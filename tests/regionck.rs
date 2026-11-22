@@ -2148,6 +2148,8 @@ fn closure_call_holds_its_captures_through_the_arguments() {
     let d = check("fn take(v: Vec<u32>) -> usize {\n    v.len()\n}\nfn main() {\n    let v = vec![1];\n    let c = |x: usize| v.len() + x;\n    let _ = c(take(v));\n}\n");
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot move out of `v` because it is borrowed"), "{d:?}");
     assert_eq!(check("fn main() {\n    let mut v = vec![1u32];\n    let mut c = |x| v.push(x);\n    c(1);\n    c(2);\n    let w = vec![5u32, 6];\n    let d = |x: usize| w.len() + x;\n    let a = d(w.len());\n    let s = String::from(\"hi\");\n    let e = move |k: usize| s.len() + k;\n    let t = e(e(1));\n    println!(\"{:?} {} {}\", v, a, t);\n}\n"), vec![]);
+}
+
 /// An `unsafe fn` of a blanket impl called on `()`, a number, a `&str` or a reference to one, and one of an impl for a
 /// number, is E0133 outside `unsafe` (the receivers dispatched before the method call's own check; from the summary
 /// review of #54)
