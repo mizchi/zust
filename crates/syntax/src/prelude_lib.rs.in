@@ -63,6 +63,13 @@ pub fn __core_replace<T>(dest: &mut T, src: T) -> T {
 pub fn __core_take<T>(dest: &mut T) -> T {
     __core_replace(dest, __exr_default::<T>())
 }
+// `ptr::from_ref(r)` / `ptr::from_mut(r)`: the reference as a raw pointer
+pub fn __core_from_ref<T: ?Sized>(r: &T) -> *const T {
+    r as *const T
+}
+pub fn __core_from_mut<T: ?Sized>(r: &mut T) -> *mut T {
+    r as *mut T
+}
 // `mem::discriminant(&e)`: the variant's tag, compared / hashed / printed as a number
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Discriminant<T> {

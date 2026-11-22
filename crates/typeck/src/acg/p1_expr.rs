@@ -3094,6 +3094,14 @@ impl Cx<'_> {
         if let Some(r) = self.default_call(c, expected)? {
             return Ok(r);
         }
+        // (`<T as Clone>::clone(x)`: `(x).clone()`, as method resolution picks T's clone for x: &T, a derive's too)
+        if let (Expr::Path(Some(_), p), [x]) = (&**func, cargs.as_slice()) {
+            let n = p.segs.len();
+            if n >= 2 && p.segs[n - 2].name == "Clone" && p.segs[n - 1].name == "clone" && p.segs[n - 2].args.is_empty() && self.lookup("Clone").is_none() {
+                let e = self.keep_expr(mcall(Expr::Paren(Box::new(x.clone())), "clone", vec![]));
+                return self.expr(e, expected);
+            }
+        }
         // `From::from(x)` to an expected type T: `T::from(x)`; `Into::into(x)`: `x.into()`
         if let (Expr::Path(None, p), [x]) = (&**func, cargs.as_slice()) {
             let n = p.segs.len();
