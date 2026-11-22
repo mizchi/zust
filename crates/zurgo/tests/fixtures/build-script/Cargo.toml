@@ -1,0 +1,14 @@
+[package]
+name = "bsapp"
+version = "0.4.2-beta.1"
+edition = "2021"
+description = "a build script fixture"
+build = "build.rs"
+
+[dependencies]
+gen = { path = "gen" }
+
+[build-dependencies]
+helper = { path = "helper" }
+
+[workspace]

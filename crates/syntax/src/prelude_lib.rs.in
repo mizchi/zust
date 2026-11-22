@@ -3811,6 +3811,12 @@ pub trait Debug {
     fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
 }
 
+// (`fmt::Pointer` and the radix traits: zustc formats `{:p}` / `{:x}` itself; the traits are here for code that
+// implements or names them)
+pub trait Pointer {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError>;
+}
+
 // `f.debug_struct("P").field("x", &self.x).finish()` などのビルダー (derive(Debug) と同じ部品で書く)
 pub struct DebugStruct {
     f: *mut Formatter,

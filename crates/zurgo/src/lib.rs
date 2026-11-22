@@ -13,12 +13,14 @@
 //! - `metadata`: `zurgo metadata`
 //! - `compile`: `zurgo build` / `run`
 
+pub mod build_script;
 pub mod compile;
 pub mod json;
 pub mod lock;
 pub mod manifest;
 pub mod metadata;
 pub mod platform;
+pub mod proc_macro_stub;
 pub mod resolve;
 pub mod semver;
 pub mod toml;
