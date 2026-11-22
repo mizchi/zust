@@ -370,64 +370,26 @@ pub fn strip(src: &str, c: &CfgSet) -> Option<String> {
 /// strip, and whether the source may call `env!` / `option_env!` (macros::may_use_env), found on the way by the
 /// same tokens: `env` is left None when the source was not read by tokens (nothing to evaluate in it)
 pub fn strip_noting_env(src: &str, c: &CfgSet, env: &mut Option<bool>) -> Option<String> {
+    strip_noting(src, c, env, &mut vec![])
+}
+
+/// [`strip_noting_env`], and the byte ranges of the `extern crate x;` items it blanks: those of the configured text (not
+/// in an item or module a false `#[cfg]` takes away, nor in a macro's input), whose names the duplicate check reads
+pub fn strip_noting(src: &str, c: &CfgSet, env: &mut Option<bool>, externs: &mut Vec<(usize, usize)>) -> Option<String> {
     if !src.contains("cfg") && !src.contains("extern crate") {
         return None;
     }
     // (a `cfg_select!` call the tokens below pass: its chosen arm in place, then that arm's own cfgs)
     let mut select = false;
     let mut seen = false;
-    let r = strip_toks(src, c, &mut select, &mut seen);
+    let r = strip_toks(src, c, &mut select, &mut seen, externs);
     *env = Some(seen);
     if select {
         if let Some(e) = expand_select(r.as_deref().unwrap_or(src), c) {
-            return Some(strip_toks(&e, c, &mut false, &mut false).unwrap_or(e));
+            return Some(strip_toks(&e, c, &mut false, &mut false, &mut vec![]).unwrap_or(e));
         }
     }
     r
-}
-
-/// The `extern crate x;` items of `src` that [`strip`] blanked in `stripped` as such (its own pass, not one that went
-/// with a configured-away item or module: the token before it is kept, is such an item's, or ends its own true
-/// `#[cfg(..)]`), and not in a comment: (byte offset, the item's text). One tokenizing of the text, only when it has an
-/// `extern crate`
-pub fn blanked_externs(src: &str, stripped: &str, c: &CfgSet) -> Vec<(usize, String)> {
-    let mut out: Vec<(usize, String)> = vec![];
-    if src.len() != stripped.len() || !src.contains("extern crate") {
-        return out;
-    }
-    let (s, st) = (src.as_bytes(), stripped.as_bytes());
-    let toks = crate::lexer::tokenize(s);
-    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, b)| &s[a..b]) };
-    // (where the last item taken ends)
-    let mut last_end = usize::MAX;
-    for i in 0..toks.len() {
-        if t(i) != b"extern" || t(i + 1) != b"crate" || !toks.get(i + 2).is_some_and(|x| x.0 == 0) {
-            continue;
-        }
-        let Some(e) = (i + 3..(i + 6).min(toks.len())).find(|&e| t(e) == b";") else { continue };
-        let (a, b) = (toks[i].1, toks[e].2);
-        let blank = st[a..b].iter().all(u8::is_ascii_whitespace);
-        // (its own attributes `#[cfg(p)]`, which went with the item when p is false: back to where they start)
-        let mut j = i;
-        let mut cfg_true = true;
-        while j >= 3 && t(j - 1) == b"]" {
-            let Some(o) = (0..j - 1).rev().find(|&o| t(o) == b"[" && o >= 1 && t(o - 1) == b"#") else { break };
-            if t(o + 1) == b"cfg" && t(o + 2) == b"(" {
-                cfg_true &= eval(s, &toks, o + 3, c).0;
-            }
-            j = o - 1;
-        }
-        let before_kept = j == 0 || {
-            let (_, pa, pb) = toks[j - 1];
-            st[pa..pb] == s[pa..pb] || pb == last_end
-        };
-        let before_kept = before_kept && cfg_true;
-        if blank && before_kept {
-            out.push((a, src[a..b].to_string()));
-            last_end = b;
-        }
-    }
-    out
 }
 
 /// The first outer attribute of the attributes just before the one at i (`#[a] #[b] #[cfg(x)]`: `#[a]`'s byte offset)
@@ -459,7 +421,7 @@ fn attrs_start(s: &[u8], toks: &[Tok], i: usize) -> usize {
     toks[j].1
 }
 
-fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool) -> Option<String> {
+fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs: &mut Vec<(usize, usize)>) -> Option<String> {
     let s = src.as_bytes();
     let toks = crate::lexer::tokenize(s);
     let mut out = s.to_vec();
@@ -520,6 +482,7 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool) -> Optio
                 e += 1;
             }
             if t(e) == b";" {
+                externs.push((toks[i].1, toks[e].2));
                 blank(&mut out, toks[i].1, toks[e].2);
                 changed = true;
                 i = e + 1;
