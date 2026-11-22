@@ -55,4 +55,6 @@ fn main() {
     println!("{r} {s} {t}");
     let (a, b, c) = (<f64 as From<f32>>::from(1.5), <u32 as TryFrom<i64>>::try_from(-5).is_err(), <i64 as From<i8>>::from(-3));
     println!("{a} {b} {c}");
+    // (suffixed literals keep their own suffix; `1E3` is a float)
+    println!("{} {} {}", <f64 as From<f32>>::from(1f32), <f64 as From<f32>>::from(1E3), <u16 as From<u8>>::from(5u8));
 }

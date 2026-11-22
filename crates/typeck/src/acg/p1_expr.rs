@@ -146,7 +146,21 @@ impl Cx<'_> {
                     if let Some(s) = self.parse_ty(sty).ok().filter(|&s| !self.prog.has_param(s) && !has_hole(self.prog, s)) {
                         // (a literal of the source's kind takes it as its suffix (`6` as `6u8`, out of range an error as for
                         // `300u8`); one of the other kind is a mismatch (`from(3.5)` for a u8), as rustc says)
-                        let (int, float) = (super::p2_call::is_int_lit(x), super::p2_call::is_float_lit(x));
+                        // (the literal's parsed kind, only without a suffix: `1f32` and `1E3` are floats, `5u8` keeps its own)
+                        fn unsuffixed(e: &Expr) -> Option<bool> {
+                            match e {
+                                Expr::Paren(i) => unsuffixed(i),
+                                Expr::Unary(op, i, _) if op == "-" => unsuffixed(i),
+                                Expr::Lit(t, _) => match super::lit::lit(t)? {
+                                    super::lit::Lit::Int(i) if i.suffix().is_empty() => Some(true),
+                                    super::lit::Lit::Float(f) if f.suffix().is_empty() => Some(false),
+                                    _ => None,
+                                },
+                                _ => None,
+                            }
+                        }
+                        let kind = unsuffixed(x);
+                        let (int, float) = (kind == Some(true), kind == Some(false));
                         if int || float {
                             if (int && !s.is_int()) || (float && !s.is_float()) {
                                 let found = if int { "integer" } else { "floating-point number" };
