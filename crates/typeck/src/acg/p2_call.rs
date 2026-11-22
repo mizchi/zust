@@ -2035,7 +2035,17 @@ impl Cx<'_> {
             if matches!(pt, Ty::Ref(true, _)) {
                 self.bk_reborrow_arg(a);
             }
-            if to_param && self.bk_on() && matches!(strip_paren(a), Expr::Path(..)) && matches!(r.as_ref().map(|x| x.1), Ok(Ty::Ref(true, _))) {
+            // (`take(m::BAR)`: a static moved out by its module's path, E0507; by its name alone, the read of the
+            // place checks it. A path is no place expression, so it is read as a value elsewhere too (a method's
+            // receiver `m::KEY.with(..)`): only an argument passed by value is surely moved)
+            if self.bk_on() && matches!(strip_paren(a), Expr::Path(None, p) if p.segs.len() >= 2) && self.static_of(strip_paren(a)).is_some() {
+                if let Ok(t) = r.as_ref().map(|x| x.1) {
+                    if !self.bk_ty(t).0 {
+                        self.drop_move_check(a)?;
+                    }
+                }
+            }
+            if to_param && self.bk_on() && matches!(strip_paren(a), Expr::Path(..) | Expr::Field(..)) && matches!(r.as_ref().map(|x| x.1), Ok(Ty::Ref(true, _))) {
                 self.bk_acc(a, borrowck::Acc::Move);
             }
             if top_ref {

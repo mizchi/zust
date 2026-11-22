@@ -1411,6 +1411,35 @@ fn union_fields_overlap() {
     assert_eq!(check(&src("u.s.b")), vec![]);
 }
 
+/// Review follow-ups of part 8: a write to one union field while another is borrowed is reported (it panicked); a store
+/// through a field's `&mut` is not followed into the local's other loans; E0509 for a projected scrutinee and nested
+/// patterns; a `&mut` field moved into a type parameter; a static moved out by a module path (E0507)
+#[test]
+fn part8_review_follow_ups() {
+    // (a write to `u.b.x` while `u.a` is borrowed: the same memory)
+    let d = check("#[derive(Clone, Copy)]\nstruct P { x: u32, y: u32 }\nunion U { a: u32, b: P }\nfn main() {\n    let mut u = U { a: 1 };\n    let r = unsafe { &u.a };\n    unsafe { u.b.x = 2; }\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("borrowed"), "{d:?}");
+    // (a union's field written: the union is, its field moved out before too)
+    assert_eq!(check("struct A;\nstruct B;\nunion U {\n    a: std::mem::ManuallyDrop<A>,\n    b: std::mem::ManuallyDrop<B>,\n}\nfn main() {\n    unsafe {\n        let mut u = U { a: std::mem::ManuallyDrop::new(A) };\n        let _a = u.a;\n        u.b = std::mem::ManuallyDrop::new(B);\n        let _a = u.a;\n    }\n}\n"), vec![]);
+    // (`*q.0 = &y` with q = (&mut p, &mut z): z is not changed)
+    assert_eq!(check("fn sink(_: &u32) {}\nfn main() {\n    let x = 0;\n    let mut p = &x;\n    let mut z = &x;\n    {\n        let y = 1;\n        let q = (&mut p, &mut z);\n        *q.0 = &y;\n        sink(p);\n    }\n    sink(z);\n}\n"), vec![]);
+    let drop_d = "struct D { f: Option<String> }\nimpl Drop for D { fn drop(&mut self) {} }\n";
+    // (`match d.f { Some(x) => .. }`: x is moved out of d)
+    let d = check(&format!("{drop_d}fn main() {{\n    let d = D {{ f: Some(String::new()) }};\n    match d.f {{ Some(x) => drop(x), None => {{}} }}\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0509"), "{d:?}");
+    assert_eq!(check(&format!("{drop_d}fn main() {{\n    let d = D {{ f: Some(String::new()) }};\n    match d.f {{ Some(ref x) => println!(\"{{}}\", x), None => {{}} }}\n}}\n")), vec![]);
+    // (`let D { f: Some(x) } = d`: deeper than d's own field)
+    let d = check(&format!("{drop_d}fn main() {{\n    let d = D {{ f: Some(String::new()) }};\n    let D {{ f: Some(x) }} = d else {{ return }};\n    drop(x);\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0509"), "{d:?}");
+    // (a `&mut` field passed for a type parameter is moved)
+    let d = check("fn consume<T>(_: T) {}\nfn main() {\n    let mut a = 1;\n    let s = (&mut a,);\n    consume(s.0);\n    *s.0 = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("moved"), "{d:?}");
+    // (a static by its module's path)
+    let d = check("mod m {\n    pub static BAR: String = String::new();\n}\nfn take(_: String) {}\nfn main() {\n    take(m::BAR);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0507"), "{d:?}");
+    assert_eq!(check("mod m {\n    pub static BAR: String = String::new();\n}\nfn main() {\n    println!(\"{}\", m::BAR.len());\n}\n"), vec![]);
+}
+
 /// E0582: a lifetime a `for<'a>` binder declares that only the bound's result or an associated type's binding names
 #[test]
 fn e0582_unconstrained_binder() {

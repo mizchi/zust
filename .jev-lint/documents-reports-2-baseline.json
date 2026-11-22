@@ -1,6 +1,6 @@
 {
   "schema": "jev-lint-documents-1",
-  "snapshotDigest": "b9c8160726a0c7201a50921922d8576e72e6223560291de7feee48eacd947d97",
+  "snapshotDigest": "39faefd2922c9a0b096fed6da81c4cae90e91ddcf69a2bcdf0c15933bea3196c",
   "questionDigest": "209d6df378ccb747fcb0e821998fcd6105bc76638a88d22488d3b398d6a21595",
   "model": "jev-1.14.0",
   "snapshotChanged": false,
@@ -66,10 +66,10 @@
       "contextHash": "7c7b286af72e5d19978bdcefe4ac1812afb0557f682df47ae767fa9324a36f5c",
       "judgment": {
         "choice": "supports",
-        "confidence": 1,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 1,
-          "contradicts": 0,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -100,12 +100,12 @@
       "contextHash": "a068452334ef52150a1932e9d45207a4c156e3a5c60d69e061e986b1aa86d889",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0
         }
       }
     },
@@ -202,10 +202,10 @@
       "contextHash": "5b6ede2d00ec82893b1c63b36b593d1e9e7999236c2422416b8324666f265c93",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -236,10 +236,10 @@
       "contextHash": "68facf70966b576a1dde106a31fd37de8e21bda46e6439878b91e7bce57154b6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -338,10 +338,10 @@
       "contextHash": "b91a1cf01d33b66ef15111899d22ac963d6abc38c4242e6d72ebc80aefe2aecd",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -372,10 +372,10 @@
       "contextHash": "65d03eec8a642fb4c59c7bacc74397f936864091105bba631e8977b9ca9c1612",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.97,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.98,
+          "contradicts": 0.02,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -542,10 +542,10 @@
       "contextHash": "00e42fd2cdae3ea7c73dba0447b72b25a656b131f159ac3ebcbdd07de3f969a5",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 1,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 1,
+          "contradicts": 0,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -678,10 +678,10 @@
       "contextHash": "f1894d506a5e66f92906b403c8a6a69c60e6e1bad8273b43b0489836c39d482f",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.99,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.99,
-          "contradicts": 0.01,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -780,12 +780,12 @@
       "contextHash": "54b56e94027819b91287b9766c4872faa76c4344146540b341b4389c6b8dd7ce",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.92,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.94,
-          "contradicts": 0.04,
+          "supports": 0.96,
+          "contradicts": 0.03,
           "unrelated": 0,
-          "insufficient_context": 0.02
+          "insufficient_context": 0.01
         }
       }
     },
@@ -814,12 +814,12 @@
       "contextHash": "7438e0bb6ac3c01bf6beaa56051a35abf5a2f30ee56334c8cd754b996d6bd4e6",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.84,
+        "confidence": 0.88,
         "probabilities": {
-          "supports": 0.88,
-          "contradicts": 0.11,
+          "supports": 0.91,
+          "contradicts": 0.07,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0.02
         }
       }
     },
@@ -848,10 +848,10 @@
       "contextHash": "7982c179582830150e0121639bf13f758b8cd2967a8c41c2205db632219eb8e5",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.96,
+        "confidence": 0.95,
         "probabilities": {
-          "supports": 0.97,
-          "contradicts": 0.03,
+          "supports": 0.96,
+          "contradicts": 0.04,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -916,12 +916,12 @@
       "contextHash": "6ef3c783f7f2ee4aa85d450d7fc65f20f61a1aa01a222d8aeb9ddeda31a027f9",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.83,
+        "confidence": 0.88,
         "probabilities": {
-          "supports": 0.87,
-          "contradicts": 0.06,
+          "supports": 0.91,
+          "contradicts": 0.03,
           "unrelated": 0,
-          "insufficient_context": 0.07
+          "insufficient_context": 0.06
         }
       }
     },
@@ -984,12 +984,12 @@
       "contextHash": "262bb5dcd097b8cb7be1fb2545acff1e36bb67eb6c6b7603871f70e0250fd627",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.65,
+        "confidence": 0.67,
         "probabilities": {
-          "supports": 0.74,
-          "contradicts": 0.25,
+          "supports": 0.75,
+          "contradicts": 0.23,
           "unrelated": 0,
-          "insufficient_context": 0.01
+          "insufficient_context": 0.02
         }
       }
     },
@@ -1052,12 +1052,12 @@
       "contextHash": "bfaf4d56cd89f0d502d67729104d49b1f7a5d01e4a0434db45cecfa6c5d2c14a",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.93,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.95,
+          "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0
+          "insufficient_context": 0.01
         }
       }
     },
@@ -1120,10 +1120,10 @@
       "contextHash": "bdae948e735bbc239b594e195dd432f3efabbcd09895e48688e599b130a79530",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.77,
+        "confidence": 0.85,
         "probabilities": {
-          "supports": 0.83,
-          "contradicts": 0.16,
+          "supports": 0.89,
+          "contradicts": 0.1,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1154,10 +1154,10 @@
       "contextHash": "56aef8202ec18e7d916f99df3c3f62b2bb9580fd1fbf151d494787ff37e24afd",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.88,
+        "confidence": 0.85,
         "probabilities": {
-          "supports": 0.91,
-          "contradicts": 0.08,
+          "supports": 0.89,
+          "contradicts": 0.1,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1188,10 +1188,10 @@
       "contextHash": "74e65e68c1b778bfced01be26cec0dab66d60dd32d09c465681c7178583e7e1b",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.97,
+        "confidence": 0.99,
         "probabilities": {
-          "supports": 0.98,
-          "contradicts": 0.02,
+          "supports": 0.99,
+          "contradicts": 0.01,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -1222,10 +1222,10 @@
       "contextHash": "f0d2be59aa7f66b5393e14f52bebb261bbc73ff0e17d8864466d2fbbacc92e53",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.95,
+        "confidence": 0.92,
         "probabilities": {
-          "supports": 0.96,
-          "contradicts": 0.03,
+          "supports": 0.94,
+          "contradicts": 0.05,
           "unrelated": 0,
           "insufficient_context": 0.01
         }
@@ -1290,10 +1290,10 @@
       "contextHash": "c5f11c2a5bb22360cce2d81aaeea5a50ddd0d694d43c8b59fe35e5f382753834",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.92,
+        "confidence": 0.96,
         "probabilities": {
-          "supports": 0.94,
-          "contradicts": 0.06,
+          "supports": 0.97,
+          "contradicts": 0.03,
           "unrelated": 0,
           "insufficient_context": 0
         }
@@ -1307,29 +1307,29 @@
         "source": "docs_reports_2026-11-22-04-region-check-8.en",
         "path": "docs/reports/2026-11-22-04-region-check-8.md",
         "startLine": 1,
-        "endLine": 105,
-        "quote": "# Region (lifetime) checking, part 8: stores through `&mut`, moves out of what cannot be moved, and tuning (issue #1)\n\nDate: 2026-11-22\n\nPart 7 ([2026-11-22-03](2026-11-22-03-region-check-7.md)) was merged with #46. This step takes the borrow check's\ncases that tests/ui showed accepted or reported at the wrong place, and makes the check cheaper.\n\n## 1. What was added\n\n### Borrow check\n\n- **Stores through a `&mut`:** what is assigned through a `&mut` a local holds is held by what it points to.\n  - With `let q = &mut p; *q = &y;`, p holds the loan of y. Using p after y is gone is E0597, at `&y`.\n  - It goes as many derefs deep as the place has (`**r = ..`).\n  - A `&mut` that points behind a parameter (`let q = &mut *x;`) stores where the value outlives the function.\n  - Before, the loan was held by q alone, so p used after y was accepted.\n- **A `&mut` passed for a type parameter:** with `fn generic<T>(x: T)`, `generic(self)` and `self: &mut X` is no\n  coercion site, so `self` is moved, not reborrowed. Using it after is E0382.\n  - A `&mut` passed where the parameter's type is a `&mut` is still reborrowed.\n- **Moves out of what cannot be moved:**\n  - A field of a value whose type implements `Drop` cannot be moved out (E0509): `s.f`, `S { a: 2, ..s }`, and a\n    pattern that binds such a field by value (`let S { f } = s;`, a match arm, a parameter's pattern).\n  - A static cannot be moved out either (E0507): `test(BAR)` with `static BAR: Foo`. A constant is a new value at\n    each use.\n- **Two fields of a union are the same memory:** `&mut u.s.a` and `&u.z.c` conflict (E0502). Fields of the same\n  field (`u.s.a`, `u.s.b`) do not.\n- **Tuple, array and struct literals of runtime values are temporaries:** `gimme(&(v,))` with a local v is not\n  promoted to a static as `&(1, 2)` is. A borrow of it that is used after the statement is E0716.\n- **Where `{x}` in a format string is reported:** the variable that `println!(\"{x}\")` names has the format string's\n  position. A use of x uninitialized there (E0381) was reported at the function's first line.\n\n### Signatures\n\n- **E0582:** a `for<'a>` binder whose lifetime only the bound's result names (`F: for<'a> Fn() -> Option<&'a i32>`)\n  or only an associated type's binding names (`for<'a> Iterator<Item = &'a i32>`). No type can satisfy the bound.\n  The type before `:` of a predicate with its own binder is an input (`for<'a> &'a T: IntoIterator<Item = &'a U>`).\n  A generic associated type's binding (`Item<'a> = &'a T`) is not checked: the parser drops its arguments, which may\n  name the lifetime.\n\n## 2. Tuning\n\n`zustc check` of the patterns input, measured with cachegrind (instructions):\n\n| step | instructions (M) | change |\n|---|---:|---:|\n| main (f9cf20b, part 7 merged) | 717.79 | |\n| this work | 708.92 | -1.24% |\n\nOf the drop, the environment variables read once are about half (-0.57% measured alone, before part 7's review\nfixes).\n\n- **Environment variables read once:** each `std::env::var_os` call scans the whole environment. Per temporary,\n  per function and per closure, the checks for `ZUSTC_NO_FRESH`, `ZUSTC_BORROWCK`, `ZUSTC_BK_DEBUG` and the\n  debugging flags took 0.5% of the check. They are now read once.\n- **The borrow check's dataflow:**\n  - A block's state goes to its last successor without a copy.\n  - The report takes each block's state instead of copying it.\n  - The liveness loop reuses two buffers.\n- **`has_refs` through the function's cache:** the sites that asked it directly now use `bk_ty`, which keeps the\n  answer per type.\n\n## 3. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0)\n\n| | main (f9cf20b) | this work |\n|---|---:|---:|\n| compile-fail passing (accidental ones not counted) | 4141 | 4162 (+21) |\n\n- No test that passed before fails now; run-pass and check-pass do not change.\n- The new ones: `borrowck/borrowck-if-else-uninitialized.rs`, `borrowck/borrowck-if-elseif-else-uninitialezed.rs`, `borrowck/borrowck-match-multiple-uninitialized.rs`, `borrowck/borrowck-match-uninitialized.rs`, `borrowck/borrowck-move-out-of-static-item.rs`, `borrowck/borrowck-move-out-of-struct-with-dtor.rs`, `borrowck/borrowck-move-out-of-tuple-struct-with-dtor.rs`, `borrowck/borrowck-struct-update-with-dtor.rs`, `borrowck/issue-17718-static-move.rs`, `borrowck/issue-64453.rs`, `borrowck/moved-value-suggest-reborrow-issue-127285.rs`, `disallowed-deconstructing/disallowed-deconstructing-destructing-struct-let.rs`, `disallowed-deconstructing/disallowed-deconstructing-destructing-struct-match.rs`, `error-codes/E0509.rs`, `error-codes/E0582.rs`, `functional-struct-update/functional-struct-update-noncopyable.rs`, `impl-trait/in-trait/span-bug-issue-121457.rs`, `nll/issue-45157.rs`, `nll/issue-54189.rs`, `static/static-items-cant-move.rs`, `wf/ice-wf-missing-span-in-error-130012.rs`.\n- `zustc check` of the 1809 run-pass tests that pass (built, not checked, by tests/ui): none is rejected that main\n  accepts.\n- The stores through `&mut`, the moves into type parameters' arguments and the runtime literals' temporaries are\n  checked by tests/regionck.rs (`store_through_mut_ref`, `mut_ref_moved_into_type_parameter`,\n  `runtime_literal_temporaries`); the tests/ui cases that show them need more (a block's tail, a call's store).\n\n## 4. KPIs\n\n`bench/kpi_track.py --dry-run --lsp`, main (f9cf20b) and this work, both measured here, one after the other:\n\n| KPI | main (f9cf20b) | this work (29d0fe4) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.705 | -0.14% |\n| edit one fn (M) | 547.903 | 541.278 | -1.21% |\n| check (M) | 3848.2 | 3835.74 | -0.32% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9083 | 10.9187 | +0.10% |\n| traits check (M) | 1192.12 | 1181.5 | -0.89% |\n| traits edit (M) | 61.656 | 61.682 | +0.04% |\n| crates no-op (M) | 9.942 | 9.941 | -0.01% |\n| crates edit (M) | 317.088 | 315.822 | -0.40% |\n| patterns check (M) | 717.958 | 708.745 | -1.28% |\n| patterns edit (M) | 261.495 | 259.642 | -0.71% |\n\nThe checks get cheaper: the environment flags read once account for most of it (each `getenv` scanned the whole\nenvironment), the borrow check's dataflow for the rest. The new checks add little: they look at what the borrow check\nalready lowers.\n\n## 5. Not covered yet\n\n- **What a call stores through a `&mut` it is given:** `s.invoke()` where `invoke(self)` writes `*self.p = self.y`\n  (nll/capture-ref-in-struct.rs). The store is in another function, and only its signature's regions tell it.\n- **Generic fns with trait bounds on their type parameters (`K: Clone`):** such a fn has no placeholder instance, so\n  its body is not checked.",
-        "contentHash": "920a268938f80cf1035d7305ed8d1e271023acaf6b0798134e51a5bfe1fd3db5"
+        "endLine": 119,
+        "quote": "# Region (lifetime) checking, part 8: stores through `&mut`, moves out of what cannot be moved, and tuning (issue #1)\n\nDate: 2026-11-22\n\nPart 7 ([2026-11-22-03](2026-11-22-03-region-check-7.md)) was merged with #46. This step takes the borrow check's\ncases that tests/ui showed accepted or reported at the wrong place, and makes the check cheaper.\n\n## 1. What was added\n\n### Borrow check\n\n- **Stores through a `&mut`:** what is assigned through a `&mut` a local holds is held by what it points to.\n  - With `let q = &mut p; *q = &y;`, p holds the loan of y. Using p after y is gone is E0597, at `&y`.\n  - It goes as many derefs deep as the place has (`**r = ..`).\n  - A `&mut` that points behind a parameter (`let q = &mut *x;`) stores where the value outlives the function.\n  - Before, the loan was held by q alone, so p used after y was accepted.\n- **A `&mut` passed for a type parameter:** with `fn generic<T>(x: T)`, `generic(self)` and `self: &mut X` is no\n  coercion site, so `self` is moved, not reborrowed. Using it after is E0382.\n  - A `&mut` passed where the parameter's type is a `&mut` is still reborrowed.\n- **Moves out of what cannot be moved:**\n  - A field of a value whose type implements `Drop` cannot be moved out (E0509): `s.f`, `S { a: 2, ..s }`, and a\n    pattern that binds such a field by value (`let S { f } = s;`, a match arm, a parameter's pattern).\n  - A static cannot be moved out either (E0507): `test(BAR)` with `static BAR: Foo`. A constant is a new value at\n    each use.\n- **Two fields of a union are the same memory:** `&mut u.s.a` and `&u.z.c` conflict (E0502). Fields of the same\n  field (`u.s.a`, `u.s.b`) do not.\n- **Tuple, array and struct literals of runtime values are temporaries:** `gimme(&(v,))` with a local v is not\n  promoted to a static as `&(1, 2)` is. A borrow of it that is used after the statement is E0716.\n- **Where `{x}` in a format string is reported:** the variable that `println!(\"{x}\")` names has the format string's\n  position. A use of x uninitialized there (E0381) was reported at the function's first line.\n\n### Signatures\n\n- **E0582:** a `for<'a>` binder whose lifetime only the bound's result names (`F: for<'a> Fn() -> Option<&'a i32>`)\n  or only an associated type's binding names (`for<'a> Iterator<Item = &'a i32>`). No type can satisfy the bound.\n  The type before `:` of a predicate with its own binder is an input (`for<'a> &'a T: IntoIterator<Item = &'a U>`).\n  A generic associated type's binding (`Item<'a> = &'a T`) is not checked: the parser drops its arguments, which may\n  name the lifetime.\n\n### After the review\n\n- **A write to one union field while another is borrowed** (`u.b.x = 2` with `&u.a` live) is E0506. It panicked:\n  the check that two paths share a prefix took two fields of a union as one, and the write's check then cut the\n  loan's path past its end. Two union fields are now a case of their own. Writing one field still initializes the\n  whole union, so a field moved out before can be used again (nll/issue-55651.rs).\n- **A store through a field's `&mut`** (`*q.0 = &y` with `q = (&mut p, &mut z)`) is not followed. Which loan q.0\n  holds is not known, because a local's loans are not kept by field. Following it made z hold y's loan as well.\n- **E0509 deeper:** a pattern that binds by value below a field of a `Drop` type (`D { f: Some(x) }`), and a match\n  on such a field (`match d.f { Some(x) => .. }`).\n- **A `&mut` field passed for a type parameter** (`consume(s.0)`) is moved, as a `&mut` local is.\n- **A static moved out by a module's path** (`take(m::BAR)`) is E0507. Only an argument passed by value is checked:\n  a path is no place expression, so it is also read as a value where it is not moved (`m::KEY.with(..)`).\n\n## 2. Tuning\n\n`zustc check` of the patterns input, measured with cachegrind (instructions):\n\n| step | instructions (M) | change |\n|---|---:|---:|\n| main (f9cf20b, part 7 merged) | 717.79 | |\n| this work | 708.92 | -1.24% |\n\nOf the drop, the environment variables read once are about half (-0.57% measured alone, before part 7's review\nfixes).\n\n- **Environment variables read once:** each `std::env::var_os` call scans the whole environment. Per temporary,\n  per function and per closure, the checks for `ZUSTC_NO_FRESH`, `ZUSTC_BORROWCK`, `ZUSTC_BK_DEBUG` and the\n  debugging flags took 0.5% of the check. They are now read once.\n- **The borrow check's dataflow:**\n  - A block's state goes to its last successor without a copy.\n  - The report takes each block's state instead of copying it.\n  - The liveness loop reuses two buffers.\n- **`has_refs` through the function's cache:** the sites that asked it directly now use `bk_ty`, which keeps the\n  answer per type.\n\n## 3. Coverage\n\n(tests/ui compile-fail, rust-lang/rust 1.100.0)\n\n| | main (f9cf20b) | this work |\n|---|---:|---:|\n| compile-fail passing (accidental ones not counted) | 4141 | 4162 (+21) |\n\n- No test that passed before fails now; run-pass and check-pass do not change.\n- The new ones: `borrowck/borrowck-if-else-uninitialized.rs`, `borrowck/borrowck-if-elseif-else-uninitialezed.rs`, `borrowck/borrowck-match-multiple-uninitialized.rs`, `borrowck/borrowck-match-uninitialized.rs`, `borrowck/borrowck-move-out-of-static-item.rs`, `borrowck/borrowck-move-out-of-struct-with-dtor.rs`, `borrowck/borrowck-move-out-of-tuple-struct-with-dtor.rs`, `borrowck/borrowck-struct-update-with-dtor.rs`, `borrowck/issue-17718-static-move.rs`, `borrowck/issue-64453.rs`, `borrowck/moved-value-suggest-reborrow-issue-127285.rs`, `disallowed-deconstructing/disallowed-deconstructing-destructing-struct-let.rs`, `disallowed-deconstructing/disallowed-deconstructing-destructing-struct-match.rs`, `error-codes/E0509.rs`, `error-codes/E0582.rs`, `functional-struct-update/functional-struct-update-noncopyable.rs`, `impl-trait/in-trait/span-bug-issue-121457.rs`, `nll/issue-45157.rs`, `nll/issue-54189.rs`, `static/static-items-cant-move.rs`, `wf/ice-wf-missing-span-in-error-130012.rs`.\n- `zustc check` of the 1809 run-pass tests that pass (built, not checked, by tests/ui): none is rejected that main\n  accepts.\n- The stores through `&mut`, the moves into type parameters' arguments and the runtime literals' temporaries are\n  checked by tests/regionck.rs (`store_through_mut_ref`, `mut_ref_moved_into_type_parameter`,\n  `runtime_literal_temporaries`); the tests/ui cases that show them need more (a block's tail, a call's store).\n\n## 4. KPIs\n\n`bench/kpi_track.py --dry-run --lsp`, main (f9cf20b) and this work, both measured here, one after the other:\n\n| KPI | main (f9cf20b) | this work (29d0fe4) | change |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.705 | -0.14% |\n| edit one fn (M) | 547.903 | 541.278 | -1.21% |\n| check (M) | 3848.2 | 3835.74 | -0.32% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9083 | 10.9187 | +0.10% |\n| traits check (M) | 1192.12 | 1181.5 | -0.89% |\n| traits edit (M) | 61.656 | 61.682 | +0.04% |\n| crates no-op (M) | 9.942 | 9.941 | -0.01% |\n| crates edit (M) | 317.088 | 315.822 | -0.40% |\n| patterns check (M) | 717.958 | 708.745 | -1.28% |\n| patterns edit (M) | 261.495 | 259.642 | -0.71% |\n\nThe checks get cheaper: the environment flags read once account for most of it (each `getenv` scanned the whole\nenvironment), the borrow check's dataflow for the rest. The new checks add little: they look at what the borrow check\nalready lowers.\n\n## 5. Not covered yet\n\n- **What a call stores through a `&mut` it is given:** `s.invoke()` where `invoke(self)` writes `*self.p = self.y`\n  (nll/capture-ref-in-struct.rs). The store is in another function, and only its signature's regions tell it.\n- **Generic fns with trait bounds on their type parameters (`K: Clone`):** such a fn has no placeholder instance, so\n  its body is not checked.",
+        "contentHash": "b97b2ebe727459e53b6c1764a2df2f0aeb68dead7f092d8d36826ae431d706d5"
       },
       "target": {
         "source": "docs_reports_2026-11-22-04-region-check-8.ja",
         "path": "docs/ja/reports/2026-11-22-04-region-check-8.md",
         "startLine": 1,
-        "endLine": 100,
-        "quote": "# リージョン (ライフタイム) 検査、その 8: `&mut` を通した書き込み、ムーブできないものからのムーブ、チューニング (issue #1)\n\n日付: 2026-11-22\n\nその 7 ([2026-11-22-03](2026-11-22-03-region-check-7.md)) は #46 でマージした。この段は、tests/ui で受け入れてしまう、\nまたは違う場所で報告していた借用検査の場合を扱い、検査を安くする。\n\n## 1. 加えたもの\n\n### 借用検査\n\n- **`&mut` を通した書き込み:** ローカルが持つ `&mut` を通して代入したものは、その指す先が持つ。\n  - `let q = &mut p; *q = &y;` なら、p が y の貸し出しを持つ。y がなくなった後で p を使えば、`&y` で E0597。\n  - 場所が持つ deref の数だけ深く辿る (`**r = ..`)。\n  - 引数の後ろを指す `&mut` (`let q = &mut *x;`) を通したものは、関数より長く残るところにしまう。\n  - 以前は q だけが貸し出しを持っていたので、y の後で p を使っても受け入れていた。\n- **型パラメータに渡す `&mut`:** `fn generic<T>(x: T)` に対する `generic(self)` (`self: &mut X`) は型強制の場所でない\n  ので、`self` は再借用でなくムーブされる。その後で使えば E0382。\n  - 引数の型が `&mut` なら、これまでどおり再借用する。\n- **ムーブできないものからのムーブ:**\n  - `Drop` を実装した型の値からは、フィールドをムーブできない (E0509): `s.f`、`S { a: 2, ..s }`、そうしたフィールドを\n    値で束縛するパターン (`let S { f } = s;`、match の腕、引数のパターン)。\n  - static からもムーブできない (E0507): `static BAR: Foo` に対する `test(BAR)`。定数は使うたびに新しい値。\n- **union の 2 つのフィールドは同じメモリ:** `&mut u.s.a` と `&u.z.c` はぶつかる (E0502)。同じフィールドのフィールド\n  (`u.s.a`、`u.s.b`) はぶつからない。\n- **実行時の値のタプル・配列・struct のリテラルは一時値:** ローカル v の `gimme(&(v,))` は、`&(1, 2)` のように static\n  へ昇格しない。文の後で使う借用なら E0716。\n- **書式文字列の `{x}` を報告する場所:** `println!(\"{x}\")` が名指す変数は、書式文字列の位置を持つ。そこで初期化されて\n  いない x を使えば (E0381)、以前は関数の最初の行で報告していた。\n\n### シグネチャ\n\n- **E0582:** `for<'a>` の束縛子のライフタイムを、境界の結果だけが名指す (`F: for<'a> Fn() -> Option<&'a i32>`) か、\n  関連型の束縛だけが名指す (`for<'a> Iterator<Item = &'a i32>`)。そうした境界を満たす型はない。束縛子を持つ述語の\n  `:` の前の型は入力 (`for<'a> &'a T: IntoIterator<Item = &'a U>`)。ジェネリックな関連型の束縛 (`Item<'a> = &'a T`)\n  は検査しない。構文解析がその引数を捨てていて、引数がそのライフタイムを名指すことがある。\n\n## 2. チューニング\n\npatterns の入力の `zustc check` を cachegrind で測った (命令数):\n\n| 段 | 命令数 (M) | 変化 |\n|---|---:|---:|\n| main (f9cf20b、その 7 をマージした) | 717.79 | |\n| この作業 | 708.92 | -1.24% |\n\nそのうち、環境変数を一度だけ読むものがおよそ半分 (その 7 のレビューの修正の前に、それだけで測って -0.57%)。\n\n- **環境変数を一度だけ読む:** `std::env::var_os` は呼ぶたびに環境全体を走査する。一時値ごと、関数ごと、クロージャ\n  ごとに `ZUSTC_NO_FRESH`、`ZUSTC_BORROWCK`、`ZUSTC_BK_DEBUG` やデバッグ用の印を調べていて、検査の 0.5% を使って\n  いた。これを一度だけ読む。\n- **借用検査のデータフロー:**\n  - ブロックの状態は、最後の後続へ写さずに渡す。\n  - 報告では、各ブロックの状態を写さずに取り出す。\n  - 生存解析のループは 2 つのバッファを使い回す。\n- **関数のキャッシュを通した `has_refs`:** 直接呼んでいたところは、型ごとに答えを持つ `bk_ty` を使う。\n\n## 3. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0)\n\n| | main (f9cf20b) | この作業 |\n|---|---:|---:|\n| 通る compile-fail (偶然の通過は数えない) | 4141 | 4162 (+21) |\n\n- 前に通っていたテストで、いま通らないものはない。run-pass と check-pass は変わらない。\n- 通るようになったもの: `borrowck/borrowck-if-else-uninitialized.rs`, `borrowck/borrowck-if-elseif-else-uninitialezed.rs`, `borrowck/borrowck-match-multiple-uninitialized.rs`, `borrowck/borrowck-match-uninitialized.rs`, `borrowck/borrowck-move-out-of-static-item.rs`, `borrowck/borrowck-move-out-of-struct-with-dtor.rs`, `borrowck/borrowck-move-out-of-tuple-struct-with-dtor.rs`, `borrowck/borrowck-struct-update-with-dtor.rs`, `borrowck/issue-17718-static-move.rs`, `borrowck/issue-64453.rs`, `borrowck/moved-value-suggest-reborrow-issue-127285.rs`, `disallowed-deconstructing/disallowed-deconstructing-destructing-struct-let.rs`, `disallowed-deconstructing/disallowed-deconstructing-destructing-struct-match.rs`, `error-codes/E0509.rs`, `error-codes/E0582.rs`, `functional-struct-update/functional-struct-update-noncopyable.rs`, `impl-trait/in-trait/span-bug-issue-121457.rs`, `nll/issue-45157.rs`, `nll/issue-54189.rs`, `static/static-items-cant-move.rs`, `wf/ice-wf-missing-span-in-error-130012.rs`。\n- 通る run-pass のテスト 1809 本の `zustc check` (tests/ui はビルドで試し、検査では試さない): main が受け入れるもので、\n  拒否するものはない。\n- `&mut` を通した書き込み、型パラメータの引数へのムーブ、実行時の値のリテラルの一時値は、tests/regionck.rs\n  (`store_through_mut_ref`、`mut_ref_moved_into_type_parameter`、`runtime_literal_temporaries`) で試す。それらを\n  見せる tests/ui のものは、ほかのもの (ブロックの末尾、呼び出しの中の書き込み) も要る。\n\n## 4. KPI\n\n`bench/kpi_track.py --dry-run --lsp` で、main (f9cf20b) とこの作業を、ここで続けて測った:\n\n| KPI | main (f9cf20b) | この作業 (29d0fe4) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.705 | -0.14% |\n| edit one fn (M) | 547.903 | 541.278 | -1.21% |\n| check (M) | 3848.2 | 3835.74 | -0.32% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9083 | 10.9187 | +0.10% |\n| traits check (M) | 1192.12 | 1181.5 | -0.89% |\n| traits edit (M) | 61.656 | 61.682 | +0.04% |\n| crates no-op (M) | 9.942 | 9.941 | -0.01% |\n| crates edit (M) | 317.088 | 315.822 | -0.40% |\n| patterns check (M) | 717.958 | 708.745 | -1.28% |\n| patterns edit (M) | 261.495 | 259.642 | -0.71% |\n\n検査が安くなる。大部分は環境変数を一度だけ読むもの (`getenv` は毎回環境全体を走査していた)、残りは借用検査の\nデータフロー。新しい検査はほとんど足さない。借用検査がすでに下ろしたものを見るだけ。\n\n## 5. まだ扱わないもの\n\n- **呼び出しが、渡された `&mut` を通してしまうもの:** `invoke(self)` が `*self.p = self.y` と書く `s.invoke()`\n  (nll/capture-ref-in-struct.rs)。書き込みは別の関数の中にあり、それを伝えるのはシグネチャのリージョンだけ。\n- **型パラメータにトレイトの境界を持つジェネリックな関数 (`K: Clone`):** そうした関数には代わりの型のインスタンスが\n  なく、本体を検査しない。",
-        "contentHash": "94eec775e052b6e903f9eb6a40e8a1bb27c5210d4ed24e111a7ae90d2e9931de"
+        "endLine": 114,
+        "quote": "# リージョン (ライフタイム) 検査、その 8: `&mut` を通した書き込み、ムーブできないものからのムーブ、チューニング (issue #1)\n\n日付: 2026-11-22\n\nその 7 ([2026-11-22-03](2026-11-22-03-region-check-7.md)) は #46 でマージした。この段は、tests/ui で受け入れてしまう、\nまたは違う場所で報告していた借用検査の場合を扱い、検査を安くする。\n\n## 1. 加えたもの\n\n### 借用検査\n\n- **`&mut` を通した書き込み:** ローカルが持つ `&mut` を通して代入したものは、その指す先が持つ。\n  - `let q = &mut p; *q = &y;` なら、p が y の貸し出しを持つ。y がなくなった後で p を使えば、`&y` で E0597。\n  - 場所が持つ deref の数だけ深く辿る (`**r = ..`)。\n  - 引数の後ろを指す `&mut` (`let q = &mut *x;`) を通したものは、関数より長く残るところにしまう。\n  - 以前は q だけが貸し出しを持っていたので、y の後で p を使っても受け入れていた。\n- **型パラメータに渡す `&mut`:** `fn generic<T>(x: T)` に対する `generic(self)` (`self: &mut X`) は型強制の場所でない\n  ので、`self` は再借用でなくムーブされる。その後で使えば E0382。\n  - 引数の型が `&mut` なら、これまでどおり再借用する。\n- **ムーブできないものからのムーブ:**\n  - `Drop` を実装した型の値からは、フィールドをムーブできない (E0509): `s.f`、`S { a: 2, ..s }`、そうしたフィールドを\n    値で束縛するパターン (`let S { f } = s;`、match の腕、引数のパターン)。\n  - static からもムーブできない (E0507): `static BAR: Foo` に対する `test(BAR)`。定数は使うたびに新しい値。\n- **union の 2 つのフィールドは同じメモリ:** `&mut u.s.a` と `&u.z.c` はぶつかる (E0502)。同じフィールドのフィールド\n  (`u.s.a`、`u.s.b`) はぶつからない。\n- **実行時の値のタプル・配列・struct のリテラルは一時値:** ローカル v の `gimme(&(v,))` は、`&(1, 2)` のように static\n  へ昇格しない。文の後で使う借用なら E0716。\n- **書式文字列の `{x}` を報告する場所:** `println!(\"{x}\")` が名指す変数は、書式文字列の位置を持つ。そこで初期化されて\n  いない x を使えば (E0381)、以前は関数の最初の行で報告していた。\n\n### シグネチャ\n\n- **E0582:** `for<'a>` の束縛子のライフタイムを、境界の結果だけが名指す (`F: for<'a> Fn() -> Option<&'a i32>`) か、\n  関連型の束縛だけが名指す (`for<'a> Iterator<Item = &'a i32>`)。そうした境界を満たす型はない。束縛子を持つ述語の\n  `:` の前の型は入力 (`for<'a> &'a T: IntoIterator<Item = &'a U>`)。ジェネリックな関連型の束縛 (`Item<'a> = &'a T`)\n  は検査しない。構文解析がその引数を捨てていて、引数がそのライフタイムを名指すことがある。\n\n### レビューの後\n\n- **別のフィールドを借用中の union のフィールドへの書き込み** (`&u.a` が生きているときの `u.b.x = 2`) は E0506。以前は\n  パニックしていた。2 つのパスが接頭辞を共有するかの判定が union の 2 つのフィールドを 1 つとみなし、書き込みの検査が\n  貸し出しのパスを末尾より先で切っていた。union の 2 つのフィールドは別の場合として扱う。1 つのフィールドへの書き込みは\n  これまでどおり union 全体を初期化するので、先にムーブしたフィールドをまた使える (nll/issue-55651.rs)。\n- **フィールドの `&mut` を通した書き込み** (`q = (&mut p, &mut z)` での `*q.0 = &y`) は辿らない。ローカルの貸し出しは\n  フィールドごとに持たないので、q.0 がどれを持つかは分からない。辿ると z も y の貸し出しを持つことになっていた。\n- **より深い E0509:** `Drop` を実装した型のフィールドの下で値を束縛するパターン (`D { f: Some(x) }`) と、そうした\n  フィールドに対する match (`match d.f { Some(x) => .. }`)。\n- **型パラメータに渡すフィールドの `&mut`** (`consume(s.0)`) は、`&mut` のローカルと同じくムーブされる。\n- **モジュールのパスで static からムーブ** (`take(m::BAR)`) すると E0507。値で渡す引数だけを調べる。パスは場所の式で\n  ないので、ムーブしないところでも値として読む (`m::KEY.with(..)`)。\n\n## 2. チューニング\n\npatterns の入力の `zustc check` を cachegrind で測った (命令数):\n\n| 段 | 命令数 (M) | 変化 |\n|---|---:|---:|\n| main (f9cf20b、その 7 をマージした) | 717.79 | |\n| この作業 | 708.92 | -1.24% |\n\nそのうち、環境変数を一度だけ読むものがおよそ半分 (その 7 のレビューの修正の前に、それだけで測って -0.57%)。\n\n- **環境変数を一度だけ読む:** `std::env::var_os` は呼ぶたびに環境全体を走査する。一時値ごと、関数ごと、クロージャ\n  ごとに `ZUSTC_NO_FRESH`、`ZUSTC_BORROWCK`、`ZUSTC_BK_DEBUG` やデバッグ用の印を調べていて、検査の 0.5% を使って\n  いた。これを一度だけ読む。\n- **借用検査のデータフロー:**\n  - ブロックの状態は、最後の後続へ写さずに渡す。\n  - 報告では、各ブロックの状態を写さずに取り出す。\n  - 生存解析のループは 2 つのバッファを使い回す。\n- **関数のキャッシュを通した `has_refs`:** 直接呼んでいたところは、型ごとに答えを持つ `bk_ty` を使う。\n\n## 3. カバー率\n\n(tests/ui の compile-fail、rust-lang/rust 1.100.0)\n\n| | main (f9cf20b) | この作業 |\n|---|---:|---:|\n| 通る compile-fail (偶然の通過は数えない) | 4141 | 4162 (+21) |\n\n- 前に通っていたテストで、いま通らないものはない。run-pass と check-pass は変わらない。\n- 通るようになったもの: `borrowck/borrowck-if-else-uninitialized.rs`, `borrowck/borrowck-if-elseif-else-uninitialezed.rs`, `borrowck/borrowck-match-multiple-uninitialized.rs`, `borrowck/borrowck-match-uninitialized.rs`, `borrowck/borrowck-move-out-of-static-item.rs`, `borrowck/borrowck-move-out-of-struct-with-dtor.rs`, `borrowck/borrowck-move-out-of-tuple-struct-with-dtor.rs`, `borrowck/borrowck-struct-update-with-dtor.rs`, `borrowck/issue-17718-static-move.rs`, `borrowck/issue-64453.rs`, `borrowck/moved-value-suggest-reborrow-issue-127285.rs`, `disallowed-deconstructing/disallowed-deconstructing-destructing-struct-let.rs`, `disallowed-deconstructing/disallowed-deconstructing-destructing-struct-match.rs`, `error-codes/E0509.rs`, `error-codes/E0582.rs`, `functional-struct-update/functional-struct-update-noncopyable.rs`, `impl-trait/in-trait/span-bug-issue-121457.rs`, `nll/issue-45157.rs`, `nll/issue-54189.rs`, `static/static-items-cant-move.rs`, `wf/ice-wf-missing-span-in-error-130012.rs`。\n- 通る run-pass のテスト 1809 本の `zustc check` (tests/ui はビルドで試し、検査では試さない): main が受け入れるもので、\n  拒否するものはない。\n- `&mut` を通した書き込み、型パラメータの引数へのムーブ、実行時の値のリテラルの一時値は、tests/regionck.rs\n  (`store_through_mut_ref`、`mut_ref_moved_into_type_parameter`、`runtime_literal_temporaries`) で試す。それらを\n  見せる tests/ui のものは、ほかのもの (ブロックの末尾、呼び出しの中の書き込み) も要る。\n\n## 4. KPI\n\n`bench/kpi_track.py --dry-run --lsp` で、main (f9cf20b) とこの作業を、ここで続けて測った:\n\n| KPI | main (f9cf20b) | この作業 (29d0fe4) | 変化 |\n|---|---:|---:|---:|\n| no-op build (M) | 0.706 | 0.705 | -0.14% |\n| edit one fn (M) | 547.903 | 541.278 | -1.21% |\n| check (M) | 3848.2 | 3835.74 | -0.32% |\n| cache (KiB) | 1902.8 | 1902.8 | ±0 |\n| LSP session (G) | 10.9083 | 10.9187 | +0.10% |\n| traits check (M) | 1192.12 | 1181.5 | -0.89% |\n| traits edit (M) | 61.656 | 61.682 | +0.04% |\n| crates no-op (M) | 9.942 | 9.941 | -0.01% |\n| crates edit (M) | 317.088 | 315.822 | -0.40% |\n| patterns check (M) | 717.958 | 708.745 | -1.28% |\n| patterns edit (M) | 261.495 | 259.642 | -0.71% |\n\n検査が安くなる。大部分は環境変数を一度だけ読むもの (`getenv` は毎回環境全体を走査していた)、残りは借用検査の\nデータフロー。新しい検査はほとんど足さない。借用検査がすでに下ろしたものを見るだけ。\n\n## 5. まだ扱わないもの\n\n- **呼び出しが、渡された `&mut` を通してしまうもの:** `invoke(self)` が `*self.p = self.y` と書く `s.invoke()`\n  (nll/capture-ref-in-struct.rs)。書き込みは別の関数の中にあり、それを伝えるのはシグネチャのリージョンだけ。\n- **型パラメータにトレイトの境界を持つジェネリックな関数 (`K: Clone`):** そうした関数には代わりの型のインスタンスが\n  なく、本体を検査しない。",
+        "contentHash": "7fca084c5c59911d29ebe05e115a96659f2f06b4c10252189488127bbb6766f1"
       },
       "context": [],
-      "candidateId": "bea2a2fcd90e449c0987430cc34255beac5d6ecd4677d8c10263581f9717de23",
-      "contextHash": "9025f83b4c898da8bc9c0de1439b6b6789e881bd8db9ac6a11e475b5f3872be2",
+      "candidateId": "0ae9725dda1f6b2201d952665afca3f1acbc7f563c9fc9f53ab462b22bc80aa6",
+      "contextHash": "eba932e18640fa9b0cd8b70dbb8290747003d4aa8f217cf6c5110ec355e74ea0",
       "judgment": {
         "choice": "supports",
-        "confidence": 0.92,
+        "confidence": 0.93,
         "probabilities": {
-          "supports": 0.94,
-          "contradicts": 0.03,
+          "supports": 0.95,
+          "contradicts": 0.04,
           "unrelated": 0,
-          "insufficient_context": 0.03
+          "insufficient_context": 0.01
         }
       }
     }
@@ -1347,8 +1347,8 @@
   },
   "usage": {
     "requests": 39,
-    "inputTokens": 218781,
-    "usd": 0.009188802000000001
+    "inputTokens": 219745,
+    "usd": 0.009229290000000001
   },
   "errors": []
 }
