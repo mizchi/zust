@@ -1976,3 +1976,24 @@ fn nested_lifetime_struct_gate_and_blanket_bounds() {
     let d = check("trait Tr { fn go(&self) -> u8 { 1 } }\ntrait Other {}\nimpl<T: ?Sized> Tr for T where T: Other {}\nfn main() {\n    let _x = ().go();\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("no method `go`"), "{d:?}");
 }
+
+/// What a `Deref` with no `DerefMut` reaches (`Rc`, a `Ref` guard) is shared: writing it, borrowing it mutably, or
+/// calling a `&mut self` method of it is E0594 / E0596 (borrowck/borrowck-borrow-overloaded-*.rs). A `MutexGuard`,
+/// a `RefMut` and a `RefCell` through an `Rc` are written as before
+#[test]
+fn shared_deref_writes() {
+    let pre = "use std::rc::Rc;\nstruct Point { x: isize, y: isize }\nimpl Point {\n    fn set(&mut self, x: isize) { self.x = x; }\n    fn get(&self) -> isize { self.x + self.y }\n}\n";
+    for (body, msg) in [
+        ("fn f(x: Rc<isize>) {\n    let _p = &mut *x;\n}", "cannot borrow data in an `Rc` as mutable"),
+        ("fn f(x: &Rc<isize>) {\n    **x = 3;\n}", "cannot assign to data in an `Rc`"),
+        ("fn f(x: Rc<Point>) {\n    let _p = &mut x.y;\n}", "cannot borrow data in an `Rc` as mutable"),
+        ("fn f(mut x: Rc<Point>) {\n    x.y = 3;\n}", "cannot assign to data in an `Rc`"),
+        ("fn f(x: Rc<Point>) {\n    x.set(1);\n}", "cannot borrow data in an `Rc` as mutable"),
+        ("fn f(x: Rc<Vec<u8>>) {\n    x.push(1);\n}", "cannot borrow data in an `Rc` as mutable"),
+    ] {
+        let d = check(&format!("{pre}{body}\nfn main() {{}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains(msg), "{body}: {d:?}");
+    }
+    assert_eq!(check(&format!("{pre}fn f(x: Rc<Point>) -> isize {{\n    let a = &x.y;\n    *a + x.get() + (*x).x\n}}\nfn main() {{}}\n")), vec![]);
+    assert_eq!(check("use std::cell::RefCell;\nuse std::rc::Rc;\nuse std::sync::Mutex;\nfn main() {\n    let m = Mutex::new(vec![1]);\n    let mut g = m.lock().unwrap();\n    g.push(2);\n    *g = vec![3];\n    drop(g);\n    let r = Rc::new(RefCell::new(String::new()));\n    r.borrow_mut().push('a');\n    let mut b = r.borrow_mut();\n    *b = String::from(\"c\");\n}\n"), vec![]);
+}

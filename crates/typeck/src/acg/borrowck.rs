@@ -217,6 +217,10 @@ pub struct Bk {
     /// through boxes and fields (`Box<Scribble>`: `*`; `Wrapper(Scribble)`: `.0`): its `drop` may use what a `&mut`
     /// field points to, so a borrow through it must not outlive the local (E0713)
     pub drop_owners: Vec<(u32, Vec<Proj>)>,
+    /// A `*x` through an overloaded `Deref` with no `DerefMut` (`Rc`, `Arc`, a `Ref` guard, the program's): (the
+    /// local, the place of its `Shr` in the projection) → the type's name, for the errors of writing through it
+    /// (bk_place records them: it reads `self` only)
+    pub overloaded: std::cell::RefCell<HashMap<(u32, usize), String>>,
     /// Type → (Copy, may hold references)
     pub ty_info: HashMap<Ty, (bool, bool)>,
     /// Hidden locals of temporaries borrowed in the statements being lowered (they go out of scope at the end of
@@ -1407,9 +1411,15 @@ impl Bk {
         if writes && p.proj.contains(&Proj::Shr) && !self.locals[p.local as usize].via_ref {
             let i = p.proj.iter().rposition(|x| *x == Proj::Shr).unwrap();
             let behind = path_str(&self.locals, &BPlace { local: p.local, proj: p.proj[..=i].to_vec() });
-            let msg = match a {
-                Acc::Borrow(_) => format!("cannot borrow `{}` as mutable, as `{behind}` is behind a `&` reference", path_str(&self.locals, p)),
-                _ => format!("cannot assign to `{}`, which is behind a `&` reference", path_str(&self.locals, p)),
+            // (through an overloaded `Deref`: "data in an `Rc`", as rustc says)
+            let over = self.overloaded.borrow().get(&(p.local, i)).map(|n| if matches!(n.as_str(), "Rc" | "Arc") { format!("data in an `{n}`") } else { format!("data in dereference of `{n}`") });
+            let msg = match (a, over) {
+                (Acc::Borrow(_), Some(d)) => format!("cannot borrow {d} as mutable (E0596)"),
+                (_, Some(d)) => format!("cannot assign to {d} (E0594)"),
+                (a, None) => match a {
+                    Acc::Borrow(_) => format!("cannot borrow `{}` as mutable, as `{behind}` is behind a `&` reference", path_str(&self.locals, p)),
+                    _ => format!("cannot assign to `{}`, which is behind a `&` reference", path_str(&self.locals, p)),
+                },
             };
             let sp = if let Acc::Borrow(l) = a { self.loans[l as usize].at } else { sp };
             errs.push(BkError { sp, msg });
@@ -1909,6 +1919,37 @@ impl Cx<'_> {
         }
     }
 
+    /// `*x` through an overloaded `Deref` with no `DerefMut` (`*rc`): what it reaches is shared, as through a `&`
+    /// (writing it or borrowing it mutably is E0594 / E0596). The deref's target type; None for another struct
+    fn bk_overloaded_shr(&self, p: &mut BPlace, sid: u32) -> Option<Ty> {
+        let name = self.shared_deref(sid)?;
+        let did = self.prog.method(sid, "deref")?;
+        let Ty::Ref(_, i) = self.prog.sigs[did as usize].ret else { return None };
+        if i.is_fat() || matches!(i, Ty::Str | Ty::Slice(_) | Ty::Dyn(_)) {
+            return None;
+        }
+        let args: Vec<Option<Ty>> = self.prog.structs[sid as usize].args.iter().map(|&a| Some(a)).collect();
+        let inner = self.prog.partial_subst(*i, &args);
+        self.bk.overloaded.borrow_mut().insert((p.local, p.proj.len()), name);
+        p.proj.push(Proj::Shr);
+        Some(inner)
+    }
+
+    /// The name of a type whose `Deref` has no `DerefMut` (`Rc`, `Arc`, a `Ref` guard, the program's): what it reaches
+    /// is shared. Not a Vec / String (their own), nor the prelude's `MutexGuard`, which writes through its `deref`
+    pub(crate) fn shared_deref(&self, sid: u32) -> Option<String> {
+        if self.vec_fields(sid).is_some() || self.prog.method(sid, "deref_mut").is_some() || self.prog.method(sid, "deref").is_none() {
+            return None;
+        }
+        let base = self.prog.base_of(sid);
+        let n = &self.prog.structs[base as usize].name;
+        let prelude = self.prog.struct_item.get(base as usize).is_none_or(|&i| i >= self.prog.prelude_from);
+        if n == "MutexGuard" && prelude {
+            return None;
+        }
+        Some(n.clone())
+    }
+
     /// The place e names, rooted at a local (None for temporaries, statics, captures ..)
     pub(crate) fn bk_place(&self, e: &Expr) -> Option<(BPlace, Option<Ty>)> {
         match e {
@@ -1932,6 +1973,13 @@ impl Cx<'_> {
                         Ty::Box(i) => {
                             p.proj.push(Proj::Deref(true));
                             t = *i;
+                        }
+                        // (a field of what an overloaded `Deref` reaches: `rc.y` with `rc: Rc<Point>`)
+                        Ty::Struct(sid) if !self.prog.structs[sid as usize].is_enum && self.prog.field(sid, name).is_none() => {
+                            t = self.bk_overloaded_shr(&mut p, sid)?;
+                            if self.prog.has_param(t) {
+                                return None;
+                            }
                         }
                         _ => break,
                     }
@@ -1961,6 +2009,12 @@ impl Cx<'_> {
                     Ty::Box(i) => {
                         p.proj.push(Proj::Deref(true));
                         Some((p, Some(*i)))
+                    }
+                    // (an overloaded `Deref` with no `DerefMut` (`*rc`): what it reaches is shared, as through a `&`.
+                    // Writing or borrowing it mutably is E0594 / E0596)
+                    Ty::Struct(sid) => {
+                        let inner = self.bk_overloaded_shr(&mut p, sid)?;
+                        Some((p, Some(inner).filter(|&t| !self.prog.has_param(t))))
                     }
                     _ => None,
                 }
