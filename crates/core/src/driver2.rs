@@ -1674,6 +1674,14 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
                 let second: String = r2.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
                 if !second.is_empty() && second != "self" && second != "super" {
                     seconds.push((line, first.clone(), second));
+                } else if let Some(list) = r2.trim_start().strip_prefix('{').and_then(|l| l.split_once('}')).map(|(l, _)| l).filter(|l| !l.contains('{')) {
+                    // (`use m::{f, g as h};`: each name of a flat list)
+                    for part in list.split(',') {
+                        let n: String = part.trim_start().chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                        if !n.is_empty() && n != "self" && n != "super" && !part.contains("::") {
+                            seconds.push((line, first.clone(), n));
+                        }
+                    }
                 }
             }
             firsts.push((line, first));

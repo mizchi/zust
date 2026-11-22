@@ -3101,6 +3101,7 @@ check-pass	imports/import-after-macro-expand-8.rs
 check-pass	imports/import-after-macro-expand-9.rs
 compile-fail	imports/import-from-missing-star-3.rs
 compile-fail	imports/import-from-missing-star.rs
+compile-fail	imports/import-from-missing.rs
 run-pass	imports/import-from.rs
 run-pass	imports/import-glob-0-rpass.rs
 compile-fail	imports/import-glob-0.rs

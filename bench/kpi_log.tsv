@@ -259,3 +259,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-22	5911b30+	Review of #41 (3): alias deps in cache keys, cfg_select delimiters / opaque macros / no arm, compile_error!	0.699	555.600	3863.878	1902.8	10.8520	1809	1493	101	4078	1192.696	64.130	10.400	320.396	723.768	268.207
 2026-11-22	15e01a6+	A struct's const parameters of other types than usize: their kind in its turbofish	0.697	555.606	3863.883	1902.8	-	1809	1493	101	4078	1192.692	64.029	10.388	320.395	723.770	268.207
 2026-11-22	c1dbf81+	Review of #41 (4): cfg_select grouping / std:: path, user From impls, narrowing From, alias const types	0.697	555.615	3863.902	1902.8	-	1809	1493	101	4078	1192.686	64.012	10.388	320.399	723.783	268.225
+2026-11-22	0ad42a5+	use m::{f, g}: each name of the list in E0432	0.693	555.655	3875.367	1902.8	-	1809	1493	101	4126	1193.662	64.103	10.361	320.557	726.367	268.332
