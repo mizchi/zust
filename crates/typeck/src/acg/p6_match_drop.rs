@@ -2485,6 +2485,13 @@ fn guard_closure_move(e: &Expr, names: &[String], by: crate::ast_closure::MovesB
     if names.is_empty() {
         return None;
     }
+    // (a `move` closure takes what it names by value when it is made: one of names it names is moved there, even if
+    // its body only borrows it)
+    if let Expr::Closure(true, _, _, _, at) = e {
+        if let Some(n) = crate::ast_closure::free_vars(e).into_iter().find(|n| names.contains(n)) {
+            return Some((n, *at));
+        }
+    }
     if let Expr::Closure(..) = e {
         return crate::ast_closure::move_site_by(e, names, by);
     }
