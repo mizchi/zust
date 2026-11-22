@@ -2388,7 +2388,16 @@ impl Cx<'_> {
                     while let Some(Ty::Ref(_, i)) = rt {
                         rt = Some(*i);
                     }
-                    if rt.is_some_and(prelude) {
+                    // (an adapter whose closure makes the items (`map`, `filter_map` ..): they hold what the closure's
+                    // result does, not the receiver's items, when the closure does not use its parameter
+                    // (`raw.iter().map(|_| "ok")`))
+                    let made = matches!(name.as_str(), "map" | "filter_map" | "flat_map" | "map_while")
+                        && matches!(args.first().map(|a| super::strip_paren(a)), Some(Expr::Closure(_, ps, _, body, _)) if ps.iter().all(|(p, _)| {
+                            let mut v = vec![];
+                            crate::ast_closure::pat_idents(p, &mut v);
+                            v.iter().all(|n| !mentions(body, n))
+                        }));
+                    if rt.is_some_and(prelude) && !made {
                         // (`copied` / `cloned` take a reference off: what is under it, not the borrow itself
                         // (`parts.first().copied()` holds what parts holds, not a loan of parts))
                         if matches!(name.as_str(), "copied" | "cloned") {

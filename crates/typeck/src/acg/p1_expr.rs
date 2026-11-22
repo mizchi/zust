@@ -2053,6 +2053,31 @@ impl Cx<'_> {
             }
             _ => {}
         }
+        // (a binding of the same name shadows the capture where it is in scope: `let mut x = x; x += 1;`)
+        let binds = |p: &Pat| {
+            let mut v = vec![];
+            crate::ast_closure::pat_idents(p, &mut v);
+            v.iter().any(|x| x == n)
+        };
+        let either = |a: Option<(Sp, bool)>, b: &mut dyn FnMut() -> Option<(Sp, bool)>| a.or_else(b);
+        match e {
+            Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => return self.owned_mutation_block(b, n),
+            Expr::Closure(_, ps, _, body, _) => return if ps.iter().any(|(p, _)| binds(p)) { None } else { self.owned_mutation(body, n) },
+            Expr::Match(x, arms) => {
+                return either(self.owned_mutation(x, n), &mut || {
+                    arms.iter().filter(|a| !binds(&a.pat)).find_map(|a| a.guard.as_ref().and_then(|g| self.owned_mutation(g, n)).or_else(|| self.owned_mutation(&a.body, n)))
+                });
+            }
+            Expr::For(_, p, it, b) => return either(self.owned_mutation(it, n), &mut || if binds(p) { None } else { self.owned_mutation_block(b, n) }),
+            Expr::If(c, b, _) | Expr::While(_, c, b) if matches!(&**c, Expr::Let(..)) => {
+                let Expr::Let(p, x) = &**c else { unreachable!() };
+                let els = if let Expr::If(_, _, els) = e { els.as_deref() } else { None };
+                return either(self.owned_mutation(x, n), &mut || {
+                    if binds(p) { None } else { self.owned_mutation_block(b, n) }.or_else(|| els.and_then(|x| self.owned_mutation(x, n)))
+                });
+            }
+            _ => {}
+        }
         let mut found = None;
         crate::ast_closure::each_child_pub(e, &mut |c| {
             if found.is_none() {
@@ -2060,6 +2085,31 @@ impl Cx<'_> {
             }
         });
         found
+    }
+
+    /// owned_mutation in a block's statements: a `let` of the same name ends the search
+    fn owned_mutation_block(&self, b: &crate::parse::Block, n: &str) -> Option<(Sp, bool)> {
+        for st in &b.stmts {
+            match st {
+                crate::parse::Stmt::Let(p, _, init, els, _) => {
+                    if let Some(f) = init.as_ref().and_then(|x| self.owned_mutation(x, n)).or_else(|| els.as_ref().and_then(|b| self.owned_mutation_block(b, n))) {
+                        return Some(f);
+                    }
+                    let mut v = vec![];
+                    crate::ast_closure::pat_idents(p, &mut v);
+                    if v.iter().any(|x| x == n) {
+                        return None;
+                    }
+                }
+                crate::parse::Stmt::Expr(x, _) => {
+                    if let Some(f) = self.owned_mutation(x, n) {
+                        return Some(f);
+                    }
+                }
+                crate::parse::Stmt::Item(_) => {}
+            }
+        }
+        None
     }
 
     /// The first assignment to, `&mut` of, or `&mut self` method call of a captured variable in a closure's body (a
@@ -2723,20 +2773,43 @@ impl Cx<'_> {
                     let bound = self.prog.structs[sid as usize].placeholder.as_ref().and_then(|bs| bs.iter().find_map(|b| crate::ast_summary::parse_fn_bound(b).map(|(k, _, _)| (k, b.clone()))));
                     if let (Some((kind, b)), true) = (bound, self.prog.is_placeholder(sid)) {
                         let (ps, ret) = self.dyn_fn_sig(&b).map_err(|e| self.at(SP, e))?;
-                        if is_place_expr(func) && self.peek(func) == Some(t) {
-                            match kind.as_str() {
-                                "FnOnce" => self.bk_acc(func, borrowck::Acc::Move),
-                                k => {
-                                    self.bk.no_loan_src = true;
-                                    self.bk_borrow(func, k == "FnMut", err_pos(func));
-                                    self.bk.no_loan_src = false;
+                        // (the bound's arity and its parameters of primitive types. A placeholder's instance's type errors
+                        // are not reported (see compile_once): it stops being checked. A name a macro's expansion
+                        // shadows (no hygiene) may be such a callee)
+                        if args.len() != ps.len() {
+                            return err(err_pos(func), format!("this function takes {} arguments but {} were supplied (a call through the bound `{b}`) (E0057)", ps.len(), args.len()));
+                        }
+                        if is_place_expr(func) && kind == "FnOnce" && self.peek(func) == Some(t) {
+                            self.bk_acc(func, borrowck::Acc::Move);
+                        } else if is_place_expr(func) && kind != "FnOnce" {
+                            // (through every reference to it, as a closure's call: `f: &F` with `F: FnMut()` is a `&mut`
+                            // of `*f`, behind a `&` (E0596))
+                            let mut ft = self.peek(func);
+                            let mut x: &Expr = func;
+                            let mut n = 0;
+                            while let Some(Ty::Ref(_, i)) = ft {
+                                if n > 8 {
+                                    break;
                                 }
+                                let sp = crate::parse::Span { start: expr_start(func), at: expr_start(func) };
+                                x = self.keep_expr(Expr::Unary("*".into(), Box::new(x.clone()), sp));
+                                ft = Some(*i);
+                                n += 1;
+                            }
+                            if ft == Some(t) {
+                                self.bk.no_loan_src = true;
+                                self.bk_borrow(x, kind == "FnMut", err_pos(func));
+                                self.bk.no_loan_src = false;
                             }
                         }
                         let mut never = false;
+                        let prim = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char);
                         for (a, &pt) in args.iter().zip(&ps) {
                             let (_, at) = self.expr(a, Some(pt))?;
                             never |= at == Ty::Never;
+                            if at != Ty::Never && at != pt && prim(at) && prim(pt) {
+                                return err(expr_start(a), format!("mismatched types: expected `{}`, found `{}` (an argument of a call through the bound `{b}`) (E0308)", self.prog.tn(pt), self.prog.tn(at)));
+                            }
                         }
                         let r = if never { (None, Ty::Never) } else { self.zero_of(ret) };
                         self.bk_frame_end_call();

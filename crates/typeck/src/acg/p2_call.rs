@@ -927,7 +927,9 @@ impl Cx<'_> {
             // (a receiver a call made, borrowed by `&self` / `&mut self` for a result that borrows it, in a `let`'s
             // initializer: a temporary freed at the end of the statement (E0716 when the result is used after))
             if let (Ty::Ref(m, _), false, true) = (recv_ty, is_place_expr(recv), flows) {
-                if !matches!(p0.ty(), Ty::Ref(..)) {
+                // (not a receiver a call returned as a reference (`id(&a).get()`): dropping the reference frees
+                // nothing)
+                if !through_ref && !matches!(p0.ty(), Ty::Ref(..)) {
                     self.bk_temp_borrow(recv, m, st);
                 }
             }

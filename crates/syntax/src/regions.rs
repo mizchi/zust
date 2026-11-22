@@ -129,7 +129,7 @@ fn wf_outlives(t: &PTy, out: &mut Vec<(String, String)>, depth: u32) {
 }
 
 /// The lifetimes named in t
-fn lifetimes_in(t: &PTy, out: &mut Vec<String>) {
+pub(crate) fn lifetimes_in(t: &PTy, out: &mut Vec<String>) {
     match t {
         PTy::Ref(l, _, i) => {
             if let Some(l) = l {

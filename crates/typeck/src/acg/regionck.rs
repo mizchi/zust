@@ -945,6 +945,12 @@ impl RgSt {
         // (a type alias written without its lifetimes (`b: A` with `type A<'a> = &'a isize`): one marker for what it
         // stands for, whose regions are all elided)
         if matches!(t, Ty::Ref(..) | Ty::Dyn(_) | Ty::Fn(_)) && c.codes.is_some_and(|x| x.get(c.pos) == Some(&R_ELIDED_ADT)) {
+            // (an alias whose definition fixes a lifetime (`type S = &'static u8;`): which alias this is, and so
+            // which of its regions are fixed, is not known here. Not followed)
+            if prog.alias_fixed_lt {
+                c.ok = false;
+                return;
+            }
             c.pos += 1;
             let mut all = Codes { codes: None, pos: 0, ok: true, parent };
             self.inst(prog, t, &mut all, lts, targs, elided, out, depth + 1);

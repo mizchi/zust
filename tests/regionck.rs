@@ -1358,3 +1358,26 @@ fn borrow_of_a_temporarys_contents() {
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0716"), "{d:?}");
     assert_eq!(check("fn main() {\n    let r: &usize = &*Box::new(1);\n    println!(\"{}\", r);\n}\n"), vec![]);
 }
+
+/// Review follow-ups of part 7: what rustc accepts (an alias that fixes `'static`, `map` with a closure that does not
+/// use its item, a shadowed capture, a receiver a call returns as a reference, a method named `__ref_m` itself) and
+/// what it rejects (E0195 for lifetimes early-bound in one and late-bound in the other, E0276 for a stricter bound,
+/// `FnMut` through `&F`)
+#[test]
+fn part7_review_follow_ups() {
+    assert_eq!(check("type Static = &'static u8;\nfn keep(x: Static) -> &'static u8 {\n    x\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("fn ok() -> Vec<&'static str> {\n    let raw = vec![String::new()];\n    raw.iter().map(|_| \"ok\").collect()\n}\nfn main() {}\n"), vec![]);
+    let d = check("fn bad() -> Vec<&'static str> {\n    let raw = vec![String::new()];\n    raw.iter().map(|s| s.as_str()).collect()\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(check("fn main() {\n    let x = 0;\n    let mut c = move || {\n        let mut x = x;\n        x += 1;\n        println!(\"{x}\");\n    };\n    c();\n}\n"), vec![]);
+    assert_eq!(check("struct A {\n    s: String,\n}\nimpl A {\n    fn get(&self) -> &String {\n        &self.s\n    }\n}\nfn id(a: &A) -> &A {\n    a\n}\nfn main() {\n    let a = A { s: String::new() };\n    let x = id(&a).get();\n    println!(\"{}\", x.len());\n}\n"), vec![]);
+    assert_eq!(check("trait Tr {\n    fn foo<'a: 'b, 'b>(x: &'a u8, y: &'b u8);\n    fn __ref_foo();\n}\nimpl Tr for i32 {\n    fn foo<'a: 'b, 'b>(x: &'a u8, y: &'b u8) {}\n    fn __ref_foo() {}\n}\nfn main() {}\n"), vec![]);
+    // (the impl's bounds less strict than the trait's: accepted)
+    assert_eq!(check("trait Tr {\n    fn f<'a: 'b, 'b: 'a>(x: &'a u8, y: &'b u8);\n}\nimpl Tr for i32 {\n    fn f<'a: 'b, 'b>(x: &'a u8, y: &'b u8) {}\n}\nfn main() {}\n"), vec![]);
+    let d = check("trait Tr {\n    fn f<'a, 'b: 'static>(x: &'a u8, y: &'b u8);\n}\nimpl Tr for i32 {\n    fn f<'a: 'static, 'b>(x: &'a u8, y: &'b u8) {}\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0195"), "{d:?}");
+    let d = check("trait Tr {\n    fn f<'a: 'b, 'b>(x: &'a u8, y: &'b u8);\n}\nimpl Tr for i32 {\n    fn f<'a, 'b: 'a>(x: &'a u8, y: &'b u8) {}\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0276"), "{d:?}");
+    let d = check("fn bad<F: FnMut()>(f: &F) {\n    f();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("behind a `&` reference"), "{d:?}");
+}

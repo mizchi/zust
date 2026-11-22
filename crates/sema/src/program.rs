@@ -311,6 +311,9 @@ pub struct Program {
     pub trait_self_outlives: FxMap<String, Vec<String>>,
     /// The program (not the prelude) has a static not declared `mut`: an assignment is checked against it
     pub any_immutable_static: bool,
+    /// An alias of the program's names a lifetime that is not its own (`type S = &'static u8;`): see
+    /// Summary::alias_fixed_lts
+    pub alias_fixed_lt: bool,
     /// the generics a method of the trait starts with: Self and the trait's own parameters
     pub trait_ngen: FxMap<String, usize>,
     /// a generic trait's impls: trait → (self type, the trait's arguments, both with the impl's parameters as
@@ -746,6 +749,7 @@ impl Program {
             trait_supers: FxMap::default(),
             trait_self_outlives: FxMap::default(),
             any_immutable_static: false,
+            alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
             ref_impls: Default::default(),
@@ -826,6 +830,7 @@ impl Program {
                     *e = (*e).max(k);
                 }
             }
+            p.alias_fixed_lt |= !sm.alias_fixed_lts.is_empty();
             for (n, g, t) in &sm.aliases {
                 if !adt_names.contains(n.as_str()) {
                     p.aliases.insert(n.clone(), (g.clone(), t.clone()));
@@ -1560,14 +1565,6 @@ impl Program {
         // (E0195 for the methods of an impl of a type that is not a struct (`impl<'a> Foo<'a> for &'a isize`), which
         // the loop below does not reach: the method's own early-bound lifetimes are the trait's)
         {
-            let early = |r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)]| -> Vec<usize> {
-                let Some(r) = r else { return vec![] };
-                let in_bounds = |l: &str| g.iter().flat_map(|x| x.1.iter()).any(|b| b.match_indices(l).any(|(k, _)| !b[k + l.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')));
-                (r.outer as usize..r.lts.len())
-                    .map(|i| r.outlives.iter().filter(|&&(a, b)| a as usize == i || b as usize == i).count() + in_bounds(&r.lts[i]) as usize)
-                    .filter(|&n| n > 0)
-                    .collect()
-            };
             for (mi, ms) in p.sigs.iter().enumerate() {
                 let (Some(tr), None, true) = (ms.impl_trait.as_deref(), ms.impl_of, ms.has_body) else { continue };
                 let Some(ii) = p.item_of[mi] else { continue };
@@ -1576,12 +1573,15 @@ impl Program {
                 }
                 let m = p.names[mi].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
                 // (an impl of a reference names its methods `__ref_m`)
-                let same = |dn: &str| m == dn || m.strip_suffix(dn).is_some_and(|pre| pre.starts_with("__") && pre.ends_with('_'));
-                let Some(&d) = p.traits.get(tr).and_then(|ds| ds.iter().find(|&&d| p.names[d as usize].rsplit("::").next().is_some_and(same))) else { continue };
+                // (the declaration of the same name first: a method may be named `__ref_m` itself)
+                let decl_name = |d: u32| p.names[d as usize].rsplit("::").next().unwrap_or("");
+                let ds = p.traits.get(tr).map(|v| v.as_slice()).unwrap_or(&[]);
+                let found = ds.iter().find(|&&d| decl_name(d) == m).or_else(|| ds.iter().find(|&&d| m.strip_suffix(decl_name(d)).is_some_and(|pre| pre.starts_with("__") && pre.ends_with('_'))));
+                let Some(&d) = found else { continue };
                 let m = p.names[d as usize].rsplit("::").next().unwrap_or(m);
                 let ds = &p.sigs[d as usize];
-                if early(ds.regions.as_deref(), &ds.generics) != early(ms.regions.as_deref(), &ms.generics) {
-                    return Err(format!("{}:1: lifetime parameters or bounds on method `{m}` do not match the trait declaration (E0195)", items[ii as usize].line));
+                if let Some(e) = early_mismatch(ds, ms, m) {
+                    return Err(format!("{}:1: {e}", items[ii as usize].line));
                 }
             }
         }
@@ -1625,22 +1625,8 @@ impl Program {
                         }
                         // (E0195: the method's own lifetimes that bounds make early-bound, and how many bounds each has,
                         // are the trait's: `fn bar<'a, 'b: 'a>` in the trait, `fn bar<'a, 'b>` in the impl)
-                        {
-                            // (a lifetime a type parameter's bound names (`T: Test<'p>`) is early-bound too)
-                            let early = |r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)]| -> Vec<usize> {
-                                let Some(r) = r else { return vec![] };
-                                let in_bounds = |l: &str| {
-                                    g.iter().flat_map(|x| x.1.iter()).any(|b| b.match_indices(l).any(|(k, _)| !b[k + l.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')))
-                                };
-                                (r.outer as usize..r.lts.len())
-                                    .map(|i| r.outlives.iter().filter(|&&(a, b)| a as usize == i || b as usize == i).count() + in_bounds(&r.lts[i]) as usize)
-                                    .filter(|&n| n > 0)
-                                    .collect()
-                            };
-                            let (de, me) = (early(ds.regions.as_deref(), &ds.generics), early(ms.regions.as_deref(), &ms.generics));
-                            if de != me {
-                                return Err(format!("{line}lifetime parameters or bounds on method `{m}` do not match the trait declaration (E0195)"));
-                            }
+                        if let Some(e) = early_mismatch(ds, ms, m) {
+                            return Err(format!("{line}{e}"));
                         }
                         // (a parameter's reference the trait leaves to the caller (elided, or the method's own lifetime)
                         // that the impl ties to one of its header's (`fn next(&'a mut self)`): less general, E0308)
@@ -4104,6 +4090,73 @@ fn syn_has_assoc(t: &TySyn) -> bool {
         TySyn::Tuple(a) | TySyn::FnPtr(a) => a.iter().any(syn_has_assoc),
         _ => false,
     }
+}
+
+/// A method's own early-bound lifetimes: those its bounds name (`'a: 'b`, `T: Tr<'a>`), in their order. Returns
+/// whether each of its own lifetimes is early-bound, and its bounds `'a: 'b` among the early-bound ones, to
+/// `'static` (-1) and to the impl's or trait's lifetimes (-100 - k, k their name's place in `outer_names`), each own
+/// lifetime by its place among the early-bound ones
+fn early_bound(r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)], outer_names: &mut Vec<String>) -> (Vec<bool>, Vec<(i32, i32)>) {
+    let Some(r) = r else { return (vec![], vec![]) };
+    let in_bounds = |l: &str| g.iter().flat_map(|x| x.1.iter()).any(|b| b.match_indices(l).any(|(k, _)| !b[k + l.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')));
+    let idx: Vec<usize> = (r.outer as usize..r.lts.len()).filter(|&i| in_bounds(&r.lts[i]) || r.outlives.iter().any(|&(a, b)| a as usize == i || b as usize == i)).collect();
+    let mut ord = |c: u8| match idx.iter().position(|&k| k == c as usize) {
+        Some(p) => Some(p as i32),
+        None if c == crate::types::R_STATIC => Some(-1),
+        None if c < r.outer => {
+            let n = &r.lts[c as usize];
+            let k = outer_names.iter().position(|x| x == n).unwrap_or_else(|| {
+                outer_names.push(n.clone());
+                outer_names.len() - 1
+            });
+            Some(-100 - k as i32)
+        }
+        None => None,
+    };
+    let rel = r.outlives.iter().filter_map(|&(a, b)| Some((ord(a)?, ord(b)?))).collect();
+    ((r.outer as usize..r.lts.len()).map(|i| idx.contains(&i)).collect(), rel)
+}
+
+/// An impl's method against the trait's declaration: E0195 when they have a different number of early-bound
+/// lifetimes, or the same lifetimes with one early-bound where the other's is late-bound; E0276 when the impl's
+/// bounds among them are not implied by the declaration's (rustc's order of the checks). The impl's and the trait's
+/// own lifetimes are told apart by name: a bound with one of the impl's that the trait has no lifetime of that name for
+/// is not compared (the header's trait arguments, which relate them, are not kept)
+fn early_mismatch(decl: &FnSig, imp: &FnSig, m: &str) -> Option<String> {
+    let mut names = vec![];
+    let (de, drel) = early_bound(decl.regions.as_deref(), &decl.generics, &mut names);
+    let n_decl = names.len();
+    let (me, mrel) = early_bound(imp.regions.as_deref(), &imp.generics, &mut names);
+    let count = |v: &[bool]| v.iter().filter(|&&x| x).count();
+    if count(&de) != count(&me) || de.len() == me.len() && de != me {
+        return Some(format!("lifetime parameters or bounds on method `{m}` do not match the trait declaration (E0195)"));
+    }
+    // (the trait's lifetimes: the declaration's own ones, and the impl's of the same names)
+    let decl_outer = |x: i32| x > -100 || ((-100 - x) as usize) < n_decl || decl.regions.as_deref().is_some_and(|r| r.lts[..r.outer as usize].iter().any(|l| *l == names[(-100 - x) as usize]));
+    // ('a: 'b holds when the declaration's bounds lead from 'a to 'b, or 'a is 'static)
+    let implied = |a: i32, b: i32| {
+        if a == b || a == -1 {
+            return true;
+        }
+        let (mut seen, mut work) = (vec![a], vec![a]);
+        while let Some(x) = work.pop() {
+            for &(p, q) in &drel {
+                if p == x && !seen.contains(&q) {
+                    if q == b || q == -1 {
+                        return true;
+                    }
+                    seen.push(q);
+                    work.push(q);
+                }
+            }
+        }
+        false
+    };
+    // (a bound with none of the method's own lifetimes may be the impl header's (`impl<'a: 'b, 'b>`): not compared)
+    if mrel.iter().any(|&(a, b)| (a >= 0 || b >= 0) && decl_outer(a) && decl_outer(b) && !implied(a, b)) {
+        return Some(format!("impl has stricter requirements than trait: method `{m}` (E0276)"));
+    }
+    None
 }
 
 fn syn_has_app(t: &TySyn, aliases: &FxMap<String, (Vec<String>, TySyn)>) -> bool {

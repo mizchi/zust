@@ -156,11 +156,18 @@ impl Cx<'_> {
             let last = ops.pop().unwrap();
             let merge = self.b.create_block();
             let res = self.b.append_block_param(merge, types::I8);
-            for x in ops {
+            for (i, x) in ops.into_iter().enumerate() {
                 let (l, lt) = self.expr(x, Some(Ty::Bool))?;
                 self.same(SP, lt, Ty::Bool)?;
                 let Some(l) = l else {
-                    return Ok((None, Ty::Never));
+                    // (the first operand diverges: so does the whole. A later one: the operands before it may
+                    // short-circuit to the end, whose value is the chain's)
+                    if i == 0 {
+                        return Ok((None, Ty::Never));
+                    }
+                    self.b.ins().trap(TrapCode::unwrap_user(1));
+                    self.b.switch_to_block(merge);
+                    return Ok((Some(res), Ty::Bool));
                 };
                 let rhs_blk = self.b.create_block();
                 if op == "&&" {
