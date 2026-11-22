@@ -255,6 +255,13 @@ pub fn direct_temps(e: &Expr, out: &mut Vec<usize>) {
         e
     }
     let args = match strip(e) {
+        // (`let x: &str = { mk().as_str() };`: the block's value is its tail's, and so are its temporaries)
+        Expr::Block(_, _, b) => {
+            if let Some(crate::parse::Stmt::Expr(t, false)) = b.stmts.last() {
+                direct_temps(t, out);
+            }
+            return;
+        }
         Expr::Call(_, a) => a,
         Expr::MethodCall(r, _, _, a, _) => {
             // (the receiver made by a call (`mk(1).get()`): borrowed by a `&self` method, it is a temporary too)
@@ -266,8 +273,25 @@ pub fn direct_temps(e: &Expr, out: &mut Vec<usize>) {
         _ => return,
     };
     for a in args {
-        direct_ref(a, out);
+        direct_arg(a, out);
     }
+}
+
+/// direct_ref of an argument, also of a block's tail: `gimme({ let v = 22; &(v,) })` passes what the tail borrows,
+/// which is not extended (it is not the `let`'s own value). (Not for the `let`'s value: `let s = { ..; &(v,) };`
+/// extends it to the `let`'s block, not the inner one it is made in)
+fn direct_arg(a: &Expr, out: &mut Vec<usize>) {
+    let mut e = a;
+    while let Expr::Paren(p) = e {
+        e = p;
+    }
+    if let Expr::Block(_, _, b) = e {
+        if let Some(crate::parse::Stmt::Expr(t, false)) = b.stmts.last() {
+            direct_arg(t, out);
+        }
+        return;
+    }
+    direct_ref(a, out);
 }
 
 /// A value a call makes (not a place, not a constant rustc would promote): `f()`, `x.m()`, `vec![..]`
@@ -284,6 +308,8 @@ fn made_temp(x: &Expr) -> bool {
         // static as a constant one is (`&(1, 2)`), so a temporary)
         Expr::Tuple(xs) | Expr::Array(xs) => !xs.is_empty() && xs.iter().any(runtime_value),
         Expr::Struct(_, fs, None) => fs.iter().any(|f| runtime_value(&f.1)),
+        // (`&{ let v = 4; (v,) }`: a block's value is a temporary, moved or copied out of what its tail names)
+        Expr::Block(None, _, b) => matches!(b.stmts.last(), Some(crate::parse::Stmt::Expr(t, false)) if runtime_value(t)),
         _ => false,
     }
 }
@@ -1728,7 +1754,18 @@ impl Cx<'_> {
         let (copy, refs) = self.bk_ty(t);
         self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy, refs, mutable: Some(true), decl: super::SP });
         self.bk_ev(Ev::Bind(id, true));
-        let sp = err_pos(e);
+        // (a block, which has no position: its first statement's, usually on the line of its `{`)
+        let sp = match err_pos(e) {
+            s if s.line != 0 => s,
+            s => match strip_paren(e) {
+                Expr::Block(_, _, b) => match b.stmts.first() {
+                    Some(crate::parse::Stmt::Let(.., p)) => *p,
+                    Some(crate::parse::Stmt::Expr(x, _)) => err_pos(x),
+                    _ => s,
+                },
+                _ => s,
+            },
+        };
         let p = BPlace { local: id, proj: vec![] };
         let ln = self.bk.loans.len() as u32;
         self.bk.loan_of.insert(e as *const Expr as usize, ln);
@@ -1742,6 +1779,18 @@ impl Cx<'_> {
             self.bk.scope_temps.push((self.scopes.len().saturating_sub(1), id));
         } else {
             self.bk.stmt_temps.push(id);
+        }
+    }
+
+    /// `let _ = x;`: not a read of x (it may be moved out or borrowed), but rustc's fake read keeps x live there, so
+    /// what x borrows must still be there (`let z = gimme(&{ .. }); let _ = z;` is E0716)
+    pub(crate) fn bk_fake_read(&mut self, e: &Expr) {
+        if !self.bk_on() {
+            return;
+        }
+        let Some((p, _)) = self.bk_place(e) else { return };
+        if self.bk.locals[p.local as usize].refs {
+            self.bk_ev(Ev::Acc(BPlace { local: p.local, proj: vec![] }, Acc::Drop, err_pos(e)));
         }
     }
 

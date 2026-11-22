@@ -1731,6 +1731,7 @@ impl Cx<'_> {
                         let r = self.place(init);
                         self.bk.place_depth -= 1;
                         let _ = r?;
+                        self.bk_fake_read(init);
                     } else {
                         // (`let _: [(); 0] = [];`: the annotation is the expected type)
                         // (only for an array literal, which needs it for its element type: an expected type would
