@@ -1976,3 +1976,34 @@ fn nested_lifetime_struct_gate_and_blanket_bounds() {
     let d = check("trait Tr { fn go(&self) -> u8 { 1 } }\ntrait Other {}\nimpl<T: ?Sized> Tr for T where T: Other {}\nfn main() {\n    let _x = ().go();\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("no method `go`"), "{d:?}");
 }
+
+/// From the review of #54: a pattern's turbofish gives the matched value's instance (`let P::<u16>(x, _) =
+/// P(300, 1);` makes x a u16) and is checked against it (`S::<u16>(_)` on an `S<u8>`); a struct literal's written
+/// arguments are checked against the expected instance, `_` aside; a union's `&mut` field is not `Copy`; the
+/// enum's arguments written beside the variant's are E0109; a method call's turbofish and a turbofish on several
+/// lines turn the region check on; a blanket impl's bounds hold transitively; a by-value `self` keeps a `&mut`
+/// receiver; a guard's closure's parameters are its own; a struct is not taken for a closure by its id
+#[test]
+fn part11_review() {
+    // (reported where the value is built, line 3; rustc reports it at the pattern)
+    let d = check("struct S<T>(T);\nfn main() {\n    match S(1u8) {\n        S::<u16>(_) => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("mismatched types"), "{d:?}");
+    let d = check("struct S<T>(T);\nfn f(s: S<u8>) {\n    match s {\n        S::<u16>(_) => {}\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("mismatched types"), "{d:?}");
+    assert_eq!(check("struct S<T>(T);\nfn main() {\n    match S(1u8) {\n        S::<u8>(_) => {}\n    }\n}\n"), vec![]);
+    let d = check("struct S<A, B> { a: A, b: B }\nfn main() {\n    let s: S<u8, u8> = S::<u16, _> { a: 1, b: 2 };\n    let _ = (s.a, s.b);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("expected `S<u8, u8>`, found `S<u16, _>`"), "{d:?}");
+    assert_eq!(check("struct S<A, B> { a: A, b: B }\nfn main() {\n    let s: S<u8, u8> = S::<u8, _> { a: 1, b: 2 };\n    let _ = (s.a, s.b);\n}\n"), vec![]);
+    let d = check("union U<T: Copy> { a: T }\nfn main() {\n    let mut n = 1u8;\n    let _u = U { a: &mut n };\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`&mut u8: Copy`"), "{d:?}");
+    let d = check("enum E<'a, T> { V(&'a u8, T) }\nfn main() {\n    let local = 1u8;\n    let _e = E::<'static>::V::<u8>(&local, 0u8);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0109"), "{d:?}");
+    let d = check("struct Q;\nimpl Q {\n    fn take<T>(&self, _t: T) {}\n}\nfn f() {\n    let c = 1u32;\n    Q.take::<&'static u32>(&c);\n}\nfn main() { f() }\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("`c` does not live long enough"), "{d:?}");
+    let d = check("use std::cell::Cell;\nenum E<T> { V(T), U }\nfn combine<T>(_: T, _: T) {}\nfn f() {\n    let c = 66;\n    combine(E::V(Cell::new(&c)), E::U::<\n        Cell<&'static u32>,\n    >);\n}\nfn main() { f() }\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("`c` does not live long enough"), "{d:?}");
+    let d = check("trait Marker {}\ntrait Other {}\nimpl<T: Marker> Other for T {}\ntrait Tr { fn go(&self) {} }\nimpl<T: Other> Tr for T {}\nfn main() {\n    ().go();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("no method `go`"), "{d:?}");
+    assert_eq!(check("trait Id { fn id(self) -> Self where Self: Sized { self } }\nimpl<T> Id for T {}\nfn main() {\n    let mut n = 3u8;\n    let r = &mut n;\n    let r2: &mut u8 = r.id();\n    *r2 += 1;\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let mut y = 1;\n    match Some(5) {\n        Some(ref mut r) if (|r: &mut i32| { *r = 2; true })(&mut y) => { *r += 1; }\n        _ => {}\n    }\n}\n"), vec![]);
+}
