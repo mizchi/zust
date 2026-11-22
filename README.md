@@ -377,7 +377,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui: the [table above](#coverage-of-rusts-test-suite)
+- [x] tests/ui: the [table above](#coverage-of-rustcs-test-suite)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
