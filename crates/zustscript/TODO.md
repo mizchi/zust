@@ -79,6 +79,32 @@ r5 / r2 を書いた agent が報告したもの。次の改訂で直す。
 - 001 の決定 9(`pub` の入口で TAG を検査し、内部の呼び出しは検査しない): `@wasm` の `pub` な関数では、JS 層の中からの呼び出しも glue の検査を通る
 - 001 の引数のあるバリアント(`if c { Parsed::Ok(1) } else { Ok(2) }`)は、`EK::If` が他の分岐の型を期待する型として渡すので、分岐の順で結果が変わりうる(003 は「書いた型」だけを数える規則で避けた。001 にも同じ規則を入れる)
 
+## JS ターゲット: サイズ、速さ、TS との型の接続
+
+計測は `node bench/js/kpi.mjs`(`--esbuild PATH`、`--save FILE`、`--against FILE`)。`examples/*.zsc` と `bench/js/workloads.zsc` を `--all-js` でコンパイルし、esbuild で bundle + minify + gzip したサイズと、`w_*` の速さを出す。ベースラインは `bench/js/baseline.json`(node 26.13.1、esbuild 0.28.2)。
+
+決めたこと(順に入れて、1 つずつ効果を測る):
+
+1. **済: effect の tail-resumptive な handler を、直接の関数呼び出しにした**(`check::direct_effects`、`$perform` / `$handleD`)
+   - handler のすべての arm が末尾で `k(x)` を呼ぶだけで、`pub` な関数から外へ出ず、generator の effect と混ざらない effect は、普通の呼び出しになる。それ以外は generator のまま
+   - `w_effects` は 676 ms → 6.5 ms(約 100 倍)。結果は同じ。operation を 100 万回しても、スタックはあふれない(回帰テスト `many_ops`)
+   - **残る不具合**: generator の deep handler は、operation のたびに JS のスタックが深くなり、1 つの `handle` の中で operation が 1000 回前後になるとあふれる。ループの形の再開(trampoline)が要る
+2. **済: 実行時の補助関数を共通の runtime モジュールにした**: `zsc-runtime.js` / `.d.ts`(補助関数と、数値の brand とそのコンストラクタ)を出力先に 1 つ書き、各モジュールは使うものだけ import する。モジュールは使う brand を re-export するので、TS 側の import は変わらない。`--inline-runtime` で、これまでどおりモジュールの中に書く
+   - 1 つのモジュールの bundle は変わらない(tree-shaking)。全モジュールを 1 つに bundle すると minify 後で 18,376 → 14,249 バイト(−22%)、gzip 後で −6.5%。zsc が出す .js は −30%
+   - 003 の prelude(`Option` / `Result` の型)も、ここに置く予定
+3. **済: TS との境界の検査に tsrs を使う**(`zsc --check-externs`、`npm i tsrs`。tsc と同じ診断で、今の .d.ts の検査は 0.89 秒 → 0.06 秒)
+   - zsc は `<stem>.externs.ts` を書く。各 `extern` の実体を、zustscript の型(数値は `number`)の変数に代入する: `const $c0: <T>(a0: T) => readonly [T, (a0: T) => void] = useState;`。引数は反変、戻り値は共変で確かめられる。TS の型検査を自前で実装しない
+   - tsrs のエラーは、その `extern` の位置に戻して報告する(`the TS declaration of \`useId\` does not fit this signature: Type '() => string' is not assignable to type '() => number'`)
+   - 実際の `@types/react`(React 19)で、`useState` は合い、戻り値を誤った `useId` は検出された。CI は tsrs も入れて、テスト `externs_match_ts` を走らせる
+   - tsrs は Rust 1.100 が要り(この環境は 1.97)、Rust ライブラリとしての安定した API もないので、zustc と同じく外部コマンドとして使う
+   - 次: npm の .d.ts から `extern` の宣言を作る(`zsc import-types`)。tsrs の Node API の型の問い合わせはまだ partial
+
+まだ決めていないこと:
+
+- 式の中の即時関数(`iife`)をなくす変換(003 の `?` の脱糖と同じ AST の書き換えに載せる)
+- enum の表現(`@tag`)がサイズに効く分(`TAG: "Circle"` と `_0` のキー)
+- `|> .map(..) |> .filter(..)` の連鎖を 1 つのループにまとめるか
+
 ## 実装の残り(文法以外)
 
 - PR #31 のレビューで直さずに残した指摘: [mizchi/zust#35](https://github.com/mizchi/zust/issues/35)(検証の結果は [docs/review-31.md](docs/review-31.md))

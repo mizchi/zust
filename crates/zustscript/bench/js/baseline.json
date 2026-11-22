@@ -1,0 +1,94 @@
+{
+  "node": "v26.13.1",
+  "esbuild": true,
+  "size": {
+    "app": {
+      "raw": 5485,
+      "raw_gz": 1930,
+      "min": 3779,
+      "gz": 1552
+    },
+    "basics": {
+      "raw": 2708,
+      "raw_gz": 1000,
+      "min": 2465,
+      "gz": 1029
+    },
+    "effects": {
+      "raw": 1941,
+      "raw_gz": 669,
+      "min": 1780,
+      "gz": 816
+    },
+    "kernels": {
+      "raw": 936,
+      "raw_gz": 371,
+      "min": 1096,
+      "gz": 536
+    },
+    "ml": {
+      "raw": 1180,
+      "raw_gz": 411,
+      "min": 1311,
+      "gz": 564
+    },
+    "numeric": {
+      "raw": 1815,
+      "raw_gz": 678,
+      "min": 2043,
+      "gz": 863
+    },
+    "regress": {
+      "raw": 1922,
+      "raw_gz": 732,
+      "min": 1633,
+      "gz": 797
+    },
+    "shapes": {
+      "raw": 2191,
+      "raw_gz": 794,
+      "min": 1588,
+      "gz": 767
+    },
+    "workloads": {
+      "raw": 2386,
+      "raw_gz": 897,
+      "min": 2058,
+      "gz": 999
+    },
+    "TOTAL": {
+      "raw": 20564,
+      "raw_gz": 7482,
+      "min": 17753,
+      "gz": 7923
+    },
+    "ALL (one bundle)": {
+      "raw": "",
+      "raw_gz": "",
+      "min": 14249,
+      "gz": 5086
+    }
+  },
+  "speed": {
+    "w_effects": {
+      "ms": 5.94,
+      "result": "1197"
+    },
+    "w_records": {
+      "ms": 5.99,
+      "result": "399960"
+    },
+    "w_enums": {
+      "ms": 7.28,
+      "result": "8845127.652340543"
+    },
+    "w_numeric": {
+      "ms": 3.22,
+      "result": "-1627944058"
+    },
+    "w_strings": {
+      "ms": 10.45,
+      "result": "1778000"
+    }
+  }
+}

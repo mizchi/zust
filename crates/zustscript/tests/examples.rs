@@ -63,7 +63,10 @@ fn basics() {
     assert!(dts.contains("export type Filter = \"All\" | \"Active\" | \"Done\";"));
     assert!(dts.contains("export declare function sum$i64(xs: readonly bigint[]): bigint;"));
     assert!(dts.contains("export declare function sum$i32(xs: readonly i32[]): i32;"));
-    assert!(dts.contains("export type i32 = number & { readonly __zsc_num: \"i32\" };"));
+    // (the brands are declared once, in the shared runtime, and re-exported by the module)
+    assert!(dts.contains("import { i32, f64 } from \"./zsc-runtime.js\";") || dts.contains("from \"./zsc-runtime.js\";"), "{dts}");
+    let rt = std::fs::read_to_string(d.join("zsc-runtime.d.ts")).unwrap();
+    assert!(rt.contains("export type i32 = number & { readonly __zsc_num: \"i32\" };"));
     let js = std::fs::read_to_string(d.join("basics.js")).unwrap();
     assert!(!js.contains("class "), "the output uses no classes");
     // the brands' constructors check at the boundary
@@ -80,6 +83,10 @@ fn effects() {
         "[ask] name?\n[out] hello, taro\ngreeted taro\n[state] put 11\n[state] put 11\n[state] put 11\ncounter: 10\n\
          raised: divide by zero\nresults: -1 3\n"
     );
+    // State and Console have only tail-resumptive handlers: plain calls. Fail's handler does not resume: a generator
+    let js = std::fs::read_to_string(d.join("effects.js")).unwrap();
+    assert!(js.contains("$perform(\"Get\")") && js.contains("$handleD("), "{js}");
+    assert!(js.contains("function* safe_div") && !js.contains("function* counter"), "{js}");
 }
 
 #[test]
@@ -271,9 +278,10 @@ console.log(m.shadow(), m.only("One"), m.range_end_once(), m.prec(-1, 2, 3));
 console.log(m.add_all([1, 2]).join(","), m.push_v([1, 2], 3).join(","));
 console.log(m.shadow_fn(), m.prec_str(3), m.push_zs([1], 2).join(","), m.re({ value: 5 }));
 console.log(m.zs_inj(5, 2), m.kw_inj(7, 3), JSON.stringify(m.kw_rec({ async_: 1, move: 2 })));
+console.log(m.many_ops(100000), m.own_ops(), m.nested_k(), m.proto_op());
 "#,
     );
-    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n");
+    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n99999 42 101 7\n");
     let dts = std::fs::read_to_string(d.join("regress.d.ts")).unwrap();
     assert!(dts.contains("import type { ReactElement as $ReactElement } from \"react\";"), "{dts}");
     assert!(dts.contains("export interface ReactElement {"), "{dts}");
@@ -290,4 +298,60 @@ fn no_jsx_no_react_import() {
     assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
     let dts = std::fs::read_to_string(d.join("nojsx.d.ts")).unwrap();
     assert!(!dts.contains("import type"), "{dts}");
+}
+
+/// `--check-externs`: each extern's TS declaration is checked against its zustscript signature with tsrs (the
+/// `TSRS` variable, or `tsrs` on PATH; skipped otherwise). app.zsc's `useState` fits the react stand-in's
+/// declaration; tests/externs/bad.zsc gives the setter the wrong type, and the error points at that extern.
+#[test]
+fn externs_match_ts() {
+    let tsrs = std::env::var("TSRS").unwrap_or_else(|_| "tsrs".into());
+    if Command::new(&tsrs).arg("--version").output().is_err() {
+        eprintln!("skipped: no tsrs (set TSRS)");
+        return;
+    }
+    let d = out_dir("externs");
+    let o = zsc(&root().join("examples/app.zsc"), &d, &["--check-externs"]);
+    assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    assert!(String::from_utf8_lossy(&o.stderr).contains("externs match their TS declarations (1 checked with tsrs)"));
+    let o = zsc(&root().join("tests/externs/bad.zsc"), &d, &["--check-externs"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(!o.status.success(), "{err}");
+    assert!(err.contains("the TS declaration of `useState` does not fit this signature"), "{err}");
+    assert!(err.contains("bad.zsc:2:1"), "{err}");
+    assert!(!err.contains("`log`"), "console.log fits: {err}");
+    // a record type (the TS side returns plain numbers) and a dotted extern (`api.read`) both check
+    std::fs::write(d.join("lib.d.ts"), "export declare function point(): { x: number; y: number };\nexport declare const api: { read(): string };\n").unwrap();
+    std::fs::write(d.join("lib.js"), "export const point = () => ({ x: 1, y: 2 });\nexport const api = { read: () => \"r\" };\n").unwrap();
+    let o = zsc(&root().join("tests/externs/named.zsc"), &d, &["--check-externs"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(o.status.success() && err.contains("(2 checked with tsrs)"), "{err}");
+    // a record's Jsx field, reached only by expanding the record: ReactElement is still imported
+    std::fs::write(d.join("lib.d.ts"), "import type { ReactElement } from \"react\";\nexport declare function view(): { title: string; body: ReactElement };\n").unwrap();
+    let o = zsc(&root().join("tests/externs/jsx.zsc"), &d, &["--check-externs"]);
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(o.status.success() && err.contains("(1 checked with tsrs)"), "{err}");
+}
+
+#[test]
+fn runtime_name_collisions() {
+    // the shared runtime and a module named `zsc-runtime` never overwrite each other in one directory
+    let d = out_dir("runtime_names");
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let src = d.join("zsc-runtime.zsc");
+    std::fs::write(&src, "pub fn one() -> i32 { 1 }\n").unwrap();
+    let o = zsc(&src, &d, &[]);
+    assert!(!o.status.success(), "a module named like the runtime is refused in shared mode");
+    assert!(zsc(&root().join("examples/basics.zsc"), &d, &[]).status.success());
+    let rt = std::fs::read_to_string(d.join("zsc-runtime.js")).unwrap();
+    let o = zsc(&src, &d, &["--inline-runtime"]);
+    assert!(!o.status.success(), "an inline `zsc-runtime` must not overwrite the shared runtime");
+    assert_eq!(std::fs::read_to_string(d.join("zsc-runtime.js")).unwrap(), rt);
+    // in its own directory, the inline build works; a shared build into that directory is then refused
+    let e = d.join("inline");
+    assert!(zsc(&src, &e, &["--inline-runtime"]).status.success());
+    let o = zsc(&root().join("examples/basics.zsc"), &e, &[]);
+    assert!(!o.status.success(), "the shared runtime must not overwrite a module named like it");
+    assert!(std::fs::read_to_string(e.join("zsc-runtime.js")).unwrap().contains("function one"));
 }

@@ -129,6 +129,9 @@ pub struct Info {
     pub fns: HashMap<String, FnSig>,
     pub externs: HashMap<String, (FnSig, Option<String>, String)>,
     pub wasm: HashMap<String, (Vec<(String, WTy)>, WTy)>,
+    /// effects whose handlers all resume in tail position (see [`direct_effects`]): in JS they are plain calls to the
+    /// handler's arm, not generators
+    pub direct: BTreeSet<String>,
 }
 
 pub struct Checker {
@@ -1475,6 +1478,7 @@ pub fn infer_effects(items: &[Item], info: &mut Info, errors: &mut Vec<(Pos, Str
             break;
         }
     }
+    info.direct = direct_effects(items, info);
     // (once more, for the errors, with the final sets)
     for it in items {
         if let Item::Fn { body, ret, pos, name, .. } = it {
@@ -1620,4 +1624,159 @@ impl EffWalk<'_> {
         }
         out
     }
+}
+
+// ---------------------------------------------------------------- direct (tail-resumptive) effects
+
+/// The effects that can run as plain calls in JS. An effect is direct when:
+/// - every `handle` of it is tail-resumptive (each arm calls `k` once, in tail position, and nowhere else),
+/// - it does not leave a `pub` function (TS callers drive the generator of such a function),
+/// - every `handle` of it handles only direct effects, and lets only direct effects through its body and its arms
+///   (a plain call cannot carry a generator's `yield`).
+/// The last rule is a fixpoint: removing an effect can make another one non-direct.
+pub fn direct_effects(items: &[Item], info: &Info) -> BTreeSet<String> {
+    struct H {
+        handled: BTreeSet<String>,
+        through: BTreeSet<String>,
+        tail: bool,
+    }
+    let mut hs: Vec<H> = vec![];
+    // `outer`: the continuations of the arms around `e`. A handler whose body or arms call one of them suspends
+    // through that arm, so it cannot be a plain call
+    fn collect(e: &Expr, info: &Info, hs: &mut Vec<H>, outer: &mut Vec<String>) {
+        if let EK::Handle(body, arms) = &e.kind {
+            let mut w = EffWalk { info, errors: vec![], conts: vec![], in_closure: 0 };
+            let handled: BTreeSet<String> = arms.iter().filter_map(|a| info.variant_of.get(&a.variant).cloned()).collect();
+            let mut through: BTreeSet<String> = w.expr(body).difference(&handled).cloned().collect();
+            for a in arms {
+                w.conts.push(a.k.clone());
+                through.extend(w.expr(&a.body));
+                w.conts.pop();
+            }
+            let suspends = outer.iter().any(|k| mentions(body, k) || arms.iter().any(|a| mentions(&a.body, k)));
+            let tail = !suspends && arms.iter().all(|a| tail_resumes(&a.body, &a.k));
+            hs.push(H { handled, through, tail });
+            collect(body, info, hs, outer);
+            for a in arms {
+                outer.push(a.k.clone());
+                collect(&a.body, info, hs, outer);
+                outer.pop();
+            }
+            return;
+        }
+        for c in subexprs(e) {
+            collect(c, info, hs, outer);
+        }
+    }
+    let mut escaping = BTreeSet::new();
+    for it in items {
+        if let Item::Fn { name, body, public, .. } = it {
+            collect(body, info, &mut hs, &mut vec![]);
+            if *public {
+                escaping.extend(info.effects[name].iter().cloned());
+            }
+        }
+    }
+    let mut direct: BTreeSet<String> = hs.iter().flat_map(|h| h.handled.iter().cloned()).collect();
+    direct.retain(|e| !escaping.contains(e));
+    for h in &hs {
+        if !h.tail {
+            direct.retain(|e| !h.handled.contains(e));
+        }
+    }
+    loop {
+        let mut changed = false;
+        for h in &hs {
+            if h.handled.iter().any(|e| direct.contains(e)) && (!h.handled.is_subset(&direct) || !h.through.is_subset(&direct)) {
+                direct.retain(|e| !h.handled.contains(e));
+                changed = true;
+            }
+        }
+        if !changed {
+            return direct;
+        }
+    }
+}
+
+/// Every tail of `e` is a call `k(..)` whose arguments do not mention `k`, and `k` appears nowhere else
+fn tail_resumes(e: &Expr, k: &str) -> bool {
+    match &e.kind {
+        EK::Call(f, args) if matches!(&f.kind, EK::Var(n) if n == k) => !args.iter().any(|a| mentions(a, k)),
+        EK::Block(stmts, Some(t)) => {
+            stmts.iter().all(|s| match s {
+                Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) | Stmt::Expr(x) => !mentions(x, k),
+            }) && tail_resumes(t, k)
+        }
+        EK::If(c, t, Some(el)) => !mentions(c, k) && tail_resumes(t, k) && tail_resumes(el, k),
+        EK::Match(sc, arms) => !mentions(sc, k) && arms.iter().all(|(_, b)| tail_resumes(b, k)),
+        _ => false,
+    }
+}
+
+fn mentions(e: &Expr, k: &str) -> bool {
+    matches!(&e.kind, EK::Var(n) if n == k) || subexprs(e).into_iter().any(|c| mentions(c, k))
+}
+
+/// The direct sub-expressions of `e`
+pub fn subexprs(e: &Expr) -> Vec<&Expr> {
+    let mut v: Vec<&Expr> = vec![];
+    match &e.kind {
+        EK::Lit(_) | EK::Var(_) | EK::Path(..) | EK::Break | EK::Continue => {}
+        EK::Call(f, args) => {
+            v.push(f);
+            v.extend(args);
+        }
+        EK::Method(r, _, args) => {
+            v.push(r);
+            v.extend(args);
+        }
+        EK::Field(x, _) | EK::Un(_, x) | EK::Cast(x, _) | EK::Assign(_, x) => v.push(x),
+        EK::Bin(_, l, r) | EK::Index(l, r) | EK::While(l, r) | EK::For(_, l, r) => {
+            v.push(l);
+            v.push(r);
+        }
+        EK::If(c, t, el) => {
+            v.push(c);
+            v.push(t);
+            if let Some(x) = el {
+                v.push(x);
+            }
+        }
+        EK::Match(sc, arms) => {
+            v.push(sc);
+            v.extend(arms.iter().map(|a| &a.1));
+        }
+        EK::Block(stmts, tail) => {
+            for s in stmts {
+                match s {
+                    Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) | Stmt::Expr(x) => v.push(x),
+                }
+            }
+            if let Some(t) = tail {
+                v.push(t);
+            }
+        }
+        EK::Closure(_, b) => v.push(b),
+        EK::Record(_, fs, base) => {
+            v.extend(fs.iter().map(|f| &f.1));
+            if let Some(b) = base {
+                v.push(b);
+            }
+        }
+        EK::Array(xs) | EK::Tuple(xs) => v.extend(xs),
+        EK::Jsx(j) => {
+            v.extend(j.attrs.iter().map(|a| &a.1));
+            for c in &j.children {
+                if let JsxChild::Expr(x) = c {
+                    v.push(x);
+                }
+            }
+        }
+        EK::Perform(_, _, args) => v.extend(args),
+        EK::Handle(b, arms) => {
+            v.push(b);
+            v.extend(arms.iter().map(|a| &a.body));
+        }
+    }
+    v
 }
