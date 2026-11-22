@@ -206,3 +206,13 @@ fn discriminants_and_constants_past_literals() {
     let repeat = "struct S;\nimpl S {\n    const C: S = S;\n    fn make() {\n        let _ = [Self::C; 2];\n    }\n}\nfn main() {\n    S::make();\n}\n";
     assert_eq!(lines(&mut s, repeat), Vec::<usize>::new());
 }
+
+/// A scrutinee's type from the arms: a unit struct pattern (`Some(S)`), a reference pattern of a type not known yet
+/// (`&S`), as rustc infers `fn get<T>() -> T` from them (rust-lang/rust#55810)
+#[test]
+fn scrutinee_types_from_unit_struct_and_reference_patterns() {
+    let src = "struct S;\nimpl S {\n    fn method(&self) -> bool {\n        true\n    }\n}\nfn get<T>() -> T {\n    unimplemented!()\n}\nfn opt<T>() -> Option<T> {\n    None\n}\nfn main() {\n    match opt() {\n        Some(S) => {}\n        None => {}\n    }\n    let w = opt();\n    if let Some(S) = w {}\n    match get() {\n        x if x.method() => {}\n        &S => {}\n    }\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert!(d.is_empty(), "{d:?}");
+}
