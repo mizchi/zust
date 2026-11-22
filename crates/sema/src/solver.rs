@@ -445,6 +445,8 @@ impl Solver<'_> {
                     self.unify(x, k);
                 }
             }
+            // (`&T` to `*const T` (a coercion): the pointees are one type, the reference and the pointer are not)
+            (Some(Shape::Ref(_, x)), Some(Shape::Ptr(_, y))) | (Some(Shape::Ptr(_, y)), Some(Shape::Ref(_, x))) => self.unify(x, y),
             // `&[T; N]` を `&[T]` に渡す (強制変換): 要素の型だけ単一化する
             (Some(Shape::Slc(x)), Some(Shape::Arr(y, _)))
             | (Some(Shape::Arr(y, _)), Some(Shape::Slc(x))) => self.unify(x, y),
