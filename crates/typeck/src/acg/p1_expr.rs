@@ -3284,7 +3284,8 @@ impl Cx<'_> {
                     if let Some(t) = Ty::prim(&ts.name).filter(|t| t.is_int() || t.is_float()) {
                         if self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none() {
                             if let Some(a) = self.peek(x).filter(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char)) {
-                                if !crate::program::prim_from(a, t) {
+                                // (not `f32::from(3.14)`: a float literal falls back to f32 there, which rustc accepts)
+                                if !crate::program::prim_from(a, t) && !(t == Ty::F32 && a == Ty::F64) {
                                     return err(SP, format!("the trait `From<{}>` is not implemented for `{}` (E0277)", self.prog.tn(a), self.prog.tn(t)));
                                 }
                             }
