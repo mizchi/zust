@@ -48,8 +48,8 @@ These were open questions in mizchi/zust#28:
 - **Proc-macro dependencies are stubs, with a check.**
   - zustc drops an unknown attribute silently, so the stub alone could miscompile code that uses an attribute macro.
   - zurgo therefore reads the macros a proc-macro crate defines (`#[proc_macro_derive(..)]`,
-    `#[proc_macro_attribute]`, `#[proc_macro]`). A crate of the build whose source uses one of its derives or
-    attributes stops the build before anything is compiled.
+    `#[proc_macro_attribute]`, `#[proc_macro]`). A crate of the build that reaches the proc-macro crate and whose
+    source uses one of its derives or attributes stops the build before anything is compiled.
   - Function-like macros expand to a `compile_error!`.
 
 ## 3. Results

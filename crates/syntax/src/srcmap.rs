@@ -185,20 +185,28 @@ fn load_file(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: 
     r
 }
 
+/// src with its `env!` / `option_env!` expanded (not inlined: load_file_in's loop over every file stays as it was)
+#[inline(never)]
+fn env_values(src: String, cfg: &crate::cfg::CfgSet) -> String {
+    crate::macros::expand_env(&src, cfg).unwrap_or(src)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: u32, map: &mut SrcMap, cfg: &crate::cfg::CfgSet, open: &mut Vec<(String, String)>) -> Result<String, String> {
     let src = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     // (cfg を先に評価する: 偽の `#[cfg(..)] mod x;` のファイルは読まない)
-    let src = match crate::cfg::strip(&src, cfg) {
+    // (and whether it may call `env!` / `option_env!`, seen by the same tokens)
+    let mut env = None;
+    let src = match crate::cfg::strip_noting_env(&src, cfg, &mut env) {
         Some(t) => t,
         None => src,
     };
     map.inputs.push(path.to_path_buf());
-    // (`env!` / `option_env!` read the environment, which file stamps do not cover. One look at the source: a
-    // workspace's no-op build reads every file)
-    let src = if crate::macros::may_use_env(&src) {
+    // (`env!` / `option_env!` read the environment, which file stamps do not cover. A workspace's no-op build reads
+    // every file: one more look at the source only when the cfg pass did not read its tokens)
+    let src = if env.unwrap_or_else(|| crate::macros::may_use_env(&src)) {
         map.volatile = true;
-        crate::macros::expand_env(&src, cfg).unwrap_or(src)
+        env_values(src, cfg)
     } else {
         src
     };
@@ -206,11 +214,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         Ok(Some(s)) => {
             map.volatile = true;
             // (and the `env!` of what `include!` put in: before it, `env!` gave the include's path)
-            if crate::macros::may_use_env(&s) {
-                crate::macros::expand_env(&s, cfg).unwrap_or(s)
-            } else {
-                s
-            }
+            if crate::macros::may_use_env(&s) { env_values(s, cfg) } else { s }
         }
         Ok(None) => src,
         Err(e) => return Err(format!("{display}: {e}")),
@@ -356,6 +360,7 @@ fn attrs_before(src: &str, s: &[u8], toks: &[(u8, usize, usize)], mut b: usize) 
 }
 
 #[allow(clippy::type_complexity)]
+#[inline(never)]
 fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>, Nested)>), String> {
     if !src.contains("mod") {
         return Ok((src.to_string(), vec![]));

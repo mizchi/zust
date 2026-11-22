@@ -327,21 +327,58 @@ pub fn expand_select(src: &str, c: &CfgSet) -> Option<String> {
 }
 
 pub fn strip(src: &str, c: &CfgSet) -> Option<String> {
+    strip_noting_env(src, c, &mut None)
+}
+
+/// strip, and whether the source may call `env!` / `option_env!` (macros::may_use_env), found on the way by the
+/// same tokens: `env` is left None when the source was not read by tokens (nothing to evaluate in it)
+pub fn strip_noting_env(src: &str, c: &CfgSet, env: &mut Option<bool>) -> Option<String> {
     if !src.contains("cfg") && !src.contains("extern crate") {
         return None;
     }
     // (a `cfg_select!` call the tokens below pass: its chosen arm in place, then that arm's own cfgs)
     let mut select = false;
-    let r = strip_toks(src, c, &mut select);
+    let mut seen = false;
+    let r = strip_toks(src, c, &mut select, &mut seen);
+    *env = Some(seen);
     if select {
         if let Some(e) = expand_select(r.as_deref().unwrap_or(src), c) {
-            return Some(strip_toks(&e, c, &mut false).unwrap_or(e));
+            return Some(strip_toks(&e, c, &mut false, &mut false).unwrap_or(e));
         }
     }
     r
 }
 
-fn strip_toks(src: &str, c: &CfgSet, select: &mut bool) -> Option<String> {
+/// The first outer attribute of the attributes just before the one at i (`#[a] #[b] #[cfg(x)]`: `#[a]`'s byte offset)
+fn attrs_start(s: &[u8], toks: &[Tok], i: usize) -> usize {
+    let t = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
+    let mut j = i;
+    while j >= 3 && toks[j - 1].0 == 1 && t(j - 1) == b"]" {
+        // (back to its `[`)
+        let mut depth = 0usize;
+        let mut o = j - 1;
+        loop {
+            if toks[o].0 == 1 {
+                match t(o) {
+                    b")" | b"]" | b"}" => depth += 1,
+                    b"(" | b"[" | b"{" => depth = depth.saturating_sub(1),
+                    _ => {}
+                }
+            }
+            if depth == 0 || o == 0 {
+                break;
+            }
+            o -= 1;
+        }
+        if o == 0 || t(o) != b"[" || t(o - 1) != b"#" {
+            break;
+        }
+        j = o - 1;
+    }
+    toks[j].1
+}
+
+fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool) -> Option<String> {
     let s = src.as_bytes();
     let toks = crate::lexer::tokenize(s);
     let mut out = s.to_vec();
@@ -352,10 +389,6 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool) -> Option<String> {
             None => b"",
         }
     };
-    // (where the outer attributes before i start: a false `#[cfg]` takes them with its item, `#[derive(Debug)]
-    // #[cfg(x)] struct A;` (they would apply to the next item otherwise))
-    let mut run_start = 0;
-    let mut run_end = usize::MAX;
     let mut i = 0;
     while i < toks.len() {
         // `cfg!(p)` → `true` / `false`
@@ -380,6 +413,7 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool) -> Option<String> {
         // マクロの呼び出しと macro_rules! の中は見ない (展開してから評価する: cfg_if! の `if #[cfg(..)] { .. }`)。
         // std の書式のマクロ (`println!("{}", cfg!(unix))`) は後で展開されないので、中も評価する
         if toks[i].0 == 0 && t(i) != b"cfg" && t(i + 1) == b"!" && !format_like(t(i)) {
+            *env |= matches!(t(i), b"env" | b"option_env");
             let g = if t(i + 2) == b"(" || t(i + 2) == b"[" || t(i + 2) == b"{" {
                 Some(i + 2)
             } else if toks.get(i + 2).is_some_and(|x| x.0 == 0) && t(i + 3) == b"{" {
@@ -389,6 +423,8 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool) -> Option<String> {
             };
             if let Some(g) = g {
                 let end = matching(s, &toks, g);
+                // (`include!(concat!(env!("OUT_DIR"), ..))`, `env!($k)` in a macro_rules! body)
+                *env = *env || (end < toks.len() && crate::macros::may_use_env(&src[toks[g].1..toks[end].2]));
                 // (also in the arguments of a std macro that takes expressions: `println!(cfg_select! { .. })`)
                 *select |= t(i) == b"cfg_select"
                     || (expr_macro(t(i)) && end < toks.len() && src[toks[g].1..toks[end].2].contains("cfg_select"));
@@ -421,12 +457,6 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool) -> Option<String> {
         }
         let rb = matching(s, &toks, lb);
         let name = t(lb + 1);
-        if !inner {
-            if i == 0 || run_end != i - 1 {
-                run_start = toks[i].1;
-            }
-            run_end = rb;
-        }
         if (name == b"cfg" || name == b"cfg_attr") && t(lb + 2) == b"(" {
             let pclose = matching(s, &toks, lb + 2);
             let (mut v, after) = eval(s, &toks, lb + 3, c);
@@ -463,8 +493,10 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool) -> Option<String> {
                 blank(&mut out, toks[i].1, toks[rb].2);
                 i = rb + 1;
             } else {
+                // (with the attributes before it: `#[derive(Debug)] #[cfg(x)] struct A;` would leave the derive on the
+                // next item)
                 let e = thing_end(s, &toks, rb + 1);
-                blank(&mut out, run_start, toks[e.max(rb)].2);
+                blank(&mut out, attrs_start(s, &toks, i), toks[e.max(rb)].2);
                 i = e.max(rb) + 1;
             }
             continue;
@@ -494,6 +526,16 @@ mod tests {
         assert_eq!(run("match x { #[cfg(any(test, doc))] 1 => {} _ => 2 }", &[]), "match x { _ => 2 }");
         assert_eq!(run("#[cfg(test)] const X: S = S { a: 1 }; fn f() {}", &[]), "fn f() {}");
         assert_eq!(run("#[cfg(test)] use a::{b, c}; fn f() {}", &[]), "fn f() {}");
+        // (whether the source may call `env!`, seen by the same tokens: also inside a macro's arguments)
+        let env = |src: &str| {
+            let mut e = None;
+            strip_noting_env(src, &CfgSet::default(), &mut e);
+            e
+        };
+        assert_eq!(env("#[cfg(x)] fn f() {} fn g() -> &'static str { env ! (\"A\") }"), Some(true));
+        assert_eq!(env("#[cfg(x)] fn f() {} include!(concat!(env!(\"OUT_DIR\"), \"/a.rs\"));"), Some(true));
+        assert_eq!(env("#[cfg(x)] fn f() {} const S: &str = \"env!(A)\"; use std::env;"), Some(false));
+        assert_eq!(env("fn f() {}"), None);
         // (the attributes before a false `#[cfg]` go with its item, not on to the next one)
         assert_eq!(run("#[derive(Debug)] #[cfg(test)] struct A; struct B;", &[]), "struct B;");
         assert_eq!(run("#[inline] fn a() {} #[pm::traced]\n#[cfg(any())] fn h() {} fn b() {}", &[]), "#[inline] fn a() {} fn b() {}");

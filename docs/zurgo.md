@@ -118,11 +118,12 @@ A package's `build.rs` runs before its crates are built, as under cargo:
   the script changes, when cargo's variables change, or when a file or variable that `rerun-if-changed` /
   `rerun-if-env-changed` names changes. A script that prints neither runs again when any file of its package
   changes, as cargo does.
-  - A run is not kept when a file it depends on changed while it ran, when a directory could not be read, or when a
-    file it names does not exist (cargo runs such a script every time).
+  - A run is not kept when a file it depends on changed while it ran (also one removed: the directory's time says
+    so), when a directory could not be read, or when a file it names does not exist (cargo runs such a script every
+    time).
   - The old result is removed before a script runs again, so a run that fails leaves nothing to reuse.
-- **rustc's builds** of the host libraries and scripts are kept while the rustc (`rustc -vV`), the sources and the
-  dependencies' artifacts are the same.
+- **rustc's builds** of the host libraries and scripts are kept while the rustc (`rustc -vV`), the sources, the
+  dependencies' artifacts and the files their build scripts wrote to `OUT_DIR` are the same.
 
 Every crate also gets cargo's variables for `env!` / `option_env!`: `CARGO_PKG_*`, `CARGO_MANIFEST_DIR`,
 `CARGO_CRATE_NAME`, and for a bin `CARGO_BIN_NAME`. `OUT_DIR` and the script's `rustc-env` come on top of those.
@@ -135,8 +136,14 @@ crate that only re-exports it builds: `pub use thiserror_impl::*;`, or serde's `
 zustc would drop an unknown attribute silently, so using a proc macro is an error before anything is built:
 - a crate of the build that uses one of the stub's derives (`#[derive(thiserror::Error)]`), or one of its attribute
   macros (`#[wasm_bindgen]`, also renamed: `use wasm_bindgen::prelude::wasm_bindgen as wb;`), is an error naming #29.
-  Each crate is read as zustc reads it: the files of its module tree, with its features and cfgs, so a use in a file
-  it does not reach or under a cfg that is off does not count;
+  - Only the proc-macro crates a crate reaches count: its dependencies, or what its libraries re-export.
+  - Each crate is read as zustc reads it: the files of its module tree, with its features and cfgs. So a use in a
+    file it does not reach, under a cfg that is off, or in a `macro_rules!` body that is neither called nor exported
+    does not count.
+  - A derive of the language (`#[derive(Debug)]`) is a proc macro's only when the crate imports one of that name
+    from outside std (`use derive_more::Debug;`).
+  - The proc-macro crate's root is read with its features, so `#[cfg_attr(feature = "x", proc_macro_attribute)]`
+    counts when the feature is on;
 - a function-like macro (`html!(..)`) expands to a `compile_error!` naming #29.
 
 ## Not yet (mizchi/zust#28)
