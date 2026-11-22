@@ -65,3 +65,4 @@ compile-fail	nll/issue-54302-cases.rs
 compile-fail	nll/user-annotations/method-ufcs-2.rs
 compile-fail	coercion/unsize-lifetime-shrinking.rs
 compile-fail	generics/issue-65285-incorrect-explicit-lifetime-name-needed.rs
+compile-fail	privacy/projections.rs

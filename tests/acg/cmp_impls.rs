@@ -27,6 +27,7 @@ fn main() {
     println!("{}", v[0] == Q { a: 1 });
     println!("{:?}", by_ref());
     println!("{:?}", other_eq());
+    println!("{}", whole_array());
 }
 // (`impl PartialEq for &X` only: `&X(1) == &X(2)` compares through it, not by the fields)
 struct RX(i32);
@@ -53,4 +54,16 @@ impl Other for &OX {
 #[allow(dead_code)]
 fn other_eq() -> (bool, bool) {
     (&OX(1) == &OX(2), &OX(1) == &OX(1))
+}
+// (`impl PartialEq<R> for [N; 1]`: the array's own impl compares it with R, though N is no PartialEq)
+struct NN;
+struct RR;
+impl PartialEq<RR> for [NN; 1] {
+    fn eq(&self, _: &RR) -> bool {
+        true
+    }
+}
+#[allow(dead_code)]
+fn whole_array() -> bool {
+    [NN] == RR
 }
