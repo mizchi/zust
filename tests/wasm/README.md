@@ -105,7 +105,7 @@ table index or signature mismatch) and for `abort`; 126 for a module that needs 
   Exported functions take and return i64 for them.
 - Traps carry no panic message (the native build prints the location from its trap table).
 - Not supported yet: i128 division and float conversions, threads (green threads need `swapcontext`), processes,
-  files other than the arguments, workspace builds (`zustc build`), and self-hosting zustc as wasm.
+  files other than the arguments, and self-hosting zustc as wasm.
 - Speed: every block is a case of one `loop` + `br_table` dispatcher and every value a local, so bench/rt runs 3 to 15
   times slower than the native build under Node (the address checks are 5–20% of that). A relooper / stackifier and
   local reuse are the next steps.

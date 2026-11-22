@@ -39,6 +39,10 @@ macro_rules! count {
     ($($t:ty)*) => { 0 $(+ { let _x: Option<$t> = None; 1 })* };
 }
 
+macro_rules! count_boxed {
+    ($($t:ty)*) => { 0 $(+ { let _x: Option<Box<$t>> = None; 1 })* };
+}
+
 macro_rules! defaults {
     ($($t:ty)*) => { ($(<$t as Default>::default(),)*) };
 }
@@ -52,6 +56,12 @@ mod b {
 }
 use a as x;
 use b as y;
+
+// (a block's own alias: only in that block)
+fn inner_alias() -> u32 {
+    use b as x;
+    x::f() * 10
+}
 
 fn show<T: Debug>(t: T) -> String {
     format!("{t:?}")
@@ -72,6 +82,7 @@ fn main() {
     println!("{:?}", lens(&[String::from("four")]));
     println!("{} {}", hex("AB"), hex(vec![1u8, 255]));
     println!("{}", count!((u8, u16) u8 [u8; 2] &str Vec<Option<u8>> fn(u8) -> u8 id_ty!(u8) id_ty![u16] Box<dyn Fn(u8) -> u8> for<'a> fn(&'a u8) Box<dyn for<'a> Fn(&'a u8)>));
+    println!("{}", count_boxed!(dyn Debug + 'static u8 &'static str dyn Debug + Send + 'static));
     println!("{}", show(defaults!(u8 String Vec<u8> (bool, char) Option<&'static str> id_ty!(u8) [u8; 2])));
-    println!("{} {} {}", x::f(), y::f(), x::deep::K);
+    println!("{} {} {} {} {}", x::f(), y::f(), x::deep::K, inner_alias(), x::f());
 }

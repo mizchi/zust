@@ -1225,6 +1225,8 @@ impl Session2 {
         let mut h = KeyHasher::new();
         h.add(&self.cid);
         h.add(&(self.opts.opt as u8));
+        // (the backend: a wasm32 crate's object is its module parts, an x86-64 one an ELF object)
+        h.add(&self.opts.backend_id());
         h.add(&(c.lib as u8));
         add_crate_cfg(&mut h, c);
         h.add(own);
@@ -1333,6 +1335,7 @@ impl Session2 {
             let mut h = KeyHasher::new();
             h.add(&self.cid);
             h.add(&(self.opts.opt as u8));
+            h.add(&self.opts.backend_id());
             h.add(&(c.lib as u8));
             h.add(&cfg_keys[i]);
             h.add(&loaded[i].as_ref().unwrap().0);

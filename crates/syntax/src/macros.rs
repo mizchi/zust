@@ -214,6 +214,9 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
             // (`for` before `<`, and generic arguments that are its binder: `for<'a> fn(&'a u8)` goes on after the `>`)
             let mut for_kw = false;
             let mut binder = false;
+            // (a lifetime after `+` is a bound and can end the type: `dyn Display + 'static`; after `&` it goes on)
+            let mut plus = false;
+            let mut lt_bound = false;
             while n < toks.len() {
                 if angle > 0 {
                     if let TokenTree::Punct(p) = &toks[n] {
@@ -239,8 +242,9 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
                             if ty_end && !quote && w != "as" {
                                 break;
                             }
-                            ty_end = !quote && !matches!(w.as_str(), "dyn" | "impl" | "mut" | "const" | "fn" | "unsafe" | "extern" | "for" | "as" | "async");
-                            named = ty_end;
+                            ty_end = if quote { lt_bound } else { !matches!(w.as_str(), "dyn" | "impl" | "mut" | "const" | "fn" | "unsafe" | "extern" | "for" | "as" | "async") };
+                            named = ty_end && !quote;
+                            plus = false;
                             mac = false;
                             for_kw = w == "for";
                             quote = false;
@@ -253,12 +257,17 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
                             named = false;
                             mac = false;
                             for_kw = false;
+                            plus = false;
                         }
                         TokenTree::Punct(p) => {
                             if ty_end && matches!(p.as_char(), '&' | '*') {
                                 break;
                             }
                             quote = p.as_char() == '\'';
+                            if quote {
+                                lt_bound = plus;
+                            }
+                            plus = p.as_char() == '+';
                             mac = p.as_char() == '!' && named;
                             ty_end = p.as_char() == '!';
                             named = false;

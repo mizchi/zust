@@ -99,8 +99,8 @@ def cargo_env(p, t):
 
 
 def ws_escape(s):
-    """a value in zustc's workspace file: `%`, `#` and white space as %XX"""
-    return "".join(f"%{ord(c):02X}" if c in "%#" or c.isspace() else c for c in s)
+    """a value in zustc's workspace file: `%`, `#` and white space as %XX, one per byte of their UTF-8 (U+3000 too)"""
+    return "".join("".join(f"%{b:02X}" for b in c.encode()) if c in "%#" or c.isspace() else c for c in s)
 
 
 def graph(meta):

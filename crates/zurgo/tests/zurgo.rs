@@ -146,7 +146,10 @@ fn wasm32_runs_like_native() {
         eprintln!("note: no node: wasm32_runs_like_native skipped");
         return;
     }
-    let host = format!("node {}", Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/wasm/run.mjs").display());
+    // (the runner is split on white space, as cargo splits it: a path relative to the repository's root, where zurgo
+    // runs, so a checkout under a directory with a space works)
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let host = "node tests/wasm/run.mjs";
     let bs = Scratch::new("build-script-wasm");
     copy_dir(&fixture("build-script"), &bs.0);
     let mut cases: Vec<(String, std::path::PathBuf)> = vec![("path-ws".into(), fixture("path-ws/Cargo.toml")), ("build-script".into(), bs.0.join("Cargo.toml"))];
@@ -170,7 +173,8 @@ fn wasm32_runs_like_native() {
             .args(["run", "--target", "wasm32-unknown-unknown", "--manifest-path"])
             .arg(m)
             .env("CARGO_TARGET_DIR", tdir(&format!("{n}-wasm")))
-            .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER", &host));
+            .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER", host)
+            .current_dir(&root));
         if !r.0 || r.1 != want {
             bad.push(format!("{n}: {}\n--- want\n{want}--- got\n{}", r.2, r.1));
         }

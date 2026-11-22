@@ -1731,6 +1731,22 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     // (a module imported by `use`, under its own name or another: `use util as u;` with the crate `util`, or
     // `use crate::geom::shape;`. (scope, the name used) → the module, so `u::calls()` is `util::calls()`)
     let mut mod_alias: LMap<(usize, Vec<u8>), usize> = LMap::default();
+    // (a `use` in a block (a fn body) names the module in that block only: (its `{`, its `}`, the name, the module))
+    let mut block_alias: Vec<(usize, usize, Vec<u8>, usize)> = vec![];
+    // (the innermost `{` around each token, and the `}` of each `{`)
+    let mut block_of: Vec<usize> = vec![usize::MAX; toks.len()];
+    let mut close_at: LMap<usize, usize> = LMap::default();
+    let mut open_st: Vec<usize> = vec![];
+    for (k, b) in block_of.iter_mut().enumerate() {
+        *b = open_st.last().copied().unwrap_or(usize::MAX);
+        if is_sym(k, b'{') {
+            open_st.push(k);
+        } else if is_sym(k, b'}') {
+            if let Some(o) = open_st.pop() {
+                close_at.insert(o, k);
+            }
+        }
+    }
     let mut k = 0;
     while k < toks.len() {
         if !is_id(k, b"use") {
@@ -1744,17 +1760,34 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         let mut items = vec![];
         use_walk(&toks, s, k + 1, e, vec![], &mut items);
+        // (in the module's own braces (or at the root), or in a block inside them)
+        let own = if sc == usize::MAX { usize::MAX } else { mods[sc].1 };
+        let block = block_of[k];
         for (path, local) in items {
             if local.as_slice() != b"*" && local.as_slice() != b"_" && !path.is_empty() {
                 if let Some(m) = resolve_mod(sc, &path).filter(|&m| m != usize::MAX) {
-                    mod_alias.insert((sc, local), m);
+                    match close_at.get(&block) {
+                        Some(&close) if block != own => block_alias.push((block, close, local, m)),
+                        _ => {
+                            mod_alias.insert((sc, local), m);
+                        }
+                    }
                 }
             }
         }
         k = e + 1;
     }
-    let resolve_mod = |from: usize, segs: &[Vec<u8>]| -> Option<usize> {
-        if let Some(&m) = segs.first().and_then(|f| mod_alias.get(&(from, f.clone()))) {
+    // (a path at token `at` in scope `from`: its first segment through the aliases, the innermost block's first)
+    let resolve_mod = |from: usize, segs: &[Vec<u8>], at: usize| -> Option<usize> {
+        let alias = segs.first().and_then(|f| {
+            block_alias
+                .iter()
+                .filter(|b| b.0 < at && at < b.1 && b.2 == *f)
+                .max_by_key(|b| b.0)
+                .map(|b| b.3)
+                .or_else(|| mod_alias.get(&(from, f.clone())).copied())
+        });
+        if let Some(m) = alias {
             let mut p = mods[m].0.clone();
             p.extend(segs[1..].iter().cloned());
             return if segs.len() == 1 { Some(m) } else { mod_of_path.get(&p).copied() };
@@ -1785,7 +1818,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         use_walk(&toks, s, k + 1, e, vec![], &mut items);
         for (path, local) in items {
             if local.as_slice() == b"*" {
-                if let Some(m) = resolve_mod(sc, &path) {
+                if let Some(m) = resolve_mod(sc, &path, k) {
                     globs.push((sc, m));
                 }
                 continue;
@@ -1794,7 +1827,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 continue;
             }
             let (mpath, name) = path.split_at(path.len() - 1);
-            if let Some(m) = resolve_mod(sc, mpath) {
+            if let Some(m) = resolve_mod(sc, mpath, k) {
                 if let Some(nn) = renamed_in(m, &name[0]) {
                     imports.push((sc, local, nn));
                 } else if !def_set.contains(&(m, name[0].clone())) {
@@ -2015,7 +2048,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // 接頭辞のいちばん長いモジュールから見る
             let mut done = false;
             for cut in (1..segs.len()).rev() {
-                if let Some(m) = resolve_mod(sc, &segs[..cut]) {
+                if let Some(m) = resolve_mod(sc, &segs[..cut], k) {
                     if m == usize::MAX && !(segs[0].as_slice() == b"crate") {
                         continue;
                     }
