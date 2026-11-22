@@ -360,3 +360,175 @@ fn wasm_contains_faults() {
     }
     assert!(bad.is_empty(), "\n{}", bad.join("\n"));
 }
+
+// --- SIMD (core::arch::wasm32, issue #30) --------------------------------------------------------------------
+
+const WASI_RUNNER: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/wasm/wasi.mjs");
+
+/// Whether rustc can build for wasm32-wasip1 (the oracle of the SIMD tests: core::arch::wasm32 exists only on wasm)
+fn have_wasip1() -> bool {
+    let o = Command::new("rustc").args(["--print", "target-libdir", "--target", "wasm32-wasip1"]).output();
+    o.is_ok_and(|o| o.status.success() && Path::new(String::from_utf8_lossy(&o.stdout).trim()).is_dir())
+}
+
+/// tests/wasm/simd/*.rs print what rustc's wasm32-wasip1 builds print. rustc's build is unoptimized: with -O, LLVM
+/// folds `f32x4_pmin` / `f32x4_pmax` of constants as if the operands were swapped (NaN and ±0 lanes differ from
+/// its own definition and from the wasm spec). Relaxed SIMD (relaxed.rs) is checked on inputs where every allowed
+/// result agrees, and by whether a result is one of the allowed ones
+#[test]
+fn wasm_simd_like_rustc() {
+    if !ready() {
+        return;
+    }
+    if !have_wasip1() {
+        eprintln!("wasm_simd_like_rustc: rustc has no wasm32-wasip1 target (rustup target add wasm32-wasip1), skipped");
+        return;
+    }
+    let dir = private_dir("wasm_simd");
+    let progs = files("tests/wasm/simd", "");
+    assert!(progs.len() >= 5);
+    let mut bad = vec![];
+    for p in &progs {
+        let n = p.file_stem().unwrap().to_string_lossy().into_owned();
+        let rmod = dir.0.join(format!("{n}.rustc.wasm"));
+        let r = Command::new("rustc")
+            .args(["-Awarnings", "--edition", "2021", "--target", "wasm32-wasip1", "-C", "target-feature=+simd128,+relaxed-simd"])
+            .arg(p)
+            .arg("-o")
+            .arg(&rmod)
+            .output()
+            .unwrap();
+        if !r.status.success() {
+            bad.push(format!("{n}: rustc: {}", String::from_utf8_lossy(&r.stderr)));
+            continue;
+        }
+        let zmod = dir.0.join(format!("{n}.wasm"));
+        if let Err(e) = build_wasm(p, &zmod) {
+            bad.push(format!("{n}: zustc: {e}"));
+            continue;
+        }
+        let mut c = Command::new("node");
+        c.arg(WASI_RUNNER).arg(&rmod).current_dir(&dir.0);
+        let want = run_limited(c, Duration::from_secs(60)).expect("rustc's module timed out");
+        let got = run_wasm(&zmod, &[], &dir.0).expect("the module timed out");
+        // (both must run to the end: two runs that fail alike would compare nothing)
+        if !want.status.success() || !got.status.success() {
+            bad.push(format!(
+                "{n}: rustc exit {:?}, zustc exit {:?}\n  rustc's stderr: {}\n  zustc's stderr: {}",
+                want.status.code(),
+                got.status.code(),
+                String::from_utf8_lossy(&want.stderr).trim(),
+                String::from_utf8_lossy(&got.stderr).trim()
+            ));
+        } else if want.stdout != got.stdout {
+            let (w, g) = (String::from_utf8_lossy(&want.stdout).into_owned(), String::from_utf8_lossy(&got.stdout).into_owned());
+            let first = w.lines().zip(g.lines()).find(|(a, b)| a != b).map(|(a, b)| format!("rustc: {a}\n  zustc: {b}")).unwrap_or_default();
+            bad.push(format!(
+                "{n}: rustc exit {:?}, zustc exit {:?}, first difference:\n  {first}\n  stderr: {}",
+                want.status.code(),
+                got.status.code(),
+                String::from_utf8_lossy(&got.stderr).trim()
+            ));
+        }
+    }
+    assert!(bad.is_empty(), "\n{}", bad.join("\n"));
+}
+
+/// The same programs built natively (the Cranelift backend; core::arch::wasm32's intrinsics are lowered to the same
+/// IR instructions on every target) print what rustc's wasm32 builds print: Cranelift's vector instructions have
+/// wasm's semantics
+#[test]
+fn simd_natively_like_rustc_wasm() {
+    if !ready() || !have_wasip1() {
+        return;
+    }
+    let dir = private_dir("simd_native");
+    let mut bad = vec![];
+    for p in &files("tests/wasm/simd", "") {
+        let n = p.file_stem().unwrap().to_string_lossy().into_owned();
+        let rmod = dir.0.join(format!("{n}.rustc.wasm"));
+        let r = Command::new("rustc")
+            .args(["-Awarnings", "--edition", "2021", "--target", "wasm32-wasip1", "-C", "target-feature=+simd128,+relaxed-simd"])
+            .arg(p)
+            .arg("-o")
+            .arg(&rmod)
+            .output()
+            .unwrap();
+        assert!(r.status.success(), "{n}: rustc: {}", String::from_utf8_lossy(&r.stderr));
+        let mut c = Command::new("node");
+        c.arg(WASI_RUNNER).arg(&rmod).current_dir(&dir.0);
+        let want = run_limited(c, Duration::from_secs(60)).expect("rustc's module timed out");
+        for opt in [false, true] {
+            let exe = dir.0.join(format!("{n}{}", if opt { "_o" } else { "" }));
+            let mut c = Command::new(env!("CARGO_BIN_EXE_zustc"));
+            c.arg("--no-cache");
+            if opt {
+                c.arg("-O");
+            }
+            let o = c.arg(p).arg("-o").arg(&exe).output().unwrap();
+            if !o.status.success() {
+                bad.push(format!("{n} (-O {opt}): zustc: {}", String::from_utf8_lossy(&o.stderr).trim()));
+                continue;
+            }
+            let got = run_limited(Command::new(&exe), Duration::from_secs(60)).expect("timed out");
+            if !want.status.success() || !got.status.success() {
+                bad.push(format!(
+                    "{n} (-O {opt}): exit {:?} / {:?}\n  rustc's stderr: {}\n  zustc's stderr: {}",
+                    want.status.code(),
+                    got.status.code(),
+                    String::from_utf8_lossy(&want.stderr).trim(),
+                    String::from_utf8_lossy(&got.stderr).trim()
+                ));
+            } else if got.stdout != want.stdout {
+                let (w, g) = (String::from_utf8_lossy(&want.stdout).into_owned(), String::from_utf8_lossy(&got.stdout).into_owned());
+                let first = w.lines().zip(g.lines()).find(|(a, b)| a != b).map(|(a, b)| format!("rustc: {a}\n  zustc: {b}")).unwrap_or_default();
+                bad.push(format!("{n} (-O {opt}): exit {:?} / {:?}, first difference:\n  {first}", want.status.code(), got.status.code()));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "\n{}", bad.join("\n"));
+}
+
+/// The wasm SIMD module has v128 in function signatures and locals, and imports and exports what any module does
+#[test]
+fn wasm_simd_module_shape() {
+    if !ready() {
+        return;
+    }
+    let dir = private_dir("wasm_simd_shape");
+    let module = dir.0.join("m.wasm");
+    build_wasm(Path::new("tests/wasm/simd/usage.rs"), &module).unwrap();
+    let m = std::fs::read(&module).unwrap();
+    let (imports, exports, _) = interface(&m);
+    assert!(imports.iter().all(|(md, nm, k)| md == "env" && *k == 0 && HOST.contains(&nm.as_str())), "{imports:?}");
+    let mut ex: Vec<&str> = exports.iter().map(|e| e.0.as_str()).collect();
+    ex.sort();
+    assert_eq!(ex, ["main", "memory"]);
+    assert!(type_params(&m).iter().any(|ps| ps.contains(&0x7B)), "no function type with a v128 parameter");
+}
+
+/// The parameter types of each function type in a module's type section (section 1)
+fn type_params(m: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = vec![];
+    let mut i = 8;
+    while i < m.len() {
+        let id = m[i];
+        i += 1;
+        let len = uleb(m, &mut i) as usize;
+        let end = i + len;
+        if id == 1 {
+            let mut j = i;
+            for _ in 0..uleb(m, &mut j) {
+                assert_eq!(m[j], 0x60, "a type that is not a function type");
+                j += 1;
+                let np = uleb(m, &mut j) as usize;
+                out.push(m[j..j + np].to_vec());
+                j += np;
+                let nr = uleb(m, &mut j) as usize;
+                j += nr;
+            }
+        }
+        i = end;
+    }
+    out
+}
