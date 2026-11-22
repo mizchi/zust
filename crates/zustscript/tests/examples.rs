@@ -254,11 +254,22 @@ fn owned_same_in_js_and_wasm() {
     // matched by reference through the borrowed parameter
     assert!(rs.contains("match *s {\nZsShape::Polygon(ref p, n)"), "{rs}");
     // the glue still passes slices and takes an owned result: adapters in front of the inferred signatures
-    assert!(rs.contains("fn zs_appended__js(xs: &[f64], x: f64) -> Vec<f64> {\n    zs_appended(xs.to_vec(), x)\n}"), "{rs}");
+    // (named in the generated `__zs` namespace: no source function's Rust name can be it)
+    assert!(rs.contains("fn __zs_js_zs_appended(xs: &[f64], x: f64) -> Vec<f64> {\n    zs_appended(xs.to_vec(), x)\n}"), "{rs}");
     assert!(rs.contains("zs_longer(a, b).to_vec()"), "{rs}");
 
-    let (out, rs) = run("tests/owned_cases.zsc", "owned_cases", "m.cases(4)");
-    assert_eq!(out, "[66.5,24,21.5,41.5,36,18.5,38,36]\n");
+    let (out, rs) = run("tests/owned_cases.zsc", "owned_cases", "[m.cases(4), m.more(4), m.grow([5])]");
+    assert_eq!(out, "[[66.5,24,21.5,41.5,36,18.5,38,36],[65,10,5,4,9,6,4,13,6,2],[5,1]]\n");
+    // a result that borrows only its first parameter: a temporary second argument needs no copy
+    assert!(rs.contains("fn zs_wrap<'a>(a: &'a [f64]) -> &'a [f64]"), "{rs}");
+    assert!(rs.contains("fn zs_first<'a>(a: &'a [f64], b: &[f64]) -> &'a [f64]"), "{rs}");
+    // a later argument assigns what an earlier one reads: the earlier one is taken as a value first
+    assert!(rs.contains("zs_pair(&({ xs })[..], &({"), "{rs}");
+    // the iterable is reassigned in the body: a dead one is taken, a borrowed one through a call is copied
+    assert!(rs.contains("for x in xs.into_iter() {\nxs = vec![x];"), "{rs}");
+    assert!(rs.contains("for x in (zs_id(&xs[..])).to_vec().into_iter() {"), "{rs}");
+    // `&&`'s right operand may not run: the push on its left copies
+    assert!(rs.contains("({ let mut __zs_v = xs.to_vec(); __zs_v.push(2.0f64); __zs_v })"), "{rs}");
     // a local borrowed by one argument and consumed by the other is copied for the consumer only
     assert!(rs.contains("zs_pair(&xs[..], &(zs_keep(xs.to_vec()))[..])"), "{rs}");
     // iterated and reassigned in the loop: the loop iterates a copy, and the push inside still reuses the array

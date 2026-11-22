@@ -153,6 +153,9 @@ enum VarK {
 struct Modes {
     owned: HashSet<(String, usize)>,
     owned_result: HashSet<String>,
+    /// for a borrowed result, the parameters (by index) it borrows from. Optimistic like the rest: missing (not
+    /// lowered yet) is none, and it only grows (a result that comes to borrow from something else is owned)
+    region: HashMap<String, BTreeSet<usize>>,
 }
 
 pub struct Lower<'a> {
@@ -229,8 +232,9 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_
 
 impl Lower<'_> {
     /// The fixed point of the signatures, by a worklist: an instance is lowered again when its own signature changed
-    /// (what it found while being lowered) or a callee's did. Each change makes a parameter or a result owned and is
-    /// never undone, so every instance is lowered at most (1 + the changes of itself and its callees) times
+    /// (what it found while being lowered) or a callee's did. Each change makes a parameter or a result owned, or
+    /// grows a result's region, and is never undone, so this ends; an instance is lowered at most (1 + the changes of
+    /// itself and its callees) times, and fewer as the changes are batched (see `again`)
     fn all(&mut self, wanted: &[(String, Vec<Ty>)]) -> Result<(Vec<WFn>, String), Vec<(Pos, String)>> {
         for (n, t) in wanted {
             self.want(n, t.clone());
@@ -238,9 +242,12 @@ impl Lower<'_> {
         let mut order = vec![];
         let mut results: HashMap<String, (String, Vec<Ty>, LResult<(String, Vec<(String, Ty)>, Ty)>)> = HashMap::new();
         let mut callers: HashMap<String, HashSet<String>> = HashMap::new();
-        let mut work: Vec<(String, Vec<Ty>)> = std::mem::take(&mut self.queue);
-        let mut queued: HashSet<String> = work.iter().map(|(n, t)| rs_name(n, t)).collect();
-        while let Some((name, targs)) = work.pop() {
+        // (instances never lowered come first; the ones to lower again wait until there are none, so a caller of
+        // many callees that each change is lowered again once for all of them, not once for each)
+        let mut fresh: Vec<(String, Vec<Ty>)> = std::mem::take(&mut self.queue);
+        let mut again: Vec<(String, Vec<Ty>)> = vec![];
+        let mut queued: HashSet<String> = fresh.iter().map(|(n, t)| rs_name(n, t)).collect();
+        while let Some((name, targs)) = fresh.pop().or_else(|| again.pop()) {
             let rs = rs_name(&name, &targs);
             queued.remove(&rs);
             if !results.contains_key(&rs) {
@@ -255,14 +262,14 @@ impl Lower<'_> {
             results.insert(rs.clone(), (name.clone(), targs.clone(), r));
             for (n, t) in std::mem::take(&mut self.queue) {
                 if queued.insert(rs_name(&n, &t)) {
-                    work.push((n, t));
+                    fresh.push((n, t));
                 }
             }
             if self.sig_of(&name, &rs) != before {
                 for c in std::iter::once(&rs).chain(callers.get(&rs).into_iter().flatten()) {
                     if queued.insert(c.clone()) {
                         let (n, t, _) = &results[c];
-                        work.push((n.clone(), t.clone()));
+                        again.push((n.clone(), t.clone()));
                     }
                 }
             }
@@ -323,9 +330,9 @@ impl Lower<'_> {
     }
 
     /// An instance's inferred signature (its owned parameters, whether its result is owned)
-    fn sig_of(&self, name: &str, rs: &str) -> (usize, bool) {
+    fn sig_of(&self, name: &str, rs: &str) -> (usize, bool, Option<BTreeSet<usize>>) {
         let k = (0..self.info.fns.get(name).map_or(0, |s| s.args.len())).filter(|i| self.modes.owned.contains(&(rs.to_string(), *i))).count();
-        (k, self.modes.owned_result.contains(rs))
+        (k, self.modes.owned_result.contains(rs), self.modes.region.get(rs).cloned())
     }
 
     /// For an instance the glue calls: (its text, the name the glue calls). The glue passes an array as a slice and
@@ -349,7 +356,9 @@ impl Lower<'_> {
         if ret_ref {
             body = format!("{body}.to_vec()");
         }
-        Ok((format!("{text}\n\nfn {rs}__js({}) -> {rt} {{\n    {body}\n}}", ps.join(", ")), format!("{rs}__js")))
+        // (named in the generated `__zs` namespace: a source function's Rust name is `zs_..`, so none can meet it)
+        let entry = format!("__zs_js_{rs}");
+        Ok((format!("{text}\n\nfn {entry}({}) -> {rt} {{\n    {body}\n}}", ps.join(", ")), entry))
     }
 
     /// The Rust definition of record or enum `n` (Copy, and passed by value like a number, when all its fields are)
@@ -543,7 +552,11 @@ impl<'a> Lower<'a> {
         let ats: Vec<Ty> = sig.args.iter().map(|t| subst_ty(t, &self.subst)).collect();
         let ret = subst_ty(&sig.ret, &self.subst);
         let params: Vec<String> = args.iter().map(|a| a.0.clone()).collect();
-        self.live = self.lives.entry(name.to_string()).or_insert_with(|| Rc::new(own::liveness(&params, body))).clone();
+        if !self.lives.contains_key(name) {
+            let l = own::liveness(&params, body, &|id| self.copy(&self.ty(id)));
+            self.lives.insert(name.to_string(), Rc::new(l));
+        }
+        self.live = self.lives[name].clone();
         self.cur = rs.clone();
         self.params = params;
         self.vars.clear();
@@ -563,7 +576,11 @@ impl<'a> Lower<'a> {
         } else if ret_ref {
             let (s, f) = self.ex(body)?;
             match self.borrow_of(&s, &f, &ret) {
-                (s, Some(roots)) if !roots.is_empty() => {
+                // (empty roots: only while a callee's region is still being found; it grows, and this is redone)
+                (s, Some(roots)) => {
+                    // (which parameters the result borrows from: callers count only those arguments)
+                    let idx = self.params.iter().enumerate().filter(|(_, p)| roots.contains(*p)).map(|(i, _)| i).collect();
+                    self.modes.region.insert(rs.clone(), idx);
                     self.region = roots;
                     s
                 }
@@ -577,8 +594,8 @@ impl<'a> Lower<'a> {
             let (s, f) = self.ex(body)?;
             self.owned(s, &f, &ret)
         };
-        let b = if b.starts_with('{') { b } else { format!("{{\n{b}\n}}") };
-        let lt = if ret_ref && !self.region.is_empty() { Some("a") } else { None };
+        let b = format!("{{\n{b}\n}}");
+        let lt = if ret_ref { Some("a") } else { None };
         let mut ps = vec![];
         for (((a, _), t), o) in args.iter().zip(&ats).zip(&owned) {
             let borrow = if *o { None } else { Some(if self.region.contains(a) { lt } else { None }) };
@@ -614,6 +631,8 @@ impl<'a> Lower<'a> {
     }
 
     fn clone_of(&self, s: &str, t: &Ty) -> String {
+        // (a block, `if`, `match` or reference takes the method only inside parentheses)
+        let s = if ["if ", "match ", "{", "&", "*"].iter().any(|p| s.starts_with(p)) { format!("({s})") } else { s.to_string() };
         if is_array(t) { format!("{s}.to_vec()") } else { format!("{s}.clone()") }
     }
 
@@ -704,8 +723,10 @@ impl<'a> Lower<'a> {
             Stmt::Let(Pat::Bind(n), _, x) => {
                 let t = self.ty(x.id);
                 if self.copy(&t) {
+                    // (the initializer still sees the binding this one shadows)
+                    let s = self.expr(x)?;
                     self.vars.remove(n);
-                    return Ok(format!("let {} = {};\n", local(n), self.expr(x)?));
+                    return Ok(format!("let {} = {s};\n", local(n)));
                 }
                 let (s, f) = self.ex(x)?;
                 let (s, k) = match &f {
@@ -797,8 +818,9 @@ impl<'a> Lower<'a> {
         } else {
             match &sf {
                 Form::Val => (ss, false, None),
+                // (the arms assign a local the scrutinee reads: match a value of it, taken if dead, else a copy)
+                _ if self.live.clone_root.contains(&m.id) => (self.owned(ss, &sf, &st), false, None),
                 Form::Own { movable: true } if self.live.match_move.contains(&m.id) => (ss, false, None),
-                _ if self.live.clone_root.contains(&m.id) => (self.clone_of(&ss, &st), false, None),
                 Form::Brw { is_ref: true, roots, .. } => (format!("*{ss}"), true, roots.clone()),
                 Form::Brw { roots, .. } => (ss, true, roots.clone()),
                 Form::Own { .. } => (ss, true, None),
@@ -879,15 +901,36 @@ impl<'a> Lower<'a> {
 
     /// The arguments of a call of a lowered instance: each borrowed or owned as the callee's inferred signature says
     fn call_args(&mut self, rs: &str, args: &[Expr], ptys: &[Ty]) -> LResult<(Vec<String>, Vec<Option<BTreeSet<String>>>)> {
+        let borrow: Vec<bool> = args.iter().zip(ptys).enumerate().map(|(i, (_, t))| !self.copy(t) && !self.modes.owned.contains(&(rs.to_string(), i))).collect();
+        self.args_as(args, &borrow, ptys)
+    }
+
+    /// Arguments, each borrowed or owned as `borrow` says. A borrowed argument that reads a local a later argument
+    /// assigns (`pair(xs, { xs = [2]; .. })`) is made a value first, so it keeps the old one and no borrow is held
+    /// across the assignment
+    fn args_as(&mut self, args: &[Expr], borrow: &[bool], ptys: &[Ty]) -> LResult<(Vec<String>, Vec<Option<BTreeSet<String>>>)> {
+        let mut later = vec![HashSet::new(); args.len()];
+        let any = args.iter().skip(1).any(|x| self.live.assigns_in.contains(&x.id));
+        for i in (0..args.len().saturating_sub(1)).rev().filter(|_| any) {
+            let mut a = later[i + 1].clone();
+            own::names(&args[i + 1], &mut HashSet::new(), &mut a);
+            later[i] = a;
+        }
         let mut out = vec![];
         let mut roots = vec![];
-        for (i, (x, t)) in args.iter().zip(ptys).enumerate() {
-            if self.copy(t) {
+        for (i, x) in args.iter().enumerate() {
+            if !borrow[i] {
                 out.push(self.expr(x)?);
                 roots.push(Some(BTreeSet::new()));
-            } else if self.modes.owned.contains(&(rs.to_string(), i)) {
-                out.push(self.expr(x)?);
-                roots.push(Some(BTreeSet::new()));
+                continue;
+            }
+            let mut reads = HashSet::new();
+            own::names(x, &mut reads, &mut HashSet::new());
+            if reads.iter().any(|n| later[i].contains(n)) {
+                // (`{ v }`: a value, so a local is moved (or copied) into a temporary, not borrowed in place)
+                let v = format!("{{ {} }}", self.expr(x)?);
+                out.push(self.borrow_of(&v, &Form::Val, &ptys[i]).0);
+                roots.push(None);
             } else {
                 let (s, r) = self.borrowed(x)?;
                 out.push(s);
@@ -952,7 +995,7 @@ impl<'a> Lower<'a> {
                     return val(if c == "zeros" {
                         format!("vec![{zero}; ({}) as usize]", self.expr(&args[0])?)
                     } else {
-                        format!("{}.to_vec()", self.borrowed(&args[0])?.0)
+                        format!("({}).to_vec()", self.borrowed(&args[0])?.0)
                     });
                 }
                 let EK::Var(n) = &f.kind else { return not_in_subset(pos, "calling this") };
@@ -973,9 +1016,11 @@ impl<'a> Lower<'a> {
                         if self.copy(&ret) || self.modes.owned_result.contains(&rs) {
                             val(s)
                         } else {
-                            // (a borrowed result borrows from the arguments that borrow: what they borrow from)
+                            // (a borrowed result borrows from the arguments the callee's result borrows from: what they
+                            // borrow from)
+                            let region = self.modes.region.get(&rs).cloned().unwrap_or_default();
                             let mut all = Some(BTreeSet::new());
-                            for r in roots {
+                            for (_, r) in roots.into_iter().enumerate().filter(|(i, _)| region.contains(i)) {
                                 all = match (all, r) {
                                     (Some(mut a), Some(r)) => {
                                         a.extend(r);
@@ -994,7 +1039,8 @@ impl<'a> Lower<'a> {
                         if wargs.iter().any(|(_, w)| matches!(w, WTy::Str | WTy::Callback(..))) {
                             return not_in_subset(pos, "calling a `wasm fn` that takes a string or a callback");
                         }
-                        let a = args.iter().zip(arrs).map(|(x, arr)| if arr { Ok(self.borrowed(x)?.0) } else { self.expr(x) }).collect::<LResult<Vec<_>>>()?;
+                        let ptys: Vec<Ty> = args.iter().map(|x| self.ty(x.id)).collect();
+                        let (a, _) = self.args_as(args, &arrs, &ptys)?;
                         val(format!("{n}({})", a.join(", ")))
                     }
                     Some(Callee::Local) => not_in_subset(pos, "calling a function value"),
@@ -1087,7 +1133,8 @@ impl<'a> Lower<'a> {
                         let it_ty = self.ty(it.id);
                         let v = Self::recv(v, it);
                         if self.live.clone_root.contains(&e.id) {
-                            (format!("{}.into_iter()", self.clone_of(&v, &it_ty)), None)
+                            // (the body assigns a local the iterable reads: iterate a value of it, taken if dead)
+                            (format!("{}.into_iter()", self.owned(v, &f, &it_ty)), None)
                         } else if self.copy(&el) {
                             (format!("{v}.iter().copied()"), None)
                         } else {
@@ -1195,8 +1242,10 @@ impl<'a> Lower<'a> {
             B::Len => val(format!("({recv}.len() as i32)")),
             B::Map => val(format!("{it}.map({}).collect::<Vec<_>>()", self.closure(&args[0], &[k("")])?)),
             B::Filter => {
-                // (filter's closure gets `&Item`: `|&x|` binds the item itself)
-                let f = self.closure(&args[0], &[k("&")])?;
+                // (filter's closure gets `&Item`. For copied items and for references `|&x|` binds the item; for
+                // items the iterator owns that are not Copy, `|x|` borrows it)
+                let param = if elems.is_none() && range.is_none() && !self.copy(&el) { (Some(None), "") } else { k("&") };
+                let f = self.closure(&args[0], &[param])?;
                 val(if by_ref { format!("{it}.filter({f}).cloned().collect::<Vec<_>>()") } else { format!("{it}.filter({f}).collect::<Vec<_>>()") })
             }
             B::Any => val(format!("{it}.any({})", self.closure(&args[0], &[k("")])?)),
@@ -1213,7 +1262,7 @@ impl<'a> Lower<'a> {
             B::Concat => {
                 let v = self.owned(recv, &rf, &rt);
                 let (o, _) = self.borrowed(&args[0])?;
-                let ext = if self.copy(&el) { format!("__zs_v.extend_from_slice({o})") } else { format!("__zs_v.extend({o}.iter().cloned())") };
+                let ext = if self.copy(&el) { format!("__zs_v.extend_from_slice({o})") } else { format!("__zs_v.extend(({o}).iter().cloned())") };
                 val(format!("{{ let mut __zs_v = {v}; {ext}; __zs_v }}"))
             }
             B::Sqrt => val(format!("{recv}.sqrt()")),

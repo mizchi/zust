@@ -79,6 +79,9 @@ pub struct Live {
     /// `match` / `for` expressions whose arms / body assign the root local of the scrutinee / iterable: it is
     /// cloned before, so the loop does not borrow what it reassigns
     pub clone_root: HashSet<Id>,
+    /// the expressions that contain an assignment (most do not: a check that a later operand assigns what an
+    /// earlier one borrows can skip them)
+    pub assigns_in: HashSet<Id>,
 }
 
 /// The key of a binding site: (the id of the expression that scopes it, the name)
@@ -86,16 +89,28 @@ type Key = (Id, String);
 /// (a key for the function's parameters)
 const PARAM: Id = Id::MAX;
 
-/// Computes [`Live`] for a body whose parameters are `params`
-pub fn liveness(params: &[String], body: &Expr) -> Live {
+/// Computes [`Live`] for a body whose parameters are `params`; `copy(id)`: expression `id` is of a Copy type (a
+/// `match` on a Copy value borrows nothing)
+pub fn liveness(params: &[String], body: &Expr, copy: &dyn Fn(Id) -> bool) -> Live {
     let mut r = Resolve { scopes: vec![HashMap::new()], binds: HashMap::new(), uses: HashMap::new(), depth: vec![], closures: 0 };
     for p in params {
         r.bind((PARAM, p.clone()));
     }
     r.expr(body);
-    let mut lv = Lv { r: &r, out: Live::default(), record: true, frozen: vec![], closure: 0, loops: vec![] };
+    let mut lv = Lv { r: &r, copy, out: Live::default(), record: true, frozen: vec![], closure: 0, loops: vec![], memo: Default::default() };
     let mut live = HashSet::new();
     lv.expr(body, &mut live);
+    fn mark(e: &Expr, out: &mut HashSet<Id>) -> bool {
+        let mut any = matches!(e.kind, EK::Assign(..));
+        for c in children(e) {
+            any |= mark(c, out);
+        }
+        if any {
+            out.insert(e.id);
+        }
+        any
+    }
+    mark(body, &mut lv.out.assigns_in);
     lv.out
 }
 
@@ -195,6 +210,24 @@ impl Resolve {
     }
 }
 
+/// The local names an expression reads and the ones it assigns (by name: conservative across shadowing)
+pub fn names(e: &Expr, reads: &mut HashSet<String>, assigns: &mut HashSet<String>) {
+    match &e.kind {
+        EK::Var(n) => {
+            reads.insert(n.clone());
+        }
+        EK::Assign(n, x) => {
+            assigns.insert(n.clone());
+            names(x, reads, assigns);
+        }
+        _ => {
+            for c in children(e) {
+                names(c, reads, assigns);
+            }
+        }
+    }
+}
+
 /// The names a pattern binds
 pub fn pat_names(p: &Pat) -> Vec<String> {
     let mut out = vec![];
@@ -238,6 +271,7 @@ fn children(e: &Expr) -> Vec<&Expr> {
 
 struct Lv<'a> {
     r: &'a Resolve,
+    copy: &'a dyn Fn(Id) -> bool,
     out: Live,
     /// false while a loop iterates to its fixed point (only the final pass records)
     record: bool,
@@ -245,11 +279,23 @@ struct Lv<'a> {
     closure: usize,
     /// (live at the loop's head, live after the loop)
     loops: Vec<(HashSet<usize>, HashSet<usize>)>,
+    /// [`Lv::used`] of each expression, computed once (it is asked for at every operator of a nested chain)
+    memo: std::cell::RefCell<HashMap<Id, std::rc::Rc<(HashSet<usize>, HashSet<usize>)>>>,
 }
 
 impl Lv<'_> {
     /// The bindings used (read or assigned) in `e`: (reads, assigns)
     fn used(&self, e: &Expr, reads: &mut HashSet<usize>, assigns: &mut HashSet<usize>) {
+        let s = self.sets(e);
+        reads.extend(s.0.iter().copied());
+        assigns.extend(s.1.iter().copied());
+    }
+
+    fn sets(&self, e: &Expr) -> std::rc::Rc<(HashSet<usize>, HashSet<usize>)> {
+        if let Some(s) = self.memo.borrow().get(&e.id) {
+            return s.clone();
+        }
+        let (mut reads, mut assigns) = (HashSet::new(), HashSet::new());
         match &e.kind {
             EK::Var(_) => {
                 if let Some(b) = self.r.uses.get(&e.id) {
@@ -260,14 +306,17 @@ impl Lv<'_> {
                 if let Some(b) = self.r.uses.get(&e.id) {
                     assigns.insert(*b);
                 }
-                self.used(x, reads, assigns);
+                self.used(x, &mut reads, &mut assigns);
             }
             _ => {
                 for c in children(e) {
-                    self.used(c, reads, assigns);
+                    self.used(c, &mut reads, &mut assigns);
                 }
             }
         }
+        let s = std::rc::Rc::new((reads, assigns));
+        self.memo.borrow_mut().insert(e.id, s.clone());
+        s
     }
 
     fn binding_of(&self, e: &Expr) -> Option<usize> {
@@ -356,19 +405,26 @@ impl Lv<'_> {
                 for (_, body) in arms {
                     self.used(body, &mut reads, &mut assigns);
                 }
-                let mut frozen = None;
-                if let Some(r) = root {
-                    if !after.contains(&r) && !reads.contains(&r) {
-                        if self.record {
-                            self.out.match_move.insert(e.id);
-                        }
-                    } else if assigns.contains(&r) {
-                        if self.record {
-                            self.out.clone_root.insert(e.id);
-                        }
-                    } else {
-                        frozen = Some(r);
+                // (the locals the scrutinee reads: it may borrow from any of them, also through a call that returns
+                // a borrow, `match pick(t) { .. }`)
+                let mut sc_reads = HashSet::new();
+                self.used(sc, &mut sc_reads, &mut HashSet::new());
+                let mut frozen = vec![];
+                if (self.copy)(sc.id) {
+                    // (a Copy value: the patterns copy, nothing is borrowed)
+                } else if let Some(r) = root
+                    && !after.contains(&r)
+                    && !reads.contains(&r)
+                {
+                    if self.record {
+                        self.out.match_move.insert(e.id);
                     }
+                } else if sc_reads.iter().any(|b| assigns.contains(b)) {
+                    if self.record {
+                        self.out.clone_root.insert(e.id);
+                    }
+                } else {
+                    frozen.extend(sc_reads);
                 }
                 let n = self.frozen.len();
                 self.frozen.extend(frozen);
@@ -433,20 +489,20 @@ impl Lv<'_> {
                     l.extend(after.iter().copied());
                     l
                 });
-                let root = self.binding_of(it);
-                let mut frozen = None;
-                if let Some(r) = root
-                    && head.contains(&r)
-                {
-                    let (mut reads, mut assigns) = (HashSet::new(), HashSet::new());
-                    self.used(body, &mut reads, &mut assigns);
-                    if assigns.contains(&r) {
-                        if self.record {
-                            self.out.clone_root.insert(e.id);
-                        }
-                    } else {
-                        frozen = Some(r);
+                // (the iterable may borrow from any local it reads, also through a call that returns a borrow. If
+                // the body assigns one of them, the loop iterates a copy (or takes the array, if it is dead);
+                // otherwise they are frozen in the body)
+                let mut it_reads = HashSet::new();
+                self.used(it, &mut it_reads, &mut HashSet::new());
+                let (mut reads, mut assigns) = (HashSet::new(), HashSet::new());
+                self.used(body, &mut reads, &mut assigns);
+                let mut frozen = vec![];
+                if it_reads.iter().any(|b| assigns.contains(b)) {
+                    if self.record {
+                        self.out.clone_root.insert(e.id);
                     }
+                } else {
+                    frozen.extend(it_reads);
                 }
                 self.loops.push((head.clone(), after.clone()));
                 let n = self.frozen.len();
@@ -469,6 +525,21 @@ impl Lv<'_> {
             }
             EK::Call(_, args) => self.operands(&args.iter().collect::<Vec<_>>(), live),
             EK::Method(r, _, args) => self.operands(&std::iter::once(&**r).chain(args).collect::<Vec<_>>(), live),
+            EK::Bin(op, a, b) if *op == "&&" || *op == "||" => {
+                // (the right operand may not run: what is live before it joins what is live after the operator)
+                let mut shared = HashSet::new();
+                let (mut ra, mut rb) = (HashSet::new(), HashSet::new());
+                self.used(a, &mut ra, &mut HashSet::new());
+                self.used(b, &mut rb, &mut HashSet::new());
+                shared.extend(ra.intersection(&rb).copied());
+                let n = self.frozen.len();
+                self.frozen.extend(shared);
+                let mut l = live.clone();
+                self.expr(b, &mut l);
+                live.extend(l);
+                self.expr(a, live);
+                self.frozen.truncate(n);
+            }
             EK::Bin(_, a, b) | EK::Index(a, b) => self.operands(&[a, b], live),
             EK::Record(_, fs, base) => self.operands(&fs.iter().map(|f| &f.1).chain(base.as_deref()).collect::<Vec<_>>(), live),
             EK::Array(xs) | EK::Tuple(xs) => self.operands(&xs.iter().collect::<Vec<_>>(), live),
@@ -508,7 +579,7 @@ mod tests {
         let items = crate::parse::Parser::new(src).file().unwrap();
         let Item::Fn { args, body, .. } = &items[0] else { panic!() };
         let ps: Vec<String> = args.iter().map(|a| a.0.clone()).collect();
-        (liveness(&ps, body), items.clone())
+        (liveness(&ps, body, &|_| false), items.clone())
     }
 
     /// The ids of the uses of `name`, in source order
@@ -542,6 +613,9 @@ mod tests {
         assert_eq!(lasts("fn f(xs: Array<f64>) -> Array<f64> { let n = xs.len(); g(xs) }", "xs"), [false, true]);
         // (two operands of one call: neither moves)
         assert_eq!(lasts("fn f(xs: Array<f64>) -> f64 { h(xs, g(xs)) }", "xs"), [false, false]);
+        // (`&&`'s right operand may not run: the reassignment there does not make the left use the last)
+        let src = "fn f(n: i32) -> Array<f64> { let mut xs = [1.0]; let ok = g(xs) && { xs = [2.0]; true }; xs }";
+        assert_eq!(lasts(src, "xs"), [false, true]);
     }
 
     #[test]
