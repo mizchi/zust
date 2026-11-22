@@ -32,7 +32,6 @@ const esbuild = opt("--esbuild", process.env.ESBUILD || "esbuild");
 const quick = args.includes("--quick");
 // (extra zsc flags, e.g. --inline-runtime to measure the runtime written into each module)
 const extra = args.includes("--zsc-flags") ? opt("--zsc-flags").split(" ") : [];
-// (the baseline is read before the output directory is cleaned: it may be a file saved there)
 const against = opt("--against");
 let base = null;
 if (against !== undefined) {
@@ -44,7 +43,8 @@ if (against !== undefined) {
   }
 }
 const save = opt("--save");
-const out = join(root, "target/js-kpi");
+// (only the build output is cleaned, so a baseline saved under target/js-kpi survives later runs)
+const out = join(root, "target/js-kpi/build");
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
