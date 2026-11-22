@@ -1277,3 +1277,107 @@ fn builtin_results_of_placeholders() {
         vec![]
     );
 }
+
+/// A constant condition is not folded for the borrow check (`false || { i = 5; true }` may leave i uninitialized,
+/// E0381); a chain of one operator is one control flow, so `true && { z = 3; true } && z == 3` reads z only after it is
+/// set
+#[test]
+fn constant_conditions_and_chains() {
+    let d = check("fn main() {\n    let i: isize;\n    println!(\"{}\", false || { i = 5; true });\n    println!(\"{}\", i);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("isn't initialized"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let z;\n    if true && { z = 3; true } && z == 3 {}\n    let y;\n    if false || { y = 3; false } || y == 3 {}\n}\n"), vec![]);
+}
+
+/// A receiver a call made, borrowed by a `&self` method whose result borrows it, in a `let`'s initializer: a temporary
+/// freed at the end of the statement (E0716 when the result is used after). Not when the result does not borrow it
+#[test]
+fn receiver_temporaries() {
+    let a = "struct A {\n    v: Vec<u8>,\n}\nimpl A {\n    fn get(&self) -> &A {\n        self\n    }\n    fn len(&self) -> usize {\n        self.v.len()\n    }\n    fn name(&self) -> &'static str {\n        \"a\"\n    }\n}\nfn mk() -> A {\n    A { v: vec![1] }\n}\n";
+    let d = check(&format!("{a}fn main() {{\n    let x = mk().get();\n    println!(\"{{}}\", x.len());\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 19 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check(&format!("{a}fn main() {{\n    let n = mk().len();\n    let s = mk().name();\n    let k = mk().get().len();\n    println!(\"{{}} {{}} {{}}\", n, s, k);\n}}\n")), vec![]);
+}
+
+/// A type alias written without its lifetimes in a signature (`b: A` with `type A<'a> = &'a isize`): its regions are
+/// elided, a fresh one each, as `&isize`'s
+#[test]
+fn alias_with_elided_lifetimes() {
+    let d = check("type A<'a> = &'a isize;\nstruct C<'a> {\n    f: A<'a>,\n}\nimpl<'a> C<'a> {\n    fn set_bad(&mut self, b: A) {\n        self.f = b;\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("type A<'a> = &'a isize;\nstruct C<'a> {\n    f: A<'a>,\n}\nimpl<'a> C<'a> {\n    fn set_ok(&mut self, b: A<'a>) {\n        self.f = b;\n    }\n    fn get(&self) -> A {\n        self.f\n    }\n}\nfn main() {}\n"), vec![]);
+}
+
+/// A method of the prelude's types whose result holds references holds what its receiver holds: returning
+/// `it.next()` or `raw.iter().map(..).collect()` of a local's iterator is E0515, where the chain starts
+#[test]
+fn prelude_results_hold_receivers() {
+    let d = check("fn d<'a>() -> Option<&'a String> {\n    let raw: Vec<String> = Vec::new();\n    let mut it = raw.iter();\n    it.next()\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("cannot return a reference to a local variable"), "{d:?}");
+    let d = check("fn r<'a>() -> Vec<&'a str> {\n    let raw: Vec<String> = vec![String::new()];\n    raw\n        .iter()\n        .map(|l| l.trim())\n        .collect()\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(check("fn ok(s: &str) -> Option<&str> {\n    let parts: Vec<&str> = s.split(',').collect();\n    parts.first().copied()\n}\nfn n() -> usize {\n    let raw: Vec<String> = Vec::new();\n    raw.iter().count()\n}\nfn main() {}\n"), vec![]);
+}
+
+/// E0195 for the methods of an impl of a type that is not a struct (`impl<'a> Foo<'a> for &'a isize`): the method's
+/// early-bound lifetimes are the trait's
+#[test]
+fn e0195_for_impls_of_references() {
+    let d = check("pub trait Foo<'a> {\n    fn no_bound<'b>(self, b: &'b u8);\n}\nimpl<'a> Foo<'a> for &'a isize {\n    fn no_bound<'b: 'a>(self, b: &'b u8) {}\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].1.contains("E0195"), "{d:?}");
+    assert_eq!(check("pub trait Foo<'a> {\n    fn no_bound<'b>(self, b: &'b u8);\n    fn has_bound<'b: 'a>(self, b: &'b u8);\n}\nimpl<'a> Foo<'a> for &'a isize {\n    fn no_bound<'b>(self, b: &'b u8) {}\n    fn has_bound<'b: 'a>(self, b: &'b u8) {}\n}\nfn main() {}\n"), vec![]);
+}
+
+/// A capture held by value (a `move` closure's) of a local not declared `mut`: assigning it is E0594, at the
+/// assignment; assigning through a `&mut` it holds (`t.0.0 = x`) or reading it is not
+#[test]
+fn move_closure_assigns_immutable_capture() {
+    let d = check("fn main() {\n    let x = 0;\n    (move || {\n        x = 1;\n    })()\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0594"), "{d:?}");
+    assert_eq!(check("struct S(String);\nstruct T<'a>(&'a mut S);\nfn main() {\n    let mut s = S(String::new());\n    let t = T(&mut s);\n    let mut c = move || {\n        t.0.0 = String::from(\"new\");\n    };\n    c();\n    let y = 1;\n    let g = move || y + 1;\n    g();\n    let mut z = 0;\n    let mut h = move || z += 1;\n    h();\n}\n"), vec![]);
+}
+
+/// A type parameter bounded by `Fn` / `FnMut` / `FnOnce` in a generic fn nothing calls: its calls are checked against
+/// the bound (`FnMut` borrows it mutably: E0596 when not `mut`; `FnOnce` takes it: E0382 when called twice; `Fn`
+/// reads it: E0502 under a `&mut` of it)
+#[test]
+fn placeholder_fn_calls() {
+    let d = check("fn b<F: FnMut(isize, isize) -> isize>(f: F) {\n    f(1, 2);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("fn c<F: FnOnce(isize, isize) -> isize>(f: F) {\n    f(1, 2);\n    f(1, 2);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("use of moved value: `f`"), "{d:?}");
+    let d = check("fn a<F: Fn(isize, isize) -> isize>(mut f: F) {\n    let g = &mut f;\n    f(1, 2);\n    use_mut(g);\n}\nfn use_mut<T>(_: &mut T) {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(check("fn a<F: Fn(isize, isize) -> isize>(f: F) -> isize {\n    f(1, 2) + f(3, 4)\n}\nfn b<F: FnMut(isize) -> isize>(mut f: F) -> isize {\n    f(1) + f(2)\n}\nfn c<F: FnOnce() -> String>(f: F) -> String {\n    f()\n}\nfn d<T, F: Fn(&T) -> bool>(v: &[T], f: F) -> usize {\n    v.iter().filter(|x| f(x)).count()\n}\nfn main() {}\n"), vec![]);
+}
+
+/// `&*Box::new(1)` borrows what a temporary owns: stored in a map that outlives the statement, E0716; a `let` extends
+/// it (`let r = &*Box::new(1);`)
+#[test]
+fn borrow_of_a_temporarys_contents() {
+    let d = check("use std::collections::HashMap;\nfn main() {\n    let mut m: HashMap<usize, &usize> = HashMap::new();\n    m.insert(42, &*Box::new(1));\n    println!(\"{:?}\", m.len());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let r: &usize = &*Box::new(1);\n    println!(\"{}\", r);\n}\n"), vec![]);
+}
+
+/// Review follow-ups of part 7: what rustc accepts (an alias that fixes `'static`, `map` with a closure that does not
+/// use its item, a shadowed capture, a receiver a call returns as a reference, a method named `__ref_m` itself) and
+/// what it rejects (E0195 for lifetimes early-bound in one and late-bound in the other, E0276 for a stricter bound,
+/// `FnMut` through `&F`)
+#[test]
+fn part7_review_follow_ups() {
+    assert_eq!(check("type Static = &'static u8;\nfn keep(x: Static) -> &'static u8 {\n    x\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("fn ok() -> Vec<&'static str> {\n    let raw = vec![String::new()];\n    raw.iter().map(|_| \"ok\").collect()\n}\nfn main() {}\n"), vec![]);
+    let d = check("fn bad() -> Vec<&'static str> {\n    let raw = vec![String::new()];\n    raw.iter().map(|s| s.as_str()).collect()\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(check("fn main() {\n    let x = 0;\n    let mut c = move || {\n        let mut x = x;\n        x += 1;\n        println!(\"{x}\");\n    };\n    c();\n}\n"), vec![]);
+    assert_eq!(check("struct A {\n    s: String,\n}\nimpl A {\n    fn get(&self) -> &String {\n        &self.s\n    }\n}\nfn id(a: &A) -> &A {\n    a\n}\nfn main() {\n    let a = A { s: String::new() };\n    let x = id(&a).get();\n    println!(\"{}\", x.len());\n}\n"), vec![]);
+    assert_eq!(check("trait Tr {\n    fn foo<'a: 'b, 'b>(x: &'a u8, y: &'b u8);\n    fn __ref_foo();\n}\nimpl Tr for i32 {\n    fn foo<'a: 'b, 'b>(x: &'a u8, y: &'b u8) {}\n    fn __ref_foo() {}\n}\nfn main() {}\n"), vec![]);
+    // (the impl's bounds less strict than the trait's: accepted)
+    assert_eq!(check("trait Tr {\n    fn f<'a: 'b, 'b: 'a>(x: &'a u8, y: &'b u8);\n}\nimpl Tr for i32 {\n    fn f<'a: 'b, 'b>(x: &'a u8, y: &'b u8) {}\n}\nfn main() {}\n"), vec![]);
+    let d = check("trait Tr {\n    fn f<'a, 'b: 'static>(x: &'a u8, y: &'b u8);\n}\nimpl Tr for i32 {\n    fn f<'a: 'static, 'b>(x: &'a u8, y: &'b u8) {}\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0195"), "{d:?}");
+    let d = check("trait Tr {\n    fn f<'a: 'b, 'b>(x: &'a u8, y: &'b u8);\n}\nimpl Tr for i32 {\n    fn f<'a, 'b: 'a>(x: &'a u8, y: &'b u8) {}\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0276"), "{d:?}");
+    let d = check("fn bad<F: FnMut()>(f: &F) {\n    f();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("behind a `&` reference"), "{d:?}");
+}

@@ -1656,6 +1656,10 @@ impl Cx<'_> {
             // (`&mut x as *mut _` / coerced to a raw pointer: not a loan)
             if !matches!(expected, Some(Ty::Ptr(..))) {
                 self.bk_borrow(rexpr, m, err_pos(rexpr));
+                // (`&*Box::new(1)`: a borrow of what a temporary owns, which goes away with it (E0716))
+                if matches!(strip_paren(rexpr), Expr::Unary(op, _, _) if op == "*") && self.bk_place(rexpr).is_none() {
+                    self.bk_temp_borrow(rexpr, m, pl.ty());
+                }
             }
             return match pl {
                 // `&mut v[i]` (v: Vec<Box<T>>) を `&mut T` の位置に: Box の中身を指す (deref の強制変換)
@@ -1950,6 +1954,24 @@ impl Cx<'_> {
             caps.push((loc, t));
             self.bk_capture(c, n, loc, t, by_move);
         }
+        // (a capture held by value (a `move` closure's) of a local not declared `mut`, which the body assigns or borrows
+        // mutably: E0594 / E0596 at the mutation; one held by reference is a `&mut` loan the borrow check reports)
+        if self.bk_on() && self.bk.fnmut_exprs.contains(&(c as *const Expr as usize)) {
+            let Expr::Closure(_, _, _, body, _) = c else { unreachable!() };
+            for (i, n) in cd.captures.iter().enumerate() {
+                if !cd.moved.get(i).copied().unwrap_or(false) {
+                    continue;
+                }
+                let immutable = self.lookup(n).and_then(|(loc, _)| self.bk.by_loc.get(&loc).copied()).is_some_and(|l| self.bk.locals[l as usize].mutable == Some(false));
+                if !immutable {
+                    continue;
+                }
+                if let Some((sp, assign)) = self.owned_mutation(body, n) {
+                    let msg = if assign { format!("cannot assign to `{n}`, as it is not declared as mutable (E0594)") } else { format!("cannot borrow `{n}` as mutable, as it is not declared as mutable (E0596)") };
+                    return Err(self.at(sp, msg));
+                }
+            }
+        }
         // (passed where a bound wants `Fn`: a closure that mutates what it captures is not one (E0594 / E0596))
         if fn_only && self.bk.fnmut_exprs.contains(&(c as *const Expr as usize)) {
             let Expr::Closure(_, _, _, body, csp) = c else { unreachable!() };
@@ -2150,6 +2172,100 @@ impl Cx<'_> {
             }
         }
         Ok((Some(a), st))
+    }
+
+    /// The first assignment to, `&mut` of, or `&mut self` method call of what the capture n itself holds (not through a
+    /// reference it holds: `t.0.0 = x` with `t.0: &mut S` mutates no part of t): where, whether an assignment
+    fn owned_mutation(&self, e: &Expr, n: &str) -> Option<(Sp, bool)> {
+        let owned = |l: &Expr| self.bk_rooted_at_pub(strip_paren(l), n).is_some_and(|(p, t)| p.owned_len_pub() == p.proj.len() && !matches!(t, Some(Ty::Ref(..))));
+        match e {
+            Expr::Assign(l, _) | Expr::AssignOp(_, l, _, _) => {
+                let mut b: &Expr = l;
+                while let Expr::Index(x, _, _) = strip_paren(b) {
+                    b = x;
+                }
+                if owned(b) {
+                    return Some((borrowck::pos(e), true));
+                }
+            }
+            Expr::Ref(true, l) => {
+                if owned(l) {
+                    return Some((borrowck::pos(e), false));
+                }
+            }
+            Expr::MethodCall(r, m, ..) => {
+                if owned(r) {
+                    let mut_self = match self.bk_rooted_at_pub(strip_paren(r), n) {
+                        Some((_, Some(Ty::Struct(sid)))) => self.prog.method(sid, m).is_some_and(|id| {
+                            let sg = &self.prog.sigs[id as usize];
+                            sg.has_self && matches!(sg.params.first(), Some(Ty::Ref(true, _)))
+                        }),
+                        _ => false,
+                    };
+                    if mut_self {
+                        return Some((borrowck::pos(e), false));
+                    }
+                }
+            }
+            _ => {}
+        }
+        // (a binding of the same name shadows the capture where it is in scope: `let mut x = x; x += 1;`)
+        let binds = |p: &Pat| {
+            let mut v = vec![];
+            crate::ast_closure::pat_idents(p, &mut v);
+            v.iter().any(|x| x == n)
+        };
+        let either = |a: Option<(Sp, bool)>, b: &mut dyn FnMut() -> Option<(Sp, bool)>| a.or_else(b);
+        match e {
+            Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => return self.owned_mutation_block(b, n),
+            Expr::Closure(_, ps, _, body, _) => return if ps.iter().any(|(p, _)| binds(p)) { None } else { self.owned_mutation(body, n) },
+            Expr::Match(x, arms) => {
+                return either(self.owned_mutation(x, n), &mut || {
+                    arms.iter().filter(|a| !binds(&a.pat)).find_map(|a| a.guard.as_ref().and_then(|g| self.owned_mutation(g, n)).or_else(|| self.owned_mutation(&a.body, n)))
+                });
+            }
+            Expr::For(_, p, it, b) => return either(self.owned_mutation(it, n), &mut || if binds(p) { None } else { self.owned_mutation_block(b, n) }),
+            Expr::If(c, b, _) | Expr::While(_, c, b) if matches!(&**c, Expr::Let(..)) => {
+                let Expr::Let(p, x) = &**c else { unreachable!() };
+                let els = if let Expr::If(_, _, els) = e { els.as_deref() } else { None };
+                return either(self.owned_mutation(x, n), &mut || {
+                    if binds(p) { None } else { self.owned_mutation_block(b, n) }.or_else(|| els.and_then(|x| self.owned_mutation(x, n)))
+                });
+            }
+            _ => {}
+        }
+        let mut found = None;
+        crate::ast_closure::each_child_pub(e, &mut |c| {
+            if found.is_none() {
+                found = self.owned_mutation(c, n);
+            }
+        });
+        found
+    }
+
+    /// owned_mutation in a block's statements: a `let` of the same name ends the search
+    fn owned_mutation_block(&self, b: &crate::parse::Block, n: &str) -> Option<(Sp, bool)> {
+        for st in &b.stmts {
+            match st {
+                crate::parse::Stmt::Let(p, _, init, els, _) => {
+                    if let Some(f) = init.as_ref().and_then(|x| self.owned_mutation(x, n)).or_else(|| els.as_ref().and_then(|b| self.owned_mutation_block(b, n))) {
+                        return Some(f);
+                    }
+                    let mut v = vec![];
+                    crate::ast_closure::pat_idents(p, &mut v);
+                    if v.iter().any(|x| x == n) {
+                        return None;
+                    }
+                }
+                crate::parse::Stmt::Expr(x, _) => {
+                    if let Some(f) = self.owned_mutation(x, n) {
+                        return Some(f);
+                    }
+                }
+                crate::parse::Stmt::Item(_) => {}
+            }
+        }
+        None
     }
 
     /// The first assignment to, `&mut` of, or `&mut self` method call of a captured variable in a closure's body (a
@@ -2725,6 +2841,20 @@ impl Cx<'_> {
     }
 
     /// `Fn(A, B) -> R` (dyn の中身) の引数と戻り値の型
+    /// A value of type t made of zeros (what a placeholder's call returns in a check: its bits are never used)
+    pub(crate) fn zero_of(&mut self, t: Ty) -> V {
+        if t == Ty::Unit || t == Ty::Never {
+            return (None, t);
+        }
+        if t.is_agg() {
+            let tmp = self.temp(t);
+            self.zero(tmp, t);
+            return (Some(tmp), t);
+        }
+        let v = clif_ty(t).map(|ct| if ct == types::I128 { self.int_const(Ty::I128, 0) } else if ct == types::F64 { self.b.ins().f64const(0.0) } else if ct == types::F32 { self.b.ins().f32const(0.0) } else { self.b.ins().iconst(ct, 0) });
+        (v, t)
+    }
+
     pub(crate) fn dyn_fn_sig(&self, s: &str) -> R<(Vec<Ty>, Ty)> {
         let Some((_, ps, r)) = crate::ast_summary::parse_fn_bound(s) else {
             return Err(format!("`dyn {s}` is not a function type"));
@@ -2793,6 +2923,54 @@ impl Cx<'_> {
         let r = match t {
             Ty::Struct(sid) => {
                 let Some(&cid) = self.prog.closure_of_struct.get(&self.prog.base_of(sid)) else {
+                    // (a type parameter's placeholder bounded by `Fn` / `FnMut` / `FnOnce` (zustc check of a generic fn
+                    // nothing calls): the call is checked against the bound, its result a value of the bound's result
+                    // type; `FnMut` borrows the callee mutably, `FnOnce` takes it)
+                    let bound = self.prog.structs[sid as usize].placeholder.as_ref().and_then(|bs| bs.iter().find_map(|b| crate::ast_summary::parse_fn_bound(b).map(|(k, _, _)| (k, b.clone()))));
+                    if let (Some((kind, b)), true) = (bound, self.prog.is_placeholder(sid)) {
+                        let (ps, ret) = self.dyn_fn_sig(&b).map_err(|e| self.at(SP, e))?;
+                        // (the bound's arity and its parameters of primitive types. A placeholder's instance's type errors
+                        // are not reported (see compile_once): it stops being checked. A name a macro's expansion
+                        // shadows (no hygiene) may be such a callee)
+                        if args.len() != ps.len() {
+                            return err(err_pos(func), format!("this function takes {} arguments but {} were supplied (a call through the bound `{b}`) (E0057)", ps.len(), args.len()));
+                        }
+                        if is_place_expr(func) && kind == "FnOnce" && self.peek(func) == Some(t) {
+                            self.bk_acc(func, borrowck::Acc::Move);
+                        } else if is_place_expr(func) && kind != "FnOnce" {
+                            // (through every reference to it, as a closure's call: `f: &F` with `F: FnMut()` is a `&mut`
+                            // of `*f`, behind a `&` (E0596))
+                            let mut ft = self.peek(func);
+                            let mut x: &Expr = func;
+                            let mut n = 0;
+                            while let Some(Ty::Ref(_, i)) = ft {
+                                if n > 8 {
+                                    break;
+                                }
+                                let sp = crate::parse::Span { start: expr_start(func), at: expr_start(func) };
+                                x = self.keep_expr(Expr::Unary("*".into(), Box::new(x.clone()), sp));
+                                ft = Some(*i);
+                                n += 1;
+                            }
+                            if ft == Some(t) {
+                                self.bk.no_loan_src = true;
+                                self.bk_borrow(x, kind == "FnMut", err_pos(func));
+                                self.bk.no_loan_src = false;
+                            }
+                        }
+                        let mut never = false;
+                        let prim = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char);
+                        for (a, &pt) in args.iter().zip(&ps) {
+                            let (_, at) = self.expr(a, Some(pt))?;
+                            never |= at == Ty::Never;
+                            if at != Ty::Never && at != pt && prim(at) && prim(pt) {
+                                return err(expr_start(a), format!("mismatched types: expected `{}`, found `{}` (an argument of a call through the bound `{b}`) (E0308)", self.prog.tn(pt), self.prog.tn(at)));
+                            }
+                        }
+                        let r = if never { (None, Ty::Never) } else { self.zero_of(ret) };
+                        self.bk_frame_end_call();
+                        return Ok(r);
+                    }
                     return err(SP, format!("expected a function, found `{}`", self.prog.tn(t)));
                 };
                 let recv = (v, Ty::Ptr(true, intern(t)));

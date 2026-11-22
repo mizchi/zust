@@ -151,6 +151,7 @@ crate::enc_struct!(Summary {
     closures,
     assocs,
     aliases,
+    alias_fixed_lts,
     where_types,
     impl_trait_args,
     assoc_bounds,
