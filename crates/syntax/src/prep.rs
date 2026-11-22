@@ -149,11 +149,103 @@ fn file_start(src: &str) -> Option<String> {
     Some(out)
 }
 
-/// チャンクの結果: 本文の行 (改行込み)、末尾に移したアイテム、桁のずれ (行はチャンクの先頭からの 0 始まり)
+/// チャンクの結果: 本文の行 (改行込み)、末尾に移したアイテム (チャンクの中の行, テキスト)、桁のずれ (行はチャンクの先頭からの
+/// 0 始まり)
 struct ChunkOut {
     text: String,
-    pieces: Vec<String>,
+    pieces: Vec<(usize, String)>,
     fix: Vec<(u32, u32, i32)>,
+}
+
+/// What a hoisted item starts with, on its first line: the line it was written on (from 1), `/*zust:line=12*/`, which
+/// an error in it is reported at (a comment: no token, the item's hash stays). A line the program starts with such a
+/// comment of its own is read as a mark too (the lines after it, to the next mark, as written at its line)
+pub const HOIST_MARK: &str = "/*zust:line=";
+
+fn hoist_mark(line0: usize) -> String {
+    format!("{HOIST_MARK}{}*/", line0 + 1)
+}
+
+/// The full preprocessing's text, each hoisted item marked with the line it was written on
+pub fn marked(p: Prep) -> String {
+    let Some(info) = &p.moved else { return p.text };
+    let b = p.text.as_bytes();
+    let total_nl = b.iter().filter(|&&c| c == b'\n').count();
+    let tail_nl: usize = info.iter().map(|&(_, nl)| nl + 1).sum::<usize>() + 1;
+    // (the body has the input's lines; then `\n` and each piece, then a last `\n`)
+    let Some(body_nl) = total_nl.checked_sub(tail_nl) else { return p.text };
+    let mut nl = 0;
+    let mut sep = 0;
+    for (i, &c) in b.iter().enumerate() {
+        if c == b'\n' {
+            if nl == body_nl {
+                sep = i;
+                break;
+            }
+            nl += 1;
+        }
+    }
+    let mut out = String::with_capacity(p.text.len() + info.len() * 20);
+    out.push_str(&p.text[..sep]);
+    let mut at = sep;
+    for &(line, pnl) in info {
+        // (at the `\n` before the piece: the piece runs pnl lines more, to the next `\n`)
+        out.push('\n');
+        out.push_str(&hoist_mark(line));
+        let start = at + 1;
+        let mut e = start;
+        let mut seen = 0;
+        while e < b.len() && !(b[e] == b'\n' && seen == pnl) {
+            if b[e] == b'\n' {
+                seen += 1;
+            }
+            e += 1;
+        }
+        out.push_str(&p.text[start..e]);
+        at = e;
+    }
+    out.push_str(&p.text[at..]);
+    out
+}
+
+/// The hoisted items' marks of a preprocessed text: (its line, the line it was written on), in order. Empty without
+pub fn hoist_marks(text: &str) -> Vec<(usize, usize)> {
+    if !text.contains(HOIST_MARK) {
+        return vec![];
+    }
+    text.split('\n')
+        .enumerate()
+        .filter_map(|(i, l)| Some((i + 1, l.strip_prefix(HOIST_MARK)?.split("*/").next()?.parse().ok()?)))
+        .collect()
+}
+
+/// With hoist_marks: the line a line of a hoisted item was written on (None before every mark)
+pub fn hoisted_at(marks: &[(usize, usize)], line: usize) -> Option<usize> {
+    let k = marks.partition_point(|&(at, _)| at <= line);
+    let &(at, orig) = marks.get(k.checked_sub(1)?)?;
+    Some(orig + (line - at))
+}
+
+/// The line an error at `line` of the preprocessed text was written on, when it is in a hoisted item (HOIST_MARK)
+pub fn hoisted_line(text: &str, line: usize) -> Option<usize> {
+    if !text.contains(HOIST_MARK) {
+        return None;
+    }
+    let mut best: Option<(usize, usize)> = None;
+    let mut ln = 1;
+    for (i, l) in text.split('\n').enumerate() {
+        ln = i + 1;
+        if ln > line {
+            break;
+        }
+        if let Some(r) = l.strip_prefix(HOIST_MARK) {
+            if let Some(n) = r.split("*/").next().and_then(|n| n.parse::<usize>().ok()) {
+                best = Some((ln, n));
+            }
+        }
+    }
+    let _ = ln;
+    best.map(|(at, orig)| orig + (line - at))
 }
 
 #[derive(Default)]
@@ -704,7 +796,7 @@ fn split_out(p: &Prep, lines: &[usize], fix: &[(u32, u32, i32)], want: &[bool]) 
                 if *line + count_nl(t.as_bytes()) >= l1 {
                     return None;
                 }
-                c.pieces.push(t.clone());
+                c.pieces.push((*line - l0, t.clone()));
             }
         }
         for &(fl, col, cum) in fix {
@@ -800,13 +892,21 @@ pub fn std_renames(src: &str) -> Option<String> {
     changed.then_some(out)
 }
 
+/// Where the items moved out of function bodies came from (Prep::moved), for the source `prep` is given: their
+/// lines past the input's last one are theirs. None when nothing was moved
+pub fn moved_lines(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>) -> Option<Vec<(usize, usize)>> {
+    let start = file_start(src);
+    let src: &str = start.as_deref().unwrap_or(src);
+    prep_full(src, crates, &mut vec![], cfg).ok()?.moved
+}
+
 /// 前処理 (差分)。fix には桁のずれを足す
 pub fn prep(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: Option<&crate::cfg::CfgSet>, memo: &mut PrepMemo) -> R<String> {
     memo.calls += 1;
     let start = file_start(src);
     let src: &str = start.as_deref().unwrap_or(src);
     if std::env::var_os("ZUSTC_NO_PREP_INC").is_some() || (memo.calls == 1 && std::env::var_os("ZUSTC_PREP_VERIFY").is_none()) {
-        return prep_full(src, crates, fix, cfg).map(|p| p.text);
+        return prep_full(src, crates, fix, cfg).map(marked);
     }
     let r = prep_inc(src, crates, cfg, memo);
     let (text, fx) = match r {
@@ -815,7 +915,7 @@ pub fn prep(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: O
             let c = memo.calls;
             *memo = PrepMemo::default();
             memo.calls = c;
-            return prep_full(src, crates, fix, cfg).map(|p| p.text);
+            return prep_full(src, crates, fix, cfg).map(marked);
         }
         Err(e) => {
             let c = memo.calls;
@@ -826,11 +926,11 @@ pub fn prep(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: O
     };
     if std::env::var_os("ZUSTC_PREP_VERIFY").is_some() {
         let mut f2 = vec![];
-        let full = prep_full(src, crates, &mut f2, cfg)?;
-        if full.text != text || f2 != fx {
+        let full = marked(prep_full(src, crates, &mut f2, cfg)?);
+        if full != text || f2 != fx {
             if let Ok(p) = std::env::var("ZUSTC_PREP_VERIFY_DUMP") {
                 let _ = std::fs::write(format!("{p}.inc"), &text);
-                let _ = std::fs::write(format!("{p}.full"), &full.text);
+                let _ = std::fs::write(format!("{p}.full"), &full);
             }
             return Err("internal: incremental preprocessing differs from the full preprocessing".into());
         }
@@ -986,21 +1086,22 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
     }
     // 組み立てる
     let mut text = String::with_capacity(src.len() + 64);
-    let mut pieces: Vec<&str> = vec![];
+    let mut pieces: Vec<(usize, &str)> = vec![];
     let mut fx: Vec<(u32, u32, i32)> = vec![];
     for j in 0..nchunk {
         let Some(o) = &outs[j] else { return Ok(None) };
         text.push_str(&o.text);
-        for p in &o.pieces {
-            pieces.push(p);
+        for (l, p) in &o.pieces {
+            pieces.push((lines[j] + l, p));
         }
         for &(l, c, d) in &o.fix {
             fx.push((l + lines[j] as u32 + 1, c, d));
         }
     }
     if !pieces.is_empty() {
-        for p in &pieces {
+        for (l, p) in &pieces {
             text.push('\n');
+            text.push_str(&hoist_mark(*l));
             text.push_str(p);
         }
         text.push('\n');

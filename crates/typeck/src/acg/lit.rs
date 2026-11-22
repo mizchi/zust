@@ -74,7 +74,8 @@ pub fn lit(t: &str) -> Option<Lit> {
     if !t.starts_with(|c: char| c.is_ascii_digit()) {
         return None;
     }
-    let s: String = t.chars().filter(|&c| c != '_').collect();
+    // (most literals have no `_`: no copy then)
+    let s: std::borrow::Cow<str> = if t.contains('_') { t.chars().filter(|&c| c != '_').collect::<String>().into() } else { t.into() };
     let (radix, body) = if let Some(h) = s.strip_prefix("0x") {
         (16, h)
     } else if let Some(b) = s.strip_prefix("0b") {
@@ -82,9 +83,9 @@ pub fn lit(t: &str) -> Option<Lit> {
     } else if let Some(o) = s.strip_prefix("0o") {
         (8, o)
     } else {
-        (10, s.as_str())
+        (10, &*s)
     };
-    let digits: String = body.chars().take_while(|c| c.is_digit(radix)).collect();
+    let digits: &str = &body[..body.bytes().take_while(|&c| (c as char).is_digit(radix)).count()];
     let rest = &body[digits.len()..];
     // 浮動小数点 (`1.5` / `1e3` / `2.` / `1f64`)
     if radix == 10 && (rest.starts_with('.') || rest.starts_with('e') || rest.starts_with('E') || rest == "f32" || rest == "f64") {
@@ -108,7 +109,7 @@ pub fn lit(t: &str) -> Option<Lit> {
         let suffix = body[n..].to_string();
         if (rest == "f32" || rest == "f64") && suffix == rest {
             // (`1f64` は syn では整数リテラル + 接尾辞 f64)
-            return Some(Lit::Int(LitInt { digits, suffix }));
+            return Some(Lit::Int(LitInt { digits: digits.to_string(), suffix }));
         }
         return Some(Lit::Float(LitFloat { digits: body[..n].to_string(), suffix }));
     }

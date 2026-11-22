@@ -379,6 +379,14 @@ impl Cx<'_> {
             return Ok(None);
         }
         if let Some(pt) = self.peek(receiver) {
+            // (`r.clone()` with `r: &S` and S not Clone: the reference's own clone, a copy of r (`&S`). Not Clone: a type
+            // of the program with no clone and no derive, or an instance with such an argument (`Option<NoClone>`), but
+            // for the shared pointers)
+            if let Ty::Ref(false, i @ Ty::Struct(_)) = pt {
+                if self.not_clone(*i, 0) {
+                    return self.operand(receiver, None, false).map(Some);
+                }
+            }
             let mut t = pt;
             while let Ty::Ref(_, i) = t {
                 if t.is_fat() {
@@ -411,6 +419,11 @@ impl Cx<'_> {
         }
         let r = Ty::Ref(false, intern(t));
         self.call_named("__exr_clone", vec![t], &[(a, r)], SP).map(Some)
+    }
+
+    /// Whether t is surely not Clone (clone_call): Program::surely_not_clone
+    fn not_clone(&self, t: Ty, depth: u32) -> bool {
+        self.prog.surely_not_clone(t, depth)
     }
 
     /// `__exr_clone::<T>(x: &T) -> T` の本体
@@ -735,7 +748,25 @@ impl Cx<'_> {
 impl Cx<'_> {
     /// const は式そのものを埋め込む
     pub(crate) fn const_value(&mut self, p: &Expr, ci: u32) -> R<V> {
-        let _ = p;
+        // (E0391: a constant whose value needs its own (`const A: i32 = B; const B: i32 = A;`))
+        thread_local! {
+            static EVALUATING: std::cell::RefCell<Vec<u32>> = const { std::cell::RefCell::new(Vec::new()) };
+        }
+        if EVALUATING.with(|v| v.borrow().contains(&ci)) {
+            return err(SP, format!("cycle detected when const-evaluating `{}` (E0391)", self.prog.consts[ci as usize].name));
+        }
+        EVALUATING.with(|v| v.borrow_mut().push(ci));
+        let r = self.const_value_in(p, ci);
+        EVALUATING.with(|v| {
+            v.borrow_mut().pop();
+        });
+        r
+    }
+
+    fn const_value_in(&mut self, p: &Expr, ci: u32) -> R<V> {
+        if !self.prog.static_self_consts.is_empty() {
+            self.rg_static_self_const(p, ci);
+        }
         let prog = self.prog;
         let c = &prog.consts[ci as usize];
         let (t, src) = (c.ty, c.expr.clone());

@@ -72,9 +72,109 @@ pub const PTR: Type = types::I64;
 pub type Sp = crate::parse::Pos;
 pub const SP: Sp = crate::parse::Pos { line: 0, col: 0 };
 
+/// Whether an environment variable is set, read once for each flag: getenv scans the whole environment, and these are
+/// asked for each function, closure or temporary
+fn env_once(cell: &'static std::sync::OnceLock<bool>, name: &str) -> bool {
+    *cell.get_or_init(|| std::env::var_os(name).is_some())
+}
+
+/// ACG_PANIC_ERR=1: an error panics (to find where it is made from the backtrace)
+/// An error of the borrow or region check's kind (lowering itself returns some: `m[k] = v` of a HashMap is E0594)
+pub fn borrow_error(e: &str) -> bool {
+    ["cannot assign", "cannot borrow", "cannot move out", "use of moved", "borrow of moved", "does not live long enough", "may not live long enough", "(E0594)", "(E0596)", "(E0384)"]
+        .iter()
+        .any(|k| e.contains(k))
+}
+
+/// borrow_error, and the borrow check's other errors: a use of what is not initialized (E0381), a temporary freed while
+/// borrowed (E0716), a match guard's change (E0510), a returned borrow (E0515, E0713), a closure that outlives what it
+/// borrows (E0373), a use of what is mutably borrowed (E0503) or partly moved (E0382), an assignment to a part of
+/// what was moved (E0382), a closure's borrow that escapes it (E0521)
+/// A placeholder instance's error that holds whatever its type parameters are: an operator its bounds do not give, or
+/// mismatched types of two types written
+/// out (no projection `T::Item` / `<T as Tr>::X`, no `impl` / `dyn` type, no hole, no lifetime), as `x` of
+/// `impl Debug` returned as a String (a placeholder is `T#`)
+pub fn placeholder_mismatch(e: &str, bound_eqs: &[&str]) -> bool {
+    // (an operator a type parameter's bounds do not give, p3_ops: holds whatever the parameter is)
+    if (e.ends_with("(E0369)") || e.ends_with("(E0368)"))
+        && ["cannot add `", "cannot subtract `", "cannot multiply `", "cannot divide `", "cannot calculate the remainder of `", "binary assignment operation `"].iter().any(|v| e.contains(v))
+    {
+        return true;
+    }
+    let Some(m) = e.find("mismatched types: expected `") else { return false };
+    let tys: Vec<&str> = e[m..].split('`').skip(1).step_by(2).take(2).collect();
+    // (the placeholders named: `T#`)
+    let names = |t: &str| -> Vec<String> {
+        t.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '#')).filter_map(|w| w.strip_suffix('#')).map(str::to_string).collect()
+    };
+    if tys.len() == 2 {
+        let (a, b) = (names(tys[0]), names(tys[1]));
+        // (two placeholders: a closure or a bound may relate them; one equated by a bound `Tr<X = T>`)
+        let equated = a.iter().chain(&b).any(|n| bound_eqs.iter().any(|q| q.split('=').skip(1).any(|r| r.trim_start().split(|c: char| !(c.is_alphanumeric() || c == '_')).next() == Some(n.as_str()))));
+        if (!a.is_empty() && !b.is_empty()) || equated {
+            return false;
+        }
+    }
+    // (a hole `_`, or a type parameter left unsubstituted (`T0`): what inference did not reach)
+    let unknown = |t: &str| {
+        t.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '#')).any(|w| {
+            w == "_" || (w.starts_with(|c: char| c.is_ascii_uppercase()) && w[1..].chars().all(|c| c.is_ascii_digit()))
+        })
+    };
+    tys.len() == 2 && tys.iter().all(|t| !t.contains("::") && !t.contains(" as ") && !t.contains("impl ") && !t.contains("dyn ") && !t.contains('\'') && !unknown(t))
+}
+
+pub fn borrow_check_error(e: &str) -> bool {
+    borrow_error(e)
+        || [
+            "isn't initialized",
+            "temporary value",
+            "in match guard",
+            "destructor runs",
+            "cannot return",
+            "may outlive the current function",
+            "because it was mutably borrowed",
+            "of partially moved",
+            "to part of moved",
+            "escapes outside of closure",
+            "(E0505)",
+            "(E0499)",
+            "(E0502)",
+            "(E0506)",
+            "(E0503)",
+        ]
+            .iter()
+            .any(|k| e.contains(k))
+}
+
+pub(crate) fn panic_err() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ACG_PANIC_ERR")
+}
+
+pub(crate) fn no_fresh() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ZUSTC_NO_FRESH")
+}
+
+pub(crate) fn no_ret_dst() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ZUSTC_NO_RET_DST")
+}
+
+pub(crate) fn debug_at() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ACG_DEBUG_AT")
+}
+
+pub(crate) fn debug_clo() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ACG_DEBUG_CLO")
+}
+
 pub fn err<T>(_: Sp, msg: impl std::fmt::Display) -> R<T> {
     // (ACG_PANIC_ERR=1: エラーの場所をバックトレースで調べる)
-    if std::env::var_os("ACG_PANIC_ERR").is_some() {
+    if panic_err() {
         panic!("{msg}");
     }
     Err(msg.to_string())
@@ -405,18 +505,48 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     // fails, as a placeholder cannot do all its bounds allow (a trait's method, a coercion to `dyn`): not checked
     // further, nothing reported. Its borrow and region checks' errors are)
     // (not an error of the borrow check's kind lowering itself returns: `m[k] = v` of a HashMap is E0594 whatever T is)
-    let borrow_kind = |e: &str| {
-        ["cannot assign", "cannot borrow", "cannot move out", "use of moved", "borrow of moved", "does not live long enough", "may not live long enough", "(E0594)", "(E0596)", "(E0384)"]
-            .iter()
-            .any(|k| e.contains(k))
-    };
-    if placeholder && r.as_ref().is_err_and(|e| !borrow_kind(e)) {
+    // (a placeholder's mismatch holds, unless a bound equates its parameter with another type (`Tr<X = T>`))
+    let mut bound_eqs: Vec<&str> = vec![];
+    let mut bound_params: Vec<String> = vec![];
+    if placeholder && r.is_err() {
+        bound_eqs.extend(sig.generics.iter().flat_map(|(_, bs)| bs.iter().map(|b| b.as_str())).filter(|b| b.contains('=')));
+        // (a parameter with an equation in its bounds (`T: Deref<Target = i32>`): its mismatches may be the projection's)
+        bound_params.extend(sig.generics.iter().filter(|(_, bs)| bs.iter().any(|b| b.contains('='))).map(|(n, _)| format!("= {n}")));
+    }
+    // (and the fn's own where clauses, on any type: `where Back: Backend<Layout = DSL>`)
+    for (subj, bs) in f.sig.generics.preds.iter().filter(|_| placeholder && r.is_err()) {
+        for b in bs {
+            if let crate::parse::Bound::Trait(_, p) = b {
+                for seg in &p.segs {
+                    for a in &seg.args {
+                        if let crate::parse::GArg::Bind(_, bt) = a {
+                            if let crate::parse::Ty::Path(None, tp) = bt {
+                                if let Some(s) = tp.segs.last() {
+                                    bound_params.push(format!("= {}", s.name));
+                                }
+                            }
+                            // (`where T: Deref<Target = i32>`: T's mismatches may be the projection's)
+                            if let crate::parse::Ty::Path(None, sp) = subj {
+                                if let [s] = sp.segs.as_slice() {
+                                    bound_params.push(format!("= {}", s.name));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    bound_eqs.extend(bound_params.iter().map(|s| s.as_str()));
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }
         let b = cx.b;
         return Ok((Compiled { rec: b.m, late: vec![], datas: vec![], vtables: vec![], infos: vec![], loc_used: false, line_base }, vec![]));
     }
+    // (a placeholder's type by its parameter's name: `T`, not `T#`)
+    let r = if placeholder { r.map_err(|e| e.replace("#`", "`").replace("#>", ">").replace("#,", ",")) } else { r };
     r?;
     cx.bk_check()?;
     let rerun = cx.rg.rerun && !force_rg;
@@ -864,6 +994,21 @@ pub fn is_promotable(cx: &Cx, e: &Expr) -> bool {
 }
 
 /// `_` の穴を含む型か
+/// Whether a type as written names a path of std / core / alloc (`std::num::NonZero<u64>`), which zustc may not have
+pub fn names_std_path(t: &crate::parse::Ty) -> bool {
+    use crate::parse::{GArg, Ty as P};
+    match t {
+        P::Path(None, p) => {
+            p.segs.first().is_some_and(|s| matches!(s.name.as_str(), "std" | "core" | "alloc"))
+                || p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Ty(x) if names_std_path(x))))
+        }
+        P::Ref(_, _, x) | P::Ptr(_, x) | P::Slice(x) | P::Array(x, _) => names_std_path(x),
+        P::Tuple(xs) => xs.iter().any(names_std_path),
+        P::Fn(ps, r) => ps.iter().any(names_std_path) || names_std_path(r),
+        _ => false,
+    }
+}
+
 pub fn has_hole(prog: &Program, t: Ty) -> bool {
     match t {
         Ty::Param(i) => i == crate::program::HOLE,
@@ -1055,11 +1200,35 @@ impl Cx<'_> {
         if got == want || got == Ty::Never {
             Ok(())
         } else {
-            if std::env::var_os("ACG_PANIC_ERR").is_some() {
+            if panic_err() {
                 panic!("mismatched types");
             }
             Err(self.at(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(want), self.prog.tn(got))))
         }
+    }
+
+    /// Whether two types differ only in the lifetimes their names show (`dyn Foo<Bar = &'a u32>` and `.. &'static u32>`)
+    pub fn apart_in_lifetimes(&self, a: Ty, b: Ty) -> bool {
+        let (x, y) = (self.prog.tn(a), self.prog.tn(b));
+        if !x.contains('\'') && !y.contains('\'') {
+            return false;
+        }
+        // (the names without their `'a`, and their spaces)
+        let plain = |s: &str| {
+            let mut out = String::new();
+            let mut it = s.chars().peekable();
+            while let Some(c) = it.next() {
+                if c == '\'' {
+                    while it.peek().is_some_and(|d| d.is_alphanumeric() || *d == '_') {
+                        it.next();
+                    }
+                } else if !c.is_whitespace() {
+                    out.push(c);
+                }
+            }
+            out
+        };
+        plain(&x) == plain(&y)
     }
 
     /// 書かれた型 (`Self` と型パラメータは env から)
@@ -1112,7 +1281,7 @@ impl Cx<'_> {
     pub fn temp_fresh(&mut self, t: Ty) -> Value {
         let ss = self.slot(t);
         let a = self.b.ins().stack_addr(PTR, ss, 0);
-        if std::env::var_os("ZUSTC_NO_FRESH").is_none() {
+        if !no_fresh() {
             self.fresh.insert(a.0, ss);
         }
         a
@@ -1285,7 +1454,15 @@ impl Cx<'_> {
     }
 
     pub fn lookup(&self, name: &str) -> Option<(Loc, Ty)> {
-        self.scopes.iter().rev().flat_map(|s| s.iter().rev()).find(|(n, _, _)| n == name).map(|&(_, l, t)| (l, t))
+        // (plain loops: a `flat_map` over the scopes costs more per name, and most lookups of a function's names miss)
+        for s in self.scopes.iter().rev() {
+            for (n, l, t) in s.iter().rev() {
+                if n.len() == name.len() && n.as_bytes() == name.as_bytes() {
+                    return Some((*l, *t));
+                }
+            }
+        }
+        None
     }
 
     fn body(&mut self, f: &ItemFn, sig: &FnSig) -> R<()> {
@@ -1303,10 +1480,11 @@ impl Cx<'_> {
         for (k, (p, _)) in f.sig.params.iter().enumerate() {
             names.push(param_name(k, p)?);
         }
-        // (`mut x` parameters, for the borrow checker; `self` is not known)
+        // (`mut x` parameters, for the borrow checker; `self` is `mut self` / `mut self: T` (not `&mut self`, whose
+        // binding is not mutable))
         let mut muts: Vec<Option<bool>> = vec![];
-        if f.sig.recv.is_some() {
-            muts.push(None);
+        if let Some(r) = &f.sig.recv {
+            muts.push(Some(r.starts_with("mut ")));
         }
         for (p, _) in &f.sig.params {
             muts.push(pat_mut(p));
@@ -1438,7 +1616,7 @@ impl Cx<'_> {
     /// e が呼び出しなら、戻り値を sret の場所に直接書かせる印を付ける
     pub fn mark_ret_call(&mut self, e: &Expr) {
         let e = strip_paren(e);
-        if self.sret.is_some() && self.inline_ret.is_none() && matches!(e, Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..)) && std::env::var_os("ZUSTC_NO_RET_DST").is_none() {
+        if self.sret.is_some() && self.inline_ret.is_none() && matches!(e, Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..)) && !no_ret_dst() {
             self.ret_call = Some(e as *const Expr as usize);
         }
     }
@@ -1670,7 +1848,7 @@ impl Cx<'_> {
                     }
                     // (as for a plain let: what the bindings may borrow (a `ref` binding, a reference in the value)
                     // lives to the end of the block, the rest is dropped here: `let (n, _) = (c.borrow().len(), 0);`)
-                    if extends_temps(init) || borrowck::has_refs(self.prog, place.ty(), 0) || format!("{pat:?}").contains("Ident(true") {
+                    if extends_temps(init) || self.bk_ty(place.ty()).1 || format!("{pat:?}").contains("Ident(true") {
                         self.extend_temps(t0);
                     } else {
                         self.drop_temps(t0);
@@ -1693,24 +1871,49 @@ impl Cx<'_> {
                     // (`let _ = Foo;` with Foo a unit struct (or a const) is a value: dropped at once)
                     let local = !matches!(init, Expr::Path(None, p) if ident_of(p).is_some_and(|n| self.lookup(n).is_none()
                         && !self.prog.const_index.get(n).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_some())));
-                    if is_place_expr(init) && local {
+                    // (`let _: u8 = "s";`: the annotation names a type, and the value is checked against it as a named
+                    // binding's is: the expected type, then a deref coercion (`let _: *const u8 = &a;` with `a: Foo`
+                    // stays an error))
+                    // (a type zustc cannot read yet (`[(); foo()]`, `dyn Send`, `std::num::NonZero<u64>`) is not checked;
+                    // a name of none of the program's is an error)
+                    let ann = match ann_ty.as_ref().map(|t| (t, self.parse_ty(t))) {
+                        Some((_, Ok(a))) => Some(a),
+                        Some((t, Err(e))) if e.contains("cannot find type") && !names_std_path(t) => return Err(e),
+                        _ => None,
+                    };
+                    let full = ann.filter(|&a| !has_hole(self.prog, a) && !self.prog.has_param(a));
+                    // (a place of another type than the annotation's is coerced: a value, read)
+                    let coerced = || full.is_some_and(|a| self.peek(init).is_some_and(|pt| pt != a));
+                    if is_place_expr(init) && local && !coerced() {
                         // (`let _ = x;` does not read x)
                         self.bk.place_depth += 1;
                         let r = self.place(init);
                         self.bk.place_depth -= 1;
                         let _ = r?;
+                        self.bk_fake_read(init);
                     } else {
-                        // (`let _: [(); 0] = [];`: the annotation is the expected type)
-                        // (only for an array literal, which needs it for its element type: an expected type would
-                        // also coerce, and `let _: *const u8 = &a;` must stay an error)
-                        let exp = match ann_ty {
-                            Some(t) if matches!(strip_paren(init), Expr::Array(_) | Expr::Repeat(..)) => self.parse_ty(t).ok().filter(|&t| !has_hole(self.prog, t)),
-                            _ => None,
+                        // (`let _: [(); 0] = [];`: an array literal takes its element type from it, holes and all)
+                        let exp = match ann {
+                            Some(a) if matches!(strip_paren(init), Expr::Array(_) | Expr::Repeat(..)) => Some(a).filter(|&a| !has_hole(self.prog, a)),
+                            _ => full,
                         };
-                        let (v, t) = self.expr(init, exp)?;
+                        let (mut v, mut t) = self.expr(init, exp)?;
                         if t == Ty::Never {
                             diverged = true;
                             continue;
+                        }
+                        if let Some(a) = full.filter(|&a| a != t) {
+                            let (v2, t2) = self.deref_coerce(v, t, a);
+                            if t2 == a {
+                                v = v2;
+                                t = t2;
+                            }
+                            // (`*mut T` where `*const T` is written: the same pointer. Types apart in their lifetimes only
+                            // (`dyn Foo<Bar = &'a u32>`, which keeps the text of its bounds) are the region check's)
+                            let ptr = matches!((t, a), (Ty::Ptr(true, x), Ty::Ptr(false, y)) if x == y);
+                            if !ptr && !self.apart_in_lifetimes(t, a) {
+                                self.same(SP, t, a).map_err(|m| self.at(expr_start(init), m))?;
+                            }
                         }
                         if let Some(v) = v {
                             self.own_temp(v, t);
@@ -1909,7 +2112,7 @@ impl Cx<'_> {
                     // extends them (`let r = &f();`, `let p: *const S = &S::new();`). zustc also keeps them when the
                     // bound value may hold a reference, which rustc rejects when it borrows a temporary (E0716) and
                     // zustc does not see yet. A RefCell guard in `let n = *c.borrow();` must not outlive the let)
-                    if extends_temps(init) || borrowck::has_refs(self.prog, ty, 0) {
+                    if extends_temps(init) || self.bk_ty(ty).1 {
                         self.extend_temps(t0);
                     } else {
                         self.drop_temps(t0);
@@ -1969,7 +2172,7 @@ impl Cx<'_> {
                     }
                     if tail {
                         let srcs = self.bk_frame_end();
-                        if borrowck::has_refs(self.prog, self.ret, 0) {
+                        if self.bk_ty(self.ret).1 {
                             { let _ = &srcs; self.bk_ret(e); }
                         }
                     }

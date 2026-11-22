@@ -505,7 +505,7 @@ impl Cx<'_> {
         self.bk.place_depth = pd;
         let (v, t) = r.map_err(|m| {
             // (エラーに、位置を持つ一番内側の式の先頭の行:桁を付ける。ACG_DEBUG_AT=1 なら式も)
-            let m = if std::env::var_os("ACG_DEBUG_AT").is_some() && !m.contains(" (at `") {
+            let m = if super::debug_at() && !m.contains(" (at `") {
                 let d = format!("{e:?}");
                 format!("{m} (at `{}`)", d.chars().take(400).collect::<String>())
             } else {
@@ -701,7 +701,12 @@ impl Cx<'_> {
                 let p = self.place(e)?;
                 let r = self.read(p);
                 if self.bk_on() && (!self.bk_ty(r.1).0 || exp_none && matches!(r.1, Ty::Ref(true, _))) {
+                    if !self.bk_ty(r.1).0 {
+                        self.drop_move_check(e)?;
+                    }
                     self.bk_acc(e, borrowck::Acc::Move);
+                } else if self.bk_on() && !self.prog.static_copy.is_empty() {
+                    self.bk_copy(e, r.1);
                 }
                 // drop が要る値を値として読んだらムーブ
                 if self.needs_drop(r.1) {
@@ -1079,6 +1084,8 @@ impl Cx<'_> {
                 lp.breaks += 1;
                 let (t, d, tt) = (lp.brk, lp.depth, lp.temps);
                 self.drop_for_exit(d, tt);
+                // (the locals of the scopes left go out of scope here: `loop { let x = 1; r = &x; break; }`)
+                self.bk_dead_exit(d, *pos);
                 let args: Vec<Value> = args;
                 self.b.ins().jump(t, &args);
                 Ok(self.dead())
@@ -1091,6 +1098,7 @@ impl Cx<'_> {
                 let lp = &self.loops[li];
                 let (t, d, tt) = (lp.cont, lp.depth, lp.temps);
                 self.drop_for_exit(d, tt);
+                self.bk_dead_exit(d, *pos);
                 self.b.ins().jump(t, &[]);
                 Ok(self.dead())
             }
@@ -1106,7 +1114,7 @@ impl Cx<'_> {
                         if t == Ty::Never {
                             return Ok((None, Ty::Never));
                         }
-                        if borrowck::has_refs(self.prog, ret, 0) {
+                        if self.bk_ty(ret).1 {
                             { let _ = &srcs; self.bk_ret(e); }
                         }
                         self.rg_ret(e);
@@ -1842,6 +1850,12 @@ impl Cx<'_> {
                         let mut p = bp.clone();
                         p.proj.push(borrowck::Proj::Field(f));
                         let a = if borrowck::is_copy(self.prog, ft, 0) { borrowck::Acc::Read } else { borrowck::Acc::Move };
+                        // (moving a field out of a value whose type implements `Drop`: E0509)
+                        if a == borrowck::Acc::Move && self.bk.level >= 1 {
+                            if let Some(n) = self.user_drop_name(bsid) {
+                                return err(err_pos(base), format!("cannot move out of type `{n}`, which implements the `Drop` trait (E0509)"));
+                            }
+                        }
                         self.bk_acc_place(p, a, err_pos(base));
                     }
                 }
@@ -1944,6 +1958,7 @@ impl Cx<'_> {
             }
         }
         let mut caps = vec![];
+        let mut copy_caps = vec![];
         for (i, n) in cd.captures.iter().enumerate() {
             let Some((loc, t)) = self.lookup(n) else {
                 return err(SP, format!("cannot capture `{n}` here"));
@@ -1952,7 +1967,7 @@ impl Cx<'_> {
             let ct = if by_move { t } else { Ty::Ptr(true, intern(t)) };
             sol[cd.n_parent + i] = Some(ct);
             caps.push((loc, t));
-            self.bk_capture(c, n, loc, t, by_move);
+            copy_caps.push(self.bk_capture(c, n, loc, t, by_move));
         }
         // (a capture held by value (a `move` closure's) of a local not declared `mut`, which the body assigns or borrows
         // mutably: E0594 / E0596 at the mutation; one held by reference is a `&mut` loan the borrow check reports)
@@ -2005,7 +2020,7 @@ impl Cx<'_> {
             .or(hint.as_ref().and_then(|h| h.1).filter(|&t| !prog.has_param(t)))
             .or_else(|| self.lets.get(&(c as *const Expr as usize)).copied().filter(|&t| !prog.has_param(t)))
             .or(hint.as_ref().and_then(|h| h.1));
-        if std::env::var_os("ACG_DEBUG_CLO").is_some() {
+        if super::debug_clo() {
             eprintln!("closure k={k} ret_ann={:?} hint={:?} rec={:?} -> {:?}", cd.ret_ann, hint, self.lets.get(&(c as *const Expr as usize)), sol[ri]);
         }
         if let Some(a) = exp_args {
@@ -2145,6 +2160,13 @@ impl Cx<'_> {
                 };
                 let (v, _) = self.read(p);
                 self.write(Place::Mem(a, off as i32, ft), v);
+                // (a copy of which the body uses only `Copy` parts (bk_capture): its other parts are emptied, so that
+                // dropping the closure frees nothing, and the variable is not moved)
+                if copy_caps.get(i).copied().unwrap_or(false) {
+                    let dst = self.addr_plus(a, off as i32);
+                    self.zero_drop_parts(dst, t);
+                    continue;
+                }
                 if self.needs_drop(t) {
                     // (a capture of the enclosing closure moved into this one: as for moving it out, the
                     // enclosing closure's slot becomes empty)
@@ -2365,40 +2387,8 @@ impl Cx<'_> {
                     return err(span, format!("the value of the associated type `{n}` in `{tr}` must be specified (E0191)"));
                 }
             }
-            // (E0038 too: a supertrait of the program's trait that takes Self by default (`trait Expr: PartialEq`))
-            {
-                let mut st = vec![tr.to_string()];
-                let mut seen: Vec<String> = vec![];
-                while let Some(t) = st.pop() {
-                    if seen.contains(&t) {
-                        continue;
-                    }
-                    for sup in self.prog.trait_supers.get(&t).cloned().unwrap_or_default() {
-                        if sup == "#SelfRhs" {
-                            return err(span, format!("the trait `{tr}` is not dyn compatible: it uses `Self` as a type parameter (E0038)"));
-                        }
-                        st.push(sup.split('<').next().unwrap_or("").trim().to_string());
-                    }
-                    seen.push(t);
-                }
-            }
-            // (E0038: a method without `where Self: Sized` makes the trait not dyn compatible when it has no `self`,
-            // or, for a method the program's own trait declares (not a supertrait's, not the prelude's, which leave
-            // out their `where Self: Sized`), when `Self` is in its parameters or result)
-            for &d in &decls {
-                let ds = &self.prog.sigs[d as usize];
-                let sized = ds.generics.first().is_some_and(|g| g.1.iter().any(|b| b == "Sized"));
-                if sized {
-                    continue;
-                }
-                let own = self.prog.item_of.get(d as usize).copied().flatten().is_some_and(|ii| ii < self.prog.prelude_from);
-                let self_used = own && ds.trait_of.as_deref() == Some(tr) && (ds.params.iter().skip(1).any(|&p| mentions_self(self.prog, p)) || mentions_self(self.prog, ds.ret));
-                // (generics of its own: more than Self and the trait's own parameters)
-                let own_generics = own && ds.trait_of.as_deref().and_then(|t| self.prog.trait_ngen.get(t)).is_some_and(|&n| ds.generics.len() > n);
-                if !ds.has_self || self_used || own_generics {
-                    let m = self.prog.names[d as usize].rsplit("::").next().unwrap_or("").to_string();
-                    return err(span, format!("the trait `{tr}` is not dyn compatible: `{m}` (E0038)"));
-                }
+            if let Some(m) = dyn_incompatible(self.prog, tr, &decls, false) {
+                return err(span, m);
             }
             for &d in &decls {
                 let ds = &self.prog.sigs[d as usize];
@@ -2958,6 +2948,10 @@ impl Cx<'_> {
                                 self.bk.no_loan_src = false;
                             }
                         }
+                        // (a bound that writes `'static` (`F: Fn(&'static u8)`): checked from here on, as a `dyn Fn`'s)
+                        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && b.contains("'static") {
+                            self.rg_late_on();
+                        }
                         let mut never = false;
                         let prim = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char);
                         for (a, &pt) in args.iter().zip(&ps) {
@@ -2967,6 +2961,8 @@ impl Cx<'_> {
                                 return err(expr_start(a), format!("mismatched types: expected `{}`, found `{}` (an argument of a call through the bound `{b}`) (E0308)", self.prog.tn(pt), self.prog.tn(at)));
                             }
                         }
+                        // (the arguments flow into the regions the bound's parameters write, as for a `dyn Fn`)
+                        self.rg_dyn_fn_args(&b, &args);
                         let r = if never { (None, Ty::Never) } else { self.zero_of(ret) };
                         self.bk_frame_end_call();
                         return Ok(r);
@@ -3347,6 +3343,54 @@ impl Cx<'_> {
 }
 
 /// t names `Self` (the parameter 0 of a trait's method) itself, not through an associated type (`Self::Item`)
+/// E0038: why the trait `tr` is not dyn compatible, with its methods dyn calls (Program::dyn_methods), or None. A
+/// supertrait of the program's trait that takes Self by default (`trait Expr: PartialEq`); a method without
+/// `where Self: Sized` that has no `self`, or (the program's own trait's) that names `Self` in its parameters or result
+/// or has generics of its own
+/// `bounded_exempt`: a method with any bound on Self counts as `where Self: Sized` (a bound's trait may be Sized,
+/// `where Self: Tr1` with `trait Tr1: Sized`, which the supertraits recorded leave out)
+pub fn dyn_incompatible(prog: &crate::program::Program, tr: &str, decls: &[u32], bounded_exempt: bool) -> Option<String> {
+    // (E0038 too: a supertrait of the program's trait that takes Self by default (`trait Expr: PartialEq`))
+    {
+        let mut st = vec![tr.to_string()];
+        let mut seen: Vec<String> = vec![];
+        while let Some(t) = st.pop() {
+            if seen.contains(&t) {
+                continue;
+            }
+            for sup in prog.trait_supers.get(&t).cloned().unwrap_or_default() {
+                if sup == "#SelfRhs" {
+                    return Some(format!("the trait `{tr}` is not dyn compatible: it uses `Self` as a type parameter (E0038)"));
+                }
+                st.push(sup.split('<').next().unwrap_or("").trim().to_string());
+            }
+            seen.push(t);
+        }
+    }
+    // (E0038: a method without `where Self: Sized` makes the trait not dyn compatible when it has no `self`,
+    // or, for a method the program's own trait declares (not a supertrait's, not the prelude's, which leave
+    // out their `where Self: Sized`), when `Self` is in its parameters or result)
+    for &d in decls {
+        let ds = &prog.sigs[d as usize];
+        // (a bound of Self's other than its own trait's: `where Self: Tr1<..>`)
+        let named = |b: &str, t: &str| b == t || b.starts_with(&format!("{t}<"));
+        let other_bound = |g: &(String, Vec<String>)| g.1.iter().any(|b| !named(b, tr) && !ds.trait_of.as_deref().is_some_and(|t| named(b, t)));
+        let sized = ds.generics.first().is_some_and(|g| g.1.iter().any(|b| b == "Sized") || (bounded_exempt && other_bound(g)));
+        if sized {
+            continue;
+        }
+        let own = prog.item_of.get(d as usize).copied().flatten().is_some_and(|ii| ii < prog.prelude_from);
+        let self_used = own && ds.trait_of.as_deref() == Some(tr) && (ds.params.iter().skip(1).any(|&p| mentions_self(prog, p)) || mentions_self(prog, ds.ret));
+        // (generics of its own: more than Self and the trait's own parameters)
+        let own_generics = own && ds.trait_of.as_deref().and_then(|t| prog.trait_ngen.get(t)).is_some_and(|&n| ds.generics.len() > n);
+        if !ds.has_self || self_used || own_generics {
+            let m = prog.names[d as usize].rsplit("::").next().unwrap_or("").to_string();
+            return Some(format!("the trait `{tr}` is not dyn compatible: `{m}` (E0038)"));
+        }
+    }
+    None
+}
+
 fn mentions_self(prog: &crate::program::Program, t: Ty) -> bool {
     match t {
         Ty::Param(0) => true,

@@ -134,6 +134,7 @@ impl Session2 {
         let mut user_live: Vec<u32> = (0..a.prog.names.len()).filter(|&i| live[i] && concrete(&a.prog, i) && !a.is_ext(i as u32)).map(|i| i as u32).collect();
         let insts = Mutex::new(Insts::new(&a.prog));
         let mut blobs: FxMap<u32, Blob> = FxMap::default();
+        let log_compiled = std::env::var_os("ZUSTC_LOG_COMPILED").is_some();
         let mut wave = user_live.clone();
         while !wave.is_empty() {
             let cur = wave.clone();
@@ -151,7 +152,7 @@ impl Session2 {
                     a.line_base_for(&*g, id)
                 };
                 let raw = self.get(k);
-                if std::env::var_os("ZUSTC_LOG_COMPILED").is_some() && raw.is_some() {
+                if log_compiled && raw.is_some() {
                     let d = crate::cache2::decode_blob(raw.as_ref().unwrap(), &a.prog, &insts);
                     match &d {
                         None => eprintln!("decode-fail {}", a.prog.names[insts.lock().unwrap().body_of(id) as usize]),
@@ -168,7 +169,7 @@ impl Session2 {
                     None => misses.push(id),
                 }
             }
-            if std::env::var_os("ZUSTC_LOG_COMPILED").is_some() {
+            if log_compiled {
                 let g = insts.lock().unwrap();
                 for &id in &misses {
                     let b = g.body_of(id);
@@ -241,10 +242,10 @@ impl Session2 {
         let t0 = now_ns();
         let mut tm = Timer { on: self.opts.time, last: t0, start: t0 };
         let mut rep = Report2::default();
-        let a = self.analyze(src)?;
+        let a = self.analyze(src).map_err(|e| self.unhoist_analysis_err(src, e))?;
         rep.items_parsed = a.n_parsed;
         tm.lap("front", format!("{} items, {} parsed", a.items.len(), a.n_parsed));
-        let obj = self.compile_object(&a, &mut rep, Some(&mut tm))?;
+        let obj = self.compile_object(&a, &mut rep, Some(&mut tm)).map_err(|e| super::unhoist_err(&a, e))?;
         tm.lap("object", format!("{} bytes", obj.len()));
         rep.object_bytes = obj.len();
         // (wasm32: the module is the output, nothing to link)

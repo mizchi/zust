@@ -16,7 +16,6 @@ These are in the type and borrow checks that the compat and region-check work ch
 |---|---|
 | `borrow_closure_escapes` | E0373 is only checked for `thread::spawn`: a boxed closure borrowing a local is returned |
 | `region_block_tail_escapes` | a loan held by a block's local, or by what a by-value method returns (`Some(&v).unwrap()`), is not followed out of the block's tail (E0597) |
-| `borrow_uninit_read` | rejected, but reported at the function's first line instead of the read |
 
 ### Privacy
 
@@ -39,7 +38,6 @@ invariants.
 | `cve_2019_12083_error_type_id` | an impl may define a method its trait does not declare (E0407). zustc has no downcast, so no type confusion follows |
 | `lit_overflow` | `let x: u8 = 256;` (overflowing_literals) is accepted and wraps to 0 |
 | `const_overflow` | overflow in a const (E0080) is found only when it is evaluated at run time (a panic) |
-| `unsafe_nested_fn_in_unsafe_block` | rejected with E0133, but at a wrong line (a nested fn's lines are counted from its item) |
 | `unsafe_union_pattern` | rejected, but as an unsupported pattern (a union pattern of one field), not as E0133 |
 
 ### Runtime

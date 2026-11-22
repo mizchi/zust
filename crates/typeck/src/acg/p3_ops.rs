@@ -188,6 +188,56 @@ impl Cx<'_> {
             return Ok((Some(res), Ty::Bool));
         }
 
+        // (E0369 / E0368: an operator on a type parameter whose bounds have not the operator's trait (`a * b` with
+        // `T: MyMul<f64>`: a method of that name is not the operator). Not one behind a reference, which a where
+        // clause may give it (`for<'x> &'x T: Add<&'x T>`)
+        // (behind a reference: no check, and none of the mismatches the numeric path would make: the placeholder's
+        // instance is left unchecked)
+        // (only where placeholders are: zustc check's last round)
+        let placeholders = matches!(op, "+" | "-" | "*" | "/" | "%") && self.prog.any_placeholder();
+        if let Some(Ty::Ref(_, Ty::Struct(sid))) = if placeholders { self.peek(left) } else { None } {
+            if self.prog.structs[*sid as usize].placeholder.is_some() && self.peek(right).is_some_and(|r| !matches!(r, Ty::Ref(..) | Ty::Struct(_))) {
+                return err(SP, "an operator on a reference to a type parameter and a value of another type");
+            }
+        }
+        if let Some(lt @ Ty::Struct(sid)) = if placeholders { self.peek(left) } else { None } {
+            let tr = match op {
+                "+" => "Add",
+                "-" => "Sub",
+                "*" => "Mul",
+                "/" => "Div",
+                "%" => "Rem",
+                _ => "",
+            };
+            if let (Some(bs), false) = (&self.prog.structs[sid as usize].placeholder, tr.is_empty()) {
+                // (the trait of the operator's form, `AddAssign` for `+=`; a bound's supertraits give it too
+                // (`trait Sum: Add<Output = Self>`); a bound zustc does not know may)
+                let want = if assign { format!("{tr}Assign") } else { tr.to_string() };
+                let prog = self.prog;
+                fn gives(prog: &Program, n: &str, want: &str, depth: u32) -> bool {
+                    let n = n.rsplit("::").next().unwrap_or(n).trim();
+                    n == want
+                        || depth < 8 && prog.trait_supers.get(n).is_some_and(|ss| ss.iter().any(|s| gives(prog, s.split('<').next().unwrap_or(s), want, depth + 1)))
+                        || !prog.traits.contains_key(n) && !matches!(n, "Copy" | "Clone" | "Debug" | "Display" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Default" | "Sized" | "Send" | "Sync")
+                            && !["Add", "Sub", "Mul", "Div", "Rem"].iter().any(|o| n == *o || n == format!("{o}Assign"))
+                }
+                let named = |b: &String| b.split('<').next().is_some_and(|n| gives(prog, n, &want, 0));
+                if !bs.iter().any(named) {
+                    let show = |t: Ty| self.prog.tn(t).replace('#', "");
+                    let (l, r) = (show(lt), self.peek(right).map_or("_".to_string(), show));
+                    let pos = if let Expr::Binary(_, _, _, sp) | Expr::AssignOp(_, _, _, sp) = e { sp.start } else { SP };
+                    let m = match (tr, assign) {
+                        (_, true) => format!("binary assignment operation `{op}=` cannot be applied to type `{l}` (E0368)"),
+                        ("Add", _) => format!("cannot add `{r}` to `{l}` (E0369)"),
+                        ("Sub", _) => format!("cannot subtract `{r}` from `{l}` (E0369)"),
+                        ("Mul", _) => format!("cannot multiply `{l}` by `{r}` (E0369)"),
+                        ("Div", _) => format!("cannot divide `{l}` by `{r}` (E0369)"),
+                        _ => format!("cannot calculate the remainder of `{l}` divided by `{r}` (E0369)"),
+                    };
+                    return err(pos, m);
+                }
+            }
+        }
         // 演算子のオーバーロード (`impl Add for V` / String + &str): `a.add(b)` / `a.add_assign(b)`
         if let Some(Ty::Struct(sid)) = self.peek(left) {
             let m = match (op, assign) {
@@ -1749,6 +1799,46 @@ impl Cx<'_> {
         let (v, elem) = self.expr(x, exp)?;
         if elem == Ty::Never {
             return Ok((None, Ty::Never));
+        }
+        // (E0277: two or more copies of a value need it to be Copy; a constant (`[C; 4]`, `[const { .. }; 4]`) is
+        // evaluated for each)
+        let constant = match strip_paren(x) {
+            // (the resolver's: `Self::C`, `m::C`, a local of the name shadows it)
+            e @ Expr::Path(None, p) => p.segs.len() >= 1 && (p.segs.len() >= 2 || self.lookup(&p.segs[0].name).is_none()) && self.const_of(e).is_some(),
+            Expr::Const(_) => true,
+            _ => false,
+        };
+        // (Copy as a trait: `&mut T` is not, though the borrow check's is_copy counts it, as it is reborrowed)
+        // (an instance whose Copy needs its arguments' (`Option<&mut T>`, a derive of the program's), not
+        // `PhantomData<&mut T>`)
+        fn copy_needs_args(p: &Program, sid: u32) -> bool {
+            let b = p.base_of(sid);
+            let own = p.struct_item.get(b as usize).is_some_and(|&ii| ii < p.prelude_from);
+            p.impls.contains(&(b, "Copy".to_string())) && if own { p.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Copy")) } else { p.clone_needs_args(b, false) }
+        }
+        fn mut_ref(p: &Program, t: Ty, depth: u32) -> bool {
+            match t {
+                Ty::Ref(true, _) => true,
+                Ty::Array(e, _) => depth < 16 && mut_ref(p, *e, depth + 1),
+                Ty::Struct(sid) if p.is_tuple(sid) => depth < 16 && p.structs[sid as usize].fields.iter().any(|f| mut_ref(p, f.1, depth + 1)),
+                Ty::Struct(sid) => depth < 16 && copy_needs_args(p, sid) && p.structs[sid as usize].args.iter().any(|&a| mut_ref(p, a, depth + 1)),
+                _ => false,
+            }
+        }
+        let is_copy = |p: &Program, t: Ty| super::borrowck::is_copy(p, t, 0) && !mut_ref(p, t, 0);
+        if n >= 2 && self.user_code && !constant && !is_copy(self.prog, elem) {
+            // (the type that is not Copy: an argument of a Copy type, as rustc names it (`Option<Bar>`: `Bar`,
+            // `Option<&mut i32>`: `&mut i32`))
+            let mut culprit = elem;
+            while let Ty::Struct(sid) = culprit {
+                let p = self.prog;
+                let derived_copy = p.impls.contains(&(p.base_of(sid), "Copy".to_string()));
+                match p.structs[sid as usize].args.iter().find(|&&a| !is_copy(p, a)) {
+                    Some(&a) if derived_copy => culprit = a,
+                    _ => break,
+                }
+            }
+            return err(expr_start(x), format!("the trait bound `{}: Copy` is not satisfied (E0277)", self.prog.tn(culprit)));
         }
         let t = Ty::Array(intern(elem), n);
         let base = self.temp(t);

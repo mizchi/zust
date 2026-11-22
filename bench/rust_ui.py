@@ -11,6 +11,7 @@ Each test's kind comes from its header directives, as in rustc's compiletest:
 - check-pass / build-pass: `zustc check` accepts it (build-pass also builds it)
 - compile-fail (no pass/fail directive; errors marked with `//~ ERROR`): `zustc check` rejects it with an error on a
   line an annotation points at. Rejections that only report other lines are counted as "wrong line"
+Each is compiled in its `//@ edition:` (`--edition=`), 2015 without one, as compiletest does.
 
 Tests zustc cannot be asked to handle are counted as "not applicable", not as failures: nightly `#![feature(..)]`,
 auxiliary crates (`aux-build`, `aux-crate`), `compile-flags`, `revisions`, `needs-*` other than what Linux x86-64 has,
@@ -133,12 +134,20 @@ def test_helpers():
 HELPERS = None
 
 
+def edition(text):
+    """The edition the test is compiled in, as compiletest passes it: `//@ edition: 2018` (the lower end of a range
+    `2018..`), 2015 without one"""
+    m = re.search(r"^\s*//@\s*edition\s*:\s*(\d{4})", text, re.M)
+    return m.group(1) if m else "2015"
+
+
 def run_one(path, kind, tmp):
     name = os.path.splitext(os.path.basename(path))[0]
     exe = os.path.join(tmp, re.sub(r"[^\w]", "_", os.path.relpath(path, TESTS)))
+    ed = "--edition=" + edition(open(path, errors="replace").read())
     try:
         if kind in ("check-pass", "compile-fail"):
-            r = subprocess.run([*LIMIT, ZUSTC, "check", path], capture_output=True, text=True, timeout=30)
+            r = subprocess.run([*LIMIT, ZUSTC, "check", path, ed], capture_output=True, text=True, timeout=30)
             if crashed(r):
                 return "crash"
             ok = r.returncode == 0
@@ -151,7 +160,7 @@ def run_one(path, kind, tmp):
             got = {int(m.group(1)) for m in re.finditer(r"^error: [^\n]*?:(\d+):\d+:", r.stderr, re.M)}
             return "pass" if want & got else "wrong-line"
         libs = ["-L", HELPERS] if HELPERS else []
-        r = subprocess.run([*LIMIT, ZUSTC, path, "-o", exe, "--no-cache", *libs], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([*LIMIT, ZUSTC, path, "-o", exe, "--no-cache", ed, *libs], capture_output=True, text=True, timeout=60)
         if crashed(r):
             return "crash"
         if r.returncode != 0:
