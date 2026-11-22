@@ -3808,6 +3808,7 @@ compile-fail	lint/unused/issue-81314-unused-span-ident.rs
 check-pass	lint/unused/issue-90807-unused-paren.rs
 compile-fail	lint/unused/lint-unsed-in-macro-issue-151269.rs
 compile-fail	lint/unused/lint-unused-imports-self-single.rs
+compile-fail	lint/unused/lint-unused-imports.rs
 check-pass	lint/unused/match_with_guard.rs
 check-pass	lint/unused/must-use-block-expr.rs
 check-pass	lint/unused/must-use-box-from-raw.rs
@@ -6103,6 +6104,7 @@ check-pass	rfcs/rfc-2396-target_feature-11/check-pass.rs
 check-pass	rfcs/rfc-2396-target_feature-11/closures-inherit-target_feature.rs
 check-pass	rfcs/rfc-2396-target_feature-11/issue-108655-inline-always-closure.rs
 check-pass	rfcs/rfc-2396-target_feature-11/issue-99876.rs
+run-pass	rfcs/rfc-2396-target_feature-11/return-fn-ptr.rs
 run-pass	rfcs/rfc-2421-unreserve-pure-offsetof-sizeof-alignof/offsetof-alignof-sizeof-pure-can-be-used-as-idents.rs
 check-pass	rfcs/rfc-2457-non-ascii-idents/mod_file_nonascii_with_path_allowed.rs
 check-pass	rfcs/rfc-2457-non-ascii-idents/mod_inline_nonascii_allowed.rs

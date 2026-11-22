@@ -2080,6 +2080,102 @@ pub fn flatten_modules_in(src: &str, crates: &[String]) -> Option<String> {
 
 /// fix: rename_module_collisions_fix と同じ (平らにするのは位置を変えない)
 pub fn flatten_modules_fix(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>) -> Option<String> {
+    let aliased = expand_module_aliases(src);
+    let changed = aliased.is_some();
+    let src: &str = aliased.as_deref().unwrap_or(src);
+    let r = flatten_modules_fix_in(src, crates, fix);
+    if r.is_none() && changed {
+        return aliased;
+    }
+    r
+}
+
+/// A module imported by a `use` (`use crate::arch::generic::memchr as generic;`, `use crate::arch::{generic::packedpair}`):
+/// in its module (not the modules inside it), a path through the name (`generic::Iter`) is written through the
+/// module's path instead (`crate::arch::generic::memchr::Iter`), which the flattening of modules renames. None if
+/// there is none.
+pub fn expand_module_aliases(src: &str) -> Option<String> {
+    if !src.contains("use") || !src.contains("mod") {
+        return None;
+    }
+    let s = src.as_bytes();
+    let toks = tokenize(s);
+    let tk = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
+    let is_sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && toks[k].2 == toks[k].1 + 1 && s[toks[k].1] == c;
+    let is_id = |k: usize| k < toks.len() && toks[k].0 == 0;
+    // (modules: the names, and the token ranges of their bodies)
+    let mut names: Vec<&[u8]> = vec![];
+    let mut ranges: Vec<(usize, usize)> = vec![];
+    let mut stack: Vec<(usize, i32)> = vec![];
+    let mut depth = 0i32;
+    for k in 0..toks.len() {
+        if is_id(k) && tk(k) == b"mod" && is_id(k + 1) && is_sym(k + 2, b'{') {
+            names.push(tk(k + 1));
+            stack.push((k + 2, depth + 1));
+        } else if is_sym(k, b'{') {
+            depth += 1;
+        } else if is_sym(k, b'}') {
+            if stack.last().is_some_and(|&(_, d)| d == depth) {
+                let (o, _) = stack.pop().unwrap();
+                ranges.push((o, k));
+            }
+            depth -= 1;
+        }
+    }
+    if names.is_empty() {
+        return None;
+    }
+    // (the innermost module body around token k)
+    let scope = |k: usize| ranges.iter().filter(|&&(o, c)| o < k && k < c).min_by_key(|&&(o, c)| c - o).copied();
+    let mut reps: Vec<(usize, Vec<u8>)> = vec![]; // (token, its new text)
+    let mut k = 0;
+    while k < toks.len() {
+        // (`use a::b::m as x;`, in a tree too: `use crate::{arch::m as x, y};`)
+        if !(is_id(k) && tk(k) == b"use") || (k >= 1 && (is_sym(k - 1, b'.') || is_sym(k - 1, b':'))) {
+            k += 1;
+            continue;
+        }
+        let Some(e) = (k + 1..toks.len()).find(|&j| is_sym(j, b';')) else { break };
+        let mut binds = vec![];
+        use_walk(&toks, s, k + 1, e, vec![], &mut binds);
+        let sc = scope(k);
+        let (lo, hi) = sc.map_or((0, toks.len()), |(o, c)| (o + 1, c));
+        // (the modules inside it do not see the name)
+        let inner: Vec<(usize, usize)> = ranges.iter().copied().filter(|&(o, c)| lo <= o && c < hi && Some((o, c)) != sc).collect();
+        for (path, alias) in binds {
+            let Some(last) = path.last() else { continue };
+            if path.len() < 2 || alias == b"*" || alias == b"_" || !names.contains(&last.as_slice()) {
+                continue;
+            }
+            let text = path.join(&b"::"[..]);
+            for t in lo..hi {
+                if (k..=e).contains(&t) || inner.iter().any(|&(o, c)| o <= t && t <= c) {
+                    continue;
+                }
+                if is_id(t) && tk(t) == alias.as_slice() && is_sym(t + 1, b':') && is_sym(t + 2, b':') && !(t >= 2 && is_sym(t - 1, b':') && is_sym(t - 2, b':')) && !(t >= 1 && is_sym(t - 1, b'.')) {
+                    reps.push((t, text.clone()));
+                }
+            }
+        }
+        k = e + 1;
+    }
+    if reps.is_empty() {
+        return None;
+    }
+    reps.sort_by_key(|r| r.0);
+    reps.dedup_by_key(|r| r.0);
+    let mut out = Vec::with_capacity(s.len() + reps.len() * 16);
+    let mut at = 0;
+    for (t, p) in reps {
+        out.extend_from_slice(&s[at..toks[t].1]);
+        out.extend_from_slice(&p);
+        at = toks[t].2;
+    }
+    out.extend_from_slice(&s[at..]);
+    String::from_utf8(out).ok()
+}
+
+fn flatten_modules_fix_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>) -> Option<String> {
     let renamed = rename_module_collisions_fix(src, crates, fix);
     let src: &str = renamed.as_deref().unwrap_or(src);
     if !src.contains("mod") {

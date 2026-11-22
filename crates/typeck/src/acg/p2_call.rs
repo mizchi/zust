@@ -1304,7 +1304,8 @@ impl Cx<'_> {
             let args: Vec<&Expr> = margs.iter().collect();
             return self.call_fn(id, Some((v, vt)), &args, tf, expected, SP).map(Some);
         }
-        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Box(_))) {
+        // (a vector of core::arch too: `impl Vector for __m128i`'s `v.movemask()`)
+        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Box(_) | Ty::Vec(_))) {
             return Ok(None);
         }
         // (`b.inc()` with `impl Inc for i32` and b: Box<i32>: the number's method, when the Box has none)

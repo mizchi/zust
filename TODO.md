@@ -93,6 +93,11 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   claims the address is aligned) although `ptr::read_unaligned` and a gather off an unaligned base (scale >= the
   element size) use them too. x86 scalar moves do not need alignment, so the code is right today; an alignment
   operand (or an unaligned load op) on `Op::Load` / `Op::Store` would make the flag true.
+- memchr (42 crates of dioxus, 29 of leptos depend on it) stops at items a `macro_rules!` expansion puts in a function
+  body (`unsafe_ifunc!`: `type Fn = *mut ();`, `static FN: AtomicPtr<()>`, `fn detect()` inside a block): "nested
+  items are not supported". Nested items written in a body are hoisted; those of an expression macro's expansion are
+  not. Also `is_x86_feature_detected!` is `true` only for sse / sse2 (no detection at run time), and the vector types
+  `__m128` / `__m128i` / `__m128d` / `v128` are one type, so impls of a trait for two of them conflict.
 - Incremental preprocessing (`prep` with a `PrepMemo`) can differ from `prep_full` on unbalanced input: an item in a
   brace that an edit leaves open (`println!("{}", std::mem::size_o{ fn inner() {} }` inside `fn main`) is hoisted to
   the top level by the full pass but left in place by the chunked one. Found by `tests/prep_inc.rs` when

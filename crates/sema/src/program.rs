@@ -245,6 +245,17 @@ fn early_int_ty(t: &TySyn, aliases: &FxMap<String, (Vec<String>, TySyn)>) -> Opt
     None
 }
 
+/// The names of core::arch's vector type t (`Ty::Vec(128)`: `__m128i`, `__m128`, `__m128d`, `v128`), which an impl
+/// may use for it
+pub fn vector_names(t: Ty) -> &'static [&'static str] {
+    match t {
+        Ty::Vec(128) => &["__m128i", "__m128", "__m128d", "v128"],
+        Ty::Vec(256) => &["__m256i", "__m256", "__m256d"],
+        Ty::Vec(512) => &["__m512i", "__m512", "__m512d"],
+        _ => &[],
+    }
+}
+
 /// An integer type in constant evaluation: its width and sign (usize / isize are 64 bits)
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct It {
@@ -1396,6 +1407,8 @@ impl Program {
                 let impl_of = match &ss.impl_of {
                     // (`impl Tr for Box<S>`: Box is not a struct; its methods are found by the self type, as for primitives)
                     Some(n) if Ty::prim(n).is_some() || n == "__array" || n == "__slice" || n == "__fnptr" || n == "__ptr" || n == "__never" || n.starts_with("__dyn_") || n == "str" || (n == "Box" && !p.struct_index.contains_key("Box")) => None,
+                    // (`impl Vector for __m128i`: a vector type is not a struct either, unless the program's own)
+                    Some(n) if crate::simd_sig::vector_name(n).is_some() && !p.struct_index.contains_key(n) => None,
                     Some(n) => match p.struct_index.get(n).copied().or_else(|| {
                         n.strip_prefix("#tuple").and_then(|k| k.parse().ok()).map(|k| p.tuple_base(k))
                     }).as_ref() {
@@ -1592,7 +1605,10 @@ impl Program {
                     p.ref_impls.insert((t, tr.clone()));
                 }
             }
-            if let Some(pt) = Ty::prim(sn).or((sn == "str").then_some(Ty::Str)).or((sn == "#tuple0").then_some(Ty::Unit)) {
+            // (and a vector type of core::arch, when the program has no type of the name: `impl Vector for __m128i`.
+            // `__m128`, `__m128i`, `__m128d` and `v128` are one type here, so impls of a trait for two of them conflict)
+            let vec_ty = crate::simd_sig::vector_name(sn).filter(|_| !p.struct_index.contains_key(sn.as_str()));
+            if let Some(pt) = Ty::prim(sn).or((sn == "str").then_some(Ty::Str)).or((sn == "#tuple0").then_some(Ty::Unit)).or(vec_ty) {
                 let dup = !p.prim_impls.insert((pt, tr.clone()));
                 if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup) {
                     return Err(format!(
@@ -2419,6 +2435,12 @@ impl Program {
         if let Some(&id) = self.index.get(&format!("{}::{name}", self.tn(t))) {
             return Some(id);
         }
+        // (a vector type's methods are under the name its impl wrote: `impl Vector for __m128i` has `__m128i::splat`)
+        if let Ty::Vec(_) = t {
+            if let Some(&id) = vector_names(t).iter().find_map(|n| self.index.get(&format!("{n}::{name}"))) {
+                return Some(id);
+            }
+        }
         // (`impl<T: Hash> Hash for [T]` / `for [T; N]` のメソッドは `__slice::m` / `__array::m`)
         let base = match t {
             Ty::Slice(_) => Some("__slice"),
@@ -2840,7 +2862,7 @@ impl Program {
     }
 
     /// A one-segment type name's primitive integer name, through aliases (`type Lane = i32` -> "i32"); "" for another
-    fn prim_of_name(&self, n: &str) -> String {
+    pub fn prim_of_name(&self, n: &str) -> String {
         let mut prim = n.to_string();
         // (a primitive integer's name is that type, not an alias of it: the aliases are the whole program's, and a
         // program's `type u32 = u8;` must not change the prelude's `as u32`, whose cached code does not hash aliases)
@@ -3205,7 +3227,8 @@ impl Program {
                 if let Some((sid, vi)) = self.variant_by_p(&PPath::of(p), None) {
                     return un(self.structs[sid as usize].variants[vi].discr as i128);
                 }
-                let t = Ty::prim(&p.segs[0].name).ok_or("unsupported path in constant")?;
+                // (through an alias of a primitive: `type Mask = u16;` and `Mask::BITS`)
+                let t = Ty::prim(&p.segs[0].name).or_else(|| Ty::prim(&self.prim_of_name(&p.segs[0].name))).ok_or("unsupported path in constant")?;
                 self.prim_const_t(t, &p.segs[1].name)
             }
             // 整数のメソッド (`u128::MAX.ilog10()`): 受け手の型の幅・符号で (`(-1i8).count_ones()` は 8)
@@ -3341,7 +3364,7 @@ impl Program {
                 let ci = self.const_index[&format!("{}::{}", p.segs[0].name, p.segs[1].name)];
                 It::of_ty(self.consts[ci as usize].ty)
             }
-            Expr::Path(None, p) if p.segs.len() == 2 => match (Ty::prim(&p.segs[0].name), p.segs[1].name.as_str()) {
+            Expr::Path(None, p) if p.segs.len() == 2 => match (Ty::prim(&p.segs[0].name).or_else(|| Ty::prim(&self.prim_of_name(&p.segs[0].name))), p.segs[1].name.as_str()) {
                 (Some(_), "BITS") => Some(It { bits: 32, signed: false }),
                 (Some(t), _) => It::of_ty(t),
                 _ => None,
@@ -4817,10 +4840,18 @@ impl Program {
                 // `use Expr::*;` したバリアント (大文字で始まり、ほかの enum と名前が重ならないもの)
                 // (同じ名前の struct があればそちら: `TokenTree::Punct(Punct { .. })`)
                 _ if n.starts_with(|c: char| c.is_ascii_uppercase()) => {
-                    if self.struct_index.get(n).is_some_and(|&id| !self.structs[id as usize].is_enum) {
+                    // (but not a struct of the prelude with named fields (its iterator `Skip { .. }`), which a program
+                    // never writes as a value: `use Ord::*;`'s unit variant `Skip` is the variant)
+                    let v = self.variant_names.get(n).copied().flatten();
+                    let unit = v.is_some_and(|(sid, vi)| self.structs[sid as usize].variants[vi].fields.is_empty());
+                    let prelude_named = |id: u32| {
+                        let sd = &self.structs[id as usize];
+                        !sd.fields.is_empty() && sd.fields[0].0 != "0" && self.struct_item.get(id as usize).is_some_and(|&ii| ii >= self.prelude_from)
+                    };
+                    if self.struct_index.get(n).is_some_and(|&id| !self.structs[id as usize].is_enum && !(unit && prelude_named(id))) {
                         return None;
                     }
-                    return self.variant_names.get(n).copied().flatten();
+                    return v;
                 }
                 _ => return None,
             };

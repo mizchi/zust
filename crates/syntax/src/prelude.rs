@@ -616,8 +616,12 @@ fn type_def_name<'a>(src: &'a str, it: &SrcItem) -> Option<&'a str> {
     if !matches!(it.kind, ItemKind::Normal | ItemKind::TraitHeader) {
         return None;
     }
-    let mut ids = it.idents.iter().take(6).map(|&(a, b)| &src[a as usize..b as usize]);
-    ids.find(|w| matches!(*w, "struct" | "enum" | "trait" | "union"))?;
+    // (past the attributes and the visibility, however many words they have: `#[derive(Clone, Debug)] pub(crate)
+    // struct Iter` is 6 words before its name; another item's keyword first means it defines no type)
+    let mut ids = it.idents.iter().map(|&(a, b)| &src[a as usize..b as usize]);
+    let is_ty = |w: &str| matches!(w, "struct" | "enum" | "trait" | "union");
+    let other = |w: &str| matches!(w, "fn" | "impl" | "mod" | "const" | "static" | "type" | "use" | "macro_rules" | "extern");
+    ids.find(|w| is_ty(w) || other(w)).filter(|w| is_ty(w))?;
     ids.next()
 }
 

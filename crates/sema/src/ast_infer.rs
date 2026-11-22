@@ -2298,9 +2298,17 @@ impl Inf<'_> {
                 _ => self.var(),
             };
         }
-        if let Some(Ty::Ptr(_, e)) = self.resolve(r) {
+        if let Some(Ty::Ptr(m, e)) = self.resolve(r) {
             return match name {
                 "add" | "sub" | "offset" | "wrapping_add" | "wrapping_sub" | "wrapping_offset" => r,
+                // (`x.cast::<u32>()`: a pointer to the turbofish's type, of the same mutability)
+                "cast" => match tf.first() {
+                    Some(GArg::Ty(t)) => match self.parse_ty(t) {
+                        Some(u) => self.known(Ty::Ptr(m, intern(u))),
+                        None => self.var(),
+                    },
+                    _ => self.var(),
+                },
                 "is_null" => self.known(Ty::Bool),
                 "read" | "read_volatile" | "read_unaligned" => self.known(*e),
                 _ => self.known(Ty::Unit),
@@ -2352,6 +2360,23 @@ impl Inf<'_> {
                 _ => self.var(),
             },
             "wrapping_neg" | "abs" | "signum" | "swap_bytes" | "to_be" | "to_le" | "to_ascii_uppercase" | "to_ascii_lowercase" | "next_power_of_two" | "isqrt" => rv,
+            "reverse_bits" => rv,
+            // (the shift amount is a u32: `x.wrapping_shl(1)` is x's type, not the default bool)
+            "wrapping_shl" | "wrapping_shr" => {
+                for a in avs {
+                    let k = self.known(Ty::U32);
+                    self.unify(a, k);
+                }
+                rv
+            }
+            "checked_shl" | "checked_shr" => {
+                for a in avs {
+                    let k = self.known(Ty::U32);
+                    self.unify(a, k);
+                }
+                self.option_of(rv)
+            }
+            "overflowing_shl" | "overflowing_shr" => self.var(),
             "pow" | "rotate_left" | "rotate_right" | "wrapping_pow" | "saturating_pow" => {
                 for a in avs {
                     let k = self.known(Ty::U32);
