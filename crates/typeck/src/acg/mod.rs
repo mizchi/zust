@@ -79,6 +79,40 @@ fn env_once(cell: &'static std::sync::OnceLock<bool>, name: &str) -> bool {
 }
 
 /// ACG_PANIC_ERR=1: an error panics (to find where it is made from the backtrace)
+/// An error of the borrow or region check's kind (lowering itself returns some: `m[k] = v` of a HashMap is E0594)
+pub fn borrow_error(e: &str) -> bool {
+    ["cannot assign", "cannot borrow", "cannot move out", "use of moved", "borrow of moved", "does not live long enough", "may not live long enough", "(E0594)", "(E0596)", "(E0384)"]
+        .iter()
+        .any(|k| e.contains(k))
+}
+
+/// borrow_error, and the borrow check's other errors: a use of what is not initialized (E0381), a temporary freed while
+/// borrowed (E0716), a match guard's change (E0510), a returned borrow (E0515, E0713), a closure that outlives what it
+/// borrows (E0373), a use of what is mutably borrowed (E0503) or partly moved (E0382), an assignment to a part of
+/// what was moved (E0382), a closure's borrow that escapes it (E0521)
+pub fn borrow_check_error(e: &str) -> bool {
+    borrow_error(e)
+        || [
+            "isn't initialized",
+            "temporary value",
+            "in match guard",
+            "destructor runs",
+            "cannot return",
+            "may outlive the current function",
+            "because it was mutably borrowed",
+            "of partially moved",
+            "to part of moved",
+            "escapes outside of closure",
+            "(E0505)",
+            "(E0499)",
+            "(E0502)",
+            "(E0506)",
+            "(E0503)",
+        ]
+            .iter()
+            .any(|k| e.contains(k))
+}
+
 pub(crate) fn panic_err() -> bool {
     static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     env_once(&C, "ACG_PANIC_ERR")
@@ -437,12 +471,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     // fails, as a placeholder cannot do all its bounds allow (a trait's method, a coercion to `dyn`): not checked
     // further, nothing reported. Its borrow and region checks' errors are)
     // (not an error of the borrow check's kind lowering itself returns: `m[k] = v` of a HashMap is E0594 whatever T is)
-    let borrow_kind = |e: &str| {
-        ["cannot assign", "cannot borrow", "cannot move out", "use of moved", "borrow of moved", "does not live long enough", "may not live long enough", "(E0594)", "(E0596)", "(E0384)"]
-            .iter()
-            .any(|k| e.contains(k))
-    };
-    if placeholder && r.as_ref().is_err_and(|e| !borrow_kind(e)) {
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }
@@ -1731,6 +1760,7 @@ impl Cx<'_> {
                         let r = self.place(init);
                         self.bk.place_depth -= 1;
                         let _ = r?;
+                        self.bk_fake_read(init);
                     } else {
                         // (`let _: [(); 0] = [];`: the annotation is the expected type)
                         // (only for an array literal, which needs it for its element type: an expected type would

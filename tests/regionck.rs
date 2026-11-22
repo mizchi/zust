@@ -1499,3 +1499,133 @@ fn runtime_literal_temporaries() {
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
     assert_eq!(check("fn gimme(x: &(u32,)) -> &u32 {\n    &x.0\n}\nfn main() {\n    let v = 22;\n    let a = gimme(&(1,));\n    let r = &(v,);\n    let b = gimme(r);\n    println!(\"{} {} {}\", a, b, gimme(&(v,)));\n}\n"), vec![]);
 }
+
+/// A block passed as an argument passes what its tail borrows: its temporaries are the call's (E0716). `&{ .. }` is a
+/// temporary. `let _ = z;` keeps z live (rustc's fake read)
+#[test]
+fn block_tail_temporaries() {
+    let gimme = "fn gimme(x: &(u32,)) -> &u32 {\n    &x.0\n}\n";
+    let d = check(&format!("{gimme}fn main() {{\n    let x = gimme({{ let v = 22; &(v,) }});\n    println!(\"{{:?}}\", x);\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0716"), "{d:?}");
+    let d = check(&format!("{gimme}fn main() {{\n    let z = gimme(&{{ let v = 4; (v,) }});\n    let _ = z;\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0716"), "{d:?}");
+    let d = check("fn mk() -> String {\n    String::from(\"a\")\n}\nfn main() {\n    let x: &str = { mk().as_str() };\n    println!(\"{}\", x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0716"), "{d:?}");
+    // (the `let` extends a block tail's borrow to its own block; a value used within the statement is fine)
+    assert_eq!(check(&format!("fn mk() -> String {{\n    String::from(\"a\")\n}}\n{gimme}fn main() {{\n    let n = {{ mk().as_str() }}.len();\n    let s = {{ let v = 1; &(v,) }};\n    let q = *gimme({{ let v = 5; &(v,) }});\n    println!(\"{{}} {{:?}} {{}}\", n, s, q);\n}}\n")), vec![]);
+    // (a fake read keeps x live: the write to y while it is borrowed conflicts)
+    let d = check("fn main() {\n    let mut y = 1;\n    let r = &y;\n    y = 2;\n    let _ = r;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    // (but it is no use of a moved value)
+    assert_eq!(check("fn main() {\n    let x = String::new();\n    drop(x);\n    let _ = x;\n}\n"), vec![]);
+}
+
+/// A trait's parameters are invariant: a callee's bound `G: Get<T>` met by the caller's `G: Get<&'max i32>` makes T's
+/// region 'max
+#[test]
+fn trait_bound_regions_invariant() {
+    let tr = "trait Get<T> {\n    fn get(&self) -> T;\n}\nfn impls_get<G: Get<T>, T>() {}\n";
+    let d = check(&format!("{tr}fn f<'min, 'max: 'min, G: Get<&'max i32>>() {{\n    impls_get::<G, &'min i32>()\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check(&format!("{tr}fn f<'a, G: Get<&'a i32>>() {{\n    impls_get::<G, &'a i32>()\n}}\nfn g<'a, 'b, G: Get<&'a i32>>() where 'a: 'b, 'b: 'a {{\n    impls_get::<G, &'b i32>()\n}}\nfn main() {{}}\n")), vec![]);
+}
+
+/// E0510: a match guard must not assign or mutably borrow the place the match tests (or one it is part of, or what it
+/// points to); a part of it is fine, as is a match that tests nothing
+#[test]
+fn match_guard_mutation() {
+    let d = check("fn main() {\n    let mut n = 3;\n    match n {\n        0 => {}\n        _ if { n += 1; true } => {}\n        _ => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0510"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = &mut Some(&2);\n    match x {\n        &mut None => {}\n        &mut Some(&_) if { (|| { *x = None; })(); false } => {}\n        _ => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0510"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut s = (1, Some(2));\n    match s {\n        (_, Some(_)) if { s.0 = 5; true } => {}\n        _ => {}\n    }\n    let mut v = vec![1];\n    match v.len() {\n        0 if { v.push(2); true } => {}\n        _ => {}\n    }\n    println!(\"{:?} {:?}\", s, v);\n}\n"), vec![]);
+}
+
+/// E0713: a borrow through a `&mut` field of a value whose type implements `Drop`, returned: the value's drop may use
+/// the field when the function returns
+#[test]
+fn borrow_in_use_when_destructor_runs() {
+    let s = "struct Scribble<'a>(&'a mut u32);\nimpl<'a> Drop for Scribble<'a> {\n    fn drop(&mut self) {\n        *self.0 = 42;\n    }\n}\n";
+    let d = check(&format!("{s}fn f<'a>(s: Scribble<'a>) -> &'a mut u32 {{\n    &mut *s.0\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0713"), "{d:?}");
+    let d = check(&format!("{s}fn f<'a>(s: Box<Scribble<'a>>) -> &'a u32 {{\n    let r: &'a u32 = &*(*s).0;\n    &*r\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0713"), "{d:?}");
+    // (not through a `&mut Scribble`, nor of a type without `Drop`, nor a borrow not returned)
+    assert_eq!(check(&format!("{s}struct Plain<'a>(&'a mut u32);\nfn f<'a>(s: &'a mut Scribble) -> &'a mut u32 {{\n    &mut *s.0\n}}\nfn g<'a>(s: Plain<'a>) -> &'a mut u32 {{\n    &mut *s.0\n}}\nfn h(s: Scribble) -> u32 {{\n    let r = &mut *s.0;\n    *r\n}}\nfn main() {{}}\n")), vec![]);
+}
+
+/// E0507: a closure written where a bound wants `Fn` / `FnMut` is that, so moving out what it captures by value is an
+/// error at the move; `FnOnce` takes it
+#[test]
+fn closure_moves_capture_out() {
+    let d = check("fn take_mut(_f: impl FnMut()) {}\nfn main() {\n    let val = String::new();\n    take_mut(|| {\n        let _s: String = val;\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+    let d = check("fn take_fn<F: Fn()>(_f: F) {}\nfn main() {\n    let v = String::new();\n    take_fn(move || {\n        drop(v);\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`Fn` closure"), "{d:?}");
+    assert_eq!(check("fn take_once(_f: impl FnOnce()) {}\nfn take_mut(_f: impl FnMut()) {}\nfn main() {\n    let a = String::new();\n    take_once(|| {\n        let _x: String = a;\n    });\n    let c = 5;\n    take_mut(move || {\n        let _z = c;\n    });\n    let e = vec![1];\n    take_mut(move || drop(e.clone()));\n}\n"), vec![]);
+}
+
+/// `for n in v` with v: &mut Vec<T> moves v: `IntoIterator::into_iter` takes a type parameter, so no reborrow
+#[test]
+fn for_loop_moves_mut_ref() {
+    let d = check("fn f(v: &mut Vec<i32>) {\n    for n in v {\n        *n += 1;\n    }\n    for n in v {\n        *n += 1;\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("moved"), "{d:?}");
+    assert_eq!(check("fn f(v: &mut Vec<i32>) -> usize {\n    for n in v.iter_mut() {\n        *n += 1;\n    }\n    for n in &mut *v {\n        *n += 1;\n    }\n    v.len()\n}\nfn g(v: &Vec<i32>) {\n    for _ in v {}\n    for _ in v {}\n}\nfn main() {}\n"), vec![]);
+}
+
+/// From the review of part 9 (#51): guards protect the places the patterns test, and the deref prefixes of where
+/// bindings come from; `S { .. }` tests nothing (E0510)
+#[test]
+fn part9_review_guards() {
+    let d = check("fn main() {\n    let mut pair = (Some(0), 0);\n    match pair {\n        (None, _) => (),\n        (Some(_), _) if { pair.0 = None; false } => (),\n        (Some(_), _) => (),\n    }\n    let _ = pair;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`pair.0`"), "{d:?}");
+    let d = check("fn main() {\n    let mut ptr: &i32 = &1;\n    let x = match *ptr {\n        value if { ptr = &2; true } => value,\n        _ => 0,\n    };\n    let _ = (x, ptr);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0510"), "{d:?}");
+    let d = check("struct S { n: u32, m: u32 }\nfn main() {\n    let mut s = S { n: 0, m: 0 };\n    match s {\n        S { n: 0, .. } if { s.m = 1; false } => (),\n        S { n: 1, .. } if { s.n = 3; false } => (),\n        _ => (),\n    }\n    let _ = s.n;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("`s.n`"), "{d:?}");
+    assert_eq!(check("struct S { n: u32 }\nfn main() {\n    let mut s = S { n: 0 };\n    match s {\n        S { .. } if { s = S { n: 1 }; false } => (),\n        _ => (),\n    }\n    let mut pair = (Some(0), 0);\n    match pair {\n        (None, _) => (),\n        (Some(_), _) if { pair.1 = 5; false } => (),\n        (Some(_), _) => (),\n    }\n    let _ = (s.n, pair);\n}\n"), vec![]);
+}
+
+/// From the review of part 9 (#51): E0713 through a `Drop` value in a field, not past a shared deref; E0507 for a
+/// nested `move` closure, not for a name the closure binds again; a receiver reached through `Deref` is borrowed
+/// while the arguments are evaluated; a callee's `'static` in a trait bound
+#[test]
+fn part9_review_follow_ups() {
+    let s = "struct Scribble<'a>(&'a mut u32);\nimpl<'a> Drop for Scribble<'a> {\n    fn drop(&mut self) {\n        *self.0 = 42;\n    }\n}\n";
+    let d = check(&format!("{s}struct Wrapper<'a>(Scribble<'a>);\nfn f<'a>(w: Wrapper<'a>) -> &'a mut u32 {{\n    &mut *(w.0).0\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("E0713"), "{d:?}");
+    assert_eq!(check("struct S<'a> { data: &'a mut &'static u32 }\nimpl<'a> Drop for S<'a> {\n    fn drop(&mut self) {}\n}\nfn f<'a>(s: S<'a>) -> &'static u32 {\n    &**s.data\n}\nfn main() {}\n"), vec![]);
+    let d = check("fn take_mut(_: impl FnMut()) {}\nfn main() {\n    let v = String::new();\n    take_mut(|| {\n        let _inner = move || drop(v);\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+    assert_eq!(check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let val = String::new();\n    take_fn(move || {\n        let _len = val.len();\n        let val = String::new();\n        drop(val);\n    });\n}\n"), vec![]);
+    // (a move of the capture before a `let` binds its name again is still one; the names an arm, a loop, an `if let`,
+    // a nested closure's parameter or a block's `let` bind are not the capture there)
+    let d = check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let val = String::new();\n    take_fn(move || {\n        drop(val);\n        let val = String::new();\n        drop(val);\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+    let d = check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let val = String::new();\n    take_fn(move || {\n        if true {\n            let val = String::new();\n            drop(val);\n        }\n        drop(val);\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("E0507"), "{d:?}");
+    assert_eq!(check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let val = String::new();\n    take_fn(move || match Some(String::new()) {\n        Some(val) => drop(val),\n        None => (),\n    });\n    let val = String::new();\n    take_fn(move || {\n        let f = |val: String| drop(val);\n        f(String::new());\n        let _ = val.len();\n    });\n    let val = String::new();\n    take_fn(move || {\n        if let Some(val) = Some(String::new()) {\n            drop(val)\n        }\n        let _ = val.len();\n    });\n    let val = String::new();\n    take_fn(move || {\n        for val in vec![String::new()] {\n            drop(val);\n        }\n        let _ = val.len();\n    });\n}\n"), vec![]);
+    // (a `let` that destructures the capture moves only the parts bound by value that are not Copy)
+    assert_eq!(check("struct P {\n    n: u32,\n    s: String,\n}\nfn take_fn(_: impl Fn()) {}\nfn main() {\n    let pair = (1, String::new());\n    take_fn(move || {\n        let (n, _) = pair;\n        let _ = n;\n    });\n    let p = P { n: 1, s: String::new() };\n    take_fn(move || {\n        let P { n, .. } = p;\n        let _ = n;\n    });\n}\n"), vec![]);
+    let d = check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let pair = (1, String::new());\n    take_fn(move || {\n        let (_, s) = pair;\n        drop(s);\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+    // (so a named closure that copies out of it and mutates another capture is FnMut only, not maybe FnOnce)
+    let d = check("fn take_fn<F: Fn()>(_: F) {}\nfn main() {\n    let pair = (1, String::new());\n    let mut x = 0;\n    let c = move || {\n        let (n, _) = pair;\n        x += n;\n    };\n    take_fn(c);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0525") && d[0].1.contains("only implements `FnMut`"), "{d:?}");
+    // (a nested closure without `move` whose body moves the capture out takes it by value too; one that borrows it
+    // does not)
+    let d = check("fn take_mut(_: impl FnMut()) {}\nfn main() {\n    let v = String::new();\n    take_mut(|| {\n        let _inner = || drop(v);\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+    assert_eq!(check("fn take_mut(_: impl FnMut()) {}\nfn main() {\n    let v = String::new();\n    take_mut(|| {\n        let inner = || v.len();\n        let _ = inner();\n    });\n}\n"), vec![]);
+    let d = check("use std::ops::Deref;\nstruct T;\nimpl T {\n    fn read(&self, _: ()) {}\n}\nstruct W(T);\nimpl Deref for W {\n    type Target = T;\n    fn deref(&self) -> &T {\n        &self.0\n    }\n}\nfn main() {\n    let w = W(T);\n    w.read(drop(w));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 15 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    let tr = "trait Get<'a> {\n    fn get(&self) -> &'a i32;\n}\nfn need_static<G: Get<'static>>(_: &G) {}\n";
+    let d = check(&format!("{tr}fn f<'a, G: Get<'a>>(g: &G) {{\n    need_static::<G>(g);\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check(&format!("{tr}fn f<G: Get<'static>>(g: &G) {{\n    need_static::<G>(g);\n}}\nfn main() {{}}\n")), vec![]);
+    // (an fn in a fn body: E0503 at its own lines, the position the message names too)
+    let d = check("fn main() {\n    fn helper() {\n        let mut x = 1;\n        let r = &mut x;\n        let y = x;\n        *r = 2;\n        let _ = y;\n    }\n    helper();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it was mutably borrowed (at 4:"), "{d:?}");
+    let d = check("struct S {\n    f: u8,\n}\nfn main() {\n    fn helper() {\n        let mut s = S { f: 1 };\n        drop(s);\n        s.f = 2;\n    }\n    helper();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("assign to part of moved value") && d[0].1.contains("(moved at 7:"), "{d:?}");
+}

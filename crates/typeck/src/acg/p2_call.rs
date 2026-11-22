@@ -1002,6 +1002,23 @@ impl Cx<'_> {
                 }
             }
         }
+        // (a method of what a user's `Deref` gives (`x.get()` with get on the target): `deref(&self)` borrows the
+        // receiver shared, and a result that borrows from self borrows from it)
+        if self.bk_on() && via_deref && is_place_expr(recv) {
+            let flows = self.bk_ret_from(id, 0);
+            let ev = self.bk_recv_ev(recv, Ty::Ref(false, intern(st)), flows);
+            // (an argument that names the receiver (`w.read(drop(w))`): the loan lasts while the arguments are
+            // evaluated, as a receiver's that is not reached through `Deref`)
+            let hold = match (&ev, borrowck::root_local(recv)) {
+                (Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _)), Some(n)) if margs.iter().any(|a| borrowck::mentions(a, n)) => Some(*ln),
+                _ => None,
+            };
+            self.bk_push(ev);
+            if let Some(ln) = hold {
+                self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                bk_op_temp = true;
+            }
+        }
         // `self` を値で受ける: 受け手からムーブ
         if !matches!(recv_ty, Ty::Ref(..)) && self.needs_drop(st) {
             match recv_temp {
@@ -1104,7 +1121,7 @@ impl Cx<'_> {
             if not_send(self.prog, t) {
                 return Err(self.at(*cpos, format!("`{}` cannot be sent between threads safely", self.prog.tn(t))));
             }
-            if !*mv && !crate::ast_closure::moves_capture(strip_paren(c), &[n.clone()]) {
+            if !*mv && !crate::ast_closure::moves_capture_by(strip_paren(c), &[n.clone()], &|p, _| borrowck::pat_moves(self.prog, p, t, 0)) {
                 return Err(self.at(*cpos, format!("closure may outlive the current function, but it borrows `{n}`, which is owned by the current function")));
             }
         }
@@ -2034,6 +2051,23 @@ impl Cx<'_> {
             let r = self.expr(a, exp);
             if matches!(pt, Ty::Ref(true, _)) {
                 self.bk_reborrow_arg(a);
+            }
+            // (a closure written where a bound wants `Fn` / `FnMut`: it is that, so its body moving out what it captures
+            // by value (`|| { let s = val; }`) is E0507, at the move. Passed by name, it is E0525 (above))
+            if let (Some(x), Expr::Closure(..), true) = (&fbt, strip_paren(a), self.bk_on()) {
+                let want = x.2.trim_start();
+                let kind = |k: &str| want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('('));
+                let c = strip_paren(a);
+                if (kind("Fn") || kind("FnMut")) && self.bk.fnonce_sure.contains(&(c as *const Expr as usize)) {
+                    let caps: Vec<String> = crate::ast_closure::free_vars(c).into_iter().filter(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0)).collect();
+                    let prog = self.prog;
+                    let types: Vec<(String, Ty)> = caps.iter().filter_map(|n| self.lookup(n).map(|(_, t)| (n.clone(), t))).collect();
+                    let by = |p: &crate::parse::Pat, n: &str| types.iter().find(|x| x.0 == n).is_none_or(|x| borrowck::pat_moves(prog, p, x.1, 0));
+                    if let Some((n, at)) = crate::ast_closure::move_site_by(c, &caps, &by) {
+                        let w = if kind("Fn") { "Fn" } else { "FnMut" };
+                        return Err(self.at(at, format!("cannot move out of `{n}`, a captured variable in an `{w}` closure (E0507)")));
+                    }
+                }
             }
             // (`take(m::BAR)`: a static moved out by its module's path, E0507; by its name alone, the read of the
             // place checks it. A path is no place expression, so it is read as a value elsewhere too (a method's

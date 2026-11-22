@@ -238,6 +238,8 @@ impl Cx<'_> {
         let merge = self.b.create_block();
         let mut result_ty: Option<Ty> = None;
         let mut param: Option<Value> = None;
+        // (the places a guard must not change, made at the first guard: see below)
+        let mut guard_places: Option<Vec<(borrowck::BPlace, bool)>> = None;
         // 各 arm を上から順に試す (判定 → 束縛 → ガード → 本体)
         for arm in arms {
             let next = self.b.create_block();
@@ -256,6 +258,38 @@ impl Cx<'_> {
             r?;
             if self.owned_binds > ob {
                 self.release_outer(scrut, sflag)?;
+            }
+            // (a guard must not change what the match tests: rustc's fake borrows (E0510). The places the patterns
+            // test (`.0` of `(None, _)`; `match x { y if .. }` and `S { .. }` test nothing), and the deref prefixes of
+            // the place bindings are bound from (`ptr` of `match *ptr { v if .. }`))
+            if guard_places.is_none() && arm.guard.is_some() && self.bk_on() {
+                if let Some((sp, _)) = &bk_sp {
+                    let mut gs: Vec<(borrowck::BPlace, bool)> = vec![];
+                    let mut tested = vec![];
+                    for a in arms {
+                        self.tested_places(&a.pat, sp, place.ty(), &mut tested, 0);
+                    }
+                    gs.extend(tested.into_iter().map(|p| (p, true)));
+                    let mut names = vec![];
+                    for a in arms {
+                        crate::ast_closure::pat_idents(&a.pat, &mut names);
+                    }
+                    if names.iter().any(|n| n.starts_with(|c: char| c.is_lowercase() || c == '_')) {
+                        for (i, x) in sp.proj.iter().enumerate() {
+                            if matches!(x, borrowck::Proj::Deref(_) | borrowck::Proj::Shr) {
+                                gs.push((borrowck::BPlace { local: sp.local, proj: sp.proj[..i].to_vec() }, false));
+                            }
+                        }
+                    }
+                    guard_places = Some(gs);
+                }
+            }
+            let guard_place = match (&arm.guard, &guard_places) {
+                (Some(_), Some(gs)) if self.bk_on() && !gs.is_empty() => Some(gs.clone()),
+                _ => None,
+            };
+            if let Some(gp) = &guard_place {
+                self.bk_ev(borrowck::Ev::Guard(Some(gp.clone())));
             }
             if let Some(g) = &arm.guard {
                 // (`P if let Q = e && c => ..`: each `let` of the guard tests and binds in the arm's scope, each other
@@ -293,6 +327,9 @@ impl Cx<'_> {
                         self.require(c, next);
                     }
                 }
+            }
+            if guard_place.is_some() {
+                self.bk_ev(borrowck::Ev::Guard(None));
             }
             let t0 = self.temps.len();
             let (v, t) = self.expr(&arm.body, result_ty.or(expected))?;
@@ -518,6 +555,91 @@ impl Cx<'_> {
         let c = self.b.ins().icmp(IntCC::Equal, tv, d);
         self.require(c, fail);
         Ok(())
+    }
+
+    /// The places pattern p tests, from the place of the value it matches (of type t): rustc's shallow fake borrows
+    /// of a match with guards. A tuple or a struct is not tested, only what its fields' patterns test (`(None, _)`
+    /// tests `.0`); where a part's place is not followed, the place of the whole
+    fn tested_places(&self, p: &Pat, place: &borrowck::BPlace, t: Ty, out: &mut Vec<borrowck::BPlace>, depth: u32) {
+        let push = |out: &mut Vec<borrowck::BPlace>, pl: &borrowck::BPlace| {
+            if !out.contains(pl) {
+                out.push(pl.clone());
+            }
+        };
+        let field = |pl: &borrowck::BPlace, f: String| {
+            let mut q = pl.clone();
+            q.proj.push(borrowck::Proj::Field(f));
+            q
+        };
+        if depth > 8 {
+            return push(out, place);
+        }
+        // (a reference matched by a pattern that is not a reference's: what it points to is tested)
+        if let (Ty::Ref(m, i), Pat::Tuple(_) | Pat::TupleStruct(..) | Pat::Struct(..) | Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) | Pat::Slice(_)) = (t, p) {
+            let mut q = place.clone();
+            q.proj.push(if m { borrowck::Proj::Deref(false) } else { borrowck::Proj::Shr });
+            return self.tested_places(p, &q, *i, out, depth + 1);
+        }
+        match p {
+            Pat::Wild | Pat::Rest => {}
+            Pat::Ident(_, _, n, sub) if n.starts_with(|c: char| c.is_lowercase() || c == '_') => {
+                if let Some(s) = sub {
+                    self.tested_places(s, place, t, out, depth + 1);
+                }
+            }
+            Pat::Ref(_, i) => match t {
+                Ty::Ref(m, it) => {
+                    let mut q = place.clone();
+                    q.proj.push(if m { borrowck::Proj::Deref(false) } else { borrowck::Proj::Shr });
+                    self.tested_places(i, &q, *it, out, depth + 1);
+                }
+                _ => push(out, place),
+            },
+            Pat::Or(ps) => {
+                for q in ps {
+                    self.tested_places(q, place, t, out, depth + 1);
+                }
+            }
+            Pat::Tuple(ps) => match t {
+                Ty::Struct(sid) if self.prog.is_tuple(sid) => {
+                    let fs = &self.prog.structs[sid as usize].fields;
+                    match Self::tuple_fields(ps.iter(), fs.len(), SP) {
+                        Ok(v) => {
+                            for (i, q) in v {
+                                self.tested_places(q, &field(place, i.to_string()), fs[i].1, out, depth + 1);
+                            }
+                        }
+                        Err(_) => push(out, place),
+                    }
+                }
+                _ => push(out, place),
+            },
+            // (a struct's pattern (not an enum's variant): what its fields' patterns test)
+            Pat::TupleStruct(..) | Pat::Struct(..) if matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].variants.is_empty() && !self.prog.is_tuple(sid)) => {
+                let Ty::Struct(sid) = t else { return };
+                let fs = &self.prog.structs[sid as usize].fields;
+                match p {
+                    Pat::TupleStruct(_, ps) => match Self::tuple_fields(ps.iter(), fs.len(), SP) {
+                        Ok(v) => {
+                            for (i, q) in v {
+                                self.tested_places(q, &field(place, i.to_string()), fs[i].1, out, depth + 1);
+                            }
+                        }
+                        Err(_) => push(out, place),
+                    },
+                    Pat::Struct(_, named, _) => {
+                        for (n, q) in named {
+                            match fs.iter().find(|f| f.0 == *n) {
+                                Some(f) => self.tested_places(q, &field(place, n.clone()), f.1, out, depth + 1),
+                                None => push(out, place),
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => push(out, place),
+        }
     }
 
     /// パターン列 (`V(a, .., z)`) とフィールド列の対応 (`..` は途中を飛ばす)
