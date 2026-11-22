@@ -33,17 +33,28 @@ pub struct Parser {
 pub type PResult<X> = Result<X, (Pos, String)>;
 
 const PUNCTS: &[&str] = &[
-    "|>", "..", "::", "->", "=>", "+=", "-=", "*=", "/=", "%=", "==", "!=", "<=", ">=", "&&", "||", "+", "-", "*", "/", "%", "=", "<", ">", "!", "(", ")",
-    "{", "}", "[", "]", ",", ";", ":", ".", "|", "&", "#", "@",
+    "|>", "..", "::", "->", "=>", "+=", "-=", "*=", "/=", "%=", "==", "!=", "<=", ">=", "&&", "||",
+    "+", "-", "*", "/", "%", "=", "<", ">", "!", "(", ")", "{", "}", "[", "]", ",", ";", ":", ".",
+    "|", "&", "#", "@",
 ];
 
 impl Parser {
     pub fn new(src: &str) -> Parser {
-        Parser { src: src.chars().collect(), i: 0, line: 1, col: 0, peeked: None, next_id: 0 }
+        Parser {
+            src: src.chars().collect(),
+            i: 0,
+            line: 1,
+            col: 0,
+            peeked: None,
+            next_id: 0,
+        }
     }
 
     fn here(&self) -> Pos {
-        Pos { line: self.line, col: self.col }
+        Pos {
+            line: self.line,
+            col: self.col,
+        }
     }
 
     fn bump(&mut self) -> char {
@@ -93,7 +104,11 @@ impl Parser {
         let pos = self.here();
         let start = self.i;
         if self.i >= self.src.len() {
-            return Ok(Tok { t: T::Eof, pos, start });
+            return Ok(Tok {
+                t: T::Eof,
+                pos,
+                start,
+            });
         }
         let c = self.at(0);
         let t = if c.is_alphabetic() || c == '_' {
@@ -105,7 +120,10 @@ impl Parser {
         } else if c.is_ascii_digit() {
             let mut s = String::new();
             let mut float = false;
-            while self.at(0).is_ascii_digit() || self.at(0) == '_' || (self.at(0) == '.' && self.at(1).is_ascii_digit() && !float) {
+            while self.at(0).is_ascii_digit()
+                || self.at(0) == '_'
+                || (self.at(0) == '.' && self.at(1).is_ascii_digit() && !float)
+            {
                 if self.at(0) == '.' {
                     float = true;
                 }
@@ -116,7 +134,8 @@ impl Parser {
             }
             // (an exponent: `1.0e10`, `2e-3`)
             if (self.at(0) == 'e' || self.at(0) == 'E')
-                && (self.at(1).is_ascii_digit() || ((self.at(1) == '-' || self.at(1) == '+') && self.at(2).is_ascii_digit()))
+                && (self.at(1).is_ascii_digit()
+                    || ((self.at(1) == '-' || self.at(1) == '+') && self.at(2).is_ascii_digit()))
             {
                 float = true;
                 s.push(self.bump());
@@ -130,7 +149,10 @@ impl Parser {
             if float {
                 T::Float(s)
             } else {
-                T::Int(s.parse().map_err(|_| (pos, format!("integer literal out of range: {s}")))?)
+                T::Int(
+                    s.parse()
+                        .map_err(|_| (pos, format!("integer literal out of range: {s}")))?,
+                )
             }
         } else if c == '"' {
             self.bump();
@@ -163,7 +185,9 @@ impl Parser {
                     break;
                 }
             }
-            let Some(p) = found else { return Err((pos, format!("unexpected character `{c}`"))) };
+            let Some(p) = found else {
+                return Err((pos, format!("unexpected character `{c}`")));
+            };
             for _ in 0..p.len() {
                 self.bump();
             }
@@ -228,7 +252,11 @@ impl Parser {
 
     fn mk(&mut self, pos: Pos, kind: EK) -> Expr {
         self.next_id += 1;
-        Expr { id: self.next_id, pos, kind }
+        Expr {
+            id: self.next_id,
+            pos,
+            kind,
+        }
     }
 
     // ------------------------------------------------------------ items
@@ -269,7 +297,12 @@ impl Parser {
             match a.as_str() {
                 "wasm" => (true, false),
                 "simd" => (false, true),
-                _ => return Err((apos, format!("unknown attribute `@{a}` (there are `@wasm` and `@simd`)"))),
+                _ => {
+                    return Err((
+                        apos,
+                        format!("unknown attribute `@{a}` (there are `@wasm` and `@simd`)"),
+                    ));
+                }
             }
         } else {
             (false, false)
@@ -278,7 +311,10 @@ impl Parser {
         let relaxed = if simd && self.eat("(")? {
             let (a, apos) = self.ident()?;
             if a != "relaxed" {
-                return Err((apos, format!("unknown option `{a}` of @simd (there is `relaxed`)")));
+                return Err((
+                    apos,
+                    format!("unknown option `{a}` of @simd (there is `relaxed`)"),
+                ));
             }
             self.expect(")")?;
             true
@@ -307,7 +343,12 @@ impl Parser {
                     fields.push((f, self.ty()?));
                     self.eat(",")?;
                 }
-                Ok(Item::Record { name, params, fields, pos })
+                Ok(Item::Record {
+                    name,
+                    params,
+                    fields,
+                    pos,
+                })
             }
             "enum" => {
                 let (name, _) = self.ident()?;
@@ -323,11 +364,20 @@ impl Parser {
                             self.eat(",")?;
                         }
                     }
-                    let ret = if self.eat("->")? { Some(self.ty()?) } else { None };
+                    let ret = if self.eat("->")? {
+                        Some(self.ty()?)
+                    } else {
+                        None
+                    };
                     variants.push((v, tys, ret));
                     self.eat(",")?;
                 }
-                Ok(Item::Enum { name, params, variants, pos })
+                Ok(Item::Enum {
+                    name,
+                    params,
+                    variants,
+                    pos,
+                })
             }
             "fn" => {
                 let (name, _) = self.ident()?;
@@ -340,9 +390,25 @@ impl Parser {
                     args.push((a, self.ty()?));
                     self.eat(",")?;
                 }
-                let ret = if self.eat("->")? { Some(self.ty()?) } else { None };
+                let ret = if self.eat("->")? {
+                    Some(self.ty()?)
+                } else {
+                    None
+                };
                 let body = self.block()?;
-                Ok(Item::Fn { name, public, wasm, simd, relaxed, generics, bounds, args, ret, body, pos })
+                Ok(Item::Fn {
+                    name,
+                    public,
+                    wasm,
+                    simd,
+                    relaxed,
+                    generics,
+                    bounds,
+                    args,
+                    ret,
+                    body,
+                    pos,
+                })
             }
             "extern" => {
                 let module = match &self.peek()?.t {
@@ -367,7 +433,11 @@ impl Parser {
                     args.push(self.ty()?);
                     self.eat(",")?;
                 }
-                let ret = if self.eat("->")? { self.ty()? } else { TyS::Unit };
+                let ret = if self.eat("->")? {
+                    self.ty()?
+                } else {
+                    TyS::Unit
+                };
                 let js = if self.eat("=")? {
                     match self.next()? {
                         Tok { t: T::Str(s), .. } => s,
@@ -377,7 +447,15 @@ impl Parser {
                     name.clone()
                 };
                 self.expect(";")?;
-                Ok(Item::Extern { name, module, generics, args, ret, js, pos })
+                Ok(Item::Extern {
+                    name,
+                    module,
+                    generics,
+                    args,
+                    ret,
+                    js,
+                    pos,
+                })
             }
             "wasm" => {
                 if self.is("{")? {
@@ -400,12 +478,28 @@ impl Parser {
                     self.eat(",")?;
                 }
                 self.expect(")")?;
-                let ret = if self.eat("->")? { self.wty(&["{"])? } else { WTy::Unit };
+                let ret = if self.eat("->")? {
+                    self.wty(&["{"])?
+                } else {
+                    WTy::Unit
+                };
                 let body = self.raw_braces()?;
-                let head: String = self.src[fstart..self.i - body.chars().count()].iter().collect();
-                Ok(Item::WasmFn { name, public, args, ret, text: format!("{head}{body}"), pos })
+                let head: String = self.src[fstart..self.i - body.chars().count()]
+                    .iter()
+                    .collect();
+                Ok(Item::WasmFn {
+                    name,
+                    public,
+                    args,
+                    ret,
+                    text: format!("{head}{body}"),
+                    pos,
+                })
             }
-            _ => Err((pos, format!("expected an item (`type`, `enum`, `fn`, `extern`, `wasm`), found `{kw}`"))),
+            _ => Err((
+                pos,
+                format!("expected an item (`type`, `enum`, `fn`, `extern`, `wasm`), found `{kw}`"),
+            )),
         }
     }
 
@@ -446,8 +540,18 @@ impl Parser {
             "f64" => WTy::F64,
             "bool" => WTy::Bool,
             "()" => WTy::Unit,
-            _ if s.starts_with("&[") && s.ends_with(']') && Elem::parse(&s[2..s.len() - 1]).is_some() => WTy::Slice(Elem::parse(&s[2..s.len() - 1]).unwrap()),
-            _ if s.starts_with("Vec<") && s.ends_with('>') && Elem::parse(&s[4..s.len() - 1]).is_some() => WTy::Vec(Elem::parse(&s[4..s.len() - 1]).unwrap()),
+            _ if s.starts_with("&[")
+                && s.ends_with(']')
+                && Elem::parse(&s[2..s.len() - 1]).is_some() =>
+            {
+                WTy::Slice(Elem::parse(&s[2..s.len() - 1]).unwrap())
+            }
+            _ if s.starts_with("Vec<")
+                && s.ends_with('>')
+                && Elem::parse(&s[4..s.len() - 1]).is_some() =>
+            {
+                WTy::Vec(Elem::parse(&s[4..s.len() - 1]).unwrap())
+            }
             "&str" => WTy::Str,
             "String" => WTy::String,
             _ => {
@@ -529,7 +633,11 @@ impl Parser {
                 ts.push(self.ty()?);
                 self.eat(",")?;
             }
-            return Ok(if ts.is_empty() { TyS::Unit } else { TyS::Tuple(ts) });
+            return Ok(if ts.is_empty() {
+                TyS::Unit
+            } else {
+                TyS::Tuple(ts)
+            });
         }
         if self.is_kw("fn")? {
             self.next()?;
@@ -539,7 +647,11 @@ impl Parser {
                 ts.push(self.ty()?);
                 self.eat(",")?;
             }
-            let r = if self.eat("->")? { self.ty()? } else { TyS::Unit };
+            let r = if self.eat("->")? {
+                self.ty()?
+            } else {
+                TyS::Unit
+            };
             return Ok(TyS::Fn(ts, Box::new(r)));
         }
         let (n, pos) = self.ident()?;
@@ -568,7 +680,11 @@ impl Parser {
                 if self.is_kw("mut")? {
                     self.next()?;
                     let (n, _) = self.ident()?;
-                    let t = if self.eat(":")? { Some(self.ty()?) } else { None };
+                    let t = if self.eat(":")? {
+                        Some(self.ty()?)
+                    } else {
+                        None
+                    };
                     self.expect("=")?;
                     let e = self.expr(false)?;
                     self.expect(";")?;
@@ -576,7 +692,11 @@ impl Parser {
                     continue;
                 }
                 let p = self.pat()?;
-                let t = if self.eat(":")? { Some(self.ty()?) } else { None };
+                let t = if self.eat(":")? {
+                    Some(self.ty()?)
+                } else {
+                    None
+                };
                 self.expect("=")?;
                 let e = self.expr(false)?;
                 self.expect(";")?;
@@ -587,7 +707,9 @@ impl Parser {
             // `x = e;` / `x += e;`
             let t = self.peek()?.clone();
             if let T::P(op @ ("=" | "+=" | "-=" | "*=" | "/=" | "%=")) = t.t {
-                let EK::Var(n) = &e.kind else { return Err((t.pos, "only a local variable can be assigned".into())) };
+                let EK::Var(n) = &e.kind else {
+                    return Err((t.pos, "only a local variable can be assigned".into()));
+                };
                 let n = n.clone();
                 self.next()?;
                 let mut r = self.expr(false)?;
@@ -611,7 +733,10 @@ impl Parser {
                 self.next()?;
                 tail = Some(Box::new(e));
                 break;
-            } else if matches!(e.kind, EK::If(..) | EK::Match(..) | EK::Block(..) | EK::While(..) | EK::For(..)) {
+            } else if matches!(
+                e.kind,
+                EK::If(..) | EK::Match(..) | EK::Block(..) | EK::While(..) | EK::For(..)
+            ) {
                 stmts.push(Stmt::Expr(e));
             } else {
                 let t = self.peek()?.clone();
@@ -630,7 +755,11 @@ impl Parser {
                     ps.push(self.pat()?);
                     self.eat(",")?;
                 }
-                if ps.is_empty() { Pat::Lit(Lit::Unit) } else { Pat::Tuple(ps) }
+                if ps.is_empty() {
+                    Pat::Lit(Lit::Unit)
+                } else {
+                    Pat::Tuple(ps)
+                }
             }
             T::P("-") => match self.next()?.t {
                 T::Int(n) => Pat::Lit(Lit::Int(-n)),
@@ -643,7 +772,11 @@ impl Parser {
             T::Ident(n) if n == "_" => Pat::Wild,
             T::Ident(n) if n == "true" || n == "false" => Pat::Lit(Lit::Bool(n == "true")),
             T::Ident(n) => {
-                let (en, vn) = if self.eat("::")? { (Some(n), self.ident()?.0) } else { (None, n) };
+                let (en, vn) = if self.eat("::")? {
+                    (Some(n), self.ident()?.0)
+                } else {
+                    (None, n)
+                };
                 let upper = vn.chars().next().is_some_and(|c| c.is_uppercase());
                 if !upper && en.is_none() {
                     return Ok(Pat::Bind(vn));
@@ -757,7 +890,12 @@ impl Parser {
                 let name = match t.t {
                     T::Ident(n) => n,
                     T::Int(n) => n.to_string(),
-                    o => return Err((t.pos, format!("expected a field or method name, found {}", show(&o)))),
+                    o => {
+                        return Err((
+                            t.pos,
+                            format!("expected a field or method name, found {}", show(&o)),
+                        ));
+                    }
                 };
                 if self.is("(")? {
                     self.next()?;
@@ -818,22 +956,36 @@ impl Parser {
                 self.mk(pos, EK::Array(es))
             }
             T::P("{") => {
-                self.peeked = Some(Tok { t: T::P("{"), pos, start: t.start });
+                self.peeked = Some(Tok {
+                    t: T::P("{"),
+                    pos,
+                    start: t.start,
+                });
                 self.block()?
             }
             T::P("|") | T::P("||") => return Err((pos, "a closure is written `(x) => e`".into())),
             T::P("<") => {
-                self.peeked = Some(Tok { t: T::P("<"), pos, start: t.start });
+                self.peeked = Some(Tok {
+                    t: T::P("<"),
+                    pos,
+                    start: t.start,
+                });
                 let j = self.jsx()?;
                 self.mk(pos, EK::Jsx(Box::new(j)))
             }
-            T::Ident(k) if k == "true" || k == "false" => self.mk(pos, EK::Lit(Lit::Bool(k == "true"))),
+            T::Ident(k) if k == "true" || k == "false" => {
+                self.mk(pos, EK::Lit(Lit::Bool(k == "true")))
+            }
             T::Ident(k) if k == "if" => {
                 let c = self.expr(true)?;
                 let th = self.block()?;
                 let el = if self.is_kw("else")? {
                     self.next()?;
-                    if self.is_kw("if")? { Some(Box::new(self.primary(no_rec)?)) } else { Some(Box::new(self.block()?)) }
+                    if self.is_kw("if")? {
+                        Some(Box::new(self.primary(no_rec)?))
+                    } else {
+                        Some(Box::new(self.block()?))
+                    }
                 } else {
                     None
                 };
@@ -858,8 +1010,16 @@ impl Parser {
             T::Ident(k) if k == "continue" => self.mk(pos, EK::Continue),
             T::Ident(k) if k == "perform" => {
                 let (n, npos) = self.ident()?;
-                let (en, v) = if self.eat("::")? { (Some(n), self.ident()?.0) } else { (None, n) };
-                let args = if self.eat("(")? { self.args(")")? } else { vec![] };
+                let (en, v) = if self.eat("::")? {
+                    (Some(n), self.ident()?.0)
+                } else {
+                    (None, n)
+                };
+                let args = if self.eat("(")? {
+                    self.args(")")?
+                } else {
+                    vec![]
+                };
                 self.mk(npos, EK::Perform(en, v, args))
             }
             T::Ident(k) if k == "handle" => {
@@ -879,7 +1039,13 @@ impl Parser {
                     let (k, _) = self.ident()?;
                     self.expect("=>")?;
                     let b = self.expr(false)?;
-                    arms.push(HArm { variant: v, pats, k, body: b, pos: apos });
+                    arms.push(HArm {
+                        variant: v,
+                        pats,
+                        k,
+                        body: b,
+                        pos: apos,
+                    });
                     if !self.eat(",")? {
                         self.expect("}")?;
                         break;
@@ -939,12 +1105,24 @@ impl Parser {
     /// After `(`: the parameters of an arrow function `(a, b: i32) => ..`, up to and including `=>`; otherwise
     /// None, with the parser back where it was
     fn try_arrow_params(&mut self) -> PResult<Option<Vec<(String, Option<TyS>)>>> {
-        let save = (self.i, self.line, self.col, self.peeked.clone(), self.next_id);
+        let save = (
+            self.i,
+            self.line,
+            self.col,
+            self.peeked.clone(),
+            self.next_id,
+        );
         let r = (|| -> PResult<Option<Vec<(String, Option<TyS>)>>> {
             let mut ps = vec![];
             while !self.eat(")")? {
-                let T::Ident(n) = self.next()?.t else { return Ok(None) };
-                let t = if self.eat(":")? { Some(self.ty()?) } else { None };
+                let T::Ident(n) = self.next()?.t else {
+                    return Ok(None);
+                };
+                let t = if self.eat(":")? {
+                    Some(self.ty()?)
+                } else {
+                    None
+                };
                 ps.push((n, t));
                 if !self.eat(",")? && !self.is(")")? {
                     return Ok(None);
@@ -967,7 +1145,12 @@ impl Parser {
         let pos = self.expect("<")?;
         if self.eat(">")? {
             let children = self.jsx_children("")?;
-            return Ok(Jsx { tag: String::new(), attrs: vec![], children, pos });
+            return Ok(Jsx {
+                tag: String::new(),
+                attrs: vec![],
+                children,
+                pos,
+            });
         }
         let (mut tag, _) = self.ident()?;
         while self.eat(".")? {
@@ -977,7 +1160,12 @@ impl Parser {
         loop {
             if self.eat("/")? {
                 self.expect(">")?;
-                return Ok(Jsx { tag, attrs, children: vec![], pos });
+                return Ok(Jsx {
+                    tag,
+                    attrs,
+                    children: vec![],
+                    pos,
+                });
             }
             if self.eat(">")? {
                 break;
@@ -1001,7 +1189,15 @@ impl Parser {
                         self.expect("}")?;
                         e
                     }
-                    o => return Err((t.pos, format!("expected a string or `{{..}}` as the attribute's value, found {}", show(&o)))),
+                    o => {
+                        return Err((
+                            t.pos,
+                            format!(
+                                "expected a string or `{{..}}` as the attribute's value, found {}",
+                                show(&o)
+                            ),
+                        ));
+                    }
                 }
             } else {
                 self.mk(apos, EK::Lit(Lit::Bool(true)))
@@ -1009,7 +1205,12 @@ impl Parser {
             attrs.push((a, v));
         }
         let children = self.jsx_children(&tag)?;
-        Ok(Jsx { tag, attrs, children, pos })
+        Ok(Jsx {
+            tag,
+            attrs,
+            children,
+            pos,
+        })
     }
 
     fn jsx_children(&mut self, tag: &str) -> PResult<Vec<JsxChild>> {
@@ -1021,13 +1222,21 @@ impl Parser {
                 text.push(self.bump());
             }
             // (JSX's whitespace rule, simplified: lines are trimmed and joined by a space, blank text dropped)
-            let lines: Vec<&str> = text.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+            let lines: Vec<&str> = text
+                .lines()
+                .map(|l| l.trim())
+                .filter(|l| !l.is_empty())
+                .collect();
             if !lines.is_empty() {
                 let mut s = lines.join(" ");
-                if text.starts_with([' ', '\t']) && !text.trim_start_matches([' ', '\t']).starts_with('\n') {
+                if text.starts_with([' ', '\t'])
+                    && !text.trim_start_matches([' ', '\t']).starts_with('\n')
+                {
                     s.insert(0, ' ');
                 }
-                if text.ends_with([' ', '\t']) && !text.trim_end_matches([' ', '\t']).ends_with('\n') {
+                if text.ends_with([' ', '\t'])
+                    && !text.trim_end_matches([' ', '\t']).ends_with('\n')
+                {
                     s.push(' ');
                 }
                 out.push(JsxChild::Text(s));
@@ -1100,7 +1309,13 @@ fn callback_ty(s: &str) -> Option<WTy> {
         (true, s.strip_prefix("Box<dynFn(")?.strip_suffix('>')?)
     };
     let (args, ret) = rest.split_once(')')?;
-    let args = if args.is_empty() { vec![] } else { args.split(',').map(scalar_wty).collect::<Option<Vec<_>>>()? };
+    let args = if args.is_empty() {
+        vec![]
+    } else {
+        args.split(',')
+            .map(scalar_wty)
+            .collect::<Option<Vec<_>>>()?
+    };
     let ret = match ret.strip_prefix("->") {
         Some(r) => scalar_wty(r)?,
         None if ret.is_empty() => WTy::Unit,

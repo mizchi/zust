@@ -39,11 +39,18 @@ fn copy_rec(t: &Ty, info: &Info, seen: &mut Vec<String>) -> bool {
             let (params, fields): (&[String], Vec<&Ty>) = if let Some(r) = info.records.get(n) {
                 (&r.params, r.fields.iter().map(|f| &f.1).collect())
             } else if let Some(e) = info.enums.get(n) {
-                (&e.params, e.variants.iter().flat_map(|v| v.1.iter()).collect())
+                (
+                    &e.params,
+                    e.variants.iter().flat_map(|v| v.1.iter()).collect(),
+                )
             } else {
                 return true;
             };
-            let m: HashMap<&str, &Ty> = params.iter().map(|p| p.as_str()).zip(targs.iter()).collect();
+            let m: HashMap<&str, &Ty> = params
+                .iter()
+                .map(|p| p.as_str())
+                .zip(targs.iter())
+                .collect();
             seen.push(n.clone());
             let ok = fields.iter().all(|f| match f {
                 Ty::Param(p) => m.get(p.as_str()).is_none_or(|t| copy_rec(t, info, seen)),
@@ -63,7 +70,10 @@ fn subst(t: &Ty, m: &HashMap<&str, &Ty>) -> Ty {
         Ty::Typed(a) => Ty::Typed(Box::new(subst(a, m))),
         Ty::Tuple(ts) => Ty::Tuple(ts.iter().map(|t| subst(t, m)).collect()),
         Ty::Named(n, a) => Ty::Named(n.clone(), a.iter().map(|t| subst(t, m)).collect()),
-        Ty::Fn(a, r) => Ty::Fn(a.iter().map(|t| subst(t, m)).collect(), Box::new(subst(r, m))),
+        Ty::Fn(a, r) => Ty::Fn(
+            a.iter().map(|t| subst(t, m)).collect(),
+            Box::new(subst(r, m)),
+        ),
         t => t.clone(),
     }
 }
@@ -92,12 +102,27 @@ const PARAM: Id = Id::MAX;
 /// Computes [`Live`] for a body whose parameters are `params`; `copy(id)`: expression `id` is of a Copy type (a
 /// `match` on a Copy value borrows nothing)
 pub fn liveness(params: &[String], body: &Expr, copy: &dyn Fn(Id) -> bool) -> Live {
-    let mut r = Resolve { scopes: vec![HashMap::new()], binds: HashMap::new(), uses: HashMap::new(), depth: vec![], closures: 0 };
+    let mut r = Resolve {
+        scopes: vec![HashMap::new()],
+        binds: HashMap::new(),
+        uses: HashMap::new(),
+        depth: vec![],
+        closures: 0,
+    };
     for p in params {
         r.bind((PARAM, p.clone()));
     }
     r.expr(body);
-    let mut lv = Lv { r: &r, copy, out: Live::default(), record: true, frozen: vec![], closure: 0, loops: vec![], memo: Default::default() };
+    let mut lv = Lv {
+        r: &r,
+        copy,
+        out: Live::default(),
+        record: true,
+        frozen: vec![],
+        closure: 0,
+        loops: vec![],
+        memo: Default::default(),
+    };
     let mut live = HashSet::new();
     lv.expr(body, &mut live);
     fn mark(e: &Expr, out: &mut HashSet<Id>) -> bool {
@@ -277,10 +302,15 @@ fn children(e: &Expr) -> Vec<&Expr> {
         EK::Bin(_, l, r) | EK::Index(l, r) => vec![l, r],
         EK::Record(_, fs, base) => fs.iter().map(|f| &f.1).chain(base.as_deref()).collect(),
         EK::Array(xs) | EK::Tuple(xs) | EK::Perform(_, _, xs) => xs.iter().collect(),
-        EK::If(c, t, el) => std::iter::once(&**c).chain(std::iter::once(&**t)).chain(el.as_deref()).collect(),
+        EK::If(c, t, el) => std::iter::once(&**c)
+            .chain(std::iter::once(&**t))
+            .chain(el.as_deref())
+            .collect(),
         EK::While(c, b) => vec![c, b],
         EK::Assign(_, x) => vec![x],
-        EK::Match(sc, arms) => std::iter::once(&**sc).chain(arms.iter().map(|a| &a.1)).collect(),
+        EK::Match(sc, arms) => std::iter::once(&**sc)
+            .chain(arms.iter().map(|a| &a.1))
+            .collect(),
         EK::For(_, it, b) => vec![it, b],
         EK::Closure(_, b) => vec![b],
         EK::Block(stmts, tail) => stmts
@@ -290,7 +320,9 @@ fn children(e: &Expr) -> Vec<&Expr> {
             })
             .chain(tail.as_deref())
             .collect(),
-        EK::Handle(b, arms) => std::iter::once(&**b).chain(arms.iter().map(|a| &a.body)).collect(),
+        EK::Handle(b, arms) => std::iter::once(&**b)
+            .chain(arms.iter().map(|a| &a.body))
+            .collect(),
         // (a JSX element's attribute values and expression children are evaluated as well)
         EK::Jsx(j) => jsx_children(j),
         EK::Lit(_) | EK::Var(_) | EK::Path(..) | EK::Break | EK::Continue => vec![],
@@ -371,7 +403,11 @@ impl Lv<'_> {
                     *seen.entry(b).or_default() += 1;
                 }
             }
-            shared = seen.into_iter().filter(|(_, n)| *n > 1).map(|(b, _)| b).collect();
+            shared = seen
+                .into_iter()
+                .filter(|(_, n)| *n > 1)
+                .map(|(b, _)| b)
+                .collect();
         }
         let n = self.frozen.len();
         self.frozen.extend(shared);
@@ -395,7 +431,11 @@ impl Lv<'_> {
             EK::Var(_) => {
                 if let Some(&b) = self.r.uses.get(&e.id) {
                     // (a local captured from outside a closure is never moved inside it; the closure's own are)
-                    if self.record && self.r.depth[b] == self.closure && !live.contains(&b) && !self.frozen.contains(&b) {
+                    if self.record
+                        && self.r.depth[b] == self.closure
+                        && !live.contains(&b)
+                        && !self.frozen.contains(&b)
+                    {
                         self.out.last.insert(e.id);
                     }
                     live.insert(b);
@@ -554,7 +594,9 @@ impl Lv<'_> {
                 live.extend(l);
             }
             // (the callee too: it may be an expression, `(if c { f } else { g })(x)`)
-            EK::Call(f, args) => self.operands(&std::iter::once(&**f).chain(args).collect::<Vec<_>>(), live),
+            EK::Call(f, args) => {
+                self.operands(&std::iter::once(&**f).chain(args).collect::<Vec<_>>(), live)
+            }
             // (the emitted JS evaluates a JSX element's parts in its own order (`key` after the props): as operands, a
             // local read by two of them is moved by none, whatever the order)
             EK::Jsx(j) => self.operands(&jsx_children(j), live),
@@ -573,7 +615,9 @@ impl Lv<'_> {
                 *live = acc;
                 self.expr(body, live);
             }
-            EK::Method(r, _, args) => self.operands(&std::iter::once(&**r).chain(args).collect::<Vec<_>>(), live),
+            EK::Method(r, _, args) => {
+                self.operands(&std::iter::once(&**r).chain(args).collect::<Vec<_>>(), live)
+            }
             EK::Bin(op, a, b) if *op == "&&" || *op == "||" => {
                 // (the right operand may not run: what is live before it joins what is live after the operator)
                 let mut shared = HashSet::new();
@@ -590,7 +634,13 @@ impl Lv<'_> {
                 self.frozen.truncate(n);
             }
             EK::Bin(_, a, b) | EK::Index(a, b) => self.operands(&[a, b], live),
-            EK::Record(_, fs, base) => self.operands(&fs.iter().map(|f| &f.1).chain(base.as_deref()).collect::<Vec<_>>(), live),
+            EK::Record(_, fs, base) => self.operands(
+                &fs.iter()
+                    .map(|f| &f.1)
+                    .chain(base.as_deref())
+                    .collect::<Vec<_>>(),
+                live,
+            ),
             EK::Array(xs) | EK::Tuple(xs) => self.operands(&xs.iter().collect::<Vec<_>>(), live),
             _ => {
                 for c in children(e).into_iter().rev() {
@@ -602,7 +652,11 @@ impl Lv<'_> {
 
     /// Iterates `step` (what is live at the loop's head, from a guess of it) from `after` to its fixed point, without
     /// recording
-    fn fixpoint(&mut self, after: &HashSet<usize>, step: impl Fn(&mut Self, &HashSet<usize>) -> HashSet<usize>) -> HashSet<usize> {
+    fn fixpoint(
+        &mut self,
+        after: &HashSet<usize>,
+        step: impl Fn(&mut Self, &HashSet<usize>) -> HashSet<usize>,
+    ) -> HashSet<usize> {
         let saved = self.record;
         self.record = false;
         let mut h = after.clone();
@@ -634,7 +688,13 @@ impl Lv<'_> {
 pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id> {
     use crate::check::{Builtin as B, Callee};
     let live = liveness(params, body, &|_| false);
-    let mut r = Resolve { scopes: vec![HashMap::new()], binds: HashMap::new(), uses: HashMap::new(), depth: vec![], closures: 0 };
+    let mut r = Resolve {
+        scopes: vec![HashMap::new()],
+        binds: HashMap::new(),
+        uses: HashMap::new(),
+        depth: vec![],
+        closures: 0,
+    };
     for p in params {
         r.bind((PARAM, p.clone()));
     }
@@ -666,11 +726,18 @@ pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id
     lets(body, &r, &mut values);
     let fresh = |x: &Expr| match &x.kind {
         EK::Array(_) => !info.typed_lit.contains_key(&x.id),
-        EK::Method(..) => matches!(info.builtin.get(&x.id), Some(B::Map | B::Filter | B::Push | B::Concat)),
+        EK::Method(..) => matches!(
+            info.builtin.get(&x.id),
+            Some(B::Map | B::Filter | B::Push | B::Concat)
+        ),
         EK::Call(f, _) => matches!(info.callee.get(&f.id), Some(Callee::Range)),
         _ => false,
     };
-    let mut ok: HashSet<usize> = values.iter().filter(|(_, vs)| vs.iter().all(|x| fresh(x))).map(|(b, _)| *b).collect();
+    let mut ok: HashSet<usize> = values
+        .iter()
+        .filter(|(_, vs)| vs.iter().all(|x| fresh(x)))
+        .map(|(b, _)| *b)
+        .collect();
     // every use: read without keeping, or the last
     fn uses(e: &Expr, keeps: bool, r: &Resolve, info: &Info, live: &Live, ok: &mut HashSet<usize>) {
         use crate::check::Builtin as B;
@@ -685,7 +752,20 @@ pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id
         }
         match &e.kind {
             EK::Method(recv, _, args) => {
-                let reads = matches!(info.builtin.get(&e.id), Some(B::Len | B::Map | B::Filter | B::Fold | B::Any | B::All | B::Push | B::Concat | B::Join));
+                let reads = matches!(
+                    info.builtin.get(&e.id),
+                    Some(
+                        B::Len
+                            | B::Map
+                            | B::Filter
+                            | B::Fold
+                            | B::Any
+                            | B::All
+                            | B::Push
+                            | B::Concat
+                            | B::Join
+                    )
+                );
                 uses(recv, !reads, r, info, live, ok);
                 for a in args {
                     uses(a, true, r, info, live, ok);
@@ -718,7 +798,9 @@ pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id
                 for st in stmts {
                     match st {
                         Stmt::Expr(x) => uses(x, false, r, info, live, ok),
-                        Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) => uses(x, true, r, info, live, ok),
+                        Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) => {
+                            uses(x, true, r, info, live, ok)
+                        }
                     }
                 }
                 if let Some(t) = tail {
@@ -752,7 +834,14 @@ pub fn inplace_pushes(params: &[String], body: &Expr, info: &Info) -> HashSet<Id
     uses(body, true, &r, info, &live, &mut ok);
     // the pushes and concats onto such a local, at its last use
     let mut out = HashSet::new();
-    fn pushes(e: &Expr, r: &Resolve, info: &Info, live: &Live, ok: &HashSet<usize>, out: &mut HashSet<Id>) {
+    fn pushes(
+        e: &Expr,
+        r: &Resolve,
+        info: &Info,
+        live: &Live,
+        ok: &HashSet<usize>,
+        out: &mut HashSet<Id>,
+    ) {
         use crate::check::Builtin as B;
         if let EK::Method(recv, _, args) = &e.kind
             && matches!(info.builtin.get(&e.id), Some(B::Push | B::Concat))
@@ -785,14 +874,18 @@ mod tests {
 
     fn live_of(src: &str) -> (Live, Vec<Item>) {
         let items = crate::parse::Parser::new(src).file().unwrap();
-        let Item::Fn { args, body, .. } = &items[0] else { panic!() };
+        let Item::Fn { args, body, .. } = &items[0] else {
+            panic!()
+        };
         let ps: Vec<String> = args.iter().map(|a| a.0.clone()).collect();
         (liveness(&ps, body, &|_| false), items.clone())
     }
 
     /// The ids of the uses of `name`, in source order
     fn uses(items: &[Item], name: &str) -> Vec<Id> {
-        let Item::Fn { body, .. } = &items[0] else { panic!() };
+        let Item::Fn { body, .. } = &items[0] else {
+            panic!()
+        };
         let mut out = vec![];
         fn go(e: &Expr, name: &str, out: &mut Vec<(Pos, Id)>) {
             if let EK::Var(n) = &e.kind
@@ -813,14 +906,26 @@ mod tests {
 
     fn lasts(src: &str, name: &str) -> Vec<bool> {
         let (l, items) = live_of(src);
-        uses(&items, name).iter().map(|id| l.last.contains(id)).collect()
+        uses(&items, name)
+            .iter()
+            .map(|id| l.last.contains(id))
+            .collect()
     }
 
     #[test]
     fn straight_line() {
-        assert_eq!(lasts("fn f(xs: Array<f64>) -> Array<f64> { let n = xs.len(); g(xs) }", "xs"), [false, true]);
+        assert_eq!(
+            lasts(
+                "fn f(xs: Array<f64>) -> Array<f64> { let n = xs.len(); g(xs) }",
+                "xs"
+            ),
+            [false, true]
+        );
         // (two operands of one call: neither moves)
-        assert_eq!(lasts("fn f(xs: Array<f64>) -> f64 { h(xs, g(xs)) }", "xs"), [false, false]);
+        assert_eq!(
+            lasts("fn f(xs: Array<f64>) -> f64 { h(xs, g(xs)) }", "xs"),
+            [false, false]
+        );
         // (`&&`'s right operand may not run: the reassignment there does not make the left use the last)
         let src = "fn f(n: i32) -> Array<f64> { let mut xs = [1.0]; let ok = g(xs) && { xs = [2.0]; true }; xs }";
         assert_eq!(lasts(src, "xs"), [false, true]);
@@ -838,16 +943,29 @@ mod tests {
 
     #[test]
     fn shadowing_is_by_binding() {
-        let src = "fn f(v: Array<i32>) -> Array<i32> { let a = g(v); let w = { let v = 1; v }; h(v) }";
+        let src =
+            "fn f(v: Array<i32>) -> Array<i32> { let a = g(v); let w = { let v = 1; v }; h(v) }";
         // (the inner `v` is another binding: its only use is its last; the outer one is still live for `h`)
         assert_eq!(lasts(src, "v"), [false, true, true]);
     }
 
     #[test]
     fn closures_never_move() {
-        assert_eq!(lasts("fn f(xs: Array<i32>, ys: Array<i32>) -> Array<i32> { xs.map((x) => g(ys)) }", "ys"), [false]);
+        assert_eq!(
+            lasts(
+                "fn f(xs: Array<i32>, ys: Array<i32>) -> Array<i32> { xs.map((x) => g(ys)) }",
+                "ys"
+            ),
+            [false]
+        );
         // ... but a closure's own parameters are: the fold can push into its accumulator in place
-        assert_eq!(lasts("fn f(xs: Array<i32>) -> Array<i32> { xs.fold([], (acc, x) => acc.push(x)) }", "acc"), [true]);
+        assert_eq!(
+            lasts(
+                "fn f(xs: Array<i32>) -> Array<i32> { xs.fold([], (acc, x) => acc.push(x)) }",
+                "acc"
+            ),
+            [true]
+        );
     }
 
     #[test]
@@ -859,16 +977,32 @@ mod tests {
     #[test]
     fn match_and_for_roots() {
         let (l, items) = live_of("fn f(s: Shape) -> i32 { match s { A(xs) => g(xs), B => 0 } }");
-        let Item::Fn { body, .. } = &items[0] else { panic!() };
-        let EK::Block(_, Some(t)) = &body.kind else { panic!() };
+        let Item::Fn { body, .. } = &items[0] else {
+            panic!()
+        };
+        let EK::Block(_, Some(t)) = &body.kind else {
+            panic!()
+        };
         assert!(l.match_move.contains(&t.id));
         // the iterable is assigned in the body: iterate a clone
-        let (l, items) = live_of("fn f(xs: Array<i32>) -> Array<i32> { let mut v = xs; for x in v { v = v.push(x); } v }");
-        let Item::Fn { body, .. } = &items[0] else { panic!() };
-        let EK::Block(st, _) = &body.kind else { panic!() };
+        let (l, items) = live_of(
+            "fn f(xs: Array<i32>) -> Array<i32> { let mut v = xs; for x in v { v = v.push(x); } v }",
+        );
+        let Item::Fn { body, .. } = &items[0] else {
+            panic!()
+        };
+        let EK::Block(st, _) = &body.kind else {
+            panic!()
+        };
         let Stmt::Expr(fe) = &st[1] else { panic!() };
         assert!(l.clone_root.contains(&fe.id));
         // ... so the push inside the loop can reuse v (the loop does not borrow it), while the iterable is not moved
-        assert_eq!(lasts("fn f(xs: Array<i32>) -> Array<i32> { let mut v = xs; for x in v { v = v.push(x); } v }", "v"), [false, true, true]);
+        assert_eq!(
+            lasts(
+                "fn f(xs: Array<i32>) -> Array<i32> { let mut v = xs; for x in v { v = v.push(x); } v }",
+                "v"
+            ),
+            [false, true, true]
+        );
     }
 }
