@@ -31,6 +31,11 @@ builds are not supported yet".
 - **Build scripts** are still built for the host and run on it. They see wasm32's `CARGO_CFG_*`, as under cargo.
 - **The wasm backend** had no byte swap of a 128-bit integer (`u128::swap_bytes`, `to_be`), which byteorder uses.
   It swaps the two 64-bit halves now, each with its bytes reversed.
+- **Two fixes found by the test of that swap** (examples/int128.rs):
+  - minclif swapped only the low 64 bits of a 128-bit integer, so the high half was lost.
+  - A single-file build skipped its link when its object was unchanged and an executable was there, even an
+    executable older than the object. `-o x.cold` and `-o x` share `x.o`, so tests/compare.sh's warm build kept an
+    old executable. Now the executable must not be older than its object.
 
 ### 1.2 The compiler gaps on the way
 

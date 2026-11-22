@@ -260,7 +260,11 @@ impl Session2 {
             return Ok(rep);
         }
         let obj_path = output.with_extension("o");
-        let same = std::fs::read(&obj_path).is_ok_and(|old| old == obj) && std::fs::read(output).is_ok();
+        // (and the executable linked from it, not before it: `-o x.cold` writes the same `x.o` as `-o x`, and a link
+        // that failed leaves its object behind)
+        let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        let same = std::fs::read(&obj_path).is_ok_and(|old| old == obj)
+            && matches!((mtime(output), mtime(&obj_path)), (Some(e), Some(o)) if e >= o);
         if same {
             tm.lap("link", "skipped (object unchanged)".to_string());
         } else {
