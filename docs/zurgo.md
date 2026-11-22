@@ -29,10 +29,13 @@ Options:
 - `--target <triple>`: `x86_64-unknown-linux-gnu` (the default). `wasm32-unknown-unknown` is accepted, but zustc's
   workspace build does not take it yet.
 - `--bin <name>`, `-j <n>`, `--time` (zustc's timings), `--no-cache`.
+- `--build-script-compiler auto|zustc|rustc`: what compiles build scripts (below). `auto`, the default, tries zustc
+  and falls back to rustc.
 - `-v`: prints the workspace zurgo gives zustc, in the format of `zustc build`. It is also written to
   `target/zust/<profile>/zurgo-ws.txt`, so `zustc build` can repeat the build. A bin whose crate name differs from its
   executable's (a package's lib and bin share the package's name, so the bin's crate is `<name>-bin`) carries
-  `exe=<name>`.
+  `exe=<name>`. Each crate's cfgs from its build script and its environment for `env!` (`CARGO_PKG_*`, `OUT_DIR`)
+  are there too (`cfg=`, `env=`).
 - `--filter-platform <triple>` (metadata).
 - `--locked`, `--offline`, `--frozen` are accepted. zurgo always uses Cargo.lock as it is and never downloads.
 
@@ -87,12 +90,69 @@ output. A binary is `target/zust/debug/<name>`.
 packages and for cratebench/ui's dioxus and leptos apps (344 and 180 packages; also with `--filter-platform` for
 wasm32 and x86-64 Linux). For dioxus, zurgo takes 39 ms and cargo 320 ms.
 
+## Build scripts
+
+A package's `build.rs` runs before its crates are built, as under cargo:
+
+- **Compiling it.** It is a binary for the host, with the package's build-dependencies.
+  - `auto` (the default): zustc builds the build-dependencies and the script as one zustc workspace. When zustc
+    cannot (a std function it lacks, a proc-macro build-dependency), rustc builds them instead: the build-dependencies
+    as rlibs (a proc macro as a dylib), then the script.
+  - `-v` says which compiler built a script, and why zustc could not. zurgo remembers the choice until the sources
+    change.
+- **Running it.** It runs in the package's directory, with the variables cargo sets:
+  - `OUT_DIR`, `TARGET`, `HOST`, `NUM_JOBS`, `OPT_LEVEL`, `DEBUG`, `PROFILE`;
+  - `CARGO_MANIFEST_DIR`, `CARGO_MANIFEST_PATH`, `CARGO_MANIFEST_LINKS`, `CARGO_PKG_*`;
+  - `CARGO_FEATURE_<NAME>` and `CARGO_CFG_<KEY>` (rustc's values for the target);
+  - `RUSTC`, `RUSTDOC`, `CARGO`, `CARGO_ENCODED_RUSTFLAGS`;
+  - `DEP_<LINKS>_<KEY>` from the `links` packages it depends on.
+
+  `RUSTC` is the real rustc, so a script's probes and version checks see what they see under cargo.
+- **Its output**, in the `cargo:` and `cargo::` forms:
+  - `rustc-cfg` and `rustc-env` go to the package's crates;
+  - `warning` is printed, and `error` stops the build;
+  - `metadata` (and, in the old form, any other key) goes to the dependents' scripts as `DEP_<LINKS>_<KEY>`;
+  - link instructions (`rustc-link-lib`, `rustc-link-search`, `rustc-link-arg`, `rustc-flags`) are kept, but zustc
+    does not apply them yet: a warning says so.
+- **When it runs again.** Its output is kept in `target/zust/<profile>/build/<package>-<hash>/run`. It runs again when
+  the script changes, when cargo's variables change, or when a file or variable that `rerun-if-changed` /
+  `rerun-if-env-changed` names changes. A script that prints neither runs again when any file of its package
+  changes, as cargo does.
+  - A run is not kept when a file it depends on changed while it ran (also one removed: the directory's time says
+    so), when a directory could not be read, or when a file it names does not exist (cargo runs such a script every
+    time).
+  - The old result is removed before a script runs again, so a run that fails leaves nothing to reuse.
+  - Two zurgo processes that share a target directory take turns, as cargo does: a build holds a lock on it from
+    its first build script to its last compiled crate, so the `OUT_DIR` a script filled is the one its crates read.
+- **rustc's builds** of the host libraries and scripts are kept while the rustc (`rustc -vV`), the sources, the
+  dependencies' artifacts and the files their build scripts wrote to `OUT_DIR` are the same.
+
+Every crate also gets cargo's variables for `env!` / `option_env!`: `CARGO_PKG_*`, `CARGO_MANIFEST_DIR`,
+`CARGO_CRATE_NAME`, and for a bin `CARGO_BIN_NAME`. `OUT_DIR` and the script's `rustc-env` come on top of those.
+
+## Proc-macro dependencies
+
+Proc macros cannot run yet (mizchi/zust#29). A proc-macro dependency is built as a stub library of its name, so a
+crate that only re-exports it builds: `pub use thiserror_impl::*;`, or serde's `derive` feature.
+
+zustc would drop an unknown attribute silently, so using a proc macro is an error before anything is built:
+- a crate of the build that uses one of the stub's derives (`#[derive(thiserror::Error)]`), or one of its attribute
+  macros (`#[wasm_bindgen]`, also renamed: `use wasm_bindgen::prelude::wasm_bindgen as wb;`), is an error naming #29.
+  - Only the proc-macro crates a crate reaches count: its dependencies, or what its libraries re-export.
+  - Each crate is read as zustc reads it: the files of its module tree, with its features and cfgs. So a use in a
+    file it does not reach, under a cfg that is off, or in a `macro_rules!` body that is neither called nor exported
+    does not count.
+  - A derive of the language (`#[derive(Debug)]`) is a proc macro's only when the crate imports one of that name
+    from outside std (`use derive_more::Debug;`).
+  - The proc-macro crate's root is read with its features, so `#[cfg_attr(feature = "x", proc_macro_attribute)]`
+    counts when the feature is on;
+- a function-like macro (`html!(..)`) expands to a `compile_error!` naming #29.
+
 ## Not yet (mizchi/zust#28)
 
-- **Build scripts are not run.** A warning names each one. The cfgs they set and the files they write are missing.
-- **Proc-macro dependencies are an error** (mizchi/zust#29).
 - **Two versions of one library**, and **renamed dependencies**, are errors: zustc's workspace has one name per
   crate.
 - **Other sources:** git dependencies, other registries, source replacement.
 - **No `[patch]`, no resolver of its own, no downloads, no `test` / `doc`.**
-- **Editions:** zustc does not take an edition per crate yet.
+- **Editions:** zustc has no edition setting: it accepts what any edition accepts, so a crate's edition is not
+  passed on. (rustc, building build scripts, gets each crate's own.)

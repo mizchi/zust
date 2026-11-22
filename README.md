@@ -29,7 +29,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-22, 1739a48<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-22, 3943412<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -41,10 +41,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1809 (75.8%) |
+| run-pass (builds, runs, same output) | 2385 | 1811 (75.9%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1493 (82.6%) |
 | build-pass | 135 | 101 (74.8%) |
-| compile-fail (rejected at an annotated line) | 7358 | 4180 (56.8%) |
+| compile-fail (rejected at an annotated line) | 7358 | 4196 (57.0%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -56,22 +56,22 @@ Build speed, build cache size and LSP latency on generated programs of 1000 / 50
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 162 ms | 716 ms |
-| no-op build | 1.2 ms | 1.2 ms |
-| build after editing one function | 25.9 ms | 89.0 ms |
-| `check` | 132 ms | 636 ms |
+| cold build | 125 ms | 560 ms |
+| no-op build | 1.1 ms | 1.1 ms |
+| build after editing one function | 21.8 ms | 75.6 ms |
+| `check` | 98 ms | 474 ms |
 | no-op build (instructions) | 0.6 M | 0.6 M |
-| edit one function (instructions) | 124.2 M | 589.3 M |
-| `check` (instructions) | 783.8 M | 3869.3 M |
+| edit one function (instructions) | 124.7 M | 591.4 M |
+| `check` (instructions) | 786.0 M | 3879.0 M |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 18.7 MiB | 52.5 MiB |
+| cold build peak RSS | 19.1 MiB | 52.8 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.91 ms / 0.72 ms / 1.41 ms / 4.75 ms / 0.68 ms |
-| startup until indexed | 208 ms |
-| peak RSS | 91.3 MiB |
+| p50: definition, hover, completion, references, rename | 0.75 ms / 0.53 ms / 1.12 ms / 4.07 ms / 0.59 ms |
+| startup until indexed | 162 ms |
+| peak RSS | 92.2 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -263,6 +263,14 @@ bin app app/src/main.rs geom util
 zustc build workspace.txt -o target
 ```
 
+- Words after the dependencies set more of the crate:
+  - `features=a,b`: its features;
+  - `cfg=name` / `cfg=name=value`: other cfgs (what a build script's `rustc-cfg` gives);
+  - `env=KEY=VALUE`: the values `env!` / `option_env!` see (`CARGO_PKG_*`, `OUT_DIR`);
+  - `exe=NAME`: a bin's executable name.
+
+  In a value, `%`, `#` and white space are written `%XX`. A name `env!` does not find there is looked up in zustc's
+  own environment, as rustc does.
 - Each crate gets its own object file and cache, and they are linked at the end.
 - Changing the body of a function in a crate that others depend on does not recompile the dependents; zustc only
   relinks.
@@ -281,8 +289,10 @@ zurgo run
 
 - Commands: `build`, `run`, `metadata` (the JSON of `cargo metadata`), `clean`, with cargo's flags for them.
 - Output goes to `target/zust/<profile>/`.
-- Not yet: build scripts, proc macros, two versions of one crate, renamed dependencies, git dependencies, its own
-  resolver (mizchi/zust#28, mizchi/zust#29).
+- Build scripts run as under cargo (compiled by zustc, or by rustc when zustc cannot), and their cfgs, `rustc-env` and
+  `OUT_DIR` reach the crates. A proc-macro dependency is a stub: using its macros is an error.
+- Not yet: running proc macros, two versions of one crate, renamed dependencies, git dependencies, its own resolver
+  (mizchi/zust#28, mizchi/zust#29).
 
 ### Options
 
@@ -369,10 +379,10 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Overall
 
-- [x] tests/ui run-pass: <!-- total:run-pass -->75.8% (1809 / 2385)
+- [x] tests/ui run-pass: <!-- total:run-pass -->75.9% (1811 / 2385)
 - [x] tests/ui check-pass: <!-- total:check-pass -->82.6% (1493 / 1807)
 - [x] tests/ui build-pass: <!-- total:build-pass -->74.8% (101 / 135)
-- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->56.8% (4180 / 7358)
+- [ ] tests/ui compile-fail (an error on an annotated line): <!-- total:compile-fail -->57.0% (4196 / 7358)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
 - [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
 
@@ -407,12 +417,12 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [ ] const generics: <!-- ui:const-generics -->64.4% (no `generic_const_exprs`)
 - [ ] generic associated types: <!-- ui:generic-associated-types -->80.0%
 - [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->72.4%
-- [ ] `impl Trait`: <!-- ui:impl-trait -->70.3% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
+- [ ] `impl Trait`: <!-- ui:impl-trait -->71.2% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
 - [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->58.1%
 
 ### Checks (compile-fail)
 
-- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->68.9%
+- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->70.6%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
 - [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->69.3%, structs <!-- cf:structs -->77.1%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
@@ -430,7 +440,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   types (E0106), `'_` where it cannot be used (E0637), `unused_lifetimes` / `single_use_lifetimes`; borrows that
   must outlive the fn live to its end, closures that are not general enough or let borrowed data escape. Not yet:
   generic fns that are never called, what a closure's body requires of its fn, higher-ranked trait selection, the
-  requirements of the impl a coercion selects, the prelude's iterators (their types hold no lifetimes). regions <!-- cf:regions -->72.4%, lifetimes <!-- cf:lifetimes -->71.9%
+  requirements of the impl a coercion selects, the prelude's iterators (their types hold no lifetimes). regions <!-- cf:regions -->73.3%, lifetimes <!-- cf:lifetimes -->72.7%
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
 - [ ] lints and warnings: lint <!-- cf:lint -->30.6%
 - [ ] editions (2015-only errors)
@@ -455,7 +465,8 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [ ] items inside blocks: `mod`, `trait`, `impl`, `type`, `union` and `pub` items in a fn body now move out; items a
   macro expands to in statement position move out too; from a macro in expression position not yet (~12 tests)
 - [ ] builtin macros: `offset_of!`, `addr_of!` / `addr_of_mut!`, `try!`, `stringify!`, `concat!`, `line!`, `column!`,
-  `option_env!`, `assert_matches!`, `format_args!` now work; `module_path!`, `file!`, `include!`, `asm!` do not (~8 tests)
+  `env!`, `option_env!`, `assert_matches!`, `format_args!` now work, and so does `include!` of a literal path or of
+  `concat!` of literals and `env!`; `module_path!`, `file!`, other forms of `include!`, `asm!` do not (~8 tests)
 - [ ] `repr(packed)` / `repr(align)`: ~16 tests
 - [ ] `Pin`: `Pin<&T>` / `Pin<&mut T>` work as the pointer; `Box::pin(fut)` and `Pin<Box<dyn Future<Output = T>>>` work (the future's value, as async runs at once); `self: Pin<&mut Self>` and
   `self: Box<Self>` receivers work; `pin!` does not

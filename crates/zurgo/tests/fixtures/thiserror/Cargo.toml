@@ -1,0 +1,11 @@
+[package]
+name = "app-thiserror"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# (a test package of zurgo, not a member of zust's workspace)
+[workspace]
+
+[dependencies]
+thiserror = "=2.0.21"
