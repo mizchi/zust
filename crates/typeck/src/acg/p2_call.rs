@@ -1121,7 +1121,7 @@ impl Cx<'_> {
             if not_send(self.prog, t) {
                 return Err(self.at(*cpos, format!("`{}` cannot be sent between threads safely", self.prog.tn(t))));
             }
-            if !*mv && !crate::ast_closure::moves_capture(strip_paren(c), &[n.clone()]) {
+            if !*mv && !crate::ast_closure::moves_capture_by(strip_paren(c), &[n.clone()], &|p, _| borrowck::pat_moves(self.prog, p, t, 0)) {
                 return Err(self.at(*cpos, format!("closure may outlive the current function, but it borrows `{n}`, which is owned by the current function")));
             }
         }
@@ -2060,7 +2060,10 @@ impl Cx<'_> {
                 let c = strip_paren(a);
                 if (kind("Fn") || kind("FnMut")) && self.bk.fnonce_sure.contains(&(c as *const Expr as usize)) {
                     let caps: Vec<String> = crate::ast_closure::free_vars(c).into_iter().filter(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0)).collect();
-                    if let Some((n, at)) = crate::ast_closure::move_site(c, &caps) {
+                    let prog = self.prog;
+                    let types: Vec<(String, Ty)> = caps.iter().filter_map(|n| self.lookup(n).map(|(_, t)| (n.clone(), t))).collect();
+                    let by = |p: &crate::parse::Pat, n: &str| types.iter().find(|x| x.0 == n).is_none_or(|x| borrowck::pat_moves(prog, p, x.1, 0));
+                    if let Some((n, at)) = crate::ast_closure::move_site_by(c, &caps, &by) {
                         let w = if kind("Fn") { "Fn" } else { "FnMut" };
                         return Err(self.at(at, format!("cannot move out of `{n}`, a captured variable in an `{w}` closure (E0507)")));
                     }

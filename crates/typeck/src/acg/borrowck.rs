@@ -444,6 +444,49 @@ pub fn is_copy(prog: &Program, t: Ty, depth: u32) -> bool {
     }
 }
 
+/// Whether `let p = v;` with v of type t moves v, or a part of it, out: p binds by value a part whose type is not
+/// Copy (`let (n, _) = pair;` with n an integer copies). An enum variant's pattern, or a part whose type is not
+/// followed: as binds_by_value
+pub fn pat_moves(prog: &Program, p: &Pat, t: Ty, depth: u32) -> bool {
+    if depth > 8 {
+        return crate::ast_closure::binds_by_value(p);
+    }
+    let parts = |ps: &[Pat], fs: &[(String, Ty, u32)]| match Cx::tuple_fields(ps.iter(), fs.len(), super::SP) {
+        Ok(v) => v.iter().any(|(i, q)| pat_moves(prog, q, fs[*i].1, depth + 1)),
+        Err(_) => ps.iter().any(crate::ast_closure::binds_by_value),
+    };
+    match p {
+        Pat::Wild | Pat::Rest => false,
+        // (`x` / `x @ ..` binds the whole by value; `ref x` borrows; an uppercase name is a constant or a unit variant)
+        Pat::Ident(by_ref, _, n, sub) => {
+            if *by_ref {
+                sub.as_deref().is_some_and(|q| pat_moves(prog, q, t, depth + 1))
+            } else if n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_" {
+                !is_copy(prog, t, 0)
+            } else {
+                false
+            }
+        }
+        Pat::Tuple(ps) => match t {
+            Ty::Struct(sid) if prog.is_tuple(sid) => parts(ps, &prog.structs[sid as usize].fields),
+            _ => crate::ast_closure::binds_by_value(p),
+        },
+        // (a struct's pattern, not an enum variant's)
+        Pat::TupleStruct(_, ps) => match t {
+            Ty::Struct(sid) if prog.structs[sid as usize].variants.is_empty() && !prog.is_tuple(sid) => parts(ps, &prog.structs[sid as usize].fields),
+            _ => crate::ast_closure::binds_by_value(p),
+        },
+        Pat::Struct(_, named, _) => match t {
+            Ty::Struct(sid) if prog.structs[sid as usize].variants.is_empty() && !prog.is_tuple(sid) => {
+                let fs = &prog.structs[sid as usize].fields;
+                named.iter().any(|(n, q)| fs.iter().find(|f| f.0 == *n).map_or(crate::ast_closure::binds_by_value(q), |f| pat_moves(prog, q, f.1, depth + 1)))
+            }
+            _ => crate::ast_closure::binds_by_value(p),
+        },
+        _ => crate::ast_closure::binds_by_value(p),
+    }
+}
+
 /// The prelude's iterator and view types: raw pointers into what they were made from, so they hold the loan of it
 const VIEWS: &[&str] = &[
     "Windows", "Chunks", "ChunksExact", "Iter", "IterMut", "Chars", "DebugStruct", "DebugTuple", "DebugMap", "MutexGuard", "Ref", "RefMut", "HmIter",
@@ -2106,7 +2149,9 @@ impl Cx<'_> {
         if (by_move || move_kw) && !self.bk_ty(t).0 && !self.bk.fnonce_exprs.contains(&ca) && (crate::ast_closure::moves_capture(c, &[n.to_string()]) || self.bk_may_consume(body, n)) {
             self.bk.fnonce_exprs.push(ca);
         }
-        if (by_move || move_kw) && !self.bk_ty(t).0 && crate::ast_closure::moves_capture(c, &[n.to_string()]) && !self.bk.fnonce_sure.contains(&ca) {
+        // (surely: a `let` that destructures the capture moves only the parts that are not Copy)
+        let prog = self.prog;
+        if (by_move || move_kw) && !self.bk_ty(t).0 && !self.bk.fnonce_sure.contains(&ca) && crate::ast_closure::moves_capture_by(c, &[n.to_string()], &|p, _| pat_moves(prog, p, t, 0)) {
             self.bk.fnonce_sure.push(ca);
         }
         for (p, pt, mode, _) in &mut paths {
