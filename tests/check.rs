@@ -135,6 +135,8 @@ fn uncalled_generic_fns() {
     let d = s.check(src);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![3, 6], "{d:?}");
     assert!(d[1].msg.contains("cannot add `T` to `T`"), "{d:?}");
+}
+
 /// A constant whose value needs its own is E0391 at the constant, not an endless evaluation
 #[test]
 fn constant_cycles() {
