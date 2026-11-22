@@ -27,162 +27,6 @@
 > - zustc's checks (types, borrow checking, region errors against signatures) are partial, so it is not a replacement for rustc for checking correctness.
 > - zust-analyzer implements only part of what rust-analyzer does.
 
-## Status
-
-Numbers measured <!-- measured -->2026-11-22, 9edb119<!-- /measured --> by CI on each push to main (bench.yml runs
-`bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
-GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
-
-### Coverage of rustc's test suite
-
-zustc run against rustc's own UI tests (`tests/ui` of rust-lang/rust 1.100.0, `python3 bench/rust_ui.py`), counting
-only the tests it can be asked to handle (no nightly features, auxiliary crates or special flags):
-
-<!-- auto:ui -->
-| kind | applicable | pass |
-|---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1816 (76.1%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1502 (83.1%) |
-| build-pass | 135 | 102 (75.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 4364 (59.3%) |
-<!-- /auto:ui -->
-
-[What is supported](#what-is-supported) breaks this down by area.
-
-### KPIs
-
-Build speed, build cache size and LSP latency on generated programs of 1000 / 5000 functions (`bench/ci_bench.py`).
-In parentheses: the instruction count (valgrind), which does not vary with the runner:
-
-<!-- auto:kpi -->
-| KPI | gen1000 | gen5000 |
-|---|---:|---:|
-| cold build | 123 ms | 437 ms |
-| no-op build | 1.0 ms (0.6 M) | 1.2 ms (0.6 M) |
-| build after editing one function | 23.9 ms (124.9 M) | 70.7 ms (590.9 M) |
-| `check` | 77 ms (761.2 M) | 345 ms (3755.3 M) |
-| build cache on disk | 387.2 KiB | 1902.8 KiB |
-| binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 19.3 MiB | 52.8 MiB |
-
-| zust-analyzer (zustc's own sources) | |
-|---|---:|
-| p50: definition, hover, completion, references, rename | 1.00 ms / 0.77 ms / 1.54 ms / 2.60 ms / 0.85 ms |
-| startup until indexed | 202 ms |
-| peak RSS | 95.8 MiB |
-<!-- /auto:kpi -->
-
-Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
-visible: [bench/kpi_log.md](bench/kpi_log.md) has one row per change with its effect (Δ) and the total since the
-reference (Σ). The [benchmark dashboard](https://mizchi.github.io/zust/dev/bench/) has the CI numbers of every commit.
-
-### Against rustc, relax and rust-analyzer (snapshots)
-
-Measured with `python3 bench/vs_rustc.py` and `python3 cratebench/run.py` (2026-11-18, 4 cores, rustc 1.100.0; times are
-medians of 3 runs). These comparisons are run by hand (they need rustc, relax and rust-analyzer side by side) and are dated. gen1000 is a generated program with 1000 functions:
-
-| gen1000 | cold | no-op | edit one function | on disk | binary (stripped) | run |
-|---|---:|---:|---:|---:|---:|---:|
-| zustc | 123 ms | 18 ms | 27 ms | 766 KiB | 324 KiB | 11 ms |
-| zustc `-O` | 374 ms | 68 ms | 67 ms | 1199 KiB | 341 KiB | 3 ms |
-| rustc `-C incremental` | 756 ms | 197 ms | 406 ms | 10.8 MiB | 1038 KiB | 7 ms |
-| rustc `-O` | 18345 ms | - | - | - | 377 KiB | 2 ms |
-| **zustc vs rustc `-C incremental`** | **6.1x faster** | **11x faster** | **15x faster** | **14x smaller** | **3.2x smaller** | |
-
-Small programs (`bench/rt`: fib, hashmap, matmul, nbody, sieve, sort, strings) and real crates (cratebench: fnv,
-adler2, hex, itoa, rustc-hash, cfg-if; all six give the same output as rustc):
-
-| | zustc vs rustc `-C incremental` (bench/rt) | zustc vs rustc (cratebench) |
-|---|---:|---:|
-| cold build | 2.5–4.0x faster (21–39 ms vs 71–131 ms) | 2.9–4.2x faster (22–61 ms vs 90–234 ms) |
-| edit and rebuild | 12–17x faster (4–6 ms vs 63–75 ms) | 4.8–7.0x faster (11–22 ms vs 68–114 ms) |
-| binary | 13–24x smaller | 93–550x smaller (8–48 KiB vs 4.4 MiB) |
-| run time vs rustc `-O` | zustc 1.2–3.6x slower, zustc `-O` 1.0–2.9x slower | zustc 3.1–22x slower, zustc `-O` 0.9–9.1x |
-
-zustc's code is close to rustc's debug build at run time, and faster than it in all seven small programs (rustc's
-debug build is 3–26x slower than rustc `-O` there).
-
-Against relax ([makepad/relax](https://github.com/makepad/relax) 3489f2d, a Rust JIT that compiles each function
-when it is first called; `python3 bench/vs_relax.py`, 2026-11-18). relax runs the program while it compiles it, so the
-three are compared on the time from source to the program's last output (zustc and rustc: build, then run). Every
-output matches rustc `-O`:
-
-| source to finished output | cold | no-op | edit one function | cache on disk |
-|---|---:|---:|---:|---:|
-| gen1000: zustc | 103 ms | 23 ms | 31 ms | 766 KiB |
-| gen1000: rustc `-C incremental` | 585 ms | 173 ms | 384 ms | 10.8 MiB |
-| gen1000: relax run | 1193 ms | 74 ms | 569 ms | 145 MiB |
-| bench/rt (7 programs): zustc | 87–278 ms | 56–224 ms | 58–266 ms | 37–90 KiB |
-| bench/rt: rustc `-C incremental` | 164–1718 ms | 141–1654 ms | 145–1615 ms | 0.1–0.9 MiB |
-| bench/rt: relax run | 831–1460 ms | 106–356 ms | 168–435 ms | 136–137 MiB |
-| **zustc vs relax** | **5.3–12x faster** | **1.3–3.4x faster** | **1.6–18x faster** | **1/190 (gen1000)–1/3800** |
-
-relax's numbers include starting its runtime and loading its own std; its strength (patching edits into a running
-program, keeping its state) is not measured here. On the small programs, the run itself is a large part of every
-number: rustc's debug build runs slowly, so relax beats it on five of the seven after an edit.
-
-Against blaze ([indexable-inc/blaze](https://github.com/indexable-inc/blaze) 0.20261027.0, a replacement for cargo
-whose daemon keeps the workspace compiled and builds only what an edit changed), on this machine and the same
-programs: each program as a cargo package for `blaze build` (dev profile, the daemon left running between builds as it
-is meant to be used; cold also stops it), `python3 bench/vs_blaze.py` (2026-11-19, 4 cores, with other jobs running;
-medians of 3; every output matches rustc `-O`). Memory is the peak RSS of one edit build for zustc and rustc, and what
-blaze's daemon holds:
-
-| | cold | no-op | edit one function | on disk | memory |
-|---|---:|---:|---:|---:|---:|
-| gen5000: zustc | 719 ms | 2 ms | 100 ms | 3.6 MiB | 37 MiB |
-| gen5000: rustc `-C incremental` | 3656 ms | 829 ms | 2245 ms | 55.8 MiB | 482 MiB |
-| gen5000: blaze | 9400 ms | 32 ms | 773 ms | 304 MiB | 661 MiB |
-| gen1000: zustc | 214 ms | 2 ms | 34 ms | 766 KiB | 17 MiB |
-| gen1000: rustc `-C incremental` | 828 ms | 202 ms | 468 ms | 10.8 MiB | 157 MiB |
-| gen1000: blaze | 2834 ms | 29 ms | 218 ms | 259 MiB | 442 MiB |
-| bench/rt (6 programs): zustc | 34–54 ms | 2 ms | 5–12 ms | 36–90 KiB | 13 MiB |
-| bench/rt: rustc `-C incremental` | 81–203 ms | 65–126 ms | 75–168 ms | 0.1–0.9 MiB | 82–94 MiB |
-| bench/rt: blaze | 1705–2311 ms | 32–60 ms | 41–74 ms | 244 MiB | 342–389 MiB |
-| **zustc vs blaze** | **13–61x faster** | **15–30x faster** | **6–11x faster** | **1/83 (gen5000)–1/6900** | **1/18–1/30** |
-
-A no-op build reads no source: like blaze's file watcher (`crates/blaze-vfs/src/watch.rs`: a file whose stat stamp
-did not move is never read or hashed), zustc keeps `<output>.stamp` with the stat stamps of every file the last
-successful build read, of the places `mod x;` looked, of the zustc binary and of the output, and stops when the
-command line, the `ZUSTC_*` environment and every stamp are as kept (a stamp taken within 20 ms of its file's change,
-or 2 s on a file system with whole-second times, is not trusted: git's racy rule, as blaze-vfs's `window_ns`).
-Before it, a no-op build did the front end over the whole source with every function a cache hit (84 ms on gen5000,
-against blaze's 29 ms). `ZUSTC_NO_STAMP=1` turns it off.
-
-hashmap is left out of bench/rt's rows: blaze does not build it (`HashMap::new` reaches a thread-local static it cannot
-compile yet). blaze builds real cargo projects that zustc cannot build yet (ripgrep, nushell, bun: its own
-[benchmarks](https://github.com/indexable-inc/blaze/blob/main/docs/benchmarks.md) show 56 ms to rebuild ripgrep after an
-edit, against cargo's 508 ms, on 16 cores of an AMD EPYC 9R45), and compiles the standard library itself, which is
-most of its cold build and of its target directory here. Its way of tracking its numbers (each merge's instruction
-counts against the median of the last runs, with a noise band) is what `bench/kpi_track.py` does too.
-
-Compatibility against blaze on the same tests: rustc's tests/ui, 300 of the tests `bench/rust_ui.py` counts as
-applicable of each kind (all 135 build-pass), picked with a fixed seed, each built by `blaze build` as the `src/main.rs`
-of a cargo package (its `//@ edition:`, else 2015; the C helpers compiletest links linked through a build script), and
-run for run-pass (`python3 bench/blaze_ui.py --per-kind 300`, 2026-11-20, blaze 0.20261027.0, zustc d9294dc; the table
-is also in `bench/blaze_ui_result.md`). compile-fail is left out: blaze reports rust-analyzer's diagnostics, whose lines
-this harness does not compare. blaze passes more of each kind; its front end is rust-analyzer's with rustc's trait
-solver, where zustc's is its own. Most of blaze's misses here are functions its code generator does not compile yet
-(`thread::spawn` reaches a writable static it has no symbol for), and a few are its own type errors:
-
-| tests/ui kind | sample | blaze | zustc |
-|---|---:|---:|---:|
-| run-pass | 300 | 254 (84.7%) | 224 (74.7%) |
-| check-pass | 300 | 274 (91.3%) | 245 (81.7%) |
-| build-pass | 135 | 123 (91.1%) | 97 (71.9%) |
-
-zust-analyzer against rust-analyzer and rust-glancer on zustc's own sources (40 query points,
-`python3 bench/lsp_parity.py --servers zustc,rust-analyzer,rust-glancer --targets zustc`, 2026-11-18, e45ee10;
-rust-glancer is github.com/rust-glancer/rust-glancer 50dd51a):
-
-| | startup until symbols resolve | memory | references p50 | agreement (mean over the queries) |
-|---|---:|---:|---:|---:|
-| zust-analyzer | 113 ms | 71 MB | 10.9 ms | 99.0% |
-| rust-analyzer | 6118 ms | 2060 MB | 214.0 ms | 98.9% |
-| rust-glancer | 9965 ms | 1573 MB | 548.8 ms | 58.5% |
-
-Details are in [bench/lsp_parity_result.md](bench/lsp_parity_result.md).
-
 ## Requirements
 
 - Linux x86-64
@@ -366,132 +210,44 @@ Documents are synced in full: didChange receives the whole text.
 
 Known differences from rust-analyzer are listed in [CONTRIBUTING.md](CONTRIBUTING.md#zust-analyzer-remaining-differences-from-rust-analyzer).
 
-## What is supported
+## Status
 
-The percentages are rustc's own UI tests that pass in that area: run-pass + check-pass + build-pass of the tests/ui
-directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). CI rewrites them with the rest of
-the measured numbers. The [reports](docs/reports/) explain each step.
+Numbers measured <!-- measured -->2026-11-22, 9edb119<!-- /measured --> by CI on each push to main. Details:
+[SUPPORT.md](SUPPORT.md) (what is supported) and [PERFORMANCE.md](PERFORMANCE.md) (speed, size, memory, and
+comparisons with rustc and others).
 
-- `[x]` works for ordinary code (most tests of the area pass)
-- `[ ]` partial or missing; the note says what is left
+### Coverage of rustc's test suite
 
-### Overall
+zustc run against rustc's own UI tests (`tests/ui` of rust-lang/rust 1.100.0, `python3 bench/rust_ui.py`), counting
+only the tests it can be asked to handle (no nightly features, auxiliary crates or special flags):
 
-- [x] tests/ui: the [table above](#coverage-of-rustcs-test-suite)
-- [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
-- [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
+<!-- auto:ui -->
+| kind | applicable | pass |
+|---|---:|---:|
+| run-pass (builds, runs, same output) | 2385 | 1816 (76.1%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1502 (83.1%) |
+| build-pass | 135 | 102 (75.6%) |
+| compile-fail (rejected at an annotated line) | 7358 | 4364 (59.3%) |
+<!-- /auto:ui -->
 
-### Language
+[SUPPORT.md](SUPPORT.md) breaks this down by area: the language, the checks, the runtime and std, and what is left.
 
-- [x] numbers, arithmetic, overflow checks: <!-- ui:numbers-arithmetic -->100.0%
-- [x] `for` / `while` / `loop`, labels: <!-- ui:for-loop-while,loops,label -->96.7%
-- [x] enums, `#[repr(u8)]`, auto-sized tags: <!-- ui:enum,enum-discriminant -->85.7%
-- [x] `cfg`: <!-- ui:cfg -->93.8%
-- [x] bindings, patterns, slice patterns, or-patterns (also with guards): <!-- ui:binding,pattern,or-patterns -->89.2%
-- [x] `match`: <!-- ui:match -->87.8%
-- [x] name resolution: <!-- ui:resolve -->88.6%
-- [x] statics: ints, floats, raw pointers, fn pointers, `const fn` calls: <!-- ui:statics -->95.0%
-- [x] structs, `..base` (field by field): <!-- ui:structs,structs-enums -->87.6%
-- [x] type aliases and paths (`impl foo::Point`) as impl self types, discriminants from constants and earlier variants, where clauses on concrete types
-- [x] syntax: GAT bindings, `dyn for<'a> Fn`, 2015 anonymous parameters, raw lifetimes `'r#a`, half-open range patterns, shebangs, Unicode white space; `macro_rules!` fragments matched by kind (`ident`, `literal`, `lifetime`, `vis`)
-- [x] methods of `impl Tr for Box<S>` (a Box impl next to a blanket impl of the same trait is E0119), `..b` / `..=b` / `..` values, `wrapping_shl` / `checked_shl` / `overflowing_shl` / `reverse_bits`, `wrapping_abs` / `saturating_abs` / `saturating_neg` / `overflowing_neg` / `overflowing_abs`
-- [x] qualified paths: `<T as Tr>::C` for a trait's default constant (its `Self::` is the qualified type), `<() as Tr>::f()`, associated functions through a type alias (`type Ham = m::Qux; Ham::new()`)
-- [x] let chains (`if let A = x && cond`), also in match guards (`P if let Q = e =>`); inline `const { .. }`, `&raw const` / `&raw mut`
-- [x] parser: <!-- ui:parser -->90.9%
-- [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->79.7%
-- [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->88.6%
-- [x] imports, `use`: <!-- ui:imports -->86.4%
-- [x] associated types: <!-- ui:associated-types -->79.7%
-- [x] generics: <!-- ui:generics -->85.7% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
-  parameter known only from the expected type is not inferred)
-- [ ] consts: <!-- ui:consts -->76.9% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
-- [ ] drop: <!-- ui:drop -->65.2% (the drop order of some temporaries differs)
-- [ ] traits: <!-- ui:traits -->71.0% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
-- [ ] `macro_rules!`: <!-- ui:macros -->77.1% (hygiene for `let`, labels, arm bindings; not every fragment kind)
-- [ ] unions: <!-- ui:union -->69.2% (no `repr(packed)`)
-- [ ] const generics: <!-- ui:const-generics -->64.4% (no `generic_const_exprs`)
-- [ ] generic associated types: <!-- ui:generic-associated-types -->80.0%
-- [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->72.4%
-- [ ] `impl Trait`: <!-- ui:impl-trait -->72.0% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
-- [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->58.1%
+### Speed
 
-### Checks (compile-fail)
+Generated programs of 1000 / 5000 functions, on shared GitHub Actions runners (times vary by about ±20%). The full
+table, with instruction counts, cache and binary sizes and memory, is in [PERFORMANCE.md](PERFORMANCE.md#kpis):
 
-- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->78.2%
-  ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
-- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->70.9%, structs <!-- cf:structs -->77.1%
-- [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
-  union field reads (not yet inside closures or consts, and not the `unsafe_op_in_unsafe_fn` lint)
-- [x] non-exhaustive `match` (E0004): bool, unit, enums (variants that cannot have a value need no arm), structs and
-  tuples, nested and with or-patterns (integer and slice patterns, and types left generic, are not checked yet)
-- [x] impl methods against the trait's declaration: parameter count (E0050), kind of receiver (E0053)
-- [x] unreachable match arms under `#![deny(unreachable_patterns)]` (the same usefulness check, arm by arm);
-  array patterns of the wrong length (E0527, E0528)
-- [ ] region errors against signatures ("lifetime may not live long enough", E0621): the universal regions of a fn's
-  signature against the constraints its body needs (calls, `let`, assignments, struct / variant values, patterns,
-  coercions to trait objects), borrows of locals and temporaries that must outlive the fn (E0597, E0716, E0515),
-  closure bodies against the bound they are passed to, trait object lifetimes, well-formed written types (E0309,
-  E0310, E0491), undeclared / shadowed / unconstrained lifetimes (E0261, E0496, E0207), missing ones in fn pointer
-  types (E0106), `'_` where it cannot be used (E0637), `unused_lifetimes` / `single_use_lifetimes`; borrows that
-  must outlive the fn live to its end, closures that are not general enough or let borrowed data escape, generic fns
-  that are never called (checked with placeholder types). Not yet: what a closure's body requires of its fn,
-  higher-ranked trait selection, the requirements of the impl a coercion selects, the prelude's iterators (their types
-  hold no lifetimes). regions <!-- cf:regions -->74.1%, lifetimes <!-- cf:lifetimes -->72.7%
-  ([issue #1](https://github.com/mizchi/zust/issues/1))
-- [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
-- [ ] lints and warnings: lint <!-- cf:lint -->31.1%
-- [ ] editions (2015-only errors)
+<!-- auto:kpi-summary -->
+| | gen1000 | gen5000 |
+|---|---:|---:|
+| cold build | 123 ms | 437 ms |
+| no-op build | 1.0 ms | 1.2 ms |
+| build after editing one function | 23.9 ms | 70.7 ms |
+| `check` | 77 ms | 345 ms |
+<!-- /auto:kpi-summary -->
 
-### Runtime and std
-
-- [x] the prelude (zustc's own small std): `Option`/`Result`, `Vec`, `String`, `HashMap`/`HashSet`,
-  `BTreeMap`/`BTreeSet`, `VecDeque`, `BinaryHeap`, `Rc`/`Arc`, `Cell`/`RefCell`, `Mutex`, `OnceLock`, `ManuallyDrop`,
-  `Duration`, `AtomicPtr`, `RangeTo` / `RangeFull` as types, `Fuse`, `iter::Empty`, `NonNull`, `Pin` (a plain pointer: `Pin::new`, `get_mut`, `into_inner`, deref), `std::task` (`Poll`, `Context`, `Waker::noop`) and the `Future` trait for futures implemented and polled by hand, `UnsafeCell`, `PhantomData`, atomics, `mpsc`, `mem::*`, `ptr::{read, write, drop_in_place, null}`,
-  `iter::{repeat, once, empty, repeat_with, successors}`, `reverse` / `fill` / `rotate_left` / `rotate_right` on arrays and slices, formatting, stdin/stdout/fs/env/process basics
-- [ ] async / await: <!-- ui:async-await -->77.7%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
-- [ ] threads: <!-- ui:threads-sendsync -->70.2%. Green threads on one OS thread: each spawned thread has its own stack and runs until it waits (`join`, `recv`, a held `Mutex`, `sleep`, `yield_now`, an atomic `load`); no parallelism
-- [ ] iterators: <!-- ui:iterators -->47.1% (`iter::empty()` cannot infer its item from the target)
-- [ ] FFI: <!-- ui:abi -->78.6%. Scalars only, no structs by value
-- [ ] panics: <!-- ui:panics -->11.1%. A panic aborts: no unwinding, `catch_unwind`, `set_hook`
-
-### In sight (known approach, small cost)
-
-- [ ] type parameters: `let v: Vec<Box<_>> = ..` (holes in an annotation) and generic fns passed as values
-  (`.map(drop)`, `.map(Result::unwrap)`) now infer; `iter::empty().collect()`, `let f = id;` and const parameters
-  inferred from patterns do not (~35 tests)
-- [ ] items inside blocks: `mod`, `trait`, `impl`, `type`, `union` and `pub` items in a fn body now move out; items a
-  macro expands to in statement position move out too; from a macro in expression position not yet (~12 tests)
-- [ ] builtin macros: `offset_of!`, `addr_of!` / `addr_of_mut!`, `try!`, `stringify!`, `concat!`, `line!`, `column!`,
-  `env!`, `option_env!`, `assert_matches!`, `format_args!` now work, and so does `include!` of a literal path or of
-  `concat!` of literals and `env!`; `module_path!`, `file!`, other forms of `include!`, `asm!` do not (~8 tests)
-- [ ] `repr(packed)` / `repr(align)`: ~16 tests
-- [ ] `Pin`: `Pin<&T>` / `Pin<&mut T>` work as the pointer; `Box::pin(fut)` and `Pin<Box<dyn Future<Output = T>>>` work (the future's value, as async runs at once); `self: Pin<&mut Self>` and
-  `self: Box<Self>` receivers work; `pin!` does not
-- [ ] dyn compatibility (E0038), generic argument counts of traits
-- [ ] closures that capture `&mut` are not `Copy`
-
-### Expected to cost performance (measured before kept)
-
-- [x] region checking against signatures: each part is measured in its PR, with the KPIs before and after
-  in [issue #1](https://github.com/mizchi/zust/issues/1) and its reports
-- [ ] coherence and bounds of blanket impls: `check` time, LSP
-- [ ] field-precise closure captures in codegen: binary size
-- [ ] a larger prelude: no-op build and cache size (the prelude, ~11k lines, is scanned on every build)
-
-### Large features not started
-
-- [ ] real concurrency: threads on several OS threads, in parallel (atomic `Arc` and atomics, a thread-safe
-  runtime; cost: runtime size)
-- [ ] executors: async as state machines, `Future::poll`, `Waker`, `Pin<Box<dyn Future>>` (~25 tests; cost: build
-  time, binary size)
-- [ ] unwinding: `catch_unwind`, panic hooks (~22 tests; landing pads cost build time and binary size)
-- [ ] FFI: structs by value, other ABIs (~27 tests)
-- [ ] a full trait solver: specialization, auto traits through `dyn` / `async`, higher-ranked bounds
-- [ ] inline asm
-- [ ] proc macros: none run yet; zurgo stops on a use of one ([issue #29](https://github.com/mizchi/zust/issues/29))
-
-Lints, editions and region checking are under [Checks](#checks-compile-fail). SIMD is done in part
-([tests/simd/README.md](tests/simd/README.md), [issue #30](https://github.com/mizchi/zust/issues/30)).
+Against `rustc -C incremental` on gen1000 (a snapshot measured by hand): about 6x faster cold, 15x faster after an
+edit, and a 14x smaller cache ([PERFORMANCE.md](PERFORMANCE.md#against-rustc-relax-and-rust-analyzer-snapshots)).
 
 ## Roadmap
 
@@ -503,6 +259,8 @@ What is planned and what blocks it: [CONTRIBUTING.md](CONTRIBUTING.md#roadmap) a
 - [docs/language.md](docs/language.md): the subset of Rust that zustc supports, and what it does not
 - [docs/architecture.md](docs/architecture.md): crate layout, the pipeline, how incremental builds work, value representation
 - [docs/reports/](docs/reports/README.md): work log, as dated reports (benchmark results and what was done at each step)
+- [SUPPORT.md](SUPPORT.md): what is supported, by area, with rustc's tests/ui pass rates
+- [PERFORMANCE.md](PERFORMANCE.md): the KPIs, and comparisons with rustc, relax, blaze and rust-analyzer
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to develop (setting up a clone, tests, KPIs, benchmarks, reports) and the roadmap
 
 ## License

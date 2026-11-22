@@ -322,10 +322,11 @@ python3 bench/ci_bench.py --out-dir out/ci
 
 ## English and Japanese documents
 
-`README.md` is in English only: it holds the overview, the measured numbers and what is supported in one
-place; the roadmap is in this document. The measured numbers in it (between `<!-- auto:.. -->` markers, and after `<!-- ui:.. -->` and `<!-- cf:.. -->`
-markers) are rewritten by CI (`scripts/update_readme.py`, run by bench.yml after each push to
-main); do not edit them by hand. `CONTRIBUTING.md` / `CONTRIBUTING.ja.md` and `docs/X.md` / `docs/ja/X.md` (reports
+`README.md` (the overview, how to use zustc and zust-analyzer, and a summary of the measured numbers),
+`SUPPORT.md` (what is supported, by area) and `PERFORMANCE.md` (the KPIs and the comparisons with other tools) are in
+English only; the roadmap is in this document. The measured numbers in those three files (between `<!-- auto:.. -->`
+markers, and after `<!-- ui:.. -->` and `<!-- cf:.. -->` markers) are rewritten by CI (`scripts/update_readme.py`, run
+by bench.yml after each push to main); do not edit them by hand. `CONTRIBUTING.md` / `CONTRIBUTING.ja.md` and `docs/X.md` / `docs/ja/X.md` (reports
 included) are English / Japanese pairs. When you change one, change the other
 too. [jev-lint](https://github.com/mizchi/jev-lint) `docs` asks a model whether each pair still says the same thing.
 
@@ -376,7 +377,7 @@ the code for the name to see what each one does.
 - If you changed LSP answers, check with `bench/lsp_parity.py` that agreement and times did not get worse.
 - After a substantial piece of work, write a report (next section).
 - Record differences from rust-analyzer and anything left undone in the [Roadmap](#roadmap) below (or an issue), and
-  what is supported in the README's [What is supported](README.md#what-is-supported) (a new area with a percentage gets a
+  what is supported in [SUPPORT.md](SUPPORT.md) (a new area with a percentage gets a
   `<!-- ui:DIR -->` marker naming its tests/ui directories).
 
 ### Writing reports
@@ -415,7 +416,7 @@ list in [docs/reports/README.md](docs/reports/README.md) (and to
 - **Security** ([TODO.md](TODO.md); [report](docs/reports/2026-11-21-01-security-cves.md)): the holes the security tests
   found and left (the `//@ todo` cases of `tests/security/`), and what is left of the wasm32 target
 - **rustc's tests/ui** (`python3 bench/rust_ui.py`; [report](docs/reports/2026-11-18-07-rustc-ui-tests.md))
-  - Raise the pass rates ([Status](README.md#status))
+  - Raise the pass rates ([the README's Status](README.md#status), by area in [SUPPORT.md](SUPPORT.md))
   - Largest gaps: unwinding (`catch_unwind`, `panic::set_hook`), structs by value through FFI, type inference (type
     parameters known only from the expected type), `type` aliases and macros in expression position inside bodies,
     closures in consts, `impl Trait` in argument types nested in other types (`&Vec<impl Display>`)

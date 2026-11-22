@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
-"""Rewrite the measured numbers in README.md from benchmark results, so that they need no hand edits. bench.yml runs
-this after each push to main and commits README.md when it changed.
+"""Rewrite the measured numbers in README.md, PERFORMANCE.md and SUPPORT.md from benchmark results, so that they need
+no hand edits. bench.yml runs this after each push to main and commits the files that changed.
 
 usage: python3 scripts/update_readme.py [--ci-dir out/ci] [--ui-json out/ci/rust_ui_summary.json]
                                         [--ui-results out/ci/rust_ui.tsv] [--commit SHA] [--check]
 
-What it rewrites (anything else in README.md is left as written):
+What it rewrites, in each of the files (anything else is left as written):
 - blocks between `<!-- auto:NAME -->` and `<!-- /auto:NAME -->`:
   - `kpi`: the KPI table, from ci-dir/zustc.json and ci-dir/analyzer.json (bench/ci_bench.py)
+  - `kpi-summary`: the times of builds and `check` only (the README's summary of `kpi`)
   - `ui`: the tests/ui table, from the rust_ui.py summary (--json)
 - inline values right after a marker:
   - `<!-- ui:DIR,DIR -->72.5%`: run-pass + check-pass + build-pass of those tests/ui directories, from the per-test
     results (rust_ui.py --results)
   - `<!-- cf:DIR,DIR -->38.0%`: compile-fail of those directories
-- `<!-- measured -->...<!-- /measured -->`: the date and commit the numbers come from
+- `<!-- measured -->...<!-- /measured -->`: the date and commit the numbers come from (in a file whose numbers changed)
 
-Inputs that are missing leave their values as they were. --check exits 1 if README.md would change (nothing written).
+Inputs that are missing leave their values as they were. --check exits 1 if a file would change (nothing written).
 """
 import argparse, collections, datetime, json, os, re, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-README = os.path.join(ROOT, "README.md")
+FILES = [os.path.join(ROOT, f) for f in ("README.md", "PERFORMANCE.md", "SUPPORT.md")]
 KINDS = ("run-pass", "check-pass", "build-pass", "compile-fail")
 KIND_TEXT = {"run-pass": "run-pass (builds, runs, same output)", "check-pass": "check-pass (accepted by `zustc check`)",
              "build-pass": "build-pass", "compile-fail": "compile-fail (rejected at an annotated line)"}
@@ -67,6 +68,20 @@ def kpi_table(z, a):
     return "\n".join(lines)
 
 
+def kpi_summary(z):
+    def v(k, fmt):
+        return fmt.format(z[k]) if k in z else "-"
+    lines = ["| | gen1000 | gen5000 |", "|---|---:|---:|"]
+    for label, key, fmt in (
+        ("cold build", "build cold", "{:.0f} ms"),
+        ("no-op build", "build noop", "{:.1f} ms"),
+        ("build after editing one function", "build edit 1 fn", "{:.1f} ms"),
+        ("`check`", "check", "{:.0f} ms"),
+    ):
+        lines.append(f"| {label} | {v(f'gen1000 {key}', fmt)} | {v(f'gen5000 {key}', fmt)} |")
+    return "\n".join(lines)
+
+
 def ui_table(kinds):
     lines = ["| kind | applicable | pass |", "|---|---:|---:|"]
     for k in KINDS:
@@ -105,44 +120,45 @@ def main():
     a = ap.parse_args()
     ui_json = a.ui_json or os.path.join(a.ci_dir, "rust_ui_summary.json")
     ui_results = a.ui_results or os.path.join(a.ci_dir, "rust_ui.tsv")
-    s = open(README).read()
-    old = s
-
-    def block(name, text):
-        nonlocal s
-        pat = re.compile(rf"(<!-- auto:{name} -->\n)(?:.*?\n)?(<!-- /auto:{name} -->)", re.S)
-        s = pat.sub(lambda m: m.group(1) + text + "\n" + m.group(2), s)
-
     z, an = by_name(load(os.path.join(a.ci_dir, "zustc.json"))), by_name(load(os.path.join(a.ci_dir, "analyzer.json")))
-    if z or an:
-        block("kpi", kpi_table(z, an))
     ui = load(ui_json)
-    if ui:
-        kinds = ui["kinds"]
-        block("ui", ui_table(kinds))
-    if os.path.exists(ui_results):
-        c = per_dir(ui_results)
+    c = per_dir(ui_results) if os.path.exists(ui_results) else None
+    stale = []
+    for path in FILES:
+        if not os.path.exists(path):
+            continue
+        s = old = open(path).read()
 
-        def area(m):
-            r = rate(c, m.group(2).split(","), m.group(1) == "cf")
-            return m.group(0) if r is None else f"<!-- {m.group(1)}:{m.group(2)} -->{r:.1f}%"
-        s = re.sub(r"<!-- (ui|cf):([\w\-,]+) -->[0-9.]+%", area, s)
-    if s != old or a.commit:
-        when = datetime.date.today().isoformat() + (f", {a.commit[:7]}" if a.commit else "")
-        s2 = re.sub(r"<!-- measured -->.*?<!-- /measured -->", f"<!-- measured -->{when}<!-- /measured -->", s)
+        def block(name, text):
+            nonlocal s
+            pat = re.compile(rf"(<!-- auto:{name} -->\n)(?:.*?\n)?(<!-- /auto:{name} -->)", re.S)
+            s = pat.sub(lambda m: m.group(1) + text + "\n" + m.group(2), s)
+
+        if z or an:
+            block("kpi", kpi_table(z, an))
+            block("kpi-summary", kpi_summary(z))
+        if ui:
+            block("ui", ui_table(ui["kinds"]))
+        if c is not None:
+            def area(m):
+                r = rate(c, m.group(2).split(","), m.group(1) == "cf")
+                return m.group(0) if r is None else f"<!-- {m.group(1)}:{m.group(2)} -->{r:.1f}%"
+            s = re.sub(r"<!-- (ui|cf):([\w\-,]+) -->[0-9.]+%", area, s)
         # (only the stamp changing is not a change)
         if s != old:
-            s = s2
-    if a.check:
-        if s != old:
-            print("README.md is out of date: run python3 scripts/update_readme.py")
-            sys.exit(1)
-        return
-    if s != old:
-        open(README, "w").write(s)
-        print("README.md updated")
-    else:
-        print("README.md unchanged")
+            when = datetime.date.today().isoformat() + (f", {a.commit[:7]}" if a.commit else "")
+            s = re.sub(r"<!-- measured -->.*?<!-- /measured -->", f"<!-- measured -->{when}<!-- /measured -->", s)
+        name = os.path.basename(path)
+        if s == old:
+            print(f"{name} unchanged")
+        elif a.check:
+            stale.append(name)
+        else:
+            open(path, "w").write(s)
+            print(f"{name} updated")
+    if stale:
+        print(f"out of date: {', '.join(stale)}: run python3 scripts/update_readme.py")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
