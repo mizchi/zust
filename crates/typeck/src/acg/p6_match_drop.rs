@@ -266,6 +266,18 @@ impl Cx<'_> {
             if let Some(gp) = &guard_place {
                 self.bk_ev(borrowck::Ev::Guard(Some(gp.clone())));
             }
+            // (a guard sees the arm's bindings by shared reference: a closure in it that moves one out
+            // (`|| { let bar = foo; }` with `ref mut foo`) is E0507, at the move)
+            if let (Some(g), true) = (&arm.guard, self.bk_on()) {
+                let mut names = vec![];
+                crate::ast_closure::pat_idents(&arm.pat, &mut names);
+                names.retain(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0 || matches!(t, Ty::Ref(true, _))));
+                if !names.is_empty() {
+                    if let Some((n, at)) = guard_closure_move(g, &names) {
+                        return Err(self.at(at, format!("cannot move out of `{n}` in pattern guard (E0507)")));
+                    }
+                }
+            }
             if let Some(g) = &arm.guard {
                 // (`P if let Q = e && c => ..`: each `let` of the guard tests and binds in the arm's scope, each other
                 // condition must hold; a failure goes to the next arm)
@@ -2178,4 +2190,18 @@ fn lit_suffix(e: &Expr) -> Option<bool> {
         Expr::Unary(op, x, _) if op == "-" => lit_suffix(x),
         _ => None,
     }
+}
+
+/// A closure in e (a match guard) whose body moves one of names out: that capture, and where it moves
+fn guard_closure_move(e: &Expr, names: &[String]) -> Option<(String, crate::parse::Pos)> {
+    if let Expr::Closure(..) = e {
+        return crate::ast_closure::move_site(e, names);
+    }
+    let mut found = None;
+    crate::ast_closure::each_child_pub(e, &mut |c| {
+        if found.is_none() {
+            found = guard_closure_move(c, names);
+        }
+    });
+    found
 }

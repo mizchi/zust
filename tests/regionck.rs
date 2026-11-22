@@ -1572,3 +1572,11 @@ fn for_loop_moves_mut_ref() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("moved"), "{d:?}");
     assert_eq!(check("fn f(v: &mut Vec<i32>) -> usize {\n    for n in v.iter_mut() {\n        *n += 1;\n    }\n    for n in &mut *v {\n        *n += 1;\n    }\n    v.len()\n}\nfn g(v: &Vec<i32>) {\n    for _ in v {}\n    for _ in v {}\n}\nfn main() {}\n"), vec![]);
 }
+
+/// E0507: a match guard sees the arm's bindings by shared reference, so a closure in it must not move one out
+#[test]
+fn guard_closure_moves_binding() {
+    let d = check("fn main() {\n    match Some(&4) {\n        None => {}\n        ref mut foo if {\n            (|| { let mut bar = foo; bar.take() })();\n            false\n        } => {}\n        Some(s) => std::process::exit(*s),\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("in pattern guard (E0507)"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let v = Some(String::new());\n    match v {\n        Some(ref s) if (|| s.len() > 0)() => {}\n        Some(s) if s.len() > 1 => drop(s),\n        _ => {}\n    }\n}\n"), vec![]);
+}
