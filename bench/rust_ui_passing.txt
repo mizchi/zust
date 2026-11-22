@@ -2165,6 +2165,7 @@ compile-fail	enum-discriminant/non-int-discriminant-promoted-ice-138660.rs
 run-pass	enum-discriminant/repr-u64-enum-discriminant-cast.rs
 compile-fail	enum/assoc-fn-call-on-variant.rs
 check-pass	enum/dead-code-associated-function.rs
+compile-fail	enum/enum-and-module-in-same-scope.rs
 run-pass	enum/enum-discrim-manual-sizing.rs
 check-pass	enum/enum-discrim-range-overflow.rs
 run-pass	enum/enum-discrim-width-stuff.rs
@@ -5778,6 +5779,7 @@ run-pass	resolve/const-iter-no-conflict-for-loop.rs
 compile-fail	resolve/const-with-typo-in-pattern-binding.rs
 compile-fail	resolve/crate-called-as-function.rs
 compile-fail	resolve/dot-notation-type-namespace-suggest-path-sep.rs
+compile-fail	resolve/duplicate-name-in-module-6936.rs
 compile-fail	resolve/duplicated-item-in-const-generics.rs
 compile-fail	resolve/editions-crate-root-2015.rs
 compile-fail	resolve/editions-crate-root-2018.rs
@@ -5818,6 +5820,7 @@ compile-fail	resolve/issue-23305.rs
 compile-fail	resolve/issue-2356.rs
 compile-fail	resolve/issue-24968.rs
 compile-fail	resolve/issue-3099-a.rs
+compile-fail	resolve/issue-3099-b.rs
 compile-fail	resolve/issue-33876.rs
 compile-fail	resolve/issue-35675.rs
 compile-fail	resolve/issue-39559-2.rs
@@ -5840,6 +5843,7 @@ check-pass	resolve/macro-determinacy-non-module.rs
 compile-fail	resolve/missing-associated-items.rs
 compile-fail	resolve/missing-in-namespace.rs
 compile-fail	resolve/missing-type-in-scope-58712.rs
+compile-fail	resolve/module-type-name-conflict.rs
 compile-fail	resolve/module-used-as-struct-constructor.rs
 compile-fail	resolve/name-clash-nullary.rs
 check-pass	resolve/name-collision-in-trait-fn-sig.rs
