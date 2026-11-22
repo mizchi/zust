@@ -215,6 +215,12 @@ impl Cx<'_> {
             // (rustc's `!` fallback for `Some(v) => v` in a diverging context))
             // (`match (0, 0) { (usize::MIN, usize::MAX) => .. }`: unsuffixed literals take their type from a pattern)
             e if lit_scrutinee(e) => pats.iter().find_map(|p| self.pat_ty(p).filter(|t| !self.prog.has_param(*t))),
+            // (`match get() { x if x.method() => .., &S => .. }` with `fn get<T>() -> T`: the type inference read the
+            // arms' patterns and guards, which the call's own arguments do not give)
+            e @ Expr::Call(..) if self.lets.contains_key(&(e as *const Expr as usize)) => {
+                let t = self.lets[&(e as *const Expr as usize)];
+                (!self.prog.has_param(t) && !has_hole(self.prog, t)).then_some(t)
+            }
             _ => self.bare_none_ty(scrut, &pats)?,
         };
         let Some(place) = self.bk_scrutinee(scrut, scrut_exp, &pats)? else {
