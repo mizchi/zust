@@ -421,6 +421,28 @@ fn captures(prog: &Program, sid: u32) -> Option<(&[Ty], &[bool])> {
 }
 
 /// The number of region slots of t (None: not followed)
+/// The lifetimes a bound written as a string passes its trait (`GetRef<'a, isize>`: `'a`), in order
+fn bound_lts(b: &str) -> Vec<String> {
+    let (Some(i), Some(j)) = (b.find('<'), b.rfind('>')) else { return vec![] };
+    let Some(inner) = b.get(i + 1..j) else { return vec![] };
+    let (mut out, mut depth, mut from) = (vec![], 0i32, 0);
+    for (k, ch) in inner.char_indices().chain(std::iter::once((inner.len(), ','))) {
+        match ch {
+            '<' | '(' | '[' => depth += 1,
+            '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                let a = inner[from..k].trim();
+                if a.starts_with('\'') {
+                    out.push(a.to_string());
+                }
+                from = k + 1;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
 pub fn count(prog: &Program, t: Ty, depth: u32) -> Option<usize> {
     if depth > 24 {
         return None;
@@ -1558,6 +1580,31 @@ impl Cx<'_> {
                 let (Some(&v), true) = (tr.first(), prog.is_placeholder(sid)) else { continue };
                 rg.univ.push((v, prog.structs[sid as usize].name.clone()));
                 let pname = gsig.generics.get(k).map(|g| g.0.as_str()).unwrap_or("");
+                // (and what its bounds' traits require of their `Self` (`trait Tr<'a>: 'a`, `T: Tr<'x>`: T: 'x),
+                // through supertraits)
+                if !prog.trait_self_outlives.is_empty() {
+                    let mut todo: Vec<(String, Vec<String>)> = gsig.generics.get(k).map(|g| g.1.iter().map(|b| (b.split('<').next().unwrap_or(b).trim().to_string(), bound_lts(b))).collect()).unwrap_or_default();
+                    let mut seen = 0;
+                    while let Some((tr, args)) = todo.pop() {
+                        seen += 1;
+                        if seen > 16 {
+                            break;
+                        }
+                        let short = tr.rsplit("::").next().unwrap_or(&tr).to_string();
+                        let find = |m: &HashMap<String, Vec<String>>| m.get(&tr).or_else(|| m.iter().find(|(n, _)| n.rsplit("::").next() == Some(&short)).map(|(_, x)| x)).cloned();
+                        for c in find(&prog.trait_self_outlives).unwrap_or_default() {
+                            let b = if c == "static" { Some(STATIC) } else { c.parse::<usize>().ok().and_then(|i| args.get(i)).and_then(|l| if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|x| x == l).and_then(|p| lts.get(p).copied()) }) };
+                            if let Some(b) = b {
+                                rg.known.push((v, b));
+                            }
+                        }
+                        // (a supertrait's lifetimes: as written in the trait's header, not the bound's; only 'static
+                        // and its unnamed ones are followed)
+                        for sup in find(&prog.trait_supers).unwrap_or_default() {
+                            todo.push((sup.split('<').next().unwrap_or(&sup).trim().to_string(), vec![]));
+                        }
+                    }
+                }
                 for (tp, c) in rs.map(|r| r.ty_outlives.as_slice()).unwrap_or(&[]) {
                     if tp == pname {
                         let b = if *c == R_STATIC { Some(STATIC) } else { lts.get(*c as usize).copied() };
@@ -1695,7 +1742,9 @@ impl Cx<'_> {
                 let to = if infer { it } else { to };
                 // (an unsizing cast (`Box::new(v) as Box<dyn Tr + 'static>`): a coercion, the value flows into the
                 // type written)
-                let unsize = to != it && has_dyn(prog, to, 0) && !matches!(to, Ty::Ptr(..));
+                // (a raw pointer to a value with no trait object in it, cast to one to a trait object (`p as *const (dyn
+                // Tr + 'static)`), unsizes too; one between pointers to trait objects is not a coercion)
+                let unsize = to != it && has_dyn(prog, to, 0) && (!matches!(to, Ty::Ptr(..)) || !has_dyn(prog, it, 0));
                 if to != it && !unsize {
                     return None;
                 }

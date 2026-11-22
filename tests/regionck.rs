@@ -1111,6 +1111,16 @@ fn type_parameter_regions() {
     assert_eq!(check("use std::cell::Cell;\nfn outlives<'a, T>(_x: Cell<&'a usize>, _y: T)\nwhere\n    T: 'a,\n{\n}\nfn bounded<'a, T: 'a>(cell: Cell<&'a usize>, t: T) {\n    outlives(cell, t)\n}\nfn main() {}\n"), vec![]);
 }
 
+/// What a bound's trait requires of its `Self` holds of a placeholder (`trait Tr: 'static`, `trait Q<'a>: 'a`, through
+/// supertraits); a raw pointer to a placeholder cast to one to a trait object is an unsizing coercion (review of #42)
+#[test]
+fn placeholder_trait_outlives() {
+    assert_eq!(check("trait Tr: 'static {}\nfn boxed<T: Tr>(v: T) -> Box<dyn Tr + 'static> {\n    Box::new(v)\n}\ntrait Q<'a>: 'a {}\nfn q<'a, T: Q<'a>>(v: T) -> Box<dyn Q<'a> + 'a> {\n    Box::new(v)\n}\ntrait Base: 'static {}\ntrait Sub: Base {}\nfn s<T: Sub>(v: T) -> Box<dyn Sub + 'static> {\n    Box::new(v)\n}\nfn main() {}\n"), vec![]);
+    let d = check("trait Tr {}\nfn p<T: Tr>(v: *const T) -> *const (dyn Tr + 'static) {\n    v as *const (dyn Tr + 'static)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0310"), "{d:?}");
+    assert_eq!(check("trait Tr {}\nfn p<T: Tr + 'static>(v: *const T) -> *const (dyn Tr + 'static) {\n    v as *const (dyn Tr + 'static)\n}\nfn main() {}\n"), vec![]);
+}
+
 /// A placeholder bounded by a trait: coerced to `dyn Tr + 'static` (E0310), cast to it; a fn whose body calls the
 /// bound's methods is not checked (`dyn Tr + '_` in a parameter is an elided lifetime, not the default)
 #[test]

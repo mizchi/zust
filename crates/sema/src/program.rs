@@ -307,6 +307,8 @@ pub struct Program {
     pub fnptr_impls: HashSet<(Option<Ty>, String)>,
     /// 親トレイト (`trait Bar: Foo`)
     pub trait_supers: FxMap<String, Vec<String>>,
+    /// What a trait's `Self` must outlive (`trait Tr<'a>: 'a`): "static", or the index of the trait's lifetime parameter
+    pub trait_self_outlives: FxMap<String, Vec<String>>,
     /// the generics a method of the trait starts with: Self and the trait's own parameters
     pub trait_ngen: FxMap<String, usize>,
     /// a generic trait's impls: trait → (self type, the trait's arguments, both with the impl's parameters as
@@ -740,6 +742,7 @@ impl Program {
             prelude_from: u32::MAX,
             overflow_checks: false,
             trait_supers: FxMap::default(),
+            trait_self_outlives: FxMap::default(),
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
             ref_impls: Default::default(),
@@ -1331,6 +1334,9 @@ impl Program {
                 p.traits.entry(tr.clone()).or_default();
                 if let Some((_, sup)) = sm.trait_generics.iter().find(|g| g.0 == "#supers") {
                     p.trait_supers.insert(tr.clone(), sup.clone());
+                }
+                if let Some((_, so)) = sm.trait_generics.iter().find(|g| g.0 == crate::types::SELF_OUTLIVES) {
+                    p.trait_self_outlives.insert(tr.clone(), so.clone());
                 }
                 p.trait_ngen.insert(tr.clone(), 1 + sm.trait_generics.iter().filter(|g| !g.0.starts_with('#')).count());
             }
