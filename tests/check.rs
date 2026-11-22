@@ -146,3 +146,16 @@ fn constant_cycles() {
     assert!(!d.is_empty() && d.iter().all(|d| d.msg.contains("(E0391)")), "{d:?}");
     assert!(d.iter().any(|d| d.line == 3), "{d:?}");
 }
+
+/// E0038 for `dyn Tr` in a signature when Tr is not dyn compatible (a method without `self` nor `where Self: Sized`),
+/// called or not; not when that method is `where Self: Sized`
+#[test]
+fn dyn_incompatible_in_signature() {
+    let bad = "trait Shape {\n    fn new() -> Self;\n    fn area(&self) -> f64;\n}\n#[inline]\nfn total(shapes: &[Box<dyn Shape>]) -> f64 {\n    shapes.iter().map(|s| s.area()).sum()\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(bad);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![6], "{d:?}");
+    assert!(d[0].msg.contains("(E0038)"), "{d:?}");
+    let good = bad.replace("fn new() -> Self;", "fn new() -> Self\n    where\n        Self: Sized;");
+    assert!(s.check(&good).is_empty(), "{:?}", s.check(&good));
+}

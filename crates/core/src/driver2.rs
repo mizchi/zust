@@ -1305,6 +1305,10 @@ impl Session2 {
         if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
             return Err(e);
         }
+        // (in a check (zustc check, the LSP): a build stays as fast as it was, and reports it when it makes the vtable)
+        if let Some(e) = self.checking.then(|| dyn_in_signature(&prog, &src, &items)).flatten() {
+            return Err(e);
+        }
         // (E0277: a static is reachable from every thread, so its type must be Sync)
         if let Some((ci, tn)) = crate::acg::static_not_sync(&prog) {
             let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
@@ -1871,6 +1875,55 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
             if !ok {
                 let line = it.line + text[..at].matches('\n').count();
                 return Some(format!("{line}:1: `#[{name}]` attribute cannot be used on {kind}"));
+            }
+        }
+    }
+    None
+}
+
+/// E0038: a fn of the program whose parameters or result name `dyn Tr` of a trait that is not dyn compatible (rustc
+/// checks the types a signature writes, called or not): at the fn's line
+fn dyn_in_signature(prog: &Program, src: &str, items: &[SrcItem]) -> Option<String> {
+    // (only a program that writes `dyn`: one look at its own text)
+    let user_end = items.get((prog.prelude_from as usize).wrapping_sub(1)).map_or(0, |it| it.end);
+    if !src[..user_end.min(src.len())].contains("dyn") {
+        return None;
+    }
+    fn dyns(prog: &Program, t: Ty, depth: u32, out: &mut Vec<&'static String>) {
+        if depth > 8 {
+            return;
+        }
+        match t {
+            Ty::Dyn(d) => out.push(d),
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => dyns(prog, *i, depth + 1, out),
+            Ty::Struct(sid) => {
+                for &a in &prog.structs[sid as usize].args {
+                    dyns(prog, a, depth + 1, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = vec![];
+    for (fi, sig) in prog.sigs.iter().enumerate() {
+        let Some(ii) = prog.item_of.get(fi).copied().flatten().filter(|&ii| ii < prog.prelude_from) else { continue };
+        found.clear();
+        for &t in sig.params.iter().chain(std::iter::once(&sig.ret)) {
+            dyns(prog, t, 0, &mut found);
+        }
+        for d in &found {
+            // (the principal trait: `dyn Tr<u8> + Send`'s `Tr`)
+            let tr = d.split('+').map(str::trim).find(|b| !matches!(*b, "Send" | "Sync" | "Unpin") && !b.starts_with('\'')).unwrap_or("");
+            let tr = tr.split('<').next().unwrap_or("").trim();
+            // (a trait the program knows; dyn_incompatible reads the methods of the program's own ones)
+            if !prog.traits.contains_key(tr) || crate::ast_summary::parse_fn_bound(tr).is_some() {
+                continue;
+            }
+            if let Some(m) = acg::dyn_incompatible(prog, tr, &prog.dyn_methods(tr), true) {
+                // (the line of `fn`, past the item's attributes and doc comments)
+                let it = &items[ii as usize];
+                let past = src[it.start..it.end].lines().take_while(|l| { let l = l.trim_start(); l.starts_with('#') || l.starts_with("//") }).count();
+                return Some(format!("{}:1: {m}", it.line + past));
             }
         }
     }
