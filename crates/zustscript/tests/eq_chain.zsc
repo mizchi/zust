@@ -1,0 +1,34 @@
+// A chain of records each holding two of the previous one, over a recursive one: `==` on the last must be checked
+// in time linear in the types (tests/examples.rs: eq_check_is_linear), not once per path (2^30)
+type R0 = { x: i32, more: Array<R0> }
+type R1 = { a: R0, b: R0 }
+type R2 = { a: R1, b: R1 }
+type R3 = { a: R2, b: R2 }
+type R4 = { a: R3, b: R3 }
+type R5 = { a: R4, b: R4 }
+type R6 = { a: R5, b: R5 }
+type R7 = { a: R6, b: R6 }
+type R8 = { a: R7, b: R7 }
+type R9 = { a: R8, b: R8 }
+type R10 = { a: R9, b: R9 }
+type R11 = { a: R10, b: R10 }
+type R12 = { a: R11, b: R11 }
+type R13 = { a: R12, b: R12 }
+type R14 = { a: R13, b: R13 }
+type R15 = { a: R14, b: R14 }
+type R16 = { a: R15, b: R15 }
+type R17 = { a: R16, b: R16 }
+type R18 = { a: R17, b: R17 }
+type R19 = { a: R18, b: R18 }
+type R20 = { a: R19, b: R19 }
+type R21 = { a: R20, b: R20 }
+type R22 = { a: R21, b: R21 }
+type R23 = { a: R22, b: R22 }
+type R24 = { a: R23, b: R23 }
+type R25 = { a: R24, b: R24 }
+type R26 = { a: R25, b: R25 }
+type R27 = { a: R26, b: R26 }
+type R28 = { a: R27, b: R27 }
+type R29 = { a: R28, b: R28 }
+type R30 = { a: R29, b: R29 }
+fn f(p: R30, q: R30) -> bool { p == q }
