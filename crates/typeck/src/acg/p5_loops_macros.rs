@@ -1891,9 +1891,9 @@ impl Cx<'_> {
                     return self.expr(&cargs[0], expected).map(Some);
                 }
             }
-            // (not when the program has its own `impl From<S> for Box<T>`: that impl is the conversion)
+            // (not when the program has its own `impl From<S> for Box<T>` (S a struct or a Box): that impl is the conversion)
             let user_from = self.prog.names.iter().enumerate().any(|(i, n)| n.starts_with("Box::from") && self.prog.sigs[i].impl_trait.as_deref().is_some_and(|t| t.starts_with("From")));
-            if arg.is_some_and(owned) && !(user_from && matches!(arg, Some(Ty::Struct(_)))) {
+            if arg.is_some_and(owned) && !(user_from && matches!(arg, Some(Ty::Struct(_) | Ty::Box(_)))) {
                 // (the `Box` segment as written, with its arguments: `Box::<u64>::from(1)`)
                 let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
                 let bn = crate::parse::Path { global: false, segs: vec![p.segs[n - 2].clone(), seg("new")], pos: p.pos };

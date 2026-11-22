@@ -7,6 +7,8 @@ const HI: u128 = (E::A as u128) >> 127;
 const HI2: u128 = (E::A as u128) >> 63;
 struct Src(u64);
 impl From<Src> for Box<u64> { fn from(s: Src) -> Box<u64> { Box::new(s.0 + 1) } }
+struct Src2(u64);
+impl From<Box<Src2>> for Box<u64> { fn from(s: Box<Src2>) -> Box<u64> { Box::new(s.0 + 2) } }
 fn main() {
     let x: u8 = 7;
     let shift = 1;
@@ -17,5 +19,7 @@ fn main() {
     let _ = Mask;
     let bits = Mask::BITS;
     let b: Box<u64> = Box::from(Src(4));
-    println!("{} {} {} {} {}", y, bits, HI, HI2, b);
+    let b2: Box<u64> = Box::from(Box::new(Src2(4)));
+    let same: Box<u64> = Box::from(Box::new(9u64));
+    println!("{} {} {} {} {} {} {}", y, bits, HI, HI2, b, b2, same);
 }
