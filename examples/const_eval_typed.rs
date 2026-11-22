@@ -111,6 +111,7 @@ fn main() {
     println!("{} {} {}", std::mem::size_of::<[u8; REF_IDX]>(), std::mem::size_of::<[u8; USER_BITS]>(), EXP);
     println!("{}", FLIP);
     println!("{}", std::mem::size_of::<PL>());
+    println!("{} {} {}", FLIP2, WIDE, std::mem::size_of::<[u8; ADD_U16]>());
 }
 
 // (a generic alias resolves before layout; an unsafe block evaluates; the i128::MIN literal negates)
@@ -143,3 +144,13 @@ const PL_N: usize = PARR[0].count_ones() as usize + PTUP.0.count_ones() as usize
 struct PL {
     bytes: [u8; PL_N],
 }
+// (a const fn's parameters and result are its signature's types; a long untyped chain keeps the type of its use)
+const fn flip2(x: u8) -> u8 {
+    !x >> 4
+}
+const FLIP2: u8 = flip2(255) + 1;
+const WIDE: u8 = { let y0 = !0 >> 1; let y1 = y0 & y0; let y2 = y1 & y1; let y3 = y2 & y2; let y4 = y3 & y3; let y5 = y4 & y4; let y6 = y5 & y5; let y7 = y6 & y6; let y8 = y7 & y7; let y9 = y8 & y8; let y10 = y9 & y9; let y11 = y10 & y10; let y12 = y11 & y11; let y13 = y12 & y12; let y14 = y13 & y13; let y15 = y14 & y14; let y16 = y15 & y15; let y17 = y16 & y16; let y18 = y17 & y17; let y19 = y18 & y18; let y20 = y19 & y19; let y21 = y20 & y20; let y22 = y21 & y21; let y23 = y22 & y22; let y24 = y23 & y23; let y25 = y24 & y24; let y26 = y25 & y25; let y27 = y26 & y26; let y28 = y27 & y27; let y29 = y28 & y28; let y30 = y29 & y29; let y31 = y30 & y30; let y32 = y31 & y31; let y33 = y32 & y32; let y34 = y33 & y33; let y35 = y34 & y34; let y36 = y35 & y35; let y37 = y36 & y36; let y38 = y37 & y37; let y39 = y38 & y38; y39 };
+const fn add16(a: u16, b: u16) -> u16 {
+    a + b
+}
+const ADD_U16: usize = (add16(65535, 0) >> 8) as usize;

@@ -93,8 +93,8 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   claims the address is aligned) although `ptr::read_unaligned` and a gather off an unaligned base (scale >= the
   element size) use them too. x86 scalar moves do not need alignment, so the code is right today; an alignment
   operand (or an unaligned load op) on `Op::Load` / `Op::Store` would make the flag true.
-- The constant evaluator is typed (`Program::eval_t`), except through a `const fn`: its parameters and its result
-  have no integer type (an unsuffixed value), so `!x` of a `u8` parameter is -1 there, not 255.
+- The constant evaluator is typed (`Program::eval_t`); a `const fn`'s parameters and result take their signature's
+  types only when written as a one-segment name (`u8`, an alias): `core::primitive::u8` there is untyped.
 - Incremental preprocessing (`prep` with a `PrepMemo`) can differ from `prep_full` on unbalanced input: an item in a
   brace that an edit leaves open (`println!("{}", std::mem::size_o{ fn inner() {} }` inside `fn main`) is hoisted to
   the top level by the full pass but left in place by the chunked one. Found by `tests/prep_inc.rs` when

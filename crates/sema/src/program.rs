@@ -115,7 +115,12 @@ impl StructDef {
     }
 }
 
+/// The untyped locals of the blocks being evaluated (Program::eval_block_env): their expressions, and their values
+/// at each type a use wanted (memoized, so a chain `let x1 = x0 & x0; let x2 = x1 & x1; ..` is linear)
+type LazyLocals = (u64, FxMap<u64, (crate::parse::Expr, Vec<(Option<It>, Result<(i128, Option<It>), String>)>)>);
+
 thread_local! {
+    static LAZY: std::cell::RefCell<LazyLocals> = std::cell::RefCell::new((0, FxMap::default()));
     /// 作っている途中のインスタンス (基の型, 型引数) と、途中で取った番号
     static INSTANTIATING: std::cell::RefCell<Vec<((u32, Vec<Ty>), Option<u32>)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -240,7 +245,7 @@ fn early_int_ty(t: &TySyn, aliases: &FxMap<String, (Vec<String>, TySyn)>) -> Opt
 }
 
 /// An integer type in constant evaluation: its width and sign (usize / isize are 64 bits)
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct It {
     pub bits: u32,
     pub signed: bool,
@@ -388,6 +393,8 @@ pub struct Program {
     pub repr_c: HashSet<String>,
     /// `const fn` bodies a constant may call: name -> (parameter names, body text)
     pub const_fns: HashMap<String, (Vec<String>, String)>,
+    /// The parameter and result type names of those const fns (see Summary::const_fn_tys)
+    pub const_fn_tys: HashMap<String, (Vec<String>, String)>,
     /// 同じ型への別々の trait impl が同じ名前の関数を持つもの (`impl From<&str> for P` と `impl From<String> for P`):
     /// 最初の名前 → 候補の関数 (2 つ目以降は `P::from#1` のような名前)。呼び出し側が引数の型で選ぶ
     pub overloads: FxMap<String, Vec<u32>>,
@@ -885,6 +892,7 @@ impl Program {
             min_align: Default::default(),
             repr_c: Default::default(),
             const_fns: Default::default(),
+            const_fn_tys: Default::default(),
             overloads: Default::default(),
             trait_scopes: vec![],
             item_lines: vec![],
@@ -928,6 +936,9 @@ impl Program {
             p.unions.extend(sm.unions.iter().cloned());
             for (n, ps, b) in &sm.const_fns {
                 p.const_fns.insert(n.clone(), (ps.clone(), b.clone()));
+            }
+            for (n, ps, r) in &sm.const_fn_tys {
+                p.const_fn_tys.insert(n.clone(), (ps.clone(), r.clone()));
             }
             for (tr, n, bs) in &sm.assoc_bounds {
                 p.assoc_bounds.insert((tr.clone(), n.clone()), bs.clone());
@@ -2725,6 +2736,26 @@ impl Program {
     /// A block of `let x = ..;` statements and a tail expression, with the locals in env (typed: a `let` keeps its
     /// value's type, the tail is evaluated as `want`)
     fn eval_block_env(&self, b: &crate::parse::Block, env: &mut Vec<(String, i128, Option<It>, Option<crate::parse::Expr>)>, depth: u32, want: Option<It>) -> R<(i128, Option<It>)> {
+        // (the untyped locals this block registers are dropped when it is done)
+        let start = LAZY.with(|l| l.borrow().0);
+        let r = self.eval_block_in(b, env, depth, want);
+        LAZY.with(|l| l.borrow_mut().1.retain(|&k, _| k < start));
+        r
+    }
+
+    /// An untyped local's expression as a marker (`__zust_lazy_N`) that a use evaluates at the type it wants
+    fn lazy_marker(&self, x: crate::parse::Expr) -> R<crate::parse::Expr> {
+        let id = LAZY.with(|l| {
+            let mut l = l.borrow_mut();
+            let id = l.0;
+            l.0 += 1;
+            l.1.insert(id, (x, vec![]));
+            id
+        });
+        crate::parse::parse_expr(&format!("__zust_lazy_{id}"))
+    }
+
+    fn eval_block_in(&self, b: &crate::parse::Block, env: &mut Vec<(String, i128, Option<It>, Option<crate::parse::Expr>)>, depth: u32, want: Option<It>) -> R<(i128, Option<It>)> {
         use crate::parse::{Pat, Stmt};
         let n = b.stmts.len();
         for (k, s) in b.stmts.iter().enumerate() {
@@ -2735,10 +2766,9 @@ impl Program {
                     let lt = ty.as_ref().and_then(|t| It::of_name(&self.cast_prim(t))).or_else(|| self.static_ty(&x));
                     let (v, t) = self.eval_t(&x, depth, lt)?;
                     let t = lt.or(t);
-                    // (untyped (`let x = !0 >> 4;`): kept as its expression too, which takes the type of its use)
-                    // (but not a large one: `let x1 = x0 + x0; let x2 = x1 + x1; ..` would double at each use; past
-                    // the cap it stays its untyped value)
-                    let lazy = t.is_none().then_some(x).filter(|x| format!("{x:?}").len() <= 4096);
+                    // (untyped (`let x = !0 >> 4;`): kept as its expression too, which takes the type of its use; as a
+                    // marker, so a chain of them does not grow)
+                    let lazy = if t.is_none() { Some(self.lazy_marker(x)?) } else { None };
                     env.push((name.clone(), t.map_or(v, |it| it.wrap(v)), t, lazy));
                 }
                 Stmt::Expr(x, false) if k + 1 == n => return self.eval_t(&subst_consts(x, env), depth, want),
@@ -2756,7 +2786,7 @@ impl Program {
                     let (v, t) = self.eval_t(&x, depth, st)?;
                     env[slot].1 = v;
                     env[slot].2 = st.or(t);
-                    env[slot].3 = env[slot].2.is_none().then_some(x).filter(|x| format!("{x:?}").len() <= 4096);
+                    env[slot].3 = if env[slot].2.is_none() { Some(self.lazy_marker(x)?) } else { None };
                 }
                 _ => return Err("unsupported statement in a const fn".into()),
             }
@@ -2764,12 +2794,9 @@ impl Program {
         Err("a const fn without a value".into())
     }
 
-    /// The name of a cast's target type, through aliases of it (`type Lane = i32` -> "i32"); "" for another type
-    fn cast_prim(&self, t: &crate::parse::Ty) -> String {
-        let mut prim = match t {
-            crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.clone(),
-            _ => String::new(),
-        };
+    /// A one-segment type name's primitive integer name, through aliases (`type Lane = i32` -> "i32"); "" for another
+    fn prim_of_name(&self, n: &str) -> String {
+        let mut prim = n.to_string();
         // (a primitive integer's name is that type, not an alias of it: the aliases are the whole program's, and a
         // program's `type u32 = u8;` must not change the prelude's `as u32`, whose cached code does not hash aliases)
         for _ in 0..16 {
@@ -2783,6 +2810,14 @@ impl Program {
             }
         }
         prim
+    }
+
+    /// The name of a cast's target type, through aliases of it (`type Lane = i32` -> "i32"); "" for another type
+    fn cast_prim(&self, t: &crate::parse::Ty) -> String {
+        match t {
+            crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => self.prim_of_name(&p.segs[0].name),
+            _ => String::new(),
+        }
     }
 
     /// 自前の構文木の整数の定数式を評価する (値だけ: 型は eval_t)
@@ -2867,6 +2902,26 @@ impl Program {
                 let want = want.or_else(|| self.static_ty(&x)).or_else(|| self.static_ty(els));
                 if c != 0 { self.eval_t(&x, depth, want) } else { self.eval_t(els, depth, want) }
             }
+            // (an untyped local of a block: its expression at the wanted type, once per type)
+            Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name.starts_with("__zust_lazy_") => {
+                let id: u64 = p.segs[0].name["__zust_lazy_".len()..].parse().map_err(|_| "bad local")?;
+                let (x, hit) = LAZY.with(|l| {
+                    let l = l.borrow();
+                    let (x, memo) = l.1.get(&id).ok_or("a local out of its block")?;
+                    R::Ok((x.clone(), memo.iter().find(|m| m.0 == want).map(|m| m.1.clone())))
+                })?;
+                if let Some(r) = hit {
+                    return r;
+                }
+                // (an earlier local only, so no cycle: the same depth, or a long chain would hit the limit)
+                let r = self.eval_t(&x, depth, want);
+                LAZY.with(|l| {
+                    if let Some(e) = l.borrow_mut().1.get_mut(&id) {
+                        e.1.push((want, r.clone()));
+                    }
+                });
+                r
+            }
             Expr::Path(None, p) if p.segs.len() == 1 && (p.segs[0].name == "true" || p.segs[0].name == "false") => un((p.segs[0].name == "true") as i128),
             // (a call of a `const fn` with integer arguments: its body with the parameters bound)
             Expr::Call(f, args) if matches!(&**f, Expr::Path(None, p) if p.segs.len() == 1 && self.const_fns.contains_key(p.segs[0].name.as_str())) => {
@@ -2878,17 +2933,22 @@ impl Program {
                 if ps.len() != args.len() {
                     return Err("wrong number of arguments in a constant call".into());
                 }
-                // (a const fn's parameters and result are untyped: its signature's types are not kept)
+                // (its parameters and result are its signature's integer types: `const fn flip(x: u8) -> u8 { !x >> 4 }`
+                // shifts a u8; a parameter or result of another type is untyped)
+                let (pts, rt) = self.const_fn_tys.get(p.segs[0].name.as_str()).cloned().unwrap_or_default();
+                let int_of = |n: &str| It::of_name(&self.prim_of_name(n));
                 let mut env: Vec<(String, i128, Option<It>, Option<crate::parse::Expr>)> = vec![];
-                for (n, a) in ps.iter().zip(args) {
-                    env.push((n.clone(), self.eval_const(a, depth + 1)?, None, None));
+                for (k, (n, a)) in ps.iter().zip(args).enumerate() {
+                    let pt = pts.get(k).and_then(|t| int_of(t));
+                    let (v, t) = self.eval_t(a, depth + 1, pt)?;
+                    let t = pt.or(t);
+                    env.push((n.clone(), t.map_or(v, |it| it.wrap(v)), t, None));
                 }
                 let b = crate::parse::parse_expr(&body)?;
                 let Expr::Block(_, _, b) = b else { return Err("unsupported const fn".into()) };
-                let v = self.eval_block_env(&b, &mut env, depth + 1, None)?.0;
-                // (its result is the type its use wants, as rustc unifies them: `flip(255) + 1` as a u8 wraps the
-                // untyped `!255` to 0, not an overflow of -256)
-                match want {
+                let rt = int_of(&rt);
+                let (v, t) = self.eval_block_env(&b, &mut env, depth + 1, rt.or(want))?;
+                match rt.or(t).or(want) {
                     Some(it) => Ok((it.wrap(v), Some(it))),
                     None => un(v),
                 }

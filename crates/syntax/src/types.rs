@@ -398,6 +398,9 @@ pub struct Summary {
     pub reprs: Vec<(String, String)>,
     /// (name, parameter names, body text) of a free `const fn`: constants may call it
     pub const_fns: Vec<(String, Vec<String>, String)>,
+    /// (name, parameter type names, result type name) of those const fns: a type's name is a one-segment path's
+    /// (`u8`, an alias), "" for another type
+    pub const_fn_tys: Vec<(String, Vec<String>, String)>,
     /// An error in a struct / enum / union definition (unused parameter ..), reported for the program's own items only
     /// (the prelude's types may break these rules)
     pub adt_err: Option<String>,

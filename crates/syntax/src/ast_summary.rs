@@ -2245,6 +2245,12 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     _ => None,
                 }).collect();
                 if let Some(ps) = ps {
+                    let tn = |t: &crate::parse::Ty| match t {
+                        crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.clone(),
+                        _ => String::new(),
+                    };
+                    let pts = fs.params.iter().map(|(_, t)| tn(t)).collect();
+                    sm.const_fn_tys.push((name.clone(), pts, fs.ret.as_ref().map_or(String::new(), tn)));
                     sm.const_fns.push((name.clone(), ps, item.init_text.clone()));
                 }
             }
