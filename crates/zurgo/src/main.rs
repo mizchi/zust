@@ -108,7 +108,21 @@ fn main() {
                 [(_, e)] => e.clone(),
                 many => die(&format!("several binaries ({}): choose one with `--bin`", many.iter().map(|b| b.0.as_str()).collect::<Vec<_>>().join(", "))),
             };
-            let st = std::process::Command::new(&exe).args(&rest).status().unwrap_or_else(|e| die(&format!("{}: {e}", exe.display())));
+            // (a wasm32 module runs under the runner cargo's variable names, as `cargo run` runs it)
+            let mut cmd = if exe.extension().is_some_and(|x| x == "wasm") {
+                let var = "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER";
+                let runner = std::env::var(var).unwrap_or_default();
+                let mut words = runner.split_whitespace();
+                let Some(prog) = words.next() else {
+                    die(&format!("{} is a wasm32 module: set {var} to a program that runs it (`node tests/wasm/run.mjs` in this repository)", exe.display()))
+                };
+                let mut c = std::process::Command::new(prog);
+                c.args(words).arg(&exe);
+                c
+            } else {
+                std::process::Command::new(&exe)
+            };
+            let st = cmd.args(&rest).status().unwrap_or_else(|e| die(&format!("{}: {e}", exe.display())));
             std::process::exit(st.code().unwrap_or(101));
         }
         "metadata" => {

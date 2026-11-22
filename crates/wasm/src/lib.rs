@@ -997,36 +997,47 @@ impl<'a> Body<'a> {
                 self.norm(t);
             }
             Type::I32 | Type::I64 => {
-                let n = if t == Type::I32 { 4 } else { 8 };
-                let w = t == Type::I64;
-                // or of each byte moved to its mirrored place
-                for i in 0..n {
-                    self.get(x)?;
-                    let (sh_r, sh_l) = (8 * i as i64, 8 * (n - 1 - i) as i64);
-                    if w {
-                        self.i64c(sh_r);
-                        self.op(0x88);
-                        self.i64c(0xFF);
-                        self.op(0x83);
-                        self.i64c(sh_l);
-                        self.op(0x86);
-                    } else {
-                        self.i32c(sh_r as i32);
-                        self.op(0x76);
-                        self.i32c(0xFF);
-                        self.op(0x71);
-                        self.i32c(sh_l as i32);
-                        self.op(0x74);
-                    }
-                    if i > 0 {
-                        self.op(if w { 0x84 } else { 0x72 });
-                    }
-                }
+                let l = self.loc(x)?;
+                self.bswap_local(l, t == Type::I64);
+            }
+            // (the low half of the result is the high half's bytes reversed, then the high half the low half's)
+            Type::I128 => {
+                let l = self.loc(x)?;
+                self.bswap_local(l + 1, true);
+                self.bswap_local(l, true);
             }
             Type::I8 => self.get(x)?,
             _ => return Err("wasm32: bswap of this type is not supported".into()),
         }
         Ok(())
+    }
+
+    /// pushes local l (an i32, or an i64 when w) with its bytes reversed
+    fn bswap_local(&mut self, l: u32, w: bool) {
+        let n = if w { 8 } else { 4 };
+        // or of each byte moved to its mirrored place
+        for i in 0..n {
+            self.lget(l);
+            let (sh_r, sh_l) = (8 * i as i64, 8 * (n - 1 - i) as i64);
+            if w {
+                self.i64c(sh_r);
+                self.op(0x88);
+                self.i64c(0xFF);
+                self.op(0x83);
+                self.i64c(sh_l);
+                self.op(0x86);
+            } else {
+                self.i32c(sh_r as i32);
+                self.op(0x76);
+                self.i32c(0xFF);
+                self.op(0x71);
+                self.i32c(sh_l as i32);
+                self.op(0x74);
+            }
+            if i > 0 {
+                self.op(if w { 0x84 } else { 0x72 });
+            }
+        }
     }
 
     fn rotate(&mut self, x: Value, y: Value, left: bool) -> Result<(), String> {
