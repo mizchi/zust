@@ -561,13 +561,16 @@ impl Lv<'_> {
             // (a handler's arms run once per operation, maybe many times: like a closure, a local from outside is
             // never moved in them; the body runs while they can)
             EK::Handle(body, arms) => {
+                // (the arms are alternatives: each from what is live after the handle, then joined)
                 self.closure += 1;
-                let mut l = live.clone();
+                let mut acc = live.clone();
                 for a in arms {
+                    let mut l = live.clone();
                     self.expr(&a.body, &mut l);
+                    acc.extend(l);
                 }
                 self.closure -= 1;
-                live.extend(l);
+                *live = acc;
                 self.expr(body, live);
             }
             EK::Method(r, _, args) => self.operands(&std::iter::once(&**r).chain(args).collect::<Vec<_>>(), live),

@@ -102,10 +102,22 @@ pub fn computed_callee() -> i32 {
 }
 
 // a JSX element's parts are evaluated in the emitter's order (`key` after the props): no in-place push in them
-pub fn jsx_key() -> i32 {
+pub fn jsx_key() -> Jsx {
   let mut a = [1];
-  let v = <div key={a.len()} id={a.push(2).len()} />;
-  a.len()
+  <div key={a.len()} id={a.push(2).len()} />
+}
+
+// handler arms are alternatives: an assignment in one does not end a read in another
+enum Store { Read -> i32, Reset -> i32 }
+pub fn handler_alternatives() -> i32 {
+  let mut a = [1];
+  handle {
+    a.push(2);
+    perform Read
+  } {
+    Read, k => k(a.len()),
+    Reset, k => { a = [7]; k(0) },
+  }
 }
 
 // a handler arm runs once per operation: an array from outside is not appended to in place there

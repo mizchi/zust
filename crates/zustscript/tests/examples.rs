@@ -309,6 +309,16 @@ fn text_same_in_js_and_wasm() {
     assert!(rs.contains("s = { let mut __zs_s = { let mut __zs_s = s;"), "{rs}");
 }
 
+/// tests/eq_chain.zsc: `==` on a type with exponentially many paths to the same types checks each type once
+#[test]
+fn eq_check_is_linear() {
+    let d = out_dir("eq_chain");
+    let t = std::time::Instant::now();
+    let o = zsc(&root().join("tests/eq_chain.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(t.elapsed().as_secs() < 5, "took {:?}", t.elapsed());
+}
+
 /// tests/js_inplace.zsc: the JS layer appends in place only onto a local array no one else can see, so every
 /// result is what the copying push gives
 #[test]
@@ -316,8 +326,8 @@ fn js_push_in_place() {
     let d = out_dir("js_inplace");
     let o = zsc(&root().join("tests/js_inplace.zsc"), &d, &[]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    let out = node(&d, "const m = await import('./js_inplace.js'); const xs = [1]; const r = m.from_param(xs); console.log(JSON.stringify([m.ramp(5), m.aliased(), [r, xs.length], m.iterate_and_grow(), m.stored(), m.other_local(), m.concat_and_short(), m.compare_with_push(), m.push_arg_assigns(), m.jsx_alias(), m.computed_callee(), m.jsx_key(), m.handler_twice()]))");
-    assert_eq!(out, "[5,12,[2,1],4,114,13,31,false,2,1,1,1,4]\n");
+    let out = node(&d, "const m = await import('./js_inplace.js'); const xs = [1]; const r = m.from_param(xs); console.log(JSON.stringify([m.ramp(5), m.aliased(), [r, xs.length], m.iterate_and_grow(), m.stored(), m.other_local(), m.concat_and_short(), m.compare_with_push(), m.push_arg_assigns(), m.jsx_alias(), m.computed_callee(), m.jsx_key().key, m.handler_twice(), m.handler_alternatives()]))");
+    assert_eq!(out, "[5,12,[2,1],4,114,13,31,false,2,1,1,1,4,1]\n");
     // == by content compares the declared fields only, so it is symmetric: a value from TS may carry more
     let out = node(&d, "const m = await import('./js_inplace.js'); const a = { x: 1, name: 'a' }, b = { x: 1, name: 'a', extra: 2 }; console.log(JSON.stringify([m.same_p(a, b), m.same_p(b, a), m.same_p(a, { x: 2, name: 'a' })]))");
     assert_eq!(out, "[true,true,false]\n");

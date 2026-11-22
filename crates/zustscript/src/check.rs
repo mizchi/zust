@@ -167,7 +167,7 @@ pub struct Checker {
     tys: Vec<(Id, Ty)>,
     /// [`Checker::eqable`]'s finished answers
     eq_memo: std::cell::RefCell<HashMap<Ty, bool>>,
-    eq_cycles: std::cell::Cell<usize>,
+    eq_low: std::cell::Cell<usize>,
     bound_checks: Vec<(Pos, Ty, String)>,
     /// mutable locals: (scope index, name)
     muts: HashSet<(usize, String)>,
@@ -282,7 +282,7 @@ impl Checker {
             typed_lits: vec![],
             tys: vec![],
             eq_memo: Default::default(),
-            eq_cycles: Default::default(),
+            eq_low: std::cell::Cell::new(usize::MAX),
             bound_checks: vec![],
             muts: HashSet::new(),
             closure_bases: vec![],
@@ -596,12 +596,16 @@ impl Checker {
         if let Some(r) = self.eq_memo.borrow().get(t) {
             return *r;
         }
-        let cycles = self.eq_cycles.get();
+        // (`eq_low`: the shallowest type still being checked that a cycle below reached. false is final; true is
+        // final when every cycle it reached closes at this type or inside it, not on an outer one)
+        let depth = seen.len();
+        let outer = self.eq_low.replace(usize::MAX);
         let r = self.eqable_inner(t, seen);
-        // (false is final; true is final unless it leaned on a type still being checked, a cycle)
-        if !r || self.eq_cycles.get() == cycles {
+        let low = self.eq_low.get();
+        if !r || low >= depth {
             self.eq_memo.borrow_mut().insert(t.clone(), r);
         }
+        self.eq_low.set(outer.min(low));
         r
     }
 
@@ -613,8 +617,8 @@ impl Checker {
             Ty::Array(e) | Ty::Typed(e) => self.eqable(e, seen),
             Ty::Tuple(ts) => ts.iter().all(|t| self.eqable(t, seen)),
             Ty::Named(n, targs) => {
-                if seen.contains(t) {
-                    self.eq_cycles.set(self.eq_cycles.get() + 1);
+                if let Some(at) = seen.iter().position(|s| s == t) {
+                    self.eq_low.set(self.eq_low.get().min(at));
                     return true;
                 }
                 if seen.len() > 64 || ty_size(t, 4096) >= 4096 {
@@ -638,6 +642,8 @@ impl Checker {
     }
 
     fn finish_fn(&mut self) {
+        // (comparability depends on this function's bounds: no answer from another function's)
+        self.eq_memo.borrow_mut().clear();
         // integer literals nothing constrained are i32
         let mut intv: Vec<u32> = self.intv.iter().copied().collect();
         intv.sort();
