@@ -63,6 +63,16 @@ fn inner_alias() -> u32 {
     x::f() * 10
 }
 
+// (a block's own import: only in that block, over the module's)
+fn imports_a() -> u32 {
+    use a::f;
+    f()
+}
+fn imports_b() -> u32 {
+    use b::f;
+    f()
+}
+
 fn show<T: Debug>(t: T) -> String {
     format!("{t:?}")
 }
@@ -85,4 +95,5 @@ fn main() {
     println!("{}", count_boxed!(dyn Debug + 'static u8 &'static str dyn Debug + Send + 'static));
     println!("{}", show(defaults!(u8 String Vec<u8> (bool, char) Option<&'static str> id_ty!(u8) [u8; 2])));
     println!("{} {} {} {} {}", x::f(), y::f(), x::deep::K, inner_alias(), x::f());
+    println!("{} {}", imports_a(), imports_b());
 }

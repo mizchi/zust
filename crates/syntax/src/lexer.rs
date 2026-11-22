@@ -1800,8 +1800,11 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     let mut use_ranges: Vec<(usize, usize)> = vec![];
     // `use crate::m::*;` で取り込んだモジュール: (スコープ, モジュール)
     let mut globs: Vec<(usize, usize)> = vec![];
-    // (モジュール m の中で use した名前を取り込むもの: (スコープ, 使う名前, m, m の中の名前))
-    let mut pending: Vec<(usize, Vec<u8>, usize, Vec<u8>)> = vec![];
+    // (モジュール m の中で use した名前を取り込むもの: (スコープ, 使う名前, m, m の中の名前, ブロック))
+    let mut pending: Vec<(usize, Vec<u8>, usize, Vec<u8>, Option<(usize, usize)>)> = vec![];
+    // (a name a `use` in a block (a fn body) imports, seen in that block only: (its `{`, its `}`, the name used, the new
+    // name). The innermost block's wins over the module's items and imports)
+    let mut block_imports: Vec<(usize, usize, Vec<u8>, Vec<u8>)> = vec![];
     let mut k = 0;
     while k < toks.len() {
         if !is_id(k, b"use") {
@@ -1816,6 +1819,12 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         use_ranges.push((k, e));
         let mut items = vec![];
         use_walk(&toks, s, k + 1, e, vec![], &mut items);
+        let own_brace = if sc == usize::MAX { usize::MAX } else { mods[sc].1 };
+        let in_block = close_at.get(&block_of[k]).filter(|_| block_of[k] != own_brace).map(|&c| (block_of[k], c));
+        let mut add = |local: Vec<u8>, nn: Vec<u8>| match in_block {
+            Some((o, c)) => block_imports.push((o, c, local, nn)),
+            None => imports.push((sc, local, nn)),
+        };
         for (path, local) in items {
             if local.as_slice() == b"*" {
                 if let Some(m) = resolve_mod(sc, &path, k) {
@@ -1829,13 +1838,13 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             let (mpath, name) = path.split_at(path.len() - 1);
             if let Some(m) = resolve_mod(sc, mpath, k) {
                 if let Some(nn) = renamed_in(m, &name[0]) {
-                    imports.push((sc, local, nn));
+                    add(local, nn);
                 } else if !def_set.contains(&(m, name[0].clone())) {
                     // (`pub use` で取り込み直した名前かもしれない: 後で解く)
-                    pending.push((sc, local, m, name[0].clone()));
+                    pending.push((sc, local, m, name[0].clone(), in_block));
                 } else if local.as_slice() != name[0].as_slice() && def_set.contains(&(m, name[0].clone())) {
                     // (`use crate::parse::{FnSig as PSig}`: 別名はそのモジュールの中で元の名前に)
-                    imports.push((sc, local, name[0].clone()));
+                    add(local, name[0].clone());
                 }
             }
         }
@@ -1849,7 +1858,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             let found = imports.iter().find(|i| i.0 == p.2 && i.1 == p.3).map(|i| i.2.clone());
             match found {
                 Some(nn) => {
-                    imports.push((p.0, p.1, nn));
+                    match p.4 {
+                        Some((o, c)) => block_imports.push((o, c, p.1, nn)),
+                        None => imports.push((p.0, p.1, nn)),
+                    }
                     progress = true;
                 }
                 None => rest.push(p),
@@ -1928,6 +1940,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     }
     for i in &imports {
         interest.insert(name_hash(&i.1));
+    }
+    for i in &block_imports {
+        interest.insert(name_hash(&i.2));
     }
     // (a name a fn binds itself, a parameter `guard: Self` or a `let guard = ..`, is that local in the fn's body, not
     // the item of that name: `fn into_inner(guard: Self) { ManuallyDrop::new(guard) }` next to `pub fn guard`)
@@ -2074,7 +2089,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // (a glob import is shadowed by the scope's own item of that name: the crate root's `enum Thing` beside
             // `use thing::*;` stays the root's)
             let own = || own_defs.contains(&(sc, n));
-            let nn = renamed_in(sc, n)
+            // (a block's own import first: `fn f() { use b::g; g() }` beside a module-level `g`)
+            let in_block = || if is_def { None } else { block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n).max_by_key(|b| b.0).map(|b| b.3.clone()) };
+            let nn = in_block()
+                .or_else(|| renamed_in(sc, n))
                 .or_else(|| imported(sc, n))
                 .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| renamed_in(g.1, n)) })
                 // (`use super::*;` は親が use で取り込んだ名前も見える)
