@@ -3569,6 +3569,48 @@ fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u
 #[cfg(not(feature = "build"))]
 fn lower_blob(_: &Analysis, _: acg::Compiled, _: Vec<u32>) -> R<(Blob, Vec<u32>)> { Err("internal: zust-core was built without the backend (feature `build`)".into()) }
 
+impl Session2 {
+    /// An error of the analysis at a line past the program's own (an item hoisted out of a fn body, prep::HOIST_MARK):
+    /// at the line it was written on. The text is preprocessed again for it, only when there is such an error
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn unhoist_analysis_err(&self, src0: &str, e: String) -> String {
+        let d = Diagnostic::parse(&e);
+        let user_lines = src0.bytes().filter(|&c| c == b'\n').count() + 1;
+        if d.line <= user_lines || !e.trim_start().starts_with(|c: char| c.is_ascii_digit()) || !hoisted_err_holds(&d.msg) {
+            return e;
+        }
+        let cfg = self.opts.cfg_with(&self.opts.features);
+        let stripped = crate::cfg::strip(src0, &cfg);
+        let s = stripped.as_deref().unwrap_or(src0);
+        let renamed = crate::prep::std_renames(s);
+        let s = renamed.as_deref().unwrap_or(s);
+        let mut crates = self.ctx.deps.clone();
+        crates.extend(self.ctx.lib.iter().cloned());
+        let Ok(p) = crate::prep::prep_full(s, &crates, &mut vec![], Some(&cfg)) else { return e };
+        match crate::prep::hoisted_line(&crate::prep::marked(p), d.line) {
+            Some(l) => with_line(&e, l),
+            None => e,
+        }
+    }
+}
+
+/// An analysis error of a hoisted item that says what rustc says there: a name it cannot see (a type parameter or
+/// `Self` of the fn or impl around it, a local), an import, `_` in a signature, an item never used. Not what zustc
+/// does not read (`unsupported ..`, a parse error of syntax it does not know), nor a name the hoisting made (`X__h0`)
+fn hoisted_err_holds(msg: &str) -> bool {
+    let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword"];
+    let unused = msg.starts_with("function `") && msg.contains("is never used");
+    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused)
+}
+
+/// e with its leading line `L:` made l
+fn with_line(e: &str, l: usize) -> String {
+    let lead = e.trim_start();
+    let n = lead.find(':').unwrap_or(0);
+    format!("{l}{}", &lead[n..])
+}
+
 /// An error at a line of an item hoisted out of a fn body (prep::HOIST_MARK): at the line it was written on
 pub(crate) fn unhoist_err(a: &Analysis, e: String) -> String {
     let d = Diagnostic::parse(&e);
@@ -3577,10 +3619,7 @@ pub(crate) fn unhoist_err(a: &Analysis, e: String) -> String {
         return e;
     }
     match crate::prep::hoisted_line(&a.src, d.line) {
-        Some(l) => {
-            let n = lead.find(':').unwrap_or(0);
-            format!("{l}{}", &lead[n..])
-        }
+        Some(l) => with_line(&e, l),
         None => e,
     }
 }
@@ -3630,7 +3669,7 @@ impl Session2 {
         self.checking = false;
         let mut a = match r {
             Ok(a) => a,
-            Err(e) => return vec![Diagnostic::parse(&e)],
+            Err(e) => return vec![Diagnostic::parse(&self.unhoist_analysis_err(src, e))],
         };
         // 検査だけ: コード生成 (acg) で型を検査し、機械語は作らない (ZUSTC_CHECK_CODEGEN=1 で機械語まで作る)。
         // 検査済みの印は、要求したインスタンスへの再配置だけを持つ空の Blob を、ビルドとは別のキーで覚える

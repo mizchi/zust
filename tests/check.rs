@@ -159,3 +159,18 @@ fn dyn_incompatible_in_signature() {
     let good = bad.replace("fn new() -> Self;", "fn new() -> Self\n    where\n        Self: Sized;");
     assert!(s.check(&good).is_empty(), "{:?}", s.check(&good));
 }
+
+#[test]
+fn errors_of_items_in_fn_bodies_at_their_lines() {
+    // an item in a fn body is checked after the text, and its error is reported where it is written
+    let bad = "fn outer<T>(x: T) {\n    fn inner(y: T) {}\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(bad);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2], "{d:?}");
+    assert!(d[0].msg.contains("cannot find type `T`"), "{d:?}");
+    let dir = std::env::temp_dir().join(format!("zust-unhoist-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let e = Session2::new(Options2 { jobs: 1, ..Options2::default() }).build(bad, &dir.join("a")).unwrap_err();
+    assert!(e.starts_with("2:"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

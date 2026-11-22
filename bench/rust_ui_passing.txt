@@ -1584,6 +1584,7 @@ compile-fail	const-generics/infer/uninferred-consts.rs
 check-pass	const-generics/integer-literal-generic-arg-in-where-clause.rs
 compile-fail	const-generics/invalid-attributes-on-const-params-78957.rs
 compile-fail	const-generics/invalid-const-arg-for-type-param.rs
+compile-fail	const-generics/invalid-path-in-const.rs
 compile-fail	const-generics/invalid-rustc_legacy_const_generics-issue-123077.rs
 check-pass	const-generics/issues/issue-60818-struct-constructors.rs
 build-pass	const-generics/issues/issue-61336-1.rs
@@ -2340,6 +2341,7 @@ compile-fail	error-codes/E0381-duplicated-label.rs
 compile-fail	error-codes/E0389.rs
 compile-fail	error-codes/E0390.rs
 compile-fail	error-codes/E0392.rs
+compile-fail	error-codes/E0401.rs
 compile-fail	error-codes/E0403.rs
 compile-fail	error-codes/E0404.rs
 compile-fail	error-codes/E0405.rs
@@ -2823,6 +2825,7 @@ compile-fail	generics/box-missing-generics-14092.rs
 compile-fail	generics/cyclic-default-type-param-via-alias.rs
 run-pass	generics/default-type-params-well-formedness.rs
 run-pass	generics/empty-generic-brackets-equiv.rs
+compile-fail	generics/enum-definition-with-outer-generic-parameter-5997.rs
 compile-fail	generics/generic-arg-mismatch-recover.rs
 run-pass	generics/generic-derived-type.rs
 compile-fail	generics/generic-enum-errors.rs
@@ -3221,6 +3224,7 @@ check-pass	imports/issue-32119.rs
 check-pass	imports/issue-32222.rs
 compile-fail	imports/issue-32354-suggest-import-rename.rs
 compile-fail	imports/issue-33464.rs
+compile-fail	imports/issue-37887.rs
 compile-fail	imports/issue-45799-bad-extern-crate-rename-suggestion-formatting.rs
 compile-fail	imports/issue-45829/import-self.rs
 compile-fail	imports/issue-45829/import-twice.rs
@@ -3644,6 +3648,7 @@ check-pass	lint/dead-code/expect-dead-code-154324.rs
 check-pass	lint/dead-code/expect-dead-code-field-read-in-dead-fn.rs
 check-pass	lint/dead-code/expect-dead-code-through-non-expect-item.rs
 check-pass	lint/dead-code/expect-on-assoc-fn-issue-148861.rs
+compile-fail	lint/dead-code/in-closure.rs
 check-pass	lint/dead-code/inferred-generic-arg.rs
 compile-fail	lint/dead-code/issue-41883.rs
 check-pass	lint/dead-code/issue-59003.rs
@@ -5882,6 +5887,7 @@ compile-fail	resolve/associated-fn-called-as-fn.rs
 compile-fail	resolve/bad-expr-path.rs
 compile-fail	resolve/bad-expr-path2.rs
 compile-fail	resolve/bad-module.rs
+compile-fail	resolve/bad-type-env-capture.rs
 run-pass	resolve/blind-item-local-shadow.rs
 run-pass	resolve/blind-item-mixed-use-item.rs
 check-pass	resolve/block-with-trait-parent.rs
@@ -5910,6 +5916,7 @@ compile-fail	resolve/ice-inconsistent-resolution-with-import-separators-issue-14
 compile-fail	resolve/impl-on-non-type.rs
 compile-fail	resolve/impl-trait-for-undeclared-type.rs
 compile-fail	resolve/import-suggestion-duplicated-importing-same-item.rs
+compile-fail	resolve/incorrect-self-res.rs
 compile-fail	resolve/issue-100365.rs
 compile-fail	resolve/issue-101749-2.rs
 compile-fail	resolve/issue-101749.rs
@@ -5922,6 +5929,7 @@ compile-fail	resolve/issue-111312.rs
 compile-fail	resolve/issue-111727.rs
 check-pass	resolve/issue-114433-invalid-unused-qualifications-suggestion.rs
 compile-fail	resolve/issue-118295.rs
+compile-fail	resolve/issue-12796.rs
 compile-fail	resolve/issue-14254.rs
 compile-fail	resolve/issue-16058.rs
 compile-fail	resolve/issue-17518.rs
@@ -5934,6 +5942,7 @@ compile-fail	resolve/issue-2356.rs
 compile-fail	resolve/issue-24968.rs
 compile-fail	resolve/issue-3099-a.rs
 compile-fail	resolve/issue-3099-b.rs
+compile-fail	resolve/issue-3214.rs
 compile-fail	resolve/issue-33876.rs
 compile-fail	resolve/issue-35675.rs
 compile-fail	resolve/issue-39559-2.rs
@@ -5967,6 +5976,7 @@ run-pass	resolve/no-std-2.rs
 run-pass	resolve/no-std-3.rs
 check-pass	resolve/non-macro-attrs-accepted.rs
 compile-fail	resolve/nonexistent-macro.rs
+compile-fail	resolve/outer-generic-in-trait-method.rs
 compile-fail	resolve/parse_error.rs
 compile-fail	resolve/privacy-enum-ctor.rs
 run-pass	resolve/reference-clone-nonclone-11820.rs
@@ -6016,11 +6026,13 @@ compile-fail	resolve/unresolved-module-error-33293.rs
 compile-fail	resolve/unresolved-segments-visibility.rs
 compile-fail	resolve/unresolved_static_type_field.rs
 check-pass	resolve/unused-macro-import.rs
+compile-fail	resolve/use-self-in-inner-fn.rs
 check-pass	resolve/use-shadowing-14082.rs
 compile-fail	resolve/use_suggestion.rs
 compile-fail	resolve/visibility-indeterminate.rs
 compile-fail	return/dont-suggest-through-inner-const.rs
 run-pass	return/early-return-with-unreachable-code-24353.rs
+compile-fail	return/infer-return-ty-for-fn-sig-issue-125488.rs
 run-pass	return/ret-bang.rs
 compile-fail	return/ret-non-nil.rs
 compile-fail	return/return-disjoint-regions.rs
@@ -7349,6 +7361,7 @@ compile-fail	typeck/issue-67971.rs
 check-pass	typeck/issue-68590-reborrow-through-derefmut.rs
 compile-fail	typeck/issue-69378-ice-on-invalid-type-node-after-recovery.rs
 check-pass	typeck/issue-72225-call-fnmut-through-derefmut.rs
+compile-fail	typeck/issue-74086.rs
 check-pass	typeck/issue-74933.rs
 compile-fail	typeck/issue-75883.rs
 compile-fail	typeck/issue-7813.rs
@@ -7408,6 +7421,7 @@ compile-fail	typeck/remove-semi-but-confused-char.rs
 compile-fail	typeck/return-unsized-coercion.rs
 compile-fail	typeck/return_type_containing_closure.rs
 compile-fail	typeck/self-constructor-type-error-56199.rs
+compile-fail	typeck/self-param-in-fn-item-cast-to-fn-trait.rs
 compile-fail	typeck/slow-lhs-suggestion.rs
 compile-fail	typeck/span-bug-issue-121410.rs
 compile-fail	typeck/str-no-field-desc-14721.rs
@@ -7609,6 +7623,7 @@ check-pass	use/use-mod/use-mod-5.rs
 check-pass	use/use-mod/use-mod-6.rs
 compile-fail	use/use-mod/use-mod.rs
 compile-fail	use/use-paths-as-items.rs
+compile-fail	use/use-self-type.rs
 compile-fail	variance/leaking-unnameables.rs
 check-pass	variance/smart-pointers-covariant.rs
 compile-fail	variance/type-resolve-error-two-structs-deep.rs
