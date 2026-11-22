@@ -1591,3 +1591,17 @@ fn fn_bound_call_regions() {
     assert!(d.len() == 1 && d[0].0 == 2, "{d:?}");
     assert_eq!(check("fn f<'a, 'b: 'a, G: FnOnce(&'a i32)>(g: G, x: &'b i32) {\n    g(x);\n}\nfn h<G: Fn(&i32)>(g: G) {\n    let v = 1;\n    g(&v);\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A copy proves its type `Copy`: with `impl Copy for Foo<'static>`, what a copied Foo borrows is 'static
+/// (nll/do-not-ignore-lifetime-bounds-in-copy.rs)
+#[test]
+fn static_copy_impl() {
+    let pre = "#[derive(Clone)] struct Foo<'a>(&'a u32);\nimpl Copy for Foo<'static> {}\n";
+    let d = check(&format!("{pre}fn main() {{\n    let s = 2;\n    let a = Foo(&s);\n    drop(a);\n    drop(a);\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`s` does not live long enough"), "{d:?}");
+    let d = check(&format!("{pre}fn main() {{\n    let s = 2;\n    let a = (Foo(&s),);\n    drop(a.0);\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+    // (a 'static loan, a promoted constant, an impl for every lifetime, a tuple that also holds another reference)
+    let ok = "#[derive(Clone)] struct Bar<'a>(&'a u32);\nimpl<'a> Copy for Bar<'a> {}\nstatic N: u32 = 3;\nfn main() {\n    let s = 2;\n    let a = Foo(&N);\n    drop(a);\n    drop(a);\n    let b = Bar(&s);\n    drop(b);\n    drop(b);\n    let c = Foo(&7);\n    let e = (c, &s);\n    let d = e;\n    drop(d);\n}\n";
+    assert_eq!(check(&format!("{pre}{ok}")), vec![]);
+}

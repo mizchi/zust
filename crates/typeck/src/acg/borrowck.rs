@@ -441,6 +441,19 @@ pub fn is_copy(prog: &Program, t: Ty, depth: u32) -> bool {
     }
 }
 
+/// How t holds references, for a copy of it: 0 none, 1 only in types whose `Copy` impl is for their 'static
+/// instance (`impl Copy for Foo<'static>`, and tuples and arrays of them), 2 others too. A copy of a value whose type
+/// is 1 proves its type `Copy`, so what it borrows must be 'static
+pub fn static_copy(prog: &Program, t: Ty, depth: u32) -> u8 {
+    match t {
+        _ if depth > 8 => 2,
+        Ty::Struct(sid) if prog.static_copy.contains(&prog.base_of(sid)) => 1,
+        Ty::Array(e, _) => static_copy(prog, *e, depth + 1),
+        Ty::Struct(sid) if prog.is_tuple(sid) => prog.structs[sid as usize].fields.iter().map(|f| static_copy(prog, f.1, depth + 1)).max().unwrap_or(0),
+        _ => 2 * has_refs(prog, t, 0) as u8,
+    }
+}
+
 /// The prelude's iterator and view types: raw pointers into what they were made from, so they hold the loan of it
 const VIEWS: &[&str] = &[
     "Windows", "Chunks", "ChunksExact", "Iter", "IterMut", "Chars", "DebugStruct", "DebugTuple", "DebugMap", "MutexGuard", "Ref", "RefMut", "HmIter",
@@ -1839,6 +1852,17 @@ impl Cx<'_> {
         if matches!(a, Acc::Read | Acc::Move) && self.bk.locals[l as usize].refs {
             self.bk.src(Src::Local(l));
         }
+    }
+
+    /// A copy of e, of type t: what it borrows is 'static when t's `Copy` impl is for its 'static instance (see
+    /// static_copy). Only for a place the local owns, of a local whose references are all in such types
+    pub(crate) fn bk_copy(&mut self, e: &Expr, t: Ty) {
+        let Some((p, _)) = self.bk_place(e) else { return };
+        let lo = &self.bk.locals[p.local as usize];
+        if p.owned_len() < p.proj.len() || !lo.refs || static_copy(self.prog, t, 0) != 1 || static_copy(self.prog, lo.ty, 0) != 1 {
+            return;
+        }
+        self.bk_ev(Ev::Escape(vec![Src::Local(p.local)]));
     }
 
     pub(crate) fn bk_acc_place(&mut self, p: BPlace, a: Acc, sp: Sp) {

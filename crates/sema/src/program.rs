@@ -325,6 +325,9 @@ pub struct Program {
     pub impl_targs: FxMap<String, Vec<(Ty, Vec<Ty>, usize)>>,
     /// (型, trait) の実装
     pub impls: HashSet<(u32, String)>,
+    /// Types whose `Copy` impl names 'static in its self type (`impl Copy for Foo<'static>`): a copy of one requires
+    /// what it borrows to be 'static
+    pub static_copy: FxSet<u32>,
     /// `#[panic_handler]` の関数 (no_std)。panic (範囲外アクセス・unwrap など) はここを呼ぶ
     pub panic_handler: Option<u32>,
     /// const と static
@@ -753,6 +756,7 @@ impl Program {
             trait_supers: FxMap::default(),
             trait_self_outlives: FxMap::default(),
             any_immutable_static: false,
+            static_copy: FxSet::default(),
             alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
@@ -1530,6 +1534,9 @@ impl Program {
             // (a trait with parameters, `impl Tr<u8> for S` and `impl Tr<u16> for S`, or self types that differ in their
             // arguments, `impl Tr for Vec<i32>` and `impl Tr for Vec<Box<i32>>`)
             let dup = !p.impls.insert((sid, tr.clone()));
+            if tr == "Copy" && sm.hdr_regions.as_ref().is_some_and(|r| r.self_slots.contains(&R_STATIC)) {
+                p.static_copy.insert(sid);
+            }
 
             if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup)
                 && !matches!(

@@ -705,6 +705,8 @@ impl Cx<'_> {
                         self.drop_move_check(e)?;
                     }
                     self.bk_acc(e, borrowck::Acc::Move);
+                } else if self.bk_on() && !self.prog.static_copy.is_empty() {
+                    self.bk_copy(e, r.1);
                 }
                 // drop が要る値を値として読んだらムーブ
                 if self.needs_drop(r.1) {
