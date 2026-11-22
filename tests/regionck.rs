@@ -2163,3 +2163,13 @@ fn blanket_and_number_unsafe_methods() {
     assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("E0133"), "{d:?}");
     assert_eq!(check("trait T {\n    unsafe fn f(&self) -> u32 {\n        1\n    }\n}\nimpl<X> T for X {}\ntrait P {\n    unsafe fn g(&self) -> u32;\n}\nimpl P for u8 {\n    unsafe fn g(&self) -> u32 {\n        2\n    }\n}\nfn main() {\n    let r = &5u32;\n    let x = unsafe { ().f() + r.f() + 3u8.f() + \"a\".f() + 4u8.g() };\n    println!(\"{}\", x);\n}\n"), vec![]);
 }
+
+/// A closure's captures held by value outlive the body's call: what they borrow of the body's own escapes it
+/// (borrowck/borrowed-data-escapes-closure-148392.rs: `move || { b = Some(&a); }`, rustc's E0521)
+#[test]
+fn closure_value_captures_outlive_the_call() {
+    let d = check("fn main() {\n    let a = 0;\n    let mut b = None;\n    move || {\n        b = Some(&a);\n    };\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`a` does not live long enough"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let a = 0;\n    let mut b: Option<&i32> = None;\n    let mut c = || {\n        b = Some(&a);\n    };\n    c();\n    println!(\"{:?}\", b);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let s = 5;\n    let mut acc: Vec<&i32> = vec![];\n    let r = &s;\n    let mut c = move || {\n        acc.push(r);\n        acc.len()\n    };\n    let t = String::from(\"ab\");\n    let e = move || {\n        let x = &t;\n        x.len()\n    };\n    println!(\"{} {}\", c(), e());\n}\n"), vec![]);
+}

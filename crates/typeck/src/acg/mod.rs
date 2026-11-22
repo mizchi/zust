@@ -1602,6 +1602,8 @@ impl Cx<'_> {
             }
         }
         // クロージャ: キャプチャを `__env` のフィールド (by-ref なら指す先) として見せる
+        // (the borrow checker's locals of the captures held by value)
+        let mut cap_vals: Vec<u32> = vec![];
         if !self.caps.is_empty() {
             let env = match self.lookup("__env") {
                 Some((l, _)) => self.loc_value(l),
@@ -1614,7 +1616,11 @@ impl Cx<'_> {
                 // (a capture held by value is a local of the body for the borrow checker: moving it twice, or in a
                 // loop, is a use of a moved value)
                 if !by_ref {
+                    let id = self.bk.locals.len() as u32;
                     self.bk_local(loc, &n, t);
+                    if self.bk.locals.len() as u32 > id {
+                        cap_vals.push(id);
+                    }
                 } else if self.bk_on() {
                     // (one held by reference is the place the environment points to: `*x`, which the body borrows
                     // and assigns as the closure's own (`let p = &this.x; &mut this.x;` conflicts), and which is no
@@ -1637,6 +1643,15 @@ impl Cx<'_> {
             self.bk.tail = e as *const Expr as usize;
         }
         let (v, t) = self.block(&f.block, Some(self.ret))?;
+        // (a closure's captures held by value outlive the body's call, in its environment: what they borrow of the
+        // body's own (another capture held by value, a local) escapes it (`move || { b = Some(&a); }`, rustc's E0521))
+        if self.bk_on() {
+            for &id in &cap_vals {
+                if self.bk.locals.get(id as usize).is_some_and(|l| l.refs) {
+                    self.bk_ev(borrowck::Ev::Escape(vec![borrowck::Src::Local(id)]));
+                }
+            }
+        }
         // (the temporaries of the body's tail go away after its locals (edition 2021))
         self.bk_temps_end(0);
         if t == Ty::Never {
