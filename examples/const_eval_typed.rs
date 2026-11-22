@@ -21,6 +21,17 @@ const M_PLUS: usize = M as usize + 1;
 const NEG_SHR: usize = ((-16i32 >> 2) + 8) as usize;
 const WRAP: usize = (300u32 as u8) as usize;
 const POW: usize = 3u8.pow(5) as usize;
+// (review of #49: a block keeps its tail's type; `-` of a literal is the type's minimum; an unsuffixed operand is the
+// other's type; u128's pow is unsigned; a layout sees the constant's declared type)
+const BLOCK_SHL: usize = ({ let _unused = 0; 255u8 } << 1) as usize;
+const NEG_MIN: usize = (-128i8).count_ones() as usize + (-(128i8)).count_ones() as usize;
+const NOT_AND: usize = (!0 & 7u8) as usize;
+const POW128: usize = (2u128.pow(127) >> 127) as usize;
+const LET_TYPED: usize = { let x: u8 = !0; x as usize };
+const LAYOUT_N: usize = X.count_ones() as usize;
+struct S {
+    a: [u8; LAYOUT_N],
+}
 
 fn main() {
     println!("{}", std::mem::size_of::<[u8; M as usize]>());
@@ -38,4 +49,12 @@ fn main() {
     println!("{}", std::mem::size_of::<[u8; NEG_SHR]>());
     println!("{}", std::mem::size_of::<[u8; WRAP]>());
     println!("{}", std::mem::size_of::<[u8; POW]>());
+    println!("{}", std::mem::size_of::<[u8; BLOCK_SHL]>());
+    println!("{}", std::mem::size_of::<[u8; NEG_MIN]>());
+    println!("{}", std::mem::size_of::<[u8; NOT_AND]>());
+    println!("{}", std::mem::size_of::<[u8; POW128]>());
+    println!("{}", std::mem::size_of::<[u8; LET_TYPED]>());
+    println!("{}", std::mem::size_of::<S>());
+    let s = S { a: [0; LAYOUT_N] };
+    println!("{}", s.a.len());
 }

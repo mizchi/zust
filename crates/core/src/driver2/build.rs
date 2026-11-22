@@ -258,8 +258,19 @@ impl Session2 {
             }
             return Ok(rep);
         }
-        let obj_path = output.with_extension("o");
-        let same = std::fs::read(&obj_path).is_ok_and(|old| old == obj) && std::fs::read(output).is_ok();
+        // (`x` -> `x.o`, `x.cold` -> `x.cold.o`: not `x.o`, which another output `x` would share, and whose object
+        // equal to its own would skip relinking `x`)
+        let obj_path = match output.extension() {
+            Some(_) => {
+                let mut o = output.as_os_str().to_owned();
+                o.push(".o");
+                std::path::PathBuf::from(o)
+            }
+            None => output.with_extension("o"),
+        };
+        // (and the output was linked from that object: not older than it)
+        let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        let same = std::fs::read(&obj_path).is_ok_and(|old| old == obj) && matches!((mtime(output), mtime(&obj_path)), (Some(e), Some(o)) if e >= o);
         if same {
             tm.lap("link", "skipped (object unchanged)".to_string());
         } else {
