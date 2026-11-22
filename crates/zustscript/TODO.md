@@ -89,7 +89,9 @@ r5 / r2 を書いた agent が報告したもの。次の改訂で直す。
    - handler のすべての arm が末尾で `k(x)` を呼ぶだけで、`pub` な関数から外へ出ず、generator の effect と混ざらない effect は、普通の呼び出しになる。それ以外は generator のまま
    - `w_effects` は 676 ms → 6.5 ms(約 100 倍)。結果は同じ。operation を 100 万回しても、スタックはあふれない(回帰テスト `many_ops`)
    - **残る不具合**: generator の deep handler は、operation のたびに JS のスタックが深くなり、1 つの `handle` の中で operation が 1000 回前後になるとあふれる。ループの形の再開(trampoline)が要る
-2. **実行時の補助関数を共通の runtime モジュールにする**: `zsc-runtime.js`(`$div_i32`、`$fold`、`$handle`、数値の brand のコンストラクタなど)と `zsc-prelude.d.ts` を 1 つ出し、各モジュールは使うものだけ import する(bundler の tree-shaking が効き、モジュールの間で重複しない。003 の prelude の計画と同じ)
+2. **済: 実行時の補助関数を共通の runtime モジュールにした**: `zsc-runtime.js` / `.d.ts`(補助関数と、数値の brand とそのコンストラクタ)を出力先に 1 つ書き、各モジュールは使うものだけ import する。モジュールは使う brand を re-export するので、TS 側の import は変わらない。`--inline-runtime` で、これまでどおりモジュールの中に書く
+   - 1 つのモジュールの bundle は変わらない(tree-shaking)。全モジュールを 1 つに bundle すると minify 後で 18,376 → 14,249 バイト(−22%)、gzip 後で −6.5%。zsc が出す .js は −30%
+   - 003 の prelude(`Option` / `Result` の型)も、ここに置く予定
 3. **TS との境界の検査に tsrs を使う**(`npm i tsrs`。tsc と同じ診断で、今の .d.ts の検査は 0.89 秒 → 0.06 秒)
    - `extern` で宣言した TS の関数の型と、実際の .d.ts の型が合うかを、検査用の .ts を生成して tsrs で確かめる。TS の型検査を自前で実装しない
    - tsrs は Rust 1.100 が要り(この環境は 1.97)、Rust ライブラリとしての安定した API もないので、zustc と同じく外部コマンドとして使う

@@ -1,6 +1,6 @@
 //! zsc: the zustscript prototype's compiler.
 //!
-//!   zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd]
+//!   zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd] [--inline-runtime]
 //!
 //! (`--no-simd` compiles `@simd fn`s through zustc like `@wasm` ones (no vectors).
 //! `--all-js` keeps `@wasm fn`s in the JS output: the same source, run as JS.
@@ -9,6 +9,8 @@
 //!
 //! Writes `<name>.js` (ES module: the JS layer, then the glue of the wasm layer), `<name>.d.ts`, and, when the file
 //! has `wasm fn`s, `<name>.wasm.rs` (the Rust handed to zustc) and `<name>.wasm`.
+//! The helpers and the brand constructors go to `zsc-runtime.js` / `.d.ts` in the same directory, which the modules
+//! import (`--inline-runtime` writes them into the module instead).
 //!
 //! zustc is used only as an external command: this prototype adds nothing to zust's crates.
 
@@ -32,6 +34,7 @@ fn main() {
     let mut wasm_opt = false;
     let mut all_js = false;
     let mut no_simd = false;
+    let mut inline_runtime = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -41,6 +44,7 @@ fn main() {
             "--wasm-O" => wasm_opt = true,
             "--all-js" => all_js = true,
             "--no-simd" => no_simd = true,
+            "--inline-runtime" => inline_runtime = true,
             _ if input.is_none() => input = Some(PathBuf::from(a)),
             _ => usage(),
         }
@@ -72,6 +76,7 @@ fn main() {
     report_warnings(&file, &src, &warns);
     let info = ck.info;
     let mut j = js::Js::new(&info, &jsx_runtime);
+    j.shared_runtime = !inline_runtime;
     if !all_js {
         j.wasm_fns = items.iter().filter_map(|it| match it {
             ast::Item::Fn { name, wasm, simd, .. } if *wasm || *simd => Some(name.clone()),
@@ -87,7 +92,7 @@ fn main() {
         std::process::exit(1);
     }
     let header = j.header();
-    let (dts, brands) = js::dts(&items, &info);
+    let (dts, brands) = js::dts(&items, &info, !inline_runtime);
     let wasm_name = format!("{stem}.wasm");
     // `@wasm fn`s: lowered to Rust (with --all-js they stay in the JS output)
     // `@simd fn`s: vectorized kernels (with --no-simd they go through zustc as @wasm ones)
@@ -146,7 +151,13 @@ fn main() {
         out.push_str(&s.glue);
         std::fs::write(out_dir.join(format!("{stem}.simd.wasm")), &s.wasm).unwrap();
     }
-    out.push_str(&js::brand_runtime(&brands));
+    if inline_runtime {
+        out.push_str(&js::brand_runtime(&brands));
+    } else {
+        out.push_str(&js::brand_reexport(&brands));
+        std::fs::write(out_dir.join(format!("{}.js", js::RUNTIME)), js::runtime_js()).unwrap();
+        std::fs::write(out_dir.join(format!("{}.d.ts", js::RUNTIME)), js::runtime_dts()).unwrap();
+    }
     std::fs::write(out_dir.join(format!("{stem}.js")), out).unwrap();
     std::fs::write(out_dir.join(format!("{stem}.d.ts")), dts).unwrap();
     eprint!("zsc: {} → {}/{stem}.js, .d.ts (front {:.1} ms", file, out_dir.display(), t_front.as_secs_f64() * 1e3);
@@ -192,7 +203,7 @@ fn report_warnings(file: &str, src: &str, ws: &[(ast::Pos, String)]) {
 }
 
 fn usage() -> ! {
-    die("usage: zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd]")
+    die("usage: zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd] [--inline-runtime]")
 }
 
 fn die(m: &str) -> ! {

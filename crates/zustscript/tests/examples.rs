@@ -63,7 +63,10 @@ fn basics() {
     assert!(dts.contains("export type Filter = \"All\" | \"Active\" | \"Done\";"));
     assert!(dts.contains("export declare function sum$i64(xs: readonly bigint[]): bigint;"));
     assert!(dts.contains("export declare function sum$i32(xs: readonly i32[]): i32;"));
-    assert!(dts.contains("export type i32 = number & { readonly __zsc_num: \"i32\" };"));
+    // (the brands are declared once, in the shared runtime, and re-exported by the module)
+    assert!(dts.contains("import { i32, f64 } from \"./zsc-runtime.js\";") || dts.contains("from \"./zsc-runtime.js\";"), "{dts}");
+    let rt = std::fs::read_to_string(d.join("zsc-runtime.d.ts")).unwrap();
+    assert!(rt.contains("export type i32 = number & { readonly __zsc_num: \"i32\" };"));
     let js = std::fs::read_to_string(d.join("basics.js")).unwrap();
     assert!(!js.contains("class "), "the output uses no classes");
     // the brands' constructors check at the boundary

@@ -21,6 +21,8 @@ const opt = (k, d) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
 const zsc = opt("--zsc", join(root, "target/release/zsc"));
 const esbuild = opt("--esbuild", process.env.ESBUILD || "esbuild");
 const quick = args.includes("--quick");
+// (extra zsc flags, e.g. --inline-runtime to measure the runtime written into each module)
+const extra = args.includes("--zsc-flags") ? opt("--zsc-flags").split(" ") : [];
 const out = join(root, "target/js-kpi");
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
@@ -43,7 +45,7 @@ const size = {};
 for (const src of sources) {
   const name = src.split("/").pop().replace(/\.zsc$/, "");
   const dir = join(out, name);
-  execFileSync(zsc, [src, "-o", dir, "--all-js"], { stdio: "pipe" });
+  execFileSync(zsc, [src, "-o", dir, "--all-js", ...extra], { stdio: "pipe" });
   const js = join(dir, `${name}.js`);
   const raw = readFileSync(js);
   const row = { raw: raw.length, raw_gz: gzipSync(raw, { level: 9 }).length };
@@ -55,7 +57,19 @@ for (const src of sources) {
   size[name] = row;
 }
 const total = (k) => Object.values(size).reduce((s, r) => s + (r[k] ?? 0), 0);
+// all the modules in one app: what an app ships when it uses several modules (shared helpers count once)
+let all = null;
+if (hasEsbuild) {
+  const dir = join(out, "all");
+  mkdirSync(dir, { recursive: true });
+  const names = Object.keys(size);
+  for (const name of names) execFileSync(zsc, [sources.find((s) => s.endsWith(`/${name}.zsc`)), "-o", dir, "--all-js", ...extra], { stdio: "pipe" });
+  writeFileSync(join(dir, "entry.js"), names.map((n, i) => `export * as m${i} from "./${n}.js";`).join("\n") + "\n");
+  const min = execFileSync(esbuild, [join(dir, "entry.js"), "--bundle", "--minify", "--format=esm", "--external:react", "--external:react/*", "--external:node:*"], { stdio: ["pipe", "pipe", "pipe"] });
+  all = { min: min.length, gz: gzipSync(min, { level: 9 }).length };
+}
 size.TOTAL = { raw: total("raw"), raw_gz: total("raw_gz"), ...(hasEsbuild ? { min: total("min"), gz: total("gz") } : {}) };
+if (all) size["ALL (one bundle)"] = { raw: "", raw_gz: "", ...all };
 
 // ---- speed
 const m = await import(pathToFileURL(join(out, "workloads/workloads.js")).href);

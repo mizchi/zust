@@ -3,77 +3,83 @@
   "esbuild": true,
   "size": {
     "app": {
-      "raw": 5899,
-      "raw_gz": 2100,
+      "raw": 5485,
+      "raw_gz": 1930,
       "min": 3779,
       "gz": 1552
     },
     "basics": {
-      "raw": 3757,
-      "raw_gz": 1313,
+      "raw": 2708,
+      "raw_gz": 1000,
       "min": 2465,
-      "gz": 1031
+      "gz": 1029
     },
     "effects": {
-      "raw": 3703,
-      "raw_gz": 1347,
+      "raw": 1941,
+      "raw_gz": 669,
       "min": 1780,
       "gz": 816
     },
     "kernels": {
-      "raw": 1722,
-      "raw_gz": 682,
+      "raw": 936,
+      "raw_gz": 371,
       "min": 1096,
-      "gz": 535
+      "gz": 536
     },
     "ml": {
-      "raw": 1972,
-      "raw_gz": 720,
+      "raw": 1180,
+      "raw_gz": 411,
       "min": 1311,
-      "gz": 562
+      "gz": 564
     },
     "numeric": {
-      "raw": 3005,
-      "raw_gz": 1075,
+      "raw": 1815,
+      "raw_gz": 678,
       "min": 2043,
-      "gz": 862
+      "gz": 863
     },
     "regress": {
-      "raw": 3043,
-      "raw_gz": 1212,
+      "raw": 1922,
+      "raw_gz": 732,
       "min": 1633,
       "gz": 797
     },
     "shapes": {
-      "raw": 2667,
-      "raw_gz": 1011,
+      "raw": 2191,
+      "raw_gz": 794,
       "min": 1588,
-      "gz": 770
+      "gz": 767
     },
     "workloads": {
-      "raw": 3798,
-      "raw_gz": 1446,
+      "raw": 2386,
+      "raw_gz": 897,
       "min": 2058,
       "gz": 999
     },
     "TOTAL": {
-      "raw": 29566,
-      "raw_gz": 10906,
+      "raw": 20564,
+      "raw_gz": 7482,
       "min": 17753,
-      "gz": 7924
+      "gz": 7923
+    },
+    "ALL (one bundle)": {
+      "raw": "",
+      "raw_gz": "",
+      "min": 14249,
+      "gz": 5086
     }
   },
   "speed": {
     "w_effects": {
-      "ms": 6.34,
+      "ms": 5.94,
       "result": "1197"
     },
     "w_records": {
-      "ms": 6.43,
+      "ms": 5.99,
       "result": "399960"
     },
     "w_enums": {
-      "ms": 8.49,
+      "ms": 7.28,
       "result": "8845127.652340543"
     },
     "w_numeric": {
@@ -81,7 +87,7 @@
       "result": "-1627944058"
     },
     "w_strings": {
-      "ms": 10.59,
+      "ms": 10.45,
       "result": "1778000"
     }
   }
