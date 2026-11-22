@@ -472,6 +472,17 @@ impl Session2 {
         self.fresh.push(k);
     }
 
+    /// Where the items moved out of fn bodies came from, for src as analyze prepares it (Prep::moved)
+    fn moved_lines(&self, src0: &str) -> Option<Vec<(usize, usize)>> {
+        let stripped = if self.ctx.map.inputs.is_empty() { crate::cfg::strip(src0, &self.opts.cfg_with(&self.opts.features)) } else { None };
+        let src0 = stripped.as_deref().unwrap_or(src0);
+        let mut crates = self.ctx.deps.clone();
+        crates.extend(self.ctx.lib.iter().cloned());
+        let cfg = self.opts.cfg_with(self.ctx.features.as_ref().unwrap_or(&self.opts.features));
+        let renamed = crate::prep::std_renames(src0);
+        crate::prep::moved_lines(renamed.as_deref().unwrap_or(src0), &crates, Some(&cfg))
+    }
+
     /// 要約はアイテムのハッシュで引く
     pub fn analyze(&mut self, src0: &str) -> R<Analysis> {
         // (ファイルから読んだもの (load_crate) は読むときに cfg を評価してある)
@@ -2880,11 +2891,37 @@ impl Session2 {
             self.chk = Some(memo);
         }
         tm.lap("check", format!("{n_memo} from the last check, {n_keys} keys, {n_hit} cached, {n_checked} checked"));
-        let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).filter(|d| d.line <= user_lines).collect();
+        let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).collect();
+        // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its
+        // errors are at the lines it was moved from)
+        if d.iter().any(|x| x.line > user_lines) {
+            if let Some(moved) = self.moved_lines(src) {
+                for x in &mut d {
+                    if let Some(l) = moved_line(&moved, user_lines, x.line) {
+                        x.line = l;
+                    }
+                }
+            }
+        }
+        d.retain(|d| d.line <= user_lines);
         d.sort_by(|x, y| (x.line, x.col).cmp(&(y.line, y.col)));
         d.dedup();
         d
     }
+}
+
+/// The line (1-based) in the source of line `line` of the prepared text, past the source's `user_lines`: in the
+/// items moved out of fn bodies, appended in order, each after a newline (Prep::moved: each one's first line in the
+/// source (0-based) and its newlines). None past them (the prelude's)
+fn moved_line(moved: &[(usize, usize)], user_lines: usize, line: usize) -> Option<usize> {
+    let mut start = user_lines + 1;
+    for &(from, nl) in moved {
+        if line >= start && line <= start + nl {
+            return Some(from + 1 + (line - start));
+        }
+        start += nl + 1;
+    }
+    None
 }
 
 /// The program's generic fns (not a trait's default methods, not a closure's body, not a dependency's) that no
