@@ -112,6 +112,7 @@ fn main() {
     println!("{}", FLIP);
     println!("{}", std::mem::size_of::<PL>());
     println!("{} {} {}", FLIP2, WIDE, std::mem::size_of::<[u8; ADD_U16]>());
+    println!("{}", DIV_LATE);
 }
 
 // (a generic alias resolves before layout; an unsafe block evaluates; the i128::MIN literal negates)
@@ -154,3 +155,8 @@ const fn add16(a: u16, b: u16) -> u16 {
     a + b
 }
 const ADD_U16: usize = (add16(65535, 0) >> 8) as usize;
+// (an untyped local whose untyped value fails (a division by 0) but whose use's type succeeds)
+const DIV_LATE: u8 = {
+    let x = 1 / ((!0 >> 7) + 1);
+    x
+};

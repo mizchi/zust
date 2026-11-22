@@ -2764,7 +2764,12 @@ impl Program {
                     // (`let x: u8 = ..`: the annotation is the value's type)
                     let x = subst_consts(init, env);
                     let lt = ty.as_ref().and_then(|t| It::of_name(&self.cast_prim(t))).or_else(|| self.static_ty(&x));
-                    let (v, t) = self.eval_t(&x, depth, lt)?;
+                    // (with no type yet, its failing untyped value is not an error: `let x = 1 / ((!0 >> 7) + 1);` is
+                    // 0 as a u8, whose use evaluates it again at that type)
+                    let (v, t) = match self.eval_t(&x, depth, lt) {
+                        Err(_) if lt.is_none() => (0, None),
+                        r => r?,
+                    };
                     let t = lt.or(t);
                     // (untyped (`let x = !0 >> 4;`): kept as its expression too, which takes the type of its use; as a
                     // marker, so a chain of them does not grow)
@@ -2783,7 +2788,10 @@ impl Program {
                     };
                     let st = env[slot].2;
                     let x = subst_consts(r, env);
-                    let (v, t) = self.eval_t(&x, depth, st)?;
+                    let (v, t) = match self.eval_t(&x, depth, st) {
+                        Err(_) if st.is_none() => (0, None),
+                        r => r?,
+                    };
                     env[slot].1 = v;
                     env[slot].2 = st.or(t);
                     env[slot].3 = if env[slot].2.is_none() { Some(self.lazy_marker(x)?) } else { None };
