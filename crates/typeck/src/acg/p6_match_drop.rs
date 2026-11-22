@@ -298,7 +298,10 @@ impl Cx<'_> {
                 crate::ast_closure::pat_idents(&arm.pat, &mut names);
                 names.retain(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0 || matches!(t, Ty::Ref(true, _))));
                 if !names.is_empty() {
-                    if let Some((n, at)) = guard_closure_move(g, &names) {
+                    let prog = self.prog;
+                    let types: Vec<(String, Ty)> = names.iter().filter_map(|n| self.lookup(n).map(|(_, t)| (n.clone(), t))).collect();
+                    let by = |p: &Pat, n: &str| types.iter().find(|x| x.0 == n).is_none_or(|x| borrowck::pat_moves(prog, p, x.1, 0));
+                    if let Some((n, at)) = guard_closure_move(g, &names, &by) {
                         return Err(self.at(at, format!("cannot move out of `{n}` in pattern guard (E0507)")));
                     }
                 }
@@ -2303,14 +2306,14 @@ fn lit_suffix(e: &Expr) -> Option<bool> {
 }
 
 /// A closure in e (a match guard) whose body moves one of names out: that capture, and where it moves
-fn guard_closure_move(e: &Expr, names: &[String]) -> Option<(String, crate::parse::Pos)> {
+fn guard_closure_move(e: &Expr, names: &[String], by: crate::ast_closure::MovesBy) -> Option<(String, crate::parse::Pos)> {
     if let Expr::Closure(..) = e {
-        return crate::ast_closure::move_site(e, names);
+        return crate::ast_closure::move_site_by(e, names, by);
     }
     let mut found = None;
     crate::ast_closure::each_child_pub(e, &mut |c| {
         if found.is_none() {
-            found = guard_closure_move(c, names);
+            found = guard_closure_move(c, names, by);
         }
     });
     found

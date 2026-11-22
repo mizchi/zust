@@ -527,6 +527,14 @@ pub fn free_vars(c: &Expr) -> Vec<String> {
     v.out
 }
 
+/// The capture e names (a path that is one of caps)
+fn cap_name<'c>(e: &Expr, caps: &'c [String]) -> Option<&'c str> {
+    match e {
+        Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => caps.iter().find(|c| **c == p.segs[0].name).map(|c| c.as_str()),
+        _ => None,
+    }
+}
+
 fn is_cap(e: &Expr, caps: &[String]) -> bool {
     match e {
         Expr::Path(None, p) => !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() && caps.iter().any(|c| *c == p.segs[0].name),
@@ -534,7 +542,15 @@ fn is_cap(e: &Expr, caps: &[String]) -> bool {
     }
 }
 
-fn moves_in(e: &Expr, caps: &[String]) -> bool {
+/// Whether `let p = cap;` (cap named by the str) moves cap, or a part of it, out: by default (binds_by_value) when p
+/// binds a part by value; the type check knows which parts are Copy (`let (n, _) = pair;` with n an integer copies)
+pub type MovesBy<'a> = &'a dyn Fn(&Pat, &str) -> bool;
+
+fn by_value(p: &Pat, _: &str) -> bool {
+    binds_by_value(p)
+}
+
+fn moves_in(e: &Expr, caps: &[String], by: MovesBy) -> bool {
     if caps.is_empty() {
         return false;
     }
@@ -542,14 +558,14 @@ fn moves_in(e: &Expr, caps: &[String]) -> bool {
         // (a nested closure that owns the capture: `|| { let c = move || t.0 = ..; }` moves `t` into the outer
         // closure too)
         Expr::Closure(mv, ..) => {
-            return if *mv { free_vars(e).iter().any(|n| caps.contains(n)) } else { moves_capture(e, caps) };
+            return if *mv { free_vars(e).iter().any(|n| caps.contains(n)) } else { moves_capture_by(e, caps, by) };
         }
         Expr::Call(_, a) if a.iter().any(|x| is_cap(x, caps)) => return true,
         Expr::Return(Some(v)) if is_cap(v, caps) => return true,
         _ => {}
     }
     // (`let C(ref mut r, _) = c;` binds by reference: not a move)
-    scoped_children(e, caps, &mut |c, cs, let_pat| let_pat.is_some_and(|p| is_cap(c, cs) && binds_by_value(p)) || moves_in(c, cs))
+    scoped_children(e, caps, &mut |c, cs, let_pat| let_pat.is_some_and(|p| cap_name(c, cs).is_some_and(|n| by(p, n))) || moves_in(c, cs, by))
 }
 
 /// The names of caps that p does not bind
@@ -659,6 +675,11 @@ fn each_child_stmts(e: &Expr, f: &mut dyn FnMut(&Expr)) {
 
 /// クロージャの本体がキャプチャした変数を値として使うか (関数の引数・本体の値・`let y = x;` の右辺・`return x`)
 pub fn moves_capture(c: &Expr, caps: &[String]) -> bool {
+    moves_capture_by(c, caps, &by_value)
+}
+
+/// moves_capture, with what a `let` that destructures a capture moves decided by `by`
+pub fn moves_capture_by(c: &Expr, caps: &[String], by: MovesBy) -> bool {
     let Expr::Closure(_, ps, _, body, _) = c else { return false };
     // (not what the closure's parameters name)
     let mut caps = caps.to_vec();
@@ -675,12 +696,17 @@ pub fn moves_capture(c: &Expr, caps: &[String]) -> bool {
     if tail.is_some_and(|e| is_cap(e, &tail_caps(body, &caps))) {
         return true;
     }
-    moves_in(body, &caps)
+    moves_in(body, &caps, by)
 }
 
 /// Where the body of closure c first moves one of caps out (what moves_capture finds), with that capture's name. Not
 /// in a nested closure (its move is the nested closure's capture)
 pub fn move_site(c: &Expr, caps: &[String]) -> Option<(String, Pos)> {
+    move_site_by(c, caps, &by_value)
+}
+
+/// move_site, with what a `let` that destructures a capture moves decided by `by` (see MovesBy)
+pub fn move_site_by(c: &Expr, caps: &[String], by: MovesBy) -> Option<(String, Pos)> {
     let Expr::Closure(_, ps, _, body, _) = c else { return None };
     let mut caps = caps.to_vec();
     for (p, _) in ps {
@@ -693,7 +719,7 @@ pub fn move_site(c: &Expr, caps: &[String]) -> Option<(String, Pos)> {
         }),
         e => Some(e),
     };
-    tail.and_then(|e| cap_at(e, &tail_caps(body, &caps))).or_else(|| move_site_in(body, &caps))
+    tail.and_then(|e| cap_at(e, &tail_caps(body, &caps))).or_else(|| move_site_in(body, &caps, by))
 }
 
 fn cap_at(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
@@ -703,7 +729,7 @@ fn cap_at(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
     }
 }
 
-fn move_site_in(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
+fn move_site_in(e: &Expr, caps: &[String], by: MovesBy) -> Option<(String, Pos)> {
     if caps.is_empty() {
         return None;
     }
@@ -713,7 +739,7 @@ fn move_site_in(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
         // not move it)
         Expr::Closure(true, _, _, _, at) => return free_vars(e).into_iter().find(|n| caps.contains(n)).map(|n| (n, *at)),
         Expr::Closure(false, _, _, _, at) => {
-            return caps.iter().find(|n| moves_capture(e, std::slice::from_ref(*n))).map(|n| (n.clone(), *at));
+            return caps.iter().find(|n| moves_capture_by(e, std::slice::from_ref(*n), by)).map(|n| (n.clone(), *at));
         }
         Expr::Call(_, a) => {
             if let Some(x) = a.iter().find_map(|x| cap_at(x, caps)) {
@@ -729,7 +755,7 @@ fn move_site_in(e: &Expr, caps: &[String]) -> Option<(String, Pos)> {
     }
     let mut found = None;
     scoped_children(e, caps, &mut |c, cs, let_pat| {
-        found = let_pat.filter(|p| binds_by_value(p)).and_then(|_| cap_at(c, cs)).or_else(|| move_site_in(c, cs));
+        found = let_pat.and_then(|p| cap_at(c, cs).filter(|(n, _)| by(p, n))).or_else(|| move_site_in(c, cs, by));
         found.is_some()
     });
     found
