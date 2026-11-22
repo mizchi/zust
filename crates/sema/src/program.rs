@@ -214,6 +214,64 @@ fn anon_const(n: &str) -> bool {
     n == "_" || n.ends_with("::_") || (n.len() > 3 && n.ends_with("___"))
 }
 
+/// An integer type in constant evaluation: its width and sign (usize / isize are 64 bits)
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct It {
+    pub bits: u32,
+    pub signed: bool,
+}
+
+impl It {
+    pub fn of_name(n: &str) -> Option<It> {
+        let (bits, signed) = match n {
+            "u8" => (8, false),
+            "u16" => (16, false),
+            "u32" => (32, false),
+            "u64" | "usize" => (64, false),
+            "u128" => (128, false),
+            "i8" => (8, true),
+            "i16" => (16, true),
+            "i32" => (32, true),
+            "i64" | "isize" => (64, true),
+            "i128" => (128, true),
+            _ => return None,
+        };
+        Some(It { bits, signed })
+    }
+    pub fn of_ty(t: Ty) -> Option<It> {
+        match t {
+            Ty::U8 => It::of_name("u8"),
+            Ty::U16 => It::of_name("u16"),
+            Ty::U32 => It::of_name("u32"),
+            Ty::U64 | Ty::Usize => It::of_name("u64"),
+            Ty::U128 => It::of_name("u128"),
+            Ty::I8 => It::of_name("i8"),
+            Ty::I16 => It::of_name("i16"),
+            Ty::I32 => It::of_name("i32"),
+            Ty::I64 | Ty::Isize => It::of_name("i64"),
+            Ty::I128 => It::of_name("i128"),
+            _ => None,
+        }
+    }
+    /// v's low bits as this type (two's complement; a u128 as its bit pattern)
+    pub fn wrap(self, v: i128) -> i128 {
+        if self.bits == 128 {
+            return v;
+        }
+        let m = (1u128 << self.bits) - 1;
+        let u = (v as u128) & m;
+        if self.signed && u >> (self.bits - 1) & 1 == 1 { (u | !m) as i128 } else { u as i128 }
+    }
+    /// v is in this type's range (a 128-bit type takes any held value)
+    pub fn fits(self, v: i128) -> bool {
+        self.bits == 128 || self.wrap(v) == v
+    }
+    /// v, which must be in this type's range ("overflow in constant", as rustc's error)
+    pub fn check(self, v: Option<i128>) -> R<i128> {
+        v.filter(|&v| self.fits(v)).ok_or_else(|| "overflow in constant".to_string())
+    }
+}
+
 pub fn prim_assoc_const(t: Ty, name: &str) -> Option<i128> {
     let bits = t.bits();
     Some(match (name, t.signed()) {
@@ -2525,14 +2583,7 @@ impl Program {
 
     /// 整数の const を評価する (リテラル・四則演算・ビット演算・シフト・キャスト・他の const)
     pub fn const_int(&self, name: &str, depth: u32) -> R<i128> {
-        if depth > 64 {
-            return Err(format!("cycle while evaluating constant `{name}`"));
-        }
-        let Some(&ci) = self.const_index.get(name) else {
-            return Err(format!("cannot find constant `{name}`"));
-        };
-        let e = crate::parse::parse_expr(&self.consts[ci as usize].expr)?;
-        self.eval_const(&e, depth + 1)
+        Ok(self.const_int_t(name, depth)?.0)
     }
 
     /// The part `pick` takes from the value of the constant expression b (through `&`, `*`, parentheses and other
@@ -2604,60 +2655,65 @@ impl Program {
         prim
     }
 
-    /// The width in bits of a constant expression's integer type when it is written (a cast, a suffixed literal,
-    /// `-` of one): `count_ones` of `-1i8` counts 8 bits, not the 128 of the evaluator's i128
-    fn const_width(&self, e: &crate::parse::Expr) -> Option<u32> {
-        use crate::parse::Expr;
-        let of = |n: &str| match n {
-            "u8" | "i8" => Some(8),
-            "u16" | "i16" => Some(16),
-            "u32" | "i32" => Some(32),
-            "u64" | "i64" | "usize" | "isize" => Some(64),
-            "u128" | "i128" => Some(128),
-            _ => None,
-        };
-        match e {
-            Expr::Cast(_, t) => of(&self.cast_prim(t)),
-            Expr::Paren(x) => self.const_width(x),
-            Expr::Unary(op, x, _) if op == "-" || op == "!" => self.const_width(x),
-            Expr::Lit(t, _) => ["u128", "i128", "usize", "isize", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8"]
-                .iter()
-                .find(|s| t.ends_with(*s))
-                .and_then(|s| of(s)),
-            _ => None,
-        }
+    /// 自前の構文木の整数の定数式を評価する (値だけ: 型は eval_t)
+    pub fn eval_const(&self, e: &crate::parse::Expr, depth: u32) -> R<i128> {
+        Ok(self.eval_t(e, depth)?.0)
     }
 
-    /// 自前の構文木の整数の定数式を評価する
-    pub fn eval_const(&self, e: &crate::parse::Expr, depth: u32) -> R<i128> {
+    /// A constant's value and its integer type, wrapped to the type it is declared with (`const X: i8 = -1`)
+    fn const_int_t(&self, name: &str, depth: u32) -> R<(i128, Option<It>)> {
+        if depth > 64 {
+            return Err(format!("cycle while evaluating constant `{name}`"));
+        }
+        let Some(&ci) = self.const_index.get(name) else {
+            return Err(format!("cannot find constant `{name}`"));
+        };
+        let e = crate::parse::parse_expr(&self.consts[ci as usize].expr)?;
+        let (v, t) = self.eval_t(&e, depth + 1)?;
+        // (an unsuffixed literal takes the declared type: `const M: u8 = !0;` is 255)
+        Ok(match It::of_ty(self.consts[ci as usize].ty) {
+            Some(it) => (it.wrap(v), Some(it)),
+            None => (v, t),
+        })
+    }
+
+    /// A constant expression's value and its integer type, when it has one (a suffixed literal, a cast, a typed
+    /// constant, `u8::MAX`; an unsuffixed literal has none and takes the other operand's). A typed value is held in
+    /// its type's range (a u128 as its bit pattern), and arithmetic on it is checked as rustc's: past the type is an
+    /// error, `!` and `<<` keep its bits (`!0u8` is 255, so `!0u8 as u16` is 255)
+    fn eval_t(&self, e: &crate::parse::Expr, depth: u32) -> R<(i128, Option<It>)> {
         use crate::parse::Expr;
-        Ok(match e {
-            Expr::Lit(t, _) => lit_int(t).ok_or("not an integer constant")?,
-            Expr::Paren(x) => self.eval_const(x, depth)?,
-            // (an integer `as` wraps to its type, as rustc's: `4294967297u64 as i32` is 1)
+        let un = |v: i128| Ok((v, None));
+        match e {
+            Expr::Lit(t, _) => {
+                let v = lit_int(t).ok_or("not an integer constant")?;
+                // (a suffix that is a type's: `255u8`, `1_i64`; not a float's)
+                let it = ["u128", "i128", "usize", "isize", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8"]
+                    .iter()
+                    .find(|x| t.ends_with(*x) && !t.starts_with('\'') && !t.starts_with('"') && !t.starts_with('b'))
+                    .and_then(|x| It::of_name(x));
+                Ok(match it {
+                    Some(it) => (it.wrap(v), Some(it)),
+                    None => (v, None),
+                })
+            }
+            Expr::Paren(x) => self.eval_t(x, depth),
+            // (an integer `as` wraps to its type, as rustc's: `4294967297u64 as i32` is 1; another type keeps the value)
             Expr::Cast(x, t) => {
-                let v = self.eval_const(x, depth)?;
-                let prim = self.cast_prim(t);
-                match prim.as_str() {
-                    "u8" => v as u8 as i128,
-                    "u16" => v as u16 as i128,
-                    "u32" => v as u32 as i128,
-                    "u64" | "usize" => v as u64 as i128,
-                    "i8" => v as i8 as i128,
-                    "i16" => v as i16 as i128,
-                    "i32" => v as i32 as i128,
-                    "i64" | "isize" => v as i64 as i128,
-                    _ => v,
-                }
+                let (v, _) = self.eval_t(x, depth)?;
+                Ok(match It::of_name(&self.cast_prim(t)) {
+                    Some(it) => (it.wrap(v), Some(it)),
+                    None => (v, None),
+                })
             }
             // (`{ 3 }` / `{ let x = ..; }` is not: a block of one expression; `if c { a } else { b }`)
             Expr::Block(None, false, b) if b.stmts.len() == 1 => match &b.stmts[0] {
-                crate::parse::Stmt::Expr(x, false) => self.eval_const(x, depth)?,
-                _ => return Err("unsupported expression in constant".into()),
+                crate::parse::Stmt::Expr(x, false) => self.eval_t(x, depth),
+                _ => Err("unsupported expression in constant".into()),
             },
             // (`{ let x = 2; 5 }`)
-            Expr::Block(None, false, b) if b.stmts.len() > 1 => self.eval_block_env(b, &mut vec![], depth + 1)?,
-            Expr::Ref(false, x) => self.eval_const(x, depth)?,
+            Expr::Block(None, false, b) if b.stmts.len() > 1 => un(self.eval_block_env(b, &mut vec![], depth + 1)?),
+            Expr::Ref(false, x) => self.eval_t(x, depth),
             Expr::If(c, t, Some(els)) => {
                 let tail = |b: &crate::parse::Block| match b.stmts.as_slice() {
                     [crate::parse::Stmt::Expr(x, false)] => Some(x.clone()),
@@ -2666,12 +2722,12 @@ impl Program {
                 let c = self.eval_const(c, depth)?;
                 if c != 0 {
                     let x = tail(t).ok_or("unsupported expression in constant")?;
-                    self.eval_const(&x, depth)?
+                    self.eval_t(&x, depth)
                 } else {
-                    self.eval_const(els, depth)?
+                    self.eval_t(els, depth)
                 }
             }
-            Expr::Path(None, p) if p.segs.len() == 1 && (p.segs[0].name == "true" || p.segs[0].name == "false") => (p.segs[0].name == "true") as i128,
+            Expr::Path(None, p) if p.segs.len() == 1 && (p.segs[0].name == "true" || p.segs[0].name == "false") => un((p.segs[0].name == "true") as i128),
             // (a call of a `const fn` with integer arguments: its body with the parameters bound)
             Expr::Call(f, args) if matches!(&**f, Expr::Path(None, p) if p.segs.len() == 1 && self.const_fns.contains_key(p.segs[0].name.as_str())) => {
                 let Expr::Path(None, p) = &**f else { unreachable!() };
@@ -2688,7 +2744,7 @@ impl Program {
                 }
                 let b = crate::parse::parse_expr(&body)?;
                 let Expr::Block(_, _, b) = b else { return Err("unsupported const fn".into()) };
-                self.eval_block_env(&b, &mut env, depth + 1)?
+                un(self.eval_block_env(&b, &mut env, depth + 1)?)
             }
             // (`X[0]` / `T.1` of a const array, byte string, tuple or struct)
             Expr::Index(b, i, _) => {
@@ -2703,7 +2759,7 @@ impl Program {
                     }
                     _ => None,
                 })?;
-                self.eval_const(&part, depth + 1)?
+                self.eval_t(&part, depth + 1)
             }
             Expr::Field(b, f, _) => {
                 let part = self.const_part(b, depth, &|x| match x {
@@ -2712,44 +2768,108 @@ impl Program {
                     Expr::Call(_, xs) => f.parse::<usize>().ok().and_then(|k| xs.get(k).cloned()),
                     _ => None,
                 })?;
-                self.eval_const(&part, depth + 1)?
+                self.eval_t(&part, depth + 1)
             }
             Expr::Unary(op, x, _) => {
-                let v = self.eval_const(x, depth)?;
-                match op.as_str() {
-                    "-" => -v,
-                    "!" => !v,
-                    "*" => v,
-                    _ => return Err("not an integer constant".into()),
+                let (v, t) = self.eval_t(x, depth)?;
+                match (op.as_str(), t) {
+                    // (`-` of a typed value: checked; of an unsigned one, an error as rustc's)
+                    ("-", Some(it)) => Ok((it.check(v.checked_neg().filter(|_| it.signed || v == 0))?, t)),
+                    ("-", None) => un(v.wrapping_neg()),
+                    // (`!` of a typed value: its bits only)
+                    ("!", Some(it)) => Ok((it.wrap(!v), t)),
+                    ("!", None) => un(!v),
+                    ("*", _) => Ok((v, t)),
+                    _ => Err("not an integer constant".into()),
                 }
             }
             Expr::Binary(op, l, r, _) => {
-                let (l, r) = (self.eval_const(l, depth)?, self.eval_const(r, depth)?);
-                match op.as_str() {
-                    "+" => l + r,
-                    "-" => l - r,
-                    "*" => l * r,
-                    "/" if r != 0 => l / r,
-                    "%" if r != 0 => l % r,
-                    "<<" => l << r,
-                    ">>" => l >> r,
-                    "&" => l & r,
-                    "|" => l | r,
-                    "^" => l ^ r,
-                    "==" => (l == r) as i128,
-                    "!=" => (l != r) as i128,
-                    "<" => (l < r) as i128,
-                    "<=" => (l <= r) as i128,
-                    ">" => (l > r) as i128,
-                    ">=" => (l >= r) as i128,
-                    "&&" => (l != 0 && r != 0) as i128,
-                    "||" => (l != 0 || r != 0) as i128,
-                    _ => return Err("unsupported operator in constant".into()),
+                let ((lv, lt), (rv, rt)) = (self.eval_t(l, depth)?, self.eval_t(r, depth)?);
+                let op = op.as_str();
+                // (a shift has its left operand's type; another operator its operands' (one may be unsuffixed))
+                let t = if op == "<<" || op == ">>" { lt } else { lt.or(rt) };
+                let b = |x: bool| un(x as i128);
+                match t {
+                    // (u128: computed as u128, held as its bit pattern)
+                    Some(it) if it.bits == 128 && !it.signed => {
+                        let (x, y) = (lv as u128, rv as u128);
+                        let v: Option<u128> = match op {
+                            "+" => x.checked_add(y),
+                            "-" => x.checked_sub(y),
+                            "*" => x.checked_mul(y),
+                            "/" => x.checked_div(y),
+                            "%" => x.checked_rem(y),
+                            "<<" => u32::try_from(rv).ok().and_then(|n| x.checked_shl(n)),
+                            ">>" => u32::try_from(rv).ok().and_then(|n| x.checked_shr(n)),
+                            "&" => Some(x & y),
+                            "|" => Some(x | y),
+                            "^" => Some(x ^ y),
+                            "==" => return b(x == y),
+                            "!=" => return b(x != y),
+                            "<" => return b(x < y),
+                            "<=" => return b(x <= y),
+                            ">" => return b(x > y),
+                            ">=" => return b(x >= y),
+                            "&&" => return b(x != 0 && y != 0),
+                            "||" => return b(x != 0 || y != 0),
+                            _ => return Err("unsupported operator in constant".into()),
+                        };
+                        Ok((v.ok_or("overflow in constant")? as i128, t))
+                    }
+                    Some(it) => {
+                        let v = match op {
+                            "+" => lv.checked_add(rv),
+                            "-" => lv.checked_sub(rv),
+                            "*" => lv.checked_mul(rv),
+                            "/" => lv.checked_div(rv),
+                            "%" => lv.checked_rem(rv),
+                            // (a shift past the width is an error; `<<` drops the bits shifted out)
+                            "<<" if (0..it.bits as i128).contains(&rv) => return Ok((it.wrap(lv << rv), t)),
+                            ">>" if (0..it.bits as i128).contains(&rv) => Some(lv >> rv),
+                            "<<" | ">>" => None,
+                            "&" => Some(lv & rv),
+                            "|" => Some(lv | rv),
+                            "^" => Some(lv ^ rv),
+                            "==" => return b(lv == rv),
+                            "!=" => return b(lv != rv),
+                            "<" => return b(lv < rv),
+                            "<=" => return b(lv <= rv),
+                            ">" => return b(lv > rv),
+                            ">=" => return b(lv >= rv),
+                            "&&" => return b(lv != 0 && rv != 0),
+                            "||" => return b(lv != 0 || rv != 0),
+                            _ => return Err("unsupported operator in constant".into()),
+                        };
+                        // (an unsuffixed operand of a typed one is that type: it must fit in it too)
+                        if op != "<<" && op != ">>" && !(it.fits(lv) && it.fits(rv)) {
+                            return Err("overflow in constant".into());
+                        }
+                        Ok((it.check(v)?, t))
+                    }
+                    None => match op {
+                        "+" => un(lv.wrapping_add(rv)),
+                        "-" => un(lv.wrapping_sub(rv)),
+                        "*" => un(lv.wrapping_mul(rv)),
+                        "/" if rv != 0 => un(lv.wrapping_div(rv)),
+                        "%" if rv != 0 => un(lv.wrapping_rem(rv)),
+                        "<<" => un(lv.wrapping_shl(rv as u32)),
+                        ">>" => un(lv.wrapping_shr(rv as u32)),
+                        "&" => un(lv & rv),
+                        "|" => un(lv | rv),
+                        "^" => un(lv ^ rv),
+                        "==" => b(lv == rv),
+                        "!=" => b(lv != rv),
+                        "<" => b(lv < rv),
+                        "<=" => b(lv <= rv),
+                        ">" => b(lv > rv),
+                        ">=" => b(lv >= rv),
+                        "&&" => b(lv != 0 && rv != 0),
+                        "||" => b(lv != 0 || rv != 0),
+                        _ => Err("unsupported operator in constant".into()),
+                    },
                 }
             }
-            Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => {
-                self.const_int(&p.segs[0].name, depth)?
-            }
+            Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => self.const_int_t(&p.segs[0].name, depth),
             // `<u64 as Integer>::MAX_STR_LEN`
             Expr::Path(Some(q), p) if matches!(&**q, crate::parse::Ty::Path(None, tp) if tp.segs.len() == 1) && !p.segs.is_empty() => {
                 let crate::parse::Ty::Path(None, tp) = &**q else { unreachable!() };
@@ -2757,46 +2877,45 @@ impl Program {
                 if p.segs.len() == 2 {
                     let q = format!("{} as {}::{}", tp.segs[0].name, p.segs[0].name, p.segs[1].name);
                     if self.const_index.contains_key(&q) {
-                        return self.const_int(&q, depth);
+                        return self.const_int_t(&q, depth);
                     }
                     if let Some(k) = self.blanket_defines(&p.segs[0].name, &p.segs[1].name) {
-                        return self.const_int(&k, depth);
+                        return self.const_int_t(&k, depth);
                     }
                     let d = format!("{}::{}", p.segs[0].name, p.segs[1].name);
                     if self.const_index.contains_key(&d) {
-                        return self.const_int(&d, depth);
+                        return self.const_int_t(&d, depth);
                     }
                 }
                 let full = format!("{}::{}", tp.segs[0].name, p.segs.last().unwrap().name);
                 if self.const_index.contains_key(&full) {
-                    return self.const_int(&full, depth);
+                    return self.const_int_t(&full, depth);
                 }
                 let t = Ty::prim(&tp.segs[0].name).ok_or("unsupported path in constant")?;
-                prim_assoc_const(t, &p.segs.last().unwrap().name).ok_or("unsupported constant")?
+                self.prim_const_t(t, &p.segs.last().unwrap().name)
             }
             Expr::Path(None, p) if p.segs.len() == 2 => {
                 // (impl の関連 const: `i128::MAX_STR_LEN`)
                 let full = format!("{}::{}", p.segs[0].name, p.segs[1].name);
                 if self.const_index.contains_key(&full) {
-                    return self.const_int(&full, depth);
+                    return self.const_int_t(&full, depth);
                 }
                 // (`Foo::Bar as usize`: a unit variant's discriminant)
                 if let Some((sid, vi)) = self.variant_by_p(&PPath::of(p), None) {
-                    return Ok(self.structs[sid as usize].variants[vi].discr as i128);
+                    return un(self.structs[sid as usize].variants[vi].discr as i128);
                 }
                 let t = Ty::prim(&p.segs[0].name).ok_or("unsupported path in constant")?;
-                prim_assoc_const(t, &p.segs[1].name).ok_or("unsupported constant")?
+                self.prim_const_t(t, &p.segs[1].name)
             }
-            // 整数のメソッド (`u128::MAX.ilog10()`)。u128 の値はビット列で持つので、受け手が符号なしの型の
-            // 関連 const なら符号なしとして見る
+            // 整数のメソッド (`u128::MAX.ilog10()`): 受け手の型の幅・符号で (`(-1i8).count_ones()` は 8)
             Expr::MethodCall(recv, m, _, args, _) => {
-                let v = self.eval_const(recv, depth)?;
-                let unsigned = matches!(&**recv, Expr::Path(None, p) if p.segs.len() == 2 && Ty::prim(&p.segs[0].name).is_some_and(|t| !t.signed()));
-                // (the bits of the receiver's type only: a negative i8 is 8 bits, not 128)
-                let bits = self.const_width(recv).unwrap_or(128);
+                let (v, t) = self.eval_t(recv, depth)?;
+                let bits = t.map_or(128, |it| it.bits);
+                let unsigned = t.is_some_and(|it| !it.signed);
                 let u = if bits < 128 { (v as u128) & ((1u128 << bits) - 1) } else { v as u128 };
                 let a: Vec<i128> = args.iter().map(|x| self.eval_const(x, depth)).collect::<R<Vec<i128>>>()?;
-                match (m.as_str(), a.as_slice()) {
+                let u32t = Some(It { bits: 32, signed: false });
+                Ok(match (m.as_str(), a.as_slice()) {
                     ("ilog10", []) if unsigned || v > 0 => {
                         let mut n = if unsigned { u } else { v as u128 };
                         let mut k = 0;
@@ -2804,20 +2923,34 @@ impl Program {
                             n /= 10;
                             k += 1;
                         }
-                        k
+                        (k, u32t)
                     }
-                    ("ilog2", []) if unsigned || v > 0 => (127 - (if unsigned { u } else { v as u128 }).leading_zeros()) as i128,
-                    ("count_ones", []) => u.count_ones() as i128,
-                    ("trailing_zeros", []) => u.trailing_zeros().min(bits) as i128,
-                    ("pow", [e]) => v.checked_pow(*e as u32).ok_or("overflow in constant")?,
-                    ("min", [b]) => v.min(*b),
-                    ("max", [b]) => v.max(*b),
-                    ("abs", []) => v.abs(),
+                    ("ilog2", []) if unsigned || v > 0 => ((127 - (if unsigned { u } else { v as u128 }).leading_zeros()) as i128, u32t),
+                    ("count_ones", []) => (u.count_ones() as i128, u32t),
+                    ("count_zeros", []) => ((bits - u.count_ones()) as i128, u32t),
+                    ("trailing_zeros", []) => (u.trailing_zeros().min(bits) as i128, u32t),
+                    ("leading_zeros", []) => ((u.leading_zeros() - (128 - bits)) as i128, u32t),
+                    ("pow", [e]) => {
+                        let p = v.checked_pow(*e as u32).ok_or("overflow in constant")?;
+                        match t {
+                            Some(it) if it.bits < 128 => (it.check(Some(p))?, t),
+                            _ => (p, t),
+                        }
+                    }
+                    ("min", [b]) => (v.min(*b), t),
+                    ("max", [b]) => (v.max(*b), t),
+                    ("abs", []) => (v.abs(), t),
                     _ => return Err(format!("unsupported method `{m}` in constant")),
-                }
+                })
             }
-            _ => return Err("unsupported expression in constant".into()),
-        })
+            _ => Err("unsupported expression in constant".into()),
+        }
+    }
+
+    /// `u8::MAX` and the like, with their type (`BITS` is a u32)
+    fn prim_const_t(&self, t: Ty, name: &str) -> R<(i128, Option<It>)> {
+        let v = prim_assoc_const(t, name).ok_or("unsupported constant")?;
+        Ok((v, if name == "BITS" { Some(It { bits: 32, signed: false }) } else { It::of_ty(t) }))
     }
 
     /// n 要素のタプルの (組み込みの) ジェネリック定義

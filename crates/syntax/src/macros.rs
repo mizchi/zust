@@ -862,6 +862,7 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
         return Ok(Some(text));
     }
     // 2. 呼び出しを展開する (いちばん外側の呼び出しだけ。展開したものの中の呼び出しは次の周)
+    let limit = text.len().saturating_mul(64).max(16 << 20);
     for round in 0..64 {
         // (definitions an expansion produced: `macro_rules! foo { () => { macro_rules! bar { .. } } }`)
         if round > 0 && text.contains("macro_rules") {
@@ -991,6 +992,11 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
             }
             text.replace_range(a..e, &r);
         }
+        // (a macro whose expansion grows each round (`m!($({ x } $t)*)` calling itself) would fill the memory long
+        // before the round limit: stop at 64 times the source, as an error)
+        if text.len() > limit {
+            return Err("1:1: macro expansion is too large (a recursive macro that grows)".into());
+        }
         if has_cfg {
             if let Some(t) = crate::cfg::strip(&text, cfg.unwrap()) {
                 text = t;
@@ -1088,6 +1094,7 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
         return Ok(Some(text));
     }
     // 2. 呼び出しを展開する (展開したものの中の呼び出しも)
+    let limit = text.len().saturating_mul(64).max(16 << 20);
     for _round in 0..64 {
         let ts = TokenStream::from_str(&text).map_err(|e| format!("1:1: {e}"))?;
         let mut reps: Vec<(usize, usize, String)> = vec![];
@@ -1106,6 +1113,11 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
                 r.push('\n');
             }
             text.replace_range(a..e, &r);
+        }
+        // (a macro whose expansion grows each round (`m!($({ x } $t)*)` calling itself) would fill the memory long
+        // before the round limit: stop at 64 times the source, as an error)
+        if text.len() > limit {
+            return Err("1:1: macro expansion is too large (a recursive macro that grows)".into());
         }
         if !again {
             return Ok(Some(text));
