@@ -186,7 +186,8 @@ fn join_toks(ts: &[crate::parse::Tok]) -> String {
 
 /// 整数・浮動小数点のリテラルの (浮動小数点か, 接尾辞)
 fn num_suffix(t: &str) -> (bool, String) {
-    let s: String = t.chars().filter(|&c| c != '_').collect();
+    // (most literals have no `_`: no copy then)
+    let s: std::borrow::Cow<str> = if t.contains('_') { t.chars().filter(|&c| c != '_').collect::<String>().into() } else { t.into() };
     let radix_prefix = s.starts_with("0x") || s.starts_with("0b") || s.starts_with("0o");
     if radix_prefix {
         let body = &s[2..];
