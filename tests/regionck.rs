@@ -2052,3 +2052,17 @@ fn part11_review_3() {
     s.opts.edition = 2024;
     assert!(s.check(src).is_empty());
 }
+
+/// An `unsafe fn` of a blanket impl called on `()`, a number, a `&str` or a reference to one, and one of an impl for a
+/// number, is E0133 outside `unsafe` (the receivers dispatched before the method call's own check; from the summary
+/// review of #54)
+#[test]
+fn blanket_and_number_unsafe_methods() {
+    let d = check("trait T {\n    unsafe fn f(&self) -> u32 {\n        1\n    }\n}\nimpl<X> T for X {}\nfn main() {\n    let r = &5u32;\n    let a = r.f();\n    println!(\"{}\", a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("E0133"), "{d:?}");
+    let d = check("trait T {\n    unsafe fn f(&self) -> u32 {\n        1\n    }\n}\nimpl<X> T for X {}\nfn main() {\n    let a = ().f();\n    println!(\"{}\", a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0133"), "{d:?}");
+    let d = check("trait P {\n    unsafe fn g(&self) -> u32;\n}\nimpl P for u8 {\n    unsafe fn g(&self) -> u32 {\n        2\n    }\n}\nfn main() {\n    let c = 3u8.g();\n    println!(\"{}\", c);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("E0133"), "{d:?}");
+    assert_eq!(check("trait T {\n    unsafe fn f(&self) -> u32 {\n        1\n    }\n}\nimpl<X> T for X {}\ntrait P {\n    unsafe fn g(&self) -> u32;\n}\nimpl P for u8 {\n    unsafe fn g(&self) -> u32 {\n        2\n    }\n}\nfn main() {\n    let r = &5u32;\n    let x = unsafe { ().f() + r.f() + 3u8.f() + \"a\".f() + 4u8.g() };\n    println!(\"{}\", x);\n}\n"), vec![]);
+}

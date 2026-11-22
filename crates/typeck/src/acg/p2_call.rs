@@ -494,6 +494,8 @@ impl Cx<'_> {
             let extra = |t: Ty| (prim(t) || matches!(t, Ty::Unit | Ty::Box(_))) && holds(t);
             let to_prim = matches!(pt, Some(Ty::Ref(_, i)) if extra(*i));
             if !own && pt.is_some_and(|t| prim(t) || matches!(t, Ty::Ref(_, Ty::Str)) || (t == Ty::Unit && holds(t))) || (!own && to_prim) {
+                // (an `unsafe fn` of the trait: E0133 outside `unsafe`, as for any method)
+                self.check_unsafe_call(bid, msp.start)?;
                 let (v, t) = self.expr(recv, None)?;
                 if t == Ty::Never {
                     return Ok((None, Ty::Never));
@@ -1263,7 +1265,7 @@ impl Cx<'_> {
 
     /// プリミティブ型への trait 実装のメソッド (`impl Tr for u32` の `x.m()`)
     pub(crate) fn prim_trait_method(&mut self, e: &Expr, expected: Option<Ty>) -> R<Option<V>> {
-        let Expr::MethodCall(recv, method, gargs, margs, _) = e else { unreachable!() };
+        let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let recv: &Expr = recv;
         let tf: Option<&[GArg]> = (!gargs.is_empty()).then_some(&gargs[..]);
         // (接尾辞のない整数リテラル `5.d()` は i32)
@@ -1386,6 +1388,8 @@ impl Cx<'_> {
         }) else {
             return Ok(None);
         };
+        // (an `unsafe fn` of the impl: E0133 outside `unsafe`, as for any method)
+        self.check_unsafe_call(id, msp.start)?;
         // (`impl Tr for Box<S>`: only when the impl's self type is this Box; else the method is S's, through deref)
         if let Ty::Box(_) = t {
             let st = self.prog.sigs[id as usize].self_ty;
