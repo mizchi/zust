@@ -504,7 +504,18 @@ impl Cx<'_> {
                         // (a `&self` method through a `&mut`: the reference is shared for it; `self` by value keeps it
                         // as it is)
                         let shared_self = matches!(self.prog.sigs[bid as usize].params.first(), Some(Ty::Ref(false, _)));
-                        return self.call_fn(bid, Some((v, Ty::Ref(m && !shared_self, i))), &args, tf, expected, SP);
+                        let rt = Ty::Ref(m && !shared_self, i);
+                        // (the receiver is reborrowed: `*r`, which a result that borrows from self holds
+                        // (`let r2 = r.get(); *r = 5;` while r2 is used is E0506))
+                        if self.bk_on() {
+                            // (`self` by value of a reference (`fn id(self) -> Self`): the result may be the reborrow)
+                            let bs = &self.prog.sigs[bid as usize];
+                            let by_value = !matches!(bs.params.first(), Some(Ty::Ref(..))) && self.prog.has_param(bs.ret);
+                            let flows = by_value || self.bk_ret_from(bid, 0);
+                            let ev = self.bk_recv_ev(recv, rt, flows);
+                            self.bk_push(ev);
+                        }
+                        return self.call_fn(bid, Some((v, rt)), &args, tf, expected, SP);
                     }
                 }
                 // (&self に渡すのは値のアドレス。&str は fat pointer の置き場所のアドレスがそのまま &&str; `()` は
@@ -2907,8 +2918,9 @@ fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], dep
         if b.starts_with('?') || b.starts_with('\'') {
             return true;
         }
+        // (an impl for t itself (`impl Other for ()`), or the blanket impl's bounds)
         match prog.blanket_bounds.get(b.as_str()) {
-            Some(inner) if prog.blanket_traits.contains(b.as_str()) && depth < 4 => blanket_bounds_hold(prog, t, inner, depth + 1),
+            Some(inner) if prog.blanket_traits.contains(b.as_str()) && depth < 4 => prog.implements_concrete(t, b) || blanket_bounds_hold(prog, t, inner, depth + 1),
             _ => prog.implements(t, b),
         }
     })
