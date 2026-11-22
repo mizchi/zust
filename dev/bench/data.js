@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795329483017,
+  "lastUpdate": 1795329485406,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -80917,6 +80917,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/1739a48bb3b0f2b30aec332a96e53f1bb583a8db"
         },
         "date": 1795326663391,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 82.051,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 83.871,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.531,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f9cf20b5ac85b30007b107fb801b1530b923047f",
+          "message": "Merge pull request #46 from mizchi/claude/sleepy-dijkstra-8sankk\n\nRegion check, part 7: control flow, temporaries, prelude results, placeholder Fn calls",
+          "timestamp": "2026-11-22T15:33:33+09:00",
+          "tree_id": "f1a0f680d024d1c040e6b56d62fdcdf24eee3942",
+          "url": "https://github.com/mizchi/zust/commit/f9cf20b5ac85b30007b107fb801b1530b923047f"
+        },
+        "date": 1795329484909,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
