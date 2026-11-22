@@ -81,3 +81,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-21 | [Region (lifetime) checking, part 3: closures, loans that outlive the function, lints](2026-11-21-06-region-check-3.md) |
 | 2026-11-21 | [Region (lifetime) checking, part 4: generic functions nothing calls](2026-11-21-07-region-check-4.md) |
 | 2026-11-22 | [Region (lifetime) checking, part 5: a type parameter's region](2026-11-22-01-region-check-5.md) |
+| 2026-11-22 | [Region (lifetime) checking, part 6: placeholders' regions everywhere, and the borrow check's mutability](2026-11-22-02-region-check-6.md) |

@@ -313,6 +313,8 @@ pub struct Program {
     pub trait_supers: FxMap<String, Vec<String>>,
     /// What a trait's `Self` must outlive (`trait Tr<'a>: 'a`): "static", or the index of the trait's lifetime parameter
     pub trait_self_outlives: FxMap<String, Vec<String>>,
+    /// The program (not the prelude) has a static not declared `mut`: an assignment is checked against it
+    pub any_immutable_static: bool,
     /// the generics a method of the trait starts with: Self and the trait's own parameters
     pub trait_ngen: FxMap<String, usize>,
     /// a generic trait's impls: trait → (self type, the trait's arguments, both with the impl's parameters as
@@ -747,6 +749,7 @@ impl Program {
             overflow_checks: false,
             trait_supers: FxMap::default(),
             trait_self_outlives: FxMap::default(),
+            any_immutable_static: false,
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
             ref_impls: Default::default(),
@@ -1776,6 +1779,7 @@ impl Program {
                 }
             }
         }
+        p.any_immutable_static = p.consts.iter().any(|c| c.stat == Some(false) && (c.item as usize) < user);
         Ok(p)
     }
 

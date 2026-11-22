@@ -2895,7 +2895,8 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
     let made: FxSet<u32> = g.list.iter().map(|i| i.base).collect();
     for id in 0..p.names.len() {
         let sig = &p.sigs[id];
-        if !sig.is_generic() || !sig.has_body || sig.trait_of.is_some() || made.contains(&(id as u32)) || p.closures.contains_key(&(id as u32)) {
+        // (a trait's default method no impl uses: its `Self` is a placeholder too, bounded by the trait)
+        if !sig.is_generic() || !sig.has_body || made.contains(&(id as u32)) || p.closures.contains_key(&(id as u32)) {
             continue;
         }
         // (not a dependency's: `is_ext` knows only concrete fns, the item's flag tells)
@@ -2916,7 +2917,14 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
             let tail = format!("::{tr}");
             let decls = p.traits.get(tr).or_else(|| p.traits.iter().find(|(k, _)| k.ends_with(&tail)).map(|(_, v)| v));
             // (a trait not known: as calling)
-            decls.is_none_or(|ds| ds.iter().any(|&d| p.names[d as usize].rsplit("::").next().is_some_and(|m| body.contains(&format!(".{m}(")) || body.contains(&format!("::{m}(")))))
+            // (but a method whose declaration names lifetimes (the trait's `'a`, its own): its call says something of
+            // the regions)
+            decls.is_none_or(|ds| {
+                ds.iter().any(|&d| {
+                    let called = p.names[d as usize].rsplit("::").next().is_some_and(|m| body.contains(&format!(".{m}(")) || body.contains(&format!("::{m}(")));
+                    called && !p.sigs[d as usize].regions.as_deref().is_some_and(|r| !r.lts.is_empty())
+                })
+            })
         });
         if calls_bound {
             continue;

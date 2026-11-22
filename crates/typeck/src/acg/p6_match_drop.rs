@@ -1020,6 +1020,9 @@ impl Cx<'_> {
                             }
                         };
                         let saved = self.bk_pat_ref(m, *by_ref);
+                        // (the binding of `ref x` / `ref mut x`, or one by reference of the default binding mode, is not
+                        // `mut` itself: `&mut x` of it is E0596)
+                        self.bk.mut_next = Some(false);
                         self.bind(name.clone(), Ty::Ref(m, intern(t)), Some(addr));
                         self.bk.bind_srcs = saved;
                         if !*by_ref {
@@ -1108,8 +1111,10 @@ impl Cx<'_> {
                 Ok(())
             }
             Pat::Slice(_) => {
-                // (moving out of an array by a pattern is allowed: not tracked)
-                let saved = self.bk.pat_path.take();
+                // (an array matched by value: each element is a place of its own (`[_, _, x] = a` moves a[2]); a slice's
+                // or one through a reference is not tracked)
+                let arr = matches!(p.ty(), Ty::Array(..));
+                let saved = if arr { self.bk.pat_path.clone() } else { self.bk.pat_path.take() };
                 let rs = self.rg.pat.take();
                 // (the elements' tree: the array's or the slice's, through the references matched)
                 self.rg.pat_elem = rs.clone().and_then(|p| self.rg_slice_elem(p));
@@ -1129,11 +1134,29 @@ impl Cx<'_> {
                 let (base, len, elem, rmode) = self.slice_scrutinee(p, SP)?;
                 let mode = rmode.map(BindMode::Ref).unwrap_or(mode);
                 let (pre, rest, post) = slice_parts(pat);
-                for (q, sub) in self.slice_elems(base, len, elem, &pre, &post) {
+                let n = match p.ty() {
+                    Ty::Array(_, n) if self.bk.pat_path.is_some() => Some(n as usize),
+                    _ => None,
+                };
+                for (k, (q, sub)) in self.slice_elems(base, len, elem, &pre, &post).into_iter().enumerate() {
                     self.rg.pat = self.rg.pat_elem.clone();
+                    let idx = if k < pre.len() { k } else { n.unwrap_or(0).wrapping_sub(pre.len() + post.len()).wrapping_add(k) };
+                    let saved = n.map(|_| self.bk_pat_proj(borrowck::Proj::Field(format!("[{idx}]"))));
                     self.pat_bind(sub, q, mode)?;
+                    if let Some(s) = saved {
+                        self.bk.pat_path = s;
+                    }
                 }
                 self.rg.pat = None;
+                // (`rest @ ..` by value of an array: it takes the elements between, one place for them all (`a[1..19]`), so
+                // the work does not grow with the array's length)
+                if let (Some(n), Some(Pat::Ident(false, _, _, _)), BindMode::Move) = (n, rest, mode) {
+                    if !self.bk_ty(elem).0 && pre.len() < n.saturating_sub(post.len()) {
+                        let saved = self.bk_pat_proj(borrowck::Proj::Field(format!("[{}..{}]", pre.len(), n - post.len())));
+                        self.bk_pat_move(elem, "");
+                        self.bk.pat_path = saved;
+                    }
+                }
                 // `rest @ ..`: 残りの部分スライス (`&[T]`)
                 if let Some(Pat::Ident(_, _, rname, _)) = rest {
                     let (es, _) = self.prog.size_align(elem);

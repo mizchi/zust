@@ -301,9 +301,74 @@ impl Cx<'_> {
 
     /// `for pat in &x { .. }` / `for pat in &mut x { .. }`: x is borrowed until the loop ends (a hidden local holds
     /// the loan; it is read when the loop is left)
+    /// `for x in mk().iter().cloned()` (a Vec or an array a call makes, under adapters): the value goes to a local of
+    /// the loop's own block first, `{ let t = mk(); for x in t.iter().cloned() { .. } }`, so it is dropped when the
+    /// loop is done (its elements, which a borrowed loop leaves in it; its buffer, which a loop by value empties)
+    fn for_temp_base(&self, e: &Expr) -> Option<(Expr, Expr)> {
+        match strip_paren(e) {
+            Expr::MethodCall(r, name, tf, args, sp) if args.is_empty() && matches!(name.as_str(), "iter" | "iter_mut" | "into_iter" | "copied" | "cloned" | "enumerate" | "rev") => {
+                let (base, inner) = self.for_temp_base(r)?;
+                Some((base, Expr::MethodCall(Box::new(inner), name.clone(), tf.clone(), vec![], *sp)))
+            }
+            x @ (Expr::Call(..) | Expr::MethodCall(..) | Expr::Macro(..) | Expr::Array(..)) => {
+                let t = self.peek(x)?;
+                let seq = match t {
+                    Ty::Array(..) => true,
+                    Ty::Struct(sid) => self.vec_fields(sid).is_some(),
+                    _ => false,
+                };
+                seq.then(|| (x.clone(), path_expr("for#tmp")))
+            }
+            _ => None,
+        }
+    }
+
     pub(crate) fn for_(&mut self, f: &Expr) -> R<V> {
+        if let Expr::For(label, fpat, fexpr, fbody) = f {
+            if let Some((base, rebuilt)) = self.for_temp_base(fexpr) {
+                let at = expr_start(fexpr);
+                let blk = Expr::Block(
+                    None,
+                    false,
+                    crate::parse::Block {
+                        stmts: vec![
+                            Stmt::Let(Pat::Ident(false, true, "for#tmp".into(), None), None, Some(base), None, at),
+                            Stmt::Expr(Expr::For(label.clone(), fpat.clone(), Box::new(rebuilt), fbody.clone()), false),
+                        ],
+                    },
+                );
+                let blk = self.keep_expr(blk);
+                return self.expr(blk, None);
+            }
+        }
         let mut temp = None;
         if let Expr::For(_, _, fexpr, _) = f {
+            // (`for x in v.iter()` / `v.iter_mut()`, through `copied` / `cloned` / `enumerate` / `rev`: a loan of v for
+            // the loop, as `&v` / `&mut v`)
+            let mut base = strip_paren(fexpr);
+            let mut by_iter = None;
+            while let Expr::MethodCall(r, name, _, args, _) = base {
+                if !args.is_empty() {
+                    break;
+                }
+                match name.as_str() {
+                    "copied" | "cloned" | "enumerate" | "rev" => base = strip_paren(r),
+                    "iter" | "iter_mut" => {
+                        by_iter = Some((strip_paren(r), name == "iter_mut"));
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+            if let (true, Some((inner, m))) = (self.bk_on(), by_iter.filter(|x| is_place_expr(x.0))) {
+                let t0 = self.bk.call_temps.len();
+                if let Some(ln) = self.bk_loan_only(inner, m) {
+                    self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                }
+                if self.bk.call_temps.len() > t0 {
+                    temp = Some(t0);
+                }
+            }
             if let (true, Expr::Ref(m, inner)) = (self.bk_on(), strip_paren(fexpr)) {
                 // (the loan only: the lowering reads x itself)
                 let t0 = self.bk.call_temps.len();
@@ -519,7 +584,9 @@ impl Cx<'_> {
         }
         // 値で回す (`for x in arr`): 要素は x にムーブするので、配列は drop しない。
         // Vec なら長さを 0 にしておき、バッファの解放だけを Vec の drop に任せる
-        if mode.is_none() {
+        // (`v.iter().copied()` / `.cloned()`: the elements are copied out of a borrow, v stays as it is)
+        let borrowed = adapters.iter().any(|a| a == "iter" || a == "iter_mut");
+        if mode.is_none() && !borrowed {
             let vec = match self.peek(base_e) {
                 Some(Ty::Struct(sid)) => self.vec_fields(sid),
                 _ => None,
@@ -531,6 +598,11 @@ impl Cx<'_> {
                 }
             } else if self.needs_drop(elem) {
                 self.mark_moved(base_e);
+            }
+            // (the borrow check: `into_iter` takes the Vec / array, which is not used after (E0382). The elements are
+            // read by the loop itself, not through it)
+            if is_place_expr(base_e) && self.peek(base_e).is_some_and(|t| !matches!(t, Ty::Ref(..)) && !self.bk_ty(t).0) {
+                self.bk_acc(base_e, crate::acg::borrowck::Acc::Move);
             }
         }
         let i = self.b.declare_var(types::I64);
@@ -554,8 +626,17 @@ impl Cx<'_> {
             iv
         };
         let addr = self.elem_addr(ptr, idx, elem);
+        // (`v.iter().cloned()`: each element is cloned (`Clone::clone` of a reference to it, a user's `Clone` too), not
+        // copied bit for bit; a primitive's clone is its copy)
+        let prim = matches!(elem, Ty::I8 | Ty::I16 | Ty::I32 | Ty::I64 | Ty::I128 | Ty::Isize | Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::U128 | Ty::Usize | Ty::F32 | Ty::F64 | Ty::Bool | Ty::Char | Ty::Unit | Ty::Ref(false, _));
+        let clone_elems = mode.is_none() && borrowed && adapters.iter().any(|a| a == "cloned") && !prim;
         let (val, vt) = match mode {
             Some(m) => (Some(addr), Ty::Ref(m, intern(elem))),
+            None if clone_elems => {
+                self.bind("__exr_cl".into(), Ty::Ref(false, intern(elem)), Some(addr));
+                let ce = self.keep_expr(mcall(path_expr("__exr_cl"), "clone", vec![]));
+                self.expr(ce, Some(elem))?
+            }
             None => self.read(Place::Mem(addr, 0, elem)),
         };
         // (`for (i, x) in v.iter().enumerate()`: 組を作らずに i と x をそれぞれ束縛する)
