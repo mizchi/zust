@@ -1074,7 +1074,9 @@ impl Cx<'_> {
 
     /// struct パターン (`P(a, b)` / `S { .. }`) のフィールド。match 対象の型 t のインスタンスで引く
     pub(crate) fn tuple_struct_fields(&self, path: &Path, t: Ty, span: Sp) -> R<Vec<(String, Ty, u32)>> {
-        let Some(sid) = self.prog.struct_by_p(&PPath::of(path), self.self_sid) else {
+        // (`S::<u8>(x)`: the struct of the path without its arguments; the value's type is the instance)
+        let (pp, _) = self.turbofish_split(path);
+        let Some(sid) = self.prog.struct_by_p(&pp, self.self_sid) else {
             return err(span, self.no_variant_msg(path));
         };
         match t {
@@ -1114,7 +1116,7 @@ impl Cx<'_> {
                 self.test_variant(p, sid, vi, SP, fail)?;
             }
             self.prog.structs[sid as usize].variants[vi].fields.clone()
-        } else if self.prog.struct_by_p(&PPath::of(path), self.self_sid).is_some() {
+        } else if self.prog.struct_by_p(&self.turbofish_split(path).0, self.self_sid).is_some() {
             self.tuple_struct_fields(path, p.ty(), SP)?
         } else {
             return err(SP, "cannot find struct or variant");

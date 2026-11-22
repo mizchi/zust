@@ -1733,6 +1733,19 @@ impl Cx<'_> {
 
     pub(crate) fn struct_lit(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let r = self.struct_lit_inner(e, expected);
+        // (E0277: an argument of a parameter bounded by Copy that is not (`union U<T: Copy>` as `U<Rc<u32>>`))
+        if let (Ok((_, Ty::Struct(sid))), true) = (&r, self.user_code && !self.prog.copy_params.is_empty()) {
+            let (sid, prog) = (*sid, self.prog);
+            if let Some(ks) = prog.copy_params.get(&prog.base_of(sid)) {
+                for &k in ks {
+                    if let Some(&a) = prog.structs[sid as usize].args.get(k) {
+                        if !prog.has_param(a) && !has_hole(prog, a) && !super::borrowck::is_copy(prog, a, 0) {
+                            return err(expr_start(e), format!("the trait bound `{}: Copy` is not satisfied (E0277)", prog.tn(a)));
+                        }
+                    }
+                }
+            }
+        }
         if let Ok((_, t)) = &r {
             self.rg_struct_lit(e, *t);
             // (a struct-like variant (`E::V { r: x }`): its value's tree, which variant_value made last)
@@ -1768,6 +1781,12 @@ impl Cx<'_> {
                 return err(SP, format!("missing fields in initializer of `{}`", v.name));
             }
             return self.variant_value(sid, vi, &args, expected);
+        }
+        // (`Self::<u8> {}`: E0109)
+        if let [s] = path.segs.as_slice() {
+            if s.name == "Self" && !s.args.is_empty() {
+                return err(SP, "type arguments are not allowed on self type (E0109)");
+            }
         }
         // (`Foo::<i32> { .. }`: the struct of the path without its arguments, as the type the path writes)
         if path.segs.last().is_some_and(|s| !s.args.is_empty()) {

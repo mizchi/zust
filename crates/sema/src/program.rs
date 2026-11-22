@@ -254,6 +254,8 @@ pub struct Program {
     pub derived: FxMap<u32, Vec<String>>,
     /// a struct's / enum's const parameters of other types than usize (base ids): (the parameter's place, its type)
     pub const_param_tys: FxMap<u32, Vec<(usize, String)>>,
+    /// A struct / enum / union of the program's: the places of its type parameters bounded by Copy (`union U<T: Copy>`)
+    pub copy_params: FxMap<u32, Vec<usize>>,
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
     /// be out of scope where the name is written
     pub has_mods: bool,
@@ -795,6 +797,7 @@ impl Program {
             derived_peq: FxSet::default(),
             derived: FxMap::default(),
             const_param_tys: FxMap::default(),
+            copy_params: FxMap::default(),
             has_mods: false,
             lower_consts: false,
             const_by_last: FxMap::default(),
@@ -1013,6 +1016,9 @@ impl Program {
                     let decl = bs.iter().find_map(|b| b.strip_prefix(CONST_GENERIC)?.strip_prefix(':'));
                     if let (Some(d), Some(k)) = (decl, sm.adt_generics.iter().position(|g| g == pn)) {
                         p.const_param_tys.entry(sdefs.len() as u32).or_default().push((k, d.to_string()));
+                    }
+                    if let (true, Some(k)) = (bs.iter().any(|b| b == "Copy" || b.ends_with("::Copy")), sm.adt_generics.iter().position(|g| g == pn)) {
+                        p.copy_params.entry(sdefs.len() as u32).or_default().push(k);
                     }
                 }
                 sdefs.push((ii, name.clone(), shape, sm.adt_generics.clone()));

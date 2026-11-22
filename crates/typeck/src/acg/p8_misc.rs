@@ -387,6 +387,21 @@ impl Cx<'_> {
                     return self.operand(receiver, None, false).map(Some);
                 }
             }
+            // (E0599: a value of a type surely not Clone and with no Deref to take its clone through: a derive whose
+            // bounds an argument does not meet (`Bar<NotClone>`), or a type of the program's with no clone)
+            if let (Ty::Struct(sid), true) = (pt, self.user_code) {
+                let b = self.prog.base_of(sid);
+                if self.not_clone(pt, 0) && self.prog.method(sid, "deref").is_none() && self.prog.method(b, "deref").is_none() {
+                    let derived = self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
+                    let what = if self.prog.structs[b as usize].is_enum { "enum" } else { "struct" };
+                    let tn = self.prog.tn(pt);
+                    return err(SP, if derived {
+                        format!("the method `clone` exists for {what} `{tn}`, but its trait bounds were not satisfied (E0599)")
+                    } else {
+                        format!("no method named `clone` found for {what} `{tn}` in the current scope (E0599)")
+                    });
+                }
+            }
             let mut t = pt;
             while let Ty::Ref(_, i) = t {
                 if t.is_fat() {
