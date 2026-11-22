@@ -1,0 +1,2 @@
+{"schema":"jev-lint-ledger-1","namespace":"jev-lint-documents-judgments-1","written":"2026-11-22T16:41:18.806Z","model":"jev-1.14.0"}
+{"key":"c3de8eff84e78a02b2020da8d2432e291a7f73605715483ccbdfc4e1c170ca1d","at":"2026-11-22T16:41:18.799Z","value":{"judgment":{"choice":"supports","confidence":0.88,"probabilities":{"supports":0.91,"contradicts":0.08,"unrelated":0,"insufficient_context":0.01}},"comparisonId":"CONTRIBUTING","target":"CONTRIBUTING.ja.md"}}

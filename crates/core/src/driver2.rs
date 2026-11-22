@@ -4047,8 +4047,7 @@ fn first_accidentally_stable(src: &str, items: &[SrcItem]) -> Option<String> {
     const STABLE: [&str; 4] = ["transmute", "copy_nonoverlapping", "copy", "write_bytes"];
     for it in items {
         let raw = src.get(it.start..it.end)?;
-        // (an item's `#[allow(deprecated)]` allows its uses, under the crate's deny)
-        if !raw.contains("intrinsics") || raw.contains("allow(deprecated") || raw.contains("expect(deprecated") {
+        if !raw.contains("intrinsics") {
             continue;
         }
         // (comments and string literals are no paths)
@@ -4068,6 +4067,10 @@ fn first_accidentally_stable(src: &str, items: &[SrcItem]) -> Option<String> {
             }
         }
         let Ok(text) = String::from_utf8(text) else { continue };
+        // (an item's `#[allow(deprecated)]` allows its uses, under the crate's deny; read past comments and literals)
+        if text.contains("allow(deprecated") || text.contains("expect(deprecated") {
+            continue;
+        }
         let b = text.as_bytes();
         for (k, _) in text.match_indices("intrinsics") {
             // (`std::intrinsics::` / `core::intrinsics::`, the module a segment of its own)

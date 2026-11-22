@@ -722,6 +722,13 @@ impl Inf<'_> {
     }
 
     /// パターンを型変数 v に当て、束縛を今のスコープに入れる
+    /// The unit struct a pattern's name is (`S` with `struct S;`), not a variant or a const
+    fn unit_struct(&self, n: &str) -> Option<u32> {
+        let sid = self.struct_by(&path1(n))?;
+        let sd = &self.prog.structs[sid as usize];
+        (!sd.is_enum && sd.fields.is_empty() && self.variant_by(&path1(n)).is_none() && !self.prog.const_index.contains_key(n)).then_some(sid)
+    }
+
     fn pat(&mut self, pat: &Pat, v: u32, mode: Option<bool>) {
         match pat {
             Pat::Ident(r, m, n, sub) if self.unit_variant_ident(*r, *m, n, sub).is_some() => {
@@ -751,6 +758,12 @@ impl Inf<'_> {
                 let k = self.known(t);
                 self.unify(v, k);
             }
+            // (a unit struct (`Some(S)` with `struct S;`): the scrutinee is S, the pattern binds nothing)
+            Pat::Ident(false, false, n, None) if n.starts_with(|c: char| c.is_ascii_uppercase()) && self.lookup(n).is_none() && self.unit_struct(n).is_some() => {
+                let sid = self.unit_struct(n).unwrap();
+                let (v, _) = self.auto_deref(v, mode);
+                self.pat_fields(v, sid, None);
+            }
             Pat::Ident(r, m, n, sub) => {
                 if let Some(sub) = sub {
                     self.pat(sub, v, mode);
@@ -758,8 +771,17 @@ impl Inf<'_> {
                 let mode = if *r { Some(*m) } else { mode };
                 self.bind_name(n.clone(), v, mode);
             }
-            Pat::Ref(_, p) => {
-                let i = self.deref_var(v);
+            Pat::Ref(m, p) => {
+                // (a scrutinee of no type yet is a reference: `match get() { &S => .. }`)
+                let r = self.find(v);
+                let i = if self.shape[r as usize].is_none() {
+                    let i = self.var();
+                    let rv = self.with(Shape::Ref(*m, i));
+                    self.unify(v, rv);
+                    i
+                } else {
+                    self.deref_var(v)
+                };
                 self.pat(p, i, None);
             }
             Pat::Or(cs) => {
@@ -786,6 +808,11 @@ impl Inf<'_> {
                 let (v, _) = self.auto_deref(v, mode);
                 if let Some((sid, vi)) = self.variant_by(p) {
                     self.pat_fields(v, sid, Some(vi));
+                } else if let Some(sid) = self.struct_by(p).filter(|&sid| {
+                    let sd = &self.prog.structs[sid as usize];
+                    !sd.is_enum && sd.fields.is_empty()
+                }) {
+                    self.pat_fields(v, sid, None);
                 }
             }
             Pat::TupleStruct(p, elems) => {
