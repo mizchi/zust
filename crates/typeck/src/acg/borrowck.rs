@@ -487,6 +487,11 @@ pub fn pat_moves(prog: &Program, p: &Pat, t: Ty, depth: u32) -> bool {
             Ty::Struct(sid) if prog.is_tuple(sid) => parts(ps, &prog.structs[sid as usize].fields),
             _ => crate::ast_closure::binds_by_value(p),
         },
+        // (`&mut n` / `&n` of a reference: the reference is not moved, its referent is matched)
+        Pat::Ref(_, q) => match t {
+            Ty::Ref(_, i) => pat_moves(prog, q, *i, depth + 1),
+            _ => crate::ast_closure::binds_by_value(p),
+        },
         // (a struct's pattern, not an enum variant's)
         Pat::TupleStruct(_, ps) => match t {
             Ty::Struct(sid) if prog.structs[sid as usize].variants.is_empty() && !prog.is_tuple(sid) => parts(ps, &prog.structs[sid as usize].fields),
@@ -2444,6 +2449,8 @@ impl Cx<'_> {
             }
             Pat::Ident(true, m, _, Some(_)) => out.push((base.clone(), t, if *m { CapMode::RefMut } else { CapMode::Ref }, sp)),
             Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) => out.push((base.clone(), t, CapMode::Ref, sp)),
+            // (a pattern not followed into: borrowed mutably if it binds a part by `ref mut`, else as the body uses it)
+            _ if crate::ast_closure::binds_ref_mut(pat) => out.push((base.clone(), t, CapMode::RefMut, sp)),
             _ => out.push((base.clone(), t, CapMode::Use, sp)),
         }
     }
@@ -2515,9 +2522,9 @@ impl Cx<'_> {
         let mut v = vec![];
         self.bk_pat_cap(pat, p, t, super::SP, &mut v);
         let n0 = out.len();
-        // (`Use` marks a part the patterns are not followed into (`S { value: ref mut y }`): kept, as borrowed
-        // mutably)
-        out.extend(v.into_iter().filter(|x| matches!(x.2, CapMode::RefMut | CapMode::Use) && x.0.local == p.local).map(|x| x.0));
+        // (a part the patterns are not followed into that binds by `ref mut` (`S { value: ref mut y }`) is RefMut
+        // too (bk_pat_cap); one that does not (`S { value: ref y }`) keeps its own mode)
+        out.extend(v.into_iter().filter(|x| x.2 == CapMode::RefMut && x.0.local == p.local).map(|x| x.0));
         if out.len() == n0 {
             out.push(p.clone());
         }

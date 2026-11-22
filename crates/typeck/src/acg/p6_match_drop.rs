@@ -322,6 +322,8 @@ impl Cx<'_> {
                     let types: Vec<(String, Ty)> = names.iter().filter_map(|n| self.lookup(n).map(|(_, t)| (n.clone(), t))).collect();
                     // (a `ref mut` binding's `&mut` is moved by a `let` that binds it by value: not Copy here)
                     let by = |p: &Pat, n: &str| match types.iter().find(|x| x.0 == n) {
+                        // (`let &mut n = foo;` matches the referent: it does not move the `&mut`)
+                        Some((_, t @ Ty::Ref(true, _))) if matches!(p, Pat::Ref(..)) => borrowck::pat_moves(prog, p, *t, 0),
                         Some((_, Ty::Ref(true, _))) | None => crate::ast_closure::binds_by_value(p),
                         Some(x) => borrowck::pat_moves(prog, p, x.1, 0),
                     };
