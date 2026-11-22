@@ -942,6 +942,15 @@ impl RgSt {
             return;
         }
         let parent = c.parent.take();
+        // (a type alias written without its lifetimes (`b: A` with `type A<'a> = &'a isize`): one marker for what it
+        // stands for, whose regions are all elided)
+        if matches!(t, Ty::Ref(..) | Ty::Dyn(_) | Ty::Fn(_)) && c.codes.is_some_and(|x| x.get(c.pos) == Some(&R_ELIDED_ADT)) {
+            c.pos += 1;
+            let mut all = Codes { codes: None, pos: 0, ok: true, parent };
+            self.inst(prog, t, &mut all, lts, targs, elided, out, depth + 1);
+            c.ok &= all.ok;
+            return;
+        }
         let region = |me: &mut RgSt, c: &mut Codes, elided: &mut dyn FnMut(&mut RgSt) -> u32| -> u32 {
             match c.next() {
                 R_STATIC => STATIC,

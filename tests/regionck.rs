@@ -1297,3 +1297,12 @@ fn receiver_temporaries() {
     assert!(d.len() == 1 && d[0].0 == 19 && d[0].1.contains("E0716"), "{d:?}");
     assert_eq!(check(&format!("{a}fn main() {{\n    let n = mk().len();\n    let s = mk().name();\n    let k = mk().get().len();\n    println!(\"{{}} {{}} {{}}\", n, s, k);\n}}\n")), vec![]);
 }
+
+/// A type alias written without its lifetimes in a signature (`b: A` with `type A<'a> = &'a isize`): its regions are
+/// elided, a fresh one each, as `&isize`'s
+#[test]
+fn alias_with_elided_lifetimes() {
+    let d = check("type A<'a> = &'a isize;\nstruct C<'a> {\n    f: A<'a>,\n}\nimpl<'a> C<'a> {\n    fn set_bad(&mut self, b: A) {\n        self.f = b;\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("type A<'a> = &'a isize;\nstruct C<'a> {\n    f: A<'a>,\n}\nimpl<'a> C<'a> {\n    fn set_ok(&mut self, b: A<'a>) {\n        self.f = b;\n    }\n    fn get(&self) -> A {\n        self.f\n    }\n}\nfn main() {}\n"), vec![]);
+}
