@@ -2194,3 +2194,13 @@ fn move_closure_holds_what_its_value_captures_hold() {
     assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
     assert_eq!(check("fn f<'a>(s: &'a str) -> impl Fn() -> usize + 'a {\n    move || s.len()\n}\nfn main() {\n    let v = vec![1u32, 2];\n    let r = &v;\n    let g = move || r.len();\n    println!(\"{} {}\", f(\"ab\")(), g());\n}\n"), vec![]);
 }
+
+/// `(&x).clone()` with x: T and no `Clone` bound is the reference's copy: it borrows x (borrowck/
+/// borrowck-return-variable-on-stack-via-clone.rs, E0515)
+#[test]
+fn reference_clone_of_an_unbounded_param() {
+    let d = check("fn leak<'a, T>(x: T) -> &'a T {\n    (&x).clone()\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("`x`"), "{d:?}");
+    // (an instance's `x.clone()` with T a `Clone` type is that type's clone, not the reference's: not followed)
+    assert_eq!(check("fn dup<T: Clone>(x: &T) -> T {\n    x.clone()\n}\nfn main() {\n    let s = String::from(\"a\");\n    println!(\"{}\", dup(&s));\n}\n"), vec![]);
+}

@@ -3146,6 +3146,11 @@ impl Cx<'_> {
                 if let Some(&ln) = self.bk.loan_of.get(&(e as *const Expr as usize)) {
                     out.push(Src::Loan(ln));
                 }
+                // (`r.clone()` of a reference whose referent is not `Clone` (`(&x).clone()` with x: T): the reference's
+                // copy, which holds what r holds (E0515 when it is returned))
+                if out.len() == n0 && name == "clone" && args.is_empty() && matches!(self.peek(e), Some(Ty::Ref(..))) && self.peek(recv) == self.peek(e) {
+                    self.bk_direct(recv, out);
+                }
                 // (a method of the prelude's types whose result holds references: what its receiver holds (`it.next()`,
                 // `raw.iter().map(..).collect()`). The prelude writes no lifetimes)
                 if out.len() == n0 && self.peek(e).is_some_and(|t| has_refs(self.prog, t, 0)) {

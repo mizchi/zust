@@ -2945,6 +2945,14 @@ impl Program {
             return true;
         }
         let Ty::Struct(sid) = t else { return false };
+        // (a type parameter's placeholder whose bounds name no `Clone` (nor `Copy`, nor a trait with supertraits, which
+        // may imply it): `(&x).clone()` with x: T is the reference's copy)
+        if let Some(bs) = &self.structs[sid as usize].placeholder {
+            return !bs.iter().any(|b| {
+                let n = b.split('<').next().unwrap_or(b).trim();
+                n.ends_with("Clone") || n.ends_with("Copy") || self.trait_supers.get(n).is_some_and(|s| !s.is_empty())
+            });
+        }
         let b = self.base_of(sid);
         let own = self.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prelude_from);
         // (a clone of the program's own; std's (`Vec<T>`) is Clone when its arguments are)
