@@ -153,8 +153,12 @@ impl<'a> Runner<'a> {
                 return Ok(Some(o));
             }
         }
-        // (not that run any more: a run that fails, or changes OUT_DIR and then fails, leaves nothing to reuse)
-        let _ = std::fs::remove_file(&run_path);
+        // (not that run any more: a run that fails, or changes OUT_DIR and then fails, leaves nothing to reuse. If the
+        //  old result cannot be removed, the script does not run)
+        match std::fs::remove_file(&run_path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(format!("{}: {e}", run_path.display())),
+            _ => {}
+        }
         if self.verbose {
             eprintln!("     Running build script of `{} v{}`", pk.name, pk.version);
         }
