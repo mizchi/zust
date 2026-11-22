@@ -1267,3 +1267,13 @@ fn review_of_43_3() {
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("moved"), "{d:?}");
     assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut c = || x += 1;\n    let mut m = &mut c;\n    let r = &mut m;\n    r();\n    let a: [String; 20] = Default::default();\n    let [_f, _rest @ .., _l] = a;\n}\n"), vec![]);
 }
+
+/// A builtin method's result (`v.iter()` of `&[T]`): a placeholder's region in it is its own, not the receiver's
+/// (`v.iter().count()` in a generic fn nothing calls was "`'_` must outlive `T#`")
+#[test]
+fn builtin_results_of_placeholders() {
+    assert_eq!(
+        check("fn d<T>(v: &[T]) -> usize {\n    v.iter().filter(|_| true).count()\n}\nfn e<T>(v: &[T]) -> Option<&T> {\n    v.iter().next()\n}\nfn f<T>(v: &[T]) -> usize {\n    v.iter().map(|_| 1).count()\n}\nfn main() {}\n"),
+        vec![]
+    );
+}

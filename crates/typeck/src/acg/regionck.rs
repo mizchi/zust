@@ -3264,7 +3264,12 @@ impl Cx<'_> {
         let Some(n) = count(prog, t, 0).filter(|&n| n > 0) else { return };
         let Some((Ty::Ref(..), rtr)) = self.rt_expr(recv) else { return };
         let Some(&r) = rtr.first() else { return };
-        self.rg.calls.insert(e as *const Expr as usize, (t, vec![r; n]));
+        // (a placeholder's region in the result is its own, not the receiver's: `v.iter()` of `&[T]` is `Iter<T>`)
+        let tree = match self.rg.fresh(prog, t).filter(|_| !self.rg.ph.is_empty()) {
+            Some(tr) => tr.into_iter().map(|v| if self.rg.ph.iter().any(|x| x.1 == v) { v } else { r }).collect(),
+            None => vec![r; n],
+        };
+        self.rg.calls.insert(e as *const Expr as usize, (t, tree));
     }
 
     /// `Box::new(x)` (x of type t): the box's tree is x's
