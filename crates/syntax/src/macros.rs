@@ -1222,7 +1222,8 @@ fn find_calls(
     Ok(())
 }
 
-/// Whether src may call `env!` / `option_env!` (also written `env !`): the one look a file gets before expand_env
+/// Whether src may call `env!` / `option_env!` (also written `env !` or `env /* .. */ !`): the one look a file gets
+/// before expand_env
 pub fn may_use_env(src: &str) -> bool {
     if !src.contains("env") {
         return false;
@@ -1230,8 +1231,17 @@ pub fn may_use_env(src: &str) -> bool {
     let b = src.as_bytes();
     src.match_indices("env").any(|(k, _)| {
         let mut j = k + 3;
-        while j < b.len() && b[j].is_ascii_whitespace() {
-            j += 1;
+        loop {
+            while j < b.len() && b[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if b[j..].starts_with(b"/*") {
+                j = src[j + 2..].find("*/").map_or(b.len(), |e| j + 2 + e + 2);
+            } else if b[j..].starts_with(b"//") {
+                j = src[j..].find('\n').map_or(b.len(), |e| j + e);
+            } else {
+                break;
+            }
         }
         b.get(j) == Some(&b'!')
     })
@@ -1574,5 +1584,7 @@ mod env_tests {
         assert_eq!(x("stringify!(env!(\"LABEL\")); env!(\"LABEL\")"), "stringify!(env!(\"LABEL\")); \"v\"");
         assert!(may_use_env("let a = env ! (\"X\");") && may_use_env("option_env!(\"X\")"));
         assert!(!may_use_env("use std::env; fn environment() {}"));
+        assert!(may_use_env("env /* a comment */ !(\"X\")") && may_use_env("env // why\n !(\"X\")"));
+        assert_eq!(x("env /* c */ !(\"LABEL\")"), "\"v\"");
     }
 }
