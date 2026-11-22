@@ -478,7 +478,8 @@ pub fn pat_moves(prog: &Program, p: &Pat, t: Ty, depth: u32) -> bool {
             if *by_ref {
                 sub.as_deref().is_some_and(|q| pat_moves(prog, q, t, depth + 1))
             } else if n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_" {
-                !is_copy(prog, t, 0)
+                // (a `&mut` bound by value is moved: a pattern does not reborrow it, as an argument is)
+                !is_copy(prog, t, 0) || matches!(t, Ty::Ref(true, _))
             } else {
                 false
             }
