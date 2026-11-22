@@ -1477,6 +1477,15 @@ impl Cx<'_> {
                 // loop, is a use of a moved value)
                 if !by_ref {
                     self.bk_local(loc, &n, t);
+                } else if self.bk_on() {
+                    // (one held by reference is the place the environment points to: `*x`, which the body borrows
+                    // and assigns as the closure's own (`let p = &this.x; &mut this.x;` conflicts), and which is no
+                    // local of the body's (a borrow of it may be returned))
+                    let id = self.bk.locals.len();
+                    self.bk_local(loc, &n, t);
+                    if let Some(l) = self.bk.locals.get_mut(id) {
+                        l.via_ref = true;
+                    }
                 }
                 self.rg_capture(ci, loc, t);
                 self.scopes.last_mut().unwrap().push((n, loc, t));
@@ -1490,6 +1499,8 @@ impl Cx<'_> {
             self.bk.tail = e as *const Expr as usize;
         }
         let (v, t) = self.block(&f.block, Some(self.ret))?;
+        // (the temporaries of the body's tail go away after its locals (edition 2021))
+        self.bk_temps_end(0);
         if t == Ty::Never {
             self.b.ins().trap(TrapCode::unwrap_user(1));
             return Ok(());
@@ -1921,7 +1932,8 @@ impl Cx<'_> {
                     // (a function the gate left out, with `let x: &'static T = ..`: from here on, a borrow of what it
                     // owns must not have to be 'static. What came before has no trees and adds no constraint)
                     let static_cast = || matches!(strip_paren(init), Expr::Cast(_, t) if crate::regions::mentions_static(t));
-                    if !self.rg.on && self.rg.eligible && (static_cast() || ann_ty.as_ref().is_some_and(crate::regions::mentions_static)) {
+                    let ctor_lts = || self.prog.path_lts && self.inline_depth == 0 && crate::regions::writes_path_lts(init);
+                    if !self.rg.on && self.rg.eligible && (static_cast() || ann_ty.as_ref().is_some_and(crate::regions::mentions_static) || ctor_lts()) {
                         self.rg_late_on();
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
@@ -1950,6 +1962,15 @@ impl Cx<'_> {
                             None => self.bind(name, Ty::Never, None),
                         }
                         continue;
+                    }
+                    // (an annotation with holes, of another struct than the value's: `let x: Foo<_> = Bar::<usize>(..)`. No
+                    // coercion makes one struct another)
+                    if let (Some(Ty::Struct(a)), Ty::Struct(b), true) = (ann, t, ann_ty.is_some()) {
+                        let p = self.prog;
+                        if has_hole(p, Ty::Struct(a)) && p.base_of(a) != p.base_of(b) && !p.is_tuple(a) && !p.is_tuple(b) && !p.has_param(t) && p.structs[b as usize].placeholder.is_none() && !p.closures.contains_key(&b) {
+                            let m = format!("mismatched types: expected `{}`, found `{}`", p.tn(Ty::Struct(a)), p.tn(t));
+                            return Err(self.at(expr_start(init), m));
+                        }
                     }
                     let mut ann = ann.filter(|&a| !has_hole(self.prog, a));
                     // (型推論の結果 (注釈なし) と違う: `&&str` → `&str` は deref の強制変換、それでも違えば実際の型)
@@ -2006,6 +2027,10 @@ impl Cx<'_> {
                 }
                 Stmt::Expr(e, semi) => {
                     let exp = if last && !*semi { expected } else { None };
+                    // (a path that writes lifetimes, after a borrow in the same statement: from its start)
+                    if !self.rg.on && self.rg.eligible && self.prog.path_lts && self.inline_depth == 0 && crate::regions::writes_path_lts(e) {
+                        self.rg_late_on();
+                    }
                     // (the value of the function body: what it borrows must outlive the function)
                     let tail = last && !*semi && self.bk.tail == e as *const Expr as usize && self.bk_on();
                     if tail {
@@ -2037,6 +2062,7 @@ impl Cx<'_> {
                     // (a block's value: its tree, while the block's locals are in scope)
                     if last && !*semi && r.is_ok() {
                         self.rg_keep(e);
+                        self.bk_tail_drop_temps(e);
                     }
                     if tail {
                         let srcs = self.bk_frame_end();
@@ -2087,6 +2113,10 @@ impl Cx<'_> {
                     return err(SP, format!("nested items are not supported ({k})"));
                 }
             }
+        }
+        // (edition 2024: the tail expression's temporaries go away at the end of the block, before its locals)
+        if self.prog.edition >= 2024 {
+            self.bk_temps_end(bk_mark);
         }
         self.pop_scope();
         if diverged && result.1 == Ty::Unit {

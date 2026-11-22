@@ -384,6 +384,17 @@ impl Inf<'_> {
         self.prog.struct_by_p(&PPath::of(p), self.self_sid)
     }
 
+    /// The struct a path with a turbofish on its last segment names (`S::<u32>`)
+    fn struct_by_turbofish(&self, p: &Path) -> Option<u32> {
+        let last = p.segs.last()?;
+        if last.args.is_empty() || last.fn_args.is_some() {
+            return None;
+        }
+        let mut pp = PPath::of(p);
+        pp.segs.last_mut()?.args = false;
+        self.prog.struct_by_p(&pp, self.self_sid)
+    }
+
     fn fn_by(&self, p: &Path) -> Option<u32> {
         self.prog.fn_by_p(&PPath::of(p), self.self_sid)
     }
@@ -770,7 +781,7 @@ impl Inf<'_> {
                 let (v, mode) = self.auto_deref(v, mode);
                 let fts: Vec<u32> = if let Some((sid, vi)) = self.variant_by(p) {
                     self.pat_fields(v, sid, Some(vi)).into_iter().map(|f| f.1).collect()
-                } else if let Some(sid) = self.struct_by(p) {
+                } else if let Some(sid) = self.struct_by(p).or_else(|| self.struct_by_turbofish(p)) {
                     self.pat_fields(v, sid, None).into_iter().map(|f| f.1).collect()
                 } else {
                     return;
@@ -787,7 +798,7 @@ impl Inf<'_> {
                 let (v, mode) = self.auto_deref(v, mode);
                 let fields = if let Some((sid, vi)) = self.variant_by(p) {
                     self.pat_fields(v, sid, Some(vi))
-                } else if let Some(sid) = self.struct_by(p) {
+                } else if let Some(sid) = self.struct_by(p).or_else(|| self.struct_by_turbofish(p)) {
                     self.pat_fields(v, sid, None)
                 } else {
                     return;
@@ -1323,6 +1334,14 @@ impl Inf<'_> {
                     self.adt_ctor(sid, Some(vi), args)
                 } else if let Some(sid) = self.struct_by(p) {
                     self.adt_ctor(sid, None, args)
+                } else if let Some(sid) = self.struct_by_turbofish(p) {
+                    // (`S::<u32> { t: 1 }`: the instance the turbofish writes)
+                    let v = self.adt_ctor(sid, None, args);
+                    if let Some(t) = self.variant_turbofish(p, sid) {
+                        let k = self.known(t);
+                        self.unify(v, k);
+                    }
+                    v
                 } else {
                     self.var()
                 }
@@ -1750,17 +1769,34 @@ impl Inf<'_> {
                         let v = self.expr(a);
                         xs.push((i.to_string(), v));
                     }
-                    return self.adt_ctor(sid, Some(vi), xs);
+                    let v = self.adt_ctor(sid, Some(vi), xs);
+                    // (`SomeEnum::SomeVariant::<&u32>(&c)`: the instance the turbofish writes)
+                    if p.segs.iter().any(|s| !s.args.is_empty()) {
+                        if let Some(t) = self.variant_turbofish(p, sid) {
+                            let k = self.known(t);
+                            self.unify(v, k);
+                        }
+                    }
+                    return v;
                 }
                 let local = ident(p).is_some_and(|id| self.lookup(id).is_some());
                 if !local && self.fn_by(p).is_none() {
-                    if let Some(sid) = self.struct_by(p) {
+                    let plain = self.struct_by(p);
+                    if let Some(sid) = plain.or_else(|| self.struct_by_turbofish(p)) {
                         let mut xs = vec![];
                         for (i, a) in args.iter().enumerate() {
                             let v = self.expr(a);
                             xs.push((i.to_string(), v));
                         }
-                        return self.adt_ctor(sid, None, xs);
+                        let v = self.adt_ctor(sid, None, xs);
+                        // (`SomeStruct::<&u32>(&c)`: the instance the turbofish writes)
+                        if plain.is_none() {
+                            if let Some(t) = self.variant_turbofish(p, sid) {
+                                let k = self.known(t);
+                                self.unify(v, k);
+                            }
+                        }
+                        return v;
                     }
                 }
             }

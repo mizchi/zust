@@ -1762,6 +1762,35 @@ fn assignment_drop_and_deref_moves() {
     assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("cannot move out of an `Rc`"), "{d:?}");
 }
 
+/// The fn's tail is a match: what an arm returns (a binding, or a constructor of one: `Some(r)`) is returned while the
+/// arm's bindings are in scope, so a `ref mut` binding through a `Drop` value's `&mut` field is E0713
+#[test]
+fn match_tail_returns_arm_binding() {
+    let d = check("enum DropOption<T> {\n    Some(T),\n    None,\n}\nimpl<T> Drop for DropOption<T> {\n    fn drop(&mut self) {}\n}\nfn f(opt: DropOption<&mut i32>) -> Option<&mut i32> {\n    match opt {\n        DropOption::Some(&mut ref mut r) => Some(r),\n        DropOption::None => None,\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("E0713"), "{d:?}");
+    assert_eq!(check("fn f(opt: Option<(&mut i32, String)>) -> Option<&mut i32> {\n    match opt {\n        Some((&mut ref mut r, _)) => Some(r),\n        None => None,\n    }\n}\nfn main() {}\n"), vec![]);
+}
+
+/// From the review of #51: a `let` that destructures an enum variant of a capture moves only the parts it binds by
+/// value whose types are not `Copy`, by the variant's fields (`let E::V(n, _) = e;` with n an integer copies)
+#[test]
+fn variant_destructuring_moves_by_type() {
+    assert_eq!(check("enum E {\n    V(i32, String),\n}\nenum F {\n    W { a: u8, s: String },\n}\nfn take_fn(_: impl Fn()) {}\nfn main() {\n    let e = E::V(1, String::new());\n    take_fn(move || {\n        let E::V(n, _) = e;\n        let _ = n;\n    });\n    let f = F::W { a: 1, s: String::new() };\n    take_fn(move || {\n        let F::W { a, .. } = f;\n        let _ = a;\n    });\n}\n"), vec![]);
+    let d = check("enum E {\n    V(i32, String),\n}\nfn take_fn(_: impl Fn()) {}\nfn main() {\n    let e = E::V(1, String::new());\n    take_fn(move || {\n        let E::V(_, s) = e;\n        drop(s);\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0507"), "{d:?}");
+}
+
+/// The scrutinee of an `if let` or a `match` in a closure for an `Fn` bound comes with the patterns: one that binds a
+/// part of a capture by value that is not `Copy` moves it (E0507, at the scrutinee); `ref` and `Copy` parts do not
+#[test]
+fn closure_match_scrutinee_moves() {
+    let d = check("enum E {\n    V(i32, String),\n}\nfn take_fn(_: impl Fn()) {}\nfn main() {\n    let e = E::V(1, String::new());\n    take_fn(move || {\n        if let E::V(_, s) = e {\n            drop(s);\n        }\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0507"), "{d:?}");
+    let d = check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let o = Some(String::new());\n    take_fn(move || match o {\n        Some(s) => drop(s),\n        None => {}\n    });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0507"), "{d:?}");
+    assert_eq!(check("fn take_fn(_: impl Fn()) {}\nfn main() {\n    let o = Some(String::new());\n    take_fn(move || match o {\n        Some(ref s) => println!(\"{}\", s),\n        None => {}\n    });\n    let p = Some((1, String::new()));\n    take_fn(move || {\n        if let Some((n, _)) = p {\n            let _ = n;\n        }\n    });\n}\n"), vec![]);
+}
+
 /// From the review of #53: a `Copy` impl with a `'static` slot and others does not make every copy `'static`; a
 /// parenthesized capture moved by a `let` is moved; a block's result that keeps a borrow through a dropped `Drop`
 /// value's `&mut` field is E0713; a `ref mut` pattern in a closure borrows only the part it binds; a move through a
@@ -1779,6 +1808,20 @@ fn part10_review() {
     assert_eq!(check("fn main() {\n    match Some(String::from(\"arm\")) {\n        Some(foo) if {\n            let foo = String::from(\"local\");\n            (|| { let _owned = foo; true })()\n        } => (),\n        _ => (),\n    }\n}\n"), vec![]);
 }
 
+/// A block's tail's temporary a method is called on lives until the end of the enclosing statement, after the block's
+/// locals: one whose `Drop` may see a local it borrows is E0597 (with `;`, it is dropped first). `a;` in a closure
+/// moves a (a closure made in a loop is then E0382). A guard sees a `ref mut` binding as shared (E0596 / E0594)
+#[test]
+fn tail_temps_stmt_moves_guard_ref_mut() {
+    let d = check("#[derive(Debug)]\nstruct D<T: std::fmt::Debug>(T);\nimpl<T: std::fmt::Debug> Drop for D<T> {\n    fn drop(&mut self) {}\n}\nimpl<T: std::fmt::Debug> D<T> {\n    fn end(&self) {}\n}\nfn f() {\n    let t = D(Box::new(1));\n    D(&t).end()\n}\nfn g() {\n    let t = D(Box::new(1));\n    D(&t).end();\n}\nfn main() {\n    f();\n    g();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("does not live long enough"), "{d:?}");
+    let d = check("struct NotCopy;\nfn main() {\n    let mut a = NotCopy;\n    loop {\n        || {\n            &mut a;\n            a;\n        };\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("use of moved value: `a`"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let n = 5;\n    let s = String::new();\n    for _ in 0..2 {\n        let c = || {\n            n;\n            s.len();\n        };\n        c();\n    }\n}\n"), vec![]);
+    let d = check("fn main() {\n    let mut x = Some(1);\n    match x {\n        Some(ref mut r) if {\n            let q = &mut *r;\n            *q == 1\n        } => {}\n        Some(ref mut r) if *r == 1 => {\n            *r = 3;\n        }\n        _ => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0596"), "{d:?}");
+}
+
 /// From the second review of #53: `impl Copy for Foo<&'static u32>` (a path written without lifetimes) needs a copy's
 /// borrows `'static`; a `ref mut` pattern's part that is not followed is borrowed mutably; a `move` closure in a guard
 /// that names an arm's binding moves it (E0507)
@@ -1790,6 +1833,36 @@ fn part10_review_2() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot borrow `p.1` as mutable"), "{d:?}");
     let d = check("fn main() {\n    match Some(String::from(\"arm\")) {\n        Some(foo) if { let c = move || { drop(foo.len()); false }; c() } => (),\n        _ => (),\n    }\n}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0507"), "{d:?}");
+}
+
+/// A `&mut` bound by value by a pattern is moved out (no reborrow): in a loop it is E0382 the second time. A receiver
+/// written as a borrow (`(&mut x).with(..)`) stays borrowed while the arguments that name x are evaluated (E0499)
+#[test]
+fn pattern_mut_ref_moves_and_written_receivers() {
+    let d = check("fn main() {\n    let mut x = 42_i32;\n    let opt = Some(&mut x);\n    for _ in 0..5 {\n        if let Some(_x) = opt {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("moved value"), "{d:?}");
+    assert_eq!(check("struct Node { v: i32, next: Option<Box<Node>> }\nfn main() {\n    let mut x = 1;\n    let mut opt = Some(&mut x);\n    if let Some(r) = opt.as_mut() { **r += 1; }\n    if let Some(ref mut r) = opt { **r += 1; }\n    if let Some(r) = opt { *r += 1; }\n    let mut head = Node { v: 1, next: Some(Box::new(Node { v: 2, next: None })) };\n    let mut cur = &mut head;\n    while let Some(ref mut n) = cur.next { n.v += 1; break; }\n    let mut cur2 = Some(&mut head);\n    while let Some(n) = cur2 { n.v += 1; cur2 = match n.next { Some(ref mut b) => Some(&mut **b), None => None }; }\n    println!(\"{}\", x);\n}\n"), vec![]);
+    let d = check("struct X(u32);\nimpl X {\n    pub fn with<F>(&self, blk: F) where F: FnOnce(&u32) { blk(&self.0) }\n    pub fn with_mut<F>(&mut self, blk: F) where F: FnOnce(&u32) { blk(&self.0) }\n}\nfn main() {\n    let mut x = X(1);\n    (&mut x).with(|v| { x = X(*v); });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("more than once"), "{d:?}");
+    assert_eq!(check("struct X(u32);\nimpl X { fn get(&self, n: u32) -> u32 { self.0 + n } }\nfn main() {\n    let mut x = X(1);\n    let a = (&x).get(x.0);\n    let b = (&mut x).get(2);\n    let y = &x;\n    let c = (&x).get(y.0);\n    println!(\"{} {} {}\", a, b, c);\n}\n"), vec![]);
+}
+
+/// What a returned value borrows is followed through a cast and `Box::new` (`Box::new(B(&*v)) as Box<dyn X>`: E0515)
+#[test]
+fn returned_borrow_through_cast_and_box() {
+    let d = check("trait X { }\nstruct B<'a>(&'a u32);\nimpl<'a> X for B<'a> {}\nfn f(v: Box<u32>) -> Box<dyn X + 'static> {\n    Box::new(B(&*v)) as Box<dyn X>\n}\nfn h(v: Box<u32>) -> Box<dyn X + 'static> {\n    Box::new(B(&*v))\n}\nfn main() {}\n");
+    assert!(d.len() == 2 && d[0].0 == 5 && d[1].0 == 8 && d[0].1.contains("cannot return a reference"), "{d:?}");
+}
+
+/// `&mut *x` in a closure through a reference it captures is a unique borrow of `*x`: E0596 through a `&`, and two
+/// such closures alive at once conflict; one after the other is fine
+#[test]
+fn closure_mut_through_captured_ref() {
+    let d = check("fn set(x: &mut isize) {\n    *x = 4;\n}\nfn a(x: &isize) {\n    let mut c1 = || set(&mut *x);\n    c1();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("behind a `&` reference"), "{d:?}");
+    let d = check("fn set(x: &mut isize) {\n    *x = 4;\n}\nfn b(x: &mut isize) {\n    let mut c1 = || set(&mut *x);\n    let mut c2 = || set(&mut *x);\n    c2();\n    c1();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("more than once"), "{d:?}");
+    assert_eq!(check("fn set(x: &mut isize) {\n    *x = 4;\n}\nfn ok(x: &mut isize) {\n    let mut c1 = || set(&mut *x);\n    c1();\n    let mut c2 = || set(&mut *x);\n    c2();\n    *x += 1;\n}\nfn main() {}\n"), vec![]);
 }
 
 /// From the third review of #53: a reference pattern (`let &mut n = foo;`) matches the referent, so it does not move a
@@ -1809,4 +1882,97 @@ fn part10_review_3() {
 fn part10_review_4() {
     let d = check("fn main() {\n    let mut x = 7u32;\n    match Some(&mut x) {\n        Some(ref mut foo) if (|| {\n            let &mut bar = foo;\n            *bar == 7\n        })() => {}\n        _ => {}\n    }\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+}
+
+/// A capture held by reference is the place the environment points to: the closure's body borrows and assigns it as
+/// its own (`let p = &this.x; &mut this.x;` in the body conflicts, borrowck/borrowck-closures-unique-imm.rs); what the
+/// body may move or write through it is checked where the closure is made
+#[test]
+fn closure_body_by_ref_capture() {
+    let d = check("struct Foo { x: isize }\nfn main() {\n    let mut this = &mut Foo { x: 1 };\n    let mut r = || {\n        let p = &this.x;\n        let q = &mut this.x;\n        *q += *p;\n    };\n    r();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot borrow `this.x` as mutable because it is also borrowed as immutable"), "{d:?}");
+    assert_eq!(check("struct Foo { x: isize, y: isize }\nfn main() {\n    let mut this = Foo { x: 1, y: 2 };\n    let mut r = || {\n        let p = &this.x;\n        let q = &mut this.y;\n        *q += *p;\n    };\n    r();\n    println!(\"{}\", this.y);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let mut v = vec![1];\n    let mut r = || {\n        let p = &mut v;\n        p.push(2);\n        v.push(3);\n    };\n    r();\n    println!(\"{:?}\", v);\n}\n"), vec![]);
+}
+
+/// A constructor's path that writes lifetimes gives the value's type (nll/user-annotations/adt-*.rs): a tuple
+/// variant's, a struct-like variant's, a unit variant's (`SomeOtherVariant::<Cell<&'static u32>>`, through an
+/// invariant `Cell`), a tuple struct's and a struct literal's (which zustc did not accept with a turbofish). A pattern's
+/// struct path with a turbofish is resolved (pattern_substs_on_*_struct.rs). A trait's const through a qualified path
+/// (`<A<'a> as Tr>::IC`) requires what its impl's self type writes
+#[test]
+fn written_ctor_lifetimes() {
+    let pre = "use std::cell::Cell;\nenum E<T> { V(T), W { t: T }, U }\nstruct P<T>(T);\nstruct S<T> { t: T }\nfn combine<T>(_: T, _: T) {}\n";
+    let at = |body: &str| check(&format!("{pre}{body}\nfn main() {{}}\n"));
+    for (body, line) in [
+        ("fn a() {\n    let c = 66;\n    E::V::<&'static u32>(&c);\n}", 8),
+        ("fn a<'a>(_d: &'a u32) {\n    let c = 66;\n    E::W::<&'a u32> { t: &c };\n}", 8),
+        ("fn a() {\n    let c = 66;\n    combine(E::V(Cell::new(&c)), E::U::<Cell<&'static u32>>);\n}", 8),
+        ("fn a() {\n    let c = 66;\n    P::<&'static u32>(&c);\n}", 8),
+        ("fn a<'a>(_d: &'a u32) {\n    let c = 66;\n    S::<&'a u32> { t: &c };\n}", 8),
+    ] {
+        let d = at(body);
+        assert!(d.len() == 1 && d[0].0 == line && d[0].1.contains("does not live long enough"), "{body}: {d:?}");
+    }
+    for body in [
+        "fn a<'a>(c: &'a u32) {\n    E::V::<&'a u32>(c);\n    E::W::<&'a u32> { t: c };\n    combine(E::V(Cell::new(c)), E::U::<Cell<&'a u32>>);\n    P::<&'a u32>(c);\n    S::<&'a u32> { t: c };\n}",
+        "fn a() {\n    let c = 66;\n    E::V::<&u32>(&c);\n    P::<&u32>(&c);\n    S::<&u32> { t: &c };\n    let f = P::<&u32>;\n    f(&c);\n}",
+    ] {
+        assert_eq!(at(body), vec![], "{body}");
+    }
+    let d = check("struct Foo<'a> { field: &'a u32 }\nfn main() {\n    let y = 22;\n    let foo = Foo { field: &y };\n    let Foo::<'static> { field: _z } = foo;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    let d = check("struct T<'a>(&'a u32);\nfn main() {\n    let z = 23;\n    let t = T(&z);\n    match t {\n        T::<'static>(_w) => {}\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    let d = check("struct A<'a>(&'a ());\ntrait Tr { const IC: i32; }\nimpl Tr for A<'static> { const IC: i32 = 10; }\nfn f<'a>() -> i32 { <A<'a> as Tr>::IC }\nfn g() -> i32 { <A<'static> as Tr>::IC }\nfn main() { println!(\"{}\", f() + g()); }\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("'a` must outlive `'static"), "{d:?}");
+}
+
+/// The lifetimes a path call writes on its type are the impl's (nll/user-annotations/method-ufcs-inherent-*.rs):
+/// `A::<'a>::new(&v, 22)` and `<A<'a>>::new(&v, 22)` with `impl<'a> A<'a> { fn new(x: &'a u32, ..) }` require v to
+/// outlive 'a, in a fn of one region too; a call in the arguments does not take them
+#[test]
+fn path_call_self_lifetimes() {
+    let pre = "struct A<'a> { x: &'a u32 }\nimpl<'a> A<'a> {\n    fn new<T>(x: &'a u32, _y: T) -> Self { Self { x } }\n    fn id(x: &u32) -> u32 { *x }\n}\n";
+    let at = |body: &str| check(&format!("{pre}{body}\nfn main() {{}}\n"));
+    for body in [
+        "fn f<'a>() {\n    let v = 22;\n    let _x = A::<'a>::new(&v, 22);\n}",
+        "fn f<'a>() {\n    let v = 22;\n    let _x = <A<'a>>::new(&v, 22);\n}",
+        "fn f() {\n    let v = 22;\n    let _x = A::<'static>::new(&v, A::id(&3));\n}",
+    ] {
+        let d = at(body);
+        assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("does not live long enough"), "{body}: {d:?}");
+    }
+    assert_eq!(at("fn f<'a>(c: &'a u32) -> A<'a> {\n    let v = 22;\n    let _n = A::<'a>::id(&v);\n    A::<'a>::new(c, A::<'a>::id(&v))\n}"), vec![]);
+}
+
+/// A trait object's method borrows the receiver by `&self` / `&mut self`, and a result that borrows from self holds
+/// the loan (borrowck/borrowck-object-lifetime.rs, borrowck-borrow-mut-object-twice.rs). A blanket impl's method
+/// (`impl<T> Fake for T`) is found for `()`, a reference to a number or `()`, and a reference to a `Box`: Self is the
+/// referent, and the reference is the receiver
+#[test]
+fn dyn_receiver_loans_and_blanket_receivers() {
+    let pre = "trait Fake { fn use_mut(&mut self) {} fn use_ref(&self) {} }\nimpl<T> Fake for T {}\ntrait Foo { fn borrowed(&self) -> &(); fn mut_borrowed(&mut self) -> &(); }\n";
+    let at = |body: &str| check(&format!("{pre}{body}\nfn main() {{}}\n"));
+    let d = at("fn f(x: &mut dyn Foo) {\n    let y = x.borrowed();\n    let _z = x.mut_borrowed();\n    y.use_ref();\n}");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot borrow `*x` as mutable"), "{d:?}");
+    let d = at("fn f(mut x: Box<dyn Foo>) {\n    let y = x.borrowed();\n    let _z = &mut x;\n    y.use_ref();\n}");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
+    assert_eq!(at("fn f(x: &dyn Foo, b: Box<dyn Foo>) {\n    let y = x.borrowed();\n    let z = x.borrowed();\n    z.use_ref();\n    y.use_ref();\n    let w = b.borrowed();\n    let v = &b;\n    v.use_ref();\n    w.use_ref();\n}"), vec![]);
+    let d = at("fn f() {\n    let mut void = ();\n    let first = &mut void;\n    let second = &mut void;\n    first.use_mut();\n    second.use_mut();\n}");
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+    assert_eq!(at("fn f() {\n    let mut n = 3u8;\n    let r = &mut n;\n    r.use_mut();\n    ().use_ref();\n    let u = &();\n    u.use_ref();\n}"), vec![]);
+}
+
+/// A struct whose field nests two of its lifetimes (`p: &'a mut &'b i32`) relates the borrows it is built from: in a
+/// fn the gate leaves out (no region in its signature), the region check is on from its start
+/// (nll/capture-ref-in-struct.rs). A blanket impl's method on `()` is `()`'s only when the impl's bounds hold of it
+#[test]
+fn nested_lifetime_struct_gate_and_blanket_bounds() {
+    let src = "struct S<'a, 'b: 'a> {\n    p: &'a mut &'b i32,\n    y: &'b i32,\n}\nimpl<'a, 'b> S<'a, 'b> {\n    fn invoke(self) {\n        *self.p = self.y;\n    }\n}\nfn deref(_: &i32) {}\nfn test() {\n    let x = 44;\n    let mut p = &x;\n    {\n        let y = 22;\n        let s = S { p: &mut p, y: &y };\n        s.invoke();\n    }\n    deref(p);\n}\nfn main() {}\n";
+    let d = check(src);
+    assert!(d.len() == 1 && d[0].0 == 16 && d[0].1.contains("`y` does not live long enough"), "{d:?}");
+    assert_eq!(check(&src.replace("let y = 22;", "let y = &x;").replace("y: &y", "y")), vec![]);
+    let d = check("trait Tr { fn go(&self) -> u8 { 1 } }\ntrait Other {}\nimpl<T: ?Sized> Tr for T where T: Other {}\nfn main() {\n    let _x = ().go();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("no method `go`"), "{d:?}");
 }
