@@ -475,6 +475,8 @@ impl Cx<'_> {
             }
         }
         // ブランケット impl のメソッドをプリミティブ型・&str で呼ぶ (`5.describe()` / `"x".describe()`)
+        // (and `()`, and a reference to one (`r.use_mut()` with `r: &mut ()`): Self is the referent, and the reference
+        // itself is the receiver, as rustc's probe matches `&mut self` with it)
         if let Some(&bid) = self.prog.blanket.get(method) {
             let pt = self.peek(recv);
             let prim = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char);
@@ -482,18 +484,42 @@ impl Cx<'_> {
                 Some(Ty::Struct(sid)) => self.prog.method(sid, method).is_some(),
                 _ => false,
             };
-            if !own && pt.is_some_and(|t| prim(t) || matches!(t, Ty::Ref(_, Ty::Str))) {
+            // (`()`, and what is behind a reference (a `Box` too: Self is the box, before the deref to what it
+            // holds), when the impl's bounds hold of it: `impl<T: ?Sized> FutureExt for T where T: Future` is not
+            // `()`'s)
+            let bsig = &self.prog.sigs[bid as usize];
+            let bounds = bsig.trait_of.as_deref().or(bsig.impl_trait.as_deref()).and_then(|tr| self.prog.blanket_bounds.get(tr));
+            let holds = |t: Ty| bounds.is_none_or(|bs| bs.iter().all(|b| b.starts_with('?') || b.starts_with('\'') || self.prog.implements(t, b)));
+            let extra = |t: Ty| (prim(t) || matches!(t, Ty::Unit | Ty::Box(_))) && holds(t);
+            let to_prim = matches!(pt, Some(Ty::Ref(_, i)) if extra(*i));
+            if !own && pt.is_some_and(|t| prim(t) || matches!(t, Ty::Ref(_, Ty::Str)) || (t == Ty::Unit && holds(t))) || (!own && to_prim) {
                 let (v, t) = self.expr(recv, None)?;
-                let Some(v) = v else { return Ok((None, Ty::Never)) };
-                // (&self に渡すのは値のアドレス。&str は fat pointer の置き場所のアドレスがそのまま &&str)
-                let addr = if t.is_fat() {
-                    v
-                } else {
-                    let ss = self.slot(t);
-                    self.b.ins().stack_store(v, ss, 0);
-                    self.b.ins().stack_addr(PTR, ss, 0)
-                };
+                if t == Ty::Never {
+                    return Ok((None, Ty::Never));
+                }
                 let args: Vec<&Expr> = margs.iter().collect();
+                if let (Ty::Ref(m, i), Some(v)) = (t, v) {
+                    if extra(*i) {
+                        // (a `&self` method through a `&mut`: the reference is shared for it)
+                        let self_mut = matches!(self.prog.sigs[bid as usize].params.first(), Some(Ty::Ref(true, _)));
+                        return self.call_fn(bid, Some((v, Ty::Ref(m && self_mut, i))), &args, tf, expected, SP);
+                    }
+                }
+                // (&self に渡すのは値のアドレス。&str は fat pointer の置き場所のアドレスがそのまま &&str; `()` は
+                // 1 バイトの置き場所)
+                let addr = match v {
+                    Some(v) if t.is_fat() => v,
+                    Some(v) => {
+                        let ss = self.slot(t);
+                        self.b.ins().stack_store(v, ss, 0);
+                        self.b.ins().stack_addr(PTR, ss, 0)
+                    }
+                    None if t == Ty::Unit => {
+                        let ss = self.slot(Ty::U8);
+                        self.b.ins().stack_addr(PTR, ss, 0)
+                    }
+                    None => return Ok((None, Ty::Never)),
+                };
                 return self.call_fn(bid, Some((addr, Ty::Ref(false, intern(t)))), &args, tf, expected, SP);
             }
         }

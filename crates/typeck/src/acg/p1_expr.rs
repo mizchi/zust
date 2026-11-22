@@ -2750,6 +2750,15 @@ impl Cx<'_> {
         }
         let args: Vec<&Expr> = margs.iter().collect();
         let decl = decls[idx];
+        // (the receiver is borrowed by `&self` / `&mut self`, and a result that borrows from self holds the loan:
+        // `let y = x.f1(); x.f2(); y.use_ref();` with x a `&mut dyn Foo` is E0499)
+        if self.bk_on() && !by_box {
+            if let (Expr::MethodCall(recv, ..), Some(&Ty::Ref(m, _))) = (mc, self.prog.sigs[decl as usize].params.first()) {
+                let flows = self.bk_ret_from(decl, 0);
+                let ev = self.bk_recv_ev(recv, Ty::Ref(m, intern(Ty::Unit)), flows);
+                self.bk_push(ev);
+            }
+        }
         let r = self.dyn_call(fat, idx, &ps, ret, &args, SP);
         if r.is_ok() {
             self.rg_dyn_call(mc, decl, &sol, &ps, ret);

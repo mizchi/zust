@@ -1945,3 +1945,34 @@ fn path_call_self_lifetimes() {
     }
     assert_eq!(at("fn f<'a>(c: &'a u32) -> A<'a> {\n    let v = 22;\n    let _n = A::<'a>::id(&v);\n    A::<'a>::new(c, A::<'a>::id(&v))\n}"), vec![]);
 }
+
+/// A trait object's method borrows the receiver by `&self` / `&mut self`, and a result that borrows from self holds
+/// the loan (borrowck/borrowck-object-lifetime.rs, borrowck-borrow-mut-object-twice.rs). A blanket impl's method
+/// (`impl<T> Fake for T`) is found for `()`, a reference to a number or `()`, and a reference to a `Box`: Self is the
+/// referent, and the reference is the receiver
+#[test]
+fn dyn_receiver_loans_and_blanket_receivers() {
+    let pre = "trait Fake { fn use_mut(&mut self) {} fn use_ref(&self) {} }\nimpl<T> Fake for T {}\ntrait Foo { fn borrowed(&self) -> &(); fn mut_borrowed(&mut self) -> &(); }\n";
+    let at = |body: &str| check(&format!("{pre}{body}\nfn main() {{}}\n"));
+    let d = at("fn f(x: &mut dyn Foo) {\n    let y = x.borrowed();\n    let _z = x.mut_borrowed();\n    y.use_ref();\n}");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot borrow `*x` as mutable"), "{d:?}");
+    let d = at("fn f(mut x: Box<dyn Foo>) {\n    let y = x.borrowed();\n    let _z = &mut x;\n    y.use_ref();\n}");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
+    assert_eq!(at("fn f(x: &dyn Foo, b: Box<dyn Foo>) {\n    let y = x.borrowed();\n    let z = x.borrowed();\n    z.use_ref();\n    y.use_ref();\n    let w = b.borrowed();\n    let v = &b;\n    v.use_ref();\n    w.use_ref();\n}"), vec![]);
+    let d = at("fn f() {\n    let mut void = ();\n    let first = &mut void;\n    let second = &mut void;\n    first.use_mut();\n    second.use_mut();\n}");
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+    assert_eq!(at("fn f() {\n    let mut n = 3u8;\n    let r = &mut n;\n    r.use_mut();\n    ().use_ref();\n    let u = &();\n    u.use_ref();\n}"), vec![]);
+}
+
+/// A struct whose field nests two of its lifetimes (`p: &'a mut &'b i32`) relates the borrows it is built from: in a
+/// fn the gate leaves out (no region in its signature), the region check is on from its start
+/// (nll/capture-ref-in-struct.rs). A blanket impl's method on `()` is `()`'s only when the impl's bounds hold of it
+#[test]
+fn nested_lifetime_struct_gate_and_blanket_bounds() {
+    let src = "struct S<'a, 'b: 'a> {\n    p: &'a mut &'b i32,\n    y: &'b i32,\n}\nimpl<'a, 'b> S<'a, 'b> {\n    fn invoke(self) {\n        *self.p = self.y;\n    }\n}\nfn deref(_: &i32) {}\nfn test() {\n    let x = 44;\n    let mut p = &x;\n    {\n        let y = 22;\n        let s = S { p: &mut p, y: &y };\n        s.invoke();\n    }\n    deref(p);\n}\nfn main() {}\n";
+    let d = check(src);
+    assert!(d.len() == 1 && d[0].0 == 16 && d[0].1.contains("`y` does not live long enough"), "{d:?}");
+    assert_eq!(check(&src.replace("let y = 22;", "let y = &x;").replace("y: &y", "y")), vec![]);
+    let d = check("trait Tr { fn go(&self) -> u8 { 1 } }\ntrait Other {}\nimpl<T: ?Sized> Tr for T where T: Other {}\nfn main() {\n    let _x = ().go();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("no method `go`"), "{d:?}");
+}

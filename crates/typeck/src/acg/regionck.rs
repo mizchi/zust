@@ -3633,6 +3633,27 @@ impl Cx<'_> {
     }
 
     /// Keep the tree of the call just lowered, as the value of e
+    /// A value of an ADT whose field nests two of its lifetimes (`p: &'a mut &'b i32`) relates the borrows it is
+    /// built from (a method may store one through the other): the region check of a function the gate left out is
+    /// turned on before its fields are lowered, from the function's start if a local bound before has no tree
+    /// (nll/capture-ref-in-struct.rs)
+    pub(crate) fn rg_adt_on(&mut self, base: u32) {
+        if self.rg.on || !self.rg.eligible || self.inline_depth != 0 {
+            return;
+        }
+        let Some(r) = self.prog.adt_regions.get(&base) else { return };
+        if r.lts.len() < 2 {
+            return;
+        }
+        let nests = r.fields.iter().any(|f| {
+            let mut first = None;
+            f.iter().any(|&c| c < R_STATIC && *first.get_or_insert(c) != c)
+        });
+        if nests {
+            self.rg_late_on();
+        }
+    }
+
     /// A constructor's path that writes lifetimes turns the region check on, before what it holds is lowered
     pub(crate) fn rg_written_on(&mut self, path: &crate::parse::Path) {
         if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && path.segs.iter().any(|s| !s.args.is_empty()) && crate::regions::path_names_lt(path) {

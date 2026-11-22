@@ -279,6 +279,9 @@ pub struct Program {
     pub opt: bool,
     /// ブランケット impl のメソッド (名前 → 関数 id) と、その self 型の型パラメータ名
     pub blanket: FxMap<String, u32>,
+    /// A blanket impl's trait → the bounds of its self type's parameter, its where clauses' too
+    /// (`impl<T: ?Sized> FutureExt for T where T: Future`: ?Sized, Future)
+    pub blanket_bounds: FxMap<String, Vec<String>>,
     pub blanket_selfs: HashSet<String>,
     /// Traits with a blanket impl (`impl<T> Tr for T`): every type implements them (bounds are not checked)
     pub blanket_traits: HashSet<String>,
@@ -781,6 +784,7 @@ impl Program {
             prim_mut_methods: HashSet::default(),
             opt: false,
             blanket: FxMap::default(),
+            blanket_bounds: FxMap::default(),
             blanket_selfs: Default::default(),
             blanket_traits: Default::default(),
             unions: Default::default(),
@@ -1526,6 +1530,9 @@ impl Program {
                 }
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
+                if let Some(g) = sm.impl_generics.iter().find(|g| g.0 == *sn) {
+                    p.blanket_bounds.entry(tr.clone()).or_default().extend(g.1.iter().cloned());
+                }
                 // (the trait's default methods are methods of every type)
                 let ids: Vec<u32> = p.traits.get(tr).cloned().unwrap_or_default();
                 for id in ids {
