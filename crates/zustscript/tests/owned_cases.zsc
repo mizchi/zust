@@ -146,6 +146,17 @@ enum Tree { Leaf(Array<f64>), Node(Poly, Array<f64>), Nil }
   }
 }
 
+// an element matched while the arm replaces its array (the element cannot be moved out, so it is copied)
+@wasm fn match_index(n: i32) -> f64 {
+  let mut xs = [mk(n).pts];
+  match xs[0] {
+    row => {
+      xs = [[2.0]];
+      (row.len() as f64) + sum(xs[0])
+    },
+  }
+}
+
 // the result borrows only from the first parameter: a temporary second argument needs no copy
 @wasm fn first(a: Array<f64>, b: Array<f64>) -> Array<f64> { let k = b.len(); a }
 @wasm fn wrap(a: Array<f64>) -> Array<f64> { first(a, [2.0]) }
@@ -155,7 +166,7 @@ enum Tree { Leaf(Array<f64>), Node(Poly, Array<f64>), Nil }
 @wasm fn grow__js(x: f64) -> f64 { x + 1.0 }
 
 @wasm pub fn more(n: i32) -> Array<f64> {
-  [arg_assign(n), typed_concat(n), shadow_call(n), long_rows(n), loop_call(n), loop_dead(n), short_circuit(n), match_call(n), sum(wrap(mk(n).pts)), grow__js(1.0)]
+  [arg_assign(n), typed_concat(n), shadow_call(n), long_rows(n), loop_call(n), loop_dead(n), short_circuit(n), match_call(n), sum(wrap(mk(n).pts)), grow__js(1.0), match_index(n)]
 }
 
 @wasm pub fn cases(n: i32) -> Array<f64> {

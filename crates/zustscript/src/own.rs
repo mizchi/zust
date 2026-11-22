@@ -412,16 +412,18 @@ impl Lv<'_> {
                 let mut frozen = vec![];
                 if (self.copy)(sc.id) {
                     // (a Copy value: the patterns copy, nothing is borrowed)
+                } else if sc_reads.iter().any(|b| assigns.contains(b)) {
+                    // (checked first: a scrutinee that cannot be moved, `xs[0]`, would otherwise be borrowed across the
+                    // assignment; lowering takes a value of it, moved when it can be)
+                    if self.record {
+                        self.out.clone_root.insert(e.id);
+                    }
                 } else if let Some(r) = root
                     && !after.contains(&r)
                     && !reads.contains(&r)
                 {
                     if self.record {
                         self.out.match_move.insert(e.id);
-                    }
-                } else if sc_reads.iter().any(|b| assigns.contains(b)) {
-                    if self.record {
-                        self.out.clone_root.insert(e.id);
                     }
                 } else {
                     frozen.extend(sc_reads);

@@ -259,7 +259,7 @@ fn owned_same_in_js_and_wasm() {
     assert!(rs.contains("zs_longer(a, b).to_vec()"), "{rs}");
 
     let (out, rs) = run("tests/owned_cases.zsc", "owned_cases", "[m.cases(4), m.more(4), m.grow([5])]");
-    assert_eq!(out, "[[66.5,24,21.5,41.5,36,18.5,38,36],[65,10,5,4,9,6,4,13,6,2],[5,1]]\n");
+    assert_eq!(out, "[[66.5,24,21.5,41.5,36,18.5,38,36],[65,10,5,4,9,6,4,13,6,2,6],[5,1]]\n");
     // a result that borrows only its first parameter: a temporary second argument needs no copy
     assert!(rs.contains("fn zs_wrap<'a>(a: &'a [f64]) -> &'a [f64]"), "{rs}");
     assert!(rs.contains("fn zs_first<'a>(a: &'a [f64], b: &[f64]) -> &'a [f64]"), "{rs}");
@@ -268,6 +268,8 @@ fn owned_same_in_js_and_wasm() {
     // the iterable is reassigned in the body: a dead one is taken, a borrowed one through a call is copied
     assert!(rs.contains("for x in xs.into_iter() {\nxs = vec![x];"), "{rs}");
     assert!(rs.contains("for x in (zs_id(&xs[..])).to_vec().into_iter() {"), "{rs}");
+    // an element matched while its array is replaced in the arm: copied first (it cannot be moved out)
+    assert!(rs.contains("match xs[(0i32) as usize].to_vec() {"), "{rs}");
     // `&&`'s right operand may not run: the push on its left copies
     assert!(rs.contains("({ let mut __zs_v = xs.to_vec(); __zs_v.push(2.0f64); __zs_v })"), "{rs}");
     // a local borrowed by one argument and consumed by the other is copied for the consumer only
