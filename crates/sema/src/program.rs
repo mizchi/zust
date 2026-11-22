@@ -1838,8 +1838,8 @@ impl Program {
             }
         }
         p.any_immutable_static = p.consts.iter().any(|c| c.stat == Some(false) && (c.item as usize) < user);
-        // (a trait other than Clone with a fn `clone`, or a blanket `clone`: what default_method may find for a `.clone()`)
-        p.trait_clone_fns = p.blanket.contains_key("clone") || p.traits.iter().any(|(t, ds)| t != "Clone" && ds.iter().any(|&d| p.names.get(d as usize).is_some_and(|n| n.rsplit("::").next() == Some("clone"))));
+        // (a body, whatever the trait's name: the prelude's `Clone::clone` has none, a program's own `trait Clone` may)
+        p.trait_clone_fns = p.blanket.contains_key("clone") || p.traits.values().flatten().any(|&d| p.sigs[d as usize].has_body && p.names.get(d as usize).is_some_and(|n| n.rsplit("::").next() == Some("clone")));
         Ok(p)
     }
 

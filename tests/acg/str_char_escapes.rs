@@ -14,6 +14,8 @@ fn main() {
         print!("[{}]", c.escape_default());
     }
     println!(" {}", '\\'.escape_default().count());
+    // (an escape is written whole: no width or precision applies)
+    println!("[{:.3}] [{:>8}]", '\u{e9}'.escape_unicode(), 'a'.escape_default());
     match &*NAME.to_ascii_lowercase() {
         "hello world" => println!("lower"),
         _ => println!("other"),
