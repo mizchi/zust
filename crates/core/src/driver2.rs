@@ -1514,11 +1514,13 @@ impl Session2 {
         }
         // (E0191 at a `dyn Tr` in a type that leaves one of the trait's associated types without a value; before
         // E0038, as rustc)
-        if let Some(e) = first_dyn_unspecified_assoc(&src, src0, &items[..user]) {
+        // (one look at the program's own text for `dyn`, for this and E0038's check)
+        let has_dyn = items[..user].last().is_some_and(|l| src[..l.end.min(src.len())].contains("dyn"));
+        if let Some(e) = has_dyn.then(|| first_dyn_unspecified_assoc(&src, src0, &items[..user])).flatten() {
             return Err(e);
         }
         // (in a check (zustc check, the LSP): a build stays as fast as it was, and reports it when it makes the vtable)
-        if let Some(e) = self.checking.then(|| dyn_in_signature(&prog, &src, &items)).flatten() {
+        if let Some(e) = (self.checking && has_dyn).then(|| dyn_in_signature(&prog, &src, &items)).flatten() {
             return Err(e);
         }
         // (E0277: a static is reachable from every thread, so its type must be Sync)
@@ -2430,25 +2432,34 @@ fn bound_at(t: &[(u8, usize, usize)], b: &[u8], mut k: usize) -> Option<(usize, 
     Some((at, name, parts, k))
 }
 
-/// A `<..>`'s parts split into the arguments as rustc shows them (`<(), Vec<u8>>`, or "" without any) and the
-/// associated types they bind (`Item = u8`, `Item: Copy`); a supertrait's binding whose value names `Self`
-/// (`Base<Output = <Self as Helper>::Target>`) is left out with `self_free`, as dyn does not know `Self`
-fn split_assoc_args<'a>(t: &[(u8, usize, usize)], text: &'a str, parts: &[(usize, usize)], self_free: bool) -> (String, Vec<&'a str>) {
+/// The associated types a `<..>`'s parts bind (`Item = u8`, `Item: Copy`); a supertrait's binding whose value names
+/// `Self` (`Base<Output = <Self as Helper>::Target>`) is left out with `self_free`, as dyn does not know `Self`
+fn assoc_bindings<'a>(t: &[(u8, usize, usize)], text: &'a str, parts: &[(usize, usize)], self_free: bool) -> Vec<&'a str> {
     let b = text.as_bytes();
     let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && b[t[q].1] == c;
-    let (mut shown, mut bound) = (vec![], vec![]);
+    let mut bound = vec![];
     for &(a, z) in parts {
         let binds = sym(a + 1, b'=') && !sym(a + 2, b'=') || sym(a + 1, b':') && !sym(a + 2, b':');
-        if t[a].0 == 0 && a < z && binds && !(t[a].1 > 0 && b[t[a].1 - 1] == b'\'') {
-            if !self_free || !(a + 2..=z).any(|q| t[q].0 == 0 && &text[t[q].1..t[q].2] == "Self") {
-                bound.push(&text[t[a].1..t[a].2]);
-            }
-        } else {
-            let from = t[a].1 - usize::from(t[a].1 > 0 && b[t[a].1 - 1] == b'\'');
-            shown.push(text[from..t[z].2].split_whitespace().collect::<Vec<_>>().join(" "));
+        if t[a].0 == 0 && a < z && binds && !(t[a].1 > 0 && b[t[a].1 - 1] == b'\'') && (!self_free || !(a + 2..=z).any(|q| t[q].0 == 0 && &text[t[q].1..t[q].2] == "Self")) {
+            bound.push(&text[t[a].1..t[a].2]);
         }
     }
-    (if shown.is_empty() { String::new() } else { format!("<{}>", shown.join(", ")) }, bound)
+    bound
+}
+
+/// A `<..>`'s type and const arguments as rustc shows them (`<(), Vec<u8>>`), or "" without any
+fn shown_args(t: &[(u8, usize, usize)], text: &str, parts: &[(usize, usize)]) -> String {
+    let b = text.as_bytes();
+    let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && b[t[q].1] == c;
+    let mut shown = vec![];
+    for &(a, z) in parts {
+        let binds = sym(a + 1, b'=') && !sym(a + 2, b'=') || sym(a + 1, b':') && !sym(a + 2, b':');
+        let lifetime = t[a].1 > 0 && b[t[a].1 - 1] == b'\'';
+        if !(t[a].0 == 0 && a < z && binds && !lifetime) {
+            shown.push(text[t[a].1 - usize::from(lifetime)..t[z].2].split_whitespace().collect::<Vec<_>>().join(" "));
+        }
+    }
+    if shown.is_empty() { String::new() } else { format!("<{}>", shown.join(", ")) }
 }
 
 /// E0191 at a trait object written in a type (`type Foo = dyn Tr;`, `fn f(x: &dyn Tr)`) that leaves an associated
@@ -2456,9 +2467,17 @@ fn split_assoc_args<'a>(t: &[(u8, usize, usize)], text: &'a str, parts: &[(usize
 /// associated type makes the trait not dyn compatible instead (E0038), and `where Self: Sized` exempts a type
 fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
     use crate::lexer::ItemKind;
-    let (Some(first), Some(last)) = (items.first(), items.last()) else { return None };
-    let region = &src[first.start..last.end];
-    if !region.contains("dyn") {
+    // (the `dyn`s of the program: identifiers the lexer found, so none in a string or a comment)
+    let sb = src.as_bytes();
+    let dyns: Vec<(usize, usize, Option<(u32, u32)>)> = items
+        .iter()
+        .enumerate()
+        .flat_map(|(i, it)| {
+            let ids = &it.idents;
+            (0..ids.len()).filter(move |&k| ids[k].1 - ids[k].0 == 3 && &sb[ids[k].0 as usize..ids[k].1 as usize] == b"dyn").map(move |k| (i, ids[k].0 as usize, ids.get(k + 1).copied()))
+        })
+        .collect();
+    if dyns.is_empty() {
         return None;
     }
     // (std's traits with associated types: (name, associated types, supertraits))
@@ -2486,10 +2505,16 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
             continue;
         }
         let Some(k) = it.idents.iter().position(|x| id(x) == "trait") else { continue };
-        let Some(name) = it.idents.get(k + 1).map(id) else { continue };
+        let Some(&(_, ne)) = it.idents.get(k + 1) else { continue };
+        let name = id(&it.idents[k + 1]);
         header_of.insert(i, name);
         if traits.contains_key(name) {
             traits.insert(name, None);
+            continue;
+        }
+        // (`trait Tr {`: no parameters and no supertraits, nothing to read)
+        if !src[ne as usize..it.end].contains(['<', ':']) {
+            traits.insert(name, Some((vec![], vec![], (0, 0))));
             continue;
         }
         let text = &src[it.start..it.end];
@@ -2526,8 +2551,7 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                 while q < t.len() && w(q) != "where" && !sym(q, b'{') {
                     match bound_at(&t, b, q) {
                         Some((_, n, parts, after)) => {
-                            let (shown, bound) = split_assoc_args(&t, text, &parts, true);
-                            sup.push((w(n), plain(w(n), &shown), bound));
+                            sup.push((w(n), plain(w(n), &shown_args(&t, text, &parts)), assoc_bindings(&t, text, &parts, true)));
                             q = after;
                         }
                         None => q += 1,
@@ -2560,28 +2584,42 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
             entry.0.push(id(&it.idents[k + 1]));
         }
     }
-    let marks = crate::prep::hoist_marks(src);
-    let mut at = 0;
-    while let Some(f) = region[at..].find("dyn") {
-        let off = first.start + at + f;
-        let Some(i) = items.partition_point(|it| it.start <= off).checked_sub(1) else { break };
+    for (i, off, next) in dyns {
         let it = &items[i];
-        // (every `dyn` of the item at once, then past it)
-        at = it.end.max(off + 3) - first.start;
-        if off >= it.end {
-            continue;
-        }
-        let text = &src[it.start..it.end];
-        let b = text.as_bytes();
-        let t = crate::lexer::tokenize(b);
-        let w = |q: usize| if q < t.len() && t[q].0 == 0 { &text[t[q].1..t[q].2] } else { "" };
-        for k in 0..t.len() {
-            if w(k) != "dyn" {
+        // (`dyn Handler` of a trait with no associated types and no supertraits, `dyn Any` of a trait this does not
+        // know: settled by the name after `dyn`, when it is the whole path, without reading tokens)
+        if let Some(n) = next.filter(|&(a, b)| src[off + 3..a as usize].trim().is_empty() && sb.get(b as usize) != Some(&b':')).map(|x| id(&x)) {
+            let simple = match traits.get(n) {
+                Some(Some((a, sups, _))) => a.is_empty() && sups.is_empty(),
+                Some(None) => true,
+                None => !STD.iter().any(|s| s.0 == n),
+            };
+            if simple {
                 continue;
             }
-            let Some((q, n, parts, _)) = bound_at(&t, b, k + 1) else { continue };
+        }
+        // (the tokens from the `dyn` on, as far as its bound goes: a window that grows while the bound's `<..>` is
+        // not closed in it)
+        let mut len = 48;
+        let (text, t, bound) = loop {
+            let mut end = (off + len).min(it.end);
+            while !src.is_char_boundary(end) {
+                end -= 1;
+            }
+            let text = &src[off..end];
+            let t = crate::lexer::tokenize(text.as_bytes());
+            let bound = bound_at(&t, text.as_bytes(), 1);
+            if bound.is_some() || end == it.end || len >= 1 << 16 {
+                break (text, t, bound);
+            }
+            len *= 4;
+        };
+        let b = text.as_bytes();
+        let w = |q: usize| if q < t.len() && t[q].0 == 0 { &text[t[q].1..t[q].2] } else { "" };
+        {
+            let Some((q, n, parts, _)) = bound else { continue };
             let name = w(n);
-            let (shown, bound) = split_assoc_args(&t, text, &parts, false);
+            let bound = assoc_bindings(&t, text, &parts, false);
             // (the type and const arguments: a wrong count is E0107 instead, as rustc)
             let sym = |r: usize, c: u8| r < t.len() && t[r].0 == 1 && b[t[r].1] == c;
             let args = parts
@@ -2591,6 +2629,18 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
             // (`std::iter::Iterator` is std's even when the program has a trait of the name)
             let first_seg = if w(q).is_empty() { w(q + 2) } else { w(q) };
             let std_path = n > q && matches!(first_seg, "std" | "core" | "alloc");
+            // (the usual case first: a trait without supertraits whose every associated type the object binds, or one
+            // left to another error (a wrong count of arguments, a generic associated type, not a trait this knows))
+            let in_std = STD.iter().find(|s| s.0 == name);
+            let settled = match traits.get(name) {
+                Some(None) => true,
+                Some(Some((a, sups, (req, all)))) if !(std_path && in_std.is_some()) => args < *req || args > *all || sups.is_empty() && a.iter().all(|x| bound.contains(x)),
+                _ => in_std.is_none_or(|s| args > 0 || s.2.is_empty() && s.1.iter().all(|x| bound.contains(x))),
+            };
+            if settled {
+                continue;
+            }
+            let shown = shown_args(&t, text, &parts);
             // (breadth first from the trait: a binding written on the object goes to the first trait that has the
             // name; a supertrait's binding to that supertrait, by whichever path it is reached (`A2: Service<Future =
             // F> + A1` with `A1: Service<Response = i32>` binds both))
@@ -2669,7 +2719,7 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                 each.sort();
                 format!("types {}", each.join(", "))
             };
-            let (line, col) = item_pos(src, orig, &marks, it, t[q].1);
+            let (line, col) = item_pos(src, orig, &crate::prep::hoist_marks(src), it, off - it.start + t[q].1);
             return Some(format!("{line}:{col}: the value of the associated {what} must be specified (E0191)"));
         }
     }
@@ -3125,12 +3175,8 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
 
 /// E0038: a fn of the program whose parameters or result name `dyn Tr` of a trait that is not dyn compatible (rustc
 /// checks the types a signature writes, called or not): at the fn's line
+/// (called only for a program whose own text has `dyn`)
 fn dyn_in_signature(prog: &Program, src: &str, items: &[SrcItem]) -> Option<String> {
-    // (only a program that writes `dyn`: one look at its own text)
-    let user_end = items.get((prog.prelude_from as usize).wrapping_sub(1)).map_or(0, |it| it.end);
-    if !src[..user_end.min(src.len())].contains("dyn") {
-        return None;
-    }
     fn dyns(prog: &Program, t: Ty, depth: u32, out: &mut Vec<&'static String>) {
         if depth > 8 {
             return;
