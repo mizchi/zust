@@ -2195,6 +2195,16 @@ fn move_closure_holds_what_its_value_captures_hold() {
     assert_eq!(check("fn f<'a>(s: &'a str) -> impl Fn() -> usize + 'a {\n    move || s.len()\n}\nfn main() {\n    let v = vec![1u32, 2];\n    let r = &v;\n    let g = move || r.len();\n    println!(\"{} {}\", f(\"ab\")(), g());\n}\n"), vec![]);
 }
 
+/// `(&x).clone()` with x: T and no `Clone` bound is the reference's copy: it borrows x (borrowck/
+/// borrowck-return-variable-on-stack-via-clone.rs, E0515)
+#[test]
+fn reference_clone_of_an_unbounded_param() {
+    let d = check("fn leak<'a, T>(x: T) -> &'a T {\n    (&x).clone()\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("`x`"), "{d:?}");
+    // (an instance's `x.clone()` with T a `Clone` type is that type's clone, not the reference's: not followed)
+    assert_eq!(check("fn dup<T: Clone>(x: &T) -> T {\n    x.clone()\n}\nfn main() {\n    let s = String::from(\"a\");\n    println!(\"{}\", dup(&s));\n}\n"), vec![]);
+}
+
 /// From the review of #64: a session's second check keeps a closure body's kind (its parent taken from the record);
 /// a `Deref` whose target is the type itself is not followed forever; a destructuring `let` writing `'static` turns
 /// the check on, and one with holes (`(&'static u8, _)`) is related element by element; a closure called holds a
@@ -2297,4 +2307,169 @@ fn part12_review_3() {
     // (a cycle through two types: type inference followed it until the stack overflowed)
     let d = check("use std::ops::Deref;\nstruct A {\n    x: u32,\n}\nstruct B {\n    y: u32,\n}\nstatic BB: B = B { y: 2 };\nstatic AA: A = A { x: 2 };\nimpl Deref for A {\n    type Target = B;\n    fn deref(&self) -> &B {\n        &BB\n    }\n}\nimpl Deref for B {\n    type Target = A;\n    fn deref(&self) -> &A {\n        &AA\n    }\n}\nfn main() {\n    let a = A { x: 1 };\n    println!(\"{}\", a.missing);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 24 && d[0].1.contains("reached the recursion limit while auto-dereferencing `A` (E0055)"), "{d:?}");
+}
+
+/// An impl's method against its trait through the header's arguments: `To` of `fn get_relation(&self) -> To` is the
+/// header's `&ProofReader`, a lifetime of the impl that `&self` is not known to outlive (traits/param-without-
+/// lifetime-constraint.rs); a header's `&'static` is not compared, and an impl's `&'static` input is less general
+/// (E0308 in rustc). A struct in a fn's signature with another number of lifetime arguments than it has is E0107
+#[test]
+fn part13_header_and_arity() {
+    let rel = "struct Article {\n    proof_reader: ProofReader,\n}\nstruct ProofReader {\n    name: String,\n}\npub trait HaveRelationship<To> {\n    fn get_relation(&self) -> To;\n}\n";
+    let d = check(&format!("{rel}impl HaveRelationship<&ProofReader> for Article {{\n    fn get_relation(&self) -> &ProofReader {{\n        &self.proof_reader\n    }}\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("`impl` item signature doesn't match `trait` item signature"), "{d:?}");
+    assert_eq!(check(&format!("{rel}impl HaveRelationship<&'static ProofReader> for Article {{\n    fn get_relation(&self) -> &'static ProofReader {{\n        static P: ProofReader = ProofReader {{ name: String::new() }};\n        &P\n    }}\n}}\nfn main() {{\n    let a = Article {{ proof_reader: ProofReader {{ name: String::new() }} }};\n    println!(\"{{}}\", a.get_relation().name.len() + a.proof_reader.name.len());\n}}\n")), vec![]);
+    let take = "trait Take<T> {\n    fn take(&self, t: T) -> usize;\n}\nstruct S;\n";
+    assert_eq!(check(&format!("{take}impl Take<&u8> for S {{\n    fn take(&self, t: &u8) -> usize {{\n        *t as usize\n    }}\n}}\nfn main() {{\n    let x = 3;\n    println!(\"{{}}\", S.take(&x));\n}}\n")), vec![]);
+    let d = check(&format!("{take}impl Take<&u8> for S {{\n    fn take(&self, t: &'static u8) -> usize {{\n        *t as usize\n    }}\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("`impl` item signature doesn't match"), "{d:?}");
+    let d = check("struct Foo<'c, 'd>(&'c (), &'d ());\nstruct Bar;\nimpl<'a> Bar {\n    fn boom(&self, foo: &mut Foo<'_, '_, 'a>) -> Option<&'a ()> {\n        let _ = foo;\n        None\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("struct takes 2 lifetime arguments but 3 lifetime arguments were supplied (E0107)"), "{d:?}");
+    assert_eq!(check("struct Foo<'c, 'd>(&'c (), &'d ());\nfn f<'a>(x: &Foo<'a, 'a>) -> Foo<'a, 'a> {\n    Foo(x.0, x.1)\n}\nfn g(x: Foo) -> u8 {\n    let _ = x;\n    1\n}\nfn main() {\n    let v = ();\n    let a = Foo(&v, &v);\n    let _ = f(&a);\n    let _ = g(Foo(&v, &v));\n}\n"), vec![]);
+}
+
+/// `let _ = s;` in a closure reads nothing of s, so the closure does not capture s for it (edition 2021): a `move`
+/// closure leaves s usable after it, and a `Box<dyn Fn()>` of it is `'static`. A typo there is still E0425, and a
+/// `let _x = r;` captures r
+#[test]
+fn part13_wild_let_in_closure() {
+    assert_eq!(check("fn main() {\n    let s = String::from(\"a\");\n    let c = move || {\n        let _ = s;\n    };\n    c();\n    println!(\"{}\", s);\n}\n"), vec![]);
+    assert_eq!(check("fn keep(_b: Box<dyn Fn()>) {}\nfn main() {\n    let y = 3;\n    let r = &y;\n    keep(Box::new(move || {\n        let _ = r;\n    }));\n}\n"), vec![]);
+    assert_eq!(check("struct P {\n    a: String,\n    b: u8,\n}\nfn main() {\n    let p = P { a: String::from(\"x\"), b: 1 };\n    let c = move || {\n        let _ = p.a;\n        p.b\n    };\n    println!(\"{} {}\", c(), p.a);\n}\n"), vec![]);
+    let d = check("fn main() {\n    let c = || {\n        let _ = typo;\n    };\n    c();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("cannot find value `typo`"), "{d:?}");
+    let d = check("fn keep(_b: Box<dyn Fn()>) {}\nfn main() {\n    let y = 3;\n    let r = &y;\n    keep(Box::new(move || {\n        let _x = r;\n    }));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`y` does not live long enough"), "{d:?}");
+}
+
+/// A block's tail's temporary whose `Drop` may see what it holds, holding a loan through another value (`id(rows)`,
+/// `rows.wrap()`: what rows held) is dropped after the block's locals: E0597 (nll/issue-54556-stephaneyfx.rs). A
+/// constructor's call with an argument known when it runs (`&Some(s)`, `&W(v)`) is a temporary, not promoted: E0716
+#[test]
+fn part13_tail_and_ctor_temps() {
+    let rows = "pub struct Statement;\npub struct Rows<'stmt>(&'stmt Statement);\nimpl<'stmt> Drop for Rows<'stmt> {\n    fn drop(&mut self) {}\n}\nimpl<'stmt> Rows<'stmt> {\n    fn wrap(self) -> Rows<'stmt> {\n        self\n    }\n    fn len(&self) -> usize {\n        0\n    }\n}\nfn id<T>(t: T) -> T {\n    t\n}\n";
+    for tail in ["id(rows).len()", "rows.wrap().len()"] {
+        let d = check(&format!("{rows}fn get() -> usize {{\n    let stmt = Statement;\n    let rows = Rows(&stmt);\n    {tail}\n}}\nfn main() {{\n    println!(\"{{}}\", get());\n}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 19 && d[0].1.contains("`stmt` does not live long enough"), "{tail}: {d:?}");
+    }
+    // (the tail's value is not a temporary that outlives the locals: `let n = ..; n`)
+    assert_eq!(check(&format!("{rows}fn get() -> usize {{\n    let stmt = Statement;\n    let rows = Rows(&stmt);\n    let n = id(rows).len();\n    n\n}}\nfn main() {{\n    println!(\"{{}}\", get());\n}}\n")), vec![]);
+    let d = check("fn f(x: &Option<String>) -> &Option<String> {\n    x\n}\nfn main() {\n    let s = String::new();\n    let r = f(&Some(s));\n    println!(\"{:?}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("temporary value dropped while borrowed"), "{d:?}");
+    assert_eq!(check("struct W(u32);\nfn f(x: &W) -> &W {\n    x\n}\nfn g(x: &Option<u32>) -> &Option<u32> {\n    x\n}\nfn main() {\n    let r = f(&W(3));\n    let o = g(&Some(4));\n    let v = 5;\n    let k = &Some(v);\n    println!(\"{} {:?} {:?}\", r.0, o, k);\n}\n"), vec![]);
+}
+
+/// `#![deny(mismatched_lifetime_syntaxes)]`: an output that writes an input's lifetime another way (`&'a u8` in,
+/// `&u8` out; `&u8` in, `S` out) is an error, at the item's line; the same syntax both ways is not. Denied on one
+/// item only, the others are not checked. `use<'_>` names the one input lifetime, not a missing one
+#[test]
+fn part13_mismatched_lifetime_syntaxes() {
+    let d = check("#![deny(mismatched_lifetime_syntaxes)]\nfn f<'a>(x: &'a u8) -> &u8 {\n    x\n}\nfn main() {\n    let v = 1;\n    let _ = f(&v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("eliding a lifetime that's named elsewhere is confusing"), "{d:?}");
+    let d = check("#![deny(mismatched_lifetime_syntaxes)]\nstruct S<'a>(&'a u8);\nfn g(x: &u8) -> S {\n    S(x)\n}\nfn main() {\n    let v = 1;\n    let _ = g(&v).0;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("hiding a lifetime that's elided elsewhere is confusing"), "{d:?}");
+    assert_eq!(check("#![deny(mismatched_lifetime_syntaxes)]\nstruct S<'a>(&'a u8);\nfn f<'a>(x: &'a u8) -> &'a u8 {\n    x\n}\nfn h(x: &u8) -> &u8 {\n    x\n}\nfn k(x: &u8) -> S<'_> {\n    S(x)\n}\nfn s<'a>(_x: &'a u8) -> &'static u8 {\n    &1\n}\nfn main() {\n    let v = 1;\n    let _ = (f(&v), h(&v), k(&v).0, s(&v));\n}\n"), vec![]);
+    let d = check("fn f<'a>(x: &'a u8) -> &u8 {\n    x\n}\n#[deny(mismatched_lifetime_syntaxes)]\nfn g<'a>(x: &'a u8) -> &u8 {\n    x\n}\nfn main() {\n    let v = 1;\n    let _ = (f(&v), g(&v));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("eliding a lifetime that's named elsewhere is confusing"), "{d:?}");
+    assert_eq!(check("fn f<'a>(x: &'a u8) -> &u8 {\n    x\n}\nfn main() {\n    let v = 1;\n    let _ = f(&v);\n}\n"), vec![]);
+    assert_eq!(check("fn e<'a>(v: &'a u8) -> impl FnOnce() + use<'_> {\n    move || {\n        let _ = v;\n    }\n}\nfn main() {\n    let x = 1;\n    e(&x)();\n}\n"), vec![]);
+}
+
+/// A closure's `let p: &'static mut usize = &mut self.food;`: the function is checked from the closure on (as for its
+/// own `'static` annotation), so what the closure reaches through `self` is borrowed for less than `'static`; a
+/// `'static` value there is fine
+#[test]
+fn part13_static_let_in_closure() {
+    let dog = "struct Dog {\n    food: usize,\n}\nimpl Dog {\n    pub fn chase(&mut self) {\n        let _f = || {\n            let p: &'static mut usize = &mut self.food;\n            *p = 3;\n        };\n    }\n}\nfn main() {}\n";
+    let d = check(dog);
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn f(x: &usize) {\n    let c = || {\n        let p: &'static usize = x;\n        let _ = *p;\n    };\n    c();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("fn f(x: &usize) {\n    let c = || {\n        let p: &'static str = \"lit\";\n        let q: &'static [u8] = &[1, 2];\n        p.len() + q.len() + *x\n    };\n    println!(\"{}\", c());\n}\nfn main() {\n    f(&1);\n}\n"), vec![]);
+}
+
+/// Where it is reported: a call that requires `T: 'static` of a function the check left out until there, with no
+/// argument (`s::<T>()`), at the call, not at the function's first line; a closure's capture written through a `&`
+/// (`z.0.0.0 = ..` with `z.0.0: &(String, String)`), at the closure, as rustc does
+#[test]
+fn part13_report_lines() {
+    let d = check("fn s<T: 'static>() {}\nfn test<T>() {\n    let _ = 1;\n    s::<T>();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("the parameter type `T` may not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = (String::new(), String::new());\n    let mut y = (&x, 1);\n    let z = (&mut y, 2);\n    let mut c = || {\n        z.0.0.0 = String::from(\"a\");\n    };\n    c();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("is behind a `&` reference"), "{d:?}");
+}
+
+/// A `&mut` local: `let b = a;` moves it (the type inference's type is no annotation), so a later use of a is E0382;
+/// `let b: &mut T = a;` reborrows `*a`, so a use of `*a` while b lives is E0506. A method's `&mut self` is taken
+/// at the call, while the arguments are live: `v.ext(&v)` is E0502 (two-phase borrows)
+#[test]
+fn part13_mut_ref_moves_and_two_phase() {
+    let d = check("fn f(s: &mut String) {\n    let alias = s;\n    let _n = s.len();\n    alias.push('a');\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("use of moved value: `s`"), "{d:?}");
+    let d = check("fn f(s: &mut String) {\n    let alias: &mut String = s;\n    *s = String::new();\n    alias.push('a');\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("cannot assign to `*s` because it is borrowed"), "{d:?}");
+    let d = check("struct S(Vec<i32>);\nimpl S {\n    fn ext(&mut self, _b: &S) {}\n}\nfn main() {\n    let mut v = S(vec![0]);\n    v.ext(&v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot borrow `v` as mutable because it is also borrowed as immutable"), "{d:?}");
+    let ok = "struct S(Vec<i32>);\nimpl S {\n    fn ext(&mut self, _b: &S) {}\n    fn add(&mut self, n: usize) {\n        self.0.push(n as i32);\n    }\n    fn len(&self) -> usize {\n        self.0.len()\n    }\n}\nfn walk<'a>(mut cur: &'a mut Vec<i32>, other: &'a mut Vec<i32>) {\n    let r: &mut Vec<i32> = cur;\n    r.push(1);\n    cur.push(2);\n    let t: &mut Vec<i32> = other;\n    t.push(3);\n    cur = t;\n    cur.push(4);\n}\nfn moves(a: &mut Vec<u8>) {\n    let b = a;\n    b.push(1);\n    let c = b;\n    c.push(2);\n}\nfn main() {\n    let mut v = S(vec![]);\n    let w = S(vec![1]);\n    v.ext(&w);\n    v.add(v.len());\n    let mut a = vec![1];\n    let mut b = vec![2];\n    walk(&mut a, &mut b);\n    let mut x = vec![1, 2];\n    let y = &mut x;\n    let z: &mut Vec<i32> = y;\n    z.push(3);\n    y.push(4);\n    let mut u = vec![];\n    moves(&mut u);\n    println!(\"{} {:?} {:?} {:?}\", v.len(), a, x, u);\n}\n";
+    assert_eq!(check(ok), vec![]);
+}
+
+/// `v.extend(&v)` / `v.extend(shared)` with `shared = &v`: the iterator the argument becomes holds a loan of v when
+/// v's `&mut` is taken (E0502, borrowck/two-phase-reservation-sharing-interference-2.rs). A closure that calls a
+/// captured `FnMut` closure borrows it mutably, so is `FnMut` itself: neither may be called through a binding not
+/// declared `mut` (unboxed-closures/unboxed-closures-infer-fnmut-calling-fnmut-no-mut.rs)
+#[test]
+fn part13_extend_and_fnmut_calls() {
+    let d = check("fn main() {\n    let mut v = vec![0, 1, 2];\n    let shared = &v;\n    v.extend(shared);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("cannot borrow `v` as mutable because it is also borrowed as immutable"), "{d:?}");
+    let d = check("fn main() {\n    let mut v = vec![0, 1, 2];\n    v.extend(&v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("cannot borrow `v` as mutable"), "{d:?}");
+    let d = check("fn main() {\n    let mut counter = 0;\n    let tick1 = || {\n        counter += 1;\n    };\n    let tick2 = || {\n        tick1();\n    };\n    let _ = tick2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot borrow `tick1` as mutable, as `tick1` is not declared as mutable"), "{d:?}");
+    let d = check("fn main() {\n    let mut counter = 0;\n    let mut tick1 = || {\n        counter += 1;\n    };\n    let tick2 = || {\n        tick1();\n    };\n    tick2();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("cannot borrow `tick2` as mutable"), "{d:?}");
+    let ok = "fn main() {\n    let mut v = vec![1, 2];\n    let w = vec![3];\n    v.extend(w.iter());\n    v.extend(v.clone());\n    v.extend(v.iter().copied().collect::<Vec<_>>());\n    v.extend(&w);\n    let mut s = String::new();\n    let o = String::from(\"ab\");\n    s.extend(o.chars());\n    let mut counter = 0;\n    let mut tick1 = || {\n        counter += 1;\n    };\n    let mut tick2 = || {\n        tick1();\n    };\n    tick2();\n    let base = 3;\n    let read = || base + 1;\n    let call = || read() + 1;\n    let mut acc = vec![];\n    let mut push = |x: i32| acc.push(x);\n    let mut twice = |x: i32| {\n        push(x);\n        push(x);\n    };\n    twice(call());\n    println!(\"{:?} {} {} {:?}\", v, s, counter, acc);\n}\n";
+    assert_eq!(check(ok), vec![]);
+}
+
+/// A reference copied out of what a call's result points into (`*names.first().unwrap()`, `m.first().copied()` with
+/// a `Vec<&str>`) holds what the vector holds, not the borrow of the vector: clearing it while the copy lives is fine.
+/// Dropping what the copy points to is not, and neither is a loan of the referent itself (`*id(&&s)`)
+#[test]
+fn part14_copied_out_references() {
+    assert_eq!(check("fn main() {\n    let a = String::from(\"a\");\n    let mut names: Vec<&str> = vec![&a];\n    let t = *names.first().unwrap();\n    names.clear();\n    let u = names.first().copied().unwrap_or(t);\n    names.clear();\n    let w = *names.first().unwrap_or(&\"x\");\n    names.clear();\n    println!(\"{} {} {}\", t, u, w);\n}\n"), vec![]);
+    assert_eq!(check("struct S<'a> {\n    items: Vec<&'a str>,\n}\nimpl<'a> S<'a> {\n    fn go(&mut self) -> &'a str {\n        let t = *self.items.first().unwrap();\n        self.items.clear();\n        t\n    }\n}\nfn main() {\n    let a = String::from(\"a\");\n    let mut s = S { items: vec![&a] };\n    println!(\"{}\", s.go());\n}\n"), vec![]);
+    let d = check("fn main() {\n    let a = String::from(\"a\");\n    let names: Vec<&str> = vec![&a];\n    let t = *names.first().unwrap();\n    drop(a);\n    println!(\"{}\", t);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot move out of `a` because it is borrowed"), "{d:?}");
+    let d = check("fn id<T>(t: T) -> T {\n    t\n}\nfn main() {\n    let s = String::from(\"a\");\n    let t = *id(&&s);\n    drop(s);\n    println!(\"{}\", t);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot move out of `s` because it is borrowed"), "{d:?}");
+    // (an `index` call's element (`m[&1]` of a HashMap), a `Copied` iterator's item; the iterator itself still holds
+    // the borrow)
+    assert_eq!(check("use std::collections::HashMap;\nfn main() {\n    let a = String::from(\"a\");\n    let mut m: HashMap<u8, &str> = HashMap::new();\n    m.insert(1, &a);\n    let x = m[&1];\n    m.clear();\n    let mut w: Vec<&str> = vec![&a];\n    let z = w.iter().copied().next().unwrap();\n    w.clear();\n    println!(\"{} {}\", x, z);\n}\n"), vec![]);
+    let d = check("fn main() {\n    let mut w: Vec<String> = vec![String::from(\"a\")];\n    let mut it = w.iter().cloned();\n    let z = it.next();\n    w.clear();\n    println!(\"{:?} {:?}\", z, it.next());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot borrow `w` as mutable"), "{d:?}");
+}
+
+/// From the review of #67: an item's lint attributes as lists (`#[deny(dead_code, mismatched_lifetime_syntaxes)]`,
+/// `#[allow(.., ..)]`, `#[expect(..)]`), a type parameter named as a struct hides no lifetime, `let _ = x;` is a use for
+/// the unused-variable lint, a `let .. else` block's `let _ = x;` and `'static` annotation in a closure, a program's own
+/// `clone`, a skipped `let _ = s.missing;` (E0609), and `s.take(s.get())` (E0502: the argument's shared loan is held
+/// until the `&mut self` is taken)
+#[test]
+fn part13_review() {
+    let d = check("#[deny(dead_code, mismatched_lifetime_syntaxes)]\nfn f<'a>(x: &'a u8) -> &u8 {\n    x\n}\nfn main() {\n    let v = 1;\n    let _ = f(&v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("eliding a lifetime that's named elsewhere is confusing"), "{d:?}");
+    assert_eq!(check("#![deny(mismatched_lifetime_syntaxes)]\nstruct S<'s>(&'s u8);\nfn f<'a, S>(x: &'a u8) -> (Option<S>, &'a u8) {\n    (None, x)\n}\nfn main() {\n    let v = 1;\n    let _ = f::<u8>(&v);\n    let _ = S(&v);\n}\n"), vec![]);
+    assert_eq!(check("#![deny(mismatched_lifetime_syntaxes)]\n#[allow(dead_code, mismatched_lifetime_syntaxes)]\nfn f<'a>(x: &'a u8) -> &u8 {\n    x\n}\n#[expect(mismatched_lifetime_syntaxes)]\nfn g<'a>(x: &'a u8) -> &u8 {\n    x\n}\nfn main() {\n    let v = 1;\n    let _ = (f(&v), g(&v));\n}\n"), vec![]);
+    assert_eq!(check("#![deny(unused_variables)]\nfn main() {\n    let x = 1;\n    let _ = x;\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let x = String::from(\"a\");\n    let o: Option<u8> = None;\n    let c = move || {\n        let Some(_y) = o else {\n            let _ = x;\n            return;\n        };\n    };\n    c();\n}\n"), vec![]);
+    let d = check("fn f(x: &usize, o: Option<u8>) {\n    let c = || {\n        let Some(_y) = o else {\n            let _p: &'static usize = x;\n            return;\n        };\n    };\n    c();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("struct S;\nstatic GLOBAL: S = S;\nimpl S {\n    fn clone(&self) -> &'static S {\n        &GLOBAL\n    }\n}\nfn f() -> &'static S {\n    let local = S;\n    (&local).clone()\n}\nfn main() {\n    let _ = f();\n}\n"), vec![]);
+    let d = check("struct P {\n    a: u8,\n}\nfn main() {\n    let s = P { a: 1 };\n    let c = || {\n        let _ = s.missing;\n    };\n    c();\n    let _ = s.a;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("no field `missing` on type `P` (E0609)"), "{d:?}");
+    let d = check("struct S {\n    n: u8,\n}\nimpl S {\n    fn get(&self) -> &u8 {\n        &self.n\n    }\n    fn take(&mut self, _x: &u8) {}\n}\nfn main() {\n    let mut s = S { n: 1 };\n    s.take(s.get());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 12 && d[0].1.contains("cannot borrow `s` as mutable because it is also borrowed as immutable"), "{d:?}");
+    assert_eq!(check("struct S {\n    n: u8,\n}\nimpl S {\n    fn get(&self) -> &u8 {\n        &self.n\n    }\n    fn take(&mut self, _x: &u8) {}\n    fn val(&self) -> u8 {\n        self.n\n    }\n    fn put(&mut self, _x: u8) {}\n}\nfn main() {\n    let mut s = S { n: 1 };\n    s.put(s.val());\n    s.put(*s.get());\n    let t = S { n: 2 };\n    s.take(t.get());\n    let a = String::from(\"a\");\n    let mut v: Vec<&str> = vec![&a];\n    v.push(v.first().unwrap().clone());\n    v.push(*v.last().unwrap());\n    v.push(v[0]);\n    let n = v.len();\n    v.truncate(n - 1);\n    let mut w = vec![1, 2];\n    w.push(w.len());\n    w.push(*w.last().unwrap());\n    let mut st = String::from(\"x\");\n    st.push_str(&st.clone());\n    println!(\"{} {:?} {:?} {}\", s.n, v, w, st);\n}\n"), vec![]);
+    assert_eq!(check("trait Dup: Clone {}\n#[derive(Clone)]\nstruct W(u8);\nimpl Dup for W {}\nfn duplicate<T: Dup>(x: T) -> T {\n    (&x).clone()\n}\nfn main() {\n    let w = duplicate(W(3));\n    println!(\"{}\", w.0);\n}\n"), vec![]);
 }

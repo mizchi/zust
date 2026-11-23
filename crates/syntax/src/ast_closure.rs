@@ -384,6 +384,8 @@ fn str_lit_body(t: &str) -> Option<&str> {
 struct Free {
     scopes: Vec<Vec<String>>,
     out: Vec<String>,
+    /// Count `let _ = s;` as a use of s (fake_reads)
+    keep_wild: bool,
 }
 
 impl Free {
@@ -405,6 +407,9 @@ impl Free {
         self.scopes.push(vec![]);
         for s in &b.stmts {
             match s {
+                // (`let _ = s;` / `let _ = s.f;` reads no value: a closure does not capture s for it (edition 2021's
+                // captures), so a `move` closure leaves s usable after it)
+                Stmt::Let(Pat::Wild, None, Some(e), None, ..) if !self.keep_wild && wild_fake_reads() && wild_read_only(e) => {}
                 Stmt::Let(p, _, init, els, ..) => {
                     if let Some(e) = init {
                         self.expr(e);
@@ -520,11 +525,100 @@ impl Free {
     }
 }
 
+/// Edition 2021 and later: `let _ = place;` in a closure captures nothing (the driver sets it for the program it
+/// analyzes; edition 2015 / 2018 capture the place's variable)
+pub static WILD_FAKE_READS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+fn wild_fake_reads() -> bool {
+    WILD_FAKE_READS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A place made of a variable and its fields (`s`, `s.f.g`, `(s)`): `let _ = place;` reads nothing of it
+fn wild_read_only(e: &Expr) -> bool {
+    match e {
+        Expr::Paren(x) => wild_read_only(x),
+        Expr::Field(b, ..) => wild_read_only(b),
+        Expr::Path(None, p) => !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty(),
+        _ => false,
+    }
+}
+
 /// クロージャの自由変数 (使われた順)
 pub fn free_vars(c: &Expr) -> Vec<String> {
-    let mut v = Free { scopes: vec![vec![]], out: Vec::new() };
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), keep_wild: false };
     v.expr(c);
     v.out
+}
+
+/// free_vars with `let _ = place;` a use of the place's variable (the unused-variable lint: rustc counts it as one)
+pub fn used_vars(c: &Expr) -> Vec<String> {
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), keep_wild: true };
+    v.expr(c);
+    v.out
+}
+
+/// The variables closure c reads only by `let _ = place;`, which it does not capture: its body skips those `let`s
+pub fn fake_reads(c: &Expr) -> Vec<String> {
+    // (none before edition 2021, where such a `let` captures; and none without such a `let`, found without the two
+    // walks of the body below: most closures have none)
+    if !wild_fake_reads() || !has_wild_read(c) {
+        return vec![];
+    }
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), keep_wild: true };
+    v.expr(c);
+    let caps = free_vars(c);
+    v.out.into_iter().filter(|n| !caps.contains(n)).collect()
+}
+
+/// The places of the `let _ = place;`s in e (in its `let .. else` blocks and the closures in it too)
+pub fn wild_reads(e: &Expr, out: &mut Vec<Expr>) {
+    fn block(b: &Block, out: &mut Vec<Expr>) {
+        for s in &b.stmts {
+            match s {
+                Stmt::Let(Pat::Wild, None, Some(x), None, ..) if wild_read_only(x) => out.push(x.clone()),
+                Stmt::Let(_, _, _, Some(els), ..) => {
+                    block(els, out);
+                    wild_reads(&Expr::Block(None, false, els.clone()), out);
+                }
+                _ => {}
+            }
+        }
+    }
+    if let Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) | Expr::If(_, b, _) | Expr::While(_, _, b) | Expr::For(_, _, _, b) = e {
+        block(b, out);
+    }
+    each_child(e, &mut |x| wild_reads(x, out));
+}
+
+/// A `let _ = place;` somewhere in e (in a closure in it too)
+fn has_wild_read(e: &Expr) -> bool {
+    // (a `let .. else`'s block too, which the walk of the children does not enter)
+    fn block(b: &Block) -> bool {
+        b.stmts.iter().any(|s| match s {
+            Stmt::Let(Pat::Wild, None, Some(x), None, ..) if wild_read_only(x) => true,
+            Stmt::Let(_, _, _, Some(els), ..) => block(els) || has_wild_read(&Expr::Block(None, false, els.clone())),
+            _ => false,
+        })
+    }
+    let here = match e {
+        Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) | Expr::If(_, b, _) | Expr::While(_, _, b) | Expr::For(_, _, _, b) => block(b),
+        _ => false,
+    };
+    if here {
+        return true;
+    }
+    let mut found = false;
+    each_child(e, &mut |x| found = found || has_wild_read(x));
+    found
+}
+
+/// The variable `let _ = place;` names, when the place is one of it and its fields (wild_read_only)
+pub fn wild_root(e: &Expr) -> Option<&str> {
+    match e {
+        Expr::Paren(x) | Expr::Field(x, ..) => wild_root(x),
+        Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => Some(p.segs[0].name.as_str()),
+        _ => None,
+    }
 }
 
 /// The capture e names (a path that is one of caps)
@@ -1212,7 +1306,7 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
                 names(p, &mut ns);
                 if ns.iter().any(|n| reportable(n)) {
                     let rest = Expr::Block(None, false, Block { stmts: b.stmts[i + 1..].to_vec() });
-                    let fv = free_vars(&rest);
+                    let fv = used_vars(&rest);
                     for n in ns.iter().filter(|n| reportable(n)) {
                         if !fv.contains(n) {
                             found.push((*pos, n.clone()));
@@ -1254,7 +1348,7 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
     }
     let mut found = vec![];
     block(body, &mut found);
-    let fv = free_vars(&Expr::Block(None, false, body.clone()));
+    let fv = used_vars(&Expr::Block(None, false, body.clone()));
     let param = params.iter().find(|n| reportable(n) && !fv.contains(*n)).map(|n| (None, n.clone()));
     found.sort_by_key(|(p, _)| (p.line, p.col));
     param.or_else(|| found.into_iter().next().map(|(p, n)| (Some(p), n)))

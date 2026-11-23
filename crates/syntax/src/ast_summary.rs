@@ -471,14 +471,19 @@ fn check_impl_ret(sig: &PSig, owner: Option<&Owner>) -> R<()> {
         for a in &s.args {
             match a {
                 crate::parse::GArg::Lifetime(l) if l == "'_" => {
-                    // (fine when an argument has an elided lifetime for it to name)
+                    // (fine when an argument has an elided lifetime for it to name, or the arguments name one
+                    // lifetime only (`fn f<'a>(x: &'a u8) -> impl Tr + use<'_>`): the elision rules give it)
+                    let mut named: Vec<String> = vec![];
                     let elided = sig.recv_ty.is_some()
                         || sig.params.iter().any(|p| {
                             let (mut v, mut e, mut o) = (vec![], false, false);
                             lifetimes(&p.1, &mut v, &mut e, &mut o);
+                            named.extend(v);
                             e
                         });
-                    if !elided {
+                    named.sort();
+                    named.dedup();
+                    if !elided && named.len() != 1 {
                         return err("missing lifetime specifier");
                     }
                 }
@@ -1645,6 +1650,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
             moved: moved,
             ret_ann: ret_ann,
             n_parent: n_parent,
+            fake_reads: ast_closure::fake_reads(c).into_iter().filter(|n| bound.contains(n)).collect(),
         });
     }
     // `-> impl Fn(A) -> B { move |x| .. }`: 型は末尾のクロージャの struct
@@ -2015,6 +2021,11 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                         if !matches!(s.name.as_str(), "Sized" | "Send" | "Sync" | "Copy" | "Clone" | "Unpin" | "Any" | "Debug" | "Display") {
                             sup.push(s.name.clone());
                         }
+                        // (`trait Dup: Clone`: a marker no trait has the name of, so that a `T: Dup` is not taken
+                        // for a type that is surely not Clone (Program::surely_not_clone))
+                        if matches!(s.name.as_str(), "Copy" | "Clone") && !sup.iter().any(|x| x == "#Clone") {
+                            sup.push("#Clone".to_string());
+                        }
                         // (`trait T: PartialEq`: its `Rhs` is Self by default, so T is not dyn compatible; a marker
                         // no trait has the name of)
                         if matches!(s.name.as_str(), "PartialEq" | "PartialOrd") && s.args.is_empty() {
@@ -2044,6 +2055,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         }
         ItemKind::Impl(g, tr, self_ty, _) => {
             sm.hdr_regions = crate::regions::hdr_regions(g, Some(self_ty));
+            sm.impl_trait_lts = tr.as_ref().is_some_and(|(_, p)| crate::regions::path_names_lt(p));
             // (E0261: the header names only the lifetimes it declares; E0207: a lifetime parameter an associated type
             // names must be constrained by the self type or the trait)
             if crate::regions::generics_name_lt(g) || crate::regions::names_lt(self_ty) || tr.as_ref().is_some_and(|(_, p)| crate::regions::path_names_lt(p)) {
