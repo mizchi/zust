@@ -735,6 +735,64 @@ fn visibility_where_it_means_nothing() {
 }
 
 #[test]
+fn dyn_without_associated_types() {
+    // (E0191 at a trait object written in a type that leaves an associated type of its trait, or of a supertrait,
+    // without a value, as rustc 1.100 reports it)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let e = |line: usize, col: usize, what: &str| Some((line, col, format!("the value of the associated {what} must be specified (E0191)")));
+    let src = "trait Trait {\n    type Bar;\n}\ntype Foo = dyn Trait;\nfn main() {}\n";
+    assert_eq!(first(src), e(4, 16, "type `Bar` in `Trait`"), "type_alias");
+    let src = "trait Foo { type A; fn dummy(&self) {} }\nfn bar(_x: &dyn Foo) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(2, 17, "type `A` in `Foo`"), "parameter");
+    let src = "trait Tr { type A; type B; }\nfn f(_: &dyn Tr<A = u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(2, 14, "type `B` in `Tr`"), "one_bound");
+    let src = "trait T3 { type A; type B; type C; }\nfn f(_: &dyn T3) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(2, 14, "types `A`, `B` and `C` in `T3`"), "three_in_one_trait");
+    // (several traits: each `X` in `Tr`, sorted)
+    let src = "trait Sub: Super + Zed { type Y; }\ntrait Zed { type Z; }\ntrait Super { type X; }\nfn f(_: &dyn Sub) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(4, 14, "types `X` in `Super`, `Y` in `Sub`, `Z` in `Zed`"), "supertraits");
+    // (a binding on the object goes to its own trait first; a supertrait's binding in the trait's header counts,
+    // unless it names `Self`)
+    let src = "pub trait Super { type X; }\npub trait Sub: Super { type X; }\nfn f<T>(_: Box<dyn Sub<X = T>>) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(3, 20, "type `X` in `Super`"), "shadowed");
+    let src = "trait Super { type X; }\ntrait Sub: Super<X = u8> { type Y; }\nfn f(_: &dyn Sub<Y = u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "bound_in_header");
+    let src = "trait Base { type Output; }\ntrait Helper: Base<Output = <Self as Helper>::Target> { type Target; }\nfn f(_: Box<dyn Helper<Target = i32>>) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(3, 17, "type `Output` in `Base`"), "self_in_header_binding");
+    // (the trait's own arguments as written)
+    let src = "trait G<T> { type A; }\nfn f<'a>(_: Box<dyn G<&'a str> + Send + 'a>) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(2, 21, "type `A` in `G<&'a str>`"), "arguments_shown");
+    // (std's traits; a path to std's beside the program's trait of the name)
+    let src = "fn f(_: &dyn Iterator) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(1, 14, "type `Item` in `Iterator`"), "std_iterator");
+    let src = "fn f(_: &dyn DoubleEndedIterator) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(1, 14, "type `Item` in `Iterator`"), "std_supertrait");
+    let src = "fn g(_: Box<dyn std::ops::Deref>) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(1, 17, "type `Target` in `Deref`"), "std_path");
+    let src = "trait Iterator { fn go(&self); }\nfn f(_: &dyn Iterator) {}\nfn g(_: &dyn std::iter::Iterator) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(3, 14, "type `Item` in `std::iter::Iterator`"), "own_trait_of_std_name");
+    // (before E0038, as rustc: `fn new() -> Self` alone does not hide it)
+    let src = "trait Tr { type A; fn new() -> Self; }\nfn f(_: &dyn Tr) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(2, 14, "type `A` in `Tr`"), "before_e0038");
+    // (left alone: every type bound, `where Self: Sized`, `Fn(..)` sugar, a generic associated type (E0038), a
+    // `dyn` in a string or a comment, a name that only contains `dyn`)
+    let src = "trait S { type A where Self: Sized; type B; fn g(&self) {} }\nfn f(_: &dyn S<B = u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "where_self_sized");
+    let src = "fn f(_: &dyn Fn(u8) -> u8, _: Box<dyn Iterator<Item = u8> + Send>, _: &dyn IntoIterator<Item = u8, IntoIter = std::vec::IntoIter<u8>>) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "all_bound");
+    let src = "trait Ga { type A<'a>; }\nfn f(_: &dyn Ga) {}\nfn main() {}\n";
+    assert!(first(src).is_none_or(|d| !d.2.contains("E0191")), "gat");
+    let src = "trait Tr { type A; }\n// dyn Tr\nfn dyn_tr() -> &'static str { \"dyn Tr\" }\nfn main() { let _ = dyn_tr(); }\n";
+    assert_eq!(first(src), None, "string_and_comment");
+    // (a bound that implies Sized; a supertrait bound by two paths, one type each (rust-lang/rust#102933))
+    let src = "trait Other: Sized {}\ntrait Boo { type Assoc where Self: Other; }\nfn boo(_: &dyn Boo) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "implies_sized");
+    let src = "pub trait Service { type Response; type Fut; }\npub trait A1: Service<Response = i32> {}\npub trait A2: Service<Fut = u8> + A1 { fn foo(&self) {} }\nfn f(_: &dyn A2) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "bound_by_two_paths");
+}
+
+#[test]
 fn gat_arity_at_uses() {
     // (E0107 at a use of a generic associated type without its arguments or with the wrong number of lifetimes,
     // as rustc 1.100 reports them; valid uses, bindings with arguments and other traits' names are left alone)

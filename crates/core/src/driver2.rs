@@ -1505,6 +1505,11 @@ impl Session2 {
         if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
             return Err(e);
         }
+        // (E0191 at a `dyn Tr` in a type that leaves one of the trait's associated types without a value; before
+        // E0038, as rustc)
+        if let Some(e) = first_dyn_unspecified_assoc(&src, src0, &items[..user]) {
+            return Err(e);
+        }
         // (in a check (zustc check, the LSP): a build stays as fast as it was, and reports it when it makes the vtable)
         if let Some(e) = self.checking.then(|| dyn_in_signature(&prog, &src, &items)).flatten() {
             return Err(e);
@@ -2380,6 +2385,248 @@ fn first_gat_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<Str
             };
             let (line, col) = item_pos(src, orig, &marks, it, t[k].1);
             return Some(format!("{line}:{col}: {what} (E0107)"));
+        }
+    }
+    None
+}
+
+/// One trait bound of a bound list (`Super<X = u8> + Zed + 'a`), from the token at `k`: (its first token, its name's
+/// token, the parts of its `<..>`, the token after it). None at a lifetime, `?Sized`, `Fn(..)` (whose sugar binds
+/// `Output`) or anything else that is not a path
+fn bound_at(t: &[(u8, usize, usize)], b: &[u8], mut k: usize) -> Option<(usize, usize, Vec<(usize, usize)>, usize)> {
+    let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && b[t[q].1] == c;
+    let word = |q: usize| q < t.len() && t[q].0 == 0;
+    // (`for<'a> Tr<'a>`)
+    if word(k) && &b[t[k].1..t[k].2] == b"for" && sym(k + 1, b'<') {
+        k = angle_parts(t, b, k + 1)?.1 + 1;
+    }
+    let at = k;
+    if sym(k, b':') && sym(k + 1, b':') {
+        k += 2;
+    }
+    if !word(k) || (t[k].1 > 0 && b[t[k].1 - 1] == b'\'') {
+        return None;
+    }
+    while word(k) && sym(k + 1, b':') && sym(k + 2, b':') && word(k + 3) {
+        k += 3;
+    }
+    let name = k;
+    let mut parts = vec![];
+    k += 1;
+    if sym(k, b'<') {
+        let (p, c) = angle_parts(t, b, k)?;
+        parts = p;
+        k = c + 1;
+    } else if sym(k, b'(') {
+        return None;
+    }
+    Some((at, name, parts, k))
+}
+
+/// A `<..>`'s parts split into the arguments as rustc shows them (`<(), Vec<u8>>`, or "" without any) and the
+/// associated types they bind (`Item = u8`, `Item: Copy`); a supertrait's binding whose value names `Self`
+/// (`Base<Output = <Self as Helper>::Target>`) is left out with `self_free`, as dyn does not know `Self`
+fn split_assoc_args<'a>(t: &[(u8, usize, usize)], text: &'a str, parts: &[(usize, usize)], self_free: bool) -> (String, Vec<&'a str>) {
+    let b = text.as_bytes();
+    let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && b[t[q].1] == c;
+    let (mut shown, mut bound) = (vec![], vec![]);
+    for &(a, z) in parts {
+        let binds = sym(a + 1, b'=') && !sym(a + 2, b'=') || sym(a + 1, b':') && !sym(a + 2, b':');
+        if t[a].0 == 0 && a < z && binds && !(t[a].1 > 0 && b[t[a].1 - 1] == b'\'') {
+            if !self_free || !(a + 2..=z).any(|q| t[q].0 == 0 && &text[t[q].1..t[q].2] == "Self") {
+                bound.push(&text[t[a].1..t[a].2]);
+            }
+        } else {
+            let from = t[a].1 - usize::from(t[a].1 > 0 && b[t[a].1 - 1] == b'\'');
+            shown.push(text[from..t[z].2].split_whitespace().collect::<Vec<_>>().join(" "));
+        }
+    }
+    (if shown.is_empty() { String::new() } else { format!("<{}>", shown.join(", ")) }, bound)
+}
+
+/// E0191 at a trait object written in a type (`type Foo = dyn Tr;`, `fn f(x: &dyn Tr)`) that leaves an associated
+/// type of its trait, or of a supertrait, without a value: the program's traits and a few of std's. A generic
+/// associated type makes the trait not dyn compatible instead (E0038), and `where Self: Sized` exempts a type
+fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind;
+    let (Some(first), Some(last)) = (items.first(), items.last()) else { return None };
+    let region = &src[first.start..last.end];
+    if !region.contains("dyn") {
+        return None;
+    }
+    // (std's traits with associated types: (name, associated types, supertraits))
+    const STD: &[(&str, &[&str], &[&str])] = &[
+        ("Iterator", &["Item"], &[]),
+        ("DoubleEndedIterator", &[], &["Iterator"]),
+        ("ExactSizeIterator", &[], &["Iterator"]),
+        ("FusedIterator", &[], &["Iterator"]),
+        ("IntoIterator", &["Item", "IntoIter"], &[]),
+        ("Deref", &["Target"], &[]),
+        ("DerefMut", &[], &["Deref"]),
+        ("Future", &["Output"], &[]),
+    ];
+    // (the program's traits: name -> (associated types, supertraits as (name, shown, the types the bound binds)), or
+    // None when one has a generic associated type or two traits share the name)
+    type Sup<'s> = (&'s str, String, Vec<&'s str>);
+    let id = |&(a, b): &(u32, u32)| &src[a as usize..b as usize];
+    // (a trait as rustc shows it: without the flattened modules' `a__` prefix and the renamer's `__u_`)
+    let plain = |n: &str, args: &str| format!("{}{}", n.rsplit("__").next().unwrap_or(n).trim_start_matches("u_"), args.replace("__u_", ""));
+    let mut traits: crate::fxhash::FxMap<&str, Option<(Vec<&str>, Vec<Sup>)>> = Default::default();
+    let mut header_of: crate::fxhash::FxMap<usize, &str> = Default::default();
+    for (i, it) in items.iter().enumerate() {
+        if !matches!(it.kind, ItemKind::TraitHeader) {
+            continue;
+        }
+        let Some(k) = it.idents.iter().position(|x| id(x) == "trait") else { continue };
+        let Some(name) = it.idents.get(k + 1).map(id) else { continue };
+        header_of.insert(i, name);
+        if traits.contains_key(name) {
+            traits.insert(name, None);
+            continue;
+        }
+        let text = &src[it.start..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && b[t[q].1] == c;
+        let w = |q: usize| if q < t.len() && t[q].0 == 0 { &text[t[q].1..t[q].2] } else { "" };
+        let mut sup = vec![];
+        if let Some(mut q) = (0..t.len()).find(|&q| w(q) == "trait" && w(q + 1) == name).map(|q| q + 2) {
+            if sym(q, b'<') {
+                q = angle_parts(&t, b, q).map_or(t.len(), |(_, c)| c + 1);
+            }
+            if sym(q, b':') && !sym(q + 1, b':') {
+                q += 1;
+                // (`Super<X = u8> + Zed + 'a`, up to `where` or `{`)
+                while q < t.len() && w(q) != "where" && !sym(q, b'{') {
+                    match bound_at(&t, b, q) {
+                        Some((_, n, parts, after)) => {
+                            let (shown, bound) = split_assoc_args(&t, text, &parts, true);
+                            sup.push((w(n), plain(w(n), &shown), bound));
+                            q = after;
+                        }
+                        None => q += 1,
+                    }
+                    while q < t.len() && !sym(q, b'+') && w(q) != "where" && !sym(q, b'{') {
+                        q += 1;
+                    }
+                    q += usize::from(sym(q, b'+'));
+                }
+            }
+        }
+        traits.insert(name, Some((vec![], sup)));
+    }
+    for it in items {
+        let ItemKind::TraitMember(h) = it.kind else { continue };
+        let Some(&tr) = header_of.get(&(h as usize)) else { continue };
+        let Some(k) = it.idents.iter().take(6).position(|x| id(x) == "type") else { continue };
+        let Some(&(_, ne)) = it.idents.get(k + 1) else { continue };
+        let rest = &src[ne as usize..it.end];
+        if rest.trim_start().starts_with('<') {
+            traits.insert(tr, None);
+            continue;
+        }
+        // (`where Self: Sized`, or a bound that implies it (`where Self: Other` with `trait Other: Sized`): one that
+        // bounds `Self` at all is left alone)
+        if rest.find("where").is_some_and(|w| rest[w..].contains("Self")) {
+            continue;
+        }
+        if let Some(Some(entry)) = traits.get_mut(tr) {
+            entry.0.push(id(&it.idents[k + 1]));
+        }
+    }
+    let marks = crate::prep::hoist_marks(src);
+    let mut at = 0;
+    while let Some(f) = region[at..].find("dyn") {
+        let off = first.start + at + f;
+        let Some(i) = items.partition_point(|it| it.start <= off).checked_sub(1) else { break };
+        let it = &items[i];
+        // (every `dyn` of the item at once, then past it)
+        at = it.end.max(off + 3) - first.start;
+        if off >= it.end {
+            continue;
+        }
+        let text = &src[it.start..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |q: usize| if q < t.len() && t[q].0 == 0 { &text[t[q].1..t[q].2] } else { "" };
+        for k in 0..t.len() {
+            if w(k) != "dyn" {
+                continue;
+            }
+            let Some((q, n, parts, _)) = bound_at(&t, b, k + 1) else { continue };
+            let name = w(n);
+            let (shown, bound) = split_assoc_args(&t, text, &parts, false);
+            // (`std::iter::Iterator` is std's even when the program has a trait of the name)
+            let first_seg = if w(q).is_empty() { w(q + 2) } else { w(q) };
+            let std_path = n > q && matches!(first_seg, "std" | "core" | "alloc");
+            // (breadth first from the trait: a binding written on the object goes to the first trait that has the
+            // name; a supertrait's binding to that supertrait, by whichever path it is reached (`A2: Service<Future =
+            // F> + A1` with `A1: Service<Response = i32>` binds both))
+            let mut pending = bound;
+            // (std's trait beside the program's of the name: rustc shows its path)
+            let path: String = if std_path && (traits.contains_key(name) || traits.contains_key(format!("__u_{name}").as_str())) { text[t[q].1..t[n].2].split_whitespace().collect() } else { plain(name, "") };
+            let mut queue: Vec<Sup> = vec![(name, format!("{path}{}", plain("", &shown)), vec![])];
+            let mut order: Vec<(&str, String, Vec<&str>)> = vec![];
+            let mut bound_by: crate::fxhash::FxMap<&str, Vec<&str>> = Default::default();
+            let mut known = true;
+            let mut n = 0;
+            while n < queue.len() && n < 64 {
+                let (tn, ts, local) = queue[n].clone();
+                n += 1;
+                bound_by.entry(tn).or_default().extend(local);
+                if queue[..n - 1].iter().any(|x| x.0 == tn) {
+                    continue;
+                }
+                let in_std = STD.iter().find(|s| s.0 == tn);
+                let (assoc, sups): (Vec<&str>, Vec<Sup>) = match traits.get(tn) {
+                    Some(Some((a, s))) if !(std_path && n == 1 && in_std.is_some()) => (a.clone(), s.clone()),
+                    Some(None) => {
+                        known = false;
+                        break;
+                    }
+                    _ => match in_std {
+                        Some(s) => (s.1.to_vec(), s.2.iter().map(|x| (*x, x.to_string(), vec![])).collect()),
+                        None if n == 1 => {
+                            known = false;
+                            break;
+                        }
+                        None => (vec![], vec![]),
+                    },
+                };
+                order.push((tn, ts, assoc));
+                queue.extend(sups);
+            }
+            let mut missing: Vec<(&str, String)> = vec![];
+            for (tn, ts, assoc) in &order {
+                for &a in assoc {
+                    if bound_by.get(tn).is_some_and(|b| b.contains(&a)) {
+                        continue;
+                    }
+                    if let Some(p) = pending.iter().position(|x| *x == a) {
+                        pending.remove(p);
+                        continue;
+                    }
+                    missing.push((a, ts.clone()));
+                }
+            }
+            if !known || missing.is_empty() {
+                continue;
+            }
+            // (one trait: its types in the order it declares them; several: each `X` in `Tr`, sorted)
+            let what = if missing.iter().all(|m| m.1 == missing[0].1) {
+                let names: Vec<String> = missing.iter().map(|m| format!("`{}`", m.0)).collect();
+                let list = match names.split_last() {
+                    Some((l, rest)) if !rest.is_empty() => format!("{} and {l}", rest.join(", ")),
+                    _ => names[0].clone(),
+                };
+                format!("type{} {list} in `{}`", if names.len() == 1 { "" } else { "s" }, missing[0].1)
+            } else {
+                let mut each: Vec<String> = missing.iter().map(|m| format!("`{}` in `{}`", m.0, m.1)).collect();
+                each.sort();
+                format!("types {}", each.join(", "))
+            };
+            let (line, col) = item_pos(src, orig, &marks, it, t[q].1);
+            return Some(format!("{line}:{col}: the value of the associated {what} must be specified (E0191)"));
         }
     }
     None
