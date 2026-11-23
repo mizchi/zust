@@ -2370,6 +2370,12 @@ impl Cx<'_> {
                 self.rg_closure_stores(cd.sid, &args, link, body, &names, &cd.captures);
             }
         }
+        // (a body with a `let` whose annotation writes `'static`: the function is checked from here on, as for its own
+        // `let x: &'static T`, so what the closure captures has its trees)
+        let ann_static = self.user_code && self.bk.level >= 2 && !cd.captures.is_empty() && matches!(c, Expr::Closure(_, _, _, b, _) if crate::regions::annotates_static(b));
+        if ann_static && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
+            self.rg_late_on();
+        }
         // (the region signature its body is checked with: from a bound not the prelude's, else from annotated
         // parameters)
         if self.user_code && self.bk.level >= 2 && !to_prelude && (bound.is_some() || inputs.iter().any(|x| x.1.is_some()) || (self.rg_on() && !cd.captures.is_empty())) && regionck::enabled() {

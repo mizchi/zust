@@ -3186,16 +3186,18 @@ impl Cx<'_> {
     /// the callee's lifetimes and type parameters) or else its annotations: kept with the instances (Insts::closure_rg)
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn rg_closure_sig(&mut self, c: &Expr, cid: u32, params: &[Ty], ret: Ty, bound: Option<(String, Vec<String>, Vec<String>)>) {
-        let Expr::Closure(_, inputs, ret_ann, _, _) = c else { return };
+        let Expr::Closure(_, inputs, ret_ann, body, _) = c else { return };
         let prog = self.prog;
         // (its captures' regions that are universal here: the function's own, related as it knows)
         let (caps, known, lts) = self.rg_capture_codes(cid);
         let any_cap = caps.iter().flatten().flatten().any(|&c| c >= CLO_U);
-        // (nothing to check when no region is in its signature nor its captures are this function's)
-        if !any_cap && params.iter().chain([&ret]).all(|&t| count(prog, t, 0) == Some(0)) {
+        // (nothing to check when no region is in its signature nor its captures are this function's, unless its
+        // body writes `'static` (what it reaches through its environment is borrowed from outside, for less))
+        let ann_static = !caps.is_empty() && crate::regions::annotates_static(body);
+        if !any_cap && !ann_static && params.iter().chain([&ret]).all(|&t| count(prog, t, 0) == Some(0)) {
             return;
         }
-        if bound.is_none() && !any_cap && !inputs.iter().any(|x| x.1.is_some()) {
+        if bound.is_none() && !any_cap && !ann_static && !inputs.iter().any(|x| x.1.is_some()) {
             return;
         }
         let mut codes: Vec<Vec<u8>> = vec![];

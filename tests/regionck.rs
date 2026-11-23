@@ -2374,3 +2374,16 @@ fn part13_mismatched_lifetime_syntaxes() {
     assert_eq!(check("fn f<'a>(x: &'a u8) -> &u8 {\n    x\n}\nfn main() {\n    let v = 1;\n    let _ = f(&v);\n}\n"), vec![]);
     assert_eq!(check("fn e<'a>(v: &'a u8) -> impl FnOnce() + use<'_> {\n    move || {\n        let _ = v;\n    }\n}\nfn main() {\n    let x = 1;\n    e(&x)();\n}\n"), vec![]);
 }
+
+/// A closure's `let p: &'static mut usize = &mut self.food;`: the function is checked from the closure on (as for its
+/// own `'static` annotation), so what the closure reaches through `self` is borrowed for less than `'static`; a
+/// `'static` value there is fine
+#[test]
+fn part13_static_let_in_closure() {
+    let dog = "struct Dog {\n    food: usize,\n}\nimpl Dog {\n    pub fn chase(&mut self) {\n        let _f = || {\n            let p: &'static mut usize = &mut self.food;\n            *p = 3;\n        };\n    }\n}\nfn main() {}\n";
+    let d = check(dog);
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn f(x: &usize) {\n    let c = || {\n        let p: &'static usize = x;\n        let _ = *p;\n    };\n    c();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("fn f(x: &usize) {\n    let c = || {\n        let p: &'static str = \"lit\";\n        let q: &'static [u8] = &[1, 2];\n        p.len() + q.len() + *x\n    };\n    println!(\"{}\", c());\n}\nfn main() {\n    f(&1);\n}\n"), vec![]);
+}
