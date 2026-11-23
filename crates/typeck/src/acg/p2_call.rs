@@ -92,42 +92,100 @@ impl Cx<'_> {
         r
     }
 
-    /// Two traits give t (references aside) a method `name` and no inherent one does: an impl's method of each, or a
-    /// default of a trait t implements
+    /// rustc's method lookup of `x.name()`, x of type t, among the methods two traits of the program's give t's type
+    /// (an impl's method of each, or a default of a trait t implements): `Err(())` when two traits' are at the first
+    /// receiver candidate any method takes (E0034), `Ok(Some((trait, k)))` when one trait's is there, at candidate k
+    /// (t derefed k / 3 times, then taken by value, `&` or `&mut`), `Ok(None)` for an inherent method or none
     #[cold]
     #[inline(never)]
-    fn ambiguous_method(&self, t: Ty, name: &str) -> bool {
-        let t = self.strip_refs(t);
-        let key = format!("{}::{name}", self.ty_key(t));
-        let mut trs: Vec<&str> = vec![];
+    fn method_pick(&self, t: Ty, name: &str) -> Result<Option<(&str, usize)>, ()> {
+        let base = self.strip_refs(t);
+        // (the candidates, in order: t and each type it derefs to, each followed by its `&` and `&mut`. The method is
+        // the one at the first candidate any method takes; only those there compete: `A::foo(&self)` beats
+        // `B::foo(&mut self)`)
+        let mut steps: Vec<Ty> = vec![];
+        let mut u = t;
+        loop {
+            steps.extend([u, Ty::Ref(false, intern(u)), Ty::Ref(true, intern(u))]);
+            match u {
+                Ty::Ref(_, i) => u = *i,
+                _ => break,
+            }
+        }
+        // (match_ty does not tell `&` from `&mut`)
+        fn same_refs(p: Ty, c: Ty) -> bool {
+            match (p, c) {
+                (Ty::Ref(m, a), Ty::Ref(n, b)) => m == n && same_refs(*a, *b),
+                (Ty::Ref(..), _) => false,
+                _ => true,
+            }
+        }
+        // (the candidate a method's self type takes, its impl's parameters (`impl<T> W<T>`) or the trait's Self solved)
+        let at = |p: Ty, self_ty: Option<Ty>, ng: usize| -> Option<usize> {
+            steps.iter().position(|&c| {
+                let mut sol = vec![None; ng.max(1)];
+                sol[0] = self_ty;
+                same_refs(p, c) && self.prog.match_ty(p, c, &mut sol)
+            })
+        };
+        // (the first candidate so far, whether an inherent method is there, the traits whose methods are)
+        let mut st: (usize, bool, Vec<&str>) = (usize::MAX, false, vec![]);
+        fn add<'a>(st: &mut (usize, bool, Vec<&'a str>), i: usize, tr: Option<&'a str>) {
+            if i < st.0 {
+                *st = (i, false, vec![]);
+            }
+            if i == st.0 {
+                match tr {
+                    None => st.1 = true,
+                    Some(tr) if !st.2.contains(&tr) => st.2.push(tr),
+                    Some(_) => {}
+                }
+            }
+        }
+        let key = format!("{}::{name}", self.ty_key(base));
+        let mut explicit: Vec<&str> = vec![];
+        // (the traits with an impl for a reference (`impl A for &S`): a call is not rewritten to theirs)
+        let mut of_ref: Vec<&str> = vec![];
         let cands = self.prog.index.get(&key).copied().into_iter().chain(self.prog.overloads.get(&key).into_iter().flatten().copied());
         for c in cands {
             let sg = &self.prog.sigs[c as usize];
-            let applies = sg.has_self && sg.params.first().is_some_and(|&p| self.strip_refs(p) == t);
-            match sg.impl_trait.as_deref() {
-                None if applies => return false,
-                Some(tr) if applies => {
-                    let b = tr.split('<').next().unwrap_or(tr).trim();
-                    if !trs.contains(&b) {
-                        trs.push(b);
-                    }
-                }
-                _ => {}
+            let Some(i) = sg.params.first().filter(|_| sg.has_self).and_then(|&p| at(p, None, sg.generics.len())) else {
+                continue;
+            };
+            let tr = sg.impl_trait.as_deref().map(|tr| tr.split('<').next().unwrap_or(tr).trim());
+            explicit.extend(tr);
+            if matches!(sg.self_ty, Some(Ty::Ref(..))) {
+                of_ref.extend(tr);
             }
+            add(&mut st, i, tr);
         }
         for (tr, ds) in &self.prog.traits {
-            if trs.contains(&tr.as_str()) {
+            if explicit.contains(&tr.as_str()) {
                 continue;
             }
-            let default = ds.iter().any(|&d| {
+            let Some(d) = ds.iter().copied().find(|&d| {
                 let sg = &self.prog.sigs[d as usize];
                 sg.has_body && sg.has_self && self.prog.names[d as usize].rsplit("::").next() == Some(name)
-            });
-            if default && self.prog.implements(t, tr) {
-                trs.push(tr);
+            }) else {
+                continue;
+            };
+            // (a blanket impl counts only without bounds: `impl<T: Display> A for T` may not cover t)
+            if !(self.prog.implements_concrete(base, tr) || self.prog.unbounded_blankets.contains(tr)) {
+                continue;
+            }
+            let sg = &self.prog.sigs[d as usize];
+            if let Some(i) = sg.params.first().and_then(|&p| at(p, Some(base), sg.generics.len())) {
+                add(&mut st, i, Some(tr));
             }
         }
-        trs.len() >= 2
+        match st {
+            (_, true, _) => Ok(None),
+            (k, false, trs) => match trs.as_slice() {
+                [tr] if !of_ref.contains(tr) => Ok(Some((tr, k))),
+                [] | [_] => Ok(None),
+                _ => Err(()),
+            },
+        }
     }
 
     fn method_call_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
@@ -164,8 +222,24 @@ impl Cx<'_> {
                 ts.contains(&k).then_some(t)
             });
             if let Some(t) = maybe {
-                if self.ambiguous_method(t, method) {
-                    return err(SP, "multiple applicable items in scope (E0034)");
+                match self.method_pick(t, method) {
+                    Err(()) => return err(SP, "multiple applicable items in scope (E0034)"),
+                    // (the one trait's at the first candidate: `Shared::bar(&m)`, not the other trait's `bar(&mut
+                    // self)` the lookup below would find)
+                    Ok(Some((tr, k))) if gargs.is_empty() => {
+                        let mut a = paren(recv.as_ref().clone());
+                        for _ in 0..k / 3 {
+                            a = paren(Expr::Unary("*".to_string(), Box::new(a), msp));
+                        }
+                        let a = match k % 3 {
+                            0 => a,
+                            r => Expr::Ref(r == 2, Box::new(a)),
+                        };
+                        let c = Expr::Call(Box::new(path_expr(&format!("{tr}::{method}"))), std::iter::once(a).chain(margs.iter().cloned()).collect());
+                        let ne: &Expr = self.keep_expr(c);
+                        return self.expr(ne, expected);
+                    }
+                    Ok(_) => {}
                 }
             }
         }
@@ -922,6 +996,17 @@ impl Cx<'_> {
             // (its instance is not compiled: zustc check's last round follows closures only))
             if let Some(id) = self.placeholder_method(sid, &name) {
                 break (a, o, sid, id);
+            }
+            // (`C::baz(&w)` of a trait of the program's: its default when the impl of C does not override it, not an
+            // inherent `baz` or another trait's)
+            if let Some((_, tr)) = self.explicit_trait.as_ref().filter(|(m, _)| *m == name) {
+                let key = format!("{}::{name}", self.prog.structs[self.prog.base_of(sid) as usize].name);
+                if self.trait_candidate(&key, tr).is_none() {
+                    let user = |d: u32| self.prog.item_of.get(d as usize).copied().flatten().is_some_and(|x| x < self.prog.prelude_from);
+                    if let Some(d) = self.trait_default(tr, &name, Ty::Struct(sid)).filter(|&d| user(d)) {
+                        break (a, o, sid, d);
+                    }
+                }
             }
             if let Some(id) = self.prog.method(sid, &name).or_else(|| self.prog.default_method(sid, &name)) {
                 break (a, o, sid, id);
@@ -1759,8 +1844,19 @@ impl Cx<'_> {
         // trait の関数を `Tr::m(&x)` で呼んだら、実装があればそちらへ静的ディスパッチ
         if sig.trait_of.is_some() {
             let m = self.prog.names[id as usize].rsplit("::").next().unwrap().to_string();
+            let tr0 = sig.trait_of.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
             let imp = match args[0] {
-                Ty::Struct(sid) => self.prog.method(sid, &m),
+                // (the impl of the trait the call named: through `T: A`, S's `foo` from `impl B for S` is not A's,
+                // and A's default is the one when S's `impl A` does not override it)
+                Ty::Struct(sid) => self
+                    .trait_candidate(&format!("{}::{m}", self.prog.structs[self.prog.base_of(sid) as usize].name), tr0.unwrap_or(""))
+                    // (an inherent method answers it only for the prelude's types, which write std's traits' methods so:
+                    // never the program's own, `C::baz(&w)` beside `impl<T> W<T> { fn baz(&self) }` is C's)
+                    .or_else(|| self.prog.method(sid, &m).filter(|&i| {
+                        let it = self.prog.sigs[i as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+                        let user = self.prog.item_of.get(i as usize).copied().flatten().is_some_and(|x| x < self.prog.prelude_from);
+                        it == tr0 || (it.is_none() && !user)
+                    })),
                 // (only an impl of the trait the call named: `A::m(&0.0f32)` is not B's `f32::m`)
                 t if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) => self.prog.index.get(&format!("{}::{m}", self.prog.tn(t))).copied().filter(|&i| {
                     let it = self.prog.sigs[i as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
@@ -2929,18 +3025,20 @@ pub(crate) fn lit_fits(t: Ty, digits: &str, neg: bool) -> bool {
         Ty::I16 | Ty::U16 => (16, 4),
         Ty::I32 | Ty::U32 => (32, 9),
         Ty::I64 | Ty::U64 | Ty::Isize | Ty::Usize => (64, 18),
+        Ty::I128 | Ty::U128 => (128, 38),
         _ => return true,
     };
     if digits.len() <= short {
         return true;
     }
+    // (u128's range is what parses)
     let Ok(n) = digits.parse::<u128>() else { return false };
     if t.signed() {
         let max = (1u128 << (bits - 1)) - 1;
         if neg { n <= max + 1 } else { n <= max }
     } else {
         // (a negated unsigned literal is another error, E0600)
-        neg || n <= (1u128 << bits) - 1
+        neg || bits == 128 || n <= (1u128 << bits) - 1
     }
 }
 

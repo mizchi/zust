@@ -2281,6 +2281,7 @@ check-pass	enum/dead-code-associated-function.rs
 compile-fail	enum/enum-and-module-in-same-scope.rs
 run-pass	enum/enum-discrim-manual-sizing.rs
 check-pass	enum/enum-discrim-range-overflow.rs
+compile-fail	enum/enum-discrim-too-small2.rs
 run-pass	enum/enum-discrim-width-stuff.rs
 compile-fail	enum/enum-discriminant-type-mismatch-8761.rs
 run-pass	enum/enum-disr-val-pretty.rs

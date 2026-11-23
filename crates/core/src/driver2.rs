@@ -26,6 +26,9 @@ pub use build::*;
 /// check の記録 (LSP の編集をまたいで): 宣言の指紋と、検査に通った関数・インスタンス (名前 → 記録)
 pub struct ChkMemo {
     fp: u64,
+    /// the lint levels it was checked with (lint_bits): `#![allow(overflowing_literals)]` taken out of a body leaves
+    /// iface_fp as it was
+    lint: u8,
     ents: FxMap<String, ChkEnt>,
 }
 
@@ -1408,9 +1411,25 @@ impl Session2 {
         prog.deny_unused_alloc = deny_unused_alloc;
         // (an `allow` / `warn` / `expect` of it anywhere, at the crate or an item: not denied there, so not checked)
         // (one search of the source for the name, then the attribute around each place it is written)
+        // (not the name in a string or after `//` on its line: `"#[allow(overflowing_literals)]"` allows nothing)
+        let in_text = |i: usize| {
+            let line = &src[src[..i].rfind('\n').map_or(0, |k| k + 1)..i];
+            let (mut quoted, mut esc, mut prev) = (false, false, ' ');
+            for c in line.chars() {
+                match c {
+                    _ if esc => esc = false,
+                    '\\' if quoted => esc = true,
+                    '"' => quoted = !quoted,
+                    '/' if !quoted && prev == '/' => return true,
+                    _ => {}
+                }
+                prev = c;
+            }
+            quoted
+        };
         prog.allow_overflowing_literals = src.match_indices("overflowing_literals").any(|(i, _)| {
             let head = &src[src[..i].rfind('(').map(|k| src[..k].rfind(|c: char| c == '[' || c == ',').map_or(0, |b| b + 1)).unwrap_or(i)..i];
-            ["allow(", "warn(", "expect("].iter().any(|a| head.trim_start().starts_with(a))
+            ["allow(", "warn(", "expect("].iter().any(|a| head.trim_start().starts_with(a)) && !in_text(i)
         });
         prog.deny_trivial_casts = deny_trivial_casts;
         if deny_must_use {
@@ -3768,12 +3787,12 @@ impl Session2 {
         // 前回の check の記録: 宣言の指紋が同じなら、本体のアイテムが変わっていない関数は検査済み (キーも読み戻しも要らない)。
         // 要求していたインスタンスは名前で辿り、本体が変わったものだけを要求し直す
         let old = match self.chk.take() {
-            Some(m) if m.fp == a.iface_fp && check_only && std::env::var_os("ZUSTC_NO_CHECK_MEMO").is_none() => Some(m),
+            Some(m) if m.fp == a.iface_fp && m.lint == lint_bits(&a.prog) && check_only && std::env::var_os("ZUSTC_NO_CHECK_MEMO").is_none() => Some(m),
             _ => None,
         };
         // (記録を作るのは、続けて検査する (キャッシュを使う) セッションだけ: 1 度だけの `zustc check` では作らない)
         let keep = check_only && !self.opts.no_cache;
-        let mut memo = ChkMemo { fp: a.iface_fp, ents: FxMap::default() };
+        let mut memo = ChkMemo { fp: a.iface_fp, lint: lint_bits(&a.prog), ents: FxMap::default() };
         let mut seen: FxSet<String> = FxSet::default();
         let name_of = |g: &Insts, id: u32| -> String {
             match g.get(id) {
@@ -3890,7 +3909,9 @@ impl Session2 {
                                                 // (a coercion to a raw pointer zustc may not make: the expected type's)
                                                 let expected = tys.split('`').nth(1).unwrap_or("");
                                                 !expected.contains("*const") && !expected.contains("*mut") && !tys.split('`').skip(1).step_by(2).any(|t| unsized_ty(t) || derefs(t))
-                                            }));
+                                            }))
+                                            // (`const BAD: i8 = -129;`: overflowing_literals, denied)
+                                            .or_else(|| e.find("literal out of range for"));
                                             if let (Some(&l), Some(m)) = (self.const_lines.get(k), m) {
                                                 errs.push(format!("{l}:1: {}", &e[m..]));
                                             }

@@ -267,6 +267,8 @@ pub struct Program {
     pub multi_trait_methods: FxSet<String>,
     /// of those, the types (a struct's base, a primitive) two of the traits that declare the name are implemented for
     pub ambiguous_methods: FxMap<String, Vec<Ty>>,
+    /// the program's traits with a blanket impl without bounds (`impl<T> A for T {}`): every type implements them
+    pub unbounded_blankets: FxSet<String>,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
@@ -872,6 +874,7 @@ impl Program {
             trait_clone_fns: false,
             multi_trait_methods: FxSet::default(),
             ambiguous_methods: FxMap::default(),
+            unbounded_blankets: FxSet::default(),
             lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
@@ -1942,7 +1945,9 @@ impl Program {
                         *seen.entry(*t).or_default() += 1;
                     }
                 }
-                let ts: Vec<Ty> = seen.into_iter().filter(|&(_, c)| c >= 2).map(|(t, _)| t).collect();
+                // (with `impl<T> A for T {}`, a type that implements B: `S.foo()` is A's and B's)
+                let ub = trs.iter().filter(|tr| unbounded_blankets.iter().any(|(u, _)| u == *tr)).count() as u32;
+                let ts: Vec<Ty> = seen.into_iter().filter(|&(_, c)| c + ub >= 2).map(|(t, _)| t).collect();
                 if !ts.is_empty() {
                     amb.insert(n.to_string(), ts);
                 }
@@ -1950,6 +1955,7 @@ impl Program {
             p.ambiguous_methods = amb;
         }
         p.multi_trait_methods = multi;
+        p.unbounded_blankets = unbounded_blankets.into_iter().map(|(tr, _)| tr).collect();
         Ok(p)
     }
 
@@ -2561,13 +2567,17 @@ impl Program {
             }
             TySyn::Assoc(b, n) => {
                 let bt = r(b)?;
+                let (n, std_impls) = match n.strip_prefix(crate::ast_types::NO_STD_ASSOC) {
+                    Some(x) => (x, false),
+                    None => (n.as_str(), true),
+                };
                 if self.has_param(bt) {
                     Ty::Assoc(intern_assoc(AssocTy {
                         base: bt,
-                        name: n.clone(),
+                        name: n.to_string(),
                     }))
                 } else {
-                    match self.assoc_of(bt, n) {
+                    match self.assoc_of_with(bt, n, std_impls) {
                         Some(t) => t,
                         None => {
                             return Err(format!(
@@ -3449,6 +3459,11 @@ impl Program {
 
     /// 具体型 t の関連型 name (`impl Iterator for Counter { type Item = u32; }` なら u32)
     pub fn assoc_of(&self, t: Ty, name: &str) -> Option<Ty> {
+        self.assoc_of_with(t, name, true)
+    }
+
+    /// assoc_of; with std_impls false, not std's impls the prelude does not write out (`<i32 as Local>::Output`)
+    pub fn assoc_of_with(&self, t: Ty, name: &str, std_impls: bool) -> Option<Ty> {
         thread_local! {
             static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
         }
@@ -3458,12 +3473,12 @@ impl Program {
             return None;
         }
         DEPTH.with(|d| d.set(d.get() + 1));
-        let r = self.assoc_of0(t, name);
+        let r = self.assoc_of0(t, name, std_impls);
         DEPTH.with(|d| d.set(d.get() - 1));
         r
     }
 
-    fn assoc_of0(&self, t: Ty, name: &str) -> Option<Ty> {
+    fn assoc_of0(&self, t: Ty, name: &str, std_impls: bool) -> Option<Ty> {
         // (`P::Pointer<String>`: the associated type `#gat:Pointer` of `(P, String)`, the impl's for P with its own
         // parameters String)
         if let Some(gname) = name.strip_prefix(crate::ast_types::GAT_PREFIX) {
@@ -3510,6 +3525,9 @@ impl Program {
         }
         // (std's impls the prelude does not write out: `<i32 as Add<T>>::Output` is i32 (the operators of a number or
         // bool are Self's, through a reference too: `&i32 + i32`), `<&i32 as Deref>::Target` is i32)
+        if !std_impls {
+            return None;
+        }
         let prim = |t: Ty| t.is_int() || t.is_float() || t == Ty::Bool;
         match (name, t) {
             ("Output", t) if prim(t) => Some(t),
