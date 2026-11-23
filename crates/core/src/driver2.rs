@@ -1474,15 +1474,20 @@ impl Session2 {
         }
         prog.opt = self.opts.opt;
         resolve_opaque(&mut prog, &src, &items)?;
-        // (the words of the program's `use` declarations, at an item's start or a statement's)
-        for it in &items[..user] {
-            let t = src.get(it.start..it.end).unwrap_or("");
-            let b = t.as_bytes();
-            for (i, _) in t.match_indices("use ") {
-                if i > 0 && !matches!(b[i - 1], b' ' | b'\t' | b'\n' | b'{' | b';' | b'}') {
+        // (the words of the program's `use` declarations, fn bodies' too: from the lexer's identifier tokens, the
+        // `use` keyword's to its `;`)
+        // (one search of the source first: most programs have no `use`)
+        let sb = src.as_bytes();
+        // (only `zustc check` has the placeholders' round that reads them)
+        let any_use = self.checking && src.contains("use ");
+        for it in items[..user].iter().filter(|_| any_use) {
+            for &(a, b) in &it.idents {
+                let (a, b) = (a as usize, b as usize);
+                if b - a != 3 || sb.get(a..b) != Some(b"use") {
                     continue;
                 }
-                let decl = &t[i + 4..t[i..].find(';').map_or(t.len(), |k| i + k)];
+                let end = sb[b..it.end.min(sb.len())].iter().position(|&c| c == b';').map_or(it.end, |k| b + k);
+                let decl = src.get(b..end).unwrap_or("");
                 prog.use_names.extend(decl.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).map(str::to_string));
             }
         }
