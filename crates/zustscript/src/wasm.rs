@@ -250,6 +250,7 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
         let mut ps = vec![]; // the wrapper's parameters
         let mut pre = vec![]; // Rust statements before the call
         let mut call = vec![]; // the call's arguments
+        let mut jenc = vec![]; // JS that encodes an argument (first: it can throw)
         let mut jpre = vec![]; // JS before the call
         let mut jargs = vec![]; // the wrapper's arguments in JS
         let mut jpost = vec![]; // JS after the call (frees, releases)
@@ -298,7 +299,7 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
                 WTy::Str => {
                     ps.push(format!("{a}_p: *const u8, {a}_n: usize"));
                     call.push(format!("unsafe {{ std::str::from_utf8_unchecked(std::slice::from_raw_parts({a}_p, {a}_n)) }}"));
-                    jpre.push(format!("const {a}$b = $enc.encode({a});"));
+                    jenc.push(format!("const {a}$b = $enc.encode({a});"));
                     jpre.push(format!("const {a}$p = $w.__zsc_alloc(BigInt({a}$b.length));"));
                     jpre.push(format!("new Uint8Array($w.memory.buffer, Number({a}$p), {a}$b.length).set({a}$b);"));
                     jargs.push(format!("{a}$p, BigInt({a}$b.length)"));
@@ -315,7 +316,7 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
                         // (a Copy enum, a union of strings: by value)
                         (_, false) => format!("__zsc_{a}"),
                     });
-                    jpre.push(format!("const {a}$b = $zsEncode({}, {a});", schema_of(ws)));
+                    jenc.push(format!("const {a}$b = $zsEncode({}, {a});", schema_of(ws)));
                     jpre.push(format!("const {a}$p = $w.__zsc_alloc(BigInt({a}$b.length));"));
                     jpre.push(format!("new Uint8Array($w.memory.buffer, Number({a}$p), {a}$b.length).set({a}$b);"));
                     jargs.push(format!("{a}$p, BigInt({a}$b.length)"));
@@ -379,7 +380,9 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
         // the glue
         let jps: Vec<String> = args.iter().map(|(a, _)| a.clone()).collect();
         let _ = writeln!(glue, "{}function {name}({}) {{", if public.contains(name) { "export " } else { "" }, jps.join(", "));
-        for l in &jpre {
+        // (every argument is encoded, which can throw, before anything is allocated in wasm or registered: a
+        // rejected value leaves nothing behind)
+        for l in jenc.iter().chain(&jpre) {
             let _ = writeln!(glue, "  {l}");
         }
         let callw = format!("$w.__zsc_w_{wname}({})", jargs.join(", "));

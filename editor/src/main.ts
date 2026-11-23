@@ -179,10 +179,17 @@ function recompile() {
     last = compile(source.value);
   } catch (e) {
     if (!(e instanceof CompilerCrash)) throw e;
+    // (the instance is unusable after a trap: no edit reaches it while a fresh one loads, and the fresh one
+    // compiles the source only when it changed since the crash, so a source that crashes zsc is not retried in a loop)
     last = { ok: false, js: "", dts: "", diagnostics: [], ms: 0 };
-    status.textContent = `zsc crashed: ${e.message} (the compiler is reloaded on the next edit)`;
+    const crashed = source.value;
+    compile = null;
+    status.textContent = `zsc crashed: ${e.message} (edit the source to try again)`;
     status.className = "status bad";
-    void loadCompiler(zscUrl).then((c) => (compile = c));
+    void loadCompiler(zscUrl).then((c) => {
+      compile = c;
+      if (source.value !== crashed) recompile();
+    });
     render([]);
     return;
   }
@@ -221,7 +228,12 @@ function log(l: LogLine) {
 }
 
 source.addEventListener("input", () => changed());
+// Tab indents; Esc then Tab leaves the editor (no keyboard trap)
+let tabLeaves = false;
 source.addEventListener("keydown", (e) => {
+  const leave = tabLeaves;
+  tabLeaves = e.key === "Escape";
+  if (e.key === "Tab" && leave) return;
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
     e.preventDefault();
     recompile();

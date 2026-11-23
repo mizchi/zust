@@ -516,7 +516,9 @@ impl Lower<'_> {
             Ty::Bool => WS::Scalar(WTy::Bool),
             Ty::Str => WS::Str,
             Ty::Array(e) => WS::Arr(Box::new(self.ws_in(e, pos, open)?)),
-            Ty::Named(n, _) if open.contains(t) => {
+            // (or a type whose arguments grow on each expansion, `Grow<T> { More(Array<Grow<Array<T>>>) }`: finite
+            // nesting like `Wrap<Wrap<i32>>` stays well under the bound)
+            Ty::Named(n, _) if open.contains(t) || open.iter().filter(|o| matches!(o, Ty::Named(m, _) if m == n)).count() >= 16 => {
                 return Err((pos, format!("{n} holds itself: a recursive record or enum cannot cross from JS to a @wasm function yet")));
             }
             Ty::Named(n, targs) if self.info.records.contains_key(n) => {

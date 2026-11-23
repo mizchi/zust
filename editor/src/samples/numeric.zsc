@@ -27,8 +27,12 @@ extern fn log(s: String) = "console.log";
 type Stats = { mean: f64, max: f64 }
 
 @wasm pub fn stats(xs: Array<f64>) -> Stats {
-  let hi = xs.fold(0.0, (m, x) => if x > m { x } else { m });
-  Stats { mean: total(xs) / (xs.len() as f64), max: hi }
+  if xs.len() == 0 {
+    Stats { mean: 0.0, max: 0.0 }
+  } else {
+    let hi = xs.fold(xs[0], (m, x) => if x > m { x } else { m });
+    Stats { mean: total(xs) / (xs.len() as f64), max: hi }
+  }
 }
 
 pub fn main() -> String {
@@ -36,6 +40,8 @@ pub fn main() -> String {
   log("total i32: " + total([1, 2, 3]).to_string() + ", f64: " + total([0.5, 0.25]).to_string());
   // i32 wraps like Rust's wrapping arithmetic
   log("fib(47) wraps: " + fib(47).to_string());
+  let n = stats([-3.0, -1.0]);
+  log("max of negatives: " + n.max.to_string());
   let s = stats([3.0, 1.0, 4.0, 1.0, 5.0]);
   "mean " + s.mean.to_string() + ", max " + s.max.to_string()
 }

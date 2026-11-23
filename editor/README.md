@@ -19,11 +19,13 @@ A page to write [zustscript](../crates/zustscript) in the browser: the editor hi
     imports (`extern "pkg" fn ..`) load from esm.sh too.
 - **JS / .d.ts**: zsc's output.
 
-The source is kept in localStorage. **share** puts it in the URL (`#code=…`).
+The source is kept in localStorage. In the editor Tab indents; press Esc, then Tab, to move on to the next control.
+
+ **share** puts it in the URL (`#code=…`).
 
 ## Build
 
-You need Rust with the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) and Node 20+.
+You need Rust with the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) and Node 20.19+ or 22.12+ (Vite 8's).
 
 ```sh
 npm install

@@ -2,15 +2,22 @@
 // It gets the compiled module by postMessage, imports it, calls `main` and renders a React element it returns.
 const post = (kind, text) => parent.postMessage({ zsc: true, kind, text }, "*");
 
-const show = (v, top = true) => {
+// (`path`: the arrays and objects being shown, to mark a cycle; a value seen twice side by side is shown twice)
+const show = (v, top = true, path = []) => {
   if (typeof v === "string") return top ? v : JSON.stringify(v);
   if (typeof v === "bigint") return `${v}`;
   if (typeof v === "function") return `[function ${v.name || "anonymous"}]`;
   if (v === undefined) return "()";
-  if (Array.isArray(v)) return `[${v.map((x) => show(x, false)).join(", ")}]`;
   if (v && typeof v === "object") {
+    if (path.includes(v)) return "[circular]";
     if ("$$typeof" in v) return "<React element>";
-    return `{ ${Object.entries(v).map(([k, x]) => `${k}: ${show(x, false)}`).join(", ")} }`;
+    path.push(v);
+    try {
+      if (Array.isArray(v)) return `[${v.map((x) => show(x, false, path)).join(", ")}]`;
+      return `{ ${Object.entries(v).map(([k, x]) => `${k}: ${show(x, false, path)}`).join(", ")} }`;
+    } finally {
+      path.pop();
+    }
   }
   return String(v);
 };
