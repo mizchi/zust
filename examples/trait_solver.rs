@@ -63,6 +63,12 @@ impl Conv<u64> for u8 {
         *self as u64 * 1000
     }
 }
+// (two impls of one trait for one type, told apart by the trait's argument)
+impl Conv<bool> for u8 {
+    fn conv(&self) -> bool {
+        *self != 0
+    }
+}
 fn conv_to<T, S: Conv<T>>(s: S) -> T {
     s.conv()
 }
@@ -92,5 +98,8 @@ fn main() {
     println!("{}", show(&Pair(Square(1), Pair(Square(2), Square(3)))));
     println!("{}", same(1u8, 2u8));
     let a: u64 = conv_to(7u8);
-    println!("{a}");
+    let b: bool = conv_to(0u8);
+    let c: u64 = 3u8.conv();
+    let d: bool = 3u8.conv();
+    println!("{a} {b} {c} {d}");
 }

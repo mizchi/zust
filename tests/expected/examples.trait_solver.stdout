@@ -2,4 +2,4 @@ local marked
 square of area 9
 (square, (square, square)) of area 14
 2
-7000
+7000 false 3000 true

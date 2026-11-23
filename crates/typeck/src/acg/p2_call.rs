@@ -2023,6 +2023,23 @@ impl Cx<'_> {
                 }),
                 _ => None,
             };
+            // (impls of the trait with other arguments for the same type (`impl Conv<u64> for u8` and `impl Conv<bool>
+            // for u8`): the one whose method has the trait's signature under the trait's arguments the call has (Self,
+            // then the trait's own: `T = bool`), as the solver selects the impl whose head matches the goal)
+                let imp = imp.map(|imp| {
+                let Some(group) = self.prog.overloads.get(self.prog.names[imp as usize].split('#').next().unwrap_or("")) else { return imp };
+                let want_ret = self.prog.subst(sig.ret, &args);
+                let want_params: Vec<Ty> = sig.params.iter().map(|&t| self.prog.subst(t, &args)).collect();
+                if self.prog.has_param(want_ret) || want_params.iter().any(|&t| self.prog.has_param(t)) {
+                    return imp;
+                }
+                let fit: Vec<u32> = group.iter().copied().filter(|&c| {
+                    let cs = &self.prog.sigs[c as usize];
+                    !cs.is_generic() && cs.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim()) == tr0 && cs.ret == want_ret && cs.params.len() == want_params.len()
+                        && cs.params.iter().zip(&want_params).skip(1).all(|(a, b)| a == b)
+                }).collect();
+                if fit.len() == 1 { fit[0] } else { imp }
+            });
             if let Some(imp) = imp {
                 let isig = &self.prog.sigs[imp as usize];
                 if !isig.is_generic() {
@@ -2065,7 +2082,7 @@ impl Cx<'_> {
     }
 
     /// 同じ名前の trait impl の関数 (`P::from` が `From<&str>` と `From<String>`) から、最初の引数の型で選ぶ
-    pub(crate) fn pick_overload(&self, id: u32, recv: Option<Ty>, args: &[&Expr]) -> u32 {
+    pub(crate) fn pick_overload(&self, id: u32, recv: Option<Ty>, args: &[&Expr], expected: Option<Ty>) -> u32 {
         if self.keep_overload.get() == Some(id) {
             self.keep_overload.set(None);
             return id;
@@ -2105,6 +2122,23 @@ impl Cx<'_> {
             Ty::Ref(_, Ty::Ref(m, i)) => Some(Ty::Ref(*m, i)),
             _ => None,
         };
+        // (impls of one trait with different arguments for one type (`impl Conv<u64> for u8`, `impl Conv<bool> for
+        // u8`): the receiver fits both, the trait's argument tells them apart, as the trait solver's matching of the
+        // impls' heads does. Here the argument is what the call's result must be: the one whose result is that type)
+        if let Some(want) = expected.filter(|&w| !self.prog.has_param(w)) {
+            // (the receiver by value or by reference: the impls' self type)
+            let mut bare = at;
+            while let Ty::Ref(_, i) = bare {
+                bare = *i;
+            }
+            let fit: Vec<u32> = cands.iter().copied().filter(|&c| self.prog.sigs[c as usize].impl_trait.is_some() && (fits(c, at) || self.prog.sigs[c as usize].self_ty == Some(bare))).collect();
+            if fit.len() > 1 {
+                let by_ret: Vec<u32> = fit.iter().copied().filter(|&c| self.prog.sigs[c as usize].ret == want).collect();
+                if by_ret.len() == 1 {
+                    return by_ret[0];
+                }
+            }
+        }
         // (`a::M::m(&x)`: the impl of the trait the call named, also through the deref coercion; never an inherent
         // method of the same name)
         if let Some((m, tr)) = &self.explicit_trait {
@@ -2284,7 +2318,7 @@ impl Cx<'_> {
         // (戻り値を書く先: 引数の中の呼び出しには渡さない)
         let hint = self.dst_hint.take();
         let id0 = id;
-        let id = self.pick_overload(id, recv.map(|r| r.1), args);
+        let id = self.pick_overload(id, recv.map(|r| r.1), args, expected);
         // (E0133 was checked on the fn found before the overload was chosen: an `unsafe fn` chosen in its place, by
         // the traits in scope, needs the same check)
         if id != id0 && self.prog.sigs[id as usize].is_unsafe && !self.prog.sigs[id0 as usize].is_unsafe && self.unsafe_ok == 0 && self.user_code {
