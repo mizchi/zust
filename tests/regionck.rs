@@ -2473,3 +2473,12 @@ fn part13_review() {
     assert_eq!(check("struct S {\n    n: u8,\n}\nimpl S {\n    fn get(&self) -> &u8 {\n        &self.n\n    }\n    fn take(&mut self, _x: &u8) {}\n    fn val(&self) -> u8 {\n        self.n\n    }\n    fn put(&mut self, _x: u8) {}\n}\nfn main() {\n    let mut s = S { n: 1 };\n    s.put(s.val());\n    s.put(*s.get());\n    let t = S { n: 2 };\n    s.take(t.get());\n    let a = String::from(\"a\");\n    let mut v: Vec<&str> = vec![&a];\n    v.push(v.first().unwrap().clone());\n    v.push(*v.last().unwrap());\n    v.push(v[0]);\n    let n = v.len();\n    v.truncate(n - 1);\n    let mut w = vec![1, 2];\n    w.push(w.len());\n    w.push(*w.last().unwrap());\n    let mut st = String::from(\"x\");\n    st.push_str(&st.clone());\n    println!(\"{} {:?} {:?} {}\", s.n, v, w, st);\n}\n"), vec![]);
     assert_eq!(check("trait Dup: Clone {}\n#[derive(Clone)]\nstruct W(u8);\nimpl Dup for W {}\nfn duplicate<T: Dup>(x: T) -> T {\n    (&x).clone()\n}\nfn main() {\n    let w = duplicate(W(3));\n    println!(\"{}\", w.0);\n}\n"), vec![]);
 }
+
+/// A local holding a reference passed to a `&mut self` method of what it may borrow (`let w = &v; v.ext(w)`): what
+/// it holds is held until the `&mut` is taken (E0502). One that borrows something else is fine
+#[test]
+fn part14_two_phase_through_a_local() {
+    let d = check("struct S(Vec<i32>);\nimpl S {\n    fn ext(&mut self, _b: &S) {}\n    fn add(&mut self, _b: &[i32]) {}\n}\nfn main() {\n    let mut v = S(vec![0]);\n    let w = &v;\n    v.ext(w);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("cannot borrow `v` as mutable because it is also borrowed as immutable"), "{d:?}");
+    assert_eq!(check("struct S(Vec<i32>);\nimpl S {\n    fn ext(&mut self, _b: &S) {}\n    fn add(&mut self, _b: &[i32]) {}\n}\nfn main() {\n    let mut v = S(vec![0]);\n    let u = S(vec![1]);\n    let w = &u;\n    v.ext(w);\n    let x = vec![3];\n    let r = &x;\n    v.add(r);\n    let a = String::from(\"a\");\n    let mut names: Vec<&str> = vec![];\n    let s: &str = &a;\n    names.push(s);\n    let t = names[0];\n    names.push(t);\n    println!(\"{}\", v.0.len() + names.len());\n}\n"), vec![]);
+}

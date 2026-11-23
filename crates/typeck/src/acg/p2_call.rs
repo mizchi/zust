@@ -1093,7 +1093,17 @@ impl Cx<'_> {
                 // (an argument that names the receiver (`v.push(v.pop().unwrap())`): the two-phase borrow's
                 // reservation, a shared loan of the place, lasts while the arguments are evaluated)
                 if let (Some(borrowck::Ev::Acc(place, borrowck::Acc::Borrow(ln), sp)), Some(n)) = (&ev, borrowck::root_local(recv)) {
-                    if margs.iter().any(|a| borrowck::mentions(a, n)) {
+                    // (or a local that may hold a loan of it (`let w = &v; v.ext(w)`): what it holds is held until the
+                    // `&mut` is taken)
+                    let mut holds = false;
+                    for a in margs.iter() {
+                        if let Expr::Path(None, p) = strip_paren(a) {
+                            if let (1, Some((_, t))) = (p.segs.len(), self.lookup(&p.segs[0].name)) {
+                                holds |= self.bk_ty(t).1;
+                            }
+                        }
+                    }
+                    if holds || margs.iter().any(|a| borrowck::mentions(a, n)) {
                         let l = &self.bk.loans[*ln as usize];
                         let res = borrowck::Loan { place: l.place.clone(), mutable: false, sp: l.sp, at: l.at, quiet: l.quiet, capture: l.capture };
                         let rs = self.bk.loans.len() as u32;
