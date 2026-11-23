@@ -3494,6 +3494,16 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             let rest = &t[i..];
             let ws = rest.len() - rest.trim_start().len();
             let r = &rest[ws..];
+            // (a comment between attributes: `#[inline]\n//~^ ERROR ..\n#[target_feature(..)]`)
+            if r.starts_with("//") {
+                i += ws + r.find('\n').map_or(r.len(), |n| n + 1);
+                continue;
+            }
+            if r.starts_with("/*") {
+                let Some(n) = r.find("*/") else { break };
+                i += ws + n + 2;
+                continue;
+            }
             let open = if r.starts_with("#![") { 3 } else if r.starts_with("#[") { 2 } else { break };
             // (the matching `]`, past nested brackets and string literals)
             let mut depth = 0i32;
@@ -3549,6 +3559,11 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
         let t = line.trim_start();
         if t.starts_with("#![") {
             for (at, name, input) in leading(line) {
+                // (the attribute macros an item takes, not a crate: `#![derive(Debug)]`)
+                if matches!(name, "derive" | "test" | "test_case" | "bench" | "global_allocator") && line[at..].starts_with("#![") {
+                    let n = head[..off + at].matches('\n').count() + 1;
+                    return Some(format!("{n}:1: `{name}` attribute cannot be used at crate level"));
+                }
                 if !check(name, input) {
                     return Some(report(head, 1, off + at, name, input));
                 }
@@ -3561,6 +3576,8 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
     // (the unsafe attributes, which `#[unsafe(..)]` may wrap; `naked` needs it in every edition, the others in 2024, or
     // where `unsafe_attr_outside_unsafe` is denied)
     const UNSAFE: &[&str] = &["no_mangle", "export_name", "link_section", "naked", "ffi_pure", "ffi_const", "force_target_feature"];
+    // (`unused_attributes` denied at the crate, by itself or a group)
+    let unused_attributes_denied = (head.contains("#![deny(") || head.contains("#![forbid(")) && ["unused_attributes", "unused)", "unused,", "warnings"].iter().any(|n| head.contains(n));
     // (`#![crate_type = "proc-macro"]`, not a comment that names the crate type)
     let proc_macro_crate = head.match_indices("crate_type").any(|(i, _)| head[i + 10..].trim_start().strip_prefix('=').is_some_and(|r| r.trim_start().starts_with("\"proc-macro\"")));
     // (before 2024 a lint: denied at the crate, and not allowed again on an item, `#[allow(unsafe_attr_outside_unsafe)]
@@ -3651,7 +3668,7 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             "macro_rules!" => "macro defs",
             _ => continue,
         };
-        for &(at, name, _) in &attrs {
+        for &(at, name, input) in &attrs {
             // (a proc macro: a fn of a `proc-macro` crate)
             if matches!(name, "proc_macro" | "proc_macro_derive" | "proc_macro_attribute") && !proc_macro_crate {
                 let line = it.line + text[..at].matches('\n').count();
@@ -3661,18 +3678,36 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
                     format!("{line}:1: the `{name}` attribute cannot be used on {kind}")
                 });
             }
+            let line = || it.line + text[..at].matches('\n').count();
+            // (`repr(packed)` is a struct's or a union's; rustc names a repr by its hint)
+            let hint = input.trim().strip_prefix('(').and_then(|r| r.strip_suffix(')')).map(str::trim).unwrap_or("");
+            let shown = if name == "repr" && !hint.is_empty() && !hint.contains(',') { format!("repr({hint})") } else { name.to_string() };
+            // (an error wherever it is: the attributes rustc rejects on an item of another kind)
             let ok = match name {
-                "inline" | "cold" | "track_caller" => kw == "fn",
+                "inline" | "track_caller" | "target_feature" => kw == "fn",
+                "repr" if hint.starts_with("packed") => matches!(kw, "struct" | "union"),
                 "repr" => matches!(kw, "struct" | "enum" | "union"),
                 "non_exhaustive" => matches!(kw, "struct" | "enum"),
-                "must_use" => matches!(kw, "fn" | "struct" | "enum" | "union" | "trait"),
-                "macro_use" => matches!(kw, "mod"),
-                "no_mangle" => matches!(kw, "fn" | "static"),
+                "used" => kw == "static",
+                "debugger_visualizer" => kw == "mod",
                 _ => true,
             };
             if !ok {
-                let line = it.line + text[..at].matches('\n').count();
-                return Some(format!("{line}:1: `#[{name}]` attribute cannot be used on {kind}"));
+                return Some(format!("{}:1: the `{shown}` attribute cannot be used on {kind}", line()));
+            }
+            // (`no_mangle` on a const: the deny-by-default `no_mangle_const_items`)
+            if name == "no_mangle" && kw == "const" {
+                return Some(format!("{}:1: const items should never be `#[no_mangle]`", line()));
+            }
+            // (only a warning (`unused_attributes`) elsewhere: an error where the crate denies it)
+            let warned = match name {
+                "cold" => kw != "fn",
+                "macro_use" => kw != "mod",
+                "no_mangle" => !matches!(kw, "fn" | "static"),
+                _ => false,
+            };
+            if warned && unused_attributes_denied {
+                return Some(format!("{}:1: the `{name}` attribute cannot be used on {kind}", line()));
             }
         }
     }

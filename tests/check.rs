@@ -1080,3 +1080,38 @@ fn review100_fourth_round() {
     let src = "trait Id { type T; }\nimpl Id for u8 { type T = u8; }\ntrait Base<T, U = <u8 as Id>::T> { type A; type B; }\ntrait Mid: Base<u8, A = u8> {}\ntrait Root: Base<u8, <u8 as Id>::T, B = u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
     assert_eq!(first(src), None, "associated_segment_in_a_default");
 }
+
+#[test]
+fn attributes_at_crate_level_and_misplaced() {
+    // (as rustc 1.100 reports them: an attribute macro an item takes, written at the crate; an attribute on an item
+    // of a kind it does not apply to, an error or, for those rustc only warns about, an error where the lint is denied)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    for a in ["derive(Debug)", "test", "test_case", "bench", "global_allocator"] {
+        let name = a.split('(').next().unwrap();
+        assert_eq!(first(&format!("#![{a}]\nfn main() {{}}\n")), at(1, &format!("`{name}` attribute cannot be used at crate level")), "{a}");
+    }
+    let cases: &[(&str, &str, Option<&str>)] = &[
+        ("inline", "const FOO: u8 = 0;", Some("the `inline` attribute cannot be used on constants")),
+        ("used", "fn foo() {}", Some("the `used` attribute cannot be used on functions")),
+        ("used", "static FOO: u32 = 0;", None),
+        ("target_feature(enable = \"sse2\")", "struct S;", Some("the `target_feature` attribute cannot be used on structs")),
+        ("debugger_visualizer(natvis_file = \"a.natvis\")", "fn foo() {}", Some("the `debugger_visualizer` attribute cannot be used on functions")),
+        ("repr(packed)", "enum E { A }", Some("the `repr(packed)` attribute cannot be used on enums")),
+        ("repr(C)", "fn foo() {}", Some("the `repr(C)` attribute cannot be used on functions")),
+        ("repr(C)", "enum E { A }", None),
+        ("no_mangle", "const C: u8 = 0;", Some("const items should never be `#[no_mangle]`")),
+        // (warnings only: not an error)
+        ("cold", "struct S;", None),
+        ("macro_use", "struct S;", None),
+        ("no_mangle", "struct S;", None),
+    ];
+    for (a, item, want) in cases {
+        assert_eq!(first(&format!("#[{a}]\n{item}\nfn main() {{}}\n")), want.and_then(|m| at(1, m)), "{a} {item}");
+    }
+    // (a comment between attributes does not hide the ones after it)
+    assert_eq!(first("#[inline]\n// a comment\n#[target_feature(enable = \"sse2\")]\nconst FOO: u8 = 0;\nfn main() {}\n"), at(1, "the `inline` attribute cannot be used on constants"), "comment_between");
+    // (a warned one is an error where `unused_attributes` is denied)
+    assert_eq!(first("#![deny(unused_attributes)]\n#[cold]\nstruct S;\nfn main() {}\n"), at(2, "the `cold` attribute cannot be used on structs"), "denied");
+}
