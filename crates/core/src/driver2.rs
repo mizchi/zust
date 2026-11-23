@@ -1474,6 +1474,12 @@ impl Session2 {
         }
         prog.opt = self.opts.opt;
         resolve_opaque(&mut prog, &src, &items)?;
+        // (a derive whose field has not the trait: `#[derive(Hash)] struct S { x: Error }`)
+        if !prog.derived.is_empty() {
+            if let Some(e) = derive_field_error(&prog, &src, &items[..user]) {
+                return Err(e);
+            }
+        }
         let ol = self.ctx.own_lines as usize;
         let ext_items: Vec<bool> = items.iter().enumerate().map(|(i, it)| ol > 0 && i < user && it.line > ol).collect();
         // (ライブラリ: 自分の総称でない関数は全部外に見せる (使う側のクレートが呼ぶ))
@@ -4299,6 +4305,156 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         }
     }
     std::mem::take(&mut g.pending)
+}
+
+/// A derive of the program's whose field does not have the derived trait: `line:col: ..` of the first such field
+/// (`#[derive(Hash)] struct S { x: Error }`, `#[derive(Eq)]` of an f64). Only what is sure: a field of a struct or enum
+/// of the program's that neither derives nor implements the trait, and a float (inside an Option, an array, a tuple,
+/// a Box, a Vec or a reference too) for Eq, Ord and Hash
+fn derive_field_error(prog: &Program, src: &str, items: &[SrcItem]) -> Option<String> {
+    fn float_in(p: &Program, t: Ty, depth: u32) -> Option<&'static str> {
+        match t {
+            Ty::F32 => Some("f32"),
+            Ty::F64 => Some("f64"),
+            Ty::Array(e, _) | Ty::Slice(e) | Ty::Box(e) | Ty::Ref(_, e) if depth < 8 => float_in(p, *e, depth + 1),
+            Ty::Struct(s) if depth < 8 => {
+                let sd = &p.structs[s as usize];
+                let std_wrap = sd.base.is_some_and(|b| p.is_tuple(b) || matches!(p.structs[b as usize].name.as_str(), "Option" | "Vec"));
+                sd.args.iter().filter(|_| std_wrap).find_map(|&a| float_in(p, a, depth + 1))
+            }
+            _ => None,
+        }
+    }
+    let mut ds: Vec<(u32, &Vec<String>)> = prog.derived.iter().map(|(&sid, d)| (sid, d)).collect();
+    ds.sort_by_key(|&(sid, _)| prog.struct_item.get(sid as usize).copied().unwrap_or(u32::MAX));
+    for (sid, derives) in ds {
+        let Some(&ii) = prog.struct_item.get(sid as usize) else { continue };
+        let Some(it) = items.get(ii as usize) else { continue };
+        let sd = &prog.structs[sid as usize];
+        let fields: Vec<&[(String, Ty, u32)]> = if sd.is_enum { sd.variants.iter().map(|v| v.fields.as_slice()).collect() } else { vec![sd.fields.as_slice()] };
+        let mut bad: Option<(usize, usize, String)> = None;
+        'fields: for (vi, fs) in fields.iter().enumerate() {
+            for (fi, (_, ft, _)) in fs.iter().enumerate() {
+                if prog.has_param(*ft) {
+                    continue;
+                }
+                for d in derives {
+                    let d = d.as_str();
+                    let float = if matches!(d, "Eq" | "Ord" | "Hash") { float_in(prog, *ft, 0) } else { None };
+                    let own_missing = matches!(d, "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Clone" | "Debug") && matches!(*ft, Ty::Struct(f) if {
+                        let fd = &prog.structs[f as usize];
+                        fd.base.is_none() && fd.placeholder.is_none() && !prog.is_tuple(f) && prog.struct_item.get(f as usize).is_some_and(|&fi| (fi as usize) < items.len()) && !prog.implements(*ft, d)
+                    });
+                    if float.is_some() || own_missing {
+                        // (the name as written: not the renamer's `__u_Error`)
+                        let n = float.map_or_else(|| prog.tn(*ft).replace("__u_", ""), str::to_string);
+                        let msg = match d {
+                            "PartialEq" => format!("binary operation `==` cannot be applied to type `{n}` (E0369)"),
+                            "PartialOrd" => format!("can't compare `{n}` with `{n}` (E0277)"),
+                            "Debug" => format!("`{n}` doesn't implement `Debug` (E0277)"),
+                            _ => format!("the trait bound `{n}: {d}` is not satisfied (E0277)"),
+                        };
+                        bad = Some((vi, fi, msg));
+                        break 'fields;
+                    }
+                }
+            }
+        }
+        let Some((vi, fi, msg)) = bad else { continue };
+        let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
+        let (l, c) = field_pos(&text, sd.is_enum, vi, fi).unwrap_or((0, 0));
+        return Some(format!("{}:{}: {msg}", it.line + l, c + 1));
+    }
+    None
+}
+
+/// The line (from the item's first) and column of field fi of variant vi (of the struct's fields when not an enum)
+/// in a struct's or enum's text, comments blanked
+fn field_pos(text: &str, is_enum: bool, vi: usize, fi: usize) -> Option<(usize, usize)> {
+    let b = text.as_bytes();
+    let pos = |i: usize| {
+        let l = text[..i].matches('\n').count();
+        (l, i - text[..i].rfind('\n').map_or(0, |k| k + 1))
+    };
+    // (the body: past the name and its generics (`<T: Fn(u8) -> u8>`), the first `{` or `(`)
+    let kw = if is_enum { "enum " } else { "struct " };
+    let mut i = text.find(kw)? + kw.len();
+    let mut angle = 0i32;
+    while i < b.len() {
+        match b[i] {
+            b'<' => angle += 1,
+            b'>' if i > 0 && b[i - 1] != b'-' => angle -= 1,
+            b'{' | b'(' if angle == 0 => break,
+            _ => {}
+        }
+        i += 1;
+    }
+    // (the items of a list from b[i] (an opening bracket) to its close: where each starts, past attributes)
+    fn items_of(b: &[u8], open: usize) -> (Vec<usize>, usize) {
+        let mut starts = vec![];
+        let mut depth = 0i32;
+        let mut j = open + 1;
+        let mut at_start = true;
+        while j < b.len() {
+            let c = b[j];
+            if at_start && !c.is_ascii_whitespace() && depth == 0 {
+                if c == b'#' {
+                    // (an attribute: to its `]`)
+                    let mut d = 0;
+                    while j < b.len() {
+                        match b[j] {
+                            b'[' => d += 1,
+                            b']' => {
+                                d -= 1;
+                                if d == 0 {
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                        j += 1;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if !matches!(c, b')' | b'}' | b']') {
+                    starts.push(j);
+                }
+                at_start = false;
+            }
+            match c {
+                b'(' | b'[' | b'{' => depth += 1,
+                b'<' => depth += 1,
+                b'>' if b[j - 1] != b'-' && depth > 0 => depth -= 1,
+                b')' | b']' | b'}' => {
+                    if depth == 0 {
+                        return (starts, j);
+                    }
+                    depth -= 1;
+                }
+                b',' if depth == 0 => at_start = true,
+                _ => {}
+            }
+            j += 1;
+        }
+        (starts, j)
+    }
+    if !is_enum {
+        let (starts, _) = items_of(b, i);
+        return starts.get(fi).map(|&k| pos(k));
+    }
+    let (variants, _) = items_of(b, i);
+    let v = *variants.get(vi)?;
+    // (the variant's fields: its `(` or `{`)
+    let mut k = v;
+    while k < b.len() && !matches!(b[k], b'(' | b'{' | b',' | b'=' | b'}') {
+        k += 1;
+    }
+    if k >= b.len() || !matches!(b[k], b'(' | b'{') {
+        return Some(pos(v));
+    }
+    let (starts, _) = items_of(b, k);
+    starts.get(fi).map(|&s| pos(s))
 }
 
 /// `#![deny(deprecated)]`: the first path of the program's through `std::intrinsics` / `core::intrinsics` to an

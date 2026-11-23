@@ -17,7 +17,7 @@ impl Cx<'_> {
     /// rustc's E0369 message for `l op r` (a placeholder `T#` shown as `T`, an unsuffixed literal as `{integer}` /
     /// `{float}`, an unknown type as `_`)
     fn cannot_op(&self, op: &str, lt: Ty, right: &Expr) -> String {
-        let show = |t: Ty| self.prog.tn(t).replace('#', "");
+        let show = |t: Ty| self.prog.tn(t).replace('#', "").replace("__u_", "");
         let l = show(lt);
         let r = if super::p2_call::is_int_lit(right) {
             "{integer}".to_string()
