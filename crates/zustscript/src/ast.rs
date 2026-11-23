@@ -151,6 +151,20 @@ pub enum WTy {
     /// call returns. `Box<dyn Fn(A) -> R>` (true): owned by the wasm side, released when Rust drops it.
     /// Arguments and result are scalars (i32 u32 f64 bool ()).
     Callback(Vec<WTy>, Box<WTy>, bool),
+    /// A value that crosses as bytes in the format of zustscript-helper / zustscript_helper (a record holding a
+    /// string or an array, an array of records, strings or arrays), and its owned Rust type
+    Wire(Box<WS>, String),
+}
+
+/// The schema of a value that crosses as bytes (helper/rust/src/lib.rs has the format)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WS {
+    /// i32 u32 i64 f32 f64 bool
+    Scalar(WTy),
+    Str,
+    Arr(Box<WS>),
+    /// (Rust type, fields)
+    Rec(String, Vec<(String, WS)>),
 }
 
 /// The shape of a value that crosses the boundary as slots

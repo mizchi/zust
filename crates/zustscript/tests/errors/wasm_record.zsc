@@ -1,3 +1,0 @@
-// expect: String cannot be inside a record or enum that crosses to wasm
-type P = { name: String, x: f64 }
-@wasm pub fn f(p: P) -> f64 { p.x }

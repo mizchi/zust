@@ -1,0 +1,29 @@
+// Values that cross to @wasm as bytes, through zustscript-helper (JS) and zustscript_helper (Rust): records holding
+// strings or arrays, arrays of records and of strings, nested arrays (tests/examples.rs: wire_same_in_js_and_wasm)
+
+type Person = { name: String, age: i32, tags: Array<String> }
+type Team = { title: String, people: Array<Person>, scores: Array<Array<f64>>, open: bool, id: i64 }
+
+@wasm pub fn describe(p: Person) -> String {
+  p.name + " (" + p.age.to_string() + ") " + p.tags.join("/")
+}
+
+@wasm pub fn oldest(ps: Array<Person>) -> Person {
+  let mut best = ps[0];
+  for p in ps {
+    if p.age > best.age { best = p; }
+  }
+  best
+}
+
+@wasm pub fn rename(p: Person, name: String) -> Person { Person { name: name, ..p } }
+
+@wasm pub fn total(t: Team) -> f64 { t.scores.fold(0.0, (s, row) => row.fold(s, (a, x) => a + x)) }
+
+@wasm pub fn grow(t: Team, p: Person) -> Team {
+  Team { people: t.people.push(p), scores: t.scores.push([1.5]), open: !t.open, id: t.id + 1, ..t }
+}
+
+@wasm pub fn names(t: Team) -> Array<String> { t.people.map((p) => p.name.to_upper()) }
+
+@wasm pub fn grid(n: i32) -> Array<Array<i32>> { range(0, n).map((i) => range(0, i + 1)) }

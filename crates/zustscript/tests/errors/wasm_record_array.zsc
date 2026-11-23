@@ -1,3 +1,0 @@
-// expect: Array<f64> cannot be inside a record or enum that crosses to wasm
-type Poly = { xs: Array<f64> }
-@wasm pub fn f(p: Poly) -> f64 { 1.0 }

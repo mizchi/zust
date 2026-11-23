@@ -29,3 +29,6 @@ pub fn same_user(a: User, b: User) -> bool { a == b }
   let dy = a.y - b.y;
   (dx * dx + dy * dy).sqrt()
 }
+
+// a TS record holding strings and arrays crosses to wasm as bytes (zustscript-helper / zustscript_helper)
+@wasm pub fn badge(u: User) -> String { u.name.to_upper() + " #" + (u.id as i32).to_string() + " " + u.tags.join("+") }

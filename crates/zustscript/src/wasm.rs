@@ -13,12 +13,41 @@
 //! | `String` / `Vec<f64>` / `Vec<i32>` (result) | String / Array | the wrapper leaks it and writes (ptr, len, cap); the glue copies it out and frees it |
 //! | `&dyn Fn(A) -> R` | `(A) => R` | a borrowed callback: registered for the call, released when the call returns |
 //! | `Box<dyn Fn(A) -> R>` | `(A) => R` | an owned callback: released when the Rust side drops the Box |
+//! | a record holding strings or arrays, an array of records / strings / arrays (`@wasm fn` only) | the same | as bytes in the format of the helpers: `encode` (npm `zustscript-helper`) and `from_bytes` (crate `zustscript_helper`, embedded), and back |
 //!
 //! Pointers and `usize` are 64-bit in zustc's wasm output (x86-64 layouts), so they cross as BigInt.
 
 use crate::ast::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
+
+/// The Rust side of the helpers (the crate zustscript_helper), embedded as `mod zustscript_helper`: zustc compiles
+/// one file
+const HELPER_RS: &str = include_str!("../helper/rust/src/lib.rs");
+
+/// The JS spelling of a schema (helper/ts/index.js)
+fn ws_js(w: &WS) -> String {
+    match w {
+        WS::Scalar(t) => format!("{:?}", rs_scalar(t)),
+        WS::Str => "\"str\"".into(),
+        WS::Arr(e) => format!("[\"arr\", {}]", ws_js(e)),
+        WS::Rec(_, fs) => format!("[\"rec\", [{}]]", fs.iter().map(|(f, t)| format!("[{f:?}, {}]", ws_js(t))).collect::<Vec<_>>().join(", ")),
+    }
+}
+
+/// The records of a schema (each needs a `Wire` impl), by Rust type
+fn ws_records<'w>(w: &'w WS, out: &mut BTreeMap<String, &'w [(String, WS)]>) {
+    match w {
+        WS::Arr(e) => ws_records(e, out),
+        WS::Rec(rt, fs) => {
+            out.insert(rt.clone(), fs);
+            for (_, t) in fs {
+                ws_records(t, out);
+            }
+        }
+        _ => {}
+    }
+}
 
 fn rs_scalar(w: &WTy) -> &'static str {
     match w {
@@ -129,6 +158,41 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
     }
     // memory for the boundary
     rs.push_str("#[no_mangle]\npub extern \"C\" fn __zsc_alloc(n: usize) -> *mut u8 {\n    unsafe { malloc(if n == 0 { 1 } else { n }) }\n}\n#[no_mangle]\npub extern \"C\" fn __zsc_free(p: *mut u8) {\n    unsafe { free(p) }\n}\n\n");
+    // values that cross as bytes: their schemas (one JS constant each) and the records' Wire impls
+    let mut schemas: Vec<String> = vec![];
+    let mut wire_recs: BTreeMap<String, &[(String, WS)]> = BTreeMap::new();
+    for (_, args, ret, _, _) in &fns {
+        for w in args.iter().map(|(_, w)| w).chain(std::iter::once(*ret)) {
+            if let WTy::Wire(ws, _) = w {
+                ws_records(ws, &mut wire_recs);
+                let j = ws_js(ws);
+                if !schemas.contains(&j) {
+                    schemas.push(j);
+                }
+            }
+        }
+    }
+    let schema_of = |ws: &WS| format!("$zs{}", schemas.iter().position(|j| *j == ws_js(ws)).unwrap());
+    if !schemas.is_empty() {
+        rs.push_str("mod zustscript_helper {\n");
+        // (as a module: no crate docs, no tests)
+        for l in HELPER_RS.split("#[cfg(test)]").next().unwrap().lines().filter(|l| !l.starts_with("//!")) {
+            rs.push_str(l);
+            rs.push('\n');
+        }
+        rs.push_str("}\n\n");
+        for (rt, fs) in &wire_recs {
+            let puts: Vec<String> = fs.iter().map(|(f, _)| format!("        zustscript_helper::Wire::put(&self.{}, out);", crate::lower::local(f))).collect();
+            let gets: Vec<String> = fs.iter().map(|(f, _)| format!("{}: zustscript_helper::Wire::get(r)", crate::lower::local(f))).collect();
+            let _ = writeln!(
+                rs,
+                "impl zustscript_helper::Wire for {rt} {{\n    fn put(&self, out: &mut Vec<u8>) {{\n{}\n    }}\n    fn get(r: &mut zustscript_helper::Reader) -> {rt} {{\n        {} {{ {} }}\n    }}\n}}\n",
+                puts.join("\n"),
+                base(rt),
+                gets.join(", ")
+            );
+        }
+    }
     let mut glue = String::new();
     let mut names = vec![];
     // (the out area: 3 words for a String / Vec, 8 bytes a slot for a record / enum)
@@ -142,7 +206,7 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
         let mut jpre = vec![]; // JS before the call
         let mut jargs = vec![]; // the wrapper's arguments in JS
         let mut jpost = vec![]; // JS after the call (frees, releases)
-        let out = matches!(ret, WTy::String | WTy::Vec(_) | WTy::TVec(_));
+        let out = matches!(ret, WTy::String | WTy::Vec(_) | WTy::TVec(_) | WTy::Wire(..));
         let ret: &WTy = ret;
         if out {
             ps.push("__out: *mut usize".to_string());
@@ -193,6 +257,17 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
                     jargs.push(format!("{a}$p, BigInt({a}$b.length)"));
                     jpost.push(format!("$w.__zsc_free({a}$p);"));
                 }
+                WTy::Wire(ws, rt) => {
+                    // as bytes: encoded by zustscript-helper, decoded by zustscript_helper, handed by reference
+                    ps.push(format!("{a}_p: *const u8, {a}_n: usize"));
+                    pre.push(format!("let {a}_v: {rt} = zustscript_helper::from_bytes(unsafe {{ std::slice::from_raw_parts({a}_p, {a}_n) }});"));
+                    call.push(if matches!(**ws, WS::Arr(_)) { format!("&{a}_v[..]") } else { format!("&{a}_v") });
+                    jpre.push(format!("const {a}$b = $zsEncode({}, {a});", schema_of(ws)));
+                    jpre.push(format!("const {a}$p = $w.__zsc_alloc(BigInt({a}$b.length));"));
+                    jpre.push(format!("new Uint8Array($w.memory.buffer, Number({a}$p), {a}$b.length).set({a}$b);"));
+                    jargs.push(format!("{a}$p, BigInt({a}$b.length)"));
+                    jpost.push(format!("$w.__zsc_free({a}$p);"));
+                }
                 WTy::Callback(ca, cr, o) => {
                     ps.push(format!("{a}: u32"));
                     let k = sig_key(ca, cr);
@@ -237,6 +312,9 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
             store(v, "r", &mut off, 0, &mut rs);
         } else if out {
             let _ = writeln!(rs, "    let r = {rs_name}({});", call.join(", "));
+            if let WTy::Wire(..) = ret {
+                rs.push_str("    let r = zustscript_helper::to_bytes(&r);\n");
+            }
             let ptr = if *ret == WTy::String { "r.as_bytes().as_ptr()" } else { "r.as_ptr()" };
             let _ = write!(rs, "    let (p, l, c) = ({ptr} as usize, r.len(), r.capacity());");
             rs.push_str("\n    std::mem::forget(r);\n    unsafe {\n        *__out = p;\n        *__out.add(1) = l;\n        *__out.add(2) = c;\n    }\n");
@@ -273,8 +351,9 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
             WTy::Bool => {
                 let _ = writeln!(glue, "{pad}return {callw} !== 0;");
             }
-            WTy::String | WTy::Vec(_) | WTy::TVec(_) => {
+            WTy::String | WTy::Vec(_) | WTy::TVec(_) | WTy::Wire(..) => {
                 let read = match ret {
+                    WTy::Wire(ws, _) => format!("$zsDecode({}, new Uint8Array($w.memory.buffer, Number(p), Number(l)))", schema_of(ws)),
                     WTy::TVec(el) => format!("new {}($w.memory.buffer, Number(p), Number(l)).slice()", el.info().1),
                     WTy::Vec(el) => format!("$wToArray(new {}($w.memory.buffer, Number(p), Number(l)))", el.info().1),
                     _ => "$dec.decode(new Uint8Array($w.memory.buffer, Number(p), Number(l)))".to_string(),
@@ -308,6 +387,13 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
         "const $wasmBytes = typeof process !== \"undefined\" && process.versions?.node\n  ? (await import(\"node:fs\")).readFileSync($wasmUrl)\n  : await (await fetch($wasmUrl)).arrayBuffer();\n",
     );
     head.push_str("const $mod = await WebAssembly.compile($wasmBytes);\n");
+    if !schemas.is_empty() {
+        // (values that cross as bytes: the format of zustscript-helper, the schemas of this module's)
+        head.push_str("import { encode as $zsEncode, decode as $zsDecode } from \"zustscript-helper\";\n");
+        for (k, j) in schemas.iter().enumerate() {
+            let _ = writeln!(head, "const $zs{k} = {j};");
+        }
+    }
     head.push_str("const $enc = new TextEncoder();\nconst $dec = new TextDecoder();\n");
     head.push_str("// JS functions handed to wasm, by id (borrowed ones leave when the call returns, owned ones when Rust drops them)\nexport const $cbs = new Map();\nlet $cbNext = 1;\nconst $cbAdd = (f) => {\n  const id = $cbNext++;\n  $cbs.set(id, f);\n  return id;\n};\n");
     head.push_str("const $lines = {};\n");

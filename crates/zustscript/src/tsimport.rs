@@ -301,7 +301,9 @@ impl TsFile {
             fields.push((f.clone(), ty));
         }
         // (`type X = { .. } | ..`: the whole alias must be the object)
-        if !d.interface && matches!(self.toks[k + 1].t, T::P('|' | '&' | '[' | '.' | '<')) {
+        // (or a conditional type: `type X = { .. } extends Y ? .. : ..`)
+        let goes_on = matches!(self.toks[k + 1].t, T::P('|' | '&' | '[' | '.' | '<')) || matches!(&self.toks[k + 1].t, T::Ident(e) if e == "extends");
+        if !d.interface && goes_on {
             return Err(self.err(self.toks[k + 1].pos, format!("`{name}` is not only an object type (a union, an intersection or an array of one): {plain}")));
         }
         Ok((fields, members, uses))

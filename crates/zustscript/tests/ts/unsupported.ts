@@ -11,3 +11,4 @@ export interface UsesHidden { h: Hidden }
 export type Either = { a: number } | { b: string };
 export interface Twice { a: number }
 export interface Twice { b: string }
+export type Cond = { a: number } extends object ? { b: string } : never;
