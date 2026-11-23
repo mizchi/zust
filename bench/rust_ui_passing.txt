@@ -214,7 +214,10 @@ compile-fail	associated-types/associated-type-as-value-in-impl-issue-142797.rs
 compile-fail	associated-types/associated-type-call.rs
 check-pass	associated-types/associated-type-const-nomalization.rs
 check-pass	associated-types/associated-type-projection-alias-in-field.rs
+compile-fail	associated-types/associated-type-projection-from-multiple-supertraits.rs
 compile-fail	associated-types/associated-type-projection-from-supertrait.rs
+compile-fail	associated-types/associated-type-shadowed-from-non-local-supertrait.rs
+compile-fail	associated-types/associated-type-shadowed-from-supertrait.rs
 compile-fail	associated-types/associated-type-unconstrained-lifetime.rs
 run-pass	associated-types/associated-types-basic.rs
 run-pass	associated-types/associated-types-binding-in-trait.rs
@@ -347,6 +350,7 @@ check-pass	associated-types/supertrait-bound-references-own-associated-type.rs
 compile-fail	associated-types/unconstrained-lifetime-assoc-type.rs
 compile-fail	associated-types/unconstrained-lifetime-in-projection.rs
 check-pass	associated-types/unioned-keys-with-associated-type-23442.rs
+compile-fail	associated-types/unspecified-assoc-type-in-trait-object.rs
 check-pass	associated-types/wf-cycle-2.rs
 check-pass	associated-types/wf-cycle.rs
 compile-fail	async-await/async-block-control-flow-static-semantics.rs
@@ -2239,6 +2243,7 @@ check-pass	dropck/constrained_by_assoc_type_equality.rs
 compile-fail	dropck/drop-on-non-struct.rs
 compile-fail	dropck/drop-with-active-borrows-1.rs
 compile-fail	dropck/drop-with-active-borrows-2.rs
+compile-fail	dropck/dropck-after-failed-type-lowering.rs
 run-pass	dropck/dropck-boxed-self-referencial-fnmut.rs
 run-pass	dropck/dropck-empty-array.rs
 run-pass	dropck/dropck-resolves-associated-type-in-field.rs
@@ -2273,7 +2278,9 @@ check-pass	dst/unsized-tuple-trait-tail.rs
 compile-fail	duplicate/duplicate-parameter.rs
 compile-fail	duplicate/duplicate-type-parameter.rs
 compile-fail	dyn-compatibility/almost-supertrait-associated-type.rs
+compile-fail	dyn-compatibility/assoc_type_bounds.rs
 check-pass	dyn-compatibility/assoc_type_bounds_sized.rs
+compile-fail	dyn-compatibility/assoc_type_bounds_sized_others.rs
 check-pass	dyn-compatibility/assoc_type_bounds_sized_unnecessary.rs
 check-pass	dyn-compatibility/associated_type_bound_mentions_self.rs
 check-pass	dyn-compatibility/by-value-self.rs
@@ -2411,11 +2418,13 @@ compile-fail	error-codes/E0131.rs
 compile-fail	error-codes/E0133.rs
 compile-fail	error-codes/E0161.rs
 compile-fail	error-codes/E0164.rs
+compile-fail	error-codes/E0191.rs
 compile-fail	error-codes/E0195.rs
 compile-fail	error-codes/E0200.rs
 compile-fail	error-codes/E0201.rs
 compile-fail	error-codes/E0207.rs
 compile-fail	error-codes/E0214.rs
+compile-fail	error-codes/E0220.rs
 compile-fail	error-codes/E0223.rs
 compile-fail	error-codes/E0252.rs
 compile-fail	error-codes/E0254.rs
@@ -2458,7 +2467,9 @@ check-pass	error-codes/E0429.rs
 compile-fail	error-codes/E0430.rs
 compile-fail	error-codes/E0432.rs
 compile-fail	error-codes/E0433.rs
+compile-fail	error-codes/E0434.rs
 compile-fail	error-codes/E0435.rs
+compile-fail	error-codes/E0449.rs
 compile-fail	error-codes/E0478.rs
 compile-fail	error-codes/E0496.rs
 compile-fail	error-codes/E0499.rs
@@ -2902,10 +2913,12 @@ check-pass	generic-associated-types/anonymize-bound-vars.rs
 check-pass	generic-associated-types/bugs/issue-80626.rs
 check-pass	generic-associated-types/bugs/issue-88460.rs
 check-pass	generic-associated-types/construct_with_other_type.rs
+compile-fail	generic-associated-types/elided-in-expr-position.rs
 compile-fail	generic-associated-types/empty_generics.rs
 check-pass	generic-associated-types/gat-bound-mismatch-106832.rs
 check-pass	generic-associated-types/gat-bounds-normalize-pred.rs
 compile-fail	generic-associated-types/gat-trait-path-generic-type-arg.rs
+compile-fail	generic-associated-types/gat-trait-path-missing-lifetime.rs
 compile-fail	generic-associated-types/gat-trait-path-parenthesised-args.rs
 compile-fail	generic-associated-types/generic_associated_type_undeclared_lifetimes.rs
 check-pass	generic-associated-types/higher-ranked-self-impl-requirement.rs
@@ -2921,12 +2934,18 @@ compile-fail	generic-associated-types/issue-68648-2.rs
 check-pass	generic-associated-types/issue-68649-pass.rs
 check-pass	generic-associated-types/issue-68653.rs
 check-pass	generic-associated-types/issue-70303.rs
+compile-fail	generic-associated-types/issue-71176.rs
 check-pass	generic-associated-types/issue-76407.rs
+compile-fail	generic-associated-types/issue-76535.rs
 run-pass	generic-associated-types/issue-76826.rs
 compile-fail	generic-associated-types/issue-78671.rs
 compile-fail	generic-associated-types/issue-79636-1.rs
+compile-fail	generic-associated-types/issue-79636-2.rs
 check-pass	generic-associated-types/issue-80433-reduced.rs
+compile-fail	generic-associated-types/issue-80433.rs
 build-pass	generic-associated-types/issue-81487.rs
+compile-fail	generic-associated-types/issue-81712-cyclic-traits.rs
+compile-fail	generic-associated-types/issue-81862.rs
 check-pass	generic-associated-types/issue-85921.rs
 check-pass	generic-associated-types/issue-86483.rs
 check-pass	generic-associated-types/issue-87429-2.rs
@@ -2943,10 +2962,12 @@ check-pass	generic-associated-types/issue-93262.rs
 check-pass	generic-associated-types/issue-93341.rs
 compile-fail	generic-associated-types/missing-bounds.rs
 compile-fail	generic-associated-types/missing_lifetime_args.rs
+compile-fail	generic-associated-types/missing_lifetime_const.rs
 compile-fail	generic-associated-types/parse/trait-path-expected-token.rs
 compile-fail	generic-associated-types/parse/trait-path-expressions.rs
 compile-fail	generic-associated-types/parse/trait-path-missing-gen_arg.rs
 compile-fail	generic-associated-types/parse/trait-path-segments.rs
+compile-fail	generic-associated-types/parse/trait-path-type-error-once-implemented.rs
 compile-fail	generic-associated-types/parse/trait-path-types.rs
 check-pass	generic-associated-types/pointer_family.rs
 compile-fail	generic-associated-types/shadowing.rs
@@ -3729,6 +3750,7 @@ compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/missing-lifetime-kin
 compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/not-tied-to-crate.rs
 compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/path-count.rs
 compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/static.rs
+compile-fail	lifetimes/missing-lifetime-in-alias.rs
 compile-fail	lifetimes/missing-lifetime-in-assoc-type-1.rs
 compile-fail	lifetimes/missing-lifetime-in-assoc-type-2.rs
 compile-fail	lifetimes/missing-lifetime-in-assoc-type-3.rs
@@ -5626,6 +5648,9 @@ compile-fail	parser/trait-object-delimiters.rs
 compile-fail	parser/trait-object-polytrait-priority.rs
 compile-fail	parser/trait-object-trait-parens.rs
 check-pass	parser/trait-plusequal-splitting.rs
+compile-fail	parser/trait-pub-assoc-const.rs
+compile-fail	parser/trait-pub-assoc-ty.rs
+compile-fail	parser/trait-pub-method.rs
 compile-fail	parser/triple-colon.rs
 compile-fail	parser/tuple-index-suffix.rs
 compile-fail	parser/tuple-pattern-type-ascription.rs
@@ -5833,8 +5858,10 @@ check-pass	privacy/generic_struct_field_projection.rs
 check-pass	privacy/import-list-stem-visibility-issue-119126.rs
 compile-fail	privacy/inaccessible-private-fields-76077.rs
 compile-fail	privacy/inaccessible-private-fields-trailing-comma-149787.rs
+compile-fail	privacy/issue-29161.rs
 compile-fail	privacy/issue-79593.rs
 compile-fail	privacy/locally-pub-private-module-access.rs
+compile-fail	privacy/priv-in-bad-locations.rs
 run-pass	privacy/privacy-ns.rs
 compile-fail	privacy/privacy-ns1.rs
 compile-fail	privacy/privacy-ns2.rs
@@ -5862,6 +5889,7 @@ check-pass	privacy/trait_more_private_than_item.rs
 compile-fail	privacy/unreachable-issue-121455.rs
 compile-fail	privacy/unresolved-trait-impl-item.rs
 check-pass	privacy/use-in-impl-scope-12729.rs
+compile-fail	privacy/useless-pub.rs
 check-pass	privacy/where-pub-type-impls-priv-trait.rs
 check-pass	proc-macro/derive-multiple-with-packed.rs
 check-pass	proc-macro/extern-prelude-extern-crate-proc-macro.rs
@@ -6147,6 +6175,9 @@ compile-fail	repr/repr-transparent-other-items.rs
 compile-fail	repr/repr.rs
 compile-fail	resolve/112590-2.rs
 compile-fail	resolve/associated-fn-called-as-fn.rs
+compile-fail	resolve/bad-env-capture.rs
+compile-fail	resolve/bad-env-capture2.rs
+compile-fail	resolve/bad-env-capture3.rs
 compile-fail	resolve/bad-expr-path.rs
 compile-fail	resolve/bad-expr-path2.rs
 compile-fail	resolve/bad-module.rs
@@ -6157,6 +6188,7 @@ check-pass	resolve/block-with-trait-parent.rs
 compile-fail	resolve/builtin-attribute-not-value.rs
 compile-fail	resolve/cannot-find-value-in-scope-22811.rs
 compile-fail	resolve/change-ty-to-const-param-sugg-0.rs
+compile-fail	resolve/closure-suggestion-in-impl.rs
 run-pass	resolve/const-iter-no-conflict-for-loop.rs
 compile-fail	resolve/const-with-typo-in-pattern-binding.rs
 compile-fail	resolve/crate-called-as-function.rs
@@ -6172,11 +6204,14 @@ compile-fail	resolve/explicit-self-lowercase-param.rs
 check-pass	resolve/extern-crate-lint-issue-141785.rs
 compile-fail	resolve/field-and-method-in-self-not-available-in-assoc-fn.rs
 compile-fail	resolve/filter-intrinsics.rs
+compile-fail	resolve/fn-item-cant-capture-dynamic-env.rs
 compile-fail	resolve/function-module-ambiguity-error-71406.rs
 check-pass	resolve/generic-struct-and-fn-share-name.rs
 check-pass	resolve/hidden_glob_reexports.rs
 compile-fail	resolve/ice-inconsistent-resolution-with-import-separators-issue-147208.rs
+compile-fail	resolve/impl-method-cant-capture-env.rs
 compile-fail	resolve/impl-on-non-type.rs
+compile-fail	resolve/impl-trait-for-type-cant-capture-env.rs
 compile-fail	resolve/impl-trait-for-undeclared-type.rs
 compile-fail	resolve/import-suggestion-duplicated-importing-same-item.rs
 compile-fail	resolve/incorrect-self-res.rs
@@ -6215,6 +6250,7 @@ compile-fail	resolve/issue-54379.rs
 check-pass	resolve/issue-57523.rs
 compile-fail	resolve/issue-5927.rs
 compile-fail	resolve/issue-60057.rs
+compile-fail	resolve/issue-6642.rs
 compile-fail	resolve/issue-6702.rs
 compile-fail	resolve/issue-69401-trait-fn-no-body-ty-local.rs
 compile-fail	resolve/issue-70736-async-fn-no-body-def-collector.rs
@@ -6280,6 +6316,7 @@ compile-fail	resolve/suggestions/suggest-path-instead-of-mod-dot-item.rs
 compile-fail	resolve/suggestions/suggest-vec-not-slice.rs
 compile-fail	resolve/token-error-correct-2.rs
 compile-fail	resolve/tool-import.rs
+compile-fail	resolve/trait-impl-cant-capture-env.rs
 compile-fail	resolve/tuple-struct-alias.rs
 compile-fail	resolve/typo-suggestion-for-variable-with-name-similar-to-struct-field.rs
 compile-fail	resolve/typo-suggestion-mistyped-in-path.rs
@@ -6959,6 +6996,7 @@ compile-fail	suggestions/issue-84592.rs
 compile-fail	suggestions/issue-84700.rs
 compile-fail	suggestions/issue-84973-negative.rs
 compile-fail	suggestions/issue-84973.rs
+compile-fail	suggestions/issue-85347.rs
 compile-fail	suggestions/issue-85945-check-where-clause-before-suggesting-unsized.rs
 compile-fail	suggestions/issue-86100-tuple-paren-comma.rs
 compile-fail	suggestions/issue-86667.rs
@@ -7118,6 +7156,7 @@ compile-fail	suggestions/unsized-function-parameter.rs
 compile-fail	suggestions/unused-closure-argument.rs
 check-pass	suggestions/unused-imports.rs
 compile-fail	suggestions/use-parentheses-to-call-closure-issue-145404.rs
+compile-fail	suggestions/use-type-argument-instead-of-assoc-type.rs
 compile-fail	suggestions/while-let-typo.rs
 compile-fail	suggestions/wrap-function-local-constructors.rs
 run-pass	supertrait-shadowing/trivially-false-subtrait.rs
@@ -7199,6 +7238,7 @@ compile-fail	traits/as-struct-constructor.rs
 run-pass	traits/assoc-type-in-supertrait.rs
 compile-fail	traits/associated-item-unsatisfied-trait-bounds.rs
 compile-fail	traits/associated_type_bound/116464-invalid-assoc-type-suggestion-in-trait-impl.rs
+compile-fail	traits/associated_type_bound/assoc-type-bounds-with-the-same-name-with-lacking-generic-arg-148121.rs
 check-pass	traits/associated_type_bound/assoc-type-via-another-trait-issue-19479.rs
 compile-fail	traits/associated_type_bound/check-trait-object-bounds-1.rs
 compile-fail	traits/associated_type_bound/check-trait-object-bounds-2.rs
@@ -7413,6 +7453,7 @@ check-pass	traits/object/trait-object-with-send-supertrait.rs
 compile-fail	traits/object/vs-lifetime-2.rs
 compile-fail	traits/object/vs-lifetime.rs
 run-pass	traits/object/with-lifetime-bound.rs
+compile-fail	traits/object/with-self-in-projection-output-bad.rs
 run-pass	traits/objects-owned-object-borrowed-method-headerless.rs
 compile-fail	traits/param-without-lifetime-constraint.rs
 run-pass	traits/parameterized-with-bounds.rs
@@ -7539,6 +7580,7 @@ check-pass	type-alias-impl-trait/nested-rpit-with-lifetimes.rs
 check-pass	type-alias-impl-trait/wf-check-rpit-lifetimes.rs
 check-pass	type-alias/issue-14933.rs
 compile-fail	type-alias/issue-62364-self-ty-arg.rs
+compile-fail	type-alias/missing-associated-type-in-trait-object-22434.rs
 run-pass	type-alias/static-method-type-alias-11047.rs
 run-pass	type-alias/type-param.rs
 check-pass	type-alias/where-clause-on-generic-type-alias.rs
