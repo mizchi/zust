@@ -3587,6 +3587,28 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
     let lowered = || ["allow(", "expect("].iter().any(|l| ["unsafe_attr_outside_unsafe", "rust_2024_compatibility"].iter().any(|n| src0.contains(&format!("{l}{n}"))));
     let outside_unsafe_denied = edition >= 2024
         || (head.contains("deny(") || head.contains("forbid(")) && (head.contains("unsafe_attr_outside_unsafe") || head.contains("rust_2024_compatibility")) && !lowered();
+    // (a `macro_rules!`'s attributes, read from the file as written: expansion takes the definition out of the items.
+    // Those `unused_attributes` reports there, where the crate denies it)
+    if unused_attributes_denied && src0.contains("macro_rules!") {
+        let lines: Vec<&str> = src0.split('\n').collect();
+        for (k, l) in lines.iter().enumerate() {
+            if !l.trim_start().starts_with("macro_rules!") {
+                continue;
+            }
+            // (the attribute and comment lines right above it)
+            let mut a = k;
+            while a > 0 && { let p = lines[a - 1].trim_start(); p.starts_with("#[") || p.starts_with("//") } {
+                a -= 1;
+            }
+            let block = lines[a..k].join("\n");
+            for (at, name, _) in leading(&block) {
+                if matches!(name, "macro_use" | "path" | "cold" | "no_mangle") {
+                    let line = a + 1 + block[..at].matches('\n').count();
+                    return Some(format!("{line}:1: the `{name}` attribute cannot be used on macro defs"));
+                }
+            }
+        }
+    }
     for it in items {
         let text = &split[it.start..it.end];
         if !text.trim_start().starts_with("#[") {
