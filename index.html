@@ -53,11 +53,31 @@
 </head>
 <body>
 <header class="bar">
-  <div class="wrap bar-in">
-    <a class="brand" href="./"><span>z</span>ust</a>
-    <nav><a href="./" aria-current="page">About</a><a href="dashboard/">Retrospective</a><a href="dev/bench/">Benchmarks</a><a href="https://github.com/mizchi/zust">GitHub</a></nav>
+  <div class="bar-in">
+    <a class="brand" href=""><span>z</span>ust</a>
+    <button class="menu" id="menu" type="button" aria-controls="side" aria-expanded="false">Menu</button>
   </div>
 </header>
+<div class="scrim" id="scrim" hidden></div>
+<div class="shell">
+  <aside class="side" id="side" aria-label="Site">
+    <a class="brand" href=""><span>z</span>ust</a>
+    <nav class="pages" aria-label="Pages">
+      <a href="" aria-current="page">About</a>
+      <a href="dashboard/">Retrospective</a>
+      <a class="ext" href="dev/bench/">Benchmarks</a>
+      <a class="ext" href="https://github.com/mizchi/zust">GitHub</a>
+    </nav>
+    <nav class="toc" aria-label="On this page">
+      <p class="label">On this page</p>
+      <a href="#speed">Measured on every push</a>
+      <a href="#tools">Three tools</a>
+      <a href="#try">Try it</a>
+      <a href="#coverage">How much of Rust</a>
+      <a href="#docs">Documentation</a>
+    </nav>
+  </aside>
+  <div class="content">
 
 <main class="wrap stack">
   <section class="hero">
@@ -147,7 +167,6 @@
   <section class="sec" id="docs">
     <h2>Documentation</h2>
     <ul class="doclist">
-      <li><a href="zustscript/" lang="ja">zustscript 入門（日本語）</a></li>
       <li><a href="https://github.com/mizchi/zust/blob/main/docs/language.md">The supported language</a></li>
       <li><a href="https://github.com/mizchi/zust/blob/main/docs/architecture.md">Architecture</a></li>
       <li><a href="https://github.com/mizchi/zust/blob/main/SUPPORT.md">What is supported, by area</a></li>
@@ -160,6 +179,8 @@
   </section>
 </main>
 <footer class="wrap foot">zust is dual-licensed under Apache-2.0 and MIT · <a href="https://github.com/mizchi/zust">github.com/mizchi/zust</a></footer>
+  </div>
+</div>
 
 <script src="dev/bench/data.js"></script>
 <script>
@@ -192,5 +213,6 @@
   }).catch(() => {});
 })();
 </script>
+<script src="nav.js"></script>
 </body>
 </html>
