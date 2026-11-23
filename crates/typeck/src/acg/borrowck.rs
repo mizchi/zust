@@ -2779,6 +2779,15 @@ impl Cx<'_> {
                 }
             }
         }
+        // (an argument of a type parameter that outlives a lifetime the result names: the result may hold it
+        // (`fn scoped<'a, F: Fn() + 'a>(f: F) -> Guard<'a>`))
+        if let (Some(Ty::Param(k)), Some(rs)) = (sig.params.get(i), sig.regions.as_deref()) {
+            if let (Some((name, _)), Some(ret)) = (sig.generics.get(*k as usize), rs.slots.last()) {
+                if rs.ty_outlives.iter().any(|(n, c)| n == name && *c < crate::types::R_STATIC && ret.contains(c)) {
+                    return true;
+                }
+            }
+        }
         let m = sig.ret_from;
         // (not known: say no, so that a borrow is never kept alive by a guess)
         m != 0 && i < 63 && m >> i & 1 == 1

@@ -2864,3 +2864,14 @@ fn part16_block_values_through_locals() {
     assert_eq!(check("fn main() {\n    let outer = 1;\n    { let x = 1; let y = &x; y };\n    let n = match { let v = vec![1]; v.len() } { k => k };\n    let m = match { let y = &outer; y } { k => *k };\n    println!(\"{} {}\", n, m);\n}\n"), vec![]);
     assert_eq!(check("fn main() {\n    let outer = 5;\n    let n = { let s = String::from(\"a\"); s.len() };\n    let r = { let y = &outer; y };\n    let v = vec![1, 2];\n    let w = { let it = &v; it.len() };\n    let z: &i32 = { let q = &v; &q[0] };\n    let t = { let k = (1, &outer); k };\n    println!(\"{} {} {} {} {:?}\", n, r, w, z, t);\n}\n"), vec![]);
 }
+
+/// A call's argument of a type parameter that outlives a lifetime the result names may be held by the result:
+/// `scoped(|| { let _z = y; })` of `fn scoped<'a, F: Fn() + Send + 'a>(f: F) -> Guard<'a>`, a block's value used after
+/// the block, holds what the closure holds (span/send-is-not-static-ensures-scoping.rs, E0597)
+#[test]
+fn part16_type_parameter_arguments() {
+    let g = "struct Guard<'a> {\n    f: Box<dyn Fn() + Send + 'a>,\n}\nfn scoped<'a, F: Fn() + Send + 'a>(f: F) -> Guard<'a> {\n    Guard { f: Box::new(f) }\n}\nimpl<'a> Guard<'a> {\n    fn join(self) {}\n}\n";
+    let d = check(&format!("{g}fn main() {{\n    let bad = {{\n        let x = 1;\n        let y = &x;\n        scoped(|| {{\n            let _z = y;\n        }})\n    }};\n    bad.join();\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 13 && d[0].1.contains("`x` does not live long enough"), "{d:?}");
+    assert_eq!(check("struct G<'a> {\n    f: Box<dyn Fn() + 'a>,\n}\nfn scoped<'a, F: Fn() + 'a>(f: F) -> G<'a> {\n    G { f: Box::new(f) }\n}\nfn keep<T: Clone>(t: T) -> Vec<T> {\n    vec![t]\n}\nfn main() {\n    let x = 1;\n    let g = scoped(|| println!(\"{}\", x));\n    (g.f)();\n    let v = { let s = String::from(\"a\"); keep(s.len()) };\n    println!(\"{:?}\", v);\n}\n"), vec![]);
+}
