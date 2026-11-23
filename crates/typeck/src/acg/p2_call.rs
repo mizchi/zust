@@ -239,6 +239,17 @@ impl Cx<'_> {
                     // for its lookup (as `Tr::m(x)` names it), so its receiver's borrow, its position and its type
                     // arguments are the method call's: `m.bar()` is `Shared::bar(&self)`'s, not the other trait's
                     // `bar(&mut self)`)
+                    // (but the reference itself by value, `(&s).foo()` of a blanket impl's default `foo(self)` with
+                    // Self = &S: that default for &S, the receiver as it is (a copy, no borrow taken))
+                    Ok(Some((tr, 0))) if matches!(t, Ty::Ref(..)) && self.trait_default(tr, method, t).is_some() && self.trait_candidate(&format!("{}::{method}", self.ty_key(self.strip_refs(t))), tr).is_none() => {
+                        let d = self.trait_default(tr, method, t).unwrap();
+                        self.check_unsafe_call(d, msp.start)?;
+                        let (v, vt) = self.expr(recv, None)?;
+                        let Some(v) = v else { return Ok((None, Ty::Never)) };
+                        let args: Vec<&Expr> = margs.iter().collect();
+                        let tf: Option<&[GArg]> = (!gargs.is_empty()).then_some(&gargs[..]);
+                        return self.call_fn(d, Some((v, vt)), &args, tf, expected, SP);
+                    }
                     Ok(Some((tr, _))) => self.explicit_trait = Some((method.clone(), tr.to_string())),
                     Ok(_) => {}
                 }
@@ -1554,7 +1565,21 @@ impl Cx<'_> {
             t
         };
         let boxed_num = |t: Ty| matches!(t, Ty::Box(_)) && { let i = leaf(t); i.is_int() || i.is_float() || matches!(i, Ty::Bool | Ty::Char) };
-        let Some(id) = self.prog.prim_self_method(t, &name).or_else(|| match t {
+        // (the trait the call names for its lookup (method_pick's, or `Tr::m(x)`'s): its impl's method for the number,
+        // else its default, before whatever method of the name the number has: `x.foo()` of A's default `foo(self)`
+        // beside B's `foo(&self)`)
+        let named = self.explicit_trait.as_ref().filter(|(m, _)| *m == name).and_then(|(_, tr)| {
+            if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)) {
+                return None;
+            }
+            let user = |d: u32| self.prog.item_of.get(d as usize).copied().flatten().is_some_and(|x| x < self.prog.prelude_from);
+            let key = format!("{}::{name}", self.prog.tn(t));
+            match self.trait_candidate(&key, tr) {
+                Some(c) => user(c).then_some(c),
+                None => self.trait_default(tr, &name, t).filter(|&d| user(d)),
+            }
+        });
+        let Some(id) = named.or_else(|| self.prog.prim_self_method(t, &name)).or_else(|| match t {
             Ty::Box(_) if boxed_num(t) => self.prog.prim_self_method(leaf(t), &name),
             _ => None,
         }) else {
