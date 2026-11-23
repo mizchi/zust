@@ -342,9 +342,11 @@ console.log(JSON.stringify(g, (k, v) => typeof v === "bigint" ? v.toString() : v
 // the helper keeps a leading U+FEFF and a field named __proto__
 const h = await import('zustscript-helper');
 const rec = ["rec", [["__proto__", "str"]]];
+const notes = [{ text: "a", tag: { TAG: "Named", _0: "héllo" }, mood: "Happy" }, { text: "b", tag: { TAG: "Anon" }, mood: "Sad" }, { text: "c", tag: { TAG: "Pair", _0: 7, _1: [1, 2] }, mood: "Happy" }];
+console.log(JSON.stringify([notes.map((n) => m.tag_name(n.tag)), notes.map((n) => m.retag(n)), m.tags(notes)]));
 console.log(m.shadow(ana, 2), h.decode("str", h.encode("str", "\uFEFFhi")).length, JSON.stringify(h.decode(rec, h.encode(rec, JSON.parse('{"__proto__":"x"}')))));
 "#;
-    let want = "[\"Ana (30) a/😀\",{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"Bö\",\"age\":41,\"tags\":[]},6.5,[\"ANA\",\"BO\",\"CY\"],[[0],[0,1],[0,1,2]]]\n{\"title\":\"T\",\"people\":[{\"name\":\"Ana\",\"age\":30,\"tags\":[\"a\",\"😀\"]},{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"cy\",\"age\":7,\"tags\":[\"x\"]}],\"scores\":[[1,2.5],[],[3],[1.5]],\"open\":false,\"id\":\"9007199254740994\"}\n32 3 {\"__proto__\":\"x\"}\n";
+    let want = "[\"Ana (30) a/😀\",{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"Bö\",\"age\":41,\"tags\":[]},6.5,[\"ANA\",\"BO\",\"CY\"],[[0],[0,1],[0,1,2]]]\n{\"title\":\"T\",\"people\":[{\"name\":\"Ana\",\"age\":30,\"tags\":[\"a\",\"😀\"]},{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"cy\",\"age\":7,\"tags\":[\"x\"]}],\"scores\":[[1,2.5],[],[3],[1.5]],\"open\":false,\"id\":\"9007199254740994\"}\n[[\"héllo\",\"-\",\"7/2\"],[{\"text\":\"a\",\"tag\":{\"TAG\":\"Pair\",\"_0\":5,\"_1\":[1.5]},\"mood\":\"Sad\"},{\"text\":\"b\",\"tag\":{\"TAG\":\"Named\",\"_0\":\"x\"},\"mood\":\"Happy\"},{\"text\":\"c\",\"tag\":{\"TAG\":\"Anon\"},\"mood\":\"Sad\"}],[{\"TAG\":\"Named\",\"_0\":\"héllo\"},{\"TAG\":\"Anon\"},{\"TAG\":\"Pair\",\"_0\":7,\"_1\":[1,2]}]]\n32 3 {\"__proto__\":\"x\"}\n";
     for flags in [&[][..], &["--all-js"][..]] {
         let d = out_dir(if flags.is_empty() { "wire" } else { "wire_js" });
         let o = zsc(&root().join("tests/wire.zsc"), &d, flags);
@@ -378,11 +380,12 @@ const p = m.reply({ author: u, title: "Hi", scores: [1, 2, 4.5], replies: [] }, 
 console.log(m.display(u), "|", m.summary(p), "|", JSON.stringify(m.promote(u)));
 const doc = { title: "D", status: "draft", shapes: [{ kind: "circle", r: 1 }, { kind: "rect", w: 2, h: 3 }] };
 console.log(m.label("published"), m.label(doc.status), m.total_area(doc), JSON.stringify(m.publish(doc)), m.same_shape({ kind: "rect", w: 2, h: 3 }, { kind: "rect", h: 3, w: 2 }), m.same_shape(doc.shapes[0], doc.shapes[1]), m.tile({ kind: "square", side: 4 }), m.tile({ kind: "empty" }));
+console.log(m.area_w({ kind: "circle", r: 1 }), m.area_w({ kind: "rect", w: 2, h: 3 }), m.label_w("published"), JSON.stringify(m.publish_w(doc)) === JSON.stringify(m.publish(doc)));
 console.log(m.same_flag({ kind: "on" }, { kind: "on" }), m.same_flag({ kind: "on" }, { kind: "off" }), JSON.stringify(m.item_of({ item: { kind: "crate", n: 3 } })), m.crates({ item: { kind: "nothing" } }), m.esc("done"), m.par("p"), m.loc("l2"), m.sur("bc"), m.sur_first() === "\uD835\uDC9Ca");
 console.log(m.same_user(u, { ...u, tags: ["a"] }), m.same_user(u, m.promote(u)), m.dist({ x: 3, y: 4 }, { x: 0, y: 0 }), m.badge(m.promote(u)), m.cr({ a: 2, b: "x", c: true }));
 "#,
     );
-    assert_eq!(out, "ana (member, #7) | Hi by ana (member, #7): 1 replies, score 7 | {\"id\":7,\"name\":\"ana\",\"admin\":true,\"tags\":[\"a\",\"staff\"]}\nlive draft! 9 {\"title\":\"D\",\"status\":\"published\",\"shapes\":[{\"kind\":\"circle\",\"r\":2},{\"kind\":\"rect\",\"w\":3,\"h\":2}]} true false 4 0\ntrue false {\"kind\":\"crate\",\"n\":3} 0 d q 2 2 true\ntrue false 5 ANA #7 a+staff x2!\n");
+    assert_eq!(out, "ana (member, #7) | Hi by ana (member, #7): 1 replies, score 7 | {\"id\":7,\"name\":\"ana\",\"admin\":true,\"tags\":[\"a\",\"staff\"]}\nlive draft! 9 {\"title\":\"D\",\"status\":\"published\",\"shapes\":[{\"kind\":\"circle\",\"r\":2},{\"kind\":\"rect\",\"w\":3,\"h\":2}]} true false 4 0\n3 6 live true\ntrue false {\"kind\":\"crate\",\"n\":3} 0 d q 2 2 true\ntrue false 5 ANA #7 a+staff x2!\n");
     let dts = std::fs::read_to_string(d.join("ts_import.d.ts")).unwrap();
     assert!(dts.contains("import type { Doc, Esc, Flag, Loc, Par, Point, Post, Shape, Shelf, Status, Sur, Tile, User } from \"./ts/model.js\";"), "{dts}");
     assert!(!dts.contains("export interface User"), "{dts}");
