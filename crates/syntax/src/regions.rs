@@ -149,6 +149,30 @@ pub fn mentions_lt(t: &PTy, l: &str) -> bool {
     }
 }
 
+/// A `let` of e whose annotation writes `'static` (`let p: &'static mut usize = &mut self.food;`), not in a closure
+/// in e (checked on its own)
+pub fn annotates_static(e: &crate::parse::Expr) -> bool {
+    use crate::parse::{Block, Expr, Stmt};
+    // (a `let .. else`'s block too, which the walk of the children does not enter)
+    fn block(b: &Block) -> bool {
+        b.stmts.iter().any(|s| match s {
+            Stmt::Let(_, t, _, els, ..) => t.as_ref().is_some_and(mentions_static) || els.as_ref().is_some_and(|b| block(b) || annotates_static(&Expr::Block(None, false, b.clone()))),
+            _ => false,
+        })
+    }
+    let here = match e {
+        Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) | Expr::If(_, b, _) | Expr::While(_, _, b) | Expr::For(_, _, _, b) => block(b),
+        Expr::Closure(..) => return false,
+        _ => false,
+    };
+    if here {
+        return true;
+    }
+    let mut found = false;
+    crate::ast_closure::each_child_pub(e, &mut |x| found = found || annotates_static(x));
+    found
+}
+
 /// t writes `'static` somewhere (outside fn pointer, `impl` and `dyn` types)
 pub fn mentions_static(t: &PTy) -> bool {
     match t {

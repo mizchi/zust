@@ -450,6 +450,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         lets,
         addr_taken: taken,
         caps,
+        fake_reads: prog.closures.get(&body_id).map(|cd| cd.fake_reads.clone()).unwrap_or_default(),
         root,
         generic_args: generic_args_of(prog, &f.sig.params, root),
         closure_ix,
@@ -940,6 +941,8 @@ pub struct Cx<'p> {
     pub vtables: Vec<Vec<u32>>,
     pub cmp_depth: u32,
     pub caps: Vec<(String, Ty, bool, u32)>,
+    /// A closure's body: the variables it reads only by `let _ = place;`, which it does not capture
+    pub fake_reads: Vec<String>,
     pub root: u32,
     /// The fn's parameters declared as one of its type parameters (`x: T` / `x: &T`): (name, type parameter)
     pub generic_args: Vec<(String, String)>,
@@ -1502,6 +1505,14 @@ impl Cx<'_> {
     }
 
     fn body(&mut self, f: &ItemFn, sig: &FnSig) -> R<()> {
+        // (E0107: a struct or enum of the signature written with another number of lifetime arguments than it has:
+        // `Foo<'_, '_, 'a>` for `struct Foo<'c, 'd>`)
+        if self.user_code && self.inline_depth == 0 {
+            let tps: Vec<&str> = f.sig.generics.params.iter().filter_map(|p| if let crate::parse::GParam::Ty(n, ..) = p { Some(n.as_str()) } else { None }).collect();
+            for t in f.sig.params.iter().map(|p| &p.1).chain(f.sig.ret.iter()) {
+                self.sig_lt_arity(t, &tps, 0)?;
+            }
+        }
         let entry = self.b.create_block();
         self.b.switch_to_block(entry);
         let mut params = self.b.func_params();
@@ -1966,6 +1977,10 @@ impl Cx<'_> {
                         }
                         continue;
                     };
+                    // (`let _ = s;` in a closure that does not capture s for it: it reads nothing)
+                    if ann_ty.is_none() && crate::ast_closure::wild_root(init).is_some_and(|n| self.fake_reads.iter().any(|x| x == n) && self.lookup(n).is_none()) {
+                        continue;
+                    }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
                     if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(crate::regions::mentions_static) {
                         self.rg_late_on();
@@ -2145,6 +2160,8 @@ impl Cx<'_> {
                     };
                     self.bk_frame();
                     self.bk.move_mut_next = ann_ty.is_none();
+                    // (`let b = a;`: what the type inference found is not an annotation; not of a macro's `let`)
+                    self.bk.move_mut_hint = ann_ty.is_none() && !name.starts_with("__exr_") && matches!(strip_paren(init), Expr::Path(None, _));
                     let ext0 = self.bk.direct.len();
                     let ext1 = self.bk.extended.len();
                     if self.bk_on() {
@@ -2162,6 +2179,11 @@ impl Cx<'_> {
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
                     let ml0 = std::mem::replace(&mut self.bk.macro_let, name.starts_with("__exr_"));
                     let r = self.expr(init, ann.or(hint));
+                    // (`let b: &mut T = a;` with a: `&mut T`: a coercion site, b reborrows `*a` (rustc's `&mut *a`), not
+                    // a copy of a: a use of `*a` while b lives conflicts)
+                    if r.is_ok() && ann_ty.is_some() && matches!(ann, Some(Ty::Ref(true, _))) && matches!(strip_paren(init), Expr::Path(None, _)) {
+                        self.bk_reborrow_let(init);
+                    }
                     self.bk.macro_let = ml0;
                     self.bk.direct.truncate(ext0);
                     self.bk.extended.truncate(ext1);
@@ -2277,6 +2299,7 @@ impl Cx<'_> {
                             _ => {}
                         }
                     }
+                    let watch = if last && !*semi { self.bk_watch_tail(e) } else { vec![] };
                     let r = self.expr(e, exp);
                     self.bk.direct.truncate(ext0);
                     if last && !*semi && self.bk.tail == e as *const Expr as usize && r.is_ok() {
@@ -2287,6 +2310,7 @@ impl Cx<'_> {
                         self.rg_keep(e);
                         self.bk_tail_drop_temps(e);
                     }
+                    self.bk_unwatch(&watch);
                     if tail {
                         let srcs = self.bk_frame_end();
                         if self.bk_ty(self.ret).1 {

@@ -145,6 +145,10 @@ pub struct BkError {
 
 #[derive(Default)]
 pub struct Bk {
+    /// The receivers of a block's tail's method calls that are temporaries (bk_tail_drop_temps): Cx::expr collects
+    /// what each one's value holds (watched), as a `let` of it would
+    pub watch: crate::fxhash::FxSet<usize>,
+    pub watched: HashMap<usize, Vec<Src>>,
     /// A closure's body: the borrow checker's locals of its captures held by value. They outlive the body's call, in
     /// the closure's environment: at each exit (its end, `return`, `?`), what they hold escapes it (Cx::bk_cap_escape)
     pub cap_vals: Vec<u32>,
@@ -185,6 +189,9 @@ pub struct Bk {
     pub exp_none: bool,
     /// The next expression lowered is such a place
     pub move_mut_next: bool,
+    /// Its expected type is the type inference's of the `let` (`let b = a;`, no annotation): no coercion site, a
+    /// `&mut` there is moved as where nothing is expected
+    pub move_mut_hint: bool,
     /// The place the pattern being bound matches (the scrutinee, then its parts)
     pub pat_path: Option<BPlace>,
     /// The method call an operator was rewritten to (its address)
@@ -195,6 +202,9 @@ pub struct Bk {
     /// A compound assignment's `&mut self` loan and the call temporary of its reservation: the next call_fn takes the
     /// loan once its arguments are evaluated, before their loans end (`s += &s` conflicts), ending the reservation first
     pub activate: Option<(Ev, u32)>,
+    /// The call being lowered takes its `&mut self` once its arguments are evaluated (activate): what the arguments
+    /// borrow, shared loans too, is held until then (`s.take(s.get())`: E0502)
+    pub hold_args: bool,
     /// The `index_mut` call acg makes to read an indexed place (its receiver is seen as shared)
     pub shared_recv: usize,
     /// Binding the pattern of an arm with a guard: a binding by value does not move until the guard holds (the next
@@ -333,7 +343,13 @@ fn made_temp(x: &Expr) -> bool {
     }
     match x {
         Expr::MethodCall(..) => true,
-        Expr::Call(f, _) => matches!(&**f, Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_'))),
+        // (a fn's call; a constructor's (`Some(v)`, `W(v)`) is promoted to a static only when its arguments are
+        // constants, as a tuple literal is)
+        Expr::Call(f, args) => match &**f {
+            Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')) => true,
+            Expr::Path(..) => args.iter().any(runtime_value),
+            _ => false,
+        },
         Expr::Macro(p, ..) => p.segs.last().is_some_and(|s| s.name == "vec" || s.name == "format"),
         // (a tuple / array / struct literal of a value only known when it runs (`(v,)` of a local v): not promoted to a
         // static as a constant one is (`&(1, 2)`), so a temporary)
@@ -1439,7 +1455,12 @@ impl Bk {
                     _ => format!("cannot assign to `{}`, which is behind a `&` reference", path_str(&self.locals, p)),
                 },
             };
-            let sp = if let Acc::Borrow(l) = a { self.loans[l as usize].at } else { sp };
+            // (a closure's capture through the `&`: at the closure, as rustc reports it, not at the use in its body)
+            let sp = match a {
+                Acc::Borrow(l) if self.loans[l as usize].capture => self.loans[l as usize].sp,
+                Acc::Borrow(l) => self.loans[l as usize].at,
+                _ => sp,
+            };
             errs.push(BkError { sp, msg });
             return;
         }
@@ -2151,6 +2172,70 @@ impl Cx<'_> {
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
     }
 
+    /// `*x` of a value x: `&U` with U a `Copy` type holding references, copied out (srcs: what x holds). A loan of a
+    /// place whose type holds U values (a container of the U x points to, or the U itself) is what x is, not what U
+    /// holds: what that place holds stands for it. A loan of anything else (`&s` in `*id(&&s)`) is what U holds
+    pub(crate) fn bk_copy_out(&mut self, srcs: &[Src], u: Ty) {
+        for &s in srcs {
+            let s = match s {
+                Src::Loan(ln) => {
+                    let p = &self.bk.loans[ln as usize].place;
+                    let pt = self.bk.locals.get(p.local as usize).map(|l| l.ty);
+                    match pt.and_then(|t| self.place_ty(t, &p.proj)) {
+                        Some(t) if self.ty_holds(t, u, 0) => Src::Local(p.local),
+                        _ => s,
+                    }
+                }
+                s => s,
+            };
+            self.bk.src(s);
+        }
+    }
+
+    /// The type of the place of local type t through proj (None where it is not followed: an index of a slice's type
+    /// is its element's)
+    fn place_ty(&self, t: Ty, proj: &[Proj]) -> Option<Ty> {
+        let mut t = t;
+        for x in proj {
+            t = match (x, t) {
+                (Proj::Deref(_) | Proj::Shr, Ty::Ref(_, i) | Ty::Box(i) | Ty::Ptr(_, i)) => *i,
+                (Proj::Index, Ty::Array(i, _) | Ty::Slice(i)) => *i,
+                (Proj::Field(f), Ty::Struct(sid)) => self.prog.field(sid, f)?.0,
+                _ => return None,
+            };
+        }
+        Some(t)
+    }
+
+    /// t is u or holds u values (a struct's type arguments, an array's or a slice's elements, what a `Box` holds)
+    fn ty_holds(&self, t: Ty, u: Ty, depth: u32) -> bool {
+        if t == u {
+            return true;
+        }
+        if depth > 6 {
+            return false;
+        }
+        match t {
+            Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => self.ty_holds(*i, u, depth + 1),
+            Ty::Struct(sid) => self.prog.structs[sid as usize].args.iter().any(|&a| self.ty_holds(a, u, depth + 1)),
+            _ => false,
+        }
+    }
+
+    /// `let b: &mut T = a;` with a `&mut` local a: the loan of `*a` b holds
+    pub(crate) fn bk_reborrow_let(&mut self, a: &Expr) {
+        if !self.bk_on() {
+            return;
+        }
+        let Some((mut p, Some(Ty::Ref(true, _)))) = self.bk_place(a) else { return };
+        p.proj.push(ref_deref(true));
+        let sp = err_pos(a);
+        let ln = self.bk.loans.len() as u32;
+        self.bk.loans.push(Loan { place: p.clone(), mutable: true, sp, at: sp, quiet: false, capture: false });
+        self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+        self.bk.src(Src::Loan(ln));
+    }
+
     /// `&e` of a temporary (not promoted to a static): a hidden local that goes out of scope at the end of the
     /// statement (unless the `let` extends it), so a loan of it still live then is an error (E0716)
     pub(crate) fn bk_temp_borrow(&mut self, e: &Expr, m: bool, t: Ty) {
@@ -2221,6 +2306,35 @@ impl Cx<'_> {
     /// The temporaries of a block's tail that a method is called on (`D(&_t1).end()`) live until the end of the
     /// enclosing statement, after the block's locals (edition 2021). One whose `Drop` may see what it borrows uses
     /// its loans when it is dropped there: a loan of one of the block's locals is then E0597 at the local
+    /// Before a block's tail is lowered: its method calls' receivers that are temporaries, whose values Cx::expr
+    /// collects (Bk::watch). Returns them, for bk_unwatch
+    pub(crate) fn bk_watch_tail(&mut self, e: &Expr) -> Vec<usize> {
+        let mut added = vec![];
+        if !self.bk_on() || self.bk.level < 2 || !self.user_code {
+            return added;
+        }
+        let mut cur = strip_paren(e);
+        while let Expr::MethodCall(recv, ..) = cur {
+            let r = strip_paren(recv);
+            if !super::is_place_expr(r) {
+                for a in [&**recv as *const Expr as usize, r as *const Expr as usize] {
+                    if self.bk.watch.insert(a) {
+                        added.push(a);
+                    }
+                }
+            }
+            cur = r;
+        }
+        added
+    }
+
+    pub(crate) fn bk_unwatch(&mut self, added: &[usize]) {
+        for a in added {
+            self.bk.watch.remove(a);
+            self.bk.watched.remove(a);
+        }
+    }
+
     pub(crate) fn bk_tail_drop_temps(&mut self, e: &Expr) {
         if !self.bk_on() || self.bk.level < 2 || !self.user_code {
             return;
@@ -2231,8 +2345,19 @@ impl Cx<'_> {
             if !super::is_place_expr(r) {
                 if let Some(t) = self.peek(r) {
                     if self.dropck(t, 0) {
+                        // (what its value holds, as lowering it collected (`id(rows)`, `rows.wrap()`: what rows held),
+                        // else as the syntax tells)
                         let mut srcs = vec![];
                         self.bk_direct(r, &mut srcs);
+                        for a in [&**recv as *const Expr as usize, r as *const Expr as usize] {
+                            if let Some(s) = self.bk.watched.get(&a) {
+                                for x in s {
+                                    if !srcs.contains(x) {
+                                        srcs.push(*x);
+                                    }
+                                }
+                            }
+                        }
                         if !srcs.is_empty() {
                             let id = self.bk.locals.len() as u32;
                             self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP, via_ref: false });
@@ -2671,6 +2796,15 @@ impl Cx<'_> {
                     out.push(p);
                 }
             }
+            // (a call of a captured closure that is `FnMut` (`tick1()`): it is borrowed by `&mut` for the call, so
+            // captured by `&mut`)
+            Expr::Call(f, _) => {
+                if let Some((p, Some(Ty::Struct(sid)))) = self.bk_rooted_at(strip_paren(f), n) {
+                    if p.proj.is_empty() && self.bk.fnmut.contains(&Ty::Struct(sid)) {
+                        calls.push(p);
+                    }
+                }
+            }
             // (a `&mut self` method of the place (`v.push(4)`): captured by `&mut`)
             Expr::MethodCall(r, m, ..) => {
                 if let Some((p, Some(Ty::Struct(sid)))) = self.bk_rooted_at(r, n) {
@@ -2900,6 +3034,19 @@ impl Cx<'_> {
         self.bk.locals.push(Local { name: "<argument>".into(), ty: Ty::Unit, copy: true, refs: true, mutable: None, decl: super::SP, via_ref: false });
         self.bk_ev(Ev::Bind(id, true));
         self.bk_ev(Ev::Def(id, loans));
+        self.bk.call_temps.push(id);
+    }
+
+    /// A hidden local holds what an argument holds (its loans, shared ones too, and what the locals it reads hold) until
+    /// the call is made: for a call whose `&mut self` is taken then (Bk::hold_args)
+    pub(crate) fn bk_call_temp_all(&mut self, srcs: &[Src]) {
+        if !self.bk_on() || srcs.is_empty() {
+            return;
+        }
+        let id = self.bk.locals.len() as u32;
+        self.bk.locals.push(Local { name: "<argument>".into(), ty: Ty::Unit, copy: true, refs: true, mutable: None, decl: super::SP, via_ref: false });
+        self.bk_ev(Ev::Bind(id, true));
+        self.bk_ev(Ev::Def(id, srcs.to_vec()));
         self.bk.call_temps.push(id);
     }
 
@@ -3157,6 +3304,13 @@ impl Cx<'_> {
                 let n0 = out.len();
                 if let Some(&ln) = self.bk.loan_of.get(&(e as *const Expr as usize)) {
                     out.push(Src::Loan(ln));
+                }
+                // (`r.clone()` of a reference whose referent is not `Clone` (`(&x).clone()` with x: T): the reference's
+                // copy, which holds what r holds (E0515 when it is returned))
+                // (not a `clone` of the referent's own: `fn clone(&self) -> &'static S` is what it says)
+                let own_clone = matches!(self.peek(recv), Some(Ty::Ref(_, Ty::Struct(sid))) if self.prog.method(*sid, "clone").is_some());
+                if out.len() == n0 && name == "clone" && args.is_empty() && !own_clone && matches!(self.peek(e), Some(Ty::Ref(..))) && self.peek(recv) == self.peek(e) {
+                    self.bk_direct(recv, out);
                 }
                 // (a method of the prelude's types whose result holds references: what its receiver holds (`it.next()`,
                 // `raw.iter().map(..).collect()`). The prelude writes no lifetimes)

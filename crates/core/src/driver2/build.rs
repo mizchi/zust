@@ -1354,6 +1354,8 @@ impl Session2 {
             h.add(&self.cid);
             h.add(&(self.opts.opt as u8));
             h.add(&self.opts.backend_id());
+            // (the edition decides what closures capture, among others)
+            h.add(&self.opts.edition);
             h.add(&(c.lib as u8));
             h.add(&cfg_keys[i]);
             h.add(&loaded[i].as_ref().unwrap().0);

@@ -87,6 +87,7 @@ impl Hasher for KeyState {
     }
 }
 
+#[derive(Clone)]
 pub struct KeyHasher(KeyState);
 
 impl KeyHasher {
