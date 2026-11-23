@@ -67,7 +67,27 @@ fn conv_to<T, S: Conv<T>>(s: S) -> T {
     s.conv()
 }
 
+// (two impls that do not conflict: the blanket one's where clause does not hold for Local, a type of this crate)
+trait Marker {}
+trait Kind {
+    fn kind(&self) -> &'static str;
+}
+impl<T: Marker> Kind for T {
+    fn kind(&self) -> &'static str {
+        "marked"
+    }
+}
+struct Local;
+struct Tagged;
+impl Marker for Tagged {}
+impl Kind for Local {
+    fn kind(&self) -> &'static str {
+        "local"
+    }
+}
+
 fn main() {
+    println!("{} {}", Local.kind(), Tagged.kind());
     println!("{}", show(&Square(3)));
     println!("{}", show(&Pair(Square(1), Pair(Square(2), Square(3)))));
     println!("{}", same(1u8, 2u8));

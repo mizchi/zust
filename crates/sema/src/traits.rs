@@ -76,6 +76,9 @@ pub struct Clause {
     pub body: Vec<Pred>,
     /// the impl's item, for reports
     pub item: usize,
+    /// zustc read all of the impl: nothing was weakened (no where clause left out, the head resolved and with no
+    /// associated type). Only such a clause's `Yes` counts where a `Yes` is reported (E0119)
+    pub exact: bool,
 }
 
 /// The program's impls of its own traits, by trait name
@@ -131,14 +134,23 @@ impl TraitDb {
                 }
             }
             let mut body = Vec::new();
+            // (a where clause on a type that is not a parameter (`where Vec<T>: Debug`) is left out)
+            let mut exact = s.where_types.is_empty() && self_ty.is_some() && args.is_some();
             for (i, (_, bs)) in s.impl_generics.iter().enumerate() {
                 for b in bs {
                     if let Some(pr) = pred_of(p, Ty::Param(i as u8), b, &gn) {
+                        // (an associated type's binding (`Iterator<Item = u8>`) is left out; arguments not read)
+                        if b.contains('=') || (db.user.contains(&pr.tr) && pr.args.is_none()) {
+                            exact = false;
+                        }
                         body.push(pr);
                     }
                 }
             }
-            db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii });
+            if self_ty.is_some_and(|t| has_assoc(p, t, 0)) || args.as_ref().is_some_and(|a| a.iter().any(|&t| has_assoc(p, t, 0))) {
+                exact = false;
+            }
+            db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii, exact });
         }
         db
     }
@@ -158,8 +170,268 @@ impl TraitDb {
                 *x = p.subst(*x, inst);
             }
         }
-        let mut cx = Cx { db: self, p, stack: vec![], steps: 0 };
+        let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: false };
         cx.solve(FUEL, pr.ty, &pr.tr, &pr.raw, pr.args.as_deref())
+    }
+}
+
+/// The first marker for the parameters unification leaves free: types that are not ground (so a where clause that
+/// names one is not proved, `Overflow`), one per parameter (so two free parameters are not taken for one)
+const FREE: u8 = 200;
+
+/// Two impls of one trait that surely conflict (E0119): (the later impl's item, the earlier's, the trait, the
+/// common instance of their self types when it is ground). `conflict_sound` of Coherence.lean: substitutions that
+/// make the heads equal (found by unification, and checked equal) under which the solver proves both impls' where
+/// clauses: both apply to one goal. What zustc cannot unify exactly (an associated type) or prove is not reported
+impl TraitDb {
+    /// `read_all(item)`: the caller's check that the impl's where clauses are all on its parameters (the summaries
+    /// leave out the others without a trace: `where W<U>: Tr`)
+    pub fn conflict(&self, p: &Program, read_all: &dyn Fn(usize) -> bool) -> Option<(usize, usize, String, Option<Ty>)> {
+        let mut trs: Vec<&String> = self.clauses.keys().collect();
+        trs.sort();
+        for tr in trs {
+            let cs = &self.clauses[tr];
+            for (j, b) in cs.iter().enumerate() {
+                for a in &cs[..j] {
+                    if let Some(g) = self.both_apply(p, a, b).filter(|_| read_all(a.item) && read_all(b.item)) {
+                        let (x, y) = if a.item > b.item { (a.item, b.item) } else { (b.item, a.item) };
+                        return Some((x, y, tr.clone(), g));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Some(common self type, when ground) when both impls surely apply to one goal
+    fn both_apply(&self, p: &Program, a: &Clause, b: &Clause) -> Option<Option<Ty>> {
+        if !a.exact || !b.exact {
+            return None;
+        }
+        // (a fn pointer with a reference is higher-ranked or not by lifetimes `Ty` does not keep: `for<'a> fn(&'a
+        // u8)` is not `fn(&'static u8)`, though both are one Ty)
+        let heads = |c: &Clause| c.self_ty.into_iter().chain(c.args.iter().flatten().copied()).any(|t| fn_ref(p, t, 0));
+        if heads(a) || heads(b) {
+            return None;
+        }
+        let (sa, sb) = (a.self_ty?, b.self_ty?);
+        let (aa, ba) = (a.args.as_ref()?, b.args.as_ref()?);
+        let n = a.n + b.n;
+        if aa.len() != ba.len() || n >= FREE as usize {
+            return None;
+        }
+        // (b's parameters after a's: one namespace)
+        let ren: Vec<Ty> = (0..b.n).map(|i| Ty::Param((a.n + i) as u8)).collect();
+        let sb = p.subst(sb, &ren);
+        let ba: Vec<Ty> = ba.iter().map(|&t| p.subst(t, &ren)).collect();
+        let mut sol: Vec<Option<Ty>> = vec![None; n];
+        if unify(p, sa, sb, &mut sol, 0) != Some(true) {
+            return None;
+        }
+        for (&x, &y) in aa.iter().zip(&ba) {
+            if unify(p, x, y, &mut sol, 0) != Some(true) {
+                return None;
+            }
+        }
+        // (the most general unifier, each free parameter a marker of its own)
+        let mut fin: Vec<Ty> = (0..n).map(|i| Ty::Param(FREE + i as u8)).collect();
+        for _ in 0..=n {
+            let next: Vec<Ty> = (0..n).map(|i| sol[i].map_or(Ty::Param(FREE + i as u8), |t| p.subst(t, &fin))).collect();
+            if next == fin {
+                break;
+            }
+            fin = next;
+        }
+        if fin.iter().any(|&t| (0..n as u8).any(|i| mentions(p, t, i, 0))) {
+            return None;
+        }
+        // (the heads are equal under it: the hypothesis of conflict_sound, checked rather than trusted)
+        let g = p.subst(sa, &fin);
+        if g != p.subst(sb, &fin) || aa.iter().zip(&ba).any(|(&x, &y)| p.subst(x, &fin) != p.subst(y, &fin)) {
+            return None;
+        }
+        let sub_b: Vec<Ty> = (0..b.n).map(|i| fin[a.n + i]).collect();
+        for (c, sub) in [(a, &fin[..a.n]), (b, &sub_b[..])] {
+            for w in &c.body {
+                let t = p.subst(w.ty, sub);
+                let args: Option<Vec<Ty>> = w.args.as_ref().map(|v| v.iter().map(|&x| p.subst(x, sub)).collect());
+                let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: true };
+                if cx.solve(FUEL, t, &w.tr, &w.raw, args.as_deref()) != Ans::Yes {
+                    return None;
+                }
+            }
+        }
+        Some(ground(p, g, 0).then_some(g))
+    }
+}
+
+/// t holds an associated type
+fn has_assoc(p: &Program, t: Ty, depth: u32) -> bool {
+    if depth > 32 {
+        return true;
+    }
+    match t {
+        Ty::Assoc(_) => true,
+        Ty::Ref(_, x) | Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) | Ty::Box(x) => has_assoc(p, *x, depth + 1),
+        Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| has_assoc(p, x, depth + 1)),
+        Ty::Struct(s) => p.structs[s as usize].args.iter().any(|&x| has_assoc(p, x, depth + 1)),
+        _ => false,
+    }
+}
+
+/// t holds a reference somewhere (its lifetimes, which `Ty` does not keep, may tell two such types apart)
+fn has_ref(p: &Program, t: Ty, depth: u32) -> bool {
+    if depth > 32 {
+        return true;
+    }
+    match t {
+        Ty::Ref(..) => true,
+        Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) | Ty::Box(x) => has_ref(p, *x, depth + 1),
+        Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| has_ref(p, x, depth + 1)),
+        Ty::Struct(s) => p.structs[s as usize].args.iter().any(|&x| has_ref(p, x, depth + 1)),
+        _ => false,
+    }
+}
+
+/// t holds a fn pointer type with a reference in it
+fn fn_ref(p: &Program, t: Ty, depth: u32) -> bool {
+    if depth > 32 {
+        return true;
+    }
+    match t {
+        Ty::Fn(_) => has_ref(p, t, 0),
+        Ty::Ref(_, x) | Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) | Ty::Box(x) => fn_ref(p, *x, depth + 1),
+        Ty::Struct(s) => p.structs[s as usize].args.iter().any(|&x| fn_ref(p, x, depth + 1)),
+        _ => false,
+    }
+}
+
+/// t names the parameter i
+fn mentions(p: &Program, t: Ty, i: u8, depth: u32) -> bool {
+    if depth > 64 {
+        return true;
+    }
+    match t {
+        Ty::Param(j) => j == i,
+        Ty::Assoc(a) => mentions(p, a.base, i, depth + 1),
+        Ty::Ref(_, x) | Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) | Ty::Box(x) => mentions(p, *x, i, depth + 1),
+        Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| mentions(p, x, i, depth + 1)),
+        Ty::Struct(s) => p.structs[s as usize].args.iter().any(|&x| mentions(p, x, i, depth + 1)),
+        _ => false,
+    }
+}
+
+/// First-order unification over one namespace of parameters (sol: what each is bound to), with the occurs check.
+/// Some(false): the types surely differ; None: zustc cannot tell (an associated type, a const parameter's length)
+fn unify(p: &Program, a: Ty, b: Ty, sol: &mut [Option<Ty>], depth: u32) -> Option<bool> {
+    if depth > 64 {
+        return None;
+    }
+    let walk = |mut t: Ty, sol: &[Option<Ty>]| {
+        for _ in 0..sol.len() + 1 {
+            match t {
+                Ty::Param(i) => match sol.get(i as usize).copied().flatten() {
+                    Some(u) => t = u,
+                    None => break,
+                },
+                _ => break,
+            }
+        }
+        t
+    };
+    let (a, b) = (walk(a, sol), walk(b, sol));
+    if a == b {
+        return Some(true);
+    }
+    // (a parameter's binding, followed through the others bound so far: for the occurs check)
+    fn deep(p: &Program, t: Ty, sol: &[Option<Ty>], depth: u32) -> Ty {
+        if depth > 32 {
+            return t;
+        }
+        let args: Vec<Ty> = (0..sol.len()).map(|i| sol[i].map_or(Ty::Param(i as u8), |u| deep(p, u, sol, depth + 1))).collect();
+        p.subst(t, &args)
+    }
+    let all = |xs: &[Ty], ys: &[Ty], sol: &mut [Option<Ty>]| -> Option<bool> {
+        let mut r = Some(true);
+        for (&x, &y) in xs.iter().zip(ys) {
+            match unify(p, x, y, sol, depth + 1) {
+                Some(false) => return Some(false),
+                None => r = None,
+                Some(true) => {}
+            }
+        }
+        r
+    };
+    match (a, b) {
+        (Ty::Assoc(_), _) | (_, Ty::Assoc(_)) => None,
+        (Ty::Param(x), t) | (t, Ty::Param(x)) => {
+            // (an impl's parameter is Sized unless it says `?Sized`, which the summaries do not keep: one bound to an
+            // unsized type cannot be told)
+            if (x as usize) >= sol.len() || matches!(t, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
+                return None;
+            }
+            if mentions(p, deep(p, t, sol, 0), x, 0) {
+                return Some(false);
+            }
+            sol[x as usize] = Some(t);
+            Some(true)
+        }
+        (Ty::Ref(m, x), Ty::Ref(n, y)) | (Ty::Ptr(m, x), Ty::Ptr(n, y)) => {
+            if m != n {
+                Some(false)
+            } else {
+                unify(p, *x, *y, sol, depth + 1)
+            }
+        }
+        (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) => unify(p, *x, *y, sol, depth + 1),
+        (Ty::Array(x, n), Ty::Array(y, m)) => {
+            if n >= CONST_LEN_BASE || m >= CONST_LEN_BASE {
+                None
+            } else if n != m {
+                Some(false)
+            } else {
+                unify(p, *x, *y, sol, depth + 1)
+            }
+        }
+        (Ty::Fn(f), Ty::Fn(g)) => {
+            if f.params.len() != g.params.len() {
+                return Some(false);
+            }
+            if has_ref(p, a, 0) || has_ref(p, b, 0) {
+                return None;
+            }
+            let mut xs = f.params.clone();
+            xs.push(f.ret);
+            let mut ys = g.params.clone();
+            ys.push(g.ret);
+            all(&xs, &ys, sol)
+        }
+        (Ty::Struct(x), Ty::Struct(y)) => {
+            let (sx, sy) = (&p.structs[x as usize], &p.structs[y as usize]);
+            // (a placeholder is no type an impl names)
+            if sx.placeholder.is_some() || sy.placeholder.is_some() {
+                return None;
+            }
+            if sx.base.unwrap_or(x) != sy.base.unwrap_or(y) {
+                return Some(false);
+            }
+            if sx.args.len() != sy.args.len() || sx.base.is_none() || sy.base.is_none() {
+                return None;
+            }
+            let (xa, ya) = (sx.args.clone(), sy.args.clone());
+            all(&xa, &ya, sol)
+        }
+        (Ty::Dyn(x), Ty::Dyn(y)) => {
+            // (`dyn Send + Sync` is `dyn Sync + Send`)
+            let parts = |d: &str| {
+                let mut v: Vec<String> = d.split('+').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                v.sort();
+                v.dedup();
+                v
+            };
+            Some(parts(x) == parts(y))
+        }
+        _ => Some(false),
     }
 }
 
@@ -190,6 +462,9 @@ struct Cx<'a> {
     p: &'a Program,
     stack: Vec<Key>,
     steps: u32,
+    /// a `Yes` is reported (E0119): nothing weakened may give one (clauses not `exact`, a literal's leniency, std's
+    /// traits but where `implements` is exact)
+    strict: bool,
 }
 
 impl Cx<'_> {
@@ -210,13 +485,13 @@ impl Cx<'_> {
         if let Ty::Struct(sid) = t {
             if let Some(bs) = &self.p.structs[sid as usize].placeholder {
                 if bs.iter().any(|b| self.p.bound_implies(b, &[tr], false, 0)) {
-                    return Ans::Yes;
+                    return if self.strict { Ans::Overflow } else { Ans::Yes };
                 }
                 rigid = true;
             }
         }
         if let Ty::Dyn(d) = t {
-            if d.split('+').any(|b| self.p.bound_implies(b.trim(), &[tr], false, 0)) {
+            if d.split('+').any(|b| if self.strict { b.trim() == tr } else { self.p.bound_implies(b.trim(), &[tr], false, 0) }) {
                 return Ans::Yes;
             }
             rigid = true;
@@ -256,30 +531,44 @@ impl Cx<'_> {
     /// One impl as a candidate for the goal (`candidate` of the model)
     fn candidate(&mut self, fuel: u32, c: &Clause, t: Ty, args: Option<&[Ty]>) -> Ans {
         let mut sol: Vec<Option<Ty>> = vec![None; c.n];
+        let lenient = !self.strict;
         if let Some(st) = c.self_ty {
-            if !mtch(self.p, st, t, &mut sol, 0) {
+            if !mtch(self.p, st, t, &mut sol, lenient, 0) {
                 return Ans::No;
             }
         }
-        if let (Some(ha), Some(ga)) = (&c.args, args) {
-            if ha.len() == ga.len() {
+        // (arguments not matched (not read, or not as many): any. Then a `Yes` is a weakened one)
+        let mut weak = !c.exact;
+        match (&c.args, args) {
+            (Some(ha), Some(ga)) if ha.len() == ga.len() => {
                 for (&h, &g) in ha.iter().zip(ga) {
-                    if !mtch(self.p, h, g, &mut sol, 0) {
+                    if !mtch(self.p, h, g, &mut sol, lenient, 0) {
                         return Ans::No;
                     }
                 }
             }
+            (Some(ha), None) if ha.is_empty() => {}
+            _ => weak = true,
         }
+        let r = self.body(fuel, c, &sol);
+        if self.strict && weak && r == Ans::Yes {
+            return Ans::Overflow;
+        }
+        r
+    }
+
+    /// The where clauses of a candidate under what matching its head found
+    fn body(&mut self, fuel: u32, c: &Clause, sol: &[Option<Ty>]) -> Ans {
         let mut r = Ans::Yes;
         for w in &c.body {
             // (the where clause under what the head bound: not ground when it names a parameter the head does not
             // bind)
-            let Some(wt) = ground_subst(self.p, w.ty, &sol) else { return Ans::Overflow };
+            let Some(wt) = ground_subst(self.p, w.ty, sol) else { return Ans::Overflow };
             let wargs = match &w.args {
                 Some(a) => {
                     let mut v = Vec::new();
                     for &x in a {
-                        match ground_subst(self.p, x, &sol) {
+                        match ground_subst(self.p, x, sol) {
                             Some(y) => v.push(y),
                             None => return Ans::Overflow,
                         }
@@ -299,12 +588,15 @@ impl Cx<'_> {
     /// A trait that is not the program's: `implements`, believed when it says no only for the types and the
     /// prelude's traits it judges exactly
     fn std_goal(&self, t: Ty, tr: &str, raw: &str) -> Ans {
-        if self.p.implements(t, raw) {
-            return Ans::Yes;
-        }
         let judged = t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Unit)
             || matches!(t, Ty::Struct(x) if self.p.structs[x as usize].base.is_none() && self.p.structs[x as usize].generics.is_empty() && self.p.structs[x as usize].placeholder.is_none());
-        if judged && self.db.prelude.contains(tr) && !raw.contains('<') && !raw.contains('(') {
+        let exact = judged && !raw.contains('<') && !raw.contains('(')
+            && (self.db.prelude.contains(tr) || matches!(tr, "Copy" | "Clone" | "Sized" | "Send" | "Sync" | "Debug" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash"));
+        if self.p.implements(t, raw) {
+            // (`implements` may say yes of what it does not judge exactly)
+            return if self.strict && !exact { Ans::Overflow } else { Ans::Yes };
+        }
+        if exact && (self.strict || self.db.prelude.contains(tr)) {
             Ans::No
         } else {
             Ans::Overflow
@@ -342,7 +634,7 @@ fn ground_subst(p: &Program, t: Ty, sol: &[Option<Ty>]) -> Option<Ty> {
 /// One-way matching of a pattern (an impl's head, over its parameters) against a ground type: `mtch` of the model.
 /// Exact: references and pointers agree in mutability, arrays in length, other types are equal. A part of the pattern
 /// zustc cannot match exactly (an associated type) matches anything: the head is weakened, never strengthened
-pub fn mtch(p: &Program, pt: Ty, t: Ty, sol: &mut [Option<Ty>], depth: u32) -> bool {
+pub fn mtch(p: &Program, pt: Ty, t: Ty, sol: &mut [Option<Ty>], lenient: bool, depth: u32) -> bool {
     if depth > 64 {
         return true;
     }
@@ -357,8 +649,8 @@ pub fn mtch(p: &Program, pt: Ty, t: Ty, sol: &mut [Option<Ty>], depth: u32) -> b
             // (a parameter that is not the impl's: `_`)
             None => true,
         },
-        (Ty::Ref(m, a), Ty::Ref(n, b)) | (Ty::Ptr(m, a), Ty::Ptr(n, b)) => m == n && mtch(p, *a, *b, sol, depth + 1),
-        (Ty::Slice(a), Ty::Slice(b)) | (Ty::Box(a), Ty::Box(b)) => mtch(p, *a, *b, sol, depth + 1),
+        (Ty::Ref(m, a), Ty::Ref(n, b)) | (Ty::Ptr(m, a), Ty::Ptr(n, b)) => m == n && mtch(p, *a, *b, sol, lenient, depth + 1),
+        (Ty::Slice(a), Ty::Slice(b)) | (Ty::Box(a), Ty::Box(b)) => mtch(p, *a, *b, sol, lenient, depth + 1),
         (Ty::Array(a, n), Ty::Array(b, m)) => {
             if n >= CONST_LEN_BASE {
                 // (a const parameter's length: the parameter is the array of that length, as match_ty has it)
@@ -372,15 +664,15 @@ pub fn mtch(p: &Program, pt: Ty, t: Ty, sol: &mut [Option<Ty>], depth: u32) -> b
                     }
                     None => true,
                 };
-                ok && mtch(p, *a, *b, sol, depth + 1)
+                ok && mtch(p, *a, *b, sol, lenient, depth + 1)
             } else {
-                n == m && mtch(p, *a, *b, sol, depth + 1)
+                n == m && mtch(p, *a, *b, sol, lenient, depth + 1)
             }
         }
         (Ty::Fn(a), Ty::Fn(b)) => {
             a.params.len() == b.params.len()
-                && a.params.iter().zip(&b.params).all(|(&x, &y)| mtch(p, x, y, sol, depth + 1))
-                && mtch(p, a.ret, b.ret, sol, depth + 1)
+                && a.params.iter().zip(&b.params).all(|(&x, &y)| mtch(p, x, y, sol, lenient, depth + 1))
+                && mtch(p, a.ret, b.ret, sol, lenient, depth + 1)
         }
         (Ty::Struct(a), Ty::Struct(b)) => {
             if a == b {
@@ -393,15 +685,15 @@ pub fn mtch(p: &Program, pt: Ty, t: Ty, sol: &mut [Option<Ty>], depth: u32) -> b
             }
             match (sa.base, sb.base) {
                 (Some(x), Some(y)) if x == y && sa.args.len() == sb.args.len() => {
-                    sa.args.iter().zip(&sb.args).all(|(&x, &y)| mtch(p, x, y, sol, depth + 1))
+                    sa.args.iter().zip(&sb.args).all(|(&x, &y)| mtch(p, x, y, sol, lenient, depth + 1))
                 }
                 _ => false,
             }
         }
         // (a goal's i32 / f64 may be an integer / float literal zustc defaulted before an impl could choose its type
         // (`f(0, 2)` with `impl A<isize> for isize`): it matches any integer / float, the goal weakened)
-        (_, Ty::I32) if pt.is_int() => true,
-        (_, Ty::F64) if pt.is_float() => true,
+        (_, Ty::I32) if lenient && pt.is_int() => true,
+        (_, Ty::F64) if lenient && pt.is_float() => true,
         _ => pt == t,
     }
 }

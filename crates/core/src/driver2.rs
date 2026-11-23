@@ -1519,6 +1519,47 @@ impl Session2 {
                 return Err(e);
             }
         }
+        // (E0119: two impls of a trait of the program's that both apply to one goal, by the trait solver: their heads
+        // unify and both impls' where clauses hold there (crate::traits::TraitDb::conflict))
+        // (an impl's where clauses, from its header's text: each on one of its parameters, `T: Tr`, as the summary
+        // keeps them)
+        let read_all = |ii: usize| -> bool {
+            let (Some(it), Some(sm)) = (items.get(ii), sums.get(ii)) else { return false };
+            let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
+            let head = text.split('{').next().unwrap_or("");
+            let Some(w) = head.match_indices("where").find(|(i, _)| {
+                let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+                ok(head[..*i].chars().next_back()) && ok(head[i + 5..].chars().next())
+            }) else {
+                return true;
+            };
+            // (the predicates at depth 0, split at commas)
+            let mut depth = 0i32;
+            let mut preds = vec![String::new()];
+            for c in head[w.0 + 5..].chars() {
+                match c {
+                    '<' | '(' | '[' => depth += 1,
+                    '>' | ')' | ']' => depth -= 1,
+                    ',' if depth == 0 => {
+                        preds.push(String::new());
+                        continue;
+                    }
+                    _ => {}
+                }
+                if let Some(l) = preds.last_mut() {
+                    l.push(c);
+                }
+            }
+            preds.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).all(|p| {
+                let subj = p.split(':').next().unwrap_or("").trim();
+                subj.starts_with('\'') || sm.impl_generics.iter().any(|g| g.0 == subj)
+            })
+        };
+        if let Some((later, _, tr, g)) = prog.tdb.conflict(&prog, &read_all) {
+            let line = items.get(later).map_or(1, |it| it.line);
+            let ty = g.map(|g| format!(" for type `{}`", prog.tn(g).replace("__u_", ""))).unwrap_or_default();
+            return Err(format!("{line}:1: conflicting implementations of trait `{tr}`{ty} (E0119)"));
+        }
         // (a derive whose field has not the trait: `#[derive(Hash)] struct S { x: Error }`)
         if !prog.derived.is_empty() {
             if let Some(e) = derive_field_error(&prog, &src, &items[..user]) {

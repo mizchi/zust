@@ -92,4 +92,29 @@ theorem select_unique (P : Prog) (hdis : ∀ c ∈ P, ∀ d ∈ P, c ≠ d → m
   intro hne
   exact mayUnify_sound _ _ (hdis c hc d hd hne) σ τ (hcg.trans hdg.symm)
 
+/-- an impl applies to a goal: the goal is an instance of its head whose where clauses hold -/
+def Applies (P : Prog) (env : List Ty) (c : Clause) (g : Ty) : Prop :=
+  ∃ σ : Nat → Ty, Ty.inst σ c.head = g ∧ ∀ w ∈ c.body, Holds P env (Ty.inst σ w)
+
+/-- What zustc reports as E0119: two impls whose heads have a common instance at which the solver proves both impls'
+where clauses. Then both apply to one goal: a real conflict, never a false one -/
+theorem conflict_sound (P : Prog) (env : List Ty) (c d : Clause) (σ τ : Nat → Ty)
+    (hu : Ty.inst σ c.head = Ty.inst τ d.head)
+    (fc : ∀ w ∈ c.body, ∃ fuel, solve P env fuel [] (Ty.inst σ w) = .yes)
+    (fd : ∀ w ∈ d.body, ∃ fuel, solve P env fuel [] (Ty.inst τ w) = .yes) :
+    ∃ g, Applies P env c g ∧ Applies P env d g := by
+  refine ⟨Ty.inst σ c.head, ⟨σ, rfl, ?_⟩, ⟨τ, hu.symm, ?_⟩⟩
+  · intro w hw
+    obtain ⟨f, hf⟩ := fc w hw
+    exact solve_yes_sound P env f [] _ hf
+  · intro w hw
+    obtain ⟨f, hf⟩ := fd w hw
+    exact solve_yes_sound P env f [] _ hf
+
+/-- and impls whose heads do not unify never conflict -/
+theorem no_conflict_of_not_mayUnify (P : Prog) (env : List Ty) (c d : Clause)
+    (h : mayUnify c.head d.head = false) : ¬ ∃ g, Applies P env c g ∧ Applies P env d g := by
+  rintro ⟨g, ⟨σ, hσ, _⟩, ⟨τ, hτ, _⟩⟩
+  exact mayUnify_sound _ _ h σ τ (hσ.trans hτ.symm)
+
 end TraitSolver

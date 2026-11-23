@@ -1503,6 +1503,7 @@ check-pass	coherence/clone-impl-unsized-slice.rs
 compile-fail	coherence/coherence-blanket-conflicts-with-blanket-implemented.rs
 compile-fail	coherence/coherence-blanket-conflicts-with-blanket-unimplemented.rs
 compile-fail	coherence/coherence-blanket-conflicts-with-specific-multidispatch.rs
+compile-fail	coherence/coherence-blanket-conflicts-with-specific-trait.rs
 compile-fail	coherence/coherence-blanket-conflicts-with-specific.rs
 compile-fail	coherence/coherence-error-suppression.rs
 check-pass	coherence/coherence-fn-covariant-bound-vs-static.rs
@@ -1512,6 +1513,7 @@ compile-fail	coherence/coherence-impl-trait-for-trait.rs
 compile-fail	coherence/coherence-inherited-subtyping.rs
 check-pass	coherence/coherence-multidispatch-tuple.rs
 compile-fail	coherence/coherence-no-direct-lifetime-dispatch.rs
+compile-fail	coherence/coherence-overlap-all-t-and-tuple.rs
 compile-fail	coherence/coherence-overlap-downstream-inherent.rs
 compile-fail	coherence/coherence-overlap-downstream.rs
 compile-fail	coherence/coherence-overlap-issue-23516-inherent.rs
