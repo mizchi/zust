@@ -4425,18 +4425,40 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
     // (`n: ?Sized` / `n: Tr + ?Sized`, in the parameter list or a where clause: the `:` before a `?Sized` with only
     // bounds between, and the parameter's name before the `:`)
     let maybe_unsized = |text: &str, n: &str| {
-        text.match_indices("?Sized").any(|(i, _)| {
-            let before = &text[..i];
-            let b = before.as_bytes();
-            let mut j = b.len();
-            while j > 0 && (b[j - 1].is_ascii_alphanumeric() || matches!(b[j - 1], b'_' | b' ' | b'\t' | b'\n' | b'\r' | b'+' | b'\'' | b'<' | b'>' | b',')) {
-                j -= 1;
-            }
-            if j == 0 || b[j - 1] != b':' || (j >= 2 && b[j - 2] == b':') {
+        // (from the tokens: not a `?Sized` in a string, `#[doc = "K: ?Sized"]`)
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let sym = |k: usize, c: u8| t[k].0 == 1 && b[t[k].1] == c;
+        (1..t.len()).any(|k| {
+            if !(w(k) == "Sized" && sym(k - 1, b'?')) {
                 return false;
             }
-            before[..j - 1].trim_end().rsplit(|c: char| !(c.is_alphanumeric() || c == '_')).next() == Some(n)
+            // (back over the other bounds, `Tr<A, B> + 'a + std::fmt::Debug +`, to the `:` after the name)
+            let mut j = k - 1;
+            while j > 0 {
+                j -= 1;
+                if sym(j, b':') {
+                    if j > 0 && sym(j - 1, b':') {
+                        j -= 1;
+                        continue;
+                    }
+                    return j > 0 && w(j - 1) == n;
+                }
+                if !(t[j].0 == 0 || sym(j, b'+') || sym(j, b'<') || sym(j, b'>') || sym(j, b',') || sym(j, b'?')) {
+                    return false;
+                }
+            }
+            false
         })
+    };
+    // (a bound whose trait has `Sized` as a supertrait: std's `Clone`, `Copy`, `Default`, the conversions, or one of
+    // the program's traits through its supertraits)
+    let implies_sized = |b: &str| {
+        let tr = b.split('<').next().unwrap_or(b).trim();
+        let tr = tr.rsplit("::").next().unwrap_or(tr);
+        matches!(tr, "Sized" | "Clone" | "Copy" | "Default" | "From" | "Into" | "TryFrom" | "TryInto" | "FromStr" | "FromIterator")
+            || prog.bound_implies(b, &["Sized", "Clone", "Copy"], false, 0)
     };
     let word = |text: &str, w: &str| text.match_indices(w).any(|(i, _)| {
         let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
@@ -4452,7 +4474,7 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
                     // bound that implies Sized holds it, not the word `Sized` of its `?Sized`)
                     let bs = bounds(n);
                     let held = if tr == "Sized" {
-                        bs.iter().any(|b| b == "Sized" || prog.bound_implies(b, &["Sized"], false, 0)) || !maybe_unsized(text, n)
+                        bs.iter().any(|b| implies_sized(b)) || !maybe_unsized(text, n)
                     } else {
                         bs.iter().any(|b| b == tr || prog.bound_implies(b, &[tr.as_str()], true, 0)) || word(text, tr)
                     };
