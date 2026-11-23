@@ -2558,7 +2558,6 @@ fn part15_undeclared_in_where_types() {
     assert_eq!(check("use std::ops::Add;\ntrait Numoid<'a>: Sized\nwhere\n    &'a Self: Add<Self>,\n{\n}\nfn f<'a, T>(x: &'a T) -> usize\nwhere\n    &'a T: IntoIterator,\n    Vec<&'a T>: Clone,\n{\n    let _ = x;\n    1\n}\nstruct W<'a, T>(&'a T)\nwhere\n    &'a T: Clone;\nfn main() {\n    println!(\"{}\", f(&vec![1u8]));\n}\n"), vec![]);
 }
 
-
 /// From the third review of #69: a closure's call that needs `T: 'static` takes it from `T: 'a` with `'a: 'static`,
 /// and from a supertrait whose `Self` must be 'static (`trait Derived: Base`, `trait Base: 'static`); a T in the type
 /// argument (`needs_static::<Option<T>>()`) needs it too (E0310)

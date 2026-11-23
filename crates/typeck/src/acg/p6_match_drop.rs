@@ -1345,9 +1345,9 @@ impl Cx<'_> {
                 Ok(())
             }
             Pat::Slice(_) => {
-                // (an array matched by value: each element is a place of its own (`[_, _, x] = a` moves a[2]); a slice's
-                // or one through a reference is not tracked)
-                let arr = matches!(p.ty(), Ty::Array(..));
+                // (an array or a slice matched as a place: each element is a place of its own (`[_, _, x] = a` moves
+                // a[2]; `[ref a, ..] = *s` borrows s's first); one through a reference is not tracked)
+                let arr = matches!(p.ty(), Ty::Array(..) | Ty::Slice(_));
                 let saved = if arr { self.bk.pat_path.clone() } else { self.bk.pat_path.take() };
                 let rs = self.rg.pat.take();
                 // (the elements' tree: the array's or the slice's, through the references matched)
@@ -1372,10 +1372,20 @@ impl Cx<'_> {
                     Ty::Array(_, n) if self.bk.pat_path.is_some() => Some(n as usize),
                     _ => None,
                 };
+                // (a slice's elements are counted from the pattern's ends, with the least length it needs (m): `[1;m]`,
+                // `[-1;m]` (the last), as rustc's MIR does: `[_, ref mut b, ..]` and `[.., ref c, _, _]` may be one
+                // element of a slice of 3)
+                let slice = matches!(p.ty(), Ty::Slice(_)) && self.bk.pat_path.is_some();
+                let m = pre.len() + post.len();
                 for (k, (q, sub)) in self.slice_elems(base, len, elem, &pre, &post).into_iter().enumerate() {
                     self.rg.pat = self.rg.pat_elem.clone();
-                    let idx = if k < pre.len() { k } else { n.unwrap_or(0).wrapping_sub(pre.len() + post.len()).wrapping_add(k) };
-                    let saved = n.map(|_| self.bk_pat_proj(borrowck::Proj::Field(format!("[{idx}]"))));
+                    let name = match n {
+                        Some(n) => Some(format!("[{}]", if k < pre.len() { k } else { n.wrapping_sub(m).wrapping_add(k) })),
+                        None if slice && k < pre.len() => Some(format!("[{k};{m}]")),
+                        None if slice => Some(format!("[-{};{m}]", m - k)),
+                        None => None,
+                    };
+                    let saved = name.map(|f| self.bk_pat_proj(borrowck::Proj::Field(f)));
                     self.pat_bind(sub, q, mode)?;
                     if let Some(s) = saved {
                         self.bk.pat_path = s;
@@ -1392,17 +1402,23 @@ impl Cx<'_> {
                     }
                 }
                 // `rest @ ..`: 残りの部分スライス (`&[T]`)
-                if let Some(Pat::Ident(by_ref, _, rname, _)) = rest {
+                if let Some(Pat::Ident(by_ref, mutable, rname, _)) = rest {
                     let (es, _) = self.prog.size_align(elem);
                     let start = self.b.ins().iadd_imm_s(base, pre.len() as i64 * es as i64);
                     let len_v = self.b.ins().iadd_imm_s(len, -((pre.len() + post.len()) as i64));
                     let fat = self.make_fat_v(start, len_v);
-                    let m = matches!(mode, BindMode::Ref(true));
+                    // (`ref mut tail @ ..` is `&mut [T]`; without `ref`, the mode the pattern is matched in)
+                    let m = if *by_ref { *mutable } else { matches!(mode, BindMode::Ref(true)) };
                     // (`ref tail @ ..` of an array: a borrow of the elements between, which tail holds (`a[2] = 0` while
-                    // it lives is E0506))
-                    let held = match (n, *by_ref) {
-                        (Some(n), true) if pre.len() < n.saturating_sub(post.len()) => {
-                            let path = self.bk_pat_proj(borrowck::Proj::Field(format!("[{}..{}]", pre.len(), n - post.len())));
+                    // it lives is E0506); of a slice: `[1..-2]`, the elements but the first and the last two)
+                    let between = match n {
+                        Some(n) if pre.len() < n.saturating_sub(post.len()) => Some(format!("[{}..{}]", pre.len(), n - post.len())),
+                        None if slice => Some(format!("[{}..-{}]", pre.len(), post.len())),
+                        _ => None,
+                    };
+                    let held = match (between, *by_ref) {
+                        (Some(f), true) => {
+                            let path = self.bk_pat_proj(borrowck::Proj::Field(f));
                             let srcs = self.bk_pat_ref(m, true);
                             Some((path, srcs))
                         }

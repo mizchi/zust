@@ -629,9 +629,12 @@ fn path_str(locals: &[Local], p: &BPlace) -> String {
     for (i, pr) in p.proj.iter().enumerate().skip(skip) {
         match pr {
             Proj::Field(f) => {
-                // (an array pattern's element: `a[2]`)
+                // (an array pattern's element: `a[2]`; a slice's, counted from its ends: `s[..]`, as rustc writes it)
                 if !f.starts_with('[') {
                     s.push('.');
+                } else if f.contains(';') || f.contains("..-") {
+                    s.push_str("[..]");
+                    continue;
                 }
                 s.push_str(f.trim_start_matches(UNION_FIELD));
             }
@@ -647,18 +650,52 @@ fn path_str(locals: &[Local], p: &BPlace) -> String {
     s
 }
 
-/// The elements an array pattern's place is (`[2]`: 2..3; `[1..19]`: the rest between)
-fn elems(p: &Proj) -> Option<(usize, usize)> {
+/// The elements a slice pattern's place is. An array's are where they are: `[2]` (2..3), `[1..19]` (the rest between).
+/// A slice's are counted as rustc's MIR does, from the pattern's ends, with the least length the pattern needs: `[1;3]`
+/// (the second from the start), `[-1;3]` (the last), `[1..-2]` (the rest, without the first and the last two)
+#[derive(Clone, Copy)]
+enum Elems {
+    Abs(usize, usize),
+    Start(usize, usize),
+    End(usize, usize),
+    Sub(usize, usize),
+}
+
+fn elems(p: &Proj) -> Option<Elems> {
     let Proj::Field(f) = p else { return None };
     let inner = f.strip_prefix('[')?.strip_suffix(']')?;
-    match inner.split_once("..") {
-        Some((a, b)) => Some((a.parse().ok()?, b.parse().ok()?)),
-        None => inner.parse::<usize>().ok().map(|i| (i, i + 1)),
+    if let Some((a, b)) = inner.split_once("..") {
+        return match b.strip_prefix('-') {
+            Some(b) => Some(Elems::Sub(a.parse().ok()?, b.parse().ok()?)),
+            None => Some(Elems::Abs(a.parse().ok()?, b.parse().ok()?)),
+        };
+    }
+    if let Some((i, m)) = inner.split_once(';') {
+        let m = m.parse().ok()?;
+        return match i.strip_prefix('-') {
+            Some(e) => Some(Elems::End(e.parse().ok()?, m)),
+            None => Some(Elems::Start(i.parse().ok()?, m)),
+        };
+    }
+    inner.parse::<usize>().ok().map(|i| Elems::Abs(i, i + 1))
+}
+
+/// The two may be the same elements (rustc's place_projection_conflict). Of a slice: the b-th from the start and the
+/// e-th from the end may be one when b + e reaches the least length both patterns need; the rest `[f..-t]` holds the
+/// b-th from the start when b >= f, and the e-th from the end when e > t; two rests may overlap.
+fn elems_overlap(x: Elems, y: Elems) -> bool {
+    use Elems::*;
+    match (x, y) {
+        (Abs(a0, a1), Abs(b0, b1)) => a0 < b1 && b0 < a1,
+        (Start(a, _), Start(b, _)) | (End(a, _), End(b, _)) => a == b,
+        (Start(b, m1), End(e, m2)) | (End(e, m2), Start(b, m1)) => b + e >= m1.max(m2),
+        (Start(b, _), Sub(f, _)) | (Sub(f, _), Start(b, _)) => b >= f,
+        (End(e, _), Sub(_, t)) | (Sub(_, t), End(e, _)) => e > t,
+        _ => true,
     }
 }
 
-/// a is a prefix of b (an index `[..]` is any element; an array pattern's elements, `[2]` or `[1..19]`, are where they
-/// overlap)
+/// a is a prefix of b (an index `[..]` is any element; a slice pattern's elements are where they overlap)
 fn prefix(a: &[Proj], b: &[Proj]) -> bool {
     a.len() <= b.len() && a.iter().zip(b).all(|(x, y)| same_proj(x, y))
 }
@@ -666,7 +703,7 @@ fn prefix(a: &[Proj], b: &[Proj]) -> bool {
 /// The two projections may be the same part (an index `[..]` is any element)
 fn same_proj(x: &Proj, y: &Proj) -> bool {
     match (elems(x), elems(y)) {
-        (Some((a0, a1)), Some((b0, b1))) => a0 < b1 && b0 < a1,
+        (Some(a), Some(b)) => elems_overlap(a, b),
         (Some(_), None) => *y == Proj::Index,
         (None, Some(_)) => *x == Proj::Index,
         (None, None) => x == y || (*x == Proj::Index && *y == Proj::Index),
