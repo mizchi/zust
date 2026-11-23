@@ -10,3 +10,5 @@ import TraitSolver
 #print axioms TraitSolver.conflict_sound
 #print axioms TraitSolver.no_conflict_of_not_mayUnify
 #print axioms TraitSolver.supertrait_obligation_fails
+#print axioms TraitSolver.csolve_yes_sound
+#print axioms TraitSolver.csolve_no_sound

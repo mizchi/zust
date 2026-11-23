@@ -48,16 +48,15 @@ invariants.
 
 ## Trait solving (`crates/sema/src/traits.rs`, `formal/lean/`)
 
-The program's own traits are solved by the algorithm proved in formal/lean (report:
-[docs/reports/2026-11-23-04-trait-solver.md](docs/reports/2026-11-23-04-trait-solver.md)). Left:
+The program's own traits are solved by the algorithms proved in formal/lean, including E0119, supertrait
+obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-11-23-04-trait-solver.md),
+[part 2](docs/reports/2026-11-23-05-trait-solver-2.md)). Left:
 
-- E0119 still uses the old checks, not `mayUnify` of the model.
-- Auto traits (coinductive) are not in the model; associated types are not normalized by the solver (a bound on
-  one is left out of an impl's clause).
-- Supertraits as an impl's obligations (`impl<T> Complete for T` needs `T: Partial`), and E0277 at a coercion to
-  `dyn Tr<A>` (traits/coercion-generic-bad.rs).
-- Method lookup between impls of one trait with different arguments (`impl Conv<u64> for u8`, `impl Conv<bool> for
-  u8`) picks the wrong one.
+- Associated types: a where clause on one (`where <T as Mirror>::Mirror: Foo`) is left out of an impl's clause;
+  normalization is not modeled.
+- E0119 against std's impls (`impl<S> Into<S> for GenX<S>`): std's impls are not clauses.
+- Lifetimes in impl heads (fn pointers, higher-ranked bounds) need lifetimes in `Ty`.
+- Placeholder and module-flattened names in messages (`__impl0`, `a__b__Hidden`).
 
 ## Security: CVEs whose API zustc does not have (`expect: unsupported`)
 

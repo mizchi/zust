@@ -89,6 +89,18 @@ pub struct TraitDb {
     pub user: crate::fxhash::FxSet<String>,
     /// the traits the prelude declares: `implements` judges these exactly for scalars and plain structs
     pub prelude: crate::fxhash::FxSet<String>,
+    /// the auto traits (Send, Sync) among each program trait's own supertraits (`trait Foo: Send`): the summaries'
+    /// supertraits leave them out, the driver reads them from the trait's header
+    pub auto_supers: FxMap<String, Vec<String>>,
+}
+
+/// rustc's words for `t: tr` not holding
+pub fn not_held(t: &str, tr: &str) -> String {
+    match tr {
+        "Send" => format!("`{t}` cannot be sent between threads safely"),
+        "Sync" => format!("`{t}` cannot be shared between threads safely"),
+        _ => format!("the trait bound `{t}: {}` is not satisfied", bound_text(tr)),
+    }
 }
 
 /// A bound's text as rustc prints it: `Trait<isize>`, not the tokens' `Trait < isize >`
@@ -162,6 +174,46 @@ impl TraitDb {
             db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii, exact });
         }
         db
+    }
+
+    /// Whether a bound b of a type parameter gives it the auto trait tr: b itself, or a trait of the program's with
+    /// tr among its supertraits, all the way up (Some(false): surely not; None: a trait zustc does not know)
+    pub fn gives_auto(&self, p: &Program, b: &str, tr: &str) -> Option<bool> {
+        let b = b.trim();
+        let name = b.split('<').next().unwrap_or(b).split('(').next().unwrap_or(b).trim();
+        let name = name.rsplit("::").next().unwrap_or(name);
+        if name == tr {
+            return Some(true);
+        }
+        if self.user.contains(name) {
+            let mut seen: Vec<String> = vec![];
+            let mut todo = vec![name.to_string()];
+            while let Some(t) = todo.pop() {
+                if seen.contains(&t) {
+                    continue;
+                }
+                if self.auto_supers.get(&t).is_some_and(|v| v.iter().any(|x| x == tr)) {
+                    return Some(true);
+                }
+                for sup in p.trait_supers.get(&t).into_iter().flatten() {
+                    let n = sup.split('<').next().unwrap_or(sup).trim();
+                    let n = n.rsplit("::").next().unwrap_or(n).to_string();
+                    if self.user.contains(&n) {
+                        todo.push(n);
+                    } else if !STD_EXACT.contains(&n.as_str()) && !n.starts_with('#') && !matches!(n.as_str(), "Sized" | "Send" | "Sync" | "Unpin") {
+                        // (a std trait zustc does not know the supertraits of)
+                        return None;
+                    }
+                }
+                seen.push(t);
+            }
+            return Some(false);
+        }
+        // (std's traits zustc knows: none of them has an auto trait as a supertrait; nor do the Fn traits)
+        if STD_EXACT.contains(&name) || matches!(name, "Sized" | "Send" | "Sync" | "Unpin" | "Fn" | "FnMut" | "FnOnce" | "Iterator" | "IntoIterator") || b.starts_with('\'') {
+            return Some(false);
+        }
+        None
     }
 
     /// Whether `t: b` holds (b a bound as written: `Tr`, `Tr<u8>`, `a::Tr`); `generics`: the names of the type
@@ -497,6 +549,9 @@ impl Cx<'_> {
         if !ground(self.p, t, 0) || args.is_some_and(|a| a.iter().any(|&x| !ground(self.p, x, 0))) {
             return Ans::Overflow;
         }
+        if matches!(tr, "Send" | "Sync") && raw.trim() == tr {
+            return self.auto_goal(t, tr);
+        }
         if !self.db.user.contains(tr) {
             if let Some(bs) = self.rigid_bounds(t) {
                 // (an impl's parameter: a std trait only by its bounds)
@@ -629,6 +684,105 @@ impl Cx<'_> {
     fn known(&self, b: &str) -> bool {
         let b = b.trim();
         !b.contains('<') && !b.contains('(') && !b.contains('=') && (self.db.user.contains(b) || STD_EXACT.contains(&b) || matches!(b, "Sized" | "Send" | "Sync"))
+    }
+
+    /// An auto trait (Send, Sync): coinductive, `csolve` of Coinductive.lean over the structural rules as clauses
+    /// (a struct is Send when its fields are; a type that comes back round holds). A placeholder has it only by its
+    /// bounds; what the rules here do not cover is `Overflow`
+    fn auto_goal(&self, t: Ty, tr: &str) -> Ans {
+        let mut stack = vec![];
+        self.auto_rec(t, tr == "Sync", &mut stack, 0)
+    }
+
+    fn auto_rec(&self, t: Ty, sync: bool, stack: &mut Vec<(Ty, bool)>, depth: u32) -> Ans {
+        let tr = if sync { "Sync" } else { "Send" };
+        if depth > 24 {
+            return Ans::Overflow;
+        }
+        let all = |cx: &Self, ts: &[(Ty, bool)], stack: &mut Vec<(Ty, bool)>| {
+            let mut r = Ans::Yes;
+            for &(x, sy) in ts {
+                r = r.and(cx.auto_rec(x, sy, stack, depth + 1));
+                if r == Ans::No {
+                    break;
+                }
+            }
+            r
+        };
+        match t {
+            Ty::Ptr(..) => Ans::No,
+            // (`&T: Send` needs `T: Sync`; `&mut T: Send` needs `T: Send`; both are Sync when T is)
+            Ty::Ref(m, i) => self.auto_rec(*i, sync || !m, stack, depth + 1),
+            Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.auto_rec(*i, sync, stack, depth + 1),
+            Ty::Param(_) | Ty::Assoc(_) => Ans::Overflow,
+            Ty::Dyn(d) => {
+                if d.split('+').any(|b| self.db.gives_auto(self.p, b, tr) == Some(true)) {
+                    Ans::Yes
+                } else {
+                    Ans::Overflow
+                }
+            }
+            Ty::Struct(sid) => {
+                let sd = &self.p.structs[sid as usize];
+                if let Some(bs) = &sd.placeholder {
+                    let mut r = Ans::No;
+                    for b in bs {
+                        match self.db.gives_auto(self.p, b, tr) {
+                            Some(true) => return Ans::Yes,
+                            Some(false) => {}
+                            None => r = Ans::Overflow,
+                        }
+                    }
+                    return r;
+                }
+                // (a type that comes back round: the set being built assumes it)
+                if stack.contains(&(t, sync)) {
+                    return Ans::Yes;
+                }
+                let b = self.p.base_of(sid);
+                // (a user's `unsafe impl Send for T`)
+                if self.p.impls.contains(&(b, tr.to_string())) {
+                    return Ans::Yes;
+                }
+                let prelude = self.p.struct_item.get(b as usize).is_some_and(|&i| i >= self.p.prelude_from);
+                let args: Vec<Ty> = sd.args.clone();
+                if prelude && !self.p.is_tuple(b) {
+                    let name = self.p.structs[b as usize].name.as_str();
+                    let each = |sy: bool| args.iter().map(|&a| (a, sy)).collect::<Vec<_>>();
+                    return match name {
+                        "Rc" => Ans::No,
+                        "Cell" | "RefCell" if sync => Ans::No,
+                        "Cell" | "RefCell" | "Option" | "Vec" | "VecDeque" | "String" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "BinaryHeap" | "Result" | "PhantomData" => {
+                            all(self, &each(sync), stack)
+                        }
+                        // (Arc<T> is Send and Sync when T is both; Mutex<T> when T is Send)
+                        "Arc" => {
+                            let mut v = each(false);
+                            v.extend(each(true));
+                            all(self, &v, stack)
+                        }
+                        "Mutex" => all(self, &each(false), stack),
+                        _ => {
+                            if !self.p.names_placeholder(t, 0) && self.p.implements(t, tr) {
+                                Ans::Yes
+                            } else {
+                                Ans::Overflow
+                            }
+                        }
+                    };
+                }
+                // (a struct, enum, tuple or closure: its fields (captures))
+                let mut fs: Vec<(Ty, bool)> = sd.fields.iter().map(|f| (f.1, sync)).collect();
+                for v in &sd.variants {
+                    fs.extend(v.fields.iter().map(|f| (f.1, sync)));
+                }
+                stack.push((t, sync));
+                let r = all(self, &fs, stack);
+                stack.pop();
+                r
+            }
+            _ => Ans::Yes,
+        }
     }
 
     /// A trait that is not the program's: `implements`, believed when it says no only for the types and the

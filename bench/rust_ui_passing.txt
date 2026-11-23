@@ -1134,9 +1134,12 @@ run-pass	box/unit/unique-send-2.rs
 run-pass	box/unit/unique-swap.rs
 run-pass	builtin-superkinds/builtin-superkinds-capabilities-transitive.rs
 run-pass	builtin-superkinds/builtin-superkinds-capabilities.rs
+compile-fail	builtin-superkinds/builtin-superkinds-double-superkind.rs
 run-pass	builtin-superkinds/builtin-superkinds-phantom-typaram.rs
 compile-fail	builtin-superkinds/builtin-superkinds-self-type.rs
+compile-fail	builtin-superkinds/builtin-superkinds-simple.rs
 check-pass	builtin-superkinds/builtin-superkinds-simple2.rs
+compile-fail	builtin-superkinds/builtin-superkinds-typaram-not-send.rs
 check-pass	builtin-superkinds/builtin-superkinds-typaram.rs
 compile-fail	c-variadic/fn-item-diagnostic-issue-69232.rs
 compile-fail	c-variadic/issue-32201.rs
@@ -6916,6 +6919,7 @@ compile-fail	suggestions/recover-invalid-float.rs
 compile-fail	suggestions/recover-missing-turbofish-surrounding-angle-braket.rs
 compile-fail	suggestions/redundant-shared-reference-issue-133685.rs
 compile-fail	suggestions/remove-question-symbol-with-paren.rs
+compile-fail	suggestions/restrict-type-argument.rs
 compile-fail	suggestions/restrict-type-not-param.rs
 compile-fail	suggestions/return-bindings-multi.rs
 compile-fail	suggestions/return-bindings.rs
@@ -7102,6 +7106,7 @@ check-pass	traits/associated_type_bound/issue-51446.rs
 run-pass	traits/astconv-cycle-between-and-type.rs
 check-pass	traits/augmented-assignments-trait.rs
 compile-fail	traits/bad-error-message-impl-trait-double-ref-issue-85681.rs
+compile-fail	traits/bad-method-typaram-kind.rs
 compile-fail	traits/bad-sized.rs
 check-pass	traits/blanket-impl-trait-object-10456.rs
 compile-fail	traits/block-scoped-trait-import-issue-134146.rs
@@ -7651,6 +7656,7 @@ compile-fail	typeck/type-inference-for-associated-types-69683.rs
 compile-fail	typeck/type-placeholder-fn-in-const.rs
 compile-fail	typeck/typeck-cast-pointer-to-float.rs
 run-pass	typeck/typeck-closure-to-unsafe-fn-ptr.rs
+compile-fail	typeck/typeck-default-trait-impl-send-param.rs
 run-pass	typeck/typeck-fn-to-unsafe-fn-ptr.rs
 compile-fail	typeck/typeck-inner-expr-on-field-access-error.rs
 compile-fail	typeck/typeck_type_placeholder_item_help.rs

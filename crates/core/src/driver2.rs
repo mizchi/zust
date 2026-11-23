@@ -1555,6 +1555,40 @@ impl Session2 {
                 subj.starts_with('\'') || sm.impl_generics.iter().any(|g| g.0 == subj)
             })
         };
+        // (the auto traits among the program's traits' supertraits, which the summaries leave out: `trait Foo: Send`,
+        // `trait Foo where Self: Sync`, from the header's text)
+        if !prog.tdb.user.is_empty() {
+            for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
+                let Some(tr) = sm.trait_decl.as_deref() else { continue };
+                let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
+                let head = text.split('{').next().unwrap_or("");
+                // (after the name and its parameters: the supertraits and the where clause)
+                let Some(at) = head.find(tr) else { continue };
+                let rest = &head[at + tr.len()..];
+                let mut depth = 0i32;
+                let mut cut = rest.len();
+                for (i, c) in rest.char_indices() {
+                    match c {
+                        '<' => depth += 1,
+                        '>' => depth -= 1,
+                        ':' if depth == 0 => {
+                            cut = i;
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                let sup = &rest[cut.min(rest.len())..];
+                let word = |w: &str| sup.match_indices(w).any(|(i, _)| {
+                    let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+                    ok(sup[..i].chars().next_back()) && ok(sup[i + w.len()..].chars().next())
+                });
+                let autos: Vec<String> = ["Send", "Sync"].iter().filter(|w| word(w)).map(|w| w.to_string()).collect();
+                if !autos.is_empty() {
+                    prog.tdb.auto_supers.insert(tr.to_string(), autos);
+                }
+            }
+        }
         // (E0277: an impl of a trait of the program's needs its supertraits, all the way up, of its self type, with the
         // impl's parameters as placeholders whose bounds are all the impl assumes (`impl<T> Complete for T` with `trait
         // Complete: Partial` and `trait Partial: Copy` needs `T: Copy`))
@@ -1580,6 +1614,11 @@ impl Session2 {
                             todo.push(sup.to_string());
                         }
                     }
+                    for a in prog.tdb.auto_supers.get(&t).into_iter().flatten() {
+                        if !supers.contains(a) {
+                            supers.push(a.clone());
+                        }
+                    }
                 }
                 if supers.is_empty() {
                     continue;
@@ -1591,7 +1630,7 @@ impl Session2 {
                 for sup in &supers {
                     if prog.tdb.holds_rigid(&prog, t, sup) == crate::traits::Ans::No {
                         let n = prog.tn(t).replace("__u_", "").replace('#', "");
-                        return Err(format!("{}:1: the trait bound `{n}: {sup}` is not satisfied (E0277)", items[ii].line));
+                        return Err(format!("{}:1: {} (E0277)", items[ii].line, crate::traits::not_held(&n, sup)));
                     }
                 }
             }

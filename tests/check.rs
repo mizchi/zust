@@ -359,3 +359,15 @@ fn trait_solver_no_in_uncalled_generic_fn() {
     let ok = src.replace("trait Bar {}\n", "trait Bar {}\nimpl Bar for u8 {}\n");
     assert!(s.check(&ok).is_empty());
 }
+
+/// An auto trait of a type parameter holds only by its bounds (also through a supertrait of the program's), and a
+/// struct is Send when its fields are, also when it contains itself (coinductive)
+#[test]
+fn trait_solver_auto_traits_of_type_parameters() {
+    let src = "fn is_send<T: Send>(_: T) {}\ntrait Shared: Send {}\nstruct List<T> { v: T, next: Option<Box<List<T>>> }\nfn by_sync<S: Sync>(s: S) {\n    is_send(s);\n}\nfn by_super<S: Shared>(s: S) {\n    is_send(s);\n}\nfn by_list<S: Send>(s: List<S>) {\n    is_send(s);\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].line, 5, "{d:?}");
+    assert!(d[0].msg.contains("cannot be sent between threads safely"), "{d:?}");
+}

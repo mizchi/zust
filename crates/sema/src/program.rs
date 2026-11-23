@@ -683,6 +683,12 @@ impl Insts {
                 };
                 // (the solver's `No` holds whatever the caller's type parameters are when t names no placeholder: it
                 // is reported from a placeholder instance too, marked so)
+                // (an auto trait of a type parameter's placeholder: only by its bounds (Coinductive.lean's csolve, with
+                // the bounds as the environment); it holds whatever the caller's parameters are, so it is reported from a
+                // placeholder instance too)
+                if matches!(tr.as_str(), "Send" | "Sync") && matches!(t, Ty::Struct(s) if prog.structs[s as usize].placeholder.is_some()) && prog.tdb.holds(prog, t, tr) == crate::traits::Ans::No {
+                    return Err(format!("{} {}", crate::traits::not_held(&prog.tn(t), tr), crate::traits::SOLVED_NO));
+                }
                 if own && !prog.has_param(t) && !prog.names_placeholder(t, 0) && !args.iter().any(|&a| prog.names_placeholder(a, 0) && tr.contains('<')) && prog.tdb.holds_in(prog, t, tr, &gn, &args) == crate::traits::Ans::No {
                     return Err(format!("the trait bound `{}: {}` is not satisfied (for `{pn}`) {}", prog.tn(t), crate::traits::bound_text(tr), crate::traits::SOLVED_NO));
                 }

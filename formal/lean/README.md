@@ -17,7 +17,9 @@ formal/run.sh lean
 | `TraitSolver/Ty.lean` | types as trees (`var` / `con` / `app`), substitutions, one-way matching `mtch`: sound (`mtch_sound`), complete (`mtch_complete`) |
 | `TraitSolver/Solver.lean` | impls as Horn clauses, the specification `Holds` (inductive), the algorithm `solve` (depth first, fuel, the stack of goals being proved), and its theorems |
 | `TraitSolver/Weaken.lean` | why zustc may leave out what it cannot read: a weaker program's `no` is the real program's `no` |
-| `TraitSolver/Coherence.lean` | overlap of impl heads (E0119): `mayUnify`, exact for linear heads; unique selection |
+| `TraitSolver/Coherence.lean` | overlap of impl heads (E0119): `mayUnify`, exact for linear heads; unique selection; when a conflict is a real one (`conflict_sound`) |
+| `TraitSolver/Obligations.lean` | an impl's supertrait obligations, under its own bounds |
+| `TraitSolver/Coinductive.lean` | auto traits (`Send` / `Sync`): `csolve`, where a goal that comes back round holds, against the greatest fixpoint |
 | `TraitSolver/Examples.lean` | tests/ui cases as goals the model answers (`by decide`) |
 | `Axioms.lean` | `#print axioms` of the main theorems |
 
@@ -31,6 +33,9 @@ formal/run.sh lean
 | `solve_no_sound_weaken` | if every impl of `P` is covered by one of `P'` (`Prog.weakens`), `solve P' .. = no → ¬ Holds P ..` |
 | `mayUnify_sound` / `mayUnify_complete` | heads that `mayUnify` rejects have no common instance; linear heads it accepts have one |
 | `select_unique` | impls whose heads pairwise do not unify never both apply to a goal |
+| `conflict_sound` / `no_conflict_of_not_mayUnify` | heads made equal by some substitutions, under which the solver proves both impls' where clauses, give a goal both impls apply to (zustc's E0119); heads that do not unify never conflict |
+| `supertrait_obligation_fails` | an impl's parameters made rigid, its where clauses the environment: a `no` for a supertrait is a failed obligation |
+| `csolve_yes_sound` / `csolve_no_sound` | the coinductive solver's `yes` only for goals in a consistent set, its `no` only for goals in none |
 
 `solve_no_sound` is the property zustc relies on: an E0277 is reported only on `no`, so it is never a false error with
 respect to the impls zustc read. The stack is what makes `no` from a cycle sound: `HA_cut` shows that a proof can
@@ -39,7 +44,5 @@ loses nothing.
 
 ## What the model does not cover
 
-- auto traits (`Send` / `Sync`), which are coinductive (a cycle proves them): zustc decides these structurally
-  (`Program::auto_trait`), not with this solver;
 - associated types and their normalization (`<T as Tr>::X`), and higher-ranked bounds (`for<'a>`);
 - lifetimes (zustc's `Ty` erases them; region checking is separate).
