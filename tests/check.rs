@@ -627,6 +627,47 @@ fn trait_arity_at_impls() {
     assert_eq!(first(src), None, "lifetime_and_default_ok");
     let src = "trait It { type Item; }\nimpl It for u8 { type Item = u8; }\nfn main() {}\n";
     assert_eq!(first(src), None, "assoc_type_ok");
+    // (review of #91: an `=` inside a bound is no default; a braced const argument's `<`)
+    let src = "trait Tr<T: Iterator<Item = u8>> {}\nimpl Tr for u8 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 6, "missing generics for trait `Tr` (E0107)".to_string())), "eq_in_bound");
+    let src = "trait Tr<const B: bool, T> {}\nimpl Tr<{ 0 < 1 }> for u8 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 6, "trait takes 2 generic arguments but 1 generic argument was supplied (E0107)".to_string())), "braced_const");
+}
+
+#[test]
+fn review91_attributes_imports_unreachable() {
+    // (review of #91, each checked with rustc 1.100)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    // (unused_imports: a `]` in an attribute's string; `expect(unused_must_use)` is another lint; a name another
+    // `use` starts with is used)
+    let src = "#![deny(unused_imports)]\n#[doc = \"]\"]\nuse std::fs as unused_fs;\nfn main() {}\n";
+    assert_eq!(first(src), Some((3, "unused import: `std::fs as unused_fs`".to_string())), "bracket_in_string");
+    let src = "#![deny(unused_imports)]\n#[expect(unused_must_use)]\nuse std::fs as unused_fs;\nfn main() {}\n";
+    assert_eq!(first(src), Some((3, "unused import: `std::fs as unused_fs`".to_string())), "other_lint");
+    let src = "#![deny(unused_imports)]\n#[deprecated]\nuse std::fs as files;\nuse files::File;\nfn main() { let _: Option<File> = None; }\n";
+    // (zustc does not yet resolve `File` through the alias; only the lint is checked here)
+    assert_eq!(first(src).filter(|d| d.1.starts_with("unused import")), None, "used_by_use");
+    // (the unstable ABIs: after any number of attributes; a raw string)
+    let src = "#[doc = \"a\"]\n#[doc = \"b\"]\n#[doc = \"c\"]\n#[allow(dead_code, unused)]\npub extern \"rust-cold\" fn f() {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((5, "the extern \"rust-cold\" ABI is experimental and subject to change (E0658)".to_string())), "abi_after_attrs");
+    let src = "extern r\"rust-cold\" fn f() {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((1, "the extern \"rust-cold\" ABI is experimental and subject to change (E0658)".to_string())), "raw_abi");
+    // (repr(transparent): the item it is on, past a raw-string attribute and `pub(crate)`; no slice inside a char)
+    let src = "#[repr(transparent)]\n#[doc = r\"note\"]\nstruct Wrap(u8);\nunion Slot { x: u8 }\nfn main() { let _ = Wrap(1); let _ = Slot { x: 1 }; }\n";
+    assert_eq!(first(src), None, "transparent_struct_then_union");
+    let src = "#[repr(transparent)]\npub(crate) union U { x: u8 }\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, "transparent unions are unstable (E0658)".to_string())), "transparent_pub_crate_union");
+    let pad = "é".repeat(300);
+    let src = format!("#[repr(transparent)]\nstruct W(u8);\nfn main() {{ let _s = \"{pad}\"; let _ = W(1); }}\n");
+    for k in 0..4 {
+        let src = format!("{}{src}", " ".repeat(k));
+        assert_eq!(first(&src), None, "multibyte_after_{k}");
+    }
+    // (unreachable_code: the program's own `process::exit` returns)
+    let src = "#![deny(unreachable_code)]\nmod process { pub fn exit() -> u8 { 1 } }\nfn take(_: u8, _: u8) {}\nfn main() { take(process::exit(), 2); }\n";
+    // (zustc resolves `process::exit` to std's here, a separate gap; only the lint is checked)
+    assert_eq!(first(src).filter(|d| d.1.starts_with("unreachable")), None, "user_process_exit");
 }
 
 #[test]
