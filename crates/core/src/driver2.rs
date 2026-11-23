@@ -1212,9 +1212,17 @@ impl Session2 {
                             leading_pub(text).filter(|&v| {
                                 let b = text.as_bytes();
                                 let mut j = skip_space(b, v + 3);
-                                // (a `pub(..)`'s path)
+                                // (a `pub(..)`'s path, past the comments in it: `pub(in crate /* ) */)`)
                                 if b.get(j) == Some(&b'(') {
-                                    j += b[j..].iter().position(|&c| c == b')').map_or(b.len() - j, |n| n + 1);
+                                    j += 1;
+                                    loop {
+                                        j = skip_space(b, j);
+                                        match b.get(j) {
+                                            Some(b')') => break j += 1,
+                                            None => break,
+                                            _ => j += 1,
+                                        }
+                                    }
                                 }
                                 extern_block(b, skip_space(b, j))
                             })
@@ -2032,7 +2040,15 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
                 Some(base + l.char_indices().nth(at.col as usize).map_or(l.len(), |(i, _)| i))
             })
             .flatten()
-            .filter(|&o| text[o..].starts_with(name.as_str()));
+            .and_then(|o| {
+                let r = &text[o..];
+                if r.starts_with(name.as_str()) {
+                    return Some(o);
+                }
+                // (a format string's `{x}` / `{x:?}`: the name in it)
+                let end = str_lit_len(r)?;
+                ['}', ':'].iter().find_map(|c| r[..end].find(&format!("{{{name}{c}"))).map(|k| o + k + 1)
+            });
         // (else (`self`) the first in that fn's body that is not a field or a path's segment)
         let off = match found {
             Some(o) => o,
@@ -2051,6 +2067,31 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
         };
         let (line, col) = item_pos(src, orig, &marks, it, off);
         return Some(format!("{line}:{col}: can't capture dynamic environment in a fn item (E0434)"));
+    }
+    None
+}
+
+/// The length of the string literal `r` starts with (`"..."`, `r"..."`, `r#"..."#`), None when it starts with none
+fn str_lit_len(r: &str) -> Option<usize> {
+    let b = r.as_bytes();
+    let (hashes, open) = match b.first()? {
+        b'"' => (0, 1),
+        b'r' => {
+            let h = b[1..].iter().take_while(|&&c| c == b'#').count();
+            (b.get(1 + h) == Some(&b'"')).then_some((h, 2 + h))?
+        }
+        _ => return None,
+    };
+    let mut i = open;
+    while i < b.len() {
+        if hashes == 0 && b[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if b[i] == b'"' && b[i + 1..].iter().take(hashes).filter(|&&c| c == b'#').count() == hashes {
+            return Some(i + 1 + hashes);
+        }
+        i += 1;
     }
     None
 }
@@ -2467,6 +2508,14 @@ fn first_gat_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<Str
             } else {
                 (sym(k + 1, b':') && sym(k + 2, b':') && sym(k + 3, b'<')).then_some(k + 3)
             };
+            // (a call of an associated fn of the name, `Self::A()` / `Self::A::<u8>()`: the value namespace)
+            let next = match args {
+                Some(open) => angle_parts(&t, b, open).map(|(_, c)| c + 1),
+                None => Some(k + 1),
+            };
+            if next.is_some_and(|q| sym(q, b'(')) {
+                continue;
+            }
             let (glts, gtys) = if let Some(open) = args {
                 let Some((parts, _)) = angle_parts(&t, b, open) else { continue };
                 let lifetime = |q: usize| b[t[q].1] == b'\'' || (t[q].1 > 0 && b[t[q].1 - 1] == b'\'');
@@ -2671,6 +2720,8 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
     let plain = |n: &str, args: &str| format!("{}{}", n.rsplit("__").next().unwrap_or(n).trim_start_matches("u_"), args.replace("__u_", ""));
     let mut traits: crate::fxhash::FxMap<&str, Option<Trait>> = Default::default();
     let mut header_of: crate::fxhash::FxMap<usize, &str> = Default::default();
+    // (the defaults of a trait's type and const parameters, for a trait with any)
+    let mut defaults_of: crate::fxhash::FxMap<&str, Vec<Option<String>>> = Default::default();
     for (i, it) in items.iter().enumerate() {
         if !matches!(it.kind, ItemKind::TraitHeader) {
             continue;
@@ -2696,6 +2747,7 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
         let mut sup = vec![];
         let mut params = (0, 0);
         let mut pnames = vec![];
+        let mut pdefaults: Vec<Option<String>> = vec![];
         // (a bound list from q (`Super<X = u8> + Zed + 'a`), up to `where`, `{`, or with `clause` a `,` that ends a
         // where clause: where it ends, and its traits)
         let read_bounds = |mut q: usize, clause: bool| {
@@ -2733,7 +2785,7 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                     }
                     pnames.push(if w(a) == "const" { w(a + 1) } else { w(a) });
                     let mut d = 0i32;
-                    let default = (a..=z).any(|r| {
+                    let default = (a..=z).find(|&r| {
                         if sym(r, b'<') {
                             d += 1;
                         } else if sym(r, b'>') && !(r > 0 && sym(r - 1, b'-')) {
@@ -2741,7 +2793,8 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                         }
                         d == 0 && sym(r, b'=')
                     });
-                    params = (params.0 + usize::from(!default), params.1 + 1);
+                    pdefaults.push(default.filter(|&r| r < z).map(|r| text[t[r + 1].1..t[z].2].split_whitespace().collect::<Vec<_>>().join(" ")));
+                    params = (params.0 + usize::from(default.is_none()), params.1 + 1);
                 }
                 q = c + 1;
             }
@@ -2773,6 +2826,9 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                 }
             }
         }
+        if pdefaults.iter().any(Option::is_some) {
+            defaults_of.insert(name, pdefaults);
+        }
         traits.insert(name, Some((vec![], sup, params, pnames)));
     }
     for it in items {
@@ -2800,7 +2856,7 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
         // know: settled by the name after `dyn`, when it is the whole path, without reading tokens)
         if let Some(n) = next.filter(|&(a, b)| src[off + 3..a as usize].trim().is_empty() && sb.get(b as usize) != Some(&b':')).map(|x| id(&x)).filter(|n| !AUTO.contains(n)) {
             let simple = match traits.get(n) {
-                Some(Some((a, sups, _, _))) => a.is_empty() && sups.is_empty(),
+                Some(Some((a, sups, (req, _), _))) => a.is_empty() && sups.is_empty() && *req == 0,
                 Some(None) => true,
                 None => !STD.iter().any(|s| s.0 == n),
             };
@@ -2874,18 +2930,32 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
             // (std's trait beside the program's of the name: rustc shows its path)
             let path: String = if std_path && (traits.contains_key(name) || traits.contains_key(format!("__u_{name}").as_str())) { text[t[q].1..t[n].2].split_whitespace().collect() } else { plain(name, "") };
             let mut queue: Vec<Sup> = vec![(name, format!("{path}{}", plain("", &shown)), vec![])];
-            let mut order: Vec<(&str, String, Vec<&str>)> = vec![];
+            let mut order: Vec<(&str, String, Vec<&str>, String)> = vec![];
+            // (an instantiation's key: its arguments with the trait's defaults for the ones left out, so `Base` and
+            // `Base<u8>` of `trait Base<T = u8>` are one)
+            let key = |tn: &str, ts: &str| -> String {
+                let Some(ds) = defaults_of.get(tn) else { return ts.to_string() };
+                let (lts, tys): (Vec<&str>, Vec<&str>) = type_args(ts).into_iter().partition(|a| a.starts_with('\''));
+                if tys.len() >= ds.len() || ds[tys.len()..].iter().any(Option::is_none) {
+                    return ts.to_string();
+                }
+                let all: Vec<&str> = lts.into_iter().chain(tys.iter().copied()).chain(ds[tys.len()..].iter().flatten().map(String::as_str)).collect();
+                format!("{}<{}>", &ts[..ts.find('<').unwrap_or(ts.len())], all.join(", "))
+            };
             // (the bindings each instantiation gets: `Sup<i32>` and `Sup<u32>` are two)
             let mut bound_by: crate::fxhash::FxMap<String, Vec<&str>> = Default::default();
+            let mut seen: Vec<String> = vec![];
             let mut known = true;
             let mut n = 0;
             while n < queue.len() && n < 64 {
                 let (tn, ts, local) = queue[n].clone();
                 n += 1;
-                bound_by.entry(ts.clone()).or_default().extend(local);
-                if queue[..n - 1].iter().any(|x| x.1 == ts) {
+                let k = key(tn, &ts);
+                bound_by.entry(k.clone()).or_default().extend(local);
+                if seen.contains(&k) {
                     continue;
                 }
+                seen.push(k.clone());
                 let in_std = STD.iter().find(|s| s.0 == tn);
                 let (assoc, sups): (Vec<&str>, Vec<Sup>) = match traits.get(tn) {
                     Some(Some((_, _, (req, all), _))) if n == 1 && !(std_path && in_std.is_some()) && (args < *req || args > *all) => {
@@ -2895,7 +2965,8 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                     Some(Some((a, s, _, ps))) if !(std_path && n == 1 && in_std.is_some()) => {
                         // (a supertrait as this instantiation has it: `trait Dyn<A, B>: Sup<B>` of `Dyn<i32, u32>` is
                         // `Sup<u32>`)
-                        let args = type_args(&ts);
+                        // (by the type and const arguments, defaults filled: a lifetime is not one of `ps`)
+                        let args: Vec<&str> = type_args(&k).into_iter().filter(|a| !a.starts_with('\'')).collect();
                         let s = s.iter().map(|(sn, sts, sb)| (*sn, if ps.is_empty() || args.is_empty() { sts.clone() } else { subst_idents(sts, ps, &args) }, sb.clone())).collect();
                         (a.clone(), s)
                     }
@@ -2916,7 +2987,7 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                         None => (vec![], vec![]),
                     },
                 };
-                order.push((tn, ts, assoc));
+                order.push((tn, ts, assoc, k));
                 queue.extend(sups);
             }
             // (a walk cut short leaves the types of the traits it did not reach unknown)
@@ -2924,13 +2995,13 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                 known = false;
             }
             // (a binding of a name the trait does not have itself, but two of its supertraits do, binds neither: E0222)
-            if let Some((_, _, own)) = order.first() {
+            if let Some((_, _, own, _)) = order.first() {
                 pending.retain(|p| own.contains(p) || order[1..].iter().filter(|o| o.2.contains(p)).count() < 2);
             }
             let mut missing: Vec<(&str, String)> = vec![];
-            for (_, ts, assoc) in &order {
+            for (_, ts, assoc, k) in &order {
                 for &a in assoc {
-                    if bound_by.get(ts).is_some_and(|b| b.contains(&a)) {
+                    if bound_by.get(k).is_some_and(|b| b.contains(&a)) {
                         continue;
                     }
                     if let Some(p) = pending.iter().position(|x| *x == a) {
@@ -2942,6 +3013,21 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
             }
             if !known || missing.is_empty() {
                 continue;
+            }
+            // (as rustc prints a trait: without the trailing arguments that are its defaults, `Base<u8>` of `trait
+            // Base<T = u8>` is `Base`)
+            for (_, ts) in missing.iter_mut() {
+                let Some(ds) = traits.iter().find(|(n, _)| ts.starts_with(*n) && ts[n.len()..].starts_with('<')).and_then(|(n, _)| defaults_of.get(n)) else { continue };
+                let all = type_args(ts);
+                let lts = all.iter().take_while(|a| a.starts_with('\'')).count();
+                let mut keep = all.len();
+                while keep > lts && ds.get(keep - lts - 1).is_some_and(|d| d.as_deref() == Some(all[keep - 1])) {
+                    keep -= 1;
+                }
+                if keep < all.len() {
+                    let base = &ts[..ts.find('<').unwrap_or(ts.len())];
+                    *ts = if keep == 0 { base.to_string() } else { format!("{base}<{}>", all[..keep].join(", ")) };
+                }
             }
             // (one trait: its types in the order it declares them; several: each `X` in `Tr`, sorted)
             let what = if missing.iter().all(|m| m.1 == missing[0].1) {

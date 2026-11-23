@@ -483,24 +483,16 @@ impl Free {
                 self.block(b);
                 self.scopes.pop();
             }
-            Expr::Macro(mp, g, _) if mp.segs.len() == 1 && mp.segs[0].name == "matches" => {
-                // `matches!(e, pat if guard)`: e と guard の中を見る (パターンの束縛は guard の中だけ)
-                let Some(inner) = strip_delims(g) else { return };
-                let Some(parts) = split_top_commas(inner) else { return };
-                if parts.len() < 2 {
-                    return;
-                }
-                if let Ok(e) = parse_expr(&parts[0]) {
-                    self.expr(&e);
-                }
-                let rest = parts[1..].join(",");
-                if let Some((pat, guard)) = crate::parse::parse_pat_guard(&rest) {
-                    if let Some(gd) = guard {
-                        self.scopes.push(vec![]);
-                        self.bind(&pat);
-                        self.expr(&gd);
-                        self.scopes.pop();
-                    }
+            Expr::Macro(mp, g, sp) if mp.segs.len() == 1 && mp.segs[0].name == "matches" => {
+                // `matches!(e, pat if guard)`: e と guard の中を見る (パターンの束縛は guard の中だけ)。位置はマクロの
+                // 引数の位置から (matches_parts: 型推論と同じ読み方)
+                let Some((e, pat, guard)) = matches_parts(g, sp.at) else { return };
+                self.expr(&e);
+                if let Some(gd) = guard {
+                    self.scopes.push(vec![]);
+                    self.bind(&pat);
+                    self.expr(&gd);
+                    self.scopes.pop();
                 }
             }
             Expr::Macro(_, g, sp) => {

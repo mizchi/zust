@@ -871,12 +871,13 @@ fn review100_capture_visibility_dyn_gat() {
     assert_eq!(first(src), at(4, 14, &item("type `A` in `Base`")), "where_self_clauses");
     let src = "trait Base { type A; }\ntrait Sub where Self: Base<A = u8> {}\nfn f(_: &dyn Sub) {}\nfn main() {}\n";
     assert_eq!(first(src), None, "where_self_bound");
-    // (a supertrait walk cut short at 64 traits says nothing about the ones it did not reach)
-    let mut src = String::from("trait T70 { type A; }\n");
-    for i in 0..70 {
+    // (a supertrait walk cut short at 64 traits says nothing about the ones it did not reach: here the binding of
+    // `Base::A` is past the cut, and rustc accepts the object)
+    let mut src = String::from("trait Base { type A; }\ntrait T0: Base + T1 {}\n");
+    for i in 1..70 {
         src += &format!("trait T{i}: T{} {{}}\n", i + 1);
     }
-    src += "fn f(_: &dyn T0) {}\nfn main() {}\n";
+    src += "trait T70: Base<A = u8> {}\nfn f(_: &dyn T0) {}\nfn main() {}\n";
     assert_eq!(first(&src), None, "long_chain");
     // (E0107: a GAT's turbofish; a qualified path whose trait has arguments; a dyn's count of trait arguments)
     let src = "trait Lend { type Item<'a> where Self: 'a; fn next<'a>(&'a mut self) -> Self::Item::<'a>; }\nfn main() {}\n";
@@ -996,4 +997,40 @@ fn proc_macro_attributes_outside_a_proc_macro_crate() {
         let src = format!("#[{a}{input}]\npub struct S;\nfn main() {{}}\n");
         assert_eq!(first(&src), at(1, &format!("the `{a}` attribute cannot be used on structs")), "{a}_struct");
     }
+}
+
+#[test]
+fn review100_second_round() {
+    // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    let item = |what: &str| format!("the value of the associated {what} must be specified (E0191)");
+    let cap = "can't capture dynamic environment in a fn item (E0434)";
+    // (E0449: a comment inside `pub(..)`)
+    let src = "pub(in crate /* ) */) unsafe extern \"C\" { fn f(); }\nfn main() {}\n";
+    assert_eq!(first(src), at(1, 1, "visibility qualifiers are not permitted here (E0449)"), "comment_in_restricted_visibility");
+    // (E0434: a format string's capture, and `matches!`'s operands)
+    let src = "fn outer(x: u8) {\n    fn inner() {\n        let _ = format!(\"{x}\");\n    }\n}\nfn main() { outer(1); }\n";
+    assert_eq!(first(src), at(3, 27, cap), "format_capture");
+    let src = "fn outer(x: u8) {\n    fn inner() -> bool {\n        matches!(\n            x, 1)\n    }\n}\nfn main() { outer(1); }\n";
+    assert_eq!(first(src), at(4, 13, cap), "matches_operand");
+    let src = "fn outer(x: u8) {\n    fn inner(y: u8) -> bool {\n        matches!(y,\n            1 if x > 0)\n    }\n}\nfn main() { outer(1); }\n";
+    assert_eq!(first(src), at(4, 18, cap), "matches_guard");
+    // (E0107: an associated fn of a GAT's name is a value; a trait that requires arguments is not settled by its name)
+    let src = "trait Tr { type A<'a>; #[allow(non_snake_case)] fn A() {} fn f() { Self::A(); } }\nfn main() {}\n";
+    assert_eq!(first(src), None, "assoc_fn_of_the_name");
+    let src = "trait Tr { type A<'a>; fn f() -> Self::A; }\nfn main() {}\n";
+    assert_eq!(first(src), at(1, 40, "missing generics for associated type `Tr::A` (E0107)"), "type_use_still_reported");
+    let src = "trait T<X> {}\ntype Obj = dyn T;\nfn main() {}\n";
+    assert_eq!(first(src), at(2, 16, "missing generics for trait `T` (E0107)"), "dyn_of_trait_without_types");
+    // (E0191: an instantiation with its defaults is one, however written; a lifetime is not a type argument)
+    let src = "trait Base<T = u8> { type A; type B; }\ntrait Mid: Base<A = u8> {}\ntrait Root: Base<u8, B = u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "defaults_merge");
+    let src = "trait Base<T = u8> { type A; type B; }\ntrait Mid: Base<A = u8> {}\ntrait Root: Base<u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(4, 14, &item("type `B` in `Base`")), "defaults_left_out_of_the_message");
+    let src = "trait Base<T = u8> { type A; }\ntrait Mid: Base<u16, A = u8> {}\ntrait Root: Base + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(4, 14, &item("type `A` in `Base`")), "other_instantiation_apart");
+    let src = "trait Base<T> { type A; }\ntrait Obj<'a, T>: Base<T, A = u8> + Base<u8> {}\nfn f(_: &dyn Obj<'static, u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "lifetime_argument_not_substituted");
 }
