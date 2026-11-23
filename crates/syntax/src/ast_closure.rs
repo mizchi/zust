@@ -1296,11 +1296,23 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
             Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Slice(ps) => ps.iter().for_each(|q| names(q, out)),
             Pat::Ref(_, q) => names(q, out),
             Pat::Struct(_, fs, _) => fs.iter().for_each(|(_, q)| names(q, out)),
+            // (an or-pattern binds the same names in every alternative: the first's)
+            Pat::Or(ps) => ps.iter().take(1).for_each(|q| names(q, out)),
             _ => {}
         }
     }
     fn reportable(n: &str) -> bool {
         !n.starts_with('_') && n.chars().next().is_some_and(|c| c.is_lowercase())
+    }
+    // (where an expression starts, when its first part says; else line 0)
+    fn expr_pos(e: &Expr) -> Pos {
+        match e {
+            Expr::Path(_, p) => p.pos,
+            Expr::Lit(_, p) => *p,
+            Expr::Call(x, _) | Expr::Ref(_, x) | Expr::Paren(x) | Expr::Range(Some(x), _, _) => expr_pos(x),
+            Expr::MethodCall(.., s) | Expr::Binary(.., s) | Expr::Field(_, _, s) | Expr::Macro(_, _, s) | Expr::Index(_, _, s) => s.start,
+            _ => Pos::default(),
+        }
     }
     fn block(b: &Block, found: &mut Vec<(Pos, String)>) {
         for (i, s) in b.stmts.iter().enumerate() {
@@ -1341,9 +1353,46 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
                 expr(c, found);
                 block(b, found);
             }
-            Expr::For(_, _, x, b) => {
+            Expr::For(_, p, x, b) => {
                 expr(x, found);
+                // (the loop's pattern: a binding the body never reads, at the iterator, on the `for`'s line)
+                let mut ns = vec![];
+                names(p, &mut ns);
+                let fv = used_vars(&Expr::Block(None, false, b.clone()));
+                let at = expr_pos(x);
+                if at.line > 0 {
+                    found.extend(ns.into_iter().filter(|n| reportable(n) && !fv.contains(n)).map(|n| (at, n)));
+                }
                 block(b, found);
+            }
+            // (a `match` arm's bindings its guard and body never read, at the arm's pattern)
+            Expr::Match(x, arms) => {
+                expr(x, found);
+                for a in arms {
+                    let mut ns = vec![];
+                    names(&a.pat, &mut ns);
+                    if ns.iter().any(|n| reportable(n)) {
+                        let mut fv = used_vars(&a.body);
+                        if let Some(g) = &a.guard {
+                            fv.extend(used_vars(g));
+                        }
+                        found.extend(ns.into_iter().filter(|n| reportable(n) && !fv.contains(n)).map(|n| (a.pos, n)));
+                    }
+                    if let Some(g) = &a.guard {
+                        expr(g, found);
+                    }
+                    expr(&a.body, found);
+                }
+            }
+            // (a closure's parameters its body never reads, at the closure)
+            Expr::Closure(_, ps, _, b, pos) => {
+                let fv = used_vars(b);
+                for (p, _) in ps {
+                    let mut ns = vec![];
+                    names(p, &mut ns);
+                    found.extend(ns.into_iter().filter(|n| reportable(n) && !fv.contains(n)).map(|n| (*pos, n)));
+                }
+                expr(b, found);
             }
             Expr::Macro(..) => {}
             _ => each_child(e, &mut |c| expr(c, found)),

@@ -4,7 +4,7 @@ The percentages are rustc's own UI tests that pass in that area: run-pass + chec
 directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). They count only the tests
 `bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special flags or targets other than
 Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
-<!-- measured -->2026-11-23, cc5b1fe<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
+<!-- measured -->2026-11-23, 8804e8f<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
 [docs/language.md](docs/language.md), and the [reports](docs/reports/) explain each step.
@@ -43,7 +43,7 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 - [x] associated types: <!-- ui:associated-types -->82.5%
 - [x] generics: <!-- ui:generics -->90.5% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
   parameter known only from the expected type is not inferred)
-- [ ] consts: <!-- ui:consts -->77.3% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
+- [ ] consts: <!-- ui:consts -->78.4% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
 - [ ] drop: <!-- ui:drop -->65.2% (the drop order of some temporaries differs)
 - [ ] traits: <!-- ui:traits -->71.0% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
 - [ ] `macro_rules!`: <!-- ui:macros -->77.1% (hygiene for `let`, labels, arm bindings; not every fragment kind)
@@ -56,9 +56,9 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 
 ## Checks (compile-fail)
 
-- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->85.3%
+- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->85.6%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
-- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->71.4%, structs <!-- cf:structs -->79.2%
+- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->73.5%, structs <!-- cf:structs -->81.2%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
   union field reads (not yet inside closures or consts, and not the `unsafe_op_in_unsafe_fn` lint)
 - [x] non-exhaustive `match` (E0004): bool, unit, enums (variants that cannot have a value need no arm), structs and
@@ -75,10 +75,10 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
   must outlive the fn live to its end, closures that are not general enough or let borrowed data escape, generic fns
   that are never called (checked with placeholder types). Not yet: what a closure's body requires of its fn,
   higher-ranked trait selection, the requirements of the impl a coercion selects, the prelude's iterators (their types
-  hold no lifetimes). regions <!-- cf:regions -->75.9%, lifetimes <!-- cf:lifetimes -->79.7%
+  hold no lifetimes). regions <!-- cf:regions -->76.7%, lifetimes <!-- cf:lifetimes -->80.5%
   ([issue #1](https://github.com/mizchi/zust/issues/1))
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
-- [ ] lints and warnings: lint <!-- cf:lint -->39.3%
+- [ ] lints and warnings: lint <!-- cf:lint -->39.8%
 - [ ] editions (2015-only errors)
 
 ## Runtime and std

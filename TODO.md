@@ -80,7 +80,9 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   claims the address is aligned) although `ptr::read_unaligned` and a gather off an unaligned base (scale >= the
   element size) use them too. x86 scalar moves do not need alignment, so the code is right today; an alignment
   operand (or an unaligned load op) on `Op::Load` / `Op::Store` would make the flag true.
-- memchr (42 crates of dioxus, 29 of leptos depend on it) stops at items a `macro_rules!` expansion puts in a function
+- memchr 2.8.3 builds for wasm32 (what dioxus and leptos use) and gives rustc's results under node
+  (`memchr`, `memrchr`, `memchr2/3`, `memmem::find/rfind`, `Finder::find_iter`). Its x86-64 build (a host program)
+  stops at items a `macro_rules!` expansion puts in a function
   body (`unsafe_ifunc!`: `type Fn = *mut ();`, `static FN: AtomicPtr<()>`, `fn detect()` inside a block): "nested
   items are not supported". Nested items written in a body are hoisted; those of an expression macro's expansion are
   not. Also `is_x86_feature_detected!` is `true` only for sse / sse2 (no detection at run time), and the vector types
@@ -151,8 +153,13 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
     definition.
   - `LocalKey<T>` is a type with `with`, but a `thread_local!` is not one of them yet (each has a key type of its
     own), so a `&'static LocalKey<T>` cannot point at one.
-- memchr 2.8.3, which 42 crates of dioxus and 29 of leptos depend on: an impl of a trait for a SIMD vector type is
-  "cannot find type" (`impl Vector for v128` in its wasm32 module, `impl Vector for __m128i` in its x86-64 one).
+- Found while building memchr, not fixed:
+  - a generic struct literal whose field is a `<v128 as Tr>::f(..)` call (`Pair { v1: <v128 as Vector>::splat(b) }`)
+    does not infer `V = v128` ("expected `T0`, found `v128`"); an annotation or an intrinsic's value does;
+  - `fn f<'a>(x: &&'a T) -> &'a T { x }`: the deref coercion is applied, but the region check takes the outer
+    reference's lifetime ("`'_` must outlive `'a`"). With elided lifetimes (`fn as_slice(&self) -> &[u8]`) it passes;
+  - `None => &[]` in a match whose type is `&'a [u8]`: "type annotations needed for an empty array";
+  - zustc's own parser counts the destructuring assignment `(a.x, a.y) = t;` as a `let` (tests/parse.rs).
 - `cratebench/ui/run.py` does not run build scripts: a crate gets cargo's variables (`CARGO_PKG_*`) but not what its
   script would give (zurgo does both).
 - `x.as_ref()` on text takes the `AsRef` targets of all the bounds in scope, not those of `x`'s own parameter: in
@@ -176,8 +183,6 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 - `!FLAG` with `const FLAG: bool` (and `!{ true }`) is folded as an integer complement: `(!FLAG) as u8` is 254, not 0.
   `is_bool_expr` sees only literals, comparisons and `&&`/`||`; the bool type should be carried through constants and
   blocks.
-- A vector type's overload group with an `unsafe fn m` and a safe `fn m` (two traits): when the unsafe one stays
-  selected, no E0133 is reported. Check the id `pick_overload` returns, after selection.
 - Serialized const arguments drop a local's type annotation (`{ let x: u8 = !0; ... }` in `Buf<{ .. }>`), and a const
   fn's return type through an alias (`type Id<T> = T; const fn f() -> Id<u8>`) is not applied.
 

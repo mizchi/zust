@@ -4,6 +4,9 @@
 #![cfg(feature = "acg")]
 use std::path::PathBuf;
 
+#[path = "common/par.rs"]
+mod par;
+
 #[test]
 fn inline_keeps_behavior() {
     let dir = std::env::temp_dir().join(format!("drv2inl_{}", std::process::id()));
@@ -18,26 +21,29 @@ fn inline_keeps_behavior() {
         }
     }
     files.sort();
-    let (mut ok, mut bad) = (0, vec![]);
-    for p in &files {
+    let results = par::par_map(&files, |p| -> Option<Result<(), String>> {
         let name = p.file_stem().unwrap().to_string_lossy().to_string();
         let src = std::fs::read_to_string(p).unwrap();
-        let (a, b) = (dir.join(format!("{name}.0")), dir.join(format!("{name}.1")));
+        // (a directory of its own for each source directory: two of them have a file of the same name)
+        let sub = dir.join(p.parent().unwrap().file_name().unwrap());
+        std::fs::create_dir_all(&sub).unwrap();
+        let (a, b) = (sub.join(format!("{name}.0")), sub.join(format!("{name}.1")));
         if zustc::driver2::build(&src, &a, false, None).is_err() {
-            continue;
+            return None;
         }
         if let Err(e) = zustc::driver2::build(&src, &b, true, None) {
-            bad.push(format!("{name}: -O build failed: {}", e.lines().next().unwrap_or("")));
-            continue;
+            return Some(Err(format!("{name}: -O build failed: {}", e.lines().next().unwrap_or(""))));
         }
         let run = |e: &PathBuf| std::process::Command::new(e).stdin(std::process::Stdio::null()).output().unwrap();
         let (x, y) = (run(&a), run(&b));
         if x.stdout == y.stdout && x.stderr == y.stderr && x.status.code() == y.status.code() {
-            ok += 1;
+            Some(Ok(()))
         } else {
-            bad.push(format!("{name}: differs (exit {:?} vs {:?})", x.status.code(), y.status.code()));
+            Some(Err(format!("{name}: differs (exit {:?} vs {:?})", x.status.code(), y.status.code())))
         }
-    }
+    });
+    let ok = results.iter().filter(|r| matches!(r, Some(Ok(())))).count();
+    let bad: Vec<String> = results.into_iter().filter_map(|r| r?.err()).collect();
     let _ = std::fs::remove_dir_all(&dir);
     assert!(bad.is_empty(), "{}", bad.join("\n"));
     assert!(ok >= 130, "{ok}");

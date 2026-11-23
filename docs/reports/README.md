@@ -94,3 +94,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-23 | [Region (lifetime) checking, part 14: `impl Trait` results' captures, closures' `T: 'static`, two-phase borrows through a local, and `ref` rest patterns](2026-11-23-02-region-check-14.md) |
 | 2026-11-23 | [Region (lifetime) checking, part 15: slice patterns, closures' whole-variable captures, `copied` iterators, edition 2024 block tails, `unused_mut`, and GAT parameters](2026-11-23-03-region-check-15.md) |
 | 2026-11-23 | [Region (lifetime) checking, part 16: deref coercions, block values and guards that outlive a block's locals, `&mut` arguments, and temporaries' places](2026-11-23-04-region-check-16.md) |
+| 2026-11-23 | [Test time: where it goes, what was cut, and a nextest-like `zurgo test`](2026-11-23-05-test-time.md) |

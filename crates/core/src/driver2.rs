@@ -1165,6 +1165,16 @@ impl Session2 {
                     return Err(e);
                 }
             }
+            // (an unstable ABI: `extern "rust-cold" fn`)
+            // (`extern` among the item's first names, `pub unsafe extern "C" fn`, from the lexer's identifiers: no
+            // search of its text)
+            const KEYWORDS: &[&str] = &["fn", "struct", "enum", "union", "trait", "impl", "type", "const", "static", "mod", "use", "macro_rules"];
+            let ids = || it.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or(""));
+            if ids().take_while(|w| !KEYWORDS.contains(w)).any(|w| w == "extern") {
+                if let Some(e) = gated_abi(&src, it.start, it.end, &mut feats) {
+                    return Err(e);
+                }
+            }
         }
         // (E0119: two blanket impls of one trait for a bare parameter, `impl<T: A> Tr for T` and `impl<T: B> Tr for T`,
         // overlap whatever their bounds say. Only the program's own traits declared once (modules flatten names),
@@ -1249,6 +1259,8 @@ impl Session2 {
         let mut warn_denied = false;
         let mut deny_dead_pub = false;
         let mut deny_unused_imports = false;
+        // (unused_imports denied by its own name or its group's, not only through `deny(warnings)`)
+        let mut imports_denied = false;
         let mut deny_unreachable_code = false;
         let mut deny_must_use = false;
         let mut deny_unused_alloc = false;
@@ -1335,6 +1347,11 @@ impl Session2 {
             };
             deny_dead_code = grouped("dead_code", "unused");
             warn_denied = last_of("deny", &["warnings"]).is_some() || last_of("forbid", &["warnings"]).is_some();
+            imports_denied = last_of("forbid", &["unused_imports", "unused"]).is_some() || {
+                let own = ["unused_imports", "unused"];
+                let levels = [("deny", last_of("deny", &own)), ("warn", last_of("warn", &own)), ("allow", last_of("allow", &own)), ("expect", last_of("expect", &own))];
+                levels.iter().filter_map(|(l, at)| at.map(|at| (at, *l))).max().is_some_and(|(_, l)| l == "deny")
+            };
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_mismatched_lts = lint("mismatched_lifetime_syntaxes");
@@ -1361,7 +1378,7 @@ impl Session2 {
         }
         // (unused_imports: a top-level `use` whose name nothing else mentions)
         if deny_unused_imports && self.ctx.lib.is_none() {
-            if let Some((line, col, msg)) = first_unused_import(&src, &items[..user_src]) {
+            if let Some((line, col, msg)) = first_unused_import(&src, &items[..user_src], imports_denied, warn_denied) {
                 return Err(format!("{line}:{col}: {msg}"));
             }
         }
@@ -1373,13 +1390,20 @@ impl Session2 {
         }
         // (unreachable_code: a statement after one that diverges)
         if deny_unreachable_code && self.ctx.lib.is_none() {
+            // (the source as written, as flattening blanks a `mod process {` header: `mod`, any space, `process`)
+            let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+            let b0 = src0.as_bytes();
+            let user_process = src0.match_indices("process").any(|(i, _)| {
+                let before = src0[..i].trim_end();
+                i > before.len() && before.ends_with("mod") && !b0.get(i + 7).is_some_and(|&c| word(c)) && !before[..before.len() - 3].bytes().last().is_some_and(word)
+            });
             for it in &items[..user_src] {
                 let text = src.get(it.start..it.end).unwrap_or("");
                 if !text.contains("fn ") || text.contains("allow(unreachable") || text.contains("#[cfg") {
                     continue;
                 }
                 let Ok(Some(f)) = parse_fn(&src, it) else { continue };
-                if let Some((p, what)) = first_unreachable(&f.block) {
+                if let Some((p, what)) = first_unreachable(&f.block, user_process) {
                     if p.line > 0 {
                         return Err(format!("{}:{}: unreachable {what}", it.line + p.line as usize - 1, p.col + 1));
                     }
@@ -1585,6 +1609,13 @@ impl Session2 {
         // (only when one of them has a bounded parameter)
         if sums[..user.min(sums.len())].iter().any(|s| !s.adt_bounds.is_empty()) {
             if let Some(e) = wf_error(&prog, &sums, &src, &items, user) {
+                return Err(e);
+            }
+        }
+        // (E0107: an impl giving one of the program's traits the wrong number of generic arguments; only with a trait
+        // header and an impl header)
+        if items[..user].iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::TraitHeader)) && items[..user].iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::ImplHeader)) {
+            if let Some(e) = first_trait_arity_error(&src, &items[..user]) {
                 return Err(e);
             }
         }
@@ -1795,10 +1826,161 @@ fn relocate(e: String, it: &SrcItem) -> String {
     format!("{}:1: {e}", it.line)
 }
 
+/// The top-level parts of a `<..>` of tokens that starts at `open` (its `<`): (first token, last token) of each, and
+/// the index of its `>`. None when it does not close
+fn angle_parts(t: &[(u8, usize, usize)], text: &[u8], open: usize) -> Option<(Vec<(usize, usize)>, usize)> {
+    let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && text[t[k].1] == c;
+    let (mut d, mut braces, mut parts, mut from) = (0i32, 0i32, vec![], open + 1);
+    for k in open..t.len() {
+        if sym(k, b'{') {
+            braces += 1;
+            continue;
+        }
+        if sym(k, b'}') {
+            braces -= 1;
+            continue;
+        }
+        if braces > 0 {
+            continue;
+        }
+        if sym(k, b'<') || sym(k, b'(') || sym(k, b'[') {
+            d += 1;
+        } else if (sym(k, b'>') && !(k > 0 && sym(k - 1, b'-'))) || sym(k, b')') || sym(k, b']') {
+            d -= 1;
+            if d == 0 {
+                if from < k {
+                    parts.push((from, k - 1));
+                }
+                return Some((parts, k));
+            }
+        } else if d == 1 && sym(k, b',') {
+            if from < k {
+                parts.push((from, k - 1));
+            }
+            from = k + 1;
+        }
+    }
+    None
+}
+
+/// E0107 at an impl of one of the program's traits that gives it more generic (type / const) arguments than the
+/// trait declares, or fewer than it requires: `impl Seq<bool> for u32` with `trait Seq {}`. Read from the trait
+/// headers and the impl headers only (lifetimes and `Item = ..` bindings are not counted)
+fn first_trait_arity_error(src: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind;
+    // (each trait's (required, declared) count; a name declared twice is left out)
+    let mut decl: crate::fxhash::FxMap<&str, Option<(usize, usize)>> = Default::default();
+    for it in items.iter().filter(|it| matches!(it.kind, ItemKind::TraitHeader)) {
+        let text = &src[it.start..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let Some(k) = (0..t.len()).find(|&k| w(k) == "trait") else { continue };
+        let name = w(k + 1);
+        if name.is_empty() {
+            continue;
+        }
+        let counts = if k + 2 < t.len() && t[k + 2].0 == 1 && b[t[k + 2].1] == b'<' {
+            let Some((parts, _)) = angle_parts(&t, b, k + 2) else { continue };
+            // (a lifetime, `'a`, whose token may start after its quote)
+            let lifetime = |q: usize| b[t[q].1] == b'\'' || (t[q].1 > 0 && b[t[q].1 - 1] == b'\'');
+            let tys: Vec<&(usize, usize)> = parts.iter().filter(|p| !lifetime(p.0)).collect();
+            // (braces, a const expression's `{ 1 > 0 }`, are skipped whole)
+            let top_eq = |p: &(usize, usize)| {
+                let (mut d, mut braces) = (0i32, 0i32);
+                (p.0..=p.1).any(|q| {
+                    if t[q].0 == 1 {
+                        match b[t[q].1] {
+                            b'{' => braces += 1,
+                            b'}' => braces -= 1,
+                            _ if braces > 0 => {}
+                            b'<' | b'(' | b'[' => d += 1,
+                            b'>' if !(q > 0 && t[q - 1].0 == 1 && b[t[q - 1].1] == b'-') => d -= 1,
+                            b')' | b']' => d -= 1,
+                            b'=' => return d == 0,
+                            _ => {}
+                        }
+                    }
+                    false
+                })
+            };
+            let defaults = tys.iter().filter(|p| top_eq(p)).count();
+            (tys.len() - defaults, tys.len())
+        } else {
+            (0, 0)
+        };
+        decl.entry(name).and_modify(|e| *e = None).or_insert(Some(counts));
+    }
+    if decl.is_empty() {
+        return None;
+    }
+    let plural = |n: usize| if n == 1 { "generic argument" } else { "generic arguments" };
+    for it in items.iter().filter(|it| matches!(it.kind, ItemKind::ImplHeader)) {
+        let text = &src[it.start..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+        let Some(mut k) = (0..t.len()).find(|&k| w(k) == "impl") else { continue };
+        k += 1;
+        if sym(k, b'<') {
+            let Some((_, close)) = angle_parts(&t, b, k) else { continue };
+            k = close + 1;
+        }
+        // (the trait's path, up to `for`: its last segment and its arguments)
+        if sym(k, b'!') {
+            continue;
+        }
+        let mut name_at = None;
+        while k < t.len() && w(k) != "for" && !sym(k, b'{') {
+            if t[k].0 == 0 && w(k) != "dyn" {
+                name_at = Some(k);
+                k += 1;
+                if sym(k, b'<') {
+                    let Some((_, close)) = angle_parts(&t, b, k) else { break };
+                    k = close + 1;
+                }
+                continue;
+            }
+            k += 1;
+        }
+        if w(k) != "for" {
+            continue;
+        }
+        let Some(nk) = name_at else { continue };
+        let Some(&Some((required, declared))) = decl.get(w(nk)) else { continue };
+        let given = if sym(nk + 1, b'<') {
+            let Some((parts, _)) = angle_parts(&t, b, nk + 1) else { continue };
+            parts
+                .iter()
+                .filter(|p| !(b[t[p.0].1] == b'\'' || (t[p.0].1 > 0 && b[t[p.0].1 - 1] == b'\'')) && !(t[p.0].0 == 0 && p.1 > p.0 && sym(p.0 + 1, b'=') && !sym(p.0 + 2, b'=')))
+                .count()
+        } else {
+            0
+        };
+        if given > declared || given < required {
+            // (an impl hoisted out of a fn body: the line it was written on)
+            let line = it.line + text[..t[nk].1].matches('\n').count();
+            let line = crate::prep::hoisted_at(&crate::prep::hoist_marks(src), line).unwrap_or(line);
+            let what = if given == 0 {
+                format!("missing generics for trait `{}`", w(nk))
+            } else {
+                let takes = if required == declared { format!("{declared}") } else if given > declared { format!("at most {declared}") } else { format!("at least {required}") };
+                format!("trait takes {takes} {} but {given} {} {} supplied", plural(declared.max(required)), plural(given), if given == 1 { "was" } else { "were" })
+            };
+            // (rustc points at the trait's name; a hoisted impl's column is in its hoisted text, without the indent)
+            let col = t[nk].1 - text[..t[nk].1].rfind('\n').map_or(0, |n| n + 1) + 1;
+            return Some(format!("{line}:{col}: {what} (E0107)"));
+        }
+    }
+    None
+}
+
 /// アイテムの関数を自前の構文木で読む (本体がなければ None)。引数のパターンは本体の先頭の let にする
 /// `#![deny(unused_imports)]`: the first name a top-level `use` brings in that no other item mentions. Traits
-/// (std's usual ones and the program's) are left alone: their methods use them without naming them
-fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, String)> {
+/// (std's usual ones and the program's) are left alone: their methods use them without naming them. `lint_denied`:
+/// the crate denies the lint (or its group) itself; `warn_denied`: it denies `warnings`, which turns a warn into an error
+fn first_unused_import(src: &str, items: &[SrcItem], lint_denied: bool, warn_denied: bool) -> Option<(usize, usize, String)> {
     const TRAITS: &[&str] = &[
         "Read", "Write", "BufRead", "Seek", "Hash", "Hasher", "BuildHasher", "FromStr", "Display", "Debug", "Iterator", "IntoIterator",
         "DoubleEndedIterator", "ExactSizeIterator", "FromIterator", "Extend", "Deref", "DerefMut", "Borrow", "BorrowMut", "AsRef", "AsMut",
@@ -1826,6 +2008,11 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
             if toks[k].0 == 1 && b[toks[k].1] == b';' {
                 in_use = false;
             }
+            // (a path's first segment in a `use`: after `use`, `{` or `,`, and followed by `::`)
+            let sym = |q: usize, c: u8| q < toks.len() && toks[q].0 == 1 && b[toks[q].1] == c;
+            if toks[k].0 == 0 && w != "use" && k > 0 && (word(k - 1) == "use" || sym(k - 1, b'{') || sym(k - 1, b',')) && sym(k + 1, b':') && sym(k + 2, b':') {
+                used.insert(w);
+            }
             continue;
         }
         if k > 0 && word(k - 1) == "trait" {
@@ -1840,8 +2027,60 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
             continue;
         }
         let text = &src[it.start..it.end];
-        let t = text.trim_start();
-        if !t.starts_with("use ") || text.contains("allow(unused") || text.contains("#[cfg") || text.contains('*') {
+        // (past its outer attributes, `#[deprecated] #[cfg(not(FALSE))] use std::fs;`: a false `cfg` is stripped
+        // before; the last of its lint attributes that names the lint or its group sets its level, and the last that
+        // names `warnings` whether a warn is an error)
+        let mut t = text.trim_start();
+        let (mut level, mut warnings) = (None, None);
+        if t.starts_with('#') {
+            let tb = text.as_bytes();
+            let tt = crate::lexer::tokenize(tb);
+            let ts = |q: usize, c: u8| q < tt.len() && tt[q].0 == 1 && tb[tt[q].1] == c;
+            let tw = |q: usize| if q < tt.len() && tt[q].0 == 0 { &text[tt[q].1..tt[q].2] } else { "" };
+            let mut q = 0;
+            while ts(q, b'#') && ts(q + 1, b'[') {
+                // (`#[allow(a, unused_imports)]` / `#[warn(unused)]` / `#[deny(unused_imports)]`: the lint or its group;
+                // `#[allow(warnings)]`)
+                let l = tw(q + 2);
+                if matches!(l, "allow" | "expect" | "warn" | "deny" | "forbid") && ts(q + 3, b'(') {
+                    let mut r = q + 4;
+                    while r < tt.len() && !ts(r, b')') {
+                        match tw(r) {
+                            "unused_imports" | "unused" => level = Some(l),
+                            "warnings" => warnings = Some(l),
+                            _ => {}
+                        }
+                        r += 1;
+                    }
+                }
+                let (mut d, mut r) = (0i32, q + 1);
+                while r < tt.len() {
+                    if ts(r, b'[') || ts(r, b'(') {
+                        d += 1;
+                    } else if ts(r, b']') || ts(r, b')') {
+                        d -= 1;
+                        if d == 0 {
+                            break;
+                        }
+                    }
+                    r += 1;
+                }
+                if r >= tt.len() {
+                    break;
+                }
+                t = text[tt[r].2..].trim_start();
+                q = r + 1;
+            }
+        }
+        // (a warn is an error only where `warnings` is denied: by the item's own level of it, or else the crate's)
+        let warn_is_error = warnings.map_or(warn_denied, |w| matches!(w, "deny" | "forbid"));
+        let lint_off = match level {
+            Some("allow" | "expect") => true,
+            Some("warn") => !warn_is_error,
+            Some(_) => false,
+            None => !lint_denied && !warn_is_error,
+        };
+        if !t.starts_with("use ") || lint_off || t.contains('*') {
             continue;
         }
         let body = t["use ".len()..].trim_end().trim_end_matches(';').trim();
@@ -1873,19 +2112,43 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
     None
 }
 
+thread_local! {
+    /// (first_unreachable: the program has a module named `process`, so `process::exit` may not be std's)
+    static USER_PROCESS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// `#![deny(unreachable_code)]`: the first statement of a block after one that always diverges (`return`,
 /// `break`, `continue`, `panic!` and its kin, a `loop` with no `break`), and whether it is a statement or the
 /// block's value
-fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'static str)> {
+fn first_unreachable(b: &crate::parse::Block, user_process: bool) -> Option<(crate::parse::Pos, &'static str)> {
     use crate::parse::{Expr, Stmt};
+    USER_PROCESS.with(|c| c.set(user_process));
     fn diverges(e: &Expr) -> bool {
         match e {
             Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
             Expr::Macro(p, _, _) => matches!(p.segs.last().map(|s| s.name.as_str()), Some("panic" | "unreachable" | "todo" | "unimplemented")),
             Expr::Loop(_, body) => !format!("{body:?}").contains("Break("),
-            Expr::Paren(x) => diverges(x),
+            Expr::Paren(x) | Expr::Unary(_, x, _) | Expr::Ref(_, x) | Expr::Cast(x, _) | Expr::Field(x, _, _) => diverges(x),
+            // (an operand or an argument that diverges: evaluated first, the rest never runs; not the right of `&&` /
+            // `||`, which may not run)
+            Expr::Binary(op, l, r, _) => diverges(l) || (!matches!(op.as_str(), "&&" | "||") && diverges(r)),
+            Expr::Call(f, args) => diverges(f) || args.iter().any(diverges) || matches!(&**f, Expr::Path(None, p) if p.segs.len() >= 2 && p.segs[p.segs.len() - 2].name == "process" && matches!(p.segs[p.segs.len() - 1].name.as_str(), "exit" | "abort")
+                && ((p.segs.len() >= 3 && p.segs[p.segs.len() - 3].name == "std") || !USER_PROCESS.with(|c| c.get()))),
+            Expr::MethodCall(r, _, _, args, _) => diverges(r) || args.iter().any(diverges),
+            // (both branches; a `match` with no arm (on an empty enum) or whose every arm diverges)
+            Expr::If(c, t, Some(els)) => diverges(c) || (block_diverges(t) && diverges(els)),
+            Expr::If(c, _, None) => diverges(c),
+            Expr::Match(x, arms) => diverges(x) || arms.iter().all(|a| diverges(&a.body)),
+            Expr::Block(None, false, b) => block_diverges(b),
             _ => false,
         }
+    }
+    fn block_diverges(b: &crate::parse::Block) -> bool {
+        b.stmts.iter().any(|s| match s {
+            Stmt::Expr(e, _) => diverges(e),
+            Stmt::Let(_, _, Some(e), None, _) => diverges(e),
+            _ => false,
+        })
     }
     fn block(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'static str)> {
         let n = b.stmts.len();
@@ -1923,10 +2186,49 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
         None
     }
     fn inner(e: &Expr) -> Option<(crate::parse::Pos, &'static str)> {
+        // (the arguments after one that diverges are unreachable expressions; when the last one diverges, the call)
+        let args = |all: &[&Expr], call: crate::parse::Pos| -> Option<(crate::parse::Pos, &'static str)> {
+            for (i, a) in all.iter().enumerate() {
+                if let Some(r) = inner(a) {
+                    return Some(r);
+                }
+                if diverges(a) {
+                    return Some(match all.get(i + 1) {
+                        Some(next) => (acg::expr_start(next), "expression"),
+                        None => (call, "call"),
+                    });
+                }
+            }
+            None
+        };
         match e {
             Expr::Block(_, _, b) | Expr::Loop(_, b) => block(b),
-            Expr::If(_, t, els) => block(t).or_else(|| els.as_deref().and_then(inner)),
-            Expr::While(_, _, b) | Expr::For(_, _, _, b) => block(b),
+            Expr::If(c, t, els) => inner(c).or_else(|| block(t)).or_else(|| els.as_deref().and_then(inner)),
+            Expr::While(_, c, b) => inner(c).or_else(|| block(b)),
+            Expr::For(_, _, x, b) => inner(x).or_else(|| block(b)),
+            Expr::Call(f, xs) => {
+                let all: Vec<&Expr> = std::iter::once(&**f).chain(xs.iter()).collect();
+                args(&all, acg::expr_start(e))
+            }
+            Expr::MethodCall(r, _, _, xs, sp) => {
+                let all: Vec<&Expr> = std::iter::once(&**r).chain(xs.iter()).collect();
+                args(&all, sp.start)
+            }
+            // (an operand that diverges: the right is never evaluated, or (the right diverging) the operation)
+            Expr::Binary(op, l, r, sp) => {
+                if let Some(x) = inner(l) {
+                    return Some(x);
+                }
+                if diverges(l) {
+                    return Some((acg::expr_start(r), "expression"));
+                }
+                if let Some(x) = inner(r) {
+                    return Some(x);
+                }
+                (!matches!(op.as_str(), "&&" | "||") && diverges(r)).then_some((sp.start, "expression"))
+            }
+            Expr::Paren(x) | Expr::Unary(_, x, _) | Expr::Ref(_, x) | Expr::Cast(x, _) | Expr::Field(x, _, _) => inner(x),
+            Expr::Match(x, arms) => inner(x).or_else(|| arms.iter().find_map(|a| inner(&a.body))),
             _ => None,
         }
     }
@@ -1938,7 +2240,6 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
 fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) -> Option<String> {
     // (a crate with no dependency (so no proc macro) knows only the built-in attributes and its tools' paths)
     // (both looked up only when such an attribute is there: not a search of every file)
-    let rustc_attrs = || src0.contains("rustc_attrs");
     let unknown = |name: &str| {
         const BUILTIN: &[&str] = &[
             "cfg", "cfg_attr", "test", "ignore", "should_panic", "bench", "derive", "automatically_derived", "macro_export", "macro_use",
@@ -1955,7 +2256,9 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
             "needs_panic_runtime", "profiler_runtime", "no_core", "prelude_import", "rustc_std_internal_symbol", "unstable_feature_bound",
             "rustc_main", "test_runner", "reexport_test_harness_main", "default", "main", "plugin", "plugin_registrar",
         ];
-        if name.contains("::") || name.is_empty() || (name.starts_with("rustc_") && rustc_attrs()) {
+        // (`rustc_*`: rustc's internal attributes; without `#![feature(rustc_attrs)]` the gate's E0658, at the same
+        // attribute)
+        if name.contains("::") || name.is_empty() || name.starts_with("rustc_") {
             return false;
         }
         // (`#[default]` is the derive(Default) helper, `#[main]` was removed)
@@ -4958,13 +5261,183 @@ fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>
             }
             continue;
         }
-        let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) else { continue };
+        // (the first-level names of its arguments: `doc(cfg(..))` / `repr(C, simd)`)
+        let mut args: Vec<&str> = vec![];
+        if sym(j + 1, "(") {
+            let (mut q, mut d) = (j + 2, 1);
+            while q < toks.len() && d > 0 {
+                if sym(q, "(") || sym(q, "[") {
+                    d += 1;
+                } else if sym(q, ")") || sym(q, "]") {
+                    d -= 1;
+                } else if d == 1 && toks[q].0 == 0 {
+                    args.push(tx(q));
+                }
+                q += 1;
+            }
+        }
+        // (`#[repr(transparent)] union U`: rustc points at the union)
+        if name == "repr" && args.contains(&"transparent") {
+            // (this attribute's `]`)
+            let (mut e, mut d) = (j + 1, 0i32);
+            while e < toks.len() {
+                if sym(e, "(") || sym(e, "[") {
+                    d += 1;
+                } else if sym(e, ")") {
+                    d -= 1;
+                } else if sym(e, "]") {
+                    if d == 0 {
+                        break;
+                    }
+                    d -= 1;
+                }
+                e += 1;
+            }
+            let start = if e < toks.len() { from + toks[e].2 } else { to };
+            // (a window past the attributes after it, however long: doubled until the item's keyword is in it)
+            let mut len = 512;
+            let (rest, rt) = loop {
+                let mut end = src.len().min(start + len);
+                while !src.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let rest = &src[start..end];
+                let rt = lexer::tokenize(rest.as_bytes());
+                // (complete when an identifier other than `pub` follows the attributes, or at the source's end)
+                let (rb, mut q, mut d) = (rest.as_bytes(), 0, 0i32);
+                let mut done = end == src.len();
+                while q < rt.len() && !done {
+                    let c = (rt[q].0 == 1).then(|| rb[rt[q].1]);
+                    match c {
+                        Some(b'[' | b'(') => d += 1,
+                        Some(b']' | b')') => d -= 1,
+                        // (a whole identifier: one that ends where the window does may be cut)
+                        _ if d == 0 && rt[q].0 == 0 && (rt[q].2 < rest.len() || end == src.len()) && &rest[rt[q].1..rt[q].2] != "pub" => done = true,
+                        _ => {}
+                    }
+                    q += 1;
+                }
+                if done {
+                    break (rest, rt);
+                }
+                len *= 2;
+            };
+            let rb = rest.as_bytes();
+            let rw = |q: usize| if q < rt.len() && rt[q].0 == 0 { &rest[rt[q].1..rt[q].2] } else { "" };
+            let rs = |q: usize, c: u8| q < rt.len() && rt[q].0 == 1 && rb[rt[q].1] == c;
+            // (the group that opens at q: the index after its close)
+            let skip_group = |q: usize| -> usize {
+                let mut d = 0i32;
+                for k in q..rt.len() {
+                    if rs(k, b'(') || rs(k, b'[') {
+                        d += 1;
+                    } else if rs(k, b')') || rs(k, b']') {
+                        d -= 1;
+                        if d == 0 {
+                            return k + 1;
+                        }
+                    }
+                }
+                rt.len()
+            };
+            let mut q = 0;
+            loop {
+                if rs(q, b'#') && rs(q + 1, b'[') {
+                    q = skip_group(q + 1);
+                } else if rw(q) == "pub" {
+                    q += 1;
+                    if rs(q, b'(') {
+                        q = skip_group(q);
+                    }
+                } else {
+                    break;
+                }
+            }
+            if rw(q) == "union" && !feats.get_or_insert_with(|| enabled_features(src)).iter().any(|f| f == "transparent_unions") {
+                let i = start + rt[q].1;
+                let line = src[..i].matches('\n').count() + 1;
+                return Some(format!("{line}:{}: transparent unions are unstable (E0658)", i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1));
+            }
+        }
+        let Some((feat, msg)) = attr_gate(name, &args) else { continue };
         // (the source's enabled features: read once, at the first gated attribute)
         let enabled = feats.get_or_insert_with(|| enabled_features(src));
         if !enabled.iter().any(|f| f == feat) {
             let (line, col) = at(k);
-            return Some(format!("{line}:{col}: the `{name}` attribute is an experimental feature (E0658)"));
+            return Some(format!("{line}:{col}: {msg} (E0658)"));
         }
+    }
+    None
+}
+
+/// The feature gate of an attribute named `name` with the first-level argument names `args`, and rustc's message
+/// when the source does not enable it (rustc 1.100)
+fn attr_gate(name: &str, args: &[&str]) -> Option<(&'static str, String)> {
+    if let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) {
+        return Some((feat, format!("the `{name}` attribute is an experimental feature")));
+    }
+    let experimental = |feat: &'static str| Some((feat, format!("the `{name}` attribute is an experimental feature")));
+    match name {
+        "allow_internal_unstable" => Some(("allow_internal_unstable", "the `allow_internal_unstable` attribute side-steps feature gating and stability checks".into())),
+        "allow_internal_unsafe" => Some(("allow_internal_unsafe", "the `allow_internal_unsafe` attribute side-steps the `unsafe_code` lint".into())),
+        "compiler_builtins" => Some(("compiler_builtins", "the `compiler_builtins` attribute is used to identify the `compiler_builtins` crate which contains compiler-rt intrinsics and will never be stable".into())),
+        "profiler_runtime" => Some(("profiler_runtime", "the `profiler_runtime` attribute is used to identify the `profiler_builtins` crate which contains the profiler runtime and will never be stable".into())),
+        "prelude_import" => Some(("prelude_import", "the `prelude_import` attribute is for use by rustc only".into())),
+        "linkage" => Some(("linkage", "the `linkage` attribute is experimental and not portable across platforms".into())),
+        "lang" => Some(("lang_items", "lang items are subject to change".into())),
+        "needs_allocator" => experimental("allocator_internals"),
+        "panic_runtime" => experimental("panic_runtime"),
+        "needs_panic_runtime" => experimental("needs_panic_runtime"),
+        "rustc_unroll" => experimental("loop_hints"),
+        "rustc_splat" => experimental("splat"),
+        // (stability attributes: the standard library's)
+        "stable" | "unstable" | "rustc_const_stable" | "rustc_const_unstable" | "rustc_default_body_unstable" | "unstable_feature_bound" => {
+            Some(("staged_api", "stability attributes may not be used outside of the standard library".into()))
+        }
+        "pattern_complexity_limit" => Some(("rustc_attrs", "use of an internal attribute".into())),
+        n if n.starts_with("rustc_") => Some(("rustc_attrs", "use of an internal attribute".into())),
+        "repr" if args.contains(&"simd") => Some(("repr_simd", "SIMD types are experimental and possibly buggy".into())),
+        "doc" => {
+            if args.iter().any(|a| matches!(*a, "cfg" | "auto_cfg")) {
+                Some(("doc_cfg", "the `doc(cfg)` and `doc(auto_cfg)` attributes are experimental".into()))
+            } else if args.contains(&"masked") {
+                Some(("doc_masked", "the `doc(masked)` attribute is experimental".into()))
+            } else if args.contains(&"notable_trait") {
+                Some(("doc_notable_trait", "the `doc(notable_trait)` attribute is experimental".into()))
+            } else if args.iter().any(|a| matches!(*a, "rust_logo" | "keyword" | "attribute" | "fake_variadic" | "search_unbox")) {
+                Some(("rustdoc_internals", "this subset of the `doc` attribute is meant for internal use only".into()))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// An ABI behind a feature gate the source does not enable, `extern "rust-cold" fn f()` (rustc 1.100): `line:col:
+/// the extern "x" ABI is experimental and subject to change (E0658)`, at the ABI's string
+fn gated_abi(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>) -> Option<String> {
+    let toks = lexer::tokenize(&src.as_bytes()[from..to]);
+    let tx = |k: usize| &src[from + toks[k].1..from + toks[k].2];
+    for k in 1..toks.len() {
+        if toks[k].0 != 2 || toks[k - 1].0 != 0 || tx(k - 1) != "extern" {
+            continue;
+        }
+        let Some(abi) = str_lit_value(tx(k)) else { continue };
+        let (feat, how) = match abi.as_str() {
+            "rust-cold" => ("rust_cold_cc", "is experimental and subject to change"),
+            "tail" => ("rust_tail_cc", "is experimental and subject to change"),
+            "rust-preserve-none" => ("rust_preserve_none_cc", "is experimental and subject to change"),
+            "llvm-intrinsic" => ("link_llvm_intrinsics", "is an implementation detail and perma-unstable"),
+            _ => continue,
+        };
+        if feats.get_or_insert_with(|| enabled_features(src)).iter().any(|f| f == feat) {
+            continue;
+        }
+        let i = from + toks[k].1;
+        let line = src[..i].matches('\n').count() + 1;
+        let col = i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1;
+        return Some(format!("{line}:{col}: the extern \"{abi}\" ABI {how} (E0658)"));
     }
     None
 }
@@ -5089,7 +5562,9 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
                     }
                     let name = &b[n0..j];
                     skip(&mut j);
-                    if !name.is_empty() && b.get(j) != Some(&b':') && (GATED.iter().any(|g| g.0.as_bytes() == name) || name == b"target_feature") {
+                    // (a name some gate is on: `attr_gate`'s, or one whose arguments decide, `doc(..)` / `repr(..)`)
+                    let gate_named = std::str::from_utf8(name).is_ok_and(|n| attr_gate(n, &[]).is_some() || matches!(n, "doc" | "repr" | "target_feature"));
+                    if !name.is_empty() && b.get(j) != Some(&b':') && gate_named {
                         gated = true;
                     }
                     i = j;

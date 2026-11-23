@@ -1319,6 +1319,19 @@ impl Inf<'_> {
             Expr::Index(base, ix, _) => self.index(base, ix),
             Expr::For(_, p, it, body) => self.for_loop(p, it, body),
             Expr::Block(_, _, b) => self.block(b),
+            // (`T::BYTES` with T a type parameter: the type the impls' `BYTES` all have, `cur.add(2 * V::BYTES)`)
+            Expr::Path(None, p)
+                if p.segs.len() == 2 && (self.env.params.iter().any(|(g, _)| *g == p.segs[0].name) || p.segs[0].name == "Self") && self.prog.const_by_last.contains_key(&p.segs[1].name)
+                    && self.variant_by(p).is_none() =>
+            {
+                let cs = &self.prog.const_by_last[&p.segs[1].name];
+                let t = self.prog.consts[cs[0] as usize].ty;
+                if t.is_int() && cs.iter().all(|&c| self.prog.consts[c as usize].ty == t) {
+                    self.known(t)
+                } else {
+                    self.var()
+                }
+            }
             Expr::Path(None, p)
                 if p.segs.len() >= 2
                     || (p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_none() && self.variant_by(p).is_some()) =>
@@ -1854,8 +1867,18 @@ impl Inf<'_> {
                                     let kv = self.known(Ty::Ref(false, intern(t)));
                                     self.unify(av, kv);
                                 }
-                                // (a raw pointer: acg checks it, with rustc's coercions)
-                                crate::simd_sig::SArg::P(..) => {}
+                                // (a raw pointer: acg checks it, with rustc's coercions. A `p.cast()` gets its type from it:
+                                // `v128_load(data.cast())`)
+                                crate::simd_sig::SArg::P(t, m) => {
+                                    let mut inner: &Expr = a;
+                                    while let Expr::Paren(x) = inner {
+                                        inner = x;
+                                    }
+                                    if matches!(inner, Expr::MethodCall(_, n, tf, xs, _) if n == "cast" && tf.is_empty() && xs.is_empty()) {
+                                        let kv = self.known(Ty::Ptr(m, intern(t)));
+                                        self.unify(av, kv);
+                                    }
+                                }
                             }
                         }
                         return self.known(r);
@@ -2476,16 +2499,29 @@ impl Inf<'_> {
         }
         if let Some(Ty::Ptr(m, e)) = self.resolve(r) {
             return match name {
-                "add" | "sub" | "offset" | "wrapping_add" | "wrapping_sub" | "wrapping_offset" => r,
+                // (the count is a usize (an isize for the offsets): `p.add(2 * V::BYTES)`'s literal is one)
+                "add" | "sub" | "offset" | "wrapping_add" | "wrapping_sub" | "wrapping_offset" => {
+                    let k = self.known(if name.contains("offset") { Ty::Isize } else { Ty::Usize });
+                    for a in avs {
+                        self.unify(a, k);
+                    }
+                    r
+                }
                 // (`x.cast::<u32>()`: a pointer to the turbofish's type, of the same mutability)
                 "cast" => match tf.first() {
                     Some(GArg::Ty(t)) => match self.parse_ty(t) {
                         Some(u) => self.known(Ty::Ptr(m, intern(u))),
                         None => self.var(),
                     },
-                    _ => self.var(),
+                    // (no turbofish: a pointer of the same mutability to what the use wants, `v128_load(p.cast())`)
+                    _ => {
+                        let i = self.var();
+                        self.with(crate::solver::Shape::Ptr(m, i))
+                    }
                 },
                 "is_null" => self.known(Ty::Bool),
+                // (the argument may be a `*mut` of a `*const` receiver, or the other way: not unified with it)
+                "offset_from" => self.known(Ty::Isize),
                 "read" | "read_volatile" | "read_unaligned" => self.known(*e),
                 _ => self.known(Ty::Unit),
             };

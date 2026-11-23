@@ -1275,7 +1275,7 @@ impl Program {
         for (it, sm) in items.iter().zip(sums) {
             // (and an impl's self type, at its header: `impl Tr for xyz::T`)
             if let Some(sn) = &sm.impl_self {
-                let builtin = Ty::prim(sn).is_some() || sn == "str" || sn == "Box" || sn.starts_with("#tuple") || sn.starts_with("__");
+                let builtin = Ty::prim(sn).is_some() || sn == "str" || sn == "Box" || sn.starts_with("#tuple") || sn.starts_with("__") || crate::simd_sig::vector_name(sn).is_some();
                 if !builtin && !p.struct_index.contains_key(sn) && !p.aliases.contains_key(sn) && !sm.impl_generics.iter().any(|g| g.0 == *sn) {
                     return Err(format!("{}:1: cannot find type `{sn}` in this scope", it.line));
                 }

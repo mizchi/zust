@@ -1228,7 +1228,8 @@ impl Cx<'_> {
                 let (_, bt) = self.block(wbody, Some(Ty::Unit))?;
                 self.loops.pop();
                 if bt != Ty::Never {
-                    self.same(SP, bt, Ty::Unit)?;
+                    // (a body with a value: at its tail, as rustc points)
+                    self.same(block_end_pos(wbody), bt, Ty::Unit)?;
                     self.drop_for_exit(usize::MAX, t0);
                     self.b.ins().jump(header, &[]);
                 } else {
@@ -1259,7 +1260,8 @@ impl Cx<'_> {
                 let (_, bt) = self.block(lbody, Some(Ty::Unit))?;
                 let lp = self.loops.pop().unwrap();
                 if bt != Ty::Never {
-                    self.same(SP, bt, Ty::Unit)?;
+                    // (a body with a value: at its tail, as rustc points)
+                    self.same(block_end_pos(lbody), bt, Ty::Unit)?;
                     self.drop_for_exit(usize::MAX, lp.temps);
                     self.b.ins().jump(body, &[]);
                 } else {
@@ -1348,6 +1350,7 @@ impl Cx<'_> {
                             { let _ = &srcs; self.bk_ret(e); }
                         }
                         self.rg_ret(e);
+                        let (v, t) = if t != ret { self.deref_coerce(v, t, ret) } else { (v, t) };
                         self.same(expr_start(e), t, ret)?;
                         v
                     }
@@ -2074,7 +2077,11 @@ impl Cx<'_> {
 
     fn struct_lit_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Struct(path, sfields, rest) = e else { return err(SP, "internal: expected a struct literal") };
-        if let Some((sid, vi)) = self.prog.variant_by_p(&PPath::of(path), self.self_sid) {
+        // (a variant that is not struct-like yields to a struct of that name: `Skip { .. }` with `use E::*`'s `Skip`)
+        let variant = self.prog.variant_by_p(&PPath::of(path), self.self_sid).filter(|&(sid, vi)| {
+            self.prog.structs[sid as usize].variants[vi].kind == crate::types::VariantKind::Struct || self.prog.struct_by_p(&PPath::of(path), self.self_sid).is_none()
+        });
+        if let Some((sid, vi)) = variant {
             let v = &self.prog.structs[sid as usize].variants[vi];
             if v.kind != crate::types::VariantKind::Struct {
                 return err(SP, "this variant is not a struct-like variant");

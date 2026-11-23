@@ -1348,7 +1348,9 @@ impl Cx<'_> {
             Some(e) => self.expr(e, result_ty.or(expected))?,
             None => (None, Ty::Unit),
         };
-        self.finish_arm(ev, et, merge, &mut result_ty, &mut param, SP)?;
+        // (a mismatch is the else branch's, at its tail as rustc points; with no else, at the `if` (E0317))
+        let at = else_branch.as_deref().map_or(SP, branch_pos);
+        self.finish_arm(ev, et, merge, &mut result_ty, &mut param, at)?;
 
         self.b.switch_to_block(merge);
         match result_ty {
@@ -1370,6 +1372,11 @@ impl Cx<'_> {
             self.b.ins().trap(TrapCode::unwrap_user(1));
             return Ok(());
         }
+        // (`&&T` where the arms are `&T`: the deref coercion, `Imp::Borrowed(x) => x` with x: &&[u8])
+        let (v, t) = match *result_ty {
+            Some(rt) if rt != t => self.deref_coerce(v, t, rt),
+            _ => (v, t),
+        };
         match *result_ty {
             Some(rt) => self.same(span, t, rt)?,
             None => {
@@ -1467,7 +1474,8 @@ impl Cx<'_> {
             if inst.is_none() {
                 self.prog.match_ty(gen_fields[fi].1, vt, &mut sol);
             }
-            vals.push((fi, v, vt, SP));
+            // (a field's value of the wrong type: at the value (the field's name when shorthand), as rustc points)
+            vals.push((fi, v, vt, expr_start(e)));
         }
         let inst = match inst.take() {
             Some(i) => i,

@@ -766,6 +766,85 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
     out
 }
 
+/// Whether the source has a path `Box::from` in any spelling the parser takes: spaces around `::`, a turbofish
+/// (`Box::<[u8]>::from`). Comments are not told apart (a match there only selects a few names more)
+fn box_from_path(src: &str) -> bool {
+    let b = src.as_bytes();
+    // (white space and comments between the path's tokens, as the parser skips them: `Box /* c */ ::from`)
+    let ws = |mut i: usize| {
+        loop {
+            if i >= b.len() {
+                return b.len();
+            }
+            while i < b.len() && b[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if b[i..].starts_with(b"//") {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            } else if b[i..].starts_with(b"/*") {
+                let mut d = 0;
+                while i < b.len() {
+                    if b[i..].starts_with(b"/*") {
+                        d += 1;
+                        i += 2;
+                    } else if b[i..].starts_with(b"*/") {
+                        d -= 1;
+                        i += 2;
+                        if d == 0 {
+                            break;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+            } else {
+                return i;
+            }
+        }
+    };
+    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let colons = |i: usize| (b.get(i) == Some(&b':') && b.get(i + 1) == Some(&b':')).then_some(i + 2);
+    for (k, _) in src.match_indices("Box") {
+        if k > 0 && word(b[k - 1]) || b.get(k + 3).is_some_and(|&c| word(c)) {
+            continue;
+        }
+        let Some(mut i) = colons(ws(k + 3)) else { continue };
+        i = ws(i);
+        if b.get(i) == Some(&b'<') {
+            // (to its closing `>`, past comments (`<[u8 /* > */]>`); none: no turbofish, no path)
+            let mut d = 0;
+            let mut closed = false;
+            while i < b.len() {
+                i = ws(i);
+                match b.get(i) {
+                    Some(b'<') => d += 1,
+                    Some(b'>') => {
+                        d -= 1;
+                        if d == 0 {
+                            closed = true;
+                            break;
+                        }
+                    }
+                    Some(_) => {}
+                    None => break,
+                }
+                i += 1;
+            }
+            if !closed {
+                continue;
+            }
+            let Some(j) = colons(ws(i + 1)) else { continue };
+            i = ws(j);
+        }
+        if b[i..].starts_with(b"from") && !b.get(i + 4).is_some_and(|&c| word(c)) {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn select(user_src: &str, user_items: &[SrcItem]) -> String {
     select_with(user_src, user_items, &mut SelectCache::default())
 }
@@ -1069,6 +1148,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     if sc.has("array::from_fn") {
         need.insert("__exr_array_from_fn");
+    }
+    // (`Box::from(s)` of a slice is `s.to_vec().into_boxed_slice()`)
+    if sc.has("Box") && box_from_path(sc.src) {
+        need.extend(["to_vec", "__exr_slice_to_vec", "Vec", "into_boxed_slice"]);
     }
     if sc.has("Cow") {
         need.extend(["Cow", "__CowStr", "Deref", "deref", "into_owned", "to_vec", "__exr_slice_to_vec", "Vec", "String"]);
