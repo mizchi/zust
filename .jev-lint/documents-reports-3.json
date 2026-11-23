@@ -64,6 +64,14 @@
     "docs_reports_2026-11-23-03-region-check-15.ja": {
       "path": "docs/ja/reports/2026-11-23-03-region-check-15.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-23-04-test-time.en": {
+      "path": "docs/reports/2026-11-23-04-test-time.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-04-test-time.ja": {
+      "path": "docs/ja/reports/2026-11-23-04-test-time.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -153,6 +161,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-23-03-region-check-15.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-23-04-test-time",
+      "topic": "The Japanese file docs/ja/reports/2026-11-23-04-test-time.md is a faithful translation of docs/reports/2026-11-23-04-test-time.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-23-04-test-time.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-23-04-test-time.ja"
       }
     }
   ]

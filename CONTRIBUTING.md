@@ -21,6 +21,7 @@ Steps for a fresh clone, in order. After them, every command in this document wo
    - optional:
      - rust-analyzer (`bench/lsp_parity.py`, `bench/ide_golden_ra.py`)
      - cargo-mutants (mutation testing)
+     - cargo-nextest (runs the tests faster, see "Tests"; CI uses it)
      - blaze (`bench/vs_blaze.py`)
      - Node 24+ and a TypeSafe API key (jev-lint, see "English and Japanese documents")
 2. Clone with the submodules. `cratebench/` and `bench/deps_bench.py` build real crates from them:
@@ -101,7 +102,19 @@ What each crate contains is described in detail in [docs/architecture.md](docs/a
 cargo test --release --workspace
 ```
 
-This runs all the tests:
+This runs all the tests. With [cargo-nextest](https://nexte.st/) the same tests run in about two thirds of the time
+(each test in its own process, the test binaries side by side; 71s -> 50s on 4 cores). It does not run doc tests,
+so CI runs those with `cargo test --doc`:
+
+```bash
+cargo nextest run --release --workspace
+```
+
+`.config/nextest.toml` holds its settings (the `ci` profile: no fail-fast, a hung test stopped after 5 minutes). A
+test that builds and runs many programs spreads them over the cores itself (`tests/common/par.rs`), so `cargo test`
+is not slow either.
+
+The tests cover:
 
 - unit tests (the lexer and others)
 - diagnostics from check: it keeps going after an error, and it reports errors in generic function bodies even
@@ -293,8 +306,10 @@ Mutants the tests miss are written to `mutants.out/missed.txt`; add tests to kil
 
 ## CI and the benchmark dashboard
 
-- `.github/workflows/ci.yml` runs a release build, `cargo test --release --workspace`, `tests/compare.sh` and the
-  tests/ui baseline check on every push and pull request. The size budget depends on the linker, so CI installs wild 0.11.0 and measures with
+- `.github/workflows/ci.yml` runs a release build, the tests (`cargo nextest run --release --workspace --profile ci`
+  and the doc tests), `tests/compare.sh` and the tests/ui baseline check on every push and pull request. Its test job
+  builds without the crate-local ThinLTO (`CARGO_PROFILE_RELEASE_LTO=off`: the workspace builds in ~2/3 of the time)
+  and installs valgrind from cached packages while it builds. The size budget depends on the linker, so CI installs wild 0.11.0 and measures with
   `ZUSTC_BENCH_LINKER=wild` (`bench/budget.txt` also holds wild sizes).
 - `.github/workflows/kpi.yml` runs on every push to a pull request. It builds the merge base and the head one after
   the other on the same runner and measures both with `bench/kpi_track.py --lsp --dry-run` (a zust-analyzer session

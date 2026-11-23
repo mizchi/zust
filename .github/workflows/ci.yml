@@ -57,10 +57,10 @@ jobs:
           [ "$(cat ~/valgrind-install.done)" = 0 ] || { echo "valgrind's install failed"; exit 1; }
           valgrind --version
       # (nextest runs the test binaries side by side too, where cargo test runs them one after another: 71s -> 50s
-      # on 4 cores. `cargo test` runs the same tests)
+      # on 4 cores. `cargo test` runs the same tests. .config/nextest.toml has the ci profile)
       - name: Test
         run: |
-          cargo nextest run --release --workspace --no-fail-fast
+          cargo nextest run --release --workspace --profile ci
           cargo test --release --workspace --doc
       - name: Compare with rustc (examples)
         run: tests/compare.sh

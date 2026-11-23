@@ -20,6 +20,7 @@ clone したばかりのところから、順に行う。終わると、この�
    - あれば:
      - rust-analyzer (`bench/lsp_parity.py`、`bench/ide_golden_ra.py`)
      - cargo-mutants (ミューテーションテスト)
+     - cargo-nextest (テストを速く回す。「テスト」を参照。CI はこれで回す)
      - blaze (`bench/vs_blaze.py`)
      - Node 24 以上と TypeSafe の API キー (jev-lint。「英語の文書と日本語訳」を参照)
 2. submodule ごと clone する。`cratebench/` と `bench/deps_bench.py` は、そこにある実在のクレートをビルドする。
@@ -98,7 +99,18 @@ crate ごとの詳しい中身は [docs/ja/architecture.md](docs/ja/architecture
 cargo test --release --workspace
 ```
 
-全部のテスト。次のものが入っている。
+全部のテスト。[cargo-nextest](https://nexte.st/) なら、同じテストが 2/3 ほどの時間で終わる (テストごとに別のプロセスで、
+テストのバイナリを並べて動かす。4 コアで 71 秒 → 50 秒)。doc テストは動かさないので、CI はそれを `cargo test --doc` で動かす。
+
+```bash
+cargo nextest run --release --workspace
+```
+
+設定は `.config/nextest.toml` にある (`ci` プロファイル: 最初の失敗で止めない、止まったテストは 5 分で打ち切る)。
+多くのプログラムをビルドして動かすテストは、自分でそれをコアに分けて回す (`tests/common/par.rs`) ので、`cargo test` でも
+遅くはない。
+
+テストには次のものが入っている。
 
 - lexer などの単体テスト
 - check の診断 (エラーの後も止まらないこと、キャッシュされた呼び出し元越しに総称関数の本体のエラーを拾うこと)
@@ -286,8 +298,10 @@ origin/main からの差分の行だけを変異させ、テストで見つか�
 
 ## CI とベンチマークのダッシュボード
 
-- `.github/workflows/ci.yml`: push と pull request ごとに、release ビルド、`cargo test --release --workspace`、
-  `tests/compare.sh`、tests/ui の一覧との比較を走らせる。サイズ予算はリンカで変わるので、CI は wild 0.11.0 を入れて `ZUSTC_BENCH_LINKER=wild` で測る
+- `.github/workflows/ci.yml`: push と pull request ごとに、release ビルド、テスト
+  (`cargo nextest run --release --workspace --profile ci` と doc テスト)、`tests/compare.sh`、tests/ui の一覧との比較を
+  走らせる。test ジョブはクレート内の ThinLTO なしでビルドし (`CARGO_PROFILE_RELEASE_LTO=off`: ワークスペースのビルドが
+  2/3 ほどの時間になる)、ビルドの間に、キャッシュしたパッケージから valgrind を入れる。サイズ予算はリンカで変わるので、CI は wild 0.11.0 を入れて `ZUSTC_BENCH_LINKER=wild` で測る
   (`bench/budget.txt` も wild の大きさ)。
 - `.github/workflows/kpi.yml`: pull request への push ごとに走る。分岐点 (merge base) と head を同じランナーで順にビルドし、
   どちらも `bench/kpi_track.py --lsp --dry-run` で測る (zust-analyzer のセッションも含む)。`bench/kpi_pr.py` が
