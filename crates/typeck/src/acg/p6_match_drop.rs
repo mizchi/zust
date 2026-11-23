@@ -494,6 +494,7 @@ impl Cx<'_> {
         self.b.switch_to_block(header);
         // 毎回 match 対象を評価し直す (一時値は 1 回ごとに drop する)
         let t0 = self.temps.len();
+        let bk_t0 = self.bk.stmt_temps.len();
         let Some(place) = ({ let ex = self.bare_none_ty(e, &[pat])?; self.bk_scrutinee(e, ex, &[pat])? }) else {
             return Ok((None, Ty::Never));
         };
@@ -522,14 +523,20 @@ impl Cx<'_> {
         let (_, bt) = self.block(body, Some(Ty::Unit))?;
         self.loops.pop();
         self.pop_scope();
+        // (the scrutinee's temporaries and the body's go away at the end of each iteration; on the way out, those of
+        // the last test stay the statement's)
+        let last: Vec<u32> = self.bk.stmt_temps.get(bk_t0..).map(|t| t.to_vec()).unwrap_or_default();
         if bt != Ty::Never {
             // (a body with a value: at its tail, as rustc points)
             self.same(block_end_pos(body), bt, Ty::Unit)?;
             self.drop_for_exit(usize::MAX, t0);
+            self.bk_iteration_end(bk_t0);
             self.b.ins().jump(header, &[]);
         } else {
             self.b.ins().trap(TrapCode::unwrap_user(1));
         }
+        self.bk.stmt_temps.truncate(bk_t0);
+        self.bk.stmt_temps.extend(last);
         self.b.switch_to_block(exit);
         self.drop_temps(t0);
         Ok((None, Ty::Unit))
@@ -1868,6 +1875,10 @@ impl Cx<'_> {
                 Expr::Unary(op, b, _) if op == "*" => (strip_paren(b), None),
                 _ => break,
             };
+            // (out of what a raw pointer points to (`*x`, `(*x).a`): E0507, as it is not owned)
+            if fname.is_none() && matches!(self.peek(b), Some(Ty::Ptr(..))) {
+                return err(expr_start(e), format!("cannot move out of `{}`, which is behind a raw pointer (E0507)", raw_place_text(e)));
+            }
             // (through references too: `r.value` with r: `&Rc<S>`)
             if let Some(Ty::Struct(sid)) = self.peek(b).map(|t| self.strip_refs(t)) {
                 let through = fname.is_none_or(|f| self.prog.field(sid, f).is_none());
@@ -2008,6 +2019,10 @@ impl Cx<'_> {
     /// a pattern moved a value out of `*rc` (an Rc / a Deref type of the program's): E0507, as `let x = *rc;`
     pub(crate) fn deref_move_check(&mut self, e: &Expr) -> R<()> {
         if let Expr::Unary(op, x, _) = strip_paren(e) {
+            // (a pattern that moves out of what a raw pointer points to: `let (a, s) = *x;`)
+            if op == "*" && self.bk_on() && self.bk.level >= 1 && matches!(self.peek(x), Some(Ty::Ptr(..))) {
+                return err(expr_start(e), format!("cannot move out of `{}`, which is behind a raw pointer (E0507)", raw_place_text(e)));
+            }
             if op == "*" && self.bk_on() && self.bk.level >= 1 {
                 if let Some(Ty::Struct(sid)) = self.peek(x).map(|t| self.strip_refs(t)) {
                     if self.user_deref_sid(x, sid).is_some() {
@@ -2640,4 +2655,40 @@ fn guard_closure_move(e: &Expr, names: &[String], by: crate::ast_closure::MovesB
         }
     });
     found
+}
+
+/// How rustc names a place through a raw pointer: `*x`, and `x.a` for `(*x).a`
+pub(crate) fn raw_place_text(e: &Expr) -> String {
+    fn go(e: &Expr, top: bool) -> String {
+        match strip_paren(e) {
+            Expr::Path(_, p) => p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::"),
+            Expr::Field(b, f, _) => format!("{}.{f}", go(b, false)),
+            Expr::Index(b, _, _) => format!("{}[_]", go(b, false)),
+            Expr::Unary(op, b, _) if op == "*" => if top { format!("*{}", go(b, false)) } else { go(b, false) },
+            _ => "..".into(),
+        }
+    }
+    go(e, true)
+}
+
+impl Cx<'_> {
+    /// e is a place written through a `*const` pointer (`*p`, `(*p).x`, `(*p)[0]`): E0594's text
+    pub(crate) fn const_ptr_write(&self, e: &Expr) -> Option<String> {
+        let mut cur = strip_paren(e);
+        loop {
+            cur = match cur {
+                Expr::Field(b, ..) | Expr::Index(b, ..) => strip_paren(b),
+                Expr::Unary(op, b, _) if op == "*" => {
+                    match self.peek(b) {
+                        Some(Ty::Ptr(false, _)) => return Some(format!("cannot assign to `{}`, which is behind a `*const` pointer (E0594)", raw_place_text(e))),
+                        // (through a `*mut` (`**p = 1` with `p: *const *mut i32`): what it points to is writable, whatever
+                        // reached the pointer)
+                        Some(Ty::Ptr(true, _)) => return None,
+                        _ => strip_paren(b),
+                    }
+                }
+                _ => return None,
+            };
+        }
+    }
 }
