@@ -22,5 +22,6 @@ pub mod regions;
 pub mod wf;
 pub mod srcmap;
 pub mod stub;
+pub mod test_harness;
 pub mod types;
 pub mod types_enc;
