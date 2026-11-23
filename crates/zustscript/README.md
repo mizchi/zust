@@ -258,7 +258,7 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
   - 型: 数値、bool、配列、それらを組み合わせたレコードと enum(入れ子、総称の `Option<T>` なども可)
     - スカラーだけのレコードと enum は、Rust では `#[derive(Clone, Copy, PartialEq)]` の struct / enum(`ZsVec2`、`ZsShape`)になり、値で渡す
     - 配列と、配列を含むレコード / enum は Copy にならない。借用、move、clone は zsc が推論する(次の「所有権の推論」)
-    - JS との境界を越えられるのは、これまでどおり数値の配列と、スカラーだけのレコード / enum。配列を含むレコードは wasm の内側で使う
+    - JS との境界を越えられるのは、数値の配列、スカラーだけのレコード / enum、そして文字列や配列を含むレコードと、レコード・文字列・配列の配列(次の「バイト列で越える値」)
   - 構文: `let` / `let mut` と代入、`while` / `for` / `break` / `continue`、`if`、`match`(数値、bool、enum のバリアント、入れ子のパターン)、レコードの生成・フィールド・`..base` での更新、`as`、`T::zero()` / `T::one()`
   - 配列の操作: `len` `map` `filter` `fold` `any` `all` `push` `concat`、添字、`range(a, b)`(Rust では配列を作らずイテレータ `a..b` になる)
   - 呼び出し: 他の `@wasm` 関数、`wasm fn`、再帰
@@ -274,6 +274,12 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
     - Rust 側の wrapper が値に組み立て直す
   - 戻り値: wrapper が glue の out 領域に、1 スロット 8 byte で書き込む。glue はそれを `DataView` で読み、`{ TAG: "Some", _0: { .. } }` を組み立てる
   - 例: `nearest(xs, ys, p: Vec2, mode: Mode) -> Option<Hit>`
+- **バイト列で越える値**: 文字列や配列を含むレコード(`{ name: String, tags: Array<String> }`)、レコード・文字列・配列の配列(`Array<Person>`、`Array<Array<f64>>`)は、1 つの固定した形式のバイト列にして越える
+  - 両側の補助: JS 側は npm のパッケージ **zustscript-helper**(helper/ts、`encode` / `decode` だけの約 100 行)、Rust 側は crate **zustscript_helper**(helper/rust、trait `Wire` と `to_bytes` / `from_bytes`)。zustc は 1 つのファイルをコンパイルするので、zsc は crate のソースを `mod zustscript_helper` として埋め込み、レコードごとの `impl Wire` を書く
+  - 形式(第 1 版、helper/rust/src/lib.rs に表): little-endian、詰め物なし、型のタグなし(両側が型を知っている)。数値は 4 / 8 byte、bool は 1 byte、文字列は UTF-8 の長さ(u32)と UTF-8、配列は長さ(u32)と要素、レコードは宣言順のフィールド。両側の単体テストで、同じ値が同じバイト列になることを確かめている
+  - glue は引数を `encode` して線形メモリに置き、Rust の wrapper が `from_bytes` で値に戻して参照で渡す。結果は `to_bytes` して返し、glue が `decode` する。JS の出力は `import { encode, decode } from "zustscript-helper"` を含むので、使う側はこのパッケージを入れる
+  - まずは安定している型だけ: 数値、bool、文字列、配列、レコード。enum(スロットで越える)、typed array、関数は、まだこの形式に載せない(tests/errors/wasm_wire_enum.zsc)
+  - 差分テスト `wire_same_in_js_and_wasm`(tests/wire.zsc): 文字列と配列を含むレコード、レコードの配列、入れ子の配列、i64 の結果が、JS と wasm で一致する。TS から読み込んだレコード(`User`)もそのまま越える(`ts_records` の `badge`)
 - 差分テスト `shapes_same_in_js_and_wasm`: examples/shapes.zsc で、レコード、enum、総称の `Option<T>`、ループ、可変のローカル変数の結果が、JS と wasm で一致することを確かめている
 
 同じソースを JS と wasm で走らせた速さ(node 22、examples/numeric.zsc、`tests/numeric_bench.mjs`)。両方の結果は一致している。

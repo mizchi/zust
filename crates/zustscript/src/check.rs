@@ -203,7 +203,7 @@ pub fn wty_to_ty(w: &WTy) -> Ty {
         WTy::Str | WTy::String => Ty::Str,
         WTy::Callback(a, r, _) => Ty::Fn(a.iter().map(wty_to_ty).collect(), Box::new(wty_to_ty(r))),
         // (only lowered `@wasm fn`s have these, and their types come from their zustscript signature)
-        WTy::Value(_) => Ty::Unit,
+        WTy::Value(_) | WTy::Wire(..) => Ty::Unit,
     }
 }
 
@@ -528,7 +528,10 @@ impl Checker {
                     }
                     self.info.records.insert(name.clone(), RecordDef { params: params.clone(), fields: vec![] });
                 }
-                Item::Enum { name, params, .. } => {
+                Item::Enum { name, params, pos, .. } => {
+                    if self.info.records.contains_key(name) || self.info.enums.contains_key(name) {
+                        self.err(*pos, format!("the type `{name}` is defined twice"));
+                    }
                     self.info.enums.insert(name.clone(), EnumDef { params: params.clone(), variants: vec![], ops: HashMap::new() });
                 }
                 _ => {}

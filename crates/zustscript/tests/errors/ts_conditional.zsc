@@ -1,0 +1,2 @@
+// expect: `Cond` is not only an object type
+import type { Cond } from "../ts/unsupported.ts";
