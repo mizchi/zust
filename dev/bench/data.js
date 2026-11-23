@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795464085570,
+  "lastUpdate": 1795464088617,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -111802,6 +111802,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/f35ffc400f6f3b7805306d116b69bc73aa7ea5ec"
         },
         "date": 1795463427445,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.11,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1839,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.84,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1515,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.26,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4655,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0398e929d4cb17be44bbb2c6178e48a32a46424a",
+          "message": "Merge pull request #102 from mizchi/claude/tender-sagan-iatvun\n\nzurgo test: a test per process, all at once (nextest's model); zustc --test and --cfg",
+          "timestamp": "2026-11-24T04:42:07+09:00",
+          "tree_id": "4f11ceb813e2fc346e8f2f10eb280c15194e9a85",
+          "url": "https://github.com/mizchi/zust/commit/0398e929d4cb17be44bbb2c6178e48a32a46424a"
+        },
+        "date": 1795464088050,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
