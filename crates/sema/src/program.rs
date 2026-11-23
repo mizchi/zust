@@ -512,6 +512,9 @@ pub struct Program {
     /// The structs (base ids) whose `deref` returns a reference to an array, slice or str: `t.len()` on one of them is
     /// that target's method
     pub deref_to_seq: crate::fxhash::FxSet<u32>,
+    /// The program's structs (base ids) with a `deref_mut`: a method call's receiver of another one reaches no
+    /// program's `DerefMut`
+    pub deref_mut_of: crate::fxhash::FxSet<u32>,
     /// drop が要る型がありうるか (prelude に drop glue があるか。Box も Drop もなければ false)
     pub has_drop: bool,
     /// impl の関連型の定義
@@ -1031,6 +1034,7 @@ impl Program {
             inst_keys: Default::default(),
             drop_impls: Default::default(),
             deref_to_seq: Default::default(),
+            deref_mut_of: Default::default(),
             has_drop: false,
             assocs: vec![],
             assoc_bounds: Default::default(),
@@ -2068,6 +2072,13 @@ impl Program {
             .enumerate()
             .filter(|(i, n)| n.ends_with("::deref") && matches!(p.sigs[*i].ret, Ty::Ref(_, Ty::Array(..) | Ty::Slice(_) | Ty::Str)))
             .filter_map(|(_, n)| p.struct_index.get(n.trim_end_matches("::deref")).copied())
+            .collect();
+        p.deref_mut_of = p
+            .names
+            .iter()
+            .filter(|n| n.ends_with("::deref_mut"))
+            .filter_map(|n| p.struct_index.get(n.trim_end_matches("::deref_mut")).copied())
+            .filter(|&sid| p.struct_item.get(sid as usize).is_some_and(|&i| i < p.prelude_from))
             .collect();
         p.drop_impls = p
             .impls

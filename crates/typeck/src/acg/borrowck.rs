@@ -706,7 +706,8 @@ pub fn is_view(prog: &Program, sid: u32) -> bool {
 
 /// Whether a value of type t may hold a reference (and so a loan)
 pub fn has_refs(prog: &Program, t: Ty, _depth: u32) -> bool {
-    fn go(prog: &Program, t: Ty, seen: &mut Vec<u32>, memo: &mut HashMap<u32, bool>) -> bool {
+    // (the structs already answered: a few, so a list)
+    fn go(prog: &Program, t: Ty, seen: &mut Vec<u32>, memo: &mut Vec<(u32, bool)>) -> bool {
         match t {
             Ty::Ref(..) => true,
             Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => go(prog, *i, seen, memo),
@@ -716,7 +717,7 @@ pub fn has_refs(prog: &Program, t: Ty, _depth: u32) -> bool {
                 if seen.contains(&sid) {
                     return false;
                 }
-                if let Some(&r) = memo.get(&sid) {
+                if let Some(&(_, r)) = memo.iter().find(|m| m.0 == sid) {
                     return r;
                 }
                 if seen.len() > 64 {
@@ -736,13 +737,13 @@ pub fn has_refs(prog: &Program, t: Ty, _depth: u32) -> bool {
                     || sd.variants.iter().any(|v| v.fields.iter().any(|f| go(prog, f.1, seen, memo)))
                     || sd.args.iter().any(|&a| go(prog, a, seen, memo));
                 seen.pop();
-                memo.insert(sid, r);
+                memo.push((sid, r));
                 r
             }
             _ => false,
         }
     }
-    go(prog, t, &mut vec![], &mut HashMap::default())
+    go(prog, t, &mut vec![], &mut vec![])
 }
 
 fn at(lb: u32, sp: Sp) -> String {
@@ -2198,6 +2199,10 @@ impl Cx<'_> {
 
     /// (Copy, may hold references), cached
     pub(crate) fn bk_ty(&mut self, t: Ty) -> (bool, bool) {
+        // (a number, a bool, a char: Copy, no reference, not worth a lookup)
+        if t.is_int() || matches!(t, Ty::Bool | Ty::Char | Ty::F32 | Ty::F64 | Ty::Unit) {
+            return (true, false);
+        }
         if let Some(&r) = self.bk.ty_info.get(&t) {
             return r;
         }

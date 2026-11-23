@@ -358,7 +358,7 @@ impl Cx<'_> {
         // (`w.m()` with w of the program's struct with a `DerefMut`, and m a `&mut self` method of what it derefs to, not
         // w's own: `(&mut *w).m()`, as autoderef takes `deref_mut` for it; w is borrowed mutably (E0596 without `mut`,
         // E0502 against a shared loan of it) and the user's `deref_mut` runs, not `deref`)
-        if let Some((t0, (refs, target))) = self.peek(recv).and_then(|t| Some((t, self.deref_mut_recv(t, method)?))) {
+        if let Some((t0, (refs, target))) = (!self.prog.deref_mut_of.is_empty()).then(|| self.peek(recv)).flatten().and_then(|t| Some((t, self.deref_mut_recv(t, method)?))) {
             let mut d = recv.clone();
             let at = expr_start(recv);
             for _ in 0..=refs {
@@ -1483,11 +1483,15 @@ impl Cx<'_> {
             refs += 1;
         }
         let Ty::Struct(sid) = t else { return None };
+        // (the cheap test first: most structs have no `DerefMut`)
+        if !self.prog.deref_mut_of.contains(&self.prog.base_of(sid)) || self.prog.method(sid, "deref_mut").is_none() {
+            return None;
+        }
         let base = self.prog.base_of(sid);
         if !self.prog.struct_item.get(base as usize).is_some_and(|&i| i < self.prog.prelude_from) || self.prog.is_placeholder(sid) {
             return None;
         }
-        if self.prog.method(sid, m).is_some() || self.prog.default_method(sid, m).is_some() || self.prog.method(sid, "deref_mut").is_none() {
+        if self.prog.method(sid, m).is_some() || self.prog.default_method(sid, m).is_some() {
             return None;
         }
         let deref_target = |sid: u32| -> Option<Ty> {
