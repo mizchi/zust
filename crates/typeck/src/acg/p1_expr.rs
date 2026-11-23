@@ -838,6 +838,15 @@ impl Cx<'_> {
                     None => self.block(b, expected),
                 };
                 self.unsafe_ok -= *uns as u32;
+                // (a value that holds what the block's locals hold (bk_block_value), used here, after them: a match's
+                // scrutinee, a receiver, an argument. Not one a statement discards)
+                let key = b as *const crate::parse::Block as usize;
+                if self.bk_on() && self.bk.stmt_block != key {
+                    if let Some(&t) = self.bk.block_val.get(&key) {
+                        self.bk_ev(borrowck::Ev::Acc(borrowck::BPlace { local: t, proj: vec![] }, borrowck::Acc::Read, borrowck::pos(e)));
+                        self.bk.src(borrowck::Src::Local(t));
+                    }
+                }
                 r
             }
             // (`[a, a]` after `let a = foo;` (foo generic): the fn foo)

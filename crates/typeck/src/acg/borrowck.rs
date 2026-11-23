@@ -227,6 +227,8 @@ pub struct Bk {
     /// A block's value that holds what one of its locals holds (`{ let y = &x; y }`): a hidden local made at its tail,
     /// while its locals live, which stands for it after (its direct sources, as the block's names are gone then)
     pub block_val: HashMap<usize, u32>,
+    /// The block a statement discards (`{ .. };`, its address): its value is not used after it
+    pub stmt_block: usize,
     /// Loan made for an expression (`&x`: the address of x; `x.m()` with a borrowed receiver: of the call)
     pub loan_of: HashMap<usize, u32>,
     /// The next `&e` is an argument the call's result does not borrow from (its loan does not flow on)
@@ -2560,7 +2562,7 @@ impl Cx<'_> {
         }
         let mut d = vec![];
         self.bk_direct(e, &mut d);
-        if !d.iter().any(|s| matches!(s, Src::Local(_))) {
+        if d.is_empty() {
             return;
         }
         let id = self.bk.locals.len() as u32;

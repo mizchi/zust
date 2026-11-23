@@ -2431,6 +2431,10 @@ impl Cx<'_> {
                     // is a temporary of the statement: made at the block's tail, while its locals live, and dropped at
                     // the statement's end, after them (E0597 when its `Drop` may see a borrow of one of them))
                     let saved_discard = self.bk.discard;
+                    let saved_stmt_block = self.bk.stmt_block;
+                    if let (true, Expr::Block(None, _, b)) = (*semi, strip_paren(e)) {
+                        self.bk.stmt_block = b as *const crate::parse::Block as usize;
+                    }
                     let mark_discard = self.bk.discard_temps.len();
                     let stmt_block = *semi && self.prog.edition < 2024 && self.bk_on() && self.bk.level >= 2 && self.user_code;
                     if let (true, Expr::Block(None, _, b)) = (stmt_block, strip_paren(e)) {
@@ -2460,6 +2464,7 @@ impl Cx<'_> {
                     if made_here || stmt_block {
                         self.bk.discard = saved_discard;
                     }
+                    self.bk.stmt_block = saved_stmt_block;
                     if stmt_block && self.bk.discard_temps.len() > mark_discard {
                         let ts: Vec<u32> = self.bk.discard_temps.drain(mark_discard..).collect();
                         self.bk_drop_held(&ts, borrowck::pos(e));

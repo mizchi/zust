@@ -237,7 +237,11 @@ fn late_static() {
 fn keep_through_calls() {
     let d = check("fn gimme(x: &(u32,)) -> &u32 { &x.0 }\nfn main() {\n    let x = gimme({\n        let v = (22,);\n        &v\n    });\n    println!(\"{:?}\", x);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`v` does not live long enough"), "{d:?}");
-    assert_eq!(check("fn first<'a>(_x: &u32, y: &'a u32) -> &'a u32 { y }\nfn main() {\n    let k = 1;\n    let x = first({ let v = 2; &v }, &k);\n    println!(\"{}\", x);\n}\n"), vec![]);
+    // (a block's value that borrows its local is used as an argument after the local is gone: E0597 in rustc too,
+    // whatever the callee returns (part 16). One that borrows nothing of the block's is fine)
+    let d = check("fn first<'a>(_x: &u32, y: &'a u32) -> &'a u32 { y }\nfn main() {\n    let k = 1;\n    let x = first({ let v = 2; &v }, &k);\n    println!(\"{}\", x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`v` does not live long enough"), "{d:?}");
+    assert_eq!(check("fn first<'a>(_x: &u32, y: &'a u32) -> &'a u32 { y }\nfn main() {\n    let k = 1;\n    let x = first({ let v = &k; v }, &k);\n    println!(\"{}\", x);\n}\n"), vec![]);
 }
 
 /// A cast's type, with the regions written in it: `&x as &'static u32` borrows x for 'static
@@ -2846,12 +2850,17 @@ fn part16_guard_tail_temporaries() {
 
 /// A block's value that holds what one of its locals holds (`{ let x = 1; let y = &x; y }`, or a call's result through
 /// a local, `f(a, b)` of `let f = &shorten_lifetime;`, nll/promoted-bounds.rs) used after the block: x does not live
-/// long enough (E0597). It was checked only when the tail borrowed directly (`{ let x = 1; &x }`), as the block's
-/// names are gone after it. Not a value that holds nothing of the block's (`{ let y = &outer; y }`)
+/// long enough (E0597). It was checked only when a `let` took a tail that borrowed directly (`{ let x = 1; &x }`), as
+/// the block's names are gone after it. Not a value that holds nothing of the block's (`{ let y = &outer; y }`)
 #[test]
 fn part16_block_values_through_locals() {
     let d = check("fn a() {\n    let r = { let x = 1; let y = &x; y };\n    println!(\"{}\", r);\n}\nfn s<'a, 'b, 'm>(a: &'a i32, b: &'b i32) -> &'m i32\nwhere\n    'a: 'm,\n    'b: 'm,\n{\n    if *a < *b { &a } else { &b }\n}\nfn b() {\n    let f = &s;\n    let a = &5;\n    let p = {\n        let l = 3;\n        let b = &l;\n        let c = f(a, b);\n        c\n    };\n    println!(\"{}\", p);\n}\nfn main() { a(); b(); }\n");
     let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
     assert!(lines == vec![2, 17] && d.iter().all(|x| x.1.contains("does not live long enough")), "{d:?}");
+    // (also where the value is used other than by a `let`: a match's scrutinee (span/issue-40157.rs); not by a
+    // statement that discards it)
+    let d = check("fn main() {\n    let n = match { let foo = vec![1, 2]; foo.get(1) } { x => x };\n    println!(\"{:?}\", n);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("`foo` does not live long enough"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let outer = 1;\n    { let x = 1; let y = &x; y };\n    let n = match { let v = vec![1]; v.len() } { k => k };\n    let m = match { let y = &outer; y } { k => *k };\n    println!(\"{} {}\", n, m);\n}\n"), vec![]);
     assert_eq!(check("fn main() {\n    let outer = 5;\n    let n = { let s = String::from(\"a\"); s.len() };\n    let r = { let y = &outer; y };\n    let v = vec![1, 2];\n    let w = { let it = &v; it.len() };\n    let z: &i32 = { let q = &v; &q[0] };\n    let t = { let k = (1, &outer); k };\n    println!(\"{} {} {} {} {:?}\", n, r, w, z, t);\n}\n"), vec![]);
 }
