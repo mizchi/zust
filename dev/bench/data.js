@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795462387804,
+  "lastUpdate": 1795462390555,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -92276,6 +92276,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/8804e8fd8734cc184514d4a31d46e7a94e9cefc0"
         },
         "date": 1795456328331,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.296,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 79.487,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 86.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 95.833,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 93.268,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "50e0ef5004c4bc03ed2007e126a74da21c9e5a49",
+          "message": "Region check part 17: raw pointers, DerefMut receivers, scrutinee and loop temporaries, and false errors of indexing, dispatch and turbofish inference (#97)\n\nRegion check part 17: raw pointers, DerefMut receivers, scrutinee and loop temporaries, and false errors of indexing, dispatch and turbofish inference",
+          "timestamp": "2026-11-24T04:22:01+09:00",
+          "tree_id": "58fd6adeabb14028eb071df9db9fd8d33f705a37",
+          "url": "https://github.com/mizchi/zust/commit/50e0ef5004c4bc03ed2007e126a74da21c9e5a49"
+        },
+        "date": 1795462389997,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
