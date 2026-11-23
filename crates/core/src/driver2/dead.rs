@@ -127,165 +127,37 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -
         )
     };
     let keyword = |w: &str| matches!(w, "else" | "loop" | "unsafe" | "move" | "async" | "const" | "match" | "if" | "while" | "in" | "return" | "break" | "try");
-    // (whether the occurrence that starts at token ps (its path) and ends at e (its brackets) is, or may be, in a
-    // pattern: after `let` / `for` / `|` / `@`, in a macro other than std's expression ones, or followed (out through
-    // the brackets around it) by `=` / `=>` / `|` / `:` / `in` / `if` before anything that ends an expression)
-    let pattern_like = |ps0: usize, e0: usize| -> bool {
-        let mut o = encl[ps0];
+    // (the start of each path the program's patterns name, from the parsed source: `E::A =>`, `let S { .. } =`,
+    // `Some(E::B) | ..`, the parameters of fns and closures; None when the source does not parse)
+    let (pat_starts, binders) = match pattern_paths(region) {
+        Some((p, b)) => (Some(p), Some(b)),
+        None => (None, None),
+    };
+    // (a token's place as the parser counts it: its line, its column in chars)
+    let line_starts: Vec<usize> = std::iter::once(0).chain(region.match_indices('\n').map(|(i, _)| i + 1)).collect();
+    let pos_of = |k: usize| -> (u32, u32) {
+        let off = toks[k].1;
+        let li = line_starts.partition_point(|&s| s <= off) - 1;
+        ((li + 1) as u32, region[line_starts[li]..off].chars().count() as u32)
+    };
+    // (whether the occurrence whose path starts at token ps is, or may be, in a pattern: in the arguments of a macro
+    // (the innermost decides: std's expression macros' are expressions, `matches!`'s before its first comma too, any
+    // other's may be patterns), or where the parsed program has a pattern's path; anything unclear (an unparsed
+    // source) is one)
+    let pattern_like = |ps: usize, _e: usize| -> bool {
+        let mut o = encl[ps];
         while o != none {
-            if o >= 2 && sym(o - 1, b'!') && !expr_macro(word(o - 2)) {
-                return true;
+            if o >= 2 && sym(o - 1, b'!') && toks[o - 2].0 == 0 && !keyword(word(o - 2)) {
+                let m = word(o - 2);
+                if m == "matches" {
+                    let comma = (o + 1..close[o].min(n)).find(|&q| encl[q] == o && sym(q, b','));
+                    return comma.is_none_or(|c| ps > c);
+                }
+                return !expr_macro(m);
             }
             o = encl[o];
         }
-        // (a closure's `|..|` that ends at p: `||`, or a `|` whose opening `|` (at the same depth, in the same
-        // statement) follows what a closure starts after; an or-pattern's `A | B` is none)
-        let closure_end = |p: usize| -> bool {
-            if p > 0 && sym(p - 1, b'|') && toks[p - 1].2 == toks[p].1 {
-                return true;
-            }
-            let mut q = p;
-            while q > 0 {
-                q -= 1;
-                if encl[q] != encl[p] {
-                    continue;
-                }
-                if sym(q, b';') || sym(q, b'{') || sym(q, b'}') || (sym(q, b'>') && q > 0 && sym(q - 1, b'=')) {
-                    return false;
-                }
-                if sym(q, b'|') {
-                    let r = q.wrapping_sub(1);
-                    return r == none
-                        || sym(r, b'(')
-                        || sym(r, b',')
-                        || sym(r, b'{')
-                        || sym(r, b';')
-                        || (sym(r, b'=') && !(r > 0 && toks[r - 1].0 == 1 && toks[r - 1].2 == toks[r].1 && b"=<>!".contains(&b[toks[r - 1].1])))
-                        || (sym(r, b'>') && r > 0 && sym(r - 1, b'='))
-                        || matches!(word(r), "move" | "return" | "async");
-                }
-            }
-            false
-        };
-        // (what the token p before something says: after `let` / `for` / `@` / an or-pattern's `|` a pattern;
-        // after `=>` (an arm's body), a single `=` (a value), `return` / `break`, a closure's `|..|` an expression)
-        let before = |p: usize| -> Option<bool> {
-            if p == none {
-                return None;
-            }
-            if sym(p, b'|') {
-                return Some(!closure_end(p));
-            }
-            if matches!(word(p), "let" | "for") || sym(p, b'@') {
-                return Some(true);
-            }
-            let arrow = p > 0 && sym(p, b'>') && sym(p - 1, b'=');
-            let assign = sym(p, b'=') && !(p > 0 && toks[p - 1].0 == 1 && toks[p - 1].2 == toks[p].1 && b"=<>!+-*/%^&|".contains(&b[toks[p - 1].1]));
-            (arrow || assign || matches!(word(p), "return" | "break")).then_some(false)
-        };
-        // (a group around the unit (its opener o): the group with the path before it, `Some(..)` / `S { .. }`, is
-        // the unit now, and what is around that says)
-        let group = |o: usize| -> (usize, usize) {
-            let mut q = o;
-            if q > 0 && toks[q - 1].0 == 0 && !keyword(word(q - 1)) {
-                q -= 1;
-                while q >= 3 && sym(q - 1, b':') && sym(q - 2, b':') && toks[q - 3].0 == 0 {
-                    q -= 3;
-                }
-            }
-            (q, close[o])
-        };
-        // (a block's braces: after no name, or a keyword's)
-        let is_block = |o: usize| o == 0 || word(o - 1).is_empty() || keyword(word(o - 1));
-        let (mut ps, mut e) = (ps0, e0);
-        'unit: loop {
-            if let Some(r) = before(ps.wrapping_sub(1)) {
-                return r;
-            }
-            let mut d = 0i32;
-            let mut j = e.wrapping_add(1);
-            while j < n {
-                if toks[j].0 == 0 {
-                    match word(j) {
-                        "fn" | "struct" | "enum" | "union" | "impl" | "trait" | "mod" => return false,
-                        "in" | "if" if d == 0 => return true,
-                        "let" | "return" | "use" | "static" | "type" if d == 0 => return false,
-                        _ => {}
-                    }
-                } else if toks[j].0 == 1 {
-                    match b[toks[j].1] {
-                        b'(' | b'[' => d += 1,
-                        // (a struct's braces go on; a block's start ends the expression)
-                        // (right after it, with its own brackets in e: a block, `match E::A {` / `if x == S {`)
-                        b'{' if d == 0 && j == e + 1 => return false,
-                        b'{' if d == 0 => {
-                            let prev = word(j - 1);
-                            if prev.is_empty() || keyword(prev) {
-                                return false;
-                            }
-                            d += 1;
-                        }
-                        b'{' => d += 1,
-                        // (the end of a group around it: a block's (an arm's `{ .. }`, a fn's body) ends the
-                        // expression; a struct's, a call's, a tuple's is the unit now)
-                        b')' | b']' | b'}' if d == 0 => {
-                            let o = open_of[j];
-                            if o == none {
-                                return true;
-                            }
-                            if sym(j, b'}') && is_block(o) {
-                                return false;
-                            }
-                            let (gp, ge) = group(o);
-                            if ge == none {
-                                return true;
-                            }
-                            ps = gp;
-                            e = ge;
-                            continue 'unit;
-                        }
-                        b')' | b']' | b'}' => d = (d - 1).max(0),
-                        b';' if d == 0 => return false,
-                        // (a comma beside it: of a block, a `match`'s arms (an arm's body); of a group, its element
-                        // (`Holder { a: E::A, b: 0 }`, `f(E::A, 1)`, `(E::A, x) =>`), as the group is)
-                        b',' if d == 0 => {
-                            let o = encl[j];
-                            if o == none {
-                                return true;
-                            }
-                            if sym(o, b'{') && is_block(o) {
-                                return false;
-                            }
-                            let (gp, ge) = group(o);
-                            if ge == none {
-                                return true;
-                            }
-                            ps = gp;
-                            e = ge;
-                            continue 'unit;
-                        }
-                        b':' if d == 0 && !sym(j + 1, b':') && !sym(j - 1, b':') => return true,
-                        b'|' if d == 0 => return true,
-                        b'=' if d == 0 => {
-                            if sym(j + 1, b'>') {
-                                return true;
-                            }
-                            if sym(j + 1, b'=') {
-                                j += 2;
-                                continue;
-                            }
-                            let glued = toks[j - 1].0 == 1 && toks[j - 1].2 == toks[j].1 && b"=<>!+-*/%^&|".contains(&b[toks[j - 1].1]);
-                            if !glued {
-                                return true;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                j += 1;
-            }
-            return true;
-        }
+        pat_starts.as_ref().is_none_or(|s| s.contains(&pos_of(ps)))
     };
     // (the path an occurrence at k is the last segment of: back over `a::`)
     let path_start = |k: usize| -> usize {
@@ -419,12 +291,17 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -
         .collect();
     // (the struct a variable at k is bound to: the item's only `let` of that name, `let [mut] x = S(` of a tuple
     // struct / `S {` of another)
+    // (only a name the program binds once, with that `let`: a closure's parameter, an arm's binding or another `let`
+    // of it may be what a read names)
     let bound_to = |k: usize| -> Option<&str> {
         let ii = item_of[k];
         if ii == none {
             return None;
         }
         let v = word(k);
+        if binders.as_ref().is_none_or(|m| m.get(v).copied() != Some(1)) {
+            return None;
+        }
         let mut found = None;
         let mut q = first_tok[ii];
         while q < n && item_of[q] == ii {
@@ -473,7 +350,7 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -
             .flatten()
             // (one of the program's structs: an alias it does not resolve, a foreign type, read by any owner)
             .filter(|o| struct_names.contains(o))
-            // (`x.f` of an `x` the same item binds once, to a struct's value: `let x = S(..)` / `let x = S { .. }`)
+            // (`x.f` of an `x` the program binds once, to a struct's value: `let x = S(..)` / `let x = S { .. }`)
             .or_else(|| (k > 0 && toks[k - 1].0 == 0 && !sym(k.wrapping_sub(2), b'.')).then(|| bound_to(k - 1)).flatten());
         match owner {
             Some(o) => {
@@ -802,4 +679,116 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -
         }
     }
     None
+}
+
+/// The start (line, col in chars, as the parser counts them) of each path a pattern of the parsed region names:
+/// `E::A =>`, `if let Some(E::B) =`, `let S { .. } =`, `for (E::A, x) in`, the parameters of fns and closures, in every
+/// item (nested ones too); and how many times each name is bound (by a pattern's name). None when the region does not
+/// parse
+fn pattern_paths(region: &str) -> Option<(FxSet<(u32, u32)>, FxMap<String, usize>)> {
+    use crate::parse::{Block, Expr, Item, ItemKind as K, Pat, Stmt};
+    let file = crate::parse::parse_file(region).ok()?;
+    #[derive(Default)]
+    struct Out {
+        starts: FxSet<(u32, u32)>,
+        binders: FxMap<String, usize>,
+    }
+    fn pat(p: &Pat, out: &mut Out) {
+        match p {
+            Pat::TupleStruct(path, ps) => {
+                out.starts.insert((path.pos.line, path.pos.col));
+                ps.iter().for_each(|p| pat(p, out));
+            }
+            Pat::Struct(path, fs, _) => {
+                out.starts.insert((path.pos.line, path.pos.col));
+                fs.iter().for_each(|f| pat(&f.1, out));
+            }
+            Pat::Path(path) => {
+                out.starts.insert((path.pos.line, path.pos.col));
+            }
+            Pat::Ident(_, _, name, sub) => {
+                *out.binders.entry(name.clone()).or_default() += 1;
+                if let Some(sub) = sub {
+                    pat(sub, out);
+                }
+            }
+            Pat::Ref(_, sub) => pat(sub, out),
+            Pat::Tuple(ps) | Pat::Slice(ps) | Pat::Or(ps) => ps.iter().for_each(|p| pat(p, out)),
+            _ => {}
+        }
+    }
+    fn block(b: &Block, out: &mut Out) {
+        for st in &b.stmts {
+            match st {
+                Stmt::Let(p, _, init, els, _) => {
+                    pat(p, out);
+                    if let Some(e) = init {
+                        expr(e, out);
+                    }
+                    if let Some(b) = els {
+                        block(b, out);
+                    }
+                }
+                Stmt::Expr(e, _) => expr(e, out),
+                Stmt::Item(it) => item(it, out),
+            }
+        }
+    }
+    fn expr(e: &Expr, out: &mut Out) {
+        match e {
+            Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => block(b, out),
+            Expr::If(c, t, els) => {
+                expr(c, out);
+                block(t, out);
+                if let Some(e) = els {
+                    expr(e, out);
+                }
+            }
+            Expr::While(_, c, b) => {
+                expr(c, out);
+                block(b, out);
+            }
+            Expr::For(_, p, it, b) => {
+                pat(p, out);
+                expr(it, out);
+                block(b, out);
+            }
+            Expr::Let(p, x) => {
+                pat(p, out);
+                expr(x, out);
+            }
+            Expr::Match(x, arms) => {
+                expr(x, out);
+                for a in arms {
+                    pat(&a.pat, out);
+                    if let Some(g) = &a.guard {
+                        expr(g, out);
+                    }
+                    expr(&a.body, out);
+                }
+            }
+            Expr::Closure(_, ps, _, body, _) => {
+                ps.iter().for_each(|(p, _)| pat(p, out));
+                expr(body, out);
+            }
+            e => crate::ast_closure::each_child_pub(e, &mut |c| expr(c, out)),
+        }
+    }
+    fn item(it: &Item, out: &mut Out) {
+        match &it.kind {
+            K::Fn(sig, body) => {
+                sig.params.iter().for_each(|(p, _)| pat(p, out));
+                if let Some(b) = body {
+                    block(b, out);
+                }
+            }
+            K::Impl(_, _, _, ms) | K::Trait(_, _, _, ms) | K::Extern(ms) | K::Mod(_, Some(ms)) => ms.iter().for_each(|m| item(m, out)),
+            K::Const(_, _, Some(e)) | K::Static(_, _, _, e) => expr(e, out),
+            K::Enum(_, _, vs) => vs.iter().filter_map(|v| v.2.as_ref()).for_each(|e| expr(e, out)),
+            _ => {}
+        }
+    }
+    let mut out = Out::default();
+    file.items.iter().for_each(|it| item(it, &mut out));
+    Some((out.starts, out.binders))
 }
