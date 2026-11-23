@@ -663,6 +663,11 @@ fn review91_attributes_imports_unreachable() {
     assert_eq!(first(src), Some((2, "transparent unions are unstable (E0658)".to_string())), "transparent_pub_crate_union");
     let src = format!("#[repr(transparent)]\n#[doc = \"{}\"]\npub union U {{ x: u8 }}\nfn main() {{}}\n", "a".repeat(600));
     assert_eq!(first(&src), Some((3, "transparent unions are unstable (E0658)".to_string())), "transparent_after_long_attribute");
+    // (a window that ends inside `union`: grown until the name is whole)
+    for n in 470..490 {
+        let src = format!("#[repr(transparent)]\n#[doc = \"{}\"]\nunion U {{ x: u8 }}\nfn main() {{}}\n", "a".repeat(n));
+        assert_eq!(first(&src), Some((3, "transparent unions are unstable (E0658)".to_string())), "transparent_window_edge_{n}");
+    }
     let pad = "é".repeat(300);
     let src = format!("#[repr(transparent)]\nstruct W(u8);\nfn main() {{ let _s = \"{pad}\"; let _ = W(1); }}\n");
     for k in 0..4 {
@@ -673,4 +678,9 @@ fn review91_attributes_imports_unreachable() {
     let src = "#![deny(unreachable_code)]\nmod process { pub fn exit() -> u8 { 1 } }\nfn take(_: u8, _: u8) {}\nfn main() { take(process::exit(), 2); }\n";
     // (zustc resolves `process::exit` to std's here, a separate gap; only the lint is checked)
     assert_eq!(first(src).filter(|d| d.1.starts_with("unreachable")), None, "user_process_exit");
+    // (third round: `mod` and `process` apart; std's `process::exit` still diverges beside the program's module)
+    let src = "#![deny(unreachable_code)]\nmod\n    process { pub fn exit() -> u8 { 1 } }\nfn take(_: u8, _: u8) {}\nfn main() { take(process::exit(), 2); }\n";
+    assert_eq!(first(src).filter(|d| d.1.starts_with("unreachable")), None, "user_process_split");
+    let src = "#![deny(unreachable_code)]\nmod process { pub fn exit() -> u8 { 1 } }\nfn take(_: u8, _: u8) {}\nfn main() { take(std::process::exit(0), 2); }\n";
+    assert_eq!(first(src), Some((4, "unreachable expression".to_string())), "std_process_exit");
 }
