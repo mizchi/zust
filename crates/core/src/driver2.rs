@@ -1836,9 +1836,26 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
             Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
             Expr::Macro(p, _, _) => matches!(p.segs.last().map(|s| s.name.as_str()), Some("panic" | "unreachable" | "todo" | "unimplemented")),
             Expr::Loop(_, body) => !format!("{body:?}").contains("Break("),
-            Expr::Paren(x) => diverges(x),
+            Expr::Paren(x) | Expr::Unary(_, x, _) | Expr::Ref(_, x) | Expr::Cast(x, _) | Expr::Field(x, _, _) => diverges(x),
+            // (an operand or an argument that diverges: evaluated first, the rest never runs; not the right of `&&` /
+            // `||`, which may not run)
+            Expr::Binary(op, l, r, _) => diverges(l) || (!matches!(op.as_str(), "&&" | "||") && diverges(r)),
+            Expr::Call(f, args) => diverges(f) || args.iter().any(diverges) || matches!(&**f, Expr::Path(None, p) if p.segs.len() >= 2 && p.segs[p.segs.len() - 2].name == "process" && matches!(p.segs[p.segs.len() - 1].name.as_str(), "exit" | "abort")),
+            Expr::MethodCall(r, _, _, args, _) => diverges(r) || args.iter().any(diverges),
+            // (both branches; a `match` with no arm (on an empty enum) or whose every arm diverges)
+            Expr::If(c, t, Some(els)) => diverges(c) || (block_diverges(t) && diverges(els)),
+            Expr::If(c, _, None) => diverges(c),
+            Expr::Match(x, arms) => diverges(x) || arms.iter().all(|a| diverges(&a.body)),
+            Expr::Block(None, false, b) => block_diverges(b),
             _ => false,
         }
+    }
+    fn block_diverges(b: &crate::parse::Block) -> bool {
+        b.stmts.iter().any(|s| match s {
+            Stmt::Expr(e, _) => diverges(e),
+            Stmt::Let(_, _, Some(e), None, _) => diverges(e),
+            _ => false,
+        })
     }
     fn block(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'static str)> {
         let n = b.stmts.len();
@@ -1876,10 +1893,49 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
         None
     }
     fn inner(e: &Expr) -> Option<(crate::parse::Pos, &'static str)> {
+        // (the arguments after one that diverges are unreachable expressions; when the last one diverges, the call)
+        let args = |all: &[&Expr], call: crate::parse::Pos| -> Option<(crate::parse::Pos, &'static str)> {
+            for (i, a) in all.iter().enumerate() {
+                if let Some(r) = inner(a) {
+                    return Some(r);
+                }
+                if diverges(a) {
+                    return Some(match all.get(i + 1) {
+                        Some(next) => (acg::expr_start(next), "expression"),
+                        None => (call, "call"),
+                    });
+                }
+            }
+            None
+        };
         match e {
             Expr::Block(_, _, b) | Expr::Loop(_, b) => block(b),
-            Expr::If(_, t, els) => block(t).or_else(|| els.as_deref().and_then(inner)),
-            Expr::While(_, _, b) | Expr::For(_, _, _, b) => block(b),
+            Expr::If(c, t, els) => inner(c).or_else(|| block(t)).or_else(|| els.as_deref().and_then(inner)),
+            Expr::While(_, c, b) => inner(c).or_else(|| block(b)),
+            Expr::For(_, _, x, b) => inner(x).or_else(|| block(b)),
+            Expr::Call(f, xs) => {
+                let all: Vec<&Expr> = std::iter::once(&**f).chain(xs.iter()).collect();
+                args(&all, acg::expr_start(e))
+            }
+            Expr::MethodCall(r, _, _, xs, sp) => {
+                let all: Vec<&Expr> = std::iter::once(&**r).chain(xs.iter()).collect();
+                args(&all, sp.start)
+            }
+            // (an operand that diverges: the right is never evaluated, or (the right diverging) the operation)
+            Expr::Binary(op, l, r, sp) => {
+                if let Some(x) = inner(l) {
+                    return Some(x);
+                }
+                if diverges(l) {
+                    return Some((acg::expr_start(r), "expression"));
+                }
+                if let Some(x) = inner(r) {
+                    return Some(x);
+                }
+                (!matches!(op.as_str(), "&&" | "||") && diverges(r)).then_some((sp.start, "expression"))
+            }
+            Expr::Paren(x) | Expr::Unary(_, x, _) | Expr::Ref(_, x) | Expr::Cast(x, _) | Expr::Field(x, _, _) => inner(x),
+            Expr::Match(x, arms) => inner(x).or_else(|| arms.iter().find_map(|a| inner(&a.body))),
             _ => None,
         }
     }

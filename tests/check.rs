@@ -371,3 +371,24 @@ fn dead_code_fields_variants_members_aliases() {
     let ok = "#![deny(dead_code)]\nstruct W;\ntype WI = W;\ntrait T {\n    fn t(&self) {}\n}\nimpl T for WI {}\nenum V {}\nextern \"C\" {\n    fn free(p: *const V);\n}\nunion U {\n    a: u8,\n    b: u8,\n}\nstruct P(u8, ());\nfn main() {\n    W.t();\n    unsafe { free(std::ptr::null()) };\n    let u = U { a: 1 };\n    let _ = unsafe { u.b };\n    let p = P(1, ());\n    let _ = p.0;\n}\n";
     assert_eq!(first(ok), None);
 }
+
+/// `#![deny(unreachable_code)]` inside expressions: an argument after one that diverges, a call whose last argument
+/// diverges, an operation whose operand diverges, and the statement after a `match` on an empty enum or an
+/// `if`/`else` whose branches both diverge; not the right of `||`, which may not run
+#[test]
+fn unreachable_code_in_expressions() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let arg = "#![deny(unreachable_code)]\nfn foo(x: u8, y: usize) {}\nfn a() {\n    foo(return, 22);\n}\nfn main() {}\n";
+    assert_eq!(first(arg), Some((4, "unreachable expression".to_string())));
+    let call = "#![deny(unreachable_code)]\nfn bar(x: u8) {}\nfn b() {\n    bar(return);\n}\nfn main() {}\n";
+    assert_eq!(first(call), Some((4, "unreachable call".to_string())));
+    let op = "#![deny(unreachable_code)]\nfn c() -> u8 {\n    let x = 1 + return 2;\n    x\n}\nfn main() {}\n";
+    assert_eq!(first(op).map(|f| f.0), Some(3));
+    let empty = "#![deny(unreachable_code)]\nenum Void {}\nfn d(v: Void) {\n    match v {}\n    let x = 2;\n}\nfn main() {}\n";
+    assert_eq!(first(empty), Some((5, "unreachable statement".to_string())));
+    let both = "#![deny(unreachable_code)]\nfn e(b: bool) {\n    if b {\n        return;\n    } else {\n        return;\n    }\n    println!(\"dead\");\n}\nfn main() {}\n";
+    assert_eq!(first(both), Some((8, "unreachable statement".to_string())));
+    let ok = "#![deny(unreachable_code)]\nfn f(b: bool) -> bool {\n    let x = b || return false;\n    if b {\n        return true;\n    }\n    x\n}\nfn main() {}\n";
+    assert_eq!(first(ok), None);
+}
