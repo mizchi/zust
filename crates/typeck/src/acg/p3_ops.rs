@@ -1664,6 +1664,23 @@ impl Cx<'_> {
                 return Ok((b, l, t));
             }
         }
+        // (`c[0]` of a struct whose `Deref` is to a slice / str (`type Target = [T]`): `c.deref()[0]`, `deref_mut`
+        // for a `&mut c[0]`)
+        let mut pt = self.peek(e);
+        while let Some(Ty::Ref(_, i)) = pt {
+            pt = Some(*i);
+        }
+        if let Some(Ty::Struct(sid)) = pt {
+            if self.vec_fields(sid).is_none() {
+                let m = if self.bk.place_mut && self.prog.method(sid, "deref_mut").is_some() { "deref_mut" } else { "deref" };
+                if let Some(did) = self.prog.method(sid, m) {
+                    if matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, Ty::Slice(_))) {
+                        let d = self.keep_expr(mcall(paren(e), m, vec![]));
+                        return self.indexable(d);
+                    }
+                }
+            }
+        }
         let is_const = matches!(e, Expr::Path(..)) && self.const_of(e).is_some();
         let mut p = if is_place_expr(e) && !is_const {
             self.place(e)?

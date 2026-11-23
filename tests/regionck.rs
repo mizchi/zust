@@ -2957,3 +2957,13 @@ fn part16_review() {
     }
     assert_eq!(check("struct S<'a> { r: &'a mut i32 }\nfn g<'short, 'long>(s: &'short S<'long>) -> &'short i32 {\n    &s.r\n}\nfn h<'short, 'long: 'short>(s: &'short mut S<'long>) -> &'short i32 {\n    &s.r\n}\nfn main() {}\n"), vec![]);
 }
+
+/// `c[i]` of a struct whose `Deref` is to a slice (`type Target = [T]`) is `c.deref()[i]` (`deref_mut` for a
+/// `&mut c[i]`): it was "cannot index", and what it borrows is the struct, so a write of another field while it is
+/// used is E0506 (borrowck/issue-81365-6.rs); two shared ones and a `&mut` one after them are fine
+#[test]
+fn part16_index_through_deref() {
+    let d = check("use std::ops::Deref;\n\nstruct Container {\n    target: Vec<()>,\n    container_field: bool,\n}\n\nimpl Deref for Container {\n    type Target = [()];\n    fn deref(&self) -> &Self::Target {\n        &self.target\n    }\n}\n\nimpl Container {\n    fn bad_borrow(&mut self) {\n        let first = &self[0];\n        self.container_field = true;\n        first;\n    }\n}\n\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 18 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    assert_eq!(check("use std::ops::{Deref, DerefMut};\nstruct C { v: Vec<i32>, s: String }\nimpl Deref for C { type Target = [i32]; fn deref(&self) -> &[i32] { &self.v } }\nimpl DerefMut for C { fn deref_mut(&mut self) -> &mut [i32] { &mut self.v } }\nstruct S(String);\nimpl Deref for S { type Target = str; fn deref(&self) -> &str { &self.0 } }\nfn main() {\n    let mut c = C { v: vec![1, 2, 3], s: String::new() };\n    let a = &c[0];\n    let b = &c[1];\n    println!(\"{} {} {}\", a, b, c[2]);\n    c[1] = 20;\n    let m = &mut c[2];\n    *m += 10;\n    println!(\"{:?} {} {}\", &c[..], c.len(), c.s.len());\n    let r = &mut c;\n    r[0] = 7;\n    println!(\"{}\", r[0] + r[1]);\n}\n"), vec![]);
+}
