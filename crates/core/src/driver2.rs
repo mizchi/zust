@@ -2473,12 +2473,13 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
         ("Future", &["Output"], &[]),
     ];
     // (the program's traits: name -> (associated types, supertraits as (name, shown, the types the bound binds)), or
-    // None when one has a generic associated type or two traits share the name)
+    // None when one has a generic associated type or two traits share the name; and how many type and const
+    // parameters it requires and takes)
     type Sup<'s> = (&'s str, String, Vec<&'s str>);
     let id = |&(a, b): &(u32, u32)| &src[a as usize..b as usize];
     // (a trait as rustc shows it: without the flattened modules' `a__` prefix and the renamer's `__u_`)
     let plain = |n: &str, args: &str| format!("{}{}", n.rsplit("__").next().unwrap_or(n).trim_start_matches("u_"), args.replace("__u_", ""));
-    let mut traits: crate::fxhash::FxMap<&str, Option<(Vec<&str>, Vec<Sup>)>> = Default::default();
+    let mut traits: crate::fxhash::FxMap<&str, Option<(Vec<&str>, Vec<Sup>, (usize, usize))>> = Default::default();
     let mut header_of: crate::fxhash::FxMap<usize, &str> = Default::default();
     for (i, it) in items.iter().enumerate() {
         if !matches!(it.kind, ItemKind::TraitHeader) {
@@ -2497,9 +2498,27 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
         let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && b[t[q].1] == c;
         let w = |q: usize| if q < t.len() && t[q].0 == 0 { &text[t[q].1..t[q].2] } else { "" };
         let mut sup = vec![];
+        let mut params = (0, 0);
         if let Some(mut q) = (0..t.len()).find(|&q| w(q) == "trait" && w(q + 1) == name).map(|q| q + 2) {
             if sym(q, b'<') {
-                q = angle_parts(&t, b, q).map_or(t.len(), |(_, c)| c + 1);
+                // (`<'a, T, U = u8, const N: usize>`: a default is an `=` at the parameter's own level)
+                let Some((ps, c)) = angle_parts(&t, b, q) else { continue };
+                for &(a, z) in &ps {
+                    if t[a].1 > 0 && b[t[a].1 - 1] == b'\'' {
+                        continue;
+                    }
+                    let mut d = 0i32;
+                    let default = (a..=z).any(|r| {
+                        if sym(r, b'<') {
+                            d += 1;
+                        } else if sym(r, b'>') && !(r > 0 && sym(r - 1, b'-')) {
+                            d -= 1;
+                        }
+                        d == 0 && sym(r, b'=')
+                    });
+                    params = (params.0 + usize::from(!default), params.1 + 1);
+                }
+                q = c + 1;
             }
             if sym(q, b':') && !sym(q + 1, b':') {
                 q += 1;
@@ -2520,7 +2539,7 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                 }
             }
         }
-        traits.insert(name, Some((vec![], sup)));
+        traits.insert(name, Some((vec![], sup, params)));
     }
     for it in items {
         let ItemKind::TraitMember(h) = it.kind else { continue };
@@ -2563,6 +2582,12 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
             let Some((q, n, parts, _)) = bound_at(&t, b, k + 1) else { continue };
             let name = w(n);
             let (shown, bound) = split_assoc_args(&t, text, &parts, false);
+            // (the type and const arguments: a wrong count is E0107 instead, as rustc)
+            let sym = |r: usize, c: u8| r < t.len() && t[r].0 == 1 && b[t[r].1] == c;
+            let args = parts
+                .iter()
+                .filter(|&&(a, z)| !(t[a].1 > 0 && b[t[a].1 - 1] == b'\'') && !(t[a].0 == 0 && a < z && (sym(a + 1, b'=') && !sym(a + 2, b'=') || sym(a + 1, b':') && !sym(a + 2, b':'))))
+                .count();
             // (`std::iter::Iterator` is std's even when the program has a trait of the name)
             let first_seg = if w(q).is_empty() { w(q + 2) } else { w(q) };
             let std_path = n > q && matches!(first_seg, "std" | "core" | "alloc");
@@ -2586,12 +2611,20 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                 }
                 let in_std = STD.iter().find(|s| s.0 == tn);
                 let (assoc, sups): (Vec<&str>, Vec<Sup>) = match traits.get(tn) {
-                    Some(Some((a, s))) if !(std_path && n == 1 && in_std.is_some()) => (a.clone(), s.clone()),
+                    Some(Some((_, _, (req, all)))) if n == 1 && !(std_path && in_std.is_some()) && (args < *req || args > *all) => {
+                        known = false;
+                        break;
+                    }
+                    Some(Some((a, s, _))) if !(std_path && n == 1 && in_std.is_some()) => (a.clone(), s.clone()),
                     Some(None) => {
                         known = false;
                         break;
                     }
                     _ => match in_std {
+                        Some(_) if n == 1 && args > 0 => {
+                            known = false;
+                            break;
+                        }
                         Some(s) => (s.1.to_vec(), s.2.iter().map(|x| (*x, x.to_string(), vec![])).collect()),
                         None if n == 1 => {
                             known = false;
@@ -2602,6 +2635,10 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                 };
                 order.push((tn, ts, assoc));
                 queue.extend(sups);
+            }
+            // (a binding of a name the trait does not have itself, but two of its supertraits do, binds neither: E0222)
+            if let Some((_, _, own)) = order.first() {
+                pending.retain(|p| own.contains(p) || order[1..].iter().filter(|o| o.2.contains(p)).count() < 2);
             }
             let mut missing: Vec<(&str, String)> = vec![];
             for (tn, ts, assoc) in &order {
