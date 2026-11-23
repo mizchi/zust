@@ -2427,9 +2427,42 @@ impl Cx<'_> {
                     if tail24 {
                         self.bk_frame();
                     }
+                    // (before edition 2024, a block's value that a statement discards (`{ let t = D(1); d.next(&t) };`)
+                    // is a temporary of the statement: made at the block's tail, while its locals live, and dropped at
+                    // the statement's end, after them (E0597 when its `Drop` may see a borrow of one of them))
+                    let saved_discard = self.bk.discard;
+                    let mark_discard = self.bk.discard_temps.len();
+                    let stmt_block = *semi && self.prog.edition < 2024 && self.bk_on() && self.bk.level >= 2 && self.user_code;
+                    if let (true, Expr::Block(None, _, b)) = (stmt_block, strip_paren(e)) {
+                        self.bk.discard = b as *const crate::parse::Block as usize;
+                    }
+                    // (the tail of such a block: an inner block's value is the same value; another expression makes it)
+                    let made_here = last && !*semi && self.bk.discard != 0 && self.bk.discard == blk as *const crate::parse::Block as usize;
+                    if made_here {
+                        match strip_paren(e) {
+                            Expr::Block(None, _, b) => self.bk.discard = b as *const crate::parse::Block as usize,
+                            _ => self.bk_frame(),
+                        }
+                    }
+                    let made_value = made_here && !matches!(strip_paren(e), Expr::Block(None, ..));
                     let r = self.expr(e, exp);
                     if tail24 {
                         tail_srcs = self.bk_frame_end();
+                    }
+                    if made_value {
+                        let srcs = self.bk_frame_end();
+                        if let Ok((_, t)) = &r {
+                            if !srcs.is_empty() && self.dropck(*t, 0) {
+                                self.bk_hold_value(srcs, *t);
+                            }
+                        }
+                    }
+                    if made_here || stmt_block {
+                        self.bk.discard = saved_discard;
+                    }
+                    if stmt_block && self.bk.discard_temps.len() > mark_discard {
+                        let ts: Vec<u32> = self.bk.discard_temps.drain(mark_discard..).collect();
+                        self.bk_drop_held(&ts, borrowck::pos(e));
                     }
                     self.bk.direct.truncate(ext0);
                     if last && !*semi && self.bk.tail == e as *const Expr as usize && r.is_ok() {

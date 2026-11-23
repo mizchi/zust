@@ -218,6 +218,9 @@ pub struct Bk {
     pub place_mut: bool,
     /// The tail expression of the function body (its address)
     pub tail: usize,
+    /// The block whose value a statement discards (its address; 0: none), and the hidden locals holding such values
+    pub discard: usize,
+    pub discard_temps: Vec<u32>,
     /// Loan made for an expression (`&x`: the address of x; `x.m()` with a borrowed receiver: of the call)
     pub loan_of: HashMap<usize, u32>,
     /// The next `&e` is an argument the call's result does not borrow from (its loan does not flow on)
@@ -2493,6 +2496,23 @@ impl Cx<'_> {
         self.bk_ev(Ev::Keep(id, srcs));
         self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Read, sp));
         self.bk_ev(Ev::Dead(id, super::SP));
+    }
+
+    /// A block's value of type t that a statement discards, which holds what srcs borrow: a hidden local, dropped at
+    /// the statement's end (bk_drop_held)
+    pub(crate) fn bk_hold_value(&mut self, srcs: Vec<Src>, t: Ty) {
+        let id = self.bk.locals.len() as u32;
+        self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP, via_ref: false });
+        self.bk_ev(Ev::Bind(id, true));
+        self.bk_ev(Ev::Def(id, srcs));
+        self.bk.discard_temps.push(id);
+    }
+
+    pub(crate) fn bk_drop_held(&mut self, ts: &[u32], sp: Sp) {
+        for &id in ts {
+            self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Drop, sp));
+            self.bk_ev(Ev::Dead(id, super::SP));
+        }
     }
 
     pub(crate) fn bk_temps_end(&mut self, mark: usize) {

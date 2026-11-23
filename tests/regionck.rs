@@ -2801,3 +2801,16 @@ fn part16_str_views() {
     assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
     assert_eq!(check("fn main() {\n    let mut s = String::from(\"ab\");\n    let n = s.as_str().chars().count();\n    s.push('x');\n    let w: Vec<&str> = s.split(',').collect();\n    println!(\"{} {:?}\", n, w);\n    let v = vec![1u8, 2];\n    let sl: &[u8] = &v;\n    let c: Vec<u8> = sl.iter().copied().collect();\n    drop(v);\n    println!(\"{:?}\", c);\n}\n"), vec![]);
 }
+
+/// Before edition 2024, a block's value that a statement discards (`{ let t1 = D(1); D("o").next(&t1) };`) is dropped at
+/// the statement's end, after the block's locals: when its `Drop` may see a borrow of one, that local does not live long
+/// enough (E0597, nll/issue-54382-use-span-of-tail-of-block.rs), also through an inner block. Not a value that borrows
+/// none of them, nor one with no `Drop`
+#[test]
+fn part16_discarded_block_values() {
+    let pre = "#[derive(Debug)]\nstruct D<T: std::fmt::Debug>(T);\nimpl<T: std::fmt::Debug> Drop for D<T> {\n    fn drop(&mut self) {\n        println!(\"dropping {:?}\", self);\n    }\n}\nimpl<T: std::fmt::Debug> D<T> {\n    fn next<U: std::fmt::Debug>(&self, o: U) -> D<U> { D(o) }\n}\n";
+    let d = check(&format!("{pre}fn a() {{\n    {{\n        let t1 = D(1);\n        D(\"other\").next(&t1)\n    }};\n}}\nfn b() {{\n    {{\n        let t2 = D(2);\n        {{\n            D(\"other\").next(&t2)\n        }}\n    }};\n}}\nfn main() {{ a(); b(); }}\n"));
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![14, 21] && d.iter().all(|x| x.1.contains("does not live long enough")), "{d:?}");
+    assert_eq!(check(&format!("{pre}struct P<'a>(&'a u8);\nfn main() {{\n    let k = D(0);\n    {{\n        let t1 = D(1);\n        D(\"o\").next(&k)\n    }};\n    {{\n        let t2 = 3u8;\n        P(&t2)\n    }};\n    {{\n        let t3 = D(3);\n        D(\"o\").next(5)\n    }};\n}}\n")), vec![]);
+}
