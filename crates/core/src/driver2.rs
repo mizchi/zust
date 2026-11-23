@@ -1601,6 +1601,10 @@ impl Session2 {
                 return Err(e);
             }
         }
+        // (E0107 at a use of a generic associated type without its arguments, or with the wrong number)
+        if let Some(e) = first_gat_arity_error(&src, &items[..user]) {
+            return Err(e);
+        }
         // (a derive whose field has not the trait: `#[derive(Hash)] struct S { x: Error }`)
         if !prog.derived.is_empty() {
             if let Some(e) = derive_field_error(&prog, &src, &items[..user]) {
@@ -1808,6 +1812,20 @@ fn relocate(e: String, it: &SrcItem) -> String {
     format!("{}:1: {e}", it.line)
 }
 
+/// The line and column, in the file as written, of the byte at `off` in an item's text. An item hoisted out of a fn
+/// body is given the line it was written on; its column is the one in its own text, as its indent is not kept
+fn item_pos(src: &str, marks: &[(usize, usize)], it: &SrcItem, off: usize) -> (usize, usize) {
+    let text = &src[it.start..it.end];
+    let line = it.line + text[..off].matches('\n').count();
+    match crate::prep::hoisted_at(marks, line) {
+        Some(orig) => (orig, off - text[..off].rfind('\n').map_or(0, |n| n + 1) + 1),
+        None => {
+            let at = it.start + off;
+            (line, at - src[..at].rfind('\n').map_or(0, |n| n + 1) + 1)
+        }
+    }
+}
+
 /// The top-level parts of a `<..>` of tokens that starts at `open` (its `<`): (first token, last token) of each, and
 /// the index of its `>`. None when it does not close
 fn angle_parts(t: &[(u8, usize, usize)], text: &[u8], open: usize) -> Option<(Vec<(usize, usize)>, usize)> {
@@ -1911,17 +1929,181 @@ fn first_trait_arity_error(src: &str, items: &[SrcItem]) -> Option<String> {
             0
         };
         if given > declared || given < required {
-            // (an impl hoisted out of a fn body: the line it was written on)
-            let line = it.line + text[..t[nk].1].matches('\n').count();
-            let line = crate::prep::hoisted_at(&crate::prep::hoist_marks(src), line).unwrap_or(line);
             let what = if given == 0 {
                 format!("missing generics for trait `{}`", w(nk))
             } else {
                 let takes = if required == declared { format!("{declared}") } else if given > declared { format!("at most {declared}") } else { format!("at least {required}") };
                 format!("trait takes {takes} {} but {given} {} {} supplied", plural(declared.max(required)), plural(given), if given == 1 { "was" } else { "were" })
             };
-            // (rustc points at the trait's name; a hoisted impl's column is in its hoisted text, without the indent)
-            let col = t[nk].1 - text[..t[nk].1].rfind('\n').map_or(0, |n| n + 1) + 1;
+            // (rustc points at the trait's name)
+            let (line, col) = item_pos(src, &crate::prep::hoist_marks(src), it, t[nk].1);
+            return Some(format!("{line}:{col}: {what} (E0107)"));
+        }
+    }
+    None
+}
+
+/// E0107 at a use of one of the program's generic associated types with the wrong number of arguments: none at all
+/// (`Self::Item` / `Tr<Item = X>` for `type Item<'a>`: "missing generics"), too few / many lifetimes, or too few / many
+/// types and consts. Only uses whose trait is known are read: `Self::A` in the trait or in an impl of it, `<T as Tr>::A`,
+/// `<Self>::A`, and the binding `Tr<A = ..>`. Nothing is tokenized unless a trait declares a generic associated type
+fn first_gat_arity_error(src: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind;
+    let id = |&(a, b): &(u32, u32)| &src[a as usize..b as usize];
+    // (the trait an item's `Self` implements or is: a trait's members, an impl's members of `impl Tr for X`)
+    let trait_of_header = |h: usize| -> Option<&str> {
+        let it = items.get(h)?;
+        match it.kind {
+            ItemKind::TraitHeader => it.idents.iter().position(|x| id(x) == "trait").and_then(|k| it.idents.get(k + 1)).map(id),
+            ItemKind::ImplHeader => {
+                let text = &src[it.start..it.end];
+                let b = text.as_bytes();
+                let t = crate::lexer::tokenize(b);
+                let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+                let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+                let f = (0..t.len()).find(|&k| w(k) == "for")?;
+                // (the last segment before `for`, past its own `<..>`)
+                let mut k = f.checked_sub(1)?;
+                if sym(k, b'>') {
+                    let mut d = 0i32;
+                    loop {
+                        if sym(k, b'>') && !(k > 0 && sym(k - 1, b'-')) {
+                            d += 1;
+                        } else if sym(k, b'<') {
+                            d -= 1;
+                            if d == 0 {
+                                break;
+                            }
+                        }
+                        k = k.checked_sub(1)?;
+                    }
+                    k = k.checked_sub(1)?;
+                }
+                (t[k].0 == 0).then(|| w(k))
+            }
+            _ => None,
+        }
+    };
+    // (the generic associated types: (trait, name) -> (lifetimes, types and consts))
+    let mut gats: crate::fxhash::FxMap<(&str, &str), (usize, usize)> = Default::default();
+    for it in items {
+        let ItemKind::TraitMember(h) = it.kind else { continue };
+        let Some(k) = it.idents.iter().take(4).position(|x| id(x) == "type") else { continue };
+        let Some(&(_, ne)) = it.idents.get(k + 1) else { continue };
+        if !src[ne as usize..it.end].trim_start().starts_with('<') {
+            continue;
+        }
+        let Some(tr) = trait_of_header(h as usize) else { continue };
+        let text = &src[ne as usize..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let Some((parts, _)) = angle_parts(&t, b, 0) else { continue };
+        let lifetime = |q: usize| b[t[q].1] == b'\'' || (t[q].1 > 0 && b[t[q].1 - 1] == b'\'');
+        let lts = parts.iter().filter(|p| lifetime(p.0)).count();
+        gats.insert((tr, id(&it.idents[k + 1])), (lts, parts.len() - lts));
+    }
+    if gats.is_empty() {
+        return None;
+    }
+    let names: Vec<&str> = gats.keys().map(|k| k.1).collect();
+    let marks = crate::prep::hoist_marks(src);
+    for (i, it) in items.iter().enumerate() {
+        if !it.idents.iter().any(|x| names.contains(&id(x))) {
+            continue;
+        }
+        let self_trait = match it.kind {
+            ItemKind::TraitMember(h) | ItemKind::ImplMember(h) => trait_of_header(h as usize),
+            ItemKind::TraitHeader => trait_of_header(i),
+            _ => None,
+        };
+        let text = &src[it.start..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+        // (the opener of the group a closing `>` / `)` / `]` at k ends, reading back)
+        let opener = |mut k: usize| -> Option<usize> {
+            let mut d = 0i32;
+            loop {
+                if (sym(k, b'>') && !(k > 0 && sym(k - 1, b'-'))) || sym(k, b')') || sym(k, b']') {
+                    d += 1;
+                } else if sym(k, b'<') || sym(k, b'(') || sym(k, b'[') {
+                    d -= 1;
+                    if d == 0 {
+                        return Some(k);
+                    }
+                }
+                k = k.checked_sub(1)?;
+            }
+        };
+        for k in 1..t.len() {
+            if t[k].0 != 0 || !names.contains(&w(k)) || w(k - 1) == "type" {
+                continue;
+            }
+            let name = w(k);
+            // (whose trait: `Self::A` / `<Self>::A` / `<T as Tr>::A`, or the binding `Tr<.., A = ..>`)
+            let mut tr = None;
+            if k >= 3 && sym(k - 1, b':') && sym(k - 2, b':') {
+                if w(k - 3) == "Self" && !(k >= 5 && sym(k - 4, b':') && sym(k - 5, b':')) {
+                    tr = self_trait;
+                } else if sym(k - 3, b'>') {
+                    if let Some(o) = opener(k - 3) {
+                        if o + 2 == k - 3 && w(o + 1) == "Self" {
+                            tr = self_trait;
+                        } else if k >= 5 && t[k - 4].0 == 0 && (o + 1..k - 4).any(|q| w(q) == "as") {
+                            tr = Some(w(k - 4));
+                        }
+                    }
+                }
+            } else if sym(k - 1, b'<') || sym(k - 1, b',') {
+                // (a binding: `A = ..` / `A<..> = ..`, not `==` / `=>`)
+                let mut e = k + 1;
+                if sym(e, b'<') {
+                    let Some((_, close)) = angle_parts(&t, b, e) else { continue };
+                    e = close + 1;
+                }
+                let eq = sym(e, b'=') && !(sym(e + 1, b'=') || sym(e + 1, b'>'));
+                if !eq {
+                    continue;
+                }
+                // (the `<` the list is in, reading back over balanced groups, and the trait's name before it)
+                let mut q = k - 1;
+                let open = loop {
+                    if sym(q, b'<') {
+                        break Some(q);
+                    }
+                    if sym(q, b';') || sym(q, b'{') || sym(q, b'}') || sym(q, b'(') || sym(q, b'[') {
+                        break None;
+                    }
+                    if (sym(q, b'>') && !(q > 0 && sym(q - 1, b'-'))) || sym(q, b')') || sym(q, b']') {
+                        let Some(o) = opener(q) else { break None };
+                        q = o;
+                    }
+                    let Some(n) = q.checked_sub(1) else { break None };
+                    q = n;
+                };
+                if let Some(o) = open.filter(|&o| o > 0 && t[o - 1].0 == 0) {
+                    tr = Some(w(o - 1));
+                }
+            }
+            let Some(tr) = tr else { continue };
+            let Some(&(lts, tys)) = gats.get(&(tr, name)) else { continue };
+            let (glts, gtys) = if sym(k + 1, b'<') {
+                let Some((parts, _)) = angle_parts(&t, b, k + 1) else { continue };
+                let lifetime = |q: usize| b[t[q].1] == b'\'' || (t[q].1 > 0 && b[t[q].1 - 1] == b'\'');
+                let binding = |p: &(usize, usize)| t[p.0].0 == 0 && p.1 > p.0 && sym(p.0 + 1, b'=') && !sym(p.0 + 2, b'=');
+                let l = parts.iter().filter(|p| lifetime(p.0)).count();
+                (Some(l), parts.iter().filter(|p| !lifetime(p.0) && !binding(p)).count())
+            } else {
+                (None, 0)
+            };
+            let what = match glts {
+                None => format!("missing generics for associated type `{tr}::{name}`"),
+                Some(g) if g != lts => format!("associated type takes {lts} lifetime argument{} but {g} lifetime argument{} supplied", if lts == 1 { "" } else { "s" }, if g == 1 { " was" } else { "s were" }),
+                Some(_) if gtys != tys => format!("associated type takes {tys} generic argument{} but {gtys} generic argument{} supplied", if tys == 1 { "" } else { "s" }, if gtys == 1 { " was" } else { "s were" }),
+                _ => continue,
+            };
+            let (line, col) = item_pos(src, &marks, it, t[k].1);
             return Some(format!("{line}:{col}: {what} (E0107)"));
         }
     }
