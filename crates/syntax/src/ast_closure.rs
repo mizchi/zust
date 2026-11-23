@@ -550,6 +550,13 @@ pub fn free_vars(c: &Expr) -> Vec<String> {
     v.out
 }
 
+/// free_vars with `let _ = place;` a use of the place's variable (the unused-variable lint: rustc counts it as one)
+pub fn used_vars(c: &Expr) -> Vec<String> {
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), keep_wild: true };
+    v.expr(c);
+    v.out
+}
+
 /// The variables closure c reads only by `let _ = place;`, which it does not capture: its body skips those `let`s
 pub fn fake_reads(c: &Expr) -> Vec<String> {
     // (none before edition 2021, where such a `let` captures; and none without such a `let`, found without the two
@@ -563,9 +570,36 @@ pub fn fake_reads(c: &Expr) -> Vec<String> {
     v.out.into_iter().filter(|n| !caps.contains(n)).collect()
 }
 
+/// The places of the `let _ = place;`s in e (in its `let .. else` blocks and the closures in it too)
+pub fn wild_reads(e: &Expr, out: &mut Vec<Expr>) {
+    fn block(b: &Block, out: &mut Vec<Expr>) {
+        for s in &b.stmts {
+            match s {
+                Stmt::Let(Pat::Wild, None, Some(x), None, ..) if wild_read_only(x) => out.push(x.clone()),
+                Stmt::Let(_, _, _, Some(els), ..) => {
+                    block(els, out);
+                    wild_reads(&Expr::Block(None, false, els.clone()), out);
+                }
+                _ => {}
+            }
+        }
+    }
+    if let Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) | Expr::If(_, b, _) | Expr::While(_, _, b) | Expr::For(_, _, _, b) = e {
+        block(b, out);
+    }
+    each_child(e, &mut |x| wild_reads(x, out));
+}
+
 /// A `let _ = place;` somewhere in e (in a closure in it too)
 fn has_wild_read(e: &Expr) -> bool {
-    let block = |b: &Block| b.stmts.iter().any(|s| matches!(s, Stmt::Let(Pat::Wild, None, Some(x), None, ..) if wild_read_only(x)));
+    // (a `let .. else`'s block too, which the walk of the children does not enter)
+    fn block(b: &Block) -> bool {
+        b.stmts.iter().any(|s| match s {
+            Stmt::Let(Pat::Wild, None, Some(x), None, ..) if wild_read_only(x) => true,
+            Stmt::Let(_, _, _, Some(els), ..) => block(els) || has_wild_read(&Expr::Block(None, false, els.clone())),
+            _ => false,
+        })
+    }
     let here = match e {
         Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) | Expr::If(_, b, _) | Expr::While(_, _, b) | Expr::For(_, _, _, b) => block(b),
         _ => false,
@@ -1272,7 +1306,7 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
                 names(p, &mut ns);
                 if ns.iter().any(|n| reportable(n)) {
                     let rest = Expr::Block(None, false, Block { stmts: b.stmts[i + 1..].to_vec() });
-                    let fv = free_vars(&rest);
+                    let fv = used_vars(&rest);
                     for n in ns.iter().filter(|n| reportable(n)) {
                         if !fv.contains(n) {
                             found.push((*pos, n.clone()));
@@ -1314,7 +1348,7 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
     }
     let mut found = vec![];
     block(body, &mut found);
-    let fv = free_vars(&Expr::Block(None, false, body.clone()));
+    let fv = used_vars(&Expr::Block(None, false, body.clone()));
     let param = params.iter().find(|n| reportable(n) && !fv.contains(*n)).map(|n| (None, n.clone()));
     found.sort_by_key(|(p, _)| (p.line, p.col));
     param.or_else(|| found.into_iter().next().map(|(p, n)| (Some(p), n)))

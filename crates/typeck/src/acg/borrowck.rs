@@ -202,6 +202,9 @@ pub struct Bk {
     /// A compound assignment's `&mut self` loan and the call temporary of its reservation: the next call_fn takes the
     /// loan once its arguments are evaluated, before their loans end (`s += &s` conflicts), ending the reservation first
     pub activate: Option<(Ev, u32)>,
+    /// The call being lowered takes its `&mut self` once its arguments are evaluated (activate): what the arguments
+    /// borrow, shared loans too, is held until then (`s.take(s.get())`: E0502)
+    pub hold_args: bool,
     /// The `index_mut` call acg makes to read an indexed place (its receiver is seen as shared)
     pub shared_recv: usize,
     /// Binding the pattern of an arm with a guard: a binding by value does not move until the guard holds (the next
@@ -3034,6 +3037,19 @@ impl Cx<'_> {
         self.bk.call_temps.push(id);
     }
 
+    /// A hidden local holds what an argument holds (its loans, shared ones too, and what the locals it reads hold) until
+    /// the call is made: for a call whose `&mut self` is taken then (Bk::hold_args)
+    pub(crate) fn bk_call_temp_all(&mut self, srcs: &[Src]) {
+        if !self.bk_on() || srcs.is_empty() {
+            return;
+        }
+        let id = self.bk.locals.len() as u32;
+        self.bk.locals.push(Local { name: "<argument>".into(), ty: Ty::Unit, copy: true, refs: true, mutable: None, decl: super::SP, via_ref: false });
+        self.bk_ev(Ev::Bind(id, true));
+        self.bk_ev(Ev::Def(id, srcs.to_vec()));
+        self.bk.call_temps.push(id);
+    }
+
     /// What the callee of a call holds (the locals read for it, the loans made for it), held until the call ends
     /// (bk_call_temps_end), after the arguments
     pub(crate) fn bk_callee_hold(&mut self, srcs: &[Src]) {
@@ -3291,7 +3307,9 @@ impl Cx<'_> {
                 }
                 // (`r.clone()` of a reference whose referent is not `Clone` (`(&x).clone()` with x: T): the reference's
                 // copy, which holds what r holds (E0515 when it is returned))
-                if out.len() == n0 && name == "clone" && args.is_empty() && matches!(self.peek(e), Some(Ty::Ref(..))) && self.peek(recv) == self.peek(e) {
+                // (not a `clone` of the referent's own: `fn clone(&self) -> &'static S` is what it says)
+                let own_clone = matches!(self.peek(recv), Some(Ty::Ref(_, Ty::Struct(sid))) if self.prog.method(*sid, "clone").is_some());
+                if out.len() == n0 && name == "clone" && args.is_empty() && !own_clone && matches!(self.peek(e), Some(Ty::Ref(..))) && self.peek(recv) == self.peek(e) {
                     self.bk_direct(recv, out);
                 }
                 // (a method of the prelude's types whose result holds references: what its receiver holds (`it.next()`,

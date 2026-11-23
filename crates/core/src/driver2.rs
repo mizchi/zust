@@ -1350,7 +1350,7 @@ impl Session2 {
         // say)
         // (mismatched_lifetime_syntaxes: a lifetime of a signature's inputs its output writes another way. Denied for
         // the crate, or for the items that deny it (`#[deny(mismatched_lifetime_syntaxes)] fn f`))
-        let marked_mls = !deny_mismatched_lts && src.contains("#[deny(mismatched_lifetime_syntaxes)]");
+        let marked_mls = !deny_mismatched_lts && src.contains("mismatched_lifetime_syntaxes");
         if deny_mismatched_lts || marked_mls {
             let mut adts: crate::fxhash::FxMap<&str, usize> = Default::default();
             for sm in &sums[..user_src] {
@@ -3039,16 +3039,28 @@ fn first_mismatched_lifetime_syntax(src: &str, items: &[SrcItem], adts: &crate::
     use crate::parse::{ItemKind, Ty as PTy};
     for it in items {
         let text = src.get(it.start..it.end).unwrap_or("");
-        if !text.contains("fn ") || !text.contains("->") || text.contains("#[cfg") || text.contains("allow(mismatched_lifetime_syntaxes") {
+        if !text.contains("fn ") || !text.contains("->") || text.contains("#[cfg") {
             continue;
         }
-        if marked && !text.contains("#[deny(mismatched_lifetime_syntaxes)]") {
+        // (the item's own level of the lint: an allow / expect / warn takes it out, and where only items deny it, an
+        // item is checked when it denies or forbids it)
+        let level = item_lint_level(text, "mismatched_lifetime_syntaxes");
+        if matches!(level, Some("allow" | "expect" | "warn")) || (marked && !matches!(level, Some("deny" | "forbid"))) {
             continue;
         }
         let Ok(f) = crate::parse::parse_file(text) else { continue };
         let Some(item) = f.items.first() else { continue };
         let ItemKind::Fn(sig, _) = &item.kind else { continue };
         let Some(ret) = &sig.ret else { continue };
+        // (a type parameter named as a struct (`fn f<S>(..) -> Option<S>` with `struct S<'s>`) hides nothing)
+        let shadowed: Vec<&str> = sig.generics.params.iter().filter_map(|p| if let crate::parse::GParam::Ty(n, ..) = p { Some(n.as_str()) } else { None }).filter(|n| adts.contains_key(n)).collect();
+        let own;
+        let adts = if shadowed.is_empty() {
+            adts
+        } else {
+            own = adts.iter().filter(|(k, _)| !shadowed.contains(k)).map(|(k, v)| (*k, *v)).collect::<crate::fxhash::FxMap<&str, usize>>();
+            &own
+        };
         let (mut k, mut ids, mut ins, mut recv) = (0usize, Vec::<String>::new(), Vec::<(String, LtSyntax)>::new(), None::<String>);
         for (j, t) in sig.recv_ty.iter().chain(sig.params.iter().map(|p| &p.1)).enumerate() {
             let mut v = vec![];
@@ -3094,6 +3106,38 @@ fn first_mismatched_lifetime_syntax(src: &str, items: &[SrcItem], adts: &crate::
         }
     }
     None
+}
+
+/// The level an item's own attributes (`#[allow(dead_code, n)]`, `#[expect(n)]`, `#[warn(n)]`, `#[deny(n)]`,
+/// `#[forbid(n)]`) give the lint n: the last of them, if one names it. Outer attributes and comments before the item
+fn item_lint_level(text: &str, n: &str) -> Option<&'static str> {
+    let mut rest = text;
+    let mut level = None;
+    loop {
+        rest = rest.trim_start();
+        if let Some(r) = rest.strip_prefix("//") {
+            rest = r.split_once('\n').map_or("", |x| x.1);
+            continue;
+        }
+        let Some(r) = rest.strip_prefix("#[") else { break };
+        let Some(end) = r.find(']') else { break };
+        if let Some((name, list)) = r[..end].split_once('(') {
+            let lv = match name.trim() {
+                "allow" => Some("allow"),
+                "expect" => Some("expect"),
+                "warn" => Some("warn"),
+                "deny" => Some("deny"),
+                "forbid" => Some("forbid"),
+                _ => None,
+            };
+            let list = list.trim_end().strip_suffix(')').unwrap_or(list);
+            if lv.is_some() && list.split(',').any(|x| x.trim() == n) {
+                level = lv;
+            }
+        }
+        rest = &r[end + 1..];
+    }
+    level
 }
 
 fn first_unused_lifetime(src: &str, items: &[SrcItem], (unused, single): (bool, bool)) -> Option<String> {
@@ -4302,6 +4346,8 @@ fn first_accidentally_stable(src: &str, items: &[SrcItem]) -> Option<String> {
 /// function compiled before such a `#![deny]` was added is not reused without its check
 fn lint_bits(p: &Program) -> u8 {
     p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4 | ((p.edition >= 2024) as u8) << 5
+        // (and what a closure captures: `let _ = s;` captures s before 2021 only (ast_closure::WILD_FAKE_READS))
+        | ((p.edition >= 2021) as u8) << 6
 }
 
 /// The attributes behind a feature gate, and the feature

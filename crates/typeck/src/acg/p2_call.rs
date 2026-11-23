@@ -95,6 +95,11 @@ impl Cx<'_> {
             _ => None,
         };
         let copy_out = match e {
+            // (`r.clone()` of a `&&str`: the `&str` copied out)
+            Expr::MethodCall(r, m, _, a, _) if self.bk_on() && a.is_empty() && m == "clone" && matches!(self.peek(r), Some(Ty::Ref(_, u)) if self.bk_ty(*u) == (true, true)) => match self.peek(r) {
+                Some(Ty::Ref(_, u)) => Some(Some(*u)),
+                _ => None,
+            },
             Expr::MethodCall(r, m, _, a, _) if self.bk_on() => match base_name(self, self.peek(r)) {
                 Some((sid, "Option")) if a.is_empty() && matches!(m.as_str(), "copied" | "cloned") => match self.prog.structs[sid as usize].args.first() {
                     Some(Ty::Ref(_, u)) if self.bk_ty(**u).1 => Some(Some(**u)),
@@ -1914,7 +1919,9 @@ impl Cx<'_> {
         let act = self.bk.activate.take();
         let t0 = self.bk.call_temps.len();
         self.rg.depth += 1;
+        let ha = std::mem::replace(&mut self.bk.hold_args, act.is_some());
         let r = self.call_fn_inner(id, recv, args, turbofish, expected, span);
+        self.bk.hold_args = ha;
         // (the arguments are evaluated and their loans still live: the reservation ends, the `&mut` loan is taken)
         if let Some((ev, tid)) = act {
             if self.bk_on() {
@@ -2190,10 +2197,19 @@ impl Cx<'_> {
             let top_ref = self.bk_on() && matches!(strip_paren(a), Expr::Ref(..));
             // (an argument `&x` the result does not borrow from: its loan ends with the call)
             let flows = !(top_ref && matches!(pt, Ty::Ref(..)) && !self.bk_ret_from(id, i + skip));
-            if top_ref {
+            // (the call's `&mut self` is taken after its arguments: what one that holds references borrows is held
+            // until then)
+            let hold = self.bk_on() && self.bk.hold_args;
+            if top_ref || hold {
                 self.bk_frame();
             }
             let r = self.expr(a, exp);
+            if hold && !top_ref {
+                let srcs = self.bk_frame_end();
+                if r.as_ref().is_ok_and(|x| self.bk_ty(x.1).1) {
+                    self.bk_call_temp_all(&srcs);
+                }
+            }
             // (also where a type parameter the call already knows is a `&mut` (`v.push(c.raw)` with v: `Vec<&mut T>`),
             // as rustc's coercion to the expected type)
             if matches!(pt, Ty::Ref(true, _)) || matches!(self.prog.partial_subst(pt, &sol), Ty::Ref(true, _)) {
@@ -2240,7 +2256,11 @@ impl Cx<'_> {
                     }
                 }
                 // (a `&x` argument also lives until the call: `add(&*a, rewrite(&mut a))` conflicts)
-                self.bk_call_temp(&srcs, matches!(strip_paren(a), Expr::Ref(..)));
+                if hold {
+                    self.bk_call_temp_all(&srcs);
+                } else {
+                    self.bk_call_temp(&srcs, matches!(strip_paren(a), Expr::Ref(..)));
+                }
             }
             let (v, mut t) = r?;
             self.closure_hint = None;

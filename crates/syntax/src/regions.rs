@@ -153,7 +153,13 @@ pub fn mentions_lt(t: &PTy, l: &str) -> bool {
 /// in e (checked on its own)
 pub fn annotates_static(e: &crate::parse::Expr) -> bool {
     use crate::parse::{Block, Expr, Stmt};
-    let block = |b: &Block| b.stmts.iter().any(|s| matches!(s, Stmt::Let(_, Some(t), ..) if mentions_static(t)));
+    // (a `let .. else`'s block too, which the walk of the children does not enter)
+    fn block(b: &Block) -> bool {
+        b.stmts.iter().any(|s| match s {
+            Stmt::Let(_, t, _, els, ..) => t.as_ref().is_some_and(mentions_static) || els.as_ref().is_some_and(|b| block(b) || annotates_static(&Expr::Block(None, false, b.clone()))),
+            _ => false,
+        })
+    }
     let here = match e {
         Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) | Expr::If(_, b, _) | Expr::While(_, _, b) | Expr::For(_, _, _, b) => block(b),
         Expr::Closure(..) => return false,

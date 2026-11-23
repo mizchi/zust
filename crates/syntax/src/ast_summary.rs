@@ -2021,6 +2021,11 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                         if !matches!(s.name.as_str(), "Sized" | "Send" | "Sync" | "Copy" | "Clone" | "Unpin" | "Any" | "Debug" | "Display") {
                             sup.push(s.name.clone());
                         }
+                        // (`trait Dup: Clone`: a marker no trait has the name of, so that a `T: Dup` is not taken
+                        // for a type that is surely not Clone (Program::surely_not_clone))
+                        if matches!(s.name.as_str(), "Copy" | "Clone") && !sup.iter().any(|x| x == "#Clone") {
+                            sup.push("#Clone".to_string());
+                        }
                         // (`trait T: PartialEq`: its `Rhs` is Self by default, so T is not dyn compatible; a marker
                         // no trait has the name of)
                         if matches!(s.name.as_str(), "PartialEq" | "PartialOrd") && s.args.is_empty() {
