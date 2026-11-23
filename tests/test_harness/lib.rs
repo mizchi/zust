@@ -28,6 +28,9 @@ mod tests {
     #[should_panic(expected = "wanted")]
     fn printed_then_panicked() { eprintln!("wanted"); panic!("different"); }
     #[test]
+    #[should_panic(expected /* a comment */ = "wanted")]
+    fn commented_expected() { panic!("different"); }
+    #[test]
     #[should_panic(expected = r"a\b")]
     fn raw_expected() { panic!(r"x a\b y"); }
     #[test]

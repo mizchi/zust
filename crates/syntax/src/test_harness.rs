@@ -55,6 +55,8 @@ pub fn collect(src: &str) -> Collected {
     // (a call's position, the module whose `main` it names, whether it is a bare `main`)
     let mut calls: Vec<(usize, String, bool)> = vec![];
     let mut attrs_test = 0usize;
+    // (inside a `macro_rules!`'s body: the brace depth outside it)
+    let mut macro_end: Option<i32> = None;
     // (the modules open here: (the brace depth inside it, its name)); depth of braces
     let mut mods: Vec<(i32, String)> = vec![];
     let mut depth = 0i32;
@@ -72,8 +74,16 @@ pub fn collect(src: &str) -> Collected {
                 mods.pop();
             }
             depth -= 1;
+            if macro_end == Some(depth) {
+                macro_end = None;
+            }
         } else if sym(k, "#") && sym(k + 1, "[") && tok(k + 2) == "test" && sym(k + 3, "]") {
             attrs_test += 1;
+        } else if sym(k, "#") && sym(k + 1, "[") && tok(k + 2).starts_with('$') && macro_end.is_some() {
+            // (an attribute a macro's caller names, `#[$attr]`: it may be `test`)
+            attrs_test += 1;
+        } else if ident(k) && tok(k) == "macro_rules" && sym(k + 1, "!") && ident(k + 2) && sym(k + 3, "{") && macro_end.is_none() {
+            macro_end = Some(depth);
         } else if ident(k) && tok(k) == "main" && sym(k + 1, "(") && !(k >= 1 && (tok(k - 1) == "fn" || sym(k - 1, "."))) {
             // (a call of a `main`: the module its path names, from the module it is in. `crate::`, `self::`,
             //  `super::` (repeated) are followed; a path through another module is not the root's `main`)
@@ -181,8 +191,9 @@ fn attrs_before(src: &str, toks: &[Tok], k: usize) -> Vec<(String, String)> {
                 j -= 1;
             }
             if j >= 1 && tok(j - 1) == "#" {
-                let raw = &src[toks[j].2..toks[b - 1].1];
-                out.push((raw.chars().filter(|c| !c.is_whitespace()).collect(), raw.to_string()));
+                // (from its tokens: a comment inside it is gone, a literal stays whole)
+                let raw = (j + 1..b - 1).map(|x| tok(x)).collect::<Vec<_>>().join(" ");
+                out.push((raw.chars().filter(|c| !c.is_whitespace()).collect(), raw));
                 b = j - 1;
             } else {
                 break;

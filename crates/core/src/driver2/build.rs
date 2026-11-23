@@ -1075,7 +1075,7 @@ fn add_crate_cfg(h: &mut KeyHasher, c: &CrateSpec) {
 fn with_harness(src: &str, display: &str) -> String {
     let (out, unlisted) = crate::test_harness::apply_noting(src);
     if unlisted > 0 {
-        eprintln!("warning: {display}: {unlisted} `#[test]` function(s) made by a macro are not run yet (mizchi/zust#96)");
+        eprintln!("warning: {display}: {unlisted} `#[test]` function(s) made by a macro (counting each `#[$attr]` in a macro's body, which may be one) are not run yet (mizchi/zust#96)");
     }
     out
 }
