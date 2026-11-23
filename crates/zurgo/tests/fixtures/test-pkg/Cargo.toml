@@ -1,0 +1,11 @@
+[package]
+name = "tp"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# (a test package of zurgo, not a member of zust's workspace: `zurgo test` against `cargo test`)
+[workspace]
+
+[dev-dependencies]
+helper = { path = "helper" }

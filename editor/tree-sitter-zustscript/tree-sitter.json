@@ -1,0 +1,6 @@
+{
+  "grammars": [
+    { "name": "zustscript", "camelcase": "Zustscript", "scope": "source.zustscript", "path": ".", "file-types": ["zsc"], "highlights": "queries/highlights.scm" }
+  ],
+  "metadata": { "version": "0.1.0", "license": "MIT OR Apache-2.0", "description": "zustscript grammar for the playground" }
+}

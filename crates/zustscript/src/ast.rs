@@ -152,8 +152,9 @@ pub enum WTy {
     /// Arguments and result are scalars (i32 u32 f64 bool ()).
     Callback(Vec<WTy>, Box<WTy>, bool),
     /// A value that crosses as bytes in the format of zustscript-helper / zustscript_helper (a record holding a
-    /// string or an array, an array of records, strings or arrays), and its owned Rust type
-    Wire(Box<WS>, String),
+    /// string or an array, an array of records, strings or arrays, an enum that does not fit the slots), its owned
+    /// Rust type, and whether the Rust side takes it by reference (not Copy)
+    Wire(Box<WS>, String, bool),
 }
 
 /// The schema of a value that crosses as bytes (helper/rust/src/lib.rs has the format)
@@ -165,6 +166,10 @@ pub enum WS {
     Arr(Box<WS>),
     /// (Rust type, fields)
     Rec(String, Vec<(String, WS)>),
+    /// An enum: its variant's index as a u32, then that variant's fields. `key`: the JS property holding the tag
+    /// (`TAG`, or a TS union's `kind`); None: the JS value is the tag string itself. Each variant: its Rust name, its
+    /// JS tag, and its fields by JS name
+    Enum { rt: String, key: Option<String>, variants: Vec<(String, String, Vec<(String, WS)>)> },
 }
 
 /// The shape of a value that crosses the boundary as slots
