@@ -525,12 +525,15 @@ impl Free {
     }
 }
 
-/// Edition 2021 and later: `let _ = place;` in a closure captures nothing (the driver sets it for the program it
-/// analyzes; edition 2015 / 2018 capture the place's variable)
-pub static WILD_FAKE_READS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+thread_local! {
+    /// Edition 2021 and later: `let _ = place;` in a closure captures nothing (the driver sets it for the program it
+    /// analyzes; edition 2015 / 2018 capture the place's variable). Of the thread: an analysis runs on one thread,
+    /// and two at once on two threads (tests) do not read each other's
+    pub static WILD_FAKE_READS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
 
 fn wild_fake_reads() -> bool {
-    WILD_FAKE_READS.load(std::sync::atomic::Ordering::Relaxed)
+    WILD_FAKE_READS.with(|c| c.get())
 }
 
 /// A place made of a variable and its fields (`s`, `s.f.g`, `(s)`): `let _ = place;` reads nothing of it

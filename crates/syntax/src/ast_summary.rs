@@ -559,14 +559,18 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         }
         let declared: Vec<&str> = outer.iter().map(|s| s.as_str()).chain(own.iter().copied()).collect();
         let mut used = vec![];
+        // (with no `for<..>` in the item, the lifetimes in its `impl` and `dyn` types are the declared ones too:
+        // `Box<dyn X<Y<'a> = &'a ()>>` with no `'a`, E0261)
+        let deep = !HRTB_TEXT.with(|c| c.get());
+        let names = |t: &PTy, used: &mut Vec<String>| if deep { named_lifetimes_deep(t, used, 0) } else { named_lifetimes(t, used) };
         if let Some(r) = &sig.recv_ty {
-            named_lifetimes(r, &mut used);
+            names(r, &mut used);
         }
         for (_, t) in &sig.params {
-            named_lifetimes(t, &mut used);
+            names(t, &mut used);
         }
         if let Some(r) = &sig.ret {
-            named_lifetimes(r, &mut used);
+            names(r, &mut used);
         }
         bound_lifetimes(&sig.generics, &mut used);
         if let Some(l) = undeclared_lifetime(&used, &declared) {
@@ -731,6 +735,56 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
     })
 }
 
+thread_local! {
+    /// The item being summarized writes `for<..>` (a higher-ranked binder, which the parser does not keep): the
+    /// lifetimes in its `impl` and `dyn` types may be the binder's, and are not checked against the declared ones
+    static HRTB_TEXT: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// named_lifetimes, and in `impl` and `dyn` types too (their bounds, associated type bindings, `Fn(..)` sugar)
+fn named_lifetimes_deep(t: &PTy, out: &mut Vec<String>, depth: u32) {
+    fn path(p: &crate::parse::Path, out: &mut Vec<String>, depth: u32) {
+        for sg in &p.segs {
+            for a in &sg.args {
+                match a {
+                    crate::parse::GArg::Lifetime(l) => out.push(l.clone()),
+                    crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) => named_lifetimes_deep(t, out, depth + 1),
+                    _ => {}
+                }
+            }
+            if let Some((ps, r)) = &sg.fn_args {
+                ps.iter().for_each(|t| named_lifetimes_deep(t, out, depth + 1));
+                if let Some(r) = r {
+                    named_lifetimes_deep(r, out, depth + 1);
+                }
+            }
+        }
+    }
+    if depth > 16 {
+        return;
+    }
+    match t {
+        PTy::Ref(l, _, i) => {
+            if let Some(l) = l {
+                out.push(l.clone());
+            }
+            named_lifetimes_deep(i, out, depth + 1);
+        }
+        PTy::Path(None, p) => path(p, out, depth),
+        PTy::Impl(bs) | PTy::Dyn(bs) => {
+            for b in bs {
+                match b {
+                    Bound::Lifetime(l) => out.push(l.clone()),
+                    Bound::Trait(_, p) => path(p, out, depth),
+                }
+            }
+        }
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => named_lifetimes_deep(i, out, depth + 1),
+        PTy::Tuple(ts) => ts.iter().for_each(|t| named_lifetimes_deep(t, out, depth + 1)),
+        _ => {}
+    }
+}
+
 /// Checks on a struct / enum / union definition: unused parameters (E0392), `Self` in defaults (E0735), union fields
 /// a slice or array whose element is unsized (`[[T]]`, `[str; 2]`, `[dyn Tr]`), anywhere in t: its text
 /// The lifetimes a type names, outside fn pointer, `impl` and `dyn` types (which may bind their own with `for<'a>`)
@@ -784,9 +838,13 @@ fn bound_lifetimes(g: &Generics, out: &mut Vec<String>) {
                 }
             }
         }
-        // (`where for<'a> &'a T: Tr` binds its own: only the bounds of a type that is a plain parameter)
+        // (`where for<'a> &'a T: Tr` binds its own: only the bounds of a type that is a plain parameter; with no
+        // `for<..>` in the item, the type's and its bounds' lifetimes too: `&'missing Self: Add<Self>`)
         if matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty()) {
             bs_of(bs, out);
+        } else if !HRTB_TEXT.with(|c| c.get()) {
+            named_lifetimes_deep(t, out, 0);
+            named_lifetimes_deep(&PTy::Impl(bs.clone()), out, 0);
         }
     }
 }
@@ -2006,7 +2064,12 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 if let Some(l) = undeclared_lifetime(&used, &declared) {
                     let m = format!("use of undeclared lifetime name `{l}` (E0261)");
                     // (at the where clause's predicate that names it)
-                    let at = g.preds.iter().find(|(_, bs)| bs.iter().any(|b| matches!(b, Bound::Lifetime(x) if *x == l))).and_then(|(t, _)| crate::wf::pos_of(t));
+                    let names = |t: &PTy| {
+                        let mut v = vec![];
+                        named_lifetimes_deep(t, &mut v, 0);
+                        v.contains(&l)
+                    };
+                    let at = g.preds.iter().find(|(t, bs)| bs.iter().any(|b| matches!(b, Bound::Lifetime(x) if *x == l)) || names(t)).and_then(|(t, _)| crate::wf::pos_of(t));
                     return Err(match at {
                         Some(p) => format!("{}:{}: {m}", p.line, p.col + 1),
                         None => m,
@@ -2574,7 +2637,25 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
         _ => text.to_string(),
     };
     let f = parse_file(&text)?;
+    // (`for<`, also with spaces or a line break before the `<`)
+    HRTB_TEXT.with(|c| c.set(text.match_indices("for").any(|(i, _)| text[i + 3..].trim_start().starts_with('<'))));
     let Some(item) = f.items.first() else { return Ok(Summary::default()) };
+    // (E0496 / E0403: a generic associated type's own parameters named as its trait's or impl's: `type Bar<'a>` in
+    // `trait Shadow<'a>`)
+    if let (ItemKind::Type(_, g, ..), Some(ow)) = (&item.kind, owner) {
+        let lts: &[String] = ow.regions.as_ref().map(|r| r.lts.as_slice()).unwrap_or(&[]);
+        for p in &g.params {
+            match p {
+                GParam::Lifetime(l) if lts.iter().any(|x| x == l) => {
+                    return Err(format!("lifetime name `{l}` shadows a lifetime name that is already in scope (E0496)"));
+                }
+                GParam::Ty(n, ..) if n != "Self" && ow.generics.iter().any(|x| x.0 == *n) => {
+                    return Err(format!("the name `{n}` is already used for a generic parameter in this item's generic parameters (E0403)"));
+                }
+                _ => {}
+            }
+        }
+    }
     if let LexKind::TraitMember(_) = it.kind {
         let ow = owner.ok_or("trait member without trait")?;
         match &item.kind {

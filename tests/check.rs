@@ -306,7 +306,8 @@ fn wf_bounds_held_by_bounds_where_clauses_and_supertraits() {
 }
 
 /// A parameter that says `?Sized` (in its bounds or a where clause) does not hold a `Sized` bound, even with the word
-/// `Sized` in its `?Sized`; another parameter of the same item still does
+/// `Sized` in its `?Sized`, unless another of its bounds implies it (std's `Clone`); another parameter of the same item
+/// still does
 #[test]
 fn wf_maybe_unsized_parameter_does_not_hold_sized() {
     let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
@@ -314,8 +315,11 @@ fn wf_maybe_unsized_parameter_does_not_hold_sized() {
     let ds = s.check(bad);
     assert_eq!(ds.iter().map(|d| d.line).collect::<Vec<_>>(), vec![3], "{ds:?}");
     assert!(ds[0].msg.contains("`K: Sized`"), "{ds:?}");
-    let wher = "struct Sz<T: Sized>(T);\nstruct J<K>\nwhere\n    K: Clone + ?Sized,\n{\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
-    assert_eq!(s.check(wher).iter().map(|d| d.line).collect::<Vec<_>>(), vec![6], "{:?}", s.check(wher));
+    let wher = "use std::fmt::Debug;\nstruct Sz<T: Sized>(T);\nstruct J<K>\nwhere\n    K: Debug + ?Sized,\n{\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    assert_eq!(s.check(wher).iter().map(|d| d.line).collect::<Vec<_>>(), vec![7], "{:?}", s.check(wher));
+    // (std's `Clone` has `Sized` as a supertrait: `K: Clone + ?Sized` is Sized, as rustc accepts it)
+    let clone = "struct Sz<T: Sized>(T);\nstruct J<K>\nwhere\n    K: Clone + ?Sized,\n{\n    s: Box<Sz<K>>,\n}\nstruct W<T: ?Sized + Clone> {\n    value: Sz<T>,\n}\nfn main() {}\n";
+    assert!(s.check(clone).is_empty(), "{:?}", s.check(clone));
     let ok = "struct Sz<T: Sized>(T);\nstruct J<K, V: ?Sized> {\n    s: Sz<K>,\n    v: Box<V>,\n}\nfn main() {}\n";
     assert!(s.check(ok).is_empty(), "{:?}", s.check(ok));
 }

@@ -120,6 +120,9 @@ impl Cx<'_> {
         if let (Some((f, m)), Expr::Index(_, ix_index, _)) = (slice_fn, strip_paren(&*mc_recv)) {
             if matches!(&**ix_index, Expr::Range(..)) {
                 let r = &*mc_recv;
+                if m {
+                    self.bk_mut_use(r);
+                }
                 let e: Expr = if m { Expr::Ref(true, Box::new(r.clone())) } else { Expr::Ref(false, Box::new(r.clone())) };
                 let (v, t) = self.expr(&e, None)?;
                 let Some(v) = v else { return Ok(Some((None, Ty::Never))) };
@@ -196,6 +199,10 @@ impl Cx<'_> {
         if let (Some((f, m)), true) = (slice_fn, vec_slice || matches!(rt, Ty::Array(..) | Ty::Ref(_, Ty::Slice(_)))) {
             if let Some(&id) = self.prog.index.get(f) {
                 // 受け手を `&[T]` / `&mut [T]` にして、引数 (クロージャも) は元の式のまま渡す
+                // (not through a reference (`s.sort()` of `s: &mut [i32]` needs no `mut s`)
+                if m && is_place_expr(&*mc_recv) && !matches!(rt, Ty::Ref(..)) {
+                    self.bk_mut_use(&*mc_recv);
+                }
                 let (base, len, elem) = self.indexable(&*mc_recv)?;
                 let (fat, st) = (self.make_fat_v(base, len), Ty::Ref(m, intern(Ty::Slice(intern(elem)))));
                 let args: Vec<&Expr> = mc_args.iter().collect();

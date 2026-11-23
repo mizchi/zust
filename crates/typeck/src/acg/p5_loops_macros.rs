@@ -1187,7 +1187,7 @@ impl Cx<'_> {
             // (`vec![&f()]`: a macro's arguments are not extended, the temporary goes away with the statement)
             let d0 = self.bk.direct.len();
             if self.bk_on() && !self.bk.macro_let {
-                borrowck::direct_ref(a, &mut self.bk.direct);
+                borrowck::direct_ref(self.prog, a, &mut self.bk.direct);
             }
             let r = self.expr(a, elem);
             self.bk.direct.truncate(d0);

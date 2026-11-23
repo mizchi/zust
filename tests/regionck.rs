@@ -7,6 +7,12 @@ fn check(src: &str) -> Vec<(usize, String)> {
     s.check(src).into_iter().map(|d| (d.line, d.msg)).collect()
 }
 
+/// check in an edition
+fn check_ed(src: &str, edition: u16) -> Vec<(usize, String)> {
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition, ..Options2::default() });
+    s.check(src).into_iter().map(|d| (d.line, d.msg)).collect()
+}
+
 fn temp_error(src: &str, line: usize) {
     let d = check(src);
     assert!(d.len() == 1 && d[0].0 == line && d[0].1.contains("temporary value dropped while borrowed"), "{src}\n{d:?}");
@@ -2523,6 +2529,144 @@ fn part14_rpit_captures_no_lifetime() {
     let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2024, ..Options2::default() });
     assert!(s.check("use std::fmt::Display;\nfn s(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn t(x: &u8) -> impl Display {\n    x\n}\nfn main() {}\n").is_empty());
 }
+
+/// A generic associated type's parameters named as its trait's or impl's (generic-associated-types/shadowing.rs):
+/// E0496 for a lifetime, E0403 for a type parameter
+#[test]
+fn part15_gat_shadowing() {
+    let d = check("trait Shadow<'a> {\n    type Bar<'a>;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0496"), "{d:?}");
+    let d = check("trait NoShadowT<T> {\n    type Bar<U>;\n}\nimpl<T> NoShadowT<T> for Option<T> {\n    type Bar<T> = i32;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0403"), "{d:?}");
+    assert_eq!(check("trait NoShadow<'a> {\n    type Bar<'b>;\n    fn f(&self) -> u8;\n}\nimpl<'a> NoShadow<'a> for &'a u32 {\n    type Bar<'b> = &'b u8;\n    fn f(&self) -> u8 {\n        1\n    }\n}\ntrait NoShadowT<T> {\n    type Bar<U>;\n}\nimpl<T> NoShadowT<T> for Option<T> {\n    type Bar<U> = U;\n}\ntrait WithSelf {\n    type Out<'x>\n    where\n        Self: 'x;\n}\nfn main() {\n    let x = 3u32;\n    println!(\"{}\", (&x).f());\n}\n"), vec![]);
+}
+
+/// E0261 in a signature's `impl` and `dyn` types, where the item writes no `for<..>` (which the parser does not keep):
+/// `Box<dyn X<Y<'a> = &'a ()>>` with no `'a` (generic-associated-types/issue-67510.rs), `impl Iterator<Item =
+/// Self::Item<'missing>>` (impl-trait/in-trait/missing-lt-outlives-in-rpitit-114274.rs)
+#[test]
+fn part15_undeclared_in_impl_and_dyn() {
+    let d = check("trait X {\n    type Y<'a>;\n}\nfn f(x: Box<dyn X<Y<'a> = &'a ()>>) {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("use of undeclared lifetime name `'a` (E0261)"), "{d:?}");
+    let d = check("fn g(x: &u8) -> impl std::fmt::Display + 'b {\n    *x\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 1 && d[0].1.contains("E0261"), "{d:?}");
+    assert_eq!(check("use std::fmt::Display;\nfn f<'a>(x: &'a u8) -> impl Fn() -> u8 + 'a {\n    move || *x\n}\nfn g(x: &dyn Fn(&u8) -> u8) -> u8 {\n    x(&1)\n}\nfn h(x: Box<dyn Fn() -> u8 + 'static>) -> u8 {\n    x()\n}\nfn k<'a>(x: impl Iterator<Item = &'a u8>) -> usize {\n    x.count()\n}\nstruct S<'a>(&'a [u8]);\nimpl<'a> S<'a> {\n    fn it(&self) -> impl Iterator<Item = &'a u8> + '_ {\n        self.0.iter()\n    }\n    fn d(&self) -> Box<dyn Display + 'a> {\n        Box::new(self.0.len())\n    }\n}\ntrait T<'a> {\n    fn m(&self) -> Option<Box<dyn Display + 'a>>;\n}\nfn u<'a>(x: &'a u8) -> impl Display + use<'a> {\n    x\n}\nfn main() {\n    let v = [1u8];\n    let s = S(&v);\n    println!(\"{} {} {} {} {} {} {}\", f(&1)(), g(&|x| *x), h(Box::new(|| 2)), k(v.iter()), s.it().count(), s.d(), u(&3));\n}\n"), vec![]);
+    // (a `for<..>` in the item: not checked)
+    assert_eq!(check("fn h(f: &dyn for<'a> Fn(&'a u8) -> &'a u8) -> u8 {\n    *f(&1)\n}\nfn main() {\n    println!(\"{}\", h(&|x| x));\n}\n"), vec![]);
+}
+
+/// E0261 in a where clause's type (`&'missing Self: Add<Self>`, traits/eval-caching-error-region.rs), at that
+/// predicate, where the item writes no `for<..>`
+#[test]
+fn part15_undeclared_in_where_types() {
+    let d = check("use std::ops::Add;\npub trait Numoid: Sized\nwhere\n    &'missing Self: Add<Self>,\n{\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("use of undeclared lifetime name `'missing` (E0261)"), "{d:?}");
+    assert_eq!(check("use std::ops::Add;\ntrait Numoid<'a>: Sized\nwhere\n    &'a Self: Add<Self>,\n{\n}\nfn f<'a, T>(x: &'a T) -> usize\nwhere\n    &'a T: IntoIterator,\n    Vec<&'a T>: Clone,\n{\n    let _ = x;\n    1\n}\nstruct W<'a, T>(&'a T)\nwhere\n    &'a T: Clone;\nfn main() {\n    println!(\"{}\", f(&vec![1u8]));\n}\n"), vec![]);
+}
+
+/// A slice's pattern elements are places, counted from the pattern's ends as rustc's MIR does
+/// (borrowck/borrowck-slice-pattern-element-loan-slice.rs): the b-th from the start and the e-th from the end may be
+/// one element when b + e reaches the least length both patterns need; a rest `ref mut t @ ..` is `&mut [T]` and holds
+/// the elements it may be
+#[test]
+fn part15_slice_pattern_elements() {
+    let conflict = |pats: (&str, &str)| {
+        let src = format!("fn nop(_s: &[&i32]) {{}}\nfn f(s: &mut [i32]) {{\n    if let {} = *s {{\n        if let {} = *s {{\n            nop(&[a, b]);\n        }}\n    }}\n}}\nfn main() {{}}\n", pats.0, pats.1);
+        let d = check(&src);
+        assert!(d.len() <= 1 && d.iter().all(|x| x.0 == 4 && x.1.contains("cannot borrow `s[..]` as mutable")), "{src}\n{d:?}");
+        !d.is_empty()
+    };
+    // (the same index from one end; from both ends within the least length)
+    assert!(conflict(("[_, ref a, ..]", "[_, ref mut b, ..]")));
+    assert!(conflict(("[.., ref a, _]", "[.., ref mut b, _]")));
+    assert!(conflict(("[.., ref a, _, _, _]", "[_, ref mut b, ..]")));
+    // (apart: other indexes from one end, and from both ends where the least length keeps them apart: of 3 or more
+    // elements, the second from the end is not the first; of 4, the fourth from the end may be)
+    assert!(!conflict(("[ref a, ..]", "[_, ref mut b, ..]")));
+    assert!(!conflict(("[.., ref a]", "[.., ref mut b, _]")));
+    assert!(conflict(("[ref a, ..]", "[.., ref mut b, _, _, _]")));
+    assert!(!conflict(("[ref a, _, _, ..]", "[.., ref mut b, _]")));
+    // (rests: `[_, ref mut t @ ..]` holds the second from the start, not the first; `[ref mut t @ .., _]` not the last)
+    let rest = |a: &str, b: &str| check(&format!("fn f(s: &mut [i32]) {{\n    if let {a} = *s {{\n        if let {b} = *s {{\n            t[0] = *x;\n        }}\n    }}\n}}\nfn main() {{}}\n"));
+    assert!(rest("[_, ref x, ..]", "[_, ref mut t @ ..]").iter().any(|d| d.0 == 3));
+    assert_eq!(rest("[ref x, ..]", "[_, ref mut t @ ..]"), vec![]);
+    assert!(rest("[.., ref x, _]", "[ref mut t @ .., _]").iter().any(|d| d.0 == 3));
+    assert_eq!(rest("[.., ref x]", "[ref mut t @ .., _]"), vec![]);
+    let d = check("fn f(s: &mut [i32]) {\n    if let [_, _, ref x @ ..] = *s {\n        if let [ref mut t @ .., _] = *s {\n            t[0] = x[0];\n        }\n    }\n}\nfn main() {}\n");
+    assert!(d.iter().any(|d| d.0 == 3), "{d:?}");
+    // (`ref mut t @ ..` of an array is `&mut [T]`)
+    assert_eq!(check("fn main() {\n    let mut a = [1, 2, 3];\n    if let [ref mut t @ .., _] = a {\n        t[0] = 5;\n    }\n    println!(\"{}\", a[0]);\n}\n"), vec![]);
+}
+
+/// A fn named like a braced struct (`fn AddFlags(..) -> AddFlags`): its call makes a temporary, not a constructor's
+/// value promoted to a static (borrowck/rvalue-borrow-scope-error.rs, E0716)
+#[test]
+fn part15_fn_named_like_a_struct() {
+    let d = check("struct AddFlags {\n    bits: u64,\n}\n#[allow(non_snake_case)]\nfn AddFlags(bits: u64) -> AddFlags {\n    AddFlags { bits }\n}\nfn arg(x: &AddFlags) -> &AddFlags {\n    x\n}\nfn main() {\n    let x1 = arg(&AddFlags(1));\n    let y: &'static AddFlags = &AddFlags(2);\n    (x1, y);\n}\n");
+    assert!(d.iter().any(|x| x.0 == 12 && x.1.contains("E0716")) && d.iter().all(|x| x.0 == 12 || x.0 == 13), "{d:?}");
+    assert_eq!(check("struct W(u8);\nfn arg(x: &W) -> &W {\n    x\n}\nfn main() {\n    let x1 = arg(&W(1));\n    let y: &'static W = &W(2);\n    println!(\"{} {}\", x1.0, y.0);\n}\n"), vec![]);
+}
+
+/// Before edition 2021 a closure captures whole variables (nll/issue-51268.rs): `|| x.number += 1` holds all of x,
+/// so reading `x.thing` while it lives is E0503; a by-reference capture in a closure's body stays of `*x`
+/// (nll/issue-40510-4.rs)
+#[test]
+fn part15_whole_variable_captures() {
+    let src = "struct Foo {\n    thing: u8,\n    number: usize,\n}\nfn f(x: &mut Foo) {\n    let c = || x.number += 1;\n    let d = x.thing;\n    let _ = c;\n    let _ = d;\n}\nfn main() {}\n";
+    let d = check_ed(src, 2018);
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+    assert_eq!(check_ed(src, 2021), vec![]);
+    assert_eq!(check_ed("fn f() {\n    let x: Vec<()> = Vec::new();\n    || {\n        || {\n            x.len()\n        }\n    };\n}\nfn main() {}\n", 2015), vec![]);
+}
+
+/// `copied` / `cloned` of an iterator: the adapter holds the iterator and its borrow (E0700 of
+/// `s.0.iter().copied()` returned as `impl Iterator<Item = u8>`, nll/issue-73159-rpit-static.rs; E0502 of
+/// `v.push(1)` while `v.iter().copied()` lives), and what is taken out of it, also through other adapters
+/// (`.filter(..).collect()`), is the copies, which do not hold it
+#[test]
+fn part15_iterator_copied() {
+    let d = check_ed("struct Foo<'a>(&'a [u8]);\nstruct V(Vec<u8>);\nfn a(x: &[u8]) -> impl Iterator<Item = u8> { x.iter().copied() }\nfn b<'a>(s: &Foo<'a>) -> impl Iterator<Item = u8> { s.0.iter().copied() }\nfn c(s: &V) -> impl Iterator<Item = u8> { s.0.iter().copied() }\nfn d(s: &V) -> impl Iterator<Item = &u8> { s.0.iter() }\nfn e(s: &V) -> impl Iterator<Item = u8> { s.0.iter().map(|x| *x) }\nfn main() {}\n", 2021);
+    let mut lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    lines.dedup();
+    assert!(lines == vec![3, 4, 5, 7] && d.iter().all(|x| x.1.contains("E0700")), "{d:?}");
+    let d = check_ed("fn ok1(mut names: Vec<&str>) -> Vec<&str> {\n    let w: Vec<&str> = names.iter().copied().collect();\n    names.clear();\n    w\n}\nfn ok2(mut names: Vec<&str>) -> usize {\n    let t = names.iter().copied().next().unwrap();\n    names.clear();\n    t.len()\n}\nfn ok3(mut names: Vec<&str>) -> usize {\n    let w: Vec<&str> = names.iter().copied().filter(|s| !s.is_empty()).collect();\n    names.clear();\n    w.len()\n}\nfn ok4(mut names: Vec<&str>) -> usize {\n    let t = names.first().copied();\n    names.clear();\n    t.map_or(0, |s| s.len())\n}\nfn ok5(mut v: Vec<String>) -> usize {\n    let w: Vec<String> = v.iter().cloned().collect();\n    v.clear();\n    w.len()\n}\nfn bad1(mut v: Vec<u8>) -> usize {\n    let it = v.iter().copied();\n    v.push(1);\n    it.count()\n}\nfn bad2(mut v: Vec<u8>) -> usize {\n    let it = v.iter().copied().map(|x| x + 1);\n    v.push(1);\n    it.count()\n}\nfn main() {}\n", 2021);
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert_eq!(lines, vec![28, 33], "{d:?}");
+    assert_eq!(check_ed("struct Foo<'a>(&'a [u8]);\nstruct S { r: &'static [u8], v: Vec<u8> }\nfn a(s: &Foo<'static>) -> impl Iterator<Item = u8> { s.0.iter().copied() }\nfn b(s: &S) -> impl Iterator<Item = u8> { s.r.iter().copied() }\nfn c<'a>(s: &Foo<'a>) -> impl Iterator<Item = u8> + 'a { s.0.iter().copied() }\nfn d(s: &S) -> impl Iterator<Item = u8> { s.v.clone().into_iter() }\nfn e<'a>(s: &Foo<'a>) -> impl Iterator<Item = u8> { s.0.to_vec().into_iter() }\nfn f<'a>(s: &Foo<'a>) -> impl std::fmt::Display { s.0.len() }\nfn g<'a>(s: &Foo<'a>) -> impl std::fmt::Display { s.0[0] }\nfn main() {}\n", 2021), vec![]);
+}
+
+/// unused_mut under `#![deny(unused_mut)]` (nll/issue-61424.rs, nll/capture-mut-ref.rs,
+/// lint/unused/unused-mut-warning-captured-var.rs): a `let mut` that nothing needs mutable. Not a second assignment of
+/// `let mut x;` that is assigned once, not a `move` closure that writes through the `&mut` it holds; and what needs it:
+/// `&mut`, `+=`, a write of a part, a second assignment, a closure that mutates it, an array's methods
+#[test]
+fn part15_unused_mut() {
+    let d = check("#![deny(unused_mut)]\nfn main() {\n    let mut x;\n    x = String::new();\n    println!(\"{}\", x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("does not need to be mutable"), "{d:?}");
+    let d = check("#![deny(unused_mut)]\npub fn f() {\n    let mut x = &mut 0;\n    let _ = move || {\n        *x = 1;\n    };\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    let d = check("#![forbid(unused_mut)]\nfn main() {\n    let mut x = 1;\n    (move || { println!(\"{}\", x); })();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(check("#![deny(unused_mut)]\nuse std::collections::HashMap;\nuse std::fmt::Write as _;\nstruct P { n: u32 }\nimpl P { fn inc(&mut self) { self.n += 1; } }\nfn take(_: &mut [u8]) {}\nfn main() {\n    let mut v = vec![]; v.push(1);\n    let mut i = 0; while i < 3 { i += 1; }\n    let mut x; let mut k = 0; loop { x = 1; k += 1; if k > 2 { break; } } let _ = x;\n    let mut it = v.iter(); it.next();\n    let mut s = String::new(); s += \"a\"; s.push_str(\"b\"); write!(s, \"{}\", 1).unwrap();\n    let mut a = [0; 3]; a[1] = 2;\n    let mut t = (1, 2); t.0 = 3;\n    let mut y = 0; let mut c = || y += 1; c();\n    let mut count = 0; let mut inc = move || { count += 1; count }; inc();\n    let mut b = Box::new(1); *b = 2;\n    let mut vv = vec![0]; let mut r = &mut vv; r.push(2); let mut w = vec![0]; r = &mut w; r.push(3);\n    let mut z = 0; let zz = &mut z; *zz += 1;\n    let mut v2 = vec![1]; for e in v2.iter_mut() { *e += 1; }\n    let mut v3 = vec![1]; for e in &mut v3 { *e += 1; }\n    let mut p = P { n: 0 }; p.inc();\n    let mut rng = 0..3; while let Some(_) = rng.next() {}\n    let mut h = HashMap::new(); h.insert(1, 2); *h.entry(1).or_insert(0) += 1;\n    let mut buf = [0u8; 4]; buf.copy_from_slice(&[1, 2, 3, 4]);\n    let mut arr = [3, 2, 1]; arr.sort(); arr.reverse(); arr.swap(0, 1);\n    let mut arr2 = [1u8, 2]; take(&mut arr2);\n    let mut ve: Vec<u8> = vec![]; writeln!(&mut s, \"x\").unwrap(); ve.extend([1]);\n    let mut m = 5; m = 6; let _ = m;\n    let mut q = (vec![1], 2); q.0.push(3);\n    let mut o = Some(vec![1]); if let Some(ref mut l) = o { l.push(1); }\n    let mut o2 = Some(1); o2.take(); o2.replace(3);\n    let mut aa = 1; let mut bb = 2; std::mem::swap(&mut aa, &mut bb);\n    let mut st = String::from(\"x\"); st.clear(); st.truncate(0);\n    let mut sl = [1u8, 2, 3]; sl[..2].copy_from_slice(&[5, 6]);\n    let mut nested = vec![vec![1]]; nested[0].push(2);\n    let mut cl = vec![1]; let f = |x: u8| x; cl.retain(|&e| f(e) > 0);\n    let _ = (v, i, s, a, t, b, p, h, buf, arr, arr2, ve, q, o, o2, aa, bb, st, sl, nested, cl);\n}\n"), vec![]);
+    assert_eq!(check("#![deny(unused_mut)]\nfn main() {\n    let mut a = [3, 2, 1]; a.swap(0, 1);\n    let mut b = [1, 2]; if let Some(x) = b.get_mut(0) { *x = 5; }\n\n\n    let mut e = [1, 2]; for x in e.iter_mut() { *x += 1; }\n    let mut f = [1, 2]; let _p = f.as_mut_ptr();\n    let mut g = [1, 2, 3, 4]; let (_l, _r) = g.split_at_mut(2);\n    let mut h = [1, 2]; for x in &mut h { *x += 1; }\n    let mut i = [1u8, 2]; i.fill(0);\n    let mut j = [[0u8; 2]; 2]; j[0][1] = 3;\n    let mut k = [1, 2]; k.iter_mut().for_each(|x| *x += 1);\n    let mut l = vec![1, 2]; l.swap(0, 1); l.iter_mut().for_each(|x| *x += 1);\n    let mut m = [1, 2]; m.chunks_mut(1).for_each(|c| c[0] = 0);\n    let _ = (a, b, e, f, h, i, j, k, l, m);\n}\n"), vec![]);
+    // (an allow anywhere turns it off; no deny, no check)
+    assert_eq!(check("#![deny(unused_mut)]\nfn main() {\n    #[allow(unused_mut)]\n    let mut x = 1;\n    let _ = x;\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let mut x = 1;\n    let _ = x;\n}\n"), vec![]);
+}
+
+/// Edition 2024: a block's tail temporaries go away at the end of the block (lifetimes/tail-expr-in-nested-expr.rs):
+/// `{ String::new().as_str() }.len()` and `let x = { String::new().as_str() };` used after are E0716. A block whose
+/// value holds no borrow of them is accepted; in 2021 `{ .. }.len()` is accepted (they live to the statement's end)
+#[test]
+fn part15_tail_temporaries_2024() {
+    for src in ["fn main() {\n    let _ = { String::new().as_str() }.len();\n}\n", "fn main() {\n    let x = { String::new().as_str() };\n    let _ = x.len();\n}\n"] {
+        let d = check_ed(src, 2024);
+        assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0716"), "{src}\n{d:?}");
+    }
+    assert_eq!(check_ed("fn main() {\n    let _ = { String::new().as_str() }.len();\n}\n", 2021), vec![]);
+    assert_eq!(check_ed("use std::cell::RefCell;\nfn a(v: &Vec<u8>) -> usize { { v.iter().count() } }\nfn b() -> usize { let n = { vec![1u8].iter().count() }; n }\nfn c() -> usize { let s = { String::from(\"ab\").as_str().len() }; s }\nfn d(c: &RefCell<Vec<u8>>) -> usize { let n = { c.borrow().len() }; n }\nfn e() -> String { let s = { String::from(\"x\").as_str().to_string() }; s }\nfn f(m: &std::collections::HashMap<u8, String>) -> usize { let n = { m.get(&1).map(|s| s.len()).unwrap_or(0) }; n }\nfn g() -> usize { let x = { let s = String::new(); s.len() }; x }\nfn main() { let _ = (a(&vec![]), b(), c(), e(), g()); }\n", 2024), vec![]);
+}
+
 /// From the third review of #69: a closure's call that needs `T: 'static` takes it from `T: 'a` with `'a: 'static`,
 /// and from a supertrait whose `Self` must be 'static (`trait Derived: Base`, `trait Base: 'static`); a T in the type
 /// argument (`needs_static::<Option<T>>()`) needs it too (E0310)
@@ -2549,4 +2693,41 @@ fn part14_review() {
     assert_eq!(check("fn f<'a: 'b, 'b: 'static>(x: &'a u8) -> impl std::fmt::Display {\n    x\n}\nfn main() {}\n"), vec![]);
     assert_eq!(check("fn f(x: &'static String) -> impl std::fmt::Display {\n    x\n}\nfn main() {}\n"), vec![]);
     assert_eq!(check("fn needs_static<T: 'static>() {}\nfn f<T>(_: &'static T) {\n    let c = || needs_static::<T>();\n    c();\n}\nfn main() {}\n"), vec![]);
+}
+
+/// From the review of #71: `for` and its `<` apart (a line break, spaces) is a binder too; a binding the lowering makes
+/// (`#sl0`) is not checked for unused_mut; an array's method that only reads it (`a.len()`) does not need it `mut`, nor
+/// a method of a slice through a `&mut` binding (`s.sort()`)
+#[test]
+fn part15_review() {
+    assert_eq!(check("fn f(_x: Box<dyn for\n<'a> Fn(&'a u8)>) {}\nfn g(_x: Box<dyn for  <'b> Fn(&'b u8)>) {}\nfn main() {\n    f(Box::new(|_| {}));\n    g(Box::new(|_| {}));\n}\n"), vec![]);
+    assert_eq!(check("#![deny(unused_mut)]\nstruct Foo<T> { value: T }\nstatic X: u32 = 5;\nfn main() {\n    let Foo { value: &n } = Foo::<&'static u32> { value: &X };\n    println!(\"{}\", n);\n}\n"), vec![]);
+    let d = check("#![deny(unused_mut)]\nfn main() {\n    let mut a = [1, 2];\n    println!(\"{}\", a.len());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("unused_mut"), "{d:?}");
+    let d = check("#![deny(unused_mut)]\nfn main() {\n    let mut a = [3, 1, 2];\n    let mut s: &mut [i32] = &mut a;\n    s.sort();\n    println!(\"{:?}\", a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`s`"), "{d:?}");
+    // (the second round: a `&mut self` method of the program's on an array takes it `&mut` (it was a type mismatch):
+    // it needs the array `mut` (E0596 without), and so it is not unused_mut's)
+    let tr = "trait Touch {\n    fn touch(&mut self);\n    fn look(&self) -> i32;\n}\nimpl Touch for [i32; 2] {\n    fn touch(&mut self) { self[0] += 1; }\n    fn look(&self) -> i32 { self[0] }\n}\n";
+    let d = check(&format!("#![deny(unused_mut)]\n{tr}fn main() {{\n    let mut a = [0, 1];\n    a.touch();\n    let mut b = [0, 1];\n    println!(\"{{}} {{}}\", a.look(), b.look());\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 13 && d[0].1.contains("`b`"), "{d:?}");
+    let d = check(&format!("{tr}fn main() {{\n    let a = [0, 1];\n    a.touch();\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("as mutable"), "{d:?}");
+    // (the third round: an array of a type not `Copy` is borrowed by such a method, not moved; an `unsafe fn` of the
+    // trait is E0133 outside `unsafe`; `#[allow (unused_mut)]` with a space allows it too; and in edition 2024 a block's
+    // value that holds a reference into its tail's temporaries (`{ (String::new().as_str(),) }.0`) is E0716)
+    assert_eq!(check("trait Touch {\n    fn touch(&mut self);\n    fn look(&self) -> usize;\n}\nimpl Touch for [String; 1] {\n    fn touch(&mut self) { self[0].push('y'); }\n    fn look(&self) -> usize { self[0].len() }\n}\nfn main() {\n    let mut a = [String::from(\"x\")];\n    a.touch();\n    println!(\"{} {}\", a.look(), a.look());\n}\n"), vec![]);
+    let d = check("trait U {\n    unsafe fn danger(&self) -> i32;\n}\nimpl U for [i32; 2] {\n    unsafe fn danger(&self) -> i32 { self[0] }\n}\nfn main() {\n    let a = [1, 2];\n    println!(\"{}\", a.danger());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("E0133"), "{d:?}");
+    assert_eq!(check("#![deny(unused_mut)]\nfn main() {\n    #[allow (unused_mut)]\n    let mut x = 1;\n    let _ = x;\n}\n"), vec![]);
+    let src = "fn main() {\n    let n = { (String::new().as_str(),) }.0.len();\n    println!(\"{}\", n);\n}\n";
+    let d = check_ed(src, 2024);
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check_ed(src, 2021), vec![]);
+    // (the fourth round: such a `&self` method borrows the array, which its result holds (E0505 when the array is
+    // moved while it is used); and `allow (unused_mut)` in a comment allows nothing)
+    let d = check("trait Head {\n    fn head(&self) -> &String;\n}\nimpl Head for [String; 1] {\n    fn head(&self) -> &String { &self[0] }\n}\nfn main() {\n    let a = [String::from(\"x\")];\n    let r = a.head();\n    drop(a);\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    let d = check("#![deny(unused_mut)]\n// we allow (unused_mut) nowhere\nfn main() {\n    let mut x = 1;\n    let _ = x;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("unused_mut"), "{d:?}");
 }

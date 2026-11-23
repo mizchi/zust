@@ -864,6 +864,7 @@ compile-fail	borrowck/borrowck-move-out-of-overloaded-deref.rs
 compile-fail	borrowck/borrowck-move-out-of-static-item.rs
 compile-fail	borrowck/borrowck-move-out-of-struct-with-dtor.rs
 compile-fail	borrowck/borrowck-move-out-of-tuple-struct-with-dtor.rs
+compile-fail	borrowck/borrowck-move-out-of-vec-tail.rs
 compile-fail	borrowck/borrowck-move-subcomponent.rs
 run-pass	borrowck/borrowck-multiple-borrows-interior-boxes.rs
 compile-fail	borrowck/borrowck-multiple-captures.rs
@@ -899,7 +900,9 @@ run-pass	borrowck/borrowck-rvalues-mutable.rs
 run-pass	borrowck/borrowck-scope-of-deref-issue-4666.rs
 check-pass	borrowck/borrowck-slice-pattern-element-loan-array-no-overlap.rs
 compile-fail	borrowck/borrowck-slice-pattern-element-loan-array.rs
+run-pass	borrowck/borrowck-slice-pattern-element-loan-rpass.rs
 check-pass	borrowck/borrowck-slice-pattern-element-loan-slice-no-overlap.rs
+compile-fail	borrowck/borrowck-slice-pattern-element-loan-slice.rs
 run-pass	borrowck/borrowck-static-item-in-fn.rs
 compile-fail	borrowck/borrowck-storage-dead.rs
 compile-fail	borrowck/borrowck-struct-update-with-dtor.rs
@@ -1070,6 +1073,7 @@ compile-fail	borrowck/regions-escape-bound-fn-2.rs
 compile-fail	borrowck/regions-escape-bound-fn.rs
 compile-fail	borrowck/regions-escape-unboxed-closure.rs
 compile-fail	borrowck/return-ref-to-temporary.rs
+compile-fail	borrowck/rvalue-borrow-scope-error.rs
 run-pass	borrowck/rvalue-lifetime-match-equivalence-7660.rs
 check-pass	borrowck/self-field-consume-with-drop-type.rs
 check-pass	borrowck/static-trait-bound-lost.rs
@@ -2439,6 +2443,7 @@ compile-fail	error-codes/E0499.rs
 compile-fail	error-codes/E0501.rs
 compile-fail	error-codes/E0502.rs
 compile-fail	error-codes/E0503.rs
+compile-fail	error-codes/E0504.rs
 compile-fail	error-codes/E0505.rs
 compile-fail	error-codes/E0506.rs
 compile-fail	error-codes/E0507.rs
@@ -2858,6 +2863,7 @@ compile-fail	generic-associated-types/issue-47206-where-clause.rs
 check-pass	generic-associated-types/issue-58694-parameter-out-of-range.rs
 check-pass	generic-associated-types/issue-62326-parameter-out-of-range.rs
 check-pass	generic-associated-types/issue-67424.rs
+compile-fail	generic-associated-types/issue-67510.rs
 check-pass	generic-associated-types/issue-68648-1.rs
 compile-fail	generic-associated-types/issue-68648-2.rs
 check-pass	generic-associated-types/issue-68649-pass.rs
@@ -2891,6 +2897,7 @@ compile-fail	generic-associated-types/parse/trait-path-missing-gen_arg.rs
 compile-fail	generic-associated-types/parse/trait-path-segments.rs
 compile-fail	generic-associated-types/parse/trait-path-types.rs
 check-pass	generic-associated-types/pointer_family.rs
+compile-fail	generic-associated-types/shadowing.rs
 compile-fail	generic-associated-types/static-lifetime-tip-with-default-type.rs
 run-pass	generic-associated-types/streaming_iterator.rs
 compile-fail	generic-associated-types/type-param-defaults.rs
@@ -3109,6 +3116,7 @@ compile-fail	impl-trait/in-trait/ensure-rpitits-are-created-before-freezing.rs
 check-pass	impl-trait/in-trait/expeced-refree-to-map-to-reearlybound-ice-108580.rs
 check-pass	impl-trait/in-trait/issue-102301.rs
 check-pass	impl-trait/in-trait/lifetime-in-associated-trait-bound.rs
+compile-fail	impl-trait/in-trait/missing-lt-outlives-in-rpitit-114274.rs
 check-pass	impl-trait/in-trait/nested-rpitit.rs
 compile-fail	impl-trait/in-trait/not-inferred-generic.rs
 compile-fail	impl-trait/in-trait/opaque-and-lifetime-mismatch.rs
@@ -3698,6 +3706,7 @@ check-pass	lifetimes/struct-lifetime-field-assignment-13405.rs
 check-pass	lifetimes/struct-lifetime-inference-15735.rs
 run-pass	lifetimes/struct-with-lifetime-parameters-9259.rs
 compile-fail	lifetimes/suggest-introducing-and-adding-missing-lifetime.rs
+compile-fail	lifetimes/tail-expr-in-nested-expr.rs
 compile-fail	lifetimes/trait-impl-mismatch-elided-lifetime-issue-65866.rs
 run-pass	lifetimes/trait-method-lifetime-bounds.rs
 compile-fail	lifetimes/trait-method-lifetime-suggestion.rs
@@ -3961,6 +3970,7 @@ check-pass	lint/unused/unused-attr-repr-packed-c-order.rs
 check-pass	lint/unused/unused-braces-attrs-issue-141549.rs
 compile-fail	lint/unused/unused-doc-comments-edge-cases.rs
 check-pass	lint/unused/unused-field-in-pat-field.rs
+compile-fail	lint/unused/unused-mut-warning-captured-var.rs
 check-pass	lint/unused/unused-never-binding-issue-158783.rs
 check-pass	lint/unused/unused-parens-issue-106413.rs
 check-pass	lint/unused/unused-results-unit-and-uninhabited.rs
@@ -4552,6 +4562,7 @@ compile-fail	nll/borrowed-temporary-error.rs
 compile-fail	nll/borrowed-universal-error-2.rs
 compile-fail	nll/borrowed-universal-error.rs
 compile-fail	nll/cannot-move-block-spans.rs
+compile-fail	nll/capture-mut-ref.rs
 compile-fail	nll/capture-ref-in-struct.rs
 compile-fail	nll/closure-access-spans.rs
 compile-fail	nll/closure-borrow-spans.rs
@@ -4617,6 +4628,7 @@ run-pass	nll/issue-50461-used-mut-from-moves.rs
 check-pass	nll/issue-50716-1.rs
 compile-fail	nll/issue-51191.rs
 compile-fail	nll/issue-51244.rs
+compile-fail	nll/issue-51268.rs
 check-pass	nll/issue-51351.rs
 check-pass	nll/issue-51770.rs
 run-pass	nll/issue-52057.rs
@@ -4659,12 +4671,14 @@ compile-fail	nll/issue-58053.rs
 compile-fail	nll/issue-58299.rs
 check-pass	nll/issue-61311-normalize.rs
 check-pass	nll/issue-61320-normalize.rs
+compile-fail	nll/issue-61424.rs
 compile-fail	nll/issue-62007-assign-const-index.rs
 compile-fail	nll/issue-62007-assign-differing-fields.rs
 compile-fail	nll/issue-67007-escaping-data.rs
 compile-fail	nll/issue-68550.rs
 compile-fail	nll/issue-69114-static-mut-ty.rs
 compile-fail	nll/issue-69114-static-ty.rs
+compile-fail	nll/issue-73159-rpit-static.rs
 compile-fail	nll/issue-95272.rs
 compile-fail	nll/issue-98170.rs
 compile-fail	nll/issue-98693.rs
