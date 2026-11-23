@@ -3100,3 +3100,26 @@ fn part17_receivers_of_extended_borrows() {
     assert_eq!(check("use std::cell::RefCell;\nfn main() {\n    let c = RefCell::new(1);\n    let r = &mut *c.borrow_mut();\n    *r += 1;\n}\n"), vec![]);
     assert_eq!(check("use std::cell::RefCell;\nfn main() {\n    let a = &*String::from(\"b\");\n    let n = &RefCell::new(1).borrow().clone();\n    let l = &String::from(\"x\").len();\n    let m = &vec![1, 2].iter().count();\n    println!(\"{} {} {} {}\", a, n, l, m);\n}\n"), vec![]);
 }
+
+/// A `&mut self` method of what a program's `DerefMut` reaches (`w.push(2)` with `W: DerefMut<Target = Vec<usize>>`)
+/// borrows w mutably, as autoderef takes `deref_mut` for it: E0596 without `mut w` or through a `&W`, E0502 against a
+/// shared loan of w or a read of w in the arguments (`w.push(w.len())`, as `(&mut *w).push(w.len())`), and a result
+/// that borrows from it holds the loan. A `&self` method borrows it shared
+#[test]
+fn part17_deref_mut_methods() {
+    let w = "use std::ops::{Deref, DerefMut};\nstruct W(Vec<usize>);\nimpl Deref for W { type Target = Vec<usize>; fn deref(&self) -> &Vec<usize> { &self.0 } }\nimpl DerefMut for W { fn deref_mut(&mut self) -> &mut Vec<usize> { &mut self.0 } }\n";
+    let d = check(&format!("{w}fn main() {{\n    let w = W(vec![1]);\n    w.push(2);\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check(&format!("{w}fn f(w: &W) {{\n    w.push(1);\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("behind a `&` reference"), "{d:?}");
+    let d = check(&format!("{w}fn main() {{\n    let mut w = W(vec![1]);\n    let r = &w;\n    w.push(3);\n    println!(\"{{}}\", r.len());\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("also borrowed as immutable"), "{d:?}");
+    let d = check(&format!("{w}fn main() {{\n    let mut w = W(vec![1]);\n    w.push(w.len());\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("mutably borrowed"), "{d:?}");
+    let d = check(&format!("{w}fn main() {{\n    let mut w = W(vec![1]);\n    (&mut *w).push(w.len());\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("mutably borrowed"), "{d:?}");
+    let d = check(&format!("{w}fn main() {{\n    let mut w = W(vec![1]);\n    let r = w.last_mut().unwrap();\n    let k = w.len();\n    *r = k;\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("mutably borrowed"), "{d:?}");
+    assert_eq!(check(&format!("{w}fn main() {{\n    let mut w = W(vec![1]);\n    w.push(2);\n    let n = w.len();\n    w[0] = n;\n    let r = &w;\n    println!(\"{{}}\", r.len());\n}}\n")), vec![]);
+    assert_eq!(check(&format!("{w}fn f(w: &mut W) -> usize {{\n    w.push(1);\n    let n = w.len();\n    w.push(n);\n    w.len()\n}}\nfn main() {{}}\n")), vec![]);
+}

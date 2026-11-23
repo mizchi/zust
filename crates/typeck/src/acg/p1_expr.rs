@@ -515,7 +515,15 @@ impl Cx<'_> {
                         }
                     }
                     self.deref_shared(d);
-                    return self.place(d);
+                    let r = self.place(d);
+                    // (the loan the deref's call takes of x is the loan of `*x`: `(&mut *w).push(w.len())` holds it
+                    // while the arguments are evaluated)
+                    if let (true, Expr::Unary(_, c, _)) = (self.bk_on(), d) {
+                        if let Some(&ln) = self.bk.loan_of.get(&(&**c as *const Expr as usize)) {
+                            self.bk.loan_of.insert(e as *const Expr as usize, ln);
+                        }
+                    }
+                    return r;
                 }
                 // `*b` は b をムーブしない
                 let (v, t) = self.read_no_move(x)?;

@@ -355,6 +355,43 @@ impl Cx<'_> {
                 }
             }
         }
+        // (`w.m()` with w of the program's struct with a `DerefMut`, and m a `&mut self` method of what it derefs to, not
+        // w's own: `(&mut *w).m()`, as autoderef takes `deref_mut` for it; w is borrowed mutably (E0596 without `mut`,
+        // E0502 against a shared loan of it) and the user's `deref_mut` runs, not `deref`)
+        if let Some((t0, (refs, target))) = self.peek(recv).and_then(|t| Some((t, self.deref_mut_recv(t, method)?))) {
+            let mut d = recv.clone();
+            let at = expr_start(recv);
+            for _ in 0..=refs {
+                d = Box::new(Expr::Unary("*".into(), d, crate::parse::Span { start: at, at }));
+            }
+            let inner = Expr::Paren(Box::new(Expr::Ref(true, d)));
+            let rt = Ty::Ref(true, intern(target));
+            let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(inner), method.to_string(), gargs.clone(), margs.clone(), msp));
+            // (the new receiver's type, for what looks the method up by it: String's and Vec's builtin methods; and each
+            // deref's, so that the user's deref is called once, on the place: `**w` of a w: &mut W)
+            if let Expr::MethodCall(r, ..) = ne {
+                self.lets.insert(&**r as *const Expr as usize, rt);
+                if let Expr::Paren(i) = &**r {
+                    self.lets.insert(&**i as *const Expr as usize, rt);
+                    if let Expr::Ref(_, u) = &**i {
+                        // (outermost first: the target, then the struct, then what each reference or box reaches)
+                        let mut reached = vec![];
+                        let mut tt = t0;
+                        while let Ty::Ref(_, x) | Ty::Box(x) = tt {
+                            reached.push(*x);
+                            tt = *x;
+                        }
+                        let mut u = &**u;
+                        for ty in std::iter::once(target).chain(reached.into_iter().rev()) {
+                            let Expr::Unary(_, x, _) = u else { break };
+                            self.lets.insert(u as *const Expr as usize, ty);
+                            u = &**x;
+                        }
+                    }
+                }
+            }
+            return self.expr(ne, expected);
+        }
         // (`g.m()` with g a RefCell's Ref / RefMut or a MutexGuard, and m not the guard's own: `(*g).m()`, so the value's
         // methods are found as for the value itself, the builtin ones of String / Vec / slices too)
         if let Some((sid, target, deref_mut)) = self.peek(recv).and_then(|t| self.guard_of(self.strip_refs(t))) {
@@ -1247,7 +1284,12 @@ impl Cx<'_> {
             // evaluated, when they name x)
             if ev.is_none() {
                 if let Expr::Ref(_, inner) = strip_paren(recv) {
-                    if let (Some(&ln), Some(n)) = (self.bk.loan_of.get(&(&**inner as *const Expr as usize)), borrowck::root_local(inner)) {
+                    // (also `(&mut *w)` through a user's `DerefMut`: the loan its `deref_mut` takes of w)
+                    let root = borrowck::root_local(inner).or_else(|| match strip_paren(inner) {
+                        Expr::Unary(op, x, _) if op == "*" => borrowck::root_local(x),
+                        _ => None,
+                    });
+                    if let (Some(&ln), Some(n)) = (self.bk.loan_of.get(&(&**inner as *const Expr as usize)), root) {
                         if margs.iter().any(|a| borrowck::mentions(a, n)) {
                             self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
                             bk_op_temp = true;
@@ -1431,6 +1473,47 @@ impl Cx<'_> {
 
     /// `thread::spawn(|| ..)`: the closure must own what it uses (E0373) and be Send (see not_send)
     /// Whether `x.m()` with x: t takes `&mut self` (a method of t's, or a builtin one of a slice / str that changes it)
+    /// `w.m()` with w (through references and boxes) of the program's struct with a `DerefMut` and no method m of its
+    /// own, where the method m of what it derefs to (through further derefs) takes `&mut self`: the references and boxes
+    /// to go through, and the deref's target
+    pub(crate) fn deref_mut_recv(&self, t: Ty, m: &str) -> Option<(usize, Ty)> {
+        let (mut t, mut refs) = (t, 0);
+        while let Ty::Ref(_, i) | Ty::Box(i) = t {
+            t = *i;
+            refs += 1;
+        }
+        let Ty::Struct(sid) = t else { return None };
+        let base = self.prog.base_of(sid);
+        if !self.prog.struct_item.get(base as usize).is_some_and(|&i| i < self.prog.prelude_from) || self.prog.is_placeholder(sid) {
+            return None;
+        }
+        if self.prog.method(sid, m).is_some() || self.prog.default_method(sid, m).is_some() || self.prog.method(sid, "deref_mut").is_none() {
+            return None;
+        }
+        let deref_target = |sid: u32| -> Option<Ty> {
+            let did = self.prog.method(sid, "deref")?;
+            let Ty::Ref(_, i) = self.prog.sigs[did as usize].ret else { return None };
+            let args: Vec<Option<Ty>> = self.prog.structs[sid as usize].args.iter().map(|&a| Some(a)).collect();
+            Some(self.prog.partial_subst(*i, &args))
+        };
+        let target = deref_target(sid)?;
+        if self.prog.has_param(target) {
+            return None;
+        }
+        // (the type m is found on: through the target's own derefs)
+        let mut at = target;
+        for _ in 0..8 {
+            match at {
+                Ty::Struct(s) if self.prog.method(s, m).is_none() && self.prog.default_method(s, m).is_none() && self.guard_of(at).is_none() => match deref_target(s) {
+                    Some(n) => at = n,
+                    None => break,
+                },
+                _ => break,
+            }
+        }
+        self.takes_mut_self(at, m).then_some((refs, target))
+    }
+
     pub(crate) fn takes_mut_self(&self, t: Ty, m: &str) -> bool {
         let t = self.strip_refs(t);
         if let Ty::Struct(ts) = t {
