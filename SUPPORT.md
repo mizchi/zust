@@ -83,7 +83,9 @@ directories named in the comment next to the number (`ui:`), or compile-fail (`c
   `BTreeMap`/`BTreeSet`, `VecDeque`, `BinaryHeap`, `Rc`/`Arc`, `Cell`/`RefCell`, `Mutex`, `OnceLock`, `ManuallyDrop`,
   `Duration`, `AtomicPtr`, `RangeTo` / `RangeFull` as types, `Fuse`, `iter::Empty`, `NonNull`, `Pin` (a plain pointer: `Pin::new`, `get_mut`, `into_inner`, deref), `std::task` (`Poll`, `Context`, `Waker::noop`) and the `Future` trait for futures implemented and polled by hand, `UnsafeCell`, `PhantomData`, atomics, `mpsc`, `mem::*`, `ptr::{read, write, drop_in_place, null}`,
   `iter::{repeat, once, empty, repeat_with, successors}`, `reverse` / `fill` / `rotate_left` / `rotate_right` on arrays and slices, formatting, stdin/stdout/fs/env/process basics
-- [ ] async / await: <!-- ui:async-await -->77.7%. It runs at once, with no executor (no `poll`, `Waker`, `Pin<Box<dyn Future>>`)
+- [ ] async / await: <!-- ui:async-await -->77.7%. An `async fn` runs at once and returns its value: it is not lowered
+  to a state machine that `poll`s, and there is no executor or real `Waker`. Futures implemented and polled by hand
+  work (above)
 - [ ] threads: <!-- ui:threads-sendsync -->70.2%. Green threads on one OS thread: each spawned thread has its own stack and runs until it waits (`join`, `recv`, a held `Mutex`, `sleep`, `yield_now`, an atomic `load`); no parallelism
 - [ ] iterators: <!-- ui:iterators -->47.1% (`iter::empty()` cannot infer its item from the target)
 - [ ] FFI: <!-- ui:abi -->78.6%. Scalars only, no structs by value
@@ -117,8 +119,8 @@ directories named in the comment next to the number (`ui:`), or compile-fail (`c
 
 - [ ] real concurrency: threads on several OS threads, in parallel (atomic `Arc` and atomics, a thread-safe
   runtime; cost: runtime size)
-- [ ] executors: async as state machines, `Future::poll`, `Waker`, `Pin<Box<dyn Future>>` (~25 tests; cost: build
-  time, binary size)
+- [ ] executors: `async` lowered to state machines that `poll`, an executor and wakers that wake it, so that
+  `Pin<Box<dyn Future>>` holds a pending future, not its value (~25 tests; cost: build time, binary size)
 - [ ] unwinding: `catch_unwind`, panic hooks (~22 tests; landing pads cost build time and binary size)
 - [ ] FFI: structs by value, other ABIs (~27 tests)
 - [ ] a full trait solver: specialization, auto traits through `dyn` / `async`, higher-ranked bounds
