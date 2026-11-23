@@ -3253,3 +3253,17 @@ fn part18_let_extension_in_constructors() {
     temp_error("fn temp() -> String { String::from(\"x\") }\nfn main() {\n    let h = Some(temp().as_str());\n    println!(\"{:?}\", h);\n}\n", 3);
     temp_error("fn temp() -> String { String::from(\"x\") }\nfn id<T>(t: T) -> T { t }\nfn main() {\n    let f = id::<&String>;\n    let g = f(&temp());\n    println!(\"{:?}\", g);\n}\n", 5);
 }
+
+/// A capture of a closure reborrowed where a longer `&mut` is expected is reborrowed through the closure's
+/// environment, which the closure has for no longer than a call: `|| doit(data)` with `data: &'static mut ()` and
+/// `doit(&'static mut ())` is "lifetime may not live long enough" (nll/issue-42574-diagnostic-in-nested-closure.rs),
+/// also for a `move` closure (FnMut). Moved out first (`let d = data; doit(d)`), or a shared reference copied, or a
+/// callee that takes any lifetime, is fine
+#[test]
+fn part18_closure_capture_reborrows() {
+    for c in ["|| doit(data)", "move || doit(data)", "|| doit(&mut *data)"] {
+        let d = check(&format!("fn doit(_: &'static mut ()) {{}}\nfn f(data: &'static mut ()) {{\n    let mut c = {c};\n    c();\n}}\nfn main() {{}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("must outlive `'static`"), "{c}: {d:?}");
+    }
+    assert_eq!(check("fn doit(_: &'static mut ()) {}\nfn f(data: &'static mut ()) {\n    let c = || { let d = data; doit(d) };\n    c();\n}\nfn keep<'a>(_: &'a mut ()) {}\nfn g<'a>(data: &'a mut ()) {\n    let mut c = || keep(data);\n    c();\n}\nfn keep2(_: &'static ()) {}\nfn h(data: &'static ()) {\n    let c = || keep2(data);\n    c();\n}\nfn main() {}\n"), vec![]);
+}

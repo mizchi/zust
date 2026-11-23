@@ -1644,7 +1644,9 @@ impl RgSt {
                     if let Some(j) = ix(y) {
                         // (a closure's region from outside required to be 'static, or related to one of the function
                         // it is in: the caller's to know)
-                        let outside = |a: u32, b: u32| self.externals.contains(&a) && (b == STATIC || self.outer_univ.contains(&b));
+                        // (not the closure's environment required to be 'static: the closure has it for no longer
+                        // than a call (a capture reborrowed into a `&'static mut`))
+                        let outside = |a: u32, b: u32| self.externals.contains(&a) && (b == STATIC || self.outer_univ.contains(&b)) && !(self.in_closure && a == self.env_r && b == STATIC);
                         // (nor one of the function's that must outlive a placeholder: the callee's lifetimes in the
                         // bound may be it, and what they imply is of them)
                         let placeholder = |b: u32| self.in_closure && !self.externals.contains(&b) && !self.outer_univ.contains(&b) && b != STATIC;
@@ -2562,7 +2564,21 @@ impl Cx<'_> {
         while let Expr::Field(x, _, _) = root {
             root = strip(x);
         }
-        if tr.is_empty() || self.rg.closure.is_some() || !matches!(root, Expr::Path(..)) {
+        if tr.is_empty() || !matches!(root, Expr::Path(..)) {
+            return;
+        }
+        // (a capture of the closure being checked: reborrowed through its environment, which the closure has for no
+        // longer than a call (`|| doit(data)` with `data: &'static mut ()` passed where a `&'static mut ()` is
+        // expected: "lifetime may not live long enough"). Not a local of the closure's own (`let d = data; doit(d)`)
+        if self.rg.closure.is_some() {
+            let env = self.rg.env_r;
+            if self.rt_place(root).is_some_and(|p| p.2.contains(&env)) {
+                let r = self.rg.var();
+                let sp = super::borrowck::pos(a);
+                self.rg.edge(tr[0], r, sp);
+                self.rg.edge(env, r, sp);
+                tr[0] = r;
+            }
             return;
         }
         let r = self.rg.var();
