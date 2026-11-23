@@ -290,3 +290,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-23	76e0441+	free placeholders, clone of &T, E0369 for structs, derive field bounds	0.697	554.387	3767.090	1902.8	-	1830	1511	102	4391	1196.466	64.398	10.496	324.972	727.607	270.732
 2026-11-23	e9b68db+	[x; N] needs Copy of a free parameter; Copy / Clone supertraits	0.697	554.394	3767.038	1902.8	-	1830	1511	102	4392	1196.482	64.378	10.496	324.982	727.603	270.726
 2026-11-23	6c3cf1c+	variant patterns' type arguments	0.695	554.392	3767.036	1902.8	-	1830	1511	102	4394	1196.514	64.378	10.482	324.968	727.619	270.724
+2026-11-23	1691d54	LSP session measured locally (compat-next37 head)	0.699	553.570	3772.189	1902.8	10.8634	1830	1511	102	4411	1199.543	64.315	10.572	324.789	729.114	270.837
