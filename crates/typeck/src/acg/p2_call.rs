@@ -1659,9 +1659,13 @@ impl Cx<'_> {
                 // (a `&mut self` method (`impl Touch for [i32; 2]`'s `fn touch(&mut self)`): a mutable borrow of the
                 // array (E0596 when it is not `mut`; it needs the `mut`, for unused_mut))
                 let mutable = matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(true, _)));
-                if mutable && is_place_expr(recv) && matches!(self.peek(recv), Some(Ty::Array(..))) {
-                    self.bk_borrow(recv, true, err_pos(recv));
-                    self.bk_mut_use(recv);
+                // (a `&self` one: a shared borrow of the array, which a result that borrows from self holds
+                // (`let r = a.head(); drop(a);` is E0505))
+                if is_place_expr(recv) && matches!(self.peek(recv), Some(Ty::Array(..))) {
+                    self.bk_borrow(recv, mutable, err_pos(recv));
+                    if mutable {
+                        self.bk_mut_use(recv);
+                    }
                 }
                 vt = Ty::Ref(mutable, intern(vt));
             }

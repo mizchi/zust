@@ -2724,4 +2724,10 @@ fn part15_review() {
     let d = check_ed(src, 2024);
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0716"), "{d:?}");
     assert_eq!(check_ed(src, 2021), vec![]);
+    // (the fourth round: such a `&self` method borrows the array, which its result holds (E0505 when the array is
+    // moved while it is used); and `allow (unused_mut)` in a comment allows nothing)
+    let d = check("trait Head {\n    fn head(&self) -> &String;\n}\nimpl Head for [String; 1] {\n    fn head(&self) -> &String { &self[0] }\n}\nfn main() {\n    let a = [String::from(\"x\")];\n    let r = a.head();\n    drop(a);\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    let d = check("#![deny(unused_mut)]\n// we allow (unused_mut) nowhere\nfn main() {\n    let mut x = 1;\n    let _ = x;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("unused_mut"), "{d:?}");
 }

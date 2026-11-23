@@ -1439,9 +1439,14 @@ impl Session2 {
         prog.deny_unused_alloc = deny_unused_alloc;
         // (not where an item or a statement may allow it: any `allow` / `warn` / `expect` of unused_mut, unused or
         // warnings in the source turns it off, as the borrow check does not follow lint levels below the crate)
-        // (also with spaces before the `(`: `#[allow (unused_mut)]`)
+        // (an attribute's: after `#[` / `#![` (not the word in a comment, `// allow (unused_mut)`), also with spaces
+        // before the `(`: `#[allow (unused_mut)]`)
         prog.deny_unused_mut = deny_unused_mut && !["allow", "warn", "expect"].iter().any(|a| {
             src0.match_indices(a).any(|(i, _)| {
+                let attr = src0[..i].trim_end().strip_suffix('[').map(str::trim_end).is_some_and(|p| p.ends_with('#') || p.strip_suffix('!').is_some_and(|q| q.trim_end().ends_with('#')));
+                if !attr {
+                    return false;
+                }
                 let Some(rest) = src0[i + a.len()..].trim_start().strip_prefix('(') else { return false };
                 let list = &rest[..rest.find(')').unwrap_or(rest.len())];
                 list.split(',').any(|x| matches!(x.trim(), "unused_mut" | "unused" | "warnings"))
