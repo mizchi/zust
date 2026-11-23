@@ -29,7 +29,7 @@
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-22, 0501acf<!-- /measured --> by CI on each push to main (bench.yml runs
+Numbers measured <!-- measured -->2026-11-22, 26770e4<!-- /measured --> by CI on each push to main (bench.yml runs
 `bench/ci_bench.py` and `bench/rust_ui.py`, then `scripts/update_readme.py` writes them here). Times come from shared
 GitHub Actions runners and vary by about ±20%; the instruction counts (valgrind) do not.
 
@@ -41,10 +41,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1822 (76.4%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1509 (83.5%) |
+| run-pass (builds, runs, same output) | 2385 | 1825 (76.5%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1510 (83.6%) |
 | build-pass | 135 | 102 (75.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 4397 (59.8%) |
+| compile-fail (rejected at an annotated line) | 7358 | 4413 (60.0%) |
 <!-- /auto:ui -->
 
 [What is supported](#what-is-supported) breaks this down by area.
@@ -57,19 +57,19 @@ In parentheses: the instruction count (valgrind), which does not vary with the r
 <!-- auto:kpi -->
 | KPI | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 91 ms | 393 ms |
-| no-op build | 1.1 ms (0.6 M) | 1.1 ms (0.6 M) |
-| build after editing one function | 18.3 ms (124.6 M) | 62.2 ms (590.8 M) |
-| `check` | 75 ms (763.3 M) | 363 ms (3763.6 M) |
+| cold build | 122 ms | 551 ms |
+| no-op build | 0.7 ms (0.6 M) | 0.7 ms (0.6 M) |
+| build after editing one function | 17.1 ms (125.5 M) | 64.1 ms (591.6 M) |
+| `check` | 77 ms (763.0 M) | 375 ms (3765.6 M) |
 | build cache on disk | 387.2 KiB | 1902.8 KiB |
 | binary | 324.0 KiB | 1558.3 KiB |
-| cold build peak RSS | 19.3 MiB | 53.3 MiB |
+| cold build peak RSS | 19.5 MiB | 53.0 MiB |
 
 | zust-analyzer (zustc's own sources) | |
 |---|---:|
-| p50: definition, hover, completion, references, rename | 0.78 ms / 0.56 ms / 1.00 ms / 4.69 ms / 0.57 ms |
-| startup until indexed | 155 ms |
-| peak RSS | 97.0 MiB |
+| p50: definition, hover, completion, references, rename | 0.63 ms / 0.47 ms / 1.38 ms / 4.73 ms / 0.56 ms |
+| startup until indexed | 188 ms |
+| peak RSS | 98.0 MiB |
 <!-- /auto:kpi -->
 
 Every change is also measured on its own with `python3 bench/kpi_track.py`, so that small increases that add up stay
@@ -404,7 +404,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 - [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->80.2%
 - [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->90.9%
 - [x] imports, `use`: <!-- ui:imports -->87.5%
-- [x] associated types: <!-- ui:associated-types -->80.4%
+- [x] associated types: <!-- ui:associated-types -->81.1%
 - [x] generics: <!-- ui:generics -->85.7% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
   parameter known only from the expected type is not inferred)
 - [ ] consts: <!-- ui:consts -->77.3% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
@@ -420,7 +420,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
 
 ### Checks (compile-fail)
 
-- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->81.1%
+- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->83.1%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
 - [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->70.9%, structs <!-- cf:structs -->77.1%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
@@ -439,7 +439,7 @@ the measured numbers. The [reports](docs/reports/) explain each step.
   must outlive the fn live to its end, closures that are not general enough or let borrowed data escape, generic fns
   that are never called (checked with placeholder types). Not yet: what a closure's body requires of its fn,
   higher-ranked trait selection, the requirements of the impl a coercion selects, the prelude's iterators (their types
-  hold no lifetimes). regions <!-- cf:regions -->74.1%, lifetimes <!-- cf:lifetimes -->72.7%
+  hold no lifetimes). regions <!-- cf:regions -->75.0%, lifetimes <!-- cf:lifetimes -->74.2%
   ([issue #1](https://github.com/mizchi/zust/issues/1))
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
 - [ ] lints and warnings: lint <!-- cf:lint -->31.1%
