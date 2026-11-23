@@ -2959,6 +2959,7 @@ run-pass	generics/empty-generic-brackets-equiv.rs
 compile-fail	generics/enum-definition-with-outer-generic-parameter-5997.rs
 compile-fail	generics/generic-arg-mismatch-recover.rs
 run-pass	generics/generic-associated-type-deref-target-56237.rs
+run-pass	generics/generic-default-type-params.rs
 run-pass	generics/generic-derived-type.rs
 compile-fail	generics/generic-enum-errors.rs
 run-pass	generics/generic-exterior-unique.rs

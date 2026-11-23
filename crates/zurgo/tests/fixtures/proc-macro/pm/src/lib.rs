@@ -104,3 +104,15 @@ pub fn pkg(_input: TokenStream) -> TokenStream {
     let name = std::env::var("CARGO_PKG_NAME").unwrap_or_default();
     format!("{name:?}").parse().unwrap()
 }
+
+/// `shared!()`: a file outside this package (`include_str!`), as a string: rebuilt when it changes
+#[proc_macro]
+pub fn shared(_input: TokenStream) -> TokenStream {
+    format!("{:?}", include_str!("../../shared.txt").trim()).parse().unwrap()
+}
+
+/// `add!(a, b)`: `a + b`, not grouped (its place groups it: `pm::add!(1, 2) * 3` is 9)
+#[proc_macro]
+pub fn add(input: TokenStream) -> TokenStream {
+    input.to_string().replace(',', " + ").parse().unwrap()
+}

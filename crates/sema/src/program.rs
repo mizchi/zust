@@ -2633,7 +2633,9 @@ impl Program {
                 let arg = |k: usize, r: bool| sd.args.get(k).is_none_or(|&a| self.unwind_safe(a, r, d + 1));
                 match name {
                     "AssertUnwindSafe" => return true,
-                    "Mutex" | "RwLock" | "MutexGuard" => return arg(0, false),
+                    // (std's locks are both whatever they hold: a panic poisons them)
+                    "Mutex" | "RwLock" => return true,
+                    "MutexGuard" => return arg(0, false),
                     n if n.starts_with("Atomic") => return true,
                     "UnsafeCell" | "Cell" | "RefCell" | "OnceCell" | "LazyCell" => return !refs && arg(0, false),
                     "Rc" | "Arc" => return arg(0, true),
@@ -2900,6 +2902,10 @@ impl Program {
                 }
                 match self.struct_index.get(n) {
                     Some(&id) if self.structs[id as usize].generics.is_empty() => Ty::Struct(id),
+                    // (every parameter with a default: `W` for `struct W<T = u8>`, as `W<>`)
+                    Some(&id) if self.struct_defaults.get(&id).is_some_and(|ds| ds.iter().all(Option::is_some)) => {
+                        return self.resolve_with(&TySyn::App(n.clone(), vec![]), names);
+                    }
                     Some(_) => return Err(format!("missing generics for `{n}`")),
                     // (`zeros::<K>()` / `Buf<K>`: const の名前は const ジェネリクスの引数)
                     None if self.const_index.contains_key(n) => Ty::Array(intern(Ty::Unit), self.const_usize(n)? as u32),

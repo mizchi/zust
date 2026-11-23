@@ -1621,17 +1621,30 @@ impl Cx<'_> {
             };
             let self_is = |id: u32, want: Ty| self.prog.sigs[id as usize].params.first() == Some(&want);
             let by_ref = |id: u32| matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(_, p)) if **p == t);
-            let outer = lookup("__ref___ref_");
+            // (`Second::m(&rr)`: the impl of the trait the call named, among those of one name)
+            let named = self.explicit_trait.as_ref().filter(|(m, _)| m == method).map(|(_, tr)| tr.clone());
+            let of_named = |id: u32| match &named {
+                Some(tr) => self.trait_candidate(&self.prog.names[id as usize].clone(), tr).unwrap_or(id),
+                None => id,
+            };
+            let outer = lookup("__ref___ref_").map(of_named);
             // (the method's own type arguments, `rr.size::<u16>()`, go with the call)
             let callee = |f: &str| with_targs(f, gargs);
             // (`impl Tr for &str`'s `&self` method: its self is the receiver as it is)
-            let shadow = lookup("__ref_").filter(|&o| self_is(o, t) && !outer.is_some_and(|id| self_is(id, t)));
+            // (with a trait named, only that trait's)
+            let shadow = lookup("__ref_")
+                .map(of_named)
+                .filter(|&o| self_is(o, t) && !outer.is_some_and(|id| self_is(id, t)))
+                .filter(|&o| named.as_ref().is_none_or(|tr| self.prog.sigs[o as usize].impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr.as_str())));
             if let Some(o) = shadow.filter(|_| outer.is_some()) {
                 let f = self.prog.names[o as usize].clone();
                 let mut args = vec![recv.clone()];
                 args.extend(margs.iter().cloned());
                 let c = Expr::Call(Box::new(callee(&f)), args);
-                return self.expr(&c, expected).map(Some);
+                self.keep_overload.set(Some(o));
+                let r = self.expr(&c, expected).map(Some);
+                self.keep_overload.set(None);
+                return r;
             }
             if let Some(id) = outer {
                 let shadowed = shadow.is_some();
@@ -1646,7 +1659,11 @@ impl Cx<'_> {
                     let mut args = vec![a0];
                     args.extend(margs.iter().cloned());
                     let c = Expr::Call(Box::new(callee(&f)), args);
-                    return self.expr(&c, expected).map(Some);
+                    // (the overload chosen: the call of its name resolves to it, not to the group's first)
+                    self.keep_overload.set(Some(id));
+                    let r = self.expr(&c, expected).map(Some);
+                    self.keep_overload.set(None);
+                    return r;
                 }
             }
         }
@@ -2216,7 +2233,14 @@ impl Cx<'_> {
             let name = &self.prog.names[id as usize];
             // (an impl for a reference, `impl PartialEq for &X`: its methods are `X::__ref_eq`)
             let last = name.rsplit("::").next().map(|l| l.split('#').next().unwrap_or(l));
-            if last == Some(m.as_str()) || last.and_then(|l| l.strip_prefix("__ref_")) == Some(m.as_str()) {
+            // (an impl for `&&T` too: every `__ref_` off)
+            let bare = last.map(|mut l| {
+                while let Some(b) = l.strip_prefix("__ref_") {
+                    l = b;
+                }
+                l
+            });
+            if last == Some(m.as_str()) || bare == Some(m.as_str()) {
                 let of_tr = |c: u32| base(c) == Some(tr.as_str());
                 if let Some(&c) = cands.iter().find(|&&c| of_tr(c) && fits(c, at)) {
                     return c;

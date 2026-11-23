@@ -942,6 +942,17 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
     expand_with(src, cfg, &[])
 }
 
+/// A name that can be a segment of a path (`crate`, `self`, `super`, `Self` and identifiers, no other keyword): a
+/// macro call's path stops at `return ::pm::m!()`'s `return`
+fn path_seg(t: &[u8]) -> bool {
+    !matches!(
+        t,
+        b"return" | b"break" | b"continue" | b"in" | b"as" | b"let" | b"mut" | b"ref" | b"move" | b"if" | b"else" | b"match" | b"while" | b"for"
+            | b"loop" | b"fn" | b"pub" | b"unsafe" | b"async" | b"await" | b"dyn" | b"impl" | b"where" | b"use" | b"const" | b"static" | b"struct"
+            | b"enum" | b"type" | b"mod" | b"trait" | b"box" | b"yield" | b"extern"
+    )
+}
+
 /// expand_cfg with the proc macros of pms too (crate::pm): at the start of each round the outermost attribute and
 /// derive uses, and a function-like call where a `macro_rules!` call would be (a name no `macro_rules!` has)
 pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::Lib]) -> Result<Option<String>, String> {
@@ -1018,7 +1029,7 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
                 Some(sc) if tk(i) != b"macro_rules" && i > inert_until => {
                     let mut segs = vec![std::str::from_utf8(tk(i)).unwrap_or("")];
                     let mut k = i;
-                    while k >= 3 && toks[k - 3].0 == 0 && sym(k - 2, b':') && sym(k - 1, b':') {
+                    while k >= 3 && toks[k - 3].0 == 0 && path_seg(tk(k - 3)) && sym(k - 2, b':') && sym(k - 1, b':') {
                         segs.insert(0, std::str::from_utf8(tk(k - 3)).unwrap_or(""));
                         k -= 3;
                     }
@@ -1100,17 +1111,19 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
             };
             // 式の位置は `({ .. })`、トップレベルと `mod` / `impl` / `trait` の中はアイテムとしてそのまま
             // (`const C: T = m!();` at the top or in an impl is an expression)
-            let top = (depth[i] == 0 || item_scope(b, &toks, &close, &depth, i)) && !(i > 0 && sym(i - 1, b'='));
-            // (a call in statement position: the items it expands to are items of the enclosing block, not
-            // of the `({ .. })` around the rest: `fn main() { m!(); S }` with `struct S;` from m)
-            // (`crate::m!(..);` / `::m!(..);` / `pm::bind!();`: where its path starts)
+            // (`crate::m!(..);` / `::m!(..);` / `pm::bind!();`: where its path starts (not at a keyword before a
+            // leading `::`, `return ::pm::m!()`))
             let mut ps = i;
-            while ps >= 3 && toks[ps - 3].0 == 0 && sym(ps - 2, b':') && sym(ps - 1, b':') {
+            while ps >= 3 && toks[ps - 3].0 == 0 && path_seg(tk(ps - 3)) && sym(ps - 2, b':') && sym(ps - 1, b':') {
                 ps -= 3;
             }
-            if ps >= 2 && sym(ps - 2, b':') && sym(ps - 1, b':') && !(ps >= 3 && toks[ps - 3].0 == 0) {
+            if ps >= 2 && sym(ps - 2, b':') && sym(ps - 1, b':') && !(ps >= 3 && toks[ps - 3].0 == 0 && path_seg(tk(ps - 3))) {
                 ps -= 2;
             }
+            // (`const N: i32 = pm::sum!() * 3;`: after `=` from the path's start)
+            let top = (depth[i] == 0 || item_scope(b, &toks, &close, &depth, i)) && !(ps > 0 && sym(ps - 1, b'='));
+            // (a call in statement position: the items it expands to are items of the enclosing block, not
+            // of the `({ .. })` around the rest: `fn main() { m!(); S }` with `struct S;` from m)
             let stmt_pos = ps == 0 || sym(ps - 1, b';') || sym(ps - 1, b'{') || sym(ps - 1, b'}');
             // (at the top, a call is an item only where an item starts: after an attribute too. Elsewhere it is
             // in an item's expression or type, `const N: u32 = 0 + m!(u8);`, and keeps the `;` after it; after
@@ -1142,12 +1155,12 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
             // (`crate::m!(..)` / `self::m!(..)`: 前のパスも消す)
             let mut a = toks[i].1;
             let mut k = i;
-            while k >= 3 && toks[k - 3].0 == 0 && sym(k - 2, b':') && sym(k - 1, b':') {
+            while k >= 3 && toks[k - 3].0 == 0 && path_seg(tk(k - 3)) && sym(k - 2, b':') && sym(k - 1, b':') {
                 a = toks[k - 3].1;
                 k -= 3;
             }
             // (`::m!(..)`)
-            if k >= 2 && sym(k - 2, b':') && sym(k - 1, b':') && toks[k - 1].1 == toks[k - 2].1 + 1 && !(k >= 3 && toks[k - 3].0 == 0) {
+            if k >= 2 && sym(k - 2, b':') && sym(k - 1, b':') && toks[k - 1].1 == toks[k - 2].1 + 1 && !(k >= 3 && toks[k - 3].0 == 0 && path_seg(tk(k - 3))) {
                 a = toks[k - 2].1;
             }
             // (トップレベルの `name!(..);` の `;` も取る)
@@ -1165,7 +1178,9 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
         reps.sort_by_key(|r| std::cmp::Reverse(r.0));
         // (展開したものの中にマクロの名前が無ければ、もう一周しなくてよい。proc macro の出力は次の周でも読む)
         // (also when it names a proc macro: a `macro_rules!` that gives `pm::answer!()` or a `#[wasm_bindgen]` item)
-        let names_pm = |t: &str| pms.iter().any(|l| l.macros.iter().any(|(m, _)| t.contains(m.as_str())));
+        let names_pm = |t: &str| {
+            pms.iter().any(|l| l.macros.iter().any(|(m, _)| t.contains(m.as_str()))) || pm_scope.as_ref().is_some_and(|sc| sc.aliases().any(|a| t.contains(a)))
+        };
         let again = pm_done || reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())) || names_pm(&r.2));
         let has_cfg = cfg.is_some() && (pm_done || reps.iter().any(|r| r.2.contains("cfg")));
         let has_select = !has_cfg && reps.iter().any(|r| r.2.contains("cfg_select"));
@@ -1357,7 +1372,7 @@ fn find_calls(
                                 // (`crate::m!(..);`: where its path starts)
                                 let mut ps = i;
                                 while ps >= 3
-                                    && matches!((&toks[ps - 3], &toks[ps - 2], &toks[ps - 1]), (TokenTree::Ident(_), TokenTree::Punct(c1), TokenTree::Punct(c2)) if c1.as_char() == ':' && c2.as_char() == ':')
+                                    && matches!((&toks[ps - 3], &toks[ps - 2], &toks[ps - 1]), (TokenTree::Ident(seg), TokenTree::Punct(c1), TokenTree::Punct(c2)) if c1.as_char() == ':' && c2.as_char() == ':' && path_seg(seg.to_string().as_bytes()))
                                 {
                                     ps -= 3;
                                 }
@@ -1394,7 +1409,7 @@ fn find_calls(
                                 while k >= 3 {
                                     match (&toks[k - 3], &toks[k - 2], &toks[k - 1]) {
                                         (TokenTree::Ident(seg), TokenTree::Punct(c1), TokenTree::Punct(c2))
-                                            if c1.as_char() == ':' && c2.as_char() == ':' =>
+                                            if c1.as_char() == ':' && c2.as_char() == ':' && path_seg(seg.to_string().as_bytes()) =>
                                         {
                                             a = seg.span().byte_range().start;
                                             k -= 3;

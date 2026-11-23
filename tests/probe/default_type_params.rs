@@ -24,10 +24,15 @@ impl<T, F: Fn() -> T> Lazyish<T, F> {
 fn seven() -> u32 {
     7
 }
+// (every parameter defaulted: the bare name)
+struct D<T = u8>(T);
+fn dd(d: D) -> u8 {
+    d.0
+}
 fn main() {
     let w: W<u32> = W { a: 1, b: 2 };
     let v: W<u32, u16> = W { a: 3, b: 4 };
     println!("{} {} {}", take(&w), w.first(), v.a as u16 + v.b);
     let l: Lazyish<u32> = Lazyish { f: seven, _t: None };
-    println!("{}", l.get());
+    println!("{} {}", l.get(), dd(D(9)));
 }

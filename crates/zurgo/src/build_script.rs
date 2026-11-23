@@ -417,10 +417,13 @@ impl<'a> Runner<'a> {
             let h = hash(&[&rustc_id(), &self.g.pkgs[m.0].id, &feats.join(","), &format!("{externs:?}"), &deps_fp.join(","), &format!("{:?}", o.as_ref().map(|o| (&o.cfgs, &o.env))), &out_fp, da]);
             let pm = lib.is_proc_macro();
             let file = deps_dir.join(format!("lib{}-{h}.{}", lib.name, if pm { "so" } else { "rlib" }));
-            let fresh = file.is_file() && (self.g.pkgs[m.0].source.is_some() || src_fp(&p.dir, &self.skip) == std::fs::read_to_string(file.with_extension("fp")).unwrap_or_default());
+            // (rustc's dep-info: the files it read outside the package, `include_str!("../../shared.txt")`, count too)
+            let dep_info = deps_dir.join(format!("{}-{h}.d", lib.name));
+            let local_fp = || format!("{}|{}", src_fp(&p.dir, &self.skip), outside_fp(&dep_info, &p.dir));
+            let fresh = file.is_file() && (self.g.pkgs[m.0].source.is_some() || local_fp() == std::fs::read_to_string(file.with_extension("fp")).unwrap_or_default());
             if !fresh {
                 let mut c = Command::new(rustc());
-                c.args(["--crate-name", &lib.name, "--edition", &lib.edition, "--crate-type", if pm { "proc-macro" } else { "lib" }, "--emit=link", "--cap-lints", "allow"]);
+                c.args(["--crate-name", &lib.name, "--edition", &lib.edition, "--crate-type", if pm { "proc-macro" } else { "lib" }, "--emit=link,dep-info", "--cap-lints", "allow"]);
                 c.args(["-C", "opt-level=0", "-C", da, "-C", &format!("metadata={h}"), "-C", &format!("extra-filename=-{h}"), "--out-dir"]).arg(&deps_dir);
                 c.arg("-L").arg(format!("dependency={}", deps_dir.display()));
                 for f in &feats {
@@ -445,7 +448,7 @@ impl<'a> Runner<'a> {
                 run_rustc(c, &format!("`{} v{}`", p.name, p.version))?;
                 let after = src_fp(&p.dir, &self.skip);
                 if before == after {
-                    let _ = std::fs::write(file.with_extension("fp"), before);
+                    let _ = std::fs::write(file.with_extension("fp"), format!("{before}|{}", outside_fp(&dep_info, &p.dir)));
                 } else {
                     let _ = std::fs::remove_file(file.with_extension("fp"));
                 }
@@ -672,6 +675,25 @@ fn unquote(v: &str) -> String {
 }
 
 /// A file's size and modification time ("-" when it does not exist)
+/// The files rustc's dep-info (`--emit=dep-info`) lists outside the package's directory, with their sizes and times
+fn outside_fp(dep_info: &Path, pkg_dir: &Path) -> String {
+    let Ok(t) = std::fs::read_to_string(dep_info) else { return String::new() };
+    let dir = std::fs::canonicalize(pkg_dir).unwrap_or_else(|_| pkg_dir.to_path_buf());
+    let mut v: Vec<String> = vec![];
+    // (each file it read is a line `path:` of its own, spaces written `\ `)
+    for l in t.lines() {
+        let Some(f) = l.strip_suffix(':') else { continue };
+        let f = f.replace("\\ ", " ");
+        let fp = Path::new(&f);
+        let real = std::fs::canonicalize(fp).unwrap_or_else(|_| fp.to_path_buf());
+        if real.starts_with(&dir) || real.starts_with(pkg_dir) {
+            continue;
+        }
+        v.push(format!("{f}={}", file_fp(fp)));
+    }
+    v.join(",")
+}
+
 fn file_fp(p: &Path) -> String {
     match std::fs::metadata(p) {
         Ok(m) => format!("{}:{}", m.len(), mtime(p).unwrap_or(0)),

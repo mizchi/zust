@@ -176,6 +176,11 @@ fn proc_macros_run_like_cargo() {
     let (ok, got, err) = zurgo(&["run"], &m, &t);
     assert!(ok, "zurgo run: {err}");
     assert_eq!(got.lines().next(), Some("7 22"), "{got}");
+    // (a file the proc macro includes from outside its package: rustc's dep-info has it)
+    std::fs::write(sc.0.join("shared.txt"), "shared v2\n").unwrap();
+    let (ok, got, err) = zurgo(&["run"], &m, &t);
+    assert!(ok, "zurgo run: {err}");
+    assert_eq!(got.lines().last(), Some("shared v2"), "{got}");
 }
 
 #[test]

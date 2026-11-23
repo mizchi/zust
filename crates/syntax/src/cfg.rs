@@ -446,10 +446,24 @@ pub(crate) fn outer_docs_start(s: &[u8], p: usize) -> usize {
         let text = &line[lead..];
         let doc_line = text.starts_with(b"///") && !text.starts_with(b"////");
         let doc_block = text.starts_with(b"/**") && !text.starts_with(b"/***") && text.ends_with(b"*/") && text.len() > 4;
-        if !(doc_line || doc_block) {
-            return start;
+        if doc_line || doc_block {
+            start = pls + lead;
+            continue;
         }
-        start = pls + lead;
+        // (a block doc comment over several lines, `/** ..\n .. */`: back to its `/**`, at a line's start)
+        if text.ends_with(b"*/") {
+            if let Some(o) = s[..prev_end].windows(3).rposition(|w| w == b"/**") {
+                let ols = s[..o].iter().rposition(|&c| c == b'\n').map_or(0, |k| k + 1);
+                let opens_doc = !s[o..].starts_with(b"/***") && s[ols..o].iter().all(|c| c.is_ascii_whitespace());
+                // (nothing closes a comment between its `/**` and this line's `*/`)
+                let one = o + 3 <= pls && !s[o + 3..pls].windows(2).any(|w| w == b"*/");
+                if opens_doc && one {
+                    start = o;
+                    continue;
+                }
+            }
+        }
+        return start;
     }
 }
 

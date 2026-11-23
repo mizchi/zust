@@ -777,9 +777,9 @@ pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
-    const KWS: [&str; 20] = [
-        "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "pub fn ", "pub struct ", "pub enum ", "pub const ",
-        "pub static ", "pub trait ", "pub type ", "pub(crate) ",
+    const KWS: [&str; 21] = [
+        "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "pub fn ", "pub struct ",
+        "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) ",
     ];
     let indented = src.split('\n').any(|l| {
         let t = l.trim_start();
@@ -1030,8 +1030,15 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 j += 1;
             }
             let mut st = k - 1;
-            while st >= 1 && toks[st - 1].0 == 0 && matches!(tok(st - 1), b"unsafe" | b"safe" | b"pub") {
-                st -= 1;
+            loop {
+                if st >= 1 && toks[st - 1].0 == 0 && matches!(tok(st - 1), b"unsafe" | b"safe" | b"pub") {
+                    st -= 1;
+                } else if st >= 4 && is_sym(st - 1, b")") && toks[st - 2].0 == 0 && is_sym(st - 3, b"(") && tok(st - 4) == b"pub" {
+                    // (`pub(crate)` / `pub(super)`: the attribute goes before it)
+                    st -= 4;
+                } else {
+                    break;
+                }
             }
             // (its attributes, back to the block's `{` or the previous item's `;`)
             let mut a = st;
@@ -1906,7 +1913,12 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             }
         }
     }
-    let resolve_mod = |from: usize, segs: &[Vec<u8>], at: usize| -> Option<usize> {
+    // (lead: the path is `::a::b`, whose first name is a crate's (the crate root's in 2015), not an alias a block
+    // or a module brings in)
+    let resolve_mod_at = |from: usize, segs: &[Vec<u8>], at: usize, lead: bool| -> Option<usize> {
+        if lead {
+            return resolve_mod(usize::MAX, segs);
+        }
         let alias = segs.first().and_then(|f| {
             // (the innermost block's alias or module of that name, then the module's alias)
             block_alias
@@ -1924,6 +1936,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         resolve_mod(from, segs)
     };
+    let resolve_mod = |from: usize, segs: &[Vec<u8>], at: usize| resolve_mod_at(from, segs, at, false);
     let renamed_in = |m: usize, n: &[u8]| -> Option<Vec<u8>> { renamed_map.get(&(m, n.to_vec())).cloned() };
     // use 文で取り込んだ名前: (スコープ, 使う名前) → 新しい名前。use 文のトークン範囲は書き換えない
     let mut imports: Vec<(usize, Vec<u8>, Vec<u8>)> = vec![];
@@ -2138,11 +2151,12 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 continue;
             }
             let pe = close[p];
-            // (each name and where it starts to be the local: a parameter from the parameters on, a `let` from itself on)
-            let mut bound: Vec<(&[u8], usize)> = vec![];
+            // (each name and where it is the local: a parameter in the whole function, a `let` from itself to the end of
+            // its block)
+            let mut bound: Vec<(&[u8], usize, usize)> = vec![];
             for q in p + 1..pe {
                 if toks[q].0 == 0 && q + 2 <= pe && is_sym(q + 1, b':') && !is_sym(q + 2, b':') && renamed_names.contains(&tok(q)) {
-                    bound.push((tok(q), p + 1));
+                    bound.push((tok(q), p + 1, usize::MAX));
                 }
             }
             // (the body: the first `{` after the parameters, or none (`;`))
@@ -2161,12 +2175,28 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     // (a plain name: `let FnvHasher(mut h) = ..` is a pattern of the struct)
                     let plain = n + 1 < be && (is_sym(n + 1, b'=') || is_sym(n + 1, b';') || (is_sym(n + 1, b':') && !is_sym(n + 2, b':')));
                     if n < be && toks[n].0 == 0 && plain && renamed_names.contains(&tok(n)) {
-                        bound.push((tok(n), n));
+                        // (the end of the innermost block around the `let`)
+                        let mut d = 0usize;
+                        let mut o = q;
+                        let mut until = be;
+                        while o > b {
+                            o -= 1;
+                            if is_sym(o, b'}') {
+                                d += 1;
+                            } else if is_sym(o, b'{') {
+                                if d == 0 {
+                                    until = close[o];
+                                    break;
+                                }
+                                d -= 1;
+                            }
+                        }
+                        bound.push((tok(n), n, until));
                     }
                 }
             }
             if !bound.is_empty() {
-                let is_bound = |q: usize| bound.iter().any(|&(nm, from)| nm == tok(q) && q >= from);
+                let is_bound = |q: usize| bound.iter().any(|&(nm, from, until)| nm == tok(q) && q >= from && q <= until);
                 for q in p + 1..be {
                     if toks[q].0 == 0 && is_bound(q) && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':')) && !is_sym(q + 1, b':') || (toks[q].0 == 0 && is_bound(q) && q + 2 <= be && is_sym(q + 1, b':') && !is_sym(q + 2, b':')) {
                         local_tok[q] = true;
@@ -2275,7 +2305,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // 接頭辞のいちばん長いモジュールから見る
             let mut done = false;
             for cut in (1..segs.len()).rev() {
-                if let Some(m) = resolve_mod(sc, &segs[..cut], k) {
+                if let Some(m) = resolve_mod_at(sc, &segs[..cut], k, leading) {
                     if m == usize::MAX && !(segs[0].as_slice() == b"crate") {
                         continue;
                     }

@@ -629,6 +629,11 @@ impl<'a> Scope<'a> {
         Scope { libs, imported, renames, origins }
     }
 
+    /// The other names macros are brought in under (`use pm::value as alias;`: `alias`)
+    pub fn aliases(&self) -> impl Iterator<Item = &str> {
+        self.renames.iter().map(|(_, a)| a.as_str())
+    }
+
     /// The macro a path names (its names in order, `r#` kept off): (the library, the macro's own name)
     pub fn resolve(&self, segs: &[&str], kind: Kind) -> Option<(&'a Lib, String)> {
         let last = plain(segs.last()?);
@@ -835,7 +840,9 @@ pub fn expand_items(text: &str, libs: &[Lib], env: &[(String, String)]) -> Resul
             s.push_str(&text[e..iend]);
             // (on one line: comments in the item would comment out the rest of the line once its line breaks go, so
             // then the item goes as tokens, read from its lines)
-            let mut s = if s.contains("//") || s.contains("/*") { one_line(&s).map_err(here)? } else { s.replace(['\n', '\r'], " ") };
+            // (and so does one with a literal, whose line breaks are its own: written `\n` there)
+            let lit = s.contains('"') || s.contains('\'');
+            let mut s = if lit || s.contains("//") || s.contains("/*") { one_line(&s).map_err(here)? } else { s.replace(['\n', '\r'], " ") };
             for (_, _, d) in &derives {
                 if let Some((lib, name)) = d {
                     s.push(' ');

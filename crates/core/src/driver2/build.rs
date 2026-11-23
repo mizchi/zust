@@ -1469,6 +1469,11 @@ impl Session2 {
                             if let Some((nl, body)) = rest.split_once('\n') {
                                 if let Ok(nl) = nl.parse::<usize>() {
                                     if nl <= body.len() && body.is_char_boundary(nl) {
+                                        // (a cached proc macro's output: as when it expanded here, the hoisting looks
+                                        // for its marked lines)
+                                        if !pms.is_empty() && body.contains(crate::lexer::PM_MARK) {
+                                            crate::lexer::PM_EXPANDED.store(true, std::sync::atomic::Ordering::Relaxed);
+                                        }
                                         dep_v[i] = Some((body[nl..].to_string(), map.clone()));
                                         own_v[i] = Some((body[..nl].to_string(), map));
                                         continue;
