@@ -2962,7 +2962,7 @@ fn part16_review() {
 /// `&mut c[i]`): it was "cannot index", and what it borrows is the struct, so a write of another field while it is
 /// used is E0506 (borrowck/issue-81365-6.rs); two shared ones and a `&mut` one after them are fine
 #[test]
-fn part16_index_through_deref() {
+fn part17_index_through_deref() {
     let d = check("use std::ops::Deref;\n\nstruct Container {\n    target: Vec<()>,\n    container_field: bool,\n}\n\nimpl Deref for Container {\n    type Target = [()];\n    fn deref(&self) -> &Self::Target {\n        &self.target\n    }\n}\n\nimpl Container {\n    fn bad_borrow(&mut self) {\n        let first = &self[0];\n        self.container_field = true;\n        first;\n    }\n}\n\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 18 && d[0].1.contains("because it is borrowed"), "{d:?}");
     assert_eq!(check("use std::ops::{Deref, DerefMut};\nstruct C { v: Vec<i32>, s: String }\nimpl Deref for C { type Target = [i32]; fn deref(&self) -> &[i32] { &self.v } }\nimpl DerefMut for C { fn deref_mut(&mut self) -> &mut [i32] { &mut self.v } }\nstruct S(String);\nimpl Deref for S { type Target = str; fn deref(&self) -> &str { &self.0 } }\nfn main() {\n    let mut c = C { v: vec![1, 2, 3], s: String::new() };\n    let a = &c[0];\n    let b = &c[1];\n    println!(\"{} {} {}\", a, b, c[2]);\n    c[1] = 20;\n    let m = &mut c[2];\n    *m += 10;\n    println!(\"{:?} {} {}\", &c[..], c.len(), c.s.len());\n    let r = &mut c;\n    r[0] = 7;\n    println!(\"{}\", r[0] + r[1]);\n}\n"), vec![]);
@@ -2972,7 +2972,7 @@ fn part16_index_through_deref() {
 /// is E0507, as rustc's "behind a raw pointer" (borrowck/borrowck-move-from-unsafe-ptr.rs); a copy and a `ref` binding
 /// are not
 #[test]
-fn part16_raw_pointer_moves() {
+fn part17_raw_pointer_moves() {
     let d = check("unsafe fn foo(x: *const Box<isize>) -> Box<isize> {\n    let y = *x;\n    return y;\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("behind a raw pointer"), "{d:?}");
     let d = check("struct S { a: String }\nunsafe fn foo(x: *const S) -> String {\n    (*x).a\n}\nfn main() {}\n");
@@ -2987,7 +2987,7 @@ fn part16_raw_pointer_moves() {
 /// pointer" (borrowck/no-invalid-mut-suggestion-for-raw-pointer-issue-127562.rs); through a `*mut` one, or of a
 /// `*const` value itself, it is fine
 #[test]
-fn part16_const_pointer_writes() {
+fn part17_const_pointer_writes() {
     let d = check("fn main() {\n    let val = 2;\n    let ptr = &raw const val;\n    unsafe { *ptr = 3; }\n}\n");
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("behind a `*const` pointer"), "{d:?}");
     let d = check("struct P { x: i32, a: [i32; 2] }\nunsafe fn f(p: *const P, q: *mut P) {\n    (*q).x = 1;\n    (*q).a[0] += 1;\n    (*p).a[1] += 1;\n}\nfn main() {}\n");
@@ -3000,7 +3000,7 @@ fn part16_const_pointer_writes() {
 /// captures by value (`Box::new(|| x)`, `Box::new(move || v)`) is E0507, as where a bound wants it. A `Box<dyn FnOnce()>`
 /// may move it
 #[test]
-fn part16_boxed_fn_closures() {
+fn part17_boxed_fn_closures() {
     let d = check("fn f() -> Box<dyn Fn() -> Box<i32>> {\n    let x = Box::new(0);\n    Box::new(|| x)\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("a captured variable in an `Fn` closure"), "{d:?}");
     let d = check("fn f() -> Box<dyn Fn() -> Box<i32>> {\n    let x = Box::new(0);\n    Box::new(move || x)\n}\nfn main() {}\n");
@@ -3008,4 +3008,15 @@ fn part16_boxed_fn_closures() {
     let d = check("fn g() -> Box<dyn FnMut() -> Vec<i32>> {\n    let v = vec![1];\n    Box::new(move || v)\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("a captured variable in an `FnMut` closure"), "{d:?}");
     assert_eq!(check("fn f() -> Box<dyn FnOnce() -> Box<i32>> {\n    let x = Box::new(0);\n    Box::new(|| x)\n}\nfn g() -> Box<dyn FnMut() -> usize> {\n    let mut v = vec![1];\n    Box::new(move || { v.push(2); v.len() })\n}\nfn main() { println!(\"{} {}\", f()(), g()()); }\n"), vec![]);
+}
+
+/// A move out of an array that is no local's place, a constant's or a temporary's (`C[0]`, `mk()[0]`, `[S][0]`): E0508,
+/// as out of a local's (borrowck/move-error-in-promoted*.rs). A copy, a borrow and a method's `&self` are fine
+#[test]
+fn part17_non_place_array_moves() {
+    let d = check("fn mk() -> [String; 2] { [String::new(), String::new()] }\nfn main() {\n    let s = mk()[0];\n    println!(\"{}\", s);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("a non-copy array (E0508)"), "{d:?}");
+    let d = check("#[derive(Clone)]\nstruct S2;\nfn main() {\n    const C: [S2; 1] = [S2];\n    let _ = C[0].clone();\n    let _s = C[0];\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("`[S2; 1]`, a non-copy array"), "{d:?}");
+    assert_eq!(check("const C: [i32; 2] = [1, 2];\nfn mk() -> [String; 2] { [String::new(), String::new()] }\nfn main() {\n    let a = C[0];\n    let n = mk()[1].len();\n    let r = &mk()[0];\n    let c = mk()[0].clone();\n    println!(\"{} {} {} {}\", a, n, r, c);\n}\n"), vec![]);
 }

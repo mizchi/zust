@@ -1414,6 +1414,13 @@ impl Cx<'_> {
                 }
                 let p = p?;
                 if self.bk_on() && !self.bk_ty(p.ty()).0 {
+                    // (out of an array that is no local's place (a constant's, a temporary: `C[0]`, `[S][0]`): E0508,
+                    // as out of a local's, which the borrow check's events report)
+                    if let Some(at @ Ty::Array(..)) = self.peek(b) {
+                        if self.bk.level >= 1 && self.bk_place(e).is_none() {
+                            return err(expr_start(e), format!("cannot move out of type `{}`, a non-copy array (E0508)", self.prog.tn(at)));
+                        }
+                    }
                     self.bk_acc(e, borrowck::Acc::Move);
                 }
                 Ok(self.read(p))
