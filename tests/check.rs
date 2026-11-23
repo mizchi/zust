@@ -325,4 +325,28 @@ fn undeclared_names_in_uncalled_generic_fns() {
     assert!(s.check(ok).is_empty(), "{:?}", s.check(ok));
     let newline = "use\nstd::convert::identity;\nfn g<T: Copy>(x: T) -> T {\n    let f = identity;\n    f(x)\n}\nfn main() {}\n";
     assert!(s.check(newline).is_empty(), "{:?}", s.check(newline));
+    let semi = "use std::convert::{ /* ; */ identity };\nfn g<T: Copy>(x: T) -> T {\n    let f = identity;\n    f(x)\n}\nfn main() {}\n";
+    assert!(s.check(semi).is_empty(), "{:?}", s.check(semi));
+}
+
+/// `#![deny(dead_code)]` below the item level: a field nothing reads (a derived Debug / Clone reads none), a variant
+/// nothing constructs (a pattern does not, a `match` scrutinee does), an inherent impl's const nothing names, a type
+/// alias nothing names. `#![allow(unused_variables)]` leaves dead_code denied; a type named only in `*const T` or an
+/// impl header, a union field something writes and a tuple struct's `()` field are used
+#[test]
+fn dead_code_fields_variants_members_aliases() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let field = "#![allow(unused_variables)]\n#![deny(dead_code)]\n#[derive(Debug, Clone)]\nstruct A {\n    x: u8,\n    f: u8,\n}\nfn main() {\n    let a = A { x: 1, f: 2 };\n    let _ = a.x;\n}\n";
+    assert_eq!(first(field), Some((6, "field `f` is never read".to_string())));
+    let tuple = "#![deny(dead_code)]\nstruct T(u8, u8);\nstruct U(u8, u8);\nfn main() {\n    let t = T(1, 2);\n    let u = U(1, 2);\n    let _ = (t.0, u.0, u.1);\n}\n";
+    assert_eq!(first(tuple), Some((2, "field `1` is never read".to_string())));
+    let variant = "#![deny(dead_code)]\nenum E {\n    A,\n    B,\n}\nfn main() {\n    match E::A {\n        E::A => {}\n        E::B => {}\n    }\n}\n";
+    assert_eq!(first(variant), Some((4, "variant `B` is never constructed".to_string())));
+    let member = "#![deny(dead_code)]\nstruct S;\nimpl S {\n    const C: u8 = 1;\n}\nfn main() {\n    let _ = S;\n}\n";
+    assert_eq!(first(member), Some((4, "associated constant `C` is never used".to_string())));
+    let alias = "#![deny(dead_code)]\ntype Used = u8;\ntype Unused = u8;\nfn id(x: Used) -> Used {\n    x\n}\nfn main() {\n    id(0);\n}\n";
+    assert_eq!(first(alias), Some((3, "type alias `Unused` is never used".to_string())));
+    let ok = "#![deny(dead_code)]\nstruct W;\ntype WI = W;\ntrait T {\n    fn t(&self) {}\n}\nimpl T for WI {}\nenum V {}\nextern \"C\" {\n    fn free(p: *const V);\n}\nunion U {\n    a: u8,\n    b: u8,\n}\nstruct P(u8, ());\nfn main() {\n    W.t();\n    unsafe { free(std::ptr::null()) };\n    let u = U { a: 1 };\n    let _ = unsafe { u.b };\n    let p = P(1, ());\n    let _ = p.0;\n}\n";
+    assert_eq!(first(ok), None);
 }

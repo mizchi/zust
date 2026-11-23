@@ -20,6 +20,7 @@ pub type R<T> = Result<T, String>;
 /// ビルド (機械語・オブジェクト・リンク・ワークスペース)。feature `build` (既定) のときだけ
 #[cfg(feature = "build")]
 mod build;
+mod dead;
 #[cfg(feature = "build")]
 pub use build::*;
 
@@ -1296,6 +1297,26 @@ impl Session2 {
                 };
                 levels.contains(&n) && (last("forbid").is_some() || last("allow") < last("deny"))
             };
+            // (a lint of a group: denied by its name, the group's or `warnings`, unless an allow of its name or the
+            // group's comes after that (`#![allow(unused_variables)]` leaves dead_code as it is); forbid stays)
+            let last_of = |a: &str, names: &[&str]| -> Option<usize> {
+                let open = format!("#![{a}(");
+                c.match_indices(&open)
+                    .filter(|(i, _)| {
+                        let rest = &c[i + open.len()..];
+                        let list = &rest[..rest.find(')').unwrap_or(rest.len())];
+                        list.split(',').any(|x| names.contains(&x.trim()))
+                    })
+                    .map(|(i, _)| i)
+                    .last()
+            };
+            let grouped = |n: &str, group: &str| {
+                let names = [n, group, "warnings"];
+                let forbid = last_of("forbid", &names);
+                let deny = last_of("deny", &names).max(forbid);
+                deny.is_some() && (forbid.is_some() || last_of("allow", &[n, group]) < deny) && last_of("expect", &[n, group]).is_none()
+            };
+            deny_dead_code = grouped("dead_code", "unused");
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_mismatched_lts = lint("mismatched_lifetime_syntaxes");
@@ -1312,6 +1333,10 @@ impl Session2 {
         if deny_dead_code && self.ctx.lib.is_none() {
             // (a `pub` item counts as used, except in a binary under `deny(dead_code_pub_in_binary)`)
             if let Some((line, msg)) = first_dead_item(&src, &items[..user_src], deny_dead_pub && !lib_attr) {
+                return Err(format!("{line}:1: {msg}"));
+            }
+            // (a field nothing reads, a variant nothing constructs, an inherent impl's const or fn nothing names)
+            if let Some((line, msg)) = dead::first_dead_part(&src, &items[..user_src]) {
                 return Err(format!("{line}:1: {msg}"));
             }
         }
@@ -1487,7 +1512,22 @@ impl Session2 {
                 if b - a != 3 || sb.get(a..b) != Some(b"use") {
                     continue;
                 }
-                let end = sb[b..it.end.min(sb.len())].iter().position(|&c| c == b';').map_or(it.end, |k| b + k);
+                // (the declaration's `;`: not one in a comment, `use a::{ /* ; */ b };`)
+                let stop = it.end.min(sb.len());
+                let mut end = stop;
+                let mut i = b;
+                while i < stop {
+                    if sb[i] == b'/' && sb.get(i + 1) == Some(&b'/') {
+                        i = sb[i..stop].iter().position(|&c| c == b'\n').map_or(stop, |k| i + k);
+                    } else if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
+                        i = src[i + 2..stop].find("*/").map_or(stop, |k| i + 2 + k + 2);
+                    } else if sb[i] == b';' {
+                        end = i;
+                        break;
+                    } else {
+                        i += 1;
+                    }
+                }
                 // (its identifier tokens: not the words of a comment in it)
                 prog.use_names.extend(it.idents.iter().map(|&(x, y)| (x as usize, y as usize)).filter(|&(x, y)| x > b && y <= end).filter_map(|(x, y)| src.get(x..y)).map(str::to_string));
             }
@@ -2946,6 +2986,7 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
     let sym = |k: usize, c: u8| toks[k].0 == 1 && b[toks[k].1] == c;
     // (uses of each name: every occurrence but the definition's, the one after `impl` / `for` in an impl header)
     let mut uses: crate::fxhash::FxMap<&str, usize> = Default::default();
+    let mut impl_uses: crate::fxhash::FxMap<&str, usize> = Default::default();
     let mut in_impl_header = false;
     for k in 0..toks.len() {
         let w = word(k);
@@ -2958,10 +2999,15 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
         if toks[k].0 != 0 {
             continue;
         }
-        let defn = k > 0 && matches!(word(k - 1), "fn" | "struct" | "enum" | "const" | "static" | "trait" | "union" | "type");
+        // (not a raw pointer's `*const T`)
+        let defn = k > 0 && matches!(word(k - 1), "fn" | "struct" | "enum" | "const" | "static" | "trait" | "union" | "type") && !(k > 1 && sym(k - 2, b'*'));
         let impl_self = in_impl_header && k > 0 && (word(k - 1) == "impl" || word(k - 1) == "for" || sym(k - 1, b'>'));
         if !defn && !impl_self {
             *uses.entry(w).or_default() += 1;
+        }
+        // (a type alias an impl header names is used: `impl Tr for Alias`)
+        if impl_self {
+            *impl_uses.entry(w).or_default() += 1;
         }
     }
     for it in items {
@@ -3005,9 +3051,11 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
             "const" => format!("constant `{shown}` is never used"),
             "static" => format!("static `{shown}` is never used"),
             "trait" => format!("trait `{shown}` is never used"),
+            "type" => format!("type alias `{shown}` is never used"),
             _ => continue,
         };
-        if uses.get(name).copied().unwrap_or(0) == 0 {
+        let alias_in_impl = kw == "type" && impl_uses.get(name).copied().unwrap_or(0) > 0;
+        if uses.get(name).copied().unwrap_or(0) == 0 && !alias_in_impl {
             let line = it.line + text[..t[k].1].matches('\n').count();
             return Some((line, what));
         }
