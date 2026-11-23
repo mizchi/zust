@@ -1894,6 +1894,21 @@ impl Cx<'_> {
         deref.and_then(|d| cands.iter().copied().find(|&c| fits(c, d))).unwrap_or(id)
     }
 
+    /// A placeholder's type parameter is `'static` by its function's bounds (`T: 'static`, or a trait whose `Self` must
+    /// be `'static`)
+    pub(crate) fn placeholder_static(&self, s: u32) -> bool {
+        let Some((id, k)) = self.prog.placeholder_of(s) else { return true };
+        let sig = &self.prog.sigs[id as usize];
+        let Some((name, bounds)) = sig.generics.get(k as usize) else { return true };
+        let by_outlives = sig.regions.as_deref().is_some_and(|r| r.ty_outlives.iter().any(|(t, c)| t == name && *c == crate::types::R_STATIC));
+        let by_trait = bounds.iter().any(|b| {
+            let n = b.split('<').next().unwrap_or(b).trim();
+            let n = n.rsplit("::").next().unwrap_or(n);
+            self.prog.trait_self_outlives.iter().any(|(t, so)| t.rsplit("::").next() == Some(n) && so.iter().any(|x| x == "static"))
+        });
+        by_outlives || by_trait || bounds.iter().any(|b| b.trim() == "'static")
+    }
+
     /// Program::trait_scopes at this function: the traits of a colliding name in scope where it is (the innermost
     /// scope around the source line of its item; a closure is in its fn's). None for the prelude, or when no trait
     /// name collides
@@ -2392,6 +2407,24 @@ impl Cx<'_> {
         // (a callee that requires 'static (`fn f<T: 'static>`, `&'static T`): from here on, checked)
         if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && self.prog.sigs[id as usize].regions.as_deref().is_some_and(Self::callee_needs_static) {
             self.rg_late_on();
+        }
+        // (in a closure's body, whose region check has no placeholders for its function's type parameters: a callee
+        // that requires `T: 'static` of the function's T, which none of the function's bounds gives (E0310))
+        if self.user_code && self.inline_depth == 0 && self.prog.closures.contains_key(&self.rg.base) {
+            if let Some(r) = self.prog.sigs[id as usize].regions.as_deref() {
+                for (tp, c) in &r.ty_outlives {
+                    if *c != crate::types::R_STATIC {
+                        continue;
+                    }
+                    let Some(g) = sig0.generics.iter().position(|x| x.0 == *tp) else { continue };
+                    if let Some(Some(Ty::Struct(s))) = sol0.get(g) {
+                        if self.prog.is_placeholder(*s) && !self.placeholder_static(*s) {
+                            let n = self.prog.structs[*s as usize].name.trim_end_matches('#').to_string();
+                            return Err(self.at(if span.line == 0 { rg_sp } else { span }, format!("the parameter type `{n}` may not live long enough (it must outlive `'static`) (E0310)")));
+                        }
+                    }
+                }
+            }
         }
         let sol_rg = if self.rg_on() { Some(sol0.clone()) } else { None };
         let (target, sig) = self.resolve_call(id, &arg_tys, sol0, expected, span)?;

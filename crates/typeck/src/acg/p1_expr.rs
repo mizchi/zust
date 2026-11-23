@@ -3790,7 +3790,7 @@ impl Cx<'_> {
         }
         // (the region check reports at the call: call_fn is given no span for it. Also when it is off, but may begin
         // at the call (a callee that requires 'static: `s::<T>()`))
-        if self.rg_on() || self.rg.eligible {
+        if self.rg_on() || self.rg.eligible || self.user_code {
             self.rg.call_sp = borrowck::pos(c);
         }
         // (the lifetimes written on the type: `A::<'a>::new`, `<A<'a>>::new`, `<A<'a> as Tr>::f`)

@@ -2491,3 +2491,12 @@ fn part14_ref_rest_binding() {
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("because it is borrowed"), "{d:?}");
     assert_eq!(check("fn main() {\n    let mut a = [1, 2, 3, 4];\n    let t = match a {\n        [_, ref tail @ ..] => tail.len(),\n    };\n    a[2] = 0;\n    let [x, ref rest @ .., y] = a;\n    let n = rest.len();\n    a[0] = 9;\n    println!(\"{} {} {} {} {:?}\", t, x, y, n, a);\n}\n"), vec![]);
 }
+
+/// A closure's call of a fn that requires `T: 'static` of its function's T (nll/issue-98693.rs): E0310 when no bound
+/// of the function gives it (`T: 'static`, a where clause, a trait whose `Self` is `'static`)
+#[test]
+fn part14_static_param_in_closure() {
+    let d = check("fn s2<T: 'static>() {}\nfn test2<T>() {\n    let c = || {\n        s2::<T>();\n    };\n    c();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("the parameter type `T` may not live long enough"), "{d:?}");
+    assert_eq!(check("use std::any::Any;\nfn s2<T: 'static>() {}\nfn a<T: 'static>() {\n    let c = || s2::<T>();\n    c();\n}\nfn b<T>()\nwhere\n    T: 'static,\n{\n    let c = || s2::<T>();\n    c();\n}\nfn d<T: Any>() {\n    let c = || s2::<T>();\n    c();\n}\ntrait St: 'static {}\nfn e<T: St>() {\n    let c = || s2::<T>();\n    c();\n}\nfn g<T: Send + 'static>(t: T) {\n    let c = move || {\n        std::thread::spawn(move || drop(t));\n    };\n    c();\n}\nfn main() {\n    a::<u8>();\n    b::<u8>();\n\n    g(1u8);\n}\n"), vec![]);
+}
