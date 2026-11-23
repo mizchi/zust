@@ -2150,11 +2150,15 @@ impl Cx<'_> {
             }
             self.bk_ev(Ev::Dead(id, sp));
         }
-        // (the temporaries its `let`s extended)
+        // (the temporaries its `let`s extended: all of this scope's, also below a holder of an enclosing scope's
+        // pushed later (a block's value, bk_block_value: `let r = { let ref x = make(); x };`))
         let depth = self.scopes.len().saturating_sub(1);
-        while self.bk.scope_temps.last().is_some_and(|x| x.0 >= depth) {
-            let (_, id) = self.bk.scope_temps.pop().unwrap();
-            self.bk_ev(Ev::Dead(id, sp));
+        if self.bk.scope_temps.iter().any(|x| x.0 >= depth) {
+            let (gone, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.bk.scope_temps).into_iter().partition(|x| x.0 >= depth);
+            self.bk.scope_temps = kept;
+            for (_, id) in gone.into_iter().rev() {
+                self.bk_ev(Ev::Dead(id, sp));
+            }
         }
     }
 

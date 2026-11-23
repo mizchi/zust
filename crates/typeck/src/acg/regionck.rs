@@ -1946,15 +1946,27 @@ impl Cx<'_> {
                     deref(&mut ds, tr.remove(0), m);
                     t = *i;
                 }
+                // (a region of its own, as an explicit reborrow's, which the borrow check's loan of it follows: kept
+                // to the function's end when it must outlive a lifetime of the signature (`let r: &'a i32 = &x;`))
+                // (through `&mut` links only, the reborrow goes through the borrow of the local the coercion takes
+                // (`&**(&x)`): it lives no longer than x, E0515 when returned (`&x` of `x: &'a mut i32` as `&'a i32`).
+                // A shared link stops that there)
                 if let (Ty::Ref(m, _), Some(&last)) = (t, tr.first()) {
                     deref(&mut ds, last, m);
-                    if ds.len() > 1 {
-                        let r = self.rg.var();
-                        let sp = super::borrowck::pos(e);
-                        for d in ds {
-                            self.rg.edge(d, r, sp);
+                    let all_mut = ds.len() == n + 1 && m;
+                    let r = self.rg.var();
+                    let sp = super::borrowck::pos(e);
+                    for d in ds {
+                        self.rg.edge(d, r, sp);
+                    }
+                    tr[0] = r;
+                    if self.rg.closure.is_none() {
+                        self.rg.reborrows.push((&**x as *const Expr as usize, r));
+                        if all_mut {
+                            if let Some(name) = place_text(x) {
+                                self.rg.loans.push((r, name, sp));
+                            }
                         }
-                        tr[0] = r;
                     }
                 }
                 Some((t, tr))

@@ -2933,4 +2933,14 @@ fn part16_review() {
     assert_eq!(check("fn main() {\n    let f: &dyn Fn(&i32) -> &i32 = &|v| v;\n    let g: &dyn Fn(&i32) -> i32 = &|v| *v;\n    let mut x = 1;\n    let r = f(&x);\n    println!(\"{}\", r);\n    let n = g(&x);\n    x = 2;\n    println!(\"{} {}\", n, x);\n}\n"), vec![]);
     assert_eq!(check("fn f<'a, 'b>(x: &'a &'b i32) -> &'b i32 {\n    &x\n}\nfn g<'a, 'b>(x: &'a mut &'b i32) -> &'b i32 {\n    &x\n}\nfn main() {}\n"), vec![]);
     assert_eq!(check_ed("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) { println!(\"{}\", self.0); } }\nfn main() {\n    let y = 1;\n    { let x = 0; let _ = x; D(&y) };\n}\n", 2024), vec![]);
+    // (the second round: a `let ref` temporary of a block ends with it, also when a holder of the enclosing block's
+    // value is pushed after it; a coerced `&x` keeps its loan as long as the lifetime it is annotated with, and through
+    // `&mut` links only it lives no longer than x (E0515 when returned))
+    let d = check("fn make() -> String { String::from(\"a\") }\nfn main() {\n    let r = { let ref x = make(); x };\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("temporary value dropped while borrowed"), "{d:?}");
+    let d = check("fn f<'a>(x: &'a mut i32) {\n    let r: &'a i32 = &x;\n    *x = 2;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    let d = check("fn f(x: &mut i32) {\n    let r: &i32 = &x;\n    println!(\"{}\", r);\n    *x = 2;\n}\nfn g<'a>(x: &'a mut i32) -> &'a i32 {\n    &x\n}\nfn h(v: &mut Vec<i32>) -> usize {\n    let s: &Vec<i32> = &v;\n    let n = s.len();\n    v.push(1);\n    n\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0515"), "{d:?}");
+    assert_eq!(check("fn make() -> String { String::from(\"a\") }\nfn main() {\n    let r = { let ref x = make(); x.len() };\n    println!(\"{}\", r);\n}\n"), vec![]);
 }
