@@ -1,0 +1,56 @@
+name: Pages
+
+# The site on GitHub Pages (served from the gh-pages branch):
+#   /            site/index.html, an introduction to zust
+#   /dashboard/  site/dashboard/, the development retrospective; its data comes from scripts/retro/extract.py
+#   /dev/bench/  written by the Benchmark workflow (github-action-benchmark); left as it is here
+# It runs after each benchmark run, since the tests/ui pass rates on the dashboard come from that run's results.
+on:
+  workflow_run:
+    workflows: [Benchmark]
+    types: [completed]
+    branches: [main]
+  push:
+    branches: [main]
+    paths: [site/**, scripts/retro/**, .github/workflows/pages.yml]
+  workflow_dispatch:
+
+concurrency:
+  group: pages-site
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  site:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Extract the dashboard data
+        run: python3 scripts/retro/extract.py --out out/site/dashboard/data
+      - name: Assemble the site
+        run: cp -R site/. out/site/
+      - name: Publish to gh-pages (keeping dev/bench)
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git worktree add -B gh-pages ../pages origin/gh-pages
+          for i in 1 2 3 4; do
+            (cd ../pages && git reset -q --hard origin/gh-pages)
+            rm -rf ../pages/dashboard
+            cp -R out/site/. ../pages/
+            cd ../pages
+            git add -A index.html style.css dashboard
+            if git diff --cached --quiet; then echo "site unchanged"; exit 0; fi
+            git commit -q -m "site: / and /dashboard/ from ${GITHUB_SHA::7}"
+            if git push -q origin gh-pages; then exit 0; fi
+            cd - >/dev/null
+            sleep $((i * 5))
+            git fetch -q origin gh-pages
+          done
+          exit 1
