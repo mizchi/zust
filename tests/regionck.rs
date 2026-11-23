@@ -2533,6 +2533,10 @@ fn part14_review2() {
     let d = check("fn needs_static<T: 'static>() {}\nfn f<T>() {\n    let c = || needs_static::<Option<T>>();\n    c();\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0310"), "{d:?}");
     assert_eq!(check("fn needs_static<T: 'static>() {}\nfn f<T: 'static>() {\n    let c = || needs_static::<Option<Box<T>>>();\n    c();\n}\nfn main() {}\n"), vec![]);
+    // (a block argument whose value is such a local reserves the receiver too: `v.ext({ w })` is E0502)
+    let d = check("struct V;\nimpl V {\n    fn ext(&mut self, _: &V) {}\n}\nfn main() {\n    let mut v = V;\n    let w = &v;\n    v.ext({ w });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("cannot borrow `v` as mutable"), "{d:?}");
+    assert_eq!(check("struct V;\nimpl V {\n    fn ext(&mut self, _: &V) {}\n}\nfn main() {\n    let mut v = V;\n    let u = V;\n    let w = &u;\n    v.ext({ w });\n    v.ext({ let x = &u; x });\n}\n"), vec![]);
 }
 
 /// From the review of #69: a parameter's reference bound to a local (`let y = x;`) is still captured by a no-capture

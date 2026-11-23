@@ -1261,7 +1261,15 @@ impl Cx<'_> {
                     // `&mut` is taken)
                     let mut holds = false;
                     for a in margs.iter() {
-                        if let Expr::Path(None, p) = strip_paren(a) {
+                        // (also a block's value: `v.ext({ w })`)
+                        let mut a: &Expr = strip_paren(a);
+                        while let Expr::Block(None, _, b) = a {
+                            match b.stmts.last() {
+                                Some(crate::parse::Stmt::Expr(t, false)) => a = strip_paren(t),
+                                _ => break,
+                            }
+                        }
+                        if let Expr::Path(None, p) = a {
                             if let (1, Some((_, t))) = (p.segs.len(), self.lookup(&p.segs[0].name)) {
                                 holds |= self.bk_ty(t).1;
                             }
