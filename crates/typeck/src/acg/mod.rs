@@ -2614,10 +2614,11 @@ impl Cx<'_> {
         if let Some(q) = q {
             let t = self.parse_ty(q).ok()?;
             let m = p.segs.last()?.name.clone();
-            // (`<S as Tr>::m`: Tr's impl, also beside an inherent `S::m` of the same name)
+            // (`<S as Tr>::m`: Tr's impl, also beside an inherent `S::m` of the same name; or Tr's default, not another
+            // trait's of the same name)
             if p.segs.len() >= 2 {
                 let tr = &p.segs[p.segs.len() - 2].name;
-                if let Some(i) = self.trait_candidate(&format!("{}::{m}", self.ty_key(t)), tr) {
+                if let Some(i) = self.trait_candidate(&format!("{}::{m}", self.ty_key(t)), tr).or_else(|| self.trait_default(tr, &m, t)) {
                     return Some((i, &self.prog.sigs[i as usize]));
                 }
             }
@@ -2738,6 +2739,12 @@ impl Cx<'_> {
         // (the literal keeps its arguments too: struct_lit_inner checks them against the fields and an update's base,
         // also when the annotation, with a `_`, gives no type)
         Some(Box::leak(Box::new(Stmt::Let(pat, Some(crate::parse::Ty::Path(None, path.clone())), Some(init.clone()), None, lp))))
+    }
+
+    /// Trait tr's default fn m (one with a body), when t implements tr
+    pub fn trait_default(&self, tr: &str, m: &str, t: Ty) -> Option<u32> {
+        let d = self.prog.traits.get(tr)?.iter().copied().find(|&d| self.prog.sigs[d as usize].has_body && self.prog.names[d as usize].rsplit("::").next() == Some(m))?;
+        self.prog.implements(t, tr).then_some(d)
     }
 
     /// The name methods of t are indexed under (`S` for a struct's instances too, `u8`, `#tuple0`)

@@ -26,6 +26,12 @@ impl Cx<'_> {
             if let Expr::Lit(t, _) = strip_paren(x) {
                 if let Some(Lit::Int(i)) = lit::lit(t) {
                     let lit_e: &Expr = strip_paren(x);
+                    // (`-129i8` / `let x: i8 = -129;`: past the type, overflowing_literals; `-128i8` is not)
+                    if let (Some(t), true) = (Ty::from_suffix(i.suffix()).or(expected.filter(|t| t.is_int())), self.user_code && !self.prog.allow_overflowing_literals) {
+                        if t.signed() && !super::p2_call::lit_fits(t, i.base10_digits(), true) {
+                            return err(SP, format!("literal out of range for `{}`", self.prog.tn(t)));
+                        }
+                    }
                     let ty = Ty::from_suffix(i.suffix())
                         .or(expected.filter(|t| t.is_int()))
                         .or_else(|| self.lets.get(&(lit_e as *const Expr as usize)).copied().filter(|t| t.is_int()))

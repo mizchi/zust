@@ -193,6 +193,7 @@ check-pass	associated-type-bounds/supertrait-where-referencing-self.rs
 check-pass	associated-type-bounds/traits-assoc-anonymized.rs
 check-pass	associated-type-bounds/traits-assoc-type-macros.rs
 compile-fail	associated-types/ambiguous-associated-type-error-78622.rs
+run-pass	associated-types/assoc-type-add-output-via-operator-syntax.rs
 check-pass	associated-types/assoc-type-in-generic-struct-bound.rs
 run-pass	associated-types/assoc-type-in-struct-constructor.rs
 check-pass	associated-types/assoc-type-in-unused-where-clause.rs
@@ -334,6 +335,7 @@ run-pass	associated-types/projection-as-type-alias.rs
 compile-fail	associated-types/recursive-associated-type-overflow-21946.rs
 compile-fail	associated-types/report-unsatisfied-where-bound-error.rs
 compile-fail	associated-types/resolve-method-with-missing-assoc-type.rs
+run-pass	associated-types/ret-associated-type.rs
 run-pass	associated-types/same-name-assoc-type-and-method.rs
 check-pass	associated-types/self-type-alias-for-assoc-type.rs
 run-pass	associated-types/self-type-projection-dyn-coerce.rs
@@ -2010,6 +2012,7 @@ run-pass	deref/deref-in-for-loop.rs
 check-pass	deref/deref-mut-method-through-box.rs
 run-pass	deref/deref-newtype-method-call.rs
 run-pass	deref/deref-newtype-slice-coercion.rs
+check-pass	deref/deref-target-in-fn-type.rs
 compile-fail	deref/option-result-as_deref.rs
 compile-fail	derived-errors/issue-30580.rs
 compile-fail	derived-errors/issue-31997-1.rs
@@ -2284,6 +2287,7 @@ check-pass	enum/dead-code-associated-function.rs
 compile-fail	enum/enum-and-module-in-same-scope.rs
 run-pass	enum/enum-discrim-manual-sizing.rs
 check-pass	enum/enum-discrim-range-overflow.rs
+compile-fail	enum/enum-discrim-too-small2.rs
 run-pass	enum/enum-discrim-width-stuff.rs
 compile-fail	enum/enum-discriminant-type-mismatch-8761.rs
 run-pass	enum/enum-disr-val-pretty.rs
@@ -2613,6 +2617,7 @@ compile-fail	feature-gates/feature-gate-register_tool.rs
 compile-fail	feature-gates/feature-gate-stmt_expr_attributes.rs
 check-pass	feature-gates/feature-gate-strict_provenance_lints.rs
 compile-fail	feature-gates/feature-gate-super-let.rs
+compile-fail	feature-gates/feature-gate-supertrait-item-shadowing.rs
 compile-fail	feature-gates/feature-gate-test-binder-constraints.rs
 check-pass	feature-gates/feature-gate-test_unstable_lint.rs
 compile-fail	feature-gates/feature-gate-thread_local.rs
@@ -2883,10 +2888,12 @@ run-pass	generics/default-type-params-well-formedness.rs
 run-pass	generics/empty-generic-brackets-equiv.rs
 compile-fail	generics/enum-definition-with-outer-generic-parameter-5997.rs
 compile-fail	generics/generic-arg-mismatch-recover.rs
+run-pass	generics/generic-associated-type-deref-target-56237.rs
 run-pass	generics/generic-derived-type.rs
 compile-fail	generics/generic-enum-errors.rs
 run-pass	generics/generic-exterior-unique.rs
 compile-fail	generics/generic-extern-lifetime.rs
+run-pass	generics/generic-extern-mangle.rs
 compile-fail	generics/generic-extern.rs
 run-pass	generics/generic-fn-infer.rs
 run-pass	generics/generic-fn-twice.rs
@@ -3745,6 +3752,7 @@ compile-fail	lint/dead-code/unused-trait-with-assoc-ty.rs
 build-pass	lint/dead-code/unused-variant-pub.rs
 compile-fail	lint/dead-code/with-core-crate.rs
 run-pass	lint/dead-code/with-impl.rs
+compile-fail	lint/deny-overflowing-literals.rs
 check-pass	lint/empty-lint-attributes.rs
 check-pass	lint/expect-future_breakage-crash-issue-126521.rs
 check-pass	lint/expect-unused-imports.rs
@@ -3791,6 +3799,8 @@ run-pass	lint/issue-49588-non-shorthand-field-patterns-in-pattern-macro.rs
 check-pass	lint/issue-54099-camel-case-underscore-types.rs
 check-pass	lint/issue-57410-1.rs
 check-pass	lint/issue-57410.rs
+compile-fail	lint/issue-63364.rs
+compile-fail	lint/issue-79744.rs
 check-pass	lint/issue-81218.rs
 check-pass	lint/issue-87274-paren-parent.rs
 check-pass	lint/issue-90614-accept-allow-text-direction-codepoint-in-comment-lint.rs
@@ -3820,10 +3830,12 @@ check-pass	lint/lint-non-uppercase-usages.rs
 compile-fail	lint/lint-nonstandard-style-unicode-1.rs
 compile-fail	lint/lint-nonstandard-style-unicode-2.rs
 compile-fail	lint/lint-nonstandard-style-unicode-3.rs
+compile-fail	lint/lint-overflowing-int-136675.rs
 check-pass	lint/lint-pub-unreachable-for-nested-glob.rs
 compile-fail	lint/lint-qualification.rs
 compile-fail	lint/lint-range-endpoint-overflow.rs
 check-pass	lint/lint-raw-borrows-via-references.rs
+compile-fail	lint/lint-type-overflow.rs
 check-pass	lint/lints-on-stmt-not-overridden-130142.rs
 check-pass	lint/mention-lint-group-in-default-level-lint-note-issue-65464.rs
 check-pass	lint/missing-copy-implementations-non-exhaustive.rs
@@ -4224,6 +4236,8 @@ compile-fail	match/single-line.rs
 run-pass	match/struct-reference-patterns-12285.rs
 run-pass	match/tuple-usize-pattern-14393.rs
 compile-fail	match/uninhabited-granular-moves.rs
+compile-fail	match/validate-range-endpoints.rs
+compile-fail	methods/ambig-method-call-in-trait-impl.rs
 compile-fail	methods/assc-func-issue-149038.rs
 compile-fail	methods/assign-to-method.rs
 compile-fail	methods/associated-fn-turbofish-issue-159813.rs
@@ -4249,6 +4263,8 @@ compile-fail	methods/issues/issue-84495.rs
 compile-fail	methods/issues/issue-90315.rs
 compile-fail	methods/issues/issue-94581.rs
 compile-fail	methods/method-ambig-one-trait-unknown-int-type.rs
+compile-fail	methods/method-ambig-two-traits-from-impls.rs
+compile-fail	methods/method-ambig-two-traits-with-default-method.rs
 compile-fail	methods/method-ambiguity-no-rcvr.rs
 run-pass	methods/method-argument-inference-associated-type.rs
 compile-fail	methods/method-call-err-msg.rs
@@ -4285,6 +4301,7 @@ run-pass	methods/trait-method-resolution-7575.rs
 compile-fail	methods/tuple-suggestions-issue-142488.rs
 compile-fail	methods/untrimmed-path-type.rs
 compile-fail	methods/vec-autoderef-autoref.rs
+compile-fail	methods/wrong-ambig-message.rs
 compile-fail	mir/build-async-error-body-correctly.rs
 compile-fail	mir/drop-elaboration-after-borrowck-error.rs
 build-pass	mir/field-projection-invariant.rs
@@ -5759,6 +5776,7 @@ compile-fail	range/issue-54505.rs
 compile-fail	range/misleading-field-access-hint.rs
 compile-fail	range/range-1.rs
 compile-fail	range/range-negative-literal-unsigned-type.rs
+compile-fail	range/range-pattern-out-of-bounds-issue-68972.rs
 compile-fail	range/range-to-iterator-suggestion-issue-147749.rs
 check-pass	range/range_traits-4.rs
 check-pass	range/range_traits-5.rs
@@ -6942,6 +6960,7 @@ check-pass	suggestions/unused-imports.rs
 compile-fail	suggestions/use-parentheses-to-call-closure-issue-145404.rs
 compile-fail	suggestions/while-let-typo.rs
 compile-fail	suggestions/wrap-function-local-constructors.rs
+run-pass	supertrait-shadowing/trivially-false-subtrait.rs
 build-pass	symbol-names/issue-53912.rs
 compile-fail	sync/mutexguard-sync.rs
 compile-fail	sync/suggest-cell.rs
