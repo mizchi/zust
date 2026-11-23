@@ -3673,12 +3673,13 @@ impl Program {
             Ty::Struct(sid) => sid,
             _ => return false,
         };
-        // (a type parameter's placeholder whose bounds name no `Clone` (nor `Copy`, nor a trait with supertraits, which
-        // may imply it): `(&x).clone()` with x: T is the reference's copy)
+        // (a type parameter's placeholder: Clone when a bound is, or has Clone among its supertraits (`trait Dup:
+        // Clone`, also through others); a trait with supertraits may imply it. `(&x).clone()` of `fn f<T>(x: T)` is the
+        // reference's copy)
         if let Some(bs) = &self.structs[sid as usize].placeholder {
             return !bs.iter().any(|b| {
                 let n = b.split('<').next().unwrap_or(b).trim();
-                n.ends_with("Clone") || n.ends_with("Copy") || self.trait_supers.get(n).is_some_and(|s| !s.is_empty())
+                self.implies_clone(b, 0) || n.ends_with("Clone") || n.ends_with("Copy") || self.trait_supers.get(n).is_some_and(|s| !s.is_empty())
             });
         }
         let b = self.base_of(sid);
@@ -3696,6 +3697,23 @@ impl Program {
             return true;
         }
         self.clone_needs_args(b, own) && self.structs[sid as usize].args.iter().any(|&a| self.surely_not_clone(a, depth + 1))
+    }
+
+    /// A bound b makes its type Clone: `Clone`, `Copy`, a trait with one of them among its supertraits, or a trait zustc
+    /// does not know (which may have)
+    fn implies_clone(&self, b: &str, depth: u32) -> bool {
+        let tr = b.split('<').next().unwrap_or(b).trim();
+        let tr = tr.rsplit("::").next().unwrap_or(tr);
+        if matches!(tr, "Clone" | "Copy") || depth > 8 {
+            return true;
+        }
+        if matches!(tr, "Sized" | "?Sized" | "Send" | "Sync" | "Unpin" | "Debug" | "Display" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash") {
+            return false;
+        }
+        match self.trait_supers.get(tr) {
+            Some(ss) => ss.iter().any(|s| self.implies_clone(s, depth + 1)),
+            None => !self.traits.contains_key(tr),
+        }
     }
 
     /// The base b is a closure's struct (`f::{closure#0}`)

@@ -255,3 +255,18 @@ fn overflowing_literals_in_constants_and_after_allow_removed() {
     let d = s.check(&denied);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![3], "{d:?}");
 }
+
+/// Two type parameters nothing relates (no equation, no fn bound, no where clause) are mismatched in a generic fn
+/// nothing calls, a trait's default method too; `x.clone()` of `x: &T` without `T: Clone` is the reference's, and an
+/// operator on a reference to a parameter its bounds do not give is E0369. Parameters an equation, a bound or a where
+/// clause relates are not
+#[test]
+fn free_parameters_mismatch_and_reference_operators() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let src = "fn f<X, Y>(x: X, y: Y) -> X {\n    y\n}\ntrait Tr: Sized {\n    fn test<X>(u: X) -> Self {\n        u\n    }\n}\nfn ok<T>(x: &T) -> &T {\n    x.clone()\n}\nfn add_ref<T: Copy>(a: T) {\n    let _ = &a + a;\n}\nfn main() {}\n";
+    let d = s.check(src);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2, 6, 13], "{d:?}");
+    assert!(d[2].msg.contains("cannot add `T` to `&T`"), "{d:?}");
+    let related = "trait Tr { type Out; }\nfn g<T: Tr<Out = U>, U>(x: T::Out) -> U {\n    x\n}\nfn h<T, U>(x: T) -> U\nwhere\n    T: Into<U>,\n{\n    x.into()\n}\nfn r<T>(a: &T, b: T) -> T\nwhere\n    for<'x> &'x T: std::ops::Add<T, Output = T>,\n{\n    a + b\n}\nfn swap<A, B>(p: (A, B)) -> (B, A) {\n    (p.1, p.0)\n}\nfn pick<A: Clone, B>(a: &A, _b: B) -> A {\n    a.clone()\n}\nfn main() {}\n";
+    assert!(s.check(related).is_empty(), "{:?}", s.check(related));
+}
