@@ -2431,3 +2431,16 @@ fn part13_extend_and_fnmut_calls() {
     let ok = "fn main() {\n    let mut v = vec![1, 2];\n    let w = vec![3];\n    v.extend(w.iter());\n    v.extend(v.clone());\n    v.extend(v.iter().copied().collect::<Vec<_>>());\n    v.extend(&w);\n    let mut s = String::new();\n    let o = String::from(\"ab\");\n    s.extend(o.chars());\n    let mut counter = 0;\n    let mut tick1 = || {\n        counter += 1;\n    };\n    let mut tick2 = || {\n        tick1();\n    };\n    tick2();\n    let base = 3;\n    let read = || base + 1;\n    let call = || read() + 1;\n    let mut acc = vec![];\n    let mut push = |x: i32| acc.push(x);\n    let mut twice = |x: i32| {\n        push(x);\n        push(x);\n    };\n    twice(call());\n    println!(\"{:?} {} {} {:?}\", v, s, counter, acc);\n}\n";
     assert_eq!(check(ok), vec![]);
 }
+
+/// A reference copied out of what a call's result points into (`*names.first().unwrap()`, `m.first().copied()` with
+/// a `Vec<&str>`) holds what the vector holds, not the borrow of the vector: clearing it while the copy lives is fine.
+/// Dropping what the copy points to is not, and neither is a loan of the referent itself (`*id(&&s)`)
+#[test]
+fn part14_copied_out_references() {
+    assert_eq!(check("fn main() {\n    let a = String::from(\"a\");\n    let mut names: Vec<&str> = vec![&a];\n    let t = *names.first().unwrap();\n    names.clear();\n    let u = names.first().copied().unwrap_or(t);\n    names.clear();\n    let w = *names.first().unwrap_or(&\"x\");\n    names.clear();\n    println!(\"{} {} {}\", t, u, w);\n}\n"), vec![]);
+    assert_eq!(check("struct S<'a> {\n    items: Vec<&'a str>,\n}\nimpl<'a> S<'a> {\n    fn go(&mut self) -> &'a str {\n        let t = *self.items.first().unwrap();\n        self.items.clear();\n        t\n    }\n}\nfn main() {\n    let a = String::from(\"a\");\n    let mut s = S { items: vec![&a] };\n    println!(\"{}\", s.go());\n}\n"), vec![]);
+    let d = check("fn main() {\n    let a = String::from(\"a\");\n    let names: Vec<&str> = vec![&a];\n    let t = *names.first().unwrap();\n    drop(a);\n    println!(\"{}\", t);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot move out of `a` because it is borrowed"), "{d:?}");
+    let d = check("fn id<T>(t: T) -> T {\n    t\n}\nfn main() {\n    let s = String::from(\"a\");\n    let t = *id(&&s);\n    drop(s);\n    println!(\"{}\", t);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot move out of `s` because it is borrowed"), "{d:?}");
+}

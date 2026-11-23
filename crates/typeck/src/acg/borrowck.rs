@@ -2169,6 +2169,56 @@ impl Cx<'_> {
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
     }
 
+    /// `*x` of a value x: `&U` with U a `Copy` type holding references, copied out (srcs: what x holds). A loan of a
+    /// place whose type holds U values (a container of the U x points to, or the U itself) is what x is, not what U
+    /// holds: what that place holds stands for it. A loan of anything else (`&s` in `*id(&&s)`) is what U holds
+    pub(crate) fn bk_copy_out(&mut self, srcs: &[Src], u: Ty) {
+        for &s in srcs {
+            let s = match s {
+                Src::Loan(ln) => {
+                    let p = &self.bk.loans[ln as usize].place;
+                    let pt = self.bk.locals.get(p.local as usize).map(|l| l.ty);
+                    match pt.and_then(|t| self.place_ty(t, &p.proj)) {
+                        Some(t) if self.ty_holds(t, u, 0) => Src::Local(p.local),
+                        _ => s,
+                    }
+                }
+                s => s,
+            };
+            self.bk.src(s);
+        }
+    }
+
+    /// The type of the place of local type t through proj (None where it is not followed: an index of a slice's type
+    /// is its element's)
+    fn place_ty(&self, t: Ty, proj: &[Proj]) -> Option<Ty> {
+        let mut t = t;
+        for x in proj {
+            t = match (x, t) {
+                (Proj::Deref(_) | Proj::Shr, Ty::Ref(_, i) | Ty::Box(i) | Ty::Ptr(_, i)) => *i,
+                (Proj::Index, Ty::Array(i, _) | Ty::Slice(i)) => *i,
+                (Proj::Field(f), Ty::Struct(sid)) => self.prog.field(sid, f)?.0,
+                _ => return None,
+            };
+        }
+        Some(t)
+    }
+
+    /// t is u or holds u values (a struct's type arguments, an array's or a slice's elements, what a `Box` holds)
+    fn ty_holds(&self, t: Ty, u: Ty, depth: u32) -> bool {
+        if t == u {
+            return true;
+        }
+        if depth > 6 {
+            return false;
+        }
+        match t {
+            Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => self.ty_holds(*i, u, depth + 1),
+            Ty::Struct(sid) => self.prog.structs[sid as usize].args.iter().any(|&a| self.ty_holds(a, u, depth + 1)),
+            _ => false,
+        }
+    }
+
     /// `let b: &mut T = a;` with a `&mut` local a: the loan of `*a` b holds
     pub(crate) fn bk_reborrow_let(&mut self, a: &Expr) {
         if !self.bk_on() {

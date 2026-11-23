@@ -953,7 +953,20 @@ impl Cx<'_> {
                 Ok(r)
             }
             Expr::Unary(op, x, _) if op == "*" => {
-                let p = self.place(e)?;
+                // (a reference copied out of what a call's result points into (`*names.first().unwrap()` with
+                // `names: Vec<&str>`): it does not hold the borrow of names that reached it (bk_copy_out))
+                let copy_out = self.bk_on() && !is_place_expr(x) && matches!(self.peek(x), Some(Ty::Ref(_, i)) if self.bk_ty(*i) == (true, true));
+                if copy_out {
+                    self.bk_frame();
+                }
+                let p = self.place(e);
+                if copy_out {
+                    let srcs = self.bk.frames.pop().unwrap_or_default();
+                    if let Some(Ty::Ref(_, u)) = self.peek(x) {
+                        self.bk_copy_out(&srcs, *u);
+                    }
+                }
+                let p = p?;
                 // (`*slice` as a value: its size is not known; only a place (a pattern, `&*s`) can be one)
                 if matches!(p.ty(), Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
                     return err(expr_start(e), format!("the size for values of type `{}` cannot be known at compilation time", self.prog.tn(p.ty())));
