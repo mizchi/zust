@@ -2407,6 +2407,9 @@ impl Cx<'_> {
                     || sd.variants.iter().any(|v| v.fields.iter().any(|f| self.dropck(f.1, depth + 1)))
             }
             Ty::Box(i) | Ty::Array(i, _) => self.dropck(*i, depth + 1),
+            // (a trait object's drop is not known: it may use all it borrows (`Box<dyn FnMut()>` of a closure that
+            // borrows v mutably, used when it is dropped))
+            Ty::Dyn(_) => true,
             _ => false,
         }
     }

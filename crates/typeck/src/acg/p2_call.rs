@@ -2214,6 +2214,20 @@ impl Cx<'_> {
                     let it = self.prog.sigs[i as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
                     it.is_none() || it == sig.trait_of.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim())
                 }),
+                // (an impl of the trait for a reference type (`impl<'a> Foo for &'a isize`): its method, as for a
+                // `dyn Foo` made of a `&isize`)
+                // (named `__ref_m` of the referent's type)
+                t @ Ty::Ref(_, inner) => {
+                    let rm = format!("__ref_{m}");
+                    let id = match *inner {
+                        Ty::Struct(sid) => self.prog.method(sid, &rm),
+                        it => self.prog.index.get(&format!("{}::{rm}", self.prog.tn(it))).copied(),
+                    };
+                    id.filter(|&i| {
+                        let it = self.prog.sigs[i as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+                        it == tr0 && self.self_fits(i, t)
+                    })
+                }
                 _ => None,
             };
             // (else a blanket impl of the trait whose bounds hold of Self: `impl<A> Foo for A`'s `get` for a `&i32`

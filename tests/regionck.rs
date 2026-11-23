@@ -3313,3 +3313,16 @@ fn part18_mut_refs_moved_by_value() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot move out of `*qq`"), "{d:?}");
     assert_eq!(check("fn take(r: &mut i32) { *r += 1; }\nfn main() {\n    let mut x = 1;\n    let mut y = 2;\n    let mut a = [&mut x, &mut y];\n    take(a[0]);\n    *a[1] = 5;\n    let c: &mut i32 = a[0];\n    *c = 3;\n    let v = &mut a;\n    take(v[1]);\n    println!(\"{}\", a.len());\n}\n"), vec![]);
 }
+
+/// A trait object's drop is not known: it may use what it borrows (rustc's "when `f` is dropped and runs the
+/// destructor for type `Box<dyn FnMut()>`"). A `&dyn` is no owner
+#[test]
+fn part18_dyn_drops() {
+    let d = check("fn main() {\n    let mut v = 1;\n    let mut f: Box<dyn FnMut()> = Box::new(|| v += 1);\n    f();\n    println!(\"{}\", v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+    let d = check("trait Foo { }\nimpl<'a> Foo for &'a isize { }\nfn main() {\n    let blah;\n    {\n        let x: isize = 1;\n        blah = Box::new(&x) as Box<dyn Foo>;\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("`x` does not live long enough"), "{d:?}");
+    let d = check("trait Foo { fn get(&self) -> isize; }\nimpl<'a> Foo for &'a isize { fn get(&self) -> isize { **self } }\nfn main() {\n    let mut x: isize = 1;\n    let b: Box<dyn Foo> = Box::new(&x);\n    println!(\"{}\", b.get());\n    x = 2;\n    println!(\"{}\", x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+    assert_eq!(check("trait Foo { }\nimpl<'a> Foo for &'a isize { }\nfn main() {\n    let x: isize = 1;\n    let b = Box::new(&x) as Box<dyn Foo>;\n    drop(b);\n    let mut v = vec![1];\n    let r: &dyn std::fmt::Debug = &v[0];\n    println!(\"{:?}\", r);\n    v.push(2);\n}\n"), vec![]);
+}
