@@ -615,7 +615,9 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
             || prog.use_names.contains(n);
         !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_') && !e.contains("(unsupported path)") && !item
     };
-    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free) && !undeclared(e)) {
+    // (nor what the trait solver proved of a type with no placeholder in it: crate::traits::SOLVED_NO)
+    let solved = |e: &str| e.contains(crate::traits::SOLVED_NO);
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free) && !undeclared(e) && !solved(e)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }
@@ -624,6 +626,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     }
     // (a placeholder's type by its parameter's name: `T`, not `T#`)
     let r = if placeholder { r.map_err(|e| e.replace("#`", "`").replace("#>", ">").replace("#,", ",").replace("#:", ":")) } else { r };
+    let r = r.map_err(|e| if solved(&e) { e.replace(crate::traits::SOLVED_NO, "(E0277)") } else { e });
     r?;
     cx.bk_check()?;
     let rerun = cx.rg.rerun && !force_rg;

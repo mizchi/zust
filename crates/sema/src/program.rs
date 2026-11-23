@@ -479,6 +479,8 @@ pub struct Program {
     pub impl_selfs: FxMap<(u32, String), Vec<(Ty, usize, Vec<(usize, String)>)>>,
     /// the traits the program declares (not the prelude's): a bound of one is checked by its impls
     pub user_traits: FxSet<String>,
+    /// The program's impls of its own traits as clauses, for the trait solver (crate::traits)
+    pub tdb: crate::traits::TraitDb,
     /// Types whose `Copy` impl names 'static in its self type (`impl Copy for Foo<'static>`): a copy of one requires
     /// what it borrows to be 'static
     pub static_copy: FxSet<u32>,
@@ -670,9 +672,21 @@ impl Insts {
                 b.generics.len()
             ));
         }
+        let gn: Vec<&str> = b.generics.iter().map(|g| g.0.as_str()).collect();
         for ((pn, bounds), &t) in b.generics.iter().zip(&args) {
             for tr in bounds {
-                if !prog.implements(t, tr) {
+                // (a trait of the program's: by the trait solver, so an impl's where clauses count (`impl<T: Bar> Foo
+                // for T` is no `(): Foo` without `(): Bar`), and a goal that needs itself fails (E0275))
+                let own = {
+                    let n = tr.split('<').next().unwrap_or(tr).trim();
+                    prog.tdb.user.contains(n.rsplit("::").next().unwrap_or(n))
+                };
+                // (the solver's `No` holds whatever the caller's type parameters are when t names no placeholder: it
+                // is reported from a placeholder instance too, marked so)
+                if own && !prog.has_param(t) && !prog.names_placeholder(t, 0) && !args.iter().any(|&a| prog.names_placeholder(a, 0) && tr.contains('<')) && prog.tdb.holds_in(prog, t, tr, &gn, &args) == crate::traits::Ans::No {
+                    return Err(format!("the trait bound `{}: {tr}` is not satisfied (for `{pn}`) {}", prog.tn(t), crate::traits::SOLVED_NO));
+                }
+                if !prog.implements(t, tr) || (own && !prog.has_param(t) && prog.tdb.holds_in(prog, t, tr, &gn, &args) == crate::traits::Ans::No) {
                     return Err(format!(
                         "the trait bound `{}: {tr}` is not satisfied (for `{pn}`)",
                         prog.tn(t)
@@ -1021,6 +1035,7 @@ impl Program {
             use_names: FxSet::default(),
             impl_selfs: FxMap::default(),
             user_traits: FxSet::default(),
+            tdb: Default::default(),
             lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
@@ -2033,6 +2048,7 @@ impl Program {
                 return Err(format!("{}:1: {why} (E0080)", items[c.item as usize].line));
             }
         }
+        p.tdb = crate::traits::TraitDb::build(&p, sums, user);
         // (a static's type is well-formed: the bounds of its struct's parameters hold, `static S: W<u8>` with
         // `struct W<T: Tr>` and no `impl Tr for u8` (E0277))
         for c in p.consts.iter().filter(|c| c.stat.is_some()) {
@@ -2256,80 +2272,16 @@ impl Program {
         }
     }
 
-    /// Whether t: tr holds, for a static's bound. For a trait the program declares, one of its impls in the program must
-    /// apply: its self type matches t exactly (`impl Tr for G<u8>` is not one for G<u16>, nor `&mut u8`'s for `&u8`;
-    /// a blanket `impl<P: B> Tr for P` matches any t) and the impl's bounds on its parameters hold for what they matched
-    /// (checked the same way). An impl this cannot read (a where clause, a self type that does not resolve) counts as
-    /// applying. Other traits (std's) are asked of `implements`
-    pub fn bound_holds(&self, sums: &[Summary], user: usize, t: Ty, tr: &str, depth: u32) -> bool {
-        self.bound_holds_in(sums, user, t, tr, depth, &mut vec![])
-    }
-
-    /// bound_holds, with the obligations being proved (active): one that comes back around (`impl<T: B> A for T` with
-    /// `impl<T: A> B for T`) is no proof, and that candidate fails
-    fn bound_holds_in(&self, sums: &[Summary], user: usize, t: Ty, tr: &str, depth: u32, active: &mut Vec<(Ty, String)>) -> bool {
+    /// Whether t: tr holds, for a static's bound or a field's: false only when the trait solver proves it does not
+    /// (crate::traits: `No`). For a trait the program declares, its impls are the clauses; others (std's) are asked
+    /// of `implements`
+    pub fn bound_holds(&self, sums: &[Summary], user: usize, t: Ty, tr: &str, _depth: u32) -> bool {
         // (the program's own traits: the first `user` summaries are its items, the rest the prelude's, whose traits
         // (Default ..) builtin types implement without an impl to find)
         if matches!(t, Ty::Param(_)) || self.has_param(t) || !sums[..user.min(sums.len())].iter().any(|s| s.trait_decl.as_deref() == Some(tr)) {
             return self.implements(t, tr);
         }
-        // (a trait object is its own trait's: `dyn Tr: Tr`, and the other traits written in it (`dyn Tr + Other`);
-        // not any blanket trait `implements` would also answer for it)
-        if let Ty::Dyn(d) = t {
-            if d.split('+').any(|p| {
-                let p = p.trim();
-                let name = p.split('<').next().unwrap_or(p).trim();
-                name.rsplit("::").next().unwrap_or(name) == tr
-            }) {
-                return true;
-            }
-        }
-        if active.iter().any(|(at, atr)| *at == t && atr == tr) {
-            return false;
-        }
-        // (a proof deeper than this (types that grow at each step) is not followed: it counts as holding)
-        if depth > 16 {
-            return true;
-        }
-        active.push((t, tr.to_string()));
-        let r = self.bound_impls(sums, user, t, tr, depth, active);
-        active.pop();
-        r
-    }
-
-    fn bound_impls(&self, sums: &[Summary], user: usize, t: Ty, tr: &str, depth: u32, active: &mut Vec<(Ty, String)>) -> bool {
-        let readable = |b: &str| b.chars().all(|c| c.is_alphanumeric() || c == '_');
-        for s in sums.iter().filter(|s| s.impl_trait.as_deref() == Some(tr)) {
-            let gn: Vec<&str> = s.impl_generics.iter().map(|g| g.0.as_str()).collect();
-            let Some(pt) = s.impl_self_ty.as_ref().and_then(|st| self.resolve_g(st, &gn).ok()) else {
-                return true;
-            };
-            let mut sol = vec![None; gn.len()];
-            if !self.match_ty(pt, t, &mut sol) {
-                continue;
-            }
-            // (match_ty also lets `&mut` stand for `&` and the like: the impl applies only to its self type itself)
-            if let Some(args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() {
-                if self.subst(pt, &args) != t {
-                    continue;
-                }
-            }
-            // (a where clause this does not read: the impl applies, once its self type matches)
-            if !s.where_types.is_empty() {
-                return true;
-            }
-            let bounds_hold = s.impl_generics.iter().zip(&sol).all(|((_, bs), a)| match a {
-                Some(a) => bs.iter().all(|b| {
-                    let b = b.trim();
-                    !readable(b) || self.bound_holds_in(sums, user, *a, b, depth + 1, active)
-                }),
-                None => true,
-            });
-            if bounds_hold {
-                return true;
-            }
-        }
-        false
+        self.tdb.holds(self, t, tr) != crate::traits::Ans::No
     }
 
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
@@ -3791,6 +3743,23 @@ impl Program {
     /// The fn and the index of the type parameter a placeholder stands for
     pub fn placeholder_of(&self, sid: u32) -> Option<(u32, u32)> {
         self.structs.placeholders.lock().unwrap().iter().find(|e| *e.1 == sid).map(|e| *e.0)
+    }
+
+    /// Whether t names a placeholder anywhere (Program::placeholder)
+    pub fn names_placeholder(&self, t: Ty, depth: u32) -> bool {
+        if !self.any_placeholder() || depth > 32 {
+            return false;
+        }
+        match t {
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => self.names_placeholder(*i, depth + 1),
+            Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| self.names_placeholder(x, depth + 1)),
+            Ty::Struct(s) => {
+                let sd = &self.structs[s as usize];
+                sd.placeholder.is_some() || sd.args.iter().any(|&a| self.names_placeholder(a, depth + 1))
+            }
+            Ty::Assoc(a) => self.names_placeholder(a.base, depth + 1),
+            _ => false,
+        }
     }
 
     pub fn is_placeholder(&self, sid: u32) -> bool {

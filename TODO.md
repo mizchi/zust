@@ -46,6 +46,19 @@ invariants.
 | `rt_box_move_patterns` | the same leak through patterns (`let Pair { a, b } = *b`, `match *b`); no double free (valgrind) |
 | `rt_pattern_partial_move` | what a pattern leaves to `_` / `..` (`let (a, _) = pair();`, `let W { a, .. } = w;`) is never dropped (a leak) |
 
+## Trait solving (`crates/sema/src/traits.rs`, `formal/lean/`)
+
+The program's own traits are solved by the algorithm proved in formal/lean (report:
+[docs/reports/2026-11-23-04-trait-solver.md](docs/reports/2026-11-23-04-trait-solver.md)). Left:
+
+- E0119 still uses the old checks, not `mayUnify` of the model.
+- Auto traits (coinductive) are not in the model; associated types are not normalized by the solver (a bound on
+  one is left out of an impl's clause).
+- Supertraits as an impl's obligations (`impl<T> Complete for T` needs `T: Partial`), and E0277 at a coercion to
+  `dyn Tr<A>` (traits/coercion-generic-bad.rs).
+- Method lookup between impls of one trait with different arguments (`impl Conv<u64> for u8`, `impl Conv<bool> for
+  u8`) picks the wrong one.
+
 ## Security: CVEs whose API zustc does not have (`expect: unsupported`)
 
 These cannot happen today. Each case fails as soon as zustc gets the API, and must then become a test of the CVE's

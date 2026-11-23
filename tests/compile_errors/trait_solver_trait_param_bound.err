@@ -1,0 +1,1 @@
+ 8:1: the trait bound `isize: Clone2` is not satisfied (E0277)

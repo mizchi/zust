@@ -345,3 +345,17 @@ fn undeclared_names_in_uncalled_generic_fns() {
     let newline = "use\nstd::convert::identity;\nfn g<T: Copy>(x: T) -> T {\n    let f = identity;\n    f(x)\n}\nfn main() {}\n";
     assert!(s.check(newline).is_empty(), "{:?}", s.check(newline));
 }
+
+/// The trait solver's `No` of a goal with no type parameter in it (`Vec<u8>: Foo` with `impl<T: Bar> Foo for Vec<T>`
+/// and no `u8: Bar`) is reported from a generic fn nothing calls: it holds whatever the fn's parameters are
+#[test]
+fn trait_solver_no_in_uncalled_generic_fn() {
+    let src = "trait Foo {}\ntrait Bar {}\nimpl<T: Bar> Foo for Vec<T> {}\nfn needs_foo<T: Foo>(_: T) {}\nfn hello<T>(_: T) {\n    needs_foo(Vec::<u8>::new());\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].line, 6, "{d:?}");
+    // (with `impl Bar for u8` the goal holds)
+    let ok = src.replace("trait Bar {}\n", "trait Bar {}\nimpl Bar for u8 {}\n");
+    assert!(s.check(&ok).is_empty());
+}

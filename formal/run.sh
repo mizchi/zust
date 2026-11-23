@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Runs the formal checks in formal/. `formal/run.sh tla` (seconds), `formal/run.sh connect` (a minute: the
 # implementation against the models), `formal/run.sh kani` (minutes, needs
-# `cargo install --locked kani-verifier && cargo kani setup`), no argument: both.
+# `cargo install --locked kani-verifier && cargo kani setup`), `formal/run.sh lean` (the trait solver's proofs, needs
+# Lean 4 (`lake`) on PATH, version in lean/lean-toolchain), no argument: all of them.
 # Each check has an expected result: configurations that model a design zustc does not use must find its bug.
 set -u
 cd "$(dirname "$0")"
@@ -34,6 +35,15 @@ if [ "${1:-all}" = all ] || [ "${1:-all}" = connect ]; then
 fi
 if [ "${1:-all}" = all ]; then
     (cd .. && cargo test --quiet -p zust-typeck --lib props) || fail=1
+fi
+if [ "${1:-all}" = all ] || [ "${1:-all}" = lean ]; then
+    # (every theorem proved, on Lean's standard axioms only: a `sorry` would show as the axiom sorryAx)
+    if (cd lean && lake build > "$log" 2>&1 && lake env lean Axioms.lean > "$log.ax" 2>&1) && ! grep -q sorryAx "$log.ax"; then
+        echo "ok   lean TraitSolver ($(grep -c "depends on axioms" "$log.ax") theorems)"
+    else
+        echo "FAIL lean TraitSolver"; cat "$log" "$log.ax" 2>/dev/null | tail -30; fail=1
+    fi
+    rm -f "$log.ax"
 fi
 if [ "${1:-all}" = all ] || [ "${1:-all}" = kani ]; then
     # (every harness is expected to pass)

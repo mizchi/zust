@@ -1513,7 +1513,8 @@ impl Session2 {
         // (a field or an impl's self type that names a struct of the program's whose parameter's bound does not hold:
         // `struct Hoge<K> { s: S<K> }` with `struct S<T: Tr>`)
         // (only when one of them has a bounded parameter)
-        if sums[..user.min(sums.len())].iter().any(|s| !s.adt_bounds.is_empty()) {
+        // (or a trait of the program's with a bounded parameter: `trait Getter<T: Clone2>`)
+        if sums[..user.min(sums.len())].iter().any(|s| !s.adt_bounds.is_empty() || (s.trait_decl.is_some() && s.trait_generics.iter().any(|g| !g.0.starts_with('#') && g.0 != "Self" && !g.1.is_empty()))) {
             if let Some(e) = wf_error(&prog, &sums, &src, &items, user) {
                 return Err(e);
             }
@@ -4481,6 +4482,20 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
         let Ok(t) = prog.resolve_g(st, &gn) else { continue };
         let mut ns = vec![];
         needs(prog, sums, user, t, &mut ns, 0);
+        // (the trait's arguments: the types written in them, and the bounds the trait puts on its parameters
+        // (`trait Getter<T: Clone2>` with `impl Getter<isize> for isize` needs `isize: Clone2`), for a trait of the
+        // program's)
+        let tr = sm.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+        let decl = tr.and_then(|tr| sums[..user.min(sums.len())].iter().find(|s| s.trait_decl.as_deref() == Some(tr)));
+        let tparams: Vec<&(String, Vec<String>)> = decl.map(|d| d.trait_generics.iter().filter(|g| !g.0.starts_with('#') && g.0 != "Self").collect()).unwrap_or_default();
+        for (k, a) in sm.impl_trait_args.iter().enumerate() {
+            let Ok(a) = prog.resolve_g(a, &gn) else { continue };
+            needs(prog, sums, user, a, &mut ns, 0);
+            // (only when the arguments line up with the trait's parameters)
+            if tparams.len() == sm.impl_trait_args.len() {
+                ns.extend(tparams[k].1.iter().filter(|b| !b.starts_with(crate::types::CONST_GENERIC) && !b.contains('<')).map(|b| (a, b.clone())));
+            }
+        }
         if ns.is_empty() {
             continue;
         }
@@ -4489,6 +4504,35 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
         let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
         if let Some(m) = failing(&ns, &gens, &bounds, &text) {
             return Some(format!("{}:1: {m}", items[ii].line));
+        }
+    }
+    // (the signatures of the program's free fns: `fn explode(x: Foo<u32>)` with `struct Foo<T: Trait>`)
+    for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
+        if sm.impl_self_ty.is_some() || sm.trait_decl.is_some() || !matches!(items[ii].kind, ItemKind::Normal) {
+            continue;
+        }
+        for (_, sig) in &sm.fns {
+            if sig.impl_of.is_some() || sig.trait_of.is_some() || sig.is_extern {
+                continue;
+            }
+            let gn: Vec<&str> = sig.generics.iter().map(|g| g.0.as_str()).collect();
+            let mut ns = vec![];
+            for t in sig.params.iter().chain([&sig.ret]) {
+                if let Ok(t) = prog.resolve_g(t, &gn) {
+                    needs(prog, sums, user, t, &mut ns, 0);
+                }
+            }
+            if ns.is_empty() {
+                continue;
+            }
+            let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
+            let bounds = |n: &str| sig.generics.iter().find(|g| g.0 == n).map(|g| g.1.clone()).unwrap_or_default();
+            let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
+            // (the signature only: a bound written in the body is no bound of the fn's)
+            let head = text.split('{').next().unwrap_or("").to_string();
+            if let Some(m) = failing(&ns, &gens, &bounds, &head) {
+                return Some(format!("{}:1: {m}", items[ii].line));
+            }
         }
     }
     None

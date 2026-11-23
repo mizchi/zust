@@ -1374,6 +1374,32 @@ pub fn parse_fn_bound(s: &str) -> Option<(String, Vec<TySyn>, TySyn)> {
     Some((kind.to_string(), args, ret))
 }
 
+/// A bound `a::Tr<A, B>` (or `Tr<A, Item = X>`) as its trait's name and its type arguments, without its
+/// associated-type bindings: None when a type argument cannot be read (a lifetime is left out)
+pub fn bound_args(s: &str) -> Option<(String, Vec<TySyn>)> {
+    let Some(lt) = s.find('<') else {
+        let n = s.trim();
+        return Some((n.rsplit("::").next().unwrap_or(n).to_string(), vec![]));
+    };
+    let f = parse_file(&format!("type __B = dyn {s};")).ok()?;
+    let ItemKind::Type(_, _, _, Some(PTy::Dyn(bs))) = &f.items.first()?.kind else { return None };
+    let Some(Bound::Trait(_, p)) = bs.first() else { return None };
+    let last = p.segs.last()?;
+    if last.fn_args.is_some() {
+        return None;
+    }
+    let mut args = Vec::new();
+    for a in &last.args {
+        match a {
+            crate::parse::GArg::Ty(t) => args.push(tysyn(t, None).ok()?),
+            crate::parse::GArg::Bind(..) => {}
+            _ => {}
+        }
+    }
+    let n = s[..lt].trim();
+    Some((n.rsplit("::").next().unwrap_or(n).to_string(), args))
+}
+
 /// 境界 `Iterator<Item = T>` の関連型の束縛 (名前, 型)
 pub fn assoc_bindings(s: &str) -> Vec<(String, TySyn)> {
     let mut out = Vec::new();
