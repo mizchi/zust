@@ -604,7 +604,18 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
             .collect(),
         _ => vec![],
     };
-    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free)) {
+    // (a name nothing of the program's declares, `foo == 2` / `this.a`: holds whatever the parameters are. Not one an
+    // item has (a generic fn used as a value, which zustc may not lower), nor what zustc cannot read (`cannot find
+    // value (unsupported path)`))
+    let undeclared = |e: &str| {
+        let Some(r) = e.split("cannot find value `").nth(1) else { return false };
+        let n = r.split('`').next().unwrap_or("");
+        let item = prog.index.contains_key(n) || prog.struct_index.contains_key(n) || prog.consts.iter().any(|c| c.name == n || c.name.ends_with(&format!("::{n}")))
+            || prog.names.iter().any(|x| x.rsplit("::").next() == Some(n))
+            || prog.use_names.contains(n);
+        !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_') && !e.contains("(unsupported path)") && !item
+    };
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free) && !undeclared(e)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }
