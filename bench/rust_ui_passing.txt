@@ -2424,6 +2424,7 @@ compile-fail	error-codes/E0416.rs
 compile-fail	error-codes/E0423-struct-literal-comment.rs
 compile-fail	error-codes/E0423.rs
 compile-fail	error-codes/E0424.rs
+compile-fail	error-codes/E0425.rs
 compile-fail	error-codes/E0426.rs
 compile-fail	error-codes/E0428.rs
 check-pass	error-codes/E0429.rs
@@ -6092,6 +6093,7 @@ compile-fail	resolve/issue-33876.rs
 compile-fail	resolve/issue-35675.rs
 compile-fail	resolve/issue-39559-2.rs
 compile-fail	resolve/issue-5035.rs
+compile-fail	resolve/issue-5099.rs
 compile-fail	resolve/issue-54379.rs
 check-pass	resolve/issue-57523.rs
 compile-fail	resolve/issue-5927.rs

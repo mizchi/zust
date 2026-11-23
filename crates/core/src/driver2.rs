@@ -1474,6 +1474,18 @@ impl Session2 {
         }
         prog.opt = self.opts.opt;
         resolve_opaque(&mut prog, &src, &items)?;
+        // (the words of the program's `use` declarations, at an item's start or a statement's)
+        for it in &items[..user] {
+            let t = src.get(it.start..it.end).unwrap_or("");
+            let b = t.as_bytes();
+            for (i, _) in t.match_indices("use ") {
+                if i > 0 && !matches!(b[i - 1], b' ' | b'\t' | b'\n' | b'{' | b';' | b'}') {
+                    continue;
+                }
+                let decl = &t[i + 4..t[i..].find(';').map_or(t.len(), |k| i + k)];
+                prog.use_names.extend(decl.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).map(str::to_string));
+            }
+        }
         // (a field or an impl's self type that names a struct of the program's whose parameter's bound does not hold:
         // `struct Hoge<K> { s: S<K> }` with `struct S<T: Tr>`)
         // (only when one of them has a bounded parameter)
