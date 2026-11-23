@@ -2653,6 +2653,27 @@ impl Cx<'_> {
                 *mode = if by_move { CapMode::Val } else if m { CapMode::RefMut } else { CapMode::Ref };
             }
         }
+        // (before edition 2021 a closure captures whole variables, not the places it uses: `|| &self.number`
+        // borrows `self`, which conflicts with `self.thing.bar(..)`'s `&mut` (nll/issue-51268.rs). A unique borrow
+        // through a `&mut` variable (`|| self.n += 1`) stays of `*self`: it needs no `mut self`. In a closure's body,
+        // a variable the closure holds by reference is `*x` of its reference (nll/issue-40510-4.rs))
+        if self.prog.edition < 2021 {
+            let base = self.bk.locals[l as usize].via_ref as usize;
+            for (p, pt, mode, _) in &mut paths {
+                if p.local != l || p.proj.len() < base || (base == 1 && p.proj[0] != Proj::Deref(false)) {
+                    continue;
+                }
+                let uniq = (*mode == CapMode::RefMut && p.proj.get(base) == Some(&Proj::Deref(false))) as usize;
+                if p.proj.len() > base + uniq {
+                    p.proj.truncate(base + uniq);
+                    *pt = match (uniq, t) {
+                        (0, _) => Some(t),
+                        (_, Ty::Ref(_, i)) => Some(*i),
+                        _ => None,
+                    };
+                }
+            }
+        }
         // (a closure that holds the capture by value holds all of the variable: the code copies it whole into the
         // closure. Of a variable that needs dropping, the parts the body uses (rustc's captures) are not all that
         // is held: a part used after the closure would be dropped twice, by the closure and where it is used.

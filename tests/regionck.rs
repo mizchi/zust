@@ -7,6 +7,12 @@ fn check(src: &str) -> Vec<(usize, String)> {
     s.check(src).into_iter().map(|d| (d.line, d.msg)).collect()
 }
 
+/// check in an edition
+fn check_ed(src: &str, edition: u16) -> Vec<(usize, String)> {
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition, ..Options2::default() });
+    s.check(src).into_iter().map(|d| (d.line, d.msg)).collect()
+}
+
 fn temp_error(src: &str, line: usize) {
     let d = check(src);
     assert!(d.len() == 1 && d[0].0 == line && d[0].1.contains("temporary value dropped while borrowed"), "{src}\n{d:?}");
@@ -2599,6 +2605,18 @@ fn part15_fn_named_like_a_struct() {
     let d = check("struct AddFlags {\n    bits: u64,\n}\n#[allow(non_snake_case)]\nfn AddFlags(bits: u64) -> AddFlags {\n    AddFlags { bits }\n}\nfn arg(x: &AddFlags) -> &AddFlags {\n    x\n}\nfn main() {\n    let x1 = arg(&AddFlags(1));\n    let y: &'static AddFlags = &AddFlags(2);\n    (x1, y);\n}\n");
     assert!(d.iter().any(|x| x.0 == 12 && x.1.contains("E0716")) && d.iter().all(|x| x.0 == 12 || x.0 == 13), "{d:?}");
     assert_eq!(check("struct W(u8);\nfn arg(x: &W) -> &W {\n    x\n}\nfn main() {\n    let x1 = arg(&W(1));\n    let y: &'static W = &W(2);\n    println!(\"{} {}\", x1.0, y.0);\n}\n"), vec![]);
+}
+
+/// Before edition 2021 a closure captures whole variables (nll/issue-51268.rs): `|| x.number += 1` holds all of x,
+/// so reading `x.thing` while it lives is E0503; a by-reference capture in a closure's body stays of `*x`
+/// (nll/issue-40510-4.rs)
+#[test]
+fn part15_whole_variable_captures() {
+    let src = "struct Foo {\n    thing: u8,\n    number: usize,\n}\nfn f(x: &mut Foo) {\n    let c = || x.number += 1;\n    let d = x.thing;\n    let _ = c;\n    let _ = d;\n}\nfn main() {}\n";
+    let d = check_ed(src, 2018);
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+    assert_eq!(check_ed(src, 2021), vec![]);
+    assert_eq!(check_ed("fn f() {\n    let x: Vec<()> = Vec::new();\n    || {\n        || {\n            x.len()\n        }\n    };\n}\nfn main() {}\n", 2015), vec![]);
 }
 
 /// From the third review of #69: a closure's call that needs `T: 'static` takes it from `T: 'a` with `'a: 'static`,
