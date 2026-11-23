@@ -130,102 +130,158 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -
     // (whether the occurrence that starts at token ps (its path) and ends at e (its brackets) is, or may be, in a
     // pattern: after `let` / `for` / `|` / `@`, in a macro other than std's expression ones, or followed (out through
     // the brackets around it) by `=` / `=>` / `|` / `:` / `in` / `if` before anything that ends an expression)
-    let pattern_like = |ps: usize, e: usize| -> bool {
-        let mut o = encl[ps];
+    let pattern_like = |ps0: usize, e0: usize| -> bool {
+        let mut o = encl[ps0];
         while o != none {
             if o >= 2 && sym(o - 1, b'!') && !expr_macro(word(o - 2)) {
                 return true;
             }
             o = encl[o];
         }
-        // (what the token p before something says: after `let` / `for` / `|` / `@` a pattern; after `=>` (an arm's
-        // body), a single `=` (a value), `return` / `break` an expression)
+        // (a closure's `|..|` that ends at p: `||`, or a `|` whose opening `|` (at the same depth, in the same
+        // statement) follows what a closure starts after; an or-pattern's `A | B` is none)
+        let closure_end = |p: usize| -> bool {
+            if p > 0 && sym(p - 1, b'|') && toks[p - 1].2 == toks[p].1 {
+                return true;
+            }
+            let mut q = p;
+            while q > 0 {
+                q -= 1;
+                if encl[q] != encl[p] {
+                    continue;
+                }
+                if sym(q, b';') || sym(q, b'{') || sym(q, b'}') || (sym(q, b'>') && q > 0 && sym(q - 1, b'=')) {
+                    return false;
+                }
+                if sym(q, b'|') {
+                    let r = q.wrapping_sub(1);
+                    return r == none
+                        || sym(r, b'(')
+                        || sym(r, b',')
+                        || sym(r, b'{')
+                        || sym(r, b';')
+                        || (sym(r, b'=') && !(r > 0 && toks[r - 1].0 == 1 && toks[r - 1].2 == toks[r].1 && b"=<>!".contains(&b[toks[r - 1].1])))
+                        || (sym(r, b'>') && r > 0 && sym(r - 1, b'='))
+                        || matches!(word(r), "move" | "return" | "async");
+                }
+            }
+            false
+        };
+        // (what the token p before something says: after `let` / `for` / `@` / an or-pattern's `|` a pattern;
+        // after `=>` (an arm's body), a single `=` (a value), `return` / `break`, a closure's `|..|` an expression)
         let before = |p: usize| -> Option<bool> {
             if p == none {
                 return None;
             }
-            if matches!(word(p), "let" | "for") || sym(p, b'|') || sym(p, b'@') {
+            if sym(p, b'|') {
+                return Some(!closure_end(p));
+            }
+            if matches!(word(p), "let" | "for") || sym(p, b'@') {
                 return Some(true);
             }
             let arrow = p > 0 && sym(p, b'>') && sym(p - 1, b'=');
             let assign = sym(p, b'=') && !(p > 0 && toks[p - 1].0 == 1 && toks[p - 1].2 == toks[p].1 && b"=<>!+-*/%^&|".contains(&b[toks[p - 1].1]));
             (arrow || assign || matches!(word(p), "return" | "break")).then_some(false)
         };
-        if let Some(r) = before(ps.wrapping_sub(1)) {
-            return r;
-        }
-        let mut d = 0i32;
-        let mut j = e + 1;
-        while j < n {
-            if toks[j].0 == 0 {
-                match word(j) {
-                    "fn" | "struct" | "enum" | "union" | "impl" | "trait" | "mod" => return false,
-                    "in" | "if" if d == 0 => return true,
-                    "let" | "return" | "use" | "static" | "type" if d == 0 => return false,
-                    _ => {}
-                }
-            } else if toks[j].0 == 1 {
-                match b[toks[j].1] {
-                    b'(' | b'[' => d += 1,
-                    // (a struct's braces go on; a block's start ends the expression)
-                    // (right after it, with its own brackets in e: a block, `match E::A {` / `if x == S {`)
-                    b'{' if d == 0 && j == e + 1 => return false,
-                    b'{' if d == 0 => {
-                        let prev = word(j - 1);
-                        if prev.is_empty() || keyword(prev) {
-                            return false;
-                        }
-                        d += 1;
-                    }
-                    b'{' => d += 1,
-                    // (the end of a block around it (an arm's `{ .. }`, a fn's body): the expression ended; the end
-                    // of a struct's braces (`Outer { s: S { f } }`): go on)
-                    b'}' if d == 0 => {
-                        let o = open_of[j];
-                        if o == none || o == 0 || word(o - 1).is_empty() || keyword(word(o - 1)) {
-                            return false;
-                        }
-                    }
-                    // (the end of a group around it, `=> (E::A)` / `=> Some((E::A))`: what is before the group (or the
-                    // path it follows) says; `Some(E::A) =>` goes on to its `=>`)
-                    b')' | b']' if d == 0 => {
-                        let o = open_of[j];
-                        if o != none {
-                            let mut q = o;
-                            if q > 0 && toks[q - 1].0 == 0 {
-                                q -= 1;
-                                while q >= 3 && sym(q - 1, b':') && sym(q - 2, b':') && toks[q - 3].0 == 0 {
-                                    q -= 3;
-                                }
-                            }
-                            if let Some(r) = before(q.wrapping_sub(1)) {
-                                return r;
-                            }
-                        }
-                    }
-                    b')' | b']' | b'}' => d = (d - 1).max(0),
-                    b';' if d == 0 => return false,
-                    b':' if d == 0 && !sym(j + 1, b':') && !sym(j - 1, b':') => return true,
-                    b'|' if d == 0 => return true,
-                    b'=' if d == 0 => {
-                        if sym(j + 1, b'>') {
-                            return true;
-                        }
-                        if sym(j + 1, b'=') {
-                            j += 2;
-                            continue;
-                        }
-                        let glued = toks[j - 1].0 == 1 && toks[j - 1].2 == toks[j].1 && b"=<>!+-*/%^&|".contains(&b[toks[j - 1].1]);
-                        if !glued {
-                            return true;
-                        }
-                    }
-                    _ => {}
+        // (a group around the unit (its opener o): the group with the path before it, `Some(..)` / `S { .. }`, is
+        // the unit now, and what is around that says)
+        let group = |o: usize| -> (usize, usize) {
+            let mut q = o;
+            if q > 0 && toks[q - 1].0 == 0 && !keyword(word(q - 1)) {
+                q -= 1;
+                while q >= 3 && sym(q - 1, b':') && sym(q - 2, b':') && toks[q - 3].0 == 0 {
+                    q -= 3;
                 }
             }
-            j += 1;
+            (q, close[o])
+        };
+        // (a block's braces: after no name, or a keyword's)
+        let is_block = |o: usize| o == 0 || word(o - 1).is_empty() || keyword(word(o - 1));
+        let (mut ps, mut e) = (ps0, e0);
+        'unit: loop {
+            if let Some(r) = before(ps.wrapping_sub(1)) {
+                return r;
+            }
+            let mut d = 0i32;
+            let mut j = e.wrapping_add(1);
+            while j < n {
+                if toks[j].0 == 0 {
+                    match word(j) {
+                        "fn" | "struct" | "enum" | "union" | "impl" | "trait" | "mod" => return false,
+                        "in" | "if" if d == 0 => return true,
+                        "let" | "return" | "use" | "static" | "type" if d == 0 => return false,
+                        _ => {}
+                    }
+                } else if toks[j].0 == 1 {
+                    match b[toks[j].1] {
+                        b'(' | b'[' => d += 1,
+                        // (a struct's braces go on; a block's start ends the expression)
+                        // (right after it, with its own brackets in e: a block, `match E::A {` / `if x == S {`)
+                        b'{' if d == 0 && j == e + 1 => return false,
+                        b'{' if d == 0 => {
+                            let prev = word(j - 1);
+                            if prev.is_empty() || keyword(prev) {
+                                return false;
+                            }
+                            d += 1;
+                        }
+                        b'{' => d += 1,
+                        // (the end of a group around it: a block's (an arm's `{ .. }`, a fn's body) ends the
+                        // expression; a struct's, a call's, a tuple's is the unit now)
+                        b')' | b']' | b'}' if d == 0 => {
+                            let o = open_of[j];
+                            if o == none {
+                                return true;
+                            }
+                            if sym(j, b'}') && is_block(o) {
+                                return false;
+                            }
+                            (ps, e) = group(o);
+                            if e == none {
+                                return true;
+                            }
+                            continue 'unit;
+                        }
+                        b')' | b']' | b'}' => d = (d - 1).max(0),
+                        b';' if d == 0 => return false,
+                        // (a comma beside it: of a block, a `match`'s arms (an arm's body); of a group, its element
+                        // (`Holder { a: E::A, b: 0 }`, `f(E::A, 1)`, `(E::A, x) =>`), as the group is)
+                        b',' if d == 0 => {
+                            let o = encl[j];
+                            if o == none {
+                                return true;
+                            }
+                            if sym(o, b'{') && is_block(o) {
+                                return false;
+                            }
+                            (ps, e) = group(o);
+                            if e == none {
+                                return true;
+                            }
+                            continue 'unit;
+                        }
+                        b':' if d == 0 && !sym(j + 1, b':') && !sym(j - 1, b':') => return true,
+                        b'|' if d == 0 => return true,
+                        b'=' if d == 0 => {
+                            if sym(j + 1, b'>') {
+                                return true;
+                            }
+                            if sym(j + 1, b'=') {
+                                j += 2;
+                                continue;
+                            }
+                            let glued = toks[j - 1].0 == 1 && toks[j - 1].2 == toks[j].1 && b"=<>!+-*/%^&|".contains(&b[toks[j - 1].1]);
+                            if !glued {
+                                return true;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                j += 1;
+            }
+            return true;
         }
-        true
     };
     // (the path an occurrence at k is the last segment of: back over `a::`)
     let path_start = |k: usize| -> usize {
@@ -376,7 +432,9 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -
                     }
                     let s = x + 2;
                     let shape = struct_shapes.get(word(s)).copied();
-                    found = Some((sym(x + 1, b'=') && toks.get(s).is_some_and(|t| t.0 == 0) && ((sym(s + 1, b'(') && shape == Some(b'(')) || (sym(s + 1, b'{') && shape == Some(b'{')))).then(|| word(s)));
+                    // (the whole initializer: `;` after the constructor's brackets, not `S { .. }.inner`)
+                    let whole = s + 1 < n && close[s + 1] != none && sym(close[s + 1] + 1, b';');
+                    found = Some((sym(x + 1, b'=') && toks.get(s).is_some_and(|t| t.0 == 0) && whole && ((sym(s + 1, b'(') && shape == Some(b'(')) || (sym(s + 1, b'{') && shape == Some(b'{')))).then(|| word(s)));
                 }
             }
             q += 1;
