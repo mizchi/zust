@@ -667,6 +667,20 @@ fn review91_attributes_imports_unreachable() {
         let src = format!("#![deny(unused_imports)]\n{attrs} use std::fs;\nfn main() {{}}\n");
         assert_eq!(first(&src), want, "lint_level {attrs}");
     }
+    // (fifth round: a warn is still an error where `warnings` is denied, by the crate or the item)
+    for (krate, attrs, want) in [
+        ("#![deny(warnings)]", "#[warn(unused_imports)]", unused_fs.clone()),
+        ("#![deny(warnings)]", "#[warn(unused)]", unused_fs.clone()),
+        ("#![deny(warnings)]", "", unused_fs.clone()),
+        ("#![deny(warnings)]", "#[allow(warnings)]", None),
+        ("#![deny(warnings)]", "#[allow(warnings)] #[warn(unused_imports)]", None),
+        ("#![deny(warnings)]", "#[warn(unused_imports)] #[allow(warnings)]", None),
+        ("#![deny(warnings)]", "#[warn(warnings)] #[warn(unused_imports)]", None),
+        ("#![deny(unused_imports)]", "#[warn(unused_imports)] #[deny(warnings)]", unused_fs.clone()),
+    ] {
+        let src = format!("{krate}\n{attrs} use std::fs;\nfn main() {{}}\n");
+        assert_eq!(first(&src), want, "warnings_level {krate} {attrs}");
+    }
     let src = "#![deny(unused_imports)]\n#[doc = \"*\"] use std::fs as unused_fs;\nfn main() {}\n";
     assert_eq!(first(src), Some((2, "unused import: `std::fs as unused_fs`".to_string())), "star_in_attribute");
     // (the unstable ABIs: after any number of attributes; a raw string)
