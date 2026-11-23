@@ -2043,6 +2043,7 @@ impl Cx<'_> {
         }
         // (a temporary bound by `ref` (`match f() { Some(ref m) => .. }`): borrowed, it goes away at the end of the
         // statement)
+        let mut own_loan = None;
         if self.bk.level >= 2 && !in_let && !super::is_place_expr(e) && pats.iter().any(|p| pat_binds_ref(p)) {
             let id = self.bk.locals.len() as u32;
             self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP, via_ref: false });
@@ -2054,6 +2055,7 @@ impl Cx<'_> {
             self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Borrow(ln), sp));
             self.bk.src(Src::Loan(ln));
             self.bk.stmt_temps.push(id);
+            own_loan = Some(ln);
         }
         // (`let ref mut x = 5;` / `let ref x = f();`: a temporary the `let` extends, which goes away with the block's
         // locals (returning x is E0515). Not a constant one, as `let x = &5;` (`let ref x = 5;`))
@@ -2084,7 +2086,10 @@ impl Cx<'_> {
                     let id = self.bk.locals.len() as u32;
                     self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP, via_ref: false });
                     self.bk_ev(Ev::Bind(id, true));
-                    self.bk_ev(Ev::Def(id, srcs.clone()));
+                    // (not the loan of the scrutinee's own storage its `ref` bindings take: its drop does not use
+                    // that (`(Struct(1), 1)` matched by `(l, ref s) if g`))
+                    let held: Vec<Src> = srcs.iter().copied().filter(|s| !matches!((s, own_loan), (Src::Loan(l), Some(o)) if *l == o)).collect();
+                    self.bk_ev(Ev::Def(id, held));
                     self.bk.stmt_temps.push(id);
                     self.bk.drop_temps.push(id);
                 }

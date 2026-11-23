@@ -3086,6 +3086,10 @@ fn part17_scrutinee_temporaries() {
     assert_eq!(check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap: BinaryHeap<i32> = BinaryHeap::new();\n    let borrow = heap.peek_mut();\n    match (borrow, ()) {\n        (Some(_), ()) => {}\n        _ => {}\n    };\n}\n"), vec![]);
     assert_eq!(check("fn mk(v: &mut Vec<i32>) -> Option<&mut i32> { v.first_mut() }\nfn main() {\n    let mut v = vec![1];\n    match mk(&mut v) {\n        Some(_) => { v.push(2); }\n        None => {}\n    }\n}\n"), vec![]);
     assert_eq!(check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap: BinaryHeap<i32> = BinaryHeap::new();\n    heap.push(1);\n    match heap.peek_mut() {\n        x => { drop(x); heap.pop(); }\n    }\n}\n"), vec![]);
+    // (its `ref` bindings' borrow of its own storage is not what its drop uses: dropck/eager-by-ref-binding-for-guards.rs)
+    for p in ["(long2, ref short2) if true", "(ref long2, _) if true", "(_, ref short2) if true"] {
+        assert_eq!(check(&format!("struct Struct<T>(T);\nimpl<T> Drop for Struct<T> {{\n    fn drop(&mut self) {{}}\n}}\nfn main() {{\n    match (Struct(&&0), 1) {{\n        {p} => {{ let _ = 0; }}\n        _ => unreachable!(),\n    }}\n}}\n")), vec![]);
+    }
 }
 
 /// `let x = &*R.m();` with R a temporary a call makes and a result that borrows it: the `let` extends the result, not R,
