@@ -1,0 +1,2 @@
+// expect: `Box` has type parameters
+import type { Box } from "../ts/unsupported.ts";

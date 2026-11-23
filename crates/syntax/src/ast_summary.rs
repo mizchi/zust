@@ -1374,6 +1374,59 @@ pub fn parse_fn_bound(s: &str) -> Option<(String, Vec<TySyn>, TySyn)> {
     Some((kind.to_string(), args, ret))
 }
 
+/// The arguments a call through a closure bound (`Fn(&T) -> &T`) returns a borrow of, by its lifetimes: those whose
+/// types name a lifetime its result names (`for<'a> Fn(&'a T, &u8) -> &'a T`: the first), or the only one with a
+/// reference when the result's is elided (`Fn(&T) -> &T`). Not a `'static` result's. Empty when it returns none
+pub fn fn_bound_ret_from(s: &str) -> Vec<usize> {
+    fn refs(t: &PTy, named: &mut Vec<String>, elided: &mut bool) {
+        match t {
+            PTy::Ref(l, _, i) => {
+                match l.as_deref() {
+                    Some("'_") | None => *elided = true,
+                    Some(l) => named.push(l.to_string()),
+                }
+                refs(i, named, elided);
+            }
+            PTy::Path(None, p) => {
+                for sg in &p.segs {
+                    for a in &sg.args {
+                        match a {
+                            crate::parse::GArg::Lifetime(l) if l == "'_" => *elided = true,
+                            crate::parse::GArg::Lifetime(l) => named.push(l.clone()),
+                            crate::parse::GArg::Ty(t) => refs(t, named, elided),
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => refs(i, named, elided),
+            PTy::Tuple(ts) => ts.iter().for_each(|t| refs(t, named, elided)),
+            _ => {}
+        }
+    }
+    let Some(kind) = ["FnOnce", "FnMut", "Fn"].into_iter().find(|k| s.starts_with(k) && s[k.len()..].trim_start().starts_with('(')) else { return vec![] };
+    let _ = kind;
+    let Ok(f) = parse_file(&format!("type __B = dyn {s};")) else { return vec![] };
+    let Some(ItemKind::Type(_, _, _, Some(PTy::Dyn(bs)))) = f.items.first().map(|i| &i.kind) else { return vec![] };
+    let Some(Bound::Trait(_, p)) = bs.first() else { return vec![] };
+    let Some((ps, Some(r))) = p.segs.last().and_then(|s| s.fn_args.clone()) else { return vec![] };
+    let (mut rn, mut re) = (vec![], false);
+    refs(&r, &mut rn, &mut re);
+    rn.retain(|l| l != "'static");
+    let params: Vec<(Vec<String>, bool)> = ps
+        .iter()
+        .map(|t| {
+            let (mut n, mut e) = (vec![], false);
+            refs(t, &mut n, &mut e);
+            (n, e)
+        })
+        .collect();
+    let with_refs: Vec<usize> = (0..params.len()).filter(|&i| params[i].1 || !params[i].0.is_empty()).collect();
+    (0..params.len())
+        .filter(|&i| params[i].0.iter().any(|l| rn.contains(l)) || (re && with_refs == [i]))
+        .collect()
+}
+
 /// 境界 `Iterator<Item = T>` の関連型の束縛 (名前, 型)
 pub fn assoc_bindings(s: &str) -> Vec<(String, TySyn)> {
     let mut out = Vec::new();

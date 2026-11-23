@@ -307,7 +307,7 @@ impl Parser {
                     fields.push((f, self.ty()?));
                     self.eat(",")?;
                 }
-                Ok(Item::Record { name, params, fields, pos })
+                Ok(Item::Record { name, params, fields, pos, from: None })
             }
             "enum" => {
                 let (name, _) = self.ident()?;
@@ -343,6 +343,29 @@ impl Parser {
                 let ret = if self.eat("->")? { Some(self.ty()?) } else { None };
                 let body = self.block()?;
                 Ok(Item::Fn { name, public, wasm, simd, relaxed, generics, bounds, args, ret, body, pos })
+            }
+            // `import type { User, Post } from "./model.ts";`
+            "import" => {
+                let (t, tpos) = self.ident()?;
+                if t != "type" {
+                    return Err((tpos, "zsc imports only types for now: `import type { User } from \"./model.ts\";`".into()));
+                }
+                self.expect("{")?;
+                let mut names = vec![];
+                while !self.eat("}")? {
+                    names.push(self.ident()?);
+                    self.eat(",")?;
+                }
+                let (f, fpos) = self.ident()?;
+                if f != "from" {
+                    return Err((fpos, "expected `from \"./file.ts\"`".into()));
+                }
+                let from = match self.next()? {
+                    Tok { t: T::Str(s), .. } => s,
+                    t => return Err((t.pos, "expected the TS file's path as a string".into())),
+                };
+                self.expect(";")?;
+                Ok(Item::ImportType { names, from, pos })
             }
             "extern" => {
                 let module = match &self.peek()?.t {

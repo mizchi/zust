@@ -237,7 +237,11 @@ fn late_static() {
 fn keep_through_calls() {
     let d = check("fn gimme(x: &(u32,)) -> &u32 { &x.0 }\nfn main() {\n    let x = gimme({\n        let v = (22,);\n        &v\n    });\n    println!(\"{:?}\", x);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`v` does not live long enough"), "{d:?}");
-    assert_eq!(check("fn first<'a>(_x: &u32, y: &'a u32) -> &'a u32 { y }\nfn main() {\n    let k = 1;\n    let x = first({ let v = 2; &v }, &k);\n    println!(\"{}\", x);\n}\n"), vec![]);
+    // (a block's value that borrows its local is used as an argument after the local is gone: E0597 in rustc too,
+    // whatever the callee returns (part 16). One that borrows nothing of the block's is fine)
+    let d = check("fn first<'a>(_x: &u32, y: &'a u32) -> &'a u32 { y }\nfn main() {\n    let k = 1;\n    let x = first({ let v = 2; &v }, &k);\n    println!(\"{}\", x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`v` does not live long enough"), "{d:?}");
+    assert_eq!(check("fn first<'a>(_x: &u32, y: &'a u32) -> &'a u32 { y }\nfn main() {\n    let k = 1;\n    let x = first({ let v = &k; v }, &k);\n    println!(\"{}\", x);\n}\n"), vec![]);
 }
 
 /// A cast's type, with the regions written in it: `&x as &'static u32` borrows x for 'static
@@ -2730,4 +2734,226 @@ fn part15_review() {
     assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("because it is borrowed"), "{d:?}");
     let d = check("#![deny(unused_mut)]\n// we allow (unused_mut) nowhere\nfn main() {\n    let mut x = 1;\n    let _ = x;\n}\n");
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("unused_mut"), "{d:?}");
+}
+
+/// `&*b` of a `Box<dyn Tr>` / `Box<[T]>` / `Box<str>` borrows what the box owns, as of a `Box<T>`: moving b while it
+/// lives is E0505, and returning it in a `Box<dyn X>` is E0515 (regions/regions-close-object-into-object-*.rs)
+#[test]
+fn part16_unsized_box_reborrow() {
+    let d = check("trait A {}\nfn f(v: Box<dyn A>) {\n    let r = &*v;\n    drop(v);\n    let _ = r;\n}\nfn g(v: Box<[u8]>) {\n    let r = &*v;\n    drop(v);\n    let _ = r;\n}\nfn main() {}\n");
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![4, 9] && d.iter().all(|x| x.1.contains("because it is borrowed")), "{d:?}");
+    let d = check("trait A {}\nstruct B<'a>(&'a (dyn A + 'a));\ntrait X {}\nimpl<'a> X for B<'a> {}\nfn f(v: Box<dyn A>) -> Box<dyn X> {\n    Box::new(B(&*v))\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
+    // (`&mut` through a method's auto-ref: `b.iter_mut()` of a box not declared `mut`, `self.0.sort()` through `&self`
+    // (E0596), at the receiver)
+    let d = check("struct E(Box<[u8]>);\nimpl E {\n    fn g(&self) {\n        self.0.sort();\n    }\n}\nfn h(b: Box<[u8]>) -> usize {\n    b.iter_mut().count()\n}\nfn main() {}\n");
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![4, 8] && d.iter().all(|x| x.1.contains("as mutable")), "{d:?}");
+    // (what is fine: the borrow ends before the move, a `&mut *b` of a `mut` box, a box of a `&'static`)
+    assert_eq!(check("trait A { fn n(&self) -> u8; }\nimpl A for u8 { fn n(&self) -> u8 { *self } }\nfn f(v: Box<dyn A>) -> u8 {\n    let r = &*v;\n    let n = r.n();\n    drop(v);\n    n\n}\nfn g(mut v: Box<[u8]>) -> u8 {\n    let r = &mut *v;\n    r[0] = 1;\n    v[0]\n}\nfn h(v: Box<&'static str>) -> &'static str {\n    *v\n}\nfn main() {\n    println!(\"{} {} {}\", f(Box::new(3u8)), g(vec![0u8].into_boxed_slice()), h(Box::new(\"x\")));\n}\n"), vec![]);
+}
+
+/// `let ref x = e;` binds a reference to e's value (its type is `&T`, as an element of `[x]` too), and a temporary e
+/// the `let` extends goes away with the block's locals: returning `x` of `let ref mut x = 1234543;` is E0515
+/// (nll/return-ref-mut-issue-46557.rs), and `r = z;` of `let ref z = f();` in an inner block used after is E0716
+#[test]
+fn part16_let_ref_temporaries() {
+    let d = check("fn g() -> &'static mut u32 {\n    let ref mut x = 1234543;\n    x\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0515"), "{d:?}");
+    let d = check("fn f() -> u32 { 3 }\nfn main() {\n    let ref mut x = 1234543;\n    *x += 1;\n    let ref y = f();\n    let r;\n    {\n        let ref z = f();\n        r = z;\n    }\n    println!(\"{} {} {}\", x, y, r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check("fn h() -> &'static u32 {\n    let x = &(5u32 + 1);\n    x\n}\nfn k() -> &'static u32 {\n    let ref x = 5u32;\n    x\n}\nfn main() {\n    let ref init = 0i32;\n    let a: &i32 = init;\n    let out = [init];\n    println!(\"{} {:?} {} {}\", a, out, h(), k());\n}\n"), vec![]);
+}
+
+/// A call's `&mut place` argument whose referent shares a lifetime or a type parameter with another argument stores
+/// what that argument borrows (`push(&x, &mut v)` of `fn push<'a>(r: &'a i32, v: &mut Vec<&'a i32>)`): `x = 2;` while
+/// v is used is E0506 (borrowck/cannot-assign-borrowed-ref-in-slice.rs)
+#[test]
+fn part16_mut_argument_flows() {
+    let d = check("fn push<'a>(r: &'a i32, v: &mut Vec<&'a i32>) { v.push(r) }\nfn save<'a>(r: &'a i32, to: &mut [&'a i32]) { to[0] = r; }\nfn put<T>(a: T, v: &mut Vec<T>) { v.push(a) }\nfn a() {\n    let mut v = vec![];\n    let mut x = 1;\n    push(&x, &mut v);\n    x = 2;\n    println!(\"{:?} {}\", v, x);\n}\nfn b() {\n    let init = 0i32;\n    let mut x = 1;\n    let mut out = [&init];\n    save(&x, &mut out);\n    x = 3;\n    println!(\"{:?} {}\", out, x);\n}\nfn c() {\n    let mut v = vec![];\n    let mut x = 1;\n    put(&x, &mut v);\n    x = 2;\n    println!(\"{:?} {}\", v, x);\n}\nfn main() { a(); b(); c(); }\n");
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![8, 16, 23] && d.iter().all(|x| x.1.contains("because it is borrowed")), "{d:?}");
+    // (not through an elided or another lifetime, nor after the borrower's last use; behind a reference, what the
+    // referent holds: `swap(&mut values, &mut x.values)` stores no loan of values in x (borrowck/borrowck-mut-uniq.rs))
+    assert_eq!(check("struct Ints { values: Vec<isize> }\nfn add_int(x: &mut Ints, v: isize) {\n    let mut values = Vec::new();\n    std::mem::swap(&mut values, &mut x.values);\n    values.push(v);\n    std::mem::swap(&mut values, &mut x.values);\n}\nfn main() {\n    let mut i = Ints { values: vec![] };\n    add_int(&mut i, 1);\n    println!(\"{}\", i.values.len());\n}\n"), vec![]);
+    let d = check("fn main() {\n    let mut x = 1;\n    let k = 0;\n    let mut a = &k;\n    let mut b = &x;\n    std::mem::swap(&mut a, &mut b);\n    x = 2;\n    println!(\"{} {}\", a, b);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+    assert_eq!(check("fn f(_a: &u8, _v: &mut Vec<&u8>) {}\nfn g<'a, 'b>(_a: &'a u8, _v: &mut Vec<&'b u8>) {}\nfn push<'a>(r: &'a u8, v: &mut Vec<&'a u8>) { v.push(r) }\nfn main() {\n    let k = 0u8;\n    let mut v: Vec<&u8> = vec![&k];\n    let mut x = 1u8;\n    f(&x, &mut v);\n    g(&x, &mut v);\n    x = 2;\n    let mut w = vec![];\n    push(&x, &mut w);\n    println!(\"{:?} {:?}\", v, w);\n    x = 3;\n    println!(\"{}\", x);\n}\n"), vec![]);
+}
+
+/// A call through a closure bound whose result borrows an argument by the bound's lifetimes holds that argument's loans:
+/// `let y = f(&x); x = 5;` with `F: Fn(&isize) -> &isize` is E0506 (higher-ranked/trait-bounds/hrtb-identity-fn-borrows.rs
+/// has the same shape through a trait of its own). Not a result of no reference, a `'static` one, nor one tied to
+/// another argument
+#[test]
+fn part16_fn_bound_results() {
+    let d = check("fn g<F: Fn(&isize) -> &isize>(f: F) {\n    let mut x = 3;\n    let y = f(&x);\n    x = 5;\n    drop(y);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn g1<F: Fn(&isize) -> isize>(f: F) {\n    let mut x = 3;\n    let y = f(&x);\n    x = 5;\n    drop(y);\n}\nfn g2<F: for<'a> Fn(&'a isize, &isize) -> &'a isize>(f: F) {\n    let mut x = 3;\n    let z = 4;\n    let y = f(&z, &x);\n    x = 5;\n    drop(y);\n}\nfn g3<F: Fn(&isize) -> &'static isize>(f: F) {\n    let mut x = 3;\n    let y = f(&x);\n    x = 5;\n    drop(y);\n}\nfn g4<F: Fn(&isize) -> &isize>(f: F) {\n    let mut x = 3;\n    f(&x);\n    x = 5;\n    drop(x);\n}\nfn main() {}\n"), vec![]);
+}
+
+/// A view of a str / slice (`s.chars()`, `s.split(',')`) holds what the receiver does: `v0.chars()` returned as an
+/// `impl Iterator<Item = char>` that captures no lifetime is E0700 (lifetimes/issue-105227.rs), and `t.chars()` of
+/// `t: &str = &s` kept while `s.push('c')` is E0502
+#[test]
+fn part16_str_views() {
+    let d = check("fn c1(v0: &str, v1: &str) -> impl Iterator<Item = char> {\n    v0.chars().chain(v1.chars())\n}\nfn c2(v0: &str) -> impl Iterator<Item = char> {\n    v0.chars()\n}\nfn main() {}\n");
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![2, 5] && d.iter().all(|x| x.1.contains("E0700")), "{d:?}");
+    let d = check("fn main() {\n    let mut s = String::from(\"ab\");\n    let t: &str = &s;\n    let it = t.chars();\n    s.push('c');\n    println!(\"{}\", it.count());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut s = String::from(\"ab\");\n    let n = s.as_str().chars().count();\n    s.push('x');\n    let w: Vec<&str> = s.split(',').collect();\n    println!(\"{} {:?}\", n, w);\n    let v = vec![1u8, 2];\n    let sl: &[u8] = &v;\n    let c: Vec<u8> = sl.iter().copied().collect();\n    drop(v);\n    println!(\"{:?}\", c);\n}\n"), vec![]);
+}
+
+/// Before edition 2024, a block's value that a statement discards (`{ let t1 = D(1); D("o").next(&t1) };`) is dropped at
+/// the statement's end, after the block's locals: when its `Drop` may see a borrow of one, that local does not live long
+/// enough (E0597, nll/issue-54382-use-span-of-tail-of-block.rs), also through an inner block. Not a value that borrows
+/// none of them, nor one with no `Drop`
+#[test]
+fn part16_discarded_block_values() {
+    let pre = "#[derive(Debug)]\nstruct D<T: std::fmt::Debug>(T);\nimpl<T: std::fmt::Debug> Drop for D<T> {\n    fn drop(&mut self) {\n        println!(\"dropping {:?}\", self);\n    }\n}\nimpl<T: std::fmt::Debug> D<T> {\n    fn next<U: std::fmt::Debug>(&self, o: U) -> D<U> { D(o) }\n}\n";
+    let d = check(&format!("{pre}fn a() {{\n    {{\n        let t1 = D(1);\n        D(\"other\").next(&t1)\n    }};\n}}\nfn b() {{\n    {{\n        let t2 = D(2);\n        {{\n            D(\"other\").next(&t2)\n        }}\n    }};\n}}\nfn main() {{ a(); b(); }}\n"));
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![14, 21] && d.iter().all(|x| x.1.contains("does not live long enough")), "{d:?}");
+    assert_eq!(check(&format!("{pre}struct P<'a>(&'a u8);\nfn main() {{\n    let k = D(0);\n    {{\n        let t1 = D(1);\n        D(\"o\").next(&k)\n    }};\n    {{\n        let t2 = 3u8;\n        P(&t2)\n    }};\n    {{\n        let t3 = D(3);\n        D(\"o\").next(5)\n    }};\n}}\n")), vec![]);
+}
+
+/// `&a` of a reference `a: &T` (or `&&T`) where a `&T` is expected is a deref coercion: the pointer a holds, a reborrow
+/// of `*a`, not a borrow of the local a. As a result (`fn f(a: &i32) -> &i32 { &a }`, also in an `if`'s branches) it
+/// was a type mismatch, and through a `let` or an argument (`g(&a)`) a false E0515. What a holds is still followed:
+/// `let a = &x; let b = &a; &b` returned is E0515 of x
+#[test]
+fn part16_deref_coercion() {
+    assert_eq!(check("fn f1(a: &i32) -> &i32 {\n    &a\n}\nfn f2<'x>(a: &'x i32, b: &'x i32) -> &'x i32 {\n    if *a < *b { &a } else { &b }\n}\nfn f3(a: &i32) -> &i32 {\n    let r: &i32 = &a;\n    r\n}\nfn g(x: &i32) -> &i32 {\n    x\n}\nfn f4(a: &i32) -> &i32 {\n    g(&a)\n}\nfn f5<'x>(a: &'x i32) -> &'x i32 {\n    let b = &a;\n    &b\n}\nfn h(x: &mut i32) {\n    *x += 1;\n}\nfn f6(mut a: &mut i32) {\n    h(&mut a);\n}\nfn main() {\n    let (x, y) = (1, 2);\n    let mut z = 3;\n    println!(\"{} {} {} {} {}\", f1(&x), f2(&x, &y), f3(&x), f4(&x), f5(&x));\n    f6(&mut z);\n}\n"), vec![]);
+    // (`&mut a` borrows a mutably: E0596 when a is not `mut` (did_you_mean/issue-37139.rs), and what it reborrows
+    // through it cannot be returned)
+    let d = check("fn h(x: &mut i32) {\n    *x += 1;\n}\nfn main() {\n    let mut v = 1;\n    let ref mut x = v;\n    h(&mut x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("fn f() -> &'static i32 {\n    let x = 1;\n    let a = &x;\n    let b = &a;\n    &b\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`x`"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = 1;\n    let mut a = &mut x;\n    let r: &mut i32 = &mut a;\n    let s = &x;\n    *r = 2;\n    println!(\"{}\", s);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+}
+
+/// A guard of the prelude (`c.borrow()`'s `Ref`, a `MutexGuard`) releases what it borrows when it is dropped: one made
+/// in a block's tail (`y.borrow().clone()`, `*a.borrow() + 1`), which lives to the end of the enclosing statement
+/// before edition 2024, makes the block's local it borrows not live long enough (E0597,
+/// span/issue-23338-locals-die-before-temps-of-body.rs, span/destructor-restrictions.rs). Not one made in a statement
+#[test]
+fn part16_guard_tail_temporaries() {
+    let d = check("use std::cell::RefCell;\nfn foo(x: RefCell<String>) -> String {\n    let ret = {\n        let y = x;\n        y.borrow().clone()\n    };\n    ret\n}\nfn main() {\n    let b = {\n        let a = Box::new(RefCell::new(4));\n        *a.borrow() + 1\n    };\n    println!(\"{} {}\", b, foo(RefCell::new(String::new())));\n}\n");
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![5, 12] && d.iter().all(|x| x.1.contains("does not live long enough")), "{d:?}");
+    assert_eq!(check("use std::cell::RefCell;\nfn main() {\n    let c = RefCell::new(vec![1]);\n    let n = c.borrow().len();\n    let g = c.borrow();\n    let m = g[0];\n    drop(g);\n    c.borrow_mut().push(2);\n    let t = {\n        let d = RefCell::new(5);\n        let v = *d.borrow();\n        v\n    };\n    println!(\"{} {} {}\", n, m, t);\n}\n"), vec![]);
+}
+
+/// A block's value that holds what one of its locals holds (`{ let x = 1; let y = &x; y }`, or a call's result through
+/// a local, `f(a, b)` of `let f = &shorten_lifetime;`, nll/promoted-bounds.rs) used after the block: x does not live
+/// long enough (E0597). It was checked only when a `let` took a tail that borrowed directly (`{ let x = 1; &x }`), as
+/// the block's names are gone after it. Not a value that holds nothing of the block's (`{ let y = &outer; y }`)
+#[test]
+fn part16_block_values_through_locals() {
+    let d = check("fn a() {\n    let r = { let x = 1; let y = &x; y };\n    println!(\"{}\", r);\n}\nfn s<'a, 'b, 'm>(a: &'a i32, b: &'b i32) -> &'m i32\nwhere\n    'a: 'm,\n    'b: 'm,\n{\n    if *a < *b { &a } else { &b }\n}\nfn b() {\n    let f = &s;\n    let a = &5;\n    let p = {\n        let l = 3;\n        let b = &l;\n        let c = f(a, b);\n        c\n    };\n    println!(\"{}\", p);\n}\nfn main() { a(); b(); }\n");
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![2, 17] && d.iter().all(|x| x.1.contains("does not live long enough")), "{d:?}");
+    // (also where the value is used other than by a `let`: a match's scrutinee (span/issue-40157.rs); not by a
+    // statement that discards it)
+    let d = check("fn main() {\n    let n = match { let foo = vec![1, 2]; foo.get(1) } { x => x };\n    println!(\"{:?}\", n);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("`foo` does not live long enough"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let outer = 1;\n    { let x = 1; let y = &x; y };\n    let n = match { let v = vec![1]; v.len() } { k => k };\n    let m = match { let y = &outer; y } { k => *k };\n    println!(\"{} {}\", n, m);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let outer = 5;\n    let n = { let s = String::from(\"a\"); s.len() };\n    let r = { let y = &outer; y };\n    let v = vec![1, 2];\n    let w = { let it = &v; it.len() };\n    let z: &i32 = { let q = &v; &q[0] };\n    let t = { let k = (1, &outer); k };\n    println!(\"{} {} {} {} {:?}\", n, r, w, z, t);\n}\n"), vec![]);
+}
+
+/// A call's argument of a type parameter that outlives a lifetime the result names may be held by the result:
+/// `scoped(|| { let _z = y; })` of `fn scoped<'a, F: Fn() + Send + 'a>(f: F) -> Guard<'a>`, a block's value used after
+/// the block, holds what the closure holds (span/send-is-not-static-ensures-scoping.rs, E0597)
+#[test]
+fn part16_type_parameter_arguments() {
+    let g = "struct Guard<'a> {\n    f: Box<dyn Fn() + Send + 'a>,\n}\nfn scoped<'a, F: Fn() + Send + 'a>(f: F) -> Guard<'a> {\n    Guard { f: Box::new(f) }\n}\nimpl<'a> Guard<'a> {\n    fn join(self) {}\n}\n";
+    let d = check(&format!("{g}fn main() {{\n    let bad = {{\n        let x = 1;\n        let y = &x;\n        scoped(|| {{\n            let _z = y;\n        }})\n    }};\n    bad.join();\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 13 && d[0].1.contains("`x` does not live long enough"), "{d:?}");
+    assert_eq!(check("struct G<'a> {\n    f: Box<dyn Fn() + 'a>,\n}\nfn scoped<'a, F: Fn() + 'a>(f: F) -> G<'a> {\n    G { f: Box::new(f) }\n}\nfn keep<T: Clone>(t: T) -> Vec<T> {\n    vec![t]\n}\nfn main() {\n    let x = 1;\n    let g = scoped(|| println!(\"{}\", x));\n    (g.f)();\n    let v = { let s = String::from(\"a\"); keep(s.len()) };\n    println!(\"{:?}\", v);\n}\n"), vec![]);
+}
+
+/// A borrow of a place in a temporary (`&f().0`, `&x.borrow().1`, `&v.clone()[0]`, `&f().0[..]`, a `&mut` field
+/// reborrowed through a guard where a `&mut` is annotated): the temporary goes away at the end of the statement unless
+/// the `let` extends it (E0716). Not through a reference the temporary is (`&v.iter().next().unwrap().1`)
+#[test]
+fn part16_temporary_places() {
+    temp_error("fn mk() -> (i32, i32) {\n    (0, 1)\n}\nfn main() {\n    let v;\n    v = &mk().1;\n    println!(\"{}\", v);\n}\n", 6);
+    temp_error("use std::cell::RefCell;\nfn id<T>(t: T) -> T {\n    t\n}\nfn main() {\n    let x = RefCell::new((0, 1));\n    let v: &i32 = id(&x.borrow().1);\n    println!(\"{}\", v);\n}\n", 7);
+    temp_error("fn main() {\n    let x = vec![(0, 1)];\n    let v;\n    v = &x.clone()[0].1;\n    println!(\"{:?}\", v);\n}\n", 4);
+    temp_error("fn main() {\n    let v;\n    v = &Box::new((0, 1)).1;\n    println!(\"{:?}\", v);\n}\n", 3);
+    temp_error("fn mk() -> (String, i32) {\n    (String::new(), 1)\n}\nfn main() {\n    let v: &str;\n    v = &mk().0[..];\n    println!(\"{:?}\", v);\n}\n", 6);
+    temp_error("use std::cell::RefCell;\nfn main() {\n    let mut r = 0;\n    let x = RefCell::new((&mut r, 0));\n    let val: &mut i32 = x.borrow_mut().0;\n    println!(\"{}\", val);\n}\n", 5);
+    assert_eq!(check("use std::cell::RefCell;\nfn main() {\n    let x = RefCell::new((0, 1));\n    let v = &x.borrow().1;\n    println!(\"{}\", v);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let x = vec![(0, 1)];\n    let v = &x.clone()[0].1;\n    println!(\"{:?}\", v);\n}\n"), vec![]);
+    assert_eq!(check("static P: (i32, i32) = (0, 1);\nfn mk() -> &'static (i32, i32) {\n    &P\n}\nfn main() {\n    let v;\n    v = &mk().1;\n    println!(\"{}\", v);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let x = vec![(0, 1)];\n    let v;\n    v = &x.iter().next().unwrap().1;\n    println!(\"{:?}\", v);\n}\n"), vec![]);
+    assert_eq!(check("fn mk() -> (i32, i32) {\n    (0, 1)\n}\nfn main() {\n    let v;\n    v = &mk().1;\n    let _ = 0;\n}\n"), vec![]);
+    assert_eq!(check("use std::cell::RefCell;\nfn main() {\n    let mut r = 0;\n    let x = RefCell::new((&mut r, 0));\n    let val: &mut i32 = &mut *x.borrow_mut().0;\n    *val = 2;\n}\n"), vec![]);
+}
+
+/// A returned `match`'s arm after the first whose value flows out as it is (not a block, an `if` or a constructor's
+/// call) is reported at the match, as rustc's blame does (regions/regions-free-region-ordering-incorrect.rs); the
+/// first arm, an `if`'s branches and what an arm makes are reported where they are
+#[test]
+fn part16_match_arm_returns() {
+    one_error("fn f<'a, 'b>(c: bool, x: &'a i32, y: &'b i32) -> &'b i32 {\n    if c {\n        y\n    } else {\n        x\n    }\n}\nfn main() {}\n", 5);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    match c {\n        Some(_) => y,\n        None => x,\n    }\n}\nfn main() {}\n", 2);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    let _ = 1;\n    {\n        match c {\n            Some(_) => y,\n            None => x,\n        }\n    }\n}\nfn main() {}\n", 4);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    return match c {\n        Some(_) => y,\n        None => x,\n    };\n}\nfn main() {}\n", 2);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    match c {\n        Some(_) => y,\n        None => {\n            x\n        }\n    }\n}\nfn main() {}\n", 5);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    match c {\n        Some(_) => x,\n        None => y,\n    }\n}\nfn main() {}\n", 3);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    match c {\n        Some(0) => return y,\n        Some(_) => x,\n        None => y,\n    }\n}\nfn main() {}\n", 2);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a (i32, i32), y: &'b i32) -> &'b i32 {\n    match c {\n        Some(0) => y,\n        _ => if true { x.0.max(0); &x.1 } else { y },\n    }\n}\nfn main() {}\n", 4);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> Option<&'b i32> {\n    match c {\n        Some(0) => Some(y),\n        _ => Some(x),\n    }\n}\nfn main() {}\n", 4);
+    one_error("fn id<T>(t: T) -> T { t }\nfn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    match c {\n        Some(0) => y,\n        _ => id(x),\n    }\n}\nfn main() {}\n", 3);
+}
+
+/// From the review of #88: a block in an argument of a block tail's watched call keeps the outer tail's position watches
+/// (it removed them: an index out of bounds); a discarded block value is drop-checked in edition 2024 too; a `dyn Fn`
+/// call's result holds what it borrows, as a generic bound's; a coerced `&x` through a `&mut` lives no longer than it;
+/// and what a local passed holds before a later argument assigns it flows too (both loans, as rustc's region)
+#[test]
+fn part16_review() {
+    let d = check("use std::cell::RefCell;\nfn main() {\n    let c = RefCell::new(vec![1, 2]);\n    let n = {\n        let _d = 1;\n        c.borrow().get({ let e = RefCell::new(0usize); let v = *e.borrow(); v }).copied()\n    };\n    let m = {\n        let _d = 1;\n        c.borrow().get({ let e = RefCell::new(1usize); *e.borrow() }).copied()\n    };\n    println!(\"{:?} {:?}\", n, m);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("`e` does not live long enough"), "{d:?}");
+    let d = check_ed("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) { println!(\"{}\", self.0); } }\nfn main() {\n    { let x = 0; D(&x) };\n}\n", 2024);
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`x` does not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let f: &dyn Fn(&i32) -> &i32 = &|v| v;\n    let mut x = 1;\n    let r = f(&x);\n    x = 2;\n    println!(\"{} {}\", r, x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    let d = check("fn f<'short, 'long>(x: &'short mut &'long mut i32) -> &'long i32 {\n    &x\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn put<'a>(r: &'a i32, _u: (), v: &mut Vec<&'a i32>) { v.push(r) }\nfn main() {\n    let k = 1;\n    let mut x = 2;\n    let mut r = &k;\n    let mut v = vec![];\n    put(r, { r = &x; }, &mut v);\n    x = 3;\n    println!(\"{:?} {} {}\", v, r, x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("`x` because it is borrowed"), "{d:?}");
+    let d = check("fn put<'a>(r: &'a i32, _u: (), v: &mut Vec<&'a i32>) { v.push(r) }\nfn main() {\n    let mut k = 1;\n    let x = 2;\n    let mut r = &k;\n    let mut v = vec![];\n    put(r, { r = &x; }, &mut v);\n    k = 3;\n    println!(\"{:?} {} {}\", v, r, k);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("`k` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let f: &dyn Fn(&i32) -> &i32 = &|v| v;\n    let g: &dyn Fn(&i32) -> i32 = &|v| *v;\n    let mut x = 1;\n    let r = f(&x);\n    println!(\"{}\", r);\n    let n = g(&x);\n    x = 2;\n    println!(\"{} {}\", n, x);\n}\n"), vec![]);
+    assert_eq!(check("fn f<'a, 'b>(x: &'a &'b i32) -> &'b i32 {\n    &x\n}\nfn g<'a, 'b>(x: &'a mut &'b i32) -> &'b i32 {\n    &x\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check_ed("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) { println!(\"{}\", self.0); } }\nfn main() {\n    let y = 1;\n    { let x = 0; let _ = x; D(&y) };\n}\n", 2024), vec![]);
+    // (the second round: a `let ref` temporary of a block ends with it, also when a holder of the enclosing block's
+    // value is pushed after it; a coerced `&x` keeps its loan as long as the lifetime it is annotated with, and through
+    // `&mut` links only it lives no longer than x (E0515 when returned))
+    let d = check("fn make() -> String { String::from(\"a\") }\nfn main() {\n    let r = { let ref x = make(); x };\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("temporary value dropped while borrowed"), "{d:?}");
+    let d = check("fn f<'a>(x: &'a mut i32) {\n    let r: &'a i32 = &x;\n    *x = 2;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    let d = check("fn f(x: &mut i32) {\n    let r: &i32 = &x;\n    println!(\"{}\", r);\n    *x = 2;\n}\nfn g<'a>(x: &'a mut i32) -> &'a i32 {\n    &x\n}\nfn h(v: &mut Vec<i32>) -> usize {\n    let s: &Vec<i32> = &v;\n    let n = s.len();\n    v.push(1);\n    n\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0515"), "{d:?}");
+    assert_eq!(check("fn make() -> String { String::from(\"a\") }\nfn main() {\n    let r = { let ref x = make(); x.len() };\n    println!(\"{}\", r);\n}\n"), vec![]);
+    // (the third round: only a place the function owns is bounded by the coercion's borrow of it; one reached through a
+    // reference (`&s.f` of `s: &mut S`, `&*x`) is a reborrow through it)
+    assert_eq!(check("struct S<'a> { f: &'a mut i32 }\nfn g<'a>(s: &'a mut S<'a>) -> &'a i32 {\n    &s.f\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("fn g<'a>(x: &'a mut &'a mut i32) -> &'a i32 {\n    &*x\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("struct S<'a> {\n    r: &'a mut i32,\n}\nfn f<'a>(s: &'a S<'a>) -> &'a i32 {\n    &s.r\n}\nfn main() {}\n"), vec![]);
+    let d = check("struct S<'a> { f: &'a mut i32 }\nfn g<'a>(s: S<'a>) -> &'a i32 {\n    &s.f\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0515"), "{d:?}");
+    // (the fourth: such a reborrow is bounded by the references that reach the place too, as the explicit one)
+    for s in ["&'short mut S<'long>", "&'short S<'long>"] {
+        let d = check(&format!("struct S<'a> {{ r: &'a mut i32 }}\nfn f<'short, 'long>(s: {s}) -> &'long i32 {{\n    &s.r\n}}\nfn main() {{}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("`'short` must outlive `'long`"), "{d:?}");
+    }
+    assert_eq!(check("struct S<'a> { r: &'a mut i32 }\nfn g<'short, 'long>(s: &'short S<'long>) -> &'short i32 {\n    &s.r\n}\nfn h<'short, 'long: 'short>(s: &'short mut S<'long>) -> &'short i32 {\n    &s.r\n}\nfn main() {}\n"), vec![]);
 }
