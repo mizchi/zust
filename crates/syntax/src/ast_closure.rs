@@ -384,6 +384,8 @@ fn str_lit_body(t: &str) -> Option<&str> {
 struct Free {
     scopes: Vec<Vec<String>>,
     out: Vec<String>,
+    /// Where each name of `out` is first used
+    at: Vec<Pos>,
     /// Count `let _ = s;` as a use of s (fake_reads)
     keep_wild: bool,
 }
@@ -397,10 +399,11 @@ impl Free {
         pat_idents(p, &mut v);
         self.scopes.last_mut().unwrap().extend(v);
     }
-    fn name(&mut self, n: &str) {
+    fn name(&mut self, n: &str, at: Pos) {
         // (`_` は式としては推論の穴 (syn の Expr::Infer) で、変数ではない)
         if n != "_" && !self.bound(n) && !self.out.iter().any(|x| x == n) {
             self.out.push(n.to_string());
+            self.at.push(at);
         }
     }
     fn block(&mut self, b: &Block) {
@@ -430,7 +433,7 @@ impl Free {
             Expr::Path(None, p) => {
                 if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() {
                     let n = p.segs[0].name.clone();
-                    self.name(&n);
+                    self.name(&n, p.pos);
                 }
             }
             Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => self.block(b),
@@ -504,10 +507,10 @@ impl Free {
                 if let Some(es) = macro_args_at(g, sp.at) {
                     for x in &es {
                         self.expr(x);
-                        if let Expr::Lit(t, _) = x {
+                        if let Expr::Lit(t, at) = x {
                             if let Some(body) = str_lit_body(t) {
                                 for n in fmt_inline_names(body) {
-                                    self.name(&n);
+                                    self.name(&n, *at);
                                 }
                             }
                         }
@@ -548,16 +551,24 @@ fn wild_read_only(e: &Expr) -> bool {
 
 /// クロージャの自由変数 (使われた順)
 pub fn free_vars(c: &Expr) -> Vec<String> {
-    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), keep_wild: false };
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), at: Vec::new(), keep_wild: false };
     v.expr(c);
     v.out
 }
 
 /// free_vars with `let _ = place;` a use of the place's variable (the unused-variable lint: rustc counts it as one)
 pub fn used_vars(c: &Expr) -> Vec<String> {
-    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), keep_wild: true };
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), at: Vec::new(), keep_wild: true };
     v.expr(c);
     v.out
+}
+
+/// used_vars, each with where it is first used free (the path that names it; for a name only a format string's
+/// `{x}` names, the string)
+pub fn used_vars_at(c: &Expr) -> Vec<(String, Pos)> {
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), at: Vec::new(), keep_wild: true };
+    v.expr(c);
+    v.out.into_iter().zip(v.at).collect()
 }
 
 /// The variables closure c reads only by `let _ = place;`, which it does not capture: its body skips those `let`s
@@ -567,7 +578,7 @@ pub fn fake_reads(c: &Expr) -> Vec<String> {
     if !wild_fake_reads() || !has_wild_read(c) {
         return vec![];
     }
-    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), keep_wild: true };
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), at: Vec::new(), keep_wild: true };
     v.expr(c);
     let caps = free_vars(c);
     v.out.into_iter().filter(|n| !caps.contains(n)).collect()
