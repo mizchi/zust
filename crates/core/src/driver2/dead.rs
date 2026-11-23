@@ -10,7 +10,7 @@ use crate::fxhash::{FxMap, FxSet};
 use crate::lexer::{ItemKind, SrcItem};
 
 /// The first dead part of the program's items, as `(line, message)`
-pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, String)> {
+pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -> Option<(usize, String)> {
     let (Some(first), Some(last)) = (items.first(), items.last()) else { return None };
     let base = first.start;
     let region = src.get(base..last.end)?;
@@ -100,14 +100,17 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
             None => &src[it.start..it.end],
         }
     };
-    // (a lint level of its own (allow / expect / warn, spaced or not), a cfg, a repr, an export: left alone)
+    // (a lint level of its own (allow / expect, or warn but under the crate's `deny(warnings)`; spaced or not), a cfg,
+    // a repr, an export: left alone)
     let skip_attr = |a: &str| {
         let a: String = a.chars().filter(|c| !c.is_whitespace()).collect();
-        ["allow(", "expect(", "warn(", "#[cfg", "repr(", "no_mangle", "export_name", "#[test]"].iter().any(|x| a.contains(x))
+        (!warn_denied && a.contains("warn(")) || ["allow(", "expect(", "#[cfg", "repr(", "no_mangle", "export_name", "#[test]"].iter().any(|x| a.contains(x))
     };
+    // (the derives of the attributes, spaced or not: `#[derive (PartialEq)]`)
     let derives = |a: &str| -> Vec<String> {
+        let a: String = a.chars().filter(|c| !c.is_whitespace()).collect();
         let mut out = vec![];
-        let mut rest = a;
+        let mut rest = a.as_str();
         while let Some(p) = rest.find("derive(") {
             rest = &rest[p + 7..];
             let e = rest.find(')').unwrap_or(rest.len());
@@ -135,15 +138,21 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
             }
             o = encl[o];
         }
-        let p = ps.wrapping_sub(1);
-        if matches!(word(p), "let" | "for") || sym(p, b'|') || sym(p, b'@') {
-            return true;
-        }
-        // (after `=>` (an arm's body), a single `=` (a value), `return` / `break`: an expression)
-        let arrow = p != none && p > 0 && sym(p, b'>') && sym(p - 1, b'=');
-        let assign = p != none && sym(p, b'=') && !(p > 0 && toks[p - 1].0 == 1 && toks[p - 1].2 == toks[p].1 && b"=<>!+-*/%^&|".contains(&b[toks[p - 1].1]));
-        if arrow || assign || matches!(word(p), "return" | "break") {
-            return false;
+        // (what the token p before something says: after `let` / `for` / `|` / `@` a pattern; after `=>` (an arm's
+        // body), a single `=` (a value), `return` / `break` an expression)
+        let before = |p: usize| -> Option<bool> {
+            if p == none {
+                return None;
+            }
+            if matches!(word(p), "let" | "for") || sym(p, b'|') || sym(p, b'@') {
+                return Some(true);
+            }
+            let arrow = p > 0 && sym(p, b'>') && sym(p - 1, b'=');
+            let assign = sym(p, b'=') && !(p > 0 && toks[p - 1].0 == 1 && toks[p - 1].2 == toks[p].1 && b"=<>!+-*/%^&|".contains(&b[toks[p - 1].1]));
+            (arrow || assign || matches!(word(p), "return" | "break")).then_some(false)
+        };
+        if let Some(r) = before(ps.wrapping_sub(1)) {
+            return r;
         }
         let mut d = 0i32;
         let mut j = e + 1;
@@ -175,6 +184,23 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                         let o = open_of[j];
                         if o == none || o == 0 || word(o - 1).is_empty() || keyword(word(o - 1)) {
                             return false;
+                        }
+                    }
+                    // (the end of a group around it, `=> (E::A)` / `=> Some((E::A))`: what is before the group (or the
+                    // path it follows) says; `Some(E::A) =>` goes on to its `=>`)
+                    b')' | b']' if d == 0 => {
+                        let o = open_of[j];
+                        if o != none {
+                            let mut q = o;
+                            if q > 0 && toks[q - 1].0 == 0 {
+                                q -= 1;
+                                while q >= 3 && sym(q - 1, b':') && sym(q - 2, b':') && toks[q - 3].0 == 0 {
+                                    q -= 3;
+                                }
+                            }
+                            if let Some(r) = before(q.wrapping_sub(1)) {
+                                return r;
+                            }
                         }
                     }
                     b')' | b']' | b'}' => d = (d - 1).max(0),
@@ -209,8 +235,8 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
         }
         ps
     };
-    // (each inherent / trait impl's self type, by its header's index)
-    let impl_self = |h: usize| -> Option<&str> {
+    // (each inherent / trait impl's self type as its header names it, by the header's index)
+    let impl_self_named = |h: usize| -> Option<&str> {
         let it = items.get(h)?;
         let t = crate::lexer::tokenize(src.get(it.start..it.end)?.as_bytes());
         let text = &src[it.start..it.end];
@@ -264,6 +290,35 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
         }
         name
     };
+    // (the program's type aliases of a path, `type A = S;` / `type A = m::S<u8>;`: the path's last segment)
+    let aliases: FxMap<&str, &str> = (0..items.len())
+        .filter(|&ii| matches!(items[ii].kind, ItemKind::Normal))
+        .filter_map(|ii| {
+            let k = head(ii)?;
+            if word(k) != "type" || !sym(k + 2, b'=') {
+                return None;
+            }
+            let (mut q, mut last) = (k + 3, None);
+            while q < n && item_of[q] == ii && (toks[q].0 == 0 || sym(q, b':')) {
+                if toks[q].0 == 0 {
+                    last = Some(word(q));
+                }
+                q += 1;
+            }
+            (sym(q, b';') || sym(q, b'<')).then_some((word(k + 1), last?))
+        })
+        .collect();
+    // (each inherent / trait impl's self type, by its header's index; through the program's aliases)
+    let impl_self = |h: usize| -> Option<&str> {
+        let mut name = impl_self_named(h)?;
+        for _ in 0..8 {
+            match aliases.get(name) {
+                Some(&t) if t != name => name = t,
+                _ => break,
+            }
+        }
+        Some(name)
+    };
     let mut self_of: FxMap<usize, Option<&str>> = Default::default();
     // (the struct or enum each occurrence names: its own name, or `Self` in its impl)
     let mut names_at = |k: usize, name: &str| -> bool {
@@ -282,7 +337,28 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
         .filter(|&ii| matches!(items[ii].kind, ItemKind::Normal))
         .filter_map(|ii| head(ii).filter(|&k| matches!(word(k), "struct" | "union")).map(|k| word(k + 1)))
         .collect();
-    // (the struct a variable at k is bound to: the item's only `let` of that name, `let [mut] x = S(` / `S {`)
+    // (the bracket each of them is constructed with: `(` of a tuple struct, `{` of the others; a fn may share a braced
+    // struct's name, `fn S() -> T` beside `struct S { .. }`)
+    let struct_shapes: FxMap<&str, u8> = (0..items.len())
+        .filter(|&ii| matches!(items[ii].kind, ItemKind::Normal))
+        .filter_map(|ii| {
+            let k = head(ii).filter(|&k| matches!(word(k), "struct" | "union"))?;
+            let (mut q, mut angle) = (k + 2, 0i32);
+            while q < n && item_of[q] == ii {
+                if sym(q, b'<') {
+                    angle += 1;
+                } else if sym(q, b'>') && !sym(q - 1, b'-') {
+                    angle -= 1;
+                } else if angle <= 0 && (sym(q, b'(') || sym(q, b'{') || sym(q, b';') || word(q) == "where") {
+                    break;
+                }
+                q += 1;
+            }
+            Some((word(k + 1), if sym(q, b'(') { b'(' } else { b'{' }))
+        })
+        .collect();
+    // (the struct a variable at k is bound to: the item's only `let` of that name, `let [mut] x = S(` of a tuple
+    // struct / `S {` of another)
     let bound_to = |k: usize| -> Option<&str> {
         let ii = item_of[k];
         if ii == none {
@@ -299,7 +375,8 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                         return None;
                     }
                     let s = x + 2;
-                    found = Some((sym(x + 1, b'=') && toks.get(s).is_some_and(|t| t.0 == 0) && (sym(s + 1, b'(') || sym(s + 1, b'{')) && struct_names.contains(word(s))).then(|| word(s)));
+                    let shape = struct_shapes.get(word(s)).copied();
+                    found = Some((sym(x + 1, b'=') && toks.get(s).is_some_and(|t| t.0 == 0) && ((sym(s + 1, b'(') && shape == Some(b'(')) || (sym(s + 1, b'{') && shape == Some(b'{')))).then(|| word(s)));
                 }
             }
             q += 1;
@@ -332,6 +409,8 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                 _ => None,
             })
             .flatten()
+            // (one of the program's structs: an alias it does not resolve, a foreign type, read by any owner)
+            .filter(|o| struct_names.contains(o))
             // (`x.f` of an `x` the same item binds once, to a struct's value: `let x = S(..)` / `let x = S { .. }`)
             .or_else(|| (k > 0 && toks[k - 1].0 == 0 && !sym(k.wrapping_sub(2), b'.')).then(|| bound_to(k - 1)).flatten());
         match owner {
@@ -500,13 +579,17 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
         // (the parts: split at the commas between the brackets; each one's attributes, visibility, name)
         let mut parts: Vec<(usize, usize)> = vec![];
         let mut s = open + 1;
-        // (not at a comma of a type's arguments: `Result<u8, u8>`)
+        // (not at a comma of a type's arguments: `Result<u8, u8>`; in a variant's discriminant, `A = 1 << 0`, `<` and
+        // `>` are operators but for a turbofish's `::<`)
         let mut angle = 0i32;
+        let mut discr = false;
         for q in open + 1..=end {
             if q < end && encl[q] == open {
-                if sym(q, b'<') {
+                if sym(q, b'=') && angle <= 0 && !discr && !tuple {
+                    discr = true;
+                } else if sym(q, b'<') && (!discr || (sym(q - 1, b':') && sym(q.wrapping_sub(2), b':'))) {
                     angle += 1;
-                } else if sym(q, b'>') && !sym(q - 1, b'-') {
+                } else if sym(q, b'>') && !sym(q - 1, b'-') && (!discr || angle > 0) {
                     angle -= 1;
                 }
             }
@@ -515,6 +598,7 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                     parts.push((s, q));
                 }
                 s = q + 1;
+                discr = false;
             }
         }
         // (the occurrences of the name: whether anything constructs it, whether a pattern (or anything unclear) names

@@ -1243,6 +1243,8 @@ impl Session2 {
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;
         let mut deny_dead_code = false;
+        // (`deny(warnings)` / `forbid(warnings)` of the crate: a lint an item or field sets to warn is an error)
+        let mut warn_denied = false;
         let mut deny_dead_pub = false;
         let mut deny_unused_imports = false;
         let mut deny_unreachable_code = false;
@@ -1310,17 +1312,18 @@ impl Session2 {
                     .map(|(i, _)| i)
                     .last()
             };
-            // (the level of a lint of a group, by the last of its levels in source order: forbid wins; a deny of it
-            // or its group denies; a warn of it (or no level of its own) is denied by `deny(warnings)`; an allow or an
-            // expect does not deny)
+            // (the level of a lint of a group, by the last of its levels in source order: a forbid of it or its group
+            // wins; a deny of it or its group denies; a warn of it (or no level of its own) is denied by
+            // `deny(warnings)` or `forbid(warnings)`, which reach only the lints left at warn; an allow or an expect
+            // does not deny)
             let grouped = |n: &str, group: &str| {
-                if last_of("forbid", &[n, group, "warnings"]).is_some() {
+                if last_of("forbid", &[n, group]).is_some() {
                     return true;
                 }
                 let own = [n, group];
                 let levels = [("deny", last_of("deny", &own)), ("warn", last_of("warn", &own)), ("allow", last_of("allow", &own)), ("expect", last_of("expect", &own))];
                 let last = levels.iter().filter_map(|(l, at)| at.map(|at| (at, *l))).max();
-                let warnings = last_of("deny", &["warnings"]).is_some();
+                let warnings = last_of("deny", &["warnings"]).is_some() || last_of("forbid", &["warnings"]).is_some();
                 match last.map(|(_, l)| l) {
                     Some("deny") => true,
                     Some("warn") | None => warnings,
@@ -1328,6 +1331,7 @@ impl Session2 {
                 }
             };
             deny_dead_code = grouped("dead_code", "unused");
+            warn_denied = last_of("deny", &["warnings"]).is_some() || last_of("forbid", &["warnings"]).is_some();
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_mismatched_lts = lint("mismatched_lifetime_syntaxes");
@@ -1343,11 +1347,11 @@ impl Session2 {
         // appears nowhere but in its own definition and in `impl` headers)
         if deny_dead_code && self.ctx.lib.is_none() {
             // (a `pub` item counts as used, except in a binary under `deny(dead_code_pub_in_binary)`)
-            if let Some((line, msg)) = first_dead_item(&src, &items[..user_src], deny_dead_pub && !lib_attr) {
+            if let Some((line, msg)) = first_dead_item(&src, &items[..user_src], deny_dead_pub && !lib_attr, warn_denied) {
                 return Err(format!("{line}:1: {msg}"));
             }
             // (a field nothing reads, a variant nothing constructs, an inherent impl's const or fn nothing names)
-            if let Some((line, msg)) = dead::first_dead_part(&src, &items[..user_src]) {
+            if let Some((line, msg)) = dead::first_dead_part(&src, &items[..user_src], warn_denied) {
                 return Err(format!("{line}:1: {msg}"));
             }
         }
@@ -3058,7 +3062,7 @@ fn first_bad_name(src: &str, items: &[SrcItem], deny: [bool; 3]) -> Option<(usiz
 }
 
 /// `#![deny(dead_code)]`: the first top-level item of the program that nothing uses (see the caller)
-fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usize, String)> {
+fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool, warn_denied: bool) -> Option<(usize, String)> {
     let (Some(first), Some(last)) = (items.first(), items.last()) else { return None };
     let region = &src[first.start..last.end];
     let b = region.as_bytes();
@@ -3097,18 +3101,43 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
             continue;
         }
         let text = &src[it.start..it.end];
-        if text.contains("allow(dead_code") || text.contains("expect(dead_code") || text.contains("allow(unused") || text.contains("no_mangle") || text.contains("#[test]")
-            || text.contains("#[derive") || text.contains("export_name") || text.contains("#[cfg")
-        {
+        // (the item's own level, the last of its attributes naming dead_code: `#[allow(dead_code)] #[warn(dead_code)]`
+        // is a warn, an error under `deny(warnings)`; with none of its own, any allow in it leaves it alone)
+        let allowed = match item_lint_level(text, "dead_code").or_else(|| item_lint_level(text, "unused")) {
+            Some("allow" | "expect") => true,
+            Some("warn") => !warn_denied,
+            Some(_) => false,
+            None => text.contains("allow(dead_code") || text.contains("expect(dead_code") || text.contains("allow(unused"),
+        };
+        if allowed || text.contains("no_mangle") || text.contains("#[test]") || text.contains("#[derive") || text.contains("export_name") || text.contains("#[cfg") {
             continue;
         }
         let t = crate::lexer::tokenize(text.as_bytes());
         let tw = |k: usize| -> &str { if t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" } };
-        // (the item's keyword and name, after its attributes and visibility)
+        // (the item's keyword and name, after its lint-level attributes and visibility; another attribute (`#[used]`,
+        // `#[panic_handler]` ..) may make it used: the scan stops at its name, and the item is left alone)
+        let sym_at = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && text.as_bytes()[t[k].1] == c;
         let mut k = 0;
         while k < t.len() && (tw(k) == "pub" || tw(k) == "unsafe" || tw(k) == "async" || tw(k) == "extern" || t[k].0 != 0) {
             if tw(k) == "extern" || tw(k) == "impl" || tw(k) == "mod" || tw(k) == "use" || tw(k) == "macro_rules" {
                 break;
+            }
+            if sym_at(k, b'#') && sym_at(k + 1, b'[') && matches!(tw(k + 2), "allow" | "warn" | "deny" | "forbid" | "expect") {
+                let mut d = 0;
+                let mut j = k + 1;
+                while j < t.len() {
+                    if sym_at(j, b'[') {
+                        d += 1;
+                    } else if sym_at(j, b']') {
+                        d -= 1;
+                        if d == 0 {
+                            break;
+                        }
+                    }
+                    j += 1;
+                }
+                k = j + 1;
+                continue;
             }
             k += 1;
         }
@@ -3119,7 +3148,8 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
         if !check_pub && (0..k).any(|j| tw(j) == "pub") {
             continue;
         }
-        if name.is_empty() || name.starts_with('_') || name == "main" {
+        // (`_foo`, also in a flattened module: `m___foo`)
+        if name.is_empty() || name.starts_with('_') || name.split("__").last().is_some_and(|s| s.starts_with('_')) || name == "main" {
             continue;
         }
         // (the name as written: without the flattened modules' `a__` prefix and the renamer's `__u_`)
@@ -3303,6 +3333,12 @@ fn item_lint_level(text: &str, n: &str) -> Option<&'static str> {
         rest = rest.trim_start();
         if let Some(r) = rest.strip_prefix("//") {
             rest = r.split_once('\n').map_or("", |x| x.1);
+            continue;
+        }
+        // (the crate's inner attributes, at the head of the first item's text: the crate's levels, not the item's)
+        if let Some(r) = rest.strip_prefix("#![") {
+            let Some(end) = r.find(']') else { break };
+            rest = &r[end + 1..];
             continue;
         }
         let Some(r) = rest.strip_prefix("#[") else { break };
@@ -4514,12 +4550,24 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
             if !(w(k) == "Sized" && sym(k - 1, b'?')) {
                 return false;
             }
-            // (back over the other bounds, `Tr<A, B> + 'a + std::fmt::Debug + Iterator<Item = u8> +`, to the `:`
-            // after the name: anything inside a bound's `<..>`)
+            // (back over the other bounds, `Tr<A, B> + 'a + std::fmt::Debug + Iterator<Item = u8> + FnOnce(u8) -> u8
+            // +`, to the `:` after the name: anything inside a bound's `<..>` or `(..)`)
             let mut j = k - 1;
             let mut angle = 0i32;
+            let mut paren = 0i32;
             while j > 0 {
                 j -= 1;
+                if sym(j, b')') {
+                    paren += 1;
+                    continue;
+                }
+                if sym(j, b'(') {
+                    paren -= 1;
+                    continue;
+                }
+                if paren > 0 {
+                    continue;
+                }
                 if sym(j, b'>') && !(j > 0 && sym(j - 1, b'-')) {
                     angle += 1;
                     continue;
@@ -4529,6 +4577,10 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
                     continue;
                 }
                 if angle > 0 {
+                    continue;
+                }
+                // (the `->` of a `Fn(..) -> R` bound)
+                if sym(j, b'-') && j + 1 < t.len() && sym(j + 1, b'>') {
                     continue;
                 }
                 if sym(j, b':') {
