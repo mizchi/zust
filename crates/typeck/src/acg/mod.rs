@@ -761,9 +761,11 @@ pub(crate) fn addr_taken(b: &crate::parse::Block, mut_methods: &crate::fxhash::F
                 let es = crate::ast_closure::macro_exprs(g);
                 if es.is_empty() {
                     if let Some(es) = crate::ast_closure::macro_args(g) {
+                        // (a formatting macro's `&x` is read for its value; another's takes x's address (`vec![&mut x]`))
+                        let fmt = matches!(name, "println" | "print" | "eprintln" | "eprint" | "format" | "format_args" | "write" | "writeln" | "panic" | "assert" | "debug_assert" | "unreachable" | "todo" | "unimplemented");
                         for e in &es {
                             match e {
-                                Expr::Ref(_, x) => visit(x, out, mm),
+                                Expr::Ref(_, x) if fmt => visit(x, out, mm),
                                 Expr::Path(..) | Expr::Lit(_, _) => {}
                                 e => visit(e, out, mm),
                             }
