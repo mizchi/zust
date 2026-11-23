@@ -294,3 +294,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-23	c9ff1c4+	review of #68: hoisted derive errors, attributes before the keyword, supertrait chains / where Self / equations, {float}, defaulted pattern arguments	0.695	553.530	3772.125	1902.8	-	1830	1511	102	4411	1199.550	64.444	10.545	324.796	729.115	270.838
 2026-11-23	54dea96+	second review of #68: supertrait chains by a visited set, where-Self equations, variant pattern arity	0.697	553.551	3772.137	1902.8	-	1830	1511	102	4411	1199.549	64.324	10.558	324.825	729.129	270.849
 2026-11-23	c9ff1c4+	WF of struct fields and impl headers	0.695	554.291	3772.192	1902.8	-	1830	1511	102	4418	1200.025	64.431	10.545	324.943	729.795	272.872
+2026-11-23	df7b223+	WF check only when a struct of the program's has a bounded parameter	0.695	553.577	3772.112	1902.8	-	-	-	-	-	1199.544	64.382	10.545	324.772	729.107	270.833

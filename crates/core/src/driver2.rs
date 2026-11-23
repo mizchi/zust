@@ -1476,8 +1476,11 @@ impl Session2 {
         resolve_opaque(&mut prog, &src, &items)?;
         // (a field or an impl's self type that names a struct of the program's whose parameter's bound does not hold:
         // `struct Hoge<K> { s: S<K> }` with `struct S<T: Tr>`)
-        if let Some(e) = wf_error(&prog, &sums, &src, &items, user) {
-            return Err(e);
+        // (only when one of them has a bounded parameter)
+        if sums[..user.min(sums.len())].iter().any(|s| !s.adt_bounds.is_empty()) {
+            if let Some(e) = wf_error(&prog, &sums, &src, &items, user) {
+                return Err(e);
+            }
         }
         // (a derive whose field has not the trait: `#[derive(Hash)] struct S { x: Error }`)
         if !prog.derived.is_empty() {
