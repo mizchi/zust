@@ -143,7 +143,13 @@ pub fn collect(src: &str) -> Collected {
     if let Some(at) = main_at {
         main_refs.push(at);
         // (the calls that name the root's `main`: by a path to the root, or a bare `main` in a module without its own)
-        main_refs.extend(calls.into_iter().filter(|(_, m, bare)| m.is_empty() || (*bare && !own_main.contains(m))).map(|c| c.0));
+        // (a bare `main` in a module without its own reaches one through a glob import (`use super::*`): the nearest
+        //  module around it that has one. It is the root's only when none of them, the root aside, has one)
+        let shadowed = |m: &str| {
+            let segs: Vec<&str> = if m.is_empty() { vec![] } else { m.split("::").collect() };
+            (1..=segs.len()).any(|n| own_main.contains(&segs[..n].join("::")))
+        };
+        main_refs.extend(calls.into_iter().filter(|(_, m, bare)| if *bare { !shadowed(m) } else { m.is_empty() }).map(|c| c.0));
     }
     let unlisted = attrs_test.saturating_sub(tests.len());
     Collected { tests, main_refs, unlisted }
@@ -445,6 +451,10 @@ mod tests {
         let src = "fn main() {}\nmod tests {\n    fn main() {}\n    #[test]\n    fn calls_crate_main() { crate::main(); main(); }\n}\n";
         let out = apply(src);
         assert!(out.contains("fn calls_crate_main() { crate::m41n(); main(); }"), "{out}");
+        // (a bare `main` under a module with its own, through `use super::*`: that module's)
+        let src = "fn main() {}\nmod a {\n    fn main() {}\n    mod b {\n        use super::*;\n        fn f() { main(); }\n    }\n}\nmod c { use super::*; fn g() { main(); } }\n";
+        let out = apply(src);
+        assert!(out.contains("fn f() { main(); }") && out.contains("fn g() { m41n(); }"), "{out}");
     }
 
     #[test]
