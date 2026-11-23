@@ -2706,4 +2706,11 @@ fn part15_review() {
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("unused_mut"), "{d:?}");
     let d = check("#![deny(unused_mut)]\nfn main() {\n    let mut a = [3, 1, 2];\n    let mut s: &mut [i32] = &mut a;\n    s.sort();\n    println!(\"{:?}\", a);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`s`"), "{d:?}");
+    // (the second round: a `&mut self` method of the program's on an array takes it `&mut` (it was a type mismatch):
+    // it needs the array `mut` (E0596 without), and so it is not unused_mut's)
+    let tr = "trait Touch {\n    fn touch(&mut self);\n    fn look(&self) -> i32;\n}\nimpl Touch for [i32; 2] {\n    fn touch(&mut self) { self[0] += 1; }\n    fn look(&self) -> i32 { self[0] }\n}\n";
+    let d = check(&format!("#![deny(unused_mut)]\n{tr}fn main() {{\n    let mut a = [0, 1];\n    a.touch();\n    let mut b = [0, 1];\n    println!(\"{{}} {{}}\", a.look(), b.look());\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 13 && d[0].1.contains("`b`"), "{d:?}");
+    let d = check(&format!("{tr}fn main() {{\n    let a = [0, 1];\n    a.touch();\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("as mutable"), "{d:?}");
 }

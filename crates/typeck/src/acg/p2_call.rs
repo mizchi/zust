@@ -1654,9 +1654,14 @@ impl Cx<'_> {
                 vt = *i;
             }
             if matches!(vt, Ty::Array(..)) {
-                let a = v;
-                v = a;
-                vt = Ty::Ref(false, intern(vt));
+                // (a `&mut self` method (`impl Touch for [i32; 2]`'s `fn touch(&mut self)`): a mutable borrow of the
+                // array (E0596 when it is not `mut`; it needs the `mut`, for unused_mut))
+                let mutable = matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(true, _)));
+                if mutable && is_place_expr(recv) && matches!(self.peek(recv), Some(Ty::Array(..))) {
+                    self.bk_borrow(recv, true, err_pos(recv));
+                    self.bk_mut_use(recv);
+                }
+                vt = Ty::Ref(mutable, intern(vt));
             }
             let args: Vec<&Expr> = margs.iter().collect();
             return self.call_fn(id, Some((v, vt)), &args, tf, expected, SP).map(Some);
