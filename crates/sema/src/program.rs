@@ -262,6 +262,13 @@ pub struct Program {
     /// some trait other than Clone has a fn `clone` (`trait Duplicate { fn clone(&self) -> S { .. } }`), or a blanket
     /// impl one: only then can default_method find a `clone` for a type
     pub trait_clone_fns: bool,
+    /// method names that two traits of the program's declare (`trait A { fn foo(self); } trait B { fn foo(self); }`):
+    /// only a call of one of these can be ambiguous (E0034)
+    pub multi_trait_methods: FxSet<String>,
+    /// of those, the types (a struct's base, a primitive) two of the traits that declare the name are implemented for
+    pub ambiguous_methods: FxMap<String, Vec<Ty>>,
+    /// the program's traits with a blanket impl without bounds (`impl<T> A for T {}`): every type implements them
+    pub unbounded_blankets: FxSet<String>,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
@@ -273,6 +280,8 @@ pub struct Program {
     pub path_lts: bool,
     /// `#![deny(unused_allocation)]`: `Box::new(x).m()` with m of `&self` on what the box holds is an error
     pub deny_unused_alloc: bool,
+    /// the source allows (or warns of) `overflowing_literals`, at the crate or an item: no "literal out of range"
+    pub allow_overflowing_literals: bool,
     /// `#![deny(trivial_casts)]` / `#![deny(trivial_numeric_casts)]`: a cast a coercion or nothing would do
     pub deny_trivial_casts: (bool, bool),
     /// the program's `#[must_use]` fns (by name), for unused_must_use
@@ -339,6 +348,11 @@ pub struct Program {
     pub impl_targs_lts: HashSet<(String, Ty)>,
     /// (型, trait) の実装
     pub impls: HashSet<(u32, String)>,
+    /// the self types of the impls of a trait for a struct's instances (`impl A for W<u8>`), by (struct, trait), with
+    /// the impl's parameters as `Param(i)` and their number
+    pub impl_selfs: FxMap<(u32, String), Vec<(Ty, usize, Vec<(usize, String)>)>>,
+    /// the traits the program declares (not the prelude's): a bound of one is checked by its impls
+    pub user_traits: FxSet<String>,
     /// Types whose `Copy` impl names 'static in its self type (`impl Copy for Foo<'static>`): a copy of one requires
     /// what it borrows to be 'static
     pub static_copy: FxSet<u32>,
@@ -838,6 +852,7 @@ impl Program {
             edition: 2021,
             path_lts: false,
             deny_unused_alloc: false,
+            allow_overflowing_literals: false,
             deny_trivial_casts: (false, false),
             must_use_fns: vec![],
             prim_mut_methods: HashSet::default(),
@@ -867,6 +882,11 @@ impl Program {
             copy_params: FxMap::default(),
             has_mods: false,
             trait_clone_fns: false,
+            multi_trait_methods: FxSet::default(),
+            ambiguous_methods: FxMap::default(),
+            unbounded_blankets: FxSet::default(),
+            impl_selfs: FxMap::default(),
+            user_traits: FxSet::default(),
             lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
@@ -1443,6 +1463,9 @@ impl Program {
             }
             if let Some(tr) = &sm.trait_decl {
                 p.traits.entry(tr.clone()).or_default();
+                if ii < user {
+                    p.user_traits.insert(tr.clone());
+                }
                 if let Some((_, sup)) = sm.trait_generics.iter().find(|g| g.0 == "#supers") {
                     p.trait_supers.insert(tr.clone(), sup.clone());
                 }
@@ -1626,6 +1649,21 @@ impl Program {
             // (a trait with parameters, `impl Tr<u8> for S` and `impl Tr<u16> for S`, or self types that differ in their
             // arguments, `impl Tr for Vec<i32>` and `impl Tr for Vec<Box<i32>>`)
             let dup = !p.impls.insert((sid, tr.clone()));
+            // (an impl for an instance, `impl A for W<u8>`: its self type, for the method lookup to tell W<u16> apart;
+            // one it cannot read is for every instance)
+            // (an alias of an instance too, `impl A for Alias`; and the bounds of the impl's parameters, `impl<T: Marker>
+            // A for W<T>` is not for a W<i32> without `impl Marker for i32`)
+            {
+                let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                let resolved = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok());
+                let inst = matches!(resolved, Some(Ty::Struct(s)) if p.structs[s as usize].base.is_some());
+                if inst || matches!(sm.impl_self_ty, Some(TySyn::App(..))) {
+                    let st = resolved.unwrap_or(Ty::Param(0));
+                    let bounds: Vec<(usize, String)> =
+                        sm.impl_generics.iter().enumerate().flat_map(|(i, (_, bs))| bs.iter().map(move |b| (i, b.split('<').next().unwrap_or(b).trim().to_string()))).collect();
+                    p.impl_selfs.entry((sid, tr.clone())).or_default().push((st, gn.len().max(1), bounds));
+                }
+            }
             // (all of its lifetimes 'static: `impl Copy for Foo<'static>`, `impl Copy for Foo<&'static u32>` (a path
             // written without lifetimes is no lifetime of its own). One with others (`impl<'b> Copy for Foo<'static,
             // 'b>`) is not followed: the borrow check would ask all of a copy's borrows to be 'static)
@@ -1898,6 +1936,60 @@ impl Program {
         p.any_immutable_static = p.consts.iter().any(|c| c.stat == Some(false) && (c.item as usize) < user);
         // (a body, whatever the trait's name: the prelude's `Clone::clone` has none, a program's own `trait Clone` may)
         p.trait_clone_fns = p.blanket.contains_key("clone") || p.traits.values().flatten().any(|&d| p.sigs[d as usize].has_body && p.names.get(d as usize).is_some_and(|n| n.rsplit("::").next() == Some("clone")));
+        let mut first_trait: FxMap<&str, &str> = FxMap::default();
+        let mut multi: FxSet<String> = FxSet::default();
+        for (tr, ds) in &p.traits {
+            for &d in ds {
+                if !p.item_of.get(d as usize).copied().flatten().is_some_and(|i| i < p.prelude_from) {
+                    continue;
+                }
+                let Some(n) = p.names.get(d as usize).and_then(|n| n.rsplit("::").next()) else { continue };
+                match first_trait.get(n) {
+                    Some(&t) if t != tr.as_str() => {
+                        multi.insert(n.to_string());
+                    }
+                    Some(_) => {}
+                    None => {
+                        first_trait.insert(n, tr.as_str());
+                    }
+                }
+            }
+        }
+        // (for each of those names, the types (a struct's base, a primitive) that implement two of the traits declaring
+        // it: only a call on one of these can be E0034)
+        if !multi.is_empty() {
+            let mut declaring: FxMap<&str, Vec<&str>> = FxMap::default();
+            for (tr, ds) in &p.traits {
+                for &d in ds {
+                    if let Some(n) = p.names.get(d as usize).and_then(|n| n.rsplit("::").next()).filter(|n| multi.contains(*n)) {
+                        declaring.entry(n).or_default().push(tr.as_str());
+                    }
+                }
+            }
+            let mut amb: FxMap<String, Vec<Ty>> = FxMap::default();
+            for (n, trs) in &declaring {
+                let mut seen: FxMap<Ty, u32> = FxMap::default();
+                for (b, tr) in &p.impls {
+                    if trs.contains(&tr.as_str()) {
+                        *seen.entry(Ty::Struct(*b)).or_default() += 1;
+                    }
+                }
+                for (t, tr) in &p.prim_impls {
+                    if trs.contains(&tr.as_str()) {
+                        *seen.entry(*t).or_default() += 1;
+                    }
+                }
+                // (with `impl<T> A for T {}`, a type that implements B: `S.foo()` is A's and B's)
+                let ub = trs.iter().filter(|tr| unbounded_blankets.iter().any(|(u, _)| u == *tr)).count() as u32;
+                let ts: Vec<Ty> = seen.into_iter().filter(|&(_, c)| c + ub >= 2).map(|(t, _)| t).collect();
+                if !ts.is_empty() {
+                    amb.insert(n.to_string(), ts);
+                }
+            }
+            p.ambiguous_methods = amb;
+        }
+        p.multi_trait_methods = multi;
+        p.unbounded_blankets = unbounded_blankets.into_iter().map(|(tr, _)| tr).collect();
         Ok(p)
     }
 
@@ -2090,6 +2182,36 @@ impl Program {
 
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
         self.blanket_traits.contains(tr) || self.implements_concrete(t, tr)
+    }
+
+    /// An impl of tr for t's struct is for t itself: for an instance (`W<u8>`), an impl whose self type matches it, or
+    /// one for every instance (`impl<T> A for W<T>`, `impl A for W`)
+    pub fn impl_applies(&self, t: Ty, tr: &str) -> bool {
+        let Ty::Struct(sid) = t else { return true };
+        let b = self.base_of(sid);
+        match self.impl_selfs.get(&(b, tr.to_string())) {
+            Some(v) if b != sid => v.iter().any(|(st, n, bounds)| {
+                let mut sol = vec![None; *n];
+                // (a bound of a trait of the program's holds by its impls; std's are not checked)
+                self.match_ty(*st, t, &mut sol)
+                    && self.refs_agree(*st, t, 0)
+                    && bounds.iter().all(|(i, b)| !self.user_traits.contains(b) || sol.get(*i).copied().flatten().is_none_or(|a| self.implements(a, b)))
+            }),
+            _ => true,
+        }
+    }
+
+    /// The references in a and b (a pattern with `Param`s, a type) agree in mutability, as match_ty does not check:
+    /// `W<&mut i32>` is not `W<&i32>`
+    pub fn refs_agree(&self, a: Ty, b: Ty, depth: u32) -> bool {
+        match (a, b) {
+            (Ty::Ref(m, x), Ty::Ref(n, y)) => m == n && self.refs_agree(*x, *y, depth + 1),
+            (Ty::Array(x, _), Ty::Array(y, _)) | (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) | (Ty::Ptr(_, x), Ty::Ptr(_, y)) => self.refs_agree(*x, *y, depth + 1),
+            (Ty::Struct(x), Ty::Struct(y)) if x != y && depth < 16 => {
+                self.structs[x as usize].args.iter().zip(&self.structs[y as usize].args).all(|(&p, &q)| self.refs_agree(p, q, depth + 1))
+            }
+            _ => true,
+        }
     }
 
     /// implements, not counting a blanket impl of tr (`impl<T: Marker> Other for T`): an impl for t's type itself
@@ -2509,13 +2631,17 @@ impl Program {
             }
             TySyn::Assoc(b, n) => {
                 let bt = r(b)?;
+                let (n, std_impls) = match n.strip_prefix(crate::ast_types::NO_STD_ASSOC) {
+                    Some(x) => (x, false),
+                    None => (n.as_str(), true),
+                };
                 if self.has_param(bt) {
                     Ty::Assoc(intern_assoc(AssocTy {
                         base: bt,
-                        name: n.clone(),
+                        name: n.to_string(),
                     }))
                 } else {
-                    match self.assoc_of(bt, n) {
+                    match self.assoc_of_with(bt, n, std_impls) {
                         Some(t) => t,
                         None => {
                             return Err(format!(
@@ -3405,6 +3531,11 @@ impl Program {
 
     /// 具体型 t の関連型 name (`impl Iterator for Counter { type Item = u32; }` なら u32)
     pub fn assoc_of(&self, t: Ty, name: &str) -> Option<Ty> {
+        self.assoc_of_with(t, name, true)
+    }
+
+    /// assoc_of; with std_impls false, not std's impls the prelude does not write out (`<i32 as Local>::Output`)
+    pub fn assoc_of_with(&self, t: Ty, name: &str, std_impls: bool) -> Option<Ty> {
         thread_local! {
             static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
         }
@@ -3414,12 +3545,12 @@ impl Program {
             return None;
         }
         DEPTH.with(|d| d.set(d.get() + 1));
-        let r = self.assoc_of0(t, name);
+        let r = self.assoc_of0(t, name, std_impls);
         DEPTH.with(|d| d.set(d.get() - 1));
         r
     }
 
-    fn assoc_of0(&self, t: Ty, name: &str) -> Option<Ty> {
+    fn assoc_of0(&self, t: Ty, name: &str, std_impls: bool) -> Option<Ty> {
         // (`P::Pointer<String>`: the associated type `#gat:Pointer` of `(P, String)`, the impl's for P with its own
         // parameters String)
         if let Some(gname) = name.strip_prefix(crate::ast_types::GAT_PREFIX) {
@@ -3464,7 +3595,18 @@ impl Program {
                 return Some(self.subst(a.value, &args));
             }
         }
-        None
+        // (std's impls the prelude does not write out: `<i32 as Add<T>>::Output` is i32 (the operators of a number or
+        // bool are Self's, through a reference too: `&i32 + i32`), `<&i32 as Deref>::Target` is i32)
+        if !std_impls {
+            return None;
+        }
+        let prim = |t: Ty| t.is_int() || t.is_float() || t == Ty::Bool;
+        match (name, t) {
+            ("Output", t) if prim(t) => Some(t),
+            ("Output", Ty::Ref(_, i)) if prim(*i) => Some(*i),
+            ("Target", Ty::Ref(_, i) | Ty::Box(i)) => Some(*i),
+            _ => None,
+        }
     }
 
     /// t names a type parameter numbered `from` or above

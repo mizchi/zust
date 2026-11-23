@@ -239,3 +239,19 @@ fn uncalled_generic_fns_with_supertraits_and_equations() {
     let d = s.check(by_value);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![5, 11], "{d:?}");
 }
+
+/// Review of #66: a constant's overflowing literal is reported at the constant, used or not; taking an
+/// `#![allow(overflowing_literals)]` out leaves the declarations as they were, and the check memo is not reused then
+#[test]
+fn overflowing_literals_in_constants_and_after_allow_removed() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let unused = "fn main() {}\n\nconst BAD: i8 = -129;\n";
+    let d = s.check(unused);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![3], "{d:?}");
+    assert!(d[0].msg.contains("literal out of range for `i8`"), "{d:?}");
+    let allowed = "#![allow(overflowing_literals)]\nfn main() {\n    let x: i8 = -129;\n    println!(\"{x}\");\n}\n";
+    assert!(s.check(allowed).is_empty(), "{:?}", s.check(allowed));
+    let denied = allowed.replace("#![allow(overflowing_literals)]", "");
+    let d = s.check(&denied);
+    assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![3], "{d:?}");
+}

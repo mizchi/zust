@@ -270,7 +270,16 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
         PTy::Path(Some(q), p) if !p.segs.is_empty() => {
             // (`<T as Tr>::Out<u8>`, a generic associated type in a qualified path, is not taken apart yet: only
             // `T::Out<u8>` is)
-            TySyn::Assoc(Box::new(tysyn(q, self_ty)?), p.segs.last().unwrap().name.clone())
+            let name = p.segs.last().unwrap().name.clone();
+            // (`<i32 as Local>::Output` of a trait other than std's operators / Deref: an impl must give it, not std's
+            // impls for the numbers, which Program answers `<i32 as Add>::Output` with)
+            let tr = p.segs.len().checked_sub(2).map(|i| p.segs[i].name.as_str());
+            let std_tr = matches!(
+                tr,
+                Some("Add" | "Sub" | "Mul" | "Div" | "Rem" | "Neg" | "Not" | "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr" | "Deref" | "DerefMut")
+            );
+            let name = if tr.is_some() && !std_tr && matches!(name.as_str(), "Output" | "Target") { format!("{NO_STD_ASSOC}{name}") } else { name };
+            TySyn::Assoc(Box::new(tysyn(q, self_ty)?), name)
         }
         PTy::Path(None, p) => path_ty(p, self_ty)?,
         _ => return Err("unsupported type".to_string()),
@@ -280,6 +289,10 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
 /// The name a generic associated type's application has: `P::Pointer<String>` is the associated type
 /// `#gat:Pointer` of the tuple `(P, String)` (Program::assoc_of takes it apart)
 pub const GAT_PREFIX: &str = "#gat:";
+
+/// The mark of an associated type a qualified path names of a trait other than std's operators (`<i32 as
+/// Local>::Output`): std's impls for the numbers do not give it
+pub const NO_STD_ASSOC: &str = "#impl:";
 
 fn gat_app(base: TySyn, seg: &crate::parse::Seg, self_ty: Option<&TySyn>) -> R<TySyn> {
     let mut parts = vec![base];
