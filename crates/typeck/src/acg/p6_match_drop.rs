@@ -226,6 +226,7 @@ impl Cx<'_> {
         let Some(place) = self.bk_scrutinee(scrut, scrut_exp, &pats)? else {
             return Ok((None, Ty::Never));
         };
+        let scrut_drop = self.bk.scrut_drop.take();
         // (E0004: the arms must cover the scrutinee's type; user code only)
         if self.user_code {
             if let Some(w) = self.non_exhaustive(arms, place.ty()) {
@@ -385,6 +386,10 @@ impl Cx<'_> {
             }
             if guard_place.is_some() {
                 self.bk_ev(borrowck::Ev::Guard(None));
+            }
+            // (an arm that takes the whole scrutinee moves it: its drop holds nothing on this arm's path)
+            if let Some(id) = scrut_drop.filter(|_| borrowck::pat_takes_whole(&arm.pat)) {
+                self.bk_ev(borrowck::Ev::Def(id, vec![]));
             }
             let t0 = self.temps.len();
             let (v, t) = self.expr(&arm.body, result_ty.or(expected))?;

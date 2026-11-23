@@ -3288,3 +3288,14 @@ fn part18_unsized_ctor_value() {
     }
     assert_eq!(check("struct Test(i32);\nfn main() {\n    let f: fn(_) -> Test = Test;\n    let _ = f(1);\n}\n"), vec![]);
 }
+
+/// A scrutinee whose drop uses what it borrows, with an arm that takes the whole value (`x if flag => drop(x)`): that
+/// arm moves it, the others keep it to the end of the statement (E0499 of `_ => heap.push(1)`)
+#[test]
+fn part18_scrutinee_drop_per_arm() {
+    let d = check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap = BinaryHeap::from(vec![1, 2]);\n    let flag = std::env::args().count() > 5;\n    match heap.peek_mut() {\n        x if flag => drop(x),\n        _ => heap.push(1),\n    };\n    println!(\"{}\", heap.len());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+    let d = check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap = BinaryHeap::from(vec![1, 2]);\n    match heap.peek_mut() {\n        Some(_) => heap.push(1),\n        x => drop(x),\n    };\n    println!(\"{}\", heap.len());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+    assert_eq!(check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap = BinaryHeap::from(vec![1, 2]);\n    let flag = std::env::args().count() > 5;\n    match heap.peek_mut() {\n        x if flag => drop(x),\n        x => drop(x),\n    }\n    heap.push(3);\n    let n = match heap.peek_mut() {\n        x if flag => { drop(x); 1 }\n        _ => 2,\n    };\n    heap.push(n);\n    println!(\"{}\", heap.len());\n}\n"), vec![]);
+}

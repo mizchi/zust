@@ -287,6 +287,9 @@ pub struct Bk {
     /// What the items of each `for` loop being lowered hold (the loan of v for `for x in &v` / `v.iter()`): the
     /// bindings of an item that holds references hold it
     pub for_items: Vec<Vec<Src>>,
+    /// The drop of a `match` scrutinee some of whose arms take the whole value (`x => drop(x)`): those arms move it,
+    /// so it holds nothing there (bk_scrutinee; the match takes it)
+    pub scrut_drop: Option<u32>,
     /// For each of copy_out's locals, its mask in masks: whether each loan is of a place that holds the copied type
     pub copy_masks: HashMap<u32, usize>,
     /// copy_masks' masks, one for each copied type
@@ -1993,6 +1996,11 @@ pub enum CapMode {
     Val,
 }
 
+/// A pattern that binds the whole value by value (`x`, `x @ ..`): it moves the scrutinee
+pub(crate) fn pat_takes_whole(q: &Pat) -> bool {
+    matches!(q, Pat::Ident(false, _, n, _) if n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_")
+}
+
 /// p binds by reference somewhere (`ref x`, `ref mut x`)
 pub(crate) fn pat_binds_ref(p: &Pat) -> bool {
     pat_any(p, &|q| matches!(q, Pat::Ident(true, ..)))
@@ -2174,8 +2182,10 @@ impl Cx<'_> {
         // of the prelude in it): a temporary of the statement, dropped at its end, so its loans live through the
         // arms; also when an arm moves a part out (`Some(t)`), as the drop is then of what may be left. Not when a
         // pattern takes the whole value (`x`, `x @ ..`))
-        let whole = |q: &Pat| matches!(q, Pat::Ident(false, _, n, _) if n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_");
-        if self.bk.level >= 2 && !in_let && self.user_code && !super::is_place_expr(e) && !srcs.is_empty() && !pats.iter().any(|q| whole(q)) {
+        // (when only some of the arms take the whole value (`x if flag => drop(x), _ => ..`), those arms move it: the
+        // match ends its drop there (Bk::scrut_drop), the others keep it)
+        self.bk.scrut_drop = None;
+        if self.bk.level >= 2 && !in_let && self.user_code && !super::is_place_expr(e) && !srcs.is_empty() && !pats.iter().all(|q| pat_takes_whole(q)) {
             if let Ok(Some(p)) = &r {
                 let t = p.ty();
                 if self.dropck(t, 0) {
@@ -2188,6 +2198,9 @@ impl Cx<'_> {
                     self.bk_ev(Ev::Def(id, held));
                     self.bk.stmt_temps.push(id);
                     self.bk.drop_temps.push(id);
+                    if pats.iter().any(|q| pat_takes_whole(q)) {
+                        self.bk.scrut_drop = Some(id);
+                    }
                 }
             }
         }
