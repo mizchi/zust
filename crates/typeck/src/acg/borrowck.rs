@@ -149,6 +149,9 @@ pub struct Bk {
     /// what each one's value holds (watched), as a `let` of it would
     pub watch: crate::fxhash::FxSet<usize>,
     pub watched: HashMap<usize, Vec<Src>>,
+    /// The watched receivers that are method calls, by position (a call the lowering copies, as a method of what an
+    /// auto-deref reaches (`y.borrow().clone()`), is not at its address): what their values hold
+    pub watch_at: Vec<(Sp, Vec<Src>)>,
     /// A closure's body: the borrow checker's locals of its captures held by value. They outlive the body's call, in
     /// the closure's environment: at each exit (its end, `return`, `?`), what they hold escapes it (Cx::bk_cap_escape)
     pub cap_vals: Vec<u32>,
@@ -370,6 +373,38 @@ fn direct_arg(prog: &Program, a: &Expr, out: &mut Vec<usize>) {
 }
 
 /// A value a call makes (not a place, not a constant rustc would promote): `f()`, `x.m()`, `vec![..]`
+/// The temporaries of a block's tail that live to the end of the enclosing statement (edition 2021): the receivers of
+/// its method calls that are not places (`D(&t).end()`), and what a `*` derefs that a call makes (`*a.borrow() + 1`),
+/// through its operators. Each as (the expression, it with no parentheses)
+fn tail_temps<'e>(e: &'e Expr, out: &mut Vec<(&'e Expr, &'e Expr)>, depth: u32) {
+    if depth > 16 {
+        return;
+    }
+    match e {
+        Expr::Paren(x) => tail_temps(x, out, depth + 1),
+        Expr::MethodCall(recv, ..) => {
+            let r = strip_paren(recv);
+            if !super::is_place_expr(r) {
+                out.push((&**recv, r));
+            }
+            tail_temps(r, out, depth + 1);
+        }
+        Expr::Unary(op, x, _) if op == "*" => {
+            let r = strip_paren(x);
+            if matches!(r, Expr::MethodCall(..) | Expr::Call(..)) {
+                out.push((&**x, r));
+            }
+            tail_temps(r, out, depth + 1);
+        }
+        Expr::Unary(_, x, _) => tail_temps(x, out, depth + 1),
+        Expr::Binary(_, l, r, _) => {
+            tail_temps(l, out, depth + 1);
+            tail_temps(r, out, depth + 1);
+        }
+        _ => {}
+    }
+}
+
 fn made_temp(prog: &Program, x: &Expr) -> bool {
     let mut x = x;
     while let Expr::Paren(p) = x {
@@ -2138,6 +2173,11 @@ impl Cx<'_> {
                 let base = prog.base_of(sid);
                 let sd = &prog.structs[sid as usize];
                 let prelude = prog.struct_item.get(base as usize).is_some_and(|&i| i >= prog.prelude_from);
+                // (a guard of the prelude (`c.borrow()`'s `Ref`, a `MutexGuard`): its `Drop` releases what it borrows, so
+                // that must still be there, as std's guards (no `#[may_dangle]`))
+                if prelude && matches!(prog.structs[base as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard") {
+                    return true;
+                }
                 if prelude || prog.closure_of_struct.contains_key(&base) {
                     return sd.args.iter().any(|&a| self.dropck(a, depth + 1));
                 }
@@ -2538,17 +2578,17 @@ impl Cx<'_> {
         if !self.bk_on() || self.bk.level < 2 || !self.user_code {
             return added;
         }
-        let mut cur = strip_paren(e);
-        while let Expr::MethodCall(recv, ..) = cur {
-            let r = strip_paren(recv);
-            if !super::is_place_expr(r) {
-                for a in [&**recv as *const Expr as usize, r as *const Expr as usize] {
-                    if self.bk.watch.insert(a) {
-                        added.push(a);
-                    }
+        let mut temps = vec![];
+        tail_temps(e, &mut temps, 0);
+        for (recv, r) in temps {
+            for a in [recv as *const Expr as usize, r as *const Expr as usize] {
+                if self.bk.watch.insert(a) {
+                    added.push(a);
                 }
             }
-            cur = r;
+            if matches!(r, Expr::MethodCall(..)) && err_pos(r).line != 0 {
+                self.bk.watch_at.push((err_pos(r), vec![]));
+            }
         }
         added
     }
@@ -2558,43 +2598,52 @@ impl Cx<'_> {
             self.bk.watch.remove(a);
             self.bk.watched.remove(a);
         }
+        if added.is_empty() {
+            return;
+        }
+        self.bk.watch_at.clear();
     }
 
     pub(crate) fn bk_tail_drop_temps(&mut self, e: &Expr) {
         if !self.bk_on() || self.bk.level < 2 || !self.user_code {
             return;
         }
-        let mut cur = strip_paren(e);
-        while let Expr::MethodCall(recv, ..) = cur {
-            let r = strip_paren(recv);
-            if !super::is_place_expr(r) {
-                if let Some(t) = self.peek(r) {
-                    if self.dropck(t, 0) {
-                        // (what its value holds, as lowering it collected (`id(rows)`, `rows.wrap()`: what rows held),
-                        // else as the syntax tells)
-                        let mut srcs = vec![];
-                        self.bk_direct(r, &mut srcs);
-                        for a in [&**recv as *const Expr as usize, r as *const Expr as usize] {
-                            if let Some(s) = self.bk.watched.get(&a) {
-                                for x in s {
-                                    if !srcs.contains(x) {
-                                        srcs.push(*x);
-                                    }
-                                }
-                            }
-                        }
-                        if !srcs.is_empty() {
-                            let id = self.bk.locals.len() as u32;
-                            self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP, via_ref: false });
-                            self.bk_ev(Ev::Bind(id, true));
-                            self.bk_ev(Ev::Def(id, srcs));
-                            self.bk.drop_temps.push(id);
-                            self.bk.stmt_temps.push(id);
+        let mut temps = vec![];
+        tail_temps(e, &mut temps, 0);
+        for (recv, r) in temps {
+            let Some(t) = self.peek(r) else { continue };
+            if !self.dropck(t, 0) {
+                continue;
+            }
+            // (what its value holds, as lowering it collected (`id(rows)`, `rows.wrap()`: what rows held), else as the
+            // syntax tells)
+            let mut srcs = vec![];
+            self.bk_direct(r, &mut srcs);
+            for a in [recv as *const Expr as usize, r as *const Expr as usize] {
+                if let Some(s) = self.bk.watched.get(&a) {
+                    for x in s {
+                        if !srcs.contains(x) {
+                            srcs.push(*x);
                         }
                     }
                 }
             }
-            cur = r;
+            let at = err_pos(r);
+            if let Some((_, s)) = self.bk.watch_at.iter().find(|w| w.0 == at && at.line != 0) {
+                for x in s {
+                    if !srcs.contains(x) {
+                        srcs.push(*x);
+                    }
+                }
+            }
+            if !srcs.is_empty() {
+                let id = self.bk.locals.len() as u32;
+                self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP, via_ref: false });
+                self.bk_ev(Ev::Bind(id, true));
+                self.bk_ev(Ev::Def(id, srcs));
+                self.bk.drop_temps.push(id);
+                self.bk.stmt_temps.push(id);
+            }
         }
     }
 

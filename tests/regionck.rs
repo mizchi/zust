@@ -2831,3 +2831,15 @@ fn part16_deref_coercion() {
     let d = check("fn main() {\n    let mut x = 1;\n    let mut a = &mut x;\n    let r: &mut i32 = &mut a;\n    let s = &x;\n    *r = 2;\n    println!(\"{}\", s);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
 }
+
+/// A guard of the prelude (`c.borrow()`'s `Ref`, a `MutexGuard`) releases what it borrows when it is dropped: one made
+/// in a block's tail (`y.borrow().clone()`, `*a.borrow() + 1`), which lives to the end of the enclosing statement
+/// before edition 2024, makes the block's local it borrows not live long enough (E0597,
+/// span/issue-23338-locals-die-before-temps-of-body.rs, span/destructor-restrictions.rs). Not one made in a statement
+#[test]
+fn part16_guard_tail_temporaries() {
+    let d = check("use std::cell::RefCell;\nfn foo(x: RefCell<String>) -> String {\n    let ret = {\n        let y = x;\n        y.borrow().clone()\n    };\n    ret\n}\nfn main() {\n    let b = {\n        let a = Box::new(RefCell::new(4));\n        *a.borrow() + 1\n    };\n    println!(\"{} {}\", b, foo(RefCell::new(String::new())));\n}\n");
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![5, 12] && d.iter().all(|x| x.1.contains("does not live long enough")), "{d:?}");
+    assert_eq!(check("use std::cell::RefCell;\nfn main() {\n    let c = RefCell::new(vec![1]);\n    let n = c.borrow().len();\n    let g = c.borrow();\n    let m = g[0];\n    drop(g);\n    c.borrow_mut().push(2);\n    let t = {\n        let d = RefCell::new(5);\n        let v = *d.borrow();\n        v\n    };\n    println!(\"{} {} {}\", n, m, t);\n}\n"), vec![]);
+}

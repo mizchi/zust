@@ -684,13 +684,29 @@ impl Cx<'_> {
         self.bk.exp_none = std::mem::take(&mut self.bk.move_mut_next) && (expected.is_none() || hint_only);
         // (a block's tail's receiver that is a temporary: what its value holds (bk_watch_tail))
         let watched = !self.bk.watch.is_empty() && self.bk.watch.contains(&(e as *const Expr as usize));
-        if watched {
+        // (or a copy of one: a method call at a watched position)
+        let at = if !self.bk.watch_at.is_empty() && matches!(e, Expr::MethodCall(..)) {
+            let p = super::err_pos(e);
+            self.bk.watch_at.iter().position(|w| w.0 == p)
+        } else {
+            None
+        };
+        if watched || at.is_some() {
             self.bk_frame();
         }
         let r = self.expr_inner(e, expected);
-        if watched {
+        if watched || at.is_some() {
             let s = self.bk_frame_end();
-            self.bk.watched.insert(e as *const Expr as usize, s);
+            if let Some(i) = at {
+                for x in &s {
+                    if !self.bk.watch_at[i].1.contains(x) {
+                        self.bk.watch_at[i].1.push(*x);
+                    }
+                }
+            }
+            if watched {
+                self.bk.watched.insert(e as *const Expr as usize, s);
+            }
         }
         self.bk.place_depth = pd;
         let (v, t) = r.map_err(|m| {
