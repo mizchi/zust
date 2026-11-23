@@ -435,4 +435,22 @@ fn review72_second_round() {
     assert_eq!(first(src), None, "spaced_derive_ok");
     let src = "#![deny(dead_code)]\nstruct S {\n    value: u8,\n}\ntype Alias = S;\nimpl Alias {\n    fn read(&self) -> u8 {\n        self.value\n    }\n}\nfn main() {\n    let s = S { value: 1 };\n    let _ = s.read();\n}\n";
     assert_eq!(first(src), None, "alias_impl_ok");
+    // (third round: an arm's body in parentheses is an expression; `fn S()` beside `struct S { .. }` constructs no
+    // S; an item's or a field's own warn is an error under the crate's `deny(warnings)`)
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let flag = true;\n    let _e = match flag {\n        true => (E::A),\n        false => (E::B),\n    };\n}\n";
+    assert_eq!(first(src), None, "paren_arms_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let _e = match 1 {\n        0 => Some((E::A)),\n        _ => Some(E::B),\n    };\n}\n";
+    assert_eq!(first(src), None, "nested_paren_arm_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn f(e: Option<E>) -> u8 {\n    match e {\n        Some(E::A) => 1,\n        _ => 0,\n    }\n}\nfn main() {\n    let _ = f(Some(E::B));\n}\n";
+    assert_eq!(first(src), Some((2, "variant `A` is never constructed".to_string())), "pattern_in_some_err");
+    let src = "#![deny(dead_code)]\n#![allow(non_snake_case)]\nstruct S {\n    other: u8,\n}\nstruct T {\n    value: u8,\n}\nfn S() -> T {\n    T { value: 1 }\n}\nfn main() {\n    let _ = S { other: 1 }.other;\n    let t = S();\n    let _ = t.value;\n}\n";
+    assert_eq!(first(src), None, "fn_named_like_struct_ok");
+    let src = "#![deny(warnings)]\n#[allow(dead_code)]\n#[warn(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(first(src).map(|d| d.0), Some(4), "item_allow_then_warn_err");
+    let src = "#![deny(dead_code)]\n#[warn(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "item_warn_ok");
+    let src = "#![deny(warnings)]\nstruct S {\n    x: u8,\n    #[warn(dead_code)]\n    y: u8,\n}\nfn main() {\n    let s = S { x: 1, y: 2 };\n    let _ = s.x;\n}\n";
+    assert_eq!(first(src), Some((5, "field `y` is never read".to_string())), "field_warn_warnings_err");
+    let src = "#![deny(warnings)]\nmod m {\n    #[allow(unused_variables)]\n    fn _foo() {}\n}\nfn main() {}\n";
+    assert_eq!(first(src), None, "underscore_in_module_ok");
 }

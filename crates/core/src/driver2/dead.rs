@@ -10,7 +10,7 @@ use crate::fxhash::{FxMap, FxSet};
 use crate::lexer::{ItemKind, SrcItem};
 
 /// The first dead part of the program's items, as `(line, message)`
-pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, String)> {
+pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -> Option<(usize, String)> {
     let (Some(first), Some(last)) = (items.first(), items.last()) else { return None };
     let base = first.start;
     let region = src.get(base..last.end)?;
@@ -100,10 +100,11 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
             None => &src[it.start..it.end],
         }
     };
-    // (a lint level of its own (allow / expect / warn, spaced or not), a cfg, a repr, an export: left alone)
+    // (a lint level of its own (allow / expect, or warn but under the crate's `deny(warnings)`; spaced or not), a cfg,
+    // a repr, an export: left alone)
     let skip_attr = |a: &str| {
         let a: String = a.chars().filter(|c| !c.is_whitespace()).collect();
-        ["allow(", "expect(", "warn(", "#[cfg", "repr(", "no_mangle", "export_name", "#[test]"].iter().any(|x| a.contains(x))
+        (!warn_denied && a.contains("warn(")) || ["allow(", "expect(", "#[cfg", "repr(", "no_mangle", "export_name", "#[test]"].iter().any(|x| a.contains(x))
     };
     // (the derives of the attributes, spaced or not: `#[derive (PartialEq)]`)
     let derives = |a: &str| -> Vec<String> {
@@ -137,15 +138,21 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
             }
             o = encl[o];
         }
-        let p = ps.wrapping_sub(1);
-        if matches!(word(p), "let" | "for") || sym(p, b'|') || sym(p, b'@') {
-            return true;
-        }
-        // (after `=>` (an arm's body), a single `=` (a value), `return` / `break`: an expression)
-        let arrow = p != none && p > 0 && sym(p, b'>') && sym(p - 1, b'=');
-        let assign = p != none && sym(p, b'=') && !(p > 0 && toks[p - 1].0 == 1 && toks[p - 1].2 == toks[p].1 && b"=<>!+-*/%^&|".contains(&b[toks[p - 1].1]));
-        if arrow || assign || matches!(word(p), "return" | "break") {
-            return false;
+        // (what the token p before something says: after `let` / `for` / `|` / `@` a pattern; after `=>` (an arm's
+        // body), a single `=` (a value), `return` / `break` an expression)
+        let before = |p: usize| -> Option<bool> {
+            if p == none {
+                return None;
+            }
+            if matches!(word(p), "let" | "for") || sym(p, b'|') || sym(p, b'@') {
+                return Some(true);
+            }
+            let arrow = p > 0 && sym(p, b'>') && sym(p - 1, b'=');
+            let assign = sym(p, b'=') && !(p > 0 && toks[p - 1].0 == 1 && toks[p - 1].2 == toks[p].1 && b"=<>!+-*/%^&|".contains(&b[toks[p - 1].1]));
+            (arrow || assign || matches!(word(p), "return" | "break")).then_some(false)
+        };
+        if let Some(r) = before(ps.wrapping_sub(1)) {
+            return r;
         }
         let mut d = 0i32;
         let mut j = e + 1;
@@ -177,6 +184,23 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                         let o = open_of[j];
                         if o == none || o == 0 || word(o - 1).is_empty() || keyword(word(o - 1)) {
                             return false;
+                        }
+                    }
+                    // (the end of a group around it, `=> (E::A)` / `=> Some((E::A))`: what is before the group (or the
+                    // path it follows) says; `Some(E::A) =>` goes on to its `=>`)
+                    b')' | b']' if d == 0 => {
+                        let o = open_of[j];
+                        if o != none {
+                            let mut q = o;
+                            if q > 0 && toks[q - 1].0 == 0 {
+                                q -= 1;
+                                while q >= 3 && sym(q - 1, b':') && sym(q - 2, b':') && toks[q - 3].0 == 0 {
+                                    q -= 3;
+                                }
+                            }
+                            if let Some(r) = before(q.wrapping_sub(1)) {
+                                return r;
+                            }
                         }
                     }
                     b')' | b']' | b'}' => d = (d - 1).max(0),
@@ -313,7 +337,28 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
         .filter(|&ii| matches!(items[ii].kind, ItemKind::Normal))
         .filter_map(|ii| head(ii).filter(|&k| matches!(word(k), "struct" | "union")).map(|k| word(k + 1)))
         .collect();
-    // (the struct a variable at k is bound to: the item's only `let` of that name, `let [mut] x = S(` / `S {`)
+    // (the bracket each of them is constructed with: `(` of a tuple struct, `{` of the others; a fn may share a braced
+    // struct's name, `fn S() -> T` beside `struct S { .. }`)
+    let struct_shapes: FxMap<&str, u8> = (0..items.len())
+        .filter(|&ii| matches!(items[ii].kind, ItemKind::Normal))
+        .filter_map(|ii| {
+            let k = head(ii).filter(|&k| matches!(word(k), "struct" | "union"))?;
+            let (mut q, mut angle) = (k + 2, 0i32);
+            while q < n && item_of[q] == ii {
+                if sym(q, b'<') {
+                    angle += 1;
+                } else if sym(q, b'>') && !sym(q - 1, b'-') {
+                    angle -= 1;
+                } else if angle <= 0 && (sym(q, b'(') || sym(q, b'{') || sym(q, b';') || word(q) == "where") {
+                    break;
+                }
+                q += 1;
+            }
+            Some((word(k + 1), if sym(q, b'(') { b'(' } else { b'{' }))
+        })
+        .collect();
+    // (the struct a variable at k is bound to: the item's only `let` of that name, `let [mut] x = S(` of a tuple
+    // struct / `S {` of another)
     let bound_to = |k: usize| -> Option<&str> {
         let ii = item_of[k];
         if ii == none {
@@ -330,7 +375,8 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                         return None;
                     }
                     let s = x + 2;
-                    found = Some((sym(x + 1, b'=') && toks.get(s).is_some_and(|t| t.0 == 0) && (sym(s + 1, b'(') || sym(s + 1, b'{')) && struct_names.contains(word(s))).then(|| word(s)));
+                    let shape = struct_shapes.get(word(s)).copied();
+                    found = Some((sym(x + 1, b'=') && toks.get(s).is_some_and(|t| t.0 == 0) && ((sym(s + 1, b'(') && shape == Some(b'(')) || (sym(s + 1, b'{') && shape == Some(b'{')))).then(|| word(s)));
                 }
             }
             q += 1;
