@@ -2498,6 +2498,7 @@ compile-fail	errors/error-count.rs
 check-pass	errors/issue-89280-emitter-overflow-splice-lines.rs
 compile-fail	errors/issue-99572-impl-trait-on-pointer.rs
 compile-fail	errors/span-format_args-issue-140578.rs
+compile-fail	errors/trait-bound-error-spans/blame-trait-error.rs
 run-pass	expr/block-fn.rs
 run-pass	expr/block-generic.rs
 run-pass	expr/block.rs
@@ -6845,6 +6846,7 @@ compile-fail	suggestions/issue-82566-1.rs
 compile-fail	suggestions/issue-82566-2.rs
 compile-fail	suggestions/issue-84592.rs
 compile-fail	suggestions/issue-84700.rs
+compile-fail	suggestions/issue-84973-2.rs
 compile-fail	suggestions/issue-84973-negative.rs
 compile-fail	suggestions/issue-84973.rs
 compile-fail	suggestions/issue-85945-check-where-clause-before-suggesting-unsized.rs
@@ -7077,6 +7079,7 @@ check-pass	trait-bounds/issue-94999.rs
 compile-fail	trait-bounds/negative-bound-not-supported-58857.rs
 compile-fail	trait-bounds/ownership-mismatch-on-arg.rs
 compile-fail	trait-bounds/sort-missing-ord-bound.rs
+compile-fail	trait-bounds/super-assoc-mismatch.rs
 compile-fail	trait-bounds/trait-bound-adt-issue-145611.rs
 compile-fail	trait-bounds/trait-selection-overflow-prevention-72839.rs
 compile-fail	traits/alias/generic-default-in-dyn.rs
@@ -7106,6 +7109,8 @@ run-pass	traits/bound/multiple.rs
 compile-fail	traits/bound/not-on-bare-trait-2021.rs
 compile-fail	traits/bound/not-on-bare-trait.rs
 compile-fail	traits/bound/not-on-struct.rs
+compile-fail	traits/bound/on-structs-and-enums-in-fns.rs
+compile-fail	traits/bound/on-structs-and-enums-in-impls.rs
 run-pass	traits/bound/on-structs-and-enums-rpass.rs
 compile-fail	traits/bound/on-structs-and-enums-static.rs
 compile-fail	traits/bound/on-structs-and-enums.rs
@@ -7171,6 +7176,7 @@ check-pass	traits/hrtb-related-type-params-30867.rs
 compile-fail	traits/ignore-err-impls.rs
 compile-fail	traits/impl-1.rs
 run-pass	traits/impl-2.rs
+compile-fail	traits/impl-bounds-checking.rs
 compile-fail	traits/impl-can-not-have-untraitful-items.rs
 check-pass	traits/impl-evaluation-order.rs
 compile-fail	traits/impl-for-module.rs
@@ -7179,6 +7185,9 @@ run-pass	traits/impl-inherent-prefer-over-trait.rs
 run-pass	traits/impl-object-overlap-issue-23853.rs
 check-pass	traits/impl_trait_as_trait_return_position.rs
 compile-fail	traits/incoherent-impl-ambiguity.rs
+compile-fail	traits/inductive-overflow/simultaneous.rs
+compile-fail	traits/inductive-overflow/supertrait.rs
+compile-fail	traits/inductive-overflow/two-traits.rs
 run-pass	traits/infer-from-object-issue-26952.rs
 run-pass	traits/inheritance/auto.rs
 run-pass	traits/inheritance/basic.rs
@@ -7211,6 +7220,7 @@ build-pass	traits/issue-104322.rs
 compile-fail	traits/issue-105231.rs
 compile-fail	traits/issue-106072.rs
 run-pass	traits/issue-15155.rs
+compile-fail	traits/issue-18400.rs
 run-pass	traits/issue-18412.rs
 compile-fail	traits/issue-21837.rs
 run-pass	traits/issue-22019.rs
@@ -7259,6 +7269,7 @@ run-pass	traits/multidispatch2.rs
 run-pass	traits/mut-trait-in-struct-8249.rs
 compile-fail	traits/negative-impls/feature-gate-negative_impls.rs
 compile-fail	traits/next-solver/coherence/issue-102048.rs
+compile-fail	traits/next-solver/diagnostics/where-clause-doesnt-apply.rs
 check-pass	traits/next-solver/normalize/normalize-type-outlives.rs
 check-pass	traits/next-solver/opaques/revealing-use-in-nested-body.rs
 compile-fail	traits/next-solver/well-formed-in-relate.rs
@@ -7577,6 +7588,7 @@ check-pass	typeck/issue-89935.rs
 compile-fail	typeck/issue-90027-async-fn-return-suggestion.rs
 compile-fail	typeck/issue-90101.rs
 compile-fail	typeck/issue-90319.rs
+compile-fail	typeck/issue-90804-incorrect-reference-suggestion.rs
 compile-fail	typeck/issue-91210-ptr-method.rs
 compile-fail	typeck/issue-91328.rs
 compile-fail	typeck/issue-91450-inner-ty-error.rs
