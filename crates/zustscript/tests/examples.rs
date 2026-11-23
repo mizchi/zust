@@ -322,6 +322,47 @@ fn eq_check_is_linear() {
     }
 }
 
+/// tests/ts_import.zsc: records read from a TS file (tests/ts/model.ts) with `import type`. The JS takes TS's objects
+/// as they are, and the .d.ts imports model.ts's types, so TS code passes its own values (tests/ts/consumer.ts,
+/// checked with tsc when it is available)
+#[test]
+fn ts_records() {
+    let d = out_dir("ts_import");
+    // (the module and its TS file side by side, as in a project: the .d.ts imports `./ts/model.js`)
+    std::fs::create_dir_all(d.join("ts")).unwrap();
+    std::fs::copy(root().join("tests/ts/model.ts"), d.join("ts/model.ts")).unwrap();
+    std::fs::copy(root().join("tests/ts_import.zsc"), d.join("ts_import.zsc")).unwrap();
+    let o = zsc(&d.join("ts_import.zsc"), &d, &[]);
+    assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(
+        &d,
+        r#"
+const m = await import('./ts_import.js');
+const u = { id: 7, name: "ana", admin: false, tags: ["a"] };
+const p = m.reply({ author: u, title: "Hi", scores: [1, 2, 4.5], replies: [] }, u, "ok");
+console.log(m.display(u), "|", m.summary(p), "|", JSON.stringify(m.promote(u)));
+console.log(m.same_user(u, { ...u, tags: ["a"] }), m.same_user(u, m.promote(u)), m.dist({ x: 3, y: 4 }, { x: 0, y: 0 }));
+"#,
+    );
+    assert_eq!(out, "ana (member, #7) | Hi by ana (member, #7): 1 replies, score 7 | {\"id\":7,\"name\":\"ana\",\"admin\":true,\"tags\":[\"a\",\"staff\"]}\ntrue false 5\n");
+    let dts = std::fs::read_to_string(d.join("ts_import.d.ts")).unwrap();
+    assert!(dts.contains("import type { Point, Post, User } from \"./ts/model.js\";"), "{dts}");
+    assert!(!dts.contains("export interface User"), "{dts}");
+    let tsc = std::env::var("TSC").unwrap_or_else(|_| "tsc".into());
+    if Command::new(&tsc).arg("--version").output().is_err() {
+        eprintln!("skipped tsc: no tsc (set TSC)");
+        return;
+    }
+    std::fs::copy(root().join("tests/ts/consumer.ts"), d.join("consumer.ts")).unwrap();
+    std::fs::write(d.join("package.json"), "{ \"type\": \"module\" }\n").unwrap();
+    let o = Command::new(&tsc)
+        .current_dir(&d)
+        .args(["--strict", "--noEmit", "--target", "es2022", "--module", "nodenext", "--moduleResolution", "nodenext", "consumer.ts"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "tsc:\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+}
+
 /// tests/js_inplace.zsc: the JS layer appends in place only onto a local array no one else can see, so every
 /// result is what the copying push gives
 #[test]

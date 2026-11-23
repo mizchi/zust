@@ -1,0 +1,2 @@
+// expect: `Opt.name` is optional
+import type { Opt } from "../ts/unsupported.ts";

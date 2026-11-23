@@ -208,9 +208,23 @@ impl Elem {
     }
 }
 
+/// Where a record read from TS comes from
+#[derive(Clone, Debug)]
+pub struct TsFrom {
+    /// the TS file (canonical)
+    pub path: std::path::PathBuf,
+    pub exported: bool,
+    /// each member as the TS file writes it (`readonly tags: string[]`): a type the file does not export is declared
+    /// again in the `.d.ts` with these, so it is the same type to TS
+    pub members: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 pub enum Item {
-    Record { name: String, params: Vec<String>, fields: Vec<(String, TyS)>, pos: Pos },
+    /// (`from`: read from a TS file by an `import type`, see tsimport.rs)
+    Record { name: String, params: Vec<String>, fields: Vec<(String, TyS)>, pos: Pos, from: Option<TsFrom> },
+    /// `import type { User, Post } from "./model.ts";` (replaced by the records before checking, see tsimport.rs)
+    ImportType { names: Vec<(String, Pos)>, from: String, pos: Pos },
     /// (a variant with `-> R` is an effect operation)
     Enum { name: String, params: Vec<String>, variants: Vec<(String, Vec<TyS>, Option<TyS>)>, pos: Pos },
     /// (bounds: `T: Num` / `T: Integer` / `T: Float`; a function with one is monomorphized per numeric type)

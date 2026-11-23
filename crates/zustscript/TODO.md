@@ -69,6 +69,7 @@ README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画の�
 
 - 文字列の補間 `` `hi ${name}` ``
 - モジュールと import(`import { a } from "./b.zsc"`、npm の型との接続)
+  - **済: TS のファイルのプレーンなレコード型を `import type` で読む**(README の「TS の型の取り込み」)。残り: 任意のフィールド(003 の `Option` と一緒に)、総称型、`extends`、union(enum として読めるか)、パッケージの .d.ts からの読み込み、関数の型(`extern` の代わり)、文字列を含むレコードを `@wasm` との境界で渡すこと
 - ML 用途の文法: [docs/plan.md](docs/plan.md) の「TODO: ML 用途」
 
 ## 提案の中の、分かっている食い違い
