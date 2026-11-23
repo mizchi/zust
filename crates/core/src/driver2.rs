@@ -1521,40 +1521,44 @@ impl Session2 {
         }
         // (E0119: two impls of a trait of the program's that both apply to one goal, by the trait solver: their heads
         // unify and both impls' where clauses hold there (crate::traits::TraitDb::conflict))
-        // (an impl's where clauses, from its header's text: each on one of its parameters, `T: Tr`, as the summary
-        // keeps them)
-        let read_all = |ii: usize| -> bool {
-            let (Some(it), Some(sm)) = (items.get(ii), sums.get(ii)) else { return false };
-            let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
-            let head = text.split('{').next().unwrap_or("");
-            let Some(w) = head.match_indices("where").find(|(i, _)| {
-                let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
-                ok(head[..*i].chars().next_back()) && ok(head[i + 5..].chars().next())
-            }) else {
-                return true;
-            };
-            // (the predicates at depth 0, split at commas)
-            let mut depth = 0i32;
-            let mut preds = vec![String::new()];
-            for c in head[w.0 + 5..].chars() {
-                match c {
-                    '<' | '(' | '[' => depth += 1,
-                    '>' | ')' | ']' => depth -= 1,
-                    ',' if depth == 0 => {
-                        preds.push(String::new());
-                        continue;
-                    }
-                    _ => {}
-                }
-                if let Some(l) = preds.last_mut() {
-                    l.push(c);
-                }
+        // (an impl's where clauses, from its header's text: the summary keeps those on one of its parameters (`T: Tr`);
+        // the others (`where T::Assoc: Foo`, `where (): Array<Element = &()>`) are read here and added to its clause.
+        // read_all: every where clause of the impl was read)
+        let mut where_all: FxMap<usize, bool> = FxMap::default();
+        for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
+            if sm.impl_self_ty.is_none() || !matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) {
+                continue;
             }
-            preds.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).all(|p| {
-                let subj = p.split(':').next().unwrap_or("").trim();
-                subj.starts_with('\'') || sm.impl_generics.iter().any(|g| g.0 == subj)
-            })
-        };
+            let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
+            let head = text.split('{').next().unwrap_or("");
+            let Some(preds) = where_preds(head) else { continue };
+            let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+            let mut all = true;
+            let mut extra = vec![];
+            for (subj, bounds) in &preds {
+                if subj.starts_with('\'') || gn.contains(&subj.as_str()) {
+                    continue;
+                }
+                let ty = if subj.starts_with("for") && subj[3..].trim_start().starts_with('<') {
+                    None
+                } else {
+                    crate::ast_summary::ty_of_text(subj, sm.impl_self_ty.as_ref()).and_then(|t| prog.resolve_g(&t, &gn).ok())
+                };
+                let Some(ty) = ty else {
+                    all = false;
+                    continue;
+                };
+                let bs: Vec<&str> = bounds.iter().map(|b| b.as_str()).filter(|b| !b.starts_with('\'')).collect();
+                let ps = crate::traits::preds_of(&prog, ty, &bs, &gn);
+                if ps.len() != bs.iter().filter(|b| !b.starts_with('?')).count() {
+                    all = false;
+                }
+                extra.extend(ps);
+            }
+            prog.tdb.add_where(ii, extra, all);
+            where_all.insert(ii, all);
+        }
+        let read_all = |ii: usize| -> bool { where_all.get(&ii).copied().unwrap_or(true) };
         // (the auto traits among the program's traits' supertraits, which the summaries leave out: `trait Foo: Send`,
         // `trait Foo where Self: Sync`, from the header's text)
         if !prog.tdb.user.is_empty() {
@@ -1631,6 +1635,49 @@ impl Session2 {
                     if prog.tdb.holds_rigid(&prog, t, sup) == crate::traits::Ans::No {
                         let n = prog.tn(t).replace("__u_", "").replace('#', "");
                         return Err(format!("{}:1: {} (E0277)", items[ii].line, crate::traits::not_held(&n, sup)));
+                    }
+                }
+            }
+        }
+        // (E0271 / E0277: the bounds a trait of the program's puts on its associated types (`type Sibling: Bar2<Ok =
+        // Self::Ok>`) hold of each impl's definitions, with the impl's parameters as placeholders: reported at the
+        // definition)
+        if !prog.tdb.user.is_empty() && !prog.assoc_bounds.is_empty() {
+            let mut checks: Vec<(usize, String, String, Ty)> = vec![];
+            for cs in prog.tdb.clauses.values() {
+                for c in cs {
+                    for (n, v) in &c.assocs {
+                        checks.push((c.item, n.clone(), String::new(), *v));
+                    }
+                }
+            }
+            for (ii, n, _, v) in checks {
+                let Some(sm) = sums.get(ii) else { continue };
+                let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self_ty.as_ref()) else { continue };
+                let tr = tr.split('<').next().unwrap_or(tr).trim();
+                let tr = tr.rsplit("::").next().unwrap_or(tr).to_string();
+                let Some(bounds) = prog.assoc_bounds.get(&(tr.clone(), n.clone())).cloned() else { continue };
+                if !read_all(ii) {
+                    continue;
+                }
+                let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                let Ok(st) = prog.resolve_g(st, &gn) else { continue };
+                let rigid: Vec<Ty> = sm.impl_generics.iter().enumerate().map(|(k, (g, bs))| Ty::Struct(prog.placeholder(u32::MAX - ii as u32, k as u32, g, bs))).collect();
+                let (st, v) = (prog.subst(st, &rigid), prog.subst(v, &rigid));
+                // (the definition's line: the member item that defines it)
+                let line = (0..items.len().min(sums.len()))
+                    .find(|&jj| matches!(items[jj].kind, ItemKind::ImplMember(h) if h as usize == ii) && sums[jj].assocs.iter().any(|a| a.name == n))
+                    .map_or(items[ii].line, |jj| items[jj].line);
+                for b in &bounds {
+                    match prog.tdb.assoc_bound(&prog, v, b, st) {
+                        (_, Some((proj, got, want))) => {
+                            return Err(format!("{line}:1: type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want).replace('#', ""), prog.tn(got).replace('#', "")));
+                        }
+                        (crate::traits::Ans::No, None) => {
+                            let tn = prog.tn(v).replace("__u_", "").replace('#', "");
+                            return Err(format!("{line}:1: {} (E0277)", crate::traits::not_held(&tn, b)));
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -4475,6 +4522,52 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         }
     }
     std::mem::take(&mut g.pending)
+}
+
+/// The where clause of an item's header text: (subject, bounds) of each predicate, split at depth 0 (None: no where)
+fn where_preds(head: &str) -> Option<Vec<(String, Vec<String>)>> {
+    let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+    let (w, _) = head.match_indices("where").find(|(i, _)| ok(head[..*i].chars().next_back()) && ok(head[i + 5..].chars().next()))?;
+    let split = |s: &str, sep: char| -> Vec<String> {
+        let mut depth = 0i32;
+        let mut out = vec![String::new()];
+        for c in s.chars() {
+            match c {
+                '<' | '(' | '[' => depth += 1,
+                '>' | ')' | ']' => depth -= 1,
+                c if c == sep && depth == 0 => {
+                    out.push(String::new());
+                    continue;
+                }
+                _ => {}
+            }
+            if let Some(l) = out.last_mut() {
+                l.push(c);
+            }
+        }
+        out.into_iter().map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()
+    };
+    let mut preds = vec![];
+    for p in split(&head[w + 5..], ',') {
+        // (the first `:` at depth 0 that is not half of a `::`)
+        let b = p.as_bytes();
+        let mut depth = 0i32;
+        let mut at = None;
+        for i in 0..b.len() {
+            match b[i] {
+                b'<' | b'(' | b'[' => depth += 1,
+                b'>' | b')' | b']' => depth -= 1,
+                b':' if depth == 0 && b.get(i + 1) != Some(&b':') && (i == 0 || b[i - 1] != b':') => {
+                    at = Some(i);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let Some(at) = at else { continue };
+        preds.push((p[..at].trim().to_string(), split(&p[at + 1..], '+')));
+    }
+    Some(preds)
 }
 
 /// Well-formedness of the program's struct fields and impl headers: a type that names a struct of the program's whose

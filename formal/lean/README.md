@@ -20,6 +20,7 @@ formal/run.sh lean
 | `TraitSolver/Coherence.lean` | overlap of impl heads (E0119): `mayUnify`, exact for linear heads; unique selection; when a conflict is a real one (`conflict_sound`) |
 | `TraitSolver/Obligations.lean` | an impl's supertrait obligations, under its own bounds |
 | `TraitSolver/Coinductive.lean` | auto traits (`Send` / `Sync`): `csolve`, where a goal that comes back round holds, against the greatest fixpoint |
+| `TraitSolver/Normalize.lean` | associated types: `normalize` (the impl that applies, and its definition), sound, and functional under coherence |
 | `TraitSolver/Examples.lean` | tests/ui cases as goals the model answers (`by decide`) |
 | `Axioms.lean` | `#print axioms` of the main theorems |
 
@@ -36,6 +37,7 @@ formal/run.sh lean
 | `conflict_sound` / `no_conflict_of_not_mayUnify` | heads made equal by some substitutions, under which the solver proves both impls' where clauses, give a goal both impls apply to (zustc's E0119); heads that do not unify never conflict |
 | `supertrait_obligation_fails` | an impl's parameters made rigid, its where clauses the environment: a `no` for a supertrait is a failed obligation |
 | `csolve_yes_sound` / `csolve_no_sound` | the coinductive solver's `yes` only for goals in a consistent set, its `no` only for goals in none |
+| `normalize_sound` / `normTo_functional` / `binding_no_sound` | what `normalize` returns is a normal form; with coherent impls whose definitions name only parameters their heads bind, a goal has one; so a binding `Tr<A = x>` whose `A` normalizes to another type does not hold (E0271) |
 
 `solve_no_sound` is the property zustc relies on: an E0277 is reported only on `no`, so it is never a false error with
 respect to the impls zustc read. The stack is what makes `no` from a cycle sound: `HA_cut` shows that a proof can
@@ -44,5 +46,6 @@ loses nothing.
 
 ## What the model does not cover
 
-- associated types and their normalization (`<T as Tr>::X`), and higher-ranked bounds (`for<'a>`);
+- generic associated types, projections whose trait is not known (`T::Item` with several traits defining `Item`),
+  and higher-ranked bounds (`for<'a>`);
 - lifetimes (zustc's `Ty` erases them; region checking is separate).

@@ -12,3 +12,6 @@ import TraitSolver
 #print axioms TraitSolver.supertrait_obligation_fails
 #print axioms TraitSolver.csolve_yes_sound
 #print axioms TraitSolver.csolve_no_sound
+#print axioms TraitSolver.normalize_sound
+#print axioms TraitSolver.normTo_functional
+#print axioms TraitSolver.binding_no_sound

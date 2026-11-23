@@ -689,6 +689,14 @@ impl Insts {
                 if matches!(tr.as_str(), "Send" | "Sync") && matches!(t, Ty::Struct(s) if prog.structs[s as usize].placeholder.is_some()) && prog.tdb.holds(prog, t, tr) == crate::traits::Ans::No {
                     return Err(format!("{} {}", crate::traits::not_held(&prog.tn(t), tr), crate::traits::SOLVED_NO));
                 }
+                // (a binding that normalizes to another type: E0271, `<W<i32> as Tr>::Assoc` is u32, not ())
+                if own && tr.contains('=') && !prog.has_param(t) && !prog.names_placeholder(t, 0) {
+                    if let Some((proj, got, want)) = prog.tdb.binding_mismatch(prog, t, tr, &gn, &args) {
+                        if !prog.names_placeholder(want, 0) {
+                            return Err(format!("type mismatch resolving `{proj} == {}`: it is `{}` {}", prog.tn(want), prog.tn(got), crate::traits::SOLVED_NO.replace("E0277", "E0271")));
+                        }
+                    }
+                }
                 if own && !prog.has_param(t) && !prog.names_placeholder(t, 0) && !args.iter().any(|&a| prog.names_placeholder(a, 0) && tr.contains('<')) && prog.tdb.holds_in(prog, t, tr, &gn, &args) == crate::traits::Ans::No {
                     return Err(format!("the trait bound `{}: {}` is not satisfied (for `{pn}`) {}", prog.tn(t), crate::traits::bound_text(tr), crate::traits::SOLVED_NO));
                 }
@@ -2054,7 +2062,11 @@ impl Program {
                 return Err(format!("{}:1: {why} (E0080)", items[c.item as usize].line));
             }
         }
-        p.tdb = crate::traits::TraitDb::build(&p, sums, user);
+        let header = |ii: usize| match items.get(ii).map(|it| it.kind) {
+            Some(crate::lexer::ItemKind::ImplMember(h)) => Some(h as usize),
+            _ => None,
+        };
+        p.tdb = crate::traits::TraitDb::build(&p, sums, user, &header);
         // (a static's type is well-formed: the bounds of its struct's parameters hold, `static S: W<u8>` with
         // `struct W<T: Tr>` and no `impl Tr for u8` (E0277))
         for c in p.consts.iter().filter(|c| c.stat.is_some()) {

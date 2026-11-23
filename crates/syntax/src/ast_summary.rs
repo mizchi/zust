@@ -1400,6 +1400,13 @@ pub fn bound_args(s: &str) -> Option<(String, Vec<TySyn>)> {
     Some((n.rsplit("::").next().unwrap_or(n).to_string(), args))
 }
 
+/// A type written as text (`<T as Tr>::Assoc`, `W<u8>`, `()`), as a TySyn; self_ty: what `Self` is
+pub fn ty_of_text(s: &str, self_ty: Option<&TySyn>) -> Option<TySyn> {
+    let f = parse_file(&format!("type __W = {s};")).ok()?;
+    let ItemKind::Type(_, _, _, Some(t)) = &f.items.first()?.kind else { return None };
+    tysyn(t, self_ty).ok()
+}
+
 /// 境界 `Iterator<Item = T>` の関連型の束縛 (名前, 型)
 pub fn assoc_bindings(s: &str) -> Vec<(String, TySyn)> {
     let mut out = Vec::new();

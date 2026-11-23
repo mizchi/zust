@@ -108,6 +108,50 @@ impl Erased for dyn std::fmt::Debug + Send {
     }
 }
 
+// (associated types normalized by the impl that applies: a binding that holds, a where clause on a projection, and
+// the bound a trait puts on its associated type)
+trait Container {
+    type Elem;
+    fn first(&self) -> Self::Elem;
+}
+struct Bytes(Vec<u8>);
+struct Words(Vec<u32>);
+impl Container for Bytes {
+    type Elem = u8;
+    fn first(&self) -> u8 {
+        self.0[0]
+    }
+}
+impl Container for Words {
+    type Elem = u32;
+    fn first(&self) -> u32 {
+        self.0[0]
+    }
+}
+fn first_byte<C: Container<Elem = u8>>(c: &C) -> u8 {
+    c.first()
+}
+trait Printable {
+    fn show(&self) -> String;
+}
+impl<C> Printable for C
+where
+    C: Container,
+    C::Elem: std::fmt::Display,
+{
+    fn show(&self) -> String {
+        format!("first {}", self.first())
+    }
+}
+trait Linked {
+    type Ok;
+    type Next: Container<Elem = Self::Ok>;
+}
+impl Linked for Bytes {
+    type Ok = u32;
+    type Next = Words;
+}
+
 fn main() {
     println!("{} {}", Local.kind(), Tagged.kind());
     println!("{}", show(&Square(3)));
@@ -122,4 +166,6 @@ fn main() {
     let f: u64 = Conv::conv(&5u8);
     let g: bool = <u8 as Conv<bool>>::conv(&0u8);
     println!("{e} {f} {g}");
+    let b = Bytes(vec![7, 8]);
+    println!("{} {} {}", first_byte(&b), b.show(), Words(vec![9]).show());
 }

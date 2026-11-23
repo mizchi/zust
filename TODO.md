@@ -50,10 +50,11 @@ invariants.
 
 The program's own traits are solved by the algorithms proved in formal/lean, including E0119, supertrait
 obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-11-23-04-trait-solver.md),
-[part 2](docs/reports/2026-11-23-05-trait-solver-2.md)). Left:
+[part 2](docs/reports/2026-11-23-05-trait-solver-2.md), [part 3](docs/reports/2026-11-23-06-trait-solver-3.md)). Left:
 
-- Associated types: a where clause on one (`where <T as Mirror>::Mirror: Foo`) is left out of an impl's clause;
-  normalization is not modeled.
+- Associated types ([part 3](docs/reports/2026-11-23-06-trait-solver-3.md)): an opaque return type's bound (`-> impl
+  Tr`) is not kept, so its hidden type is not checked; projections by a name std also defines (`T::Item`) and
+  generic associated types are not normalized by the solver; type inference still uses `Program::assoc_of`.
 - E0119 against std's impls (`impl<S> Into<S> for GenX<S>`): std's impls are not clauses.
 - Lifetimes in impl heads (fn pointers, higher-ranked bounds) need lifetimes in `Ty`.
 - Placeholder and module-flattened names in messages (`__impl0`, `a__b__Hidden`).

@@ -306,6 +306,7 @@ check-pass	associated-types/issue-38917.rs
 check-pass	associated-types/issue-39532.rs
 check-pass	associated-types/issue-40093.rs
 check-pass	associated-types/issue-43475.rs
+compile-fail	associated-types/issue-44153.rs
 run-pass	associated-types/issue-47139-1.rs
 run-pass	associated-types/issue-47139-2.rs
 check-pass	associated-types/issue-48010.rs
@@ -313,8 +314,10 @@ check-pass	associated-types/issue-48551.rs
 run-pass	associated-types/issue-54467.rs
 run-pass	associated-types/issue-55846.rs
 compile-fail	associated-types/issue-64855.rs
+compile-fail	associated-types/issue-72806.rs
 check-pass	associated-types/issue-91069.rs
 run-pass	associated-types/method-on-impl-with-assoc-type-projection.rs
+compile-fail	associated-types/mismatch-two-relevant-impls.rs
 compile-fail	associated-types/mismatched-types-in-associated-type-87490.rs
 compile-fail	associated-types/missing-associated-types.rs
 compile-fail	associated-types/nested-assoc-type-projection-ice-109864.rs
@@ -330,6 +333,8 @@ check-pass	associated-types/param-env-normalize-cycle.rs
 compile-fail	associated-types/param-env-shadowing-false-positive.rs
 compile-fail	associated-types/param-env-shadowing-gat.rs
 compile-fail	associated-types/param-env-shadowing-suggestion-no-ice-on-missing-assoc-value.rs
+compile-fail	associated-types/point-at-type-on-obligation-failure-2.rs
+compile-fail	associated-types/point-at-type-on-obligation-failure.rs
 run-pass	associated-types/project-defer-unification.rs
 run-pass	associated-types/projection-as-type-alias.rs
 compile-fail	associated-types/recursive-associated-type-overflow-21946.rs
@@ -2409,6 +2414,7 @@ compile-fail	error-codes/E0262.rs
 compile-fail	error-codes/E0263.rs
 compile-fail	error-codes/E0267.rs
 compile-fail	error-codes/E0268.rs
+compile-fail	error-codes/E0271.rs
 compile-fail	error-codes/E0277-2.rs
 compile-fail	error-codes/E0277-3.rs
 compile-fail	error-codes/E0277-4.rs
@@ -2870,6 +2876,7 @@ check-pass	generic-associated-types/issue-58694-parameter-out-of-range.rs
 check-pass	generic-associated-types/issue-62326-parameter-out-of-range.rs
 check-pass	generic-associated-types/issue-67424.rs
 compile-fail	generic-associated-types/issue-67510.rs
+compile-fail	generic-associated-types/issue-68641-check-gat-bounds.rs
 check-pass	generic-associated-types/issue-68648-1.rs
 compile-fail	generic-associated-types/issue-68648-2.rs
 check-pass	generic-associated-types/issue-68649-pass.rs
@@ -3117,6 +3124,7 @@ check-pass	impl-trait/in-trait/default-body.rs
 check-pass	impl-trait/in-trait/default-method-binder-shifting.rs
 check-pass	impl-trait/in-trait/default-method-constraint.rs
 compile-fail	impl-trait/in-trait/dont-probe-missing-item-name-3.rs
+compile-fail	impl-trait/in-trait/dont-probe-missing-item-name-4.rs
 check-pass	impl-trait/in-trait/early.rs
 compile-fail	impl-trait/in-trait/ensure-rpitits-are-created-before-freezing.rs
 check-pass	impl-trait/in-trait/expeced-refree-to-map-to-reearlybound-ice-108580.rs
@@ -7175,6 +7183,7 @@ run-pass	traits/dynamic-dispatch-trait-objects-5666.rs
 run-pass	traits/early-vtbl-resolution.rs
 run-pass	traits/elaborate-type-region.rs
 compile-fail	traits/error-reporting/ambiguity-in-dropck-err-reporting.rs
+compile-fail	traits/error-reporting/conditionally-implemented-trait-158423.rs
 compile-fail	traits/error-reporting/incomplete-partial-ord-impl.rs
 compile-fail	traits/eval-caching-error-region.rs
 compile-fail	traits/explicit-reference-cast-unrelated-leaf.rs
@@ -7197,6 +7206,7 @@ run-pass	traits/impl-inherent-prefer-over-trait.rs
 run-pass	traits/impl-object-overlap-issue-23853.rs
 check-pass	traits/impl_trait_as_trait_return_position.rs
 compile-fail	traits/incoherent-impl-ambiguity.rs
+compile-fail	traits/inductive-overflow/lifetime.rs
 compile-fail	traits/inductive-overflow/simultaneous.rs
 compile-fail	traits/inductive-overflow/supertrait.rs
 compile-fail	traits/inductive-overflow/two-traits.rs

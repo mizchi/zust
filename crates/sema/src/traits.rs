@@ -62,6 +62,10 @@ pub struct Pred {
     pub raw: String,
     /// the trait's type arguments (None: not read, any)
     pub args: Option<Vec<Ty>>,
+    /// the associated types the bound binds (`Tr<Assoc = u8>`): (name, type)
+    pub eqs: Vec<(String, Ty)>,
+    /// every binding was read (else some are left out of eqs)
+    pub eqs_read: bool,
 }
 
 /// An impl of one of the program's traits
@@ -79,6 +83,11 @@ pub struct Clause {
     /// zustc read all of the impl: nothing was weakened (no where clause left out, the head resolved and with no
     /// associated type). Only such a clause's `Yes` counts where a `Yes` is reported (E0119)
     pub exact: bool,
+    /// the where clauses on what is not a parameter (`where T::A: Foo`, `where (): Tr`) were all read (the driver
+    /// reads them from the header's text: TraitDb::add_where)
+    pub where_ok: bool,
+    /// the associated types the impl defines (`type Assoc = u32;`), over its parameters
+    pub assocs: Vec<(String, Ty)>,
 }
 
 /// The program's impls of its own traits, by trait name
@@ -92,6 +101,9 @@ pub struct TraitDb {
     /// the auto traits (Send, Sync) among each program trait's own supertraits (`trait Foo: Send`): the summaries'
     /// supertraits leave them out, the driver reads them from the trait's header
     pub auto_supers: FxMap<String, Vec<String>>,
+    /// the names of associated types that impls zustc has no clauses of define (the prelude's, and the program's impls
+    /// of std's traits): a projection by such a name alone (`T::Item`, no trait) is not normalized here
+    pub other_assoc: crate::fxhash::FxSet<String>,
 }
 
 /// rustc's words for `t: tr` not holding
@@ -122,7 +134,8 @@ type Key = (Ty, String, Vec<Ty>);
 
 impl TraitDb {
     /// The clauses of the impls of the program's traits in its first `user` summaries
-    pub fn build(p: &Program, sums: &[Summary], user: usize) -> TraitDb {
+    /// `header`: an item's impl header when the item is an impl's members (their associated types are the impl's)
+    pub fn build(p: &Program, sums: &[Summary], user: usize, header: &dyn Fn(usize) -> Option<usize>) -> TraitDb {
         let mut db = TraitDb::default();
         for s in &sums[..user.min(sums.len())] {
             if let Some(tr) = &s.trait_decl {
@@ -132,6 +145,22 @@ impl TraitDb {
         for s in &sums[user.min(sums.len())..] {
             if let Some(tr) = &s.trait_decl {
                 db.prelude.insert(tr.clone());
+            }
+        }
+        // (the associated types of each impl: its own summary's and its members')
+        let mut defs: FxMap<usize, Vec<&crate::types::AssocSyn>> = FxMap::default();
+        for (ii, s) in sums.iter().enumerate() {
+            for a in &s.assocs {
+                defs.entry(header(ii).unwrap_or(ii)).or_default().push(a);
+            }
+        }
+        for (ii, s) in sums.iter().enumerate() {
+            let h = header(ii).unwrap_or(ii);
+            let tr = sums.get(h).and_then(|x| x.impl_trait.as_deref()).map(|t| t.split('<').next().unwrap_or(t).trim()).map(|t| t.rsplit("::").next().unwrap_or(t));
+            if ii >= user || tr.is_none_or(|t| !db.user.contains(t)) {
+                for a in &s.assocs {
+                    db.other_assoc.insert(a.name.clone());
+                }
             }
         }
         if db.user.is_empty() {
@@ -156,24 +185,110 @@ impl TraitDb {
             }
             let mut body = Vec::new();
             // (a where clause on a type that is not a parameter (`where Vec<T>: Debug`) is left out)
-            let mut exact = s.where_types.is_empty() && self_ty.is_some() && args.is_some();
+            let mut exact = self_ty.is_some() && args.is_some();
             for (i, (_, bs)) in s.impl_generics.iter().enumerate() {
                 for b in bs {
                     if let Some(pr) = pred_of(p, Ty::Param(i as u8), b, &gn) {
-                        // (an associated type's binding (`Iterator<Item = u8>`) is left out; arguments not read)
-                        if b.contains('=') || (db.user.contains(&pr.tr) && pr.args.is_none()) {
+                        // (an associated type's binding of std's trait (`Iterator<Item = u8>`) is left out, and of one
+                        // of the program's that was not read; arguments not read)
+                        if (b.contains('=') && !(db.user.contains(&pr.tr) && pr.eqs_read)) || (db.user.contains(&pr.tr) && pr.args.is_none()) {
                             exact = false;
                         }
                         body.push(pr);
                     }
                 }
             }
+            let mut assocs = vec![];
+            for a in defs.get(&ii).into_iter().flatten() {
+                // (a generic associated type is not normalized here)
+                if a.generics.iter().any(|g| g == "#gat") {
+                    continue;
+                }
+                let agn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
+                if agn == gn {
+                    if let Ok(v) = p.resolve_g(&a.value, &gn) {
+                        assocs.push((a.name.clone(), v));
+                    }
+                }
+            }
             if self_ty.is_some_and(|t| has_assoc(p, t, 0)) || args.as_ref().is_some_and(|a| a.iter().any(|&t| has_assoc(p, t, 0))) {
                 exact = false;
             }
-            db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii, exact });
+            db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii, exact, where_ok: s.where_types.is_empty(), assocs });
         }
         db
+    }
+
+    /// The where clauses of impl `item` on what is not one of its parameters, read by the driver from its header
+    /// (`where T::Assoc: Foo`, `where (): Array<Element = &()>`): added to its clause; `all`: every one was read
+    pub fn add_where(&mut self, item: usize, preds: Vec<Pred>, all: bool) {
+        for cs in self.clauses.values_mut() {
+            for c in cs.iter_mut().filter(|c| c.item == item) {
+                c.body.extend(preds.iter().cloned());
+                c.where_ok = all;
+            }
+        }
+    }
+
+    /// The associated type `name` of the ground type t, by trait tr (None: any trait of the program's that defines
+    /// it, when no other impl does): `normalize` of Normalize.lean
+    pub fn normalize(&self, p: &Program, t: Ty, name: &str, tr: Option<&str>) -> Option<Ty> {
+        let cx = Cx { db: self, p, stack: vec![], steps: 0, strict: true, rigid_env: false, norm_depth: 0 };
+        cx.normalize(t, name, tr)
+    }
+
+    /// Whether a bound b that a trait puts on its associated type holds of the impl's definition t (`type Sibling:
+    /// Bar2<Ok = Self::Ok>` with `type Sibling = Foo2`): `Self` in b is the impl's self type, and its associated types
+    /// are normalized by the solver. Some((projection, it, asked)) when a binding is another type (E0271)
+    pub fn assoc_bound(&self, p: &Program, t: Ty, b: &str, self_ty: Ty) -> (Ans, Option<(String, Ty, Ty)>) {
+        let Some(pr) = pred_of(p, t, b, &["Self"]) else { return (Ans::Overflow, None) };
+        let cx = Cx { db: self, p, stack: vec![], steps: 0, strict: false, rigid_env: true, norm_depth: 0 };
+        let sol = [Some(self_ty)];
+        let mut w = pr.clone();
+        if let Some(a) = &pr.args {
+            let mut v = vec![];
+            for &x in a {
+                match cx.isubst(x, &sol, 0) {
+                    Some(y) => v.push(y),
+                    None => return (Ans::Overflow, None),
+                }
+            }
+            w.args = Some(v);
+        }
+        let mut eqs = vec![];
+        for (n, x) in &pr.eqs {
+            match cx.isubst(*x, &sol, 0) {
+                Some(y) => eqs.push((n.clone(), y)),
+                None => return (Ans::Overflow, None),
+            }
+        }
+        w.eqs = eqs;
+        if self.user.contains(&w.tr) && w.eqs_read {
+            for (n, x) in &w.eqs {
+                if let Some(u) = cx.normalize(t, n, Some(&w.tr)) {
+                    if u != *x {
+                        return (Ans::No, Some((format!("<{} as {}>::{n}", p.tn(t), w.tr), u, *x)));
+                    }
+                }
+            }
+        }
+        let mut cx = cx;
+        (cx.solve_pred(FUEL, &w), None)
+    }
+
+    /// A bound's binding that the trait solver finds another type for: (`<t as Tr>::name`, what it is, what the
+    /// bound asks), for E0271
+    pub fn binding_mismatch(&self, p: &Program, t: Ty, b: &str, gn: &[&str], inst: &[Ty]) -> Option<(String, Ty, Ty)> {
+        let pr = pred_of(p, t, b, gn)?;
+        for (n, x) in &pr.eqs {
+            let x = p.subst(*x, inst);
+            if let Some(u) = self.normalize(p, t, n, Some(&pr.tr)) {
+                if u != x && !p.has_param(x) {
+                    return Some((format!("<{} as {}>::{n}", p.tn(t), pr.tr), u, x));
+                }
+            }
+        }
+        None
     }
 
     /// Whether a bound b of a type parameter gives it the auto trait tr: b itself, or a trait of the program's with
@@ -228,8 +343,8 @@ impl TraitDb {
     /// obligations): a placeholder holds a trait only by its bounds (through their supertraits) or by an impl
     pub fn holds_rigid(&self, p: &Program, t: Ty, b: &str) -> Ans {
         let Some(pr) = pred_of(p, t, b, &[]) else { return Ans::Overflow };
-        let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: false, rigid_env: true };
-        cx.solve(FUEL, pr.ty, &pr.tr, &pr.raw, pr.args.as_deref())
+        let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: false, rigid_env: true, norm_depth: 0 };
+        cx.solve_pred(FUEL, &pr)
     }
 
     pub fn holds_in(&self, p: &Program, t: Ty, b: &str, gn: &[&str], inst: &[Ty]) -> Ans {
@@ -239,8 +354,11 @@ impl TraitDb {
                 *x = p.subst(*x, inst);
             }
         }
-        let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: false, rigid_env: false };
-        cx.solve(FUEL, pr.ty, &pr.tr, &pr.raw, pr.args.as_deref())
+        for e in pr.eqs.iter_mut() {
+            e.1 = p.subst(e.1, inst);
+        }
+        let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: false, rigid_env: false, norm_depth: 0 };
+        cx.solve_pred(FUEL, &pr)
     }
 }
 
@@ -326,7 +444,7 @@ impl TraitDb {
             for w in &c.body {
                 let t = p.subst(w.ty, sub);
                 let args: Option<Vec<Ty>> = w.args.as_ref().map(|v| v.iter().map(|&x| p.subst(x, sub)).collect());
-                let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: true, rigid_env: false };
+                let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: true, rigid_env: false, norm_depth: 0 };
                 if cx.solve(FUEL, t, &w.tr, &w.raw, args.as_deref()) != Ans::Yes {
                     return None;
                 }
@@ -539,7 +657,27 @@ fn pred_of(p: &Program, t: Ty, b: &str, gn: &[&str]) -> Option<Pred> {
             Some(v)
         })
     };
-    Some(Pred { ty: t, tr, raw: b.to_string(), args })
+    let mut eqs = vec![];
+    let mut eqs_read = true;
+    if b.contains('=') {
+        let bs = crate::ast_summary::assoc_bindings(b);
+        // (as many bindings as `=` signs at the bound's own level: else one was not read)
+        if bs.len() != b.matches('=').count() {
+            eqs_read = false;
+        }
+        for (n, x) in bs {
+            match p.resolve_g(&x, gn) {
+                Ok(x) => eqs.push((n, x)),
+                Err(_) => eqs_read = false,
+            }
+        }
+    }
+    Some(Pred { ty: t, tr, raw: b.to_string(), args, eqs, eqs_read })
+}
+
+/// A where clause's bound on a type that is not a bare parameter, as predicates (pub for the driver)
+pub fn preds_of(p: &Program, t: Ty, bounds: &[&str], gn: &[&str]) -> Vec<Pred> {
+    bounds.iter().filter_map(|b| pred_of(p, t, b, gn)).collect()
 }
 
 struct Cx<'a> {
@@ -553,6 +691,8 @@ struct Cx<'a> {
     /// the placeholders are an impl's parameters, whose bounds are all its where clauses on them (the caller checked):
     /// their bounds are the whole environment, so a `No` of one holds
     rigid_env: bool,
+    /// how deep normalization is nested (an associated type defined by another's)
+    norm_depth: u32,
 }
 
 impl Cx<'_> {
@@ -640,7 +780,7 @@ impl Cx<'_> {
             }
         }
         // (arguments not matched (not read, or not as many): any. Then a `Yes` is a weakened one)
-        let mut weak = !c.exact;
+        let mut weak = !c.exact || !c.where_ok;
         match (&c.args, args) {
             (Some(ha), Some(ga)) if ha.len() == ga.len() => {
                 for (&h, &g) in ha.iter().zip(ga) {
@@ -663,28 +803,146 @@ impl Cx<'_> {
     fn body(&mut self, fuel: u32, c: &Clause, sol: &[Option<Ty>]) -> Ans {
         let mut r = Ans::Yes;
         for w in &c.body {
-            // (the where clause under what the head bound: not ground when it names a parameter the head does not
-            // bind)
-            let Some(wt) = ground_subst(self.p, w.ty, sol) else { return Ans::Overflow };
-            let wargs = match &w.args {
-                Some(a) => {
-                    let mut v = Vec::new();
-                    for &x in a {
-                        match ground_subst(self.p, x, sol) {
-                            Some(y) => v.push(y),
-                            None => return Ans::Overflow,
-                        }
+            // (the where clause under what the head bound, its associated types normalized: not ground when it names
+            // a parameter the head does not bind, or a projection the solver cannot normalize)
+            let Some(wt) = self.isubst(w.ty, sol, 0) else { return Ans::Overflow };
+            let mut wp = w.clone();
+            wp.ty = wt;
+            if let Some(a) = &w.args {
+                let mut v = Vec::new();
+                for &x in a {
+                    match self.isubst(x, sol, 0) {
+                        Some(y) => v.push(y),
+                        None => return Ans::Overflow,
                     }
-                    Some(v)
                 }
-                None => None,
-            };
-            r = r.and(self.solve(fuel - 1, wt, &w.tr, &w.raw, wargs.as_deref()));
+                wp.args = Some(v);
+            }
+            let mut eqs = vec![];
+            for (n, x) in &w.eqs {
+                match self.isubst(*x, sol, 0) {
+                    Some(y) => eqs.push((n.clone(), y)),
+                    None => return Ans::Overflow,
+                }
+            }
+            wp.eqs = eqs;
+            r = r.and(self.solve_pred(fuel - 1, &wp));
             if r == Ans::No {
                 return r;
             }
         }
         r
+    }
+
+    /// A predicate: its trait, and the associated types it binds (`T: Tr<Assoc = X>` needs `<T as Tr>::Assoc` to
+    /// normalize to X: `binding_no_sound` of Normalize.lean)
+    fn solve_pred(&mut self, fuel: u32, w: &Pred) -> Ans {
+        let mut r = self.solve(fuel, w.ty, &w.tr, &w.raw, w.args.as_deref());
+        if r == Ans::No || w.eqs.is_empty() {
+            return r;
+        }
+        if !self.db.user.contains(&w.tr) || !w.eqs_read {
+            return if self.strict && r == Ans::Yes { Ans::Overflow } else { r };
+        }
+        for (n, x) in &w.eqs {
+            match self.normalize(w.ty, n, Some(&w.tr)) {
+                Some(u) if u == *x => {}
+                Some(_) => return Ans::No,
+                None => r = r.and(Ans::Overflow),
+            }
+        }
+        r
+    }
+
+    /// `normalize` of Normalize.lean: the impls of tr (or of any program trait that defines `name`) whose head
+    /// matches t exactly and whose where clauses hold (a strict `Yes`), and their definition of `name` under what
+    /// matching found. One answer or none: two impls that give two (an incoherent program) or one zustc cannot decide
+    /// leave it unknown
+    fn normalize(&self, t: Ty, name: &str, tr: Option<&str>) -> Option<Ty> {
+        if self.norm_depth > 8 || !ground(self.p, t, 0) {
+            return None;
+        }
+        if tr.is_none() && self.db.other_assoc.contains(name) {
+            return None;
+        }
+        let mut found: Option<Ty> = None;
+        let mut trs: Vec<&String> = self.db.clauses.keys().filter(|k| tr.is_none_or(|t| k.as_str() == t)).collect();
+        trs.sort();
+        for k in trs {
+            for c in &self.db.clauses[k] {
+                let Some(&(_, v)) = c.assocs.iter().find(|a| a.0 == name).map(|a| a) else { continue };
+                let mut sol: Vec<Option<Ty>> = vec![None; c.n];
+                let Some(st) = c.self_ty else { return None };
+                if !mtch(self.p, st, t, &mut sol, false, 0) {
+                    continue;
+                }
+                // (an impl of the trait with arguments: another impl may be the one for other arguments)
+                if c.args.as_ref().is_none_or(|a| !a.is_empty()) || !c.exact || !c.where_ok {
+                    return None;
+                }
+                let mut sub = Cx { db: self.db, p: self.p, stack: vec![], steps: 0, strict: true, rigid_env: false, norm_depth: self.norm_depth + 1 };
+                match sub.body(FUEL, c, &sol) {
+                    Ans::Yes => {}
+                    Ans::No => continue,
+                    Ans::Overflow => return None,
+                }
+                let u = sub.isubst(v, &sol, 0)?;
+                if found.is_some_and(|f| f != u) {
+                    return None;
+                }
+                found = Some(u);
+            }
+        }
+        found
+    }
+
+    /// t under the impl's parameters' solution, its associated types normalized by the solver (not by
+    /// Program::assoc_of, which takes the first definition of the name): None when the result is not ground
+    fn isubst(&self, t: Ty, sol: &[Option<Ty>], depth: u32) -> Option<Ty> {
+        if depth > 32 {
+            return None;
+        }
+        let r = match t {
+            Ty::Param(i) => sol.get(i as usize).copied().flatten()?,
+            Ty::Assoc(a) => {
+                let b = self.isubst(a.base, sol, depth + 1)?;
+                self.normalize(b, &a.name, None)?
+            }
+            Ty::Ref(m, i) => Ty::Ref(m, crate::types::intern(self.isubst(*i, sol, depth + 1)?)),
+            Ty::Ptr(m, i) => Ty::Ptr(m, crate::types::intern(self.isubst(*i, sol, depth + 1)?)),
+            Ty::Box(i) => Ty::Box(crate::types::intern(self.isubst(*i, sol, depth + 1)?)),
+            Ty::Slice(i) => Ty::Slice(crate::types::intern(self.isubst(*i, sol, depth + 1)?)),
+            Ty::Array(i, n) => {
+                let n = if n >= CONST_LEN_BASE {
+                    match sol.get((n - CONST_LEN_BASE) as usize).copied().flatten() {
+                        Some(Ty::Array(_, m)) => m,
+                        _ => return None,
+                    }
+                } else {
+                    n
+                };
+                Ty::Array(crate::types::intern(self.isubst(*i, sol, depth + 1)?), n)
+            }
+            Ty::Fn(f) => {
+                let mut ps = vec![];
+                for &x in &f.params {
+                    ps.push(self.isubst(x, sol, depth + 1)?);
+                }
+                let ret = self.isubst(f.ret, sol, depth + 1)?;
+                Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params: ps, ret }))
+            }
+            Ty::Struct(sid) if self.p.has_param(t) || has_assoc(self.p, t, 0) => {
+                let sd = &self.p.structs[sid as usize];
+                let base = sd.base?;
+                let mut args = vec![];
+                for &a in &sd.args.clone() {
+                    args.push(self.isubst(a, sol, depth + 1)?);
+                }
+                Ty::Struct(self.p.instantiate(base, args).ok()?)
+            }
+            t => t,
+        };
+        ground(self.p, r, 0).then_some(r)
     }
 
     /// The bounds of an impl's parameter (rigid_env), None for other types
@@ -834,16 +1092,6 @@ fn ground(p: &Program, t: Ty, depth: u32) -> bool {
             (sd.base.is_some() || sd.generics.is_empty()) && sd.args.iter().all(|&a| ground(p, a, depth + 1))
         }
         _ => !p.has_param(t),
-    }
-}
-
-/// t with the impl's parameters replaced by what matching found: None when one it names is not bound
-fn ground_subst(p: &Program, t: Ty, sol: &[Option<Ty>]) -> Option<Ty> {
-    let r = p.partial_subst(t, sol);
-    if p.has_param(r) {
-        None
-    } else {
-        Some(r)
     }
 }
 
