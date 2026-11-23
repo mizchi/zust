@@ -39,6 +39,14 @@ mod tests {
     // (the crate's own `main`, which the harness renamed)
     #[test]
     fn calls_main() { main(); super::main(); }
+    // (a test a macro makes)
+    macro_rules! make_test {
+        ($name:ident, $v:expr) => {
+            #[test]
+            fn $name() { assert_eq!(add($v, 0), $v); }
+        };
+    }
+    make_test!(made_by_macro, 3);
     mod inner {
         #[test]
         fn deep() { println!("deep out"); }

@@ -167,7 +167,8 @@ zurgo test
 zurgo test --lib parse -- --include-ignored
 ```
 
-- Each test crate is built with `zustc --test`. That keeps `#[cfg(test)]` items, collects the `#[test]` functions
+- Each test crate is built with `zustc --test`. That keeps `#[cfg(test)]` items, collects the `#[test]` functions (those a `macro_rules!` makes too: they are
+  collected from the expanded source)
   and adds a harness `main` (the crate's own `main` is not called). The harness only lists its tests and runs the
   one named:
   - a panic exits with 101, and a `Result` test that returns `Err` exits with 1;
@@ -199,7 +200,6 @@ zurgo test --lib parse -- --include-ignored
   (`ZURGO_TEST_SLOW`, `ZURGO_TEST_TIMEOUT`, in seconds).
 - Not yet:
   - doc tests and benchmarks;
-  - `#[test]` functions that a `macro_rules!` makes (the build warns about them);
   - `test = false` on a target;
   - wasm32;
   - building only the chosen targets (`--lib` and the others choose what runs; everything is built).

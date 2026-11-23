@@ -353,14 +353,19 @@ fn lit(s: &str) -> String {
 /// The source with the harness: `--test`'s crate. The crate's own `fn main` is renamed (same length, so nothing
 /// moves) and a `main` that runs the tests follows the last line
 pub fn apply(src: &str) -> String {
-    apply_noting(src).0
+    apply_with(src, None).0
 }
 
-/// apply, and how many `#[test]` attributes it found no function for (inside a `macro_rules!`: not run yet)
-pub fn apply_noting(src: &str) -> (String, usize) {
+/// apply, with the tests collected from `expanded` when there is one: the same source with its `macro_rules!`
+/// expanded (crate::macros), so the tests a macro makes are run too. The harness still goes after the source as it
+/// is. Also how many `#[test]` attributes no function was found for (macros, when there is no expansion)
+pub fn apply_with(src: &str, expanded: Option<&str>) -> (String, usize) {
     let c = collect(src);
-    let unlisted = c.unlisted;
-    let mut tests = c.tests;
+    let (tests, unlisted) = match expanded {
+        Some(e) => (collect(e).tests, 0),
+        None => (c.tests.clone(), c.unlisted),
+    };
+    let mut tests = tests;
     // (libtest's order: by name)
     tests.sort_by(|a, b| a.path.cmp(&b.path));
     let mut out = src.to_string();

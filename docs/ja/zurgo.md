@@ -166,7 +166,8 @@ zurgo test
 zurgo test --lib parse -- --include-ignored
 ```
 
-- テストのクレートはどれも `zustc --test` でビルドする。`#[cfg(test)]` のアイテムを残し、`#[test]` の関数を集め、
+- テストのクレートはどれも `zustc --test` でビルドする。`#[cfg(test)]` のアイテムを残し、`#[test]` の関数を集め (`macro_rules!` が作るものも:
+  展開したソースから集める)、
   ハーネスの `main` を足す (クレート自身の `main` は呼ばれない)。ハーネスがするのは、テストの列挙と、名前を
   指定されたテストを 1 つ動かすことだけ:
   - panic は 101 で終わり、`Err` を返す `Result` のテストは 1 で終わる。
@@ -196,7 +197,6 @@ zurgo test --lib parse -- --include-ignored
   (`ZURGO_TEST_SLOW`、`ZURGO_TEST_TIMEOUT`。秒で)。
 - まだのもの:
   - doc テストとベンチマーク。
-  - `macro_rules!` が作る `#[test]` の関数 (ビルドが警告する)。
   - ターゲットの `test = false`。
   - wasm32。
   - 選んだターゲットだけをビルドすること (`--lib` などは動かすものを選ぶだけで、すべてビルドする)。
