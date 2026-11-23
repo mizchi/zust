@@ -1257,7 +1257,25 @@ impl Cx<'_> {
                 // (an argument that names the receiver (`v.push(v.pop().unwrap())`): the two-phase borrow's
                 // reservation, a shared loan of the place, lasts while the arguments are evaluated)
                 if let (Some(borrowck::Ev::Acc(place, borrowck::Acc::Borrow(ln), sp)), Some(n)) = (&ev, borrowck::root_local(recv)) {
-                    if margs.iter().any(|a| borrowck::mentions(a, n)) {
+                    // (or a local that may hold a loan of it (`let w = &v; v.ext(w)`): what it holds is held until the
+                    // `&mut` is taken)
+                    let mut holds = false;
+                    for a in margs.iter() {
+                        // (also a block's value: `v.ext({ w })`)
+                        let mut a: &Expr = strip_paren(a);
+                        while let Expr::Block(None, _, b) = a {
+                            match b.stmts.last() {
+                                Some(crate::parse::Stmt::Expr(t, false)) => a = strip_paren(t),
+                                _ => break,
+                            }
+                        }
+                        if let Expr::Path(None, p) = a {
+                            if let (1, Some((_, t))) = (p.segs.len(), self.lookup(&p.segs[0].name)) {
+                                holds |= self.bk_ty(t).1;
+                            }
+                        }
+                    }
+                    if holds || margs.iter().any(|a| borrowck::mentions(a, n)) {
                         let l = &self.bk.loans[*ln as usize];
                         let res = borrowck::Loan { place: l.place.clone(), mutable: false, sp: l.sp, at: l.at, quiet: l.quiet, capture: l.capture };
                         let rs = self.bk.loans.len() as u32;
@@ -2079,6 +2097,87 @@ impl Cx<'_> {
         deref.and_then(|d| cands.iter().copied().find(|&c| fits(c, d))).unwrap_or(id)
     }
 
+    /// A placeholder's type parameter is `'static` by its function's bounds (`T: 'static`, or a trait whose `Self` must
+    /// be `'static`)
+    /// A placeholder in t (itself, or in its type arguments, under references, boxes, slices and arrays) that may not
+    /// be 'static (placeholder_static)
+    fn non_static_placeholder(&self, t: Ty, depth: u32) -> Option<u32> {
+        if depth > 12 {
+            return None;
+        }
+        match t {
+            Ty::Struct(s) if self.prog.is_placeholder(s) => (!self.placeholder_static(s)).then_some(s),
+            Ty::Struct(s) => self.prog.structs[s as usize].args.iter().find_map(|&a| self.non_static_placeholder(a, depth + 1)),
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Slice(i) | Ty::Array(i, _) => self.non_static_placeholder(*i, depth + 1),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn placeholder_static(&self, s: u32) -> bool {
+        let Some((id, k)) = self.prog.placeholder_of(s) else { return true };
+        let sig = &self.prog.sigs[id as usize];
+        let Some((name, bounds)) = sig.generics.get(k as usize) else { return true };
+        // (`T: 'a` with `'a` reaching 'static through the outlives bounds (`'a: 'static`))
+        let by_outlives = sig.regions.as_deref().is_some_and(|r| {
+            r.ty_outlives.iter().any(|(t, c)| {
+                if t != name {
+                    return false;
+                }
+                let mut seen = vec![*c];
+                let mut k = 0;
+                while k < seen.len() {
+                    if seen[k] == crate::types::R_STATIC {
+                        return true;
+                    }
+                    for &(a, b) in &r.outlives {
+                        if a == seen[k] && !seen.contains(&b) {
+                            seen.push(b);
+                        }
+                    }
+                    k += 1;
+                }
+                false
+            })
+        });
+        // (a trait whose `Self` must be 'static, also through its supertraits (`trait Derived: Base`, `trait Base:
+        // 'static`))
+        let short = |t: &str| t.split('<').next().unwrap_or(t).trim().rsplit("::").next().unwrap_or("").to_string();
+        let by_trait = bounds.iter().any(|b| {
+            let mut todo = vec![short(b)];
+            let mut seen: Vec<String> = vec![];
+            while let Some(n) = todo.pop() {
+                if seen.contains(&n) {
+                    continue;
+                }
+                if self.prog.trait_self_outlives.iter().any(|(t, so)| short(t) == n && so.iter().any(|x| x == "static")) {
+                    return true;
+                }
+                for (t, sups) in &self.prog.trait_supers {
+                    if short(t) == n {
+                        todo.extend(sups.iter().map(|x| short(x)));
+                    }
+                }
+                seen.push(n);
+            }
+            false
+        });
+        // (or implied by a parameter's type: `_: &'static T` makes T 'static)
+        fn mentions(prog: &crate::program::Program, t: Ty, k: u32, depth: u32) -> bool {
+            depth < 12
+                && match t {
+                    Ty::Param(i) => i as u32 == k,
+                    Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Slice(i) | Ty::Array(i, _) => mentions(prog, *i, k, depth + 1),
+                    Ty::Struct(s) => prog.structs[s as usize].args.iter().any(|&a| mentions(prog, a, k, depth + 1)),
+                    _ => false,
+                }
+        }
+        let by_param = sig.regions.as_deref().is_some_and(|r| {
+            let n = r.slots.len().saturating_sub(1);
+            sig.params.iter().zip(&r.slots[..n]).any(|(&t, s)| matches!(t, Ty::Ref(_, i) if mentions(self.prog, *i, k, 0)) && s.first() == Some(&crate::types::R_STATIC))
+        });
+        by_outlives || by_trait || by_param || bounds.iter().any(|b| b.trim() == "'static")
+    }
+
     /// Program::trait_scopes at this function: the traits of a colliding name in scope where it is (the innermost
     /// scope around the source line of its item; a closure is in its fn's). None for the prelude, or when no trait
     /// name collides
@@ -2577,6 +2676,23 @@ impl Cx<'_> {
         // (a callee that requires 'static (`fn f<T: 'static>`, `&'static T`): from here on, checked)
         if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && self.prog.sigs[id as usize].regions.as_deref().is_some_and(Self::callee_needs_static) {
             self.rg_late_on();
+        }
+        // (in a closure's body, whose region check has no placeholders for its function's type parameters: a callee
+        // that requires `T: 'static` of the function's T, which none of the function's bounds gives (E0310))
+        if self.user_code && self.inline_depth == 0 && self.prog.closures.contains_key(&self.rg.base) {
+            if let Some(r) = self.prog.sigs[id as usize].regions.as_deref() {
+                for (tp, c) in &r.ty_outlives {
+                    if *c != crate::types::R_STATIC {
+                        continue;
+                    }
+                    let Some(g) = sig0.generics.iter().position(|x| x.0 == *tp) else { continue };
+                    // (also one in the type argument: `needs_static::<Option<T>>()`)
+                    if let Some(s) = sol0.get(g).copied().flatten().and_then(|t| self.non_static_placeholder(t, 0)) {
+                        let n = self.prog.structs[s as usize].name.trim_end_matches('#').to_string();
+                        return Err(self.at(if span.line == 0 { rg_sp } else { span }, format!("the parameter type `{n}` may not live long enough (it must outlive `'static`) (E0310)")));
+                    }
+                }
+            }
         }
         let sol_rg = if self.rg_on() { Some(sol0.clone()) } else { None };
         let (target, sig) = self.resolve_call(id, &arg_tys, sol0, expected, span)?;

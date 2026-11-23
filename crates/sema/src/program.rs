@@ -3784,6 +3784,11 @@ impl Program {
     }
 
     /// sid is a placeholder (Program::placeholder); cheap when none was made
+    /// The fn and the index of the type parameter a placeholder stands for
+    pub fn placeholder_of(&self, sid: u32) -> Option<(u32, u32)> {
+        self.structs.placeholders.lock().unwrap().iter().find(|e| *e.1 == sid).map(|e| *e.0)
+    }
+
     pub fn is_placeholder(&self, sid: u32) -> bool {
         self.structs.any_placeholder.load(std::sync::atomic::Ordering::Relaxed) && self.structs[sid as usize].placeholder.is_some()
     }

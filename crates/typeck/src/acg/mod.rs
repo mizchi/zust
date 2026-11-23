@@ -1603,7 +1603,63 @@ impl Cx<'_> {
         // universal regions to relate)
         // (or one region and a trait object in the result, 'static by default: `fn f(x: &u8) -> Box<dyn Tr>`)
         self.rg.eligible = self.rg.on && self.rg.closure.is_none();
-        if self.rg.on && sig.regions.is_none() && self.rg.closure.is_none() && !self.rg.force {
+        // (or, before edition 2024, one whose bounds name no lifetime (`-> impl Iterator<Item = u32>`, `+ use<>`): it
+        // captures none, so its hidden type's regions are 'static too (E0700 in rustc). Not with type parameters,
+        // which it captures)
+        self.bk.ret_no_capture = self.bk_on()
+            && self.user_code
+            && self.prog.opaque.contains(&self.rg.base)
+            && self.prog.edition < 2024
+            && !sig.is_generic()
+            && self.rg.inst_args.is_empty()
+            && matches!(&f.sig.ret, Some(crate::parse::Ty::Impl(bs)) if !bs.iter().any(|b| matches!(b, crate::parse::Bound::Lifetime(l) if l == "'static")) && crate::regions::captures_no_lifetime(bs));
+        if self.bk.ret_no_capture {
+            // (a parameter whose regions are all 'static: its slots write `'static`, or lifetimes bounded by it)
+            if let Some(r) = sig.regions.as_deref() {
+                // (through the outlives bounds: `'a: 'b, 'b: 'static`)
+                let st = |c: u8| {
+                    let mut seen = vec![c];
+                    let mut k = 0;
+                    while k < seen.len() && seen.len() < 64 {
+                        let x = seen[k];
+                        if x == crate::types::R_STATIC {
+                            return true;
+                        }
+                        for &(a, b) in &r.outlives {
+                            if a == x && !seen.contains(&b) {
+                                seen.push(b);
+                            }
+                        }
+                        k += 1;
+                    }
+                    false
+                };
+                let n = r.slots.len().saturating_sub(1);
+                for (j, s) in r.slots[..n].iter().enumerate() {
+                    // (a path written with no lifetime is a mark that stands for no region when its type has none
+                    // (`&'static String`): the regions are the codes but those marks, as many as the type has)
+                    let codes: Vec<u8> = s.iter().copied().filter(|&c| c != crate::types::R_ELIDED_ADT).collect();
+                    let pt = sig.params.get(j).copied();
+                    let fits = pt.is_some_and(|t| regionck::count(self.prog, t, 0) == Some(codes.len()));
+                    if !codes.is_empty() && fits && codes.iter().all(|&c| st(c)) {
+                        if let Some(&l) = self.bk.params.get(j) {
+                            self.bk.static_params.push(l);
+                        }
+                    }
+                }
+            }
+        }
+        self.rg.static_opaque = self.rg.on
+            && self.rg.closure.is_none()
+            && self.prog.opaque.contains(&self.rg.base)
+            && match &f.sig.ret {
+                Some(crate::parse::Ty::Impl(bs)) => {
+                    bs.iter().any(|b| matches!(b, crate::parse::Bound::Lifetime(l) if l == "'static"))
+                        || (self.prog.edition < 2024 && !sig.is_generic() && self.rg.inst_args.is_empty() && crate::regions::captures_no_lifetime(bs))
+                }
+                _ => false,
+            };
+        if self.rg.on && sig.regions.is_none() && self.rg.closure.is_none() && !self.rg.force && !self.rg.static_opaque {
             let n: usize = sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum();
             // (a placeholder's region is universal, whether a parameter's type has it or not (`f::<T>(x)`))
             let n = n + self.rg.inst_args.iter().filter(|&&t| matches!(t, Ty::Struct(s) if self.prog.is_placeholder(s))).count();

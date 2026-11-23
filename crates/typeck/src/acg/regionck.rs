@@ -77,6 +77,8 @@ pub struct Rg {
     /// The check is on from the function's start whatever the gate says (compile's second run); the check began late
     /// (rg_late_on); a local bound before it with no tree was met (the function is compiled again)
     pub force: bool,
+    /// The result is `impl Trait + 'static`: its hidden type's regions are 'static whatever the parameters are
+    pub static_opaque: bool,
     pub began_late: bool,
     pub rerun: bool,
     /// Nesting of call_fn (this and what follows: where lowering is, written whether the check is on or not)
@@ -374,6 +376,17 @@ fn kind(e: &Expr) -> &'static str {
         Expr::Try(..) => "try",
         _ => "other",
     }
+}
+
+/// t is a closure that captures what holds regions, or holds one (in a struct's type arguments, a box, a reference)
+fn holds_closure(prog: &Program, t: Ty, depth: u32) -> bool {
+    depth < 8
+        && match t {
+            Ty::Struct(sid) if is_closure(prog, sid) => captures(prog, sid).is_none_or(|(ts, moved)| ts.iter().enumerate().any(|(i, &c)| !moved.get(i).copied().unwrap_or(false) || count(prog, c, 0) != Some(0))),
+            Ty::Struct(sid) => prog.structs[sid as usize].args.iter().any(|&a| holds_closure(prog, a, depth + 1)),
+            Ty::Ref(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Ptr(_, i) => holds_closure(prog, *i, depth + 1),
+            _ => false,
+        }
 }
 
 pub fn debug() -> bool {
@@ -1748,7 +1761,11 @@ impl Cx<'_> {
         let ret = rg.instantiate(prog, gret, codes(params.len()), &lts, &targs, &mut el);
         rg.ret = ret.filter(|_| !bad);
         // (an `impl Trait` result with no region among the parameters: its hidden type's regions are 'static)
-        let opaque = inputs.is_empty() && !generic && rs.is_none() && prog.opaque.contains(&rg.base);
+        // (or one written `+ 'static`: `fn f<T>(x: T) -> impl Any + 'static`, its hidden type T must be 'static (E0310))
+        // (not a closure, nor what holds one: its tree is of the variables it captures, not of the places it uses (RFC
+        // 2229: `|| drop(&m.a.0)` through a `&'static` field borrows for 'static), which would be required for no reason)
+        let static_opaque = rg.static_opaque && !holds_closure(prog, ret_t, 0);
+        let opaque = (inputs.is_empty() && !generic && rs.is_none() || static_opaque) && prog.opaque.contains(&rg.base);
         if opaque {
             rg.ret = count(prog, ret_t, 0).filter(|&c| c > 0).map(|c| vec![STATIC; c]);
         }

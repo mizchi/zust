@@ -173,6 +173,41 @@ pub fn annotates_static(e: &crate::parse::Expr) -> bool {
     found
 }
 
+/// The bounds of an `impl Trait` result capture no lifetime (before edition 2024): none named or elided in them, no
+/// reference, no `dyn`, and a `use<..>` that lists none. Conservative: a bound it cannot read says it may capture one
+pub fn captures_no_lifetime(bs: &[Bound]) -> bool {
+    fn ty_ok(t: &PTy, depth: u32) -> bool {
+        depth < 16
+            && match t {
+                PTy::Ref(..) | PTy::Dyn(_) | PTy::Impl(_) | PTy::Fn(..) | PTy::Macro(_) => false,
+                PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => ty_ok(i, depth + 1),
+                PTy::Tuple(ts) => ts.iter().all(|t| ty_ok(t, depth + 1)),
+                PTy::Path(q, p) => q.is_none() && path_ok(p, depth),
+                PTy::Never | PTy::Infer => true,
+            }
+    }
+    fn path_ok(p: &crate::parse::Path, depth: u32) -> bool {
+        p.segs.iter().all(|s| {
+            s.fn_args.is_none()
+                && s.args.iter().all(|a| match a {
+                    GArg::Lifetime(_) => false,
+                    GArg::Ty(t) | GArg::Bind(_, t) => ty_ok(t, depth + 1),
+                    GArg::Const(_) => true,
+                })
+        })
+    }
+    if let Some(u) = bs.iter().find_map(|b| match b {
+        Bound::Trait(_, p) if p.segs.len() == 1 && p.segs[0].name == "use" => Some(&p.segs[0]),
+        _ => None,
+    }) {
+        return !u.args.iter().any(|a| matches!(a, GArg::Lifetime(_)));
+    }
+    bs.iter().all(|b| match b {
+        Bound::Lifetime(_) => false,
+        Bound::Trait(_, p) => path_ok(p, 0),
+    })
+}
+
 /// t writes `'static` somewhere (outside fn pointer, `impl` and `dyn` types)
 pub fn mentions_static(t: &PTy) -> bool {
     match t {

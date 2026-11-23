@@ -229,6 +229,14 @@ pub struct Bk {
     pub line_base: u32,
     /// The locals that are parameters
     pub params: Vec<u32>,
+    /// The result is an `impl Trait` that captures no lifetime (before edition 2024, its bounds name none, not generic):
+    /// what it returns must not borrow through a parameter's reference (E0700)
+    pub ret_no_capture: bool,
+    /// The parameters whose regions are all 'static (`x: &'static u8`, `'a: 'static`): returning them captures nothing
+    pub static_params: Vec<u32>,
+    /// The locals bound (once, never assigned again) from what holds such a parameter's reference (`let y = x;`):
+    /// they hold it too (check fills it)
+    pub param_derived: std::cell::RefCell<Vec<u32>>,
     /// Locals that own a value whose type implements `Drop` (a user's), and the place of that value in the local,
     /// through boxes and fields (`Box<Scribble>`: `*`; `Wrapper(Scribble)`: `.0`): its `drop` may use what a `&mut`
     /// field points to, so a borrow through it must not outlive the local (E0713)
@@ -922,6 +930,30 @@ impl Bk {
         let succ = |b: usize| &flat[so[b]..so[b + 1]];
         let nl = self.locals.len();
         let loans_on = need_loans;
+        // (an `impl Trait` that captures no lifetime: the locals that hold a parameter's reference, as bound from it)
+        if self.ret_no_capture {
+            let all: Vec<&Ev> = self.evs.iter().map(|x| &x.1).collect();
+            let again: Vec<u32> = all.iter().filter_map(|e| match e {
+                Ev::Flow(l, _) | Ev::Store(l, ..) => Some(*l),
+                _ => None,
+            }).collect();
+            let mut d: Vec<u32> = vec![];
+            loop {
+                let n0 = d.len();
+                for e in &all {
+                    if let Ev::Def(l, srcs) = e {
+                        let from = |s: &Src| matches!(s, Src::Local(p) if (self.params.contains(p) && !self.static_params.contains(p)) || d.contains(p));
+                        if !d.contains(l) && !again.contains(l) && !self.params.contains(l) && srcs.iter().any(from) {
+                            d.push(*l);
+                        }
+                    }
+                }
+                if d.len() == n0 || d.len() > 256 {
+                    break;
+                }
+            }
+            *self.param_derived.borrow_mut() = d;
+        }
         // ---- drop check: a drop of a local that is certainly moved out runs nothing (NLL's drop-liveness counts only
         // the maybe-initialized). Forward: the locals moved out on every path, joined by intersection
         if evs.iter().flatten().any(|e| matches!(e, Ev::Acc(_, Acc::Drop, _))) {
@@ -1389,6 +1421,20 @@ impl Bk {
                                     }
                                 }
                                 k += 1;
+                            }
+                            // (an `impl Trait` that captures no lifetime: a borrow through a parameter's reference, or the
+                            // reference itself, is in its hidden type, which may not hold it)
+                            if self.ret_no_capture {
+                                let derived = self.param_derived.borrow();
+                                let non_static = |l: u32| (self.params.contains(&l) && !self.static_params.contains(&l)) || derived.contains(&l);
+                                let through_param = ls.iter().any(|&ln| {
+                                    let lp = &self.loans[ln as usize].place;
+                                    non_static(lp.local) && lp.owned_len() < lp.proj.len()
+                                });
+                                let param_ref = srcs.iter().any(|s| matches!(s, Src::Local(l) if non_static(*l) && self.locals.get(*l as usize).is_some_and(|x| x.refs)));
+                                if through_param || param_ref {
+                                    errs.push(BkError { sp: *sp, msg: "hidden type for `impl Trait` captures lifetime that does not appear in bounds (E0700)".to_string() });
+                                }
                             }
                             if let Some(&ln) = through.iter().find(|&&ln| self.drop_field_borrow(&self.loans[ln as usize], st)) {
                                 errs.push(BkError { sp: self.loans[ln as usize].sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
