@@ -2018,7 +2018,8 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
         }
         let text = &src[it.start..it.end];
         // (past its outer attributes, `#[deprecated] #[cfg(not(FALSE))] use std::fs;`: a false `cfg` is stripped
-        // before, an allow or an expect of the lint leaves it alone)
+        // before; the last of its lint attributes that names the lint or its group sets the level, and an allow,
+        // an expect or a warn leaves it without an error)
         let mut t = text.trim_start();
         let mut lint_off = false;
         if t.starts_with('#') {
@@ -2028,11 +2029,15 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
             let tw = |q: usize| if q < tt.len() && tt[q].0 == 0 { &text[tt[q].1..tt[q].2] } else { "" };
             let mut q = 0;
             while ts(q, b'#') && ts(q + 1, b'[') {
-                // (`#[allow(a, unused_imports)]` / `#[expect(unused)]`: the lint or its group)
-                if matches!(tw(q + 2), "allow" | "expect") && ts(q + 3, b'(') {
+                // (`#[allow(a, unused_imports)]` / `#[warn(unused)]` / `#[deny(unused_imports)]`: the lint or its group)
+                let level = tw(q + 2);
+                if matches!(level, "allow" | "expect" | "warn" | "deny" | "forbid") && ts(q + 3, b'(') {
                     let mut r = q + 4;
                     while r < tt.len() && !ts(r, b')') {
-                        lint_off |= matches!(tw(r), "unused_imports" | "unused");
+                        if matches!(tw(r), "unused_imports" | "unused") {
+                            lint_off = matches!(level, "allow" | "expect" | "warn");
+                            break;
+                        }
                         r += 1;
                     }
                 }
@@ -2055,7 +2060,7 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
                 q = r + 1;
             }
         }
-        if !t.starts_with("use ") || lint_off || text.contains('*') {
+        if !t.starts_with("use ") || lint_off || t.contains('*') {
             continue;
         }
         let body = t["use ".len()..].trim_end().trim_end_matches(';').trim();
