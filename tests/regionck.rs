@@ -2523,6 +2523,19 @@ fn part14_rpit_captures_no_lifetime() {
     let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2024, ..Options2::default() });
     assert!(s.check("use std::fmt::Display;\nfn s(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn t(x: &u8) -> impl Display {\n    x\n}\nfn main() {}\n").is_empty());
 }
+
+/// A generic associated type's parameters named as its trait's or impl's (generic-associated-types/shadowing.rs):
+/// E0496 for a lifetime, E0403 for a type parameter
+#[test]
+fn part15_gat_shadowing() {
+    let d = check("trait Shadow<'a> {\n    type Bar<'a>;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0496"), "{d:?}");
+    let d = check("trait NoShadowT<T> {\n    type Bar<U>;\n}\nimpl<T> NoShadowT<T> for Option<T> {\n    type Bar<T> = i32;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0403"), "{d:?}");
+    assert_eq!(check("trait NoShadow<'a> {\n    type Bar<'b>;\n    fn f(&self) -> u8;\n}\nimpl<'a> NoShadow<'a> for &'a u32 {\n    type Bar<'b> = &'b u8;\n    fn f(&self) -> u8 {\n        1\n    }\n}\ntrait NoShadowT<T> {\n    type Bar<U>;\n}\nimpl<T> NoShadowT<T> for Option<T> {\n    type Bar<U> = U;\n}\ntrait WithSelf {\n    type Out<'x>\n    where\n        Self: 'x;\n}\nfn main() {\n    let x = 3u32;\n    println!(\"{}\", (&x).f());\n}\n"), vec![]);
+}
+
+
 /// From the third review of #69: a closure's call that needs `T: 'static` takes it from `T: 'a` with `'a: 'static`,
 /// and from a supertrait whose `Self` must be 'static (`trait Derived: Base`, `trait Base: 'static`); a T in the type
 /// argument (`needs_static::<Option<T>>()`) needs it too (E0310)

@@ -2575,6 +2575,22 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
     };
     let f = parse_file(&text)?;
     let Some(item) = f.items.first() else { return Ok(Summary::default()) };
+    // (E0496 / E0403: a generic associated type's own parameters named as its trait's or impl's: `type Bar<'a>` in
+    // `trait Shadow<'a>`)
+    if let (ItemKind::Type(_, g, ..), Some(ow)) = (&item.kind, owner) {
+        let lts: &[String] = ow.regions.as_ref().map(|r| r.lts.as_slice()).unwrap_or(&[]);
+        for p in &g.params {
+            match p {
+                GParam::Lifetime(l) if lts.iter().any(|x| x == l) => {
+                    return Err(format!("lifetime name `{l}` shadows a lifetime name that is already in scope (E0496)"));
+                }
+                GParam::Ty(n, ..) if n != "Self" && ow.generics.iter().any(|x| x.0 == *n) => {
+                    return Err(format!("the name `{n}` is already used for a generic parameter in this item's generic parameters (E0403)"));
+                }
+                _ => {}
+            }
+        }
+    }
     if let LexKind::TraitMember(_) = it.kind {
         let ow = owner.ok_or("trait member without trait")?;
         match &item.kind {
