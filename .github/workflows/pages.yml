@@ -35,6 +35,17 @@ jobs:
         run: python3 scripts/retro/extract.py --out out/site/dashboard/data
       - name: Assemble the site
         run: cp -R site/. out/site/
+      - name: Render the social cards (og:image) from the same data
+        run: |
+          mkdir -p out/site/dev/bench
+          git show origin/gh-pages:dev/bench/data.js > out/site/dev/bench/data.js
+          python3 -m http.server 8790 -d out/site >/dev/null 2>&1 &
+          npx -y playwright@1.48.2 install --with-deps chromium
+          for page in home dashboard; do
+            npx -y playwright@1.48.2 screenshot --viewport-size "1200, 630" --wait-for-selector "body[data-ready]" \
+              "http://localhost:8790/og/card.html?page=$page" "out/site/og-$page.png"
+          done
+          rm -rf out/site/dev
       - name: Publish to gh-pages (keeping dev/bench)
         run: |
           git config --global user.name "github-actions[bot]"
@@ -42,10 +53,10 @@ jobs:
           git worktree add -B gh-pages ../pages origin/gh-pages
           for i in 1 2 3 4; do
             (cd ../pages && git reset -q --hard origin/gh-pages)
-            rm -rf ../pages/dashboard
+            rm -rf ../pages/dashboard ../pages/og
             cp -R out/site/. ../pages/
             cd ../pages
-            git add -A index.html style.css dashboard
+            git add -A index.html style.css dashboard og og-home.png og-dashboard.png
             if git diff --cached --quiet; then echo "site unchanged"; exit 0; fi
             git commit -q -m "site: / and /dashboard/ from ${GITHUB_SHA::7}"
             if git push -q origin gh-pages; then exit 0; fi
