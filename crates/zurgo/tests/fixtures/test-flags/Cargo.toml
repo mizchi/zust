@@ -1,0 +1,15 @@
+[package]
+name = "tf"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# (a test package of zurgo: `test = false` and `harness = false`)
+[workspace]
+
+[lib]
+test = false
+
+[[test]]
+name = "custom"
+harness = false

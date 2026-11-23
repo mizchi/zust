@@ -35,15 +35,17 @@ pub struct BuildOpts {
     /// `zurgo test`: also the selected packages' test crates (their lib's and bins' unit tests, their integration
     /// tests), with the dev-dependencies
     pub test: bool,
+    /// `zurgo test --lib` / `--bin x` / `--test x` ..: only the test crates whose label contains one of these
+    /// (`(lib)`, `(bin x)`, `(test x)`; empty: every one)
+    pub test_targets: Vec<String>,
 }
 
 pub struct Built {
     pub out_dir: PathBuf,
     /// (binary name, executable)
     pub bins: Vec<(String, PathBuf)>,
-    /// `zurgo test`'s test executables: (what it is, as cargo names it: `pkg (lib)`, `pkg (bin x)`, `pkg (test x)`;
-    /// the executable; the package's directory, where it runs)
-    pub tests: Vec<(String, PathBuf, PathBuf)>,
+    /// `zurgo test`'s test executables
+    pub tests: Vec<crate::test_runner::TestExe>,
     pub crates: Vec<CrateSpec>,
 }
 
@@ -80,8 +82,9 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
     plan_labeled(g, o).map(|p| p.0)
 }
 
-/// plan, and the label of each test crate (`pkg (lib)`, `pkg (bin x)`, `pkg (test x)`), in the order of the crates
-pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<String>)> {
+/// plan, and each test crate: its index in the crates, its label (`pkg (lib)`, `pkg (bin x)`, `pkg (test x)`), and
+/// whether it has the harness (`harness = false`: no)
+pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, String, bool)>)> {
     let host = Target::host();
     let target = match &o.target {
         Some(t) => Target::by_triple(t).ok_or_else(|| format!("unknown target `{t}` (x86_64-unknown-linux-gnu, wasm32-unknown-unknown)"))?,
@@ -315,8 +318,8 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<String>)
     }
     // (`zurgo test`: a test crate for the lib's unit tests, each bin's, and each integration test. Each is a bin
     //  crate built with `test` (zustc's harness), with the dev-dependencies; an integration test also with the lib)
-    // (each test crate's label, in order)
-    let mut labels: Vec<String> = vec![];
+    // (each test crate: its index in crates, its label, whether it has the harness)
+    let mut labels: Vec<(usize, String, bool)> = vec![];
     if o.test {
         let built_bins: Vec<(String, String)> = crates.iter().filter_map(|c| c.exe.clone().map(|e| (e.clone(), e))).collect();
         for &m in &selected {
@@ -325,19 +328,21 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<String>)
             let dev = deps_of(g, &r, n, true)?;
             let lib = pk.m.lib.as_ref().filter(|l| !l.is_proc_macro());
             let mut units: Vec<(String, &crate::manifest::Target, bool)> = vec![];
-            if let Some(l) = lib {
+            if let Some(l) = lib.filter(|l| l.test) {
                 units.push((format!("{} (lib)", pk.m.name), l, false));
             }
-            for b in &pk.m.bins {
+            for b in pk.m.bins.iter().filter(|b| b.test) {
                 if missing_features(g, &r, n, b).is_empty() {
                     units.push((format!("{} (bin {})", pk.m.name, b.name), b, true));
                 }
             }
-            for t in &pk.m.tests {
+            for t in pk.m.tests.iter().filter(|t| t.test) {
                 if missing_features(g, &r, n, t).is_empty() {
                     units.push((format!("{} (test {})", pk.m.name, t.name), t, true));
                 }
             }
+            // (`--lib`, `--bin x`, `--test x` ..: only those are built)
+            units.retain(|u| o.test_targets.is_empty() || o.test_targets.iter().any(|w| u.0.contains(w.as_str())));
             for (label, t, with_lib) in units {
                 let mut deps = dev.clone();
                 if with_lib {
@@ -382,9 +387,10 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<String>)
                     exe: Some(format!("{exe}.test")),
                     cfgs,
                     env,
-                    test: true,
+                    // (`harness = false`: its own `main`, no `cfg(test)`)
+                    test: t.harness,
                 });
-                labels.push(label);
+                labels.push((crates.len() - 1, label, t.harness));
             }
         }
     }
@@ -555,14 +561,19 @@ pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
     let wasm = opts.module_writer.is_some();
     Session2::new(opts).build_workspace(&crates, &out)?;
     // (wasm32: a bin is the module `<name>.wasm`)
-    let bins = crates.iter().filter(|c| !c.test).filter_map(|c| c.exe.as_ref().map(|e| (e.clone(), if wasm { out.join(format!("{e}.wasm")) } else { out.join(e) }))).collect();
-    let tests = crates
+    let is_test: Vec<usize> = labels.iter().map(|l| l.0).collect();
+    let bins = crates
         .iter()
-        .filter(|c| c.test)
-        .zip(labels)
-        .filter_map(|(c, l)| {
+        .enumerate()
+        .filter(|(i, _)| !is_test.contains(i))
+        .filter_map(|(_, c)| c.exe.as_ref().map(|e| (e.clone(), if wasm { out.join(format!("{e}.wasm")) } else { out.join(e) })))
+        .collect();
+    let tests = labels
+        .into_iter()
+        .filter_map(|(i, label, harness)| {
+            let c = &crates[i];
             let dir = c.env.iter().find(|(k, _)| k == "CARGO_MANIFEST_DIR").map(|(_, v)| PathBuf::from(v)).unwrap_or_else(|| g.ws_dir.clone());
-            c.exe.as_ref().map(|e| (l, out.join(e), dir))
+            c.exe.as_ref().map(|e| crate::test_runner::TestExe { label, exe: out.join(e), dir, harness })
         })
         .collect();
     Ok(Built { out_dir: out, bins, tests, crates })

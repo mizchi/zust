@@ -188,18 +188,20 @@ zurgo test --lib parse -- --include-ignored
 - 長いテストから始める。順番は `target/zust/<profile>/test-times` に残した前回の時間で決める。長いテストが最後に
   始まると、終わりにそれだけが残って動くことになる。
 - オプション:
-  - `--lib`、`--bin <name>`、`--bins`、`--tests`、`--test <name>` でターゲットを選ぶ。
+  - `--lib`、`--bin <name>`、`--bins`、`--tests`、`--test <name>` でターゲットを選ぶ: それだけをビルドする
+    (`CARGO_BIN_EXE_` のために bin も)。
   - `--no-run` はビルドして、実行ファイルを並べるだけ。
   - `--fail-fast` は、失敗の後に新しいテストを始めない (既定ではすべてのテストを動かす。`--no-fail-fast` も受け付ける)。
 - `--` の後: `<filter>`、`--exact`、`--skip <s>`、`--ignored`、`--include-ignored`、`--list`、`--test-threads <n>`
   (既定はコアの数)。`--nocapture` と `--show-output` も受け付ける: 失敗したテストの出力は必ず出す。
 - 60 秒たっても動いているテストには `SLOW` と出し、300 秒たっても動いているものは止めて失敗にする
   (`ZURGO_TEST_SLOW`、`ZURGO_TEST_TIMEOUT`。秒で)。
+- ターゲットの `test = false` は、そのテストを外す。`harness = false` のターゲットはそのままビルドし (自分の `main`、
+  `cfg(test)` なし)、ターゲットの名前の 1 つのテストとして動かす: 0 で終われば通る。`zurgo metadata` は結合テストを
+  cargo と同じく並べる。
 - まだのもの:
   - doc テストとベンチマーク。
-  - ターゲットの `test = false`。
   - wasm32。
-  - 選んだターゲットだけをビルドすること (`--lib` などは動かすものを選ぶだけで、すべてビルドする)。
 
 ## まだのもの (mizchi/zust#28)
 

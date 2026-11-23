@@ -58,6 +58,10 @@ pub struct Target {
     pub edition: String,
     /// `required-features` (a bin is built only when they are all on)
     pub required_features: Vec<String>,
+    /// `test = false`: `zurgo test` leaves its tests out (true by default)
+    pub test: bool,
+    /// `harness = false`: built without the test harness, and run as one test that passes when it exits with 0
+    pub harness: bool,
 }
 
 impl Target {
@@ -151,6 +155,8 @@ impl Package {
             path: PathBuf::new(),
             edition: "2015".into(),
             required_features: vec![],
+            test: true,
+            harness: true,
         });
         p
     }
@@ -189,6 +195,11 @@ fn safe_name(what: &str, n: &str) -> R<()> {
         return Err(format!("the {what} name `{n}` is not allowed: use letters, digits, `-` and `_`"));
     }
     Ok(())
+}
+
+/// A target's boolean key that is true unless the manifest says `false` (`test`, `harness`)
+fn flag(t: &Table, k: &str) -> bool {
+    t.get(k).and_then(Value::as_bool).unwrap_or(true)
 }
 
 pub fn read(path: &Path) -> R<Table> {
@@ -278,6 +289,8 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
                 path: lp,
                 edition: toml::get_str(&l, &["edition"]).unwrap_or(&edition).to_string(),
                 required_features: vec![],
+                test: flag(&l, "test"),
+                harness: flag(&l, "harness"),
             })
         }
         None => None,
@@ -302,6 +315,8 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
             path: bpath,
             edition: toml::get_str(b, &["edition"]).unwrap_or(&edition).to_string(),
             required_features: b.get("required-features").or_else(|| b.get("required_features")).map(Value::str_list).unwrap_or_default(),
+            test: flag(b, "test"),
+            harness: flag(b, "harness"),
         });
     }
     if auto("autobins") {
@@ -322,13 +337,22 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
         }
         for (n, x) in found {
             if !bins.iter().any(|b| b.name == n || b.path == x) {
-                bins.push(Target { name: n, kind: vec!["bin".into()], crate_types: vec!["bin".into()], path: x, edition: edition.clone(), required_features: vec![] });
+                bins.push(Target { name: n, kind: vec!["bin".into()], crate_types: vec!["bin".into()], path: x, edition: edition.clone(), required_features: vec![], test: true, harness: true });
             }
         }
     }
     // (integration tests: `[[test]]`, then tests/*.rs and tests/*/main.rs unless `autotests = false`)
     let mut tests: Vec<Target> = vec![];
-    let test_target = |n: String, path: PathBuf, ed: &str, rf: Vec<String>| Target { name: n, kind: vec!["test".into()], crate_types: vec!["bin".into()], path, edition: ed.to_string(), required_features: rf };
+    let test_target = |n: String, path: PathBuf, ed: &str, rf: Vec<String>, harness: bool| Target {
+        name: n,
+        kind: vec!["test".into()],
+        crate_types: vec!["bin".into()],
+        path,
+        edition: ed.to_string(),
+        required_features: rf,
+        test: true,
+        harness,
+    };
     for b in t.get("test").and_then(Value::as_array).unwrap_or(&[]) {
         let b = b.as_table().ok_or("`[[test]]` is not a table")?;
         let tname = toml::get_str(b, &["name"]).ok_or("a `[[test]]` without a name")?.to_string();
@@ -337,7 +361,7 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
             None => [format!("tests/{tname}.rs"), format!("tests/{tname}/main.rs")].iter().map(|x| dir.join(x)).find(|x| x.is_file()).unwrap_or_else(|| dir.join(format!("tests/{tname}.rs"))),
         };
         let rf = b.get("required-features").or_else(|| b.get("required_features")).map(Value::str_list).unwrap_or_default();
-        tests.push(test_target(tname, tpath, toml::get_str(b, &["edition"]).unwrap_or(&edition), rf));
+        tests.push(test_target(tname, tpath, toml::get_str(b, &["edition"]).unwrap_or(&edition), rf, flag(b, "harness")));
     }
     if auto("autotests") {
         if let Ok(rd) = std::fs::read_dir(dir.join("tests")) {
@@ -353,7 +377,7 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
                 };
                 if let Some((n, x)) = found {
                     if !tests.iter().any(|b| b.name == n || b.path == x) {
-                        tests.push(test_target(n, x, &edition, vec![]));
+                        tests.push(test_target(n, x, &edition, vec![], true));
                     }
                 }
             }

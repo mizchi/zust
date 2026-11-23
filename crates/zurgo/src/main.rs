@@ -155,21 +155,22 @@ fn main() {
                 die("`zurgo test` builds for the host only (x86_64-unknown-linux-gnu)");
             }
             o.test = true;
+            o.test_targets = only.clone();
             let t0 = std::time::Instant::now();
             let built = compile::build(&g, &o).unwrap_or_else(|e| die(&e));
             eprintln!("    Finished `{}` profile in {:.2}s (zustc)", if o.release { "release" } else { "dev" }, t0.elapsed().as_secs_f64());
             // (the targets asked for: `--lib`, `--bins`, `--tests`, `--test x`)
             // (`--test x` and `--bin x` name targets that must exist)
             for w in only.iter().filter(|w| w.ends_with(')')) {
-                if !built.tests.iter().any(|t| t.0.ends_with(w.as_str())) {
+                if !built.tests.iter().any(|t| t.label.ends_with(w.as_str())) {
                     let (what, name) = w[1..w.len() - 1].split_once(' ').unwrap_or(("test", ""));
                     die(&format!("no {what} target named `{name}`"));
                 }
             }
-            let exes: Vec<_> = built.tests.iter().filter(|t| only.is_empty() || only.iter().any(|w| t.0.contains(w.as_str()))).cloned().collect();
+            let exes: Vec<_> = built.tests.iter().filter(|t| only.is_empty() || only.iter().any(|w| t.label.contains(w.as_str()))).cloned().collect();
             if no_run {
-                for (l, e, _) in &exes {
-                    eprintln!("  Executable {l} ({})", e.display());
+                for t in &exes {
+                    eprintln!("  Executable {} ({})", t.label, t.exe.display());
                 }
                 return;
             }

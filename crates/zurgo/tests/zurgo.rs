@@ -224,7 +224,7 @@ fn graph(json: &str) -> Vec<String> {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|t| t["kind"].as_array().unwrap().iter().all(|k| matches!(k.as_str(), Some("lib" | "rlib" | "proc-macro" | "bin" | "cdylib" | "staticlib" | "dylib" | "custom-build"))))
+            .filter(|t| t["kind"].as_array().unwrap().iter().all(|k| matches!(k.as_str(), Some("lib" | "rlib" | "proc-macro" | "bin" | "cdylib" | "staticlib" | "dylib" | "custom-build" | "test"))))
             .map(|t| format!("{} {} {} {}", t["kind"], t["name"], t["src_path"], t["edition"]))
             .collect();
         ts.sort();
@@ -253,7 +253,7 @@ fn graph(json: &str) -> Vec<String> {
 #[test]
 fn metadata_matches_cargo() {
     let ui = repo().join("cratebench/ui/apps");
-    let mut manifests: Vec<PathBuf> = ["path-ws", "fnv", "hex", "cfg-if"].iter().map(|n| fixture(n).join("Cargo.toml")).collect();
+    let mut manifests: Vec<PathBuf> = ["path-ws", "fnv", "hex", "cfg-if", "test-pkg", "test-flags"].iter().map(|n| fixture(n).join("Cargo.toml")).collect();
     manifests.push(ui.join("dioxus/Cargo.toml"));
     manifests.push(ui.join("leptos/Cargo.toml"));
     let mut bad = vec![];
@@ -578,12 +578,12 @@ fn runner_drives_libtest_executables() {
     let td = tdir("test-pkg-libtest");
     let (ok, out, err) = cargo(&["test", "--no-run", "--offline", "--message-format=json"], &m, &td);
     assert!(ok, "{err}");
-    let mut exes: Vec<(String, PathBuf, PathBuf)> = vec![];
+    let mut exes: Vec<zurgo::test_runner::TestExe> = vec![];
     for l in out.lines() {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(l) else { continue };
         if v["reason"] == "compiler-artifact" && v["profile"]["test"] == true {
             if let Some(e) = v["executable"].as_str() {
-                exes.push((v["target"]["name"].as_str().unwrap().to_string(), e.into(), fixture("test-pkg")));
+                exes.push(zurgo::test_runner::TestExe::new(v["target"]["name"].as_str().unwrap(), e, fixture("test-pkg")));
             }
         }
     }
@@ -594,4 +594,26 @@ fn runner_drives_libtest_executables() {
     let want: std::collections::BTreeMap<String, String> = cargo_outcomes(&out).into_iter().filter(|(_, v)| v != "ignored").collect();
     assert_eq!(got, want);
     assert_eq!(s.skipped, 3);
+}
+
+/// `test = false` leaves a target's tests out; a `harness = false` target is one test, its own `main`, that passes when
+/// it exits with 0 (as `cargo test` runs them). `--test x` builds that test crate alone
+#[test]
+fn test_flags_like_cargo() {
+    let m = fixture("test-flags/Cargo.toml");
+    let (ok, out, err) = cargo(&["test", "--offline"], &m, &tdir("test-flags-cargo"));
+    assert!(ok, "{out}{err}");
+    assert!(out.contains("custom ran") || err.contains("custom ran"), "{out}{err}");
+    assert!(!out.contains("never"), "{out}");
+    let t = tdir("test-flags");
+    let (ok, _, err) = zurgo(&["test"], &m, &t);
+    assert!(ok, "{err}");
+    assert_eq!(zurgo_outcomes(&err).into_iter().collect::<Vec<_>>(), [("custom".to_string(), "ok".to_string()), ("uses_lib".to_string(), "ok".to_string())], "{err}");
+    // (`--test normal`: that test crate alone is built)
+    let t2 = tdir("test-flags-one");
+    let _ = std::fs::remove_dir_all(&t2);
+    let (ok, _, err) = zurgo(&["test", "--test", "normal"], &m, &t2);
+    assert!(ok, "{err}");
+    assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["uses_lib"], "{err}");
+    assert!(!t2.join("zust/debug/custom_test_test.test").exists() && t2.join("zust/debug/normal_test_test.test").exists());
 }
