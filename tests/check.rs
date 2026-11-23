@@ -632,6 +632,9 @@ fn trait_arity_at_impls() {
     assert_eq!(first(src), Some((2, 6, "missing generics for trait `Tr` (E0107)".to_string())), "eq_in_bound");
     let src = "trait Tr<const B: bool, T> {}\nimpl Tr<{ 0 < 1 }> for u8 {}\nfn main() {}\n";
     assert_eq!(first(src), Some((2, 6, "trait takes 2 generic arguments but 1 generic argument was supplied (E0107)".to_string())), "braced_const");
+    // (second round: a braced comparison inside a bound does not hide the parameter's default)
+    let src = "trait Flag<const B: bool> {}\ntrait Tr<T: Flag<{ 1 > 0 }> = u8> {}\nimpl Tr for () {}\nfn main() {}\n";
+    assert_eq!(first(src).filter(|d| d.2.contains("E0107")), None, "braced_bound_default");
 }
 
 #[test]
@@ -658,6 +661,8 @@ fn review91_attributes_imports_unreachable() {
     assert_eq!(first(src), None, "transparent_struct_then_union");
     let src = "#[repr(transparent)]\npub(crate) union U { x: u8 }\nfn main() {}\n";
     assert_eq!(first(src), Some((2, "transparent unions are unstable (E0658)".to_string())), "transparent_pub_crate_union");
+    let src = format!("#[repr(transparent)]\n#[doc = \"{}\"]\npub union U {{ x: u8 }}\nfn main() {{}}\n", "a".repeat(600));
+    assert_eq!(first(&src), Some((3, "transparent unions are unstable (E0658)".to_string())), "transparent_after_long_attribute");
     let pad = "é".repeat(300);
     let src = format!("#[repr(transparent)]\nstruct W(u8);\nfn main() {{ let _s = \"{pad}\"; let _ = W(1); }}\n");
     for k in 0..4 {

@@ -1871,11 +1871,15 @@ fn first_trait_arity_error(src: &str, items: &[SrcItem]) -> Option<String> {
             // (a lifetime, `'a`, whose token may start after its quote)
             let lifetime = |q: usize| b[t[q].1] == b'\'' || (t[q].1 > 0 && b[t[q].1 - 1] == b'\'');
             let tys: Vec<&(usize, usize)> = parts.iter().filter(|p| !lifetime(p.0)).collect();
+            // (braces, a const expression's `{ 1 > 0 }`, are skipped whole)
             let top_eq = |p: &(usize, usize)| {
-                let mut d = 0i32;
+                let (mut d, mut braces) = (0i32, 0i32);
                 (p.0..=p.1).any(|q| {
                     if t[q].0 == 1 {
                         match b[t[q].1] {
+                            b'{' => braces += 1,
+                            b'}' => braces -= 1,
+                            _ if braces > 0 => {}
                             b'<' | b'(' | b'[' => d += 1,
                             b'>' if !(q > 0 && t[q - 1].0 == 1 && b[t[q - 1].1] == b'-') => d -= 1,
                             b')' | b']' => d -= 1,
@@ -5259,13 +5263,34 @@ fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>
                 e += 1;
             }
             let start = if e < toks.len() { from + toks[e].2 } else { to };
-            let mut end = src.len().min(start + 512);
-            while !src.is_char_boundary(end) {
-                end -= 1;
-            }
-            let rest = &src[start..end];
+            // (a window past the attributes after it, however long: doubled until the item's keyword is in it)
+            let mut len = 512;
+            let (rest, rt) = loop {
+                let mut end = src.len().min(start + len);
+                while !src.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let rest = &src[start..end];
+                let rt = lexer::tokenize(rest.as_bytes());
+                // (complete when an identifier other than `pub` follows the attributes, or at the source's end)
+                let (rb, mut q, mut d) = (rest.as_bytes(), 0, 0i32);
+                let mut done = end == src.len();
+                while q < rt.len() && !done {
+                    let c = (rt[q].0 == 1).then(|| rb[rt[q].1]);
+                    match c {
+                        Some(b'[' | b'(') => d += 1,
+                        Some(b']' | b')') => d -= 1,
+                        _ if d == 0 && rt[q].0 == 0 && &rest[rt[q].1..rt[q].2] != "pub" => done = true,
+                        _ => {}
+                    }
+                    q += 1;
+                }
+                if done {
+                    break (rest, rt);
+                }
+                len *= 2;
+            };
             let rb = rest.as_bytes();
-            let rt = lexer::tokenize(rb);
             let rw = |q: usize| if q < rt.len() && rt[q].0 == 0 { &rest[rt[q].1..rt[q].2] } else { "" };
             let rs = |q: usize, c: u8| q < rt.len() && rt[q].0 == 1 && rb[rt[q].1] == c;
             // (the group that opens at q: the index after its close)
