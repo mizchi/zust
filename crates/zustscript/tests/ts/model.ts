@@ -67,6 +67,12 @@ export type Esc = "\u0064one" | "todo";
 export type Par = ("p" | "q");
 type Loc = "l1" | "l2";
 export type { Loc };
+// (a surrogate pair written as two escapes is one character; a line continuation adds none)
+export type Sur = "\uD835\uDC9Ca" | "b\
+c";
+// (a re-export names another module's type: the local `Hid` stays unexported)
+type Hid = "h";
+export type { Hid } from "./cr.js";
 
 // not read: not imported, and not in the subset
 export interface Box<T> { value: T }

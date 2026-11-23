@@ -113,7 +113,7 @@ fn lex(src: &str) -> Vec<Tok> {
                     adv(&mut i, &mut line, &mut col, &s);
                     let e = s[i];
                     adv(&mut i, &mut line, &mut col, &s);
-                    let hex = |i: &mut usize, line: &mut u32, col: &mut u32, n: Option<usize>| -> Option<char> {
+                    let hex = |i: &mut usize, line: &mut u32, col: &mut u32, n: Option<usize>| -> Option<u32> {
                         let mut h = String::new();
                         if n.is_none() {
                             // `\u{..}`
@@ -133,7 +133,7 @@ fn lex(src: &str) -> Vec<Tok> {
                                 }
                             }
                         }
-                        u32::from_str_radix(&h, 16).ok().and_then(char::from_u32)
+                        u32::from_str_radix(&h, 16).ok()
                     };
                     let ch = match e {
                         'n' => Some('\n'),
@@ -143,10 +143,33 @@ fn lex(src: &str) -> Vec<Tok> {
                         'f' => Some('\u{c}'),
                         'v' => Some('\u{b}'),
                         '0' => Some('\0'),
-                        'x' => hex(&mut i, &mut line, &mut col, Some(2)),
-                        'u' if i < s.len() && s[i] == '{' => hex(&mut i, &mut line, &mut col, None),
-                        'u' => hex(&mut i, &mut line, &mut col, Some(4)),
-                        // (a line continuation)
+                        'x' => hex(&mut i, &mut line, &mut col, Some(2)).and_then(char::from_u32),
+                        'u' => {
+                            let u = if i < s.len() && s[i] == '{' { hex(&mut i, &mut line, &mut col, None) } else { hex(&mut i, &mut line, &mut col, Some(4)) };
+                            // (UTF-16: a high surrogate and the low one after it, `\uD835\uDC9C`, are one character; a
+                            // lone surrogate is no character: U+FFFD, not dropped)
+                            match u {
+                                Some(hi @ 0xD800..=0xDBFF) if s.get(i) == Some(&'\\') && s.get(i + 1) == Some(&'u') && s.get(i + 2) != Some(&'{') => {
+                                    let save = (i, line, col);
+                                    adv(&mut i, &mut line, &mut col, &s);
+                                    adv(&mut i, &mut line, &mut col, &s);
+                                    match hex(&mut i, &mut line, &mut col, Some(4)) {
+                                        Some(lo @ 0xDC00..=0xDFFF) => char::from_u32(0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)),
+                                        _ => {
+                                            (i, line, col) = save;
+                                            Some('\u{FFFD}')
+                                        }
+                                    }
+                                }
+                                Some(c) => Some(char::from_u32(c).unwrap_or('\u{FFFD}')),
+                                None => None,
+                            }
+                        }
+                        // (a line continuation: CR LF is one line end)
+                        '\r' if i < s.len() && s[i] == '\n' => {
+                            adv(&mut i, &mut line, &mut col, &s);
+                            None
+                        }
                         c if line_end(c) => None,
                         c => Some(c),
                     };
@@ -339,6 +362,13 @@ impl TsFile {
                     let mut j = k + 1;
                     if matches!(&toks[j].t, T::Ident(t) if t == "type") {
                         j += 1;
+                    }
+                    // (`export { A } from "./other"` re-exports another module's `A`: not the local one)
+                    let close = (j..toks.len()).find(|&x| toks[x].t == T::P('}') || toks[x].t == T::Eof).unwrap_or(j);
+                    let reexport = matches!(toks.get(close + 1).map(|t| &t.t), Some(T::Ident(f)) if f == "from");
+                    if toks[j].t == T::P('{') && reexport {
+                        k = close + 1;
+                        continue;
                     }
                     if toks[j].t == T::P('{') {
                         j += 1;
