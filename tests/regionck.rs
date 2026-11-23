@@ -2947,6 +2947,7 @@ fn part16_review() {
     // reference (`&s.f` of `s: &mut S`, `&*x`) is a reborrow through it)
     assert_eq!(check("struct S<'a> { f: &'a mut i32 }\nfn g<'a>(s: &'a mut S<'a>) -> &'a i32 {\n    &s.f\n}\nfn main() {}\n"), vec![]);
     assert_eq!(check("fn g<'a>(x: &'a mut &'a mut i32) -> &'a i32 {\n    &*x\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("struct S<'a> {\n    r: &'a mut i32,\n}\nfn f<'a>(s: &'a S<'a>) -> &'a i32 {\n    &s.r\n}\nfn main() {}\n"), vec![]);
     let d = check("struct S<'a> { f: &'a mut i32 }\nfn g<'a>(s: S<'a>) -> &'a i32 {\n    &s.f\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0515"), "{d:?}");
 }
