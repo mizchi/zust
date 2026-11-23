@@ -305,6 +305,21 @@ fn wf_bounds_held_by_bounds_where_clauses_and_supertraits() {
     assert!(s.check(src).is_empty(), "{:?}", s.check(src));
 }
 
+/// A parameter that says `?Sized` (in its bounds or a where clause) does not hold a `Sized` bound, even with the word
+/// `Sized` in its `?Sized`; another parameter of the same item still does
+#[test]
+fn wf_maybe_unsized_parameter_does_not_hold_sized() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let bad = "struct Sz<T: Sized>(T);\nstruct J<K: ?Sized> {\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    let ds = s.check(bad);
+    assert_eq!(ds.iter().map(|d| d.line).collect::<Vec<_>>(), vec![3], "{ds:?}");
+    assert!(ds[0].msg.contains("`K: Sized`"), "{ds:?}");
+    let wher = "struct Sz<T: Sized>(T);\nstruct J<K>\nwhere\n    K: Clone + ?Sized,\n{\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    assert_eq!(s.check(wher).iter().map(|d| d.line).collect::<Vec<_>>(), vec![6], "{:?}", s.check(wher));
+    let ok = "struct Sz<T: Sized>(T);\nstruct J<K, V: ?Sized> {\n    s: Sz<K>,\n    v: Box<V>,\n}\nfn main() {}\n";
+    assert!(s.check(ok).is_empty(), "{:?}", s.check(ok));
+}
+
 /// A name nothing declares, in a generic fn nothing calls or a trait's default method, is E0425 there too, whatever it
 /// is spelled; one an item or a `use` declares is not (zustc may not lower a generic fn as a value), a word in a
 /// comment in the `use` declares nothing, and `use` then a newline is a `use` too
