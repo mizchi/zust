@@ -1,5 +1,6 @@
-//! `zustc --test`: the crate's `#[test]` functions, and a `main` that runs them (the crate's own `main`, if it has
-//! one, is renamed out of the way, as rustc's harness leaves it unused).
+//! `zustc --test`: the crate's `#[test]` functions, and an entry point that runs them: `#[zust_test_entry] fn
+//! __zust_test_entry`, which the program takes as its `main` (sema::program). The crate's own `main`, if it has one,
+//! keeps its name and is an ordinary function, as rustc's harness leaves it unused: a test that calls it calls it.
 //!
 //! The harness follows nextest's model rather than libtest's: it lists its tests and runs the one named, each in a
 //! process of its own, so the program needs no `catch_unwind`, threads or output capture. A panic ends the process
@@ -33,9 +34,6 @@ type Tok = (u8, usize, usize);
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Collected {
     pub tests: Vec<TestFn>,
-    /// where the crate's own `fn main`'s name is, and the calls of it (`main()`, `super::main()`, `crate::main()`
-    /// outside a module with a `main` of its own): renamed together, so a test that calls `main` still calls it
-    pub main_refs: Vec<usize>,
     /// `#[test]` attributes that are not on a function collected here: inside a `macro_rules!`, whose expansion comes
     /// later (those tests are not run yet; the build says so)
     pub unlisted: usize,
@@ -49,13 +47,6 @@ pub fn collect(src: &str) -> Collected {
     let sym = |k: usize, c: &str| toks.get(k).is_some_and(|t| t.0 == 1) && tok(k) == c;
     let ident = |k: usize| toks.get(k).is_some_and(|t| t.0 == 0);
     let mut tests = vec![];
-    let mut main_at = None;
-    // (the modules with a `fn main` of their own, by path, and the calls of `main` with their module's path)
-    let mut own_main: Vec<String> = vec![];
-    // (a call's position, the module whose `main` it names, whether it is a bare `main`)
-    let mut calls: Vec<(usize, String, bool)> = vec![];
-    // (the glob and `main` imports of each module: (module, the module the import names))
-    let mut imports: Vec<(String, String)> = vec![];
     let mut attrs_test = 0usize;
     // (inside a `macro_rules!`'s body: the brace depth outside it)
     let mut macro_end: Option<i32> = None;
@@ -84,49 +75,12 @@ pub fn collect(src: &str) -> Collected {
         } else if sym(k, "#") && sym(k + 1, "[") && tok(k + 2).starts_with('$') && macro_end.is_some() {
             // (an attribute a macro's caller names, `#[$attr]`: it may be `test`)
             attrs_test += 1;
-        } else if ident(k) && tok(k) == "use" && !(k >= 1 && sym(k - 1, "!")) {
-            // (`use p::*;` / `use p::main;`: the module p names, from this module, for the bare calls of `main`
-            //  here. Other forms (lists, renames) are not followed)
-            let here: Vec<&str> = mods.iter().map(|m| m.1.as_str()).collect();
-            let mut segs: Vec<&str> = vec![];
-            let mut j = k + 1;
-            while ident(j) && sym(j + 1, ":") && sym(j + 2, ":") {
-                segs.push(tok(j));
-                j += 3;
-            }
-            if (sym(j, "*") || (ident(j) && tok(j) == "main")) && sym(j + 1, ";") {
-                if let Some(t) = resolve(&here, &segs) {
-                    imports.push((here.join("::"), t.join("::")));
-                }
-            }
         } else if ident(k) && tok(k) == "macro_rules" && sym(k + 1, "!") && ident(k + 2) && sym(k + 3, "{") && macro_end.is_none() {
             macro_end = Some(depth);
-        } else if ident(k) && tok(k) == "main" && sym(k + 1, "(") && !(k >= 1 && (tok(k - 1) == "fn" || sym(k - 1, "."))) {
-            // (a call of a `main`: the module its path names, from the module it is in. `crate::`, `self::`,
-            //  `super::` (repeated) are followed; a path through another module is not the root's `main`)
-            let here: Vec<&str> = mods.iter().map(|m| m.1.as_str()).collect();
-            let mut segs: Vec<&str> = vec![];
-            let mut j = k;
-            while j >= 3 && sym(j - 1, ":") && sym(j - 2, ":") && ident(j - 3) {
-                segs.insert(0, tok(j - 3));
-                j -= 3;
-            }
-            // (a bare `main`: its module, whose own or imported `main` it is; decided below)
-            let target: Option<Vec<&str>> = if segs.is_empty() { Some(here.clone()) } else { resolve(&here, &segs) };
-            if let Some(t) = target {
-                calls.push((toks[k].1, t.join("::"), segs.is_empty()));
-            }
         } else if ident(k) && tok(k) == "mod" && ident(k + 1) && sym(k + 2, "{") {
             pending_mod = Some(tok(k + 1).trim_start_matches("r#").to_string());
         } else if ident(k) && tok(k) == "fn" && ident(k + 1) && depth == mods.last().map(|m| m.0).unwrap_or(0) {
             let name = tok(k + 1);
-            if name == "main" {
-                if depth == 0 {
-                    main_at = Some(toks[k + 1].1);
-                } else {
-                    own_main.push(mods.iter().map(|m| m.1.as_str()).collect::<Vec<_>>().join("::"));
-                }
-            }
             let attrs = attrs_before(src, &toks, k);
             if attrs.iter().any(|a| a.0 == "test") {
                 let mut path: Vec<&str> = mods.iter().map(|m| m.1.as_str()).collect();
@@ -138,52 +92,8 @@ pub fn collect(src: &str) -> Collected {
         }
         k += 1;
     }
-    let mut main_refs = vec![];
-    if let Some(at) = main_at {
-        main_refs.push(at);
-        // (the calls that name the root's `main`: by a path to the root, or a bare `main` in a module without its own)
-        // (a bare `main` in a module without its own reaches one through a glob import (`use super::*`): the nearest
-        //  module around it that has one. It is the root's only when none of them, the root aside, has one)
-        // (a bare `main`: the module's own if it has one; else the one its `use` brings (`use crate::*` the root's,
-        //  `use super::*` the parent's); with no such import, the nearest module around it that has one)
-        let names_root = |m: &str| -> bool {
-            if m.is_empty() {
-                return true;
-            }
-            if own_main.iter().any(|o| o == m) {
-                return false;
-            }
-            let from: Vec<&String> = imports.iter().filter(|i| i.0 == m).map(|i| &i.1).collect();
-            if from.iter().any(|t| t.is_empty()) {
-                return true;
-            }
-            if from.iter().any(|t| own_main.contains(t)) {
-                return false;
-            }
-            let segs: Vec<&str> = m.split("::").collect();
-            !(1..=segs.len()).any(|n| own_main.contains(&segs[..n].join("::")))
-        };
-        main_refs.extend(calls.into_iter().filter(|(_, m, bare)| if *bare { names_root(m) } else { m.is_empty() }).map(|c| c.0));
-    }
     let unlisted = attrs_test.saturating_sub(tests.len());
-    Collected { tests, main_refs, unlisted }
-}
-
-/// The module a path names from module `here`: `crate::`, `self::` and `super::` (repeated) followed, other segments
-/// as child modules. None when `super::` goes above the root
-fn resolve<'a>(here: &[&'a str], segs: &[&'a str]) -> Option<Vec<&'a str>> {
-    let mut t: Vec<&str> = here.to_vec();
-    for (i, sg) in segs.iter().enumerate() {
-        match *sg {
-            "crate" if i == 0 => t.clear(),
-            "self" if i == 0 => {}
-            "super" => {
-                t.pop()?;
-            }
-            m => t.push(m),
-        }
-    }
-    Some(t)
+    Collected { tests, unlisted }
 }
 
 /// The attributes before the item whose keyword `fn` is token k (over `pub`, `pub(..)`, `async`, `unsafe`, `const`,
@@ -350,8 +260,7 @@ fn lit(s: &str) -> String {
     format!("{s:?}")
 }
 
-/// The source with the harness: `--test`'s crate. The crate's own `fn main` is renamed (same length, so nothing
-/// moves) and a `main` that runs the tests follows the last line
+/// The source with the harness: `--test`'s crate. Nothing in the source moves: the harness follows the last line
 pub fn apply(src: &str) -> String {
     apply_with(src, None).0
 }
@@ -369,9 +278,6 @@ pub fn apply_with(src: &str, expanded: Option<&str>) -> (String, usize) {
     // (libtest's order: by name)
     tests.sort_by(|a, b| a.path.cmp(&b.path));
     let mut out = src.to_string();
-    for &at in &c.main_refs {
-        out.replace_range(at..at + 4, "m41n");
-    }
     if !out.ends_with('\n') {
         out.push('\n');
     }
@@ -391,7 +297,7 @@ pub fn apply_with(src: &str, expanded: Option<&str>) -> (String, usize) {
         })
         .collect();
     out.push_str(&format!(
-        "#[allow(dead_code)] fn __zust_test_run(i: usize) {{ match i {{ {} _ => {{}} }} }} #[allow(dead_code)] fn main() {{ let t: &[(&str, u8, &str)] = &[{}]; let a: Vec<String> = std::env::args().collect(); std::process::exit(__zust_test_main(t, &a)); }} {HARNESS}\n",
+        "#[allow(dead_code)] fn __zust_test_run(i: usize) {{ match i {{ {} _ => {{}} }} }} #[allow(dead_code)] #[zust_test_entry] fn __zust_test_entry() {{ let t: &[(&str, u8, &str)] = &[{}]; let a: Vec<String> = std::env::args().collect(); std::process::exit(__zust_test_main(t, &a)); }} {HARNESS}\n",
         arms.join(" "),
         table.join(", ")
     ));
@@ -454,7 +360,6 @@ mod tests {
         let src = "fn main() {}\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn a() {}\n    #[test]\n    #[ignore = \"slow\"]\n    fn b() {}\n    #[should_panic(expected = \"bo om\")]\n    #[test]\n    fn c() { panic!(\"bo om\") }\n    #[test]\n    fn d() -> Result<(), String> { Ok(()) }\n    fn helper() {}\n    mod inner { #[test] fn e() { fn nested() {} } }\n}\n";
         let c = collect(src);
         let t = c.tests;
-        assert_eq!(c.main_refs, [3]);
         assert_eq!(c.unlisted, 0);
         let names: Vec<&str> = t.iter().map(|t| t.path.as_str()).collect();
         assert_eq!(names, ["tests::a", "tests::b", "tests::c", "tests::d", "tests::inner::e"]);
@@ -462,39 +367,18 @@ mod tests {
         assert_eq!(t[2].should_panic.as_deref(), Some("bo om"));
         assert!(t[3].returns && !t[0].returns);
         let out = apply(src);
-        assert!(out.starts_with("fn m41n() {}\n"));
+        assert!(out.starts_with(src));
         assert_eq!(out.lines().count(), src.lines().count() + 1);
     }
 
     #[test]
-    fn main_calls_and_macro_tests() {
-        let src = "fn main() {}\nmod tests {\n    #[test]\n    fn calls() { main(); super::main(); crate::main(); x.main(); other::main(); }\n    mod m { fn main() {} fn f() { main(); } }\n    macro_rules! t { () => { #[test] fn gen() {} } }\n}\n";
-        let c = collect(src);
-        // (the declaration, and the three calls of it in `calls`: not the method, `other::main` or m's own)
-        assert_eq!(c.main_refs.len(), 4);
-        assert!(c.main_refs.iter().all(|&i| &src[i..i + 4] == "main"));
-        assert_eq!(c.unlisted, 1);
-        let out = apply(src);
-        assert!(out.contains("fn calls() { m41n(); super::m41n(); crate::m41n(); x.main(); other::main(); }"), "{out}");
-        // (`super::` names the module above: its own `main` is not the root's, and the root's is renamed with the
-        //  calls that reach it)
-        let src = "fn main() {}\nmod a {\n    fn main() {}\n    fn f() { super::main(); self::main(); main(); }\n    mod b { fn g() { super::main(); super::super::main(); } }\n}\n";
-        let out = apply(src);
-        assert!(out.contains("fn f() { super::m41n(); self::main(); main(); }"), "{out}");
-        assert!(out.contains("fn g() { super::main(); super::super::m41n(); }"), "{out}");
-        assert!(out.contains("    fn main() {}"), "{out}");
-        // (`crate::main()` from a module with its own `main` still names the root's)
-        let src = "fn main() {}\nmod tests {\n    fn main() {}\n    #[test]\n    fn calls_crate_main() { crate::main(); main(); }\n}\n";
-        let out = apply(src);
-        assert!(out.contains("fn calls_crate_main() { crate::m41n(); main(); }"), "{out}");
-        // (a bare `main` under a module with its own, through `use super::*`: that module's)
-        let src = "fn main() {}\nmod a {\n    fn main() {}\n    mod b {\n        use super::*;\n        fn f() { main(); }\n    }\n}\nmod c { use super::*; fn g() { main(); } }\n";
-        let out = apply(src);
-        assert!(out.contains("fn f() { main(); }") && out.contains("fn g() { m41n(); }"), "{out}");
-        // (`use crate::*` under a module with its own `main`: the root's)
-        let src = "fn main() {}\nmod a {\n    fn main() {}\n    mod b {\n        use crate::*;\n        fn f() { main(); }\n    }\n    mod c {\n        use super::main;\n        fn g() { main(); }\n    }\n}\n";
-        let out = apply(src);
-        assert!(out.contains("fn f() { m41n(); }") && out.contains("fn g() { main(); }"), "{out}");
+    fn macro_attrs_counted() {
+        let src = "fn main() {}\nmod tests {\n    macro_rules! t { () => { #[test] fn gen() {} } }\n    macro_rules! u { ($a:ident) => { #[$a] fn gen2() {} } }\n}\n";
+        assert_eq!(collect(src).unlisted, 2);
+        // (with the expansion, the tests it makes are listed)
+        let (out, unlisted) = apply_with(src, Some("fn main() {}\nmod tests {\n    #[test] fn gen() {}\n}\n"));
+        assert_eq!(unlisted, 0);
+        assert!(out.contains("(\"tests::gen\", 0, \"\")"), "{out}");
     }
 
     #[test]

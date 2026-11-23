@@ -2427,7 +2427,10 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
             }
             let export = has_attr(&item.attrs, "no_mangle");
-            let is_main = name == "main" && !export;
+            // (`zustc --test`'s entry point, crate::test_harness: a `main` too. The program keeps it as the one, and
+            //  the crate's own `main` as an ordinary function: sema::program)
+            let entry = has_attr(&item.attrs, "zust_test_entry");
+            let is_main = (name == "main" && !export) || entry;
             let mut sig = parse_sig(fs, false, is_main, None)?;
             let result_ret = matches!(&sig.ret, TySyn::App(n, _) if n == "Result");
             if is_main && (!sig.params.is_empty() || (sig.ret != TySyn::Prim(Ty::Unit) && !result_ret)) {
