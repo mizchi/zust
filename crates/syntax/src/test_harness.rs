@@ -54,6 +54,8 @@ pub fn collect(src: &str) -> Collected {
     let mut own_main: Vec<String> = vec![];
     // (a call's position, the module whose `main` it names, whether it is a bare `main`)
     let mut calls: Vec<(usize, String, bool)> = vec![];
+    // (the glob and `main` imports of each module: (module, the module the import names))
+    let mut imports: Vec<(String, String)> = vec![];
     let mut attrs_test = 0usize;
     // (inside a `macro_rules!`'s body: the brace depth outside it)
     let mut macro_end: Option<i32> = None;
@@ -82,6 +84,21 @@ pub fn collect(src: &str) -> Collected {
         } else if sym(k, "#") && sym(k + 1, "[") && tok(k + 2).starts_with('$') && macro_end.is_some() {
             // (an attribute a macro's caller names, `#[$attr]`: it may be `test`)
             attrs_test += 1;
+        } else if ident(k) && tok(k) == "use" && !(k >= 1 && sym(k - 1, "!")) {
+            // (`use p::*;` / `use p::main;`: the module p names, from this module, for the bare calls of `main`
+            //  here. Other forms (lists, renames) are not followed)
+            let here: Vec<&str> = mods.iter().map(|m| m.1.as_str()).collect();
+            let mut segs: Vec<&str> = vec![];
+            let mut j = k + 1;
+            while ident(j) && sym(j + 1, ":") && sym(j + 2, ":") {
+                segs.push(tok(j));
+                j += 3;
+            }
+            if (sym(j, "*") || (ident(j) && tok(j) == "main")) && sym(j + 1, ";") {
+                if let Some(t) = resolve(&here, &segs) {
+                    imports.push((here.join("::"), t.join("::")));
+                }
+            }
         } else if ident(k) && tok(k) == "macro_rules" && sym(k + 1, "!") && ident(k + 2) && sym(k + 3, "{") && macro_end.is_none() {
             macro_end = Some(depth);
         } else if ident(k) && tok(k) == "main" && sym(k + 1, "(") && !(k >= 1 && (tok(k - 1) == "fn" || sym(k - 1, "."))) {
@@ -94,26 +111,8 @@ pub fn collect(src: &str) -> Collected {
                 segs.insert(0, tok(j - 3));
                 j -= 3;
             }
-            let target: Option<Vec<&str>> = if segs.is_empty() {
-                // (a bare `main`: this module's own, else the one a `use super::*` brings: taken as the root's)
-                Some(here.clone())
-            } else {
-                let mut t: Vec<&str> = here.clone();
-                let mut ok = true;
-                for (i, sg) in segs.iter().enumerate() {
-                    match *sg {
-                        "crate" if i == 0 => t.clear(),
-                        "self" if i == 0 => {}
-                        "super" => {
-                            if t.pop().is_none() {
-                                ok = false;
-                            }
-                        }
-                        m => t.push(m),
-                    }
-                }
-                ok.then_some(t)
-            };
+            // (a bare `main`: its module, whose own or imported `main` it is; decided below)
+            let target: Option<Vec<&str>> = if segs.is_empty() { Some(here.clone()) } else { resolve(&here, &segs) };
             if let Some(t) = target {
                 calls.push((toks[k].1, t.join("::"), segs.is_empty()));
             }
@@ -145,14 +144,46 @@ pub fn collect(src: &str) -> Collected {
         // (the calls that name the root's `main`: by a path to the root, or a bare `main` in a module without its own)
         // (a bare `main` in a module without its own reaches one through a glob import (`use super::*`): the nearest
         //  module around it that has one. It is the root's only when none of them, the root aside, has one)
-        let shadowed = |m: &str| {
-            let segs: Vec<&str> = if m.is_empty() { vec![] } else { m.split("::").collect() };
-            (1..=segs.len()).any(|n| own_main.contains(&segs[..n].join("::")))
+        // (a bare `main`: the module's own if it has one; else the one its `use` brings (`use crate::*` the root's,
+        //  `use super::*` the parent's); with no such import, the nearest module around it that has one)
+        let names_root = |m: &str| -> bool {
+            if m.is_empty() {
+                return true;
+            }
+            if own_main.iter().any(|o| o == m) {
+                return false;
+            }
+            let from: Vec<&String> = imports.iter().filter(|i| i.0 == m).map(|i| &i.1).collect();
+            if from.iter().any(|t| t.is_empty()) {
+                return true;
+            }
+            if from.iter().any(|t| own_main.contains(t)) {
+                return false;
+            }
+            let segs: Vec<&str> = m.split("::").collect();
+            !(1..=segs.len()).any(|n| own_main.contains(&segs[..n].join("::")))
         };
-        main_refs.extend(calls.into_iter().filter(|(_, m, bare)| if *bare { !shadowed(m) } else { m.is_empty() }).map(|c| c.0));
+        main_refs.extend(calls.into_iter().filter(|(_, m, bare)| if *bare { names_root(m) } else { m.is_empty() }).map(|c| c.0));
     }
     let unlisted = attrs_test.saturating_sub(tests.len());
     Collected { tests, main_refs, unlisted }
+}
+
+/// The module a path names from module `here`: `crate::`, `self::` and `super::` (repeated) followed, other segments
+/// as child modules. None when `super::` goes above the root
+fn resolve<'a>(here: &[&'a str], segs: &[&'a str]) -> Option<Vec<&'a str>> {
+    let mut t: Vec<&str> = here.to_vec();
+    for (i, sg) in segs.iter().enumerate() {
+        match *sg {
+            "crate" if i == 0 => t.clear(),
+            "self" if i == 0 => {}
+            "super" => {
+                t.pop()?;
+            }
+            m => t.push(m),
+        }
+    }
+    Some(t)
 }
 
 /// The attributes before the item whose keyword `fn` is token k (over `pub`, `pub(..)`, `async`, `unsafe`, `const`,
@@ -455,6 +486,10 @@ mod tests {
         let src = "fn main() {}\nmod a {\n    fn main() {}\n    mod b {\n        use super::*;\n        fn f() { main(); }\n    }\n}\nmod c { use super::*; fn g() { main(); } }\n";
         let out = apply(src);
         assert!(out.contains("fn f() { main(); }") && out.contains("fn g() { m41n(); }"), "{out}");
+        // (`use crate::*` under a module with its own `main`: the root's)
+        let src = "fn main() {}\nmod a {\n    fn main() {}\n    mod b {\n        use crate::*;\n        fn f() { main(); }\n    }\n    mod c {\n        use super::main;\n        fn g() { main(); }\n    }\n}\n";
+        let out = apply(src);
+        assert!(out.contains("fn f() { m41n(); }") && out.contains("fn g() { main(); }"), "{out}");
     }
 
     #[test]
