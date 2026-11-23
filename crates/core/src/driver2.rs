@@ -817,7 +817,7 @@ impl Session2 {
     /// 要約はアイテムのハッシュで引く
     pub fn analyze(&mut self, src0: &str) -> R<Analysis> {
         // (closures' captures by edition: `let _ = s;` captures s before 2021 only (ast_closure::WILD_FAKE_READS))
-        crate::ast_closure::WILD_FAKE_READS.store(self.opts.edition >= 2021, std::sync::atomic::Ordering::Relaxed);
+        crate::ast_closure::WILD_FAKE_READS.with(|c| c.set(self.opts.edition >= 2021));
         let mut externs = std::mem::take(&mut self.externs);
         // (ファイルから読んだもの (load_crate) は読むときに cfg を評価してある)
         let stripped;
