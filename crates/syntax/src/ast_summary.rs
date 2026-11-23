@@ -562,7 +562,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         // (with no `for<..>` in the item, the lifetimes in its `impl` and `dyn` types are the declared ones too:
         // `Box<dyn X<Y<'a> = &'a ()>>` with no `'a`, E0261)
         let deep = !HRTB_TEXT.with(|c| c.get());
-        let mut names = |t: &PTy, used: &mut Vec<String>| if deep { named_lifetimes_deep(t, used, 0) } else { named_lifetimes(t, used) };
+        let names = |t: &PTy, used: &mut Vec<String>| if deep { named_lifetimes_deep(t, used, 0) } else { named_lifetimes(t, used) };
         if let Some(r) = &sig.recv_ty {
             names(r, &mut used);
         }
@@ -735,9 +735,6 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
     })
 }
 
-/// Checks on a struct / enum / union definition: unused parameters (E0392), `Self` in defaults (E0735), union fields
-/// a slice or array whose element is unsized (`[[T]]`, `[str; 2]`, `[dyn Tr]`), anywhere in t: its text
-/// The lifetimes a type names, outside fn pointer, `impl` and `dyn` types (which may bind their own with `for<'a>`)
 thread_local! {
     /// The item being summarized writes `for<..>` (a higher-ranked binder, which the parser does not keep): the
     /// lifetimes in its `impl` and `dyn` types may be the binder's, and are not checked against the declared ones
@@ -788,6 +785,9 @@ fn named_lifetimes_deep(t: &PTy, out: &mut Vec<String>, depth: u32) {
     }
 }
 
+/// Checks on a struct / enum / union definition: unused parameters (E0392), `Self` in defaults (E0735), union fields
+/// a slice or array whose element is unsized (`[[T]]`, `[str; 2]`, `[dyn Tr]`), anywhere in t: its text
+/// The lifetimes a type names, outside fn pointer, `impl` and `dyn` types (which may bind their own with `for<'a>`)
 pub fn named_lifetimes(t: &PTy, out: &mut Vec<String>) {
     match t {
         PTy::Ref(l, _, i) => {
