@@ -5,6 +5,9 @@
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 
+#[path = "common/par.rs"]
+mod par;
+
 /// A new directory only this user can enter, made where nothing was: a directory that is there already (another
 /// user's, made before the test started) is never reused, so nothing the test writes goes through it. It is removed
 /// when the guard is dropped, a failing assertion's unwinding too
@@ -60,30 +63,31 @@ fn driver2_matches_expected() {
     if let Ok(f) = std::env::var("DRIVER2_FILE") {
         files = vec![PathBuf::from(f)];
     }
-    let (mut ok, mut bad) = (0, vec![]);
-    for p in &files {
+    let results = par::par_map(&files, |p| -> Result<(), String> {
         let name = p.file_stem().unwrap().to_string_lossy().to_string();
         let d = p.parent().unwrap().file_name().unwrap().to_string_lossy().to_string();
         let exp = |ext: &str| PathBuf::from("tests/expected").join(format!("{d}.{name}.{ext}"));
         let (Ok(want_out), Ok(want_err), Ok(want_code)) = (std::fs::read(exp("stdout")), std::fs::read(exp("stderr")), std::fs::read_to_string(exp("code"))) else {
-            bad.push(format!("{d}/{name}: no expected output in tests/expected"));
-            continue;
+            return Err(format!("{d}/{name}: no expected output in tests/expected"));
         };
         let src = std::fs::read_to_string(p).unwrap();
-        let exe = dir.join(&name);
+        // (a directory of its own for each source directory: two of them have a file of the same name)
+        let exe = dir.join(&d).join(&name);
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
         if let Err(e) = zustc::driver2::build(&src, &exe, false, None) {
-            bad.push(format!("{name}: {}", e.lines().next().unwrap_or("")));
-            continue;
+            return Err(format!("{name}: {}", e.lines().next().unwrap_or("")));
         }
         let a = std::process::Command::new(&exe).current_dir("tests/expected").stdin(std::process::Stdio::null()).output().unwrap();
         let code = a.status.code().unwrap_or_else(|| 128 + a.status.signal().unwrap_or(0));
         if a.stdout == want_out && a.stderr == want_err && code.to_string() == want_code.trim() {
-            ok += 1;
+            Ok(())
         } else {
             let why = if a.stdout != want_out { "stdout" } else if a.stderr != want_err { "stderr" } else { "exit code" };
-            bad.push(format!("{d}/{name}: {why} differs (exit {code} vs {})", want_code.trim()));
+            Err(format!("{d}/{name}: {why} differs (exit {code} vs {})", want_code.trim()))
         }
-    }
+    });
+    let ok = results.iter().filter(|r| r.is_ok()).count();
+    let bad: Vec<String> = results.into_iter().filter_map(|r| r.err()).collect();
     let _ = std::fs::remove_dir_all(&dir);
     assert!(bad.is_empty(), "{ok} same\n{}", bad.join("\n"));
 }

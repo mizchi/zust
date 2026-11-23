@@ -1,0 +1,13 @@
+# cargo-nextest: `cargo nextest run --release --workspace` runs the same tests as `cargo test --release --workspace`,
+# each in its own process and the test binaries side by side (71s -> 50s on 4 cores). CI uses `--profile ci`.
+# (nextest does not run doc tests: `cargo test --release --workspace --doc` does)
+
+[profile.default]
+# (the longest tests build and run a few hundred programs: ~30s on 4 cores while the rest run beside them)
+slow-timeout = { period = "60s" }
+
+[profile.ci]
+fail-fast = false
+# (a test that hangs is stopped after 5 minutes, not at the job's timeout; the slowest are listed at the end)
+slow-timeout = { period = "60s", terminate-after = 5 }
+final-status-level = "slow"
