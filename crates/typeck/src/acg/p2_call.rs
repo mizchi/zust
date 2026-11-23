@@ -1047,28 +1047,17 @@ impl Cx<'_> {
                     }
                     Place::Mem(v, 0, *i)
                 }
-                // (a vector value whose type inference left open (`eq1.and(eq2).movemask()`, `and` of two traits): its
-                // impl's method, as prim_trait_method calls it)
+                // (a vector value whose type inference left open (`eq1.and(eq2).movemask()`, `and` of two traits): bound to
+                // a local of its type, and the method called on that, as on any vector local (its receiver's borrow and
+                // regions checked as theirs: a `&self` result does not outlive the statement)
                 (Some(v), t @ Ty::Vec(_)) => {
-                    let Some(id) = self.prog.prim_self_method(t, method) else {
-                        return err(SP, format!("no method `{}` on type `{}`", method, self.prog.tn(t)));
-                    };
-                    let group = self.prog.overloads.get(&self.prog.names[id as usize]).cloned().unwrap_or_else(|| vec![id]);
-                    if group.iter().all(|&i| self.prog.sigs[i as usize].is_unsafe) {
-                        self.check_unsafe_call(id, msp.start)?;
-                    }
-                    // (`&self` / `&mut self`: the vector through a slot, as prim_trait_method passes it)
-                    let (recv_v, recv_ty) = match self.prog.sigs[id as usize].params.first() {
-                        Some(Ty::Ref(m, _)) => {
-                            let a = self.temp(t);
-                            self.b.ins().store(mf(), v, a, 0);
-                            (a, Ty::Ref(*m, intern(t)))
-                        }
-                        _ => (v, t),
-                    };
-                    let args: Vec<&Expr> = margs.iter().collect();
-                    let tf: Option<&[GArg]> = (!gargs.is_empty()).then_some(&gargs[..]);
-                    return self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
+                    let n = "__exr_vrecv".to_string();
+                    self.scopes.push(vec![]);
+                    self.bind(n.clone(), t, Some(v));
+                    let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(path_expr(&n)), method.to_string(), gargs.clone(), margs.clone(), msp));
+                    let r = self.expr(ne, expected);
+                    self.scopes.pop();
+                    return r;
                 }
                 (_, t) => {
                     return err(SP, format!("no method `{}` on type `{}`", method, self.prog.tn(t)));
@@ -1833,6 +1822,11 @@ impl Cx<'_> {
             Some(Ty::Ref(m, _)) => {
                 let a = self.temp(t);
                 self.b.ins().store(mf(), v, a, 0);
+                // (a receiver a call made, borrowed for a result that borrows it: the temporary is freed at the end
+                // of the statement (E0716 when the result is used after: `let r = mk().loan(); *r`), as for a struct's)
+                if self.bk_on() && !is_place_expr(recv) && self.bk_ret_from(id, 0) {
+                    self.bk_temp_borrow(recv, *m, t);
+                }
                 (a, Ty::Ref(*m, intern(t)))
             }
             _ => (v, t),

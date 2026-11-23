@@ -1869,7 +1869,11 @@ impl Inf<'_> {
                                 // (a raw pointer: acg checks it, with rustc's coercions. A `p.cast()` gets its type from it:
                                 // `v128_load(data.cast())`)
                                 crate::simd_sig::SArg::P(t, m) => {
-                                    if matches!(a, Expr::MethodCall(_, n, tf, xs, _) if n == "cast" && tf.is_empty() && xs.is_empty()) {
+                                    let mut inner: &Expr = a;
+                                    while let Expr::Paren(x) = inner {
+                                        inner = x;
+                                    }
+                                    if matches!(inner, Expr::MethodCall(_, n, tf, xs, _) if n == "cast" && tf.is_empty() && xs.is_empty()) {
                                         let kv = self.known(Ty::Ptr(m, intern(t)));
                                         self.unify(av, kv);
                                     }

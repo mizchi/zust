@@ -119,6 +119,8 @@ fn simd_errors() {
         ("let a = _mm_set1_epi32(1); let _ = g::<[(); 1]>(a); } fn g<T>(a: __m128i) -> i32 { _mm_extract_epi32::<{ T }>(a) } fn f() {", "not a constant"),
         ("let mut x = [0f32; 4]; let v = _mm_set1_ps(1.0); unsafe { _mm_maskstore_ss(x.as_mut_ptr(), v, v) };", "`_mm_maskstore_ss` is not supported yet"),
         // (a vector method of two traits, the unsafe one in scope, on a value inference leaves open: E0133 on the one chosen)
+        // (a `&self` result of a vector temporary used after its statement: E0716, as for a struct's)
+        ("let r = mk().loan(); let _ = unsafe { _mm_movemask_epi8(*r) }; } trait Loan { fn loan(&self) -> &__m128i; } impl Loan for __m128i { fn loan(&self) -> &__m128i { self } } fn mk() -> __m128i { unsafe { _mm_set1_epi8(1) } } fn f() {", "E0716"),
         ("let _ = mk().m(); } trait A { unsafe fn m(self) -> i32; } impl A for __m128i { unsafe fn m(self) -> i32 { unsafe { _mm_movemask_epi8(self) } } } mod hidden { use std::arch::x86_64::*; pub trait B { fn m(self) -> i32; } impl B for __m128i { fn m(self) -> i32 { 0 } } } fn mk() -> __m128i { unsafe { _mm_set1_epi8(1) } } fn f() {", "E0133"),
     ];
     let mut bad = vec![];

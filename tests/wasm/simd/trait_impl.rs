@@ -44,7 +44,7 @@ impl Vector for v128 {
         u8x16_splat(b)
     }
     unsafe fn load_unaligned(p: *const u8) -> v128 {
-        v128_load(p.cast())
+        v128_load((p.cast()))
     }
     unsafe fn cmpeq(self, o: v128) -> v128 {
         u8x16_eq(self, o)
