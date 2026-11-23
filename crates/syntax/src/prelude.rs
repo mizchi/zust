@@ -770,11 +770,36 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
 /// (`Box::<[u8]>::from`). Comments are not told apart (a match there only selects a few names more)
 fn box_from_path(src: &str) -> bool {
     let b = src.as_bytes();
+    // (white space and comments between the path's tokens, as the parser skips them: `Box /* c */ ::from`)
     let ws = |mut i: usize| {
-        while i < b.len() && b[i].is_ascii_whitespace() {
-            i += 1;
+        loop {
+            while i < b.len() && b[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if b[i..].starts_with(b"//") {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            } else if b[i..].starts_with(b"/*") {
+                let mut d = 0;
+                while i < b.len() {
+                    if b[i..].starts_with(b"/*") {
+                        d += 1;
+                        i += 2;
+                    } else if b[i..].starts_with(b"*/") {
+                        d -= 1;
+                        i += 2;
+                        if d == 0 {
+                            break;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+            } else {
+                return i;
+            }
         }
-        i
     };
     let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
     let colons = |i: usize| (b.get(i) == Some(&b':') && b.get(i + 1) == Some(&b':')).then_some(i + 2);
