@@ -1479,7 +1479,8 @@ impl Session2 {
         // (one search of the source first: most programs have no `use`)
         let sb = src.as_bytes();
         // (only `zustc check` has the placeholders' round that reads them)
-        let any_use = self.checking && src.contains("use ");
+        // (the keyword and any space after it: `use` then a newline is one too)
+        let any_use = self.checking && src.match_indices("use").any(|(i, _)| sb.get(i + 3).is_some_and(|c| c.is_ascii_whitespace()));
         for it in items[..user].iter().filter(|_| any_use) {
             for &(a, b) in &it.idents {
                 let (a, b) = (a as usize, b as usize);
@@ -1487,8 +1488,8 @@ impl Session2 {
                     continue;
                 }
                 let end = sb[b..it.end.min(sb.len())].iter().position(|&c| c == b';').map_or(it.end, |k| b + k);
-                let decl = src.get(b..end).unwrap_or("");
-                prog.use_names.extend(decl.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).map(str::to_string));
+                // (its identifier tokens: not the words of a comment in it)
+                prog.use_names.extend(it.idents.iter().map(|&(x, y)| (x as usize, y as usize)).filter(|&(x, y)| x > b && y <= end).filter_map(|(x, y)| src.get(x..y)).map(str::to_string));
             }
         }
         // (a field or an impl's self type that names a struct of the program's whose parameter's bound does not hold:
@@ -4382,7 +4383,11 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
             match *a {
                 Ty::Param(i) => {
                     let Some(n) = gens.get(i as usize) else { continue };
-                    let held = bounds(n).iter().any(|b| b == tr || prog.bound_implies(b, &[tr.as_str()], true, 0)) || word(text, tr);
+                    // (a parameter is Sized unless it says `?Sized`)
+                    let bs = bounds(n);
+                    let held = bs.iter().any(|b| b == tr || prog.bound_implies(b, &[tr.as_str()], true, 0))
+                        || (tr == "Sized" && !bs.iter().any(|b| b == "?Sized"))
+                        || word(text, tr);
                     if !held {
                         return Some(format!("the trait bound `{n}: {tr}` is not satisfied (E0277)"));
                     }

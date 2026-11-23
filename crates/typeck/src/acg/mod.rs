@@ -613,7 +613,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         let item = prog.index.contains_key(n) || prog.struct_index.contains_key(n) || prog.consts.iter().any(|c| c.name == n || c.name.ends_with(&format!("::{n}")))
             || prog.names.iter().any(|x| x.rsplit("::").next() == Some(n))
             || prog.use_names.contains(n);
-        !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_') && !e.contains("unsupported") && !item
+        !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_') && !e.contains("(unsupported path)") && !item
     };
     if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free) && !undeclared(e)) {
         if regionck::debug() {

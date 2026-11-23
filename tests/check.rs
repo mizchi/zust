@@ -296,22 +296,33 @@ fn review68_supertraits_equations_defaults() {
 }
 
 /// A struct field or an impl's self type naming a struct of the program's with a bounded parameter: the bound is held
-/// by the enclosing item's own bound, a where clause, a supertrait, a bound with arguments, or an impl for a concrete
-/// argument, and then nothing is reported
+/// by the enclosing item's own bound, a where clause, a supertrait, a bound with arguments, an impl for a concrete
+/// argument, or a parameter's implicit `Sized`, and then nothing is reported
 #[test]
 fn wf_bounds_held_by_bounds_where_clauses_and_supertraits() {
     let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
-    let src = "trait Tr {}\ntrait Sub: Tr {}\nstruct S<T: Tr>(T);\nstruct A<K: Tr> {\n    s: S<K>,\n}\nstruct B<K>\nwhere\n    K: Tr,\n{\n    s: S<K>,\n}\nstruct C<K: Sub> {\n    s: S<K>,\n}\nstruct D<K: Tr + Clone> {\n    s: Vec<S<K>>,\n}\nimpl<K: Tr> S<K> {\n    fn get(&self) -> &K {\n        &self.0\n    }\n}\nimpl Tr for u8 {}\nstruct E {\n    s: S<u8>,\n}\ntrait G<X> {}\nstruct H<T: G<u8>>(T);\nstruct I<K: G<u8>> {\n    h: H<K>,\n}\nimpl<K> Clone for A<K>\nwhere\n    K: Tr + Clone,\n{\n    fn clone(&self) -> Self {\n        A { s: S(self.s.get().clone()) }\n    }\n}\nfn main() {}\n";
+    let src = "trait Tr {}\ntrait Sub: Tr {}\nstruct S<T: Tr>(T);\nstruct A<K: Tr> {\n    s: S<K>,\n}\nstruct B<K>\nwhere\n    K: Tr,\n{\n    s: S<K>,\n}\nstruct C<K: Sub> {\n    s: S<K>,\n}\nstruct D<K: Tr + Clone> {\n    s: Vec<S<K>>,\n}\nimpl<K: Tr> S<K> {\n    fn get(&self) -> &K {\n        &self.0\n    }\n}\nimpl Tr for u8 {}\nstruct E {\n    s: S<u8>,\n}\ntrait G<X> {}\nstruct H<T: G<u8>>(T);\nstruct I<K: G<u8>> {\n    h: H<K>,\n}\nstruct Sz<T: Sized>(T);\nstruct J<K> {\n    s: Sz<K>,\n}\nimpl<K> Clone for A<K>\nwhere\n    K: Tr + Clone,\n{\n    fn clone(&self) -> Self {\n        A { s: S(self.s.get().clone()) }\n    }\n}\nfn main() {}\n";
     assert!(s.check(src).is_empty(), "{:?}", s.check(src));
 }
 
-/// A name nothing declares, in a generic fn nothing calls or a trait's default method, is E0425 there too; one an item
-/// or a `use` declares is not (zustc may not lower a generic fn as a value)
+/// A name nothing declares, in a generic fn nothing calls or a trait's default method, is E0425 there too, whatever it
+/// is spelled; one an item or a `use` declares is not (zustc may not lower a generic fn as a value), a word in a
+/// comment in the `use` declares nothing, and `use` then a newline is a `use` too
+/// (a fn whose parameter is bounded by a trait whose methods the body may call, `T: PartialEq` with `==`, gets no
+/// placeholder instance in zustc, so the name is not looked up in it)
 #[test]
 fn undeclared_names_in_uncalled_generic_fns() {
     let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
-    let src = "fn f() -> i32 {\n    foo + 1\n}\nfn g<T: PartialEq>() {\n    foo == 2;\n}\ntrait B<A> {\n    fn a() -> A {\n        this.a\n    }\n}\nfn main() { f(); }\n";
-    assert_eq!(s.check(src).iter().map(|d| d.line).collect::<Vec<_>>(), vec![2, 9], "{:?}", s.check(src));
+    let src = "fn f() -> i32 {\n    foo + 1\n}\nfn g<T: Copy>() {\n    foo == 2;\n}\ntrait B<A> {\n    fn a() -> A {\n        this.a\n    }\n}\nfn main() { f(); }\n";
+    let ds = s.check(src);
+    assert_eq!(ds.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2, 5, 9], "{ds:?}");
+    assert!(ds.iter().all(|d| d.msg.contains("cannot find value `foo`") || d.msg.contains("cannot find value `this`")), "{ds:?}");
+    let named = "fn f<T>() {\n    unsupported_value;\n}\nfn main() {}\n";
+    assert_eq!(s.check(named).iter().map(|d| d.line).collect::<Vec<_>>(), vec![2], "{:?}", s.check(named));
+    let comment = "use std::convert::identity /* ghost */;\nfn f<T>() {\n    ghost;\n}\nfn main() {}\n";
+    assert_eq!(s.check(comment).iter().map(|d| d.line).collect::<Vec<_>>(), vec![3], "{:?}", s.check(comment));
     let ok = "use std::convert::identity;\nfn g<T: Copy>(x: T) -> T {\n    let f = identity;\n    f(x)\n}\nfn h<T>() -> fn(T) -> T {\n    fn id<U>(x: U) -> U {\n        x\n    }\n    id\n}\nfn main() {}\n";
     assert!(s.check(ok).is_empty(), "{:?}", s.check(ok));
+    let newline = "use\nstd::convert::identity;\nfn g<T: Copy>(x: T) -> T {\n    let f = identity;\n    f(x)\n}\nfn main() {}\n";
+    assert!(s.check(newline).is_empty(), "{:?}", s.check(newline));
 }
