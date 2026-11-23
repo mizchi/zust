@@ -3544,6 +3544,8 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
         });
         match found.flatten() {
             Some(f) => format!("{line}:1: {}", crate::cfg::not_a_literal(&f)),
+            // (`#[inline = ".."]`: the deny-by-default `ill_formed_attribute_input`, with the forms it takes)
+            None if name == "inline" && input.starts_with('=') => format!("{line}:1: valid forms for the attribute are `inline`, `inline(always)`, and `inline(never)`"),
             None => format!("{line}:1: malformed `{name}` attribute input"),
         }
     };

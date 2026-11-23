@@ -541,6 +541,7 @@ run-pass	attributes/inline-main.rs
 compile-fail	attributes/inline/attr-usage-inline.rs
 compile-fail	attributes/inline/invalid-inline.rs
 check-pass	attributes/inner-attr-metavar.rs
+compile-fail	attributes/invalid-debugger-visualizer-target.rs
 compile-fail	attributes/invalid-macro-use.rs
 compile-fail	attributes/invalid-repr.rs
 compile-fail	attributes/invalid-reprs.rs
@@ -557,9 +558,11 @@ compile-fail	attributes/malformed-must_use.rs
 compile-fail	attributes/malformed-reprs.rs
 check-pass	attributes/mixed_export_name_and_no_mangle.rs
 check-pass	attributes/mixed_export_name_and_no_mangle_2024.rs
+compile-fail	attributes/multiple-invalid.rs
 compile-fail	attributes/obsolete-attr.rs
 check-pass	attributes/path-inline-module.rs
 check-pass	attributes/positions/link-section.rs
+compile-fail	attributes/positions/used.rs
 compile-fail	attributes/repr-align-in-trait-issue-132391.rs
 run-pass	attributes/repr-on-single-variant-Enum.rs
 run-pass	attributes/tool_attributes.rs
@@ -2082,6 +2085,7 @@ run-pass	derives/default/deriving-default-box.rs
 run-pass	derives/default/deriving-default-enum.rs
 compile-fail	derives/derive-assoc-type-not-impl.rs
 check-pass	derives/derive-compound-arities.rs
+compile-fail	derives/derive-enum-repr-packed.rs
 run-pass	derives/derive-hrtb-for-bare-fn-field-with-lifetime.rs
 run-pass	derives/derive-hygiene-struct-builder.rs
 check-pass	derives/derive-macro-const-default.rs
@@ -2120,6 +2124,7 @@ check-pass	derives/hash-on-compound-types.rs
 compile-fail	derives/imperfect-derive-advanced.rs
 compile-fail	derives/imperfect-derive-copy.rs
 compile-fail	derives/imperfect-derive-phantom.rs
+compile-fail	derives/issue-36617.rs
 compile-fail	derives/issue-91492.rs
 compile-fail	derives/issue-91550.rs
 check-pass	derives/no-ice-on-derived-copy-with-associated-type-field.rs
@@ -2740,6 +2745,7 @@ check-pass	feature-gates/issue-43106-gating-of-macro_escape.rs
 compile-fail	feature-gates/issue-43106-gating-of-macro_use.rs
 compile-fail	feature-gates/issue-43106-gating-of-proc_macro_derive.rs
 compile-fail	feature-gates/issue-43106-gating-of-stable.rs
+compile-fail	feature-gates/issue-43106-gating-of-test.rs
 compile-fail	feature-gates/issue-43106-gating-of-unstable.rs
 check-pass	feature-gates/soft-feature-gate-auto_traits.rs
 check-pass	feature-gates/soft-feature-gate-decl_macro.rs
@@ -3906,6 +3912,7 @@ check-pass	lint/forgetting_copy_types.rs
 check-pass	lint/forgetting_references.rs
 compile-fail	lint/function_casts_as_integer.rs
 compile-fail	lint/ice-array-into-iter-lint-issue-121532.rs
+compile-fail	lint/ice-const-prop-unions-known-panics-lint-123710.rs
 build-pass	lint/ice-unions-known-panics-lint-issue-121534.rs
 run-pass	lint/improper-ctypes/allow-phantomdata-in-ffi.rs
 check-pass	lint/improper-ctypes/ice-irregular-recursive-types.rs
@@ -4076,6 +4083,7 @@ check-pass	lint/unused/unused-allocation-box-cmp-issue-134186.rs
 compile-fail	lint/unused/unused-allocation.rs
 check-pass	lint/unused/unused-associated-item.rs
 compile-fail	lint/unused/unused-async.rs
+compile-fail	lint/unused/unused-attr-macro-rules.rs
 check-pass	lint/unused/unused-attr-repr-packed-c-order.rs
 check-pass	lint/unused/unused-braces-attrs-issue-141549.rs
 compile-fail	lint/unused/unused-doc-comments-edge-cases.rs
@@ -4143,6 +4151,7 @@ compile-fail	loops/loop-proper-liveness.rs
 compile-fail	loops/loop-properly-diverging-2.rs
 run-pass	loops/loop-with-label-9047.rs
 run-pass	loops/unreachable-while-loop-5741.rs
+compile-fail	lowering/issue-121108.rs
 compile-fail	lub-glb/old-lub-glb-object.rs
 run-pass	macros/assert-eq-macro-success.rs
 run-pass	macros/assert-ne-macro-success.rs
@@ -4322,6 +4331,7 @@ check-pass	macros/user-defined-macro-rules.rs
 compile-fail	macros/vec-macro-in-pattern.rs
 compile-fail	macros/write-missing-destination.rs
 compile-fail	malformed/issue-107423-unused-delim-only-one-no-pair.rs
+compile-fail	malformed/malformed-regressions.rs
 compile-fail	malformed/malformed-special-attrs.rs
 compile-fail	match/borrowck-uninhabited.rs
 check-pass	match/const_non_normal_zst_ref_pattern.rs
@@ -5918,6 +5928,7 @@ check-pass	privacy/where-pub-type-impls-priv-trait.rs
 check-pass	proc-macro/derive-multiple-with-packed.rs
 check-pass	proc-macro/extern-prelude-extern-crate-proc-macro.rs
 compile-fail	proc-macro/illegal-proc-macro-derive-use.rs
+compile-fail	proc-macro/issue-89566-suggest-fix-invalid-top-level-macro-attr.rs
 compile-fail	proc-macro/macro-namespace-reserved-2.rs
 compile-fail	proc-macro/proc-macro-abi.rs
 compile-fail	proc-macro/pub-at-crate-root.rs
@@ -6663,6 +6674,7 @@ compile-fail	span/issue-36537.rs
 compile-fail	span/issue-39018.rs
 compile-fail	span/issue-40157.rs
 compile-fail	span/issue-42234-unknown-receiver-type.rs
+compile-fail	span/issue-43927-non-ADT-derive.rs
 compile-fail	span/issue-81800.rs
 compile-fail	span/issue28498-reject-lifetime-param.rs
 compile-fail	span/issue28498-reject-passed-to-fn.rs

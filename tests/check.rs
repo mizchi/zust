@@ -1112,6 +1112,7 @@ fn attributes_at_crate_level_and_misplaced() {
     }
     // (a comment between attributes does not hide the ones after it)
     assert_eq!(first("#[inline]\n// a comment\n#[target_feature(enable = \"sse2\")]\nconst FOO: u8 = 0;\nfn main() {}\n"), at(1, "the `inline` attribute cannot be used on constants"), "comment_between");
+    assert_eq!(first("#[inline = \"\"]\nfn f() {}\nfn main() {}\n"), at(1, "valid forms for the attribute are `inline`, `inline(always)`, and `inline(never)`"), "inline_eq");
     // (a warned one is an error where `unused_attributes` is denied)
     assert_eq!(first("#![deny(unused_attributes)]\n#[cold]\nstruct S;\nfn main() {}\n"), at(2, "the `cold` attribute cannot be used on structs"), "denied");
 }
