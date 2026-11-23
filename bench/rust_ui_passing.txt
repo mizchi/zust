@@ -943,6 +943,7 @@ build-pass	borrowck/borrowed-pointer-in-struct-5884.rs
 compile-fail	borrowck/branch-condition-flow-issue-156494.rs
 compile-fail	borrowck/buffer-reuse-pattern-issue-147694.rs
 run-pass	borrowck/call-and-ref-option-mutate.rs
+compile-fail	borrowck/cannot-assign-borrowed-ref-in-slice.rs
 compile-fail	borrowck/cannot-borrow-index-of-hashmap-in-for.rs
 compile-fail	borrowck/cannot-borrow-index-output-mutably.rs
 compile-fail	borrowck/clone-on-ref.rs
@@ -2638,6 +2639,7 @@ compile-fail	feature-gates/feature-gate-patchable-function-entry.rs
 compile-fail	feature-gates/feature-gate-pin_ergonomics.rs
 compile-fail	feature-gates/feature-gate-postfix_match.rs
 compile-fail	feature-gates/feature-gate-register_tool.rs
+compile-fail	feature-gates/feature-gate-shorter_tail_lifetimes.rs
 compile-fail	feature-gates/feature-gate-stmt_expr_attributes.rs
 check-pass	feature-gates/feature-gate-strict_provenance_lints.rs
 compile-fail	feature-gates/feature-gate-super-let.rs
@@ -3600,6 +3602,7 @@ compile-fail	lifetimes/fullwidth-ampersand.rs
 check-pass	lifetimes/if-else-branches-lifetime-coercion.rs
 compile-fail	lifetimes/issue-103582-hint-for-missing-lifetime-bound-on-trait-object-using-type-alias.rs
 check-pass	lifetimes/issue-104432-unused-lifetimes-in-expansion.rs
+compile-fail	lifetimes/issue-105227.rs
 compile-fail	lifetimes/issue-105675.rs
 compile-fail	lifetimes/issue-107492-default-value-for-lifetime.rs
 compile-fail	lifetimes/issue-107988.rs
@@ -4663,6 +4666,7 @@ check-pass	nll/issue-53570.rs
 compile-fail	nll/issue-53773.rs
 compile-fail	nll/issue-53807.rs
 compile-fail	nll/issue-54189.rs
+compile-fail	nll/issue-54382-use-span-of-tail-of-block.rs
 compile-fail	nll/issue-54556-stephaneyfx.rs
 compile-fail	nll/issue-54556-temps-in-tail-diagnostic.rs
 compile-fail	nll/issue-54556-used-vs-unused-tails.rs
@@ -4718,6 +4722,7 @@ compile-fail	nll/outlives-suggestion-more.rs
 compile-fail	nll/outlives-suggestion-simple.rs
 run-pass	nll/process_or_insert_default.rs
 check-pass	nll/promotable-mutable-zst-doesnt-conflict.rs
+compile-fail	nll/promoted-bounds.rs
 compile-fail	nll/promoted-closure-pair.rs
 check-pass	nll/promoted-liveness.rs
 run-pass	nll/rc-loop.rs
@@ -5945,6 +5950,7 @@ compile-fail	regions/regions-free-region-ordering-callee-4.rs
 compile-fail	regions/regions-free-region-ordering-callee.rs
 compile-fail	regions/regions-free-region-ordering-caller.rs
 compile-fail	regions/regions-free-region-ordering-caller1.rs
+compile-fail	regions/regions-free-region-ordering-incorrect.rs
 run-pass	regions/regions-free-region-outlives-static-outlives-free-region.rs
 compile-fail	regions/regions-glb-free-free.rs
 check-pass	regions/regions-implied-bounds-projection-gap-2.rs
@@ -6496,9 +6502,11 @@ compile-fail	span/borrowck-let-suggestion-suffixes.rs
 compile-fail	span/borrowck-object-mutability.rs
 compile-fail	span/borrowck-ref-into-rvalue.rs
 compile-fail	span/coerce-suggestions.rs
+compile-fail	span/destructor-restrictions.rs
 compile-fail	span/drop-location-span-error-rust-2021-incompatible-closure-captures-96258.rs
 compile-fail	span/dropck_misc_variants.rs
 compile-fail	span/impl-wrong-item-for-trait.rs
+compile-fail	span/issue-23338-locals-die-before-temps-of-body.rs
 check-pass	span/issue-24690.rs
 compile-fail	span/issue-24805-dropck-child-has-items-via-parent.rs
 compile-fail	span/issue-24895-copy-clone-dropck.rs
@@ -6507,6 +6515,7 @@ compile-fail	span/issue-29595.rs
 compile-fail	span/issue-34264.rs
 compile-fail	span/issue-36537.rs
 compile-fail	span/issue-39018.rs
+compile-fail	span/issue-40157.rs
 compile-fail	span/issue-42234-unknown-receiver-type.rs
 compile-fail	span/issue-81800.rs
 compile-fail	span/issue28498-reject-lifetime-param.rs
@@ -6524,8 +6533,10 @@ compile-fail	span/mutability-suggestion-fullwidth-ampersand.rs
 compile-fail	span/pub-struct-field.rs
 compile-fail	span/range-2.rs
 compile-fail	span/regionck-unboxed-closure-lifetimes.rs
+compile-fail	span/regions-close-over-type-parameter-2.rs
 compile-fail	span/regions-escape-loop-via-variable.rs
 compile-fail	span/regions-infer-borrow-scope-within-loop.rs
+compile-fail	span/send-is-not-static-ensures-scoping.rs
 compile-fail	span/send-is-not-static-std-sync-2.rs
 compile-fail	span/slice-borrow.rs
 compile-fail	span/suggestion-non-ascii.rs
