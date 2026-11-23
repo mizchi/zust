@@ -773,6 +773,9 @@ fn box_from_path(src: &str) -> bool {
     // (white space and comments between the path's tokens, as the parser skips them: `Box /* c */ ::from`)
     let ws = |mut i: usize| {
         loop {
+            if i >= b.len() {
+                return b.len();
+            }
             while i < b.len() && b[i].is_ascii_whitespace() {
                 i += 1;
             }
@@ -810,24 +813,32 @@ fn box_from_path(src: &str) -> bool {
         let Some(mut i) = colons(ws(k + 3)) else { continue };
         i = ws(i);
         if b.get(i) == Some(&b'<') {
+            // (to its closing `>`, past comments (`<[u8 /* > */]>`); none: no turbofish, no path)
             let mut d = 0;
+            let mut closed = false;
             while i < b.len() {
-                match b[i] {
-                    b'<' => d += 1,
-                    b'>' => {
+                i = ws(i);
+                match b.get(i) {
+                    Some(b'<') => d += 1,
+                    Some(b'>') => {
                         d -= 1;
                         if d == 0 {
+                            closed = true;
                             break;
                         }
                     }
-                    _ => {}
+                    Some(_) => {}
+                    None => break,
                 }
                 i += 1;
+            }
+            if !closed {
+                continue;
             }
             let Some(j) = colons(ws(i + 1)) else { continue };
             i = ws(j);
         }
-        if src[i..].starts_with("from") && !b.get(i + 4).is_some_and(|&c| word(c)) {
+        if b[i..].starts_with(b"from") && !b.get(i + 4).is_some_and(|&c| word(c)) {
             return true;
         }
     }
