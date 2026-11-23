@@ -95,3 +95,4 @@ zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの�
 | 2026-11-23 | [プログラムのトレイトの trait solver: 先に Lean でモデル化・証明してから実装する](2026-11-23-04-trait-solver.md) |
 | 2026-11-23 | [trait solver、その 2: コヒーレンス、スーパートレイト、dyn への型強制、impl の選択、auto trait](2026-11-23-05-trait-solver-2.md) |
 | 2026-11-23 | [trait solver、その 3: 関連型](2026-11-23-06-trait-solver-3.md) |
+| 2026-11-23 | [trait solver、その 4: 誤ったエラーを減らす](2026-11-23-07-trait-solver-4.md) |

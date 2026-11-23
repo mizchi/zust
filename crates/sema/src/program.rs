@@ -544,6 +544,25 @@ pub struct AssocDef {
     pub ngen: usize,
     /// a generic associated type's own parameters (`type Pointer<T>`: 1), Params after the impl's and a mark
     pub ngat: usize,
+    /// the impl's trait (its own name) and its type arguments over the impl's parameters (`impl Tr<u8> for S`), when
+    /// they resolve: a qualified path with the trait's arguments chooses the impl by them
+    pub trait_name: String,
+    pub trait_args: Option<Vec<Ty>>,
+}
+
+/// The trait of the impl whose member item ii is (its own name) and the trait's type arguments resolved over the impl's
+/// parameters gn (None when one does not resolve)
+fn impl_trait_of(p: &Program, items: &[SrcItem], sums: &[Summary], ii: usize, gn: &[&str]) -> (String, Option<Vec<Ty>>) {
+    let h = match items.get(ii).map(|it| it.kind) {
+        Some(crate::lexer::ItemKind::ImplMember(h)) => h as usize,
+        _ => ii,
+    };
+    let Some(sm) = sums.get(h) else { return (String::new(), None) };
+    let tr = sm.impl_trait.as_deref().unwrap_or("");
+    let tr = tr.split('<').next().unwrap_or(tr).trim();
+    let tr = tr.rsplit("::").next().unwrap_or(tr).to_string();
+    let args: Option<Vec<Ty>> = sm.impl_trait_args.iter().map(|a| p.resolve_g(a, gn).ok()).collect();
+    (tr, args)
 }
 
 /// (the impl's parameter count, the generic associated type's) of an associated type's parameter names: those after
@@ -1356,7 +1375,8 @@ impl Program {
                 let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
                 if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
                     let (ngen, ngat) = gat_split(&gn);
-                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat });
+                    let (trait_name, trait_args) = impl_trait_of(&p, items, sums, ii, &gn);
+                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat, trait_name, trait_args });
                     early.push((ii, k));
                 }
             }
@@ -1487,12 +1507,15 @@ impl Program {
                     .resolve_g(&a.value, &gn)
                     .map_err(|e| format!("{}:1: {e}", it.line))?;
                 let (ngen, ngat) = gat_split(&gn);
+                let (trait_name, trait_args) = impl_trait_of(&p, items, sums, ii, &gn);
                 p.assocs.push(AssocDef {
                     name: a.name.clone(),
                     self_ty,
                     value,
                     ngen,
                     ngat,
+                    trait_name,
+                    trait_args,
                 });
             }
         }
@@ -2784,6 +2807,21 @@ impl Program {
                 let TySyn::Tuple(parts) = &**b else { unreachable!() };
                 let name = n[crate::ast_types::GAT_PREFIX.len()..].to_string();
                 return r(&TySyn::App(name, parts[1..].to_vec()));
+            }
+            // (`<S as Trait<usize>>::Assoc`: the impl whose self type and trait arguments match, exactly)
+            TySyn::Assoc(b, n) if n.starts_with(crate::ast_types::TARGS_PREFIX) && matches!(&**b, TySyn::Tuple(p) if !p.is_empty()) => {
+                let TySyn::Tuple(parts) = &**b else { unreachable!() };
+                let rest = &n[crate::ast_types::TARGS_PREFIX.len()..];
+                let (tr, name) = rest.split_once('#').unwrap_or(("", rest));
+                let bt = r(&parts[0])?;
+                let args = parts[1..].iter().map(r).collect::<R<Vec<Ty>>>()?;
+                if !self.has_param(bt) && !args.iter().any(|&a| self.has_param(a)) {
+                    if let Some(t) = self.assoc_of_targs(bt, tr, &args, name.strip_prefix(crate::ast_types::NO_STD_ASSOC).unwrap_or(name)) {
+                        return Ok(t);
+                    }
+                }
+                // (as before the arguments were kept: by the self type alone)
+                return r(&TySyn::Assoc(Box::new(parts[0].clone()), name.to_string()));
             }
             TySyn::Assoc(b, n) => {
                 let bt = r(b)?;
@@ -4160,6 +4198,33 @@ impl Program {
     }
 
     /// 具体型 t の関連型 name (`impl Iterator for Counter { type Item = u32; }` なら u32)
+    /// The associated type `name` of the impl of trait tr with arguments args for t: the impls whose self type and
+    /// trait arguments match exactly (crate::traits::mtch), one definition or none
+    pub fn assoc_of_targs(&self, t: Ty, tr: &str, args: &[Ty], name: &str) -> Option<Ty> {
+        let tr = tr.rsplit("::").next().unwrap_or(tr);
+        let mut found: Option<Ty> = None;
+        for a in &self.assocs {
+            if a.name != name || a.trait_name != tr || a.ngat != 0 {
+                continue;
+            }
+            let Some(ta) = &a.trait_args else { return None };
+            if ta.len() != args.len() {
+                continue;
+            }
+            let mut sol = vec![None; a.ngen];
+            if !crate::traits::mtch(self, a.self_ty, t, &mut sol, false, 0) || !ta.iter().zip(args).all(|(&p, &x)| crate::traits::mtch(self, p, x, &mut sol, false, 0)) {
+                continue;
+            }
+            let full: Vec<Ty> = sol.iter().copied().collect::<Option<Vec<Ty>>>()?;
+            let v = self.subst(a.value, &full);
+            if found.is_some_and(|f| f != v) {
+                return None;
+            }
+            found = Some(v);
+        }
+        found
+    }
+
     pub fn assoc_of(&self, t: Ty, name: &str) -> Option<Ty> {
         self.assoc_of_with(t, name, true)
     }

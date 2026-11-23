@@ -96,3 +96,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-23 | [A trait solver for the program's traits, modeled and proved in Lean first](2026-11-23-04-trait-solver.md) |
 | 2026-11-23 | [The trait solver, part 2: coherence, supertraits, dyn coercions, impl selection, auto traits](2026-11-23-05-trait-solver-2.md) |
 | 2026-11-23 | [The trait solver, part 3: associated types](2026-11-23-06-trait-solver-3.md) |
+| 2026-11-23 | [The trait solver, part 4: fewer false errors](2026-11-23-07-trait-solver-4.md) |

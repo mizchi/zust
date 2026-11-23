@@ -4865,6 +4865,7 @@ run-pass	object-lifetime/object-lifetime-default-from-rptr.rs
 check-pass	object-lifetime/object-lifetime-default-inferred-args.rs
 compile-fail	object-lifetime/object-lifetime-default-mybox.rs
 check-pass	object-lifetime/object-lifetime-default-resolved-gat.rs
+check-pass	object-lifetime/object-lifetime-default-trait-ref-lifetime-bound-on-assoc-ty.rs
 compile-fail	object-lifetime/undeclared-object-lifetime.rs
 compile-fail	offset-of/offset-of-arg-count.rs
 compile-fail	offset-of/offset-of-error-recovery.rs
@@ -4929,6 +4930,7 @@ run-pass	packed/packed-struct-match.rs
 compile-fail	packed/packed-struct-transmute.rs
 run-pass	packed/packed-struct-vec.rs
 run-pass	packed/packed-tuple-struct-layout.rs
+run-pass	packed/packed-with-inference-vars-issue-61402.rs
 check-pass	panics/panic-handler-closures.rs
 build-pass	parallel-rustc/assert-found_cycle-issue-115223.rs
 compile-fail	parallel-rustc/cycle_crash-issue-135870.rs
@@ -7292,6 +7294,7 @@ compile-fail	traits/issue-75627.rs
 compile-fail	traits/issue-77982.rs
 compile-fail	traits/issue-78372.rs
 check-pass	traits/issue-78632.rs
+check-pass	traits/issue-82830.rs
 compile-fail	traits/issue-87558.rs
 check-pass	traits/issue-90195-2.rs
 check-pass	traits/issue-90195.rs

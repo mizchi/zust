@@ -290,12 +290,32 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                 Some("Add" | "Sub" | "Mul" | "Div" | "Rem" | "Neg" | "Not" | "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr" | "Deref" | "DerefMut")
             );
             let name = if tr.is_some() && !std_tr && matches!(name.as_str(), "Output" | "Target") { format!("{NO_STD_ASSOC}{name}") } else { name };
+            // (`<S as Trait<usize>>::Assoc`: the trait's type arguments choose the impl, as the trait solver's matching
+            // of heads does. The associated type `#targs:Trait#Assoc` of the tuple (S, usize), as for a generic
+            // associated type; Program::resolve takes it apart)
+            let targs: Vec<&PTy> = p.segs.len().checked_sub(2).map(|i| &p.segs[i]).map_or(vec![], |sg| {
+                sg.args.iter().filter_map(|a| match a {
+                    crate::parse::GArg::Ty(t) => Some(t),
+                    _ => None,
+                }).collect()
+            });
+            if let (Some(tr), false, false) = (tr, targs.is_empty(), std_tr) {
+                let mut parts = vec![tysyn(q, self_ty)?];
+                for t in targs {
+                    parts.push(tysyn(t, self_ty)?);
+                }
+                return Ok(TySyn::Assoc(Box::new(TySyn::Tuple(parts)), format!("{TARGS_PREFIX}{tr}#{name}")));
+            }
             TySyn::Assoc(Box::new(tysyn(q, self_ty)?), name)
         }
         PTy::Path(None, p) => path_ty(p, self_ty)?,
         _ => return Err("unsupported type".to_string()),
     })
 }
+
+/// The name of a qualified path's associated type whose trait has type arguments: `#targs:Trait#Assoc` of the tuple of
+/// the self type and the arguments (`<S as Trait<usize>>::Assoc` is `#targs:Trait#Assoc` of `(S, usize)`)
+pub const TARGS_PREFIX: &str = "#targs:";
 
 /// The name a generic associated type's application has: `P::Pointer<String>` is the associated type
 /// `#gat:Pointer` of the tuple `(P, String)` (Program::assoc_of takes it apart)

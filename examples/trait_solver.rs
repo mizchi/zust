@@ -195,6 +195,22 @@ fn is_default<T: PartialEq + Default>(a: T) -> bool {
     a == T::default()
 }
 
+// (a qualified path whose trait's arguments choose the impl: `<Pick as Choose<u16>>::Out` is u16's)
+trait Choose<T> {
+    type Out;
+}
+struct Pick;
+impl Choose<u8> for Pick {
+    type Out = u8;
+}
+impl Choose<u16> for Pick {
+    type Out = u32;
+}
+struct Picked {
+    small: <Pick as Choose<u8>>::Out,
+    wide: <Pick as Choose<u16>>::Out,
+}
+
 fn main() {
     println!("{} {}", Local.kind(), Tagged.kind());
     println!("{}", show(&Square(3)));
@@ -215,4 +231,6 @@ fn main() {
     let w: WithHelper<Option<u8>, u8> = WithHelper { helper: Some(5), value: 2 };
     let k = || 21;
     println!("{} {} {} {} {}", *w, w.value, call_twice(&k), borrowed(3u8), is_default(()));
+    let p = Picked { small: 200, wide: 70000 };
+    println!("{} {}", p.small, p.wide);
 }

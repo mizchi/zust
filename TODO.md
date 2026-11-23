@@ -50,7 +50,7 @@ invariants.
 
 The program's own traits are solved by the algorithms proved in formal/lean, including E0119, supertrait
 obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-11-23-04-trait-solver.md),
-[part 2](docs/reports/2026-11-23-05-trait-solver-2.md), [part 3](docs/reports/2026-11-23-06-trait-solver-3.md)). Left:
+[part 2](docs/reports/2026-11-23-05-trait-solver-2.md), [part 3](docs/reports/2026-11-23-06-trait-solver-3.md), [part 4](docs/reports/2026-11-23-07-trait-solver-4.md)). Left:
 
 - Associated types ([part 3](docs/reports/2026-11-23-06-trait-solver-3.md)): a generic fn's or a nested opaque return type
   (`-> Option<impl Tr>`) is not checked against its bounds; projections by a name std also defines (`T::Item`) and
@@ -58,6 +58,11 @@ obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-
 - E0119 against std's impls (`impl<S> Into<S> for GenX<S>`): std's impls are not clauses.
 - Lifetimes in impl heads (fn pointers, higher-ranked bounds) need lifetimes in `Ty`.
 - Placeholder and module-flattened names in messages (`__impl0`, `a__b__Hidden`).
+- `Self::X` inside the impl that defines X, when X's definition names impl parameters only the trait's arguments
+  bind, and definitions whose value is a generic struct (registered after struct fields): "cannot find associated
+  type" on valid code (unsized/issue-40231-*.rs, wf/issue-48638.rs).
+- Most of std's traits are still judged by `Program::implements` at calls (with known exceptions); the prelude's
+  impls as solver clauses would make both directions exact.
 
 ## Security: CVEs whose API zustc does not have (`expect: unsupported`)
 
