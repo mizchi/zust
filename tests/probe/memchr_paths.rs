@@ -18,6 +18,16 @@ mod other {
     fn seven() -> u8 {
         7
     }
+    // (and of an impl whose head has a const argument, `S<{ 1 }>`)
+    pub struct C<const N: usize>;
+    impl T for C<{ 1 }> {
+        fn find(&self) -> u8 {
+            20
+        }
+    }
+    pub fn via_const_arg() -> u8 {
+        C::<1>.find()
+    }
     pub fn via_fn_ptr() -> u8 {
         let f: fn() -> u8 = seven;
         T::find(&f)
@@ -137,7 +147,7 @@ fn cmp(a: u8, b: u8) -> SuffixOrdering {
 }
 
 fn main() {
-    println!("{:?} {:?} {} {} {}", memmem::find(b"abcdef", b"cd"), memmem::find(b"abc", b"x"), other::find(b"qq"), other::run(b"qq"), other::via_fn_ptr());
+    println!("{:?} {:?} {} {} {}", memmem::find(b"abcdef", b"cd"), memmem::find(b"abc", b"x"), other::find(b"qq"), other::run(b"qq"), other::via_fn_ptr() + other::via_const_arg());
 
     let a: &[u8] = &[1, 2, 3];
     let b: Box<[u8]> = Box::<[u8]>::from(a);

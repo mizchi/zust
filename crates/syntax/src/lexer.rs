@@ -2053,8 +2053,28 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 // (the item's head: back to the last `;` / `{` / `}`)
                 let mut j = k;
                 let (mut assoc, mut is_fn) = (false, false);
+                // (inside `<..>` of the head, a brace group is a const argument (`impl T for S<{ 1 }> {`): skipped)
+                let mut angle = 0i32;
                 while j > 0 {
                     j -= 1;
+                    // (the `>` of `->` / `=>` is none)
+                    let arrow = j > 0 && (is_sym(j - 1, b'-') || is_sym(j - 1, b'=')) && toks[j - 1].2 == toks[j].1;
+                    if is_sym(j, b'>') && !arrow {
+                        angle += 1;
+                    } else if is_sym(j, b'<') {
+                        angle -= 1;
+                    } else if angle > 0 && is_sym(j, b'}') {
+                        let mut d = 1;
+                        while j > 0 && d > 0 {
+                            j -= 1;
+                            if is_sym(j, b'}') {
+                                d += 1;
+                            } else if is_sym(j, b'{') {
+                                d -= 1;
+                            }
+                        }
+                        continue;
+                    }
                     if is_sym(j, b';') || is_sym(j, b'{') || is_sym(j, b'}') {
                         break;
                     }
