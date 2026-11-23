@@ -1000,6 +1000,8 @@ impl Session2 {
         let iface_fp = {
             let mut h = KeyHasher::new();
             h.add(&self.ctx.dep_ranges.len());
+            // (the edition changes what a body's check finds: tail temporaries)
+            h.add(&self.opts.edition);
             let mut new_fp: FxMap<Key, u64> = FxMap::default();
             for (i, it) in items.iter().enumerate() {
                 let is_fn = !sums[i].fns.is_empty() && sums[i].structs.is_empty() && sums[i].enums.is_empty() && matches!(it.kind, ItemKind::Normal | ItemKind::ImplMember(_) | ItemKind::TraitMember(_));
@@ -1401,6 +1403,8 @@ impl Session2 {
         prog.has_mods = has_mod_word;
         prog.lower_consts = prog.consts.iter().any(|c| !c.name.contains("::") && c.name.trim_start_matches('_').starts_with(|ch: char| ch.is_lowercase()));
         prog.deny_must_use = deny_must_use;
+        prog.edition = self.opts.edition;
+        prog.path_lts = crate::regions::src_path_lts(src0);
         prog.deny_unused_alloc = deny_unused_alloc;
         prog.deny_trivial_casts = deny_trivial_casts;
         if deny_must_use {
@@ -3626,13 +3630,16 @@ fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u
         let g = insts.lock().unwrap();
         a.line_shift(&*g, id)
     };
+    let l0 = insts.lock().unwrap().fx_log.len();
     let (c, req) = acg::compile(&a.prog, insts, id, f, lb, &a.inl)
         .map_err(|e| if acg::has_loc(&e) { untag_lines(&e, shift) } else { format!("{}:1: in `{}`: {e}", it.line, a.prog.names[body as usize]) })?;
+    // (what it told the closures it makes goes with its Blob: one read back (a cache, another process) tells them too)
+    let clo_facts = insts.lock().unwrap().facts_since(l0);
     // (check は機械語にしない。ビルドは記録をバックエンドで機械語にする)
     if a.inl.check_only {
-        return Ok((acg::Compiled::empty_blob(), req));
+        return Ok((Blob { clo_facts, ..acg::Compiled::empty_blob() }, req));
     }
-    lower_blob(a, c, req)
+    lower_blob(a, c, req).map(|(b, req)| (Blob { clo_facts, ..b }, req))
 }
 
 /// 記録を機械語にして Blob を作る (バックエンドなしでは作れない)
@@ -3899,7 +3906,10 @@ impl Session2 {
                         let children: Vec<String> = req.iter().filter(|&&i| g.get(i).is_some()).map(|&i| name_of(&*g, i)).collect();
                         let mut me = vec![];
                         if g.get(id).is_some() {
-                            let b = Blob { align: 1, code: vec![], relocs: vec![acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(id) }], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None };
+                            // (a closure's body: with what its parent's lowering, which the record stands for, told it)
+                            let bo = g.body_of(id);
+                            let clo_facts = if g.kind_free.contains(&bo) || g.closure_rg.contains_key(&bo) { g.facts_of(bo) } else { vec![] };
+                            let b = Blob { align: 1, code: vec![], relocs: vec![acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(id) }], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None, clo_facts };
                             crate::cache2::encode_blob(&b, &a.prog, &*g, &mut me);
                         }
                         memo.ents.insert(name, ChkEnt { body, body_hash: bh, children, me, ok });
@@ -3996,13 +4006,29 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
     let p = &a.prog;
     let mut g = insts.lock().unwrap();
     g.lenient = true;
-    let made: FxSet<u32> = g.list.iter().map(|i| i.base).collect();
+    let mut made: FxMap<u32, Vec<Vec<Ty>>> = FxMap::default();
+    for i in &g.list {
+        made.entry(i.base).or_default().push(i.args.clone());
+    }
     for id in 0..p.names.len() {
         let sig = &p.sigs[id];
         // (a trait's default method no impl uses: its `Self` is a placeholder too, bounded by the trait)
-        if !sig.is_generic() || !sig.has_body || made.contains(&(id as u32)) || p.closures.contains_key(&(id as u32)) {
+        if !sig.is_generic() || !sig.has_body || p.closures.contains_key(&(id as u32)) {
             continue;
         }
+        // (a fn of which instances are made: checked with them. Unless every instance gives a `Copy` type for a
+        // parameter its bounds do not make `Copy` (`dup(1u32)` of `fn dup<T>(x: T) -> (T, T) { (x, x) }`): those hide
+        // what moving a T does, so the body is checked with placeholders too)
+        let recheck = match made.get(&(id as u32)) {
+            Some(insts) => {
+                let hides = |args: &Vec<Ty>| args.iter().zip(&sig.generics).any(|(&a, (_, bs))| !bs.iter().any(|b| b == "Copy") && acg::borrowck::is_copy(p, a, 0));
+                if !insts.iter().all(hides) {
+                    continue;
+                }
+                true
+            }
+            None => false,
+        };
         // (not a dependency's: `is_ext` knows only concrete fns, the item's flag tells)
         if !p.item_of[id].is_some_and(|ii| ii < p.prelude_from && !a.ext_items.get(ii as usize).copied().unwrap_or(false)) {
             continue;
@@ -4035,7 +4061,9 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
             continue;
         }
         let args: Vec<Ty> = sig.generics.iter().enumerate().map(|(k, (n, bs))| Ty::Struct(p.placeholder(id as u32, k as u32, n, bs))).collect();
-        let _ = g.request(p, id as u32, args);
+        if let (Ok(iid), true) = (g.request(p, id as u32, args), recheck) {
+            g.recheck.insert(iid);
+        }
     }
     std::mem::take(&mut g.pending)
 }
@@ -4111,7 +4139,7 @@ fn first_accidentally_stable(src: &str, items: &[SrcItem]) -> Option<String> {
 /// The lint levels codegen checks (`#![deny(unused_must_use)]`, `trivial_casts` ..) as one byte for the cache keys: a
 /// function compiled before such a `#![deny]` was added is not reused without its check
 fn lint_bits(p: &Program) -> u8 {
-    p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4
+    p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4 | ((p.edition >= 2024) as u8) << 5
 }
 
 /// The attributes behind a feature gate, and the feature

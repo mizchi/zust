@@ -1,0 +1,1 @@
+16:14: the trait bound `Rc<u32>: Copy` is not satisfied (E0277)

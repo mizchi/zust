@@ -144,6 +144,28 @@ pub fn rewrite_ctor_values(src: &str) -> Option<String> {
         } else {
             (String::new(), String::from_utf8_lossy(tok(k)).into_owned(), k)
         };
+        // (a turbofish after it: `P::<u16>` / `Some::<u32>`, kept on the call)
+        let mut last = last;
+        if is_sym(last + 1, b':') && is_sym(last + 2, b':') && is_sym(last + 3, b'<') {
+            let mut d = 0i32;
+            let mut j = last + 3;
+            while j < toks.len() {
+                if is_sym(j, b'<') {
+                    d += 1;
+                } else if is_sym(j, b'>') && !is_sym(j - 1, b'-') {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                } else if is_sym(j, b';') || is_sym(j, b'{') || is_sym(j, b'}') {
+                    break;
+                }
+                j += 1;
+            }
+            if d == 0 && j < toks.len() {
+                last = j;
+            }
+        }
         // 後ろ: `)` / `,` / `;` (`::` の続きでない)
         let next_ok = last + 1 < toks.len() && (is_sym(last + 1, b')') || is_sym(last + 1, b',') || is_sym(last + 1, b';')) && !(is_sym(last + 1, b':'));
         if !next_ok || !name.starts_with(|c: char| c.is_ascii_uppercase()) {

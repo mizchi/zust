@@ -14,7 +14,6 @@ These are in the type and borrow checks that the compat and region-check work ch
 
 | case | what is accepted that rustc rejects |
 |---|---|
-| `borrow_closure_escapes` | E0373 is only checked for `thread::spawn`: a boxed closure borrowing a local is returned |
 | `region_block_tail_escapes` | a loan held by a block's local, or by what a by-value method returns (`Some(&v).unwrap()`), is not followed out of the block's tail (E0597) |
 
 ### Privacy

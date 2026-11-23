@@ -568,7 +568,7 @@ fn owner(h: usize) -> Option<&'static str> {
                     .copied()
                     .find_map(|w| match w {
                         "Vec" | "String" | "HashMap" | "Reverse" | "BinaryHeap" | "SplitStr" | "RSplitStr" | "FlattenRef" | "MatchIndices" | "CharIndices"
-                        | "Bytes" | "ToCase" | "ParseIntError" | "IntErrorKind" | "Rev" | "StepBy" | "Peekable"
+                        | "Bytes" | "ToCase" | "CharEscape" | "ParseIntError" | "IntErrorKind" | "Rev" | "StepBy" | "Peekable"
                         | "SkipWhile" | "PreludeScan" | "Inspect" | "FlatMap" | "Flatten" | "Cloned" | "Windows" | "Chunks" | "ChunksExact" | "ChunksMut" | "Iter" | "IterMut" | "MaybeUninit"
                         | "HashSet" | "SetIntoIter" | "BTreeMap" | "BTreeSet" | "BtEntry" | "BtIter" | "BtIterMut"
                         | "BtIntoIter" | "VecDeque" | "DqIter" | "DqIntoIter" | "f64" | "f32" | "ParseFloatError" | "i128" | "u128" | "FromUtf8Error" | "Utf8Error" | "Rc" | "Arc" | "ManuallyDrop" | "Pin" | "NonNull" | "UnsafeCell" | "RefCell" | "Ref" | "RefMut" | "BorrowError" | "BorrowMutError" | "Cell" | "JoinHandle" | "__Sndr" | "__SyncSndr" | "__Rcvr__" | "__RecvIter" | "AtomicUsize" | "AtomicIsize" | "AtomicU8" | "AtomicU16" | "AtomicU32" | "AtomicU64" | "AtomicI8" | "AtomicI16" | "AtomicI32" | "AtomicI64" | "AtomicBool" | "OnceLock" | "Mutex" | "MutexGuard" | "RangeFrom" | "TryFromIntError" | "TryFromSliceError" | "Stdin" | "StdinLock" | "StdinLines" | "Stdout" | "StdoutLock"
@@ -1090,6 +1090,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     for (m, f) in [
         ("split", "__exr_str_split"),
         ("split_whitespace", "__exr_str_split_ws"),
+        ("split_ascii_whitespace", "__exr_str_split_ascii_whitespace"),
         ("lines", "__exr_str_lines"),
         ("trim", "__exr_str_trim"),
         ("starts_with", "__exr_str_starts_with"),
@@ -1099,7 +1100,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     ] {
         if need.contains(m) {
             need.insert(f);
-            if !matches!(m, "split" | "split_whitespace" | "lines" | "trim") {
+            if !matches!(m, "split" | "split_whitespace" | "split_ascii_whitespace" | "lines" | "trim") {
                 need.insert("__exr_char_utf8");
             }
         }
@@ -1127,6 +1128,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let hs = helper_suffixes();
     // (整数・Option・イテレータにも同じ名前のメソッドがあるものは、文字列を使っていそうなときだけ:
     //  String が現れるか、文字列リテラルが受け手 (`"ab".repeat(3)`))
+    // (or a `&str` / `&'static str` written: `NAME.to_ascii_lowercase()` with `static NAME: &'static str`)
     let mut str_evidence = |n: &str| -> bool {
         need.contains("String") || sc.has(&format!("\".{n}("))
     };
@@ -1144,12 +1146,16 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let iter_helper = found.iter().any(|f| {
         matches!(
             *f,
-            "__exr_str_char_indices" | "__exr_str_bytes" | "__exr_char_to_uppercase" | "__exr_char_to_lowercase"
+            "__exr_str_char_indices" | "__exr_str_bytes" | "__exr_char_to_uppercase" | "__exr_char_to_lowercase" | "__exr_char_escape_unicode" | "__exr_char_escape_default"
         )
     });
     // (helper の &str の引数に char を渡すと codegen が UTF-8 にする)
     if found.iter().any(|f| f.starts_with("__exr_str_")) {
         need.insert("__exr_char_utf8");
+    }
+    // (a helper giving a String: the String it is, and its `&*s` / `as_str` (`&*NAME.to_ascii_lowercase()`))
+    if found.iter().any(|f| matches!(*f, "__exr_str_to_ascii_lowercase" | "__exr_str_to_ascii_uppercase" | "__exr_str_to_lowercase" | "__exr_str_to_uppercase")) {
+        need.extend(["String", "as_str"]);
     }
     need.extend(found);
     if iter_helper {
@@ -1160,6 +1166,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         && sc.any_pre("split_str", &[".split("], &|user_src: &str| user_src.match_indices(".split(").any(|(i, m)| user_src.as_bytes().get(i + m.len()) != Some(&b'\'')))
     {
         need.extend(["__exr_str_split_str", "Iterator"]);
+    }
+    // (`s.split_ascii_whitespace().collect()`: Split's next)
+    if need.contains("split_ascii_whitespace") {
+        need.extend(["Iterator", "next"]);
     }
     // `s.rsplit("::")` (後ろから区切るイテレータ)
     if need.contains("rsplit") {

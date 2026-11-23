@@ -412,6 +412,28 @@ impl Inf<'_> {
         self.prog.struct_by_p(&PPath::of(p), self.self_sid)
     }
 
+    /// A pattern's path that writes type arguments (`P::<u16>(x, _)`): the value it matches is of that instance
+    fn pat_turbofish(&mut self, v: u32, p: &Path, sid: u32) {
+        // (a value of another instance (`S::<u16>(_)` matching `S(1u8)`) is then a mismatch where it is built)
+        if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Ty(_)))) {
+            if let Some(t) = self.variant_turbofish(p, sid) {
+                let k = self.known(t);
+                self.unify(v, k);
+            }
+        }
+    }
+
+    /// The struct a path with a turbofish on its last segment names (`S::<u32>`)
+    fn struct_by_turbofish(&self, p: &Path) -> Option<u32> {
+        let last = p.segs.last()?;
+        if last.args.is_empty() || last.fn_args.is_some() {
+            return None;
+        }
+        let mut pp = PPath::of(p);
+        pp.segs.last_mut()?.args = false;
+        self.prog.struct_by_p(&pp, self.self_sid)
+    }
+
     fn fn_by(&self, p: &Path) -> Option<u32> {
         self.prog.fn_by_p(&PPath::of(p), self.self_sid)
     }
@@ -824,8 +846,10 @@ impl Inf<'_> {
             Pat::TupleStruct(p, elems) => {
                 let (v, mode) = self.auto_deref(v, mode);
                 let fts: Vec<u32> = if let Some((sid, vi)) = self.variant_by(p) {
+                    self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, Some(vi)).into_iter().map(|f| f.1).collect()
-                } else if let Some(sid) = self.struct_by(p) {
+                } else if let Some(sid) = self.struct_by(p).or_else(|| self.struct_by_turbofish(p)) {
+                    self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, None).into_iter().map(|f| f.1).collect()
                 } else {
                     return;
@@ -843,8 +867,10 @@ impl Inf<'_> {
                 // (a unit variant has no fields: `Skip { iter, .. }` is the struct, even with `use E::*`'s variant `Skip`)
                 let variant = self.variant_by(p).filter(|&(sid, vi)| fps.is_empty() || !self.prog.structs[sid as usize].variants[vi].fields.is_empty() || self.struct_by(p).is_none());
                 let fields = if let Some((sid, vi)) = variant {
+                    self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, Some(vi))
-                } else if let Some(sid) = self.struct_by(p) {
+                } else if let Some(sid) = self.struct_by(p).or_else(|| self.struct_by_turbofish(p)) {
+                    self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, None)
                 } else {
                     return;
@@ -1038,7 +1064,8 @@ impl Inf<'_> {
             _ => return false,
         };
         let own = self.prog.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prog.prelude_from);
-        if own && self.prog.method(b, "clone").is_some() {
+        // (a closure's Clone is its captures', which are not among the arguments here)
+        if (own && self.prog.method(b, "clone").is_some()) || self.prog.is_closure(b) {
             return false;
         }
         let derived = self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
@@ -1411,6 +1438,14 @@ impl Inf<'_> {
                     self.adt_ctor(sid, Some(vi), args)
                 } else if let Some(sid) = self.struct_by(p) {
                     self.adt_ctor(sid, None, args)
+                } else if let Some(sid) = self.struct_by_turbofish(p) {
+                    // (`S::<u32> { t: 1 }`: the instance the turbofish writes)
+                    let v = self.adt_ctor(sid, None, args);
+                    if let Some(t) = self.variant_turbofish(p, sid) {
+                        let k = self.known(t);
+                        self.unify(v, k);
+                    }
+                    v
                 } else {
                     self.var()
                 }
@@ -1848,17 +1883,34 @@ impl Inf<'_> {
                             }
                         }
                     }
-                    return self.adt_ctor(sid, Some(vi), xs);
+                    let v = self.adt_ctor(sid, Some(vi), xs);
+                    // (`SomeEnum::SomeVariant::<&u32>(&c)`: the instance the turbofish writes)
+                    if p.segs.iter().any(|s| !s.args.is_empty()) {
+                        if let Some(t) = self.variant_turbofish(p, sid) {
+                            let k = self.known(t);
+                            self.unify(v, k);
+                        }
+                    }
+                    return v;
                 }
                 let local = ident(p).is_some_and(|id| self.lookup(id).is_some());
                 if !local && self.fn_by(p).is_none() {
-                    if let Some(sid) = self.struct_by(p) {
+                    let plain = self.struct_by(p);
+                    if let Some(sid) = plain.or_else(|| self.struct_by_turbofish(p)) {
                         let mut xs = vec![];
                         for (i, a) in args.iter().enumerate() {
                             let v = self.expr(a);
                             xs.push((i.to_string(), v));
                         }
-                        return self.adt_ctor(sid, None, xs);
+                        let v = self.adt_ctor(sid, None, xs);
+                        // (`SomeStruct::<&u32>(&c)`: the instance the turbofish writes)
+                        if plain.is_none() {
+                            if let Some(t) = self.variant_turbofish(p, sid) {
+                                let k = self.known(t);
+                                self.unify(v, k);
+                            }
+                        }
+                        return v;
                     }
                 }
             }
