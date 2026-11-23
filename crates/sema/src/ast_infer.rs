@@ -1398,6 +1398,20 @@ impl Inf<'_> {
                         let f = intern_fn(FnTy { params: s.params.clone(), ret: s.ret });
                         self.known(Ty::Fn(f))
                     }
+                    // (a free generic fn with every type argument written (`id::<&'static u32>`): its instance's
+                    // pointer type, so that a call through it knows its arguments' types)
+                    Some(id) if self.prog.sigs[id as usize].impl_of.is_none() && self.prog.sigs[id as usize].trait_of.is_none() => {
+                        let ng = self.prog.sigs[id as usize].generics.len();
+                        let ts: Option<Vec<Ty>> = p.segs.last().map(|sg| sg.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).map(|t| self.parse_ty(t)).collect()).unwrap_or(None);
+                        match ts.filter(|ts| ts.len() == ng && ng > 0 && ts.iter().all(|&t| !self.prog.has_param(t))) {
+                            Some(ts) => {
+                                let s = &self.prog.sigs[id as usize];
+                                let f = intern_fn(FnTy { params: s.params.iter().map(|&t| self.prog.subst(t, &ts)).collect(), ret: self.prog.subst(s.ret, &ts) });
+                                self.known(Ty::Fn(f))
+                            }
+                            None => self.var(),
+                        }
+                    }
                     _ => self.var(),
                 },
             },
@@ -1942,6 +1956,18 @@ impl Inf<'_> {
                 }
                 None => self.var(),
             };
+        }
+        // (`id::<u32>(c)`: the turbofish's types are the fn's own generics', the last ones)
+        if let (Some(id), Expr::Path(None, p)) = (callee, f) {
+            let tys: Vec<&PTy> = p.segs.last().map(|s| s.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect()).unwrap_or_default();
+            let ng = self.prog.sigs[id as usize].generics.len();
+            if !tys.is_empty() && tys.len() <= ng {
+                let mut pre = vec![None; ng];
+                for (k, t) in tys.iter().enumerate() {
+                    pre[ng - tys.len() + k] = Some(self.ty_var(t));
+                }
+                return self.apply_with(callee, avs, 0, None, pre);
+            }
         }
         self.apply(callee, avs, 0)
     }

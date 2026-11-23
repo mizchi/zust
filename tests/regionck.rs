@@ -3144,3 +3144,17 @@ fn part17_loop_iteration_temporaries() {
     assert_eq!(check(&format!("fn main() {{\n    let mut v: Vec<&i32> = vec![];\n    match Some(1) {{\n        Some(ref x) => v.push(x),\n        None => {{}}\n    }};\n    let r: &i32 = match 5 {{ ref y => y }};\n    println!(\"{{}}\", r);\n{tail}")), vec![]);
     assert_eq!(check("fn main() {\n    let v = vec![String::new(), String::from(\"a\")];\n    let mut out: Vec<&String> = vec![];\n    for ref s in v.iter() {\n        out.push(*s);\n    }\n    for (_i, ref s) in v.iter().enumerate() {\n        out.push(*s);\n    }\n    let mut it = v.iter();\n    while let Some(ref s) = it.next() {\n        out.push(s);\n    }\n    match v.iter().next() {\n        Some(ref s) => out.push(*s),\n        None => {}\n    };\n    let mut n: Vec<i32> = vec![];\n    for ref x in 0..3 {\n        n.push(*x);\n    }\n    println!(\"{} {:?}\", out.len(), n);\n}\n"), vec![]);
 }
+
+/// A call's turbofish gives the fn's type arguments to the inference: `let c = 66; id::<&'static u32>(&c)` makes c a
+/// u32 (it was "mismatched types: expected `T0`, found `&i32`"), and the borrow must be 'static (E0597), also through a
+/// fn item with every type argument written (`let f = id::<&'static u32>; f(&c)`), as
+/// nll/user-annotations/adt-tuple-struct-calls.rs writes them
+#[test]
+fn part17_fn_turbofish_inference() {
+    let id = "fn id<T>(t: T) -> T { t }\n";
+    for call in ["id::<&'static u32>(&c);", "let f = id::<&'static u32>;\n    f(&c);"] {
+        let d = check(&format!("{id}fn main() {{\n    let c = 66;\n    {call}\n}}\n"));
+        assert!(d.len() == 1 && d[0].1.contains("does not live long enough"), "{call}: {d:?}");
+    }
+    assert_eq!(check(&format!("{id}fn main() {{\n    let c = 66;\n    id::<u32>(c);\n    let d = 1;\n    let _r = id::<&u32>(&d);\n    let f = id::<u64>;\n    let _g = f(300);\n}}\n")), vec![]);
+}

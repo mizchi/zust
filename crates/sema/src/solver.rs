@@ -893,11 +893,28 @@ impl Solver<'_> {
         skip: usize,
         self_ty: Option<Ty>,
     ) -> u32 {
+        self.apply_with(callee, args, skip, self_ty, vec![])
+    }
+
+    /// apply_self, with the type variables of some of the callee's generics given (a turbofish's: `id::<u32>(c)`)
+    pub fn apply_with(
+        &mut self,
+        callee: Option<u32>,
+        args: Vec<u32>,
+        skip: usize,
+        self_ty: Option<Ty>,
+        pre: Vec<Option<u32>>,
+    ) -> u32 {
         match callee {
             Some(id) => {
                 let sig = &self.prog.sigs[id as usize];
                 let (params, ret) = (sig.params[skip.min(sig.params.len())..].to_vec(), sig.ret);
                 let mut pv: Vec<Option<u32>> = vec![None; sig.generics.len()];
+                for (i, v) in pre.into_iter().enumerate() {
+                    if i < pv.len() {
+                        pv[i] = v;
+                    }
+                }
                 if let (Some(t), true) = (self_ty, sig.trait_of.is_some()) {
                     pv[0] = Some(self.known(t));
                 }
