@@ -3,6 +3,8 @@
 // argument and `decode` for a result; both walk the value by its schema, since the bytes carry no type tags.
 //
 // A schema: "i32" | "u32" | "i64" | "f32" | "f64" | "bool" | "str" | ["arr", schema] | ["rec", [[field, schema], ..]]
+//   | ["enum", key, [[tag, [[field, schema], ..]], ..]]: the variant's index (u32), then its fields. `key` is the
+//     property holding the tag (`TAG`, or a TS union's `kind`); null: the value is the tag string itself
 
 const enc = new TextEncoder();
 // (a leading U+FEFF is part of the string, not a byte order mark to drop)
@@ -49,6 +51,19 @@ function put(w, s, v) {
       return;
     }
   }
+  if (s[0] === "enum") {
+    const tag = s[1] === null ? v : v[s[1]];
+    const vs = s[2];
+    let k = 0;
+    while (k < vs.length && vs[k][0] !== tag) k++;
+    if (k === vs.length) throw new TypeError("zustscript-helper: " + JSON.stringify(tag) + " is not a variant");
+    room(w, 4);
+    w.view.setUint32(w.n, k, true);
+    w.n += 4;
+    const fs = vs[k][1];
+    for (let i = 0; i < fs.length; i++) put(w, fs[i][1], v[fs[i][0]]);
+    return;
+  }
   if (s[0] === "arr") {
     room(w, 4);
     w.view.setUint32(w.n, v.length, true);
@@ -76,6 +91,18 @@ function get(r, s) {
       r.i += 4 + n;
       return v;
     }
+  }
+  if (s[0] === "enum") {
+    const k = r.view.getUint32(r.i, true);
+    r.i += 4;
+    const vr = s[2][k];
+    if (vr === undefined) throw new TypeError("zustscript-helper: no variant " + k);
+    if (s[1] === null) return vr[0];
+    v = {};
+    Object.defineProperty(v, s[1], { value: vr[0], enumerable: true, writable: true, configurable: true });
+    const fs = vr[1];
+    for (let i = 0; i < fs.length; i++) Object.defineProperty(v, fs[i][0], { value: get(r, fs[i][1]), enumerable: true, writable: true, configurable: true });
+    return v;
   }
   if (s[0] === "arr") {
     const n = r.view.getUint32(r.i, true);
