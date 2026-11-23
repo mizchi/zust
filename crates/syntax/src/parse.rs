@@ -1156,7 +1156,9 @@ impl Parser {
     /// 式の中のパス (`a::b::<T>::c`)。型の中では `::` なしの `<..>` も取る
     fn path(&mut self, in_ty: bool) -> R<Path> {
         let pos = self.pos();
-        let global = self.eat_punct("::");
+        // (`::name::..` names the extern crate `name` (2018 and later): the crate's items are reached as `name::..`
+        // is. Kept for `::crate` / `::self` / `::super`, which are errors (E0433))
+        let global = self.eat_punct("::") && self.tok(0).is_some_and(|t| matches!(t.text.as_str(), "crate" | "self" | "super" | "Self"));
         let mut segs = Vec::new();
         loop {
             let st = self.i;

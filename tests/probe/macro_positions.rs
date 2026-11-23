@@ -25,6 +25,14 @@ d!(u8, u16, u32);
 fn f() -> ty!() {
     4
 }
+macro_rules! item {
+    ($n:ident, $v:expr) => {
+        const $n: u32 = $v;
+    };
+}
+pub(crate) use {item, one};
+crate::item!(P, 7);
+self::item!(Q, 0 + crate::one!(u8));
 
 macro_rules! m {
     (@closure $x:expr) => { $x * 2 };
@@ -52,7 +60,7 @@ struct R {
 }
 
 fn main() {
-    println!("{} {} {} {} {}", A, B, ARR.len(), N, f());
+    println!("{} {} {} {} {} {} {}", A, B, ARR.len(), N, f(), P, Q);
     println!("{}", m!(@go 5));
     let r = R { a: 1 };
     println!("ok {}", r.a);

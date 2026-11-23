@@ -302,6 +302,7 @@ impl<'a> Runner<'a> {
                 exe: None,
                 cfgs,
                 env,
+                proc_macro: None,
             });
         }
         let pk = &self.g.pkgs[n.0].m;
@@ -325,6 +326,7 @@ impl<'a> Runner<'a> {
             exe: Some("build-script-build".into()),
             cfgs,
             env,
+            proc_macro: None,
         });
         let zd = dir.join("zust");
         let mut opts = Options2 { backend: Some(zustc::clif_backend::compile), ..Options2::default() };
@@ -335,10 +337,68 @@ impl<'a> Runner<'a> {
         Ok(zd.join("build-script-build"))
     }
 
+    /// A proc-macro crate (a host node) as rustc builds it: a dylib, with its dependencies as rlibs (their build scripts
+    /// run first). zustc runs its macros through the toolchain's proc-macro server
+    pub fn proc_macro_dylib(&mut self, pm: Node) -> R<PathBuf> {
+        fn visit(s: &Runner, m: Node, out: &mut Vec<Node>) {
+            if out.contains(&m) {
+                return;
+            }
+            for (_, t) in s.edges(m, DepKind::Normal) {
+                visit(s, t, out);
+            }
+            out.push(m);
+        }
+        let mut closure = vec![];
+        visit(self, pm, &mut closure);
+        let mut outs: BTreeMap<Node, Option<Output>> = BTreeMap::new();
+        for &m in &closure {
+            let o = self.run(m)?;
+            outs.insert(m, o);
+        }
+        let art = self.host_libs_rustc(&closure, &outs)?;
+        art.get(&pm).cloned().ok_or_else(|| format!("`{}` was not built", self.g.pkgs[pm.0].m.name))
+    }
+
     fn compile_rustc(&self, n: Node, script: &Path, dir: &Path, closure: &[Node], outs: &BTreeMap<Node, Option<Output>>) -> R<PathBuf> {
         let deps_dir = self.out.join("build").join("deps");
+        let art = self.host_libs_rustc(closure, outs)?;
+        let pk = &self.g.pkgs[n.0].m;
+        let rd = dir.join("rustc");
+        mkdir(&rd)?;
+        let exe = rd.join("build-script-build");
+        let mut c = Command::new(rustc());
+        c.args(["--crate-name", "build_script_build", "--edition", &pk.edition, "--crate-type", "bin", "--emit=link", "--cap-lints", "allow", "-C", "opt-level=0", "-o"]).arg(&exe);
+        c.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+        for f in &self.r.nodes[&n].features {
+            c.args(["--cfg", &format!("feature=\"{f}\"")]);
+        }
+        let mut deps_fp: Vec<String> = vec![];
+        for (e, t) in self.externs(n, DepKind::Build) {
+            if let Some(a) = art.get(&t) {
+                c.arg("--extern").arg(format!("{e}={}", a.display()));
+                deps_fp.push(file_fp(a));
+            }
+        }
+        let (_, mut env) = crate_env(pk, "build_script_build", None);
+        env.retain(|(k, _)| k != "OUT_DIR");
+        c.envs(env.iter().map(|(k, v)| (k, v))).current_dir(&pk.dir).arg(script);
+        // (not again while the command and the package's files are the same)
+        let key = hash(&[&rustc_id(), &format!("{c:?}"), &deps_fp.join(","), &src_fp(&pk.dir, &self.skip)]);
+        let kp = rd.join("key");
+        if exe.is_file() && std::fs::read_to_string(&kp).is_ok_and(|k| k == key) {
+            return Ok(exe);
+        }
+        run_rustc(c, &format!("the build script of `{} v{}`", pk.name, pk.version))?;
+        let _ = std::fs::write(&kp, key);
+        Ok(exe)
+    }
+
+    /// Host libraries (dependencies first) as rustc builds them: rlibs, a proc macro as a dylib, each named by a hash
+    /// of what it is built from
+    fn host_libs_rustc(&self, closure: &[Node], outs: &BTreeMap<Node, Option<Output>>) -> R<BTreeMap<Node, PathBuf>> {
+        let deps_dir = self.out.join("build").join("deps");
         mkdir(&deps_dir)?;
-        // (a host library as an rlib (a proc macro as a dylib), named by a hash of what it is built from)
         let mut art: BTreeMap<Node, PathBuf> = BTreeMap::new();
         for &m in closure {
             let p = &self.g.pkgs[m.0].m;
@@ -381,37 +441,10 @@ impl<'a> Runner<'a> {
             }
             art.insert(m, file);
         }
-        let pk = &self.g.pkgs[n.0].m;
-        let rd = dir.join("rustc");
-        mkdir(&rd)?;
-        let exe = rd.join("build-script-build");
-        let mut c = Command::new(rustc());
-        c.args(["--crate-name", "build_script_build", "--edition", &pk.edition, "--crate-type", "bin", "--emit=link", "--cap-lints", "allow", "-C", "opt-level=0", "-o"]).arg(&exe);
-        c.arg("-L").arg(format!("dependency={}", deps_dir.display()));
-        for f in &self.r.nodes[&n].features {
-            c.args(["--cfg", &format!("feature=\"{f}\"")]);
-        }
-        let mut deps_fp: Vec<String> = vec![];
-        for (e, t) in self.externs(n, DepKind::Build) {
-            if let Some(a) = art.get(&t) {
-                c.arg("--extern").arg(format!("{e}={}", a.display()));
-                deps_fp.push(file_fp(a));
-            }
-        }
-        let (_, mut env) = crate_env(pk, "build_script_build", None);
-        env.retain(|(k, _)| k != "OUT_DIR");
-        c.envs(env.iter().map(|(k, v)| (k, v))).current_dir(&pk.dir).arg(script);
-        // (not again while the command and the package's files are the same)
-        let key = hash(&[&rustc_id(), &format!("{c:?}"), &deps_fp.join(","), &src_fp(&pk.dir, &self.skip)]);
-        let kp = rd.join("key");
-        if exe.is_file() && std::fs::read_to_string(&kp).is_ok_and(|k| k == key) {
-            return Ok(exe);
-        }
-        run_rustc(c, &format!("the build script of `{} v{}`", pk.name, pk.version))?;
-        let _ = std::fs::write(&kp, key);
-        Ok(exe)
+        Ok(art)
     }
 }
+
 
 /// `CARGO_PKG_*` of a package (what cargo gives rustc and build scripts)
 pub fn pkg_env(pk: &Package) -> Vec<(String, String)> {

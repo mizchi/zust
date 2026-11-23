@@ -133,18 +133,23 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
     - reads a proc-macro crate's root with its features but not with its own build script's cfgs;
     - evaluates `cfg!` in the arguments of a user's macro named like std's format macros (`print!`) before that
       macro's rules match.
-- Proc macros ([#29](https://github.com/mizchi/zust/issues/29)): none can run. zurgo builds a proc-macro dependency as a
-  stub and stops on a use of its derives or attributes; zustc alone still drops an unknown attribute silently
-  (`#[wasm_bindgen]`, `#[component]`).
+- Proc macros ([#29](https://github.com/mizchi/zust/issues/29)) run through the toolchain's proc-macro server: zurgo
+  builds the dylib with rustc, zustc finds the uses by name and expands them (crates/syntax/src/pm.rs). Not yet:
+  - hygiene and spans of their output (every span is the call site's);
+  - a proc macro among a build script's build-dependencies (rustc builds that script);
+  - zustc alone (`zustc build` with no `pm=` dylib, or without the server) still drops an unknown attribute silently
+    (`#[wasm_bindgen]`, `#[component]`).
 - Crates that zurgo now reaches and that stop on zustc: anyhow 1.0.104 (`error.rs:808`, E0106), libc 0.2.191 and
   serde_core 1.0.229 (`mod x;` inside a `macro_rules!` body: rustc finds the file where the macro is expanded, zustc
   beside the macro's own file). Their build scripts compile with rustc only (`env::vars()`, `Command` with an
   `OsString`, `Output` and other std gaps).
 - wasm-bindgen-shared 0.2.130 (W0 of [#38](https://github.com/mizchi/zust/issues/38)) builds with zurgo for x86-64 and
   for wasm32. An app that calls its whole API prints, under node, what its cargo build prints
-  (`crates/zurgo/tests/zurgo.rs`). Next, the wasm-bindgen crate itself (W1), which stops on:
-  - `closures!` (a tt-muncher) matches none of its calls;
-  - `impl IntoWasmAbi for &&str` from `ref_by_copy!`: an impl for a reference to a reference.
+  (`crates/zurgo/tests/zurgo.rs`). Next, the wasm-bindgen crate itself (W1). Its `#[wasm_bindgen]` uses expand
+  (proc macros, above), and these no longer stop it: `closures!` (a tt-muncher's `@closure` marker), impls for `&&str`,
+  macro calls in an item's expression, doc comments on a cfg'd-out item, `pub extern crate`, `::dep::path`, an
+  `extern` block in a function body, a type bound in a `where` clause. It stops on:
+  - `AssertUnwindSafe` (`closure.rs:946`): a type of std that zustc does not have.
 - memchr 2.8.3, which 42 crates of dioxus and 29 of leptos depend on: an impl of a trait for a SIMD vector type is
   "cannot find type" (`impl Vector for v128` in its wasm32 module, `impl Vector for __m128i` in its x86-64 one).
 - `cratebench/ui/run.py` does not run build scripts: a crate gets cargo's variables (`CARGO_PKG_*`) but not what its

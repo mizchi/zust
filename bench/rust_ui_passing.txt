@@ -659,6 +659,7 @@ run-pass	binding/nil-pattern.rs
 run-pass	binding/nullary-or-pattern.rs
 run-pass	binding/optional_comma_in_match_arm.rs
 run-pass	binding/or-pattern.rs
+run-pass	binding/pat-ranges.rs
 run-pass	binding/pat-tuple-1.rs
 run-pass	binding/pat-tuple-2.rs
 run-pass	binding/pat-tuple-3.rs
@@ -968,6 +969,7 @@ compile-fail	borrowck/implementation-not-general-enough-ice-133252.rs
 run-pass	borrowck/incorrect-loan-error-on-local-update-5550.rs
 compile-fail	borrowck/index-mut-help-with-impl.rs
 compile-fail	borrowck/index-mut-help.rs
+compile-fail	borrowck/index-mut-help2.rs
 check-pass	borrowck/index-self-with-arithmetic-on-self-item.rs
 compile-fail	borrowck/issue-101119.rs
 compile-fail	borrowck/issue-103250.rs
@@ -2536,6 +2538,7 @@ compile-fail	expr/malformed_closure/missing-braces-before-close-brace.rs
 compile-fail	expr/malformed_closure/missing_block_in_fn_call.rs
 compile-fail	expr/malformed_closure/ruby_style_closure_successful_parse.rs
 run-pass	expr/return-in-block-tuple.rs
+run-pass	expr/scope.rs
 compile-fail	extern/bad-external-async-fn-issue-146754.rs
 run-pass	extern/empty-struct-extern-fn-16441.rs
 run-pass	extern/extern-1.rs
@@ -4100,6 +4103,7 @@ check-pass	macros/issue-78892-substitution-in-statement-attr.rs
 check-pass	macros/issue-84429-matches-edition.rs
 compile-fail	macros/issue-86865.rs
 run-pass	macros/issue-8709.rs
+check-pass	macros/issue-87877.rs
 run-pass	macros/issue-8851.rs
 check-pass	macros/issue-95267.rs
 check-pass	macros/issue-95533.rs
@@ -6117,6 +6121,7 @@ compile-fail	resolve/issue-54379.rs
 check-pass	resolve/issue-57523.rs
 compile-fail	resolve/issue-5927.rs
 compile-fail	resolve/issue-60057.rs
+compile-fail	resolve/issue-65025-extern-static-parent-generics.rs
 compile-fail	resolve/issue-6702.rs
 compile-fail	resolve/issue-69401-trait-fn-no-body-ty-local.rs
 compile-fail	resolve/issue-70736-async-fn-no-body-def-collector.rs

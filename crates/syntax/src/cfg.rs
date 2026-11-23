@@ -431,7 +431,7 @@ fn attrs_start(s: &[u8], toks: &[Tok], i: usize) -> usize {
 
 /// Before the byte p (an item or its first attribute), the outer doc comments (`///`, `/** */`) on the lines just
 /// above it: they are attributes of that item and go with it (rustc: no E0585 for a doc before a cfg'd-out item)
-fn outer_docs_start(s: &[u8], p: usize) -> usize {
+pub(crate) fn outer_docs_start(s: &[u8], p: usize) -> usize {
     let mut start = p;
     loop {
         // (the text from the line's start up to here must be blank)
@@ -516,9 +516,24 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs:
             if t(e) == b";" {
                 externs.push((toks[i].1, toks[e].2));
                 blank(&mut out, toks[i].1, toks[e].2);
+                // (its visibility too: `pub extern crate alloc;`, `pub(crate) extern crate core;`. A path through it
+                // (`rt::alloc::vec::Vec`) is the crate's path. `pub(in path)` stays: its path is checked)
+                let renamed = e == i + 5 && t(i + 3) == b"as" && t(i + 4) != b"_" && !matches!(t(i + 2), b"std" | b"core" | b"alloc");
+                if !renamed && i >= 1 {
+                    let vs = if t(i - 1) == b"pub" {
+                        Some(i - 1)
+                    } else if i >= 4 && t(i - 1) == b")" && matches!(t(i - 2), b"crate" | b"self" | b"super") && t(i - 3) == b"(" && t(i - 4) == b"pub" {
+                        Some(i - 4)
+                    } else {
+                        None
+                    };
+                    if let Some(vs) = vs {
+                        blank(&mut out, toks[vs].1, toks[i].1);
+                    }
+                }
                 // (`extern crate util as u;` names the crate `u` too: `use util as u;` in its place. `use` where `extern`
                 // was, and `util as u;` where it was, so a line break in the item stays where it is)
-                if e == i + 5 && t(i + 3) == b"as" && t(i + 4) != b"_" && !matches!(t(i + 2), b"std" | b"core" | b"alloc") {
+                if renamed {
                     out[toks[i].1..toks[i].1 + 3].copy_from_slice(b"use");
                     let (a, b) = (toks[i + 2].1, toks[e].2);
                     out[a..b].copy_from_slice(&s[a..b]);
@@ -641,6 +656,7 @@ mod tests {
         assert_eq!(run("m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }", &[]), "m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }");
         assert_eq!(run("#[cfg(feature = \"alloc\")] extern crate alloc; extern crate std as s; fn f() {}", &["alloc"]), "fn f() {}");
         assert_eq!(run("extern crate util as u; extern crate geom as _; fn f() {}", &[]), "use util as u; fn f() {}");
+        assert_eq!(run("pub extern crate alloc; pub(crate) extern crate core; pub extern crate util as u; fn f() {}", &[]), "pub use util as u; fn f() {}");
         // (a line break in the item stays on its line)
         let o = strip("extern\ncrate util as u;\n#[cfg(any())] fn f() {}", &CfgSet::default()).unwrap();
         assert_eq!(o.lines().map(str::trim).take(2).collect::<Vec<_>>(), ["use", "util as u;"]);

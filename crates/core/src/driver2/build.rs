@@ -852,6 +852,9 @@ pub struct CrateSpec {
     /// the compile-time environment for `env!` / `option_env!` (`env=KEY=VALUE`): cargo's `CARGO_PKG_*`, `OUT_DIR`,
     /// a build script's `rustc-env`
     pub env: Vec<(String, String)>,
+    /// (a proc-macro crate, which zurgo builds as a stub library of its name: the dylib rustc built from it. The
+    /// crates that reach it use its macros (crate::pm, the toolchain's proc-macro server runs them). `pm=PATH`)
+    pub proc_macro: Option<std::path::PathBuf>,
 }
 
 /// A value for the workspace file: `%`, `#`, whitespace and other control characters as `%XX`
@@ -891,7 +894,7 @@ fn ws_unescape(s: &str) -> String {
 
 /// ワークスペースの説明ファイルを読む。1 行に 1 クレート: `lib <名前> <根のファイル> [依存...]` / `bin <名前> <根のファイル> [依存...]`
 /// (依存の代わりに `features=a,b` で feature を有効にする。bin の `exe=NAME` は実行ファイルの名前。`cfg=name` / `cfg=name=value`
-/// は cfg、`env=KEY=VALUE` は `env!` の値: 値の `%` `#` 空白は `%XX` (ws_escape))
+/// は cfg、`env=KEY=VALUE` は `env!` の値: 値の `%` `#` 空白は `%XX` (ws_escape)。`pm=PATH` は proc-macro クレートの dylib)
 /// (`#` から後ろはコメント。パスは説明ファイルのディレクトリから)
 pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -932,6 +935,7 @@ pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
                 })
                 .collect(),
             env: w[3..].iter().filter_map(|s| s.strip_prefix("env=")).filter_map(|s| s.split_once('=')).map(|(k, v)| (ws_unescape(k), ws_unescape(v))).collect(),
+            proc_macro: w[3..].iter().find_map(|s| s.strip_prefix("pm=")).map(|p| dir.join(ws_unescape(p))),
         });
     }
     Ok(out)
@@ -1064,6 +1068,14 @@ fn add_crate_cfg(h: &mut KeyHasher, c: &CrateSpec) {
     h.add(&c.features);
     h.add(&c.cfgs);
     h.add(&c.env);
+    // (a proc macro's dylib: also when it is rebuilt in place)
+    if let Some(p) = &c.proc_macro {
+        h.add(p.as_os_str());
+        if let Ok(m) = std::fs::metadata(p) {
+            h.add(&m.len());
+            h.add(&m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos()));
+        }
+    }
 }
 
 fn n_lines(s: &str) -> u32 {
@@ -1425,8 +1437,13 @@ impl Session2 {
                 }
                 let (text, map) = loaded[i].clone().unwrap();
                 let mut dd = String::new();
+                // (the proc-macro crates it reaches: directly, or through the libraries that re-export their macros)
+                let mut pms: Vec<crate::pm::Lib> = vec![];
                 for j in all_deps(i) {
                     dd.push_str(&defs[j]);
+                    if let Some(p) = &crates[j].proc_macro {
+                        pms.push(crate::pm::load(&crates[j].name, p).map_err(|e| format!("crate `{}`: the proc-macro crate `{}`: {e}", crates[i].name, crates[j].name))?);
+                    }
                 }
                 // (前回と同じ入力なら out_dir/<名前>.prep から読む: `キー\n展開したものの長さ\n展開したもの インターフェース`)
                 let mut kh = KeyHasher::new();
@@ -1436,6 +1453,12 @@ impl Session2 {
                 // (the expansion's cfg follows the target: `cfg(target_arch = "wasm32")` in a macro's output)
                 kh.add(&self.opts.backend_id());
                 add_crate_cfg(&mut kh, &crates[i]);
+                // (the proc macros' dylibs: also when one is rebuilt in place)
+                for j in all_deps(i) {
+                    if crates[j].proc_macro.is_some() {
+                        add_crate_cfg(&mut kh, &crates[j]);
+                    }
+                }
                 let pkey = key_hex(kh.finish());
                 let pp = out_dir.join(format!("{}.prep", crates[i].name).as_str());
                 if let Ok(old) = std::fs::read_to_string(pp.as_path()) {
@@ -1454,14 +1477,14 @@ impl Session2 {
                     }
                 }
                 let marker = "\n// __zustc_dep_macros__\n";
-                let exp = if dd.is_empty() && !text.contains("macro_rules!") {
+                let exp = if dd.is_empty() && !text.contains("macro_rules!") && pms.is_empty() {
                     text.clone()
                 } else {
                     let mut full = text.clone();
                     full.push_str(marker);
                     full.push_str(&dd);
                     let cfg = self.opts.cfg_of(&crates[i].features, &crates[i].cfgs, &crates[i].env);
-                    match crate::macros::expand_cfg(&full, Some(&cfg)).map_err(|e| format!("crate `{}`: {}", crates[i].name, map.relocate_err(&e)))? {
+                    match crate::macros::expand_with(&full, Some(&cfg), &pms).map_err(|e| format!("crate `{}`: {}", crates[i].name, map.relocate_err(&e)))? {
                         Some(t) => match t.find(marker) {
                             Some(k) => t[..k].to_string(),
                             None => t,

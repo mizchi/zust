@@ -745,6 +745,9 @@ pub fn tokenize(s: &[u8]) -> Vec<(u8, usize, usize)> {
     toks
 }
 
+/// What a proc macro's expansion starts with (crate::pm): a comment, so the preprocessing knows that a line holds one
+pub const PM_MARK: &str = "/*zust:pm*/";
+
 /// 関数の本体の中に書いたアイテム (`fn helper() {..}` / `struct` / `enum` / `const` / `use`) をファイルの末尾へ移す。
 /// 元の場所は空白にして (改行は残す)、後ろの行番号を変えない
 pub fn hoist_nested_items(src: &str) -> Option<String> {
@@ -771,11 +774,17 @@ pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
+    const KWS: [&str; 20] = [
+        "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "pub fn ", "pub struct ", "pub enum ", "pub const ",
+        "pub static ", "pub trait ", "pub type ", "pub(crate) ",
+    ];
     let indented = src.split('\n').any(|l| {
         let t = l.trim_start();
-        t.len() < l.len() && ["fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "pub fn ", "pub struct ", "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) "].iter().any(|k| t.starts_with(k))
+        t.len() < l.len() && KWS.iter().any(|k| t.starts_with(k))
     });
-    if !indented {
+    // (a proc macro's output is one line, marked (PM_MARK): the items in its bodies, `{#[link(..)] extern "C" {..}`,
+    // are not at a line's start)
+    if !indented && !src.contains(PM_MARK) {
         return None;
     }
     let s = src.as_bytes();
@@ -827,18 +836,27 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 } else {
                     k
                 }
+            } else if t == b"unsafe" && k + 1 < toks.len() && tok(k + 1) == b"extern" {
+                // (`unsafe extern "C" { .. }`)
+                k + 1
             } else {
                 k
             };
             let pt = t;
             let t = tok(ik);
+            // (an extern block, `extern "C" { fn f(); }` (also with no ABI): the block goes out whole, its declarations
+            // are not items of their own)
+            let extern_block = t == b"extern"
+                && ik + 1 < toks.len()
+                && (is_sym(ik + 1, b"{") || (toks[ik + 1].0 == 2 && ik + 2 < toks.len() && is_sym(ik + 2, b"{")));
             // (`mod m { .. }` / `trait T { .. }` / `impl S { .. }` / `type A = ..;` / `union U { .. }` too; `union` is a
             // keyword only before a name)
             let item_kw = matches!(t, b"fn" | b"struct" | b"enum" | b"const" | b"use" | b"static" | b"mod" | b"trait" | b"impl" | b"type")
-                || (t == b"union" && ik + 1 < toks.len() && toks[ik + 1].0 == 0);
+                || (t == b"union" && ik + 1 < toks.len() && toks[ik + 1].0 == 0)
+                || extern_block;
             let impl_like = t == b"impl";
             // (`const` の後ろに `fn` や `|` (const クロージャ) が来るものは別扱い: `const fn` は fn で見る)
-            if in_body && stmt_start && item_kw && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<"))) {
+            if in_body && stmt_start && item_kw && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<")) || extern_block) {
                 // アイテムの終わり: `{ .. }` (fn / struct / enum) か `;`
                 let mut j = ik + 1;
                 let mut d = 0i32;
@@ -910,7 +928,7 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 }
                 moves.push((toks[st].1, toks[e].2));
                 let nk = if matches!(t, b"static") && tok(ik + 1) == b"mut" { ik + 2 } else { ik + 1 };
-                if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" {
+                if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" && !extern_block {
                     nested_names.push((tok(nk).to_vec(), fn_bodies.last().unwrap().1));
                 }
                 k = e + 1;
@@ -2055,7 +2073,16 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             continue;
         }
         let prev_dot = k >= 1 && is_sym(k - 1, b'.');
-        let prev_path = k >= 2 && is_sym(k - 1, b':') && is_sym(k - 2, b':');
+        // (`::name` at a path's start, `::re::label` / `<T as ::re::Tr>`, is a path from the extern crate `name`: read as
+        // `re::label` is)
+        let leading = k >= 2
+            && is_sym(k - 1, b':')
+            && is_sym(k - 2, b':')
+            && (k == 2
+                || !(toks[k - 3].0 == 0 || is_sym(k - 3, b'>'))
+                || (toks[k - 3].0 == 0
+                    && matches!(tok(k - 3), b"as" | b"dyn" | b"impl" | b"for" | b"in" | b"return" | b"let" | b"mut" | b"ref" | b"box" | b"where" | b"use" | b"pub" | b"else" | b"match" | b"if" | b"while" | b"move" | b"break" | b"yield" | b"const" | b"static" | b"unsafe")));
+        let prev_path = k >= 2 && is_sym(k - 1, b':') && is_sym(k - 2, b':') && !leading;
         // (impl / trait の中の関連型の定義 `type Buffer = ..;` は、同じ名前のトップレベルの型があっても変えない)
         let assoc_def = k >= 1 && is_id(k - 1, b"type") && !def_tok[k];
         if prev_dot || prev_path || assoc_def {
@@ -2103,8 +2130,36 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         // 裸の名前 (フィールドの宣言・初期化 `name: ..` は除く)
         let next_colon = k + 1 < toks.len() && is_sym(k + 1, b':') && !(k + 2 < toks.len() && is_sym(k + 2, b':'));
+        // (but a bound of a `where` clause, `where JsValue: From<T>`, is a type: back over the clause's other bounds to
+        // its `where`, not past an unclosed bracket or the end of an item)
+        let in_where = || {
+            let mut j = k;
+            let mut d = 0i32;
+            let mut n = 0;
+            while j > 0 && n < 400 {
+                j -= 1;
+                n += 1;
+                if toks[j].0 == 0 && tok(j) == b"where" && d == 0 {
+                    return true;
+                }
+                if toks[j].0 == 1 {
+                    match s[toks[j].1] {
+                        b')' | b']' | b'}' => d += 1,
+                        b'(' | b'[' | b'{' => {
+                            if d == 0 {
+                                return false;
+                            }
+                            d -= 1;
+                        }
+                        b';' if d == 0 => return false,
+                        _ => {}
+                    }
+                }
+            }
+            false
+        };
         let is_def = def_tok[k];
-        if !next_colon || is_def {
+        if !next_colon || is_def || in_where() {
             let n = tok(k);
             // (a glob import is shadowed by the scope's own item of that name: the crate root's `enum Thing` beside
             // `use thing::*;` stays the root's)

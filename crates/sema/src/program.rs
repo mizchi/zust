@@ -1637,7 +1637,9 @@ impl Program {
             .collect();
         // 4. trait の実装 (impl ヘッダの要約から)
         // (traits with an impl for `&T` of a type parameter T)
-        let mut ref_blankets: HashSet<String> = Default::default();
+        // (the traits of `impl<T> Tr for &T` / `&mut T` (whether mut), and of `impl<T> Tr for T`)
+        let mut ref_blankets: HashSet<(String, bool)> = Default::default();
+        let mut bare_blankets: HashSet<String> = Default::default();
         // (impls for Box: (trait, line), checked against blanket impls of the same trait after the loop)
         let mut box_impls: Vec<(String, usize)> = vec![];
         // (unbounded blanket impls (trait, line), and every impl of the program's (trait, line))
@@ -1754,11 +1756,11 @@ impl Program {
                 if !sm.fns.is_empty() || defaults {
                     return Err(format!("{}:1: impls for references to a type parameter (`impl<T> {tr} for &T`) are not supported", it.line));
                 }
-                // (`impl<T> Foo for T` covers `&U` too)
-                if p.blanket_traits.contains(tr) {
-                    return Err(format!("{}:1: conflicting implementations of trait `{tr}` for type `&_` (E0119)", it.line));
+                // (`impl<T> Foo for T` covers `&U` too; `&T` and `&mut T` are two types)
+                let m = matches!(&sm.impl_self_ty, Some(TySyn::Ref(true, _)));
+                if bare_blankets.contains(tr) || !ref_blankets.insert((tr.clone(), m)) {
+                    return Err(format!("{}:1: conflicting implementations of trait `{tr}` for type `&{}_` (E0119)", it.line, if m { "mut " } else { "" }));
                 }
-                ref_blankets.insert(tr.clone());
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
                 continue;
@@ -1768,9 +1770,10 @@ impl Program {
                 if ii < user && sm.impl_generics.iter().any(|g| g.0 == *sn && g.1.is_empty()) && sm.where_types.is_empty() && sm.impl_trait_args.is_empty() {
                     unbounded_blankets.push((tr.clone(), it.line));
                 }
-                if ref_blankets.contains(tr) {
+                if ref_blankets.contains(&(tr.clone(), false)) || ref_blankets.contains(&(tr.clone(), true)) {
                     return Err(format!("{}:1: conflicting implementations of trait `{tr}` for type `&_` (E0119)", it.line));
                 }
+                bare_blankets.insert(tr.clone());
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
                 if let Some(g) = sm.impl_generics.iter().find(|g| g.0 == *sn) {
