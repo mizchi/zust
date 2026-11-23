@@ -23,6 +23,7 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
     let none = usize::MAX;
     let mut encl = vec![none; n];
     let mut close = vec![none; n];
+    let mut open_of = vec![none; n];
     let mut stack: Vec<usize> = vec![];
     for k in 0..n {
         encl[k] = stack.last().copied().unwrap_or(none);
@@ -32,6 +33,7 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                 b')' | b']' | b'}' => {
                     if let Some(o) = stack.pop() {
                         close[o] = k;
+                        open_of[k] = o;
                         encl[k] = stack.last().copied().unwrap_or(none);
                     }
                 }
@@ -98,7 +100,11 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
             None => &src[it.start..it.end],
         }
     };
-    let skip_attr = |a: &str| a.contains("allow(") || a.contains("expect(") || a.contains("#[cfg") || a.contains("repr(") || a.contains("no_mangle") || a.contains("#[test]");
+    // (a lint level of its own (allow / expect / warn, spaced or not), a cfg, a repr, an export: left alone)
+    let skip_attr = |a: &str| {
+        let a: String = a.chars().filter(|c| !c.is_whitespace()).collect();
+        ["allow(", "expect(", "warn(", "#[cfg", "repr(", "no_mangle", "export_name", "#[test]"].iter().any(|x| a.contains(x))
+    };
     let derives = |a: &str| -> Vec<String> {
         let mut out = vec![];
         let mut rest = a;
@@ -133,6 +139,12 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
         if matches!(word(p), "let" | "for") || sym(p, b'|') || sym(p, b'@') {
             return true;
         }
+        // (after `=>` (an arm's body), a single `=` (a value), `return` / `break`: an expression)
+        let arrow = p != none && p > 0 && sym(p, b'>') && sym(p - 1, b'=');
+        let assign = p != none && sym(p, b'=') && !(p > 0 && toks[p - 1].0 == 1 && toks[p - 1].2 == toks[p].1 && b"=<>!+-*/%^&|".contains(&b[toks[p - 1].1]));
+        if arrow || assign || matches!(word(p), "return" | "break") {
+            return false;
+        }
         let mut d = 0i32;
         let mut j = e + 1;
         while j < n {
@@ -157,6 +169,14 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                         d += 1;
                     }
                     b'{' => d += 1,
+                    // (the end of a block around it (an arm's `{ .. }`, a fn's body): the expression ended; the end
+                    // of a struct's braces (`Outer { s: S { f } }`): go on)
+                    b'}' if d == 0 => {
+                        let o = open_of[j];
+                        if o == none || o == 0 || word(o - 1).is_empty() || keyword(word(o - 1)) {
+                            return false;
+                        }
+                    }
                     b')' | b']' | b'}' => d = (d - 1).max(0),
                     b';' if d == 0 => return false,
                     b':' if d == 0 && !sym(j + 1, b':') && !sym(j - 1, b':') => return true,
@@ -257,6 +277,11 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
         let ItemKind::ImplMember(h) = items[item_of[k]].kind else { return false };
         *self_of.entry(h as usize).or_insert_with(|| impl_self(h as usize)) == Some(name)
     };
+    // (the program's structs and unions: what `let x = S(..)` can name, not a fn `let x = make(..)`)
+    let struct_names: FxSet<&str> = (0..items.len())
+        .filter(|&ii| matches!(items[ii].kind, ItemKind::Normal))
+        .filter_map(|ii| head(ii).filter(|&k| matches!(word(k), "struct" | "union")).map(|k| word(k + 1)))
+        .collect();
     // (the struct a variable at k is bound to: the item's only `let` of that name, `let [mut] x = S(` / `S {`)
     let bound_to = |k: usize| -> Option<&str> {
         let ii = item_of[k];
@@ -274,7 +299,7 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                         return None;
                     }
                     let s = x + 2;
-                    found = Some((sym(x + 1, b'=') && toks.get(s).is_some_and(|t| t.0 == 0) && (sym(s + 1, b'(') || sym(s + 1, b'{'))).then(|| word(s)));
+                    found = Some((sym(x + 1, b'=') && toks.get(s).is_some_and(|t| t.0 == 0) && (sym(s + 1, b'(') || sym(s + 1, b'{')) && struct_names.contains(word(s))).then(|| word(s)));
                 }
             }
             q += 1;
@@ -341,7 +366,7 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
     };
     let unit_structs: FxSet<&str> = (0..items.len())
         .filter(|&ii| matches!(items[ii].kind, ItemKind::Normal))
-        .filter_map(|ii| head(ii).filter(|&k| word(k) == "struct" && sym(k + 2, b';')).map(|k| word(k + 1)))
+        .filter_map(|ii| head(ii).filter(|&k| word(k) == "struct" && (sym(k + 2, b';') || (sym(k + 2, b'{') && sym(k + 3, b'}')))).map(|k| word(k + 1)))
         .collect();
     // (an inherent impl's const or fn nothing names: as `(line, message)`)
     let dead_member = |ii: usize, h: usize| -> Option<(usize, String)> {
@@ -401,6 +426,25 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
         };
         Some((line_of(k), format!("{what} `{name}` is never used")))
     };
+    // (each enum of the program's and its variants' names: the identifiers directly in its braces before `(` / `{` /
+    // `,` / `=` / its end)
+    let mut enum_variants: FxMap<&str, FxSet<&str>> = Default::default();
+    for ii in 0..items.len() {
+        if !matches!(items[ii].kind, ItemKind::Normal) {
+            continue;
+        }
+        let Some(k) = head(ii).filter(|&k| word(k) == "enum") else { continue };
+        let Some(open) = (k + 2..n).take_while(|&q| item_of[q] == ii).find(|&q| sym(q, b'{')) else { continue };
+        if close[open] == none {
+            continue;
+        }
+        let vs = enum_variants.entry(word(k + 1)).or_default();
+        for q in open + 1..close[open] {
+            if toks[q].0 == 0 && encl[q] == open && (sym(q + 1, b'(') || sym(q + 1, b'{') || sym(q + 1, b',') || sym(q + 1, b'=') || q + 1 == close[open]) {
+                vs.insert(word(q));
+            }
+        }
+    }
     for ii in 0..items.len() {
         let it = &items[ii];
         match it.kind {
@@ -456,8 +500,17 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
         // (the parts: split at the commas between the brackets; each one's attributes, visibility, name)
         let mut parts: Vec<(usize, usize)> = vec![];
         let mut s = open + 1;
+        // (not at a comma of a type's arguments: `Result<u8, u8>`)
+        let mut angle = 0i32;
         for q in open + 1..=end {
-            if q == end || (sym(q, b',') && encl[q] == open) {
+            if q < end && encl[q] == open {
+                if sym(q, b'<') {
+                    angle += 1;
+                } else if sym(q, b'>') && !sym(q - 1, b'-') {
+                    angle -= 1;
+                }
+            }
+            if q == end || (sym(q, b',') && encl[q] == open && angle <= 0) {
                 if s < q {
                     parts.push((s, q));
                 }
@@ -522,7 +575,7 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                 let mut default = false;
                 while sym(v, b'#') && sym(v + 1, b'[') && close[v + 1] != none {
                     let at = &region[toks[v].1..toks[close[v + 1]].2];
-                    if at.contains("allow(") || at.contains("expect(") || at.contains("cfg") {
+                    if skip_attr(at) || at.contains("cfg") {
                         v = e;
                         break;
                     }
@@ -541,6 +594,10 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                 // (constructed: an occurrence outside the enum that is not (or may not be) in a pattern)
                 let made = (0..n).any(|q| {
                     if word(q) != vn || item_of[q] == ii || item_of[q] == none || is_use_item(item_of[q]) {
+                        return false;
+                    }
+                    // (`F::B` of another enum of the program's that has a `B` too: not this one's)
+                    if q >= 3 && sym(q - 1, b':') && sym(q - 2, b':') && word(q - 3) != name && word(q - 3) != "Self" && enum_variants.get(word(q - 3)).is_some_and(|vs| vs.contains(vn)) {
                         return false;
                     }
                     let g = q + 1;
@@ -566,7 +623,7 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
             let mut skip = false;
             while sym(f, b'#') && sym(f + 1, b'[') && close[f + 1] != none {
                 let at = &region[toks[f].1..toks[close[f + 1]].2];
-                skip |= at.contains("allow(") || at.contains("expect(") || at.contains("cfg");
+                skip |= skip_attr(at) || at.contains("cfg");
                 f = close[f + 1] + 1;
             }
             if skip || word(f) == "pub" || f >= e {
