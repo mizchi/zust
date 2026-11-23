@@ -2216,16 +2216,17 @@ impl Cx<'_> {
                 }),
                 // (an impl of the trait for a reference type (`impl<'a> Foo for &'a isize`): its method, as for a
                 // `dyn Foo` made of a `&isize`)
-                // (named `__ref_m` of the referent's type)
+                // (named `__ref_m` of the referent's type: the impl of the trait the call names among them, for this
+                // reference (`impl A for &S` and `impl B for &S` share the name))
                 t @ Ty::Ref(_, inner) => {
-                    let rm = format!("__ref_{m}");
-                    let id = match *inner {
-                        Ty::Struct(sid) => self.prog.method(sid, &rm),
-                        it => self.prog.index.get(&format!("{}::{rm}", self.prog.tn(it))).copied(),
+                    let owner = match *inner {
+                        Ty::Struct(sid) => self.prog.structs[self.prog.base_of(sid) as usize].name.clone(),
+                        it => self.prog.tn(it),
                     };
-                    id.filter(|&i| {
+                    let f = format!("{owner}::__ref_{m}");
+                    self.trait_candidate_where(&f, tr0.unwrap_or(""), |i| self.self_fits(i, t)).filter(|&i| {
                         let it = self.prog.sigs[i as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
-                        it == tr0 && self.self_fits(i, t)
+                        it == tr0
                     })
                 }
                 _ => None,

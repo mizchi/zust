@@ -2307,7 +2307,7 @@ impl Cx<'_> {
                     let ext0 = self.bk.direct.len();
                     let ext1 = self.bk.extended.len();
                     if self.bk_on() {
-                        borrowck::direct_temps(self.prog, init, &mut self.bk.direct);
+                        borrowck::direct_temps_let(self.prog, init, &mut self.bk.direct);
                         borrowck::direct_ref_recv(self.prog, init, &mut self.bk.direct);
                         // (`let x = &f();`: the temporary lives as long as x's block; also within the initializer's
                         // extending expressions, `let x = Some(&f());`)

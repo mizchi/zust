@@ -388,7 +388,7 @@ impl Cx<'_> {
                 self.bk_ev(borrowck::Ev::Guard(None));
             }
             // (an arm that takes the whole scrutinee moves it: its drop holds nothing on this arm's path)
-            if let Some(id) = scrut_drop.filter(|_| borrowck::pat_takes_whole(&arm.pat)) {
+            if let Some(id) = scrut_drop.filter(|_| self.takes_whole(&arm.pat)) {
                 self.bk_ev(borrowck::Ev::Def(id, vec![]));
             }
             let t0 = self.temps.len();

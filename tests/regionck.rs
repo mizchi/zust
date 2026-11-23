@@ -3326,3 +3326,19 @@ fn part18_dyn_drops() {
     assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
     assert_eq!(check("trait Foo { }\nimpl<'a> Foo for &'a isize { }\nfn main() {\n    let x: isize = 1;\n    let b = Box::new(&x) as Box<dyn Foo>;\n    drop(b);\n    let mut v = vec![1];\n    let r: &dyn std::fmt::Debug = &v[0];\n    println!(\"{:?}\", r);\n    v.push(2);\n}\n"), vec![]);
 }
+
+#[test]
+fn part18_review() {
+    // (edition 2024: a block's tail is a statement of its own; a constructor's `&` argument there is a call's, not a
+    // `let`'s to extend)
+    let d = check_ed("fn temp() -> String { String::from(\"x\") }\nfn consume<T: std::fmt::Debug>(t: T) { println!(\"{:?}\", t); }\nfn main() {\n    consume({ (Some(&temp()),) });\n}\n", 2024);
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0716"), "{d:?}");
+    // (a local fn pointer named in upper case is no constructor: its arguments are not extended)
+    let d = check("fn temp() -> String { String::from(\"x\") }\nfn id(s: &String) -> &String { s }\n#[allow(non_snake_case)]\nfn main() {\n    let F: fn(&String) -> &String = id;\n    let r = F(&temp());\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
+    // (an or-pattern whose alternatives each take the whole value moves it)
+    assert_eq!(check("struct G<'a>(&'a mut i32);\nimpl Drop for G<'_> { fn drop(&mut self) { *self.0 += 1; } }\nfn mk(n: &mut i32) -> Option<G<'_>> { Some(G(n)) }\nfn main() {\n    let mut n = 0;\n    match mk(&mut n) {\n        x @ Some(_) | x @ None => { drop(x); n = 1; }\n    };\n    println!(\"{}\", n);\n}\n"), vec![]);
+    // (a lowercase constant in a pattern is compared with, not bound: the arm keeps the scrutinee's drop)
+    let d = check("#![allow(non_upper_case_globals)]\n#[derive(PartialEq, Eq)]\nstruct W<'a>(Option<&'a i32>);\nimpl Drop for W<'_> { fn drop(&mut self) {} }\nconst none: Option<W<'static>> = None;\nfn mk(n: &i32) -> Option<W<'_>> { Some(W(Some(n))) }\nfn main() {\n    let mut n = 0;\n    match mk(&n) {\n        none => { n = 1; }\n        _ => {}\n    };\n    println!(\"{}\", n);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 10, "{d:?}");
+}

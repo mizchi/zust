@@ -338,6 +338,16 @@ pub struct Bk {
 /// temporaries are left alone (the loans that flow into a local are approximated, and a temporary whose lifetime the
 /// `let` extends (`let x = &f();`, `S { r: &f() }`) lives as long as the block)
 pub fn direct_temps(prog: &Program, e: &Expr, out: &mut Vec<usize>) {
+    direct_temps_in(prog, e, false, out)
+}
+
+/// The temporaries of a `let`'s initializer the statement drops (direct_temps): a `&` of a temporary in a
+/// constructor's arguments is the `let`'s to extend (extended_refs), not a statement's
+pub fn direct_temps_let(prog: &Program, e: &Expr, out: &mut Vec<usize>) {
+    direct_temps_in(prog, e, true, out)
+}
+
+fn direct_temps_in(prog: &Program, e: &Expr, in_let: bool, out: &mut Vec<usize>) {
     fn strip(mut e: &Expr) -> &Expr {
         while let Expr::Paren(p) = e {
             e = p;
@@ -348,30 +358,31 @@ pub fn direct_temps(prog: &Program, e: &Expr, out: &mut Vec<usize>) {
         // (`let x: &str = { mk().as_str() };`: the block's value is its tail's, and so are its temporaries)
         Expr::Block(_, _, b) => {
             if let Some(crate::parse::Stmt::Expr(t, false)) = b.stmts.last() {
-                direct_temps(prog, t, out);
+                direct_temps_in(prog, t, in_let, out);
             }
             return;
         }
         // (a tuple / array / struct of such calls: each element's (`{ (String::new().as_str(),) }` of edition 2024))
         Expr::Tuple(xs) | Expr::Array(xs) => {
             for x in xs {
-                direct_temps(prog, x, out);
+                direct_temps_in(prog, x, in_let, out);
             }
             return;
         }
         Expr::Struct(_, fs, None) => {
             for f in fs {
-                direct_temps(prog, &f.1, out);
+                direct_temps_in(prog, &f.1, in_let, out);
             }
             return;
         }
-        // (a tuple struct's or a variant's constructor (`Some(&[name])`): an extending expression, so a `&` of a
-        // temporary in its arguments is extended by the `let` (extended_refs), as rustc does since 1.79; what its
-        // arguments' calls borrow is not)
-        Expr::Call(f, a) if is_ctor_path(prog, f) => {
+        // (a tuple struct's or a variant's constructor (`Some(&[name])`) in a `let`'s initializer: an extending
+        // expression, so a `&` of a temporary in its arguments is extended by the `let` (extended_refs), as rustc does
+        // since 1.79; what its arguments' calls borrow is not. Elsewhere (an edition 2024 block's tail,
+        // `consume({ (Some(&temp()),) })`) its arguments are a call's)
+        Expr::Call(f, a) if in_let && is_ctor_path(prog, f) => {
             for x in a {
                 if !matches!(strip(x), Expr::Ref(..)) {
-                    direct_temps(prog, x, out);
+                    direct_temps_in(prog, x, in_let, out);
                 }
             }
             return;
@@ -570,7 +581,13 @@ pub fn direct_ref_recv(prog: &Program, a: &Expr, out: &mut Vec<usize>) {
 /// not `some` of `let some = Some;`)
 fn is_ctor_path(prog: &Program, f: &Expr) -> bool {
     let Expr::Path(_, p) = f else { return false };
-    p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_uppercase())) && prog.fn_by_p(&crate::program::PPath::of(p), None).is_none()
+    // (a path that names a variant or a tuple struct, not a local fn pointer written in upper case
+    // (`let F: fn(&String) -> &String = id; F(&temp())`), whose arguments are a call's)
+    if !p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_uppercase())) {
+        return false;
+    }
+    let pp = crate::program::PPath::of(p);
+    prog.variant_by_p(&pp, None).is_some() || (prog.struct_by_p(&pp, None).is_some() && prog.fn_by_p(&pp, None).is_none())
 }
 
 /// The temporaries a `let`'s initializer borrows that the `let` extends: `&e` (direct_ref) as the initializer or
@@ -2014,7 +2031,12 @@ pub(crate) fn value_tail(e: &Expr) -> &Expr {
 
 /// A pattern that binds the whole value by value (`x`, `x @ ..`): it moves the scrutinee
 pub(crate) fn pat_takes_whole(q: &Pat) -> bool {
-    matches!(q, Pat::Ident(false, _, n, _) if n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_")
+    match q {
+        Pat::Ident(false, _, n, _) => n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_",
+        // (`x @ Some(_) | x @ None`: each alternative takes it)
+        Pat::Or(ps) => !ps.is_empty() && ps.iter().all(pat_takes_whole),
+        _ => false,
+    }
 }
 
 /// p binds by reference somewhere (`ref x`, `ref mut x`)
@@ -2096,6 +2118,16 @@ impl Cx<'_> {
             if let Some(srcs) = self.bk.bind_srcs.clone().filter(|s| !s.is_empty()) {
                 self.bk_ev(Ev::Def(id, srcs));
             }
+        }
+    }
+
+    /// q binds the whole scrutinee by value (pat_takes_whole), not a constant it is compared with (a lowercase
+    /// `const` name, which a pattern of a program with `lower_consts` takes)
+    pub(crate) fn takes_whole(&self, q: &Pat) -> bool {
+        match q {
+            Pat::Or(ps) => !ps.is_empty() && ps.iter().all(|p| self.takes_whole(p)),
+            Pat::Ident(_, _, n, sub) => pat_takes_whole(q) && !(sub.is_none() && self.prog.const_index.contains_key(n.as_str())),
+            _ => false,
         }
     }
 
@@ -2201,7 +2233,7 @@ impl Cx<'_> {
         // (when only some of the arms take the whole value (`x if flag => drop(x), _ => ..`), those arms move it: the
         // match ends its drop there (Bk::scrut_drop), the others keep it)
         self.bk.scrut_drop = None;
-        if self.bk.level >= 2 && !in_let && self.user_code && !super::is_place_expr(e) && !srcs.is_empty() && !pats.iter().all(|q| pat_takes_whole(q)) {
+        if self.bk.level >= 2 && !in_let && self.user_code && !super::is_place_expr(e) && !srcs.is_empty() && !pats.iter().all(|q| self.takes_whole(q)) {
             if let Ok(Some(p)) = &r {
                 let t = p.ty();
                 if self.dropck(t, 0) {
@@ -2214,7 +2246,7 @@ impl Cx<'_> {
                     self.bk_ev(Ev::Def(id, held));
                     self.bk.stmt_temps.push(id);
                     self.bk.drop_temps.push(id);
-                    if pats.iter().any(|q| pat_takes_whole(q)) {
+                    if pats.iter().any(|q| self.takes_whole(q)) {
                         self.bk.scrut_drop = Some(id);
                     }
                 }
