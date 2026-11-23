@@ -1165,6 +1165,12 @@ impl Session2 {
                     return Err(e);
                 }
             }
+            // (an unstable ABI: `extern "rust-cold" fn`)
+            if head.contains("extern") {
+                if let Some(e) = gated_abi(&src, it.start, it.end, &mut feats) {
+                    return Err(e);
+                }
+            }
         }
         // (E0119: two blanket impls of one trait for a bare parameter, `impl<T: A> Tr for T` and `impl<T: B> Tr for T`,
         // overlap whatever their bounds say. Only the program's own traits declared once (modules flatten names),
@@ -1975,7 +1981,6 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
 fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) -> Option<String> {
     // (a crate with no dependency (so no proc macro) knows only the built-in attributes and its tools' paths)
     // (both looked up only when such an attribute is there: not a search of every file)
-    let rustc_attrs = || src0.contains("rustc_attrs");
     let unknown = |name: &str| {
         const BUILTIN: &[&str] = &[
             "cfg", "cfg_attr", "test", "ignore", "should_panic", "bench", "derive", "automatically_derived", "macro_export", "macro_use",
@@ -1992,7 +1997,9 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
             "needs_panic_runtime", "profiler_runtime", "no_core", "prelude_import", "rustc_std_internal_symbol", "unstable_feature_bound",
             "rustc_main", "test_runner", "reexport_test_harness_main", "default", "main", "plugin", "plugin_registrar",
         ];
-        if name.contains("::") || name.is_empty() || (name.starts_with("rustc_") && rustc_attrs()) {
+        // (`rustc_*`: rustc's internal attributes; without `#![feature(rustc_attrs)]` the gate's E0658, at the same
+        // attribute)
+        if name.contains("::") || name.is_empty() || name.starts_with("rustc_") {
             return false;
         }
         // (`#[default]` is the derive(Default) helper, `#[main]` was removed)
@@ -4994,13 +5001,114 @@ fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>
             }
             continue;
         }
-        let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) else { continue };
+        // (the first-level names of its arguments: `doc(cfg(..))` / `repr(C, simd)`)
+        let mut args: Vec<&str> = vec![];
+        if sym(j + 1, "(") {
+            let (mut q, mut d) = (j + 2, 1);
+            while q < toks.len() && d > 0 {
+                if sym(q, "(") || sym(q, "[") {
+                    d += 1;
+                } else if sym(q, ")") || sym(q, "]") {
+                    d -= 1;
+                } else if d == 1 && toks[q].0 == 0 {
+                    args.push(tx(q));
+                }
+                q += 1;
+            }
+        }
+        // (`#[repr(transparent)] union U`: rustc points at the union)
+        if name == "repr" && args.contains(&"transparent") {
+            let rest = &src[to..src.len().min(to + 256)];
+            let rt = lexer::tokenize(rest.as_bytes());
+            let rw = |q: usize| if rt[q].0 == 0 { &rest[rt[q].1..rt[q].2] } else { "" };
+            let mut q = 0;
+            while q < rt.len() && (rw(q) == "pub" || rt[q].0 != 0) {
+                q += 1;
+            }
+            if q < rt.len() && rw(q) == "union" && !feats.get_or_insert_with(|| enabled_features(src)).iter().any(|f| f == "transparent_unions") {
+                let i = to + rt[q].1;
+                let line = src[..i].matches('\n').count() + 1;
+                return Some(format!("{line}:{}: transparent unions are unstable (E0658)", i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1));
+            }
+        }
+        let Some((feat, msg)) = attr_gate(name, &args) else { continue };
         // (the source's enabled features: read once, at the first gated attribute)
         let enabled = feats.get_or_insert_with(|| enabled_features(src));
         if !enabled.iter().any(|f| f == feat) {
             let (line, col) = at(k);
-            return Some(format!("{line}:{col}: the `{name}` attribute is an experimental feature (E0658)"));
+            return Some(format!("{line}:{col}: {msg} (E0658)"));
         }
+    }
+    None
+}
+
+/// The feature gate of an attribute named `name` with the first-level argument names `args`, and rustc's message
+/// when the source does not enable it (rustc 1.100)
+fn attr_gate(name: &str, args: &[&str]) -> Option<(&'static str, String)> {
+    if let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) {
+        return Some((feat, format!("the `{name}` attribute is an experimental feature")));
+    }
+    let experimental = |feat: &'static str| Some((feat, format!("the `{name}` attribute is an experimental feature")));
+    match name {
+        "allow_internal_unstable" => Some(("allow_internal_unstable", "the `allow_internal_unstable` attribute side-steps feature gating and stability checks".into())),
+        "allow_internal_unsafe" => Some(("allow_internal_unsafe", "the `allow_internal_unsafe` attribute side-steps the `unsafe_code` lint".into())),
+        "compiler_builtins" => Some(("compiler_builtins", "the `compiler_builtins` attribute is used to identify the `compiler_builtins` crate which contains compiler-rt intrinsics and will never be stable".into())),
+        "profiler_runtime" => Some(("profiler_runtime", "the `profiler_runtime` attribute is used to identify the `profiler_builtins` crate which contains the profiler runtime and will never be stable".into())),
+        "prelude_import" => Some(("prelude_import", "the `prelude_import` attribute is for use by rustc only".into())),
+        "linkage" => Some(("linkage", "the `linkage` attribute is experimental and not portable across platforms".into())),
+        "lang" => Some(("lang_items", "lang items are subject to change".into())),
+        "needs_allocator" => experimental("allocator_internals"),
+        "panic_runtime" => experimental("panic_runtime"),
+        "needs_panic_runtime" => experimental("needs_panic_runtime"),
+        "rustc_unroll" => experimental("loop_hints"),
+        "rustc_splat" => experimental("splat"),
+        // (stability attributes: the standard library's)
+        "stable" | "unstable" | "rustc_const_stable" | "rustc_const_unstable" | "rustc_default_body_unstable" | "unstable_feature_bound" => {
+            Some(("staged_api", "stability attributes may not be used outside of the standard library".into()))
+        }
+        "pattern_complexity_limit" => Some(("rustc_attrs", "use of an internal attribute".into())),
+        n if n.starts_with("rustc_") => Some(("rustc_attrs", "use of an internal attribute".into())),
+        "repr" if args.contains(&"simd") => Some(("repr_simd", "SIMD types are experimental and possibly buggy".into())),
+        "doc" => {
+            if args.iter().any(|a| matches!(*a, "cfg" | "auto_cfg")) {
+                Some(("doc_cfg", "the `doc(cfg)` and `doc(auto_cfg)` attributes are experimental".into()))
+            } else if args.contains(&"masked") {
+                Some(("doc_masked", "the `doc(masked)` attribute is experimental".into()))
+            } else if args.contains(&"notable_trait") {
+                Some(("doc_notable_trait", "the `doc(notable_trait)` attribute is experimental".into()))
+            } else if args.iter().any(|a| matches!(*a, "rust_logo" | "keyword" | "attribute" | "fake_variadic" | "search_unbox")) {
+                Some(("rustdoc_internals", "this subset of the `doc` attribute is meant for internal use only".into()))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// An ABI behind a feature gate the source does not enable, `extern "rust-cold" fn f()` (rustc 1.100): `line:col:
+/// the extern "x" ABI is experimental and subject to change (E0658)`, at the ABI's string
+fn gated_abi(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>) -> Option<String> {
+    let toks = lexer::tokenize(&src.as_bytes()[from..to]);
+    let tx = |k: usize| &src[from + toks[k].1..from + toks[k].2];
+    for k in 1..toks.len() {
+        if toks[k].0 != 2 || toks[k - 1].0 != 0 || tx(k - 1) != "extern" {
+            continue;
+        }
+        let (feat, how) = match tx(k) {
+            "\"rust-cold\"" => ("rust_cold_cc", "is experimental and subject to change"),
+            "\"tail\"" => ("rust_tail_cc", "is experimental and subject to change"),
+            "\"rust-preserve-none\"" => ("rust_preserve_none_cc", "is experimental and subject to change"),
+            "\"llvm-intrinsic\"" => ("link_llvm_intrinsics", "is an implementation detail and perma-unstable"),
+            _ => continue,
+        };
+        if feats.get_or_insert_with(|| enabled_features(src)).iter().any(|f| f == feat) {
+            continue;
+        }
+        let i = from + toks[k].1;
+        let line = src[..i].matches('\n').count() + 1;
+        let col = i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1;
+        return Some(format!("{line}:{col}: the extern {} ABI {how} (E0658)", tx(k)));
     }
     None
 }
@@ -5125,7 +5233,9 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
                     }
                     let name = &b[n0..j];
                     skip(&mut j);
-                    if !name.is_empty() && b.get(j) != Some(&b':') && (GATED.iter().any(|g| g.0.as_bytes() == name) || name == b"target_feature") {
+                    // (a name some gate is on: `attr_gate`'s, or one whose arguments decide, `doc(..)` / `repr(..)`)
+                    let gate_named = std::str::from_utf8(name).is_ok_and(|n| attr_gate(n, &[]).is_some() || matches!(n, "doc" | "repr" | "target_feature"));
+                    if !name.is_empty() && b.get(j) != Some(&b':') && gate_named {
                         gated = true;
                     }
                     i = j;
