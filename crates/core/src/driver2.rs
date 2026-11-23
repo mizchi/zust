@@ -2003,6 +2003,66 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
         }
         d > 0
     };
+    // (the `let`s of the fn written at `a` that are in scope at `b`: those before it in the blocks still open there, not
+    // a sibling block's, `{ let drop = 1u8; }` beside `fn inner() { drop(0u8); }`. A `let`'s names start after its `;`,
+    // not in its initializer; an `if let` / `while let`'s in its body only. None when the text is not read)
+    let scoped_lets = |a: usize, b: usize| -> Option<Vec<String>> {
+        let seg = orig.as_bytes().get(a..b)?;
+        let t = crate::lexer::tokenize(seg);
+        let w = |q: usize| if q < t.len() && t[q].0 == 0 { std::str::from_utf8(&seg[t[q].1..t[q].2]).unwrap_or("") } else { "" };
+        let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && seg[t[q].1] == c;
+        let mut open: Vec<Vec<String>> = vec![];
+        // (a `let`'s names until its `;`, and an `if let`'s until its body opens: with the depth they were written at)
+        let mut pending: Vec<(usize, Vec<String>)> = vec![];
+        let mut cond: Option<(usize, Vec<String>)> = None;
+        let mut q = 0;
+        while q < t.len() {
+            if sym(q, b'{') {
+                let body = cond.take_if(|(d, _)| *d == open.len());
+                open.push(body.map(|(_, ns)| ns).unwrap_or_default());
+            } else if sym(q, b'}') {
+                open.pop()?;
+                pending.retain(|(d, _)| *d <= open.len());
+            } else if sym(q, b';') {
+                let depth = open.len();
+                for (_, ns) in pending.extract_if(.., |(d, _)| *d == depth) {
+                    open.last_mut()?.extend(ns);
+                }
+            } else if w(q) == "let" && !open.is_empty() {
+                let conditional = q > 0 && (w(q - 1) == "if" || w(q - 1) == "while" || sym(q - 1, b'&'));
+                let mut names = vec![];
+                // (its pattern's names, to the `=`, `;` or type at the pattern's own level)
+                let mut d = 0i32;
+                q += 1;
+                while q < t.len() {
+                    let path = sym(q + 1, b':') && sym(q + 2, b':') || q > 0 && sym(q - 1, b':') && q > 1 && sym(q - 2, b':');
+                    if d == 0 && (sym(q, b'=') || sym(q, b';') || (sym(q, b':') && !sym(q + 1, b':') && !(q > 0 && sym(q - 1, b':')))) {
+                        break;
+                    }
+                    if sym(q, b'(') || sym(q, b'[') || sym(q, b'{') {
+                        d += 1;
+                    } else if sym(q, b')') || sym(q, b']') || sym(q, b'}') {
+                        d -= 1;
+                    } else if t[q].0 == 0 && !path && !(t[q].1 > 0 && seg[t[q].1 - 1] == b'\'') {
+                        let n = w(q);
+                        let binds = n.starts_with(|c: char| c.is_lowercase() || c == '_') && !matches!(n, "mut" | "ref" | "box" | "_");
+                        if binds && !sym(q + 1, b'(') && !sym(q + 1, b'{') && !(sym(q + 1, b':') && d > 0) {
+                            names.push(n.to_string());
+                        }
+                    }
+                    q += 1;
+                }
+                if conditional {
+                    cond = Some((open.len(), names));
+                } else {
+                    pending.push((open.len(), names));
+                }
+                continue;
+            }
+            q += 1;
+        }
+        Some(open.into_iter().flatten().collect())
+    };
     for &h in &hoisted {
         let it = &items[h];
         let Ok(Some(f)) = parse_fn(src, it) else { continue };
@@ -2024,7 +2084,18 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
                 }
             }
             let Ok(Some(gf)) = parse_fn(src, gi) else { continue };
-            locals_of(&gf.sig, &gf.block, &mut outer);
+            match orig_at(gi).zip(orig_at(it)).filter(|(x, y)| x < y).and_then(|(x, y)| scoped_lets(x, y)) {
+                Some(lets) => {
+                    if gf.sig.recv.is_some() {
+                        outer.push("self".to_string());
+                    }
+                    for (p, _) in &gf.sig.params {
+                        crate::ast_closure::pat_idents(p, &mut outer);
+                    }
+                    outer.extend(lets);
+                }
+                None => locals_of(&gf.sig, &gf.block, &mut outer),
+            }
         }
         if outer.is_empty() {
             continue;
@@ -2074,17 +2145,18 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
 /// The length of the string literal `r` starts with (`"..."`, `r"..."`, `r#"..."#`), None when it starts with none
 fn str_lit_len(r: &str) -> Option<usize> {
     let b = r.as_bytes();
-    let (hashes, open) = match b.first()? {
-        b'"' => (0, 1),
+    let (raw, hashes, open) = match b.first()? {
+        b'"' => (false, 0, 1),
         b'r' => {
             let h = b[1..].iter().take_while(|&&c| c == b'#').count();
-            (b.get(1 + h) == Some(&b'"')).then_some((h, 2 + h))?
+            (b.get(1 + h) == Some(&b'"')).then_some((true, h, 2 + h))?
         }
         _ => return None,
     };
     let mut i = open;
     while i < b.len() {
-        if hashes == 0 && b[i] == b'\\' {
+        // (escapes only in a cooked string: `r"\"` ends at its second byte's quote)
+        if !raw && b[i] == b'\\' {
             i += 2;
             continue;
         }
@@ -2621,7 +2693,9 @@ fn subst_idents(s: &str, params: &[&str], args: &[&str]) -> String {
             let j = i + b[i..].iter().position(|c| !(c.is_ascii_alphanumeric() || *c == b'_')).unwrap_or(b.len() - i);
             let word = &s[i..j];
             let lifetime = i > 0 && b[i - 1] == b'\'';
-            match params.iter().position(|p| *p == word).and_then(|k| args.get(k)).filter(|_| !lifetime) {
+            // (a segment after `::` names an associated item, `<u8 as Id>::T`, not a parameter)
+            let path_segment = i >= 2 && &b[i - 2..i] == b"::";
+            match params.iter().position(|p| *p == word).and_then(|k| args.get(k)).filter(|_| !lifetime && !path_segment) {
                 Some(a) => out.push_str(a),
                 None => out.push_str(word),
             }
@@ -2850,6 +2924,27 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
             entry.0.push(id(&it.idents[k + 1]));
         }
     }
+    // (a trait's type and const arguments with its defaults for the ones left out, a default naming an earlier
+    // parameter taking that one's argument (`trait Base<T, U = T>`: `Base<u8>` is `Base<u8, u8>`); None when there is
+    // nothing to fill or a left-out one has no default)
+    let filled_args = |tn: &str, tys: &[&str]| -> Option<Vec<String>> {
+        let ds = defaults_of.get(tn)?;
+        if tys.len() >= ds.len() {
+            return None;
+        }
+        let ps: &[&str] = match traits.get(tn) {
+            Some(Some((_, _, _, ps))) => ps,
+            _ => &[],
+        };
+        let mut all: Vec<String> = tys.iter().map(|a| a.to_string()).collect();
+        for d in &ds[tys.len()..] {
+            let d = d.as_deref()?;
+            let k = all.len().min(ps.len());
+            let refs: Vec<&str> = all.iter().map(String::as_str).collect();
+            all.push(subst_idents(d, &ps[..k], &refs[..k]));
+        }
+        Some(all)
+    };
     for (i, off, next) in dyns {
         let it = &items[i];
         // (`dyn Handler` of a trait with no associated types and no supertraits, `dyn Any` of a trait this does not
@@ -2934,13 +3029,11 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
             // (an instantiation's key: its arguments with the trait's defaults for the ones left out, so `Base` and
             // `Base<u8>` of `trait Base<T = u8>` are one)
             let key = |tn: &str, ts: &str| -> String {
-                let Some(ds) = defaults_of.get(tn) else { return ts.to_string() };
                 let (lts, tys): (Vec<&str>, Vec<&str>) = type_args(ts).into_iter().partition(|a| a.starts_with('\''));
-                if tys.len() >= ds.len() || ds[tys.len()..].iter().any(Option::is_none) {
-                    return ts.to_string();
+                match filled_args(tn, &tys) {
+                    Some(all) => format!("{}<{}>", &ts[..ts.find('<').unwrap_or(ts.len())], lts.into_iter().map(str::to_string).chain(all).collect::<Vec<_>>().join(", ")),
+                    None => ts.to_string(),
                 }
-                let all: Vec<&str> = lts.into_iter().chain(tys.iter().copied()).chain(ds[tys.len()..].iter().flatten().map(String::as_str)).collect();
-                format!("{}<{}>", &ts[..ts.find('<').unwrap_or(ts.len())], all.join(", "))
             };
             // (the bindings each instantiation gets: `Sup<i32>` and `Sup<u32>` are two)
             let mut bound_by: crate::fxhash::FxMap<String, Vec<&str>> = Default::default();
@@ -3017,11 +3110,12 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
             // (as rustc prints a trait: without the trailing arguments that are its defaults, `Base<u8>` of `trait
             // Base<T = u8>` is `Base`)
             for (_, ts) in missing.iter_mut() {
-                let Some(ds) = traits.iter().find(|(n, _)| ts.starts_with(*n) && ts[n.len()..].starts_with('<')).and_then(|(n, _)| defaults_of.get(n)) else { continue };
+                let Some(tn) = defaults_of.keys().find(|n| ts.starts_with(**n) && ts[n.len()..].starts_with('<')).copied() else { continue };
                 let all = type_args(ts);
                 let lts = all.iter().take_while(|a| a.starts_with('\'')).count();
                 let mut keep = all.len();
-                while keep > lts && ds.get(keep - lts - 1).is_some_and(|d| d.as_deref() == Some(all[keep - 1])) {
+                // (each trailing argument against its default as the arguments before it fill it)
+                while keep > lts && filled_args(tn, &all[lts..keep - 1]).is_some_and(|f| f.get(keep - lts - 1).is_some_and(|d| d == all[keep - 1])) {
                     keep -= 1;
                 }
                 if keep < all.len() {

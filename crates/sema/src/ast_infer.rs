@@ -1411,6 +1411,20 @@ impl Inf<'_> {
                         let f = intern_fn(FnTy { params: s.params.clone(), ret: s.ret });
                         self.known(Ty::Fn(f))
                     }
+                    // (a free generic fn with every type argument written (`id::<&'static u32>`): its instance's
+                    // pointer type, so that a call through it knows its arguments' types)
+                    Some(id) if self.prog.sigs[id as usize].impl_of.is_none() && self.prog.sigs[id as usize].trait_of.is_none() => {
+                        let ng = self.prog.sigs[id as usize].generics.len();
+                        let ts: Option<Vec<Ty>> = p.segs.last().map(|sg| sg.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).map(|t| self.parse_ty(t)).collect()).unwrap_or(None);
+                        match ts.filter(|ts| ts.len() == ng && ng > 0 && ts.iter().all(|&t| !self.prog.has_param(t))) {
+                            Some(ts) => {
+                                let s = &self.prog.sigs[id as usize];
+                                let f = intern_fn(FnTy { params: s.params.iter().map(|&t| self.prog.subst(t, &ts)).collect(), ret: self.prog.subst(s.ret, &ts) });
+                                self.known(Ty::Fn(f))
+                            }
+                            None => self.var(),
+                        }
+                    }
                     _ => self.var(),
                 },
             },
@@ -1966,6 +1980,26 @@ impl Inf<'_> {
                 None => self.var(),
             };
         }
+        // (`id::<u32>(c)`: the turbofish's arguments are a free fn's generics, in order, as the lowering takes them
+        // (turbofish_sol). Its types seed the inference; a const argument (`take::<u8, 1>`, `f::<true>()`) is not a
+        // type, and its slot is left to the lowering)
+        if let (Some(id), Expr::Path(None, p)) = (callee, f) {
+            let sig = &self.prog.sigs[id as usize];
+            let free = sig.self_ty.is_none() && sig.impl_of.is_none() && sig.trait_of.is_none();
+            let args: Vec<&GArg> = p.segs.last().map(|s| s.args.iter().filter(|a| !matches!(a, GArg::Lifetime(_))).collect()).unwrap_or_default();
+            let ng = sig.generics.len();
+            if free && !args.is_empty() && args.len() <= ng && args.iter().any(|a| matches!(a, GArg::Ty(t) if crate::ast_types::bool_arg(t).is_none())) {
+                let mut pre = vec![None; ng];
+                for (k, a) in args.iter().enumerate() {
+                    if let GArg::Ty(t) = a {
+                        if crate::ast_types::bool_arg(t).is_none() {
+                            pre[k] = Some(self.ty_var(t));
+                        }
+                    }
+                }
+                return self.apply_with(callee, avs, 0, None, pre);
+            }
+        }
         self.apply(callee, avs, 0)
     }
 
@@ -2123,7 +2157,7 @@ impl Inf<'_> {
             let Some(s0) = sid else { break };
             let Some(did) = self.prog.method(s0, "deref") else { break };
             // (a guard (RefCell's Ref / RefMut, MutexGuard) has none of these itself: `g.clone()` is the value's)
-            let guard = matches!(self.prog.structs[self.prog.base_of(s0) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard");
+            let guard = matches!(self.prog.structs[self.prog.base_of(s0) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard" | "PeekMut");
             if guard || !matches!(n, "clone" | "to_string" | "cmp" | "partial_cmp" | "eq") {
                 let r = self.apply_recv(Some(did), vec![], rv);
                 rv = self.deref_expr(r);

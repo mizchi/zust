@@ -503,8 +503,27 @@ impl Cx<'_> {
                 // `*g` (g: MutexGuard など Deref を実装した型): `*g.deref_mut()` / `*g.deref()`
                 if let Some(d) = self.user_deref(x) {
                     let d = self.keep_expr(d);
+                    // (the temporaries the borrow check follows in x (`*RefCell::new(1).borrow_mut()`'s receiver) are
+                    // followed in its copy too)
+                    if let Expr::Unary(_, c, _) = d {
+                        if let Expr::MethodCall(r, ..) = &**c {
+                            if let Expr::Paren(xc) = &**r {
+                                if !self.bk.direct.is_empty() {
+                                    borrowck::copy_marks(x, xc, &mut self.bk.direct, 0);
+                                }
+                            }
+                        }
+                    }
                     self.deref_shared(d);
-                    return self.place(d);
+                    let r = self.place(d);
+                    // (the loan the deref's call takes of x is the loan of `*x`: `(&mut *w).push(w.len())` holds it
+                    // while the arguments are evaluated)
+                    if let (true, Expr::Unary(_, c, _)) = (self.bk_on(), d) {
+                        if let Some(&ln) = self.bk.loan_of.get(&(&**c as *const Expr as usize)) {
+                            self.bk.loan_of.insert(e as *const Expr as usize, ln);
+                        }
+                    }
+                    return r;
                 }
                 // `*b` は b をムーブしない
                 let (v, t) = self.read_no_move(x)?;
@@ -694,7 +713,42 @@ impl Cx<'_> {
         if watched || at.is_some() {
             self.bk_frame();
         }
+        // (a place read or a call's result of a type that holds no reference (`*d` of `d: &mut bool`, `p.0` of a
+        // number, `mem::replace(d, false)`) carries none of the loans it is reached through or made from: `(*d, log)`
+        // holds only what log holds)
+        let read = self.bk.on && (matches!(e, Expr::Unary(op, ..) if op == "*") || matches!(e, Expr::Field(..) | Expr::Index(..) | Expr::Call(..) | Expr::MethodCall(..)));
+        let mark = if read { self.bk.frames.last().map(|f| (self.bk.frames.len(), f.len())) } else { None };
+        // (a local `s: &&U` where a `&U` is expected: the deref coercion copies `*s` out, so the value holds what that
+        // holds, not the loan s is (bk_copy_out_of))
+        let coerced = match (expected, strip_paren(e)) {
+            (Some(Ty::Ref(_, w)), Expr::Path(None, p)) if self.bk.on && self.bk.level >= 2 && !matches!(w, Ty::Ref(..) | Ty::Param(_)) => {
+                match ident_of(p).and_then(|n| self.bk_local_of(n)).map(|l| (l, self.bk.locals[l as usize].ty)) {
+                    Some((l, Ty::Ref(_, u @ Ty::Ref(false, i)))) if *i == w => self.bk.frames.last().map(|f| (self.bk.frames.len(), f.len(), l, *u)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
         let r = self.expr_inner(e, expected);
+        if let (Some((n, k, l, u)), true) = (coerced, self.bk_on()) {
+            if self.bk.frames.len() == n && self.bk.frames.last().is_some_and(|f| f[k..].contains(&borrowck::Src::Local(l))) {
+                let c = self.bk_copy_out_of(l, u);
+                if let Some(f) = self.bk.frames.last_mut() {
+                    for s in f[k..].iter_mut() {
+                        if *s == borrowck::Src::Local(l) {
+                            *s = borrowck::Src::Local(c);
+                        }
+                    }
+                }
+            }
+        }
+        if let (Some((n, k)), Ok((_, t))) = (mark, &r) {
+            if self.bk.frames.len() == n && *t != Ty::Never && self.bk_on() && !self.bk_ty(*t).1 {
+                if let Some(f) = self.bk.frames.last_mut() {
+                    f.truncate(k);
+                }
+            }
+        }
         if watched || at.is_some() {
             let s = self.bk_frame_end();
             if let Some(i) = at {
@@ -1004,7 +1058,16 @@ impl Cx<'_> {
                 // (a reference copied out of what a call's result points into (`*names.first().unwrap()` with
                 // `names: Vec<&str>`): it does not hold the borrow of names that reached it (bk_copy_out))
                 let copy_out = self.bk_on() && !is_place_expr(x) && matches!(self.peek(x), Some(Ty::Ref(_, i)) if self.bk_ty(*i) == (true, true));
-                if copy_out {
+                // (`*r` of a local `r: &U`: the U copied out holds what r's referent holds, not the loan r is
+                // (bk_copy_out_of): `let r = &a; t = *r;` holds what a holds)
+                let local_copy = match (copy_out || !self.bk_on() || self.bk.level < 2, strip_paren(x)) {
+                    (false, Expr::Path(None, p)) => match ident_of(p).and_then(|n| self.bk_local_of(n)).map(|l| (l, self.bk.locals[l as usize].ty)) {
+                        Some((l, Ty::Ref(_, u))) if self.bk_ty(*u) == (true, true) => Some((l, *u)),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if copy_out || local_copy.is_some() {
                     self.bk_frame();
                 }
                 let p = self.place(e);
@@ -1014,12 +1077,26 @@ impl Cx<'_> {
                         self.bk_copy_out(&srcs, *u);
                     }
                 }
+                if let Some((l, u)) = local_copy {
+                    let srcs = self.bk.frames.pop().unwrap_or_default();
+                    let c = srcs.contains(&borrowck::Src::Local(l)).then(|| self.bk_copy_out_of(l, u));
+                    for s in srcs {
+                        match (s, c) {
+                            (borrowck::Src::Local(x), Some(c)) if x == l => self.bk.src(borrowck::Src::Local(c)),
+                            _ => self.bk.src(s),
+                        }
+                    }
+                }
                 let p = p?;
                 // (`*slice` as a value: its size is not known; only a place (a pattern, `&*s`) can be one)
                 if matches!(p.ty(), Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
                     return err(expr_start(e), format!("the size for values of type `{}` cannot be known at compilation time", self.prog.tn(p.ty())));
                 }
                 if self.bk_on() && !self.bk_ty(p.ty()).0 {
+                    // (`*x` with x a raw pointer: what it points to is not owned, E0507)
+                    if matches!(self.peek(x), Some(Ty::Ptr(..))) && self.bk.level >= 1 {
+                        self.drop_move_check(e)?;
+                    }
                     // (`*rc` with rc an Rc / a Deref type of the program's: its deref gives a reference, which cannot
                     // be moved out of (Box is the one type whose `*` moves))
                     if let Some(Ty::Struct(sid)) = self.peek(x).map(|t| self.strip_refs(t)) {
@@ -1058,8 +1135,8 @@ impl Cx<'_> {
             }
             // (deref coercion of a guard: `&g` where a `&T` (or `&[U]` / `&str` of a Vec / String T) is expected, with
             // g a RefCell's Ref / RefMut or a MutexGuard: `&*g`)
-            Expr::Ref(_, x) if self.guard_coercion(x, expected).is_some() => {
-                let ne = self.guard_coercion(x, expected).unwrap();
+            Expr::Ref(m, x) if self.guard_coercion(x, *m, expected).is_some() => {
+                let ne = self.guard_coercion(x, *m, expected).unwrap();
                 let ne: &Expr = self.keep_expr(ne);
                 self.expr(ne, expected)
             }
@@ -1088,6 +1165,9 @@ impl Cx<'_> {
                 if let Some(m) = self.prog.any_immutable_static.then(|| self.immutable_static(left)).flatten() {
                     return err(expr_start(left), m);
                 }
+                if let Some(m) = self.const_ptr_write(left).filter(|_| self.bk.level >= 1) {
+                    return err(expr_start(left), m);
+                }
                 // (an overloaded `+=` is a call of `add_assign(&mut self, ..)`: no access of its own)
                 let builtin = !matches!(self.peek(left), Some(Ty::Struct(_) | Ty::Ref(_, Ty::Struct(_))));
                 let r = self.binary(e, expected)?;
@@ -1098,6 +1178,9 @@ impl Cx<'_> {
             }
             Expr::Assign(left, right) => {
                 if let Some(m) = self.prog.any_immutable_static.then(|| self.immutable_static(left)).flatten() {
+                    return err(expr_start(left), m);
+                }
+                if let Some(m) = self.const_ptr_write(left).filter(|_| self.bk.level >= 1) {
                     return err(expr_start(left), m);
                 }
                 // (`map[&k] = v`: a map's index is not a place to assign to (E0594); `insert` or `get_mut`)
@@ -1225,12 +1308,14 @@ impl Cx<'_> {
                     temps: t0,
                     no_value: Some("while"),
                 });
+                let bk_t0 = self.bk.stmt_temps.len();
                 let (_, bt) = self.block(wbody, Some(Ty::Unit))?;
                 self.loops.pop();
                 if bt != Ty::Never {
                     // (a body with a value: at its tail, as rustc points)
                     self.same(block_end_pos(wbody), bt, Ty::Unit)?;
                     self.drop_for_exit(usize::MAX, t0);
+                    self.bk_iteration_end(bk_t0);
                     self.b.ins().jump(header, &[]);
                 } else {
                     self.b.ins().trap(TrapCode::unwrap_user(1));
@@ -1257,12 +1342,14 @@ impl Cx<'_> {
                     temps: self.temps.len(),
                     no_value: None,
                 });
+                let bk_t0 = self.bk.stmt_temps.len();
                 let (_, bt) = self.block(lbody, Some(Ty::Unit))?;
                 let lp = self.loops.pop().unwrap();
                 if bt != Ty::Never {
                     // (a body with a value: at its tail, as rustc points)
                     self.same(block_end_pos(lbody), bt, Ty::Unit)?;
                     self.drop_for_exit(usize::MAX, lp.temps);
+                    self.bk_iteration_end(bk_t0);
                     self.b.ins().jump(body, &[]);
                 } else {
                     self.b.ins().trap(TrapCode::unwrap_user(1));
@@ -1407,6 +1494,13 @@ impl Cx<'_> {
                 }
                 let p = p?;
                 if self.bk_on() && !self.bk_ty(p.ty()).0 {
+                    // (out of an array that is no local's place (a constant's, a temporary: `C[0]`, `[S][0]`): E0508,
+                    // as out of a local's, which the borrow check's events report)
+                    if let Some(at @ Ty::Array(..)) = self.peek(b) {
+                        if self.bk.level >= 1 && self.bk_place(e).is_none() {
+                            return err(expr_start(e), format!("cannot move out of type `{}`, a non-copy array (E0508)", self.prog.tn(at)));
+                        }
+                    }
                     self.bk_acc(e, borrowck::Acc::Move);
                 }
                 Ok(self.read(p))
@@ -1798,7 +1892,7 @@ impl Cx<'_> {
     /// A borrow guard (`Ref<T>` / `RefMut<T>` / `MutexGuard<T>`): (its struct, T, whether it derefs mutably)
     pub(crate) fn guard_of(&self, t: Ty) -> Option<(u32, Ty, bool)> {
         let Ty::Struct(sid) = t else { return None };
-        if !matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard") {
+        if !matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard" | "PeekMut") {
             return None;
         }
         let target = *self.prog.structs[sid as usize].args.first()?;
@@ -1828,8 +1922,12 @@ impl Cx<'_> {
     /// `&g` (g: Ref<T> / RefMut<T> / MutexGuard<T>) where a reference to T, or the slice / str of a Vec / String T, is
     /// expected: the expression to use instead (`&*g`, `&(*g)[..]`, `(*g).as_str()`). None when no coercion applies
     /// (a `&dyn Trait` is expected, or a reference to the guard itself)
-    pub(crate) fn guard_coercion(&self, x: &Expr, expected: Option<Ty>) -> Option<Expr> {
+    pub(crate) fn guard_coercion(&self, x: &Expr, written_mut: bool, expected: Option<Ty>) -> Option<Expr> {
         let Some(Ty::Ref(wm, want)) = expected else { return None };
+        // (`&g` where a `&mut T` is expected: no coercion makes a shared borrow of the guard mutable (E0308))
+        if wm && !written_mut {
+            return None;
+        }
         let (sid, target, _) = self.guard_of(self.peek(x)?)?;
         if *want == Ty::Struct(sid) || matches!(want, Ty::Dyn(_)) || self.prog.has_param(*want) {
             return None;
@@ -1922,9 +2020,31 @@ impl Cx<'_> {
             e => e,
         };
         if is_place_expr(rexpr) && !fn_item && !not_var(inner) {
+            // (`&**s` with `s: &&T`: what the reborrow holds is what bk_borrow copies out of `*s`, not all s holds,
+            // which reading s gives)
+            let shr_root = match strip_paren(rexpr) {
+                Expr::Unary(o, x, _) if o == "*" && self.bk_on() && self.bk.level >= 2 => match strip_paren(x) {
+                    Expr::Unary(o, x, _) if o == "*" => self
+                        .bk_place(x)
+                        .filter(|(p, _)| p.proj.is_empty() && matches!(self.bk.locals[p.local as usize].ty, Ty::Ref(_, Ty::Ref(false, _))))
+                        .map(|(p, _)| p.local),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if shr_root.is_some() {
+                self.bk_frame();
+            }
             let pm = std::mem::replace(&mut self.bk.place_mut, m);
             let pl = self.place(rexpr);
             self.bk.place_mut = pm;
+            if let Some(l) = shr_root {
+                for s in self.bk.frames.pop().unwrap_or_default() {
+                    if s != borrowck::Src::Local(l) {
+                        self.bk.src(s);
+                    }
+                }
+            }
             let pl = pl?;
             // (`&a` of a reference `a: &T` (or `&&T` ..) where a `&T` is expected (a deref coercion, also as a result): the
             // pointer a holds, a reborrow of `*a` (`**a` ..), not a borrow of the local a)
