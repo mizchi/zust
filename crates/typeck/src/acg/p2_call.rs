@@ -2551,20 +2551,10 @@ impl Cx<'_> {
             }
             // (a closure written where a bound wants `Fn` / `FnMut`: it is that, so its body moving out what it captures
             // by value (`|| { let s = val; }`) is E0507, at the move. Passed by name, it is E0525 (above))
-            if let (Some(x), Expr::Closure(..), true) = (&fbt, strip_paren(a), self.bk_on()) {
-                let want = x.2.trim_start();
-                let kind = |k: &str| want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('('));
-                let c = strip_paren(a);
-                if (kind("Fn") || kind("FnMut")) && self.bk.fnonce_sure.contains(&(c as *const Expr as usize)) {
-                    let caps: Vec<String> = crate::ast_closure::free_vars(c).into_iter().filter(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0)).collect();
-                    let prog = self.prog;
-                    let types: Vec<(String, Ty)> = caps.iter().filter_map(|n| self.lookup(n).map(|(_, t)| (n.clone(), t))).collect();
-                    let by = |p: &crate::parse::Pat, n: &str| types.iter().find(|x| x.0 == n).is_none_or(|x| borrowck::pat_moves(prog, p, x.1, 0));
-                    if let Some((n, at)) = crate::ast_closure::move_site_by(c, &caps, &by) {
-                        let w = if kind("Fn") { "Fn" } else { "FnMut" };
-                        return Err(self.at(at, format!("cannot move out of `{n}`, a captured variable in an `{w}` closure (E0507)")));
-                    }
-                }
+            // (also `Box::new(|| ..)` where a `Box<dyn Fn()>` is expected: the coercion wants it `Fn`)
+            if let (Some(x), true) = (&fbt, self.bk_on()) {
+                let want = x.2.to_string();
+                self.fn_kind_move_check(a, &want)?;
             }
             // (`take(m::BAR)`: a static moved out by its module's path, E0507; by its name alone, the read of the
             // place checks it. A path is no place expression, so it is read as a value elsewhere too (a method's
@@ -3480,3 +3470,27 @@ const MUT_SLICE_METHODS: &[&str] = &[
     "rsplit_mut", "rsplitn_mut", "select_nth_unstable", "select_nth_unstable_by", "select_nth_unstable_by_key", "each_mut",
     "make_ascii_uppercase", "make_ascii_lowercase", "partition_dedup",
 ];
+
+impl Cx<'_> {
+    /// A closure written where an `Fn` / `FnMut` is wanted (a bound's text, a `Box<dyn Fn()>`'s): it is that, so its
+    /// body moving out what it captures by value (`|| { let s = val; }`) is E0507, at the move
+    pub(crate) fn fn_kind_move_check(&mut self, a: &Expr, want: &str) -> R<()> {
+        let c = strip_paren(a);
+        if !matches!(c, Expr::Closure(..)) {
+            return Ok(());
+        }
+        let want = want.trim_start();
+        let kind = |k: &str| want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('('));
+        if (kind("Fn") || kind("FnMut")) && self.bk.fnonce_sure.contains(&(c as *const Expr as usize)) {
+            let caps: Vec<String> = crate::ast_closure::free_vars(c).into_iter().filter(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0)).collect();
+            let prog = self.prog;
+            let types: Vec<(String, Ty)> = caps.iter().filter_map(|n| self.lookup(n).map(|(_, t)| (n.clone(), t))).collect();
+            let by = |p: &crate::parse::Pat, n: &str| types.iter().find(|x| x.0 == n).is_none_or(|x| borrowck::pat_moves(prog, p, x.1, 0));
+            if let Some((n, at)) = crate::ast_closure::move_site_by(c, &caps, &by) {
+                let w = if kind("Fn") { "Fn" } else { "FnMut" };
+                return Err(self.at(at, format!("cannot move out of `{n}`, a captured variable in an `{w}` closure (E0507)")));
+            }
+        }
+        Ok(())
+    }
+}

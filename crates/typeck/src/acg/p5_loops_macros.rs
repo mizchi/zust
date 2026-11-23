@@ -1928,6 +1928,10 @@ impl Cx<'_> {
             if t == Ty::Never {
                 return Ok(Some((None, Ty::Never)));
             }
+            // (a closure boxed where a `Box<dyn Fn()>` is expected: the coercion wants it `Fn`)
+            if let (Some(Ty::Box(Ty::Dyn(want))), true) = (expected, self.bk_on()) {
+                self.fn_kind_move_check(&cargs[0], want)?;
+            }
             let Some(&alloc) = self.prog.index.get(crate::prelude::BOX_ALLOC) else {
                 return err(SP, "internal: the allocator is missing from the prelude");
             };

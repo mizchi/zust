@@ -2995,3 +2995,17 @@ fn part16_const_pointer_writes() {
     assert_eq!(check("unsafe fn f(p: *const i32) -> i32 {\n    let mut v = *p;\n    v += 1;\n    v\n}\nfn main() {}\n"), vec![]);
     assert_eq!(check("unsafe fn f(p: *mut *const i32, q: *const i32) {\n    *p = q;\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A closure boxed where a `Box<dyn Fn()>` / `Box<dyn FnMut()>` is expected is that kind: its body moving out what it
+/// captures by value (`Box::new(|| x)`, `Box::new(move || v)`) is E0507, as where a bound wants it. A `Box<dyn FnOnce()>`
+/// may move it
+#[test]
+fn part16_boxed_fn_closures() {
+    let d = check("fn f() -> Box<dyn Fn() -> Box<i32>> {\n    let x = Box::new(0);\n    Box::new(|| x)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("a captured variable in an `Fn` closure"), "{d:?}");
+    let d = check("fn f() -> Box<dyn Fn() -> Box<i32>> {\n    let x = Box::new(0);\n    Box::new(move || x)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("a captured variable in an `Fn` closure"), "{d:?}");
+    let d = check("fn g() -> Box<dyn FnMut() -> Vec<i32>> {\n    let v = vec![1];\n    Box::new(move || v)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("a captured variable in an `FnMut` closure"), "{d:?}");
+    assert_eq!(check("fn f() -> Box<dyn FnOnce() -> Box<i32>> {\n    let x = Box::new(0);\n    Box::new(|| x)\n}\nfn g() -> Box<dyn FnMut() -> usize> {\n    let mut v = vec![1];\n    Box::new(move || { v.push(2); v.len() })\n}\nfn main() { println!(\"{} {}\", f()(), g()()); }\n"), vec![]);
+}
