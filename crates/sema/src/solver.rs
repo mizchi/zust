@@ -777,7 +777,7 @@ impl Solver<'_> {
 
     /// RefCell's Ref / RefMut, or MutexGuard: a guard that derefs to its one type argument
     pub fn is_guard(&self, base: u32) -> bool {
-        matches!(self.prog.structs[base as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard")
+        matches!(self.prog.structs[base as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard" | "PeekMut")
     }
 
     pub fn is_vec(&self, base: u32) -> bool {

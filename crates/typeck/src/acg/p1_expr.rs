@@ -1824,7 +1824,7 @@ impl Cx<'_> {
     /// A borrow guard (`Ref<T>` / `RefMut<T>` / `MutexGuard<T>`): (its struct, T, whether it derefs mutably)
     pub(crate) fn guard_of(&self, t: Ty) -> Option<(u32, Ty, bool)> {
         let Ty::Struct(sid) = t else { return None };
-        if !matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard") {
+        if !matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard" | "PeekMut") {
             return None;
         }
         let target = *self.prog.structs[sid as usize].args.first()?;

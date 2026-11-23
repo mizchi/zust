@@ -2100,7 +2100,7 @@ impl Inf<'_> {
             let Some(s0) = sid else { break };
             let Some(did) = self.prog.method(s0, "deref") else { break };
             // (a guard (RefCell's Ref / RefMut, MutexGuard) has none of these itself: `g.clone()` is the value's)
-            let guard = matches!(self.prog.structs[self.prog.base_of(s0) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard");
+            let guard = matches!(self.prog.structs[self.prog.base_of(s0) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard" | "PeekMut");
             if guard || !matches!(n, "clone" | "to_string" | "cmp" | "partial_cmp" | "eq") {
                 let r = self.apply_recv(Some(did), vec![], rv);
                 rv = self.deref_expr(r);

@@ -3064,3 +3064,11 @@ fn part17_values_with_no_references() {
     let d = check("fn main() {\n    let mut x = vec![1];\n    let v = {\n        x.push(2);\n        &x\n    };\n    x.push(3);\n    println!(\"{:?}\", v);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("also borrowed as immutable"), "{d:?}");
 }
+
+/// `BinaryHeap::peek_mut`'s guard holds the heap's `&mut` borrow while it lives: a read of the heap meanwhile conflicts
+/// (E0502 in rustc). It was "no method named `peek_mut`"
+#[test]
+fn part17_peek_mut() {
+    let d = check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap: BinaryHeap<i32> = BinaryHeap::new();\n    heap.push(1);\n    let b = heap.peek_mut();\n    println!(\"{:?}\", heap);\n    drop(b);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("mutably borrowed"), "{d:?}");
+}

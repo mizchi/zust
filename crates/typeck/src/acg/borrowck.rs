@@ -649,7 +649,7 @@ fn variant_fields<'p>(prog: &'p Program, sid: u32, path: &crate::parse::Path) ->
 
 /// The prelude's iterator and view types: raw pointers into what they were made from, so they hold the loan of it
 const VIEWS: &[&str] = &[
-    "Windows", "Chunks", "ChunksExact", "Iter", "IterMut", "Chars", "DebugStruct", "DebugTuple", "DebugMap", "MutexGuard", "Ref", "RefMut", "HmIter",
+    "Windows", "Chunks", "ChunksExact", "Iter", "IterMut", "Chars", "DebugStruct", "DebugTuple", "DebugMap", "MutexGuard", "Ref", "RefMut", "PeekMut", "HmIter",
     "HmIterMut", "BtIter", "BtIterMut", "DqIter", "Split", "SplitStr", "MatchIndices", "RSplitStr", "CharIndices", "Bytes", "SplitFn",
 ];
 
@@ -2198,7 +2198,7 @@ impl Cx<'_> {
                 let prelude = prog.struct_item.get(base as usize).is_some_and(|&i| i >= prog.prelude_from);
                 // (a guard of the prelude (`c.borrow()`'s `Ref`, a `MutexGuard`): its `Drop` releases what it borrows, so
                 // that must still be there, as std's guards (no `#[may_dangle]`))
-                if prelude && matches!(prog.structs[base as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard") {
+                if prelude && matches!(prog.structs[base as usize].name.as_str(), "Ref" | "RefMut" | "PeekMut" | "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard") {
                     return true;
                 }
                 if prelude || prog.closure_of_struct.contains_key(&base) {
