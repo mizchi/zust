@@ -430,6 +430,10 @@ mod tests {
         assert!(out.contains("fn f() { super::m41n(); self::main(); main(); }"), "{out}");
         assert!(out.contains("fn g() { super::main(); super::super::m41n(); }"), "{out}");
         assert!(out.contains("    fn main() {}"), "{out}");
+        // (`crate::main()` from a module with its own `main` still names the root's)
+        let src = "fn main() {}\nmod tests {\n    fn main() {}\n    #[test]\n    fn calls_crate_main() { crate::main(); main(); }\n}\n";
+        let out = apply(src);
+        assert!(out.contains("fn calls_crate_main() { crate::m41n(); main(); }"), "{out}");
     }
 
     #[test]
