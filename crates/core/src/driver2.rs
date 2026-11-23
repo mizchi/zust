@@ -1427,8 +1427,13 @@ impl Session2 {
         }
         // (unreachable_code: a statement after one that diverges)
         if deny_unreachable_code && self.ctx.lib.is_none() {
-            // (the source as written: flattening blanks a `mod process {` header)
-            let user_process = src0.contains("mod process");
+            // (the source as written, as flattening blanks a `mod process {` header: `mod`, any space, `process`)
+            let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+            let b0 = src0.as_bytes();
+            let user_process = src0.match_indices("process").any(|(i, _)| {
+                let before = src0[..i].trim_end();
+                i > before.len() && before.ends_with("mod") && !b0.get(i + 7).is_some_and(|&c| word(c)) && !before[..before.len() - 3].bytes().last().is_some_and(word)
+            });
             for it in &items[..user_src] {
                 let text = src.get(it.start..it.end).unwrap_or("");
                 if !text.contains("fn ") || text.contains("allow(unreachable") || text.contains("#[cfg") {
@@ -2520,7 +2525,8 @@ fn first_unreachable(b: &crate::parse::Block, user_process: bool) -> Option<(cra
             // (an operand or an argument that diverges: evaluated first, the rest never runs; not the right of `&&` /
             // `||`, which may not run)
             Expr::Binary(op, l, r, _) => diverges(l) || (!matches!(op.as_str(), "&&" | "||") && diverges(r)),
-            Expr::Call(f, args) => diverges(f) || args.iter().any(diverges) || (matches!(&**f, Expr::Path(None, p) if p.segs.len() >= 2 && p.segs[p.segs.len() - 2].name == "process" && matches!(p.segs[p.segs.len() - 1].name.as_str(), "exit" | "abort")) && !USER_PROCESS.with(|c| c.get())),
+            Expr::Call(f, args) => diverges(f) || args.iter().any(diverges) || matches!(&**f, Expr::Path(None, p) if p.segs.len() >= 2 && p.segs[p.segs.len() - 2].name == "process" && matches!(p.segs[p.segs.len() - 1].name.as_str(), "exit" | "abort")
+                && ((p.segs.len() >= 3 && p.segs[p.segs.len() - 3].name == "std") || !USER_PROCESS.with(|c| c.get()))),
             Expr::MethodCall(r, _, _, args, _) => diverges(r) || args.iter().any(diverges),
             // (both branches; a `match` with no arm (on an empty enum) or whose every arm diverges)
             Expr::If(c, t, Some(els)) => diverges(c) || (block_diverges(t) && diverges(els)),
@@ -5698,7 +5704,8 @@ fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>
                     match c {
                         Some(b'[' | b'(') => d += 1,
                         Some(b']' | b')') => d -= 1,
-                        _ if d == 0 && rt[q].0 == 0 && &rest[rt[q].1..rt[q].2] != "pub" => done = true,
+                        // (a whole identifier: one that ends where the window does may be cut)
+                        _ if d == 0 && rt[q].0 == 0 && (rt[q].2 < rest.len() || end == src.len()) && &rest[rt[q].1..rt[q].2] != "pub" => done = true,
                         _ => {}
                     }
                     q += 1;
