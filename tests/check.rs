@@ -651,6 +651,24 @@ fn review91_attributes_imports_unreachable() {
     let src = "#![deny(unused_imports)]\n#[deprecated]\nuse std::fs as files;\nuse files::File;\nfn main() { let _: Option<File> = None; }\n";
     // (zustc does not yet resolve `File` through the alias; only the lint is checked here)
     assert_eq!(first(src).filter(|d| d.1.starts_with("unused import")), None, "used_by_use");
+    // (fourth round: the last lint attribute that names the lint or its group sets the level, and a warn is not an
+    // error; a `*` in an attribute is not a glob)
+    let unused_fs = Some((2, "unused import: `std::fs`".to_string()));
+    for (attrs, want) in [
+        ("#[warn(unused_imports)]", None),
+        ("#[warn(unused)]", None),
+        ("#[allow(unused)] #[warn(unused_imports)]", None),
+        ("#[warn(unused_imports)] #[allow(unused)]", None),
+        ("#[deny(unused_imports)] #[allow(unused_imports)]", None),
+        ("#[allow(unused_imports)] #[deny(unused_imports)]", unused_fs.clone()),
+        ("#[allow(unused_imports, warnings)] #[forbid(unused_imports)]", unused_fs.clone()),
+        ("#[allow(warnings)]", unused_fs.clone()),
+    ] {
+        let src = format!("#![deny(unused_imports)]\n{attrs} use std::fs;\nfn main() {{}}\n");
+        assert_eq!(first(&src), want, "lint_level {attrs}");
+    }
+    let src = "#![deny(unused_imports)]\n#[doc = \"*\"] use std::fs as unused_fs;\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, "unused import: `std::fs as unused_fs`".to_string())), "star_in_attribute");
     // (the unstable ABIs: after any number of attributes; a raw string)
     let src = "#[doc = \"a\"]\n#[doc = \"b\"]\n#[doc = \"c\"]\n#[allow(dead_code, unused)]\npub extern \"rust-cold\" fn f() {}\nfn main() {}\n";
     assert_eq!(first(src), Some((5, "the extern \"rust-cold\" ABI is experimental and subject to change (E0658)".to_string())), "abi_after_attrs");
