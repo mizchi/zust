@@ -1310,11 +1310,22 @@ impl Session2 {
                     .map(|(i, _)| i)
                     .last()
             };
+            // (the level of a lint of a group, by the last of its levels in source order: forbid wins; a deny of it
+            // or its group denies; a warn of it (or no level of its own) is denied by `deny(warnings)`; an allow or an
+            // expect does not deny)
             let grouped = |n: &str, group: &str| {
-                let names = [n, group, "warnings"];
-                let forbid = last_of("forbid", &names);
-                let deny = last_of("deny", &names).max(forbid);
-                deny.is_some() && (forbid.is_some() || last_of("allow", &[n, group]) < deny) && last_of("expect", &[n, group]).is_none()
+                if last_of("forbid", &[n, group, "warnings"]).is_some() {
+                    return true;
+                }
+                let own = [n, group];
+                let levels = [("deny", last_of("deny", &own)), ("warn", last_of("warn", &own)), ("allow", last_of("allow", &own)), ("expect", last_of("expect", &own))];
+                let last = levels.iter().filter_map(|(l, at)| at.map(|at| (at, *l))).max();
+                let warnings = last_of("deny", &["warnings"]).is_some();
+                match last.map(|(_, l)| l) {
+                    Some("deny") => true,
+                    Some("warn") | None => warnings,
+                    _ => false,
+                }
             };
             deny_dead_code = grouped("dead_code", "unused");
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
@@ -1521,7 +1532,20 @@ impl Session2 {
                     if sb[i] == b'/' && sb.get(i + 1) == Some(&b'/') {
                         i = sb[i..stop].iter().position(|&c| c == b'\n').map_or(stop, |k| i + k);
                     } else if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
-                        i = src[i + 2..stop].find("*/").map_or(stop, |k| i + 2 + k + 2);
+                        // (block comments nest: `/* a /* b */ ; */`)
+                        let mut depth = 1;
+                        i += 2;
+                        while i < stop && depth > 0 {
+                            if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
+                                depth += 1;
+                                i += 2;
+                            } else if sb[i] == b'*' && sb.get(i + 1) == Some(&b'/') {
+                                depth -= 1;
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
+                        }
                     } else if sb[i] == b';' {
                         end = i;
                         break;
@@ -4490,10 +4514,23 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
             if !(w(k) == "Sized" && sym(k - 1, b'?')) {
                 return false;
             }
-            // (back over the other bounds, `Tr<A, B> + 'a + std::fmt::Debug +`, to the `:` after the name)
+            // (back over the other bounds, `Tr<A, B> + 'a + std::fmt::Debug + Iterator<Item = u8> +`, to the `:`
+            // after the name: anything inside a bound's `<..>`)
             let mut j = k - 1;
+            let mut angle = 0i32;
             while j > 0 {
                 j -= 1;
+                if sym(j, b'>') && !(j > 0 && sym(j - 1, b'-')) {
+                    angle += 1;
+                    continue;
+                }
+                if sym(j, b'<') {
+                    angle -= 1;
+                    continue;
+                }
+                if angle > 0 {
+                    continue;
+                }
                 if sym(j, b':') {
                     if j > 0 && sym(j - 1, b':') {
                         j -= 1;
