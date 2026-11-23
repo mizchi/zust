@@ -135,6 +135,7 @@ crate::enc_struct!(Summary {
     unions,
     reprs,
     const_fns,
+    const_fn_tys,
     adt_err,
     impl_self,
     enums,

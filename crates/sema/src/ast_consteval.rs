@@ -160,6 +160,11 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
     if let Expr::Path(None, p) = e {
         if let Some(id) = ident(p) {
             if let Some(&ci) = prog.const_index.get(id) {
+                // (an integer constant takes its declared type: `const M: u8 = !0 >> 4` is 15)
+                if ty.is_int() && prog.consts[ci as usize].ty.is_int() {
+                    put_int(v, off, ty.bits() / 8, prog.const_int(id, 0)?);
+                    return Ok(());
+                }
                 let ce = crate::parse::parse_expr(&prog.consts[ci as usize].expr)?;
                 return write(prog, &ce, ty, v, off, depth + 1);
             }
@@ -167,7 +172,8 @@ fn write(prog: &Program, e: &Expr, ty: Ty, v: &mut DataVal, off: u32, depth: u32
     }
     match ty {
         t if t.is_int() || matches!(t, Ty::Bool | Ty::Char) => {
-            let x = prog.eval_const(e, 0)?;
+            // (as the static's type: `static B: u8 = !0 >> 4` is 15)
+            let x = prog.eval_const_as(e, t)?;
             // (`!true` is the integer `!1`: a bool keeps its low bit)
             let x = if t == Ty::Bool { x & 1 } else { x };
             put_int(v, off, t.bits() / 8, x);

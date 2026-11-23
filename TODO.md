@@ -86,6 +86,17 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   claims the address is aligned) although `ptr::read_unaligned` and a gather off an unaligned base (scale >= the
   element size) use them too. x86 scalar moves do not need alignment, so the code is right today; an alignment
   operand (or an unaligned load op) on `Op::Load` / `Op::Store` would make the flag true.
+- memchr (42 crates of dioxus, 29 of leptos depend on it) stops at items a `macro_rules!` expansion puts in a function
+  body (`unsafe_ifunc!`: `type Fn = *mut ();`, `static FN: AtomicPtr<()>`, `fn detect()` inside a block): "nested
+  items are not supported". Nested items written in a body are hoisted; those of an expression macro's expansion are
+  not. Also `is_x86_feature_detected!` is `true` only for sse / sse2 (no detection at run time), and the vector types
+  `__m128` / `__m128i` / `__m128d` / `v128` are one type, so impls of a trait for two of them conflict.
+- Incremental preprocessing (`prep` with a `PrepMemo`) can differ from `prep_full` on unbalanced input: an item in a
+  brace that an edit leaves open (`println!("{}", std::mem::size_o{ fn inner() {} }` inside `fn main`) is hoisted to
+  the top level by the full pass but left in place by the chunked one. Found by `tests/prep_inc.rs` when
+  `examples/const_eval_typed.rs` grew; the example's new items were moved to its end, which changes the random edits.
+  A second case found the same way: a `m!()` call that the full pass expands and the chunked one leaves (an edit
+  near `let y17 = y16 & y16;` in that example).
 - Nested generic aliases (`type T1 = D<T0, T0>; type T2 = D<T1, T1>; ..`) take time exponential in the depth to
   compile (about 2x per level: 2.2 s at depth 24, 33 s at depth 28), with or without `TypeId` (whose key is the
   fixed-size `hash_ty`). Pre-existing (not SIMD): probably the aliases' expansion.
@@ -148,6 +159,21 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 - Macros: larger tt-munchers (`pin_project!`, `bitflags!`), `#[macro_use] extern crate`, `#[macro_use] mod` in a file
   ("cannot find macro"), `#![recursion_limit]` (the limit stays 64).
 - Language and std: the tables of sections 2.5 and 2.7 of the report.
+
+## Typed constant evaluator: open cases from the review of #49
+
+- An untyped `let` whose only use is in an `if` arm that is not taken is not validated at its inferred type:
+  `const N: u8 = { let x = 255 + 1; if false { x } else { 0u8 } };` is accepted (rustc: overflow). Finalize every
+  executed initializer at the type inference gives it, not only those whose untyped trial failed.
+- That type should come from both arms (`let x = 1 / ((!0 >> 7) + 1);` used as `i64` in a skipped arm divides by
+  zero at `i64`); the fallback in `Program::eval_block_env` accepts success at any integer type.
+- `!FLAG` with `const FLAG: bool` (and `!{ true }`) is folded as an integer complement: `(!FLAG) as u8` is 254, not 0.
+  `is_bool_expr` sees only literals, comparisons and `&&`/`||`; the bool type should be carried through constants and
+  blocks.
+- A vector type's overload group with an `unsafe fn m` and a safe `fn m` (two traits): when the unsafe one stays
+  selected, no E0133 is reported. Check the id `pick_overload` returns, after selection.
+- Serialized const arguments drop a local's type annotation (`{ let x: u8 = !0; ... }` in `Buf<{ .. }>`), and a const
+  fn's return type through an alias (`type Id<T> = T; const fn f() -> Id<u8>`) is not applied.
 
 ## Tooling
 

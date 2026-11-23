@@ -1589,6 +1589,16 @@ impl Cx<'_> {
                     (None, _) => err(SP, "expected string literal"),
                 }
             }
+            // `is_x86_feature_detected!("avx2")`: no detection at run time, so only what every x86-64 has (sse, sse2):
+            // a caller takes its fallback (memchr's sse2 routines instead of its avx2 ones)
+            "is_x86_feature_detected" => {
+                let args = self.macro_args(p, g)?;
+                let Some(f) = args.first().and_then(|a| str_lit(a)) else {
+                    return err(SP, "is_x86_feature_detected! takes a string literal");
+                };
+                let v = self.b.ins().iconst(types::I8, matches!(f.as_str(), "sse" | "sse2" | "fxsr") as i64);
+                Ok((Some(v), Ty::Bool))
+            }
             _ => err(SP, format!("macro `{name}!` is not supported")),
         }
     }
@@ -1870,6 +1880,27 @@ impl Cx<'_> {
                 ("from_raw", Ty::Ptr(_, i)) => Ok(Some((Some(v), Ty::Box(i)))),
                 _ => err(SP, format!("`Box::{name}` needs a {}", if name == "into_raw" { "Box" } else { "raw pointer" })),
             };
+        }
+        // `Box::from(x)` of a value (an array, a number ..): `Box::new(x)` (`Box::from([!0; 256])`). Of a `&str` / `&[T]` /
+        // String / Vec it is not: those stay unsupported here
+        if name == "from" && n >= 2 && p.segs[n - 2].name == "Box" && cargs.len() == 1 && !self.prog.struct_index.contains_key("Box") {
+            let owned = |t: Ty| !matches!(t, Ty::Ref(..) | Ty::Str | Ty::Slice(_) | Ty::Dyn(_)) && !matches!(t, Ty::Struct(sid) if matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "String" | "Vec"));
+            let arg = self.peek(&cargs[0]).or(match expected { Some(Ty::Box(i)) => Some(*i), _ => None });
+            // (`Box::from(b)` of a Box of that type: `From<T> for T`, the Box itself)
+            if let (Some(a @ Ty::Box(_)), Some(e)) = (arg, expected) {
+                if a == e {
+                    return self.expr(&cargs[0], expected).map(Some);
+                }
+            }
+            // (not when the program has its own `impl From<S> for Box<T>` (S a struct or a Box): that impl is the conversion)
+            let user_from = self.prog.names.iter().enumerate().any(|(i, n)| n.starts_with("Box::from") && self.prog.sigs[i].impl_trait.as_deref().is_some_and(|t| t.starts_with("From")));
+            if arg.is_some_and(owned) && !(user_from && matches!(arg, Some(Ty::Struct(_) | Ty::Box(_)))) {
+                // (the `Box` segment as written, with its arguments: `Box::<u64>::from(1)`)
+                let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
+                let bn = crate::parse::Path { global: false, segs: vec![p.segs[n - 2].clone(), seg("new")], pos: p.pos };
+                let ne: &Expr = self.keep_expr(Expr::Call(Box::new(Expr::Path(None, bn)), cargs.to_vec()));
+                return self.expr(ne, expected).map(Some);
+            }
         }
         // `Box::new(x)`: ヒープに置いて、所有する `&mut T` として返す (解放はしない)
         if name == "new" && n >= 2 && p.segs[n - 2].name == "Box" && !self.prog.struct_index.contains_key("Box") {
@@ -2197,7 +2228,18 @@ impl Cx<'_> {
         // `<u64 as Integer>::MAX_STR_LEN`: impl の関連 const `u64::MAX_STR_LEN`
         if let (Some(q), Some(last)) = (q, p.segs.last()) {
             if let Ok(t) = self.parse_ty(q) {
-                let tn = if t == Ty::Unit { "#tuple0".to_string() } else { self.prog.tn(t) };
+                let mut tn = if t == Ty::Unit { "#tuple0".to_string() } else { self.prog.tn(t) };
+                // (a vector type's consts are under the name its impl wrote: `impl Vector for __m128i` has `__m128i::BYTES`)
+                // (the trait's own first, among all the names: `<__m128 as B>::C` is B's even if `__m128i` has an A::C)
+                let names = crate::program::vector_names(t).iter().filter(|n| !self.prog.struct_index.contains_key(**n));
+                let qualified = (p.segs.len() >= 2).then(|| p.segs[p.segs.len() - 2].name.clone());
+                let by_trait = qualified.as_ref().and_then(|tr| names.clone().find(|n| self.prog.const_index.contains_key(&format!("{n} as {tr}::{}", last.name))));
+                // (a qualified path whose impl has no `C` takes the trait's default: not another trait's bare `C`)
+                let trait_default = qualified.as_ref().is_some_and(|tr| self.prog.const_index.contains_key(&format!("{tr}::{}", last.name)));
+                let bare = || if qualified.is_some() && trait_default { None } else { names.clone().find(|n| self.prog.const_index.contains_key(&format!("{n}::{}", last.name))) };
+                if let Some(n) = by_trait.or_else(bare) {
+                    tn = n.to_string();
+                }
                 // (`<Foo as Tr>::C` where Foo has an inherent `C` too: the trait impl's, by its qualified name)
                 if p.segs.len() >= 2 {
                     let tr = &p.segs[p.segs.len() - 2].name;
@@ -2295,7 +2337,10 @@ impl Cx<'_> {
             }
         }
         if segs.len() == 2 {
-            if let Some(t) = Ty::from_suffix(&segs[0]).or(if segs[0] == "char" { Some(Ty::Char) } else { None }) {
+            // (through an alias of a primitive too: `type Mask = u16;` and `Mask::BITS`)
+            // (a type alias is not hidden by a value binding of the name: another namespace)
+            let alias = || Ty::from_suffix(&self.prog.prim_of_name(&segs[0]));
+            if let Some(t) = Ty::from_suffix(&segs[0]).or(if segs[0] == "char" { Some(Ty::Char) } else { None }).or_else(alias) {
                 if let Some(v) = crate::program::prim_assoc_const(t, &segs[1]) {
                     let t = if segs[1] == "BITS" { Ty::U32 } else { t };
                     let c = self.int_const(t, v);
@@ -2450,6 +2495,10 @@ impl Cx<'_> {
                 None => Some(a.clone()),
             }?;
             if let Some(&ci) = self.prog.const_index.get(&format!("{base}::{n}")) {
+                return Some(ci);
+            }
+            // (`V::BYTES` with V a vector type: its impl's const, under the name the impl wrote (`__m128i::BYTES`))
+            if let Some(&ci) = ty.and_then(|t| crate::program::vector_names(t).iter().filter(|v| !self.prog.struct_index.contains_key(**v)).find_map(|v| self.prog.const_index.get(&format!("{v}::{n}")))) {
                 return Some(ci);
             }
             // trait の既定値: 型が実装している trait の `Tr::N`

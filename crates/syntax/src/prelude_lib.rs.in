@@ -2433,6 +2433,12 @@ pub trait ExactSizeIterator {
     fn len(&self) -> usize;
 }
 
+// (the trait, for a program's `impl DoubleEndedIterator for X`: the prelude's own iterators keep next_back as a method of
+// each type, which `rev()` calls by name)
+pub trait DoubleEndedIterator: Iterator {
+    fn next_back(&mut self) -> Option<Self::Item>;
+}
+
 // (a marker: the default method only lets the selection find the trait)
 pub trait FusedIterator {
     fn __fused_mark(&self) {}

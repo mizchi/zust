@@ -2479,8 +2479,16 @@ impl Cx<'_> {
                 let e = a.iter().find_map(|e| self.peek(e))?;
                 Some(Ty::Array(intern(e), a.len() as u32))
             }
-            Expr::MethodCall(recv, name, _, args, _) => {
+            Expr::MethodCall(recv, name, tf, args, _) => {
                 let mut t = self.peek(recv)?;
+                // (a raw pointer's `cast::<U>()` / `add(n)`: `x.cast::<u32>().read_unaligned()`)
+                if let Ty::Ptr(m, _) = t {
+                    match (name.as_str(), tf.first()) {
+                        ("cast", Some(crate::parse::GArg::Ty(u))) => return self.parse_ty(u).ok().map(|u| Ty::Ptr(m, intern(u))),
+                        ("add" | "sub" | "offset" | "wrapping_add" | "wrapping_sub" | "wrapping_offset", _) => return Some(t),
+                        _ => {}
+                    }
+                }
                 while let Ty::Ref(_, i) = t {
                     t = *i;
                 }
