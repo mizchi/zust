@@ -1934,10 +1934,17 @@ impl Cx<'_> {
             }
             Expr::Ref(_, x) if self.rg.coerced.iter().any(|c| c.0 == e as *const Expr as usize) => {
                 let n = self.rg.coerced.iter().find(|c| c.0 == e as *const Expr as usize).map_or(0, |c| c.1);
-                let (mut t, mut tr) = self.rt_expr(x)?;
                 // (the reborrow `&**x` it is lives no longer than the references it goes through, as an explicit one:
-                // a `&mut` link's region bounds it, a shared link stops there (deref))
-                let mut ds = vec![];
+                // a `&mut` link's region bounds it, a shared link stops there (deref)); those that reach the place x
+                // first (`&s.r` of `s: &'short mut S<'long>` as `&'long i32` needs `'short: 'long`)
+                let (mut t, mut tr, mut ds, place) = match self.rt_place(x) {
+                    Some((t, tr, ds)) => (t, tr, ds, true),
+                    None => {
+                        let (t, tr) = self.rt_expr(x)?;
+                        (t, tr, vec![], false)
+                    }
+                };
+                let (ds0, owned_place) = (ds.len(), place && ds.is_empty());
                 for _ in 0..n {
                     let Ty::Ref(m, i) = t else { return None };
                     if tr.is_empty() {
@@ -1953,7 +1960,7 @@ impl Cx<'_> {
                 // A shared link stops that there)
                 if let (Ty::Ref(m, _), Some(&last)) = (t, tr.first()) {
                     deref(&mut ds, last, m);
-                    let all_mut = ds.len() == n + 1 && m;
+                    let all_mut = ds.len() == ds0 + n + 1 && m;
                     let r = self.rg.var();
                     let sp = super::borrowck::pos(e);
                     for d in ds {
@@ -1964,7 +1971,7 @@ impl Cx<'_> {
                         self.rg.reborrows.push((&**x as *const Expr as usize, r));
                         // (only of a place the function owns: one reached through a reference (`&s.f` of `s: &mut S`,
                         // `&*x`) is a reborrow through it, as the explicit path's)
-                        let owned = all_mut && !matches!(strip(x), Expr::Call(..) | Expr::MethodCall(..)) && self.rt_place(x).is_some_and(|p| p.2.is_empty());
+                        let owned = all_mut && owned_place && !matches!(strip(x), Expr::Call(..) | Expr::MethodCall(..));
                         if owned {
                             if let Some(name) = place_text(x) {
                                 self.rg.loans.push((r, name, sp));

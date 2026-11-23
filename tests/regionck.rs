@@ -2950,4 +2950,10 @@ fn part16_review() {
     assert_eq!(check("struct S<'a> {\n    r: &'a mut i32,\n}\nfn f<'a>(s: &'a S<'a>) -> &'a i32 {\n    &s.r\n}\nfn main() {}\n"), vec![]);
     let d = check("struct S<'a> { f: &'a mut i32 }\nfn g<'a>(s: S<'a>) -> &'a i32 {\n    &s.f\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0515"), "{d:?}");
+    // (the fourth: such a reborrow is bounded by the references that reach the place too, as the explicit one)
+    for s in ["&'short mut S<'long>", "&'short S<'long>"] {
+        let d = check(&format!("struct S<'a> {{ r: &'a mut i32 }}\nfn f<'short, 'long>(s: {s}) -> &'long i32 {{\n    &s.r\n}}\nfn main() {{}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("`'short` must outlive `'long`"), "{d:?}");
+    }
+    assert_eq!(check("struct S<'a> { r: &'a mut i32 }\nfn g<'short, 'long>(s: &'short S<'long>) -> &'short i32 {\n    &s.r\n}\nfn h<'short, 'long: 'short>(s: &'short mut S<'long>) -> &'short i32 {\n    &s.r\n}\nfn main() {}\n"), vec![]);
 }
