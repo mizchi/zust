@@ -14,6 +14,9 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
   - `--check-externs`: 各 `extern` の宣言が、実際の TS の .d.ts の型に合うかを tsrs(`npm i tsrs`、または `TSRS`)で確かめる。合わなければ、その `extern` の位置でエラーになる
   - JS ターゲットのサイズと速さの計測: `node bench/js/kpi.mjs --esbuild PATH`(`--against bench/js/baseline.json` で比べる)
   - あとで決めることと、次にやること: [TODO.md](TODO.md)(文法の提案は [evals/syntax/](evals/syntax/README.md))
+- ブラウザで試すプレイグラウンド: [editor/](../../editor/README.md)
+  - tree-sitter でハイライトし、wasm にした zsc で編集のたびにトランスパイルして、iframe で `main` を実行する(JSX を返せば React で描画)
+  - `@wasm fn` は JS のまま動かす(`--all-js` 相当。ブラウザでは zustc を動かせない)
 - テスト: `cargo test --release`
   - **Node 26** を使う(PATH 上の `node`。計測も Node 26.13.1。relaxed SIMD はフラグなしで動く)
   - app の例は zust 側の `target/release/zustc` を使う

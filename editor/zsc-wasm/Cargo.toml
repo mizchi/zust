@@ -1,0 +1,21 @@
+[package]
+name = "zsc-wasm"
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "zsc (crates/zustscript) built for the browser: the playground's compiler"
+publish = false
+
+# (standalone: not a member of zust's workspace)
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

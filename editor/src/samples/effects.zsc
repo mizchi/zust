@@ -1,0 +1,59 @@
+// Algebraic effects declared as enums: every variant is an operation `Op(Args) -> Result`.
+// Which functions perform which effects is inferred (no annotations); a function that performs one is a
+// generator in the output, and `handle` gives each operation a one-shot continuation `k`.
+
+extern fn log(s: String) = "console.log";
+
+enum Console { Print(String) -> (), Ask(String) -> String }
+enum State { Get -> i32, Put(i32) -> () }
+enum Fail { Raise(String) -> i32 }
+
+fn greet() -> String {
+  let name = perform Ask("name?");
+  perform Print("hello, " + name);
+  name
+}
+
+// performs State (through tick) and Console (through greet): both inferred
+fn counter(n: i32) -> i32 {
+  if n == 0 { perform Get } else { tick(); counter(n - 1) }
+}
+
+fn tick() -> () {
+  let v = perform Get;
+  perform Put(v + 1);
+}
+
+fn safe_div(a: i32, b: i32) -> i32 {
+  if b == 0 { perform Raise("divide by zero") } else { a / b }
+}
+
+// handles State; the arm for Put performs Console, which goes on to the caller's handler
+// (threading a state through `k` needs `k` inside a closure: the next step, effect polymorphism)
+fn with_state(start: i32) -> i32 {
+  handle counter(3) {
+    Get, k => k(start),
+    Put(v), k => { perform Print("put " + v.to_string()); k(()) },
+  }
+}
+
+pub fn main() -> () {
+  let who = handle greet() {
+    Print(s), k => { log("[out] " + s); k(()) },
+    Ask(q), k => { log("[ask] " + q); k("taro") },
+  };
+  log("greeted " + who);
+
+  let n = handle with_state(10) {
+    Print(s), k => { log("[state] " + s); k(()) },
+    Ask(q), k => k(q),
+  };
+  log("counter: " + n.to_string());
+
+  // an arm that does not resume aborts the handled computation (an exception)
+  let r = handle safe_div(10, 0) {
+    Raise(m), k => { log("raised: " + m); -1 },
+  };
+  let ok = handle safe_div(10, 3) { Raise(m), k => -1 };
+  log("results: " + r.to_string() + " " + ok.to_string());
+}
