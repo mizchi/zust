@@ -306,8 +306,8 @@ fn wf_bounds_held_by_bounds_where_clauses_and_supertraits() {
 }
 
 /// A parameter that says `?Sized` (in its bounds or a where clause) does not hold a `Sized` bound, even with the word
-/// `Sized` in its `?Sized`, unless another of its bounds implies it (std's `Clone`); another parameter of the same item
-/// still does
+/// `Sized` in its `?Sized`, unless another of its bounds has `Sized` as a supertrait (`Clone`); another parameter of the
+/// same item still does, and a `?Sized` in a string declares nothing
 #[test]
 fn wf_maybe_unsized_parameter_does_not_hold_sized() {
     let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
@@ -315,13 +315,19 @@ fn wf_maybe_unsized_parameter_does_not_hold_sized() {
     let ds = s.check(bad);
     assert_eq!(ds.iter().map(|d| d.line).collect::<Vec<_>>(), vec![3], "{ds:?}");
     assert!(ds[0].msg.contains("`K: Sized`"), "{ds:?}");
-    let wher = "use std::fmt::Debug;\nstruct Sz<T: Sized>(T);\nstruct J<K>\nwhere\n    K: Debug + ?Sized,\n{\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
-    assert_eq!(s.check(wher).iter().map(|d| d.line).collect::<Vec<_>>(), vec![7], "{:?}", s.check(wher));
-    // (std's `Clone` has `Sized` as a supertrait: `K: Clone + ?Sized` is Sized, as rustc accepts it)
-    let clone = "struct Sz<T: Sized>(T);\nstruct J<K>\nwhere\n    K: Clone + ?Sized,\n{\n    s: Box<Sz<K>>,\n}\nstruct W<T: ?Sized + Clone> {\n    value: Sz<T>,\n}\nfn main() {}\n";
-    assert!(s.check(clone).is_empty(), "{:?}", s.check(clone));
+    let wher = "struct Sz<T: Sized>(T);\nstruct J<K>\nwhere\n    K: std::fmt::Debug + ?Sized,\n{\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    let ds = s.check(wher);
+    assert_eq!(ds.iter().map(|d| (d.line, d.msg.contains("`K: Sized`"))).collect::<Vec<_>>(), vec![(6, true)], "{ds:?}");
+    // (std's `Clone` has `Sized` as a supertrait, before or after the `?Sized`: `T: ?Sized + Clone` is Sized)
+    let clone_first = "struct Sz<T: Sized>(T);\nstruct W<T: ?Sized + Clone> {\n    value: Sz<T>,\n}\nfn main() {}\n";
+    assert!(s.check(clone_first).is_empty(), "{:?}", s.check(clone_first));
     let ok = "struct Sz<T: Sized>(T);\nstruct J<K, V: ?Sized> {\n    s: Sz<K>,\n    v: Box<V>,\n}\nfn main() {}\n";
     assert!(s.check(ok).is_empty(), "{:?}", s.check(ok));
+    // (`Clone` has `Sized` as a supertrait: `K: Clone + ?Sized` is Sized; a `?Sized` in a string declares nothing)
+    let clone = "struct Sz<T: Sized>(T);\nstruct J<K>\nwhere\n    K: Clone + ?Sized,\n{\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    assert!(s.check(clone).is_empty(), "{:?}", s.check(clone));
+    let doc = "struct Sz<T: Sized>(T);\n#[doc = \"K: ?Sized\"]\nstruct J<K> {\n    s: Sz<K>,\n}\nfn main() {}\n";
+    assert!(s.check(doc).is_empty(), "{:?}", s.check(doc));
 }
 
 /// A name nothing declares, in a generic fn nothing calls or a trait's default method, is E0425 there too, whatever it
@@ -344,4 +350,149 @@ fn undeclared_names_in_uncalled_generic_fns() {
     assert!(s.check(ok).is_empty(), "{:?}", s.check(ok));
     let newline = "use\nstd::convert::identity;\nfn g<T: Copy>(x: T) -> T {\n    let f = identity;\n    f(x)\n}\nfn main() {}\n";
     assert!(s.check(newline).is_empty(), "{:?}", s.check(newline));
+    let semi = "use std::convert::{ /* ; */ identity };\nfn g<T: Copy>(x: T) -> T {\n    let f = identity;\n    f(x)\n}\nfn main() {}\n";
+    assert!(s.check(semi).is_empty(), "{:?}", s.check(semi));
+}
+
+/// `#![deny(dead_code)]` below the item level: a field nothing reads (a derived Debug / Clone reads none), a variant
+/// nothing constructs (a pattern does not, a `match` scrutinee does), an inherent impl's const nothing names, a type
+/// alias nothing names. `#![allow(unused_variables)]` leaves dead_code denied; a type named only in `*const T` or an
+/// impl header, a union field something writes and a tuple struct's `()` field are used
+#[test]
+fn dead_code_fields_variants_members_aliases() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let field = "#![allow(unused_variables)]\n#![deny(dead_code)]\n#[derive(Debug, Clone)]\nstruct A {\n    x: u8,\n    f: u8,\n}\nfn main() {\n    let a = A { x: 1, f: 2 };\n    let _ = a.x;\n}\n";
+    assert_eq!(first(field), Some((6, "field `f` is never read".to_string())));
+    let tuple = "#![deny(dead_code)]\nstruct T(u8, u8);\nstruct U(u8, u8);\nfn main() {\n    let t = T(1, 2);\n    let u = U(1, 2);\n    let _ = (t.0, u.0, u.1);\n}\n";
+    assert_eq!(first(tuple), Some((2, "field `1` is never read".to_string())));
+    let variant = "#![deny(dead_code)]\nenum E {\n    A,\n    B,\n}\nfn main() {\n    match E::A {\n        E::A => {}\n        E::B => {}\n    }\n}\n";
+    assert_eq!(first(variant), Some((4, "variant `B` is never constructed".to_string())));
+    let member = "#![deny(dead_code)]\nstruct S;\nimpl S {\n    const C: u8 = 1;\n}\nfn main() {\n    let _ = S;\n}\n";
+    assert_eq!(first(member), Some((4, "associated constant `C` is never used".to_string())));
+    let alias = "#![deny(dead_code)]\ntype Used = u8;\ntype Unused = u8;\nfn id(x: Used) -> Used {\n    x\n}\nfn main() {\n    id(0);\n}\n";
+    assert_eq!(first(alias), Some((3, "type alias `Unused` is never used".to_string())));
+    let ok = "#![deny(dead_code)]\nstruct W;\ntype WI = W;\ntrait T {\n    fn t(&self) {}\n}\nimpl T for WI {}\nenum V {}\nextern \"C\" {\n    fn free(p: *const V);\n}\nunion U {\n    a: u8,\n    b: u8,\n}\nstruct P(u8, ());\nfn main() {\n    W.t();\n    unsafe { free(std::ptr::null()) };\n    let u = U { a: 1 };\n    let _ = unsafe { u.b };\n    let p = P(1, ());\n    let _ = p.0;\n}\n";
+    assert_eq!(first(ok), None);
+}
+
+/// Review of #72: a variant in a `match` arm's body (`true => E::A, false => E::B`) is constructed; a value a fn
+/// returns (`let s = make()`) is no struct's own; a comma in a tuple field's type (`Result<u8, u8>`) splits nothing;
+/// `warn(dead_code)` (of the crate, a field) denies nothing, but `deny(warnings)` makes it an error; `export_name`
+/// uses an inherent fn; an empty braced struct is a 1-ZST field; `F::B` of another enum constructs no `E::B`; block
+/// comments nest in a `use`; `Iterator<Item = u8> + ?Sized` is still `?Sized`
+#[test]
+fn review72_dead_code_and_sized() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let flag = true;\n    let _e = match flag { true => E::A, false => E::B };\n}\n";
+    assert!(s.check(src).is_empty(), "arms_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let flag = true;\n    let _e = match flag {\n        true => { E::A }\n        false => E::B,\n    };\n}\n";
+    assert!(s.check(src).is_empty(), "block_arm_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nstruct S { value: u8 }\nfn make() -> S { S { value: 1 } }\nfn main() {\n    let s = make();\n    let _ = s.value;\n}\n";
+    assert!(s.check(src).is_empty(), "factory_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nstruct Pair(Result<u8, u8>, u8);\nfn main() {\n    let p = Pair(Ok(1), 2);\n    let _ = (p.0, p.1);\n}\n";
+    assert!(s.check(src).is_empty(), "tuple_result_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\n#![warn(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert!(s.check(src).is_empty(), "warn_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nstruct S {\n    x: u8,\n    #[warn(dead_code)]\n    y: u8,\n}\nfn main() {\n    let s = S { x: 1, y: 2 };\n    let _ = s.x;\n}\n";
+    assert!(s.check(src).is_empty(), "field_warn_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nstruct S;\nimpl S {\n    #[unsafe(export_name = \"entry\")]\n    extern \"C\" fn dispatch() {}\n}\nfn main() {\n    let _ = S;\n}\n";
+    assert!(s.check(src).is_empty(), "export_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nstruct Marker {}\nstruct Pair(u8, Marker);\nfn main() {\n    let p = Pair(1, Marker {});\n    let _ = p.0;\n}\n";
+    assert!(s.check(src).is_empty(), "marker_ok: {:?}", s.check(src));
+    let src = "use std::convert::{ /* a /* b */ ; */ identity };\nfn g<T: Copy>(x: T) -> T {\n    let f = identity;\n    f(x)\n}\nfn main() {}\n";
+    assert!(s.check(src).is_empty(), "nested_comment_ok: {:?}", s.check(src));
+    let src = "#![expect(dead_code)]\n#![deny(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(s.check(src).first().map(|d| d.line), Some(3), "expect_then_deny_err: {:?}", s.check(src));
+    let src = "#![deny(warnings)]\n#![allow(dead_code)]\n#![warn(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(s.check(src).first().map(|d| d.line), Some(4), "warnings_warn_err: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nenum E {\n    A,\n    B,\n}\nenum F {\n    B,\n}\nfn main() {\n    let _ = E::A;\n    let _ = F::B;\n}\n";
+    assert_eq!(s.check(src).first().map(|d| d.line), Some(4), "owner_err: {:?}", s.check(src));
+    let src = "struct Sz<T: Sized>(T);\nstruct J<K: Iterator<Item = u8> + ?Sized> {\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    assert_eq!(s.check(src).first().map(|d| d.line), Some(3), "iter_unsized_err: {:?}", s.check(src));
+}
+
+/// Second review of #72: `forbid(warnings)` reaches only the lints left at warn (an `allow(dead_code)` after it
+/// stands); `Fn() + ?Sized` / `FnOnce(u8) -> u8 + ?Sized` are still `?Sized`; `<<` in a discriminant is a shift, not
+/// a type's arguments; `#[derive (PartialEq)]` is a derive; `self.f` in an `impl` of an alias reads the aliased
+/// struct's field
+#[test]
+fn review72_second_round() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let src = "#![forbid(warnings)]\n#![allow(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "forbid_warnings_allow_ok");
+    let src = "#![forbid(warnings)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(first(src).map(|d| d.0), Some(2), "forbid_warnings_err");
+    let src = "struct Sz<T: Sized>(T);\nstruct J<K: Fn() + ?Sized> {\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    assert_eq!(first(src).map(|d| (d.0, d.1.contains("`K: Sized`"))), Some((3, true)), "fn_unsized_err");
+    let src = "struct Sz<T: Sized>(T);\nstruct J<K: FnOnce(u8) -> u8 + ?Sized> {\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    assert_eq!(first(src).map(|d| d.0), Some(3), "fnonce_unsized_err");
+    let src = "struct Sz<T: Sized>(T);\nstruct J<K: Fn() + Clone + ?Sized> {\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    assert_eq!(first(src), None, "fn_clone_sized_ok");
+    let src = "#![deny(dead_code)]\nenum E {\n    A = 1 << 0,\n    B,\n}\nfn main() {\n    let _ = E::A;\n}\n";
+    assert_eq!(first(src), Some((4, "variant `B` is never constructed".to_string())), "shift_discr_err");
+    let src = "#![deny(dead_code)]\nenum E {\n    A = 1 << 0,\n    B = 1 << 1,\n    C,\n}\nfn main() {\n    let _ = (E::A, E::B, E::C);\n}\n";
+    assert_eq!(first(src), None, "shift_discr_ok");
+    let src = "#![deny(dead_code)]\n#[derive (PartialEq)]\nstruct S {\n    value: u8,\n}\nfn main() {\n    let a = S { value: 1 };\n    let b = S { value: 2 };\n    let _ = a == b;\n}\n";
+    assert_eq!(first(src), None, "spaced_derive_ok");
+    let src = "#![deny(dead_code)]\nstruct S {\n    value: u8,\n}\ntype Alias = S;\nimpl Alias {\n    fn read(&self) -> u8 {\n        self.value\n    }\n}\nfn main() {\n    let s = S { value: 1 };\n    let _ = s.read();\n}\n";
+    assert_eq!(first(src), None, "alias_impl_ok");
+    // (third round: an arm's body in parentheses is an expression; `fn S()` beside `struct S { .. }` constructs no
+    // S; an item's or a field's own warn is an error under the crate's `deny(warnings)`)
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let flag = true;\n    let _e = match flag {\n        true => (E::A),\n        false => (E::B),\n    };\n}\n";
+    assert_eq!(first(src), None, "paren_arms_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let _e = match 1 {\n        0 => Some((E::A)),\n        _ => Some(E::B),\n    };\n}\n";
+    assert_eq!(first(src), None, "nested_paren_arm_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn f(e: Option<E>) -> u8 {\n    match e {\n        Some(E::A) => 1,\n        _ => 0,\n    }\n}\nfn main() {\n    let _ = f(Some(E::B));\n}\n";
+    assert_eq!(first(src), Some((2, "variant `A` is never constructed".to_string())), "pattern_in_some_err");
+    let src = "#![deny(dead_code)]\n#![allow(non_snake_case)]\nstruct S {\n    other: u8,\n}\nstruct T {\n    value: u8,\n}\nfn S() -> T {\n    T { value: 1 }\n}\nfn main() {\n    let _ = S { other: 1 }.other;\n    let t = S();\n    let _ = t.value;\n}\n";
+    assert_eq!(first(src), None, "fn_named_like_struct_ok");
+    let src = "#![deny(warnings)]\n#[allow(dead_code)]\n#[warn(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(first(src).map(|d| d.0), Some(4), "item_allow_then_warn_err");
+    let src = "#![deny(dead_code)]\n#[warn(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "item_warn_ok");
+    let src = "#![deny(warnings)]\nstruct S {\n    x: u8,\n    #[warn(dead_code)]\n    y: u8,\n}\nfn main() {\n    let s = S { x: 1, y: 2 };\n    let _ = s.x;\n}\n";
+    assert_eq!(first(src), Some((5, "field `y` is never read".to_string())), "field_warn_warnings_err");
+    let src = "#![deny(warnings)]\nmod m {\n    #[allow(unused_variables)]\n    fn _foo() {}\n}\nfn main() {}\n";
+    assert_eq!(first(src), None, "underscore_in_module_ok");
+    // (fourth round: an element of a group is what the group is (a struct literal's field, a call's argument, a
+    // tuple pattern's element); a closure's body is an expression; `S { .. }.inner` binds no S)
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let make = || E::A;\n    let _ = make();\n    let id = |x: u8| E::B;\n    let _ = id(1);\n}\n";
+    assert_eq!(first(src), None, "closure_body_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nstruct Holder {\n    a: E,\n    b: u8,\n}\nfn main() {\n    let h = Holder { a: E::A, b: 0 };\n    let _ = (h.a, h.b, E::B);\n}\n";
+    assert_eq!(first(src), None, "struct_field_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn f(_: E, _: u8) {}\nfn main() {\n    f(E::A, 1);\n    let _ = [E::B, E::B];\n}\n";
+    assert_eq!(first(src), None, "call_and_array_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn g(t: (E, u8)) -> u8 {\n    match t {\n        (E::A, x) => x,\n        _ => 0,\n    }\n}\nfn main() {\n    let _ = g((E::B, 1));\n}\n";
+    assert_eq!(first(src), Some((2, "variant `A` is never constructed".to_string())), "tuple_pattern_err");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nstruct Holder {\n    a: E,\n}\nfn h(x: Holder) -> u8 {\n    match x {\n        Holder { a: E::A } => 1,\n        _ => 0,\n    }\n}\nfn main() {\n    let _ = h(Holder { a: E::B });\n}\n";
+    assert_eq!(first(src), Some((2, "variant `A` is never constructed".to_string())), "struct_pattern_err");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn k(e: E) -> u8 {\n    match e {\n        E::B | E::A => 1,\n    }\n}\nfn main() {\n    let _ = k(E::B);\n}\n";
+    assert_eq!(first(src), Some((2, "variant `A` is never constructed".to_string())), "or_pattern_err");
+    let src = "#![deny(dead_code)]\nstruct Inner {\n    value: u8,\n}\nstruct Outer {\n    inner: Inner,\n}\nfn main() {\n    let t = Outer { inner: Inner { value: 1 } }.inner;\n    let _ = t.value;\n}\n";
+    assert_eq!(first(src), None, "projected_initializer_ok");
+    // (fifth round, with patterns from the parsed program: `matches!`'s first argument is an expression, its second a
+    // pattern; `!(..)` after `=` is no macro; a leading `|` of an or-pattern is a pattern's; `|` between two values
+    // is a bitwise or; a closure's parameter shadowing a `let` gives no owner)
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let _ = matches!(E::A, E::B);\n    let _ = E::B;\n}\n";
+    assert_eq!(first(src), None, "matches_first_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let _ = matches!(E::A, E::B);\n}\n";
+    assert_eq!(first(src), Some((2, "variant `B` is never constructed".to_string())), "matches_second_err");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let _ = !(E::A as u8 == 0);\n    let _ = E::B;\n}\n";
+    assert_eq!(first(src), None, "not_operator_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    match (E::A, 0) {\n        (| E::A | E::B, _) => (),\n    }\n}\n";
+    assert_eq!(first(src), Some((2, "variant `B` is never constructed".to_string())), "leading_pipe_err");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let _ = E::A as u8 | E::B as u8;\n}\n";
+    assert_eq!(first(src), None, "bitwise_or_ok");
+    let src = "#![deny(dead_code)]\nstruct S {\n    other: u8,\n}\nstruct T {\n    value: u8,\n}\nfn main() {\n    let x = S { other: 1 };\n    let _ = x.other;\n    let f = |x: T| x.value;\n    let _ = f(T { value: 1 });\n}\n";
+    assert_eq!(first(src), None, "closure_shadow_ok");
+    // (sixth round: the parsed region runs through an impl's closing brace after the last member; a `matches!` guard
+    // is an expression; a closure's parameter inside a macro's arguments is a binding too)
+    let src = "#![deny(dead_code)]\nenum E {\n    A,\n}\nfn main() {\n    let _ = E::A;\n    E::ping();\n}\nimpl E {\n    fn ping() {}\n}\n";
+    assert_eq!(first(src), None, "impl_last_ok");
+    let src = "#![deny(dead_code)]\nenum E {\n    A,\n    B,\n}\nfn main() {\n    let _ = matches!(E::A, _ if E::B as u8 == 1);\n}\n";
+    assert_eq!(first(src), None, "matches_guard_ok");
+    let src = "#![deny(dead_code)]\nstruct S {\n    other: u8,\n}\nstruct T {\n    value: u8,\n}\nfn main() {\n    let x = S { other: 1 };\n    let t = T { value: 1 };\n    assert!((|x: T| x.value)(t) == x.other);\n}\n";
+    assert_eq!(first(src), None, "closure_in_macro_ok");
 }
