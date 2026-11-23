@@ -2943,4 +2943,10 @@ fn part16_review() {
     let d = check("fn f(x: &mut i32) {\n    let r: &i32 = &x;\n    println!(\"{}\", r);\n    *x = 2;\n}\nfn g<'a>(x: &'a mut i32) -> &'a i32 {\n    &x\n}\nfn h(v: &mut Vec<i32>) -> usize {\n    let s: &Vec<i32> = &v;\n    let n = s.len();\n    v.push(1);\n    n\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("E0515"), "{d:?}");
     assert_eq!(check("fn make() -> String { String::from(\"a\") }\nfn main() {\n    let r = { let ref x = make(); x.len() };\n    println!(\"{}\", r);\n}\n"), vec![]);
+    // (the third round: only a place the function owns is bounded by the coercion's borrow of it; one reached through a
+    // reference (`&s.f` of `s: &mut S`, `&*x`) is a reborrow through it)
+    assert_eq!(check("struct S<'a> { f: &'a mut i32 }\nfn g<'a>(s: &'a mut S<'a>) -> &'a i32 {\n    &s.f\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("fn g<'a>(x: &'a mut &'a mut i32) -> &'a i32 {\n    &*x\n}\nfn main() {}\n"), vec![]);
+    let d = check("struct S<'a> { f: &'a mut i32 }\nfn g<'a>(s: S<'a>) -> &'a i32 {\n    &s.f\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0515"), "{d:?}");
 }

@@ -1962,7 +1962,10 @@ impl Cx<'_> {
                     tr[0] = r;
                     if self.rg.closure.is_none() {
                         self.rg.reborrows.push((&**x as *const Expr as usize, r));
-                        if all_mut {
+                        // (only of a place the function owns: one reached through a reference (`&s.f` of `s: &mut S`,
+                        // `&*x`) is a reborrow through it, as the explicit path's)
+                        let owned = all_mut && !matches!(strip(x), Expr::Call(..) | Expr::MethodCall(..)) && self.rt_place(x).is_some_and(|p| p.2.is_empty());
+                        if owned {
                             if let Some(name) = place_text(x) {
                                 self.rg.loans.push((r, name, sp));
                             }
