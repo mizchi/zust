@@ -1771,6 +1771,8 @@ compile-fail	consts/const-eval/ice-unsized-struct-const-eval-123154.rs
 build-pass	consts/const-eval/issue-100878.rs
 compile-fail	consts/const-eval/issue-104390.rs
 check-pass	consts/const-eval/issue-47971.rs
+check-pass	consts/const-eval/issue-50706.rs
+check-pass	consts/const-eval/issue-51300.rs
 check-pass	consts/const-eval/issue-53401.rs
 run-pass	consts/const-eval/issue-64908.rs
 run-pass	consts/const-eval/issue-64970.rs
@@ -1848,6 +1850,7 @@ run-pass	consts/const-unsafe-fn.rs
 compile-fail	consts/const-unsized.rs
 run-pass	consts/const-vec-syntax.rs
 run-pass	consts/const-vecs-and-slices.rs
+run-pass	consts/const_constructor/const_constructor_qpath.rs
 run-pass	consts/const_discriminant.rs
 check-pass	consts/const_forget.rs
 check-pass	consts/const_in_pattern/const-bytes-slice-pattern.rs

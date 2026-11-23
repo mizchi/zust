@@ -1,0 +1,134 @@
+// What memchr 2.8.3 needed (besides its SIMD impls): `Box::from` of a slice, the deref coercion `&&T` -> `&T` at
+// a fn's tail and a match arm, a method named as another module's fn, `p.cast()` without a turbofish,
+// `offset_from`, `unwrap_unchecked`, `Self::C` in an impl's const, `V::Mask::m` as a value, `p.add(2 * T::C)`,
+// and the prelude's `Skip { .. }` beside a glob-imported variant `Skip`
+mod other {
+    pub fn find(h: &[u8]) -> usize {
+        h.len()
+    }
+}
+
+mod memmem {
+    pub fn find(h: &[u8], n: &[u8]) -> Option<usize> {
+        Finder::new(n).find(h)
+    }
+    pub struct Finder<'n> {
+        n: &'n [u8],
+    }
+    impl<'n> Finder<'n> {
+        pub fn new(n: &'n [u8]) -> Finder<'n> {
+            Finder { n }
+        }
+        pub fn find(&self, h: &[u8]) -> Option<usize> {
+            h.windows(self.n.len()).position(|w| w == self.n)
+        }
+    }
+}
+
+enum Imp<'a> {
+    Borrowed(&'a [u8]),
+    Owned(Box<[u8]>),
+}
+
+impl<'a> Imp<'a> {
+    fn as_slice(&self) -> &[u8] {
+        match self {
+            Imp::Owned(ref x) => x,
+            Imp::Borrowed(x) => x,
+        }
+    }
+    fn into_owned(self) -> Imp<'static> {
+        match self {
+            Imp::Borrowed(b) => Imp::Owned(Box::from(b)),
+            Imp::Owned(b) => Imp::Owned(b),
+        }
+    }
+}
+
+trait MoveMask: Copy {
+    fn first_offset(self) -> usize;
+}
+#[derive(Clone, Copy)]
+struct Mask(u32);
+impl MoveMask for Mask {
+    fn first_offset(self) -> usize {
+        self.0.trailing_zeros() as usize
+    }
+}
+trait Vector: Copy {
+    const BYTES: usize;
+    const ALIGN: usize;
+    type Mask: MoveMask;
+    fn mask(self) -> Self::Mask;
+}
+#[derive(Clone, Copy)]
+struct V8(u32);
+impl Vector for V8 {
+    const BYTES: usize = 8;
+    const ALIGN: usize = Self::BYTES - 1;
+    type Mask = Mask;
+    fn mask(self) -> Mask {
+        Mask(self.0)
+    }
+}
+struct Plain;
+impl Plain {
+    const N: usize = 3;
+    const TWICE: usize = Self::N * 2;
+}
+
+fn offset_of<V: Vector>(v: V) -> usize {
+    let topos = V::Mask::first_offset;
+    topos(v.mask())
+}
+
+unsafe fn second_chunk<V: Vector>(p: *const u8) -> *const u8 {
+    p.add(1 * V::BYTES)
+}
+
+fn read_u32(p: *const u32) -> u32 {
+    unsafe { p.read_unaligned() }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SuffixOrdering {
+    Accept,
+    Skip,
+    Push,
+}
+
+fn cmp(a: u8, b: u8) -> SuffixOrdering {
+    use self::SuffixOrdering::*;
+    if a < b {
+        Accept
+    } else if a > b {
+        Skip
+    } else {
+        Push
+    }
+}
+
+fn main() {
+    println!("{:?} {:?} {}", memmem::find(b"abcdef", b"cd"), memmem::find(b"abc", b"x"), other::find(b"qq"));
+
+    let a: &[u8] = &[1, 2, 3];
+    let b: Box<[u8]> = Box::from(a);
+    let o = Imp::Borrowed(&a[1..]).into_owned();
+    println!("{:?} {:?} {:?}", &b[..], o.as_slice(), Imp::Borrowed(a).as_slice());
+
+    let bytes = [1u8, 0, 0, 0, 2, 0, 0, 0, 9, 9, 9, 9, 9, 9, 9, 9];
+    let p: *const u8 = bytes.as_ptr();
+    let x: u32 = unsafe { *p.cast() };
+    let y = read_u32(unsafe { p.add(4) }.cast());
+    let q = unsafe { second_chunk::<V8>(p) };
+    let d = unsafe { q.offset_from(p) };
+    let back = unsafe { p.offset_from(q) };
+    let n = unsafe { usize::try_from(d).unwrap_unchecked() };
+    let s = unsafe { Some(7u8).unwrap_unchecked() };
+    println!("{} {} {} {} {} {}", x, y, d, back, n, s);
+
+    println!("{} {} {} {}", V8::BYTES, <V8 as Vector>::ALIGN, Plain::TWICE, offset_of(V8(8)));
+
+    let v: Vec<u8> = [1u8, 2, 3, 4].iter().skip(2).copied().collect();
+    println!("{:?} {:?} {:?} {:?}", v, cmp(1, 2), cmp(2, 1), cmp(1, 1));
+}
