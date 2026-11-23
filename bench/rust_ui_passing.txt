@@ -2445,6 +2445,7 @@ compile-fail	error-codes/E0430.rs
 compile-fail	error-codes/E0432.rs
 compile-fail	error-codes/E0433.rs
 compile-fail	error-codes/E0435.rs
+compile-fail	error-codes/E0449.rs
 compile-fail	error-codes/E0478.rs
 compile-fail	error-codes/E0496.rs
 compile-fail	error-codes/E0499.rs
@@ -5617,6 +5618,9 @@ compile-fail	parser/trait-object-delimiters.rs
 compile-fail	parser/trait-object-polytrait-priority.rs
 compile-fail	parser/trait-object-trait-parens.rs
 check-pass	parser/trait-plusequal-splitting.rs
+compile-fail	parser/trait-pub-assoc-const.rs
+compile-fail	parser/trait-pub-assoc-ty.rs
+compile-fail	parser/trait-pub-method.rs
 compile-fail	parser/triple-colon.rs
 compile-fail	parser/tuple-index-suffix.rs
 compile-fail	parser/tuple-pattern-type-ascription.rs
@@ -5824,8 +5828,10 @@ check-pass	privacy/generic_struct_field_projection.rs
 check-pass	privacy/import-list-stem-visibility-issue-119126.rs
 compile-fail	privacy/inaccessible-private-fields-76077.rs
 compile-fail	privacy/inaccessible-private-fields-trailing-comma-149787.rs
+compile-fail	privacy/issue-29161.rs
 compile-fail	privacy/issue-79593.rs
 compile-fail	privacy/locally-pub-private-module-access.rs
+compile-fail	privacy/priv-in-bad-locations.rs
 run-pass	privacy/privacy-ns.rs
 compile-fail	privacy/privacy-ns1.rs
 compile-fail	privacy/privacy-ns2.rs
@@ -5853,6 +5859,7 @@ check-pass	privacy/trait_more_private_than_item.rs
 compile-fail	privacy/unreachable-issue-121455.rs
 compile-fail	privacy/unresolved-trait-impl-item.rs
 check-pass	privacy/use-in-impl-scope-12729.rs
+compile-fail	privacy/useless-pub.rs
 check-pass	privacy/where-pub-type-impls-priv-trait.rs
 check-pass	proc-macro/derive-multiple-with-packed.rs
 check-pass	proc-macro/extern-prelude-extern-crate-proc-macro.rs
