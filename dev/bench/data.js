@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795414776445,
+  "lastUpdate": 1795414778946,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -104793,6 +104793,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 4430,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ca6d3ae1c6e6f0e2ad69b65f50fa2ef3e86709e5",
+          "message": "Merge pull request #66 from mizchi/claude/compat-next36\n\nCompat: std assoc types on primitives; E0034; overflowing_literals; a generic fn's bound picks the trait's default",
+          "timestamp": "2026-11-23T15:14:07+09:00",
+          "tree_id": "141264fab60ff18dc6a3053bf9b9209142e3ddb4",
+          "url": "https://github.com/mizchi/zust/commit/ca6d3ae1c6e6f0e2ad69b65f50fa2ef3e86709e5"
+        },
+        "date": 1795414778335,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 76.73,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1830,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.62,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1511,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 60.38,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4443,
             "unit": "tests"
           }
         ]
