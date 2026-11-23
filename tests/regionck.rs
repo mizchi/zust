@@ -3242,3 +3242,14 @@ fn part17_review4() {
     let d = check("use std::ops::{Deref, DerefMut};\nstruct W(Vec<usize>);\nimpl Deref for W { type Target = Vec<usize>; fn deref(&self) -> &Vec<usize> { &self.0 } }\nimpl DerefMut for W { fn deref_mut(&mut self) -> &mut Vec<usize> { &mut self.0 } }\nfn main() {\n    let mut x = W(vec![1]);\n    let w = &mut x;\n    w.push({ *w = W(vec![]); 2 });\n    println!(\"{}\", x.0.len());\n}\n");
     assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("cannot assign to `*w`"), "{d:?}");
 }
+
+/// A `let` extends a `&` of a temporary within its initializer's extending expressions: a tuple struct's or a
+/// variant's constructor's arguments, a tuple's, an array's or a struct literal's fields (`let x = Some(&[name]);`,
+/// `let e = X(&temp());`, rustc since 1.79). They were a false E0716. A call of a fn, a method's receiver, are not
+/// extended. A call through a fn pointer holds what its arguments borrow when its result holds references
+#[test]
+fn part18_let_extension_in_constructors() {
+    assert_eq!(check("fn temp() -> String { String::from(\"x\") }\n#[derive(Debug)]\nstruct X<'a>(&'a String);\nfn main() {\n    let name = \"Foo\";\n    let a = Some(&[name]);\n    let b = Some(&temp());\n    let e = X(&temp());\n    let t = (&temp(), [&temp()]);\n    let o = Some(X(&temp()));\n    println!(\"{:?} {:?} {:?} {:?} {:?}\", a, b, e, t, o);\n}\n"), vec![]);
+    temp_error("fn temp() -> String { String::from(\"x\") }\nfn main() {\n    let h = Some(temp().as_str());\n    println!(\"{:?}\", h);\n}\n", 3);
+    temp_error("fn temp() -> String { String::from(\"x\") }\nfn id<T>(t: T) -> T { t }\nfn main() {\n    let f = id::<&String>;\n    let g = f(&temp());\n    println!(\"{:?}\", g);\n}\n", 5);
+}

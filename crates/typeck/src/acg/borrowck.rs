@@ -358,6 +358,17 @@ pub fn direct_temps(prog: &Program, e: &Expr, out: &mut Vec<usize>) {
             }
             return;
         }
+        // (a tuple struct's or a variant's constructor (`Some(&[name])`): an extending expression, so a `&` of a
+        // temporary in its arguments is extended by the `let` (extended_refs), as rustc does since 1.79; what its
+        // arguments' calls borrow is not)
+        Expr::Call(f, a) if is_ctor_path(prog, f) => {
+            for x in a {
+                if !matches!(strip(x), Expr::Ref(..)) {
+                    direct_temps(prog, x, out);
+                }
+            }
+            return;
+        }
         Expr::Call(_, a) => a,
         Expr::MethodCall(r, _, _, a, _) => {
             // (the receiver made by a call (`mk(1).get()`): borrowed by a `&self` method, it is a temporary too)
@@ -545,6 +556,42 @@ pub fn direct_ref_recv(prog: &Program, a: &Expr, out: &mut Vec<usize>) {
             }
             _ => return,
         }
+    }
+}
+
+/// A path that names a tuple struct's or a variant's constructor, not a fn (`Some`, `W`, `Self`, `Option::Some::<T>`;
+/// not `some` of `let some = Some;`)
+fn is_ctor_path(prog: &Program, f: &Expr) -> bool {
+    let Expr::Path(_, p) = f else { return false };
+    p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_uppercase())) && prog.fn_by_p(&crate::program::PPath::of(p), None).is_none()
+}
+
+/// The temporaries a `let`'s initializer borrows that the `let` extends: `&e` (direct_ref) as the initializer or
+/// within its extending expressions, the arguments of a tuple struct's or a variant's constructor, the fields of a
+/// tuple, array or struct literal, a block's tail (`let x = Some((&temp(), W(&temp())));`)
+pub fn extended_refs(prog: &Program, e: &Expr, out: &mut Vec<usize>) {
+    let mut x = e;
+    while let Expr::Paren(p) | Expr::Cast(p, _) = x {
+        x = p;
+    }
+    match x {
+        Expr::Ref(..) => direct_ref(prog, x, out),
+        Expr::Call(f, a) if is_ctor_path(prog, f) => {
+            for y in a {
+                extended_refs(prog, y, out);
+            }
+        }
+        Expr::Tuple(xs) | Expr::Array(xs) => {
+            for y in xs {
+                extended_refs(prog, y, out);
+            }
+        }
+        Expr::Struct(_, fs, None) => {
+            for f in fs {
+                extended_refs(prog, &f.1, out);
+            }
+        }
+        _ => {}
     }
 }
 

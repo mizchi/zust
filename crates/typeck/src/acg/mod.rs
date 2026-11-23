@@ -2018,7 +2018,7 @@ impl Cx<'_> {
                     // (`let &Foo(ref x) = &f();`: the temporary lives as long as the block)
                     let ext1 = self.bk.extended.len();
                     if self.bk_on() {
-                        borrowck::direct_ref(self.prog, init, &mut self.bk.extended);
+                        borrowck::extended_refs(self.prog, init, &mut self.bk.extended);
                     }
                     let sc = self.bk_scrutinee(init, ann, &[pat]);
                     self.bk.extended.truncate(ext1);
@@ -2305,8 +2305,9 @@ impl Cx<'_> {
                     if self.bk_on() {
                         borrowck::direct_temps(self.prog, init, &mut self.bk.direct);
                         borrowck::direct_ref_recv(self.prog, init, &mut self.bk.direct);
-                        // (`let x = &f();`: the temporary lives as long as x's block)
-                        borrowck::direct_ref(self.prog, init, &mut self.bk.extended);
+                        // (`let x = &f();`: the temporary lives as long as x's block; also within the initializer's
+                        // extending expressions, `let x = Some(&f());`)
+                        borrowck::extended_refs(self.prog, init, &mut self.bk.extended);
                     }
                     // (a function the gate left out, with `let x: &'static T = ..`: from here on, a borrow of what it
                     // owns must not have to be 'static. What came before has no trees and adds no constraint)

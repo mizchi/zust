@@ -3617,6 +3617,13 @@ impl Cx<'_> {
                 let r = self.indirect_call(Indirect::Ptr(v), &f.params, f.ret, &args, SP);
                 self.rg_fnptr_call(func, t, &args);
                 self.rg_took_call(c);
+                // (a result that holds references may hold what the arguments of such types borrow, as an elided
+                // signature's: `let f = id::<&String>; let g = f(&temp());`, `some(&temp())` of `let some = Some;`)
+                if r.is_ok() && self.bk_on() && self.bk_ty(f.ret).1 {
+                    let from: Vec<usize> = f.params.iter().enumerate().filter(|(_, p)| self.bk_ty(**p).1).map(|(i, _)| i).collect();
+                    self.bk_frame_end_call_from(&args, &from);
+                    return r;
+                }
                 r
             }
             t => err(SP, format!("expected a function, found `{}`", self.prog.tn(t))),
