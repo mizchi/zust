@@ -1935,13 +1935,27 @@ impl Cx<'_> {
             Expr::Ref(_, x) if self.rg.coerced.iter().any(|c| c.0 == e as *const Expr as usize) => {
                 let n = self.rg.coerced.iter().find(|c| c.0 == e as *const Expr as usize).map_or(0, |c| c.1);
                 let (mut t, mut tr) = self.rt_expr(x)?;
+                // (the reborrow `&**x` it is lives no longer than the references it goes through, as an explicit one:
+                // a `&mut` link's region bounds it, a shared link stops there (deref))
+                let mut ds = vec![];
                 for _ in 0..n {
-                    let Ty::Ref(_, i) = t else { return None };
+                    let Ty::Ref(m, i) = t else { return None };
                     if tr.is_empty() {
                         return None;
                     }
-                    tr.remove(0);
+                    deref(&mut ds, tr.remove(0), m);
                     t = *i;
+                }
+                if let (Ty::Ref(m, _), Some(&last)) = (t, tr.first()) {
+                    deref(&mut ds, last, m);
+                    if ds.len() > 1 {
+                        let r = self.rg.var();
+                        let sp = super::borrowck::pos(e);
+                        for d in ds {
+                            self.rg.edge(d, r, sp);
+                        }
+                        tr[0] = r;
+                    }
                 }
                 Some((t, tr))
             }

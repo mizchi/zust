@@ -2663,10 +2663,12 @@ impl Cx<'_> {
     /// its loans when it is dropped there: a loan of one of the block's locals is then E0597 at the local
     /// Before a block's tail is lowered: its method calls' receivers that are temporaries, whose values Cx::expr
     /// collects (Bk::watch). Returns them, for bk_unwatch
-    pub(crate) fn bk_watch_tail(&mut self, e: &Expr) -> Vec<usize> {
+    pub(crate) fn bk_watch_tail(&mut self, e: &Expr) -> (Vec<usize>, usize) {
         let mut added = vec![];
+        // (the position watches of the enclosing tails stay: a block in an argument of a watched call has its own)
+        let mark = self.bk.watch_at.len();
         if !self.bk_on() || self.bk.level < 2 || !self.user_code {
-            return added;
+            return (added, mark);
         }
         let mut temps = vec![];
         tail_temps(e, &mut temps, 0);
@@ -2680,18 +2682,15 @@ impl Cx<'_> {
                 self.bk.watch_at.push((err_pos(r), vec![]));
             }
         }
-        added
+        (added, mark)
     }
 
-    pub(crate) fn bk_unwatch(&mut self, added: &[usize]) {
+    pub(crate) fn bk_unwatch(&mut self, (added, mark): &(Vec<usize>, usize)) {
         for a in added {
             self.bk.watch.remove(a);
             self.bk.watched.remove(a);
         }
-        if added.is_empty() {
-            return;
-        }
-        self.bk.watch_at.clear();
+        self.bk.watch_at.truncate(*mark);
     }
 
     pub(crate) fn bk_tail_drop_temps(&mut self, e: &Expr) {
@@ -3515,6 +3514,33 @@ impl Cx<'_> {
     /// another argument: what that argument borrows may be stored in the place (`push(&x, &mut v)` of
     /// `fn push<'a>(r: &'a i32, v: &mut Vec<&'a i32>)` stores x's loan in v: `x = 2;` while v is used is E0506)
     pub(crate) fn bk_arg_flows(&mut self, id: u32, args: &[&Expr]) {
+        self.bk_arg_flows_at(id, args, false);
+    }
+
+    /// bk_arg_flows before the arguments are made, when one of them assigns (`put(r, { r = &x; }, &mut v)`): what a
+    /// local passed holds then flows too, as rustc's region of the local holds both loans (only the locals' sources
+    /// are known before)
+    pub(crate) fn bk_arg_flows_before(&mut self, id: u32, args: &[&Expr]) {
+        fn assigns(e: &Expr, depth: u32) -> bool {
+            if depth > 32 {
+                return false;
+            }
+            if matches!(e, Expr::Assign(..) | Expr::AssignOp(..)) {
+                return true;
+            }
+            if matches!(e, Expr::Closure(..)) {
+                return false;
+            }
+            let mut found = false;
+            crate::ast_closure::each_child_pub(e, &mut |c| found = found || assigns(c, depth + 1));
+            found
+        }
+        if self.bk_on() && args.iter().any(|a| assigns(a, 0)) {
+            self.bk_arg_flows_at(id, args, true);
+        }
+    }
+
+    fn bk_arg_flows_at(&mut self, id: u32, args: &[&Expr], before: bool) {
         if !self.bk_on() || self.bk.level < 2 || args.len() < 2 {
             return;
         }
@@ -3583,6 +3609,9 @@ impl Cx<'_> {
                 } else {
                     self.bk_direct(b, &mut srcs);
                 }
+            }
+            if before {
+                srcs.retain(|s| matches!(s, Src::Local(_)));
             }
             self.bk_flow_into(place, &srcs);
         }

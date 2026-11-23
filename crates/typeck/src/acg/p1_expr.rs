@@ -3477,6 +3477,13 @@ impl Cx<'_> {
                 }
                 let r = self.dyn_fn_call(v, s, &args, SP);
                 self.rg_dyn_fn_args(s, &args);
+                // (its result holds the loans of the arguments it borrows by the bound's lifetimes, as a generic
+                // `F: Fn(&i32) -> &i32`'s: `let r = f(&x);` with `f: &dyn Fn(&i32) -> &i32`)
+                if let Ok((_, rt)) = &r {
+                    let from = if matches!(rt, Ty::Ref(..)) || self.bk_ty(*rt).1 { crate::ast_summary::fn_bound_ret_from(s) } else { vec![] };
+                    self.bk_frame_end_call_from(&args, &from);
+                    return r;
+                }
                 r
             }
             Ty::Fn(f) => {
@@ -3893,6 +3900,7 @@ impl Cx<'_> {
         }
         // (a call of this kind in the arguments keeps the outer one's for after it)
         let outer = std::mem::replace(&mut self.rg.call_self, written);
+        self.bk_arg_flows_before(id, &args);
         let r = self.call_fn(id, None, &args, tf, expected, SP);
         self.rg.call_self = outer;
         if r.is_ok() {

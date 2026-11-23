@@ -2432,22 +2432,23 @@ impl Cx<'_> {
                             _ => {}
                         }
                     }
-                    let watch = if last && !*semi { self.bk_watch_tail(e) } else { vec![] };
+                    let watch = if last && !*semi { self.bk_watch_tail(e) } else { (vec![], self.bk.watch_at.len()) };
                     // (edition 2024: what the block's value holds, for its temporaries' end below)
                     let tail24 = !*semi && last && self.prog.edition >= 2024 && self.bk_on() && !tail;
                     if tail24 {
                         self.bk_frame();
                     }
-                    // (before edition 2024, a block's value that a statement discards (`{ let t = D(1); d.next(&t) };`)
-                    // is a temporary of the statement: made at the block's tail, while its locals live, and dropped at
-                    // the statement's end, after them (E0597 when its `Drop` may see a borrow of one of them))
+                    // (a block's value that a statement discards (`{ let t = D(1); d.next(&t) };`) is a temporary of
+                    // the statement: made at the block's tail, while its locals live, and dropped at the statement's
+                    // end, after them (E0597 when its `Drop` may see a borrow of one of them). In every edition: 2024
+                    // changes when the tail's temporaries go, not the block's value)
                     let saved_discard = self.bk.discard;
                     let saved_stmt_block = self.bk.stmt_block;
                     if let (true, Expr::Block(None, _, b)) = (*semi, strip_paren(e)) {
                         self.bk.stmt_block = b as *const crate::parse::Block as usize;
                     }
                     let mark_discard = self.bk.discard_temps.len();
-                    let stmt_block = *semi && self.prog.edition < 2024 && self.bk_on() && self.bk.level >= 2 && self.user_code;
+                    let stmt_block = *semi && self.bk_on() && self.bk.level >= 2 && self.user_code;
                     if let (true, Expr::Block(None, _, b)) = (stmt_block, strip_paren(e)) {
                         self.bk.discard = b as *const crate::parse::Block as usize;
                     }

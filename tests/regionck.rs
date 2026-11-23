@@ -2911,3 +2911,26 @@ fn part16_match_arm_returns() {
     one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> Option<&'b i32> {\n    match c {\n        Some(0) => Some(y),\n        _ => Some(x),\n    }\n}\nfn main() {}\n", 4);
     one_error("fn id<T>(t: T) -> T { t }\nfn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    match c {\n        Some(0) => y,\n        _ => id(x),\n    }\n}\nfn main() {}\n", 3);
 }
+
+/// From the review of #88: a block in an argument of a block tail's watched call keeps the outer tail's position watches
+/// (it removed them: an index out of bounds); a discarded block value is drop-checked in edition 2024 too; a `dyn Fn`
+/// call's result holds what it borrows, as a generic bound's; a coerced `&x` through a `&mut` lives no longer than it;
+/// and what a local passed holds before a later argument assigns it flows too (both loans, as rustc's region)
+#[test]
+fn part16_review() {
+    let d = check("use std::cell::RefCell;\nfn main() {\n    let c = RefCell::new(vec![1, 2]);\n    let n = {\n        let _d = 1;\n        c.borrow().get({ let e = RefCell::new(0usize); let v = *e.borrow(); v }).copied()\n    };\n    let m = {\n        let _d = 1;\n        c.borrow().get({ let e = RefCell::new(1usize); *e.borrow() }).copied()\n    };\n    println!(\"{:?} {:?}\", n, m);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("`e` does not live long enough"), "{d:?}");
+    let d = check_ed("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) { println!(\"{}\", self.0); } }\nfn main() {\n    { let x = 0; D(&x) };\n}\n", 2024);
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`x` does not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let f: &dyn Fn(&i32) -> &i32 = &|v| v;\n    let mut x = 1;\n    let r = f(&x);\n    x = 2;\n    println!(\"{} {}\", r, x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    let d = check("fn f<'short, 'long>(x: &'short mut &'long mut i32) -> &'long i32 {\n    &x\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn put<'a>(r: &'a i32, _u: (), v: &mut Vec<&'a i32>) { v.push(r) }\nfn main() {\n    let k = 1;\n    let mut x = 2;\n    let mut r = &k;\n    let mut v = vec![];\n    put(r, { r = &x; }, &mut v);\n    x = 3;\n    println!(\"{:?} {} {}\", v, r, x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("`x` because it is borrowed"), "{d:?}");
+    let d = check("fn put<'a>(r: &'a i32, _u: (), v: &mut Vec<&'a i32>) { v.push(r) }\nfn main() {\n    let mut k = 1;\n    let x = 2;\n    let mut r = &k;\n    let mut v = vec![];\n    put(r, { r = &x; }, &mut v);\n    k = 3;\n    println!(\"{:?} {} {}\", v, r, k);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("`k` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let f: &dyn Fn(&i32) -> &i32 = &|v| v;\n    let g: &dyn Fn(&i32) -> i32 = &|v| *v;\n    let mut x = 1;\n    let r = f(&x);\n    println!(\"{}\", r);\n    let n = g(&x);\n    x = 2;\n    println!(\"{} {}\", n, x);\n}\n"), vec![]);
+    assert_eq!(check("fn f<'a, 'b>(x: &'a &'b i32) -> &'b i32 {\n    &x\n}\nfn g<'a, 'b>(x: &'a mut &'b i32) -> &'b i32 {\n    &x\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check_ed("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) { println!(\"{}\", self.0); } }\nfn main() {\n    let y = 1;\n    { let x = 0; let _ = x; D(&y) };\n}\n", 2024), vec![]);
+}
