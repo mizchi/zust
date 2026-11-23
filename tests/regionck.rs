@@ -3087,3 +3087,16 @@ fn part17_scrutinee_temporaries() {
     assert_eq!(check("fn mk(v: &mut Vec<i32>) -> Option<&mut i32> { v.first_mut() }\nfn main() {\n    let mut v = vec![1];\n    match mk(&mut v) {\n        Some(_) => { v.push(2); }\n        None => {}\n    }\n}\n"), vec![]);
     assert_eq!(check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap: BinaryHeap<i32> = BinaryHeap::new();\n    heap.push(1);\n    match heap.peek_mut() {\n        x => { drop(x); heap.pop(); }\n    }\n}\n"), vec![]);
 }
+
+/// `let x = &*R.m();` with R a temporary a call makes and a result that borrows it: the `let` extends the result, not R,
+/// which goes away at the end of the statement (E0716 when x is used after): `&mut *RefCell::new(1).borrow_mut()`,
+/// `&*String::from("b").as_str()`. The lowering's copy of a guard's deref keeps what the borrow check follows. Not a
+/// result that borrows nothing of R (`&String::from("x").len()`, `&RefCell::new(1).borrow().clone()`)
+#[test]
+fn part17_receivers_of_extended_borrows() {
+    temp_error("use std::cell::RefCell;\nfn main() {\n    let r = &mut *RefCell::new(1).borrow_mut();\n    *r += 1;\n}\n", 3);
+    temp_error("use std::cell::RefCell;\nfn main() {\n    let r = &*RefCell::new(vec![1]).borrow();\n    println!(\"{:?}\", r);\n}\n", 3);
+    temp_error("fn main() {\n    let r = &String::from(\"a\").clone();\n    let s = &*String::from(\"b\").as_str();\n    println!(\"{} {}\", r, s);\n}\n", 3);
+    assert_eq!(check("use std::cell::RefCell;\nfn main() {\n    let c = RefCell::new(1);\n    let r = &mut *c.borrow_mut();\n    *r += 1;\n}\n"), vec![]);
+    assert_eq!(check("use std::cell::RefCell;\nfn main() {\n    let a = &*String::from(\"b\");\n    let n = &RefCell::new(1).borrow().clone();\n    let l = &String::from(\"x\").len();\n    let m = &vec![1, 2].iter().count();\n    println!(\"{} {} {} {}\", a, n, l, m);\n}\n"), vec![]);
+}

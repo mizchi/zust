@@ -2281,6 +2281,7 @@ impl Cx<'_> {
                     let ext1 = self.bk.extended.len();
                     if self.bk_on() {
                         borrowck::direct_temps(self.prog, init, &mut self.bk.direct);
+                        borrowck::direct_ref_recv(self.prog, init, &mut self.bk.direct);
                         // (`let x = &f();`: the temporary lives as long as x's block)
                         borrowck::direct_ref(self.prog, init, &mut self.bk.extended);
                     }

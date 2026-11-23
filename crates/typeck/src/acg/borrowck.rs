@@ -489,6 +489,52 @@ pub(crate) fn mentions(e: &Expr, n: &str) -> bool {
     found
 }
 
+/// The addresses of marks lists that are in orig, for the same nodes of copy, a clone of orig the lowering made
+pub fn copy_marks(orig: &Expr, copy: &Expr, marks: &mut Vec<usize>, depth: u32) {
+    if depth > 32 {
+        return;
+    }
+    if marks.contains(&(orig as *const Expr as usize)) {
+        marks.push(copy as *const Expr as usize);
+    }
+    let (mut a, mut b): (Vec<*const Expr>, Vec<*const Expr>) = (vec![], vec![]);
+    crate::ast_closure::each_child_pub(orig, &mut |c| a.push(c as *const Expr));
+    crate::ast_closure::each_child_pub(copy, &mut |c| b.push(c as *const Expr));
+    if a.len() == b.len() {
+        for (x, y) in a.into_iter().zip(b) {
+            // SAFETY: the children of orig and copy, which outlive this call
+            copy_marks(unsafe { &*x }, unsafe { &*y }, marks, depth + 1);
+        }
+    }
+}
+
+/// `let x = &*R.m();` / `&R.m().f` with R a temporary a call makes: the `let` extends what `&` borrows (the call's
+/// result), not R, the receiver it is made from, which goes away at the end of the statement (E0716 when the result
+/// borrows it: `&mut *RefCell::new(1).borrow_mut()`, `&*String::from("b").as_str()`). Its address, for direct
+pub fn direct_ref_recv(prog: &Program, a: &Expr, out: &mut Vec<usize>) {
+    fn strip(mut e: &Expr) -> &Expr {
+        while let Expr::Paren(p) = e {
+            e = p;
+        }
+        e
+    }
+    let Expr::Ref(_, x) = strip(a) else { return };
+    let mut y = strip(x);
+    loop {
+        match y {
+            Expr::Field(b, ..) | Expr::Index(b, ..) => y = strip(b),
+            Expr::Unary(op, b, _) if op == "*" => y = strip(b),
+            Expr::MethodCall(r, ..) => {
+                if made_temp(prog, r) {
+                    out.push(&**r as *const Expr as usize);
+                }
+                return;
+            }
+            _ => return,
+        }
+    }
+}
+
 /// `&e` with e a temporary that is never promoted to a static: the result of a call of a fn (not a struct's or
 /// variant's constructor), of a method, of `vec!` / `format!` (its addresses, for direct_temps)
 pub fn direct_ref(prog: &Program, a: &Expr, out: &mut Vec<usize>) {

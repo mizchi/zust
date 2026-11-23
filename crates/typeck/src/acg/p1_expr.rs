@@ -503,6 +503,17 @@ impl Cx<'_> {
                 // `*g` (g: MutexGuard など Deref を実装した型): `*g.deref_mut()` / `*g.deref()`
                 if let Some(d) = self.user_deref(x) {
                     let d = self.keep_expr(d);
+                    // (the temporaries the borrow check follows in x (`*RefCell::new(1).borrow_mut()`'s receiver) are
+                    // followed in its copy too)
+                    if let Expr::Unary(_, c, _) = d {
+                        if let Expr::MethodCall(r, ..) = &**c {
+                            if let Expr::Paren(xc) = &**r {
+                                if !self.bk.direct.is_empty() {
+                                    borrowck::copy_marks(x, xc, &mut self.bk.direct, 0);
+                                }
+                            }
+                        }
+                    }
                     self.deref_shared(d);
                     return self.place(d);
                 }
