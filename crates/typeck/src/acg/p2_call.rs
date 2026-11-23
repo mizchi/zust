@@ -241,7 +241,13 @@ impl Cx<'_> {
                     // `bar(&mut self)`)
                     // (but the reference itself by value, `(&s).foo()` of a blanket impl's default `foo(self)` with
                     // Self = &S: that default for &S, the receiver as it is (a copy, no borrow taken))
-                    Ok(Some((tr, 0))) if matches!(t, Ty::Ref(..)) && self.trait_default(tr, method, t).is_some() && self.trait_candidate(&format!("{}::{method}", self.ty_key(self.strip_refs(t))), tr).is_none() => {
+                    // (only a default taking `self` by value: one taking `&self` / `&mut self` goes the ordinary way,
+                    // which records the receiver's loan)
+                    Ok(Some((tr, 0)))
+                        if matches!(t, Ty::Ref(..))
+                            && self.trait_default(tr, method, t).is_some_and(|d| !matches!(self.prog.sigs[d as usize].params.first(), Some(Ty::Ref(..))))
+                            && self.trait_candidate(&format!("{}::{method}", self.ty_key(self.strip_refs(t))), tr).is_none() =>
+                    {
                         let d = self.trait_default(tr, method, t).unwrap();
                         self.check_unsafe_call(d, msp.start)?;
                         let (v, vt) = self.expr(recv, None)?;
