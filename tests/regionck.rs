@@ -3229,4 +3229,8 @@ fn part17_review3() {
     // (two blanket impls of a generic trait that override its default: not told apart, so not the default either)
     let d = check("trait A<X> { fn get(&self) -> i32 { 0 } }\nimpl<T> A<u8> for T { fn get(&self) -> i32 { 8 } }\nimpl<T> A<u16> for T { fn get(&self) -> i32 { 16 } }\nfn f(x: &dyn A<u16>) -> i32 { x.get() }\nfn main() {\n    let v = 5u8;\n    let r = &v;\n    println!(\"{}\", f(&r));\n}\n");
     assert!(d.len() == 1 && d[0].1.contains("has no implementation"), "{d:?}");
+    // (`&g` of a guard where a `&mut T` is expected: a shared borrow, no coercion makes it mutable (E0308))
+    let d = check("use std::cell::RefCell;\nfn main() {\n    let c = RefCell::new(1);\n    let mut g2 = c.borrow_mut();\n    let r2: &mut i32 = &g2;\n    *r2 = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("mismatched types"), "{d:?}");
+    assert_eq!(check("use std::cell::RefCell;\nfn bump(x: &mut i32) { *x += 1; }\nfn main() {\n    let c = RefCell::new(1);\n    let mut g = c.borrow_mut();\n    bump(&mut g);\n    let r: &i32 = &g;\n    println!(\"{}\", r);\n}\n"), vec![]);
 }

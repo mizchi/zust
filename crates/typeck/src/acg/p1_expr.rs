@@ -1135,8 +1135,8 @@ impl Cx<'_> {
             }
             // (deref coercion of a guard: `&g` where a `&T` (or `&[U]` / `&str` of a Vec / String T) is expected, with
             // g a RefCell's Ref / RefMut or a MutexGuard: `&*g`)
-            Expr::Ref(_, x) if self.guard_coercion(x, expected).is_some() => {
-                let ne = self.guard_coercion(x, expected).unwrap();
+            Expr::Ref(m, x) if self.guard_coercion(x, *m, expected).is_some() => {
+                let ne = self.guard_coercion(x, *m, expected).unwrap();
                 let ne: &Expr = self.keep_expr(ne);
                 self.expr(ne, expected)
             }
@@ -1922,8 +1922,12 @@ impl Cx<'_> {
     /// `&g` (g: Ref<T> / RefMut<T> / MutexGuard<T>) where a reference to T, or the slice / str of a Vec / String T, is
     /// expected: the expression to use instead (`&*g`, `&(*g)[..]`, `(*g).as_str()`). None when no coercion applies
     /// (a `&dyn Trait` is expected, or a reference to the guard itself)
-    pub(crate) fn guard_coercion(&self, x: &Expr, expected: Option<Ty>) -> Option<Expr> {
+    pub(crate) fn guard_coercion(&self, x: &Expr, written_mut: bool, expected: Option<Ty>) -> Option<Expr> {
         let Some(Ty::Ref(wm, want)) = expected else { return None };
+        // (`&g` where a `&mut T` is expected: no coercion makes a shared borrow of the guard mutable (E0308))
+        if wm && !written_mut {
+            return None;
+        }
         let (sid, target, _) = self.guard_of(self.peek(x)?)?;
         if *want == Ty::Struct(sid) || matches!(want, Ty::Dyn(_)) || self.prog.has_param(*want) {
             return None;
