@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795447090317,
+  "lastUpdate": 1795447093040,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -91662,6 +91662,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/0bda52d39163e35dc68d53ed6498a112ecfd4bd0"
         },
         "date": 1795445753995,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 82.759,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 57.895,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 84.848,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 78.947,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 88.445,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "08987da3b449c8e0d2879b33ba658fc15afae6b4",
+          "message": "memchr builds for wasm32 (#90)\n\n* memchr builds for wasm32\n\nmemchr 2.8.3 (42 crates of dioxus, 29 of leptos depend on it) now builds for wasm32 and\ngives rustc's results under node. What it needed:\n\n- an impl of a trait for `v128` passes the impl header check, as `__m128i` did\n- `Box::from(s)` of a slice is `s.to_vec().into_boxed_slice()`\n- the deref coercion `&&T` -> `&T` at a fn's tail, a `return` and a match arm\n- a method `fn find(&self ..)` in an impl is not renamed with another module's fn `find`\n- `p.cast()` without a turbofish takes its type from inference (and from an intrinsic's pointer parameter)\n- `p.offset_from(q)`; `Option::unwrap_unchecked` / `Result::unwrap_unchecked`\n- `Self::C` in an impl's const (also for a struct: `const TWICE: usize = Self::N * 2`)\n- `V::Mask::first_offset` as a value, V a type parameter\n- `p.add(n)` constrains n to usize in inference (`p.add(2 * V::BYTES)`)\n- a struct literal of a name that is also a glob-imported unit variant is the struct (the prelude's `Skip { .. }`)\n- a method call on a vector value whose type inference left open\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9fRgwYNcgjEK4xh99N\n\n* Review: E0133 on the chosen overload of a mixed group; no &mut through a shared ref; nested fns keep their renaming\n\n- The unsafe check after overload selection also runs when the group mixes safe and unsafe\n  methods, on the one chosen even when it is the first (the vector fallback relied on the\n  all-unsafe check only)\n- The vector fallback passes a `&self` / `&mut self` receiver through a slot\n- deref_coerce does not strip a shared outer reference to reach a `&mut` (`&&mut u8`)\n- Collision renaming leaves alone only fns directly in an impl / trait body; a fn nested in a\n  body is renamed with its calls, as before (`-> impl Trait {` is a fn's body)\n- The `T::BYTES` inference arm is reached (it was after the arm of every 2-segment path)\n- `offset_from` takes a `*mut` of a `*const` receiver and the other way, in inference too\n- The prelude's slice-copy names for `Box::<[u8]>::from` too\n- `Self` in a const is a whole word (`MySelf` is not)\n- Tests: aligned reads in the probe, no pointer past the haystack in the wasm test\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9fRgwYNcgjEK4xh99N\n\n* Review: a vector temporary's &self result is borrow-checked (E0716); the fallback calls through a local; a parenthesized cast into an intrinsic\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9fRgwYNcgjEK4xh99N\n\n* Review: an impl for a fn pointer type keeps its methods' names; Box::from spelled with spaces selects the slice-copy names\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9fRgwYNcgjEK4xh99N\n\n* Review: a match / if value as a receiver is a temporary (E0716); a reference receiver keeps no temporary loan\n\n- borrowck's made_temp counts a match / if value as a temporary, so a &self result that borrows\n  it is not used after its statement, for a struct and a vector alike\n- prim_trait_method takes no temporary loan for a receiver that is a reference (id(&v).loan())\n- the vector fallback records the temporary's loan as prim_trait_method does\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9fRgwYNcgjEK4xh99N\n\n* Review: an impl head with a const argument (S<{ 1 }>) is still an impl head when renaming\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9fRgwYNcgjEK4xh99N\n\n* Review: a &self receiver of a primitive / vector is the value itself; Box::from found by its path in any spelling\n\n- prim_trait_method passes the address of a place receiver, or the reference a receiver is, to a\n  &self method, not a copy's: `a.loan()` / `id(&a).loan()` return a's address (ptr::eq as rustc)\n- the prelude's slice-copy names are selected by a scan of the path (Box, ::, an optional\n  turbofish, ::, from; spaces anywhere), not by fixed spellings\n- one probe per spelling (Box::  from, Box :: from, Box::<[u8]>::from), none with a plain one\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9fRgwYNcgjEK4xh99N\n\n* Review: Box::from's path scan skips comments between its tokens\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9fRgwYNcgjEK4xh99N\n\n* Review: Box::from's turbofish scan skips comments; an unclosed turbofish is no path (no out-of-bounds index)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9fRgwYNcgjEK4xh99N\n\n---------\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-24T00:12:12+09:00",
+          "tree_id": "d98123c10a4064b11987e15654377372194ec290",
+          "url": "https://github.com/mizchi/zust/commit/08987da3b449c8e0d2879b33ba658fc15afae6b4"
+        },
+        "date": 1795447092468,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
