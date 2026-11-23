@@ -2023,6 +2023,22 @@ impl Cx<'_> {
                 }),
                 _ => None,
             };
+            // (else a blanket impl of the trait whose bounds hold of Self: `impl<A> Foo for A`'s `get` for a `&i32`
+            // made a `dyn Foo`. Only for a method the trait has no default of: a default the impl does not override
+            // is the trait's, as below)
+            let imp = imp.or_else(|| {
+                if sig.has_body {
+                    return None;
+                }
+                let &bid = self.prog.blanket.get(&m)?;
+                let bsig = &self.prog.sigs[bid as usize];
+                let btr = bsig.impl_trait.as_deref().or(bsig.trait_of.as_deref()).map(|t| t.split('<').next().unwrap_or(t).trim());
+                if btr.is_none() || btr != tr0 {
+                    return None;
+                }
+                let bounds = btr.and_then(|tr| self.prog.blanket_bounds.get(tr));
+                bounds.is_none_or(|bs| blanket_bounds_hold(self.prog, args[0], bs, &mut vec![], &mut vec![])).then_some(bid)
+            });
             if let Some(imp) = imp {
                 let isig = &self.prog.sigs[imp as usize];
                 if !isig.is_generic() {
