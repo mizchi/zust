@@ -285,3 +285,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-23	8145fc6+	std assoc types on primitives; E0034; overflowing_literals; bound trait's default in generic fns	0.695	554.203	3766.626	1902.8	-	1829	1511	102	4369	1194.454	64.348	10.482	324.251	726.972	270.476
 2026-11-23	1e52ac1+	review of #66: receiver-order E0034 and dispatch, trait-qualified Output, i128 literal range, const literal errors	0.695	554.439	3766.762	1902.8	-	1829	1511	102	4370	1196.166	64.354	10.482	324.308	727.160	270.434
 2026-11-23	7eb85f1+	second review of #66: instance impls, blanket Self per candidate, turbofish rewrite	0.697	553.727	3766.754	1902.8	-	1829	1511	102	4370	1195.797	64.488	10.496	324.778	727.754	271.651
+2026-11-23	7bd058e+	third review of #66: explicit-trait lookup instead of the rewrite, alias / bounded / &mut instance impls	0.699	554.428	3766.718	1902.8	-	1830	1511	102	4370	1196.219	64.387	10.510	324.930	727.463	270.651

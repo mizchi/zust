@@ -96,7 +96,7 @@ impl Cx<'_> {
     /// W<u16>'s); one without a self type is
     pub(crate) fn self_fits(&self, i: u32, t: Ty) -> bool {
         let sg = &self.prog.sigs[i as usize];
-        sg.self_ty.is_none_or(|st| self.prog.match_ty(st, t, &mut vec![None; sg.generics.len().max(1)]))
+        sg.self_ty.is_none_or(|st| self.prog.match_ty(st, t, &mut vec![None; sg.generics.len().max(1)]) && self.prog.refs_agree(st, t, 0))
     }
 
     /// rustc's method lookup of `x.name()`, x of type t, among the methods two traits of the program's give t's type
@@ -235,28 +235,11 @@ impl Cx<'_> {
             if let Some(t) = maybe {
                 match self.method_pick(t, method) {
                     Err(()) => return err(SP, "multiple applicable items in scope (E0034)"),
-                    // (the one trait's at the first candidate: `Shared::bar(&m)`, not the other trait's `bar(&mut
-                    // self)` the lookup below would find)
-                    Ok(Some((tr, k))) => {
-                        let mut a = paren(recv.as_ref().clone());
-                        for _ in 0..k / 3 {
-                            a = paren(Expr::Unary("*".to_string(), Box::new(a), msp));
-                        }
-                        let a = match k % 3 {
-                            0 => a,
-                            r => Expr::Ref(r == 2, Box::new(a)),
-                        };
-                        // (`s.foo::<u8>()`: `Tr::foo::<u8>(..)`, the method's own arguments on its segment)
-                        let f = if gargs.is_empty() {
-                            path_expr(&format!("{tr}::{method}"))
-                        } else {
-                            let seg = |n: &str, args: Vec<GArg>| crate::parse::Seg { name: n.to_string(), args, fn_args: None, text: n.to_string() };
-                            Expr::Path(None, crate::parse::Path { global: false, segs: vec![seg(tr, vec![]), seg(method, gargs.clone())], pos: Default::default() })
-                        };
-                        let c = Expr::Call(Box::new(f), std::iter::once(a).chain(margs.iter().cloned()).collect());
-                        let ne: &Expr = self.keep_expr(c);
-                        return self.expr(ne, expected);
-                    }
+                    // (the one trait's at the first candidate: the call is lowered as written, with that trait named
+                    // for its lookup (as `Tr::m(x)` names it), so its receiver's borrow, its position and its type
+                    // arguments are the method call's: `m.bar()` is `Shared::bar(&self)`'s, not the other trait's
+                    // `bar(&mut self)`)
+                    Ok(Some((tr, _))) => self.explicit_trait = Some((method.clone(), tr.to_string())),
                     Ok(_) => {}
                 }
             }
@@ -1017,12 +1000,18 @@ impl Cx<'_> {
             }
             // (`C::baz(&w)` of a trait of the program's: its default when the impl of C does not override it, not an
             // inherent `baz` or another trait's)
+            // (and its impl's method when it has one, chosen here: the receiver is then taken as that method takes it,
+            // `(&q).qux()` of ByRef's `qux(&self)` beside ByValue's `qux(self)`)
             if let Some((_, tr)) = self.explicit_trait.as_ref().filter(|(m, _)| *m == name) {
                 let key = format!("{}::{name}", self.prog.structs[self.prog.base_of(sid) as usize].name);
-                if self.trait_candidate_where(&key, tr, |i| self.self_fits(i, Ty::Struct(sid))).is_none() {
-                    let user = |d: u32| self.prog.item_of.get(d as usize).copied().flatten().is_some_and(|x| x < self.prog.prelude_from);
-                    if let Some(d) = self.trait_default(tr, &name, Ty::Struct(sid)).filter(|&d| user(d)) {
-                        break (a, o, sid, d);
+                let user = |d: u32| self.prog.item_of.get(d as usize).copied().flatten().is_some_and(|x| x < self.prog.prelude_from);
+                match self.trait_candidate_where(&key, tr, |i| self.self_fits(i, Ty::Struct(sid))) {
+                    Some(c) if user(c) && self.prog.sigs[c as usize].has_self => break (a, o, sid, c),
+                    Some(_) => {}
+                    None => {
+                        if let Some(d) = self.trait_default(tr, &name, Ty::Struct(sid)).filter(|&d| user(d)) {
+                            break (a, o, sid, d);
+                        }
                     }
                 }
             }

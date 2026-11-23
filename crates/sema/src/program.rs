@@ -348,7 +348,9 @@ pub struct Program {
     pub impls: HashSet<(u32, String)>,
     /// the self types of the impls of a trait for a struct's instances (`impl A for W<u8>`), by (struct, trait), with
     /// the impl's parameters as `Param(i)` and their number
-    pub impl_selfs: FxMap<(u32, String), Vec<(Ty, usize)>>,
+    pub impl_selfs: FxMap<(u32, String), Vec<(Ty, usize, Vec<(usize, String)>)>>,
+    /// the traits the program declares (not the prelude's): a bound of one is checked by its impls
+    pub user_traits: FxSet<String>,
     /// Types whose `Copy` impl names 'static in its self type (`impl Copy for Foo<'static>`): a copy of one requires
     /// what it borrows to be 'static
     pub static_copy: FxSet<u32>,
@@ -879,6 +881,7 @@ impl Program {
             ambiguous_methods: FxMap::default(),
             unbounded_blankets: FxSet::default(),
             impl_selfs: FxMap::default(),
+            user_traits: FxSet::default(),
             lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
@@ -1454,6 +1457,9 @@ impl Program {
             }
             if let Some(tr) = &sm.trait_decl {
                 p.traits.entry(tr.clone()).or_default();
+                if ii < user {
+                    p.user_traits.insert(tr.clone());
+                }
                 if let Some((_, sup)) = sm.trait_generics.iter().find(|g| g.0 == "#supers") {
                     p.trait_supers.insert(tr.clone(), sup.clone());
                 }
@@ -1636,10 +1642,18 @@ impl Program {
             let dup = !p.impls.insert((sid, tr.clone()));
             // (an impl for an instance, `impl A for W<u8>`: its self type, for the method lookup to tell W<u16> apart;
             // one it cannot read is for every instance)
-            if matches!(sm.impl_self_ty, Some(TySyn::App(..))) {
+            // (an alias of an instance too, `impl A for Alias`; and the bounds of the impl's parameters, `impl<T: Marker>
+            // A for W<T>` is not for a W<i32> without `impl Marker for i32`)
+            {
                 let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
-                let st = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok()).unwrap_or(Ty::Param(0));
-                p.impl_selfs.entry((sid, tr.clone())).or_default().push((st, gn.len().max(1)));
+                let resolved = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok());
+                let inst = matches!(resolved, Some(Ty::Struct(s)) if p.structs[s as usize].base.is_some());
+                if inst || matches!(sm.impl_self_ty, Some(TySyn::App(..))) {
+                    let st = resolved.unwrap_or(Ty::Param(0));
+                    let bounds: Vec<(usize, String)> =
+                        sm.impl_generics.iter().enumerate().flat_map(|(i, (_, bs))| bs.iter().map(move |b| (i, b.split('<').next().unwrap_or(b).trim().to_string()))).collect();
+                    p.impl_selfs.entry((sid, tr.clone())).or_default().push((st, gn.len().max(1), bounds));
+                }
             }
             // (all of its lifetimes 'static: `impl Copy for Foo<'static>`, `impl Copy for Foo<&'static u32>` (a path
             // written without lifetimes is no lifetime of its own). One with others (`impl<'b> Copy for Foo<'static,
@@ -2167,7 +2181,26 @@ impl Program {
         let Ty::Struct(sid) = t else { return true };
         let b = self.base_of(sid);
         match self.impl_selfs.get(&(b, tr.to_string())) {
-            Some(v) if b != sid => v.iter().any(|&(st, n)| self.match_ty(st, t, &mut vec![None; n])),
+            Some(v) if b != sid => v.iter().any(|(st, n, bounds)| {
+                let mut sol = vec![None; *n];
+                // (a bound of a trait of the program's holds by its impls; std's are not checked)
+                self.match_ty(*st, t, &mut sol)
+                    && self.refs_agree(*st, t, 0)
+                    && bounds.iter().all(|(i, b)| !self.user_traits.contains(b) || sol.get(*i).copied().flatten().is_none_or(|a| self.implements(a, b)))
+            }),
+            _ => true,
+        }
+    }
+
+    /// The references in a and b (a pattern with `Param`s, a type) agree in mutability, as match_ty does not check:
+    /// `W<&mut i32>` is not `W<&i32>`
+    pub fn refs_agree(&self, a: Ty, b: Ty, depth: u32) -> bool {
+        match (a, b) {
+            (Ty::Ref(m, x), Ty::Ref(n, y)) => m == n && self.refs_agree(*x, *y, depth + 1),
+            (Ty::Array(x, _), Ty::Array(y, _)) | (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) | (Ty::Ptr(_, x), Ty::Ptr(_, y)) => self.refs_agree(*x, *y, depth + 1),
+            (Ty::Struct(x), Ty::Struct(y)) if x != y && depth < 16 => {
+                self.structs[x as usize].args.iter().zip(&self.structs[y as usize].args).all(|(&p, &q)| self.refs_agree(p, q, depth + 1))
+            }
             _ => true,
         }
     }
