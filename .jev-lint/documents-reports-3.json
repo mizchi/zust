@@ -80,6 +80,14 @@
     "docs_reports_2026-11-23-05-test-time.ja": {
       "path": "docs/ja/reports/2026-11-23-05-test-time.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-23-06-rust-frontier-survey.en": {
+      "path": "docs/reports/2026-11-23-06-rust-frontier-survey.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-06-rust-frontier-survey.ja": {
+      "path": "docs/ja/reports/2026-11-23-06-rust-frontier-survey.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -191,6 +199,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-23-05-test-time.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-23-06-rust-frontier-survey",
+      "topic": "The Japanese file docs/ja/reports/2026-11-23-06-rust-frontier-survey.md is a faithful translation of docs/reports/2026-11-23-06-rust-frontier-survey.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-23-06-rust-frontier-survey.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-23-06-rust-frontier-survey.ja"
       }
     }
   ]
