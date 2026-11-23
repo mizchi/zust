@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795445754707,
+  "lastUpdate": 1795445757586,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -109947,6 +109947,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/b274208a7209948e7b7bf1a7b5ac0c6ef55609c7"
         },
         "date": 1795445104860,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 76.81,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1832,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.67,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1512,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 61.46,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4522,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0bda52d39163e35dc68d53ed6498a112ecfd4bd0",
+          "message": "Merge pull request #95 from mizchi/claude/tender-sagan-iatvun\n\nTest time: parallel test loops, fewer valgrind runs, cargo-nextest in CI, cached valgrind",
+          "timestamp": "2026-11-23T23:50:40+09:00",
+          "tree_id": "3ffcf9ed2a3bc56ffb9f87ee846ba6eeeab9f45a",
+          "url": "https://github.com/mizchi/zust/commit/0bda52d39163e35dc68d53ed6498a112ecfd4bd0"
+        },
+        "date": 1795445756910,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
