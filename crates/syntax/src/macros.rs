@@ -582,10 +582,13 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                 out.push_str("__mh ");
             }
             // (not a tt-muncher's marker, `closures!(@closure ..)` in a body with `let closure`: the marker is matched
-            // against a rule's `@closure`, as rustc matches it by name)
+            // against a rule's `@closure`, as rustc matches it by name. A binding's `@`, `whole @ x`, has a name
+            // before it: its `x` is the body's own)
             Pt::Tok(TokenTree::Ident(i))
                 if lets.iter().any(|l| *i == l.as_str())
-                    && !(k > 0 && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '@')) =>
+                    && !(k > 0
+                        && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '@')
+                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Ident(_)) | Pt::Var(..)))) =>
             {
                 out.push_str(&i.to_string());
                 out.push_str("__mh ");
@@ -1008,8 +1011,12 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
         if round > 0 && text.contains("macro_rules") {
             collect_defs(&mut text, &mut macros, None)?;
         }
-        // (proc macros: the outermost attribute and derive uses. What they give is read again next round)
+        // (proc macros: the outermost attribute and derive uses. What they give is read again next round; the
+        // `macro_rules!` they give are definitions now, not calls to run: `pm::fail!()` in an unused one does not run)
         let mut pm_done = !pms.is_empty() && pm_items(&mut text, pms, env, cfg, &mut first)?;
+        if pm_done && text.contains("macro_rules") {
+            collect_defs(&mut text, &mut macros, None)?;
+        }
         let b = text.as_bytes();
         let toks = crate::lexer::tokenize(b);
         let (close, depth) = brackets(b, &toks);
@@ -1027,7 +1034,8 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
                 i += 1;
                 continue;
             }
-            if tk(i) == b"stringify" && pm_scope.is_some() {
+            // (the builtin's: `stringify!`, `std::stringify!`, not a library's macro of that name, `re::stringify!`)
+            if tk(i) == b"stringify" && pm_scope.is_some() && (!(i >= 2 && sym(i - 1, b':') && sym(i - 2, b':')) || (i >= 3 && matches!(tk(i - 3), b"std" | b"core"))) {
                 inert_until = inert_until.max(close[i + 2]);
             }
             let mut rules = macros.get(std::str::from_utf8(tk(i)).unwrap_or(""));

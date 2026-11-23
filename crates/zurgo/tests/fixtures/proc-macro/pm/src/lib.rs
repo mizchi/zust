@@ -29,7 +29,14 @@ pub fn scaled(attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn rules(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let n = item.to_string().matches("macro_rules").count();
-    format!("{item} const RULES_{}: usize = {n};", item_name(&item).to_uppercase()).parse().unwrap()
+    // (and a `macro_rules!` no one calls, whose body calls `boom!`: it never runs)
+    format!("{item} const RULES_{}: usize = {n}; macro_rules! never_called {{ () => {{ pm::boom!() }}; }}", item_name(&item).to_uppercase()).parse().unwrap()
+}
+
+/// `boom!()`: fails the build where it runs
+#[proc_macro]
+pub fn boom(_input: TokenStream) -> TokenStream {
+    panic!("boom!() ran")
 }
 
 /// `#[docs] item`: the item, and `const DOCS_<NAME>: usize` with the number of its doc attributes (doc comments come in

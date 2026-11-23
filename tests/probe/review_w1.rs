@@ -53,6 +53,15 @@ impl Size for &&u8 {
     }
 }
 
+// (a binding with `@` in a macro's body: the binding and its uses are renamed alike)
+macro_rules! whole_of {
+    ($v:expr) => {
+        match $v {
+            whole @ x => x + whole,
+        }
+    };
+}
+
 fn main() {
     println!("{} {}", a(-3), b(-5_000_000_000));
     let v = vec![1, 2];
@@ -64,6 +73,7 @@ fn main() {
         let release = release(vec![7]);
         println!("{:?}", release);
     }
+    println!("{}", whole_of!(7));
     let c = C::new(3);
     println!("{} {} {}", id(5), Wrap(6).get(), c.get());
     release(v);

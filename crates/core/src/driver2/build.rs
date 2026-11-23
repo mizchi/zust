@@ -1447,11 +1447,12 @@ impl Session2 {
                         pms.push(crate::pm::load(&crates[j].name, p).map_err(|e| format!("crate `{}`: the proc-macro crate `{}`: {e}", crates[i].name, crates[j].name))?);
                     }
                 }
-                // (which of their macros the libraries re-export, and under what names: `re::answer!()`)
+                // (which of their macros the libraries re-export, and under what names: `re::answer!()`. From their
+                // expanded text, prepared before this crate's: a `pub use` a macro of theirs gives counts too)
                 if !pms.is_empty() {
                     for j in all_deps(i) {
                         if crates[j].proc_macro.is_none() {
-                            let uses = pub_uses[j].get_or_insert_with(|| crate::pm::pub_uses(&loaded[j].as_ref().unwrap().0));
+                            let uses = pub_uses[j].get_or_insert_with(|| crate::pm::pub_uses(&own_v[j].as_ref().or(loaded[j].as_ref()).unwrap().0));
                             crate::pm::note_reexports(&mut pms, &crates[j].name, uses);
                         }
                     }
