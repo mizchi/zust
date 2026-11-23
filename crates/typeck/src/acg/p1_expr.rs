@@ -718,7 +718,30 @@ impl Cx<'_> {
         // holds only what log holds)
         let read = self.bk.on && (matches!(e, Expr::Unary(op, ..) if op == "*") || matches!(e, Expr::Field(..) | Expr::Index(..) | Expr::Call(..) | Expr::MethodCall(..)));
         let mark = if read { self.bk.frames.last().map(|f| (self.bk.frames.len(), f.len())) } else { None };
+        // (a local `s: &&U` where a `&U` is expected: the deref coercion copies `*s` out, so the value holds what that
+        // holds, not the loan s is (bk_copy_out_of))
+        let coerced = match (expected, strip_paren(e)) {
+            (Some(Ty::Ref(_, w)), Expr::Path(None, p)) if self.bk.on && self.bk.level >= 2 && !matches!(w, Ty::Ref(..) | Ty::Param(_)) => {
+                match ident_of(p).and_then(|n| self.bk_local_of(n)).map(|l| (l, self.bk.locals[l as usize].ty)) {
+                    Some((l, Ty::Ref(_, u @ Ty::Ref(false, i)))) if *i == w => self.bk.frames.last().map(|f| (self.bk.frames.len(), f.len(), l, *u)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
         let r = self.expr_inner(e, expected);
+        if let (Some((n, k, l, u)), true) = (coerced, self.bk_on()) {
+            if self.bk.frames.len() == n && self.bk.frames.last().is_some_and(|f| f[k..].contains(&borrowck::Src::Local(l))) {
+                let c = self.bk_copy_out_of(l, u);
+                if let Some(f) = self.bk.frames.last_mut() {
+                    for s in f[k..].iter_mut() {
+                        if *s == borrowck::Src::Local(l) {
+                            *s = borrowck::Src::Local(c);
+                        }
+                    }
+                }
+            }
+        }
         if let (Some((n, k)), Ok((_, t))) = (mark, &r) {
             if self.bk.frames.len() == n && *t != Ty::Never && self.bk_on() && !self.bk_ty(*t).1 {
                 if let Some(f) = self.bk.frames.last_mut() {
@@ -1035,7 +1058,16 @@ impl Cx<'_> {
                 // (a reference copied out of what a call's result points into (`*names.first().unwrap()` with
                 // `names: Vec<&str>`): it does not hold the borrow of names that reached it (bk_copy_out))
                 let copy_out = self.bk_on() && !is_place_expr(x) && matches!(self.peek(x), Some(Ty::Ref(_, i)) if self.bk_ty(*i) == (true, true));
-                if copy_out {
+                // (`*r` of a local `r: &U`: the U copied out holds what r's referent holds, not the loan r is
+                // (bk_copy_out_of): `let r = &a; t = *r;` holds what a holds)
+                let local_copy = match (copy_out || !self.bk_on() || self.bk.level < 2, strip_paren(x)) {
+                    (false, Expr::Path(None, p)) => match ident_of(p).and_then(|n| self.bk_local_of(n)).map(|l| (l, self.bk.locals[l as usize].ty)) {
+                        Some((l, Ty::Ref(_, u))) if self.bk_ty(*u) == (true, true) => Some((l, *u)),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if copy_out || local_copy.is_some() {
                     self.bk_frame();
                 }
                 let p = self.place(e);
@@ -1043,6 +1075,16 @@ impl Cx<'_> {
                     let srcs = self.bk.frames.pop().unwrap_or_default();
                     if let Some(Ty::Ref(_, u)) = self.peek(x) {
                         self.bk_copy_out(&srcs, *u);
+                    }
+                }
+                if let Some((l, u)) = local_copy {
+                    let srcs = self.bk.frames.pop().unwrap_or_default();
+                    let c = srcs.contains(&borrowck::Src::Local(l)).then(|| self.bk_copy_out_of(l, u));
+                    for s in srcs {
+                        match (s, c) {
+                            (borrowck::Src::Local(x), Some(c)) if x == l => self.bk.src(borrowck::Src::Local(c)),
+                            _ => self.bk.src(s),
+                        }
                     }
                 }
                 let p = p?;

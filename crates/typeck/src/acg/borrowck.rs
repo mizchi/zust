@@ -280,6 +280,15 @@ pub struct Bk {
     /// Loans the region check found must outlive the function (a reborrow through a parameter flowing into a
     /// universal region): live from where each is made to the end (sorted)
     pub forever: Vec<u32>,
+    /// Hidden locals that hold a value copied out of what a local points to (`*r` of `r: &&String`, bk_copy_out_of),
+    /// with the copied type: they hold what r holds, with each loan of a place that holds such values replaced by
+    /// what that place's local holds (copy_masks, made by bk_check)
+    pub copy_out: Vec<(u32, Ty)>,
+    /// What the items of each `for` loop being lowered hold (the loan of v for `for x in &v` / `v.iter()`): the
+    /// bindings of an item that holds references hold it
+    pub for_items: Vec<Vec<Src>>,
+    /// For each of copy_out's locals, whether each loan is of a place that holds the copied type
+    pub copy_masks: HashMap<u32, Vec<bool>>,
     /// The loans of each closure's captures by reference, by the closure's address
     pub cap_loans: HashMap<usize, Vec<u32>>,
     /// The locals a closure holds by value that hold loans, by the closure's address: the closure holds what they do
@@ -1547,6 +1556,19 @@ impl Bk {
                 }
                 Ev::Def(l, srcs) | Ev::Flow(l, srcs) => {
                     let mut ls = self.resolve(srcs, st);
+                    // (a value copied out of what a reference points to: not the loan of the place it was read from,
+                    // what that place holds)
+                    if let Some(mask) = self.copy_masks.get(l) {
+                        let mut out = Vec::with_capacity(ls.len());
+                        for ln in ls {
+                            if mask.get(ln as usize).copied().unwrap_or(false) {
+                                out.extend_from_slice(st.held(self.loans[ln as usize].place.local));
+                            } else {
+                                out.push(ln);
+                            }
+                        }
+                        ls = out;
+                    }
                     if let Ev::Flow(..) = e {
                         ls.extend_from_slice(st.held(*l));
                     } else {
@@ -2046,12 +2068,23 @@ impl Cx<'_> {
         // statement)
         let mut own_loan = None;
         // (not a constant (`match Some(1) { Some(ref x) => .. }`), promoted to a static as `&Some(1)` is, unless
-        // bound `ref mut`; nor a value that holds references, which a binding's `*x` copies out (`Some(ref s)` of an
-        // `Option<&String>`, `out.push(*s)`: what it holds is the value's, not the temporary's))
-        let holds_refs = matches!(&r, Ok(Some(p)) if self.bk_ty(p.ty()).1);
-        if self.bk.level >= 2 && !in_let && !super::is_place_expr(e) && pats.iter().any(|p| pat_binds_ref(p)) && (pats.iter().any(|p| pat_binds_ref_mut(p)) || made_temp(self.prog, e)) && !holds_refs {
+        // bound `ref mut`. A value that holds references is the temporary's (Def after the frame): a binding's `*x`
+        // copies them out (`Some(ref s)` of an `Option<&String>`, `out.push(*s)`, bk_copy_out_of))
+        let mut temp_holds = None;
+        let scrut_t = match &r {
+            Ok(Some(p)) => Some(p.ty()),
+            _ => None,
+        };
+        if self.bk.level >= 2 && !in_let && !super::is_place_expr(e) && pats.iter().any(|p| pat_binds_ref(p)) && (pats.iter().any(|p| pat_binds_ref_mut(p)) || made_temp(self.prog, e)) {
             let id = self.bk.locals.len() as u32;
-            self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP, via_ref: false });
+            let (ty, refs) = match scrut_t {
+                Some(t) => (t, self.bk_ty(t).1),
+                None => (Ty::Unit, false),
+            };
+            self.bk.locals.push(Local { name: TEMP.to_string(), ty, copy: true, refs, mutable: Some(true), decl: super::SP, via_ref: false });
+            if refs {
+                temp_holds = Some(id);
+            }
             self.bk_ev(Ev::Bind(id, true));
             let sp = err_pos(e);
             let ln = self.bk.loans.len() as u32;
@@ -2079,6 +2112,13 @@ impl Cx<'_> {
             }
         }
         let srcs = self.bk_frame_end();
+        // (the temporary its `ref` bindings borrow holds what the value holds, but its own loan)
+        if let Some(id) = temp_holds {
+            let held: Vec<Src> = srcs.iter().copied().filter(|s| !matches!((s, own_loan), (Src::Loan(l), Some(o)) if *l == o)).collect();
+            if !held.is_empty() {
+                self.bk_ev(Ev::Def(id, held));
+            }
+        }
         // (a scrutinee value whose drop may use what it borrows (`match heap.peek_mut() { Some(_) => .. }`, a guard
         // of the prelude in it): a temporary of the statement, dropped at its end, so its loans live through the
         // arms; also when an arm moves a part out (`Some(t)`), as the drop is then of what may be left. Not when a
@@ -2464,13 +2504,25 @@ impl Cx<'_> {
         self.bk.loan_of.insert(e as *const Expr as usize, ln);
         self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false, capture: false });
         let l = p.local;
+        // (`&**s` with `s: &&T`: a reborrow through the shared reference s points to, which may be copied out first:
+        // what that holds, not the loan s is (bk_copy_out_of))
+        let through_shared = match (self.bk.locals[l as usize].ty, p.proj.first(), p.proj.get(1)) {
+            (Ty::Ref(_, u @ Ty::Ref(false, _)), Some(Proj::Deref(_)), Some(Proj::Deref(_) | Proj::Shr)) if self.bk.level >= 2 => Some(*u),
+            _ => None,
+        };
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
         if !quiet {
             self.bk.src(Src::Loan(ln));
         }
         // (reborrowing through a reference also carries the loans the reference holds)
         if self.bk.locals[l as usize].refs {
-            self.bk.src(Src::Local(l));
+            match through_shared {
+                Some(u) => {
+                    let c = self.bk_copy_out_of(l, u);
+                    self.bk.src(Src::Local(c));
+                }
+                None => self.bk.src(Src::Local(l)),
+            }
         }
     }
 
@@ -2503,6 +2555,18 @@ impl Cx<'_> {
         self.bk.loans.push(Loan { place: p.clone(), mutable: true, sp, at: sp, quiet: false, capture: false });
         self.bk.implicit.push(ln);
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+    }
+
+    /// A hidden local that holds a `U` copied out of what the local x points to (`*r` with `r: &U`): what x holds, with
+    /// each loan of a place that holds U values replaced by what that place's local holds (copy_masks). `let r = &a;
+    /// let t = *r;` holds what a holds, not a's loan
+    pub(crate) fn bk_copy_out_of(&mut self, x: u32, u: Ty) -> u32 {
+        let id = self.bk.locals.len() as u32;
+        self.bk.locals.push(Local { name: "<copy>".into(), ty: u, copy: true, refs: true, mutable: None, decl: super::SP, via_ref: false });
+        self.bk_ev(Ev::Bind(id, true));
+        self.bk_ev(Ev::Def(id, vec![Src::Local(x)]));
+        self.bk.copy_out.push((id, u));
+        id
     }
 
     /// `*x` of a value x: `&U` with U a `Copy` type holding references, copied out (srcs: what x holds). A loan of a
@@ -2747,13 +2811,18 @@ impl Cx<'_> {
     /// Returns what to restore (bk_for_item_end)
     pub(crate) fn bk_for_item_begin(&mut self, f: &Expr, t: Ty) -> Option<(Option<u32>, Option<Vec<Src>>, Option<BPlace>, Option<(BPlace, Sp)>)> {
         let Expr::For(_, fpat, it, _) = f else { return None };
-        // (not an item that holds references: a binding's `*x` copies them out (as a scrutinee's, bk_scrutinee))
-        if !self.bk_on() || self.bk.level < 2 || !pat_binds_ref(fpat) || self.bk_ty(t).1 {
+        if !self.bk_on() || self.bk.level < 2 || !pat_binds_ref(fpat) {
             return None;
         }
+        // (an item that holds references holds what the loop's items do (bk_for_item_srcs): a binding's `*x` copies
+        // that out (bk_copy_out_of))
+        let refs = self.bk_ty(t).1;
         let id = self.bk.locals.len() as u32;
-        self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP, via_ref: false });
+        self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: true, refs, mutable: Some(true), decl: super::SP, via_ref: false });
         self.bk_ev(Ev::Bind(id, true));
+        if let (true, Some(srcs)) = (refs, self.bk.bind_srcs.clone().filter(|s| !s.is_empty())) {
+            self.bk_ev(Ev::Def(id, srcs));
+        }
         let place = BPlace { local: id, proj: vec![] };
         // (an array literal has no position of its own: its first element's)
         let at = |e: &Expr| Some(err_pos(e)).filter(|s| s.line != 0).unwrap_or_else(|| super::expr_start(e));
@@ -2763,6 +2832,18 @@ impl Cx<'_> {
         };
         let saved = (Some(id), self.bk.bind_srcs.clone(), self.bk.pat_path.replace(place.clone()), self.bk.scrut_place.replace((place, sp)));
         Some(saved)
+    }
+
+    /// Before a `for` loop's pattern is bound to an item of type t: when t holds references, its bindings hold what the
+    /// loop's items do (Bk::for_items). Returns the bind_srcs to restore
+    pub(crate) fn bk_for_item_srcs(&mut self, t: Ty) -> Option<Vec<Src>> {
+        let saved = self.bk.bind_srcs.clone();
+        if self.bk_on() && self.bk_ty(t).1 {
+            if let Some(it) = self.bk.for_items.last().cloned() {
+                self.bk.bind_srcs = Some(it);
+            }
+        }
+        saved
     }
 
     /// After the pattern is bound (bk_for_item_begin): the item's temporary, to end with the iteration
@@ -4105,6 +4186,13 @@ impl Cx<'_> {
         }
         let mut bk = std::mem::take(&mut self.bk);
         bk.edges = self.b.cfg_edges();
+        for &(c, u) in &bk.copy_out {
+            let mask: Vec<bool> = bk.loans.iter().map(|lo| {
+                let t = bk.locals.get(lo.place.local as usize).map(|l| l.ty);
+                t.and_then(|t| self.place_ty(t, &lo.place.proj)).is_some_and(|t| self.ty_holds(t, u, 0))
+            }).collect();
+            bk.copy_masks.insert(c, mask);
+        }
         // (the reborrows the region check found must outlive the function)
         if self.rg.on && !self.rg.rerun && self.rg.closure.is_none() {
             let loan = |p: usize| bk.loan_of.get(&p).or_else(|| bk.recv_loans.get(&p)).copied();

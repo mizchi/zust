@@ -3158,3 +3158,30 @@ fn part17_fn_turbofish_inference() {
     }
     assert_eq!(check(&format!("{id}fn main() {{\n    let c = 66;\n    id::<u32>(c);\n    let d = 1;\n    let _r = id::<&u32>(&d);\n    let f = id::<u64>;\n    let _g = f(300);\n}}\n")), vec![]);
 }
+
+/// A reference copied out of what a local points to (`*r` of `r: &&String`, `&**s`, a `&&String` where a `&String` is
+/// expected) holds what that place holds, not the loan the local is: `let r = &a; t = *r;` used after a's scope is
+/// accepted, as in rustc. What a holds is still followed (a borrow of a dead s, a write of the Vec it points into)
+#[test]
+fn part18_copied_out_references() {
+    assert_eq!(check("fn main() {\n    let v = vec![String::new(), String::from(\"a\")];\n    let t: &String;\n    {\n        let a: &String = &v[0];\n        let r = &a;\n        t = *r;\n    }\n    println!(\"{}\", t);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let v = vec![String::new()];\n    let mut out: Vec<&String> = vec![];\n    {\n        let a: &String = &v[0];\n        let r = &a;\n        out.push(r);\n    }\n    println!(\"{}\", out.len());\n}\n"), vec![]);
+    let d = check("fn main() {\n    let t: &String;\n    {\n        let s = String::new();\n        let a: &String = &s;\n        let r = &a;\n        t = *r;\n    }\n    println!(\"{}\", t);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("does not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let mut v = vec![String::new()];\n    let a: &String = &v[0];\n    let r = &a;\n    let t = *r;\n    v.push(String::new());\n    println!(\"{}\", t);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("borrowed as immutable"), "{d:?}");
+}
+
+/// A `for` loop's item over `&v` / `v.iter()` holds the loop's loan of v: keeping it past the loop and changing v is
+/// E0502 (it held nothing). A `ref` binding of an item or a scrutinee that holds references borrows a temporary
+/// that holds them: `*s` copies them out, and `s` itself kept past the iteration is E0716
+#[test]
+fn part18_loop_items() {
+    for (head, keep) in [("for x in &v {", "out.push(x);"), ("for x in v.iter() {", "out.push(x);"), ("for ref x in &v {", "out.push(*x);"), ("for x in &v {", "keep = Some(x);")] {
+        let d = check(&format!("fn main() {{\n    let mut v = vec![String::new()];\n    let mut out: Vec<&String> = vec![];\n    let mut keep: Option<&String> = None;\n    {head}\n        {keep}\n    }}\n    v.push(String::new());\n    println!(\"{{}} {{:?}}\", out.len(), keep);\n}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("borrowed as immutable"), "{head} {keep}: {d:?}");
+    }
+    temp_error("fn main() {\n    let v = vec![String::new()];\n    let mut out: Vec<&&String> = vec![];\n    match v.iter().next() {\n        Some(ref s) => out.push(s),\n        None => {}\n    };\n    println!(\"{}\", out.len());\n}\n", 4);
+    temp_error("fn main() {\n    let v = vec![String::new()];\n    let mut out: Vec<&&String> = vec![];\n    for ref s in v.iter() {\n        out.push(s);\n    }\n    println!(\"{}\", out.len());\n}\n", 4);
+    assert_eq!(check("fn main() {\n    let v = vec![String::new(), String::from(\"a\")];\n    let mut out: Vec<&String> = vec![];\n    for ref s in &v {\n        out.push(s);\n    }\n    for (_i, ref s) in v.iter().enumerate() {\n        out.push(*s);\n    }\n    match v.iter().next() {\n        Some(ref s) => out.push(*s),\n        None => {}\n    };\n    println!(\"{}\", out.len());\n}\n"), vec![]);
+}

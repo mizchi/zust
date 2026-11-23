@@ -352,6 +352,7 @@ impl Cx<'_> {
             }
         }
         let mut temp = None;
+        let mut items = None;
         if let Expr::For(_, _, fexpr, _) = f {
             // (`for x in v.iter()` / `v.iter_mut()`, through `copied` / `cloned` / `enumerate` / `rev`: a loan of v for
             // the loop, as `&v` / `&mut v`)
@@ -374,6 +375,7 @@ impl Cx<'_> {
                 let t0 = self.bk.call_temps.len();
                 if let Some(ln) = self.bk_loan_only(inner, m) {
                     self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                    items = Some(self.bk_for_items(inner, ln));
                 }
                 if self.bk.call_temps.len() > t0 {
                     temp = Some(t0);
@@ -384,17 +386,37 @@ impl Cx<'_> {
                 let t0 = self.bk.call_temps.len();
                 if let Some(ln) = self.bk_loan_only(inner, *m) {
                     self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                    items = Some(self.bk_for_items(inner, ln));
                 }
                 if self.bk.call_temps.len() > t0 {
                     temp = Some(t0);
                 }
             }
         }
+        let pushed = items.is_some();
+        if let Some(it) = items {
+            self.bk.for_items.push(it);
+        }
         let r = self.for_inner(f);
+        if pushed {
+            self.bk.for_items.pop();
+        }
         if let Some(t0) = temp {
             self.bk_call_temps_end(t0);
         }
         r
+    }
+
+    /// What an item of a loop over `&v` / `v.iter()` holds: the loop's loan of v, and what v holds (its own
+    /// references, `for s in &names` with `names: Vec<&str>`)
+    fn bk_for_items(&mut self, v: &Expr, ln: u32) -> Vec<borrowck::Src> {
+        let mut out = vec![borrowck::Src::Loan(ln)];
+        if let Some((p, _)) = self.bk_place(v) {
+            if self.bk.locals[p.local as usize].refs {
+                out.push(borrowck::Src::Local(p.local));
+            }
+        }
+        out
     }
 
     fn for_inner(&mut self, f: &Expr) -> R<V> {
@@ -754,7 +776,10 @@ impl Cx<'_> {
             let pv = to_place(self, v, t);
             self.for_pat_check(&tp[1], t)?;
             self.runtime_pat_guard(&tp[1], pv)?;
-            self.pat_bind(&tp[1], pv, BindMode::Move)?;
+            let saved = self.bk_for_item_srcs(t);
+            let r = self.pat_bind(&tp[1], pv, BindMode::Move);
+            self.bk.bind_srcs = saved;
+            r?;
         } else {
             let place = to_place(self, val, vt);
             // (`for _ in arr`: `_` binds nothing; the element moved out of arr is dropped at once)
@@ -766,9 +791,11 @@ impl Cx<'_> {
             self.rg_for_item(f, vt);
             self.for_pat_check(fpat, place.ty())?;
             self.runtime_pat_guard(fpat, place)?;
+            let srcs0 = self.bk_for_item_srcs(place.ty());
             let saved = self.bk_for_item_begin(f, place.ty());
             let r = self.pat_bind(fpat, place, BindMode::Move);
             item_temp = self.bk_for_item_end(saved);
+            self.bk.bind_srcs = srcs0;
             r?;
             self.rg.pat = None;
         }
