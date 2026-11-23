@@ -2209,12 +2209,11 @@ impl Cx<'_> {
             let imp = imp.or_else(|| {
                 // (the trait's own: `Program::blanket` keeps one method of each name, of whichever trait came first, so
                 // the methods of the name are looked through)
-                let base = |t: &str| t.split('<').next().unwrap_or(t).trim().to_string();
                 let tr = tr0?;
-                let cands: Vec<u32> = self.prog.by_last.get(&m).cloned().unwrap_or_default();
-                let mut bl = cands.into_iter().filter(|&c| {
-                    let bsig = &self.prog.sigs[c as usize];
-                    bsig.impl_trait.as_deref().map(base).as_deref() == Some(tr) && matches!(bsig.self_ty, Some(Ty::Param(_)))
+                let prog = self.prog;
+                let mut bl = prog.by_last.get(&m)?.iter().copied().filter(|&c| {
+                    let bsig = &prog.sigs[c as usize];
+                    matches!(bsig.self_ty, Some(Ty::Param(_))) && bsig.impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr)
                 });
                 // (one only: two blanket impls of a generic trait (`impl<T> A<u8> for T`, `impl<T> A<u16> for T`) are
                 // told apart by the trait's arguments, which are not kept for each method)
