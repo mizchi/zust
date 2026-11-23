@@ -155,7 +155,10 @@ fn lex(src: &str) -> Vec<Tok> {
         } else {
             let closes_ctrl = match c {
                 '(' => {
-                    parens.push(matches!(out.last().map(|t| &t.t), Some(T::Ident(k)) if matches!(k.as_str(), "if" | "while" | "for" | "with")));
+                    // (the keyword, not a property named like it: `obj.if(4) / 2` divides)
+                    let n = out.len();
+                    let kw = matches!(out.last().map(|t| &t.t), Some(T::Ident(k)) if matches!(k.as_str(), "if" | "while" | "for" | "with"));
+                    parens.push(kw && !(n >= 2 && out[n - 2].t == T::P('.')));
                     false
                 }
                 ')' => parens.pop().unwrap_or(false),

@@ -5,7 +5,8 @@
 // A schema: "i32" | "u32" | "i64" | "f32" | "f64" | "bool" | "str" | ["arr", schema] | ["rec", [[field, schema], ..]]
 
 const enc = new TextEncoder();
-const dec = new TextDecoder();
+// (a leading U+FEFF is part of the string, not a byte order mark to drop)
+const dec = new TextDecoder("utf-8", { ignoreBOM: true });
 
 /** The bytes of `value` (a value of `schema`) */
 export function encode(schema, value) {
@@ -85,6 +86,7 @@ function get(r, s) {
   }
   v = {};
   const fs = s[1];
-  for (let i = 0; i < fs.length; i++) v[fs[i][0]] = get(r, fs[i][1]);
+  // (own data properties: a field named `__proto__` is a field, not the prototype)
+  for (let i = 0; i < fs.length; i++) Object.defineProperty(v, fs[i][0], { value: get(r, fs[i][1]), enumerable: true, writable: true, configurable: true });
   return v;
 }

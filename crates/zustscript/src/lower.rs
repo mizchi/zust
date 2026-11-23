@@ -498,6 +498,11 @@ impl Lower<'_> {
     /// The schema a value crosses in as bytes: numbers, bools, strings, arrays and records of them (the stable part
     /// of the format; enums, typed arrays and functions do not cross this way yet)
     fn ws(&mut self, t: &Ty, pos: Pos) -> LResult<WS> {
+        self.ws_in(t, pos, &mut vec![])
+    }
+
+    /// (`open`: the records being expanded: one that holds itself, through an array, has no fixed schema)
+    fn ws_in(&mut self, t: &Ty, pos: Pos, open: &mut Vec<Ty>) -> LResult<WS> {
         Ok(match t {
             Ty::I32 => WS::Scalar(WTy::I32),
             Ty::U32 => WS::Scalar(WTy::U32),
@@ -506,14 +511,19 @@ impl Lower<'_> {
             Ty::F64 => WS::Scalar(WTy::F64),
             Ty::Bool => WS::Scalar(WTy::Bool),
             Ty::Str => WS::Str,
-            Ty::Array(e) => WS::Arr(Box::new(self.ws(e, pos)?)),
+            Ty::Array(e) => WS::Arr(Box::new(self.ws_in(e, pos, open)?)),
+            Ty::Named(n, _) if open.contains(t) => {
+                return Err((pos, format!("{n} holds itself: a recursive record cannot cross from JS to a @wasm function yet")));
+            }
             Ty::Named(n, targs) if self.info.records.contains_key(n) => {
                 let r = &self.info.records[n];
                 let m: HashMap<String, Ty> = r.params.iter().cloned().zip(targs.iter().cloned()).collect();
                 let fields: Vec<(String, Ty)> = r.fields.iter().map(|(f, ft)| (f.clone(), subst_ty(ft, &m))).collect();
                 let rt = self.rty(t, pos, None)?;
-                let fs = fields.iter().map(|(f, ft)| Ok((f.clone(), self.ws(ft, pos)?))).collect::<LResult<Vec<_>>>()?;
-                WS::Rec(rt, fs)
+                open.push(t.clone());
+                let fs = fields.iter().map(|(f, ft)| Ok((f.clone(), self.ws_in(ft, pos, open)?))).collect::<LResult<Vec<_>>>();
+                open.pop();
+                WS::Rec(rt, fs?)
             }
             _ => return Err((pos, format!("{} cannot cross from JS to a @wasm function inside a record or an array yet (numbers, bools, strings, arrays and records of them)", show(t)))),
         })

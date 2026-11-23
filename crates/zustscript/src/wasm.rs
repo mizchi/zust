@@ -260,8 +260,9 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
                 WTy::Wire(ws, rt) => {
                     // as bytes: encoded by zustscript-helper, decoded by zustscript_helper, handed by reference
                     ps.push(format!("{a}_p: *const u8, {a}_n: usize"));
-                    pre.push(format!("let {a}_v: {rt} = zustscript_helper::from_bytes(unsafe {{ std::slice::from_raw_parts({a}_p, {a}_n) }});"));
-                    call.push(if matches!(**ws, WS::Arr(_)) { format!("&{a}_v[..]") } else { format!("&{a}_v") });
+                    // (`__zsc_` names are the generated code's: a parameter cannot take one)
+                    pre.push(format!("let __zsc_{a}: {rt} = zustscript_helper::from_bytes(unsafe {{ std::slice::from_raw_parts({a}_p, {a}_n) }});"));
+                    call.push(if matches!(**ws, WS::Arr(_)) { format!("&__zsc_{a}[..]") } else { format!("&__zsc_{a}") });
                     jpre.push(format!("const {a}$b = $zsEncode({}, {a});", schema_of(ws)));
                     jpre.push(format!("const {a}$p = $w.__zsc_alloc(BigInt({a}$b.length));"));
                     jpre.push(format!("new Uint8Array($w.memory.buffer, Number({a}$p), {a}$b.length).set({a}$b);"));

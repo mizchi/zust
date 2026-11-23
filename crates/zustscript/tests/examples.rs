@@ -339,8 +339,12 @@ const t = { title: "T", people: [ana, bo], scores: [[1, 2.5], [], [3]], open: tr
 const g = m.grow(t, { name: "cy", age: 7, tags: ["x"] });
 console.log(JSON.stringify([m.describe(ana), m.oldest([ana, bo, ana]), m.rename(bo, "Bö"), m.total(t), m.names(g), m.grid(3)]));
 console.log(JSON.stringify(g, (k, v) => typeof v === "bigint" ? v.toString() : v));
+// the helper keeps a leading U+FEFF and a field named __proto__
+const h = await import('zustscript-helper');
+const rec = ["rec", [["__proto__", "str"]]];
+console.log(m.shadow(ana, 2), h.decode("str", h.encode("str", "\uFEFFhi")).length, JSON.stringify(h.decode(rec, h.encode(rec, JSON.parse('{"__proto__":"x"}')))));
 "#;
-    let want = "[\"Ana (30) a/😀\",{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"Bö\",\"age\":41,\"tags\":[]},6.5,[\"ANA\",\"BO\",\"CY\"],[[0],[0,1],[0,1,2]]]\n{\"title\":\"T\",\"people\":[{\"name\":\"Ana\",\"age\":30,\"tags\":[\"a\",\"😀\"]},{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"cy\",\"age\":7,\"tags\":[\"x\"]}],\"scores\":[[1,2.5],[],[3],[1.5]],\"open\":false,\"id\":\"9007199254740994\"}\n";
+    let want = "[\"Ana (30) a/😀\",{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"Bö\",\"age\":41,\"tags\":[]},6.5,[\"ANA\",\"BO\",\"CY\"],[[0],[0,1],[0,1,2]]]\n{\"title\":\"T\",\"people\":[{\"name\":\"Ana\",\"age\":30,\"tags\":[\"a\",\"😀\"]},{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"cy\",\"age\":7,\"tags\":[\"x\"]}],\"scores\":[[1,2.5],[],[3],[1.5]],\"open\":false,\"id\":\"9007199254740994\"}\n32 3 {\"__proto__\":\"x\"}\n";
     for flags in [&[][..], &["--all-js"][..]] {
         let d = out_dir(if flags.is_empty() { "wire" } else { "wire_js" });
         let o = zsc(&root().join("tests/wire.zsc"), &d, flags);
