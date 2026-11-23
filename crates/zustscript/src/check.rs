@@ -88,6 +88,8 @@ pub struct EnumDef {
     pub variants: Vec<(String, Vec<Ty>)>,
     /// the result type of each operation, for an effect
     pub ops: HashMap<String, Ty>,
+    /// read from a TS union: its values are TS's (see tsimport.rs)
+    pub ts: Option<crate::ast::TsEnum>,
 }
 
 impl EnumDef {
@@ -532,7 +534,7 @@ impl Checker {
                     if self.info.records.contains_key(name) || self.info.enums.contains_key(name) {
                         self.err(*pos, format!("the type `{name}` is defined twice"));
                     }
-                    self.info.enums.insert(name.clone(), EnumDef { params: params.clone(), variants: vec![], ops: HashMap::new() });
+                    self.info.enums.insert(name.clone(), EnumDef { params: params.clone(), variants: vec![], ops: HashMap::new(), ts: None });
                 }
                 _ => {}
             }
@@ -544,7 +546,7 @@ impl Checker {
                     let fs = fields.iter().map(|(f, t)| (f.clone(), self.ty_of(t, params))).collect();
                     self.info.records.get_mut(name).unwrap().fields = fs;
                 }
-                Item::Enum { name, params, variants, pos } => {
+                Item::Enum { name, params, variants, pos, from } => {
                     let mut vs = vec![];
                     let mut ops = HashMap::new();
                     for (v, ts, ret) in variants {
@@ -563,6 +565,7 @@ impl Checker {
                     let e = self.info.enums.get_mut(name).unwrap();
                     e.variants = vs;
                     e.ops = ops;
+                    e.ts = from.as_ref().and_then(|f| f.repr.clone());
                 }
                 Item::Fn { name, generics, bounds, args, ret, pos, .. } => {
                     if let Some(p) = names.insert(name.clone(), *pos) {

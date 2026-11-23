@@ -1,6 +1,6 @@
 // Records read from a TS file (tests/ts/model.ts): `number` is f64, arrays are arrays, and a record a record uses
 // (`Reply`) is read with it (tests/examples.rs: ts_records)
-import type { User, Post, Point } from "./ts/model.ts";
+import type { User, Post, Point, Doc, Tile } from "./ts/model.ts";
 import type { Cr } from "./ts/cr.ts";
 
 pub fn display(u: User) -> String {
@@ -36,3 +36,17 @@ pub fn same_user(a: User, b: User) -> bool { a == b }
 
 // members separated by CR, U+2028 and U+2029 only (tests/ts/cr.ts)
 pub fn cr(c: Cr) -> String { c.b + (c.a as i32).to_string() + (if c.c { "!" } else { "?" }) }
+
+// unions read as enums (Status, Shape come with Doc): matched, built and compared in TS's own shape
+pub fn label(s: Status) -> String { match s { Draft => "draft!", Published => "live" } }
+pub fn area(s: Shape) -> f64 {
+  match s {
+    Circle(r) => 3.0 * r * r,
+    Rect(w, h) => w * h,
+  }
+}
+pub fn turn(s: Shape) -> Shape { match s { Circle(r) => Circle(r * 2.0), Rect(w, h) => Rect(h, w) } }
+pub fn publish(d: Doc) -> Doc { Doc { status: Published, shapes: d.shapes.map(turn), ..d } }
+pub fn total_area(d: Doc) -> f64 { d.shapes.fold(0.0, (a, s) => a + area(s)) }
+pub fn same_shape(a: Shape, b: Shape) -> bool { a == b }
+pub fn tile(t: Tile) -> f64 { match t { Square(s) => s, Empty => 0.0 } }

@@ -42,8 +42,21 @@ export interface Point {
   y: number
 }
 
-// not read: not imported, and not in the subset
+// unions, read as enums: of string literals (the strings are the values), and of objects with a tag field
+// (each variant's fields by name); a member may be an object type of the file (`Square`)
 export type Status = "draft" | "published";
+export type Shape =
+  | { kind: "circle"; r: number }
+  | { kind: "rect"; w: number; h: number };
+export interface Doc {
+  title: string;
+  status: Status;
+  shapes: Shape[];
+}
+interface Square { kind: "square"; side: number }
+export type Tile = Square | { kind: "empty" };
+
+// not read: not imported, and not in the subset
 export interface Box<T> { value: T }
 export function makeUser(id: number, name: string): User {
   return { id, name, admin: false, tags: [] };
