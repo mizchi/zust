@@ -3916,7 +3916,11 @@ impl Session2 {
 fn hoisted_err_holds(msg: &str) -> bool {
     let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword"];
     let unused = msg.starts_with("function `") && msg.contains("is never used");
-    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused)
+    // (a derive's field or a field's type without the bound it needs (derive_field_error, wf_error): a local
+    // `#[derive(Eq)] struct S(f64);` too)
+    let bounds = ["the trait bound `", "binary operation `==` cannot be applied to type `", "can't compare `"].iter().any(|n| msg.starts_with(n))
+        || (msg.starts_with('`') && (msg.contains("` doesn't implement `Debug`") || msg.contains("` is not an iterator")));
+    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused || bounds)
 }
 
 /// e with its leading line `L:` made l
@@ -4376,9 +4380,16 @@ fn field_pos(text: &str, is_enum: bool, vi: usize, fi: usize) -> Option<(usize, 
         let l = text[..i].matches('\n').count();
         (l, i - text[..i].rfind('\n').map_or(0, |k| k + 1))
     };
-    // (the body: past the name and its generics (`<T: Fn(u8) -> u8>`), the first `{` or `(`)
+    // (the body: past the item's attributes (`#[doc = "struct "]`), the name and its generics (`<T: Fn(u8) -> u8>`),
+    // the first `{` or `(`)
     let kw = if is_enum { "enum " } else { "struct " };
-    let mut i = text.find(kw)? + kw.len();
+    let mut from = text.len() - text.trim_start().len();
+    while text[from..].starts_with("#[") {
+        from += 2 + attr_end(&text[from + 2..]);
+        from += text[from.min(text.len())..].len() - text[from.min(text.len())..].trim_start().len();
+        from = from.min(text.len());
+    }
+    let mut i = from + text[from..].find(kw)? + kw.len();
     let mut angle = 0i32;
     while i < b.len() {
         match b[i] {

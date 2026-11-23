@@ -2026,10 +2026,23 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
             }
             let mut sup = vec![];
-            // (`trait Num: Copy`: the marker supertraits a bound of the trait gives, Copy and Clone)
+            // (`trait Num: Copy`: the marker supertraits a bound of the trait gives, Copy and Clone; `where Self: Copy`
+            // is the same)
             let mut msup = vec![];
-            for b in supers {
+            for b in supers.iter().chain(g.preds.iter().filter(|(t, _)| matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Self")).flat_map(|(_, bs)| bs)) {
                 if let Bound::Trait(false, p) = b {
+                    if matches!(p.segs.last().map(|s| s.name.as_str()), Some("Copy" | "Clone")) && !supers.iter().any(|x| std::ptr::eq(x, b)) {
+                        msup.push(p.segs.last().unwrap().name.clone());
+                        continue;
+                    }
+                    if !supers.iter().any(|x| std::ptr::eq(x, b)) {
+                        continue;
+                    }
+                    // (a supertrait with an equation, `trait View<U>: Deref<Target = U>`: a mark, so that a parameter
+                    // bounded by the trait is not taken as free of equations (acg placeholder_mismatch))
+                    if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Bind(..)))) && !sup.iter().any(|x| x == "#Eq") {
+                        sup.push("#Eq".to_string());
+                    }
                     if let Some(s) = p.segs.last() {
                         if !matches!(s.name.as_str(), "Sized" | "Send" | "Sync" | "Copy" | "Clone" | "Unpin" | "Any" | "Debug" | "Display") {
                             sup.push(s.name.clone());

@@ -3711,13 +3711,25 @@ impl Program {
         self.bound_implies(b, &["Clone", "Copy"], true, depth)
     }
 
+    /// A bound b's trait has an associated-type equation among its supertraits (`trait View<U>: Deref<Target = U>`,
+    /// the summary's `#Eq` mark), through any number of them
+    pub fn bound_has_eq(&self, b: &str, depth: u32) -> bool {
+        let tr = b.split('<').next().unwrap_or(b).trim();
+        let tr = tr.rsplit("::").next().unwrap_or(tr);
+        depth < 8 && self.trait_supers.get(tr).is_some_and(|ss| ss.iter().any(|s| s == "#Eq" || self.bound_has_eq(s, depth + 1)))
+    }
+
     /// A bound b gives one of the traits `want`: itself, or through its supertraits. A trait zustc does not know (a
     /// std one's, `Fn(u8)`) gives them when `unknown` says so: as the caller's safe side is
     pub fn bound_implies(&self, b: &str, want: &[&str], unknown: bool, depth: u32) -> bool {
         let tr = b.split('<').next().unwrap_or(b).trim();
         let tr = tr.rsplit("::").next().unwrap_or(tr);
-        if want.contains(&tr) || depth > 8 {
+        if want.contains(&tr) {
             return true;
+        }
+        // (a chain too long to follow is as a trait not known: the caller's safe side)
+        if depth > 8 {
+            return unknown;
         }
         if matches!(tr, "Sized" | "?Sized" | "Send" | "Sync" | "Unpin" | "Debug" | "Display" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Clone") {
             return false;

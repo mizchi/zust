@@ -798,6 +798,11 @@ impl Cx<'_> {
         };
         let base = self.prog.base_of(sid);
         let have = self.prog.structs[sid as usize].args.clone();
+        // (fewer arguments than parameters, `E::<u8>::V(..)` of `enum E<T, U = ()>`: the rest are defaults zustc does
+        // not read here, not checked)
+        if seg.args.iter().filter(|a| matches!(a, crate::parse::GArg::Ty(_))).count() != have.len() {
+            return Ok(());
+        }
         let ts = self.turbofish_targs(base, &seg.args)?;
         if ts.len() == have.len() && ts.iter().zip(&have).any(|(t, &h)| t.is_some_and(|t| t != h && !self.prog.has_param(h) && !self.prog.has_param(t))) {
             let want: Vec<Ty> = ts.iter().zip(&have).map(|(t, &h)| t.unwrap_or(h)).collect();

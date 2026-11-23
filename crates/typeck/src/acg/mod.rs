@@ -598,7 +598,8 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
                 let Ty::Struct(s) = t else { return None };
                 let sd = &prog.structs[s as usize];
                 let bs = sd.placeholder.as_ref()?;
-                bs.iter().all(|b| !b.contains('=') && !b.contains('(')).then(|| sd.name.trim_end_matches('#').to_string())
+                // (nor one through a supertrait: `T: View<U>` of `trait View<U>: Deref<Target = U>`)
+                bs.iter().all(|b| !b.contains('=') && !b.contains('(') && !prog.bound_has_eq(b, 0)).then(|| sd.name.trim_end_matches('#').to_string())
             })
             .collect(),
         _ => vec![],

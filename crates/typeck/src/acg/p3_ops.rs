@@ -19,10 +19,11 @@ impl Cx<'_> {
     fn cannot_op(&self, op: &str, lt: Ty, right: &Expr) -> String {
         let show = |t: Ty| self.prog.tn(t).replace('#', "").replace("__u_", "");
         let l = show(lt);
-        let r = if super::p2_call::is_int_lit(right) {
-            "{integer}".to_string()
-        } else if super::p2_call::is_float_lit(right) {
+        // (a float first: `1E3` passes is_int_lit too)
+        let r = if super::p2_call::is_float_lit(right) {
             "{float}".to_string()
+        } else if super::p2_call::is_int_lit(right) {
+            "{integer}".to_string()
         } else {
             self.peek(right).map_or("_".to_string(), show)
         };
