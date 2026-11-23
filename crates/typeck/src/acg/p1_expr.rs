@@ -684,13 +684,29 @@ impl Cx<'_> {
         self.bk.exp_none = std::mem::take(&mut self.bk.move_mut_next) && (expected.is_none() || hint_only);
         // (a block's tail's receiver that is a temporary: what its value holds (bk_watch_tail))
         let watched = !self.bk.watch.is_empty() && self.bk.watch.contains(&(e as *const Expr as usize));
-        if watched {
+        // (or a copy of one: a method call at a watched position)
+        let at = if !self.bk.watch_at.is_empty() && matches!(e, Expr::MethodCall(..)) {
+            let p = super::err_pos(e);
+            self.bk.watch_at.iter().position(|w| w.0 == p)
+        } else {
+            None
+        };
+        if watched || at.is_some() {
             self.bk_frame();
         }
         let r = self.expr_inner(e, expected);
-        if watched {
+        if watched || at.is_some() {
             let s = self.bk_frame_end();
-            self.bk.watched.insert(e as *const Expr as usize, s);
+            if let Some(i) = at {
+                for x in &s {
+                    if !self.bk.watch_at[i].1.contains(x) {
+                        self.bk.watch_at[i].1.push(*x);
+                    }
+                }
+            }
+            if watched {
+                self.bk.watched.insert(e as *const Expr as usize, s);
+            }
         }
         self.bk.place_depth = pd;
         let (v, t) = r.map_err(|m| {
@@ -822,6 +838,15 @@ impl Cx<'_> {
                     None => self.block(b, expected),
                 };
                 self.unsafe_ok -= *uns as u32;
+                // (a value that holds what the block's locals hold (bk_block_value), used here, after them: a match's
+                // scrutinee, a receiver, an argument. Not one a statement discards)
+                let key = b as *const crate::parse::Block as usize;
+                if self.bk_on() && self.bk.stmt_block != key {
+                    if let Some(&t) = self.bk.block_val.get(&key) {
+                        self.bk_ev(borrowck::Ev::Acc(borrowck::BPlace { local: t, proj: vec![] }, borrowck::Acc::Read, borrowck::pos(e)));
+                        self.bk.src(borrowck::Src::Local(t));
+                    }
+                }
                 r
             }
             // (`[a, a]` after `let a = foo;` (foo generic): the fn foo)
@@ -1858,6 +1883,13 @@ impl Cx<'_> {
                         _ => unreachable!(),
                     };
                     let (v, _) = self.read_no_move(inner)?;
+                    // (of a Box: a borrow of what the box owns, as `&*b` of a `Box<T>` (E0505 when b is moved while
+                    // it lives, E0515 when it is returned))
+                    // (a method call's auto-ref (`b.iter_mut()`) is made with no position: the box's)
+                    if matches!(it, Ty::Box(_)) && !matches!(expected, Some(Ty::Ptr(..))) {
+                        let sp = err_pos(rexpr);
+                        self.bk_borrow(rexpr, m, if sp.line == 0 { err_pos(inner) } else { sp });
+                    }
                     return Ok((v, Ty::Ref(m, intern(pointee))));
                 }
             }
@@ -1868,6 +1900,10 @@ impl Cx<'_> {
                 let r = self.slice_range(b, ix, m)?;
                 // (a borrow of the elements: `&mut x[1..3]` with x: &[T] is E0596, and it conflicts as `&mut x[1]`)
                 self.bk_borrow(rexpr, m, err_pos(rexpr));
+                // (`&f().0[..]`: of a temporary's elements)
+                if let Some(t) = self.temp_root(rexpr).and_then(|r| self.peek(r)).filter(|_| self.bk_on() && self.bk_place(rexpr).is_none()) {
+                    self.bk_temp_borrow(rexpr, m, t);
+                }
                 return Ok(r);
             }
         }
@@ -1887,12 +1923,60 @@ impl Cx<'_> {
             let pl = self.place(rexpr);
             self.bk.place_mut = pm;
             let pl = pl?;
+            // (`&a` of a reference `a: &T` (or `&&T` ..) where a `&T` is expected (a deref coercion, also as a result): the
+            // pointer a holds, a reborrow of `*a` (`**a` ..), not a borrow of the local a)
+            if let (Some(Ty::Ref(_, want)), Ty::Ref(..)) = (expected, pl.ty()) {
+                // (the derefs to a `&T` (`&mut T` when one is taken), as far as a few)
+                let (mut t, mut n, mut muts) = (pl.ty(), 0usize, true);
+                while let Ty::Ref(rm, i) = t {
+                    muts &= rm;
+                    if *i == *want || n > 4 {
+                        break;
+                    }
+                    t = *i;
+                    n += 1;
+                }
+                let thin = !matches!(want, Ty::Str | Ty::Slice(_) | Ty::Dyn(_));
+                if matches!(t, Ty::Ref(_, i) if *i == *want) && thin && (muts || !m) && matches!(pl, Place::Mem(..) | Place::Var(..)) {
+                    let sp = crate::parse::Span { start: expr_start(rexpr), at: expr_start(rexpr) };
+                    let mut star: &Expr = rexpr;
+                    for _ in 0..=n {
+                        star = self.keep_expr(Expr::Unary("*".into(), Box::new(star.clone()), sp));
+                    }
+                    // (`&mut a` is a mutable borrow of the local a, which needs it `mut` (E0596 of `test(&mut x)` with
+                    // `ref mut x`), and what it reborrows through it lives no longer than that borrow: as before)
+                    if m {
+                        self.bk_borrow(rexpr, true, err_pos(rexpr));
+                    } else {
+                        let n0 = self.bk.loans.len();
+                        self.bk_borrow(star, m, err_pos(rexpr));
+                        if self.bk.loans.len() > n0 {
+                            self.bk.loan_of.insert(&**rexpr as *const Expr as usize, n0 as u32);
+                        }
+                    }
+                    let mut v = match pl {
+                        Place::Mem(a, o, _) => self.b.ins().load(PTR, mf(), a, o),
+                        Place::Var(v, _) => self.b.use_var(v),
+                        _ => unreachable!(),
+                    };
+                    for _ in 0..n {
+                        v = self.b.ins().load(PTR, mf(), v, 0);
+                    }
+                    if !m && (self.rg_on() || self.rg.eligible) {
+                        self.rg.coerced.push((e as *const Expr as usize, n));
+                    }
+                    return Ok((Some(v), Ty::Ref(m, want)));
+                }
+            }
             // (`&mut x as *mut _` / coerced to a raw pointer: not a loan)
             if !matches!(expected, Some(Ty::Ptr(..))) {
                 self.bk_borrow(rexpr, m, err_pos(rexpr));
                 // (`&*Box::new(1)`: a borrow of what a temporary owns, which goes away with it (E0716))
                 if matches!(strip_paren(rexpr), Expr::Unary(op, _, _) if op == "*") && self.bk_place(rexpr).is_none() {
                     self.bk_temp_borrow(rexpr, m, pl.ty());
+                } else if let Some(t) = self.temp_root(rexpr).and_then(|r| self.peek(r)).filter(|_| self.bk_on() && self.bk_place(rexpr).is_none()) {
+                    // (`&f().0`, `&x.borrow().1`: a borrow of a place in a temporary, which goes away with it)
+                    self.bk_temp_borrow(rexpr, m, t);
                 }
             }
             return match pl {
@@ -3363,7 +3447,10 @@ impl Cx<'_> {
                         // (the arguments flow into the regions the bound's parameters write, as for a `dyn Fn`)
                         self.rg_dyn_fn_args(&b, &args);
                         let r = if never { (None, Ty::Never) } else { self.zero_of(ret) };
-                        self.bk_frame_end_call();
+                        // (a result that borrows an argument by the bound's lifetimes holds the argument's loans:
+                        // `let y = f(&x);` with `F: Fn(&isize) -> &isize`)
+                        let from = if matches!(ret, Ty::Ref(..)) || self.bk_ty(ret).1 { crate::ast_summary::fn_bound_ret_from(&b) } else { vec![] };
+                        self.bk_frame_end_call_from(&args, &from);
                         return Ok(r);
                     }
                     return err(SP, format!("expected a function, found `{}`", self.prog.tn(t)));
@@ -3390,6 +3477,13 @@ impl Cx<'_> {
                 }
                 let r = self.dyn_fn_call(v, s, &args, SP);
                 self.rg_dyn_fn_args(s, &args);
+                // (its result holds the loans of the arguments it borrows by the bound's lifetimes, as a generic
+                // `F: Fn(&i32) -> &i32`'s: `let r = f(&x);` with `f: &dyn Fn(&i32) -> &i32`)
+                if let Ok((_, rt)) = &r {
+                    let from = if matches!(rt, Ty::Ref(..)) || self.bk_ty(*rt).1 { crate::ast_summary::fn_bound_ret_from(s) } else { vec![] };
+                    self.bk_frame_end_call_from(&args, &from);
+                    return r;
+                }
                 r
             }
             Ty::Fn(f) => {
@@ -3806,8 +3900,12 @@ impl Cx<'_> {
         }
         // (a call of this kind in the arguments keeps the outer one's for after it)
         let outer = std::mem::replace(&mut self.rg.call_self, written);
+        self.bk_arg_flows_before(id, &args);
         let r = self.call_fn(id, None, &args, tf, expected, SP);
         self.rg.call_self = outer;
+        if r.is_ok() {
+            self.bk_arg_flows(id, &args);
+        }
         self.rg_took_call(c);
         self.seg_self = None;
         r

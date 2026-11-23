@@ -2299,6 +2299,17 @@ impl Cx<'_> {
                     if r.is_ok() && ann_ty.is_some() && matches!(ann, Some(Ty::Ref(true, _))) && matches!(strip_paren(init), Expr::Path(None, _)) {
                         self.bk_reborrow_let(init);
                     }
+                    // (`let v: &T = x.borrow().0;` with the field a `&mut T`: a coercion site, v reborrows `*x.borrow().0`
+                    // through the temporary guard, which goes away at the end of the statement (E0716 when v is used
+                    // after): rustc's `&*`, which the `let` does not extend, as it is not written)
+                    if let (true, Some(Ty::Ref(m, _)), Some(Ty::Ref(true, _))) = (r.is_ok() && ann_ty.is_some() && self.bk_on(), ann, self.owned_field_ty(init)) {
+                        if let Some(t) = self.temp_root(init).and_then(|x| self.peek(x)) {
+                            if self.bk_place(init).is_none() {
+                                self.bk.direct.push(init as *const Expr as usize);
+                                self.bk_temp_borrow(init, m, t);
+                            }
+                        }
+                    }
                     self.bk.macro_let = ml0;
                     self.bk.direct.truncate(ext0);
                     self.bk.extended.truncate(ext1);
@@ -2421,15 +2432,54 @@ impl Cx<'_> {
                             _ => {}
                         }
                     }
-                    let watch = if last && !*semi { self.bk_watch_tail(e) } else { vec![] };
+                    let watch = if last && !*semi { self.bk_watch_tail(e) } else { (vec![], self.bk.watch_at.len()) };
                     // (edition 2024: what the block's value holds, for its temporaries' end below)
                     let tail24 = !*semi && last && self.prog.edition >= 2024 && self.bk_on() && !tail;
                     if tail24 {
                         self.bk_frame();
                     }
+                    // (a block's value that a statement discards (`{ let t = D(1); d.next(&t) };`) is a temporary of
+                    // the statement: made at the block's tail, while its locals live, and dropped at the statement's
+                    // end, after them (E0597 when its `Drop` may see a borrow of one of them). In every edition: 2024
+                    // changes when the tail's temporaries go, not the block's value)
+                    let saved_discard = self.bk.discard;
+                    let saved_stmt_block = self.bk.stmt_block;
+                    if let (true, Expr::Block(None, _, b)) = (*semi, strip_paren(e)) {
+                        self.bk.stmt_block = b as *const crate::parse::Block as usize;
+                    }
+                    let mark_discard = self.bk.discard_temps.len();
+                    let stmt_block = *semi && self.bk_on() && self.bk.level >= 2 && self.user_code;
+                    if let (true, Expr::Block(None, _, b)) = (stmt_block, strip_paren(e)) {
+                        self.bk.discard = b as *const crate::parse::Block as usize;
+                    }
+                    // (the tail of such a block: an inner block's value is the same value; another expression makes it)
+                    let made_here = last && !*semi && self.bk.discard != 0 && self.bk.discard == blk as *const crate::parse::Block as usize;
+                    if made_here {
+                        match strip_paren(e) {
+                            Expr::Block(None, _, b) => self.bk.discard = b as *const crate::parse::Block as usize,
+                            _ => self.bk_frame(),
+                        }
+                    }
+                    let made_value = made_here && !matches!(strip_paren(e), Expr::Block(None, ..));
                     let r = self.expr(e, exp);
                     if tail24 {
                         tail_srcs = self.bk_frame_end();
+                    }
+                    if made_value {
+                        let srcs = self.bk_frame_end();
+                        if let Ok((_, t)) = &r {
+                            if !srcs.is_empty() && self.dropck(*t, 0) {
+                                self.bk_hold_value(srcs, *t);
+                            }
+                        }
+                    }
+                    if made_here || stmt_block {
+                        self.bk.discard = saved_discard;
+                    }
+                    self.bk.stmt_block = saved_stmt_block;
+                    if stmt_block && self.bk.discard_temps.len() > mark_discard {
+                        let ts: Vec<u32> = self.bk.discard_temps.drain(mark_discard..).collect();
+                        self.bk_drop_held(&ts, borrowck::pos(e));
                     }
                     self.bk.direct.truncate(ext0);
                     if last && !*semi && self.bk.tail == e as *const Expr as usize && r.is_ok() {
@@ -2439,6 +2489,11 @@ impl Cx<'_> {
                     if last && !*semi && r.is_ok() {
                         self.rg_keep(e);
                         self.bk_tail_drop_temps(e);
+                        if !tail {
+                            if let Ok((_, t)) = &r {
+                                self.bk_block_value(blk, e, *t);
+                            }
+                        }
                     }
                     self.bk_unwatch(&watch);
                     if tail {

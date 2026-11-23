@@ -17,6 +17,12 @@ fn out_dir(name: &str) -> PathBuf {
     let d = root().join("target/test-out").join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("node_modules")).unwrap();
+    // (the JS side of the helpers, as a package: the glue imports `zustscript-helper`)
+    let helper = d.join("node_modules/zustscript-helper");
+    std::fs::create_dir_all(&helper).unwrap();
+    for f in ["package.json", "index.js", "index.d.ts"] {
+        std::fs::copy(root().join("helper/ts").join(f), helper.join(f)).unwrap();
+    }
     // (a stand-in for React: renders to a string)
     let stub = root().join("tests/stub/react");
     let dst = d.join("node_modules/react");
@@ -322,6 +328,34 @@ fn eq_check_is_linear() {
     }
 }
 
+/// tests/wire.zsc: records holding strings and arrays, arrays of records and strings, nested arrays cross to @wasm
+/// as bytes (zustscript-helper on the JS side, zustscript_helper in the Rust), and give the JS layer's results
+#[test]
+fn wire_same_in_js_and_wasm() {
+    let script = r#"
+const m = await import('./wire.js');
+const ana = { name: "Ana", age: 30, tags: ["a", "😀"] }, bo = { name: "bo", age: 41, tags: [] };
+const t = { title: "T", people: [ana, bo], scores: [[1, 2.5], [], [3]], open: true, id: 9007199254740993n };
+const g = m.grow(t, { name: "cy", age: 7, tags: ["x"] });
+console.log(JSON.stringify([m.describe(ana), m.oldest([ana, bo, ana]), m.rename(bo, "Bö"), m.total(t), m.names(g), m.grid(3)]));
+console.log(JSON.stringify(g, (k, v) => typeof v === "bigint" ? v.toString() : v));
+// the helper keeps a leading U+FEFF and a field named __proto__
+const h = await import('zustscript-helper');
+const rec = ["rec", [["__proto__", "str"]]];
+console.log(m.shadow(ana, 2), h.decode("str", h.encode("str", "\uFEFFhi")).length, JSON.stringify(h.decode(rec, h.encode(rec, JSON.parse('{"__proto__":"x"}')))));
+"#;
+    let want = "[\"Ana (30) a/😀\",{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"Bö\",\"age\":41,\"tags\":[]},6.5,[\"ANA\",\"BO\",\"CY\"],[[0],[0,1],[0,1,2]]]\n{\"title\":\"T\",\"people\":[{\"name\":\"Ana\",\"age\":30,\"tags\":[\"a\",\"😀\"]},{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"cy\",\"age\":7,\"tags\":[\"x\"]}],\"scores\":[[1,2.5],[],[3],[1.5]],\"open\":false,\"id\":\"9007199254740994\"}\n32 3 {\"__proto__\":\"x\"}\n";
+    for flags in [&[][..], &["--all-js"][..]] {
+        let d = out_dir(if flags.is_empty() { "wire" } else { "wire_js" });
+        let o = zsc(&root().join("tests/wire.zsc"), &d, flags);
+        assert!(o.status.success(), "zsc {flags:?} failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(node(&d, script), want, "{flags:?}");
+    }
+    // (the wasm build goes through the helpers)
+    let js = std::fs::read_to_string(root().join("target/test-out/wire/wire.js")).unwrap();
+    assert!(js.contains("from \"zustscript-helper\""), "{js}");
+}
+
 /// tests/ts_import.zsc: records read from a TS file (tests/ts/model.ts) with `import type`. The JS takes TS's objects
 /// as they are, and the .d.ts imports model.ts's types, so TS code passes its own values (tests/ts/consumer.ts,
 /// checked with tsc when it is available)
@@ -331,6 +365,7 @@ fn ts_records() {
     // (the module and its TS file side by side, as in a project: the .d.ts imports `./ts/model.js`)
     std::fs::create_dir_all(d.join("ts")).unwrap();
     std::fs::copy(root().join("tests/ts/model.ts"), d.join("ts/model.ts")).unwrap();
+    std::fs::copy(root().join("tests/ts/cr.ts"), d.join("ts/cr.ts")).unwrap();
     std::fs::copy(root().join("tests/ts_import.zsc"), d.join("ts_import.zsc")).unwrap();
     let o = zsc(&d.join("ts_import.zsc"), &d, &[]);
     assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
@@ -341,10 +376,10 @@ const m = await import('./ts_import.js');
 const u = { id: 7, name: "ana", admin: false, tags: ["a"] };
 const p = m.reply({ author: u, title: "Hi", scores: [1, 2, 4.5], replies: [] }, u, "ok");
 console.log(m.display(u), "|", m.summary(p), "|", JSON.stringify(m.promote(u)));
-console.log(m.same_user(u, { ...u, tags: ["a"] }), m.same_user(u, m.promote(u)), m.dist({ x: 3, y: 4 }, { x: 0, y: 0 }));
+console.log(m.same_user(u, { ...u, tags: ["a"] }), m.same_user(u, m.promote(u)), m.dist({ x: 3, y: 4 }, { x: 0, y: 0 }), m.badge(m.promote(u)), m.cr({ a: 2, b: "x", c: true }));
 "#,
     );
-    assert_eq!(out, "ana (member, #7) | Hi by ana (member, #7): 1 replies, score 7 | {\"id\":7,\"name\":\"ana\",\"admin\":true,\"tags\":[\"a\",\"staff\"]}\ntrue false 5\n");
+    assert_eq!(out, "ana (member, #7) | Hi by ana (member, #7): 1 replies, score 7 | {\"id\":7,\"name\":\"ana\",\"admin\":true,\"tags\":[\"a\",\"staff\"]}\ntrue false 5 ANA #7 a+staff x2!\n");
     let dts = std::fs::read_to_string(d.join("ts_import.d.ts")).unwrap();
     assert!(dts.contains("import type { Point, Post, User } from \"./ts/model.js\";"), "{dts}");
     assert!(!dts.contains("export interface User"), "{dts}");
