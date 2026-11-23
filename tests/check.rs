@@ -491,3 +491,41 @@ fn review72_second_round() {
     let src = "#![deny(warnings)]\nmod m {\n    #[allow(unused_variables)]\n    fn _foo() {}\n}\nfn main() {}\n";
     assert_eq!(first(src), None, "underscore_in_module_ok");
 }
+
+/// E0308 where rustc points: the branch whose type differs from the ones before it (its tail, the last statement of
+/// a block without one, the arm of an empty block), a loop body with a value (its tail), a struct literal's field (its
+/// value, the name of a shorthand field)
+#[test]
+fn mismatch_at_the_branch_rustc_points_at() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut line = |src: &str| s.check(src).first().map(|d| d.line);
+    let if_else = "fn main() {\n    let _ = if true {\n        1i32\n    } else {\n        2u32\n    };\n}\n";
+    assert_eq!(line(if_else), Some(5));
+    let semi = "fn main() {\n    let _ = match 3u8 {\n        0 => {\n            1i32\n        }\n        _ => {\n            0;\n        }\n    };\n}\n";
+    assert_eq!(line(semi), Some(7));
+    let empty = "fn f() {\n    match Some(0u32) {\n        Some(x) => {\n            x\n        }\n        None => {}\n    };\n}\nfn main() {}\n";
+    assert_eq!(line(empty), Some(6));
+    let lp = "fn main() {\n    let _a: i8 = loop {\n        1\n    };\n}\n";
+    assert_eq!(line(lp), Some(3));
+    let short = "struct Foo {\n    t: Thing,\n}\nstruct Thing;\nfn main() {\n    let t = &Thing;\n    let _f = Foo {\n        t\n    };\n}\n";
+    assert_eq!(line(short), Some(8));
+    // (no else: at the `if`, as rustc reports E0317)
+    let no_else = "fn main() {\n    let _x: i32 = if true {\n        1\n    };\n}\n";
+    assert_eq!(line(no_else), Some(2));
+}
+
+/// A condition (or iterator) that took the block meant to follow it: rustc's error at the `if` / `for`
+#[test]
+fn swallowed_block_at_the_keyword() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let bare = "fn a() {\n    if {}\n}\nfn main() {}\n";
+    assert_eq!(first(bare), Some((2, "missing condition for `if` expression".to_string())));
+    let unfinished = "fn main() {\n    let n = 1;\n    if n == {\n        println!(\"five\");\n    }\n}\n";
+    assert_eq!(first(unfinished), Some((3, "this `if` expression is missing a block after the condition".to_string())));
+    let for_in = "fn main() {\n    for i in {\n    }\n}\n";
+    assert_eq!(first(for_in), Some((2, "missing expression to iterate on in `for` loop".to_string())));
+    // (a block as the condition, followed by the block: fine)
+    let ok = "fn main() {\n    if { true } {\n        println!(\"ok\");\n    }\n}\n";
+    assert_eq!(first(ok), None);
+}
