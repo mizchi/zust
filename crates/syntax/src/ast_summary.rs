@@ -471,14 +471,19 @@ fn check_impl_ret(sig: &PSig, owner: Option<&Owner>) -> R<()> {
         for a in &s.args {
             match a {
                 crate::parse::GArg::Lifetime(l) if l == "'_" => {
-                    // (fine when an argument has an elided lifetime for it to name)
+                    // (fine when an argument has an elided lifetime for it to name, or the arguments name one
+                    // lifetime only (`fn f<'a>(x: &'a u8) -> impl Tr + use<'_>`): the elision rules give it)
+                    let mut named: Vec<String> = vec![];
                     let elided = sig.recv_ty.is_some()
                         || sig.params.iter().any(|p| {
                             let (mut v, mut e, mut o) = (vec![], false, false);
                             lifetimes(&p.1, &mut v, &mut e, &mut o);
+                            named.extend(v);
                             e
                         });
-                    if !elided {
+                    named.sort();
+                    named.dedup();
+                    if !elided && named.len() != 1 {
                         return err("missing lifetime specifier");
                     }
                 }

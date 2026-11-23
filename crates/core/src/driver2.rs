@@ -1242,6 +1242,7 @@ impl Session2 {
         let mut deny_unused_alloc = false;
         let mut deny_trivial_casts = (false, false);
         let mut deny_unused_lifetimes = (false, false);
+        let mut deny_mismatched_lts = false;
         let mut deny_deprecated = false;
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
@@ -1290,6 +1291,7 @@ impl Session2 {
             };
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
+            deny_mismatched_lts = lint("mismatched_lifetime_syntaxes");
             deny_deprecated = lint("deprecated") || (levels.contains(&"warnings") && !c.contains("#![allow(deprecated"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
@@ -1342,6 +1344,22 @@ impl Session2 {
         // (unused_lifetimes: a lifetime parameter of a fn or an impl of the program's that nothing in it names;
         // single_use_lifetimes: one named once, in a parameter's type (or the impl's header), which eliding it would
         // say)
+        // (mismatched_lifetime_syntaxes: a lifetime of a signature's inputs its output writes another way. Denied for
+        // the crate, or for the items that deny it (`#[deny(mismatched_lifetime_syntaxes)] fn f`))
+        let marked_mls = !deny_mismatched_lts && src.contains("#[deny(mismatched_lifetime_syntaxes)]");
+        if deny_mismatched_lts || marked_mls {
+            let mut adts: crate::fxhash::FxMap<&str, usize> = Default::default();
+            for sm in &sums[..user_src] {
+                if let Some(r) = sm.adt_regions.as_deref().filter(|r| !r.lts.is_empty()) {
+                    for n in sm.structs.iter().map(|s| s.0.as_str()).chain(sm.enums.iter().map(|e| e.0.as_str())) {
+                        adts.insert(n.rsplit("::").next().unwrap_or(n), r.lts.len());
+                    }
+                }
+            }
+            if let Some(e) = first_mismatched_lifetime_syntax(&src, &items[..user_src], &adts, marked_mls) {
+                return Err(e);
+            }
+        }
         if deny_unused_lifetimes.0 || deny_unused_lifetimes.1 {
             if let Some(e) = first_unused_lifetime(&src, &items[..user_src], deny_unused_lifetimes) {
                 return Err(e);
@@ -2938,6 +2956,142 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
 
 /// `#![deny(unused_lifetimes)]` / `#![deny(single_use_lifetimes)]`: the first lifetime parameter of a fn or an impl
 /// named nowhere else in it / named once, as `line:col: message`
+/// How a signature writes a lifetime (mismatched_lifetime_syntaxes): left out of a path (`S` for `S<'a>`), elided
+/// (`&u8`, `'_`), or named (`'a`, `'static`)
+#[derive(Clone, Copy, PartialEq)]
+enum LtSyntax {
+    Hidden,
+    Elided,
+    Named,
+}
+
+/// The lifetimes t writes or leaves out: (the name if it is named, how). Not a `dyn` type's own lifetime, nor one
+/// inside a fn pointer's or an `Fn(..)` bound's types, which have their own
+fn lt_syntaxes(t: &crate::parse::Ty, adts: &crate::fxhash::FxMap<&str, usize>, out: &mut Vec<(Option<String>, LtSyntax)>, depth: u32) {
+    use crate::parse::{Bound, Ty as PTy};
+    fn named(l: &str, out: &mut Vec<(Option<String>, LtSyntax)>) {
+        out.push(if l == "'_" { (None, LtSyntax::Elided) } else { (Some(l.to_string()), LtSyntax::Named) });
+    }
+    fn path(p: &crate::parse::Path, adts: &crate::fxhash::FxMap<&str, usize>, out: &mut Vec<(Option<String>, LtSyntax)>, depth: u32) {
+        let Some(s) = p.segs.last() else { return };
+        if s.fn_args.is_some() {
+            return;
+        }
+        let mut written = 0;
+        for a in &s.args {
+            match a {
+                crate::parse::GArg::Lifetime(l) => {
+                    written += 1;
+                    named(l, out);
+                }
+                crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) => lt_syntaxes(t, adts, out, depth + 1),
+                _ => {}
+            }
+        }
+        if written == 0 && p.segs.len() == 1 {
+            if let Some(&n) = adts.get(s.name.as_str()) {
+                out.extend((0..n).map(|_| (None, LtSyntax::Hidden)));
+            }
+        }
+    }
+    if depth > 16 {
+        return;
+    }
+    match t {
+        PTy::Ref(l, _, i) => {
+            match l {
+                Some(l) => named(l, out),
+                None => out.push((None, LtSyntax::Elided)),
+            }
+            lt_syntaxes(i, adts, out, depth + 1);
+        }
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => lt_syntaxes(i, adts, out, depth + 1),
+        PTy::Tuple(ts) => ts.iter().for_each(|t| lt_syntaxes(t, adts, out, depth + 1)),
+        PTy::Path(None, p) => path(p, adts, out, depth),
+        PTy::Impl(bs) => {
+            for b in bs {
+                match b {
+                    Bound::Lifetime(l) => named(l, out),
+                    Bound::Trait(_, p) => path(p, adts, out, depth),
+                }
+            }
+        }
+        PTy::Dyn(bs) => {
+            for b in bs {
+                if let Bound::Trait(_, p) = b {
+                    path(p, adts, out, depth);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// mismatched_lifetime_syntaxes: the first fn whose output writes a lifetime of its inputs another way than they do:
+/// named in the inputs and elided or hidden in the output, or elided in one and hidden in the other (`&u8` to `S`).
+/// The output's elided lifetimes are the receiver's, else the inputs' only one. `line:1: msg` at the output's line
+/// (marked: only the items with a `#[deny(mismatched_lifetime_syntaxes)]` of their own)
+fn first_mismatched_lifetime_syntax(src: &str, items: &[SrcItem], adts: &crate::fxhash::FxMap<&str, usize>, marked: bool) -> Option<String> {
+    use crate::parse::{ItemKind, Ty as PTy};
+    for it in items {
+        let text = src.get(it.start..it.end).unwrap_or("");
+        if !text.contains("fn ") || !text.contains("->") || text.contains("#[cfg") || text.contains("allow(mismatched_lifetime_syntaxes") {
+            continue;
+        }
+        if marked && !text.contains("#[deny(mismatched_lifetime_syntaxes)]") {
+            continue;
+        }
+        let Ok(f) = crate::parse::parse_file(text) else { continue };
+        let Some(item) = f.items.first() else { continue };
+        let ItemKind::Fn(sig, _) = &item.kind else { continue };
+        let Some(ret) = &sig.ret else { continue };
+        let (mut k, mut ids, mut ins, mut recv) = (0usize, Vec::<String>::new(), Vec::<(String, LtSyntax)>::new(), None::<String>);
+        for (j, t) in sig.recv_ty.iter().chain(sig.params.iter().map(|p| &p.1)).enumerate() {
+            let mut v = vec![];
+            lt_syntaxes(t, adts, &mut v, 0);
+            for (n, c) in v {
+                let id = n.unwrap_or_else(|| {
+                    k += 1;
+                    format!("#{k}")
+                });
+                if j == 0 && sig.recv_ty.is_some() && recv.is_none() && matches!(t, PTy::Ref(..)) {
+                    recv = Some(id.clone());
+                }
+                if !ids.contains(&id) {
+                    ids.push(id.clone());
+                }
+                ins.push((id, c));
+            }
+        }
+        let target = recv.or_else(|| (ids.len() == 1).then(|| ids[0].clone()));
+        let mut v = vec![];
+        lt_syntaxes(ret, adts, &mut v, 0);
+        let outs: Vec<(String, LtSyntax)> = v.into_iter().filter_map(|(n, c)| Some((n.or_else(|| target.clone())?, c))).collect();
+        for id in &ids {
+            let ic: Vec<LtSyntax> = ins.iter().filter(|o| &o.0 == id).map(|o| o.1).collect();
+            let oc: Vec<LtSyntax> = outs.iter().filter(|o| &o.0 == id).map(|o| o.1).collect();
+            if oc.is_empty() {
+                continue;
+            }
+            let msg = if ic.contains(&LtSyntax::Named) {
+                match (oc.contains(&LtSyntax::Elided), oc.contains(&LtSyntax::Hidden)) {
+                    (true, true) => "hiding or eliding a lifetime that's named elsewhere is confusing",
+                    (true, false) => "eliding a lifetime that's named elsewhere is confusing",
+                    (false, true) => "hiding a lifetime that's named elsewhere is confusing",
+                    _ => continue,
+                }
+            } else if ic.iter().chain(&oc).any(|&c| c == LtSyntax::Hidden) && ic.iter().chain(&oc).any(|&c| c == LtSyntax::Elided) {
+                "hiding a lifetime that's elided elsewhere is confusing"
+            } else {
+                continue;
+            };
+            let at = text.find("->").map_or(0, |i| text[..i].matches('\n').count());
+            return Some(format!("{}:1: {msg}", it.line + at));
+        }
+    }
+    None
+}
+
 fn first_unused_lifetime(src: &str, items: &[SrcItem], (unused, single): (bool, bool)) -> Option<String> {
     use crate::parse::{GParam, ItemKind};
     // (the uses of l in t, as tokens: not `'a'` (a char) nor `'ab`)

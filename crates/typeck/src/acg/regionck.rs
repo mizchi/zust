@@ -178,8 +178,6 @@ pub struct RgSt {
     pub temps: HashMap<usize, Ty>,
     /// Where values are returned (a borrow that escapes there is reported there: E0515)
     pub ret_sps: Vec<Sp>,
-    /// Within a returned `if` / `match` (rg_ret): where it is, the span its branches' flows into the result take
-    pub ret_at: Option<Sp>,
     /// A closure's body: the locals that are its captures, the region its environment is borrowed for, the regions
     /// from outside
     pub cap_locs: Vec<Loc>,
@@ -2670,30 +2668,22 @@ impl Cx<'_> {
                 }
                 return;
             }
-            // (an `if`'s or a `match`'s branches flow into the result where the whole expression is: rustc's span
-            // of "lifetime may not live long enough" for them)
             Expr::If(_, b, els) => {
-                let at0 = self.rg.ret_at;
-                self.rg.ret_at = at0.or_else(|| Some(super::borrowck::pos(e)).filter(|s| s.line != 0));
                 if let Some(Stmt::Expr(t, false)) = b.stmts.last() {
                     self.rg_ret(t);
                 }
                 if let Some(x) = els {
                     self.rg_ret(x);
                 }
-                self.rg.ret_at = at0;
                 return;
             }
             Expr::Match(_, arms) => {
                 if let Some(&m2) = self.rg.alias.get(&(e as *const Expr as usize)) {
                     return self.rg_ret(m2);
                 }
-                let at0 = self.rg.ret_at;
-                self.rg.ret_at = at0.or_else(|| Some(super::borrowck::pos(e)).filter(|s| s.line != 0));
                 for a in arms {
                     self.rg_ret(&a.body);
                 }
-                self.rg.ret_at = at0;
                 return;
             }
             _ => {}
@@ -2706,8 +2696,7 @@ impl Cx<'_> {
         if sp.line != 0 && !rt.is_empty() {
             self.rg.ret_sps.push(sp);
         }
-        let at = self.rg.ret_at.unwrap_or(sp);
-        self.rg.flow(prog, et, t, &tr, &rt, at);
+        self.rg.flow(prog, et, t, &tr, &rt, sp);
     }
 
     /// A call of id (generic signature sig0, type arguments sol, instance's parameter types params) with these

@@ -2358,3 +2358,19 @@ fn part13_tail_and_ctor_temps() {
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("temporary value dropped while borrowed"), "{d:?}");
     assert_eq!(check("struct W(u32);\nfn f(x: &W) -> &W {\n    x\n}\nfn g(x: &Option<u32>) -> &Option<u32> {\n    x\n}\nfn main() {\n    let r = f(&W(3));\n    let o = g(&Some(4));\n    let v = 5;\n    let k = &Some(v);\n    println!(\"{} {:?} {:?}\", r.0, o, k);\n}\n"), vec![]);
 }
+
+/// `#![deny(mismatched_lifetime_syntaxes)]`: an output that writes an input's lifetime another way (`&'a u8` in,
+/// `&u8` out; `&u8` in, `S` out) is an error, at the item's line; the same syntax both ways is not. Denied on one
+/// item only, the others are not checked. `use<'_>` names the one input lifetime, not a missing one
+#[test]
+fn part13_mismatched_lifetime_syntaxes() {
+    let d = check("#![deny(mismatched_lifetime_syntaxes)]\nfn f<'a>(x: &'a u8) -> &u8 {\n    x\n}\nfn main() {\n    let v = 1;\n    let _ = f(&v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("eliding a lifetime that's named elsewhere is confusing"), "{d:?}");
+    let d = check("#![deny(mismatched_lifetime_syntaxes)]\nstruct S<'a>(&'a u8);\nfn g(x: &u8) -> S {\n    S(x)\n}\nfn main() {\n    let v = 1;\n    let _ = g(&v).0;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("hiding a lifetime that's elided elsewhere is confusing"), "{d:?}");
+    assert_eq!(check("#![deny(mismatched_lifetime_syntaxes)]\nstruct S<'a>(&'a u8);\nfn f<'a>(x: &'a u8) -> &'a u8 {\n    x\n}\nfn h(x: &u8) -> &u8 {\n    x\n}\nfn k(x: &u8) -> S<'_> {\n    S(x)\n}\nfn s<'a>(_x: &'a u8) -> &'static u8 {\n    &1\n}\nfn main() {\n    let v = 1;\n    let _ = (f(&v), h(&v), k(&v).0, s(&v));\n}\n"), vec![]);
+    let d = check("fn f<'a>(x: &'a u8) -> &u8 {\n    x\n}\n#[deny(mismatched_lifetime_syntaxes)]\nfn g<'a>(x: &'a u8) -> &u8 {\n    x\n}\nfn main() {\n    let v = 1;\n    let _ = (f(&v), g(&v));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("eliding a lifetime that's named elsewhere is confusing"), "{d:?}");
+    assert_eq!(check("fn f<'a>(x: &'a u8) -> &u8 {\n    x\n}\nfn main() {\n    let v = 1;\n    let _ = f(&v);\n}\n"), vec![]);
+    assert_eq!(check("fn e<'a>(v: &'a u8) -> impl FnOnce() + use<'_> {\n    move || {\n        let _ = v;\n    }\n}\nfn main() {\n    let x = 1;\n    e(&x)();\n}\n"), vec![]);
+}
