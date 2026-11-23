@@ -208,6 +208,8 @@ pub struct Bk {
     /// The call being lowered takes its `&mut self` once its arguments are evaluated (activate): what the arguments
     /// borrow, shared loans too, is held until then (`s.take(s.get())`: E0502)
     pub hold_args: bool,
+    /// The parameters of the call being lowered whose arguments a `&self` receiver stores (shared_recv_stores)
+    pub store_args: Vec<usize>,
     /// The `index_mut` call acg makes to read an indexed place (its receiver is seen as shared)
     pub shared_recv: usize,
     /// Binding the pattern of an arm with a guard: a binding by value does not move until the guard holds (the next
@@ -278,6 +280,17 @@ pub struct Bk {
     /// Loans the region check found must outlive the function (a reborrow through a parameter flowing into a
     /// universal region): live from where each is made to the end (sorted)
     pub forever: Vec<u32>,
+    /// Hidden locals that hold a value copied out of what a local points to (`*r` of `r: &&String`, bk_copy_out_of),
+    /// with the copied type: they hold what r holds, with each loan of a place that holds such values replaced by
+    /// what that place's local holds (copy_masks, made by bk_check)
+    pub copy_out: Vec<(u32, Ty)>,
+    /// What the items of each `for` loop being lowered hold (the loan of v for `for x in &v` / `v.iter()`): the
+    /// bindings of an item that holds references hold it
+    pub for_items: Vec<Vec<Src>>,
+    /// For each of copy_out's locals, its mask in masks: whether each loan is of a place that holds the copied type
+    pub copy_masks: HashMap<u32, usize>,
+    /// copy_masks' masks, one for each copied type
+    pub masks: Vec<Vec<bool>>,
     /// The loans of each closure's captures by reference, by the closure's address
     pub cap_loans: HashMap<usize, Vec<u32>>,
     /// The locals a closure holds by value that hold loans, by the closure's address: the closure holds what they do
@@ -489,6 +502,52 @@ pub(crate) fn mentions(e: &Expr, n: &str) -> bool {
     found
 }
 
+/// The addresses of marks lists that are in orig, for the same nodes of copy, a clone of orig the lowering made
+pub fn copy_marks(orig: &Expr, copy: &Expr, marks: &mut Vec<usize>, depth: u32) {
+    if depth > 32 {
+        return;
+    }
+    if marks.contains(&(orig as *const Expr as usize)) {
+        marks.push(copy as *const Expr as usize);
+    }
+    let (mut a, mut b): (Vec<*const Expr>, Vec<*const Expr>) = (vec![], vec![]);
+    crate::ast_closure::each_child_pub(orig, &mut |c| a.push(c as *const Expr));
+    crate::ast_closure::each_child_pub(copy, &mut |c| b.push(c as *const Expr));
+    if a.len() == b.len() {
+        for (x, y) in a.into_iter().zip(b) {
+            // SAFETY: the children of orig and copy, which outlive this call
+            copy_marks(unsafe { &*x }, unsafe { &*y }, marks, depth + 1);
+        }
+    }
+}
+
+/// `let x = &*R.m();` / `&R.m().f` with R a temporary a call makes: the `let` extends what `&` borrows (the call's
+/// result), not R, the receiver it is made from, which goes away at the end of the statement (E0716 when the result
+/// borrows it: `&mut *RefCell::new(1).borrow_mut()`, `&*String::from("b").as_str()`). Its address, for direct
+pub fn direct_ref_recv(prog: &Program, a: &Expr, out: &mut Vec<usize>) {
+    fn strip(mut e: &Expr) -> &Expr {
+        while let Expr::Paren(p) = e {
+            e = p;
+        }
+        e
+    }
+    let Expr::Ref(_, x) = strip(a) else { return };
+    let mut y = strip(x);
+    loop {
+        match y {
+            Expr::Field(b, ..) | Expr::Index(b, ..) => y = strip(b),
+            Expr::Unary(op, b, _) if op == "*" => y = strip(b),
+            Expr::MethodCall(r, ..) => {
+                if made_temp(prog, r) {
+                    out.push(&**r as *const Expr as usize);
+                }
+                return;
+            }
+            _ => return,
+        }
+    }
+}
+
 /// `&e` with e a temporary that is never promoted to a static: the result of a call of a fn (not a struct's or
 /// variant's constructor), of a method, of `vec!` / `format!` (its addresses, for direct_temps)
 pub fn direct_ref(prog: &Program, a: &Expr, out: &mut Vec<usize>) {
@@ -649,7 +708,7 @@ fn variant_fields<'p>(prog: &'p Program, sid: u32, path: &crate::parse::Path) ->
 
 /// The prelude's iterator and view types: raw pointers into what they were made from, so they hold the loan of it
 const VIEWS: &[&str] = &[
-    "Windows", "Chunks", "ChunksExact", "Iter", "IterMut", "Chars", "DebugStruct", "DebugTuple", "DebugMap", "MutexGuard", "Ref", "RefMut", "HmIter",
+    "Windows", "Chunks", "ChunksExact", "Iter", "IterMut", "Chars", "DebugStruct", "DebugTuple", "DebugMap", "MutexGuard", "Ref", "RefMut", "PeekMut", "HmIter",
     "HmIterMut", "BtIter", "BtIterMut", "DqIter", "Split", "SplitStr", "MatchIndices", "RSplitStr", "CharIndices", "Bytes", "SplitFn",
 ];
 
@@ -660,7 +719,8 @@ pub fn is_view(prog: &Program, sid: u32) -> bool {
 
 /// Whether a value of type t may hold a reference (and so a loan)
 pub fn has_refs(prog: &Program, t: Ty, _depth: u32) -> bool {
-    fn go(prog: &Program, t: Ty, seen: &mut Vec<u32>, memo: &mut HashMap<u32, bool>) -> bool {
+    // (the structs already answered: a few, so a list)
+    fn go(prog: &Program, t: Ty, seen: &mut Vec<u32>, memo: &mut Vec<(u32, bool)>) -> bool {
         match t {
             Ty::Ref(..) => true,
             Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => go(prog, *i, seen, memo),
@@ -670,7 +730,7 @@ pub fn has_refs(prog: &Program, t: Ty, _depth: u32) -> bool {
                 if seen.contains(&sid) {
                     return false;
                 }
-                if let Some(&r) = memo.get(&sid) {
+                if let Some(&(_, r)) = memo.iter().find(|m| m.0 == sid) {
                     return r;
                 }
                 if seen.len() > 64 {
@@ -690,13 +750,13 @@ pub fn has_refs(prog: &Program, t: Ty, _depth: u32) -> bool {
                     || sd.variants.iter().any(|v| v.fields.iter().any(|f| go(prog, f.1, seen, memo)))
                     || sd.args.iter().any(|&a| go(prog, a, seen, memo));
                 seen.pop();
-                memo.insert(sid, r);
+                memo.push((sid, r));
                 r
             }
             _ => false,
         }
     }
-    go(prog, t, &mut vec![], &mut HashMap::default())
+    go(prog, t, &mut vec![], &mut vec![])
 }
 
 fn at(lb: u32, sp: Sp) -> String {
@@ -1500,6 +1560,19 @@ impl Bk {
                 }
                 Ev::Def(l, srcs) | Ev::Flow(l, srcs) => {
                     let mut ls = self.resolve(srcs, st);
+                    // (a value copied out of what a reference points to: not the loan of the place it was read from,
+                    // what that place holds)
+                    if let Some(mask) = self.copy_masks.get(l).map(|&i| &self.masks[i]) {
+                        let mut out = Vec::with_capacity(ls.len());
+                        for ln in ls {
+                            if mask.get(ln as usize).copied().unwrap_or(false) {
+                                out.extend_from_slice(st.held(self.loans[ln as usize].place.local));
+                            } else {
+                                out.push(ln);
+                            }
+                        }
+                        ls = out;
+                    }
                     if let Ev::Flow(..) = e {
                         ls.extend_from_slice(st.held(*l));
                     } else {
@@ -1997,9 +2070,25 @@ impl Cx<'_> {
         }
         // (a temporary bound by `ref` (`match f() { Some(ref m) => .. }`): borrowed, it goes away at the end of the
         // statement)
-        if self.bk.level >= 2 && !in_let && !super::is_place_expr(e) && pats.iter().any(|p| pat_binds_ref(p)) {
+        let mut own_loan = None;
+        // (not a constant (`match Some(1) { Some(ref x) => .. }`), promoted to a static as `&Some(1)` is, unless
+        // bound `ref mut`. A value that holds references is the temporary's (Def after the frame): a binding's `*x`
+        // copies them out (`Some(ref s)` of an `Option<&String>`, `out.push(*s)`, bk_copy_out_of))
+        let mut temp_holds = None;
+        let scrut_t = match &r {
+            Ok(Some(p)) => Some(p.ty()),
+            _ => None,
+        };
+        if self.bk.level >= 2 && !in_let && !super::is_place_expr(e) && pats.iter().any(|p| pat_binds_ref(p)) && (pats.iter().any(|p| pat_binds_ref_mut(p)) || made_temp(self.prog, e)) {
             let id = self.bk.locals.len() as u32;
-            self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP, via_ref: false });
+            let (ty, refs) = match scrut_t {
+                Some(t) => (t, self.bk_ty(t).1),
+                None => (Ty::Unit, false),
+            };
+            self.bk.locals.push(Local { name: TEMP.to_string(), ty, copy: true, refs, mutable: Some(true), decl: super::SP, via_ref: false });
+            if refs {
+                temp_holds = Some(id);
+            }
             self.bk_ev(Ev::Bind(id, true));
             let sp = err_pos(e);
             let ln = self.bk.loans.len() as u32;
@@ -2008,6 +2097,7 @@ impl Cx<'_> {
             self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Borrow(ln), sp));
             self.bk.src(Src::Loan(ln));
             self.bk.stmt_temps.push(id);
+            own_loan = Some(ln);
         }
         // (`let ref mut x = 5;` / `let ref x = f();`: a temporary the `let` extends, which goes away with the block's
         // locals (returning x is E0515). Not a constant one, as `let x = &5;` (`let ref x = 5;`))
@@ -2026,6 +2116,34 @@ impl Cx<'_> {
             }
         }
         let srcs = self.bk_frame_end();
+        // (the temporary its `ref` bindings borrow holds what the value holds, but its own loan)
+        if let Some(id) = temp_holds {
+            let held: Vec<Src> = srcs.iter().copied().filter(|s| !matches!((s, own_loan), (Src::Loan(l), Some(o)) if *l == o)).collect();
+            if !held.is_empty() {
+                self.bk_ev(Ev::Def(id, held));
+            }
+        }
+        // (a scrutinee value whose drop may use what it borrows (`match heap.peek_mut() { Some(_) => .. }`, a guard
+        // of the prelude in it): a temporary of the statement, dropped at its end, so its loans live through the
+        // arms; also when an arm moves a part out (`Some(t)`), as the drop is then of what may be left. Not when a
+        // pattern takes the whole value (`x`, `x @ ..`))
+        let whole = |q: &Pat| matches!(q, Pat::Ident(false, _, n, _) if n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_");
+        if self.bk.level >= 2 && !in_let && self.user_code && !super::is_place_expr(e) && !srcs.is_empty() && !pats.iter().any(|q| whole(q)) {
+            if let Ok(Some(p)) = &r {
+                let t = p.ty();
+                if self.dropck(t, 0) {
+                    let id = self.bk.locals.len() as u32;
+                    self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP, via_ref: false });
+                    self.bk_ev(Ev::Bind(id, true));
+                    // (not the loan of the scrutinee's own storage its `ref` bindings take: its drop does not use
+                    // that (`(Struct(1), 1)` matched by `(l, ref s) if g`))
+                    let held: Vec<Src> = srcs.iter().copied().filter(|s| !matches!((s, own_loan), (Src::Loan(l), Some(o)) if *l == o)).collect();
+                    self.bk_ev(Ev::Def(id, held));
+                    self.bk.stmt_temps.push(id);
+                    self.bk.drop_temps.push(id);
+                }
+            }
+        }
         self.bk.scrut = srcs;
         // (a pattern that writes `'static` (`Foo::Bar::<'static> { .. }`): checked from here on)
         if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && pats.iter().any(|p| pat_any(p, &|q| matches!(q, Pat::TupleStruct(pp, _) | Pat::Struct(pp, _, _) if crate::regions::path_names_lt(pp)))) {
@@ -2125,6 +2243,10 @@ impl Cx<'_> {
 
     /// (Copy, may hold references), cached
     pub(crate) fn bk_ty(&mut self, t: Ty) -> (bool, bool) {
+        // (a number, a bool, a char: Copy, no reference, not worth a lookup)
+        if t.is_int() || matches!(t, Ty::Bool | Ty::Char | Ty::F32 | Ty::F64 | Ty::Unit) {
+            return (true, false);
+        }
         if let Some(&r) = self.bk.ty_info.get(&t) {
             return r;
         }
@@ -2198,7 +2320,7 @@ impl Cx<'_> {
                 let prelude = prog.struct_item.get(base as usize).is_some_and(|&i| i >= prog.prelude_from);
                 // (a guard of the prelude (`c.borrow()`'s `Ref`, a `MutexGuard`): its `Drop` releases what it borrows, so
                 // that must still be there, as std's guards (no `#[may_dangle]`))
-                if prelude && matches!(prog.structs[base as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard") {
+                if prelude && matches!(prog.structs[base as usize].name.as_str(), "Ref" | "RefMut" | "PeekMut" | "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard") {
                     return true;
                 }
                 if prelude || prog.closure_of_struct.contains_key(&base) {
@@ -2386,13 +2508,25 @@ impl Cx<'_> {
         self.bk.loan_of.insert(e as *const Expr as usize, ln);
         self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false, capture: false });
         let l = p.local;
+        // (`&**s` with `s: &&T`: a reborrow through the shared reference s points to, which may be copied out first:
+        // what that holds, not the loan s is (bk_copy_out_of))
+        let through_shared = match (self.bk.locals[l as usize].ty, p.proj.first(), p.proj.get(1)) {
+            (Ty::Ref(_, u @ Ty::Ref(false, _)), Some(Proj::Deref(_) | Proj::Shr), Some(Proj::Deref(_) | Proj::Shr)) if self.bk.level >= 2 => Some(*u),
+            _ => None,
+        };
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
         if !quiet {
             self.bk.src(Src::Loan(ln));
         }
         // (reborrowing through a reference also carries the loans the reference holds)
         if self.bk.locals[l as usize].refs {
-            self.bk.src(Src::Local(l));
+            match through_shared {
+                Some(u) => {
+                    let c = self.bk_copy_out_of(l, u);
+                    self.bk.src(Src::Local(c));
+                }
+                None => self.bk.src(Src::Local(l)),
+            }
         }
     }
 
@@ -2425,6 +2559,18 @@ impl Cx<'_> {
         self.bk.loans.push(Loan { place: p.clone(), mutable: true, sp, at: sp, quiet: false, capture: false });
         self.bk.implicit.push(ln);
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+    }
+
+    /// A hidden local that holds a `U` copied out of what the local x points to (`*r` with `r: &U`): what x holds, with
+    /// each loan of a place that holds U values replaced by what that place's local holds (copy_masks). `let r = &a;
+    /// let t = *r;` holds what a holds, not a's loan
+    pub(crate) fn bk_copy_out_of(&mut self, x: u32, u: Ty) -> u32 {
+        let id = self.bk.locals.len() as u32;
+        self.bk.locals.push(Local { name: "<copy>".into(), ty: u, copy: true, refs: true, mutable: None, decl: super::SP, via_ref: false });
+        self.bk_ev(Ev::Bind(id, true));
+        self.bk_ev(Ev::Def(id, vec![Src::Local(x)]));
+        self.bk.copy_out.push((id, u));
+        id
     }
 
     /// `*x` of a value x: `&U` with U a `Copy` type holding references, copied out (srcs: what x holds). A loan of a
@@ -2664,6 +2810,68 @@ impl Cx<'_> {
         }
     }
 
+    /// Before a `for` loop's pattern is bound to an item: when it binds by `ref` (`for ref x in 0..3`), the item is a
+    /// temporary of the iteration its `ref` bindings borrow (E0716 when such a borrow is used after the iteration).
+    /// Returns what to restore (bk_for_item_end)
+    pub(crate) fn bk_for_item_begin(&mut self, f: &Expr, t: Ty) -> Option<(Option<u32>, Option<Vec<Src>>, Option<BPlace>, Option<(BPlace, Sp)>)> {
+        let Expr::For(_, fpat, it, _) = f else { return None };
+        if !self.bk_on() || self.bk.level < 2 || !pat_binds_ref(fpat) {
+            return None;
+        }
+        // (an item that holds references holds what the loop's items do (bk_for_item_srcs): a binding's `*x` copies
+        // that out (bk_copy_out_of))
+        let refs = self.bk_ty(t).1;
+        let id = self.bk.locals.len() as u32;
+        self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: true, refs, mutable: Some(true), decl: super::SP, via_ref: false });
+        self.bk_ev(Ev::Bind(id, true));
+        if let (true, Some(srcs)) = (refs, self.bk.bind_srcs.clone().filter(|s| !s.is_empty())) {
+            self.bk_ev(Ev::Def(id, srcs));
+        }
+        let place = BPlace { local: id, proj: vec![] };
+        // (an array literal has no position of its own: its first element's)
+        let at = |e: &Expr| Some(err_pos(e)).filter(|s| s.line != 0).unwrap_or_else(|| super::expr_start(e));
+        let sp = match (at(it), strip_paren(it)) {
+            (s, Expr::Array(xs)) if s.line == 0 && !xs.is_empty() => at(&xs[0]),
+            (s, _) => s,
+        };
+        let saved = (Some(id), self.bk.bind_srcs.clone(), self.bk.pat_path.replace(place.clone()), self.bk.scrut_place.replace((place, sp)));
+        Some(saved)
+    }
+
+    /// Before a `for` loop's pattern is bound to an item of type t: when t holds references, its bindings hold what the
+    /// loop's items do (Bk::for_items). Returns the bind_srcs to restore
+    pub(crate) fn bk_for_item_srcs(&mut self, t: Ty) -> Option<Vec<Src>> {
+        let saved = self.bk.bind_srcs.clone();
+        if self.bk_on() && self.bk_ty(t).1 {
+            if let Some(it) = self.bk.for_items.last().filter(|it| !it.is_empty()).cloned() {
+                self.bk.bind_srcs = Some(it);
+            }
+        }
+        saved
+    }
+
+    /// After the pattern is bound (bk_for_item_begin): the item's temporary, to end with the iteration
+    pub(crate) fn bk_for_item_end(&mut self, saved: Option<(Option<u32>, Option<Vec<Src>>, Option<BPlace>, Option<(BPlace, Sp)>)>) -> Option<u32> {
+        let (id, srcs, path, scrut) = saved?;
+        self.bk.bind_srcs = srcs;
+        self.bk.pat_path = path;
+        self.bk.scrut_place = scrut;
+        // (gone with the body's scope: at the end of the iteration, and on a `break` / `continue` out of it
+        // (bk_dead_scope, bk_dead_exit))
+        if let Some(id) = id {
+            self.bk.scope_temps.push((self.scopes.len().saturating_sub(1), id));
+        }
+        id
+    }
+
+    /// The end of a loop's iteration: the temporaries of the statement made since mark (a `while let` scrutinee's that
+    /// its `ref` bindings borrow, the body's tail's) go away, as a loop's body is a terminating scope (E0716 for
+    /// `while let Some(ref x) = it.next() { v.push(x); }` when v is used after). They are left out of what ends at
+    /// the enclosing statement
+    pub(crate) fn bk_iteration_end(&mut self, mark: usize) {
+        self.bk_temps_end(mark);
+    }
+
     /// The temporaries of a block's tail that a method is called on (`D(&_t1).end()`) live until the end of the
     /// enclosing statement, after the block's locals (edition 2021). One whose `Drop` may see what it borrows uses
     /// its loans when it is dropped there: a loan of one of the block's locals is then E0597 at the local
@@ -2816,14 +3024,15 @@ impl Cx<'_> {
     pub(crate) fn bk_ret_from(&self, id: u32, i: usize) -> bool {
         let sig = &self.prog.sigs[id as usize];
         // (a method of a prelude view (`chunks.remainder()`): the result borrows what the view borrows, which the view's
-        // local passes on, not the view. Not a RefCell guard's `deref` / `deref_mut`: `&mut *g` and `&g[0]` borrow the
-        // guard g, which must outlive them. A MutexGuard is left out: here `if let Some(&r) = guard.get(&k) { return r }`
+        // local passes on, not the view. Not a RefCell guard's or a `PeekMut`'s `deref` / `deref_mut`: `&mut *g` and
+        // `&g[0]` borrow the guard g, which must outlive them (a `PeekMut` dropped while what `deref_mut` gave is
+        // written, the heap left out of order, E0505). A MutexGuard is left out: here `if let Some(&r) = guard.get(&k) { return r }`
         // (tests/probe/modules_intern.rs) would count r, a `&'static` copied out, as a borrow of the guard, as the
         // prelude has no lifetimes to tell; and `&g[0]` through it borrows the guard already
         // (tests/security/borrow_mutex_guard_deref_outlives.rs))
         if i == 0 && sig.has_self {
             if let Some(Ty::Ref(_, Ty::Struct(v))) = sig.params.first() {
-                let guard = matches!(self.prog.structs[self.prog.base_of(*v) as usize].name.as_str(), "Ref" | "RefMut");
+                let guard = matches!(self.prog.structs[self.prog.base_of(*v) as usize].name.as_str(), "Ref" | "RefMut" | "PeekMut");
                 if is_view(self.prog, *v) && !guard {
                     return false;
                 }
@@ -3987,6 +4196,23 @@ impl Cx<'_> {
         }
         let mut bk = std::mem::take(&mut self.bk);
         bk.edges = self.b.cfg_edges();
+        // (one mask for each copied type: it depends on the type and the loans only)
+        let mut by_ty: Vec<Ty> = Vec::new();
+        for &(c, u) in &bk.copy_out {
+            let i = match by_ty.iter().position(|&t| t == u) {
+                Some(i) => i,
+                None => {
+                    let m: Vec<bool> = bk.loans.iter().map(|lo| {
+                        let t = bk.locals.get(lo.place.local as usize).map(|l| l.ty);
+                        t.and_then(|t| self.place_ty(t, &lo.place.proj)).is_some_and(|t| self.ty_holds(t, u, 0))
+                    }).collect();
+                    by_ty.push(u);
+                    bk.masks.push(m);
+                    bk.masks.len() - 1
+                }
+            };
+            bk.copy_masks.insert(c, i);
+        }
         // (the reborrows the region check found must outlive the function)
         if self.rg.on && !self.rg.rerun && self.rg.closure.is_none() {
             let loan = |p: usize| bk.loan_of.get(&p).or_else(|| bk.recv_loans.get(&p)).copied();
