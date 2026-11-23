@@ -2444,6 +2444,7 @@ check-pass	error-codes/E0429.rs
 compile-fail	error-codes/E0430.rs
 compile-fail	error-codes/E0432.rs
 compile-fail	error-codes/E0433.rs
+compile-fail	error-codes/E0434.rs
 compile-fail	error-codes/E0435.rs
 compile-fail	error-codes/E0449.rs
 compile-fail	error-codes/E0478.rs
@@ -6143,6 +6144,9 @@ compile-fail	repr/repr-transparent-other-items.rs
 compile-fail	repr/repr.rs
 compile-fail	resolve/112590-2.rs
 compile-fail	resolve/associated-fn-called-as-fn.rs
+compile-fail	resolve/bad-env-capture.rs
+compile-fail	resolve/bad-env-capture2.rs
+compile-fail	resolve/bad-env-capture3.rs
 compile-fail	resolve/bad-expr-path.rs
 compile-fail	resolve/bad-expr-path2.rs
 compile-fail	resolve/bad-module.rs
@@ -6153,6 +6157,7 @@ check-pass	resolve/block-with-trait-parent.rs
 compile-fail	resolve/builtin-attribute-not-value.rs
 compile-fail	resolve/cannot-find-value-in-scope-22811.rs
 compile-fail	resolve/change-ty-to-const-param-sugg-0.rs
+compile-fail	resolve/closure-suggestion-in-impl.rs
 run-pass	resolve/const-iter-no-conflict-for-loop.rs
 compile-fail	resolve/const-with-typo-in-pattern-binding.rs
 compile-fail	resolve/crate-called-as-function.rs
@@ -6168,11 +6173,14 @@ compile-fail	resolve/explicit-self-lowercase-param.rs
 check-pass	resolve/extern-crate-lint-issue-141785.rs
 compile-fail	resolve/field-and-method-in-self-not-available-in-assoc-fn.rs
 compile-fail	resolve/filter-intrinsics.rs
+compile-fail	resolve/fn-item-cant-capture-dynamic-env.rs
 compile-fail	resolve/function-module-ambiguity-error-71406.rs
 check-pass	resolve/generic-struct-and-fn-share-name.rs
 check-pass	resolve/hidden_glob_reexports.rs
 compile-fail	resolve/ice-inconsistent-resolution-with-import-separators-issue-147208.rs
+compile-fail	resolve/impl-method-cant-capture-env.rs
 compile-fail	resolve/impl-on-non-type.rs
+compile-fail	resolve/impl-trait-for-type-cant-capture-env.rs
 compile-fail	resolve/impl-trait-for-undeclared-type.rs
 compile-fail	resolve/import-suggestion-duplicated-importing-same-item.rs
 compile-fail	resolve/incorrect-self-res.rs
@@ -6211,6 +6219,7 @@ compile-fail	resolve/issue-54379.rs
 check-pass	resolve/issue-57523.rs
 compile-fail	resolve/issue-5927.rs
 compile-fail	resolve/issue-60057.rs
+compile-fail	resolve/issue-6642.rs
 compile-fail	resolve/issue-6702.rs
 compile-fail	resolve/issue-69401-trait-fn-no-body-ty-local.rs
 compile-fail	resolve/issue-70736-async-fn-no-body-def-collector.rs
@@ -6276,6 +6285,7 @@ compile-fail	resolve/suggestions/suggest-path-instead-of-mod-dot-item.rs
 compile-fail	resolve/suggestions/suggest-vec-not-slice.rs
 compile-fail	resolve/token-error-correct-2.rs
 compile-fail	resolve/tool-import.rs
+compile-fail	resolve/trait-impl-cant-capture-env.rs
 compile-fail	resolve/tuple-struct-alias.rs
 compile-fail	resolve/typo-suggestion-for-variable-with-name-similar-to-struct-field.rs
 compile-fail	resolve/typo-suggestion-mistyped-in-path.rs
