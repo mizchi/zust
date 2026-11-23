@@ -2646,14 +2646,34 @@ fn guard_closure_move(e: &Expr, names: &[String], by: crate::ast_closure::MovesB
 }
 
 /// How rustc names a place through a raw pointer: `*x`, and `x.a` for `(*x).a`
-fn raw_place_text(e: &Expr) -> String {
+pub(crate) fn raw_place_text(e: &Expr) -> String {
     fn go(e: &Expr, top: bool) -> String {
         match strip_paren(e) {
             Expr::Path(_, p) => p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::"),
             Expr::Field(b, f, _) => format!("{}.{f}", go(b, false)),
+            Expr::Index(b, _, _) => format!("{}[_]", go(b, false)),
             Expr::Unary(op, b, _) if op == "*" => if top { format!("*{}", go(b, false)) } else { go(b, false) },
             _ => "..".into(),
         }
     }
     go(e, true)
+}
+
+impl Cx<'_> {
+    /// e is a place written through a `*const` pointer (`*p`, `(*p).x`, `(*p)[0]`): E0594's text
+    pub(crate) fn const_ptr_write(&self, e: &Expr) -> Option<String> {
+        let mut cur = strip_paren(e);
+        loop {
+            cur = match cur {
+                Expr::Field(b, ..) | Expr::Index(b, ..) => strip_paren(b),
+                Expr::Unary(op, b, _) if op == "*" => {
+                    if matches!(self.peek(b), Some(Ty::Ptr(false, _))) {
+                        return Some(format!("cannot assign to `{}`, which is behind a `*const` pointer (E0594)", raw_place_text(e)));
+                    }
+                    strip_paren(b)
+                }
+                _ => return None,
+            };
+        }
+    }
 }

@@ -2982,3 +2982,16 @@ fn part16_raw_pointer_moves() {
     assert_eq!(check("unsafe fn foo(x: *const (i32, i32)) -> i32 {\n    let (a, b) = *x;\n    a + b\n}\nfn main() {}\n"), vec![]);
     assert_eq!(check("unsafe fn foo(x: *const (i32, String)) -> usize {\n    let (a, ref s) = *x;\n    a as usize + s.len()\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A write through a `*const` pointer (`*ptr = 3`, `(*p).a[1] += 1`) is E0594, as rustc's "behind a `*const`
+/// pointer" (borrowck/no-invalid-mut-suggestion-for-raw-pointer-issue-127562.rs); through a `*mut` one, or of a
+/// `*const` value itself, it is fine
+#[test]
+fn part16_const_pointer_writes() {
+    let d = check("fn main() {\n    let val = 2;\n    let ptr = &raw const val;\n    unsafe { *ptr = 3; }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("behind a `*const` pointer"), "{d:?}");
+    let d = check("struct P { x: i32, a: [i32; 2] }\nunsafe fn f(p: *const P, q: *mut P) {\n    (*q).x = 1;\n    (*q).a[0] += 1;\n    (*p).a[1] += 1;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("behind a `*const` pointer"), "{d:?}");
+    assert_eq!(check("unsafe fn f(p: *const i32) -> i32 {\n    let mut v = *p;\n    v += 1;\n    v\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("unsafe fn f(p: *mut *const i32, q: *const i32) {\n    *p = q;\n}\nfn main() {}\n"), vec![]);
+}

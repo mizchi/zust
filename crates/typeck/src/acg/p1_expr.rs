@@ -1092,6 +1092,9 @@ impl Cx<'_> {
                 if let Some(m) = self.prog.any_immutable_static.then(|| self.immutable_static(left)).flatten() {
                     return err(expr_start(left), m);
                 }
+                if let Some(m) = self.const_ptr_write(left).filter(|_| self.bk.level >= 1) {
+                    return err(expr_start(left), m);
+                }
                 // (an overloaded `+=` is a call of `add_assign(&mut self, ..)`: no access of its own)
                 let builtin = !matches!(self.peek(left), Some(Ty::Struct(_) | Ty::Ref(_, Ty::Struct(_))));
                 let r = self.binary(e, expected)?;
@@ -1102,6 +1105,9 @@ impl Cx<'_> {
             }
             Expr::Assign(left, right) => {
                 if let Some(m) = self.prog.any_immutable_static.then(|| self.immutable_static(left)).flatten() {
+                    return err(expr_start(left), m);
+                }
+                if let Some(m) = self.const_ptr_write(left).filter(|_| self.bk.level >= 1) {
                     return err(expr_start(left), m);
                 }
                 // (`map[&k] = v`: a map's index is not a place to assign to (E0594); `insert` or `get_mut`)
