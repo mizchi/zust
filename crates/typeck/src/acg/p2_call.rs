@@ -92,6 +92,13 @@ impl Cx<'_> {
         r
     }
 
+    /// An impl's method i is for t: its impl's self type (its parameters solved) is t (`impl A for W<u8>`'s is not
+    /// W<u16>'s); one without a self type is
+    pub(crate) fn self_fits(&self, i: u32, t: Ty) -> bool {
+        let sg = &self.prog.sigs[i as usize];
+        sg.self_ty.is_none_or(|st| self.prog.match_ty(st, t, &mut vec![None; sg.generics.len().max(1)]))
+    }
+
     /// rustc's method lookup of `x.name()`, x of type t, among the methods two traits of the program's give t's type
     /// (an impl's method of each, or a default of a trait t implements): `Err(())` when two traits' are at the first
     /// receiver candidate any method takes (E0034), `Ok(Some((trait, k)))` when one trait's is there, at candidate k
@@ -169,12 +176,16 @@ impl Cx<'_> {
             }) else {
                 continue;
             };
-            // (a blanket impl counts only without bounds: `impl<T: Display> A for T` may not cover t)
-            if !(self.prog.implements_concrete(base, tr) || self.prog.unbounded_blankets.contains(tr)) {
+            // (a blanket impl counts only without bounds: `impl<T: Display> A for T` may not cover t. An impl for t's
+            // struct counts when it is for t's instance: `impl A for W<u8>` is not W<u16>'s)
+            let concrete = self.prog.implements_concrete(base, tr) && self.prog.impl_applies(base, tr);
+            if !(concrete || self.prog.unbounded_blankets.contains(tr)) {
                 continue;
             }
             let sg = &self.prog.sigs[d as usize];
-            if let Some(i) = sg.params.first().and_then(|&p| at(p, Some(base), sg.generics.len())) {
+            // (a blanket impl's Self is what each candidate makes it: `A::foo(self)` of `impl<T> A for T` takes `&S` by
+            // value on `(&S).foo()`)
+            if let Some(i) = sg.params.first().and_then(|&p| at(p, concrete.then_some(base), sg.generics.len())) {
                 add(&mut st, i, Some(tr));
             }
         }
@@ -226,7 +237,7 @@ impl Cx<'_> {
                     Err(()) => return err(SP, "multiple applicable items in scope (E0034)"),
                     // (the one trait's at the first candidate: `Shared::bar(&m)`, not the other trait's `bar(&mut
                     // self)` the lookup below would find)
-                    Ok(Some((tr, k))) if gargs.is_empty() => {
+                    Ok(Some((tr, k))) => {
                         let mut a = paren(recv.as_ref().clone());
                         for _ in 0..k / 3 {
                             a = paren(Expr::Unary("*".to_string(), Box::new(a), msp));
@@ -235,7 +246,14 @@ impl Cx<'_> {
                             0 => a,
                             r => Expr::Ref(r == 2, Box::new(a)),
                         };
-                        let c = Expr::Call(Box::new(path_expr(&format!("{tr}::{method}"))), std::iter::once(a).chain(margs.iter().cloned()).collect());
+                        // (`s.foo::<u8>()`: `Tr::foo::<u8>(..)`, the method's own arguments on its segment)
+                        let f = if gargs.is_empty() {
+                            path_expr(&format!("{tr}::{method}"))
+                        } else {
+                            let seg = |n: &str, args: Vec<GArg>| crate::parse::Seg { name: n.to_string(), args, fn_args: None, text: n.to_string() };
+                            Expr::Path(None, crate::parse::Path { global: false, segs: vec![seg(tr, vec![]), seg(method, gargs.clone())], pos: Default::default() })
+                        };
+                        let c = Expr::Call(Box::new(f), std::iter::once(a).chain(margs.iter().cloned()).collect());
                         let ne: &Expr = self.keep_expr(c);
                         return self.expr(ne, expected);
                     }
@@ -1001,7 +1019,7 @@ impl Cx<'_> {
             // inherent `baz` or another trait's)
             if let Some((_, tr)) = self.explicit_trait.as_ref().filter(|(m, _)| *m == name) {
                 let key = format!("{}::{name}", self.prog.structs[self.prog.base_of(sid) as usize].name);
-                if self.trait_candidate(&key, tr).is_none() {
+                if self.trait_candidate_where(&key, tr, |i| self.self_fits(i, Ty::Struct(sid))).is_none() {
                     let user = |d: u32| self.prog.item_of.get(d as usize).copied().flatten().is_some_and(|x| x < self.prog.prelude_from);
                     if let Some(d) = self.trait_default(tr, &name, Ty::Struct(sid)).filter(|&d| user(d)) {
                         break (a, o, sid, d);
@@ -1848,14 +1866,15 @@ impl Cx<'_> {
             let imp = match args[0] {
                 // (the impl of the trait the call named: through `T: A`, S's `foo` from `impl B for S` is not A's,
                 // and A's default is the one when S's `impl A` does not override it)
+                // (an impl for the receiver's instance: `impl A for W<u8>`'s `foo` is not W<u16>'s)
                 Ty::Struct(sid) => self
-                    .trait_candidate(&format!("{}::{m}", self.prog.structs[self.prog.base_of(sid) as usize].name), tr0.unwrap_or(""))
+                    .trait_candidate_where(&format!("{}::{m}", self.prog.structs[self.prog.base_of(sid) as usize].name), tr0.unwrap_or(""), |i| self.self_fits(i, args[0]))
                     // (an inherent method answers it only for the prelude's types, which write std's traits' methods so:
                     // never the program's own, `C::baz(&w)` beside `impl<T> W<T> { fn baz(&self) }` is C's)
                     .or_else(|| self.prog.method(sid, &m).filter(|&i| {
                         let it = self.prog.sigs[i as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
                         let user = self.prog.item_of.get(i as usize).copied().flatten().is_some_and(|x| x < self.prog.prelude_from);
-                        it == tr0 || (it.is_none() && !user)
+                        (it == tr0 && self.self_fits(i, args[0])) || (it.is_none() && !user)
                     })),
                 // (only an impl of the trait the call named: `A::m(&0.0f32)` is not B's `f32::m`)
                 t if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char) => self.prog.index.get(&format!("{}::{m}", self.prog.tn(t))).copied().filter(|&i| {

@@ -346,6 +346,9 @@ pub struct Program {
     pub impl_targs: FxMap<String, Vec<(Ty, Vec<Ty>, usize)>>,
     /// (型, trait) の実装
     pub impls: HashSet<(u32, String)>,
+    /// the self types of the impls of a trait for a struct's instances (`impl A for W<u8>`), by (struct, trait), with
+    /// the impl's parameters as `Param(i)` and their number
+    pub impl_selfs: FxMap<(u32, String), Vec<(Ty, usize)>>,
     /// Types whose `Copy` impl names 'static in its self type (`impl Copy for Foo<'static>`): a copy of one requires
     /// what it borrows to be 'static
     pub static_copy: FxSet<u32>,
@@ -875,6 +878,7 @@ impl Program {
             multi_trait_methods: FxSet::default(),
             ambiguous_methods: FxMap::default(),
             unbounded_blankets: FxSet::default(),
+            impl_selfs: FxMap::default(),
             lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
@@ -1630,6 +1634,13 @@ impl Program {
             // (a trait with parameters, `impl Tr<u8> for S` and `impl Tr<u16> for S`, or self types that differ in their
             // arguments, `impl Tr for Vec<i32>` and `impl Tr for Vec<Box<i32>>`)
             let dup = !p.impls.insert((sid, tr.clone()));
+            // (an impl for an instance, `impl A for W<u8>`: its self type, for the method lookup to tell W<u16> apart;
+            // one it cannot read is for every instance)
+            if matches!(sm.impl_self_ty, Some(TySyn::App(..))) {
+                let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                let st = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok()).unwrap_or(Ty::Param(0));
+                p.impl_selfs.entry((sid, tr.clone())).or_default().push((st, gn.len().max(1)));
+            }
             // (all of its lifetimes 'static: `impl Copy for Foo<'static>`, `impl Copy for Foo<&'static u32>` (a path
             // written without lifetimes is no lifetime of its own). One with others (`impl<'b> Copy for Foo<'static,
             // 'b>`) is not followed: the borrow check would ask all of a copy's borrows to be 'static)
@@ -2148,6 +2159,17 @@ impl Program {
 
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
         self.blanket_traits.contains(tr) || self.implements_concrete(t, tr)
+    }
+
+    /// An impl of tr for t's struct is for t itself: for an instance (`W<u8>`), an impl whose self type matches it, or
+    /// one for every instance (`impl<T> A for W<T>`, `impl A for W`)
+    pub fn impl_applies(&self, t: Ty, tr: &str) -> bool {
+        let Ty::Struct(sid) = t else { return true };
+        let b = self.base_of(sid);
+        match self.impl_selfs.get(&(b, tr.to_string())) {
+            Some(v) if b != sid => v.iter().any(|&(st, n)| self.match_ty(st, t, &mut vec![None; n])),
+            _ => true,
+        }
     }
 
     /// implements, not counting a blanket impl of tr (`impl<T: Marker> Other for T`): an impl for t's type itself
