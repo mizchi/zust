@@ -123,6 +123,7 @@ fn main() {
         // drops them when an expansion moved them))
         if map.inputs.len() == 1 {
             s.externs = map.externs;
+            s.cfg_err = map.cfg_err;
         }
         let diags = s.check(&src);
         for d in &diags {

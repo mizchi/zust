@@ -820,6 +820,55 @@ fn dyn_without_associated_types() {
 }
 
 #[test]
+fn malformed_attribute_input() {
+    // (a built-in attribute in a shape rustc cannot read, as rustc 1.100 reports it; a `cfg` predicate is read from
+    // the source as written, as the configuring takes the attributes away)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let lit = |found: &str| format!("expected a literal (`1u8`, `1.0f32`, `\"string\"`, etc.) here, found {found}");
+    let cases: &[(&str, Option<String>)] = &[
+        // (deprecated: known keys with string values, each once)
+        ("#[deprecated(since = \"a\", note = \"a\", reason)]\nfn f() {}\nfn main() { }\n", Some("malformed `deprecated` attribute input".into())),
+        ("#[deprecated(reason = \"x\")]\nfn f() {}\nfn main() { }\n", Some("malformed `deprecated` attribute input".into())),
+        ("#[deprecated(\"since\")]\nfn f() {}\nfn main() { }\n", Some("malformed `deprecated` attribute input".into())),
+        ("#[deprecated(since = b\"1.29\", note = \"hi\")]\nfn f() {}\nfn main() { }\n", Some("malformed `deprecated` attribute input".into())),
+        ("#[deprecated(since = \"a\", since = \"b\", note = \"c\")]\nfn f() {}\nfn main() { }\n", Some("malformed `deprecated` attribute input".into())),
+        ("#[deprecated(note = test)]\nfn f() {}\nfn main() { }\n", Some(lit("expression"))),
+        ("#[deprecated(note = concat!(\"a\", \"b\"))]\nfn f() {}\nfn main() { }\n", Some(lit("macro call"))),
+        ("#[deprecated(since = r\"1.0\", note = \"a, b\")]\nfn f() {}\n#[deprecated()]\nfn g() {}\nfn main() { }\n", None),
+        // (repr, windows_subsystem, link)
+        ("#[repr(\"C\")]\nstruct A {}\nfn main() {}\n", Some("malformed `repr` attribute input".into())),
+        ("#[repr(C, align(8))]\nstruct A { x: u8 }\nfn main() { let _ = A { x: 1 }.x; }\n", None),
+        ("#![windows_subsystem = \"wrong\"]\nfn main() {}\n", Some("malformed `windows_subsystem` attribute input".into())),
+        ("#![windows_subsystem = \"console\"]\nfn main() {}\n", None),
+        ("#[link(kind = \"wonderful_unicorn\")] extern \"C\" {}\nfn main() {}\n", Some("malformed `link` attribute input".into())),
+        // (cfg predicates: a name, `name = \"value\"`, all / any of any number, not of one)
+        ("#[cfg(foo(bar))]\nfn check() {}\nfn main() {}\n", Some("malformed `cfg` attribute input".into())),
+        ("fn main() {}\n#[cfg(not())]\nfn f() {}\n", Some("malformed `cfg` attribute input".into())),
+        ("fn main() {}\n#[cfg(a, b)]\nfn f() {}\n", Some("malformed `cfg` attribute input".into())),
+        ("fn main() {}\n#[cfg(foo = 1)]\nfn f() {}\n", Some("malformed `cfg` attribute input".into())),
+        ("fn main() {}\n#[cfg(feature = -1)]\nfn f() {}\n", Some(lit("expression"))),
+        ("fn main() {}\n#[cfg(target-os = \"windows\")]\nfn f() {}\n", Some("expected one of `(`, `,`, `::`, or `=`, found `-`".into())),
+        ("#![cfg_attr(a())]\nfn main() {}\n", Some("malformed `cfg_attr` attribute input".into())),
+        ("#[cfg_attr(foo(bar), inline)]\nfn f() {}\nfn main() {}\n", Some("malformed `cfg_attr` attribute input".into())),
+        ("#[cfg(all())]\nfn f() {}\n#[cfg(not(any()))]\nfn g() {}\n#[cfg(all(unix,))]\nfn h() {}\n#[cfg(feature = \"a\")]\nfn i() {}\nfn main() {}\n", None),
+        // (cfg! of one predicate)
+        ("fn main() {\n    let _ = cfg!();\n}\n", Some("macro requires a cfg-pattern as an argument".into())),
+        ("fn main() {\n    if cfg!(not()) { }\n}\n", Some("malformed `cfg` macro input".into())),
+        ("fn main() {\n    let _ = cfg!(a, b);\n}\n", Some("expected 1 cfg-pattern".into())),
+        // (not one in a comment, a string or a macro's pattern)
+        ("// #[cfg(foo(bar))]\nfn main() { let _ = \"#[cfg(foo(bar))]\"; let _ = cfg!(unix); }\nmacro_rules! m { ($p:meta) => { #[cfg($p)] fn x() {} } }\n", None),
+    ];
+    for (src, want) in cases {
+        let got = first(src);
+        match want {
+            Some(m) => assert_eq!(got.as_ref().map(|d| d.1.as_str()), Some(m.as_str()), "{src}"),
+            None => assert_eq!(got, None, "{src}"),
+        }
+    }
+}
+
+#[test]
 fn gat_arity_at_uses() {
     // (E0107 at a use of a generic associated type without its arguments or with the wrong number of lifetimes,
     // as rustc 1.100 reports them; valid uses, bindings with arguments and other traits' names are left alone)

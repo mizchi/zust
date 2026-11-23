@@ -632,3 +632,181 @@ fn expr_macro(n: &[u8]) -> bool {
             | b"unimplemented" | b"format_args"
     )
 }
+
+/// A string literal as an attribute takes it: `"a"`, `r"a"`, `r#"a"#` (not `b"a"`)
+pub fn str_lit(v: &str) -> bool {
+    let r = v.strip_prefix('r').map(|r| r.trim_start_matches('#')).unwrap_or(v);
+    r.starts_with('"') && v.ends_with('"') && r.len() >= 2
+}
+
+/// The entries of an attribute's list: split at the commas outside brackets and string literals, trimmed, without
+/// the empty one a trailing comma leaves
+pub fn attr_entries(v: &str) -> Vec<&str> {
+    let (mut out, mut d, mut in_str, mut from) = (vec![], 0i32, false, 0);
+    let b = v.as_bytes();
+    for (i, &c) in b.iter().enumerate() {
+        match c {
+            b'"' if !(in_str && i > 0 && b[i - 1] == b'\\') => in_str = !in_str,
+            b'(' | b'[' | b'{' if !in_str => d += 1,
+            b')' | b']' | b'}' if !in_str => d -= 1,
+            b',' if !in_str && d == 0 => {
+                out.push(v[from..i].trim());
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(v[from..].trim());
+    if out.last().is_some_and(|x| x.is_empty()) {
+        out.pop();
+    }
+    out
+}
+
+/// A `cfg` predicate rustc can read: a name (`unix`, `r#true`), `name = "value"`, `all(..)` / `any(..)` of any
+/// number, `not(..)` of one; `version(..)` and `target(..)` are left to their feature gates. Not a path, a literal or
+/// another `name(..)`
+pub fn cfg_pred(p: &str) -> bool {
+    cfg_check(p).is_ok()
+}
+
+/// What an attribute's `name = value` holds: Ok(true) a string literal, Ok(false) another literal (`1`, `b"a"`,
+/// `'c'`, `true`), Err(what rustc says it found) anything else: a macro call, a lone symbol (`` `%` ``), an expression
+pub fn attr_value(v: &str) -> Result<bool, String> {
+    let v = v.trim();
+    if str_lit(v) {
+        return Ok(true);
+    }
+    let lit = v.starts_with("b\"") || v.starts_with("b'") || v.starts_with('\'')
+        || v.starts_with(|c: char| c.is_ascii_digit()) && v.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        || v == "true" || v == "false";
+    if lit {
+        return Ok(false);
+    }
+    let n = v.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(v.len());
+    if n > 0 && v[n..].starts_with('!') && v[n + 1..].trim_start().starts_with(['(', '[', '{']) {
+        return Err("macro call".to_string());
+    }
+    if v.chars().count() == 1 && !v.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+        return Err(format!("`{v}`"));
+    }
+    Err("expression".to_string())
+}
+
+/// The message rustc gives for an attribute value that is not a literal
+pub fn not_a_literal(found: &str) -> String {
+    format!("expected a literal (`1u8`, `1.0f32`, `\"string\"`, etc.) here, found {found}")
+}
+
+/// Whether rustc can read a `cfg` predicate: Ok, or Err with its own message ("" for "malformed `cfg` .. input")
+pub fn cfg_check(p: &str) -> Result<(), String> {
+    let p = p.trim();
+    let raw = p.strip_prefix("r#").unwrap_or(p);
+    let n = raw.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(raw.len());
+    let (name, rest) = (&raw[..n], raw[n..].trim());
+    if name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit()) {
+        return Err(String::new());
+    }
+    if rest.is_empty() {
+        return Ok(());
+    }
+    if let Some(v) = rest.strip_prefix('=') {
+        return match attr_value(v) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(String::new()),
+            Err(found) => Err(not_a_literal(&found)),
+        };
+    }
+    // (`target-os = ..`, `target_os?`: not a predicate's next token)
+    if !rest.starts_with(['(', ',']) && !rest.starts_with("::") {
+        let c = rest.chars().next().unwrap_or(' ');
+        return Err(format!("expected one of `(`, `,`, `::`, or `=`, found `{c}`"));
+    }
+    let Some(inner) = rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')) else { return Err(String::new()) };
+    match name {
+        "all" | "any" => attr_entries(inner).iter().try_for_each(|x| cfg_check(x)),
+        "not" => {
+            let e = attr_entries(inner);
+            if e.len() == 1 { cfg_check(e[0]) } else { Err(String::new()) }
+        }
+        "version" | "target" => Ok(()),
+        _ => Err(String::new()),
+    }
+}
+
+/// The first `#[cfg(..)]`, `#[cfg_attr(..)]` or `cfg!(..)` of a source whose predicate rustc cannot read (E0539 /
+/// E0565 / E0805): not one in a comment or a string on its line, nor in a macro's pattern (`$`)
+pub fn malformed_cfg(src: &str) -> Option<String> {
+    if !src.contains("cfg") {
+        return None;
+    }
+    let b = src.as_bytes();
+    let mut at = 0;
+    while let Some(f) = src[at..].find("cfg") {
+        let i = at + f;
+        at = i + 3;
+        let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+        if i > 0 && ident(b[i - 1]) {
+            continue;
+        }
+        // (`#[cfg(` / `#![cfg_attr(` / `cfg!(`)
+        let (name, attr) = if src[i..].starts_with("cfg_attr") { ("cfg_attr", true) } else { ("cfg", true) };
+        let after = i + name.len();
+        let macro_call = name == "cfg" && src[after..].starts_with("!(");
+        let attr = attr && !macro_call && (src[..i].ends_with("#[") || src[..i].ends_with("#!["));
+        if !attr && !macro_call {
+            continue;
+        }
+        let open = if macro_call { after + 1 } else { after };
+        if b.get(open) != Some(&b'(') {
+            continue;
+        }
+        let line_start = src[..i].rfind('\n').map_or(0, |n| n + 1);
+        let pre = &src[line_start..i];
+        if pre.contains("//") || pre.bytes().filter(|&c| c == b'"').count() % 2 == 1 {
+            continue;
+        }
+        // (the matching `)`, past strings)
+        let (mut d, mut in_str, mut close) = (0i32, false, None);
+        for (k, &c) in b.iter().enumerate().skip(open) {
+            match c {
+                b'"' if !(in_str && b[k - 1] == b'\\') => in_str = !in_str,
+                b'(' if !in_str => d += 1,
+                b')' if !in_str => {
+                    d -= 1;
+                    if d == 0 {
+                        close = Some(k);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(close) = close else { continue };
+        let inner = &src[open + 1..close];
+        if inner.contains('$') {
+            continue;
+        }
+        let entries = attr_entries(inner);
+        let checked = match (name, entries.first()) {
+            ("cfg_attr", Some(p)) => cfg_check(p),
+            ("cfg_attr", None) => Err(String::new()),
+            _ if entries.len() == 1 => cfg_check(inner),
+            _ => Err(String::new()),
+        };
+        if let Err(own) = checked {
+            let line = src[..i].matches('\n').count() + 1;
+            if !own.is_empty() {
+                return Some(format!("{line}:1: {own}"));
+            }
+            let what = match (macro_call, entries.len()) {
+                (true, 0) => "macro requires a cfg-pattern as an argument".to_string(),
+                (true, 1) => "malformed `cfg` macro input".to_string(),
+                (true, _) => "expected 1 cfg-pattern".to_string(),
+                _ => format!("malformed `{name}` attribute input"),
+            };
+            return Some(format!("{line}:1: {what}"));
+        }
+    }
+    None
+}

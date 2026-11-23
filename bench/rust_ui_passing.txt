@@ -566,6 +566,7 @@ check-pass	attributes/unnamed-field-attributes-dup.rs
 check-pass	attributes/unnamed-field-attributes-vis.rs
 check-pass	attributes/unnamed-field-attributes.rs
 build-pass	attributes/unsafe/cfg-unsafe-attributes.rs
+compile-fail	attributes/unsafe/extraneous-unsafe-attributes.rs
 build-pass	attributes/unsafe/unsafe-attributes.rs
 check-pass	attributes/used/used-not-dead-code-lint.rs
 run-pass	auto-traits/auto-is-contextual.rs
@@ -1230,6 +1231,7 @@ compile-fail	cfg/diagnostics-same-crate.rs
 check-pass	cfg/expanded-cfg.rs
 compile-fail	cfg/nested-cfg-attr-conditional-compilation.rs
 run-pass	cfg/struct-field-empty.rs
+compile-fail	cfg/suggest-any-or-all.rs
 check-pass	check-cfg/cfg-select.rs
 check-pass	check-cfg/nested-cfg.rs
 check-pass	closure-expected-type/expect-fn-supply-fn-multiple.rs
@@ -1560,13 +1562,16 @@ run-pass	collections/vecdeque-append-operation-54477.rs
 compile-fail	compare-method/bad-self-type.rs
 compile-fail	compare-method/region-extra-2.rs
 check-pass	compiletest-self-test/dir.with.dots/test.rs
+compile-fail	conditional-compilation/cfg-attr-invalid-predicate.rs
 check-pass	conditional-compilation/cfg-attr-multi-false.rs
 check-pass	conditional-compilation/cfg-attr-multi-true.rs
+compile-fail	conditional-compilation/cfg-attr-parse.rs
 compile-fail	conditional-compilation/cfg-attr-parsed-span-issue-154801.rs
 compile-fail	conditional-compilation/cfg-attr-syntax-validation.rs
 compile-fail	conditional-compilation/cfg-empty-any-all.rs
 compile-fail	conditional-compilation/cfg-in-crate-1.rs
 compile-fail	conditional-compilation/cfg_attr-attr-syntax-validation.rs
+compile-fail	conditional-compilation/cfg_attr-invalid-predicate-inner.rs
 check-pass	conditional-compilation/cfg_attr_path.rs
 check-pass	conditional-compilation/inner-cfg-non-inline-mod.rs
 check-pass	conditional-compilation/issue-34028.rs
@@ -2022,9 +2027,11 @@ compile-fail	delegation/ice-line-bounds-issue-148732.rs
 check-pass	deprecation/atomic_initializers.rs
 run-pass	deprecation/deprecated-macro_escape-inner.rs
 run-pass	deprecation/deprecated-macro_escape.rs
+compile-fail	deprecation/deprecation-sanity.rs
 check-pass	deprecation/derive_on_deprecated.rs
 check-pass	deprecation/derive_on_deprecated_forbidden.rs
 compile-fail	deprecation/invalid-literal.rs
+compile-fail	deprecation/issue-66340-deprecated-attr-non-meta-grammar.rs
 compile-fail	deprecation/issue-84637-deprecated-associated-function.rs
 compile-fail	deprecation/try-macro-suggestion.rs
 check-pass	deref/deref-impl-for-dyn-trait.rs
@@ -2459,6 +2466,7 @@ compile-fail	error-codes/E0433.rs
 compile-fail	error-codes/E0434.rs
 compile-fail	error-codes/E0435.rs
 compile-fail	error-codes/E0449.rs
+compile-fail	error-codes/E0458.rs
 compile-fail	error-codes/E0478.rs
 compile-fail	error-codes/E0496.rs
 compile-fail	error-codes/E0499.rs
@@ -2478,9 +2486,12 @@ compile-fail	error-codes/E0528.rs
 compile-fail	error-codes/E0529.rs
 compile-fail	error-codes/E0530.rs
 compile-fail	error-codes/E0532.rs
+compile-fail	error-codes/E0539.rs
 compile-fail	error-codes/E0540.rs
 compile-fail	error-codes/E0559.rs
 compile-fail	error-codes/E0560.rs
+compile-fail	error-codes/E0565-1.rs
+compile-fail	error-codes/E0565.rs
 compile-fail	error-codes/E0582.rs
 compile-fail	error-codes/E0585.rs
 compile-fail	error-codes/E0594.rs
@@ -4124,6 +4135,7 @@ check-pass	macros/break-last-token-twice.rs
 compile-fail	macros/builtin-env-issue-114010.rs
 compile-fail	macros/builtin-prelude-no-accidents.rs
 check-pass	macros/builtin-std-paths.rs
+compile-fail	macros/cfg.rs
 check-pass	macros/column-macro-collision.rs
 compile-fail	macros/compile_error_macro-suppress-errors.rs
 compile-fail	macros/compile_error_macro.rs
@@ -5019,9 +5031,11 @@ compile-fail	parser/attribute-on-empty.rs
 compile-fail	parser/attribute-on-type-or-gen-arg.rs
 compile-fail	parser/attribute/attr-bad-meta-2.rs
 compile-fail	parser/attribute/attr-bad-meta-3.rs
+compile-fail	parser/attribute/attr-bad-meta-4.rs
 compile-fail	parser/attribute/attr-bad-meta.rs
 compile-fail	parser/attribute/attr-before-eof.rs
 compile-fail	parser/attribute/attr-dangling-in-mod.rs
+compile-fail	parser/attribute/attr-incomplete.rs
 compile-fail	parser/attribute/attr-with-a-semicolon.rs
 compile-fail	parser/attribute/attribute-with-no-generics-in-parameter-list.rs
 compile-fail	parser/bad-crate-name.rs
@@ -5400,11 +5414,13 @@ compile-fail	parser/macro-rules-paren-name-issue-150899.rs
 compile-fail	parser/macro/bad-macro-argument.rs
 compile-fail	parser/macro/break-in-unlabeled-block-in-macro.rs
 compile-fail	parser/macro/do-not-suggest-semicolon-between-macro-without-exclamation-mark-and-array.rs
+compile-fail	parser/macro/expr-in-attribute.rs
 check-pass	parser/macro/extern-abi-from-mac-literal-frag.rs
 compile-fail	parser/macro/issue-33569.rs
 compile-fail	parser/macro/kw-in-item-pos-recovery-149692.rs
 compile-fail	parser/macro/macro-bad-delimiter-ident.rs
 check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
+compile-fail	parser/macro/macro-in-attribute.rs
 compile-fail	parser/macro/macro-keyword.rs
 compile-fail	parser/macro/macro-missing-right-paren.rs
 compile-fail	parser/macro/macros-no-semicolon.rs
@@ -6598,6 +6614,7 @@ compile-fail	sized/unsized-str-in-return-expr-arg-and-local.rs
 compile-fail	span/E0046.rs
 compile-fail	span/E0072.rs
 compile-fail	span/E0539.rs
+compile-fail	span/E0805.rs
 compile-fail	span/borrowck-borrow-overloaded-auto-deref-mut.rs
 compile-fail	span/borrowck-borrow-overloaded-deref-mut.rs
 compile-fail	span/borrowck-call-method-from-mut-aliasable.rs
@@ -8029,6 +8046,7 @@ run-pass	where-clauses/where-clauses.rs
 run-pass	whitespace/ascii_whitespace_excludes_vertical_tab.rs
 run-pass	whitespace/vertical_tab_lexer.rs
 run-pass	windows-subsystem/console.rs
+compile-fail	windows-subsystem/windows-subsystem-invalid.rs
 run-pass	windows-subsystem/windows.rs
 run-pass	zero-sized/zero-size-type-destructors.rs
 run-pass	zero-sized/zero-sized-btreemap-insert.rs

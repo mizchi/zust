@@ -3,6 +3,7 @@
 //! driver.rs と同じ手順を、外部クレートに依存しないモジュールだけで行う (zustc 自身でもコンパイルできる)。
 //! キャッシュと並列化はまだない。
 
+use crate::cfg::{attr_entries, cfg_pred, malformed_cfg, str_lit};
 use std::sync::Mutex;
 
 use crate::acg::{self, Blob, ItemFn};
@@ -723,6 +724,8 @@ pub struct Session2 {
     /// A crate of one file that the caller configured before it checks it: the `extern crate x;` items the configuring
     /// blanked (SrcMap::externs), whose names may be defined twice. Read by the next analyze
     pub externs: Vec<(usize, String)>,
+    /// The same crate's first `cfg` predicate rustc cannot read, found in the file as written (SrcMap::cfg_err)
+    pub cfg_err: Option<String>,
     /// In a `check`: its analysis adds const_check_item
     checking: bool,
     /// The lines of the constants that the check's const_check_item reads, in its order
@@ -733,7 +736,7 @@ pub struct Session2 {
 
 impl Session2 {
     pub fn new(opts: Options2) -> Session2 {
-        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], checking: false, const_lines: vec![], const_fn: String::new() }
+        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new() }
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
@@ -820,6 +823,9 @@ impl Session2 {
         // (closures' captures by edition: `let _ = s;` captures s before 2021 only (ast_closure::WILD_FAKE_READS))
         crate::ast_closure::WILD_FAKE_READS.with(|c| c.set(self.opts.edition >= 2021));
         let mut externs = std::mem::take(&mut self.externs);
+        // (a `cfg` predicate rustc cannot read, in the source as written: `#[cfg(..)]`, `#[cfg_attr(..)]` and `cfg!(..)`
+        // are taken away before the items are read; reported where the attributes are, after a parse error)
+        let mut cfg_err = self.cfg_err.take().or_else(|| if self.ctx.map.inputs.is_empty() { malformed_cfg(src0) } else { None });
         // (ファイルから読んだもの (load_crate) は読むときに cfg を評価してある)
         let stripped;
         let src0 = if self.ctx.map.inputs.is_empty() {
@@ -897,7 +903,7 @@ impl Session2 {
             if let Some(e) = duplicate_name(src0, &externs, self.opts.edition < 2018) {
                 return Err(e);
             }
-            if let Some(e) = malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none()) {
+            if let Some(e) = cfg_err.take().or_else(|| malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none())) {
                 return Err(e);
             }
         }
@@ -3029,23 +3035,43 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
         } else {
             return true;
         };
-        let str_lit = |v: &str| v.starts_with('"') && v.ends_with('"') && v.len() >= 2;
         let idents = |v: &str| v.split(',').all(|x| {
             let x = x.trim();
             !x.is_empty() && x.chars().all(|c| c.is_alphanumeric() || c == '_')
         });
+        // (`key = "value"` entries of known keys, each at most once: `deprecated(since = "1.0", note = "..")`)
+        let keyed = |v: &str, keys: &[&str], value: &dyn Fn(&str, &str) -> bool| {
+            let mut seen: Vec<&str> = vec![];
+            attr_entries(v).iter().all(|e| match e.split_once('=') {
+                Some((k, x)) => {
+                    let k = k.trim();
+                    let ok = keys.contains(&k) && !seen.contains(&k) && value(k, x.trim());
+                    seen.push(k);
+                    ok
+                }
+                None => false,
+            })
+        };
         match name {
             "crate_type" | "recursion_limit" | "type_length_limit" | "crate_name" => form == '=' && str_lit(inner),
             "inline" => form == ' ' || (form == '(' && matches!(inner, "always" | "never")),
             "must_use" => form == ' ' || (form == '=' && str_lit(inner)),
             "cold" | "track_caller" | "non_exhaustive" | "no_mangle" | "automatically_derived" | "no_implicit_prelude" => form == ' ',
-            "repr" => form == '(' && !inner.is_empty() && !inner.contains('='),
-            "deprecated" => form == ' ' || (form == '=' && str_lit(inner)) || form == '(',
-            "link" => form == '(' && !inner.is_empty() && !inner.contains("cfg()"),
+            // (each hint a name, or a name with its list: `repr(C, align(8))`, not `repr("C")`)
+            "repr" => form == '(' && !inner.is_empty() && !inner.contains('=') && attr_entries(inner).iter().all(|e| e.starts_with(|c: char| c.is_alphabetic() || c == '_')),
+            "deprecated" => form == ' ' || (form == '=' && str_lit(inner)) || (form == '(' && keyed(inner, &["since", "note", "suggestion"], &|_, x| str_lit(x))),
+            "windows_subsystem" => form == '=' && matches!(inner, "\"console\"" | "\"windows\""),
+            // (`link(name = "m", kind = "static")`: a kind rustc knows)
+            "link" => {
+                form == '(' && !inner.is_empty() && !inner.contains("cfg()") && attr_entries(inner).iter().all(|e| match e.split_once('=') {
+                    Some((k, x)) if k.trim() == "kind" => matches!(x.trim(), "\"static\"" | "\"dylib\"" | "\"framework\"" | "\"raw-dylib\"" | "\"link-arg\""),
+                    _ => true,
+                })
+            }
             "allow" | "warn" | "deny" | "forbid" | "expect" => form == '(',
             "macro_use" => form == ' ' || (form == '(' && idents(inner)),
-            "cfg" => form == '(' && !inner.is_empty(),
-            "cfg_attr" => form == '(' && inner.contains(','),
+            "cfg" => form == '(' && attr_entries(inner).len() == 1 && cfg_pred(inner),
+            "cfg_attr" => form == '(' && inner.contains(',') && attr_entries(inner).first().is_some_and(|p| cfg_pred(p)),
             _ => true,
         }
     }
@@ -3083,9 +3109,22 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
         }
         out
     }
-    let report = |text: &str, base_line: usize, at: usize, name: &str| {
+    // (a `deprecated` value that is no literal (`note = test`, `note = concat!(..)`): rustc's parse message; any other
+    // wrong shape: malformed input)
+    let report = |text: &str, base_line: usize, at: usize, name: &str, input: &str| {
         let line = base_line + text[..at].matches('\n').count();
-        format!("{line}:1: malformed `{name}` attribute input")
+        let input = input.trim();
+        let found = (name == "deprecated").then(|| match input.strip_prefix('=') {
+            Some(v) => crate::cfg::attr_value(v).err(),
+            None => {
+                let list = input.strip_prefix('(').and_then(|r| r.strip_suffix(')')).unwrap_or("");
+                attr_entries(list).iter().find_map(|e| e.split_once('=').and_then(|(_, v)| crate::cfg::attr_value(v).err()))
+            }
+        });
+        match found.flatten() {
+            Some(f) => format!("{line}:1: {}", crate::cfg::not_a_literal(&f)),
+            None => format!("{line}:1: malformed `{name}` attribute input"),
+        }
     };
     // (the file's inner attributes)
     let mut head_end = src0.len().min(8192);
@@ -3100,7 +3139,7 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
         if t.starts_with("#![") {
             for (at, name, input) in leading(line) {
                 if !check(name, input) {
-                    return Some(report(head, 1, off + at, name));
+                    return Some(report(head, 1, off + at, name, input));
                 }
             }
         } else if !(t.is_empty() || t.starts_with("//")) && !t.starts_with("#[") {
@@ -3116,7 +3155,7 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
         let attrs = leading(text);
         for &(at, name, input) in &attrs {
             if !check(name, input) {
-                return Some(report(text, it.line, at, name));
+                return Some(report(text, it.line, at, name, input));
             }
             // (a parse error, as a merge's diff marker, comes first in rustc)
             if standalone && unknown(name) && !text.contains("<<<<<<<") {

@@ -25,12 +25,15 @@ pub struct SrcMap {
     pub externs: Vec<(usize, String)>,
     /// Whether the loading keeps `externs`
     pub keep_externs: bool,
+    /// The root file's first `cfg` predicate rustc cannot read (cfg::malformed_cfg), found before the configuring
+    /// takes the attributes away; kept with `externs`
+    pub cfg_err: Option<String>,
 }
 
 impl SrcMap {
     /// 1 ファイルだけ (区間 1 つ)
     pub fn single(name: &str) -> SrcMap {
-        SrcMap { segs: vec![(1, 0, 1)], files: vec![name.to_string()], inputs: vec![], probes: vec![], volatile: false, colfix: vec![], externs: vec![], keep_externs: false }
+        SrcMap { segs: vec![(1, 0, 1)], files: vec![name.to_string()], inputs: vec![], probes: vec![], volatile: false, colfix: vec![], externs: vec![], keep_externs: false, cfg_err: None }
     }
 
     /// 結合したソースの行 → (ファイルの名前, ファイルの中の行)
@@ -212,6 +215,9 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     // (and whether it may call `env!` / `option_env!`, seen by the same tokens)
     let mut env = None;
     let mut externs = vec![];
+    if map.inputs.is_empty() && map.keep_externs {
+        map.cfg_err = crate::cfg::malformed_cfg(&src);
+    }
     let src = match crate::cfg::strip_noting(&src, cfg, &mut env, &mut externs) {
         Some(t) => {
             // (the root file's `extern crate` items, for a caller that asked)
