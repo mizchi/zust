@@ -69,7 +69,7 @@ README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画の�
 
 - 文字列の補間 `` `hi ${name}` ``
 - モジュールと import(`import { a } from "./b.zsc"`、npm の型との接続)
-  - **済: TS のファイルのプレーンなレコード型を `import type` で読む**(README の「TS の型の取り込み」)。残り: 任意のフィールド(003 の `Option` と一緒に)、総称型、`extends`、union(enum として読めるか。作業中)、パッケージの .d.ts からの読み込み、関数の型(`extern` の代わり)
+  - **済: TS のファイルのプレーンなレコード型を `import type` で読む**(README の「TS の型の取り込み」)。残り: 任意のフィールド(003 の `Option` と一緒に)、総称型、`extends`、union(**済: 文字列リテラルの union と判別キーつきの union を enum として読む**。残り: その enum を `@wasm` との境界で渡す、zustscript の enum の表現を `@tag` で選べるようにする)、パッケージの .d.ts からの読み込み、関数の型(`extern` の代わり)
   - **済: 文字列や配列を含むレコードを `@wasm` との境界で渡す**: 補助のパッケージ zustscript-helper(TS)と crate zustscript_helper(Rust)の、1 つの固定したバイト列の形式で(README の「バイト列で越える値」)。残り: enum と typed array をこの形式に載せる、zustscript-helper を npm に公開する(今は helper/ts をそのまま置く)
 - ML 用途の文法: [docs/plan.md](docs/plan.md) の「TODO: ML 用途」
 

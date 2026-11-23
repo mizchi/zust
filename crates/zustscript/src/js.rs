@@ -215,7 +215,33 @@ impl<'a> Js<'a> {
 
     fn string_enum(&self, en: &str) -> bool {
         let e = &self.info.enums[en];
-        e.unit_only() && !e.is_effect()
+        e.unit_only() && !e.is_effect() && e.ts.as_ref().is_none_or(|t| t.key.is_none())
+    }
+
+    /// The JS value of variant `v`'s tag: its own name, or the TS union's string for it (`"circle"`)
+    fn tag_js(&self, en: &str, v: &str) -> String {
+        let e = &self.info.enums[en];
+        match &e.ts {
+            Some(t) => js_str(&t.tags[e.variants.iter().position(|x| x.0 == v).unwrap()]),
+            None => js_str(v),
+        }
+    }
+
+    /// The property that holds the tag: `TAG`, or the TS union's tag field (`kind`)
+    fn tag_key(&self, en: &str) -> String {
+        match self.info.enums[en].ts.as_ref().and_then(|t| t.key.clone()) {
+            Some(k) => k,
+            None => "TAG".into(),
+        }
+    }
+
+    /// The property that holds field `k` of variant `v`: `_0`, or the TS member's name (`r`)
+    fn field_key(&self, en: &str, v: &str, k: usize) -> String {
+        let e = &self.info.enums[en];
+        match &e.ts {
+            Some(t) => t.fields[e.variants.iter().position(|x| x.0 == v).unwrap()][k].clone(),
+            None => format!("_{k}"),
+        }
     }
 
     /// The body of the module: the functions of the JS layer
@@ -662,11 +688,11 @@ impl<'a> Js<'a> {
             Pat::Variant(_, v, subs, _) => {
                 let en = &self.info.variant_of[v];
                 if self.string_enum(en) {
-                    return vec![format!("{s} === {}", js_str(v))];
+                    return vec![format!("{s} === {}", self.tag_js(en, v))];
                 }
-                let mut c = vec![format!("{s}.TAG === {}", js_str(v))];
+                let mut c = vec![format!("{s}.{} === {}", self.tag_key(en), self.tag_js(en, v))];
                 for (k, sp) in subs.iter().enumerate() {
-                    c.extend(self.pat_cond(sp, &format!("{s}._{k}")));
+                    c.extend(self.pat_cond(sp, &format!("{s}.{}", self.field_key(en, v, k))));
                 }
                 c
             }
@@ -681,9 +707,10 @@ impl<'a> Js<'a> {
                     self.pat_binds(p, &format!("{s}[{k}]"), out);
                 }
             }
-            Pat::Variant(_, _, subs, _) => {
+            Pat::Variant(_, v, subs, _) => {
+                let en = self.info.variant_of[v].clone();
                 for (k, p) in subs.iter().enumerate() {
-                    self.pat_binds(p, &format!("{s}._{k}"), out);
+                    self.pat_binds(p, &format!("{s}.{}", self.field_key(&en, v, k)), out);
                 }
             }
             _ => {}
@@ -814,11 +841,12 @@ impl<'a> Js<'a> {
 
     fn variant_value(&mut self, en: &str, v: &str, args: Vec<String>) -> String {
         if self.string_enum(en) {
-            return js_str(v);
+            return self.tag_js(en, v);
         }
-        let mut s = format!("{{ TAG: {}", js_str(v));
+        // (a union read from TS: TS's own shape, `{ kind: "circle", r: 1 }`)
+        let mut s = format!("{{ {}: {}", self.tag_key(en), self.tag_js(en, v));
         for (k, a) in args.iter().enumerate() {
-            let _ = write!(s, ", _{k}: {a}");
+            let _ = write!(s, ", {}: {a}", self.field_key(en, v, k));
         }
         s.push_str(" }");
         s
@@ -1150,7 +1178,7 @@ impl<'a> Js<'a> {
         }
         let compound = match t {
             Ty::Array(_) | Ty::Typed(_) | Ty::Tuple(_) => true,
-            Ty::Named(n, _) => self.info.records.contains_key(n) || self.info.enums.get(n).is_some_and(|e| !e.unit_only() && !e.is_effect()),
+            Ty::Named(n, _) => self.info.records.contains_key(n) || self.info.enums.get(n).is_some_and(|e| !e.is_effect() && !self.string_enum(n)),
             _ => false,
         };
         if !compound {
@@ -1183,13 +1211,18 @@ impl<'a> Js<'a> {
                 let e = &self.info.enums[n];
                 let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
                 let vs: Vec<(String, Vec<Ty>)> = e.variants.iter().map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_named(t, &m)).collect())).collect();
-                let mut s = String::from("  if (a.TAG !== b.TAG) return false;\n  switch (a.TAG) {\n");
+                let key = self.tag_key(n);
+                let n = n.clone();
+                let mut s = format!("  if (a.{key} !== b.{key}) return false;\n  switch (a.{key}) {{\n");
                 for (v, fs) in vs {
                     if fs.is_empty() {
                         continue;
                     }
-                    let cs: Vec<String> = fs.iter().enumerate().map(|(k, t)| cmp(self, t, &format!("a._{k}"), &format!("b._{k}"))).collect();
-                    let _ = writeln!(s, "    case {}: return {};", js_str(&v), cs.join(" && "));
+                    let cs: Vec<String> = fs.iter().enumerate().map(|(k, t)| {
+                        let f = self.field_key(&n, &v, k);
+                        cmp(self, t, &format!("a.{f}"), &format!("b.{f}"))
+                    }).collect();
+                    let _ = writeln!(s, "    case {}: return {};", self.tag_js(&n, &v), cs.join(" && "));
                 }
                 s.push_str("  }\n  return true;\n");
                 s
@@ -1678,8 +1711,12 @@ pub fn dts(items: &[Item], info: &Info, shared_runtime: bool, spec: &dyn Fn(&std
     let mut ts_imports: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for it in items {
         match it {
-            Item::Record { from: Some(f), name, .. } if f.exported => {
+            Item::Record { from: Some(f), name, .. } | Item::Enum { from: Some(f), name, .. } if f.exported => {
                 ts_imports.entry(spec(&f.path)).or_default().insert(name.clone());
+            }
+            // (a union the file does not export: declared again as the file writes it)
+            Item::Enum { from: Some(f), name, .. } => {
+                let _ = writeln!(o, "export type {name} = {};\n", f.text);
             }
             // (a type the file does not export, read because an imported one uses it: declared again with the TS
             // file's own members, so it is the same type to TS)

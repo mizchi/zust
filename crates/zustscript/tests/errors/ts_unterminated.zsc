@@ -1,0 +1,2 @@
+// expect: is not closed before the end of the file
+import type { U } from "../ts/unterminated.ts";

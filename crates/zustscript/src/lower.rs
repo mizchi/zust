@@ -481,6 +481,10 @@ impl Lower<'_> {
                     Ok(VTy::Record(rt, fs))
                 } else {
                     let e = &self.info.enums[n];
+                    // (a union read from TS has TS's shape in JS, not the `{ TAG, _0 }` the glue reads)
+                    if e.ts.is_some() {
+                        return Err((pos, format!("{n} is a union read from TS: it does not cross to wasm yet (use it in the JS layer)")));
+                    }
                     let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
                     let string_enum = e.unit_only() && !e.is_effect();
                     let vs: Vec<(String, Vec<Ty>)> = e.variants.iter().map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_ty(t, &m)).collect())).collect();

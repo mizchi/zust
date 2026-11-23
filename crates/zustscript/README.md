@@ -72,6 +72,10 @@ pub fn display(u: User) -> String { u.name + " #" + (u.id as i32).to_string() }
   - 読み込む型が使う型(`Post` の `author: User`)も一緒に読む。export されていない型でもよい
   - ファイルの残り(関数、union、総称型など)は、import しない限り読まない。import した型が部分集合の外なら、TS のファイルのその位置でエラーになる(`` `Opt.name` is optional ``、tests/errors/ts_*.zsc)
   - パスは zsc のファイルからの相対パス。パッケージ(`"react"`)からはまだ読まない
+- **union は enum として読む**(JS では TS の値そのまま)
+  - 文字列リテラルの union `type Status = "draft" | "published"`: データのない enum。バリアントはタグの先頭を大文字にした名前(`Draft`、`Published`)で、JS の値は TS の文字列そのもの(`"draft"`)
+  - 判別キーつきの union `type Shape = { kind: "circle"; r: number } | { kind: "rect"; w: number; h: number }`: 全メンバーが同じ文字列リテラルのフィールド(タグ)を持つもの。メンバーはファイルの別のオブジェクト型の名前でもよい(`Square | { kind: "empty" }`)。バリアントは `Circle(f64)`、`Rect(f64, f64)` で、フィールドは TS のメンバーの順。パターン `Circle(r)` は `s.kind === "circle"` と `s.r` になり、`Circle(2.0)` は `{ kind: "circle", r: 2.0 }` を作る。`==` もタグとメンバー名で比べる
+  - 読まないもの(エラー): 文字列とオブジェクトが混ざった union、共通のタグがない union、名前にならないタグ(`"in-progress"`)、大文字にすると同じになるタグ。TS から読んだ union は、まだ `@wasm` との境界を越えない(JS 層で使う)
 - 読み込んだ型は、zustscript のレコードと同じに使える(フィールドの読み出し、`{ ..u }` の更新、`==`、`@wasm` との境界)
 - JS の出力には何も足さない(レコードは素のオブジェクト)。`.d.ts` は自分で interface を書かず、`import type { User } from "./model.js"` で TS の型そのものを使う。TS 側は自分の値をそのまま渡せる(tests/ts/consumer.ts を tsc で検査)
   - export されていない型が `.d.ts` に出るときだけ、TS と同じ形(数値は素の `number`)の interface を書く。TS は構造で型を比べるので、同じ型として扱われる

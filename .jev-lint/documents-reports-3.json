@@ -73,12 +73,20 @@
       "path": "docs/ja/reports/2026-11-23-04-region-check-16.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-23-05-region-check-17.en": {
-      "path": "docs/reports/2026-11-23-05-region-check-17.md",
+    "docs_reports_2026-11-23-05-test-time.en": {
+      "path": "docs/reports/2026-11-23-05-test-time.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-23-05-region-check-17.ja": {
-      "path": "docs/ja/reports/2026-11-23-05-region-check-17.md",
+    "docs_reports_2026-11-23-05-test-time.ja": {
+      "path": "docs/ja/reports/2026-11-23-05-test-time.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-06-region-check-17.en": {
+      "path": "docs/reports/2026-11-23-06-region-check-17.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-06-region-check-17.ja": {
+      "path": "docs/ja/reports/2026-11-23-06-region-check-17.md",
       "role": "historical"
     }
   },
@@ -183,14 +191,25 @@
       }
     },
     {
-      "id": "docs_reports_2026-11-23-05-region-check-17",
-      "topic": "The Japanese file docs/ja/reports/2026-11-23-05-region-check-17.md is a faithful translation of docs/reports/2026-11-23-05-region-check-17.md",
+      "id": "docs_reports_2026-11-23-05-test-time",
+      "topic": "The Japanese file docs/ja/reports/2026-11-23-05-test-time.md is a faithful translation of docs/reports/2026-11-23-05-test-time.md",
       "mode": "translation",
       "reference": {
-        "source": "docs_reports_2026-11-23-05-region-check-17.en"
+        "source": "docs_reports_2026-11-23-05-test-time.en"
       },
       "target": {
-        "source": "docs_reports_2026-11-23-05-region-check-17.ja"
+        "source": "docs_reports_2026-11-23-05-test-time.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-23-06-region-check-17",
+      "topic": "The Japanese file docs/ja/reports/2026-11-23-06-region-check-17.md is a faithful translation of docs/reports/2026-11-23-06-region-check-17.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-23-06-region-check-17.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-23-06-region-check-17.ja"
       }
     }
   ]

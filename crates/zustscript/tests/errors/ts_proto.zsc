@@ -1,0 +1,2 @@
+// expect: `Proto.__proto__`: a member named `__proto__`
+import type { Proto } from "../ts/unsupported.ts";

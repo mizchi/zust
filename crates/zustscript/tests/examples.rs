@@ -376,13 +376,18 @@ const m = await import('./ts_import.js');
 const u = { id: 7, name: "ana", admin: false, tags: ["a"] };
 const p = m.reply({ author: u, title: "Hi", scores: [1, 2, 4.5], replies: [] }, u, "ok");
 console.log(m.display(u), "|", m.summary(p), "|", JSON.stringify(m.promote(u)));
+const doc = { title: "D", status: "draft", shapes: [{ kind: "circle", r: 1 }, { kind: "rect", w: 2, h: 3 }] };
+console.log(m.label("published"), m.label(doc.status), m.total_area(doc), JSON.stringify(m.publish(doc)), m.same_shape({ kind: "rect", w: 2, h: 3 }, { kind: "rect", h: 3, w: 2 }), m.same_shape(doc.shapes[0], doc.shapes[1]), m.tile({ kind: "square", side: 4 }), m.tile({ kind: "empty" }));
+console.log(m.same_flag({ kind: "on" }, { kind: "on" }), m.same_flag({ kind: "on" }, { kind: "off" }), JSON.stringify(m.item_of({ item: { kind: "crate", n: 3 } })), m.crates({ item: { kind: "nothing" } }), m.esc("done"), m.par("p"), m.loc("l2"), m.sur("bc"), m.sur_first() === "\uD835\uDC9Ca");
 console.log(m.same_user(u, { ...u, tags: ["a"] }), m.same_user(u, m.promote(u)), m.dist({ x: 3, y: 4 }, { x: 0, y: 0 }), m.badge(m.promote(u)), m.cr({ a: 2, b: "x", c: true }));
 "#,
     );
-    assert_eq!(out, "ana (member, #7) | Hi by ana (member, #7): 1 replies, score 7 | {\"id\":7,\"name\":\"ana\",\"admin\":true,\"tags\":[\"a\",\"staff\"]}\ntrue false 5 ANA #7 a+staff x2!\n");
+    assert_eq!(out, "ana (member, #7) | Hi by ana (member, #7): 1 replies, score 7 | {\"id\":7,\"name\":\"ana\",\"admin\":true,\"tags\":[\"a\",\"staff\"]}\nlive draft! 9 {\"title\":\"D\",\"status\":\"published\",\"shapes\":[{\"kind\":\"circle\",\"r\":2},{\"kind\":\"rect\",\"w\":3,\"h\":2}]} true false 4 0\ntrue false {\"kind\":\"crate\",\"n\":3} 0 d q 2 2 true\ntrue false 5 ANA #7 a+staff x2!\n");
     let dts = std::fs::read_to_string(d.join("ts_import.d.ts")).unwrap();
-    assert!(dts.contains("import type { Point, Post, User } from \"./ts/model.js\";"), "{dts}");
+    assert!(dts.contains("import type { Doc, Esc, Flag, Loc, Par, Point, Post, Shape, Shelf, Status, Sur, Tile, User } from \"./ts/model.js\";"), "{dts}");
     assert!(!dts.contains("export interface User"), "{dts}");
+    // (an unexported union with a named member: written with the member's object, which needs no name)
+    assert!(dts.contains("export type Item = { kind: \"crate\"; n: number } | { kind: \"nothing\" };"), "{dts}");
     let tsc = std::env::var("TSC").unwrap_or_else(|_| "tsc".into());
     if Command::new(&tsc).arg("--version").output().is_err() {
         eprintln!("skipped tsc: no tsc (set TSC)");

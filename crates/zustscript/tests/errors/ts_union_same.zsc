@@ -1,0 +1,2 @@
+// expect: two members of `Sameish` are the variant `Done`
+import type { Sameish } from "../ts/unsupported.ts";
