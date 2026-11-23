@@ -1226,7 +1226,7 @@ impl Bk {
             return;
         }
         for (i, lo) in self.locals.iter().enumerate() {
-            if lo.mutable == Some(true) && lo.decl.line != 0 && !lo.via_ref && !lo.name.starts_with("__") && lo.name != TEMP && !self.cap_vals.contains(&(i as u32)) && used.binary_search(&(i as u32)).is_err() {
+            if lo.mutable == Some(true) && lo.decl.line != 0 && !lo.via_ref && !lo.name.starts_with("__") && !lo.name.starts_with('#') && lo.name != TEMP && !self.cap_vals.contains(&(i as u32)) && used.binary_search(&(i as u32)).is_err() {
                 errs.push(BkError { sp: lo.decl, msg: format!("variable does not need to be mutable: `{}` (unused_mut)", lo.name) });
             }
         }

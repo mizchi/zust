@@ -2637,7 +2637,8 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
         _ => text.to_string(),
     };
     let f = parse_file(&text)?;
-    HRTB_TEXT.with(|c| c.set(text.contains("for<") || text.contains("for <")));
+    // (`for<`, also with spaces or a line break before the `<`)
+    HRTB_TEXT.with(|c| c.set(text.match_indices("for").any(|(i, _)| text[i + 3..].trim_start().starts_with('<'))));
     let Some(item) = f.items.first() else { return Ok(Summary::default()) };
     // (E0496 / E0403: a generic associated type's own parameters named as its trait's or impl's: `type Bar<'a>` in
     // `trait Shadow<'a>`)

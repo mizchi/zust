@@ -2694,3 +2694,16 @@ fn part14_review() {
     assert_eq!(check("fn f(x: &'static String) -> impl std::fmt::Display {\n    x\n}\nfn main() {}\n"), vec![]);
     assert_eq!(check("fn needs_static<T: 'static>() {}\nfn f<T>(_: &'static T) {\n    let c = || needs_static::<T>();\n    c();\n}\nfn main() {}\n"), vec![]);
 }
+
+/// From the review of #71: `for` and its `<` apart (a line break, spaces) is a binder too; a binding the lowering makes
+/// (`#sl0`) is not checked for unused_mut; an array's method that only reads it (`a.len()`) does not need it `mut`, nor
+/// a method of a slice through a `&mut` binding (`s.sort()`)
+#[test]
+fn part15_review() {
+    assert_eq!(check("fn f(_x: Box<dyn for\n<'a> Fn(&'a u8)>) {}\nfn g(_x: Box<dyn for  <'b> Fn(&'b u8)>) {}\nfn main() {\n    f(Box::new(|_| {}));\n    g(Box::new(|_| {}));\n}\n"), vec![]);
+    assert_eq!(check("#![deny(unused_mut)]\nstruct Foo<T> { value: T }\nstatic X: u32 = 5;\nfn main() {\n    let Foo { value: &n } = Foo::<&'static u32> { value: &X };\n    println!(\"{}\", n);\n}\n"), vec![]);
+    let d = check("#![deny(unused_mut)]\nfn main() {\n    let mut a = [1, 2];\n    println!(\"{}\", a.len());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("unused_mut"), "{d:?}");
+    let d = check("#![deny(unused_mut)]\nfn main() {\n    let mut a = [3, 1, 2];\n    let mut s: &mut [i32] = &mut a;\n    s.sort();\n    println!(\"{:?}\", a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`s`"), "{d:?}");
+}

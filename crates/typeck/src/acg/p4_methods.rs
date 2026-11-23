@@ -199,7 +199,8 @@ impl Cx<'_> {
         if let (Some((f, m)), true) = (slice_fn, vec_slice || matches!(rt, Ty::Array(..) | Ty::Ref(_, Ty::Slice(_)))) {
             if let Some(&id) = self.prog.index.get(f) {
                 // 受け手を `&[T]` / `&mut [T]` にして、引数 (クロージャも) は元の式のまま渡す
-                if m && is_place_expr(&*mc_recv) {
+                // (not through a reference (`s.sort()` of `s: &mut [i32]` needs no `mut s`)
+                if m && is_place_expr(&*mc_recv) && !matches!(rt, Ty::Ref(..)) {
                     self.bk_mut_use(&*mc_recv);
                 }
                 let (base, len, elem) = self.indexable(&*mc_recv)?;

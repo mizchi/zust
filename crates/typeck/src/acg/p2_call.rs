@@ -97,15 +97,16 @@ impl Cx<'_> {
         };
         let prev = std::mem::replace(&mut self.explicit_trait, forced);
         let n = self.caller_locs.len();
-        // (unused_mut: an array's methods are lowered on its memory, not all through a recorded `&mut`: any method of
-        // an array the local owns (`a.swap(0, 1)`, `a[..2].copy_from_slice(..)`) counts as needing it `mut`)
+        // (unused_mut: an array's methods are lowered on its memory, not all through a recorded `&mut`: a method that
+        // mutates an array the local owns (`a.swap(0, 1)`, `a[..2].copy_from_slice(..)`) counts as needing it `mut`.
+        // Not one that reads it (`a.len()`))
         if self.bk.lint_mut {
-            if let Expr::MethodCall(r, ..) = e {
+            if let Expr::MethodCall(r, mname, ..) = e {
                 let mut base: &Expr = strip_paren(r);
                 while let Expr::Index(b, ..) = base {
                     base = strip_paren(b);
                 }
-                if is_place_expr(base) && matches!(self.peek(base), Some(Ty::Array(..))) {
+                if is_place_expr(base) && matches!(self.peek(base), Some(Ty::Array(..))) && MUT_SLICE_METHODS.contains(&mname.as_str()) {
                     self.bk_mut_use(base);
                 }
             }
@@ -3455,3 +3456,14 @@ fn mentions_param0(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
         _ => false,
     }
 }
+
+/// The methods of a slice (and so of an array) that take `&mut self`: an array's call of one needs the array `mut`
+/// (unused_mut)
+const MUT_SLICE_METHODS: &[&str] = &[
+    "sort", "sort_unstable", "sort_by", "sort_by_key", "sort_unstable_by", "sort_unstable_by_key", "sort_by_cached_key", "swap", "reverse",
+    "fill", "fill_with", "rotate_left", "rotate_right", "copy_from_slice", "clone_from_slice", "copy_within", "swap_with_slice", "iter_mut",
+    "as_mut_slice", "as_mut_ptr", "as_mut_ptr_range", "get_mut", "get_unchecked_mut", "first_mut", "last_mut", "split_at_mut",
+    "split_first_mut", "split_last_mut", "chunks_mut", "chunks_exact_mut", "rchunks_mut", "rchunks_exact_mut", "split_mut", "splitn_mut",
+    "rsplit_mut", "rsplitn_mut", "select_nth_unstable", "select_nth_unstable_by", "select_nth_unstable_by_key", "each_mut",
+    "make_ascii_uppercase", "make_ascii_lowercase", "partition_dedup",
+];
