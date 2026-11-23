@@ -1555,6 +1555,47 @@ impl Session2 {
                 subj.starts_with('\'') || sm.impl_generics.iter().any(|g| g.0 == subj)
             })
         };
+        // (E0277: an impl of a trait of the program's needs its supertraits, all the way up, of its self type, with the
+        // impl's parameters as placeholders whose bounds are all the impl assumes (`impl<T> Complete for T` with `trait
+        // Complete: Partial` and `trait Partial: Copy` needs `T: Copy`))
+        if !prog.tdb.user.is_empty() {
+            for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
+                let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self_ty.as_ref()) else { continue };
+                let tr = tr.split('<').next().unwrap_or(tr).trim();
+                let tr = tr.rsplit("::").next().unwrap_or(tr);
+                if !prog.tdb.user.contains(tr) || !matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) || !read_all(ii) {
+                    continue;
+                }
+                // (the supertraits, transitively: the program's traits' recorded ones, and the markers (Copy, Clone))
+                let mut supers: Vec<String> = vec![];
+                let mut todo: Vec<String> = vec![tr.to_string()];
+                while let Some(t) = todo.pop() {
+                    for sup in prog.trait_supers.get(&t).into_iter().flatten().chain(prog.trait_marker_supers.get(&t).into_iter().flatten()) {
+                        let sup = sup.trim();
+                        if sup.starts_with('#') || sup.contains('<') || sup.contains('(') || supers.iter().any(|x| x == sup) || sup == tr {
+                            continue;
+                        }
+                        supers.push(sup.to_string());
+                        if prog.tdb.user.contains(sup) {
+                            todo.push(sup.to_string());
+                        }
+                    }
+                }
+                if supers.is_empty() {
+                    continue;
+                }
+                let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                let Ok(t) = prog.resolve_g(st, &gn) else { continue };
+                let rigid: Vec<Ty> = sm.impl_generics.iter().enumerate().map(|(k, (n, bs))| Ty::Struct(prog.placeholder(u32::MAX - ii as u32, k as u32, n, bs))).collect();
+                let t = prog.subst(t, &rigid);
+                for sup in &supers {
+                    if prog.tdb.holds_rigid(&prog, t, sup) == crate::traits::Ans::No {
+                        let n = prog.tn(t).replace("__u_", "").replace('#', "");
+                        return Err(format!("{}:1: the trait bound `{n}: {sup}` is not satisfied (E0277)", items[ii].line));
+                    }
+                }
+            }
+        }
         if let Some((later, _, tr, g)) = prog.tdb.conflict(&prog, &read_all) {
             let line = items.get(later).map_or(1, |it| it.line);
             let ty = g.map(|g| format!(" for type `{}`", prog.tn(g).replace("__u_", ""))).unwrap_or_default();

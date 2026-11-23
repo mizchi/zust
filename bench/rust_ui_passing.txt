@@ -5769,6 +5769,8 @@ run-pass	privacy/pub-priv-dep/std-pub.rs
 run-pass	privacy/pub-restricted-path-usage-55376.rs
 run-pass	privacy/required-pub-in-blocks.rs
 check-pass	privacy/restricted/private-in-public.rs
+compile-fail	privacy/sealed-traits/false-sealed-traits-note.rs
+compile-fail	privacy/sealed-traits/sealed-trait-local.rs
 compile-fail	privacy/suggest-box-new.rs
 compile-fail	privacy/suggest-new-projection-ice.rs
 compile-fail	privacy/trait-object-method-error.rs
@@ -6950,6 +6952,7 @@ compile-fail	suggestions/suggest-collect.rs
 compile-fail	suggestions/suggest-create-closure-issue-150701.rs
 compile-fail	suggestions/suggest-deref-in-match-issue-132784.rs
 compile-fail	suggestions/suggest-dereferencing-index.rs
+compile-fail	suggestions/suggest-derive-default-for-enums.rs
 compile-fail	suggestions/suggest-exact-alias-before-similar-name.rs
 compile-fail	suggestions/suggest-field-through-deref.rs
 compile-fail	suggestions/suggest-fn-ptr-for-fn-item-in-fn-ret.rs
@@ -7134,6 +7137,7 @@ compile-fail	traits/const-traits/ice-120503-async-const-method.rs
 compile-fail	traits/const-traits/macro-const-trait-bound-theoretical-regression.rs
 check-pass	traits/const-traits/trait-method-ptr-in-consts-ice.rs
 compile-fail	traits/constrained-type-params-trait-impl.rs
+compile-fail	traits/copy-bounds-impl-type-params.rs
 compile-fail	traits/copy-guessing.rs
 check-pass	traits/copy-requires-self-wf.rs
 run-pass	traits/copy-trait-implicit-copy.rs
@@ -7241,6 +7245,7 @@ compile-fail	traits/issue-3973.rs
 run-pass	traits/issue-40085.rs
 run-pass	traits/issue-4107.rs
 run-pass	traits/issue-43132.rs
+compile-fail	traits/issue-43784-supertrait.rs
 run-pass	traits/issue-5008-borrowed-traitobject-method-call.rs
 compile-fail	traits/issue-50480.rs
 build-pass	traits/issue-56202.rs

@@ -91,6 +91,10 @@ pub struct TraitDb {
     pub prelude: crate::fxhash::FxSet<String>,
 }
 
+/// std's traits that `implements` judges exactly for scalars and plain structs, and that a type parameter has only by
+/// its bounds
+const STD_EXACT: &[&str] = &["Copy", "Clone", "Debug", "Display", "Default", "PartialEq", "Eq", "PartialOrd", "Ord", "Hash"];
+
 /// The recursion limit (rustc's is 128; zustc's goals are smaller)
 const FUEL: u32 = 48;
 /// The most goals one question may visit
@@ -163,6 +167,14 @@ impl TraitDb {
 
     /// holds, for a bound of an item whose type parameters are `gn`, instantiated with `inst` (`U: Eq<T>` of
     /// `fn f<T, U: Eq<T>>`: T in the bound is the item's parameter, not a type of that name)
+    /// holds, of a type whose placeholders are an impl's parameters with all their bounds (for the impl's supertrait
+    /// obligations): a placeholder holds a trait only by its bounds (through their supertraits) or by an impl
+    pub fn holds_rigid(&self, p: &Program, t: Ty, b: &str) -> Ans {
+        let Some(pr) = pred_of(p, t, b, &[]) else { return Ans::Overflow };
+        let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: false, rigid_env: true };
+        cx.solve(FUEL, pr.ty, &pr.tr, &pr.raw, pr.args.as_deref())
+    }
+
     pub fn holds_in(&self, p: &Program, t: Ty, b: &str, gn: &[&str], inst: &[Ty]) -> Ans {
         let Some(mut pr) = pred_of(p, t, b, gn) else { return Ans::Overflow };
         if let Some(a) = pr.args.as_mut() {
@@ -170,7 +182,7 @@ impl TraitDb {
                 *x = p.subst(*x, inst);
             }
         }
-        let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: false };
+        let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: false, rigid_env: false };
         cx.solve(FUEL, pr.ty, &pr.tr, &pr.raw, pr.args.as_deref())
     }
 }
@@ -255,7 +267,7 @@ impl TraitDb {
             for w in &c.body {
                 let t = p.subst(w.ty, sub);
                 let args: Option<Vec<Ty>> = w.args.as_ref().map(|v| v.iter().map(|&x| p.subst(x, sub)).collect());
-                let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: true };
+                let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: true, rigid_env: false };
                 if cx.solve(FUEL, t, &w.tr, &w.raw, args.as_deref()) != Ans::Yes {
                     return None;
                 }
@@ -465,6 +477,9 @@ struct Cx<'a> {
     /// a `Yes` is reported (E0119): nothing weakened may give one (clauses not `exact`, a literal's leniency, std's
     /// traits but where `implements` is exact)
     strict: bool,
+    /// the placeholders are an impl's parameters, whose bounds are all its where clauses on them (the caller checked):
+    /// their bounds are the whole environment, so a `No` of one holds
+    rigid_env: bool,
 }
 
 impl Cx<'_> {
@@ -478,16 +493,27 @@ impl Cx<'_> {
             return Ans::Overflow;
         }
         if !self.db.user.contains(tr) {
+            if let Some(bs) = self.rigid_bounds(t) {
+                // (an impl's parameter: a std trait only by its bounds)
+                return if bs.iter().any(|b| self.p.bound_implies(b, &[tr], true, 0)) || self.p.implements(t, raw) {
+                    Ans::Yes
+                } else if bs.iter().all(|b| self.known(b)) && STD_EXACT.contains(&tr) && !raw.contains('<') {
+                    Ans::No
+                } else {
+                    Ans::Overflow
+                };
+            }
             return self.std_goal(t, tr, raw);
         }
         // (the environment: a placeholder's own bounds, the traits a trait object names, through their supertraits)
         let mut rigid = false;
         if let Ty::Struct(sid) = t {
             if let Some(bs) = &self.p.structs[sid as usize].placeholder {
-                if bs.iter().any(|b| self.p.bound_implies(b, &[tr], false, 0)) {
+                if bs.iter().any(|b| self.p.bound_implies(b, &[tr], self.rigid_env, 0)) {
                     return if self.strict { Ans::Overflow } else { Ans::Yes };
                 }
-                rigid = true;
+                // (an impl's parameter whose bounds are all known: they are the whole environment)
+                rigid = !(self.rigid_env && bs.iter().all(|b| self.known(b)));
             }
         }
         if let Ty::Dyn(d) = t {
@@ -585,6 +611,21 @@ impl Cx<'_> {
         r
     }
 
+    /// The bounds of an impl's parameter (rigid_env), None for other types
+    fn rigid_bounds(&self, t: Ty) -> Option<&Vec<String>> {
+        match t {
+            Ty::Struct(sid) if self.rigid_env => self.p.structs[sid as usize].placeholder.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// A bound whose trait zustc knows all of: one of the program's (its supertraits are recorded) or std's that
+    /// `implements` judges, written without arguments or bindings
+    fn known(&self, b: &str) -> bool {
+        let b = b.trim();
+        !b.contains('<') && !b.contains('(') && !b.contains('=') && (self.db.user.contains(b) || STD_EXACT.contains(&b) || matches!(b, "Sized" | "Send" | "Sync"))
+    }
+
     /// A trait that is not the program's: `implements`, believed when it says no only for the types and the
     /// prelude's traits it judges exactly
     fn std_goal(&self, t: Ty, tr: &str, raw: &str) -> Ans {
@@ -596,7 +637,7 @@ impl Cx<'_> {
             // (`implements` may say yes of what it does not judge exactly)
             return if self.strict && !exact { Ans::Overflow } else { Ans::Yes };
         }
-        if exact && (self.strict || self.db.prelude.contains(tr)) {
+        if exact {
             Ans::No
         } else {
             Ans::Overflow
