@@ -545,7 +545,7 @@ impl Cx<'_> {
             let bsig = &self.prog.sigs[bid as usize];
             let bounds = bsig.trait_of.as_deref().or(bsig.impl_trait.as_deref()).and_then(|tr| self.prog.blanket_bounds.get(tr));
             let prog = self.prog;
-            let holds = |t: Ty| bounds.is_none_or(|bs| blanket_bounds_hold(prog, t, bs, 0));
+            let holds = |t: Ty| bounds.is_none_or(|bs| blanket_bounds_hold(prog, t, bs, &mut vec![], &mut vec![]));
             let extra = |t: Ty| (prim(t) || matches!(t, Ty::Unit | Ty::Box(_))) && holds(t);
             let to_prim = matches!(pt, Some(Ty::Ref(_, i)) if extra(*i));
             if !own && pt.is_some_and(|t| prim(t) || matches!(t, Ty::Ref(_, Ty::Str)) || (t == Ty::Unit && holds(t))) || (!own && to_prim) {
@@ -891,6 +891,8 @@ impl Cx<'_> {
         let p0 = p;
         // (メソッドがなく `impl Deref` があれば、deref した先で探す: `rc.borrow_mut()`)
         let mut via_deref = false;
+        // (the first type reached through whose `Deref` has no `DerefMut` (`Rc`): what follows is shared)
+        let mut shared_deref: Option<String> = None;
         let mut derefs = 0;
         let (a, o, sid, id) = loop {
             let (a, o, sid) = loop {
@@ -942,6 +944,9 @@ impl Cx<'_> {
                 };
                 p = Place::Mem(v.unwrap(), 0, inner_t);
                 via_deref = true;
+                if shared_deref.is_none() {
+                    shared_deref = self.shared_deref(sid);
+                }
                 derefs += 1;
                 if derefs > 16 {
                     let sname = self.prog.structs[sid as usize].name.clone();
@@ -963,6 +968,12 @@ impl Cx<'_> {
         let sname = self.prog.structs[sid as usize].name.clone();
         if !self.prog.sigs[id as usize].has_self {
             return err(SP, format!("`{sname}::{name}` is an associated function, not a method"));
+        }
+        // (a `&mut self` method of what a `Deref` with no `DerefMut` reaches (`rc.set(0, 0)` with `rc: Rc<Point>`):
+        // it would write shared data (E0596))
+        if let (Some(n), true, true) = (&shared_deref, self.user_code, matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(true, _)))) {
+            let what = if matches!(n.as_str(), "Rc" | "Arc") { format!("data in an `{n}`") } else { format!("data in dereference of `{n}`") };
+            return err(SP, format!("cannot borrow {what} as mutable (E0596)"));
         }
         // struct のアドレスを渡す: `&self` ならそのまま、`self` なら call_fn がコピーする
         let mut recv_v = self.addr_plus(a, o);
@@ -3049,15 +3060,31 @@ fn hidden_param(n: &str) -> bool {
 
 /// The bounds of a blanket impl's self type hold of t (`?Sized` and lifetimes aside). A bound that is a trait with a
 /// blanket impl of its own holds when that impl's bounds do (`impl<T: Marker> Other for T`)
-fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], depth: u32) -> bool {
+fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], path: &mut Vec<String>, seen: &mut Vec<(String, bool)>) -> bool {
     bs.iter().all(|b| {
         if b.starts_with('?') || b.starts_with('\'') {
             return true;
         }
-        // (an impl for t itself (`impl Other for ()`), or the blanket impl's bounds; past the depth limit, only an
-        // impl for t itself: a chain that long, or a cycle, is not taken to hold)
+        // (an impl for t itself (`impl Other for ()`), or the blanket impl's bounds. A trait met again on the way
+        // (a cycle of blanket impls), or a chain past rustc's recursion limit (128), does not hold: rustc reports
+        // E0275 there. Each trait is decided once (seen): a trait has one blanket impl, so its answer for t is one)
         match prog.blanket_bounds.get(b.as_str()) {
-            Some(inner) if prog.blanket_traits.contains(b.as_str()) => prog.implements_concrete(t, b) || (depth < 8 && blanket_bounds_hold(prog, t, inner, depth + 1)),
+            Some(inner) if prog.blanket_traits.contains(b.as_str()) => {
+                if prog.implements_concrete(t, b) {
+                    return true;
+                }
+                if let Some(&(_, r)) = seen.iter().find(|(n, _)| n == b) {
+                    return r;
+                }
+                if path.len() >= 128 || path.iter().any(|n| n == b) {
+                    return false;
+                }
+                path.push(b.clone());
+                let r = blanket_bounds_hold(prog, t, inner, path, seen);
+                path.pop();
+                seen.push((b.clone(), r));
+                r
+            }
             _ => prog.implements(t, b),
         }
     })

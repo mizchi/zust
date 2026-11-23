@@ -202,6 +202,8 @@ pub struct Blob {
     pub traps: Vec<(u32, u32, u32)>,
     pub line_base: Option<u32>,
     pub code_ref: Option<(u32, u64)>,
+    /// What the function's lowering told the closures it makes (Insts::fx_log): given back to Insts with the Blob
+    pub clo_facts: Vec<crate::program::CloFact>,
 }
 
 #[derive(Clone, Debug)]
@@ -315,6 +317,18 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
     // (a region check begun late (`'static` required where the gate left the function out) that met a local bound
     // before it began, with no tree: the function again, checked from its start)
     // (rerun out of band: the result is compile's own, returned as it is, not copied into another)
+    // (an impl's method whose regions make it less general than its trait's declaration)
+    if regionck::enabled() {
+        let b = insts.lock().unwrap().body_of(id);
+        let user = prog.item_of.get(b as usize).copied().flatten().is_some_and(|i| i < prog.prelude_from);
+        if user && prog.sigs[b as usize].impl_trait.is_some() {
+            if let Some(d) = regionck::trait_decl_of(prog, b) {
+                if regionck::impl_sig_mismatch(prog, d, b) {
+                    return Err(format!("{}:1: `impl` item signature doesn't match `trait` item signature (E0308)", line_base + 1));
+                }
+            }
+        }
+    }
     let mut rerun = false;
     let r = compile_once(prog, insts, id, f, line_base, inl, false, &mut rerun);
     if rerun && r.is_ok() {
@@ -328,10 +342,10 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
 
 #[allow(clippy::too_many_arguments)]
 fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline, force_rg: bool, rerun_out: &mut bool) -> R<(Compiled, Vec<u32>)> {
-    let (sig, env, body_id, fnptr, inst_args, clo_rg, lenient) = {
+    let (sig, env, body_id, fnptr, inst_args, clo_rg, lenient, recheck, fnmut_ret) = {
         let g = insts.lock().unwrap();
         let b = g.body_of(id);
-        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned(), g.lenient)
+        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned(), g.lenient, g.recheck.contains(&id), g.kind_free.contains(&b))
     };
     // (zustc check's last round: instances with placeholders for type parameters, and those they request (only
     // there are placeholders): see below)
@@ -389,7 +403,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     let bk_level = if user_code { borrowck::level() } else { 0 };
     let mut cx = Cx {
         b: FunctionBuilder::new(&clif_sig(&sig)),
-        bk: borrowck::Bk { on: bk_level > 0, level: bk_level, line_base, ..Default::default() },
+        bk: borrowck::Bk { on: bk_level > 0, level: bk_level, line_base, fnmut_ret, ..Default::default() },
         // (a function's own body, not a generic one's instance nor a closure's: see regionck)
         // (a generic function's instance: the generic signature, its type parameters' regions not followed)
         // (a closure's: with the region signature the bound it is passed to (or its annotations) gives it)
@@ -475,6 +489,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         inl,
         inline_ret: None,
         inline_depth: 0,
+        deref_depth: 0,
         inlined: 0,
         try_into_hint: None,
     };
@@ -509,6 +524,19 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     // fails, as a placeholder cannot do all its bounds allow (a trait's method, a coercion to `dyn`): not checked
     // further, nothing reported. Its borrow and region checks' errors are)
     // (not an error of the borrow check's kind lowering itself returns: `m[k] = v` of a HashMap is E0594 whatever T is)
+    // (a fn whose instances give `Copy` types for its parameters, again with placeholders: what moving a T does is
+    // reported, nothing else (the instances checked the rest))
+    if recheck {
+        let e = match r {
+            Err(e) => Some(e),
+            Ok(_) => cx.bk_check().err(),
+        };
+        if let Some(e) = e.filter(|e| e.contains("moved value") || e.contains("cannot move out")) {
+            return Err(e);
+        }
+        let b = cx.b;
+        return Ok((Compiled { rec: b.m, late: vec![], datas: vec![], vtables: vec![], infos: vec![], loc_used: false, line_base }, vec![]));
+    }
     // (a placeholder's mismatch holds, unless a bound equates its parameter with another type (`Tr<X = T>`))
     let mut bound_eqs: Vec<&str> = vec![];
     let mut bound_params: Vec<String> = vec![];
@@ -586,7 +614,7 @@ pub struct Compiled {
 impl Compiled {
     /// 機械語なしの Blob (check の検査済みの印)
     pub fn empty_blob() -> Blob {
-        Blob { align: 16, code: vec![], relocs: vec![], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None }
+        Blob { align: 16, code: vec![], relocs: vec![], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None, clo_facts: vec![] }
     }
 
     /// バックエンドが作った (機械語, 再配置, trap) から Blob を作る
@@ -612,7 +640,7 @@ impl Compiled {
                 traps.push((off, info, msg));
             }
         }
-        Blob { align: 16, code, relocs: out, datas, vtables, traps, line_base: loc_used.then_some(line_base), code_ref: None }
+        Blob { align: 16, code, relocs: out, datas, vtables, traps, line_base: loc_used.then_some(line_base), code_ref: None, clo_facts: vec![] }
     }
 }
 
@@ -964,6 +992,9 @@ pub struct Cx<'p> {
     /// 展開している本体の続きのブロック (return / 末尾の値はここへ飛ぶ)
     pub inline_ret: Option<Block>,
     pub inline_depth: u32,
+    /// The overloaded derefs a field access is lowered through so far (`(*s.deref()).f`, then again): at most rustc's
+    /// default recursion limit (128), then E0055
+    pub deref_depth: u32,
     pub inlined: u32,
     /// `x.try_into().unwrap()` の unwrap の期待型 (型推論が try_into の行き先を記録していないとき)
     pub try_into_hint: Option<Ty>,
@@ -1577,6 +1608,8 @@ impl Cx<'_> {
             }
         }
         // クロージャ: キャプチャを `__env` のフィールド (by-ref なら指す先) として見せる
+        // (the borrow checker's locals of the captures held by value)
+        let mut cap_vals: Vec<u32> = vec![];
         if !self.caps.is_empty() {
             let env = match self.lookup("__env") {
                 Some((l, _)) => self.loc_value(l),
@@ -1589,7 +1622,11 @@ impl Cx<'_> {
                 // (a capture held by value is a local of the body for the borrow checker: moving it twice, or in a
                 // loop, is a use of a moved value)
                 if !by_ref {
+                    let id = self.bk.locals.len() as u32;
                     self.bk_local(loc, &n, t);
+                    if self.bk.locals.len() as u32 > id {
+                        cap_vals.push(id);
+                    }
                 } else if self.bk_on() {
                     // (one held by reference is the place the environment points to: `*x`, which the body borrows
                     // and assigns as the closure's own (`let p = &this.x; &mut this.x;` conflicts), and which is no
@@ -1611,7 +1648,9 @@ impl Cx<'_> {
             self.mark_ret_call(e);
             self.bk.tail = e as *const Expr as usize;
         }
+        self.bk.cap_vals = cap_vals;
         let (v, t) = self.block(&f.block, Some(self.ret))?;
+        self.bk_cap_escape();
         // (the temporaries of the body's tail go away after its locals (edition 2021))
         self.bk_temps_end(0);
         if t == Ty::Never {
@@ -1634,6 +1673,21 @@ impl Cx<'_> {
         let e = strip_paren(e);
         if self.sret.is_some() && self.inline_ret.is_none() && matches!(e, Expr::Call(..) | Expr::MethodCall(..) | Expr::Struct(..)) && !no_ret_dst() {
             self.ret_call = Some(e as *const Expr as usize);
+        }
+    }
+
+    /// A closure's captures held by value outlive the body's call, in its environment: at an exit of the body, what
+    /// they borrow of the body's own (another capture held by value, a local) escapes it (`move || { b = Some(&a); }`,
+    /// rustc's E0521). Not while inlining (the borrow check is off): a `return` there leaves the inlined body only
+    pub(crate) fn bk_cap_escape(&mut self) {
+        if !self.bk_on() {
+            return;
+        }
+        for i in 0..self.bk.cap_vals.len() {
+            let id = self.bk.cap_vals[i];
+            if self.bk.locals.get(id as usize).is_some_and(|l| l.refs) {
+                self.bk_ev(borrowck::Ev::Escape(vec![borrowck::Src::Local(id)]));
+            }
         }
     }
 
@@ -1805,6 +1859,13 @@ impl Cx<'_> {
                         return err(SP, "`let` without initializer is not supported");
                     };
                     let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t).ok());
+                    // (an annotation that writes `'static`: checked from here on, as a `let x: &'static T`, from
+                    // its initializer, whose calls are lowered with the check on)
+                    if let Some(a) = ann_ty {
+                        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && crate::regions::mentions_static(a) {
+                            self.rg_late_on();
+                        }
+                    }
                     // (destructuring reads the parts the pattern binds, not the whole value)
                     // (a `let`'s temporary bound by `ref` lives as long as the block: not one of the statement)
                     self.bk.let_scrut = true;
@@ -1820,6 +1881,14 @@ impl Cx<'_> {
                         diverged = true;
                         continue;
                     };
+                    // (`let (y, _): (&'a u32, u32) = ..;`: the pattern binds from a value of the annotation's type)
+                    if let Some(a) = ann_ty {
+                        if let Some((t, tr)) = self.rg_let_ann(a, init, Some(place.ty())) {
+                            if t == place.ty() {
+                                self.rg.scrut = Some((t, tr));
+                            }
+                        }
+                    }
                     // (E0005: without `else`, the pattern must cover the value's type)
                     if els.is_none() && self.user_code && !plainly_irrefutable(pat) {
                         // (`let false = 22;`: the literal's type first)

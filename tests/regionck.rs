@@ -1977,6 +1977,45 @@ fn nested_lifetime_struct_gate_and_blanket_bounds() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("no method `go`"), "{d:?}");
 }
 
+/// What a `Deref` with no `DerefMut` reaches (`Rc`, a `Ref` guard) is shared: writing it, borrowing it mutably, or
+/// calling a `&mut self` method of it is E0594 / E0596 (borrowck/borrowck-borrow-overloaded-*.rs). A `MutexGuard`,
+/// a `RefMut` and a `RefCell` through an `Rc` are written as before
+#[test]
+fn shared_deref_writes() {
+    let pre = "use std::rc::Rc;\nstruct Point { x: isize, y: isize }\nimpl Point {\n    fn set(&mut self, x: isize) { self.x = x; }\n    fn get(&self) -> isize { self.x + self.y }\n}\n";
+    for (body, msg) in [
+        ("fn f(x: Rc<isize>) {\n    let _p = &mut *x;\n}", "cannot borrow data in an `Rc` as mutable"),
+        ("fn f(x: &Rc<isize>) {\n    **x = 3;\n}", "cannot assign to data in an `Rc`"),
+        ("fn f(x: Rc<Point>) {\n    let _p = &mut x.y;\n}", "cannot borrow data in an `Rc` as mutable"),
+        ("fn f(mut x: Rc<Point>) {\n    x.y = 3;\n}", "cannot assign to data in an `Rc`"),
+        ("fn f(x: Rc<Point>) {\n    x.set(1);\n}", "cannot borrow data in an `Rc` as mutable"),
+        ("fn f(x: Rc<Vec<u8>>) {\n    x.push(1);\n}", "cannot borrow data in an `Rc` as mutable"),
+    ] {
+        let d = check(&format!("{pre}{body}\nfn main() {{}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains(msg), "{body}: {d:?}");
+    }
+    assert_eq!(check(&format!("{pre}fn f(x: Rc<Point>) -> isize {{\n    let a = &x.y;\n    *a + x.get() + (*x).x\n}}\nfn main() {{}}\n")), vec![]);
+    assert_eq!(check("use std::cell::RefCell;\nuse std::rc::Rc;\nuse std::sync::Mutex;\nfn main() {\n    let m = Mutex::new(vec![1]);\n    let mut g = m.lock().unwrap();\n    g.push(2);\n    *g = vec![3];\n    drop(g);\n    let r = Rc::new(RefCell::new(String::new()));\n    r.borrow_mut().push('a');\n    let mut b = r.borrow_mut();\n    *b = String::from(\"c\");\n}\n"), vec![]);
+}
+
+/// A closure that passes a `&mut` it captures where a `&mut` is expected (`|| foo(x)`, `|| s.put(x)`) borrows `*x`
+/// uniquely: it is `FnMut`, so calling it through a binding that is not `mut` is E0596
+/// (closures/issue-81700-mut-borrow.rs). Where a `&` is expected, the reborrow is shared and the closure is `Fn`
+#[test]
+fn closure_unique_reborrow_is_fn_mut() {
+    let pre = "fn foo(x: &mut u32) { *x += 1; }\nfn look(x: &u32) -> u32 { *x }\nstruct S;\nimpl S {\n    fn put(&self, x: &mut u32) { *x += 1; }\n    fn see(&self, x: &u32) -> u32 { *x }\n}\n";
+    for body in ["fn f(x: &mut u32) {\n    let bar = || foo(x);\n    bar();\n}", "fn f(x: &mut u32, s: &S) {\n    let bar = || s.put(x);\n    bar();\n}", "fn f(x: &mut u32) {\n    let bar = || foo(&mut *x);\n    bar();\n}"] {
+        let d = check(&format!("{pre}{body}\nfn main() {{}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("cannot borrow `bar` as mutable"), "{body}: {d:?}");
+    }
+    assert_eq!(check(&format!("{pre}fn f(x: &mut u32, s: &S) -> u32 {{\n    let bar = || look(x) + s.see(x);\n    let n = bar();\n    let mut baz = || foo(x);\n    baz();\n    baz();\n    n\n}}\nfn main() {{}}\n")), vec![]);
+    // (the closure borrows `*x`: shared for `look(x)`, uniquely for `foo(x)`; E0500 / E0502 against it)
+    for body in ["fn f(x: &mut u32) -> u32 {\n    let bar = || look(x);\n    let mut baz = || foo(x);\n    baz();\n    bar()\n}", "fn f(x: &mut u32) -> u32 {\n    let bar = || look(x);\n    let m = &mut *x;\n    *m += 1;\n    bar()\n}"] {
+        let d = check(&format!("{pre}{body}\nfn main() {{}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("cannot borrow `*x` as mutable"), "{body}: {d:?}");
+    }
+}
+
 /// From the review of #54: a pattern's turbofish gives the matched value's instance (`let P::<u16>(x, _) =
 /// P(300, 1);` makes x a u16) and is checked against it (`S::<u16>(_)` on an `S<u8>`); a struct literal's written
 /// arguments are checked against the expected instance, `_` aside; a union's `&mut` field is not `Copy`; the
@@ -2006,6 +2045,16 @@ fn part11_review() {
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("no method `go`"), "{d:?}");
     assert_eq!(check("trait Id { fn id(self) -> Self where Self: Sized { self } }\nimpl<T> Id for T {}\nfn main() {\n    let mut n = 3u8;\n    let r = &mut n;\n    let r2: &mut u8 = r.id();\n    *r2 += 1;\n}\n"), vec![]);
     assert_eq!(check("fn main() {\n    let mut y = 1;\n    match Some(5) {\n        Some(ref mut r) if (|r: &mut i32| { *r = 2; true })(&mut y) => { *r += 1; }\n        _ => {}\n    }\n}\n"), vec![]);
+}
+
+/// A generic fn whose instances all give a `Copy` type for a parameter its bounds do not make `Copy`
+/// (`dup(1u32)` of `fn dup<T>(x: T) -> (T, T) { (x, x) }`) is checked with placeholders too: moving a T twice is
+/// E0382, as rustc checks the generic body. One with a `T: Copy` bound is not
+#[test]
+fn generic_moves_behind_copy_instances() {
+    let d = check("fn dup<T>(x: T) -> (T, T) {\n    (x, x)\n}\nfn main() {\n    let _ = dup(1u32);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("use of moved value: `x`"), "{d:?}");
+    assert_eq!(check("fn dup<T: Copy>(x: T) -> (T, T) {\n    (x, x)\n}\nfn main() {\n    let _ = dup(1u32);\n}\n"), vec![]);
 }
 
 /// From the second review of #54: a blanket impl's bound holds by an impl for the type itself (`impl Other for ()`
@@ -2053,6 +2102,54 @@ fn part11_review_3() {
     assert!(s.check(src).is_empty());
 }
 
+/// A destructuring `let` with a type annotation binds from a value of the annotation's type: the bindings have its
+/// lifetimes (nll/issue-55401.rs: `let (ref y, _z): (&'a u32, u32) = (&22, 44); *y` as a `&'static u32`)
+#[test]
+fn let_pattern_annotation_lifetimes() {
+    let d = check("fn f<'a>(_x: &'a u32) -> &'static u32 {\n    let (y, _z): (&'a u32, u32) = (&22, 44);\n    y\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn f<'a>(_x: &'a u32) -> &'static u32 {\n    let (ref y, _z): (&'a u32, u32) = (&22, 44);\n    *y\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    let d = check("fn m<'a, 'b>(p: (&'a u32, &'b u32)) -> &'a u32 {\n    let (_, b): (&u32, &'b u32) = p;\n    b\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("`'b` must outlive `'a`"), "{d:?}");
+    assert_eq!(check("struct S<'a> {\n    x: &'a u32,\n}\nfn g<'a>(x: &'a u32) -> &'a u32 {\n    let (y, _): (&'a u32, u32) = (x, 1);\n    y\n}\nfn k<'a>(s: S<'a>) -> &'a u32 {\n    let S { x }: S<'_> = s;\n    x\n}\nfn m<'a, 'b>(p: (&'a u32, &'b u32)) -> &'a u32 {\n    let (a, _): (&'a u32, &u32) = p;\n    a\n}\nfn q<'a>(x: &'a mut u32) -> u32 {\n    let (ref mut y, z): (&'a mut u32, u32) = (x, 3);\n    **y += z;\n    **y\n}\nfn main() {\n    let mut w = 4;\n    println!(\"{} {} {} {}\", g(&1), k(S { x: &7 }), m((&1, &2)), q(&mut w));\n}\n"), vec![]);
+}
+
+/// A closure made where a trait object of a closure trait is expected is checked with that trait's signature, as with
+/// a bound (borrowck/regions-escape-unboxed-closure.rs: `with_int(&mut |y| x = Some(y))` for a
+/// `&mut dyn FnMut(&isize)` is E0521)
+#[test]
+fn closure_dyn_fn_signature() {
+    let d = check("fn with_int(_f: &mut dyn FnMut(&isize)) {}\nfn main() {\n    let mut x: Option<&isize> = None;\n    with_int(&mut |y| x = Some(y));\n    let _ = x;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("borrowed data escapes outside of closure"), "{d:?}");
+    let d = check("fn main() {\n    let mut x: Option<&isize> = None;\n    let f: &mut dyn FnMut(&isize) = &mut |y| x = Some(y);\n    f(&1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("borrowed data escapes outside of closure"), "{d:?}");
+    assert_eq!(check("fn g<'a>(out: &mut Vec<&'a u32>, a: &'a u32) {\n    let f: &mut dyn FnMut(&'a u32) = &mut |y| out.push(y);\n    f(a);\n}\nfn main() {\n    let mut count = 0;\n    {\n        let f: &mut dyn FnMut(&str) = &mut |s| count += s.len();\n        f(\"abc\");\n    }\n    let k: &dyn Fn(&u32) -> &u32 = &|x| x;\n    let first: &dyn Fn(&Vec<u32>) -> Option<&u32> = &|v| v.first();\n    let v = vec![4u32, 5];\n    let mut all = vec![];\n    g(&mut all, &v[0]);\n    println!(\"{} {} {:?} {}\", count, k(&7), first(&v), all.len());\n}\n"), vec![]);
+}
+
+/// An impl's method whose regions make it less general than its trait's declaration: the declaration's regions are
+/// placeholders, the method's own lifetimes variables (lifetimes/lifetime-mismatch-between-trait-and-impl.rs,
+/// trait-impl-mismatch-elided-lifetime-issue-65866.rs)
+#[test]
+fn impl_method_regions_against_the_trait() {
+    let d = check("trait Foo {\n    fn foo<'a>(x: &i32, y: &'a i32) -> &'a i32;\n}\nimpl Foo for () {\n    fn foo<'a>(x: &'a i32, y: &'a i32) -> &'a i32 {\n        if x > y { x } else { y }\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`impl` item signature doesn't match `trait` item signature"), "{d:?}");
+    let d = check("struct Foo;\nstruct Re<'a> {\n    _data: &'a u16,\n}\ntrait Bar {\n    fn bar(&self, r: &mut Re);\n}\nimpl Bar for Foo {\n    fn bar<'a, 'b>(&'a self, _r: &'b mut Re<'a>) {}\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 9, "{d:?}");
+    assert_eq!(check("trait B {\n    fn g<'a>(&self, x: &'a u32) -> &'a u32;\n}\ntrait C {\n    fn h<'a>(x: &'a u32, y: &'a u32) -> &'a u32;\n}\ntrait A {\n    fn f(&self) -> &u32;\n}\nstruct S(u32);\nstruct L<'a>(&'a u32);\nimpl B for S {\n    fn g<'b>(&self, x: &'b u32) -> &'b u32 {\n        x\n    }\n}\nimpl C for S {\n    fn h<'a, 'b>(x: &'a u32, _y: &'b u32) -> &'a u32 {\n        x\n    }\n}\nimpl<'a> A for L<'a> {\n    fn f(&self) -> &u32 {\n        self.0\n    }\n}\nfn main() {\n    let n = 5;\n    println!(\"{} {} {}\", S(1).g(&n), S::h(&n, &n), L(&n).f());\n}\n"), vec![]);
+}
+
+/// A closure called holds what it borrows until the call, after its arguments (regions/
+/// region-bound-on-closure-outlives-call.rs: `(|x| f(x))(call_rec(f))` is E0505; `c(take(v))` with c capturing v)
+#[test]
+fn closure_call_holds_its_captures_through_the_arguments() {
+    let d = check("fn call_rec<F>(mut f: F) -> usize\nwhere\n    F: FnMut(usize) -> usize,\n{\n    (|x| f(x))(call_rec(f))\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot move out of `f` because it is borrowed"), "{d:?}");
+    let d = check("fn take(v: Vec<u32>) -> usize {\n    v.len()\n}\nfn main() {\n    let v = vec![1];\n    let c = |x: usize| v.len() + x;\n    let _ = c(take(v));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot move out of `v` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut v = vec![1u32];\n    let mut c = |x| v.push(x);\n    c(1);\n    c(2);\n    let w = vec![5u32, 6];\n    let d = |x: usize| w.len() + x;\n    let a = d(w.len());\n    let s = String::from(\"hi\");\n    let e = move |k: usize| s.len() + k;\n    let t = e(e(1));\n    println!(\"{:?} {} {}\", v, a, t);\n}\n"), vec![]);
+}
+
 /// An `unsafe fn` of a blanket impl called on `()`, a number, a `&str` or a reference to one, and one of an impl for a
 /// number, is E0133 outside `unsafe` (the receivers dispatched before the method call's own check; from the summary
 /// review of #54)
@@ -2065,4 +2162,139 @@ fn blanket_and_number_unsafe_methods() {
     let d = check("trait P {\n    unsafe fn g(&self) -> u32;\n}\nimpl P for u8 {\n    unsafe fn g(&self) -> u32 {\n        2\n    }\n}\nfn main() {\n    let c = 3u8.g();\n    println!(\"{}\", c);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 10 && d[0].1.contains("E0133"), "{d:?}");
     assert_eq!(check("trait T {\n    unsafe fn f(&self) -> u32 {\n        1\n    }\n}\nimpl<X> T for X {}\ntrait P {\n    unsafe fn g(&self) -> u32;\n}\nimpl P for u8 {\n    unsafe fn g(&self) -> u32 {\n        2\n    }\n}\nfn main() {\n    let r = &5u32;\n    let x = unsafe { ().f() + r.f() + 3u8.f() + \"a\".f() + 4u8.g() };\n    println!(\"{}\", x);\n}\n"), vec![]);
+}
+
+/// A closure's captures held by value outlive the body's call: what they borrow of the body's own escapes it
+/// (borrowck/borrowed-data-escapes-closure-148392.rs: `move || { b = Some(&a); }`, rustc's E0521)
+#[test]
+fn closure_value_captures_outlive_the_call() {
+    let d = check("fn main() {\n    let a = 0;\n    let mut b = None;\n    move || {\n        b = Some(&a);\n    };\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`a` does not live long enough"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let a = 0;\n    let mut b: Option<&i32> = None;\n    let mut c = || {\n        b = Some(&a);\n    };\n    c();\n    println!(\"{:?}\", b);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let s = 5;\n    let mut acc: Vec<&i32> = vec![];\n    let r = &s;\n    let mut c = move || {\n        acc.push(r);\n        acc.len()\n    };\n    let t = String::from(\"ab\");\n    let e = move || {\n        let x = &t;\n        x.len()\n    };\n    println!(\"{} {}\", c(), e());\n}\n"), vec![]);
+}
+
+/// A closure whose kind nothing decides that returns a closure mutating what it captures by reference: the inner
+/// closure's `&mut` of the capture is through the outer's `&mut self` (nll/issue-40510-3.rs,
+/// closures/nested-closure-escape-borrow.rs)
+#[test]
+fn closure_returning_a_closure_that_mutates_its_capture() {
+    let d = check("fn main() {\n    let mut x: Vec<()> = Vec::new();\n    || {\n        || {\n            x.push(())\n        }\n    };\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("captured variable cannot escape `FnMut` closure body"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = 0;\n    || {\n        || {\n            let _y = &mut x;\n        }\n    };\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    assert_eq!(check("fn once<F: FnOnce() -> G, G: FnMut()>(f: F) -> G {\n    f()\n}\nfn main() {\n    let v = vec![1u32];\n    let f = || {\n        || v.len()\n    };\n    let n = f()();\n    let mut c = 0;\n    let mut g = || {\n        c += 1;\n        c\n    };\n    let k = g();\n    let mut w = vec![1u32];\n    let mut h = once(|| || w.push(2));\n    h();\n    println!(\"{} {} {:?}\", n, k, w);\n}\n"), vec![]);
+}
+
+/// A `move` closure holds what its captures held by value hold: returned from a closure that borrows its own capture
+/// for it, the borrow escapes (borrowck/do-not-suggest-adding-move-when-closure-is-already-marked-as-move.rs)
+#[test]
+fn move_closure_holds_what_its_value_captures_hold() {
+    let d = check("fn main() {\n    let mut vec: Vec<i32> = Vec::new();\n    let _closure = move || {\n        vec.clear();\n        let mut iter = vec.iter();\n        move || iter.next()\n    };\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
+    assert_eq!(check("fn f<'a>(s: &'a str) -> impl Fn() -> usize + 'a {\n    move || s.len()\n}\nfn main() {\n    let v = vec![1u32, 2];\n    let r = &v;\n    let g = move || r.len();\n    println!(\"{} {}\", f(\"ab\")(), g());\n}\n"), vec![]);
+}
+
+/// From the review of #64: a session's second check keeps a closure body's kind (its parent taken from the record);
+/// a `Deref` whose target is the type itself is not followed forever; a destructuring `let` writing `'static` turns
+/// the check on, and one with holes (`(&'static u8, _)`) is related element by element; a closure called holds a
+/// borrow of itself through its arguments (`c(drop(c))`, E0505); an impl's `&'static` input elides its result
+#[test]
+fn part12_review() {
+    let src = "fn main() {\n    let mut x: Vec<()> = Vec::new();\n    || {\n        || {\n            x.push(())\n        }\n    };\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    assert_eq!(s.check(src).len(), 1);
+    assert_eq!(s.check(&format!("{src}fn other() {{}}\n")).len(), 1);
+    assert_eq!(s.check(&format!("{src}fn other() {{\n    let _ = 1;\n}}\n")).len(), 1);
+    assert_eq!(s.check(src).len(), 1);
+    let d = check("use std::ops::Deref;\nstruct S {\n    v: u32,\n}\nimpl Deref for S {\n    type Target = S;\n    fn deref(&self) -> &S {\n        self\n    }\n}\nfn main() {\n    let s = S { v: 1 };\n    let c = || s.missing;\n    let _ = c;\n}\n");
+    assert!(!d.is_empty(), "{d:?}");
+    let d = check("fn main() {\n    let x = 5;\n    let (a, _): (&'static i32, u8) = (&x, 0);\n    println!(\"{}\", a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("`x` does not live long enough"), "{d:?}");
+    let d = check("fn f(r: &u8) -> u8 {\n    let (x, _): (&'static u8, _) = (r, 0u8);\n    *x\n}\nfn main() {\n    let v = 1;\n    println!(\"{}\", f(&v));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let s = String::from(\"a\");\n    let c = move |_: ()| s.len();\n    let _ = c(drop(c));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("cannot move out of `c` because it is borrowed"), "{d:?}");
+    let d = check("trait Tr {\n    fn f(x: &u8) -> &u8;\n}\nstruct S;\nimpl Tr for S {\n    fn f(x: &'static u8) -> &u8 {\n        x\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("`impl` item signature doesn't match"), "{d:?}");
+    assert_eq!(check("trait Tr {\n    fn f(x: &'static u8) -> &u8;\n}\nstruct S;\nimpl Tr for S {\n    fn f(x: &'static u8) -> &u8 {\n        x\n    }\n}\nfn main() {\n    let mut n = 0;\n    let mut f = |x: u32| {\n        n += x;\n        x + 1\n    };\n    let a = f(1);\n    let s = String::from(\"ab\");\n    let e = move |k: usize| s.len() + k;\n    let (p, _): (&'static str, _) = (\"x\", 1u8);\n    println!(\"{} {} {} {}\", a, e(e(1)), n, p);\n}\n"), vec![]);
+}
+
+/// From the review of #54 (a follow-up): a chain of blanket impls is followed past eight impls (as far as rustc's
+/// recursion limit), so `().go()` through ten of them is accepted when `()` has the first trait and rejected when it
+/// does not; a cycle of blanket impls does not hold (E0599 in rustc), and is not followed forever
+#[test]
+fn blanket_chain_past_eight() {
+    let chain = "trait Marker {}\ntrait A {}\ntrait B {}\ntrait C {}\ntrait D {}\ntrait E {}\ntrait F {}\ntrait G {}\ntrait H {}\ntrait I {}\nimpl<T: Marker> A for T {}\nimpl<T: A> B for T {}\nimpl<T: B> C for T {}\nimpl<T: C> D for T {}\nimpl<T: D> E for T {}\nimpl<T: E> F for T {}\nimpl<T: F> G for T {}\nimpl<T: G> H for T {}\nimpl<T: H> I for T {}\ntrait Tr {\n    fn go(&self) -> u32 {\n        7\n    }\n}\nimpl<T: I> Tr for T {}\n";
+    assert_eq!(check(&format!("{chain}impl Marker for () {{}}\nfn main() {{\n    println!(\"{{}}\", ().go());\n}}\n")), vec![]);
+    let d = check(&format!("{chain}fn main() {{\n    println!(\"{{}}\", ().go());\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 27 && d[0].1.contains("no method `go`"), "{d:?}");
+    let d = check("trait A {}\ntrait B {}\nimpl<T: B> A for T {}\nimpl<T: A> B for T {}\ntrait Tr {\n    fn go(&self) -> u32 {\n        7\n    }\n}\nimpl<T: A> Tr for T {}\nfn main() {\n    println!(\"{}\", ().go());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 12 && d[0].1.contains("no method `go`"), "{d:?}");
+}
+
+/// From the second review of #64: a write through a chain of 17 `Deref`s with no `DerefMut` is E0594 (the borrow
+/// check follows such a chain as far as rustc's recursion limit, not 16 steps), and a read through it is accepted; a
+/// destructuring `let` whose annotation writes `'static` turns the check on before its initializer is lowered, so a
+/// call in it (`(id(r), 0)`) is related to the annotation
+#[test]
+fn part12_review_2() {
+    let chain = "use std::ops::Deref;\nstruct S0 {\n    field: u32,\n}\nstruct S1(S0);\nimpl Deref for S1 {\n    type Target = S0;\n    fn deref(&self) -> &S0 {\n        &self.0\n    }\n}\nstruct S2(S1);\nimpl Deref for S2 {\n    type Target = S1;\n    fn deref(&self) -> &S1 {\n        &self.0\n    }\n}\nstruct S3(S2);\nimpl Deref for S3 {\n    type Target = S2;\n    fn deref(&self) -> &S2 {\n        &self.0\n    }\n}\nstruct S4(S3);\nimpl Deref for S4 {\n    type Target = S3;\n    fn deref(&self) -> &S3 {\n        &self.0\n    }\n}\nstruct S5(S4);\nimpl Deref for S5 {\n    type Target = S4;\n    fn deref(&self) -> &S4 {\n        &self.0\n    }\n}\nstruct S6(S5);\nimpl Deref for S6 {\n    type Target = S5;\n    fn deref(&self) -> &S5 {\n        &self.0\n    }\n}\nstruct S7(S6);\nimpl Deref for S7 {\n    type Target = S6;\n    fn deref(&self) -> &S6 {\n        &self.0\n    }\n}\nstruct S8(S7);\nimpl Deref for S8 {\n    type Target = S7;\n    fn deref(&self) -> &S7 {\n        &self.0\n    }\n}\nstruct S9(S8);\nimpl Deref for S9 {\n    type Target = S8;\n    fn deref(&self) -> &S8 {\n        &self.0\n    }\n}\nstruct S10(S9);\nimpl Deref for S10 {\n    type Target = S9;\n    fn deref(&self) -> &S9 {\n        &self.0\n    }\n}\nstruct S11(S10);\nimpl Deref for S11 {\n    type Target = S10;\n    fn deref(&self) -> &S10 {\n        &self.0\n    }\n}\nstruct S12(S11);\nimpl Deref for S12 {\n    type Target = S11;\n    fn deref(&self) -> &S11 {\n        &self.0\n    }\n}\nstruct S13(S12);\nimpl Deref for S13 {\n    type Target = S12;\n    fn deref(&self) -> &S12 {\n        &self.0\n    }\n}\nstruct S14(S13);\nimpl Deref for S14 {\n    type Target = S13;\n    fn deref(&self) -> &S13 {\n        &self.0\n    }\n}\nstruct S15(S14);\nimpl Deref for S15 {\n    type Target = S14;\n    fn deref(&self) -> &S14 {\n        &self.0\n    }\n}\nstruct S16(S15);\nimpl Deref for S16 {\n    type Target = S15;\n    fn deref(&self) -> &S15 {\n        &self.0\n    }\n}\nstruct S17(S16);\nimpl Deref for S17 {\n    type Target = S16;\n    fn deref(&self) -> &S16 {\n        &self.0\n    }\n}\n";
+    let d = check(&(chain.to_string() + "fn main() {\n    let mut x = S17(S16(S15(S14(S13(S12(S11(S10(S9(S8(S7(S6(S5(S4(S3(S2(S1(S0 { field: 0 })))))))))))))))));\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("cannot assign to data in dereference of `S1` (E0594)"), "{d:?}");
+    assert_eq!(check(&(chain.to_string() + "fn main() {\n    let x = S17(S16(S15(S14(S13(S12(S11(S10(S9(S8(S7(S6(S5(S4(S3(S2(S1(S0 { field: 0 })))))))))))))))));\n    println!(\"{}\", x.field);\n}\n")), vec![]);
+    let id = "fn id(x: &u8) -> &u8 {\n    x\n}\n";
+    let d = check(&(id.to_string() + "fn f(r: &u8) {\n    let (_x, _): (&'static u8, u8) = (id(r), 0);\n}\nfn main() {\n    let v = 1;\n    f(&v);\n}\n"));
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check(&(id.to_string() + "static X: u8 = 1;\nfn main() {\n    let (p, _): (&'static u8, u8) = (id(&X), 0);\n    println!(\"{}\", p);\n}\n")), vec![]);
+}
+
+/// From the third review of #64: a closure's captures held by value escape at each of its exits, an explicit `return`
+/// and a `?` too (E0521 in rustc), not only at the body's end; a `Deref` chain that does not reach the field within
+/// rustc's recursion limit (128) is E0055, so the borrow check, which follows a place's derefs as far, does not drop
+/// a place the program keeps (a write through 129 `Deref`s), and a chain of 128 is followed
+#[test]
+fn part12_review_3() {
+    let d = check("fn main() {\n    let a = 1;\n    let mut b: Option<&i32> = None;\n    let mut c = move || {\n        b = Some(&a);\n        return;\n    };\n    c();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`a` does not live long enough"), "{d:?}");
+    let d = check("fn get() -> Option<u8> {\n    None\n}\nfn main() {\n    let a = 1;\n    let mut b: Option<&i32> = None;\n    let mut c = move || -> Option<u8> {\n        b = Some(&a);\n        let v = get()?;\n        loop {\n            let _ = v;\n        }\n    };\n    let _ = c();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("`a` does not live long enough"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let a = 1;\n    let mut c = move |k: bool| -> i32 {\n        let r = &a;\n        if k {\n            return *r;\n        }\n        *r + 1\n    };\n    println!(\"{}\", c(true));\n}\n"), vec![]);
+    // (S_n derefs to S_{n-1}; S0 has the field)
+    let chain = |n: usize, body: &str| {
+        let mut s = String::from("use std::ops::Deref;\nstruct S0 {\n    field: u32,\n}\n");
+        let mut v = String::from("S0 { field: 0 }");
+        for i in 1..=n {
+            s += &format!("struct S{i}(S{});\nimpl Deref for S{i} {{\n    type Target = S{};\n    fn deref(&self) -> &S{} {{\n        &self.0\n    }}\n}}\n", i - 1, i - 1, i - 1);
+            v = format!("S{i}({v})");
+        }
+        s + &body.replace("VALUE", &v)
+    };
+    let d = check(&chain(129, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("reached the recursion limit while auto-dereferencing `S129` (E0055)"), "{d:?}");
+    let d = check(&chain(128, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("cannot assign to data in dereference of `S1` (E0594)"), "{d:?}");
+    assert_eq!(check(&chain(128, "fn main() {\n    let x = VALUE;\n    println!(\"{}\", x.field);\n}\n")), vec![]);
+    // (through a generic target, `W<T>: Deref<Target = T>`: as far, then E0055; a shorter chain's write is E0594)
+    let generic = |n: usize, body: &str| {
+        let mut v = String::from("S0 { field: 0 }");
+        for _ in 0..n {
+            v = format!("W({v})");
+        }
+        "use std::ops::Deref;\nstruct S0 {\n    field: u32,\n}\nstruct W<T>(T);\nimpl<T> Deref for W<T> {\n    type Target = T;\n    fn deref(&self) -> &T {\n        &self.0\n    }\n}\n".to_string() + &body.replace("VALUE", &v)
+    };
+    let d = check(&generic(129, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("reached the recursion limit while auto-dereferencing `W<"), "{d:?}");
+    let d = check(&generic(20, "fn main() {\n    let mut x = VALUE;\n    x.field = 1;\n}\n"));
+    assert!(d.len() == 1 && d[0].1.contains("cannot assign to data in dereference of `W` (E0594)"), "{d:?}");
+    assert_eq!(check(&generic(20, "fn main() {\n    let x = VALUE;\n    println!(\"{}\", x.field);\n}\n")), vec![]);
+    // (a target that is a reference, `Target = &'static S`: followed through it, as part of the chain; a cycle so is
+    // E0055, not lowered again and again until the stack overflows)
+    let rr = "use std::ops::Deref;\nstruct S0 {\n    field: u32,\n}\nstatic Z: S0 = S0 { field: 3 };\nstatic RZ: &S0 = &Z;\nstruct W;\nimpl Deref for W {\n    type Target = &'static S0;\n    fn deref(&self) -> &&'static S0 {\n        &RZ\n    }\n}\n";
+    assert_eq!(check(&format!("{rr}fn main() {{\n    let w = W;\n    println!(\"{{}}\", w.field);\n}}\n")), vec![]);
+    let d = check("use std::ops::Deref;\nstruct S;\nstatic SS: S = S;\nstatic RS: &S = &SS;\nimpl Deref for S {\n    type Target = &'static S;\n    fn deref(&self) -> &&'static S {\n        &RS\n    }\n}\nfn main() {\n    let s = S;\n    println!(\"{}\", s.missing);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 13 && d[0].1.contains("reached the recursion limit while auto-dereferencing `S` (E0055)"), "{d:?}");
+    // (a cycle through two types: type inference followed it until the stack overflowed)
+    let d = check("use std::ops::Deref;\nstruct A {\n    x: u32,\n}\nstruct B {\n    y: u32,\n}\nstatic BB: B = B { y: 2 };\nstatic AA: A = A { x: 2 };\nimpl Deref for A {\n    type Target = B;\n    fn deref(&self) -> &B {\n        &BB\n    }\n}\nimpl Deref for B {\n    type Target = A;\n    fn deref(&self) -> &A {\n        &AA\n    }\n}\nfn main() {\n    let a = A { x: 1 };\n    println!(\"{}\", a.missing);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 24 && d[0].1.contains("reached the recursion limit while auto-dereferencing `A` (E0055)"), "{d:?}");
 }
