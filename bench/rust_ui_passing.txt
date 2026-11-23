@@ -2566,8 +2566,11 @@ compile-fail	extern/issue-18819.rs
 run-pass	extern/lgamma-linkage.rs
 compile-fail	extern/not-in-block.rs
 run-pass	extern/windows-tcb-trash-13259.rs
+compile-fail	feature-gates/doc-rust-logo.rs
+compile-fail	feature-gates/feature-gate-abi_llvm-intrinsic.rs
 compile-fail	feature-gates/feature-gate-adt_const_params.rs
 compile-fail	feature-gates/feature-gate-allocator_internals.rs
+compile-fail	feature-gates/feature-gate-allow-internal-unstable-struct.rs
 compile-fail	feature-gates/feature-gate-apx-target-feature.rs
 compile-fail	feature-gates/feature-gate-asm_const_ptr.rs
 compile-fail	feature-gates/feature-gate-asm_goto_with_outputs.rs
@@ -2581,6 +2584,7 @@ compile-fail	feature-gates/feature-gate-builtin_syntax.rs
 compile-fail	feature-gates/feature-gate-cfg-version.rs
 compile-fail	feature-gates/feature-gate-clflushopt_target_feature.rs
 compile-fail	feature-gates/feature-gate-closure_lifetime_binder.rs
+compile-fail	feature-gates/feature-gate-compiler-builtins.rs
 compile-fail	feature-gates/feature-gate-concat_bytes.rs
 compile-fail	feature-gates/feature-gate-const-c-variadic.rs
 compile-fail	feature-gates/feature-gate-custom_attribute.rs
@@ -2591,6 +2595,9 @@ compile-fail	feature-gates/feature-gate-derive-from.rs
 compile-fail	feature-gates/feature-gate-diagnostic-on-move.rs
 check-pass	feature-gates/feature-gate-diagnostic-on-type-error-malformed-args.rs
 compile-fail	feature-gates/feature-gate-diagnostic-on-unmatched-args.rs
+compile-fail	feature-gates/feature-gate-doc_cfg.rs
+compile-fail	feature-gates/feature-gate-doc_masked.rs
+compile-fail	feature-gates/feature-gate-doc_notable_trait.rs
 compile-fail	feature-gates/feature-gate-ergonomic-clones.rs
 compile-fail	feature-gates/feature-gate-explicit_tail_calls.rs
 compile-fail	feature-gates/feature-gate-extern-item-impls.rs
@@ -2616,6 +2623,7 @@ compile-fail	feature-gates/feature-gate-impl_trait_in_assoc_type.rs
 compile-fail	feature-gates/feature-gate-impl_trait_in_fn_trait_return.rs
 check-pass	feature-gates/feature-gate-ineffective_unstable_reexports.rs
 compile-fail	feature-gates/feature-gate-intrinsics.rs
+compile-fail	feature-gates/feature-gate-lang-items.rs
 compile-fail	feature-gates/feature-gate-large-assignments.rs
 compile-fail	feature-gates/feature-gate-lifetime-capture-rules-2024.rs
 compile-fail	feature-gates/feature-gate-link-enzyme-intrinsics-no-gate.rs
@@ -2630,6 +2638,7 @@ compile-fail	feature-gates/feature-gate-movrs_target_feature.rs
 check-pass	feature-gates/feature-gate-multiple_supertrait_upcastable.rs
 compile-fail	feature-gates/feature-gate-mut-ref.rs
 compile-fail	feature-gates/feature-gate-named-fn-trait-parameters.rs
+compile-fail	feature-gates/feature-gate-needs-allocator.rs
 compile-fail	feature-gates/feature-gate-negate-unsigned.rs
 compile-fail	feature-gates/feature-gate-negative_bounds.rs
 compile-fail	feature-gates/feature-gate-never_patterns.rs
@@ -2639,9 +2648,21 @@ compile-fail	feature-gates/feature-gate-offset-of-enum.rs
 compile-fail	feature-gates/feature-gate-optimize_attribute.rs
 compile-fail	feature-gates/feature-gate-overlapping_marker_traits.rs
 compile-fail	feature-gates/feature-gate-patchable-function-entry.rs
+compile-fail	feature-gates/feature-gate-pattern-complexity-limit.rs
 compile-fail	feature-gates/feature-gate-pin_ergonomics.rs
 compile-fail	feature-gates/feature-gate-postfix_match.rs
+compile-fail	feature-gates/feature-gate-prelude_import.rs
+compile-fail	feature-gates/feature-gate-profiler-runtime.rs
 compile-fail	feature-gates/feature-gate-register_tool.rs
+compile-fail	feature-gates/feature-gate-repr-simd.rs
+compile-fail	feature-gates/feature-gate-rust-preserve-none-cc.rs
+compile-fail	feature-gates/feature-gate-rust-tail-cc.rs
+compile-fail	feature-gates/feature-gate-rust_cold_cc.rs
+compile-fail	feature-gates/feature-gate-rustc-attrs-1.rs
+compile-fail	feature-gates/feature-gate-rustc_const_unstable.rs
+compile-fail	feature-gates/feature-gate-rustdoc_internals.rs
+compile-fail	feature-gates/feature-gate-simd.rs
+compile-fail	feature-gates/feature-gate-staged_api.rs
 compile-fail	feature-gates/feature-gate-stmt_expr_attributes.rs
 check-pass	feature-gates/feature-gate-strict_provenance_lints.rs
 compile-fail	feature-gates/feature-gate-super-let.rs
@@ -2651,6 +2672,7 @@ check-pass	feature-gates/feature-gate-test_unstable_lint.rs
 compile-fail	feature-gates/feature-gate-thread_local.rs
 compile-fail	feature-gates/feature-gate-trace_macros.rs
 compile-fail	feature-gates/feature-gate-trait-alias.rs
+compile-fail	feature-gates/feature-gate-transparent_unions.rs
 run-pass	feature-gates/feature-gate-trivial_bounds-lint.rs
 compile-fail	feature-gates/feature-gate-try_blocks.rs
 compile-fail	feature-gates/feature-gate-try_blocks_heterogeneous.rs
@@ -2666,6 +2688,8 @@ check-pass	feature-gates/issue-43106-gating-of-deprecated.rs
 compile-fail	feature-gates/issue-43106-gating-of-derive-2.rs
 check-pass	feature-gates/issue-43106-gating-of-macro_escape.rs
 compile-fail	feature-gates/issue-43106-gating-of-macro_use.rs
+compile-fail	feature-gates/issue-43106-gating-of-stable.rs
+compile-fail	feature-gates/issue-43106-gating-of-unstable.rs
 check-pass	feature-gates/soft-feature-gate-auto_traits.rs
 check-pass	feature-gates/soft-feature-gate-decl_macro.rs
 check-pass	feature-gates/soft-feature-gate-negative_impls.rs
@@ -3725,6 +3749,7 @@ compile-fail	lifetimes/unusual-rib-combinations.rs
 build-pass	limits/limit-huge-struct-derive-debug.rs
 compile-fail	link-native-libs/issue-43926.rs
 compile-fail	link-native-libs/link-attr-validation-early.rs
+compile-fail	linkage-attr/linkage4.rs
 build-pass	linkage-attr/unreferenced-used-static-issue-127052.rs
 check-pass	lint/ambiguous_wide_pointer_comparisons_suggestions.rs
 check-pass	lint/break-with-label-and-unsafe-block.rs
@@ -4920,6 +4945,7 @@ run-pass	packed/packed-struct-match.rs
 compile-fail	packed/packed-struct-transmute.rs
 run-pass	packed/packed-struct-vec.rs
 run-pass	packed/packed-tuple-struct-layout.rs
+compile-fail	panic-runtime/needs-gate.rs
 check-pass	panics/panic-handler-closures.rs
 build-pass	parallel-rustc/assert-found_cycle-issue-115223.rs
 compile-fail	parallel-rustc/cycle_crash-issue-135870.rs
@@ -6070,6 +6096,7 @@ compile-fail	repeat-expr/repeat_count.rs
 compile-fail	repeat-expr/typo-in-repeat-expr-issue-80173.rs
 run-pass	repr/align-with-extern-c-fn.rs
 run-pass	repr/aligned_enum_cast.rs
+compile-fail	repr/explicit-rust-repr-conflicts.rs
 compile-fail	repr/invalid_repr_list_help.rs
 compile-fail	repr/issue-83505-repr-simd.rs
 run-pass	repr/packed-struct-with-enum-53728.rs
@@ -6517,6 +6544,7 @@ compile-fail	span/borrowck-ref-into-rvalue.rs
 compile-fail	span/coerce-suggestions.rs
 compile-fail	span/drop-location-span-error-rust-2021-incompatible-closure-captures-96258.rs
 compile-fail	span/dropck_misc_variants.rs
+compile-fail	span/gated-features-attr-spans.rs
 compile-fail	span/impl-wrong-item-for-trait.rs
 check-pass	span/issue-24690.rs
 compile-fail	span/issue-24805-dropck-child-has-items-via-parent.rs
@@ -6560,6 +6588,7 @@ compile-fail	specialization/specialization-feature-gate-overlap.rs
 compile-fail	stability-attribute/accidentally-stable-intrinsics.rs
 check-pass	stability-attribute/check-stability-issue-138319.rs
 check-pass	stability-attribute/issue-99286-stable-intrinsics.rs
+compile-fail	stability-attribute/stability-attribute-non-staged.rs
 compile-fail	stability-attribute/stability-in-private-module.rs
 compile-fail	static/bad-const-type.rs
 compile-fail	static/duplicated-fields-issue-124464.rs
@@ -7853,6 +7882,7 @@ compile-fail	unsized/unsized-trait-impl-trait-arg.rs
 run-pass	unsized/unsized.rs
 run-pass	unsized/unsized2.rs
 compile-fail	unsized/unsized7.rs
+compile-fail	unstable-feature-bound/unstable_feature_bound_staged_api.rs
 compile-fail	use/unused-trait-with-method-err.rs
 compile-fail	use/use-after-move-based-on-type.rs
 compile-fail	use/use-after-move-self-based-on-type.rs

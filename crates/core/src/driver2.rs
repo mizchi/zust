@@ -1166,7 +1166,9 @@ impl Session2 {
                 }
             }
             // (an unstable ABI: `extern "rust-cold" fn`)
-            if head.contains("extern") {
+            // (`extern` among the item's first names, `pub unsafe extern "C" fn`, from the lexer's identifiers: no
+            // search of its text)
+            if it.idents.iter().take(6).any(|&(a, b)| b - a == 6 && src.get(a as usize..b as usize) == Some("extern")) {
                 if let Some(e) = gated_abi(&src, it.start, it.end, &mut feats) {
                     return Err(e);
                 }
