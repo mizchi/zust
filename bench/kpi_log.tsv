@@ -301,3 +301,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-23	c2fcc60+	E0308 at the branch rustc points at; swallowed-block parse errors; unreachable_code / unused_variables in expressions	0.699	554.844	3778.172	1902.8	-	1831	1512	102	4488	1201.582	64.460	10.511	329.515	735.332	276.464
 2026-11-23	8d6a388	E0658 for more gated attributes and unstable ABIs; dead.rs patterns from the parsed program	0.699	555.310	3778.552	1902.8	-	-	-	-	-	1201.724	64.662	10.511	329.611	735.407	276.567
 2026-11-23	30232e1	E0107 at impls with the wrong number of trait arguments	0.699	555.085	3785.936	1902.8	-	1832	1512	102	4534	1201.066	64.579	10.511	330.197	736.616	276.431
+2026-11-23	41af057	GAT arity, E0449 visibility, E0434 env capture (cheap gates)	0.699	556.125	3786.946	1902.8	-	-	-	-	-	1201.214	64.517	10.511	330.109	736.665	276.468
