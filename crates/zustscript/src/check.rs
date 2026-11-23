@@ -589,7 +589,7 @@ impl Checker {
                     }
                     self.info.wasm.insert(name.clone(), (args.clone(), ret.clone()));
                 }
-                Item::WasmRaw(_) => {}
+                Item::WasmRaw(_) | Item::ImportType { .. } => {}
             }
         }
         let mut errs = vec![];

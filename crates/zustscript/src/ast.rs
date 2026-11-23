@@ -210,7 +210,10 @@ impl Elem {
 
 #[derive(Clone, Debug)]
 pub enum Item {
-    Record { name: String, params: Vec<String>, fields: Vec<(String, TyS)>, pos: Pos },
+    /// (`from`: read from this TS file by an `import type`, and whether the file exports it; see tsimport.rs)
+    Record { name: String, params: Vec<String>, fields: Vec<(String, TyS)>, pos: Pos, from: Option<(std::path::PathBuf, bool)> },
+    /// `import type { User, Post } from "./model.ts";` (replaced by the records before checking, see tsimport.rs)
+    ImportType { names: Vec<(String, Pos)>, from: String, pos: Pos },
     /// (a variant with `-> R` is an effect operation)
     Enum { name: String, params: Vec<String>, variants: Vec<(String, Vec<TyS>, Option<TyS>)>, pos: Pos },
     /// (bounds: `T: Num` / `T: Integer` / `T: Float`; a function with one is monomorphized per numeric type)

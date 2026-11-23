@@ -52,9 +52,29 @@ pub fn sum<T: Num>(xs: Array<T>) -> T { xs.fold(T::zero(), (acc, x) => acc + x) 
 // JSX: コンポーネントは `fn Name(props: Record) -> Jsx`。props は型検査される
 pub fn Row(props: RowProps) -> Jsx { <li onClick={() => props.onPick(props.sample.label)}>{props.sample.label}</li> }
 
-// JS の関数を手書きで宣言して取り込む (TS の型の自動取り込みはまだない)
+// JS の関数を手書きで宣言して取り込む (関数の型の自動取り込みはまだない)
 extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
+
+// TS のファイルのレコード型を、その型定義のとおりに読み込む (下の「TS の型の取り込み」)
+import type { User, Post } from "./model.ts";
 ```
+
+### TS の型の取り込み: `import type`
+
+```zsc
+import type { User, Post } from "./model.ts";   // model.ts の interface / type を、レコード型として読む
+
+pub fn display(u: User) -> String { u.name + " #" + (u.id as i32).to_string() }
+```
+
+- まずは**プレーンなレコード型**だけを読む(src/tsimport.rs)。`interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
+  - フィールドの型: `string` は `String`、`number` は `f64`(JS の number は倍精度。整数にするときは `as i32`)、`boolean` は `bool`、`bigint` は `i64`。配列(`T[]`、`readonly T[]`、`Array<T>`、`ReadonlyArray<T>`)と、同じファイルの別のレコード型
+  - 読み込む型が使う型(`Post` の `author: User`)も一緒に読む。export されていない型でもよい
+  - ファイルの残り(関数、union、総称型など)は、import しない限り読まない。import した型が部分集合の外なら、TS のファイルのその位置でエラーになる(`` `Opt.name` is optional ``、tests/errors/ts_*.zsc)
+  - パスは zsc のファイルからの相対パス。パッケージ(`"react"`)からはまだ読まない
+- 読み込んだ型は、zustscript のレコードと同じに使える(フィールドの読み出し、`{ ..u }` の更新、`==`、`@wasm` との境界)
+- JS の出力には何も足さない(レコードは素のオブジェクト)。`.d.ts` は自分で interface を書かず、`import type { User } from "./model.js"` で TS の型そのものを使う。TS 側は自分の値をそのまま渡せる(tests/ts/consumer.ts を tsc で検査)
+  - export されていない型が `.d.ts` に出るときだけ、TS と同じ形(数値は素の `number`)の interface を書く。TS は構造で型を比べるので、同じ型として扱われる
 
 ### 数値(AssemblyScript と同じ程度の表現力)
 
@@ -527,7 +547,7 @@ zust は到達しない関数をそもそも出さないので、`wasm-gc` に�
 | 3 | effect 多相(関数型の effect 行)、async の effect(Promise で継続を再開) | 2〜4 週 | 生成はジェネレータのまま |
 | 4 | 方向 A の合流の続き: どの関数を wasm に置くかの判断材料(コピーの量と呼び出しの回数の見積もり)、`range(..).fold` などの JS 側での `for` への最適化、文字列やタプルへの部分集合の拡張、データを wasm 側に置いたまま繰り返し処理する仕組み(ハンドル) | 2〜4 週 | 数値、レコード、enum、ループまでは試作済み |
 | 5 | wasm バックエンドの改善(reactor、stackifier、wasm32 レイアウト) | 1〜2 か月 | zust 本体の作業 |
-| 6 | TS の型の取り込み(限定した部分集合、tsc API による抽出) | 範囲次第 | 今は手書きの extern |
+| 6 | TS の型の取り込み(限定した部分集合、tsc API による抽出) | 範囲次第 | プレーンなレコード型は `import type` で読める。関数は手書きの extern |
 
 - 小さな実アプリ(React 上)が書けるまで: 段階 1〜2 で 1.5〜2 か月
 - wasm の島が実用サイズになるまで: 段階 5 が必要

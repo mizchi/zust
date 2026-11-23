@@ -1,0 +1,3 @@
+// expect: the type `Point` is defined twice
+import type { Point } from "../ts/model.ts";
+type Point = { x: f64 }

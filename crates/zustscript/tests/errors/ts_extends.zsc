@@ -1,0 +1,2 @@
+// expect: `Sub` extends another type
+import type { Sub } from "../ts/unsupported.ts";
