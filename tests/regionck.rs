@@ -3234,3 +3234,11 @@ fn part17_review3() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("mismatched types"), "{d:?}");
     assert_eq!(check("use std::cell::RefCell;\nfn bump(x: &mut i32) { *x += 1; }\nfn main() {\n    let c = RefCell::new(1);\n    let mut g = c.borrow_mut();\n    bump(&mut g);\n    let r: &i32 = &g;\n    println!(\"{}\", r);\n}\n"), vec![]);
 }
+
+#[test]
+fn part17_review4() {
+    // (`w.push(..)` of a `w: &mut W` with a `DerefMut` W is `(&mut **w).push(..)`: its loan of w lasts while the
+    // arguments are evaluated, which assign `*w` (E0506))
+    let d = check("use std::ops::{Deref, DerefMut};\nstruct W(Vec<usize>);\nimpl Deref for W { type Target = Vec<usize>; fn deref(&self) -> &Vec<usize> { &self.0 } }\nimpl DerefMut for W { fn deref_mut(&mut self) -> &mut Vec<usize> { &mut self.0 } }\nfn main() {\n    let mut x = W(vec![1]);\n    let w = &mut x;\n    w.push({ *w = W(vec![]); 2 });\n    println!(\"{}\", x.0.len());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("cannot assign to `*w`"), "{d:?}");
+}

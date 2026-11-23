@@ -1308,9 +1308,16 @@ impl Cx<'_> {
             if ev.is_none() {
                 if let Expr::Ref(_, inner) = strip_paren(recv) {
                     // (also `(&mut *w)` through a user's `DerefMut`: the loan its `deref_mut` takes of w)
-                    let root = borrowck::root_local(inner).or_else(|| match strip_paren(inner) {
-                        Expr::Unary(op, x, _) if op == "*" => borrowck::root_local(x),
-                        _ => None,
+                    // (through each `*`: `(&mut **w)` of a `w: &mut W`)
+                    let root = borrowck::root_local(inner).or_else(|| {
+                        let mut base = strip_paren(inner);
+                        while let Expr::Unary(op, x, _) = base {
+                            if op != "*" {
+                                break;
+                            }
+                            base = strip_paren(x);
+                        }
+                        borrowck::root_local(base)
                     });
                     if let (Some(&ln), Some(n)) = (self.bk.loan_of.get(&(&**inner as *const Expr as usize)), root) {
                         if margs.iter().any(|a| borrowck::mentions(a, n)) {
@@ -1515,6 +1522,11 @@ impl Cx<'_> {
             return None;
         }
         if self.prog.method(sid, m).is_some() || self.prog.default_method(sid, m).is_some() {
+            return None;
+        }
+        // (a method of an impl for a reference to it (`impl RefTouch for &mut W`) with a reference receiver: the
+        // probe reaches it by autoref before it derefs)
+        if refs > 0 && self.prog.method(sid, &format!("__ref_{m}")).is_some() {
             return None;
         }
         let deref_target = |sid: u32| -> Option<Ty> {
@@ -2209,6 +2221,9 @@ impl Cx<'_> {
             // (blanket impls that are not told apart: neither is taken, and neither is the trait's default, which one
             // of them may override)
             let ambiguous = std::cell::Cell::new(false);
+            // (the blanket impl's own parameters, solved from its header against the call's Self and trait arguments,
+            // and how many trait arguments come before the method's own generics)
+            let header: std::cell::RefCell<Option<(Vec<Option<Ty>>, usize)>> = std::cell::RefCell::new(None);
             let imp = imp.or_else(|| {
                 // (the trait's own: `Program::blanket` keeps one method of each name, of whichever trait came first, so
                 // the methods of the name are looked through)
@@ -2242,6 +2257,7 @@ impl Cx<'_> {
                                 return None;
                             }
                         }
+                        *header.borrow_mut() = Some((isol, targs.len()));
                     }
                 }
                 let bounds = self.prog.blanket_bounds.get(tr);
@@ -2261,9 +2277,23 @@ impl Cx<'_> {
                 if let Some(st) = isig.self_ty {
                     self.prog.match_ty(st, args[0], &mut s2);
                 }
-                let own = args.len() - 1;
-                let k0 = s2.len().saturating_sub(own);
-                for (j, &a) in args[1..].iter().enumerate() {
+                // (a blanket impl's parameters as its header solved them (`impl<T, U> A<[U; 2]> for T` with
+                // `A<[u16; 2]>`: U is u16), and the method's own generics after the trait's arguments)
+                let (own_from, k0) = match header.borrow_mut().take() {
+                    Some((isol, ntargs)) => {
+                        for (slot, x) in s2.iter_mut().zip(&isol) {
+                            if slot.is_none() {
+                                *slot = *x;
+                            }
+                        }
+                        (1 + ntargs, isol.len())
+                    }
+                    None => {
+                        let own = args.len() - 1;
+                        (1, s2.len().saturating_sub(own))
+                    }
+                };
+                for (j, &a) in args.get(own_from..).unwrap_or(&[]).iter().enumerate() {
                     if let Some(slot) = s2.get_mut(k0 + j) {
                         if slot.is_none() {
                             *slot = Some(a);
