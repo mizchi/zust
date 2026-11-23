@@ -800,7 +800,13 @@ impl Cx<'_> {
         let have = self.prog.structs[sid as usize].args.clone();
         // (fewer arguments than parameters, `E::<u8>::V(..)` of `enum E<T, U = ()>`: the rest are defaults zustc does
         // not read here, not checked)
-        if seg.args.iter().filter(|a| matches!(a, crate::parse::GArg::Ty(_))).count() != have.len() {
+        // (a const argument counts as one of them; more than the parameters is E0107)
+        let written = seg.args.iter().filter(|a| matches!(a, crate::parse::GArg::Ty(_) | crate::parse::GArg::Const(_))).count();
+        if written > have.len() {
+            let n = have.len();
+            return err(path.pos, format!("enum takes {n} generic argument{} but {written} generic arguments were supplied (E0107)", if n == 1 { "" } else { "s" }));
+        }
+        if written != have.len() {
             return Ok(());
         }
         let ts = self.turbofish_targs(base, &seg.args)?;

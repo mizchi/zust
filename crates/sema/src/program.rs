@@ -3713,34 +3713,56 @@ impl Program {
 
     /// A bound b's trait has an associated-type equation among its supertraits (`trait View<U>: Deref<Target = U>`,
     /// the summary's `#Eq` mark), through any number of them
-    pub fn bound_has_eq(&self, b: &str, depth: u32) -> bool {
-        let tr = b.split('<').next().unwrap_or(b).trim();
-        let tr = tr.rsplit("::").next().unwrap_or(tr);
-        depth < 8 && self.trait_supers.get(tr).is_some_and(|ss| ss.iter().any(|s| s == "#Eq" || self.bound_has_eq(s, depth + 1)))
+    pub fn bound_has_eq(&self, b: &str, _depth: u32) -> bool {
+        // (every supertrait once, however long the chain: a visited set, no cutoff)
+        let mut seen: Vec<&str> = vec![];
+        let mut stack: Vec<&str> = vec![b];
+        while let Some(b) = stack.pop() {
+            let tr = b.split('<').next().unwrap_or(b).trim();
+            let tr = tr.rsplit("::").next().unwrap_or(tr);
+            if seen.contains(&tr) {
+                continue;
+            }
+            seen.push(tr);
+            if let Some(ss) = self.trait_supers.get(tr) {
+                if ss.iter().any(|s| s == "#Eq") {
+                    return true;
+                }
+                stack.extend(ss.iter().map(|s| s.as_str()));
+            }
+        }
+        false
     }
 
     /// A bound b gives one of the traits `want`: itself, or through its supertraits. A trait zustc does not know (a
     /// std one's, `Fn(u8)`) gives them when `unknown` says so: as the caller's safe side is
-    pub fn bound_implies(&self, b: &str, want: &[&str], unknown: bool, depth: u32) -> bool {
-        let tr = b.split('<').next().unwrap_or(b).trim();
-        let tr = tr.rsplit("::").next().unwrap_or(tr);
-        if want.contains(&tr) {
-            return true;
+    pub fn bound_implies(&self, b: &str, want: &[&str], unknown: bool, _depth: u32) -> bool {
+        // (every supertrait once, however long the chain: a visited set, no cutoff)
+        let mut seen: Vec<&str> = vec![];
+        let mut stack: Vec<&str> = vec![b];
+        while let Some(b) = stack.pop() {
+            let tr = b.split('<').next().unwrap_or(b).trim();
+            let tr = tr.rsplit("::").next().unwrap_or(tr);
+            if want.contains(&tr) {
+                return true;
+            }
+            if seen.contains(&tr) {
+                continue;
+            }
+            seen.push(tr);
+            if matches!(tr, "Sized" | "?Sized" | "Send" | "Sync" | "Unpin" | "Debug" | "Display" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Clone") {
+                continue;
+            }
+            if self.trait_marker_supers.get(tr).is_some_and(|ms| ms.iter().any(|m| want.contains(&m.as_str()) || (m == "Copy" && want.contains(&"Clone")))) {
+                return true;
+            }
+            match self.trait_supers.get(tr) {
+                Some(ss) => stack.extend(ss.iter().map(|s| s.as_str())),
+                None if unknown && !self.traits.contains_key(tr) => return true,
+                None => {}
+            }
         }
-        // (a chain too long to follow is as a trait not known: the caller's safe side)
-        if depth > 8 {
-            return unknown;
-        }
-        if matches!(tr, "Sized" | "?Sized" | "Send" | "Sync" | "Unpin" | "Debug" | "Display" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Clone") {
-            return false;
-        }
-        if self.trait_marker_supers.get(tr).is_some_and(|ms| ms.iter().any(|m| want.contains(&m.as_str()) || (m == "Copy" && want.contains(&"Clone")))) {
-            return true;
-        }
-        match self.trait_supers.get(tr) {
-            Some(ss) => ss.iter().any(|s| self.bound_implies(s, want, unknown, depth + 1)),
-            None => unknown && !self.traits.contains_key(tr),
-        }
+        false
     }
 
     /// The base b is a closure's struct (`f::{closure#0}`)
