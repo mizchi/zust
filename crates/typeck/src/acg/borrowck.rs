@@ -321,6 +321,19 @@ pub fn direct_temps(prog: &Program, e: &Expr, out: &mut Vec<usize>) {
             }
             return;
         }
+        // (a tuple / array / struct of such calls: each element's (`{ (String::new().as_str(),) }` of edition 2024))
+        Expr::Tuple(xs) | Expr::Array(xs) => {
+            for x in xs {
+                direct_temps(prog, x, out);
+            }
+            return;
+        }
+        Expr::Struct(_, fs, None) => {
+            for f in fs {
+                direct_temps(prog, &f.1, out);
+            }
+            return;
+        }
         Expr::Call(_, a) => a,
         Expr::MethodCall(r, _, _, a, _) => {
             // (the receiver made by a call (`mk(1).get()`): borrowed by a `&self` method, it is a temporary too)

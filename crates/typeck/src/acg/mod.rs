@@ -2403,7 +2403,7 @@ impl Cx<'_> {
                     // (edition 2024: a block's tail is a statement of its own for its temporaries, which go away at
                     // the end of the block (`{ String::new().as_str() }.len()` is E0716). Not the function's body)
                     if !*semi && last && self.prog.edition >= 2024 && self.bk_on() && self.bk.tail != e as *const Expr as usize {
-                        if let e @ Expr::MethodCall(..) = strip_paren(e) {
+                        if let e @ (Expr::MethodCall(..) | Expr::Tuple(..) | Expr::Array(..) | Expr::Struct(..)) = strip_paren(e) {
                             borrowck::direct_temps(self.prog, e, &mut self.bk.direct);
                         }
                     }
@@ -2493,10 +2493,10 @@ impl Cx<'_> {
         }
         // (edition 2024: the tail expression's temporaries go away at the end of the block, before its locals)
         if self.prog.edition >= 2024 {
-            // (a reference the block's value is, into one of them, is used after: `{ String::new().as_str() }.len()`
-            // is E0716)
+            // (a reference the block's value is, or holds, into one of them, is used after:
+            // `{ String::new().as_str() }.len()`, `{ (String::new().as_str(),) }.0.len()` are E0716)
             let held = match (blk.stmts.last(), result.1) {
-                (Some(Stmt::Expr(t, false)), Ty::Ref(..)) if self.bk_on() && self.bk.stmt_temps.len() > bk_mark => {
+                (Some(Stmt::Expr(t, false)), ty) if self.bk_on() && self.bk.stmt_temps.len() > bk_mark && (matches!(ty, Ty::Ref(..)) || borrowck::has_refs(self.prog, ty, 0)) => {
                     let dying = self.bk.stmt_temps[bk_mark..].to_vec();
                     let mut srcs = std::mem::take(&mut tail_srcs);
                     self.bk_direct_pub(t, &mut srcs);

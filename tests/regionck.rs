@@ -2713,4 +2713,15 @@ fn part15_review() {
     assert!(d.len() == 1 && d[0].0 == 13 && d[0].1.contains("`b`"), "{d:?}");
     let d = check(&format!("{tr}fn main() {{\n    let a = [0, 1];\n    a.touch();\n}}\n"));
     assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("as mutable"), "{d:?}");
+    // (the third round: an array of a type not `Copy` is borrowed by such a method, not moved; an `unsafe fn` of the
+    // trait is E0133 outside `unsafe`; `#[allow (unused_mut)]` with a space allows it too; and in edition 2024 a block's
+    // value that holds a reference into its tail's temporaries (`{ (String::new().as_str(),) }.0`) is E0716)
+    assert_eq!(check("trait Touch {\n    fn touch(&mut self);\n    fn look(&self) -> usize;\n}\nimpl Touch for [String; 1] {\n    fn touch(&mut self) { self[0].push('y'); }\n    fn look(&self) -> usize { self[0].len() }\n}\nfn main() {\n    let mut a = [String::from(\"x\")];\n    a.touch();\n    println!(\"{} {}\", a.look(), a.look());\n}\n"), vec![]);
+    let d = check("trait U {\n    unsafe fn danger(&self) -> i32;\n}\nimpl U for [i32; 2] {\n    unsafe fn danger(&self) -> i32 { self[0] }\n}\nfn main() {\n    let a = [1, 2];\n    println!(\"{}\", a.danger());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("E0133"), "{d:?}");
+    assert_eq!(check("#![deny(unused_mut)]\nfn main() {\n    #[allow (unused_mut)]\n    let mut x = 1;\n    let _ = x;\n}\n"), vec![]);
+    let src = "fn main() {\n    let n = { (String::new().as_str(),) }.0.len();\n    println!(\"{}\", n);\n}\n";
+    let d = check_ed(src, 2024);
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check_ed(src, 2021), vec![]);
 }

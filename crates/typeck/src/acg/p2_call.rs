@@ -1639,7 +1639,9 @@ impl Cx<'_> {
             if !matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(..))) {
                 return Ok(None);
             }
-            let (v, vt) = self.expr(recv, None)?;
+            // (an array the method borrows (`&self` / `&mut self`): its place, not a move out of it (`a.touch()` of
+            // `a: [String; 1]`))
+            let (v, vt) = if is_place_expr(recv) && matches!(self.peek(recv), Some(Ty::Array(..))) { self.read_no_move(recv)? } else { self.expr(recv, None)? };
             let Some(mut v) = v else { return Ok(Some((None, Ty::Never))) };
             let mut vt = vt;
             // (参照の参照は 1 段ずつ外し、&str / &[T] / &[T; N] で止める)
@@ -1664,6 +1666,8 @@ impl Cx<'_> {
                 vt = Ty::Ref(mutable, intern(vt));
             }
             let args: Vec<&Expr> = margs.iter().collect();
+            // (an `unsafe fn` of the trait: E0133 outside `unsafe`, as for the other method calls)
+            self.check_unsafe_call(id, msp.start)?;
             return self.call_fn(id, Some((v, vt)), &args, tf, expected, SP).map(Some);
         }
         // (a vector of core::arch too: `impl Vector for __m128i`'s `v.movemask()`)
