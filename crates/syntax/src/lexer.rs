@@ -2044,6 +2044,54 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             k = b;
         }
     }
+    // (whether token k is directly in an impl / trait body: its innermost `{` opens one, `impl .. {` / `trait .. {`)
+    let assoc_body: Vec<bool> = {
+        let mut out = vec![false; toks.len()];
+        let mut stack: Vec<bool> = vec![];
+        for k in 0..toks.len() {
+            if is_sym(k, b'{') {
+                // (the item's head: back to the last `;` / `{` / `}`)
+                let mut j = k;
+                let (mut assoc, mut is_fn) = (false, false);
+                // (inside `<..>` of the head, a brace group is a const argument (`impl T for S<{ 1 }> {`): skipped)
+                let mut angle = 0i32;
+                while j > 0 {
+                    j -= 1;
+                    // (the `>` of `->` / `=>` is none)
+                    let arrow = j > 0 && (is_sym(j - 1, b'-') || is_sym(j - 1, b'=')) && toks[j - 1].2 == toks[j].1;
+                    if is_sym(j, b'>') && !arrow {
+                        angle += 1;
+                    } else if is_sym(j, b'<') {
+                        angle -= 1;
+                    } else if angle > 0 && is_sym(j, b'}') {
+                        let mut d = 1;
+                        while j > 0 && d > 0 {
+                            j -= 1;
+                            if is_sym(j, b'}') {
+                                d += 1;
+                            } else if is_sym(j, b'{') {
+                                d -= 1;
+                            }
+                        }
+                        continue;
+                    }
+                    if is_sym(j, b';') || is_sym(j, b'{') || is_sym(j, b'}') {
+                        break;
+                    }
+                    // (`fn f() -> impl Iterator {` is a fn's body, not an impl's; a fn pointer type (`impl T for fn() {`)
+                    // is no fn: a declaration names one, `fn f`)
+                    is_fn |= is_id(j, b"fn") && j + 1 < k && toks[j + 1].0 == 0;
+                    assoc |= is_id(j, b"impl") || is_id(j, b"trait");
+                }
+                stack.push(assoc && !is_fn);
+            } else if is_sym(k, b'}') {
+                stack.pop();
+            } else {
+                out[k] = stack.last().copied().unwrap_or(false);
+            }
+        }
+        out
+    };
     let mut repl: Vec<(usize, usize, Vec<u8>)> = vec![]; // (開始トークン, 終了トークン (含む), 新しいテキスト)
     // (the items each scope defines, for the glob imports they shadow: built only when there is a glob)
     let own_defs: LSet<(usize, &[u8])> =
@@ -2058,7 +2106,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let prev_path = k >= 2 && is_sym(k - 1, b':') && is_sym(k - 2, b':');
         // (impl / trait の中の関連型の定義 `type Buffer = ..;` は、同じ名前のトップレベルの型があっても変えない)
         let assoc_def = k >= 1 && is_id(k - 1, b"type") && !def_tok[k];
-        if prev_dot || prev_path || assoc_def {
+        // (nor a method's `fn find(&self ..)` in an impl / trait beside a module's `fn find`: only the item is renamed.
+        // A fn nested in a body is renamed with its calls, as before)
+        let method_def = k >= 1 && is_id(k - 1, b"fn") && !def_tok[k] && assoc_body[k];
+        if prev_dot || prev_path || assoc_def || method_def {
             k += 1;
             continue;
         }
