@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795445101613,
+  "lastUpdate": 1795445105513,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -109576,6 +109576,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/b38a9f4986a0ab5f79ec348b1abddfd64df8ff69"
         },
         "date": 1795443449115,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 76.81,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1832,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.67,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1512,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 61.46,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4522,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b274208a7209948e7b7bf1a7b5ac0c6ef55609c7",
+          "message": "Merge pull request #94 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: read TS unions as enums, in TS's own shape",
+          "timestamp": "2026-11-23T23:39:02+09:00",
+          "tree_id": "0e634a607dd520b74de91d76f970e5b0caea904f",
+          "url": "https://github.com/mizchi/zust/commit/b274208a7209948e7b7bf1a7b5ac0c6ef55609c7"
+        },
+        "date": 1795445104860,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
