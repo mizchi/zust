@@ -3360,3 +3360,20 @@ fn part18_review2() {
     // (a binding named as another module's static binds the whole value)
     assert_eq!(check("mod m {\n    #[allow(non_upper_case_globals)]\n    pub static val: i32 = 1;\n}\nstruct G<'a>(&'a mut i32);\nimpl Drop for G<'_> { fn drop(&mut self) { *self.0 += 1; } }\nfn mk(n: &mut i32) -> Option<G<'_>> { Some(G(n)) }\nfn main() {\n    let mut n = 0;\n    match mk(&mut n) {\n        val => { drop(val); n = 1; }\n    };\n    println!(\"{} {}\", n, m::val);\n}\n"), vec![]);
 }
+
+/// A fn item passed where a fn pointer type that binds its regions is expected: it must do for every region the type
+/// binds. `fn baz(x: &S) -> &S` (`for<'a> fn(&'a S) -> &'a S`) for a `for<'cx> fn(&'cx S) -> &'static S` is E0308 in
+/// rustc ("lifetime may not live long enough" here); `foo(x: &S) -> &'static S` for a `for<'cx> fn(&'cx S) -> &'cx S`
+/// is fine. A fn item's value elides its result's regions as its signature does
+#[test]
+fn part19_fn_item_subtyping() {
+    let d = check("struct S;\nfn want(f: for<'cx> fn(&'cx S) -> &'static S) {}\nfn baz(x: &S) -> &S { x }\nfn main() { want(baz); }\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("struct S;\nfn want(f: fn(&S) -> &'static S) {}\nfn baz(x: &S) -> &S { x }\nfn main() { want(baz); }\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    assert_eq!(check("struct S;\nfn foo(x: &S) -> &'static S { panic!() }\nfn baz(x: &S) -> &S { x }\nfn want(f: for<'cx> fn(&'cx S) -> &'cx S) {}\nfn main() { want(foo); want(baz); }\n"), vec![]);
+    // (a `let` annotation: the check takes the item's own tree; the local keeps fresh regions for its calls)
+    let d = check("struct S;\nfn baz(x: &S) -> &S { x }\nfn main() { let g: for<'cx> fn(&'cx S) -> &'static S = baz; }\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(check("struct S;\nfn baz(x: &S) -> &S { x }\nfn f<'a>(x: &'a S) -> &'a S {\n    let g: for<'cx> fn(&'cx S) -> &'cx S = baz;\n    g(x)\n}\nfn main() { let s = S; f(&s); }\n"), vec![]);
+}
