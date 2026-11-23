@@ -2894,3 +2894,20 @@ fn part16_temporary_places() {
     assert_eq!(check("fn mk() -> (i32, i32) {\n    (0, 1)\n}\nfn main() {\n    let v;\n    v = &mk().1;\n    let _ = 0;\n}\n"), vec![]);
     assert_eq!(check("use std::cell::RefCell;\nfn main() {\n    let mut r = 0;\n    let x = RefCell::new((&mut r, 0));\n    let val: &mut i32 = &mut *x.borrow_mut().0;\n    *val = 2;\n}\n"), vec![]);
 }
+
+/// A returned `match`'s arm after the first whose value flows out as it is (not a block, an `if` or a constructor's
+/// call) is reported at the match, as rustc's blame does (regions/regions-free-region-ordering-incorrect.rs); the
+/// first arm, an `if`'s branches and what an arm makes are reported where they are
+#[test]
+fn part16_match_arm_returns() {
+    one_error("fn f<'a, 'b>(c: bool, x: &'a i32, y: &'b i32) -> &'b i32 {\n    if c {\n        y\n    } else {\n        x\n    }\n}\nfn main() {}\n", 5);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    match c {\n        Some(_) => y,\n        None => x,\n    }\n}\nfn main() {}\n", 2);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    let _ = 1;\n    {\n        match c {\n            Some(_) => y,\n            None => x,\n        }\n    }\n}\nfn main() {}\n", 4);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    return match c {\n        Some(_) => y,\n        None => x,\n    };\n}\nfn main() {}\n", 2);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    match c {\n        Some(_) => y,\n        None => {\n            x\n        }\n    }\n}\nfn main() {}\n", 5);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    match c {\n        Some(_) => x,\n        None => y,\n    }\n}\nfn main() {}\n", 3);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    match c {\n        Some(0) => return y,\n        Some(_) => x,\n        None => y,\n    }\n}\nfn main() {}\n", 2);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a (i32, i32), y: &'b i32) -> &'b i32 {\n    match c {\n        Some(0) => y,\n        _ => if true { x.0.max(0); &x.1 } else { y },\n    }\n}\nfn main() {}\n", 4);
+    one_error("fn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> Option<&'b i32> {\n    match c {\n        Some(0) => Some(y),\n        _ => Some(x),\n    }\n}\nfn main() {}\n", 4);
+    one_error("fn id<T>(t: T) -> T { t }\nfn f<'a, 'b>(c: Option<i32>, x: &'a i32, y: &'b i32) -> &'b i32 {\n    match c {\n        Some(0) => y,\n        _ => id(x),\n    }\n}\nfn main() {}\n", 3);
+}

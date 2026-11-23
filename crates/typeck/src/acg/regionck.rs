@@ -2696,32 +2696,47 @@ impl Cx<'_> {
 
     /// The value e is returned
     pub(crate) fn rg_ret(&mut self, e: &Expr) {
+        self.rg_ret_at(e, None);
+    }
+
+    /// rg_ret, with the position its errors are reported at when it is not e's own: a `match` arm's after the first,
+    /// whose value is coerced to the match's type, is reported at the match as rustc does (its blame prefers the
+    /// return of the match's value over that coercion). Not an arm that makes its value (a block, an `if`, a
+    /// constructor's call): rustc reports those inside
+    fn rg_ret_at(&mut self, e: &Expr, at: Option<Sp>) {
         if !self.rg_on() {
             return;
         }
         match e {
-            Expr::Paren(x) => return self.rg_ret(x),
+            Expr::Paren(x) => return self.rg_ret_at(x, at),
             Expr::Block(None, _, b) => {
                 if let Some(Stmt::Expr(t, false)) = b.stmts.last() {
-                    self.rg_ret(t);
+                    self.rg_ret_at(t, at);
                 }
                 return;
             }
             Expr::If(_, b, els) => {
                 if let Some(Stmt::Expr(t, false)) = b.stmts.last() {
-                    self.rg_ret(t);
+                    self.rg_ret_at(t, at);
                 }
                 if let Some(x) = els {
-                    self.rg_ret(x);
+                    self.rg_ret_at(x, at);
                 }
                 return;
             }
             Expr::Match(_, arms) => {
                 if let Some(&m2) = self.rg.alias.get(&(e as *const Expr as usize)) {
-                    return self.rg_ret(m2);
+                    return self.rg_ret_at(m2, at);
                 }
-                for a in arms {
-                    self.rg_ret(&a.body);
+                let made = |b: &Expr| match super::strip_paren(b) {
+                    Expr::Block(..) | Expr::If(..) | Expr::Match(..) | Expr::Struct(..) | Expr::Tuple(..) | Expr::Array(..) => true,
+                    Expr::Call(f, _) => matches!(&**f, Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_uppercase()))),
+                    _ => false,
+                };
+                let sp = super::borrowck::pos(e);
+                for (i, a) in arms.iter().enumerate() {
+                    let at = at.or((i > 0 && sp.line != 0 && !made(&a.body)).then_some(sp));
+                    self.rg_ret_at(&a.body, at);
                 }
                 return;
             }
@@ -2730,7 +2745,7 @@ impl Cx<'_> {
         let Some(rt) = self.rg.ret.clone() else { return };
         let Some((et, tr)) = self.rt_expr(e) else { return };
         let (prog, t) = (self.prog, self.ret);
-        let sp = super::borrowck::pos(e);
+        let sp = at.unwrap_or_else(|| super::borrowck::pos(e));
         // (a result with no regions: nothing escapes through it; the span may be a call's in it)
         if sp.line != 0 && !rt.is_empty() {
             self.rg.ret_sps.push(sp);
