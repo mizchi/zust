@@ -2026,11 +2026,32 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
             }
             let mut sup = vec![];
-            for b in supers {
+            // (`trait Num: Copy`: the marker supertraits a bound of the trait gives, Copy and Clone; `where Self: Copy`
+            // is the same)
+            let mut msup = vec![];
+            for b in supers.iter().chain(g.preds.iter().filter(|(t, _)| matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "Self")).flat_map(|(_, bs)| bs)) {
                 if let Bound::Trait(false, p) = b {
+                    let from_where = !supers.iter().any(|x| std::ptr::eq(x, b));
+                    if matches!(p.segs.last().map(|s| s.name.as_str()), Some("Copy" | "Clone")) && from_where {
+                        msup.push(p.segs.last().unwrap().name.clone());
+                        continue;
+                    }
+                    // (a supertrait with an equation, `trait View<U>: Deref<Target = U>` or `where Self: Deref<Target =
+                    // U>`: a mark, so that a parameter bounded by the trait is not taken as free of equations (acg
+                    // placeholder_mismatch))
+                    if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Bind(..)))) && !sup.iter().any(|x| x == "#Eq") {
+                        sup.push("#Eq".to_string());
+                    }
+                    // (the where clause's other supertraits are left as they were)
+                    if from_where {
+                        continue;
+                    }
                     if let Some(s) = p.segs.last() {
                         if !matches!(s.name.as_str(), "Sized" | "Send" | "Sync" | "Copy" | "Clone" | "Unpin" | "Any" | "Debug" | "Display") {
                             sup.push(s.name.clone());
+                        }
+                        if matches!(s.name.as_str(), "Copy" | "Clone") {
+                            msup.push(s.name.clone());
                         }
                         // (`trait Dup: Clone`: a marker no trait has the name of, so that a `T: Dup` is not taken
                         // for a type that is surely not Clone (Program::surely_not_clone))
@@ -2058,6 +2079,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             collect_generics(g, &mut sm.trait_generics)?;
             if !sup.is_empty() {
                 sm.trait_generics.push(("#supers".to_string(), sup));
+            }
+            if !msup.is_empty() {
+                sm.trait_generics.push(("#marker_supers".to_string(), msup));
             }
             if !self_outlives.is_empty() {
                 sm.trait_generics.push((crate::types::SELF_OUTLIVES.to_string(), self_outlives));

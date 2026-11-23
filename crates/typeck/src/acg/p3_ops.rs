@@ -9,6 +9,33 @@ fn paren(e: &Expr) -> Expr {
 }
 
 impl Cx<'_> {
+    /// The place an operator's error is reported at: the binary expression's start
+    fn op_pos(&self, e: &Expr) -> Sp {
+        if let Expr::Binary(_, _, _, sp) | Expr::AssignOp(_, _, _, sp) = e { sp.start } else { SP }
+    }
+
+    /// rustc's E0369 message for `l op r` (a placeholder `T#` shown as `T`, an unsuffixed literal as `{integer}` /
+    /// `{float}`, an unknown type as `_`)
+    fn cannot_op(&self, op: &str, lt: Ty, right: &Expr) -> String {
+        let show = |t: Ty| self.prog.tn(t).replace('#', "").replace("__u_", "");
+        let l = show(lt);
+        // (a float first: `1E3` passes is_int_lit too)
+        let r = if super::p2_call::is_float_lit(right) {
+            "{float}".to_string()
+        } else if super::p2_call::is_int_lit(right) {
+            "{integer}".to_string()
+        } else {
+            self.peek(right).map_or("_".to_string(), show)
+        };
+        match op {
+            "+" => format!("cannot add `{r}` to `{l}` (E0369)"),
+            "-" => format!("cannot subtract `{r}` from `{l}` (E0369)"),
+            "*" => format!("cannot multiply `{l}` by `{r}` (E0369)"),
+            "/" => format!("cannot divide `{l}` by `{r}` (E0369)"),
+            _ => format!("cannot calculate the remainder of `{l}` divided by `{r}` (E0369)"),
+        }
+    }
+
     pub(crate) fn unary(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Unary(op, x, _) = e else { unreachable!() };
         let op = op.as_str();
@@ -201,9 +228,16 @@ impl Cx<'_> {
         // instance is left unchecked)
         // (only where placeholders are: zustc check's last round)
         let placeholders = matches!(op, "+" | "-" | "*" | "/" | "%") && self.prog.any_placeholder();
-        if let Some(Ty::Ref(_, Ty::Struct(sid))) = if placeholders { self.peek(left) } else { None } {
+        if let Some(lt @ Ty::Ref(_, Ty::Struct(sid))) = if placeholders { self.peek(left) } else { None } {
             if self.prog.structs[*sid as usize].placeholder.is_some() && self.peek(right).is_some_and(|r| !matches!(r, Ty::Ref(..) | Ty::Struct(_))) {
                 return err(SP, "an operator on a reference to a type parameter and a value of another type");
+            }
+            // (`&a + a` with `a: N`: no bound of N's is for `&N`. Reported only when no where clause may give it, which
+            // placeholder_mismatch tells)
+            if let (Some(Ty::Struct(_)), "+" | "-" | "*" | "/" | "%", false) = (self.peek(right), op, assign) {
+                if self.prog.structs[*sid as usize].placeholder.is_some() {
+                    return err(self.op_pos(e), self.cannot_op(op, lt, right));
+                }
             }
         }
         if let Some(lt @ Ty::Struct(sid)) = if placeholders { self.peek(left) } else { None } {
@@ -229,18 +263,12 @@ impl Cx<'_> {
                 }
                 let named = |b: &String| b.split('<').next().is_some_and(|n| gives(prog, n, &want, 0));
                 if !bs.iter().any(named) {
-                    let show = |t: Ty| self.prog.tn(t).replace('#', "");
-                    let (l, r) = (show(lt), self.peek(right).map_or("_".to_string(), show));
-                    let pos = if let Expr::Binary(_, _, _, sp) | Expr::AssignOp(_, _, _, sp) = e { sp.start } else { SP };
-                    let m = match (tr, assign) {
-                        (_, true) => format!("binary assignment operation `{op}=` cannot be applied to type `{l}` (E0368)"),
-                        ("Add", _) => format!("cannot add `{r}` to `{l}` (E0369)"),
-                        ("Sub", _) => format!("cannot subtract `{r}` from `{l}` (E0369)"),
-                        ("Mul", _) => format!("cannot multiply `{l}` by `{r}` (E0369)"),
-                        ("Div", _) => format!("cannot divide `{l}` by `{r}` (E0369)"),
-                        _ => format!("cannot calculate the remainder of `{l}` divided by `{r}` (E0369)"),
+                    let m = if assign {
+                        format!("binary assignment operation `{op}=` cannot be applied to type `{}` (E0368)", self.prog.tn(lt).replace('#', ""))
+                    } else {
+                        self.cannot_op(op, lt, right)
                     };
-                    return err(pos, m);
+                    return err(self.op_pos(e), m);
                 }
             }
         }
@@ -280,6 +308,33 @@ impl Cx<'_> {
                     self.bk.op_call = ne as *const Expr as usize;
                 }
                 return self.expr(ne, expected);
+            }
+            // (E0369 / E0368: an arithmetic operator on a struct or enum of the program's that has no impl of its trait:
+            // `W(1) + 1`, `a + b` of `a: Wrapper<T>`)
+            if matches!(op, "+" | "-" | "*" | "/" | "%") && self.user_code && self.prog.structs[sid as usize].placeholder.is_none() {
+                let b = self.prog.base_of(sid);
+                let own = self.prog.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prog.prelude_from);
+                let tr = match (op, assign) {
+                    ("+", false) => "Add",
+                    ("-", false) => "Sub",
+                    ("*", false) => "Mul",
+                    ("/", false) => "Div",
+                    ("%", false) => "Rem",
+                    ("+", true) => "AddAssign",
+                    ("-", true) => "SubAssign",
+                    ("*", true) => "MulAssign",
+                    ("/", true) => "DivAssign",
+                    _ => "RemAssign",
+                };
+                let lt = Ty::Struct(sid);
+                if own && !self.prog.is_closure(b) && self.prog.default_method(sid, m).is_none() && !self.prog.implements(lt, tr) {
+                    let msg = if assign {
+                        format!("binary assignment operation `{op}=` cannot be applied to type `{}` (E0368)", self.prog.tn(lt))
+                    } else {
+                        self.cannot_op(op, lt, right)
+                    };
+                    return err(self.op_pos(e), msg);
+                }
             }
         }
         // `&a + &b` (`impl Add for &M`): `(&a).__ref_add(&b)`
