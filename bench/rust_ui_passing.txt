@@ -6429,7 +6429,6 @@ compile-fail	span/issue28498-reject-lifetime-param.rs
 compile-fail	span/issue28498-reject-passed-to-fn.rs
 compile-fail	span/issue28498-reject-trait-bound.rs
 check-pass	span/let-offset-of.rs
-compile-fail	span/lint-unused-unsafe.rs
 check-pass	span/macro-span-replacement.rs
 compile-fail	span/macro-ty-params.rs
 compile-fail	span/missing-unit-argument.rs
