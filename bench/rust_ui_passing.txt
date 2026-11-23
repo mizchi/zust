@@ -928,6 +928,7 @@ compile-fail	borrowck/borrowck-use-uninitialized-in-cast-trait.rs
 compile-fail	borrowck/borrowck-use-uninitialized-in-cast.rs
 compile-fail	borrowck/borrowck-vec-pattern-element-loan.rs
 compile-fail	borrowck/borrowck-vec-pattern-loan-from-mut.rs
+compile-fail	borrowck/borrowck-vec-pattern-move-tail.rs
 compile-fail	borrowck/borrowck-vec-pattern-tail-element-loan.rs
 compile-fail	borrowck/borrowck-while-break.rs
 compile-fail	borrowck/borrowck-while-cond.rs
@@ -2604,6 +2605,7 @@ compile-fail	feature-gates/feature-gate-impl_trait_in_fn_trait_return.rs
 check-pass	feature-gates/feature-gate-ineffective_unstable_reexports.rs
 compile-fail	feature-gates/feature-gate-intrinsics.rs
 compile-fail	feature-gates/feature-gate-large-assignments.rs
+compile-fail	feature-gates/feature-gate-lifetime-capture-rules-2024.rs
 compile-fail	feature-gates/feature-gate-link-enzyme-intrinsics-no-gate.rs
 compile-fail	feature-gates/feature-gate-linkage.rs
 compile-fail	feature-gates/feature-gate-log_syntax.rs
@@ -3175,6 +3177,7 @@ compile-fail	impl-trait/precise-capturing/bad-lifetimes.rs
 compile-fail	impl-trait/precise-capturing/bad-params.rs
 compile-fail	impl-trait/precise-capturing/bound-modifiers.rs
 check-pass	impl-trait/precise-capturing/elided.rs
+compile-fail	impl-trait/precise-capturing/forgot-to-capture-lifetime.rs
 check-pass	impl-trait/precise-capturing/higher-ranked.rs
 compile-fail	impl-trait/precise-capturing/migration-note.rs
 check-pass	impl-trait/precise-capturing/overcaptures-2024-but-fine.rs
@@ -3199,6 +3202,7 @@ check-pass	impl-trait/trait_resolution.rs
 compile-fail	impl-trait/trait_type.rs
 check-pass	impl-trait/transmute/in-defining-scope.rs
 check-pass	impl-trait/transmute/outside-of-defining-scope.rs
+compile-fail	impl-trait/type_parameters_captured.rs
 compile-fail	impl-trait/universal-mismatched-type.rs
 run-pass	impl-trait/universal_hrtb_anon.rs
 run-pass	impl-trait/universal_hrtb_named.rs
@@ -4661,6 +4665,7 @@ compile-fail	nll/issue-69114-static-mut-ty.rs
 compile-fail	nll/issue-69114-static-ty.rs
 compile-fail	nll/issue-95272.rs
 compile-fail	nll/issue-98170.rs
+compile-fail	nll/issue-98693.rs
 check-pass	nll/lint-no-err.rs
 compile-fail	nll/lub-if.rs
 compile-fail	nll/lub-match.rs
@@ -6344,6 +6349,8 @@ compile-fail	self/arbitrary-self-types-dyn-incompatible.rs
 compile-fail	self/arbitrary_self_type_mut_difference.rs
 compile-fail	self/arbitrary_self_types_needing_mut_pin.rs
 check-pass	self/arbitrary_self_types_pin_lifetime-async.rs
+compile-fail	self/arbitrary_self_types_pin_lifetime_impl_trait-async.rs
+compile-fail	self/arbitrary_self_types_pin_lifetime_impl_trait.rs
 compile-fail	self/arbitrary_self_types_pin_lifetime_mismatch-async.rs
 compile-fail	self/arbitrary_self_types_pin_lifetime_mismatch.rs
 compile-fail	self/arbitrary_self_types_pin_needing_borrow.rs

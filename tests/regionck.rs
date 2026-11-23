@@ -2473,3 +2473,80 @@ fn part13_review() {
     assert_eq!(check("struct S {\n    n: u8,\n}\nimpl S {\n    fn get(&self) -> &u8 {\n        &self.n\n    }\n    fn take(&mut self, _x: &u8) {}\n    fn val(&self) -> u8 {\n        self.n\n    }\n    fn put(&mut self, _x: u8) {}\n}\nfn main() {\n    let mut s = S { n: 1 };\n    s.put(s.val());\n    s.put(*s.get());\n    let t = S { n: 2 };\n    s.take(t.get());\n    let a = String::from(\"a\");\n    let mut v: Vec<&str> = vec![&a];\n    v.push(v.first().unwrap().clone());\n    v.push(*v.last().unwrap());\n    v.push(v[0]);\n    let n = v.len();\n    v.truncate(n - 1);\n    let mut w = vec![1, 2];\n    w.push(w.len());\n    w.push(*w.last().unwrap());\n    let mut st = String::from(\"x\");\n    st.push_str(&st.clone());\n    println!(\"{} {:?} {:?} {}\", s.n, v, w, st);\n}\n"), vec![]);
     assert_eq!(check("trait Dup: Clone {}\n#[derive(Clone)]\nstruct W(u8);\nimpl Dup for W {}\nfn duplicate<T: Dup>(x: T) -> T {\n    (&x).clone()\n}\nfn main() {\n    let w = duplicate(W(3));\n    println!(\"{}\", w.0);\n}\n"), vec![]);
 }
+
+/// A local holding a reference passed to a `&mut self` method of what it may borrow (`let w = &v; v.ext(w)`): what
+/// it holds is held until the `&mut` is taken (E0502). One that borrows something else is fine
+#[test]
+fn part14_two_phase_through_a_local() {
+    let d = check("struct S(Vec<i32>);\nimpl S {\n    fn ext(&mut self, _b: &S) {}\n    fn add(&mut self, _b: &[i32]) {}\n}\nfn main() {\n    let mut v = S(vec![0]);\n    let w = &v;\n    v.ext(w);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("cannot borrow `v` as mutable because it is also borrowed as immutable"), "{d:?}");
+    assert_eq!(check("struct S(Vec<i32>);\nimpl S {\n    fn ext(&mut self, _b: &S) {}\n    fn add(&mut self, _b: &[i32]) {}\n}\nfn main() {\n    let mut v = S(vec![0]);\n    let u = S(vec![1]);\n    let w = &u;\n    v.ext(w);\n    let x = vec![3];\n    let r = &x;\n    v.add(r);\n    let a = String::from(\"a\");\n    let mut names: Vec<&str> = vec![];\n    let s: &str = &a;\n    names.push(s);\n    let t = names[0];\n    names.push(t);\n    println!(\"{}\", v.0.len() + names.len());\n}\n"), vec![]);
+}
+
+/// `[_, ref tail @ ..]` of an array borrows the elements between: tail holds the loan (E0506 on `a[2] = 0` while it
+/// lives, borrowck/borrowck-vec-pattern-move-tail.rs); once tail is not used, the array may be written
+#[test]
+fn part14_ref_rest_binding() {
+    let d = check("fn main() {\n    let mut a = [1, 2, 3, 4];\n    let t = match a {\n        [_, ref tail @ ..] => tail,\n    };\n    a[2] = 0;\n    println!(\"{}\", t[0]);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut a = [1, 2, 3, 4];\n    let t = match a {\n        [_, ref tail @ ..] => tail.len(),\n    };\n    a[2] = 0;\n    let [x, ref rest @ .., y] = a;\n    let n = rest.len();\n    a[0] = 9;\n    println!(\"{} {} {} {} {:?}\", t, x, y, n, a);\n}\n"), vec![]);
+}
+
+/// A closure's call of a fn that requires `T: 'static` of its function's T (nll/issue-98693.rs): E0310 when no bound
+/// of the function gives it (`T: 'static`, a where clause, a trait whose `Self` is `'static`)
+#[test]
+fn part14_static_param_in_closure() {
+    let d = check("fn s2<T: 'static>() {}\nfn test2<T>() {\n    let c = || {\n        s2::<T>();\n    };\n    c();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("the parameter type `T` may not live long enough"), "{d:?}");
+    assert_eq!(check("use std::any::Any;\nfn s2<T: 'static>() {}\nfn a<T: 'static>() {\n    let c = || s2::<T>();\n    c();\n}\nfn b<T>()\nwhere\n    T: 'static,\n{\n    let c = || s2::<T>();\n    c();\n}\nfn d<T: Any>() {\n    let c = || s2::<T>();\n    c();\n}\ntrait St: 'static {}\nfn e<T: St>() {\n    let c = || s2::<T>();\n    c();\n}\nfn g<T: Send + 'static>(t: T) {\n    let c = move || {\n        std::thread::spawn(move || drop(t));\n    };\n    c();\n}\nfn main() {\n    a::<u8>();\n    b::<u8>();\n\n    g(1u8);\n}\n"), vec![]);
+}
+
+/// An `impl Trait + 'static` result: its hidden type's regions are 'static, whatever the parameters are
+/// (impl-trait/type_parameters_captured.rs): returning a T is E0310, a `&'a u8` "lifetime may not live long enough"
+#[test]
+fn part14_static_opaque_result() {
+    let d = check("trait Any {}\nimpl<T> Any for T {}\nfn foo<T>(x: T) -> impl Any + 'static {\n    x\n}\nfn bar<T>(x: T) -> Box<dyn Any + 'static> {\n    Box::new(x)\n}\nfn baz<'a>(x: &'a u8) -> impl Any + 'static {\n    x\n}\nfn main() {}\n");
+    assert!(d.len() == 3 && d[0].0 == 4 && d[0].1.contains("E0310") && d[1].0 == 7 && d[2].0 == 10 && d[2].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("use std::fmt::Display;\ntrait Any {}\nimpl<T> Any for T {}\nfn f() -> impl Fn() + 'static {\n    || {}\n}\nfn g(x: u8) -> impl Iterator<Item = u8> + 'static {\n    std::iter::once(x)\n}\nfn h<T: 'static>(x: T) -> impl Any + 'static {\n    x\n}\nfn k(s: &str) -> impl Display + 'static {\n    s.to_string()\n}\nfn m<'a>(x: &'a u8) -> impl Fn() -> u8 + 'static {\n    let v: u8 = *x;\n    move || v\n}\nfn n(v: &[u8]) -> impl Iterator<Item = u8> + 'static {\n    v.to_vec().into_iter()\n}\nstruct W;\nimpl W {\n    fn it(&self) -> impl Display + 'static {\n        5\n    }\n}\nfn main() {\n    f()();\n    let _ = g(1).count();\n    let _ = h(1u8);\n    println!(\"{} {} {} {}\", k(\"a\"), m(&3)(), n(&[1]).count(), W.it());\n}\n"), vec![]);
+}
+
+/// Before edition 2024, an `impl Trait` result whose bounds name no lifetime captures none: what it returns may not
+/// borrow through a parameter's reference, nor be one (E0700; impl-trait/precise-capturing/forgot-to-capture-lifetime.rs).
+/// What is copied or owned, and a `+ '_` or `Item = &'a u8` that names the lifetime, are fine
+#[test]
+fn part14_rpit_captures_no_lifetime() {
+    let d = check("use std::fmt::Display;\nfn s(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn t(x: &u8) -> impl Display {\n    x\n}\nfn main() {}\n");
+    assert!(d.len() == 2 && d[0].0 == 3 && d[1].0 == 6 && d[0].1.contains("E0700"), "{d:?}");
+    assert_eq!(check("use std::fmt::Display;\nfn a(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.to_vec().into_iter()\n}\nfn b(x: &str) -> impl Display {\n    x.to_string()\n}\nfn c(x: &u8) -> impl Display {\n    *x\n}\nfn d(x: &[u8]) -> impl Iterator<Item = u8> + '_ {\n    x.iter().copied()\n}\nfn e<'a>(x: &'a [u8]) -> impl Iterator<Item = &'a u8> {\n    x.iter()\n}\nfn f(x: &[u8]) -> impl Fn() -> usize {\n    let n: usize = x.len();\n    move || n\n}\nfn main() {\n    println!(\"{} {} {} {} {} {}\", a(&[1]).count(), b(\"x\"), c(&1), d(&[2]).count(), e(&[3]).count(), f(&[4])());\n}\n"), vec![]);
+    // (a parameter whose regions are 'static: `x: &'static u8`, `'a: 'static`)
+    assert_eq!(check("use std::fmt::Display;\nfn a(x: &'static u8) -> impl Display {\n    x\n}\nfn b<'a: 'static>(x: &'a [u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn c(_y: &u8, x: &'static str) -> impl Display {\n    x\n}\nfn main() {}\n"), vec![]);
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2024, ..Options2::default() });
+    assert!(s.check("use std::fmt::Display;\nfn s(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn t(x: &u8) -> impl Display {\n    x\n}\nfn main() {}\n").is_empty());
+}
+/// From the third review of #69: a closure's call that needs `T: 'static` takes it from `T: 'a` with `'a: 'static`,
+/// and from a supertrait whose `Self` must be 'static (`trait Derived: Base`, `trait Base: 'static`); a T in the type
+/// argument (`needs_static::<Option<T>>()`) needs it too (E0310)
+#[test]
+fn part14_review2() {
+    assert_eq!(check("fn needs_static<T: 'static>() {}\nfn f<'a, T>()\nwhere\n    T: 'a,\n    'a: 'static,\n{\n    let c = || needs_static::<T>();\n    c();\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("fn needs_static<T: 'static>() {}\ntrait Base: 'static {}\ntrait Derived: Base {}\nfn f<T: Derived>() {\n    let c = || needs_static::<T>();\n    c();\n}\nfn main() {}\n"), vec![]);
+    let d = check("fn needs_static<T: 'static>() {}\nfn f<T>() {\n    let c = || needs_static::<Option<T>>();\n    c();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0310"), "{d:?}");
+    assert_eq!(check("fn needs_static<T: 'static>() {}\nfn f<T: 'static>() {\n    let c = || needs_static::<Option<Box<T>>>();\n    c();\n}\nfn main() {}\n"), vec![]);
+    // (a block argument whose value is such a local reserves the receiver too: `v.ext({ w })` is E0502)
+    let d = check("struct V;\nimpl V {\n    fn ext(&mut self, _: &V) {}\n}\nfn main() {\n    let mut v = V;\n    let w = &v;\n    v.ext({ w });\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("cannot borrow `v` as mutable"), "{d:?}");
+    assert_eq!(check("struct V;\nimpl V {\n    fn ext(&mut self, _: &V) {}\n}\nfn main() {\n    let mut v = V;\n    let u = V;\n    let w = &u;\n    v.ext({ w });\n    v.ext({ let x = &u; x });\n}\n"), vec![]);
+}
+
+/// From the review of #69: a parameter's reference bound to a local (`let y = x;`) is still captured by a no-capture
+/// `impl Trait` (E0700); a parameter is 'static through outlives bounds (`'a: 'b, 'b: 'static`) and with an ADT of no
+/// lifetime (`&'static String`); `_: &'static T` implies `T: 'static` for a closure's call
+#[test]
+fn part14_review() {
+    let d = check("use std::fmt::Display;\nfn f(x: &u8) -> impl Display {\n    let y = x;\n    y\n}\nfn g(x: &[u8]) -> impl Iterator<Item = u8> {\n    let y = x;\n    y.iter().copied()\n}\nfn main() {}\n");
+    assert!(d.iter().any(|x| x.0 == 4) && d.iter().any(|x| x.0 == 8) && d.iter().all(|x| x.0 == 4 || x.0 == 8), "{d:?}");
+    assert_eq!(check("fn f<'a: 'b, 'b: 'static>(x: &'a u8) -> impl std::fmt::Display {\n    x\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("fn f(x: &'static String) -> impl std::fmt::Display {\n    x\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("fn needs_static<T: 'static>() {}\nfn f<T>(_: &'static T) {\n    let c = || needs_static::<T>();\n    c();\n}\nfn main() {}\n"), vec![]);
+}
