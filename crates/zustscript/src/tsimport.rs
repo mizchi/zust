@@ -157,8 +157,10 @@ fn lex(src: &str) -> Vec<Tok> {
                 '(' => {
                     // (the keyword, not a property named like it: `obj.if(4) / 2` divides)
                     let n = out.len();
-                    let kw = matches!(out.last().map(|t| &t.t), Some(T::Ident(k)) if matches!(k.as_str(), "if" | "while" | "for" | "with"));
-                    parens.push(kw && !(n >= 2 && out[n - 2].t == T::P('.')));
+                    // (`for await (..)`: the keyword is the one before `await`)
+                    let is = |j: usize, ks: &[&str]| matches!(&out[j].t, T::Ident(k) if ks.contains(&k.as_str())) && !(j >= 1 && out[j - 1].t == T::P('.'));
+                    let kw = n >= 1 && (is(n - 1, &["if", "while", "for", "with"]) || (is(n - 1, &["await"]) && n >= 2 && is(n - 2, &["for"])));
+                    parens.push(kw);
                     false
                 }
                 ')' => parens.pop().unwrap_or(false),

@@ -10,6 +10,8 @@ const quarter = (half) / 2;
 // (a property named like a keyword is not one: this `/` divides)
 const obj = { if: (n: number) => n };
 function f() { return obj.if(4) / 2; }
+// (`for await (..)` is a condition too: a regular expression follows it)
+async function g(xs: AsyncIterable<string>) { for await (const x of xs) /[}]/.test(x); }
 
 /** a user */
 export interface User {
