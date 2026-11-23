@@ -1129,8 +1129,8 @@ impl Cx<'_> {
             let user = self.prog.item_of.get(id as usize).copied().flatten().is_some_and(|i| i < self.prog.prelude_from);
             self.rg_recv(recv, recv_ty, sid, user.then_some(e));
         }
-        // (the region check reports at the method call: call_fn is given no span for it)
-        if self.rg_on() {
+        // (the region check reports at the method call: call_fn is given no span for it; also when it may begin there)
+        if self.rg_on() || self.rg.eligible {
             self.rg.call_sp = borrowck::pos(e);
         }
         let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);

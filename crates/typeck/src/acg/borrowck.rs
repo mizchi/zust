@@ -1449,7 +1449,12 @@ impl Bk {
                     _ => format!("cannot assign to `{}`, which is behind a `&` reference", path_str(&self.locals, p)),
                 },
             };
-            let sp = if let Acc::Borrow(l) = a { self.loans[l as usize].at } else { sp };
+            // (a closure's capture through the `&`: at the closure, as rustc reports it, not at the use in its body)
+            let sp = match a {
+                Acc::Borrow(l) if self.loans[l as usize].capture => self.loans[l as usize].sp,
+                Acc::Borrow(l) => self.loans[l as usize].at,
+                _ => sp,
+            };
             errs.push(BkError { sp, msg });
             return;
         }

@@ -3718,8 +3718,9 @@ impl Cx<'_> {
         if let Expr::Path(_, p) = &**func {
             self.check_unsafe_call(id, p.pos)?;
         }
-        // (the region check reports at the call: call_fn is given no span for it)
-        if self.rg_on() {
+        // (the region check reports at the call: call_fn is given no span for it. Also when it is off, but may begin
+        // at the call (a callee that requires 'static: `s::<T>()`))
+        if self.rg_on() || self.rg.eligible {
             self.rg.call_sp = borrowck::pos(c);
         }
         // (the lifetimes written on the type: `A::<'a>::new`, `<A<'a>>::new`, `<A<'a> as Tr>::f`)

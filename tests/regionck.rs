@@ -2387,3 +2387,14 @@ fn part13_static_let_in_closure() {
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
     assert_eq!(check("fn f(x: &usize) {\n    let c = || {\n        let p: &'static str = \"lit\";\n        let q: &'static [u8] = &[1, 2];\n        p.len() + q.len() + *x\n    };\n    println!(\"{}\", c());\n}\nfn main() {\n    f(&1);\n}\n"), vec![]);
 }
+
+/// Where it is reported: a call that requires `T: 'static` of a function the check left out until there, with no
+/// argument (`s::<T>()`), at the call, not at the function's first line; a closure's capture written through a `&`
+/// (`z.0.0.0 = ..` with `z.0.0: &(String, String)`), at the closure, as rustc does
+#[test]
+fn part13_report_lines() {
+    let d = check("fn s<T: 'static>() {}\nfn test<T>() {\n    let _ = 1;\n    s::<T>();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("the parameter type `T` may not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = (String::new(), String::new());\n    let mut y = (&x, 1);\n    let z = (&mut y, 2);\n    let mut c = || {\n        z.0.0.0 = String::from(\"a\");\n    };\n    c();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("is behind a `&` reference"), "{d:?}");
+}
