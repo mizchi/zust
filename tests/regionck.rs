@@ -2443,4 +2443,9 @@ fn part14_copied_out_references() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot move out of `a` because it is borrowed"), "{d:?}");
     let d = check("fn id<T>(t: T) -> T {\n    t\n}\nfn main() {\n    let s = String::from(\"a\");\n    let t = *id(&&s);\n    drop(s);\n    println!(\"{}\", t);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot move out of `s` because it is borrowed"), "{d:?}");
+    // (an `index` call's element (`m[&1]` of a HashMap), a `Copied` iterator's item; the iterator itself still holds
+    // the borrow)
+    assert_eq!(check("use std::collections::HashMap;\nfn main() {\n    let a = String::from(\"a\");\n    let mut m: HashMap<u8, &str> = HashMap::new();\n    m.insert(1, &a);\n    let x = m[&1];\n    m.clear();\n    let mut w: Vec<&str> = vec![&a];\n    let z = w.iter().copied().next().unwrap();\n    w.clear();\n    println!(\"{} {}\", x, z);\n}\n"), vec![]);
+    let d = check("fn main() {\n    let mut w: Vec<String> = vec![String::from(\"a\")];\n    let mut it = w.iter().cloned();\n    let z = it.next();\n    w.clear();\n    println!(\"{:?} {:?}\", z, it.next());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot borrow `w` as mutable"), "{d:?}");
 }

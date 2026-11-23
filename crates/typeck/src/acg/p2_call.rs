@@ -88,12 +88,19 @@ impl Cx<'_> {
         let n = self.caller_locs.len();
         // (`opt.copied()` / `opt.cloned()` of an `Option<&U>`: the U copied out does not hold the borrow that reached it
         // (bk_copy_out), as `*opt.unwrap()` does not)
+        // (and an item of a `Copied` / `Cloned` iterator (`w.iter().copied().next()`): what the iterator's items are
+        // copied from holds it)
+        let base_name = |this: &Self, t: Option<Ty>| match t.map(|t| this.strip_refs(t)) {
+            Some(Ty::Struct(sid)) => Some((sid, this.prog.structs[this.prog.base_of(sid) as usize].name.as_str())),
+            _ => None,
+        };
         let copy_out = match e {
-            Expr::MethodCall(r, m, _, a, _) if a.is_empty() && matches!(m.as_str(), "copied" | "cloned") && self.bk_on() => match self.peek(r) {
-                Some(Ty::Struct(sid)) if self.prog.structs[self.prog.base_of(sid) as usize].name == "Option" => match self.prog.structs[sid as usize].args.first() {
-                    Some(Ty::Ref(_, u)) if self.bk_ty(**u).1 => Some(**u),
+            Expr::MethodCall(r, m, _, a, _) if self.bk_on() => match base_name(self, self.peek(r)) {
+                Some((sid, "Option")) if a.is_empty() && matches!(m.as_str(), "copied" | "cloned") => match self.prog.structs[sid as usize].args.first() {
+                    Some(Ty::Ref(_, u)) if self.bk_ty(**u).1 => Some(Some(**u)),
                     _ => None,
                 },
+                Some((_, "Copied" | "Cloned")) => Some(None),
                 _ => None,
             },
             _ => None,
@@ -104,7 +111,23 @@ impl Cx<'_> {
         let r = self.method_call_inner(e, expected);
         if let Some(u) = copy_out {
             let srcs = self.bk.frames.pop().unwrap_or_default();
-            self.bk_copy_out(&srcs, u);
+            // (an iterator's item: the result's type, or what its `Option` holds, when it is not the iterator itself)
+            let u = u.or_else(|| match r.as_ref().ok().map(|x| x.1) {
+                Some(t @ Ty::Struct(sid)) => match base_name(self, Some(t)) {
+                    Some((_, "Option")) => self.prog.structs[sid as usize].args.first().copied(),
+                    Some((_, "Copied" | "Cloned")) => None,
+                    _ => Some(t),
+                },
+                t => t,
+            });
+            match u.filter(|&u| self.bk_ty(u).1) {
+                Some(u) => self.bk_copy_out(&srcs, u),
+                None => {
+                    for s in srcs {
+                        self.bk.src(s);
+                    }
+                }
+            }
         }
         self.caller_locs.truncate(n);
         self.explicit_trait = prev;

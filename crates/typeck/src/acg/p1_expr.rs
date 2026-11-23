@@ -1334,8 +1334,27 @@ impl Cx<'_> {
             }
             Expr::Repeat(..) => self.repeat_lit(e, expected),
             Expr::Index(_, ix, _) if matches!(&**ix, Expr::Range(..)) => err(SP, "range indexing needs a reference: `&a[lo..hi]`"),
-            Expr::Index(..) => {
-                let p = self.place(e)?;
+            Expr::Index(b, _, _) => {
+                // (a reference copied out of what an `index` call gives (`m[&1]` with `m: HashMap<u8, &str>`): it does
+                // not hold the borrow of m that reached it (bk_copy_out). A Vec's or an array's element is a place of
+                // the local, which holds only what the local holds)
+                let copy_out = self.bk_on() && matches!(self.peek(b).map(|t| self.strip_refs(t)), Some(Ty::Struct(sid)) if self.vec_fields(sid).is_none());
+                if copy_out {
+                    self.bk_frame();
+                }
+                let p = self.place(e);
+                if copy_out {
+                    let srcs = self.bk.frames.pop().unwrap_or_default();
+                    match &p {
+                        Ok(p) if self.bk_ty(p.ty()) == (true, true) => self.bk_copy_out(&srcs, p.ty()),
+                        _ => {
+                            for s in srcs {
+                                self.bk.src(s);
+                            }
+                        }
+                    }
+                }
+                let p = p?;
                 if self.bk_on() && !self.bk_ty(p.ty()).0 {
                     self.bk_acc(e, borrowck::Acc::Move);
                 }
