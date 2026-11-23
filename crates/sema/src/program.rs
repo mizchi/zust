@@ -344,6 +344,8 @@ pub struct Program {
     /// a generic trait's impls: trait → (self type, the trait's arguments, both with the impl's parameters as
     /// `Param(i)`, and their number) (`impl Getter<isize> for isize`: a default method's T for an isize receiver)
     pub impl_targs: FxMap<String, Vec<(Ty, Vec<Ty>, usize)>>,
+    /// Of those, the (trait, self type) whose header's trait path writes a lifetime (SigSyn::impl_trait_lts)
+    pub impl_targs_lts: HashSet<(String, Ty)>,
     /// (型, trait) の実装
     pub impls: HashSet<(u32, String)>,
     /// the self types of the impls of a trait for a struct's instances (`impl A for W<u8>`), by (struct, trait), with
@@ -443,6 +445,8 @@ pub struct ClosureDef {
     pub n_parent: usize,
     /// 戻り値の注釈 (親の型パラメータを Param で含みうる)
     pub ret_ann: Option<Ty>,
+    /// ClosureSyn::fake_reads
+    pub fake_reads: Vec<String>,
 }
 
 /// 単相化したインスタンス (ジェネリック関数 base に型引数 args を入れたもの)
@@ -839,6 +843,7 @@ impl Program {
             alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
+            impl_targs_lts: HashSet::default(),
             ref_impls: Default::default(),
             ref_impl_pats: vec![],
             fnptr_impls: Default::default(),
@@ -1450,6 +1455,7 @@ impl Program {
                         moved: c.moved.clone(),
                         n_parent: c.n_parent as usize,
                         ret_ann,
+                        fake_reads: c.fake_reads.clone(),
                     },
                 );
                 p.closure_by.insert((first, k as u32), fid);
@@ -1542,6 +1548,9 @@ impl Program {
                     let st = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok());
                     let args: Option<Vec<Ty>> = sm.impl_trait_args.iter().map(|a| p.resolve_g(a, &gn).ok()).collect();
                     if let (Some(st), Some(args)) = (st, args) {
+                        if sm.impl_trait_lts {
+                            p.impl_targs_lts.insert((tr.clone(), st));
+                        }
                         p.impl_targs.entry(tr.clone()).or_default().push((st, args, gn.len()));
                     }
                 }
@@ -3126,6 +3135,14 @@ impl Program {
             Ty::Struct(sid) => sid,
             _ => return false,
         };
+        // (a type parameter's placeholder whose bounds name no `Clone` (nor `Copy`, nor a trait with supertraits, which
+        // may imply it): `(&x).clone()` with x: T is the reference's copy)
+        if let Some(bs) = &self.structs[sid as usize].placeholder {
+            return !bs.iter().any(|b| {
+                let n = b.split('<').next().unwrap_or(b).trim();
+                n.ends_with("Clone") || n.ends_with("Copy") || self.trait_supers.get(n).is_some_and(|s| !s.is_empty())
+            });
+        }
         let b = self.base_of(sid);
         let own = self.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prelude_from);
         // (a clone of the program's own; std's (`Vec<T>`) is Clone when its arguments are)

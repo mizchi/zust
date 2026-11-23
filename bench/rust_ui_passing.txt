@@ -835,6 +835,7 @@ compile-fail	borrowck/borrowck-loan-blocks-move-cc.rs
 compile-fail	borrowck/borrowck-loan-blocks-move.rs
 compile-fail	borrowck/borrowck-loan-blocks-mut-uniq.rs
 compile-fail	borrowck/borrowck-loan-in-overloaded-op.rs
+compile-fail	borrowck/borrowck-loan-of-static-data-issue-27616.rs
 compile-fail	borrowck/borrowck-loan-rcvr-overloaded-op.rs
 compile-fail	borrowck/borrowck-loan-rcvr.rs
 compile-fail	borrowck/borrowck-loan-vec-content.rs
@@ -850,6 +851,7 @@ compile-fail	borrowck/borrowck-move-error-with-note.rs
 compile-fail	borrowck/borrowck-move-from-subpath-of-borrowed-path.rs
 compile-fail	borrowck/borrowck-move-in-irrefut-pat.rs
 compile-fail	borrowck/borrowck-move-moved-value-into-closure.rs
+compile-fail	borrowck/borrowck-move-mut-base-ptr.rs
 check-pass	borrowck/borrowck-move-out-from-array-no-overlap-match.rs
 check-pass	borrowck/borrowck-move-out-from-array-no-overlap.rs
 compile-fail	borrowck/borrowck-move-out-from-array-use-match.rs
@@ -891,6 +893,7 @@ compile-fail	borrowck/borrowck-reborrow-from-shorter-lived-andmut.rs
 compile-fail	borrowck/borrowck-ref-mut-of-imm.rs
 compile-fail	borrowck/borrowck-reinit.rs
 compile-fail	borrowck/borrowck-report-with-custom-diagnostic.rs
+compile-fail	borrowck/borrowck-return-variable-on-stack-via-clone.rs
 compile-fail	borrowck/borrowck-return.rs
 run-pass	borrowck/borrowck-rvalues-mutable.rs
 run-pass	borrowck/borrowck-scope-of-deref-issue-4666.rs
@@ -1094,6 +1097,7 @@ run-pass	borrowck/two-phase-control-flow-split-before-activation.rs
 run-pass	borrowck/two-phase-method-receivers.rs
 compile-fail	borrowck/two-phase-multi-mut.rs
 run-pass	borrowck/two-phase-multiple-activations.rs
+compile-fail	borrowck/two-phase-reservation-sharing-interference-2.rs
 compile-fail	borrowck/two-phase-sneaky.rs
 compile-fail	borrowck/two-phase-surprise-no-conflict.rs
 compile-fail	borrowck/unboxed-closures-move-upvar-from-non-once-ref-closure.rs
@@ -1229,6 +1233,7 @@ compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-2.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-3.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-closures-mut-and-imm.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/box.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/cant-mutate-imm-borrow.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/cant-mutate-imm.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-array-diagnostics.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-multi-variant-diagnostics.rs
@@ -1238,6 +1243,7 @@ compile-fail	closures/2229_closure_analysis/diagnostics/closure-origin-tuple-dia
 check-pass	closures/2229_closure_analysis/diagnostics/liveness.rs
 check-pass	closures/2229_closure_analysis/diagnostics/liveness_unintentional_copy.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/multilevel-path.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/mut_ref.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/simple-struct-min-capture.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/union.rs
 compile-fail	closures/2229_closure_analysis/issue-118144.rs
@@ -2861,6 +2867,7 @@ check-pass	generic-associated-types/issue-93141.rs
 check-pass	generic-associated-types/issue-93262.rs
 check-pass	generic-associated-types/issue-93341.rs
 compile-fail	generic-associated-types/missing-bounds.rs
+compile-fail	generic-associated-types/missing_lifetime_args.rs
 compile-fail	generic-associated-types/parse/trait-path-expected-token.rs
 compile-fail	generic-associated-types/parse/trait-path-expressions.rs
 compile-fail	generic-associated-types/parse/trait-path-missing-gen_arg.rs
@@ -3629,7 +3636,12 @@ check-pass	lifetimes/lifetime-inference-miss-15735.rs
 compile-fail	lifetimes/lifetime-mismatch-between-trait-and-impl.rs
 compile-fail	lifetimes/lifetime-no-keyword.rs
 run-pass	lifetimes/lifetime-param-in-fn-coercion.rs
+compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/example-from-issue48686.rs
 compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/mismatched-lifetime-syntaxes.rs
+compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/missing-lifetime-kind.rs
+compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/not-tied-to-crate.rs
+compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/path-count.rs
+compile-fail	lifetimes/mismatched-lifetime-syntaxes-details/static.rs
 compile-fail	lifetimes/missing-lifetime-in-assoc-type-1.rs
 compile-fail	lifetimes/missing-lifetime-in-assoc-type-2.rs
 compile-fail	lifetimes/missing-lifetime-in-assoc-type-3.rs
@@ -3643,6 +3655,7 @@ compile-fail	lifetimes/nested-binder-print.rs
 check-pass	lifetimes/nested.rs
 check-pass	lifetimes/no-spurious-ref-outlives-data.rs
 compile-fail	lifetimes/no_lending_iterators.rs
+compile-fail	lifetimes/noisy-follow-up-erro.rs
 compile-fail	lifetimes/nondeterministic-lifetime-errors-15034.rs
 check-pass	lifetimes/raw/lifetimes-eq.rs
 check-pass	lifetimes/raw/macro-lt.rs
@@ -4604,6 +4617,7 @@ check-pass	nll/issue-53570.rs
 compile-fail	nll/issue-53773.rs
 compile-fail	nll/issue-53807.rs
 compile-fail	nll/issue-54189.rs
+compile-fail	nll/issue-54556-stephaneyfx.rs
 compile-fail	nll/issue-54556-temps-in-tail-diagnostic.rs
 compile-fail	nll/issue-54556-used-vs-unused-tails.rs
 compile-fail	nll/issue-54556-wrap-it-up.rs
@@ -5837,6 +5851,7 @@ compile-fail	regions/regions-addr-of-arg.rs
 run-pass	regions/regions-addr-of-interior-of-unique-box.rs
 run-pass	regions/regions-addr-of-ret.rs
 compile-fail	regions/regions-addr-of-self.rs
+compile-fail	regions/regions-addr-of-upvar-self.rs
 compile-fail	regions/regions-adjusted-lvalue-op.rs
 run-pass	regions/regions-assoc-type-region-bound.rs
 run-pass	regions/regions-assoc-type-static-bound.rs
@@ -7233,6 +7248,7 @@ compile-fail	traits/object/vs-lifetime-2.rs
 compile-fail	traits/object/vs-lifetime.rs
 run-pass	traits/object/with-lifetime-bound.rs
 run-pass	traits/objects-owned-object-borrowed-method-headerless.rs
+compile-fail	traits/param-without-lifetime-constraint.rs
 run-pass	traits/parameterized-with-bounds.rs
 check-pass	traits/polymorphic-trait-creation-7673.rs
 compile-fail	traits/projection-no-progress-cycle-issue-159750.rs
@@ -7602,6 +7618,7 @@ run-pass	unboxed-closures/unboxed-closures-generic.rs
 run-pass	unboxed-closures/unboxed-closures-infer-arg-types-from-expected-bound.rs
 run-pass	unboxed-closures/unboxed-closures-infer-arg-types-w-bound-regs-from-expected-bound.rs
 compile-fail	unboxed-closures/unboxed-closures-infer-fn-once-move-from-projection.rs
+compile-fail	unboxed-closures/unboxed-closures-infer-fnmut-calling-fnmut-no-mut.rs
 run-pass	unboxed-closures/unboxed-closures-infer-fnmut-calling-fnmut.rs
 compile-fail	unboxed-closures/unboxed-closures-infer-fnmut-missing-mut.rs
 compile-fail	unboxed-closures/unboxed-closures-infer-fnmut-move-missing-mut.rs
