@@ -2472,6 +2472,11 @@ impl Cx<'_> {
                     if last && !*semi && r.is_ok() {
                         self.rg_keep(e);
                         self.bk_tail_drop_temps(e);
+                        if !tail {
+                            if let Ok((_, t)) = &r {
+                                self.bk_block_value(blk, e, *t);
+                            }
+                        }
                     }
                     self.bk_unwatch(&watch);
                     if tail {

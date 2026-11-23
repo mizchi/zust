@@ -224,6 +224,9 @@ pub struct Bk {
     /// The block whose value a statement discards (its address; 0: none), and the hidden locals holding such values
     pub discard: usize,
     pub discard_temps: Vec<u32>,
+    /// A block's value that holds what one of its locals holds (`{ let y = &x; y }`): a hidden local made at its tail,
+    /// while its locals live, which stands for it after (its direct sources, as the block's names are gone then)
+    pub block_val: HashMap<usize, u32>,
     /// Loan made for an expression (`&x`: the address of x; `x.m()` with a borrowed receiver: of the call)
     pub loan_of: HashMap<usize, u32>,
     /// The next `&e` is an argument the call's result does not borrow from (its loan does not flow on)
@@ -2548,6 +2551,27 @@ impl Cx<'_> {
         self.bk.discard_temps.push(id);
     }
 
+    /// The tail e of the block blk, whose value (of type t) may hold references: what it holds directly through the
+    /// block's locals is kept in a hidden local, which lives with the enclosing block's locals and stands for the
+    /// block's value after it (bk_direct): `let r = { let x = 1; let y = &x; y };` used after is E0597
+    pub(crate) fn bk_block_value(&mut self, blk: &crate::parse::Block, e: &Expr, t: Ty) {
+        if !self.bk_on() || self.bk.level < 2 || !self.bk_ty(t).1 {
+            return;
+        }
+        let mut d = vec![];
+        self.bk_direct(e, &mut d);
+        if !d.iter().any(|s| matches!(s, Src::Local(_))) {
+            return;
+        }
+        let id = self.bk.locals.len() as u32;
+        let (copy, refs) = self.bk_ty(t);
+        self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy, refs, mutable: Some(true), decl: super::SP, via_ref: false });
+        self.bk_ev(Ev::Bind(id, true));
+        self.bk_ev(Ev::Def(id, d));
+        self.bk.block_val.insert(blk as *const crate::parse::Block as usize, id);
+        self.bk.scope_temps.push((self.scopes.len().saturating_sub(2), id));
+    }
+
     pub(crate) fn bk_drop_held(&mut self, ts: &[u32], sp: Sp) {
         for &id in ts {
             self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Drop, sp));
@@ -3814,7 +3838,9 @@ impl Cx<'_> {
                 }
             }
             Expr::Block(_, _, b) => {
-                if let Some(crate::parse::Stmt::Expr(t, false)) = b.stmts.last() {
+                if let Some(&t) = self.bk.block_val.get(&(b as *const crate::parse::Block as usize)) {
+                    out.push(Src::Local(t));
+                } else if let Some(crate::parse::Stmt::Expr(t, false)) = b.stmts.last() {
                     self.bk_direct(t, out);
                 }
             }

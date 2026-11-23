@@ -2843,3 +2843,15 @@ fn part16_guard_tail_temporaries() {
     assert!(lines == vec![5, 12] && d.iter().all(|x| x.1.contains("does not live long enough")), "{d:?}");
     assert_eq!(check("use std::cell::RefCell;\nfn main() {\n    let c = RefCell::new(vec![1]);\n    let n = c.borrow().len();\n    let g = c.borrow();\n    let m = g[0];\n    drop(g);\n    c.borrow_mut().push(2);\n    let t = {\n        let d = RefCell::new(5);\n        let v = *d.borrow();\n        v\n    };\n    println!(\"{} {} {}\", n, m, t);\n}\n"), vec![]);
 }
+
+/// A block's value that holds what one of its locals holds (`{ let x = 1; let y = &x; y }`, or a call's result through
+/// a local, `f(a, b)` of `let f = &shorten_lifetime;`, nll/promoted-bounds.rs) used after the block: x does not live
+/// long enough (E0597). It was checked only when the tail borrowed directly (`{ let x = 1; &x }`), as the block's
+/// names are gone after it. Not a value that holds nothing of the block's (`{ let y = &outer; y }`)
+#[test]
+fn part16_block_values_through_locals() {
+    let d = check("fn a() {\n    let r = { let x = 1; let y = &x; y };\n    println!(\"{}\", r);\n}\nfn s<'a, 'b, 'm>(a: &'a i32, b: &'b i32) -> &'m i32\nwhere\n    'a: 'm,\n    'b: 'm,\n{\n    if *a < *b { &a } else { &b }\n}\nfn b() {\n    let f = &s;\n    let a = &5;\n    let p = {\n        let l = 3;\n        let b = &l;\n        let c = f(a, b);\n        c\n    };\n    println!(\"{}\", p);\n}\nfn main() { a(); b(); }\n");
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![2, 17] && d.iter().all(|x| x.1.contains("does not live long enough")), "{d:?}");
+    assert_eq!(check("fn main() {\n    let outer = 5;\n    let n = { let s = String::from(\"a\"); s.len() };\n    let r = { let y = &outer; y };\n    let v = vec![1, 2];\n    let w = { let it = &v; it.len() };\n    let z: &i32 = { let q = &v; &q[0] };\n    let t = { let k = (1, &outer); k };\n    println!(\"{} {} {} {} {:?}\", n, r, w, z, t);\n}\n"), vec![]);
+}
