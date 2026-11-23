@@ -2461,7 +2461,28 @@ impl Cx<'_> {
                         }
                     }
                     let made_value = made_here && !matches!(strip_paren(e), Expr::Block(None, ..));
+                    // (a statement's value is discarded: what it holds is no part of the enclosing value
+                    // (`{ *v += 1; f(&format!("{v}")); (x, y) }`), but what a `break` in it gives the loop)
+                    fn breaks_value(e: &Expr, depth: u32) -> bool {
+                        if depth > 64 || matches!(e, Expr::Closure(..)) {
+                            return false;
+                        }
+                        if matches!(e, Expr::Break(_, Some(_), _)) {
+                            return true;
+                        }
+                        let mut found = false;
+                        crate::ast_closure::each_child_pub(e, &mut |c| found = found || breaks_value(c, depth + 1));
+                        found
+                    }
+                    let stmt_mark = if *semi && self.bk_on() && !breaks_value(e, 0) { self.bk.frames.last().map(|f| (self.bk.frames.len(), f.len())) } else { None };
                     let r = self.expr(e, exp);
+                    if let Some((n, k)) = stmt_mark {
+                        if self.bk.frames.len() == n {
+                            if let Some(f) = self.bk.frames.last_mut() {
+                                f.truncate(k);
+                            }
+                        }
+                    }
                     if tail24 {
                         tail_srcs = self.bk_frame_end();
                     }

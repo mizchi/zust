@@ -694,7 +694,19 @@ impl Cx<'_> {
         if watched || at.is_some() {
             self.bk_frame();
         }
+        // (a place read or a call's result of a type that holds no reference (`*d` of `d: &mut bool`, `p.0` of a
+        // number, `mem::replace(d, false)`) carries none of the loans it is reached through or made from: `(*d, log)`
+        // holds only what log holds)
+        let read = self.bk.on && (matches!(e, Expr::Unary(op, ..) if op == "*") || matches!(e, Expr::Field(..) | Expr::Index(..) | Expr::Call(..) | Expr::MethodCall(..)));
+        let mark = if read { self.bk.frames.last().map(|f| (self.bk.frames.len(), f.len())) } else { None };
         let r = self.expr_inner(e, expected);
+        if let (Some((n, k)), Ok((_, t))) = (mark, &r) {
+            if self.bk.frames.len() == n && *t != Ty::Never && self.bk_on() && !self.bk_ty(*t).1 {
+                if let Some(f) = self.bk.frames.last_mut() {
+                    f.truncate(k);
+                }
+            }
+        }
         if watched || at.is_some() {
             let s = self.bk_frame_end();
             if let Some(i) = at {
