@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795440970380,
+  "lastUpdate": 1795440973282,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -108092,6 +108092,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/7a3864435ac5f3df87f9b941399088b60b3e0a09"
         },
         "date": 1795438274935,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 76.81,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1832,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.67,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1512,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 61.31,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4511,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0cb2692fbd96d14492993274900858baed3e39f9",
+          "message": "Merge pull request #89 from mizchi/claude/tender-sagan-iatvun\n\nupdate_readme.py: one measured stamp for README, PERFORMANCE and SUPPORT",
+          "timestamp": "2026-11-23T22:31:09+09:00",
+          "tree_id": "e6bc34f26bd0ba491f109ac7c5934ccd658faa6f",
+          "url": "https://github.com/mizchi/zust/commit/0cb2692fbd96d14492993274900858baed3e39f9"
+        },
+        "date": 1795440972754,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
