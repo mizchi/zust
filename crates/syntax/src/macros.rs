@@ -77,6 +77,13 @@ fn parse_pt(ts: TokenStream, is_pat: bool) -> Vec<Pt> {
                         } else {
                             sep = Some(toks[j].clone());
                             j += 1;
+                            // (`::` as the separator (`$($s:ident)::+`): the joint first `:` stands for the pair)
+                            if p.spacing() == Spacing::Joint && matches!(toks.get(j), Some(TokenTree::Punct(q)) if q.as_char() == p.as_char()) {
+                                j += 1;
+                            } else if let TokenTree::Punct(p) = &toks[j - 1] {
+                                // (a lone punct separator is never joint, so a joint one always means the pair)
+                                sep = Some(TokenTree::Punct(proc_macro2::Punct::new(p.as_char(), Spacing::Alone)));
+                            }
                             if let Some(TokenTree::Punct(q)) = toks.get(j) {
                                 if matches!(q.as_char(), '*' | '+' | '?') {
                                     op = q.as_char();
@@ -176,6 +183,10 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
             }
             if kind == "lifetime" {
                 return Some((2.min(toks.len()), false));
+            }
+            // (a lifetime is one token tree (`$(<$l:tt>)*` of `<'de>`), though lexed as `'` and its name)
+            if kind == "tt" && matches!((first, toks.get(1)), (TokenTree::Punct(p), Some(TokenTree::Ident(_))) if p.as_char() == '\'' && p.spacing() == Spacing::Joint) {
+                return Some((2, false));
             }
             Some((1, false))
         }
@@ -409,9 +420,10 @@ fn match_prefix(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind
                     }
                     match sep {
                         Some(s) => {
-                            if i < toks.len() && same_tok(s, &toks[i]) {
+                            let pair = matches!(s, TokenTree::Punct(p) if p.spacing() == Spacing::Joint);
+                            if i < toks.len() && same_tok(s, &toks[i]) && (!pair || toks.get(i + 1).is_some_and(|t| same_tok(s, t))) {
                                 sep_at = Some(i);
-                                i += 1;
+                                i += if pair { 2 } else { 1 };
                             } else {
                                 break;
                             }
@@ -444,6 +456,17 @@ fn collect_vars(p: &[Pt], out: &mut Vec<String>) {
             Pt::Var(n, _) => out.push(n.clone()),
             Pt::Group(_, i) | Pt::Rep(i, _, _) => collect_vars(i, out),
             Pt::Tok(_) => {}
+        }
+    }
+}
+
+/// A repetition's separator: a joint punct stands for the pair of it (`::`)
+fn sep_text(t: &TokenTree, out: &mut String) {
+    tt_text(t, out);
+    if let TokenTree::Punct(p) = t {
+        if p.spacing() == Spacing::Joint {
+            out.push(p.as_char());
+            out.push(' ');
         }
     }
 }
@@ -534,9 +557,22 @@ fn body_lets(body: &[Pt], out: &mut Vec<String>) {
 }
 
 /// transcribe with hygiene for the body's own `let` names
+/// Whether a body defines a module (`mod m { .. }`: a module file put in a macro's body, serde_core's `crate_root!`)
+fn defines_mod(body: &[Pt]) -> bool {
+    body.iter().enumerate().any(|(k, p)| match p {
+        Pt::Tok(TokenTree::Ident(m)) if m == "mod" => matches!((body.get(k + 1), body.get(k + 2)), (Some(Pt::Tok(TokenTree::Ident(_))), Some(Pt::Group(Delimiter::Brace, _)))),
+        Pt::Group(_, inner) | Pt::Rep(inner, _, _) => defines_mod(inner),
+        _ => false,
+    })
+}
+
 fn transcribe_h(body: &[Pt], binds: &HashMap<String, Bind>, out: &mut String) -> Result<(), String> {
     let mut lets = vec![];
-    body_lets(body, &mut lets);
+    // (no renaming in a body of modules: its lets are in its fns' bodies, which see no caller's locals, and the
+    // renaming, by name alone, would reach other uses of the name (`seq` of `forward_to_deserialize_any! { seq }`))
+    if !defines_mod(body) {
+        body_lets(body, &mut lets);
+    }
     transcribe(body, &Binds::Root(binds), out, &lets)
 }
 
@@ -620,9 +656,22 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                     out.push(' ');
                 }
             },
-            Pt::Rep(inner, sep, _) => {
+            Pt::Rep(inner, sep, op) => {
                 let mut names = vec![];
                 collect_vars(inner, &mut names);
+                // (no variable of it bound here: a repetition of an inner `macro_rules!` that this body holds (a module
+                // file put in a macro's body, serde_core's `crate_root!`): kept as written, for that macro)
+                if names.iter().all(|v| binds.get(v).is_none()) {
+                    out.push_str("$(");
+                    transcribe(inner, binds, out, lets)?;
+                    out.push_str(") ");
+                    if let Some(s) = sep {
+                        sep_text(s, out);
+                    }
+                    out.push(*op);
+                    out.push(' ');
+                    continue;
+                }
                 let n = names
                     .iter()
                     .filter_map(|v| match binds.get(v) {
@@ -634,7 +683,7 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                 for k in 0..n {
                     if k > 0 {
                         if let Some(s) = sep {
-                            tt_text(s, out);
+                            sep_text(s, out);
                         }
                     }
                     let mut layer: HashMap<&str, &Bind> = HashMap::default();
@@ -715,6 +764,8 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
     }
     let mut k = o;
     let mut n = 0;
+    // (inside `<..>` of the head, `=` binds an associated type: `where I: Iterator<Item = T>`)
+    let mut angle = 0i32;
     while k > 0 && n < 256 {
         k -= 1;
         n += 1;
@@ -728,7 +779,13 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
         if toks[k].0 == 0 && (t == b"fn" || t == b"struct" || t == b"enum" || t == b"union" || t == b"let") {
             return false;
         }
-        if toks[k].0 == 1 && t == b"=" {
+        // (the `>` of `->` / `=>` is none)
+        let arrow = k > 0 && toks[k - 1].0 == 1 && matches!(tk(k - 1), b"-" | b"=") && toks[k - 1].2 == toks[k].1;
+        if toks[k].0 == 1 && t == b">" && !arrow {
+            angle += 1;
+        } else if toks[k].0 == 1 && t == b"<" {
+            angle -= 1;
+        } else if toks[k].0 == 1 && t == b"=" && angle <= 0 {
             return false;
         }
     }
@@ -915,11 +972,121 @@ fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>, mut 
         Ok(())
 }
 
+/// Two `macro_rules!` of one name (serde_core's `seq_impl` in de/impls.rs and in ser/impls.rs): textual scope, a call
+/// is the definition last above it. Each definition gets a name of its own (`seq_impl__zm1`) and each call the name of
+/// the definition before it. Not for a `#[macro_export]` one, which a path names anywhere
+fn rename_shadowed_macros(text: &str) -> Option<String> {
+    let b = text.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
+    let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && toks[k].2 == toks[k].1 + 1 && b[toks[k].1] == c;
+    // (name -> the tokens of its definitions' names, in order; exported: any of them is `#[macro_export]`)
+    let mut defs: HashMap<&[u8], (Vec<usize>, bool)> = HashMap::default();
+    for i in 0..toks.len().saturating_sub(3) {
+        if toks[i].0 == 0 && tk(i) == b"macro_rules" && sym(i + 1, b'!') && toks[i + 2].0 == 0 {
+            let exported = text[..toks[i].1].trim_end().ends_with(']') && {
+                let before = &text[..toks[i].1];
+                before.rfind("#[").is_some_and(|a| before[a..].contains("macro_export"))
+            };
+            let e = defs.entry(tk(i + 2)).or_default();
+            e.0.push(i + 2);
+            e.1 |= exported;
+        }
+    }
+    let dup: HashMap<&[u8], &Vec<usize>> = defs.iter().filter(|(_, (v, ex))| v.len() > 1 && !ex).map(|(k, (v, _))| (*k, v)).collect();
+    if dup.is_empty() {
+        return None;
+    }
+    // (the token ranges of the `macro_rules!` bodies: a call in one is resolved where that macro is called, not known
+    // here; the definition nearest it is taken (`tuple_impls!`'s `tuple_impl_body!` beside the one of its module))
+    let mut bodies: Vec<(usize, usize)> = vec![];
+    for i in 0..toks.len().saturating_sub(3) {
+        if toks[i].0 == 0 && tk(i) == b"macro_rules" && sym(i + 1, b'!') && toks[i + 2].0 == 0 && (sym(i + 3, b'{') || sym(i + 3, b'(')) {
+            let mut d = 0i32;
+            let mut j = i + 3;
+            while j < toks.len() {
+                if sym(j, b'{') || sym(j, b'(') || sym(j, b'[') {
+                    d += 1;
+                } else if sym(j, b'}') || sym(j, b')') || sym(j, b']') {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            bodies.push((i + 3, j));
+        }
+    }
+    let in_body = |k: usize| bodies.iter().any(|&(a, e)| a < k && k < e);
+    // (a definition's textual scope: to the end of the block or module around it, and past a `#[macro_use] mod`'s end
+    // to its parent's. Outside every definition's scope a call keeps its name: "cannot find macro" as before)
+    let mut open: Vec<usize> = vec![];
+    let mut encl = vec![usize::MAX; toks.len()];
+    let mut close_of = vec![usize::MAX; toks.len()];
+    for k in 0..toks.len() {
+        encl[k] = open.last().copied().unwrap_or(usize::MAX);
+        if sym(k, b'{') {
+            open.push(k);
+        } else if sym(k, b'}') {
+            if let Some(o) = open.pop() {
+                close_of[o] = k;
+            }
+        }
+    }
+    let scope_end = |d: usize| -> usize {
+        let mut o = encl[d];
+        loop {
+            if o == usize::MAX {
+                return toks.len();
+            }
+            // (`#[macro_use] mod m {`: the scope goes on in the parent)
+            let is_mod = o >= 2 && toks[o - 1].0 == 0 && toks[o - 2].0 == 0 && tk(o - 2) == b"mod";
+            if is_mod && text[..toks[o - 2].1].trim_end().ends_with(']') && {
+                let before = &text[..toks[o - 2].1];
+                before.rfind("#[").is_some_and(|a| before[a..].contains("macro_use"))
+            } {
+                o = encl[o];
+                continue;
+            }
+            return if close_of[o] == usize::MAX { toks.len() } else { close_of[o] };
+        }
+    };
+    let ends: HashMap<usize, usize> = dup.values().flat_map(|v| v.iter().map(|&d| (d, scope_end(d)))).collect();
+    let mut out = String::with_capacity(text.len() + 64);
+    let mut last = 0;
+    for k in 0..toks.len() {
+        if toks[k].0 != 0 {
+            continue;
+        }
+        let Some(ds) = dup.get(tk(k)) else { continue };
+        // (a definition's name, or a call `name!`, not a path's last segment `a::name!`)
+        let is_def = ds.contains(&k);
+        let is_call = sym(k + 1, b'!') && !(k >= 1 && sym(k - 1, b':'));
+        if !is_def && !is_call {
+            continue;
+        }
+        let n = if is_def {
+            ds.iter().position(|&d| d == k)
+        } else if in_body(k) {
+            (0..ds.len()).min_by_key(|&n| ds[n].abs_diff(k))
+        } else {
+            ds.iter().rposition(|&d| d <= k && k < ends[&d])
+        };
+        let Some(n) = n else { continue };
+        out.push_str(&text[last..toks[k].1]);
+        out.push_str(&format!("{}__zm{}", String::from_utf8_lossy(tk(k)), n));
+        last = toks[k].2;
+    }
+    out.push_str(&text[last..]);
+    Some(out)
+}
+
 pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<String>, String> {
     if !src.contains("macro_rules!") {
         return Ok(None);
     }
-    let mut text = src.to_string();
+    let mut text = rename_shadowed_macros(src).unwrap_or_else(|| src.to_string());
     let mut macros: HashMap<String, Vec<Rule>> = HashMap::default();
     let mut first: HashMap<String, usize> = HashMap::default();
     collect_defs(&mut text, &mut macros, Some(&mut first))?;
@@ -1098,7 +1265,8 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
     if !src.contains("macro_rules!") {
         return Ok(None);
     }
-    let mut text = src.to_string();
+    // (macro names two textual scopes define, as expand_cfg renames them)
+    let mut text = rename_shadowed_macros(src).unwrap_or_else(|| src.to_string());
     let mut macros: HashMap<String, Vec<Rule>> = HashMap::default();
     // 1. 定義を集めて消す (関数の本体や `mod m { .. }` の中の定義も)
     {
@@ -1181,7 +1349,7 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
     for _round in 0..64 {
         let ts = TokenStream::from_str(&text).map_err(|e| format!("1:1: {e}"))?;
         let mut reps: Vec<(usize, usize, String)> = vec![];
-        find_calls(ts, &macros, &text, 0, false, &mut reps)?;
+        find_calls(ts, &macros, &text, 0, false, true, &mut reps)?;
         if reps.is_empty() {
             return Ok(Some(text));
         }
@@ -1216,6 +1384,8 @@ fn find_calls(
     text: &str,
     depth: usize,
     brace: bool,
+    // (a place of items: the top level, or a `mod m { .. }` body (expand_cfg's item_scope))
+    item: bool,
     out: &mut Vec<(usize, usize, String)>,
 ) -> Result<(), String> {
     let toks: Vec<TokenTree> = ts.into_iter().collect();
@@ -1242,7 +1412,7 @@ fn find_calls(
                                 let next_semi = matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if q.as_char() == ';');
                                 let spliced = depth > 0 && stmt_pos && (next_semi || toks.get(i + 3).is_none()) && !body.contains('#');
                                 let drop_semi = spliced && next_semi && body.trim_end().ends_with(';');
-                                let rep = if depth == 0 || spliced {
+                                let rep = if depth == 0 || item || spliced {
                                     body
                                 } else if stmt_pos {
                                     match split_items(&body) {
@@ -1268,7 +1438,7 @@ fn find_calls(
                                 }
                                 let mut e = g.span().byte_range().end;
                                 // (トップレベルの `name!(..);` の `;` も取る)
-                                if depth == 0 || drop_semi {
+                                if depth == 0 || item || drop_semi {
                                     if let Some(TokenTree::Punct(s)) = toks.get(i + 3) {
                                         if s.as_char() == ';' {
                                             e = s.span().byte_range().end;
@@ -1295,7 +1465,9 @@ fn find_calls(
             let r = g.span().byte_range();
             let inner = if r.start <= r.end && r.end <= text.len() { &text[r.start..r.end] } else { "" };
             if inner.is_empty() || macros.keys().any(|m| inner.contains(m.as_str())) {
-                find_calls(g.stream(), macros, text, depth + 1, g.delimiter() == proc_macro2::Delimiter::Brace, out)?;
+                let brace = g.delimiter() == proc_macro2::Delimiter::Brace;
+                let module = brace && i >= 2 && matches!(&toks[i - 2], TokenTree::Ident(m) if m == "mod");
+                find_calls(g.stream(), macros, text, depth + 1, brace, module, out)?;
             }
         }
         i += 1;

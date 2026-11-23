@@ -291,7 +291,7 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
             if pm_deps.is_empty() {
                 continue;
             }
-            let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs: c.cfgs.clone(), env: c.env.clone() };
+            let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs: c.cfgs.clone(), env: c.env.clone(), ..Default::default() };
             let (text, _) = zustc::srcmap::load_crate(&c.root, &c.display, &cfg)?;
             let u = proc_macro_stub::uses_in(&text);
             for (p, m) in pm_macros.iter().filter(|(p, _)| pm_deps.contains(p)) {

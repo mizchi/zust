@@ -117,16 +117,22 @@ fn main() {
     }
     if mode == "check" {
         // (`mod x;` のファイルも読む。診断の行は結合したソースのもの: 1 ファイルならそのまま)
-        let (src, map) = zustc::srcmap::load_crate_keeping_externs(&input, "src/main.rs", &o.cfg_with(&o.features)).unwrap_or_else(|e| die(e));
+        let (src, mut map) = zustc::srcmap::load_crate_keeping_externs(&input, "src/main.rs", &o.cfg_with(&o.features)).unwrap_or_else(|e| die(e));
         let mut s = Session2::new(Options2 { no_cache: true, jobs: 1, ..o });
         // (a crate of one file: the `extern crate` items the configuring blanked, in their places in it (the loader
         // drops them when an expansion moved them))
         if map.inputs.len() == 1 {
-            s.externs = map.externs;
+            s.externs = std::mem::take(&mut map.externs);
         }
         let diags = s.check(&src);
         for d in &diags {
-            eprintln!("error: {}:{}:{}: {}", input.display(), d.line, d.col, d.msg.replace("__u_", ""));
+            // (a line of the root file: its line there (a `#[macro_use] mod` is inlined where it is declared); one of
+            // another file stays the combined source's line)
+            let line = match map.locate(d.line as u32) {
+                (f, l) if f == "src/main.rs" => l as usize,
+                _ => d.line,
+            };
+            eprintln!("error: {}:{}:{}: {}", input.display(), line, d.col, d.msg.replace("__u_", ""));
         }
         std::process::exit(if diags.is_empty() { 0 } else { 1 });
     }

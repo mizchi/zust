@@ -613,6 +613,7 @@ impl Options2 {
             wasm: self.module_writer.is_some(),
             cfgs: cfgs.to_vec(),
             env: env.to_vec(),
+            edition: self.edition,
         }
     }
 }
@@ -1254,6 +1255,10 @@ impl Session2 {
             for (ii, sm) in sums[..user_src].iter().enumerate() {
                 let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self.as_deref()) else { continue };
                 if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) {
+                    continue;
+                }
+                // (the bare parameter itself, not a reference to it: `impl<T> Tr for &T` and `.. for &mut T` do not overlap)
+                if !matches!(&sm.impl_self_ty, Some(crate::types::TySyn::Named(n)) if n == st) {
                     continue;
                 }
                 // (an impl whose `where` clause may make it disjoint is no candidate either way)

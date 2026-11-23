@@ -10,8 +10,9 @@ wasm に入るクレート (proc-macro を通らずに app から届くもの) �
 ホストで動くもので、zustc には proc-macro を動かす仕組みがないので数えるだけ。
 各クレートは、推移的な依存 (lib) と自分のワークスペース (ws.txt) にして `zustc build` する。依存のどれかが
 通らなければ、そのクレートはビルドせず blocked とする。`--target wasm32-unknown-unknown` でビルドする (cfg も
-wasm32 のもの。bin はモジュール `<名前>.wasm`)。ビルドスクリプトは動かさない: `env!` には cargo の変数
-(`CARGO_PKG_*` など) だけを渡す。
+wasm32 のもの。bin はモジュール `<名前>.wasm`)。`env!` には cargo の変数 (`CARGO_PKG_*` など) を渡す。
+ビルドスクリプトは、build-dependencies のないものだけ rustc でホスト向けにビルドして cargo と同じ変数で動かし、
+出力の `rustc-cfg` / `rustc-env` と OUT_DIR をそのクレートに渡す (out/cratebench-ui/<APP>/build/)。
 結果は out/cratebench-ui/<APP>/ (クレートごとの ws.txt と err.txt、results.json)。
 """
 import json
@@ -98,6 +99,50 @@ def cargo_env(p, t):
             "CARGO_MANIFEST_DIR": os.path.dirname(p["manifest_path"]), "CARGO_CRATE_NAME": t["name"].replace("-", "_")}
 
 
+def build_script(c, out):
+    """Run a crate's build script as cargo would, when it has no build-dependencies (rustc builds it for the host):
+    its `rustc-cfg` and `rustc-env` lines and OUT_DIR, as (cfgs, env). None when it has none, or cannot run"""
+    p = c["pkg"]
+    script = next((t for t in p["targets"] if "custom-build" in t["kind"]), None)
+    if script is None or any(d.get("kind") == "build" for d in p.get("dependencies", [])):
+        return None
+    d = os.path.join(out, "build", f'{c["name"]}-{c["version"]}')
+    out_dir = os.path.join(d, "out")
+    os.makedirs(out_dir, exist_ok=True)
+    exe = os.path.join(d, "build-script-build")
+    r = subprocess.run(["rustc", "--edition", script["edition"], "--crate-name", "build_script_build", "--crate-type", "bin",
+                        "--cap-lints", "allow", "-o", exe, script["src_path"]], capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    env = dict(os.environ)
+    env.update(c["env"])
+    env.update({"OUT_DIR": out_dir, "TARGET": TARGET, "HOST": "x86_64-unknown-linux-gnu", "PROFILE": "debug", "OPT_LEVEL": "0",
+                "DEBUG": "true", "NUM_JOBS": "4", "RUSTC": "rustc"})
+    for f in c["features"]:
+        env["CARGO_FEATURE_" + f.upper().replace("-", "_")] = "1"
+    cfgs = {}
+    for k, v in WASM_CFG:
+        cfgs.setdefault(k, []).append(v)
+    for k, vs in cfgs.items():
+        env["CARGO_CFG_" + k.upper()] = ",".join(v for v in vs if v is not None)
+    r = subprocess.run([exe], cwd=os.path.dirname(p["manifest_path"]), env=env, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        return None
+    out_cfgs, out_env = [], {"OUT_DIR": out_dir}
+    for line in r.stdout.splitlines():
+        for pre in ("cargo::", "cargo:"):
+            if line.startswith(pre):
+                key, _, val = line[len(pre):].partition("=")
+                if key == "rustc-cfg":
+                    k, _, v = val.partition("=")
+                    out_cfgs.append((k, v.strip('"') if v else None))
+                elif key == "rustc-env":
+                    k, _, v = val.partition("=")
+                    out_env[k] = v
+                break
+    return out_cfgs, out_env
+
+
 def ws_escape(s):
     """a value in zustc's workspace file: `%`, `#` and white space as %XX, one per byte of their UTF-8 (U+3000 too)"""
     return "".join("".join(f"%{b:02X}" for b in c.encode()) if c in "%#" or c.isspace() else c for c in s)
@@ -117,7 +162,8 @@ def graph(meta):
         deps = [d["pkg"] for d in n["deps"] if any(k["kind"] is None and on_target(k["target"]) for k in d["dep_kinds"])]
         C[i] = {"name": p["name"], "version": p["version"], "edition": t["edition"],
                 "proc_macro": "proc-macro" in t["kind"], "build_rs": any("custom-build" in x["kind"] for x in p["targets"]),
-                "features": n["features"], "deps": deps, "src": t["src_path"], "root": i == root, "env": cargo_env(p, t)}
+                "features": n["features"], "deps": deps, "src": t["src_path"], "root": i == root, "env": cargo_env(p, t),
+                "pkg": p}
     order, seen = [], set()
 
     def visit(i):
@@ -172,6 +218,14 @@ def sweep(app):
             dn = sorted({ext(C[d]) for d in cj["deps"] if d in tset})
             f = f' features={",".join(cj["features"])}' if cj["features"] else ""
             e = "".join(f" env={k}={ws_escape(v)}" for k, v in cj["env"].items())
+            # (what its build script gives: cfgs and OUT_DIR / rustc-env, once per crate)
+            if cj["build_rs"]:
+                if "bs" not in cj:
+                    cj["bs"] = build_script(cj, out)
+                if cj["bs"]:
+                    cs, be = cj["bs"]
+                    e += "".join(f" cfg={ws_escape(k)}" + (f"={ws_escape(v)}" if v is not None else "") for k, v in cs)
+                    e += "".join(f" env={k}={ws_escape(v)}" for k, v in be.items())
             ws[ext(cj)] = f'{"bin" if cj["root"] else "lib"} {ext(cj)} {cj["src"]} {" ".join(dn)}{f}{e}'.rstrip()
         d = os.path.join(out, f'{c["name"]}-{c["version"]}')
         os.makedirs(d, exist_ok=True)

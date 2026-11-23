@@ -190,3 +190,36 @@ fn crate_cfgs_and_env() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// What serde_core's lib.rs does with its modules: a `#[macro_use] mod` whose macros the rest of the root calls (it
+/// goes where it is declared), and a macro that declares `pub mod de;` (de.rs beside the file that calls it).
+/// `zustc check` reports a line of the root as the root's own line, past the module put in its place; and edition
+/// 2021's reserved prefixes (`demo!(foo#bar)`) are an error before the macro reads its input
+#[test]
+fn macro_use_modules_and_check_lines() {
+    let dir = std::env::temp_dir().join(format!("zustc_ws_macro_use_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let put = |p: &str, t: &str| std::fs::write(dir.join(p), t).unwrap();
+    put("crate_root.rs", "macro_rules! crate_root {\n    () => {\n        pub mod de;\n    };\n}\nmacro_rules! twice {\n    ($e:expr) => {\n        $e * 2\n    };\n}\n");
+    put("de.rs", "pub fn name() -> &'static str {\n    \"de\"\n}\n");
+    put("main.rs", "#[macro_use]\nmod crate_root;\n\ncrate_root!();\n\nfn main() {\n    println!(\"{} {}\", twice!(4), de::name());\n}\n");
+    let zustc = env!("CARGO_BIN_EXE_zustc");
+    let exe = dir.join("main");
+    let o = Command::new(zustc).arg("--no-cache").arg(dir.join("main.rs")).arg("-o").arg(&exe).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let (got, _, code) = run(&exe, &dir, 0);
+    assert_eq!((got.as_str(), code), ("8 de\n", Some(0)));
+    // (the error on line 7 of main.rs, past the 10 lines of crate_root.rs inlined at line 2)
+    put("main.rs", "#[macro_use]\nmod crate_root;\n\ncrate_root!();\n\nfn main() {\n    let x: u8 = \"s\";\n    println!(\"{} {} {x}\", twice!(4), de::name());\n}\n");
+    let o = Command::new(zustc).arg("check").arg(dir.join("main.rs")).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("main.rs:7:17: mismatched types"), "{err}");
+    put("p.rs", "macro_rules! demo {\n    ($a:tt $b:tt $c:tt) => {};\n}\nfn main() {\n    demo!(foo#bar);\n}\n");
+    let o = Command::new(zustc).arg("check").arg(dir.join("p.rs")).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains(":5:11: prefix `foo` is unknown"), "{err}");
+    let o = Command::new(zustc).arg("check").arg("--edition=2018").arg(dir.join("p.rs")).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let _ = std::fs::remove_dir_all(&dir);
+}

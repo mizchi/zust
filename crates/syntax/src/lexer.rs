@@ -670,6 +670,36 @@ mod tests {
 /// `#[cfg(test)] mod tests { .. }` はまるごと消す。モジュールのパス (`geo::f`) は名前解決が先頭を読み飛ばす。
 /// モジュールがなければ None
 /// 簡単な字句解析: (種類, 開始, 終了)。0 = 識別子, 1 = 記号 1 文字, 2 = リテラル (コメントは飛ばす)
+/// Edition 2021 reserves `prefix#`, `prefix"..."` and `prefix'..'` for every identifier but the literal prefixes (`b`,
+/// `r`, `br`, `c`, `cr`): `foo#bar` is no longer the three tokens `foo # bar`. The first such one, as
+/// `line:col: prefix `foo` is unknown`. A look at the bytes first: tokenized only when an identifier character is
+/// right before one of the three
+pub fn unknown_prefix(src: &str) -> Option<String> {
+    let b = src.as_bytes();
+    if !b.windows(2).any(|w| is_ident_cont(w[0]) && matches!(w[1], b'#' | b'"' | b'\'')) {
+        return None;
+    }
+    let toks = tokenize(b);
+    for (k, &(kind, a, e)) in toks.iter().enumerate() {
+        if kind != 0 || e >= b.len() || !matches!(b[e], b'#' | b'"' | b'\'') {
+            continue;
+        }
+        let w = &src[a..e];
+        // (a lifetime `'a`, a number's suffix `1u8`, a literal's prefix (one token with its literal), a raw name `r#x`)
+        if matches!(w, "b" | "r" | "br" | "c" | "cr") || (a > 0 && (b[a - 1] == b'\'' || b[a - 1].is_ascii_alphanumeric())) {
+            continue;
+        }
+        // (a macro's fragment `$x`: still a prefix to rustc, but its own tests keep to the names)
+        if k > 0 && toks[k - 1].0 == 1 && b[toks[k - 1].1] == b'$' && toks[k - 1].2 == a {
+            continue;
+        }
+        let line = b[..a].iter().filter(|&&c| c == b'\n').count() + 1;
+        let col = a - b[..a].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1) + 1;
+        return Some(format!("{line}:{col}: prefix `{w}` is unknown"));
+    }
+    None
+}
+
 pub fn tokenize(s: &[u8]) -> Vec<(u8, usize, usize)> {
     let n = s.len();
     // (種類, 開始, 終了): 0 = 識別子, 1 = 記号 1 文字, 2 = リテラル

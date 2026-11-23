@@ -9995,6 +9995,339 @@ impl Ordering {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Reverse<T>(pub T);
 
+/// `std::num::Wrapping<T>` / `std::num::Saturating<T>`: the value in a public field (their arithmetic is not here)
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Wrapping<T>(pub T);
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Saturating<T>(pub T);
+
+/// `std::num::NonZeroU8` .. `NonZeroIsize`: an integer that is never 0 (`new` gives None for 0). Formatted as the
+/// number, as std's are
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroU8(u8);
+impl NonZeroU8 {
+    pub const MIN: NonZeroU8 = NonZeroU8(1);
+    pub const MAX: NonZeroU8 = NonZeroU8(u8::MAX);
+    pub const BITS: u32 = u8::BITS;
+    pub const fn new(n: u8) -> Option<NonZeroU8> {
+        if n == 0 { None } else { Some(NonZeroU8(n)) }
+    }
+    pub const unsafe fn new_unchecked(n: u8) -> NonZeroU8 {
+        NonZeroU8(n)
+    }
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+impl Display for NonZeroU8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+impl Debug for NonZeroU8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroU16(u16);
+impl NonZeroU16 {
+    pub const MIN: NonZeroU16 = NonZeroU16(1);
+    pub const MAX: NonZeroU16 = NonZeroU16(u16::MAX);
+    pub const BITS: u32 = u16::BITS;
+    pub const fn new(n: u16) -> Option<NonZeroU16> {
+        if n == 0 { None } else { Some(NonZeroU16(n)) }
+    }
+    pub const unsafe fn new_unchecked(n: u16) -> NonZeroU16 {
+        NonZeroU16(n)
+    }
+    pub const fn get(self) -> u16 {
+        self.0
+    }
+}
+impl Display for NonZeroU16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+impl Debug for NonZeroU16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroU32(u32);
+impl NonZeroU32 {
+    pub const MIN: NonZeroU32 = NonZeroU32(1);
+    pub const MAX: NonZeroU32 = NonZeroU32(u32::MAX);
+    pub const BITS: u32 = u32::BITS;
+    pub const fn new(n: u32) -> Option<NonZeroU32> {
+        if n == 0 { None } else { Some(NonZeroU32(n)) }
+    }
+    pub const unsafe fn new_unchecked(n: u32) -> NonZeroU32 {
+        NonZeroU32(n)
+    }
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+impl Display for NonZeroU32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+impl Debug for NonZeroU32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroU64(u64);
+impl NonZeroU64 {
+    pub const MIN: NonZeroU64 = NonZeroU64(1);
+    pub const MAX: NonZeroU64 = NonZeroU64(u64::MAX);
+    pub const BITS: u32 = u64::BITS;
+    pub const fn new(n: u64) -> Option<NonZeroU64> {
+        if n == 0 { None } else { Some(NonZeroU64(n)) }
+    }
+    pub const unsafe fn new_unchecked(n: u64) -> NonZeroU64 {
+        NonZeroU64(n)
+    }
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+impl Display for NonZeroU64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+impl Debug for NonZeroU64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroU128(u128);
+impl NonZeroU128 {
+    pub const MIN: NonZeroU128 = NonZeroU128(1);
+    pub const MAX: NonZeroU128 = NonZeroU128(u128::MAX);
+    pub const BITS: u32 = u128::BITS;
+    pub const fn new(n: u128) -> Option<NonZeroU128> {
+        if n == 0 { None } else { Some(NonZeroU128(n)) }
+    }
+    pub const unsafe fn new_unchecked(n: u128) -> NonZeroU128 {
+        NonZeroU128(n)
+    }
+    pub const fn get(self) -> u128 {
+        self.0
+    }
+}
+impl Display for NonZeroU128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+impl Debug for NonZeroU128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroUsize(usize);
+impl NonZeroUsize {
+    pub const MIN: NonZeroUsize = NonZeroUsize(1);
+    pub const MAX: NonZeroUsize = NonZeroUsize(usize::MAX);
+    pub const BITS: u32 = usize::BITS;
+    pub const fn new(n: usize) -> Option<NonZeroUsize> {
+        if n == 0 { None } else { Some(NonZeroUsize(n)) }
+    }
+    pub const unsafe fn new_unchecked(n: usize) -> NonZeroUsize {
+        NonZeroUsize(n)
+    }
+    pub const fn get(self) -> usize {
+        self.0
+    }
+}
+impl Display for NonZeroUsize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+impl Debug for NonZeroUsize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroI8(i8);
+impl NonZeroI8 {
+    pub const MIN: NonZeroI8 = NonZeroI8(i8::MIN);
+    pub const MAX: NonZeroI8 = NonZeroI8(i8::MAX);
+    pub const BITS: u32 = i8::BITS;
+    pub const fn new(n: i8) -> Option<NonZeroI8> {
+        if n == 0 { None } else { Some(NonZeroI8(n)) }
+    }
+    pub const unsafe fn new_unchecked(n: i8) -> NonZeroI8 {
+        NonZeroI8(n)
+    }
+    pub const fn get(self) -> i8 {
+        self.0
+    }
+}
+impl Display for NonZeroI8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+impl Debug for NonZeroI8 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroI16(i16);
+impl NonZeroI16 {
+    pub const MIN: NonZeroI16 = NonZeroI16(i16::MIN);
+    pub const MAX: NonZeroI16 = NonZeroI16(i16::MAX);
+    pub const BITS: u32 = i16::BITS;
+    pub const fn new(n: i16) -> Option<NonZeroI16> {
+        if n == 0 { None } else { Some(NonZeroI16(n)) }
+    }
+    pub const unsafe fn new_unchecked(n: i16) -> NonZeroI16 {
+        NonZeroI16(n)
+    }
+    pub const fn get(self) -> i16 {
+        self.0
+    }
+}
+impl Display for NonZeroI16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+impl Debug for NonZeroI16 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroI32(i32);
+impl NonZeroI32 {
+    pub const MIN: NonZeroI32 = NonZeroI32(i32::MIN);
+    pub const MAX: NonZeroI32 = NonZeroI32(i32::MAX);
+    pub const BITS: u32 = i32::BITS;
+    pub const fn new(n: i32) -> Option<NonZeroI32> {
+        if n == 0 { None } else { Some(NonZeroI32(n)) }
+    }
+    pub const unsafe fn new_unchecked(n: i32) -> NonZeroI32 {
+        NonZeroI32(n)
+    }
+    pub const fn get(self) -> i32 {
+        self.0
+    }
+}
+impl Display for NonZeroI32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+impl Debug for NonZeroI32 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroI64(i64);
+impl NonZeroI64 {
+    pub const MIN: NonZeroI64 = NonZeroI64(i64::MIN);
+    pub const MAX: NonZeroI64 = NonZeroI64(i64::MAX);
+    pub const BITS: u32 = i64::BITS;
+    pub const fn new(n: i64) -> Option<NonZeroI64> {
+        if n == 0 { None } else { Some(NonZeroI64(n)) }
+    }
+    pub const unsafe fn new_unchecked(n: i64) -> NonZeroI64 {
+        NonZeroI64(n)
+    }
+    pub const fn get(self) -> i64 {
+        self.0
+    }
+}
+impl Display for NonZeroI64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+impl Debug for NonZeroI64 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroI128(i128);
+impl NonZeroI128 {
+    pub const MIN: NonZeroI128 = NonZeroI128(i128::MIN);
+    pub const MAX: NonZeroI128 = NonZeroI128(i128::MAX);
+    pub const BITS: u32 = i128::BITS;
+    pub const fn new(n: i128) -> Option<NonZeroI128> {
+        if n == 0 { None } else { Some(NonZeroI128(n)) }
+    }
+    pub const unsafe fn new_unchecked(n: i128) -> NonZeroI128 {
+        NonZeroI128(n)
+    }
+    pub const fn get(self) -> i128 {
+        self.0
+    }
+}
+impl Display for NonZeroI128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+impl Debug for NonZeroI128 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroIsize(isize);
+impl NonZeroIsize {
+    pub const MIN: NonZeroIsize = NonZeroIsize(isize::MIN);
+    pub const MAX: NonZeroIsize = NonZeroIsize(isize::MAX);
+    pub const BITS: u32 = isize::BITS;
+    pub const fn new(n: isize) -> Option<NonZeroIsize> {
+        if n == 0 { None } else { Some(NonZeroIsize(n)) }
+    }
+    pub const unsafe fn new_unchecked(n: isize) -> NonZeroIsize {
+        NonZeroIsize(n)
+    }
+    pub const fn get(self) -> isize {
+        self.0
+    }
+}
+impl Display for NonZeroIsize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+impl Debug for NonZeroIsize {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// `std::marker::PhantomData` (no fields: a zero-sized value of every T)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct PhantomData<T>;

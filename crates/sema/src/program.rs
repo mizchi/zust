@@ -1642,6 +1642,8 @@ impl Program {
         // 4. trait の実装 (impl ヘッダの要約から)
         // (traits with an impl for `&T` of a type parameter T)
         let mut ref_blankets: HashSet<String> = Default::default();
+        // (the mutabilities of each trait's `impl<T> Tr for &T` / `&mut T`: the two do not overlap each other)
+        let mut ref_muts: HashMap<String, Vec<bool>> = Default::default();
         // (impls for Box: (trait, line), checked against blanket impls of the same trait after the loop)
         let mut box_impls: Vec<(String, usize)> = vec![];
         // (unbounded blanket impls (trait, line), and every impl of the program's (trait, line))
@@ -1753,15 +1755,19 @@ impl Program {
             // methods instead: not supported)
             let ref_of_param = matches!(&sm.impl_self_ty, Some(TySyn::Ref(_, i)) if matches!(&**i, TySyn::Named(n) if n == sn))
                 && sm.impl_generics.iter().any(|g| g.0 == *sn);
+            let ref_mut = matches!(&sm.impl_self_ty, Some(TySyn::Ref(true, _)));
             if ref_of_param {
                 let defaults = p.traits.get(tr).is_some_and(|ids| ids.iter().any(|&id| p.sigs[id as usize].has_body));
                 if !sm.fns.is_empty() || defaults {
                     return Err(format!("{}:1: impls for references to a type parameter (`impl<T> {tr} for &T`) are not supported", it.line));
                 }
-                // (`impl<T> Foo for T` covers `&U` too)
-                if p.blanket_traits.contains(tr) {
+                // (`impl<T> Foo for T` covers `&U` too; one for `&T` and one for `&mut T` are two types)
+                let seen = ref_muts.entry(tr.clone()).or_default();
+                let other_ref_only = !seen.is_empty() && !seen.contains(&ref_mut);
+                if seen.contains(&ref_mut) || (p.blanket_traits.contains(tr) && !other_ref_only) {
                     return Err(format!("{}:1: conflicting implementations of trait `{tr}` for type `&_` (E0119)", it.line));
                 }
+                seen.push(ref_mut);
                 ref_blankets.insert(tr.clone());
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());

@@ -208,6 +208,12 @@ fn env_values(src: String, cfg: &crate::cfg::CfgSet) -> String {
 #[allow(clippy::too_many_arguments)]
 fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: u32, map: &mut SrcMap, cfg: &crate::cfg::CfgSet, open: &mut Vec<(String, String)>) -> Result<String, String> {
     let src = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // (edition 2021's reserved prefixes, before any macro takes the tokens as its input: `m!(foo#bar)`)
+    if cfg.edition >= 2021 {
+        if let Some(e) = crate::lexer::unknown_prefix(&src) {
+            return Err(format!("{display}:{e}"));
+        }
+    }
     // (cfg を先に評価する: 偽の `#[cfg(..)] mod x;` のファイルは読まない)
     // (and whether it may call `env!` / `option_env!`, seen by the same tokens)
     let mut env = None;
@@ -287,10 +293,32 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
                 let b = dir.join(&name).join("mod.rs");
                 map.probes.push(a.clone());
                 map.probes.push(b.clone());
+                // (a `mod x;` a macro body declares (serde_core's `crate_root!` in crate_root.rs, called in lib.rs): rustc
+                // looks beside the file that calls it; beside this file is that for a macro called from its parent)
+                let here = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+                let mut hdir = here.clone();
+                for p in &parts {
+                    hdir = hdir.join(match p {
+                        Ok(n) | Err(n) => n,
+                    });
+                }
+                let (c, d) = (hdir.join(format!("{name}.rs")), hdir.join(&name).join("mod.rs"));
                 if a.exists() {
                     (a, join_disp(&ddisp, &format!("{name}.rs")), dir.join(&name), join_disp(&ddisp, &name))
                 } else if b.exists() {
                     (b, join_disp(&ddisp, &format!("{name}/mod.rs")), dir.join(&name), join_disp(&ddisp, &name))
+                } else if hdir != dir && (c.exists() || d.exists()) {
+                    map.probes.push(c.clone());
+                    map.probes.push(d.clone());
+                    let pdisp = match display.rsplit_once('/') {
+                        Some((dd, _)) => dd.to_string(),
+                        None => String::new(),
+                    };
+                    if c.exists() {
+                        (c, join_disp(&pdisp, &format!("{name}.rs")), hdir.join(&name), join_disp(&pdisp, &name))
+                    } else {
+                        (d, join_disp(&pdisp, &format!("{name}/mod.rs")), hdir.join(&name), join_disp(&pdisp, &name))
+                    }
                 } else {
                     return Err(format!("{display}: file not found for module `{name}`"));
                 }
@@ -440,6 +468,10 @@ fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>, Ne
             }
             let (b2, cfg_test, path_attr) = attrs_before(src, s, &toks, b);
             b = b2;
+            // (`#[macro_use] mod m;`: m's macros are usable right after the declaration, so its file goes in at that
+            // place, not after the file's end: serde_core's `#[macro_use] mod crate_root; crate_root!();`)
+            let macro_use = src[toks[b].1..toks[k].1].contains("macro_use");
+            let nested = nested.or_else(|| macro_use.then(|| (toks[k + 2].2, vec![])));
             for c in &mut out[toks[b].1..toks[k + 2].2] {
                 if *c != b'\n' {
                     *c = b' ';
