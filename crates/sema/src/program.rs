@@ -1978,7 +1978,10 @@ impl Program {
                 let m = m.split('#').next().unwrap_or(m);
                 // (`__ref_foo` is the generated name of an impl for a reference; a method the trait declares with that
                 // name matches as written)
-                let bare = m.strip_prefix("__ref_").unwrap_or(m);
+                let mut bare = m;
+                while let Some(b) = bare.strip_prefix("__ref_") {
+                    bare = b;
+                }
                 let decls = p.traits.get(tr).map(|v| v.as_slice()).unwrap_or(&[]);
                 let declared = |n: &str| decls.iter().any(|&d| p.names[d as usize].rsplit("::").next() == Some(n));
                 if declared(m) || declared(bare) {

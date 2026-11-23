@@ -115,7 +115,20 @@ fn parse_pt(ts: TokenStream, is_pat: bool) -> Vec<Pt> {
 
 fn same_tok(a: &TokenTree, b: &TokenTree) -> bool {
     match (a, b) {
-        (TokenTree::Ident(x), TokenTree::Ident(y)) => x == y,
+        // (a rule's literal name matches the name renamed for hygiene, `closure__mh`, as rustc matches names)
+        (TokenTree::Ident(x), TokenTree::Ident(y)) => {
+            x == y || {
+                let (x, y) = (x.to_string(), y.to_string());
+                let base = |s: &str| -> String {
+                    let mut s = s;
+                    while let Some(t) = s.strip_suffix("__mh") {
+                        s = t;
+                    }
+                    s.to_string()
+                };
+                (x.ends_with("__mh") || y.ends_with("__mh")) && base(&x) == base(&y)
+            }
+        }
         (TokenTree::Punct(x), TokenTree::Punct(y)) => x.as_char() == y.as_char(),
         (TokenTree::Literal(x), TokenTree::Literal(y)) => x.to_string() == y.to_string(),
         // (目印としてのグループ: 括弧の種類が同じなら)
@@ -568,7 +581,12 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                 out.push_str(&i.to_string());
                 out.push_str("__mh ");
             }
-            Pt::Tok(TokenTree::Ident(i)) if lets.iter().any(|l| *i == l.as_str()) => {
+            // (not a tt-muncher's marker, `closures!(@closure ..)` in a body with `let closure`: the marker is matched
+            // against a rule's `@closure`, as rustc matches it by name)
+            Pt::Tok(TokenTree::Ident(i))
+                if lets.iter().any(|l| *i == l.as_str())
+                    && !(k > 0 && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '@')) =>
+            {
                 out.push_str(&i.to_string());
                 out.push_str("__mh ");
             }
@@ -991,13 +1009,20 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                     // (a call in statement position: the items it expands to are items of the enclosing block, not
                     // of the `({ .. })` around the rest: `fn main() { m!(); S }` with `struct S;` from m)
                     let stmt_pos = i == 0 || sym(i - 1, b';') || sym(i - 1, b'{') || sym(i - 1, b'}');
+                    // (at the top, a call is an item only where an item starts: after an attribute too. Elsewhere it is
+                    // in an item's expression or type, `const N: u32 = 0 + m!(u8);`, and keeps the `;` after it; after
+                    // a binary operator its expansion is one operand, as rustc's is)
+                    let item_start = stmt_pos || sym(i - 1, b']');
+                    let operand = top && !item_start && matches!(tk(i - 1), b"+" | b"-" | b"*" | b"/" | b"%" | b"^" | b"|");
                     // (not with attributes: a `#[cfg(false)]` item removed later would leave the attributes before it)
                     // (`m! { .. }` in statement position is a statement by itself, whatever follows: `defer! { .. }
                     // let x = ..;`)
                     let spliced = !top && stmt_pos && (sym(ge + 1, b';') || sym(ge + 1, b'}') || sym(ge, b'}')) && !body.contains('#');
                     // (the call's own `;` goes when the expansion ends a statement itself: no stray `;` after attributes)
                     let drop_semi = spliced && sym(ge + 1, b';') && body.trim_end().ends_with(';');
-                    let rep = if top {
+                    let rep = if operand {
+                        format!("({body})")
+                    } else if top {
                         body
                     } else if spliced {
                         // (followed by `;` or the block's end: the statements go into the block as they are; the
@@ -1024,7 +1049,7 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                     }
                     // (トップレベルの `name!(..);` の `;` も取る)
                     let mut e = toks[ge].2;
-                    if (top || drop_semi) && sym(ge + 1, b';') {
+                    if ((top && item_start) || drop_semi) && sym(ge + 1, b';') {
                         e = toks[ge + 1].2;
                     }
                     reps.push((a, e, rep));
@@ -1242,7 +1267,17 @@ fn find_calls(
                                 let next_semi = matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if q.as_char() == ';');
                                 let spliced = depth > 0 && stmt_pos && (next_semi || toks.get(i + 3).is_none()) && !body.contains('#');
                                 let drop_semi = spliced && next_semi && body.trim_end().ends_with(';');
-                                let rep = if depth == 0 || spliced {
+                                // (as expand_cfg: at the top, an item only where an item starts (after an attribute
+                                // too); after a binary operator, one operand that keeps the `;` after it)
+                                let item_start = i == 0
+                                    || matches!(&toks[i - 1], TokenTree::Punct(q) if q.as_char() == ';')
+                                    || matches!(&toks[i - 1], TokenTree::Group(pg) if matches!(pg.delimiter(), proc_macro2::Delimiter::Brace | proc_macro2::Delimiter::Bracket));
+                                let operand = depth == 0
+                                    && !item_start
+                                    && matches!(&toks[i - 1], TokenTree::Punct(q) if matches!(q.as_char(), '+' | '-' | '*' | '/' | '%' | '^' | '|'));
+                                let rep = if operand {
+                                    format!("({body})")
+                                } else if depth == 0 || spliced {
                                     body
                                 } else if stmt_pos {
                                     match split_items(&body) {
@@ -1268,7 +1303,7 @@ fn find_calls(
                                 }
                                 let mut e = g.span().byte_range().end;
                                 // (トップレベルの `name!(..);` の `;` も取る)
-                                if depth == 0 || drop_semi {
+                                if (depth == 0 && item_start) || drop_semi {
                                     if let Some(TokenTree::Punct(s)) = toks.get(i + 3) {
                                         if s.as_char() == ';' {
                                             e = s.span().byte_range().end;

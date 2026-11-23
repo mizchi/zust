@@ -426,7 +426,31 @@ fn attrs_start(s: &[u8], toks: &[Tok], i: usize) -> usize {
         }
         j = o - 1;
     }
-    toks[j].1
+    outer_docs_start(s, toks[j].1)
+}
+
+/// Before the byte p (an item or its first attribute), the outer doc comments (`///`, `/** */`) on the lines just
+/// above it: they are attributes of that item and go with it (rustc: no E0585 for a doc before a cfg'd-out item)
+fn outer_docs_start(s: &[u8], p: usize) -> usize {
+    let mut start = p;
+    loop {
+        // (the text from the line's start up to here must be blank)
+        let ls = s[..start].iter().rposition(|&c| c == b'\n').map_or(0, |k| k + 1);
+        if !s[ls..start].iter().all(|c| c.is_ascii_whitespace()) || ls == 0 {
+            return start;
+        }
+        let prev_end = ls - 1;
+        let pls = s[..prev_end].iter().rposition(|&c| c == b'\n').map_or(0, |k| k + 1);
+        let line = &s[pls..prev_end];
+        let lead = line.iter().take_while(|c| c.is_ascii_whitespace()).count();
+        let text = &line[lead..];
+        let doc_line = text.starts_with(b"///") && !text.starts_with(b"////");
+        let doc_block = text.starts_with(b"/**") && !text.starts_with(b"/***") && text.ends_with(b"*/") && text.len() > 4;
+        if !(doc_line || doc_block) {
+            return start;
+        }
+        start = pls + lead;
+    }
 }
 
 fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs: &mut Vec<(usize, usize)>) -> Option<String> {

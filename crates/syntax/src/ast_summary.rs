@@ -698,8 +698,19 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         Some(t) => tysyn(t, self_ty)?,
     };
     let name = sig.name.clone();
+    // (an impl for a reference, `impl Tr for &S` beside `impl Tr for S`: its own symbol, `_xS.__ref_v` (one
+    // `__ref_` a level), as its name is `S::__ref_v`)
+    let refs = {
+        let (mut pre, mut t) = (String::new(), owner.map(|o| &o.self_ty));
+        while let Some(TySyn::Ref(_, i)) = t {
+            pre.push_str("__ref_");
+            t = Some(i);
+        }
+        pre
+    };
     let symbol = match owner {
         _ if is_extern || is_main => name.clone(),
+        Some(o) if !o.is_trait && !refs.is_empty() => format!("_x{}.{refs}{name}", o.base),
         Some(o) => match o.impl_trait.as_deref() {
             Some(t) if t == "Display" || t == "Debug" => format!("_x{}.{t}.{name}", o.base),
             Some(t) if t.starts_with("PartialEq<") || t.starts_with("PartialOrd<") => {
@@ -2024,7 +2035,14 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             let name = match ow.impl_trait.as_deref() {
                 Some(t) if t == "Display" || t == "Debug" => format!("{}::<{t}>::{}", ow.base, fs.name),
                 Some(t) if t.starts_with("PartialEq<") || t.starts_with("PartialOrd<") => format!("{}::<{t}>::{}", ow.base, fs.name),
-                _ if matches!(ow.self_ty, TySyn::Ref(..)) => format!("{}::__ref_{}", ow.base, fs.name),
+                _ if matches!(ow.self_ty, TySyn::Ref(..)) => {
+                    let (mut pre, mut t) = (String::new(), &ow.self_ty);
+                    while let TySyn::Ref(_, i) = t {
+                        pre.push_str("__ref_");
+                        t = i;
+                    }
+                    format!("{}::{pre}{}", ow.base, fs.name)
+                }
                 _ => format!("{}::{}", ow.base, fs.name),
             };
             lift_closures(fs, body, &name, &mut sig, Some(&ow.self_ty), &mut sm)?;
@@ -2281,10 +2299,11 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
             }
             // `impl Add for &M`: M のメソッド `__ref_add` (self は &M) として持つ
-            let self_path = match self_ty {
-                PTy::Ref(_, _, i) if tr.is_some() => &**i,
-                t => t,
-            };
+            // (`impl Tr for &&str`: every reference off, the methods `str::__ref___ref_m`, one `__ref_` a level)
+            let mut self_path = self_ty;
+            while let (PTy::Ref(_, _, i), true) = (self_path, tr.is_some()) {
+                self_path = &**i;
+            }
             if let (PTy::Tuple(v), true) = (self_path, tr.is_some()) {
                 sm.impl_self = Some(format!("#tuple{}", v.len()));
                 sm.impl_self_ty = Some(tysyn(self_ty, None)?);
