@@ -9,7 +9,7 @@
 //! The JS output needs nothing (a record is a plain object); the `.d.ts` imports the TS type instead of declaring
 //! its own, so TS sees one type.
 
-use crate::ast::{Item, Pos, TyS};
+use crate::ast::{Item, Pos, TsFrom, TyS};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -34,12 +34,32 @@ enum T {
 struct Tok {
     t: T,
     pos: Pos,
+    /// the token's text: `src[start..end]` (in chars)
+    start: usize,
+    end: usize,
+    /// a line ends between this token and the one before (a field's separator, as in TS)
+    nl: bool,
+}
+
+/// Whether a `/` after token `prev` starts a regular expression (not a division): after an operator, an opening
+/// bracket or a keyword, as JS decides
+fn regex_after(prev: Option<&T>) -> bool {
+    match prev {
+        None => true,
+        Some(T::P(c)) => !matches!(c, ')' | ']'),
+        Some(T::Ident(k)) => matches!(
+            k.as_str(),
+            "return" | "typeof" | "instanceof" | "in" | "of" | "new" | "delete" | "void" | "throw" | "case" | "do" | "else" | "yield" | "await"
+        ),
+        Some(_) => false,
+    }
 }
 
 fn lex(src: &str) -> Vec<Tok> {
     let s: Vec<char> = src.chars().collect();
     let (mut i, mut line, mut col) = (0usize, 1u32, 0u32);
-    let mut out = vec![];
+    let mut out: Vec<Tok> = vec![];
+    let mut nl = false;
     let adv = |i: &mut usize, line: &mut u32, col: &mut u32, s: &[char]| {
         if s[*i] == '\n' {
             *line += 1;
@@ -52,7 +72,10 @@ fn lex(src: &str) -> Vec<Tok> {
     while i < s.len() {
         let c = s[i];
         let pos = Pos { line, col };
+        let start = i;
+        let before = out.len();
         if c.is_whitespace() {
+            nl |= c == '\n';
             adv(&mut i, &mut line, &mut col, &s);
         } else if c == '/' && s.get(i + 1) == Some(&'/') {
             while i < s.len() && s[i] != '\n' {
@@ -60,6 +83,7 @@ fn lex(src: &str) -> Vec<Tok> {
             }
         } else if c == '/' && s.get(i + 1) == Some(&'*') {
             while i < s.len() && !(s[i] == '*' && s.get(i + 1) == Some(&'/')) {
+                nl |= s[i] == '\n';
                 adv(&mut i, &mut line, &mut col, &s);
             }
             for _ in 0..2 {
@@ -81,27 +105,50 @@ fn lex(src: &str) -> Vec<Tok> {
             if i < s.len() {
                 adv(&mut i, &mut line, &mut col, &s);
             }
-            out.push(Tok { t: T::Str(v), pos });
+            out.push(Tok { t: T::Str(v), pos, start, end: i, nl });
         } else if c.is_alphabetic() || c == '_' || c == '$' {
             let mut v = String::new();
             while i < s.len() && (s[i].is_alphanumeric() || s[i] == '_' || s[i] == '$') {
                 v.push(s[i]);
                 adv(&mut i, &mut line, &mut col, &s);
             }
-            out.push(Tok { t: T::Ident(v), pos });
+            out.push(Tok { t: T::Ident(v), pos, start, end: i, nl });
         } else if c.is_ascii_digit() {
             let mut v = String::new();
             while i < s.len() && (s[i].is_alphanumeric() || s[i] == '.' || s[i] == '_') {
                 v.push(s[i]);
                 adv(&mut i, &mut line, &mut col, &s);
             }
-            out.push(Tok { t: T::Other(v), pos });
+            out.push(Tok { t: T::Other(v), pos, start, end: i, nl });
+        } else if c == '/' && regex_after(out.last().map(|t| &t.t)) {
+            // (a regular expression: opaque, so its brackets are not structure; `/` inside `[..]` does not end it)
+            adv(&mut i, &mut line, &mut col, &s);
+            let mut class = false;
+            while i < s.len() && s[i] != '\n' && (class || s[i] != '/') {
+                match s[i] {
+                    '\\' if i + 1 < s.len() => adv(&mut i, &mut line, &mut col, &s),
+                    '[' => class = true,
+                    ']' => class = false,
+                    _ => {}
+                }
+                adv(&mut i, &mut line, &mut col, &s);
+            }
+            if i < s.len() && s[i] == '/' {
+                adv(&mut i, &mut line, &mut col, &s);
+            }
+            while i < s.len() && s[i].is_alphabetic() {
+                adv(&mut i, &mut line, &mut col, &s);
+            }
+            out.push(Tok { t: T::Other(s[start..i].iter().collect()), pos, start, end: i, nl });
         } else {
             adv(&mut i, &mut line, &mut col, &s);
-            out.push(Tok { t: T::P(c), pos });
+            out.push(Tok { t: T::P(c), pos, start, end: i, nl });
+        }
+        if out.len() > before {
+            nl = false;
         }
     }
-    out.push(Tok { t: T::Eof, pos: Pos { line, col } });
+    out.push(Tok { t: T::Eof, pos: Pos { line, col }, start: i, end: i, nl });
     out
 }
 
@@ -114,11 +161,14 @@ struct Decl {
     interface: bool,
     exported: bool,
     body: usize,
+    /// another declaration of the same name (TS merges interfaces: not read yet)
+    again: Option<Pos>,
 }
 
 struct TsFile {
     path: String,
     src: String,
+    chars: Vec<char>,
     toks: Vec<Tok>,
     decls: HashMap<String, Decl>,
 }
@@ -136,7 +186,7 @@ impl TsFile {
                 T::P('{' | '(' | '[') => depth += 1,
                 T::P('}' | ')' | ']') => depth -= 1,
                 T::Ident(kw) if depth == 0 && (kw == "interface" || kw == "type") => {
-                    if let Some(Tok { t: T::Ident(name), pos }) = toks.get(k + 1) {
+                    if let Some(Tok { t: T::Ident(name), pos, .. }) = toks.get(k + 1) {
                         let interface = kw == "interface";
                         // (`export interface`, `export declare interface`)
                         let before = |n: usize, w: &str| k >= n && matches!(&toks[k - n].t, T::Ident(x) if x == w);
@@ -163,7 +213,15 @@ impl TsFile {
                         }
                         // (a `type` that is not `type X = ..`, e.g. `import type`, is not a declaration)
                         if interface || toks.get(j.wrapping_sub(1)).is_some_and(|t| t.t == T::P('=')) {
-                            decls.entry(name.clone()).or_insert(Decl { pos: *pos, generic, extends, interface, exported, body: j });
+                            match decls.get_mut(name) {
+                                Some(d) => {
+                                    let d: &mut Decl = d;
+                                    d.again.get_or_insert(*pos);
+                                }
+                                None => {
+                                    decls.insert(name.clone(), Decl { pos: *pos, generic, extends, interface, exported, body: j, again: None });
+                                }
+                            }
                         }
                         k = j;
                         continue;
@@ -173,17 +231,22 @@ impl TsFile {
             }
             k += 1;
         }
-        Ok(TsFile { path: path.display().to_string(), src, toks, decls })
+        let chars = src.chars().collect();
+        Ok(TsFile { path: path.display().to_string(), src, chars, toks, decls })
     }
 
     fn err(&self, pos: Pos, msg: impl Into<String>) -> TsError {
         TsError { file: Some((self.path.clone(), self.src.clone())), pos, msg: msg.into() }
     }
 
-    /// The fields of record `name`, and the names of the file's types they use
-    fn record(&self, name: &str) -> Result<(Vec<(String, TyS)>, Vec<(String, Pos)>), TsError> {
+    /// The fields of record `name`, its members as the file writes them, and the names of the file's types they use
+    #[allow(clippy::type_complexity)]
+    fn record(&self, name: &str) -> Result<(Vec<(String, TyS)>, Vec<String>, Vec<(String, Pos)>), TsError> {
         let d = &self.decls[name];
         let plain = "zsc reads plain record types from TS for now";
+        if let Some(p) = d.again {
+            return Err(self.err(p, format!("`{name}` is declared more than once: {plain} (TS merges the declarations; write them as one)")));
+        }
         if d.generic {
             return Err(self.err(d.pos, format!("`{name}` has type parameters: {plain} (no type parameters, `extends`, optional fields, unions)")));
         }
@@ -196,6 +259,7 @@ impl TsFile {
         }
         k += 1;
         let mut fields = vec![];
+        let mut members = vec![];
         let mut uses = vec![];
         loop {
             let t = &self.toks[k];
@@ -208,7 +272,8 @@ impl TsFile {
                 _ => {}
             }
             // `readonly name: T`
-            if matches!(&t.t, T::Ident(r) if r == "readonly") && matches!(self.toks[k + 1].t, T::Ident(_)) {
+            let ro = matches!(&t.t, T::Ident(r) if r == "readonly") && matches!(self.toks[k + 1].t, T::Ident(_));
+            if ro {
                 k += 1;
             }
             let ft = &self.toks[k];
@@ -222,15 +287,24 @@ impl TsFile {
                 _ => return Err(self.err(self.toks[k].pos, format!("`{name}.{f}` is not `field: type` (a method is not read): {plain}"))),
             }
             k += 1;
+            let from = self.toks[k].start;
             let (ty, next) = self.ty(k, &mut uses, name, f)?;
+            let text: String = self.chars[from..self.toks[next - 1].end].iter().collect();
+            members.push(format!("{}{f}: {text}", if ro { "readonly " } else { "" }));
             k = next;
+            // (`;`, `,`, or the end of the line, as TS separates members)
             match &self.toks[k].t {
                 T::P(';' | ',' | '}') => {}
+                _ if self.toks[k].nl => {}
                 _ => return Err(self.err(self.toks[k].pos, format!("the type of `{name}.{f}` is not one zsc reads: {plain} (string, number, boolean, bigint, arrays, and the file's other record types)"))),
             }
             fields.push((f.clone(), ty));
         }
-        Ok((fields, uses))
+        // (`type X = { .. } | ..`: the whole alias must be the object)
+        if !d.interface && matches!(self.toks[k + 1].t, T::P('|' | '&' | '[' | '.' | '<')) {
+            return Err(self.err(self.toks[k + 1].pos, format!("`{name}` is not only an object type (a union, an intersection or an array of one): {plain}")));
+        }
+        Ok((fields, members, uses))
     }
 
     /// A field's type from token `k`: the type and the token after it
@@ -348,11 +422,11 @@ pub fn expand(items: Vec<Item>, base: &Path) -> Result<Vec<Item>, Vec<TsError>> 
             }
             let exported = f.decls[&n].exported;
             match f.record(&n) {
-                Ok((fields, uses)) => {
+                Ok((fields, members, uses)) => {
                     todo.extend(uses.into_iter().map(|(u, up)| (u, up, false)));
                     // (a type read because another uses it is placed at the import, for errors in the zsc file)
                     let at = if named { p } else { pos };
-                    recs.push(Item::Record { name: n, params: vec![], fields, pos: at, from: Some((abs.clone(), exported)) });
+                    recs.push(Item::Record { name: n, params: vec![], fields, pos: at, from: Some(TsFrom { path: abs.clone(), exported, members }) });
                 }
                 Err(e) => errs.push(e),
             }

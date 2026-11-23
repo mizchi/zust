@@ -1514,18 +1514,6 @@ fn ts_plain(t: &Ty, named: &mut BTreeSet<String>) -> String {
     }
 }
 
-/// A field of a record read from TS, as TS wrote it (`number`, not a brand)
-fn ts_unbranded(t: &Ty) -> String {
-    match t {
-        Ty::F64 => "number".into(),
-        Ty::I64 => "bigint".into(),
-        Ty::Str => "string".into(),
-        Ty::Bool => "boolean".into(),
-        Ty::Array(e) => format!("readonly {}[]", ts_unbranded(e)),
-        t => ts(t),
-    }
-}
-
 /// The unbranded copy of a record or enum, in the `.d.ts`'s shape
 fn ts_plain_def(n: &str, items: &[Item], info: &Info, named: &mut BTreeSet<String>) -> Option<String> {
     for it in items {
@@ -1690,15 +1678,15 @@ pub fn dts(items: &[Item], info: &Info, shared_runtime: bool, spec: &dyn Fn(&std
     let mut ts_imports: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for it in items {
         match it {
-            Item::Record { from: Some((f, true)), name, .. } => {
-                ts_imports.entry(spec(f)).or_default().insert(name.clone());
+            Item::Record { from: Some(f), name, .. } if f.exported => {
+                ts_imports.entry(spec(&f.path)).or_default().insert(name.clone());
             }
-            // (a type the file does not export, read because an imported one uses it: declared with the TS
-            // file's shape, which TS takes as the same type)
-            Item::Record { from: Some((_, false)), name, .. } => {
+            // (a type the file does not export, read because an imported one uses it: declared again with the TS
+            // file's own members, so it is the same type to TS)
+            Item::Record { from: Some(f), name, .. } => {
                 let _ = writeln!(o, "export interface {name} {{");
-                for (f, t) in &info.records[name].fields {
-                    let _ = writeln!(o, "  readonly {f}: {};", ts_unbranded(t));
+                for m in &f.members {
+                    let _ = writeln!(o, "  {m};");
                 }
                 o.push_str("}\n\n");
             }

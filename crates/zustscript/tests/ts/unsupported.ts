@@ -8,3 +8,6 @@ export interface When { at: Date }
 export interface Method { run(): void }
 interface Hidden { x: number }
 export interface UsesHidden { h: Hidden }
+export type Either = { a: number } | { b: string };
+export interface Twice { a: number }
+export interface Twice { b: string }

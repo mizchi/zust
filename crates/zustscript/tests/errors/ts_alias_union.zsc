@@ -1,0 +1,2 @@
+// expect: `Either` is not only an object type
+import type { Either } from "../ts/unsupported.ts";

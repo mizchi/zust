@@ -14,7 +14,12 @@ pub fn summary(p: Post) -> String {
 
 pub fn promote(u: User) -> User { User { admin: true, tags: u.tags.push("staff"), ..u } }
 
-pub fn reply(p: Post, by: User, text: String) -> Post { Post { replies: p.replies.push(Reply { by: by, text: text }), ..p } }
+pub fn reply(p: Post, by: User, text: String) -> Post {
+  Post { replies: p.replies.push(Reply { by: by, text: text, tags: [], grid: [[1.0, 2.0], [3.0]] }), ..p }
+}
+
+// a type model.ts does not export, returned to TS
+pub fn first_reply(p: Post) -> Reply { p.replies[0] }
 
 pub fn same_user(a: User, b: User) -> bool { a == b }
 
