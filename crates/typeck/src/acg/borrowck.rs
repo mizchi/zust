@@ -3343,6 +3343,60 @@ impl Cx<'_> {
         Some(ln)
     }
 
+    /// A call's `&mut place` argument whose referent shares a lifetime or a type parameter of the signature with
+    /// another argument: what that argument borrows may be stored in the place (`push(&x, &mut v)` of
+    /// `fn push<'a>(r: &'a i32, v: &mut Vec<&'a i32>)` stores x's loan in v: `x = 2;` while v is used is E0506)
+    pub(crate) fn bk_arg_flows(&mut self, id: u32, args: &[&Expr]) {
+        if !self.bk_on() || self.bk.level < 2 || args.len() < 2 {
+            return;
+        }
+        let prog = self.prog;
+        let sig = &prog.sigs[id as usize];
+        if args.len() != sig.params.len() || !sig.params.iter().any(|t| matches!(t, Ty::Ref(true, _))) {
+            return;
+        }
+        fn params(prog: &Program, t: Ty, out: &mut Vec<u8>, depth: u32) {
+            match t {
+                Ty::Param(i) => out.push(i),
+                Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => params(prog, *i, out, depth + 1),
+                Ty::Struct(s) if depth < 8 && prog.structs[s as usize].symbolic => {
+                    for &a in &prog.structs[s as usize].args {
+                        params(prog, a, out, depth + 1);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let rs = sig.regions.as_deref();
+        for (i, a) in args.iter().enumerate() {
+            let Ty::Ref(true, inner) = sig.params[i] else { continue };
+            let Expr::Ref(true, place) = strip_paren(a) else { continue };
+            // (what the referent may hold: the lifetimes it names (after the reference's own), its type parameters)
+            let lts: Vec<u8> = rs.and_then(|r| r.slots.get(i)).map(|s| s.iter().skip(1).copied().filter(|&c| c < crate::types::R_STATIC).collect()).unwrap_or_default();
+            let mut tps = vec![];
+            params(prog, *inner, &mut tps, 0);
+            if lts.is_empty() && tps.is_empty() {
+                continue;
+            }
+            let mut srcs = vec![];
+            for (j, b) in args.iter().enumerate() {
+                if j == i {
+                    continue;
+                }
+                let by_lt = !lts.is_empty() && rs.and_then(|r| r.slots.get(j)).is_some_and(|s| s.iter().any(|c| lts.contains(c)));
+                let by_tp = !tps.is_empty() && {
+                    let mut v = vec![];
+                    params(prog, sig.params[j], &mut v, 0);
+                    v.iter().any(|p| tps.contains(p))
+                };
+                if by_lt || by_tp {
+                    self.bk_direct(b, &mut srcs);
+                }
+            }
+            self.bk_flow_into(place, &srcs);
+        }
+    }
+
     /// What srcs borrow is stored into the local the place e is rooted at
     pub(crate) fn bk_flow_into(&mut self, e: &Expr, srcs: &[Src]) {
         if !self.bk_on() || srcs.is_empty() {

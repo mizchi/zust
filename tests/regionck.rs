@@ -2761,3 +2761,15 @@ fn part16_let_ref_temporaries() {
     assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0716"), "{d:?}");
     assert_eq!(check("fn h() -> &'static u32 {\n    let x = &(5u32 + 1);\n    x\n}\nfn k() -> &'static u32 {\n    let ref x = 5u32;\n    x\n}\nfn main() {\n    let ref init = 0i32;\n    let a: &i32 = init;\n    let out = [init];\n    println!(\"{} {:?} {} {}\", a, out, h(), k());\n}\n"), vec![]);
 }
+
+/// A call's `&mut place` argument whose referent shares a lifetime or a type parameter with another argument stores
+/// what that argument borrows (`push(&x, &mut v)` of `fn push<'a>(r: &'a i32, v: &mut Vec<&'a i32>)`): `x = 2;` while
+/// v is used is E0506 (borrowck/cannot-assign-borrowed-ref-in-slice.rs)
+#[test]
+fn part16_mut_argument_flows() {
+    let d = check("fn push<'a>(r: &'a i32, v: &mut Vec<&'a i32>) { v.push(r) }\nfn save<'a>(r: &'a i32, to: &mut [&'a i32]) { to[0] = r; }\nfn put<T>(a: T, v: &mut Vec<T>) { v.push(a) }\nfn a() {\n    let mut v = vec![];\n    let mut x = 1;\n    push(&x, &mut v);\n    x = 2;\n    println!(\"{:?} {}\", v, x);\n}\nfn b() {\n    let init = 0i32;\n    let mut x = 1;\n    let mut out = [&init];\n    save(&x, &mut out);\n    x = 3;\n    println!(\"{:?} {}\", out, x);\n}\nfn c() {\n    let mut v = vec![];\n    let mut x = 1;\n    put(&x, &mut v);\n    x = 2;\n    println!(\"{:?} {}\", v, x);\n}\nfn main() { a(); b(); c(); }\n");
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![8, 16, 23] && d.iter().all(|x| x.1.contains("because it is borrowed")), "{d:?}");
+    // (not through an elided or another lifetime, nor after the borrower's last use)
+    assert_eq!(check("fn f(_a: &u8, _v: &mut Vec<&u8>) {}\nfn g<'a, 'b>(_a: &'a u8, _v: &mut Vec<&'b u8>) {}\nfn push<'a>(r: &'a u8, v: &mut Vec<&'a u8>) { v.push(r) }\nfn main() {\n    let k = 0u8;\n    let mut v: Vec<&u8> = vec![&k];\n    let mut x = 1u8;\n    f(&x, &mut v);\n    g(&x, &mut v);\n    x = 2;\n    let mut w = vec![];\n    push(&x, &mut w);\n    println!(\"{:?} {:?}\", v, w);\n    x = 3;\n    println!(\"{}\", x);\n}\n"), vec![]);
+}

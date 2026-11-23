@@ -3815,6 +3815,9 @@ impl Cx<'_> {
         let outer = std::mem::replace(&mut self.rg.call_self, written);
         let r = self.call_fn(id, None, &args, tf, expected, SP);
         self.rg.call_self = outer;
+        if r.is_ok() {
+            self.bk_arg_flows(id, &args);
+        }
         self.rg_took_call(c);
         self.seg_self = None;
         r
