@@ -2021,6 +2021,8 @@ compile-fail	derived-errors/issue-31997.rs
 compile-fail	derived-errors/no-spurious-unconstrained-param.rs
 check-pass	derives/clone-copy/clone-ref-to-dst.rs
 run-pass	derives/clone-copy/derive-clone-basic.rs
+compile-fail	derives/clone-copy/derive-copy-clone-non-copy-field-diagnostic.rs
+compile-fail	derives/clone-copy/derives-span-Clone.rs
 compile-fail	derives/clone-copy/deriving-copyclone.rs
 run-pass	derives/clone-copy/misbehaving-clone-impl.rs
 check-pass	derives/clone-include-gat-hrtb.rs
@@ -2031,6 +2033,7 @@ run-pass	derives/debug/derive-debug-2.rs
 check-pass	derives/debug/derive-debug-generic-with-lifetime.rs
 check-pass	derives/debug/derive-debug-newtype-unsized-slice.rs
 run-pass	derives/debug/derive-debug.rs
+compile-fail	derives/debug/derives-span-Debug.rs
 run-pass	derives/default/deriving-default-box.rs
 run-pass	derives/default/deriving-default-enum.rs
 compile-fail	derives/derive-assoc-type-not-impl.rs
@@ -2043,16 +2046,24 @@ check-pass	derives/derive-on-drop-type.rs
 check-pass	derives/derive-static-str-field.rs
 run-pass	derives/derive-type-with-reference.rs
 check-pass	derives/derive-with-where-bounds.rs
+compile-fail	derives/derived-trait-requires-field-impl.rs
+compile-fail	derives/derives-span-Hash.rs
 run-pass	derives/deriving-associated-types.rs
 run-pass	derives/deriving-in-fn.rs
 check-pass	derives/deriving-meta-empty-trait-list.rs
 compile-fail	derives/deriving-meta-unknown-trait.rs
+compile-fail	derives/deriving-no-inner-impl-error-message.rs
 compile-fail	derives/deriving-with-repr-packed-2.rs
 run-pass	derives/deriving-with-repr-packed-3.rs
+compile-fail	derives/eq-ord/derive-eq-check-all-variants.rs
 run-pass	derives/eq-ord/derive-partial-ord-discriminant-64bit.rs
 run-pass	derives/eq-ord/derive-partial-ord-discriminant.rs
 run-pass	derives/eq-ord/derive-partial-ord.rs
 run-pass	derives/eq-ord/derive-partialord-correctness.rs
+compile-fail	derives/eq-ord/derives-span-Eq.rs
+compile-fail	derives/eq-ord/derives-span-Ord.rs
+compile-fail	derives/eq-ord/derives-span-PartialEq.rs
+compile-fail	derives/eq-ord/derives-span-PartialOrd.rs
 run-pass	derives/eq-ord/deriving-cmp-generic-enum.rs
 run-pass	derives/eq-ord/deriving-cmp-generic-struct-enum.rs
 run-pass	derives/eq-ord/deriving-cmp-generic-struct.rs
@@ -2060,6 +2071,7 @@ run-pass	derives/eq-ord/deriving-cmp-generic-tuple-struct.rs
 run-pass	derives/eq-ord/deriving-cmp-shortcircuit.rs
 run-pass	derives/eq-ord/deriving-self-lifetime-totalord-totaleq.rs
 compile-fail	derives/eq-ord/internal_eq_trait_method_impls.rs
+compile-fail	derives/eq-ord/invalid-derive-comparison-34229.rs
 check-pass	derives/hash-on-compound-types.rs
 compile-fail	derives/imperfect-derive-advanced.rs
 compile-fail	derives/imperfect-derive-copy.rs
@@ -2070,6 +2082,7 @@ check-pass	derives/no-ice-on-derived-copy-with-associated-type-field.rs
 compile-fail	derives/no-send-sync-derives.rs
 run-pass	derives/no-spurious-unused-variable-warning-on-derive-hash.rs
 build-pass	derives/six-hundred-fields.rs
+compile-fail	derives/ufcs-in-derive-hash.rs
 compile-fail	destructuring-assignment/bad-expr-lhs.rs
 compile-fail	destructuring-assignment/bad-let-in-destructure.rs
 run-pass	destructuring-assignment/let-binding-tuple-destructuring.rs
@@ -6676,6 +6689,7 @@ compile-fail	structs/struct-pat-derived-error.rs
 compile-fail	structs/struct-pat-unmentioned-tuple-indices.rs
 compile-fail	structs/struct-path-alias-bounds.rs
 compile-fail	structs/struct-path-associated-type.rs
+compile-fail	structs/struct-path-self-type-mismatch.rs
 compile-fail	structs/struct-path-self.rs
 run-pass	structs/struct-pattern-matching.rs
 compile-fail	structs/struct-record-suggestion.rs
@@ -6724,6 +6738,7 @@ compile-fail	suggestions/const-pat-non-exaustive-let-new-var.rs
 compile-fail	suggestions/copied-and-cloned.rs
 compile-fail	suggestions/count2len.rs
 compile-fail	suggestions/crate-or-module-typo.rs
+compile-fail	suggestions/derive-clone-already-present-issue-146515.rs
 compile-fail	suggestions/derive-trait-for-method-call.rs
 compile-fail	suggestions/do-not-attempt-to-add-suggestions-with-no-changes.rs
 compile-fail	suggestions/dont-suggest-borrowing-existing-borrow.rs
@@ -6869,6 +6884,7 @@ compile-fail	suggestions/recover-invalid-float.rs
 compile-fail	suggestions/recover-missing-turbofish-surrounding-angle-braket.rs
 compile-fail	suggestions/redundant-shared-reference-issue-133685.rs
 compile-fail	suggestions/remove-question-symbol-with-paren.rs
+compile-fail	suggestions/restrict-type-not-param.rs
 compile-fail	suggestions/return-bindings-multi.rs
 compile-fail	suggestions/return-bindings.rs
 compile-fail	suggestions/return-closures.rs
@@ -7103,6 +7119,7 @@ run-pass	traits/default-method/supervtable.rs
 run-pass	traits/default-method/trait-object-lifetime-bound.rs
 run-pass	traits/default-method/trivial.rs
 run-pass	traits/default_method_simple.rs
+compile-fail	traits/derive-implicit-bound-on-clone.rs
 compile-fail	traits/derive-implicit-bound.rs
 compile-fail	traits/dont-autoderef-ty-with-escaping-var.rs
 compile-fail	traits/dont-suggest-impl-as-closure-arg.rs
@@ -7114,6 +7131,7 @@ run-pass	traits/early-vtbl-resolution.rs
 run-pass	traits/elaborate-type-region.rs
 compile-fail	traits/error-reporting/ambiguity-in-dropck-err-reporting.rs
 compile-fail	traits/error-reporting/incomplete-partial-ord-impl.rs
+compile-fail	traits/eval-caching-error-region.rs
 compile-fail	traits/explicit-reference-cast-unrelated-leaf.rs
 run-pass	traits/false-ambiguity-where-clause-builtin-bound.rs
 check-pass	traits/fn-pointer/hrtb-assoc-fn-traits-28994.rs
@@ -7431,7 +7449,9 @@ compile-fail	type/type-check/point-at-inference-3.rs
 compile-fail	type/type-check/unknown_type_for_closure.rs
 compile-fail	type/type-mismatch-multiple.rs
 compile-fail	type/type-parameter-defaults-referencing-Self-ppaux.rs
+compile-fail	type/type-parameter-names.rs
 compile-fail	type/type-params-in-different-spaces-1.rs
+compile-fail	type/type-params-in-different-spaces-3.rs
 compile-fail	type/type-path-err-node-types.rs
 compile-fail	type/type-recursive-box-shadowed.rs
 compile-fail	type/type-recursive.rs
@@ -7463,6 +7483,7 @@ compile-fail	typeck/explain_clone_autoref.rs
 compile-fail	typeck/for-in-const-eval.rs
 compile-fail	typeck/function-in-pattern-error-12863.rs
 compile-fail	typeck/gather-locals-twice.rs
+compile-fail	typeck/ice-self-mismatch-const-generics.rs
 compile-fail	typeck/ice-unexpected-region-123863.rs
 compile-fail	typeck/ice-with-expr-not-struct-127332.rs
 compile-fail	typeck/impl-for-nonexistent-type-error-8767.rs
