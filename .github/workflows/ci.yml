@@ -35,6 +35,9 @@ jobs:
             . -> target
             formal/connect -> target
       # (valgrind's packages, kept between runs: a slow mirror once took 5 minutes to download them)
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
       - name: Restore valgrind's packages
         uses: actions/cache@v4
         with:
@@ -53,8 +56,12 @@ jobs:
           cat ~/valgrind-install.log
           [ "$(cat ~/valgrind-install.done)" = 0 ] || { echo "valgrind's install failed"; exit 1; }
           valgrind --version
+      # (nextest runs the test binaries side by side too, where cargo test runs them one after another: 71s -> 50s
+      # on 4 cores. `cargo test` runs the same tests)
       - name: Test
-        run: cargo test --release --workspace
+        run: |
+          cargo nextest run --release --workspace --no-fail-fast
+          cargo test --release --workspace --doc
       - name: Compare with rustc (examples)
         run: tests/compare.sh
       # (zustc's prelude, compiled by zustc, against TLA+ models: formal/connect)

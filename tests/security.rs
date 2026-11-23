@@ -24,7 +24,8 @@
 //! process). rustc (edition 2024, debug) is the oracle: the header must agree with what rustc does,
 //! and the output is compared with its build's. Runtime cases are built with both backends
 //! (Cranelift and minclif), and run under valgrind when it is installed (memory errors and
-//! definite leaks fail; `ZUST_SECURITY_NO_VALGRIND=1` skips it).
+//! definite leaks fail; `ZUST_SECURITY_NO_VALGRIND=1` skips it). A case with `//@ args` runs under valgrind once per
+//! exit code (the first run that exits 0, the first that panics, ..); `ZUST_SECURITY_VALGRIND=all` runs every one.
 //!
 //! A case zustc does not pass yet says so with `//@ todo: <why>` (or `//@ todo(valgrind): <why>` when only valgrind
 //! sees the failure, a leak). It is run and reported as TODO, and does not fail the test; once it passes, it fails the
@@ -233,6 +234,10 @@ fn have(tool: &str) -> bool {
 const LIMIT: Duration = Duration::from_secs(20);
 
 /// Checks one case; Err(what went wrong)
+fn vg_all() -> bool {
+    std::env::var("ZUST_SECURITY_VALGRIND").is_ok_and(|v| v == "all")
+}
+
 fn check_case(c: &Case, dir: &Path, valgrind: bool) -> Result<(), String> {
     let zustc = env!("CARGO_BIN_EXE_zustc");
     let runs: Vec<Option<&str>> = if c.args.is_empty() { vec![None] } else { c.args.iter().map(|a| Some(a.as_str())).collect() };
@@ -268,6 +273,10 @@ fn check_case(c: &Case, dir: &Path, valgrind: bool) -> Result<(), String> {
         _ => &["cranelift", "minclif"],
     };
     for be in backends {
+        // (valgrind on the first run of each exit code: the runs of one case's `//@ args` go through the same code to
+        // different panics, and valgrind on each took most of this test's time. ZUST_SECURITY_VALGRIND=all runs it on
+        // every run)
+        let mut vg_codes: Vec<Option<i32>> = vec![];
         let zbin = dir.join(format!("{}.{be}", c.name));
         let mut cmd = Command::new(zustc);
         cmd.arg(format!("--backend={be}")).arg("--no-cache").arg(&c.path).arg("-o").arg(&zbin);
@@ -323,7 +332,8 @@ fn check_case(c: &Case, dir: &Path, valgrind: bool) -> Result<(), String> {
                 }
                 return Err(msg);
             }
-            if valgrind {
+            if valgrind && (vg_all() || !vg_codes.contains(&code(&o))) {
+                vg_codes.push(code(&o));
                 let log = dir.join(format!("{}.{be}.{k}.vg", c.name));
                 let mut cmd = Command::new("valgrind");
                 cmd.args(["-q", "--leak-check=full", "--errors-for-leak-kinds=definite"]).arg(format!("--log-file={}", log.display())).arg(&zbin).args(a.iter());
