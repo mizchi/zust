@@ -1257,6 +1257,8 @@ impl Session2 {
         let mut warn_denied = false;
         let mut deny_dead_pub = false;
         let mut deny_unused_imports = false;
+        // (unused_imports denied by its own name or its group's, not only through `deny(warnings)`)
+        let mut imports_denied = false;
         let mut deny_unreachable_code = false;
         let mut deny_must_use = false;
         let mut deny_unused_alloc = false;
@@ -1343,6 +1345,11 @@ impl Session2 {
             };
             deny_dead_code = grouped("dead_code", "unused");
             warn_denied = last_of("deny", &["warnings"]).is_some() || last_of("forbid", &["warnings"]).is_some();
+            imports_denied = last_of("forbid", &["unused_imports", "unused"]).is_some() || {
+                let own = ["unused_imports", "unused"];
+                let levels = [("deny", last_of("deny", &own)), ("warn", last_of("warn", &own)), ("allow", last_of("allow", &own)), ("expect", last_of("expect", &own))];
+                levels.iter().filter_map(|(l, at)| at.map(|at| (at, *l))).max().is_some_and(|(_, l)| l == "deny")
+            };
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_mismatched_lts = lint("mismatched_lifetime_syntaxes");
@@ -1369,7 +1376,7 @@ impl Session2 {
         }
         // (unused_imports: a top-level `use` whose name nothing else mentions)
         if deny_unused_imports && self.ctx.lib.is_none() {
-            if let Some((line, col, msg)) = first_unused_import(&src, &items[..user_src]) {
+            if let Some((line, col, msg)) = first_unused_import(&src, &items[..user_src], imports_denied, warn_denied) {
                 return Err(format!("{line}:{col}: {msg}"));
             }
         }
@@ -1969,8 +1976,9 @@ fn first_trait_arity_error(src: &str, items: &[SrcItem]) -> Option<String> {
 
 /// アイテムの関数を自前の構文木で読む (本体がなければ None)。引数のパターンは本体の先頭の let にする
 /// `#![deny(unused_imports)]`: the first name a top-level `use` brings in that no other item mentions. Traits
-/// (std's usual ones and the program's) are left alone: their methods use them without naming them
-fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, String)> {
+/// (std's usual ones and the program's) are left alone: their methods use them without naming them. `lint_denied`:
+/// the crate denies the lint (or its group) itself; `warn_denied`: it denies `warnings`, which turns a warn into an error
+fn first_unused_import(src: &str, items: &[SrcItem], lint_denied: bool, warn_denied: bool) -> Option<(usize, usize, String)> {
     const TRAITS: &[&str] = &[
         "Read", "Write", "BufRead", "Seek", "Hash", "Hasher", "BuildHasher", "FromStr", "Display", "Debug", "Iterator", "IntoIterator",
         "DoubleEndedIterator", "ExactSizeIterator", "FromIterator", "Extend", "Deref", "DerefMut", "Borrow", "BorrowMut", "AsRef", "AsMut",
@@ -2018,10 +2026,10 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
         }
         let text = &src[it.start..it.end];
         // (past its outer attributes, `#[deprecated] #[cfg(not(FALSE))] use std::fs;`: a false `cfg` is stripped
-        // before; the last of its lint attributes that names the lint or its group sets the level, and an allow,
-        // an expect or a warn leaves it without an error)
+        // before; the last of its lint attributes that names the lint or its group sets its level, and the last that
+        // names `warnings` whether a warn is an error)
         let mut t = text.trim_start();
-        let mut lint_off = false;
+        let (mut level, mut warnings) = (None, None);
         if t.starts_with('#') {
             let tb = text.as_bytes();
             let tt = crate::lexer::tokenize(tb);
@@ -2029,14 +2037,16 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
             let tw = |q: usize| if q < tt.len() && tt[q].0 == 0 { &text[tt[q].1..tt[q].2] } else { "" };
             let mut q = 0;
             while ts(q, b'#') && ts(q + 1, b'[') {
-                // (`#[allow(a, unused_imports)]` / `#[warn(unused)]` / `#[deny(unused_imports)]`: the lint or its group)
-                let level = tw(q + 2);
-                if matches!(level, "allow" | "expect" | "warn" | "deny" | "forbid") && ts(q + 3, b'(') {
+                // (`#[allow(a, unused_imports)]` / `#[warn(unused)]` / `#[deny(unused_imports)]`: the lint or its group;
+                // `#[allow(warnings)]`)
+                let l = tw(q + 2);
+                if matches!(l, "allow" | "expect" | "warn" | "deny" | "forbid") && ts(q + 3, b'(') {
                     let mut r = q + 4;
                     while r < tt.len() && !ts(r, b')') {
-                        if matches!(tw(r), "unused_imports" | "unused") {
-                            lint_off = matches!(level, "allow" | "expect" | "warn");
-                            break;
+                        match tw(r) {
+                            "unused_imports" | "unused" => level = Some(l),
+                            "warnings" => warnings = Some(l),
+                            _ => {}
                         }
                         r += 1;
                     }
@@ -2060,6 +2070,14 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
                 q = r + 1;
             }
         }
+        // (a warn is an error only where `warnings` is denied: by the item's own level of it, or else the crate's)
+        let warn_is_error = warnings.map_or(warn_denied, |w| matches!(w, "deny" | "forbid"));
+        let lint_off = match level {
+            Some("allow" | "expect") => true,
+            Some("warn") => !warn_is_error,
+            Some(_) => false,
+            None => !lint_denied && !warn_is_error,
+        };
         if !t.starts_with("use ") || lint_off || t.contains('*') {
             continue;
         }
