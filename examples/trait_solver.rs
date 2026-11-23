@@ -92,6 +92,22 @@ impl Kind for Local {
     }
 }
 
+// (impls for `dyn Tr` and `dyn Tr + Send` do not conflict: a trait object's auto traits make it another type, which
+// zustc's Ty does not keep, so E0119 is not decided for trait objects; thiserror has such impls)
+trait Erased {
+    fn erased(&self) -> u8;
+}
+impl Erased for dyn std::fmt::Debug {
+    fn erased(&self) -> u8 {
+        1
+    }
+}
+impl Erased for dyn std::fmt::Debug + Send {
+    fn erased(&self) -> u8 {
+        2
+    }
+}
+
 fn main() {
     println!("{} {}", Local.kind(), Tagged.kind());
     println!("{}", show(&Square(3)));

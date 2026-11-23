@@ -279,7 +279,9 @@ impl TraitDb {
         }
         // (a fn pointer with a reference is higher-ranked or not by lifetimes `Ty` does not keep: `for<'a> fn(&'a
         // u8)` is not `fn(&'static u8)`, though both are one Ty)
-        let heads = |c: &Clause| c.self_ty.into_iter().chain(c.args.iter().flatten().copied()).any(|t| fn_ref(p, t, 0));
+        // (nor a trait object: `dyn Tr` keeps neither its auto traits nor its lifetime, so `dyn Error + 'a` and
+        // `dyn Error + Send + 'a` are one Ty)
+        let heads = |c: &Clause| c.self_ty.into_iter().chain(c.args.iter().flatten().copied()).any(|t| fn_ref(p, t, 0) || has_dyn(p, t, 0));
         if heads(a) || heads(b) {
             return None;
         }
@@ -358,6 +360,20 @@ fn has_ref(p: &Program, t: Ty, depth: u32) -> bool {
         Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) | Ty::Box(x) => has_ref(p, *x, depth + 1),
         Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| has_ref(p, x, depth + 1)),
         Ty::Struct(s) => p.structs[s as usize].args.iter().any(|&x| has_ref(p, x, depth + 1)),
+        _ => false,
+    }
+}
+
+/// t holds a trait object
+fn has_dyn(p: &Program, t: Ty, depth: u32) -> bool {
+    if depth > 32 {
+        return true;
+    }
+    match t {
+        Ty::Dyn(_) => true,
+        Ty::Ref(_, x) | Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) | Ty::Box(x) => has_dyn(p, *x, depth + 1),
+        Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| has_dyn(p, x, depth + 1)),
+        Ty::Struct(s) => p.structs[s as usize].args.iter().any(|&x| has_dyn(p, x, depth + 1)),
         _ => false,
     }
 }
