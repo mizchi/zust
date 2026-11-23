@@ -1,0 +1,2 @@
+// expect: is not `field: type`
+import type { Method } from "../ts/unsupported.ts";

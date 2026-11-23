@@ -1,0 +1,2 @@
+// expect: declares no type `Nope`
+import type { Nope } from "../ts/unsupported.ts";

@@ -52,9 +52,29 @@ pub fn sum<T: Num>(xs: Array<T>) -> T { xs.fold(T::zero(), (acc, x) => acc + x) 
 // JSX: コンポーネントは `fn Name(props: Record) -> Jsx`。props は型検査される
 pub fn Row(props: RowProps) -> Jsx { <li onClick={() => props.onPick(props.sample.label)}>{props.sample.label}</li> }
 
-// JS の関数を手書きで宣言して取り込む (TS の型の自動取り込みはまだない)
+// JS の関数を手書きで宣言して取り込む (関数の型の自動取り込みはまだない)
 extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
+
+// TS のファイルのレコード型を、その型定義のとおりに読み込む (下の「TS の型の取り込み」)
+import type { User, Post } from "./model.ts";
 ```
+
+### TS の型の取り込み: `import type`
+
+```zsc
+import type { User, Post } from "./model.ts";   // model.ts の interface / type を、レコード型として読む
+
+pub fn display(u: User) -> String { u.name + " #" + (u.id as i32).to_string() }
+```
+
+- まずは**プレーンなレコード型**だけを読む(src/tsimport.rs)。`interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
+  - フィールドの型: `string` は `String`、`number` は `f64`(JS の number は倍精度。整数にするときは `as i32`)、`boolean` は `bool`、`bigint` は `i64`。配列(`T[]`、`readonly T[]`、`Array<T>`、`ReadonlyArray<T>`)と、同じファイルの別のレコード型
+  - 読み込む型が使う型(`Post` の `author: User`)も一緒に読む。export されていない型でもよい
+  - ファイルの残り(関数、union、総称型など)は、import しない限り読まない。import した型が部分集合の外なら、TS のファイルのその位置でエラーになる(`` `Opt.name` is optional ``、tests/errors/ts_*.zsc)
+  - パスは zsc のファイルからの相対パス。パッケージ(`"react"`)からはまだ読まない
+- 読み込んだ型は、zustscript のレコードと同じに使える(フィールドの読み出し、`{ ..u }` の更新、`==`、`@wasm` との境界)
+- JS の出力には何も足さない(レコードは素のオブジェクト)。`.d.ts` は自分で interface を書かず、`import type { User } from "./model.js"` で TS の型そのものを使う。TS 側は自分の値をそのまま渡せる(tests/ts/consumer.ts を tsc で検査)
+  - export されていない型が `.d.ts` に出るときだけ、TS と同じ形(数値は素の `number`)の interface を書く。TS は構造で型を比べるので、同じ型として扱われる
 
 ### 数値(AssemblyScript と同じ程度の表現力)
 
@@ -238,7 +258,7 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
   - 型: 数値、bool、配列、それらを組み合わせたレコードと enum(入れ子、総称の `Option<T>` なども可)
     - スカラーだけのレコードと enum は、Rust では `#[derive(Clone, Copy, PartialEq)]` の struct / enum(`ZsVec2`、`ZsShape`)になり、値で渡す
     - 配列と、配列を含むレコード / enum は Copy にならない。借用、move、clone は zsc が推論する(次の「所有権の推論」)
-    - JS との境界を越えられるのは、これまでどおり数値の配列と、スカラーだけのレコード / enum。配列を含むレコードは wasm の内側で使う
+    - JS との境界を越えられるのは、数値の配列、スカラーだけのレコード / enum、そして文字列や配列を含むレコードと、レコード・文字列・配列の配列(次の「バイト列で越える値」)
   - 構文: `let` / `let mut` と代入、`while` / `for` / `break` / `continue`、`if`、`match`(数値、bool、enum のバリアント、入れ子のパターン)、レコードの生成・フィールド・`..base` での更新、`as`、`T::zero()` / `T::one()`
   - 配列の操作: `len` `map` `filter` `fold` `any` `all` `push` `concat`、添字、`range(a, b)`(Rust では配列を作らずイテレータ `a..b` になる)
   - 呼び出し: 他の `@wasm` 関数、`wasm fn`、再帰
@@ -254,6 +274,12 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
     - Rust 側の wrapper が値に組み立て直す
   - 戻り値: wrapper が glue の out 領域に、1 スロット 8 byte で書き込む。glue はそれを `DataView` で読み、`{ TAG: "Some", _0: { .. } }` を組み立てる
   - 例: `nearest(xs, ys, p: Vec2, mode: Mode) -> Option<Hit>`
+- **バイト列で越える値**: 文字列や配列を含むレコード(`{ name: String, tags: Array<String> }`)、レコード・文字列・配列の配列(`Array<Person>`、`Array<Array<f64>>`)は、1 つの固定した形式のバイト列にして越える
+  - 両側の補助: JS 側は npm のパッケージ **zustscript-helper**(helper/ts、`encode` / `decode` だけの約 100 行)、Rust 側は crate **zustscript_helper**(helper/rust、trait `Wire` と `to_bytes` / `from_bytes`)。zustc は 1 つのファイルをコンパイルするので、zsc は crate のソースを `mod zustscript_helper` として埋め込み、レコードごとの `impl Wire` を書く
+  - 形式(第 1 版、helper/rust/src/lib.rs に表): little-endian、詰め物なし、型のタグなし(両側が型を知っている)。数値は 4 / 8 byte、bool は 1 byte、文字列は UTF-8 の長さ(u32)と UTF-8、配列は長さ(u32)と要素、レコードは宣言順のフィールド。両側の単体テストで、同じ値が同じバイト列になることを確かめている
+  - glue は引数を `encode` して線形メモリに置き、Rust の wrapper が `from_bytes` で値に戻して参照で渡す。結果は `to_bytes` して返し、glue が `decode` する。JS の出力は `import { encode, decode } from "zustscript-helper"` を含むので、使う側はこのパッケージを入れる
+  - まずは安定している型だけ: 数値、bool、文字列、配列、レコード。enum(スロットで越える)、typed array、関数は、まだこの形式に載せない(tests/errors/wasm_wire_enum.zsc)
+  - 差分テスト `wire_same_in_js_and_wasm`(tests/wire.zsc): 文字列と配列を含むレコード、レコードの配列、入れ子の配列、i64 の結果が、JS と wasm で一致する。TS から読み込んだレコード(`User`)もそのまま越える(`ts_records` の `badge`)
 - 差分テスト `shapes_same_in_js_and_wasm`: examples/shapes.zsc で、レコード、enum、総称の `Option<T>`、ループ、可変のローカル変数の結果が、JS と wasm で一致することを確かめている
 
 同じソースを JS と wasm で走らせた速さ(node 22、examples/numeric.zsc、`tests/numeric_bench.mjs`)。両方の結果は一致している。
@@ -527,7 +553,7 @@ zust は到達しない関数をそもそも出さないので、`wasm-gc` に�
 | 3 | effect 多相(関数型の effect 行)、async の effect(Promise で継続を再開) | 2〜4 週 | 生成はジェネレータのまま |
 | 4 | 方向 A の合流の続き: どの関数を wasm に置くかの判断材料(コピーの量と呼び出しの回数の見積もり)、`range(..).fold` などの JS 側での `for` への最適化、文字列やタプルへの部分集合の拡張、データを wasm 側に置いたまま繰り返し処理する仕組み(ハンドル) | 2〜4 週 | 数値、レコード、enum、ループまでは試作済み |
 | 5 | wasm バックエンドの改善(reactor、stackifier、wasm32 レイアウト) | 1〜2 か月 | zust 本体の作業 |
-| 6 | TS の型の取り込み(限定した部分集合、tsc API による抽出) | 範囲次第 | 今は手書きの extern |
+| 6 | TS の型の取り込み(限定した部分集合、tsc API による抽出) | 範囲次第 | プレーンなレコード型は `import type` で読める。関数は手書きの extern |
 
 - 小さな実アプリ(React 上)が書けるまで: 段階 1〜2 で 1.5〜2 か月
 - wasm の島が実用サイズになるまで: 段階 5 が必要

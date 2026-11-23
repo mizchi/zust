@@ -1,0 +1,38 @@
+// Records read from a TS file (tests/ts/model.ts): `number` is f64, arrays are arrays, and a record a record uses
+// (`Reply`) is read with it (tests/examples.rs: ts_records)
+import type { User, Post, Point } from "./ts/model.ts";
+import type { Cr } from "./ts/cr.ts";
+
+pub fn display(u: User) -> String {
+  let role = if u.admin { "admin" } else { "member" };
+  u.name + " (" + role + ", #" + (u.id as i32).to_string() + ")"
+}
+
+pub fn summary(p: Post) -> String {
+  let total = p.scores.fold(0.0, (s, x) => s + x);
+  p.title + " by " + display(p.author) + ": " + p.replies.len().to_string() + " replies, score " + (total as i32).to_string()
+}
+
+pub fn promote(u: User) -> User { User { admin: true, tags: u.tags.push("staff"), ..u } }
+
+pub fn reply(p: Post, by: User, text: String) -> Post {
+  Post { replies: p.replies.push(Reply { by: by, text: text, tags: [], grid: [[1.0, 2.0], [3.0]] }), ..p }
+}
+
+// a type model.ts does not export, returned to TS
+pub fn first_reply(p: Post) -> Reply { p.replies[0] }
+
+pub fn same_user(a: User, b: User) -> bool { a == b }
+
+// a TS record of numbers crosses to wasm like a zustscript one
+@wasm pub fn dist(a: Point, b: Point) -> f64 {
+  let dx = a.x - b.x;
+  let dy = a.y - b.y;
+  (dx * dx + dy * dy).sqrt()
+}
+
+// a TS record holding strings and arrays crosses to wasm as bytes (zustscript-helper / zustscript_helper)
+@wasm pub fn badge(u: User) -> String { u.name.to_upper() + " #" + (u.id as i32).to_string() + " " + u.tags.join("+") }
+
+// members separated by CR, U+2028 and U+2029 only (tests/ts/cr.ts)
+pub fn cr(c: Cr) -> String { c.b + (c.a as i32).to_string() + (if c.c { "!" } else { "?" }) }

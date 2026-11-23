@@ -20,6 +20,7 @@ mod js;
 mod lower;
 mod own;
 mod simd;
+mod tsimport;
 mod parse;
 mod wasm;
 
@@ -80,6 +81,20 @@ fn main() {
             std::process::exit(1);
         }
     };
+    // `import type`: the records of TS files
+    let base = input.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let items = match tsimport::expand(items, &base) {
+        Ok(i) => i,
+        Err(errs) => {
+            for e in &errs {
+                match &e.file {
+                    Some((f, s)) => report(f, s, &[(e.pos, e.msg.clone())]),
+                    None => report(&file, &src, &[(e.pos, e.msg.clone())]),
+                }
+            }
+            std::process::exit(1);
+        }
+    };
     let mut ck = check::Checker::new();
     ck.check_file(&items);
     if !ck.errors.is_empty() {
@@ -110,7 +125,8 @@ fn main() {
         std::process::exit(1);
     }
     let header = j.header();
-    let (dts, brands) = js::dts(&items, &info, !inline_runtime);
+    std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| die(&format!("{}: {e}", out_dir.display())));
+    let (dts, brands) = js::dts(&items, &info, !inline_runtime, &|ts| tsimport::specifier(&out_dir, ts));
     let wasm_name = format!("{stem}.wasm");
     // `@wasm fn`s: lowered to Rust (with --all-js they stay in the JS output)
     // `@simd fn`s: vectorized kernels (with --no-simd they go through zustc as @wasm ones)

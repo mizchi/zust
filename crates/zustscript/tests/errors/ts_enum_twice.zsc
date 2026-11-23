@@ -1,0 +1,3 @@
+// expect: the type `Point` is defined twice
+import type { Point } from "../ts/model.ts";
+enum Point { A, B }

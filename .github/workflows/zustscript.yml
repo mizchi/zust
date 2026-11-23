@@ -52,3 +52,7 @@ jobs:
         run: |
           node --version
           cargo test --release
+      # (the Rust side of the helpers on its own: the format's layout)
+      - name: Test zustscript_helper
+        working-directory: crates/zustscript/helper/rust
+        run: cargo test --release

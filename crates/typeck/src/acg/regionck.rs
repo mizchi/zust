@@ -158,6 +158,9 @@ pub struct RgSt {
     pub last_call: Option<(u32, Ty, RT)>,
     /// The tree of the return type
     pub ret: Option<RT>,
+    /// `&a` expressions (their addresses) lowered as a deref coercion, with the derefs past a's: the pointer `a: &T`
+    /// holds (`*a: &T` of `a: &&T` ..), where a `&T` is expected. Their tree is a's, less those derefs' regions
+    pub coerced: Vec<(usize, usize)>,
     /// The function's own lifetime parameters (in `RSigSyn::lts` order)
     pub lts: Vec<u32>,
     pub lt_names: Vec<String>,
@@ -1929,6 +1932,55 @@ impl Cx<'_> {
                 out.extend(tr);
                 Some((Ty::Ref(false, crate::types::intern(t)), out))
             }
+            Expr::Ref(_, x) if self.rg.coerced.iter().any(|c| c.0 == e as *const Expr as usize) => {
+                let n = self.rg.coerced.iter().find(|c| c.0 == e as *const Expr as usize).map_or(0, |c| c.1);
+                // (the reborrow `&**x` it is lives no longer than the references it goes through, as an explicit one:
+                // a `&mut` link's region bounds it, a shared link stops there (deref)); those that reach the place x
+                // first (`&s.r` of `s: &'short mut S<'long>` as `&'long i32` needs `'short: 'long`)
+                let (mut t, mut tr, mut ds, place) = match self.rt_place(x) {
+                    Some((t, tr, ds)) => (t, tr, ds, true),
+                    None => {
+                        let (t, tr) = self.rt_expr(x)?;
+                        (t, tr, vec![], false)
+                    }
+                };
+                let (ds0, owned_place) = (ds.len(), place && ds.is_empty());
+                for _ in 0..n {
+                    let Ty::Ref(m, i) = t else { return None };
+                    if tr.is_empty() {
+                        return None;
+                    }
+                    deref(&mut ds, tr.remove(0), m);
+                    t = *i;
+                }
+                // (a region of its own, as an explicit reborrow's, which the borrow check's loan of it follows: kept
+                // to the function's end when it must outlive a lifetime of the signature (`let r: &'a i32 = &x;`))
+                // (through `&mut` links only, the reborrow goes through the borrow of the local the coercion takes
+                // (`&**(&x)`): it lives no longer than x, E0515 when returned (`&x` of `x: &'a mut i32` as `&'a i32`).
+                // A shared link stops that there)
+                if let (Ty::Ref(m, _), Some(&last)) = (t, tr.first()) {
+                    deref(&mut ds, last, m);
+                    let all_mut = ds.len() == ds0 + n + 1 && m;
+                    let r = self.rg.var();
+                    let sp = super::borrowck::pos(e);
+                    for d in ds {
+                        self.rg.edge(d, r, sp);
+                    }
+                    tr[0] = r;
+                    if self.rg.closure.is_none() {
+                        self.rg.reborrows.push((&**x as *const Expr as usize, r));
+                        // (only of a place the function owns: one reached through a reference (`&s.f` of `s: &mut S`,
+                        // `&*x`) is a reborrow through it, as the explicit path's)
+                        let owned = all_mut && owned_place && !matches!(strip(x), Expr::Call(..) | Expr::MethodCall(..));
+                        if owned {
+                            if let Some(name) = place_text(x) {
+                                self.rg.loans.push((r, name, sp));
+                            }
+                        }
+                    }
+                }
+                Some((t, tr))
+            }
             Expr::Ref(m, x) => {
                 let (t, tr, derefs) = self.rt_place(x)?;
                 let r = self.rg.var();
@@ -2680,32 +2732,47 @@ impl Cx<'_> {
 
     /// The value e is returned
     pub(crate) fn rg_ret(&mut self, e: &Expr) {
+        self.rg_ret_at(e, None);
+    }
+
+    /// rg_ret, with the position its errors are reported at when it is not e's own: a `match` arm's after the first,
+    /// whose value is coerced to the match's type, is reported at the match as rustc does (its blame prefers the
+    /// return of the match's value over that coercion). Not an arm that makes its value (a block, an `if`, a
+    /// constructor's call): rustc reports those inside
+    fn rg_ret_at(&mut self, e: &Expr, at: Option<Sp>) {
         if !self.rg_on() {
             return;
         }
         match e {
-            Expr::Paren(x) => return self.rg_ret(x),
+            Expr::Paren(x) => return self.rg_ret_at(x, at),
             Expr::Block(None, _, b) => {
                 if let Some(Stmt::Expr(t, false)) = b.stmts.last() {
-                    self.rg_ret(t);
+                    self.rg_ret_at(t, at);
                 }
                 return;
             }
             Expr::If(_, b, els) => {
                 if let Some(Stmt::Expr(t, false)) = b.stmts.last() {
-                    self.rg_ret(t);
+                    self.rg_ret_at(t, at);
                 }
                 if let Some(x) = els {
-                    self.rg_ret(x);
+                    self.rg_ret_at(x, at);
                 }
                 return;
             }
             Expr::Match(_, arms) => {
                 if let Some(&m2) = self.rg.alias.get(&(e as *const Expr as usize)) {
-                    return self.rg_ret(m2);
+                    return self.rg_ret_at(m2, at);
                 }
-                for a in arms {
-                    self.rg_ret(&a.body);
+                let made = |b: &Expr| match super::strip_paren(b) {
+                    Expr::Block(..) | Expr::If(..) | Expr::Match(..) | Expr::Struct(..) | Expr::Tuple(..) | Expr::Array(..) => true,
+                    Expr::Call(f, _) => matches!(&**f, Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_uppercase()))),
+                    _ => false,
+                };
+                let sp = super::borrowck::pos(e);
+                for (i, a) in arms.iter().enumerate() {
+                    let at = at.or((i > 0 && sp.line != 0 && !made(&a.body)).then_some(sp));
+                    self.rg_ret_at(&a.body, at);
                 }
                 return;
             }
@@ -2714,7 +2781,7 @@ impl Cx<'_> {
         let Some(rt) = self.rg.ret.clone() else { return };
         let Some((et, tr)) = self.rt_expr(e) else { return };
         let (prog, t) = (self.prog, self.ret);
-        let sp = super::borrowck::pos(e);
+        let sp = at.unwrap_or_else(|| super::borrowck::pos(e));
         // (a result with no regions: nothing escapes through it; the span may be a call's in it)
         if sp.line != 0 && !rt.is_empty() {
             self.rg.ret_sps.push(sp);
