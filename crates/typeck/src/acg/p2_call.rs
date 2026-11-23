@@ -1626,7 +1626,8 @@ impl Cx<'_> {
             let args: Vec<&Expr> = margs.iter().collect();
             return self.call_fn(id, Some((v, vt)), &args, tf, expected, SP).map(Some);
         }
-        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Box(_))) {
+        // (a vector of core::arch too: `impl Vector for __m128i`'s `v.movemask()`)
+        if !(t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Box(_) | Ty::Vec(_))) {
             return Ok(None);
         }
         // (`b.inc()` with `impl Inc for i32` and b: Box<i32>: the number's method, when the Box has none)
@@ -1658,8 +1659,12 @@ impl Cx<'_> {
         }) else {
             return Ok(None);
         };
-        // (an `unsafe fn` of the impl: E0133 outside `unsafe`, as for any method)
-        self.check_unsafe_call(id, msp.start)?;
+        // (an `unsafe fn` of the impl: E0133 outside `unsafe`, as for any method. For a vector's overload group that mixes
+        // safe and unsafe methods, only when every overload is unsafe: a safe one the overload choice may take is checked there)
+        let group = self.prog.overloads.get(&self.prog.names[id as usize]).cloned().unwrap_or_else(|| vec![id]);
+        if !matches!(t, Ty::Vec(_)) || group.iter().all(|&i| self.prog.sigs[i as usize].is_unsafe) {
+            self.check_unsafe_call(id, msp.start)?;
+        }
         // (`impl Tr for Box<S>`: only when the impl's self type is this Box; else the method is S's, through deref)
         if let Ty::Box(_) = t {
             let st = self.prog.sigs[id as usize].self_ty;

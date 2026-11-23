@@ -312,7 +312,8 @@ python3 bench/ci_bench.py --out-dir out/ci
 
 ## 英語の文書と日本語訳
 
-`README.md` は英語だけ (概要・測った数値・サポート範囲を 1 か所に持つ。ロードマップはこの文書にある)。その中の測った数値
+`README.md` (概要、zustc と zust-analyzer の使い方、測った数値の要約)、`SUPPORT.md` (分野ごとのサポート範囲)、
+`PERFORMANCE.md` (KPI と、ほかのツールとの比較) は英語だけ。ロードマップはこの文書にある。この 3 つのファイルの測った数値
 (`<!-- auto:.. -->` の間と、`<!-- ui:.. -->` / `<!-- cf:.. -->` の直後) は CI が書き直す
 (bench.yml が main への push ごとに `scripts/update_readme.py` を実行する) ので、手で直さない。英語の文書と日本語訳の組は
 `CONTRIBUTING.md` / `CONTRIBUTING.ja.md`、
@@ -364,8 +365,8 @@ Markdown を変えたコミットでは、フックが `scripts/docs_check.sh --
   速さやサイズに効く変更なら `bench/regress.sh` も通す。
 - LSP の答えを変えたら、`bench/lsp_parity.py` で一致の割合と時間が下がっていないことを見る。
 - まとまった作業をしたら、レポートを書く (次の節)。
-- rust-analyzer との違いや、残したことは下の [ロードマップ](#ロードマップ) (か issue) に、サポート範囲は README の
-  [What is supported](README.md#what-is-supported) に書く (英語。割合のある新しい分野には tests/ui のディレクトリを
+- rust-analyzer との違いや、残したことは下の [ロードマップ](#ロードマップ) (か issue) に、サポート範囲は
+  [SUPPORT.md](SUPPORT.md) に書く (英語。割合のある新しい分野には tests/ui のディレクトリを
   書いた `<!-- ui:DIR -->` を付ける)。
 
 ### レポートの書き方
@@ -402,7 +403,7 @@ What was done, why, how it was measured, the results (numbers), what was learned
 - **セキュリティ** ([TODO.md](TODO.md)。[レポート](docs/reports/2026-11-21-01-security-cves.md)): セキュリティのテストが
   見つけて残した穴 (`tests/security/` の `//@ todo` のケース) と、wasm32 のターゲットの残り
 - **rustc の tests/ui** (`python3 bench/rust_ui.py`。[レポート](docs/reports/2026-11-18-07-rustc-ui-tests.md))
-  - 通る割合を上げる ([Status](README.md#status))
+  - 通る割合を上げる ([README の Status](README.md#status)。分野ごとは [SUPPORT.md](SUPPORT.md))
   - 大きな穴: unwinding (`catch_unwind`、`panic::set_hook`)、FFI の構造体の値渡し、型推論 (期待型からしか分からない
     型パラメータ)、本体の中の式の位置の `type` 別名とマクロ、const の中のクロージャ、ほかの型の中の引数の型の
     `impl Trait` (`&Vec<impl Display>`)

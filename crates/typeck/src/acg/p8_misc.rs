@@ -812,15 +812,21 @@ impl Cx<'_> {
         let prog = self.prog;
         let c = &prog.consts[ci as usize];
         let (t, src) = (c.ty, c.expr.clone());
-        // 整数の const は畳み込む (`u8::MAX.ilog10() as usize + 1` を使うたびに計算しない)。
-        // (評価は i128 で途中の型の切り詰めを見ないので、`!` を含むものと、結果が型の範囲の外のものは実行時に計算する)
-        if t.is_int() && !src.contains('!') {
-            if let Ok(v) = prog.const_int(&c.name, 0) {
-                let (lo, hi) = (crate::program::prim_assoc_const(t, "MIN").unwrap_or(0), crate::program::prim_assoc_const(t, "MAX").unwrap_or(0));
-                let in_range = if t == Ty::U128 { v >= 0 } else { lo <= v && v <= hi };
-                if in_range {
-                    return Ok((Some(self.int_const(t, v)), t));
+        // 整数の const は畳み込む (`u8::MAX.ilog10() as usize + 1` を使うたびに計算しない)。評価は型付きなので `!` も
+        // 型の幅で (`!0u8` は 255)。範囲の外の結果 (u128 のビット列) と、評価できない式は実行時に計算する
+        if t.is_int() {
+            match prog.const_int(&c.name, 0) {
+                Ok(v) => {
+                    let (lo, hi) = (crate::program::prim_assoc_const(t, "MIN").unwrap_or(0), crate::program::prim_assoc_const(t, "MAX").unwrap_or(0));
+                    let in_range = if t == Ty::U128 { v >= 0 } else { lo <= v && v <= hi };
+                    if in_range {
+                        return Ok((Some(self.int_const(t, v)), t));
+                    }
                 }
+                // (an overflow is the constant's error at compile time, as rustc's E0080: not a wrap or a panic at run
+                // time)
+                Err(e) if e.contains("overflow in constant") => return Err(format!("{}:1: in constant `{}`: {e}", SP.line, c.name)),
+                Err(_) => {}
             }
         }
         let ce: Expr = crate::parse::parse_expr(&src).or_else(|er| err(SP, er))?;

@@ -115,7 +115,14 @@ impl StructDef {
     }
 }
 
+/// The untyped locals of the blocks being evaluated (Program::eval_block_env): their expressions, and their values
+/// at each type a use wanted (memoized, so a chain `let x1 = x0 & x0; let x2 = x1 & x1; ..` is linear)
+type LazyLocals = (u64, FxMap<u64, (crate::parse::Expr, Vec<(Option<It>, Result<(i128, Option<It>), String>)>, Option<String>, bool)>);
+// (the third: the error of its untyped value, reported if no use evaluates it: `let _x = 1 / 0;`; the fourth: whether
+// the block refers to it, where it may not be evaluated (an `if` arm not taken))
+
 thread_local! {
+    static LAZY: std::cell::RefCell<LazyLocals> = std::cell::RefCell::new((0, FxMap::default()));
     /// 作っている途中のインスタンス (基の型, 型引数) と、途中で取った番号
     static INSTANTIATING: std::cell::RefCell<Vec<((u32, Vec<Ty>), Option<u32>)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
@@ -212,6 +219,115 @@ pub struct ConstDef {
 /// `const _: () = { .. };` (名前のない const: コンパイル時の検査だけなので読み飛ばす。モジュールを平らにした `m___` も)
 fn anon_const(n: &str) -> bool {
     n == "_" || n.ends_with("::_") || (n.len() > 3 && n.ends_with("___"))
+}
+
+/// A constant's declared type, when it is an integer type written as one or as an alias of one (`u8`, `type L = u16`)
+fn early_int_ty(t: &TySyn, aliases: &FxMap<String, (Vec<String>, TySyn)>) -> Option<Ty> {
+    let mut t = t.clone();
+    for _ in 0..16 {
+        t = match t {
+            TySyn::Prim(p) if It::of_ty(p).is_some() => return Some(p),
+            TySyn::Named(n) => match aliases.get(&n) {
+                Some((g, a)) if g.is_empty() => a.clone(),
+                _ => return None,
+            },
+            // (a generic alias whose body is a parameter or a type: `type Id<T> = T;` makes `Id<i8>` an i8)
+            TySyn::App(n, args) => match aliases.get(&n) {
+                Some((g, TySyn::Named(p))) if g.len() == args.len() => match g.iter().position(|x| x == p) {
+                    Some(i) => args[i].clone(),
+                    None => TySyn::Named(p.clone()),
+                },
+                Some((g, a)) if g.len() == args.len() => a.clone(),
+                _ => return None,
+            },
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// The names of core::arch's vector type t (`Ty::Vec(128)`: `__m128i`, `__m128`, `__m128d`, `v128`), which an impl
+/// may use for it
+pub fn vector_names(t: Ty) -> &'static [&'static str] {
+    match t {
+        Ty::Vec(128) => &["__m128i", "__m128", "__m128d", "v128"],
+        Ty::Vec(256) => &["__m256i", "__m256", "__m256d"],
+        Ty::Vec(512) => &["__m512i", "__m512", "__m512d"],
+        _ => &[],
+    }
+}
+
+/// An integer type in constant evaluation: its width and sign (usize / isize are 64 bits)
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct It {
+    pub bits: u32,
+    pub signed: bool,
+}
+
+impl It {
+    pub fn of_name(n: &str) -> Option<It> {
+        let (bits, signed) = match n {
+            "u8" => (8, false),
+            "u16" => (16, false),
+            "u32" => (32, false),
+            "u64" | "usize" => (64, false),
+            "u128" => (128, false),
+            "i8" => (8, true),
+            "i16" => (16, true),
+            "i32" => (32, true),
+            "i64" | "isize" => (64, true),
+            "i128" => (128, true),
+            _ => return None,
+        };
+        Some(It { bits, signed })
+    }
+    pub fn of_ty(t: Ty) -> Option<It> {
+        match t {
+            Ty::U8 => It::of_name("u8"),
+            Ty::U16 => It::of_name("u16"),
+            Ty::U32 => It::of_name("u32"),
+            Ty::U64 | Ty::Usize => It::of_name("u64"),
+            Ty::U128 => It::of_name("u128"),
+            Ty::I8 => It::of_name("i8"),
+            Ty::I16 => It::of_name("i16"),
+            Ty::I32 => It::of_name("i32"),
+            Ty::I64 | Ty::Isize => It::of_name("i64"),
+            Ty::I128 => It::of_name("i128"),
+            _ => None,
+        }
+    }
+    /// The type's name, as a literal's suffix (usize / isize as u64 / i64: the same width)
+    pub fn name(self) -> &'static str {
+        match (self.bits, self.signed) {
+            (8, false) => "u8",
+            (16, false) => "u16",
+            (32, false) => "u32",
+            (64, false) => "u64",
+            (128, false) => "u128",
+            (8, true) => "i8",
+            (16, true) => "i16",
+            (32, true) => "i32",
+            (64, true) => "i64",
+            _ => "i128",
+        }
+    }
+    /// v's low bits as this type (two's complement; a u128 as its bit pattern)
+    pub fn wrap(self, v: i128) -> i128 {
+        if self.bits == 128 {
+            return v;
+        }
+        let m = (1u128 << self.bits) - 1;
+        let u = (v as u128) & m;
+        if self.signed && u >> (self.bits - 1) & 1 == 1 { (u | !m) as i128 } else { u as i128 }
+    }
+    /// v is in this type's range (a 128-bit type takes any held value)
+    pub fn fits(self, v: i128) -> bool {
+        self.bits == 128 || self.wrap(v) == v
+    }
+    /// v, which must be in this type's range ("overflow in constant", as rustc's error)
+    pub fn check(self, v: Option<i128>) -> R<i128> {
+        v.filter(|&v| self.fits(v)).ok_or_else(|| "overflow in constant".to_string())
+    }
 }
 
 pub fn prim_assoc_const(t: Ty, name: &str) -> Option<i128> {
@@ -311,6 +427,8 @@ pub struct Program {
     pub repr_c: HashSet<String>,
     /// `const fn` bodies a constant may call: name -> (parameter names, body text)
     pub const_fns: HashMap<String, (Vec<String>, String)>,
+    /// The parameter and result type names of those const fns (see Summary::const_fn_tys)
+    pub const_fn_tys: HashMap<String, (Vec<String>, String)>,
     /// 同じ型への別々の trait impl が同じ名前の関数を持つもの (`impl From<&str> for P` と `impl From<String> for P`):
     /// 最初の名前 → 候補の関数 (2 つ目以降は `P::from#1` のような名前)。呼び出し側が引数の型で選ぶ
     pub overloads: FxMap<String, Vec<u32>>,
@@ -359,6 +477,9 @@ pub struct Program {
     /// Associated consts of impls whose self type names 'static (`impl A<'static> { const IC: i32 = 10; }`), with
     /// the region slots of that self type: `A::<'a>::IC` requires 'a to be 'static
     pub static_self_consts: FxMap<u32, Vec<u8>>,
+    /// The declared type (as written) of a constant whose type is not known yet during layout (`[u8; 1]`, `(u8,)`):
+    /// what an element or field of it is before its type is resolved
+    pub early_syn: FxMap<u32, crate::types::TySyn>,
     /// `#[panic_handler]` の関数 (no_std)。panic (範囲外アクセス・unwrap など) はここを呼ぶ
     pub panic_handler: Option<u32>,
     /// const と static
@@ -840,6 +961,7 @@ impl Program {
             any_immutable_static: false,
             static_copy: FxSet::default(),
             static_self_consts: FxMap::default(),
+            early_syn: FxMap::default(),
             alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
@@ -867,6 +989,7 @@ impl Program {
             min_align: Default::default(),
             repr_c: Default::default(),
             const_fns: Default::default(),
+            const_fn_tys: Default::default(),
             overloads: Default::default(),
             trait_scopes: vec![],
             item_lines: vec![],
@@ -917,6 +1040,9 @@ impl Program {
             p.unions.extend(sm.unions.iter().cloned());
             for (n, ps, b) in &sm.const_fns {
                 p.const_fns.insert(n.clone(), (ps.clone(), b.clone()));
+            }
+            for (n, ps, r) in &sm.const_fn_tys {
+                p.const_fn_tys.insert(n.clone(), (ps.clone(), r.clone()));
             }
             for (tr, n, bs) in &sm.assoc_bounds {
                 p.assoc_bounds.insert((tr.clone(), n.clone()), bs.clone());
@@ -1017,7 +1143,7 @@ impl Program {
                 .iter()
                 .map(|(n, t, e)| (n, t, e, None))
                 .chain(sm.statics.iter().map(|(n, t, e, m)| (n, t, e, Some(*m))));
-            for (n, _, e, stat) in cs {
+            for (n, t, e, stat) in cs {
                 // (`const _: () = { assert!(..) };` はコンパイル時の検査だけ: 読み飛ばす)
                 if anon_const(n) {
                     continue;
@@ -1074,9 +1200,15 @@ impl Program {
                         p.static_self_consts.insert(p.consts.len() as u32, r.self_slots.clone());
                     }
                 }
+                // (an integer type is known already, before the layouts that evaluate constants (`[u8; N]`); the other
+                // types are resolved below)
+                let early = early_int_ty(t, &p.aliases).unwrap_or(Ty::Unit);
+                if early == Ty::Unit && matches!(t, TySyn::Array(..) | TySyn::Tuple(_) | TySyn::Ref(..)) {
+                    p.early_syn.insert(p.consts.len() as u32, t.clone());
+                }
                 p.consts.push(ConstDef {
                     name: n.clone(),
-                    ty: Ty::Unit,
+                    ty: early,
                     expr: e.clone(),
                     item: ii as u32,
                     stat,
@@ -1370,6 +1502,8 @@ impl Program {
                 let impl_of = match &ss.impl_of {
                     // (`impl Tr for Box<S>`: Box is not a struct; its methods are found by the self type, as for primitives)
                     Some(n) if Ty::prim(n).is_some() || n == "__array" || n == "__slice" || n == "__fnptr" || n == "__ptr" || n == "__never" || n.starts_with("__dyn_") || n == "str" || (n == "Box" && !p.struct_index.contains_key("Box")) => None,
+                    // (`impl Vector for __m128i`: a vector type is not a struct either, unless the program's own)
+                    Some(n) if crate::simd_sig::vector_name(n).is_some() && !p.struct_index.contains_key(n) => None,
                     Some(n) => match p.struct_index.get(n).copied().or_else(|| {
                         n.strip_prefix("#tuple").and_then(|k| k.parse().ok()).map(|k| p.tuple_base(k))
                     }).as_ref() {
@@ -1573,7 +1707,11 @@ impl Program {
                     p.ref_impls.insert((t, tr.clone()));
                 }
             }
-            if let Some(pt) = Ty::prim(sn).or((sn == "str").then_some(Ty::Str)).or((sn == "#tuple0").then_some(Ty::Unit)) {
+            // (and a vector type of core::arch, when the program has no type of the name: `impl Vector for __m128i`.
+            // `__m128`, `__m128i`, `__m128d` and `v128` are one type here, so impls of a trait for two of them conflict)
+            // (not `impl Tr for &__m128i`, which the reference implements: registered above)
+            let vec_ty = crate::simd_sig::vector_name(sn).filter(|_| !p.struct_index.contains_key(sn.as_str()) && !matches!(sm.impl_self_ty, Some(TySyn::Ref(..))));
+            if let Some(pt) = Ty::prim(sn).or((sn == "str").then_some(Ty::Str)).or((sn == "#tuple0").then_some(Ty::Unit)).or(vec_ty) {
                 let dup = !p.prim_impls.insert((pt, tr.clone()));
                 if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup) {
                     return Err(format!(
@@ -2503,8 +2641,17 @@ impl Program {
     }
 
     pub fn prim_method(&self, t: Ty, name: &str) -> Option<u32> {
-        if let Some(&id) = self.index.get(&format!("{}::{name}", self.tn(t))) {
+        // (not a program's own `struct v128`, which is not the vector `tn` names)
+        let direct = self.tn(t);
+        if let Some(&id) = self.index.get(&format!("{direct}::{name}")).filter(|_| !(matches!(t, Ty::Vec(_)) && self.struct_index.contains_key(&direct))) {
             return Some(id);
+        }
+        // (a vector type's methods are under the name its impl wrote: `impl Vector for __m128i` has `__m128i::splat`)
+        if let Ty::Vec(_) = t {
+            // (not a name the program gives a struct of its own: `struct __m128i` is not the vector)
+            if let Some(&id) = vector_names(t).iter().filter(|n| !self.struct_index.contains_key(**n)).find_map(|n| self.index.get(&format!("{n}::{name}"))) {
+                return Some(id);
+            }
         }
         // (`impl<T: Hash> Hash for [T]` / `for [T; N]` のメソッドは `__slice::m` / `__array::m`)
         let base = match t {
@@ -2803,14 +2950,7 @@ impl Program {
 
     /// 整数の const を評価する (リテラル・四則演算・ビット演算・シフト・キャスト・他の const)
     pub fn const_int(&self, name: &str, depth: u32) -> R<i128> {
-        if depth > 64 {
-            return Err(format!("cycle while evaluating constant `{name}`"));
-        }
-        let Some(&ci) = self.const_index.get(name) else {
-            return Err(format!("cannot find constant `{name}`"));
-        };
-        let e = crate::parse::parse_expr(&self.consts[ci as usize].expr)?;
-        self.eval_const(&e, depth + 1)
+        Ok(self.const_int_t(name, depth)?.0)
     }
 
     /// The part `pick` takes from the value of the constant expression b (through `&`, `*`, parentheses and other
@@ -2832,28 +2972,119 @@ impl Program {
         }
     }
 
-    /// A `const fn` body of `let x = ..;` statements and a tail expression, with the locals in env
-    fn eval_block_env(&self, b: &crate::parse::Block, env: &mut Vec<(String, i128)>, depth: u32) -> R<i128> {
+    /// A block of `let x = ..;` statements and a tail expression, with the locals in env (typed: a `let` keeps its
+    /// value's type, the tail is evaluated as `want`)
+    fn eval_block_env(&self, b: &crate::parse::Block, env: &mut Vec<(String, i128, Option<It>, Option<crate::parse::Expr>)>, depth: u32, want: Option<It>) -> R<(i128, Option<It>)> {
+        // (the untyped locals this block registers are dropped when it is done)
+        let start = LAZY.with(|l| l.borrow().0);
+        let r = self.eval_block_in(b, env, depth, want);
+        // (a local whose untyped value failed and that no use evaluated: an error if the block does not refer to it
+        // (`{ let _x = 1 / 0; 1 }`), or if it fails at the block's type too (`let x = 1 / 0; if false { x } else { 1 }`);
+        // `let x = 1 / ((!0 >> 7) + 1); if false { x } else { 0u8 }` is a u8's 0)
+        let pending: Vec<(crate::parse::Expr, String, bool)> = LAZY.with(|l| {
+            l.borrow().1.iter().filter(|(k, e)| **k >= start && e.1.is_empty()).filter_map(|(_, e)| e.2.clone().map(|er| (e.0.clone(), er, e.3))).collect()
+        });
+        let mut unused = None;
+        for (x, er, referenced) in pending {
+            // (a skipped use's type is not known here: the block's, or any integer type it succeeds at
+            // (`let _y: u8 = if false { x } else { 0u8 };` in an i64 block))
+            let at = |w: Option<It>| self.eval_t(&x, depth, w).is_ok();
+            let ints = ["u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize"];
+            let fails = !referenced || !(want.is_some_and(|w| at(Some(w))) || ints.iter().any(|n| at(It::of_name(n))));
+            if fails && unused.is_none() {
+                unused = Some(er);
+            }
+        }
+        LAZY.with(|l| l.borrow_mut().1.retain(|&k, _| k < start));
+        match (r, unused) {
+            (Ok(_), Some(e)) => Err(e),
+            (r, _) => r,
+        }
+    }
+
+    /// An untyped local's expression as a marker (`__zust_lazy_N`) that a use evaluates at the type it wants
+    fn lazy_marker(&self, x: crate::parse::Expr, failed: Option<String>) -> R<crate::parse::Expr> {
+        let id = LAZY.with(|l| {
+            let mut l = l.borrow_mut();
+            let id = l.0;
+            l.0 += 1;
+            l.1.insert(id, (x, vec![], failed, false));
+            id
+        });
+        crate::parse::parse_expr(&format!("__zust_lazy_{id}"))
+    }
+
+    /// An untyped local whose untyped value failed and that x refers to is used, even where x is not evaluated (an
+    /// `if` arm not taken still gives it its type): its error is not the block's
+    fn note_refs(&self, x: &crate::parse::Expr) {
+        LAZY.with(|l| {
+            let mut l = l.borrow_mut();
+            if l.1.values().all(|e| e.2.is_none() || e.3) {
+                return;
+            }
+            let t = format!("{x:?}");
+            for (id, e) in l.1.iter_mut() {
+                if e.2.is_some() && t.contains(&format!("\"__zust_lazy_{id}\"")) {
+                    e.3 = true;
+                }
+            }
+        });
+    }
+
+    fn eval_block_in(&self, b: &crate::parse::Block, env: &mut Vec<(String, i128, Option<It>, Option<crate::parse::Expr>)>, depth: u32, want: Option<It>) -> R<(i128, Option<It>)> {
         use crate::parse::{Pat, Stmt};
         let n = b.stmts.len();
         for (k, s) in b.stmts.iter().enumerate() {
             match s {
-                Stmt::Let(Pat::Ident(false, _, name, None), _, Some(init), None, ..) => {
-                    let v = self.eval_const(&subst_consts(init, env), depth)?;
-                    env.push((name.clone(), v));
+                Stmt::Let(Pat::Ident(false, _, name, None), ty, Some(init), None, ..) => {
+                    // (`let x: u8 = ..`: the annotation is the value's type)
+                    let x = subst_consts(init, env);
+                    self.note_refs(&x);
+                    let lt = ty.as_ref().and_then(|t| It::of_name(&self.cast_prim(t))).or_else(|| self.static_ty(&x));
+                    // (with no type yet, its failing untyped value is not an error: `let x = 1 / ((!0 >> 7) + 1);` is
+                    // 0 as a u8, whose use evaluates it again at that type)
+                    let mut failed = None;
+                    let (v, t) = match self.eval_t(&x, depth, lt) {
+                        Err(e) if lt.is_none() => {
+                            failed = Some(e);
+                            (0, None)
+                        }
+                        r => r?,
+                    };
+                    let t = lt.or(t);
+                    // (untyped (`let x = !0 >> 4;`): kept as its expression too, which takes the type of its use; as a
+                    // marker, so a chain of them does not grow)
+                    let lazy = if t.is_none() { Some(self.lazy_marker(x, failed)?) } else { None };
+                    env.push((name.clone(), t.map_or(v, |it| it.wrap(v)), t, lazy));
                 }
-                Stmt::Expr(x, false) if k + 1 == n => return self.eval_const(&subst_consts(x, env), depth),
+                Stmt::Expr(x, false) if k + 1 == n => {
+                    let x = subst_consts(x, env);
+                    self.note_refs(&x);
+                    return self.eval_t(&x, depth, want);
+                }
                 // (`x = 3;` to a local: its new value)
                 Stmt::Expr(crate::parse::Expr::Assign(l, r), _) => {
                     let crate::parse::Expr::Path(None, p) = &**l else { return Err("unsupported statement in a const fn".into()) };
                     let Some(name) = (p.segs.len() == 1).then(|| p.segs[0].name.clone()) else {
                         return Err("unsupported statement in a const fn".into());
                     };
-                    let v = self.eval_const(&subst_consts(r, env), depth)?;
-                    match env.iter_mut().rev().find(|(n, _)| *n == name) {
-                        Some(slot) => slot.1 = v,
-                        None => return Err("unsupported statement in a const fn".into()),
-                    }
+                    let Some(slot) = env.iter().rposition(|(n, ..)| *n == name) else {
+                        return Err("unsupported statement in a const fn".into());
+                    };
+                    let st = env[slot].2;
+                    let x = subst_consts(r, env);
+                    self.note_refs(&x);
+                    let mut failed = None;
+                    let (v, t) = match self.eval_t(&x, depth, st) {
+                        Err(e) if st.is_none() => {
+                            failed = Some(e);
+                            (0, None)
+                        }
+                        r => r?,
+                    };
+                    env[slot].1 = v;
+                    env[slot].2 = st.or(t);
+                    env[slot].3 = if env[slot].2.is_none() { Some(self.lazy_marker(x, failed)?) } else { None };
                 }
                 _ => return Err("unsupported statement in a const fn".into()),
             }
@@ -2861,12 +3092,9 @@ impl Program {
         Err("a const fn without a value".into())
     }
 
-    /// The name of a cast's target type, through aliases of it (`type Lane = i32` -> "i32"); "" for another type
-    fn cast_prim(&self, t: &crate::parse::Ty) -> String {
-        let mut prim = match t {
-            crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => p.segs[0].name.clone(),
-            _ => String::new(),
-        };
+    /// A one-segment type name's primitive integer name, through aliases (`type Lane = i32` -> "i32"); "" for another
+    pub fn prim_of_name(&self, n: &str) -> String {
+        let mut prim = n.to_string();
         // (a primitive integer's name is that type, not an alias of it: the aliases are the whole program's, and a
         // program's `type u32 = u8;` must not change the prelude's `as u32`, whose cached code does not hash aliases)
         for _ in 0..16 {
@@ -2882,74 +3110,123 @@ impl Program {
         prim
     }
 
-    /// The width in bits of a constant expression's integer type when it is written (a cast, a suffixed literal,
-    /// `-` of one): `count_ones` of `-1i8` counts 8 bits, not the 128 of the evaluator's i128
-    fn const_width(&self, e: &crate::parse::Expr) -> Option<u32> {
-        use crate::parse::Expr;
-        let of = |n: &str| match n {
-            "u8" | "i8" => Some(8),
-            "u16" | "i16" => Some(16),
-            "u32" | "i32" => Some(32),
-            "u64" | "i64" | "usize" | "isize" => Some(64),
-            "u128" | "i128" => Some(128),
-            _ => None,
-        };
-        match e {
-            Expr::Cast(_, t) => of(&self.cast_prim(t)),
-            Expr::Paren(x) => self.const_width(x),
-            Expr::Unary(op, x, _) if op == "-" || op == "!" => self.const_width(x),
-            Expr::Lit(t, _) => ["u128", "i128", "usize", "isize", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8"]
-                .iter()
-                .find(|s| t.ends_with(*s))
-                .and_then(|s| of(s)),
-            _ => None,
+    /// The name of a cast's target type, through aliases of it (`type Lane = i32` -> "i32"); "" for another type
+    fn cast_prim(&self, t: &crate::parse::Ty) -> String {
+        match t {
+            crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => self.prim_of_name(&p.segs[0].name),
+            // (`as core::primitive::u16`)
+            crate::parse::Ty::Path(None, p)
+                if p.segs.len() == 3 && matches!(p.segs[0].name.as_str(), "core" | "std") && p.segs[1].name == "primitive" && p.segs.iter().all(|s| s.args.is_empty()) =>
+            {
+                p.segs[2].name.clone()
+            }
+            _ => String::new(),
         }
     }
 
-    /// 自前の構文木の整数の定数式を評価する
+    /// 自前の構文木の整数の定数式を評価する (値だけ: 型は eval_t)
     pub fn eval_const(&self, e: &crate::parse::Expr, depth: u32) -> R<i128> {
+        Ok(self.eval_t(e, depth, None)?.0)
+    }
+
+    /// e's value as type t (an integer type: unsuffixed literals in e are t's, the value is wrapped to t)
+    pub fn eval_const_as(&self, e: &crate::parse::Expr, t: Ty) -> R<i128> {
+        let it = It::of_ty(t);
+        let (v, _) = self.eval_t(e, 0, it)?;
+        Ok(it.map_or(v, |it| it.wrap(v)))
+    }
+
+    /// A constant's value and its integer type, wrapped to the type it is declared with (`const X: i8 = -1`)
+    fn const_int_t(&self, name: &str, depth: u32) -> R<(i128, Option<It>)> {
+        if depth > 64 {
+            return Err(format!("cycle while evaluating constant `{name}`"));
+        }
+        let Some(&ci) = self.const_index.get(name) else {
+            return Err(format!("cannot find constant `{name}`"));
+        };
+        let e = crate::parse::parse_expr(&self.consts[ci as usize].expr)?;
+        // (evaluated as the declared type: an unsuffixed literal is one (`const M: u8 = !0;` is 255), and
+        // `const A: u8 = 255 + 1;` overflows)
+        let decl = It::of_ty(self.consts[ci as usize].ty);
+        let (v, t) = self.eval_t(&e, depth + 1, decl)?;
+        Ok(match decl {
+            Some(it) => (it.wrap(v), Some(it)),
+            None => (v, t),
+        })
+    }
+
+    /// A constant expression's value and its integer type, when it has one (a suffixed literal, a cast, a typed
+    /// constant, `u8::MAX`; an unsuffixed literal has none and takes the other operand's). A typed value is held in
+    /// its type's range (a u128 as its bit pattern), and arithmetic on it is checked as rustc's: past the type is an
+    /// error, `!` and `<<` keep its bits (`!0u8` is 255, so `!0u8 as u16` is 255)
+    fn eval_t(&self, e: &crate::parse::Expr, depth: u32, want: Option<It>) -> R<(i128, Option<It>)> {
         use crate::parse::Expr;
-        Ok(match e {
-            Expr::Lit(t, _) => lit_int(t).ok_or("not an integer constant")?,
-            Expr::Paren(x) => self.eval_const(x, depth)?,
-            // (an integer `as` wraps to its type, as rustc's: `4294967297u64 as i32` is 1)
+        let un = |v: i128| Ok((v, None));
+        match e {
+            Expr::Lit(t, _) => {
+                let v = lit_int(t).ok_or("not an integer constant")?;
+                // (a suffix that is a type's: `255u8`, `1_i64`; not a float's)
+                let it = ["u128", "i128", "usize", "isize", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8"]
+                    .iter()
+                    .find(|x| t.ends_with(*x) && !t.starts_with('\'') && !t.starts_with('"') && !t.starts_with('b'))
+                    .and_then(|x| It::of_name(x))
+                    // (a byte literal is a u8: `b'\x01'`)
+                    .or_else(|| t.starts_with("b'").then(|| It { bits: 8, signed: false }));
+                // (unsuffixed: the type the context wants, `const M: u8 = 255`)
+                Ok(match it.or(want) {
+                    Some(it) => (it.wrap(v), Some(it)),
+                    None => (v, None),
+                })
+            }
+            Expr::Paren(x) => self.eval_t(x, depth, want),
+            // (an integer `as` wraps to its type, as rustc's: `4294967297u64 as i32` is 1; another type keeps the value)
             Expr::Cast(x, t) => {
-                let v = self.eval_const(x, depth)?;
-                let prim = self.cast_prim(t);
-                match prim.as_str() {
-                    "u8" => v as u8 as i128,
-                    "u16" => v as u16 as i128,
-                    "u32" => v as u32 as i128,
-                    "u64" | "usize" => v as u64 as i128,
-                    "i8" => v as i8 as i128,
-                    "i16" => v as i16 as i128,
-                    "i32" => v as i32 as i128,
-                    "i64" | "isize" => v as i64 as i128,
-                    _ => v,
-                }
+                let (v, _) = self.eval_t(x, depth, None)?;
+                Ok(match It::of_name(&self.cast_prim(t)) {
+                    Some(it) => (it.wrap(v), Some(it)),
+                    None => (v, None),
+                })
             }
             // (`{ 3 }` / `{ let x = ..; }` is not: a block of one expression; `if c { a } else { b }`)
-            Expr::Block(None, false, b) if b.stmts.len() == 1 => match &b.stmts[0] {
-                crate::parse::Stmt::Expr(x, false) => self.eval_const(x, depth)?,
-                _ => return Err("unsupported expression in constant".into()),
+            Expr::Block(None, _, b) if b.stmts.len() == 1 => match &b.stmts[0] {
+                crate::parse::Stmt::Expr(x, false) => self.eval_t(x, depth, want),
+                _ => Err("unsupported expression in constant".into()),
             },
             // (`{ let x = 2; 5 }`)
-            Expr::Block(None, false, b) if b.stmts.len() > 1 => self.eval_block_env(b, &mut vec![], depth + 1)?,
-            Expr::Ref(false, x) => self.eval_const(x, depth)?,
+            Expr::Block(None, _, b) if b.stmts.len() > 1 => self.eval_block_env(b, &mut vec![], depth + 1, want),
+            Expr::Ref(false, x) => self.eval_t(x, depth, want),
             Expr::If(c, t, Some(els)) => {
                 let tail = |b: &crate::parse::Block| match b.stmts.as_slice() {
                     [crate::parse::Stmt::Expr(x, false)] => Some(x.clone()),
                     _ => None,
                 };
                 let c = self.eval_const(c, depth)?;
-                if c != 0 {
-                    let x = tail(t).ok_or("unsupported expression in constant")?;
-                    self.eval_const(&x, depth)?
-                } else {
-                    self.eval_const(els, depth)?
-                }
+                let x = tail(t).ok_or("unsupported expression in constant")?;
+                // (both arms are one type: `if true { !0 } else { 1u8 }` is a u8's !0; the other arm is not evaluated)
+                let want = want.or_else(|| self.static_ty(&x)).or_else(|| self.static_ty(els));
+                if c != 0 { self.eval_t(&x, depth, want) } else { self.eval_t(els, depth, want) }
             }
-            Expr::Path(None, p) if p.segs.len() == 1 && (p.segs[0].name == "true" || p.segs[0].name == "false") => (p.segs[0].name == "true") as i128,
+            // (an untyped local of a block: its expression at the wanted type, once per type)
+            Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name.starts_with("__zust_lazy_") => {
+                let id: u64 = p.segs[0].name["__zust_lazy_".len()..].parse().map_err(|_| "bad local")?;
+                let (x, hit) = LAZY.with(|l| {
+                    let l = l.borrow();
+                    let (x, memo, ..) = l.1.get(&id).ok_or("a local out of its block")?;
+                    R::Ok((x.clone(), memo.iter().find(|m| m.0 == want).map(|m| m.1.clone())))
+                })?;
+                if let Some(r) = hit {
+                    return r;
+                }
+                // (an earlier local only, so no cycle: the same depth, or a long chain would hit the limit)
+                let r = self.eval_t(&x, depth, want);
+                LAZY.with(|l| {
+                    if let Some(e) = l.borrow_mut().1.get_mut(&id) {
+                        e.1.push((want, r.clone()));
+                    }
+                });
+                r
+            }
+            Expr::Path(None, p) if p.segs.len() == 1 && (p.segs[0].name == "true" || p.segs[0].name == "false") => un((p.segs[0].name == "true") as i128),
             // (a call of a `const fn` with integer arguments: its body with the parameters bound)
             Expr::Call(f, args) if matches!(&**f, Expr::Path(None, p) if p.segs.len() == 1 && self.const_fns.contains_key(p.segs[0].name.as_str())) => {
                 let Expr::Path(None, p) = &**f else { unreachable!() };
@@ -2960,13 +3237,25 @@ impl Program {
                 if ps.len() != args.len() {
                     return Err("wrong number of arguments in a constant call".into());
                 }
-                let mut env: Vec<(String, i128)> = vec![];
-                for (n, a) in ps.iter().zip(args) {
-                    env.push((n.clone(), self.eval_const(a, depth + 1)?));
+                // (its parameters and result are its signature's integer types: `const fn flip(x: u8) -> u8 { !x >> 4 }`
+                // shifts a u8; a parameter or result of another type is untyped)
+                let (pts, rt) = self.const_fn_tys.get(p.segs[0].name.as_str()).cloned().unwrap_or_default();
+                let int_of = |n: &str| It::of_name(&self.prim_of_name(n));
+                let mut env: Vec<(String, i128, Option<It>, Option<crate::parse::Expr>)> = vec![];
+                for (k, (n, a)) in ps.iter().zip(args).enumerate() {
+                    let pt = pts.get(k).and_then(|t| int_of(t));
+                    let (v, t) = self.eval_t(a, depth + 1, pt)?;
+                    let t = pt.or(t);
+                    env.push((n.clone(), t.map_or(v, |it| it.wrap(v)), t, None));
                 }
                 let b = crate::parse::parse_expr(&body)?;
                 let Expr::Block(_, _, b) = b else { return Err("unsupported const fn".into()) };
-                self.eval_block_env(&b, &mut env, depth + 1)?
+                let rt = int_of(&rt);
+                let (v, t) = self.eval_block_env(&b, &mut env, depth + 1, rt.or(want))?;
+                match rt.or(t).or(want) {
+                    Some(it) => Ok((it.wrap(v), Some(it))),
+                    None => un(v),
+                }
             }
             // (`X[0]` / `T.1` of a const array, byte string, tuple or struct)
             Expr::Index(b, i, _) => {
@@ -2981,7 +3270,12 @@ impl Program {
                     }
                     _ => None,
                 })?;
-                self.eval_const(&part, depth + 1)?
+                // (an element of a typed constant array is its element type: `const A: [u8; 1] = [!0]`)
+                let et = match self.const_ty_of(b) {
+                    Some(Ty::Array(e, _)) => It::of_ty(*e),
+                    _ => self.early_part_ty(b, None),
+                };
+                self.eval_t(&part, depth + 1, want.or(et))
             }
             Expr::Field(b, f, _) => {
                 let part = self.const_part(b, depth, &|x| match x {
@@ -2990,44 +3284,157 @@ impl Program {
                     Expr::Call(_, xs) => f.parse::<usize>().ok().and_then(|k| xs.get(k).cloned()),
                     _ => None,
                 })?;
-                self.eval_const(&part, depth + 1)?
+                // (a field of a typed constant is its field's type: `const T: (u8,) = (!0,)`)
+                let ft = match self.const_ty_of(b) {
+                    Some(Ty::Struct(id)) => {
+                        let sd = &self.structs[id as usize];
+                        sd.fields.iter().find(|x| &x.0 == f).map(|x| x.1).and_then(It::of_ty)
+                    }
+                    _ => self.early_part_ty(b, f.parse::<usize>().ok()),
+                };
+                self.eval_t(&part, depth + 1, want.or(ft))
+            }
+            // (`-` of a literal is the negative literal: `-128i8` is i8::MIN, and so is `-(128i8)`; `-i8::MIN` overflows)
+            Expr::Unary(op, x, _) if op == "-" && matches!(strip_parens(x), Expr::Lit(..)) => {
+                let Expr::Lit(t, _) = strip_parens(x) else { unreachable!() };
+                let raw = lit_int(t).ok_or("not an integer constant")?;
+                let (_, it) = self.eval_t(x, depth, want)?;
+                match it {
+                    // (`-170141183460469231731687303715884105728i128` is i128::MIN: its magnitude wrapped to MIN)
+                    Some(it) if it.signed && it.bits == 128 && raw == i128::MIN => Ok((i128::MIN, Some(it))),
+                    Some(it) => Ok((it.check(raw.checked_neg().filter(|_| (it.signed || raw == 0) && raw >= 0))?, Some(it))),
+                    None => un(raw.wrapping_neg()),
+                }
+            }
+            // (`!` of a bool is the logical not: `(!true) as u8` is 0, not the complement of 1)
+            Expr::Unary(op, x, _) if op == "!" && is_bool_expr(x) => {
+                let (v, _) = self.eval_t(x, depth, None)?;
+                un((v == 0) as i128)
             }
             Expr::Unary(op, x, _) => {
-                let v = self.eval_const(x, depth)?;
-                match op.as_str() {
-                    "-" => -v,
-                    "!" => !v,
-                    "*" => v,
-                    _ => return Err("not an integer constant".into()),
+                let (v, t) = self.eval_t(x, depth, want)?;
+                match (op.as_str(), t) {
+                    // (`-` of a typed value: checked; of an unsigned one, an error as rustc's)
+                    ("-", Some(it)) => Ok((it.check(v.checked_neg().filter(|_| it.signed || v == 0))?, t)),
+                    ("-", None) => un(v.wrapping_neg()),
+                    // (`!` of a typed value: its bits only)
+                    ("!", Some(it)) => Ok((it.wrap(!v), t)),
+                    ("!", None) => un(!v),
+                    ("*", _) => Ok((v, t)),
+                    _ => Err("not an integer constant".into()),
                 }
             }
             Expr::Binary(op, l, r, _) => {
-                let (l, r) = (self.eval_const(l, depth)?, self.eval_const(r, depth)?);
-                match op.as_str() {
-                    "+" => l + r,
-                    "-" => l - r,
-                    "*" => l * r,
-                    "/" if r != 0 => l / r,
-                    "%" if r != 0 => l % r,
-                    "<<" => l << r,
-                    ">>" => l >> r,
-                    "&" => l & r,
-                    "|" => l | r,
-                    "^" => l ^ r,
-                    "==" => (l == r) as i128,
-                    "!=" => (l != r) as i128,
-                    "<" => (l < r) as i128,
-                    "<=" => (l <= r) as i128,
-                    ">" => (l > r) as i128,
-                    ">=" => (l >= r) as i128,
-                    "&&" => (l != 0 && r != 0) as i128,
-                    "||" => (l != 0 || r != 0) as i128,
-                    _ => return Err("unsupported operator in constant".into()),
+                let op = op.as_str();
+                let shift = op == "<<" || op == ">>";
+                let cmp = matches!(op, "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||");
+                // (the operands are the wanted type, but a comparison's are not its bool, and a shift's right one is
+                // its own)
+                let ow = if cmp { None } else { want };
+                // (`&&` / `||` short-circuit: `true || (u8::MAX + 1 == 0)` is true)
+                if matches!(op, "&&" | "||") {
+                    let lv = self.eval_const(l, depth)?;
+                    if (op == "&&") == (lv == 0) {
+                        return un((op == "||") as i128);
+                    }
+                    return un((self.eval_const(r, depth)? != 0) as i128);
+                }
+                // (the operands' common type, read before they are evaluated: in `(4 / ((!0 >> 7) + 1)) & 7u8` the
+                // left one is a u8 too; a shift's right operand is its own)
+                let common = if shift { ow.or_else(|| self.static_ty(l)) } else { ow.or_else(|| self.static_ty(l)).or_else(|| self.static_ty(r)) };
+                let l0 = self.eval_t(l, depth, common)?;
+                let r0 = self.eval_t(r, depth, if shift { None } else { common })?;
+                // (an unsuffixed operand is the other's type, evaluated as it: in `!0 & 7u8` the `!0` is a u8's)
+                let mutual = !shift && !matches!(op, "&&" | "||");
+                let l1 = if mutual && l0.1.is_none() && r0.1.is_some() { self.eval_t(l, depth, r0.1)? } else { l0 };
+                let r1 = if mutual && r0.1.is_none() && l1.1.is_some() { self.eval_t(r, depth, l1.1)? } else { r0 };
+                let ((lv, lt), (rv, rt)) = (l1, r1);
+                // (a shift has its left operand's type; another operator its operands' (one may be unsuffixed))
+                let t = if op == "<<" || op == ">>" { lt } else { lt.or(rt) };
+                let b = |x: bool| un(x as i128);
+                match t {
+                    // (u128: computed as u128, held as its bit pattern)
+                    Some(it) if it.bits == 128 && !it.signed => {
+                        let (x, y) = (lv as u128, rv as u128);
+                        let v: Option<u128> = match op {
+                            "+" => x.checked_add(y),
+                            "-" => x.checked_sub(y),
+                            "*" => x.checked_mul(y),
+                            "/" => x.checked_div(y),
+                            "%" => x.checked_rem(y),
+                            "<<" => u32::try_from(rv).ok().and_then(|n| x.checked_shl(n)),
+                            ">>" => u32::try_from(rv).ok().and_then(|n| x.checked_shr(n)),
+                            "&" => Some(x & y),
+                            "|" => Some(x | y),
+                            "^" => Some(x ^ y),
+                            "==" => return b(x == y),
+                            "!=" => return b(x != y),
+                            "<" => return b(x < y),
+                            "<=" => return b(x <= y),
+                            ">" => return b(x > y),
+                            ">=" => return b(x >= y),
+                            "&&" => return b(x != 0 && y != 0),
+                            "||" => return b(x != 0 || y != 0),
+                            _ => return Err("unsupported operator in constant".into()),
+                        };
+                        Ok((v.ok_or("overflow in constant")? as i128, t))
+                    }
+                    Some(it) => {
+                        let v = match op {
+                            "+" => lv.checked_add(rv),
+                            "-" => lv.checked_sub(rv),
+                            "*" => lv.checked_mul(rv),
+                            "/" => lv.checked_div(rv),
+                            // (`MIN % -1` overflows at the type's width, as `MIN / -1`)
+                            "%" if it.signed && rv == -1 && lv == it.wrap(1i128 << (it.bits - 1)) => None,
+                            "%" => lv.checked_rem(rv),
+                            // (a shift past the width is an error; `<<` drops the bits shifted out)
+                            "<<" if (0..it.bits as i128).contains(&rv) => return Ok((it.wrap(lv << rv), t)),
+                            ">>" if (0..it.bits as i128).contains(&rv) => Some(lv >> rv),
+                            "<<" | ">>" => None,
+                            "&" => Some(lv & rv),
+                            "|" => Some(lv | rv),
+                            "^" => Some(lv ^ rv),
+                            "==" => return b(lv == rv),
+                            "!=" => return b(lv != rv),
+                            "<" => return b(lv < rv),
+                            "<=" => return b(lv <= rv),
+                            ">" => return b(lv > rv),
+                            ">=" => return b(lv >= rv),
+                            "&&" => return b(lv != 0 && rv != 0),
+                            "||" => return b(lv != 0 || rv != 0),
+                            _ => return Err("unsupported operator in constant".into()),
+                        };
+                        // (an unsuffixed operand of a typed one is that type: it must fit in it too)
+                        if op != "<<" && op != ">>" && !(it.fits(lv) && it.fits(rv)) {
+                            return Err("overflow in constant".into());
+                        }
+                        Ok((it.check(v)?, t))
+                    }
+                    None => match op {
+                        "+" => un(lv.wrapping_add(rv)),
+                        "-" => un(lv.wrapping_sub(rv)),
+                        "*" => un(lv.wrapping_mul(rv)),
+                        "/" if rv != 0 => un(lv.wrapping_div(rv)),
+                        "%" if rv != 0 => un(lv.wrapping_rem(rv)),
+                        "<<" => un(lv.wrapping_shl(rv as u32)),
+                        ">>" => un(lv.wrapping_shr(rv as u32)),
+                        "&" => un(lv & rv),
+                        "|" => un(lv | rv),
+                        "^" => un(lv ^ rv),
+                        "==" => b(lv == rv),
+                        "!=" => b(lv != rv),
+                        "<" => b(lv < rv),
+                        "<=" => b(lv <= rv),
+                        ">" => b(lv > rv),
+                        ">=" => b(lv >= rv),
+                        "&&" => b(lv != 0 && rv != 0),
+                        "||" => b(lv != 0 || rv != 0),
+                        _ => Err("unsupported operator in constant".into()),
+                    },
                 }
             }
-            Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => {
-                self.const_int(&p.segs[0].name, depth)?
-            }
+            Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => self.const_int_t(&p.segs[0].name, depth),
             // `<u64 as Integer>::MAX_STR_LEN`
             Expr::Path(Some(q), p) if matches!(&**q, crate::parse::Ty::Path(None, tp) if tp.segs.len() == 1) && !p.segs.is_empty() => {
                 let crate::parse::Ty::Path(None, tp) = &**q else { unreachable!() };
@@ -3035,67 +3442,198 @@ impl Program {
                 if p.segs.len() == 2 {
                     let q = format!("{} as {}::{}", tp.segs[0].name, p.segs[0].name, p.segs[1].name);
                     if self.const_index.contains_key(&q) {
-                        return self.const_int(&q, depth);
+                        return self.const_int_t(&q, depth);
                     }
                     if let Some(k) = self.blanket_defines(&p.segs[0].name, &p.segs[1].name) {
-                        return self.const_int(&k, depth);
+                        return self.const_int_t(&k, depth);
                     }
                     let d = format!("{}::{}", p.segs[0].name, p.segs[1].name);
                     if self.const_index.contains_key(&d) {
-                        return self.const_int(&d, depth);
+                        return self.const_int_t(&d, depth);
                     }
                 }
                 let full = format!("{}::{}", tp.segs[0].name, p.segs.last().unwrap().name);
                 if self.const_index.contains_key(&full) {
-                    return self.const_int(&full, depth);
+                    return self.const_int_t(&full, depth);
                 }
                 let t = Ty::prim(&tp.segs[0].name).ok_or("unsupported path in constant")?;
-                prim_assoc_const(t, &p.segs.last().unwrap().name).ok_or("unsupported constant")?
+                self.prim_const_t(t, &p.segs.last().unwrap().name)
             }
             Expr::Path(None, p) if p.segs.len() == 2 => {
                 // (impl の関連 const: `i128::MAX_STR_LEN`)
                 let full = format!("{}::{}", p.segs[0].name, p.segs[1].name);
                 if self.const_index.contains_key(&full) {
-                    return self.const_int(&full, depth);
+                    return self.const_int_t(&full, depth);
                 }
                 // (`Foo::Bar as usize`: a unit variant's discriminant)
                 if let Some((sid, vi)) = self.variant_by_p(&PPath::of(p), None) {
-                    return Ok(self.structs[sid as usize].variants[vi].discr as i128);
+                    // (as a value of the repr type: `#[repr(u64)]`'s 2^63 is not negative)
+                    let d = self.structs[sid as usize].variants[vi].discr as i128;
+                    let rt = self.reprs.get(&self.structs[sid as usize].name).copied().and_then(It::of_ty);
+                    return Ok(match rt {
+                        Some(it) => (it.wrap(d), Some(it)),
+                        None => (d, None),
+                    });
                 }
-                let t = Ty::prim(&p.segs[0].name).ok_or("unsupported path in constant")?;
-                prim_assoc_const(t, &p.segs[1].name).ok_or("unsupported constant")?
+                // (through an alias of a primitive: `type Mask = u16;` and `Mask::BITS`)
+                let t = Ty::prim(&p.segs[0].name).or_else(|| Ty::prim(&self.prim_of_name(&p.segs[0].name))).ok_or("unsupported path in constant")?;
+                self.prim_const_t(t, &p.segs[1].name)
             }
-            // 整数のメソッド (`u128::MAX.ilog10()`)。u128 の値はビット列で持つので、受け手が符号なしの型の
-            // 関連 const なら符号なしとして見る
+            // 整数のメソッド (`u128::MAX.ilog10()`): 受け手の型の幅・符号で (`(-1i8).count_ones()` は 8)
             Expr::MethodCall(recv, m, _, args, _) => {
-                let v = self.eval_const(recv, depth)?;
-                let unsigned = matches!(&**recv, Expr::Path(None, p) if p.segs.len() == 2 && Ty::prim(&p.segs[0].name).is_some_and(|t| !t.signed()));
-                // (the bits of the receiver's type only: a negative i8 is 8 bits, not 128)
-                let bits = self.const_width(recv).unwrap_or(128);
+                let (v, t) = self.eval_t(recv, depth, None)?;
+                let bits = t.map_or(128, |it| it.bits);
+                let unsigned = t.is_some_and(|it| !it.signed);
                 let u = if bits < 128 { (v as u128) & ((1u128 << bits) - 1) } else { v as u128 };
-                let a: Vec<i128> = args.iter().map(|x| self.eval_const(x, depth)).collect::<R<Vec<i128>>>()?;
-                match (m.as_str(), a.as_slice()) {
-                    ("ilog10", []) if unsigned || v > 0 => {
+                let u32t = Some(It { bits: 32, signed: false });
+                // (an argument is its parameter's type: `pow`'s exponent a u32, `min` / `max`'s the receiver's)
+                let aw = if m == "pow" { u32t } else { t };
+                let a: Vec<i128> = args.iter().map(|x| Ok(self.eval_t(x, depth, aw)?.0)).collect::<R<Vec<i128>>>()?;
+                Ok(match (m.as_str(), a.as_slice()) {
+                    ("ilog10", []) if (unsigned && u != 0) || (!unsigned && v > 0) => {
                         let mut n = if unsigned { u } else { v as u128 };
                         let mut k = 0;
                         while n >= 10 {
                             n /= 10;
                             k += 1;
                         }
-                        k
+                        (k, u32t)
                     }
-                    ("ilog2", []) if unsigned || v > 0 => (127 - (if unsigned { u } else { v as u128 }).leading_zeros()) as i128,
-                    ("count_ones", []) => u.count_ones() as i128,
-                    ("trailing_zeros", []) => u.trailing_zeros().min(bits) as i128,
-                    ("pow", [e]) => v.checked_pow(*e as u32).ok_or("overflow in constant")?,
-                    ("min", [b]) => v.min(*b),
-                    ("max", [b]) => v.max(*b),
-                    ("abs", []) => v.abs(),
+                    ("ilog2", []) if (unsigned && u != 0) || (!unsigned && v > 0) => ((127 - (if unsigned { u } else { v as u128 }).leading_zeros()) as i128, u32t),
+                    ("count_ones", []) => (u.count_ones() as i128, u32t),
+                    ("count_zeros", []) => ((bits - u.count_ones()) as i128, u32t),
+                    ("trailing_zeros", []) => (u.trailing_zeros().min(bits) as i128, u32t),
+                    ("leading_zeros", []) => ((u.leading_zeros() - (128 - bits)) as i128, u32t),
+                    ("pow", [e]) => {
+                        // (a u128 as u128: its bit pattern is not a positive i128 past i128::MAX)
+                        let p = if bits == 128 && unsigned {
+                            (v as u128).checked_pow(*e as u32).ok_or("overflow in constant")? as i128
+                        } else {
+                            v.checked_pow(*e as u32).ok_or("overflow in constant")?
+                        };
+                        match t {
+                            Some(it) if it.bits < 128 => (it.check(Some(p))?, t),
+                            _ => (p, t),
+                        }
+                    }
+                    // (a u128 compares as unsigned: its bit pattern past i128::MAX is negative)
+                    ("min", [b]) if bits == 128 && unsigned => ((v as u128).min(*b as u128) as i128, t),
+                    ("max", [b]) if bits == 128 && unsigned => ((v as u128).max(*b as u128) as i128, t),
+                    ("min", [b]) => (v.min(*b), t),
+                    ("max", [b]) => (v.max(*b), t),
+                    // (checked at the receiver's width: `i8::MIN.abs()` overflows)
+                    ("abs", []) => match t {
+                        Some(it) => (it.check(v.checked_abs())?, t),
+                        None => (v.checked_abs().ok_or("overflow in constant")?, t),
+                    },
                     _ => return Err(format!("unsupported method `{m}` in constant")),
-                }
+                })
             }
-            _ => return Err("unsupported expression in constant".into()),
-        })
+            _ => Err("unsupported expression in constant".into()),
+        }
+    }
+
+    /// The declared type of the constant e names (through parentheses and `&`)
+    fn const_ty_of(&self, e: &crate::parse::Expr) -> Option<Ty> {
+        use crate::parse::Expr;
+        match e {
+            Expr::Paren(x) | Expr::Ref(_, x) => self.const_ty_of(x),
+            // (through references: `const R: &[u8; 1]` indexes as a `[u8; 1]`)
+            Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => {
+                let mut t = self.const_index.get(p.segs[0].name.as_str()).map(|&ci| self.consts[ci as usize].ty)?;
+                while let Ty::Ref(_, x) = t {
+                    t = *x;
+                }
+                Some(t)
+            }
+            _ => None,
+        }
+    }
+
+    /// Before constant types are resolved (a layout's `[u8; N]`): the integer type of an element (k None) or tuple
+    /// field k of the constant b, from its declared type as written
+    fn early_part_ty(&self, b: &crate::parse::Expr, k: Option<usize>) -> Option<It> {
+        use crate::parse::Expr;
+        let b = strip_parens(b);
+        let Expr::Path(None, p) = b else { return None };
+        if p.global || p.segs.len() != 1 {
+            return None;
+        }
+        let ci = *self.const_index.get(p.segs[0].name.as_str())?;
+        if self.consts[ci as usize].ty != Ty::Unit {
+            return None;
+        }
+        let mut t = self.early_syn.get(&ci)?;
+        while let TySyn::Ref(_, x) = t {
+            t = x;
+        }
+        let e = match (t, k) {
+            (TySyn::Array(e, _), None) => &**e,
+            (TySyn::Tuple(xs), Some(k)) => xs.get(k)?,
+            _ => return None,
+        };
+        early_int_ty(e, &self.aliases).and_then(It::of_ty)
+    }
+
+    /// e's integer type as written, without evaluating it (a suffix, a cast, a constant's declared type, `u8::MAX`,
+    /// an operator's operands'; None for an unsuffixed literal): what an unsuffixed literal beside it is
+    fn static_ty(&self, e: &crate::parse::Expr) -> Option<It> {
+        use crate::parse::Expr;
+        match e {
+            Expr::Lit(t, _) => {
+                if t.starts_with("b'") {
+                    return Some(It { bits: 8, signed: false });
+                }
+                if t.starts_with('\'') || t.starts_with('"') || t.starts_with('b') {
+                    return None;
+                }
+                ["u128", "i128", "usize", "isize", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8"].iter().find(|x| t.ends_with(*x)).and_then(|x| It::of_name(x))
+            }
+            Expr::Paren(x) | Expr::Ref(_, x) => self.static_ty(x),
+            Expr::Unary(op, x, _) if op == "-" || op == "!" => self.static_ty(x),
+            Expr::Cast(_, t) => It::of_name(&self.cast_prim(t)),
+            Expr::Binary(op, l, r, _) => match op.as_str() {
+                "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||" => None,
+                "<<" | ">>" => self.static_ty(l),
+                _ => self.static_ty(l).or_else(|| self.static_ty(r)),
+            },
+            Expr::Block(None, _, b) => match b.stmts.last() {
+                Some(crate::parse::Stmt::Expr(x, false)) => self.static_ty(x),
+                _ => None,
+            },
+            Expr::If(_, t, Some(els)) => match t.stmts.last() {
+                Some(crate::parse::Stmt::Expr(x, false)) => self.static_ty(x),
+                _ => None,
+            }
+            .or_else(|| self.static_ty(els)),
+            Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => self.const_index.get(p.segs[0].name.as_str()).and_then(|&ci| It::of_ty(self.consts[ci as usize].ty)),
+            // (a declared associated constant first, as eval_t: `impl S { const BITS: u8 = 7; }`)
+            Expr::Path(None, p) if p.segs.len() == 2 && self.const_index.contains_key(&format!("{}::{}", p.segs[0].name, p.segs[1].name)) => {
+                let ci = self.const_index[&format!("{}::{}", p.segs[0].name, p.segs[1].name)];
+                It::of_ty(self.consts[ci as usize].ty)
+            }
+            Expr::Path(None, p) if p.segs.len() == 2 => match (Ty::prim(&p.segs[0].name).or_else(|| Ty::prim(&self.prim_of_name(&p.segs[0].name))), p.segs[1].name.as_str()) {
+                (Some(_), "BITS") => Some(It { bits: 32, signed: false }),
+                (Some(t), _) => It::of_ty(t),
+                _ => None,
+            },
+            Expr::MethodCall(recv, m, ..) => match m.as_str() {
+                "count_ones" | "count_zeros" | "leading_zeros" | "trailing_zeros" | "ilog2" | "ilog10" => Some(It { bits: 32, signed: false }),
+                "pow" | "min" | "max" | "abs" => self.static_ty(recv),
+                _ => None,
+            },
+            Expr::Index(b, _, _) => match self.const_ty_of(b) {
+                Some(Ty::Array(e, _)) => It::of_ty(*e),
+                _ => self.early_part_ty(b, None),
+            },
+            _ => None,
+        }
+    }
+
+    /// `u8::MAX` and the like, with their type (`BITS` is a u32)
+    fn prim_const_t(&self, t: Ty, name: &str) -> R<(i128, Option<It>)> {
+        let v = prim_assoc_const(t, name).ok_or("unsupported constant")?;
+        Ok((v, if name == "BITS" { Some(It { bits: 32, signed: false }) } else { It::of_ty(t) }))
     }
 
     /// n 要素のタプルの (組み込みの) ジェネリック定義
@@ -3871,20 +4409,34 @@ impl Program {
             }
             AdtShape::Enum(vs) => {
                 let mut discrs = vec![];
-                let mut next = 0i64;
-                let mut env: Vec<(String, i128)> = vec![];
+                // (the implicit successor, as a value of the repr type: None past its range)
+                let mut next: Option<i128> = Some(0);
+                // (a discriminant is a value of the repr type, isize without one: `(1 << 63) >> 63` is -1)
+                let dt = self.reprs.get(&self.structs[id as u32 as usize].name).copied().unwrap_or(Ty::Isize);
+                let dit = It::of_ty(dt);
+                let mut env: Vec<(String, i128, Option<It>, Option<crate::parse::Expr>)> = vec![];
                 for v in vs {
                     let d = if v.discr_src.is_empty() {
-                        v.discr.unwrap_or(next)
+                        match v.discr {
+                            Some(x) => x,
+                            // (an implicit one past the repr type's range is E0370: `#[repr(u8)]`'s `A = 255, B`)
+                            None => match next.filter(|&n| dit.is_none_or(|it| it.fits(n))) {
+                                Some(n) => n as i64,
+                                None => return Err(format!("{line}:1: enum discriminant overflowed (E0370): `{}`", v.name)),
+                            },
+                        }
                     } else {
                         // (other constants, and the variants before it: `Y = Foo::X as isize - 3`)
                         let e = crate::parse::parse_expr(&v.discr_src).map_err(|e| format!("{line}:1: {e}"))?;
-                        let x = self.eval_const(&subst_consts(&e, &env), 1).map_err(|e| format!("{line}:1: {e}"))?;
+                        let x = self.eval_const_as(&subst_consts(&e, &env), dt).map_err(|e| format!("{line}:1: {e}"))?;
                         i64::try_from(x).or_else(|_| u64::try_from(x).map(|u| u as i64)).map_err(|_| format!("{line}:1: discriminant out of range"))?
                     };
                     if !v.discr_src.is_empty() || vs.iter().any(|w| !w.discr_src.is_empty()) {
-                        env.push((format!("{}::{}", sdefs[id].1, v.name), d as i128));
-                        env.push((format!("Self::{}", v.name), d as i128));
+                        // (as a value of the repr type: `#[repr(u64)]`'s `1 << 63` is 2^63, not i64::MIN)
+                        let it = It::of_ty(dt);
+                        let val = it.map_or(d as i128, |it| it.wrap(d as i128));
+                        env.push((format!("{}::{}", sdefs[id].1, v.name), val, it, None));
+                        env.push((format!("Self::{}", v.name), val, it, None));
                     }
                     if discrs.contains(&d) {
                         return Err(format!(
@@ -3892,7 +4444,7 @@ impl Program {
                         ));
                     }
                     discrs.push(d);
-                    next = d + 1;
+                    next = dit.map_or(d as i128, |it| it.wrap(d as i128)).checked_add(1);
                 }
                 let repr = self.reprs.get(&self.structs[id as u32 as usize].name).copied();
                 let tag = if let Some(t) = repr {
@@ -4625,10 +5177,18 @@ impl Program {
                 // `use Expr::*;` したバリアント (大文字で始まり、ほかの enum と名前が重ならないもの)
                 // (同じ名前の struct があればそちら: `TokenTree::Punct(Punct { .. })`)
                 _ if n.starts_with(|c: char| c.is_ascii_uppercase()) => {
-                    if self.struct_index.get(n).is_some_and(|&id| !self.structs[id as usize].is_enum) {
+                    // (but not a struct of the prelude with named fields (its iterator `Skip { .. }`), which a program
+                    // never writes as a value: `use Ord::*;`'s unit variant `Skip` is the variant)
+                    let v = self.variant_names.get(n).copied().flatten();
+                    let unit = v.is_some_and(|(sid, vi)| self.structs[sid as usize].variants[vi].fields.is_empty());
+                    let prelude_named = |id: u32| {
+                        let sd = &self.structs[id as usize];
+                        !sd.fields.is_empty() && sd.fields[0].0 != "0" && self.struct_item.get(id as usize).is_some_and(|&ii| ii >= self.prelude_from)
+                    };
+                    if self.struct_index.get(n).is_some_and(|&id| !self.structs[id as usize].is_enum && !(unit && prelude_named(id))) {
                         return None;
                     }
-                    return self.variant_names.get(n).copied().flatten();
+                    return v;
                 }
                 _ => return None,
             };
@@ -4832,24 +5392,64 @@ pub fn const_generic_value(env: &TyEnv, name: &str) -> Option<u32> {
     })
 }
 
-/// e with the names bound in env (the latest binding of each) replaced by their integer values
-fn subst_consts(e: &crate::parse::Expr, env: &[(String, i128)]) -> crate::parse::Expr {
+/// e without the parentheses around it
+/// e is a bool by its form: `true` / `false`, a comparison, `&&` / `||`, or `!` of one
+fn is_bool_expr(e: &crate::parse::Expr) -> bool {
+    use crate::parse::Expr;
+    match strip_parens(e) {
+        Expr::Path(None, p) => p.segs.len() == 1 && matches!(p.segs[0].name.as_str(), "true" | "false"),
+        Expr::Lit(t, _) => t == "true" || t == "false",
+        Expr::Binary(op, ..) => matches!(op.as_str(), "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||"),
+        Expr::Unary(op, x, _) => op == "!" && is_bool_expr(x),
+        _ => false,
+    }
+}
+
+fn strip_parens(e: &crate::parse::Expr) -> &crate::parse::Expr {
+    match e {
+        crate::parse::Expr::Paren(x) => strip_parens(x),
+        e => e,
+    }
+}
+
+/// A value as a literal: with its type's suffix when it has one (`255u8`), so that it keeps the type
+fn typed_lit(v: i128, t: Option<It>, pos: crate::parse::Pos) -> crate::parse::Expr {
+    use crate::parse::Expr;
+    let sfx = t.map(|it| it.name()).unwrap_or("");
+    // (a u128 past i128::MAX is held as a negative bit pattern: its literal is the unsigned value)
+    if t.is_some_and(|it| it.bits == 128 && !it.signed) {
+        return Expr::Lit(format!("{}{sfx}", v as u128), pos);
+    }
+    // (i128::MIN has no positive literal to negate)
+    if v == i128::MIN {
+        let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
+        return Expr::Path(None, crate::parse::Path { global: false, segs: vec![seg("i128"), seg("MIN")], pos });
+    }
+    if v < 0 {
+        Expr::Paren(Box::new(Expr::Unary("-".into(), Box::new(Expr::Lit(format!("{}{sfx}", -v), pos)), Default::default())))
+    } else {
+        Expr::Lit(format!("{v}{sfx}"), pos)
+    }
+}
+
+/// e with the names bound in env (the latest binding of each) replaced by their values (typed literals)
+fn subst_consts(e: &crate::parse::Expr, env: &[(String, i128, Option<It>, Option<crate::parse::Expr>)]) -> crate::parse::Expr {
     use crate::parse::Expr;
     let r = |x: &Expr| Box::new(subst_consts(x, env));
     match e {
         Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => {
-            match env.iter().rev().find(|(n, _)| *n == p.segs[0].name) {
-                Some((_, v)) if *v < 0 => Expr::Paren(Box::new(Expr::Unary("-".into(), Box::new(Expr::Lit((-*v).to_string(), p.pos)), Default::default()))),
-                Some((_, v)) => Expr::Lit(v.to_string(), p.pos),
+            match env.iter().rev().find(|(n, ..)| *n == p.segs[0].name) {
+                // (an untyped `let`: its expression, which takes the type of where it is used)
+                Some((_, _, None, Some(x))) => Expr::Paren(Box::new(x.clone())),
+                Some((_, v, t, _)) => typed_lit(*v, *t, p.pos),
                 None => e.clone(),
             }
         }
         // (`Foo::X`: an earlier variant's discriminant, for an enum's discriminant)
         Expr::Path(None, p) if p.segs.len() == 2 && p.segs.iter().all(|s| s.args.is_empty()) && !env.is_empty() => {
             let n = format!("{}::{}", p.segs[0].name, p.segs[1].name);
-            match env.iter().rev().find(|(x, _)| *x == n) {
-                Some((_, v)) if *v < 0 => Expr::Paren(Box::new(Expr::Unary("-".into(), Box::new(Expr::Lit((-*v).to_string(), p.pos)), Default::default()))),
-                Some((_, v)) => Expr::Lit(v.to_string(), p.pos),
+            match env.iter().rev().find(|(x, ..)| *x == n) {
+                Some((_, v, t, _)) => typed_lit(*v, *t, p.pos),
                 None => e.clone(),
             }
         }
@@ -4869,11 +5469,21 @@ fn subst_consts(e: &crate::parse::Expr, env: &[(String, i128)]) -> crate::parse:
             }
             Expr::If(r(c), t, els.as_ref().map(|x| r(x)))
         }
+        // (a nested block's own `let x` shadows an outer x from there on: `{ let x = 1u8; { let x = 255u8; x } }`)
         Expr::Block(l, u, b) => {
             let mut b = b.clone();
+            let mut env: Vec<(String, i128, Option<It>, Option<Expr>)> = env.to_vec();
             for st in &mut b.stmts {
-                if let crate::parse::Stmt::Expr(x, semi) = st {
-                    *st = crate::parse::Stmt::Expr(subst_consts(x, env), *semi);
+                match st {
+                    crate::parse::Stmt::Expr(x, semi) => *st = crate::parse::Stmt::Expr(subst_consts(x, &env), *semi),
+                    crate::parse::Stmt::Let(pat, ty, init, els, pos) => {
+                        let init = init.as_ref().map(|x| subst_consts(x, &env));
+                        if let crate::parse::Pat::Ident(_, _, n, _) = &*pat {
+                            env.retain(|(x, ..)| x != n);
+                        }
+                        *st = crate::parse::Stmt::Let(pat.clone(), ty.clone(), init, els.clone(), *pos);
+                    }
+                    _ => {}
                 }
             }
             Expr::Block(l.clone(), *u, b)

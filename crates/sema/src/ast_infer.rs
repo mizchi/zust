@@ -33,6 +33,12 @@ fn is_builtin_scalar_method(n: &str) -> bool {
             | "checked_sub"
             | "checked_mul"
             | "checked_div"
+            | "wrapping_shl"
+            | "wrapping_shr"
+            | "checked_shl"
+            | "checked_shr"
+            | "overflowing_shl"
+            | "overflowing_shr"
             | "checked_rem"
             | "checked_pow"
             | "wrapping_pow"
@@ -858,7 +864,9 @@ impl Inf<'_> {
             }
             Pat::Struct(p, fps, _) => {
                 let (v, mode) = self.auto_deref(v, mode);
-                let fields = if let Some((sid, vi)) = self.variant_by(p) {
+                // (a unit variant has no fields: `Skip { iter, .. }` is the struct, even with `use E::*`'s variant `Skip`)
+                let variant = self.variant_by(p).filter(|&(sid, vi)| fps.is_empty() || !self.prog.structs[sid as usize].variants[vi].fields.is_empty() || self.struct_by(p).is_none());
+                let fields = if let Some((sid, vi)) = variant {
                     self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, Some(vi))
                 } else if let Some(sid) = self.struct_by(p).or_else(|| self.struct_by_turbofish(p)) {
@@ -2465,9 +2473,17 @@ impl Inf<'_> {
                 _ => self.var(),
             };
         }
-        if let Some(Ty::Ptr(_, e)) = self.resolve(r) {
+        if let Some(Ty::Ptr(m, e)) = self.resolve(r) {
             return match name {
                 "add" | "sub" | "offset" | "wrapping_add" | "wrapping_sub" | "wrapping_offset" => r,
+                // (`x.cast::<u32>()`: a pointer to the turbofish's type, of the same mutability)
+                "cast" => match tf.first() {
+                    Some(GArg::Ty(t)) => match self.parse_ty(t) {
+                        Some(u) => self.known(Ty::Ptr(m, intern(u))),
+                        None => self.var(),
+                    },
+                    _ => self.var(),
+                },
                 "is_null" => self.known(Ty::Bool),
                 "read" | "read_volatile" | "read_unaligned" => self.known(*e),
                 _ => self.known(Ty::Unit),
@@ -2519,6 +2535,29 @@ impl Inf<'_> {
                 _ => self.var(),
             },
             "wrapping_neg" | "abs" | "signum" | "swap_bytes" | "to_be" | "to_le" | "to_ascii_uppercase" | "to_ascii_lowercase" | "next_power_of_two" | "isqrt" => rv,
+            "reverse_bits" => rv,
+            // (the shift amount is a u32: `x.wrapping_shl(1)` is x's type, not the default bool)
+            "wrapping_shl" | "wrapping_shr" => {
+                for a in avs {
+                    let k = self.known(Ty::U32);
+                    self.unify(a, k);
+                }
+                rv
+            }
+            "checked_shl" | "checked_shr" => {
+                for a in avs {
+                    let k = self.known(Ty::U32);
+                    self.unify(a, k);
+                }
+                self.option_of(rv)
+            }
+            "overflowing_shl" | "overflowing_shr" => {
+                for a in avs {
+                    let k = self.known(Ty::U32);
+                    self.unify(a, k);
+                }
+                self.var()
+            }
             "pow" | "rotate_left" | "rotate_right" | "wrapping_pow" | "saturating_pow" => {
                 for a in avs {
                     let k = self.known(Ty::U32);

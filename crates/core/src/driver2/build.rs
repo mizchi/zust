@@ -259,12 +259,24 @@ impl Session2 {
             }
             return Ok(rep);
         }
-        let obj_path = output.with_extension("o");
-        // (and the executable linked from it, not before it: `-o x.cold` writes the same `x.o` as `-o x`, and a link
-        // that failed leaves its object behind)
-        let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        // (`x` -> `x.o`, `x.cold` -> `x.cold.o`: not `x.o`, which another output `x` would share, and whose object
+        // equal to its own would skip relinking `x`)
+        let obj_path = match output.extension() {
+            Some(_) => {
+                let mut o = output.as_os_str().to_owned();
+                o.push(".o");
+                std::path::PathBuf::from(o)
+            }
+            None => output.with_extension("o"),
+        };
+        // (and the output was linked from that object: not older than it)
+        // (a regular file: a directory at the output path is not an executable)
+        let mtime = |p: &std::path::Path| std::fs::metadata(p).ok().filter(|m| m.is_file()).and_then(|m| m.modified().ok());
+        // (and readable: an output with mode 000 is relinked; opened only once it is a regular file, as a FIFO's open
+        // would block)
         let same = std::fs::read(&obj_path).is_ok_and(|old| old == obj)
-            && matches!((mtime(output), mtime(&obj_path)), (Some(e), Some(o)) if e >= o);
+            && matches!((mtime(output), mtime(&obj_path)), (Some(e), Some(o)) if e >= o)
+            && std::fs::File::open(output).is_ok();
         if same {
             tm.lap("link", "skipped (object unchanged)".to_string());
         } else {

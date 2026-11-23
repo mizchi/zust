@@ -1756,6 +1756,7 @@ run-pass	consts/const-enum-structlike.rs
 run-pass	consts/const-enum-tuplestruct.rs
 run-pass	consts/const-enum-vec-ptr.rs
 run-pass	consts/const-enum-vector.rs
+compile-fail	consts/const-err-early.rs
 run-pass	consts/const-err-rpass.rs
 compile-fail	consts/const-eval/array-len-mismatch-type.rs
 compile-fail	consts/const-eval/const_panic-normalize-tabs-115498.rs
@@ -3123,6 +3124,7 @@ check-pass	impl-trait/issues/issue-42479.rs
 check-pass	impl-trait/issues/issue-46959.rs
 check-pass	impl-trait/issues/issue-49376.rs
 check-pass	impl-trait/issues/issue-49556.rs
+check-pass	impl-trait/issues/issue-52128.rs
 compile-fail	impl-trait/issues/issue-54600.rs
 compile-fail	impl-trait/issues/issue-54840.rs
 compile-fail	impl-trait/issues/issue-54966.rs
@@ -3927,6 +3929,7 @@ compile-fail	lint/unused/issue-81314-unused-span-ident.rs
 check-pass	lint/unused/issue-90807-unused-paren.rs
 compile-fail	lint/unused/lint-unsed-in-macro-issue-151269.rs
 compile-fail	lint/unused/lint-unused-imports-self-single.rs
+compile-fail	lint/unused/lint-unused-imports.rs
 check-pass	lint/unused/match_with_guard.rs
 check-pass	lint/unused/must-use-block-expr.rs
 check-pass	lint/unused/must-use-box-from-raw.rs
@@ -6266,6 +6269,7 @@ check-pass	rfcs/rfc-2396-target_feature-11/check-pass.rs
 check-pass	rfcs/rfc-2396-target_feature-11/closures-inherit-target_feature.rs
 check-pass	rfcs/rfc-2396-target_feature-11/issue-108655-inline-always-closure.rs
 check-pass	rfcs/rfc-2396-target_feature-11/issue-99876.rs
+run-pass	rfcs/rfc-2396-target_feature-11/return-fn-ptr.rs
 run-pass	rfcs/rfc-2421-unreserve-pure-offsetof-sizeof-alignof/offsetof-alignof-sizeof-pure-can-be-used-as-idents.rs
 check-pass	rfcs/rfc-2457-non-ascii-idents/mod_file_nonascii_with_path_allowed.rs
 check-pass	rfcs/rfc-2457-non-ascii-idents/mod_inline_nonascii_allowed.rs
@@ -6465,7 +6469,6 @@ compile-fail	span/issue28498-reject-lifetime-param.rs
 compile-fail	span/issue28498-reject-passed-to-fn.rs
 compile-fail	span/issue28498-reject-trait-bound.rs
 check-pass	span/let-offset-of.rs
-compile-fail	span/lint-unused-unsafe.rs
 check-pass	span/macro-span-replacement.rs
 compile-fail	span/macro-ty-params.rs
 compile-fail	span/missing-unit-argument.rs
