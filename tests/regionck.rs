@@ -3072,3 +3072,18 @@ fn part17_peek_mut() {
     let d = check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap: BinaryHeap<i32> = BinaryHeap::new();\n    heap.push(1);\n    let b = heap.peek_mut();\n    println!(\"{:?}\", heap);\n    drop(b);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("mutably borrowed"), "{d:?}");
 }
+
+/// A scrutinee value whose drop may use what it borrows (`match heap.peek_mut() { Some(_) => .. }`, also when an arm
+/// moves a part out) is a temporary of the statement: its loans live through the arms (borrowck/issue-85581.rs, E0499).
+/// A last statement's temporaries end with it, before the block's locals (borrowck/issue-47646.rs had a false E0597).
+/// Not a scrutinee bound whole (`x => drop(x)`), nor one with no drop (`Option<&mut i32>`)
+#[test]
+fn part17_scrutinee_temporaries() {
+    let d = check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap: BinaryHeap<i32> = BinaryHeap::new();\n    heap.push(1);\n    match heap.peek_mut() {\n        Some(mut t) => { *t = 2; drop(t); heap.pop(); }\n        None => {}\n    }\n    match heap.peek_mut() {\n        Some(_) => {}\n        None => {}\n    }\n    heap.push(3);\n    println!(\"{:?}\", heap.len());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("mutably borrowed"), "{d:?}");
+    let d = check("use std::collections::BinaryHeap;\nfn f(heap: &mut BinaryHeap<i32>) {\n    if let Some(_) = heap.peek_mut() {\n        heap.pop();\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("mutably borrowed"), "{d:?}");
+    assert_eq!(check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap: BinaryHeap<i32> = BinaryHeap::new();\n    let borrow = heap.peek_mut();\n    match (borrow, ()) {\n        (Some(_), ()) => {}\n        _ => {}\n    };\n}\n"), vec![]);
+    assert_eq!(check("fn mk(v: &mut Vec<i32>) -> Option<&mut i32> { v.first_mut() }\nfn main() {\n    let mut v = vec![1];\n    match mk(&mut v) {\n        Some(_) => { v.push(2); }\n        None => {}\n    }\n}\n"), vec![]);
+    assert_eq!(check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap: BinaryHeap<i32> = BinaryHeap::new();\n    heap.push(1);\n    match heap.peek_mut() {\n        x => { drop(x); heap.pop(); }\n    }\n}\n"), vec![]);
+}

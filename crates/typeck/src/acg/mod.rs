@@ -2567,6 +2567,11 @@ impl Cx<'_> {
                 }
             }
         }
+        // (a last statement that is no tail (`match heap.peek_mut() { .. };`, a `let`): its temporaries end with it,
+        // before the block's locals, as any statement's)
+        if !matches!(blk.stmts.last(), Some(Stmt::Expr(_, false))) {
+            self.bk_temps_end(bk_mark);
+        }
         // (edition 2024: the tail expression's temporaries go away at the end of the block, before its locals)
         if self.prog.edition >= 2024 {
             // (a reference the block's value is, or holds, into one of them, is used after:

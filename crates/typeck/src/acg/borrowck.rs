@@ -2026,6 +2026,24 @@ impl Cx<'_> {
             }
         }
         let srcs = self.bk_frame_end();
+        // (a scrutinee value whose drop may use what it borrows (`match heap.peek_mut() { Some(_) => .. }`, a guard
+        // of the prelude in it): a temporary of the statement, dropped at its end, so its loans live through the
+        // arms; also when an arm moves a part out (`Some(t)`), as the drop is then of what may be left. Not when a
+        // pattern takes the whole value (`x`, `x @ ..`))
+        let whole = |q: &Pat| matches!(q, Pat::Ident(false, _, n, _) if n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_");
+        if self.bk.level >= 2 && !in_let && self.user_code && !super::is_place_expr(e) && !srcs.is_empty() && !pats.iter().any(|q| whole(q)) {
+            if let Ok(Some(p)) = &r {
+                let t = p.ty();
+                if self.dropck(t, 0) {
+                    let id = self.bk.locals.len() as u32;
+                    self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP, via_ref: false });
+                    self.bk_ev(Ev::Bind(id, true));
+                    self.bk_ev(Ev::Def(id, srcs.clone()));
+                    self.bk.stmt_temps.push(id);
+                    self.bk.drop_temps.push(id);
+                }
+            }
+        }
         self.bk.scrut = srcs;
         // (a pattern that writes `'static` (`Foo::Bar::<'static> { .. }`): checked from here on)
         if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && pats.iter().any(|p| pat_any(p, &|q| matches!(q, Pat::TupleStruct(pp, _) | Pat::Struct(pp, _, _) if crate::regions::path_names_lt(pp)))) {
