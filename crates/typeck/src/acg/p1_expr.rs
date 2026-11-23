@@ -75,8 +75,10 @@ impl Cx<'_> {
             PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => self.sig_lt_arity(i, tps, depth + 1),
             PTy::Tuple(ts) => ts.iter().try_for_each(|t| self.sig_lt_arity(t, tps, depth + 1)),
             PTy::Path(None, p) => {
+                // (only a path that writes lifetimes may write too many or too few: most write none, and are not
+                // looked up)
                 if let [s] = p.segs.as_slice() {
-                    if s.fn_args.is_none() && !tps.contains(&s.name.as_str()) {
+                    if s.fn_args.is_none() && s.args.iter().any(|a| matches!(a, GArg::Lifetime(_))) && !tps.contains(&s.name.as_str()) {
                         if let Some(&sid) = self.prog.struct_index.get(&s.name) {
                             let b = self.prog.base_of(sid);
                             if self.prog.struct_item.get(b as usize).is_some_and(|&i| i < self.prog.prelude_from) {

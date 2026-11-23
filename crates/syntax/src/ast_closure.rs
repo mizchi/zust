@@ -552,10 +552,30 @@ pub fn free_vars(c: &Expr) -> Vec<String> {
 
 /// The variables closure c reads only by `let _ = place;`, which it does not capture: its body skips those `let`s
 pub fn fake_reads(c: &Expr) -> Vec<String> {
+    // (none before edition 2021, where such a `let` captures; and none without such a `let`, found without the two
+    // walks of the body below: most closures have none)
+    if !wild_fake_reads() || !has_wild_read(c) {
+        return vec![];
+    }
     let mut v = Free { scopes: vec![vec![]], out: Vec::new(), keep_wild: true };
     v.expr(c);
     let caps = free_vars(c);
     v.out.into_iter().filter(|n| !caps.contains(n)).collect()
+}
+
+/// A `let _ = place;` somewhere in e (in a closure in it too)
+fn has_wild_read(e: &Expr) -> bool {
+    let block = |b: &Block| b.stmts.iter().any(|s| matches!(s, Stmt::Let(Pat::Wild, None, Some(x), None, ..) if wild_read_only(x)));
+    let here = match e {
+        Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) | Expr::If(_, b, _) | Expr::While(_, _, b) | Expr::For(_, _, _, b) => block(b),
+        _ => false,
+    };
+    if here {
+        return true;
+    }
+    let mut found = false;
+    each_child(e, &mut |x| found = found || has_wild_read(x));
+    found
 }
 
 /// The variable `let _ = place;` names, when the place is one of it and its fields (wild_read_only)
