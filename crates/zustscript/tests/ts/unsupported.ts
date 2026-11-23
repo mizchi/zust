@@ -12,3 +12,10 @@ export type Either = { a: number } | { b: string };
 export interface Twice { a: number }
 export interface Twice { b: string }
 export type Cond = { a: number } extends object ? { b: string } : never;
+export type Mixed = "a" | { kind: "b" };
+export type BadTag = { kind: "in-progress" } | { kind: "done" };
+export type Sameish = "Done" | "done";
+type Inter = { kind: "a" } & { extra: number };
+export type UsesInter = Inter | { kind: "b" };
+export interface Dup { a: number; a: string }
+export interface Proto { __proto__: string }

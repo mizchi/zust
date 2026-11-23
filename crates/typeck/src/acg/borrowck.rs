@@ -434,6 +434,8 @@ fn made_temp(prog: &Program, x: &Expr) -> bool {
         Expr::Struct(_, fs, Some(b)) => runtime_value(prog, b) || fs.iter().any(|f| runtime_value(prog, &f.1)),
         // (`&{ let v = 4; (v,) }`: a block's value is a temporary, moved or copied out of what its tail names)
         Expr::Block(None, _, b) => block_tail(b).is_some_and(|t| runtime_value(prog, t)),
+        // (a `match` / `if` value (`(match f { true => a, false => b }).loan()`): a value expression, so a temporary)
+        Expr::Match(..) | Expr::If(..) => true,
         _ => false,
     }
 }

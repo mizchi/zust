@@ -16,6 +16,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "../../../tests/common/par.rs"]
+mod par;
+
 const ZURGO: &str = env!("CARGO_BIN_EXE_zurgo");
 
 fn fixture(name: &str) -> PathBuf {
@@ -159,8 +162,8 @@ fn wasm32_runs_like_native() {
         assert!(ok, "cargo fetch {n}: {err}");
         cases.push((n.to_string(), m));
     }
-    let mut bad = vec![];
-    for (n, m) in &cases {
+    // (the crates on every core: each builds twice and runs under node)
+    let bad: Vec<String> = par::par_map(&cases, |(n, m)| -> Option<String> {
         let (ok, want, err) = zurgo(&["run"], m, &tdir(&format!("{n}-native")));
         assert!(ok, "zurgo run {n}: {err}");
         // (what depends on the target: the build script reads `CARGO_CFG_*` for wasm32; `cfg(unix)` is off there)
@@ -175,17 +178,19 @@ fn wasm32_runs_like_native() {
             .env("CARGO_TARGET_DIR", tdir(&format!("{n}-wasm")))
             .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER", host)
             .current_dir(&root));
-        if !r.0 || r.1 != want {
-            bad.push(format!("{n}: {}\n--- want\n{want}--- got\n{}", r.2, r.1));
-        }
-    }
+        (!r.0 || r.1 != want).then(|| format!("{n}: {}\n--- want\n{want}--- got\n{}", r.2, r.1))
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
 #[test]
 fn registry_crates_run_like_cargo() {
-    let mut bad = vec![];
-    for n in ["fnv", "adler2", "hex", "itoa", "rustc-hash", "cfg-if", "thiserror", "wasm-bindgen-shared"] {
+    // (the crates on every core: each is built by cargo and by zurgo)
+    let crates = ["fnv", "adler2", "hex", "itoa", "rustc-hash", "cfg-if", "thiserror", "wasm-bindgen-shared"];
+    let bad: Vec<String> = par::par_map(&crates, |&n| -> Option<String> {
         let m = fixture(&format!("{n}/Cargo.toml"));
         let (ok, _, err) = cargo(&["fetch", "--locked"], &m, &tdir(n));
         assert!(ok, "cargo fetch {n}: {err}");
@@ -193,11 +198,16 @@ fn registry_crates_run_like_cargo() {
         assert!(ok, "cargo run {n}: {err}");
         let (ok, got, err) = zurgo(&["run"], &m, &tdir(n));
         if !ok {
-            bad.push(format!("{n}: zurgo run failed: {err}"));
+            Some(format!("{n}: zurgo run failed: {err}"))
         } else if got != want {
-            bad.push(format!("{n}: output differs\n--- zurgo\n{got}--- cargo\n{want}"));
+            Some(format!("{n}: output differs\n--- zurgo\n{got}--- cargo\n{want}"))
+        } else {
+            None
         }
-    }
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     assert!(bad.is_empty(), "\n{}", bad.join("\n"));
 }
 

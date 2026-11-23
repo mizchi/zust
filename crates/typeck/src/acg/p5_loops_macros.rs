@@ -1895,6 +1895,14 @@ impl Cx<'_> {
             }
             // (not when the program has its own `impl From<S> for Box<T>` (S a struct or a Box): that impl is the conversion)
             let user_from = self.prog.names.iter().enumerate().any(|(i, n)| n.starts_with("Box::from") && self.prog.sigs[i].impl_trait.as_deref().is_some_and(|t| t.starts_with("From")));
+            // (`Box::from(s)` of a `&[T]` into a `Box<[T]>`: a copy, `s.to_vec().into_boxed_slice()`)
+            let to_slice = matches!(expected, Some(Ty::Box(Ty::Slice(_))));
+            if !user_from && (to_slice || matches!(arg, Some(Ty::Ref(_, Ty::Slice(_))))) && !matches!(arg, Some(Ty::Box(_) | Ty::Struct(_))) {
+                let sp = crate::parse::Span { start: p.pos, at: p.pos };
+                let v = Expr::MethodCall(Box::new(cargs[0].clone()), "to_vec".into(), vec![], vec![], sp);
+                let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(v), "into_boxed_slice".into(), vec![], vec![], sp));
+                return self.expr(ne, expected).map(Some);
+            }
             if arg.is_some_and(owned) && !(user_from && matches!(arg, Some(Ty::Struct(_) | Ty::Box(_)))) {
                 // (the `Box` segment as written, with its arguments: `Box::<u64>::from(1)`)
                 let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
@@ -2399,6 +2407,22 @@ impl Cx<'_> {
                 let tr_impl = |t: Ty| self.trait_candidate(&format!("{}::{}", self.ty_key(t), segs[1]), &segs[0]).is_some();
                 if let Some(st) = st.filter(|&t| !self.prog.has_param(t) && (t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Str) || matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].base.is_none())) && tr_impl(t)) {
                     if let Ok(ne) = crate::parse::parse_expr(&format!("<{} as {}>::{}", self.prog.tn(st), segs[0], segs[1])) {
+                        let ne: &Expr = self.keep_expr(ne);
+                        return self.expr(ne, _expected);
+                    }
+                }
+            }
+        }
+        // (`V::Mask::first_offset` as a value, V a type parameter: the method of the associated type's trait impl, as
+        // `<V::Mask as MoveMask>::first_offset`)
+        if q.is_none() && segs.len() == 3 && p.segs.iter().all(|s| s.args.is_empty()) {
+            let syn = crate::parse::Ty::Path(None, crate::parse::Path { global: false, segs: p.segs[..2].to_vec(), pos: p.pos });
+            if let Some(t) = self.parse_ty(&syn).ok().filter(|&t| !self.prog.has_param(t)) {
+                let key = format!("{}::{}", self.ty_key(t), segs[2]);
+                let mut trs: Vec<&String> = self.prog.traits.keys().filter(|tr| self.trait_candidate(&key, tr).is_some()).collect();
+                trs.sort();
+                if let [tr] = trs[..] {
+                    if let Ok(ne) = crate::parse::parse_expr(&format!("<{} as {}>::{}", self.prog.tn(t), tr, segs[2])) {
                         let ne: &Expr = self.keep_expr(ne);
                         return self.expr(ne, _expected);
                     }

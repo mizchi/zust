@@ -1,0 +1,2 @@
+// expect: `Inter`, a member of `UsesInter`, is not only an object type
+import type { UsesInter } from "../ts/unsupported.ts";

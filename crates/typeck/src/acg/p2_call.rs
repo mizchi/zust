@@ -1047,6 +1047,26 @@ impl Cx<'_> {
                     }
                     Place::Mem(v, 0, *i)
                 }
+                // (a vector value whose type inference left open (`eq1.and(eq2).movemask()`, `and` of two traits): bound to
+                // a local of its type, and the method called on that, as on any vector local (its receiver's borrow and
+                // regions checked as theirs: a `&self` result does not outlive the statement)
+                (Some(v), t @ Ty::Vec(_)) => {
+                    // (the temporary's loan, as prim_trait_method records it: a `&self` result does not outlive it)
+                    if let Some(id) = self.prog.prim_self_method(t, method) {
+                        if let (Some(Ty::Ref(m, _)), true) = (self.prog.sigs[id as usize].params.first().copied(), self.bk_on()) {
+                            if self.bk_ret_from(id, 0) {
+                                self.bk_temp_borrow(recv, m, t);
+                            }
+                        }
+                    }
+                    let n = "__exr_vrecv".to_string();
+                    self.scopes.push(vec![]);
+                    self.bind(n.clone(), t, Some(v));
+                    let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(path_expr(&n)), method.to_string(), gargs.clone(), margs.clone(), msp));
+                    let r = self.expr(ne, expected);
+                    self.scopes.pop();
+                    return r;
+                }
                 (_, t) => {
                     return err(SP, format!("no method `{}` on type `{}`", method, self.prog.tn(t)));
                 }
@@ -1798,10 +1818,46 @@ impl Cx<'_> {
                 return self.call_fn(id, Some((r, Ty::Ref(true, intern(t)))), &args, tf, expected, SP).map(Some);
             }
         }
+        // (`a.loan()` / `id(&a).loan()` with `fn loan(&self) -> &Self`: the address of a itself, not of a copy, so the
+        // result is `a` (`ptr::eq(r, &a)`))
+        if matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(false, _))) && !lit_int && (is_place_expr(recv) || matches!(self.peek(recv), Some(Ty::Ref(..)))) {
+            let (r, rt) = if matches!(self.peek(recv), Some(Ty::Ref(..))) {
+                let (v, mut vt) = self.expr(recv, None)?;
+                let mut v = v.ok_or("internal: receiver without a value")?;
+                while let Ty::Ref(_, i @ Ty::Ref(..)) = vt {
+                    v = self.b.ins().load(PTR, mf(), v, 0);
+                    vt = *i;
+                }
+                (v, vt)
+            } else {
+                let re = self.keep_expr(Expr::Ref(false, Box::new(recv.clone())));
+                let (v, vt) = self.expr(re, None)?;
+                (v.ok_or("internal: receiver without an address")?, vt)
+            };
+            if matches!(rt, Ty::Ref(_, i) if *i == t) {
+                let args: Vec<&Expr> = margs.iter().collect();
+                return self.call_fn(id, Some((r, Ty::Ref(false, intern(t)))), &args, tf, expected, SP).map(Some);
+            }
+            // (another shape: through a copy, below; the receiver is evaluated again only when it is a place)
+            if !is_place_expr(recv) {
+                let mut v = r;
+                let mut vt = rt;
+                while let Ty::Ref(_, i) = vt {
+                    v = self.b.ins().load(clif_ty(*i).unwrap_or(PTR), mf(), v, 0);
+                    vt = *i;
+                }
+                let a = self.temp(t);
+                self.b.ins().store(mf(), v, a, 0);
+                let args: Vec<&Expr> = margs.iter().collect();
+                return self.call_fn(id, Some((a, Ty::Ref(false, intern(t)))), &args, tf, expected, SP).map(Some);
+            }
+        }
         // 受け手: 値ならそのまま、&self ならメモリに置いてそのアドレス
         let (v, vt) = self.expr(recv, lit_int.then_some(t))?;
         let mut v = v.unwrap();
         let mut vt = vt;
+        // (a receiver that is a reference (`id(&v).loan()`): dropping it frees nothing)
+        let recv_is_ref = matches!(vt, Ty::Ref(..));
         while let Ty::Ref(_, i) = vt {
             v = self.b.ins().load(clif_ty(*i).unwrap_or(PTR), mf(), v, 0);
             vt = *i;
@@ -1810,6 +1866,11 @@ impl Cx<'_> {
             Some(Ty::Ref(m, _)) => {
                 let a = self.temp(t);
                 self.b.ins().store(mf(), v, a, 0);
+                // (a receiver a call made, borrowed for a result that borrows it: the temporary is freed at the end
+                // of the statement (E0716 when the result is used after: `let r = mk().loan(); *r`), as for a struct's)
+                if self.bk_on() && !is_place_expr(recv) && !recv_is_ref && self.bk_ret_from(id, 0) {
+                    self.bk_temp_borrow(recv, *m, t);
+                }
                 (a, Ty::Ref(*m, intern(t)))
             }
             _ => (v, t),
@@ -2287,7 +2348,13 @@ impl Cx<'_> {
         let id = self.pick_overload(id, recv.map(|r| r.1), args);
         // (E0133 was checked on the fn found before the overload was chosen: an `unsafe fn` chosen in its place, by
         // the traits in scope, needs the same check)
-        if id != id0 && self.prog.sigs[id as usize].is_unsafe && !self.prog.sigs[id0 as usize].is_unsafe && self.unsafe_ok == 0 && self.user_code {
+        // (also when the group mixes safe and unsafe methods (a vector's `m` of two traits): the check before the choice
+        // is left to here, on the one chosen, even when it is the first)
+        let mixed = || {
+            let g = self.prog.overloads.get(&self.prog.names[id0 as usize]);
+            g.is_some_and(|g| g.iter().any(|&i| self.prog.sigs[i as usize].is_unsafe) && g.iter().any(|&i| !self.prog.sigs[i as usize].is_unsafe))
+        };
+        if self.prog.sigs[id as usize].is_unsafe && ((id != id0 && !self.prog.sigs[id0 as usize].is_unsafe) || mixed()) && self.unsafe_ok == 0 && self.user_code {
             let n = self.prog.names[id as usize].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
             return err(span, format!("call to unsafe function `{n}` is unsafe and requires unsafe block (E0133)"));
         }

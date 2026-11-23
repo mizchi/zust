@@ -1372,6 +1372,11 @@ impl Cx<'_> {
             self.b.ins().trap(TrapCode::unwrap_user(1));
             return Ok(());
         }
+        // (`&&T` where the arms are `&T`: the deref coercion, `Imp::Borrowed(x) => x` with x: &&[u8])
+        let (v, t) = match *result_ty {
+            Some(rt) if rt != t => self.deref_coerce(v, t, rt),
+            _ => (v, t),
+        };
         match *result_ty {
             Some(rt) => self.same(span, t, rt)?,
             None => {

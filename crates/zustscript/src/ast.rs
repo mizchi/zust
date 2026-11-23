@@ -231,6 +231,21 @@ pub struct TsFrom {
     /// each member as the TS file writes it (`readonly tags: string[]`): a type the file does not export is declared
     /// again in the `.d.ts` with these, so it is the same type to TS
     pub members: Vec<String>,
+    /// an enum's union as the file writes it (`"draft" | "published"`), for the same
+    pub text: String,
+    /// an enum's values in JS: TS's, not zustscript's `{ TAG, _0 }`
+    pub repr: Option<TsEnum>,
+}
+
+/// How the values of an enum read from a TS union look in JS (they are TS's own)
+#[derive(Clone, Debug, PartialEq)]
+pub struct TsEnum {
+    /// the tag field (`kind`); None: a union of string literals, each value its tag
+    pub key: Option<String>,
+    /// each variant's tag (`"circle"`)
+    pub tags: Vec<String>,
+    /// each variant's fields by name, in order (`r` for `Circle(f64)`)
+    pub fields: Vec<Vec<String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -240,7 +255,7 @@ pub enum Item {
     /// `import type { User, Post } from "./model.ts";` (replaced by the records before checking, see tsimport.rs)
     ImportType { names: Vec<(String, Pos)>, from: String, pos: Pos },
     /// (a variant with `-> R` is an effect operation)
-    Enum { name: String, params: Vec<String>, variants: Vec<(String, Vec<TyS>, Option<TyS>)>, pos: Pos },
+    Enum { name: String, params: Vec<String>, variants: Vec<(String, Vec<TyS>, Option<TyS>)>, pos: Pos, from: Option<TsFrom> },
     /// (bounds: `T: Num` / `T: Integer` / `T: Float`; a function with one is monomorphized per numeric type)
     /// (`wasm`: written `@wasm fn`: lowered to Rust and compiled to wasm, see lower.rs)
     /// (`simd`: written `@simd fn`: an array kernel vectorized with v128, see simd.rs)

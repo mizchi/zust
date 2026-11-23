@@ -1,1 +1,1 @@
-// line ends are CR only (TS counts CR, LF, U+2028 and U+2029): members separated by them aloneexport interface Cr {  a: number  b: string   c: boolean }
+// line ends are CR only (TS counts CR, LF, U+2028 and U+2029): members separated by them aloneexport type Hid = { a: number };export interface Cr {  a: number  b: string   c: boolean }
