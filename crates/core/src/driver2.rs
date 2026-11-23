@@ -1201,11 +1201,16 @@ impl Session2 {
                                 }
                             }
                         }
-                        // (`pub extern "C" { .. }`)
+                        // (`pub extern "C" { .. }`, `pub(crate) unsafe extern "C" { .. }`)
                         if head.iter().any(|x| is(x, "extern")) {
                             leading_pub(text).filter(|&v| {
-                                let rest = text[v + 3..].trim_start();
-                                rest.starts_with("extern") && extern_block(rest.as_bytes(), 0)
+                                let b = text.as_bytes();
+                                let mut j = skip_space(b, v + 3);
+                                // (a `pub(..)`'s path)
+                                if b.get(j) == Some(&b'(') {
+                                    j += b[j..].iter().position(|&c| c == b')').map_or(b.len() - j, |n| n + 1);
+                                }
+                                extern_block(b, skip_space(b, j))
                             })
                         } else {
                             None
@@ -1931,11 +1936,11 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
         out.extend(crate::ast_closure::let_bindings(body).into_iter().map(|(_, n)| n));
     }
     // (the first fn in `body` or nested in it (one level of items per hoisting) that names an outer local: the fn's
-    // name and the local)
-    fn capture(sig: &crate::parse::FnSig, body: &crate::parse::Block, outer: &[String], items: &crate::fxhash::FxSet<&str>) -> Option<(String, String)> {
-        let mut used = crate::ast_closure::used_vars(&Expr::Block(None, false, body.clone()));
-        if sig.recv.is_none() && format!("{body:?}").contains("\"self\"") && !used.iter().any(|n| n == "self") {
-            used.push("self".to_string());
+    // name, the local, and where the fn's text uses it free (line 0 when not known))
+    fn capture(sig: &crate::parse::FnSig, body: &crate::parse::Block, outer: &[String], items: &crate::fxhash::FxSet<&str>) -> Option<(String, String, crate::parse::Pos)> {
+        let mut used = crate::ast_closure::used_vars_at(&Expr::Block(None, false, body.clone()));
+        if sig.recv.is_none() && format!("{body:?}").contains("\"self\"") && !used.iter().any(|(n, _)| n == "self") {
+            used.push(("self".to_string(), Default::default()));
         }
         // (its own parameters are in its signature, not its body)
         let mut own = vec![];
@@ -1945,9 +1950,9 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
         if sig.recv.is_some() {
             own.push("self".to_string());
         }
-        used.retain(|n| !own.contains(n));
-        if let Some(n) = used.iter().find(|n| !items.contains(n.as_str()) && outer.contains(n)) {
-            return Some((sig.name.clone(), n.clone()));
+        used.retain(|(n, _)| !own.contains(n));
+        if let Some((n, at)) = used.iter().find(|(n, _)| !items.contains(n.as_str()) && outer.contains(n)) {
+            return Some((sig.name.clone(), n.clone(), *at));
         }
         let mut mine = outer.to_vec();
         locals_of(sig, body, &mut mine);
@@ -1956,6 +1961,34 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
             _ => None,
         })
     }
+    // (where an item starts in the file as written: its first line up to its `{` (a fn's body, which the items
+    // hoisted out of it leave), found in the line it was written on)
+    let orig_at = |it: &SrcItem| -> Option<usize> {
+        let text = text_of(it);
+        let first = &text[..text.find('\n').unwrap_or(text.len())];
+        let skip = first.find("*/").filter(|_| first.starts_with(crate::prep::HOIST_MARK)).map_or(0, |n| n + 2);
+        let first = first[skip..].trim_start();
+        let head = first[..first.find('{').unwrap_or(first.len())].trim_end();
+        let line = crate::prep::hoisted_at(&marks, it.line).unwrap_or(it.line);
+        let l = orig.split('\n').nth(line.checked_sub(1)?)?;
+        Some(l.as_ptr() as usize - orig.as_ptr() as usize + l.find(head).filter(|_| !head.is_empty())?)
+    };
+    // (the fn written at `a` has what is written at `b` in its body: no `}` closes the body between them)
+    let encloses = |a: usize, b: usize| {
+        let Some(seg) = orig.as_bytes().get(a..b) else { return false };
+        let mut d = 0i32;
+        for &(k, s, _) in &crate::lexer::tokenize(seg) {
+            if k == 1 && seg[s] == b'{' {
+                d += 1;
+            } else if k == 1 && seg[s] == b'}' {
+                d -= 1;
+                if d <= 0 {
+                    return false;
+                }
+            }
+        }
+        d > 0
+    };
     for &h in &hoisted {
         let it = &items[h];
         let Ok(Some(f)) = parse_fn(src, it) else { continue };
@@ -1967,25 +2000,50 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
             if g == h || !(a <= line && line <= b) || !text_of(gi).contains("fn ") {
                 continue;
             }
+            // (on the line a fn starts or ends on, its columns say whether it is around: `fn a(x: u8) {} fn b() {
+            // fn c() {} }` on one line)
+            if line == a || line == b {
+                if let (Some(x), Some(y)) = (orig_at(gi), orig_at(it)) {
+                    if !encloses(x, y) {
+                        continue;
+                    }
+                }
+            }
             let Ok(Some(gf)) = parse_fn(src, gi) else { continue };
             locals_of(&gf.sig, &gf.block, &mut outer);
         }
         if outer.is_empty() {
             continue;
         }
-        let Some((fname, name)) = capture(&f.sig, &f.block, &outer, &item_names) else { continue };
-        // (rustc points at the use: the first in that fn's body, not a field or a path's segment)
+        let Some((fname, name, at)) = capture(&f.sig, &f.block, &outer, &item_names) else { continue };
         let text = text_of(it);
-        let b = text.as_bytes();
-        let t = crate::lexer::tokenize(b);
-        let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
-        let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
-        let from = (1..t.len()).find(|&k| w(k) == fname && w(k - 1) == "fn").unwrap_or(0);
-        let open = (from..t.len()).find(|&k| sym(k, b'{'))?;
-        let Some(k) = (open..t.len()).find(|&k| w(k) == name && !(k > 0 && (sym(k - 1, b'.') || sym(k - 1, b':'))) && !sym(k + 1, b':') && !sym(k + 1, b'!')) else {
-            continue;
+        // (rustc points at the use: the free one the walk found, at its line (from 1) and column (in characters, from
+        // 0) in the item's text)
+        let found = (at.line > 0)
+            .then(|| {
+                let l = text.split('\n').nth(at.line as usize - 1)?;
+                let base = l.as_ptr() as usize - text.as_ptr() as usize;
+                Some(base + l.char_indices().nth(at.col as usize).map_or(l.len(), |(i, _)| i))
+            })
+            .flatten()
+            .filter(|&o| text[o..].starts_with(name.as_str()));
+        // (else (`self`) the first in that fn's body that is not a field or a path's segment)
+        let off = match found {
+            Some(o) => o,
+            None => {
+                let b = text.as_bytes();
+                let t = crate::lexer::tokenize(b);
+                let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+                let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+                let from = (1..t.len()).find(|&k| w(k) == fname && w(k - 1) == "fn").unwrap_or(0);
+                let open = (from..t.len()).find(|&k| sym(k, b'{'))?;
+                let Some(k) = (open..t.len()).find(|&k| w(k) == name && !(k > 0 && (sym(k - 1, b'.') || sym(k - 1, b':'))) && !sym(k + 1, b':') && !sym(k + 1, b'!')) else {
+                    continue;
+                };
+                t[k].1
+            }
         };
-        let (line, col) = item_pos(src, orig, &marks, it, t[k].1);
+        let (line, col) = item_pos(src, orig, &marks, it, off);
         return Some(format!("{line}:{col}: can't capture dynamic environment in a fn item (E0434)"));
     }
     None
@@ -1996,14 +2054,9 @@ fn leading_pub(text: &str) -> Option<usize> {
     let b = text.as_bytes();
     let mut i = 0;
     loop {
-        while i < b.len() && b[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        if b[i..].starts_with(b"//") {
-            i += b[i..].iter().position(|&c| c == b'\n').unwrap_or(b.len() - i);
-        } else if b[i..].starts_with(b"/*") {
-            i += b[i..].windows(2).position(|w| w == b"*/").map_or(b.len() - i, |n| n + 2);
-        } else if b[i..].starts_with(b"#[") || b[i..].starts_with(b"#![") {
+        // (whitespace and comments, nested ones too)
+        i = skip_space(b, i);
+        if b[i..].starts_with(b"#[") || b[i..].starts_with(b"#![") {
             // (an attribute: to its `]`, past the strings in it)
             let mut d = 0i32;
             while i < b.len() {
@@ -2042,7 +2095,8 @@ fn enum_inner_pub(text: &str) -> Option<usize> {
     let e = (0..t.len()).find(|&k| w(k) == "enum")?;
     // (the body: its `{`, past the generics and a where clause)
     let open = (e..t.len()).find(|&k| sym(k, b'{'))?;
-    let mut d = 0i32;
+    // (`disc`: in a variant's discriminant, `A = { pub const N: isize = 1; N }`, whose items may be `pub`)
+    let (mut d, mut disc) = (0i32, false);
     for k in open..t.len() {
         if sym(k, b'{') || sym(k, b'(') || sym(k, b'[') {
             d += 1;
@@ -2051,7 +2105,9 @@ fn enum_inner_pub(text: &str) -> Option<usize> {
             if d == 0 {
                 break;
             }
-        } else if (d == 1 || d == 2) && w(k) == "pub" && k > 0 && (sym(k - 1, b'{') || sym(k - 1, b'(') || sym(k - 1, b',') || sym(k - 1, b']')) {
+        } else if d == 1 && (sym(k, b'=') || sym(k, b',')) {
+            disc = sym(k, b'=');
+        } else if !disc && (d == 1 || d == 2) && w(k) == "pub" && k > 0 && (sym(k - 1, b'{') || sym(k - 1, b'(') || sym(k - 1, b',') || sym(k - 1, b']')) {
             return Some(t[k].1);
         }
     }
@@ -2064,23 +2120,26 @@ fn enum_inner_pub(text: &str) -> Option<usize> {
 fn item_pos(src: &str, orig: &str, marks: &[(usize, usize)], it: &SrcItem, off: usize) -> (usize, usize) {
     let text = &src[it.start..it.end];
     let line = it.line + text[..off].matches('\n').count();
+    // (columns count characters, as rustc's do)
     match crate::prep::hoisted_at(marks, line) {
         Some(at) => {
-            let col = off - text[..off].rfind('\n').map_or(0, |n| n + 1) + 1;
+            let col = text[text[..off].rfind('\n').map_or(0, |n| n + 1)..off].chars().count() + 1;
             if text[..off].contains('\n') {
                 return (at, col);
             }
             // (the item's first line, past a hoist mark, as it is in the line it was written on)
             let first = &text[..text.find('\n').unwrap_or(text.len())];
             let skip = first.find("*/").filter(|_| first.starts_with(crate::prep::HOIST_MARK)).map_or(0, |n| n + 2);
-            let head = &first[skip..first.len().min(skip + 40).max(skip)];
-            let head = &head[..(0..=head.len()).rev().find(|&n| head.is_char_boundary(n)).unwrap_or(0)];
-            let found = orig.split('\n').nth(at.wrapping_sub(1)).and_then(|l| l.find(head)).filter(|_| !head.trim().is_empty() && off >= skip);
-            (at, found.map_or(col, |f| f + off - skip + 1))
+            // (up to 40 bytes, cut at a character's boundary)
+            let end = (skip..=first.len().min(skip + 40)).rev().find(|&n| first.is_char_boundary(n)).unwrap_or(skip);
+            let head = &first[skip..end];
+            let l = orig.split('\n').nth(at.wrapping_sub(1)).unwrap_or("");
+            let found = l.find(head).filter(|_| !head.trim().is_empty() && off >= skip);
+            (at, found.map_or(col, |f| l[..f].chars().count() + text[skip..off].chars().count() + 1))
         }
         None => {
             let at = it.start + off;
-            (line, at - src[..at].rfind('\n').map_or(0, |n| n + 1) + 1)
+            (line, src[src[..at].rfind('\n').map_or(0, |n| n + 1)..at].chars().count() + 1)
         }
     }
 }
@@ -2339,8 +2398,27 @@ fn first_gat_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<Str
                     if let Some(o) = opener(k - 3) {
                         if o + 2 == k - 3 && w(o + 1) == "Self" {
                             tr = self_trait;
-                        } else if k >= 5 && t[k - 4].0 == 0 && (o + 1..k - 4).any(|q| w(q) == "as") {
-                            tr = Some(w(k - 4));
+                        } else {
+                            // (the `as` at the group's own level: not one in `<<T as A>::X as Tr>`'s inner group)
+                            let mut d = 0i32;
+                            let as_at = (o + 1..k - 3).find(|&q| {
+                                if sym(q, b'<') {
+                                    d += 1;
+                                } else if sym(q, b'>') && !sym(q - 1, b'-') {
+                                    d -= 1;
+                                }
+                                d == 0 && w(q) == "as"
+                            });
+                            // (the trait after it: its path's last segment, `<U as m::Tr<u8>>::A`)
+                            if let Some(a) = as_at {
+                                let mut q = a + 1;
+                                while t[q].0 == 0 && sym(q + 1, b':') && sym(q + 2, b':') && q + 3 < k - 3 && t[q + 3].0 == 0 {
+                                    q += 3;
+                                }
+                                if q < k - 3 && t[q].0 == 0 && (q + 1 == k - 3 || sym(q + 1, b'<')) {
+                                    tr = Some(w(q));
+                                }
+                            }
                         }
                     }
                 }
@@ -2377,8 +2455,14 @@ fn first_gat_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<Str
             }
             let Some(tr) = tr else { continue };
             let Some(&(lts, tys)) = gats.get(&(tr, name)) else { continue };
-            let (glts, gtys) = if sym(k + 1, b'<') {
-                let Some((parts, _)) = angle_parts(&t, b, k + 1) else { continue };
+            // (its arguments, `Self::A<'a>` or `Self::A::<'a>`)
+            let args = if sym(k + 1, b'<') {
+                Some(k + 1)
+            } else {
+                (sym(k + 1, b':') && sym(k + 2, b':') && sym(k + 3, b'<')).then_some(k + 3)
+            };
+            let (glts, gtys) = if let Some(open) = args {
+                let Some((parts, _)) = angle_parts(&t, b, open) else { continue };
                 let lifetime = |q: usize| b[t[q].1] == b'\'' || (t[q].1 > 0 && b[t[q].1 - 1] == b'\'');
                 let binding = |p: &(usize, usize)| t[p.0].0 == 0 && p.1 > p.0 && sym(p.0 + 1, b'=') && !sym(p.0 + 2, b'=');
                 let l = parts.iter().filter(|p| lifetime(p.0)).count();
@@ -2422,6 +2506,10 @@ fn bound_at(t: &[(u8, usize, usize)], b: &[u8], mut k: usize) -> Option<(usize, 
     let name = k;
     let mut parts = vec![];
     k += 1;
+    // (`Iterator::<Item = u8>`)
+    if sym(k, b':') && sym(k + 1, b':') && sym(k + 2, b'<') {
+        k += 2;
+    }
     if sym(k, b'<') {
         let (p, c) = angle_parts(t, b, k)?;
         parts = p;
@@ -2445,6 +2533,51 @@ fn assoc_bindings<'a>(t: &[(u8, usize, usize)], text: &'a str, parts: &[(usize, 
         }
     }
     bound
+}
+
+/// The arguments of a trait as shown_args shows it (`Sup<A, Vec<u8>>`: `A` and `Vec<u8>`), none without `<..>`
+fn type_args(shown: &str) -> Vec<&str> {
+    let (Some(a), Some(z)) = (shown.find('<'), shown.rfind('>')) else { return vec![] };
+    let inner = &shown[a + 1..z.max(a + 1)];
+    let (mut out, mut d, mut from) = (vec![], 0i32, 0);
+    for (i, c) in inner.char_indices() {
+        match c {
+            '<' | '(' | '[' => d += 1,
+            '>' if !inner[..i].ends_with('-') => d -= 1,
+            ')' | ']' => d -= 1,
+            ',' if d == 0 => {
+                out.push(inner[from..i].trim());
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(inner[from..].trim());
+    out
+}
+
+/// `s` with each identifier that is one of `params` replaced by the argument at its place (one past `args` stays)
+fn subst_idents(s: &str, params: &[&str], args: &[&str]) -> String {
+    let b = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i].is_ascii_alphabetic() || b[i] == b'_' {
+            let j = i + b[i..].iter().position(|c| !(c.is_ascii_alphanumeric() || *c == b'_')).unwrap_or(b.len() - i);
+            let word = &s[i..j];
+            let lifetime = i > 0 && b[i - 1] == b'\'';
+            match params.iter().position(|p| *p == word).and_then(|k| args.get(k)).filter(|_| !lifetime) {
+                Some(a) => out.push_str(a),
+                None => out.push_str(word),
+            }
+            i = j;
+        } else {
+            let j = i + s[i..].chars().next().map_or(1, char::len_utf8);
+            out.push_str(&s[i..j]);
+            i = j;
+        }
+    }
+    out
 }
 
 /// A `<..>`'s type and const arguments as rustc shows them (`<(), Vec<u8>>`), or "" without any
@@ -2480,6 +2613,37 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
     if dyns.is_empty() {
         return None;
     }
+    // (the auto traits, which an object may add to its principal trait: `dyn Send + Iterator`)
+    const AUTO: &[&str] = &["Send", "Sync", "Unpin", "UnwindSafe", "RefUnwindSafe"];
+    // (the object's principal trait from the token after `dyn`: the first bound not an auto trait or a lifetime; and
+    // whether the bounds read may go on past the window's end: one runs to it, or a `<` is not closed in it)
+    fn principal(t: &[(u8, usize, usize)], b: &[u8]) -> (Option<(usize, usize, Vec<(usize, usize)>, usize)>, bool) {
+        let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && b[t[q].1] == c;
+        let mut k = 1;
+        while k < t.len() {
+            if t[k].0 == 0 && t[k].1 > 0 && b[t[k].1 - 1] == b'\'' {
+                k += 1;
+            } else {
+                match bound_at(t, b, k) {
+                    Some(bd) if !AUTO.iter().any(|a| a.as_bytes() == &b[t[bd.1].1..t[bd.1].2]) => {
+                        let open = bd.3 >= t.len();
+                        return (Some(bd), open);
+                    }
+                    Some(bd) => k = bd.3,
+                    None => {
+                        let opens = (k..t.len()).filter(|&q| sym(q, b'<')).count();
+                        let closes = (k..t.len()).filter(|&q| sym(q, b'>') && !sym(q - 1, b'-')).count();
+                        return (None, opens > closes);
+                    }
+                }
+            }
+            if !sym(k, b'+') {
+                return (None, k >= t.len());
+            }
+            k += 1;
+        }
+        (None, true)
+    }
     // (std's traits with associated types: (name, associated types, supertraits))
     const STD: &[(&str, &[&str], &[&str])] = &[
         ("Iterator", &["Item"], &[]),
@@ -2491,14 +2655,15 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
         ("DerefMut", &[], &["Deref"]),
         ("Future", &["Output"], &[]),
     ];
-    // (the program's traits: name -> (associated types, supertraits as (name, shown, the types the bound binds)), or
-    // None when one has a generic associated type or two traits share the name; and how many type and const
-    // parameters it requires and takes)
+    // (the program's traits: name -> (associated types, supertraits as (name, shown, the types the bound binds), how
+    // many type and const parameters it requires and takes, and their names), or None when one has a generic
+    // associated type or two traits share the name)
     type Sup<'s> = (&'s str, String, Vec<&'s str>);
+    type Trait<'s> = (Vec<&'s str>, Vec<Sup<'s>>, (usize, usize), Vec<&'s str>);
     let id = |&(a, b): &(u32, u32)| &src[a as usize..b as usize];
     // (a trait as rustc shows it: without the flattened modules' `a__` prefix and the renamer's `__u_`)
     let plain = |n: &str, args: &str| format!("{}{}", n.rsplit("__").next().unwrap_or(n).trim_start_matches("u_"), args.replace("__u_", ""));
-    let mut traits: crate::fxhash::FxMap<&str, Option<(Vec<&str>, Vec<Sup>, (usize, usize))>> = Default::default();
+    let mut traits: crate::fxhash::FxMap<&str, Option<Trait>> = Default::default();
     let mut header_of: crate::fxhash::FxMap<usize, &str> = Default::default();
     for (i, it) in items.iter().enumerate() {
         if !matches!(it.kind, ItemKind::TraitHeader) {
@@ -2514,7 +2679,7 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
         }
         // (`trait Tr {`: no parameters and no supertraits, nothing to read)
         if !src[ne as usize..it.end].contains(['<', ':']) {
-            traits.insert(name, Some((vec![], vec![], (0, 0))));
+            traits.insert(name, Some((vec![], vec![], (0, 0), vec![])));
             continue;
         }
         let text = &src[it.start..it.end];
@@ -2524,6 +2689,34 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
         let w = |q: usize| if q < t.len() && t[q].0 == 0 { &text[t[q].1..t[q].2] } else { "" };
         let mut sup = vec![];
         let mut params = (0, 0);
+        let mut pnames = vec![];
+        // (a bound list from q (`Super<X = u8> + Zed + 'a`), up to `where`, `{`, or with `clause` a `,` that ends a
+        // where clause: where it ends, and its traits)
+        let read_bounds = |mut q: usize, clause: bool| {
+            let mut sup = vec![];
+            let end = |q: usize, d: i32| q >= t.len() || w(q) == "where" || sym(q, b'{') || (clause && d == 0 && sym(q, b','));
+            while !end(q, 0) {
+                match bound_at(&t, b, q) {
+                    Some((_, n, parts, after)) => {
+                        sup.push((w(n), plain(w(n), &shown_args(&t, text, &parts)), assoc_bindings(&t, text, &parts, true)));
+                        q = after;
+                    }
+                    None => q += 1,
+                }
+                // (to the next `+` of the list, past a group: `Fn(A, B)`)
+                let mut d = 0i32;
+                while !end(q, d) && !(d == 0 && sym(q, b'+')) {
+                    if sym(q, b'(') || sym(q, b'[') || sym(q, b'<') {
+                        d += 1;
+                    } else if sym(q, b')') || sym(q, b']') || (sym(q, b'>') && !sym(q - 1, b'-')) {
+                        d -= 1;
+                    }
+                    q += 1;
+                }
+                q += usize::from(sym(q, b'+'));
+            }
+            (q, sup)
+        };
         if let Some(mut q) = (0..t.len()).find(|&q| w(q) == "trait" && w(q + 1) == name).map(|q| q + 2) {
             if sym(q, b'<') {
                 // (`<'a, T, U = u8, const N: usize>`: a default is an `=` at the parameter's own level)
@@ -2532,6 +2725,7 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                     if t[a].1 > 0 && b[t[a].1 - 1] == b'\'' {
                         continue;
                     }
+                    pnames.push(if w(a) == "const" { w(a + 1) } else { w(a) });
                     let mut d = 0i32;
                     let default = (a..=z).any(|r| {
                         if sym(r, b'<') {
@@ -2546,24 +2740,34 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                 q = c + 1;
             }
             if sym(q, b':') && !sym(q + 1, b':') {
+                let (e, list) = read_bounds(q + 1, false);
+                sup = list;
+                q = e;
+            }
+            // (`where Self: Base` is a supertrait too)
+            if w(q) == "where" {
                 q += 1;
-                // (`Super<X = u8> + Zed + 'a`, up to `where` or `{`)
-                while q < t.len() && w(q) != "where" && !sym(q, b'{') {
-                    match bound_at(&t, b, q) {
-                        Some((_, n, parts, after)) => {
-                            sup.push((w(n), plain(w(n), &shown_args(&t, text, &parts)), assoc_bindings(&t, text, &parts, true)));
-                            q = after;
+                while q < t.len() && !sym(q, b'{') {
+                    if w(q) == "Self" && sym(q + 1, b':') && !sym(q + 2, b':') {
+                        let (e, more) = read_bounds(q + 2, true);
+                        sup.extend(more);
+                        q = e;
+                    } else {
+                        let mut d = 0i32;
+                        while q < t.len() && !sym(q, b'{') && !(d == 0 && sym(q, b',')) {
+                            if sym(q, b'(') || sym(q, b'[') || sym(q, b'<') {
+                                d += 1;
+                            } else if sym(q, b')') || sym(q, b']') || (sym(q, b'>') && !sym(q - 1, b'-')) {
+                                d -= 1;
+                            }
+                            q += 1;
                         }
-                        None => q += 1,
                     }
-                    while q < t.len() && !sym(q, b'+') && w(q) != "where" && !sym(q, b'{') {
-                        q += 1;
-                    }
-                    q += usize::from(sym(q, b'+'));
+                    q += usize::from(sym(q, b','));
                 }
             }
         }
-        traits.insert(name, Some((vec![], sup, params)));
+        traits.insert(name, Some((vec![], sup, params, pnames)));
     }
     for it in items {
         let ItemKind::TraitMember(h) = it.kind else { continue };
@@ -2588,9 +2792,9 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
         let it = &items[i];
         // (`dyn Handler` of a trait with no associated types and no supertraits, `dyn Any` of a trait this does not
         // know: settled by the name after `dyn`, when it is the whole path, without reading tokens)
-        if let Some(n) = next.filter(|&(a, b)| src[off + 3..a as usize].trim().is_empty() && sb.get(b as usize) != Some(&b':')).map(|x| id(&x)) {
+        if let Some(n) = next.filter(|&(a, b)| src[off + 3..a as usize].trim().is_empty() && sb.get(b as usize) != Some(&b':')).map(|x| id(&x)).filter(|n| !AUTO.contains(n)) {
             let simple = match traits.get(n) {
-                Some(Some((a, sups, _))) => a.is_empty() && sups.is_empty(),
+                Some(Some((a, sups, _, _))) => a.is_empty() && sups.is_empty(),
                 Some(None) => true,
                 None => !STD.iter().any(|s| s.0 == n),
             };
@@ -2608,8 +2812,8 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
             }
             let text = &src[off..end];
             let t = crate::lexer::tokenize(text.as_bytes());
-            let bound = bound_at(&t, text.as_bytes(), 1);
-            if bound.is_some() || end == it.end || len >= 1 << 16 {
+            let (bound, open) = principal(&t, text.as_bytes());
+            if !open || end == it.end || len >= 1 << 16 {
                 break (text, t, bound);
             }
             len *= 4;
@@ -2632,9 +2836,25 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
             // (the usual case first: a trait without supertraits whose every associated type the object binds, or one
             // left to another error (a wrong count of arguments, a generic associated type, not a trait this knows))
             let in_std = STD.iter().find(|s| s.0 == name);
+            // (a wrong count of the program's trait's type and const arguments: E0107 at its name, as rustc)
+            if let Some(Some((_, _, (req, all), _))) = traits.get(name).filter(|_| !(std_path && in_std.is_some())) {
+                let (required, declared) = (*req, *all);
+                if args < required || args > declared {
+                    let plural = |n: usize| if n == 1 { "generic argument" } else { "generic arguments" };
+                    // (`dyn T` without `<..>`; `dyn T<A = u8>` is "takes 1 .. but 0")
+                    let what = if parts.is_empty() {
+                        format!("missing generics for trait `{}`", plain(name, ""))
+                    } else {
+                        let takes = if required == declared { format!("{declared}") } else if args > declared { format!("at most {declared}") } else { format!("at least {required}") };
+                        format!("trait takes {takes} {} but {args} {} {} supplied", plural(declared.max(required)), plural(args), if args == 1 { "was" } else { "were" })
+                    };
+                    let (line, col) = item_pos(src, orig, &crate::prep::hoist_marks(src), it, off - it.start + t[n].1);
+                    return Some(format!("{line}:{col}: {what} (E0107)"));
+                }
+            }
             let settled = match traits.get(name) {
                 Some(None) => true,
-                Some(Some((a, sups, (req, all)))) if !(std_path && in_std.is_some()) => args < *req || args > *all || sups.is_empty() && a.iter().all(|x| bound.contains(x)),
+                Some(Some((a, sups, (req, all), _))) if !(std_path && in_std.is_some()) => args < *req || args > *all || sups.is_empty() && a.iter().all(|x| bound.contains(x)),
                 _ => in_std.is_none_or(|s| args > 0 || s.2.is_empty() && s.1.iter().all(|x| bound.contains(x))),
             };
             if settled {
@@ -2649,23 +2869,30 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
             let path: String = if std_path && (traits.contains_key(name) || traits.contains_key(format!("__u_{name}").as_str())) { text[t[q].1..t[n].2].split_whitespace().collect() } else { plain(name, "") };
             let mut queue: Vec<Sup> = vec![(name, format!("{path}{}", plain("", &shown)), vec![])];
             let mut order: Vec<(&str, String, Vec<&str>)> = vec![];
-            let mut bound_by: crate::fxhash::FxMap<&str, Vec<&str>> = Default::default();
+            // (the bindings each instantiation gets: `Sup<i32>` and `Sup<u32>` are two)
+            let mut bound_by: crate::fxhash::FxMap<String, Vec<&str>> = Default::default();
             let mut known = true;
             let mut n = 0;
             while n < queue.len() && n < 64 {
                 let (tn, ts, local) = queue[n].clone();
                 n += 1;
-                bound_by.entry(tn).or_default().extend(local);
-                if queue[..n - 1].iter().any(|x| x.0 == tn) {
+                bound_by.entry(ts.clone()).or_default().extend(local);
+                if queue[..n - 1].iter().any(|x| x.1 == ts) {
                     continue;
                 }
                 let in_std = STD.iter().find(|s| s.0 == tn);
                 let (assoc, sups): (Vec<&str>, Vec<Sup>) = match traits.get(tn) {
-                    Some(Some((_, _, (req, all)))) if n == 1 && !(std_path && in_std.is_some()) && (args < *req || args > *all) => {
+                    Some(Some((_, _, (req, all), _))) if n == 1 && !(std_path && in_std.is_some()) && (args < *req || args > *all) => {
                         known = false;
                         break;
                     }
-                    Some(Some((a, s, _))) if !(std_path && n == 1 && in_std.is_some()) => (a.clone(), s.clone()),
+                    Some(Some((a, s, _, ps))) if !(std_path && n == 1 && in_std.is_some()) => {
+                        // (a supertrait as this instantiation has it: `trait Dyn<A, B>: Sup<B>` of `Dyn<i32, u32>` is
+                        // `Sup<u32>`)
+                        let args = type_args(&ts);
+                        let s = s.iter().map(|(sn, sts, sb)| (*sn, if ps.is_empty() || args.is_empty() { sts.clone() } else { subst_idents(sts, ps, &args) }, sb.clone())).collect();
+                        (a.clone(), s)
+                    }
                     Some(None) => {
                         known = false;
                         break;
@@ -2686,14 +2913,18 @@ fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Opti
                 order.push((tn, ts, assoc));
                 queue.extend(sups);
             }
+            // (a walk cut short leaves the types of the traits it did not reach unknown)
+            if n < queue.len() {
+                known = false;
+            }
             // (a binding of a name the trait does not have itself, but two of its supertraits do, binds neither: E0222)
             if let Some((_, _, own)) = order.first() {
                 pending.retain(|p| own.contains(p) || order[1..].iter().filter(|o| o.2.contains(p)).count() < 2);
             }
             let mut missing: Vec<(&str, String)> = vec![];
-            for (tn, ts, assoc) in &order {
+            for (_, ts, assoc) in &order {
                 for &a in assoc {
-                    if bound_by.get(tn).is_some_and(|b| b.contains(&a)) {
+                    if bound_by.get(ts).is_some_and(|b| b.contains(&a)) {
                         continue;
                     }
                     if let Some(p) = pending.iter().position(|x| *x == a) {

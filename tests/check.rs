@@ -816,7 +816,79 @@ fn dyn_without_associated_types() {
     let src = "trait T<X, Y = u8> { type A; }\nfn f(_: &dyn T<u8, A = u8>) {}\nfn g(_: &dyn T<u8>) {}\nfn main() {}\n";
     assert_eq!(first(src), e(3, 14, "type `A` in `T<u8>`"), "defaulted_parameter");
     let src = "pub trait T<X, Y> { type A; type B; type C; }\npub struct Foo { i: Box<dyn T<usize, usize, usize, usize, B = usize>> }\nfn main() {}\n";
-    assert!(first(src).is_none_or(|d| !d.2.contains("E0191")), "too_many_arguments");
+    assert_eq!(first(src), Some((2, 29, "trait takes 2 generic arguments but 4 generic arguments were supplied (E0107)".to_string())), "too_many_arguments");
+}
+
+#[test]
+fn review100_capture_visibility_dyn_gat() {
+    // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    // (E0449: past a nested comment; `pub(crate)` and `unsafe` before `extern`; not an item in a discriminant)
+    let vis = "visibility qualifiers are not permitted here (E0449)";
+    let src = "trait T { fn f(&self); }\nstruct S;\nimpl T for S { #[inline] /* a /* b */ c */ pub fn f(&self) {} }\nfn main() {}\n";
+    assert_eq!(first(src), at(3, 44, vis), "nested_comment");
+    let src = "pub(crate) unsafe extern \"C\" { fn f(); }\npub unsafe extern \"C\" { fn g(); }\nfn main() {}\n";
+    assert_eq!(first(src), at(1, 1, vis), "pub_crate_unsafe_extern");
+    let src = "unsafe extern \"C\" { fn f(); }\npub unsafe extern \"C\" { fn g(); }\nfn main() {}\n";
+    assert_eq!(first(src), at(2, 1, vis), "pub_unsafe_extern");
+    let src = "enum E { A = { pub const N: isize = 1; N } }\nfn main() { let _ = E::A; }\n";
+    assert_eq!(first(src), None, "discriminant_block");
+    let src = "enum E { A = { pub const N: isize = 1; N }, B(pub u8) }\nfn main() {}\n";
+    assert_eq!(first(src), at(1, 47, vis), "field_after_discriminant");
+    // (E0434: at the free use, not one a nested block or a closure binds; not a sibling fn's parameter on the same
+    // line; columns in characters)
+    let cap = "can't capture dynamic environment in a fn item (E0434)";
+    let src = "fn outer(x: u32) -> u32 {\n    fn inner() -> u32 { { let x = 1u32; let _ = x; } x }\n    x\n}\nfn main() { outer(1); }\n";
+    assert_eq!(first(src), at(2, 54, cap), "free_use_after_block");
+    let src = "fn outer() {\n    let s = 1u8;\n    fn inner() -> u8 { let f = |s: u8| s; f(1) + s }\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), at(3, 50, cap), "free_use_after_closure");
+    let src = "    fn unrelated(drop: u8) { let _ = drop; } fn outer() { fn inner() { drop(0u8); } inner(); }\nfn main() { unrelated(1); outer(); }\n";
+    assert_eq!(first(src), None, "sibling_on_one_line");
+    let src = "fn main() {\n    let x = 1u8;\n    fn inner() -> u8 { let _s = \"ああああああああああああああ\"; x }\n}\n";
+    assert_eq!(first(src), at(3, 51, cap), "non_ascii_first_line");
+    // (E0191: a turbofish; a `<..>` far after the name; the principal trait after auto traits and a lifetime; each
+    // instantiation of a supertrait; `where Self: Base` as a supertrait)
+    let src = "fn f(_: &dyn Iterator::<Item = u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "turbofish");
+    let src = format!("fn f(_: &dyn Iterator{}<Item = u8>) {{}}\nfn main() {{}}\n", " ".repeat(49));
+    assert_eq!(first(&src), None, "far_arguments");
+    let src = "fn f(_: Box<dyn Fn(u8) -> u8 + Send>, _: &dyn Send, _: &(dyn Sync + Send)) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "auto_traits_alone");
+    let item = |what: &str| format!("the value of the associated {what} must be specified (E0191)");
+    let src = "type Obj = dyn Send + Iterator;\nfn main() {}\n";
+    assert_eq!(first(src), at(1, 23, &item("type `Item` in `Iterator`")), "after_auto_trait");
+    let src = "fn f<'a>(_: &(dyn 'a + Iterator)) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(1, 24, &item("type `Item` in `Iterator`")), "after_lifetime");
+    let src = "trait Sup<T> { type Assoc: Default; }\nimpl<T: Default> Sup<T> for () { type Assoc = T; }\nimpl<T: Default, U: Default> Dyn<T, U> for () {}\ntrait Dyn<A, B>: Sup<A, Assoc = A> + Sup<B> {}\nfn main() { let _q: <dyn Dyn<i32, u32> as Sup<u32>>::Assoc = Default::default(); }\n";
+    assert_eq!(first(src), at(5, 26, &item("type `Assoc` in `Sup<u32>`")), "per_instantiation");
+    let src = "trait Sup<T> { type Assoc; }\ntrait Dyn<A>: Sup<A, Assoc = A> + Sup<u8, Assoc = u8> {}\nfn f(_: &dyn Dyn<i32>) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "both_instantiations_bound");
+    let src = "trait Base { type A; }\ntrait Sub where Self: Base {}\nfn f(_: &dyn Sub) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(3, 14, &item("type `A` in `Base`")), "where_self");
+    let src = "trait Base { type A; }\ntrait Other {}\ntrait Sub where Self: Other, Self: Fn(u8, u8) + Base {}\nfn f(_: &dyn Sub) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(4, 14, &item("type `A` in `Base`")), "where_self_clauses");
+    let src = "trait Base { type A; }\ntrait Sub where Self: Base<A = u8> {}\nfn f(_: &dyn Sub) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "where_self_bound");
+    // (a supertrait walk cut short at 64 traits says nothing about the ones it did not reach)
+    let mut src = String::from("trait T70 { type A; }\n");
+    for i in 0..70 {
+        src += &format!("trait T{i}: T{} {{}}\n", i + 1);
+    }
+    src += "fn f(_: &dyn T0) {}\nfn main() {}\n";
+    assert_eq!(first(&src), None, "long_chain");
+    // (E0107: a GAT's turbofish; a qualified path whose trait has arguments; a dyn's count of trait arguments)
+    let src = "trait Lend { type Item<'a> where Self: 'a; fn next<'a>(&'a mut self) -> Self::Item::<'a>; }\nfn main() {}\n";
+    assert_eq!(first(src), None, "gat_turbofish");
+    let src = "trait Tr<T> { type Item<'a>; }\nfn f<U: Tr<u8>>() { let _: Option<<U as Tr<u8>>::Item> = None; }\nfn main() {}\n";
+    assert_eq!(first(src), at(2, 50, "missing generics for associated type `Tr::Item` (E0107)"), "qualified_trait_arguments");
+    let src = "trait T<X> { type A; }\nfn f(_: &dyn T<A = u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(2, 14, "trait takes 1 generic argument but 0 generic arguments were supplied (E0107)"), "dyn_binding_only");
+    let src = "trait T<X> { type A; }\nfn f(_: &dyn T) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(2, 14, "missing generics for trait `T` (E0107)"), "dyn_no_arguments");
+    let src = "trait T<X, Y = u8> { type A; }\nfn f(_: &dyn T<u8, u8, u8, A = u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(2, 14, "trait takes at most 2 generic arguments but 3 generic arguments were supplied (E0107)"), "dyn_too_many");
 }
 
 #[test]
