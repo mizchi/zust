@@ -154,9 +154,6 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
     reference's lifetime ("`'_` must outlive `'a`"). With elided lifetimes (`fn as_slice(&self) -> &[u8]`) it passes;
   - `None => &[]` in a match whose type is `&'a [u8]`: "type annotations needed for an empty array";
   - zustc's own parser counts the destructuring assignment `(a.x, a.y) = t;` as a `let` (tests/parse.rs).
-  - a `match` / `if` expression as a method's receiver is not a temporary the borrow check frees:
-    `let r = (match f { true => mk(1), false => mk(2) }).loan(); r.0` is accepted (rustc: E0716). A call's
-    (`mk(1).loan()`) is rejected, for a struct and a vector alike.
 - `cratebench/ui/run.py` does not run build scripts: a crate gets cargo's variables (`CARGO_PKG_*`) but not what its
   script would give (zurgo does both).
 - `x.as_ref()` on text takes the `AsRef` targets of all the bounds in scope, not those of `x`'s own parameter: in

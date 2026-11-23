@@ -1051,6 +1051,14 @@ impl Cx<'_> {
                 // a local of its type, and the method called on that, as on any vector local (its receiver's borrow and
                 // regions checked as theirs: a `&self` result does not outlive the statement)
                 (Some(v), t @ Ty::Vec(_)) => {
+                    // (the temporary's loan, as prim_trait_method records it: a `&self` result does not outlive it)
+                    if let Some(id) = self.prog.prim_self_method(t, method) {
+                        if let (Some(Ty::Ref(m, _)), true) = (self.prog.sigs[id as usize].params.first().copied(), self.bk_on()) {
+                            if self.bk_ret_from(id, 0) {
+                                self.bk_temp_borrow(recv, m, t);
+                            }
+                        }
+                    }
                     let n = "__exr_vrecv".to_string();
                     self.scopes.push(vec![]);
                     self.bind(n.clone(), t, Some(v));
@@ -1814,6 +1822,8 @@ impl Cx<'_> {
         let (v, vt) = self.expr(recv, lit_int.then_some(t))?;
         let mut v = v.unwrap();
         let mut vt = vt;
+        // (a receiver that is a reference (`id(&v).loan()`): dropping it frees nothing)
+        let recv_is_ref = matches!(vt, Ty::Ref(..));
         while let Ty::Ref(_, i) = vt {
             v = self.b.ins().load(clif_ty(*i).unwrap_or(PTR), mf(), v, 0);
             vt = *i;
@@ -1824,7 +1834,7 @@ impl Cx<'_> {
                 self.b.ins().store(mf(), v, a, 0);
                 // (a receiver a call made, borrowed for a result that borrows it: the temporary is freed at the end
                 // of the statement (E0716 when the result is used after: `let r = mk().loan(); *r`), as for a struct's)
-                if self.bk_on() && !is_place_expr(recv) && self.bk_ret_from(id, 0) {
+                if self.bk_on() && !is_place_expr(recv) && !recv_is_ref && self.bk_ret_from(id, 0) {
                     self.bk_temp_borrow(recv, *m, t);
                 }
                 (a, Ty::Ref(*m, intern(t)))
