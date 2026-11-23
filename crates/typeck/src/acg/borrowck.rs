@@ -208,6 +208,8 @@ pub struct Bk {
     /// The call being lowered takes its `&mut self` once its arguments are evaluated (activate): what the arguments
     /// borrow, shared loans too, is held until then (`s.take(s.get())`: E0502)
     pub hold_args: bool,
+    /// The parameters of the call being lowered whose arguments a `&self` receiver stores (shared_recv_stores)
+    pub store_args: Vec<usize>,
     /// The `index_mut` call acg makes to read an indexed place (its receiver is seen as shared)
     pub shared_recv: usize,
     /// Binding the pattern of an arm with a guard: a binding by value does not move until the guard holds (the next

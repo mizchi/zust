@@ -3020,3 +3020,21 @@ fn part17_non_place_array_moves() {
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("`[S2; 1]`, a non-copy array"), "{d:?}");
     assert_eq!(check("const C: [i32; 2] = [1, 2];\nfn mk() -> [String; 2] { [String::new(), String::new()] }\nfn main() {\n    let a = C[0];\n    let n = mk()[1].len();\n    let r = &mk()[0];\n    let c = mk()[0].clone();\n    println!(\"{} {} {} {}\", a, n, r, c);\n}\n"), vec![]);
 }
+
+/// A `&self` method whose self type is invariant in a lifetime an argument is borrowed for (or that it outlives,
+/// `'f: 'c`) stores what the argument borrows in the receiver, as rustc's regions do: `c.push(&mut y)` twice of
+/// `fn push(&self, r: &'c mut i32)` with C holding a `RefCell<Vec<&'c mut i32>>` conflicts
+/// (borrowck/mut-borrow-conflict-in-closures-vec.rs, E0499). Not a covariant self type, nor once the receiver is gone
+#[test]
+fn part17_shared_receiver_stores() {
+    let d = check("struct C<'c> { v: std::cell::RefCell<Vec<&'c mut i32>> }\nimpl<'c> C<'c> {\n    fn push<'f: 'c>(&self, r: &'f mut i32) { self.v.borrow_mut().push(r) }\n}\nfn main() {\n    let mut y = 1;\n    let c = C { v: std::cell::RefCell::new(vec![]) };\n    c.push(&mut y);\n    c.push(&mut y);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("mutably borrowed"), "{d:?}");
+    let d = check("struct C<'c> { v: std::cell::RefCell<Vec<&'c mut i32>> }\nimpl<'c> C<'c> {\n    fn push(&self, r: &'c mut i32) { self.v.borrow_mut().push(r) }\n}\nfn main() {\n    let mut y = 1;\n    let c = C { v: std::cell::RefCell::new(vec![]) };\n    c.push(&mut y);\n    c.push(&mut y);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("mutably borrowed"), "{d:?}");
+    let d = check("trait Push<'c> {\n    fn push(&self, r: &'c mut i32);\n}\nimpl<'c> Push<'c> for std::cell::RefCell<Vec<&'c mut i32>> {\n    fn push(&self, r: &'c mut i32) { self.borrow_mut().push(r) }\n}\nfn main() {\n    let mut y = 1;\n    let c = std::cell::RefCell::new(vec![]);\n    c.push(&mut y);\n    c.push(&mut y);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("mutably borrowed"), "{d:?}");
+    let d = check("use std::cell::RefCell;\nstruct C<'c> { v: RefCell<Vec<&'c i32>> }\nimpl<'c> C<'c> {\n    fn push(&self, r: &'c i32) { self.v.borrow_mut().push(r) }\n    fn len(&self) -> usize { self.v.borrow().len() }\n}\nfn main() {\n    let mut y = 1;\n    let c = C { v: RefCell::new(vec![]) };\n    c.push(&y);\n    y = 2;\n    println!(\"{} {}\", c.len(), y);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    assert_eq!(check("struct C<'c> { v: Vec<&'c i32> }\nimpl<'c> C<'c> {\n    fn look(&self, r: &'c i32) -> usize { self.v.len() + *r as usize }\n}\nfn main() {\n    let mut y = 1;\n    let c = C { v: vec![] };\n    c.look(&y);\n    y = 2;\n    c.look(&y);\n}\n"), vec![]);
+    assert_eq!(check("use std::cell::RefCell;\nstruct C<'c> { v: RefCell<Vec<&'c i32>> }\nimpl<'c> C<'c> {\n    fn push(&self, r: &'c i32) { self.v.borrow_mut().push(r) }\n    fn len(&self) -> usize { self.v.borrow().len() }\n}\nfn main() {\n    let mut y = 1;\n    {\n        let c = C { v: RefCell::new(vec![]) };\n        c.push(&y);\n        println!(\"{}\", c.len());\n    }\n    y = 2;\n    let c2 = C { v: RefCell::new(vec![]) };\n    c2.push(&y);\n    y = 3;\n    println!(\"{}\", y);\n}\n"), vec![]);
+}

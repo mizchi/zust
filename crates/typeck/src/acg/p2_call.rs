@@ -1369,7 +1369,13 @@ impl Cx<'_> {
         let args: Vec<&Expr> = margs.iter().collect();
         // (a `&mut self` method of a value that holds references stores what its arguments borrow:
         // `v.push(&mut x)`)
-        let into_recv = self.bk_on() && !via_deref && matches!(recv_ty, Ty::Ref(true, _)) && self.bk_ty(st).1;
+        // (also a `&self` one whose self type is invariant in a lifetime an argument is borrowed for, or outlives:
+        // `c.push(&mut y)` of `fn push(&self, r: &'c mut i32)` in `impl<'c> C<'c>` with C holding a
+        // `RefCell<Vec<&'c mut i32>>`: the argument's borrow lasts as long as c's 'c)
+        let stores = if self.bk_on() && !via_deref && matches!(recv_ty, Ty::Ref(false, _)) && self.bk_ty(st).1 { self.shared_recv_stores(id) } else { vec![] };
+        let into_recv = self.bk_on() && !via_deref && self.bk_ty(st).1 && (matches!(recv_ty, Ty::Ref(true, _)) || !stores.is_empty());
+        // (the arguments stored: their loans flow out of the call, as a result's that borrows them)
+        let stores0 = std::mem::replace(&mut self.bk.store_args, stores);
         if into_recv {
             self.bk_frame();
         }
@@ -1400,9 +1406,15 @@ impl Cx<'_> {
             self.bk.activate = bk_act;
         }
         let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
+        self.bk.store_args = stores0;
         self.rg_took_call(e);
         if into_recv {
             let srcs = self.bk_frame_end();
+            // (a `&self` receiver is used at the call, after the arguments: what it holds is live while they are
+            // made, as rustc's reborrow of it is (a `&mut self` one's two-phase borrow is activated there))
+            if matches!(recv_ty, Ty::Ref(false, _)) && is_place_expr(recv) {
+                self.bk_acc(recv, borrowck::Acc::Read);
+            }
             self.bk_flow_into(recv, &srcs);
         }
         // (the arguments' and the reservation's loans end at the call, before a `&mut self` borrow is taken)
@@ -2289,6 +2301,8 @@ impl Cx<'_> {
     }
 
     fn call_fn_inner(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {
+        // (this call's: not the calls in its arguments')
+        let store_args = std::mem::take(&mut self.bk.store_args);
         // (the receiver's region tree is this call's: the calls in the arguments must not take it)
         let rg_recv = if recv.is_some() { self.rg.recv.take() } else { None };
         let rg_sp = std::mem::take(&mut self.rg.call_sp);
@@ -2546,7 +2560,7 @@ impl Cx<'_> {
             }
             let top_ref = self.bk_on() && matches!(strip_paren(a), Expr::Ref(..));
             // (an argument `&x` the result does not borrow from: its loan ends with the call)
-            let flows = !(top_ref && matches!(pt, Ty::Ref(..)) && !self.bk_ret_from(id, i + skip));
+            let flows = !(top_ref && matches!(pt, Ty::Ref(..)) && !self.bk_ret_from(id, i + skip)) || store_args.contains(&(i + skip));
             // (the call's `&mut self` is taken after its arguments: what one that holds references borrows is held
             // until then)
             let hold = self.bk_on() && self.bk.hold_args;
@@ -3508,5 +3522,32 @@ impl Cx<'_> {
             }
         }
         Ok(())
+    }
+}
+
+impl Cx<'_> {
+    /// A `&self` method whose self type is invariant in a lifetime another parameter's type names, or one that
+    /// outlives such a lifetime (`'f: 'c`): what that argument borrows is held by the receiver (rustc: its region is
+    /// the receiver's, which lives as long as the receiver is used)
+    pub(crate) fn shared_recv_stores(&mut self, id: u32) -> Vec<usize> {
+        let prog = self.prog;
+        let sig = &prog.sigs[id as usize];
+        let Some(rs) = sig.regions.as_deref() else { return vec![] };
+        let (Some(&p0), Some(s0)) = (sig.params.first(), rs.slots.first()) else { return vec![] };
+        if !matches!(p0, Ty::Ref(false, _)) || sig.params.len() < 2 {
+            return vec![];
+        }
+        let n = rs.lts.len();
+        let Some(vs) = self.rg.code_variances(prog, p0, s0, n, sig.generics.len()) else { return vec![] };
+        let mut inv: Vec<u8> = (0..n).filter(|&k| vs[k] == super::regionck::Var::Inv).map(|k| k as u8).collect();
+        if inv.is_empty() {
+            return vec![];
+        }
+        for &(a, b) in &rs.outlives {
+            if inv.contains(&b) && !inv.contains(&a) {
+                inv.push(a);
+            }
+        }
+        (1..sig.params.len()).filter(|&j| rs.slots.get(j).is_some_and(|s| s.iter().any(|c| inv.contains(c)))).collect()
     }
 }
