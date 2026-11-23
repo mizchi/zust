@@ -206,6 +206,21 @@ fn numeric_same_in_js_and_wasm() {
         outs.push(String::from_utf8(r.stdout).unwrap());
     }
     assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    // an argument that throws while it is copied in (an array element's getter, in `.set`) gives back what the call
+    // took before it: many such calls with large arrays leave the module's memory as it was
+    let leak = node(
+        &root().join("target/test-out/numeric-wasm"),
+        "let ex; const inst = WebAssembly.instantiate; WebAssembly.instantiate = async (...a) => { const r = await inst(...a); ex = (r.instance ?? r).exports; return r; };
+const m = await import('./numeric.js');
+const big = new Array(200000).fill(1.5);
+const bad = new Array(200000).fill(1); Object.defineProperty(bad, 7, { get() { throw new Error('getter'); } });
+m.dot([1], [1]);
+const before = ex.memory.buffer.byteLength;
+let thrown = 0;
+for (let i = 0; i < 200; i++) { try { m.dot(big, bad); } catch (e) { thrown++; } }
+console.log(thrown, ex.memory.buffer.byteLength - before < 8 << 20, m.dot([2], [3]));",
+    );
+    assert_eq!(leak, "200 true 6\n");
     assert_eq!(
         outs[0],
         "dot 33.5\ntotal$i32 -2147483643\ntotal$u32 1\ntotal$i64 18014398509481986n\ntotal$f64 0.30000000000000004\n\
