@@ -1632,7 +1632,13 @@ impl Cx<'_> {
         if self.vec_fields(sid).is_some() {
             return None;
         }
-        let m = if self.prog.method(sid, "deref_mut").is_some() { "deref_mut" } else { "deref" };
+        // (the prelude's `Pin<&T>`: its `deref_mut` would borrow the pin itself mutably, where std's `Pin` has no
+        // `DerefMut` for a shared pointer (`s.0.borrow_mut()` of `s: Pin<&S>` needs no `mut s`))
+        let base = self.prog.base_of(sid);
+        let shared_pin = self.prog.structs[base as usize].name == "Pin"
+            && self.prog.struct_item.get(base as usize).is_none_or(|&i| i >= self.prog.prelude_from)
+            && matches!(self.prog.structs[sid as usize].args.first(), Some(Ty::Ref(false, _)));
+        let m = if !shared_pin && self.prog.method(sid, "deref_mut").is_some() { "deref_mut" } else { "deref" };
         let did = self.prog.method(sid, m)?;
         if !matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, i) if !i.is_fat() && !matches!(i, Ty::Str | Ty::Slice(_) | Ty::Dyn(_))) {
             return None;

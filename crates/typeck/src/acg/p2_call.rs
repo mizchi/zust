@@ -140,7 +140,11 @@ impl Cx<'_> {
         if copy_out.is_some() {
             self.bk_frame();
         }
+        // (a method call is a value: a `&mut` place around it (`&mut *s.0.borrow_mut()`) does not make its receiver a
+        // mutable place, the method's `self` does)
+        let pm = std::mem::replace(&mut self.bk.place_mut, false);
         let r = self.method_call_inner(e, expected);
+        self.bk.place_mut = pm;
         if let Some(u) = copy_out {
             let srcs = self.bk.frames.pop().unwrap_or_default();
             // (an iterator's item: the result's type, or what its `Option` holds, when it is not the iterator itself)
