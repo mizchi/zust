@@ -188,7 +188,7 @@ zurgo test --lib parse -- --include-ignored
 - The longest tests start first, ordered by their last times in `target/zust/<profile>/test-times`. A long test that
   starts last would run alone at the end.
 - Options:
-  - `--lib`, `--bins`, `--tests` and `--test <name>` choose the targets;
+  - `--lib`, `--bin <name>`, `--bins`, `--tests` and `--test <name>` choose the targets;
   - `--no-run` builds them and lists the executables;
   - `--fail-fast` stops starting tests after a failure (by default every test runs, and `--no-fail-fast` is
     accepted).

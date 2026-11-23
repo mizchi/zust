@@ -187,7 +187,7 @@ zurgo test --lib parse -- --include-ignored
 - 長いテストから始める。順番は `target/zust/<profile>/test-times` に残した前回の時間で決める。長いテストが最後に
   始まると、終わりにそれだけが残って動くことになる。
 - オプション:
-  - `--lib`、`--bins`、`--tests`、`--test <name>` でターゲットを選ぶ。
+  - `--lib`、`--bin <name>`、`--bins`、`--tests`、`--test <name>` でターゲットを選ぶ。
   - `--no-run` はビルドして、実行ファイルを並べるだけ。
   - `--fail-fast` は、失敗の後に新しいテストを始めない (既定ではすべてのテストを動かす。`--no-fail-fast` も受け付ける)。
 - `--` の後: `<filter>`、`--exact`、`--skip <s>`、`--ignored`、`--include-ignored`、`--list`、`--test-threads <n>`

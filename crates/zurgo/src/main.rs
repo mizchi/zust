@@ -27,7 +27,8 @@ options:
   --build-script-compiler <c>    auto (zustc, else rustc; default), zustc or rustc
   --time                         zustc's timings
   --filter-platform <triple>     (metadata) only the dependencies of that platform
-  --lib / --test <name>          (test) only the lib's unit tests / that integration test (also --bins, --tests)
+  --lib / --test <name>          (test) only the lib's unit tests / that integration test (also --bin <name>,
+                                 --bins, --tests)
   --no-run                       (test) build the tests, do not run them
   --no-fail-fast / --fail-fast   (test) run every test (the default) / stop starting tests after a failure
   after `--` (test): <filter>, --exact, --skip <s>, --ignored, --include-ignored, --list, --test-threads <n>
@@ -75,6 +76,8 @@ fn main() {
             "--all-features" => o.all_features = true,
             "--no-default-features" => o.no_default = true,
             "--target" => o.target = Some(val(&a)),
+            // (`zurgo test --bin x`: that bin's unit tests; the bins are all still built, for `CARGO_BIN_EXE_`)
+            "--bin" if cmd == "test" || cmd == "t" => only.push(format!("(bin {})", val(&a))),
             "--bin" => o.bins.push(val(&a)),
             "-j" | "--jobs" => o.jobs = Some(val(&a).parse().unwrap_or_else(|_| die("`-j` needs a number"))),
             "-v" | "--verbose" => o.verbose = true,
@@ -156,10 +159,11 @@ fn main() {
             let built = compile::build(&g, &o).unwrap_or_else(|e| die(&e));
             eprintln!("    Finished `{}` profile in {:.2}s (zustc)", if o.release { "release" } else { "dev" }, t0.elapsed().as_secs_f64());
             // (the targets asked for: `--lib`, `--bins`, `--tests`, `--test x`)
-            // (`--test x` names a target that must exist)
-            for w in only.iter().filter(|w| w.starts_with("(test ")) {
+            // (`--test x` and `--bin x` name targets that must exist)
+            for w in only.iter().filter(|w| w.ends_with(')')) {
                 if !built.tests.iter().any(|t| t.0.ends_with(w.as_str())) {
-                    die(&format!("no test target named `{}`", &w[6..w.len() - 1]));
+                    let (what, name) = w[1..w.len() - 1].split_once(' ').unwrap_or(("test", ""));
+                    die(&format!("no {what} target named `{name}`"));
                 }
             }
             let exes: Vec<_> = built.tests.iter().filter(|t| only.is_empty() || only.iter().any(|w| t.0.contains(w.as_str()))).cloned().collect();

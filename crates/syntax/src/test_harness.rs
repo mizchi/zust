@@ -52,7 +52,8 @@ pub fn collect(src: &str) -> Collected {
     let mut main_at = None;
     // (the modules with a `fn main` of their own, by path, and the calls of `main` with their module's path)
     let mut own_main: Vec<String> = vec![];
-    let mut calls: Vec<(usize, String)> = vec![];
+    // (a call's position, the module whose `main` it names, whether it is a bare `main`)
+    let mut calls: Vec<(usize, String, bool)> = vec![];
     let mut attrs_test = 0usize;
     // (the modules open here: (the brace depth inside it, its name)); depth of braces
     let mut mods: Vec<(i32, String)> = vec![];
@@ -74,10 +75,37 @@ pub fn collect(src: &str) -> Collected {
         } else if sym(k, "#") && sym(k + 1, "[") && tok(k + 2) == "test" && sym(k + 3, "]") {
             attrs_test += 1;
         } else if ident(k) && tok(k) == "main" && sym(k + 1, "(") && !(k >= 1 && (tok(k - 1) == "fn" || sym(k - 1, "."))) {
-            // (a call of a `main`: by its bare name, or by `crate::` / `self::` / `super::`)
-            let by_path = k >= 2 && sym(k - 1, ":") && sym(k - 2, ":");
-            if !by_path || (k >= 3 && matches!(tok(k - 3), "crate" | "self" | "super")) {
-                calls.push((toks[k].1, mods.iter().map(|m| m.1.as_str()).collect::<Vec<_>>().join("::")));
+            // (a call of a `main`: the module its path names, from the module it is in. `crate::`, `self::`,
+            //  `super::` (repeated) are followed; a path through another module is not the root's `main`)
+            let here: Vec<&str> = mods.iter().map(|m| m.1.as_str()).collect();
+            let mut segs: Vec<&str> = vec![];
+            let mut j = k;
+            while j >= 3 && sym(j - 1, ":") && sym(j - 2, ":") && ident(j - 3) {
+                segs.insert(0, tok(j - 3));
+                j -= 3;
+            }
+            let target: Option<Vec<&str>> = if segs.is_empty() {
+                // (a bare `main`: this module's own, else the one a `use super::*` brings: taken as the root's)
+                Some(here.clone())
+            } else {
+                let mut t: Vec<&str> = here.clone();
+                let mut ok = true;
+                for (i, sg) in segs.iter().enumerate() {
+                    match *sg {
+                        "crate" if i == 0 => t.clear(),
+                        "self" if i == 0 => {}
+                        "super" => {
+                            if t.pop().is_none() {
+                                ok = false;
+                            }
+                        }
+                        m => t.push(m),
+                    }
+                }
+                ok.then_some(t)
+            };
+            if let Some(t) = target {
+                calls.push((toks[k].1, t.join("::"), segs.is_empty()));
             }
         } else if ident(k) && tok(k) == "mod" && ident(k + 1) && sym(k + 2, "{") {
             pending_mod = Some(tok(k + 1).trim_start_matches("r#").to_string());
@@ -104,7 +132,8 @@ pub fn collect(src: &str) -> Collected {
     let mut main_refs = vec![];
     if let Some(at) = main_at {
         main_refs.push(at);
-        main_refs.extend(calls.into_iter().filter(|(_, m)| !own_main.contains(m)).map(|c| c.0));
+        // (the calls that name the root's `main`: by a path to the root, or a bare `main` in a module without its own)
+        main_refs.extend(calls.into_iter().filter(|(_, m, bare)| m.is_empty() || (*bare && !own_main.contains(m))).map(|c| c.0));
     }
     let unlisted = attrs_test.saturating_sub(tests.len());
     Collected { tests, main_refs, unlisted }
@@ -394,6 +423,13 @@ mod tests {
         assert_eq!(c.unlisted, 1);
         let out = apply(src);
         assert!(out.contains("fn calls() { m41n(); super::m41n(); crate::m41n(); x.main(); other::main(); }"), "{out}");
+        // (`super::` names the module above: its own `main` is not the root's, and the root's is renamed with the
+        //  calls that reach it)
+        let src = "fn main() {}\nmod a {\n    fn main() {}\n    fn f() { super::main(); self::main(); main(); }\n    mod b { fn g() { super::main(); super::super::main(); } }\n}\n";
+        let out = apply(src);
+        assert!(out.contains("fn f() { super::m41n(); self::main(); main(); }"), "{out}");
+        assert!(out.contains("fn g() { super::main(); super::super::m41n(); }"), "{out}");
+        assert!(out.contains("    fn main() {}"), "{out}");
     }
 
     #[test]

@@ -525,6 +525,16 @@ fn test_runs_like_cargo_test() {
     // (cargo's `--tests`: the unit tests too)
     let (_, _, err) = zurgo(&["test", "--tests", "adds"], &m, &tdir("test-pkg"));
     assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["tests::adds"], "{err}");
+    // (`--bin x`: that bin's unit tests alone)
+    let (ok, _, err) = zurgo(&["test", "--bin", "tp"], &m, &tdir("test-pkg"));
+    assert!(ok, "{err}");
+    assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["greets"], "{err}");
+    let (ok, _, err) = zurgo(&["test", "--bin", "nope"], &m, &tdir("test-pkg"));
+    assert!(!ok && err.contains("no bin target named `nope`"), "{err}");
+    // (`--list --ignored`: the ignored ones alone)
+    let (ok, listed, _) = run(Command::new(ZURGO).args(["test", "--lib", "--manifest-path"]).arg(&m).args(["--", "--list", "--ignored"]).env("CARGO_TARGET_DIR", tdir("test-pkg")));
+    assert!(ok);
+    assert!(listed.lines().all(|l| l.ends_with("(ignored)")) && listed.lines().count() == 3, "{listed}");
     // (a test target that does not exist is an error, not a run of nothing)
     let (ok, _, err) = zurgo(&["test", "--test", "nope"], &m, &tdir("test-pkg"));
     assert!(!ok && err.contains("no test target named `nope`"), "{err}");

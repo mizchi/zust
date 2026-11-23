@@ -220,7 +220,10 @@ pub fn run(exes: &[(String, PathBuf, PathBuf)], o: &RunOpts, times_path: &Path) 
             }
             let ignored = ign.contains(&n);
             if o.list {
-                println!("{label}: {n}{}", if ignored { " (ignored)" } else { "" });
+                // (`--ignored`: the ignored ones alone, as libtest lists them)
+                if !o.ignored || ignored {
+                    println!("{label}: {n}{}", if ignored { " (ignored)" } else { "" });
+                }
                 continue;
             }
             let runs = if o.ignored { ignored } else { !ignored || o.include_ignored };
