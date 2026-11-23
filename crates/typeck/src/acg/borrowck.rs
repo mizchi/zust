@@ -234,6 +234,9 @@ pub struct Bk {
     pub ret_no_capture: bool,
     /// The parameters whose regions are all 'static (`x: &'static u8`, `'a: 'static`): returning them captures nothing
     pub static_params: Vec<u32>,
+    /// The parameters whose type has a region that may not be 'static under its own reference (`s: &Foo<'a>`): a
+    /// reference copied out of their fields (`s.0`) holds it
+    pub inner_params: Vec<u32>,
     /// The locals bound (once, never assigned again) from what holds such a parameter's reference (`let y = x;`):
     /// they hold it too (check fills it)
     pub param_derived: std::cell::RefCell<Vec<u32>>,
@@ -3360,9 +3363,42 @@ impl Cx<'_> {
 
     /// What the value of e holds under the borrows it is (a chain's root local's loans: `parts.first()` holds what parts
     /// holds)
+    /// e is an iterator made by `copied` / `cloned` of an iterator, through adapters that hold it (`v.iter().copied()`,
+    /// `v.iter().cloned().filter(..)`): its items are copies
+    fn bk_copies_items(&self, e: &Expr) -> bool {
+        let mut e = e;
+        for _ in 0..16 {
+            while let Expr::Paren(x) = e {
+                e = x;
+            }
+            let Expr::MethodCall(r, name, ..) = e else { return false };
+            let mut rt = self.peek(r);
+            while let Some(Ty::Ref(_, i)) = rt {
+                rt = Some(*i);
+            }
+            if !self.peek(e).zip(rt).is_some_and(|(t, r)| self.ty_holds(t, r, 0)) {
+                return false;
+            }
+            if matches!(name.as_str(), "copied" | "cloned") {
+                return true;
+            }
+            e = r;
+        }
+        false
+    }
+
     fn bk_held(&self, e: &Expr, out: &mut Vec<Src>) {
         match e {
             Expr::Paren(x) | Expr::MethodCall(x, ..) => self.bk_held(x, out),
+            // (a reference in a parameter's field (`s.0.iter().copied()` with `s: &Foo<'a>`) holds a region of the
+            // parameter's type: for an `impl Trait` that captures none (E0700), the only check that reads it)
+            Expr::Field(..) if self.bk.ret_no_capture => {
+                if let Some((p, _)) = self.bk_place(e) {
+                    if self.bk.inner_params.contains(&p.local) && self.peek(e).is_some_and(|t| has_refs(self.prog, t, 0)) {
+                        out.push(Src::Local(p.local));
+                    }
+                }
+            }
             Expr::Path(..) => {
                 if let Some((p, _)) = self.bk_place(e) {
                     if p.proj.is_empty() && self.bk.locals[p.local as usize].refs {
@@ -3439,12 +3475,17 @@ impl Cx<'_> {
                             v.iter().all(|n| !mentions(body, n))
                         }));
                     if rt.is_some_and(prelude) && !made {
-                        // (`copied` / `cloned` take a reference off: what is under it, not the borrow itself
-                        // (`parts.first().copied()` holds what parts holds, not a loan of parts))
-                        if matches!(name.as_str(), "copied" | "cloned") {
-                            self.bk_held(recv, out);
-                        } else {
+                        // (`copied` / `cloned` of an `Option<&T>` take a reference off: what is under it, not the
+                        // borrow itself (`parts.first().copied()` holds what parts holds, not a loan of parts). Of an
+                        // iterator, the adapter holds the iterator, and so its borrow (`s.0.iter().copied()`); what
+                        // is taken out of it (`.next()`, `.collect()`, through other adapters) is the copies)
+                        let adapter = self.peek(e).zip(rt).is_some_and(|(t, r)| self.ty_holds(t, r, 0));
+                        let copies = matches!(name.as_str(), "copied" | "cloned") || self.bk_copies_items(recv);
+                        if adapter || !copies {
                             self.bk_direct(recv, out);
+                        }
+                        if copies {
+                            self.bk_held(recv, out);
                         }
                     }
                 }

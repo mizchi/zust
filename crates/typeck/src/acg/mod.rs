@@ -1638,6 +1638,14 @@ impl Cx<'_> {
                             self.bk.static_params.push(l);
                         }
                     }
+                    // (a region under the parameter's own reference (`&Foo<'a>`'s 'a; all of a value's), or a mark
+                    // that may stand for one)
+                    let inner = if matches!(pt, Some(Ty::Ref(..))) { s.get(1..).unwrap_or(&[]) } else { &s[..] };
+                    if inner.iter().any(|&c| if c == crate::types::R_ELIDED_ADT { !fits } else { !st(c) }) {
+                        if let Some(&l) = self.bk.params.get(j) {
+                            self.bk.inner_params.push(l);
+                        }
+                    }
                 }
             }
         }

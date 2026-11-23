@@ -78,6 +78,17 @@ pub(crate) fn vec_of(es: &[Expr]) -> Expr {
 impl Cx<'_> {
     /// `recv.m(args)`: レシーバを自動 deref して struct を見つけ、
     /// メソッドの self 型に合わせて自動参照 (`&self` / `&mut self`) かコピー (`self`) で渡す
+    /// A prelude iterator adapter that holds a `Copied` / `Cloned` iterator (`Filter<Copied<Iter<&str>>, F>`): what it
+    /// yields are copies
+    fn copies_items(&self, sid: u32, depth: u32) -> bool {
+        let b = self.prog.base_of(sid);
+        if depth > 8 || self.prog.struct_item.get(b as usize).is_none_or(|&i| i < self.prog.prelude_from) {
+            return false;
+        }
+        matches!(self.prog.structs[b as usize].name.as_str(), "Copied" | "Cloned")
+            || self.prog.structs[sid as usize].args.iter().any(|&a| matches!(a, Ty::Struct(x) if self.copies_items(x, depth + 1)))
+    }
+
     pub(crate) fn method_call(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         // (a call that named its trait: set while this call is resolved, and the outer call's back after)
         let forced = match e {
@@ -106,6 +117,8 @@ impl Cx<'_> {
                     _ => None,
                 },
                 Some((_, "Copied" | "Cloned")) => Some(None),
+                // (an adapter over one (`names.iter().copied().filter(..)`): its items are those copies too)
+                Some((sid, _)) if self.copies_items(sid, 0) => Some(None),
                 _ => None,
             },
             _ => None,

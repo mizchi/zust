@@ -2619,6 +2619,22 @@ fn part15_whole_variable_captures() {
     assert_eq!(check_ed("fn f() {\n    let x: Vec<()> = Vec::new();\n    || {\n        || {\n            x.len()\n        }\n    };\n}\nfn main() {}\n", 2015), vec![]);
 }
 
+/// `copied` / `cloned` of an iterator: the adapter holds the iterator and its borrow (E0700 of
+/// `s.0.iter().copied()` returned as `impl Iterator<Item = u8>`, nll/issue-73159-rpit-static.rs; E0502 of
+/// `v.push(1)` while `v.iter().copied()` lives), and what is taken out of it, also through other adapters
+/// (`.filter(..).collect()`), is the copies, which do not hold it
+#[test]
+fn part15_iterator_copied() {
+    let d = check_ed("struct Foo<'a>(&'a [u8]);\nstruct V(Vec<u8>);\nfn a(x: &[u8]) -> impl Iterator<Item = u8> { x.iter().copied() }\nfn b<'a>(s: &Foo<'a>) -> impl Iterator<Item = u8> { s.0.iter().copied() }\nfn c(s: &V) -> impl Iterator<Item = u8> { s.0.iter().copied() }\nfn d(s: &V) -> impl Iterator<Item = &u8> { s.0.iter() }\nfn e(s: &V) -> impl Iterator<Item = u8> { s.0.iter().map(|x| *x) }\nfn main() {}\n", 2021);
+    let mut lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    lines.dedup();
+    assert!(lines == vec![3, 4, 5, 7] && d.iter().all(|x| x.1.contains("E0700")), "{d:?}");
+    let d = check_ed("fn ok1(mut names: Vec<&str>) -> Vec<&str> {\n    let w: Vec<&str> = names.iter().copied().collect();\n    names.clear();\n    w\n}\nfn ok2(mut names: Vec<&str>) -> usize {\n    let t = names.iter().copied().next().unwrap();\n    names.clear();\n    t.len()\n}\nfn ok3(mut names: Vec<&str>) -> usize {\n    let w: Vec<&str> = names.iter().copied().filter(|s| !s.is_empty()).collect();\n    names.clear();\n    w.len()\n}\nfn ok4(mut names: Vec<&str>) -> usize {\n    let t = names.first().copied();\n    names.clear();\n    t.map_or(0, |s| s.len())\n}\nfn ok5(mut v: Vec<String>) -> usize {\n    let w: Vec<String> = v.iter().cloned().collect();\n    v.clear();\n    w.len()\n}\nfn bad1(mut v: Vec<u8>) -> usize {\n    let it = v.iter().copied();\n    v.push(1);\n    it.count()\n}\nfn bad2(mut v: Vec<u8>) -> usize {\n    let it = v.iter().copied().map(|x| x + 1);\n    v.push(1);\n    it.count()\n}\nfn main() {}\n", 2021);
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert_eq!(lines, vec![28, 33], "{d:?}");
+    assert_eq!(check_ed("struct Foo<'a>(&'a [u8]);\nstruct S { r: &'static [u8], v: Vec<u8> }\nfn a(s: &Foo<'static>) -> impl Iterator<Item = u8> { s.0.iter().copied() }\nfn b(s: &S) -> impl Iterator<Item = u8> { s.r.iter().copied() }\nfn c<'a>(s: &Foo<'a>) -> impl Iterator<Item = u8> + 'a { s.0.iter().copied() }\nfn d(s: &S) -> impl Iterator<Item = u8> { s.v.clone().into_iter() }\nfn e<'a>(s: &Foo<'a>) -> impl Iterator<Item = u8> { s.0.to_vec().into_iter() }\nfn f<'a>(s: &Foo<'a>) -> impl std::fmt::Display { s.0.len() }\nfn g<'a>(s: &Foo<'a>) -> impl std::fmt::Display { s.0[0] }\nfn main() {}\n", 2021), vec![]);
+}
+
 /// From the third review of #69: a closure's call that needs `T: 'static` takes it from `T: 'a` with `'a: 'static`,
 /// and from a supertrait whose `Self` must be 'static (`trait Derived: Base`, `trait Base: 'static`); a T in the type
 /// argument (`needs_static::<Option<T>>()`) needs it too (E0310)
