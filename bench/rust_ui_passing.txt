@@ -551,6 +551,7 @@ check-pass	attributes/issue-40962.rs
 compile-fail	attributes/issue-90873.rs
 check-pass	attributes/key-value-expansion-scope-pass.rs
 compile-fail	attributes/key-value-expansion-scope.rs
+compile-fail	attributes/link-name-on-static.rs
 compile-fail	attributes/main-removed-1.rs
 compile-fail	attributes/malformed-must_use.rs
 compile-fail	attributes/malformed-reprs.rs
@@ -566,8 +567,14 @@ check-pass	attributes/unnamed-field-attributes-dup.rs
 check-pass	attributes/unnamed-field-attributes-vis.rs
 check-pass	attributes/unnamed-field-attributes.rs
 build-pass	attributes/unsafe/cfg-unsafe-attributes.rs
+compile-fail	attributes/unsafe/derive-unsafe-attributes.rs
+compile-fail	attributes/unsafe/double-unsafe-attributes.rs
 compile-fail	attributes/unsafe/extraneous-unsafe-attributes.rs
+compile-fail	attributes/unsafe/proc-unsafe-attributes.rs
 build-pass	attributes/unsafe/unsafe-attributes.rs
+compile-fail	attributes/unsafe/unsafe-nonexistent-attribute.rs
+compile-fail	attributes/unsafe/unsafe-safe-attribute.rs
+compile-fail	attributes/unsafe/unsafe-safe-attribute_diagnostic.rs
 check-pass	attributes/used/used-not-dead-code-lint.rs
 run-pass	auto-traits/auto-is-contextual.rs
 check-pass	auto-traits/auto-trait-projection-recursion.rs
@@ -2720,6 +2727,7 @@ check-pass	feature-gates/issue-43106-gating-of-deprecated.rs
 compile-fail	feature-gates/issue-43106-gating-of-derive-2.rs
 check-pass	feature-gates/issue-43106-gating-of-macro_escape.rs
 compile-fail	feature-gates/issue-43106-gating-of-macro_use.rs
+compile-fail	feature-gates/issue-43106-gating-of-proc_macro_derive.rs
 compile-fail	feature-gates/issue-43106-gating-of-stable.rs
 compile-fail	feature-gates/issue-43106-gating-of-unstable.rs
 check-pass	feature-gates/soft-feature-gate-auto_traits.rs
@@ -5896,6 +5904,7 @@ compile-fail	privacy/useless-pub.rs
 check-pass	privacy/where-pub-type-impls-priv-trait.rs
 check-pass	proc-macro/derive-multiple-with-packed.rs
 check-pass	proc-macro/extern-prelude-extern-crate-proc-macro.rs
+compile-fail	proc-macro/illegal-proc-macro-derive-use.rs
 compile-fail	proc-macro/macro-namespace-reserved-2.rs
 compile-fail	proc-macro/proc-macro-abi.rs
 compile-fail	proc-macro/pub-at-crate-root.rs
@@ -6489,7 +6498,9 @@ check-pass	rust-2024/raw-gen-lt.rs
 check-pass	rust-2024/reserved-guarded-strings-migration.rs
 compile-fail	rust-2024/reserved-guarded-strings.rs
 compile-fail	rust-2024/safe-outside-extern.rs
+compile-fail	rust-2024/unsafe-attributes/in_2024_compatibility.rs
 check-pass	rust-2024/unsafe-attributes/unsafe-attributes-allow.rs
+compile-fail	rust-2024/unsafe-attributes/unsafe-attributes-fix.rs
 compile-fail	rust-2024/unsafe-before_exec-suggestion.rs
 compile-fail	rust-2024/unsafe-env-suggestion.rs
 compile-fail	rust-2024/unsafe-extern-blocks/safe-impl-trait.rs
