@@ -102,4 +102,8 @@ fn main() {
     let c: u64 = 3u8.conv();
     let d: bool = 3u8.conv();
     println!("{a} {b} {c} {d}");
+    let e: bool = Conv::conv(&5u8);
+    let f: u64 = Conv::conv(&5u8);
+    let g: bool = <u8 as Conv<bool>>::conv(&0u8);
+    println!("{e} {f} {g}");
 }
