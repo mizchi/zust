@@ -1948,6 +1948,7 @@ impl Cx<'_> {
         let n = if split.is_empty() { blk.stmts.len() } else { split.len() };
         // (the borrowed temporaries of each statement end with it; the tail expression's, with the enclosing one)
         let bk_mark = self.bk.stmt_temps.len();
+        let mut tail_srcs: Vec<borrowck::Src> = vec![];
         for k in 0..n {
             let (i, st) = if split.is_empty() { (k, &blk.stmts[k]) } else { split[k] };
             // (`let x = S::<&'static u32> { t: &c };` / `S::<&'a u32> { t: &c };`: a `let` of the type the path writes,
@@ -2388,6 +2389,13 @@ impl Cx<'_> {
                     // (a statement's temporaries borrowed by its outermost call, or by an assignment (`x = &f();`: no
                     // `let` extends them): they go away at its end)
                     let ext0 = self.bk.direct.len();
+                    // (edition 2024: a block's tail is a statement of its own for its temporaries, which go away at
+                    // the end of the block (`{ String::new().as_str() }.len()` is E0716). Not the function's body)
+                    if !*semi && last && self.prog.edition >= 2024 && self.bk_on() && self.bk.tail != e as *const Expr as usize {
+                        if let e @ Expr::MethodCall(..) = strip_paren(e) {
+                            borrowck::direct_temps(self.prog, e, &mut self.bk.direct);
+                        }
+                    }
                     if *semi && self.bk_on() {
                         match strip_paren(e) {
                             Expr::Assign(_, v) => borrowck::direct_ref(self.prog, v, &mut self.bk.direct),
@@ -2403,7 +2411,15 @@ impl Cx<'_> {
                         }
                     }
                     let watch = if last && !*semi { self.bk_watch_tail(e) } else { vec![] };
+                    // (edition 2024: what the block's value holds, for its temporaries' end below)
+                    let tail24 = !*semi && last && self.prog.edition >= 2024 && self.bk_on() && !tail;
+                    if tail24 {
+                        self.bk_frame();
+                    }
                     let r = self.expr(e, exp);
+                    if tail24 {
+                        tail_srcs = self.bk_frame_end();
+                    }
                     self.bk.direct.truncate(ext0);
                     if last && !*semi && self.bk.tail == e as *const Expr as usize && r.is_ok() {
                         self.rg_ret(e);
@@ -2466,7 +2482,24 @@ impl Cx<'_> {
         }
         // (edition 2024: the tail expression's temporaries go away at the end of the block, before its locals)
         if self.prog.edition >= 2024 {
+            // (a reference the block's value is, into one of them, is used after: `{ String::new().as_str() }.len()`
+            // is E0716)
+            let held = match (blk.stmts.last(), result.1) {
+                (Some(Stmt::Expr(t, false)), Ty::Ref(..)) if self.bk_on() && self.bk.stmt_temps.len() > bk_mark => {
+                    let dying = self.bk.stmt_temps[bk_mark..].to_vec();
+                    let mut srcs = std::mem::take(&mut tail_srcs);
+                    self.bk_direct_pub(t, &mut srcs);
+                    srcs.retain(|s| matches!(s, borrowck::Src::Loan(ln) if dying.contains(&self.bk.loans[*ln as usize].place.local)));
+                    srcs.sort_unstable_by_key(|s| match s { borrowck::Src::Loan(l) => *l, _ => 0 });
+                    srcs.dedup();
+                    (!srcs.is_empty()).then(|| (srcs, expr_start(t)))
+                }
+                _ => None,
+            };
             self.bk_temps_end(bk_mark);
+            if let Some((srcs, sp)) = held {
+                self.bk_hold_after(srcs, sp);
+            }
         }
         self.pop_scope();
         if diverged && result.1 == Ty::Unit {

@@ -1419,6 +1419,8 @@ impl Bk {
                                 let name = path_str(&self.locals, &BPlace { local: lo.place.local, proj: vec![] });
                                 if lo.place.owned_len() < lo.place.proj.len() {
                                     errs.push(BkError { sp: lo.sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
+                                } else if name == TEMP {
+                                    errs.push(BkError { sp: lo.sp, msg: "temporary value dropped while borrowed: it is freed while still in use (E0716)".to_string() });
                                 } else {
                                     errs.push(BkError { sp: lo.sp, msg: format!("`{name}` does not live long enough (dropped while still borrowed)") });
                                 }
@@ -2448,6 +2450,22 @@ impl Cx<'_> {
     }
 
     /// The statements from `mark` on are over: their temporaries go out of scope
+    pub(crate) fn bk_direct_pub(&self, e: &Expr, out: &mut Vec<Src>) {
+        self.bk_direct(e, out)
+    }
+
+    /// A value that holds srcs is used here (a hidden local holds it and is read): a loan of one of them gone away
+    /// by now is an error
+    pub(crate) fn bk_hold_after(&mut self, srcs: Vec<Src>, sp: Sp) {
+        let id = self.bk.locals.len() as u32;
+        self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: true, mutable: None, decl: super::SP, via_ref: false });
+        self.bk_ev(Ev::Bind(id, true));
+        self.bk_ev(Ev::Def(id, srcs.clone()));
+        self.bk_ev(Ev::Keep(id, srcs));
+        self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Read, sp));
+        self.bk_ev(Ev::Dead(id, super::SP));
+    }
+
     pub(crate) fn bk_temps_end(&mut self, mark: usize) {
         if self.bk.stmt_temps.len() <= mark {
             return;
@@ -3512,7 +3530,11 @@ impl Cx<'_> {
             }
             // (a call of the program's fn: what its result borrows from, by its signature (`fn gimme(x: &T) -> &U`);
             // the prelude writes no lifetimes, so its fns are not followed)
+            // (a call's value made a temporary a method borrows (`String::new().as_str()`): that temporary's loan)
             Expr::Call(f, args) => {
+                if let Some(&ln) = self.bk.loan_of.get(&(e as *const Expr as usize)) {
+                    out.push(Src::Loan(ln));
+                }
                 if let Some(id) = self.fn_item(f) {
                     if self.prog.item_of.get(id as usize).copied().flatten().is_some_and(|i| i < self.prog.prelude_from) {
                         for (i, a) in args.iter().enumerate() {

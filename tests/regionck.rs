@@ -2654,6 +2654,19 @@ fn part15_unused_mut() {
     assert_eq!(check("fn main() {\n    let mut x = 1;\n    let _ = x;\n}\n"), vec![]);
 }
 
+/// Edition 2024: a block's tail temporaries go away at the end of the block (lifetimes/tail-expr-in-nested-expr.rs):
+/// `{ String::new().as_str() }.len()` and `let x = { String::new().as_str() };` used after are E0716. A block whose
+/// value holds no borrow of them is accepted; in 2021 `{ .. }.len()` is accepted (they live to the statement's end)
+#[test]
+fn part15_tail_temporaries_2024() {
+    for src in ["fn main() {\n    let _ = { String::new().as_str() }.len();\n}\n", "fn main() {\n    let x = { String::new().as_str() };\n    let _ = x.len();\n}\n"] {
+        let d = check_ed(src, 2024);
+        assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0716"), "{src}\n{d:?}");
+    }
+    assert_eq!(check_ed("fn main() {\n    let _ = { String::new().as_str() }.len();\n}\n", 2021), vec![]);
+    assert_eq!(check_ed("use std::cell::RefCell;\nfn a(v: &Vec<u8>) -> usize { { v.iter().count() } }\nfn b() -> usize { let n = { vec![1u8].iter().count() }; n }\nfn c() -> usize { let s = { String::from(\"ab\").as_str().len() }; s }\nfn d(c: &RefCell<Vec<u8>>) -> usize { let n = { c.borrow().len() }; n }\nfn e() -> String { let s = { String::from(\"x\").as_str().to_string() }; s }\nfn f(m: &std::collections::HashMap<u8, String>) -> usize { let n = { m.get(&1).map(|s| s.len()).unwrap_or(0) }; n }\nfn g() -> usize { let x = { let s = String::new(); s.len() }; x }\nfn main() { let _ = (a(&vec![]), b(), c(), e(), g()); }\n", 2024), vec![]);
+}
+
 /// From the third review of #69: a closure's call that needs `T: 'static` takes it from `T: 'a` with `'a: 'static`,
 /// and from a supertrait whose `Self` must be 'static (`trait Derived: Base`, `trait Base: 'static`); a T in the type
 /// argument (`needs_static::<Option<T>>()`) needs it too (E0310)
