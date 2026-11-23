@@ -91,6 +91,11 @@ pub struct TraitDb {
     pub prelude: crate::fxhash::FxSet<String>,
 }
 
+/// A bound's text as rustc prints it: `Trait<isize>`, not the tokens' `Trait < isize >`
+pub fn bound_text(b: &str) -> String {
+    b.split_whitespace().collect::<Vec<_>>().join(" ").replace(" <", "<").replace("< ", "<").replace(" >", ">").replace(" ,", ",")
+}
+
 /// std's traits that `implements` judges exactly for scalars and plain structs, and that a type parameter has only by
 /// its bounds
 const STD_EXACT: &[&str] = &["Copy", "Clone", "Debug", "Display", "Default", "PartialEq", "Eq", "PartialOrd", "Ord", "Hash"];

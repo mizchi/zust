@@ -7127,6 +7127,7 @@ run-pass	traits/cache-issue-18209.rs
 compile-fail	traits/cast-as-dyn-trait-wo-assoc-type-issue-21950.rs
 compile-fail	traits/closure-capture-not-send.rs
 compile-fail	traits/closure-rc-not-send.rs
+compile-fail	traits/coercion-generic-bad.rs
 compile-fail	traits/coercion-generic-regions.rs
 run-pass	traits/coercion-generic.rs
 check-pass	traits/composition-trivial.rs

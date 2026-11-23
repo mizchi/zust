@@ -2708,6 +2708,14 @@ impl Cx<'_> {
             if !auto && !self.prog.implements(t, tr) {
                 return err(span, format!("the trait `{tr}` is not implemented for `{}`", self.prog.tn(t)));
             }
+            // (a trait of the program's with its arguments, by the trait solver: `Struct` to `dyn Trait<isize>` needs
+            // `Struct: Trait<isize>`, not some `Trait<&str>`)
+            if !auto && self.prog.tdb.user.contains(tr) && !self.prog.has_param(t) && !self.prog.names_placeholder(t, 0) {
+                let b = tr0.split('+').next().unwrap_or(tr0).trim();
+                if self.prog.tdb.holds(self.prog, t, b) == crate::traits::Ans::No {
+                    return err(span, format!("the trait bound `{}: {}` is not satisfied (E0277)", self.prog.tn(t), crate::traits::bound_text(b)));
+                }
+            }
             // (E0191: every associated type of the trait is bound in the dyn type: `dyn Iterator<Item = u32>`)
             {
                 let full = tr0;
