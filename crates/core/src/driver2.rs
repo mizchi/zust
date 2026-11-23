@@ -1177,37 +1177,44 @@ impl Session2 {
             }
         }
         // (E0449: a visibility where it means nothing: on an impl, an extern block, a trait's items, a trait impl's
-        // items, an enum's variants and their fields)
+        // items, an enum's variants and their fields. An item's names are looked at by their length first: most are
+        // fns with none of these)
         {
-            let marks = crate::prep::hoist_marks(&src);
+            let bytes = src.as_bytes();
+            let is = |&(a, b): &(u32, u32), w: &str| (b - a) as usize == w.len() && &bytes[a as usize..b as usize] == w.as_bytes();
+            let report = |it: &SrcItem, off: usize| {
+                let (line, col) = item_pos(&src, src0, &crate::prep::hoist_marks(&src), it, off);
+                format!("{line}:{col}: visibility qualifiers are not permitted here (E0449)")
+            };
             for it in &items[..user_src] {
                 let text = src.get(it.start..it.end).unwrap_or("");
-                let Some(v) = leading_pub(text) else { continue };
-                let rest = text[v + 3..].trim_start();
-                let bad = match it.kind {
-                    crate::lexer::ItemKind::ImplHeader | crate::lexer::ItemKind::TraitMember(_) => true,
-                    crate::lexer::ItemKind::ImplMember(h) => sums.get(h as usize).is_some_and(|sm| sm.impl_trait.is_some()),
-                    crate::lexer::ItemKind::Normal => rest.starts_with("extern") && extern_block(rest.as_bytes(), 0),
-                    _ => false,
+                let v = match it.kind {
+                    crate::lexer::ItemKind::ImplHeader | crate::lexer::ItemKind::TraitMember(_) => leading_pub(text),
+                    crate::lexer::ItemKind::ImplMember(h) if sums.get(h as usize).is_some_and(|sm| sm.impl_trait.is_some()) => leading_pub(text),
+                    crate::lexer::ItemKind::Normal => {
+                        let head = &it.idents[..it.idents.len().min(8)];
+                        // (an enum: a `pub` among its names after its own)
+                        if let Some(e) = head.iter().position(|x| is(x, "enum")) {
+                            if it.idents[e..].iter().any(|x| is(x, "pub")) {
+                                if let Some(off) = enum_inner_pub(text) {
+                                    return Err(report(it, off));
+                                }
+                            }
+                        }
+                        // (`pub extern "C" { .. }`)
+                        if head.iter().any(|x| is(x, "extern")) {
+                            leading_pub(text).filter(|&v| {
+                                let rest = text[v + 3..].trim_start();
+                                rest.starts_with("extern") && extern_block(rest.as_bytes(), 0)
+                            })
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
                 };
-                if bad {
-                    let (line, col) = item_pos(&src, src0, &marks, it, v);
-                    return Err(format!("{line}:{col}: visibility qualifiers are not permitted here (E0449)"));
-                }
-            }
-            // (an enum's variants and fields: only an enum with a `pub` among its names after its own)
-            for it in &items[..user_src] {
-                if !matches!(it.kind, crate::lexer::ItemKind::Normal) {
-                    continue;
-                }
-                let id = |&(a, b): &(u32, u32)| src.get(a as usize..b as usize).unwrap_or("");
-                let Some(e) = it.idents.iter().take(8).position(|x| id(x) == "enum") else { continue };
-                if !it.idents[e..].iter().any(|x| id(x) == "pub") {
-                    continue;
-                }
-                if let Some(off) = enum_inner_pub(&src[it.start..it.end]) {
-                    let (line, col) = item_pos(&src, src0, &marks, it, off);
-                    return Err(format!("{line}:{col}: visibility qualifiers are not permitted here (E0449)"));
+                if let Some(v) = v {
+                    return Err(report(it, v));
                 }
             }
         }
@@ -1859,6 +1866,16 @@ fn relocate(e: String, it: &SrcItem) -> String {
 /// `fn foo() { let y = 5; fn bar() -> u32 { y } }`. A name the program also has an item of is that item
 fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
     use crate::parse::Expr;
+    // (hoisted items come last, each piece's first line starting with a mark: none when the last item's isn't)
+    let last = items.last()?;
+    let head = match last.kind {
+        crate::lexer::ItemKind::ImplMember(h) | crate::lexer::ItemKind::TraitMember(h) => items.get(h as usize)?,
+        _ => last,
+    };
+    let line_start = src[..head.start].rfind('\n').map_or(0, |n| n + 1);
+    if !src[line_start..].starts_with(crate::prep::HOIST_MARK) && !src[head.start..].starts_with(crate::prep::HOIST_MARK) {
+        return None;
+    }
     let marks = crate::prep::hoist_marks(src);
     if marks.is_empty() {
         return None;
