@@ -1051,10 +1051,13 @@ pub fn is_promotable(cx: &Cx, e: &Expr) -> bool {
         Expr::Struct(_, fs, rest) => rest.is_none() && fs.iter().all(|f| is_promotable(cx, &f.1)),
         Expr::Tuple(t) => t.iter().all(|x| is_promotable(cx, x)),
         Expr::Array(a) => a.iter().all(|x| is_promotable(cx, x)),
+        // (a tuple struct's constructor, not a fn of the same name (`fn AddFlags(..) -> AddFlags` with a braced
+        // `struct AddFlags`), which is called when it runs, as the call's lowering decides)
         Expr::Call(f, args) => {
             matches!(&**f, Expr::Path(None, p)
                 if cx.prog.variant_by_p(&PPath::of(p), cx.self_sid).is_some()
-                    || cx.prog.struct_by_p(&PPath::of(p), cx.self_sid).is_some())
+                    || (cx.prog.struct_by_p(&PPath::of(p), cx.self_sid).is_some()
+                        && cx.prog.fn_by_p(&PPath::of(p), cx.self_sid).is_none()))
                 && args.iter().all(|x| is_promotable(cx, x))
         }
         Expr::Path(_, p) => {
@@ -1971,7 +1974,7 @@ impl Cx<'_> {
                     // (`let &Foo(ref x) = &f();`: the temporary lives as long as the block)
                     let ext1 = self.bk.extended.len();
                     if self.bk_on() {
-                        borrowck::direct_ref(init, &mut self.bk.extended);
+                        borrowck::direct_ref(self.prog, init, &mut self.bk.extended);
                     }
                     let sc = self.bk_scrutinee(init, ann, &[pat]);
                     self.bk.extended.truncate(ext1);
@@ -2253,9 +2256,9 @@ impl Cx<'_> {
                     let ext0 = self.bk.direct.len();
                     let ext1 = self.bk.extended.len();
                     if self.bk_on() {
-                        borrowck::direct_temps(init, &mut self.bk.direct);
+                        borrowck::direct_temps(self.prog, init, &mut self.bk.direct);
                         // (`let x = &f();`: the temporary lives as long as x's block)
-                        borrowck::direct_ref(init, &mut self.bk.extended);
+                        borrowck::direct_ref(self.prog, init, &mut self.bk.extended);
                     }
                     // (a function the gate left out, with `let x: &'static T = ..`: from here on, a borrow of what it
                     // owns must not have to be 'static. What came before has no trees and adds no constraint)
@@ -2375,10 +2378,10 @@ impl Cx<'_> {
                     let ext0 = self.bk.direct.len();
                     if *semi && self.bk_on() {
                         match strip_paren(e) {
-                            Expr::Assign(_, v) => borrowck::direct_ref(v, &mut self.bk.direct),
+                            Expr::Assign(_, v) => borrowck::direct_ref(self.prog, v, &mut self.bk.direct),
                             // (a method of a local that may hold references: `v.push(&f());`)
                             e @ Expr::MethodCall(r, ..) => {
-                                borrowck::direct_temps(e, &mut self.bk.direct);
+                                borrowck::direct_temps(self.prog, e, &mut self.bk.direct);
                                 let holds = || matches!(strip_paren(r), Expr::Path(None, p) if p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_some_and(|(_, t)| borrowck::has_refs(self.prog, t, 0)));
                                 if self.bk.direct.len() > ext0 && !holds() {
                                     self.bk.direct.truncate(ext0);

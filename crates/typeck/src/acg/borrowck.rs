@@ -296,7 +296,7 @@ pub struct Bk {
 /// (`let x = defer(&vec![..]);`). What a call returns borrows from those exactly as its signature says; other
 /// temporaries are left alone (the loans that flow into a local are approximated, and a temporary whose lifetime the
 /// `let` extends (`let x = &f();`, `S { r: &f() }`) lives as long as the block)
-pub fn direct_temps(e: &Expr, out: &mut Vec<usize>) {
+pub fn direct_temps(prog: &Program, e: &Expr, out: &mut Vec<usize>) {
     fn strip(mut e: &Expr) -> &Expr {
         while let Expr::Paren(p) = e {
             e = p;
@@ -307,14 +307,14 @@ pub fn direct_temps(e: &Expr, out: &mut Vec<usize>) {
         // (`let x: &str = { mk().as_str() };`: the block's value is its tail's, and so are its temporaries)
         Expr::Block(_, _, b) => {
             if let Some(crate::parse::Stmt::Expr(t, false)) = b.stmts.last() {
-                direct_temps(t, out);
+                direct_temps(prog, t, out);
             }
             return;
         }
         Expr::Call(_, a) => a,
         Expr::MethodCall(r, _, _, a, _) => {
             // (the receiver made by a call (`mk(1).get()`): borrowed by a `&self` method, it is a temporary too)
-            if made_temp(r) {
+            if made_temp(prog, r) {
                 out.push(&**r as *const Expr as usize);
             }
             a
@@ -322,29 +322,29 @@ pub fn direct_temps(e: &Expr, out: &mut Vec<usize>) {
         _ => return,
     };
     for a in args {
-        direct_arg(a, out);
+        direct_arg(prog, a, out);
     }
 }
 
 /// direct_ref of an argument, also of a block's tail: `gimme({ let v = 22; &(v,) })` passes what the tail borrows,
 /// which is not extended (it is not the `let`'s own value). (Not for the `let`'s value: `let s = { ..; &(v,) };`
 /// extends it to the `let`'s block, not the inner one it is made in)
-fn direct_arg(a: &Expr, out: &mut Vec<usize>) {
+fn direct_arg(prog: &Program, a: &Expr, out: &mut Vec<usize>) {
     let mut e = a;
     while let Expr::Paren(p) = e {
         e = p;
     }
     if let Expr::Block(_, _, b) = e {
         if let Some(crate::parse::Stmt::Expr(t, false)) = b.stmts.last() {
-            direct_arg(t, out);
+            direct_arg(prog, t, out);
         }
         return;
     }
-    direct_ref(a, out);
+    direct_ref(prog, a, out);
 }
 
 /// A value a call makes (not a place, not a constant rustc would promote): `f()`, `x.m()`, `vec![..]`
-fn made_temp(x: &Expr) -> bool {
+fn made_temp(prog: &Program, x: &Expr) -> bool {
     let mut x = x;
     while let Expr::Paren(p) = x {
         x = p;
@@ -355,18 +355,19 @@ fn made_temp(x: &Expr) -> bool {
         // constants, as a tuple literal is)
         Expr::Call(f, args) => match &**f {
             Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')) => true,
-            Expr::Path(..) => args.iter().any(runtime_value),
+            // (`AddFlags(1)` of a fn named so, beside a braced `struct AddFlags`: a call, as the lowering takes it)
+            Expr::Path(_, p) => args.iter().any(|a| runtime_value(prog, a)) || prog.fn_by_p(&crate::program::PPath::of(p), None).is_some(),
             _ => false,
         },
         Expr::Macro(p, ..) => p.segs.last().is_some_and(|s| s.name == "vec" || s.name == "format"),
         // (a tuple / array / struct literal of a value only known when it runs (`(v,)` of a local v): not promoted to a
         // static as a constant one is (`&(1, 2)`), so a temporary)
-        Expr::Tuple(xs) | Expr::Array(xs) => !xs.is_empty() && xs.iter().any(runtime_value),
-        Expr::Struct(_, fs, None) => fs.iter().any(|f| runtime_value(&f.1)),
+        Expr::Tuple(xs) | Expr::Array(xs) => !xs.is_empty() && xs.iter().any(|x| runtime_value(prog, x)),
+        Expr::Struct(_, fs, None) => fs.iter().any(|f| runtime_value(prog, &f.1)),
         // (`S { a: 3, ..s }`: the base's other fields are read too)
-        Expr::Struct(_, fs, Some(b)) => runtime_value(b) || fs.iter().any(|f| runtime_value(&f.1)),
+        Expr::Struct(_, fs, Some(b)) => runtime_value(prog, b) || fs.iter().any(|f| runtime_value(prog, &f.1)),
         // (`&{ let v = 4; (v,) }`: a block's value is a temporary, moved or copied out of what its tail names)
-        Expr::Block(None, _, b) => block_tail(b).is_some_and(runtime_value),
+        Expr::Block(None, _, b) => block_tail(b).is_some_and(|t| runtime_value(prog, t)),
         _ => false,
     }
 }
@@ -380,18 +381,18 @@ fn block_tail(b: &crate::parse::Block) -> Option<&Expr> {
 }
 
 /// e's value is only known when it runs: it reads a local (a lowercase name), calls something or makes a temporary
-fn runtime_value(e: &Expr) -> bool {
+fn runtime_value(prog: &Program, e: &Expr) -> bool {
     match e {
-        Expr::Paren(x) | Expr::Field(x, _, _) | Expr::Cast(x, _) | Expr::Unary(_, x, _) | Expr::Ref(_, x) => runtime_value(x),
+        Expr::Paren(x) | Expr::Field(x, _, _) | Expr::Cast(x, _) | Expr::Unary(_, x, _) | Expr::Ref(_, x) => runtime_value(prog, x),
         Expr::Path(None, p) => p.segs.len() == 1 && p.segs[0].name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && !matches!(p.segs[0].name.as_str(), "true" | "false"),
         Expr::Call(..) | Expr::MethodCall(..) | Expr::Index(..) | Expr::Macro(..) => true,
         // (a block, an `if` or a `match` is the value it ends with: `({ 1 },)` and `(if true { 1 } else { 2 },)` are
         // promoted as rustc does; a runtime condition or scrutinee makes it a temporary)
-        Expr::Block(_, _, b) => block_tail(b).is_some_and(runtime_value),
-        Expr::If(c, t, e) => runtime_value(c) || block_tail(t).is_some_and(runtime_value) || e.as_deref().is_some_and(runtime_value),
-        Expr::Match(x, arms) => runtime_value(x) || arms.iter().any(|a| runtime_value(&a.body) || a.guard.as_ref().is_some_and(runtime_value)),
-        Expr::Binary(_, a, b, _) => runtime_value(a) || runtime_value(b),
-        _ => made_temp(e),
+        Expr::Block(_, _, b) => block_tail(b).is_some_and(|t| runtime_value(prog, t)),
+        Expr::If(c, t, e) => runtime_value(prog, c) || block_tail(t).is_some_and(|t| runtime_value(prog, t)) || e.as_deref().is_some_and(|e| runtime_value(prog, e)),
+        Expr::Match(x, arms) => runtime_value(prog, x) || arms.iter().any(|a| runtime_value(prog, &a.body) || a.guard.as_ref().is_some_and(|g| runtime_value(prog, g))),
+        Expr::Binary(_, a, b, _) => runtime_value(prog, a) || runtime_value(prog, b),
+        _ => made_temp(prog, e),
     }
 }
 
@@ -422,7 +423,7 @@ pub(crate) fn mentions(e: &Expr, n: &str) -> bool {
 
 /// `&e` with e a temporary that is never promoted to a static: the result of a call of a fn (not a struct's or
 /// variant's constructor), of a method, of `vec!` / `format!` (its addresses, for direct_temps)
-pub fn direct_ref(a: &Expr, out: &mut Vec<usize>) {
+pub fn direct_ref(prog: &Program, a: &Expr, out: &mut Vec<usize>) {
     fn strip(mut e: &Expr) -> &Expr {
         while let Expr::Paren(p) = e {
             e = p;
@@ -430,13 +431,13 @@ pub fn direct_ref(a: &Expr, out: &mut Vec<usize>) {
         e
     }
     if let Expr::Ref(_, x) = strip(a) {
-        if made_temp(x) {
+        if made_temp(prog, x) {
             out.push(&**x as *const Expr as usize);
             out.push(strip(x) as *const Expr as usize);
         }
         // (`&*Box::new(1)`: a borrow of what a temporary owns)
         if let Expr::Unary(op, y, _) = strip(x) {
-            if op == "*" && made_temp(y) {
+            if op == "*" && made_temp(prog, y) {
                 out.push(&**x as *const Expr as usize);
             }
         }

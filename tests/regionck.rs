@@ -2558,6 +2558,49 @@ fn part15_undeclared_in_where_types() {
     assert_eq!(check("use std::ops::Add;\ntrait Numoid<'a>: Sized\nwhere\n    &'a Self: Add<Self>,\n{\n}\nfn f<'a, T>(x: &'a T) -> usize\nwhere\n    &'a T: IntoIterator,\n    Vec<&'a T>: Clone,\n{\n    let _ = x;\n    1\n}\nstruct W<'a, T>(&'a T)\nwhere\n    &'a T: Clone;\nfn main() {\n    println!(\"{}\", f(&vec![1u8]));\n}\n"), vec![]);
 }
 
+/// A slice's pattern elements are places, counted from the pattern's ends as rustc's MIR does
+/// (borrowck/borrowck-slice-pattern-element-loan-slice.rs): the b-th from the start and the e-th from the end may be
+/// one element when b + e reaches the least length both patterns need; a rest `ref mut t @ ..` is `&mut [T]` and holds
+/// the elements it may be
+#[test]
+fn part15_slice_pattern_elements() {
+    let conflict = |pats: (&str, &str)| {
+        let src = format!("fn nop(_s: &[&i32]) {{}}\nfn f(s: &mut [i32]) {{\n    if let {} = *s {{\n        if let {} = *s {{\n            nop(&[a, b]);\n        }}\n    }}\n}}\nfn main() {{}}\n", pats.0, pats.1);
+        let d = check(&src);
+        assert!(d.len() <= 1 && d.iter().all(|x| x.0 == 4 && x.1.contains("cannot borrow `s[..]` as mutable")), "{src}\n{d:?}");
+        !d.is_empty()
+    };
+    // (the same index from one end; from both ends within the least length)
+    assert!(conflict(("[_, ref a, ..]", "[_, ref mut b, ..]")));
+    assert!(conflict(("[.., ref a, _]", "[.., ref mut b, _]")));
+    assert!(conflict(("[.., ref a, _, _, _]", "[_, ref mut b, ..]")));
+    // (apart: other indexes from one end, and from both ends where the least length keeps them apart: of 3 or more
+    // elements, the second from the end is not the first; of 4, the fourth from the end may be)
+    assert!(!conflict(("[ref a, ..]", "[_, ref mut b, ..]")));
+    assert!(!conflict(("[.., ref a]", "[.., ref mut b, _]")));
+    assert!(conflict(("[ref a, ..]", "[.., ref mut b, _, _, _]")));
+    assert!(!conflict(("[ref a, _, _, ..]", "[.., ref mut b, _]")));
+    // (rests: `[_, ref mut t @ ..]` holds the second from the start, not the first; `[ref mut t @ .., _]` not the last)
+    let rest = |a: &str, b: &str| check(&format!("fn f(s: &mut [i32]) {{\n    if let {a} = *s {{\n        if let {b} = *s {{\n            t[0] = *x;\n        }}\n    }}\n}}\nfn main() {{}}\n"));
+    assert!(rest("[_, ref x, ..]", "[_, ref mut t @ ..]").iter().any(|d| d.0 == 3));
+    assert_eq!(rest("[ref x, ..]", "[_, ref mut t @ ..]"), vec![]);
+    assert!(rest("[.., ref x, _]", "[ref mut t @ .., _]").iter().any(|d| d.0 == 3));
+    assert_eq!(rest("[.., ref x]", "[ref mut t @ .., _]"), vec![]);
+    let d = check("fn f(s: &mut [i32]) {\n    if let [_, _, ref x @ ..] = *s {\n        if let [ref mut t @ .., _] = *s {\n            t[0] = x[0];\n        }\n    }\n}\nfn main() {}\n");
+    assert!(d.iter().any(|d| d.0 == 3), "{d:?}");
+    // (`ref mut t @ ..` of an array is `&mut [T]`)
+    assert_eq!(check("fn main() {\n    let mut a = [1, 2, 3];\n    if let [ref mut t @ .., _] = a {\n        t[0] = 5;\n    }\n    println!(\"{}\", a[0]);\n}\n"), vec![]);
+}
+
+/// A fn named like a braced struct (`fn AddFlags(..) -> AddFlags`): its call makes a temporary, not a constructor's
+/// value promoted to a static (borrowck/rvalue-borrow-scope-error.rs, E0716)
+#[test]
+fn part15_fn_named_like_a_struct() {
+    let d = check("struct AddFlags {\n    bits: u64,\n}\n#[allow(non_snake_case)]\nfn AddFlags(bits: u64) -> AddFlags {\n    AddFlags { bits }\n}\nfn arg(x: &AddFlags) -> &AddFlags {\n    x\n}\nfn main() {\n    let x1 = arg(&AddFlags(1));\n    let y: &'static AddFlags = &AddFlags(2);\n    (x1, y);\n}\n");
+    assert!(d.iter().any(|x| x.0 == 12 && x.1.contains("E0716")) && d.iter().all(|x| x.0 == 12 || x.0 == 13), "{d:?}");
+    assert_eq!(check("struct W(u8);\nfn arg(x: &W) -> &W {\n    x\n}\nfn main() {\n    let x1 = arg(&W(1));\n    let y: &'static W = &W(2);\n    println!(\"{} {}\", x1.0, y.0);\n}\n"), vec![]);
+}
+
 /// From the third review of #69: a closure's call that needs `T: 'static` takes it from `T: 'a` with `'a: 'static`,
 /// and from a supertrait whose `Self` must be 'static (`trait Derived: Base`, `trait Base: 'static`); a T in the type
 /// argument (`needs_static::<Option<T>>()`) needs it too (E0310)
