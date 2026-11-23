@@ -378,11 +378,12 @@ fn kind(e: &Expr) -> &'static str {
     }
 }
 
-/// t is a closure or holds one (in a struct's type arguments, a box, a reference)
+/// t is a closure that captures what holds regions, or holds one (in a struct's type arguments, a box, a reference)
 fn holds_closure(prog: &Program, t: Ty, depth: u32) -> bool {
     depth < 8
         && match t {
-            Ty::Struct(sid) => is_closure(prog, sid) || prog.structs[sid as usize].args.iter().any(|&a| holds_closure(prog, a, depth + 1)),
+            Ty::Struct(sid) if is_closure(prog, sid) => captures(prog, sid).is_none_or(|(ts, moved)| ts.iter().enumerate().any(|(i, &c)| !moved.get(i).copied().unwrap_or(false) || count(prog, c, 0) != Some(0))),
+            Ty::Struct(sid) => prog.structs[sid as usize].args.iter().any(|&a| holds_closure(prog, a, depth + 1)),
             Ty::Ref(_, i) | Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Ptr(_, i) => holds_closure(prog, *i, depth + 1),
             _ => false,
         }

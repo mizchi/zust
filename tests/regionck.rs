@@ -2509,3 +2509,15 @@ fn part14_static_opaque_result() {
     assert!(d.len() == 3 && d[0].0 == 4 && d[0].1.contains("E0310") && d[1].0 == 7 && d[2].0 == 10 && d[2].1.contains("lifetime may not live long enough"), "{d:?}");
     assert_eq!(check("use std::fmt::Display;\ntrait Any {}\nimpl<T> Any for T {}\nfn f() -> impl Fn() + 'static {\n    || {}\n}\nfn g(x: u8) -> impl Iterator<Item = u8> + 'static {\n    std::iter::once(x)\n}\nfn h<T: 'static>(x: T) -> impl Any + 'static {\n    x\n}\nfn k(s: &str) -> impl Display + 'static {\n    s.to_string()\n}\nfn m<'a>(x: &'a u8) -> impl Fn() -> u8 + 'static {\n    let v: u8 = *x;\n    move || v\n}\nfn n(v: &[u8]) -> impl Iterator<Item = u8> + 'static {\n    v.to_vec().into_iter()\n}\nstruct W;\nimpl W {\n    fn it(&self) -> impl Display + 'static {\n        5\n    }\n}\nfn main() {\n    f()();\n    let _ = g(1).count();\n    let _ = h(1u8);\n    println!(\"{} {} {} {}\", k(\"a\"), m(&3)(), n(&[1]).count(), W.it());\n}\n"), vec![]);
 }
+
+/// Before edition 2024, an `impl Trait` result whose bounds name no lifetime captures none: what it returns may not
+/// borrow through a parameter's reference, nor be one (E0700; impl-trait/precise-capturing/forgot-to-capture-lifetime.rs).
+/// What is copied or owned, and a `+ '_` or `Item = &'a u8` that names the lifetime, are fine
+#[test]
+fn part14_rpit_captures_no_lifetime() {
+    let d = check("use std::fmt::Display;\nfn s(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn t(x: &u8) -> impl Display {\n    x\n}\nfn main() {}\n");
+    assert!(d.len() == 2 && d[0].0 == 3 && d[1].0 == 6 && d[0].1.contains("E0700"), "{d:?}");
+    assert_eq!(check("use std::fmt::Display;\nfn a(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.to_vec().into_iter()\n}\nfn b(x: &str) -> impl Display {\n    x.to_string()\n}\nfn c(x: &u8) -> impl Display {\n    *x\n}\nfn d(x: &[u8]) -> impl Iterator<Item = u8> + '_ {\n    x.iter().copied()\n}\nfn e<'a>(x: &'a [u8]) -> impl Iterator<Item = &'a u8> {\n    x.iter()\n}\nfn f(x: &[u8]) -> impl Fn() -> usize {\n    let n: usize = x.len();\n    move || n\n}\nfn main() {\n    println!(\"{} {} {} {} {} {}\", a(&[1]).count(), b(\"x\"), c(&1), d(&[2]).count(), e(&[3]).count(), f(&[4])());\n}\n"), vec![]);
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2024, ..Options2::default() });
+    assert!(s.check("use std::fmt::Display;\nfn s(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn t(x: &u8) -> impl Display {\n    x\n}\nfn main() {}\n").is_empty());
+}

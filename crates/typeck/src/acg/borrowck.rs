@@ -229,6 +229,9 @@ pub struct Bk {
     pub line_base: u32,
     /// The locals that are parameters
     pub params: Vec<u32>,
+    /// The result is an `impl Trait` that captures no lifetime (before edition 2024, its bounds name none, not generic):
+    /// what it returns must not borrow through a parameter's reference (E0700)
+    pub ret_no_capture: bool,
     /// Locals that own a value whose type implements `Drop` (a user's), and the place of that value in the local,
     /// through boxes and fields (`Box<Scribble>`: `*`; `Wrapper(Scribble)`: `.0`): its `drop` may use what a `&mut`
     /// field points to, so a borrow through it must not outlive the local (E0713)
@@ -1388,6 +1391,18 @@ impl Bk {
                                     }
                                 }
                                 k += 1;
+                            }
+                            // (an `impl Trait` that captures no lifetime: a borrow through a parameter's reference, or the
+                            // reference itself, is in its hidden type, which may not hold it)
+                            if self.ret_no_capture {
+                                let through_param = ls.iter().any(|&ln| {
+                                    let lp = &self.loans[ln as usize].place;
+                                    self.params.contains(&lp.local) && lp.owned_len() < lp.proj.len()
+                                });
+                                let param_ref = srcs.iter().any(|s| matches!(s, Src::Local(l) if self.params.contains(l) && self.locals.get(*l as usize).is_some_and(|x| x.refs)));
+                                if through_param || param_ref {
+                                    errs.push(BkError { sp: *sp, msg: "hidden type for `impl Trait` captures lifetime that does not appear in bounds (E0700)".to_string() });
+                                }
                             }
                             if let Some(&ln) = through.iter().find(|&&ln| self.drop_field_borrow(&self.loans[ln as usize], st)) {
                                 errs.push(BkError { sp: self.loans[ln as usize].sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
