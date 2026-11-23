@@ -175,6 +175,7 @@ crate::enc_struct!(ClosureSyn {
     moved,
     ret_ann,
     n_parent,
+    fake_reads,
 });
 
 

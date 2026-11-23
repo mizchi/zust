@@ -496,6 +496,8 @@ pub struct ClosureSyn {
     pub ret_ann: Option<TySyn>,
     /// 親の型パラメータの数
     pub n_parent: u64,
+    /// The variables the body reads only by `let _ = place;` (ast_closure::fake_reads): not captured
+    pub fake_reads: Vec<String>,
 }
 
 /// impl / trait のメンバの所有者

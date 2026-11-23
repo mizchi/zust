@@ -63,8 +63,9 @@ impl Cx<'_> {
         Ok(())
     }
 
-    /// lifetime_arity of the structs and enums a signature's type t names (not in fn pointer, `dyn` and `impl` types,
-    /// nor a type parameter tps names)
+    /// lifetime_arity of the program's own structs and enums a signature's type t names (not in fn pointer, `dyn` and
+    /// `impl` types, nor a type parameter tps names). Not the prelude's, some of which leave out lifetimes std's have
+    /// (`Cow<'a, B>`)
     pub(crate) fn sig_lt_arity(&self, t: &crate::parse::Ty, tps: &[&str], depth: u32) -> R<()> {
         use crate::parse::Ty as PTy;
         if depth > 16 {
@@ -77,8 +78,11 @@ impl Cx<'_> {
                 if let [s] = p.segs.as_slice() {
                     if s.fn_args.is_none() && !tps.contains(&s.name.as_str()) {
                         if let Some(&sid) = self.prog.struct_index.get(&s.name) {
-                            let what = if self.prog.structs[sid as usize].is_enum { "enum" } else { "struct" };
-                            self.lifetime_arity(sid, p, what)?;
+                            let b = self.prog.base_of(sid);
+                            if self.prog.struct_item.get(b as usize).is_some_and(|&i| i < self.prog.prelude_from) {
+                                let what = if self.prog.structs[sid as usize].is_enum { "enum" } else { "struct" };
+                                self.lifetime_arity(sid, p, what)?;
+                            }
                         }
                     }
                 }

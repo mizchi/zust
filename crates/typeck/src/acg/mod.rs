@@ -450,6 +450,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         lets,
         addr_taken: taken,
         caps,
+        fake_reads: prog.closures.get(&body_id).map(|cd| cd.fake_reads.clone()).unwrap_or_default(),
         root,
         generic_args: generic_args_of(prog, &f.sig.params, root),
         closure_ix,
@@ -940,6 +941,8 @@ pub struct Cx<'p> {
     pub vtables: Vec<Vec<u32>>,
     pub cmp_depth: u32,
     pub caps: Vec<(String, Ty, bool, u32)>,
+    /// A closure's body: the variables it reads only by `let _ = place;`, which it does not capture
+    pub fake_reads: Vec<String>,
     pub root: u32,
     /// The fn's parameters declared as one of its type parameters (`x: T` / `x: &T`): (name, type parameter)
     pub generic_args: Vec<(String, String)>,
@@ -1974,6 +1977,10 @@ impl Cx<'_> {
                         }
                         continue;
                     };
+                    // (`let _ = s;` in a closure that does not capture s for it: it reads nothing)
+                    if ann_ty.is_none() && crate::ast_closure::wild_root(init).is_some_and(|n| self.fake_reads.iter().any(|x| x == n) && self.lookup(n).is_none()) {
+                        continue;
+                    }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
                     if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(crate::regions::mentions_static) {
                         self.rg_late_on();

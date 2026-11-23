@@ -431,6 +431,8 @@ pub struct ClosureDef {
     pub n_parent: usize,
     /// 戻り値の注釈 (親の型パラメータを Param で含みうる)
     pub ret_ann: Option<Ty>,
+    /// ClosureSyn::fake_reads
+    pub fake_reads: Vec<String>,
 }
 
 /// 単相化したインスタンス (ジェネリック関数 base に型引数 args を入れたもの)
@@ -1433,6 +1435,7 @@ impl Program {
                         moved: c.moved.clone(),
                         n_parent: c.n_parent as usize,
                         ret_ann,
+                        fake_reads: c.fake_reads.clone(),
                     },
                 );
                 p.closure_by.insert((first, k as u32), fid);

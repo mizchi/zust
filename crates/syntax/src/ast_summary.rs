@@ -1645,6 +1645,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
             moved: moved,
             ret_ann: ret_ann,
             n_parent: n_parent,
+            fake_reads: ast_closure::fake_reads(c).into_iter().filter(|n| bound.contains(n)).collect(),
         });
     }
     // `-> impl Fn(A) -> B { move |x| .. }`: 型は末尾のクロージャの struct

@@ -2327,3 +2327,17 @@ fn part13_header_and_arity() {
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("struct takes 2 lifetime arguments but 3 lifetime arguments were supplied (E0107)"), "{d:?}");
     assert_eq!(check("struct Foo<'c, 'd>(&'c (), &'d ());\nfn f<'a>(x: &Foo<'a, 'a>) -> Foo<'a, 'a> {\n    Foo(x.0, x.1)\n}\nfn g(x: Foo) -> u8 {\n    let _ = x;\n    1\n}\nfn main() {\n    let v = ();\n    let a = Foo(&v, &v);\n    let _ = f(&a);\n    let _ = g(Foo(&v, &v));\n}\n"), vec![]);
 }
+
+/// `let _ = s;` in a closure reads nothing of s, so the closure does not capture s for it (edition 2021): a `move`
+/// closure leaves s usable after it, and a `Box<dyn Fn()>` of it is `'static`. A typo there is still E0425, and a
+/// `let _x = r;` captures r
+#[test]
+fn part13_wild_let_in_closure() {
+    assert_eq!(check("fn main() {\n    let s = String::from(\"a\");\n    let c = move || {\n        let _ = s;\n    };\n    c();\n    println!(\"{}\", s);\n}\n"), vec![]);
+    assert_eq!(check("fn keep(_b: Box<dyn Fn()>) {}\nfn main() {\n    let y = 3;\n    let r = &y;\n    keep(Box::new(move || {\n        let _ = r;\n    }));\n}\n"), vec![]);
+    assert_eq!(check("struct P {\n    a: String,\n    b: u8,\n}\nfn main() {\n    let p = P { a: String::from(\"x\"), b: 1 };\n    let c = move || {\n        let _ = p.a;\n        p.b\n    };\n    println!(\"{} {}\", c(), p.a);\n}\n"), vec![]);
+    let d = check("fn main() {\n    let c = || {\n        let _ = typo;\n    };\n    c();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("cannot find value `typo`"), "{d:?}");
+    let d = check("fn keep(_b: Box<dyn Fn()>) {}\nfn main() {\n    let y = 3;\n    let r = &y;\n    keep(Box::new(move || {\n        let _x = r;\n    }));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`y` does not live long enough"), "{d:?}");
+}
