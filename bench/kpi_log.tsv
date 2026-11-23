@@ -299,3 +299,4 @@ date	commit	change	noop_M	edit_M	check_M	cache_KiB	lsp_G	run	check	build	cfail	t
 2026-11-23	a1a5b6e+	use_names: from the lexer's identifiers, in zustc check only	0.695	553.554	3773.753	1902.8	-	-	-	-	-	1199.757	64.302	10.545	324.800	729.345	270.838
 2026-11-23	fe44ea0+	dead_code below the item level (fields, variants, inherent members, type aliases)	0.699	555.066	3776.531	1902.8	-	1831	1512	102	4435	1201.119	64.503	10.510	329.170	734.992	276.413
 2026-11-23	c2fcc60+	E0308 at the branch rustc points at; swallowed-block parse errors; unreachable_code / unused_variables in expressions	0.699	554.844	3778.172	1902.8	-	1831	1512	102	4488	1201.582	64.460	10.511	329.515	735.332	276.464
+2026-11-23	8d6a388	E0658 for more gated attributes and unstable ABIs; dead.rs patterns from the parsed program	0.699	555.310	3778.552	1902.8	-	-	-	-	-	1201.724	64.662	10.511	329.611	735.407	276.567
