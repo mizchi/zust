@@ -236,10 +236,12 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -
                             if sym(j, b'}') && is_block(o) {
                                 return false;
                             }
-                            (ps, e) = group(o);
-                            if e == none {
+                            let (gp, ge) = group(o);
+                            if ge == none {
                                 return true;
                             }
+                            ps = gp;
+                            e = ge;
                             continue 'unit;
                         }
                         b')' | b']' | b'}' => d = (d - 1).max(0),
@@ -254,10 +256,12 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -
                             if sym(o, b'{') && is_block(o) {
                                 return false;
                             }
-                            (ps, e) = group(o);
-                            if e == none {
+                            let (gp, ge) = group(o);
+                            if ge == none {
                                 return true;
                             }
+                            ps = gp;
+                            e = ge;
                             continue 'unit;
                         }
                         b':' if d == 0 && !sym(j + 1, b':') && !sym(j - 1, b':') => return true,
