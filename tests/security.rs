@@ -352,14 +352,19 @@ fn security_regressions() {
     let dir = private_dir("security");
     // (cases in parallel: each one runs rustc, zustc and the programs)
     let n = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).min(8);
+    // (the cases with the most runs first: one of 20 runs, each under valgrind, takes as long as a quarter of the rest,
+    // and started last it would run alone at the end)
+    let mut order: Vec<usize> = (0..cases.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(cases[i].args.len()));
     let next = std::sync::atomic::AtomicUsize::new(0);
     let results: std::sync::Mutex<Vec<(usize, Result<(), String>)>> = std::sync::Mutex::new(vec![]);
     std::thread::scope(|s| {
         for _ in 0..n {
             s.spawn(|| {
                 loop {
-                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    let Some(c) = cases.get(i) else { break };
+                    let k = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(&i) = order.get(k) else { break };
+                    let c = &cases[i];
                     let r = check_case(c, &dir.0, valgrind);
                     results.lock().unwrap().push((i, r));
                 }

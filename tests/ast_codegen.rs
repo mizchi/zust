@@ -40,6 +40,9 @@ fn private_dir(prefix: &str) -> PrivateDir {
     panic!("no new directory under {}", base.display());
 }
 
+#[path = "common/par.rs"]
+mod par;
+
 #[test]
 fn acg_like_rustc() {
     let dir = private_dir("acg");
@@ -49,24 +52,19 @@ fn acg_like_rustc() {
     if let Ok(f) = std::env::var("ACG_FILE") {
         files = vec![std::path::PathBuf::from(f)];
     }
-    let mut bad = vec![];
-    for p in &files {
+    let bad: Vec<String> = par::par_map(&files, |p| -> Result<(), String> {
         let name = p.file_stem().unwrap().to_string_lossy().to_string();
         let src = std::fs::read_to_string(p).unwrap();
         let obj = match zustc::driver2::build_object(&src, false) {
             Ok(o) => o,
-            Err(e) => {
-                bad.push(format!("{name}: {e}"));
-                continue;
-            }
+            Err(e) => return Err(format!("{name}: {e}")),
         };
         let o = dir.join(format!("{name}.o"));
         std::fs::write(&o, &obj).unwrap();
         let exe = dir.join(&name);
         let st = std::process::Command::new("cc").arg(&o).arg("-o").arg(&exe).status().unwrap();
         if !st.success() {
-            bad.push(format!("{name}: link failed"));
-            continue;
+            return Err(format!("{name}: link failed"));
         }
         let ours = std::process::Command::new(&exe).output().unwrap();
         let rexe = dir.join(format!("{name}.rustc"));
@@ -80,12 +78,16 @@ fn acg_like_rustc() {
         assert!(st.success());
         let theirs = std::process::Command::new(&rexe).output().unwrap();
         if ours.stdout != theirs.stdout || ours.status.code() != theirs.status.code() {
-            bad.push(format!(
+            return Err(format!(
                 "{name}: output differs:\n{}\nvs rustc:\n{}",
                 String::from_utf8_lossy(&ours.stdout),
                 String::from_utf8_lossy(&theirs.stdout)
             ));
         }
-    }
+        Ok(())
+    })
+    .into_iter()
+    .filter_map(|r| r.err())
+    .collect();
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
