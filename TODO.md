@@ -161,6 +161,21 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   ("cannot find macro"), `#![recursion_limit]` (the limit stays 64).
 - Language and std: the tables of sections 2.5 and 2.7 of the report.
 
+## Typed constant evaluator: open cases from the review of #49
+
+- An untyped `let` whose only use is in an `if` arm that is not taken is not validated at its inferred type:
+  `const N: u8 = { let x = 255 + 1; if false { x } else { 0u8 } };` is accepted (rustc: overflow). Finalize every
+  executed initializer at the type inference gives it, not only those whose untyped trial failed.
+- That type should come from both arms (`let x = 1 / ((!0 >> 7) + 1);` used as `i64` in a skipped arm divides by
+  zero at `i64`); the fallback in `Program::eval_block_env` accepts success at any integer type.
+- `!FLAG` with `const FLAG: bool` (and `!{ true }`) is folded as an integer complement: `(!FLAG) as u8` is 254, not 0.
+  `is_bool_expr` sees only literals, comparisons and `&&`/`||`; the bool type should be carried through constants and
+  blocks.
+- A vector type's overload group with an `unsafe fn m` and a safe `fn m` (two traits): when the unsafe one stays
+  selected, no E0133 is reported. Check the id `pick_overload` returns, after selection.
+- Serialized const arguments drop a local's type annotation (`{ let x: u8 = !0; ... }` in `Buf<{ .. }>`), and a const
+  fn's return type through an alias (`type Id<T> = T; const fn f() -> Id<u8>`) is not applied.
+
 ## Tooling
 
 - `tests/selfhost_compiler.sh` fails on main: rustc does not build the combined source
