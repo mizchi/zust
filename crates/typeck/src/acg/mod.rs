@@ -1570,6 +1570,20 @@ impl Cx<'_> {
             && !sig.is_generic()
             && self.rg.inst_args.is_empty()
             && matches!(&f.sig.ret, Some(crate::parse::Ty::Impl(bs)) if !bs.iter().any(|b| matches!(b, crate::parse::Bound::Lifetime(l) if l == "'static")) && crate::regions::captures_no_lifetime(bs));
+        if self.bk.ret_no_capture {
+            // (a parameter whose regions are all 'static: its slots write `'static`, or lifetimes bounded by it)
+            if let Some(r) = sig.regions.as_deref() {
+                let st = |c: u8| c == crate::types::R_STATIC || r.outlives.iter().any(|&(a, b)| a == c && b == crate::types::R_STATIC);
+                let n = r.slots.len().saturating_sub(1);
+                for (j, s) in r.slots[..n].iter().enumerate() {
+                    if !s.is_empty() && s.iter().all(|&c| st(c)) {
+                        if let Some(&l) = self.bk.params.get(j) {
+                            self.bk.static_params.push(l);
+                        }
+                    }
+                }
+            }
+        }
         self.rg.static_opaque = self.rg.on
             && self.rg.closure.is_none()
             && self.prog.opaque.contains(&self.rg.base)

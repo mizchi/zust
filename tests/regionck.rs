@@ -2518,6 +2518,8 @@ fn part14_rpit_captures_no_lifetime() {
     let d = check("use std::fmt::Display;\nfn s(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn t(x: &u8) -> impl Display {\n    x\n}\nfn main() {}\n");
     assert!(d.len() == 2 && d[0].0 == 3 && d[1].0 == 6 && d[0].1.contains("E0700"), "{d:?}");
     assert_eq!(check("use std::fmt::Display;\nfn a(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.to_vec().into_iter()\n}\nfn b(x: &str) -> impl Display {\n    x.to_string()\n}\nfn c(x: &u8) -> impl Display {\n    *x\n}\nfn d(x: &[u8]) -> impl Iterator<Item = u8> + '_ {\n    x.iter().copied()\n}\nfn e<'a>(x: &'a [u8]) -> impl Iterator<Item = &'a u8> {\n    x.iter()\n}\nfn f(x: &[u8]) -> impl Fn() -> usize {\n    let n: usize = x.len();\n    move || n\n}\nfn main() {\n    println!(\"{} {} {} {} {} {}\", a(&[1]).count(), b(\"x\"), c(&1), d(&[2]).count(), e(&[3]).count(), f(&[4])());\n}\n"), vec![]);
+    // (a parameter whose regions are 'static: `x: &'static u8`, `'a: 'static`)
+    assert_eq!(check("use std::fmt::Display;\nfn a(x: &'static u8) -> impl Display {\n    x\n}\nfn b<'a: 'static>(x: &'a [u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn c(_y: &u8, x: &'static str) -> impl Display {\n    x\n}\nfn main() {}\n"), vec![]);
     let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2024, ..Options2::default() });
     assert!(s.check("use std::fmt::Display;\nfn s(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn t(x: &u8) -> impl Display {\n    x\n}\nfn main() {}\n").is_empty());
 }

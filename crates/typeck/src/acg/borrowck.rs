@@ -232,6 +232,8 @@ pub struct Bk {
     /// The result is an `impl Trait` that captures no lifetime (before edition 2024, its bounds name none, not generic):
     /// what it returns must not borrow through a parameter's reference (E0700)
     pub ret_no_capture: bool,
+    /// The parameters whose regions are all 'static (`x: &'static u8`, `'a: 'static`): returning them captures nothing
+    pub static_params: Vec<u32>,
     /// Locals that own a value whose type implements `Drop` (a user's), and the place of that value in the local,
     /// through boxes and fields (`Box<Scribble>`: `*`; `Wrapper(Scribble)`: `.0`): its `drop` may use what a `&mut`
     /// field points to, so a borrow through it must not outlive the local (E0713)
@@ -1395,11 +1397,12 @@ impl Bk {
                             // (an `impl Trait` that captures no lifetime: a borrow through a parameter's reference, or the
                             // reference itself, is in its hidden type, which may not hold it)
                             if self.ret_no_capture {
+                                let non_static = |l: u32| self.params.contains(&l) && !self.static_params.contains(&l);
                                 let through_param = ls.iter().any(|&ln| {
                                     let lp = &self.loans[ln as usize].place;
-                                    self.params.contains(&lp.local) && lp.owned_len() < lp.proj.len()
+                                    non_static(lp.local) && lp.owned_len() < lp.proj.len()
                                 });
-                                let param_ref = srcs.iter().any(|s| matches!(s, Src::Local(l) if self.params.contains(l) && self.locals.get(*l as usize).is_some_and(|x| x.refs)));
+                                let param_ref = srcs.iter().any(|s| matches!(s, Src::Local(l) if non_static(*l) && self.locals.get(*l as usize).is_some_and(|x| x.refs)));
                                 if through_param || param_ref {
                                     errs.push(BkError { sp: *sp, msg: "hidden type for `impl Trait` captures lifetime that does not appear in bounds (E0700)".to_string() });
                                 }
