@@ -2549,6 +2549,15 @@ fn part15_undeclared_in_impl_and_dyn() {
     assert_eq!(check("fn h(f: &dyn for<'a> Fn(&'a u8) -> &'a u8) -> u8 {\n    *f(&1)\n}\nfn main() {\n    println!(\"{}\", h(&|x| x));\n}\n"), vec![]);
 }
 
+/// E0261 in a where clause's type (`&'missing Self: Add<Self>`, traits/eval-caching-error-region.rs), at that
+/// predicate, where the item writes no `for<..>`
+#[test]
+fn part15_undeclared_in_where_types() {
+    let d = check("use std::ops::Add;\npub trait Numoid: Sized\nwhere\n    &'missing Self: Add<Self>,\n{\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("use of undeclared lifetime name `'missing` (E0261)"), "{d:?}");
+    assert_eq!(check("use std::ops::Add;\ntrait Numoid<'a>: Sized\nwhere\n    &'a Self: Add<Self>,\n{\n}\nfn f<'a, T>(x: &'a T) -> usize\nwhere\n    &'a T: IntoIterator,\n    Vec<&'a T>: Clone,\n{\n    let _ = x;\n    1\n}\nstruct W<'a, T>(&'a T)\nwhere\n    &'a T: Clone;\nfn main() {\n    println!(\"{}\", f(&vec![1u8]));\n}\n"), vec![]);
+}
+
 
 /// From the third review of #69: a closure's call that needs `T: 'static` takes it from `T: 'a` with `'a: 'static`,
 /// and from a supertrait whose `Self` must be 'static (`trait Derived: Base`, `trait Base: 'static`); a T in the type

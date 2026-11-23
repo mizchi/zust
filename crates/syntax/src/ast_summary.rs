@@ -838,9 +838,13 @@ fn bound_lifetimes(g: &Generics, out: &mut Vec<String>) {
                 }
             }
         }
-        // (`where for<'a> &'a T: Tr` binds its own: only the bounds of a type that is a plain parameter)
+        // (`where for<'a> &'a T: Tr` binds its own: only the bounds of a type that is a plain parameter; with no
+        // `for<..>` in the item, the type's and its bounds' lifetimes too: `&'missing Self: Add<Self>`)
         if matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty()) {
             bs_of(bs, out);
+        } else if !HRTB_TEXT.with(|c| c.get()) {
+            named_lifetimes_deep(t, out, 0);
+            named_lifetimes_deep(&PTy::Impl(bs.clone()), out, 0);
         }
     }
 }
@@ -2060,7 +2064,12 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 if let Some(l) = undeclared_lifetime(&used, &declared) {
                     let m = format!("use of undeclared lifetime name `{l}` (E0261)");
                     // (at the where clause's predicate that names it)
-                    let at = g.preds.iter().find(|(_, bs)| bs.iter().any(|b| matches!(b, Bound::Lifetime(x) if *x == l))).and_then(|(t, _)| crate::wf::pos_of(t));
+                    let names = |t: &PTy| {
+                        let mut v = vec![];
+                        named_lifetimes_deep(t, &mut v, 0);
+                        v.contains(&l)
+                    };
+                    let at = g.preds.iter().find(|(t, bs)| bs.iter().any(|b| matches!(b, Bound::Lifetime(x) if *x == l)) || names(t)).and_then(|(t, _)| crate::wf::pos_of(t));
                     return Err(match at {
                         Some(p) => format!("{}:{}: {m}", p.line, p.col + 1),
                         None => m,
