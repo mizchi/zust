@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795443056382,
+  "lastUpdate": 1795443059082,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -108834,6 +108834,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/aeea464aa6c38509b0f8566d550afc5521fec5ee"
         },
         "date": 1795441487358,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 76.81,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1832,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.67,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1512,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 61.31,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4511,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cc5b1feb015318881f8460880f8dda06d2f5dade",
+          "message": "Merge pull request #93 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: zustscript-helper / zustscript_helper for values that cross to wasm as bytes",
+          "timestamp": "2026-11-23T23:00:38+09:00",
+          "tree_id": "5b3d18e61b8cc67b8063fad71518263583edecbe",
+          "url": "https://github.com/mizchi/zust/commit/cc5b1feb015318881f8460880f8dda06d2f5dade"
+        },
+        "date": 1795443058560,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
