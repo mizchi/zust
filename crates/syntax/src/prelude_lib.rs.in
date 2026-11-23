@@ -11654,6 +11654,33 @@ impl<T> Debug for VecDeque<T> {
 
 // --- BinaryHeap<T> (最大ヒープ。std と同じ sift の手順なので、iter / into_vec の並びも std と同じ) ---
 
+// `BinaryHeap::peek_mut` のガード: 最大の要素。変更したら drop で sift し直す (std と同じく `deref_mut` を通ったときだけ)
+pub struct PeekMut<T> {
+    __h: *mut BinaryHeap<T>,
+    __m: bool,
+}
+
+impl<T> PeekMut<T> {
+    pub fn deref(&self) -> &T {
+        unsafe { &*(*self.__h).data.ptr }
+    }
+    pub fn deref_mut(&mut self) -> &mut T {
+        self.__m = true;
+        unsafe { &mut *(*self.__h).data.ptr }
+    }
+}
+
+impl<T> Drop for PeekMut<T> {
+    fn drop(&mut self) {
+        if self.__m {
+            unsafe {
+                let n = (*self.__h).data.len;
+                (*self.__h).sift_down_range(0, n);
+            }
+        }
+    }
+}
+
 pub struct BinaryHeap<T> {
     data: Vec<T>,
 }
@@ -11687,6 +11714,13 @@ impl<T> BinaryHeap<T> {
             None
         } else {
             Some(unsafe { &*self.data.ptr })
+        }
+    }
+    pub fn peek_mut(&mut self) -> Option<PeekMut<T>> {
+        if self.data.len == 0 {
+            None
+        } else {
+            Some(PeekMut { __h: self as *mut BinaryHeap<T>, __m: false })
         }
     }
     pub fn push(&mut self, x: T) {

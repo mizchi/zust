@@ -567,7 +567,7 @@ fn owner(h: usize) -> Option<&'static str> {
                     .chain(ws[..from].iter())
                     .copied()
                     .find_map(|w| match w {
-                        "Vec" | "String" | "HashMap" | "Reverse" | "AssertUnwindSafe" | "LocalKey" | "LazyCell" | "BinaryHeap" | "SplitStr" | "RSplitStr" | "FlattenRef" | "MatchIndices" | "CharIndices"
+                        "Vec" | "String" | "HashMap" | "Reverse" | "AssertUnwindSafe" | "LocalKey" | "LazyCell" | "BinaryHeap" | "PeekMut" | "SplitStr" | "RSplitStr" | "FlattenRef" | "MatchIndices" | "CharIndices"
                         | "Bytes" | "ToCase" | "CharEscape" | "ParseIntError" | "IntErrorKind" | "Rev" | "StepBy" | "Peekable"
                         | "SkipWhile" | "PreludeScan" | "Inspect" | "FlatMap" | "Flatten" | "Cloned" | "Windows" | "Chunks" | "ChunksExact" | "ChunksMut" | "Iter" | "IterMut" | "MaybeUninit"
                         | "HashSet" | "SetIntoIter" | "BTreeMap" | "BTreeSet" | "BtEntry" | "BtIter" | "BtIterMut"
@@ -1627,6 +1627,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     if need.contains("Mutex") {
         need.extend(["MutexGuard", "Deref", "deref", "Result"]);
+    }
+    // (BinaryHeap の peek_mut もガードを返す)
+    if need.contains("BinaryHeap") && need.contains("peek_mut") {
+        need.extend(["PeekMut", "deref", "deref_mut", "Drop", "drop"]);
     }
     // (RefCell の borrow / borrow_mut はガードを返す: その型と deref / drop)
     if need.contains("RefCell") {

@@ -140,7 +140,11 @@ impl Cx<'_> {
         if copy_out.is_some() {
             self.bk_frame();
         }
+        // (a method call is a value: a `&mut` place around it (`&mut *s.0.borrow_mut()`) does not make its receiver a
+        // mutable place, the method's `self` does)
+        let pm = std::mem::replace(&mut self.bk.place_mut, false);
         let r = self.method_call_inner(e, expected);
+        self.bk.place_mut = pm;
         if let Some(u) = copy_out {
             let srcs = self.bk.frames.pop().unwrap_or_default();
             // (an iterator's item: the result's type, or what its `Option` holds, when it is not the iterator itself)
@@ -337,14 +341,54 @@ impl Cx<'_> {
         }
         // (`x.m()` with x of a type parameter `T: Tr` in a generic fn, instantiated as a primitive: Tr's `m`, which a
         // builtin method of the same name (`to_string` ..) would otherwise answer: `<T as Tr>::m(&x, ..)`)
+        // (`w.m()` with w of the program's struct with a `DerefMut`, and m a `&mut self` method of what it derefs to, not
+        // w's own: `(&mut *w).m()`, as autoderef takes `deref_mut` for it, before the rewrite of a deref to a slice below
+        // (`c.reverse()` of a `C: DerefMut<Target = [i32]>`); w is borrowed mutably (E0596 without `mut`,
+        // E0502 against a shared loan of it) and the user's `deref_mut` runs, not `deref`)
+        if let Some((t0, (refs, target))) = (!self.prog.deref_mut_of.is_empty()).then(|| self.peek(recv)).flatten().and_then(|t| Some((t, self.deref_mut_recv(t, method)?))) {
+            let mut d = recv.clone();
+            let at = expr_start(recv);
+            for _ in 0..=refs {
+                d = Box::new(Expr::Unary("*".into(), d, crate::parse::Span { start: at, at }));
+            }
+            let inner = Expr::Paren(Box::new(Expr::Ref(true, d)));
+            let rt = Ty::Ref(true, intern(target));
+            let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(inner), method.to_string(), gargs.clone(), margs.clone(), msp));
+            // (the new receiver's type, for what looks the method up by it: String's and Vec's builtin methods; and each
+            // deref's, so that the user's deref is called once, on the place: `**w` of a w: &mut W)
+            if let Expr::MethodCall(r, ..) = ne {
+                self.lets.insert(&**r as *const Expr as usize, rt);
+                if let Expr::Paren(i) = &**r {
+                    self.lets.insert(&**i as *const Expr as usize, rt);
+                    if let Expr::Ref(_, u) = &**i {
+                        // (outermost first: the target, then the struct, then what each reference or box reaches)
+                        let mut reached = vec![];
+                        let mut tt = t0;
+                        while let Ty::Ref(_, x) | Ty::Box(x) = tt {
+                            reached.push(*x);
+                            tt = *x;
+                        }
+                        let mut u = &**u;
+                        for ty in std::iter::once(target).chain(reached.into_iter().rev()) {
+                            let Expr::Unary(_, x, _) = u else { break };
+                            self.lets.insert(u as *const Expr as usize, ty);
+                            u = &**x;
+                        }
+                    }
+                }
+            }
+            return self.expr(ne, expected);
+        }
         // (`impl Deref<Target = [T; N]>` (or a slice, str) with no method m of its own: `t.m()` is `t.deref().m()`,
         // decided before anything is evaluated, so the user's deref runs once; only for the structs Program found such a
         // deref of)
         if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)).filter(|t| matches!(t, Ty::Struct(s) if !self.prog.deref_to_seq.is_empty() && self.prog.deref_to_seq.contains(&self.prog.base_of(*s)))) {
             if self.prog.method(sid, method).is_none() && self.prog.default_method(sid, method).is_none() {
                 if let Some(did) = self.prog.method(sid, "deref") {
-                    if matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, Ty::Array(..) | Ty::Slice(_) | Ty::Str)) {
-                        let d = Expr::MethodCall(Box::new(Expr::Paren(recv.clone())), "deref".to_string(), vec![], vec![], msp);
+                    if let Ty::Ref(_, target @ (Ty::Array(..) | Ty::Slice(_) | Ty::Str)) = self.prog.sigs[did as usize].ret {
+                        // (`deref_mut` for a method that takes `&mut self` (`c.reverse()`), as autoderef takes it)
+                        let m = if self.prog.method(sid, "deref_mut").is_some() && self.takes_mut_self(*target, method) { "deref_mut" } else { "deref" };
+                        let d = Expr::MethodCall(Box::new(Expr::Paren(recv.clone())), m.to_string(), vec![], vec![], msp);
                         let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(d), method.to_string(), gargs.clone(), margs.clone(), msp));
                         return self.expr(ne, expected);
                     }
@@ -1263,7 +1307,19 @@ impl Cx<'_> {
             // evaluated, when they name x)
             if ev.is_none() {
                 if let Expr::Ref(_, inner) = strip_paren(recv) {
-                    if let (Some(&ln), Some(n)) = (self.bk.loan_of.get(&(&**inner as *const Expr as usize)), borrowck::root_local(inner)) {
+                    // (also `(&mut *w)` through a user's `DerefMut`: the loan its `deref_mut` takes of w)
+                    // (through each `*`: `(&mut **w)` of a `w: &mut W`)
+                    let root = borrowck::root_local(inner).or_else(|| {
+                        let mut base = strip_paren(inner);
+                        while let Expr::Unary(op, x, _) = base {
+                            if op != "*" {
+                                break;
+                            }
+                            base = strip_paren(x);
+                        }
+                        borrowck::root_local(base)
+                    });
+                    if let (Some(&ln), Some(n)) = (self.bk.loan_of.get(&(&**inner as *const Expr as usize)), root) {
                         if margs.iter().any(|a| borrowck::mentions(a, n)) {
                             self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
                             bk_op_temp = true;
@@ -1389,7 +1445,13 @@ impl Cx<'_> {
         let args: Vec<&Expr> = margs.iter().collect();
         // (a `&mut self` method of a value that holds references stores what its arguments borrow:
         // `v.push(&mut x)`)
-        let into_recv = self.bk_on() && !via_deref && matches!(recv_ty, Ty::Ref(true, _)) && self.bk_ty(st).1;
+        // (also a `&self` one whose self type is invariant in a lifetime an argument is borrowed for, or outlives:
+        // `c.push(&mut y)` of `fn push(&self, r: &'c mut i32)` in `impl<'c> C<'c>` with C holding a
+        // `RefCell<Vec<&'c mut i32>>`: the argument's borrow lasts as long as c's 'c)
+        let stores = if self.bk_on() && !via_deref && matches!(recv_ty, Ty::Ref(false, _)) && self.bk_ty(st).1 { self.shared_recv_stores(id) } else { vec![] };
+        let into_recv = self.bk_on() && !via_deref && self.bk_ty(st).1 && (matches!(recv_ty, Ty::Ref(true, _)) || !stores.is_empty());
+        // (the arguments stored: their loans flow out of the call, as a result's that borrows them)
+        let stores0 = std::mem::replace(&mut self.bk.store_args, stores);
         if into_recv {
             self.bk_frame();
         }
@@ -1420,9 +1482,15 @@ impl Cx<'_> {
             self.bk.activate = bk_act;
         }
         let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
+        self.bk.store_args = stores0;
         self.rg_took_call(e);
         if into_recv {
             let srcs = self.bk_frame_end();
+            // (a `&self` receiver is used at the call, after the arguments: what it holds is live while they are
+            // made, as rustc's reborrow of it is (a `&mut self` one's two-phase borrow is activated there))
+            if matches!(recv_ty, Ty::Ref(false, _)) && is_place_expr(recv) {
+                self.bk_acc(recv, borrowck::Acc::Read);
+            }
             self.bk_flow_into(recv, &srcs);
         }
         // (the arguments' and the reservation's loans end at the call, before a `&mut self` borrow is taken)
@@ -1435,6 +1503,70 @@ impl Cx<'_> {
 
     /// `thread::spawn(|| ..)`: the closure must own what it uses (E0373) and be Send (see not_send)
     /// Whether `x.m()` with x: t takes `&mut self` (a method of t's, or a builtin one of a slice / str that changes it)
+    /// `w.m()` with w (through references and boxes) of the program's struct with a `DerefMut` and no method m of its
+    /// own, where the method m of what it derefs to (through further derefs) takes `&mut self`: the references and boxes
+    /// to go through, and the deref's target
+    pub(crate) fn deref_mut_recv(&self, t: Ty, m: &str) -> Option<(usize, Ty)> {
+        let (mut t, mut refs) = (t, 0);
+        while let Ty::Ref(_, i) | Ty::Box(i) = t {
+            t = *i;
+            refs += 1;
+        }
+        let Ty::Struct(sid) = t else { return None };
+        // (the cheap test first: most structs have no `DerefMut`)
+        if !self.prog.deref_mut_of.contains(&self.prog.base_of(sid)) || self.prog.method(sid, "deref_mut").is_none() {
+            return None;
+        }
+        let base = self.prog.base_of(sid);
+        if !self.prog.struct_item.get(base as usize).is_some_and(|&i| i < self.prog.prelude_from) || self.prog.is_placeholder(sid) {
+            return None;
+        }
+        if self.prog.method(sid, m).is_some() || self.prog.default_method(sid, m).is_some() {
+            return None;
+        }
+        // (a method of an impl for a reference to it (`impl RefTouch for &mut W`) with a reference receiver: the
+        // probe reaches it by autoref before it derefs)
+        if refs > 0 && self.prog.method(sid, &format!("__ref_{m}")).is_some() {
+            return None;
+        }
+        let deref_target = |sid: u32| -> Option<Ty> {
+            let did = self.prog.method(sid, "deref")?;
+            let Ty::Ref(_, i) = self.prog.sigs[did as usize].ret else { return None };
+            let args: Vec<Option<Ty>> = self.prog.structs[sid as usize].args.iter().map(|&a| Some(a)).collect();
+            Some(self.prog.partial_subst(*i, &args))
+        };
+        let target = deref_target(sid)?;
+        // (not to an unsized one: a slice's or a str's, which the rewrite to `t.deref_mut().m()` above takes)
+        if self.prog.has_param(target) || matches!(target, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
+            return None;
+        }
+        // (the type m is found on: through the target's own derefs. Not a type the derefs came through already: a
+        // struct whose `deref` gives itself (E0055 when m is on none of them))
+        let mut at = target;
+        let mut seen = vec![t];
+        for _ in 0..8 {
+            if seen.contains(&at) {
+                return None;
+            }
+            seen.push(at);
+            match at {
+                Ty::Struct(s) if self.prog.method(s, m).is_none() && self.prog.default_method(s, m).is_none() && self.guard_of(at).is_none() => match deref_target(s) {
+                    Some(n) => at = n,
+                    None => break,
+                },
+                _ => break,
+            }
+        }
+        // (a program's struct without m: none of the prelude's `&mut self` methods takes_mut_self knows by name is its)
+        if let Ty::Struct(s) = at {
+            let user = self.prog.struct_item.get(self.prog.base_of(s) as usize).is_some_and(|&i| i < self.prog.prelude_from);
+            if user && self.prog.method(s, m).is_none() && self.prog.default_method(s, m).is_none() {
+                return None;
+            }
+        }
+        self.takes_mut_self(at, m).then_some((refs, target))
+    }
+
     pub(crate) fn takes_mut_self(&self, t: Ty, m: &str) -> bool {
         let t = self.strip_refs(t);
         if let Ty::Struct(ts) = t {
@@ -2146,6 +2278,56 @@ impl Cx<'_> {
                 }),
                 _ => None,
             };
+            // (else a blanket impl of the trait whose bounds hold of Self: `impl<A> Foo for A`'s `get` for a `&i32`
+            // made a `dyn Foo`, before the trait's default, which is the one only when no such impl overrides it)
+            // (blanket impls that are not told apart: neither is taken, and neither is the trait's default, which one
+            // of them may override)
+            let ambiguous = std::cell::Cell::new(false);
+            // (the blanket impl's own parameters, solved from its header against the call's Self and trait arguments,
+            // and how many trait arguments come before the method's own generics)
+            let header: std::cell::RefCell<Option<(Vec<Option<Ty>>, usize)>> = std::cell::RefCell::new(None);
+            let imp = imp.or_else(|| {
+                // (the trait's own: `Program::blanket` keeps one method of each name, of whichever trait came first, so
+                // the methods of the name are looked through)
+                let tr = tr0?;
+                let prog = self.prog;
+                let mut bl = prog.by_last.get(&m)?.iter().copied().filter(|&c| {
+                    let bsig = &prog.sigs[c as usize];
+                    matches!(bsig.self_ty, Some(Ty::Param(_))) && bsig.impl_trait.as_deref().is_some_and(|t| t.split('<').next().unwrap_or(t).trim() == tr)
+                });
+                // (one only: two blanket impls of a generic trait (`impl<T> A<u8> for T`, `impl<T> A<u16> for T`) are
+                // told apart by the trait's arguments, which are not kept for each method)
+                let bid = bl.next()?;
+                if bl.next().is_some() {
+                    ambiguous.set(true);
+                    return None;
+                }
+                // (the trait's arguments the call has (after Self) are those of the blanket impl's header)
+                if let Some(es) = self.prog.impl_targs.get(tr) {
+                    let mut bes = es.iter().filter(|e| matches!(e.0, Ty::Param(_)));
+                    if let Some((st, targs, ng)) = bes.next() {
+                        if bes.next().is_some() {
+                            ambiguous.set(true);
+                            return None;
+                        }
+                        let mut isol = vec![None; *ng];
+                        if !self.prog.match_ty(*st, args[0], &mut isol) {
+                            return None;
+                        }
+                        for (k, &ta) in targs.iter().enumerate() {
+                            if !args.get(1 + k).is_some_and(|&want| self.prog.match_ty(ta, want, &mut isol)) {
+                                return None;
+                            }
+                        }
+                        *header.borrow_mut() = Some((isol, targs.len()));
+                    }
+                }
+                let bounds = self.prog.blanket_bounds.get(tr);
+                bounds.is_none_or(|bs| blanket_bounds_hold(self.prog, args[0], bs, &mut vec![], &mut vec![])).then_some(bid)
+            });
+            if imp.is_none() && ambiguous.get() {
+                return err(span, format!("`{}` has no implementation for `{}` that is told apart from the trait's other blanket impls", self.prog.names[id as usize], self.prog.tn(args[0])));
+            }
             if let Some(imp) = imp {
                 let isig = &self.prog.sigs[imp as usize];
                 if !isig.is_generic() {
@@ -2157,9 +2339,23 @@ impl Cx<'_> {
                 if let Some(st) = isig.self_ty {
                     self.prog.match_ty(st, args[0], &mut s2);
                 }
-                let own = args.len() - 1;
-                let k0 = s2.len().saturating_sub(own);
-                for (j, &a) in args[1..].iter().enumerate() {
+                // (a blanket impl's parameters as its header solved them (`impl<T, U> A<[U; 2]> for T` with
+                // `A<[u16; 2]>`: U is u16), and the method's own generics after the trait's arguments)
+                let (own_from, k0) = match header.borrow_mut().take() {
+                    Some((isol, ntargs)) => {
+                        for (slot, x) in s2.iter_mut().zip(&isol) {
+                            if slot.is_none() {
+                                *slot = *x;
+                            }
+                        }
+                        (1 + ntargs, isol.len())
+                    }
+                    None => {
+                        let own = args.len() - 1;
+                        (1, s2.len().saturating_sub(own))
+                    }
+                };
+                for (j, &a) in args.get(own_from..).unwrap_or(&[]).iter().enumerate() {
                     if let Some(slot) = s2.get_mut(k0 + j) {
                         if slot.is_none() {
                             *slot = Some(a);
@@ -2403,6 +2599,8 @@ impl Cx<'_> {
     }
 
     fn call_fn_inner(&mut self, id: u32, recv: Option<(Value, Ty)>, args: &[&Expr], turbofish: Option<&[GArg]>, expected: Option<Ty>, span: Sp) -> R<V> {
+        // (this call's: not the calls in its arguments')
+        let store_args = std::mem::take(&mut self.bk.store_args);
         // (the receiver's region tree is this call's: the calls in the arguments must not take it)
         let rg_recv = if recv.is_some() { self.rg.recv.take() } else { None };
         let rg_sp = std::mem::take(&mut self.rg.call_sp);
@@ -2666,7 +2864,7 @@ impl Cx<'_> {
             }
             let top_ref = self.bk_on() && matches!(strip_paren(a), Expr::Ref(..));
             // (an argument `&x` the result does not borrow from: its loan ends with the call)
-            let flows = !(top_ref && matches!(pt, Ty::Ref(..)) && !self.bk_ret_from(id, i + skip));
+            let flows = !(top_ref && matches!(pt, Ty::Ref(..)) && !self.bk_ret_from(id, i + skip)) || store_args.contains(&(i + skip));
             // (the call's `&mut self` is taken after its arguments: what one that holds references borrows is held
             // until then)
             let hold = self.bk_on() && self.bk.hold_args;
@@ -2687,20 +2885,10 @@ impl Cx<'_> {
             }
             // (a closure written where a bound wants `Fn` / `FnMut`: it is that, so its body moving out what it captures
             // by value (`|| { let s = val; }`) is E0507, at the move. Passed by name, it is E0525 (above))
-            if let (Some(x), Expr::Closure(..), true) = (&fbt, strip_paren(a), self.bk_on()) {
-                let want = x.2.trim_start();
-                let kind = |k: &str| want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('('));
-                let c = strip_paren(a);
-                if (kind("Fn") || kind("FnMut")) && self.bk.fnonce_sure.contains(&(c as *const Expr as usize)) {
-                    let caps: Vec<String> = crate::ast_closure::free_vars(c).into_iter().filter(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0)).collect();
-                    let prog = self.prog;
-                    let types: Vec<(String, Ty)> = caps.iter().filter_map(|n| self.lookup(n).map(|(_, t)| (n.clone(), t))).collect();
-                    let by = |p: &crate::parse::Pat, n: &str| types.iter().find(|x| x.0 == n).is_none_or(|x| borrowck::pat_moves(prog, p, x.1, 0));
-                    if let Some((n, at)) = crate::ast_closure::move_site_by(c, &caps, &by) {
-                        let w = if kind("Fn") { "Fn" } else { "FnMut" };
-                        return Err(self.at(at, format!("cannot move out of `{n}`, a captured variable in an `{w}` closure (E0507)")));
-                    }
-                }
+            // (also `Box::new(|| ..)` where a `Box<dyn Fn()>` is expected: the coercion wants it `Fn`)
+            if let (Some(x), true) = (&fbt, self.bk_on()) {
+                let want = x.2.to_string();
+                self.fn_kind_move_check(a, &want)?;
             }
             // (`take(m::BAR)`: a static moved out by its module's path, E0507; by its name alone, the read of the
             // place checks it. A path is no place expression, so it is read as a value elsewhere too (a method's
@@ -3622,4 +3810,62 @@ fn with_targs(f: &str, gargs: &[crate::parse::GArg]) -> Expr {
     let mut p = crate::acg::path_of(f);
     p.segs[0].args = gargs.to_vec();
     Expr::Path(None, p)
+}
+
+impl Cx<'_> {
+    /// A closure written where an `Fn` / `FnMut` is wanted (a bound's text, a `Box<dyn Fn()>`'s): it is that, so its
+    /// body moving out what it captures by value (`|| { let s = val; }`) is E0507, at the move
+    pub(crate) fn fn_kind_move_check(&mut self, a: &Expr, want: &str) -> R<()> {
+        let c = strip_paren(a);
+        if !matches!(c, Expr::Closure(..)) {
+            return Ok(());
+        }
+        let want = want.trim_start();
+        let kind = |k: &str| want.strip_prefix(k).is_some_and(|r| r.trim_start().starts_with('('));
+        if (kind("Fn") || kind("FnMut")) && self.bk.fnonce_sure.contains(&(c as *const Expr as usize)) {
+            let caps: Vec<String> = crate::ast_closure::free_vars(c).into_iter().filter(|n| self.lookup(n).is_some_and(|(_, t)| !self.bk_ty(t).0)).collect();
+            let prog = self.prog;
+            let types: Vec<(String, Ty)> = caps.iter().filter_map(|n| self.lookup(n).map(|(_, t)| (n.clone(), t))).collect();
+            let by = |p: &crate::parse::Pat, n: &str| types.iter().find(|x| x.0 == n).is_none_or(|x| borrowck::pat_moves(prog, p, x.1, 0));
+            if let Some((n, at)) = crate::ast_closure::move_site_by(c, &caps, &by) {
+                let w = if kind("Fn") { "Fn" } else { "FnMut" };
+                return Err(self.at(at, format!("cannot move out of `{n}`, a captured variable in an `{w}` closure (E0507)")));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Cx<'_> {
+    /// A `&self` method whose self type is invariant in a lifetime another parameter's type names, or one that
+    /// outlives such a lifetime (`'f: 'c`): what that argument borrows is held by the receiver (rustc: its region is
+    /// the receiver's, which lives as long as the receiver is used)
+    pub(crate) fn shared_recv_stores(&mut self, id: u32) -> Vec<usize> {
+        let prog = self.prog;
+        let sig = &prog.sigs[id as usize];
+        let Some(rs) = sig.regions.as_deref() else { return vec![] };
+        let (Some(&p0), Some(s0)) = (sig.params.first(), rs.slots.first()) else { return vec![] };
+        if !matches!(p0, Ty::Ref(false, _)) || sig.params.len() < 2 {
+            return vec![];
+        }
+        let n = rs.lts.len();
+        let Some(vs) = self.rg.code_variances(prog, p0, s0, n, sig.generics.len()) else { return vec![] };
+        let mut inv: Vec<u8> = (0..n).filter(|&k| vs[k] == super::regionck::Var::Inv).map(|k| k as u8).collect();
+        if inv.is_empty() {
+            return vec![];
+        }
+        // (to a fixpoint: `'a: 'b, 'b: 'c` in either order)
+        loop {
+            let n0 = inv.len();
+            for &(a, b) in &rs.outlives {
+                if inv.contains(&b) && !inv.contains(&a) {
+                    inv.push(a);
+                }
+            }
+            if inv.len() == n0 {
+                break;
+            }
+        }
+        (1..sig.params.len()).filter(|&j| rs.slots.get(j).is_some_and(|s| s.iter().any(|c| inv.contains(c)))).collect()
+    }
 }
