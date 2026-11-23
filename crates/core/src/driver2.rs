@@ -4416,7 +4416,8 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
                     // bound that implies Sized holds it, not the word `Sized` of its `?Sized`)
                     let bs = bounds(n);
                     let held = if tr == "Sized" {
-                        bs.iter().any(|b| b == "Sized" || prog.bound_implies(b, &["Sized"], false, 0)) || !maybe_unsized(text, n)
+                        // (std's `Clone`, `Copy` and `Default` have `Sized` as a supertrait: `T: ?Sized + Clone` is Sized)
+                        bs.iter().any(|b| b == "Sized" || prog.bound_implies(b, &["Sized", "Clone", "Copy", "Default"], false, 0)) || !maybe_unsized(text, n)
                     } else {
                         bs.iter().any(|b| b == tr || prog.bound_implies(b, &[tr.as_str()], true, 0)) || word(text, tr)
                     };
