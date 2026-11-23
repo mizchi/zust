@@ -2749,3 +2749,15 @@ fn part16_unsized_box_reborrow() {
     // (what is fine: the borrow ends before the move, a `&mut *b` of a `mut` box, a box of a `&'static`)
     assert_eq!(check("trait A { fn n(&self) -> u8; }\nimpl A for u8 { fn n(&self) -> u8 { *self } }\nfn f(v: Box<dyn A>) -> u8 {\n    let r = &*v;\n    let n = r.n();\n    drop(v);\n    n\n}\nfn g(mut v: Box<[u8]>) -> u8 {\n    let r = &mut *v;\n    r[0] = 1;\n    v[0]\n}\nfn h(v: Box<&'static str>) -> &'static str {\n    *v\n}\nfn main() {\n    println!(\"{} {} {}\", f(Box::new(3u8)), g(vec![0u8].into_boxed_slice()), h(Box::new(\"x\")));\n}\n"), vec![]);
 }
+
+/// `let ref x = e;` binds a reference to e's value (its type is `&T`, as an element of `[x]` too), and a temporary e
+/// the `let` extends goes away with the block's locals: returning `x` of `let ref mut x = 1234543;` is E0515
+/// (nll/return-ref-mut-issue-46557.rs), and `r = z;` of `let ref z = f();` in an inner block used after is E0716
+#[test]
+fn part16_let_ref_temporaries() {
+    let d = check("fn g() -> &'static mut u32 {\n    let ref mut x = 1234543;\n    x\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0515"), "{d:?}");
+    let d = check("fn f() -> u32 { 3 }\nfn main() {\n    let ref mut x = 1234543;\n    *x += 1;\n    let ref y = f();\n    let r;\n    {\n        let ref z = f();\n        r = z;\n    }\n    println!(\"{} {} {}\", x, y, r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("E0716"), "{d:?}");
+    assert_eq!(check("fn h() -> &'static u32 {\n    let x = &(5u32 + 1);\n    x\n}\nfn k() -> &'static u32 {\n    let ref x = 5u32;\n    x\n}\nfn main() {\n    let ref init = 0i32;\n    let a: &i32 = init;\n    let out = [init];\n    println!(\"{} {:?} {} {}\", a, out, h(), k());\n}\n"), vec![]);
+}

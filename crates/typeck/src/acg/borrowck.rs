@@ -1952,6 +1952,22 @@ impl Cx<'_> {
             self.bk.src(Src::Loan(ln));
             self.bk.stmt_temps.push(id);
         }
+        // (`let ref mut x = 5;` / `let ref x = f();`: a temporary the `let` extends, which goes away with the block's
+        // locals (returning x is E0515). Not a constant one, as `let x = &5;` (`let ref x = 5;`))
+        if self.bk.level >= 2 && in_let && !super::is_place_expr(e) && pats.iter().any(|p| pat_binds_ref(p)) {
+            let m = pats.iter().any(|p| pat_binds_ref_mut(p));
+            if m || made_temp(self.prog, e) {
+                let id = self.bk.locals.len() as u32;
+                self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP, via_ref: false });
+                self.bk_ev(Ev::Bind(id, true));
+                let sp = err_pos(e);
+                let ln = self.bk.loans.len() as u32;
+                self.bk.loans.push(Loan { place: BPlace { local: id, proj: vec![] }, mutable: m, sp, at: sp, quiet: true, capture: false });
+                self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Borrow(ln), sp));
+                self.bk.src(Src::Loan(ln));
+                self.bk.scope_temps.push((self.scopes.len().saturating_sub(1), id));
+            }
+        }
         let srcs = self.bk_frame_end();
         self.bk.scrut = srcs;
         // (a pattern that writes `'static` (`Foo::Bar::<'static> { .. }`): checked from here on)

@@ -948,7 +948,8 @@ impl Inf<'_> {
                         self.lets.push((stmt_key(st), v));
                     }
                     match pat {
-                        Pat::Ident(_, _, n, None) => self.scopes.last_mut().unwrap().push((n.clone(), v)),
+                        // (`let ref x = e;` binds a reference to e's value: as a pattern)
+                        Pat::Ident(false, _, n, None) => self.scopes.last_mut().unwrap().push((n.clone(), v)),
                         p => self.pat(p, v, None),
                     }
                 }
