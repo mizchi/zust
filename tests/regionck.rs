@@ -2413,3 +2413,21 @@ fn part13_mut_ref_moves_and_two_phase() {
     let ok = "struct S(Vec<i32>);\nimpl S {\n    fn ext(&mut self, _b: &S) {}\n    fn add(&mut self, n: usize) {\n        self.0.push(n as i32);\n    }\n    fn len(&self) -> usize {\n        self.0.len()\n    }\n}\nfn walk<'a>(mut cur: &'a mut Vec<i32>, other: &'a mut Vec<i32>) {\n    let r: &mut Vec<i32> = cur;\n    r.push(1);\n    cur.push(2);\n    let t: &mut Vec<i32> = other;\n    t.push(3);\n    cur = t;\n    cur.push(4);\n}\nfn moves(a: &mut Vec<u8>) {\n    let b = a;\n    b.push(1);\n    let c = b;\n    c.push(2);\n}\nfn main() {\n    let mut v = S(vec![]);\n    let w = S(vec![1]);\n    v.ext(&w);\n    v.add(v.len());\n    let mut a = vec![1];\n    let mut b = vec![2];\n    walk(&mut a, &mut b);\n    let mut x = vec![1, 2];\n    let y = &mut x;\n    let z: &mut Vec<i32> = y;\n    z.push(3);\n    y.push(4);\n    let mut u = vec![];\n    moves(&mut u);\n    println!(\"{} {:?} {:?} {:?}\", v.len(), a, x, u);\n}\n";
     assert_eq!(check(ok), vec![]);
 }
+
+/// `v.extend(&v)` / `v.extend(shared)` with `shared = &v`: the iterator the argument becomes holds a loan of v when
+/// v's `&mut` is taken (E0502, borrowck/two-phase-reservation-sharing-interference-2.rs). A closure that calls a
+/// captured `FnMut` closure borrows it mutably, so is `FnMut` itself: neither may be called through a binding not
+/// declared `mut` (unboxed-closures/unboxed-closures-infer-fnmut-calling-fnmut-no-mut.rs)
+#[test]
+fn part13_extend_and_fnmut_calls() {
+    let d = check("fn main() {\n    let mut v = vec![0, 1, 2];\n    let shared = &v;\n    v.extend(shared);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("cannot borrow `v` as mutable because it is also borrowed as immutable"), "{d:?}");
+    let d = check("fn main() {\n    let mut v = vec![0, 1, 2];\n    v.extend(&v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("cannot borrow `v` as mutable"), "{d:?}");
+    let d = check("fn main() {\n    let mut counter = 0;\n    let tick1 = || {\n        counter += 1;\n    };\n    let tick2 = || {\n        tick1();\n    };\n    let _ = tick2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot borrow `tick1` as mutable, as `tick1` is not declared as mutable"), "{d:?}");
+    let d = check("fn main() {\n    let mut counter = 0;\n    let mut tick1 = || {\n        counter += 1;\n    };\n    let tick2 = || {\n        tick1();\n    };\n    tick2();\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("cannot borrow `tick2` as mutable"), "{d:?}");
+    let ok = "fn main() {\n    let mut v = vec![1, 2];\n    let w = vec![3];\n    v.extend(w.iter());\n    v.extend(v.clone());\n    v.extend(v.iter().copied().collect::<Vec<_>>());\n    v.extend(&w);\n    let mut s = String::new();\n    let o = String::from(\"ab\");\n    s.extend(o.chars());\n    let mut counter = 0;\n    let mut tick1 = || {\n        counter += 1;\n    };\n    let mut tick2 = || {\n        tick1();\n    };\n    tick2();\n    let base = 3;\n    let read = || base + 1;\n    let call = || read() + 1;\n    let mut acc = vec![];\n    let mut push = |x: i32| acc.push(x);\n    let mut twice = |x: i32| {\n        push(x);\n        push(x);\n    };\n    twice(call());\n    println!(\"{:?} {} {} {:?}\", v, s, counter, acc);\n}\n";
+    assert_eq!(check(ok), vec![]);
+}

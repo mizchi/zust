@@ -2743,6 +2743,15 @@ impl Cx<'_> {
                     out.push(p);
                 }
             }
+            // (a call of a captured closure that is `FnMut` (`tick1()`): it is borrowed by `&mut` for the call, so
+            // captured by `&mut`)
+            Expr::Call(f, _) => {
+                if let Some((p, Some(Ty::Struct(sid)))) = self.bk_rooted_at(strip_paren(f), n) {
+                    if p.proj.is_empty() && self.bk.fnmut.contains(&Ty::Struct(sid)) {
+                        calls.push(p);
+                    }
+                }
+            }
             // (a `&mut self` method of the place (`v.push(4)`): captured by `&mut`)
             Expr::MethodCall(r, m, ..) => {
                 if let Some((p, Some(Ty::Struct(sid)))) = self.bk_rooted_at(r, n) {

@@ -85,10 +85,14 @@ impl Cx<'_> {
             }
             _ => {}
         }
-        let (v, t) = match iter_e {
-            Some(e) => self.expr(e, None)?,
-            None => self.expr(arg, None)?,
+        // (what the iterator holds (`v.iter()` of `v.extend(&v)`): the `__exr_ext` local holds it until the call)
+        self.bk_frame();
+        let r = match iter_e {
+            Some(e) => self.expr(e, None),
+            None => self.expr(arg, None),
         };
+        let srcs = self.bk_frame_end();
+        let (v, t) = r?;
         if t == Ty::Never {
             self.scopes.pop();
             return Ok(Some((None, Ty::Never)));
@@ -96,6 +100,7 @@ impl Cx<'_> {
         let item = self.prog.assoc_of(t, "Item");
         let by_ref = is_vec && matches!(item, Some(Ty::Ref(_, i)) if *i == elem);
         self.bind("__exr_ext".into(), t, v);
+        self.bk_def_named("__exr_ext", &srcs, iter_e.unwrap_or(arg));
         let r = Expr::Paren(receiver.clone());
         let e: Expr = if by_ref {
             mcall(r, "__extend_ref", vec![path_expr("__exr_ext")])
@@ -103,6 +108,9 @@ impl Cx<'_> {
             mcall(r, "extend", vec![path_expr("__exr_ext")])
         };
         let e = self.keep_expr(e);
+        // (the argument was evaluated before: the receiver's `&mut` is taken while it is held (as an operator's, not
+        // two-phase after it), so an iterator of the receiver (`v.extend(v.iter())`) conflicts with it (E0502))
+        self.bk.op_call = e as *const Expr as usize;
         let res = self.expr(e, expected)?;
         self.pop_scope();
         Ok(Some(res))
