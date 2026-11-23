@@ -1176,6 +1176,41 @@ impl Session2 {
                 }
             }
         }
+        // (E0449: a visibility where it means nothing: on an impl, an extern block, a trait's items, a trait impl's
+        // items, an enum's variants and their fields)
+        {
+            let marks = crate::prep::hoist_marks(&src);
+            for it in &items[..user_src] {
+                let text = src.get(it.start..it.end).unwrap_or("");
+                let Some(v) = leading_pub(text) else { continue };
+                let rest = text[v + 3..].trim_start();
+                let bad = match it.kind {
+                    crate::lexer::ItemKind::ImplHeader | crate::lexer::ItemKind::TraitMember(_) => true,
+                    crate::lexer::ItemKind::ImplMember(h) => sums.get(h as usize).is_some_and(|sm| sm.impl_trait.is_some()),
+                    crate::lexer::ItemKind::Normal => rest.starts_with("extern") && extern_block(rest.as_bytes(), 0),
+                    _ => false,
+                };
+                if bad {
+                    let (line, col) = item_pos(&src, &marks, it, v);
+                    return Err(format!("{line}:{col}: visibility qualifiers are not permitted here (E0449)"));
+                }
+            }
+            // (an enum's variants and fields: only an enum with a `pub` among its names after its own)
+            for it in &items[..user_src] {
+                if !matches!(it.kind, crate::lexer::ItemKind::Normal) {
+                    continue;
+                }
+                let id = |&(a, b): &(u32, u32)| src.get(a as usize..b as usize).unwrap_or("");
+                let Some(e) = it.idents.iter().take(8).position(|x| id(x) == "enum") else { continue };
+                if !it.idents[e..].iter().any(|x| id(x) == "pub") {
+                    continue;
+                }
+                if let Some(off) = enum_inner_pub(&src[it.start..it.end]) {
+                    let (line, col) = item_pos(&src, &marks, it, off);
+                    return Err(format!("{line}:{col}: visibility qualifiers are not permitted here (E0449)"));
+                }
+            }
+        }
         // (E0119: two blanket impls of one trait for a bare parameter, `impl<T: A> Tr for T` and `impl<T: B> Tr for T`,
         // overlap whatever their bounds say. Only the program's own traits declared once (modules flatten names),
         // without trait arguments, and not under the features that allow overlapping impls)
@@ -1814,6 +1849,73 @@ fn relocate(e: String, it: &SrcItem) -> String {
         }
     }
     format!("{}:1: {e}", it.line)
+}
+
+/// The offset of a `pub` an item's text starts with, past its outer attributes and comments
+fn leading_pub(text: &str) -> Option<usize> {
+    let b = text.as_bytes();
+    let mut i = 0;
+    loop {
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if b[i..].starts_with(b"//") {
+            i += b[i..].iter().position(|&c| c == b'\n').unwrap_or(b.len() - i);
+        } else if b[i..].starts_with(b"/*") {
+            i += b[i..].windows(2).position(|w| w == b"*/").map_or(b.len() - i, |n| n + 2);
+        } else if b[i..].starts_with(b"#[") || b[i..].starts_with(b"#![") {
+            // (an attribute: to its `]`, past the strings in it)
+            let mut d = 0i32;
+            while i < b.len() {
+                match b[i] {
+                    b'"' => {
+                        i += 1;
+                        while i < b.len() && b[i] != b'"' {
+                            i += if b[i] == b'\\' { 2 } else { 1 };
+                        }
+                    }
+                    b'[' => d += 1,
+                    b']' => {
+                        d -= 1;
+                        if d == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+        } else {
+            break;
+        }
+    }
+    (b[i..].starts_with(b"pub") && b.get(i + 3).is_none_or(|c| !(c.is_ascii_alphanumeric() || *c == b'_'))).then_some(i)
+}
+
+/// In an enum's text: the offset of a `pub` on one of its variants or their fields (`V1 { pub f: i32 }`, `V2(pub i32)`)
+fn enum_inner_pub(text: &str) -> Option<usize> {
+    let b = text.as_bytes();
+    let t = crate::lexer::tokenize(b);
+    let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+    let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+    let e = (0..t.len()).find(|&k| w(k) == "enum")?;
+    // (the body: its `{`, past the generics and a where clause)
+    let open = (e..t.len()).find(|&k| sym(k, b'{'))?;
+    let mut d = 0i32;
+    for k in open..t.len() {
+        if sym(k, b'{') || sym(k, b'(') || sym(k, b'[') {
+            d += 1;
+        } else if sym(k, b'}') || sym(k, b')') || sym(k, b']') {
+            d -= 1;
+            if d == 0 {
+                break;
+            }
+        } else if (d == 1 || d == 2) && w(k) == "pub" && k > 0 && (sym(k - 1, b'{') || sym(k - 1, b'(') || sym(k - 1, b',') || sym(k - 1, b']')) {
+            return Some(t[k].1);
+        }
+    }
+    None
 }
 
 /// The line and column, in the file as written, of the byte at `off` in an item's text. An item hoisted out of a fn
