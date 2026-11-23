@@ -1900,6 +1900,10 @@ impl Cx<'_> {
                 let r = self.slice_range(b, ix, m)?;
                 // (a borrow of the elements: `&mut x[1..3]` with x: &[T] is E0596, and it conflicts as `&mut x[1]`)
                 self.bk_borrow(rexpr, m, err_pos(rexpr));
+                // (`&f().0[..]`: of a temporary's elements)
+                if let Some(t) = self.temp_root(rexpr).and_then(|r| self.peek(r)).filter(|_| self.bk_on() && self.bk_place(rexpr).is_none()) {
+                    self.bk_temp_borrow(rexpr, m, t);
+                }
                 return Ok(r);
             }
         }
@@ -1970,6 +1974,9 @@ impl Cx<'_> {
                 // (`&*Box::new(1)`: a borrow of what a temporary owns, which goes away with it (E0716))
                 if matches!(strip_paren(rexpr), Expr::Unary(op, _, _) if op == "*") && self.bk_place(rexpr).is_none() {
                     self.bk_temp_borrow(rexpr, m, pl.ty());
+                } else if let Some(t) = self.temp_root(rexpr).and_then(|r| self.peek(r)).filter(|_| self.bk_on() && self.bk_place(rexpr).is_none()) {
+                    // (`&f().0`, `&x.borrow().1`: a borrow of a place in a temporary, which goes away with it)
+                    self.bk_temp_borrow(rexpr, m, t);
                 }
             }
             return match pl {

@@ -2875,3 +2875,22 @@ fn part16_type_parameter_arguments() {
     assert!(d.len() == 1 && d[0].0 == 13 && d[0].1.contains("`x` does not live long enough"), "{d:?}");
     assert_eq!(check("struct G<'a> {\n    f: Box<dyn Fn() + 'a>,\n}\nfn scoped<'a, F: Fn() + 'a>(f: F) -> G<'a> {\n    G { f: Box::new(f) }\n}\nfn keep<T: Clone>(t: T) -> Vec<T> {\n    vec![t]\n}\nfn main() {\n    let x = 1;\n    let g = scoped(|| println!(\"{}\", x));\n    (g.f)();\n    let v = { let s = String::from(\"a\"); keep(s.len()) };\n    println!(\"{:?}\", v);\n}\n"), vec![]);
 }
+
+/// A borrow of a place in a temporary (`&f().0`, `&x.borrow().1`, `&v.clone()[0]`, `&f().0[..]`, a `&mut` field
+/// reborrowed through a guard where a `&mut` is annotated): the temporary goes away at the end of the statement unless
+/// the `let` extends it (E0716). Not through a reference the temporary is (`&v.iter().next().unwrap().1`)
+#[test]
+fn part16_temporary_places() {
+    temp_error("fn mk() -> (i32, i32) {\n    (0, 1)\n}\nfn main() {\n    let v;\n    v = &mk().1;\n    println!(\"{}\", v);\n}\n", 6);
+    temp_error("use std::cell::RefCell;\nfn id<T>(t: T) -> T {\n    t\n}\nfn main() {\n    let x = RefCell::new((0, 1));\n    let v: &i32 = id(&x.borrow().1);\n    println!(\"{}\", v);\n}\n", 7);
+    temp_error("fn main() {\n    let x = vec![(0, 1)];\n    let v;\n    v = &x.clone()[0].1;\n    println!(\"{:?}\", v);\n}\n", 4);
+    temp_error("fn main() {\n    let v;\n    v = &Box::new((0, 1)).1;\n    println!(\"{:?}\", v);\n}\n", 3);
+    temp_error("fn mk() -> (String, i32) {\n    (String::new(), 1)\n}\nfn main() {\n    let v: &str;\n    v = &mk().0[..];\n    println!(\"{:?}\", v);\n}\n", 6);
+    temp_error("use std::cell::RefCell;\nfn main() {\n    let mut r = 0;\n    let x = RefCell::new((&mut r, 0));\n    let val: &mut i32 = x.borrow_mut().0;\n    println!(\"{}\", val);\n}\n", 5);
+    assert_eq!(check("use std::cell::RefCell;\nfn main() {\n    let x = RefCell::new((0, 1));\n    let v = &x.borrow().1;\n    println!(\"{}\", v);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let x = vec![(0, 1)];\n    let v = &x.clone()[0].1;\n    println!(\"{:?}\", v);\n}\n"), vec![]);
+    assert_eq!(check("static P: (i32, i32) = (0, 1);\nfn mk() -> &'static (i32, i32) {\n    &P\n}\nfn main() {\n    let v;\n    v = &mk().1;\n    println!(\"{}\", v);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let x = vec![(0, 1)];\n    let v;\n    v = &x.iter().next().unwrap().1;\n    println!(\"{:?}\", v);\n}\n"), vec![]);
+    assert_eq!(check("fn mk() -> (i32, i32) {\n    (0, 1)\n}\nfn main() {\n    let v;\n    v = &mk().1;\n    let _ = 0;\n}\n"), vec![]);
+    assert_eq!(check("use std::cell::RefCell;\nfn main() {\n    let mut r = 0;\n    let x = RefCell::new((&mut r, 0));\n    let val: &mut i32 = &mut *x.borrow_mut().0;\n    *val = 2;\n}\n"), vec![]);
+}

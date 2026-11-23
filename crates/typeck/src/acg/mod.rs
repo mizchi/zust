@@ -2299,6 +2299,17 @@ impl Cx<'_> {
                     if r.is_ok() && ann_ty.is_some() && matches!(ann, Some(Ty::Ref(true, _))) && matches!(strip_paren(init), Expr::Path(None, _)) {
                         self.bk_reborrow_let(init);
                     }
+                    // (`let v: &T = x.borrow().0;` with the field a `&mut T`: a coercion site, v reborrows `*x.borrow().0`
+                    // through the temporary guard, which goes away at the end of the statement (E0716 when v is used
+                    // after): rustc's `&*`, which the `let` does not extend, as it is not written)
+                    if let (true, Some(Ty::Ref(m, _)), Some(Ty::Ref(true, _))) = (r.is_ok() && ann_ty.is_some() && self.bk_on(), ann, self.owned_field_ty(init)) {
+                        if let Some(t) = self.temp_root(init).and_then(|x| self.peek(x)) {
+                            if self.bk_place(init).is_none() {
+                                self.bk.direct.push(init as *const Expr as usize);
+                                self.bk_temp_borrow(init, m, t);
+                            }
+                        }
+                    }
                     self.bk.macro_let = ml0;
                     self.bk.direct.truncate(ext0);
                     self.bk.extended.truncate(ext1);

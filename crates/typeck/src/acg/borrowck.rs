@@ -501,6 +501,18 @@ pub fn direct_ref(prog: &Program, a: &Expr, out: &mut Vec<usize>) {
             out.push(&**x as *const Expr as usize);
             out.push(strip(x) as *const Expr as usize);
         }
+        // (`&f().0`, `&x.borrow().1`, `&v.clone()[0]`: a place in such a temporary (temp_root tells, with the types))
+        let mut y = strip(x);
+        while let Expr::Field(b, ..) | Expr::Index(b, ..) | Expr::Unary(_, b, _) = y {
+            if matches!(y, Expr::Unary(op, ..) if op != "*") {
+                break;
+            }
+            if made_temp(prog, b) {
+                out.push(&**x as *const Expr as usize);
+                break;
+            }
+            y = strip(b);
+        }
         // (`&*Box::new(1)`: a borrow of what a temporary owns)
         if let Expr::Unary(op, y, _) = strip(x) {
             if op == "*" && made_temp(prog, y) {
@@ -2457,6 +2469,58 @@ impl Cx<'_> {
             Ty::Struct(sid) => self.prog.structs[sid as usize].args.iter().any(|&a| self.ty_holds(a, u, depth + 1)),
             _ => false,
         }
+    }
+
+    /// `f().0`, `x.borrow().1`, `v.clone()[0]`: a place in a temporary a call makes, through fields, indexes and derefs
+    /// of what the temporary owns (a `Box`, a guard's or an `Rc`'s `Deref`, which borrow it), not through a reference
+    /// it holds (`v.iter().next().unwrap().0` is a place of `v`'s): the temporary's expression
+    pub(crate) fn temp_root<'e>(&self, e: &'e Expr) -> Option<&'e Expr> {
+        let mut x = strip_paren(e);
+        loop {
+            let b = match x {
+                Expr::Field(b, ..) | Expr::Index(b, ..) => &**b,
+                Expr::Unary(op, b, _) if op == "*" => &**b,
+                _ => return None,
+            };
+            if matches!(self.peek(b), Some(Ty::Ref(..) | Ty::Ptr(..)) | None) {
+                return None;
+            }
+            let b = strip_paren(b);
+            if made_temp(self.prog, b) {
+                return Some(b);
+            }
+            x = b;
+        }
+    }
+
+    /// The type of a field `b.f` as declared, through the `Box`es and `Deref`s of what b owns (not of a reference): the
+    /// type before a coercion (peek gives what the field is coerced to). A prelude type's own fields are not seen from
+    /// the program (`x.borrow().0` is of what the `Ref` derefs to)
+    pub(crate) fn owned_field_ty(&self, e: &Expr) -> Option<Ty> {
+        let Expr::Field(b, name, _) = strip_paren(e) else { return None };
+        let mut t = self.peek(b)?;
+        for _ in 0..4 {
+            match t {
+                Ty::Box(i) => t = *i,
+                Ty::Struct(sid) => {
+                    let base = self.prog.base_of(sid);
+                    let prelude = self.prog.struct_item.get(base as usize).is_none_or(|&i| i >= self.prog.prelude_from);
+                    let deref = self.prog.method(sid, "deref");
+                    if !(prelude && deref.is_some()) {
+                        if let Some((ft, _)) = self.prog.field(sid, name) {
+                            return Some(ft);
+                        }
+                    }
+                    // (the impl's generic `Target`: of the struct's arguments)
+                    match deref.map(|d| self.prog.sigs[d as usize].ret) {
+                        Some(Ty::Ref(_, i)) => t = self.prog.subst(*i, &self.prog.structs[sid as usize].args),
+                        _ => return None,
+                    }
+                }
+                _ => return None,
+            }
+        }
+        None
     }
 
     /// `let b: &mut T = a;` with a `&mut` local a: the loan of `*a` b holds
