@@ -3299,3 +3299,17 @@ fn part18_scrutinee_drop_per_arm() {
     assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
     assert_eq!(check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap = BinaryHeap::from(vec![1, 2]);\n    let flag = std::env::args().count() > 5;\n    match heap.peek_mut() {\n        x if flag => drop(x),\n        x => drop(x),\n    }\n    heap.push(3);\n    let n = match heap.peek_mut() {\n        x if flag => { drop(x); 1 }\n        _ => 2,\n    };\n    heap.push(n);\n    println!(\"{}\", heap.len());\n}\n"), vec![]);
 }
+
+/// A `&mut` read by value out of a place where a `let` with no type written is initialized from it: moved, not
+/// reborrowed (no coercion site). Out of an array (E0508), through a raw pointer or a reference (E0507). Where a
+/// `&mut` is expected (an argument, `let c: &mut i32 = a[0];`), it is reborrowed as before
+#[test]
+fn part18_mut_refs_moved_by_value() {
+    let d = check("fn main() {\n    let mut x = 1;\n    let a = [&mut x];\n    let b = a[0];\n    *b = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("cannot move out of"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = 1;\n    let mut r = &mut x;\n    let p: *const &mut i32 = &r;\n    let y = unsafe { *p };\n    *y = 2;\n    let _ = &mut r;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+    let d = check("fn main() {\n    let mut z = 5;\n    let mut q = &mut z;\n    let qq = &mut q;\n    let u = *qq;\n    *u = 3;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot move out of `*qq`"), "{d:?}");
+    assert_eq!(check("fn take(r: &mut i32) { *r += 1; }\nfn main() {\n    let mut x = 1;\n    let mut y = 2;\n    let mut a = [&mut x, &mut y];\n    take(a[0]);\n    *a[1] = 5;\n    let c: &mut i32 = a[0];\n    *c = 3;\n    let v = &mut a;\n    take(v[1]);\n    println!(\"{}\", a.len());\n}\n"), vec![]);
+}

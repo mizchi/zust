@@ -2322,7 +2322,10 @@ impl Cx<'_> {
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
                     let ml0 = std::mem::replace(&mut self.bk.macro_let, name.starts_with("__exr_"));
+                    let plain = if ann_ty.is_none() && self.bk_on() { borrowck::value_tail(init) as *const Expr as usize } else { 0 };
+                    let plain0 = std::mem::replace(&mut self.bk.plain_init, plain);
                     let r = self.expr(init, ann.or(hint));
+                    self.bk.plain_init = plain0;
                     // (`let b: &mut T = a;` with a: `&mut T`: a coercion site, b reborrows `*a` (rustc's `&mut *a`), not
                     // a copy of a: a use of `*a` while b lives conflicts)
                     if r.is_ok() && ann_ty.is_some() && matches!(ann, Some(Ty::Ref(true, _))) && matches!(strip_paren(init), Expr::Path(None, _)) {

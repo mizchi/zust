@@ -290,6 +290,10 @@ pub struct Bk {
     /// The drop of a `match` scrutinee some of whose arms take the whole value (`x => drop(x)`): those arms move it,
     /// so it holds nothing there (bk_scrutinee; the match takes it)
     pub scrut_drop: Option<u32>,
+    /// The address of the value a `let` with no type written is initialized from (through parentheses and block
+    /// tails, value_tail): no coercion site, so a `&mut` read out of a place there by value is moved, not reborrowed
+    /// (`let b = a[0];`, `let y = unsafe { *p };`)
+    pub plain_init: usize,
     /// For each of copy_out's locals, its mask in masks: whether each loan is of a place that holds the copied type
     pub copy_masks: HashMap<u32, usize>,
     /// copy_masks' masks, one for each copied type
@@ -1994,6 +1998,18 @@ pub enum CapMode {
     RefMut,
     /// Moved out (bound by value, not Copy)
     Val,
+}
+
+/// The expression whose value e is: through parentheses and the tails of blocks (`unsafe { *p }`)
+pub(crate) fn value_tail(e: &Expr) -> &Expr {
+    match e {
+        Expr::Paren(x) => value_tail(x),
+        Expr::Block(None, _, b) => match b.stmts.last() {
+            Some(crate::parse::Stmt::Expr(t, false)) => value_tail(t),
+            _ => e,
+        },
+        e => e,
+    }
 }
 
 /// A pattern that binds the whole value by value (`x`, `x @ ..`): it moves the scrutinee
