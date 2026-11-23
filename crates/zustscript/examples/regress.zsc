@@ -131,3 +131,39 @@ fn ask_proto() -> i32 { perform __proto__ }
 pub fn proto_op() -> i32 {
   handle ask_proto() { __proto__, k => k(7) }
 }
+
+// handlers that stay generators (not tail-resumptive, or an arm that performs an effect handled outside) run in one
+// loop with the frames on a heap stack: many operations in one handle do not grow the JS stack either
+enum Say { Said(i32) -> () }
+pub fn gen_after_k(n: i32) -> i32 {
+  let mut c = 0;
+  handle bump_all(n) {
+    Count, k => k(c),
+    Bump(v), k => { c = c + v; let r = k(()); r },
+  }
+}
+fn gen_inner(n: i32) -> i32 {
+  let mut c = 0;
+  handle bump_all(n) {
+    Count, k => k(c),
+    Bump(v), k => { c = c + v; perform Said(v); k(()) },
+  }
+}
+pub fn gen_outer_op(n: i32) -> i32 {
+  let mut s = 0;
+  let c = handle gen_inner(n) { Said(v), k => { s = s + 1; k(()) } };
+  c + s
+}
+// every arm still waits for its continuation (its `+ 1`): as deep as the operations, on the heap
+pub fn gen_plus_one(n: i32) -> i32 {
+  handle bump_all(n) {
+    Count, k => k(0),
+    Bump(v), k => k(()) + 1,
+  }
+}
+// a continuation resumed twice is an error, not a second run
+enum Once { Pick -> i32 }
+fn pick() -> i32 { perform Pick }
+pub fn resume_twice() -> i32 {
+  handle pick() { Pick, k => k(1) + k(2) }
+}
