@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zustscript 入門 ── TypeScript の座標を WebAssembly に渡す</title>
+<meta name="description" content="クリック位置と点の距離を求める例で、zustscript が生成する JavaScript、TypeScript の型定義、WebAssembly の呼び出しコードを読み解きます。">
+<link rel="stylesheet" href="../style.css">
+<style>
+  article { max-width: 48rem; margin: auto; padding-block: clamp(32px, 7vw, 76px); font-size: 16px; line-height: 1.9; }
+  article h1 { line-height: 1.35; font-size: clamp(28px, 4.5vw, 42px); margin: 0 0 24px; }
+  article h2 { margin-top: 2.4em; margin-bottom: .6em; font-size: 23px; }
+  article p { margin: .9em 0; }
+  article figure { margin-block: 1.25em; }
+  pre { overflow-x: auto; padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); line-height: 1.6; }
+  figure pre { margin: 0; }
+  pre code { background: none; padding: 0; font-size: 14px; }
+</style>
+</head>
+<body>
+<header class="bar"><div class="wrap bar-in">
+  <a class="brand" href="../"><span>z</span>ust</a>
+  <nav aria-label="サイト内"><a href="../">About</a><a href="./" aria-current="page">zustscript</a><a href="https://github.com/mizchi/zust">GitHub</a></nav>
+</div></header>
+<main class="wrap">
+<article>
+<h1>zustscript 入門<br>TypeScript の座標を WebAssembly に渡す</h1>
+<p>地図上の点をクリックしたとき、中心から半径 5 ピクセル以内なら選択できるようにします。画面にはすでに TypeScript の座標型があります。距離の計算だけを WebAssembly に移したら、クリックを処理する側のコードはどこまで変わるでしょうか。</p>
+<p>zustscript は、JavaScript と一緒に使うために開発中のフロントエンド向け言語です。コンパイラの <code>zsc</code> は、普通の関数を JavaScript の ES モジュールに変換し、公開関数には TypeScript の型定義も生成します。関数に <code>@wasm</code> を付けると、その本体を Rust に変換し、zust のコンパイラ <code>zustc</code> で WebAssembly（Wasm）にコンパイルします。</p>
+
+<h2>画面で使う Point を読み込む</h2>
+<p>クリック位置も地図上の点も、画面上のピクセル座標で表します。型を定義するファイルは TypeScript 側に一つ置きます。</p>
+<figure><figcaption>model.ts</figcaption><pre><code>export type Point = { x: number; y: number };</code></pre></figure>
+<p>同じディレクトリに <code>pick.zsc</code> を置きます。<code>import type</code> で読み込んだ <code>Point</code> の各フィールドは、zustscript では倍精度浮動小数点数の <code>f64</code> になります。</p>
+<figure><figcaption>pick.zsc</figcaption><pre><code>import type { Point } from "./model.ts";
+
+@wasm pub fn distance(a: Point, b: Point) -&gt; f64 {
+  let dx = a.x - b.x;
+  let dy = a.y - b.y;
+  (dx * dx + dy * dy).sqrt()
+}
+
+pub fn can_pick(cursor: Point, mark: Point) -&gt; bool {
+  distance(cursor, mark) &lt;= 5.0
+}</code></pre></figure>
+<p><code>pub</code> を付けた二つの関数は、どちらも JavaScript から名前で import できます。半径を 8 ピクセルに広げるなら、編集するのは <code>can_pick</code> の <code>5.0</code> だけです。</p>
+
+<h2>二つの座標は四つの数値になる</h2>
+<p>生成された <code>pick.js</code> には、クリック判定も、Wasm を呼ぶ関数も入っています。モジュールの初期化と読み込み処理を省いて、二つの関数を抜き出すとこうなります。</p>
+<figure><figcaption>pick.js の抜粋</figcaption><pre><code>export function can_pick(cursor, mark) {
+  return distance(cursor, mark) &lt;= 5.0;
+}
+
+export function distance(a, b) {
+  return $w.__zsc_w_distance(a.x, a.y, b.x, b.y);
+}</code></pre></figure>
+<p><code>$w</code> は読み込み済みの Wasm モジュールが公開する関数やメモリです。二つの <code>Point</code> は境界で四つの数値に展開されます。呼び出し側はいつもの <code>{ x, y }</code> を渡せばよく、点をバイト列に詰めるコードは要りません。生成された <code>pick.d.ts</code> でも、引数の型は元の <code>model.ts</code> の <code>Point</code> を参照します。</p>
+<p>境界を越える値によっては転送コストがかかります。たとえば数値の配列を JS から渡すと、その中身を Wasm のメモリにコピーします。地図上の数万点から最も近い点を探すなら、点ごとに距離を問い合わせる方法と、探索ループを丸ごと Wasm に置く方法とで、境界を越える回数が変わります。</p>
+
+<h2>同じ入力で両方を動かす</h2>
+<p>Rust（edition 2024 対応）と Node.js 24 以降を用意します。リポジトリを取得し、サンプル用のディレクトリに移動します。</p>
+<pre><code>git clone https://github.com/mizchi/zust.git
+cd zust
+mkdir points
+cd points</code></pre>
+<p>先ほどの <code>model.ts</code> と <code>pick.zsc</code> をここに保存します。まず <code>--all-js</code> を指定して、距離計算も含めて JavaScript に変換します。</p>
+<pre><code>cargo run --manifest-path ../crates/zustscript/Cargo.toml -- \
+  pick.zsc --all-js -o js</code></pre>
+<figure><figcaption>try.mjs</figcaption><pre><code>const { distance, can_pick } = await import(process.argv[2]);
+const mark = { x: 0, y: 0 };
+for (const cursor of [{ x: 3, y: 4 }, { x: 0, y: 6 }]) {
+  console.log(distance(cursor, mark), can_pick(cursor, mark));
+}</code></pre></figure>
+<pre><code>node try.mjs ./js/pick.js</code></pre>
+<p>次に <code>zustc</code> をビルドし、同じ <code>pick.zsc</code> を <code>--all-js</code> を外してコンパイルします。出力先の <code>wasm/</code> には、JS と型定義に加えて、中間生成物の <code>pick.wasm.rs</code> と実行用の <code>pick.wasm</code> ができます。</p>
+<pre><code>cargo build --release --manifest-path ../Cargo.toml --bin zustc
+cargo run --manifest-path ../crates/zustscript/Cargo.toml -- \
+  pick.zsc --zustc ../target/release/zustc -o wasm
+node try.mjs ./wasm/pick.js</code></pre>
+<figure><figcaption>どちらの実行でも同じ出力</figcaption><pre><code>5 true
+6 false</code></pre></figure>
+<p>中心からちょうど 5 ピクセルの点は選択でき、6 ピクセルでは外れます。距離計算の実行場所を変えても、画面側が渡す座標と判定式は共通です。リポジトリには、この例を広げて点の列から最近傍を探す関数や、JSX で画面を組み立てる例もあります。</p>
+<ul>
+  <li><a href="https://github.com/mizchi/zust/blob/main/crates/zustscript/examples/shapes.zsc">図形の面積と最近傍を求める shapes.zsc</a></li>
+  <li><a href="https://github.com/mizchi/zust/blob/main/crates/zustscript/examples/app.zsc">JSX と Wasm を組み合わせた app.zsc</a></li>
+  <li><a href="https://github.com/mizchi/zust/tree/main/crates/zustscript">zustscript の言語仕様と実装状況</a></li>
+</ul>
+</article>
+</main>
+</body>
+</html>
