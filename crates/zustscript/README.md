@@ -14,6 +14,9 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
   - `--check-externs`: 各 `extern` の宣言が、実際の TS の .d.ts の型に合うかを tsrs(`npm i tsrs`、または `TSRS`)で確かめる。合わなければ、その `extern` の位置でエラーになる
   - JS ターゲットのサイズと速さの計測: `node bench/js/kpi.mjs --esbuild PATH`(`--against bench/js/baseline.json` で比べる)
   - あとで決めることと、次にやること: [TODO.md](TODO.md)(文法の提案は [evals/syntax/](evals/syntax/README.md))
+- ブラウザで試すプレイグラウンド: [editor/](../../editor/README.md)
+  - tree-sitter でハイライトし、wasm にした zsc で編集のたびにトランスパイルして、iframe で `main` を実行する(JSX を返せば React で描画)
+  - `@wasm fn` は JS のまま動かす(`--all-js` 相当。ブラウザでは zustc を動かせない)
 - テスト: `cargo test --release`
   - **Node 26** を使う(PATH 上の `node`。計測も Node 26.13.1。relaxed SIMD はフラグなしで動く)
   - app の例は zust 側の `target/release/zustc` を使う
@@ -75,7 +78,8 @@ pub fn display(u: User) -> String { u.name + " #" + (u.id as i32).to_string() }
 - **union は enum として読む**(JS では TS の値そのまま)
   - 文字列リテラルの union `type Status = "draft" | "published"`: データのない enum。バリアントはタグの先頭を大文字にした名前(`Draft`、`Published`)で、JS の値は TS の文字列そのもの(`"draft"`)
   - 判別キーつきの union `type Shape = { kind: "circle"; r: number } | { kind: "rect"; w: number; h: number }`: 全メンバーが同じ文字列リテラルのフィールド(タグ)を持つもの。メンバーはファイルの別のオブジェクト型の名前でもよい(`Square | { kind: "empty" }`)。バリアントは `Circle(f64)`、`Rect(f64, f64)` で、フィールドは TS のメンバーの順。パターン `Circle(r)` は `s.kind === "circle"` と `s.r` になり、`Circle(2.0)` は `{ kind: "circle", r: 2.0 }` を作る。`==` もタグとメンバー名で比べる
-  - 読まないもの(エラー): 文字列とオブジェクトが混ざった union、共通のタグがない union、名前にならないタグ(`"in-progress"`)、大文字にすると同じになるタグ。TS から読んだ union は、まだ `@wasm` との境界を越えない(JS 層で使う)
+  - 読まないもの(エラー): 文字列とオブジェクトが混ざった union、共通のタグがない union、名前にならないタグ(`"in-progress"`)、大文字にすると同じになるタグ
+  - TS から読んだ union も `@wasm` との境界を越える(下の「バイト列で越える値」、TS の形のまま)
 - 読み込んだ型は、zustscript のレコードと同じに使える(フィールドの読み出し、`{ ..u }` の更新、`==`、`@wasm` との境界)
 - JS の出力には何も足さない(レコードは素のオブジェクト)。`.d.ts` は自分で interface を書かず、`import type { User } from "./model.js"` で TS の型そのものを使う。TS 側は自分の値をそのまま渡せる(tests/ts/consumer.ts を tsc で検査)
   - export されていない型が `.d.ts` に出るときだけ、TS と同じ形(数値は素の `number`)の interface を書く。TS は構造で型を比べるので、同じ型として扱われる
@@ -280,9 +284,11 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
   - 例: `nearest(xs, ys, p: Vec2, mode: Mode) -> Option<Hit>`
 - **バイト列で越える値**: 文字列や配列を含むレコード(`{ name: String, tags: Array<String> }`)、レコード・文字列・配列の配列(`Array<Person>`、`Array<Array<f64>>`)は、1 つの固定した形式のバイト列にして越える
   - 両側の補助: JS 側は npm のパッケージ **zustscript-helper**(helper/ts、`encode` / `decode` だけの約 100 行)、Rust 側は crate **zustscript_helper**(helper/rust、trait `Wire` と `to_bytes` / `from_bytes`)。zustc は 1 つのファイルをコンパイルするので、zsc は crate のソースを `mod zustscript_helper` として埋め込み、レコードごとの `impl Wire` を書く
-  - 形式(第 1 版、helper/rust/src/lib.rs に表): little-endian、詰め物なし、型のタグなし(両側が型を知っている)。数値は 4 / 8 byte、bool は 1 byte、文字列は UTF-8 の長さ(u32)と UTF-8、配列は長さ(u32)と要素、レコードは宣言順のフィールド。両側の単体テストで、同じ値が同じバイト列になることを確かめている
+  - 形式(第 1 版、helper/rust/src/lib.rs に表): little-endian、詰め物なし、型のタグなし(両側が型を知っている)。数値は 4 / 8 byte、bool は 1 byte、文字列は UTF-8 の長さ(u32)と UTF-8、配列は長さ(u32)と要素、レコードは宣言順のフィールド、enum はバリアントの番号(u32)とそのフィールド。両側の単体テストで、同じ値が同じバイト列になることを確かめている
   - glue は引数を `encode` して線形メモリに置き、Rust の wrapper が `from_bytes` で値に戻して参照で渡す。結果は `to_bytes` して返し、glue が `decode` する。JS の出力は `import { encode, decode } from "zustscript-helper"` を含むので、使う側はこのパッケージを入れる
-  - まずは安定している型だけ: 数値、bool、文字列、配列、レコード。enum(スロットで越える)、typed array、関数は、まだこの形式に載せない(tests/errors/wasm_wire_enum.zsc)
+  - 載る型: 数値、bool、文字列、配列、レコード、enum。スカラーだけのレコードと enum は、これまでどおりスロットで越える(速い)。スロットに収まらないもの(文字列を持つ enum など)と、TS から読んだ union がこの形式になる
+    - enum の JS の形はスキーマが持つ(`["enum", key, variants]`): zustscript の enum は `{ TAG, _0 }`、データのない enum は文字列、TS の union は TS の形(`{ kind: "circle", r }`、`"draft"`)。Rust 側は zsc が `impl Wire` を書く
+  - typed array と関数は、まだこの形式に載せない(tests/errors/wasm_wire_typed.zsc)
   - 差分テスト `wire_same_in_js_and_wasm`(tests/wire.zsc): 文字列と配列を含むレコード、レコードの配列、入れ子の配列、i64 の結果が、JS と wasm で一致する。TS から読み込んだレコード(`User`)もそのまま越える(`ts_records` の `badge`)
 - 差分テスト `shapes_same_in_js_and_wasm`: examples/shapes.zsc で、レコード、enum、総称の `Option<T>`、ループ、可変のローカル変数の結果が、JS と wasm で一致することを確かめている
 

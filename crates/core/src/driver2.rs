@@ -578,6 +578,10 @@ pub struct Options2 {
     /// The edition (`--edition`, 2021 by default). Only what differs between 2015 and later reads it: the crate root's
     /// own `extern crate std` holds the name `std` in 2015 alone
     pub edition: u16,
+    /// `--cfg name` / `--cfg name="value"`: more cfgs of the crate (`--test` adds `test`)
+    pub cfgs: Vec<(String, Option<String>)>,
+    /// `--test`: build the crate's `#[test]` functions with a harness for its `main` (crate::test_harness)
+    pub test: bool,
 }
 
 /// Writes the output from the functions and data build.rs lays out (in place of the ELF object)
@@ -585,7 +589,7 @@ pub type ModuleWriter = fn(&[(String, Vec<u8>, Vec<crate::ir::Reloc>, bool)], &[
 
 impl Default for Options2 {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021 }
+        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021, cfgs: vec![], test: false }
     }
 }
 
@@ -611,7 +615,7 @@ impl Options2 {
             features: features.to_vec(),
             debug_assertions: !self.opt,
             wasm: self.module_writer.is_some(),
-            cfgs: cfgs.to_vec(),
+            cfgs: self.cfgs.iter().chain(cfgs).cloned().chain(self.test.then(|| ("test".to_string(), None))).collect(),
             env: env.to_vec(),
             edition: self.edition,
         }

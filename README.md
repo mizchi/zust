@@ -130,7 +130,8 @@ zustc workspace ([docs/zurgo.md](docs/zurgo.md)).
 zurgo run
 ```
 
-- Commands: `build`, `run`, `metadata` (the JSON of `cargo metadata`), `clean`, with cargo's flags for them.
+- Commands: `build`, `run`, `test`, `metadata` (the JSON of `cargo metadata`), `clean`, with cargo's flags for them.
+  `zurgo test` runs each test in a process of its own, all at once, as cargo-nextest does.
 - Output goes to `target/zust/<profile>/`. With `--target wasm32-unknown-unknown`, each bin is a wasm module in
   `target/zust/wasm32-unknown-unknown/<profile>/`, and `zurgo run` runs it with
   `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER`, as cargo does.
@@ -148,6 +149,8 @@ zurgo run
 | `--backend=cranelift\|minclif` | code generator (default cranelift; also `ZUSTC_BACKEND`) |
 | `--linker=wild\|mold\|lld\|bfd\|PATH` | choose the linker |
 | `--features=a,b` | enable `#[cfg(feature = "..")]` |
+| `--cfg NAME` / `--cfg NAME="V"` | set a cfg, as rustc's `--cfg` |
+| `--test` | build the `#[test]` functions with a harness: `--list`, and one test per process (see [docs/zurgo.md](docs/zurgo.md#tests)) |
 | `-j N` | number of code generation threads |
 | `--time` | print the time of each phase and the peak RSS |
 | `--no-cache` | neither read nor write the cache |

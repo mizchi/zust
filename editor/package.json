@@ -1,0 +1,23 @@
+{
+  "name": "zustscript-playground",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "build:zsc": "cargo build --release --target wasm32-unknown-unknown --manifest-path zsc-wasm/Cargo.toml && node scripts/copy-wasm.mjs zsc",
+    "build:grammar": "node scripts/copy-wasm.mjs mkdir && cd tree-sitter-zustscript && tree-sitter generate && tree-sitter build --wasm -o ../public/tree-sitter-zustscript.wasm && cd .. && node scripts/copy-wasm.mjs grammar",
+    "build:wasm": "npm run build:zsc && npm run build:grammar",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "node scripts/test-grammar.mjs && node scripts/test-compile.mjs"
+  },
+  "dependencies": {
+    "web-tree-sitter": "0.27.2"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "0.27.2",
+    "typescript": "^5.9.3",
+    "vite": "8.3.8"
+  }
+}

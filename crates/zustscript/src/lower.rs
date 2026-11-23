@@ -516,8 +516,10 @@ impl Lower<'_> {
             Ty::Bool => WS::Scalar(WTy::Bool),
             Ty::Str => WS::Str,
             Ty::Array(e) => WS::Arr(Box::new(self.ws_in(e, pos, open)?)),
-            Ty::Named(n, _) if open.contains(t) => {
-                return Err((pos, format!("{n} holds itself: a recursive record cannot cross from JS to a @wasm function yet")));
+            // (or a type whose arguments grow on each expansion, `Grow<T> { More(Array<Grow<Array<T>>>) }`: finite
+            // nesting like `Wrap<Wrap<i32>>` stays well under the bound)
+            Ty::Named(n, _) if open.contains(t) || open.iter().filter(|o| matches!(o, Ty::Named(m, _) if m == n)).count() >= 16 => {
+                return Err((pos, format!("{n} holds itself: a recursive record or enum cannot cross from JS to a @wasm function yet")));
             }
             Ty::Named(n, targs) if self.info.records.contains_key(n) => {
                 let r = &self.info.records[n];
@@ -529,7 +531,40 @@ impl Lower<'_> {
                 open.pop();
                 WS::Rec(rt, fs?)
             }
-            _ => return Err((pos, format!("{} cannot cross from JS to a @wasm function inside a record or an array yet (numbers, bools, strings, arrays and records of them)", show(t)))),
+            Ty::Named(n, targs) if self.info.enums.get(n).is_some_and(|e| !e.is_effect()) => {
+                let e = &self.info.enums[n];
+                let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                let vs: Vec<(String, Vec<Ty>)> = e.variants.iter().map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_ty(t, &m)).collect())).collect();
+                let ts = e.ts.clone();
+                // (the JS shape: TS's own for a union read from TS, else zustscript's `{ TAG, _0 }` or a string)
+                let string = e.unit_only() && ts.as_ref().is_none_or(|t| t.key.is_none());
+                let key = if string { None } else { Some(ts.as_ref().and_then(|t| t.key.clone()).unwrap_or_else(|| "TAG".into())) };
+                let rt = self.rty(t, pos, None)?;
+                open.push(t.clone());
+                let mut variants = vec![];
+                let mut err = None;
+                for (vi, (v, fs)) in vs.iter().enumerate() {
+                    let tag = ts.as_ref().map_or_else(|| v.clone(), |t| t.tags[vi].clone());
+                    let mut fields = vec![];
+                    for (k, ft) in fs.iter().enumerate() {
+                        let name = ts.as_ref().map_or_else(|| format!("_{k}"), |t| t.fields[vi][k].clone());
+                        match self.ws_in(ft, pos, open) {
+                            Ok(w) => fields.push((name, w)),
+                            Err(x) => err = err.or(Some(x)),
+                        }
+                    }
+                    variants.push((v.clone(), tag, fields));
+                }
+                open.pop();
+                if let Some(x) = err {
+                    return Err(x);
+                }
+                WS::Enum { rt, key, variants }
+            }
+            _ => {
+                let what = if let Ty::Typed(_) = t { "a typed array".to_string() } else { show(t) };
+                return Err((pos, format!("{what} cannot cross from JS to a @wasm function inside a record, an enum or an array yet (numbers, bools, strings, arrays, records and enums of them)")));
+            }
         })
     }
 
@@ -543,17 +578,20 @@ impl Lower<'_> {
     }
 
     fn wty(&mut self, t: &Ty, arg: bool, pos: Pos) -> LResult<WTy> {
-        // (a record holding a string or an array, and an array of anything but numbers: as bytes, through the
-        // helpers; a record of numbers and an enum: as their scalar slots)
-        if let Ty::Named(n, _) = t {
-            if self.info.records.contains_key(n) && !self.copy(t) {
-                return Ok(WTy::Wire(Box::new(self.ws(t, pos)?), self.rty(t, pos, None)?));
+        // (a record or enum of numbers: as its scalar slots; one holding a string or an array, a union read from TS,
+        // and an array of anything but numbers: as bytes, through the helpers)
+        if let Ty::Named(..) = t {
+            let by_ref = !self.copy(t);
+            if !by_ref {
+                if let Ok(v) = self.vty(t, pos) {
+                    return Ok(WTy::Value(Box::new(v)));
+                }
             }
-            return Ok(WTy::Value(Box::new(self.vty(t, pos)?)));
+            return Ok(WTy::Wire(Box::new(self.ws(t, pos)?), self.rty(t, pos, None)?, by_ref));
         }
         if let Ty::Array(e) = t {
             if scalar(e).and_then(Elem::parse).is_none() {
-                return Ok(WTy::Wire(Box::new(self.ws(t, pos)?), self.rty(t, pos, None)?));
+                return Ok(WTy::Wire(Box::new(self.ws(t, pos)?), self.rty(t, pos, None)?, true));
             }
         }
         Ok(match t {
