@@ -1020,6 +1020,10 @@ impl Cx<'_> {
                     return err(expr_start(e), format!("the size for values of type `{}` cannot be known at compilation time", self.prog.tn(p.ty())));
                 }
                 if self.bk_on() && !self.bk_ty(p.ty()).0 {
+                    // (`*x` with x a raw pointer: what it points to is not owned, E0507)
+                    if matches!(self.peek(x), Some(Ty::Ptr(..))) && self.bk.level >= 1 {
+                        self.drop_move_check(e)?;
+                    }
                     // (`*rc` with rc an Rc / a Deref type of the program's: its deref gives a reference, which cannot
                     // be moved out of (Box is the one type whose `*` moves))
                     if let Some(Ty::Struct(sid)) = self.peek(x).map(|t| self.strip_refs(t)) {

@@ -1863,6 +1863,10 @@ impl Cx<'_> {
                 Expr::Unary(op, b, _) if op == "*" => (strip_paren(b), None),
                 _ => break,
             };
+            // (out of what a raw pointer points to (`*x`, `(*x).a`): E0507, as it is not owned)
+            if fname.is_none() && matches!(self.peek(b), Some(Ty::Ptr(..))) {
+                return err(expr_start(e), format!("cannot move out of `{}`, which is behind a raw pointer (E0507)", raw_place_text(e)));
+            }
             // (through references too: `r.value` with r: `&Rc<S>`)
             if let Some(Ty::Struct(sid)) = self.peek(b).map(|t| self.strip_refs(t)) {
                 let through = fname.is_none_or(|f| self.prog.field(sid, f).is_none());
@@ -2003,6 +2007,10 @@ impl Cx<'_> {
     /// a pattern moved a value out of `*rc` (an Rc / a Deref type of the program's): E0507, as `let x = *rc;`
     pub(crate) fn deref_move_check(&mut self, e: &Expr) -> R<()> {
         if let Expr::Unary(op, x, _) = strip_paren(e) {
+            // (a pattern that moves out of what a raw pointer points to: `let (a, s) = *x;`)
+            if op == "*" && self.bk_on() && self.bk.level >= 1 && matches!(self.peek(x), Some(Ty::Ptr(..))) {
+                return err(expr_start(e), format!("cannot move out of `{}`, which is behind a raw pointer (E0507)", raw_place_text(e)));
+            }
             if op == "*" && self.bk_on() && self.bk.level >= 1 {
                 if let Some(Ty::Struct(sid)) = self.peek(x).map(|t| self.strip_refs(t)) {
                     if self.user_deref_sid(x, sid).is_some() {
@@ -2635,4 +2643,17 @@ fn guard_closure_move(e: &Expr, names: &[String], by: crate::ast_closure::MovesB
         }
     });
     found
+}
+
+/// How rustc names a place through a raw pointer: `*x`, and `x.a` for `(*x).a`
+fn raw_place_text(e: &Expr) -> String {
+    fn go(e: &Expr, top: bool) -> String {
+        match strip_paren(e) {
+            Expr::Path(_, p) => p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::"),
+            Expr::Field(b, f, _) => format!("{}.{f}", go(b, false)),
+            Expr::Unary(op, b, _) if op == "*" => if top { format!("*{}", go(b, false)) } else { go(b, false) },
+            _ => "..".into(),
+        }
+    }
+    go(e, true)
 }

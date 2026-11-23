@@ -2967,3 +2967,18 @@ fn part16_index_through_deref() {
     assert!(d.len() == 1 && d[0].0 == 18 && d[0].1.contains("because it is borrowed"), "{d:?}");
     assert_eq!(check("use std::ops::{Deref, DerefMut};\nstruct C { v: Vec<i32>, s: String }\nimpl Deref for C { type Target = [i32]; fn deref(&self) -> &[i32] { &self.v } }\nimpl DerefMut for C { fn deref_mut(&mut self) -> &mut [i32] { &mut self.v } }\nstruct S(String);\nimpl Deref for S { type Target = str; fn deref(&self) -> &str { &self.0 } }\nfn main() {\n    let mut c = C { v: vec![1, 2, 3], s: String::new() };\n    let a = &c[0];\n    let b = &c[1];\n    println!(\"{} {} {}\", a, b, c[2]);\n    c[1] = 20;\n    let m = &mut c[2];\n    *m += 10;\n    println!(\"{:?} {} {}\", &c[..], c.len(), c.s.len());\n    let r = &mut c;\n    r[0] = 7;\n    println!(\"{}\", r[0] + r[1]);\n}\n"), vec![]);
 }
+
+/// A move out of what a raw pointer points to (`let y = *x;` with `x: *const Box<isize>`, `(*x).a`, a pattern of `*x`)
+/// is E0507, as rustc's "behind a raw pointer" (borrowck/borrowck-move-from-unsafe-ptr.rs); a copy and a `ref` binding
+/// are not
+#[test]
+fn part16_raw_pointer_moves() {
+    let d = check("unsafe fn foo(x: *const Box<isize>) -> Box<isize> {\n    let y = *x;\n    return y;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("behind a raw pointer"), "{d:?}");
+    let d = check("struct S { a: String }\nunsafe fn foo(x: *const S) -> String {\n    (*x).a\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("behind a raw pointer"), "{d:?}");
+    let d = check("unsafe fn foo(x: *const (i32, String)) -> usize {\n    let (a, s) = *x;\n    a as usize + s.len()\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("behind a raw pointer"), "{d:?}");
+    assert_eq!(check("unsafe fn foo(x: *const (i32, i32)) -> i32 {\n    let (a, b) = *x;\n    a + b\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("unsafe fn foo(x: *const (i32, String)) -> usize {\n    let (a, ref s) = *x;\n    a as usize + s.len()\n}\nfn main() {}\n"), vec![]);
+}
