@@ -1,7 +1,9 @@
 # What is supported
 
 The percentages are rustc's own UI tests that pass in that area: run-pass + check-pass + build-pass of the tests/ui
-directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). They were measured
+directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). They count only the tests
+`bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special flags or targets other than
+Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
 <!-- measured -->2026-11-23, b431304<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
@@ -14,7 +16,9 @@ directories named in the comment next to the number (`ui:`), or compile-fail (`c
 
 - [x] tests/ui: the [table in the README](README.md#coverage-of-rustcs-test-suite)
 - [x] real crates: fnv, adler2, hex, itoa, rustc-hash and cfg-if build and give the same output (6 / 6)
-- [x] zust-analyzer answers like rust-analyzer: 95.4% (rust-analyzer: 96.2%)
+- [x] zust-analyzer answers like rust-analyzer: 99.0% agreement on zustc's own sources (rust-analyzer: 98.9%). This is
+  a snapshot measured by hand (2026-11-18), not by CI:
+  [PERFORMANCE.md](PERFORMANCE.md#against-rustc-relax-and-rust-analyzer-snapshots)
 
 ## Language
 
