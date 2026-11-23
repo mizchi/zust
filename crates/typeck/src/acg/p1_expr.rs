@@ -2608,6 +2608,11 @@ impl Cx<'_> {
         if sol[ri].is_none() && diverging_tail(&c_body(c)) {
             sol[ri] = Some(Ty::Unit);
         }
+        // (a parameter of a size not known: `|a0: [i32]| ..`, as the constructor of `struct Test([i32]);` used as a
+        // value is written (E0277))
+        if let Some(u) = pslots.iter().filter_map(|&(_, g)| sol[g]).find(|t| matches!(t, Ty::Slice(_) | Ty::Str | Ty::Dyn(_))) {
+            return err(expr_start(c), format!("the size for values of type `{}` cannot be known at compilation time (E0277)", self.prog.tn(u)));
+        }
         let Some(args) = sol.into_iter().collect::<Option<Vec<Ty>>>() else {
             return err(SP, "cannot infer the return type of this closure; annotate it (`|..| -> T { .. }`)");
         };

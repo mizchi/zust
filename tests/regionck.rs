@@ -3277,3 +3277,14 @@ fn part18_fn_pointer_annotation_holes() {
     let d = check("fn foo<'a>(x: &'a u32) -> &'a u32 where 'a: 'a { x }\nfn bar<'a>(x: &'a u32) -> &'static u32 {\n    let f: fn(_) -> _ = foo;\n    f(x)\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("must outlive `'static`"), "{d:?}");
 }
+
+/// The constructor of a tuple struct whose field has no size known (`struct Test([i32]);`), used as a value: no
+/// fn value takes such a parameter (E0277), also where an annotation `fn(_) -> Test` with a hole types it
+#[test]
+fn part18_unsized_ctor_value() {
+    for src in ["struct Test([i32]);\nfn main() {\n    let _x = Test;\n}\n", "struct Test([i32]);\nfn main() {\n    let _x: fn(_) -> Test = Test;\n}\n"] {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0277"), "{src}\n{d:?}");
+    }
+    assert_eq!(check("struct Test(i32);\nfn main() {\n    let f: fn(_) -> Test = Test;\n    let _ = f(1);\n}\n"), vec![]);
+}
