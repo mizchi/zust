@@ -1191,7 +1191,7 @@ impl Session2 {
                     _ => false,
                 };
                 if bad {
-                    let (line, col) = item_pos(&src, &marks, it, v);
+                    let (line, col) = item_pos(&src, src0, &marks, it, v);
                     return Err(format!("{line}:{col}: visibility qualifiers are not permitted here (E0449)"));
                 }
             }
@@ -1206,10 +1206,14 @@ impl Session2 {
                     continue;
                 }
                 if let Some(off) = enum_inner_pub(&src[it.start..it.end]) {
-                    let (line, col) = item_pos(&src, &marks, it, off);
+                    let (line, col) = item_pos(&src, src0, &marks, it, off);
                     return Err(format!("{line}:{col}: visibility qualifiers are not permitted here (E0449)"));
                 }
             }
+        }
+        // (E0434: a fn written inside another fn that uses one of its locals; only with hoisted items)
+        if let Some(e) = first_env_capture(&src, src0, &items[..user_src]) {
+            return Err(e);
         }
         // (E0119: two blanket impls of one trait for a bare parameter, `impl<T: A> Tr for T` and `impl<T: B> Tr for T`,
         // overlap whatever their bounds say. Only the program's own traits declared once (modules flatten names),
@@ -1636,12 +1640,12 @@ impl Session2 {
         // (E0107: an impl giving one of the program's traits the wrong number of generic arguments; only with a trait
         // header and an impl header)
         if items[..user].iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::TraitHeader)) && items[..user].iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::ImplHeader)) {
-            if let Some(e) = first_trait_arity_error(&src, &items[..user]) {
+            if let Some(e) = first_trait_arity_error(&src, src0, &items[..user]) {
                 return Err(e);
             }
         }
         // (E0107 at a use of a generic associated type without its arguments, or with the wrong number)
-        if let Some(e) = first_gat_arity_error(&src, &items[..user]) {
+        if let Some(e) = first_gat_arity_error(&src, src0, &items[..user]) {
             return Err(e);
         }
         // (a derive whose field has not the trait: `#[derive(Hash)] struct S { x: Error }`)
@@ -1851,6 +1855,106 @@ fn relocate(e: String, it: &SrcItem) -> String {
     format!("{}:1: {e}", it.line)
 }
 
+/// E0434: a fn item written inside another fn (hoisted out of it) that uses a local of a fn it is in, or its `self`:
+/// `fn foo() { let y = 5; fn bar() -> u32 { y } }`. A name the program also has an item of is that item
+fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::parse::Expr;
+    let marks = crate::prep::hoist_marks(src);
+    if marks.is_empty() {
+        return None;
+    }
+    let text_of = |it: &SrcItem| src.get(it.start..it.end).unwrap_or("");
+    // (each item's lines as written)
+    let range = |it: &SrcItem| {
+        let a = crate::prep::hoisted_at(&marks, it.line).unwrap_or(it.line);
+        (a, a + text_of(it).matches('\n').count())
+    };
+    let hoisted: Vec<usize> = (0..items.len()).filter(|&i| crate::prep::hoisted_at(&marks, items[i].line).is_some() && text_of(&items[i]).contains("fn ")).collect();
+    if hoisted.is_empty() {
+        return None;
+    }
+    // (the program's item names)
+    const KEYWORDS: &[&str] = &["fn", "const", "static", "struct", "enum", "union", "type", "mod", "trait"];
+    let mut item_names: crate::fxhash::FxSet<&str> = Default::default();
+    for it in items {
+        let ids: Vec<&str> = it.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or("")).collect();
+        if let Some(k) = ids.iter().take(8).position(|w| KEYWORDS.contains(w)) {
+            if let Some(n) = ids.get(k + 1) {
+                item_names.insert(n);
+            }
+        }
+    }
+    // (a fn's own locals: its parameters, its `let`s and its `self`)
+    fn locals_of(sig: &crate::parse::FnSig, body: &crate::parse::Block, out: &mut Vec<String>) {
+        if sig.recv.is_some() {
+            out.push("self".to_string());
+        }
+        for (p, _) in &sig.params {
+            crate::ast_closure::pat_idents(p, out);
+        }
+        out.extend(crate::ast_closure::let_bindings(body).into_iter().map(|(_, n)| n));
+    }
+    // (the first fn in `body` or nested in it (one level of items per hoisting) that names an outer local: the fn's
+    // name and the local)
+    fn capture(sig: &crate::parse::FnSig, body: &crate::parse::Block, outer: &[String], items: &crate::fxhash::FxSet<&str>) -> Option<(String, String)> {
+        let mut used = crate::ast_closure::used_vars(&Expr::Block(None, false, body.clone()));
+        if sig.recv.is_none() && format!("{body:?}").contains("\"self\"") && !used.iter().any(|n| n == "self") {
+            used.push("self".to_string());
+        }
+        // (its own parameters are in its signature, not its body)
+        let mut own = vec![];
+        for (p, _) in &sig.params {
+            crate::ast_closure::pat_idents(p, &mut own);
+        }
+        if sig.recv.is_some() {
+            own.push("self".to_string());
+        }
+        used.retain(|n| !own.contains(n));
+        if let Some(n) = used.iter().find(|n| !items.contains(n.as_str()) && outer.contains(n)) {
+            return Some((sig.name.clone(), n.clone()));
+        }
+        let mut mine = outer.to_vec();
+        locals_of(sig, body, &mut mine);
+        body.stmts.iter().find_map(|st| match st {
+            crate::parse::Stmt::Item(crate::parse::Item { kind: crate::parse::ItemKind::Fn(s2, Some(b2)), .. }) => capture(s2, b2, &mine, items),
+            _ => None,
+        })
+    }
+    for &h in &hoisted {
+        let it = &items[h];
+        let Ok(Some(f)) = parse_fn(src, it) else { continue };
+        // (the locals of the fns it is written in)
+        let line = range(it).0;
+        let mut outer: Vec<String> = vec![];
+        for (g, gi) in items.iter().enumerate() {
+            let (a, b) = range(gi);
+            if g == h || !(a <= line && line <= b) || !text_of(gi).contains("fn ") {
+                continue;
+            }
+            let Ok(Some(gf)) = parse_fn(src, gi) else { continue };
+            locals_of(&gf.sig, &gf.block, &mut outer);
+        }
+        if outer.is_empty() {
+            continue;
+        }
+        let Some((fname, name)) = capture(&f.sig, &f.block, &outer, &item_names) else { continue };
+        // (rustc points at the use: the first in that fn's body, not a field or a path's segment)
+        let text = text_of(it);
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+        let from = (1..t.len()).find(|&k| w(k) == fname && w(k - 1) == "fn").unwrap_or(0);
+        let open = (from..t.len()).find(|&k| sym(k, b'{'))?;
+        let Some(k) = (open..t.len()).find(|&k| w(k) == name && !(k > 0 && (sym(k - 1, b'.') || sym(k - 1, b':'))) && !sym(k + 1, b':') && !sym(k + 1, b'!')) else {
+            continue;
+        };
+        let (line, col) = item_pos(src, orig, &marks, it, t[k].1);
+        return Some(format!("{line}:{col}: can't capture dynamic environment in a fn item (E0434)"));
+    }
+    None
+}
+
 /// The offset of a `pub` an item's text starts with, past its outer attributes and comments
 fn leading_pub(text: &str) -> Option<usize> {
     let b = text.as_bytes();
@@ -1918,13 +2022,26 @@ fn enum_inner_pub(text: &str) -> Option<usize> {
     None
 }
 
-/// The line and column, in the file as written, of the byte at `off` in an item's text. An item hoisted out of a fn
-/// body is given the line it was written on; its column is the one in its own text, as its indent is not kept
-fn item_pos(src: &str, marks: &[(usize, usize)], it: &SrcItem, off: usize) -> (usize, usize) {
+/// The line and column, in the file as written (`orig`), of the byte at `off` in an item's text. An item hoisted out
+/// of a fn body is given the line it was written on; on its first line, whose indent the hoisted text does not keep,
+/// the column is found from that line as written
+fn item_pos(src: &str, orig: &str, marks: &[(usize, usize)], it: &SrcItem, off: usize) -> (usize, usize) {
     let text = &src[it.start..it.end];
     let line = it.line + text[..off].matches('\n').count();
     match crate::prep::hoisted_at(marks, line) {
-        Some(orig) => (orig, off - text[..off].rfind('\n').map_or(0, |n| n + 1) + 1),
+        Some(at) => {
+            let col = off - text[..off].rfind('\n').map_or(0, |n| n + 1) + 1;
+            if text[..off].contains('\n') {
+                return (at, col);
+            }
+            // (the item's first line, past a hoist mark, as it is in the line it was written on)
+            let first = &text[..text.find('\n').unwrap_or(text.len())];
+            let skip = first.find("*/").filter(|_| first.starts_with(crate::prep::HOIST_MARK)).map_or(0, |n| n + 2);
+            let head = &first[skip..first.len().min(skip + 40).max(skip)];
+            let head = &head[..(0..=head.len()).rev().find(|&n| head.is_char_boundary(n)).unwrap_or(0)];
+            let found = orig.split('\n').nth(at.wrapping_sub(1)).and_then(|l| l.find(head)).filter(|_| !head.trim().is_empty() && off >= skip);
+            (at, found.map_or(col, |f| f + off - skip + 1))
+        }
         None => {
             let at = it.start + off;
             (line, at - src[..at].rfind('\n').map_or(0, |n| n + 1) + 1)
@@ -1972,7 +2089,7 @@ fn angle_parts(t: &[(u8, usize, usize)], text: &[u8], open: usize) -> Option<(Ve
 /// E0107 at an impl of one of the program's traits that gives it more generic (type / const) arguments than the
 /// trait declares, or fewer than it requires: `impl Seq<bool> for u32` with `trait Seq {}`. Read from the trait
 /// headers and the impl headers only (lifetimes and `Item = ..` bindings are not counted)
-fn first_trait_arity_error(src: &str, items: &[SrcItem]) -> Option<String> {
+fn first_trait_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
     use crate::lexer::ItemKind;
     // (each trait's (required, declared) count; a name declared twice is left out)
     let mut decl: crate::fxhash::FxMap<&str, Option<(usize, usize)>> = Default::default();
@@ -2068,7 +2185,7 @@ fn first_trait_arity_error(src: &str, items: &[SrcItem]) -> Option<String> {
                 format!("trait takes {takes} {} but {given} {} {} supplied", plural(declared.max(required)), plural(given), if given == 1 { "was" } else { "were" })
             };
             // (rustc points at the trait's name)
-            let (line, col) = item_pos(src, &crate::prep::hoist_marks(src), it, t[nk].1);
+            let (line, col) = item_pos(src, orig, &crate::prep::hoist_marks(src), it, t[nk].1);
             return Some(format!("{line}:{col}: {what} (E0107)"));
         }
     }
@@ -2079,7 +2196,7 @@ fn first_trait_arity_error(src: &str, items: &[SrcItem]) -> Option<String> {
 /// (`Self::Item` / `Tr<Item = X>` for `type Item<'a>`: "missing generics"), too few / many lifetimes, or too few / many
 /// types and consts. Only uses whose trait is known are read: `Self::A` in the trait or in an impl of it, `<T as Tr>::A`,
 /// `<Self>::A`, and the binding `Tr<A = ..>`. Nothing is tokenized unless a trait declares a generic associated type
-fn first_gat_arity_error(src: &str, items: &[SrcItem]) -> Option<String> {
+fn first_gat_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
     use crate::lexer::ItemKind;
     let id = |&(a, b): &(u32, u32)| &src[a as usize..b as usize];
     // (the trait an item's `Self` implements or is: a trait's members, an impl's members of `impl Tr for X`)
@@ -2235,7 +2352,7 @@ fn first_gat_arity_error(src: &str, items: &[SrcItem]) -> Option<String> {
                 Some(_) if gtys != tys => format!("associated type takes {tys} generic argument{} but {gtys} generic argument{} supplied", if tys == 1 { "" } else { "s" }, if gtys == 1 { " was" } else { "s were" }),
                 _ => continue,
             };
-            let (line, col) = item_pos(src, &marks, it, t[k].1);
+            let (line, col) = item_pos(src, orig, &marks, it, t[k].1);
             return Some(format!("{line}:{col}: {what} (E0107)"));
         }
     }
