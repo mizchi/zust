@@ -1502,6 +1502,14 @@ impl Cx<'_> {
     }
 
     fn body(&mut self, f: &ItemFn, sig: &FnSig) -> R<()> {
+        // (E0107: a struct or enum of the signature written with another number of lifetime arguments than it has:
+        // `Foo<'_, '_, 'a>` for `struct Foo<'c, 'd>`)
+        if self.user_code && self.inline_depth == 0 {
+            let tps: Vec<&str> = f.sig.generics.params.iter().filter_map(|p| if let crate::parse::GParam::Ty(n, ..) = p { Some(n.as_str()) } else { None }).collect();
+            for t in f.sig.params.iter().map(|p| &p.1).chain(f.sig.ret.iter()) {
+                self.sig_lt_arity(t, &tps, 0)?;
+            }
+        }
         let entry = self.b.create_block();
         self.b.switch_to_block(entry);
         let mut params = self.b.func_params();

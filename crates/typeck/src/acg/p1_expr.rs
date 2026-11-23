@@ -63,6 +63,34 @@ impl Cx<'_> {
         Ok(())
     }
 
+    /// lifetime_arity of the structs and enums a signature's type t names (not in fn pointer, `dyn` and `impl` types,
+    /// nor a type parameter tps names)
+    pub(crate) fn sig_lt_arity(&self, t: &crate::parse::Ty, tps: &[&str], depth: u32) -> R<()> {
+        use crate::parse::Ty as PTy;
+        if depth > 16 {
+            return Ok(());
+        }
+        match t {
+            PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => self.sig_lt_arity(i, tps, depth + 1),
+            PTy::Tuple(ts) => ts.iter().try_for_each(|t| self.sig_lt_arity(t, tps, depth + 1)),
+            PTy::Path(None, p) => {
+                if let [s] = p.segs.as_slice() {
+                    if s.fn_args.is_none() && !tps.contains(&s.name.as_str()) {
+                        if let Some(&sid) = self.prog.struct_index.get(&s.name) {
+                            let what = if self.prog.structs[sid as usize].is_enum { "enum" } else { "struct" };
+                            self.lifetime_arity(sid, p, what)?;
+                        }
+                    }
+                }
+                p.segs.iter().flat_map(|s| s.args.iter()).try_for_each(|a| match a {
+                    GArg::Ty(t) => self.sig_lt_arity(t, tps, depth + 1),
+                    _ => Ok(()),
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// `Enum::<()>::V::<()>(..)` / `Alias::V::<()>(..)` / `Self::V::<()>(..)`: E0109 for type arguments on a variant
     /// when its type has them already, or is an alias or `Self` (`Enum::V::<()>` alone is fine)
     pub(crate) fn variant_targs_allowed(&self, p: &crate::parse::Path, kind: &str) -> R<()> {

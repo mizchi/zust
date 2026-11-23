@@ -2308,3 +2308,22 @@ fn part12_review_3() {
     let d = check("use std::ops::Deref;\nstruct A {\n    x: u32,\n}\nstruct B {\n    y: u32,\n}\nstatic BB: B = B { y: 2 };\nstatic AA: A = A { x: 2 };\nimpl Deref for A {\n    type Target = B;\n    fn deref(&self) -> &B {\n        &BB\n    }\n}\nimpl Deref for B {\n    type Target = A;\n    fn deref(&self) -> &A {\n        &AA\n    }\n}\nfn main() {\n    let a = A { x: 1 };\n    println!(\"{}\", a.missing);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 24 && d[0].1.contains("reached the recursion limit while auto-dereferencing `A` (E0055)"), "{d:?}");
 }
+
+/// An impl's method against its trait through the header's arguments: `To` of `fn get_relation(&self) -> To` is the
+/// header's `&ProofReader`, a lifetime of the impl that `&self` is not known to outlive (traits/param-without-
+/// lifetime-constraint.rs); a header's `&'static` is not compared, and an impl's `&'static` input is less general
+/// (E0308 in rustc). A struct in a fn's signature with another number of lifetime arguments than it has is E0107
+#[test]
+fn part13_header_and_arity() {
+    let rel = "struct Article {\n    proof_reader: ProofReader,\n}\nstruct ProofReader {\n    name: String,\n}\npub trait HaveRelationship<To> {\n    fn get_relation(&self) -> To;\n}\n";
+    let d = check(&format!("{rel}impl HaveRelationship<&ProofReader> for Article {{\n    fn get_relation(&self) -> &ProofReader {{\n        &self.proof_reader\n    }}\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("`impl` item signature doesn't match `trait` item signature"), "{d:?}");
+    assert_eq!(check(&format!("{rel}impl HaveRelationship<&'static ProofReader> for Article {{\n    fn get_relation(&self) -> &'static ProofReader {{\n        static P: ProofReader = ProofReader {{ name: String::new() }};\n        &P\n    }}\n}}\nfn main() {{\n    let a = Article {{ proof_reader: ProofReader {{ name: String::new() }} }};\n    println!(\"{{}}\", a.get_relation().name.len() + a.proof_reader.name.len());\n}}\n")), vec![]);
+    let take = "trait Take<T> {\n    fn take(&self, t: T) -> usize;\n}\nstruct S;\n";
+    assert_eq!(check(&format!("{take}impl Take<&u8> for S {{\n    fn take(&self, t: &u8) -> usize {{\n        *t as usize\n    }}\n}}\nfn main() {{\n    let x = 3;\n    println!(\"{{}}\", S.take(&x));\n}}\n")), vec![]);
+    let d = check(&format!("{take}impl Take<&u8> for S {{\n    fn take(&self, t: &'static u8) -> usize {{\n        *t as usize\n    }}\n}}\nfn main() {{}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("`impl` item signature doesn't match"), "{d:?}");
+    let d = check("struct Foo<'c, 'd>(&'c (), &'d ());\nstruct Bar;\nimpl<'a> Bar {\n    fn boom(&self, foo: &mut Foo<'_, '_, 'a>) -> Option<&'a ()> {\n        let _ = foo;\n        None\n    }\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("struct takes 2 lifetime arguments but 3 lifetime arguments were supplied (E0107)"), "{d:?}");
+    assert_eq!(check("struct Foo<'c, 'd>(&'c (), &'d ());\nfn f<'a>(x: &Foo<'a, 'a>) -> Foo<'a, 'a> {\n    Foo(x.0, x.1)\n}\nfn g(x: Foo) -> u8 {\n    let _ = x;\n    1\n}\nfn main() {\n    let v = ();\n    let a = Foo(&v, &v);\n    let _ = f(&a);\n    let _ = g(Foo(&v, &v));\n}\n"), vec![]);
+}
