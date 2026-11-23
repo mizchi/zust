@@ -1,4 +1,4 @@
-//! The `zurgo` command: `build`, `run`, `metadata`, `clean` (cargo's flags for them).
+//! The `zurgo` command: `build`, `run`, `test`, `metadata`, `clean` (cargo's flags for them).
 
 use std::path::PathBuf;
 use zurgo::compile::{self, BuildOpts};
@@ -10,6 +10,8 @@ const USAGE: &str = "usage: zurgo <command> [options]
 commands:
   build     build the package (or every member of a virtual workspace) with zustc
   run       build, then run a binary (arguments after `--` go to it)
+  test      build the test crates (unit tests of the lib and bins, tests/*.rs) and run every test in a process
+            of its own, all at once: `zurgo test [filter] [-- libtest args]`
   metadata  the package graph as JSON, as `cargo metadata --format-version 1` writes it
   clean     remove target/zust
 
@@ -25,6 +27,12 @@ options:
   --build-script-compiler <c>    auto (zustc, else rustc; default), zustc or rustc
   --time                         zustc's timings
   --filter-platform <triple>     (metadata) only the dependencies of that platform
+  --lib / --test <name>          (test) only the lib's unit tests / that integration test (also --bins, --tests)
+  --no-run                       (test) build the tests, do not run them
+  --no-fail-fast / --fail-fast   (test) run every test (the default) / stop starting tests after a failure
+  after `--` (test): <filter>, --exact, --skip <s>, --ignored, --include-ignored, --list, --test-threads <n>
+    (--nocapture, --show-output are accepted: a failure's output is always shown)
+  ZURGO_TEST_TIMEOUT=<secs> (300) stops a test, ZURGO_TEST_SLOW=<secs> (60) marks it slow
   --locked / --offline / --frozen are accepted: zurgo always uses Cargo.lock as it is and never downloads";
 
 fn die(m: &str) -> ! {
@@ -49,6 +57,11 @@ fn main() {
     let mut o = BuildOpts::default();
     let mut filter: Option<String> = None;
     let mut rest: Vec<String> = vec![];
+    // (`zurgo test`: the test name before `--`, which targets, --no-run, fail-fast)
+    let mut test_filter: Vec<String> = vec![];
+    let mut only: Vec<String> = vec![];
+    let mut no_run = false;
+    let mut fail_fast = false;
     while let Some(a) = args.next() {
         let mut val = |name: &str| args.next().unwrap_or_else(|| die(&format!("`{name}` needs a value")));
         match a.as_str() {
@@ -77,6 +90,14 @@ fn main() {
                 }
             }
             "--locked" | "--offline" | "--frozen" | "-q" | "--quiet" => {}
+            "--lib" if cmd == "test" || cmd == "t" => only.push("(lib)".into()),
+            "--bins" if cmd == "test" || cmd == "t" => only.push("(bin ".into()),
+            "--tests" if cmd == "test" || cmd == "t" => only.push("(test ".into()),
+            "--test" if cmd == "test" || cmd == "t" => only.push(format!("(test {})", val(&a))),
+            "--no-run" if cmd == "test" || cmd == "t" => no_run = true,
+            "--no-fail-fast" if cmd == "test" || cmd == "t" => fail_fast = false,
+            "--fail-fast" if cmd == "test" || cmd == "t" => fail_fast = true,
+            s if (cmd == "test" || cmd == "t") && !s.starts_with('-') => test_filter.push(s.to_string()),
             s if s.starts_with("--manifest-path=") => manifest = Some(s["--manifest-path=".len()..].into()),
             s if s.starts_with("--features=") => o.features.extend(s["--features=".len()..].split(',').filter(|f| !f.is_empty()).map(str::to_string)),
             s if s.starts_with("--target=") => o.target = Some(s["--target=".len()..].to_string()),
@@ -124,6 +145,52 @@ fn main() {
             };
             let st = cmd.args(&rest).status().unwrap_or_else(|e| die(&format!("{}: {e}", exe.display())));
             std::process::exit(st.code().unwrap_or(101));
+        }
+        "test" | "t" => {
+            if o.target.as_deref().is_some_and(|t| t != "x86_64-unknown-linux-gnu") {
+                die("`zurgo test` builds for the host only (x86_64-unknown-linux-gnu)");
+            }
+            o.test = true;
+            let t0 = std::time::Instant::now();
+            let built = compile::build(&g, &o).unwrap_or_else(|e| die(&e));
+            eprintln!("    Finished `{}` profile in {:.2}s (zustc)", if o.release { "release" } else { "dev" }, t0.elapsed().as_secs_f64());
+            // (the targets asked for: `--lib`, `--bins`, `--tests`, `--test x`)
+            let exes: Vec<_> = built.tests.iter().filter(|t| only.is_empty() || only.iter().any(|w| t.0.contains(w.as_str()))).cloned().collect();
+            if no_run {
+                for (l, e, _) in &exes {
+                    eprintln!("  Executable {l} ({})", e.display());
+                }
+                return;
+            }
+            let mut ro = zurgo::test_runner::RunOpts { filters: test_filter, fail_fast, ..Default::default() };
+            let secs = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f64>().ok()).map(std::time::Duration::from_secs_f64);
+            if let Some(t) = secs("ZURGO_TEST_TIMEOUT") {
+                ro.timeout = t;
+            }
+            if let Some(t) = secs("ZURGO_TEST_SLOW") {
+                ro.slow = t;
+            }
+            // (libtest's arguments, after `--`)
+            let mut it = rest.iter();
+            while let Some(a) = it.next() {
+                match a.as_str() {
+                    "--exact" => ro.exact = true,
+                    "--ignored" => ro.ignored = true,
+                    "--include-ignored" => ro.include_ignored = true,
+                    "--list" => ro.list = true,
+                    "--skip" => ro.skip.extend(it.next().cloned()),
+                    "--test-threads" => ro.threads = it.next().and_then(|n| n.parse().ok()).unwrap_or_else(|| die("`--test-threads` needs a number")),
+                    s if s.starts_with("--test-threads=") => ro.threads = s[15..].parse().unwrap_or_else(|_| die("`--test-threads` needs a number")),
+                    "--nocapture" | "--show-output" | "-q" | "--quiet" => {}
+                    "--format" | "--color" => {
+                        it.next();
+                    }
+                    s if s.starts_with('-') => die(&format!("unknown test option `{s}`")),
+                    s => ro.filters.push(s.to_string()),
+                }
+            }
+            let sum = zurgo::test_runner::run(&exes, &ro, &built.out_dir.join("test-times")).unwrap_or_else(|e| die(&e));
+            std::process::exit(if sum.ok() { 0 } else { 101 });
         }
         "metadata" => {
             let host = Target::host();

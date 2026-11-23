@@ -76,6 +76,9 @@ pub struct Package {
     pub build: Option<PathBuf>,
     pub lib: Option<Target>,
     pub bins: Vec<Target>,
+    /// integration tests (`[[test]]`, then tests/*.rs and tests/*/main.rs unless `autotests = false`): `zurgo test`
+    /// builds each against the library. Not in `targets()` (nor in `zurgo metadata` yet)
+    pub tests: Vec<Target>,
     pub deps: Vec<Dep>,
     pub features: BTreeMap<String, Vec<String>>,
     pub resolver: Option<String>,
@@ -98,6 +101,7 @@ impl Package {
             build: None,
             lib: None,
             bins: vec![],
+            tests: vec![],
             deps: vec![],
             features: BTreeMap::new(),
             resolver: None,
@@ -322,8 +326,44 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
             }
         }
     }
+    // (integration tests: `[[test]]`, then tests/*.rs and tests/*/main.rs unless `autotests = false`)
+    let mut tests: Vec<Target> = vec![];
+    let test_target = |n: String, path: PathBuf, ed: &str, rf: Vec<String>| Target { name: n, kind: vec!["test".into()], crate_types: vec!["bin".into()], path, edition: ed.to_string(), required_features: rf };
+    for b in t.get("test").and_then(Value::as_array).unwrap_or(&[]) {
+        let b = b.as_table().ok_or("`[[test]]` is not a table")?;
+        let tname = toml::get_str(b, &["name"]).ok_or("a `[[test]]` without a name")?.to_string();
+        let tpath = match toml::get_str(b, &["path"]) {
+            Some(x) => dir.join(x),
+            None => [format!("tests/{tname}.rs"), format!("tests/{tname}/main.rs")].iter().map(|x| dir.join(x)).find(|x| x.is_file()).unwrap_or_else(|| dir.join(format!("tests/{tname}.rs"))),
+        };
+        let rf = b.get("required-features").or_else(|| b.get("required_features")).map(Value::str_list).unwrap_or_default();
+        tests.push(test_target(tname, tpath, toml::get_str(b, &["edition"]).unwrap_or(&edition), rf));
+    }
+    if auto("autotests") {
+        if let Ok(rd) = std::fs::read_dir(dir.join("tests")) {
+            let mut es: Vec<PathBuf> = rd.filter_map(|e| e.ok().map(|e| e.path())).collect();
+            es.sort();
+            for e in es {
+                let found = if e.extension().is_some_and(|x| x == "rs") && e.is_file() {
+                    Some((e.file_stem().unwrap().to_string_lossy().into_owned(), e))
+                } else if e.join("main.rs").is_file() {
+                    Some((e.file_name().unwrap().to_string_lossy().into_owned(), e.join("main.rs")))
+                } else {
+                    None
+                };
+                if let Some((n, x)) = found {
+                    if !tests.iter().any(|b| b.name == n || b.path == x) {
+                        tests.push(test_target(n, x, &edition, vec![]));
+                    }
+                }
+            }
+        }
+    }
     // (the names become file names under the target directory: no path separators, `.` or `..`)
     safe_name("package", &name)?;
+    for x in &tests {
+        safe_name("test", &x.name)?;
+    }
     for x in lib.iter().chain(&bins) {
         safe_name(if x.kind.iter().any(|k| k == "bin") { "binary" } else { "library" }, &x.name)?;
     }
@@ -351,6 +391,7 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
         build,
         lib,
         bins,
+        tests,
         deps,
         features,
         resolver: s("resolver")?,

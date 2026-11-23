@@ -852,6 +852,9 @@ pub struct CrateSpec {
     /// the compile-time environment for `env!` / `option_env!` (`env=KEY=VALUE`): cargo's `CARGO_PKG_*`, `OUT_DIR`,
     /// a build script's `rustc-env`
     pub env: Vec<(String, String)>,
+    /// `test=true`: a test crate (`zustc --test`): its `#[test]` functions with a harness for `main`
+    /// (crate::test_harness). The crate's cfgs then include `test`
+    pub test: bool,
 }
 
 /// A value for the workspace file: `%`, `#`, whitespace and other control characters as `%XX`
@@ -932,6 +935,7 @@ pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
                 })
                 .collect(),
             env: w[3..].iter().filter_map(|s| s.strip_prefix("env=")).filter_map(|s| s.split_once('=')).map(|(k, v)| (ws_unescape(k), ws_unescape(v))).collect(),
+            test: w[3..].contains(&"test=true"),
         });
     }
     Ok(out)
@@ -1074,6 +1078,7 @@ impl Session2 {
     /// 1 つのクレート (複数のファイル) をビルドする: 根のファイルから `mod x;` を辿る
     pub fn build_path(&mut self, root: &std::path::Path, display: &str, output: &std::path::Path) -> R<Report2> {
         let (src, map) = crate::srcmap::load_crate(root, display, &self.opts.cfg_with(&self.opts.features))?;
+        let src = if self.opts.test { crate::test_harness::apply(&src) } else { src };
         self.ctx = CrateCtx { map: map.clone(), ..Default::default() };
         // (1 ファイルなら場所は `行:桁:` のまま (呼ぶ側がファイル名を付ける))
         let r = self.build(&src, output).map_err(|e| if map.files.len() > 1 { self.ctx.map.relocate_err(&e) } else { e });
@@ -1292,6 +1297,23 @@ impl Session2 {
 
     fn build_workspace_in(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path, module_writer: Option<ModuleWriter>) -> R<WsReport> {
         let t0 = now_ns();
+        // (a test crate is configured with `test`: in its fingerprint too)
+        let with_test: Vec<CrateSpec>;
+        let crates = if crates.iter().any(|c| c.test && !c.cfgs.iter().any(|x| x.0 == "test" && x.1.is_none())) {
+            with_test = crates
+                .iter()
+                .map(|c| {
+                    let mut c = c.clone();
+                    if c.test {
+                        c.cfgs.push(("test".to_string(), None));
+                    }
+                    c
+                })
+                .collect();
+            &with_test[..]
+        } else {
+            crates
+        };
         let order = topo(crates)?;
         mkdir_all(out_dir)?;
         // (読んだクレートのソース: 名前 → (`pub mod 名前 { .. }` にしたテキスト, ファイルの対応))
@@ -1299,6 +1321,7 @@ impl Session2 {
         for &i in &order {
             let c = &crates[i];
             let (text, map) = crate::srcmap::load_crate(c.root.as_path(), &c.display, &self.opts.cfg_of(&c.features, &c.cfgs, &c.env))?;
+            let text = if c.test { crate::test_harness::apply(&text) } else { text };
             let text = if c.lib { format!("pub mod {} {{ {text}\n}}\n", c.name) } else { text };
             loaded[i] = Some((text, map));
         }
