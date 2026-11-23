@@ -3723,6 +3723,9 @@ impl Cx<'_> {
                         if copies {
                             self.bk_held(recv, out);
                         }
+                    } else if matches!(rt, Some(Ty::Str | Ty::Slice(_))) && self.peek(e).is_some_and(|t| matches!(t, Ty::Struct(s) if is_view(self.prog, s))) {
+                        // (a view of a str / slice (`s.chars()`, `s.split(',')`): it holds what the receiver does)
+                        self.bk_direct(recv, out);
                     }
                 }
                 // (a closure passed to an iterator adapter, which its result holds: `lines.filter_map(|l| .. self.x ..)`

@@ -2788,3 +2788,16 @@ fn part16_fn_bound_results() {
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("because it is borrowed"), "{d:?}");
     assert_eq!(check("fn g1<F: Fn(&isize) -> isize>(f: F) {\n    let mut x = 3;\n    let y = f(&x);\n    x = 5;\n    drop(y);\n}\nfn g2<F: for<'a> Fn(&'a isize, &isize) -> &'a isize>(f: F) {\n    let mut x = 3;\n    let z = 4;\n    let y = f(&z, &x);\n    x = 5;\n    drop(y);\n}\nfn g3<F: Fn(&isize) -> &'static isize>(f: F) {\n    let mut x = 3;\n    let y = f(&x);\n    x = 5;\n    drop(y);\n}\nfn g4<F: Fn(&isize) -> &isize>(f: F) {\n    let mut x = 3;\n    f(&x);\n    x = 5;\n    drop(x);\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A view of a str / slice (`s.chars()`, `s.split(',')`) holds what the receiver does: `v0.chars()` returned as an
+/// `impl Iterator<Item = char>` that captures no lifetime is E0700 (lifetimes/issue-105227.rs), and `t.chars()` of
+/// `t: &str = &s` kept while `s.push('c')` is E0502
+#[test]
+fn part16_str_views() {
+    let d = check("fn c1(v0: &str, v1: &str) -> impl Iterator<Item = char> {\n    v0.chars().chain(v1.chars())\n}\nfn c2(v0: &str) -> impl Iterator<Item = char> {\n    v0.chars()\n}\nfn main() {}\n");
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![2, 5] && d.iter().all(|x| x.1.contains("E0700")), "{d:?}");
+    let d = check("fn main() {\n    let mut s = String::from(\"ab\");\n    let t: &str = &s;\n    let it = t.chars();\n    s.push('c');\n    println!(\"{}\", it.count());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut s = String::from(\"ab\");\n    let n = s.as_str().chars().count();\n    s.push('x');\n    let w: Vec<&str> = s.split(',').collect();\n    println!(\"{} {:?}\", n, w);\n    let v = vec![1u8, 2];\n    let sl: &[u8] = &v;\n    let c: Vec<u8> = sl.iter().copied().collect();\n    drop(v);\n    println!(\"{:?}\", c);\n}\n"), vec![]);
+}
