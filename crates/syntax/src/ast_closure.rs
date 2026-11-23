@@ -384,6 +384,8 @@ fn str_lit_body(t: &str) -> Option<&str> {
 struct Free {
     scopes: Vec<Vec<String>>,
     out: Vec<String>,
+    /// Count `let _ = s;` as a use of s (fake_reads)
+    keep_wild: bool,
 }
 
 impl Free {
@@ -405,6 +407,9 @@ impl Free {
         self.scopes.push(vec![]);
         for s in &b.stmts {
             match s {
+                // (`let _ = s;` / `let _ = s.f;` reads no value: a closure does not capture s for it (edition 2021's
+                // captures), so a `move` closure leaves s usable after it)
+                Stmt::Let(Pat::Wild, None, Some(e), None, ..) if !self.keep_wild && wild_fake_reads() && wild_read_only(e) => {}
                 Stmt::Let(p, _, init, els, ..) => {
                     if let Some(e) = init {
                         self.expr(e);
@@ -520,11 +525,46 @@ impl Free {
     }
 }
 
+/// Edition 2021 and later: `let _ = place;` in a closure captures nothing (the driver sets it for the program it
+/// analyzes; edition 2015 / 2018 capture the place's variable)
+pub static WILD_FAKE_READS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+fn wild_fake_reads() -> bool {
+    WILD_FAKE_READS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A place made of a variable and its fields (`s`, `s.f.g`, `(s)`): `let _ = place;` reads nothing of it
+fn wild_read_only(e: &Expr) -> bool {
+    match e {
+        Expr::Paren(x) => wild_read_only(x),
+        Expr::Field(b, ..) => wild_read_only(b),
+        Expr::Path(None, p) => !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty(),
+        _ => false,
+    }
+}
+
 /// クロージャの自由変数 (使われた順)
 pub fn free_vars(c: &Expr) -> Vec<String> {
-    let mut v = Free { scopes: vec![vec![]], out: Vec::new() };
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), keep_wild: false };
     v.expr(c);
     v.out
+}
+
+/// The variables closure c reads only by `let _ = place;`, which it does not capture: its body skips those `let`s
+pub fn fake_reads(c: &Expr) -> Vec<String> {
+    let mut v = Free { scopes: vec![vec![]], out: Vec::new(), keep_wild: true };
+    v.expr(c);
+    let caps = free_vars(c);
+    v.out.into_iter().filter(|n| !caps.contains(n)).collect()
+}
+
+/// The variable `let _ = place;` names, when the place is one of it and its fields (wild_read_only)
+pub fn wild_root(e: &Expr) -> Option<&str> {
+    match e {
+        Expr::Paren(x) | Expr::Field(x, ..) => wild_root(x),
+        Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => Some(p.segs[0].name.as_str()),
+        _ => None,
+    }
 }
 
 /// The capture e names (a path that is one of caps)

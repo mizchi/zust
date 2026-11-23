@@ -63,6 +63,38 @@ impl Cx<'_> {
         Ok(())
     }
 
+    /// lifetime_arity of the program's own structs and enums a signature's type t names (not in fn pointer, `dyn` and
+    /// `impl` types, nor a type parameter tps names). Not the prelude's, some of which leave out lifetimes std's have
+    /// (`Cow<'a, B>`)
+    pub(crate) fn sig_lt_arity(&self, t: &crate::parse::Ty, tps: &[&str], depth: u32) -> R<()> {
+        use crate::parse::Ty as PTy;
+        if depth > 16 {
+            return Ok(());
+        }
+        match t {
+            PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => self.sig_lt_arity(i, tps, depth + 1),
+            PTy::Tuple(ts) => ts.iter().try_for_each(|t| self.sig_lt_arity(t, tps, depth + 1)),
+            PTy::Path(None, p) => {
+                if let [s] = p.segs.as_slice() {
+                    if s.fn_args.is_none() && !tps.contains(&s.name.as_str()) {
+                        if let Some(&sid) = self.prog.struct_index.get(&s.name) {
+                            let b = self.prog.base_of(sid);
+                            if self.prog.struct_item.get(b as usize).is_some_and(|&i| i < self.prog.prelude_from) {
+                                let what = if self.prog.structs[sid as usize].is_enum { "enum" } else { "struct" };
+                                self.lifetime_arity(sid, p, what)?;
+                            }
+                        }
+                    }
+                }
+                p.segs.iter().flat_map(|s| s.args.iter()).try_for_each(|a| match a {
+                    GArg::Ty(t) => self.sig_lt_arity(t, tps, depth + 1),
+                    _ => Ok(()),
+                })
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// `Enum::<()>::V::<()>(..)` / `Alias::V::<()>(..)` / `Self::V::<()>(..)`: E0109 for type arguments on a variant
     /// when its type has them already, or is an alias or `Self` (`Enum::V::<()>` alone is fine)
     pub(crate) fn variant_targs_allowed(&self, p: &crate::parse::Path, kind: &str) -> R<()> {
@@ -623,8 +655,18 @@ impl Cx<'_> {
     pub(crate) fn expr(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         // (the places inside a sub-expression are accesses of their own)
         let pd = std::mem::take(&mut self.bk.place_depth);
-        self.bk.exp_none = std::mem::take(&mut self.bk.move_mut_next) && expected.is_none();
+        let hint_only = std::mem::take(&mut self.bk.move_mut_hint);
+        self.bk.exp_none = std::mem::take(&mut self.bk.move_mut_next) && (expected.is_none() || hint_only);
+        // (a block's tail's receiver that is a temporary: what its value holds (bk_watch_tail))
+        let watched = !self.bk.watch.is_empty() && self.bk.watch.contains(&(e as *const Expr as usize));
+        if watched {
+            self.bk_frame();
+        }
         let r = self.expr_inner(e, expected);
+        if watched {
+            let s = self.bk_frame_end();
+            self.bk.watched.insert(e as *const Expr as usize, s);
+        }
         self.bk.place_depth = pd;
         let (v, t) = r.map_err(|m| {
             // (エラーに、位置を持つ一番内側の式の先頭の行:桁を付ける。ACG_DEBUG_AT=1 なら式も)
@@ -2329,6 +2371,12 @@ impl Cx<'_> {
                 self.rg_closure_stores(cd.sid, &args, link, body, &names, &cd.captures);
             }
         }
+        // (a body with a `let` whose annotation writes `'static`: the function is checked from here on, as for its own
+        // `let x: &'static T`, so what the closure captures has its trees)
+        let ann_static = self.user_code && self.bk.level >= 2 && !cd.captures.is_empty() && matches!(c, Expr::Closure(_, _, _, b, _) if crate::regions::annotates_static(b));
+        if ann_static && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
+            self.rg_late_on();
+        }
         // (the region signature its body is checked with: from a bound not the prelude's, else from annotated
         // parameters)
         if self.user_code && self.bk.level >= 2 && !to_prelude && (bound.is_some() || inputs.iter().any(|x| x.1.is_some()) || (self.rg_on() && !cd.captures.is_empty())) && regionck::enabled() {
@@ -3671,8 +3719,9 @@ impl Cx<'_> {
         if let Expr::Path(_, p) = &**func {
             self.check_unsafe_call(id, p.pos)?;
         }
-        // (the region check reports at the call: call_fn is given no span for it)
-        if self.rg_on() {
+        // (the region check reports at the call: call_fn is given no span for it. Also when it is off, but may begin
+        // at the call (a callee that requires 'static: `s::<T>()`))
+        if self.rg_on() || self.rg.eligible {
             self.rg.call_sp = borrowck::pos(c);
         }
         // (the lifetimes written on the type: `A::<'a>::new`, `<A<'a>>::new`, `<A<'a> as Tr>::f`)
