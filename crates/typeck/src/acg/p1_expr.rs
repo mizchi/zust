@@ -2705,7 +2705,15 @@ impl Cx<'_> {
                 return err(span, format!("cannot find trait `{tr}`"));
             }
             let decls = if auto { vec![] } else { self.prog.dyn_methods(tr) };
-            if !auto && !self.prog.implements(t, tr) {
+            // (a trait of the program's: by the trait solver (an impl for a reference or an array, a blanket impl with
+            // where clauses); std's: implements, unless the solver knows better (`()`'s impls))
+            let own = self.prog.tdb.user.contains(tr);
+            let no = if own || t == Ty::Unit {
+                !self.prog.has_param(t) && self.prog.tdb.holds(self.prog, t, tr) == crate::traits::Ans::No
+            } else {
+                !self.prog.implements(t, tr)
+            };
+            if !auto && no {
                 return err(span, format!("the trait `{tr}` is not implemented for `{}`", self.prog.tn(t)));
             }
             // (a trait of the program's with its arguments, by the trait solver: `Struct` to `dyn Trait<isize>` needs

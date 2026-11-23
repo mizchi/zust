@@ -1118,6 +1118,7 @@ compile-fail	borrowck/unmatched-arg-and-hir-arg-issue-126385.rs
 compile-fail	borrowck/use-moved-value-in-match-guard-drop.rs
 compile-fail	borrowck/var-matching-lifetime-but-unused-not-mentioned.rs
 compile-fail	borrowck/writing-to-immutable-vec.rs
+run-pass	box/box-array-match-temporary-drop.rs
 run-pass	box/box-deref-in-match-arm-no-invalid-ir.rs
 run-pass	box/box-deref-match-arm.rs
 run-pass	box/box-fixed-array-coerce-unsized-match.rs
@@ -1506,6 +1507,7 @@ compile-fail	coercion/non-primitive-cast-135412.rs
 compile-fail	coercion/pin-dyn-dispatch-sound.rs
 compile-fail	coercion/ptr-mutability-errors.rs
 check-pass	coercion/struct-literal-field-type-coercion-to-expected-type.rs
+run-pass	coercion/trait-object-arrays-11205.rs
 compile-fail	coercion/type-errors.rs
 run-pass	coercion/unsafe-coercion.rs
 check-pass	coherence/clone-impl-unsized-slice.rs
@@ -2223,6 +2225,7 @@ run-pass	drop/static-issue-17302.rs
 build-pass	drop/static-variable-with-drop-trait-9243.rs
 run-pass	drop/struct-field-drop-order.rs
 check-pass	drop/tail_expr_drop_order-on-recursive-boxed-fut.rs
+run-pass	drop/trait-object-drop-10802.rs
 run-pass	dropck/cleanup-arm-conditional.rs
 run-pass	dropck/compound-type-of-raw-pointers.rs
 check-pass	dropck/constrained_by_assoc_type_equality.rs
@@ -4686,6 +4689,7 @@ check-pass	nll/issue-55344.rs
 compile-fail	nll/issue-55394.rs
 compile-fail	nll/issue-55401.rs
 check-pass	nll/issue-55651.rs
+check-pass	nll/issue-55825-const-fn.rs
 compile-fail	nll/issue-57100.rs
 compile-fail	nll/issue-57280-1-flipped.rs
 compile-fail	nll/issue-57642-higher-ranked-subtype.rs
