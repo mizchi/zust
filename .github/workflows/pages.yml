@@ -56,7 +56,7 @@ jobs:
             rm -rf ../pages/dashboard ../pages/og
             cp -R out/site/. ../pages/
             cd ../pages
-            git add -A index.html style.css dashboard og og-home.png og-dashboard.png
+            git add -A index.html style.css nav.js dashboard og og-home.png og-dashboard.png
             if git diff --cached --quiet; then echo "site unchanged"; exit 0; fi
             git commit -q -m "site: / and /dashboard/ from ${GITHUB_SHA::7}"
             if git push -q origin gh-pages; then exit 0; fi
