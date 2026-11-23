@@ -3370,7 +3370,10 @@ impl Cx<'_> {
                         // (the arguments flow into the regions the bound's parameters write, as for a `dyn Fn`)
                         self.rg_dyn_fn_args(&b, &args);
                         let r = if never { (None, Ty::Never) } else { self.zero_of(ret) };
-                        self.bk_frame_end_call();
+                        // (a result that borrows an argument by the bound's lifetimes holds the argument's loans:
+                        // `let y = f(&x);` with `F: Fn(&isize) -> &isize`)
+                        let from = if matches!(ret, Ty::Ref(..)) || self.bk_ty(ret).1 { crate::ast_summary::fn_bound_ret_from(&b) } else { vec![] };
+                        self.bk_frame_end_call_from(&args, &from);
                         return Ok(r);
                     }
                     return err(SP, format!("expected a function, found `{}`", self.prog.tn(t)));

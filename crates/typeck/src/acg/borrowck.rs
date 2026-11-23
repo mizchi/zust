@@ -3463,6 +3463,23 @@ impl Cx<'_> {
 
     /// Stop collecting for a call whose signature is not known (a closure, a fn pointer, `dyn Fn`): the loans made
     /// for its arguments are not passed on, what the locals read hold is
+    /// bk_frame_end_call, and the result holds what the arguments `from` borrow directly too
+    pub(crate) fn bk_frame_end_call_from<E: std::ops::Deref<Target = Expr>>(&mut self, args: &[E], from: &[usize]) {
+        if !self.bk_on() {
+            return;
+        }
+        self.bk_frame_end_call();
+        for &i in from {
+            if let Some(a) = args.get(i) {
+                let mut v = vec![];
+                self.bk_direct(a, &mut v);
+                for s in v {
+                    self.bk.src(s);
+                }
+            }
+        }
+    }
+
     pub(crate) fn bk_frame_end_call(&mut self) {
         if !self.bk_on() {
             return;
