@@ -1386,8 +1386,22 @@ fn bin_prec(op: &str) -> u8 {
 
 fn balanced(s: &str) -> bool {
     let mut d = 0i32;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
     for c in s.chars() {
+        // (parentheses inside a string literal are not structure: `(yield k("(")) + h(")")` is not one group)
+        if let Some(q) = quote {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == q {
+                quote = None;
+            }
+            continue;
+        }
         match c {
+            '"' | '\'' | '`' => quote = Some(c),
             '(' => d += 1,
             ')' => {
                 d -= 1;

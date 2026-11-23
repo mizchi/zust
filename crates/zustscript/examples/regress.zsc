@@ -178,3 +178,11 @@ pub fn leaks_far() -> i32 {
 pub fn handles_far() -> i32 {
   handle leaks_far() { FarOp, k => k(41) }
 }
+
+// parentheses inside a string are not structure: `k("(") + h(")")` is not the arm's last act (nor one group)
+enum Ask2 { Name2 -> String }
+fn who2() -> String { perform Name2 }
+fn bang(s: String) -> String { s + "!" }
+pub fn paren_str() -> String {
+  handle who2() { Name2, k => k("(") + bang(")") }
+}

@@ -413,10 +413,10 @@ console.log(m.many_ops(100000), m.own_ops(), m.nested_k(), m.proto_op());
 console.log(m.gen_after_k(100000), m.gen_outer_op(100000), m.gen_plus_one(100000));
 try { m.resume_twice(); } catch (e) { console.log(e.message); }
 const g = m.leaks_far(), y = g.next();
-console.log(JSON.stringify(y.value), JSON.stringify(g.next(41)), m.handles_far());
+console.log(JSON.stringify(y.value), JSON.stringify(g.next(41)), m.handles_far(), m.paren_str());
 "#,
     );
-    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n99999 42 101 7\n99999 199999 100000\nzustscript: a continuation was resumed twice\n{\"TAG\":\"FarOp\"} {\"value\":42,\"done\":true} 42\n");
+    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n99999 42 101 7\n99999 199999 100000\nzustscript: a continuation was resumed twice\n{\"TAG\":\"FarOp\"} {\"value\":42,\"done\":true} 42 ()!\n");
     let dts = std::fs::read_to_string(d.join("regress.d.ts")).unwrap();
     assert!(dts.contains("import type { ReactElement as $ReactElement } from \"react\";"), "{dts}");
     assert!(dts.contains("export interface ReactElement {"), "{dts}");
