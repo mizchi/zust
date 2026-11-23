@@ -161,7 +161,7 @@ const HELPERS: &[(&str, &str)] = &[
     ("$round", "function $round(x) {\n  return x < 0 ? -Math.round(-x) : Math.round(x);\n}"),
     (
         "$handle",
-        "// Deep handlers on generators (one-shot continuations), run by one loop that keeps the frames on a heap stack:\n// operations and resumptions do not grow the JS stack. A generator yields an operation (a variant) or an\n// instruction to the loop (`$i`): run a handled body, resume a continuation, or resume it as the arm's last act\nfunction $handle(body, ops, arm) {\n  return { $i: 1, body, ops, arm };\n}\n\nfunction $resume(k, v) {\n  return { $i: 2, k, v };\n}\n\nfunction $tail(k, v) {\n  return { $i: 3, k, v };\n}\n\nfunction $run(body, ops, arm) {\n  // (a frame: a generator, and for a handled body its operations and arm; a continuation: the frames it cut off)\n  const st = [{ g: body(), ops, arm }];\n  let v, e, thrown = false;\n  for (;;) {\n    const f = st[st.length - 1];\n    let r;\n    try {\n      r = thrown ? f.g.throw(e) : f.g.next(v);\n    } catch (x) {\n      st.pop();\n      if (st.length === 0) throw x;\n      thrown = true;\n      e = x;\n      continue;\n    }\n    thrown = false;\n    v = undefined;\n    if (r.done) {\n      st.pop();\n      if (st.length === 0) return r.value;\n      v = r.value;\n      continue;\n    }\n    const y = r.value;\n    if (y.$i === 1) {\n      st.push({ g: y.body(), ops: y.ops, arm: y.arm });\n    } else if (y.$i !== undefined) {\n      const seg = y.k.seg;\n      if (seg === null) {\n        thrown = true;\n        e = new Error(\"zustscript: a continuation was resumed twice\");\n        continue;\n      }\n      y.k.seg = null;\n      // (as the arm's last act, the arm's value is the continuation's: its frame goes)\n      if (y.$i === 3) st.pop();\n      for (let i = 0; i < seg.length; i++) st.push(seg[i]);\n      v = y.v;\n    } else {\n      // (the nearest handler of the operation: the frames from it up are the continuation, and its arm runs in\n      // their place, under the handlers outside it)\n      let i = st.length - 1;\n      while (i >= 0 && (st[i].ops === undefined || !st[i].ops.includes(y.TAG))) i--;\n      if (i < 0) {\n        thrown = true;\n        e = new Error(\"zustscript: unhandled effect \" + y.TAG);\n        continue;\n      }\n      const h = st[i];\n      const k = { seg: st.splice(i) };\n      st.push({ g: h.arm(y, k) });\n    }\n  }\n}",
+        "// Deep handlers on generators (one-shot continuations), run by one loop that keeps the frames on a heap stack:\n// operations and resumptions do not grow the JS stack. A generator yields an operation (a variant) or an\n// instruction to the loop (`$i`): run a handled body, resume a continuation, or resume it as the arm's last act\nfunction $handle(body, ops, arm) {\n  return { $i: 1, body, ops, arm };\n}\n\nfunction $resume(k, v) {\n  return { $i: 2, k, v };\n}\n\nfunction $tail(k, v) {\n  return { $i: 3, k, v };\n}\n\n// The loop over the frames `st` (a frame: a generator, and for a handled body its operations and arm; a\n// continuation: the frames it cut off). An operation no frame handles is yielded to whoever drives the loop (a TS\n// caller of a `pub` function, or an outer loop), and its answer is sent back to the frame that performed it\nfunction* $drive(st) {\n  let v, e, thrown = false;\n  for (;;) {\n    const f = st[st.length - 1];\n    let r;\n    try {\n      r = thrown ? f.g.throw(e) : f.g.next(v);\n    } catch (x) {\n      st.pop();\n      if (st.length === 0) throw x;\n      thrown = true;\n      e = x;\n      continue;\n    }\n    thrown = false;\n    v = undefined;\n    if (r.done) {\n      st.pop();\n      if (st.length === 0) return r.value;\n      v = r.value;\n      continue;\n    }\n    const y = r.value;\n    if (y.$i === 1) {\n      st.push({ g: y.body(), ops: y.ops, arm: y.arm });\n    } else if (y.$i !== undefined) {\n      const seg = y.k.seg;\n      if (seg === null) {\n        thrown = true;\n        e = new Error(\"zustscript: a continuation was resumed twice\");\n        continue;\n      }\n      y.k.seg = null;\n      // (as the arm's last act, the arm's value is the continuation's: its frame goes)\n      if (y.$i === 3) st.pop();\n      for (let i = 0; i < seg.length; i++) st.push(seg[i]);\n      v = y.v;\n    } else {\n      // (the nearest handler of the operation: the frames from it up are the continuation, and its arm runs in\n      // their place, under the handlers outside it)\n      let i = st.length - 1;\n      while (i >= 0 && (st[i].ops === undefined || !st[i].ops.includes(y.TAG))) i--;\n      if (i < 0) {\n        try {\n          v = yield y;\n        } catch (x) {\n          thrown = true;\n          e = x;\n        }\n        continue;\n      }\n      const h = st[i];\n      const k = { seg: st.splice(i) };\n      st.push({ g: h.arm(y, k) });\n    }\n  }\n}\n\n// A `handle` outside any generator: nothing outside it can answer an operation it does not handle\nfunction $run(body, ops, arm) {\n  const r = $drive([{ g: body(), ops, arm }]).next();\n  if (!r.done) throw new Error(\"zustscript: unhandled effect \" + r.value.TAG);\n  return r.value;\n}",
     ),
     (
         "$perform",
@@ -327,7 +327,19 @@ impl<'a> Js<'a> {
         self.ind += 1;
         self.gen_ = gen_;
         self.tmp = 0;
+        // (a TS caller drives a `pub` generator: its body runs under the handlers' loop, so the caller sees only the
+        // operations the function leaves unhandled, never the loop's instructions)
+        let drive = gen_ && public;
+        if drive {
+            self.helpers.insert("$handle");
+            self.line("return yield* $drive([{ g: (function* () {");
+            self.ind += 1;
+        }
         self.stmt_expr(body, &Dest::Return);
+        if drive {
+            self.ind -= 1;
+            self.line("})() }]);");
+        }
         self.ind -= 1;
         self.line("}");
         self.out.push('\n');
@@ -363,7 +375,7 @@ impl<'a> Js<'a> {
         }
         let mut need: BTreeSet<&str> = self.helpers.clone();
         if need.contains("$handle") {
-            need.extend(["$resume", "$tail", "$run"]);
+            need.extend(["$resume", "$tail", "$drive", "$run"]);
         }
         if need.contains("$perform") {
             need.insert("$handleD");

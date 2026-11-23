@@ -167,3 +167,14 @@ fn pick() -> i32 { perform Pick }
 pub fn resume_twice() -> i32 {
   handle pick() { Pick, k => k(1) + k(2) }
 }
+
+// a `pub` function that handles one effect and lets another out: its TS caller (and a caller here) sees only the
+// operation left unhandled, never the loop's instructions
+enum Near { NearOp -> i32 }
+enum Far { FarOp -> i32 }
+pub fn leaks_far() -> i32 {
+  handle { let x = perform NearOp; x + perform FarOp } { NearOp, k => k(1) }
+}
+pub fn handles_far() -> i32 {
+  handle leaks_far() { FarOp, k => k(41) }
+}

@@ -172,6 +172,7 @@ let who = handle greet() {
   - `perform` は `$perform("Op", ..)` で、最も内側の handler の arm を直接呼ぶ。`k(x)` は `x` を返すことになる。arm は、その `handle` の外側の handler の下で動く(深いハンドラの意味のまま)
   - それ以外の effect(arm が `k` を呼ばずに抜けるもの、`pub` な関数から外へ出るもの、それらと混ざるもの)では、関数は `function*`、`perform` は `yield`、その呼び出しは `yield*` になる。`handle` は深いハンドラ(一度だけ再開できる継続)で、generator は `$handle(..)` / `$resume(k, x)` を命令として `yield` する
   - 命令は 1 つのループ `$run` が実行する。フレーム(generator)はヒープ上のスタックに積み、operation はその handler から上のフレームを切り取って継続にし、再開はそれを積み直す。そのため、1 つの `handle` の中で operation を何回しても JS のスタックは深くならない(回帰テスト `gen_after_k` / `gen_outer_op` / `gen_plus_one`、10 万回)
+  - `pub` な関数の generator は、本体をこのループ(`$drive`)の下で動かす。TS の呼び出し元に届くのは、その関数が扱わずに外へ出す operation だけで、`.next(x)` の値がその operation の結果になる(ループの命令は見えない)
   - arm が最後に `k(x)` を返すとき(`$tail`)は、arm のフレームを捨ててから再開するので、ヒープのスタックも伸びない。`k(()) + 1` のように再開の後に続きがあるときは、待っている arm の分だけヒープに積まれる
   - 直接の呼び出しは generator の約 100 倍速い(`bench/js` の `w_effects`)。generator の handler は、以前の `yield*` を入れ子にする実装より 4〜7 倍速い(operation 1000 回で 1.2〜1.4 ms → 0.2〜0.3 ms)
   - 扱わない effect は外側のハンドラへ転送される
