@@ -1,0 +1,7 @@
+called 3
+AddFlags { bits: 4 }
+called 1
+AddFlags { bits: 2 }
+called 5
+AddFlags { bits: 6 }
+7

@@ -78,6 +78,17 @@ pub(crate) fn vec_of(es: &[Expr]) -> Expr {
 impl Cx<'_> {
     /// `recv.m(args)`: レシーバを自動 deref して struct を見つけ、
     /// メソッドの self 型に合わせて自動参照 (`&self` / `&mut self`) かコピー (`self`) で渡す
+    /// A prelude iterator adapter that holds a `Copied` / `Cloned` iterator (`Filter<Copied<Iter<&str>>, F>`): what it
+    /// yields are copies
+    fn copies_items(&self, sid: u32, depth: u32) -> bool {
+        let b = self.prog.base_of(sid);
+        if depth > 8 || self.prog.struct_item.get(b as usize).is_none_or(|&i| i < self.prog.prelude_from) {
+            return false;
+        }
+        matches!(self.prog.structs[b as usize].name.as_str(), "Copied" | "Cloned")
+            || self.prog.structs[sid as usize].args.iter().any(|&a| matches!(a, Ty::Struct(x) if self.copies_items(x, depth + 1)))
+    }
+
     pub(crate) fn method_call(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         // (a call that named its trait: set while this call is resolved, and the outer call's back after)
         let forced = match e {
@@ -86,6 +97,20 @@ impl Cx<'_> {
         };
         let prev = std::mem::replace(&mut self.explicit_trait, forced);
         let n = self.caller_locs.len();
+        // (unused_mut: an array's methods are lowered on its memory, not all through a recorded `&mut`: a method that
+        // mutates an array the local owns (`a.swap(0, 1)`, `a[..2].copy_from_slice(..)`) counts as needing it `mut`.
+        // Not one that reads it (`a.len()`))
+        if self.bk.lint_mut {
+            if let Expr::MethodCall(r, mname, ..) = e {
+                let mut base: &Expr = strip_paren(r);
+                while let Expr::Index(b, ..) = base {
+                    base = strip_paren(b);
+                }
+                if is_place_expr(base) && matches!(self.peek(base), Some(Ty::Array(..))) && MUT_SLICE_METHODS.contains(&mname.as_str()) {
+                    self.bk_mut_use(base);
+                }
+            }
+        }
         // (`opt.copied()` / `opt.cloned()` of an `Option<&U>`: the U copied out does not hold the borrow that reached it
         // (bk_copy_out), as `*opt.unwrap()` does not)
         // (and an item of a `Copied` / `Cloned` iterator (`w.iter().copied().next()`): what the iterator's items are
@@ -106,6 +131,8 @@ impl Cx<'_> {
                     _ => None,
                 },
                 Some((_, "Copied" | "Cloned")) => Some(None),
+                // (an adapter over one (`names.iter().copied().filter(..)`): its items are those copies too)
+                Some((sid, _)) if self.copies_items(sid, 0) => Some(None),
                 _ => None,
             },
             _ => None,
@@ -1612,7 +1639,9 @@ impl Cx<'_> {
             if !matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(..))) {
                 return Ok(None);
             }
-            let (v, vt) = self.expr(recv, None)?;
+            // (an array the method borrows (`&self` / `&mut self`): its place, not a move out of it (`a.touch()` of
+            // `a: [String; 1]`))
+            let (v, vt) = if is_place_expr(recv) && matches!(self.peek(recv), Some(Ty::Array(..))) { self.read_no_move(recv)? } else { self.expr(recv, None)? };
             let Some(mut v) = v else { return Ok(Some((None, Ty::Never))) };
             let mut vt = vt;
             // (参照の参照は 1 段ずつ外し、&str / &[T] / &[T; N] で止める)
@@ -1627,11 +1656,22 @@ impl Cx<'_> {
                 vt = *i;
             }
             if matches!(vt, Ty::Array(..)) {
-                let a = v;
-                v = a;
-                vt = Ty::Ref(false, intern(vt));
+                // (a `&mut self` method (`impl Touch for [i32; 2]`'s `fn touch(&mut self)`): a mutable borrow of the
+                // array (E0596 when it is not `mut`; it needs the `mut`, for unused_mut))
+                let mutable = matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(true, _)));
+                // (a `&self` one: a shared borrow of the array, which a result that borrows from self holds
+                // (`let r = a.head(); drop(a);` is E0505))
+                if is_place_expr(recv) && matches!(self.peek(recv), Some(Ty::Array(..))) {
+                    self.bk_borrow(recv, mutable, err_pos(recv));
+                    if mutable {
+                        self.bk_mut_use(recv);
+                    }
+                }
+                vt = Ty::Ref(mutable, intern(vt));
             }
             let args: Vec<&Expr> = margs.iter().collect();
+            // (an `unsafe fn` of the trait: E0133 outside `unsafe`, as for the other method calls)
+            self.check_unsafe_call(id, msp.start)?;
             return self.call_fn(id, Some((v, vt)), &args, tf, expected, SP).map(Some);
         }
         // (a vector of core::arch too: `impl Vector for __m128i`'s `v.movemask()`)
@@ -3429,3 +3469,14 @@ fn mentions_param0(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
         _ => false,
     }
 }
+
+/// The methods of a slice (and so of an array) that take `&mut self`: an array's call of one needs the array `mut`
+/// (unused_mut)
+const MUT_SLICE_METHODS: &[&str] = &[
+    "sort", "sort_unstable", "sort_by", "sort_by_key", "sort_unstable_by", "sort_unstable_by_key", "sort_by_cached_key", "swap", "reverse",
+    "fill", "fill_with", "rotate_left", "rotate_right", "copy_from_slice", "clone_from_slice", "copy_within", "swap_with_slice", "iter_mut",
+    "as_mut_slice", "as_mut_ptr", "as_mut_ptr_range", "get_mut", "get_unchecked_mut", "first_mut", "last_mut", "split_at_mut",
+    "split_first_mut", "split_last_mut", "chunks_mut", "chunks_exact_mut", "rchunks_mut", "rchunks_exact_mut", "split_mut", "splitn_mut",
+    "rsplit_mut", "rsplitn_mut", "select_nth_unstable", "select_nth_unstable_by", "select_nth_unstable_by_key", "each_mut",
+    "make_ascii_uppercase", "make_ascii_lowercase", "partition_dedup",
+];

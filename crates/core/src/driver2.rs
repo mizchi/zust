@@ -29,7 +29,7 @@ pub struct ChkMemo {
     fp: u64,
     /// the lint levels it was checked with (lint_bits): `#![allow(overflowing_literals)]` taken out of a body leaves
     /// iface_fp as it was
-    lint: u8,
+    lint: u16,
     ents: FxMap<String, ChkEnt>,
 }
 
@@ -818,7 +818,7 @@ impl Session2 {
     /// 要約はアイテムのハッシュで引く
     pub fn analyze(&mut self, src0: &str) -> R<Analysis> {
         // (closures' captures by edition: `let _ = s;` captures s before 2021 only (ast_closure::WILD_FAKE_READS))
-        crate::ast_closure::WILD_FAKE_READS.store(self.opts.edition >= 2021, std::sync::atomic::Ordering::Relaxed);
+        crate::ast_closure::WILD_FAKE_READS.with(|c| c.set(self.opts.edition >= 2021));
         let mut externs = std::mem::take(&mut self.externs);
         // (ファイルから読んだもの (load_crate) は読むときに cfg を評価してある)
         let stripped;
@@ -1250,6 +1250,7 @@ impl Session2 {
         let mut deny_unreachable_code = false;
         let mut deny_must_use = false;
         let mut deny_unused_alloc = false;
+        let mut deny_unused_mut = false;
         let mut deny_trivial_casts = (false, false);
         let mut deny_unused_lifetimes = (false, false);
         let mut deny_mismatched_lts = false;
@@ -1338,6 +1339,7 @@ impl Session2 {
             deny_deprecated = lint("deprecated") || (levels.contains(&"warnings") && !c.contains("#![allow(deprecated"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
+            deny_unused_mut = lint("unused_mut") || (!levels.contains(&"unused_mut") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             for (k, n) in ["non_snake_case", "non_camel_case_types", "non_upper_case_globals"].iter().enumerate() {
                 deny_style[k] = levels.iter().any(|l| l == n || *l == "nonstandard_style" || *l == "warnings") && !c.contains(&format!("#![allow({n}"));
             }
@@ -1475,6 +1477,21 @@ impl Session2 {
         prog.edition = self.opts.edition;
         prog.path_lts = crate::regions::src_path_lts(src0);
         prog.deny_unused_alloc = deny_unused_alloc;
+        // (not where an item or a statement may allow it: any `allow` / `warn` / `expect` of unused_mut, unused or
+        // warnings in the source turns it off, as the borrow check does not follow lint levels below the crate)
+        // (an attribute's: after `#[` / `#![` (not the word in a comment, `// allow (unused_mut)`), also with spaces
+        // before the `(`: `#[allow (unused_mut)]`)
+        prog.deny_unused_mut = deny_unused_mut && !["allow", "warn", "expect"].iter().any(|a| {
+            src0.match_indices(a).any(|(i, _)| {
+                let attr = src0[..i].trim_end().strip_suffix('[').map(str::trim_end).is_some_and(|p| p.ends_with('#') || p.strip_suffix('!').is_some_and(|q| q.trim_end().ends_with('#')));
+                if !attr {
+                    return false;
+                }
+                let Some(rest) = src0[i + a.len()..].trim_start().strip_prefix('(') else { return false };
+                let list = &rest[..rest.find(')').unwrap_or(rest.len())];
+                list.split(',').any(|x| matches!(x.trim(), "unused_mut" | "unused" | "warnings"))
+            })
+        });
         // (an `allow` / `warn` / `expect` of it anywhere, at the crate or an item: not denied there, so not checked)
         // (one search of the source for the name, then the attribute around each place it is written)
         // (not the name in a string or after `//` on its line: `"#[allow(overflowing_literals)]"` allows nothing)
@@ -4547,7 +4564,7 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
         let tr = b.split('<').next().unwrap_or(b).trim();
         let tr = tr.rsplit("::").next().unwrap_or(tr);
         matches!(tr, "Sized" | "Clone" | "Copy" | "Default" | "From" | "Into" | "TryFrom" | "TryInto" | "FromStr" | "FromIterator")
-            || prog.bound_implies(b, &["Sized", "Clone", "Copy"], false, 0)
+            || prog.bound_implies(b, &["Sized", "Clone", "Copy", "Default"], false, 0)
     };
     let word = |text: &str, w: &str| text.match_indices(w).any(|(i, _)| {
         let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
@@ -4862,11 +4879,12 @@ fn first_accidentally_stable(src: &str, items: &[SrcItem]) -> Option<String> {
 
 /// The lint levels codegen checks (`#![deny(unused_must_use)]`, `trivial_casts` ..) as one byte for the cache keys: a
 /// function compiled before such a `#![deny]` was added is not reused without its check
-fn lint_bits(p: &Program) -> u8 {
-    p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4 | ((p.edition >= 2024) as u8) << 5
+fn lint_bits(p: &Program) -> u16 {
+    (p.deny_must_use as u8 | (p.deny_trivial_casts.0 as u8) << 1 | (p.deny_trivial_casts.1 as u8) << 2 | (p.deny_unreachable as u8) << 3 | (p.deny_unused_alloc as u8) << 4 | ((p.edition >= 2024) as u8) << 5
         // (and what a closure captures: `let _ = s;` captures s before 2021 only (ast_closure::WILD_FAKE_READS))
         | ((p.edition >= 2021) as u8) << 6
-        | (p.allow_overflowing_literals as u8) << 7
+        | (p.allow_overflowing_literals as u8) << 7) as u16
+        | (p.deny_unused_mut as u16) << 8
 }
 
 /// The attributes behind a feature gate, and the feature

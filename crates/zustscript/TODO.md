@@ -88,7 +88,7 @@ r5 / r2 を書いた agent が報告したもの。次の改訂で直す。
 1. **済: effect の tail-resumptive な handler を、直接の関数呼び出しにした**(`check::direct_effects`、`$perform` / `$handleD`)
    - handler のすべての arm が末尾で `k(x)` を呼ぶだけで、`pub` な関数から外へ出ず、generator の effect と混ざらない effect は、普通の呼び出しになる。それ以外は generator のまま
    - `w_effects` は 676 ms → 6.5 ms(約 100 倍)。結果は同じ。operation を 100 万回しても、スタックはあふれない(回帰テスト `many_ops`)
-   - **残る不具合**: generator の deep handler は、operation のたびに JS のスタックが深くなり、1 つの `handle` の中で operation が 1000 回前後になるとあふれる。ループの形の再開(trampoline)が要る
+   - **済: generator の deep handler のスタックのあふれ**: 命令を 1 つのループ(`$run`)で実行し、フレームをヒープ上のスタックに積む(trampoline)。1 つの `handle` の中で operation を 10 万回しても、あふれない。速さも 4〜7 倍
 2. **済: 実行時の補助関数を共通の runtime モジュールにした**: `zsc-runtime.js` / `.d.ts`(補助関数と、数値の brand とそのコンストラクタ)を出力先に 1 つ書き、各モジュールは使うものだけ import する。モジュールは使う brand を re-export するので、TS 側の import は変わらない。`--inline-runtime` で、これまでどおりモジュールの中に書く
    - 1 つのモジュールの bundle は変わらない(tree-shaking)。全モジュールを 1 つに bundle すると minify 後で 18,376 → 14,249 バイト(−22%)、gzip 後で −6.5%。zsc が出す .js は −30%
    - 003 の prelude(`Option` / `Result` の型)も、ここに置く予定

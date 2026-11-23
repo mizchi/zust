@@ -2068,7 +2068,13 @@ impl Cx<'_> {
             Expr::Ref(_, x) => self.not_const(x),
             Expr::MethodCall(..) => true,
             Expr::Call(f, args) => match strip(f) {
-                Expr::Path(_, p) if self.prog.variant_by_p(&crate::program::PPath::of(p), self.self_sid).is_some() || self.prog.struct_by_p(&crate::program::PPath::of(p), self.self_sid).is_some() => args.iter().any(|a| self.not_const(a)),
+                Expr::Path(_, p)
+                    if self.prog.variant_by_p(&crate::program::PPath::of(p), self.self_sid).is_some()
+                        || (self.prog.struct_by_p(&crate::program::PPath::of(p), self.self_sid).is_some()
+                            && self.prog.fn_by_p(&crate::program::PPath::of(p), self.self_sid).is_none()) =>
+                {
+                    args.iter().any(|a| self.not_const(a))
+                }
                 Expr::Path(_, p) => p.segs.last().is_none_or(|s| !matches!(s.name.as_str(), "null" | "null_mut" | "size_of" | "align_of" | "max_value" | "min_value" | "new" | "from_secs" | "from_millis" | "from_micros" | "from_nanos")),
                 _ => true,
             },
