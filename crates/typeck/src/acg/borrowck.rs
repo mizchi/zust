@@ -2852,6 +2852,11 @@ impl Cx<'_> {
         self.bk.bind_srcs = srcs;
         self.bk.pat_path = path;
         self.bk.scrut_place = scrut;
+        // (gone with the body's scope: at the end of the iteration, and on a `break` / `continue` out of it
+        // (bk_dead_scope, bk_dead_exit))
+        if let Some(id) = id {
+            self.bk.scope_temps.push((self.scopes.len().saturating_sub(1), id));
+        }
         id
     }
 

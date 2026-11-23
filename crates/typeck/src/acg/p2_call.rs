@@ -341,22 +341,9 @@ impl Cx<'_> {
         }
         // (`x.m()` with x of a type parameter `T: Tr` in a generic fn, instantiated as a primitive: Tr's `m`, which a
         // builtin method of the same name (`to_string` ..) would otherwise answer: `<T as Tr>::m(&x, ..)`)
-        // (`impl Deref<Target = [T; N]>` (or a slice, str) with no method m of its own: `t.m()` is `t.deref().m()`,
-        // decided before anything is evaluated, so the user's deref runs once; only for the structs Program found such a
-        // deref of)
-        if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)).filter(|t| matches!(t, Ty::Struct(s) if !self.prog.deref_to_seq.is_empty() && self.prog.deref_to_seq.contains(&self.prog.base_of(*s)))) {
-            if self.prog.method(sid, method).is_none() && self.prog.default_method(sid, method).is_none() {
-                if let Some(did) = self.prog.method(sid, "deref") {
-                    if matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, Ty::Array(..) | Ty::Slice(_) | Ty::Str)) {
-                        let d = Expr::MethodCall(Box::new(Expr::Paren(recv.clone())), "deref".to_string(), vec![], vec![], msp);
-                        let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(d), method.to_string(), gargs.clone(), margs.clone(), msp));
-                        return self.expr(ne, expected);
-                    }
-                }
-            }
-        }
         // (`w.m()` with w of the program's struct with a `DerefMut`, and m a `&mut self` method of what it derefs to, not
-        // w's own: `(&mut *w).m()`, as autoderef takes `deref_mut` for it; w is borrowed mutably (E0596 without `mut`,
+        // w's own: `(&mut *w).m()`, as autoderef takes `deref_mut` for it, before the rewrite of a deref to a slice below
+        // (`c.reverse()` of a `C: DerefMut<Target = [i32]>`); w is borrowed mutably (E0596 without `mut`,
         // E0502 against a shared loan of it) and the user's `deref_mut` runs, not `deref`)
         if let Some((t0, (refs, target))) = (!self.prog.deref_mut_of.is_empty()).then(|| self.peek(recv)).flatten().and_then(|t| Some((t, self.deref_mut_recv(t, method)?))) {
             let mut d = recv.clone();
@@ -391,6 +378,22 @@ impl Cx<'_> {
                 }
             }
             return self.expr(ne, expected);
+        }
+        // (`impl Deref<Target = [T; N]>` (or a slice, str) with no method m of its own: `t.m()` is `t.deref().m()`,
+        // decided before anything is evaluated, so the user's deref runs once; only for the structs Program found such a
+        // deref of)
+        if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)).filter(|t| matches!(t, Ty::Struct(s) if !self.prog.deref_to_seq.is_empty() && self.prog.deref_to_seq.contains(&self.prog.base_of(*s)))) {
+            if self.prog.method(sid, method).is_none() && self.prog.default_method(sid, method).is_none() {
+                if let Some(did) = self.prog.method(sid, "deref") {
+                    if let Ty::Ref(_, target @ (Ty::Array(..) | Ty::Slice(_) | Ty::Str)) = self.prog.sigs[did as usize].ret {
+                        // (`deref_mut` for a method that takes `&mut self` (`c.reverse()`), as autoderef takes it)
+                        let m = if self.prog.method(sid, "deref_mut").is_some() && self.takes_mut_self(*target, method) { "deref_mut" } else { "deref" };
+                        let d = Expr::MethodCall(Box::new(Expr::Paren(recv.clone())), m.to_string(), vec![], vec![], msp);
+                        let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(d), method.to_string(), gargs.clone(), margs.clone(), msp));
+                        return self.expr(ne, expected);
+                    }
+                }
+            }
         }
         // (`g.m()` with g a RefCell's Ref / RefMut or a MutexGuard, and m not the guard's own: `(*g).m()`, so the value's
         // methods are found as for the value itself, the builtin ones of String / Vec / slices too)
@@ -1501,7 +1504,8 @@ impl Cx<'_> {
             Some(self.prog.partial_subst(*i, &args))
         };
         let target = deref_target(sid)?;
-        if self.prog.has_param(target) {
+        // (not to an unsized one: a slice's or a str's, which the rewrite to `t.deref_mut().m()` above takes)
+        if self.prog.has_param(target) || matches!(target, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
             return None;
         }
         // (the type m is found on: through the target's own derefs)
@@ -2133,13 +2137,16 @@ impl Cx<'_> {
                 if sig.has_body {
                     return None;
                 }
-                let &bid = self.prog.blanket.get(&m)?;
-                let bsig = &self.prog.sigs[bid as usize];
-                let btr = bsig.impl_trait.as_deref().or(bsig.trait_of.as_deref()).map(|t| t.split('<').next().unwrap_or(t).trim());
-                if btr.is_none() || btr != tr0 {
-                    return None;
-                }
-                let bounds = btr.and_then(|tr| self.prog.blanket_bounds.get(tr));
+                // (the trait's own: `Program::blanket` keeps one method of each name, of whichever trait came first, so
+                // the methods of the name are looked through)
+                let base = |t: &str| t.split('<').next().unwrap_or(t).trim().to_string();
+                let tr = tr0?;
+                let cands: Vec<u32> = self.prog.by_last.get(&m).cloned().unwrap_or_default();
+                let bid = cands.into_iter().find(|&c| {
+                    let bsig = &self.prog.sigs[c as usize];
+                    bsig.impl_trait.as_deref().map(base).as_deref() == Some(tr) && matches!(bsig.self_ty, Some(Ty::Param(_)))
+                })?;
+                let bounds = self.prog.blanket_bounds.get(tr);
                 bounds.is_none_or(|bs| blanket_bounds_hold(self.prog, args[0], bs, &mut vec![], &mut vec![])).then_some(bid)
             });
             if let Some(imp) = imp {
@@ -3634,9 +3641,16 @@ impl Cx<'_> {
         if inv.is_empty() {
             return vec![];
         }
-        for &(a, b) in &rs.outlives {
-            if inv.contains(&b) && !inv.contains(&a) {
-                inv.push(a);
+        // (to a fixpoint: `'a: 'b, 'b: 'c` in either order)
+        loop {
+            let n0 = inv.len();
+            for &(a, b) in &rs.outlives {
+                if inv.contains(&b) && !inv.contains(&a) {
+                    inv.push(a);
+                }
+            }
+            if inv.len() == n0 {
+                break;
             }
         }
         (1..sig.params.len()).filter(|&j| rs.slots.get(j).is_some_and(|s| s.iter().any(|c| inv.contains(c)))).collect()

@@ -757,8 +757,6 @@ impl Cx<'_> {
     pub(crate) fn for_body(&mut self, f: &Expr, val: Option<Value>, vt: Ty, step: Block, exit: Block) -> R<()> {
         let Expr::For(_, fpat, _, fbody) = f else { unreachable!() };
         self.scopes.push(vec![]);
-        // (the item `ref` bindings borrow: gone at the end of the iteration)
-        let mut item_temp = None;
         let to_place = |this: &mut Self, val: Option<Value>, vt: Ty| match val {
             Some(a) if vt.is_agg() => Place::Mem(a, 0, vt),
             Some(v) => {
@@ -772,13 +770,15 @@ impl Cx<'_> {
             let pi = to_place(self, Some(idx), Ty::Usize);
             self.for_pat_check(&tp[0], Ty::Usize)?;
             self.runtime_pat_guard(&tp[0], pi)?;
-            self.pat_bind(&tp[0], pi, BindMode::Move)?;
             let pv = to_place(self, v, t);
             self.for_pat_check(&tp[1], t)?;
             self.runtime_pat_guard(&tp[1], pv)?;
-            let saved = self.bk_for_item_srcs(t);
-            let r = self.pat_bind(&tp[1], pv, BindMode::Move);
-            self.bk.bind_srcs = saved;
+            // (`for (ref i, ref x) in v.iter().enumerate()`: the pair is a temporary of the iteration too)
+            let srcs0 = self.bk_for_item_srcs(t);
+            let saved = self.bk_for_item_begin(f, t);
+            let r = self.pat_bind(&tp[0], pi, BindMode::Move).and_then(|_| self.pat_bind(&tp[1], pv, BindMode::Move));
+            self.bk_for_item_end(saved);
+            self.bk.bind_srcs = srcs0;
             r?;
         } else {
             let place = to_place(self, val, vt);
@@ -794,7 +794,7 @@ impl Cx<'_> {
             let srcs0 = self.bk_for_item_srcs(place.ty());
             let saved = self.bk_for_item_begin(f, place.ty());
             let r = self.pat_bind(fpat, place, BindMode::Move);
-            item_temp = self.bk_for_item_end(saved);
+            self.bk_for_item_end(saved);
             self.bk.bind_srcs = srcs0;
             r?;
             self.rg.pat = None;
@@ -826,9 +826,6 @@ impl Cx<'_> {
         self.pop_scope();
         if bt != Ty::Never {
             self.same(SP, bt, Ty::Unit)?;
-            if let Some(id) = item_temp {
-                self.bk_ev(crate::acg::borrowck::Ev::Dead(id, SP));
-            }
             self.b.ins().jump(step, &[]);
         } else {
             self.b.ins().trap(TrapCode::unwrap_user(1));

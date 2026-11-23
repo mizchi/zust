@@ -2674,10 +2674,13 @@ impl Cx<'_> {
             cur = match cur {
                 Expr::Field(b, ..) | Expr::Index(b, ..) => strip_paren(b),
                 Expr::Unary(op, b, _) if op == "*" => {
-                    if matches!(self.peek(b), Some(Ty::Ptr(false, _))) {
-                        return Some(format!("cannot assign to `{}`, which is behind a `*const` pointer (E0594)", raw_place_text(e)));
+                    match self.peek(b) {
+                        Some(Ty::Ptr(false, _)) => return Some(format!("cannot assign to `{}`, which is behind a `*const` pointer (E0594)", raw_place_text(e))),
+                        // (through a `*mut` (`**p = 1` with `p: *const *mut i32`): what it points to is writable, whatever
+                        // reached the pointer)
+                        Some(Ty::Ptr(true, _)) => return None,
+                        _ => strip_paren(b),
                     }
-                    strip_paren(b)
                 }
                 _ => return None,
             };

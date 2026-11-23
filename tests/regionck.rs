@@ -3185,3 +3185,20 @@ fn part18_loop_items() {
     temp_error("fn main() {\n    let v = vec![String::new()];\n    let mut out: Vec<&&String> = vec![];\n    for ref s in v.iter() {\n        out.push(s);\n    }\n    println!(\"{}\", out.len());\n}\n", 4);
     assert_eq!(check("fn main() {\n    let v = vec![String::new(), String::from(\"a\")];\n    let mut out: Vec<&String> = vec![];\n    for ref s in &v {\n        out.push(s);\n    }\n    for (_i, ref s) in v.iter().enumerate() {\n        out.push(*s);\n    }\n    match v.iter().next() {\n        Some(ref s) => out.push(*s),\n        None => {}\n    };\n    println!(\"{}\", out.len());\n}\n"), vec![]);
 }
+
+/// The review of #97, each case checked with rustc 1.97:
+/// - a `ref` binding of a scrutinee or an item that holds references and owns storage
+///   (`(ref s, _)` of `(String::from("x"), n)`) borrows the temporary, E0716 when kept past it;
+/// - a `for ref` item's temporary ends on a `break` too, and an `enumerate` pair's `ref` bindings borrow one
+///   (E0716);
+/// - a write through a `*mut` a `*const` points to (`**p = 1`) is fine
+#[test]
+fn part17_review() {
+    temp_error("fn f(n: &i32) -> usize {\n    let r: &String = match (String::from(\"x\"), n) { (ref s, _) => s };\n    r.len()\n}\nfn main() {}\n", 2);
+    temp_error("fn g(n: &i32) -> usize {\n    let mut keep: &String = &String::new();\n    for ref s in [(String::from(\"x\"), n)] { keep = &s.0; }\n    keep.len()\n}\nfn main() {}\n", 3);
+    temp_error("fn main() {\n    let mut saved = &0;\n    for ref x in [1, 2] { saved = x; break; }\n    println!(\"{}\", saved);\n}\n", 3);
+    temp_error("fn main() {\n    let v = vec![10, 20];\n    let mut saved = &0usize;\n    for (ref i, _) in v.iter().enumerate() { saved = i; }\n    println!(\"{}\", saved);\n}\n", 4);
+    assert_eq!(check("fn main() {\n    let mut v = 0;\n    let q: *mut i32 = &mut v;\n    let p: *const *mut i32 = &q;\n    unsafe { **p = 1; }\n    println!(\"{}\", v);\n}\n"), vec![]);
+    let d = check("fn main() {\n    let v = 0;\n    let q: *const i32 = &v;\n    let p: *mut *const i32 = &mut (q as *const i32) as *mut *const i32;\n    unsafe { **p = 1; }\n}\n");
+    assert!(d.len() == 1 && d[0].1.contains("behind a `*const` pointer"), "{d:?}");
+}
