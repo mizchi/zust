@@ -1573,10 +1573,32 @@ impl Cx<'_> {
         if self.bk.ret_no_capture {
             // (a parameter whose regions are all 'static: its slots write `'static`, or lifetimes bounded by it)
             if let Some(r) = sig.regions.as_deref() {
-                let st = |c: u8| c == crate::types::R_STATIC || r.outlives.iter().any(|&(a, b)| a == c && b == crate::types::R_STATIC);
+                // (through the outlives bounds: `'a: 'b, 'b: 'static`)
+                let st = |c: u8| {
+                    let mut seen = vec![c];
+                    let mut k = 0;
+                    while k < seen.len() && seen.len() < 64 {
+                        let x = seen[k];
+                        if x == crate::types::R_STATIC {
+                            return true;
+                        }
+                        for &(a, b) in &r.outlives {
+                            if a == x && !seen.contains(&b) {
+                                seen.push(b);
+                            }
+                        }
+                        k += 1;
+                    }
+                    false
+                };
                 let n = r.slots.len().saturating_sub(1);
                 for (j, s) in r.slots[..n].iter().enumerate() {
-                    if !s.is_empty() && s.iter().all(|&c| st(c)) {
+                    // (a path written with no lifetime is a mark that stands for no region when its type has none
+                    // (`&'static String`): the regions are the codes but those marks, as many as the type has)
+                    let codes: Vec<u8> = s.iter().copied().filter(|&c| c != crate::types::R_ELIDED_ADT).collect();
+                    let pt = sig.params.get(j).copied();
+                    let fits = pt.is_some_and(|t| regionck::count(self.prog, t, 0) == Some(codes.len()));
+                    if !codes.is_empty() && fits && codes.iter().all(|&c| st(c)) {
                         if let Some(&l) = self.bk.params.get(j) {
                             self.bk.static_params.push(l);
                         }

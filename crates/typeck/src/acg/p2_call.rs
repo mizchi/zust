@@ -2096,7 +2096,21 @@ impl Cx<'_> {
             let n = n.rsplit("::").next().unwrap_or(n);
             self.prog.trait_self_outlives.iter().any(|(t, so)| t.rsplit("::").next() == Some(n) && so.iter().any(|x| x == "static"))
         });
-        by_outlives || by_trait || bounds.iter().any(|b| b.trim() == "'static")
+        // (or implied by a parameter's type: `_: &'static T` makes T 'static)
+        fn mentions(prog: &crate::program::Program, t: Ty, k: u32, depth: u32) -> bool {
+            depth < 12
+                && match t {
+                    Ty::Param(i) => i as u32 == k,
+                    Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Slice(i) | Ty::Array(i, _) => mentions(prog, *i, k, depth + 1),
+                    Ty::Struct(s) => prog.structs[s as usize].args.iter().any(|&a| mentions(prog, a, k, depth + 1)),
+                    _ => false,
+                }
+        }
+        let by_param = sig.regions.as_deref().is_some_and(|r| {
+            let n = r.slots.len().saturating_sub(1);
+            sig.params.iter().zip(&r.slots[..n]).any(|(&t, s)| matches!(t, Ty::Ref(_, i) if mentions(self.prog, *i, k, 0)) && s.first() == Some(&crate::types::R_STATIC))
+        });
+        by_outlives || by_trait || by_param || bounds.iter().any(|b| b.trim() == "'static")
     }
 
     /// Program::trait_scopes at this function: the traits of a colliding name in scope where it is (the innermost
