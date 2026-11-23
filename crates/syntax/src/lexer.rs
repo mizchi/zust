@@ -1497,8 +1497,19 @@ pub fn rename_module_collisions_in(src: &str, crates: &[String]) -> Option<Strin
 
 /// fix: 名前を変えて桁がずれた所 (行, 新しいテキストでの桁, その行でそこから後ろのずれの合計)。
 /// 元の桁 = 桁 - ずれ (その行で桁が col 以上の最後の項)
+/// Whether a `use` renames an item of std (`use std::cell::LazyCell as Lazy;`): the name it brings in is that path
+fn renames_std(src: &str) -> bool {
+    ["use std::", "use core::", "use alloc::", "use ::std::", "use ::core::", "use ::alloc::"].iter().any(|u| {
+        src.match_indices(u).any(|(i, _)| {
+            let rest = &src[i..];
+            let stmt = &rest[..rest.find(';').unwrap_or(rest.len())];
+            stmt.match_indices(" as ").any(|(j, _)| stmt[j + 4..].trim_start().starts_with(|c: char| c.is_alphabetic()))
+        })
+    })
+}
+
 pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>) -> Option<String> {
-    if !src.contains("mod") {
+    if !src.contains("mod") && !renames_std(src) {
         return None;
     }
     let s = src.as_bytes();
@@ -1532,7 +1543,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         k += 1;
     }
-    if mods.is_empty() {
+    // (no module: only for a `use` that renames an item of std)
+    if mods.is_empty() && !renames_std(src) {
         return None;
     }
     // トークン k のスコープ (いちばん内側のモジュール。なければ usize::MAX = ルート)。
@@ -1874,6 +1886,18 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 continue;
             }
             let (mpath, name) = path.split_at(path.len() - 1);
+            // (an item of std under another name, `use std::cell::LazyCell as Lazy;`: the name is its path)
+            if matches!(mpath[0].as_slice(), b"std" | b"core" | b"alloc") && local != name[0] && local.as_slice() != b"_" && !def_set.contains(&(sc, local.clone())) {
+                let mut full = vec![];
+                for (i, seg) in path.iter().enumerate() {
+                    if i > 0 {
+                        full.extend_from_slice(b"::");
+                    }
+                    full.extend_from_slice(seg);
+                }
+                add(local, full);
+                continue;
+            }
             if let Some(m) = resolve_mod(sc, mpath, k) {
                 if let Some(nn) = renamed_in(m, &name[0]) {
                     add(local, nn);
@@ -2172,7 +2196,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| renamed_in(g.1, n)) })
                 // (`use super::*;` は親が use で取り込んだ名前も見える)
                 .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| imported(g.1, n)) });
-            if let Some(nn) = nn {
+            // (not a macro's name: `use core::panic as p;` then `p!()` stays as it is written)
+            let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));
+            if let Some(nn) = nn.filter(|nn| !(std_path(nn) && k + 1 < toks.len() && is_sym(k + 1, b'!'))) {
                 repl.push((k, k, nn));
             }
         }
@@ -2345,8 +2371,9 @@ pub fn expand_module_aliases(src: &str) -> Option<String> {
 fn flatten_modules_fix_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>) -> Option<String> {
     let renamed = rename_module_collisions_fix(src, crates, fix);
     let src: &str = renamed.as_deref().unwrap_or(src);
+    // (no module: what the renaming did, a `use std::cell::Cell as C;`)
     if !src.contains("mod") {
-        return None;
+        return renamed;
     }
     let r = flatten_modules_inner(src);
     r.or(renamed)

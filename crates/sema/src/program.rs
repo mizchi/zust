@@ -370,6 +370,8 @@ pub struct Program {
     pub derived: FxMap<u32, Vec<String>>,
     /// a struct's / enum's const parameters of other types than usize (base ids): (the parameter's place, its type)
     pub const_param_tys: FxMap<u32, Vec<(usize, String)>>,
+    /// The defaults of a struct's type parameters, by place (`struct W<T, F = fn() -> T>`): `W<u8>` is `W<u8, fn() -> u8>`
+    pub struct_defaults: FxMap<u32, Vec<Option<TySyn>>>,
     /// A struct / enum / union of the program's: the places of its type parameters bounded by Copy (`union U<T: Copy>`)
     pub copy_params: FxMap<u32, Vec<usize>>,
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
@@ -1012,6 +1014,7 @@ impl Program {
             derived_peq: FxSet::default(),
             derived: FxMap::default(),
             const_param_tys: FxMap::default(),
+            struct_defaults: FxMap::default(),
             copy_params: FxMap::default(),
             has_mods: false,
             trait_clone_fns: false,
@@ -1251,6 +1254,9 @@ impl Program {
                     if let (true, Some(k)) = (bs.iter().any(|b| b == "Copy" || b.ends_with("::Copy")), sm.adt_generics.iter().position(|g| g == pn)) {
                         p.copy_params.entry(sdefs.len() as u32).or_default().push(k);
                     }
+                }
+                if !sm.adt_defaults.is_empty() {
+                    p.struct_defaults.insert(sdefs.len() as u32, sm.adt_defaults.clone());
                 }
                 sdefs.push((ii, name.clone(), shape, sm.adt_generics.clone()));
             }
@@ -2398,6 +2404,14 @@ impl Program {
         if tr == "Send" || tr == "Sync" {
             return self.auto_trait(t, tr == "Sync", 0);
         }
+        // (the unwind-safety auto traits: structurally, as std's impls say)
+        if tr == "UnwindSafe" || tr == "RefUnwindSafe" {
+            return self.unwind_safe(t, tr == "RefUnwindSafe", 0);
+        }
+        // (Unpin: every type here; nothing is pinned behind the program's back)
+        if tr == "Unpin" {
+            return true;
+        }
         // (`Box<T>` is Clone / PartialEq / Eq / PartialOrd / Ord / Debug / Display / Hash / Default when T is)
         if let Ty::Box(i) = t {
             if matches!(tr, "Clone" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Debug" | "Display" | "Hash" | "Default") {
@@ -2596,6 +2610,44 @@ impl Program {
             };
             bs.iter().all(|b| self.implements(ty, b))
         })
+    }
+
+    /// UnwindSafe (refs: RefUnwindSafe) as std has them: `&mut T` is not UnwindSafe; `&T`, raw pointers, Rc and Arc
+    /// are when T is RefUnwindSafe; interior mutability (UnsafeCell, Cell, RefCell, OnceCell, LazyCell) is not
+    /// RefUnwindSafe, but Mutex, RwLock and the atomics are; AssertUnwindSafe is both; a user's impl counts
+    fn unwind_safe(&self, t: Ty, refs: bool, d: u32) -> bool {
+        if d > 12 {
+            return true;
+        }
+        match t {
+            Ty::Ref(true, i) => refs && self.unwind_safe(*i, true, d + 1),
+            Ty::Ref(false, i) | Ty::Ptr(_, i) => self.unwind_safe(*i, true, d + 1),
+            Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.unwind_safe(*i, refs, d + 1),
+            Ty::Struct(sid) => {
+                let b = self.base_of(sid);
+                let name = self.structs[b as usize].name.as_str();
+                if self.impls.contains(&(b, if refs { "RefUnwindSafe" } else { "UnwindSafe" }.to_string())) {
+                    return true;
+                }
+                let sd = &self.structs[sid as usize];
+                let arg = |k: usize, r: bool| sd.args.get(k).is_none_or(|&a| self.unwind_safe(a, r, d + 1));
+                match name {
+                    "AssertUnwindSafe" => return true,
+                    "Mutex" | "RwLock" | "MutexGuard" => return arg(0, false),
+                    n if n.starts_with("Atomic") => return true,
+                    "UnsafeCell" | "Cell" | "RefCell" | "OnceCell" | "LazyCell" => return !refs && arg(0, false),
+                    "Rc" | "Arc" => return arg(0, true),
+                    _ => {}
+                }
+                let prelude = self.struct_item.get(b as usize).is_some_and(|&i| i >= self.prelude_from);
+                if prelude {
+                    return sd.args.iter().all(|&a| self.unwind_safe(a, refs, d + 1));
+                }
+                sd.fields.iter().all(|f| self.unwind_safe(f.1, refs, d + 1))
+                    && sd.variants.iter().all(|v| v.fields.iter().all(|f| self.unwind_safe(f.1, refs, d + 1)))
+            }
+            _ => true,
+        }
     }
 
     fn auto_trait(&self, t: Ty, sync: bool, d: u32) -> bool {
@@ -2902,6 +2954,21 @@ impl Program {
                 let mut args = args.as_slice();
                 if matches!(n.as_str(), "HashMap" | "HashSet") && args.len() == self.structs[id as usize].generics.len() + 1 {
                     args = &args[..args.len() - 1];
+                }
+                // (the parameters left out take their defaults, written in the earlier ones: `LazyCell<T>` is
+                // `LazyCell<T, fn() -> T>`)
+                let filled;
+                if let Some(ds) = self.struct_defaults.get(&id) {
+                    let ps = &self.structs[id as usize].generics;
+                    if args.len() < ps.len() && ds[args.len()..].iter().all(Option::is_some) {
+                        let mut v: Vec<TySyn> = args.to_vec();
+                        for d in &ds[args.len()..] {
+                            let t = subst_tysyn(d.as_ref().unwrap(), &ps[..v.len()], &v);
+                            v.push(t);
+                        }
+                        filled = v;
+                        args = filled.as_slice();
+                    }
                 }
                 let args = args.iter().map(r).collect::<R<Vec<Ty>>>()?;
                 Ty::Struct(self.instantiate(id, args)?)

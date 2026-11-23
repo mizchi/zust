@@ -353,6 +353,22 @@ fn adt_bounds(g: &Generics) -> Vec<(String, Vec<String>)> {
     v
 }
 
+/// The default of each parameter of adt_params (`F = fn() -> T`), by place; empty when none has one
+fn adt_defaults(g: &Generics, names: &[String]) -> R<Vec<Option<TySyn>>> {
+    if !g.params.iter().any(|p| matches!(p, GParam::Ty(_, _, Some(_)))) {
+        return Ok(vec![]);
+    }
+    let mut v = vec![None; names.len()];
+    for p in &g.params {
+        if let GParam::Ty(n, _, Some(d)) = p {
+            if let Some(k) = names.iter().position(|x| x == n) {
+                v[k] = Some(tysyn(d, None)?);
+            }
+        }
+    }
+    Ok(v)
+}
+
 fn adt_params(g: &Generics) -> R<Vec<String>> {
     let mut v = Vec::new();
     collect_generics(g, &mut v)?;
@@ -2503,6 +2519,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
             }
             sm.adt_generics = adt_params(g)?;
+            sm.adt_defaults = adt_defaults(g, &sm.adt_generics)?;
             sm.adt_bounds = adt_bounds(g);
             {
                 let tys: Vec<&PTy> = vars.iter().flat_map(|(_, f, _)| match f {
@@ -2610,6 +2627,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 sm.reprs.push((sn.clone(), r));
             }
             sm.adt_generics = adt_params(g)?;
+            sm.adt_defaults = adt_defaults(g, &sm.adt_generics)?;
             sm.adt_bounds = adt_bounds(g);
             {
                 let tys: Vec<&PTy> = match fields {

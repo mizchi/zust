@@ -148,8 +148,15 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   (`crates/zurgo/tests/zurgo.rs`). Next, the wasm-bindgen crate itself (W1). Its `#[wasm_bindgen]` uses expand
   (proc macros, above), and these no longer stop it: `closures!` (a tt-muncher's `@closure` marker), impls for `&&str`,
   macro calls in an item's expression, doc comments on a cfg'd-out item, `pub extern crate`, `::dep::path`, an
-  `extern` block in a function body, a type bound in a `where` clause. It stops on:
-  - `AssertUnwindSafe` (`closure.rs:946`): a type of std that zustc does not have.
+  `extern` block in a function body, a type bound in a `where` clause, `AssertUnwindSafe`, `LocalKey` and
+  `LazyCell` (as types of the prelude), the unwind-safety auto traits, default type parameters (`LazyCell<T, F =
+  fn() -> T>` used as `LazyCell<T>`), std items imported under another name (`use core::cell::LazyCell as Lazy;`).
+  It stops on:
+  - inherent impls for two instances with one method name, `impl<T: Copy> Nullable<&T> { fn copied }` beside
+    `impl<T: Copy> Nullable<&mut T> { fn copied }` (`nullable.rs:256`, as std's `Option<&T>::copied`): a duplicate
+    definition.
+  - `LocalKey<T>` is a type with `with`, but a `thread_local!` is not one of them yet (each has a key type of its
+    own), so a `&'static LocalKey<T>` cannot point at one.
 - memchr 2.8.3, which 42 crates of dioxus and 29 of leptos depend on: an impl of a trait for a SIMD vector type is
   "cannot find type" (`impl Vector for v128` in its wasm32 module, `impl Vector for __m128i` in its x86-64 one).
 - `cratebench/ui/run.py` does not run build scripts: a crate gets cargo's variables (`CARGO_PKG_*`) but not what its
