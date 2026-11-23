@@ -2058,8 +2058,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     if is_sym(j, b';') || is_sym(j, b'{') || is_sym(j, b'}') {
                         break;
                     }
-                    // (`fn f() -> impl Iterator {` is a fn's body, not an impl's)
-                    is_fn |= is_id(j, b"fn");
+                    // (`fn f() -> impl Iterator {` is a fn's body, not an impl's; a fn pointer type (`impl T for fn() {`)
+                    // is no fn: a declaration names one, `fn f`)
+                    is_fn |= is_id(j, b"fn") && j + 1 < k && toks[j + 1].0 == 0;
                     assoc |= is_id(j, b"impl") || is_id(j, b"trait");
                 }
                 stack.push(assoc && !is_fn);

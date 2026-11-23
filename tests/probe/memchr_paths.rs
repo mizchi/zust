@@ -6,6 +6,22 @@ mod other {
     pub fn find(h: &[u8]) -> usize {
         h.len()
     }
+    // (a method of an impl for a fn pointer type keeps its name, as the trait's)
+    pub trait T {
+        fn find(&self) -> u8;
+    }
+    impl T for fn() -> u8 {
+        fn find(&self) -> u8 {
+            self() + 10
+        }
+    }
+    fn seven() -> u8 {
+        7
+    }
+    pub fn via_fn_ptr() -> u8 {
+        let f: fn() -> u8 = seven;
+        T::find(&f)
+    }
     // (a fn nested in a body keeps its calls: renamed with them, not taken for the module's `find`)
     pub fn run(h: &[u8]) -> usize {
         fn find(h: &[u8]) -> usize {
@@ -121,7 +137,7 @@ fn cmp(a: u8, b: u8) -> SuffixOrdering {
 }
 
 fn main() {
-    println!("{:?} {:?} {} {}", memmem::find(b"abcdef", b"cd"), memmem::find(b"abc", b"x"), other::find(b"qq"), other::run(b"qq"));
+    println!("{:?} {:?} {} {} {}", memmem::find(b"abcdef", b"cd"), memmem::find(b"abc", b"x"), other::find(b"qq"), other::run(b"qq"), other::via_fn_ptr());
 
     let a: &[u8] = &[1, 2, 3];
     let b: Box<[u8]> = Box::<[u8]>::from(a);
