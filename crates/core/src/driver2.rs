@@ -1407,7 +1407,11 @@ impl Session2 {
         prog.path_lts = crate::regions::src_path_lts(src0);
         prog.deny_unused_alloc = deny_unused_alloc;
         // (an `allow` / `warn` / `expect` of it anywhere, at the crate or an item: not denied there, so not checked)
-        prog.allow_overflowing_literals = ["allow(", "warn(", "expect("].iter().any(|a| src.match_indices(a).any(|(i, _)| src[i..].split(')').next().is_some_and(|l| l.contains("overflowing_literals"))));
+        // (one search of the source for the name, then the attribute around each place it is written)
+        prog.allow_overflowing_literals = src.match_indices("overflowing_literals").any(|(i, _)| {
+            let head = &src[src[..i].rfind('(').map(|k| src[..k].rfind(|c: char| c == '[' || c == ',').map_or(0, |b| b + 1)).unwrap_or(i)..i];
+            ["allow(", "warn(", "expect("].iter().any(|a| head.trim_start().starts_with(a))
+        });
         prog.deny_trivial_casts = deny_trivial_casts;
         if deny_must_use {
             for it in &items[..user] {

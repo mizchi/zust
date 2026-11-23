@@ -154,8 +154,16 @@ impl Cx<'_> {
         }
         // (E0034: `x.foo()` that two traits of the program's give x's type, with no inherent `foo`. Not in a generic fn's
         // instance: there `s.scaled()` of `S: Shape0` is Shape0's, by the bound, whatever else S's instance implements)
-        if self.user_code && self.explicit_trait.is_none() && !self.prog.has_mods && self.env.params.is_empty() && !self.prog.multi_trait_methods.is_empty() && self.prog.multi_trait_methods.contains(method.as_str()) {
-            if let Some(t) = self.peek(recv).filter(|&t| !self.prog.has_param(t)) {
+        if self.user_code && self.explicit_trait.is_none() && !self.prog.has_mods && self.env.params.is_empty() && !self.prog.ambiguous_methods.is_empty() {
+            let maybe = self.prog.ambiguous_methods.get(method.as_str()).and_then(|ts| {
+                let t = self.peek(recv).filter(|&t| !self.prog.has_param(t))?;
+                let k = match self.strip_refs(t) {
+                    Ty::Struct(sid) => Ty::Struct(self.prog.base_of(sid)),
+                    k => k,
+                };
+                ts.contains(&k).then_some(t)
+            });
+            if let Some(t) = maybe {
                 if self.ambiguous_method(t, method) {
                     return err(SP, "multiple applicable items in scope (E0034)");
                 }
@@ -2580,6 +2588,20 @@ impl Cx<'_> {
     }
 
     /// リテラル (e は `Expr::Lit` 全体)
+    /// overflowing_literals: the decimal digits (`-` first when negative) past the integer type t
+    #[cold]
+    #[inline(never)]
+    fn lit_range(&self, t: Ty, d: &str) -> R<()> {
+        let (neg, d) = match d.strip_prefix('-') {
+            Some(r) => (true, r),
+            None => (false, d),
+        };
+        if lit_fits(t, d, neg) {
+            return Ok(());
+        }
+        err(SP, format!("literal out of range for `{}`", self.prog.tn(t)))
+    }
+
     pub(crate) fn lit(&mut self, text: &str, expected: Option<Ty>) -> R<V> {
         let Some(l) = lit::lit(text) else { return err(SP, "unsupported literal") };
         match &l {
@@ -2613,10 +2635,10 @@ impl Cx<'_> {
                 let fixed = Ty::from_suffix(i.suffix()).or(expected.filter(|t| t.is_int()));
                 // (overflowing_literals, deny by default: a literal of a type its suffix or the expected one fixes, past
                 // that type: `256u8`, `let x: u8 = 256;`)
-                if let (Some(t), true) = (fixed, self.user_code && !self.prog.allow_overflowing_literals) {
-                    let neg = i.base10_digits().starts_with('-');
-                    if !lit_fits(t, i.base10_digits().trim_start_matches('-'), neg) {
-                        return err(SP, format!("literal out of range for `{}`", self.prog.tn(t)));
+                // (a literal of up to 2 digits fits every integer type: most literals stop here)
+                if let Some(t) = fixed.filter(|_| i.base10_digits().len() > 2) {
+                    if self.user_code && !self.prog.allow_overflowing_literals {
+                        self.lit_range(t, i.base10_digits())?;
                     }
                 }
                 let ty = fixed.unwrap_or(Ty::I32);
@@ -2890,14 +2912,18 @@ impl Cx<'_> {
 
 /// The literal of decimal digits (negated when neg) is in the integer type t's range
 pub(crate) fn lit_fits(t: Ty, digits: &str, neg: bool) -> bool {
-    let Ok(n) = digits.parse::<u128>() else { return false };
-    let bits = match t {
-        Ty::I8 | Ty::U8 => 8,
-        Ty::I16 | Ty::U16 => 16,
-        Ty::I32 | Ty::U32 => 32,
-        Ty::I64 | Ty::U64 | Ty::Isize | Ty::Usize => 64,
+    // (the digits that fit any value of the width, as most literals do, need no parse: up to 2 for 8 bits ..)
+    let (bits, short) = match t {
+        Ty::I8 | Ty::U8 => (8, 2),
+        Ty::I16 | Ty::U16 => (16, 4),
+        Ty::I32 | Ty::U32 => (32, 9),
+        Ty::I64 | Ty::U64 | Ty::Isize | Ty::Usize => (64, 18),
         _ => return true,
     };
+    if digits.len() <= short {
+        return true;
+    }
+    let Ok(n) = digits.parse::<u128>() else { return false };
     if t.signed() {
         let max = (1u128 << (bits - 1)) - 1;
         if neg { n <= max + 1 } else { n <= max }

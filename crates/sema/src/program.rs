@@ -265,6 +265,8 @@ pub struct Program {
     /// method names that two traits of the program's declare (`trait A { fn foo(self); } trait B { fn foo(self); }`):
     /// only a call of one of these can be ambiguous (E0034)
     pub multi_trait_methods: FxSet<String>,
+    /// of those, the types (a struct's base, a primitive) two of the traits that declare the name are implemented for
+    pub ambiguous_methods: FxMap<String, Vec<Ty>>,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
@@ -820,6 +822,7 @@ impl Program {
             has_mods: false,
             trait_clone_fns: false,
             multi_trait_methods: FxSet::default(),
+            ambiguous_methods: FxMap::default(),
             lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
@@ -1865,6 +1868,37 @@ impl Program {
                     }
                 }
             }
+        }
+        // (for each of those names, the types (a struct's base, a primitive) that implement two of the traits declaring
+        // it: only a call on one of these can be E0034)
+        if !multi.is_empty() {
+            let mut declaring: FxMap<&str, Vec<&str>> = FxMap::default();
+            for (tr, ds) in &p.traits {
+                for &d in ds {
+                    if let Some(n) = p.names.get(d as usize).and_then(|n| n.rsplit("::").next()).filter(|n| multi.contains(*n)) {
+                        declaring.entry(n).or_default().push(tr.as_str());
+                    }
+                }
+            }
+            let mut amb: FxMap<String, Vec<Ty>> = FxMap::default();
+            for (n, trs) in &declaring {
+                let mut seen: FxMap<Ty, u32> = FxMap::default();
+                for (b, tr) in &p.impls {
+                    if trs.contains(&tr.as_str()) {
+                        *seen.entry(Ty::Struct(*b)).or_default() += 1;
+                    }
+                }
+                for (t, tr) in &p.prim_impls {
+                    if trs.contains(&tr.as_str()) {
+                        *seen.entry(*t).or_default() += 1;
+                    }
+                }
+                let ts: Vec<Ty> = seen.into_iter().filter(|&(_, c)| c >= 2).map(|(t, _)| t).collect();
+                if !ts.is_empty() {
+                    amb.insert(n.to_string(), ts);
+                }
+            }
+            p.ambiguous_methods = amb;
         }
         p.multi_trait_methods = multi;
         Ok(p)
