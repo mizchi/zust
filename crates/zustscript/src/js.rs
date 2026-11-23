@@ -121,6 +121,26 @@ pub fn ident(n: &str) -> String {
     if RESERVED.contains(&n) { format!("{n}$") } else { n.to_string() }
 }
 
+/// The text of a template literal: `` ` ``, `\\` and `${` escaped, and the characters a string literal escapes
+fn template_text(s: &str) -> String {
+    let mut o = String::new();
+    let cs: Vec<char> = s.chars().collect();
+    for (i, &c) in cs.iter().enumerate() {
+        match c {
+            '`' => o.push_str("\\`"),
+            '\\' => o.push_str("\\\\"),
+            '$' if cs.get(i + 1) == Some(&'{') => o.push_str("\\$"),
+            '\r' => o.push_str("\\r"),
+            // (`\0` before a digit would be an octal escape, an error in a template)
+            '\0' => o.push_str("\\x00"),
+            '\u{2028}' => o.push_str("\\u2028"),
+            '\u{2029}' => o.push_str("\\u2029"),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
 fn js_str(s: &str) -> String {
     let mut o = String::from("\"");
     for c in s.chars() {
@@ -741,7 +761,7 @@ impl<'a> Js<'a> {
             return 20;
         }
         match &e.kind {
-            EK::Var(_) | EK::Path(..) | EK::Call(..) | EK::Method(..) | EK::Field(..) | EK::Array(_) | EK::Tuple(_) | EK::Record(..) | EK::Jsx(_) => 17,
+            EK::Var(_) | EK::Path(..) | EK::Call(..) | EK::Method(..) | EK::Field(..) | EK::Array(_) | EK::Tuple(_) | EK::Record(..) | EK::Jsx(_) | EK::Interp(..) => 17,
             EK::Lit(Lit::Int(n)) if *n < 0 => 14,
             EK::Lit(_) => 20,
             EK::Un(..) if s.ends_with("| 0") => 6,
@@ -1084,6 +1104,18 @@ impl<'a> Js<'a> {
                 format!("new {ctor}([{}])", xs.iter().map(|x| self.expr(x)).collect::<Vec<_>>().join(", "))
             }
             EK::Array(xs) | EK::Tuple(xs) => format!("[{}]", xs.iter().map(|x| self.expr(x)).collect::<Vec<_>>().join(", ")),
+            // (a template literal: a hole writes its value as `String(..)` does, which is `to_string`'s JS)
+            EK::Interp(parts, holes) => {
+                let mut o = String::from("`");
+                for (k, p) in parts.iter().enumerate() {
+                    o.push_str(&template_text(p));
+                    if let Some(h) = holes.get(k) {
+                        let _ = write!(o, "${{{}}}", self.expr(h));
+                    }
+                }
+                o.push('`');
+                o
+            }
             EK::Jsx(j) => self.jsx_expr(j),
             EK::Cast(x, _) => {
                 let (from, to) = self.info.cast[&e.id].clone();
@@ -1397,7 +1429,7 @@ fn loop_exit(e: &Expr) -> Option<Pos> {
             EK::Bin(_, a, b) | EK::Index(a, b) => walk(a).or_else(|| walk(b)),
             EK::Call(f, a) => walk(f).or_else(|| a.iter().find_map(walk)),
             EK::Method(r, _, a) => walk(r).or_else(|| a.iter().find_map(walk)),
-            EK::Array(xs) | EK::Tuple(xs) => xs.iter().find_map(walk),
+            EK::Array(xs) | EK::Tuple(xs) | EK::Interp(_, xs) => xs.iter().find_map(walk),
             EK::Record(_, fs, b) => fs.iter().find_map(|f| walk(&f.1)).or_else(|| b.as_deref().and_then(walk)),
             _ => None,
         }

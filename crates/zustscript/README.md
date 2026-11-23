@@ -434,6 +434,22 @@ type Person = { name: String, age: i32 }
   - `to_upper` は Rust の `to_uppercase`(どちらも Unicode の既定の大文字化)
 - 分かっている違い: 空の区切りの `split` は、U+FFFF より上の文字を、JS では 2 つの単位に分け、wasm では 1 文字のままにする
 
+テンプレート文字列(文字列の補間):
+
+```zsc
+@wasm pub fn card(p: Person, n: i64) -> String {
+  `${p.name} (${p.age}): ${n * 2}`
+}
+// JS(--all-js):  return `${p.name} (${p.age}): ${BigInt.asIntN(64, n * 2n)}`;
+// Rust:           format!("{} ({}): {}", &p.name[..], p.age, (n).wrapping_mul(2i64))
+```
+
+- `${..}` に書けるのは、文字列と、`to_string` を持つもの(整数、浮動小数点数、bool、`Num` などの bound つきの型変数)。書き方は `to_string` と同じ
+  - 配列、レコード、enum などは型エラー(何を書くかを選んでから `${..}` に入れる)
+- JS ではテンプレートリテラルのまま出す。`@wasm` では `format!` にし、穴は借りて渡す
+  - `@wasm` の中の浮動小数点数の穴はエラー(JS と Rust で書き方が違う。`to_string` と同じ扱い)
+- エスケープは文字列リテラルと同じ(`\n` `\t` `\\`)に加えて、`` \` `` と `\$`。`{` だけ、`$` だけは普通の文字
+
 **ここから見えた現実的なライン**:
 
 - f64 のループは、JS に `for` で出せば V8 の JIT が十分に速い。今の zustc の wasm 出力(振り分けの形、アドレス検査あり)とコピーの分を考えると、JS のほうが速い

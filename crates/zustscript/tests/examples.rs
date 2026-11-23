@@ -328,13 +328,15 @@ fn text_same_in_js_and_wasm() {
         let d = out_dir(name);
         let o = compare_build(&root().join("examples/text.zsc"), &d, flags);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
-        outs.push(node(&d, "const m = await import('./text.js'); console.log(JSON.stringify([m.text(4), m.shout('  hé '), m.conflict_report(5)]))"));
+        outs.push(node(&d, "const m = await import('./text.js'); console.log(JSON.stringify([m.text(4), m.shout('  hé '), m.conflict_report(5), m.card({ name: 'Ana`', age: 30 }, 21n)]))"));
         if flags.is_empty() {
             rs = std::fs::read_to_string(d.join("text.wasm.rs")).unwrap();
         }
     }
     assert_eq!(outs[0], outs[1], "wasm and JS differ");
-    assert_eq!(outs[0], "[\"Hello, bo! ANA,BO,😀X abc 3 110 2 TFTFTT 0;1;2;3;\",\"HÉ!\",\"FTxya,b5\"]\n");
+    assert_eq!(outs[0], "[\"Hello, bo! ANA,BO,😀X abc 3 110 2 TFTFTT 0;1;2;3;\",\"HÉ!\",\"FTxya,b5\",\"Ana` (30): 42 {not a hole} ${nor this} true\"]\n");
+    // a template string is `format!`, its holes borrowed
+    assert!(rs.contains("format!(\"{} ({}): {} {{not a hole}} ${{nor this}} {}\", &p.name[..], p.age"), "{rs}");
     // borrowed strings, a borrowed result with a lifetime, `==` through borrows, and a string grown in place
     assert!(rs.contains("fn zs_longest<'a>(a: &'a str, b: &'a str) -> &'a str"), "{rs}");
     assert!(rs.contains("fn zs_same(p: &ZsPerson, q: &ZsPerson) -> bool {\n{\n(p == q)"), "{rs}");

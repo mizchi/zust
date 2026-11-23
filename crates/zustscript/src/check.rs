@@ -1483,6 +1483,23 @@ impl Checker {
                 Ty::Array(Box::new(et))
             }
             EK::Tuple(xs) => Ty::Tuple(xs.iter().map(|x| self.infer(x, None)).collect()),
+            // (a hole is a string, or what has `to_string`: a number or a bool, written as `to_string` writes it)
+            EK::Interp(_, holes) => {
+                for h in holes {
+                    let t = self.infer(h, None);
+                    let ok = match self.resolve(&t) {
+                        Ty::Str | Ty::I32 | Ty::U32 | Ty::I64 | Ty::F32 | Ty::F64 | Ty::Bool => true,
+                        Ty::Param(p) => self.bounds.contains_key(&p),
+                        Ty::Var(v) => self.intv.contains(&v) || self.floatv.contains(&v),
+                        _ => false,
+                    };
+                    if !ok {
+                        let shown = self.show(&t);
+                        self.err(h.pos, format!("a `${{..}}` of a template string takes a String, a number or a bool, not {shown}"));
+                    }
+                }
+                Ty::Str
+            }
             EK::Jsx(j) => {
                 self.jsx(j);
                 Ty::Jsx
@@ -1801,7 +1818,7 @@ impl EffWalk<'_> {
                     out.extend(self.expr(b));
                 }
             }
-            EK::Array(xs) | EK::Tuple(xs) => {
+            EK::Array(xs) | EK::Tuple(xs) | EK::Interp(_, xs) => {
                 for x in xs {
                     out.extend(self.expr(x));
                 }
@@ -1958,7 +1975,7 @@ pub fn subexprs(e: &Expr) -> Vec<&Expr> {
                 v.push(b);
             }
         }
-        EK::Array(xs) | EK::Tuple(xs) => v.extend(xs),
+        EK::Array(xs) | EK::Tuple(xs) | EK::Interp(_, xs) => v.extend(xs),
         EK::Jsx(j) => {
             v.extend(j.attrs.iter().map(|a| &a.1));
             for c in &j.children {

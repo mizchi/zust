@@ -89,6 +89,8 @@ pub enum EK {
     Perform(Option<String>, String, Vec<Expr>),
     /// `handle body { Log(s), k => .. }`: a deep handler; `k` resumes the body once
     Handle(Box<Expr>, Vec<HArm>),
+    /// `` `hi ${name}, ${n}` ``: the literal parts (one more than the holes) and the holes (strings, numbers, bools)
+    Interp(Vec<String>, Vec<Expr>),
 }
 
 #[derive(Clone, Debug)]

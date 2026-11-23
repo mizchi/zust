@@ -67,3 +67,9 @@ enum Tag { Named(String), Anon }
 }
 
 @wasm export fn conflict_report(n: i32) -> String { conflicts(n) }
+
+// template strings: a hole is a string, an integer or a bool (`format!` in Rust; a float is formatted differently
+// there, so it stays in the JS layer)
+@wasm export fn card(p: Person, n: i64) -> String {
+  `${p.name} (${p.age}): ${n * 2} {not a hole} \${nor this} ${p.age > 18}`
+}

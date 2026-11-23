@@ -91,7 +91,7 @@
 
 ### 文法の refine の残り(提案になっていないもの)
 
-- 文字列の補間 `` `hi ${name}` ``
+- **済: 文字列の補間 `` `hi ${name}` ``**(README の「文字列と `==`」)。残り: `@wasm` の中の浮動小数点数の穴(JS と同じ書き方の `zs_f64_str` を書けば入れられる)
 - モジュールと import(`import { a } from "./b.zsc"`、npm の型との接続)
   - **済: TS のファイルのプレーンなレコード型を `import type` で読む**(README の「TS の型の取り込み」)。残り: 任意のフィールド(003 の `Option` と一緒に)、総称型、`extends`、union(**済: 文字列リテラルの union と判別キーつきの union を enum として読む**。**済: その enum を `@wasm` との境界で渡す**。残り: zustscript の enum の表現を `@tag` で選べるようにする)、パッケージの .d.ts からの読み込み、関数の型(`extern` の代わり)
   - **済: 文字列や配列を含むレコードを `@wasm` との境界で渡す**: 補助のパッケージ zustscript-helper(TS)と crate zustscript_helper(Rust)の、1 つの固定したバイト列の形式で(README の「バイト列で越える値」)。**済: enum もこの形式に載せる**。残り: typed array をこの形式に載せる、zustscript-helper を npm に公開する(今は helper/ts をそのまま置く)

@@ -1470,6 +1470,24 @@ impl<'a> Lower<'a> {
                 val(format!("{} {{ {} }}", rs_type(n), parts.join(", ")))
             }
             EK::Tuple(_) => not_in_subset(pos, "a tuple"),
+            // (`format!`: the holes borrowed through the arguments' path; Rust's `{}` writes integers, bools and strings
+            // as JS does, floats not)
+            EK::Interp(parts, holes) => {
+                let tys: Vec<Ty> = holes.iter().map(|h| subst_ty(&self.ty(h.id), &self.subst)).collect();
+                if let Some(k) = tys.iter().position(|t| matches!(t, Ty::F32 | Ty::F64)) {
+                    return not_in_subset(holes[k].pos, "a float in a template string (JS and Rust format floats differently)");
+                }
+                let (vs, _) = self.args_as(holes, &vec![true; holes.len()], &tys)?;
+                let mut f = String::new();
+                for (k, p) in parts.iter().enumerate() {
+                    f.push_str(&p.replace('{', "{{").replace('}', "}}"));
+                    if k < holes.len() {
+                        f.push_str("{}");
+                    }
+                }
+                let args: String = vs.iter().map(|v| format!(", {v}")).collect();
+                val(format!("format!({f:?}{args})"))
+            }
             EK::Path(..) => not_in_subset(pos, "this path"),
             EK::Jsx(_) => not_in_subset(pos, "JSX"),
             EK::Perform(..) | EK::Handle(..) => not_in_subset(pos, "an effect"),

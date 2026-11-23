@@ -174,6 +174,7 @@ export default grammar({
         $.path_expression,
         $.number,
         $.string,
+        $.template_string,
         $.boolean,
         $.unit,
         $.parenthesized_expression,
@@ -280,6 +281,12 @@ export default grammar({
     boolean: (_) => choice('true', 'false'),
     number: (_) => token(seq(/[0-9][0-9_]*/, optional(seq('.', /[0-9][0-9_]*/)), optional(seq(/[eE][+-]?/, /[0-9]+/)), optional(/(i8|i16|i32|i64|u8|u16|u32|u64|usize|isize|f32|f64)/))),
     string: (_) => token(seq('"', repeat(choice(/[^"\\]/, /\\./)), '"')),
+    // `hi ${name}`: text, escapes and `${..}` holes
+    template_string: ($) =>
+      seq('`', repeat(choice(alias($._template_chars, $.string_fragment), $.escape_sequence, $.template_substitution)), '`'),
+    _template_chars: (_) => token.immediate(/([^`\\$]|\$[^{`\\])+|\$/),
+    escape_sequence: (_) => token.immediate(/\\./),
+    template_substitution: ($) => seq(token.immediate('${'), $._expression, '}'),
 
     line_comment: (_) => token(seq('//', /[^\n]*/)),
     block_comment: (_) => token(seq('/*', /[^*]*\*+([^/*][^*]*\*+)*/, '/')),
