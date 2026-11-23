@@ -903,7 +903,7 @@ impl Session2 {
             if let Some(e) = duplicate_name(src0, &externs, self.opts.edition < 2018) {
                 return Err(e);
             }
-            if let Some(e) = cfg_err.take().or_else(|| malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none())) {
+            if let Some(e) = cfg_err.take().or_else(|| malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none(), self.opts.edition)) {
                 return Err(e);
             }
         }
@@ -3224,7 +3224,7 @@ fn first_unreachable(b: &crate::parse::Block, user_process: bool) -> Option<(cra
 
 /// "malformed `X` attribute input" (E0539 / E0565): a built-in attribute of a fixed shape written in another one.
 /// Read are the file's inner attributes (its head) and the attributes in front of the items (no full-text scan)
-fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) -> Option<String> {
+fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, edition: u16) -> Option<String> {
     // (a crate with no dependency (so no proc macro) knows only the built-in attributes and its tools' paths)
     // (both looked up only when such an attribute is there: not a search of every file)
     let unknown = |name: &str| {
@@ -3378,6 +3378,16 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
         }
         off += line.len();
     }
+    // (the unsafe attributes, which `#[unsafe(..)]` may wrap; `naked` needs it in every edition, the others in 2024, or
+    // where `unsafe_attr_outside_unsafe` is denied)
+    const UNSAFE: &[&str] = &["no_mangle", "export_name", "link_section", "naked", "ffi_pure", "ffi_const", "force_target_feature"];
+    // (`#![crate_type = "proc-macro"]`, not a comment that names the crate type)
+    let proc_macro_crate = head.match_indices("crate_type").any(|(i, _)| head[i + 10..].trim_start().strip_prefix('=').is_some_and(|r| r.trim_start().starts_with("\"proc-macro\"")));
+    // (before 2024 a lint: denied at the crate, and not allowed again on an item, `#[allow(unsafe_attr_outside_unsafe)]
+    // mod generated { .. }`)
+    let lowered = || ["allow(", "expect("].iter().any(|l| ["unsafe_attr_outside_unsafe", "rust_2024_compatibility"].iter().any(|n| src0.contains(&format!("{l}{n}"))));
+    let outside_unsafe_denied = edition >= 2024
+        || (head.contains("deny(") || head.contains("forbid(")) && (head.contains("unsafe_attr_outside_unsafe") || head.contains("rust_2024_compatibility")) && !lowered();
     for it in items {
         let text = &split[it.start..it.end];
         if !text.trim_start().starts_with("#[") {
@@ -3385,6 +3395,43 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
         }
         let attrs = leading(text);
         for &(at, name, input) in &attrs {
+            let line = || it.line + text[..at].matches('\n').count();
+            // (`#[unsafe(name ..)]`: the attribute inside it, which must be an unsafe one)
+            let (name, input) = match input.trim().strip_prefix('(').filter(|_| name == "unsafe") {
+                Some(r) => {
+                    let inner = r.strip_suffix(')').unwrap_or(r).trim_start();
+                    let n_end = inner.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(inner.len());
+                    let (n, rest) = (&inner[..n_end], &inner[n_end..]);
+                    if n == "unsafe" {
+                        return Some(format!("{}:1: expected identifier, found keyword `unsafe`", line()));
+                    }
+                    // (a name the crate does not know: that first, as rustc)
+                    if unknown(n) && !standalone {
+                        continue;
+                    }
+                    if standalone && unknown(n) && !text.contains("<<<<<<<") {
+                        return Some(format!("{}:1: cannot find attribute `{n}` in this scope", line()));
+                    }
+                    if !UNSAFE.contains(&n) {
+                        return Some(format!("{}:1: `{n}` is not an unsafe attribute", line()));
+                    }
+                    (n, rest)
+                }
+                None => {
+                    if (name == "naked" || outside_unsafe_denied && matches!(name, "no_mangle" | "export_name" | "link_section")) && !text[at..].starts_with("#![") {
+                        return Some(format!("{}:1: unsafe attribute used without unsafe", line()));
+                    }
+                    // (`#[derive(unsafe(Debug))]`: a derive's entries are paths)
+                    if name == "derive" && input.contains("unsafe") {
+                        let list = input.trim().strip_prefix('(').and_then(|r| r.strip_suffix(')')).unwrap_or("");
+                        let keyword = |x: &&str| x.trim_start().strip_prefix("unsafe").is_some_and(|r| !r.starts_with(|c: char| c.is_alphanumeric() || c == '_'));
+                        if attr_entries(list).iter().any(keyword) {
+                            return Some(format!("{}:1: expected identifier, found keyword `unsafe`", line()));
+                        }
+                    }
+                    (name, input)
+                }
+            };
             if !check(name, input) {
                 return Some(report(text, it.line, at, name, input));
             }
@@ -3425,6 +3472,15 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
             _ => continue,
         };
         for &(at, name, _) in &attrs {
+            // (a proc macro: a fn of a `proc-macro` crate)
+            if matches!(name, "proc_macro" | "proc_macro_derive" | "proc_macro_attribute") && !proc_macro_crate {
+                let line = it.line + text[..at].matches('\n').count();
+                return Some(if kw == "fn" {
+                    format!("{line}:1: the `{name}` attribute is only usable with crates of the `proc-macro` crate type")
+                } else {
+                    format!("{line}:1: the `{name}` attribute cannot be used on {kind}")
+                });
+            }
             let ok = match name {
                 "inline" | "cold" | "track_caller" => kw == "fn",
                 "repr" => matches!(kw, "struct" | "enum" | "union"),
