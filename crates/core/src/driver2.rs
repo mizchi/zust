@@ -1480,7 +1480,8 @@ impl Session2 {
         let sb = src.as_bytes();
         // (only `zustc check` has the placeholders' round that reads them)
         // (the keyword and any space after it: `use` then a newline is one too)
-        let any_use = self.checking && src.match_indices("use").any(|(i, _)| sb.get(i + 3).is_some_and(|c| c.is_ascii_whitespace()));
+        // (the SIMD `contains` first: a source with no "use" at all costs one fast scan, not a byte-by-byte search)
+        let any_use = self.checking && src.contains("use") && src.match_indices("use").any(|(i, _)| sb.get(i + 3).is_some_and(|c| c.is_ascii_whitespace()));
         for it in items[..user].iter().filter(|_| any_use) {
             for &(a, b) in &it.idents {
                 let (a, b) = (a as usize, b as usize);
@@ -4373,6 +4374,22 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
             _ => {}
         }
     }
+    // (`n: ?Sized` / `n: Tr + ?Sized`, in the parameter list or a where clause: the `:` before a `?Sized` with only
+    // bounds between, and the parameter's name before the `:`)
+    let maybe_unsized = |text: &str, n: &str| {
+        text.match_indices("?Sized").any(|(i, _)| {
+            let before = &text[..i];
+            let b = before.as_bytes();
+            let mut j = b.len();
+            while j > 0 && (b[j - 1].is_ascii_alphanumeric() || matches!(b[j - 1], b'_' | b' ' | b'\t' | b'\n' | b'\r' | b'+' | b'\'' | b'<' | b'>' | b',')) {
+                j -= 1;
+            }
+            if j == 0 || b[j - 1] != b':' || (j >= 2 && b[j - 2] == b':') {
+                return false;
+            }
+            before[..j - 1].trim_end().rsplit(|c: char| !(c.is_alphanumeric() || c == '_')).next() == Some(n)
+        })
+    };
     let word = |text: &str, w: &str| text.match_indices(w).any(|(i, _)| {
         let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
         ok(text[..i].chars().next_back()) && ok(text[i + w.len()..].chars().next())
@@ -4383,11 +4400,14 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
             match *a {
                 Ty::Param(i) => {
                     let Some(n) = gens.get(i as usize) else { continue };
-                    // (a parameter is Sized unless it says `?Sized`)
+                    // (a parameter is Sized unless it says `?Sized` (which the recorded bounds leave out): then only a
+                    // bound that implies Sized holds it, not the word `Sized` of its `?Sized`)
                     let bs = bounds(n);
-                    let held = bs.iter().any(|b| b == tr || prog.bound_implies(b, &[tr.as_str()], true, 0))
-                        || (tr == "Sized" && !bs.iter().any(|b| b == "?Sized"))
-                        || word(text, tr);
+                    let held = if tr == "Sized" {
+                        bs.iter().any(|b| b == "Sized" || prog.bound_implies(b, &["Sized"], false, 0)) || !maybe_unsized(text, n)
+                    } else {
+                        bs.iter().any(|b| b == tr || prog.bound_implies(b, &[tr.as_str()], true, 0)) || word(text, tr)
+                    };
                     if !held {
                         return Some(format!("the trait bound `{n}: {tr}` is not satisfied (E0277)"));
                     }
