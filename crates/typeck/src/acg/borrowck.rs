@@ -2044,7 +2044,11 @@ impl Cx<'_> {
         // (a temporary bound by `ref` (`match f() { Some(ref m) => .. }`): borrowed, it goes away at the end of the
         // statement)
         let mut own_loan = None;
-        if self.bk.level >= 2 && !in_let && !super::is_place_expr(e) && pats.iter().any(|p| pat_binds_ref(p)) {
+        // (not a constant (`match Some(1) { Some(ref x) => .. }`), promoted to a static as `&Some(1)` is, unless
+        // bound `ref mut`; nor a value that holds references, which a binding's `*x` copies out (`Some(ref s)` of an
+        // `Option<&String>`, `out.push(*s)`: what it holds is the value's, not the temporary's))
+        let holds_refs = matches!(&r, Ok(Some(p)) if self.bk_ty(p.ty()).1);
+        if self.bk.level >= 2 && !in_let && !super::is_place_expr(e) && pats.iter().any(|p| pat_binds_ref(p)) && (pats.iter().any(|p| pat_binds_ref_mut(p)) || made_temp(self.prog, e)) && !holds_refs {
             let id = self.bk.locals.len() as u32;
             self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP, via_ref: false });
             self.bk_ev(Ev::Bind(id, true));
@@ -2731,6 +2735,46 @@ impl Cx<'_> {
             }
             self.bk_ev(Ev::Dead(t, super::SP));
         }
+    }
+
+    /// Before a `for` loop's pattern is bound to an item: when it binds by `ref` (`for ref x in 0..3`), the item is a
+    /// temporary of the iteration its `ref` bindings borrow (E0716 when such a borrow is used after the iteration).
+    /// Returns what to restore (bk_for_item_end)
+    pub(crate) fn bk_for_item_begin(&mut self, f: &Expr, t: Ty) -> Option<(Option<u32>, Option<Vec<Src>>, Option<BPlace>, Option<(BPlace, Sp)>)> {
+        let Expr::For(_, fpat, it, _) = f else { return None };
+        // (not an item that holds references: a binding's `*x` copies them out (as a scrutinee's, bk_scrutinee))
+        if !self.bk_on() || self.bk.level < 2 || !pat_binds_ref(fpat) || self.bk_ty(t).1 {
+            return None;
+        }
+        let id = self.bk.locals.len() as u32;
+        self.bk.locals.push(Local { name: TEMP.to_string(), ty: Ty::Unit, copy: true, refs: false, mutable: Some(true), decl: super::SP, via_ref: false });
+        self.bk_ev(Ev::Bind(id, true));
+        let place = BPlace { local: id, proj: vec![] };
+        // (an array literal has no position of its own: its first element's)
+        let at = |e: &Expr| Some(err_pos(e)).filter(|s| s.line != 0).unwrap_or_else(|| super::expr_start(e));
+        let sp = match (at(it), strip_paren(it)) {
+            (s, Expr::Array(xs)) if s.line == 0 && !xs.is_empty() => at(&xs[0]),
+            (s, _) => s,
+        };
+        let saved = (Some(id), self.bk.bind_srcs.clone(), self.bk.pat_path.replace(place.clone()), self.bk.scrut_place.replace((place, sp)));
+        Some(saved)
+    }
+
+    /// After the pattern is bound (bk_for_item_begin): the item's temporary, to end with the iteration
+    pub(crate) fn bk_for_item_end(&mut self, saved: Option<(Option<u32>, Option<Vec<Src>>, Option<BPlace>, Option<(BPlace, Sp)>)>) -> Option<u32> {
+        let (id, srcs, path, scrut) = saved?;
+        self.bk.bind_srcs = srcs;
+        self.bk.pat_path = path;
+        self.bk.scrut_place = scrut;
+        id
+    }
+
+    /// The end of a loop's iteration: the temporaries of the statement made since mark (a `while let` scrutinee's that
+    /// its `ref` bindings borrow, the body's tail's) go away, as a loop's body is a terminating scope (E0716 for
+    /// `while let Some(ref x) = it.next() { v.push(x); }` when v is used after). They are left out of what ends at
+    /// the enclosing statement
+    pub(crate) fn bk_iteration_end(&mut self, mark: usize) {
+        self.bk_temps_end(mark);
     }
 
     /// The temporaries of a block's tail that a method is called on (`D(&_t1).end()`) live until the end of the

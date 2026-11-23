@@ -3127,3 +3127,20 @@ fn part17_deref_mut_methods() {
     assert_eq!(check(&format!("{w}fn main() {{\n    let mut w = W(vec![1]);\n    w.push(2);\n    let n = w.len();\n    w[0] = n;\n    let r = &w;\n    println!(\"{{}}\", r.len());\n}}\n")), vec![]);
     assert_eq!(check(&format!("{w}fn f(w: &mut W) -> usize {{\n    w.push(1);\n    let n = w.len();\n    w.push(n);\n    w.len()\n}}\nfn main() {{}}\n")), vec![]);
 }
+
+/// A `ref` binding of a loop's item (`for ref x in 0..3`, `while let Some(ref x) = it.next()`) borrows a temporary of
+/// the iteration, gone at its end, as a loop's body is a terminating scope (also the temporaries of the body's tail,
+/// `loop { match it.next() { Some(ref x) => .. } }`): E0716 when the borrow is kept past it. A constant scrutinee is
+/// promoted (`match Some(1) { Some(ref x) => .. }`), and an item that holds references is copied out (`out.push(*s)`
+/// of `for ref s in v.iter()`)
+#[test]
+fn part17_loop_iteration_temporaries() {
+    let tail = "    println!(\"{:?}\", v);\n}\n";
+    temp_error(&format!("fn main() {{\n    let mut v = vec![];\n    for ref x in 0..3 {{\n        v.push(x);\n    }}\n{tail}"), 3);
+    temp_error(&format!("fn main() {{\n    let mut v = vec![];\n    for ref x in vec![1, 2].into_iter() {{\n        v.push(x);\n    }}\n{tail}"), 3);
+    temp_error(&format!("fn main() {{\n    let mut v = vec![];\n    for ref x in [String::new()] {{\n        v.push(x);\n    }}\n{tail}"), 3);
+    temp_error(&format!("fn main() {{\n    let mut v = vec![];\n    let mut it = vec![1, 2].into_iter();\n    while let Some(ref x) = it.next() {{\n        v.push(x);\n    }}\n{tail}"), 4);
+    temp_error(&format!("fn main() {{\n    let mut v = vec![];\n    let mut it = vec![1, 2].into_iter();\n    loop {{\n        match it.next() {{\n            Some(ref x) => v.push(x),\n            None => break,\n        }}\n    }}\n{tail}"), 5);
+    assert_eq!(check(&format!("fn main() {{\n    let mut v: Vec<&i32> = vec![];\n    match Some(1) {{\n        Some(ref x) => v.push(x),\n        None => {{}}\n    }};\n    let r: &i32 = match 5 {{ ref y => y }};\n    println!(\"{{}}\", r);\n{tail}")), vec![]);
+    assert_eq!(check("fn main() {\n    let v = vec![String::new(), String::from(\"a\")];\n    let mut out: Vec<&String> = vec![];\n    for ref s in v.iter() {\n        out.push(*s);\n    }\n    for (_i, ref s) in v.iter().enumerate() {\n        out.push(*s);\n    }\n    let mut it = v.iter();\n    while let Some(ref s) = it.next() {\n        out.push(s);\n    }\n    match v.iter().next() {\n        Some(ref s) => out.push(*s),\n        None => {}\n    };\n    let mut n: Vec<i32> = vec![];\n    for ref x in 0..3 {\n        n.push(*x);\n    }\n    println!(\"{} {:?}\", out.len(), n);\n}\n"), vec![]);
+}

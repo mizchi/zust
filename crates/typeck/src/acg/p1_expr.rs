@@ -1266,11 +1266,13 @@ impl Cx<'_> {
                     temps: t0,
                     no_value: Some("while"),
                 });
+                let bk_t0 = self.bk.stmt_temps.len();
                 let (_, bt) = self.block(wbody, Some(Ty::Unit))?;
                 self.loops.pop();
                 if bt != Ty::Never {
                     self.same(SP, bt, Ty::Unit)?;
                     self.drop_for_exit(usize::MAX, t0);
+                    self.bk_iteration_end(bk_t0);
                     self.b.ins().jump(header, &[]);
                 } else {
                     self.b.ins().trap(TrapCode::unwrap_user(1));
@@ -1297,11 +1299,13 @@ impl Cx<'_> {
                     temps: self.temps.len(),
                     no_value: None,
                 });
+                let bk_t0 = self.bk.stmt_temps.len();
                 let (_, bt) = self.block(lbody, Some(Ty::Unit))?;
                 let lp = self.loops.pop().unwrap();
                 if bt != Ty::Never {
                     self.same(SP, bt, Ty::Unit)?;
                     self.drop_for_exit(usize::MAX, lp.temps);
+                    self.bk_iteration_end(bk_t0);
                     self.b.ins().jump(body, &[]);
                 } else {
                     self.b.ins().trap(TrapCode::unwrap_user(1));

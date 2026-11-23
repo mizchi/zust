@@ -317,7 +317,17 @@ impl Cx<'_> {
                     Ty::Struct(sid) => self.vec_fields(sid).is_some(),
                     _ => false,
                 };
-                seq.then(|| (x.clone(), path_expr("for#tmp")))
+                // (the local is where the value was written: a borrow of it (`for ref x in [s]`) is reported there; an
+                // array literal's first element's)
+                let at = match x {
+                    Expr::Array(xs) if !xs.is_empty() => expr_start(&xs[0]),
+                    _ => expr_start(x),
+                };
+                let mut pe = path_expr("for#tmp");
+                if let Expr::Path(_, p) = &mut pe {
+                    p.pos = at;
+                }
+                seq.then(|| (x.clone(), pe))
             }
             _ => None,
         }
@@ -725,6 +735,8 @@ impl Cx<'_> {
     pub(crate) fn for_body(&mut self, f: &Expr, val: Option<Value>, vt: Ty, step: Block, exit: Block) -> R<()> {
         let Expr::For(_, fpat, _, fbody) = f else { unreachable!() };
         self.scopes.push(vec![]);
+        // (the item `ref` bindings borrow: gone at the end of the iteration)
+        let mut item_temp = None;
         let to_place = |this: &mut Self, val: Option<Value>, vt: Ty| match val {
             Some(a) if vt.is_agg() => Place::Mem(a, 0, vt),
             Some(v) => {
@@ -754,7 +766,10 @@ impl Cx<'_> {
             self.rg_for_item(f, vt);
             self.for_pat_check(fpat, place.ty())?;
             self.runtime_pat_guard(fpat, place)?;
-            self.pat_bind(fpat, place, BindMode::Move)?;
+            let saved = self.bk_for_item_begin(f, place.ty());
+            let r = self.pat_bind(fpat, place, BindMode::Move);
+            item_temp = self.bk_for_item_end(saved);
+            r?;
             self.rg.pat = None;
         }
         let bound = self.pending_bound.take();
@@ -784,6 +799,9 @@ impl Cx<'_> {
         self.pop_scope();
         if bt != Ty::Never {
             self.same(SP, bt, Ty::Unit)?;
+            if let Some(id) = item_temp {
+                self.bk_ev(crate::acg::borrowck::Ev::Dead(id, SP));
+            }
             self.b.ins().jump(step, &[]);
         } else {
             self.b.ins().trap(TrapCode::unwrap_user(1));

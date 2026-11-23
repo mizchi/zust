@@ -490,6 +490,7 @@ impl Cx<'_> {
         self.b.switch_to_block(header);
         // 毎回 match 対象を評価し直す (一時値は 1 回ごとに drop する)
         let t0 = self.temps.len();
+        let bk_t0 = self.bk.stmt_temps.len();
         let Some(place) = ({ let ex = self.bare_none_ty(e, &[pat])?; self.bk_scrutinee(e, ex, &[pat])? }) else {
             return Ok((None, Ty::Never));
         };
@@ -518,13 +519,19 @@ impl Cx<'_> {
         let (_, bt) = self.block(body, Some(Ty::Unit))?;
         self.loops.pop();
         self.pop_scope();
+        // (the scrutinee's temporaries and the body's go away at the end of each iteration; on the way out, those of
+        // the last test stay the statement's)
+        let last: Vec<u32> = self.bk.stmt_temps.get(bk_t0..).map(|t| t.to_vec()).unwrap_or_default();
         if bt != Ty::Never {
             self.same(SP, bt, Ty::Unit)?;
             self.drop_for_exit(usize::MAX, t0);
+            self.bk_iteration_end(bk_t0);
             self.b.ins().jump(header, &[]);
         } else {
             self.b.ins().trap(TrapCode::unwrap_user(1));
         }
+        self.bk.stmt_temps.truncate(bk_t0);
+        self.bk.stmt_temps.extend(last);
         self.b.switch_to_block(exit);
         self.drop_temps(t0);
         Ok((None, Ty::Unit))
