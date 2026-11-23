@@ -409,7 +409,7 @@ impl Free {
             match s {
                 // (`let _ = s;` / `let _ = s.f;` reads no value: a closure does not capture s for it (edition 2021's
                 // captures), so a `move` closure leaves s usable after it)
-                Stmt::Let(Pat::Wild, None, Some(e), None, ..) if !self.keep_wild && wild_read_only(e) => {}
+                Stmt::Let(Pat::Wild, None, Some(e), None, ..) if !self.keep_wild && wild_fake_reads() && wild_read_only(e) => {}
                 Stmt::Let(p, _, init, els, ..) => {
                     if let Some(e) = init {
                         self.expr(e);
@@ -523,6 +523,14 @@ impl Free {
             }
         }
     }
+}
+
+/// Edition 2021 and later: `let _ = place;` in a closure captures nothing (the driver sets it for the program it
+/// analyzes; edition 2015 / 2018 capture the place's variable)
+pub static WILD_FAKE_READS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+fn wild_fake_reads() -> bool {
+    WILD_FAKE_READS.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A place made of a variable and its fields (`s`, `s.f.g`, `(s)`): `let _ = place;` reads nothing of it

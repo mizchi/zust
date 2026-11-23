@@ -813,6 +813,8 @@ impl Session2 {
 
     /// 要約はアイテムのハッシュで引く
     pub fn analyze(&mut self, src0: &str) -> R<Analysis> {
+        // (closures' captures by edition: `let _ = s;` captures s before 2021 only (ast_closure::WILD_FAKE_READS))
+        crate::ast_closure::WILD_FAKE_READS.store(self.opts.edition >= 2021, std::sync::atomic::Ordering::Relaxed);
         let mut externs = std::mem::take(&mut self.externs);
         // (ファイルから読んだもの (load_crate) は読むときに cfg を評価してある)
         let stripped;
@@ -914,6 +916,8 @@ impl Session2 {
                 h.add(&cid);
                 h.add(&0u8);
                 h.add(&it.hash);
+                // (a closure's captures depend on the edition: WILD_FAKE_READS)
+                h.add(&(self.opts.edition >= 2021));
                 let k = h.finish();
                 if let Some(sm) = self.get(k).and_then(|d| Summary::decode(&d)) {
                     sums[i] = sm;
