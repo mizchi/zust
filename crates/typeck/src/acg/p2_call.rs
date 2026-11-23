@@ -2091,15 +2091,67 @@ impl Cx<'_> {
 
     /// A placeholder's type parameter is `'static` by its function's bounds (`T: 'static`, or a trait whose `Self` must
     /// be `'static`)
+    /// A placeholder in t (itself, or in its type arguments, under references, boxes, slices and arrays) that may not
+    /// be 'static (placeholder_static)
+    fn non_static_placeholder(&self, t: Ty, depth: u32) -> Option<u32> {
+        if depth > 12 {
+            return None;
+        }
+        match t {
+            Ty::Struct(s) if self.prog.is_placeholder(s) => (!self.placeholder_static(s)).then_some(s),
+            Ty::Struct(s) => self.prog.structs[s as usize].args.iter().find_map(|&a| self.non_static_placeholder(a, depth + 1)),
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Slice(i) | Ty::Array(i, _) => self.non_static_placeholder(*i, depth + 1),
+            _ => None,
+        }
+    }
+
     pub(crate) fn placeholder_static(&self, s: u32) -> bool {
         let Some((id, k)) = self.prog.placeholder_of(s) else { return true };
         let sig = &self.prog.sigs[id as usize];
         let Some((name, bounds)) = sig.generics.get(k as usize) else { return true };
-        let by_outlives = sig.regions.as_deref().is_some_and(|r| r.ty_outlives.iter().any(|(t, c)| t == name && *c == crate::types::R_STATIC));
+        // (`T: 'a` with `'a` reaching 'static through the outlives bounds (`'a: 'static`))
+        let by_outlives = sig.regions.as_deref().is_some_and(|r| {
+            r.ty_outlives.iter().any(|(t, c)| {
+                if t != name {
+                    return false;
+                }
+                let mut seen = vec![*c];
+                let mut k = 0;
+                while k < seen.len() {
+                    if seen[k] == crate::types::R_STATIC {
+                        return true;
+                    }
+                    for &(a, b) in &r.outlives {
+                        if a == seen[k] && !seen.contains(&b) {
+                            seen.push(b);
+                        }
+                    }
+                    k += 1;
+                }
+                false
+            })
+        });
+        // (a trait whose `Self` must be 'static, also through its supertraits (`trait Derived: Base`, `trait Base:
+        // 'static`))
+        let short = |t: &str| t.split('<').next().unwrap_or(t).trim().rsplit("::").next().unwrap_or("").to_string();
         let by_trait = bounds.iter().any(|b| {
-            let n = b.split('<').next().unwrap_or(b).trim();
-            let n = n.rsplit("::").next().unwrap_or(n);
-            self.prog.trait_self_outlives.iter().any(|(t, so)| t.rsplit("::").next() == Some(n) && so.iter().any(|x| x == "static"))
+            let mut todo = vec![short(b)];
+            let mut seen: Vec<String> = vec![];
+            while let Some(n) = todo.pop() {
+                if seen.contains(&n) {
+                    continue;
+                }
+                if self.prog.trait_self_outlives.iter().any(|(t, so)| short(t) == n && so.iter().any(|x| x == "static")) {
+                    return true;
+                }
+                for (t, sups) in &self.prog.trait_supers {
+                    if short(t) == n {
+                        todo.extend(sups.iter().map(|x| short(x)));
+                    }
+                }
+                seen.push(n);
+            }
+            false
         });
         // (or implied by a parameter's type: `_: &'static T` makes T 'static)
         fn mentions(prog: &crate::program::Program, t: Ty, k: u32, depth: u32) -> bool {
@@ -2626,11 +2678,10 @@ impl Cx<'_> {
                         continue;
                     }
                     let Some(g) = sig0.generics.iter().position(|x| x.0 == *tp) else { continue };
-                    if let Some(Some(Ty::Struct(s))) = sol0.get(g) {
-                        if self.prog.is_placeholder(*s) && !self.placeholder_static(*s) {
-                            let n = self.prog.structs[*s as usize].name.trim_end_matches('#').to_string();
-                            return Err(self.at(if span.line == 0 { rg_sp } else { span }, format!("the parameter type `{n}` may not live long enough (it must outlive `'static`) (E0310)")));
-                        }
+                    // (also one in the type argument: `needs_static::<Option<T>>()`)
+                    if let Some(s) = sol0.get(g).copied().flatten().and_then(|t| self.non_static_placeholder(t, 0)) {
+                        let n = self.prog.structs[s as usize].name.trim_end_matches('#').to_string();
+                        return Err(self.at(if span.line == 0 { rg_sp } else { span }, format!("the parameter type `{n}` may not live long enough (it must outlive `'static`) (E0310)")));
                     }
                 }
             }

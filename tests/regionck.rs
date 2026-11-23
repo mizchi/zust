@@ -2523,6 +2523,18 @@ fn part14_rpit_captures_no_lifetime() {
     let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2024, ..Options2::default() });
     assert!(s.check("use std::fmt::Display;\nfn s(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn t(x: &u8) -> impl Display {\n    x\n}\nfn main() {}\n").is_empty());
 }
+/// From the third review of #69: a closure's call that needs `T: 'static` takes it from `T: 'a` with `'a: 'static`,
+/// and from a supertrait whose `Self` must be 'static (`trait Derived: Base`, `trait Base: 'static`); a T in the type
+/// argument (`needs_static::<Option<T>>()`) needs it too (E0310)
+#[test]
+fn part14_review2() {
+    assert_eq!(check("fn needs_static<T: 'static>() {}\nfn f<'a, T>()\nwhere\n    T: 'a,\n    'a: 'static,\n{\n    let c = || needs_static::<T>();\n    c();\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("fn needs_static<T: 'static>() {}\ntrait Base: 'static {}\ntrait Derived: Base {}\nfn f<T: Derived>() {\n    let c = || needs_static::<T>();\n    c();\n}\nfn main() {}\n"), vec![]);
+    let d = check("fn needs_static<T: 'static>() {}\nfn f<T>() {\n    let c = || needs_static::<Option<T>>();\n    c();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0310"), "{d:?}");
+    assert_eq!(check("fn needs_static<T: 'static>() {}\nfn f<T: 'static>() {\n    let c = || needs_static::<Option<Box<T>>>();\n    c();\n}\nfn main() {}\n"), vec![]);
+}
+
 /// From the review of #69: a parameter's reference bound to a local (`let y = x;`) is still captured by a no-capture
 /// `impl Trait` (E0700); a parameter is 'static through outlives bounds (`'a: 'b, 'b: 'static`) and with an ADT of no
 /// lifetime (`&'static String`); `_: &'static T` implies `T: 'static` for a closure's call
