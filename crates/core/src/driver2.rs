@@ -1846,8 +1846,21 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
             continue;
         }
         let text = &src[it.start..it.end];
-        let t = text.trim_start();
-        if !t.starts_with("use ") || text.contains("allow(unused") || text.contains("#[cfg") || text.contains('*') {
+        // (past its outer attributes, `#[deprecated] #[cfg(not(FALSE))] use std::fs;`: a false `cfg` is stripped
+        // before, an allow or an expect of the lint leaves it alone)
+        let mut t = text.trim_start();
+        while t.starts_with("#[") {
+            let mut d = 0;
+            let Some(e) = t.char_indices().find(|&(_, c)| {
+                d += (c == '[') as i32 - (c == ']') as i32;
+                c == ']' && d == 0
+            }) else {
+                break;
+            };
+            t = t[e.0 + 1..].trim_start();
+        }
+        let attrs: String = text[..text.len() - t.len()].chars().filter(|c| !c.is_whitespace()).collect();
+        if !t.starts_with("use ") || text.contains("allow(unused") || attrs.contains("expect(unused") || text.contains('*') {
             continue;
         }
         let body = t["use ".len()..].trim_end().trim_end_matches(';').trim();
