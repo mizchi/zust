@@ -1594,6 +1594,13 @@ impl Session2 {
                 return Err(e);
             }
         }
+        // (E0107: an impl giving one of the program's traits the wrong number of generic arguments; only with a trait
+        // header and an impl header)
+        if items[..user].iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::TraitHeader)) && items[..user].iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::ImplHeader)) {
+            if let Some(e) = first_trait_arity_error(&src, &items[..user]) {
+                return Err(e);
+            }
+        }
         // (a derive whose field has not the trait: `#[derive(Hash)] struct S { x: Error }`)
         if !prog.derived.is_empty() {
             if let Some(e) = derive_field_error(&prog, &src, &items[..user]) {
@@ -1799,6 +1806,126 @@ fn relocate(e: String, it: &SrcItem) -> String {
         }
     }
     format!("{}:1: {e}", it.line)
+}
+
+/// The top-level parts of a `<..>` of tokens that starts at `open` (its `<`): (first token, last token) of each, and
+/// the index of its `>`. None when it does not close
+fn angle_parts(t: &[(u8, usize, usize)], text: &[u8], open: usize) -> Option<(Vec<(usize, usize)>, usize)> {
+    let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && text[t[k].1] == c;
+    let (mut d, mut parts, mut from) = (0i32, vec![], open + 1);
+    for k in open..t.len() {
+        if sym(k, b'<') || sym(k, b'(') || sym(k, b'[') {
+            d += 1;
+        } else if (sym(k, b'>') && !(k > 0 && sym(k - 1, b'-'))) || sym(k, b')') || sym(k, b']') {
+            d -= 1;
+            if d == 0 {
+                if from < k {
+                    parts.push((from, k - 1));
+                }
+                return Some((parts, k));
+            }
+        } else if d == 1 && sym(k, b',') {
+            if from < k {
+                parts.push((from, k - 1));
+            }
+            from = k + 1;
+        }
+    }
+    None
+}
+
+/// E0107 at an impl of one of the program's traits that gives it more generic (type / const) arguments than the
+/// trait declares, or fewer than it requires: `impl Seq<bool> for u32` with `trait Seq {}`. Read from the trait
+/// headers and the impl headers only (lifetimes and `Item = ..` bindings are not counted)
+fn first_trait_arity_error(src: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind;
+    // (each trait's (required, declared) count; a name declared twice is left out)
+    let mut decl: crate::fxhash::FxMap<&str, Option<(usize, usize)>> = Default::default();
+    for it in items.iter().filter(|it| matches!(it.kind, ItemKind::TraitHeader)) {
+        let text = &src[it.start..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let Some(k) = (0..t.len()).find(|&k| w(k) == "trait") else { continue };
+        let name = w(k + 1);
+        if name.is_empty() {
+            continue;
+        }
+        let counts = if k + 2 < t.len() && t[k + 2].0 == 1 && b[t[k + 2].1] == b'<' {
+            let Some((parts, _)) = angle_parts(&t, b, k + 2) else { continue };
+            // (a lifetime, `'a`, whose token may start after its quote)
+            let lifetime = |q: usize| b[t[q].1] == b'\'' || (t[q].1 > 0 && b[t[q].1 - 1] == b'\'');
+            let tys: Vec<&(usize, usize)> = parts.iter().filter(|p| !lifetime(p.0)).collect();
+            let defaults = tys.iter().filter(|p| (p.0..=p.1).any(|q| t[q].0 == 1 && b[t[q].1] == b'=')).count();
+            (tys.len() - defaults, tys.len())
+        } else {
+            (0, 0)
+        };
+        decl.entry(name).and_modify(|e| *e = None).or_insert(Some(counts));
+    }
+    if decl.is_empty() {
+        return None;
+    }
+    let plural = |n: usize| if n == 1 { "generic argument" } else { "generic arguments" };
+    for it in items.iter().filter(|it| matches!(it.kind, ItemKind::ImplHeader)) {
+        let text = &src[it.start..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+        let Some(mut k) = (0..t.len()).find(|&k| w(k) == "impl") else { continue };
+        k += 1;
+        if sym(k, b'<') {
+            let Some((_, close)) = angle_parts(&t, b, k) else { continue };
+            k = close + 1;
+        }
+        // (the trait's path, up to `for`: its last segment and its arguments)
+        if sym(k, b'!') {
+            continue;
+        }
+        let mut name_at = None;
+        while k < t.len() && w(k) != "for" && !sym(k, b'{') {
+            if t[k].0 == 0 && w(k) != "dyn" {
+                name_at = Some(k);
+                k += 1;
+                if sym(k, b'<') {
+                    let Some((_, close)) = angle_parts(&t, b, k) else { break };
+                    k = close + 1;
+                }
+                continue;
+            }
+            k += 1;
+        }
+        if w(k) != "for" {
+            continue;
+        }
+        let Some(nk) = name_at else { continue };
+        let Some(&Some((required, declared))) = decl.get(w(nk)) else { continue };
+        let given = if sym(nk + 1, b'<') {
+            let Some((parts, _)) = angle_parts(&t, b, nk + 1) else { continue };
+            parts
+                .iter()
+                .filter(|p| !(b[t[p.0].1] == b'\'' || (t[p.0].1 > 0 && b[t[p.0].1 - 1] == b'\'')) && !(t[p.0].0 == 0 && p.1 > p.0 && sym(p.0 + 1, b'=') && !sym(p.0 + 2, b'=')))
+                .count()
+        } else {
+            0
+        };
+        if given > declared || given < required {
+            // (an impl hoisted out of a fn body: the line it was written on)
+            let line = it.line + text[..t[nk].1].matches('\n').count();
+            let line = crate::prep::hoisted_at(&crate::prep::hoist_marks(src), line).unwrap_or(line);
+            let what = if given == 0 {
+                format!("missing generics for trait `{}`", w(nk))
+            } else {
+                let takes = if required == declared { format!("{declared}") } else if given > declared { format!("at most {declared}") } else { format!("at least {required}") };
+                format!("trait takes {takes} {} but {given} {} {} supplied", plural(declared.max(required)), plural(given), if given == 1 { "was" } else { "were" })
+            };
+            // (rustc points at the trait's name; a hoisted impl's column is in its hoisted text, without the indent)
+            let col = t[nk].1 - text[..t[nk].1].rfind('\n').map_or(0, |n| n + 1) + 1;
+            return Some(format!("{line}:{col}: {what} (E0107)"));
+        }
+    }
+    None
 }
 
 /// アイテムの関数を自前の構文木で読む (本体がなければ None)。引数のパターンは本体の先頭の let にする

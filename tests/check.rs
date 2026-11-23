@@ -608,3 +608,23 @@ fn unused_import_after_attributes() {
     assert_eq!(first("#![deny(unused_imports)]\n#[cfg(FALSE)]\nuse std::fs;\nfn main() {}\n"), None);
     assert_eq!(first("#![deny(unused_imports)]\n#[allow(unused_imports)]\nuse std::fs;\nfn main() {}\n"), None);
 }
+
+#[test]
+fn trait_arity_at_impls() {
+    // (E0107 at an impl of the program's trait with the wrong number of generic arguments; messages, lines and
+    // columns as rustc 1.100 gives them. Lifetimes and defaulted parameters are counted as rustc does)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let src = "trait Seq {}\nimpl Seq<bool> for u32 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 6, "trait takes 0 generic arguments but 1 generic argument was supplied (E0107)".to_string())), "too_many");
+    let src = "trait Tr<T> {}\nimpl Tr for u8 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 6, "missing generics for trait `Tr` (E0107)".to_string())), "missing");
+    let src = "trait Tr<'a, T, U = u8> {}\nimpl<'a> Tr<'a, i32, u16, u32> for u8 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 10, "trait takes at most 2 generic arguments but 3 generic arguments were supplied (E0107)".to_string())), "at_most");
+    let src = "fn main() {\n    trait Tr<T> {}\n    impl Tr<u8, u8> for u8 {}\n}\n";
+    assert_eq!(first(src).map(|d| (d.0, d.2)), Some((3, "trait takes 1 generic argument but 2 generic arguments were supplied (E0107)".to_string())), "in_fn_body");
+    let src = "trait Tr<'a, T, U = u8> {}\nimpl<'a> Tr<'a, i32> for u8 {}\nimpl<'a> Tr<'a, i32, u16> for u16 {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "lifetime_and_default_ok");
+    let src = "trait It { type Item; }\nimpl It for u8 { type Item = u8; }\nfn main() {}\n";
+    assert_eq!(first(src), None, "assoc_type_ok");
+}
