@@ -376,6 +376,43 @@ fn dead_code_fields_variants_members_aliases() {
     assert_eq!(first(ok), None);
 }
 
+/// `#![deny(unreachable_code)]` inside expressions: an argument after one that diverges, a call whose last argument
+/// diverges, an operation whose operand diverges, and the statement after a `match` on an empty enum or an
+/// `if`/`else` whose branches both diverge; not the right of `||`, which may not run
+#[test]
+fn unreachable_code_in_expressions() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let arg = "#![deny(unreachable_code)]\nfn foo(x: u8, y: usize) {}\nfn a() {\n    foo(return, 22);\n}\nfn main() {}\n";
+    assert_eq!(first(arg), Some((4, "unreachable expression".to_string())));
+    let call = "#![deny(unreachable_code)]\nfn bar(x: u8) {}\nfn b() {\n    bar(return);\n}\nfn main() {}\n";
+    assert_eq!(first(call), Some((4, "unreachable call".to_string())));
+    let op = "#![deny(unreachable_code)]\nfn c() -> u8 {\n    let x = 1 + return 2;\n    x\n}\nfn main() {}\n";
+    assert_eq!(first(op).map(|f| f.0), Some(3));
+    let empty = "#![deny(unreachable_code)]\nenum Void {}\nfn d(v: Void) {\n    match v {}\n    let x = 2;\n}\nfn main() {}\n";
+    assert_eq!(first(empty), Some((5, "unreachable statement".to_string())));
+    let both = "#![deny(unreachable_code)]\nfn e(b: bool) {\n    if b {\n        return;\n    } else {\n        return;\n    }\n    println!(\"dead\");\n}\nfn main() {}\n";
+    assert_eq!(first(both), Some((8, "unreachable statement".to_string())));
+    let ok = "#![deny(unreachable_code)]\nfn f(b: bool) -> bool {\n    let x = b || return false;\n    if b {\n        return true;\n    }\n    x\n}\nfn main() {}\n";
+    assert_eq!(first(ok), None);
+}
+
+/// `#![deny(unused_variables)]` beyond `let`: a `match` arm's binding its guard and body never read (an or-pattern's
+/// names once), a closure's parameter its body never reads, a `for` loop's binding the body never reads
+#[test]
+fn unused_variables_in_arms_closures_and_loops() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let arm = "#![deny(unused_variables)]\nfn main() {\n    let v = match 0u8 {\n        a => 0,\n    };\n    let _ = v;\n}\n";
+    assert_eq!(first(arm), Some((4, "unused variable: `a`".to_string())));
+    let or = "#![deny(unused_variables)]\nenum E {\n    A(i32),\n    B(i32),\n}\nfn main() {\n    match E::A(1) {\n        E::A(x) | E::B(x) => {}\n    }\n}\n";
+    assert_eq!(first(or), Some((8, "unused variable: `x`".to_string())));
+    let closure = "#![deny(unused_variables)]\nfn main() {\n    let f = |x: u8| 1;\n    let _ = f(2);\n}\n";
+    assert_eq!(first(closure), Some((3, "unused variable: `x`".to_string())));
+    let ok = "#![deny(unused_variables)]\nfn main() {\n    let v = [1u8, 2];\n    for x in v.iter() {\n        let _ = x;\n    }\n    let n = match 3u8 {\n        k if k > 2 => 1,\n        _ => 0,\n    };\n    let g = |y: u8| y + n;\n    let _ = g(1);\n}\n";
+    assert_eq!(first(ok), None);
+}
+
 /// Review of #72: a variant in a `match` arm's body (`true => E::A, false => E::B`) is constructed; a value a fn
 /// returns (`let s = make()`) is no struct's own; a comma in a tuple field's type (`Result<u8, u8>`) splits nothing;
 /// `warn(dead_code)` (of the crate, a field) denies nothing, but `deny(warnings)` makes it an error; `export_name`
@@ -495,4 +532,187 @@ fn review72_second_round() {
     assert_eq!(first(src), None, "matches_guard_ok");
     let src = "#![deny(dead_code)]\nstruct S {\n    other: u8,\n}\nstruct T {\n    value: u8,\n}\nfn main() {\n    let x = S { other: 1 };\n    let t = T { value: 1 };\n    assert!((|x: T| x.value)(t) == x.other);\n}\n";
     assert_eq!(first(src), None, "closure_in_macro_ok");
+}
+
+/// E0308 where rustc points: the branch whose type differs from the ones before it (its tail, the last statement of
+/// a block without one, the arm of an empty block), a loop body with a value (its tail), a struct literal's field (its
+/// value, the name of a shorthand field)
+#[test]
+fn mismatch_at_the_branch_rustc_points_at() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut line = |src: &str| s.check(src).first().map(|d| d.line);
+    let if_else = "fn main() {\n    let _ = if true {\n        1i32\n    } else {\n        2u32\n    };\n}\n";
+    assert_eq!(line(if_else), Some(5));
+    let semi = "fn main() {\n    let _ = match 3u8 {\n        0 => {\n            1i32\n        }\n        _ => {\n            0;\n        }\n    };\n}\n";
+    assert_eq!(line(semi), Some(7));
+    let empty = "fn f() {\n    match Some(0u32) {\n        Some(x) => {\n            x\n        }\n        None => {}\n    };\n}\nfn main() {}\n";
+    assert_eq!(line(empty), Some(6));
+    let lp = "fn main() {\n    let _a: i8 = loop {\n        1\n    };\n}\n";
+    assert_eq!(line(lp), Some(3));
+    let short = "struct Foo {\n    t: Thing,\n}\nstruct Thing;\nfn main() {\n    let t = &Thing;\n    let _f = Foo {\n        t\n    };\n}\n";
+    assert_eq!(line(short), Some(8));
+    // (no else: at the `if`, as rustc reports E0317)
+    let no_else = "fn main() {\n    let _x: i32 = if true {\n        1\n    };\n}\n";
+    assert_eq!(line(no_else), Some(2));
+}
+
+/// A condition (or iterator) that took the block meant to follow it: rustc's error at the `if` / `for`
+#[test]
+fn swallowed_block_at_the_keyword() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let bare = "fn a() {\n    if {}\n}\nfn main() {}\n";
+    assert_eq!(first(bare), Some((2, "missing condition for `if` expression".to_string())));
+    let unfinished = "fn main() {\n    let n = 1;\n    if n == {\n        println!(\"five\");\n    }\n}\n";
+    assert_eq!(first(unfinished), Some((3, "this `if` expression is missing a block after the condition".to_string())));
+    let for_in = "fn main() {\n    for i in {\n    }\n}\n";
+    assert_eq!(first(for_in), Some((2, "missing expression to iterate on in `for` loop".to_string())));
+    // (a block as the condition, followed by the block: fine)
+    let ok = "fn main() {\n    if { true } {\n        println!(\"ok\");\n    }\n}\n";
+    assert_eq!(first(ok), None);
+}
+
+/// E0658 for the attributes and ABIs behind a feature gate the source does not enable, with rustc's messages; none
+/// when the source enables it
+#[test]
+fn feature_gated_attributes_and_abis() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let cases = [
+        ("#[lang = \"foo\"]\nfn f() {}\nfn main() {}\n", 1, "lang items are subject to change", "lang_items"),
+        ("#![needs_allocator]\nfn main() {}\n", 1, "the `needs_allocator` attribute is an experimental feature", "allocator_internals"),
+        ("fn f() {}\n#[rustc_nonnull_optimization_guaranteed]\nstruct S {}\nfn main() {}\n", 2, "use of an internal attribute", "rustc_attrs"),
+        ("#[stable(feature = \"a\", since = \"1.0.0\")]\nfn f() {}\nfn main() {}\n", 1, "stability attributes may not be used outside of the standard library", "staged_api"),
+        ("#[repr(simd)]\nstruct F([f32; 4]);\nfn main() {}\n", 1, "SIMD types are experimental and possibly buggy", "repr_simd"),
+        ("#[repr(transparent)]\nunion U {\n    f: u8,\n}\nfn main() {}\n", 2, "transparent unions are unstable", "transparent_unions"),
+        ("#[doc(cfg(unix))]\nfn main() {}\n", 1, "the `doc(cfg)` and `doc(auto_cfg)` attributes are experimental", "doc_cfg"),
+        ("extern \"rust-cold\" fn f() {}\nfn main() {}\n", 1, "the extern \"rust-cold\" ABI is experimental and subject to change", "rust_cold_cc"),
+    ];
+    for (src, line, msg, feat) in cases {
+        assert_eq!(first(src), Some((line, format!("{msg} (E0658)"))), "{src}");
+        let enabled = format!("#![feature({feat})]\n{src}");
+        assert!(first(&enabled).is_none_or(|d| !d.1.contains("E0658")), "enabled: {enabled}");
+    }
+    // (a stable `doc` / `repr`: no gate)
+    assert_eq!(first("#[doc = \"x\"]\n#[repr(C)]\nstruct S;\nfn main() {}\n"), None);
+}
+
+/// unused_imports reads a `use` past its outer attributes: `#[deprecated] #[cfg(not(FALSE))] use std::fs;` is unused;
+/// a `cfg` that is false strips it, an allow of the lint leaves it alone
+#[test]
+fn unused_import_after_attributes() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let src = "#![deny(unused_imports)]\n#[deprecated]\n#[cfg(not(FALSE))]\nuse std::fs;\nfn main() {}\n";
+    assert_eq!(first(src), Some((4, "unused import: `std::fs`".to_string())));
+    assert_eq!(first("#![deny(unused_imports)]\n#[cfg(FALSE)]\nuse std::fs;\nfn main() {}\n"), None);
+    assert_eq!(first("#![deny(unused_imports)]\n#[allow(unused_imports)]\nuse std::fs;\nfn main() {}\n"), None);
+}
+
+#[test]
+fn trait_arity_at_impls() {
+    // (E0107 at an impl of the program's trait with the wrong number of generic arguments; messages, lines and
+    // columns as rustc 1.100 gives them. Lifetimes and defaulted parameters are counted as rustc does)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let src = "trait Seq {}\nimpl Seq<bool> for u32 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 6, "trait takes 0 generic arguments but 1 generic argument was supplied (E0107)".to_string())), "too_many");
+    let src = "trait Tr<T> {}\nimpl Tr for u8 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 6, "missing generics for trait `Tr` (E0107)".to_string())), "missing");
+    let src = "trait Tr<'a, T, U = u8> {}\nimpl<'a> Tr<'a, i32, u16, u32> for u8 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 10, "trait takes at most 2 generic arguments but 3 generic arguments were supplied (E0107)".to_string())), "at_most");
+    let src = "fn main() {\n    trait Tr<T> {}\n    impl Tr<u8, u8> for u8 {}\n}\n";
+    assert_eq!(first(src).map(|d| (d.0, d.2)), Some((3, "trait takes 1 generic argument but 2 generic arguments were supplied (E0107)".to_string())), "in_fn_body");
+    let src = "trait Tr<'a, T, U = u8> {}\nimpl<'a> Tr<'a, i32> for u8 {}\nimpl<'a> Tr<'a, i32, u16> for u16 {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "lifetime_and_default_ok");
+    let src = "trait It { type Item; }\nimpl It for u8 { type Item = u8; }\nfn main() {}\n";
+    assert_eq!(first(src), None, "assoc_type_ok");
+    // (review of #91: an `=` inside a bound is no default; a braced const argument's `<`)
+    let src = "trait Tr<T: Iterator<Item = u8>> {}\nimpl Tr for u8 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 6, "missing generics for trait `Tr` (E0107)".to_string())), "eq_in_bound");
+    let src = "trait Tr<const B: bool, T> {}\nimpl Tr<{ 0 < 1 }> for u8 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 6, "trait takes 2 generic arguments but 1 generic argument was supplied (E0107)".to_string())), "braced_const");
+    // (second round: a braced comparison inside a bound does not hide the parameter's default)
+    let src = "trait Flag<const B: bool> {}\ntrait Tr<T: Flag<{ 1 > 0 }> = u8> {}\nimpl Tr for () {}\nfn main() {}\n";
+    assert_eq!(first(src).filter(|d| d.2.contains("E0107")), None, "braced_bound_default");
+}
+
+#[test]
+fn review91_attributes_imports_unreachable() {
+    // (review of #91, each checked with rustc 1.100)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    // (unused_imports: a `]` in an attribute's string; `expect(unused_must_use)` is another lint; a name another
+    // `use` starts with is used)
+    let src = "#![deny(unused_imports)]\n#[doc = \"]\"]\nuse std::fs as unused_fs;\nfn main() {}\n";
+    assert_eq!(first(src), Some((3, "unused import: `std::fs as unused_fs`".to_string())), "bracket_in_string");
+    let src = "#![deny(unused_imports)]\n#[expect(unused_must_use)]\nuse std::fs as unused_fs;\nfn main() {}\n";
+    assert_eq!(first(src), Some((3, "unused import: `std::fs as unused_fs`".to_string())), "other_lint");
+    let src = "#![deny(unused_imports)]\n#[deprecated]\nuse std::fs as files;\nuse files::File;\nfn main() { let _: Option<File> = None; }\n";
+    // (zustc does not yet resolve `File` through the alias; only the lint is checked here)
+    assert_eq!(first(src).filter(|d| d.1.starts_with("unused import")), None, "used_by_use");
+    // (fourth round: the last lint attribute that names the lint or its group sets the level, and a warn is not an
+    // error; a `*` in an attribute is not a glob)
+    let unused_fs = Some((2, "unused import: `std::fs`".to_string()));
+    for (attrs, want) in [
+        ("#[warn(unused_imports)]", None),
+        ("#[warn(unused)]", None),
+        ("#[allow(unused)] #[warn(unused_imports)]", None),
+        ("#[warn(unused_imports)] #[allow(unused)]", None),
+        ("#[deny(unused_imports)] #[allow(unused_imports)]", None),
+        ("#[allow(unused_imports)] #[deny(unused_imports)]", unused_fs.clone()),
+        ("#[allow(unused_imports, warnings)] #[forbid(unused_imports)]", unused_fs.clone()),
+        ("#[allow(warnings)]", unused_fs.clone()),
+    ] {
+        let src = format!("#![deny(unused_imports)]\n{attrs} use std::fs;\nfn main() {{}}\n");
+        assert_eq!(first(&src), want, "lint_level {attrs}");
+    }
+    // (fifth round: a warn is still an error where `warnings` is denied, by the crate or the item)
+    for (krate, attrs, want) in [
+        ("#![deny(warnings)]", "#[warn(unused_imports)]", unused_fs.clone()),
+        ("#![deny(warnings)]", "#[warn(unused)]", unused_fs.clone()),
+        ("#![deny(warnings)]", "", unused_fs.clone()),
+        ("#![deny(warnings)]", "#[allow(warnings)]", None),
+        ("#![deny(warnings)]", "#[allow(warnings)] #[warn(unused_imports)]", None),
+        ("#![deny(warnings)]", "#[warn(unused_imports)] #[allow(warnings)]", None),
+        ("#![deny(warnings)]", "#[warn(warnings)] #[warn(unused_imports)]", None),
+        ("#![deny(unused_imports)]", "#[warn(unused_imports)] #[deny(warnings)]", unused_fs.clone()),
+    ] {
+        let src = format!("{krate}\n{attrs} use std::fs;\nfn main() {{}}\n");
+        assert_eq!(first(&src), want, "warnings_level {krate} {attrs}");
+    }
+    let src = "#![deny(unused_imports)]\n#[doc = \"*\"] use std::fs as unused_fs;\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, "unused import: `std::fs as unused_fs`".to_string())), "star_in_attribute");
+    // (the unstable ABIs: after any number of attributes; a raw string)
+    let src = "#[doc = \"a\"]\n#[doc = \"b\"]\n#[doc = \"c\"]\n#[allow(dead_code, unused)]\npub extern \"rust-cold\" fn f() {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((5, "the extern \"rust-cold\" ABI is experimental and subject to change (E0658)".to_string())), "abi_after_attrs");
+    let src = "extern r\"rust-cold\" fn f() {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((1, "the extern \"rust-cold\" ABI is experimental and subject to change (E0658)".to_string())), "raw_abi");
+    // (repr(transparent): the item it is on, past a raw-string attribute and `pub(crate)`; no slice inside a char)
+    let src = "#[repr(transparent)]\n#[doc = r\"note\"]\nstruct Wrap(u8);\nunion Slot { x: u8 }\nfn main() { let _ = Wrap(1); let _ = Slot { x: 1 }; }\n";
+    assert_eq!(first(src), None, "transparent_struct_then_union");
+    let src = "#[repr(transparent)]\npub(crate) union U { x: u8 }\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, "transparent unions are unstable (E0658)".to_string())), "transparent_pub_crate_union");
+    let src = format!("#[repr(transparent)]\n#[doc = \"{}\"]\npub union U {{ x: u8 }}\nfn main() {{}}\n", "a".repeat(600));
+    assert_eq!(first(&src), Some((3, "transparent unions are unstable (E0658)".to_string())), "transparent_after_long_attribute");
+    // (a window that ends inside `union`: grown until the name is whole)
+    for n in 470..490 {
+        let src = format!("#[repr(transparent)]\n#[doc = \"{}\"]\nunion U {{ x: u8 }}\nfn main() {{}}\n", "a".repeat(n));
+        assert_eq!(first(&src), Some((3, "transparent unions are unstable (E0658)".to_string())), "transparent_window_edge_{n}");
+    }
+    let pad = "é".repeat(300);
+    let src = format!("#[repr(transparent)]\nstruct W(u8);\nfn main() {{ let _s = \"{pad}\"; let _ = W(1); }}\n");
+    for k in 0..4 {
+        let src = format!("{}{src}", " ".repeat(k));
+        assert_eq!(first(&src), None, "multibyte_after_{k}");
+    }
+    // (unreachable_code: the program's own `process::exit` returns)
+    let src = "#![deny(unreachable_code)]\nmod process { pub fn exit() -> u8 { 1 } }\nfn take(_: u8, _: u8) {}\nfn main() { take(process::exit(), 2); }\n";
+    // (zustc resolves `process::exit` to std's here, a separate gap; only the lint is checked)
+    assert_eq!(first(src).filter(|d| d.1.starts_with("unreachable")), None, "user_process_exit");
+    // (third round: `mod` and `process` apart; std's `process::exit` still diverges beside the program's module)
+    let src = "#![deny(unreachable_code)]\nmod\n    process { pub fn exit() -> u8 { 1 } }\nfn take(_: u8, _: u8) {}\nfn main() { take(process::exit(), 2); }\n";
+    assert_eq!(first(src).filter(|d| d.1.starts_with("unreachable")), None, "user_process_split");
+    let src = "#![deny(unreachable_code)]\nmod process { pub fn exit() -> u8 { 1 } }\nfn take(_: u8, _: u8) {}\nfn main() { take(std::process::exit(0), 2); }\n";
+    assert_eq!(first(src), Some((4, "unreachable expression".to_string())), "std_process_exit");
 }

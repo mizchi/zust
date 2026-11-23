@@ -397,7 +397,10 @@ impl Cx<'_> {
             self.rg_keep(&arm.body);
             self.drop_tail_temps(t0, (v, t));
             self.pop_scope();
-            self.finish_arm(v, t, merge, &mut result_ty, &mut param, SP)?;
+            // (an arm whose type is not that of the arms before it: at its body's tail, as rustc points; an empty
+            // block's, `None => {}`, at the arm)
+            let at = Some(branch_pos(&arm.body)).filter(|p| p.line != 0).unwrap_or(arm.pos);
+            self.finish_arm(v, t, merge, &mut result_ty, &mut param, at)?;
             self.b.switch_to_block(next);
         }
         // どの arm にも合わない (rustc が網羅性を保証するので到達しない)
@@ -462,7 +465,8 @@ impl Cx<'_> {
             Some(e) => self.expr(e, result_ty.or(expected))?,
             None => (None, Ty::Unit),
         };
-        self.finish_arm(ev, et, merge, &mut result_ty, &mut param, SP)?;
+        let at = else_branch.as_deref().map_or(SP, branch_pos);
+        self.finish_arm(ev, et, merge, &mut result_ty, &mut param, at)?;
         self.b.switch_to_block(merge);
         Ok(match result_ty {
             None => (None, Ty::Never),
@@ -523,7 +527,8 @@ impl Cx<'_> {
         // the last test stay the statement's)
         let last: Vec<u32> = self.bk.stmt_temps.get(bk_t0..).map(|t| t.to_vec()).unwrap_or_default();
         if bt != Ty::Never {
-            self.same(SP, bt, Ty::Unit)?;
+            // (a body with a value: at its tail, as rustc points)
+            self.same(block_end_pos(body), bt, Ty::Unit)?;
             self.drop_for_exit(usize::MAX, t0);
             self.bk_iteration_end(bk_t0);
             self.b.ins().jump(header, &[]);
