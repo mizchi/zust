@@ -1168,7 +1168,9 @@ impl Session2 {
             // (an unstable ABI: `extern "rust-cold" fn`)
             // (`extern` among the item's first names, `pub unsafe extern "C" fn`, from the lexer's identifiers: no
             // search of its text)
-            if it.idents.iter().take(6).any(|&(a, b)| b - a == 6 && src.get(a as usize..b as usize) == Some("extern")) {
+            const KEYWORDS: &[&str] = &["fn", "struct", "enum", "union", "trait", "impl", "type", "const", "static", "mod", "use", "macro_rules"];
+            let ids = || it.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or(""));
+            if ids().take_while(|w| !KEYWORDS.contains(w)).any(|w| w == "extern") {
                 if let Some(e) = gated_abi(&src, it.start, it.end, &mut feats) {
                     return Err(e);
                 }
@@ -1379,13 +1381,15 @@ impl Session2 {
         }
         // (unreachable_code: a statement after one that diverges)
         if deny_unreachable_code && self.ctx.lib.is_none() {
+            // (the source as written: flattening blanks a `mod process {` header)
+            let user_process = src0.contains("mod process");
             for it in &items[..user_src] {
                 let text = src.get(it.start..it.end).unwrap_or("");
                 if !text.contains("fn ") || text.contains("allow(unreachable") || text.contains("#[cfg") {
                     continue;
                 }
                 let Ok(Some(f)) = parse_fn(&src, it) else { continue };
-                if let Some((p, what)) = first_unreachable(&f.block) {
+                if let Some((p, what)) = first_unreachable(&f.block, user_process) {
                     if p.line > 0 {
                         return Err(format!("{}:{}: unreachable {what}", it.line + p.line as usize - 1, p.col + 1));
                     }
@@ -1812,8 +1816,19 @@ fn relocate(e: String, it: &SrcItem) -> String {
 /// the index of its `>`. None when it does not close
 fn angle_parts(t: &[(u8, usize, usize)], text: &[u8], open: usize) -> Option<(Vec<(usize, usize)>, usize)> {
     let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && text[t[k].1] == c;
-    let (mut d, mut parts, mut from) = (0i32, vec![], open + 1);
+    let (mut d, mut braces, mut parts, mut from) = (0i32, 0i32, vec![], open + 1);
     for k in open..t.len() {
+        if sym(k, b'{') {
+            braces += 1;
+            continue;
+        }
+        if sym(k, b'}') {
+            braces -= 1;
+            continue;
+        }
+        if braces > 0 {
+            continue;
+        }
         if sym(k, b'<') || sym(k, b'(') || sym(k, b'[') {
             d += 1;
         } else if (sym(k, b'>') && !(k > 0 && sym(k - 1, b'-'))) || sym(k, b')') || sym(k, b']') {
@@ -1856,7 +1871,22 @@ fn first_trait_arity_error(src: &str, items: &[SrcItem]) -> Option<String> {
             // (a lifetime, `'a`, whose token may start after its quote)
             let lifetime = |q: usize| b[t[q].1] == b'\'' || (t[q].1 > 0 && b[t[q].1 - 1] == b'\'');
             let tys: Vec<&(usize, usize)> = parts.iter().filter(|p| !lifetime(p.0)).collect();
-            let defaults = tys.iter().filter(|p| (p.0..=p.1).any(|q| t[q].0 == 1 && b[t[q].1] == b'=')).count();
+            let top_eq = |p: &(usize, usize)| {
+                let mut d = 0i32;
+                (p.0..=p.1).any(|q| {
+                    if t[q].0 == 1 {
+                        match b[t[q].1] {
+                            b'<' | b'(' | b'[' => d += 1,
+                            b'>' if !(q > 0 && t[q - 1].0 == 1 && b[t[q - 1].1] == b'-') => d -= 1,
+                            b')' | b']' => d -= 1,
+                            b'=' => return d == 0,
+                            _ => {}
+                        }
+                    }
+                    false
+                })
+            };
+            let defaults = tys.iter().filter(|p| top_eq(p)).count();
             (tys.len() - defaults, tys.len())
         } else {
             (0, 0)
@@ -1959,6 +1989,11 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
             if toks[k].0 == 1 && b[toks[k].1] == b';' {
                 in_use = false;
             }
+            // (a path's first segment in a `use`: after `use`, `{` or `,`, and followed by `::`)
+            let sym = |q: usize, c: u8| q < toks.len() && toks[q].0 == 1 && b[toks[q].1] == c;
+            if toks[k].0 == 0 && w != "use" && k > 0 && (word(k - 1) == "use" || sym(k - 1, b'{') || sym(k - 1, b',')) && sym(k + 1, b':') && sym(k + 2, b':') {
+                used.insert(w);
+            }
             continue;
         }
         if k > 0 && word(k - 1) == "trait" {
@@ -1976,18 +2011,42 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
         // (past its outer attributes, `#[deprecated] #[cfg(not(FALSE))] use std::fs;`: a false `cfg` is stripped
         // before, an allow or an expect of the lint leaves it alone)
         let mut t = text.trim_start();
-        while t.starts_with("#[") {
-            let mut d = 0;
-            let Some(e) = t.char_indices().find(|&(_, c)| {
-                d += (c == '[') as i32 - (c == ']') as i32;
-                c == ']' && d == 0
-            }) else {
-                break;
-            };
-            t = t[e.0 + 1..].trim_start();
+        let mut lint_off = false;
+        if t.starts_with('#') {
+            let tb = text.as_bytes();
+            let tt = crate::lexer::tokenize(tb);
+            let ts = |q: usize, c: u8| q < tt.len() && tt[q].0 == 1 && tb[tt[q].1] == c;
+            let tw = |q: usize| if q < tt.len() && tt[q].0 == 0 { &text[tt[q].1..tt[q].2] } else { "" };
+            let mut q = 0;
+            while ts(q, b'#') && ts(q + 1, b'[') {
+                // (`#[allow(a, unused_imports)]` / `#[expect(unused)]`: the lint or its group)
+                if matches!(tw(q + 2), "allow" | "expect") && ts(q + 3, b'(') {
+                    let mut r = q + 4;
+                    while r < tt.len() && !ts(r, b')') {
+                        lint_off |= matches!(tw(r), "unused_imports" | "unused");
+                        r += 1;
+                    }
+                }
+                let (mut d, mut r) = (0i32, q + 1);
+                while r < tt.len() {
+                    if ts(r, b'[') || ts(r, b'(') {
+                        d += 1;
+                    } else if ts(r, b']') || ts(r, b')') {
+                        d -= 1;
+                        if d == 0 {
+                            break;
+                        }
+                    }
+                    r += 1;
+                }
+                if r >= tt.len() {
+                    break;
+                }
+                t = text[tt[r].2..].trim_start();
+                q = r + 1;
+            }
         }
-        let attrs: String = text[..text.len() - t.len()].chars().filter(|c| !c.is_whitespace()).collect();
-        if !t.starts_with("use ") || text.contains("allow(unused") || attrs.contains("expect(unused") || text.contains('*') {
+        if !t.starts_with("use ") || lint_off || text.contains('*') {
             continue;
         }
         let body = t["use ".len()..].trim_end().trim_end_matches(';').trim();
@@ -2019,11 +2078,17 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
     None
 }
 
+thread_local! {
+    /// (first_unreachable: the program has a module named `process`, so `process::exit` may not be std's)
+    static USER_PROCESS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// `#![deny(unreachable_code)]`: the first statement of a block after one that always diverges (`return`,
 /// `break`, `continue`, `panic!` and its kin, a `loop` with no `break`), and whether it is a statement or the
 /// block's value
-fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'static str)> {
+fn first_unreachable(b: &crate::parse::Block, user_process: bool) -> Option<(crate::parse::Pos, &'static str)> {
     use crate::parse::{Expr, Stmt};
+    USER_PROCESS.with(|c| c.set(user_process));
     fn diverges(e: &Expr) -> bool {
         match e {
             Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
@@ -2033,7 +2098,7 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
             // (an operand or an argument that diverges: evaluated first, the rest never runs; not the right of `&&` /
             // `||`, which may not run)
             Expr::Binary(op, l, r, _) => diverges(l) || (!matches!(op.as_str(), "&&" | "||") && diverges(r)),
-            Expr::Call(f, args) => diverges(f) || args.iter().any(diverges) || matches!(&**f, Expr::Path(None, p) if p.segs.len() >= 2 && p.segs[p.segs.len() - 2].name == "process" && matches!(p.segs[p.segs.len() - 1].name.as_str(), "exit" | "abort")),
+            Expr::Call(f, args) => diverges(f) || args.iter().any(diverges) || (matches!(&**f, Expr::Path(None, p) if p.segs.len() >= 2 && p.segs[p.segs.len() - 2].name == "process" && matches!(p.segs[p.segs.len() - 1].name.as_str(), "exit" | "abort")) && !USER_PROCESS.with(|c| c.get())),
             Expr::MethodCall(r, _, _, args, _) => diverges(r) || args.iter().any(diverges),
             // (both branches; a `match` with no arm (on an empty enum) or whose every arm diverges)
             Expr::If(c, t, Some(els)) => diverges(c) || (block_diverges(t) && diverges(els)),
@@ -5178,15 +5243,61 @@ fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>
         }
         // (`#[repr(transparent)] union U`: rustc points at the union)
         if name == "repr" && args.contains(&"transparent") {
-            let rest = &src[to..src.len().min(to + 256)];
-            let rt = lexer::tokenize(rest.as_bytes());
-            let rw = |q: usize| if rt[q].0 == 0 { &rest[rt[q].1..rt[q].2] } else { "" };
-            let mut q = 0;
-            while q < rt.len() && (rw(q) == "pub" || rt[q].0 != 0) {
-                q += 1;
+            // (this attribute's `]`)
+            let (mut e, mut d) = (j + 1, 0i32);
+            while e < toks.len() {
+                if sym(e, "(") || sym(e, "[") {
+                    d += 1;
+                } else if sym(e, ")") {
+                    d -= 1;
+                } else if sym(e, "]") {
+                    if d == 0 {
+                        break;
+                    }
+                    d -= 1;
+                }
+                e += 1;
             }
-            if q < rt.len() && rw(q) == "union" && !feats.get_or_insert_with(|| enabled_features(src)).iter().any(|f| f == "transparent_unions") {
-                let i = to + rt[q].1;
+            let start = if e < toks.len() { from + toks[e].2 } else { to };
+            let mut end = src.len().min(start + 512);
+            while !src.is_char_boundary(end) {
+                end -= 1;
+            }
+            let rest = &src[start..end];
+            let rb = rest.as_bytes();
+            let rt = lexer::tokenize(rb);
+            let rw = |q: usize| if q < rt.len() && rt[q].0 == 0 { &rest[rt[q].1..rt[q].2] } else { "" };
+            let rs = |q: usize, c: u8| q < rt.len() && rt[q].0 == 1 && rb[rt[q].1] == c;
+            // (the group that opens at q: the index after its close)
+            let skip_group = |q: usize| -> usize {
+                let mut d = 0i32;
+                for k in q..rt.len() {
+                    if rs(k, b'(') || rs(k, b'[') {
+                        d += 1;
+                    } else if rs(k, b')') || rs(k, b']') {
+                        d -= 1;
+                        if d == 0 {
+                            return k + 1;
+                        }
+                    }
+                }
+                rt.len()
+            };
+            let mut q = 0;
+            loop {
+                if rs(q, b'#') && rs(q + 1, b'[') {
+                    q = skip_group(q + 1);
+                } else if rw(q) == "pub" {
+                    q += 1;
+                    if rs(q, b'(') {
+                        q = skip_group(q);
+                    }
+                } else {
+                    break;
+                }
+            }
+            if rw(q) == "union" && !feats.get_or_insert_with(|| enabled_features(src)).iter().any(|f| f == "transparent_unions") {
+                let i = start + rt[q].1;
                 let line = src[..i].matches('\n').count() + 1;
                 return Some(format!("{line}:{}: transparent unions are unstable (E0658)", i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1));
             }
@@ -5255,11 +5366,12 @@ fn gated_abi(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>)
         if toks[k].0 != 2 || toks[k - 1].0 != 0 || tx(k - 1) != "extern" {
             continue;
         }
-        let (feat, how) = match tx(k) {
-            "\"rust-cold\"" => ("rust_cold_cc", "is experimental and subject to change"),
-            "\"tail\"" => ("rust_tail_cc", "is experimental and subject to change"),
-            "\"rust-preserve-none\"" => ("rust_preserve_none_cc", "is experimental and subject to change"),
-            "\"llvm-intrinsic\"" => ("link_llvm_intrinsics", "is an implementation detail and perma-unstable"),
+        let Some(abi) = str_lit_value(tx(k)) else { continue };
+        let (feat, how) = match abi.as_str() {
+            "rust-cold" => ("rust_cold_cc", "is experimental and subject to change"),
+            "tail" => ("rust_tail_cc", "is experimental and subject to change"),
+            "rust-preserve-none" => ("rust_preserve_none_cc", "is experimental and subject to change"),
+            "llvm-intrinsic" => ("link_llvm_intrinsics", "is an implementation detail and perma-unstable"),
             _ => continue,
         };
         if feats.get_or_insert_with(|| enabled_features(src)).iter().any(|f| f == feat) {
@@ -5268,7 +5380,7 @@ fn gated_abi(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>)
         let i = from + toks[k].1;
         let line = src[..i].matches('\n').count() + 1;
         let col = i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1;
-        return Some(format!("{line}:{col}: the extern {} ABI {how} (E0658)", tx(k)));
+        return Some(format!("{line}:{col}: the extern \"{abi}\" ABI {how} (E0658)"));
     }
     None
 }
