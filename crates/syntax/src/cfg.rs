@@ -635,8 +635,15 @@ fn expr_macro(n: &[u8]) -> bool {
 
 /// A string literal as an attribute takes it: `"a"`, `r"a"`, `r#"a"#` (not `b"a"`)
 pub fn str_lit(v: &str) -> bool {
-    let r = v.strip_prefix('r').map(|r| r.trim_start_matches('#')).unwrap_or(v);
-    r.starts_with('"') && v.ends_with('"') && r.len() >= 2
+    match v.strip_prefix('r') {
+        // (a raw string ends with its quote and as many `#` as it opens with: `r#"reason"#`)
+        Some(r) => {
+            let h = r.len() - r.trim_start_matches('#').len();
+            let body = &r[h..];
+            body.len() >= 2 + h && body.starts_with('"') && body.ends_with(&format!("\"{}", "#".repeat(h)))
+        }
+        None => v.len() >= 2 && v.starts_with('"') && v.ends_with('"'),
+    }
 }
 
 /// The entries of an attribute's list: split at the commas outside brackets and string literals, trimmed, without
@@ -742,10 +749,58 @@ pub fn malformed_cfg(src: &str) -> Option<String> {
     }
     let b = src.as_bytes();
     let mut at = 0;
+    // (how far the source is read as code, and the block comments open there: a candidate in a comment, a string or
+    // a char literal is skipped, `/* #[cfg(not())] */`)
+    let (mut cur, mut depth) = (0usize, 0u32);
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut in_code = |i: usize| -> bool {
+        while cur < i {
+            if depth > 0 {
+                if b[cur..].starts_with(b"/*") {
+                    depth += 1;
+                    cur += 2;
+                } else if b[cur..].starts_with(b"*/") {
+                    depth -= 1;
+                    cur += 2;
+                } else {
+                    cur += 1;
+                }
+                continue;
+            }
+            match b[cur] {
+                b'/' if b.get(cur + 1) == Some(&b'/') => cur += b[cur..].iter().position(|&c| c == b'\n').unwrap_or(b.len() - cur),
+                b'/' if b.get(cur + 1) == Some(&b'*') => {
+                    depth = 1;
+                    cur += 2;
+                }
+                b'"' => {
+                    cur += 1;
+                    while cur < b.len() && b[cur] != b'"' {
+                        cur += if b[cur] == b'\\' { 2 } else { 1 };
+                    }
+                    cur += 1;
+                }
+                // (a raw string, `r#".."#` / `br".."`, not an identifier ending in r)
+                b'r' if !(cur > 0 && ident(b[cur - 1]) && b[cur - 1] != b'b') && {
+                    let h = b[cur + 1..].iter().take_while(|&&c| c == b'#').count();
+                    b.get(cur + 1 + h) == Some(&b'"')
+                } => {
+                    let h = b[cur + 1..].iter().take_while(|&&c| c == b'#').count();
+                    let close = [b"\"".as_slice(), &vec![b'#'; h]].concat();
+                    let from = cur + 2 + h;
+                    cur = b[from..].windows(close.len()).position(|w| w == close.as_slice()).map_or(b.len(), |n| from + n + close.len());
+                }
+                // (a char literal, not a lifetime)
+                b'\'' if b.get(cur + 1) == Some(&b'\\') => cur += 2 + b[cur + 2..].iter().position(|&c| c == b'\'').map_or(b.len() - cur - 2, |n| n + 1),
+                b'\'' if b.get(cur + 2) == Some(&b'\'') => cur += 3,
+                _ => cur += 1,
+            }
+        }
+        depth == 0 && cur == i
+    };
     while let Some(f) = src[at..].find("cfg") {
         let i = at + f;
         at = i + 3;
-        let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
         if i > 0 && ident(b[i - 1]) {
             continue;
         }
@@ -761,9 +816,9 @@ pub fn malformed_cfg(src: &str) -> Option<String> {
         if b.get(open) != Some(&b'(') {
             continue;
         }
-        let line_start = src[..i].rfind('\n').map_or(0, |n| n + 1);
-        let pre = &src[line_start..i];
-        if pre.contains("//") || pre.bytes().filter(|&c| c == b'"').count() % 2 == 1 {
+        // (where the attribute or the macro starts)
+        let start = if macro_call { i } else { src[..i].rfind('#').unwrap_or(i) };
+        if !in_code(start) {
             continue;
         }
         // (the matching `)`, past strings)
@@ -791,7 +846,8 @@ pub fn malformed_cfg(src: &str) -> Option<String> {
         let checked = match (name, entries.first()) {
             ("cfg_attr", Some(p)) => cfg_check(p),
             ("cfg_attr", None) => Err(String::new()),
-            _ if entries.len() == 1 => cfg_check(inner),
+            // (one pattern, with or without a trailing comma: `cfg!(unix,)`)
+            _ if entries.len() == 1 => cfg_check(entries[0]),
             _ => Err(String::new()),
         };
         if let Err(own) = checked {

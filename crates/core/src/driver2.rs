@@ -3565,13 +3565,27 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
     // (the unsafe attributes, which `#[unsafe(..)]` may wrap; `naked` needs it in every edition, the others in 2024, or
     // where `unsafe_attr_outside_unsafe` is denied)
     const UNSAFE: &[&str] = &["no_mangle", "export_name", "link_section", "naked", "ffi_pure", "ffi_const", "force_target_feature"];
-    // (`#![crate_type = "proc-macro"]`, not a comment that names the crate type)
-    let proc_macro_crate = head.match_indices("crate_type").any(|(i, _)| head[i + 10..].trim_start().strip_prefix('=').is_some_and(|r| r.trim_start().starts_with("\"proc-macro\"")));
+    // (the file's inner attributes, in order: not a comment that names one)
+    let inner: Vec<(&str, &str)> = head.split('\n').filter(|l| l.trim_start().starts_with("#![")).flat_map(|l| leading(l).into_iter().map(|(_, n, inp)| (n, inp))).collect();
+    // (`#![crate_type = "proc-macro"]`)
+    let proc_macro_crate = inner.iter().any(|&(n, inp)| n == "crate_type" && inp.trim().strip_prefix('=').is_some_and(|v| v.trim().starts_with("\"proc-macro\"")));
+    // (a lint's level at the crate: the last of its inner attributes that names it, or a group of it)
+    let crate_level = |names: &[&str]| -> Option<&str> {
+        let mut level = None;
+        for &(n, inp) in &inner {
+            if matches!(n, "deny" | "forbid" | "warn" | "allow" | "expect") {
+                let list = inp.trim().strip_prefix('(').and_then(|r| r.strip_suffix(')')).unwrap_or("");
+                if attr_entries(list).iter().any(|e| names.contains(&e.trim())) {
+                    level = Some(n);
+                }
+            }
+        }
+        level
+    };
     // (before 2024 a lint: denied at the crate, and not allowed again on an item, `#[allow(unsafe_attr_outside_unsafe)]
     // mod generated { .. }`)
     let lowered = || ["allow(", "expect("].iter().any(|l| ["unsafe_attr_outside_unsafe", "rust_2024_compatibility"].iter().any(|n| src0.contains(&format!("{l}{n}"))));
-    let outside_unsafe_denied = edition >= 2024
-        || (head.contains("deny(") || head.contains("forbid(")) && (head.contains("unsafe_attr_outside_unsafe") || head.contains("rust_2024_compatibility")) && !lowered();
+    let outside_unsafe_denied = edition >= 2024 || matches!(crate_level(&["unsafe_attr_outside_unsafe", "rust_2024_compatibility"]), Some("deny" | "forbid")) && !lowered();
     for it in items {
         let text = &split[it.start..it.end];
         if !text.trim_start().starts_with("#[") {
