@@ -96,3 +96,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-23 | [Region (lifetime) checking, part 16: deref coercions, block values and guards that outlive a block's locals, `&mut` arguments, and temporaries' places](2026-11-23-04-region-check-16.md) |
 | 2026-11-23 | [Test time: where it goes, what was cut, and a nextest-like `zurgo test`](2026-11-23-05-test-time.md) |
 | 2026-11-23 | [Region (lifetime) checking, part 17: raw pointers, `DerefMut` receivers, scrutinee and loop temporaries, and false errors of indexing, dispatch and turbofish inference](2026-11-23-06-region-check-17.md) |
+| 2026-11-23 | [Region (lifetime) checking, part 18: let extension through constructors, closure capture reborrows, trait objects' drops, `&mut` moved by value, and a scrutinee's drop per arm](2026-11-23-07-region-check-18.md) |
