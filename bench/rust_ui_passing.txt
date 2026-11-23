@@ -123,6 +123,7 @@ run-pass	associated-consts/assoc-const-in-static-array-size.rs
 check-pass	associated-consts/assoc-const-through-assoc-type-path.rs
 run-pass	associated-consts/associated-const-access.rs
 compile-fail	associated-consts/associated-const-array-len.rs
+compile-fail	associated-consts/associated-const-dead-code.rs
 compile-fail	associated-consts/associated-const-in-enum-discriminant.rs
 run-pass	associated-consts/associated-const-in-global-const.rs
 compile-fail	associated-consts/associated-const-in-trait.rs
@@ -2025,6 +2026,7 @@ compile-fail	derives/clone-copy/derive-copy-clone-non-copy-field-diagnostic.rs
 compile-fail	derives/clone-copy/derives-span-Clone.rs
 compile-fail	derives/clone-copy/deriving-copyclone.rs
 run-pass	derives/clone-copy/misbehaving-clone-impl.rs
+compile-fail	derives/clone-debug-dead-code.rs
 check-pass	derives/clone-include-gat-hrtb.rs
 run-pass	derives/debug/derive-Debug-enum-variants.rs
 run-pass	derives/debug/derive-Debug-use-ufcs-struct.rs
@@ -3720,7 +3722,9 @@ check-pass	lint/dangling-pointers-from-locals.rs
 compile-fail	lint/dangling-pointers-from-temporaries/cstring-as-ptr.rs
 compile-fail	lint/dangling-pointers-from-temporaries/example-from-issue123613.rs
 compile-fail	lint/dangling-pointers-from-temporaries/ext.rs
+compile-fail	lint/dead-code-pub-in-binary/allow-lint.rs
 compile-fail	lint/dead-code-pub-in-binary/basic.rs
+compile-fail	lint/dead-code-pub-in-binary/interaction-allow-unused-pub.rs
 check-pass	lint/dead-code-pub-in-binary/interaction-deny-dead-code-only.rs
 compile-fail	lint/dead-code-pub-in-binary/library.rs
 compile-fail	lint/dead-code-pub-in-binary/no-mangle-items.rs
@@ -3743,6 +3747,7 @@ check-pass	lint/dead-code/expect-dead-code-154324.rs
 check-pass	lint/dead-code/expect-dead-code-field-read-in-dead-fn.rs
 check-pass	lint/dead-code/expect-dead-code-through-non-expect-item.rs
 check-pass	lint/dead-code/expect-on-assoc-fn-issue-148861.rs
+compile-fail	lint/dead-code/impl-trait.rs
 compile-fail	lint/dead-code/in-closure.rs
 check-pass	lint/dead-code/inferred-generic-arg.rs
 compile-fail	lint/dead-code/issue-41883.rs
@@ -3752,6 +3757,8 @@ check-pass	lint/dead-code/issue-85071-2.rs
 check-pass	lint/dead-code/issue-85071.rs
 check-pass	lint/dead-code/issue-85255.rs
 run-pass	lint/dead-code/leading-underscore.rs
+compile-fail	lint/dead-code/lint-dead-code-4.rs
+compile-fail	lint/dead-code/lint-dead-code-5.rs
 compile-fail	lint/dead-code/lint-dead-code-6.rs
 compile-fail	lint/dead-code/newline-span.rs
 check-pass	lint/dead-code/no-dead-code-for-static-trait-impl.rs
@@ -3760,13 +3767,18 @@ check-pass	lint/dead-code/offset-of-correct-param-env.rs
 check-pass	lint/dead-code/self-assign.rs
 check-pass	lint/dead-code/struct-used-as-pattern-issue-56750.rs
 check-pass	lint/dead-code/trait-only-used-as-type-bound.rs
+compile-fail	lint/dead-code/tuple-struct-field.rs
 check-pass	lint/dead-code/type-alias-used-in-impl-59333.rs
+compile-fail	lint/dead-code/type-alias.rs
 check-pass	lint/dead-code/type-in-foreign.rs
 check-pass	lint/dead-code/type-in-transparent.rs
 compile-fail	lint/dead-code/unused-adt-impl-pub-trait-with-assoc-const.rs
 compile-fail	lint/dead-code/unused-enum.rs
+compile-fail	lint/dead-code/unused-struct-derive-default.rs
+compile-fail	lint/dead-code/unused-struct-variant.rs
 compile-fail	lint/dead-code/unused-trait-with-assoc-ty.rs
 build-pass	lint/dead-code/unused-variant-pub.rs
+compile-fail	lint/dead-code/unused-variant.rs
 compile-fail	lint/dead-code/with-core-crate.rs
 run-pass	lint/dead-code/with-impl.rs
 compile-fail	lint/deny-overflowing-literals.rs
@@ -7709,9 +7721,11 @@ run-pass	union/union-drop-assign.rs
 run-pass	union/union-drop.rs
 compile-fail	union/union-empty.rs
 build-pass	union/union-field-access-error-65462.rs
+compile-fail	union/union-fields-1.rs
 compile-fail	union/union-fields-2.rs
 compile-fail	union/union-generic.rs
 run-pass	union/union-inherent-method.rs
+compile-fail	union/union-lint-dead-code.rs
 run-pass	union/union-macro.rs
 run-pass	union/union-manuallydrop-rpass.rs
 compile-fail	union/union-move.rs
