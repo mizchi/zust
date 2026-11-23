@@ -294,3 +294,13 @@ fn review68_supertraits_equations_defaults() {
         assert!(s.check(ok).is_empty(), "{:?}", s.check(ok));
     }
 }
+
+/// A struct field or an impl's self type naming a struct of the program's with a bounded parameter: the bound is held
+/// by the enclosing item's own bound, a where clause, a supertrait, a bound with arguments, or an impl for a concrete
+/// argument, and then nothing is reported
+#[test]
+fn wf_bounds_held_by_bounds_where_clauses_and_supertraits() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let src = "trait Tr {}\ntrait Sub: Tr {}\nstruct S<T: Tr>(T);\nstruct A<K: Tr> {\n    s: S<K>,\n}\nstruct B<K>\nwhere\n    K: Tr,\n{\n    s: S<K>,\n}\nstruct C<K: Sub> {\n    s: S<K>,\n}\nstruct D<K: Tr + Clone> {\n    s: Vec<S<K>>,\n}\nimpl<K: Tr> S<K> {\n    fn get(&self) -> &K {\n        &self.0\n    }\n}\nimpl Tr for u8 {}\nstruct E {\n    s: S<u8>,\n}\ntrait G<X> {}\nstruct H<T: G<u8>>(T);\nstruct I<K: G<u8>> {\n    h: H<K>,\n}\nimpl<K> Clone for A<K>\nwhere\n    K: Tr + Clone,\n{\n    fn clone(&self) -> Self {\n        A { s: S(self.s.get().clone()) }\n    }\n}\nfn main() {}\n";
+    assert!(s.check(src).is_empty(), "{:?}", s.check(src));
+}

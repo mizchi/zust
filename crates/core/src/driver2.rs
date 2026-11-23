@@ -1474,6 +1474,11 @@ impl Session2 {
         }
         prog.opt = self.opts.opt;
         resolve_opaque(&mut prog, &src, &items)?;
+        // (a field or an impl's self type that names a struct of the program's whose parameter's bound does not hold:
+        // `struct Hoge<K> { s: S<K> }` with `struct S<T: Tr>`)
+        if let Some(e) = wf_error(&prog, &sums, &src, &items, user) {
+            return Err(e);
+        }
         // (a derive whose field has not the trait: `#[derive(Hash)] struct S { x: Error }`)
         if !prog.derived.is_empty() {
             if let Some(e) = derive_field_error(&prog, &src, &items[..user]) {
@@ -4309,6 +4314,121 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         }
     }
     std::mem::take(&mut g.pending)
+}
+
+/// Well-formedness of the program's struct fields and impl headers: a type that names a struct of the program's whose
+/// parameter is bounded (`struct S<T: Tr>`) needs the bound of what it gives the parameter (E0277). A parameter of
+/// the enclosing item holds it when its own bounds give it, or when the item names the trait anywhere (a where clause
+/// zustc does not read, a bound with arguments); a concrete type when bound_holds says so (the program's traits, and
+/// the prelude's for the types `implements` judges exactly)
+fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> Option<String> {
+    let user_sm = |ii: usize| ii < user;
+    // (the bounded parameters of the program's structs named in t, with what t gives them)
+    fn needs(prog: &Program, sums: &[Summary], user: usize, t: Ty, out: &mut Vec<(Ty, String)>, depth: u32) {
+        if depth > 16 {
+            return;
+        }
+        match t {
+            Ty::Struct(s) => {
+                let sd = &prog.structs[s as usize];
+                if let Some(b) = sd.base {
+                    if let Some(sm) = prog.struct_item.get(b as usize).map(|&bi| bi as usize).filter(|&bi| bi < user).and_then(|bi| sums.get(bi)) {
+                        for (pn, trs) in &sm.adt_bounds {
+                            let Some(&a) = sm.adt_generics.iter().position(|g| g == pn).and_then(|k| sd.args.get(k)) else { continue };
+                            out.extend(trs.iter().filter(|tr| !tr.starts_with(crate::types::CONST_GENERIC)).map(|tr| (a, tr.clone())));
+                        }
+                    }
+                    for &a in &sd.args {
+                        needs(prog, sums, user, a, out, depth + 1);
+                    }
+                }
+            }
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => needs(prog, sums, user, *i, out, depth + 1),
+            Ty::Fn(f) => {
+                for &p in f.params.iter().chain([&f.ret]) {
+                    needs(prog, sums, user, p, out, depth + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    let word = |text: &str, w: &str| text.match_indices(w).any(|(i, _)| {
+        let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+        ok(text[..i].chars().next_back()) && ok(text[i + w.len()..].chars().next())
+    });
+    // (the first need that fails, with the enclosing item's parameters (names, bounds) and its text)
+    let failing = |ns: &[(Ty, String)], gens: &[String], bounds: &dyn Fn(&str) -> Vec<String>, text: &str| -> Option<String> {
+        for (a, tr) in ns {
+            match *a {
+                Ty::Param(i) => {
+                    let Some(n) = gens.get(i as usize) else { continue };
+                    let held = bounds(n).iter().any(|b| b == tr || prog.bound_implies(b, &[tr.as_str()], true, 0)) || word(text, tr);
+                    if !held {
+                        return Some(format!("the trait bound `{n}: {tr}` is not satisfied (E0277)"));
+                    }
+                }
+                a if !prog.has_param(a) => {
+                    let own = sums[..user.min(sums.len())].iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str()));
+                    let judged = a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char | Ty::Unit) || matches!(a, Ty::Struct(x) if prog.structs[x as usize].base.is_none() && prog.structs[x as usize].generics.is_empty());
+                    let prelude = !own && judged && sums.iter().any(|s| s.trait_decl.as_deref() == Some(tr.as_str()));
+                    if (own || prelude) && !prog.bound_holds(sums, user, a, tr, 0) {
+                        let n = prog.tn(a).replace("__u_", "");
+                        // (std's message for Iterator: `u8` is not an iterator)
+                        return Some(if tr == "Iterator" { format!("`{n}` is not an iterator (E0277)") } else { format!("the trait bound `{n}: {tr}` is not satisfied (E0277)") });
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    };
+    // (the fields of the program's structs and enums)
+    let mut sids: Vec<u32> = (0..prog.structs.len() as u32).filter(|&s| prog.structs[s as usize].base.is_none() && prog.struct_item.get(s as usize).is_some_and(|&ii| user_sm(ii as usize))).collect();
+    sids.sort_by_key(|&s| prog.struct_item[s as usize]);
+    for sid in sids {
+        let sd = &prog.structs[sid as usize];
+        if prog.is_closure(sid) || prog.is_tuple(sid) {
+            continue;
+        }
+        let ii = prog.struct_item[sid as usize] as usize;
+        let (Some(it), Some(sm)) = (items.get(ii), sums.get(ii)) else { continue };
+        let fields: Vec<&[(String, Ty, u32)]> = if sd.is_enum { sd.variants.iter().map(|v| v.fields.as_slice()).collect() } else { vec![sd.fields.as_slice()] };
+        // (comments blanked: a trait's name in one is no bound)
+        let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
+        let bounds = |n: &str| sm.adt_bounds.iter().find(|(p, _)| p == n).map(|(_, b)| b.clone()).unwrap_or_default();
+        for (vi, fs) in fields.iter().enumerate() {
+            for (fi, (_, ft, _)) in fs.iter().enumerate() {
+                let mut ns = vec![];
+                needs(prog, sums, user, *ft, &mut ns, 0);
+                if let Some(m) = failing(&ns, &sm.adt_generics, &bounds, &text) {
+                    let (l, c) = field_pos(&text, sd.is_enum, vi, fi).unwrap_or((0, 0));
+                    return Some(format!("{}:{}: {m}", it.line + l, c + 1));
+                }
+            }
+        }
+    }
+    // (the self types of the program's impls)
+    for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
+        // (the impl's header once: an impl of members is split into its header and them)
+        let Some(st) = &sm.impl_self_ty else { continue };
+        if !matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) {
+            continue;
+        }
+        let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+        let Ok(t) = prog.resolve_g(st, &gn) else { continue };
+        let mut ns = vec![];
+        needs(prog, sums, user, t, &mut ns, 0);
+        if ns.is_empty() {
+            continue;
+        }
+        let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
+        let bounds = |n: &str| sm.impl_generics.iter().find(|g| g.0 == n).map(|g| g.1.clone()).unwrap_or_default();
+        let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
+        if let Some(m) = failing(&ns, &gens, &bounds, &text) {
+            return Some(format!("{}:1: {m}", items[ii].line));
+        }
+    }
+    None
 }
 
 /// A derive of the program's whose field does not have the derived trait: `line:col: ..` of the first such field

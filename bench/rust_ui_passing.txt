@@ -3455,6 +3455,7 @@ compile-fail	intrinsics/incorrect-transmute.rs
 check-pass	intrinsics/issue-84297-reifying-copy.rs
 compile-fail	intrinsics/unchecked_math_unstable.rs
 check-pass	iterators/array.rs
+compile-fail	iterators/bound.rs
 run-pass	iterators/bytes-iterator-clone-12677.rs
 compile-fail	iterators/collect-into-array.rs
 compile-fail	iterators/collect-into-slice.rs
@@ -7084,6 +7085,7 @@ compile-fail	traits/bound/not-on-bare-trait.rs
 compile-fail	traits/bound/not-on-struct.rs
 run-pass	traits/bound/on-structs-and-enums-rpass.rs
 compile-fail	traits/bound/on-structs-and-enums-static.rs
+compile-fail	traits/bound/on-structs-and-enums.rs
 check-pass	traits/bound/recursion.rs
 check-pass	traits/bound/recursive-trait-bound-on-type-param.rs
 compile-fail	traits/bound/unknown-assoc-with-const-arg.rs
@@ -7187,6 +7189,7 @@ compile-fail	traits/issue-105231.rs
 compile-fail	traits/issue-106072.rs
 run-pass	traits/issue-15155.rs
 run-pass	traits/issue-18412.rs
+compile-fail	traits/issue-21837.rs
 run-pass	traits/issue-22019.rs
 run-pass	traits/issue-22110.rs
 compile-fail	traits/issue-22384.rs
@@ -7240,6 +7243,7 @@ check-pass	traits/nll-ice-custom-type-ops-53568.rs
 compile-fail	traits/no-fallback-multiple-impls.rs
 check-pass	traits/non_lifetime_binders/disqualifying-object-candidates.rs
 check-pass	traits/normalize/assoc-type-hrtb-normalization-30472.rs
+compile-fail	traits/normalize/copy-impl-cannot-normalize.rs
 run-pass	traits/normalize/normalize-associated-type-in-where-clause.rs
 compile-fail	traits/not-suggest-non-existing-fully-qualified-path.rs
 compile-fail	traits/object-does-not-impl-trait.rs
@@ -7820,6 +7824,7 @@ compile-fail	wf/ice-hir-wf-issue-135341.rs
 compile-fail	wf/ice-wf-missing-span-in-error-130012.rs
 compile-fail	wf/issue-110157.rs
 compile-fail	wf/issue-95665.rs
+compile-fail	wf/issue-96810.rs
 compile-fail	wf/let-pat-inferred-non-wf.rs
 compile-fail	wf/range-expr-root-of-constant-issue-40749.rs
 check-pass	wf/unnormalized-projection-guides-inference.rs
@@ -7828,6 +7833,8 @@ compile-fail	wf/wf-associated-const.rs
 check-pass	wf/wf-dyn-in-hrtb-bound-issue-157122.rs
 compile-fail	wf/wf-fn-def-check-sig-2.rs
 compile-fail	wf/wf-impl-associated-type-region.rs
+compile-fail	wf/wf-in-fn-type-arg.rs
+compile-fail	wf/wf-in-fn-type-ret.rs
 compile-fail	wf/wf-in-fn-type-static.rs
 compile-fail	wf/wf-in-obj-type-static.rs
 compile-fail	wf/wf-static-method.rs
