@@ -240,6 +240,13 @@ pub struct Bk {
     /// The locals bound (once, never assigned again) from what holds such a parameter's reference (`let y = x;`):
     /// they hold it too (check fills it)
     pub param_derived: std::cell::RefCell<Vec<u32>>,
+    /// unused_mut is denied: a `let mut` local that nothing needs mutable is an error (check)
+    pub lint_mut: bool,
+    /// The `mut` locals a closure that holds them by value mutates (`move || x += 1`): needed mutable
+    pub mut_used: Vec<u32>,
+    /// The `mut` locals declared without a value and assigned whole (`let mut x; x = 1;`), whose second assignment the
+    /// dataflow looks for; and those it found (check)
+    pub mut_flow: std::cell::RefCell<(Vec<u32>, Vec<u32>)>,
     /// Locals that own a value whose type implements `Drop` (a user's), and the place of that value in the local,
     /// through boxes and fields (`Box<Scribble>`: `*`; `Wrapper(Scribble)`: `.0`): its `drop` may use what a `&mut`
     /// field points to, so a borrow through it must not outlive the local (E0713)
@@ -881,6 +888,46 @@ impl Bk {
         // are found here
         let mut errs: Vec<BkError> = vec![];
         let (mut need_moves, mut need_loans, mut need_inited) = (false, false, false);
+        // (unused_mut: the `mut` locals something needs mutable: a `&mut` of what they own, a write of a part, `+=`,
+        // a second assignment of all of it, a closure holding them by value that mutates them)
+        let mut used: Vec<u32> = if self.lint_mut { self.mut_used.clone() } else { vec![] };
+        let mut whole: Vec<u32> = vec![];
+        let mut bound: Vec<u32> = vec![];
+        if self.lint_mut {
+            for (_, e) in &self.evs {
+                match e {
+                    Ev::Acc(p, a, _) if self.locals[p.local as usize].mutable == Some(true) && p.owned_len() == p.proj.len() => match a {
+                        Acc::Borrow(l) if self.loans[*l as usize].mutable => used.push(p.local),
+                        Acc::Modify => used.push(p.local),
+                        Acc::Write if !p.proj.is_empty() => used.push(p.local),
+                        Acc::Write => whole.push(p.local),
+                        _ => {}
+                    },
+                    Ev::Bind(l, true) => bound.push(*l),
+                    _ => {}
+                }
+            }
+            used.sort_unstable();
+            used.dedup();
+            // (assigned whole after a `let` that gave it a value: a second assignment; declared without one: the
+            // dataflow decides)
+            let mut flow: Vec<u32> = vec![];
+            for l in whole {
+                if used.binary_search(&l).is_ok() {
+                    continue;
+                }
+                if bound.contains(&l) {
+                    if let Err(i) = used.binary_search(&l) {
+                        used.insert(i, l);
+                    }
+                } else if !flow.contains(&l) {
+                    flow.push(l);
+                }
+            }
+            flow.sort_unstable();
+            need_inited |= !flow.is_empty();
+            *self.mut_flow.borrow_mut() = (flow, vec![]);
+        }
         let mut by_local: HashMap<u32, Vec<u32>> = HashMap::default();
         if self.level >= 2 {
             for (i, lo) in self.loans.iter().enumerate() {
@@ -935,6 +982,7 @@ impl Bk {
             }
         }
         if !(need_moves || need_loans || need_inited) {
+            self.unused_mut(&used, &mut errs);
             // (the borrows of a local not `mut` reported as one error at its declaration: rustc reports them after the rest)
         errs.sort_by_key(|e| (e.msg.contains("is not declared as mutable") && self.locals.iter().any(|l| l.decl.line != 0 && l.decl == e.sp), e.sp.line, e.sp.col));
             return errs.into_iter().next();
@@ -1161,9 +1209,27 @@ impl Bk {
                 }
             }
         }
+        if self.lint_mut {
+            used.extend(self.mut_flow.borrow().1.iter().copied());
+            used.sort_unstable();
+            self.unused_mut(&used, &mut errs);
+        }
         // (the borrows of a local not `mut` reported as one error at its declaration: rustc reports them after the rest)
         errs.sort_by_key(|e| (e.msg.contains("is not declared as mutable") && self.locals.iter().any(|l| l.decl.line != 0 && l.decl == e.sp), e.sp.line, e.sp.col));
         errs.into_iter().next()
+    }
+
+    /// unused_mut: the `let mut` locals of the program's (declared where it is known, not a closure's capture, not a
+    /// name the lowering made) that nothing needs mutable (used, sorted)
+    fn unused_mut(&self, used: &[u32], errs: &mut Vec<BkError>) {
+        if !self.lint_mut {
+            return;
+        }
+        for (i, lo) in self.locals.iter().enumerate() {
+            if lo.mutable == Some(true) && lo.decl.line != 0 && !lo.via_ref && !lo.name.starts_with("__") && lo.name != TEMP && !self.cap_vals.contains(&(i as u32)) && used.binary_search(&(i as u32)).is_err() {
+                errs.push(BkError { sp: lo.decl, msg: format!("variable does not need to be mutable: `{}` (unused_mut)", lo.name) });
+            }
+        }
     }
 
     /// Apply the events of one block (and report errors when errs is given). `live_out` is the liveness at the end of
@@ -1215,7 +1281,7 @@ impl Bk {
                     }
                     if !*init {
                         st.moved.push(Moved { place: BPlace { local: *l, proj: vec![] }, uninit: true, sp: super::SP });
-                    } else if self.locals[*l as usize].mutable == Some(false) {
+                    } else if self.locals[*l as usize].mutable == Some(false) || self.mut_flow.borrow().0.binary_search(l).is_ok() {
                         st.inited.push(*l);
                         st.inited.sort_unstable();
                     }
@@ -1281,6 +1347,10 @@ impl Bk {
                     if let Some(errs) = errs.as_deref_mut() {
                         if *a == Acc::Write && p.proj.is_empty() {
                             self.check_mut(st, p, *a, *sp, errs);
+                            // (unused_mut: a `let mut x;` assigned when it may have a value already needs the `mut`)
+                            if st.inited.binary_search(&p.local).is_ok() && self.mut_flow.borrow().0.binary_search(&p.local).is_ok() {
+                                self.mut_flow.borrow_mut().1.push(p.local);
+                            }
                         }
                         self.check_moved(st, p, *a, *sp, errs);
                         if loans_on {
@@ -1329,7 +1399,7 @@ impl Bk {
                             if p.proj.is_empty() {
                                 st.holds.retain(|h| h.0 != p.local);
                                 st.kill_loans_of(p.local, &self.loans);
-                                if self.locals[p.local as usize].mutable == Some(false) {
+                                if self.locals[p.local as usize].mutable == Some(false) || self.mut_flow.borrow().0.binary_search(&p.local).is_ok() {
                                     if let Err(i) = st.inited.binary_search(&p.local) {
                                         st.inited.insert(i, p.local);
                                     }
@@ -2606,6 +2676,10 @@ impl Cx<'_> {
         let mut calls: Vec<BPlace> = vec![];
         self.bk_cap_muts(body, n, &mut muts, &mut calls);
         let assigns = crate::ast_closure::assigns_capture(c, &[n.to_string()]);
+        // (unused_mut: a closure that mutates the variable itself, not what a reference in it points to, needs it `mut`)
+        if self.bk.lint_mut && muts.iter().chain(&calls).any(|q| q.local == l && q.owned_len() == q.proj.len()) {
+            self.bk.mut_used.push(l);
+        }
         // (a closure that mutates what it captures, by value or by `&mut`: `FnMut`; one that holds a value that is not
         // `Copy` may move it out of itself (`FnOnce`, called by value): not known here, so not `FnMut` either)
         let ca = c as *const Expr as usize;
@@ -3197,9 +3271,26 @@ impl Cx<'_> {
     }
 
     /// A loan of the place e, with no access recorded for it
+    /// unused_mut: e (a place) is changed in a way no access records (an array's slice method that mutates,
+    /// `arr.sort()`): what it is rooted at needs `mut` when e is a part it owns
+    pub(crate) fn bk_mut_use(&mut self, e: &Expr) {
+        if !self.bk.lint_mut {
+            return;
+        }
+        if let Some((p, _)) = self.bk_place(e) {
+            if p.owned_len() == p.proj.len() {
+                self.bk.mut_used.push(p.local);
+            }
+        }
+    }
+
     pub(crate) fn bk_loan_only(&mut self, e: &Expr, m: bool) -> Option<u32> {
         let (p, _) = self.bk_place(e)?;
         let sp = err_pos(e);
+        // (unused_mut: `for x in v.iter_mut()` / `&mut v` takes a `&mut` of v, which no access records)
+        if m && self.bk.lint_mut && p.owned_len() == p.proj.len() {
+            self.bk.mut_used.push(p.local);
+        }
         let ln = self.bk.loans.len() as u32;
         self.bk.loans.push(Loan { place: p, mutable: m, sp, at: sp, quiet: true, capture: false });
         Some(ln)

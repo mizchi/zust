@@ -396,6 +396,9 @@ pub struct Program {
     pub path_lts: bool,
     /// `#![deny(unused_allocation)]`: `Box::new(x).m()` with m of `&self` on what the box holds is an error
     pub deny_unused_alloc: bool,
+    /// `#![deny(unused_mut)]` (or `unused` / `warnings`), with no `allow` of it anywhere in the source: a `let mut`
+    /// that nothing needs mutable is an error (the borrow check finds it)
+    pub deny_unused_mut: bool,
     /// the source allows (or warns of) `overflowing_literals`, at the crate or an item: no "literal out of range"
     pub allow_overflowing_literals: bool,
     /// `#![deny(trivial_casts)]` / `#![deny(trivial_numeric_casts)]`: a cast a coercion or nothing would do
@@ -977,6 +980,7 @@ impl Program {
             edition: 2021,
             path_lts: false,
             deny_unused_alloc: false,
+            deny_unused_mut: false,
             allow_overflowing_literals: false,
             deny_trivial_casts: (false, false),
             must_use_fns: vec![],

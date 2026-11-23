@@ -97,6 +97,19 @@ impl Cx<'_> {
         };
         let prev = std::mem::replace(&mut self.explicit_trait, forced);
         let n = self.caller_locs.len();
+        // (unused_mut: an array's methods are lowered on its memory, not all through a recorded `&mut`: any method of
+        // an array the local owns (`a.swap(0, 1)`, `a[..2].copy_from_slice(..)`) counts as needing it `mut`)
+        if self.bk.lint_mut {
+            if let Expr::MethodCall(r, ..) = e {
+                let mut base: &Expr = strip_paren(r);
+                while let Expr::Index(b, ..) = base {
+                    base = strip_paren(b);
+                }
+                if is_place_expr(base) && matches!(self.peek(base), Some(Ty::Array(..))) {
+                    self.bk_mut_use(base);
+                }
+            }
+        }
         // (`opt.copied()` / `opt.cloned()` of an `Option<&U>`: the U copied out does not hold the borrow that reached it
         // (bk_copy_out), as `*opt.unwrap()` does not)
         // (and an item of a `Copied` / `Cloned` iterator (`w.iter().copied().next()`): what the iterator's items are

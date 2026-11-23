@@ -1598,6 +1598,7 @@ impl Cx<'_> {
         // (or, before edition 2024, one whose bounds name no lifetime (`-> impl Iterator<Item = u32>`, `+ use<>`): it
         // captures none, so its hidden type's regions are 'static too (E0700 in rustc). Not with type parameters,
         // which it captures)
+        self.bk.lint_mut = self.prog.deny_unused_mut && self.user_code && self.bk_on() && self.bk.level >= 2;
         self.bk.ret_no_capture = self.bk_on()
             && self.user_code
             && self.prog.opaque.contains(&self.rg.base)
@@ -2214,7 +2215,10 @@ impl Cx<'_> {
                         };
                         self.bk.uninit_next = true;
                         self.bk.mut_next = pat_mut(pat);
+                        // (the declaration, where unused_mut is reported)
+                        let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
                         self.bind(name.clone(), ty, v);
+                        self.rg.let_sp = let_sp0;
                         // (the annotation's type is well formed; the value assigned later flows into it)
                         if let Some(t) = ann_ty {
                             self.rg_let_uninit(Some(&name), t, *let_at);
