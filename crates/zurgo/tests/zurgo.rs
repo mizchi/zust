@@ -154,8 +154,9 @@ fn build_scripts_match_cargo() {
 fn proc_macros_run_like_cargo() {
     // (a proc-macro crate of the workspace: an attribute with arguments, used through a library that re-exports it; a
     //  derive with a helper attribute, whose output calls that library; function-like macros as an item and in an
-    //  expression; doc comments as `#[doc]`; the expansion's environment. rustc builds it, the toolchain's proc-macro
-    //  server runs it)
+    //  expression; doc comments as `#[doc]`; the expansion's environment; paths from the crate and from the library
+    //  beside `macro_rules!` of their names, and in `stringify!`. rustc builds it, the toolchain's proc-macro server
+    //  runs it)
     let sc = Scratch::new("proc-macro");
     copy_dir(&fixture("proc-macro"), &sc.0);
     let m = sc.0.join("Cargo.toml");

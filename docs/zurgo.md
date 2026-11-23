@@ -149,6 +149,11 @@ dylib and expands each use:
     `macro_rules!` call's expansion is.
   - Only the proc-macro crates a crate reaches count: its dependencies, or what its libraries re-export. A path into
     std or a tool (`#[rustfmt::skip]`) is never a proc macro's.
+  - **Which crate's.** A path is the macro of the crate it starts from: `pm::make!()`, or `re::make!()` when the
+    library `re` re-exports it (its `pub use`s, renames and globs too). Such a path stays the proc macro's beside a
+    `macro_rules! make`, and in `stringify!(..)` it is kept as written. A name brought in by `use` (also in a brace
+    group) is the macro of the crate that `use` starts from. The `use`s are one table per crate, so two modules that
+    import different crates' macros under one name are not told apart.
 - **What a macro gets.**
   - The item as tokens, with its cfgs already evaluated and its doc comments as `#[doc = ".."]`.
   - The crate's compile-time environment (`CARGO_PKG_*`), with `CARGO_MANIFEST_DIR` as its current directory.

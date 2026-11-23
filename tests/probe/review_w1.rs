@@ -1,5 +1,6 @@
 // Cases from the review of the W1 work: two functions' extern blocks with one name (each keeps its own symbol), a
-// local that shadows a std item imported under another name (the call before it is still the std item), `::name::..`
+// local that shadows a std item imported under another name (the call before it, and after the block of another
+// such local, is still the std item), `::name::..`
 // from an extern crate next to a one-name `::path`, a macro_rules! call with a path in statement position (its `let`
 // is the block's), and explicit type arguments of a method of an impl for `&&T`
 use std::mem::drop as release;
@@ -43,6 +44,10 @@ impl Size for &&u8 {
 fn main() {
     println!("{} {}", a(-3), b(-5_000_000_000));
     let v = vec![1, 2];
+    {
+        let release = 5;
+        println!("{}", release);
+    }
     release(v);
     let release = 3;
     println!("{}", release + 1);

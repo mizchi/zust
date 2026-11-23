@@ -1,0 +1,4 @@
+zustc-stamp 1
+runtests/probe/review_w1.rs/home/user/zustPATH=/root/.claude/rm-guard/88a339e4d20fb6aab08f00aca05b7c53/refuse:/nix/var/nix/profiles/default/bin:/root/.local/bin:/root/.cargo/bin:/usr/local/go/bin:/opt/node22/bin:/opt/maven/bin:/opt/gradle/bin:/opt/rbenv/bin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin65024 594447 17257160 1795461498241020052 1795461498265020053 33261
+65024 589909 1539 1795461540635263408 1795461540635263408 33188	tests/probe/review_w1.rs
+65024 593965 16536 1795461540833021575 1795461540833021575 33261	tests/probe/review_w1

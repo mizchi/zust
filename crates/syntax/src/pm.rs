@@ -43,6 +43,9 @@ pub struct Lib {
     pub dylib: PathBuf,
     /// its macros, as the server lists them
     pub macros: Vec<(String, Kind)>,
+    /// the libraries that re-export them: (the library, the name it gives, the macro's own name), `*` for a glob
+    /// (`pub use pm::{scaled, Describe};` in `re`: ("re", "scaled", "scaled"), ..)
+    pub via: Vec<(String, String, String)>,
 }
 
 impl Lib {
@@ -173,12 +176,12 @@ pub fn load(name: &str, dylib: &Path) -> Result<Lib, String> {
     );
     let mut g = LISTED.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, r)) = g.iter().find(|(k, _)| *k == key) {
-        return r.clone().map(|macros| Lib { name: name.to_string(), dylib: dylib.to_path_buf(), macros });
+        return r.clone().map(|macros| Lib { name: name.to_string(), dylib: dylib.to_path_buf(), macros, via: vec![] });
     }
     let r = list(dylib);
     g.retain(|(k, _)| k.0 != key.0);
     g.push((key, r.clone()));
-    r.map(|macros| Lib { name: name.to_string(), dylib: dylib.to_path_buf(), macros })
+    r.map(|macros| Lib { name: name.to_string(), dylib: dylib.to_path_buf(), macros, via: vec![] })
 }
 
 fn list(dylib: &Path) -> Result<Vec<(String, Kind)>, String> {
@@ -589,44 +592,27 @@ type Toks = [(u8, usize, usize)];
 
 impl<'a> Scope<'a> {
     pub fn new(libs: &'a [Lib], b: &[u8], toks: &Toks) -> Scope<'a> {
-        let tk = |k: usize| -> &[u8] { toks.get(k).map_or(&[][..], |t| &b[t.1..t.2]) };
-        let s = |k: usize| String::from_utf8_lossy(tk(k)).into_owned();
         let mut imported = vec![];
         let mut renames = vec![];
         let mut origins = vec![];
-        let n = toks.len();
-        for k in 0..n {
-            if !(toks[k].0 == 0 && tk(k) == b"use") {
-                continue;
+        use_names(b, toks, |_, root, name, alias| {
+            if std_or_tool(root) || name == "*" {
+                return;
             }
-            let mut j = k + 1;
-            if tk(j) == b":" && tk(j + 1) == b":" {
-                j += 2;
+            imported.push(alias.to_string());
+            if name != alias {
+                renames.push((name.to_string(), alias.to_string()));
             }
-            if std_or_tool(&s(j)) {
-                continue;
-            }
-            let root = plain(&s(j)).to_string();
-            while j < n && tk(j) != b";" {
-                if toks[j].0 == 0 {
-                    let name = s(j);
-                    if tk(j + 1) == b"as" && toks.get(j + 2).is_some_and(|t| t.0 == 0) {
-                        let alias = s(j + 2);
-                        imported.push(plain(&alias).to_string());
-                        renames.push((plain(&name).to_string(), plain(&alias).to_string()));
-                        origins.push((plain(&alias).to_string(), root.clone()));
-                        j += 3;
-                        continue;
-                    }
-                    if matches!(tk(j + 1), b"," | b";" | b"}") {
-                        imported.push(plain(&name).to_string());
-                        origins.push((plain(&name).to_string(), root.clone()));
-                    }
-                }
-                j += 1;
-            }
-        }
+            origins.push((alias.to_string(), root.to_string()));
+        });
         Scope { libs, imported, renames, origins }
+    }
+
+    /// Whether a path starts from a proc-macro crate's name, or from a library's that re-exports its macro
+    /// (`pm::answer!()`, `re::answer!()`): such a path is the proc macro's even beside a `macro_rules! answer`
+    pub fn names_crate(&self, segs: &[&str]) -> bool {
+        let (Some(f), Some(last)) = (segs.first().map(|s| plain(s)), segs.last().map(|s| plain(s))) else { return false };
+        segs.len() > 1 && self.libs.iter().any(|l| l.name == f || l.via.iter().any(|(c, a, _)| c == f && (a == "*" || a == last)))
     }
 
     /// The other names macros are brought in under (`use pm::value as alias;`: `alias`)
@@ -655,20 +641,102 @@ impl<'a> Scope<'a> {
             }
             k += 1;
         }
-        // (a path from a proc-macro crate's own name first: `wasm_bindgen_macro::wasm_bindgen`; a name imported from
-        // one, `use b::make;`, is that crate's)
+        // (a path from a proc-macro crate's own name first: `wasm_bindgen_macro::wasm_bindgen`, or from a library's
+        // that re-exports it, `re::scaled`; a name imported from one, `use b::make;`, is that crate's)
         let first = if segs.len() > 1 {
             Some(plain(segs[0]).to_string())
         } else {
             self.origins.iter().find(|(n, _)| *n == last).map(|(_, r)| r.clone())
         };
-        let libs = self.libs.iter().filter(|l| first.as_deref() == Some(l.name.as_str())).chain(self.libs.iter());
-        for l in libs {
+        if let Some(f) = first.as_deref() {
+            for l in self.libs {
+                // (the names the library gives it, to the macro's own: `pub use pm::answer as reply;`)
+                let own: Vec<&str> = l.via.iter().filter(|(c, a, _)| c == f && a != "*" && names.contains(a)).map(|(_, _, o)| o.as_str()).collect();
+                if l.name == f || !own.is_empty() || l.via.iter().any(|(c, a, _)| c == f && a == "*") {
+                    if let Some(n) = names.iter().map(|n| n.as_str()).chain(own).find(|n| l.has(n, kind)) {
+                        return Some((l, n.to_string()));
+                    }
+                }
+            }
+        }
+        for l in self.libs {
             if let Some(n) = names.iter().find(|n| l.has(n, kind)) {
                 return Some((l, n.clone()));
             }
         }
         None
+    }
+}
+
+/// Each name a `use` brings in: (whether the `use` is `pub`, the crate its path starts from, the name, the name it is
+/// brought in under; `*` for a glob). `use {a::x, b::y as z};` gives (false, "a", "x", "x") and (false, "b", "y", "z")
+fn use_names(b: &[u8], toks: &Toks, mut f: impl FnMut(bool, &str, &str, &str)) {
+    let tk = |k: usize| -> &[u8] { toks.get(k).map_or(&[][..], |t| &b[t.1..t.2]) };
+    let s = |k: usize| plain(std::str::from_utf8(tk(k)).unwrap_or("")).to_string();
+    let n = toks.len();
+    for k in 0..n {
+        // (not `impl Sized + use<'a>`)
+        if !(toks[k].0 == 0 && tk(k) == b"use") || tk(k + 1) == b"<" {
+            continue;
+        }
+        let is_pub = k >= 1 && tk(k - 1) == b"pub";
+        // (the crate each brace group's paths start from, outermost first: none before a path's first name)
+        let mut roots: Vec<Option<String>> = vec![None];
+        let mut root: Option<String> = None;
+        let mut j = k + 1;
+        while j < n && tk(j) != b";" {
+            if toks[j].0 == 0 {
+                let name = s(j);
+                let r = root.get_or_insert_with(|| name.clone()).clone();
+                if tk(j + 1) == b"as" && toks.get(j + 2).is_some_and(|t| t.0 == 0) {
+                    f(is_pub, &r, &name, &s(j + 2));
+                    j += 3;
+                    continue;
+                }
+                if matches!(tk(j + 1), b"," | b";" | b"}") {
+                    f(is_pub, &r, &name, &name);
+                }
+            } else {
+                match tk(j) {
+                    b"{" => roots.push(root.clone()),
+                    b"}" => {
+                        roots.pop();
+                        root = roots.last().cloned().flatten();
+                    }
+                    b"," => root = roots.last().cloned().flatten(),
+                    b"*" => f(is_pub, root.as_deref().unwrap_or(""), "*", "*"),
+                    _ => {}
+                }
+            }
+            j += 1;
+        }
+    }
+}
+
+/// A library's `pub use`s: (the crate the path starts from, the name, the name it is given; `*` for a glob)
+pub fn pub_uses(text: &str) -> Vec<(String, String, String)> {
+    let mut v = vec![];
+    if !text.contains("use") {
+        return v;
+    }
+    let b = text.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    use_names(b, &toks, |p, root, name, alias| {
+        if p {
+            v.push((root.to_string(), name.to_string(), alias.to_string()));
+        }
+    });
+    v
+}
+
+/// Notes on the proc-macro crates the macros a library `lib` re-exports (its `pub_uses`)
+pub fn note_reexports(libs: &mut [Lib], lib: &str, uses: &[(String, String, String)]) {
+    for (root, name, alias) in uses {
+        if let Some(l) = libs.iter_mut().find(|l| l.name == *root) {
+            if name == "*" || l.macros.iter().any(|(n, _)| n == name) {
+                l.via.push((lib.to_string(), alias.clone(), name.clone()));
+            }
+        }
     }
 }
 
@@ -1194,6 +1262,7 @@ mod tests {
             name: "pm".into(),
             dylib: PathBuf::new(),
             macros: vec![("route".into(), Kind::Attr), ("Error".into(), Kind::Derive), ("html".into(), Kind::Bang)],
+            via: vec![],
         }];
         let src = "use pm::route as get;\nuse derive_more::Debug;\n";
         let b = src.as_bytes();
@@ -1208,14 +1277,33 @@ mod tests {
         assert_eq!(s.resolve(&["html"], Kind::Bang).map(|x| x.1), Some("html".into()));
         // (two crates with one macro's name: the one the `use` names)
         let two = vec![
-            Lib { name: "a".into(), dylib: PathBuf::from("a"), macros: vec![("make".into(), Kind::Bang)] },
-            Lib { name: "b".into(), dylib: PathBuf::from("b"), macros: vec![("make".into(), Kind::Bang)] },
+            Lib { name: "a".into(), dylib: PathBuf::from("a"), macros: vec![("make".into(), Kind::Bang)], via: vec![] },
+            Lib { name: "b".into(), dylib: PathBuf::from("b"), macros: vec![("make".into(), Kind::Bang)], via: vec![] },
         ];
         let src = "use b::make;\n";
         let toks = crate::lexer::tokenize(src.as_bytes());
         let s2 = Scope::new(&two, src.as_bytes(), &toks);
         assert_eq!(s2.resolve(&["make"], Kind::Bang).map(|x| x.0.name.clone()), Some("b".into()));
         assert_eq!(s2.resolve(&["a", "make"], Kind::Bang).map(|x| x.0.name.clone()), Some("a".into()));
+        // (in a brace group too)
+        let src = "use {b::make};\n";
+        let toks = crate::lexer::tokenize(src.as_bytes());
+        let s3 = Scope::new(&two, src.as_bytes(), &toks);
+        assert_eq!(s3.resolve(&["make"], Kind::Bang).map(|x| x.0.name.clone()), Some("b".into()));
+        // (through a library that re-exports `b`'s, under another name too)
+        let mut two = two;
+        note_reexports(&mut two, "re", &pub_uses("pub mod prelude { pub use b::{make, make as build}; }\nuse a::make;\n"));
+        assert_eq!(two[1].via, vec![("re".to_string(), "make".to_string(), "make".to_string()), ("re".into(), "build".into(), "make".into())]);
+        assert!(two[0].via.is_empty());
+        for src in ["use re::make;\n", "use {re::prelude::make};\n", "use re::build as make;\n"] {
+            let toks = crate::lexer::tokenize(src.as_bytes());
+            let s4 = Scope::new(&two, src.as_bytes(), &toks);
+            assert_eq!(s4.resolve(&["make"], Kind::Bang).map(|x| (x.0.name.clone(), x.1)), Some(("b".into(), "make".into())), "{src}");
+        }
+        let toks = crate::lexer::tokenize(b"");
+        let s5 = Scope::new(&two, b"", &toks);
+        assert_eq!(s5.resolve(&["re", "build"], Kind::Bang).map(|x| (x.0.name.clone(), x.1)), Some(("b".into(), "make".into())));
+        assert!(s5.names_crate(&["re", "build"]) && s5.names_crate(&["a", "x"]) && !s5.names_crate(&["re", "other"]) && !s5.names_crate(&["make"]));
     }
 
     #[test]

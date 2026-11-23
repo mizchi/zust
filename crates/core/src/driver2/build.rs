@@ -1429,6 +1429,7 @@ impl Session2 {
                     need_dep[j] = true;
                 }
             }
+            let mut pub_uses: Vec<Option<Vec<(String, String, String)>>> = vec![None; crates.len()];
             let defs: Vec<String> = (0..crates.len())
                 .map(|i| if need[i] { crate::macros::macro_defs(&loaded[i].as_ref().unwrap().0) } else { String::new() })
                 .collect();
@@ -1446,6 +1447,15 @@ impl Session2 {
                         pms.push(crate::pm::load(&crates[j].name, p).map_err(|e| format!("crate `{}`: the proc-macro crate `{}`: {e}", crates[i].name, crates[j].name))?);
                     }
                 }
+                // (which of their macros the libraries re-export, and under what names: `re::answer!()`)
+                if !pms.is_empty() {
+                    for j in all_deps(i) {
+                        if crates[j].proc_macro.is_none() {
+                            let uses = pub_uses[j].get_or_insert_with(|| crate::pm::pub_uses(&loaded[j].as_ref().unwrap().0));
+                            crate::pm::note_reexports(&mut pms, &crates[j].name, uses);
+                        }
+                    }
+                }
                 // (前回と同じ入力なら out_dir/<名前>.prep から読む: `キー\n展開したものの長さ\n展開したもの インターフェース`)
                 let mut kh = KeyHasher::new();
                 kh.add(&self.cid);
@@ -1458,6 +1468,11 @@ impl Session2 {
                 for j in all_deps(i) {
                     if crates[j].proc_macro.is_some() {
                         add_crate_cfg(&mut kh, &crates[j]);
+                    }
+                }
+                for l in &pms {
+                    for (c, a, o) in &l.via {
+                        kh.add(&format!("{}:{c}:{a}:{o}", l.name));
                     }
                 }
                 let pkey = key_hex(kh.finish());

@@ -1024,17 +1024,24 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
             }
             let mut rules = macros.get(std::str::from_utf8(tk(i)).unwrap_or(""));
             // (a proc macro's function-like call: `name!(..)`, `path::name!(..)`, a name no `macro_rules!` has. A path
-            // from a proc-macro crate's name, `pm::answer!()`, is that crate's even beside a `macro_rules! answer`)
+            // from a proc-macro crate's name, or a library's that re-exports its macro (`pm::answer!()`,
+            // `re::answer!()`), is that crate's even beside a `macro_rules! answer`)
             let pm_bang = match &pm_scope {
-                Some(sc) if tk(i) != b"macro_rules" && i > inert_until => {
+                Some(sc) if tk(i) != b"macro_rules" => {
                     let mut segs = vec![std::str::from_utf8(tk(i)).unwrap_or("")];
                     let mut k = i;
                     while k >= 3 && toks[k - 3].0 == 0 && path_seg(tk(k - 3)) && sym(k - 2, b':') && sym(k - 1, b':') {
                         segs.insert(0, std::str::from_utf8(tk(k - 3)).unwrap_or(""));
                         k -= 3;
                     }
-                    let own = segs.len() > 1 && pms.iter().any(|l| l.name == segs[0]);
-                    if rules.is_none() || own {
+                    let own = sc.names_crate(&segs);
+                    if i < inert_until {
+                        // (in `stringify!(..)`: kept as written, also beside a `macro_rules!` of its name)
+                        if own {
+                            rules = None;
+                        }
+                        None
+                    } else if rules.is_none() || own {
                         sc.resolve(&segs, crate::pm::Kind::Bang).inspect(|_| rules = None)
                     } else {
                         None
@@ -1179,7 +1186,8 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
         // (展開したものの中にマクロの名前が無ければ、もう一周しなくてよい。proc macro の出力は次の周でも読む)
         // (also when it names a proc macro: a `macro_rules!` that gives `pm::answer!()` or a `#[wasm_bindgen]` item)
         let names_pm = |t: &str| {
-            pms.iter().any(|l| l.macros.iter().any(|(m, _)| t.contains(m.as_str()))) || pm_scope.as_ref().is_some_and(|sc| sc.aliases().any(|a| t.contains(a)))
+            pms.iter().any(|l| l.macros.iter().any(|(m, _)| t.contains(m.as_str())) || l.via.iter().any(|(_, a, _)| a != "*" && t.contains(a.as_str())))
+                || pm_scope.as_ref().is_some_and(|sc| sc.aliases().any(|a| t.contains(a)))
         };
         let again = pm_done || reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())) || names_pm(&r.2));
         let has_cfg = cfg.is_some() && (pm_done || reps.iter().any(|r| r.2.contains("cfg")));
@@ -1376,6 +1384,17 @@ fn find_calls(
                                 {
                                     ps -= 3;
                                 }
+                                // (`::m!(..)`, and not a keyword before it: `return ::pm::m!()`)
+                                let colons = |k: usize| {
+                                    k >= 2
+                                        && matches!((&toks[k - 2], &toks[k - 1]), (TokenTree::Punct(c1), TokenTree::Punct(c2)) if c1.as_char() == ':' && c2.as_char() == ':' && c1.spacing() == proc_macro2::Spacing::Joint)
+                                        && !(k >= 3 && matches!(&toks[k - 3], TokenTree::Ident(seg) if path_seg(seg.to_string().as_bytes())))
+                                };
+                                if colons(ps) {
+                                    ps -= 2;
+                                }
+                                // (`const N: i32 = m!() * 3;`: after `=` an expression, also at the top)
+                                let top = depth == 0 && !(ps > 0 && matches!(&toks[ps - 1], TokenTree::Punct(q) if q.as_char() == '='));
                                 let stmt_pos = brace
                                     && (ps == 0
                                         || matches!(&toks[ps - 1], TokenTree::Punct(q) if q.as_char() == ';')
@@ -1388,12 +1407,12 @@ fn find_calls(
                                 let item_start = ps == 0
                                     || matches!(&toks[ps - 1], TokenTree::Punct(q) if q.as_char() == ';')
                                     || matches!(&toks[ps - 1], TokenTree::Group(pg) if matches!(pg.delimiter(), proc_macro2::Delimiter::Brace | proc_macro2::Delimiter::Bracket));
-                                let operand = depth == 0
+                                let operand = top
                                     && !item_start
                                     && matches!(&toks[ps - 1], TokenTree::Punct(q) if matches!(q.as_char(), '+' | '-' | '*' | '/' | '%' | '^' | '|'));
                                 let rep = if operand {
                                     format!("({body})")
-                                } else if depth == 0 || spliced {
+                                } else if top || spliced {
                                     body
                                 } else if stmt_pos {
                                     match split_items(&body) {
@@ -1417,9 +1436,12 @@ fn find_calls(
                                         _ => break,
                                     }
                                 }
+                                if colons(k) {
+                                    a = toks[k - 2].span().byte_range().start;
+                                }
                                 let mut e = g.span().byte_range().end;
                                 // (トップレベルの `name!(..);` の `;` も取る)
-                                if (depth == 0 && item_start) || drop_semi {
+                                if (top && item_start) || drop_semi {
                                     if let Some(TokenTree::Punct(s)) = toks.get(i + 3) {
                                         if s.as_char() == ';' {
                                             e = s.span().byte_range().end;
