@@ -1,0 +1,1 @@
+5:5: the trait bound `Error: Hash` is not satisfied (E0277)

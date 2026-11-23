@@ -450,6 +450,8 @@ pub struct Program {
     pub fnptr_impls: HashSet<(Option<Ty>, String)>,
     /// 親トレイト (`trait Bar: Foo`)
     pub trait_supers: FxMap<String, Vec<String>>,
+    /// trait → its supertraits Copy / Clone (`trait Num: Copy`), which trait_supers leaves out
+    pub trait_marker_supers: FxMap<String, Vec<String>>,
     /// What a trait's `Self` must outlive (`trait Tr<'a>: 'a`): "static", or the index of the trait's lifetime parameter
     pub trait_self_outlives: FxMap<String, Vec<String>>,
     /// The program (not the prelude) has a static not declared `mut`: an assignment is checked against it
@@ -957,6 +959,7 @@ impl Program {
             prelude_from: u32::MAX,
             overflow_checks: false,
             trait_supers: FxMap::default(),
+            trait_marker_supers: FxMap::default(),
             trait_self_outlives: FxMap::default(),
             any_immutable_static: false,
             static_copy: FxSet::default(),
@@ -1602,6 +1605,9 @@ impl Program {
                 }
                 if let Some((_, sup)) = sm.trait_generics.iter().find(|g| g.0 == "#supers") {
                     p.trait_supers.insert(tr.clone(), sup.clone());
+                }
+                if let Some((_, ms)) = sm.trait_generics.iter().find(|g| g.0 == "#marker_supers") {
+                    p.trait_marker_supers.insert(tr.clone(), ms.clone());
                 }
                 if let Some((_, so)) = sm.trait_generics.iter().find(|g| g.0 == crate::types::SELF_OUTLIVES) {
                     p.trait_self_outlives.insert(tr.clone(), so.clone());
@@ -3673,12 +3679,13 @@ impl Program {
             Ty::Struct(sid) => sid,
             _ => return false,
         };
-        // (a type parameter's placeholder whose bounds name no `Clone` (nor `Copy`, nor a trait with supertraits, which
-        // may imply it): `(&x).clone()` with x: T is the reference's copy)
+        // (a type parameter's placeholder: Clone when a bound is, or has Clone among its supertraits (`trait Dup:
+        // Clone`, also through others); a trait with supertraits may imply it. `(&x).clone()` of `fn f<T>(x: T)` is the
+        // reference's copy)
         if let Some(bs) = &self.structs[sid as usize].placeholder {
             return !bs.iter().any(|b| {
                 let n = b.split('<').next().unwrap_or(b).trim();
-                n.ends_with("Clone") || n.ends_with("Copy") || self.trait_supers.get(n).is_some_and(|s| !s.is_empty())
+                self.implies_clone(b, 0) || n.ends_with("Clone") || n.ends_with("Copy") || self.trait_supers.get(n).is_some_and(|s| !s.is_empty())
             });
         }
         let b = self.base_of(sid);
@@ -3696,6 +3703,66 @@ impl Program {
             return true;
         }
         self.clone_needs_args(b, own) && self.structs[sid as usize].args.iter().any(|&a| self.surely_not_clone(a, depth + 1))
+    }
+
+    /// A bound b makes its type Clone: `Clone`, `Copy`, a trait with one of them among its supertraits, or a trait zustc
+    /// does not know (which may have)
+    fn implies_clone(&self, b: &str, depth: u32) -> bool {
+        self.bound_implies(b, &["Clone", "Copy"], true, depth)
+    }
+
+    /// A bound b's trait has an associated-type equation among its supertraits (`trait View<U>: Deref<Target = U>`,
+    /// the summary's `#Eq` mark), through any number of them
+    pub fn bound_has_eq(&self, b: &str, _depth: u32) -> bool {
+        // (every supertrait once, however long the chain: a visited set, no cutoff)
+        let mut seen: Vec<&str> = vec![];
+        let mut stack: Vec<&str> = vec![b];
+        while let Some(b) = stack.pop() {
+            let tr = b.split('<').next().unwrap_or(b).trim();
+            let tr = tr.rsplit("::").next().unwrap_or(tr);
+            if seen.contains(&tr) {
+                continue;
+            }
+            seen.push(tr);
+            if let Some(ss) = self.trait_supers.get(tr) {
+                if ss.iter().any(|s| s == "#Eq") {
+                    return true;
+                }
+                stack.extend(ss.iter().map(|s| s.as_str()));
+            }
+        }
+        false
+    }
+
+    /// A bound b gives one of the traits `want`: itself, or through its supertraits. A trait zustc does not know (a
+    /// std one's, `Fn(u8)`) gives them when `unknown` says so: as the caller's safe side is
+    pub fn bound_implies(&self, b: &str, want: &[&str], unknown: bool, _depth: u32) -> bool {
+        // (every supertrait once, however long the chain: a visited set, no cutoff)
+        let mut seen: Vec<&str> = vec![];
+        let mut stack: Vec<&str> = vec![b];
+        while let Some(b) = stack.pop() {
+            let tr = b.split('<').next().unwrap_or(b).trim();
+            let tr = tr.rsplit("::").next().unwrap_or(tr);
+            if want.contains(&tr) {
+                return true;
+            }
+            if seen.contains(&tr) {
+                continue;
+            }
+            seen.push(tr);
+            if matches!(tr, "Sized" | "?Sized" | "Send" | "Sync" | "Unpin" | "Debug" | "Display" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Clone") {
+                continue;
+            }
+            if self.trait_marker_supers.get(tr).is_some_and(|ms| ms.iter().any(|m| want.contains(&m.as_str()) || (m == "Copy" && want.contains(&"Clone")))) {
+                return true;
+            }
+            match self.trait_supers.get(tr) {
+                Some(ss) => stack.extend(ss.iter().map(|s| s.as_str())),
+                None if unknown && !self.traits.contains_key(tr) => return true,
+                None => {}
+            }
+        }
+        false
     }
 
     /// The base b is a closure's struct (`f::{closure#0}`)

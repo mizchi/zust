@@ -94,12 +94,27 @@ pub fn borrow_error(e: &str) -> bool {
 /// mismatched types of two types written
 /// out (no projection `T::Item` / `<T as Tr>::X`, no `impl` / `dyn` type, no hole, no lifetime), as `x` of
 /// `impl Debug` returned as a String (a placeholder is `T#`)
-pub fn placeholder_mismatch(e: &str, bound_eqs: &[&str]) -> bool {
+pub fn placeholder_mismatch(e: &str, bound_eqs: &[&str], free: &[String]) -> bool {
     // (an operator a type parameter's bounds do not give, p3_ops: holds whatever the parameter is)
     if (e.ends_with("(E0369)") || e.ends_with("(E0368)"))
         && ["cannot add `", "cannot subtract `", "cannot multiply `", "cannot divide `", "cannot calculate the remainder of `", "binary assignment operation `"].iter().any(|v| e.contains(v))
     {
-        return true;
+        // (on a reference to a parameter, `&a + a`: only when no where clause may give it (`for<'x> &'x T: Add<T>`),
+        // as for a free parameter)
+        let on_ref = ["to `&", "from `&", "of `&"].iter().find_map(|k| e.find(k).map(|i| &e[i + k.len()..])).or_else(|| {
+            ["multiply `&", "divide `&"].iter().find_map(|k| e.find(k).map(|i| &e[i + k.len()..]))
+        });
+        return match on_ref {
+            Some(r) => {
+                let n: String = r.trim_start_matches("mut ").chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+                free.contains(&n)
+            }
+            None => true,
+        };
+    }
+    // (`[x; 3]` of a free parameter without Copy among its bounds: holds whatever it is)
+    if let Some(n) = e.split("the trait bound `").nth(1).and_then(|r| r.strip_suffix(": Copy` is not satisfied (E0277)")) {
+        return n.strip_suffix('#').is_some_and(|n| free.iter().any(|f| f == n));
     }
     let Some(m) = e.find("mismatched types: expected `") else { return false };
     let tys: Vec<&str> = e[m..].split('`').skip(1).step_by(2).take(2).collect();
@@ -115,7 +130,9 @@ pub fn placeholder_mismatch(e: &str, bound_eqs: &[&str]) -> bool {
         // coercion through the projection may hold)
         let by_ref = |n: &str| tys.iter().any(|t| t.contains(&format!("&{n}#")) || t.contains(&format!("&mut {n}#")));
         let equated = equated || a.iter().chain(&b).any(|n| bound_eqs.iter().any(|q| q.strip_prefix("=&").is_some_and(|r| r.trim() == n.as_str())) && by_ref(n));
-        if (!a.is_empty() && !b.is_empty()) || equated {
+        // (unless every one of them is free: nothing relates those)
+        let all_free = a.iter().chain(&b).all(|n| free.contains(n));
+        if (!a.is_empty() && !b.is_empty() && !all_free) || equated {
             return false;
         }
     }
@@ -572,7 +589,22 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         }
     }
     bound_eqs.extend(bound_params.iter().map(|s| s.as_str()));
-    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs)) {
+    // (the parameters nothing can relate to another: bounds without an equation or a fn signature, no where clause, not
+    // in a closure's body. A mismatch of two of them holds: `fn f<X, Y>(y: Y) -> X { y }`)
+    let free: Vec<String> = match Some(cx.rg.inst_args.as_slice()) {
+        Some(args) if placeholder && r.is_err() && f.sig.generics.preds.is_empty() && !prog.closures.contains_key(&body_id) => args
+            .iter()
+            .filter_map(|&t| {
+                let Ty::Struct(s) = t else { return None };
+                let sd = &prog.structs[s as usize];
+                let bs = sd.placeholder.as_ref()?;
+                // (nor one through a supertrait: `T: View<U>` of `trait View<U>: Deref<Target = U>`)
+                bs.iter().all(|b| !b.contains('=') && !b.contains('(') && !prog.bound_has_eq(b, 0)).then(|| sd.name.trim_end_matches('#').to_string())
+            })
+            .collect(),
+        _ => vec![],
+    };
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }
@@ -580,7 +612,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         return Ok((Compiled { rec: b.m, late: vec![], datas: vec![], vtables: vec![], infos: vec![], loc_used: false, line_base }, vec![]));
     }
     // (a placeholder's type by its parameter's name: `T`, not `T#`)
-    let r = if placeholder { r.map_err(|e| e.replace("#`", "`").replace("#>", ">").replace("#,", ",")) } else { r };
+    let r = if placeholder { r.map_err(|e| e.replace("#`", "`").replace("#>", ">").replace("#,", ",").replace("#:", ":")) } else { r };
     r?;
     cx.bk_check()?;
     let rerun = cx.rg.rerun && !force_rg;

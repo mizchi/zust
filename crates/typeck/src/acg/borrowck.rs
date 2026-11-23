@@ -466,8 +466,9 @@ pub fn is_copy(prog: &Program, t: Ty, depth: u32) -> bool {
                 return true;
             }
             // (a type parameter's placeholder: Copy when its bounds say so)
+            // (a bound with Copy among its supertraits too, `T: Num` of `trait Num: Copy`)
             if let Some(bs) = &sd.placeholder {
-                return bs.iter().any(|b| b == "Copy");
+                return bs.iter().any(|b| prog.bound_implies(b, &["Copy"], false, 0));
             }
             if prog.closure_of_struct.contains_key(&prog.base_of(sid)) || prog.is_tuple(sid) {
                 return sd.fields.iter().all(|f| is_copy(prog, f.1, depth + 1));
