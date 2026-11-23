@@ -904,6 +904,14 @@ impl Session2 {
         let cid = self.cid;
         let mut sums: Vec<Summary> = vec![Summary::default(); items.len()];
         let mut n_parsed = 0;
+        // (the keys' common prefix, hashed once: a closure's captures depend on the edition (WILD_FAKE_READS))
+        let seed = {
+            let mut h = KeyHasher::new();
+            h.add(&cid);
+            h.add(&0u8);
+            h.add(&(self.opts.edition >= 2021));
+            h
+        };
         for pass in 0..2 {
             // (キャッシュにないもの: (番号, キー))
             let mut miss: Vec<(usize, Key)> = vec![];
@@ -912,12 +920,8 @@ impl Session2 {
                 if header != (pass == 0) {
                     continue;
                 }
-                let mut h = KeyHasher::new();
-                h.add(&cid);
-                h.add(&0u8);
+                let mut h = seed.clone();
                 h.add(&it.hash);
-                // (a closure's captures depend on the edition: WILD_FAKE_READS)
-                h.add(&(self.opts.edition >= 2021));
                 let k = h.finish();
                 if let Some(sm) = self.get(k).and_then(|d| Summary::decode(&d)) {
                     sums[i] = sm;
