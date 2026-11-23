@@ -1410,7 +1410,8 @@ impl Session2 {
         // 古いクレートが使うソース: 自分は依存するクレートのマクロだけを添えて展開したもの、依存するクレートは
         // 展開して総称でない関数の本体を消したもの (stub::interface_text)。どちらもクレートごとに 1 回だけ作る
         // (使う側で依存するクレートのソース全体を展開・解析し直すと、依存が多いと推移的な依存の大きさに比例する)
-        let reuse = std::env::var_os("ZUSTC_NO_DEP_STUB").is_none();
+        // (proc macros expand only here: with them, ZUSTC_NO_DEP_STUB does not turn it off)
+        let reuse = std::env::var_os("ZUSTC_NO_DEP_STUB").is_none() || crates.iter().any(|c| c.proc_macro.is_some());
         let mut fp2s: Vec<(usize, String)> = vec![];
         // (古いクレートごとの、依存するクレートのインターフェースのうち名前で届くアイテム: 使う側にはそれだけを渡す)
         let mut reach_of: Vec<Option<Vec<(usize, usize)>>> = vec![None; crates.len()];
@@ -1461,7 +1462,8 @@ impl Session2 {
                 }
                 let pkey = key_hex(kh.finish());
                 let pp = out_dir.join(format!("{}.prep", crates[i].name).as_str());
-                if let Ok(old) = std::fs::read_to_string(pp.as_path()) {
+                // (`--no-cache`: expanded again, also a proc macro's output, which may read files of its own)
+                if let Some(old) = (!self.opts.no_cache).then(|| std::fs::read_to_string(pp.as_path()).ok()).flatten() {
                     if let Some((k, rest)) = old.split_once('\n') {
                         if k == pkey {
                             if let Some((nl, body)) = rest.split_once('\n') {

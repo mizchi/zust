@@ -64,7 +64,9 @@ struct Srv {
 /// One server for the process, started on the first use (None: not started; Err: it could not start)
 static SRV: Mutex<Option<Result<Srv, String>>> = Mutex::new(None);
 /// The macros of each dylib, listed once
-static LISTED: Mutex<Vec<(PathBuf, Result<Vec<(String, Kind)>, String>)>> = Mutex::new(Vec::new());
+/// (by the dylib's path, size and modification time: one rebuilt in place is listed again)
+#[allow(clippy::type_complexity)]
+static LISTED: Mutex<Vec<((PathBuf, u64, u128), Result<Vec<(String, Kind)>, String>)>> = Mutex::new(Vec::new());
 
 /// The server's path: `ZUSTC_PROC_MACRO_SRV` (empty: none), or `libexec/rust-analyzer-proc-macro-srv` in rustc's
 /// sysroot (`RUSTC`, or `rustc`; it comes with the `rustc` component)
@@ -163,12 +165,19 @@ pub fn server_version() -> Result<u32, String> {
 
 /// A proc-macro crate's macros, as the server reads them from its dylib (once per dylib)
 pub fn load(name: &str, dylib: &Path) -> Result<Lib, String> {
+    let meta = std::fs::metadata(dylib).ok();
+    let key = (
+        dylib.to_path_buf(),
+        meta.as_ref().map_or(0, |m| m.len()),
+        meta.and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos()),
+    );
     let mut g = LISTED.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((_, r)) = g.iter().find(|(p, _)| p == dylib) {
+    if let Some((_, r)) = g.iter().find(|(k, _)| *k == key) {
         return r.clone().map(|macros| Lib { name: name.to_string(), dylib: dylib.to_path_buf(), macros });
     }
     let r = list(dylib);
-    g.push((dylib.to_path_buf(), r.clone()));
+    g.retain(|(k, _)| k.0 != key.0);
+    g.push((key, r.clone()));
     r.map(|macros| Lib { name: name.to_string(), dylib: dylib.to_path_buf(), macros })
 }
 
@@ -570,6 +579,8 @@ pub struct Scope<'a> {
     libs: &'a [Lib],
     imported: Vec<String>,
     renames: Vec<(String, String)>,
+    /// (a name brought in, the crate its `use` starts from: `use b::make;` gives ("make", "b"))
+    origins: Vec<(String, String)>,
 }
 
 type Toks = [(u8, usize, usize)];
@@ -580,6 +591,7 @@ impl<'a> Scope<'a> {
         let s = |k: usize| String::from_utf8_lossy(tk(k)).into_owned();
         let mut imported = vec![];
         let mut renames = vec![];
+        let mut origins = vec![];
         let n = toks.len();
         for k in 0..n {
             if !(toks[k].0 == 0 && tk(k) == b"use") {
@@ -592,6 +604,7 @@ impl<'a> Scope<'a> {
             if std_or_tool(&s(j)) {
                 continue;
             }
+            let root = plain(&s(j)).to_string();
             while j < n && tk(j) != b";" {
                 if toks[j].0 == 0 {
                     let name = s(j);
@@ -599,17 +612,19 @@ impl<'a> Scope<'a> {
                         let alias = s(j + 2);
                         imported.push(plain(&alias).to_string());
                         renames.push((plain(&name).to_string(), plain(&alias).to_string()));
+                        origins.push((plain(&alias).to_string(), root.clone()));
                         j += 3;
                         continue;
                     }
                     if matches!(tk(j + 1), b"," | b";" | b"}") {
                         imported.push(plain(&name).to_string());
+                        origins.push((plain(&name).to_string(), root.clone()));
                     }
                 }
                 j += 1;
             }
         }
-        Scope { libs, imported, renames }
+        Scope { libs, imported, renames, origins }
     }
 
     /// The macro a path names (its names in order, `r#` kept off): (the library, the macro's own name)
@@ -633,8 +648,14 @@ impl<'a> Scope<'a> {
             }
             k += 1;
         }
-        // (a path from a proc-macro crate's own name first: `wasm_bindgen_macro::wasm_bindgen`)
-        let libs = self.libs.iter().filter(|l| segs.len() > 1 && plain(segs[0]) == l.name).chain(self.libs.iter());
+        // (a path from a proc-macro crate's own name first: `wasm_bindgen_macro::wasm_bindgen`; a name imported from
+        // one, `use b::make;`, is that crate's)
+        let first = if segs.len() > 1 {
+            Some(plain(segs[0]).to_string())
+        } else {
+            self.origins.iter().find(|(n, _)| *n == last).map(|(_, r)| r.clone())
+        };
+        let libs = self.libs.iter().filter(|l| first.as_deref() == Some(l.name.as_str())).chain(self.libs.iter());
         for l in libs {
             if let Some(n) = names.iter().find(|n| l.has(n, kind)) {
                 return Some((l, n.clone()));
@@ -810,11 +831,9 @@ pub fn expand_items(text: &str, libs: &[Lib], env: &[(String, String)]) -> Resul
                 s.push_str(&format!("#[derive({})]", keep.join(", ")));
             }
             s.push_str(&text[e..iend]);
-            let mut s = s.replace(['\n', '\r'], " ");
-            // (comments in the item would comment out the rest of the line: the item as tokens)
-            if s.contains("//") || s.contains("/*") {
-                s = one_line(&s).map_err(here)?;
-            }
+            // (on one line: comments in the item would comment out the rest of the line once its line breaks go, so
+            // then the item goes as tokens, read from its lines)
+            let mut s = if s.contains("//") || s.contains("/*") { one_line(&s).map_err(here)? } else { s.replace(['\n', '\r'], " ") };
             for (_, _, d) in &derives {
                 if let Some((lib, name)) = d {
                     s.push(' ');
@@ -872,11 +891,18 @@ fn item_end(b: &[u8], toks: &Toks, close: &[usize], depth: &[u32], s: usize) -> 
         return None;
     }
     let mut k = q;
+    // (the depth of `<..>`: a `{ .. }` in generic arguments, `-> Array<{ 1 }>`, is a const argument, not the body; the
+    // `>` of `->` / `=>` closes none)
+    let mut angle = 0i32;
     while k < n {
         if toks[k].0 == 1 {
             match b[toks[k].1] {
+                b'<' if depth[k] == d0 => angle += 1,
+                b'>' if depth[k] == d0 && !(k > 0 && toks[k - 1].0 == 1 && matches!(b[toks[k - 1].1], b'-' | b'=') && toks[k - 1].2 == toks[k].1) => {
+                    angle = (angle - 1).max(0)
+                }
                 b';' if depth[k] == d0 => return Some(k),
-                b'{' if depth[k] == d0 && !semi_only => return (close[k] != usize::MAX).then_some(close[k]),
+                b'{' if depth[k] == d0 && !semi_only && angle == 0 => return (close[k] != usize::MAX).then_some(close[k]),
                 b'(' | b'[' | b'{' if close[k] != usize::MAX => {
                     k = close[k] + 1;
                     continue;
@@ -1171,6 +1197,16 @@ mod tests {
         assert_eq!(s.resolve(&["Error"], Kind::Derive).map(|x| x.1), Some("Error".into()));
         assert!(s.resolve(&["Error"], Kind::Attr).is_none());
         assert_eq!(s.resolve(&["html"], Kind::Bang).map(|x| x.1), Some("html".into()));
+        // (two crates with one macro's name: the one the `use` names)
+        let two = vec![
+            Lib { name: "a".into(), dylib: PathBuf::from("a"), macros: vec![("make".into(), Kind::Bang)] },
+            Lib { name: "b".into(), dylib: PathBuf::from("b"), macros: vec![("make".into(), Kind::Bang)] },
+        ];
+        let src = "use b::make;\n";
+        let toks = crate::lexer::tokenize(src.as_bytes());
+        let s2 = Scope::new(&two, src.as_bytes(), &toks);
+        assert_eq!(s2.resolve(&["make"], Kind::Bang).map(|x| x.0.name.clone()), Some("b".into()));
+        assert_eq!(s2.resolve(&["a", "make"], Kind::Bang).map(|x| x.0.name.clone()), Some("a".into()));
     }
 
     #[test]
@@ -1186,6 +1222,7 @@ mod tests {
         assert_eq!(end("pub(crate) struct S(u8); fn g() {}").as_deref(), Some("pub(crate) struct S(u8);"));
         assert_eq!(end("extern \"C\" { type T; } fn g() {}").as_deref(), Some("extern \"C\" { type T; }"));
         assert_eq!(end("unsafe impl<T> X for Y<T> where T: Fn() -> u8 {} x").as_deref(), Some("unsafe impl<T> X for Y<T> where T: Fn() -> u8 {}"));
+        assert_eq!(end("fn f() -> A<{ 1 }> where T: Fn() -> u8 { loop {} } x").as_deref(), Some("fn f() -> A<{ 1 }> where T: Fn() -> u8 { loop {} }"));
         assert_eq!(end("let x = 1;"), None);
         assert_eq!(end("pub x: u8 }"), None);
     }

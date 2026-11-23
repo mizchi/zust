@@ -983,28 +983,46 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
                 }
                 text.replace_range(a..e, &r);
             }
+            // (their cfgs now: a macro call in an item they give under a cfg that is off does not run. The strip keeps
+            // the text's length and lines)
+            if pm_done {
+                if let Some(t) = cfg.and_then(|c| crate::cfg::strip(&text, c)) {
+                    text = t;
+                }
+            }
         }
         let b = text.as_bytes();
         let toks = crate::lexer::tokenize(b);
         let (close, depth) = brackets(b, &toks);
         let pm_scope = (!pms.is_empty()).then(|| crate::pm::Scope::new(pms, b, &toks));
+        // (the end of a `stringify!(..)`'s arguments: a proc macro called in them does not run, they are text)
+        let mut inert_until = 0usize;
         let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
         let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && b[toks[k].1] == c;
         let mut reps: Vec<(usize, usize, String)> = vec![];
         let mut i = 0;
         while i + 2 < toks.len() {
             let is_call = toks[i].0 == 0 && sym(i + 1, b'!') && close[i + 2] != usize::MAX;
-            let rules = if is_call { macros.get(std::str::from_utf8(tk(i)).unwrap_or("")) } else { None };
-            // (a proc macro's function-like call: `name!(..)`, `path::name!(..)`, a name no `macro_rules!` has)
-            let pm_bang = match (&pm_scope, rules) {
-                (Some(sc), None) if is_call && tk(i) != b"macro_rules" => {
+            if is_call && tk(i) == b"stringify" && pm_scope.is_some() {
+                inert_until = inert_until.max(close[i + 2]);
+            }
+            let mut rules = if is_call { macros.get(std::str::from_utf8(tk(i)).unwrap_or("")) } else { None };
+            // (a proc macro's function-like call: `name!(..)`, `path::name!(..)`, a name no `macro_rules!` has. A path
+            // from a proc-macro crate's name, `pm::answer!()`, is that crate's even beside a `macro_rules! answer`)
+            let pm_bang = match &pm_scope {
+                Some(sc) if is_call && tk(i) != b"macro_rules" && i > inert_until => {
                     let mut segs = vec![std::str::from_utf8(tk(i)).unwrap_or("")];
                     let mut k = i;
                     while k >= 3 && toks[k - 3].0 == 0 && sym(k - 2, b':') && sym(k - 1, b':') {
                         segs.insert(0, std::str::from_utf8(tk(k - 3)).unwrap_or(""));
                         k -= 3;
                     }
-                    sc.resolve(&segs, crate::pm::Kind::Bang)
+                    let own = segs.len() > 1 && pms.iter().any(|l| l.name == segs[0]);
+                    if rules.is_none() || own {
+                        sc.resolve(&segs, crate::pm::Kind::Bang).inspect(|_| rules = None)
+                    } else {
+                        None
+                    }
                 }
                 _ => None,
             };
@@ -1073,11 +1091,7 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
             let top = (depth[i] == 0 || item_scope(b, &toks, &close, &depth, i)) && !(i > 0 && sym(i - 1, b'='));
             // (a call in statement position: the items it expands to are items of the enclosing block, not
             // of the `({ .. })` around the rest: `fn main() { m!(); S }` with `struct S;` from m)
-            let stmt_pos = i == 0 || sym(i - 1, b';') || sym(i - 1, b'{') || sym(i - 1, b'}');
-            // (at the top, a call is an item only where an item starts: after an attribute too. Elsewhere it is
-            // in an item's expression or type, `const N: u32 = 0 + m!(u8);`, and keeps the `;` after it; after
-            // a binary operator its expansion is one operand, as rustc's is)
-            // (`crate::m!(..);` / `::m!(..);`: where its path starts)
+            // (`crate::m!(..);` / `::m!(..);` / `pm::bind!();`: where its path starts)
             let mut ps = i;
             while ps >= 3 && toks[ps - 3].0 == 0 && sym(ps - 2, b':') && sym(ps - 1, b':') {
                 ps -= 3;
@@ -1085,7 +1099,11 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
             if ps >= 2 && sym(ps - 2, b':') && sym(ps - 1, b':') && !(ps >= 3 && toks[ps - 3].0 == 0) {
                 ps -= 2;
             }
-            let item_start = stmt_pos || ps == 0 || sym(ps - 1, b';') || sym(ps - 1, b'{') || sym(ps - 1, b'}') || sym(ps - 1, b']');
+            let stmt_pos = ps == 0 || sym(ps - 1, b';') || sym(ps - 1, b'{') || sym(ps - 1, b'}');
+            // (at the top, a call is an item only where an item starts: after an attribute too. Elsewhere it is
+            // in an item's expression or type, `const N: u32 = 0 + m!(u8);`, and keeps the `;` after it; after
+            // a binary operator its expansion is one operand, as rustc's is)
+            let item_start = stmt_pos || sym(ps - 1, b']');
             let operand = top && !item_start && matches!(tk(ps - 1), b"+" | b"-" | b"*" | b"/" | b"%" | b"^" | b"|");
             // (not with attributes: a `#[cfg(false)]` item removed later would leave the attributes before it)
             // (`m! { .. }` in statement position is a statement by itself, whatever follows: `defer! { .. }
@@ -1134,7 +1152,9 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
         // 後ろから置き換える (1 行に収めるので、置き換えた範囲の改行は残す)
         reps.sort_by_key(|r| std::cmp::Reverse(r.0));
         // (展開したものの中にマクロの名前が無ければ、もう一周しなくてよい。proc macro の出力は次の周でも読む)
-        let again = pm_done || reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())));
+        // (also when it names a proc macro: a `macro_rules!` that gives `pm::answer!()` or a `#[wasm_bindgen]` item)
+        let names_pm = |t: &str| pms.iter().any(|l| l.macros.iter().any(|(m, _)| t.contains(m.as_str())));
+        let again = pm_done || reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())) || names_pm(&r.2));
         let has_cfg = cfg.is_some() && (pm_done || reps.iter().any(|r| r.2.contains("cfg")));
         let has_select = !has_cfg && reps.iter().any(|r| r.2.contains("cfg_select"));
         // (`env!($k)` in a template: its name is known only now)
@@ -1322,15 +1342,6 @@ fn find_calls(
                                 // 式の位置は `({ .. })`、トップレベルはアイテムとしてそのまま
                                 // (as expand_cfg: a call in statement position in a block puts its statements into the
                                 // block (followed by `;` or the block's end), or its items before the `({ .. })`)
-                                let stmt_pos = brace
-                                    && (i == 0
-                                        || matches!(&toks[i - 1], TokenTree::Punct(q) if q.as_char() == ';')
-                                        || matches!(&toks[i - 1], TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace));
-                                let next_semi = matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if q.as_char() == ';');
-                                let spliced = depth > 0 && stmt_pos && (next_semi || toks.get(i + 3).is_none()) && !body.contains('#');
-                                let drop_semi = spliced && next_semi && body.trim_end().ends_with(';');
-                                // (as expand_cfg: at the top, an item only where an item starts (after an attribute
-                                // too); after a binary operator, one operand that keeps the `;` after it)
                                 // (`crate::m!(..);`: where its path starts)
                                 let mut ps = i;
                                 while ps >= 3
@@ -1338,6 +1349,15 @@ fn find_calls(
                                 {
                                     ps -= 3;
                                 }
+                                let stmt_pos = brace
+                                    && (ps == 0
+                                        || matches!(&toks[ps - 1], TokenTree::Punct(q) if q.as_char() == ';')
+                                        || matches!(&toks[ps - 1], TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace));
+                                let next_semi = matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if q.as_char() == ';');
+                                let spliced = depth > 0 && stmt_pos && (next_semi || toks.get(i + 3).is_none()) && !body.contains('#');
+                                let drop_semi = spliced && next_semi && body.trim_end().ends_with(';');
+                                // (as expand_cfg: at the top, an item only where an item starts (after an attribute
+                                // too); after a binary operator, one operand that keeps the `;` after it)
                                 let item_start = ps == 0
                                     || matches!(&toks[ps - 1], TokenTree::Punct(q) if q.as_char() == ';')
                                     || matches!(&toks[ps - 1], TokenTree::Group(pg) if matches!(pg.delimiter(), proc_macro2::Delimiter::Brace | proc_macro2::Delimiter::Bracket));

@@ -724,17 +724,19 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         }
         pre
     };
+    // (the trait's part of the symbol where two traits of one type have a method of one name: Display / Debug's
+    // `fmt`, PartialEq<X> / PartialOrd<X>; for an impl for a reference too, `_xS.Debug.__ref_fmt`)
+    let disc = match owner.and_then(|o| o.impl_trait.as_deref()) {
+        Some(t) if t == "Display" || t == "Debug" => format!("{t}."),
+        Some(t) if t.starts_with("PartialEq<") || t.starts_with("PartialOrd<") => {
+            let t: String = t.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+            format!("{t}.")
+        }
+        _ => String::new(),
+    };
     let symbol = match owner {
         _ if is_extern || is_main => name.clone(),
-        Some(o) if !o.is_trait && !refs.is_empty() => format!("_x{}.{refs}{name}", o.base),
-        Some(o) => match o.impl_trait.as_deref() {
-            Some(t) if t == "Display" || t == "Debug" => format!("_x{}.{t}.{name}", o.base),
-            Some(t) if t.starts_with("PartialEq<") || t.starts_with("PartialOrd<") => {
-                let t: String = t.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
-                format!("_x{}.{t}.{name}", o.base)
-            }
-            _ => format!("_x{}.{name}", o.base),
-        },
+        Some(o) => format!("_x{}.{disc}{refs}{name}", o.base),
         None => format!("_x{name}"),
     };
     let is_trait = owner.is_some_and(|o| o.is_trait);

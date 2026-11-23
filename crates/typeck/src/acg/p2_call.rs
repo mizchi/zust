@@ -1582,7 +1582,7 @@ impl Cx<'_> {
                 };
                 let mut args = vec![a0];
                 args.extend(margs.iter().cloned());
-                let c = Expr::Call(Box::new(path_expr(&f)), args);
+                let c = Expr::Call(Box::new(with_targs(&f, gargs)), args);
                 return self.expr(&c, expected).map(Some);
             }
         }
@@ -1602,13 +1602,15 @@ impl Cx<'_> {
             let self_is = |id: u32, want: Ty| self.prog.sigs[id as usize].params.first() == Some(&want);
             let by_ref = |id: u32| matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(_, p)) if **p == t);
             let outer = lookup("__ref___ref_");
+            // (the method's own type arguments, `rr.size::<u16>()`, go with the call)
+            let callee = |f: &str| with_targs(f, gargs);
             // (`impl Tr for &str`'s `&self` method: its self is the receiver as it is)
             let shadow = lookup("__ref_").filter(|&o| self_is(o, t) && !outer.is_some_and(|id| self_is(id, t)));
             if let Some(o) = shadow.filter(|_| outer.is_some()) {
                 let f = self.prog.names[o as usize].clone();
                 let mut args = vec![recv.clone()];
                 args.extend(margs.iter().cloned());
-                let c = Expr::Call(Box::new(path_expr(&f)), args);
+                let c = Expr::Call(Box::new(callee(&f)), args);
                 return self.expr(&c, expected).map(Some);
             }
             if let Some(id) = outer {
@@ -1623,7 +1625,7 @@ impl Cx<'_> {
                     };
                     let mut args = vec![a0];
                     args.extend(margs.iter().cloned());
-                    let c = Expr::Call(Box::new(path_expr(&f)), args);
+                    let c = Expr::Call(Box::new(callee(&f)), args);
                     return self.expr(&c, expected).map(Some);
                 }
             }
@@ -1659,7 +1661,7 @@ impl Cx<'_> {
                     };
                     let mut args = vec![a0];
                     args.extend(margs.iter().cloned());
-                    let c = Expr::Call(Box::new(path_expr(&f)), args);
+                    let c = Expr::Call(Box::new(with_targs(&f, gargs)), args);
                     if id != id0 {
                         self.keep_overload.set(Some(id));
                     }
@@ -3432,7 +3434,7 @@ fn auto_trait_fails(prog: &Program, t: Ty, sync: bool, seen: &mut Vec<(u32, bool
                     ("Rc", _) | ("MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard", false) => true,
                     // (a RefCell's guards share the cell's non-atomic borrow flag: neither Send nor Sync, as in std)
                     ("Ref" | "RefMut", _) => true,
-                    ("Cell" | "RefCell" | "UnsafeCell" | "__Rcvr__", true) => true,
+                    ("Cell" | "RefCell" | "UnsafeCell" | "LazyCell" | "__Rcvr__", true) => true,
                     ("Mutex", true) => args.iter().any(|&a| send(a, seen)),
                     ("Arc" | "RwLock" | "OnceLock", true) | ("Arc", false) => args.iter().any(|&a| send(a, seen) || sync_(a, seen)),
                     _ => args.iter().any(|&a| auto_trait_fails(prog, a, sync, seen, d + 1)),
@@ -3522,3 +3524,10 @@ const MUT_SLICE_METHODS: &[&str] = &[
     "rsplit_mut", "rsplitn_mut", "select_nth_unstable", "select_nth_unstable_by", "select_nth_unstable_by_key", "each_mut",
     "make_ascii_uppercase", "make_ascii_lowercase", "partition_dedup",
 ];
+
+/// A call's path to the function f with the method call's own type arguments (`r.size::<u16>()` as `T::__ref_size::<u16>`)
+fn with_targs(f: &str, gargs: &[crate::parse::GArg]) -> Expr {
+    let mut p = crate::acg::path_of(f);
+    p.segs[0].args = gargs.to_vec();
+    Expr::Path(None, p)
+}

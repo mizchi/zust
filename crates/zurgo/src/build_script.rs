@@ -411,14 +411,17 @@ impl<'a> Runner<'a> {
             let deps_fp: Vec<String> = externs.iter().map(|(e, a)| format!("{e}={}", file_fp(a))).collect();
             let (cfgs, env) = crate_env(p, &lib.name, o.as_ref());
             let out_fp = env.iter().find(|(k, _)| k == "OUT_DIR").map(|(_, d)| scan(Path::new(d), None, true).fp()).unwrap_or_default();
-            let h = hash(&[&rustc_id(), &self.g.pkgs[m.0].id, &feats.join(","), &format!("{externs:?}"), &deps_fp.join(","), &format!("{:?}", o.as_ref().map(|o| (&o.cfgs, &o.env))), &out_fp]);
+            // (debug assertions as cargo's profile has them: off in a release build, although the host code is built at
+            //  opt-level 0, where rustc turns them on)
+            let da = if self.release { "debug-assertions=off" } else { "debug-assertions=on" };
+            let h = hash(&[&rustc_id(), &self.g.pkgs[m.0].id, &feats.join(","), &format!("{externs:?}"), &deps_fp.join(","), &format!("{:?}", o.as_ref().map(|o| (&o.cfgs, &o.env))), &out_fp, da]);
             let pm = lib.is_proc_macro();
             let file = deps_dir.join(format!("lib{}-{h}.{}", lib.name, if pm { "so" } else { "rlib" }));
             let fresh = file.is_file() && (self.g.pkgs[m.0].source.is_some() || src_fp(&p.dir, &self.skip) == std::fs::read_to_string(file.with_extension("fp")).unwrap_or_default());
             if !fresh {
                 let mut c = Command::new(rustc());
                 c.args(["--crate-name", &lib.name, "--edition", &lib.edition, "--crate-type", if pm { "proc-macro" } else { "lib" }, "--emit=link", "--cap-lints", "allow"]);
-                c.args(["-C", "opt-level=0", "-C", &format!("metadata={h}"), "-C", &format!("extra-filename=-{h}"), "--out-dir"]).arg(&deps_dir);
+                c.args(["-C", "opt-level=0", "-C", da, "-C", &format!("metadata={h}"), "-C", &format!("extra-filename=-{h}"), "--out-dir"]).arg(&deps_dir);
                 c.arg("-L").arg(format!("dependency={}", deps_dir.display()));
                 for f in &feats {
                     c.args(["--cfg", &format!("feature=\"{f}\"")]);
@@ -436,15 +439,22 @@ impl<'a> Runner<'a> {
                     }]);
                 }
                 c.envs(env.iter().map(|(k, v)| (k, v))).current_dir(&p.dir).arg(&lib.path);
+                // (the sources as they were when rustc started: a file saved while it ran leaves the artifact stale, so
+                //  its fingerprint is not written and the next build builds it again)
+                let before = src_fp(&p.dir, &self.skip);
                 run_rustc(c, &format!("`{} v{}`", p.name, p.version))?;
-                let _ = std::fs::write(file.with_extension("fp"), src_fp(&p.dir, &self.skip));
+                let after = src_fp(&p.dir, &self.skip);
+                if before == after {
+                    let _ = std::fs::write(file.with_extension("fp"), before);
+                } else {
+                    let _ = std::fs::remove_file(file.with_extension("fp"));
+                }
             }
             art.insert(m, file);
         }
         Ok(art)
     }
 }
-
 
 /// `CARGO_PKG_*` of a package (what cargo gives rustc and build scripts)
 pub fn pkg_env(pk: &Package) -> Vec<(String, String)> {

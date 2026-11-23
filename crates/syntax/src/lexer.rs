@@ -931,6 +931,15 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" && !extern_block {
                     nested_names.push((tok(nk).to_vec(), fn_bodies.last().unwrap().1));
                 }
+                // (an extern block's functions: names of the block's function, renamed like its other items when
+                // another function's block declares the name too; the declaration then keeps its symbol, link_name)
+                if extern_block {
+                    for q in ik + 1..e {
+                        if toks[q].0 == 0 && tok(q) == b"fn" && q + 1 < e && toks[q + 1].0 == 0 {
+                            nested_names.push((tok(q + 1).to_vec(), fn_bodies.last().unwrap().1));
+                        }
+                    }
+                }
                 k = e + 1;
                 continue;
             }
@@ -994,10 +1003,49 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
         // (同じトークンに複数あれば、元の順で最初のもの (renames.iter().find と同じ))
         at.sort();
         at.dedup_by_key(|x| x.0);
+        // (a foreign function's declaration, `fn abs(x: i32) -> i32;` with no body, renamed: it keeps its symbol, a
+        // `#[link_name = "abs"]` before it unless it has one)
+        let foreign_decl = |k: usize| -> Option<usize> {
+            if k < 1 || !(toks[k - 1].0 == 0 && tok(k - 1) == b"fn") {
+                return None;
+            }
+            let mut d = 0i32;
+            let mut j = k + 1;
+            while j < toks.len() {
+                if toks[j].0 == 1 {
+                    match tok(j) {
+                        b"(" | b"[" => d += 1,
+                        b")" | b"]" => d -= 1,
+                        b";" if d == 0 => break,
+                        b"{" if d == 0 => return None,
+                        _ => {}
+                    }
+                }
+                j += 1;
+            }
+            let mut st = k - 1;
+            while st >= 1 && toks[st - 1].0 == 0 && matches!(tok(st - 1), b"unsafe" | b"safe" | b"pub") {
+                st -= 1;
+            }
+            // (its attributes, back to the block's `{` or the previous item's `;`)
+            let mut a = st;
+            while a >= 1 && !(toks[a - 1].0 == 1 && matches!(tok(a - 1), b"{" | b";" | b"}")) {
+                a -= 1;
+                if toks[a].0 == 0 && tok(a) == b"link_name" {
+                    return None;
+                }
+            }
+            Some(st)
+        };
         let mut out = Vec::with_capacity(s.len() + 64);
         let mut last = 0;
         for &(k, ri) in &at {
             let t = toks[k];
+            if let Some(st) = foreign_decl(k) {
+                out.extend_from_slice(&s[last..toks[st].1]);
+                out.extend_from_slice(format!("#[link_name = \"{}\"] ", String::from_utf8_lossy(&renames[ri].2)).as_bytes());
+                last = toks[st].1;
+            }
             out.extend_from_slice(&s[last..t.1]);
             out.extend_from_slice(&renames[ri].3);
             last = t.2;
@@ -1499,17 +1547,27 @@ pub fn rename_module_collisions_in(src: &str, crates: &[String]) -> Option<Strin
 /// 元の桁 = 桁 - ずれ (その行で桁が col 以上の最後の項)
 /// Whether a `use` renames an item of std (`use std::cell::LazyCell as Lazy;`): the name it brings in is that path
 fn renames_std(src: &str) -> bool {
-    ["use std::", "use core::", "use alloc::", "use ::std::", "use ::core::", "use ::alloc::"].iter().any(|u| {
-        src.match_indices(u).any(|(i, _)| {
-            let rest = &src[i..];
-            let stmt = &rest[..rest.find(';').unwrap_or(rest.len())];
-            stmt.match_indices(" as ").any(|(j, _)| stmt[j + 4..].trim_start().starts_with(|c: char| c.is_alphabetic()))
-        })
+    // (one pass over the `use `s: the source can be large, and most have none of these)
+    let b = src.as_bytes();
+    src.match_indices("use ").any(|(i, _)| {
+        if i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_') {
+            return false;
+        }
+        let r = src[i + 4..].trim_start();
+        let r = r.strip_prefix("::").unwrap_or(r);
+        if !(r.starts_with("std::") || r.starts_with("core::") || r.starts_with("alloc::")) {
+            return false;
+        }
+        let stmt = &r[..r.find(';').unwrap_or(r.len())];
+        stmt.match_indices(" as ").any(|(j, _)| stmt[j + 4..].trim_start().starts_with(|c: char| c.is_alphabetic()))
     })
 }
 
 pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>) -> Option<String> {
-    if !src.contains("mod") && !renames_std(src) {
+    let has_mod = src.contains("mod");
+    // (only without modules: with them the pass runs anyway)
+    let std_renames = !has_mod && renames_std(src);
+    if !has_mod && !std_renames {
         return None;
     }
     let s = src.as_bytes();
@@ -1544,7 +1602,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         k += 1;
     }
     // (no module: only for a `use` that renames an item of std)
-    if mods.is_empty() && !renames_std(src) {
+    if mods.is_empty() && !std_renames && !renames_std(src) {
         return None;
     }
     // トークン k のスコープ (いちばん内側のモジュール。なければ usize::MAX = ルート)。
@@ -2021,7 +2079,15 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 }
             }
         }
-        let renamed_names: Vec<&[u8]> = renamed.iter().map(|r| r.1.as_slice()).collect();
+        // (and the names of std items under another name: `let release = 1;` beside `use std::mem::drop as release;`
+        // is the local)
+        let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));
+        let renamed_names: Vec<&[u8]> = renamed
+            .iter()
+            .map(|r| r.1.as_slice())
+            .chain(imports.iter().filter(|i| std_path(&i.2)).map(|i| i.1.as_slice()))
+            .chain(block_imports.iter().filter(|i| std_path(&i.3)).map(|i| i.2.as_slice()))
+            .collect();
         let mut k = 0;
         while k + 2 < toks.len() {
             if !is_id(k, b"fn") || toks[k + 1].0 != 0 {
@@ -2050,10 +2116,11 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 continue;
             }
             let pe = close[p];
-            let mut bound: Vec<&[u8]> = vec![];
+            // (each name and where it starts to be the local: a parameter from the parameters on, a `let` from itself on)
+            let mut bound: Vec<(&[u8], usize)> = vec![];
             for q in p + 1..pe {
                 if toks[q].0 == 0 && q + 2 <= pe && is_sym(q + 1, b':') && !is_sym(q + 2, b':') && renamed_names.contains(&tok(q)) {
-                    bound.push(tok(q));
+                    bound.push((tok(q), p + 1));
                 }
             }
             // (the body: the first `{` after the parameters, or none (`;`))
@@ -2072,13 +2139,14 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     // (a plain name: `let FnvHasher(mut h) = ..` is a pattern of the struct)
                     let plain = n + 1 < be && (is_sym(n + 1, b'=') || is_sym(n + 1, b';') || (is_sym(n + 1, b':') && !is_sym(n + 2, b':')));
                     if n < be && toks[n].0 == 0 && plain && renamed_names.contains(&tok(n)) {
-                        bound.push(tok(n));
+                        bound.push((tok(n), n));
                     }
                 }
             }
             if !bound.is_empty() {
+                let is_bound = |q: usize| bound.iter().any(|&(nm, from)| nm == tok(q) && q >= from);
                 for q in p + 1..be {
-                    if toks[q].0 == 0 && bound.contains(&tok(q)) && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':')) && !is_sym(q + 1, b':') || (toks[q].0 == 0 && bound.contains(&tok(q)) && q + 2 <= be && is_sym(q + 1, b':') && !is_sym(q + 2, b':')) {
+                    if toks[q].0 == 0 && is_bound(q) && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':')) && !is_sym(q + 1, b':') || (toks[q].0 == 0 && is_bound(q) && q + 2 <= be && is_sym(q + 1, b':') && !is_sym(q + 2, b':')) {
                         local_tok[q] = true;
                     }
                 }
@@ -2140,8 +2208,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     }
                     let re = || imported(m, &segs[cut]);
                     if let Some(nn) = renamed_in(m, &segs[cut]).or_else(re) {
-                        // segs[..=cut] を新しい名前にする
-                        repl.push((k, k + 3 * cut, nn));
+                        // segs[..=cut] を新しい名前にする (`::re::label`: the leading `::` too, as the name is the item's)
+                        repl.push((if leading { k - 2 } else { k }, k + 3 * cut, nn));
                         done = true;
                     }
                     break;
@@ -2183,7 +2251,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             false
         };
         let is_def = def_tok[k];
-        if !next_colon || is_def || in_where() {
+        {
             let n = tok(k);
             // (a glob import is shadowed by the scope's own item of that name: the crate root's `enum Thing` beside
             // `use thing::*;` stays the root's)
@@ -2198,8 +2266,11 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| imported(g.1, n)) });
             // (not a macro's name: `use core::panic as p;` then `p!()` stays as it is written)
             let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));
+            // (a name before a `:` only when it is no field: the walk back to a `where` is for a name that is renamed)
             if let Some(nn) = nn.filter(|nn| !(std_path(nn) && k + 1 < toks.len() && is_sym(k + 1, b'!'))) {
-                repl.push((k, k, nn));
+                if !next_colon || is_def || in_where() {
+                    repl.push((k, k, nn));
+                }
             }
         }
         k += 1;

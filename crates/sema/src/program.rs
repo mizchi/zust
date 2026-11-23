@@ -2666,7 +2666,7 @@ impl Program {
                 }
                 match name {
                     "Rc" => return false,
-                    "Cell" | "RefCell" if sync => return false,
+                    "Cell" | "RefCell" | "LazyCell" if sync => return false,
                     // (the prelude's own types hold raw pointers: what they hold decides)
                     _ => {}
                 }
