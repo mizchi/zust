@@ -1,0 +1,2 @@
+// expect: does not export `Hid`
+import type { Hid } from "../ts/model.ts";

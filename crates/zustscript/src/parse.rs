@@ -327,7 +327,7 @@ impl Parser {
                     variants.push((v, tys, ret));
                     self.eat(",")?;
                 }
-                Ok(Item::Enum { name, params, variants, pos })
+                Ok(Item::Enum { name, params, variants, pos, from: None })
             }
             "fn" => {
                 let (name, _) = self.ident()?;
