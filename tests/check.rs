@@ -392,3 +392,19 @@ fn unreachable_code_in_expressions() {
     let ok = "#![deny(unreachable_code)]\nfn f(b: bool) -> bool {\n    let x = b || return false;\n    if b {\n        return true;\n    }\n    x\n}\nfn main() {}\n";
     assert_eq!(first(ok), None);
 }
+
+/// `#![deny(unused_variables)]` beyond `let`: a `match` arm's binding its guard and body never read (an or-pattern's
+/// names once), a closure's parameter its body never reads, a `for` loop's binding the body never reads
+#[test]
+fn unused_variables_in_arms_closures_and_loops() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let arm = "#![deny(unused_variables)]\nfn main() {\n    let v = match 0u8 {\n        a => 0,\n    };\n    let _ = v;\n}\n";
+    assert_eq!(first(arm), Some((4, "unused variable: `a`".to_string())));
+    let or = "#![deny(unused_variables)]\nenum E {\n    A(i32),\n    B(i32),\n}\nfn main() {\n    match E::A(1) {\n        E::A(x) | E::B(x) => {}\n    }\n}\n";
+    assert_eq!(first(or), Some((8, "unused variable: `x`".to_string())));
+    let closure = "#![deny(unused_variables)]\nfn main() {\n    let f = |x: u8| 1;\n    let _ = f(2);\n}\n";
+    assert_eq!(first(closure), Some((3, "unused variable: `x`".to_string())));
+    let ok = "#![deny(unused_variables)]\nfn main() {\n    let v = [1u8, 2];\n    for x in v.iter() {\n        let _ = x;\n    }\n    let n = match 3u8 {\n        k if k > 2 => 1,\n        _ => 0,\n    };\n    let g = |y: u8| y + n;\n    let _ = g(1);\n}\n";
+    assert_eq!(first(ok), None);
+}
