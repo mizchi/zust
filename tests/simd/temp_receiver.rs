@@ -31,5 +31,8 @@ fn main() {
     let a = unsafe { _mm_set1_epi8(-1) };
     let b = unsafe { _mm_set1_epi8(0) };
     let r = id(&a).loan();
+    // (the `&self` receiver is the value itself, not a copy: `loan` returns its address)
+    let s = a.loan();
     println!("{} {} {}", pick(true, a, b), pick(false, a, b), unsafe { _mm_movemask_epi8(*r) });
+    println!("{} {}", std::ptr::eq(r, &a), std::ptr::eq(s, &a));
 }

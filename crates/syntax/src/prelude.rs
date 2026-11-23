@@ -766,6 +766,49 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
     out
 }
 
+/// Whether the source has a path `Box::from` in any spelling the parser takes: spaces around `::`, a turbofish
+/// (`Box::<[u8]>::from`). Comments are not told apart (a match there only selects a few names more)
+fn box_from_path(src: &str) -> bool {
+    let b = src.as_bytes();
+    let ws = |mut i: usize| {
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        i
+    };
+    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let colons = |i: usize| (b.get(i) == Some(&b':') && b.get(i + 1) == Some(&b':')).then_some(i + 2);
+    for (k, _) in src.match_indices("Box") {
+        if k > 0 && word(b[k - 1]) || b.get(k + 3).is_some_and(|&c| word(c)) {
+            continue;
+        }
+        let Some(mut i) = colons(ws(k + 3)) else { continue };
+        i = ws(i);
+        if b.get(i) == Some(&b'<') {
+            let mut d = 0;
+            while i < b.len() {
+                match b[i] {
+                    b'<' => d += 1,
+                    b'>' => {
+                        d -= 1;
+                        if d == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            let Some(j) = colons(ws(i + 1)) else { continue };
+            i = ws(j);
+        }
+        if src[i..].starts_with("from") && !b.get(i + 4).is_some_and(|&c| word(c)) {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn select(user_src: &str, user_items: &[SrcItem]) -> String {
     select_with(user_src, user_items, &mut SelectCache::default())
 }
@@ -1071,7 +1114,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.insert("__exr_array_from_fn");
     }
     // (`Box::from(s)` of a slice is `s.to_vec().into_boxed_slice()`)
-    if sc.has("Box::from") || sc.has("Box:: from") || sc.has("Box ::") || (sc.has("Box::<") && sc.has(">::from")) {
+    if sc.has("Box") && box_from_path(sc.src) {
         need.extend(["to_vec", "__exr_slice_to_vec", "Vec", "into_boxed_slice"]);
     }
     if sc.has("Cow") {

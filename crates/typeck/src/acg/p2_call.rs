@@ -1818,6 +1818,40 @@ impl Cx<'_> {
                 return self.call_fn(id, Some((r, Ty::Ref(true, intern(t)))), &args, tf, expected, SP).map(Some);
             }
         }
+        // (`a.loan()` / `id(&a).loan()` with `fn loan(&self) -> &Self`: the address of a itself, not of a copy, so the
+        // result is `a` (`ptr::eq(r, &a)`))
+        if matches!(self.prog.sigs[id as usize].params.first(), Some(Ty::Ref(false, _))) && !lit_int && (is_place_expr(recv) || matches!(self.peek(recv), Some(Ty::Ref(..)))) {
+            let (r, rt) = if matches!(self.peek(recv), Some(Ty::Ref(..))) {
+                let (v, mut vt) = self.expr(recv, None)?;
+                let mut v = v.ok_or("internal: receiver without a value")?;
+                while let Ty::Ref(_, i @ Ty::Ref(..)) = vt {
+                    v = self.b.ins().load(PTR, mf(), v, 0);
+                    vt = *i;
+                }
+                (v, vt)
+            } else {
+                let re = self.keep_expr(Expr::Ref(false, Box::new(recv.clone())));
+                let (v, vt) = self.expr(re, None)?;
+                (v.ok_or("internal: receiver without an address")?, vt)
+            };
+            if matches!(rt, Ty::Ref(_, i) if *i == t) {
+                let args: Vec<&Expr> = margs.iter().collect();
+                return self.call_fn(id, Some((r, Ty::Ref(false, intern(t)))), &args, tf, expected, SP).map(Some);
+            }
+            // (another shape: through a copy, below; the receiver is evaluated again only when it is a place)
+            if !is_place_expr(recv) {
+                let mut v = r;
+                let mut vt = rt;
+                while let Ty::Ref(_, i) = vt {
+                    v = self.b.ins().load(clif_ty(*i).unwrap_or(PTR), mf(), v, 0);
+                    vt = *i;
+                }
+                let a = self.temp(t);
+                self.b.ins().store(mf(), v, a, 0);
+                let args: Vec<&Expr> = margs.iter().collect();
+                return self.call_fn(id, Some((a, Ty::Ref(false, intern(t)))), &args, tf, expected, SP).map(Some);
+            }
+        }
         // 受け手: 値ならそのまま、&self ならメモリに置いてそのアドレス
         let (v, vt) = self.expr(recv, lit_int.then_some(t))?;
         let mut v = v.unwrap();
