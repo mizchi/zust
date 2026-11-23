@@ -129,10 +129,25 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -
     let keyword = |w: &str| matches!(w, "else" | "loop" | "unsafe" | "move" | "async" | "const" | "match" | "if" | "while" | "in" | "return" | "break" | "try");
     // (the start of each path the program's patterns name, from the parsed source: `E::A =>`, `let S { .. } =`,
     // `Some(E::B) | ..`, the parameters of fns and closures; None when the source does not parse)
-    let (pat_starts, binders) = match pattern_paths(region) {
-        Some((p, b)) => (Some(p), Some(b)),
-        None => (None, None),
-    };
+    // (the parsed region runs through the closing braces after the last item, an impl's or a trait's `}` that is no
+    // item's; a region that does not parse tells patterns from expressions nowhere: no dead parts then)
+    let mut end = last.end;
+    let sb = src.as_bytes();
+    loop {
+        while end < sb.len() && sb[end].is_ascii_whitespace() {
+            end += 1;
+        }
+        if sb.get(end) == Some(&b'}') {
+            end += 1;
+        } else if sb.get(end..end + 2) == Some(b"//") {
+            while end < sb.len() && sb[end] != b'\n' {
+                end += 1;
+            }
+        } else {
+            break;
+        }
+    }
+    let (pat_starts, binders) = pattern_paths(src.get(base..end)?)?;
     // (a token's place as the parser counts it: its line, its column in chars)
     let line_starts: Vec<usize> = std::iter::once(0).chain(region.match_indices('\n').map(|(i, _)| i + 1)).collect();
     let pos_of = |k: usize| -> (u32, u32) {
@@ -149,15 +164,18 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -
         while o != none {
             if o >= 2 && sym(o - 1, b'!') && toks[o - 2].0 == 0 && !keyword(word(o - 2)) {
                 let m = word(o - 2);
+                // (`matches!(e, PAT if guard)`: the expression and the guard are expressions, the pattern a pattern)
                 if m == "matches" {
-                    let comma = (o + 1..close[o].min(n)).find(|&q| encl[q] == o && sym(q, b','));
-                    return comma.is_none_or(|c| ps > c);
+                    let end = close[o].min(n);
+                    let Some(c) = (o + 1..end).find(|&q| encl[q] == o && sym(q, b',')) else { return true };
+                    let guard = (c + 1..end).find(|&q| encl[q] == o && word(q) == "if");
+                    return ps > c && guard.is_none_or(|g| ps < g);
                 }
                 return !expr_macro(m);
             }
             o = encl[o];
         }
-        pat_starts.as_ref().is_none_or(|s| s.contains(&pos_of(ps)))
+        pat_starts.contains(&pos_of(ps))
     };
     // (the path an occurrence at k is the last segment of: back over `a::`)
     let path_start = |k: usize| -> usize {
@@ -299,7 +317,7 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem], warn_denied: bool) -
             return None;
         }
         let v = word(k);
-        if binders.as_ref().is_none_or(|m| m.get(v).copied() != Some(1)) {
+        if binders.get(v).copied() != Some(1) {
             return None;
         }
         let mut found = None;
@@ -771,6 +789,8 @@ fn pattern_paths(region: &str) -> Option<(FxSet<(u32, u32)>, FxMap<String, usize
                 ps.iter().for_each(|(p, _)| pat(p, out));
                 expr(body, out);
             }
+            // (a macro's arguments, parsed where they hold a closure: its parameters are bindings too)
+            Expr::Macro(_, g, sp) => crate::ast_closure::macro_exprs_at(g, sp.at).iter().for_each(|x| expr(x, out)),
             e => crate::ast_closure::each_child_pub(e, &mut |c| expr(c, out)),
         }
     }

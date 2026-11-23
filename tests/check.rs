@@ -484,4 +484,12 @@ fn review72_second_round() {
     assert_eq!(first(src), None, "bitwise_or_ok");
     let src = "#![deny(dead_code)]\nstruct S {\n    other: u8,\n}\nstruct T {\n    value: u8,\n}\nfn main() {\n    let x = S { other: 1 };\n    let _ = x.other;\n    let f = |x: T| x.value;\n    let _ = f(T { value: 1 });\n}\n";
     assert_eq!(first(src), None, "closure_shadow_ok");
+    // (sixth round: the parsed region runs through an impl's closing brace after the last member; a `matches!` guard
+    // is an expression; a closure's parameter inside a macro's arguments is a binding too)
+    let src = "#![deny(dead_code)]\nenum E {\n    A,\n}\nfn main() {\n    let _ = E::A;\n    E::ping();\n}\nimpl E {\n    fn ping() {}\n}\n";
+    assert_eq!(first(src), None, "impl_last_ok");
+    let src = "#![deny(dead_code)]\nenum E {\n    A,\n    B,\n}\nfn main() {\n    let _ = matches!(E::A, _ if E::B as u8 == 1);\n}\n";
+    assert_eq!(first(src), None, "matches_guard_ok");
+    let src = "#![deny(dead_code)]\nstruct S {\n    other: u8,\n}\nstruct T {\n    value: u8,\n}\nfn main() {\n    let x = S { other: 1 };\n    let t = T { value: 1 };\n    assert!((|x: T| x.value)(t) == x.other);\n}\n";
+    assert_eq!(first(src), None, "closure_in_macro_ok");
 }
