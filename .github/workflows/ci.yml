@@ -46,8 +46,9 @@ jobs:
       - name: Install wild, and valgrind in the background
         run: |
           command -v wild || cargo install --locked wild-linker@0.11.0
-          # (the "Wait for valgrind" step waits for it: the build does not need valgrind)
-          { scripts/ci_install_valgrind.sh >~/valgrind-install.log 2>&1 </dev/null && echo 0 || echo 1; } >~/valgrind-install.done &
+          # (the "Wait for valgrind" step waits for it: the build does not need valgrind. Nothing of the step's stdout or
+          # stderr stays open in the background, or the runner waits for it before the next step)
+          { scripts/ci_install_valgrind.sh >~/valgrind-install.log 2>&1 </dev/null && echo 0 || echo 1; } >~/valgrind-install.done 2>/dev/null &
       - name: Build
         run: cargo build --release --workspace
       - name: Wait for valgrind
