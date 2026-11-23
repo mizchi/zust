@@ -66,6 +66,29 @@ impl Cx<'_> {
     /// lifetime_arity of the program's own structs and enums a signature's type t names (not in fn pointer, `dyn` and
     /// `impl` types, nor a type parameter tps names). Not the prelude's, some of which leave out lifetimes std's have
     /// (`Cow<'a, B>`)
+    /// The type of a place `let _ = place;` names (a variable and its fields), when known: E0609 for a field its type
+    /// does not have (through references and boxes; not through a `Deref` of the program's, which is not followed)
+    pub(crate) fn wild_place_ty(&self, e: &Expr) -> R<Option<Ty>> {
+        match e {
+            Expr::Paren(x) => self.wild_place_ty(x),
+            Expr::Path(None, p) if p.segs.len() == 1 => Ok(self.lookup(&p.segs[0].name).map(|x| x.1)),
+            Expr::Field(x, f, sp) => {
+                let Some(t) = self.wild_place_ty(x)? else { return Ok(None) };
+                let mut t = t;
+                while let Ty::Ref(_, i) | Ty::Box(i) = t {
+                    t = *i;
+                }
+                let Ty::Struct(sid) = t else { return Ok(None) };
+                match self.prog.field(sid, f) {
+                    Some((ft, _)) => Ok(Some(ft)),
+                    None if self.prog.method(sid, "deref").is_some() || self.prog.is_placeholder(sid) => Ok(None),
+                    None => Err(self.at(sp.at, format!("no field `{f}` on type `{}` (E0609)", self.prog.tn(t)))),
+                }
+            }
+            _ => Ok(None),
+        }
+    }
+
     pub(crate) fn sig_lt_arity(&self, t: &crate::parse::Ty, tps: &[&str], depth: u32) -> R<()> {
         use crate::parse::Ty as PTy;
         if depth > 16 {
@@ -953,7 +976,20 @@ impl Cx<'_> {
                 Ok(r)
             }
             Expr::Unary(op, x, _) if op == "*" => {
-                let p = self.place(e)?;
+                // (a reference copied out of what a call's result points into (`*names.first().unwrap()` with
+                // `names: Vec<&str>`): it does not hold the borrow of names that reached it (bk_copy_out))
+                let copy_out = self.bk_on() && !is_place_expr(x) && matches!(self.peek(x), Some(Ty::Ref(_, i)) if self.bk_ty(*i) == (true, true));
+                if copy_out {
+                    self.bk_frame();
+                }
+                let p = self.place(e);
+                if copy_out {
+                    let srcs = self.bk.frames.pop().unwrap_or_default();
+                    if let Some(Ty::Ref(_, u)) = self.peek(x) {
+                        self.bk_copy_out(&srcs, *u);
+                    }
+                }
+                let p = p?;
                 // (`*slice` as a value: its size is not known; only a place (a pattern, `&*s`) can be one)
                 if matches!(p.ty(), Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
                     return err(expr_start(e), format!("the size for values of type `{}` cannot be known at compilation time", self.prog.tn(p.ty())));
@@ -1321,8 +1357,27 @@ impl Cx<'_> {
             }
             Expr::Repeat(..) => self.repeat_lit(e, expected),
             Expr::Index(_, ix, _) if matches!(&**ix, Expr::Range(..)) => err(SP, "range indexing needs a reference: `&a[lo..hi]`"),
-            Expr::Index(..) => {
-                let p = self.place(e)?;
+            Expr::Index(b, _, _) => {
+                // (a reference copied out of what an `index` call gives (`m[&1]` with `m: HashMap<u8, &str>`): it does
+                // not hold the borrow of m that reached it (bk_copy_out). A Vec's or an array's element is a place of
+                // the local, which holds only what the local holds)
+                let copy_out = self.bk_on() && matches!(self.peek(b).map(|t| self.strip_refs(t)), Some(Ty::Struct(sid)) if self.vec_fields(sid).is_none());
+                if copy_out {
+                    self.bk_frame();
+                }
+                let p = self.place(e);
+                if copy_out {
+                    let srcs = self.bk.frames.pop().unwrap_or_default();
+                    match &p {
+                        Ok(p) if self.bk_ty(p.ty()) == (true, true) => self.bk_copy_out(&srcs, p.ty()),
+                        _ => {
+                            for s in srcs {
+                                self.bk.src(s);
+                            }
+                        }
+                    }
+                }
+                let p = p?;
                 if self.bk_on() && !self.bk_ty(p.ty()).0 {
                     self.bk_acc(e, borrowck::Acc::Move);
                 }
@@ -2243,6 +2298,18 @@ impl Cx<'_> {
                 if let Some((sp, assign)) = self.owned_mutation(body, n) {
                     let msg = if assign { format!("cannot assign to `{n}`, as it is not declared as mutable (E0594)") } else { format!("cannot borrow `{n}` as mutable, as it is not declared as mutable (E0596)") };
                     return Err(self.at(sp, msg));
+                }
+            }
+        }
+        // (a `let _ = s.f;` the body skips (a fake read, which captures nothing): its fields exist, as the lowering of
+        // a read of the place would have checked (E0609))
+        if !cd.fake_reads.is_empty() {
+            let Expr::Closure(_, _, _, body, _) = c else { unreachable!() };
+            let mut ws = vec![];
+            crate::ast_closure::wild_reads(body, &mut ws);
+            for w in &ws {
+                if crate::ast_closure::wild_root(w).is_some_and(|n| cd.fake_reads.iter().any(|x| x == n)) {
+                    self.wild_place_ty(w)?;
                 }
             }
         }
