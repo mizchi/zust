@@ -231,7 +231,9 @@ pub fn expand(lib: &Lib, name: &str, attr: Option<&str>, body: &str, env: &[(Str
     let ok = res.get("Ok").ok_or_else(|| format!("the proc-macro server's answer to ExpandMacro: {r:?}"))?;
     // (ExpandMacroExtended: {tree, span_data_table})
     let ft = ok.get("tree").unwrap_or(ok);
-    Ok(format!("{MARK} {}", unflat(ft, v)?))
+    let out = unflat(ft, v)?;
+    crate::lexer::PM_EXPANDED.store(true, std::sync::atomic::Ordering::Relaxed);
+    Ok(format!("{MARK} {out}"))
 }
 
 // ---------------------------------------------------------------------------------------------------------------

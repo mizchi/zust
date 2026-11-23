@@ -1003,14 +1003,19 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
         let mut i = 0;
         while i + 2 < toks.len() {
             let is_call = toks[i].0 == 0 && sym(i + 1, b'!') && close[i + 2] != usize::MAX;
-            if is_call && tk(i) == b"stringify" && pm_scope.is_some() {
+            // (most tokens are no call: on at once, as before)
+            if !is_call {
+                i += 1;
+                continue;
+            }
+            if tk(i) == b"stringify" && pm_scope.is_some() {
                 inert_until = inert_until.max(close[i + 2]);
             }
-            let mut rules = if is_call { macros.get(std::str::from_utf8(tk(i)).unwrap_or("")) } else { None };
+            let mut rules = macros.get(std::str::from_utf8(tk(i)).unwrap_or(""));
             // (a proc macro's function-like call: `name!(..)`, `path::name!(..)`, a name no `macro_rules!` has. A path
             // from a proc-macro crate's name, `pm::answer!()`, is that crate's even beside a `macro_rules! answer`)
             let pm_bang = match &pm_scope {
-                Some(sc) if is_call && tk(i) != b"macro_rules" && i > inert_until => {
+                Some(sc) if tk(i) != b"macro_rules" && i > inert_until => {
                     let mut segs = vec![std::str::from_utf8(tk(i)).unwrap_or("")];
                     let mut k = i;
                     while k >= 3 && toks[k - 3].0 == 0 && sym(k - 2, b':') && sym(k - 1, b':') {
@@ -1057,10 +1062,13 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
                 }
             }
             let ge = close[i + 2];
+            // (`line:col` of the call, for an error: counted only then, as it reads the text up to the call)
             let at = toks[i].1;
-            let line = b[..at].iter().filter(|&&c| c == b'\n').count() + 1;
-            let ls = b[..at].iter().rposition(|&c| c == b'\n').map(|k| k + 1).unwrap_or(0);
-            let col = text[ls..at].chars().count();
+            let pos = || {
+                let line = b[..at].iter().filter(|&&c| c == b'\n').count() + 1;
+                let ls = b[..at].iter().rposition(|&c| c == b'\n').map(|k| k + 1).unwrap_or(0);
+                (line, text[ls..at].chars().count())
+            };
             let body: Option<String> = match rules {
                 Some(rules) => {
                     let ts = TokenStream::from_str(&text[toks[i + 2].2..toks[ge].1]).map_err(|e| format!("1:1: {e}"))?;
@@ -1080,10 +1088,14 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
                 None => {
                     let (lib, name) = pm_bang.expect("a proc macro's call");
                     pm_done = true;
-                    Some(crate::pm::expand(lib, &name, None, &text[toks[i + 2].2..toks[ge].1], env).map_err(|e| format!("{line}:{}: {e}", col + 1))?)
+                    Some(crate::pm::expand(lib, &name, None, &text[toks[i + 2].2..toks[ge].1], env).map_err(|e| {
+                        let (line, col) = pos();
+                        format!("{line}:{}: {e}", col + 1)
+                    })?)
                 }
             };
             let Some(body) = body else {
+                let (line, col) = pos();
                 return Err(format!("{line}:{}: no rules of `{}!` matched this call", col + 1, String::from_utf8_lossy(tk(i))));
             };
             // 式の位置は `({ .. })`、トップレベルと `mod` / `impl` / `trait` の中はアイテムとしてそのまま

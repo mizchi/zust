@@ -748,6 +748,9 @@ pub fn tokenize(s: &[u8]) -> Vec<(u8, usize, usize)> {
 /// What a proc macro's expansion starts with (crate::pm): a comment, so the preprocessing knows that a line holds one
 pub const PM_MARK: &str = "/*zust:pm*/";
 
+/// Whether this process expanded a proc macro (crate::pm::expand): only then can a text hold PM_MARK
+pub static PM_EXPANDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// 関数の本体の中に書いたアイテム (`fn helper() {..}` / `struct` / `enum` / `const` / `use`) をファイルの末尾へ移す。
 /// 元の場所は空白にして (改行は残す)、後ろの行番号を変えない
 pub fn hoist_nested_items(src: &str) -> Option<String> {
@@ -780,11 +783,14 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     ];
     let indented = src.split('\n').any(|l| {
         let t = l.trim_start();
-        t.len() < l.len() && KWS.iter().any(|k| t.starts_with(k))
+        // (the keywords' first letters first: most lines start with none of them)
+        t.len() < l.len()
+            && matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p'))
+            && KWS.iter().any(|k| t.starts_with(k))
     });
     // (a proc macro's output is one line, marked (PM_MARK): the items in its bodies, `{#[link(..)] extern "C" {..}`,
-    // are not at a line's start)
-    if !indented && !src.contains(PM_MARK) {
+    // are not at a line's start. Looked for only once this process expanded one)
+    if !indented && !(PM_EXPANDED.load(std::sync::atomic::Ordering::Relaxed) && src.contains(PM_MARK)) {
         return None;
     }
     let s = src.as_bytes();
@@ -1547,20 +1553,36 @@ pub fn rename_module_collisions_in(src: &str, crates: &[String]) -> Option<Strin
 /// 元の桁 = 桁 - ずれ (その行で桁が col 以上の最後の項)
 /// Whether a `use` renames an item of std (`use std::cell::LazyCell as Lazy;`): the name it brings in is that path
 fn renames_std(src: &str) -> bool {
-    // (one pass over the `use `s: the source can be large, and most have none of these)
+    // (the source can be large and most have none: `contains` first (it is much faster than `match_indices` over a
+    // large text), then the lines that have a `use `)
+    if !src.contains("use ") {
+        return false;
+    }
     let b = src.as_bytes();
-    src.match_indices("use ").any(|(i, _)| {
-        if i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_') {
-            return false;
+    let mut off = 0;
+    for line in src.split('\n') {
+        let start = off;
+        off += line.len() + 1;
+        if !line.contains("use ") {
+            continue;
         }
-        let r = src[i + 4..].trim_start();
-        let r = r.strip_prefix("::").unwrap_or(r);
-        if !(r.starts_with("std::") || r.starts_with("core::") || r.starts_with("alloc::")) {
-            return false;
+        for (j, _) in line.match_indices("use ") {
+            let i = start + j;
+            if i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_') {
+                continue;
+            }
+            let r = src[i + 4..].trim_start();
+            let r = r.strip_prefix("::").unwrap_or(r);
+            if !(r.starts_with("std::") || r.starts_with("core::") || r.starts_with("alloc::")) {
+                continue;
+            }
+            let stmt = &r[..r.find(';').unwrap_or(r.len())];
+            if stmt.match_indices(" as ").any(|(j, _)| stmt[j + 4..].trim_start().starts_with(|c: char| c.is_alphabetic())) {
+                return true;
+            }
         }
-        let stmt = &r[..r.find(';').unwrap_or(r.len())];
-        stmt.match_indices(" as ").any(|(j, _)| stmt[j + 4..].trim_start().starts_with(|c: char| c.is_alphabetic()))
-    })
+    }
+    false
 }
 
 pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>) -> Option<String> {

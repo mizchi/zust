@@ -1157,10 +1157,9 @@ impl Parser {
     fn path(&mut self, in_ty: bool) -> R<Path> {
         let pos = self.pos();
         // (`::name::..` names the extern crate `name` (2018 and later): the crate's items are reached as `name::..`
-        // is. Kept for `::crate` / `::self` / `::super`, which are errors (E0433), and for one name, `::choose()`,
-        // which is the crate root's in 2015 (a crate is no value in 2018))
-        let lead = self.eat_punct("::");
-        let global = lead && self.tok(0).is_some_and(|t| matches!(t.text.as_str(), "crate" | "self" | "super" | "Self"));
+        // is. Kept for `::crate` / `::self` / `::super`, which are errors (E0433). One name, `::f()` (2015: the crate
+        // root's), is the item `f`, which is where the flattened program has it)
+        let global = self.eat_punct("::") && self.tok(0).is_some_and(|t| matches!(t.text.as_str(), "crate" | "self" | "super" | "Self"));
         let mut segs = Vec::new();
         loop {
             let st = self.i;
@@ -1192,7 +1191,6 @@ impl Parser {
                 self.i += 2;
                 continue;
             }
-            let global = global || (lead && segs.len() == 1);
             return Ok(Path { global: global, segs: segs, pos });
         }
     }
