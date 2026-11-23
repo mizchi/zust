@@ -75,6 +75,20 @@ fn macro_made_tests_are_reported() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// A `#[should_panic]` test passes on a panic only: an exit with 101 and no panic fails it. (Not in the comparison
+/// with rustc: there, `exit` ends every test of the process)
+#[test]
+fn should_panic_needs_a_panic() {
+    let d = dir("test_harness_exit");
+    let src = d.join("e.rs");
+    std::fs::write(&src, "#[test]\n#[should_panic]\nfn exits() {\n    std::process::exit(101);\n}\n#[test]\n#[should_panic]\nfn panics_empty() {\n    panic!(\"\");\n}\n").unwrap();
+    let o = Command::new(ZUSTC).args(["--test", "--no-cache"]).arg(&src).arg("-o").arg(d.join("e")).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_ne!(out(&d.join("e"), &["exits", "--exact"]).0, Some(0));
+    assert_eq!(out(&d.join("e"), &["panics_empty", "--exact"]).0, Some(0));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// `--cfg name` and `--cfg name="value"`, as rustc takes them
 #[test]
 fn cfg_flag() {
