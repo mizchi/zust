@@ -2770,6 +2770,10 @@ fn part16_mut_argument_flows() {
     let d = check("fn push<'a>(r: &'a i32, v: &mut Vec<&'a i32>) { v.push(r) }\nfn save<'a>(r: &'a i32, to: &mut [&'a i32]) { to[0] = r; }\nfn put<T>(a: T, v: &mut Vec<T>) { v.push(a) }\nfn a() {\n    let mut v = vec![];\n    let mut x = 1;\n    push(&x, &mut v);\n    x = 2;\n    println!(\"{:?} {}\", v, x);\n}\nfn b() {\n    let init = 0i32;\n    let mut x = 1;\n    let mut out = [&init];\n    save(&x, &mut out);\n    x = 3;\n    println!(\"{:?} {}\", out, x);\n}\nfn c() {\n    let mut v = vec![];\n    let mut x = 1;\n    put(&x, &mut v);\n    x = 2;\n    println!(\"{:?} {}\", v, x);\n}\nfn main() { a(); b(); c(); }\n");
     let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
     assert!(lines == vec![8, 16, 23] && d.iter().all(|x| x.1.contains("because it is borrowed")), "{d:?}");
-    // (not through an elided or another lifetime, nor after the borrower's last use)
+    // (not through an elided or another lifetime, nor after the borrower's last use; behind a reference, what the
+    // referent holds: `swap(&mut values, &mut x.values)` stores no loan of values in x (borrowck/borrowck-mut-uniq.rs))
+    assert_eq!(check("struct Ints { values: Vec<isize> }\nfn add_int(x: &mut Ints, v: isize) {\n    let mut values = Vec::new();\n    std::mem::swap(&mut values, &mut x.values);\n    values.push(v);\n    std::mem::swap(&mut values, &mut x.values);\n}\nfn main() {\n    let mut i = Ints { values: vec![] };\n    add_int(&mut i, 1);\n    println!(\"{}\", i.values.len());\n}\n"), vec![]);
+    let d = check("fn main() {\n    let mut x = 1;\n    let k = 0;\n    let mut a = &k;\n    let mut b = &x;\n    std::mem::swap(&mut a, &mut b);\n    x = 2;\n    println!(\"{} {}\", a, b);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
     assert_eq!(check("fn f(_a: &u8, _v: &mut Vec<&u8>) {}\nfn g<'a, 'b>(_a: &'a u8, _v: &mut Vec<&'b u8>) {}\nfn push<'a>(r: &'a u8, v: &mut Vec<&'a u8>) { v.push(r) }\nfn main() {\n    let k = 0u8;\n    let mut v: Vec<&u8> = vec![&k];\n    let mut x = 1u8;\n    f(&x, &mut v);\n    g(&x, &mut v);\n    x = 2;\n    let mut w = vec![];\n    push(&x, &mut w);\n    println!(\"{:?} {:?}\", v, w);\n    x = 3;\n    println!(\"{}\", x);\n}\n"), vec![]);
 }

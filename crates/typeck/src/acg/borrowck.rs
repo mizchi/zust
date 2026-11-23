@@ -3371,6 +3371,10 @@ impl Cx<'_> {
         for (i, a) in args.iter().enumerate() {
             let Ty::Ref(true, inner) = sig.params[i] else { continue };
             let Expr::Ref(true, place) = strip_paren(a) else { continue };
+            // (only into a referent that may hold references (not `swap(&mut v, &mut w)` of two `Vec<u8>`))
+            if !self.peek(place).is_some_and(|t| self.bk_ty(t).1) {
+                continue;
+            }
             // (what the referent may hold: the lifetimes it names (after the reference's own), its type parameters)
             let lts: Vec<u8> = rs.and_then(|r| r.slots.get(i)).map(|s| s.iter().skip(1).copied().filter(|&c| c < crate::types::R_STATIC).collect()).unwrap_or_default();
             let mut tps = vec![];
@@ -3383,13 +3387,32 @@ impl Cx<'_> {
                 if j == i {
                     continue;
                 }
-                let by_lt = !lts.is_empty() && rs.and_then(|r| r.slots.get(j)).is_some_and(|s| s.iter().any(|c| lts.contains(c)));
+                let sj = rs.and_then(|r| r.slots.get(j));
+                let by_lt = !lts.is_empty() && sj.is_some_and(|s| s.iter().any(|c| lts.contains(c)));
                 let by_tp = !tps.is_empty() && {
                     let mut v = vec![];
                     params(prog, sig.params[j], &mut v, 0);
                     v.iter().any(|p| tps.contains(p))
                 };
-                if by_lt || by_tp {
+                if !(by_lt || by_tp) {
+                    continue;
+                }
+                // (the argument itself when the shared lifetime is its reference's own (`r: &'a i32`) or the type
+                // parameter is its type (`a: T`); behind its reference (`b: &mut T`, `r: &&'a i32`), what the referent
+                // holds)
+                let own = match sig.params[j] {
+                    Ty::Ref(..) => by_lt && sj.and_then(|s| s.first()).is_some_and(|c| lts.contains(c)),
+                    _ => true,
+                };
+                if own {
+                    self.bk_direct(b, &mut srcs);
+                } else if let Expr::Ref(_, bp) = strip_paren(b) {
+                    match self.bk_place(bp) {
+                        Some((p, _)) if self.bk.locals[p.local as usize].refs => srcs.push(Src::Local(p.local)),
+                        Some(_) => {}
+                        None => self.bk_direct(bp, &mut srcs),
+                    }
+                } else {
                     self.bk_direct(b, &mut srcs);
                 }
             }
