@@ -1,6 +1,6 @@
 // Records read from a TS file (tests/ts/model.ts): `number` is f64, arrays are arrays, and a record a record uses
 // (`Reply`) is read with it (tests/examples.rs: ts_records)
-import type { User, Post, Point, Doc, Tile } from "./ts/model.ts";
+import type { User, Post, Point, Doc, Tile, Flag, Shelf, Esc, Par, Loc } from "./ts/model.ts";
 import type { Cr } from "./ts/cr.ts";
 
 pub fn display(u: User) -> String {
@@ -50,3 +50,9 @@ pub fn publish(d: Doc) -> Doc { Doc { status: Published, shapes: d.shapes.map(tu
 pub fn total_area(d: Doc) -> f64 { d.shapes.fold(0.0, (a, s) => a + area(s)) }
 pub fn same_shape(a: Shape, b: Shape) -> bool { a == b }
 pub fn tile(t: Tile) -> f64 { match t { Square(s) => s, Empty => 0.0 } }
+pub fn same_flag(a: Flag, b: Flag) -> bool { a == b }
+pub fn item_of(s: Shelf) -> Item { s.item }
+pub fn crates(s: Shelf) -> f64 { match s.item { Crate(n) => n, Nothing => 0.0 } }
+pub fn esc(e: Esc) -> String { match e { Done => "d", Todo => "t" } }
+pub fn par(p: Par) -> Par { match p { P => Q, Q => P } }
+pub fn loc(l: Loc) -> i32 { match l { L1 => 1, L2 => 2 } }

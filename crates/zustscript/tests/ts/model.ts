@@ -56,6 +56,18 @@ export interface Doc {
 interface Square { kind: "square"; side: number }
 export type Tile = Square | { kind: "empty" };
 
+// a tag field and no data: objects, compared by content
+export type Flag = { kind: "on" } | { kind: "off" };
+// a union the file does not export, with a named member: the .d.ts writes it with the member's object
+interface Crate { kind: "crate"; n: number }
+type Item = Crate | { kind: "nothing" };
+export interface Shelf { item: Item }
+// an escaped tag ("\u0064one" is "done"), a union in parentheses, and one exported by a list
+export type Esc = "\u0064one" | "todo";
+export type Par = ("p" | "q");
+type Loc = "l1" | "l2";
+export type { Loc };
+
 // not read: not imported, and not in the subset
 export interface Box<T> { value: T }
 export function makeUser(id: number, name: string): User {

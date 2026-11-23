@@ -109,7 +109,49 @@ fn lex(src: &str) -> Vec<Tok> {
             let mut v = String::new();
             while i < s.len() && s[i] != c {
                 if s[i] == '\\' && i + 1 < s.len() {
+                    // (an escape: its character, so `"\u0064one"` is the tag `done`)
                     adv(&mut i, &mut line, &mut col, &s);
+                    let e = s[i];
+                    adv(&mut i, &mut line, &mut col, &s);
+                    let hex = |i: &mut usize, line: &mut u32, col: &mut u32, n: Option<usize>| -> Option<char> {
+                        let mut h = String::new();
+                        if n.is_none() {
+                            // `\u{..}`
+                            adv(i, line, col, &s);
+                            while *i < s.len() && s[*i] != '}' {
+                                h.push(s[*i]);
+                                adv(i, line, col, &s);
+                            }
+                            if *i < s.len() {
+                                adv(i, line, col, &s);
+                            }
+                        } else {
+                            for _ in 0..n.unwrap() {
+                                if *i < s.len() {
+                                    h.push(s[*i]);
+                                    adv(i, line, col, &s);
+                                }
+                            }
+                        }
+                        u32::from_str_radix(&h, 16).ok().and_then(char::from_u32)
+                    };
+                    let ch = match e {
+                        'n' => Some('\n'),
+                        't' => Some('\t'),
+                        'r' => Some('\r'),
+                        'b' => Some('\u{8}'),
+                        'f' => Some('\u{c}'),
+                        'v' => Some('\u{b}'),
+                        '0' => Some('\0'),
+                        'x' => hex(&mut i, &mut line, &mut col, Some(2)),
+                        'u' if i < s.len() && s[i] == '{' => hex(&mut i, &mut line, &mut col, None),
+                        'u' => hex(&mut i, &mut line, &mut col, Some(4)),
+                        // (a line continuation)
+                        c if line_end(c) => None,
+                        c => Some(c),
+                    };
+                    v.extend(ch);
+                    continue;
                 }
                 v.push(s[i]);
                 adv(&mut i, &mut line, &mut col, &s);
@@ -286,6 +328,44 @@ impl TsFile {
             }
             k += 1;
         }
+        // (`export { A, B }` / `export type { A }` at the top level: those declarations are exported too)
+        let mut depth = 0i32;
+        let mut k = 0;
+        while k < toks.len() {
+            match &toks[k].t {
+                T::P('{' | '(' | '[') => depth += 1,
+                T::P('}' | ')' | ']') => depth -= 1,
+                T::Ident(e) if depth == 0 && e == "export" => {
+                    let mut j = k + 1;
+                    if matches!(&toks[j].t, T::Ident(t) if t == "type") {
+                        j += 1;
+                    }
+                    if toks[j].t == T::P('{') {
+                        j += 1;
+                        while j < toks.len() && toks[j].t != T::P('}') {
+                            // (a plain name; `A as B` exports another name, not read)
+                            if let T::Ident(n) = &toks[j].t {
+                                let renamed = matches!(&toks[j + 1].t, T::Ident(a) if a == "as");
+                                if !renamed && n != "type" {
+                                    if let Some(d) = decls.get_mut(n) {
+                                        let d: &mut Decl = d;
+                                        d.exported = true;
+                                    }
+                                }
+                                if renamed {
+                                    j += 2;
+                                }
+                            }
+                            j += 1;
+                        }
+                        k = j + 1;
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+            k += 1;
+        }
         let chars = src.chars().collect();
         Ok(TsFile { path: path.display().to_string(), src, chars, toks, decls })
     }
@@ -315,7 +395,7 @@ impl TsFile {
         let mut uses = vec![];
         // (an interface, or `type X = { .. }` that is only the object: a record)
         let k = d.body;
-        let object = d.interface || (self.toks[k].t == T::P('{') && !matches!(self.toks[self.close(k) + 1].t, T::P('|')));
+        let object = d.interface || (self.toks[k].t == T::P('{') && !matches!(self.toks[self.close(k)? + 1].t, T::P('|')));
         if object {
             let (members, close) = self.object(if d.interface { k } else { k }, name, &mut uses)?;
             // (`type X = { .. } & ..`: the whole alias must be the object)
@@ -340,7 +420,7 @@ impl TsFile {
     }
 
     /// The index of the `}` closing the `{` at `k`
-    fn close(&self, k: usize) -> usize {
+    fn close(&self, k: usize) -> Result<usize, TsError> {
         let mut depth = 0;
         let mut j = k;
         while j < self.toks.len() - 1 {
@@ -349,14 +429,14 @@ impl TsFile {
                 T::P('}') => {
                     depth -= 1;
                     if depth == 0 {
-                        return j;
+                        return Ok(j);
                     }
                 }
                 _ => {}
             }
             j += 1;
         }
-        j
+        Err(self.err(self.toks[k].pos, "this `{` is not closed before the end of the file"))
     }
 
     /// The members of the object type whose `{` is at `k`, and the index of its `}`
@@ -382,6 +462,12 @@ impl TsFile {
             let T::Ident(f) = &ft.t else {
                 return Err(self.err(ft.pos, format!("a member of `{owner}` that is not `field: type` (methods, index signatures and quoted names are not read): {PLAIN}")));
             };
+            if members.iter().any(|m: &Member| m.name == *f) {
+                return Err(self.err(ft.pos, format!("`{owner}.{f}` is declared twice")));
+            }
+            if f == "__proto__" {
+                return Err(self.err(ft.pos, format!("`{owner}.__proto__`: a member named `__proto__` is the prototype in JS, not a field: zsc does not read it")));
+            }
             k += 1;
             match &self.toks[k].t {
                 T::P(':') => {}
@@ -416,21 +502,31 @@ impl TsFile {
     /// every member: the enum's tag)
     fn union(&self, name: &str, body: usize, uses: &mut Vec<(String, Pos)>) -> Result<Read, TsError> {
         let mut k = body;
+        // (`type X = ("a" | "b")`: the parentheses close before anything that would go on)
+        let paren = self.toks[k].t == T::P('(');
+        if paren {
+            k += 1;
+        }
         if self.toks[k].t == T::P('|') {
             k += 1;
         }
+        let src = |a: usize, b: usize| -> String { self.chars[self.toks[a].start..self.toks[b].end].iter().collect() };
         let mut lits: Vec<(String, Pos)> = vec![];
         let mut objs: Vec<(Vec<Member>, Pos)> = vec![];
+        // (each member as the file writes it; a named one as its object, so the union reads the same anywhere)
+        let mut texts: Vec<String> = vec![];
         loop {
             let t = &self.toks[k];
             match &t.t {
                 T::Str(v) => {
                     lits.push((v.clone(), t.pos));
+                    texts.push(src(k, k));
                     k += 1;
                 }
                 T::P('{') => {
                     let (ms, close) = self.object(k, name, uses)?;
                     objs.push((ms, t.pos));
+                    texts.push(src(k, close));
                     k = close + 1;
                 }
                 // (a member named: an object type of the file, read for its shape)
@@ -439,8 +535,14 @@ impl TsFile {
                     let b = if d.interface || self.toks[d.body].t == T::P('{') { d.body } else {
                         return Err(self.err(t.pos, format!("`{n}`, a member of `{name}`, is not an object type: {PLAIN}")));
                     };
-                    let (ms, _) = self.object(b, n, uses)?;
+                    let (ms, close) = self.object(b, n, uses)?;
+                    // (the whole declaration must be the object: not `type A = { .. } & ..`)
+                    let goes_on = matches!(self.toks[close + 1].t, T::P('&' | '[' | '.' | '<' | '|')) || matches!(&self.toks[close + 1].t, T::Ident(e) if e == "extends");
+                    if !d.interface && goes_on {
+                        return Err(self.err(self.toks[close + 1].pos, format!("`{n}`, a member of `{name}`, is not only an object type: {PLAIN}")));
+                    }
                     objs.push((ms, t.pos));
+                    texts.push(src(b, close));
                     k += 1;
                 }
                 _ => return Err(self.err(t.pos, format!("`{name}` is not a record or a union zsc reads: {PLAIN} (an object type, a union of string literals, or a union of objects with a string tag field)"))),
@@ -451,10 +553,16 @@ impl TsFile {
             }
             break;
         }
-        if matches!(self.toks[k].t, T::P('&' | '[' | '.' | '<')) || matches!(&self.toks[k].t, T::Ident(e) if e == "extends") {
+        if paren {
+            if self.toks[k].t != T::P(')') {
+                return Err(self.err(self.toks[k].pos, format!("`{name}` is not a record or a union zsc reads: {PLAIN}")));
+            }
+            k += 1;
+        }
+        if matches!(self.toks[k].t, T::P('&' | '[' | '.' | '<' | '|')) || matches!(&self.toks[k].t, T::Ident(e) if e == "extends") {
             return Err(self.err(self.toks[k].pos, format!("`{name}` is not a record or a union zsc reads: {PLAIN}")));
         }
-        let text: String = self.chars[self.toks[body].start..self.toks[k - 1].end].iter().collect();
+        let text = texts.join(" | ");
         let variant = |tag: &str, p: Pos| -> Result<String, TsError> {
             let mut cs = tag.chars();
             match cs.next() {

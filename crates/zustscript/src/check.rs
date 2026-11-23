@@ -782,7 +782,8 @@ impl Checker {
                     let primitive = match &r {
                         Ty::Str | Ty::Bool | Ty::Unit => true,
                         t if self.numeric(t) => true,
-                        Ty::Named(n, _) => self.info.enums.get(n).is_some_and(|e| e.unit_only() && !e.is_effect()),
+                        // (a union read from TS with a tag field is objects, `{ kind: "on" }`: compared by content)
+                        Ty::Named(n, _) => self.info.enums.get(n).is_some_and(|e| e.unit_only() && !e.is_effect() && e.ts.as_ref().is_none_or(|t| t.key.is_none())),
                         _ => false,
                     };
                     let ok = primitive || self.eqable(&r, &mut vec![]);
