@@ -789,6 +789,24 @@ impl Cx<'_> {
             }
     }
 
+    /// A variant's pattern with type arguments (`None::<isize>`, `Option::<isize>::None`) against a value of the enum's
+    /// instance sid: the arguments written are the value's, else mismatched types (E0308)
+    fn variant_turbofish(&self, path: &crate::parse::Path, sid: u32) -> R<()> {
+        let n = path.segs.len();
+        let Some(seg) = path.segs[n.saturating_sub(2)..].iter().rev().find(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(_)))) else {
+            return Ok(());
+        };
+        let base = self.prog.base_of(sid);
+        let have = self.prog.structs[sid as usize].args.clone();
+        let ts = self.turbofish_targs(base, &seg.args)?;
+        if ts.len() == have.len() && ts.iter().zip(&have).any(|(t, &h)| t.is_some_and(|t| t != h && !self.prog.has_param(h) && !self.prog.has_param(t))) {
+            let want: Vec<Ty> = ts.iter().zip(&have).map(|(t, &h)| t.unwrap_or(h)).collect();
+            let found = self.prog.instantiate(base, want)?;
+            return err(path.pos, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(Ty::Struct(sid)), self.prog.tn(Ty::Struct(found))));
+        }
+        Ok(())
+    }
+
     /// パターンの判定だけをする (合わなければ fail へ飛ぶ)。束縛は pat_bind で行う
     pub(crate) fn pat_test(&mut self, pat: &Pat, p: Place, fail: Block) -> R<()> {
         match pat {
@@ -1049,11 +1067,13 @@ impl Cx<'_> {
                         let Some((sid, vi)) = self.variant_on(path, t) else {
                             return err(SP, self.no_variant_msg(path));
                         };
+                        self.variant_turbofish(path, sid)?;
                         self.test_variant(p, sid, vi, SP, fail)
                     }
                     Pat::TupleStruct(path, elems) => {
                         let fields = match self.variant_on(path, t) {
                             Some((sid, vi)) => {
+                                self.variant_turbofish(path, sid)?;
                                 self.test_variant(p, sid, vi, SP, fail)?;
                                 self.prog.structs[sid as usize].variants[vi].fields.clone()
                             }

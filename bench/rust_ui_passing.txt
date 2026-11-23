@@ -5632,9 +5632,11 @@ compile-fail	pattern/pat-type-err-let-stmt.rs
 compile-fail	pattern/patkind-ref-binding-issue-122415.rs
 compile-fail	pattern/pattern-binding-disambiguation.rs
 compile-fail	pattern/pattern-error-continue.rs
+compile-fail	pattern/pattern-ident-path-generics.rs
 run-pass	pattern/pattern-match-arc-move.rs
 compile-fail	pattern/pattern-match-invalid-variant.rs
 compile-fail	pattern/pattern-tyvar-2.rs
+compile-fail	pattern/pattern-tyvar.rs
 check-pass	pattern/patterns-dont-match-nt-statement.rs
 compile-fail	pattern/range-pattern-meant-to-be-slice-rest-pattern.rs
 check-pass	pattern/rest-pat-syntactic.rs

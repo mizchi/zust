@@ -1,3 +1,10 @@
-struct S<T>(T);
-fn take(S::<u16>(x): S<u8>) -> u8 { x }
-fn main() { println!("{}", take(S(3))); }
+fn main() {
+    match Some("foo") {
+        None::<isize> => {}
+        Some(_) => {}
+    }
+    match Some(3u8) {
+        Option::<u8>::None => {}
+        Some::<u8>(_) => {}
+    }
+}
