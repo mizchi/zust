@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795422957271,
+  "lastUpdate": 1795422960010,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -88285,6 +88285,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/c2f1892a308b49fc80f62944fced0c22f9f70ebc"
         },
         "date": 1795421179191,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 90.323,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 85,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 85,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 91.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 73.684,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.067,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ff6070196a197e9819840d3b3e4bfbe35606ebb3",
+          "message": "Merge pull request #69 from mizchi/claude/sleepy-dijkstra-8sankk\n\nRegion check part 14: impl Trait results' captures (E0700, + 'static), closures' T: 'static, two-phase borrows through a local, ref rest patterns",
+          "timestamp": "2026-11-23T17:30:47+09:00",
+          "tree_id": "e8987dfc32740d56138e7f194f9733070f1facb5",
+          "url": "https://github.com/mizchi/zust/commit/ff6070196a197e9819840d3b3e4bfbe35606ebb3"
+        },
+        "date": 1795422959332,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
