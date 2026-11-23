@@ -1,6 +1,7 @@
 // Records read from a TS file (tests/ts/model.ts): `number` is f64, arrays are arrays, and a record a record uses
 // (`Reply`) is read with it (tests/examples.rs: ts_records)
 import type { User, Post, Point } from "./ts/model.ts";
+import type { Cr } from "./ts/cr.ts";
 
 pub fn display(u: User) -> String {
   let role = if u.admin { "admin" } else { "member" };
@@ -32,3 +33,6 @@ pub fn same_user(a: User, b: User) -> bool { a == b }
 
 // a TS record holding strings and arrays crosses to wasm as bytes (zustscript-helper / zustscript_helper)
 @wasm pub fn badge(u: User) -> String { u.name.to_upper() + " #" + (u.id as i32).to_string() + " " + u.tags.join("+") }
+
+// members separated by CR, U+2028 and U+2029 only (tests/ts/cr.ts)
+pub fn cr(c: Cr) -> String { c.b + (c.a as i32).to_string() + (if c.c { "!" } else { "?" }) }

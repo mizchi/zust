@@ -4,6 +4,9 @@
 // (a regular expression's brackets are not structure, and a division is not one)
 const closing = /[}\]]/g;
 const half = 4 / 2;
+// (after the condition of an `if`, `/` starts a regular expression; after another `)`, it divides)
+if (half) /[}]/.test("}");
+const quarter = (half) / 2;
 
 /** a user */
 export interface User {

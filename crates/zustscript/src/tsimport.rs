@@ -41,11 +41,18 @@ struct Tok {
     nl: bool,
 }
 
+/// A line terminator, as TS counts them (LF, CR, U+2028, U+2029)
+fn line_end(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
+}
+
 /// Whether a `/` after token `prev` starts a regular expression (not a division): after an operator, an opening
-/// bracket or a keyword, as JS decides
-fn regex_after(prev: Option<&T>) -> bool {
+/// bracket, a keyword, or the `)` that closes the condition of `if` / `while` / `for` / `with` (`ctrl`), as JS
+/// decides
+fn regex_after(prev: Option<&T>, ctrl: bool) -> bool {
     match prev {
         None => true,
+        Some(T::P(')')) => ctrl,
         Some(T::P(c)) => !matches!(c, ')' | ']'),
         Some(T::Ident(k)) => matches!(
             k.as_str(),
@@ -60,8 +67,13 @@ fn lex(src: &str) -> Vec<Tok> {
     let (mut i, mut line, mut col) = (0usize, 1u32, 0u32);
     let mut out: Vec<Tok> = vec![];
     let mut nl = false;
+    // (each open `(`: whether it starts the condition of `if` / `while` / `for` / `with`; and whether the last
+    // token is the `)` that closed one)
+    let mut parens: Vec<bool> = vec![];
+    let mut ctrl = false;
     let adv = |i: &mut usize, line: &mut u32, col: &mut u32, s: &[char]| {
-        if s[*i] == '\n' {
+        // (CR LF is one line end)
+        if line_end(s[*i]) && !(s[*i] == '\r' && s.get(*i + 1) == Some(&'\n')) {
             *line += 1;
             *col = 0;
         } else {
@@ -75,15 +87,15 @@ fn lex(src: &str) -> Vec<Tok> {
         let start = i;
         let before = out.len();
         if c.is_whitespace() {
-            nl |= c == '\n';
+            nl |= line_end(c);
             adv(&mut i, &mut line, &mut col, &s);
         } else if c == '/' && s.get(i + 1) == Some(&'/') {
-            while i < s.len() && s[i] != '\n' {
+            while i < s.len() && !line_end(s[i]) {
                 adv(&mut i, &mut line, &mut col, &s);
             }
         } else if c == '/' && s.get(i + 1) == Some(&'*') {
             while i < s.len() && !(s[i] == '*' && s.get(i + 1) == Some(&'/')) {
-                nl |= s[i] == '\n';
+                nl |= line_end(s[i]);
                 adv(&mut i, &mut line, &mut col, &s);
             }
             for _ in 0..2 {
@@ -120,11 +132,11 @@ fn lex(src: &str) -> Vec<Tok> {
                 adv(&mut i, &mut line, &mut col, &s);
             }
             out.push(Tok { t: T::Other(v), pos, start, end: i, nl });
-        } else if c == '/' && regex_after(out.last().map(|t| &t.t)) {
+        } else if c == '/' && regex_after(out.last().map(|t| &t.t), ctrl) {
             // (a regular expression: opaque, so its brackets are not structure; `/` inside `[..]` does not end it)
             adv(&mut i, &mut line, &mut col, &s);
             let mut class = false;
-            while i < s.len() && s[i] != '\n' && (class || s[i] != '/') {
+            while i < s.len() && !line_end(s[i]) && (class || s[i] != '/') {
                 match s[i] {
                     '\\' if i + 1 < s.len() => adv(&mut i, &mut line, &mut col, &s),
                     '[' => class = true,
@@ -141,11 +153,25 @@ fn lex(src: &str) -> Vec<Tok> {
             }
             out.push(Tok { t: T::Other(s[start..i].iter().collect()), pos, start, end: i, nl });
         } else {
+            let closes_ctrl = match c {
+                '(' => {
+                    parens.push(matches!(out.last().map(|t| &t.t), Some(T::Ident(k)) if matches!(k.as_str(), "if" | "while" | "for" | "with")));
+                    false
+                }
+                ')' => parens.pop().unwrap_or(false),
+                _ => false,
+            };
             adv(&mut i, &mut line, &mut col, &s);
             out.push(Tok { t: T::P(c), pos, start, end: i, nl });
+            if out.len() > before {
+                nl = false;
+            }
+            ctrl = closes_ctrl;
+            continue;
         }
         if out.len() > before {
             nl = false;
+            ctrl = false;
         }
     }
     out.push(Tok { t: T::Eof, pos: Pos { line, col }, start: i, end: i, nl });

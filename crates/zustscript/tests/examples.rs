@@ -361,6 +361,7 @@ fn ts_records() {
     // (the module and its TS file side by side, as in a project: the .d.ts imports `./ts/model.js`)
     std::fs::create_dir_all(d.join("ts")).unwrap();
     std::fs::copy(root().join("tests/ts/model.ts"), d.join("ts/model.ts")).unwrap();
+    std::fs::copy(root().join("tests/ts/cr.ts"), d.join("ts/cr.ts")).unwrap();
     std::fs::copy(root().join("tests/ts_import.zsc"), d.join("ts_import.zsc")).unwrap();
     let o = zsc(&d.join("ts_import.zsc"), &d, &[]);
     assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
@@ -371,10 +372,10 @@ const m = await import('./ts_import.js');
 const u = { id: 7, name: "ana", admin: false, tags: ["a"] };
 const p = m.reply({ author: u, title: "Hi", scores: [1, 2, 4.5], replies: [] }, u, "ok");
 console.log(m.display(u), "|", m.summary(p), "|", JSON.stringify(m.promote(u)));
-console.log(m.same_user(u, { ...u, tags: ["a"] }), m.same_user(u, m.promote(u)), m.dist({ x: 3, y: 4 }, { x: 0, y: 0 }), m.badge(m.promote(u)));
+console.log(m.same_user(u, { ...u, tags: ["a"] }), m.same_user(u, m.promote(u)), m.dist({ x: 3, y: 4 }, { x: 0, y: 0 }), m.badge(m.promote(u)), m.cr({ a: 2, b: "x", c: true }));
 "#,
     );
-    assert_eq!(out, "ana (member, #7) | Hi by ana (member, #7): 1 replies, score 7 | {\"id\":7,\"name\":\"ana\",\"admin\":true,\"tags\":[\"a\",\"staff\"]}\ntrue false 5 ANA #7 a+staff\n");
+    assert_eq!(out, "ana (member, #7) | Hi by ana (member, #7): 1 replies, score 7 | {\"id\":7,\"name\":\"ana\",\"admin\":true,\"tags\":[\"a\",\"staff\"]}\ntrue false 5 ANA #7 a+staff x2!\n");
     let dts = std::fs::read_to_string(d.join("ts_import.d.ts")).unwrap();
     assert!(dts.contains("import type { Point, Post, User } from \"./ts/model.js\";"), "{dts}");
     assert!(!dts.contains("export interface User"), "{dts}");
