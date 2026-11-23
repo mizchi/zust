@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795434223581,
+  "lastUpdate": 1795434226042,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -107350,6 +107350,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/eb4cbbd81c150b4c231af254e0281815ef804a9a"
         },
         "date": 1795432279570,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 76.81,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1832,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 83.67,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1512,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 61.12,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4497,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c53bc8893c984ab5894cf10c37ed0b264f3310d4",
+          "message": "Merge pull request #73 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: run generator effect handlers in one loop (no stack growth)",
+          "timestamp": "2026-11-23T20:37:15+09:00",
+          "tree_id": "3177c59d9e9b45a11ea33c95f4118836da658f09",
+          "url": "https://github.com/mizchi/zust/commit/c53bc8893c984ab5894cf10c37ed0b264f3310d4"
+        },
+        "date": 1795434225565,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
