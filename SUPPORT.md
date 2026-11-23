@@ -4,7 +4,7 @@ The percentages are rustc's own UI tests that pass in that area: run-pass + chec
 directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). They count only the tests
 `bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special flags or targets other than
 Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
-<!-- measured -->2026-11-23, 08987da<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
+<!-- measured -->2026-11-23, 8804e8f<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
 [docs/language.md](docs/language.md), and the [reports](docs/reports/) explain each step.
@@ -58,7 +58,7 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 
 - [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->85.6%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
-- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->71.4%, structs <!-- cf:structs -->79.2%
+- [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->73.5%, structs <!-- cf:structs -->81.2%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
   union field reads (not yet inside closures or consts, and not the `unsafe_op_in_unsafe_fn` lint)
 - [x] non-exhaustive `match` (E0004): bool, unit, enums (variants that cannot have a value need no arm), structs and
@@ -78,7 +78,7 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
   hold no lifetimes). regions <!-- cf:regions -->76.7%, lifetimes <!-- cf:lifetimes -->80.5%
   ([issue #1](https://github.com/mizchi/zust/issues/1))
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
-- [ ] lints and warnings: lint <!-- cf:lint -->39.3%
+- [ ] lints and warnings: lint <!-- cf:lint -->39.8%
 - [ ] editions (2015-only errors)
 
 ## Runtime and std
