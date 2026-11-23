@@ -111,6 +111,8 @@ pub fn not_held(t: &str, tr: &str) -> String {
     match tr {
         "Send" => format!("`{t}` cannot be sent between threads safely"),
         "Sync" => format!("`{t}` cannot be shared between threads safely"),
+        "Iterator" => format!("`{t}` is not an iterator"),
+        "Display" | "Debug" => format!("`{t}` doesn't implement `{tr}`"),
         _ => format!("the trait bound `{t}: {}` is not satisfied", bound_text(tr)),
     }
 }
@@ -1062,7 +1064,16 @@ impl Cx<'_> {
     /// A trait that is not the program's: `implements`, believed when it says no only for the types and the
     /// prelude's traits it judges exactly
     fn std_goal(&self, t: Ty, tr: &str, raw: &str) -> Ans {
-        let judged = t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Unit)
+        // (`()`: std's impls for it, which `implements` does not know: all the derivable traits, not Display, nor an
+        // iterator)
+        if t == Ty::Unit && !raw.contains('<') && !raw.contains('(') {
+            if STD_EXACT.contains(&tr) || matches!(tr, "Sized" | "Send" | "Sync" | "Iterator") {
+                return if matches!(tr, "Display" | "Iterator") { Ans::No } else { Ans::Yes };
+            }
+        }
+        // (not `()` below: implements knows few of std's impls for it (`(): Default`, `(): Debug` say no); scalars it judges
+        // exactly, checked against rustc for each of these traits)
+        let judged = t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char)
             || matches!(t, Ty::Struct(x) if self.p.structs[x as usize].base.is_none() && self.p.structs[x as usize].generics.is_empty() && self.p.structs[x as usize].placeholder.is_none());
         let exact = judged && !raw.contains('<') && !raw.contains('(')
             && (self.db.prelude.contains(tr) || matches!(tr, "Copy" | "Clone" | "Sized" | "Send" | "Sync" | "Debug" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash"));

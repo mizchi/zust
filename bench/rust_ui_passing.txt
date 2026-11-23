@@ -270,6 +270,7 @@ check-pass	associated-types/cache/elision.rs
 compile-fail	associated-types/cache/poison-copy-via-projection.rs
 compile-fail	associated-types/dyn-impl-missing-assoc-type-ice-152668.rs
 check-pass	associated-types/enum-variant-with-assoc-type-and-lifetimes.rs
+compile-fail	associated-types/fn-ptr-coercion-normalize-ice-132767.rs
 compile-fail	associated-types/hr-associated-type-bound-object.rs
 compile-fail	associated-types/hr-associated-type-bound-param-2.rs
 compile-fail	associated-types/hr-associated-type-bound-param-3.rs
@@ -2107,6 +2108,7 @@ compile-fail	destructuring-assignment/refutable-enum-assignment.rs
 compile-fail	destructuring-assignment/slice_destructure_fail.rs
 compile-fail	destructuring-assignment/struct_destructure_fail.rs
 run-pass	destructuring-assignment/warn-unused-duplication.rs
+compile-fail	diagnostic-width/impl-trait-invalid-iterator-error.rs
 compile-fail	diagnostic-width/whitespace-trimming.rs
 check-pass	diagnostic_namespace/can_use_the_diagnostic_name_in_other_places.rs
 check-pass	diagnostic_namespace/do_not_recommend/malformed-diagnostic-attributes-if-expression.rs
@@ -3123,6 +3125,7 @@ compile-fail	impl-trait/in-trait/default-body-type-err-2.rs
 check-pass	impl-trait/in-trait/default-body.rs
 check-pass	impl-trait/in-trait/default-method-binder-shifting.rs
 check-pass	impl-trait/in-trait/default-method-constraint.rs
+compile-fail	impl-trait/in-trait/doesnt-satisfy.rs
 compile-fail	impl-trait/in-trait/dont-probe-missing-item-name-3.rs
 compile-fail	impl-trait/in-trait/dont-probe-missing-item-name-4.rs
 check-pass	impl-trait/in-trait/early.rs
@@ -3209,6 +3212,7 @@ check-pass	impl-trait/precise-capturing/rpitit-outlives.rs
 check-pass	impl-trait/precise-capturing/self-capture.rs
 compile-fail	impl-trait/precise-capturing/unexpected-token.rs
 compile-fail	impl-trait/printing-binder.rs
+compile-fail	impl-trait/projection-mismatch-in-impl-where-clause.rs
 build-pass	impl-trait/projection.rs
 check-pass	impl-trait/recursive-auto-trait.rs
 check-pass	impl-trait/recursive-impl-trait-type-direct.rs
@@ -6815,6 +6819,7 @@ compile-fail	suggestions/ice-unwrap-probe-many-result-125876.rs
 compile-fail	suggestions/if-let-typo.rs
 compile-fail	suggestions/imm-ref-trait-object-literal.rs
 compile-fail	suggestions/imm-ref-trait-object.rs
+compile-fail	suggestions/impl-trait-return-trailing-semicolon.rs
 compile-fail	suggestions/import-trait-for-method-call.rs
 compile-fail	suggestions/import-visible-path-39175.rs
 compile-fail	suggestions/incompatible-types-in-try-expression-59756.rs
@@ -6857,6 +6862,7 @@ compile-fail	suggestions/issue-64252-self-type.rs
 compile-fail	suggestions/issue-66968-suggest-sorted-words.rs
 compile-fail	suggestions/issue-68049-2.rs
 compile-fail	suggestions/issue-71394-no-from-impl.rs
+compile-fail	suggestions/issue-81098.rs
 compile-fail	suggestions/issue-82566-1.rs
 compile-fail	suggestions/issue-82566-2.rs
 compile-fail	suggestions/issue-84592.rs

@@ -152,6 +152,19 @@ impl Linked for Bytes {
     type Next = Words;
 }
 
+// (`-> impl Tr` whose body's type holds Tr, with a binding; and a trait's `-> impl Tr` an impl writes concretely)
+fn some_bytes() -> impl Container<Elem = u8> {
+    Bytes(vec![42])
+}
+trait Maker {
+    fn make() -> impl Container;
+}
+impl Maker for Words {
+    fn make() -> Words {
+        Words(vec![5])
+    }
+}
+
 fn main() {
     println!("{} {}", Local.kind(), Tagged.kind());
     println!("{}", show(&Square(3)));
@@ -168,4 +181,5 @@ fn main() {
     println!("{e} {f} {g}");
     let b = Bytes(vec![7, 8]);
     println!("{} {} {}", first_byte(&b), b.show(), Words(vec![9]).show());
+    println!("{} {}", some_bytes().first(), Words::make().first());
 }

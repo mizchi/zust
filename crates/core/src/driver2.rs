@@ -1639,6 +1639,11 @@ impl Session2 {
                 }
             }
         }
+        // (E0277 / E0271: a non-generic fn's `-> impl Tr` return: the type its body gives holds Tr, by the trait solver
+        // (`fn test() -> impl Test { () }` with no `impl Test for ()`))
+        if let Some(e) = opaque_bound_error(&prog, &src, &items[..user.min(items.len())])? {
+            return Err(e);
+        }
         // (E0271 / E0277: the bounds a trait of the program's puts on its associated types (`type Sibling: Bar2<Ok =
         // Self::Ok>`) hold of each impl's definitions, with the impl's parameters as placeholders: reported at the
         // definition)
@@ -1882,6 +1887,98 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
         return Err(format!("cannot infer the `impl Trait` return type of `{}`", prog.names[ids[k] as usize]));
     }
     Ok(())
+}
+
+/// The first `-> impl Tr` of the program's non-generic fns whose type from the body is surely not Tr: the trait solver's
+/// `No` (`solve_no_sound`), for each bound written (`impl Tr + Send`, `impl Tr<Assoc = X>`). A generic fn's type is
+/// each instance's, and a nested `impl` (`Option<impl Tr>`) is not followed
+fn opaque_bound_error(prog: &Program, src: &str, items: &[SrcItem]) -> R<Option<String>> {
+    // (a bound as a goal the solver may answer: the program's traits, the auto traits, and std's for the types
+    // `implements` judges exactly (the solver believes its no only there); a std bound whose arguments are all
+    // bindings (`Iterator<Item = &u32>`) is asked without them, which is weaker: its no stands)
+    let check = |t: Ty, b: &str, line: usize| -> Option<String> {
+        let n = b.split('<').next().unwrap_or(b).split('(').next().unwrap_or(b).trim();
+        let n = n.rsplit("::").next().unwrap_or(n);
+        let user = prog.tdb.user.contains(n);
+        let goal = if !user && b.contains('<') {
+            let inner = b[b.find('<')? + 1..].trim_end().strip_suffix('>')?;
+            if inner.split(',').all(|a| a.contains('=')) { n.to_string() } else { return None }
+        } else if user {
+            b.to_string()
+        } else {
+            n.to_string()
+        };
+        let tn = prog.tn(t).replace("__u_", "");
+        if user && b.contains('=') {
+            if let Some((proj, got, want)) = prog.tdb.binding_mismatch(prog, t, b, &[], &[]) {
+                return Some(format!("{line}:1: type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want), prog.tn(got)));
+            }
+        }
+        (prog.tdb.holds(prog, t, &goal) == crate::traits::Ans::No).then(|| format!("{line}:1: {} (E0277)", crate::traits::not_held(&tn, &goal)))
+    };
+    let ground = |t: Ty| !prog.has_param(t) && !prog.names_placeholder(t, 0);
+    for &id in &prog.opaque {
+        let sig = &prog.sigs[id as usize];
+        let t = sig.ret;
+        if sig.is_generic() || !ground(t) {
+            continue;
+        }
+        let Some(ii) = prog.item_of[id as usize].map(|i| i as usize).filter(|&i| i < items.len()) else { continue };
+        let Some(f) = parse_fn(src, &items[ii])? else { continue };
+        let Some(crate::parse::Ty::Impl(bs)) = &f.sig.ret else { continue };
+        let Ok(names) = crate::ast_summary::bound_names(bs) else { continue };
+        for b in &names {
+            if let Some(e) = check(t, b, items[ii].line) {
+                return Ok(Some(e));
+            }
+        }
+    }
+    // (a trait's method declared `-> impl Tr` (its declaration's type is a placeholder): each impl's method returns
+    // a type that is Tr, `impl Foo for () { fn bar() -> () {} }` with `fn bar() -> impl Display`)
+    for (fi, sig) in prog.sigs.iter().enumerate() {
+        let Some(tr) = sig.impl_trait.as_deref() else { continue };
+        let tr = tr.split('<').next().unwrap_or(tr).trim();
+        if sig.is_generic() || !ground(sig.ret) || !prog.tdb.user.contains(tr.rsplit("::").next().unwrap_or(tr)) {
+            continue;
+        }
+        let Some(ii) = prog.item_of[fi].map(|i| i as usize).filter(|&i| i < items.len()) else { continue };
+        let m = prog.names[fi].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
+        let Some(&d) = prog.traits.get(tr).into_iter().flatten().find(|&&d| prog.names[d as usize].rsplit("::").next() == Some(m)) else { continue };
+        let Some(di) = prog.item_of[d as usize].map(|i| i as usize).filter(|&i| i < items.len()) else { continue };
+        let text = blank_comments(src.get(items[di].start..items[di].end).unwrap_or(""));
+        let head = text.split('{').next().unwrap_or("").split(';').next().unwrap_or("");
+        let Some(at) = head.find("-> impl ") else { continue };
+        let rest = &head[at + 8..];
+        let rest = rest.split(" where").next().unwrap_or(rest);
+        // (the bounds, split at `+` at depth 0)
+        let mut depth = 0i32;
+        let mut bounds = vec![String::new()];
+        for c in rest.chars() {
+            match c {
+                '<' | '(' => depth += 1,
+                '>' | ')' => depth -= 1,
+                '+' if depth == 0 => {
+                    bounds.push(String::new());
+                    continue;
+                }
+                _ => {}
+            }
+            if let Some(l) = bounds.last_mut() {
+                l.push(c);
+            }
+        }
+        // (a bound that names the trait's parameters or Self is not asked of a concrete type here)
+        for b in bounds.iter().map(|b| b.trim()).filter(|b| !b.is_empty() && !b.starts_with('\'') && !b.contains("Self")) {
+            let decl = &prog.sigs[d as usize];
+            if decl.generics.iter().skip(1).any(|g| b.contains(g.0.as_str())) {
+                continue;
+            }
+            if let Some(e) = check(sig.ret, b, items[ii].line) {
+                return Ok(Some(e));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// アイテムの中の `行:桁:` のエラーを、ファイルの中の行にする (driver.rs の relocate_err と同じ)。位置がなければアイテムの先頭の行
