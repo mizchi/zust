@@ -2398,3 +2398,18 @@ fn part13_report_lines() {
     let d = check("fn main() {\n    let mut x = (String::new(), String::new());\n    let mut y = (&x, 1);\n    let z = (&mut y, 2);\n    let mut c = || {\n        z.0.0.0 = String::from(\"a\");\n    };\n    c();\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("is behind a `&` reference"), "{d:?}");
 }
+
+/// A `&mut` local: `let b = a;` moves it (the type inference's type is no annotation), so a later use of a is E0382;
+/// `let b: &mut T = a;` reborrows `*a`, so a use of `*a` while b lives is E0506. A method's `&mut self` is taken
+/// at the call, while the arguments are live: `v.ext(&v)` is E0502 (two-phase borrows)
+#[test]
+fn part13_mut_ref_moves_and_two_phase() {
+    let d = check("fn f(s: &mut String) {\n    let alias = s;\n    let _n = s.len();\n    alias.push('a');\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("use of moved value: `s`"), "{d:?}");
+    let d = check("fn f(s: &mut String) {\n    let alias: &mut String = s;\n    *s = String::new();\n    alias.push('a');\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("cannot assign to `*s` because it is borrowed"), "{d:?}");
+    let d = check("struct S(Vec<i32>);\nimpl S {\n    fn ext(&mut self, _b: &S) {}\n}\nfn main() {\n    let mut v = S(vec![0]);\n    v.ext(&v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot borrow `v` as mutable because it is also borrowed as immutable"), "{d:?}");
+    let ok = "struct S(Vec<i32>);\nimpl S {\n    fn ext(&mut self, _b: &S) {}\n    fn add(&mut self, n: usize) {\n        self.0.push(n as i32);\n    }\n    fn len(&self) -> usize {\n        self.0.len()\n    }\n}\nfn walk<'a>(mut cur: &'a mut Vec<i32>, other: &'a mut Vec<i32>) {\n    let r: &mut Vec<i32> = cur;\n    r.push(1);\n    cur.push(2);\n    let t: &mut Vec<i32> = other;\n    t.push(3);\n    cur = t;\n    cur.push(4);\n}\nfn moves(a: &mut Vec<u8>) {\n    let b = a;\n    b.push(1);\n    let c = b;\n    c.push(2);\n}\nfn main() {\n    let mut v = S(vec![]);\n    let w = S(vec![1]);\n    v.ext(&w);\n    v.add(v.len());\n    let mut a = vec![1];\n    let mut b = vec![2];\n    walk(&mut a, &mut b);\n    let mut x = vec![1, 2];\n    let y = &mut x;\n    let z: &mut Vec<i32> = y;\n    z.push(3);\n    y.push(4);\n    let mut u = vec![];\n    moves(&mut u);\n    println!(\"{} {:?} {:?} {:?}\", v.len(), a, x, u);\n}\n";
+    assert_eq!(check(ok), vec![]);
+}

@@ -985,6 +985,7 @@ impl Cx<'_> {
             }
         }
         let mut bk_late = None;
+        let (mut res_tid, mut bk_act) = (None, None);
         let mut bk_op_temp = false;
         let t0 = self.bk.call_temps.len();
         if self.bk_on() && !via_deref {
@@ -1054,9 +1055,15 @@ impl Cx<'_> {
                         self.bk_push(Some(borrowck::Ev::Acc(place.clone(), borrowck::Acc::Borrow(rs), *sp)));
                         self.bk_call_temp(&[borrowck::Src::Loan(rs)], true);
                         bk_op_temp = true;
+                        res_tid = self.bk.call_temps.last().copied();
                     }
                 }
-                bk_late = ev;
+                // (the `&mut` loan is taken at the call, while the arguments' values are live (call_fn): one that
+                // holds a loan of the receiver (`v.extend(&v)`) conflicts with it (E0502))
+                match (res_tid, ev) {
+                    (Some(tid), Some(ev)) => bk_act = Some((ev, tid)),
+                    (_, ev) => bk_late = ev,
+                }
             } else {
                 // (an operator's `&mut self` lasts until the call: `x += x` moves x while it is borrowed)
                 if let (true, Some(borrowck::Ev::Acc(_, borrowck::Acc::Borrow(ln), _))) = (matches!(bk_recv_ty, Ty::Ref(true, _)), &ev) {
@@ -1132,6 +1139,9 @@ impl Cx<'_> {
         // (the region check reports at the method call: call_fn is given no span for it; also when it may begin there)
         if self.rg_on() || self.rg.eligible {
             self.rg.call_sp = borrowck::pos(e);
+        }
+        if bk_act.is_some() {
+            self.bk.activate = bk_act;
         }
         let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
         self.rg_took_call(e);

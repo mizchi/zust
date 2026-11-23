@@ -655,7 +655,8 @@ impl Cx<'_> {
     pub(crate) fn expr(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         // (the places inside a sub-expression are accesses of their own)
         let pd = std::mem::take(&mut self.bk.place_depth);
-        self.bk.exp_none = std::mem::take(&mut self.bk.move_mut_next) && expected.is_none();
+        let hint_only = std::mem::take(&mut self.bk.move_mut_hint);
+        self.bk.exp_none = std::mem::take(&mut self.bk.move_mut_next) && (expected.is_none() || hint_only);
         // (a block's tail's receiver that is a temporary: what its value holds (bk_watch_tail))
         let watched = !self.bk.watch.is_empty() && self.bk.watch.contains(&(e as *const Expr as usize));
         if watched {

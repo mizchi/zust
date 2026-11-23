@@ -189,6 +189,9 @@ pub struct Bk {
     pub exp_none: bool,
     /// The next expression lowered is such a place
     pub move_mut_next: bool,
+    /// Its expected type is the type inference's of the `let` (`let b = a;`, no annotation): no coercion site, a
+    /// `&mut` there is moved as where nothing is expected
+    pub move_mut_hint: bool,
     /// The place the pattern being bound matches (the scrutinee, then its parts)
     pub pat_path: Option<BPlace>,
     /// The method call an operator was rewritten to (its address)
@@ -2164,6 +2167,20 @@ impl Cx<'_> {
         self.bk.loans.push(Loan { place: p.clone(), mutable: true, sp, at: sp, quiet: false, capture: false });
         self.bk.implicit.push(ln);
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+    }
+
+    /// `let b: &mut T = a;` with a `&mut` local a: the loan of `*a` b holds
+    pub(crate) fn bk_reborrow_let(&mut self, a: &Expr) {
+        if !self.bk_on() {
+            return;
+        }
+        let Some((mut p, Some(Ty::Ref(true, _)))) = self.bk_place(a) else { return };
+        p.proj.push(ref_deref(true));
+        let sp = err_pos(a);
+        let ln = self.bk.loans.len() as u32;
+        self.bk.loans.push(Loan { place: p.clone(), mutable: true, sp, at: sp, quiet: false, capture: false });
+        self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+        self.bk.src(Src::Loan(ln));
     }
 
     /// `&e` of a temporary (not promoted to a static): a hidden local that goes out of scope at the end of the

@@ -2160,6 +2160,8 @@ impl Cx<'_> {
                     };
                     self.bk_frame();
                     self.bk.move_mut_next = ann_ty.is_none();
+                    // (`let b = a;`: what the type inference found is not an annotation; not of a macro's `let`)
+                    self.bk.move_mut_hint = ann_ty.is_none() && !name.starts_with("__exr_") && matches!(strip_paren(init), Expr::Path(None, _));
                     let ext0 = self.bk.direct.len();
                     let ext1 = self.bk.extended.len();
                     if self.bk_on() {
@@ -2177,6 +2179,11 @@ impl Cx<'_> {
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
                     let ml0 = std::mem::replace(&mut self.bk.macro_let, name.starts_with("__exr_"));
                     let r = self.expr(init, ann.or(hint));
+                    // (`let b: &mut T = a;` with a: `&mut T`: a coercion site, b reborrows `*a` (rustc's `&mut *a`), not
+                    // a copy of a: a use of `*a` while b lives conflicts)
+                    if r.is_ok() && ann_ty.is_some() && matches!(ann, Some(Ty::Ref(true, _))) && matches!(strip_paren(init), Expr::Path(None, _)) {
+                        self.bk_reborrow_let(init);
+                    }
                     self.bk.macro_let = ml0;
                     self.bk.direct.truncate(ext0);
                     self.bk.extended.truncate(ext1);
