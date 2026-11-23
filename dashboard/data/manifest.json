@@ -1,0 +1,403 @@
+{
+ "contract": "repo-retrospective/v1",
+ "repo": "mizchi/zust",
+ "head": "ec671828",
+ "generated_at": "2026-11-23T17:24:17Z",
+ "generator": "scripts/retro/extract.py",
+ "phases": [
+  {
+   "name": "build-up",
+   "start_commit": "1c6db317",
+   "why": "the first commit of this repository"
+  },
+  {
+   "name": "compat",
+   "start_commit": "c155863e",
+   "why": "rustc's tests/ui became the spec suite"
+  }
+ ],
+ "datasets": {
+  "hourly": {
+   "title": "Commits per hour",
+   "grain": "one UTC hour",
+   "provenance": "derived",
+   "source": "git log --no-merges, without github-actions[bot]",
+   "columns": {
+    "hour": {
+     "type": "time",
+     "description": "start of the UTC hour"
+    },
+    "commits": {
+     "type": "int",
+     "description": "",
+     "unit": "commits"
+    },
+    "cumulative": {
+     "type": "int",
+     "description": "running total",
+     "unit": "commits"
+    },
+    "phase": {
+     "type": "enum",
+     "description": "before or after tests/ui became the spec",
+     "values": [
+      "build-up",
+      "compat"
+     ]
+    }
+   },
+   "file": "hourly.json"
+  },
+  "ui": {
+   "title": "rustc tests/ui pass rates",
+   "grain": "one CI benchmark run",
+   "provenance": "recorded",
+   "source": "gh-pages dev/bench/data.js, entry 'rustc tests/ui' (bench/rust_ui.py --bench-json)",
+   "columns": {
+    "time": {
+     "type": "time",
+     "description": "UTC"
+    },
+    "commit": {
+     "type": "commit",
+     "description": "first 8 hex digits"
+    },
+    "run_pass_rate": {
+     "type": "number",
+     "description": "run_pass pass rate over applicable tests, higher is better",
+     "unit": "%",
+     "nullable": true
+    },
+    "check_pass_rate": {
+     "type": "number",
+     "description": "check_pass pass rate over applicable tests, higher is better",
+     "unit": "%",
+     "nullable": true
+    },
+    "build_pass_rate": {
+     "type": "number",
+     "description": "build_pass pass rate over applicable tests, higher is better",
+     "unit": "%",
+     "nullable": true
+    },
+    "compile_fail_rate": {
+     "type": "number",
+     "description": "compile_fail pass rate over applicable tests, higher is better",
+     "unit": "%",
+     "nullable": true
+    },
+    "run_pass_passing": {
+     "type": "number",
+     "description": "run_pass tests passing",
+     "unit": "tests",
+     "nullable": true
+    },
+    "check_pass_passing": {
+     "type": "number",
+     "description": "check_pass tests passing",
+     "unit": "tests",
+     "nullable": true
+    },
+    "build_pass_passing": {
+     "type": "number",
+     "description": "build_pass tests passing",
+     "unit": "tests",
+     "nullable": true
+    },
+    "compile_fail_passing": {
+     "type": "number",
+     "description": "compile_fail tests passing",
+     "unit": "tests",
+     "nullable": true
+    }
+   },
+   "file": "ui.json"
+  },
+  "kpi": {
+   "title": "Speed KPIs per change",
+   "grain": "one row of bench/kpi_log.tsv",
+   "provenance": "recorded",
+   "source": "bench/kpi_log.tsv (bench/kpi_track.py)",
+   "columns": {
+    "n": {
+     "type": "int",
+     "description": "row number in the log"
+    },
+    "time": {
+     "type": "time",
+     "description": "UTC"
+    },
+    "time_estimated": {
+     "type": "bool",
+     "description": "the commit was rebased away; time placed between neighbours"
+    },
+    "commit": {
+     "type": "string",
+     "description": "short hash as logged; '+' marks a change measured before committing"
+    },
+    "change": {
+     "type": "string",
+     "description": "what the change was"
+    },
+    "noop_build_M": {
+     "type": "number",
+     "description": "gen5000 no-op build, instructions, lower is better",
+     "unit": "M instr",
+     "nullable": true
+    },
+    "edit_build_M": {
+     "type": "number",
+     "description": "gen5000 build after editing one function, instructions, lower is better",
+     "unit": "M instr",
+     "nullable": true
+    },
+    "check_M": {
+     "type": "number",
+     "description": "gen5000 zustc check, instructions, lower is better",
+     "unit": "M instr",
+     "nullable": true
+    },
+    "traits_check_M": {
+     "type": "number",
+     "description": "bench/gen_traits.py 50, check, instructions, lower is better",
+     "unit": "M instr",
+     "nullable": true
+    },
+    "traits_edit_M": {
+     "type": "number",
+     "description": "bench/gen_traits.py 50, edit build, instructions, lower is better",
+     "unit": "M instr",
+     "nullable": true
+    },
+    "crates_noop_M": {
+     "type": "number",
+     "description": "cratebench crates, no-op build (sum), instructions, lower is better",
+     "unit": "M instr",
+     "nullable": true
+    },
+    "crates_edit_M": {
+     "type": "number",
+     "description": "cratebench crates, edit build (sum), instructions, lower is better",
+     "unit": "M instr",
+     "nullable": true
+    },
+    "patterns_check_M": {
+     "type": "number",
+     "description": "bench/gen_patterns.py mix 4, check, instructions, lower is better",
+     "unit": "M instr",
+     "nullable": true
+    },
+    "patterns_edit_M": {
+     "type": "number",
+     "description": "bench/gen_patterns.py mix 4, edit build, instructions, lower is better",
+     "unit": "M instr",
+     "nullable": true
+    },
+    "cache_KiB": {
+     "type": "number",
+     "description": "gen5000 build cache size",
+     "unit": "KiB",
+     "nullable": true
+    },
+    "lsp_session_G": {
+     "type": "number",
+     "description": "LSP session on a fixed snapshot, lower is better",
+     "unit": "G instr",
+     "nullable": true
+    },
+    "ui_run": {
+     "type": "number",
+     "description": "tests/ui run-pass passing",
+     "unit": "tests",
+     "nullable": true
+    },
+    "ui_check": {
+     "type": "number",
+     "description": "tests/ui check-pass passing",
+     "unit": "tests",
+     "nullable": true
+    },
+    "ui_build": {
+     "type": "number",
+     "description": "tests/ui build-pass passing",
+     "unit": "tests",
+     "nullable": true
+    },
+    "ui_cfail": {
+     "type": "number",
+     "description": "tests/ui compile-fail passing",
+     "unit": "tests",
+     "nullable": true
+    }
+   },
+   "file": "kpi.json"
+  },
+  "loc": {
+   "title": "Lines of code",
+   "grain": "one first-parent commit per 3 UTC hours",
+   "provenance": "derived",
+   "source": "git grep -c over *.rs at each sampled commit",
+   "columns": {
+    "time": {
+     "type": "time",
+     "description": "UTC"
+    },
+    "commit": {
+     "type": "commit",
+     "description": "first 8 hex digits"
+    },
+    "impl_lines": {
+     "type": "int",
+     "description": "src/, crates/* without tests/benches/examples, build.rs; without crates/zustscript",
+     "unit": "lines"
+    },
+    "test_lines": {
+     "type": "int",
+     "description": "test_files_lines + inline_test_lines",
+     "unit": "lines"
+    },
+    "test_files_lines": {
+     "type": "int",
+     "description": "tests/ and crates/*/tests/",
+     "unit": "lines"
+    },
+    "inline_test_lines": {
+     "type": "int",
+     "description": "from the first #[cfg(test)] of a source file to its end",
+     "unit": "lines"
+    },
+    "zustscript_lines": {
+     "type": "int",
+     "description": "crates/zustscript, counted apart",
+     "unit": "lines"
+    },
+    "error_codes": {
+     "type": "int",
+     "description": "distinct E0xxx codes in src/ and crates/",
+     "unit": "codes"
+    }
+   },
+   "file": "loc.json"
+  },
+  "daily": {
+   "title": "By day",
+   "grain": "one UTC day with commits",
+   "provenance": "derived",
+   "source": "git log, the ui and loc datasets",
+   "columns": {
+    "date": {
+     "type": "date",
+     "description": "UTC day"
+    },
+    "commits": {
+     "type": "int",
+     "description": "",
+     "unit": "commits"
+    },
+    "prs_merged": {
+     "type": "int",
+     "description": "'Merge pull request #' merges",
+     "unit": "PRs"
+    },
+    "run_pass_rate_end": {
+     "type": "number",
+     "description": "last run_pass pass rate of the day",
+     "unit": "%",
+     "nullable": true
+    },
+    "check_pass_rate_end": {
+     "type": "number",
+     "description": "last check_pass pass rate of the day",
+     "unit": "%",
+     "nullable": true
+    },
+    "build_pass_rate_end": {
+     "type": "number",
+     "description": "last build_pass pass rate of the day",
+     "unit": "%",
+     "nullable": true
+    },
+    "compile_fail_rate_end": {
+     "type": "number",
+     "description": "last compile_fail pass rate of the day",
+     "unit": "%",
+     "nullable": true
+    },
+    "impl_lines_end": {
+     "type": "int",
+     "description": "",
+     "unit": "lines"
+    },
+    "test_lines_end": {
+     "type": "int",
+     "description": "",
+     "unit": "lines"
+    }
+   },
+   "file": "daily.json"
+  },
+  "sessions": {
+   "title": "Agent sessions",
+   "grain": "one Claude-Session trailer with 5+ commits",
+   "provenance": "derived",
+   "source": "git log trailers",
+   "columns": {
+    "session": {
+     "type": "string",
+     "description": "S1, S2, ... in order of the first commit"
+    },
+    "session_id": {
+     "type": "string",
+     "description": "last 8 characters of the session id"
+    },
+    "commits": {
+     "type": "int",
+     "description": "",
+     "unit": "commits"
+    },
+    "first": {
+     "type": "time",
+     "description": "first commit"
+    },
+    "last": {
+     "type": "time",
+     "description": "last commit"
+    }
+   },
+   "file": "sessions.json"
+  },
+  "milestones": {
+   "title": "Milestones",
+   "grain": "one decision",
+   "provenance": "hand-picked",
+   "source": "scripts/retro/milestones.json",
+   "columns": {
+    "time": {
+     "type": "time",
+     "description": "UTC"
+    },
+    "commit": {
+     "type": "commit",
+     "description": "first 8 hex digits"
+    },
+    "label": {
+     "type": "string",
+     "description": ""
+    },
+    "detail": {
+     "type": "string",
+     "description": ""
+    },
+    "phase": {
+     "type": "enum",
+     "description": "",
+     "values": [
+      "build-up",
+      "compat"
+     ]
+    }
+   },
+   "file": "milestones.json"
+  }
+ }
+}
