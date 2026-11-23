@@ -1070,6 +1070,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("array::from_fn") {
         need.insert("__exr_array_from_fn");
     }
+    // (`Box::from(s)` of a slice is `s.to_vec().into_boxed_slice()`)
+    if sc.has("Box::from") {
+        need.extend(["to_vec", "__exr_slice_to_vec", "Vec", "into_boxed_slice"]);
+    }
     if sc.has("Cow") {
         need.extend(["Cow", "__CowStr", "Deref", "deref", "into_owned", "to_vec", "__exr_slice_to_vec", "Vec", "String"]);
     }

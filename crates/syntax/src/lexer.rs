@@ -2058,7 +2058,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let prev_path = k >= 2 && is_sym(k - 1, b':') && is_sym(k - 2, b':');
         // (impl / trait の中の関連型の定義 `type Buffer = ..;` は、同じ名前のトップレベルの型があっても変えない)
         let assoc_def = k >= 1 && is_id(k - 1, b"type") && !def_tok[k];
-        if prev_dot || prev_path || assoc_def {
+        // (nor a method's `fn find(&self ..)` in an impl / trait beside a module's `fn find`: only the item is renamed)
+        let method_def = k >= 1 && is_id(k - 1, b"fn") && !def_tok[k];
+        if prev_dot || prev_path || assoc_def || method_def {
             k += 1;
             continue;
         }

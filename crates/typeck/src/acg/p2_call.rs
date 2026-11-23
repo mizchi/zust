@@ -1047,6 +1047,20 @@ impl Cx<'_> {
                     }
                     Place::Mem(v, 0, *i)
                 }
+                // (a vector value whose type inference left open (`eq1.and(eq2).movemask()`, `and` of two traits): its
+                // impl's method, as prim_trait_method calls it)
+                (Some(v), t @ Ty::Vec(_)) => {
+                    let Some(id) = self.prog.prim_self_method(t, method) else {
+                        return err(SP, format!("no method `{}` on type `{}`", method, self.prog.tn(t)));
+                    };
+                    let group = self.prog.overloads.get(&self.prog.names[id as usize]).cloned().unwrap_or_else(|| vec![id]);
+                    if group.iter().all(|&i| self.prog.sigs[i as usize].is_unsafe) {
+                        self.check_unsafe_call(id, msp.start)?;
+                    }
+                    let args: Vec<&Expr> = margs.iter().collect();
+                    let tf: Option<&[GArg]> = (!gargs.is_empty()).then_some(&gargs[..]);
+                    return self.call_fn(id, Some((v, t)), &args, tf, expected, SP);
+                }
                 (_, t) => {
                     return err(SP, format!("no method `{}` on type `{}`", method, self.prog.tn(t)));
                 }

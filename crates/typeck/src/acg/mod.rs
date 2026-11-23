@@ -1784,6 +1784,8 @@ impl Cx<'_> {
             Some(Stmt::Expr(e, false)) => err_pos(e),
             _ => SP,
         };
+        // (`fn f(x: &&T) -> &T { x }`: the deref coercion)
+        let (v, t) = if t != self.ret { self.deref_coerce(v, t, self.ret) } else { (v, t) };
         self.same(tail, t, self.ret)?;
         self.drop_for_exit(0, 0);
         self.emit_return(v);

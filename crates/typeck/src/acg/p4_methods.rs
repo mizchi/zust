@@ -618,7 +618,7 @@ impl Cx<'_> {
         let mc_recv: &Expr = mc_recv;
         let _ = (mc_name, mc_tf, mc_args);
         // (E0133: the pointer methods that are `unsafe fn` in std; the wrapping_* ones, is_null and cast are safe)
-        if matches!(mc_name.as_str(), "add" | "sub" | "offset" | "read" | "read_volatile" | "read_unaligned" | "write" | "write_volatile" | "write_unaligned") {
+        if matches!(mc_name.as_str(), "add" | "sub" | "offset" | "offset_from" | "read" | "read_volatile" | "read_unaligned" | "write" | "write_volatile" | "write_unaligned") {
             if let Expr::MethodCall(_, _, _, _, msp) = mc {
                 self.check_unsafe_op(mc_name, msp.at)?;
             }
@@ -640,6 +640,20 @@ impl Cx<'_> {
                     n = self.b.ins().ineg(n);
                 }
                 (Some(self.elem_addr(p, n, elem)), pt)
+            }
+            // (`p.offset_from(q)`: the distance in elements, `(p - q) / size_of::<T>()`)
+            "offset_from" => {
+                let (q, qt) = self.expr(args[0], Some(pt))?;
+                self.same(SP, qt, pt)?;
+                let d = self.b.ins().isub(p, q.unwrap());
+                let (size, _) = self.prog.size_align(elem);
+                let d = if size > 1 {
+                    let sz = self.b.ins().iconst(PTR, size as i64);
+                    self.b.ins().sdiv(d, sz)
+                } else {
+                    d
+                };
+                (Some(d), Ty::Isize)
             }
             "is_null" => (Some(self.b.ins().icmp_imm_u(IntCC::Equal, p, 0)), Ty::Bool),
             "read" | "read_volatile" | "read_unaligned" => {
@@ -664,7 +678,11 @@ impl Cx<'_> {
                         Some(GArg::Ty(t)) => self.parse_ty(t)?,
                         _ => return err(SP, "cast needs a type argument"),
                     },
-                    true => return err(SP, "`cast` needs a turbofish: `p.cast::<T>()`"),
+                    // (no turbofish: the type inference gave the call, `v128_load(data.cast())`)
+                    true => match self.peek(mc) {
+                        Some(Ty::Ptr(_, t)) if !self.prog.has_param(*t) => *t,
+                        _ => return err(SP, "`cast` needs a turbofish: `p.cast::<T>()`"),
+                    },
                 };
                 let Ty::Ptr(m, _) = pt else { unreachable!() };
                 (Some(p), Ty::Ptr(m, intern(to)))

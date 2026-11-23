@@ -263,6 +263,13 @@ impl<T> Option<T> {
             None => panic!("called `Option::unwrap()` on a `None` value"),
         }
     }
+    // (undefined behavior on None in rustc: a panic here)
+    pub unsafe fn unwrap_unchecked(self) -> T {
+        match self {
+            Some(v) => v,
+            None => panic!("called `Option::unwrap_unchecked()` on a `None` value"),
+        }
+    }
     pub fn unwrap_or(self, default: T) -> T {
         match self {
             Some(v) => v,
@@ -476,6 +483,13 @@ impl<T, E> Result<T, E> {
         match self {
             Ok(v) => v,
             Err(e) => panic!("called `Result::unwrap()` on an `Err` value: {:?}", e),
+        }
+    }
+    // (undefined behavior on Err in rustc: a panic here)
+    pub unsafe fn unwrap_unchecked(self) -> T {
+        match self {
+            Ok(v) => v,
+            Err(_) => panic!("called `Result::unwrap_unchecked()` on an `Err` value"),
         }
     }
     pub fn unwrap_err(self) -> E {
