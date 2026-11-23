@@ -288,6 +288,48 @@ const HOST: &[&str] = &[
     "write", "putchar", "open", "read", "close", "exit", "_exit", "abort", "sigaction", "fflush", "getenv", "strtod", "strtof", "memmem",
 ];
 
+/// A workspace (tests/workspace: two libraries and a bin, trait objects and generics across crates) built for wasm32
+/// is one module that prints what its native build prints, and stops where it does (a panic in a library's generic
+/// function, an `unwrap`, a division by zero in a dependency)
+#[test]
+fn wasm_workspace_runs_like_native() {
+    if !ready() {
+        return;
+    }
+    let d = private_dir("zust_wasm_ws");
+    let ws = d.0.join("ws");
+    fn copy(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for e in std::fs::read_dir(from).unwrap() {
+            let p = e.unwrap().path();
+            let t = to.join(p.file_name().unwrap());
+            if p.is_dir() { copy(&p, &t) } else { std::fs::copy(&p, &t).map(|_| ()).unwrap() }
+        }
+    }
+    copy(Path::new("tests/workspace"), &ws);
+    let build = |out: &str, wasm: bool| {
+        let mut c = Command::new(env!("CARGO_BIN_EXE_zustc"));
+        c.arg("build").arg(ws.join("workspace.txt")).arg("-o").arg(d.0.join(out)).arg("--no-cache");
+        if wasm {
+            c.args(["--target", "wasm32-unknown-unknown"]);
+        }
+        let o = c.output().unwrap();
+        assert!(o.status.success(), "zustc build ({out}): {}", String::from_utf8_lossy(&o.stderr));
+    };
+    build("native", false);
+    build("wasm", true);
+    assert!(!d.0.join("wasm/app").exists() && d.0.join("wasm/app.wasm").is_file());
+    // (the runs: the argument count picks the path, as in tests/workspace.rs; 2 reads a file, which the sandbox denies)
+    for n in [0usize, 1, 3, 5] {
+        let args: Vec<String> = (0..n).map(|i| i.to_string()).collect();
+        let a: Vec<&str> = args.iter().map(String::as_str).collect();
+        let native = Command::new(d.0.join("native/app")).args(&a).current_dir(&ws).output().unwrap();
+        let wasm = run_wasm(&d.0.join("wasm/app.wasm"), &a, &ws).expect("the module ran too long");
+        assert_eq!(String::from_utf8_lossy(&wasm.stdout), String::from_utf8_lossy(&native.stdout), "args {n}");
+        assert_eq!(wasm.status.code(), native.status.code(), "args {n}: {}", String::from_utf8_lossy(&wasm.stderr));
+    }
+}
+
 #[test]
 fn wasm_module_shape() {
     if !ready() {

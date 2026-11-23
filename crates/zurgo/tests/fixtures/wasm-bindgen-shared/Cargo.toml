@@ -1,0 +1,11 @@
+[package]
+name = "app-wasm-bindgen-shared"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# (a test package of zurgo, not a member of zust's workspace)
+[workspace]
+
+[dependencies]
+wasm-bindgen-shared = "=0.2.130"

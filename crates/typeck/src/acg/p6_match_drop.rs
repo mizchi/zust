@@ -337,6 +337,14 @@ impl Cx<'_> {
                         return Err(self.at(at, format!("cannot move out of `{n}` in pattern guard (E0507)")));
                     }
                 }
+                // (a `ref mut` binding is a shared reference in the guard: assigning through it or borrowing it
+                // mutably there, in a closure too, is E0594 / E0596)
+                let mut rm = vec![];
+                ref_mut_names(&arm.pat, &mut rm);
+                if let Some((at, n, assign)) = guard_mut_use(g, &rm) {
+                    let msg = if assign { format!("cannot assign to `*{n}`, as it is immutable for the pattern guard (E0594)") } else { format!("cannot borrow `*{n}` as mutable, as it is immutable for the pattern guard (E0596)") };
+                    return Err(self.at(at, msg));
+                }
             }
             if let Some(g) = &arm.guard {
                 // (`P if let Q = e && c => ..`: each `let` of the guard tests and binds in the arm's scope, each other
@@ -380,6 +388,12 @@ impl Cx<'_> {
             }
             let t0 = self.temps.len();
             let (v, t) = self.expr(&arm.body, result_ty.or(expected))?;
+            // (the fn's tail: what an arm returns by naming one of its bindings is returned here, while the binding is
+            // in scope (`S(&mut ref mut r) => r`: E0713 through a `Drop` value); after the match, the return of the
+            // match no longer finds it)
+            if self.bk.tail == m as *const Expr as usize && self.bk_on() && self.bk_ty(self.ret).1 {
+                self.bk_ret(&arm.body);
+            }
             self.rg_keep(&arm.body);
             self.drop_tail_temps(t0, (v, t));
             self.pop_scope();
@@ -1073,10 +1087,30 @@ impl Cx<'_> {
     }
 
     /// struct パターン (`P(a, b)` / `S { .. }`) のフィールド。match 対象の型 t のインスタンスで引く
+    /// The struct a pattern's path names, with or without a turbofish (`Foo::<'static> { field }`: the value's type
+    /// gives the instance, the region check the lifetimes)
+    pub(crate) fn pat_struct_by(&self, path: &Path) -> Option<u32> {
+        self.prog.struct_by_p(&PPath::of(path), self.self_sid).or_else(|| {
+            let (pp, targs) = self.turbofish_split(path);
+            targs.and_then(|_| self.prog.struct_by_p(&pp, self.self_sid))
+        })
+    }
+
     pub(crate) fn tuple_struct_fields(&self, path: &Path, t: Ty, span: Sp) -> R<Vec<(String, Ty, u32)>> {
-        let Some(sid) = self.prog.struct_by_p(&PPath::of(path), self.self_sid) else {
+        let Some(sid) = self.pat_struct_by(path) else {
             return err(span, self.no_variant_msg(path));
         };
+        // (`S::<u16>(_)` matching an `S<u8>`: the turbofish's arguments are the value's)
+        if let (Some(args), Ty::Struct(_)) = (self.turbofish_split(path).1, t) {
+            if !args.is_empty() && args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(_))) && self.prog.struct_by_p(&PPath::of(path), self.self_sid).is_none() {
+                let ts = self.turbofish_targs(sid, args)?;
+                let n = self.prog.structs[self.prog.base_of(sid) as usize].generics.len();
+                if ts.len() != n {
+                    return err(span, format!("struct takes {n} generic arguments but {} were supplied (E0107)", ts.len()));
+                }
+                self.turbofish_vs_expected(sid, &ts, Some(t))?;
+            }
+        }
         match t {
             Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => Ok(self.prog.structs[x as usize].fields.clone()),
             _ => err(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.structs[sid as usize].name)),
@@ -1114,7 +1148,7 @@ impl Cx<'_> {
                 self.test_variant(p, sid, vi, SP, fail)?;
             }
             self.prog.structs[sid as usize].variants[vi].fields.clone()
-        } else if self.prog.struct_by_p(&PPath::of(path), self.self_sid).is_some() {
+        } else if self.pat_struct_by(path).is_some() {
             self.tuple_struct_fields(path, p.ty(), SP)?
         } else {
             return err(SP, "cannot find struct or variant");
@@ -1558,6 +1592,15 @@ impl Cx<'_> {
             let va = self.addr_plus_v(a, vo);
             let (fat, _) = self.deref_to_slice(va, vs, m)?;
             return Some((fat, Ty::Ref(m, intern(Ty::Str))));
+        }
+        // (a `Cow<str>` / `Cow<[T]>`: what its Deref gives, the text or the slice it borrows or owns; never `&mut`)
+        let base = self.prog.base_of(sid);
+        let bname = self.prog.structs[base as usize].name.clone();
+        if !m && matches!(bname.as_str(), "__CowStr" | "Cow") && self.prog.index.contains_key(&format!("{bname}::deref")) {
+            let targs = self.prog.structs[sid as usize].args.clone();
+            let r = Ty::Ref(false, intern(Ty::Struct(sid)));
+            let (v, t) = self.call_named(&format!("{bname}::deref"), targs, &[(a, r)], SP).ok()?;
+            return Some((v?, t));
         }
         None
     }
@@ -2395,6 +2438,95 @@ fn lit_suffix(e: &Expr) -> Option<bool> {
 }
 
 /// A closure in e (a match guard) whose body moves one of names out: that capture, and where it moves
+/// The names a pattern binds by `ref mut`
+fn ref_mut_names(p: &Pat, out: &mut Vec<String>) {
+    match p {
+        Pat::Ident(by_ref, m, n, sub) => {
+            if *by_ref && *m {
+                out.push(n.clone());
+            }
+            if let Some(q) = sub {
+                ref_mut_names(q, out);
+            }
+        }
+        Pat::Ref(_, q) => ref_mut_names(q, out),
+        Pat::Or(v) | Pat::Tuple(v) | Pat::TupleStruct(_, v) | Pat::Slice(v) => v.iter().for_each(|q| ref_mut_names(q, out)),
+        Pat::Struct(_, fs, _) => fs.iter().for_each(|f| ref_mut_names(&f.1, out)),
+        _ => {}
+    }
+}
+
+/// Where a guard assigns through one of names (`*r = ..`) or borrows it mutably (`&mut *r`, `&mut r`), in a closure
+/// too: the position, the name, and whether it assigns. A block's `let` that binds a name again ends it there
+fn guard_mut_use(e: &Expr, names: &[String]) -> Option<(crate::parse::Pos, String, bool)> {
+    if names.is_empty() {
+        return None;
+    }
+    // (a closure's parameters are its own: `|r: &mut i32| { *r = 2; true }` writes no arm's `r`)
+    if let Expr::Closure(_, inputs, _, body, _) = e {
+        let mut bound = vec![];
+        for (p, _) in inputs {
+            crate::ast_closure::pat_idents(p, &mut bound);
+        }
+        let cur: Vec<String> = names.iter().filter(|n| !bound.contains(n)).cloned().collect();
+        return guard_mut_use(body, &cur);
+    }
+    let named = |x: &Expr| -> Option<String> {
+        let mut x = strip_paren(x);
+        if let Expr::Unary(op, i, _) = x {
+            if op == "*" {
+                x = strip_paren(i);
+            }
+        }
+        match x {
+            Expr::Path(None, p) if p.segs.len() == 1 && names.contains(&p.segs[0].name) => Some(p.segs[0].name.clone()),
+            _ => None,
+        }
+    };
+    match e {
+        Expr::Assign(l, _) | Expr::AssignOp(_, l, _, _) if matches!(strip_paren(l), Expr::Unary(op, ..) if op == "*") => {
+            if let Some(n) = named(l) {
+                return Some((borrowck::pos(e), n, true));
+            }
+        }
+        Expr::Ref(true, x) => {
+            if let Some(n) = named(x) {
+                return Some((borrowck::pos(e), n, false));
+            }
+        }
+        Expr::Block(_, _, b) => {
+            let mut cur = names.to_vec();
+            for st in &b.stmts {
+                match st {
+                    crate::parse::Stmt::Let(p, _, init, ..) => {
+                        if let Some(f) = init.as_ref().and_then(|x| guard_mut_use(x, &cur)) {
+                            return Some(f);
+                        }
+                        let mut bound = vec![];
+                        crate::ast_closure::pat_idents(p, &mut bound);
+                        cur.retain(|n| !bound.contains(n));
+                    }
+                    crate::parse::Stmt::Expr(x, _) => {
+                        if let Some(f) = guard_mut_use(x, &cur) {
+                            return Some(f);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return None;
+        }
+        _ => {}
+    }
+    let mut found = None;
+    crate::ast_closure::each_child_pub(e, &mut |c| {
+        if found.is_none() {
+            found = guard_mut_use(c, names);
+        }
+    });
+    found
+}
+
 fn guard_closure_move(e: &Expr, names: &[String], by: crate::ast_closure::MovesBy) -> Option<(String, crate::parse::Pos)> {
     if names.is_empty() {
         return None;

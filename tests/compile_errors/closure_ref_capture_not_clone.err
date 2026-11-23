@@ -1,0 +1,1 @@
+7:20: the trait bound `[NoClone; 1]: Clone` is not satisfied (E0277)

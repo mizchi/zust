@@ -2,7 +2,7 @@
 
 The percentages are rustc's own UI tests that pass in that area: run-pass + check-pass + build-pass of the tests/ui
 directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). They were measured
-<!-- measured -->2026-11-22, 9edb119<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
+<!-- measured -->2026-11-22, 26770e4<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
 [docs/language.md](docs/language.md), and the [reports](docs/reports/) explain each step.
@@ -33,26 +33,26 @@ directories named in the comment next to the number (`ui:`), or compile-fail (`c
 - [x] qualified paths: `<T as Tr>::C` for a trait's default constant (its `Self::` is the qualified type), `<() as Tr>::f()`, associated functions through a type alias (`type Ham = m::Qux; Ham::new()`)
 - [x] let chains (`if let A = x && cond`), also in match guards (`P if let Q = e =>`); inline `const { .. }`, `&raw const` / `&raw mut`
 - [x] parser: <!-- ui:parser -->90.9%
-- [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->79.7%
-- [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->88.6%
-- [x] imports, `use`: <!-- ui:imports -->86.4%
-- [x] associated types: <!-- ui:associated-types -->79.7%
+- [x] closures (capture, `Fn` traits, `move`; with no captures also as fn pointers): <!-- ui:closures,unboxed-closures,functions-closures -->80.2%
+- [x] derives: `Debug`, `Clone`, `Copy`, `PartialEq`/`Eq`, `PartialOrd`/`Ord`, `Hash`, `Default`: <!-- ui:derives,deriving -->90.9%
+- [x] imports, `use`: <!-- ui:imports -->87.5%
+- [x] associated types: <!-- ui:associated-types -->81.1%
 - [x] generics: <!-- ui:generics -->85.7% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
   parameter known only from the expected type is not inferred)
-- [ ] consts: <!-- ui:consts -->76.9% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
+- [ ] consts: <!-- ui:consts -->77.3% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
 - [ ] drop: <!-- ui:drop -->65.2% (the drop order of some temporaries differs)
 - [ ] traits: <!-- ui:traits -->71.0% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
 - [ ] `macro_rules!`: <!-- ui:macros -->77.1% (hygiene for `let`, labels, arm bindings; not every fragment kind)
-- [ ] unions: <!-- ui:union -->69.2% (no `repr(packed)`)
-- [ ] const generics: <!-- ui:const-generics -->64.4% (no `generic_const_exprs`)
-- [ ] generic associated types: <!-- ui:generic-associated-types -->80.0%
+- [ ] unions: <!-- ui:union -->73.1% (no `repr(packed)`)
+- [ ] const generics: <!-- ui:const-generics -->65.3% (no `generic_const_exprs`)
+- [ ] generic associated types: <!-- ui:generic-associated-types -->82.2%
 - [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->72.4%
-- [ ] `impl Trait`: <!-- ui:impl-trait -->72.0% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
+- [ ] `impl Trait`: <!-- ui:impl-trait -->72.9% (return position, also nested (`-> Option<impl Debug>`), in trait methods and generic fns (typed per instance); no TAIT)
 - [ ] layout: `repr(packed)` / `repr(align)` are ignored: <!-- ui:packed,layout -->58.1%
 
 ## Checks (compile-fail)
 
-- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->78.2%
+- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->83.1%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
 - [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->70.9%, structs <!-- cf:structs -->77.1%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
@@ -71,7 +71,7 @@ directories named in the comment next to the number (`ui:`), or compile-fail (`c
   must outlive the fn live to its end, closures that are not general enough or let borrowed data escape, generic fns
   that are never called (checked with placeholder types). Not yet: what a closure's body requires of its fn,
   higher-ranked trait selection, the requirements of the impl a coercion selects, the prelude's iterators (their types
-  hold no lifetimes). regions <!-- cf:regions -->74.1%, lifetimes <!-- cf:lifetimes -->72.7%
+  hold no lifetimes). regions <!-- cf:regions -->75.0%, lifetimes <!-- cf:lifetimes -->74.2%
   ([issue #1](https://github.com/mizchi/zust/issues/1))
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
 - [ ] lints and warnings: lint <!-- cf:lint -->31.1%

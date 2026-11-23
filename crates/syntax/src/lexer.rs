@@ -1728,14 +1728,103 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         mod_of_path.get(&base).copied()
     };
+    // (a module imported by `use`, under its own name or another: `use util as u;` with the crate `util`, or
+    // `use crate::geom::shape;`. (scope, the name used) → the module, so `u::calls()` is `util::calls()`)
+    let mut mod_alias: LMap<(usize, Vec<u8>), usize> = LMap::default();
+    // (a `use` in a block (a fn body) names the module in that block only: (its `{`, its `}`, the name, the module))
+    let mut block_alias: Vec<(usize, usize, Vec<u8>, usize, usize)> = vec![];
+    // (the innermost `{` around each token, and the `}` of each `{`)
+    let mut block_of: Vec<usize> = vec![usize::MAX; toks.len()];
+    let mut close_at: LMap<usize, usize> = LMap::default();
+    let mut open_st: Vec<usize> = vec![];
+    for (k, b) in block_of.iter_mut().enumerate() {
+        *b = open_st.last().copied().unwrap_or(usize::MAX);
+        if is_sym(k, b'{') {
+            open_st.push(k);
+        } else if is_sym(k, b'}') {
+            if let Some(o) = open_st.pop() {
+                close_at.insert(o, k);
+            }
+        }
+    }
+    let mut k = 0;
+    while k < toks.len() {
+        if !is_id(k, b"use") {
+            k += 1;
+            continue;
+        }
+        let sc = scope_of(k);
+        let mut e = k;
+        while e < toks.len() && !is_sym(e, b';') {
+            e += 1;
+        }
+        let mut items = vec![];
+        use_walk(&toks, s, k + 1, e, vec![], &mut items);
+        // (in the module's own braces (or at the root), or in a block inside them)
+        let own = if sc == usize::MAX { usize::MAX } else { mods[sc].1 };
+        let block = block_of[k];
+        for (path, local) in items {
+            if local.as_slice() != b"*" && local.as_slice() != b"_" && !path.is_empty() {
+                if let Some(m) = resolve_mod(sc, &path).filter(|&m| m != usize::MAX) {
+                    match close_at.get(&block) {
+                        // (and its module: a `mod` declared in the block does not see it)
+                        Some(&close) if block != own => block_alias.push((block, close, local, m, sc)),
+                        _ => {
+                            mod_alias.insert((sc, local), m);
+                        }
+                    }
+                }
+            }
+        }
+        k = e + 1;
+    }
+    // (a path at token `at` in scope `from`: its first segment through the aliases, the innermost block's first)
+    // (a `mod x { .. }` declared in a block (a fn body): (the block's `{`, its `}`, the name, the module, the scope it is
+    // declared in). Inside the block it shadows an alias `x` of the module's)
+    let mut block_mods: Vec<(usize, usize, Vec<u8>, usize, usize)> = vec![];
+    for (m, md) in mods.iter().enumerate() {
+        if md.1 < 2 {
+            continue;
+        }
+        let d = md.1 - 2;
+        let sc = scope_of(d);
+        let own = if sc == usize::MAX { usize::MAX } else { mods[sc].1 };
+        let b = block_of[d];
+        if let (Some(&c), Some(n)) = (close_at.get(&b), md.0.last()) {
+            if b != own {
+                block_mods.push((b, c, n.clone(), m, sc));
+            }
+        }
+    }
+    let resolve_mod = |from: usize, segs: &[Vec<u8>], at: usize| -> Option<usize> {
+        let alias = segs.first().and_then(|f| {
+            // (the innermost block's alias or module of that name, then the module's alias)
+            block_alias
+                .iter()
+                .chain(block_mods.iter())
+                .filter(|b| b.0 < at && at < b.1 && b.2 == *f && b.4 == from)
+                .max_by_key(|b| b.0)
+                .map(|b| b.3)
+                .or_else(|| mod_alias.get(&(from, f.clone())).copied())
+        });
+        if let Some(m) = alias {
+            let mut p = mods[m].0.clone();
+            p.extend(segs[1..].iter().cloned());
+            return if segs.len() == 1 { Some(m) } else { mod_of_path.get(&p).copied() };
+        }
+        resolve_mod(from, segs)
+    };
     let renamed_in = |m: usize, n: &[u8]| -> Option<Vec<u8>> { renamed_map.get(&(m, n.to_vec())).cloned() };
     // use 文で取り込んだ名前: (スコープ, 使う名前) → 新しい名前。use 文のトークン範囲は書き換えない
     let mut imports: Vec<(usize, Vec<u8>, Vec<u8>)> = vec![];
     let mut use_ranges: Vec<(usize, usize)> = vec![];
     // `use crate::m::*;` で取り込んだモジュール: (スコープ, モジュール)
     let mut globs: Vec<(usize, usize)> = vec![];
-    // (モジュール m の中で use した名前を取り込むもの: (スコープ, 使う名前, m, m の中の名前))
-    let mut pending: Vec<(usize, Vec<u8>, usize, Vec<u8>)> = vec![];
+    // (モジュール m の中で use した名前を取り込むもの: (スコープ, 使う名前, m, m の中の名前, ブロック))
+    let mut pending: Vec<(usize, Vec<u8>, usize, Vec<u8>, Option<(usize, usize)>)> = vec![];
+    // (a name a `use` in a block (a fn body) imports, seen in that block only: (its `{`, its `}`, the name used, the new
+    // name). The innermost block's wins over the module's items and imports)
+    let mut block_imports: Vec<(usize, usize, Vec<u8>, Vec<u8>, usize)> = vec![];
     let mut k = 0;
     while k < toks.len() {
         if !is_id(k, b"use") {
@@ -1750,9 +1839,15 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         use_ranges.push((k, e));
         let mut items = vec![];
         use_walk(&toks, s, k + 1, e, vec![], &mut items);
+        let own_brace = if sc == usize::MAX { usize::MAX } else { mods[sc].1 };
+        let in_block = close_at.get(&block_of[k]).filter(|_| block_of[k] != own_brace).map(|&c| (block_of[k], c));
+        let mut add = |local: Vec<u8>, nn: Vec<u8>| match in_block {
+            Some((o, c)) => block_imports.push((o, c, local, nn, sc)),
+            None => imports.push((sc, local, nn)),
+        };
         for (path, local) in items {
             if local.as_slice() == b"*" {
-                if let Some(m) = resolve_mod(sc, &path) {
+                if let Some(m) = resolve_mod(sc, &path, k) {
                     globs.push((sc, m));
                 }
                 continue;
@@ -1761,15 +1856,15 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 continue;
             }
             let (mpath, name) = path.split_at(path.len() - 1);
-            if let Some(m) = resolve_mod(sc, mpath) {
+            if let Some(m) = resolve_mod(sc, mpath, k) {
                 if let Some(nn) = renamed_in(m, &name[0]) {
-                    imports.push((sc, local, nn));
+                    add(local, nn);
                 } else if !def_set.contains(&(m, name[0].clone())) {
                     // (`pub use` で取り込み直した名前かもしれない: 後で解く)
-                    pending.push((sc, local, m, name[0].clone()));
+                    pending.push((sc, local, m, name[0].clone(), in_block));
                 } else if local.as_slice() != name[0].as_slice() && def_set.contains(&(m, name[0].clone())) {
                     // (`use crate::parse::{FnSig as PSig}`: 別名はそのモジュールの中で元の名前に)
-                    imports.push((sc, local, name[0].clone()));
+                    add(local, name[0].clone());
                 }
             }
         }
@@ -1783,7 +1878,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             let found = imports.iter().find(|i| i.0 == p.2 && i.1 == p.3).map(|i| i.2.clone());
             match found {
                 Some(nn) => {
-                    imports.push((p.0, p.1, nn));
+                    match p.4 {
+                        Some((o, c)) => block_imports.push((o, c, p.1, nn, p.0)),
+                        None => imports.push((p.0, p.1, nn)),
+                    }
                     progress = true;
                 }
                 None => rest.push(p),
@@ -1862,6 +1960,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     }
     for i in &imports {
         interest.insert(name_hash(&i.1));
+    }
+    for i in &block_imports {
+        interest.insert(name_hash(&i.2));
     }
     // (a name a fn binds itself, a parameter `guard: Self` or a `let guard = ..`, is that local in the fn's body, not
     // the item of that name: `fn into_inner(guard: Self) { ManuallyDrop::new(guard) }` next to `pub fn guard`)
@@ -1982,7 +2083,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // 接頭辞のいちばん長いモジュールから見る
             let mut done = false;
             for cut in (1..segs.len()).rev() {
-                if let Some(m) = resolve_mod(sc, &segs[..cut]) {
+                if let Some(m) = resolve_mod(sc, &segs[..cut], k) {
                     if m == usize::MAX && !(segs[0].as_slice() == b"crate") {
                         continue;
                     }
@@ -2008,7 +2109,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // (a glob import is shadowed by the scope's own item of that name: the crate root's `enum Thing` beside
             // `use thing::*;` stays the root's)
             let own = || own_defs.contains(&(sc, n));
-            let nn = renamed_in(sc, n)
+            // (a block's own import first: `fn f() { use b::g; g() }` beside a module-level `g`)
+            let in_block = || if is_def { None } else { block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n && b.4 == sc).max_by_key(|b| b.0).map(|b| b.3.clone()) };
+            let nn = in_block()
+                .or_else(|| renamed_in(sc, n))
                 .or_else(|| imported(sc, n))
                 .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| renamed_in(g.1, n)) })
                 // (`use super::*;` は親が use で取り込んだ名前も見える)

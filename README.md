@@ -113,7 +113,8 @@ zustc build workspace.txt -o target
 
   In a value, `%`, `#` and white space are written `%XX`. A name `env!` does not find there is looked up in zustc's
   own environment, as rustc does.
-- Each crate gets its own object file and cache, and they are linked at the end.
+- Each crate gets its own object file and cache, and they are linked at the end. With
+  `--target wasm32-unknown-unknown`, the crates' functions and data are put into one wasm module per bin.
 - Changing the body of a function in a crate that others depend on does not recompile the dependents; zustc only
   relinks.
 - See `tests/workspace/` for an example.
@@ -130,7 +131,9 @@ zurgo run
 ```
 
 - Commands: `build`, `run`, `metadata` (the JSON of `cargo metadata`), `clean`, with cargo's flags for them.
-- Output goes to `target/zust/<profile>/`.
+- Output goes to `target/zust/<profile>/`. With `--target wasm32-unknown-unknown`, each bin is a wasm module in
+  `target/zust/wasm32-unknown-unknown/<profile>/`, and `zurgo run` runs it with
+  `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER`, as cargo does.
 - Build scripts run as under cargo (compiled by zustc, or by rustc when zustc cannot), and their cfgs, `rustc-env` and
   `OUT_DIR` reach the crates. A proc-macro dependency is a stub: using its macros is an error.
 - Not yet: running proc macros, two versions of one crate, renamed dependencies, git dependencies, its own resolver
@@ -212,7 +215,7 @@ Known differences from rust-analyzer are listed in [CONTRIBUTING.md](CONTRIBUTIN
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-22, 9edb119<!-- /measured --> by CI on each push to main. Details:
+Numbers measured <!-- measured -->2026-11-22, 26770e4<!-- /measured --> by CI on each push to main. Details:
 [SUPPORT.md](SUPPORT.md) (what is supported) and [PERFORMANCE.md](PERFORMANCE.md) (speed, size, memory, and
 comparisons with rustc and others).
 
@@ -224,10 +227,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1816 (76.1%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1502 (83.1%) |
+| run-pass (builds, runs, same output) | 2385 | 1825 (76.5%) |
+| check-pass (accepted by `zustc check`) | 1807 | 1510 (83.6%) |
 | build-pass | 135 | 102 (75.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 4364 (59.3%) |
+| compile-fail (rejected at an annotated line) | 7358 | 4413 (60.0%) |
 <!-- /auto:ui -->
 
 [SUPPORT.md](SUPPORT.md) breaks this down by area: the language, the checks, the runtime and std, and what is left.
@@ -240,10 +243,10 @@ table, with instruction counts, cache and binary sizes and memory, is in [PERFOR
 <!-- auto:kpi-summary -->
 | | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 123 ms | 437 ms |
-| no-op build | 1.0 ms | 1.2 ms |
-| build after editing one function | 23.9 ms | 70.7 ms |
-| `check` | 77 ms | 345 ms |
+| cold build | 122 ms | 551 ms |
+| no-op build | 0.7 ms | 0.7 ms |
+| build after editing one function | 17.1 ms | 64.1 ms |
+| `check` | 77 ms | 375 ms |
 <!-- /auto:kpi-summary -->
 
 Against `rustc -C incremental` on gen1000 (a snapshot measured by hand): about 6x faster cold, 15x faster after an

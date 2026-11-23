@@ -1,0 +1,3 @@
+// expect: `==` compares values
+type Grow<T> = { v: T, children: Array<Grow<(T, T)>> }
+fn g(p: Grow<i32>, q: Grow<i32>) -> bool { p == q }

@@ -1331,6 +1331,7 @@ impl Cx<'_> {
 
     /// 一時領域にタグと各フィールドを書いて enum の値を作る。args は (フィールド番号, 式)
     pub(crate) fn variant_value(&mut self, sid: u32, vi: usize, args: &[(usize, &Expr)], expected: Option<Ty>) -> R<V> {
+        let sid = self.cow_of_str(sid, args, expected).unwrap_or(sid);
         let r = self.adt_value(sid, Some(vi), args, expected, SP);
         if let Ok((_, t)) = &r {
             self.rg_variant(*t, vi, args);
@@ -1338,9 +1339,36 @@ impl Cx<'_> {
         r
     }
 
+    /// `Cow::Borrowed(s)` / `Cow::Owned(s)` of a `Cow<str>` (the expected type, or an argument `&str` / `String`):
+    /// prelude's `__CowStr`, whose variants are in the same order. Prelude's `Cow<T>` stands for `Cow<[T]>` only
+    pub(crate) fn cow_of_str(&self, sid: u32, args: &[(usize, &Expr)], expected: Option<Ty>) -> Option<u32> {
+        let cow = *self.prog.struct_index.get("Cow")?;
+        if self.prog.base_of(sid) != cow {
+            return None;
+        }
+        let cs = *self.prog.struct_index.get("__CowStr")?;
+        match expected {
+            Some(Ty::Struct(e)) if e == cs => return Some(cs),
+            // (an instance inference settled on; `Cow<T0>` or the definition itself, still open, says nothing)
+            Some(t @ Ty::Struct(e)) if self.prog.base_of(e) == cow && e != cow && !self.prog.has_param(t) => return None,
+            _ => {}
+        }
+        let string = self.prog.struct_index.get("String").copied();
+        // (the argument's own type first: inference may have unified it with the slice `Cow`'s field)
+        let a = args.first()?.1;
+        match self.peek_syn(a).or_else(|| self.peek(a))? {
+            Ty::Ref(_, Ty::Str) => Some(cs),
+            Ty::Struct(s) if Some(s) == string => Some(cs),
+            _ => None,
+        }
+    }
+
     /// struct (vi = None) / enum のバリアント (vi = Some) の値を一時領域に作る。args は (フィールド番号, 式)。
     /// ジェネリックな定義なら、期待型 → 実引数の型 の順にインスタンスを決める
     pub(crate) fn adt_value(&mut self, base: u32, vi: Option<usize>, args: &[(usize, &Expr)], expected: Option<Ty>, span: Sp) -> R<V> {
+        if !self.rg.on && !self.prog.adt_regions.is_empty() {
+            self.rg_adt_on(self.prog.base_of(base));
+        }
         // (戻り値を書く先: フィールドの式の中の呼び出しには渡さない)
         let hint = self.dst_hint.take();
         let fields_of = |this: &Self, sid: u32| -> Vec<(String, Ty, u32)> {
@@ -1809,23 +1837,7 @@ impl Cx<'_> {
             _ => false,
         };
         // (Copy as a trait: `&mut T` is not, though the borrow check's is_copy counts it, as it is reborrowed)
-        // (an instance whose Copy needs its arguments' (`Option<&mut T>`, a derive of the program's), not
-        // `PhantomData<&mut T>`)
-        fn copy_needs_args(p: &Program, sid: u32) -> bool {
-            let b = p.base_of(sid);
-            let own = p.struct_item.get(b as usize).is_some_and(|&ii| ii < p.prelude_from);
-            p.impls.contains(&(b, "Copy".to_string())) && if own { p.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Copy")) } else { p.clone_needs_args(b, false) }
-        }
-        fn mut_ref(p: &Program, t: Ty, depth: u32) -> bool {
-            match t {
-                Ty::Ref(true, _) => true,
-                Ty::Array(e, _) => depth < 16 && mut_ref(p, *e, depth + 1),
-                Ty::Struct(sid) if p.is_tuple(sid) => depth < 16 && p.structs[sid as usize].fields.iter().any(|f| mut_ref(p, f.1, depth + 1)),
-                Ty::Struct(sid) => depth < 16 && copy_needs_args(p, sid) && p.structs[sid as usize].args.iter().any(|&a| mut_ref(p, a, depth + 1)),
-                _ => false,
-            }
-        }
-        let is_copy = |p: &Program, t: Ty| super::borrowck::is_copy(p, t, 0) && !mut_ref(p, t, 0);
+        let is_copy = |p: &Program, t: Ty| super::borrowck::is_copy(p, t, 0) && !copy_mut_ref(p, t, 0);
         if n >= 2 && self.user_code && !constant && !is_copy(self.prog, elem) {
             // (the type that is not Copy: an argument of a Copy type, as rustc names it (`Option<Bar>`: `Bar`,
             // `Option<&mut i32>`: `&mut i32`))
@@ -1891,5 +1903,24 @@ impl Cx<'_> {
             self.b.switch_to_block(exit);
         }
         Ok((Some(base), t))
+    }
+}
+
+/// (an instance whose Copy needs its arguments' (`Option<&mut T>`, a derive of the program's), not
+/// `PhantomData<&mut T>`)
+fn copy_needs_args(p: &Program, sid: u32) -> bool {
+    let b = p.base_of(sid);
+    let own = p.struct_item.get(b as usize).is_some_and(|&ii| ii < p.prelude_from);
+    p.impls.contains(&(b, "Copy".to_string())) && if own { p.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Copy")) } else { p.clone_needs_args(b, false) }
+}
+/// t holds a `&mut` that makes it not Copy as a trait (borrowck's is_copy counts `&mut T`, which is reborrowed):
+/// `&mut T`, an array or tuple of one, an instance whose Copy needs its arguments' (`Option<&mut T>`)
+pub(crate) fn copy_mut_ref(p: &Program, t: Ty, depth: u32) -> bool {
+    match t {
+        Ty::Ref(true, _) => true,
+        Ty::Array(e, _) => depth < 16 && copy_mut_ref(p, *e, depth + 1),
+        Ty::Struct(sid) if p.is_tuple(sid) => depth < 16 && p.structs[sid as usize].fields.iter().any(|f| copy_mut_ref(p, f.1, depth + 1)),
+        Ty::Struct(sid) => depth < 16 && copy_needs_args(p, sid) && p.structs[sid as usize].args.iter().any(|&a| copy_mut_ref(p, a, depth + 1)),
+        _ => false,
     }
 }

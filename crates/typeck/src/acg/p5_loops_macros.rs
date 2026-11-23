@@ -1762,6 +1762,7 @@ impl Cx<'_> {
             };
             self.write(Place::Mem(a, reoff as i32, rety), ev);
         }
+        self.bk_cap_escape();
         self.drop_for_exit(0, 0);
         self.emit_return(Some(a));
         self.b.switch_to_block(cont);
@@ -2058,16 +2059,26 @@ impl Cx<'_> {
     /// パターンのパスのバリアントを、match 対象の型 t (インスタンス) に合わせて引く
     pub(crate) fn variant_on(&self, p: &Path, t: Ty) -> Option<(u32, usize)> {
         let (sid, vi) = self.prog.variant_by_p(&PPath::of(p), self.self_sid)?;
+        // (`A::V(_)` with `type A = E<u8>;`: a variant of that instance only, not of an `E<u16>`)
+        let other_alias = || {
+            if p.segs.len() == 2 && !self.prog.struct_index.contains_key(&p.segs[0].name) && self.prog.aliases.contains_key(&p.segs[0].name) {
+                if let Ok(at @ Ty::Struct(_)) = self.parse_ty(&crate::parse::Ty::Path(None, path_of(&p.segs[0].name))) {
+                    return at != t && !self.prog.has_param(at) && !self.prog.has_param(t);
+                }
+            }
+            false
+        };
+        // (`Cow::Borrowed(s)` on a `Cow<str>`: prelude's `__CowStr`, whose variants are in the same order; not through an
+        // alias of another Cow, `type Bytes = Cow<'static, [u8]>;`)
+        if let (Ty::Struct(x), Some(&cow), Some(&cs)) = (t, self.prog.struct_index.get("Cow"), self.prog.struct_index.get("__CowStr")) {
+            if x == cs && self.prog.base_of(sid) == cow {
+                return if other_alias() { None } else { Some((cs, vi)) };
+            }
+        }
         match t {
             Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => {
-                // (`A::V(_)` with `type A = E<u8>;`: a variant of that instance only, not of an `E<u16>`)
-                if p.segs.len() == 2 && !self.prog.struct_index.contains_key(&p.segs[0].name) && self.prog.aliases.contains_key(&p.segs[0].name) {
-                    let at = self.parse_ty(&crate::parse::Ty::Path(None, path_of(&p.segs[0].name)));
-                    if let Ok(at @ Ty::Struct(_)) = at {
-                        if at != t && !self.prog.has_param(at) && !self.prog.has_param(t) {
-                            return None;
-                        }
-                    }
+                if other_alias() {
+                    return None;
                 }
                 Some((x, vi))
             }

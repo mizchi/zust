@@ -5321,6 +5321,22 @@ fn __exr_escape<G>(s: &mut String, c: char, quote: char) {
     }
 }
 
+// `\u{hex}` (lowercase, no leading zeros)
+fn __exr_push_unicode_escape<G>(s: &mut String, v: u32) {
+    s.push_str("\\u{");
+    let mut started = false;
+    let mut sh: i32 = 20;
+    while sh >= 0 {
+        let d = ((v >> (sh as u32)) & 15) as u8;
+        if d != 0 || started || sh == 0 {
+            started = true;
+            s.push(if d < 10 { (48 + d) as char } else { (87 + d) as char });
+        }
+        sh -= 4;
+    }
+    s.push('}');
+}
+
 fn __exr_fmt_str_debug<G>(f: &mut Formatter, x: &str) {
     let mut s = String::new();
     s.push('"');
@@ -5987,6 +6003,28 @@ impl Deref for __CowStr {
             __CowStr::Borrowed(s) => *s,
             __CowStr::Owned(v) => v.as_str(),
         }
+    }
+}
+
+// (`Cow<str>` shows as its text, as std's: `{}` the text, `{:?}` the text quoted)
+impl Display for __CowStr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let s: &str = match self {
+            __CowStr::Borrowed(s) => *s,
+            __CowStr::Owned(v) => v.as_str(),
+        };
+        __exr_fmt_str::<()>(f, s);
+        Ok(())
+    }
+}
+
+impl Debug for __CowStr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let s: &str = match self {
+            __CowStr::Borrowed(s) => *s,
+            __CowStr::Owned(v) => v.as_str(),
+        };
+        write!(f, "{:?}", s)
     }
 }
 
@@ -11797,7 +11835,7 @@ pub struct Split {
     len: usize,
     i: usize,
     sep: u8,
-    // 0 = 区切り文字 1 個, 1 = 空白の連続 (split_whitespace), 2 = 行 (lines)
+    // 0 = 区切り文字 1 個, 1 = 空白の連続 (split_whitespace; sep 1: split_ascii_whitespace, without U+000B), 2 = 行 (lines)
     mode: u8,
     done: bool,
     // 後ろから読み始めたか (lines の末尾の改行を 1 度だけ落とす)
@@ -11808,14 +11846,14 @@ impl Split {
     // rev() 用: 後ろの端 (len) を縮めながら読む
     pub fn next_back(&mut self) -> Option<&str> {
         if self.mode == 1 {
-            while self.len > self.i && __exr_is_space::<()>(unsafe { *self.p.add(self.len - 1) }) {
+            while self.len > self.i && __exr_split_space::<()>(unsafe { *self.p.add(self.len - 1) }, self.sep) {
                 self.len -= 1;
             }
             if self.len <= self.i {
                 return None;
             }
             let end = self.len;
-            while self.len > self.i && !__exr_is_space::<()>(unsafe { *self.p.add(self.len - 1) }) {
+            while self.len > self.i && !__exr_split_space::<()>(unsafe { *self.p.add(self.len - 1) }, self.sep) {
                 self.len -= 1;
             }
             return Some(__exr_sub::<()>(unsafe { self.p.add(self.len) }, end - self.len));
@@ -11856,14 +11894,14 @@ impl Iterator for Split {
     type Item = &str;
     fn next(&mut self) -> Option<&str> {
         if self.mode == 1 {
-            while self.i < self.len && __exr_is_space::<()>(unsafe { *self.p.add(self.i) }) {
+            while self.i < self.len && __exr_split_space::<()>(unsafe { *self.p.add(self.i) }, self.sep) {
                 self.i += 1;
             }
             if self.i >= self.len {
                 return None;
             }
             let st = self.i;
-            while self.i < self.len && !__exr_is_space::<()>(unsafe { *self.p.add(self.i) }) {
+            while self.i < self.len && !__exr_split_space::<()>(unsafe { *self.p.add(self.i) }, self.sep) {
                 self.i += 1;
             }
             return Some(__exr_sub::<()>(unsafe { self.p.add(st) }, self.i - st));
@@ -13051,6 +13089,74 @@ fn __exr_char_to_lowercase<G>(c: char) -> ToCase {
     ToCase { c: __exr_char_lower1::<()>(c), done: false }
 }
 
+// `c.escape_unicode()` / `c.escape_default()`: the escape's characters (`.next()` / `collect` / `{}`)
+pub struct CharEscape {
+    buf: [char; 10],
+    n: usize,
+    i: usize,
+}
+
+impl Iterator for CharEscape {
+    type Item = char;
+    fn next(&mut self) -> Option<char> {
+        if self.i < self.n {
+            let c = self.buf[self.i];
+            self.i += 1;
+            Some(c)
+        } else {
+            None
+        }
+    }
+}
+
+impl Display for CharEscape {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let mut s = String::new();
+        let mut k = self.i;
+        while k < self.n {
+            s.push(self.buf[k]);
+            k += 1;
+        }
+        // (the whole escape, as std's: no width or precision applies)
+        f.write_str(s.as_str())
+    }
+}
+
+fn __exr_char_esc_of<G>(s: &str) -> CharEscape {
+    let mut e = CharEscape { buf: ['\0'; 10], n: 0, i: 0 };
+    for c in s.chars() {
+        e.buf[e.n] = c;
+        e.n += 1;
+    }
+    e
+}
+
+fn __exr_char_escape_unicode<G>(c: char) -> CharEscape {
+    let mut s = String::new();
+    __exr_push_unicode_escape::<()>(&mut s, c as u32);
+    __exr_char_esc_of::<()>(s.as_str())
+}
+
+fn __exr_char_escape_default<G>(c: char) -> CharEscape {
+    let mut s = String::new();
+    let v = c as u32;
+    if c == '\t' {
+        s.push_str("\\t");
+    } else if c == '\r' {
+        s.push_str("\\r");
+    } else if c == '\n' {
+        s.push_str("\\n");
+    } else if c == '\'' || c == '"' || c == '\\' {
+        s.push('\\');
+        s.push(c);
+    } else if v >= 0x20 && v <= 0x7e {
+        s.push(c);
+    } else {
+        __exr_push_unicode_escape::<()>(&mut s, v);
+    }
+    __exr_char_esc_of::<()>(s.as_str())
+}
+
 // `char::from_digit(d, 10)` / `char::from_u32(x)` / `char::from(b)`
 fn __exr_char_from_digit<G>(d: u32, radix: u32) -> Option<char> {
     if d >= radix || radix > 36 {
@@ -13112,6 +13218,15 @@ impl<F: FnMut(char) -> bool> Iterator for SplitFn<F> {
 
 fn __exr_str_split_fn<G, F: FnMut(char) -> bool>(s: &str, f: F) -> SplitFn<F> {
     SplitFn { p: s.as_ptr(), len: s.len(), i: 0, f: f, done: false }
+}
+
+// (a byte of split_whitespace's spaces; with ascii (split_ascii_whitespace's) not the vertical tab)
+fn __exr_split_space<G>(b: u8, ascii: u8) -> bool {
+    __exr_is_space::<()>(b) && (ascii == 0 || b != 11)
+}
+
+fn __exr_str_split_ascii_whitespace<G>(s: &str) -> Split {
+    Split { p: s.as_ptr(), len: s.len(), i: 0, sep: 1, mode: 1, done: false, bk: false }
 }
 
 fn __exr_str_split_ws<G>(s: &str) -> Split {

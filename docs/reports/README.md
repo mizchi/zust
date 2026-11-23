@@ -87,3 +87,6 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-22 | [Region (lifetime) checking, part 8: stores through `&mut`, moves out of what cannot be moved, and tuning](2026-11-22-05-region-check-8.md) |
 | 2026-11-22 | [Region (lifetime) checking, part 9: block tails, match guards, destructors, and items in fn bodies](2026-11-22-06-region-check-9.md) |
 | 2026-11-22 | [Region (lifetime) checking, part 10: closures' captures, guards, patterns, implicit reborrows, and `'static` instances](2026-11-22-07-region-check-10.md) |
+| 2026-11-22 | [W0: wasm-bindgen-shared for wasm32, with zurgo](2026-11-22-08-wasm-bindgen-shared-wasm32.md) |
+| 2026-11-22 | [Region (lifetime) checking, part 11: match tails, tail temporaries, closures' bodies, lifetimes written in paths, and trait objects' receivers](2026-11-22-08-region-check-11.md) |
+| 2026-11-22 | [Region (lifetime) checking, part 12: shared derefs, closures' escapes and reborrows, annotated patterns, and impls' signatures](2026-11-22-09-region-check-12.md) |

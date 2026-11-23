@@ -81,6 +81,9 @@ pub struct Rg {
     pub rerun: bool,
     /// Nesting of call_fn (this and what follows: where lowering is, written whether the check is on or not)
     pub depth: u32,
+    /// The lifetimes a path call writes on its type (`A::<'a>::new(..)`, `<A<'a> as Tr>::f(..)`): (the call's depth
+    /// in call_fn, the callee, the lifetimes in the type's order). rg_call gives them to the impl's lifetimes
+    pub call_self: Option<(u32, u32, Vec<String>)>,
     /// The receiver of the method call being lowered, as passed, and its position
     pub recv: Option<(RT, Sp)>,
     /// The last scrutinee's tree; the part of it the pattern being bound matches, and the region of the reference
@@ -1848,6 +1851,32 @@ impl Cx<'_> {
         }
         match e {
             Expr::Paren(x) => self.rt_expr(x),
+            // (`(&x, 0)`: the elements' trees in order; one of another type (a coercion) flows into fresh regions)
+            Expr::Tuple(es) if !es.is_empty() => {
+                let prog = self.prog;
+                let t = self.peek(e)?;
+                let Ty::Struct(sid) = t else { return None };
+                if !prog.is_tuple(sid) || prog.structs[sid as usize].args.len() != es.len() {
+                    return None;
+                }
+                let args = prog.structs[sid as usize].args.clone();
+                let mut out = vec![];
+                for (x, a) in es.iter().zip(args) {
+                    let c = count(prog, a, 0)?;
+                    if c == 0 {
+                        continue;
+                    }
+                    let (xt, xtr) = self.rt_expr(x)?;
+                    if xt == a && xtr.len() == c {
+                        out.extend(xtr);
+                    } else {
+                        let f = self.rg.fresh(prog, a)?;
+                        self.rg.flow(prog, xt, a, &xtr, &f, super::borrowck::pos(x));
+                        out.extend(f);
+                    }
+                }
+                Some((t, out))
+            }
             Expr::Lit(s, _) if s.starts_with('"') || s.starts_with("r\"") || s.starts_with("r#") => Some((Ty::Ref(false, crate::types::intern(Ty::Str)), vec![STATIC])),
             // (`&f(..)` / `&mut 4` / `&{ let y = ..; y }`: a temporary the function owns (a `&` of a literal is
             // promoted to a static, and so may be a block of a constant alone))
@@ -2496,25 +2525,56 @@ impl Cx<'_> {
 
     /// `let _: ann = init;`: init flows into a value of the annotation's type
     pub(crate) fn rg_let_wild(&mut self, ann: &PTy, init: &Expr) {
+        self.rg_let_ann(ann, init, None);
+    }
+
+    /// `let PAT: ann = init;`: init flows into a value of the annotation's type, whose tree is returned (what the
+    /// pattern binds from: `let (y, _): (&'a u32, u32) = (&22, 44);` makes y a `&'a u32`)
+    pub(crate) fn rg_let_ann(&mut self, ann: &PTy, init: &Expr, actual: Option<Ty>) -> Option<(Ty, RT)> {
         if !self.rg_on() {
-            return;
+            return None;
         }
         let init_tree = self.rt_expr(init);
-        let Ok(t) = self.parse_ty(ann) else { return };
         let prog = self.prog;
-        let names = self.rg.lt_names.clone();
-        let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
-        let mut codes = vec![];
-        s.slots(ann, false, &mut codes);
-        let lts = self.rg.lts.clone();
-        self.rg.dyn_infer = true;
-        let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
-        self.rg.dyn_infer = false;
-        if let Some(tree) = tree {
-            let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
-            self.rg.wf(prog, t, &tree, sp);
-            if let Some((it, itr)) = init_tree {
-                self.rg.flow(prog, it, t, &itr, &tree, sp);
+        // (the type of the value bound (a pattern's), else the annotation's: an annotation with holes (`(&'static u8,
+        // _)`) gives its tree against the type inference found, element by element, a hole's regions its own)
+        let t = match actual {
+            Some(t) => t,
+            None => self.parse_ty(ann).ok()?,
+        };
+        let tree = self.rg_ann_tree(ann, t)?;
+        let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
+        self.rg.wf(prog, t, &tree, sp);
+        if let Some((it, itr)) = init_tree {
+            self.rg.flow(prog, it, t, &itr, &tree, sp);
+        }
+        Some((t, tree))
+    }
+
+    /// The tree of a value of type t written as ann (the annotation of a `let`): the regions it writes, fresh ones for
+    /// a hole (`_`) and for what it elides; through tuples element by element
+    fn rg_ann_tree(&mut self, ann: &PTy, t: Ty) -> Option<RT> {
+        let prog = self.prog;
+        match (ann, t) {
+            (PTy::Infer, _) => self.rg.fresh(prog, t),
+            (PTy::Tuple(es), Ty::Struct(sid)) if prog.is_tuple(sid) && prog.structs[sid as usize].args.len() == es.len() => {
+                let args = prog.structs[sid as usize].args.clone();
+                let mut out = vec![];
+                for (e, a) in es.iter().zip(args) {
+                    out.extend(self.rg_ann_tree(e, a)?);
+                }
+                Some(out)
+            }
+            _ => {
+                let names = self.rg.lt_names.clone();
+                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut codes = vec![];
+                s.slots(ann, false, &mut codes);
+                let lts = self.rg.lts.clone();
+                self.rg.dyn_infer = true;
+                let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
+                self.rg.dyn_infer = false;
+                tree
             }
         }
     }
@@ -2677,6 +2737,26 @@ impl Cx<'_> {
         let prelude = prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= prog.prelude_from) && !prog.closures.contains_key(&id);
         let rg = &mut self.rg;
         let mut lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| rg.var()).collect()).unwrap_or_default();
+        // (the lifetimes the path writes on the impl's self type: `A::<'a>::new` with `impl<'a> A<'a>` is the impl's
+        // `'a`. The self type's first slots are its lifetime parameters')
+        // (a call in the arguments, one level deeper, leaves them: it is made before this call's check)
+        let written = if rg.call_self.as_ref().is_some_and(|x| x.0 == rg.depth && x.1 == id) { rg.call_self.take() } else { None };
+        if let (Some((_, _, ls)), Some(r)) = (written, rs.as_deref()) {
+            let n = match sig0.self_ty {
+                Some(Ty::Struct(s)) => lts_of(prog, prog.base_of(s)),
+                _ => 0,
+            };
+            for (j, l) in ls.iter().enumerate().take(n) {
+                let Some(&c) = r.self_slots.get(j) else { break };
+                if (c as usize) >= (r.outer as usize).min(lts.len()) || l == "'_" {
+                    continue;
+                }
+                let v = if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|x| x == l).and_then(|p| rg.lts.get(p).copied()) };
+                if let Some(v) = v {
+                    lts[c as usize] = v;
+                }
+            }
+        }
         // (a method of a placeholder's bound (`G: GetRef<'a>` calling `g.get()`): the trait's lifetimes are those the
         // bound writes, the caller's; what the declaration requires is the caller's to prove)
         let mut ph_self = false;
@@ -3183,7 +3263,9 @@ impl Cx<'_> {
                 codes.push(v);
             }
         }
-        self.insts.lock().unwrap().closure_rg.insert(cid, Box::new(crate::program::CloRg { codes, caps, known, lts }));
+        let mut g = self.insts.lock().unwrap();
+        g.closure_rg.insert(cid, Box::new(crate::program::CloRg { codes, caps, known, lts }));
+        g.fx_log.push(cid);
     }
 
     /// The codes of a closure's captures (cid) as trees of this function: its universal regions are CLO_U + i; what
@@ -3244,11 +3326,21 @@ impl Cx<'_> {
     /// 'static (the type must implement what the const is of)
     pub(crate) fn rg_static_self_const(&mut self, e: &Expr, ci: u32) {
         let Some(slots) = self.prog.static_self_consts.get(&ci) else { return };
-        let Expr::Path(None, p) = e else { return };
-        if !self.rg_on() || p.segs.len() < 2 {
+        if !self.rg_on() {
             return;
         }
-        let seg = &p.segs[p.segs.len() - 2];
+        // (the type's segment: `A::<'a>::IC`, or the self type of `<A<'a> as Tr>::IC`)
+        let seg = match e {
+            Expr::Path(None, p) if p.segs.len() >= 2 => &p.segs[p.segs.len() - 2],
+            Expr::Path(Some(q), _) => match &**q {
+                PTy::Path(None, qp) => match qp.segs.last() {
+                    Some(s) => s,
+                    None => return,
+                },
+                _ => return,
+            },
+            _ => return,
+        };
         let lts = seg.args.iter().filter_map(|a| if let crate::parse::GArg::Lifetime(l) = a { Some(l) } else { None });
         for (i, l) in lts.enumerate() {
             if slots.get(i) != Some(&R_STATIC) || l == "'static" {
@@ -3600,6 +3692,64 @@ impl Cx<'_> {
     }
 
     /// Keep the tree of the call just lowered, as the value of e
+    /// A value of an ADT whose field nests two of its lifetimes (`p: &'a mut &'b i32`) relates the borrows it is
+    /// built from (a method may store one through the other): the region check of a function the gate left out is
+    /// turned on before its fields are lowered, from the function's start if a local bound before has no tree
+    /// (nll/capture-ref-in-struct.rs)
+    pub(crate) fn rg_adt_on(&mut self, base: u32) {
+        if self.rg.on || !self.rg.eligible || self.inline_depth != 0 {
+            return;
+        }
+        let Some(r) = self.prog.adt_regions.get(&base) else { return };
+        if r.lts.len() < 2 {
+            return;
+        }
+        let nests = r.fields.iter().any(|f| {
+            let mut first = None;
+            f.iter().any(|&c| c < R_STATIC && *first.get_or_insert(c) != c)
+        });
+        if nests {
+            self.rg_late_on();
+        }
+    }
+
+    /// A constructor's path that writes lifetimes turns the region check on, before what it holds is lowered
+    pub(crate) fn rg_written_on(&mut self, path: &crate::parse::Path) {
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && path.segs.iter().any(|s| !s.args.is_empty()) && crate::regions::path_names_lt(path) {
+            self.rg_late_on();
+        }
+    }
+
+    /// A constructor's path writes lifetimes (`SomeEnum::SomeVariant::<&'static u32>(&c)`, `S::<&'a u32> { .. }`,
+    /// `E::Unit::<Cell<&'a u32>>`): the value built (its tree, kept at e) is of the type written. What it holds flows
+    /// into that type, and the value is of it from here on
+    pub(crate) fn rg_written_ctor(&mut self, e: &Expr, path: &crate::parse::Path) {
+        if !self.rg_on() || path.segs.iter().all(|s| s.args.is_empty()) || !crate::regions::path_names_lt(path) {
+            return;
+        }
+        let key = e as *const Expr as usize;
+        let Some((t, tr)) = self.rg.calls.get(&key).cloned() else { return };
+        let (Ty::Struct(sid), Some(seg)) = (t, path.segs.iter().rev().find(|s| !s.args.is_empty())) else { return };
+        let prog = self.prog;
+        // (the arguments of the segment that has them (the enum's or the variant's), on the type's name)
+        let mut seg = seg.clone();
+        seg.name = prog.structs[prog.base_of(sid) as usize].name.clone();
+        let pt = PTy::Path(None, crate::parse::Path { global: false, segs: vec![seg], pos: path.pos });
+        let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+        let mut codes = vec![];
+        s.slots(&pt, false, &mut codes);
+        let lts = self.rg.lts.clone();
+        self.rg.dyn_infer = true;
+        let w = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
+        self.rg.dyn_infer = false;
+        let Some(w) = w.filter(|w| w.len() == tr.len()) else { return };
+        // (not its well-formedness: that may rest on implied bounds the check does not know, as of a normalized
+        // parameter's type (implied-bounds/normalization.rs: `None::<&'a A>`))
+        let sp = super::borrowck::pos(e);
+        self.rg.flow(prog, t, t, &tr, &w, sp);
+        self.rg.calls.insert(key, (t, w));
+    }
+
     pub(crate) fn rg_took_call(&mut self, e: &Expr) {
         // (only the call made by this expression's own call_fn: one level below)
         // (read first: taking it would make the state of a check that wrote none)
@@ -3629,4 +3779,99 @@ impl Cx<'_> {
             None => Ok(()),
         }
     }
+}
+
+/// The declaration in its trait of the method an impl's method implements (by name)
+pub fn trait_decl_of(prog: &Program, mi: u32) -> Option<u32> {
+    let ms = prog.sigs.get(mi as usize)?;
+    let tr = ms.impl_trait.as_deref()?;
+    let m = prog.names[mi as usize].rsplit("::").next()?.split('#').next()?;
+    let ds = prog.traits.get(tr)?;
+    ds.iter().copied().find(|&d| d != mi && prog.names[d as usize].rsplit("::").next() == Some(m))
+}
+
+/// An impl's method against its trait's declaration, by regions (rustc's "`impl` item signature doesn't match
+/// `trait` item signature"): the declaration's regions are universal, the method's own lifetimes and elided regions
+/// are variables; each of the declaration's parameters flows into the impl's, and the impl's result into the
+/// declaration's. True when that needs a region of the declaration to outlive another it is not known to
+/// (`fn foo<'a>(x: &'a i32, y: &'a i32) -> &'a i32` for `fn foo<'a>(x: &i32, y: &'a i32) -> &'a i32`). Not compared:
+/// signatures that name the impl's or the trait's own lifetimes, or declare bounds among lifetimes, and parameters
+/// whose types do not have as many regions on both sides (`Self`, a trait's type parameter)
+pub fn impl_sig_mismatch(prog: &Program, decl: u32, imp: u32) -> bool {
+    let (ds, ms) = (&prog.sigs[decl as usize], &prog.sigs[imp as usize]);
+    if ds.params.len() != ms.params.len() || ds.has_self != ms.has_self {
+        return false;
+    }
+    let (dr, mr) = (ds.regions.as_deref(), ms.regions.as_deref());
+    // (nothing written on either side: every region is elided the same way)
+    if dr.is_none() && mr.is_none() {
+        return false;
+    }
+    let plain = |r: Option<&RSigSyn>| {
+        r.is_none_or(|r| {
+            r.outlives.is_empty() && r.ty_outlives.is_empty() && r.slots.iter().flatten().all(|&c| c == R_STATIC || c == R_ELIDED || c == R_ELIDED_ADT || (c >= r.outer && (c as usize) < r.lts.len()))
+        })
+    };
+    if !plain(dr) || !plain(mr) {
+        return false;
+    }
+    fn codes(r: Option<&RSigSyn>, i: usize) -> Option<&[u8]> {
+        r.map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]))
+    }
+    let mut rg = RgSt::default();
+    let dl: Vec<u32> = dr.map(|r| r.lts.as_slice()).unwrap_or(&[]).iter().map(|l| {
+        let v = rg.var();
+        rg.univ.push((v, l.clone()));
+        v
+    }).collect();
+    let ml: Vec<u32> = mr.map(|r| r.lts.as_slice()).unwrap_or(&[]).iter().map(|_| rg.var()).collect();
+    let sp = super::SP;
+    let (mut d_in, mut m_in): (Vec<u32>, Vec<u32>) = (vec![], vec![]);
+    let (mut d_self, mut m_self) = (None, None);
+    for i in 0..ds.params.len() {
+        let (dt, mt) = (ds.params[i], ms.params[i]);
+        let Some(dtr) = rg.instantiate(prog, dt, codes(dr, i), &dl, &[], &mut |me| {
+            let v = me.var();
+            me.univ.push((v, "'_".to_string()));
+            v
+        }) else {
+            return false;
+        };
+        let Some(mtr) = rg.instantiate(prog, mt, codes(mr, i), &ml, &[], &mut |me| me.var()) else { return false };
+        if dtr.len() != mtr.len() || count(prog, mt, 0) != Some(mtr.len()) {
+            return false;
+        }
+        if i == 0 && ds.has_self && matches!(dt, Ty::Ref(..)) && matches!(mt, Ty::Ref(..)) {
+            d_self = dtr.first().copied();
+            m_self = mtr.first().copied();
+        }
+        // (`'static` too: the one region of the inputs, written or elided, is the result's elided one)
+        d_in.extend(dtr.iter().copied());
+        m_in.extend(mtr.iter().copied());
+        rg.implied(prog, dt, &dtr, 0);
+        rg.relate(prog, mt, &dtr, &mtr, sp);
+    }
+    // (the results' elided regions: of `&self`, else of the one region of the parameters)
+    let one = |v: &mut Vec<u32>| {
+        v.sort();
+        v.dedup();
+        if v.len() == 1 { Some(v[0]) } else { None }
+    };
+    let (d_el, m_el) = (d_self.or_else(|| one(&mut d_in)), m_self.or_else(|| one(&mut m_in)));
+    let mut bad = false;
+    let n = ds.params.len();
+    let dret = rg.instantiate(prog, ds.ret, codes(dr, n), &dl, &[], &mut |_| d_el.unwrap_or_else(|| {
+        bad = true;
+        STATIC
+    }));
+    let mret = rg.instantiate(prog, ms.ret, codes(mr, n), &ml, &[], &mut |_| m_el.unwrap_or_else(|| {
+        bad = true;
+        STATIC
+    }));
+    let (Some(dret), Some(mret)) = (dret, mret) else { return false };
+    if bad || dret.len() != mret.len() || count(prog, ms.ret, 0) != Some(mret.len()) {
+        return false;
+    }
+    rg.relate(prog, ms.ret, &mret, &dret, sp);
+    rg.check().is_some()
 }

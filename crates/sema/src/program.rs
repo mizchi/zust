@@ -254,14 +254,23 @@ pub struct Program {
     pub derived: FxMap<u32, Vec<String>>,
     /// a struct's / enum's const parameters of other types than usize (base ids): (the parameter's place, its type)
     pub const_param_tys: FxMap<u32, Vec<(usize, String)>>,
+    /// A struct / enum / union of the program's: the places of its type parameters bounded by Copy (`union U<T: Copy>`)
+    pub copy_params: FxMap<u32, Vec<usize>>,
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
     /// be out of scope where the name is written
     pub has_mods: bool,
+    /// some trait other than Clone has a fn `clone` (`trait Duplicate { fn clone(&self) -> S { .. } }`), or a blanket
+    /// impl one: only then can default_method find a `clone` for a type
+    pub trait_clone_fns: bool,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
     /// `#![deny(unused_must_use)]`: a statement whose value is a `Result` is an error
     pub deny_must_use: bool,
+    /// The edition (2021 unless given): from 2024, a block's tail's temporaries go away before its locals
+    pub edition: u16,
+    /// The source writes a lifetime in a path's generic arguments (regions::src_path_lts)
+    pub path_lts: bool,
     /// `#![deny(unused_allocation)]`: `Box::new(x).m()` with m of `&self` on what the box holds is an error
     pub deny_unused_alloc: bool,
     /// `#![deny(trivial_casts)]` / `#![deny(trivial_numeric_casts)]`: a cast a coercion or nothing would do
@@ -275,6 +284,9 @@ pub struct Program {
     pub opt: bool,
     /// ブランケット impl のメソッド (名前 → 関数 id) と、その self 型の型パラメータ名
     pub blanket: FxMap<String, u32>,
+    /// A blanket impl's trait → the bounds of its self type's parameter, its where clauses' too
+    /// (`impl<T: ?Sized> FutureExt for T where T: Future`: ?Sized, Future)
+    pub blanket_bounds: FxMap<String, Vec<String>>,
     pub blanket_selfs: HashSet<String>,
     /// Traits with a blanket impl (`impl<T> Tr for T`): every type implements them (bounds are not checked)
     pub blanket_traits: HashSet<String>,
@@ -444,6 +456,24 @@ pub struct Insts {
     /// zustc check's last round: the instances with placeholders for type parameters (Program::placeholder), and
     /// what they request. A typeck error of one is not reported (acg::compile)
     pub lenient: bool,
+    /// Of those, the instances of fns that instances were made of with `Copy` types only (driver2's
+    /// placeholder_wave): checked for what moving a T does, nothing else
+    pub recheck: FxSet<u32>,
+    /// Closures' bodies (by their fn id) whose kind no bound nor expected type decides, made in the program's code: one that
+    /// returns a mutable borrow of what it captures by reference is `FnMut`, and the borrow escapes its body
+    pub kind_free: FxSet<u32>,
+    /// The closures' bodies kind_free or closure_rg was given a fact for, in order: what a function's lowering told
+    /// the closures it makes, kept with its Blob (acg::Blob::clo_facts), as one taken from a cache, a check's record
+    /// or another process is not lowered here
+    pub fx_log: Vec<u32>,
+}
+
+/// What a function's lowering told a closure's body it makes (Insts::kind_free, Insts::closure_rg)
+#[derive(Clone, Debug)]
+pub struct CloFact {
+    pub body: u32,
+    pub kind_free: bool,
+    pub rg: Option<Box<CloRg>>,
 }
 
 /// Insts::closure_rg (codes: see typeck's regionck)
@@ -469,6 +499,9 @@ impl Insts {
             closure_rg: HashMap::default(),
             imp_cache: HashMap::default(),
             lenient: false,
+            recheck: FxSet::default(),
+            kind_free: FxSet::default(),
+            fx_log: vec![],
         }
     }
 
@@ -593,6 +626,34 @@ impl Insts {
     }
 
     /// 本体を持つ関数 (インスタンスなら元のジェネリック関数) の id
+    /// The facts a lowering told closures' bodies (from fx_log: those logged from `from` on)
+    pub fn facts_since(&self, from: usize) -> Vec<CloFact> {
+        let mut out: Vec<CloFact> = vec![];
+        for &b in &self.fx_log[from.min(self.fx_log.len())..] {
+            if !out.iter().any(|f| f.body == b) {
+                out.extend(self.facts_of(b));
+            }
+        }
+        out
+    }
+
+    /// A closure's body's facts
+    pub fn facts_of(&self, b: u32) -> Vec<CloFact> {
+        vec![CloFact { body: b, kind_free: self.kind_free.contains(&b), rg: self.closure_rg.get(&b).cloned() }]
+    }
+
+    /// Facts of a lowering not made here (a Blob's): as it would have set them
+    pub fn give_facts(&mut self, fs: &[CloFact]) {
+        for f in fs {
+            if f.kind_free {
+                self.kind_free.insert(f.body);
+            }
+            if let Some(rg) = &f.rg {
+                self.closure_rg.insert(f.body, rg.clone());
+            }
+        }
+    }
+
     pub fn body_of(&self, id: u32) -> u32 {
         self.get(id).map(|i| i.base).unwrap_or(id)
     }
@@ -769,12 +830,15 @@ impl Program {
             fnptr_impls: Default::default(),
             deny_unreachable: false,
             deny_must_use: false,
+            edition: 2021,
+            path_lts: false,
             deny_unused_alloc: false,
             deny_trivial_casts: (false, false),
             must_use_fns: vec![],
             prim_mut_methods: HashSet::default(),
             opt: false,
             blanket: FxMap::default(),
+            blanket_bounds: FxMap::default(),
             blanket_selfs: Default::default(),
             blanket_traits: Default::default(),
             unions: Default::default(),
@@ -795,7 +859,9 @@ impl Program {
             derived_peq: FxSet::default(),
             derived: FxMap::default(),
             const_param_tys: FxMap::default(),
+            copy_params: FxMap::default(),
             has_mods: false,
+            trait_clone_fns: false,
             lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
@@ -1013,6 +1079,9 @@ impl Program {
                     let decl = bs.iter().find_map(|b| b.strip_prefix(CONST_GENERIC)?.strip_prefix(':'));
                     if let (Some(d), Some(k)) = (decl, sm.adt_generics.iter().position(|g| g == pn)) {
                         p.const_param_tys.entry(sdefs.len() as u32).or_default().push((k, d.to_string()));
+                    }
+                    if let (true, Some(k)) = (bs.iter().any(|b| b == "Copy" || b.ends_with("::Copy")), sm.adt_generics.iter().position(|g| g == pn)) {
+                        p.copy_params.entry(sdefs.len() as u32).or_default().push(k);
                     }
                 }
                 sdefs.push((ii, name.clone(), shape, sm.adt_generics.clone()));
@@ -1520,6 +1589,9 @@ impl Program {
                 }
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
+                if let Some(g) = sm.impl_generics.iter().find(|g| g.0 == *sn) {
+                    p.blanket_bounds.entry(tr.clone()).or_default().extend(g.1.iter().cloned());
+                }
                 // (the trait's default methods are methods of every type)
                 let ids: Vec<u32> = p.traits.get(tr).cloned().unwrap_or_default();
                 for id in ids {
@@ -1815,6 +1887,8 @@ impl Program {
             }
         }
         p.any_immutable_static = p.consts.iter().any(|c| c.stat == Some(false) && (c.item as usize) < user);
+        // (a body, whatever the trait's name: the prelude's `Clone::clone` has none, a program's own `trait Clone` may)
+        p.trait_clone_fns = p.blanket.contains_key("clone") || p.traits.values().flatten().any(|&d| p.sigs[d as usize].has_body && p.names.get(d as usize).is_some_and(|n| n.rsplit("::").next() == Some("clone")));
         Ok(p)
     }
 
@@ -2006,9 +2080,11 @@ impl Program {
     }
 
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
-        if self.blanket_traits.contains(tr) {
-            return true;
-        }
+        self.blanket_traits.contains(tr) || self.implements_concrete(t, tr)
+    }
+
+    /// implements, not counting a blanket impl of tr (`impl<T: Marker> Other for T`): an impl for t's type itself
+    pub fn implements_concrete(&self, t: Ty, tr: &str) -> bool {
         // (a placeholder implements the traits its parameter's bounds name, and the auto traits)
         if let Ty::Struct(sid) = t {
             if let Some(bs) = &self.structs[sid as usize].placeholder {
@@ -2917,22 +2993,33 @@ impl Program {
     /// Whether t is surely not Clone (`r.clone()` of `&t` is then the reference's clone): a type of the program with no
     /// clone and no derive, or an instance with such an argument (`Option<NoClone>`), but for the shared pointers
     pub fn surely_not_clone(&self, t: Ty, depth: u32) -> bool {
-        // (`&mut T` is not Clone: `Option<&mut T>` neither)
-        if let Ty::Ref(true, _) = t {
-            return true;
-        }
-        let Ty::Struct(sid) = t else { return false };
+        // (`&mut T` is not Clone: `Option<&mut T>` neither; an array or a Box is Clone when its element is)
+        let sid = match t {
+            Ty::Ref(true, _) => return true,
+            Ty::Array(e, _) | Ty::Box(e) => return depth <= 4 && self.surely_not_clone(*e, depth + 1),
+            Ty::Struct(sid) => sid,
+            _ => return false,
+        };
         let b = self.base_of(sid);
         let own = self.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prelude_from);
         // (a clone of the program's own; std's (`Vec<T>`) is Clone when its arguments are)
         if depth > 4 || (own && self.method(sid, "clone").is_some()) {
             return false;
         }
+        // (a closure is Clone when its captures are, whatever its signature: `|x: NotClone| -> NotClone {..}` is)
+        if self.is_closure(b) {
+            return self.structs[sid as usize].fields.iter().any(|f| self.surely_not_clone(f.1, depth + 1));
+        }
         let derived = self.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
         if own && !derived && !self.implements(t, "Clone") {
             return true;
         }
         self.clone_needs_args(b, own) && self.structs[sid as usize].args.iter().any(|&a| self.surely_not_clone(a, depth + 1))
+    }
+
+    /// The base b is a closure's struct (`f::{closure#0}`)
+    pub fn is_closure(&self, b: u32) -> bool {
+        self.structs[b as usize].name.contains("{closure#")
     }
 
     /// Whether the base b is Clone only when its arguments are: a derive of the program's own, and std's containers
@@ -3758,6 +3845,8 @@ impl Program {
             Ty::Never => "!".into(),
             Ty::Vec(128) => "v128".into(),
             Ty::Vec(b) => format!("__m{b}"),
+            // (a hole of an annotation (`Foo<_>`), as written)
+            Ty::Param(HOLE) => "_".into(),
             Ty::Param(i) => format!("T{i}"),
             Ty::Ptr(false, i) => format!("*const {}", self.tn(*i)),
             Ty::Ptr(true, i) => format!("*mut {}", self.tn(*i)),
@@ -4358,8 +4447,8 @@ impl Program {
     }
 
     fn variant_by_p_inner(&self, p: &PPath, self_sid: Option<u32>) -> Option<(u32, usize)> {
-        // `core::option::Option::Some` などは最後の 2 つで見る
-        let segs: &[PSeg] = if p.segs.len() > 2 && matches!(p.segs[0].name.as_str(), "core" | "crate" | "std") {
+        // `core::option::Option::Some` / `alloc::borrow::Cow::Borrowed` などは最後の 2 つで見る
+        let segs: &[PSeg] = if p.segs.len() > 2 && matches!(p.segs[0].name.as_str(), "core" | "crate" | "std" | "alloc") {
             &p.segs[p.segs.len() - 2..]
         } else {
             &p.segs

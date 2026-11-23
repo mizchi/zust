@@ -688,6 +688,11 @@ impl Solver<'_> {
     }
     /// 自動 deref しながらフィールドの型を引く
     pub fn field(&mut self, base: u32, name: &str) -> u32 {
+        self.field_at(base, name, 0)
+    }
+    /// (depth: the derefs followed. As far as rustc's recursion limit (128): a cycle through other types (`A` to `B` to
+    /// `A`) ends, and lowering reports it (E0055))
+    fn field_at(&mut self, base: u32, name: &str, depth: u32) -> u32 {
         let v = self.deref_expr(base);
         let r = self.find(v);
         let sid = match self.shape[r as usize] {
@@ -702,14 +707,14 @@ impl Solver<'_> {
             // (フィールドがなく Deref を実装した型 (`self.prog` で self: &Inf → Solver): deref の先のフィールド)
             None => match self.prog.method(sid, "deref").map(|d| self.prog.sigs[d as usize].ret) {
                 // (not to itself: `impl Deref for Foo { type Target = Foo }` would never end)
-                Some(Ty::Ref(_, t)) if !self.prog.has_param(*t) && !matches!(t, Ty::Str | Ty::Slice(_) | Ty::Dyn(_)) && *t != Ty::Struct(sid) => {
+                Some(Ty::Ref(_, t)) if depth < 128 && !self.prog.has_param(*t) && !matches!(t, Ty::Str | Ty::Slice(_) | Ty::Dyn(_)) && *t != Ty::Struct(sid) => {
                     let k = self.known(*t);
-                    self.field(k, name)
+                    self.field_at(k, name, depth + 1)
                 }
                 // (a deref to the struct's own parameter, `Ref<T>` → `&T`: the argument's type variable)
-                Some(Ty::Ref(_, Ty::Param(i))) if (*i as usize) < vars.len() => {
+                Some(Ty::Ref(_, Ty::Param(i))) if depth < 128 && (*i as usize) < vars.len() => {
                     let k = vars[*i as usize];
-                    self.field(k, name)
+                    self.field_at(k, name, depth + 1)
                 }
                 _ => self.var(),
             },

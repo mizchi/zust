@@ -47,6 +47,11 @@ pub struct Js<'a> {
     /// import the helpers from the shared `zsc-runtime.js` (the default), or write them into the module
     pub shared_runtime: bool,
     pub wasm_wanted: Vec<(String, Vec<Ty>)>,
+    /// the `push` / `concat` calls of the function being written that append in place ([`crate::own::inplace_pushes`])
+    inplace: HashSet<Id>,
+    /// the comparators written for `==` by content (one per type, `$eq1` ..), and their definitions
+    eqs: HashMap<Ty, String>,
+    eq_defs: String,
     /// locals in scope: (source name, JS name), innermost last. Every JS name a function uses is unique in it
     /// (`x`, then `x$1` for a second `x`), so flattened blocks, shadowing and match arms never collide
     locals: Vec<(String, String)>,
@@ -143,6 +148,8 @@ const HELPERS: &[(&str, &str)] = &[
     ("$f64_to_i64", "function $f64_to_i64(x) {\n  if (x !== x) return 0n;\n  if (x >= 9223372036854775807) return 9223372036854775807n;\n  if (x <= -9223372036854775808) return -9223372036854775808n;\n  return BigInt(Math.trunc(x));\n}"),
     ("$at", "function $at(a, i) {\n  if (i >= 0 && i < a.length) return a[i];\n  throw new RangeError(\"index out of bounds: the len is \" + a.length + \" but the index is \" + i);\n}"),
     ("$range", "function $range(a, b) {\n  const r = [];\n  for (let i = a; i < b; i++) r.push(i);\n  return r;\n}"),
+    // (appends `ys` onto `xs` in place: only onto an array no one else can see, see own::inplace_pushes)
+    ("$append", "function $append(xs, ys) {\n  for (let i = 0; i < ys.length; i++) xs.push(ys[i]);\n  return xs;\n}"),
     ("$fold", "function $fold(xs, acc, f) {\n  for (let i = 0; i < xs.length; i++) acc = f(acc, xs[i]);\n  return acc;\n}"),
     ("$rangeFold", "function $rangeFold(a, b, acc, f) {\n  for (let i = a; i < b; i++) acc = f(acc, i);\n  return acc;\n}"),
     ("$rangeMap", "function $rangeMap(a, b, f) {\n  const r = new Array(Math.max(b - a, 0));\n  for (let i = a; i < b; i++) r[i - a] = f(i);\n  return r;\n}"),
@@ -181,6 +188,9 @@ impl<'a> Js<'a> {
             wasm_fns: HashSet::new(),
             shared_runtime: true,
             wasm_wanted: vec![],
+            inplace: HashSet::new(),
+            eqs: HashMap::new(),
+            eq_defs: String::new(),
             locals: vec![],
             declared: HashSet::new(),
             module_names: HashSet::new(),
@@ -254,6 +264,8 @@ impl<'a> Js<'a> {
             self.function(it, &inst_name(&name, &targs), *public);
             self.subst.clear();
         }
+        let eqs = std::mem::take(&mut self.eq_defs);
+        self.out.push_str(&eqs);
         std::mem::take(&mut self.out)
     }
 
@@ -306,6 +318,8 @@ impl<'a> Js<'a> {
         // (the module's own names: a local never takes one, so a call of a top-level function still reaches it)
         self.declared.clear();
         let ps: Vec<String> = args.iter().map(|a| self.bind(&a.0)).collect();
+        let params: Vec<String> = args.iter().map(|a| a.0.clone()).collect();
+        self.inplace = crate::own::inplace_pushes(&params, body, self.info);
         let saved = std::mem::take(&mut self.out);
         self.line(&format!("{}function{} {js_name}({}) {{", if public { "export " } else { "" }, if gen_ { "*" } else { "" }, ps.join(", ")));
         self.ind += 1;
@@ -920,6 +934,12 @@ impl<'a> Js<'a> {
                         let f = self.callback(&args[1], 2);
                         format!("$fold({recv}, {}, {f})", arg(self, 0))
                     }
+                    // (in place onto a local array no one else sees, at its last use: amortized O(1), not a copy)
+                    Some(B::Push) if self.inplace.contains(&e.id) => format!("({recv}.push({}), {recv})", arg(self, 0)),
+                    Some(B::Concat) if self.inplace.contains(&e.id) => {
+                        self.helpers.insert("$append");
+                        format!("$append({recv}, {})", arg(self, 0))
+                    }
                     Some(B::Push) => format!("[...{recv}, {}]", arg(self, 0)),
                     Some(B::Concat) => format!("[...{recv}, ...{}]", self.operand(&args[0])),
                     Some(B::Join) => format!("{recv}.join({})", arg(self, 0)),
@@ -1094,6 +1114,67 @@ impl<'a> Js<'a> {
         }
     }
 
+    /// The comparator of `==` by content for values of type `t` (None: `===` is it). It compares the declared fields
+    /// only, so it is symmetric and ignores properties a value from TS may carry beyond its type, as the wasm layer
+    /// (which rebuilds the value from its fields) does; NaN is unequal to itself anywhere, as in Rust. A recursive
+    /// type calls its own comparator
+    fn eq_fn(&mut self, t: &Ty) -> Option<String> {
+        use crate::check::subst_named;
+        if let Some(f) = self.eqs.get(t) {
+            return Some(f.clone());
+        }
+        let compound = match t {
+            Ty::Array(_) | Ty::Typed(_) | Ty::Tuple(_) => true,
+            Ty::Named(n, _) => self.info.records.contains_key(n) || self.info.enums.get(n).is_some_and(|e| !e.unit_only() && !e.is_effect()),
+            _ => false,
+        };
+        if !compound {
+            return None;
+        }
+        // (named before its body is written: a recursive type's comparator calls itself)
+        let f = format!("$eq{}", self.eqs.len() + 1);
+        self.eqs.insert(t.clone(), f.clone());
+        let cmp = |js: &mut Js, t: &Ty, a: &str, b: &str| match js.eq_fn(t) {
+            Some(g) => format!("{g}({a}, {b})"),
+            None => format!("{a} === {b}"),
+        };
+        let body = match t {
+            Ty::Array(e) | Ty::Typed(e) => {
+                let c = cmp(self, e, "a[i]", "b[i]");
+                format!("  if (a.length !== b.length) return false;\n  for (let i = 0; i < a.length; i++) if (!({c})) return false;\n  return true;\n")
+            }
+            Ty::Tuple(ts) => {
+                let cs: Vec<String> = ts.iter().enumerate().map(|(k, t)| cmp(self, t, &format!("a[{k}]"), &format!("b[{k}]"))).collect();
+                format!("  return {};\n", if cs.is_empty() { "true".into() } else { cs.join(" && ") })
+            }
+            Ty::Named(n, targs) if self.info.records.contains_key(n) => {
+                let r = &self.info.records[n];
+                let m: HashMap<String, Ty> = r.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                let fields: Vec<(String, Ty)> = r.fields.iter().map(|(f, t)| (f.clone(), subst_named(t, &m))).collect();
+                let cs: Vec<String> = fields.iter().map(|(f, t)| cmp(self, t, &format!("a.{f}"), &format!("b.{f}"))).collect();
+                format!("  return {};\n", if cs.is_empty() { "true".into() } else { cs.join(" && ") })
+            }
+            Ty::Named(n, targs) => {
+                let e = &self.info.enums[n];
+                let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                let vs: Vec<(String, Vec<Ty>)> = e.variants.iter().map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_named(t, &m)).collect())).collect();
+                let mut s = String::from("  if (a.TAG !== b.TAG) return false;\n  switch (a.TAG) {\n");
+                for (v, fs) in vs {
+                    if fs.is_empty() {
+                        continue;
+                    }
+                    let cs: Vec<String> = fs.iter().enumerate().map(|(k, t)| cmp(self, t, &format!("a._{k}"), &format!("b._{k}"))).collect();
+                    let _ = writeln!(s, "    case {}: return {};", js_str(&v), cs.join(" && "));
+                }
+                s.push_str("  }\n  return true;\n");
+                s
+            }
+            _ => unreachable!(),
+        };
+        let _ = write!(self.eq_defs, "function {f}(a, b) {{\n{body}}}\n\n");
+        Some(f)
+    }
+
     fn help(&mut self, h: &'static str, v: &str) -> String {
         self.helpers.insert(h);
         format!("{h}({v})")
@@ -1107,6 +1188,15 @@ impl<'a> Js<'a> {
     }
 
     fn binary(&mut self, id: Id, op: &str, l: &Expr, r: &Expr) -> String {
+        // (values with parts compare by content, as Rust's derive(PartialEq) does in the wasm layer: a comparator
+        // written for the type)
+        if let Some(t) = self.info.deep_eq.get(&id).cloned() {
+            let t = subst_ty(&t, &self.subst);
+            if let Some(f) = self.eq_fn(&t) {
+                let (a, b) = (self.expr(l), self.expr(r));
+                return if op == "==" { format!("{f}({a}, {b})") } else { format!("!{f}({a}, {b})") };
+            }
+        }
         let t = self.num(id);
         // (operands of the wrapping forms are inside `(..)` or a call: any precedence above `|` and `,` will do)
         let p = match (&t, op) {

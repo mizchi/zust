@@ -136,6 +136,7 @@ def main():
 
         if z or an:
             block("kpi", kpi_table(z, an))
+        if z:
             block("kpi-summary", kpi_summary(z))
         if ui:
             block("ui", ui_table(ui["kinds"]))

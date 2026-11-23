@@ -217,6 +217,8 @@ struct Inf<'p> {
     exprs: Vec<(*const Expr, u32)>,
     /// 今見ているマクロの引数 (開き括弧) のソース上の位置: 引数を読み直した式の位置の基準
     mbase: crate::parse::Pos,
+    /// the targets of the `AsRef<X>` bounds in scope (the function's and its root's): what `x.as_ref()` gives
+    asref: Vec<String>,
 }
 
 impl<'p> std::ops::Deref for Inf<'p> {
@@ -276,7 +278,20 @@ pub fn infer_ctx_margs(
 ) -> (Full, MacroArgs, TextTypes) {
 
     let clo_root = root.map(|(r, base)| (r, base, body as *const Block));
-    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default() };
+    let asref_of = |g: &[(String, Vec<String>)]| -> Vec<String> {
+        g.iter()
+            .flat_map(|(_, bs)| bs.iter())
+            .filter_map(|b| {
+                let b: String = b.chars().filter(|c| !c.is_whitespace()).collect();
+                b.strip_prefix("AsRef<").and_then(|x| x.strip_suffix('>')).map(str::to_string)
+            })
+            .collect()
+    };
+    let mut asref = asref_of(&sig.generics);
+    if let Some((r, _)) = root {
+        asref.extend(asref_of(&prog.sigs[r as usize].generics));
+    }
+    let mut s = Inf { s: Solver::new(prog, env), pending: vec![], keep: vec![], turbofish: None, clo_root, clo_keys: None, margs: Default::default(), exprs: vec![], mbase: Default::default(), asref };
     s.ret = match ret {
         Some(t) if prog.has_param(t) => s.known_g(t, &mut vec![]),
         Some(t) => s.known(t),
@@ -376,12 +391,41 @@ impl Inf<'_> {
         self.prog.resolve_env(&ts, self.env).ok()
     }
 
+    fn strip_refs_ty(mut t: Ty) -> Ty {
+        while let Ty::Ref(_, i) = t {
+            t = *i;
+        }
+        t
+    }
+
     fn variant_by(&self, p: &Path) -> Option<(u32, usize)> {
         self.prog.variant_by_p(&PPath::of(p), self.self_sid)
     }
 
     fn struct_by(&self, p: &Path) -> Option<u32> {
         self.prog.struct_by_p(&PPath::of(p), self.self_sid)
+    }
+
+    /// A pattern's path that writes type arguments (`P::<u16>(x, _)`): the value it matches is of that instance
+    fn pat_turbofish(&mut self, v: u32, p: &Path, sid: u32) {
+        // (a value of another instance (`S::<u16>(_)` matching `S(1u8)`) is then a mismatch where it is built)
+        if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Ty(_)))) {
+            if let Some(t) = self.variant_turbofish(p, sid) {
+                let k = self.known(t);
+                self.unify(v, k);
+            }
+        }
+    }
+
+    /// The struct a path with a turbofish on its last segment names (`S::<u32>`)
+    fn struct_by_turbofish(&self, p: &Path) -> Option<u32> {
+        let last = p.segs.last()?;
+        if last.args.is_empty() || last.fn_args.is_some() {
+            return None;
+        }
+        let mut pp = PPath::of(p);
+        pp.segs.last_mut()?.args = false;
+        self.prog.struct_by_p(&pp, self.self_sid)
     }
 
     fn fn_by(&self, p: &Path) -> Option<u32> {
@@ -796,8 +840,10 @@ impl Inf<'_> {
             Pat::TupleStruct(p, elems) => {
                 let (v, mode) = self.auto_deref(v, mode);
                 let fts: Vec<u32> = if let Some((sid, vi)) = self.variant_by(p) {
+                    self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, Some(vi)).into_iter().map(|f| f.1).collect()
-                } else if let Some(sid) = self.struct_by(p) {
+                } else if let Some(sid) = self.struct_by(p).or_else(|| self.struct_by_turbofish(p)) {
+                    self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, None).into_iter().map(|f| f.1).collect()
                 } else {
                     return;
@@ -813,8 +859,10 @@ impl Inf<'_> {
             Pat::Struct(p, fps, _) => {
                 let (v, mode) = self.auto_deref(v, mode);
                 let fields = if let Some((sid, vi)) = self.variant_by(p) {
+                    self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, Some(vi))
-                } else if let Some(sid) = self.struct_by(p) {
+                } else if let Some(sid) = self.struct_by(p).or_else(|| self.struct_by_turbofish(p)) {
+                    self.pat_turbofish(v, p, sid);
                     self.pat_fields(v, sid, None)
                 } else {
                     return;
@@ -1008,7 +1056,8 @@ impl Inf<'_> {
             _ => return false,
         };
         let own = self.prog.struct_item.get(b as usize).is_some_and(|&ii| ii < self.prog.prelude_from);
-        if own && self.prog.method(b, "clone").is_some() {
+        // (a closure's Clone is its captures', which are not among the arguments here)
+        if (own && self.prog.method(b, "clone").is_some()) || self.prog.is_closure(b) {
             return false;
         }
         let derived = self.prog.derived.get(&b).is_some_and(|d| d.iter().any(|x| x == "Clone"));
@@ -1381,6 +1430,14 @@ impl Inf<'_> {
                     self.adt_ctor(sid, Some(vi), args)
                 } else if let Some(sid) = self.struct_by(p) {
                     self.adt_ctor(sid, None, args)
+                } else if let Some(sid) = self.struct_by_turbofish(p) {
+                    // (`S::<u32> { t: 1 }`: the instance the turbofish writes)
+                    let v = self.adt_ctor(sid, None, args);
+                    if let Some(t) = self.variant_turbofish(p, sid) {
+                        let k = self.known(t);
+                        self.unify(v, k);
+                    }
+                    v
                 } else {
                     self.var()
                 }
@@ -1808,17 +1865,44 @@ impl Inf<'_> {
                         let v = self.expr(a);
                         xs.push((i.to_string(), v));
                     }
-                    return self.adt_ctor(sid, Some(vi), xs);
+                    // (`Cow::Borrowed(s)` / `Cow::Owned(s)` of a `&str` / `String`: prelude's `__CowStr`, as the
+                    // code generator reads it; prelude's `Cow<T>` stands for `Cow<[T]>`)
+                    if let (Some(&cow), Some(&cs), Some(&(_, x))) = (self.prog.struct_index.get("Cow"), self.prog.struct_index.get("__CowStr"), xs.first()) {
+                        if self.prog.base_of(sid) == cow {
+                            let string = self.prog.struct_index.get("String").copied();
+                            if matches!(self.resolve(x), Some(Ty::Ref(_, Ty::Str))) || self.resolve(x).is_some_and(|t| Some(t) == string.map(Ty::Struct)) {
+                                return self.adt_ctor(cs, Some(vi), xs);
+                            }
+                        }
+                    }
+                    let v = self.adt_ctor(sid, Some(vi), xs);
+                    // (`SomeEnum::SomeVariant::<&u32>(&c)`: the instance the turbofish writes)
+                    if p.segs.iter().any(|s| !s.args.is_empty()) {
+                        if let Some(t) = self.variant_turbofish(p, sid) {
+                            let k = self.known(t);
+                            self.unify(v, k);
+                        }
+                    }
+                    return v;
                 }
                 let local = ident(p).is_some_and(|id| self.lookup(id).is_some());
                 if !local && self.fn_by(p).is_none() {
-                    if let Some(sid) = self.struct_by(p) {
+                    let plain = self.struct_by(p);
+                    if let Some(sid) = plain.or_else(|| self.struct_by_turbofish(p)) {
                         let mut xs = vec![];
                         for (i, a) in args.iter().enumerate() {
                             let v = self.expr(a);
                             xs.push((i.to_string(), v));
                         }
-                        return self.adt_ctor(sid, None, xs);
+                        let v = self.adt_ctor(sid, None, xs);
+                        // (`SomeStruct::<&u32>(&c)`: the instance the turbofish writes)
+                        if plain.is_none() {
+                            if let Some(t) = self.variant_turbofish(p, sid) {
+                                let k = self.known(t);
+                                self.unify(v, k);
+                            }
+                        }
+                        return v;
                     }
                 }
             }
@@ -1922,6 +2006,24 @@ impl Inf<'_> {
     }
 
     fn method_call(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> u32 {
+        // (`s.as_ref()` on a `&str` / `String` (also through references, `&&str` of an `AsRef<str>` instance): `&str`,
+        // or `&[u8]` where the bounds in scope ask for `AsRef<[u8]>` alone, as the code generator's as_ref gives)
+        if n == "as_ref" && args.is_empty() {
+            let r = self.expr(recv);
+            let rv = self.deref_expr(r);
+            let string = self.prog.struct_index.get("String").copied();
+            let text = match self.resolve(rv) {
+                Some(Ty::Str) => true,
+                Some(Ty::Ref(_, t)) => matches!(Self::strip_refs_ty(*t), Ty::Str),
+                Some(Ty::Struct(sid)) => Some(sid) == string,
+                _ => false,
+            };
+            if text {
+                let bytes = self.asref.iter().any(|t| t == "[u8]") && !self.asref.iter().any(|t| t == "str");
+                let t = if bytes { Ty::Slice(intern(Ty::U8)) } else { Ty::Str };
+                return self.known(Ty::Ref(false, intern(t)));
+            }
+        }
         // 値としての `[a, b].into_iter()`
         if n == "into_iter" && args.is_empty() && self.prog.struct_index.contains_key("IntoIter") {
             if let Expr::Array(xs) = recv {
