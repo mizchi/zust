@@ -77,6 +77,8 @@ pub struct Rg {
     /// The check is on from the function's start whatever the gate says (compile's second run); the check began late
     /// (rg_late_on); a local bound before it with no tree was met (the function is compiled again)
     pub force: bool,
+    /// The result is `impl Trait + 'static`: its hidden type's regions are 'static whatever the parameters are
+    pub static_opaque: bool,
     pub began_late: bool,
     pub rerun: bool,
     /// Nesting of call_fn (this and what follows: where lowering is, written whether the check is on or not)
@@ -1748,7 +1750,8 @@ impl Cx<'_> {
         let ret = rg.instantiate(prog, gret, codes(params.len()), &lts, &targs, &mut el);
         rg.ret = ret.filter(|_| !bad);
         // (an `impl Trait` result with no region among the parameters: its hidden type's regions are 'static)
-        let opaque = inputs.is_empty() && !generic && rs.is_none() && prog.opaque.contains(&rg.base);
+        // (or one written `+ 'static`: `fn f<T>(x: T) -> impl Any + 'static`, its hidden type T must be 'static (E0310))
+        let opaque = (inputs.is_empty() && !generic && rs.is_none() || rg.static_opaque) && prog.opaque.contains(&rg.base);
         if opaque {
             rg.ret = count(prog, ret_t, 0).filter(|&c| c > 0).map(|c| vec![STATIC; c]);
         }

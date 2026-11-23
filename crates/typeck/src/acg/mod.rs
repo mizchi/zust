@@ -1560,7 +1560,11 @@ impl Cx<'_> {
         // universal regions to relate)
         // (or one region and a trait object in the result, 'static by default: `fn f(x: &u8) -> Box<dyn Tr>`)
         self.rg.eligible = self.rg.on && self.rg.closure.is_none();
-        if self.rg.on && sig.regions.is_none() && self.rg.closure.is_none() && !self.rg.force {
+        self.rg.static_opaque = self.rg.on
+            && self.rg.closure.is_none()
+            && self.prog.opaque.contains(&self.rg.base)
+            && matches!(&f.sig.ret, Some(crate::parse::Ty::Impl(bs)) if bs.iter().any(|b| matches!(b, crate::parse::Bound::Lifetime(l) if l == "'static")));
+        if self.rg.on && sig.regions.is_none() && self.rg.closure.is_none() && !self.rg.force && !self.rg.static_opaque {
             let n: usize = sig.params.iter().map(|&t| regionck::count(self.prog, t, 0).unwrap_or(0)).sum();
             // (a placeholder's region is universal, whether a parameter's type has it or not (`f::<T>(x)`))
             let n = n + self.rg.inst_args.iter().filter(|&&t| matches!(t, Ty::Struct(s) if self.prog.is_placeholder(s))).count();

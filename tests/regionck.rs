@@ -2500,3 +2500,12 @@ fn part14_static_param_in_closure() {
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("the parameter type `T` may not live long enough"), "{d:?}");
     assert_eq!(check("use std::any::Any;\nfn s2<T: 'static>() {}\nfn a<T: 'static>() {\n    let c = || s2::<T>();\n    c();\n}\nfn b<T>()\nwhere\n    T: 'static,\n{\n    let c = || s2::<T>();\n    c();\n}\nfn d<T: Any>() {\n    let c = || s2::<T>();\n    c();\n}\ntrait St: 'static {}\nfn e<T: St>() {\n    let c = || s2::<T>();\n    c();\n}\nfn g<T: Send + 'static>(t: T) {\n    let c = move || {\n        std::thread::spawn(move || drop(t));\n    };\n    c();\n}\nfn main() {\n    a::<u8>();\n    b::<u8>();\n\n    g(1u8);\n}\n"), vec![]);
 }
+
+/// An `impl Trait + 'static` result: its hidden type's regions are 'static, whatever the parameters are
+/// (impl-trait/type_parameters_captured.rs): returning a T is E0310, a `&'a u8` "lifetime may not live long enough"
+#[test]
+fn part14_static_opaque_result() {
+    let d = check("trait Any {}\nimpl<T> Any for T {}\nfn foo<T>(x: T) -> impl Any + 'static {\n    x\n}\nfn bar<T>(x: T) -> Box<dyn Any + 'static> {\n    Box::new(x)\n}\nfn baz<'a>(x: &'a u8) -> impl Any + 'static {\n    x\n}\nfn main() {}\n");
+    assert!(d.len() == 3 && d[0].0 == 4 && d[0].1.contains("E0310") && d[1].0 == 7 && d[2].0 == 10 && d[2].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("use std::fmt::Display;\ntrait Any {}\nimpl<T> Any for T {}\nfn f() -> impl Fn() + 'static {\n    || {}\n}\nfn g(x: u8) -> impl Iterator<Item = u8> + 'static {\n    std::iter::once(x)\n}\nfn h<T: 'static>(x: T) -> impl Any + 'static {\n    x\n}\nfn k(s: &str) -> impl Display + 'static {\n    s.to_string()\n}\nfn m<'a>(x: &'a u8) -> impl Fn() -> u8 + 'static {\n    let v: u8 = *x;\n    move || v\n}\nfn n(v: &[u8]) -> impl Iterator<Item = u8> + 'static {\n    v.to_vec().into_iter()\n}\nstruct W;\nimpl W {\n    fn it(&self) -> impl Display + 'static {\n        5\n    }\n}\nfn main() {\n    f()();\n    let _ = g(1).count();\n    let _ = h(1u8);\n    println!(\"{} {} {} {}\", k(\"a\"), m(&3)(), n(&[1]).count(), W.it());\n}\n"), vec![]);
+}
