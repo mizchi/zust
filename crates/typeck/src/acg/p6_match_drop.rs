@@ -1361,13 +1361,27 @@ impl Cx<'_> {
                     }
                 }
                 // `rest @ ..`: 残りの部分スライス (`&[T]`)
-                if let Some(Pat::Ident(_, _, rname, _)) = rest {
+                if let Some(Pat::Ident(by_ref, _, rname, _)) = rest {
                     let (es, _) = self.prog.size_align(elem);
                     let start = self.b.ins().iadd_imm_s(base, pre.len() as i64 * es as i64);
-                    let n = self.b.ins().iadd_imm_s(len, -((pre.len() + post.len()) as i64));
-                    let fat = self.make_fat_v(start, n);
+                    let len_v = self.b.ins().iadd_imm_s(len, -((pre.len() + post.len()) as i64));
+                    let fat = self.make_fat_v(start, len_v);
                     let m = matches!(mode, BindMode::Ref(true));
+                    // (`ref tail @ ..` of an array: a borrow of the elements between, which tail holds (`a[2] = 0` while
+                    // it lives is E0506))
+                    let held = match (n, *by_ref) {
+                        (Some(n), true) if pre.len() < n.saturating_sub(post.len()) => {
+                            let path = self.bk_pat_proj(borrowck::Proj::Field(format!("[{}..{}]", pre.len(), n - post.len())));
+                            let srcs = self.bk_pat_ref(m, true);
+                            Some((path, srcs))
+                        }
+                        _ => None,
+                    };
                     self.bind(rname.clone(), Ty::Ref(m, intern(Ty::Slice(intern(elem)))), Some(fat));
+                    if let Some((path, srcs)) = held {
+                        self.bk.bind_srcs = srcs;
+                        self.bk.pat_path = path;
+                    }
                 }
                 Ok(())
             }

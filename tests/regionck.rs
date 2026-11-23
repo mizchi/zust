@@ -2482,3 +2482,12 @@ fn part14_two_phase_through_a_local() {
     assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("cannot borrow `v` as mutable because it is also borrowed as immutable"), "{d:?}");
     assert_eq!(check("struct S(Vec<i32>);\nimpl S {\n    fn ext(&mut self, _b: &S) {}\n    fn add(&mut self, _b: &[i32]) {}\n}\nfn main() {\n    let mut v = S(vec![0]);\n    let u = S(vec![1]);\n    let w = &u;\n    v.ext(w);\n    let x = vec![3];\n    let r = &x;\n    v.add(r);\n    let a = String::from(\"a\");\n    let mut names: Vec<&str> = vec![];\n    let s: &str = &a;\n    names.push(s);\n    let t = names[0];\n    names.push(t);\n    println!(\"{}\", v.0.len() + names.len());\n}\n"), vec![]);
 }
+
+/// `[_, ref tail @ ..]` of an array borrows the elements between: tail holds the loan (E0506 on `a[2] = 0` while it
+/// lives, borrowck/borrowck-vec-pattern-move-tail.rs); once tail is not used, the array may be written
+#[test]
+fn part14_ref_rest_binding() {
+    let d = check("fn main() {\n    let mut a = [1, 2, 3, 4];\n    let t = match a {\n        [_, ref tail @ ..] => tail,\n    };\n    a[2] = 0;\n    println!(\"{}\", t[0]);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut a = [1, 2, 3, 4];\n    let t = match a {\n        [_, ref tail @ ..] => tail.len(),\n    };\n    a[2] = 0;\n    let [x, ref rest @ .., y] = a;\n    let n = rest.len();\n    a[0] = 9;\n    println!(\"{} {} {} {} {:?}\", t, x, y, n, a);\n}\n"), vec![]);
+}
