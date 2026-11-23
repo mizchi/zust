@@ -2731,3 +2731,21 @@ fn part15_review() {
     let d = check("#![deny(unused_mut)]\n// we allow (unused_mut) nowhere\nfn main() {\n    let mut x = 1;\n    let _ = x;\n}\n");
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("unused_mut"), "{d:?}");
 }
+
+/// `&*b` of a `Box<dyn Tr>` / `Box<[T]>` / `Box<str>` borrows what the box owns, as of a `Box<T>`: moving b while it
+/// lives is E0505, and returning it in a `Box<dyn X>` is E0515 (regions/regions-close-object-into-object-*.rs)
+#[test]
+fn part16_unsized_box_reborrow() {
+    let d = check("trait A {}\nfn f(v: Box<dyn A>) {\n    let r = &*v;\n    drop(v);\n    let _ = r;\n}\nfn g(v: Box<[u8]>) {\n    let r = &*v;\n    drop(v);\n    let _ = r;\n}\nfn main() {}\n");
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![4, 9] && d.iter().all(|x| x.1.contains("because it is borrowed")), "{d:?}");
+    let d = check("trait A {}\nstruct B<'a>(&'a (dyn A + 'a));\ntrait X {}\nimpl<'a> X for B<'a> {}\nfn f(v: Box<dyn A>) -> Box<dyn X> {\n    Box::new(B(&*v))\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
+    // (`&mut` through a method's auto-ref: `b.iter_mut()` of a box not declared `mut`, `self.0.sort()` through `&self`
+    // (E0596), at the receiver)
+    let d = check("struct E(Box<[u8]>);\nimpl E {\n    fn g(&self) {\n        self.0.sort();\n    }\n}\nfn h(b: Box<[u8]>) -> usize {\n    b.iter_mut().count()\n}\nfn main() {}\n");
+    let lines: Vec<usize> = d.iter().map(|x| x.0).collect();
+    assert!(lines == vec![4, 8] && d.iter().all(|x| x.1.contains("as mutable")), "{d:?}");
+    // (what is fine: the borrow ends before the move, a `&mut *b` of a `mut` box, a box of a `&'static`)
+    assert_eq!(check("trait A { fn n(&self) -> u8; }\nimpl A for u8 { fn n(&self) -> u8 { *self } }\nfn f(v: Box<dyn A>) -> u8 {\n    let r = &*v;\n    let n = r.n();\n    drop(v);\n    n\n}\nfn g(mut v: Box<[u8]>) -> u8 {\n    let r = &mut *v;\n    r[0] = 1;\n    v[0]\n}\nfn h(v: Box<&'static str>) -> &'static str {\n    *v\n}\nfn main() {\n    println!(\"{} {} {}\", f(Box::new(3u8)), g(vec![0u8].into_boxed_slice()), h(Box::new(\"x\")));\n}\n"), vec![]);
+}

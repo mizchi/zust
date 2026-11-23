@@ -1858,6 +1858,13 @@ impl Cx<'_> {
                         _ => unreachable!(),
                     };
                     let (v, _) = self.read_no_move(inner)?;
+                    // (of a Box: a borrow of what the box owns, as `&*b` of a `Box<T>` (E0505 when b is moved while
+                    // it lives, E0515 when it is returned))
+                    // (a method call's auto-ref (`b.iter_mut()`) is made with no position: the box's)
+                    if matches!(it, Ty::Box(_)) && !matches!(expected, Some(Ty::Ptr(..))) {
+                        let sp = err_pos(rexpr);
+                        self.bk_borrow(rexpr, m, if sp.line == 0 { err_pos(inner) } else { sp });
+                    }
                     return Ok((v, Ty::Ref(m, intern(pointee))));
                 }
             }
