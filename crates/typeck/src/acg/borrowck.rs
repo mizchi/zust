@@ -145,6 +145,10 @@ pub struct BkError {
 
 #[derive(Default)]
 pub struct Bk {
+    /// The receivers of a block's tail's method calls that are temporaries (bk_tail_drop_temps): Cx::expr collects
+    /// what each one's value holds (watched), as a `let` of it would
+    pub watch: crate::fxhash::FxSet<usize>,
+    pub watched: HashMap<usize, Vec<Src>>,
     /// A closure's body: the borrow checker's locals of its captures held by value. They outlive the body's call, in
     /// the closure's environment: at each exit (its end, `return`, `?`), what they hold escapes it (Cx::bk_cap_escape)
     pub cap_vals: Vec<u32>,
@@ -333,7 +337,13 @@ fn made_temp(x: &Expr) -> bool {
     }
     match x {
         Expr::MethodCall(..) => true,
-        Expr::Call(f, _) => matches!(&**f, Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_'))),
+        // (a fn's call; a constructor's (`Some(v)`, `W(v)`) is promoted to a static only when its arguments are
+        // constants, as a tuple literal is)
+        Expr::Call(f, args) => match &**f {
+            Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase() || c == '_')) => true,
+            Expr::Path(..) => args.iter().any(runtime_value),
+            _ => false,
+        },
         Expr::Macro(p, ..) => p.segs.last().is_some_and(|s| s.name == "vec" || s.name == "format"),
         // (a tuple / array / struct literal of a value only known when it runs (`(v,)` of a local v): not promoted to a
         // static as a constant one is (`&(1, 2)`), so a temporary)
@@ -2221,6 +2231,35 @@ impl Cx<'_> {
     /// The temporaries of a block's tail that a method is called on (`D(&_t1).end()`) live until the end of the
     /// enclosing statement, after the block's locals (edition 2021). One whose `Drop` may see what it borrows uses
     /// its loans when it is dropped there: a loan of one of the block's locals is then E0597 at the local
+    /// Before a block's tail is lowered: its method calls' receivers that are temporaries, whose values Cx::expr
+    /// collects (Bk::watch). Returns them, for bk_unwatch
+    pub(crate) fn bk_watch_tail(&mut self, e: &Expr) -> Vec<usize> {
+        let mut added = vec![];
+        if !self.bk_on() || self.bk.level < 2 || !self.user_code {
+            return added;
+        }
+        let mut cur = strip_paren(e);
+        while let Expr::MethodCall(recv, ..) = cur {
+            let r = strip_paren(recv);
+            if !super::is_place_expr(r) {
+                for a in [&**recv as *const Expr as usize, r as *const Expr as usize] {
+                    if self.bk.watch.insert(a) {
+                        added.push(a);
+                    }
+                }
+            }
+            cur = r;
+        }
+        added
+    }
+
+    pub(crate) fn bk_unwatch(&mut self, added: &[usize]) {
+        for a in added {
+            self.bk.watch.remove(a);
+            self.bk.watched.remove(a);
+        }
+    }
+
     pub(crate) fn bk_tail_drop_temps(&mut self, e: &Expr) {
         if !self.bk_on() || self.bk.level < 2 || !self.user_code {
             return;
@@ -2231,8 +2270,19 @@ impl Cx<'_> {
             if !super::is_place_expr(r) {
                 if let Some(t) = self.peek(r) {
                     if self.dropck(t, 0) {
+                        // (what its value holds, as lowering it collected (`id(rows)`, `rows.wrap()`: what rows held),
+                        // else as the syntax tells)
                         let mut srcs = vec![];
                         self.bk_direct(r, &mut srcs);
+                        for a in [&**recv as *const Expr as usize, r as *const Expr as usize] {
+                            if let Some(s) = self.bk.watched.get(&a) {
+                                for x in s {
+                                    if !srcs.contains(x) {
+                                        srcs.push(*x);
+                                    }
+                                }
+                            }
+                        }
                         if !srcs.is_empty() {
                             let id = self.bk.locals.len() as u32;
                             self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP, via_ref: false });

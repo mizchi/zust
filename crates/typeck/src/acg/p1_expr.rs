@@ -656,7 +656,16 @@ impl Cx<'_> {
         // (the places inside a sub-expression are accesses of their own)
         let pd = std::mem::take(&mut self.bk.place_depth);
         self.bk.exp_none = std::mem::take(&mut self.bk.move_mut_next) && expected.is_none();
+        // (a block's tail's receiver that is a temporary: what its value holds (bk_watch_tail))
+        let watched = !self.bk.watch.is_empty() && self.bk.watch.contains(&(e as *const Expr as usize));
+        if watched {
+            self.bk_frame();
+        }
         let r = self.expr_inner(e, expected);
+        if watched {
+            let s = self.bk_frame_end();
+            self.bk.watched.insert(e as *const Expr as usize, s);
+        }
         self.bk.place_depth = pd;
         let (v, t) = r.map_err(|m| {
             // (エラーに、位置を持つ一番内側の式の先頭の行:桁を付ける。ACG_DEBUG_AT=1 なら式も)

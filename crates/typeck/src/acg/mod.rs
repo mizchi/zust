@@ -2292,6 +2292,7 @@ impl Cx<'_> {
                             _ => {}
                         }
                     }
+                    let watch = if last && !*semi { self.bk_watch_tail(e) } else { vec![] };
                     let r = self.expr(e, exp);
                     self.bk.direct.truncate(ext0);
                     if last && !*semi && self.bk.tail == e as *const Expr as usize && r.is_ok() {
@@ -2302,6 +2303,7 @@ impl Cx<'_> {
                         self.rg_keep(e);
                         self.bk_tail_drop_temps(e);
                     }
+                    self.bk_unwatch(&watch);
                     if tail {
                         let srcs = self.bk_frame_end();
                         if self.bk_ty(self.ret).1 {

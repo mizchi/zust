@@ -2341,3 +2341,20 @@ fn part13_wild_let_in_closure() {
     let d = check("fn keep(_b: Box<dyn Fn()>) {}\nfn main() {\n    let y = 3;\n    let r = &y;\n    keep(Box::new(move || {\n        let _x = r;\n    }));\n}\n");
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("`y` does not live long enough"), "{d:?}");
 }
+
+/// A block's tail's temporary whose `Drop` may see what it holds, holding a loan through another value (`id(rows)`,
+/// `rows.wrap()`: what rows held) is dropped after the block's locals: E0597 (nll/issue-54556-stephaneyfx.rs). A
+/// constructor's call with an argument known when it runs (`&Some(s)`, `&W(v)`) is a temporary, not promoted: E0716
+#[test]
+fn part13_tail_and_ctor_temps() {
+    let rows = "pub struct Statement;\npub struct Rows<'stmt>(&'stmt Statement);\nimpl<'stmt> Drop for Rows<'stmt> {\n    fn drop(&mut self) {}\n}\nimpl<'stmt> Rows<'stmt> {\n    fn wrap(self) -> Rows<'stmt> {\n        self\n    }\n    fn len(&self) -> usize {\n        0\n    }\n}\nfn id<T>(t: T) -> T {\n    t\n}\n";
+    for tail in ["id(rows).len()", "rows.wrap().len()"] {
+        let d = check(&format!("{rows}fn get() -> usize {{\n    let stmt = Statement;\n    let rows = Rows(&stmt);\n    {tail}\n}}\nfn main() {{\n    println!(\"{{}}\", get());\n}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 19 && d[0].1.contains("`stmt` does not live long enough"), "{tail}: {d:?}");
+    }
+    // (the tail's value is not a temporary that outlives the locals: `let n = ..; n`)
+    assert_eq!(check(&format!("{rows}fn get() -> usize {{\n    let stmt = Statement;\n    let rows = Rows(&stmt);\n    let n = id(rows).len();\n    n\n}}\nfn main() {{\n    println!(\"{{}}\", get());\n}}\n")), vec![]);
+    let d = check("fn f(x: &Option<String>) -> &Option<String> {\n    x\n}\nfn main() {\n    let s = String::new();\n    let r = f(&Some(s));\n    println!(\"{:?}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("temporary value dropped while borrowed"), "{d:?}");
+    assert_eq!(check("struct W(u32);\nfn f(x: &W) -> &W {\n    x\n}\nfn g(x: &Option<u32>) -> &Option<u32> {\n    x\n}\nfn main() {\n    let r = f(&W(3));\n    let o = g(&Some(4));\n    let v = 5;\n    let k = &Some(v);\n    println!(\"{} {:?} {:?}\", r.0, o, k);\n}\n"), vec![]);
+}
