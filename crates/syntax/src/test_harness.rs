@@ -29,8 +29,20 @@ pub struct TestFn {
 
 type Tok = (u8, usize, usize);
 
-/// The `#[test]` functions of a crate's source (cfg already applied), and where its own `fn main`'s name is
-pub fn collect(src: &str) -> (Vec<TestFn>, Option<usize>) {
+/// What `collect` finds in a crate's source
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Collected {
+    pub tests: Vec<TestFn>,
+    /// where the crate's own `fn main`'s name is, and the calls of it (`main()`, `super::main()`, `crate::main()`
+    /// outside a module with a `main` of its own): renamed together, so a test that calls `main` still calls it
+    pub main_refs: Vec<usize>,
+    /// `#[test]` attributes that are not on a function collected here: inside a `macro_rules!`, whose expansion comes
+    /// later (those tests are not run yet; the build says so)
+    pub unlisted: usize,
+}
+
+/// The `#[test]` functions of a crate's source (cfg already applied), and where its own `fn main` is
+pub fn collect(src: &str) -> Collected {
     let s = src.as_bytes();
     let toks: Vec<Tok> = crate::lexer::tokenize(s);
     let tok = |k: usize| -> &str { toks.get(k).map(|t| &src[t.1..t.2]).unwrap_or("") };
@@ -38,6 +50,10 @@ pub fn collect(src: &str) -> (Vec<TestFn>, Option<usize>) {
     let ident = |k: usize| toks.get(k).is_some_and(|t| t.0 == 0);
     let mut tests = vec![];
     let mut main_at = None;
+    // (the modules with a `fn main` of their own, by path, and the calls of `main` with their module's path)
+    let mut own_main: Vec<String> = vec![];
+    let mut calls: Vec<(usize, String)> = vec![];
+    let mut attrs_test = 0usize;
     // (the modules open here: (the brace depth inside it, its name)); depth of braces
     let mut mods: Vec<(i32, String)> = vec![];
     let mut depth = 0i32;
@@ -55,12 +71,24 @@ pub fn collect(src: &str) -> (Vec<TestFn>, Option<usize>) {
                 mods.pop();
             }
             depth -= 1;
+        } else if sym(k, "#") && sym(k + 1, "[") && tok(k + 2) == "test" && sym(k + 3, "]") {
+            attrs_test += 1;
+        } else if ident(k) && tok(k) == "main" && sym(k + 1, "(") && !(k >= 1 && (tok(k - 1) == "fn" || sym(k - 1, "."))) {
+            // (a call of a `main`: by its bare name, or by `crate::` / `self::` / `super::`)
+            let by_path = k >= 2 && sym(k - 1, ":") && sym(k - 2, ":");
+            if !by_path || (k >= 3 && matches!(tok(k - 3), "crate" | "self" | "super")) {
+                calls.push((toks[k].1, mods.iter().map(|m| m.1.as_str()).collect::<Vec<_>>().join("::")));
+            }
         } else if ident(k) && tok(k) == "mod" && ident(k + 1) && sym(k + 2, "{") {
             pending_mod = Some(tok(k + 1).trim_start_matches("r#").to_string());
         } else if ident(k) && tok(k) == "fn" && ident(k + 1) && depth == mods.last().map(|m| m.0).unwrap_or(0) {
             let name = tok(k + 1);
-            if depth == 0 && name == "main" {
-                main_at = Some(toks[k + 1].1);
+            if name == "main" {
+                if depth == 0 {
+                    main_at = Some(toks[k + 1].1);
+                } else {
+                    own_main.push(mods.iter().map(|m| m.1.as_str()).collect::<Vec<_>>().join("::"));
+                }
             }
             let attrs = attrs_before(src, &toks, k);
             if attrs.iter().any(|a| a.0 == "test") {
@@ -73,7 +101,13 @@ pub fn collect(src: &str) -> (Vec<TestFn>, Option<usize>) {
         }
         k += 1;
     }
-    (tests, main_at)
+    let mut main_refs = vec![];
+    if let Some(at) = main_at {
+        main_refs.push(at);
+        main_refs.extend(calls.into_iter().filter(|(_, m)| !own_main.contains(m)).map(|c| c.0));
+    }
+    let unlisted = attrs_test.saturating_sub(tests.len());
+    Collected { tests, main_refs, unlisted }
 }
 
 /// The attributes before the item whose keyword `fn` is token k (over `pub`, `pub(..)`, `async`, `unsafe`, `const`,
@@ -131,43 +165,66 @@ fn attrs_before(src: &str, toks: &[Tok], k: usize) -> Vec<(String, String)> {
     out
 }
 
-/// `should_panic(expected = "x")`'s text ("" without one), from the attribute as written
+/// `should_panic(expected = "x")`'s text ("" without one), from the attribute as written: the literal decoded as
+/// Rust decodes it (escapes, raw strings). One that does not decode is a text no panic has, so the test fails
 fn expected(attr: &str) -> String {
     let Some(i) = attr.find("expected") else { return String::new() };
     let r = attr[i + 8..].trim_start();
-    let Some(r) = r.strip_prefix('=').map(str::trim_start).and_then(|r| r.strip_prefix('"')) else { return String::new() };
-    // (to the closing quote: one not after a backslash)
-    let mut end = None;
-    let mut esc = false;
-    for (j, c) in r.char_indices() {
-        match c {
-            '\\' if !esc => esc = true,
-            '"' if !esc => {
-                end = Some(j);
-                break;
-            }
-            _ => esc = false,
-        }
-    }
-    end.map(|j| unescape(&r[..j])).unwrap_or_default()
+    let Some(r) = r.strip_prefix('=').map(str::trim_start) else { return String::new() };
+    str_literal(r).unwrap_or_else(|| format!("\u{0}(the expected text `{}` did not decode)", r.trim_end_matches(')').trim()))
 }
 
-fn unescape(s: &str) -> String {
+/// The value of the string literal at the start of s (`"..."` with escapes, or `r"..."` / `r#"..."#`)
+fn str_literal(s: &str) -> Option<String> {
+    if let Some(r) = s.strip_prefix('r') {
+        let hashes = r.len() - r.trim_start_matches('#').len();
+        let body = r[hashes..].strip_prefix('"')?;
+        let close = format!("\"{}", "#".repeat(hashes));
+        return body.find(&close).map(|j| body[..j].to_string());
+    }
+    let mut it = s.strip_prefix('"')?.chars().peekable();
     let mut out = String::new();
-    let mut it = s.chars();
     while let Some(c) = it.next() {
-        if c == '\\' {
-            match it.next() {
-                Some('n') => out.push('\n'),
-                Some('t') => out.push('\t'),
-                Some(x) => out.push(x),
-                None => {}
-            }
-        } else {
-            out.push(c);
+        match c {
+            '"' => return Some(out),
+            '\\' => match it.next()? {
+                'n' => out.push('\n'),
+                't' => out.push('\t'),
+                'r' => out.push('\r'),
+                '0' => out.push('\0'),
+                '\\' => out.push('\\'),
+                '"' => out.push('"'),
+                '\'' => out.push('\''),
+                'x' => {
+                    let h: String = [it.next()?, it.next()?].iter().collect();
+                    out.push(char::from(u8::from_str_radix(&h, 16).ok().filter(|v| *v < 0x80)?));
+                }
+                'u' => {
+                    if it.next()? != '{' {
+                        return None;
+                    }
+                    let mut h = String::new();
+                    loop {
+                        match it.next()? {
+                            '}' => break,
+                            '_' => {}
+                            d => h.push(d),
+                        }
+                    }
+                    out.push(char::from_u32(u32::from_str_radix(&h, 16).ok()?)?);
+                }
+                // (a line continuation: the line break and the white space after it)
+                '\n' => {
+                    while it.peek().is_some_and(|c| c.is_whitespace()) {
+                        it.next();
+                    }
+                }
+                _ => return None,
+            },
+            c => out.push(c),
         }
     }
-    out
+    None
 }
 
 /// Whether the function whose parameters open at token k returns a value (`-> ..` after its `)`)
@@ -219,11 +276,18 @@ fn lit(s: &str) -> String {
 /// The source with the harness: `--test`'s crate. The crate's own `fn main` is renamed (same length, so nothing
 /// moves) and a `main` that runs the tests follows the last line
 pub fn apply(src: &str) -> String {
-    let (mut tests, main_at) = collect(src);
+    apply_noting(src).0
+}
+
+/// apply, and how many `#[test]` attributes it found no function for (inside a `macro_rules!`: not run yet)
+pub fn apply_noting(src: &str) -> (String, usize) {
+    let c = collect(src);
+    let unlisted = c.unlisted;
+    let mut tests = c.tests;
     // (libtest's order: by name)
     tests.sort_by(|a, b| a.path.cmp(&b.path));
     let mut out = src.to_string();
-    if let Some(at) = main_at {
+    for &at in &c.main_refs {
         out.replace_range(at..at + 4, "m41n");
     }
     if !out.ends_with('\n') {
@@ -249,18 +313,22 @@ pub fn apply(src: &str) -> String {
         arms.join(" "),
         table.join(", ")
     ));
-    out
+    (out, unlisted)
 }
 
 /// The harness's fixed part (one line: the lines of the source above it stay where they are)
 const HARNESS: &str = concat!(
     "#[allow(dead_code)] fn __zust_test_matches(n: &str, pats: &Vec<String>, exact: bool) -> bool { ",
     "for p in pats { if (exact && n == p.as_str()) || (!exact && n.contains(p.as_str())) { return true; } } false } ",
+    "#[allow(dead_code)] fn __zust_test_panic_msg(err: &str) -> String { ",
+    "let Some(i) = err.rfind(\"' panicked at \") else { return String::new(); }; let r = &err[i..]; let Some(j) = r.find('\\n') else { return String::new(); }; ",
+    "let m = &r[j + 1..]; let m = match m.find(\"\\nnote: run with `RUST_BACKTRACE\") { Some(e) => &m[..e], None => m }; ",
+    "let m = match m.find(\"\\nstack backtrace:\") { Some(e) => &m[..e], None => m }; m.to_string() } ",
     "#[allow(dead_code)] fn __zust_test_child(t: &[(&str, u8, &str)], k: usize, ign: bool) -> (bool, String) { ",
     "let mut c = std::process::Command::new(\"/proc/self/exe\"); c.arg(t[k].0); c.arg(\"--exact\"); c.arg(\"--zust-raw\"); if ign { c.arg(\"--include-ignored\"); } ",
     "match c.output() { ",
     "Ok(o) => { let out = String::from_utf8_lossy(&o.stdout); let err = String::from_utf8_lossy(&o.stderr); let code = o.status.code(); ",
-    "let ok = if t[k].1 & 2 != 0 { code == Some(101) && err.contains(t[k].2) } else { code == Some(0) }; ",
+    "let ok = if t[k].1 & 2 != 0 { code == Some(101) && __zust_test_panic_msg(&err).contains(t[k].2) } else { code == Some(0) }; ",
     "let mut msg = String::new(); msg.push_str(&out); msg.push_str(&err); ",
     "if !ok && t[k].1 & 2 != 0 { if code == Some(101) { msg.push_str(&format!(\"note: panic did not contain expected string\\n      expected substring: {:?}\\n\", t[k].2)); } else { msg.push_str(\"note: test did not panic as expected\\n\"); } } ",
     "(ok, msg) } ",
@@ -283,6 +351,7 @@ const HARNESS: &str = concat!(
     "if fmt != \"terse\" && fmt != \"zust\" { println!(); println!(\"{} tests, 0 benchmarks\", n); } return 0; } ",
     "if raw { for &k in &sel { __zust_test_run(k); } return 0; } ",
     "if exact && sel.len() == 1 { let k = sel[0]; ",
+    "if ignored && t[k].1 & 1 == 0 { println!(\"\\nrunning 0 tests\\n\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; {} filtered out\\n\", filtered + 1); return 0; } ",
     "if t[k].1 & 1 != 0 && !ignored && !include { println!(\"\\nrunning 1 test\\ntest {} ... ignored\\n\\ntest result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; {} filtered out\\n\", t[k].0, filtered); return 0; } ",
     "if t[k].1 & 2 != 0 { let (ok, msg) = __zust_test_child(t, k, true); if !ok { eprint!(\"{}\", msg); return 101; } return 0; } ",
     "println!(\"\\nrunning 1 test\"); __zust_test_run(k); println!(\"test {} ... ok\\n\\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; {} filtered out\\n\", t[k].0, filtered); return 0; } ",
@@ -301,8 +370,10 @@ mod tests {
     #[test]
     fn collects_tests() {
         let src = "fn main() {}\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn a() {}\n    #[test]\n    #[ignore = \"slow\"]\n    fn b() {}\n    #[should_panic(expected = \"bo om\")]\n    #[test]\n    fn c() { panic!(\"bo om\") }\n    #[test]\n    fn d() -> Result<(), String> { Ok(()) }\n    fn helper() {}\n    mod inner { #[test] fn e() { fn nested() {} } }\n}\n";
-        let (t, m) = collect(src);
-        assert_eq!(m, Some(3));
+        let c = collect(src);
+        let t = c.tests;
+        assert_eq!(c.main_refs, [3]);
+        assert_eq!(c.unlisted, 0);
         let names: Vec<&str> = t.iter().map(|t| t.path.as_str()).collect();
         assert_eq!(names, ["tests::a", "tests::b", "tests::c", "tests::d", "tests::inner::e"]);
         assert!(t[1].ignore && !t[0].ignore);
@@ -311,5 +382,27 @@ mod tests {
         let out = apply(src);
         assert!(out.starts_with("fn m41n() {}\n"));
         assert_eq!(out.lines().count(), src.lines().count() + 1);
+    }
+
+    #[test]
+    fn main_calls_and_macro_tests() {
+        let src = "fn main() {}\nmod tests {\n    #[test]\n    fn calls() { main(); super::main(); crate::main(); x.main(); other::main(); }\n    mod m { fn main() {} fn f() { main(); } }\n    macro_rules! t { () => { #[test] fn gen() {} } }\n}\n";
+        let c = collect(src);
+        // (the declaration, and the three calls of it in `calls`: not the method, `other::main` or m's own)
+        assert_eq!(c.main_refs.len(), 4);
+        assert!(c.main_refs.iter().all(|&i| &src[i..i + 4] == "main"));
+        assert_eq!(c.unlisted, 1);
+        let out = apply(src);
+        assert!(out.contains("fn calls() { m41n(); super::m41n(); crate::m41n(); x.main(); other::main(); }"), "{out}");
+    }
+
+    #[test]
+    fn expected_literals() {
+        assert_eq!(expected("should_panic(expected = \"a b\")"), "a b");
+        assert_eq!(expected("should_panic(expected = r\"wan\\ted\")"), "wan\\ted");
+        assert_eq!(expected("should_panic(expected = r#\"q\"uote\"#)"), "q\"uote");
+        assert_eq!(expected("should_panic(expected = \"\\u{41}\\x42\\n\")"), "AB\n");
+        assert_eq!(expected("should_panic"), "");
+        assert!(expected("should_panic(expected = \"\\q\")").starts_with('\u{0}'));
     }
 }

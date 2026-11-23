@@ -92,7 +92,8 @@ fn main() {
             "--locked" | "--offline" | "--frozen" | "-q" | "--quiet" => {}
             "--lib" if cmd == "test" || cmd == "t" => only.push("(lib)".into()),
             "--bins" if cmd == "test" || cmd == "t" => only.push("(bin ".into()),
-            "--tests" if cmd == "test" || cmd == "t" => only.push("(test ".into()),
+            // (cargo's `--tests`: every target that has tests, unit tests too)
+            "--tests" if cmd == "test" || cmd == "t" => only.push(String::new()),
             "--test" if cmd == "test" || cmd == "t" => only.push(format!("(test {})", val(&a))),
             "--no-run" if cmd == "test" || cmd == "t" => no_run = true,
             "--no-fail-fast" if cmd == "test" || cmd == "t" => fail_fast = false,
@@ -155,6 +156,12 @@ fn main() {
             let built = compile::build(&g, &o).unwrap_or_else(|e| die(&e));
             eprintln!("    Finished `{}` profile in {:.2}s (zustc)", if o.release { "release" } else { "dev" }, t0.elapsed().as_secs_f64());
             // (the targets asked for: `--lib`, `--bins`, `--tests`, `--test x`)
+            // (`--test x` names a target that must exist)
+            for w in only.iter().filter(|w| w.starts_with("(test ")) {
+                if !built.tests.iter().any(|t| t.0.ends_with(w.as_str())) {
+                    die(&format!("no test target named `{}`", &w[6..w.len() - 1]));
+                }
+            }
             let exes: Vec<_> = built.tests.iter().filter(|t| only.is_empty() || only.iter().any(|w| t.0.contains(w.as_str()))).cloned().collect();
             if no_run {
                 for (l, e, _) in &exes {

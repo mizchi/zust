@@ -502,7 +502,7 @@ fn test_runs_like_cargo_test() {
     let (ok, out, _) = cargo(&["test", "--no-fail-fast", "--offline"], &m, &tdir("test-pkg-cargo"));
     assert!(!ok, "the fixture has failing tests");
     let want = cargo_outcomes(&out);
-    assert_eq!(want.len(), 12, "{want:?}");
+    assert_eq!(want.len(), 13, "{want:?}");
     let o = Command::new(ZURGO).args(["test", "--manifest-path"]).arg(&m).env("CARGO_TARGET_DIR", tdir("test-pkg")).output().unwrap();
     let err = String::from_utf8_lossy(&o.stderr);
     assert_eq!(o.status.code(), Some(101), "{err}");
@@ -522,6 +522,12 @@ fn test_runs_like_cargo_test() {
     let (ok, _, err) = zurgo(&["test", "--lib", "adds"], &m, &tdir("test-pkg"));
     assert!(ok, "{err}");
     assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["tests::adds"], "{err}");
+    // (cargo's `--tests`: the unit tests too)
+    let (_, _, err) = zurgo(&["test", "--tests", "adds"], &m, &tdir("test-pkg"));
+    assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["tests::adds"], "{err}");
+    // (a test target that does not exist is an error, not a run of nothing)
+    let (ok, _, err) = zurgo(&["test", "--test", "nope"], &m, &tdir("test-pkg"));
+    assert!(!ok && err.contains("no test target named `nope`"), "{err}");
 }
 
 /// A test that never ends is stopped at `ZURGO_TEST_TIMEOUT`, and fails
@@ -539,6 +545,19 @@ fn test_timeout() {
     let err = String::from_utf8_lossy(&o.stderr);
     assert_eq!(o.status.code(), Some(101), "{err}");
     assert!(err.contains("TIMEOUT [") && err.contains("tests::hangs"), "{err}");
+    // (a test that ends but leaves a process holding its output: it passes, the process is stopped, and the run
+    //  does not wait for it)
+    let t0 = std::time::Instant::now();
+    let o = Command::new(ZURGO)
+        .args(["test", "--lib", "--manifest-path"])
+        .arg(&m)
+        .args(["--", "--ignored", "--exact", "tests::leaves_a_child"])
+        .env("CARGO_TARGET_DIR", tdir("test-pkg-timeout"))
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(o.status.success(), "{err}");
+    assert!(t0.elapsed() < std::time::Duration::from_secs(20), "{err}");
 }
 
 /// The runner speaks libtest's command line: it runs the executables `cargo test` builds as well, with the outcomes
@@ -564,5 +583,5 @@ fn runner_drives_libtest_executables() {
     let (_, out, _) = cargo(&["test", "--no-fail-fast", "--offline"], &m, &td);
     let want: std::collections::BTreeMap<String, String> = cargo_outcomes(&out).into_iter().filter(|(_, v)| v != "ignored").collect();
     assert_eq!(got, want);
-    assert_eq!(s.skipped, 2);
+    assert_eq!(s.skipped, 3);
 }

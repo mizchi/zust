@@ -350,11 +350,12 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<String>)
                     deps.retain(|d| *d != l.name);
                 }
                 let kind = if t.kind.iter().any(|k| k == "test") { "test" } else if t.kind.iter().any(|k| k == "bin") { "bin" } else { "lib" };
-                let exe = format!("{}-{kind}-{}", pk.m.name, t.name);
                 let mut name = format!("{}_{kind}_test", t.name.replace('-', "_"));
                 while lib_of.contains_key(&name) || crates.iter().any(|c| c.name == name) {
                     name.push('_');
                 }
+                // (the executable is named after the crate's unique name: two packages' targets cannot share it)
+                let exe = name.clone();
                 let (cfgs, mut env) = build_script::crate_env(&pk.m, &t.name, bs_out.get(&n));
                 if kind == "bin" {
                     env.push(("CARGO_BIN_NAME".into(), t.name.clone()));
@@ -394,11 +395,31 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<String>)
         let wasm = target.triple.starts_with("wasm32");
         let mut reach: BTreeMap<Node, Vec<usize>> = BTreeMap::new();
         for (c, &n) in crates[n_stubs..].iter().zip(&node_of) {
-            let pm_deps = pm_reach(g, &r, n, &mut reach);
+            let mut pm_deps = pm_reach(g, &r, n, &mut reach);
+            // (a test crate also links the package's dev-dependencies: the proc macros they are or reach count too.
+            //  Added here, not in the memo, which holds the normal dependencies' reach)
+            if c.test {
+                for &(ei, t) in &r.nodes[&n].edges {
+                    if g.decl(n.0, &g.edges[n.0][ei]).kind != crate::manifest::DepKind::Dev || t.0 == n.0 {
+                        continue;
+                    }
+                    let more = if g.pkgs[t.0].m.is_proc_macro() { vec![t.0] } else { pm_reach(g, &r, t, &mut reach) };
+                    for p in more {
+                        if !pm_deps.contains(&p) {
+                            pm_deps.push(p);
+                        }
+                    }
+                }
+            }
             if pm_deps.is_empty() {
                 continue;
             }
-            let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs: c.cfgs.clone(), env: c.env.clone() };
+            // (a test crate is configured with `test`, as zustc builds it)
+            let mut cfgs = c.cfgs.clone();
+            if c.test {
+                cfgs.push(("test".to_string(), None));
+            }
+            let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs, env: c.env.clone() };
             let (text, _) = zustc::srcmap::load_crate(&c.root, &c.display, &cfg)?;
             let u = proc_macro_stub::uses_in(&text);
             for (p, m) in pm_macros.iter().filter(|(p, _)| pm_deps.contains(p)) {

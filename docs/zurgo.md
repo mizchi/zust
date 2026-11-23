@@ -199,6 +199,7 @@ zurgo test --lib parse -- --include-ignored
   (`ZURGO_TEST_SLOW`, `ZURGO_TEST_TIMEOUT`, in seconds).
 - Not yet:
   - doc tests and benchmarks;
+  - `#[test]` functions that a `macro_rules!` makes (the build warns about them);
   - `test = false` on a target;
   - wasm32;
   - building only the chosen targets (`--lib` and the others choose what runs; everything is built).

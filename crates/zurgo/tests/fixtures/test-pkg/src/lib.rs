@@ -26,6 +26,12 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
+    // (leaves a process that holds the test's output open: the runner stops it and goes on)
+    #[test]
+    #[ignore]
+    fn leaves_a_child() {
+        std::process::Command::new("sh").args(["-c", "sleep 30 &"]).status().unwrap();
+    }
     #[test]
     fn reads_file() { assert!(std::fs::read_to_string("Cargo.toml").unwrap().contains("name = \"tp\"")); }
 }

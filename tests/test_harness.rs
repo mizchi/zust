@@ -54,8 +54,24 @@ fn harness_like_rustc() {
         a.extend(extra);
         assert_eq!(out(&z, &a).0 == Some(0), out(&r, &a).0 == Some(0), "{name}");
     }
+    // (`--ignored` with `--exact`: a test that is not ignored does not run)
+    assert_eq!(out(&z, &["tests::fails", "--exact", "--ignored"]).0, out(&r, &["tests::fails", "--exact", "--ignored"]).0);
     // (with a filter: substrings)
     assert_eq!(outcomes(&out(&z, &["panic"]).1), outcomes(&out(&r, &["panic"]).1));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// A `#[test]` that a `macro_rules!` makes is not run yet: the build says so
+#[test]
+fn macro_made_tests_are_reported() {
+    let d = dir("test_harness_macro");
+    let src = d.join("m.rs");
+    std::fs::write(&src, "macro_rules! make {\n    () => {\n        #[test]\n        fn generated() {}\n    };\n}\nmake!();\n#[test]\nfn plain() {}\n").unwrap();
+    let o = Command::new(ZUSTC).args(["--test", "--no-cache"]).arg(&src).arg("-o").arg(d.join("m")).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(o.status.success(), "{err}");
+    assert!(err.contains("1 `#[test]` function(s) made by a macro are not run yet"), "{err}");
+    assert_eq!(out(&d.join("m"), &["--list", "--format", "terse"]).1, "plain: test\n");
     let _ = std::fs::remove_dir_all(&d);
 }
 

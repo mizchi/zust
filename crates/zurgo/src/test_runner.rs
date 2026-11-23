@@ -126,6 +126,8 @@ fn run_one(exe: &Path, dir: &Path, name: &str, ignored: bool, o: &RunOpts, slow:
     if ignored {
         c.arg("--include-ignored");
     }
+    // (a process group of its own: at a timeout, the processes the test started go with it)
+    std::os::unix::process::CommandExt::process_group(&mut c, 0);
     let mut child = match c.spawn() {
         Ok(ch) => ch,
         Err(e) => return (Outcome::Fail(None), vec![], format!("{}: {e}\n", exe.display()).into_bytes()),
@@ -133,16 +135,22 @@ fn run_one(exe: &Path, dir: &Path, name: &str, ignored: bool, o: &RunOpts, slow:
     // (the pipes on threads of their own: a test that writes much does not block on a full pipe)
     let mut po = child.stdout.take().unwrap();
     let mut pe = child.stderr.take().unwrap();
-    let to = std::thread::spawn(move || {
+    let (tx_o, rx_o) = mpsc::channel();
+    let (tx_e, rx_e) = mpsc::channel();
+    std::thread::spawn(move || {
         let mut v = vec![];
         let _ = po.read_to_end(&mut v);
-        v
+        let _ = tx_o.send(v);
     });
-    let te = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         let mut v = vec![];
         let _ = pe.read_to_end(&mut v);
-        v
+        let _ = tx_e.send(v);
     });
+    let pgid = child.id();
+    let kill_group = || {
+        let _ = Command::new("kill").args(["-KILL", "--", &format!("-{pgid}")]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    };
     let t0 = Instant::now();
     let mut said_slow = false;
     let outcome = loop {
@@ -153,6 +161,7 @@ fn run_one(exe: &Path, dir: &Path, name: &str, ignored: bool, o: &RunOpts, slow:
         }
         let e = t0.elapsed();
         if e >= o.timeout {
+            kill_group();
             let _ = child.kill();
             let _ = child.wait();
             break Outcome::Timeout;
@@ -163,7 +172,25 @@ fn run_one(exe: &Path, dir: &Path, name: &str, ignored: bool, o: &RunOpts, slow:
         }
         std::thread::sleep(Duration::from_millis(if e < Duration::from_millis(50) { 1 } else { 10 }));
     };
-    (outcome, to.join().unwrap_or_default(), te.join().unwrap_or_default())
+    // (the output: a process the test started and left running may hold the pipes open. Wait a second for them; then
+    //  stop the test's process group and wait one more; then go on without the rest of the output)
+    let mut left = false;
+    let mut take = |rx: &mpsc::Receiver<Vec<u8>>| -> Vec<u8> {
+        match rx.recv_timeout(Duration::from_secs(1)) {
+            Ok(v) => v,
+            Err(_) => {
+                left = true;
+                kill_group();
+                rx.recv_timeout(Duration::from_secs(1)).unwrap_or_default()
+            }
+        }
+    };
+    let out = take(&rx_o);
+    let mut err = take(&rx_e);
+    if left {
+        err.extend_from_slice(b"\n(zurgo: a process the test started kept its output open after it ended: stopped)\n");
+    }
+    (outcome, out, err)
 }
 
 /// What a run did: each test that ran, (label, name, passed), in the order they finished; and how many were skipped
@@ -238,6 +265,10 @@ pub fn run(exes: &[(String, PathBuf, PathBuf)], o: &RunOpts, times_path: &Path) 
                         slow_said.lock().unwrap().push(j);
                     };
                     let (outcome, stdout, stderr) = run_one(exe, dir, &job.name, job.ignored, o, &slow);
+                    // (fail-fast: no other test starts once one failed, before the result reaches the printer)
+                    if o.fail_fast && !matches!(outcome, Outcome::Pass) {
+                        stop.store(true, Ordering::Relaxed);
+                    }
                     if tx.send(Done { job: j, outcome, time: t0.elapsed(), stdout, stderr }).is_err() {
                         break;
                     }

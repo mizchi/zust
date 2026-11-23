@@ -1070,6 +1070,16 @@ fn add_crate_cfg(h: &mut KeyHasher, c: &CrateSpec) {
     h.add(&c.env);
 }
 
+/// `--test`'s crate: its source with the harness (crate::test_harness). A `#[test]` it cannot see (made by a
+/// `macro_rules!`) is not run: the build says so
+fn with_harness(src: &str, display: &str) -> String {
+    let (out, unlisted) = crate::test_harness::apply_noting(src);
+    if unlisted > 0 {
+        eprintln!("warning: {display}: {unlisted} `#[test]` function(s) made by a macro are not run yet (mizchi/zust#96)");
+    }
+    out
+}
+
 fn n_lines(s: &str) -> u32 {
     s.as_bytes().iter().filter(|&&c| c == b'\n').count() as u32
 }
@@ -1078,7 +1088,7 @@ impl Session2 {
     /// 1 つのクレート (複数のファイル) をビルドする: 根のファイルから `mod x;` を辿る
     pub fn build_path(&mut self, root: &std::path::Path, display: &str, output: &std::path::Path) -> R<Report2> {
         let (src, map) = crate::srcmap::load_crate(root, display, &self.opts.cfg_with(&self.opts.features))?;
-        let src = if self.opts.test { crate::test_harness::apply(&src) } else { src };
+        let src = if self.opts.test { with_harness(&src, display) } else { src };
         self.ctx = CrateCtx { map: map.clone(), ..Default::default() };
         // (1 ファイルなら場所は `行:桁:` のまま (呼ぶ側がファイル名を付ける))
         let r = self.build(&src, output).map_err(|e| if map.files.len() > 1 { self.ctx.map.relocate_err(&e) } else { e });
@@ -1321,7 +1331,7 @@ impl Session2 {
         for &i in &order {
             let c = &crates[i];
             let (text, map) = crate::srcmap::load_crate(c.root.as_path(), &c.display, &self.opts.cfg_of(&c.features, &c.cfgs, &c.env))?;
-            let text = if c.test { crate::test_harness::apply(&text) } else { text };
+            let text = if c.test { with_harness(&text, &c.display) } else { text };
             let text = if c.lib { format!("pub mod {} {{ {text}\n}}\n", c.name) } else { text };
             loaded[i] = Some((text, map));
         }

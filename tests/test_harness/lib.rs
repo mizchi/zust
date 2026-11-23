@@ -23,6 +23,19 @@ mod tests {
     fn slow() {}
     #[test]
     fn result() -> Result<(), String> { Err("bad".into()) }
+    // (the panic's message is what `expected` matches, not what the test printed before it)
+    #[test]
+    #[should_panic(expected = "wanted")]
+    fn printed_then_panicked() { eprintln!("wanted"); panic!("different"); }
+    #[test]
+    #[should_panic(expected = r"a\b")]
+    fn raw_expected() { panic!(r"x a\b y"); }
+    #[test]
+    #[should_panic(expected = "\u{41}B")]
+    fn escaped_expected() { panic!("xABy"); }
+    // (the crate's own `main`, which the harness renamed)
+    #[test]
+    fn calls_main() { main(); super::main(); }
     mod inner {
         #[test]
         fn deep() { println!("deep out"); }
