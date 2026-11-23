@@ -158,6 +158,9 @@ pub struct RgSt {
     pub last_call: Option<(u32, Ty, RT)>,
     /// The tree of the return type
     pub ret: Option<RT>,
+    /// `&a` expressions (their addresses) lowered as a deref coercion, with the derefs past a's: the pointer `a: &T`
+    /// holds (`*a: &T` of `a: &&T` ..), where a `&T` is expected. Their tree is a's, less those derefs' regions
+    pub coerced: Vec<(usize, usize)>,
     /// The function's own lifetime parameters (in `RSigSyn::lts` order)
     pub lts: Vec<u32>,
     pub lt_names: Vec<String>,
@@ -1928,6 +1931,19 @@ impl Cx<'_> {
                 let mut out = vec![STATIC];
                 out.extend(tr);
                 Some((Ty::Ref(false, crate::types::intern(t)), out))
+            }
+            Expr::Ref(_, x) if self.rg.coerced.iter().any(|c| c.0 == e as *const Expr as usize) => {
+                let n = self.rg.coerced.iter().find(|c| c.0 == e as *const Expr as usize).map_or(0, |c| c.1);
+                let (mut t, mut tr) = self.rt_expr(x)?;
+                for _ in 0..n {
+                    let Ty::Ref(_, i) = t else { return None };
+                    if tr.is_empty() {
+                        return None;
+                    }
+                    tr.remove(0);
+                    t = *i;
+                }
+                Some((t, tr))
             }
             Expr::Ref(m, x) => {
                 let (t, tr, derefs) = self.rt_place(x)?;

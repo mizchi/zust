@@ -2814,3 +2814,20 @@ fn part16_discarded_block_values() {
     assert!(lines == vec![14, 21] && d.iter().all(|x| x.1.contains("does not live long enough")), "{d:?}");
     assert_eq!(check(&format!("{pre}struct P<'a>(&'a u8);\nfn main() {{\n    let k = D(0);\n    {{\n        let t1 = D(1);\n        D(\"o\").next(&k)\n    }};\n    {{\n        let t2 = 3u8;\n        P(&t2)\n    }};\n    {{\n        let t3 = D(3);\n        D(\"o\").next(5)\n    }};\n}}\n")), vec![]);
 }
+
+/// `&a` of a reference `a: &T` (or `&&T`) where a `&T` is expected is a deref coercion: the pointer a holds, a reborrow
+/// of `*a`, not a borrow of the local a. As a result (`fn f(a: &i32) -> &i32 { &a }`, also in an `if`'s branches) it
+/// was a type mismatch, and through a `let` or an argument (`g(&a)`) a false E0515. What a holds is still followed:
+/// `let a = &x; let b = &a; &b` returned is E0515 of x
+#[test]
+fn part16_deref_coercion() {
+    assert_eq!(check("fn f1(a: &i32) -> &i32 {\n    &a\n}\nfn f2<'x>(a: &'x i32, b: &'x i32) -> &'x i32 {\n    if *a < *b { &a } else { &b }\n}\nfn f3(a: &i32) -> &i32 {\n    let r: &i32 = &a;\n    r\n}\nfn g(x: &i32) -> &i32 {\n    x\n}\nfn f4(a: &i32) -> &i32 {\n    g(&a)\n}\nfn f5<'x>(a: &'x i32) -> &'x i32 {\n    let b = &a;\n    &b\n}\nfn h(x: &mut i32) {\n    *x += 1;\n}\nfn f6(mut a: &mut i32) {\n    h(&mut a);\n}\nfn main() {\n    let (x, y) = (1, 2);\n    let mut z = 3;\n    println!(\"{} {} {} {} {}\", f1(&x), f2(&x, &y), f3(&x), f4(&x), f5(&x));\n    f6(&mut z);\n}\n"), vec![]);
+    // (`&mut a` borrows a mutably: E0596 when a is not `mut` (did_you_mean/issue-37139.rs), and what it reborrows
+    // through it cannot be returned)
+    let d = check("fn h(x: &mut i32) {\n    *x += 1;\n}\nfn main() {\n    let mut v = 1;\n    let ref mut x = v;\n    h(&mut x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("not declared as mutable"), "{d:?}");
+    let d = check("fn f() -> &'static i32 {\n    let x = 1;\n    let a = &x;\n    let b = &a;\n    &b\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("`x`"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = 1;\n    let mut a = &mut x;\n    let r: &mut i32 = &mut a;\n    let s = &x;\n    *r = 2;\n    println!(\"{}\", s);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+}

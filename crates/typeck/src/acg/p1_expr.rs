@@ -1894,6 +1894,51 @@ impl Cx<'_> {
             let pl = self.place(rexpr);
             self.bk.place_mut = pm;
             let pl = pl?;
+            // (`&a` of a reference `a: &T` (or `&&T` ..) where a `&T` is expected (a deref coercion, also as a result): the
+            // pointer a holds, a reborrow of `*a` (`**a` ..), not a borrow of the local a)
+            if let (Some(Ty::Ref(_, want)), Ty::Ref(..)) = (expected, pl.ty()) {
+                // (the derefs to a `&T` (`&mut T` when one is taken), as far as a few)
+                let (mut t, mut n, mut muts) = (pl.ty(), 0usize, true);
+                while let Ty::Ref(rm, i) = t {
+                    muts &= rm;
+                    if *i == *want || n > 4 {
+                        break;
+                    }
+                    t = *i;
+                    n += 1;
+                }
+                let thin = !matches!(want, Ty::Str | Ty::Slice(_) | Ty::Dyn(_));
+                if matches!(t, Ty::Ref(_, i) if *i == *want) && thin && (muts || !m) && matches!(pl, Place::Mem(..) | Place::Var(..)) {
+                    let sp = crate::parse::Span { start: expr_start(rexpr), at: expr_start(rexpr) };
+                    let mut star: &Expr = rexpr;
+                    for _ in 0..=n {
+                        star = self.keep_expr(Expr::Unary("*".into(), Box::new(star.clone()), sp));
+                    }
+                    // (`&mut a` is a mutable borrow of the local a, which needs it `mut` (E0596 of `test(&mut x)` with
+                    // `ref mut x`), and what it reborrows through it lives no longer than that borrow: as before)
+                    if m {
+                        self.bk_borrow(rexpr, true, err_pos(rexpr));
+                    } else {
+                        let n0 = self.bk.loans.len();
+                        self.bk_borrow(star, m, err_pos(rexpr));
+                        if self.bk.loans.len() > n0 {
+                            self.bk.loan_of.insert(&**rexpr as *const Expr as usize, n0 as u32);
+                        }
+                    }
+                    let mut v = match pl {
+                        Place::Mem(a, o, _) => self.b.ins().load(PTR, mf(), a, o),
+                        Place::Var(v, _) => self.b.use_var(v),
+                        _ => unreachable!(),
+                    };
+                    for _ in 0..n {
+                        v = self.b.ins().load(PTR, mf(), v, 0);
+                    }
+                    if !m && (self.rg_on() || self.rg.eligible) {
+                        self.rg.coerced.push((e as *const Expr as usize, n));
+                    }
+                    return Ok((Some(v), Ty::Ref(m, want)));
+                }
+            }
             // (`&mut x as *mut _` / coerced to a raw pointer: not a loan)
             if !matches!(expected, Some(Ty::Ptr(..))) {
                 self.bk_borrow(rexpr, m, err_pos(rexpr));
