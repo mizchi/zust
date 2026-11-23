@@ -837,7 +837,9 @@ impl Cx<'_> {
         // (an impl's const: `Self` in it is the impl's type, `const ALIGN: usize = Self::BYTES - 1;` of `S::ALIGN` /
         // `v128 as Vector::ALIGN`)
         let saved = (self.self_sid, self.env.self_ty);
-        if src.contains("Self") {
+        let word = |c: char| c.is_alphanumeric() || c == '_';
+        let mentions_self = src.match_indices("Self").any(|(i, _)| !src[..i].ends_with(word) && !src[i + 4..].starts_with(word));
+        if mentions_self {
             let base = c.name.rsplit_once("::").map(|(a, _)| a.split(" as ").next().unwrap_or(a));
             let st = base.and_then(|b| match prog.struct_index.get(b) {
                 Some(&sid) => Some(Ty::Struct(sid)),

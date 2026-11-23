@@ -1,6 +1,6 @@
 // An impl of a trait for `v128` (memchr's `impl Vector for v128`): its consts through `Self`, its methods called
 // through a type parameter and on a temporary vector whose method name another trait has too (`and`), `p.cast()`
-// into an intrinsic's pointer, and an associated type's method as a value (`V::Mask::first_offset`)
+// into an intrinsic's pointer, and an associated type's method as a value (`V::Mask::first_offset`), and a `&self` method of a temporary vector
 use core::arch::wasm32::*;
 
 trait MoveMask: Copy {
@@ -33,6 +33,7 @@ trait Vector: Copy {
     unsafe fn cmpeq(self, o: Self) -> Self;
     unsafe fn and(self, o: Self) -> Self;
     unsafe fn movemask(self) -> Self::Mask;
+    fn lanes(&self) -> usize;
 }
 
 impl Vector for v128 {
@@ -54,6 +55,9 @@ impl Vector for v128 {
     unsafe fn movemask(self) -> SensibleMoveMask {
         SensibleMoveMask(u8x16_bitmask(self) as u32)
     }
+    fn lanes(&self) -> usize {
+        u8x16_bitmask(*self).count_ones() as usize
+    }
 }
 
 struct Pair<V> {
@@ -66,8 +70,8 @@ impl<V: Vector> Pair<V> {
         let topos = V::Mask::first_offset;
         let start = h.as_ptr();
         let mut cur = start;
-        let end = start.add(h.len() - 1);
-        while cur.add(V::BYTES) <= end {
+        // (both loads fit: the pointers past them are never formed)
+        while cur.offset_from(start) as usize + V::BYTES + 1 <= h.len() {
             let c1 = V::load_unaligned(cur);
             let c2 = V::load_unaligned(cur.add(1));
             let offsets = c1.cmpeq(self.v1).and(c2.cmpeq(self.v2)).movemask().and(mask);
@@ -88,5 +92,8 @@ fn main() {
         println!("{:?}", p.find(h, SensibleMoveMask(!0)));
         println!("{:?}", p.find(&h[20..], SensibleMoveMask(!0)));
         println!("{:?}", p.find(b"no match in this haystack at all!", SensibleMoveMask(!0)));
+        // (a `&self` method of a temporary vector whose type inference left open: `and` is two traits')
+        let a = u8x16_splat(0xff);
+        println!("{}", a.and(u8x16_replace_lane::<3>(u8x16_splat(0), 0xff)).lanes());
     }
 }

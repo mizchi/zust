@@ -644,7 +644,10 @@ impl Cx<'_> {
             // (`p.offset_from(q)`: the distance in elements, `(p - q) / size_of::<T>()`)
             "offset_from" => {
                 let (q, qt) = self.expr(args[0], Some(pt))?;
-                self.same(SP, qt, pt)?;
+                // (`*const T` for both receivers: a `*mut T` of the same pointee too)
+                if !matches!(qt, Ty::Ptr(_, i) if *i == elem) {
+                    self.same(SP, qt, pt)?;
+                }
                 let d = self.b.ins().isub(p, q.unwrap());
                 let (size, _) = self.prog.size_align(elem);
                 let d = if size > 1 {

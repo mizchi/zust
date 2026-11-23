@@ -1318,6 +1318,19 @@ impl Inf<'_> {
             Expr::Index(base, ix, _) => self.index(base, ix),
             Expr::For(_, p, it, body) => self.for_loop(p, it, body),
             Expr::Block(_, _, b) => self.block(b),
+            // (`T::BYTES` with T a type parameter: the type the impls' `BYTES` all have, `cur.add(2 * V::BYTES)`)
+            Expr::Path(None, p)
+                if p.segs.len() == 2 && (self.env.params.iter().any(|(g, _)| *g == p.segs[0].name) || p.segs[0].name == "Self") && self.prog.const_by_last.contains_key(&p.segs[1].name)
+                    && self.variant_by(p).is_none() =>
+            {
+                let cs = &self.prog.const_by_last[&p.segs[1].name];
+                let t = self.prog.consts[cs[0] as usize].ty;
+                if t.is_int() && cs.iter().all(|&c| self.prog.consts[c as usize].ty == t) {
+                    self.known(t)
+                } else {
+                    self.var()
+                }
+            }
             Expr::Path(None, p)
                 if p.segs.len() >= 2
                     || (p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_none() && self.variant_by(p).is_some()) =>
@@ -1375,18 +1388,6 @@ impl Inf<'_> {
                 let ci = self.prog.const_index[ident(p).unwrap()];
                 let t = self.prog.consts[ci as usize].ty;
                 self.known(t)
-            }
-            // (`T::BYTES` with T a type parameter: the type the impls' `BYTES` all have, `cur.add(2 * V::BYTES)`)
-            Expr::Path(None, p)
-                if p.segs.len() == 2 && (self.env.params.iter().any(|(g, _)| *g == p.segs[0].name) || p.segs[0].name == "Self") && self.prog.const_by_last.contains_key(&p.segs[1].name) =>
-            {
-                let cs = &self.prog.const_by_last[&p.segs[1].name];
-                let t = self.prog.consts[cs[0] as usize].ty;
-                if t.is_int() && cs.iter().all(|&c| self.prog.consts[c as usize].ty == t) {
-                    self.known(t)
-                } else {
-                    self.var()
-                }
             }
             Expr::Path(None, p) => match ident(p).and_then(|id| self.lookup(id)) {
                 Some(v) => v,
@@ -2514,12 +2515,8 @@ impl Inf<'_> {
                     }
                 },
                 "is_null" => self.known(Ty::Bool),
-                "offset_from" => {
-                    for a in avs {
-                        self.unify(a, r);
-                    }
-                    self.known(Ty::Isize)
-                }
+                // (the argument may be a `*mut` of a `*const` receiver, or the other way: not unified with it)
+                "offset_from" => self.known(Ty::Isize),
                 "read" | "read_volatile" | "read_unaligned" => self.known(*e),
                 _ => self.known(Ty::Unit),
             };

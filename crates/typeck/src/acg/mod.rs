@@ -1877,8 +1877,9 @@ impl Cx<'_> {
 
     /// `&&T` (`&&&T` ..) を `&T` の場所に渡すときの deref の強制変換
     pub fn deref_coerce(&mut self, mut v: Option<Value>, mut t: Ty, want: Ty) -> (Option<Value>, Ty) {
-        while let (Ty::Ref(..), Ty::Ref(_, inner @ Ty::Ref(..)), Some(val)) = (want, t, v) {
-            if t == want || t.is_fat() {
+        while let (Ty::Ref(wm, _), Ty::Ref(om, inner @ Ty::Ref(..)), Some(val)) = (want, t, v) {
+            // (a `&mut` is not reached through a shared reference: `&&mut u8` is no `&mut u8`)
+            if t == want || t.is_fat() || (wm && !om) {
                 break;
             }
             // (`&&str` の値は `&str` (fat) の置き場所のアドレスで、`&str` の表現と同じ: 読まない)

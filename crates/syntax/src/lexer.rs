@@ -2044,6 +2044,33 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             k = b;
         }
     }
+    // (whether token k is directly in an impl / trait body: its innermost `{` opens one, `impl .. {` / `trait .. {`)
+    let assoc_body: Vec<bool> = {
+        let mut out = vec![false; toks.len()];
+        let mut stack: Vec<bool> = vec![];
+        for k in 0..toks.len() {
+            if is_sym(k, b'{') {
+                // (the item's head: back to the last `;` / `{` / `}`)
+                let mut j = k;
+                let (mut assoc, mut is_fn) = (false, false);
+                while j > 0 {
+                    j -= 1;
+                    if is_sym(j, b';') || is_sym(j, b'{') || is_sym(j, b'}') {
+                        break;
+                    }
+                    // (`fn f() -> impl Iterator {` is a fn's body, not an impl's)
+                    is_fn |= is_id(j, b"fn");
+                    assoc |= is_id(j, b"impl") || is_id(j, b"trait");
+                }
+                stack.push(assoc && !is_fn);
+            } else if is_sym(k, b'}') {
+                stack.pop();
+            } else {
+                out[k] = stack.last().copied().unwrap_or(false);
+            }
+        }
+        out
+    };
     let mut repl: Vec<(usize, usize, Vec<u8>)> = vec![]; // (開始トークン, 終了トークン (含む), 新しいテキスト)
     // (the items each scope defines, for the glob imports they shadow: built only when there is a glob)
     let own_defs: LSet<(usize, &[u8])> =
@@ -2058,8 +2085,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let prev_path = k >= 2 && is_sym(k - 1, b':') && is_sym(k - 2, b':');
         // (impl / trait の中の関連型の定義 `type Buffer = ..;` は、同じ名前のトップレベルの型があっても変えない)
         let assoc_def = k >= 1 && is_id(k - 1, b"type") && !def_tok[k];
-        // (nor a method's `fn find(&self ..)` in an impl / trait beside a module's `fn find`: only the item is renamed)
-        let method_def = k >= 1 && is_id(k - 1, b"fn") && !def_tok[k];
+        // (nor a method's `fn find(&self ..)` in an impl / trait beside a module's `fn find`: only the item is renamed.
+        // A fn nested in a body is renamed with its calls, as before)
+        let method_def = k >= 1 && is_id(k - 1, b"fn") && !def_tok[k] && assoc_body[k];
         if prev_dot || prev_path || assoc_def || method_def {
             k += 1;
             continue;

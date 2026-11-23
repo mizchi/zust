@@ -1057,9 +1057,18 @@ impl Cx<'_> {
                     if group.iter().all(|&i| self.prog.sigs[i as usize].is_unsafe) {
                         self.check_unsafe_call(id, msp.start)?;
                     }
+                    // (`&self` / `&mut self`: the vector through a slot, as prim_trait_method passes it)
+                    let (recv_v, recv_ty) = match self.prog.sigs[id as usize].params.first() {
+                        Some(Ty::Ref(m, _)) => {
+                            let a = self.temp(t);
+                            self.b.ins().store(mf(), v, a, 0);
+                            (a, Ty::Ref(*m, intern(t)))
+                        }
+                        _ => (v, t),
+                    };
                     let args: Vec<&Expr> = margs.iter().collect();
                     let tf: Option<&[GArg]> = (!gargs.is_empty()).then_some(&gargs[..]);
-                    return self.call_fn(id, Some((v, t)), &args, tf, expected, SP);
+                    return self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
                 }
                 (_, t) => {
                     return err(SP, format!("no method `{}` on type `{}`", method, self.prog.tn(t)));
@@ -2301,7 +2310,13 @@ impl Cx<'_> {
         let id = self.pick_overload(id, recv.map(|r| r.1), args);
         // (E0133 was checked on the fn found before the overload was chosen: an `unsafe fn` chosen in its place, by
         // the traits in scope, needs the same check)
-        if id != id0 && self.prog.sigs[id as usize].is_unsafe && !self.prog.sigs[id0 as usize].is_unsafe && self.unsafe_ok == 0 && self.user_code {
+        // (also when the group mixes safe and unsafe methods (a vector's `m` of two traits): the check before the choice
+        // is left to here, on the one chosen, even when it is the first)
+        let mixed = || {
+            let g = self.prog.overloads.get(&self.prog.names[id0 as usize]);
+            g.is_some_and(|g| g.iter().any(|&i| self.prog.sigs[i as usize].is_unsafe) && g.iter().any(|&i| !self.prog.sigs[i as usize].is_unsafe))
+        };
+        if self.prog.sigs[id as usize].is_unsafe && ((id != id0 && !self.prog.sigs[id0 as usize].is_unsafe) || mixed()) && self.unsafe_ok == 0 && self.user_code {
             let n = self.prog.names[id as usize].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
             return err(span, format!("call to unsafe function `{n}` is unsafe and requires unsafe block (E0133)"));
         }

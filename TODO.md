@@ -177,8 +177,6 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 - `!FLAG` with `const FLAG: bool` (and `!{ true }`) is folded as an integer complement: `(!FLAG) as u8` is 254, not 0.
   `is_bool_expr` sees only literals, comparisons and `&&`/`||`; the bool type should be carried through constants and
   blocks.
-- A vector type's overload group with an `unsafe fn m` and a safe `fn m` (two traits): when the unsafe one stays
-  selected, no E0133 is reported. Check the id `pick_overload` returns, after selection.
 - Serialized const arguments drop a local's type annotation (`{ let x: u8 = !0; ... }` in `Buf<{ .. }>`), and a const
   fn's return type through an alias (`type Id<T> = T; const fn f() -> Id<u8>`) is not applied.
 
