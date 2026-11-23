@@ -385,6 +385,9 @@ pub struct Program {
     pub ambiguous_methods: FxMap<String, Vec<Ty>>,
     /// the program's traits with a blanket impl without bounds (`impl<T> A for T {}`): every type implements them
     pub unbounded_blankets: FxSet<String>,
+    /// the names the program's `use` declarations write (fn bodies' too): a value of one is imported, not undeclared,
+    /// though zustc may not have it (`use std::convert::identity;`)
+    pub use_names: FxSet<String>,
     /// a constant with a lowercase name exists (`const or: usize`): an identifier pattern of any case may name one;
     /// without, only an uppercase one is looked up
     pub lower_consts: bool,
@@ -1015,6 +1018,7 @@ impl Program {
             multi_trait_methods: FxSet::default(),
             ambiguous_methods: FxMap::default(),
             unbounded_blankets: FxSet::default(),
+            use_names: FxSet::default(),
             impl_selfs: FxMap::default(),
             user_traits: FxSet::default(),
             lower_consts: false,
