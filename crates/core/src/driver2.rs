@@ -1998,20 +1998,33 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
         d > 0
     };
     // (the `let`s of the fn written at `a` that are in scope at `b`: those before it in the blocks still open there, not
-    // a sibling block's, `{ let drop = 1u8; }` beside `fn inner() { drop(0u8); }`. None when the text is not read)
+    // a sibling block's, `{ let drop = 1u8; }` beside `fn inner() { drop(0u8); }`. A `let`'s names start after its `;`,
+    // not in its initializer; an `if let` / `while let`'s in its body only. None when the text is not read)
     let scoped_lets = |a: usize, b: usize| -> Option<Vec<String>> {
         let seg = orig.as_bytes().get(a..b)?;
         let t = crate::lexer::tokenize(seg);
         let w = |q: usize| if q < t.len() && t[q].0 == 0 { std::str::from_utf8(&seg[t[q].1..t[q].2]).unwrap_or("") } else { "" };
         let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && seg[t[q].1] == c;
         let mut open: Vec<Vec<String>> = vec![];
+        // (a `let`'s names until its `;`, and an `if let`'s until its body opens: with the depth they were written at)
+        let mut pending: Vec<(usize, Vec<String>)> = vec![];
+        let mut cond: Option<(usize, Vec<String>)> = None;
         let mut q = 0;
         while q < t.len() {
             if sym(q, b'{') {
-                open.push(vec![]);
+                let body = cond.take_if(|(d, _)| *d == open.len());
+                open.push(body.map(|(_, ns)| ns).unwrap_or_default());
             } else if sym(q, b'}') {
                 open.pop()?;
+                pending.retain(|(d, _)| *d <= open.len());
+            } else if sym(q, b';') {
+                let depth = open.len();
+                for (_, ns) in pending.extract_if(.., |(d, _)| *d == depth) {
+                    open.last_mut()?.extend(ns);
+                }
             } else if w(q) == "let" && !open.is_empty() {
+                let conditional = q > 0 && (w(q - 1) == "if" || w(q - 1) == "while" || sym(q - 1, b'&'));
+                let mut names = vec![];
                 // (its pattern's names, to the `=`, `;` or type at the pattern's own level)
                 let mut d = 0i32;
                 q += 1;
@@ -2028,10 +2041,15 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
                         let n = w(q);
                         let binds = n.starts_with(|c: char| c.is_lowercase() || c == '_') && !matches!(n, "mut" | "ref" | "box" | "_");
                         if binds && !sym(q + 1, b'(') && !sym(q + 1, b'{') && !(sym(q + 1, b':') && d > 0) {
-                            open.last_mut()?.push(n.to_string());
+                            names.push(n.to_string());
                         }
                     }
                     q += 1;
+                }
+                if conditional {
+                    cond = Some((open.len(), names));
+                } else {
+                    pending.push((open.len(), names));
                 }
                 continue;
             }
@@ -2669,7 +2687,9 @@ fn subst_idents(s: &str, params: &[&str], args: &[&str]) -> String {
             let j = i + b[i..].iter().position(|c| !(c.is_ascii_alphanumeric() || *c == b'_')).unwrap_or(b.len() - i);
             let word = &s[i..j];
             let lifetime = i > 0 && b[i - 1] == b'\'';
-            match params.iter().position(|p| *p == word).and_then(|k| args.get(k)).filter(|_| !lifetime) {
+            // (a segment after `::` names an associated item, `<u8 as Id>::T`, not a parameter)
+            let path_segment = i >= 2 && &b[i - 2..i] == b"::";
+            match params.iter().position(|p| *p == word).and_then(|k| args.get(k)).filter(|_| !lifetime && !path_segment) {
                 Some(a) => out.push_str(a),
                 None => out.push_str(word),
             }

@@ -968,3 +968,24 @@ fn review100_third_round() {
     let src = "trait Base<T, U = T> { type A; type B; }\ntrait Mid: Base<u8, A = u8> {}\ntrait Root: Base<u8, u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
     assert_eq!(first(src), at(4, 14, &item("type `B` in `Base<u8>`")), "default_of_an_earlier_parameter_shown");
 }
+
+#[test]
+fn review100_fourth_round() {
+    // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    let cap = "can't capture dynamic environment in a fn item (E0434)";
+    // (E0434: an `if let`'s names are in its body only; a `let`'s start after its `;`, not in its initializer)
+    let src = "fn outer() {\n    if let Some(drop) = Some(1u8) {\n        let _ = drop;\n    }\n    fn inner() { drop(0u8); }\n    inner();\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), None, "if_let_ends_with_its_body");
+    let src = "fn outer() {\n    if let Some(y) = Some(1u8) {\n        fn inner() -> u8 { y }\n        let _ = (y, inner());\n    }\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), at(3, 28, cap), "if_let_in_its_body");
+    let src = "fn outer() {\n    let drop = {\n        fn inner() { drop(0u8); }\n        inner();\n        1u8\n    };\n    let _ = drop;\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), None, "let_not_in_its_initializer");
+    let src = "fn outer() {\n    let Some(z) = Some(1u8) else { return };\n    fn inner() -> u8 { z }\n    let _ = (z, inner());\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), at(3, 24, cap), "let_else_after_its_semicolon");
+    // (E0191: an associated type's segment in a default is not a parameter)
+    let src = "trait Id { type T; }\nimpl Id for u8 { type T = u8; }\ntrait Base<T, U = <u8 as Id>::T> { type A; type B; }\ntrait Mid: Base<u8, A = u8> {}\ntrait Root: Base<u8, <u8 as Id>::T, B = u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "associated_segment_in_a_default");
+}
