@@ -783,7 +783,8 @@ impl Cx<'_> {
         self.loop_bounds.truncate(nb);
         self.pop_scope();
         if bt != Ty::Never {
-            self.same(SP, bt, Ty::Unit)?;
+            // (a body with a value: at its tail, as rustc points)
+            self.same(block_end_pos(fbody), bt, Ty::Unit)?;
             self.b.ins().jump(step, &[]);
         } else {
             self.b.ins().trap(TrapCode::unwrap_user(1));

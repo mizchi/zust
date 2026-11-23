@@ -1203,7 +1203,8 @@ impl Cx<'_> {
                 let (_, bt) = self.block(wbody, Some(Ty::Unit))?;
                 self.loops.pop();
                 if bt != Ty::Never {
-                    self.same(SP, bt, Ty::Unit)?;
+                    // (a body with a value: at its tail, as rustc points)
+                    self.same(block_end_pos(wbody), bt, Ty::Unit)?;
                     self.drop_for_exit(usize::MAX, t0);
                     self.b.ins().jump(header, &[]);
                 } else {
@@ -1234,7 +1235,8 @@ impl Cx<'_> {
                 let (_, bt) = self.block(lbody, Some(Ty::Unit))?;
                 let lp = self.loops.pop().unwrap();
                 if bt != Ty::Never {
-                    self.same(SP, bt, Ty::Unit)?;
+                    // (a body with a value: at its tail, as rustc points)
+                    self.same(block_end_pos(lbody), bt, Ty::Unit)?;
                     self.drop_for_exit(usize::MAX, lp.temps);
                     self.b.ins().jump(body, &[]);
                 } else {

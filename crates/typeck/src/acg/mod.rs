@@ -793,6 +793,26 @@ pub fn err_pos(e: &Expr) -> Sp {
     }
 }
 
+/// Where rustc points when a branch's value does not have the type of the branches before it (`if`/`else`, `match`
+/// arms): a block's tail, the last statement of a block without one (whose `;` made the block `()`), or the
+/// expression itself. SP when that has no position (an empty block): the caller's own position then
+pub fn branch_pos(e: &Expr) -> Sp {
+    match e {
+        Expr::Block(_, _, b) => block_end_pos(b),
+        e => expr_start(e),
+    }
+}
+
+/// [`branch_pos`] of a block
+pub fn block_end_pos(b: &crate::parse::Block) -> Sp {
+    match b.stmts.last() {
+        Some(Stmt::Expr(e, false)) => branch_pos(e),
+        Some(Stmt::Expr(e, true)) => expr_start(e),
+        Some(Stmt::Let(.., p)) => *p,
+        _ => SP,
+    }
+}
+
 /// 式の先頭のソース上の位置 (syn の `e.span()` の始まり)。位置を持つ式か、その一番左の子から。分からなければ SP
 pub fn expr_start(e: &Expr) -> Sp {
     match e {

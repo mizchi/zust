@@ -2363,6 +2363,7 @@ impl Parser {
                     base = Some(Box::new(self.expr(true)?));
                     break;
                 }
+                let at = self.pos();
                 let n = match self.tok(0) {
                     Some(t) if t.kind == TokKind::Lit => {
                         let s = t.text.clone();
@@ -2374,7 +2375,8 @@ impl Parser {
                 if self.eat_punct(":") {
                     fs.push((n, self.expr(true)?));
                 } else {
-                    let e = Expr::Path(None, Path { global: false, segs: vec![Seg { name: n.clone(), args: Vec::new(), fn_args: None, text: String::new() }], pos: Default::default() });
+                    // (shorthand `S { t }`: the local `t`, at the field's name)
+                    let e = Expr::Path(None, Path { global: false, segs: vec![Seg { name: n.clone(), args: Vec::new(), fn_args: None, text: String::new() }], pos: at });
                     fs.push((n, e));
                 }
                 if !self.eat_punct(",") {
