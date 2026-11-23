@@ -2026,11 +2026,16 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
             }
             let mut sup = vec![];
+            // (`trait Num: Copy`: the marker supertraits a bound of the trait gives, Copy and Clone)
+            let mut msup = vec![];
             for b in supers {
                 if let Bound::Trait(false, p) = b {
                     if let Some(s) = p.segs.last() {
                         if !matches!(s.name.as_str(), "Sized" | "Send" | "Sync" | "Copy" | "Clone" | "Unpin" | "Any" | "Debug" | "Display") {
                             sup.push(s.name.clone());
+                        }
+                        if matches!(s.name.as_str(), "Copy" | "Clone") {
+                            msup.push(s.name.clone());
                         }
                         // (`trait Dup: Clone`: a marker no trait has the name of, so that a `T: Dup` is not taken
                         // for a type that is surely not Clone (Program::surely_not_clone))
@@ -2058,6 +2063,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             collect_generics(g, &mut sm.trait_generics)?;
             if !sup.is_empty() {
                 sm.trait_generics.push(("#supers".to_string(), sup));
+            }
+            if !msup.is_empty() {
+                sm.trait_generics.push(("#marker_supers".to_string(), msup));
             }
             if !self_outlives.is_empty() {
                 sm.trait_generics.push((crate::types::SELF_OUTLIVES.to_string(), self_outlives));

@@ -112,6 +112,10 @@ pub fn placeholder_mismatch(e: &str, bound_eqs: &[&str], free: &[String]) -> boo
             None => true,
         };
     }
+    // (`[x; 3]` of a free parameter without Copy among its bounds: holds whatever it is)
+    if let Some(n) = e.split("the trait bound `").nth(1).and_then(|r| r.strip_suffix(": Copy` is not satisfied (E0277)")) {
+        return n.strip_suffix('#').is_some_and(|n| free.iter().any(|f| f == n));
+    }
     let Some(m) = e.find("mismatched types: expected `") else { return false };
     let tys: Vec<&str> = e[m..].split('`').skip(1).step_by(2).take(2).collect();
     // (the placeholders named: `T#`)
@@ -607,7 +611,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         return Ok((Compiled { rec: b.m, late: vec![], datas: vec![], vtables: vec![], infos: vec![], loc_used: false, line_base }, vec![]));
     }
     // (a placeholder's type by its parameter's name: `T`, not `T#`)
-    let r = if placeholder { r.map_err(|e| e.replace("#`", "`").replace("#>", ">").replace("#,", ",")) } else { r };
+    let r = if placeholder { r.map_err(|e| e.replace("#`", "`").replace("#>", ">").replace("#,", ",").replace("#:", ":")) } else { r };
     r?;
     cx.bk_check()?;
     let rerun = cx.rg.rerun && !force_rg;

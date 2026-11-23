@@ -450,6 +450,8 @@ pub struct Program {
     pub fnptr_impls: HashSet<(Option<Ty>, String)>,
     /// 親トレイト (`trait Bar: Foo`)
     pub trait_supers: FxMap<String, Vec<String>>,
+    /// trait → its supertraits Copy / Clone (`trait Num: Copy`), which trait_supers leaves out
+    pub trait_marker_supers: FxMap<String, Vec<String>>,
     /// What a trait's `Self` must outlive (`trait Tr<'a>: 'a`): "static", or the index of the trait's lifetime parameter
     pub trait_self_outlives: FxMap<String, Vec<String>>,
     /// The program (not the prelude) has a static not declared `mut`: an assignment is checked against it
@@ -957,6 +959,7 @@ impl Program {
             prelude_from: u32::MAX,
             overflow_checks: false,
             trait_supers: FxMap::default(),
+            trait_marker_supers: FxMap::default(),
             trait_self_outlives: FxMap::default(),
             any_immutable_static: false,
             static_copy: FxSet::default(),
@@ -1602,6 +1605,9 @@ impl Program {
                 }
                 if let Some((_, sup)) = sm.trait_generics.iter().find(|g| g.0 == "#supers") {
                     p.trait_supers.insert(tr.clone(), sup.clone());
+                }
+                if let Some((_, ms)) = sm.trait_generics.iter().find(|g| g.0 == "#marker_supers") {
+                    p.trait_marker_supers.insert(tr.clone(), ms.clone());
                 }
                 if let Some((_, so)) = sm.trait_generics.iter().find(|g| g.0 == crate::types::SELF_OUTLIVES) {
                     p.trait_self_outlives.insert(tr.clone(), so.clone());
@@ -3702,17 +3708,26 @@ impl Program {
     /// A bound b makes its type Clone: `Clone`, `Copy`, a trait with one of them among its supertraits, or a trait zustc
     /// does not know (which may have)
     fn implies_clone(&self, b: &str, depth: u32) -> bool {
+        self.bound_implies(b, &["Clone", "Copy"], true, depth)
+    }
+
+    /// A bound b gives one of the traits `want`: itself, or through its supertraits. A trait zustc does not know (a
+    /// std one's, `Fn(u8)`) gives them when `unknown` says so: as the caller's safe side is
+    pub fn bound_implies(&self, b: &str, want: &[&str], unknown: bool, depth: u32) -> bool {
         let tr = b.split('<').next().unwrap_or(b).trim();
         let tr = tr.rsplit("::").next().unwrap_or(tr);
-        if matches!(tr, "Clone" | "Copy") || depth > 8 {
+        if want.contains(&tr) || depth > 8 {
             return true;
         }
-        if matches!(tr, "Sized" | "?Sized" | "Send" | "Sync" | "Unpin" | "Debug" | "Display" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash") {
+        if matches!(tr, "Sized" | "?Sized" | "Send" | "Sync" | "Unpin" | "Debug" | "Display" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Clone") {
             return false;
         }
+        if self.trait_marker_supers.get(tr).is_some_and(|ms| ms.iter().any(|m| want.contains(&m.as_str()) || (m == "Copy" && want.contains(&"Clone")))) {
+            return true;
+        }
         match self.trait_supers.get(tr) {
-            Some(ss) => ss.iter().any(|s| self.implies_clone(s, depth + 1)),
-            None => !self.traits.contains_key(tr),
+            Some(ss) => ss.iter().any(|s| self.bound_implies(s, want, unknown, depth + 1)),
+            None => unknown && !self.traits.contains_key(tr),
         }
     }
 
