@@ -1674,7 +1674,19 @@ impl Cx<'_> {
     /// 受け手の struct の型引数で impl のメソッド (`Rc::<T>::deref`) を値の引数で呼ぶ
     pub(crate) fn call_fn_vals(&mut self, id: u32, args: &[(Value, Ty)], span: Sp) -> R<V> {
         let targs = match args.first().map(|a| self.strip_refs(a.1)) {
-            Some(Ty::Struct(sid)) if !self.prog.sigs[id as usize].generics.is_empty() => self.prog.structs[sid as usize].args.clone(),
+            Some(t @ Ty::Struct(sid)) if !self.prog.sigs[id as usize].generics.is_empty() => {
+                // (the impl's parameters from its self type matched against the receiver's: `impl<T, H> Deref for
+                // W<H, T>` lists them in another order than W's arguments)
+                let sig = &self.prog.sigs[id as usize];
+                let mut sol = vec![None; sig.generics.len()];
+                match sig.self_ty {
+                    Some(st) if self.prog.match_ty(st, t, &mut sol) => match sol.iter().copied().collect::<Option<Vec<Ty>>>() {
+                        Some(v) => v,
+                        None => self.prog.structs[sid as usize].args.clone(),
+                    },
+                    _ => self.prog.structs[sid as usize].args.clone(),
+                }
+            }
             _ => vec![],
         };
         let name = self.prog.names[id as usize].clone();

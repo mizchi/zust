@@ -700,10 +700,35 @@ impl Insts {
                 if own && !prog.has_param(t) && !prog.names_placeholder(t, 0) && !args.iter().any(|&a| prog.names_placeholder(a, 0) && tr.contains('<')) && prog.tdb.holds_in(prog, t, tr, &gn, &args) == crate::traits::Ans::No {
                     return Err(format!("the trait bound `{}: {}` is not satisfied (for `{pn}`) {}", prog.tn(t), crate::traits::bound_text(tr), crate::traits::SOLVED_NO));
                 }
-                if !prog.implements(t, tr) || (own && !prog.has_param(t) && prog.tdb.holds_in(prog, t, tr, &gn, &args) == crate::traits::Ans::No) {
+                // (a trait of the program's: only the trait solver's No (its impls, a placeholder's bounds through their
+                // supertraits). std's: `implements`' no, asked of the bound with the instance's types for the callee's
+                // parameters (`AsRef<T>` with T = str is `AsRef<str>`) and without lifetimes (`Into<&'a str>`), but where
+                // it is known to miss impls: std's blanket impls it does not model (`T: Borrow<T>`, `T: Any`), a Fn trait
+                // of a reference to a closure or a type parameter (`&F: Fn()`), and std's derivable traits of `()`, whose
+                // impls it does not know (the solver answers those))
+                let std_no = !own && !prog.has_param(t) && !prog.implements(t, tr) && {
+                    let n = tr.split('<').next().unwrap_or(tr).split('(').next().unwrap_or(tr).trim();
+                    let n = n.rsplit("::").next().unwrap_or(n);
+                    let inst_tr = || crate::traits::instantiate_bound(prog, tr, &gn, &args);
+                    let blanket = matches!(n, "Borrow" | "BorrowMut" | "Any" | "DoubleEndedIterator");
+                    // (`&F` is every Fn trait F is; `&mut F` is FnMut and FnOnce when F is FnMut, never Fn of itself)
+                    let fn_of_ref = match t {
+                        Ty::Ref(m, Ty::Struct(s)) if prog.closure_of_struct.contains_key(&prog.base_of(*s)) || prog.structs[*s as usize].placeholder.is_some() => {
+                            if m { matches!(n, "FnMut" | "FnOnce") } else { matches!(n, "Fn" | "FnMut" | "FnOnce") }
+                        }
+                        _ => false,
+                    };
+                    let unit_known = t == Ty::Unit && crate::traits::unit_judged(n);
+                    // (never more than `implements`' own no on the bound as written: the instantiated bound is only a
+                    // second opinion that can take a no back)
+                    let r = !blanket && !fn_of_ref && !unit_known && inst_tr().as_deref().is_none_or(|b| b == tr || !prog.implements(t, b));
+                    r
+                };
+                if std_no || ((own || t == Ty::Unit) && !prog.has_param(t) && prog.tdb.holds_in(prog, t, tr, &gn, &args) == crate::traits::Ans::No) {
                     return Err(format!(
-                        "the trait bound `{}: {tr}` is not satisfied (for `{pn}`)",
-                        prog.tn(t)
+                        "the trait bound `{}: {}` is not satisfied (for `{pn}`)",
+                        prog.tn(t),
+                        crate::traits::bound_text(tr)
                     ));
                 }
             }

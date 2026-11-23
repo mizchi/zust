@@ -171,6 +171,23 @@ impl Cx<'_> {
             let pos = if let Expr::Binary(_, _, _, sp) = e { sp.start } else { SP };
             return err(pos, format!("binary operation `{op}` cannot be applied to a fn item (cast it to a fn pointer)"));
         }
+        // (`()` compares equal to itself and orders as equal: there are no bits to compare; `&()` too. The operands
+        // are still evaluated, for what they do)
+        if !assign && is_cmp(op) {
+            let strip = |t: Option<Ty>| {
+                let mut t = t?;
+                while let Ty::Ref(_, i) = t {
+                    t = *i;
+                }
+                Some(t)
+            };
+            if strip(self.peek(left)) == Some(Ty::Unit) && strip(self.peek(right)) == Some(Ty::Unit) {
+                self.expr(left, None)?;
+                self.expr(right, None)?;
+                let v = matches!(op, "==" | "<=" | ">=") as i64;
+                return Ok((Some(self.b.ins().iconst(types::I8, v)), Ty::Bool));
+            }
+        }
         // 短絡評価
         // (a chain of one operator (`a && b && c`) is lowered as one: each operand's short-circuit goes to the end, so
         // the borrow check sees that c runs only after b did, as rustc's control flow does)

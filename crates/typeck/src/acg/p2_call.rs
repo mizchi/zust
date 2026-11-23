@@ -1900,6 +1900,15 @@ impl Cx<'_> {
             let member = sig.self_ty.is_some() || sig.impl_of.is_some();
             let named: Vec<usize> = if member { (0..sig.generics.len()).filter(|&k| !hidden_param(&sig.generics[k].0)).collect() } else { vec![] };
             let ntf = tf.iter().filter(|a| !matches!(a, GArg::Lifetime(_))).count();
+            // (E0107: a free fn's turbofish names only its explicit parameters, not an `impl Trait` argument's hidden one:
+            // `foo::<str, String>` of `fn foo<T: ?Sized>(_f: impl AsRef<T>)`)
+            if !member && sig.trait_of.is_none() && sig.generics.iter().any(|g| hidden_param(&g.0)) {
+                let n = sig.generics.iter().filter(|g| !hidden_param(&g.0)).count();
+                if ntf > n {
+                    let w = |k: usize| if k == 1 { "argument" } else { "arguments" };
+                    return err(SP, format!("function takes {n} generic {} but {ntf} generic {} supplied (E0107)", w(n), if ntf == 1 { "argument was" } else { "arguments were" }));
+                }
+            }
             let own0 = if member { named.len().saturating_sub(ntf).max(first.min(named.len())) } else { first };
             let slot_of = |i: usize| if member { named.get(own0 + i).copied().unwrap_or(usize::MAX) } else { first + i };
             for (i, a) in tf.iter().enumerate() {

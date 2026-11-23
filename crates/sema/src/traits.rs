@@ -106,6 +106,58 @@ pub struct TraitDb {
     pub other_assoc: crate::fxhash::FxSet<String>,
 }
 
+/// A bound as text with an instance's types for the item's parameters (`AsRef<T>` with T = str: `AsRef<str>`) and
+/// no lifetimes (`Into<&'a str>`: `Into<&str>`, `Foo<'a>`: `Foo`): None when a parameter's type has no name zustc
+/// could write back (a placeholder, a closure)
+pub fn instantiate_bound(p: &Program, b: &str, gn: &[&str], inst: &[Ty]) -> Option<String> {
+    let mut out = String::new();
+    let cs: Vec<char> = b.chars().collect();
+    let mut i = 0;
+    while i < cs.len() {
+        let c = cs[i];
+        if c == '\'' {
+            // (a lifetime: dropped, with the comma or space after it)
+            i += 1;
+            while i < cs.len() && (cs[i].is_alphanumeric() || cs[i] == '_') {
+                i += 1;
+            }
+            while i < cs.len() && (cs[i] == ',' || cs[i] == ' ') {
+                i += 1;
+            }
+            continue;
+        }
+        if c.is_alphabetic() || c == '_' {
+            let st = i;
+            while i < cs.len() && (cs[i].is_alphanumeric() || cs[i] == '_') {
+                i += 1;
+            }
+            let w: String = cs[st..i].iter().collect();
+            let path = st > 0 && cs[st - 1] == ':';
+            match gn.iter().position(|g| *g == w).filter(|_| !path) {
+                Some(k) => {
+                    let t = *inst.get(k)?;
+                    if p.names_placeholder(t, 0) || matches!(t, Ty::Struct(s) if p.closure_of_struct.contains_key(&p.base_of(s))) {
+                        return None;
+                    }
+                    out.push_str(&p.tn(t));
+                }
+                None => out.push_str(&w),
+            }
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    // (`Foo<>` left by a lifetime-only argument list)
+    let out = out.replace("<>", "").replace("< >", "");
+    Some(out.trim_end_matches([',', ' ']).to_string())
+}
+
+/// The std traits the solver answers of `()` from std's list
+pub fn unit_judged(tr: &str) -> bool {
+    STD_EXACT.contains(&tr) || matches!(tr, "Sized" | "Send" | "Sync" | "Iterator")
+}
+
 /// rustc's words for `t: tr` not holding
 pub fn not_held(t: &str, tr: &str) -> String {
     match tr {
@@ -214,6 +266,18 @@ impl TraitDb {
                 }
             }
             if self_ty.is_some_and(|t| has_assoc(p, t, 0)) || args.as_ref().is_some_and(|a| a.iter().any(|&t| has_assoc(p, t, 0))) {
+                exact = false;
+            }
+            // (a head zustc represents by two types: `Cow<'_, T>` is the prelude's Cow<T> (a Cow of [T]) or __CowStr (a
+            // Cow of str). Its head stands for both, so it matches anything: weakened)
+            let mut self_ty = self_ty;
+            let mut args = args;
+            if self_ty.is_some_and(|t| two_reps(p, t, 0)) {
+                self_ty = None;
+                exact = false;
+            }
+            if args.as_ref().is_some_and(|a| a.iter().any(|&t| two_reps(p, t, 0))) {
+                args = None;
                 exact = false;
             }
             db.clauses.entry(tr).or_default().push(Clause { n: gn.len(), self_ty, args, body, item: ii, exact, where_ok: s.where_types.is_empty(), assocs });
@@ -453,6 +517,27 @@ impl TraitDb {
             }
         }
         Some(ground(p, g, 0).then_some(g))
+    }
+}
+
+/// t holds a prelude type that zustc represents by two types depending on its argument: `Cow<T>` of a parameter (a
+/// Cow of `[T]`, or of `str`, which is `__CowStr`)
+fn two_reps(p: &Program, t: Ty, depth: u32) -> bool {
+    if depth > 32 {
+        return true;
+    }
+    match t {
+        Ty::Ref(_, x) | Ty::Ptr(_, x) | Ty::Array(x, _) | Ty::Slice(x) | Ty::Box(x) => two_reps(p, *x, depth + 1),
+        Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| two_reps(p, x, depth + 1)),
+        Ty::Struct(s) => {
+            let sd = &p.structs[s as usize];
+            let b = p.base_of(s);
+            // (the Cow whose `Cow<str>` is __CowStr: the prelude's, when it has __CowStr)
+            let cow = p.struct_index.get("Cow") == Some(&b) && p.struct_index.contains_key("__CowStr");
+            (cow && sd.args.iter().any(|a| matches!(a, Ty::Param(_))))
+                || sd.args.iter().any(|&x| two_reps(p, x, depth + 1))
+        }
+        _ => false,
     }
 }
 
@@ -735,6 +820,30 @@ impl Cx<'_> {
             }
         }
         if let Ty::Dyn(d) = t {
+            // (`dyn Tr<A = T>` is well formed only when T has the bounds Tr puts on A: `dyn X<Y = str>` with `type Y:
+            // Clone` is no X)
+            for part in d.split('+') {
+                let part = part.trim();
+                // (`dyn for<'x> X<'x, F = i32>`: the binder is not the trait)
+                let part = match part.strip_prefix("for") {
+                    Some(r) if r.trim_start().starts_with('<') => r[r.find('>').map_or(0, |i| i + 1)..].trim(),
+                    _ => part,
+                };
+                let pn = part.split('<').next().unwrap_or(part).trim();
+                if pn.rsplit("::").next() != Some(tr) || !part.contains('=') {
+                    continue;
+                }
+                for (n, x) in crate::ast_summary::assoc_bindings(part) {
+                    let Ok(x) = self.p.resolve_g(&x, &[]) else { continue };
+                    for b in self.p.assoc_bounds.get(&(tr.to_string(), n.clone())).cloned().unwrap_or_default() {
+                        if let Some(pr) = pred_of(self.p, x, &b, &[]) {
+                            if self.solve_pred(fuel - 1, &pr) == Ans::No {
+                                return Ans::No;
+                            }
+                        }
+                    }
+                }
+            }
             if d.split('+').any(|b| if self.strict { b.trim() == tr } else { self.p.bound_implies(b.trim(), &[tr], false, 0) }) {
                 return Ans::Yes;
             }
@@ -1064,6 +1173,24 @@ impl Cx<'_> {
     /// A trait that is not the program's: `implements`, believed when it says no only for the types and the
     /// prelude's traits it judges exactly
     fn std_goal(&self, t: Ty, tr: &str, raw: &str) -> Ans {
+        // (a Fn trait of a value that is never callable on stable Rust: a scalar, `()`, str, an array or slice, a struct
+        // of the program's that is not a closure)
+        if matches!(tr, "Fn" | "FnMut" | "FnOnce") {
+            let never = t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Unit | Ty::Str | Ty::Array(..) | Ty::Slice(_))
+                || matches!(t, Ty::Struct(x) if {
+                    let b = self.p.base_of(x);
+                    self.p.structs[x as usize].placeholder.is_none() && !self.p.closure_of_struct.contains_key(&b)
+                        && self.p.struct_item.get(b as usize).is_some_and(|&i| i < self.p.prelude_from)
+                });
+            if never {
+                return Ans::No;
+            }
+        }
+        // (an unsized type (str, a slice, a trait object) is never Copy, Clone, Sized or Default: those need a value of
+        // the type itself)
+        if matches!(t, Ty::Str | Ty::Slice(_) | Ty::Dyn(_)) && matches!(tr, "Copy" | "Clone" | "Sized" | "Default") && raw.trim() == tr {
+            return Ans::No;
+        }
         // (`()`: std's impls for it, which `implements` does not know: all the derivable traits, not Display, nor an
         // iterator)
         if t == Ty::Unit && !raw.contains('<') && !raw.contains('(') {

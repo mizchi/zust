@@ -165,6 +165,36 @@ impl Maker for Words {
     }
 }
 
+// (what the old string-based check rejected though rustc accepts it: an impl whose parameters are not in its
+// self type's order, a reference to a closure as a Fn, a std blanket impl, and std's impls for ())
+struct WithHelper<H, T> {
+    helper: H,
+    value: T,
+}
+trait Helper<T> {
+    fn get(&self) -> &T;
+}
+impl<T> Helper<T> for Option<T> {
+    fn get(&self) -> &T {
+        self.as_ref().unwrap()
+    }
+}
+impl<T, H: Helper<T>> std::ops::Deref for WithHelper<H, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        self.helper.get()
+    }
+}
+fn call_twice<F: Fn() -> i32>(f: F) -> i32 {
+    f() + f()
+}
+fn borrowed<T: std::borrow::Borrow<T>>(t: T) -> T {
+    t
+}
+fn is_default<T: PartialEq + Default>(a: T) -> bool {
+    a == T::default()
+}
+
 fn main() {
     println!("{} {}", Local.kind(), Tagged.kind());
     println!("{}", show(&Square(3)));
@@ -182,4 +212,7 @@ fn main() {
     let b = Bytes(vec![7, 8]);
     println!("{} {} {}", first_byte(&b), b.show(), Words(vec![9]).show());
     println!("{} {}", some_bytes().first(), Words::make().first());
+    let w: WithHelper<Option<u8>, u8> = WithHelper { helper: Some(5), value: 2 };
+    let k = || 21;
+    println!("{} {} {} {} {}", *w, w.value, call_twice(&k), borrowed(3u8), is_default(()));
 }
