@@ -1528,15 +1528,28 @@ impl Cx<'_> {
         if self.prog.has_param(target) || matches!(target, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
             return None;
         }
-        // (the type m is found on: through the target's own derefs)
+        // (the type m is found on: through the target's own derefs. Not a type the derefs came through already: a
+        // struct whose `deref` gives itself (E0055 when m is on none of them))
         let mut at = target;
+        let mut seen = vec![t];
         for _ in 0..8 {
+            if seen.contains(&at) {
+                return None;
+            }
+            seen.push(at);
             match at {
                 Ty::Struct(s) if self.prog.method(s, m).is_none() && self.prog.default_method(s, m).is_none() && self.guard_of(at).is_none() => match deref_target(s) {
                     Some(n) => at = n,
                     None => break,
                 },
                 _ => break,
+            }
+        }
+        // (a program's struct without m: none of the prelude's `&mut self` methods takes_mut_self knows by name is its)
+        if let Ty::Struct(s) = at {
+            let user = self.prog.struct_item.get(self.prog.base_of(s) as usize).is_some_and(|&i| i < self.prog.prelude_from);
+            if user && self.prog.method(s, m).is_none() && self.prog.default_method(s, m).is_none() {
+                return None;
             }
         }
         self.takes_mut_self(at, m).then_some((refs, target))
@@ -2192,21 +2205,41 @@ impl Cx<'_> {
                 _ => None,
             };
             // (else a blanket impl of the trait whose bounds hold of Self: `impl<A> Foo for A`'s `get` for a `&i32`
-            // made a `dyn Foo`. Only for a method the trait has no default of: a default the impl does not override
-            // is the trait's, as below)
+            // made a `dyn Foo`, before the trait's default, which is the one only when no such impl overrides it)
             let imp = imp.or_else(|| {
-                if sig.has_body {
-                    return None;
-                }
                 // (the trait's own: `Program::blanket` keeps one method of each name, of whichever trait came first, so
                 // the methods of the name are looked through)
                 let base = |t: &str| t.split('<').next().unwrap_or(t).trim().to_string();
                 let tr = tr0?;
                 let cands: Vec<u32> = self.prog.by_last.get(&m).cloned().unwrap_or_default();
-                let bid = cands.into_iter().find(|&c| {
+                let mut bl = cands.into_iter().filter(|&c| {
                     let bsig = &self.prog.sigs[c as usize];
                     bsig.impl_trait.as_deref().map(base).as_deref() == Some(tr) && matches!(bsig.self_ty, Some(Ty::Param(_)))
-                })?;
+                });
+                // (one only: two blanket impls of a generic trait (`impl<T> A<u8> for T`, `impl<T> A<u16> for T`) are
+                // told apart by the trait's arguments, which are not kept for each method)
+                let bid = bl.next()?;
+                if bl.next().is_some() {
+                    return None;
+                }
+                // (the trait's arguments the call has (after Self) are those of the blanket impl's header)
+                if let Some(es) = self.prog.impl_targs.get(tr) {
+                    let mut bes = es.iter().filter(|e| matches!(e.0, Ty::Param(_)));
+                    if let Some((st, targs, ng)) = bes.next() {
+                        if bes.next().is_some() {
+                            return None;
+                        }
+                        let mut isol = vec![None; *ng];
+                        if !self.prog.match_ty(*st, args[0], &mut isol) {
+                            return None;
+                        }
+                        for (k, &ta) in targs.iter().enumerate() {
+                            if !args.get(1 + k).is_some_and(|&want| self.prog.match_ty(ta, want, &mut isol)) {
+                                return None;
+                            }
+                        }
+                    }
+                }
                 let bounds = self.prog.blanket_bounds.get(tr);
                 bounds.is_none_or(|bs| blanket_bounds_hold(self.prog, args[0], bs, &mut vec![], &mut vec![])).then_some(bid)
             });

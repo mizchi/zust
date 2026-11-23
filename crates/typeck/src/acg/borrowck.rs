@@ -287,8 +287,10 @@ pub struct Bk {
     /// What the items of each `for` loop being lowered hold (the loan of v for `for x in &v` / `v.iter()`): the
     /// bindings of an item that holds references hold it
     pub for_items: Vec<Vec<Src>>,
-    /// For each of copy_out's locals, whether each loan is of a place that holds the copied type
-    pub copy_masks: HashMap<u32, Vec<bool>>,
+    /// For each of copy_out's locals, its mask in masks: whether each loan is of a place that holds the copied type
+    pub copy_masks: HashMap<u32, usize>,
+    /// copy_masks' masks, one for each copied type
+    pub masks: Vec<Vec<bool>>,
     /// The loans of each closure's captures by reference, by the closure's address
     pub cap_loans: HashMap<usize, Vec<u32>>,
     /// The locals a closure holds by value that hold loans, by the closure's address: the closure holds what they do
@@ -1560,7 +1562,7 @@ impl Bk {
                     let mut ls = self.resolve(srcs, st);
                     // (a value copied out of what a reference points to: not the loan of the place it was read from,
                     // what that place holds)
-                    if let Some(mask) = self.copy_masks.get(l) {
+                    if let Some(mask) = self.copy_masks.get(l).map(|&i| &self.masks[i]) {
                         let mut out = Vec::with_capacity(ls.len());
                         for ln in ls {
                             if mask.get(ln as usize).copied().unwrap_or(false) {
@@ -2509,7 +2511,7 @@ impl Cx<'_> {
         // (`&**s` with `s: &&T`: a reborrow through the shared reference s points to, which may be copied out first:
         // what that holds, not the loan s is (bk_copy_out_of))
         let through_shared = match (self.bk.locals[l as usize].ty, p.proj.first(), p.proj.get(1)) {
-            (Ty::Ref(_, u @ Ty::Ref(false, _)), Some(Proj::Deref(_)), Some(Proj::Deref(_) | Proj::Shr)) if self.bk.level >= 2 => Some(*u),
+            (Ty::Ref(_, u @ Ty::Ref(false, _)), Some(Proj::Deref(_) | Proj::Shr), Some(Proj::Deref(_) | Proj::Shr)) if self.bk.level >= 2 => Some(*u),
             _ => None,
         };
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
@@ -2841,7 +2843,7 @@ impl Cx<'_> {
     pub(crate) fn bk_for_item_srcs(&mut self, t: Ty) -> Option<Vec<Src>> {
         let saved = self.bk.bind_srcs.clone();
         if self.bk_on() && self.bk_ty(t).1 {
-            if let Some(it) = self.bk.for_items.last().cloned() {
+            if let Some(it) = self.bk.for_items.last().filter(|it| !it.is_empty()).cloned() {
                 self.bk.bind_srcs = Some(it);
             }
         }
@@ -4193,12 +4195,22 @@ impl Cx<'_> {
         }
         let mut bk = std::mem::take(&mut self.bk);
         bk.edges = self.b.cfg_edges();
+        // (one mask for each copied type: it depends on the type and the loans only)
+        let mut by_ty: Vec<Ty> = Vec::new();
         for &(c, u) in &bk.copy_out {
-            let mask: Vec<bool> = bk.loans.iter().map(|lo| {
-                let t = bk.locals.get(lo.place.local as usize).map(|l| l.ty);
-                t.and_then(|t| self.place_ty(t, &lo.place.proj)).is_some_and(|t| self.ty_holds(t, u, 0))
-            }).collect();
-            bk.copy_masks.insert(c, mask);
+            let i = match by_ty.iter().position(|&t| t == u) {
+                Some(i) => i,
+                None => {
+                    let m: Vec<bool> = bk.loans.iter().map(|lo| {
+                        let t = bk.locals.get(lo.place.local as usize).map(|l| l.ty);
+                        t.and_then(|t| self.place_ty(t, &lo.place.proj)).is_some_and(|t| self.ty_holds(t, u, 0))
+                    }).collect();
+                    by_ty.push(u);
+                    bk.masks.push(m);
+                    bk.masks.len() - 1
+                }
+            };
+            bk.copy_masks.insert(c, i);
         }
         // (the reborrows the region check found must outlive the function)
         if self.rg.on && !self.rg.rerun && self.rg.closure.is_none() {

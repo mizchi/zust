@@ -358,12 +358,17 @@ impl Cx<'_> {
             // the loop, as `&v` / `&mut v`)
             let mut base = strip_paren(fexpr);
             let mut by_iter = None;
+            // (through `copied` / `cloned`: the items are copies, which hold what v holds, not the loan of v)
+            let mut copies = false;
             while let Expr::MethodCall(r, name, _, args, _) = base {
                 if !args.is_empty() {
                     break;
                 }
                 match name.as_str() {
-                    "copied" | "cloned" | "enumerate" | "rev" => base = strip_paren(r),
+                    "copied" | "cloned" | "enumerate" | "rev" => {
+                        copies |= matches!(name.as_str(), "copied" | "cloned");
+                        base = strip_paren(r);
+                    }
                     "iter" | "iter_mut" => {
                         by_iter = Some((strip_paren(r), name == "iter_mut"));
                         break;
@@ -375,7 +380,11 @@ impl Cx<'_> {
                 let t0 = self.bk.call_temps.len();
                 if let Some(ln) = self.bk_loan_only(inner, m) {
                     self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
-                    items = Some(self.bk_for_items(inner, ln));
+                    let mut it = self.bk_for_items(inner, ln);
+                    if copies {
+                        it.retain(|s| !matches!(s, borrowck::Src::Loan(_)));
+                    }
+                    items = Some(it);
                 }
                 if self.bk.call_temps.len() > t0 {
                     temp = Some(t0);
@@ -393,14 +402,10 @@ impl Cx<'_> {
                 }
             }
         }
-        let pushed = items.is_some();
-        if let Some(it) = items {
-            self.bk.for_items.push(it);
-        }
+        // (an entry for every loop, empty for one over a value: its items hold nothing of an enclosing loop's)
+        self.bk.for_items.push(items.unwrap_or_default());
         let r = self.for_inner(f);
-        if pushed {
-            self.bk.for_items.pop();
-        }
+        self.bk.for_items.pop();
         if let Some(t0) = temp {
             self.bk_call_temps_end(t0);
         }

@@ -2016,9 +2016,31 @@ impl Cx<'_> {
             e => e,
         };
         if is_place_expr(rexpr) && !fn_item && !not_var(inner) {
+            // (`&**s` with `s: &&T`: what the reborrow holds is what bk_borrow copies out of `*s`, not all s holds,
+            // which reading s gives)
+            let shr_root = match strip_paren(rexpr) {
+                Expr::Unary(o, x, _) if o == "*" && self.bk_on() && self.bk.level >= 2 => match strip_paren(x) {
+                    Expr::Unary(o, x, _) if o == "*" => self
+                        .bk_place(x)
+                        .filter(|(p, _)| p.proj.is_empty() && matches!(self.bk.locals[p.local as usize].ty, Ty::Ref(_, Ty::Ref(false, _))))
+                        .map(|(p, _)| p.local),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if shr_root.is_some() {
+                self.bk_frame();
+            }
             let pm = std::mem::replace(&mut self.bk.place_mut, m);
             let pl = self.place(rexpr);
             self.bk.place_mut = pm;
+            if let Some(l) = shr_root {
+                for s in self.bk.frames.pop().unwrap_or_default() {
+                    if s != borrowck::Src::Local(l) {
+                        self.bk.src(s);
+                    }
+                }
+            }
             let pl = pl?;
             // (`&a` of a reference `a: &T` (or `&&T` ..) where a `&T` is expected (a deref coercion, also as a result): the
             // pointer a holds, a reborrow of `*a` (`**a` ..), not a borrow of the local a)

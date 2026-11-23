@@ -3202,3 +3202,21 @@ fn part17_review() {
     let d = check("fn main() {\n    let v = 0;\n    let q: *const i32 = &v;\n    let p: *mut *const i32 = &mut (q as *const i32) as *mut *const i32;\n    unsafe { **p = 1; }\n}\n");
     assert!(d.len() == 1 && d[0].1.contains("behind a `*const` pointer"), "{d:?}");
 }
+
+#[test]
+fn part17_review2() {
+    // (a loop's items through `copied` / `cloned` hold no loan of v; a loop over a value inside one over `&v` holds
+    // nothing of it)
+    assert_eq!(check("fn main() {\n    let n = 1;\n    let mut v = vec![&n];\n    let mut saved = &n;\n    for x in v.iter().copied() { saved = x; }\n    v.clear();\n    println!(\"{}\", saved);\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let n = 1;\n    let mut v = vec![1, 2];\n    let mut saved = &n;\n    for _x in &v { for y in [&n] { saved = y; } }\n    v.clear();\n    println!(\"{}\", saved);\n}\n"), vec![]);
+    // (`&**s` with `s: &&i32`: through the shared reference s points to, what that holds, not s's loan of a)
+    assert_eq!(check("fn main() {\n    let n = 1;\n    let r;\n    {\n        let a = &n;\n        let s = &a;\n        r = &**s;\n    }\n    println!(\"{}\", r);\n}\n"), vec![]);
+    let d = check("fn main() {\n    let mut m = 2;\n    let q;\n    {\n        let a = &mut m;\n        let s = &a;\n        q = &**s;\n    }\n    println!(\"{}\", q);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("`a` does not live long enough"), "{d:?}");
+    // (a struct whose `deref_mut` gives itself: E0055, not a `&mut self` method through it)
+    let d = check("use std::ops::{Deref, DerefMut};\nstruct S;\nimpl Deref for S { type Target = S; fn deref(&self) -> &S { self } }\nimpl DerefMut for S { fn deref_mut(&mut self) -> &mut S { self } }\nfn main() {\n    let mut s = S;\n    s.reverse();\n}\n");
+    assert!(d.len() == 1 && d[0].1.contains("E0055"), "{d:?}");
+    // (two blanket impls of a generic trait: not told apart, so neither is taken)
+    let d = check("trait A<X> { fn get(&self) -> i32; }\nimpl<T> A<u8> for T { fn get(&self) -> i32 { 8 } }\nimpl<T> A<u16> for T { fn get(&self) -> i32 { 16 } }\nfn f(x: &dyn A<u16>) -> i32 { x.get() }\nfn main() {\n    let v = 5u8;\n    let r = &v;\n    println!(\"{}\", f(&r));\n}\n");
+    assert!(d.len() == 1 && d[0].1.contains("has no implementation"), "{d:?}");
+}
