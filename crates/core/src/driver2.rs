@@ -1310,17 +1310,18 @@ impl Session2 {
                     .map(|(i, _)| i)
                     .last()
             };
-            // (the level of a lint of a group, by the last of its levels in source order: forbid wins; a deny of it
-            // or its group denies; a warn of it (or no level of its own) is denied by `deny(warnings)`; an allow or an
-            // expect does not deny)
+            // (the level of a lint of a group, by the last of its levels in source order: a forbid of it or its group
+            // wins; a deny of it or its group denies; a warn of it (or no level of its own) is denied by
+            // `deny(warnings)` or `forbid(warnings)`, which reach only the lints left at warn; an allow or an expect
+            // does not deny)
             let grouped = |n: &str, group: &str| {
-                if last_of("forbid", &[n, group, "warnings"]).is_some() {
+                if last_of("forbid", &[n, group]).is_some() {
                     return true;
                 }
                 let own = [n, group];
                 let levels = [("deny", last_of("deny", &own)), ("warn", last_of("warn", &own)), ("allow", last_of("allow", &own)), ("expect", last_of("expect", &own))];
                 let last = levels.iter().filter_map(|(l, at)| at.map(|at| (at, *l))).max();
-                let warnings = last_of("deny", &["warnings"]).is_some();
+                let warnings = last_of("deny", &["warnings"]).is_some() || last_of("forbid", &["warnings"]).is_some();
                 match last.map(|(_, l)| l) {
                     Some("deny") => true,
                     Some("warn") | None => warnings,
@@ -4458,12 +4459,24 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
             if !(w(k) == "Sized" && sym(k - 1, b'?')) {
                 return false;
             }
-            // (back over the other bounds, `Tr<A, B> + 'a + std::fmt::Debug + Iterator<Item = u8> +`, to the `:`
-            // after the name: anything inside a bound's `<..>`)
+            // (back over the other bounds, `Tr<A, B> + 'a + std::fmt::Debug + Iterator<Item = u8> + FnOnce(u8) -> u8
+            // +`, to the `:` after the name: anything inside a bound's `<..>` or `(..)`)
             let mut j = k - 1;
             let mut angle = 0i32;
+            let mut paren = 0i32;
             while j > 0 {
                 j -= 1;
+                if sym(j, b')') {
+                    paren += 1;
+                    continue;
+                }
+                if sym(j, b'(') {
+                    paren -= 1;
+                    continue;
+                }
+                if paren > 0 {
+                    continue;
+                }
                 if sym(j, b'>') && !(j > 0 && sym(j - 1, b'-')) {
                     angle += 1;
                     continue;
@@ -4473,6 +4486,10 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
                     continue;
                 }
                 if angle > 0 {
+                    continue;
+                }
+                // (the `->` of a `Fn(..) -> R` bound)
+                if sym(j, b'-') && j + 1 < t.len() && sym(j + 1, b'>') {
                     continue;
                 }
                 if sym(j, b':') {

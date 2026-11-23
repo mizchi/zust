@@ -105,9 +105,11 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
         let a: String = a.chars().filter(|c| !c.is_whitespace()).collect();
         ["allow(", "expect(", "warn(", "#[cfg", "repr(", "no_mangle", "export_name", "#[test]"].iter().any(|x| a.contains(x))
     };
+    // (the derives of the attributes, spaced or not: `#[derive (PartialEq)]`)
     let derives = |a: &str| -> Vec<String> {
+        let a: String = a.chars().filter(|c| !c.is_whitespace()).collect();
         let mut out = vec![];
-        let mut rest = a;
+        let mut rest = a.as_str();
         while let Some(p) = rest.find("derive(") {
             rest = &rest[p + 7..];
             let e = rest.find(')').unwrap_or(rest.len());
@@ -209,8 +211,8 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
         }
         ps
     };
-    // (each inherent / trait impl's self type, by its header's index)
-    let impl_self = |h: usize| -> Option<&str> {
+    // (each inherent / trait impl's self type as its header names it, by the header's index)
+    let impl_self_named = |h: usize| -> Option<&str> {
         let it = items.get(h)?;
         let t = crate::lexer::tokenize(src.get(it.start..it.end)?.as_bytes());
         let text = &src[it.start..it.end];
@@ -263,6 +265,35 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
             k += 1;
         }
         name
+    };
+    // (the program's type aliases of a path, `type A = S;` / `type A = m::S<u8>;`: the path's last segment)
+    let aliases: FxMap<&str, &str> = (0..items.len())
+        .filter(|&ii| matches!(items[ii].kind, ItemKind::Normal))
+        .filter_map(|ii| {
+            let k = head(ii)?;
+            if word(k) != "type" || !sym(k + 2, b'=') {
+                return None;
+            }
+            let (mut q, mut last) = (k + 3, None);
+            while q < n && item_of[q] == ii && (toks[q].0 == 0 || sym(q, b':')) {
+                if toks[q].0 == 0 {
+                    last = Some(word(q));
+                }
+                q += 1;
+            }
+            (sym(q, b';') || sym(q, b'<')).then_some((word(k + 1), last?))
+        })
+        .collect();
+    // (each inherent / trait impl's self type, by its header's index; through the program's aliases)
+    let impl_self = |h: usize| -> Option<&str> {
+        let mut name = impl_self_named(h)?;
+        for _ in 0..8 {
+            match aliases.get(name) {
+                Some(&t) if t != name => name = t,
+                _ => break,
+            }
+        }
+        Some(name)
     };
     let mut self_of: FxMap<usize, Option<&str>> = Default::default();
     // (the struct or enum each occurrence names: its own name, or `Self` in its impl)
@@ -332,6 +363,8 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                 _ => None,
             })
             .flatten()
+            // (one of the program's structs: an alias it does not resolve, a foreign type, read by any owner)
+            .filter(|o| struct_names.contains(o))
             // (`x.f` of an `x` the same item binds once, to a struct's value: `let x = S(..)` / `let x = S { .. }`)
             .or_else(|| (k > 0 && toks[k - 1].0 == 0 && !sym(k.wrapping_sub(2), b'.')).then(|| bound_to(k - 1)).flatten());
         match owner {
@@ -500,13 +533,17 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
         // (the parts: split at the commas between the brackets; each one's attributes, visibility, name)
         let mut parts: Vec<(usize, usize)> = vec![];
         let mut s = open + 1;
-        // (not at a comma of a type's arguments: `Result<u8, u8>`)
+        // (not at a comma of a type's arguments: `Result<u8, u8>`; in a variant's discriminant, `A = 1 << 0`, `<` and
+        // `>` are operators but for a turbofish's `::<`)
         let mut angle = 0i32;
+        let mut discr = false;
         for q in open + 1..=end {
             if q < end && encl[q] == open {
-                if sym(q, b'<') {
+                if sym(q, b'=') && angle <= 0 && !discr && !tuple {
+                    discr = true;
+                } else if sym(q, b'<') && (!discr || (sym(q - 1, b':') && sym(q.wrapping_sub(2), b':'))) {
                     angle += 1;
-                } else if sym(q, b'>') && !sym(q - 1, b'-') {
+                } else if sym(q, b'>') && !sym(q - 1, b'-') && (!discr || angle > 0) {
                     angle -= 1;
                 }
             }
@@ -515,6 +552,7 @@ pub(super) fn first_dead_part(src: &str, items: &[SrcItem]) -> Option<(usize, St
                     parts.push((s, q));
                 }
                 s = q + 1;
+                discr = false;
             }
         }
         // (the occurrences of the name: whether anything constructs it, whether a pattern (or anything unclear) names
