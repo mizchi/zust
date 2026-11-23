@@ -1980,14 +1980,22 @@ impl Inf<'_> {
                 None => self.var(),
             };
         }
-        // (`id::<u32>(c)`: the turbofish's types are the fn's own generics', the last ones)
+        // (`id::<u32>(c)`: the turbofish's arguments are a free fn's generics, in order, as the lowering takes them
+        // (turbofish_sol). Its types seed the inference; a const argument (`take::<u8, 1>`, `f::<true>()`) is not a
+        // type, and its slot is left to the lowering)
         if let (Some(id), Expr::Path(None, p)) = (callee, f) {
-            let tys: Vec<&PTy> = p.segs.last().map(|s| s.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect()).unwrap_or_default();
-            let ng = self.prog.sigs[id as usize].generics.len();
-            if !tys.is_empty() && tys.len() <= ng {
+            let sig = &self.prog.sigs[id as usize];
+            let free = sig.self_ty.is_none() && sig.impl_of.is_none() && sig.trait_of.is_none();
+            let args: Vec<&GArg> = p.segs.last().map(|s| s.args.iter().filter(|a| !matches!(a, GArg::Lifetime(_))).collect()).unwrap_or_default();
+            let ng = sig.generics.len();
+            if free && !args.is_empty() && args.len() <= ng && args.iter().any(|a| matches!(a, GArg::Ty(t) if crate::ast_types::bool_arg(t).is_none())) {
                 let mut pre = vec![None; ng];
-                for (k, t) in tys.iter().enumerate() {
-                    pre[ng - tys.len() + k] = Some(self.ty_var(t));
+                for (k, a) in args.iter().enumerate() {
+                    if let GArg::Ty(t) = a {
+                        if crate::ast_types::bool_arg(t).is_none() {
+                            pre[k] = Some(self.ty_var(t));
+                        }
+                    }
                 }
                 return self.apply_with(callee, avs, 0, None, pre);
             }

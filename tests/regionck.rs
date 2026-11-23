@@ -3220,3 +3220,13 @@ fn part17_review2() {
     let d = check("trait A<X> { fn get(&self) -> i32; }\nimpl<T> A<u8> for T { fn get(&self) -> i32 { 8 } }\nimpl<T> A<u16> for T { fn get(&self) -> i32 { 16 } }\nfn f(x: &dyn A<u16>) -> i32 { x.get() }\nfn main() {\n    let v = 5u8;\n    let r = &v;\n    println!(\"{}\", f(&r));\n}\n");
     assert!(d.len() == 1 && d[0].1.contains("has no implementation"), "{d:?}");
 }
+
+#[test]
+fn part17_review3() {
+    // (what a `PeekMut`'s `deref_mut` gives borrows the guard: dropping the guard while it is written is E0505)
+    let d = check("use std::collections::BinaryHeap;\nuse std::ops::DerefMut;\nfn main() {\n    let mut heap = BinaryHeap::from(vec![1, 5, 3]);\n    let mut g = heap.peek_mut().unwrap();\n    let r = g.deref_mut();\n    drop(g);\n    *r = 0;\n    println!(\"{:?}\", heap.peek());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+    // (two blanket impls of a generic trait that override its default: not told apart, so not the default either)
+    let d = check("trait A<X> { fn get(&self) -> i32 { 0 } }\nimpl<T> A<u8> for T { fn get(&self) -> i32 { 8 } }\nimpl<T> A<u16> for T { fn get(&self) -> i32 { 16 } }\nfn f(x: &dyn A<u16>) -> i32 { x.get() }\nfn main() {\n    let v = 5u8;\n    let r = &v;\n    println!(\"{}\", f(&r));\n}\n");
+    assert!(d.len() == 1 && d[0].1.contains("has no implementation"), "{d:?}");
+}

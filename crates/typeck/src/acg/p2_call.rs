@@ -2206,6 +2206,9 @@ impl Cx<'_> {
             };
             // (else a blanket impl of the trait whose bounds hold of Self: `impl<A> Foo for A`'s `get` for a `&i32`
             // made a `dyn Foo`, before the trait's default, which is the one only when no such impl overrides it)
+            // (blanket impls that are not told apart: neither is taken, and neither is the trait's default, which one
+            // of them may override)
+            let ambiguous = std::cell::Cell::new(false);
             let imp = imp.or_else(|| {
                 // (the trait's own: `Program::blanket` keeps one method of each name, of whichever trait came first, so
                 // the methods of the name are looked through)
@@ -2219,6 +2222,7 @@ impl Cx<'_> {
                 // told apart by the trait's arguments, which are not kept for each method)
                 let bid = bl.next()?;
                 if bl.next().is_some() {
+                    ambiguous.set(true);
                     return None;
                 }
                 // (the trait's arguments the call has (after Self) are those of the blanket impl's header)
@@ -2226,6 +2230,7 @@ impl Cx<'_> {
                     let mut bes = es.iter().filter(|e| matches!(e.0, Ty::Param(_)));
                     if let Some((st, targs, ng)) = bes.next() {
                         if bes.next().is_some() {
+                            ambiguous.set(true);
                             return None;
                         }
                         let mut isol = vec![None; *ng];
@@ -2242,6 +2247,9 @@ impl Cx<'_> {
                 let bounds = self.prog.blanket_bounds.get(tr);
                 bounds.is_none_or(|bs| blanket_bounds_hold(self.prog, args[0], bs, &mut vec![], &mut vec![])).then_some(bid)
             });
+            if imp.is_none() && ambiguous.get() {
+                return err(span, format!("`{}` has no implementation for `{}` that is told apart from the trait's other blanket impls", self.prog.names[id as usize], self.prog.tn(args[0])));
+            }
             if let Some(imp) = imp {
                 let isig = &self.prog.sigs[imp as usize];
                 if !isig.is_generic() {
