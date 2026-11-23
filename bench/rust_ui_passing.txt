@@ -7141,6 +7141,7 @@ compile-fail	suggestions/unsized-function-parameter.rs
 compile-fail	suggestions/unused-closure-argument.rs
 check-pass	suggestions/unused-imports.rs
 compile-fail	suggestions/use-parentheses-to-call-closure-issue-145404.rs
+compile-fail	suggestions/use-type-argument-instead-of-assoc-type.rs
 compile-fail	suggestions/while-let-typo.rs
 compile-fail	suggestions/wrap-function-local-constructors.rs
 run-pass	supertrait-shadowing/trivially-false-subtrait.rs
@@ -7222,6 +7223,7 @@ compile-fail	traits/as-struct-constructor.rs
 run-pass	traits/assoc-type-in-supertrait.rs
 compile-fail	traits/associated-item-unsatisfied-trait-bounds.rs
 compile-fail	traits/associated_type_bound/116464-invalid-assoc-type-suggestion-in-trait-impl.rs
+compile-fail	traits/associated_type_bound/assoc-type-bounds-with-the-same-name-with-lacking-generic-arg-148121.rs
 check-pass	traits/associated_type_bound/assoc-type-via-another-trait-issue-19479.rs
 compile-fail	traits/associated_type_bound/check-trait-object-bounds-1.rs
 compile-fail	traits/associated_type_bound/check-trait-object-bounds-2.rs
