@@ -2368,7 +2368,9 @@ impl Cx<'_> {
                 self.rg.dyn_infer = true;
                 let tr = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
                 self.rg.dyn_infer = false;
-                tr
+                // (an annotation with holes whose regions are the inferred type's (`let f: fn(_) -> _ = foo;`): fresh
+                // ones, which the initializer flows into)
+                tr.or_else(|| if crate::ast_summary::has_infer(a) { self.rg.fresh(prog, t) } else { None })
             }
             None => self.rg.fresh(prog, t),
         };

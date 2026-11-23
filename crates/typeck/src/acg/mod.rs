@@ -1122,6 +1122,8 @@ pub fn has_hole(prog: &Program, t: Ty) -> bool {
         Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => has_hole(prog, *i),
         // (`_` は型パラメータなので、型パラメータの残らないインスタンス (symbolic でない) には無い: 辿らない)
         Ty::Struct(sid) => prog.structs[sid as usize].symbolic && prog.structs[sid as usize].args.iter().any(|&a| has_hole(prog, a)),
+        // (`let f: fn(_) -> _ = foo;`: its parameters' and result's)
+        Ty::Fn(f) => f.params.iter().any(|&p| has_hole(prog, p)) || has_hole(prog, f.ret),
         _ => false,
     }
 }

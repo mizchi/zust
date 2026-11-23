@@ -3267,3 +3267,13 @@ fn part18_closure_capture_reborrows() {
     }
     assert_eq!(check("fn doit(_: &'static mut ()) {}\nfn f(data: &'static mut ()) {\n    let c = || { let d = data; doit(d) };\n    c();\n}\nfn keep<'a>(_: &'a mut ()) {}\nfn g<'a>(data: &'a mut ()) {\n    let mut c = || keep(data);\n    c();\n}\nfn keep2(_: &'static ()) {}\nfn h(data: &'static ()) {\n    let c = || keep2(data);\n    c();\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A `let` annotation with holes in a fn pointer type (`let f: fn(_) -> _ = foo;`) is the inferred instance: it was
+/// "mismatched types: expected `fn(_) -> _`". Its regions are fresh ones the initializer flows into, so a result of
+/// `foo<'a>(&'a u32) -> &'a u32` through it is still bounded by the argument (nll/mir_check_cast_reify.rs)
+#[test]
+fn part18_fn_pointer_annotation_holes() {
+    assert_eq!(check("fn foo(x: u32) -> u32 { x + 1 }\nfn bar(x: &u32) -> &u32 { x }\nfn main() {\n    let f: fn(_) -> _ = foo;\n    let g: fn(_) -> _ = bar;\n    let h: fn(u32) -> _ = foo;\n    println!(\"{} {} {}\", f(1), g(&2), h(3));\n}\n"), vec![]);
+    let d = check("fn foo<'a>(x: &'a u32) -> &'a u32 where 'a: 'a { x }\nfn bar<'a>(x: &'a u32) -> &'static u32 {\n    let f: fn(_) -> _ = foo;\n    f(x)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("must outlive `'static`"), "{d:?}");
+}
