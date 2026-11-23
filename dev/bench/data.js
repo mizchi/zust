@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795440967744,
+  "lastUpdate": 1795440970380,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -89820,6 +89820,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/7a3864435ac5f3df87f9b941399088b60b3e0a09"
         },
         "date": 1795438272343,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 82.759,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 78.947,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 84.848,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 78.947,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.55,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "0cb2692fbd96d14492993274900858baed3e39f9",
+          "message": "Merge pull request #89 from mizchi/claude/tender-sagan-iatvun\n\nupdate_readme.py: one measured stamp for README, PERFORMANCE and SUPPORT",
+          "timestamp": "2026-11-23T22:31:09+09:00",
+          "tree_id": "e6bc34f26bd0ba491f109ac7c5934ccd658faa6f",
+          "url": "https://github.com/mizchi/zust/commit/0cb2692fbd96d14492993274900858baed3e39f9"
+        },
+        "date": 1795440969825,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
