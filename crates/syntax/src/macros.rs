@@ -953,6 +953,35 @@ fn path_seg(t: &[u8]) -> bool {
     )
 }
 
+/// The outermost attribute and derive uses of the text, expanded (crate::pm::expand_items) and put in its place with
+/// as many lines as they had; the definitions' places (textual scope) move with the text. Whether one ran
+fn pm_items(text: &mut String, pms: &[crate::pm::Lib], env: &[(String, String)], cfg: Option<&crate::cfg::CfgSet>, first: &mut HashMap<String, usize>) -> Result<bool, String> {
+    let preps = crate::pm::expand_items(text, pms, env)?;
+    if preps.is_empty() {
+        return Ok(false);
+    }
+    for (a, e, rep) in preps.into_iter().rev() {
+        let nl = text[a..e].bytes().filter(|&c| c == b'\n').count();
+        let mut r = rep;
+        for _ in 0..nl {
+            r.push('\n');
+        }
+        let (old_len, new_len) = (e - a, r.len());
+        for v in first.values_mut() {
+            if *v != usize::MAX && *v >= e {
+                *v = *v + new_len - old_len;
+            }
+        }
+        text.replace_range(a..e, &r);
+    }
+    // (their cfgs now: a macro call in an item they give under a cfg that is off does not run. The strip keeps the
+    // text's length and lines)
+    if let Some(t) = cfg.and_then(|c| crate::cfg::strip(text, c)) {
+        *text = t;
+    }
+    Ok(true)
+}
+
 /// expand_cfg with the proc macros of pms too (crate::pm): at the start of each round the outermost attribute and
 /// derive uses, and a function-like call where a `macro_rules!` call would be (a name no `macro_rules!` has)
 pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::Lib]) -> Result<Option<String>, String> {
@@ -962,11 +991,16 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
     let mut text = src.to_string();
     let mut macros: HashMap<String, Vec<Rule>> = HashMap::default();
     let mut first: HashMap<String, usize> = HashMap::default();
+    let env: &[(String, String)] = cfg.map_or(&[], |c| &c.env[..]);
+    // (the outermost attribute uses before the definitions are read: an attribute macro gets its item whole, a
+    // `macro_rules!` in it too. Those in its output are read with the others)
+    if !pms.is_empty() {
+        pm_items(&mut text, pms, env, cfg, &mut first)?;
+    }
     collect_defs(&mut text, &mut macros, Some(&mut first))?;
     if macros.is_empty() && pms.is_empty() {
         return Ok(Some(text));
     }
-    let env: &[(String, String)] = cfg.map_or(&[], |c| &c.env[..]);
     // 2. 呼び出しを展開する (いちばん外側の呼び出しだけ。展開したものの中の呼び出しは次の周)
     let limit = text.len().saturating_mul(64).max(16 << 20);
     for round in 0..64 {
@@ -974,34 +1008,8 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
         if round > 0 && text.contains("macro_rules") {
             collect_defs(&mut text, &mut macros, None)?;
         }
-        // (proc macros: the outermost attribute and derive uses. What they give is read again next round; the
-        // definitions' places (textual scope) move with the text)
-        let mut pm_done = false;
-        if !pms.is_empty() {
-            let preps = crate::pm::expand_items(&text, pms, env)?;
-            pm_done = !preps.is_empty();
-            for (a, e, rep) in preps.into_iter().rev() {
-                let nl = text[a..e].bytes().filter(|&c| c == b'\n').count();
-                let mut r = rep;
-                for _ in 0..nl {
-                    r.push('\n');
-                }
-                let (old_len, new_len) = (e - a, r.len());
-                for v in first.values_mut() {
-                    if *v != usize::MAX && *v >= e {
-                        *v = *v + new_len - old_len;
-                    }
-                }
-                text.replace_range(a..e, &r);
-            }
-            // (their cfgs now: a macro call in an item they give under a cfg that is off does not run. The strip keeps
-            // the text's length and lines)
-            if pm_done {
-                if let Some(t) = cfg.and_then(|c| crate::cfg::strip(&text, c)) {
-                    text = t;
-                }
-            }
-        }
+        // (proc macros: the outermost attribute and derive uses. What they give is read again next round)
+        let mut pm_done = !pms.is_empty() && pm_items(&mut text, pms, env, cfg, &mut first)?;
         let b = text.as_bytes();
         let toks = crate::lexer::tokenize(b);
         let (close, depth) = brackets(b, &toks);

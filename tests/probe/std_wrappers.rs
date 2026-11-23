@@ -39,9 +39,10 @@ fn main() {
     **w += 1;
     let a = AssertUnwindSafe(7u8);
     println!("{} {} {} {}", x, *a, <AssertUnwindSafe<u8> as Describe>::describe(), need(&a));
-    // (a lock is UnwindSafe whatever it holds)
+    // (a lock, and its guard, is UnwindSafe whatever it holds)
     let mut y = 1;
-    println!("{}", need(&std::sync::Mutex::new(&mut y)));
+    let m = std::sync::Mutex::new(&mut y);
+    println!("{} {}", need(&m), need(&m.lock().unwrap()));
     N.with(|n| println!("{n}"));
     let _f: fn(&Holder<u32>) -> u32 = Holder::get;
     let calls = std::cell::Cell::new(0);

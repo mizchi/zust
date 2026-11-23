@@ -85,6 +85,12 @@ impl Second for &&u32 {
         2
     }
 }
+trait Third {
+    fn m(&self) -> u32 {
+        30
+    }
+}
+impl Third for &&u32 {}
 
 fn main() {
     let s = "four";
@@ -98,9 +104,9 @@ fn main() {
     println!("{}", a.v());
     let y = 5u8;
     println!("{} {}", (&y).v(), y.v());
-    // (a trait named for an impl for `&&u32`: that trait's method)
+    // (a trait named for an impl for `&&u32`: that trait's method, its default when the impl leaves it out)
     let n = 5u32;
     let r = &n;
     let rr = &r;
-    println!("{} {}", First::m(&rr), Second::m(&rr));
+    println!("{} {} {}", First::m(&rr), Second::m(&rr), Third::m(&rr));
 }

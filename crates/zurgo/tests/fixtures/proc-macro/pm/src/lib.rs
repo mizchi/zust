@@ -25,6 +25,13 @@ pub fn scaled(attr: TokenStream, item: TokenStream) -> TokenStream {
     format!("{item} fn {n}_scaled() -> u32 {{ {n}() * {k} }}").parse().unwrap()
 }
 
+/// `#[rules] fn f() { .. }`: f as it is, and `const RULES_<NAME>: usize` with the number of `macro_rules!` in it
+#[proc_macro_attribute]
+pub fn rules(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let n = item.to_string().matches("macro_rules").count();
+    format!("{item} const RULES_{}: usize = {n};", item_name(&item).to_uppercase()).parse().unwrap()
+}
+
 /// `#[docs] item`: the item, and `const DOCS_<NAME>: usize` with the number of its doc attributes (doc comments come in
 /// as `#[doc = ".."]`)
 #[proc_macro_attribute]

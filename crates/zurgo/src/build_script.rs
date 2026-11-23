@@ -419,7 +419,7 @@ impl<'a> Runner<'a> {
             let file = deps_dir.join(format!("lib{}-{h}.{}", lib.name, if pm { "so" } else { "rlib" }));
             // (rustc's dep-info: the files it read outside the package, `include_str!("../../shared.txt")`, count too)
             let dep_info = deps_dir.join(format!("{}-{h}.d", lib.name));
-            let local_fp = || format!("{}|{}", src_fp(&p.dir, &self.skip), outside_fp(&dep_info, &p.dir));
+            let local_fp = || format!("{}|{}", src_fp(&p.dir, &self.skip), outside_fp(&dep_info, &p.dir).0);
             let fresh = file.is_file() && (self.g.pkgs[m.0].source.is_some() || local_fp() == std::fs::read_to_string(file.with_extension("fp")).unwrap_or_default());
             if !fresh {
                 let mut c = Command::new(rustc());
@@ -444,11 +444,14 @@ impl<'a> Runner<'a> {
                 c.envs(env.iter().map(|(k, v)| (k, v))).current_dir(&p.dir).arg(&lib.path);
                 // (the sources as they were when rustc started: a file saved while it ran leaves the artifact stale, so
                 //  its fingerprint is not written and the next build builds it again)
+                // (and the files outside the package that rustc read: none of them saved after it started)
                 let before = src_fp(&p.dir, &self.skip);
+                let started = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
                 run_rustc(c, &format!("`{} v{}`", p.name, p.version))?;
                 let after = src_fp(&p.dir, &self.skip);
-                if before == after {
-                    let _ = std::fs::write(file.with_extension("fp"), format!("{before}|{}", outside_fp(&dep_info, &p.dir)));
+                let (outside, newest) = outside_fp(&dep_info, &p.dir);
+                if before == after && newest <= started {
+                    let _ = std::fs::write(file.with_extension("fp"), format!("{before}|{outside}"));
                 } else {
                     let _ = std::fs::remove_file(file.with_extension("fp"));
                 }
@@ -676,10 +679,12 @@ fn unquote(v: &str) -> String {
 
 /// A file's size and modification time ("-" when it does not exist)
 /// The files rustc's dep-info (`--emit=dep-info`) lists outside the package's directory, with their sizes and times
-fn outside_fp(dep_info: &Path, pkg_dir: &Path) -> String {
-    let Ok(t) = std::fs::read_to_string(dep_info) else { return String::new() };
+fn outside_fp(dep_info: &Path, pkg_dir: &Path) -> (String, u128) {
+    let Ok(t) = std::fs::read_to_string(dep_info) else { return (String::new(), 0) };
     let dir = std::fs::canonicalize(pkg_dir).unwrap_or_else(|_| pkg_dir.to_path_buf());
     let mut v: Vec<String> = vec![];
+    // (and the newest modification time among them)
+    let mut newest = 0;
     // (each file it read is a line `path:` of its own, spaces written `\ `)
     for l in t.lines() {
         let Some(f) = l.strip_suffix(':') else { continue };
@@ -690,8 +695,9 @@ fn outside_fp(dep_info: &Path, pkg_dir: &Path) -> String {
             continue;
         }
         v.push(format!("{f}={}", file_fp(fp)));
+        newest = newest.max(mtime(fp).unwrap_or(0));
     }
-    v.join(",")
+    (v.join(","), newest)
 }
 
 fn file_fp(p: &Path) -> String {

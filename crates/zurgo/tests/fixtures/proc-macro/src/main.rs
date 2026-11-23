@@ -56,6 +56,17 @@ macro_rules! add {
     };
 }
 
+// (an attribute's item comes whole: the `macro_rules!` in it too)
+#[pm::rules]
+fn inner() -> u32 {
+    macro_rules! one {
+        () => {
+            1
+        };
+    }
+    one!() + 1
+}
+
 fn main() {
     println!("{} {}", seven(), seven_scaled());
     let p = Point { x: 1, y: 2, z: 3 };
@@ -68,5 +79,6 @@ fn main() {
     println!("{} {} {} {}", DOCS_MULTI, NINE, answer(), via_alias!(1, 2, 3));
     let _ = Multi;
     println!("{} {} {} {} {}", re::plus!(1, 2, 3), plus!(1, 2), more!(4, 5), add!(1), stringify!(pm::add!(1, 2)));
+    println!("{} {}", RULES_INNER, inner());
     println!("{}", pm::shared!());
 }

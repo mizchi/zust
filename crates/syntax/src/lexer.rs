@@ -2123,53 +2123,100 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             .chain(imports.iter().filter(|i| std_path(&i.2)).map(|i| i.1.as_slice()))
             .chain(block_imports.iter().filter(|i| std_path(&i.3)).map(|i| i.2.as_slice()))
             .collect();
+        // (the names a generic parameter list `<..>` at g declares, of those, and the index of its `>`: `<C, const N:
+        // usize, T: Tr<C>>` declares C, N and T)
+        let generics = |g: usize| -> (Vec<&[u8]>, usize) {
+            let mut names = vec![];
+            let mut d = 0usize;
+            let mut q = g;
+            while q < toks.len() {
+                if is_sym(q, b'<') {
+                    d += 1;
+                } else if is_sym(q, b'>') && !(q >= 1 && is_sym(q - 1, b'-')) {
+                    d -= 1;
+                    if d == 0 {
+                        return (names, q);
+                    }
+                } else if (is_sym(q, b'(') || is_sym(q, b'[')) && close[q] != usize::MAX {
+                    q = close[q];
+                } else if d == 1 && toks[q].0 == 0 && (is_sym(q - 1, b'<') || is_sym(q - 1, b',') || is_id(q - 1, b"const")) && renamed_names.contains(&tok(q)) {
+                    names.push(tok(q));
+                }
+                q += 1;
+            }
+            (names, toks.len() - 1)
+        };
+        // (a name in its scope, where it is no path's segment: `C`, `x: C`, `C: Tr`, not `C::new` / `a::C`)
+        let local_at = |q: usize| {
+            toks[q].0 == 0
+                && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':'))
+                && !(q + 2 < toks.len() && is_sym(q + 1, b':') && is_sym(q + 2, b':'))
+        };
+        // (an item's generic parameters, in the whole item: `impl<C> X<C> { .. }`, `struct S<C>(C);`)
+        let mut k = if renamed_names.is_empty() { toks.len() } else { 0 };
+        while k + 2 < toks.len() {
+            let g = if is_id(k, b"impl") && is_sym(k + 1, b'<') {
+                k + 1
+            } else if [&b"struct"[..], b"enum", b"union", b"trait", b"type"].iter().any(|w| is_id(k, w)) && toks[k + 1].0 == 0 && is_sym(k + 2, b'<') {
+                k + 2
+            } else {
+                k += 1;
+                continue;
+            };
+            let (names, ge) = generics(g);
+            if !names.is_empty() {
+                let mut e = ge + 1;
+                while e < toks.len() && !is_sym(e, b'{') && !is_sym(e, b';') {
+                    if (is_sym(e, b'(') || is_sym(e, b'[')) && close[e] != usize::MAX {
+                        e = close[e];
+                    }
+                    e += 1;
+                }
+                let until = if e < toks.len() && is_sym(e, b'{') && close[e] != usize::MAX { close[e] } else { e.min(toks.len() - 1) };
+                for q in g + 1..until {
+                    if names.contains(&tok(q)) && local_at(q) {
+                        local_tok[q] = true;
+                    }
+                }
+            }
+            k = g + 1;
+        }
         let mut k = 0;
         while k + 2 < toks.len() {
             if !is_id(k, b"fn") || toks[k + 1].0 != 0 {
                 k += 1;
                 continue;
             }
+            // (each name and where it is the local: a generic parameter or a parameter in the whole function, a `let`
+            // after its statement to the end of its block)
+            let mut bound: Vec<(&[u8], usize, usize)> = vec![];
             // (the parameters: `(`, after the generics)
             let mut p = k + 2;
             if is_sym(p, b'<') {
-                let mut d = 0;
-                while p < toks.len() {
-                    if is_sym(p, b'<') {
-                        d += 1;
-                    } else if is_sym(p, b'>') && !(p >= 1 && is_sym(p - 1, b'-')) {
-                        d -= 1;
-                        if d == 0 {
-                            p += 1;
-                            break;
-                        }
-                    }
-                    p += 1;
+                let (names, ge) = generics(p);
+                for n in names {
+                    bound.push((n, p + 1, usize::MAX));
                 }
+                p = ge + 1;
             }
             if p >= toks.len() || !is_sym(p, b'(') || close[p] == usize::MAX {
                 k += 1;
                 continue;
             }
             let pe = close[p];
-            // (each name and where it is the local: a parameter in the whole function, a `let` from itself to the end of
-            // its block)
-            let mut bound: Vec<(&[u8], usize, usize)> = vec![];
             for q in p + 1..pe {
                 if toks[q].0 == 0 && q + 2 <= pe && is_sym(q + 1, b':') && !is_sym(q + 2, b':') && renamed_names.contains(&tok(q)) {
                     bound.push((tok(q), p + 1, usize::MAX));
                 }
             }
-            // (the body: the first `{` after the parameters, or none (`;`))
+            // (the body: the first `{` after the parameters, or none (`;`: then the signature's end))
             let mut b = pe + 1;
             while b < toks.len() && !is_sym(b, b'{') && !is_sym(b, b';') {
                 b += 1;
             }
-            if b >= toks.len() || !is_sym(b, b'{') || close[b] == usize::MAX {
-                k = pe;
-                continue;
-            }
-            let be = close[b];
-            for q in b + 1..be {
+            let body = b < toks.len() && is_sym(b, b'{') && close[b] != usize::MAX;
+            let be = if body { close[b] } else { b.min(toks.len() - 1) };
+            for q in (b + 1..be).filter(|_| body) {
                 if is_id(q, b"let") {
                     let n = if q + 1 < be && is_id(q + 1, b"mut") { q + 2 } else { q + 1 };
                     // (a plain name: `let FnvHasher(mut h) = ..` is a pattern of the struct)
@@ -2191,13 +2238,22 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                                 d -= 1;
                             }
                         }
-                        bound.push((tok(n), n, until));
+                        // (the name itself, then after its statement: `let release = release(1);` calls the item)
+                        let mut j = n + 1;
+                        while j < be && !is_sym(j, b';') {
+                            if (is_sym(j, b'(') || is_sym(j, b'[') || is_sym(j, b'{')) && close[j] != usize::MAX {
+                                j = close[j];
+                            }
+                            j += 1;
+                        }
+                        bound.push((tok(n), n, n));
+                        bound.push((tok(n), j, until));
                     }
                 }
             }
             if !bound.is_empty() {
                 let is_bound = |q: usize| bound.iter().any(|&(nm, from, until)| nm == tok(q) && q >= from && q <= until);
-                for q in p + 1..be {
+                for q in k + 2..be {
                     if toks[q].0 == 0 && is_bound(q) && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':')) && !is_sym(q + 1, b':') || (toks[q].0 == 0 && is_bound(q) && q + 2 <= be && is_sym(q + 1, b':') && !is_sym(q + 2, b':')) {
                         local_tok[q] = true;
                     }

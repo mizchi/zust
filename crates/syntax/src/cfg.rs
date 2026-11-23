@@ -443,16 +443,19 @@ pub(crate) fn outer_docs_start(s: &[u8], p: usize) -> usize {
         let pls = s[..prev_end].iter().rposition(|&c| c == b'\n').map_or(0, |k| k + 1);
         let line = &s[pls..prev_end];
         let lead = line.iter().take_while(|c| c.is_ascii_whitespace()).count();
-        let text = &line[lead..];
+        // (and without the blanks after it: `*/  `, a CRLF line's `\r`)
+        let tail = line.iter().rev().take_while(|c| c.is_ascii_whitespace()).count();
+        let text = &line[lead..line.len().saturating_sub(tail).max(lead)];
         let doc_line = text.starts_with(b"///") && !text.starts_with(b"////");
         let doc_block = text.starts_with(b"/**") && !text.starts_with(b"/***") && text.ends_with(b"*/") && text.len() > 4;
         if doc_line || doc_block {
             start = pls + lead;
             continue;
         }
-        // (a block doc comment over several lines, `/** ..\n .. */`: back to its `/**`, at a line's start)
+        // (a block doc comment over several lines, `/** ..\n .. */`: back to its `/**`, at a line's start. The
+        // comment this `*/` closes opens at the nearest `/*` before it: not a `/**` further back, in a string)
         if text.ends_with(b"*/") {
-            if let Some(o) = s[..prev_end].windows(3).rposition(|w| w == b"/**") {
+            if let Some(o) = s[..prev_end].windows(2).rposition(|w| w == b"/*").filter(|&o| s[o..].starts_with(b"/**")) {
                 let ols = s[..o].iter().rposition(|&c| c == b'\n').map_or(0, |k| k + 1);
                 let opens_doc = !s[o..].starts_with(b"/***") && s[ols..o].iter().all(|c| c.is_ascii_whitespace());
                 // (nothing closes a comment between its `/**` and this line's `*/`)
@@ -627,6 +630,23 @@ mod tests {
         let o = strip(src, &c).unwrap_or_else(|| src.to_string());
         assert_eq!(o.len(), src.len());
         o.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn outer_docs_are_comments_only() {
+        fn start(src: &str) -> &str {
+            let p = src.find("#[").unwrap();
+            &src[outer_docs_start(src.as_bytes(), p)..p]
+        }
+        assert_eq!(start("fn a() {}\n/**\n * doc\n */\n#[x]\nfn f() {}"), "/**\n * doc\n */\n");
+        // (blanks after `*/`, CRLF lines)
+        assert_eq!(start("fn a() {}\n/**\n * doc\n */  \n#[x]\nfn f() {}"), "/**\n * doc\n */  \n");
+        assert_eq!(start("fn a() {}\r\n/**\r\n * doc\r\n */\r\n/// more\r\n#[x]\r\nfn f() {}"), "/**\r\n * doc\r\n */\r\n/// more\r\n");
+        // (a `/**` in a string is no comment's: the `*/` closes the `/*` nearest before it)
+        let src = "const K: &str = r#\"\n/**\n\"#;\nfn main() {}\n/* ordinary comment\n*/\n#[cfg(any())]\nfn removed() {}\n";
+        assert_eq!(start(src), "");
+        let o = strip(src, &CfgSet::default()).unwrap();
+        assert!(o.contains("fn main() {}") && o.contains("\"#;") && !o.contains("removed"), "{o}");
     }
 
     #[test]
