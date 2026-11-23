@@ -559,14 +559,18 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         }
         let declared: Vec<&str> = outer.iter().map(|s| s.as_str()).chain(own.iter().copied()).collect();
         let mut used = vec![];
+        // (with no `for<..>` in the item, the lifetimes in its `impl` and `dyn` types are the declared ones too:
+        // `Box<dyn X<Y<'a> = &'a ()>>` with no `'a`, E0261)
+        let deep = !HRTB_TEXT.with(|c| c.get());
+        let mut names = |t: &PTy, used: &mut Vec<String>| if deep { named_lifetimes_deep(t, used, 0) } else { named_lifetimes(t, used) };
         if let Some(r) = &sig.recv_ty {
-            named_lifetimes(r, &mut used);
+            names(r, &mut used);
         }
         for (_, t) in &sig.params {
-            named_lifetimes(t, &mut used);
+            names(t, &mut used);
         }
         if let Some(r) = &sig.ret {
-            named_lifetimes(r, &mut used);
+            names(r, &mut used);
         }
         bound_lifetimes(&sig.generics, &mut used);
         if let Some(l) = undeclared_lifetime(&used, &declared) {
@@ -734,6 +738,56 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
 /// Checks on a struct / enum / union definition: unused parameters (E0392), `Self` in defaults (E0735), union fields
 /// a slice or array whose element is unsized (`[[T]]`, `[str; 2]`, `[dyn Tr]`), anywhere in t: its text
 /// The lifetimes a type names, outside fn pointer, `impl` and `dyn` types (which may bind their own with `for<'a>`)
+thread_local! {
+    /// The item being summarized writes `for<..>` (a higher-ranked binder, which the parser does not keep): the
+    /// lifetimes in its `impl` and `dyn` types may be the binder's, and are not checked against the declared ones
+    static HRTB_TEXT: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// named_lifetimes, and in `impl` and `dyn` types too (their bounds, associated type bindings, `Fn(..)` sugar)
+fn named_lifetimes_deep(t: &PTy, out: &mut Vec<String>, depth: u32) {
+    fn path(p: &crate::parse::Path, out: &mut Vec<String>, depth: u32) {
+        for sg in &p.segs {
+            for a in &sg.args {
+                match a {
+                    crate::parse::GArg::Lifetime(l) => out.push(l.clone()),
+                    crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) => named_lifetimes_deep(t, out, depth + 1),
+                    _ => {}
+                }
+            }
+            if let Some((ps, r)) = &sg.fn_args {
+                ps.iter().for_each(|t| named_lifetimes_deep(t, out, depth + 1));
+                if let Some(r) = r {
+                    named_lifetimes_deep(r, out, depth + 1);
+                }
+            }
+        }
+    }
+    if depth > 16 {
+        return;
+    }
+    match t {
+        PTy::Ref(l, _, i) => {
+            if let Some(l) = l {
+                out.push(l.clone());
+            }
+            named_lifetimes_deep(i, out, depth + 1);
+        }
+        PTy::Path(None, p) => path(p, out, depth),
+        PTy::Impl(bs) | PTy::Dyn(bs) => {
+            for b in bs {
+                match b {
+                    Bound::Lifetime(l) => out.push(l.clone()),
+                    Bound::Trait(_, p) => path(p, out, depth),
+                }
+            }
+        }
+        PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => named_lifetimes_deep(i, out, depth + 1),
+        PTy::Tuple(ts) => ts.iter().for_each(|t| named_lifetimes_deep(t, out, depth + 1)),
+        _ => {}
+    }
+}
+
 pub fn named_lifetimes(t: &PTy, out: &mut Vec<String>) {
     match t {
         PTy::Ref(l, _, i) => {
@@ -2574,6 +2628,7 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
         _ => text.to_string(),
     };
     let f = parse_file(&text)?;
+    HRTB_TEXT.with(|c| c.set(text.contains("for<") || text.contains("for <")));
     let Some(item) = f.items.first() else { return Ok(Summary::default()) };
     // (E0496 / E0403: a generic associated type's own parameters named as its trait's or impl's: `type Bar<'a>` in
     // `trait Shadow<'a>`)

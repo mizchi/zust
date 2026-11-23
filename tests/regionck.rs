@@ -2535,6 +2535,20 @@ fn part15_gat_shadowing() {
     assert_eq!(check("trait NoShadow<'a> {\n    type Bar<'b>;\n    fn f(&self) -> u8;\n}\nimpl<'a> NoShadow<'a> for &'a u32 {\n    type Bar<'b> = &'b u8;\n    fn f(&self) -> u8 {\n        1\n    }\n}\ntrait NoShadowT<T> {\n    type Bar<U>;\n}\nimpl<T> NoShadowT<T> for Option<T> {\n    type Bar<U> = U;\n}\ntrait WithSelf {\n    type Out<'x>\n    where\n        Self: 'x;\n}\nfn main() {\n    let x = 3u32;\n    println!(\"{}\", (&x).f());\n}\n"), vec![]);
 }
 
+/// E0261 in a signature's `impl` and `dyn` types, where the item writes no `for<..>` (which the parser does not keep):
+/// `Box<dyn X<Y<'a> = &'a ()>>` with no `'a` (generic-associated-types/issue-67510.rs), `impl Iterator<Item =
+/// Self::Item<'missing>>` (impl-trait/in-trait/missing-lt-outlives-in-rpitit-114274.rs)
+#[test]
+fn part15_undeclared_in_impl_and_dyn() {
+    let d = check("trait X {\n    type Y<'a>;\n}\nfn f(x: Box<dyn X<Y<'a> = &'a ()>>) {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("use of undeclared lifetime name `'a` (E0261)"), "{d:?}");
+    let d = check("fn g(x: &u8) -> impl std::fmt::Display + 'b {\n    *x\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 1 && d[0].1.contains("E0261"), "{d:?}");
+    assert_eq!(check("use std::fmt::Display;\nfn f<'a>(x: &'a u8) -> impl Fn() -> u8 + 'a {\n    move || *x\n}\nfn g(x: &dyn Fn(&u8) -> u8) -> u8 {\n    x(&1)\n}\nfn h(x: Box<dyn Fn() -> u8 + 'static>) -> u8 {\n    x()\n}\nfn k<'a>(x: impl Iterator<Item = &'a u8>) -> usize {\n    x.count()\n}\nstruct S<'a>(&'a [u8]);\nimpl<'a> S<'a> {\n    fn it(&self) -> impl Iterator<Item = &'a u8> + '_ {\n        self.0.iter()\n    }\n    fn d(&self) -> Box<dyn Display + 'a> {\n        Box::new(self.0.len())\n    }\n}\ntrait T<'a> {\n    fn m(&self) -> Option<Box<dyn Display + 'a>>;\n}\nfn u<'a>(x: &'a u8) -> impl Display + use<'a> {\n    x\n}\nfn main() {\n    let v = [1u8];\n    let s = S(&v);\n    println!(\"{} {} {} {} {} {} {}\", f(&1)(), g(&|x| *x), h(Box::new(|| 2)), k(v.iter()), s.it().count(), s.d(), u(&3));\n}\n"), vec![]);
+    // (a `for<..>` in the item: not checked)
+    assert_eq!(check("fn h(f: &dyn for<'a> Fn(&'a u8) -> &'a u8) -> u8 {\n    *f(&1)\n}\nfn main() {\n    println!(\"{}\", h(&|x| x));\n}\n"), vec![]);
+}
+
 
 /// From the third review of #69: a closure's call that needs `T: 'static` takes it from `T: 'a` with `'a: 'static`,
 /// and from a supertrait whose `Self` must be 'static (`trait Derived: Base`, `trait Base: 'static`); a T in the type
