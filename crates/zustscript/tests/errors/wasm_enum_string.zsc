@@ -1,0 +1,4 @@
+// expect: String cannot be inside a record or enum that crosses to wasm
+// (an enum crosses as scalar slots: one holding a string does not cross yet)
+enum Tag { Named(String), Anon }
+@wasm pub fn f(t: Tag) -> i32 { 1 }

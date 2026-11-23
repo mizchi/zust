@@ -10,12 +10,6 @@ only shrink. `todo_md_lists_every_todo` checks that every marked case is named h
 
 These are in the type and borrow checks that the compat and region-check work changes, so they were left there.
 
-### Borrow and region checking
-
-| case | what is accepted that rustc rejects |
-|---|---|
-| `region_block_tail_escapes` | a loan held by a block's local, or by what a by-value method returns (`Some(&v).unwrap()`), is not followed out of the block's tail (E0597) |
-
 ### Privacy
 
 | case | what is accepted that rustc rejects |

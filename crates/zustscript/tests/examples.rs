@@ -17,6 +17,12 @@ fn out_dir(name: &str) -> PathBuf {
     let d = root().join("target/test-out").join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("node_modules")).unwrap();
+    // (the JS side of the helpers, as a package: the glue imports `zustscript-helper`)
+    let helper = d.join("node_modules/zustscript-helper");
+    std::fs::create_dir_all(&helper).unwrap();
+    for f in ["package.json", "index.js", "index.d.ts"] {
+        std::fs::copy(root().join("helper/ts").join(f), helper.join(f)).unwrap();
+    }
     // (a stand-in for React: renders to a string)
     let stub = root().join("tests/stub/react");
     let dst = d.join("node_modules/react");
@@ -322,6 +328,81 @@ fn eq_check_is_linear() {
     }
 }
 
+/// tests/wire.zsc: records holding strings and arrays, arrays of records and strings, nested arrays cross to @wasm
+/// as bytes (zustscript-helper on the JS side, zustscript_helper in the Rust), and give the JS layer's results
+#[test]
+fn wire_same_in_js_and_wasm() {
+    let script = r#"
+const m = await import('./wire.js');
+const ana = { name: "Ana", age: 30, tags: ["a", "😀"] }, bo = { name: "bo", age: 41, tags: [] };
+const t = { title: "T", people: [ana, bo], scores: [[1, 2.5], [], [3]], open: true, id: 9007199254740993n };
+const g = m.grow(t, { name: "cy", age: 7, tags: ["x"] });
+console.log(JSON.stringify([m.describe(ana), m.oldest([ana, bo, ana]), m.rename(bo, "Bö"), m.total(t), m.names(g), m.grid(3)]));
+console.log(JSON.stringify(g, (k, v) => typeof v === "bigint" ? v.toString() : v));
+// the helper keeps a leading U+FEFF and a field named __proto__
+const h = await import('zustscript-helper');
+const rec = ["rec", [["__proto__", "str"]]];
+console.log(m.shadow(ana, 2), h.decode("str", h.encode("str", "\uFEFFhi")).length, JSON.stringify(h.decode(rec, h.encode(rec, JSON.parse('{"__proto__":"x"}')))));
+"#;
+    let want = "[\"Ana (30) a/😀\",{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"Bö\",\"age\":41,\"tags\":[]},6.5,[\"ANA\",\"BO\",\"CY\"],[[0],[0,1],[0,1,2]]]\n{\"title\":\"T\",\"people\":[{\"name\":\"Ana\",\"age\":30,\"tags\":[\"a\",\"😀\"]},{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"cy\",\"age\":7,\"tags\":[\"x\"]}],\"scores\":[[1,2.5],[],[3],[1.5]],\"open\":false,\"id\":\"9007199254740994\"}\n32 3 {\"__proto__\":\"x\"}\n";
+    for flags in [&[][..], &["--all-js"][..]] {
+        let d = out_dir(if flags.is_empty() { "wire" } else { "wire_js" });
+        let o = zsc(&root().join("tests/wire.zsc"), &d, flags);
+        assert!(o.status.success(), "zsc {flags:?} failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(node(&d, script), want, "{flags:?}");
+    }
+    // (the wasm build goes through the helpers)
+    let js = std::fs::read_to_string(root().join("target/test-out/wire/wire.js")).unwrap();
+    assert!(js.contains("from \"zustscript-helper\""), "{js}");
+}
+
+/// tests/ts_import.zsc: records read from a TS file (tests/ts/model.ts) with `import type`. The JS takes TS's objects
+/// as they are, and the .d.ts imports model.ts's types, so TS code passes its own values (tests/ts/consumer.ts,
+/// checked with tsc when it is available)
+#[test]
+fn ts_records() {
+    let d = out_dir("ts_import");
+    // (the module and its TS file side by side, as in a project: the .d.ts imports `./ts/model.js`)
+    std::fs::create_dir_all(d.join("ts")).unwrap();
+    std::fs::copy(root().join("tests/ts/model.ts"), d.join("ts/model.ts")).unwrap();
+    std::fs::copy(root().join("tests/ts/cr.ts"), d.join("ts/cr.ts")).unwrap();
+    std::fs::copy(root().join("tests/ts_import.zsc"), d.join("ts_import.zsc")).unwrap();
+    let o = zsc(&d.join("ts_import.zsc"), &d, &[]);
+    assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(
+        &d,
+        r#"
+const m = await import('./ts_import.js');
+const u = { id: 7, name: "ana", admin: false, tags: ["a"] };
+const p = m.reply({ author: u, title: "Hi", scores: [1, 2, 4.5], replies: [] }, u, "ok");
+console.log(m.display(u), "|", m.summary(p), "|", JSON.stringify(m.promote(u)));
+const doc = { title: "D", status: "draft", shapes: [{ kind: "circle", r: 1 }, { kind: "rect", w: 2, h: 3 }] };
+console.log(m.label("published"), m.label(doc.status), m.total_area(doc), JSON.stringify(m.publish(doc)), m.same_shape({ kind: "rect", w: 2, h: 3 }, { kind: "rect", h: 3, w: 2 }), m.same_shape(doc.shapes[0], doc.shapes[1]), m.tile({ kind: "square", side: 4 }), m.tile({ kind: "empty" }));
+console.log(m.same_flag({ kind: "on" }, { kind: "on" }), m.same_flag({ kind: "on" }, { kind: "off" }), JSON.stringify(m.item_of({ item: { kind: "crate", n: 3 } })), m.crates({ item: { kind: "nothing" } }), m.esc("done"), m.par("p"), m.loc("l2"), m.sur("bc"), m.sur_first() === "\uD835\uDC9Ca");
+console.log(m.same_user(u, { ...u, tags: ["a"] }), m.same_user(u, m.promote(u)), m.dist({ x: 3, y: 4 }, { x: 0, y: 0 }), m.badge(m.promote(u)), m.cr({ a: 2, b: "x", c: true }));
+"#,
+    );
+    assert_eq!(out, "ana (member, #7) | Hi by ana (member, #7): 1 replies, score 7 | {\"id\":7,\"name\":\"ana\",\"admin\":true,\"tags\":[\"a\",\"staff\"]}\nlive draft! 9 {\"title\":\"D\",\"status\":\"published\",\"shapes\":[{\"kind\":\"circle\",\"r\":2},{\"kind\":\"rect\",\"w\":3,\"h\":2}]} true false 4 0\ntrue false {\"kind\":\"crate\",\"n\":3} 0 d q 2 2 true\ntrue false 5 ANA #7 a+staff x2!\n");
+    let dts = std::fs::read_to_string(d.join("ts_import.d.ts")).unwrap();
+    assert!(dts.contains("import type { Doc, Esc, Flag, Loc, Par, Point, Post, Shape, Shelf, Status, Sur, Tile, User } from \"./ts/model.js\";"), "{dts}");
+    assert!(!dts.contains("export interface User"), "{dts}");
+    // (an unexported union with a named member: written with the member's object, which needs no name)
+    assert!(dts.contains("export type Item = { kind: \"crate\"; n: number } | { kind: \"nothing\" };"), "{dts}");
+    let tsc = std::env::var("TSC").unwrap_or_else(|_| "tsc".into());
+    if Command::new(&tsc).arg("--version").output().is_err() {
+        eprintln!("skipped tsc: no tsc (set TSC)");
+        return;
+    }
+    std::fs::copy(root().join("tests/ts/consumer.ts"), d.join("consumer.ts")).unwrap();
+    std::fs::write(d.join("package.json"), "{ \"type\": \"module\" }\n").unwrap();
+    let o = Command::new(&tsc)
+        .current_dir(&d)
+        .args(["--strict", "--noEmit", "--target", "es2022", "--module", "nodenext", "--moduleResolution", "nodenext", "consumer.ts"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "tsc:\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+}
+
 /// tests/js_inplace.zsc: the JS layer appends in place only onto a local array no one else can see, so every
 /// result is what the copying push gives
 #[test]
@@ -410,9 +491,13 @@ console.log(m.add_all([1, 2]).join(","), m.push_v([1, 2], 3).join(","));
 console.log(m.shadow_fn(), m.prec_str(3), m.push_zs([1], 2).join(","), m.re({ value: 5 }));
 console.log(m.zs_inj(5, 2), m.kw_inj(7, 3), JSON.stringify(m.kw_rec({ async_: 1, move: 2 })));
 console.log(m.many_ops(100000), m.own_ops(), m.nested_k(), m.proto_op());
+console.log(m.gen_after_k(100000), m.gen_outer_op(100000), m.gen_plus_one(100000));
+try { m.resume_twice(); } catch (e) { console.log(e.message); }
+const g = m.leaks_far(), y = g.next();
+console.log(JSON.stringify(y.value), JSON.stringify(g.next(41)), m.handles_far(), m.paren_str());
 "#,
     );
-    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n99999 42 101 7\n");
+    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n99999 42 101 7\n99999 199999 100000\nzustscript: a continuation was resumed twice\n{\"TAG\":\"FarOp\"} {\"value\":42,\"done\":true} 42 ()!\n");
     let dts = std::fs::read_to_string(d.join("regress.d.ts")).unwrap();
     assert!(dts.contains("import type { ReactElement as $ReactElement } from \"react\";"), "{dts}");
     assert!(dts.contains("export interface ReactElement {"), "{dts}");

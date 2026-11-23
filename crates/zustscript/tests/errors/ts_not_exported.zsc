@@ -1,0 +1,2 @@
+// expect: does not export `Hidden`
+import type { Hidden } from "../ts/unsupported.ts";

@@ -1,0 +1,2 @@
+// expect: `Date` (the type of `When.at`) is not declared in this file
+import type { When } from "../ts/unsupported.ts";

@@ -88,6 +88,8 @@ pub struct EnumDef {
     pub variants: Vec<(String, Vec<Ty>)>,
     /// the result type of each operation, for an effect
     pub ops: HashMap<String, Ty>,
+    /// read from a TS union: its values are TS's (see tsimport.rs)
+    pub ts: Option<crate::ast::TsEnum>,
 }
 
 impl EnumDef {
@@ -203,7 +205,7 @@ pub fn wty_to_ty(w: &WTy) -> Ty {
         WTy::Str | WTy::String => Ty::Str,
         WTy::Callback(a, r, _) => Ty::Fn(a.iter().map(wty_to_ty).collect(), Box::new(wty_to_ty(r))),
         // (only lowered `@wasm fn`s have these, and their types come from their zustscript signature)
-        WTy::Value(_) => Ty::Unit,
+        WTy::Value(_) | WTy::Wire(..) => Ty::Unit,
     }
 }
 
@@ -528,8 +530,11 @@ impl Checker {
                     }
                     self.info.records.insert(name.clone(), RecordDef { params: params.clone(), fields: vec![] });
                 }
-                Item::Enum { name, params, .. } => {
-                    self.info.enums.insert(name.clone(), EnumDef { params: params.clone(), variants: vec![], ops: HashMap::new() });
+                Item::Enum { name, params, pos, .. } => {
+                    if self.info.records.contains_key(name) || self.info.enums.contains_key(name) {
+                        self.err(*pos, format!("the type `{name}` is defined twice"));
+                    }
+                    self.info.enums.insert(name.clone(), EnumDef { params: params.clone(), variants: vec![], ops: HashMap::new(), ts: None });
                 }
                 _ => {}
             }
@@ -541,7 +546,7 @@ impl Checker {
                     let fs = fields.iter().map(|(f, t)| (f.clone(), self.ty_of(t, params))).collect();
                     self.info.records.get_mut(name).unwrap().fields = fs;
                 }
-                Item::Enum { name, params, variants, pos } => {
+                Item::Enum { name, params, variants, pos, from } => {
                     let mut vs = vec![];
                     let mut ops = HashMap::new();
                     for (v, ts, ret) in variants {
@@ -560,6 +565,7 @@ impl Checker {
                     let e = self.info.enums.get_mut(name).unwrap();
                     e.variants = vs;
                     e.ops = ops;
+                    e.ts = from.as_ref().and_then(|f| f.repr.clone());
                 }
                 Item::Fn { name, generics, bounds, args, ret, pos, .. } => {
                     if let Some(p) = names.insert(name.clone(), *pos) {
@@ -589,7 +595,7 @@ impl Checker {
                     }
                     self.info.wasm.insert(name.clone(), (args.clone(), ret.clone()));
                 }
-                Item::WasmRaw(_) => {}
+                Item::WasmRaw(_) | Item::ImportType { .. } => {}
             }
         }
         let mut errs = vec![];
@@ -776,7 +782,8 @@ impl Checker {
                     let primitive = match &r {
                         Ty::Str | Ty::Bool | Ty::Unit => true,
                         t if self.numeric(t) => true,
-                        Ty::Named(n, _) => self.info.enums.get(n).is_some_and(|e| e.unit_only() && !e.is_effect()),
+                        // (a union read from TS with a tag field is objects, `{ kind: "on" }`: compared by content)
+                        Ty::Named(n, _) => self.info.enums.get(n).is_some_and(|e| e.unit_only() && !e.is_effect() && e.ts.as_ref().is_none_or(|t| t.key.is_none())),
                         _ => false,
                     };
                     let ok = primitive || self.eqable(&r, &mut vec![]);

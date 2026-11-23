@@ -14,7 +14,8 @@ What it rewrites, in each of the files (anything else is left as written):
   - `<!-- ui:DIR,DIR -->72.5%`: run-pass + check-pass + build-pass of those tests/ui directories, from the per-test
     results (rust_ui.py --results)
   - `<!-- cf:DIR,DIR -->38.0%`: compile-fail of those directories
-- `<!-- measured -->...<!-- /measured -->`: the date and commit the numbers come from (in a file whose numbers changed)
+- `<!-- measured -->...<!-- /measured -->`: the date and commit the numbers come from, the same in all three files
+  (written to all of them when any file's numbers changed)
 
 Inputs that are missing leave their values as they were. --check exits 1 if a file would change (nothing written).
 """
@@ -123,11 +124,14 @@ def main():
     z, an = by_name(load(os.path.join(a.ci_dir, "zustc.json"))), by_name(load(os.path.join(a.ci_dir, "analyzer.json")))
     ui = load(ui_json)
     c = per_dir(ui_results) if os.path.exists(ui_results) else None
-    stale = []
+    # (first the numbers of each file, then one stamp for all three: when any file's numbers changed, every file gets
+    # the same date and commit, so the three never disagree on when they were measured; only the stamp changing is
+    # not a change)
+    old, new = {}, {}
     for path in FILES:
         if not os.path.exists(path):
             continue
-        s = old = open(path).read()
+        s = old[path] = open(path).read()
 
         def block(name, text):
             nonlocal s
@@ -145,17 +149,20 @@ def main():
                 r = rate(c, m.group(2).split(","), m.group(1) == "cf")
                 return m.group(0) if r is None else f"<!-- {m.group(1)}:{m.group(2)} -->{r:.1f}%"
             s = re.sub(r"<!-- (ui|cf):([\w\-,]+) -->[0-9.]+%", area, s)
-        # (only the stamp changing is not a change)
-        if s != old:
-            when = datetime.date.today().isoformat() + (f", {a.commit[:7]}" if a.commit else "")
-            s = re.sub(r"<!-- measured -->.*?<!-- /measured -->", f"<!-- measured -->{when}<!-- /measured -->", s)
+        new[path] = s
+    if any(new[p] != old[p] for p in new):
+        when = datetime.date.today().isoformat() + (f", {a.commit[:7]}" if a.commit else "")
+        for p in new:
+            new[p] = re.sub(r"<!-- measured -->.*?<!-- /measured -->", f"<!-- measured -->{when}<!-- /measured -->", new[p])
+    stale = []
+    for path in new:
         name = os.path.basename(path)
-        if s == old:
+        if new[path] == old[path]:
             print(f"{name} unchanged")
         elif a.check:
             stale.append(name)
         else:
-            open(path, "w").write(s)
+            open(path, "w").write(new[path])
             print(f"{name} updated")
     if stale:
         print(f"out of date: {', '.join(stale)}: run python3 scripts/update_readme.py")

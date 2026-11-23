@@ -30,6 +30,8 @@ pub struct Js<'a> {
     /// inside a generator (an effectful function, a handled body, a handler arm)
     gen_: bool,
     conts: Vec<String>,
+    /// `return` here returns from a generator handler's arm itself: `return k(x)` resumes as the arm's last act
+    arm_tail: bool,
     /// the continuations of the direct (tail-resumptive) handler being written: `k(x)` is just `x`
     dconts: Vec<String>,
     pub helpers: BTreeSet<&'static str>,
@@ -159,13 +161,12 @@ const HELPERS: &[(&str, &str)] = &[
     ("$round", "function $round(x) {\n  return x < 0 ? -Math.round(-x) : Math.round(x);\n}"),
     (
         "$handle",
-        "// A deep handler: runs the generator `body`; an operation in `ops` goes to `arm` with a one-shot continuation,\n// any other operation is passed on to the enclosing handler\nfunction* $handle(body, ops, arm) {\n  const g = body();\n  function* resume(v) {\n    for (;;) {\n      const r = g.next(v);\n      if (r.done) return r.value;\n      if (ops.includes(r.value.TAG)) {\n        let used = false;\n        const k = function* (x) {\n          if (used) throw new Error(\"zustscript: a continuation was resumed twice\");\n          used = true;\n          return yield* resume(x);\n        };\n        return yield* arm(r.value, k);\n      }\n      v = yield r.value;\n    }\n  }\n  return yield* resume(undefined);\n}",
+        "// Deep handlers on generators (one-shot continuations), run by one loop that keeps the frames on a heap stack:\n// operations and resumptions do not grow the JS stack. A generator yields an operation (a variant) or an\n// instruction to the loop (`$i`): run a handled body, resume a continuation, or resume it as the arm's last act\nfunction $handle(body, ops, arm) {\n  return { $i: 1, body, ops, arm };\n}\n\nfunction $resume(k, v) {\n  return { $i: 2, k, v };\n}\n\nfunction $tail(k, v) {\n  return { $i: 3, k, v };\n}\n\n// The loop over the frames `st` (a frame: a generator, and for a handled body its operations and arm; a\n// continuation: the frames it cut off). An operation no frame handles is yielded to whoever drives the loop (a TS\n// caller of a `pub` function, or an outer loop), and its answer is sent back to the frame that performed it\nfunction* $drive(st) {\n  let v, e, thrown = false;\n  for (;;) {\n    const f = st[st.length - 1];\n    let r;\n    try {\n      r = thrown ? f.g.throw(e) : f.g.next(v);\n    } catch (x) {\n      st.pop();\n      if (st.length === 0) throw x;\n      thrown = true;\n      e = x;\n      continue;\n    }\n    thrown = false;\n    v = undefined;\n    if (r.done) {\n      st.pop();\n      if (st.length === 0) return r.value;\n      v = r.value;\n      continue;\n    }\n    const y = r.value;\n    if (y.$i === 1) {\n      st.push({ g: y.body(), ops: y.ops, arm: y.arm });\n    } else if (y.$i !== undefined) {\n      const seg = y.k.seg;\n      if (seg === null) {\n        thrown = true;\n        e = new Error(\"zustscript: a continuation was resumed twice\");\n        continue;\n      }\n      y.k.seg = null;\n      // (as the arm's last act, the arm's value is the continuation's: its frame goes)\n      if (y.$i === 3) st.pop();\n      for (let i = 0; i < seg.length; i++) st.push(seg[i]);\n      v = y.v;\n    } else {\n      // (the nearest handler of the operation: the frames from it up are the continuation, and its arm runs in\n      // their place, under the handlers outside it)\n      let i = st.length - 1;\n      while (i >= 0 && (st[i].ops === undefined || !st[i].ops.includes(y.TAG))) i--;\n      if (i < 0) {\n        try {\n          v = yield y;\n        } catch (x) {\n          thrown = true;\n          e = x;\n        }\n        continue;\n      }\n      const h = st[i];\n      const k = { seg: st.splice(i) };\n      st.push({ g: h.arm(y, k) });\n    }\n  }\n}\n\n// A `handle` outside any generator: nothing outside it can answer an operation it does not handle\nfunction $run(body, ops, arm) {\n  const r = $drive([{ g: body(), ops, arm }]).next();\n  if (!r.done) throw new Error(\"zustscript: unhandled effect \" + r.value.TAG);\n  return r.value;\n}",
     ),
     (
         "$perform",
         "// Direct (tail-resumptive) handlers: a chain of frames; an operation calls the nearest frame's arm, which runs\n// under the handlers outside its own `handle` (deep handler semantics)\nlet $cur = null;\nfunction $perform(op, ...a) {\n  for (let f = $cur; f !== null; f = f.p) {\n    const h = f.h[op];\n    if (h !== undefined) {\n      const s = $cur;\n      $cur = f.p;\n      try {\n        return h(...a);\n      } finally {\n        $cur = s;\n      }\n    }\n  }\n  throw new Error(\"zustscript: unhandled effect \" + op);\n}\n\nfunction $handleD(h, body) {\n  const f = { h, p: $cur };\n  $cur = f;\n  try {\n    return body();\n  } finally {\n    $cur = f.p;\n  }\n}",
     ),
-    ("$run", "function $run(g) {\n  const r = g.next();\n  if (!r.done) throw new Error(\"zustscript: unhandled effect \" + r.value.TAG);\n  return r.value;\n}"),
 ];
 
 impl<'a> Js<'a> {
@@ -176,6 +177,7 @@ impl<'a> Js<'a> {
             ind: 0,
             tmp: 0,
             gen_: false,
+            arm_tail: false,
             conts: vec![],
             dconts: vec![],
             helpers: BTreeSet::new(),
@@ -213,7 +215,33 @@ impl<'a> Js<'a> {
 
     fn string_enum(&self, en: &str) -> bool {
         let e = &self.info.enums[en];
-        e.unit_only() && !e.is_effect()
+        e.unit_only() && !e.is_effect() && e.ts.as_ref().is_none_or(|t| t.key.is_none())
+    }
+
+    /// The JS value of variant `v`'s tag: its own name, or the TS union's string for it (`"circle"`)
+    fn tag_js(&self, en: &str, v: &str) -> String {
+        let e = &self.info.enums[en];
+        match &e.ts {
+            Some(t) => js_str(&t.tags[e.variants.iter().position(|x| x.0 == v).unwrap()]),
+            None => js_str(v),
+        }
+    }
+
+    /// The property that holds the tag: `TAG`, or the TS union's tag field (`kind`)
+    fn tag_key(&self, en: &str) -> String {
+        match self.info.enums[en].ts.as_ref().and_then(|t| t.key.clone()) {
+            Some(k) => k,
+            None => "TAG".into(),
+        }
+    }
+
+    /// The property that holds field `k` of variant `v`: `_0`, or the TS member's name (`r`)
+    fn field_key(&self, en: &str, v: &str, k: usize) -> String {
+        let e = &self.info.enums[en];
+        match &e.ts {
+            Some(t) => t.fields[e.variants.iter().position(|x| x.0 == v).unwrap()][k].clone(),
+            None => format!("_{k}"),
+        }
     }
 
     /// The body of the module: the functions of the JS layer
@@ -325,7 +353,19 @@ impl<'a> Js<'a> {
         self.ind += 1;
         self.gen_ = gen_;
         self.tmp = 0;
+        // (a TS caller drives a `pub` generator: its body runs under the handlers' loop, so the caller sees only the
+        // operations the function leaves unhandled, never the loop's instructions)
+        let drive = gen_ && public;
+        if drive {
+            self.helpers.insert("$handle");
+            self.line("return yield* $drive([{ g: (function* () {");
+            self.ind += 1;
+        }
         self.stmt_expr(body, &Dest::Return);
+        if drive {
+            self.ind -= 1;
+            self.line("})() }]);");
+        }
         self.ind -= 1;
         self.line("}");
         self.out.push('\n');
@@ -361,7 +401,7 @@ impl<'a> Js<'a> {
         }
         let mut need: BTreeSet<&str> = self.helpers.clone();
         if need.contains("$handle") {
-            need.insert("$run");
+            need.extend(["$resume", "$tail", "$drive", "$run"]);
         }
         if need.contains("$perform") {
             need.insert("$handleD");
@@ -384,6 +424,12 @@ impl<'a> Js<'a> {
     // ------------------------------------------------------------ statements
 
     fn assign(&mut self, d: &Dest, v: String) {
+        // (resuming as the arm's last act: the loop drops the arm's frame, so tail-resumptive arms do not pile up)
+        let v = if matches!(d, Dest::Return) && self.arm_tail && v.starts_with("(yield $resume(") && v.ends_with(')') && balanced(&v[1..v.len() - 1]) {
+            format!("(yield $tail({}", &v["(yield $resume(".len()..])
+        } else {
+            v
+        };
         // (`(yield x)` needs no parentheses as a whole statement)
         let v = if (v.starts_with("(yield ") || v.starts_with("(yield* ")) && v.ends_with(')') && balanced(&v[1..v.len() - 1]) && !matches!(d, Dest::Assign(_)) {
             v[1..v.len() - 1].to_string()
@@ -642,11 +688,11 @@ impl<'a> Js<'a> {
             Pat::Variant(_, v, subs, _) => {
                 let en = &self.info.variant_of[v];
                 if self.string_enum(en) {
-                    return vec![format!("{s} === {}", js_str(v))];
+                    return vec![format!("{s} === {}", self.tag_js(en, v))];
                 }
-                let mut c = vec![format!("{s}.TAG === {}", js_str(v))];
+                let mut c = vec![format!("{s}.{} === {}", self.tag_key(en), self.tag_js(en, v))];
                 for (k, sp) in subs.iter().enumerate() {
-                    c.extend(self.pat_cond(sp, &format!("{s}._{k}")));
+                    c.extend(self.pat_cond(sp, &format!("{s}.{}", self.field_key(en, v, k))));
                 }
                 c
             }
@@ -661,9 +707,10 @@ impl<'a> Js<'a> {
                     self.pat_binds(p, &format!("{s}[{k}]"), out);
                 }
             }
-            Pat::Variant(_, _, subs, _) => {
+            Pat::Variant(_, v, subs, _) => {
+                let en = self.info.variant_of[v].clone();
                 for (k, p) in subs.iter().enumerate() {
-                    self.pat_binds(p, &format!("{s}._{k}"), out);
+                    self.pat_binds(p, &format!("{s}.{}", self.field_key(&en, v, k)), out);
                 }
             }
             _ => {}
@@ -736,7 +783,7 @@ impl<'a> Js<'a> {
     /// the body runs as a plain function under the handler
     fn direct_handle(&mut self, body: &Expr, arms: &[HArm]) -> String {
         self.helpers.insert("$perform");
-        let saved = (std::mem::take(&mut self.out), self.ind, std::mem::take(&mut self.conts), std::mem::take(&mut self.dconts), self.gen_);
+        let saved = (std::mem::take(&mut self.out), self.ind, std::mem::take(&mut self.conts), std::mem::take(&mut self.dconts), self.gen_, std::mem::replace(&mut self.arm_tail, false));
         self.gen_ = false;
         let pad = "  ".repeat(saved.1);
         let mut parts = vec![];
@@ -764,7 +811,7 @@ impl<'a> Js<'a> {
         self.dconts.clear();
         self.stmt_expr(body, &Dest::Return);
         let b = std::mem::take(&mut self.out);
-        (self.out, self.ind, self.conts, self.dconts, self.gen_) = saved;
+        (self.out, self.ind, self.conts, self.dconts, self.gen_, self.arm_tail) = saved;
         // (a null prototype: an operation named like an Object method, `toString`, must not find an inherited one)
         format!("$handleD({{ __proto__: null, {} }}, () => {{\n{b}{pad}}})", parts.join(", "))
     }
@@ -773,11 +820,12 @@ impl<'a> Js<'a> {
         if let Some(pos) = loop_exit(e) {
             self.errors.push((pos, "`break` / `continue` here would have to leave a function in the JS output: move this `if` / `match` into a statement of its own (`let v = if ..;`)".into()));
         }
-        let save = (std::mem::take(&mut self.out), self.ind);
+        let save = (std::mem::take(&mut self.out), self.ind, std::mem::replace(&mut self.arm_tail, false));
         self.ind = 1;
         self.stmt_expr(e, &Dest::Return);
         let body = std::mem::replace(&mut self.out, save.0);
         self.ind = save.1;
+        self.arm_tail = save.2;
         let pad = "  ".repeat(self.ind);
         let body: String = body.lines().map(|l| format!("{pad}{l}\n")).collect();
         if self.gen_ {
@@ -793,11 +841,12 @@ impl<'a> Js<'a> {
 
     fn variant_value(&mut self, en: &str, v: &str, args: Vec<String>) -> String {
         if self.string_enum(en) {
-            return js_str(v);
+            return self.tag_js(en, v);
         }
-        let mut s = format!("{{ TAG: {}", js_str(v));
+        // (a union read from TS: TS's own shape, `{ kind: "circle", r: 1 }`)
+        let mut s = format!("{{ {}: {}", self.tag_key(en), self.tag_js(en, v));
         for (k, a) in args.iter().enumerate() {
-            let _ = write!(s, ", _{k}: {a}");
+            let _ = write!(s, ", {}: {a}", self.field_key(en, v, k));
         }
         s.push_str(" }");
         s
@@ -882,8 +931,8 @@ impl<'a> Js<'a> {
                             return if a.is_empty() { "undefined".into() } else { a[0].clone() };
                         }
                         Some(Callee::Local) if self.conts.contains(n) => {
-                            let a = if a.len() == 1 && a[0] == "undefined" { vec![] } else { a };
-                            return format!("(yield* {}({}))", self.local(n), a.join(", "));
+                            let x = a.first().cloned().unwrap_or_else(|| "undefined".into());
+                            return format!("(yield $resume({}, {x}))", self.local(n));
                         }
                         Some(Callee::Extern(js)) => {
                             self.note_extern(n);
@@ -1000,7 +1049,7 @@ impl<'a> Js<'a> {
             EK::Block(_, None) => "undefined".into(),
             EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Break | EK::Continue => unreachable!(),
             EK::Closure(ps, body) => {
-                let saved = (self.gen_, std::mem::take(&mut self.conts), std::mem::take(&mut self.dconts));
+                let saved = (self.gen_, std::mem::take(&mut self.conts), std::mem::take(&mut self.dconts), std::mem::replace(&mut self.arm_tail, false));
                 self.gen_ = false;
                 let mark = self.locals.len();
                 let ps: Vec<String> = ps.iter().map(|p| self.bind(&p.0)).collect();
@@ -1015,7 +1064,7 @@ impl<'a> Js<'a> {
                     let b = self.expr(body);
                     if b.starts_with('{') { format!("({b})") } else { b }
                 };
-                (self.gen_, self.conts, self.dconts) = saved;
+                (self.gen_, self.conts, self.dconts, self.arm_tail) = saved;
                 self.locals.truncate(mark);
                 format!("({}) => {b}", ps.join(", "))
             }
@@ -1075,8 +1124,9 @@ impl<'a> Js<'a> {
             }
             EK::Handle(body, arms) => {
                 self.helpers.insert("$handle");
-                let saved = (self.gen_, self.conts.clone(), std::mem::take(&mut self.out), self.ind);
+                let saved = (self.gen_, self.conts.clone(), std::mem::take(&mut self.out), self.ind, self.arm_tail);
                 self.gen_ = true;
+                self.arm_tail = false;
                 // the body
                 self.ind = saved.3 + 1;
                 self.stmt_expr(body, &Dest::Return);
@@ -1099,7 +1149,9 @@ impl<'a> Js<'a> {
                     let k = self.bind(&a.k);
                     self.line(&format!("const {k} = $k;"));
                     self.conts.push(a.k.clone());
+                    self.arm_tail = true;
                     self.stmt_expr(&a.body, &Dest::Return);
+                    self.arm_tail = false;
                     self.conts.pop();
                     self.locals.truncate(mark);
                     self.ind -= 1;
@@ -1107,9 +1159,10 @@ impl<'a> Js<'a> {
                 self.line("}");
                 let arms_js = std::mem::take(&mut self.out);
                 let pad = "  ".repeat(saved.3);
-                (self.gen_, self.conts, self.out, self.ind) = saved;
-                let h = format!("$handle(function* () {{\n{b}{pad}}}, [{}], function* ($op, $k) {{\n{arms_js}{pad}}})", ops.join(", "));
-                if self.gen_ { format!("(yield* {h})") } else { format!("$run({h})") }
+                (self.gen_, self.conts, self.out, self.ind, self.arm_tail) = saved;
+                self.helpers.insert("$handle");
+                let h = format!("(function* () {{\n{b}{pad}}}, [{}], function* ($op, $k) {{\n{arms_js}{pad}}})", ops.join(", "));
+                if self.gen_ { format!("(yield $handle{h})") } else { format!("$run{h}") }
             }
         }
     }
@@ -1125,7 +1178,7 @@ impl<'a> Js<'a> {
         }
         let compound = match t {
             Ty::Array(_) | Ty::Typed(_) | Ty::Tuple(_) => true,
-            Ty::Named(n, _) => self.info.records.contains_key(n) || self.info.enums.get(n).is_some_and(|e| !e.unit_only() && !e.is_effect()),
+            Ty::Named(n, _) => self.info.records.contains_key(n) || self.info.enums.get(n).is_some_and(|e| !e.is_effect() && !self.string_enum(n)),
             _ => false,
         };
         if !compound {
@@ -1158,13 +1211,18 @@ impl<'a> Js<'a> {
                 let e = &self.info.enums[n];
                 let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
                 let vs: Vec<(String, Vec<Ty>)> = e.variants.iter().map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_named(t, &m)).collect())).collect();
-                let mut s = String::from("  if (a.TAG !== b.TAG) return false;\n  switch (a.TAG) {\n");
+                let key = self.tag_key(n);
+                let n = n.clone();
+                let mut s = format!("  if (a.{key} !== b.{key}) return false;\n  switch (a.{key}) {{\n");
                 for (v, fs) in vs {
                     if fs.is_empty() {
                         continue;
                     }
-                    let cs: Vec<String> = fs.iter().enumerate().map(|(k, t)| cmp(self, t, &format!("a._{k}"), &format!("b._{k}"))).collect();
-                    let _ = writeln!(s, "    case {}: return {};", js_str(&v), cs.join(" && "));
+                    let cs: Vec<String> = fs.iter().enumerate().map(|(k, t)| {
+                        let f = self.field_key(&n, &v, k);
+                        cmp(self, t, &format!("a.{f}"), &format!("b.{f}"))
+                    }).collect();
+                    let _ = writeln!(s, "    case {}: return {};", self.tag_js(&n, &v), cs.join(" && "));
                 }
                 s.push_str("  }\n  return true;\n");
                 s
@@ -1361,8 +1419,22 @@ fn bin_prec(op: &str) -> u8 {
 
 fn balanced(s: &str) -> bool {
     let mut d = 0i32;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
     for c in s.chars() {
+        // (parentheses inside a string literal are not structure: `(yield k("(")) + h(")")` is not one group)
+        if let Some(q) = quote {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == q {
+                quote = None;
+            }
+            continue;
+        }
         match c {
+            '"' | '\'' | '`' => quote = Some(c),
             '(' => d += 1,
             ')' => {
                 d -= 1;
@@ -1631,11 +1703,30 @@ pub fn brand_runtime(used: &[&str]) -> String {
 }
 
 /// The `.d.ts`, and the numeric brands it uses
-pub fn dts(items: &[Item], info: &Info, shared_runtime: bool) -> (String, Vec<&'static str>) {
+/// (`spec`: the module specifier of a TS file a record was read from, from the `.d.ts`'s directory)
+pub fn dts(items: &[Item], info: &Info, shared_runtime: bool, spec: &dyn Fn(&std::path::Path) -> String) -> (String, Vec<&'static str>) {
     let mut o = String::new();
     USES_JSX.with(|u| u.set(false));
+    // (a record read from a TS file is that file's type: imported, not declared again)
+    let mut ts_imports: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for it in items {
         match it {
+            Item::Record { from: Some(f), name, .. } | Item::Enum { from: Some(f), name, .. } if f.exported => {
+                ts_imports.entry(spec(&f.path)).or_default().insert(name.clone());
+            }
+            // (a union the file does not export: declared again as the file writes it)
+            Item::Enum { from: Some(f), name, .. } => {
+                let _ = writeln!(o, "export type {name} = {};\n", f.text);
+            }
+            // (a type the file does not export, read because an imported one uses it: declared again with the TS
+            // file's own members, so it is the same type to TS)
+            Item::Record { from: Some(f), name, .. } => {
+                let _ = writeln!(o, "export interface {name} {{");
+                for m in &f.members {
+                    let _ = writeln!(o, "  {m};");
+                }
+                o.push_str("}\n\n");
+            }
             Item::Record { name, params, .. } => {
                 let r = &info.records[name];
                 let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
@@ -1699,6 +1790,13 @@ pub fn dts(items: &[Item], info: &Info, shared_runtime: bool) -> (String, Vec<&'
     let mut h = String::from("// generated by zsc: the types of the module's exports\n");
     if USES_JSX.with(|u| u.replace(false)) {
         h.push_str("import type { ReactElement as $ReactElement } from \"react\";\n");
+    }
+    for (m, names) in &ts_imports {
+        // (only the types the declarations name)
+        let names: Vec<String> = names.iter().filter(|n| uses_word(&o, n)).cloned().collect();
+        if !names.is_empty() {
+            let _ = writeln!(h, "import type {{ {} }} from {};", names.join(", "), js_str(m));
+        }
     }
     h.push('\n');
     if !used.is_empty() && shared_runtime {

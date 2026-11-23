@@ -1,0 +1,2 @@
+// expect: the members of `Either` have no common tag
+import type { Either } from "../ts/unsupported.ts";

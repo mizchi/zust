@@ -1,0 +1,2 @@
+// expect: `Dup.a` is declared twice
+import type { Dup } from "../ts/unsupported.ts";

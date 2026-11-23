@@ -20,6 +20,7 @@ pub type R<T> = Result<T, String>;
 /// ビルド (機械語・オブジェクト・リンク・ワークスペース)。feature `build` (既定) のときだけ
 #[cfg(feature = "build")]
 mod build;
+mod dead;
 #[cfg(feature = "build")]
 pub use build::*;
 
@@ -1244,6 +1245,8 @@ impl Session2 {
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;
         let mut deny_dead_code = false;
+        // (`deny(warnings)` / `forbid(warnings)` of the crate: a lint an item or field sets to warn is an error)
+        let mut warn_denied = false;
         let mut deny_dead_pub = false;
         let mut deny_unused_imports = false;
         let mut deny_unreachable_code = false;
@@ -1299,6 +1302,39 @@ impl Session2 {
                 };
                 levels.contains(&n) && (last("forbid").is_some() || last("allow") < last("deny"))
             };
+            // (a lint of a group: denied by its name, the group's or `warnings`, unless an allow of its name or the
+            // group's comes after that (`#![allow(unused_variables)]` leaves dead_code as it is); forbid stays)
+            let last_of = |a: &str, names: &[&str]| -> Option<usize> {
+                let open = format!("#![{a}(");
+                c.match_indices(&open)
+                    .filter(|(i, _)| {
+                        let rest = &c[i + open.len()..];
+                        let list = &rest[..rest.find(')').unwrap_or(rest.len())];
+                        list.split(',').any(|x| names.contains(&x.trim()))
+                    })
+                    .map(|(i, _)| i)
+                    .last()
+            };
+            // (the level of a lint of a group, by the last of its levels in source order: a forbid of it or its group
+            // wins; a deny of it or its group denies; a warn of it (or no level of its own) is denied by
+            // `deny(warnings)` or `forbid(warnings)`, which reach only the lints left at warn; an allow or an expect
+            // does not deny)
+            let grouped = |n: &str, group: &str| {
+                if last_of("forbid", &[n, group]).is_some() {
+                    return true;
+                }
+                let own = [n, group];
+                let levels = [("deny", last_of("deny", &own)), ("warn", last_of("warn", &own)), ("allow", last_of("allow", &own)), ("expect", last_of("expect", &own))];
+                let last = levels.iter().filter_map(|(l, at)| at.map(|at| (at, *l))).max();
+                let warnings = last_of("deny", &["warnings"]).is_some() || last_of("forbid", &["warnings"]).is_some();
+                match last.map(|(_, l)| l) {
+                    Some("deny") => true,
+                    Some("warn") | None => warnings,
+                    _ => false,
+                }
+            };
+            deny_dead_code = grouped("dead_code", "unused");
+            warn_denied = last_of("deny", &["warnings"]).is_some() || last_of("forbid", &["warnings"]).is_some();
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_mismatched_lts = lint("mismatched_lifetime_syntaxes");
@@ -1315,7 +1351,11 @@ impl Session2 {
         // appears nowhere but in its own definition and in `impl` headers)
         if deny_dead_code && self.ctx.lib.is_none() {
             // (a `pub` item counts as used, except in a binary under `deny(dead_code_pub_in_binary)`)
-            if let Some((line, msg)) = first_dead_item(&src, &items[..user_src], deny_dead_pub && !lib_attr) {
+            if let Some((line, msg)) = first_dead_item(&src, &items[..user_src], deny_dead_pub && !lib_attr, warn_denied) {
+                return Err(format!("{line}:1: {msg}"));
+            }
+            // (a field nothing reads, a variant nothing constructs, an inherent impl's const or fn nothing names)
+            if let Some((line, msg)) = dead::first_dead_part(&src, &items[..user_src], warn_denied) {
                 return Err(format!("{line}:1: {msg}"));
             }
         }
@@ -1507,7 +1547,35 @@ impl Session2 {
                 if b - a != 3 || sb.get(a..b) != Some(b"use") {
                     continue;
                 }
-                let end = sb[b..it.end.min(sb.len())].iter().position(|&c| c == b';').map_or(it.end, |k| b + k);
+                // (the declaration's `;`: not one in a comment, `use a::{ /* ; */ b };`)
+                let stop = it.end.min(sb.len());
+                let mut end = stop;
+                let mut i = b;
+                while i < stop {
+                    if sb[i] == b'/' && sb.get(i + 1) == Some(&b'/') {
+                        i = sb[i..stop].iter().position(|&c| c == b'\n').map_or(stop, |k| i + k);
+                    } else if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
+                        // (block comments nest: `/* a /* b */ ; */`)
+                        let mut depth = 1;
+                        i += 2;
+                        while i < stop && depth > 0 {
+                            if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
+                                depth += 1;
+                                i += 2;
+                            } else if sb[i] == b'*' && sb.get(i + 1) == Some(&b'/') {
+                                depth -= 1;
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
+                        }
+                    } else if sb[i] == b';' {
+                        end = i;
+                        break;
+                    } else {
+                        i += 1;
+                    }
+                }
                 // (its identifier tokens: not the words of a comment in it)
                 prog.use_names.extend(it.idents.iter().map(|&(x, y)| (x as usize, y as usize)).filter(|&(x, y)| x > b && y <= end).filter_map(|(x, y)| src.get(x..y)).map(str::to_string));
             }
@@ -2957,7 +3025,7 @@ fn first_bad_name(src: &str, items: &[SrcItem], deny: [bool; 3]) -> Option<(usiz
 }
 
 /// `#![deny(dead_code)]`: the first top-level item of the program that nothing uses (see the caller)
-fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usize, String)> {
+fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool, warn_denied: bool) -> Option<(usize, String)> {
     let (Some(first), Some(last)) = (items.first(), items.last()) else { return None };
     let region = &src[first.start..last.end];
     let b = region.as_bytes();
@@ -2966,6 +3034,7 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
     let sym = |k: usize, c: u8| toks[k].0 == 1 && b[toks[k].1] == c;
     // (uses of each name: every occurrence but the definition's, the one after `impl` / `for` in an impl header)
     let mut uses: crate::fxhash::FxMap<&str, usize> = Default::default();
+    let mut impl_uses: crate::fxhash::FxMap<&str, usize> = Default::default();
     let mut in_impl_header = false;
     for k in 0..toks.len() {
         let w = word(k);
@@ -2978,10 +3047,15 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
         if toks[k].0 != 0 {
             continue;
         }
-        let defn = k > 0 && matches!(word(k - 1), "fn" | "struct" | "enum" | "const" | "static" | "trait" | "union" | "type");
+        // (not a raw pointer's `*const T`)
+        let defn = k > 0 && matches!(word(k - 1), "fn" | "struct" | "enum" | "const" | "static" | "trait" | "union" | "type") && !(k > 1 && sym(k - 2, b'*'));
         let impl_self = in_impl_header && k > 0 && (word(k - 1) == "impl" || word(k - 1) == "for" || sym(k - 1, b'>'));
         if !defn && !impl_self {
             *uses.entry(w).or_default() += 1;
+        }
+        // (a type alias an impl header names is used: `impl Tr for Alias`)
+        if impl_self {
+            *impl_uses.entry(w).or_default() += 1;
         }
     }
     for it in items {
@@ -2990,18 +3064,43 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
             continue;
         }
         let text = &src[it.start..it.end];
-        if text.contains("allow(dead_code") || text.contains("expect(dead_code") || text.contains("allow(unused") || text.contains("no_mangle") || text.contains("#[test]")
-            || text.contains("#[derive") || text.contains("export_name") || text.contains("#[cfg")
-        {
+        // (the item's own level, the last of its attributes naming dead_code: `#[allow(dead_code)] #[warn(dead_code)]`
+        // is a warn, an error under `deny(warnings)`; with none of its own, any allow in it leaves it alone)
+        let allowed = match item_lint_level(text, "dead_code").or_else(|| item_lint_level(text, "unused")) {
+            Some("allow" | "expect") => true,
+            Some("warn") => !warn_denied,
+            Some(_) => false,
+            None => text.contains("allow(dead_code") || text.contains("expect(dead_code") || text.contains("allow(unused"),
+        };
+        if allowed || text.contains("no_mangle") || text.contains("#[test]") || text.contains("#[derive") || text.contains("export_name") || text.contains("#[cfg") {
             continue;
         }
         let t = crate::lexer::tokenize(text.as_bytes());
         let tw = |k: usize| -> &str { if t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" } };
-        // (the item's keyword and name, after its attributes and visibility)
+        // (the item's keyword and name, after its lint-level attributes and visibility; another attribute (`#[used]`,
+        // `#[panic_handler]` ..) may make it used: the scan stops at its name, and the item is left alone)
+        let sym_at = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && text.as_bytes()[t[k].1] == c;
         let mut k = 0;
         while k < t.len() && (tw(k) == "pub" || tw(k) == "unsafe" || tw(k) == "async" || tw(k) == "extern" || t[k].0 != 0) {
             if tw(k) == "extern" || tw(k) == "impl" || tw(k) == "mod" || tw(k) == "use" || tw(k) == "macro_rules" {
                 break;
+            }
+            if sym_at(k, b'#') && sym_at(k + 1, b'[') && matches!(tw(k + 2), "allow" | "warn" | "deny" | "forbid" | "expect") {
+                let mut d = 0;
+                let mut j = k + 1;
+                while j < t.len() {
+                    if sym_at(j, b'[') {
+                        d += 1;
+                    } else if sym_at(j, b']') {
+                        d -= 1;
+                        if d == 0 {
+                            break;
+                        }
+                    }
+                    j += 1;
+                }
+                k = j + 1;
+                continue;
             }
             k += 1;
         }
@@ -3012,7 +3111,8 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
         if !check_pub && (0..k).any(|j| tw(j) == "pub") {
             continue;
         }
-        if name.is_empty() || name.starts_with('_') || name == "main" {
+        // (`_foo`, also in a flattened module: `m___foo`)
+        if name.is_empty() || name.starts_with('_') || name.split("__").last().is_some_and(|s| s.starts_with('_')) || name == "main" {
             continue;
         }
         // (the name as written: without the flattened modules' `a__` prefix and the renamer's `__u_`)
@@ -3025,9 +3125,11 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
             "const" => format!("constant `{shown}` is never used"),
             "static" => format!("static `{shown}` is never used"),
             "trait" => format!("trait `{shown}` is never used"),
+            "type" => format!("type alias `{shown}` is never used"),
             _ => continue,
         };
-        if uses.get(name).copied().unwrap_or(0) == 0 {
+        let alias_in_impl = kw == "type" && impl_uses.get(name).copied().unwrap_or(0) > 0;
+        if uses.get(name).copied().unwrap_or(0) == 0 && !alias_in_impl {
             let line = it.line + text[..t[k].1].matches('\n').count();
             return Some((line, what));
         }
@@ -3194,6 +3296,12 @@ fn item_lint_level(text: &str, n: &str) -> Option<&'static str> {
         rest = rest.trim_start();
         if let Some(r) = rest.strip_prefix("//") {
             rest = r.split_once('\n').map_or("", |x| x.1);
+            continue;
+        }
+        // (the crate's inner attributes, at the head of the first item's text: the crate's levels, not the item's)
+        if let Some(r) = rest.strip_prefix("#![") {
+            let Some(end) = r.find(']') else { break };
+            rest = &r[end + 1..];
             continue;
         }
         let Some(r) = rest.strip_prefix("#[") else { break };
@@ -4396,18 +4504,69 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
     // (`n: ?Sized` / `n: Tr + ?Sized`, in the parameter list or a where clause: the `:` before a `?Sized` with only
     // bounds between, and the parameter's name before the `:`)
     let maybe_unsized = |text: &str, n: &str| {
-        text.match_indices("?Sized").any(|(i, _)| {
-            let before = &text[..i];
-            let b = before.as_bytes();
-            let mut j = b.len();
-            while j > 0 && (b[j - 1].is_ascii_alphanumeric() || matches!(b[j - 1], b'_' | b' ' | b'\t' | b'\n' | b'\r' | b'+' | b'\'' | b'<' | b'>' | b',')) {
-                j -= 1;
-            }
-            if j == 0 || b[j - 1] != b':' || (j >= 2 && b[j - 2] == b':') {
+        // (from the tokens: not a `?Sized` in a string, `#[doc = "K: ?Sized"]`)
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let sym = |k: usize, c: u8| t[k].0 == 1 && b[t[k].1] == c;
+        (1..t.len()).any(|k| {
+            if !(w(k) == "Sized" && sym(k - 1, b'?')) {
                 return false;
             }
-            before[..j - 1].trim_end().rsplit(|c: char| !(c.is_alphanumeric() || c == '_')).next() == Some(n)
+            // (back over the other bounds, `Tr<A, B> + 'a + std::fmt::Debug + Iterator<Item = u8> + FnOnce(u8) -> u8
+            // +`, to the `:` after the name: anything inside a bound's `<..>` or `(..)`)
+            let mut j = k - 1;
+            let mut angle = 0i32;
+            let mut paren = 0i32;
+            while j > 0 {
+                j -= 1;
+                if sym(j, b')') {
+                    paren += 1;
+                    continue;
+                }
+                if sym(j, b'(') {
+                    paren -= 1;
+                    continue;
+                }
+                if paren > 0 {
+                    continue;
+                }
+                if sym(j, b'>') && !(j > 0 && sym(j - 1, b'-')) {
+                    angle += 1;
+                    continue;
+                }
+                if sym(j, b'<') {
+                    angle -= 1;
+                    continue;
+                }
+                if angle > 0 {
+                    continue;
+                }
+                // (the `->` of a `Fn(..) -> R` bound)
+                if sym(j, b'-') && j + 1 < t.len() && sym(j + 1, b'>') {
+                    continue;
+                }
+                if sym(j, b':') {
+                    if j > 0 && sym(j - 1, b':') {
+                        j -= 1;
+                        continue;
+                    }
+                    return j > 0 && w(j - 1) == n;
+                }
+                if !(t[j].0 == 0 || sym(j, b'+') || sym(j, b'<') || sym(j, b'>') || sym(j, b',') || sym(j, b'?')) {
+                    return false;
+                }
+            }
+            false
         })
+    };
+    // (a bound whose trait has `Sized` as a supertrait: std's `Clone`, `Copy`, `Default`, the conversions, or one of
+    // the program's traits through its supertraits)
+    let implies_sized = |b: &str| {
+        let tr = b.split('<').next().unwrap_or(b).trim();
+        let tr = tr.rsplit("::").next().unwrap_or(tr);
+        matches!(tr, "Sized" | "Clone" | "Copy" | "Default" | "From" | "Into" | "TryFrom" | "TryInto" | "FromStr" | "FromIterator")
+            || prog.bound_implies(b, &["Sized", "Clone", "Copy", "Default"], false, 0)
     };
     let word = |text: &str, w: &str| text.match_indices(w).any(|(i, _)| {
         let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
@@ -4423,8 +4582,7 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
                     // bound that implies Sized holds it, not the word `Sized` of its `?Sized`)
                     let bs = bounds(n);
                     let held = if tr == "Sized" {
-                        // (std's `Clone`, `Copy` and `Default` have `Sized` as a supertrait: `T: ?Sized + Clone` is Sized)
-                        bs.iter().any(|b| b == "Sized" || prog.bound_implies(b, &["Sized", "Clone", "Copy", "Default"], false, 0)) || !maybe_unsized(text, n)
+                        bs.iter().any(|b| implies_sized(b)) || !maybe_unsized(text, n)
                     } else {
                         bs.iter().any(|b| b == tr || prog.bound_implies(b, &[tr.as_str()], true, 0)) || word(text, tr)
                     };

@@ -401,7 +401,8 @@ impl Lower<'_> {
     fn adapter(&mut self, rs: &str, text: String, args: &[(String, Ty)], ret: &Ty) -> Result<(String, String), Vec<(Pos, String)>> {
         let owned: Vec<bool> = (0..args.len()).map(|i| self.modes.owned.contains(&(rs.to_string(), i))).collect();
         let ret_ref = !self.copy(ret) && !self.modes.owned_result.contains(rs);
-        if !owned.iter().zip(args).any(|(o, (_, t))| *o && sliced(t)) && !ret_ref {
+        // (the glue hands a value that is not Copy by reference: one the instance owns is cloned here)
+        if !owned.iter().zip(args).any(|(o, (_, t))| *o && !self.copy(t)) && !ret_ref {
             return Ok((text, rs.to_string()));
         }
         let pos = Pos::default();
@@ -409,7 +410,7 @@ impl Lower<'_> {
         let mut call = vec![];
         for ((n, t), o) in args.iter().zip(&owned) {
             ps.push(format!("{}: {}", local(n), self.rty(t, pos, Some(None)).map_err(|e| vec![e])?));
-            call.push(if *o && sliced(t) { self.clone_of(&local(n), t) } else { local(n) });
+            call.push(if *o && !self.copy(t) { self.clone_of(&local(n), t) } else { local(n) });
         }
         let rt = self.rty(ret, pos, None).map_err(|e| vec![e])?;
         let mut body = format!("{rs}({})", call.join(", "));
@@ -480,6 +481,10 @@ impl Lower<'_> {
                     Ok(VTy::Record(rt, fs))
                 } else {
                     let e = &self.info.enums[n];
+                    // (a union read from TS has TS's shape in JS, not the `{ TAG, _0 }` the glue reads)
+                    if e.ts.is_some() {
+                        return Err((pos, format!("{n} is a union read from TS: it does not cross to wasm yet (use it in the JS layer)")));
+                    }
                     let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
                     let string_enum = e.unit_only() && !e.is_effect();
                     let vs: Vec<(String, Vec<Ty>)> = e.variants.iter().map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_ty(t, &m)).collect())).collect();
@@ -494,6 +499,40 @@ impl Lower<'_> {
         }
     }
 
+    /// The schema a value crosses in as bytes: numbers, bools, strings, arrays and records of them (the stable part
+    /// of the format; enums, typed arrays and functions do not cross this way yet)
+    fn ws(&mut self, t: &Ty, pos: Pos) -> LResult<WS> {
+        self.ws_in(t, pos, &mut vec![])
+    }
+
+    /// (`open`: the records being expanded: one that holds itself, through an array, has no fixed schema)
+    fn ws_in(&mut self, t: &Ty, pos: Pos, open: &mut Vec<Ty>) -> LResult<WS> {
+        Ok(match t {
+            Ty::I32 => WS::Scalar(WTy::I32),
+            Ty::U32 => WS::Scalar(WTy::U32),
+            Ty::I64 => WS::Scalar(WTy::I64),
+            Ty::F32 => WS::Scalar(WTy::F32),
+            Ty::F64 => WS::Scalar(WTy::F64),
+            Ty::Bool => WS::Scalar(WTy::Bool),
+            Ty::Str => WS::Str,
+            Ty::Array(e) => WS::Arr(Box::new(self.ws_in(e, pos, open)?)),
+            Ty::Named(n, _) if open.contains(t) => {
+                return Err((pos, format!("{n} holds itself: a recursive record cannot cross from JS to a @wasm function yet")));
+            }
+            Ty::Named(n, targs) if self.info.records.contains_key(n) => {
+                let r = &self.info.records[n];
+                let m: HashMap<String, Ty> = r.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                let fields: Vec<(String, Ty)> = r.fields.iter().map(|(f, ft)| (f.clone(), subst_ty(ft, &m))).collect();
+                let rt = self.rty(t, pos, None)?;
+                open.push(t.clone());
+                let fs = fields.iter().map(|(f, ft)| Ok((f.clone(), self.ws_in(ft, pos, open)?))).collect::<LResult<Vec<_>>>();
+                open.pop();
+                WS::Rec(rt, fs?)
+            }
+            _ => return Err((pos, format!("{} cannot cross from JS to a @wasm function inside a record or an array yet (numbers, bools, strings, arrays and records of them)", show(t)))),
+        })
+    }
+
     /// The boundary types of a lowered function's signature (what its glue converts)
     fn boundary(&mut self, args: &[(String, Ty)], ret: &Ty, pos: Pos) -> LResult<(Vec<(String, WTy)>, WTy)> {
         let mut a = vec![];
@@ -504,8 +543,18 @@ impl Lower<'_> {
     }
 
     fn wty(&mut self, t: &Ty, arg: bool, pos: Pos) -> LResult<WTy> {
-        if let Ty::Named(..) = t {
+        // (a record holding a string or an array, and an array of anything but numbers: as bytes, through the
+        // helpers; a record of numbers and an enum: as their scalar slots)
+        if let Ty::Named(n, _) = t {
+            if self.info.records.contains_key(n) && !self.copy(t) {
+                return Ok(WTy::Wire(Box::new(self.ws(t, pos)?), self.rty(t, pos, None)?));
+            }
             return Ok(WTy::Value(Box::new(self.vty(t, pos)?)));
+        }
+        if let Ty::Array(e) = t {
+            if scalar(e).and_then(Elem::parse).is_none() {
+                return Ok(WTy::Wire(Box::new(self.ws(t, pos)?), self.rty(t, pos, None)?));
+            }
         }
         Ok(match t {
             Ty::I32 => WTy::I32,

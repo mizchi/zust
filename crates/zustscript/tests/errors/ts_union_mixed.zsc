@@ -1,0 +1,2 @@
+// expect: `Mixed` mixes string literals and objects
+import type { Mixed } from "../ts/unsupported.ts";
