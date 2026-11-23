@@ -943,3 +943,28 @@ fn review100_second_round() {
     let src = "trait Base<T> { type A; }\ntrait Obj<'a, T>: Base<T, A = u8> + Base<u8> {}\nfn f(_: &dyn Obj<'static, u8>) {}\nfn main() {}\n";
     assert_eq!(first(src), None, "lifetime_argument_not_substituted");
 }
+
+#[test]
+fn review100_third_round() {
+    // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    let cap = "can't capture dynamic environment in a fn item (E0434)";
+    // (E0434: a raw string's `\` is no escape; a sibling block's `let` is not in scope at the nested fn, an enclosing
+    // block's is; a pattern's names are its bindings, not its fields or types)
+    let src = "fn outer(x: u8) {\n    fn inner() {\n        let _ = format!(r\"{x}\\\");\n    }\n}\nfn main() { outer(1); }\n";
+    assert_eq!(first(src), at(3, 28, cap), "raw_string_capture");
+    let src = "fn outer() {\n    fn inner() { drop(0u8); }\n    { let drop = 1u8; let _ = drop; }\n    inner();\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), None, "sibling_block_let");
+    let src = "fn outer() {\n    let x = 1u8;\n    {\n        let y = 2u8;\n        fn inner() -> u8 { y }\n        let _ = (x, inner());\n    }\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), at(5, 28, cap), "enclosing_block_let");
+    let src = "fn outer(p: u8) {\n    let Point { x: a, y } = Point { x: 1, y: 2 };\n    let (m, mut n): (u8, u8) = (1, 2);\n    fn inner() -> u8 { a + y + m + n + p }\n    let _ = (a, y, m, n);\n}\nstruct Point { x: u8, y: u8 }\nfn main() { outer(1); }\n";
+    assert_eq!(first(src), at(4, 24, cap), "pattern_bindings");
+    // (E0191: a default that names an earlier parameter takes its argument)
+    let item = |what: &str| format!("the value of the associated {what} must be specified (E0191)");
+    let src = "trait Base<T, U = T> { type A; type B; }\ntrait Mid: Base<u8, A = u8> {}\ntrait Root: Base<u8, u8, B = u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "default_of_an_earlier_parameter");
+    let src = "trait Base<T, U = T> { type A; type B; }\ntrait Mid: Base<u8, A = u8> {}\ntrait Root: Base<u8, u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(4, 14, &item("type `B` in `Base<u8>`")), "default_of_an_earlier_parameter_shown");
+}
