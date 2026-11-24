@@ -1332,6 +1332,7 @@ compile-fail	closures/closure-arg-assoc-type-mismatch.rs
 compile-fail	closures/closure-arg-type-mismatch-method-receiver.rs
 compile-fail	closures/closure-bounds-static-cant-capture-borrowed.rs
 compile-fail	closures/closure-bounds-subtype.rs
+compile-fail	closures/closure-expected-type/expect-region-supply-region-2.rs
 compile-fail	closures/closure-expected-type/expect-region-supply-region.rs
 compile-fail	closures/closure-expected.rs
 compile-fail	closures/closure-immutable-outer-variable.rs
@@ -3666,6 +3667,7 @@ compile-fail	lifetimes/E0106-trailing-comma-in-lifetime-suggestion.rs
 compile-fail	lifetimes/apit-not-targeted-by-lifetime-suggestion.rs
 check-pass	lifetimes/array-pattern-matching-10396.rs
 compile-fail	lifetimes/borrowck-let-suggestion.rs
+compile-fail	lifetimes/closure-lifetime-bounds-10291.rs
 compile-fail	lifetimes/closure-must-return-bound-lifetime.rs
 compile-fail	lifetimes/constructor-lifetime-early-binding-error.rs
 compile-fail	lifetimes/container-lifetime-error-11374.rs
@@ -4865,6 +4867,7 @@ compile-fail	nll/user-annotations/constant-in-expr-trait-item-1.rs
 check-pass	nll/user-annotations/downcast-infer.rs
 compile-fail	nll/user-annotations/fns.rs
 compile-fail	nll/user-annotations/inherent-associated-constants.rs
+compile-fail	nll/user-annotations/issue-54124.rs
 check-pass	nll/user-annotations/issue-55219.rs
 run-pass	nll/user-annotations/issue-55241.rs
 compile-fail	nll/user-annotations/issue-55748-pat-types-constrain-bindings.rs
@@ -6119,6 +6122,7 @@ compile-fail	regions/regions-name-duplicated.rs
 compile-fail	regions/regions-name-static.rs
 compile-fail	regions/regions-name-undeclared.rs
 compile-fail	regions/regions-nested-fns-2.rs
+compile-fail	regions/regions-nested-fns.rs
 run-pass	regions/regions-no-bound-in-argument-cleanup.rs
 check-pass	regions/regions-no-variance-from-fn-generics.rs
 run-pass	regions/regions-nullary-variant.rs
@@ -7597,6 +7601,7 @@ compile-fail	type-alias-enum-variants/resolve-to-enum-variant-in-type-namespace-
 compile-fail	type-alias-impl-trait/coherence/orphanck-tait-with-projection-arg.rs
 check-pass	type-alias-impl-trait/cross_inference_rpit.rs
 check-pass	type-alias-impl-trait/implied_bounds3.rs
+compile-fail	type-alias-impl-trait/implied_bounds_closure.rs
 compile-fail	type-alias-impl-trait/issue-60371.rs
 check-pass	type-alias-impl-trait/issue-87455-static-lifetime-ice.rs
 check-pass	type-alias-impl-trait/multiple_definitions.rs

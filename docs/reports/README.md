@@ -98,3 +98,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-23 | [Region (lifetime) checking, part 17: raw pointers, `DerefMut` receivers, scrutinee and loop temporaries, and false errors of indexing, dispatch and turbofish inference](2026-11-23-06-region-check-17.md) |
 | 2026-11-23 | [Region (lifetime) checking, part 18: let extension through constructors, closure capture reborrows, trait objects' drops, `&mut` moved by value, and a scrutinee's drop per arm](2026-11-23-07-region-check-18.md) |
 | 2026-11-24 | [Region (lifetime) checking, part 19: closures' calls and requirements, fn items as higher-ranked fn pointers, impl constants' lifetimes](2026-11-24-01-region-check-19.md) |
+| 2026-11-24 | [Region (lifetime) checking, part 20: closures against the regions their bounds bind, boxed closures' signatures, captured locals' regions, what a closure's calls borrow](2026-11-24-03-region-check-20.md) |
