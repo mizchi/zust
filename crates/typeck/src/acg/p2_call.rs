@@ -1068,6 +1068,11 @@ impl Cx<'_> {
                         let fat = self.addr_plus(a, o);
                         return self.dyn_method_call_on(fat, tr, e, Some(rt));
                     }
+                    // (a `dyn Tr` place (the tail of a struct, `x.inner.get()`): its place is its pair)
+                    Place::Mem(a, o, t @ Ty::Dyn(tr)) => {
+                        let fat = self.addr_plus(a, o);
+                        return self.dyn_method_call_on(fat, tr, e, Some(Ty::Ref(true, intern(t))));
+                    }
                     Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i)) => {
                         through_ref |= matches!(p.ty(), Ty::Ref(..));
                         let ptr = self.b.ins().load(PTR, mf(), a, o);
@@ -2700,8 +2705,8 @@ impl Cx<'_> {
             }
             if let (Ty::Ref(pm, wi @ Ty::Struct(_)), Ty::Ref(am, gi), Some(val)) = (pt, t, v) {
                 if am || !pm {
-                    if let Some((n, u)) = self.unsize_tail_sol(*wi, *gi, &mut sol) {
-                        v = Some(self.make_fat(val, n));
+                    if let Some((m, u)) = self.unsize_tail_sol(*wi, *gi, &mut sol) {
+                        v = Some(self.make_unsized(val, m, expr_start(a))?);
                         t = Ty::Ref(pm, intern(u));
                     }
                 }
@@ -2787,6 +2792,17 @@ impl Cx<'_> {
             };
             if t.is_some_and(|t| !self.prog.has_param(t) && !self.needs_drop(t)) {
                 return Ok((None, Ty::Unit));
+            }
+        }
+        // (`size_of_val(x)` / `align_of_val(x)` of a pointer to an unsized type: from the pair's second word)
+        if matches!(self.prog.names[id as usize].as_str(), "__core_size_of_val" | "__core_align_of_val") && vals.len() == 1 {
+            if let Ty::Ref(_, t) | Ty::Ptr(_, t) = vals[0].1 {
+                if t.is_unsized() {
+                    let meta = self.b.ins().load(types::I64, mf(), vals[0].0, 8);
+                    let (size, align) = self.unsized_size_align(meta, *t);
+                    let v = if self.prog.names[id as usize] == "__core_size_of_val" { size } else { align };
+                    return Ok((Some(v), Ty::Usize));
+                }
             }
         }
         // (a callee that requires 'static (`fn f<T: 'static>`, `&'static T`): from here on, checked)

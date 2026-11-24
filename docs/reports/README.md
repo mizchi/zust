@@ -101,3 +101,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-24 | [False "mismatched types" on valid code: literals, generic arguments, coercions](2026-11-24-02-inference-coercions.md) |
 | 2026-11-24 | [False errors on valid code, part 2: least upper bounds, trait parameters, a lint](2026-11-24-03-inference-coercions-2.md) |
 | 2026-11-24 | [Structs with an unsized tail (`&Foo<[T]>`)](2026-11-24-04-dst-struct-tails.md) |
+| 2026-11-24 | [Structs with an unsized tail, part 2: `dyn` tails, `size_of_val`, boxes](2026-11-24-05-dst-dyn-tails.md) |

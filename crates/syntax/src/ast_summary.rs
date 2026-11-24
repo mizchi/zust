@@ -303,6 +303,23 @@ fn where_types(item: &Item, owner: Option<&Owner>, out: &mut Vec<String>) {
 }
 
 /// The plain trait bounds (one-segment paths without arguments, not `?Sized`) on a struct / enum's parameters
+/// The type parameters declared `?Sized` (in the parameter list or a where clause)
+fn adt_unsized(g: &Generics) -> Vec<String> {
+    let maybe = |bs: &[Bound]| bs.iter().any(|b| matches!(b, Bound::Trait(true, p) if p.segs.last().is_some_and(|s| s.name == "Sized")));
+    let mut v: Vec<String> = g.params.iter().filter_map(|p| match p {
+        GParam::Ty(n, bs, _) if maybe(bs) => Some(n.clone()),
+        _ => None,
+    }).collect();
+    for (t, bs) in &g.preds {
+        if let PTy::Path(None, tp) = t {
+            if tp.segs.len() == 1 && maybe(bs) && !v.contains(&tp.segs[0].name) {
+                v.push(tp.segs[0].name.clone());
+            }
+        }
+    }
+    v
+}
+
 fn adt_bounds(g: &Generics) -> Vec<(String, Vec<String>)> {
     let mut v = Vec::new();
     for p in &g.params {
@@ -2518,6 +2535,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             }
             sm.adt_generics = adt_params(g)?;
             sm.adt_bounds = adt_bounds(g);
+            sm.adt_unsized = adt_unsized(g);
             {
                 let tys: Vec<&PTy> = vars.iter().flat_map(|(_, f, _)| match f {
                     Fields::Unit => vec![],
@@ -2625,6 +2643,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             }
             sm.adt_generics = adt_params(g)?;
             sm.adt_bounds = adt_bounds(g);
+            sm.adt_unsized = adt_unsized(g);
             {
                 let tys: Vec<&PTy> = match fields {
                     Fields::Named(v) => v.iter().map(|x| &x.1).collect(),

@@ -497,16 +497,7 @@ impl Cx<'_> {
                 match self.prog.field(sid, fname) {
                     // (a struct with an unsized tail is a place of its (data, length) pair: a field is at the data
                     // address, the tail is a pair of its own (its address, the same length))
-                    Some((ft, foff)) if Ty::Struct(sid).is_dst_struct() => {
-                        let data = self.b.ins().load(PTR, mf(), a, o);
-                        if matches!(ft, Ty::Slice(_) | Ty::Str) || ft.is_dst_struct() {
-                            let len = self.b.ins().load(types::I64, mf(), a, o + 8);
-                            let p = self.b.ins().iadd_imm(data, foff as i64);
-                            Ok(Place::Mem(self.make_fat_v(p, len), 0, ft))
-                        } else {
-                            Ok(Place::Mem(data, foff as i32, ft))
-                        }
-                    }
+                    Some((ft, foff)) if Ty::Struct(sid).is_dst_struct() => Ok(self.dst_field(a, o, ft, foff)),
                     Some((ft, foff)) => Ok(Place::Mem(a, o + foff as i32, ft)),
                     None => err(SP, format!("no field `{fname}` on type `{}`", self.prog.structs[sid as usize].name)),
                 }
@@ -526,6 +517,8 @@ impl Cx<'_> {
                     // (a fat pointer's value is the address of its two words, which is what a slice place holds)
                     (Some(fat), Ty::Ref(_, Ty::Slice(e)) | Ty::Box(Ty::Slice(e))) => Ok(Place::Mem(fat, 0, Ty::Slice(e))),
                     (Some(fat), Ty::Ref(_, i) | Ty::Box(i)) if i.is_dst_struct() => Ok(Place::Mem(fat, 0, *i)),
+                    // (`*b` with b: `Box<dyn Tr>` / `&str`: a place of the pair too; reading it as a value is E0277)
+                    (Some(fat), Ty::Ref(_, i @ (Ty::Str | Ty::Dyn(_))) | Ty::Box(i @ (Ty::Str | Ty::Dyn(_)))) => Ok(Place::Mem(fat, 0, *i)),
                     (Some(_), Ty::Ptr(..)) if self.unsafe_ok == 0 && sp.start.line != 0 => {
                         err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)")
                     }
@@ -745,7 +738,7 @@ impl Cx<'_> {
         })?;
         // `&Box<T>` → `&T` (deref の強制変換: `e = x;` で x: &Box<Expr>)
         if let (Some(want @ Ty::Ref(m2, we)), Some(val), Ty::Ref(m1, Ty::Box(bi))) = (expected, v, t) {
-            if *we == **bi && !matches!(bi, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) && (m1 || !m2) {
+            if *we == **bi && !bi.is_unsized() && (m1 || !m2) {
                 let p = self.b.ins().load(PTR, mf(), val, 0);
                 return Ok((Some(p), want));
             }
@@ -792,15 +785,15 @@ impl Cx<'_> {
         // `&S<[T; N]>` → `&S<[T]>` (and to `*const S<[T]>`, `Box<S<[T; N]>>` → `Box<S<[T]>>`): the address and N
         if let (Some(want @ (Ty::Ref(m2, wi) | Ty::Ptr(m2, wi))), Some(v), Ty::Ref(m1, gi) | Ty::Ptr(m1, gi)) = (expected, v, t) {
             if (m1 || !m2) && !(matches!(want, Ty::Ref(..)) && matches!(t, Ty::Ptr(..))) {
-                if let Some(n) = self.unsize_tail_len(*wi, *gi) {
-                    let fat = self.make_fat(v, n);
+                if let Some(m) = self.unsize_tail(*wi, *gi) {
+                    let fat = self.make_unsized(v, m, expr_start(e))?;
                     return Ok((Some(fat), want));
                 }
             }
         }
         if let (Some(want @ Ty::Box(wi)), Some(v), Ty::Box(gi)) = (expected, v, t) {
-            if let Some(n) = self.unsize_tail_len(*wi, *gi) {
-                let fat = self.make_fat(v, n);
+            if let Some(m) = self.unsize_tail(*wi, *gi) {
+                let fat = self.make_unsized(v, m, expr_start(e))?;
                 return Ok((Some(fat), want));
             }
         }
@@ -835,6 +828,12 @@ impl Cx<'_> {
         // `&Box<[T]>` → `&[T]` (what the reference points to is the (pointer, length) pair, a `&[T]`'s value)
         if let (Some(want @ Ty::Ref(m2, Ty::Slice(we))), Some(v), Ty::Ref(m1, Ty::Box(Ty::Slice(ge)))) = (expected, v, t) {
             if we == ge && (m1 || !m2) {
+                return Ok((Some(v), want));
+            }
+        }
+        // (`&Box<Foo<[T]>>` → `&Foo<[T]>`: the same)
+        if let (Some(want @ Ty::Ref(m2, wi)), Some(v), Ty::Ref(m1, Ty::Box(gi))) = (expected, v, t) {
+            if *wi == **gi && wi.is_dst_struct() && (m1 || !m2) {
                 return Ok((Some(v), want));
             }
         }
@@ -1073,7 +1072,7 @@ impl Cx<'_> {
                 }
                 let p = p?;
                 // (`*slice` as a value: its size is not known; only a place (a pattern, `&*s`) can be one)
-                if matches!(p.ty(), Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
+                if p.ty().is_unsized() {
                     return err(expr_start(e), format!("the size for values of type `{}` cannot be known at compilation time", self.prog.tn(p.ty())));
                 }
                 if self.bk_on() && !self.bk_ty(p.ty()).0 {
@@ -1638,11 +1637,11 @@ impl Cx<'_> {
                     // (a raw slice pointer is the address of its (data, length) pair here: as a thin pointer, the data
                     // word)
                     // (a raw dyn pointer, the address of its (data, vtable) pair: likewise the data word)
-                    (Ty::Ptr(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)), Ty::Ptr(_, b)) if !matches!(b, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                    (Ty::Ptr(_, a), Ty::Ptr(_, b)) if a.is_unsized() && !b.is_unsized() => {
                         return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
                     }
                     // (`p as usize` of a fat raw pointer: its address, the data word)
-                    (Ty::Ptr(_, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)), t) if matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
+                    (Ty::Ptr(_, a), t) if a.is_unsized() && matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
                         return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
                     }
                     // (`p as *const dyn Tr` with p: `*const S`: the unsizing to a (data, vtable) pair)
@@ -1674,10 +1673,10 @@ impl Cx<'_> {
                         return Ok((v, to));
                     }
                     // (a narrower or wider integer and a raw pointer: through usize, as `as` does)
-                    (t, Ty::Ptr(_, i)) if t.is_int() && t.bits() <= 64 && !matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                    (t, Ty::Ptr(_, i)) if t.is_int() && t.bits() <= 64 && !i.is_unsized() => {
                         return Ok((v.map(|x| self.convert(x, t, Ty::Usize)), to));
                     }
-                    (Ty::Ptr(_, i), t) if t.is_int() && t.bits() <= 64 && !matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                    (Ty::Ptr(_, i), t) if t.is_int() && t.bits() <= 64 && !i.is_unsized() => {
                         return Ok((v.map(|x| self.convert(x, Ty::Usize, t)), to));
                     }
                     _ => {}
@@ -1979,7 +1978,7 @@ impl Cx<'_> {
             }
             return match pl {
                 // `&mut v[i]` (v: Vec<Box<T>>) を `&mut T` の位置に: Box の中身を指す (deref の強制変換)
-                Place::Mem(a, o, Ty::Box(x)) if matches!(expected, Some(Ty::Ref(_, e)) if *e == *x) && !matches!(x, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) => {
+                Place::Mem(a, o, Ty::Box(x)) if matches!(expected, Some(Ty::Ref(_, e)) if *e == *x) && !x.is_unsized() => {
                     let p = self.b.ins().load(PTR, mf(), a, o);
                     Ok((Some(p), Ty::Ref(m, x)))
                 }
@@ -2869,6 +2868,12 @@ impl Cx<'_> {
         // 最後の欄は drop glue (`Box<dyn ..>` の drop で使う)
         let de = self.vtable_drop_entry(t);
         fns.push(de);
+        // (then the size and the alignment: a struct with this type as its unsized tail places the tail by them,
+        // size_of_val reads them)
+        let (size, align) = self.prog.size_align(t);
+        let lit = |n: u32| if n < 1 << 20 { VT_LIT | n } else { u32::MAX };
+        fns.push(lit(size));
+        fns.push(lit(align));
         let k = match self.vtables.iter().position(|x| *x == fns) {
             Some(k) => k,
             None => {

@@ -372,6 +372,8 @@ pub struct Program {
     pub const_param_tys: FxMap<u32, Vec<(usize, String)>>,
     /// A struct / enum / union of the program's: the places of its type parameters bounded by Copy (`union U<T: Copy>`)
     pub copy_params: FxMap<u32, Vec<usize>>,
+    /// A struct's type parameters declared `?Sized` (base ids: the places), which its last field may make unsized
+    pub unsized_params: FxMap<u32, Vec<usize>>,
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
     /// be out of scope where the name is written
     pub has_mods: bool,
@@ -1152,6 +1154,7 @@ impl Program {
             derived: FxMap::default(),
             const_param_tys: FxMap::default(),
             copy_params: FxMap::default(),
+            unsized_params: FxMap::default(),
             has_mods: false,
             trait_clone_fns: false,
             multi_trait_methods: FxSet::default(),
@@ -1390,6 +1393,11 @@ impl Program {
                     }
                     if let (true, Some(k)) = (bs.iter().any(|b| b == "Copy" || b.ends_with("::Copy")), sm.adt_generics.iter().position(|g| g == pn)) {
                         p.copy_params.entry(sdefs.len() as u32).or_default().push(k);
+                    }
+                }
+                for pn in &sm.adt_unsized {
+                    if let Some(k) = sm.adt_generics.iter().position(|g| g == pn) {
+                        p.unsized_params.entry(sdefs.len() as u32).or_default().push(k);
                     }
                 }
                 sdefs.push((ii, name.clone(), shape, sm.adt_generics.clone()));
@@ -4143,7 +4151,7 @@ impl Program {
         }
         // 最後のフィールドが unsized (`[T]` / `str` / そういう struct) なら番号に印を付ける (`&S<[T]>` は fat pointer)
         // (from the definition's last field: a symbolic instance (`Fat<[T]>`) has no laid-out fields)
-        let dst = !d.is_enum && self.structs[base as usize].fields.last().is_some_and(|f| self.tail_unsized(f.1, &d.args, 0));
+        let dst = !d.is_enum && self.structs[base as usize].fields.last().is_some_and(|f| self.tail_unsized(base, f.1, &d.args, 0));
         let id = match placeholder {
             Some(pid) => {
                 self.structs.replace(pid, d);
@@ -4180,10 +4188,13 @@ impl Program {
     /// Whether t, a definition's last field type with args for its parameters, is unsized (`[T]`, `str`, a struct
     /// with such a tail). Read from the definitions without instantiating (a recursive type's instance is not in the
     /// cache yet when this is asked)
-    fn tail_unsized(&self, t: Ty, args: &[Ty], depth: u32) -> bool {
+    fn tail_unsized(&self, base: u32, t: Ty, args: &[Ty], depth: u32) -> bool {
+        // (a parameter not declared `?Sized` is not unsized: `Bar<dyn Debug>` with `struct Bar<T>(T)` is an error
+        // (E0277), not a struct with an unsized tail)
+        let may = |b: u32, i: u8| self.unsized_params.get(&b).is_some_and(|v| v.contains(&(i as usize)));
         match t {
-            Ty::Slice(_) | Ty::Str => true,
-            Ty::Param(i) => args.get(i as usize).is_some_and(|&a| matches!(a, Ty::Slice(_) | Ty::Str) || a.is_dst_struct()),
+            Ty::Slice(_) | Ty::Str | Ty::Dyn(_) => true,
+            Ty::Param(i) => may(base, i) && args.get(i as usize).is_some_and(|&a| a.is_unsized()),
             Ty::Struct(_) if t.is_dst_struct() => true,
             Ty::Struct(s) if depth < 8 => {
                 let sd = &self.structs[s as usize];
@@ -4193,7 +4204,7 @@ impl Program {
                     return false;
                 }
                 match bd.fields.last() {
-                    Some(&(_, Ty::Param(j), _)) => sd.args.get(j as usize).is_some_and(|&a| self.tail_unsized(a, args, depth + 1)),
+                    Some(&(_, Ty::Param(j), _)) if may(b, j) => sd.args.get(j as usize).is_some_and(|&a| self.tail_unsized(base, a, args, depth + 1)),
                     _ => false,
                 }
             }

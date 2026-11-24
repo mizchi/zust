@@ -66,6 +66,20 @@ pub type R<T> = Result<T, String>;
 
 /// ポインタ型 (x86-64 前提)
 pub const PTR: Type = types::I64;
+/// A vtable entry that is a number, not a function (the concrete type's size and alignment, after the drop entry):
+/// `VT_LIT | n`, n below 2^20 (a larger size is written as the null entry)
+pub const VT_LIT: u32 = 0xFFF0_0000;
+/// The second word of the pair of a struct with an unsized tail made by a coercion: the tail's length, or the
+/// vtable of the tail's type (`S<T>` to `S<dyn Tr>`)
+#[derive(Clone, Copy)]
+pub(crate) enum TailMeta {
+    Len(i64),
+    Dyn(Ty, &'static String),
+}
+
+pub fn vt_lit(f: u32) -> Option<u64> {
+    (f != u32::MAX && f >= VT_LIT).then_some((f & !VT_LIT) as u64)
+}
 
 /// エラーの場所 (今は使わない)
 /// ソース上の位置 (アイテムの中の行・桁)。分からないところは SP (0 行目)
@@ -2188,7 +2202,7 @@ impl Cx<'_> {
                             .lets
                             .get(&crate::ast_infer::stmt_key(st))
                             .copied()
-                            .filter(|t| !matches!(t, Ty::Slice(_) | Ty::Str | Ty::Dyn(_))),
+                            .filter(|t| !t.is_unsized()),
                     };
                     // (assert_eq! の展開: 右の値の型は左と同じ)
                     let hintable = |e: &Expr| {

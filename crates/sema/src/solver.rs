@@ -217,6 +217,14 @@ impl Solver<'_> {
     pub fn seq_unify(&mut self, a: u32, b: u32) {
         let (fa, fb) = (self.find(a), self.find(b));
         let elem = |s: &mut Self, v: u32| -> Option<u32> {
+            // (`&[T]` against `[U; N]` (`PartialEq<[U; N]> for &[T]`): the slice's element)
+            let v = match s.shape[v as usize] {
+                Some(Shape::Ref(_, i)) => {
+                    let i = s.find(i);
+                    if matches!(s.shape[i as usize], Some(Shape::Slc(_))) { i } else { v }
+                }
+                _ => v,
+            };
             match s.shape[v as usize] {
                 Some(Shape::Arr(x, _)) | Some(Shape::Slc(x)) => Some(x),
                 Some(Shape::Adt(vb, st, 1)) if s.is_vec(vb) => Some(s.adt_args[st as usize]),
@@ -411,6 +419,12 @@ impl Solver<'_> {
                 }
                 self.unify(x, y);
             }
+            // (two instances of one struct that may have an unsized tail, with arguments known to differ
+            // (`[&Foo<u8>, &Foo<u64>]` as `[&Foo<dyn Tr>; 2]`, each coerced): not one type, nothing to unify)
+            (Some(Shape::Adt(x, s1, l1)), Some(Shape::Adt(y, s2, l2)))
+                if x == y
+                    && self.prog.unsized_params.contains_key(&x)
+                    && self.adt_vars_of(s1, l1).into_iter().zip(self.adt_vars_of(s2, l2)).any(|(p, q)| self.clash(p, q)) => {}
             (Some(Shape::Adt(x, s1, l1)), Some(Shape::Adt(y, s2, l2))) if x == y => {
                 // (`S<[T; N]>` passed as `S<[T]>` (a coercion, a struct with an unsized tail): not one type, only
                 // the arguments are unified (an array's element with the slice's))
@@ -446,6 +460,10 @@ impl Solver<'_> {
                     if let (true, Ty::Slice(e)) = (dst, t) {
                         let k = self.known(*e);
                         self.unsize_elem(p, k);
+                        continue;
+                    }
+                    // (`S<T>` to `S<dyn Tr>`: T is any type implementing Tr)
+                    if let (true, Ty::Dyn(_)) = (dst, t) {
                         continue;
                     }
                     let k = self.known(t);
@@ -988,6 +1006,19 @@ impl Solver<'_> {
             Ty::Ref(_, i) => elem_of(*i).map(|e| Ty::Ref(false, intern(e))),
             Ty::Array(e, _) => Some(Ty::Ref(false, e)),
             t => elem_of(t).or_else(|| self.prog.assoc_of(t, "Item")),
+        }
+    }
+
+    /// x and y have shapes that are certainly different types (a scalar and another scalar or a compound type, two
+    /// different structs): what a coercion may join (`&Foo<u8>` and `&Foo<(u16, u32)>`, both to `&Foo<dyn Tr>`)
+    fn clash(&mut self, x: u32, y: u32) -> bool {
+        let (x, y) = (self.find(x), self.find(y));
+        let scalar = |t: Ty| !matches!(t, Ty::Struct(_) | Ty::Ref(..) | Ty::Ptr(..) | Ty::Box(_) | Ty::Array(..) | Ty::Slice(_) | Ty::Assoc(_) | Ty::Param(_) | Ty::Fn(_) | Ty::Dyn(_) | Ty::Never);
+        match (self.shape[x as usize], self.shape[y as usize]) {
+            (Some(Shape::Known(a)), Some(Shape::Known(b))) => a != b && (scalar(a) || scalar(b)),
+            (Some(Shape::Known(a)), Some(_)) | (Some(_), Some(Shape::Known(a))) => scalar(a),
+            (Some(Shape::Adt(a, ..)), Some(Shape::Adt(b, ..))) => a != b,
+            _ => false,
         }
     }
 

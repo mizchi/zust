@@ -199,7 +199,7 @@ impl Session2 {
                     let fs = b.relocs.iter().filter_map(|r| if let Target::Func(f) = r.target { Some(f) } else { None });
                     let vs = b.vtables.iter().flat_map(|v| v.iter().copied());
                     for f in fs.chain(vs) {
-                        if f != u32::MAX && (f as usize) < a.prog.names.len() && concrete(&a.prog, f as usize) && !a.is_ext(f) && !blobs.contains_key(&f) && !live[f as usize] {
+                        if f != u32::MAX && acg::vt_lit(f).is_none() && (f as usize) < a.prog.names.len() && concrete(&a.prog, f as usize) && !a.is_ext(f) && !blobs.contains_key(&f) && !live[f as usize] {
                             live[f as usize] = true;
                             user_live.push(f);
                             wave.push(f);
@@ -340,7 +340,7 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
             }
         }
         for vt in &b.vtables {
-            stack.extend(vt.iter().copied().filter(|&f| f != u32::MAX));
+            stack.extend(vt.iter().copied().filter(|&f| f != u32::MAX && acg::vt_lit(f).is_none()));
         }
     }
     let mut placed: Vec<u32> = user_live.iter().copied().filter(|u| reach.contains(u) && blobs.contains_key(u)).collect();
@@ -548,13 +548,17 @@ fn emit_object(a: &Analysis, ctx: &CrateCtx, insts: &Insts, user_live: &[u32], b
             }
             let n = format!(".Lxv{}", vts.len());
             let mut rs = vec![];
+            let mut bytes = vec![0u8; 8 * vt.len().max(1)];
             for (i, &f) in vt.iter().enumerate() {
+                if let Some(n) = acg::vt_lit(f) {
+                    bytes[8 * i..8 * i + 8].copy_from_slice(&n.to_le_bytes());
+                    continue;
+                }
                 if f != u32::MAX && (reach.contains(&resolve(f)) || prog.sigs.get(f as usize).is_some_and(|s| s.is_extern) || a.is_ext(f)) {
                     rs.push((8 * i as u32, fname(f), 0));
                 }
             }
-            let size: usize = 8 * vt.len().max(1);
-            datas.push((n.clone(), vec![0u8; size], rs, false));
+            datas.push((n.clone(), bytes, rs, false));
             vts.insert(vt.clone(), n.clone());
             vt_names.push(n);
         }

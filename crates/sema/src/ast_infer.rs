@@ -1579,8 +1579,9 @@ impl Inf<'_> {
                 // type) would take the other call's integer default (`Some(22)`))
                 let simple = |e: &Expr| !matches!(e, Expr::Call(..) | Expr::MethodCall(..));
                 // SAFETY: as above
+                // (as `==` does: `&[u8]` against `[1, 2, 3]` only makes the elements one type)
                 if simple(unsafe { &*a }) || simple(unsafe { &*b }) {
-                    self.unify(va, vb);
+                    self.seq_unify(va, vb);
                 }
             }
             return self.known(Ty::Unit);

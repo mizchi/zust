@@ -654,6 +654,7 @@ run-pass	binding/match-ref-binding-in-guard-3256.rs
 run-pass	binding/match-ref-binding-mut-option.rs
 run-pass	binding/match-ref-binding-mut.rs
 run-pass	binding/match-ref-binding.rs
+run-pass	binding/match-ref-unsized.rs
 run-pass	binding/match-str.rs
 run-pass	binding/match-struct-0.rs
 run-pass	binding/match-tag.rs
@@ -2270,8 +2271,12 @@ check-pass	dropck/no-dropck-overflow-on-deep-nesting.rs
 run-pass	dropck/self-referential-struct-with-boxed-closure.rs
 check-pass	dropck/transitive-outlives-2.rs
 compile-fail	dropck/unconstrained_const_param_on_drop.rs
+compile-fail	dst/dst-bad-assign-2.rs
+compile-fail	dst/dst-bad-assign-3.rs
+compile-fail	dst/dst-bad-assign.rs
 compile-fail	dst/dst-bad-coerce1.rs
 compile-fail	dst/dst-bad-coerce2.rs
+compile-fail	dst/dst-bad-coerce3.rs
 compile-fail	dst/dst-bad-coerce4.rs
 compile-fail	dst/dst-bad-coercions.rs
 run-pass	dst/dst-coercions.rs
@@ -2279,11 +2284,13 @@ run-pass	dst/dst-irrefutable-bind.rs
 compile-fail	dst/dst-rvalue.rs
 run-pass	dst/dst-struct-sole.rs
 run-pass	dst/dst-struct.rs
+run-pass	dst/dst-trait.rs
 compile-fail	dst/issue-90528-unsizing-not-suggestion-110063.rs
 compile-fail	dst/issue-90528-unsizing-suggestion-1.rs
 compile-fail	dst/issue-90528-unsizing-suggestion-2.rs
 compile-fail	dst/issue-90528-unsizing-suggestion-3.rs
 compile-fail	dst/issue-90528-unsizing-suggestion-4.rs
+run-pass	dst/match-dst-struct.rs
 check-pass	dst/tuple-with-unsized-tail-field.rs
 run-pass	dst/unsized-str-mutability.rs
 check-pass	dst/unsized-tuple-trait-tail.rs
@@ -4368,6 +4375,7 @@ compile-fail	methods/method-not-found-but-doc-alias.rs
 compile-fail	methods/method-not-found-on-iterator.rs
 compile-fail	methods/method-not-found-on-struct.rs
 compile-fail	methods/method-path-in-pattern.rs
+run-pass	methods/method-probe-no-guessing-dyn-trait.rs
 run-pass	methods/method-projection.rs
 run-pass	methods/method-recursive-blanket-impl.rs
 compile-fail	methods/method-resolvable-path-in-pattern.rs
@@ -7894,6 +7902,7 @@ check-pass	unsized/maybe-bounds-where-cpass.rs
 compile-fail	unsized/param-mentioned-by-different-field.rs
 compile-fail	unsized/relaxed-bounds-invalid-places.rs
 compile-fail	unsized/thin-ptr-to-unsized-projection.rs
+run-pass	unsized/unchanged-param.rs
 check-pass	unsized/unsize-coerce-multiple-adt-params.rs
 compile-fail	unsized/unsized-fn-param.rs
 compile-fail	unsized/unsized-function-argument-41229.rs

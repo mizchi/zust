@@ -61,8 +61,9 @@ obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-
   (unsized/issue-40231-*.rs).
 - Most of std's traits are still judged by `Program::implements` at calls (with known exceptions); the prelude's
   impls as solver clauses would make both directions exact (measured in part 5: few tests depend on it).
-- Structs with an unsized tail ([done for slices](docs/reports/2026-11-24-04-dst-struct-tails.md)): `dyn` tails
-  (need the alignment in vtables), `size_of_val` of them, dropping a `Box<Foo<[T]>>` whose elements need it.
+- Structs with an unsized tail ([slices](docs/reports/2026-11-24-04-dst-struct-tails.md),
+  [`dyn`, boxes, `size_of_val`](docs/reports/2026-11-24-05-dst-dyn-tails.md)): a user `impl Drop` on such a struct
+  is not called when its box is dropped.
 - dangerous_implicit_autorefs: the range-index form (`(*p)[..2]`) is not caught.
 
 ## Security: CVEs whose API zustc does not have (`expect: unsupported`)

@@ -1524,37 +1524,75 @@ impl Cx<'_> {
 
     // --- タプル・配列・スライス ------------------------------------------
 
-    /// `S<[T; N]>` を `S<[T]>` (最後のフィールドが unsized な struct) に強制変換できるなら、末尾の要素数 N
+    /// `S<[T; N]>` を `S<[T]>` / `S<T>` を `S<dyn Tr>` (最後のフィールドが unsized な struct) に強制変換できるなら、
+    /// 組の後半 (末尾の要素数 N / T の vtable) と unsized な型
     /// (want may be generic (`&Fat<[T]>` for a parameter): it is matched into sol)
-    pub(crate) fn unsize_tail_len(&self, want: Ty, got: Ty) -> Option<i64> {
+    pub(crate) fn unsize_tail_sol(&self, want: Ty, got: Ty, sol: &mut [Option<Ty>]) -> Option<(TailMeta, Ty)> {
+        if !want.is_dst_struct() {
+            return None;
+        }
+        let (m, u) = self.unsized_of(Some(want), got)?;
+        let ok = if self.prog.has_param(want) { self.prog.match_ty(want, u, sol) } else { want == u };
+        ok.then_some((m, u))
+    }
+
+    pub(crate) fn unsize_tail(&self, want: Ty, got: Ty) -> Option<TailMeta> {
         let mut sol = vec![None; 64];
         self.unsize_tail_sol(want, got, &mut sol).map(|x| x.0)
     }
 
-    /// (N, the unsized type of got (`S<[T]>`)) if got (`S<[T; N]>`) unsizes to want
-    pub(crate) fn unsize_tail_sol(&self, want: Ty, got: Ty, sol: &mut [Option<Ty>]) -> Option<(i64, Ty)> {
-        if !want.is_dst_struct() {
-            return None;
+    /// The pair for a value at v unsized by m: (v, N) or (v, the vtable)
+    pub(crate) fn make_unsized(&mut self, v: Value, m: TailMeta, span: Sp) -> R<Value> {
+        match m {
+            TailMeta::Len(n) => Ok(self.make_fat(v, n)),
+            TailMeta::Dyn(t, tr) => self.to_dyn(v, t, tr.as_str(), span),
         }
-        let (n, u) = self.unsized_of(got)?;
-        let ok = if self.prog.has_param(want) { self.prog.match_ty(want, u, sol) } else { want == u };
-        ok.then_some((n, u))
     }
 
-    /// `S<[T; N]>` → (N, `S<[T]>`): the struct whose tail (through nested structs) is an array, as a slice
-    fn unsized_of(&self, got: Ty) -> Option<(i64, Ty)> {
+    /// The last field's type of a struct instance (a symbolic one (`Fat<[T]>`) has no laid-out fields: from its
+    /// definition's last field)
+    pub(crate) fn struct_tail_of(&self, t: Ty) -> Option<Ty> {
+        let Ty::Struct(s) = t else { return None };
+        let d = &self.prog.structs[s as usize];
+        if let Some(f) = d.fields.last() {
+            return Some(f.1);
+        }
+        let b = &self.prog.structs[d.base? as usize];
+        match b.fields.last()?.1 {
+            Ty::Param(j) => d.args.get(j as usize).copied(),
+            t if !self.prog.has_param(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// got (`S<[T; N]>`, `S<T>`) unsized as want asks (`[T]` for an array, `dyn Tr` for a sized type, through
+    /// nested structs' tails): (what the pair's second word is, the unsized type)
+    fn unsized_of(&self, want: Option<Ty>, got: Ty) -> Option<(TailMeta, Ty)> {
+        match (want, got) {
+            (None | Some(Ty::Slice(_)), Ty::Array(e, n)) => return Some((TailMeta::Len(n as i64), Ty::Slice(e))),
+            (Some(Ty::Dyn(tr)), t) if !t.is_unsized() => {
+                return Some((TailMeta::Dyn(t, tr), Ty::Dyn(tr)));
+            }
+            _ => {}
+        }
         let Ty::Struct(y) = got else { return None };
         if got.is_dst_struct() || self.prog.structs[y as usize].is_enum {
             return None;
         }
         let d = &self.prog.structs[y as usize];
         let base = d.base?;
+        if want.is_some_and(|w| !matches!(w, Ty::Struct(x) if self.prog.base_of(x) == base)) {
+            return None;
+        }
         let (_, tail, _) = *d.fields.last()?;
-        let (n, ut) = match tail {
-            Ty::Array(e, n) => (n as i64, Ty::Slice(e)),
-            t => self.unsized_of(t)?,
-        };
-        let args: Vec<Ty> = d.args.iter().map(|&a| if a == tail { ut } else { a }).collect();
+        let (m, ut) = self.unsized_of(want.and_then(|w| self.struct_tail_of(w)), tail)?;
+        // (the arguments that make the tail ut: from the definition's last field (`Foo<T>` in `Outer<T>`))
+        let bl = self.prog.structs[base as usize].fields.last()?.1;
+        let mut sol = vec![None; d.args.len()];
+        if !self.prog.match_ty(bl, ut, &mut sol) {
+            return None;
+        }
+        let args: Vec<Ty> = d.args.iter().zip(&sol).map(|(&a, s)| s.unwrap_or(a)).collect();
         if args == d.args {
             return None;
         }
@@ -1565,7 +1603,7 @@ impl Cx<'_> {
         let uf = &self.prog.structs[id as usize].fields;
         let k = d.fields.len() - 1;
         let same = uf.len() == d.fields.len() && uf[..k].iter().zip(&d.fields[..k]).all(|(a, b)| a.1 == b.1 && a.2 == b.2);
-        (u.is_dst_struct() && same && uf[k].1 == ut).then_some((n, u))
+        (u.is_dst_struct() && same && uf[k].1 == ut).then_some((m, u))
     }
 
     pub(crate) fn make_fat(&mut self, ptr: Value, len: i64) -> Value {

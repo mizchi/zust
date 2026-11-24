@@ -100,3 +100,4 @@ zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの�
 | 2026-11-24 | [正しいコードへの誤った「mismatched types」: リテラル、ジェネリックな引数、型強制](2026-11-24-02-inference-coercions.md) |
 | 2026-11-24 | [正しいコードへの誤ったエラー、その 2: 最小上界、トレイトのパラメータ、リント](2026-11-24-03-inference-coercions-2.md) |
 | 2026-11-24 | [最後のフィールドが unsized な struct (`&Foo<[T]>`)](2026-11-24-04-dst-struct-tails.md) |
+| 2026-11-24 | [最後のフィールドが unsized な struct、その 2: `dyn` の末尾、`size_of_val`、Box](2026-11-24-05-dst-dyn-tails.md) |
