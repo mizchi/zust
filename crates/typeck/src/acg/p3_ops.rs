@@ -51,7 +51,8 @@ impl Cx<'_> {
         // 負のリテラル (`-128i8` / `-2147483648`) はその場で値にする (検査で MIN の符号反転にしない)
         if op == "-" {
             if let Expr::Lit(t, _) = strip_paren(x) {
-                if let Some(Lit::Int(i)) = lit::lit(t) {
+                // (not `-2f32`: digits with a float's suffix are a float, negated below)
+                if let Some(Lit::Int(i)) = lit::lit(t).filter(|l| !matches!(l, Lit::Int(i) if matches!(i.suffix(), "f32" | "f64"))) {
                     let lit_e: &Expr = strip_paren(x);
                     // (`-129i8` / `let x: i8 = -129;`: past the type, overflowing_literals; `-128i8` is not)
                     if let (Some(t), true) = (Ty::from_suffix(i.suffix()).or(expected.filter(|t| t.is_int())), self.user_code && !self.prog.allow_overflowing_literals) {

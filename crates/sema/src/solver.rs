@@ -73,6 +73,8 @@ pub struct Solver<'p> {
     pub clo_info: crate::fxhash::FxMap<u32, (u32, Vec<u32>, Vec<usize>)>,
     /// 後でもう一度見る関連型の境界 (呼び先, 型パラメータの型変数)
     pub late: Vec<(u32, Vec<Option<u32>>)>,
+    /// the callee's type parameters a turbofish gives (index, variable), for the next apply_self (`tr::<u16>()`)
+    pub pre_pv: Vec<(usize, u32)>,
 }
 
 impl<'p> Solver<'p> {
@@ -104,6 +106,7 @@ impl<'p> Solver<'p> {
             clo_ctx: None,
             clo_info: Default::default(),
             late: vec![],
+            pre_pv: vec![],
         }
     }
 }
@@ -898,6 +901,11 @@ impl Solver<'_> {
                 let sig = &self.prog.sigs[id as usize];
                 let (params, ret) = (sig.params[skip.min(sig.params.len())..].to_vec(), sig.ret);
                 let mut pv: Vec<Option<u32>> = vec![None; sig.generics.len()];
+                for (k, v) in std::mem::take(&mut self.pre_pv) {
+                    if let Some(slot) = pv.get_mut(k) {
+                        *slot = Some(v);
+                    }
+                }
                 if let (Some(t), true) = (self_ty, sig.trait_of.is_some()) {
                     pv[0] = Some(self.known(t));
                 }

@@ -1761,6 +1761,12 @@ impl Inf<'_> {
         self.known(Ty::Unit)
     }
 
+    /// The program defines no fn of p's last name that the path could name (a user's own `size_of`)
+    fn fn_by_name_absent(&self, p: &crate::parse::Path) -> bool {
+        let Some(n) = p.segs.last().map(|s| s.name.as_str()) else { return true };
+        !self.prog.index.contains_key(n) || p.segs.len() >= 2
+    }
+
     fn call(&mut self, f: &Expr, args: &[Expr]) -> u32 {
         // `HashMap::from([(1, 2), ..])`: 配列を Vec<要素> として `from(Vec)` を呼ぶ (syn 版は `vec![..]` に書き換える)
         if let (Expr::Path(None, p), [Expr::Array(es)]) = (f, args) {
@@ -1780,6 +1786,18 @@ impl Inf<'_> {
                 let vv = self.adt(vb, vec![el]);
                 let callee = self.fn_by(p);
                 return self.apply(callee, vec![vv], 0);
+            }
+        }
+        // (`mem::size_of::<T>()` / `align_of` / `size_of_val(&x)`: usize, the code generator's intrinsics, so a literal
+        // beside them (`3 + mem::size_of::<Foo>()`) is a usize too)
+        if let Expr::Path(None, p) = f {
+            let last = p.segs.last().map(|s| s.name.as_str());
+            let mem_path = p.segs.len() == 1 || p.segs.iter().rev().nth(1).is_some_and(|s| s.name == "mem");
+            if mem_path && matches!(last, Some("size_of" | "align_of" | "size_of_val" | "align_of_val")) && self.fn_by_name_absent(p) {
+                for a in args {
+                    self.expr(a);
+                }
+                return self.known(Ty::Usize);
             }
         }
         if let Some(x) = self.prim_method_call(f, args) {
@@ -1928,6 +1946,25 @@ impl Inf<'_> {
             let n = p.segs.len();
             if callee.is_none() && n >= 2 && p.segs[n - 1].name == "new" && p.segs[n - 2].name == "Box" && avs.len() == 1 {
                 return self.with(Shape::Bx(avs[0]));
+            }
+        }
+        // (`tr::<u16>()`: the turbofish gives the callee's own type parameters, as the code generator reads them: a free
+        // fn's in order, a member's the last ones; an `impl Trait` argument's hidden parameter is not named)
+        if let (Some(id), Expr::Path(None, p)) = (callee, f) {
+            let tys: Vec<&PTy> = p.segs.last().map_or(vec![], |s| s.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect());
+            if !tys.is_empty() {
+                let sig = &self.prog.sigs[id as usize];
+                let named: Vec<usize> = (0..sig.generics.len()).filter(|&k| !sig.generics[k].0.starts_with("__impl")).collect();
+                let member = sig.self_ty.is_some() || sig.impl_of.is_some();
+                let start = if member { named.len().saturating_sub(tys.len()) } else { sig.trait_of.is_some() as usize };
+                let mut pre = vec![];
+                for (i, t) in tys.into_iter().enumerate() {
+                    if let Some(&k) = named.get(start + i) {
+                        let v = self.ty_var(t);
+                        pre.push((k, v));
+                    }
+                }
+                self.pre_pv = pre;
             }
         }
         if callee.is_none() {
@@ -2462,6 +2499,12 @@ impl Inf<'_> {
             }
         }
         if let Some(t) = recv_ty.filter(|t| t.is_float()) {
+            // (the methods whose arguments are Self: a literal or generic argument (`x.min(black_box(9.0))`) is that type)
+            if matches!(name, "min" | "max" | "powf" | "atan2" | "hypot" | "copysign" | "mul_add" | "clamp" | "rem_euclid" | "div_euclid" | "abs_sub" | "maximum" | "minimum" | "midpoint") {
+                for &a in &avs {
+                    self.unify(a, rv);
+                }
+            }
             return match name {
                 "is_nan" | "is_finite" | "is_infinite" | "is_sign_negative" | "is_sign_positive" | "is_normal" => self.known(Ty::Bool),
                 "to_bits" => self.known(if t == Ty::F32 { Ty::U32 } else { Ty::U64 }),

@@ -1020,6 +1020,7 @@ compile-fail	borrowck/issue-62107-match-arm-scopes.rs
 compile-fail	borrowck/issue-62387-suggest-iter-mut-2.rs
 compile-fail	borrowck/issue-62387-suggest-iter-mut.rs
 compile-fail	borrowck/issue-64453.rs
+compile-fail	borrowck/issue-69789-iterator-mut-suggestion.rs
 check-pass	borrowck/issue-70919-drop-in-loop.rs
 check-pass	borrowck/issue-71546.rs
 compile-fail	borrowck/issue-7573.rs
@@ -2188,6 +2189,7 @@ compile-fail	drop/drop-conflicting-impls.rs
 run-pass	drop/drop-count-assertion-16151.rs
 run-pass	drop/drop-immediate-non-box-ty-9446.rs
 run-pass	drop/drop-in-for-loop-destructure.rs
+run-pass	drop/drop-noncopyable-raw-pointer.rs
 run-pass	drop/drop-on-empty-block-exit.rs
 run-pass	drop/drop-on-ret.rs
 run-pass	drop/drop-on-untaken-arm-raw-ptr.rs
@@ -2693,6 +2695,7 @@ check-pass	feature-gates/soft-syntax-gates-without-errors.rs
 compile-fail	feature-gates/trace_macros-gate.rs
 compile-fail	ffi/extern-static-mut-slice-54410.rs
 run-pass	ffi/ffi-struct-size-alignment.rs
+run-pass	float/minmax.rs
 run-pass	fmt/debug-single-call.rs
 compile-fail	fmt/format-args-argument-span.rs
 compile-fail	fmt/format-args-capture-issue-102057.rs
@@ -2937,6 +2940,7 @@ compile-fail	generics/cyclic-default-type-param-via-alias.rs
 run-pass	generics/default-type-params-well-formedness.rs
 run-pass	generics/empty-generic-brackets-equiv.rs
 compile-fail	generics/enum-definition-with-outer-generic-parameter-5997.rs
+run-pass	generics/generic-alias-unique.rs
 compile-fail	generics/generic-arg-mismatch-recover.rs
 run-pass	generics/generic-associated-type-deref-target-56237.rs
 run-pass	generics/generic-derived-type.rs
@@ -3497,6 +3501,7 @@ compile-fail	inline-const/promotion.rs
 compile-fail	inline-const/uninit-local.rs
 compile-fail	intrinsics/incorrect-read_via_copy-defn.rs
 compile-fail	intrinsics/incorrect-transmute.rs
+run-pass	intrinsics/intrinsics-math.rs
 check-pass	intrinsics/issue-84297-reifying-copy.rs
 compile-fail	intrinsics/unchecked_math_unstable.rs
 check-pass	iterators/array.rs
@@ -7286,6 +7291,7 @@ check-pass	traits/issue-2611-3.rs
 compile-fail	traits/issue-32963.rs
 check-pass	traits/issue-33187.rs
 run-pass	traits/issue-3683.rs
+run-pass	traits/issue-38033.rs
 compile-fail	traits/issue-38604.rs
 compile-fail	traits/issue-3973.rs
 run-pass	traits/issue-40085.rs
@@ -7801,6 +7807,7 @@ run-pass	union/union-drop.rs
 compile-fail	union/union-empty.rs
 build-pass	union/union-field-access-error-65462.rs
 compile-fail	union/union-fields-2.rs
+run-pass	union/union-generic-rpass.rs
 compile-fail	union/union-generic.rs
 run-pass	union/union-inherent-method.rs
 run-pass	union/union-macro.rs
