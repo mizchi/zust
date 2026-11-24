@@ -1226,6 +1226,9 @@ impl Cx<'_> {
         // (the receiver's type before the derefs: `(*self).into_abi()` of a `&str` that type inference did not record
         // reaches `str`; `impl Tr for &str`'s `str::__ref_into_abi` is its method)
         let p0_ty = p.ty();
+        // (the receiver's place as evaluated, before the derefs below: a fallback that calls an impl for the reference
+        // takes its value from here, not from the receiver evaluated again (`refs[next()]` once))
+        let p0 = p;
         // (or `&Box<str>`'s, `Box::__ref_into_abi` among the impls for references to Boxes: the one whose self type
         // is the receiver's)
         let ref_impl = |t: Ty| -> Option<String> {
@@ -1241,9 +1244,7 @@ impl Cx<'_> {
             let c = std::iter::once(first).chain(self.prog.overloads.get(&f).into_iter().flatten().copied()).find(|&c| fits(c))?;
             Some(self.prog.names[c as usize].clone())
         };
-        // (the receiver is written again in the call these fall back to: only one evaluated again without effects,
-        // `refs[i]`, not `refs[next()]`)
-        let ref_call = ref_impl(p0_ty).filter(|_| is_place_expr(recv) && self.pure_place(recv));
+        let ref_call = ref_impl(p0_ty).filter(|_| is_place_expr(recv));
         let (a, o, sid, id) = loop {
             let (a, o, sid) = loop {
                 p = match p {
@@ -1263,7 +1264,27 @@ impl Cx<'_> {
                         Place::Mem(ptr, 0, *i)
                     }
                     p => {
+                        // (the reference the receiver's place holds, read once: a thin one)
+                        let recv_ref = |this: &mut Self| match p0 {
+                            Place::Var(v, Ty::Ref(_, i)) if !i.is_fat() => Some(this.b.use_var(v)),
+                            Place::Mem(a, o, Ty::Ref(_, i)) if !i.is_fat() => Some(this.b.ins().load(PTR, mf(), a, o)),
+                            _ => None,
+                        };
                         if let Some(f) = &ref_call {
+                            let id = self.prog.index.get(f.split('#').next().unwrap_or(f)).copied();
+                            let chosen = self.prog.names.iter().position(|n| n == f).map(|i| i as u32);
+                            // (an `unsafe fn` of the impl: E0133 at the method call outside `unsafe`, as for the others)
+                            if let Some(c) = chosen.or(id) {
+                                self.check_unsafe_call(c, msp.start)?;
+                                if let Some(v) = recv_ref(self) {
+                                    let args: Vec<&Expr> = margs.iter().collect();
+                                    return self.call_fn(c, Some((v, p0_ty)), &args, tf, expected, SP);
+                                }
+                            }
+                        }
+                        // (a receiver whose reference is not read here: the call written again, for one evaluated again
+                        // without effects, `refs[i]`, not `refs[next()]`)
+                        if let Some(f) = ref_call.as_ref().filter(|_| self.pure_place(recv)) {
                             let mut args = vec![recv.clone()];
                             args.extend(margs.iter().cloned());
                             let id = self.prog.index.get(f.split('#').next().unwrap_or(f)).copied();
@@ -1279,17 +1300,22 @@ impl Cx<'_> {
                         }
                         // (a blanket impl's `self`-by-value method for the reference as it is, `(*self).into_maybe_abi()`
                         // of a `&Box<str>` with `impl<T: OptionIntoWasmAbi> MaybeIntoWasmAbi for T`)
-                        if let Some(&bid) = self.prog.blanket.get(method).filter(|_| matches!(p0_ty, Ty::Ref(..)) && is_place_expr(recv) && self.pure_place(recv)) {
+                        if let Some(&bid) = self.prog.blanket.get(method).filter(|_| matches!(p0_ty, Ty::Ref(..)) && is_place_expr(recv)) {
                             let bsig = &self.prog.sigs[bid as usize];
                             let by_value = !matches!(bsig.params.first(), Some(Ty::Ref(..)));
                             let bounds = bsig.trait_of.as_deref().or(bsig.impl_trait.as_deref()).and_then(|tr| self.prog.blanket_bounds.get(tr));
                             if by_value && bounds.is_some_and(|bs| blanket_impls_hold(self.prog, p0_ty, bs, &mut vec![], &mut vec![])) {
                                 // (an `unsafe fn` of the trait: E0133 outside `unsafe`, as the other blanket calls)
                                 self.check_unsafe_call(bid, msp.start)?;
-                                let (v, t) = self.expr(recv, None)?;
-                                let Some(v) = v else { return Ok((None, Ty::Never)) };
                                 let args: Vec<&Expr> = margs.iter().collect();
-                                return self.call_fn(bid, Some((v, t)), &args, tf, expected, SP);
+                                if let Some(v) = recv_ref(self) {
+                                    return self.call_fn(bid, Some((v, p0_ty)), &args, tf, expected, SP);
+                                }
+                                if self.pure_place(recv) {
+                                    let (v, t) = self.expr(recv, None)?;
+                                    let Some(v) = v else { return Ok((None, Ty::Never)) };
+                                    return self.call_fn(bid, Some((v, t)), &args, tf, expected, SP);
+                                }
                             }
                         }
                         let t = self.prog.tn(p.ty());

@@ -6571,7 +6571,8 @@ fn alias_structs(t: &TySyn, index: &FxMap<String, u32>, out: &mut Vec<u32>) {
     }
 }
 
-/// A trait object's first trait as written, without spaces or a path (`Obj<u8>` of `dyn m::Obj< u8 > + Send`)
+/// A trait object's first trait as written, without spaces or a path (`Obj<u8>` of `dyn m::Obj< u8 >`). Its auto
+/// traits are not in it: a type of zustc's has none (`dyn Obj + Send` is `dyn Obj`, ast_types::tysyn)
 fn dyn_first(d: &str) -> String {
     let first: String = d.split('+').next().unwrap_or(d).chars().filter(|c| !c.is_whitespace()).collect();
     let cut = first.find(|c: char| c == '<' || c == '(').unwrap_or(first.len());

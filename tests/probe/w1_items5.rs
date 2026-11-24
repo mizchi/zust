@@ -93,8 +93,20 @@ trait RTr { fn m(&self) -> u8 { 1 } fn n() -> u8 { 10 } }
 impl<T> RTr for &Rw<T> { fn m(&self) -> u8 { 2 } }
 impl RTr for &Rv { fn n() -> u8 { 30 } }
 
+// (an impl for a reference to a Box, called on an element of a Vec of them: the index is evaluated once)
+trait BoxAbi { fn abi(self) -> u8; }
+impl BoxAbi for &Box<u8> { fn abi(self) -> u8 { **self + 10 } }
+
 fn main() {
     println!("{}", closure_param!());
+
+    let ba = Box::new(1u8);
+    let bb = Box::new(2u8);
+    let brefs = vec![&ba, &bb];
+    let bn = Cell::new(0usize);
+    let bnext = || { bn.set(bn.get() + 1); bn.get() - 1 };
+    let bi = 1;
+    println!("{} {} {}", brefs[bi].abi(), brefs[bnext()].abi(), bn.get());
 
     let rw = Rw(5u8);
     let rr = &rw;

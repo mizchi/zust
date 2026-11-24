@@ -182,6 +182,10 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
     block); the hand-written one in wasm-bindgen's lib.rs (`__wbindgen_skip_interpret_calls`) is not compiled. A fn
     or impl it moves out does not find a const, static or type that stays in it (`const N` or `struct Local<T>`
     beside an `impl Tr for u8` that names it).
+  - a trait object's auto traits are not in zustc's types (`dyn Obj + Send` is `dyn Obj`, ast_types::tysyn): an impl
+    for `dyn Obj + Send` is one for `dyn Obj` too, where rustc reports E0277.
+  - a blanket impl's `self`-by-value method on a `&Box<u8>` (`impl<T: Marker> Tr for T` with `impl Marker for
+    &Box<u8>`) asks the bound of the Box's content ("`u8: Marker` is not satisfied").
   - impls for trait objects with parameters (`impl<R> Tr for dyn Fn() -> R`) are matched by the object's trait's name;
     two impls for instances of one object (`dyn Obj<u8>` / `dyn Obj<u16>`) that override one method call the first
     one's. Equal associated consts of `dyn Fn(..)` impls of each arity are kept once.
