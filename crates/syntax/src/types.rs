@@ -422,6 +422,8 @@ pub struct Summary {
     /// The plain trait bounds on those parameters (`struct S<T: Tr>`: ("T", ["Tr"])), only the parameters that have
     /// some: a static's type is checked against them
     pub adt_bounds: Vec<(String, Vec<String>)>,
+    /// The defaults of those parameters, by place (`struct W<T, F = fn() -> T>`: [None, Some(fn() -> T)])
+    pub adt_defaults: Vec<Option<TySyn>>,
     /// The regions of an impl / trait header (None: it names no lifetime)
     pub hdr_regions: Option<Box<RImplSyn>>,
     /// The regions of the struct / enum defined (None: it names no lifetime, so it has no region of its own)

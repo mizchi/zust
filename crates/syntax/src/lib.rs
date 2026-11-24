@@ -16,6 +16,7 @@ pub mod front;
 pub mod lexer;
 pub mod macros;
 pub mod parse;
+pub mod pm;
 pub mod prelude;
 pub mod prep;
 pub mod regions;

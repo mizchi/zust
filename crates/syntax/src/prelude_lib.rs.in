@@ -9629,6 +9629,33 @@ pub struct OnceLock<T> {
     val: Option<T>,
 }
 
+/// `std::cell::LazyCell`: the function makes the value on the first deref / `force`
+pub struct LazyCell<T, F = fn() -> T> {
+    __lz_val: Option<T>,
+    __lz_init: Option<F>,
+}
+
+impl<T, F: FnOnce() -> T> LazyCell<T, F> {
+    pub const fn new(f: F) -> LazyCell<T, F> {
+        LazyCell { __lz_val: None, __lz_init: Some(f) }
+    }
+    pub fn force(this: &LazyCell<T, F>) -> &T {
+        if this.__lz_val.is_none() {
+            let pi = &this.__lz_init as *const Option<F> as *mut Option<F>;
+            let f = unsafe { (*pi).take() }.expect("LazyCell instance has previously been poisoned");
+            let v = f();
+            let p = &this.__lz_val as *const Option<T> as *mut Option<T>;
+            unsafe {
+                p.write(Some(v));
+            }
+        }
+        this.__lz_val.as_ref().unwrap()
+    }
+    pub fn deref(&self) -> &T {
+        LazyCell::force(self)
+    }
+}
+
 impl<T> OnceLock<T> {
     pub const fn new() -> OnceLock<T> {
         OnceLock { val: None }
@@ -9994,6 +10021,35 @@ impl Ordering {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Reverse<T>(pub T);
+
+/// `std::thread::LocalKey` as a type (`&'static LocalKey<T>` in a struct, `.with(|v| ..)` on it): the value comes from
+/// a function. A `thread_local!` is not one yet: each has a key type of its own (lexer::expand_thread_local)
+pub struct LocalKey<T: 'static> {
+    pub __get: fn() -> &'static T,
+}
+
+impl<T: 'static> LocalKey<T> {
+    pub fn with<R, F: FnOnce(&T) -> R>(&'static self, f: F) -> R {
+        f((self.__get)())
+    }
+    pub fn try_with<R, F: FnOnce(&T) -> R>(&'static self, f: F) -> Result<R, ()> {
+        Ok(f((self.__get)()))
+    }
+}
+
+/// `std::panic::AssertUnwindSafe` (the value as it is: a type that wraps it, with its own impls, `impl Tr for
+/// AssertUnwindSafe<T>`, and derefs to it)
+#[derive(Clone, Copy, Debug, Default)]
+pub struct AssertUnwindSafe<T>(pub T);
+
+impl<T> AssertUnwindSafe<T> {
+    pub fn deref(&self) -> &T {
+        &self.0
+    }
+    pub fn deref_mut(&mut self) -> &mut T {
+        &mut self.0
+    }
+}
 
 /// `std::marker::PhantomData` (no fields: a zero-sized value of every T)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

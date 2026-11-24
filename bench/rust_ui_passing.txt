@@ -391,6 +391,7 @@ compile-fail	async-await/await-keyword/incorrect-syntax-suggestions.rs
 check-pass	async-await/await-unsize.rs
 check-pass	async-await/bound-normalization.rs
 compile-fail	async-await/clone-suggestion.rs
+run-pass	async-await/context-is-sorta-unwindsafe.rs
 compile-fail	async-await/coroutine-desc.rs
 build-pass	async-await/default-struct-update.rs
 compile-fail	async-await/dont-print-desugared-async.rs
@@ -676,6 +677,7 @@ run-pass	binding/nil-pattern.rs
 run-pass	binding/nullary-or-pattern.rs
 run-pass	binding/optional_comma_in_match_arm.rs
 run-pass	binding/or-pattern.rs
+run-pass	binding/pat-ranges.rs
 run-pass	binding/pat-tuple-1.rs
 run-pass	binding/pat-tuple-2.rs
 run-pass	binding/pat-tuple-3.rs
@@ -989,6 +991,7 @@ compile-fail	borrowck/implementation-not-general-enough-ice-133252.rs
 run-pass	borrowck/incorrect-loan-error-on-local-update-5550.rs
 compile-fail	borrowck/index-mut-help-with-impl.rs
 compile-fail	borrowck/index-mut-help.rs
+compile-fail	borrowck/index-mut-help2.rs
 check-pass	borrowck/index-self-with-arithmetic-on-self-item.rs
 compile-fail	borrowck/issue-101119.rs
 compile-fail	borrowck/issue-103250.rs
@@ -1638,6 +1641,7 @@ compile-fail	const-generics/defaults/mismatch.rs
 compile-fail	const-generics/defaults/param-order-err-pretty-prints-default.rs
 run-pass	const-generics/defaults/repr-c-issue-82792.rs
 compile-fail	const-generics/defaults/self-referential.rs
+run-pass	const-generics/defaults/simple-defaults.rs
 compile-fail	const-generics/defaults/trait_objects_fail.rs
 compile-fail	const-generics/defaults/wfness.rs
 check-pass	const-generics/deref-into-array-generic.rs
@@ -2597,6 +2601,7 @@ compile-fail	expr/malformed_closure/missing-braces-before-close-brace.rs
 compile-fail	expr/malformed_closure/missing_block_in_fn_call.rs
 compile-fail	expr/malformed_closure/ruby_style_closure_successful_parse.rs
 run-pass	expr/return-in-block-tuple.rs
+run-pass	expr/scope.rs
 compile-fail	extern/bad-external-async-fn-issue-146754.rs
 run-pass	extern/empty-struct-extern-fn-16441.rs
 run-pass	extern/extern-1.rs
@@ -3013,6 +3018,7 @@ compile-fail	generics/enum-definition-with-outer-generic-parameter-5997.rs
 run-pass	generics/generic-alias-unique.rs
 compile-fail	generics/generic-arg-mismatch-recover.rs
 run-pass	generics/generic-associated-type-deref-target-56237.rs
+run-pass	generics/generic-default-type-params.rs
 run-pass	generics/generic-derived-type.rs
 compile-fail	generics/generic-enum-errors.rs
 run-pass	generics/generic-exterior-unique.rs
@@ -3064,6 +3070,7 @@ compile-fail	generics/lifetime-before-type-params.rs
 compile-fail	generics/missing-param-but-has-colon-144215.rs
 run-pass	generics/newtype-with-generics.rs
 compile-fail	generics/overlapping-errors-span-issue-123861.rs
+compile-fail	generics/param-in-ct-in-ty-param-default.rs
 check-pass	generics/resolve-generic-method-param-2312.rs
 compile-fail	generics/single-colon-path-not-const-generics.rs
 compile-fail	generics/slightly-nice-generic-literal-messages.rs
@@ -3261,6 +3268,7 @@ check-pass	impl-trait/issues/issue-65581.rs
 check-pass	impl-trait/issues/issue-68532.rs
 compile-fail	impl-trait/issues/issue-70971.rs
 compile-fail	impl-trait/issues/issue-72911.rs
+compile-fail	impl-trait/issues/issue-83929-impl-trait-in-generic-default.rs
 compile-fail	impl-trait/issues/issue-84073.rs
 compile-fail	impl-trait/issues/issue-84919.rs
 compile-fail	impl-trait/issues/issue-86642.rs
@@ -3292,6 +3300,7 @@ check-pass	impl-trait/precise-capturing/elided.rs
 compile-fail	impl-trait/precise-capturing/forgot-to-capture-lifetime.rs
 check-pass	impl-trait/precise-capturing/higher-ranked.rs
 compile-fail	impl-trait/precise-capturing/migration-note.rs
+check-pass	impl-trait/precise-capturing/nested-default-type-param-assoc-ty-155405.rs
 check-pass	impl-trait/precise-capturing/overcaptures-2024-but-fine.rs
 check-pass	impl-trait/precise-capturing/rpitit-outlives-2.rs
 check-pass	impl-trait/precise-capturing/rpitit-outlives.rs
@@ -3531,6 +3540,7 @@ compile-fail	inference/need_type_info/issue-113264-incorrect-impl-trait-in-path-
 compile-fail	inference/need_type_info/single-const-generic-suggestion.rs
 compile-fail	inference/need_type_info/single-type-generic-suggestion.rs
 compile-fail	inference/need_type_info/type-alias-indirect.rs
+compile-fail	inference/need_type_info/type-alias.rs
 compile-fail	inference/need_type_info/underscore-placeholder-wording.rs
 run-pass	inference/newlambdas-ret-infer.rs
 run-pass	inference/newlambdas-ret-infer2.rs
@@ -4225,6 +4235,7 @@ check-pass	macros/issue-78892-substitution-in-statement-attr.rs
 check-pass	macros/issue-84429-matches-edition.rs
 compile-fail	macros/issue-86865.rs
 run-pass	macros/issue-8709.rs
+check-pass	macros/issue-87877.rs
 run-pass	macros/issue-8851.rs
 check-pass	macros/issue-95267.rs
 check-pass	macros/issue-95533.rs
@@ -4483,6 +4494,7 @@ run-pass	mir/issue-76803-branches-not-same.rs
 run-pass	mir/issue-77359-simplify-arm-identity.rs
 compile-fail	mir/issue-83499-input-output-iteration-ice.rs
 run-pass	mir/issue-89485.rs
+compile-fail	mir/issue-92893.rs
 check-pass	mir/issue-99866.rs
 compile-fail	mir/mir-build-2021-closure-capture-ice-110453-2.rs
 run-pass	mir/mir-typeck-normalize-fn-sig.rs
@@ -6310,6 +6322,7 @@ compile-fail	resolve/issue-54379.rs
 check-pass	resolve/issue-57523.rs
 compile-fail	resolve/issue-5927.rs
 compile-fail	resolve/issue-60057.rs
+compile-fail	resolve/issue-65025-extern-static-parent-generics.rs
 compile-fail	resolve/issue-6642.rs
 compile-fail	resolve/issue-6702.rs
 compile-fail	resolve/issue-69401-trait-fn-no-body-ty-local.rs
@@ -6924,6 +6937,7 @@ compile-fail	structs/struct-pat-derived-error.rs
 compile-fail	structs/struct-pat-unmentioned-tuple-indices.rs
 compile-fail	structs/struct-path-alias-bounds.rs
 compile-fail	structs/struct-path-associated-type.rs
+run-pass	structs/struct-path-self-2.rs
 compile-fail	structs/struct-path-self-type-mismatch.rs
 compile-fail	structs/struct-path-self.rs
 run-pass	structs/struct-pattern-matching.rs
@@ -7346,6 +7360,7 @@ compile-fail	traits/const-traits/gate.rs
 check-pass	traits/const-traits/group-traits.rs
 compile-fail	traits/const-traits/ice-120503-async-const-method.rs
 compile-fail	traits/const-traits/macro-const-trait-bound-theoretical-regression.rs
+check-pass	traits/const-traits/static-const-trait-bound.rs
 check-pass	traits/const-traits/trait-method-ptr-in-consts-ice.rs
 compile-fail	traits/constrained-type-params-trait-impl.rs
 compile-fail	traits/copy-guessing.rs
@@ -7643,6 +7658,7 @@ check-pass	type-alias-impl-trait/cross_inference_rpit.rs
 check-pass	type-alias-impl-trait/implied_bounds3.rs
 compile-fail	type-alias-impl-trait/issue-60371.rs
 check-pass	type-alias-impl-trait/issue-87455-static-lifetime-ice.rs
+check-pass	type-alias-impl-trait/multiple_definitions.rs
 check-pass	type-alias-impl-trait/nested-rpit-with-lifetimes.rs
 check-pass	type-alias-impl-trait/wf-check-rpit-lifetimes.rs
 check-pass	type-alias/issue-14933.rs
@@ -7669,6 +7685,7 @@ compile-fail	type/ascription/issue-54516.rs
 compile-fail	type/ascription/issue-60933.rs
 compile-fail	type/binding-assigned-block-without-tail-expression.rs
 compile-fail	type/cannot-find-wrapper-with-impl-trait.rs
+compile-fail	type/clarify-error-for-generics-with-default-issue-120785.rs
 compile-fail	type/inherent-impl-primitive-types-error.rs
 compile-fail	type/issue-100584.rs
 compile-fail	type/issue-101866.rs
@@ -7704,6 +7721,7 @@ compile-fail	type/type-check/missing_trait_impl.rs
 compile-fail	type/type-check/point-at-inference-3.rs
 compile-fail	type/type-check/unknown_type_for_closure.rs
 compile-fail	type/type-mismatch-multiple.rs
+compile-fail	type/type-mismatch.rs
 compile-fail	type/type-parameter-defaults-referencing-Self-ppaux.rs
 compile-fail	type/type-parameter-names.rs
 compile-fail	type/type-params-in-different-spaces-1.rs

@@ -112,48 +112,11 @@ fn eval(s: &[u8], toks: &[Tok], mut i: usize, c: &CfgSet) -> (bool, usize) {
     }
     let name = String::from_utf8_lossy(name).into_owned();
     if t(i) == b"=" && toks.get(i + 1).is_some_and(|x| x.0 == 2) {
-        let lit = t(i + 1);
-        let mut val = String::from_utf8_lossy(&lit[1..lit.len() - 1]).into_owned();
-        // (`label = "a\"b"`: the literal's value, as a build script's `rustc-cfg` gives it)
-        if val.contains('\\') {
-            val = unescape(&val);
-        }
+        // (`label = "a\"b"`, `label = "\u{6_1}"`: the literal's value, as a build script's `rustc-cfg` gives it)
+        let val = str_value(&String::from_utf8_lossy(t(i + 1))).unwrap_or_default();
         return (c.kv(&name, &val), i + 2);
     }
     (c.flag(&name), i)
-}
-
-/// The value of a string literal's text between its quotes (`\"`, `\\`, `\n`, `\t`, `\r`, `\0`, `\xNN`, `\u{..}`)
-fn unescape(v: &str) -> String {
-    let mut out = String::with_capacity(v.len());
-    let mut it = v.chars();
-    while let Some(ch) = it.next() {
-        if ch != '\\' {
-            out.push(ch);
-            continue;
-        }
-        match it.next() {
-            Some('n') => out.push('\n'),
-            Some('t') => out.push('\t'),
-            Some('r') => out.push('\r'),
-            Some('0') => out.push('\0'),
-            Some('x') => {
-                let hex: String = it.by_ref().take(2).collect();
-                if let Some(c) = u8::from_str_radix(&hex, 16).ok().filter(|b| b.is_ascii()) {
-                    out.push(c as char);
-                }
-            }
-            Some('u') => {
-                let hex: String = it.by_ref().skip_while(|&c| c == '{').take_while(|&c| c != '}').collect();
-                if let Some(c) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
-                    out.push(c);
-                }
-            }
-            Some(x) => out.push(x),
-            None => {}
-        }
-    }
-    out
 }
 
 fn is_open(b: &[u8]) -> bool {
@@ -426,7 +389,45 @@ fn attrs_start(s: &[u8], toks: &[Tok], i: usize) -> usize {
         }
         j = o - 1;
     }
-    toks[j].1
+    outer_docs_start(s, if j > 0 { toks[j - 1].2 } else { 0 }, toks[j].1)
+}
+
+/// Before the byte p (an item or its first attribute), the outer doc comments (`///`, `/** */`) between it and the
+/// token before it (which ends at `from`): they are attributes of that item and go with it (rustc: no E0585 for a doc
+/// before a cfg'd-out item). The comments there are read forward, as the lexer reads them: they nest, and a `///` or
+/// `/**` inside another comment, `/* outer\n/// nested */`, is text. Where the first doc comment starts, or p
+pub(crate) fn outer_docs_start(s: &[u8], from: usize, p: usize) -> usize {
+    let mut i = from.min(p);
+    while i < p {
+        if s[i..p].starts_with(b"//") {
+            if s[i..].starts_with(b"///") && !s[i..].starts_with(b"////") {
+                return i;
+            }
+            i += s[i..p].iter().position(|&c| c == b'\n').unwrap_or(p - i);
+        } else if s[i..p].starts_with(b"/*") {
+            if s[i..].starts_with(b"/**") && !s[i..].starts_with(b"/***") && !s[i..].starts_with(b"/**/") {
+                return i;
+            }
+            let mut d = 0usize;
+            while i < p {
+                if s[i..].starts_with(b"/*") {
+                    d += 1;
+                    i += 2;
+                } else if s[i..].starts_with(b"*/") {
+                    d -= 1;
+                    i += 2;
+                    if d == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    p
 }
 
 fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs: &mut Vec<(usize, usize)>) -> Option<String> {
@@ -443,7 +444,7 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs:
     let mut i = 0;
     while i < toks.len() {
         // `cfg!(p)` → `true` / `false`
-        if t(i) == b"cfg" && t(i + 1) == b"!" && t(i + 2) == b"(" {
+        if t(i) == b"cfg" && t(i + 1) == b"!" && is_open(t(i + 2)) {
             let close = matching(s, &toks, i + 2);
             // (`cfg!(version(..))` is unstable: left for acg, which says so (E0658))
             if (i + 3..close).any(|k| t(k) == b"version" && t(k + 1) == b"(") {
@@ -492,9 +493,24 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs:
             if t(e) == b";" {
                 externs.push((toks[i].1, toks[e].2));
                 blank(&mut out, toks[i].1, toks[e].2);
+                // (its visibility too: `pub extern crate alloc;`, `pub(crate) extern crate core;`. A path through it
+                // (`rt::alloc::vec::Vec`) is the crate's path. `pub(in path)` stays: its path is checked)
+                let renamed = e == i + 5 && t(i + 3) == b"as" && t(i + 4) != b"_" && !matches!(t(i + 2), b"std" | b"core" | b"alloc");
+                if !renamed && i >= 1 {
+                    let vs = if t(i - 1) == b"pub" {
+                        Some(i - 1)
+                    } else if i >= 4 && t(i - 1) == b")" && matches!(t(i - 2), b"crate" | b"self" | b"super") && t(i - 3) == b"(" && t(i - 4) == b"pub" {
+                        Some(i - 4)
+                    } else {
+                        None
+                    };
+                    if let Some(vs) = vs {
+                        blank(&mut out, toks[vs].1, toks[i].1);
+                    }
+                }
                 // (`extern crate util as u;` names the crate `u` too: `use util as u;` in its place. `use` where `extern`
                 // was, and `util as u;` where it was, so a line break in the item stays where it is)
-                if e == i + 5 && t(i + 3) == b"as" && t(i + 4) != b"_" && !matches!(t(i + 2), b"std" | b"core" | b"alloc") {
+                if renamed {
                     out[toks[i].1..toks[i].1 + 3].copy_from_slice(b"use");
                     let (a, b) = (toks[i + 2].1, toks[e].2);
                     out[a..b].copy_from_slice(&s[a..b]);
@@ -577,6 +593,44 @@ mod tests {
     }
 
     #[test]
+    fn outer_docs_are_comments_only() {
+        fn start(src: &str) -> &str {
+            let p = src.find("#[").unwrap();
+            let toks = crate::lexer::tokenize(src.as_bytes());
+            let from = toks.iter().take_while(|t| t.1 < p).last().map_or(0, |t| t.2);
+            &src[outer_docs_start(src.as_bytes(), from, p)..p]
+        }
+        assert_eq!(start("fn a() {}\n/**\n * doc\n */\n#[x]\nfn f() {}"), "/**\n * doc\n */\n");
+        // (blanks after `*/`, CRLF lines)
+        assert_eq!(start("fn a() {}\n/**\n * doc\n */  \n#[x]\nfn f() {}"), "/**\n * doc\n */  \n");
+        assert_eq!(start("fn a() {}\r\n/**\r\n * doc\r\n */\r\n/// more\r\n#[x]\r\nfn f() {}"), "/**\r\n * doc\r\n */\r\n/// more\r\n");
+        // (a `/**` in a string is no comment's: the `*/` closes the `/*` nearest before it)
+        // (comments nest: this `*/ */` closes `/* outer`)
+        let nested = "fn a() {}\n/* outer\n/**\n*/ */\n#[cfg(any())]\nfn gone() {}\nfn main() {}\n";
+        assert_eq!(start(nested), "");
+        let nested1 = "fn a() {}\n/* outer\n/** nested */ */\n#[cfg(any())]\nfn gone() {}\nfn main() {}\n";
+        assert_eq!(start(nested1), "");
+        let o1 = strip(nested1, &CfgSet::default()).unwrap();
+        assert!(o1.contains("/* outer") && o1.contains("/** nested */ */") && o1.contains("fn main() {}") && !o1.contains("gone"), "{o1}");
+        // (a `///` in a block comment is text: `/* outer\n/// nested */`)
+        let nested2 = "fn a() {}\n/* outer\n/// nested */\n#[cfg(any())]\nfn gone() {}\nfn main() {}\n";
+        assert_eq!(start(nested2), "");
+        let o2 = strip(nested2, &CfgSet::default()).unwrap();
+        assert!(o2.contains("/* outer") && o2.contains("/// nested */") && o2.contains("fn main() {}") && !o2.contains("gone"), "{o2}");
+        // (the item's docs with a plain comment after them, and a `///` that ends in `*/`)
+        assert_eq!(start("fn a() {}\n/// doc */\n// plain\n#[x]\nfn f() {}"), "/// doc */\n// plain\n");
+        // (a one-line doc comment is still the item's)
+        assert_eq!(start("fn a() {}\n/** one */\n#[x]\nfn f() {}"), "/** one */\n");
+        assert_eq!(start("fn a() {}\n/**/\n#[x]\nfn f() {}"), "");
+        let o = strip(nested, &CfgSet::default()).unwrap();
+        assert!(o.contains("/* outer") && o.contains("*/ */") && o.contains("fn main() {}") && !o.contains("gone"), "{o}");
+        let src = "const K: &str = r#\"\n/**\n\"#;\nfn main() {}\n/* ordinary comment\n*/\n#[cfg(any())]\nfn removed() {}\n";
+        assert_eq!(start(src), "");
+        let o = strip(src, &CfgSet::default()).unwrap();
+        assert!(o.contains("fn main() {}") && o.contains("\"#;") && !o.contains("removed"), "{o}");
+    }
+
+    #[test]
     fn items_fields_arms() {
         assert_eq!(run("#[cfg(feature = \"std\")] fn a() {} fn b() {}", &[]), "fn b() {}");
         assert_eq!(run("#[cfg(feature = \"std\")] fn a() {} fn b() {}", &["std"]), "fn a() {} fn b() {}");
@@ -617,6 +671,7 @@ mod tests {
         assert_eq!(run("m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }", &[]), "m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }");
         assert_eq!(run("#[cfg(feature = \"alloc\")] extern crate alloc; extern crate std as s; fn f() {}", &["alloc"]), "fn f() {}");
         assert_eq!(run("extern crate util as u; extern crate geom as _; fn f() {}", &[]), "use util as u; fn f() {}");
+        assert_eq!(run("pub extern crate alloc; pub(crate) extern crate core; pub extern crate util as u; fn f() {}", &[]), "pub use util as u; fn f() {}");
         // (a line break in the item stays on its line)
         let o = strip("extern\ncrate util as u;\n#[cfg(any())] fn f() {}", &CfgSet::default()).unwrap();
         assert_eq!(o.lines().map(str::trim).take(2).collect::<Vec<_>>(), ["use", "util as u;"]);
@@ -635,14 +690,26 @@ fn expr_macro(n: &[u8]) -> bool {
 
 /// A string literal as an attribute takes it: `"a"`, `r"a"`, `r#"a"#` (not `b"a"`)
 pub fn str_lit(v: &str) -> bool {
+    let b = v.as_bytes();
     match v.strip_prefix('r') {
-        // (a raw string ends with its quote and as many `#` as it opens with: `r#"reason"#`)
+        // (a raw string ends with its quote and as many `#` as it opens with: `r#"reason"#`; it is the whole value,
+        // not `r"a" + "b"`)
         Some(r) => {
             let h = r.len() - r.trim_start_matches('#').len();
             let body = &r[h..];
-            body.len() >= 2 + h && body.starts_with('"') && body.ends_with(&format!("\"{}", "#".repeat(h)))
+            body.len() >= 2 + h && body.starts_with('"') && body.ends_with(&format!("\"{}", "#".repeat(h))) && lit_end(b, 0) == Some(b.len())
         }
-        None => v.len() >= 2 && v.starts_with('"') && v.ends_with('"'),
+        // (its closing quote ends the value: `"a\"b"`, not `"a" + "b"` nor `"a\"`)
+        None => {
+            if b.len() < 2 || b[0] != b'"' {
+                return false;
+            }
+            let mut k = 1;
+            while k < b.len() && b[k] != b'"' {
+                k += if b[k] == b'\\' { 2 } else { 1 };
+            }
+            k == b.len() - 1
+        }
     }
 }
 
@@ -659,7 +726,8 @@ pub fn lit_end(b: &[u8], i: usize) -> Option<usize> {
             }
             Some((k + 1).min(b.len()))
         }
-        b'r' if !(i > 0 && ident(b[i - 1]) && b[i - 1] != b'b') => {
+        // (`r".."`, `br".."`, `cr".."`)
+        b'r' if !(i > 0 && ident(b[i - 1]) && b[i - 1] != b'b' && b[i - 1] != b'c') => {
             let h = b[i + 1..].iter().take_while(|&&c| c == b'#').count();
             if b.get(i + 1 + h) != Some(&b'"') {
                 return None;
@@ -760,14 +828,28 @@ pub fn str_value(v: &str) -> Option<String> {
             '\\' => out.push('\\'),
             '"' => out.push('"'),
             '\'' => out.push('\''),
+            // (`\x61`: two hex digits, up to `\x7F`)
             'x' => {
                 let h: String = cs.by_ref().take(2).collect();
-                out.push(char::from(u8::from_str_radix(&h, 16).ok()?));
+                let v = u8::from_str_radix(&h, 16).ok().filter(|v| v.is_ascii() && h.bytes().all(|c| c.is_ascii_hexdigit()))?;
+                out.push(char::from(v));
             }
-            // (`\u{1F600}`, `\u{1_F600}`: digits that may have `_` between them)
+            // (`\u{1F600}`, `\u{1_F600}`: hex digits that may have `_` between them, not before the first, to the
+            // closing brace, which must be there: not `\u{_61}` nor `\u{61`)
             'u' => {
-                let rest: String = cs.by_ref().take_while(|&c| c != '}').filter(|&c| c != '_').collect();
-                out.push(char::from_u32(u32::from_str_radix(rest.strip_prefix('{')?, 16).ok()?)?);
+                if cs.next()? != '{' {
+                    return None;
+                }
+                let mut hex = String::new();
+                loop {
+                    match cs.next()? {
+                        '}' => break,
+                        '_' if !hex.is_empty() => {}
+                        d if d.is_ascii_hexdigit() => hex.push(d),
+                        _ => return None,
+                    }
+                }
+                out.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
             }
             // (a line continuation: the newline and the next line's leading whitespace)
             '\n' => {
@@ -1004,8 +1086,15 @@ pub fn cfg_check(p: &str) -> Result<(), String> {
         return Ok(());
     }
     if let Some(v) = rest.strip_prefix('=') {
+        // (a string literal with more after it, `"a" + "b"`: not one value)
+        let t = v.trim();
+        if t.starts_with(['"', 'r']) && lit_end(t.as_bytes(), 0).is_some_and(|e| e < t.len()) {
+            return Err(String::new());
+        }
         return match attr_value(v) {
-            Ok(true) => Ok(()),
+            // (its escapes must decode: not `"\u{61"`)
+            Ok(true) if str_value(v).is_some() => Ok(()),
+            Ok(true) => Err(String::new()),
             Ok(false) => Err(String::new()),
             Err(found) => Err(not_a_literal(&found)),
         };
@@ -1027,23 +1116,122 @@ pub fn cfg_check(p: &str) -> Result<(), String> {
     }
 }
 
+/// Past the whitespace and comments at `k` (comments are whitespace: `cfg /* note */ !(unix)`)
+fn skip_trivia(b: &[u8], mut k: usize) -> usize {
+    while k < b.len() {
+        if b[k].is_ascii_whitespace() {
+            k += 1;
+        } else if b[k] == b'/' && matches!(b.get(k + 1), Some(b'/' | b'*')) {
+            k = lit_end(b, k).unwrap_or(b.len());
+        } else {
+            break;
+        }
+    }
+    k
+}
+
+/// A text past its leading whitespace and comments: ` /* safety */ no_mangle` is `no_mangle`
+pub fn trim_trivia(v: &str) -> &str {
+    &v[skip_trivia(v.as_bytes(), 0)..]
+}
+
+/// The first predicate rustc cannot read in a `cfg_attr`'s entries: its own, then, when that holds, one of a `cfg(..)`
+/// or a nested `cfg_attr(..)` among the attributes it puts on the item (`cfg_attr(all(), cfg(not()))`), as the
+/// attribute's name, rustc's own message ("" for malformed input) and the nested entry (None: the `cfg_attr` itself)
+fn cfg_attr_check<'a>(entries: &[&'a str], c: &CfgSet) -> Result<(), (&'static str, String, Option<&'a str>)> {
+    let Some(p) = entries.first() else { return Err(("cfg_attr", String::new(), None)) };
+    cfg_check(p).map_err(|e| ("cfg_attr", e, None))?;
+    if !cfg_holds(p, c) {
+        return Ok(());
+    }
+    for &a in &entries[1..] {
+        let (n, rest) = match a.strip_prefix("cfg_attr") {
+            Some(r) => ("cfg_attr", r),
+            None => match a.strip_prefix("cfg") {
+                Some(r) => ("cfg", r),
+                None => continue,
+            },
+        };
+        let Some(inner) = rest.trim_start().strip_prefix('(').and_then(|r| r.strip_suffix(')')) else { continue };
+        let e = attr_entries(inner);
+        match n {
+            "cfg_attr" => cfg_attr_check(&e, c).map_err(|(n, m, at)| (n, m, at.or(Some(a))))?,
+            _ if e.len() == 1 => cfg_check(e[0]).map_err(|m| ("cfg", m, Some(a)))?,
+            _ => return Err(("cfg", String::new(), Some(a))),
+        }
+    }
+    Ok(())
+}
+
+/// Where a false `#![cfg(..)]` among a crate's leading inner attributes ends: rustc reads none of the crate after it
+/// (`#![cfg(any())]`)
+fn crate_cfg_off(src: &str, c: &CfgSet) -> Option<usize> {
+    let b = src.as_bytes();
+    let mut i = 0;
+    // (a shebang line, `#!/usr/bin/env ..`, not an inner attribute)
+    if src.starts_with("#!") && !trim_trivia(&src[2..]).starts_with('[') {
+        i = src.find('\n').unwrap_or(b.len());
+    }
+    loop {
+        i = skip_trivia(b, i);
+        if !b[i..].starts_with(b"#!") {
+            return None;
+        }
+        let o = skip_trivia(b, i + 2);
+        if b.get(o) != Some(&b'[') {
+            return None;
+        }
+        // (the matching `]`, past literals and comments)
+        let (mut d, mut k, mut close) = (0i32, o, None);
+        while k < b.len() {
+            if let Some(e) = lit_end(b, k) {
+                k = e;
+                continue;
+            }
+            match b[k] {
+                b'(' | b'[' | b'{' => d += 1,
+                b')' | b']' | b'}' => {
+                    d -= 1;
+                    if d == 0 {
+                        close = Some(k);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+        let close = close?;
+        let body = blank_comments(&src[o + 1..close]);
+        let pred = body.trim().strip_prefix("cfg").map(str::trim_start).and_then(|r| r.strip_prefix('(')).and_then(|r| r.strip_suffix(')'));
+        if pred.is_some_and(|p| cfg_check(p).is_ok() && !cfg_holds(p, c)) {
+            return Some(close + 1);
+        }
+        i = close + 1;
+    }
+}
+
 /// The first `#[cfg(..)]`, `#[cfg_attr(..)]` or `cfg!(..)` of a source whose predicate rustc cannot read (E0539 /
 /// E0565 / E0805): not one in a comment or a string on its line, nor in a macro's pattern (`$`). `kept` is the text
 /// configured by `c` (cfg::strip, in place): rustc reads none of what a false `cfg` takes away, so one in an item,
-/// statement or block it removes is not reported, nor an attribute after a false `cfg` of the same item
+/// statement or block it removes is not reported, nor an attribute after a false `cfg` of the same item, nor what a
+/// false `#![cfg(..)]` of the crate takes away; nor a `cfg!` that `stringify!` only quotes
 pub fn malformed_cfg(src: &str, kept: Option<&str>, c: &CfgSet) -> Option<String> {
     if !src.contains("cfg") {
         return None;
     }
     let b = src.as_bytes();
     let mut at = 0;
+    let crate_off = if src.contains("#!") { crate_cfg_off(src, c) } else { None };
     // (how far the source is read as code, and the block comments open there: a candidate in a comment, a string or
     // a char literal is skipped, `/* #[cfg(not())] */`)
     let (mut cur, mut depth) = (0usize, 0u32);
-    // (the open brackets of the code read so far: the innermost one around a candidate)
-    let mut open: Vec<usize> = vec![];
+    // (the open brackets of the code read so far: the innermost one around a candidate; and whether each opens a
+    // `stringify!`, whose tokens are text, `stringify!(cfg!(not()))`, with how many of those are open)
+    let mut open: Vec<(usize, bool)> = vec![];
+    let mut quoting = 0u32;
     let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
-    let mut in_code = |i: usize| -> (bool, Option<usize>) {
+    let mut in_code = |i: usize| -> (bool, Option<usize>, bool) {
         while cur < i {
             if depth > 0 {
                 if b[cur..].starts_with(b"/*") {
@@ -1070,8 +1258,8 @@ pub fn malformed_cfg(src: &str, kept: Option<&str>, c: &CfgSet) -> Option<String
                     }
                     cur += 1;
                 }
-                // (a raw string, `r#".."#` / `br".."`, not an identifier ending in r)
-                b'r' if !(cur > 0 && ident(b[cur - 1]) && b[cur - 1] != b'b') && {
+                // (a raw string, `r#".."#` / `br".."` / `cr".."`, not an identifier ending in r)
+                b'r' if !(cur > 0 && ident(b[cur - 1]) && b[cur - 1] != b'b' && b[cur - 1] != b'c') && {
                     let h = b[cur + 1..].iter().take_while(|&&c| c == b'#').count();
                     b.get(cur + 1 + h) == Some(&b'"')
                 } => {
@@ -1084,23 +1272,33 @@ pub fn malformed_cfg(src: &str, kept: Option<&str>, c: &CfgSet) -> Option<String
                 b'\'' if b.get(cur + 1) == Some(&b'\\') => cur += 2 + b[cur + 2..].iter().position(|&c| c == b'\'').map_or(b.len() - cur - 2, |n| n + 1),
                 b'\'' if b.get(cur + 2) == Some(&b'\'') => cur += 3,
                 b'{' | b'(' | b'[' => {
-                    open.push(cur);
+                    let q = src[..cur].trim_end().strip_suffix('!').map(str::trim_end).and_then(|t| t.strip_suffix("stringify"));
+                    let q = q.is_some_and(|t| !t.ends_with(|c: char| c.is_alphanumeric() || c == '_'));
+                    quoting += q as u32;
+                    open.push((cur, q));
                     cur += 1;
                 }
                 b'}' | b')' | b']' => {
-                    open.pop();
+                    if let Some((_, true)) = open.pop() {
+                        quoting -= 1;
+                    }
                     cur += 1;
                 }
                 _ => cur += 1,
             }
         }
-        (depth == 0 && cur == i, open.last().copied())
+        (depth == 0 && cur == i, open.last().map(|o| o.0), quoting > 0)
     };
     // (what the configuring took away: a blank in the configured text where the source has code)
     let kept = kept.filter(|k| k.len() == src.len()).map(str::as_bytes);
     let gone = |i: usize| kept.is_some_and(|k| k[i].is_ascii_whitespace() && !b[i].is_ascii_whitespace());
-    // (an attribute after a `cfg` of the same item that does not hold: `#[cfg(any())] #[cfg(not())] fn f() {}`)
-    let after_false = |start: usize| -> bool {
+    // (an attribute after a `cfg` of the same item that does not hold: `#[cfg(any())] #[cfg(not())] fn f() {}`, read
+    // with comments as whitespace, `#[cfg(any())] /* note */ #[cfg(not())]`, doc comments too, which are attributes of
+    // the same item)
+    let mut blanked: Option<std::borrow::Cow<'_, str>> = None;
+    let mut after_false = |start: usize| -> bool {
+        let src = &**blanked.get_or_insert_with(|| blank_comments(src));
+        let b = src.as_bytes();
         let mut p = start;
         loop {
             let q = src[..p].trim_end().len();
@@ -1126,15 +1324,18 @@ pub fn malformed_cfg(src: &str, kept: Option<&str>, c: &CfgSet) -> Option<String
                 j -= 1;
             }
             let Some(o) = o else { return false };
-            if o == 0 || b[o - 1] != b'#' {
-                return false;
-            }
+            // (`#[..]`, or an inner `#![..]` before it)
+            let hash = match o.checked_sub(1).map(|h| b[h]) {
+                Some(b'#') => o - 1,
+                Some(b'!') if o >= 2 && b[o - 2] == b'#' => o - 2,
+                _ => return false,
+            };
             let body = src[o + 1..q - 1].trim();
             let pred = body.strip_prefix("cfg").map(str::trim_start).and_then(|r| r.strip_prefix('(')).and_then(|r| r.strip_suffix(')'));
             if pred.is_some_and(|p| cfg_check(p).is_ok() && !cfg_holds(p, c)) {
                 return true;
             }
-            p = o - 1;
+            p = hash;
         }
     };
     // (the `macro_rules!` bodies, found once and only when a candidate is in code: each from its delimiter to the
@@ -1156,7 +1357,17 @@ pub fn malformed_cfg(src: &str, kept: Option<&str>, c: &CfgSet) -> Option<String
                     m += 1;
                     continue;
                 }
-                let Some(o) = b[m..].iter().position(|&c| matches!(c, b'{' | b'(' | b'[')).map(|n| m + n) else { break };
+                // (its delimiter, past the name and comments: `macro_rules! m /* {} */ { .. }`)
+                let mut o = m + 11;
+                while o < b.len() && !matches!(b[o], b'{' | b'(' | b'[') {
+                    o = match lit_end(b, o) {
+                        Some(e) if b[o] == b'/' => e,
+                        _ => o + 1,
+                    };
+                }
+                if o >= b.len() {
+                    break;
+                }
                 let (mut d, mut k) = (0i32, o);
                 while k < b.len() {
                     if let Some(e) = lit_end(b, k) {
@@ -1189,22 +1400,28 @@ pub fn malformed_cfg(src: &str, kept: Option<&str>, c: &CfgSet) -> Option<String
         if i > 0 && ident(b[i - 1]) {
             continue;
         }
-        // (`#[cfg(` / `#![cfg_attr(` / `cfg!(`)
-        let (name, attr) = if src[i..].starts_with("cfg_attr") { ("cfg_attr", true) } else { ("cfg", true) };
-        let after = i + name.len();
-        let macro_call = name == "cfg" && src[after..].starts_with("!(");
-        let attr = attr && !macro_call && (src[..i].ends_with("#[") || src[..i].ends_with("#!["));
+        // (`#[cfg(` / `#![cfg_attr(` / `cfg!(`, `cfg ! [`, `cfg!{`: tokens, with whitespace and comments between)
+        let name = if src[i..].starts_with("cfg_attr") { "cfg_attr" } else { "cfg" };
+        let after = skip_trivia(b, i + name.len());
+        let macro_open = (name == "cfg" && b.get(after) == Some(&b'!')).then(|| skip_trivia(b, after + 1));
+        let macro_open = macro_open.filter(|&k| matches!(b.get(k), Some(b'(' | b'[' | b'{')));
+        let macro_call = macro_open.is_some();
+        let attr = !macro_call && (src[..i].ends_with("#[") || src[..i].ends_with("#!["));
         if !attr && !macro_call {
             continue;
         }
-        let open = if macro_call { after + 1 } else { after };
-        if b.get(open) != Some(&b'(') {
+        let open = macro_open.unwrap_or(after);
+        if !macro_call && b.get(open) != Some(&b'(') {
             continue;
         }
         // (where the attribute or the macro starts)
         let start = if macro_call { i } else { src[..i].rfind('#').unwrap_or(i) };
-        let (code, around) = in_code(start);
-        if !code {
+        // (what a false `#![cfg(..)]` of the crate takes away)
+        if crate_off.is_some_and(|e| start >= e) {
+            break;
+        }
+        let (code, around, quoted) = in_code(start);
+        if !code || quoted {
             continue;
         }
         // (in what the configuring takes away: an item, a statement or a block of a false `cfg`, or after one)
@@ -1215,7 +1432,7 @@ pub fn malformed_cfg(src: &str, kept: Option<&str>, c: &CfgSet) -> Option<String
         if in_macro_def(start) {
             continue;
         }
-        // (the matching `)`, past literals and comments)
+        // (the matching delimiter, past literals and comments)
         let (mut d, mut k, mut close) = (0i32, open, None);
         while k < b.len() {
             if let Some(e) = lit_end(b, k) {
@@ -1223,8 +1440,8 @@ pub fn malformed_cfg(src: &str, kept: Option<&str>, c: &CfgSet) -> Option<String
                 continue;
             }
             match b[k] {
-                b'(' => d += 1,
-                b')' => {
+                b'(' | b'[' | b'{' => d += 1,
+                b')' | b']' | b'}' => {
                     d -= 1;
                     if d == 0 {
                         close = Some(k);
@@ -1236,22 +1453,37 @@ pub fn malformed_cfg(src: &str, kept: Option<&str>, c: &CfgSet) -> Option<String
             k += 1;
         }
         let Some(close) = close else { continue };
-        let inner = &src[open + 1..close];
-        if inner.contains('$') {
+        // (comments in the predicate are whitespace: `all(/* note */)`)
+        let inner = blank_comments(&src[open + 1..close]);
+        // (a macro's metavariable, `cfg!($p)`, is checked when expanded: a `$` in the code, not one in a literal or a
+        // comment, `feature = "$"`)
+        if inner.contains('$') && {
+            let ib = inner.as_bytes();
+            let mut k = 0;
+            loop {
+                if k >= ib.len() {
+                    break false;
+                }
+                match lit_end(ib, k) {
+                    Some(e) => k = e,
+                    None if ib[k] == b'$' => break true,
+                    None => k += 1,
+                }
+            }
+        } {
             continue;
         }
-        // (comments in the predicate are whitespace: `all(/* note */)`)
-        let inner = blank_comments(inner);
         let entries = attr_entries(&inner);
-        let checked = match (name, entries.first()) {
-            ("cfg_attr", Some(p)) => cfg_check(p),
-            ("cfg_attr", None) => Err(String::new()),
+        let checked = match name {
+            "cfg_attr" => cfg_attr_check(&entries, c),
             // (one pattern, with or without a trailing comma: `cfg!(unix,)`)
-            _ if entries.len() == 1 => cfg_check(entries[0]),
-            _ => Err(String::new()),
+            _ if entries.len() == 1 => cfg_check(entries[0]).map_err(|e| ("cfg", e, None)),
+            _ => Err(("cfg", String::new(), None)),
         };
-        if let Err(own) = checked {
-            let line = src[..i].matches('\n').count() + 1;
+        if let Err((name, own, nested)) = checked {
+            // (the line of the `cfg` / `cfg_attr`, or of the nested one at fault)
+            let pos = nested.map_or(i, |a| open + 1 + (a.as_ptr() as usize - inner.as_ptr() as usize));
+            let line = src[..pos].matches('\n').count() + 1;
             if !own.is_empty() {
                 return Some(format!("{line}:1: {own}"));
             }

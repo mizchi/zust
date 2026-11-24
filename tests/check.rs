@@ -1276,3 +1276,58 @@ fn fn_qualifier_order() {
     let src = "const unsafe extern \"C\" fn f() {}\ntype G = *const unsafe fn(u8);\nfn main() { unsafe { let _ = async { 1 }; } }\nextern \"C\" { fn x(); }\nconst C: u8 = 1;\n// unsafe async fn bad() {}\nmacro_rules! m { () => { unsafe async fn z() {} } }\n";
     assert_eq!(check(src), None, "in_order");
 }
+
+#[test]
+fn review106_fourth_round() {
+    // (each expected line and message is rustc 1.100's on the same source, or the error it reports there; None where
+    // rustc accepts it)
+    let check = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    // (accepted: comments between attributes and in a `macro_rules!` head, a `cfg!` that `stringify!` quotes, a raw
+    // C string's text, a `cfg_attr` that does not hold, a crate a false `#![cfg]` takes away, `$` in a comment or a
+    // literal, `#[unsafe(..)]` and `#![..]` with comments or spaces before the name)
+    for src in [
+        "#[cfg(any())] /* note */ #[cfg(not())] fn f() {}\nfn main() {}\n",
+        "#[cfg(any())] /// doc\n#[cfg(not())] fn f() {}\nfn main() {}\n",
+        "macro_rules! m /* {} */ { (cfg!(not())) => {}; }\nfn main() {}\n",
+        "const S: &str = stringify!(a (cfg!(not())));\nfn main() {}\n",
+        "#[cfg_attr(any(), cfg(not()))]\nfn f() {}\nfn main() {}\n",
+        "#[cfg_attr(all(), cfg_attr(any(), cfg(not())))]\nfn f() {}\nfn main() {}\n",
+        "fn main() { let _ = cfg!(feature = \"$\"); let _ = cfg!(unix /* $x */); }\n",
+        "#[unsafe(/* safety */ no_mangle)]\npub extern \"C\" fn f() {}\nfn main() {}\n",
+        "#![windows_subsystem = \"con\\u{7_3}ole\"]\nfn main() {}\n",
+    ] {
+        assert_eq!(check(src), None, "{src}");
+    }
+    // (a false `#![cfg]` takes the crate away, `main` too: rustc reports only that, E0601)
+    assert!(check("#![cfg(any())]\nfn g() {}\n#[cfg(not())] fn f() {}\nfn main() {}\n").is_none_or(|(_, m)| !m.contains("cfg")), "crate_cfg_false");
+    // (zustc's lexer reads no raw C string yet: only no cfg error is asked of it)
+    assert!(check("fn main() { let _ = cr#\"text\" #[cfg(not())] \"#; }\n").is_none_or(|(_, m)| !m.contains("cfg")), "raw_c_string");
+    // (`#![ crate_type = "proc-macro"]` is a proc-macro crate: zustc has no `proc_macro` crate, so only the crate-type
+    // error is asked of it)
+    let pm = "#![ crate_type = \"proc-macro\"]\nextern crate proc_macro;\nuse proc_macro::TokenStream;\n#[proc_macro]\npub fn m(t: TokenStream) -> TokenStream { t }\n";
+    assert!(check(pm).is_none_or(|(_, m)| !m.contains("crate type")), "spaced_crate_type");
+    // (rejected: `cfg!` with spaces or another delimiter, a `$` only in a comment, a value with more after its
+    // literal, a Unicode escape without its brace, a nested `cfg` of a `cfg_attr` that holds, an attribute after a
+    // true `#![cfg]`)
+    for (src, line, msg) in [
+        ("fn main() { let _ = cfg ! (not()); }\n", 1, "malformed `cfg` macro input"),
+        ("fn main() { let _ = cfg![not()]; }\n", 1, "malformed `cfg` macro input"),
+        ("fn main() { let _ = cfg!{not()}; }\n", 1, "malformed `cfg` macro input"),
+        ("fn main() { let _ = cfg!(not() /* $ */); }\n", 1, "malformed `cfg` macro input"),
+        ("fn main() { let _ = cfg!(feature = \"a\" + \"b\"); }\n", 1, "malformed `cfg` macro input"),
+        ("fn main() { let _ = cfg!(feature = \"\\u{61\"); }\n", 1, "malformed `cfg` macro input"),
+        ("fn main() { let _ = cfg!(feature = \"\\u{_61}\"); }\n", 1, "malformed `cfg` macro input"),
+        ("#![windows_subsystem = \"con\\u{_73}ole\"]\nfn main() {}\n", 1, "malformed `windows_subsystem` attribute input"),
+        ("#[cfg(feature = \"a\" + \"b\")]\nfn f() {}\nfn main() {}\n", 1, "malformed `cfg` attribute input"),
+        ("#[cfg_attr(all(), cfg(not()))]\nfn f() {}\nfn main() {}\n", 1, "malformed `cfg` attribute input"),
+        ("#[cfg_attr(all(), inline,\n    cfg(not()))]\nfn f() {}\nfn main() {}\n", 2, "malformed `cfg` attribute input"),
+        ("#[cfg_attr(all(), cfg_attr(all(), cfg(not())))]\nfn f() {}\nfn main() {}\n", 1, "malformed `cfg` attribute input"),
+        ("#![cfg(all())]\n#[cfg(not())] fn f() {}\nfn main() {}\n", 2, "malformed `cfg` attribute input"),
+    ] {
+        assert_eq!(check(src), at(line, msg), "{src}");
+    }
+}
