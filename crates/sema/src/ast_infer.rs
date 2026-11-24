@@ -1137,6 +1137,28 @@ impl Inf<'_> {
                     Some(Ty::Ref(_, Ty::Struct(sid))) => self.prog.method(*sid, &format!("__ref_{m}")),
                     _ => None,
                 };
+                // (of two impls, `Shl<u8>` and `Shl<u16>`, the one the right operand's type picks: while that is not
+                // known (`let n = 9; S(1) << n`), neither's signature is taken, as code generation picks by it)
+                let group = found.and_then(|id| self.prog.overloads.get(self.prog.names[id as usize].split('#').next().unwrap_or("")));
+                let found = match (found, group) {
+                    (Some(_), Some(g)) if g.len() > 1 => {
+                        let rt = self.resolve(r);
+                        let fit: Vec<u32> = g
+                            .iter()
+                            .copied()
+                            .filter(|&c| {
+                                let sig = &self.prog.sigs[c as usize];
+                                let mut sol = vec![None; sig.generics.len()];
+                                rt.is_some_and(|t| sig.params.get(1).is_some_and(|&pt| self.prog.match_ty(pt, t, &mut sol)))
+                            })
+                            .collect();
+                        match fit.as_slice() {
+                            [c] => Some(*c),
+                            _ => return self.var(),
+                        }
+                    }
+                    _ => found,
+                };
                 match found {
                     Some(id) => self.apply_recv(Some(id), vec![r], l),
                     None => l,

@@ -4242,7 +4242,11 @@ impl Cx<'_> {
             Expr::Index(b, i, _) => {
                 let builtin = match self.peek(b).map(|t| self.strip_refs(t)) {
                     Some(Ty::Array(..) | Ty::Slice(_)) => true,
-                    Some(Ty::Struct(sid)) => self.prog.structs[self.prog.base_of(sid) as usize].name == "Vec",
+                    // (the prelude's Vec, not a type of the program's of that name, whose `Index` would run again)
+                    Some(Ty::Struct(sid)) => {
+                        let b = self.prog.base_of(sid) as usize;
+                        self.prog.structs[b].name == "Vec" && self.prog.struct_item.get(b).is_some_and(|&i| i >= self.prog.prelude_from)
+                    }
                     _ => false,
                 };
                 builtin && self.pure_place(b) && (matches!(&**i, Expr::Lit(..)) || self.pure_place(i))

@@ -1038,11 +1038,11 @@ fn anon_const_head(s: &[u8], toks: &[(u8, usize, usize)], k: usize) -> bool {
 }
 
 /// The body of an anonymous const that opens at token k (`const _: () = {`), when it is on one line (a macro wrote
-/// it): the names of the types it defines at its top level, which stay in it
-/// (None, the body read as before (skipped), also when an item that would go out names a type, const or static that
-/// stays: `const _: () = { type Local = u32; fn helper(_: Local) {} };` would lose `Local`)
+/// it): the names of the types it defines at its top level, which stay in it. None when it is not on one line (read
+/// where it is, as before); Some(None) when it is skipped whole, as before this branch: an item that would go out names
+/// a type, const or static that stays (`const _: () = { type Local = u32; fn helper(_: Local) {} };` would lose `Local`)
 #[inline(never)]
-fn anon_body_types<'a>(s: &'a [u8], toks: &[(u8, usize, usize)], k: usize) -> Option<Vec<&'a [u8]>> {
+fn anon_body_types<'a>(s: &'a [u8], toks: &[(u8, usize, usize)], k: usize) -> Option<Option<Vec<&'a [u8]>>> {
     let tok = |k: usize| -> &'a [u8] { &s[toks[k].1..toks[k].2] };
     let is_sym = |k: usize, c: u8| toks[k].0 == 1 && s[toks[k].1] == c;
     let ident = |k: usize| toks[k].0 == 0;
@@ -1076,7 +1076,7 @@ fn anon_body_types<'a>(s: &'a [u8], toks: &[(u8, usize, usize)], k: usize) -> Op
         return None;
     }
     if names.is_empty() && values.is_empty() {
-        return Some(names);
+        return Some(Some(names));
     }
     // (its items at the top level, from their first word to their `;` or closing brace: one that goes out (a fn,
     // `use`, trait, extern block, or an impl for none of its types) must not name what stays)
@@ -1120,11 +1120,27 @@ fn anon_body_types<'a>(s: &'a [u8], toks: &[(u8, usize, usize)], k: usize) -> Op
         };
         let goes_out = matches!(kind, Some(b"fn" | b"use" | b"trait" | b"impl" | b"mod" | b"extern")) && !local_impl;
         if goes_out && (start..end.min(j)).any(|q| ident(q) && (names.contains(&tok(q)) || values.contains(&tok(q)))) {
-            return None;
+            return Some(None);
         }
         i = end + 1;
     }
-    Some(names)
+    Some(Some(names))
+}
+
+/// The token of the `}` that closes the `{` at token k (the last token when it is not closed)
+fn brace_close(s: &[u8], toks: &[(u8, usize, usize)], k: usize) -> usize {
+    let mut d = 0i32;
+    for j in k..toks.len() {
+        if toks[j].0 == 1 && s[toks[j].1] == b'{' {
+            d += 1;
+        } else if toks[j].0 == 1 && s[toks[j].1] == b'}' {
+            d -= 1;
+            if d == 0 {
+                return j;
+            }
+        }
+    }
+    toks.len().saturating_sub(1)
 }
 
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
@@ -1403,9 +1419,19 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                     } else if k >= 5 && is_sym(k - 1, b"=") && anon_const_head(s, &toks, k) {
                         // (only one a macro wrote, on one line (a proc macro's output, a `macro_rules!` expansion):
                         // one written by hand is checked where it is, its items' errors at their lines)
-                        if let Some(names) = anon_body_types(s, &toks, k) {
-                            fn_bodies.push((depth, k));
-                            anons.push((k, names));
+                        match anon_body_types(s, &toks, k) {
+                            Some(Some(names)) => {
+                                fn_bodies.push((depth, k));
+                                anons.push((k, names));
+                            }
+                            // (one skipped whole: past its closing brace, so that its items are not moved out of a
+                            // body around it either, `const _: () = { const _: () = { type Local = u32; fn helper(_:
+                            // Local) {} }; };`)
+                            Some(None) => {
+                                k = brace_close(s, &toks, k) + 1;
+                                continue;
+                            }
+                            None => {}
                         }
                     }
                     depth += 1;

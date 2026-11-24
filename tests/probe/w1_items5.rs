@@ -107,6 +107,17 @@ macro_rules! anon_const_generic {
 }
 anon_const_generic!();
 
+// (the same, nested in another anonymous const: skipped whole too, its fn not moved out of the outer one)
+macro_rules! nested_anon {
+    () => { const _: () = { const _: () = { type Local2 = u32; fn helper2(_: Local2) {} }; }; };
+}
+nested_anon!();
+
+// (two impls of Shl for one type: an untyped right operand takes neither's type in inference, the right one's later)
+struct Sh2(u8);
+impl Shl<u8> for Sh2 { type Output = u8; fn shl(self, r: u8) -> u8 { self.0 << r } }
+impl Shl<u16> for Sh2 { type Output = u16; fn shl(self, r: u16) -> u16 { (self.0 as u16) << r } }
+
 // (a hand-written one-line anonymous const whose fn names a type of its own: read as before, not moved out)
 const _: () = { type Local = u32; fn helper(_: Local) {} };
 
@@ -177,6 +188,14 @@ fn main() {
 
     println!("{}", ev_f());
     println!("{}", 7u16.inv());
+    let sn = 9;
+    let sr = Sh2(1) << sn;
+    let sm: u16 = sn;
+    println!("{} {}", sr, sm);
+    let fp = 4096usize as *mut u32;
+    let mut fv = unsafe { Vec::from_raw_parts(fp, 0, 0) };
+    fv.push(5);
+    println!("{:?}", fv);
     let bp: *mut Big = NonNull::dangling().as_ptr();
     let bv = unsafe { Vec::<Big>::from_raw_parts(bp, 0, 0) };
     println!("{} {}", bv.len(), std::mem::align_of::<Big>());

@@ -14703,7 +14703,8 @@ fn __exr_char_from_u8<G>(b: u8) -> char {
 // pointer that drop does not free. A buffer this prelude's Vec allocated stays the Vec's, also of zero-sized elements
 // (reserve gives them one byte))
 unsafe fn __exr_vec_from_raw_parts<T>(ptr: *mut T, len: usize, cap: usize) -> Vec<T> {
-    if (ptr as usize) < 4096 || (ptr as usize) == core::mem::align_of::<T>() {
+    // (cap 0 of a sized element is no buffer whatever the pointer, any aligned one: this prelude's Vec of cap 0 has none)
+    if (cap == 0 && core::mem::size_of::<T>() != 0) || (ptr as usize) < 4096 || (ptr as usize) == core::mem::align_of::<T>() {
         let c = if core::mem::size_of::<T>() == 0 { len } else { 0 };
         return Vec { ptr: core::ptr::null_mut(), cap: c, len: len };
     }
