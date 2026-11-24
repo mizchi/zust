@@ -1434,7 +1434,9 @@ impl Session2 {
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_mismatched_lts = lint("mismatched_lifetime_syntaxes");
             deny_deprecated = lint("deprecated") || (levels.contains(&"warnings") && !c.contains("#![allow(deprecated"));
-            deny_ctypes = (lint("improper_ctypes"), lint("improper_ctypes_definitions"));
+            // (warn by default: `deny(warnings)` makes them errors too, unless the crate allows them)
+            let ffi = |n: &str| lint(n) || (levels.contains(&"warnings") && !allows_lint(&c, n));
+            deny_ctypes = (ffi("improper_ctypes"), ffi("improper_ctypes_definitions"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             deny_unused_mut = lint("unused_mut") || (!levels.contains(&"unused_mut") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
@@ -3871,16 +3873,22 @@ fn std_path_ns(path: &[&[u8]]) -> u8 {
 /// improper_ctypes: the first `CStr` / `CString` in the parameters or result of a fn of an `extern "C" { .. }` block,
 /// or of an `extern "C" fn` (improper_ctypes_definitions), as `line:col: msg`. Behind a pointer too: neither has a C
 /// layout
+/// text names `lint` in an `allow(..)` (`#[allow(a, improper_ctypes)]`, `#![allow(..)]`): that lint, not one it is
+/// a prefix of
+fn allows_lint(text: &str, lint: &str) -> bool {
+    let sq: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    sq.match_indices("allow(").any(|(i, _)| {
+        let rest = &sq[i + 6..];
+        rest[..rest.find(')').unwrap_or(rest.len())].split(',').any(|n| n == lint)
+    })
+}
+
 fn first_cstr_in_extern(src: &str, items: &[SrcItem], (blocks, defs): (bool, bool)) -> Option<String> {
     for it in items {
         let text = src.get(it.start..it.end).unwrap_or("");
         if !text.contains("extern") || !(text.contains("CStr")) {
             continue;
         }
-        // (an item that allows the lint for itself: `#[allow(improper_ctypes)] extern "C" { .. }`)
-        let squeezed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
-        let blocks = blocks && !squeezed.contains("allow(improper_ctypes)") && !squeezed.contains("allow(improper_ctypes,");
-        let defs = defs && !squeezed.contains("allow(improper_ctypes_definitions");
         let b = text.as_bytes();
         let toks = crate::lexer::tokenize(b);
         let tk = |k: usize| &text[toks[k].1..toks[k].2];
@@ -3897,11 +3905,21 @@ fn first_cstr_in_extern(src: &str, items: &[SrcItem], (blocks, defs): (bool, boo
             None
         };
         let line_of = |k: usize| it.line as usize + b[..toks[k].1].iter().filter(|&&c| c == b'\n').count();
+        // (the attributes of the item or declaration token k starts: back to the `;` / `{` / `}` before them)
+        let attrs_allow = |k: usize, lint: &str| {
+            let mut a = k;
+            while a > 0 && !(sym(a - 1, ";") || sym(a - 1, "{") || sym(a - 1, "}")) {
+                a -= 1;
+            }
+            let from = if a < toks.len() { toks[a].1 } else { 0 };
+            allows_lint(&text[from..toks[k].1], lint)
+        };
         let mut k = 0;
         while k + 2 < toks.len() {
             if toks[k].0 == 0 && tk(k) == "extern" && toks[k + 1].0 == 2 && tk(k + 1) == "\"C\"" {
                 if sym(k + 2, "{") {
-                    if !blocks {
+                    // (`#[allow(improper_ctypes)]` on the block: none of its fns; on one fn: that one)
+                    if !blocks || attrs_allow(k, "improper_ctypes") {
                         k += 3;
                         continue;
                     }
@@ -3912,7 +3930,7 @@ fn first_cstr_in_extern(src: &str, items: &[SrcItem], (blocks, defs): (bool, boo
                             d += 1;
                         } else if sym(j, "}") {
                             d -= 1;
-                        } else if d == 1 && toks[j].0 == 0 && tk(j) == "fn" {
+                        } else if d == 1 && toks[j].0 == 0 && tk(j) == "fn" && !attrs_allow(j, "improper_ctypes") {
                             if let Some(t) = sig_cstr(j) {
                                 return Some(format!("{}:1: `extern` block uses type `{t}`, which is not FFI-safe", line_of(j)));
                             }
@@ -3922,7 +3940,7 @@ fn first_cstr_in_extern(src: &str, items: &[SrcItem], (blocks, defs): (bool, boo
                     k = j;
                     continue;
                 }
-                if defs && toks[k + 2].0 == 0 && tk(k + 2) == "fn" {
+                if defs && toks[k + 2].0 == 0 && tk(k + 2) == "fn" && !attrs_allow(k, "improper_ctypes_definitions") {
                     if let Some(t) = sig_cstr(k + 2) {
                         return Some(format!("{}:1: `extern` fn uses type `{t}`, which is not FFI-safe", line_of(k)));
                     }
