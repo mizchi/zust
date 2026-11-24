@@ -210,6 +210,9 @@ zurgo test --lib parse -- --include-ignored
   a child, and prints libtest's report.
 - A test passes when its process exits with 0. The runner speaks libtest's command line, so it runs the executables
   `cargo test --no-run` builds as well. The tests compare the two runs (`crates/zurgo/tests/zurgo.rs`).
+- `cratebench/test.py` runs the cratebench crates' own tests (their upstream repositories) under `zurgo test` and
+  `cargo test`, and compares them test by test. CI checks the crates that matched (`cratebench/test_passing.txt`);
+  `cratebench/test_result.md` has every crate's result, with the first error of those zurgo cannot build yet.
 - Tests run in the package's directory, as under cargo. An integration test finds the package's binaries in
   `CARGO_BIN_EXE_<name>`.
 - Output: one line per test as it finishes (`PASS [ 0.012s] (3/9) pkg (lib) tests::adds`, or `FAIL`, `TIMEOUT`,

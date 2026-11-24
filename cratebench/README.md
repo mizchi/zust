@@ -20,6 +20,16 @@ crates.io の小さなクレートを zustc でビルドできるか・どのく
 
 結果は [../docs/reports/2026-11-16-21-cratebench.md](../docs/reports/2026-11-16-21-cratebench.md)。
 
+## test.py: `zurgo test` と `cargo test`
+
+`python3 cratebench/test.py [名前..] [--check] [--write]` (リポジトリの根で、`cargo build --release -p zurgo` の後)。
+vendor/ のクレート自身のテスト (lib・bin・tests/。doc テストは数えない) を out/cratebench-test/ に写して、
+`cargo test` と `zurgo test` で動かし、(ターゲット, テスト) ごとに ok / FAILED / ignored を比べる。
+
+- `locks/<名前>.lock`: 両方が使う Cargo.lock (`--locked`)。ないものは cargo が作り、ここに残す
+- `test_passing.txt`: cargo と一致したクレート。`--check` (CI) はこれらが一致し続けることを確かめる
+- `test_result.md`: `--write` が書く、すべてのクレートの結果
+
 ## ui/: UI フレームワーク (dioxus / leptos) を wasm32 向けに
 
 - `ui/apps/<名前>/`: そのフレームワークのカウンタのアプリ (Cargo.toml と Cargo.lock で版を固定。zust の Cargo の

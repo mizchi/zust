@@ -65,6 +65,12 @@ jobs:
           cargo test --release --workspace --doc
       - name: Compare with rustc (examples)
         run: tests/compare.sh
+      # (the cratebench crates' own tests, under zurgo test and cargo test, test by test: the crates that matched,
+      # cratebench/test_passing.txt. Only their submodules are fetched)
+      - name: cratebench's tests against cargo test
+        run: |
+          git submodule update --init --depth 1 $(grep -v '^#' cratebench/test_passing.txt | sed 's|^|cratebench/vendor/|')
+          python3 cratebench/test.py --check
       # (zustc's prelude, compiled by zustc, against TLA+ models: formal/connect)
       - name: Implementation against the models
         run: cargo test --release --manifest-path formal/connect/Cargo.toml
