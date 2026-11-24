@@ -3526,7 +3526,8 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
                 }
             }
             let Some(e) = end else { break };
-            let body = &r[open..e];
+            // (the name past whitespace and comments: `#[ inline]`)
+            let body = crate::cfg::trim_trivia(&r[open..e]);
             let n_end = body.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(body.len());
             out.push((i + ws, &body[..n_end], &body[n_end..]));
             i += ws + e + 1;
@@ -3594,7 +3595,8 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
                 k += 1;
             }
             let Some(e) = end else { break };
-            let body = &head[i + 3..e];
+            // (the name past whitespace and comments: `#![ crate_type = "proc-macro"]`)
+            let body = crate::cfg::trim_trivia(&head[i + 3..e]);
             let n_end = body.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(body.len());
             out.push((i, &body[..n_end], &body[n_end..]));
             i = e + 1;
@@ -3650,7 +3652,8 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             // (`#[unsafe(name ..)]`: the attribute inside it, which must be an unsafe one)
             let (name, input) = match input.trim().strip_prefix('(').filter(|_| name == "unsafe") {
                 Some(r) => {
-                    let inner = r.strip_suffix(')').unwrap_or(r).trim_start();
+                    // (the name past whitespace and comments: `#[unsafe(/* safety */ no_mangle)]`)
+                    let inner = crate::cfg::trim_trivia(r.strip_suffix(')').unwrap_or(r));
                     let n_end = inner.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(inner.len());
                     let (n, rest) = (&inner[..n_end], &inner[n_end..]);
                     if n == "unsafe" {
