@@ -1,5 +1,5 @@
 // The same zustscript runs as wasm (default: the @wasm fns are lowered to Rust and compiled by zustc) or as JS
-// (zsc --all-js). The results are the same: numbers keep their meaning in both.
+// (remove @wasm, then use zsc --all-js). The results are the same: numbers keep their meaning in both.
 
 @wasm export fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
   range(0, a.len()).fold(0.0, (s, i) => s + a[i] * b[i])

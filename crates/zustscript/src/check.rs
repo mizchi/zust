@@ -134,12 +134,18 @@ pub struct Info {
     /// effects whose handlers all resume in tail position (see [`direct_effects`]): in JS they are plain calls to the
     /// handler's arm, not generators
     pub direct: BTreeSet<String>,
-    /// the type of each expression of a `@wasm` / `@simd` function (the lowering to Rust decides by it what is Copy,
-    /// what is borrowed and what is moved). Not recorded for the JS layer, which does not need it
+    /// Expression types for Rust lowering, including ordinary helpers reached from Wasm.
     pub ty: HashMap<Id, Ty>,
     /// `==` / `!=` that compare values with parts (arrays, records, enums with data, tuples): by content, in JS with
     /// `$eq`, in Rust with `derive(PartialEq)`. Values are immutable, so equal contents are equal values
     pub deep_eq: HashMap<Id, Ty>,
+}
+
+pub fn js_target_errors(items: &[Item]) -> Vec<(Pos, String)> {
+    items.iter().filter_map(|item| match item {
+        Item::Fn { name, wasm: true, pos, .. } => Some((*pos, format!("`{name}` is @wasm and requires the Rust backend; remove @wasm to compile it as JavaScript"))),
+        _ => None,
+    }).collect()
 }
 
 pub struct Checker {
@@ -149,8 +155,9 @@ pub struct Checker {
     pub errors: Vec<(Pos, String)>,
     /// (not errors: the guidelines, e.g. i64 in the JS layer)
     pub warnings: Vec<(Pos, String)>,
-    /// the function being checked runs as wasm (`@wasm` / `@simd`)
+    /// Suppress JS-only arithmetic warnings when checking a Rust or SIMD function.
     in_wasm: bool,
+    record_types: bool,
     /// (checked when the function is done, once inference has decided the types)
     deferred: Vec<(Pos, Id, &'static str, Ty)>,
     generics: Vec<String>,
@@ -298,6 +305,7 @@ impl Checker {
             errors: vec![],
             warnings: vec![],
             in_wasm: false,
+            record_types: false,
             deferred: vec![],
             generics: vec![],
             intv: HashSet::new(),
@@ -520,7 +528,8 @@ impl Checker {
 
     // ------------------------------------------------------------ items
 
-    pub fn check_file(&mut self, items: &[Item]) {
+    pub fn check_file(&mut self, items: &[Item], rust_output: bool) {
+        self.record_types = rust_output || items.iter().any(|it| matches!(it, Item::Fn { wasm: true, .. } | Item::Fn { simd: true, .. }));
         // types first (records and enums may refer to each other)
         for it in items {
             match it {
@@ -603,7 +612,7 @@ impl Checker {
         self.errors.extend(errs);
         for it in items {
             if let Item::Fn { generics, args, body, pos, name, wasm, simd, .. } = it {
-                self.in_wasm = *wasm || *simd;
+                self.in_wasm = rust_output || *wasm || *simd;
                 self.generics = generics.clone();
                 self.scopes = vec![HashMap::new()];
                 self.muts.clear();
@@ -918,7 +927,7 @@ impl Checker {
 
     fn infer(&mut self, e: &Expr, expect: Option<&Ty>) -> Ty {
         let t = self.infer_kind(e, expect);
-        if self.in_wasm {
+        if self.record_types {
             self.tys.push((e.id, t.clone()));
         }
         t

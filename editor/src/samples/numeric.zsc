@@ -1,17 +1,16 @@
-// @wasm fns: zsc lowers them to Rust and zustc compiles them to wasm; here they run as JS (`zsc --all-js`),
-// with the same results (numbers keep their meaning in both)
+// Plain numeric functions running as JS in the playground.
 extern fn log(s: String) = "console.log";
 
-@wasm export fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
+export fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
   range(0, a.len()).fold(0.0, (s, i) => s + a[i] * b[i])
 }
 
 // num-traits style: one source, an instance per numeric type
-@wasm export fn total<T: Num>(xs: Array<T>) -> T {
+export fn total<T: Num>(xs: Array<T>) -> T {
   xs.fold(T::zero(), (acc, x) => acc + x)
 }
 
-@wasm export fn fib(n: i32) -> i32 {
+export fn fib(n: i32) -> i32 {
   let mut a = 0;
   let mut b = 1;
   let mut i = 0;
@@ -26,7 +25,7 @@ extern fn log(s: String) = "console.log";
 
 type Stats = { mean: f64, max: f64 }
 
-@wasm export fn stats(xs: Array<f64>) -> Stats {
+export fn stats(xs: Array<f64>) -> Stats {
   if xs.len() == 0 {
     Stats { mean: 0.0, max: 0.0 }
   } else {
