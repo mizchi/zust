@@ -115,7 +115,20 @@ fn parse_pt(ts: TokenStream, is_pat: bool) -> Vec<Pt> {
 
 fn same_tok(a: &TokenTree, b: &TokenTree) -> bool {
     match (a, b) {
-        (TokenTree::Ident(x), TokenTree::Ident(y)) => x == y,
+        // (a rule's literal name matches the name renamed for hygiene, `closure__mh`, as rustc matches names)
+        (TokenTree::Ident(x), TokenTree::Ident(y)) => {
+            x == y || {
+                let (x, y) = (x.to_string(), y.to_string());
+                let base = |s: &str| -> String {
+                    let mut s = s;
+                    while let Some(t) = s.strip_suffix("__mh") {
+                        s = t;
+                    }
+                    s.to_string()
+                };
+                (x.ends_with("__mh") || y.ends_with("__mh")) && base(&x) == base(&y)
+            }
+        }
         (TokenTree::Punct(x), TokenTree::Punct(y)) => x.as_char() == y.as_char(),
         (TokenTree::Literal(x), TokenTree::Literal(y)) => x.to_string() == y.to_string(),
         // (目印としてのグループ: 括弧の種類が同じなら)
@@ -568,7 +581,15 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                 out.push_str(&i.to_string());
                 out.push_str("__mh ");
             }
-            Pt::Tok(TokenTree::Ident(i)) if lets.iter().any(|l| *i == l.as_str()) => {
+            // (not a tt-muncher's marker, `closures!(@closure ..)` in a body with `let closure`: the marker is matched
+            // against a rule's `@closure`, as rustc matches it by name. A binding's `@`, `whole @ x`, has a name
+            // before it: its `x` is the body's own)
+            Pt::Tok(TokenTree::Ident(i))
+                if lets.iter().any(|l| *i == l.as_str())
+                    && !(k > 0
+                        && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '@')
+                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Ident(_)) | Pt::Var(..)))) =>
+            {
                 out.push_str(&i.to_string());
                 out.push_str("__mh ");
             }
@@ -674,6 +695,11 @@ fn parse_rules(inner: &str) -> Result<Vec<Rule>, String> {
 }
 
 /// lexer::tokenize のトークン列で、開き括弧ごとの閉じ括弧の番号 (開きでなければ usize::MAX) と、トークンごとの括弧の深さ
+/// (for pm: each bracket's closer, and each token's depth)
+pub(crate) fn brackets_of(s: &[u8], toks: &[(u8, usize, usize)]) -> (Vec<usize>, Vec<u32>) {
+    brackets(s, toks)
+}
+
 fn brackets(s: &[u8], toks: &[(u8, usize, usize)]) -> (Vec<usize>, Vec<u32>) {
     let mut close = vec![usize::MAX; toks.len()];
     let mut depth = vec![0u32; toks.len()];
@@ -916,14 +942,71 @@ fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>, mut 
 }
 
 pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<String>, String> {
-    if !src.contains("macro_rules!") {
+    expand_with(src, cfg, &[])
+}
+
+/// A name that can be a segment of a path (`crate`, `self`, `super`, `Self` and identifiers, no other keyword): a
+/// macro call's path stops at `return ::pm::m!()`'s `return`
+fn path_seg(t: &[u8]) -> bool {
+    !matches!(
+        t,
+        b"return" | b"break" | b"continue" | b"in" | b"as" | b"let" | b"mut" | b"ref" | b"move" | b"if" | b"else" | b"match" | b"while" | b"for"
+            | b"loop" | b"fn" | b"pub" | b"unsafe" | b"async" | b"await" | b"dyn" | b"impl" | b"where" | b"use" | b"const" | b"static" | b"struct"
+            | b"enum" | b"type" | b"mod" | b"trait" | b"box" | b"yield" | b"extern"
+    )
+}
+
+/// The outermost attribute and derive uses of the text, expanded (crate::pm::expand_items) and put in its place with
+/// as many lines as they had; the definitions' places (textual scope) move with the text. Whether one ran
+fn pm_items(text: &mut String, pms: &[crate::pm::Lib], env: &[(String, String)], cfg: Option<&crate::cfg::CfgSet>, first: &mut HashMap<String, usize>) -> Result<bool, String> {
+    let preps = crate::pm::expand_items(text, pms, env)?;
+    if preps.is_empty() {
+        return Ok(false);
+    }
+    for (a, e, rep) in preps.into_iter().rev() {
+        let nl = text[a..e].bytes().filter(|&c| c == b'\n').count();
+        let mut r = rep;
+        for _ in 0..nl {
+            r.push('\n');
+        }
+        let (old_len, new_len) = (e - a, r.len());
+        for v in first.values_mut() {
+            if *v != usize::MAX && *v >= e {
+                *v = *v + new_len - old_len;
+            }
+        }
+        text.replace_range(a..e, &r);
+    }
+    // (their cfgs now: a macro call in an item they give under a cfg that is off does not run. The strip keeps the
+    // text's length and lines)
+    if let Some(t) = cfg.and_then(|c| crate::cfg::strip(text, c)) {
+        *text = t;
+    }
+    Ok(true)
+}
+
+/// expand_cfg with the proc macros of pms too (crate::pm): at the start of each round the outermost attribute and
+/// derive uses, and a function-like call where a `macro_rules!` call would be (a name no `macro_rules!` has)
+pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::Lib]) -> Result<Option<String>, String> {
+    if !src.contains("macro_rules!") && pms.is_empty() {
         return Ok(None);
     }
     let mut text = src.to_string();
     let mut macros: HashMap<String, Vec<Rule>> = HashMap::default();
     let mut first: HashMap<String, usize> = HashMap::default();
+    let env: &[(String, String)] = cfg.map_or(&[], |c| &c.env[..]);
+    // (the outermost attribute uses before the definitions are read: an attribute macro gets its item whole, a
+    // `macro_rules!` in it too. Those in its output are read with the others)
+    // (each pass runs the outermost of an item's attributes: again while one runs, `#[a] #[pm::rules] fn ..`)
+    if !pms.is_empty() {
+        for _ in 0..64 {
+            if !pm_items(&mut text, pms, env, cfg, &mut first)? {
+                break;
+            }
+        }
+    }
     collect_defs(&mut text, &mut macros, Some(&mut first))?;
-    if macros.is_empty() {
+    if macros.is_empty() && pms.is_empty() {
         return Ok(Some(text));
     }
     // 2. 呼び出しを展開する (いちばん外側の呼び出しだけ。展開したものの中の呼び出しは次の周)
@@ -933,26 +1016,67 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
         if round > 0 && text.contains("macro_rules") {
             collect_defs(&mut text, &mut macros, None)?;
         }
+        // (proc macros: the outermost attribute and derive uses. What they give is read again next round; the
+        // `macro_rules!` they give are definitions now, not calls to run: `pm::fail!()` in an unused one does not run)
+        let mut pm_done = !pms.is_empty() && pm_items(&mut text, pms, env, cfg, &mut first)?;
+        if pm_done && text.contains("macro_rules") {
+            collect_defs(&mut text, &mut macros, None)?;
+        }
         let b = text.as_bytes();
         let toks = crate::lexer::tokenize(b);
         let (close, depth) = brackets(b, &toks);
+        let pm_scope = (!pms.is_empty()).then(|| crate::pm::Scope::new(pms, b, &toks));
+        // (the end of a `stringify!(..)`'s arguments: a proc macro called in them does not run, they are text)
+        let mut inert_until = 0usize;
         let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
         let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && b[toks[k].1] == c;
         let mut reps: Vec<(usize, usize, String)> = vec![];
         let mut i = 0;
-        while i + 2 < toks.len() {
-            let rules = if toks[i].0 == 0 && sym(i + 1, b'!') && close[i + 2] != usize::MAX {
-                macros.get(std::str::from_utf8(tk(i)).unwrap_or(""))
-            } else {
-                None
+        let n = toks.len();
+        while i + 2 < n {
+            // (most tokens are no call: on to the next `name!(..)` in one tight loop)
+            match (i..n - 2).find(|&j| toks[j].0 == 0 && toks[j + 1].0 == 1 && b[toks[j + 1].1] == b'!' && close[j + 2] != usize::MAX) {
+                Some(j) => i = j,
+                None => break,
+            }
+            // (the builtin's: `stringify!`, `std::stringify!`, not a library's macro of that name, `re::stringify!`)
+            if tk(i) == b"stringify" && pm_scope.is_some() && (!(i >= 2 && sym(i - 1, b':') && sym(i - 2, b':')) || (i >= 3 && matches!(tk(i - 3), b"std" | b"core"))) {
+                inert_until = inert_until.max(close[i + 2]);
+            }
+            let mut rules = macros.get(std::str::from_utf8(tk(i)).unwrap_or(""));
+            // (a proc macro's function-like call: `name!(..)`, `path::name!(..)`, a name no `macro_rules!` has. A path
+            // from a proc-macro crate's name, or a library's that re-exports its macro (`pm::answer!()`,
+            // `re::answer!()`), is that crate's even beside a `macro_rules! answer`)
+            let pm_bang = match &pm_scope {
+                Some(sc) if tk(i) != b"macro_rules" => {
+                    let mut segs = vec![std::str::from_utf8(tk(i)).unwrap_or("")];
+                    let mut k = i;
+                    while k >= 3 && toks[k - 3].0 == 0 && path_seg(tk(k - 3)) && sym(k - 2, b':') && sym(k - 1, b':') {
+                        segs.insert(0, std::str::from_utf8(tk(k - 3)).unwrap_or(""));
+                        k -= 3;
+                    }
+                    let own = sc.names_crate(&segs);
+                    if i < inert_until {
+                        // (in `stringify!(..)`: kept as written, also beside a `macro_rules!` of its name)
+                        if own {
+                            rules = None;
+                        }
+                        None
+                    } else if rules.is_none() || own {
+                        sc.resolve(&segs, crate::pm::Kind::Bang).inspect(|_| rules = None)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
             };
-            let Some(rules) = rules else {
+            if rules.is_none() && pm_bang.is_none() {
                 i += 1;
                 continue;
-            };
+            }
             // (textual scope: a `macro_rules!` macro is usable only after its definition; E0433-like
             // "cannot find macro" for `m!()` above the only `macro_rules! m` (not `crate::m!` / exported ones))
-            if round == 0 && !(i >= 2 && sym(i - 1, b':')) {
+            if rules.is_some() && round == 0 && !(i >= 2 && sym(i - 1, b':')) {
                 let nm = std::str::from_utf8(tk(i)).unwrap_or("");
                 // (`use m;` after the definition makes it a path-scoped item, usable above too)
                 let later = first.get(nm).is_some_and(|&d| d != usize::MAX && toks[i].1 < d)
@@ -977,81 +1101,120 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                 }
             }
             let ge = close[i + 2];
-            let ts = TokenStream::from_str(&text[toks[i + 2].2..toks[ge].1]).map_err(|e| format!("1:1: {e}"))?;
-            let args: Vec<TokenTree> = ts.into_iter().collect();
-            let mut done = false;
-            for r in rules {
-                let mut binds = HashMap::default();
-                if match_pat(&r.pat, &args, &mut binds) {
-                    let mut body = String::new();
-                    transcribe_h(&r.body, &binds, &mut body)?;
-                    // 式の位置は `({ .. })`、トップレベルと `mod` / `impl` / `trait` の中はアイテムとしてそのまま
-                    // (`const C: T = m!();` at the top or in an impl is an expression)
-                    let top = (depth[i] == 0 || item_scope(b, &toks, &close, &depth, i)) && !(i > 0 && sym(i - 1, b'='));
-                    // (a call in statement position: the items it expands to are items of the enclosing block, not
-                    // of the `({ .. })` around the rest: `fn main() { m!(); S }` with `struct S;` from m)
-                    let stmt_pos = i == 0 || sym(i - 1, b';') || sym(i - 1, b'{') || sym(i - 1, b'}');
-                    // (not with attributes: a `#[cfg(false)]` item removed later would leave the attributes before it)
-                    // (`m! { .. }` in statement position is a statement by itself, whatever follows: `defer! { .. }
-                    // let x = ..;`)
-                    let spliced = !top && stmt_pos && (sym(ge + 1, b';') || sym(ge + 1, b'}') || sym(ge, b'}')) && !body.contains('#');
-                    // (the call's own `;` goes when the expansion ends a statement itself: no stray `;` after attributes)
-                    let drop_semi = spliced && sym(ge + 1, b';') && body.trim_end().ends_with(';');
-                    let rep = if top {
-                        body
-                    } else if spliced {
-                        // (followed by `;` or the block's end: the statements go into the block as they are; the
-                        // expansion's own `let`s are already renamed for hygiene, so they do not capture names)
-                        body
-                    } else if stmt_pos {
-                        match split_items(&body) {
-                            Some((items, rest)) => format!("{items} ({{ {rest} }})"),
-                            None => format!("({{ {body} }})"),
-                        }
-                    } else {
-                        format!("({{ {body} }})")
-                    };
-                    // (`crate::m!(..)` / `self::m!(..)`: 前のパスも消す)
-                    let mut a = toks[i].1;
-                    let mut k = i;
-                    while k >= 3 && toks[k - 3].0 == 0 && sym(k - 2, b':') && sym(k - 1, b':') {
-                        a = toks[k - 3].1;
-                        k -= 3;
-                    }
-                    // (`::m!(..)`)
-                    if k >= 2 && sym(k - 2, b':') && sym(k - 1, b':') && toks[k - 1].1 == toks[k - 2].1 + 1 && !(k >= 3 && toks[k - 3].0 == 0) {
-                        a = toks[k - 2].1;
-                    }
-                    // (トップレベルの `name!(..);` の `;` も取る)
-                    let mut e = toks[ge].2;
-                    if (top || drop_semi) && sym(ge + 1, b';') {
-                        e = toks[ge + 1].2;
-                    }
-                    reps.push((a, e, rep));
-                    done = true;
-                    break;
-                }
-            }
-            if !done {
-                let at = toks[i].1;
+            // (`line:col` of the call, for an error: counted only then, as it reads the text up to the call)
+            let at = toks[i].1;
+            let pos = || {
                 let line = b[..at].iter().filter(|&&c| c == b'\n').count() + 1;
                 let ls = b[..at].iter().rposition(|&c| c == b'\n').map(|k| k + 1).unwrap_or(0);
-                let col = text[ls..at].chars().count();
+                (line, text[ls..at].chars().count())
+            };
+            let body: Option<String> = match rules {
+                Some(rules) => {
+                    let ts = TokenStream::from_str(&text[toks[i + 2].2..toks[ge].1]).map_err(|e| format!("1:1: {e}"))?;
+                    let args: Vec<TokenTree> = ts.into_iter().collect();
+                    let mut found = None;
+                    for r in rules {
+                        let mut binds = HashMap::default();
+                        if match_pat(&r.pat, &args, &mut binds) {
+                            let mut body = String::new();
+                            transcribe_h(&r.body, &binds, &mut body)?;
+                            found = Some(body);
+                            break;
+                        }
+                    }
+                    found
+                }
+                None => {
+                    let (lib, name) = pm_bang.expect("a proc macro's call");
+                    pm_done = true;
+                    Some(crate::pm::expand(lib, &name, None, &text[toks[i + 2].2..toks[ge].1], env).map_err(|e| {
+                        let (line, col) = pos();
+                        format!("{line}:{}: {e}", col + 1)
+                    })?)
+                }
+            };
+            let Some(body) = body else {
+                let (line, col) = pos();
                 return Err(format!("{line}:{}: no rules of `{}!` matched this call", col + 1, String::from_utf8_lossy(tk(i))));
+            };
+            // 式の位置は `({ .. })`、トップレベルと `mod` / `impl` / `trait` の中はアイテムとしてそのまま
+            // (`const C: T = m!();` at the top or in an impl is an expression)
+            // (`crate::m!(..);` / `::m!(..);` / `pm::bind!();`: where its path starts (not at a keyword before a
+            // leading `::`, `return ::pm::m!()`))
+            let mut ps = i;
+            while ps >= 3 && toks[ps - 3].0 == 0 && path_seg(tk(ps - 3)) && sym(ps - 2, b':') && sym(ps - 1, b':') {
+                ps -= 3;
             }
+            if ps >= 2 && sym(ps - 2, b':') && sym(ps - 1, b':') && !(ps >= 3 && toks[ps - 3].0 == 0 && path_seg(tk(ps - 3))) {
+                ps -= 2;
+            }
+            // (`const N: i32 = pm::sum!() * 3;`: after `=` from the path's start)
+            let top = (depth[i] == 0 || item_scope(b, &toks, &close, &depth, i)) && !(ps > 0 && sym(ps - 1, b'='));
+            // (a call in statement position: the items it expands to are items of the enclosing block, not
+            // of the `({ .. })` around the rest: `fn main() { m!(); S }` with `struct S;` from m)
+            let stmt_pos = ps == 0 || sym(ps - 1, b';') || sym(ps - 1, b'{') || sym(ps - 1, b'}');
+            // (at the top, a call is an item only where an item starts: after an attribute too. Elsewhere it is
+            // in an item's expression or type, `const N: u32 = 0 + m!(u8);`, and keeps the `;` after it; after
+            // a binary operator its expansion is one operand, as rustc's is)
+            let item_start = stmt_pos || sym(ps - 1, b']');
+            let operand = top && !item_start && matches!(tk(ps - 1), b"+" | b"-" | b"*" | b"/" | b"%" | b"^" | b"|");
+            // (not with attributes: a `#[cfg(false)]` item removed later would leave the attributes before it)
+            // (`m! { .. }` in statement position is a statement by itself, whatever follows: `defer! { .. }
+            // let x = ..;`)
+            let spliced = !top && stmt_pos && (sym(ge + 1, b';') || sym(ge + 1, b'}') || sym(ge, b'}')) && !body.contains('#');
+            // (the call's own `;` goes when the expansion ends a statement itself: no stray `;` after attributes)
+            let drop_semi = spliced && sym(ge + 1, b';') && body.trim_end().ends_with(';');
+            let rep = if operand {
+                format!("({body})")
+            } else if top {
+                body
+            } else if spliced {
+                // (followed by `;` or the block's end: the statements go into the block as they are; the
+                // expansion's own `let`s are already renamed for hygiene, so they do not capture names)
+                body
+            } else if stmt_pos {
+                match split_items(&body) {
+                    Some((items, rest)) => format!("{items} ({{ {rest} }})"),
+                    None => format!("({{ {body} }})"),
+                }
+            } else {
+                format!("({{ {body} }})")
+            };
+            // (`crate::m!(..)` / `self::m!(..)`: 前のパスも消す)
+            let mut a = toks[i].1;
+            let mut k = i;
+            while k >= 3 && toks[k - 3].0 == 0 && path_seg(tk(k - 3)) && sym(k - 2, b':') && sym(k - 1, b':') {
+                a = toks[k - 3].1;
+                k -= 3;
+            }
+            // (`::m!(..)`)
+            if k >= 2 && sym(k - 2, b':') && sym(k - 1, b':') && toks[k - 1].1 == toks[k - 2].1 + 1 && !(k >= 3 && toks[k - 3].0 == 0 && path_seg(tk(k - 3))) {
+                a = toks[k - 2].1;
+            }
+            // (トップレベルの `name!(..);` の `;` も取る)
+            let mut e = toks[ge].2;
+            if ((top && item_start) || drop_semi) && sym(ge + 1, b';') {
+                e = toks[ge + 1].2;
+            }
+            reps.push((a, e, rep));
             i = ge + 1;
         }
-        if reps.is_empty() {
+        if reps.is_empty() && !pm_done {
             return Ok(Some(text));
         }
         // 後ろから置き換える (1 行に収めるので、置き換えた範囲の改行は残す)
         reps.sort_by_key(|r| std::cmp::Reverse(r.0));
-        // (展開したものの中にマクロの名前が無ければ、もう一周しなくてよい)
-        let again = reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())));
-        let has_cfg = cfg.is_some() && reps.iter().any(|r| r.2.contains("cfg"));
+        // (展開したものの中にマクロの名前が無ければ、もう一周しなくてよい。proc macro の出力は次の周でも読む)
+        // (also when it names a proc macro: a `macro_rules!` that gives `pm::answer!()` or a `#[wasm_bindgen]` item)
+        let names_pm = |t: &str| {
+            pms.iter().any(|l| l.macros.iter().any(|(m, _)| t.contains(m.as_str())) || l.via.iter().any(|(_, a, _)| a != "*" && t.contains(a.as_str())))
+                || pm_scope.as_ref().is_some_and(|sc| sc.aliases().any(|a| t.contains(a)))
+        };
+        let again = pm_done || reps.iter().any(|r| r.2.contains("macro_rules") || macros.keys().any(|m| r.2.contains(m.as_str())) || names_pm(&r.2));
+        let has_cfg = cfg.is_some() && (pm_done || reps.iter().any(|r| r.2.contains("cfg")));
         let has_select = !has_cfg && reps.iter().any(|r| r.2.contains("cfg_select"));
         // (`env!($k)` in a template: its name is known only now)
-        let has_env = reps.iter().any(|r| r.2.contains("env"));
+        let has_env = pm_done || reps.iter().any(|r| r.2.contains("env"));
         for (a, e, rep) in reps {
             let nl = text[a..e].bytes().filter(|&c| c == b'\n').count();
             let mut r = rep;
@@ -1235,14 +1398,42 @@ fn find_calls(
                                 // 式の位置は `({ .. })`、トップレベルはアイテムとしてそのまま
                                 // (as expand_cfg: a call in statement position in a block puts its statements into the
                                 // block (followed by `;` or the block's end), or its items before the `({ .. })`)
+                                // (`crate::m!(..);`: where its path starts)
+                                let mut ps = i;
+                                while ps >= 3
+                                    && matches!((&toks[ps - 3], &toks[ps - 2], &toks[ps - 1]), (TokenTree::Ident(seg), TokenTree::Punct(c1), TokenTree::Punct(c2)) if c1.as_char() == ':' && c2.as_char() == ':' && path_seg(seg.to_string().as_bytes()))
+                                {
+                                    ps -= 3;
+                                }
+                                // (`::m!(..)`, and not a keyword before it: `return ::pm::m!()`)
+                                let colons = |k: usize| {
+                                    k >= 2
+                                        && matches!((&toks[k - 2], &toks[k - 1]), (TokenTree::Punct(c1), TokenTree::Punct(c2)) if c1.as_char() == ':' && c2.as_char() == ':' && c1.spacing() == proc_macro2::Spacing::Joint)
+                                        && !(k >= 3 && matches!(&toks[k - 3], TokenTree::Ident(seg) if path_seg(seg.to_string().as_bytes())))
+                                };
+                                if colons(ps) {
+                                    ps -= 2;
+                                }
+                                // (`const N: i32 = m!() * 3;`: after `=` an expression, also at the top)
+                                let top = depth == 0 && !(ps > 0 && matches!(&toks[ps - 1], TokenTree::Punct(q) if q.as_char() == '='));
                                 let stmt_pos = brace
-                                    && (i == 0
-                                        || matches!(&toks[i - 1], TokenTree::Punct(q) if q.as_char() == ';')
-                                        || matches!(&toks[i - 1], TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace));
+                                    && (ps == 0
+                                        || matches!(&toks[ps - 1], TokenTree::Punct(q) if q.as_char() == ';')
+                                        || matches!(&toks[ps - 1], TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace));
                                 let next_semi = matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if q.as_char() == ';');
                                 let spliced = depth > 0 && stmt_pos && (next_semi || toks.get(i + 3).is_none()) && !body.contains('#');
                                 let drop_semi = spliced && next_semi && body.trim_end().ends_with(';');
-                                let rep = if depth == 0 || spliced {
+                                // (as expand_cfg: at the top, an item only where an item starts (after an attribute
+                                // too); after a binary operator, one operand that keeps the `;` after it)
+                                let item_start = ps == 0
+                                    || matches!(&toks[ps - 1], TokenTree::Punct(q) if q.as_char() == ';')
+                                    || matches!(&toks[ps - 1], TokenTree::Group(pg) if matches!(pg.delimiter(), proc_macro2::Delimiter::Brace | proc_macro2::Delimiter::Bracket));
+                                let operand = top
+                                    && !item_start
+                                    && matches!(&toks[ps - 1], TokenTree::Punct(q) if matches!(q.as_char(), '+' | '-' | '*' | '/' | '%' | '^' | '|'));
+                                let rep = if operand {
+                                    format!("({body})")
+                                } else if top || spliced {
                                     body
                                 } else if stmt_pos {
                                     match split_items(&body) {
@@ -1258,7 +1449,7 @@ fn find_calls(
                                 while k >= 3 {
                                     match (&toks[k - 3], &toks[k - 2], &toks[k - 1]) {
                                         (TokenTree::Ident(seg), TokenTree::Punct(c1), TokenTree::Punct(c2))
-                                            if c1.as_char() == ':' && c2.as_char() == ':' =>
+                                            if c1.as_char() == ':' && c2.as_char() == ':' && path_seg(seg.to_string().as_bytes()) =>
                                         {
                                             a = seg.span().byte_range().start;
                                             k -= 3;
@@ -1266,9 +1457,12 @@ fn find_calls(
                                         _ => break,
                                     }
                                 }
+                                if colons(k) {
+                                    a = toks[k - 2].span().byte_range().start;
+                                }
                                 let mut e = g.span().byte_range().end;
                                 // (トップレベルの `name!(..);` の `;` も取る)
-                                if depth == 0 || drop_semi {
+                                if (top && item_start) || drop_semi {
                                     if let Some(TokenTree::Punct(s)) = toks.get(i + 3) {
                                         if s.as_char() == ';' {
                                             e = s.span().byte_range().end;

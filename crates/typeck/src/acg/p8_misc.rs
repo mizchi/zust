@@ -809,6 +809,9 @@ impl Cx<'_> {
         if !self.prog.static_self_consts.is_empty() {
             self.rg_static_self_const(p, ci);
         }
+        if !self.prog.const_regions.is_empty() {
+            self.rg_const_regions(p, ci);
+        }
         let prog = self.prog;
         let c = &prog.consts[ci as usize];
         let (t, src) = (c.ty, c.expr.clone());

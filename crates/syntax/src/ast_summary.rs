@@ -353,6 +353,22 @@ fn adt_bounds(g: &Generics) -> Vec<(String, Vec<String>)> {
     v
 }
 
+/// The default of each parameter of adt_params (`F = fn() -> T`), by place; empty when none has one
+fn adt_defaults(g: &Generics, names: &[String]) -> R<Vec<Option<TySyn>>> {
+    if !g.params.iter().any(|p| matches!(p, GParam::Ty(_, _, Some(_)))) {
+        return Ok(vec![]);
+    }
+    let mut v = vec![None; names.len()];
+    for p in &g.params {
+        if let GParam::Ty(n, _, Some(d)) = p {
+            if let Some(k) = names.iter().position(|x| x == n) {
+                v[k] = Some(tysyn(d, None)?);
+            }
+        }
+    }
+    Ok(v)
+}
+
 fn adt_params(g: &Generics) -> R<Vec<String>> {
     let mut v = Vec::new();
     collect_generics(g, &mut v)?;
@@ -698,16 +714,29 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         Some(t) => tysyn(t, self_ty)?,
     };
     let name = sig.name.clone();
+    // (an impl for a reference, `impl Tr for &S` beside `impl Tr for S`: its own symbol, `_xS.__ref_v` (one
+    // `__ref_` a level), as its name is `S::__ref_v`)
+    let refs = {
+        let (mut pre, mut t) = (String::new(), owner.map(|o| &o.self_ty));
+        while let Some(TySyn::Ref(_, i)) = t {
+            pre.push_str("__ref_");
+            t = Some(i);
+        }
+        pre
+    };
+    // (the trait's part of the symbol where two traits of one type have a method of one name: Display / Debug's
+    // `fmt`, PartialEq<X> / PartialOrd<X>; for an impl for a reference too, `_xS.Debug.__ref_fmt`)
+    let disc = match owner.and_then(|o| o.impl_trait.as_deref()) {
+        Some(t) if t == "Display" || t == "Debug" => format!("{t}."),
+        Some(t) if t.starts_with("PartialEq<") || t.starts_with("PartialOrd<") => {
+            let t: String = t.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+            format!("{t}.")
+        }
+        _ => String::new(),
+    };
     let symbol = match owner {
         _ if is_extern || is_main => name.clone(),
-        Some(o) => match o.impl_trait.as_deref() {
-            Some(t) if t == "Display" || t == "Debug" => format!("_x{}.{t}.{name}", o.base),
-            Some(t) if t.starts_with("PartialEq<") || t.starts_with("PartialOrd<") => {
-                let t: String = t.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
-                format!("_x{}.{t}.{name}", o.base)
-            }
-            _ => format!("_x{}.{name}", o.base),
-        },
+        Some(o) => format!("_x{}.{disc}{refs}{name}", o.base),
         None => format!("_x{name}"),
     };
     let is_trait = owner.is_some_and(|o| o.is_trait);
@@ -2077,7 +2106,14 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             let name = match ow.impl_trait.as_deref() {
                 Some(t) if t == "Display" || t == "Debug" => format!("{}::<{t}>::{}", ow.base, fs.name),
                 Some(t) if t.starts_with("PartialEq<") || t.starts_with("PartialOrd<") => format!("{}::<{t}>::{}", ow.base, fs.name),
-                _ if matches!(ow.self_ty, TySyn::Ref(..)) => format!("{}::__ref_{}", ow.base, fs.name),
+                _ if matches!(ow.self_ty, TySyn::Ref(..)) => {
+                    let (mut pre, mut t) = (String::new(), &ow.self_ty);
+                    while let TySyn::Ref(_, i) = t {
+                        pre.push_str("__ref_");
+                        t = i;
+                    }
+                    format!("{}::{pre}{}", ow.base, fs.name)
+                }
                 _ => format!("{}::{}", ow.base, fs.name),
             };
             lift_closures(fs, body, &name, &mut sig, Some(&ow.self_ty), &mut sm)?;
@@ -2334,10 +2370,11 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
             }
             // `impl Add for &M`: M のメソッド `__ref_add` (self は &M) として持つ
-            let self_path = match self_ty {
-                PTy::Ref(_, _, i) if tr.is_some() => &**i,
-                t => t,
-            };
+            // (`impl Tr for &&str`: every reference off, the methods `str::__ref___ref_m`, one `__ref_` a level)
+            let mut self_path = self_ty;
+            while let (PTy::Ref(_, _, i), true) = (self_path, tr.is_some()) {
+                self_path = &**i;
+            }
             if let (PTy::Tuple(v), true) = (self_path, tr.is_some()) {
                 sm.impl_self = Some(format!("#tuple{}", v.len()));
                 sm.impl_self_ty = Some(tysyn(self_ty, None)?);
@@ -2455,6 +2492,16 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 Some(ow) => format!("{}::{}", ow.base, n),
                 None => n.clone(),
             };
+            // (an impl's whose type names the impl's lifetimes: its codes against them)
+            if let Some(r) = owner.and_then(|o| o.regions.as_deref()).filter(|r| !r.lts.is_empty() && crate::regions::names_lt(t)) {
+                let tps: Vec<&str> = owner.map(|o| o.generics.iter().map(|g| g.0.as_str()).collect()).unwrap_or_default();
+                let mut s = crate::regions::Slots { lts: r.lts.clone(), tparams: tps, self_slots: &r.self_slots, any: false, in_fn: 0 };
+                let mut v = vec![];
+                s.slots(t, false, &mut v);
+                if s.any && !v.contains(&crate::types::R_UNKNOWN) && v.iter().any(|&c| (c as usize) < r.lts.len()) {
+                    sm.const_regions.push((name.clone(), v));
+                }
+            }
             sm.consts.push((name, tysyn(t, owner.map(|o| &o.self_ty))?, item.init_text.clone()));
         }
         ItemKind::Static(m, n, t, _) => {
@@ -2537,6 +2584,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
             }
             sm.adt_generics = adt_params(g)?;
+            sm.adt_defaults = adt_defaults(g, &sm.adt_generics)?;
             sm.adt_bounds = adt_bounds(g);
             {
                 let tys: Vec<&PTy> = vars.iter().flat_map(|(_, f, _)| match f {
@@ -2644,6 +2692,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 sm.reprs.push((sn.clone(), r));
             }
             sm.adt_generics = adt_params(g)?;
+            sm.adt_defaults = adt_defaults(g, &sm.adt_generics)?;
             sm.adt_bounds = adt_bounds(g);
             {
                 let tys: Vec<&PTy> = match fields {

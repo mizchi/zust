@@ -2655,6 +2655,18 @@ impl Cx<'_> {
             return Ok((Some(v), t));
         }
         let sid = prog.instantiate(cd.sid, args.clone()).or_else(|e| err(SP, e))?;
+        // (the parameters its result is made of: a call's result holds what those arguments borrow)
+        if self.user_code && self.bk.level >= 2 && !self.clo_ret_from.iter().any(|x| x.0 == cd.sid) {
+            if let Expr::Closure(_, ins, _, body, _) = c {
+                let names: Vec<(String, usize)> = ins.iter().enumerate().filter_map(|(i, (p, _))| match p {
+                    Pat::Ident(false, _, n, None) => Some((n.clone(), i)),
+                    _ => None,
+                }).collect();
+                let mut from = vec![];
+                borrowck::closure_ret_params(body, &names, &mut from, 0);
+                self.clo_ret_from.push((cd.sid, from));
+            }
+        }
         // (made where nothing was expected: a parameter with no type written that is a reference has one region,
         // not one for each call (see call_fn_inner))
         if hint.is_none() && (expected.is_none() || own_type) && self.user_code && self.bk.level >= 2 && regionck::enabled() {
@@ -2678,18 +2690,36 @@ impl Cx<'_> {
                     _ => None,
                 }).collect();
                 let link = self.clo_ret_param.iter().find(|x| x.0 == cd.sid).map(|x| x.1);
+                // (what its body requires of its parameters (`let y: &'static u32 = x;`): checked from here on, so
+                // its calls' arguments are)
+                let mut reqs = vec![];
+                regionck::closure_reqs(body, &names, &mut reqs);
+                if !reqs.is_empty() && !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+                    self.rg_late_on();
+                }
                 self.rg_closure_stores(cd.sid, &args, link, body, &names, &cd.captures);
+                self.rg_closure_reqs(cd.sid, &args, &reqs);
             }
         }
         // (a body with a `let` whose annotation writes `'static`: the function is checked from here on, as for its own
         // `let x: &'static T`, so what the closure captures has its trees)
         let ann_static = self.user_code && self.bk.level >= 2 && !cd.captures.is_empty() && matches!(c, Expr::Closure(_, _, _, b, _) if crate::regions::annotates_static(b));
-        if ann_static && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
+        // (or one whose body writes a lifetime (`let y: &'static u32 = &c;`, `W::<&'a u32>`), with nothing else that
+        // asks for its body to be checked: it is, with the function's regions)
+        let writes_lt = !ann_static
+            && self.user_code
+            && self.bk.level >= 2
+            && !to_prelude
+            && bound.is_none()
+            && !inputs.iter().any(|x| x.1.is_some())
+            && regionck::enabled()
+            && matches!(c, Expr::Closure(_, _, _, b, _) if crate::regions::writes_lifetime(b));
+        if (ann_static || writes_lt) && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
             self.rg_late_on();
         }
         // (the region signature its body is checked with: from a bound not the prelude's, else from annotated
         // parameters)
-        if self.user_code && self.bk.level >= 2 && !to_prelude && (bound.is_some() || inputs.iter().any(|x| x.1.is_some()) || (self.rg_on() && !cd.captures.is_empty())) && regionck::enabled() {
+        if self.user_code && self.bk.level >= 2 && !to_prelude && (bound.is_some() || inputs.iter().any(|x| x.1.is_some()) || (self.rg_on() && (!cd.captures.is_empty() || writes_lt))) && regionck::enabled() {
             if let Some((ps, r)) = self.closure_sig(Ty::Struct(sid)) {
                 self.rg_closure_sig(c, cid, &ps, r, bound.map(|b| *b));
             }
@@ -3625,6 +3655,16 @@ impl Cx<'_> {
                 let r = self.call_fn(cid, Some(recv), &args, None, expected, SP);
                 self.rg.shared_clo = None;
                 self.rg_took_call(c);
+                // (a result that holds references holds what the arguments its body makes it of borrow: `some(&x)`
+                // with `let some = |a| Some(a);`, or `let some = Some;`)
+                if let Ok((_, rt)) = &r {
+                    if self.bk_on() && self.bk_ty(*rt).1 {
+                        if let Some(from) = self.clo_ret_from.iter().find(|x| x.0 == base).map(|x| x.1.clone()).filter(|f| !f.is_empty()) {
+                            self.bk_frame_end_call_from(&args, &from);
+                            return r;
+                        }
+                    }
+                }
                 r
             }
             Ty::Ref(_, Ty::Dyn(s)) | Ty::Box(Ty::Dyn(s)) => {

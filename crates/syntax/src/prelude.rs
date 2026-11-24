@@ -567,7 +567,7 @@ fn owner(h: usize) -> Option<&'static str> {
                     .chain(ws[..from].iter())
                     .copied()
                     .find_map(|w| match w {
-                        "Vec" | "String" | "HashMap" | "Reverse" | "BinaryHeap" | "PeekMut" | "SplitStr" | "RSplitStr" | "FlattenRef" | "MatchIndices" | "CharIndices"
+                        "Vec" | "String" | "HashMap" | "Reverse" | "AssertUnwindSafe" | "LocalKey" | "LazyCell" | "BinaryHeap" | "PeekMut" | "SplitStr" | "RSplitStr" | "FlattenRef" | "MatchIndices" | "CharIndices"
                         | "Bytes" | "ToCase" | "CharEscape" | "ParseIntError" | "IntErrorKind" | "Rev" | "StepBy" | "Peekable"
                         | "SkipWhile" | "PreludeScan" | "Inspect" | "FlatMap" | "Flatten" | "Cloned" | "Windows" | "Chunks" | "ChunksExact" | "ChunksMut" | "Iter" | "IterMut" | "MaybeUninit"
                         | "HashSet" | "SetIntoIter" | "BTreeMap" | "BTreeSet" | "BtEntry" | "BtIter" | "BtIterMut"
@@ -1441,7 +1441,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if (need.contains("Iterator") || need.contains("next")) && sc.has("FusedIterator") {
         need.insert("__fused_mark");
     }
-    if sc.has("ManuallyDrop") {
+    if sc.has("ManuallyDrop") || sc.has("AssertUnwindSafe") || sc.has("LazyCell") {
         need.extend(["Deref", "deref", "deref_mut"]);
     }
     if sc.has("Pin") {

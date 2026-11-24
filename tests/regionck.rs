@@ -3361,6 +3361,98 @@ fn part18_review2() {
     assert_eq!(check("mod m {\n    #[allow(non_upper_case_globals)]\n    pub static val: i32 = 1;\n}\nstruct G<'a>(&'a mut i32);\nimpl Drop for G<'_> { fn drop(&mut self) { *self.0 += 1; } }\nfn mk(n: &mut i32) -> Option<G<'_>> { Some(G(n)) }\nfn main() {\n    let mut n = 0;\n    match mk(&mut n) {\n        val => { drop(val); n = 1; }\n    };\n    println!(\"{} {}\", n, m::val);\n}\n"), vec![]);
 }
 
+/// A fn item passed where a fn pointer type that binds its regions is expected: it must do for every region the type
+/// binds. `fn baz(x: &S) -> &S` (`for<'a> fn(&'a S) -> &'a S`) for a `for<'cx> fn(&'cx S) -> &'static S` is E0308 in
+/// rustc ("lifetime may not live long enough" here); `foo(x: &S) -> &'static S` for a `for<'cx> fn(&'cx S) -> &'cx S`
+/// is fine. A fn item's value elides its result's regions as its signature does
+#[test]
+fn part19_fn_item_subtyping() {
+    let d = check("struct S;\nfn want(f: for<'cx> fn(&'cx S) -> &'static S) {}\nfn baz(x: &S) -> &S { x }\nfn main() { want(baz); }\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("struct S;\nfn want(f: fn(&S) -> &'static S) {}\nfn baz(x: &S) -> &S { x }\nfn main() { want(baz); }\n");
+    assert!(d.len() == 1 && d[0].0 == 4, "{d:?}");
+    assert_eq!(check("struct S;\nfn foo(x: &S) -> &'static S { panic!() }\nfn baz(x: &S) -> &S { x }\nfn want(f: for<'cx> fn(&'cx S) -> &'cx S) {}\nfn main() { want(foo); want(baz); }\n"), vec![]);
+    // (a `let` annotation: the check takes the item's own tree; the local keeps fresh regions for its calls)
+    let d = check("struct S;\nfn baz(x: &S) -> &S { x }\nfn main() { let g: for<'cx> fn(&'cx S) -> &'static S = baz; }\n");
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    assert_eq!(check("struct S;\nfn baz(x: &S) -> &S { x }\nfn f<'a>(x: &'a S) -> &'a S {\n    let g: for<'cx> fn(&'cx S) -> &'cx S = baz;\n    g(x)\n}\nfn main() { let s = S; f(&s); }\n"), vec![]);
+}
+
+/// A closure's call holds what the arguments its body makes its result of borrow (`|a| Some(a)`, `let some = Some;`),
+/// as rustc infers the closure's one signature; not those its body only reads or calls with (`|k| m.get(k)`)
+#[test]
+fn part19_closure_call_results() {
+    let t = "fn temp() -> String { String::from(\"Hello\") }\n";
+    for body in ["let some = Some; let g = some(&temp());", "let some = |a| Some(a); let g = some(&temp());", "let some = |a| a; let g: &String = some(&temp());"] {
+        let d = check(&format!("{t}fn main() {{\n    {body}\n    println!(\"{{g:?}}\");\n}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0716"), "{body}: {d:?}");
+    }
+    let d = check(&format!("{t}fn main() {{\n    let x = temp(); let some = |a| Some(a); let g = some(&x); drop(x);\n    println!(\"{{g:?}}\");\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("cannot move out of `x`"), "{d:?}");
+    for body in [
+        "let m = vec![temp()]; let look = |k: &String| m.iter().find(|x| *x == k); let g = look(&temp());",
+        "let x = temp(); let f = |a: &String| a.len(); let g = f(&x); drop(x);",
+        "let x = temp(); let f = |a: &String| -> String { a.clone() }; let g = f(&x); drop(x);",
+        "let x = temp(); let f = |a: &String| -> &'static str { if a.is_empty() { \"e\" } else { \"n\" } }; let g = f(&x); drop(x);",
+    ] {
+        assert_eq!(check(&format!("{t}fn main() {{\n    {body}\n    println!(\"{{g:?}}\");\n}}\n")), vec![], "{body}");
+    }
+}
+
+/// What a closure's body requires of its parameters (`let y: &'static u32 = x;`, `W::<&'static u32>(x)`) is required
+/// of its calls' arguments, as rustc propagates a closure's requirements; and a body that writes a lifetime is checked
+/// though nothing else asks for it (nll/user-annotations/adt-tuple-struct-calls.rs)
+#[test]
+fn part19_closure_requirements() {
+    let w = "struct W<T>(T);\nfn id<T>(t: T) -> T { t }\n";
+    for body in ["let f = |x| { let _y: &'static u32 = x; };", "let f = |x| W::<&'static u32>(x);", "let f = W::<&'static u32>;", "let f = |x| id::<&'static u32>(x);", "let f = Some::<&'static u32>;"] {
+        let d = check(&format!("{w}fn main() {{\n    let c = 66;\n    {body}\n    f(&c);\n}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("does not live long enough"), "{body}: {d:?}");
+    }
+    for body in ["let c = 66; let f = W::<&u32>; f(&c);", "static C: u32 = 1; let f = |x| { let _y: &'static u32 = x; }; f(&C);"] {
+        assert_eq!(check(&format!("{w}fn main() {{\n    {body}\n}}\n")), vec![], "{body}");
+    }
+    // (in a closure's body: `'static`, the function's 'a, and a constructor value that names it)
+    let d = check("fn st() {\n    let _c = || {\n        let c = 66;\n        let _y: &'static u32 = &c;\n    };\n}\nfn named<'a>(x: &'a u32) -> &'a u32 {\n    let _c = || {\n        let c = 66;\n        let _y: &'a u32 = &c;\n    };\n    x\n}\nstruct S<T>(T);\nfn ctor<'a>(_: &'a u32) {\n    let _c = || {\n        let c = 66;\n        let f = S::<&'a u32>;\n        f(&c);\n    };\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 10, 19], "{d:?}");
+    assert_eq!(check("struct S<T>(T);\nfn ok<'a>(c: &'a u32) {\n    let _cl = || {\n        let f = S::<&'a u32>;\n        f(c);\n    };\n}\nfn ok2<'a>(c: &'a u32) -> S<&'a u32> {\n    let f = S::<&'a u32>;\n    f(c)\n}\nfn main() { ok(&1); ok2(&2); }\n"), vec![]);
+}
+
+/// An impl's constant whose type names the impl's lifetimes is of the regions its path writes on the self type
+/// (nll/user-annotations/constant-in-expr-inherent-1.rs)
+#[test]
+fn part19_impl_const_regions() {
+    let d = check("struct Foo<'a> { x: &'a u32 }\nimpl<'a> Foo<'a> {\n    const C: &'a u32 = &22;\n}\nfn foo<'a>(_: &'a u32) -> &'static u32 {\n    <Foo<'a>>::C\n}\nfn bar<'a>(_: &'a u32) -> &'static u32 {\n    Foo::<'a>::C\n}\nfn ok<'a>(_: &'a u32) -> &'a u32 {\n    <Foo<'a>>::C\n}\nfn ok2() -> &'static u32 {\n    <Foo<'static>>::C\n}\nfn ok3<'a>(_: &'a u32) -> &'static u32 {\n    Foo::C\n}\nfn main() { let f = Foo { x: &1 }; let _ = f.x; }\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![6, 9] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
+}
+
+/// The review of #109: a closure's body that writes a lifetime only in a method's turbofish is checked; a `let` that
+/// shadows a parameter ends what the body requires of it; an impl's constant takes a lifetime written in a type
+/// argument of its path (`Foo::<&'b u32>::C` with `impl<'a> Foo<&'a u32>`)
+#[test]
+fn part19_review() {
+    let d = check("struct S;\nimpl S { fn take<T>(&self, _t: T) {} }\nfn main() {\n    let _c = || {\n        let c = 66;\n        S.take::<&'static u32>(&c);\n    };\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("does not live long enough"), "{d:?}");
+    assert_eq!(check("static C: u32 = 1;\nfn main() {\n    let local = 5;\n    let f = |x| {\n        let x = &C;\n        let _y: &'static u32 = x;\n    };\n    f(&local);\n}\n"), vec![]);
+    let d = check("struct Foo<T>(T);\nimpl<'a> Foo<&'a u32> {\n    const C: &'a u32 = &1;\n}\nfn f<'b>(_: &'b u32) -> &'b u32 {\n    Foo::<&'b u32>::C\n}\nfn g<'b>(_: &'b u32) -> &'static u32 {\n    Foo::<&'b u32>::C\n}\nfn main() { let x = 1; f(&x); g(&x); let _ = Foo(&x).0; }\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (a call through a fn pointer local takes the regions its type binds afresh: two calls relate neither argument
+    // to the other; the result is still the argument's)
+    for src in ["fn id(x: &u32) -> &u32 { x }\nfn f<'a, 'b>(a: &'a u32, b: &'b u32) -> (&'a u32, &'b u32) {\n    let g: fn(&u32) -> &u32 = id;\n    (g(a), g(b))\n}\nfn main() { let (x, y) = (1, 2); let _ = f(&x, &y); }\n", "fn id(x: &u32) -> &u32 { x }\nfn f<'a, 'b>(a: &'a u32, b: &'b u32) -> (&'a u32, &'b u32) {\n    let g = id;\n    (g(a), g(b))\n}\nfn h<'a, 'b>(a: &'a u32, b: &'b u32) -> (&'a u32, &'b u32) {\n    let g: for<'x> fn(&'x u32) -> &'x u32 = id;\n    (g(a), g(b))\n}\nfn main() { let (x, y) = (1, 2); let _ = f(&x, &y); let _ = h(&x, &y); }\n", "fn id<'x>(x: &'x u32) -> &'x u32 { x }\nfn f<'a, 'b>(a: &'a u32, b: &'b u32) -> (&'a u32, &'b u32) {\n    let g: fn(&u32) -> &u32 = id;\n    (g(a), g(b))\n}\nfn h<'a, 'b>(a: &'a u32, b: &'b u32) -> (&'a u32, &'b u32) {\n    let g = id;\n    (g(a), g(b))\n}\nfn main() { let (x, y) = (1, 2); let _ = f(&x, &y); let _ = h(&x, &y); }\n"] {
+        assert_eq!(check(src), vec![], "{src}");
+    }
+    let d = check("fn id(x: &u32) -> &u32 { x }\nfn f1<'a>(x: &'a u32) -> &'static u32 {\n    let g: fn(&u32) -> &u32 = id;\n    g(x)\n}\nfn f2<'a>(x: &'a u32) -> &'static u32 {\n    let g = id;\n    g(x)\n}\nfn f3<'a>(x: &'a u32) -> &'a u32 {\n    let g = id;\n    let _ = g(&5);\n    g(x)\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 8] && d.iter().all(|x| x.1.contains("must outlive `'static`")), "{d:?}");
+    // (a method's turbofish in a closure's body is required of its calls' arguments too, the receiver's type known)
+    let d = check("struct S;\nimpl S {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let local = 1;\n    let f = |x| S.take::<&'static u32>(x);\n    f(&local);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("does not live long enough"), "{d:?}");
+    assert_eq!(check("struct S;\nimpl S {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let local = 1;\n    let s = S;\n    let f = |x| s.take::<&u32>(x);\n    f(&local);\n    static C: u32 = 2;\n    let g = |x| S.take::<&'static u32>(x);\n    g(&C);\n}\n"), vec![]);
+    // (on a generic impl, the turbofish writes the method's own parameters, which come after the impl's)
+    let d = check("struct S<A>(A);\nimpl<A> S<A> {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let s = S(1u8);\n    let local = 1;\n    let f = |x| s.take::<&'static u32>(x);\n    f(&local);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("does not live long enough"), "{d:?}");
+    assert_eq!(check("struct S<A>(A);\nimpl<A> S<A> {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let s = S(1u8);\n    let local = 1;\n    let f = |x| s.take::<&u32>(x);\n    f(&local);\n}\n"), vec![]);
+}
+
 /// Polonius Alpha (issue #1): a reborrow returned in one branch is live only where what holds it is live, an
 /// assignment to a part of a local kills the loans through the reference it held, `for x in v.iter_mut()` with v a
 /// reference reborrows `*v`, and a cast to a number holds nothing. Each was checked against rustc 1.102-nightly

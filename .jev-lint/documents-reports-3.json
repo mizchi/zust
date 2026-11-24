@@ -105,20 +105,28 @@
       "path": "docs/ja/reports/2026-11-23-08-rust-frontier-survey.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-24-01-parallel-check.en": {
-      "path": "docs/reports/2026-11-24-01-parallel-check.md",
+    "docs_reports_2026-11-24-01-region-check-19.en": {
+      "path": "docs/reports/2026-11-24-01-region-check-19.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-24-01-parallel-check.ja": {
-      "path": "docs/ja/reports/2026-11-24-01-parallel-check.md",
+    "docs_reports_2026-11-24-01-region-check-19.ja": {
+      "path": "docs/ja/reports/2026-11-24-01-region-check-19.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-24-02-polonius-alpha.en": {
-      "path": "docs/reports/2026-11-24-02-polonius-alpha.md",
+    "docs_reports_2026-11-24-02-parallel-check.en": {
+      "path": "docs/reports/2026-11-24-02-parallel-check.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-24-02-polonius-alpha.ja": {
-      "path": "docs/ja/reports/2026-11-24-02-polonius-alpha.md",
+    "docs_reports_2026-11-24-02-parallel-check.ja": {
+      "path": "docs/ja/reports/2026-11-24-02-parallel-check.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-03-polonius-alpha.en": {
+      "path": "docs/reports/2026-11-24-03-polonius-alpha.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-03-polonius-alpha.ja": {
+      "path": "docs/ja/reports/2026-11-24-03-polonius-alpha.md",
       "role": "historical"
     }
   },
@@ -267,25 +275,36 @@
       }
     },
     {
-      "id": "docs_reports_2026-11-24-01-parallel-check",
-      "topic": "The Japanese file docs/ja/reports/2026-11-24-01-parallel-check.md is a faithful translation of docs/reports/2026-11-24-01-parallel-check.md",
+      "id": "docs_reports_2026-11-24-01-region-check-19",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-01-region-check-19.md is a faithful translation of docs/reports/2026-11-24-01-region-check-19.md",
       "mode": "translation",
       "reference": {
-        "source": "docs_reports_2026-11-24-01-parallel-check.en"
+        "source": "docs_reports_2026-11-24-01-region-check-19.en"
       },
       "target": {
-        "source": "docs_reports_2026-11-24-01-parallel-check.ja"
+        "source": "docs_reports_2026-11-24-01-region-check-19.ja"
       }
     },
     {
-      "id": "docs_reports_2026-11-24-02-polonius-alpha",
-      "topic": "The Japanese file docs/ja/reports/2026-11-24-02-polonius-alpha.md is a faithful translation of docs/reports/2026-11-24-02-polonius-alpha.md",
+      "id": "docs_reports_2026-11-24-02-parallel-check",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-02-parallel-check.md is a faithful translation of docs/reports/2026-11-24-02-parallel-check.md",
       "mode": "translation",
       "reference": {
-        "source": "docs_reports_2026-11-24-02-polonius-alpha.en"
+        "source": "docs_reports_2026-11-24-02-parallel-check.en"
       },
       "target": {
-        "source": "docs_reports_2026-11-24-02-polonius-alpha.ja"
+        "source": "docs_reports_2026-11-24-02-parallel-check.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-03-polonius-alpha",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-03-polonius-alpha.md is a faithful translation of docs/reports/2026-11-24-03-polonius-alpha.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-03-polonius-alpha.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-03-polonius-alpha.ja"
       }
     }
   ]
