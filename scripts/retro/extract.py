@@ -168,7 +168,10 @@ def loc_series(rev, every):
     for l in git("log", "--reverse", "--first-parent", "--format=%H|%aI", rev).splitlines():
         h, d = l.split("|")
         t = utc(d)
-        picked[(t.date(), t.hour // every)] = (h, t)
+        key = (t.date(), t.hour // every)
+        picked[key] = (h, t)
+        # (moved to the end: a later commit with an earlier author date keeps the requested revision the last row)
+        picked.move_to_end(key)
     return [dict(time=iso(t), commit=h[:8], **loc_at(h)) for h, t in picked.values()]
 
 
