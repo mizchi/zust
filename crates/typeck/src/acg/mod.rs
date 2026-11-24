@@ -3016,7 +3016,8 @@ impl Cx<'_> {
                     // OptionIntoWasmAbi's `none`)
                     let m = &p.segs[1].name;
                     if !self.prog.has_param(t) && self.prog.multi_trait_methods.contains(m.as_str()) {
-                        let bounds = self.prog.sigs.get(self.rg.base as usize).and_then(|s| s.generics.iter().find(|x| x.0 == *g)).map(|x| x.1.clone()).unwrap_or_default();
+                        // (the fn's own bounds: `root`, also for a body inlined into another)
+                        let bounds = self.prog.sigs.get(self.root as usize).and_then(|s| s.generics.iter().find(|x| x.0 == *g)).map(|x| x.1.clone()).unwrap_or_default();
                         for b in &bounds {
                             let tr = b.split('<').next().unwrap_or(b).trim();
                             if !self.prog.traits.get(tr).is_some_and(|ds| ds.iter().any(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(m.as_str()))) {
