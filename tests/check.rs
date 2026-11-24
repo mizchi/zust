@@ -2125,3 +2125,35 @@ fn errors_in_a_fn_written_in_another() {
     // (`Self` of the impl around it, which rustc takes from an outer item with a warning)
     assert_eq!(first("struct S0(usize);\nimpl S0 {\n    fn foo() {\n        fn bar() -> S0 {\n            Self(0)\n        }\n    }\n}\nfn main() {}\n"), None, "Self");
 }
+
+#[test]
+fn diff_markers_and_mismatched_delimiters() {
+    // (rustc 1.100's lexer and parser errors on the same source: a merge's diff marker at its line's first column; a
+    // closing delimiter that does not close the innermost open one at its line, where rustc labels it)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let marker = |l: usize| Some((l, 1, "encountered diff marker".to_string()));
+    assert_eq!(first("fn main() {\n<<<<<<< HEAD\n    let _a = 1;\n=======\n    let _b = 2;\n>>>>>>> branch\n}\n"), marker(2), "in a body");
+    assert_eq!(first("struct S {\n<<<<<<< HEAD\n    x: u8,\n=======\n    y: u8,\n>>>>>>> branch\n}\nfn main() {}\n"), marker(2), "in a struct");
+    assert_eq!(first("use std::{\n<<<<<<< HEAD\n    fmt,\n=======\n    io,\n>>>>>>> branch\n};\nfn main() {}\n"), marker(2), "in a use tree");
+    // (not in a string or a comment)
+    assert_eq!(first("fn main() {\n    let _s = \"\n<<<<<<< HEAD\n\";\n    /*\n<<<<<<< HEAD\n    */\n}\n"), None, "in a string");
+    let mismatch = |src: &str| first(src).map(|d| (d.0, d.2));
+    assert_eq!(mismatch("impl A {\n    fn b(self>\n}\n\nfn main() {}\n"), Some((3, "mismatched closing delimiter: `}`".to_string())), "brace for a paren");
+    assert_eq!(
+        mismatch("trait Foo {\n    fn bar() {\n        let x = foo();\n    )\n}\nfn main() {}\n"),
+        Some((4, "mismatched closing delimiter: `)`".to_string())),
+        "paren for a brace"
+    );
+    // (a closing delimiter none open matches is skipped; the one left over with none open is "unexpected", in place of
+    // the mismatch)
+    assert_eq!(
+        mismatch("fn main() {\n    if 1 < 2 {\n        let _a = vec!];\n    }\n}\n"),
+        Some((5, "unexpected closing delimiter: `}`".to_string())),
+        "unexpected"
+    );
+    // (an unclosed one at the end is the lexer's other error, before a diff marker)
+    assert_eq!(first("mod tests {\n<<<<<<< HEAD\n    fn a() {\n=======\n    fn b() {\n>>>>>>> x\n    }\n}\n").map(|d| d.2), Some("this file contains an unclosed delimiter".to_string()), "unclosed");
+}

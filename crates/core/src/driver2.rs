@@ -9336,6 +9336,19 @@ fn hoisted_check_err_holds(msg: &str) -> bool {
     HOLDS.iter().any(|h| msg.starts_with(h)) && !msg.contains("Self") && !msg.contains("__h") && !msg.contains("unsupported")
 }
 
+/// A merge's diff marker in the source (`<<<<<<<` at a line's start, outside strings and comments) in place of the
+/// analysis's error e: rustc's parser stops at it ("encountered diff marker", at its first column), after the lexer's
+/// errors of delimiters only
+#[cold]
+#[inline(never)]
+fn diff_marker_first(src: &str, e: String) -> String {
+    let lexer = ["this file contains an unclosed delimiter", "closing delimiter: `"].iter().any(|m| e.contains(m));
+    match crate::lexer::diff_marker_line(src.as_bytes()) {
+        Some(l) if !lexer && src.contains("<<<<<<<") => format!("{l}:1: encountered diff marker"),
+        _ => e,
+    }
+}
+
 /// e with its leading line `L:` made l
 fn with_line(e: &str, l: usize) -> String {
     let lead = e.trim_start();
@@ -9401,7 +9414,7 @@ impl Session2 {
         self.checking = false;
         let mut a = match r {
             Ok(a) => a,
-            Err(e) => return vec![Diagnostic::parse(&self.unhoist_analysis_err(src, e))],
+            Err(e) => return vec![Diagnostic::parse(&self.unhoist_analysis_err(src, diff_marker_first(src, e)))],
         };
         // 検査だけ: コード生成 (acg) で型を検査し、機械語は作らない (ZUSTC_CHECK_CODEGEN=1 で機械語まで作る)。
         // 検査済みの印は、要求したインスタンスへの再配置だけを持つ空の Blob を、ビルドとは別のキーで覚える

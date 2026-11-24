@@ -145,6 +145,74 @@ impl St<'_> {
 }
 
 pub fn split(src: &str) -> Result<Vec<SrcItem>, String> {
+    // (a closing delimiter that does not close the innermost open one is rustc's lexer's error, before any of the
+    // parser's: read for only when the split fails)
+    split_items(src).map_err(|e| mismatched_delim(src.as_bytes()).unwrap_or(e))
+}
+
+/// The line (from 1) of b's first merge diff marker, `<<<<<<<` at a line's start outside strings and comments
+#[cold]
+#[inline(never)]
+pub fn diff_marker_line(b: &[u8]) -> Option<usize> {
+    let at = tokenize(b).into_iter().find(|&(k, a, _)| k == 1 && b[a] == b'<' && (a == 0 || b[a - 1] == b'\n') && b[a..].starts_with(b"<<<<<<<"))?.1;
+    Some(b[..at].iter().filter(|&&x| x == b'\n').count() + 1)
+}
+
+/// The lexer's error of b's delimiters as rustc 1.100 reports it, outside strings, chars and comments. A closing
+/// delimiter that does not close the innermost open one takes that one away, and is read again for the next one
+/// down when one of those it would close is open (`fn f() { bar(baz( }`), as rustc recovers; else it is skipped. A
+/// closing delimiter with none open is "unexpected closing delimiter: `}`" there, which rustc reports in place of the
+/// mismatches before it; without one, the first mismatch is "mismatched closing delimiter: `)`" at that delimiter
+/// (where rustc labels it). None when every one matches (an unclosed one at the end is another error)
+#[cold]
+#[inline(never)]
+fn mismatched_delim(b: &[u8]) -> Option<String> {
+    let toks = tokenize(b);
+    let at = |a: usize, what: &str| {
+        let ls = b[..a].iter().rposition(|&x| x == b'\n').map_or(0, |p| p + 1);
+        let line = b[..a].iter().filter(|&&x| x == b'\n').count() + 1;
+        let col = std::str::from_utf8(&b[ls..a]).map_or(a - ls, |t| t.chars().count()) + 1;
+        format!("{line}:{col}: {what} closing delimiter: `{}`", b[a] as char)
+    };
+    let mut open: Vec<u8> = vec![];
+    let mut mismatch: Option<usize> = None;
+    let mut k = 0;
+    while k < toks.len() {
+        let (kind, a, _) = toks[k];
+        let want = match (kind, b[a]) {
+            (1, c @ (b'(' | b'[' | b'{')) => {
+                open.push(c);
+                k += 1;
+                continue;
+            }
+            (1, b')') => b'(',
+            (1, b']') => b'[',
+            (1, b'}') => b'{',
+            _ => {
+                k += 1;
+                continue;
+            }
+        };
+        match open.last() {
+            None => return Some(at(a, "unexpected")),
+            Some(&o) if o == want => {
+                open.pop();
+                k += 1;
+            }
+            Some(_) => {
+                mismatch.get_or_insert(a);
+                open.pop();
+                if !open.contains(&want) {
+                    k += 1;
+                }
+            }
+        }
+    }
+    mismatch.map(|a| at(a, "mismatched"))
+}
+
+#[inline(never)]
+fn split_items(src: &str) -> Result<Vec<SrcItem>, String> {
     let s = src.as_bytes();
     let n = s.len();
     let mut i = 0;

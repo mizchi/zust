@@ -5286,9 +5286,14 @@ compile-fail	parser/diff-markers/fn-arg.rs
 compile-fail	parser/diff-markers/item-with-attr.rs
 compile-fail	parser/diff-markers/item.rs
 compile-fail	parser/diff-markers/long-conflict-markers.rs
+compile-fail	parser/diff-markers/statement.rs
+compile-fail	parser/diff-markers/struct-expr.rs
 compile-fail	parser/diff-markers/struct.rs
+compile-fail	parser/diff-markers/trait-item.rs
+compile-fail	parser/diff-markers/tuple-struct.rs
 compile-fail	parser/diff-markers/unclosed-delims-in-macro.rs
 compile-fail	parser/diff-markers/unclosed-delims.rs
+compile-fail	parser/diff-markers/use-statement.rs
 compile-fail	parser/do-not-suggest-semicolon-before-array.rs
 compile-fail	parser/doc-after-struct-field.rs
 compile-fail	parser/doc-before-attr.rs
@@ -5396,12 +5401,15 @@ compile-fail	parser/issues/issue-103451.rs
 compile-fail	parser/issues/issue-103748-ICE-wrong-braces.rs
 compile-fail	parser/issues/issue-10392-2.rs
 compile-fail	parser/issues/issue-10392.rs
+compile-fail	parser/issues/issue-104367.rs
 compile-fail	parser/issues/issue-104867-inc-dec-2.rs
 compile-fail	parser/issues/issue-104867-inc-dec.rs
 compile-fail	parser/issues/issue-105366.rs
 compile-fail	parser/issues/issue-10636-1.rs
+compile-fail	parser/issues/issue-10636-2.rs
 compile-fail	parser/issues/issue-108109-fn-missing-params.rs
 compile-fail	parser/issues/issue-108109-fn-trait-missing-paren.rs
+compile-fail	parser/issues/issue-108242-semicolon-recovery.rs
 compile-fail	parser/issues/issue-108495-dec.rs
 compile-fail	parser/issues/issue-110014.rs
 compile-fail	parser/issues/issue-111148.rs
@@ -5472,6 +5480,9 @@ compile-fail	parser/issues/issue-57198.rs
 compile-fail	parser/issues/issue-57684.rs
 compile-fail	parser/issues/issue-57819.rs
 compile-fail	parser/issues/issue-58094-missing-right-square-bracket.rs
+compile-fail	parser/issues/issue-58856-1.rs
+compile-fail	parser/issues/issue-58856-2.rs
+compile-fail	parser/issues/issue-60075.rs
 compile-fail	parser/issues/issue-61858.rs
 compile-fail	parser/issues/issue-62524.rs
 compile-fail	parser/issues/issue-62546.rs
@@ -5494,6 +5505,7 @@ compile-fail	parser/issues/issue-6610.rs
 compile-fail	parser/issues/issue-66357-unexpected-unreachable.rs
 compile-fail	parser/issues/issue-66473.rs
 compile-fail	parser/issues/issue-67146-negative-outlives-bound-syntactic-fail.rs
+compile-fail	parser/issues/issue-67377-invalid-syntax-in-enum-discriminant.rs
 compile-fail	parser/issues/issue-68000-unicode-ident-after-missing-comma.rs
 compile-fail	parser/issues/issue-68092-unicode-ident-after-incomplete-expr.rs
 compile-fail	parser/issues/issue-68629.rs
@@ -5646,6 +5658,7 @@ compile-fail	parser/match-arrows-block-then-binop.rs
 compile-fail	parser/match-refactor-to-expr.rs
 compile-fail	parser/mismatched-braces/missing-close-brace-in-struct.rs
 compile-fail	parser/mismatched-delim-brace-empty-block.rs
+compile-fail	parser/mismatched-delimiter-corner-case-issue-127868.rs
 compile-fail	parser/missing-closing-angle-bracket-eq-constraint.rs
 compile-fail	parser/missing-closing-angle-bracket-struct-field-ty.rs
 compile-fail	parser/missing-closing-generics-bracket.rs
@@ -5714,6 +5727,8 @@ compile-fail	parser/paamayim-nekudotayim.rs
 check-pass	parser/parse-assoc-type-lt.rs
 compile-fail	parser/parse-error-correct.rs
 run-pass	parser/parse-panic.rs
+compile-fail	parser/parser-ice-ed2021-await-105210.rs
+compile-fail	parser/parser-recovery-2.rs
 run-pass	parser/parser-unicode-whitespace.rs
 check-pass	parser/partial-eq-trait-bound-5572.rs
 compile-fail	parser/pat-lt-bracket-1.rs
@@ -5875,6 +5890,7 @@ compile-fail	parser/type-parameters-in-field-exprs.rs
 compile-fail	parser/typod-const-in-const-param-def.rs
 run-pass	parser/ufcs-return-unused-parens.rs
 compile-fail	parser/unclosed-braces.rs
+compile-fail	parser/unclosed_delim_mod.rs
 compile-fail	parser/underscore-suffix-for-float.rs
 compile-fail	parser/underscore-suffix-for-string.rs
 compile-fail	parser/underscore_item_not_const.rs
@@ -6593,6 +6609,9 @@ compile-fail	resolve/suggestions/suggest-path-for-tuple-struct.rs
 compile-fail	resolve/suggestions/suggest-path-instead-of-mod-dot-item.rs
 compile-fail	resolve/suggestions/suggest-vec-not-slice.rs
 compile-fail	resolve/token-error-correct-2.rs
+compile-fail	resolve/token-error-correct-3.rs
+compile-fail	resolve/token-error-correct-4.rs
+compile-fail	resolve/token-error-correct.rs
 compile-fail	resolve/too-many-super-issue-158275.rs
 compile-fail	resolve/tool-import.rs
 compile-fail	resolve/trait-impl-cant-capture-env.rs
@@ -7213,6 +7232,7 @@ compile-fail	suggestions/clone-on-unconstrained-borrowed-type-param.rs
 compile-fail	suggestions/closure-arg-trailing-semicolon.rs
 compile-fail	suggestions/const-no-type.rs
 compile-fail	suggestions/const-pat-non-exaustive-let-new-var.rs
+compile-fail	suggestions/constrain-suggest-ice.rs
 compile-fail	suggestions/copied-and-cloned.rs
 compile-fail	suggestions/count2len.rs
 compile-fail	suggestions/crate-or-module-typo.rs
