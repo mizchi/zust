@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import tempfile
 from pathlib import Path
@@ -20,18 +21,31 @@ def read(path):
     return path.read_text() if path.is_file() else None
 
 
-# (seconds for the submission: compiling it and running its checks)
-TIMEOUT = 120
+# (seconds for the submission: compiling it and running its checks; VERIFY_TIMEOUT to change it)
+TIMEOUT = int(os.environ.get("VERIFY_TIMEOUT", "120"))
+
+
+def run_verifier(command, timeout, tmp):
+    """The verifier's result, or None when it gives none within timeout seconds. It runs in a process group of its own:
+    on a timeout the group goes, the compilers the verifier started included, before tmp (its temporary files) does"""
+    p = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
+                         env={**os.environ, "TMPDIR": tmp})
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.communicate()
+        return None
+    return subprocess.CompletedProcess(command, p.returncode, out, err)
 
 
 def check(source):
     command = ["node", str(here / "verify.mjs"), args.case, source, d / "zsc", d / "zustc"]
     # (a submission that never returns, a loop that does not advance: a failed check, and the record is written)
-    # (its temporary files in a directory removed here, also after a timeout kills the verifier)
-    try:
-        with tempfile.TemporaryDirectory() as tmp:
-            run = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT, env={**os.environ, "TMPDIR": tmp})
-    except subprocess.TimeoutExpired:
+    # (its temporary files in a directory removed here, also after a timeout)
+    with tempfile.TemporaryDirectory() as tmp:
+        run = run_verifier(command, TIMEOUT, tmp)
+    if run is None:
         return {"task": args.case, "passed": False,
                 "checks": [{"name": "load or run", "passed": False, "message": f"no result within {TIMEOUT} s"}]}
     if run.returncode not in (0, 1) or not run.stdout:

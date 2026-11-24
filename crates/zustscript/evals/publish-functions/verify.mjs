@@ -99,7 +99,8 @@ try {
 }
 const passed = checks.every(check => check.passed);
 
-// The body of `fn name(..) { .. }`, braces balanced (an `if` / `else` inside it included), or null
+// The body of `fn name(..) { .. }`, braces balanced (an `if` / `else` inside it included; not those in strings and
+// comments), or null
 function fnBody(source, name) {
   const head = new RegExp("\\bfn\\s+" + name + "\\s*\\(").exec(source);
   if (!head) return null;
@@ -107,8 +108,14 @@ function fnBody(source, name) {
   if (open < 0) return null;
   let depth = 0;
   for (let i = open; i < source.length; i++) {
-    if (source[i] === "{") depth++;
-    else if (source[i] === "}" && --depth === 0) return source.slice(open + 1, i);
+    const c = source[i];
+    // (a string's braces and a comment's are not the block's: `let marker = "{";`)
+    if (c === '"') {
+      for (i++; i < source.length && source[i] !== '"'; i++) if (source[i] === "\\") i++;
+    } else if (c === "/" && source[i + 1] === "/") {
+      while (i < source.length && source[i] !== "\n") i++;
+    } else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) return source.slice(open + 1, i);
   }
   return null;
 }
