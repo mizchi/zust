@@ -774,6 +774,9 @@ impl Insts {
                     continue;
                 }
                 match prog.evaluate(t, tr) {
+                    // (zustc check's last round: a type with a placeholder in it (`&G#`) may meet the bound by a where
+                    // clause of the generic fn the request comes from (`&'max G: Get`), which is not known here)
+                    Certainty::No if self.lenient && prog.holds_placeholder(t, 0) && !prog.is_placeholder_ty(t) => {}
                     Certainty::No => {
                         return Err(format!("the trait bound `{}: {tr}` is not satisfied (for `{pn}`)", prog.tn(t)));
                     }
@@ -4117,6 +4120,23 @@ impl Program {
         g.0.insert((sid, name.to_string()), s);
         g.1.insert(s, (sid, b.clone(), name.to_string()));
         Some(s)
+    }
+
+    /// t is a placeholder or has one in it (`&G#`, `Vec<T#>`)
+    pub fn holds_placeholder(&self, t: Ty, depth: u32) -> bool {
+        if depth > 16 {
+            return false;
+        }
+        match t {
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Slice(i) | Ty::Array(i, _) => self.holds_placeholder(*i, depth + 1),
+            Ty::Struct(s) => self.is_placeholder(s) || self.structs[s as usize].args.iter().any(|&a| self.holds_placeholder(a, depth + 1)),
+            _ => false,
+        }
+    }
+
+    /// t is a placeholder itself (its bounds are what it implements)
+    pub fn is_placeholder_ty(&self, t: Ty) -> bool {
+        matches!(t, Ty::Struct(s) if self.is_placeholder(s))
     }
 
     /// What a placeholder's associated type is of: (the placeholder, the bound whose trait declares it, its name)

@@ -155,6 +155,9 @@ pub struct RgSt {
     pub assoc_regs: Vec<(u8, String, u32)>,
     /// A parameter's or the result's type is not followed: what the signature implies is not all known
     pub implied_partial: bool,
+    /// The function's where clauses on a type that is no type parameter (`&'max G: Get`): the type, its tree as
+    /// written, and the traits it is bounded by
+    pub where_trees: Vec<(Ty, RT, Vec<String>)>,
     /// Outlives relations among universal regions the function may assume (a: b)
     pub known: Vec<(u32, u32)>,
     /// Constraints a: b, with where they come from
@@ -4133,6 +4136,27 @@ impl Cx<'_> {
                                 }
                             }
                         }
+                    }
+                }
+            }
+        }
+        // (a callee's trait bound on a type parameter filled by a type that only the caller's where clause makes
+        // implement the trait (`impls_get::<&'min G>()` with `G: Get`, the caller's `&'max G: Get`, and no impl of Get
+        // for a reference): the type is the where clause's, and a trait's `Self` is invariant, so the regions are
+        // the same (variance/variance-*-self-trait-match.rs))
+        if !through_trait && !rg.where_trees.is_empty() {
+            for (gi, (_, bs)) in sig0.generics.iter().enumerate() {
+                let (Some(&Some(t)), Some(Some(at))) = (sol.get(gi), targs.get(gi)) else { continue };
+                for b in bs {
+                    let tr = b.split('<').next().unwrap_or(b).trim();
+                    let tr = tr.rsplit("::").next().unwrap_or(tr);
+                    let Some((_, wt, _)) = rg.where_trees.iter().find(|(wty, _, trs)| *wty == t && trs.iter().any(|x| x == tr)) else { continue };
+                    if wt.len() != at.len() || prog.implements(t, tr) {
+                        continue;
+                    }
+                    let pairs: Vec<(u32, u32)> = at.iter().copied().zip(wt.iter().copied()).collect();
+                    for (a, c) in pairs {
+                        rg.constrain(a, c, Var::Inv, sp);
                     }
                 }
             }

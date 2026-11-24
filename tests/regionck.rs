@@ -3877,3 +3877,16 @@ fn part25_path_type_arg_ref_to_placeholder() {
     let src = "trait Tr<'a> { type S; }\ntype SFor<A> = <A as Tr<'static>>::S;\nfn need<K: 'static>() {}\nfn f<A: Tr<'static>>() where SFor<A>: 'static {\n    need::<A::S>();\n}\nfn main() {}\n";
     assert_eq!(check(src), vec![]);
 }
+
+#[test]
+fn part25_where_clause_self_invariant() {
+    // (a callee's `G: Get` filled by a type only the caller's where clause makes implement Get (`&'max G: Get`, no
+    // impl for a reference): the type is the where clause's, and `Self` is invariant (variance/variance-*-self-trait-
+    // match.rs))
+    let src = "trait Get { fn get(&self); }\nfn get_min_from_max<'min, 'max, G>() where 'max: 'min, G: 'max, &'max G: Get {\n    impls_get::<&'min G>();\n}\nfn impls_get<G>() where G: Get {}\nfn main() {}\n";
+    let d = check(src);
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (the same lifetime, or two known to be equal: accepted, as in rustc)
+    let src = "trait Get { fn get(&self); }\nfn ok1<'a, G: 'a>() where &'a G: Get { impls_get::<&'a G>(); }\nfn ok2<'min, 'max, G: 'max>() where 'max: 'min, 'min: 'max, &'max G: Get { impls_get::<&'min G>(); }\nfn impls_get<G>() where G: Get {}\nfn main() {}\n";
+    assert_eq!(check(src), vec![]);
+}
