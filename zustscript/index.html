@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- Generated from crates/zustscript/docs/introduction.md -->
+<!-- Generated from Markdown in crates/zustscript/docs/ -->
 <html lang="ja">
 <head>
 <meta charset="utf-8">
@@ -103,6 +103,7 @@
 </code></pre>
 <p><code>$w</code> は読み込み済みの Wasm モジュールが公開する関数やメモリです。二つの <code>Point</code> は境界で四つの数値に展開されます。呼び出し側はいつもの <code>{ x, y }</code> を渡せばよく、点をバイト列に詰めるコードは要りません。生成された <code>pick.d.ts</code> でも、引数の型は元の <code>model.ts</code> の <code>Point</code> を参照します。</p>
 <p>境界を越える値によっては転送コストがかかります。たとえば数値の配列を JS から渡すと、その中身を Wasm のメモリにコピーします。地図上の数万点から最も近い点を探すなら、点ごとに距離を問い合わせる方法と、探索ループを丸ごと Wasm に置く方法とで、境界を越える回数が変わります。</p>
+<p>生成 Rust の借用や中間配列、JS と Wasm の間でコピーされる量を具体例から追えます。<a href="rust-costs.html">Rust から見る zustscript の変換コスト</a></p>
 <h2>同じ入力で両方を動かす</h2>
 <p>Rust（edition 2024 対応）と Node.js 24 以降を用意します。リポジトリを取得し、サンプル用のディレクトリに移動します。</p>
 <pre><code class="language-bash"><span class='function'>git</span> clone https://github.com/mizchi/zust.git

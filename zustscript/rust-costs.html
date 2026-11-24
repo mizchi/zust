@@ -1,0 +1,94 @@
+<!doctype html>
+<!-- Generated from Markdown in crates/zustscript/docs/ -->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rust から見る zustscript の変換コスト</title>
+<meta name="description" content="Rust でスライスを借用する関数も、TypeScript から呼ぶと配列全体のコピーを伴うことがあります。生成した .wasm.rs で分かるのは Wasm 内部の処理です。呼び出し全体のコストを知るには、同じディレクトリの .js にある引数と戻り値の変換も読みます。">
+<link rel="stylesheet" href="../style.css">
+<style>
+  article { max-width: 48rem; margin: auto; padding-block: clamp(32px, 7vw, 76px); font-size: 16px; line-height: 1.9; }
+  article h1 { line-height: 1.35; font-size: clamp(28px, 4.5vw, 42px); margin: 0 0 24px; }
+  article h2 { margin-top: 2.4em; margin-bottom: .6em; font-size: 23px; }
+  article p { margin: .9em 0; }
+  article p:has(> em:only-child):has(+ pre) { color: var(--muted); font-size: 14px; margin-bottom: 0; }
+  article p:has(> em:only-child) + pre { margin-top: .25em; }
+  pre { overflow-x: auto; padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); line-height: 1.6; }
+  pre code { background: none; padding: 0; font-size: 14px; }
+  pre .keyword, pre .constant, pre .variable.builtin { color: light-dark(#773590, #dda7ed); }
+  pre .attribute, pre .property { color: light-dark(#83490c, #eac48a); }
+  pre .type, pre .constructor { color: light-dark(#08616b, #7bdae4); }
+  pre .function { color: light-dark(#244da0, #95b8ff); }
+  pre .string { color: light-dark(#32642c, #a4d69c); }
+  pre .number { color: light-dark(#924017, #ffad87); }
+  pre .comment { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+<header class="bar"><div class="wrap bar-in">
+  <a class="brand" href="../"><span>z</span>ust</a>
+  <nav aria-label="サイト内"><a href="../">About</a><a href="./" aria-current="location">zustscript</a><a href="https://github.com/mizchi/zust">GitHub</a></nav>
+</div></header>
+<main class="wrap">
+<article>
+<h1>Rust から見る zustscript の変換コスト</h1>
+<p>Rust でスライスを借用する関数も、TypeScript から呼ぶと配列全体のコピーを伴うことがあります。生成した <code>.wasm.rs</code> で分かるのは Wasm 内部の処理です。呼び出し全体のコストを知るには、同じディレクトリの <code>.js</code> にある引数と戻り値の変換も読みます。</p>
+<h2>スライスを借りる前に、JS が配列をコピーする</h2>
+<p>内積を求める <code>dot</code> の生成 Rust は <code>fn zs_dot(a: &amp;[f64], b: &amp;[f64]) -&gt; f64</code> です。本体は二つのスライスを読み、スカラーを返します。ところが JS 側では、呼び出しのたびに次の処理を行います。これは生成された <code>numeric.js</code> のうち、引数を準備する部分です。</p>
+<pre><code class="language-javascript"><span class='keyword'>const</span> <span class='variable'>a$p</span> <span class='operator'>=</span> <span class='variable'>$w</span><span class='punctuation delimiter'>.</span><span class='function'>__zsc_alloc</span><span class='punctuation bracket'>(</span><span class='constructor'>BigInt</span><span class='punctuation bracket'>(</span><span class='variable'>a</span><span class='punctuation delimiter'>.</span><span class='property'>length</span> <span class='operator'>*</span> <span class='number'>8</span><span class='punctuation bracket'>)</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
+<span class='keyword'>new</span> <span class='constructor'>Float64Array</span><span class='punctuation bracket'>(</span><span class='variable'>$w</span><span class='punctuation delimiter'>.</span><span class='property'>memory</span><span class='punctuation delimiter'>.</span><span class='property'>buffer</span><span class='punctuation delimiter'>,</span> <span class='constructor'>Number</span><span class='punctuation bracket'>(</span><span class='variable'>a$p</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>,</span> <span class='variable'>a</span><span class='punctuation delimiter'>.</span><span class='property'>length</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>.</span><span class='function'>set</span><span class='punctuation bracket'>(</span><span class='variable'>a</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
+<span class='keyword'>const</span> <span class='variable'>b$p</span> <span class='operator'>=</span> <span class='variable'>$w</span><span class='punctuation delimiter'>.</span><span class='function'>__zsc_alloc</span><span class='punctuation bracket'>(</span><span class='constructor'>BigInt</span><span class='punctuation bracket'>(</span><span class='variable'>b</span><span class='punctuation delimiter'>.</span><span class='property'>length</span> <span class='operator'>*</span> <span class='number'>8</span><span class='punctuation bracket'>)</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
+<span class='keyword'>new</span> <span class='constructor'>Float64Array</span><span class='punctuation bracket'>(</span><span class='variable'>$w</span><span class='punctuation delimiter'>.</span><span class='property'>memory</span><span class='punctuation delimiter'>.</span><span class='property'>buffer</span><span class='punctuation delimiter'>,</span> <span class='constructor'>Number</span><span class='punctuation bracket'>(</span><span class='variable'>b$p</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>,</span> <span class='variable'>b</span><span class='punctuation delimiter'>.</span><span class='property'>length</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>.</span><span class='function'>set</span><span class='punctuation bracket'>(</span><span class='variable'>b</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
+</code></pre>
+<p>両方が 1,024 要素なら、入力だけで 16 KiB を転送します。同じ二つの配列で 100 回呼べば約 1.56 MiB です。これは要素数から数えた転送量です。関数が終わると JS 側の <code>finally</code> が二つの一時領域を解放します。重みなど同じ配列を使い回す場合は、外側の反復も Wasm に置くと、入力を一度渡してそこで複数回計算できます。<a href="https://github.com/mizchi/zust/blob/1061d587bc0188afc5edaf18a49588703266ca1e/crates/zustscript/examples/numeric.zsc#L4-L6">内積のソース</a> · <a href="https://github.com/mizchi/zust/blob/1061d587bc0188afc5edaf18a49588703266ca1e/crates/zustscript/src/wasm.rs#L290-L298">境界コードを生成する wasm.rs</a></p>
+<p><code>Float32Array</code> を受け取る SIMD 関数にも転送があります。<code>relu</code> は入力を <code>.set(xs)</code> でまとめて送り、同じ長さの出力を <code>.slice()</code> で JS に取り出します。1,024 要素なら往復 8 KiB です。<code>relu(dense(...))</code> のように JS でつなぐと、前段の出力がいったん JS に戻り、次の呼び出しで再び Wasm に入ります。現在の SIMD 関数の公開シグネチャには、Wasm 側の中間バッファを次の関数に渡すハンドルがありません。<a href="https://github.com/mizchi/zust/blob/1061d587bc0188afc5edaf18a49588703266ca1e/crates/zustscript/examples/ml.zsc#L26-L28">SIMD カーネルと呼び出し側の mlp</a></p>
+<h2>filter と map の間に Vec ができる</h2>
+<p><code>evens_squared</code> は配列から偶数を選んで二乗します。Rust のイテレータに慣れていると、最後に一度だけ結果を集めるように見える式です。</p>
+<pre><code class="language-zustscript"><span class='attribute'>@</span><span class='attribute'>wasm</span> <span class='keyword'>export</span> <span class='keyword'>fn</span> <span class='function'>evens_squared</span><span class='punctuation bracket'>(</span><span class='variable'>xs</span><span class='punctuation delimiter'>:</span> <span class='type'><span class='type'>Array</span></span>&lt;<span class='type builtin'>i32</span>&gt;<span class='punctuation bracket'>)</span> <span class='operator'>-&gt;</span> <span class='type'><span class='type'>Array</span></span>&lt;<span class='type builtin'>i32</span>&gt; <span class='punctuation bracket'>{</span>
+  <span class='variable'>xs</span><span class='punctuation delimiter'>.</span><span class='property'>filter</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>(</span><span class='variable'>x</span><span class='punctuation bracket'>)</span> <span class='operator'>=&gt;</span> <span class='variable'>x</span> <span class='operator'>%</span> <span class='number'>2</span> <span class='operator'>==</span> <span class='number'>0</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>.</span><span class='property'>map</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>(</span><span class='variable'>x</span><span class='punctuation bracket'>)</span> <span class='operator'>=&gt;</span> <span class='variable'>x</span> <span class='operator'>*</span> <span class='variable'>x</span><span class='punctuation bracket'>)</span>
+<span class='punctuation bracket'>}</span>
+</code></pre>
+<p>生成 Rust の本体を改行して読むと、最初の <code>collect</code> の直後に次の <code>iter</code> があります。</p>
+<pre><code class="language-rust"><span class='punctuation bracket'>(</span>xs<span class='punctuation delimiter'>.</span><span class='function'>iter</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>.</span><span class='function'>copied</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>)</span>
+    <span class='punctuation delimiter'>.</span><span class='function'>filter</span><span class='punctuation bracket'>(</span>|<span class='operator'>&amp;</span>x| <span class='punctuation bracket'>(</span><span class='punctuation bracket'>(</span>x<span class='punctuation bracket'>)</span><span class='punctuation delimiter'>.</span><span class='function'>wrapping_rem</span><span class='punctuation bracket'>(</span><span class='constant builtin'>2i32</span><span class='punctuation bracket'>)</span> == <span class='constant builtin'>0i32</span><span class='punctuation bracket'>)</span><span class='punctuation bracket'>)</span>
+    <span class='punctuation delimiter'>.</span><span class='function'>collect</span><span class='punctuation delimiter'>::</span><span class='punctuation bracket'>&lt;</span><span class='type'>Vec</span><span class='punctuation bracket'>&lt;</span><span class='type'>_</span><span class='punctuation bracket'>&gt;</span><span class='punctuation bracket'>&gt;</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>)</span><span class='punctuation bracket'>)</span>
+    <span class='punctuation delimiter'>.</span><span class='function'>iter</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>.</span><span class='function'>copied</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>)</span>
+    <span class='punctuation delimiter'>.</span><span class='function'>map</span><span class='punctuation bracket'>(</span>|x| <span class='punctuation bracket'>(</span>x<span class='punctuation bracket'>)</span><span class='punctuation delimiter'>.</span><span class='function'>wrapping_mul</span><span class='punctuation bracket'>(</span>x<span class='punctuation bracket'>)</span><span class='punctuation bracket'>)</span>
+    <span class='punctuation delimiter'>.</span><span class='function'>collect</span><span class='punctuation delimiter'>::</span><span class='punctuation bracket'>&lt;</span><span class='type'>Vec</span><span class='punctuation bracket'>&lt;</span><span class='type'>_</span><span class='punctuation bracket'>&gt;</span><span class='punctuation bracket'>&gt;</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'></span>
+</code></pre>
+<p>入力が N 個、そのうち偶数が K 個なら、最初の走査で K 個の中間配列を作り、二度目の走査でその K 個を読み直します。ここを手で最適化するなら、同じ公開関数を <code>export wasm fn</code> で書けます。引数、戻り値、本体は zustc が扱う Rust です。</p>
+<pre><code class="language-zustscript"><span class='keyword'>export</span> <span class='keyword'>wasm</span> <span class='keyword'>fn</span> <span class='function'>evens_squared</span><span class='punctuation bracket'>(</span><span class='variable'>xs</span><span class='punctuation delimiter'>:</span> <span class='operator'>&amp;</span><span class='punctuation bracket'>[</span><span class='type builtin'>i32</span><span class='punctuation bracket'>]</span><span class='punctuation bracket'>)</span> <span class='operator'>-&gt;</span> <span class='type'>Vec</span>&lt;<span class='type builtin'>i32</span>&gt; <span class='punctuation bracket'>{</span>
+    <span class='keyword'><span class='keyword'>let</span></span> <span class='keyword'><span class='keyword'>mut</span></span> <span class='variable'>out</span> <span class='operator'>=</span> <span class='variable'>Vec</span><span class='operator'>::</span><span class='variable'>new</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
+    <span class='keyword'><span class='keyword'>for</span></span> <span class='operator'>&amp;</span><span class='variable'>x</span> <span class='keyword'><span class='keyword'>in</span></span> <span class='variable'>xs</span> <span class='punctuation bracket'>{</span>
+        <span class='keyword'><span class='keyword'>if</span></span> <span class='variable'>x</span> <span class='operator'>%</span> <span class='number'>2</span> <span class='operator'>==</span> <span class='number'>0</span> <span class='punctuation bracket'>{</span>
+            <span class='variable'>out</span><span class='punctuation delimiter'>.</span><span class='variable'>push</span><span class='punctuation bracket'>(</span><span class='variable'>x</span><span class='punctuation delimiter'>.</span><span class='variable'>wrapping_mul</span><span class='punctuation bracket'>(</span><span class='variable'>x</span><span class='punctuation bracket'>)</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
+        <span class='punctuation bracket'>}</span>
+    <span class='punctuation bracket'>}</span>
+    <span class='variable'>out</span>
+<span class='punctuation bracket'>}</span>
+</code></pre>
+<p>このループは偶数を見つけた時点で二乗し、結果の <code>Vec</code> に直接追加します。<code>wrapping_mul</code> は、二乗が <code>i32</code> の範囲を超えたときも元の関数と同じ値を返すために使っています。JS との入出力には引き続きコピーがかかります。コンパイラ側でこの中間配列を省くなら、<code>lower.rs</code> の <code>B::Filter</code> と <code>B::Map</code> がそれぞれ <code>collect</code> を生成する箇所が出発点です。<a href="https://github.com/mizchi/zust/blob/1061d587bc0188afc5edaf18a49588703266ca1e/crates/zustscript/src/lower.rs#L1528-L1542">変換ルールの実装</a></p>
+<h2>借用した戻り値の寿命は Wasm の外に出せない</h2>
+<p><code>longer(a, b)</code> は長い方の配列を返します。Wasm 内で呼ぶときは、生成された関数の型が <code>fn zs_longer&lt;'a&gt;(a: &amp;'a [f64], b: &amp;'a [f64]) -&gt; &amp;'a [f64]</code> なので、選んだ側をそのまま借用できます。一方、JS に公開するための Rust ラッパーは次のようになります。</p>
+<pre><code class="language-rust"><span class='keyword'>fn</span> <span class='function'>__zs_js_zs_longer</span><span class='punctuation bracket'>(</span><span class='variable parameter'>a</span><span class='punctuation delimiter'>:</span> <span class='operator'>&amp;</span><span class='punctuation bracket'>[</span><span class='type builtin'>f64</span><span class='punctuation bracket'>]</span><span class='punctuation delimiter'>,</span> <span class='variable parameter'>b</span><span class='punctuation delimiter'>:</span> <span class='operator'>&amp;</span><span class='punctuation bracket'>[</span><span class='type builtin'>f64</span><span class='punctuation bracket'>]</span><span class='punctuation bracket'>)</span> -&gt; <span class='type'>Vec</span><span class='punctuation bracket'>&lt;</span><span class='type builtin'>f64</span><span class='punctuation bracket'>&gt;</span> <span class='punctuation bracket'>{</span>
+    <span class='function'>zs_longer</span><span class='punctuation bracket'>(</span>a<span class='punctuation delimiter'>,</span> b<span class='punctuation bracket'>)</span><span class='punctuation delimiter'>.</span><span class='function'>to_vec</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>)</span>
+<span class='punctuation bracket'>}</span>
+</code></pre>
+<p>ラッパーが選んだスライスを所有する <code>Vec</code> に移すためにコピーし、JS 側がその中身をさらに新しい配列へコピーします。長さや合計だけが必要なら、その計算まで Wasm 側に置いて数値を返せます。単に既存の二つの JS 配列から長い方を選ぶ用途なら、通常の <code>export fn</code> で長さを比べれば、要素を転送せずに済みます。<a href="https://github.com/mizchi/zust/blob/1061d587bc0188afc5edaf18a49588703266ca1e/crates/zustscript/examples/owned.zsc#L74-L76">longer と借用の例</a> · <a href="https://github.com/mizchi/zust/blob/main/crates/zustscript/src/own.rs">所有権解析</a></p>
+<h2>手元で変換結果を読む</h2>
+<p>リポジトリのルートで次を実行すると、上の例と同じコンパイラ出力を確認できます。Rust と JS を並べて開き、関数名で検索すると、コピーが本体・公開ラッパー・JS のどこにあるかを追えます。</p>
+<pre><code class="language-bash"><span class='function'>cargo</span> build <span class='constant'>--release</span> <span class='constant'>--bin</span> zustc
+<span class='keyword'>for</span> <span class='property'>name</span> <span class='keyword'>in</span> numeric owned; <span class='keyword'>do</span>
+  <span class='function'>cargo</span> run <span class='constant'>--manifest-path</span> crates/zustscript/Cargo.toml <span class='constant'>--</span> \
+    <span class='string'>&quot;crates/zustscript/examples/<span class='operator'>$</span><span class='property'>name</span>.zsc&quot;</span> \
+    <span class='constant'>--zustc</span> ./target/release/zustc <span class='constant'>-o</span> out/costs
+<span class='keyword'>done</span>
+<span class='function'>rg</span> <span class='constant'>-n</span> <span class='string'>&#39;zs_evens_squared|zs_longer|to_vec&#39;</span> out/costs/*.wasm.rs
+<span class='function'>rg</span> <span class='constant'>-A12</span> <span class='string'>&#39;function (dot|longer)\(&#39;</span> out/costs/*.js
+</code></pre>
+<p>実行時間を比較するときは、同じ入力で JS から公開関数を呼ぶと転送も測定に入ります。<code>@wasm</code> で書いた元の例は <code>--all-js</code> で JS 版も生成できます。手書きの <code>wasm fn</code> は Rust 本体を Wasm として実行します。<a href="https://github.com/mizchi/zust/blob/main/crates/zustscript/tests/numeric_bench.mjs">数値計算のベンチマーク</a> · <a href="index.html">zustscript 入門に戻る</a></p>
+</article>
+</main>
+</body>
+</html>
