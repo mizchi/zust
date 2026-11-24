@@ -740,6 +740,7 @@ compile-fail	borrowck/access-mode-in-closures.rs
 check-pass	borrowck/alias-liveness/escaping-bounds.rs
 check-pass	borrowck/alias-liveness/gat-static.rs
 check-pass	borrowck/alias-liveness/higher-ranked.rs
+compile-fail	borrowck/alias-liveness/name-region.rs
 check-pass	borrowck/alias-liveness/opaque-capture.rs
 check-pass	borrowck/alias-liveness/rpit-static.rs
 check-pass	borrowck/alias-liveness/rpitit-static.rs
@@ -1700,6 +1701,7 @@ compile-fail	const-generics/min_const_generics/invalid-patterns.rs
 compile-fail	const-generics/min_const_generics/macro-fail.rs
 compile-fail	const-generics/min_const_generics/self-ty-in-const-1.rs
 run-pass	const-generics/min_const_generics/type_and_const_defaults.rs
+compile-fail	const-generics/mistyped_const_in_pat.rs
 compile-fail	const-generics/not_wf_param_in_rpitit.rs
 compile-fail	const-generics/parent_generics_of_nested_in_default.rs
 compile-fail	const-generics/parser-error-recovery/issue-89013-no-assoc.rs
@@ -1710,6 +1712,7 @@ compile-fail	const-generics/projection-as-arg-const.rs
 run-pass	const-generics/promotion.rs
 compile-fail	const-generics/sneaky-array-repeat-expr.rs
 check-pass	const-generics/trait-const-args.rs
+compile-fail	const-generics/try-from-with-const-genericsrs-98299.rs
 run-pass	const-generics/type-after-const-ok.rs
 run-pass	const-generics/type-dependent/issue-61936.rs
 run-pass	const-generics/type-dependent/issue-63695.rs
@@ -2211,6 +2214,7 @@ run-pass	drop/drop-trait-generic.rs
 run-pass	drop/drop-trait.rs
 run-pass	drop/drop-uninhabited-enum.rs
 run-pass	drop/drop-value-by-method.rs
+run-pass	drop/drop-with-trait-bound-calls-method-on-self.rs
 run-pass	drop/drop-with-type-ascription-1.rs
 run-pass	drop/drop-with-type-ascription-2.rs
 compile-fail	drop/drop_elaboration_with_errors2.rs
@@ -4504,6 +4508,7 @@ run-pass	mir/mir_match_arm_guard.rs
 run-pass	mir/mir_match_test.rs
 run-pass	mir/mir_small_agg_arg.rs
 run-pass	mir/mir_static_subtype.rs
+run-pass	mir/mir_struct_with_assoc_ty.rs
 run-pass	mir/mir_temp_promotions.rs
 run-pass	mir/mir_void_return.rs
 run-pass	mir/mir_void_return_2.rs
@@ -4863,7 +4868,10 @@ check-pass	nll/ty-outlives/issue-53789-1.rs
 check-pass	nll/ty-outlives/issue-53789-2.rs
 check-pass	nll/ty-outlives/issue-55756.rs
 check-pass	nll/ty-outlives/projection-body.rs
+compile-fail	nll/ty-outlives/projection-implied-bounds.rs
+compile-fail	nll/ty-outlives/projection-where-clause-env-wrong-bound.rs
 check-pass	nll/ty-outlives/projection-where-clause-env.rs
+compile-fail	nll/ty-outlives/projection-where-clause-none.rs
 check-pass	nll/ty-outlives/projection-where-clause-trait.rs
 compile-fail	nll/ty-outlives/ty-param-fn-body.rs
 compile-fail	nll/ty-outlives/ty-param-fn.rs
@@ -6063,7 +6071,9 @@ compile-fail	regions/regions-addr-of-self.rs
 compile-fail	regions/regions-addr-of-upvar-self.rs
 compile-fail	regions/regions-adjusted-lvalue-op.rs
 compile-fail	regions/regions-assoc-type-in-supertrait-outlives-container.rs
+compile-fail	regions/regions-assoc-type-region-bound-in-trait-not-met.rs
 run-pass	regions/regions-assoc-type-region-bound.rs
+compile-fail	regions/regions-assoc-type-static-bound-in-trait-not-met.rs
 run-pass	regions/regions-assoc-type-static-bound.rs
 run-pass	regions/regions-borrow-at.rs
 run-pass	regions/regions-borrow-evec-fixed.rs
@@ -6108,6 +6118,7 @@ compile-fail	regions/regions-free-region-ordering-caller1.rs
 compile-fail	regions/regions-free-region-ordering-incorrect.rs
 run-pass	regions/regions-free-region-outlives-static-outlives-free-region.rs
 compile-fail	regions/regions-glb-free-free.rs
+compile-fail	regions/regions-implied-bounds-projection-gap-1.rs
 check-pass	regions/regions-implied-bounds-projection-gap-2.rs
 check-pass	regions/regions-implied-bounds-projection-gap-3.rs
 check-pass	regions/regions-implied-bounds-projection-gap-4.rs
@@ -7387,6 +7398,7 @@ compile-fail	traits/error-reporting/ambiguity-in-dropck-err-reporting.rs
 compile-fail	traits/error-reporting/incomplete-partial-ord-impl.rs
 compile-fail	traits/eval-caching-error-region.rs
 compile-fail	traits/explicit-reference-cast-unrelated-leaf.rs
+compile-fail	traits/explicit-reference-cast.rs
 run-pass	traits/false-ambiguity-where-clause-builtin-bound.rs
 check-pass	traits/fn-pointer/hrtb-assoc-fn-traits-28994.rs
 compile-fail	traits/fn-pointer/suggest-wrap-parens-method.rs
@@ -8072,11 +8084,14 @@ compile-fail	variance/type-resolve-error-two-structs-deep.rs
 compile-fail	variance/variance-cell-is-invariant.rs
 compile-fail	variance/variance-contravariant-arg-object.rs
 compile-fail	variance/variance-contravariant-arg-trait-match.rs
+compile-fail	variance/variance-contravariant-self-trait-match.rs
 compile-fail	variance/variance-covariant-arg-object.rs
 compile-fail	variance/variance-covariant-arg-trait-match.rs
+compile-fail	variance/variance-covariant-self-trait-match.rs
 run-pass	variance/variance-intersection-of-ref-and-opt-ref.rs
 compile-fail	variance/variance-invariant-arg-object.rs
 compile-fail	variance/variance-invariant-arg-trait-match.rs
+compile-fail	variance/variance-invariant-self-trait-match.rs
 compile-fail	variance/variance-issue-20533.rs
 run-pass	variance/variance-iterators-in-libcore.rs
 compile-fail	variance/variance-regions-unused-direct.rs
@@ -8090,6 +8105,7 @@ check-pass	variance/variance-use-covariant-struct-2.rs
 compile-fail	variance/variance-use-invariant-struct-1.rs
 compile-fail	variants/variant-result-noresult-used-as-type.rs
 compile-fail	variants/variant-used-as-type.rs
+compile-fail	wf/conflicting-impls.rs
 compile-fail	wf/ice-hir-wf-check-anon-const-issue-122199.rs
 compile-fail	wf/ice-hir-wf-issue-135341.rs
 compile-fail	wf/ice-wf-missing-span-in-error-130012.rs
