@@ -366,10 +366,10 @@ pub fn compile(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_b
 
 #[allow(clippy::too_many_arguments)]
 fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_base: u32, inl: &Inline, force_rg: bool, rerun_out: &mut bool) -> R<(Compiled, Vec<u32>)> {
-    let (sig, env, body_id, fnptr, inst_args, clo_rg, lenient, recheck, fnmut_ret) = {
+    let (sig, env, body_id, fnptr, inst_args, clo_rg, lenient, recheck, fnmut_ret, where_bound) = {
         let g = insts.lock().unwrap();
         let b = g.body_of(id);
-        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned(), g.lenient, g.recheck.contains(&id), g.kind_free.contains(&b))
+        (g.sig(prog, id).clone(), g.env(prog, id), b, g.get(id).is_some_and(|i| i.fnptr), g.get(id).map(|i| i.args.clone()), g.closure_rg.get(&b).cloned(), g.lenient, g.recheck.contains(&id), g.kind_free.contains(&b), g.where_bound.contains(&id))
     };
     // (zustc check's last round: instances with placeholders for type parameters, and those they request (only
     // there are placeholders): see below)
@@ -445,6 +445,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         ret: sig.ret,
         is_main: sig.is_main,
         user_code,
+        int_as_float: 0,
         raw_ref: 0,
         const_hint: None,
         // (a closure's body is checked too: one written inside `unsafe { }` comes wrapped in one, see synth_closure)
@@ -624,7 +625,30 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
             || prog.use_names.contains(n);
         !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_') && !e.contains("(unsupported path)") && !item
     };
-    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free) && !undeclared(e)) {
+    // (E0599: a method of a parameter with no bounds but markers (`fn f<T>(t: T) { t.clone() }`), and no where clause:
+    // no trait gives it one, unless a blanket impl does (`impl<T> Tr for T`, std's `Into`), whatever the parameter is)
+    let unbounded_method = |e: &str| -> Option<String> {
+        if !f.sig.generics.preds.is_empty() || where_bound {
+            return None;
+        }
+        let i = e.find("no method named `")?;
+        let r = &e[i + 17..];
+        let m = r.split('`').next()?;
+        let rest = r[m.len() + 1..].strip_prefix(" found for ")?;
+        let rest = rest.strip_prefix("struct ").unwrap_or(rest);
+        let t = rest.strip_prefix('`')?.split('`').next()?;
+        let n = t.strip_suffix('#')?;
+        let marker = |b: &String| b.starts_with('\'') || matches!(b.as_str(), "Sized" | "?Sized" | "Send" | "Sync" | "Unpin");
+        let unbounded = cx.rg.inst_args.iter().any(|&a| matches!(a, Ty::Struct(s) if prog.structs[s as usize].name == t && prog.structs[s as usize].placeholder.as_ref().is_some_and(|bs| bs.iter().all(marker))));
+        let blanket = prog.blanket.contains_key(m) || matches!(m, "into" | "try_into" | "borrow" | "borrow_mut" | "type_id");
+        (unbounded && !blanket).then(|| format!("{}no method named `{m}` found for type parameter `{n}` in the current scope (E0599)", &e[..i]))
+    };
+    let r = match r {
+        Err(e) if placeholder => Err(unbounded_method(&e).unwrap_or(e)),
+        r => r,
+    };
+    let held = |e: &str| e.ends_with("in the current scope (E0599)") && e.contains("found for type parameter `");
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free) && !undeclared(e) && !held(e)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }
@@ -1049,6 +1073,9 @@ pub struct Cx<'p> {
     pub ret: Ty,
     pub is_main: bool,
     pub user_code: bool,
+    /// The text of the last integer literal reported where a float was expected (its address: the operator around
+    /// it reports rustc's E0277 instead)
+    pub int_as_float: usize,
     /// > 0 inside `unsafe { }`, an `unsafe fn`, or code not checked for E0133 (the prelude)
     pub unsafe_ok: u32,
     /// > 0 under `&raw const` / `&raw mut` / `addr_of!` (a raw reference to a `static mut` is safe)

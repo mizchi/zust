@@ -1960,3 +1960,99 @@ fn copy_with_a_field_that_is_not() {
     let ok = "#[derive(Clone, Copy)]\nstruct Ok1<T>(T, u8, &'static str, [u16; 3], (u8, char), fn(u8) -> u8, *const u8);\n#[derive(Clone)]\nstruct W<S>(S);\nimpl<S: Copy> Copy for W<S> {}\n#[derive(Clone, Copy)]\nenum E2 { A(u8), B { x: Option<u8> }, C }\n#[derive(Clone, Copy)]\nstruct P(std::marker::PhantomData<String>, std::mem::ManuallyDrop<u8>, std::ops::RangeTo<u8>, core::cmp::Ordering);\n#[derive(Clone)]\nunion U {\n    a: u8,\n}\nimpl Copy for U {}\nfn main() {}\n";
     assert_eq!(first(ok), None, "Copy");
 }
+
+#[test]
+fn gated_cfg_names() {
+    // (E0658: a `cfg` predicate of a name behind a feature gate, at the name, unless the crate enables the feature;
+    // each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, n: &str| Some((l, c, format!("`cfg({n})` is experimental and subject to change (E0658)")));
+    assert_eq!(first("#[cfg(not(sanitize = \"thread\"))]\nfn main() {}\n"), e(1, 11, "sanitize"), "attribute");
+    assert_eq!(first("fn main() {\n    let _ = cfg!(overflow_checks);\n}\n"), e(2, 18, "overflow_checks"), "cfg!");
+    assert_eq!(
+        first("#[cfg_attr(target(os = \"linux\"), allow(unused))]\nfn main() {}\n"),
+        Some((1, 12, "compact `cfg(target(..))` is experimental and subject to change (E0658)".to_string())),
+        "compact target"
+    );
+    // (enabled, a value of a name that is not gated, and an attribute of what a cfg_attr puts on the item)
+    assert_eq!(first("#![feature(cfg_overflow_checks)]\nfn main() {\n    let _ = cfg!(overflow_checks);\n}\n"), None, "enabled");
+    assert_eq!(first("#[cfg(feature = \"version\")]\nfn f() {}\n#[cfg_attr(unix, doc = \"sanitize\")]\nfn main() {}\n"), None, "not gated");
+}
+
+#[test]
+fn integer_literal_where_a_float_is_expected() {
+    // (an unsuffixed integer literal is never a float: E0308 where a float is expected, E0277 for arithmetic with a
+    // float, at the operator; each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    assert_eq!(first("fn main() {\n    let y: f64 = 2;\n    println!(\"{y}\");\n}\n"), e(2, 18, "mismatched types: expected `f64`, found integer"), "let");
+    assert_eq!(first("fn g(x: f32) -> f32 { x }\nfn main() {\n    let z = g(3);\n    println!(\"{z}\");\n}\n"), e(3, 15, "mismatched types: expected `f32`, found integer"), "argument");
+    assert_eq!(first("fn f(x: f32) -> f32 {\n    x + 100\n}\nfn main() {}\n"), e(2, 7, "cannot add `{integer}` to `f32` (E0277)"), "x + 100");
+    assert_eq!(first("fn f(x: f64) -> f64 {\n    100 + x\n}\nfn main() {}\n"), e(2, 9, "cannot add `f64` to `{integer}` (E0277)"), "100 + x");
+    assert_eq!(first("fn g(mut x: f64) -> f64 {\n    x += 1;\n    x\n}\nfn main() {}\n"), e(2, 7, "cannot add-assign `{integer}` to `f64` (E0277)"), "x += 1");
+    // (a float literal, or one with a float suffix, is one)
+    assert_eq!(first("fn main() {\n    let a: f64 = 2.0 + 1e3 + 2f64;\n    let b: f32 = 3.;\n    println!(\"{a} {b}\");\n}\n"), None, "floats");
+}
+
+#[test]
+fn unsized_where_sized_is_needed() {
+    // (E0277: an unsized type written where a Sized one is needed: an argument of std's containers or of a type of the
+    // program's whose parameter does not say `?Sized`, an enum variant's field, a struct's field before the last; each
+    // expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, t: &str| Some((l, c, format!("the size for values of type `{t}` cannot be known at compilation time (E0277)")));
+    assert_eq!(first("fn iceman(c: Vec<[i32]>) {}\nfn main() {}\n"), e(1, 14, "[i32]"), "Vec");
+    assert_eq!(first("trait Foo {}\nimpl Foo for Option<[u8]> {}\nfn main() {}\n"), e(2, 14, "[u8]"), "impl");
+    assert_eq!(first("struct A<T>(T);\nstruct B(A<[u8]>);\nfn main() {}\n"), e(2, 10, "[u8]"), "a type of the program's");
+    assert_eq!(first("enum E {\n    V([Box<E>]),\n}\nfn main() {}\n"), e(2, 7, "[Box<E>]"), "variant");
+    assert_eq!(first("struct S<X: ?Sized> {\n    f1: X,\n    f2: isize,\n}\nfn main() {}\n"), e(2, 9, "X"), "field before the last");
+    // (a parameter that says `?Sized`, std's that allow it, the last field)
+    let ok = "struct W<T: ?Sized>(Box<T>);\nstruct P<T: ?Sized> {\n    a: u8,\n    b: T,\n}\nfn f(_: W<[u8]>, _: Box<str>, _: std::rc::Rc<dyn Fn()>, _: &P<str>) {}\nfn main() {}\n";
+    assert_eq!(first(ok), None, "Sized");
+}
+
+#[test]
+fn method_of_an_unbounded_type_parameter() {
+    // (E0599: a method of a type parameter with no bounds but markers, in a fn nothing instantiates; each expected line
+    // and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, format!("no method named `{m}` found for type parameter `T` in the current scope (E0599)")));
+    assert_eq!(first("fn foo<T>(t: T) {\n    t.clone();\n}\nfn main() {}\n"), e(2, 7, "clone"), "clone");
+    // (behind a reference: rustc names `&T`, zustc the parameter; the place is the same)
+    assert_eq!(first("fn foo<T: Send + 'static>(x: &T) {\n    x.method();\n}\nfn main() {}\n").map(|d| (d.0, d.1)), Some((2, 7)), "behind a reference");
+    // (a blanket impl's method, std's `into`, a where clause of the impl's)
+    assert_eq!(first("trait Ext { fn ext(&self) {} }\nimpl<T> Ext for T {}\nfn foo<T>(t: T) -> u8 {\n    t.ext();\n    let _x: T = t.into();\n    0\n}\nfn main() {}\n"), None, "blanket");
+    assert_eq!(
+        first("trait Trait { fn method(self) -> isize; }\nstruct W<T> { field: T }\nimpl<'a, T> Trait for &'a W<T> where &'a T: Trait {\n    fn method(self) -> isize {\n        let r: &'a T = &self.field;\n        r.method()\n    }\n}\nfn main() {}\n"),
+        None,
+        "where clause"
+    );
+}
+
+#[test]
+fn attribute_paths_that_resolve_to_nothing() {
+    // (E0433: an attribute written as a path whose first segment is no tool and no module, or a module's that has no
+    // such attribute; each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, format!("{m} (E0433)")));
+    assert_eq!(first("#[foo::bar]\nfn main() {}\n"), e(1, 3, "cannot find module or crate `foo` in this scope"), "unknown");
+    assert_eq!(first("mod existent {}\n\n#[existent::nonexistent]\nfn main() {}\n"), e(3, 13, "cannot find `nonexistent` in `existent`"), "a module's");
+    assert_eq!(first("mod rustfmt {}\n\n#[rustfmt::skip]\nfn main() {}\n"), e(3, 12, "cannot find `skip` in `rustfmt`"), "a module shadows a tool");
+    // (a tool's attribute)
+    assert_eq!(first("#[rustfmt::skip]\n#[allow(clippy::all)]\n#[diagnostic::on_unimplemented(message = \"x\")]\ntrait T {}\nfn main() {}\n"), None, "tools");
+}

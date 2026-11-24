@@ -3440,6 +3440,13 @@ impl Cx<'_> {
                     || matches!(&l, Lit::Int(i) if matches!(i.suffix(), "f32" | "f64"))
                     || (matches!(&l, Lit::Int(i) if i.suffix().is_empty()) && expected.is_some_and(|t| t.is_float())) =>
             {
+                // (an integer literal is never a float: `let y: f64 = 2;` is rustc's E0308, in the program's own code)
+                if let (Lit::Int(i), Some(t), true) = (&l, expected, self.user_code) {
+                    if i.suffix().is_empty() {
+                        self.int_as_float = text.as_ptr() as usize;
+                        return err(SP, format!("mismatched types: expected `{}`, found integer", self.prog.tn(t)));
+                    }
+                }
                 let (digits, suffix) = match &l {
                     Lit::Float(f) => (f.base10_digits().to_string(), f.suffix().to_string()),
                     Lit::Int(i) => (i.base10_digits().to_string(), i.suffix().to_string()),

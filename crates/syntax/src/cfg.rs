@@ -1304,6 +1304,56 @@ fn crate_cfg_off(src: &str, c: &CfgSet) -> Option<usize> {
     }
 }
 
+/// The names of `cfg` predicates behind a feature gate (rustc 1.100's GATED_CFGS), with the feature
+const GATED_CFGS: &[(&str, &str)] = &[
+    ("overflow_checks", "cfg_overflow_checks"),
+    ("ub_checks", "cfg_ub_checks"),
+    ("contract_checks", "cfg_contract_checks"),
+    ("target_thread_local", "cfg_target_thread_local"),
+    ("target_has_atomic_equal_alignment", "cfg_target_has_atomic_equal_alignment"),
+    ("target_has_atomic_load_store", "cfg_target_has_atomic"),
+    ("sanitize", "cfg_sanitize"),
+    ("version", "cfg_version"),
+    ("relocation_model", "cfg_relocation_model"),
+    ("sanitizer_cfi_generalize_pointers", "cfg_sanitizer_cfi"),
+    ("sanitizer_cfi_normalize_integers", "cfg_sanitizer_cfi"),
+    ("fmt_debug", "fmt_debug"),
+    ("emscripten_wasm_eh", "cfg_emscripten_wasm_eh"),
+    ("target_has_reliable_f16", "cfg_target_has_reliable_f16_f128"),
+    ("target_has_reliable_f16_math", "cfg_target_has_reliable_f16_f128"),
+    ("target_has_reliable_f128", "cfg_target_has_reliable_f16_f128"),
+    ("target_has_reliable_f128_math", "cfg_target_has_reliable_f16_f128"),
+    ("target_object_format", "cfg_target_object_format"),
+    ("target_has_threads", "cfg_target_has_threads"),
+];
+
+/// The first name of a predicate behind a feature gate the crate does not enable (`#![feature(..)]` in `src`): its
+/// offset in `p` and rustc's message. `target(..)` is the compact form, `cfg_target_compact`'s
+fn gated_cfg(p: &str, src: &str) -> Option<(usize, String)> {
+    let b = p.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| &p[toks[k].1..toks[k].2];
+    let enabled = |f: &str| {
+        src.match_indices("#![feature(").any(|(k, _)| src[k + 11..].split(')').next().is_some_and(|l| l.split(',').any(|x| x.trim() == f)))
+    };
+    for k in 0..toks.len() {
+        if toks[k].0 != 0 || (k > 0 && tk(k - 1) == "=") {
+            continue;
+        }
+        let name = tk(k);
+        let call = k + 1 < toks.len() && tk(k + 1) == "(";
+        if name == "target" && call && !enabled("cfg_target_compact") {
+            return Some((toks[k].1, "compact `cfg(target(..))` is experimental and subject to change".into()));
+        }
+        if let Some((_, f)) = GATED_CFGS.iter().find(|g| g.0 == name) {
+            if !enabled(f) {
+                return Some((toks[k].1, format!("`cfg({name})` is experimental and subject to change")));
+            }
+        }
+    }
+    None
+}
+
 /// The first `#[cfg(..)]`, `#[cfg_attr(..)]` or `cfg!(..)` of a source whose predicate rustc cannot read (E0539 /
 /// E0565 / E0805): not one in a comment or a string on its line, nor in a macro's pattern (`$`). `kept` is the text
 /// configured by `c` (cfg::strip, in place): rustc reads none of what a false `cfg` takes away, so one in an item,
@@ -1567,6 +1617,16 @@ pub fn malformed_cfg(src: &str, kept: Option<&str>, c: &CfgSet) -> Option<String
             continue;
         }
         let entries = attr_entries(&inner);
+        // (E0658: a predicate of a name behind a feature gate, `cfg(overflow_checks)`, at the name; read where rustc
+        // reads the predicate, the first entry: a `cfg_attr`'s attributes are not predicates)
+        if let Some(&p) = entries.first().filter(|_| cfg_check(entries[0]).is_ok()) {
+            if let Some((off, msg)) = gated_cfg(p, src) {
+                let pos = open + 1 + (p.as_ptr() as usize - inner.as_ptr() as usize) + off;
+                let line = src[..pos].matches('\n').count() + 1;
+                let col = pos - src[..pos].rfind('\n').map_or(0, |n| n + 1) + 1;
+                return Some(format!("{line}:{col}: {msg} (E0658)"));
+            }
+        }
         let checked = match name {
             "cfg_attr" => cfg_attr_check(&entries, c),
             // (one pattern, with or without a trailing comma: `cfg!(unix,)`)

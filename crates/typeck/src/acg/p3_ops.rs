@@ -14,6 +14,36 @@ impl Cx<'_> {
         if let Expr::Binary(_, _, _, sp) | Expr::AssignOp(_, _, _, sp) = e { sp.start } else { SP }
     }
 
+    /// E0277 for arithmetic of a float and an unsuffixed integer literal (`x + 100` with `x: f32`), where the literal
+    /// `lit` (an operand of `e`) reported a mismatch when read as the float; else the error `m` as it is. rustc points
+    /// at the operator
+    fn int_float_op(&self, e: &Expr, lit: &Expr, m: String) -> String {
+        let (Expr::Binary(op, l, r, sp) | Expr::AssignOp(op, l, r, sp)) = e else { return m };
+        let at_lit = matches!(strip_paren(lit), Expr::Lit(t, _) if t.as_ptr() as usize == self.int_as_float);
+        if !at_lit || !matches!(op.as_str(), "+" | "-" | "*" | "/" | "%") {
+            return m;
+        }
+        let float = |x: &Expr| self.peek(x).filter(|t| t.is_float()).map(|t| self.prog.tn(t));
+        let right = std::ptr::eq(lit, &**r);
+        let Some((lt, rt)) = (if right { float(l).map(|t| (t, "{integer}".to_string())) } else { float(r).map(|t| ("{integer}".to_string(), t)) }) else {
+            return m;
+        };
+        let (l, r) = (lt, rt);
+        let msg = match (op.as_str(), matches!(e, Expr::AssignOp(..))) {
+            ("+", false) => format!("cannot add `{r}` to `{l}`"),
+            ("-", false) => format!("cannot subtract `{r}` from `{l}`"),
+            ("*", false) => format!("cannot multiply `{l}` by `{r}`"),
+            ("/", false) => format!("cannot divide `{l}` by `{r}`"),
+            ("%", false) => format!("cannot calculate the remainder of `{l}` divided by `{r}`"),
+            ("+", true) => format!("cannot add-assign `{r}` to `{l}`"),
+            ("-", true) => format!("cannot subtract-assign `{r}` from `{l}`"),
+            ("*", true) => format!("cannot multiply-assign `{l}` by `{r}`"),
+            ("/", true) => format!("cannot divide-assign `{l}` by `{r}`"),
+            _ => format!("cannot calculate and assign the remainder of `{l}` divided by `{r}`"),
+        };
+        self.at(sp.at, format!("{msg} (E0277)"))
+    }
+
     /// rustc's E0369 message for `l op r` (a placeholder `T#` shown as `T`, an unsuffixed literal as `{integer}` /
     /// `{float}`, an unknown type as `_`)
     fn cannot_op(&self, op: &str, lt: Ty, right: &Expr) -> String {
@@ -409,7 +439,7 @@ impl Cx<'_> {
             let rhint = if matches!(op, "<<" | ">>") { self.peek(right) } else { lt1 };
             // (a literal takes the place's type, whatever type inference recorded for it: `c[0] *= 10` with c a
             // chunk whose element type inference did not reach)
-            let (r, rt) = self.expr(right, rhint.or(lt1))?;
+            let (r, rt) = self.expr(right, rhint.or(lt1)).map_err(|m| self.int_float_op(e, right, m))?;
             let p = match lhs {
                 Some(p) => p,
                 None => self.place(left)?,
@@ -458,7 +488,7 @@ impl Cx<'_> {
             t => t,
         };
         let hint = deref_num(hint);
-        let (l, lt) = self.operand(left, hint, cmp)?;
+        let (l, lt) = self.operand(left, hint, cmp).map_err(|m| self.int_float_op(e, left, m))?;
         let Some(mut l) = l else {
             return Ok((None, Ty::Never));
         };
@@ -484,7 +514,7 @@ impl Cx<'_> {
         // (文字列・バイト列のリテラルは自分の型 (`v == b"crate"` の v: Vec<u8> を期待型にしない))
         let lit_str = matches!(strip_paren(right), Expr::Lit(t, _) if matches!(lit::lit(t), Some(Lit::ByteStr(_) | Lit::Str(_))));
         let rhint = if lit_str && matches!(self.strip_refs(lt), Ty::Struct(_)) { None } else { rhint.or(Some(lt)) };
-        let (r, rt) = self.operand(right, rhint, cmp)?;
+        let (r, rt) = self.operand(right, rhint, cmp).map_err(|m| self.int_float_op(e, right, m))?;
         let Some(r) = r else {
             return Ok((None, Ty::Never));
         };

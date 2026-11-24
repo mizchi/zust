@@ -1317,6 +1317,13 @@ impl Session2 {
                     return Err(e);
                 }
             }
+            // (E0433: an outer attribute's path whose first segment is no tool and no module of the crate's
+            // (`#[foo::bar]`), or a module's that has no such attribute (`#[existent::nonexistent]`))
+            if head.starts_with("#[") {
+                if let Some(e) = attr_path_error(&src, src0, it.start, leading_attrs(head).len(), it.line) {
+                    return Err(e);
+                }
+            }
             // (an unstable ABI: `extern "rust-cold" fn`)
             // (`extern` among the item's first names, `pub unsafe extern "C" fn`, from the lexer's identifiers: no
             // search of its text)
@@ -1905,6 +1912,9 @@ impl Session2 {
             if let Some(e) = wf_error(&prog, &sums, &src, &items, user) {
                 return Err(e);
             }
+        }
+        if let Some(e) = sized_error(&sums, &src, &items, user) {
+            return Err(e);
         }
         // (E0107: an impl giving one of the program's traits the wrong number of generic arguments; only with a trait
         // header and an impl header)
@@ -8648,6 +8658,56 @@ fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
     }
 }
 
+/// E0433 of an attribute written as a path, in src[start..start + len] (an item's outer attributes): "cannot find
+/// module or crate `foo` in this scope" at its first segment when that is no tool (rustfmt, clippy, diagnostic, ..,
+/// or one `register_tool` names) and no module of the crate's (in `src0`, the source as written); "cannot find `bar`
+/// in `m`" at its second when the first is a module (which shadows a tool of its name). Not a path from `std` /
+/// `core` / `crate` and the like
+fn attr_path_error(src: &str, src0: &str, start: usize, len: usize, line: usize) -> Option<String> {
+    let text = src.get(start..start + len)?;
+    if !text.contains("::") {
+        return None;
+    }
+    let toks = crate::lexer::tokenize(text.as_bytes());
+    let tk = |k: usize| toks.get(k).map_or("", |t| &text[t.1..t.2]);
+    let id = |k: usize| toks.get(k).is_some_and(|t| t.0 == 0);
+    let word_in = |hay: &str, w: &str| {
+        let b = hay.as_bytes();
+        let ok = |c: Option<&u8>| c.is_none_or(|&c| !(c == b'_' || c.is_ascii_alphanumeric()));
+        hay.match_indices(w).any(|(i, _)| ok(i.checked_sub(1).and_then(|j| b.get(j))) && ok(b.get(i + w.len())))
+    };
+    let module = |m: &str| src0.match_indices("mod").any(|(i, _)| {
+        let b = src0.as_bytes();
+        (i == 0 || !(b[i - 1] == b'_' || b[i - 1].is_ascii_alphanumeric())) && src0[i + 3..].starts_with(char::is_whitespace) && {
+            let r = src0[i + 3..].trim_start();
+            r.starts_with(m) && !r[m.len()..].starts_with(|c: char| c == '_' || c.is_alphanumeric())
+        }
+    });
+    for k in 0..toks.len() {
+        if !(tk(k) == "#" && tk(k + 1) == "[" && id(k + 2) && tk(k + 3) == ":" && tk(k + 4) == ":" && id(k + 5)) {
+            continue;
+        }
+        let (first, second) = (tk(k + 2), tk(k + 5));
+        if matches!(first, "std" | "core" | "alloc" | "crate" | "self" | "super" | "unsafe") {
+            continue;
+        }
+        let tool = matches!(first, "rustfmt" | "clippy" | "rustdoc" | "rust_analyzer" | "diagnostic" | "miri") || (src0.contains("register_tool") && word_in(src0, first) && src0.contains(&format!("register_tool({first}")));
+        let at = |j: usize| {
+            let i = start + toks[j].1;
+            (line + text[..toks[j].1].matches('\n').count(), i - src[..i].rfind('\n').map_or(0, |p| p + 1) + 1)
+        };
+        if module(first) {
+            let (l, c) = at(k + 5);
+            return Some(format!("{l}:{c}: cannot find `{second}` in `{first}` (E0433)"));
+        }
+        if !tool {
+            let (l, c) = at(k + 2);
+            return Some(format!("{l}:{c}: cannot find module or crate `{first}` in this scope (E0433)"));
+        }
+    }
+    None
+}
+
 /// The outer attributes an item's text starts with (`#[..]` groups, with the space between them)
 fn leading_attrs(t: &str) -> &str {
     let b = t.as_bytes();
@@ -9121,7 +9181,9 @@ fn hoisted_err_holds(msg: &str) -> bool {
         // (an item's own definition: a discriminant past its repr, a union's fields and derives)
         "enum discriminant overflowed (E0370)", "field must implement `Copy`", "this trait cannot be derived for unions", "cannot find derive macro `",
         // (an item's own syntax: `struct Test { Very\n Bad }` in a fn body)
-        "expected `:` (found `", "expected `,` (found `"];
+        "expected `:` (found `", "expected `,` (found `",
+        // (an item's written types: an unsized type where a Sized one is needed, sized_error)
+        "the size for values of type `"];
     let unused = msg.starts_with("function `") && msg.contains("is never used");
     // (an impl's associated type against its trait's bound (E0477): an impl in a fn body is hoisted)
     let unmet = msg.starts_with("the type `") && msg.contains("does not fulfill the required lifetime");
@@ -9590,52 +9652,30 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
             continue;
         }
         let args: Vec<Ty> = sig.generics.iter().enumerate().map(|(k, (n, bs))| Ty::Struct(p.placeholder(id as u32, k as u32, n, bs))).collect();
-        if let (Ok(iid), true) = (g.request(p, id as u32, args), recheck) {
-            g.recheck.insert(iid);
+        // (a where clause of the fn's, or of its impl's header: `impl<'a, T> Tr for &'a W<T> where &'a T: Tr`)
+        let header = match a.items.get(ii).map(|it| it.kind) {
+            Some(crate::lexer::ItemKind::ImplMember(h) | crate::lexer::ItemKind::TraitMember(h)) => a.items.get(h as usize).and_then(|it| a.src.get(it.start..it.end)).unwrap_or(""),
+            _ => "",
+        };
+        let wheres = body.contains("where") || header.contains("where");
+        let r = g.request(p, id as u32, args);
+        if let Ok(iid) = r {
+            if recheck {
+                g.recheck.insert(iid);
+            }
+            if wheres {
+                g.where_bound.insert(iid);
+            }
         }
     }
     std::mem::take(&mut g.pending)
 }
 
-/// Well-formedness of the program's struct fields and impl headers: a type that names a struct of the program's whose
-/// parameter is bounded (`struct S<T: Tr>`) needs the bound of what it gives the parameter (E0277). A parameter of
-/// the enclosing item holds it when its own bounds give it, or when the item names the trait anywhere (a where clause
-/// zustc does not read, a bound with arguments); a concrete type when bound_holds says so (the program's traits, and
-/// the prelude's for the types `implements` judges exactly)
-fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> Option<String> {
-    let user_sm = |ii: usize| ii < user;
-    // (the bounded parameters of the program's structs named in t, with what t gives them)
-    fn needs(prog: &Program, sums: &[Summary], user: usize, t: Ty, out: &mut Vec<(Ty, String)>, depth: u32) {
-        if depth > 16 {
-            return;
-        }
-        match t {
-            Ty::Struct(s) => {
-                let sd = &prog.structs[s as usize];
-                if let Some(b) = sd.base {
-                    if let Some(sm) = prog.struct_item.get(b as usize).map(|&bi| bi as usize).filter(|&bi| bi < user).and_then(|bi| sums.get(bi)) {
-                        for (pn, trs) in &sm.adt_bounds {
-                            let Some(&a) = sm.adt_generics.iter().position(|g| g == pn).and_then(|k| sd.args.get(k)) else { continue };
-                            out.extend(trs.iter().filter(|tr| !tr.starts_with(crate::types::CONST_GENERIC)).map(|tr| (a, tr.clone())));
-                        }
-                    }
-                    for &a in &sd.args {
-                        needs(prog, sums, user, a, out, depth + 1);
-                    }
-                }
-            }
-            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => needs(prog, sums, user, *i, out, depth + 1),
-            Ty::Fn(f) => {
-                for &p in f.params.iter().chain([&f.ret]) {
-                    needs(prog, sums, user, p, out, depth + 1);
-                }
-            }
-            _ => {}
-        }
-    }
-    // (`n: ?Sized` / `n: Tr + ?Sized`, in the parameter list or a where clause: the `:` before a `?Sized` with only
-    // bounds between, and the parameter's name before the `:`)
-    let maybe_unsized = |text: &str, n: &str| {
+/// Whether the parameter `n` of an item may be unsized: `n: ?Sized` / `n: Tr + ?Sized`, in the parameter list or a
+/// where clause, read from the item's text (the `:` before a `?Sized` with only bounds between, and the parameter's
+/// name before the `:`)
+fn param_maybe_unsized(text: &str, n: &str) -> bool {
+    {
         // (from the tokens: not a `?Sized` in a string, `#[doc = "K: ?Sized"]`)
         let b = text.as_bytes();
         let t = crate::lexer::tokenize(b);
@@ -9691,7 +9731,220 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
             }
             false
         })
+    }
+}
+
+/// E0277 "the size for values of type `[u8]` cannot be known at compilation time": an unsized type (`[T]`, `str`,
+/// `dyn Tr`) written where a type must be Sized. Read from the written types of the program's items (their fn
+/// signatures, fields and impl headers): an argument of std's containers that need Sized (`Vec<[i32]>`,
+/// `Option<[u8]>`), or of a type or trait of the program's whose parameter does not say `?Sized`; an enum variant's
+/// field, and a struct's field other than the last
+fn sized_error(sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> Option<String> {
+    use crate::types::TySyn;
+    // (the last segment of a path: `std::vec::Vec` → `Vec`, a char search, not a str one)
+    fn last(n: &str) -> &str {
+        n.rfind(':').map_or(n, |i| &n[i + 1..])
+    }
+    fn unsized_ty(t: &TySyn) -> bool {
+        matches!(t, TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_))
+    }
+    fn show(t: &TySyn) -> String {
+        match t {
+            TySyn::Slice(i) => format!("[{}]", show(i)),
+            TySyn::Str => "str".into(),
+            TySyn::Dyn(d) if d.contains('\'') => format!("(dyn {d})"),
+            TySyn::Dyn(d) => format!("(dyn {d} + 'static)"),
+            TySyn::Prim(p) => format!("{p:?}").to_lowercase(),
+            TySyn::Named(n) => n.rsplit("::").next().unwrap_or(n).replace("__u_", ""),
+            TySyn::App(n, a) => format!("{}<{}>", n.rsplit("::").next().unwrap_or(n).replace("__u_", ""), a.iter().map(show).collect::<Vec<_>>().join(", ")),
+            TySyn::Ref(m, i) => format!("&{}{}", if *m { "mut " } else { "" }, show(i)),
+            TySyn::Ptr(m, i) => format!("*{} {}", if *m { "mut" } else { "const" }, show(i)),
+            TySyn::Tuple(ts) => format!("({})", ts.iter().map(show).collect::<Vec<_>>().join(", ")),
+            _ => "_".into(),
+        }
+    }
+    // (the quick look first: a written type with an unsized type where it may be one that needs Sized; not std's types
+    // that allow one, `Box<dyn Fn()>`, `Rc<str>`)
+    fn may(t: &TySyn) -> bool {
+        match t {
+            TySyn::App(n, a) => {
+                let open = matches!(last(n), "Box" | "Rc" | "Arc" | "Weak" | "Cell" | "RefCell" | "UnsafeCell" | "Mutex" | "RwLock" | "PhantomData" | "NonNull" | "ManuallyDrop" | "Cow" | "Pin");
+                a.iter().any(|x| (unsized_ty(x) && !open) || may(x))
+            }
+            TySyn::Slice(i) | TySyn::Array(i, _) => unsized_ty(i) || may(i),
+            TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Assoc(i, _) => may(i),
+            TySyn::Tuple(ts) => ts.iter().enumerate().any(|(k, x)| (k + 1 < ts.len() && unsized_ty(x)) || may(x)),
+            _ => false,
+        }
+    }
+    let user_sums = &sums[..user.min(sums.len()).min(items.len())];
+    // (an item's written types, in order: its fns' signatures, its fields, its impl header)
+    fn sig_tys(sm: &Summary) -> impl Iterator<Item = &TySyn> {
+        sm.fns
+            .iter()
+            .flat_map(|(_, sig)| sig.params.iter().chain(std::iter::once(&sig.ret)))
+            .chain(sm.structs.iter().flat_map(|(_, fs)| fs.iter().map(|f| &f.1)))
+            .chain(sm.enums.iter().flat_map(|(_, vs)| vs.iter().flat_map(|x| x.fields.iter().map(|f| &f.1))))
+            .chain(sm.impl_self_ty.iter())
+            .chain(sm.impl_trait_args.iter())
+    }
+    // (a field that must be Sized (a variant's, a struct's before the last) of a type that is not, or (`param`) of a
+    // parameter of the item's, which is one when the item says `?Sized` for it)
+    let fields_unsized = |sm: &Summary, param: bool| {
+        let bad = |t: &TySyn| if param { matches!(t, TySyn::Named(n) if sm.adt_generics.iter().any(|g| g == n)) } else { unsized_ty(t) };
+        sm.enums.iter().any(|(_, vs)| vs.iter().any(|x| x.fields.iter().any(|f| bad(&f.1))))
+            || sm.structs.iter().any(|(_, fs)| fs.len() > 1 && fs[..fs.len() - 1].iter().any(|f| bad(&f.1)))
     };
+    // (without collecting: most items have nothing to look at)
+    // (a primitive or a name has nothing in it: no call)
+    #[inline(always)]
+    fn may0(t: &TySyn) -> bool {
+        !matches!(t, TySyn::Prim(_) | TySyn::Named(_) | TySyn::Str | TySyn::Infer) && may(t)
+    }
+    let any_may = |sm: &Summary| {
+        sm.fns.iter().any(|(_, sig)| sig.params.iter().any(may0) || may0(&sig.ret))
+            || sm.structs.iter().any(|(_, fs)| fs.iter().any(|f| may0(&f.1)))
+            || sm.enums.iter().any(|(_, vs)| vs.iter().any(|x| x.fields.iter().any(|f| may0(&f.1))))
+            || sm.impl_self_ty.as_ref().is_some_and(may0)
+            || sm.impl_trait_args.iter().any(may0)
+    };
+    // (the items to read: a written type that may have one, or a field of a parameter of an item that writes `?Sized`)
+    let text_of = |ii: usize| src.get(items[ii].start..items[ii].end).unwrap_or("");
+    let cands: Vec<usize> = (0..user_sums.len())
+        .filter(|&ii| {
+            let sm = &user_sums[ii];
+            any_may(sm) || fields_unsized(sm, false) || (fields_unsized(sm, true) && text_of(ii).contains("?Sized"))
+        })
+        .collect();
+    if cands.is_empty() {
+        return None;
+    }
+    // (std's containers whose parameters need Sized; the program's own types and traits by their text)
+    const STD_SIZED: &[&str] = &["Vec", "Option", "Result", "HashMap", "HashSet", "BTreeMap", "BTreeSet", "VecDeque", "BinaryHeap", "LinkedList", "MaybeUninit"];
+    let needs_sized = |name: &str, k: usize| -> bool {
+        let n = last(name).trim_start_matches("__u_");
+        for (ii, sm) in user_sums.iter().enumerate() {
+            let own_adt = sm.structs.iter().any(|x| last(&x.0) == n) || sm.enums.iter().any(|x| last(&x.0) == n);
+            let own_trait = sm.trait_decl.as_deref().is_some_and(|t| last(t) == n);
+            if !own_adt && !own_trait {
+                continue;
+            }
+            let gens: Vec<&str> = if own_adt { sm.adt_generics.iter().map(String::as_str).collect() } else { sm.trait_generics.iter().map(|g| g.0.as_str()).filter(|g| !g.starts_with('#')).collect() };
+            let Some(g) = gens.get(k) else { return false };
+            let text = src.get(items[ii].start..items[ii].end).unwrap_or("");
+            return !param_maybe_unsized(text, g);
+        }
+        STD_SIZED.contains(&n)
+    };
+    // (the first argument of a written type that is unsized where it must not be: the type it is given to, and it)
+    fn find<'a>(t: &'a TySyn, needs: &dyn Fn(&str, usize) -> bool) -> Option<(Option<&'a str>, &'a TySyn)> {
+        match t {
+            TySyn::App(n, a) => a.iter().enumerate().find_map(|(k, x)| if unsized_ty(x) && needs(n, k) { Some((Some(n.as_str()), x)) } else { find(x, needs) }),
+            TySyn::Slice(i) | TySyn::Array(i, _) => if unsized_ty(i) { Some((None, &**i)) } else { find(i, needs) },
+            TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Assoc(i, _) => find(i, needs),
+            TySyn::Tuple(ts) => ts.iter().enumerate().find_map(|(k, x)| if k + 1 < ts.len() && unsized_ty(x) { Some((None, x)) } else { find(x, needs) }),
+            _ => None,
+        }
+    }
+    let ident = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+    for ii in cands {
+        let sm = &user_sums[ii];
+        let it = &items[ii];
+        let text = text_of(ii);
+        // (where the item writes `name`, after its attributes: the line and column)
+        let at = |name: &str| -> String {
+            // (as the prepared text writes it: a type of the program's renamed, `__u_Vec`, or as written)
+            let raw = last(name);
+            let b = text.as_bytes();
+            let from = leading_attrs(text).len();
+            let find = |w: &str| text[from..].match_indices(w).map(|(i, _)| from + i).find(|&i| (i == 0 || !ident(b[i - 1])) && b.get(i + w.len()).is_none_or(|&c| !ident(c)));
+            let pos = find(raw).or_else(|| find(raw.trim_start_matches("__u_")));
+            match pos {
+                Some(i) => {
+                    let abs = it.start + i;
+                    format!("{}:{}", it.line + text[..i].matches('\n').count(), abs - src[..abs].rfind('\n').map_or(0, |p| p + 1) + 1)
+                }
+                None => format!("{}:1", it.line),
+            }
+        };
+        let msg = |t: &TySyn| format!("the size for values of type `{}` cannot be known at compilation time (E0277)", show(t));
+        // (an enum variant's field, a struct's field before the last: at the field. A field of the item's parameter
+        // that says `?Sized` is one too)
+        let unsized_field = |t: &TySyn| unsized_ty(t) || matches!(t, TySyn::Named(n) if sm.adt_generics.iter().any(|g| g == n) && param_maybe_unsized(text, n));
+        for (_, vs) in &sm.enums {
+            for (vi, v) in vs.iter().enumerate() {
+                if let Some((fi, f)) = v.fields.iter().enumerate().find(|(_, f)| unsized_field(&f.1)) {
+                    let (l, c) = field_pos(text, true, vi, fi).unwrap_or((0, 0));
+                    return Some(format!("{}:{}: {}", it.line + l, c + 1, msg(&f.1)));
+                }
+            }
+        }
+        for (_, fs) in &sm.structs {
+            if sm.unions.is_empty() && fs.len() > 1 {
+                if let Some((fi, f)) = fs[..fs.len() - 1].iter().enumerate().find(|(_, f)| unsized_field(&f.1)) {
+                    let (l, mut c) = field_pos(text, false, 0, fi).unwrap_or((0, 0));
+                    // (a named field's type, after its `name:`, as rustc points)
+                    if let Some(line) = text.lines().nth(l).filter(|_| !f.0.chars().all(|ch| ch.is_ascii_digit())) {
+                        if let Some(k) = line.get(c..).and_then(|r| r.find(':')) {
+                            c += k + 1 + line[c + k + 1..].len() - line[c + k + 1..].trim_start().len();
+                        }
+                    }
+                    return Some(format!("{}:{}: {}", it.line + l, c + 1, msg(&f.1)));
+                }
+            }
+        }
+        for t in sig_tys(sm) {
+            if !may(t) {
+                continue;
+            }
+            if let Some((outer, x)) = find(t, &needs_sized) {
+                let pos = outer.map_or_else(|| format!("{}:1", it.line), |o| at(o));
+                return Some(format!("{pos}: {}", msg(x)));
+            }
+        }
+    }
+    None
+}
+
+/// Well-formedness of the program's struct fields and impl headers: a type that names a struct of the program's whose
+/// parameter is bounded (`struct S<T: Tr>`) needs the bound of what it gives the parameter (E0277). A parameter of
+/// the enclosing item holds it when its own bounds give it, or when the item names the trait anywhere (a where clause
+/// zustc does not read, a bound with arguments); a concrete type when bound_holds says so (the program's traits, and
+/// the prelude's for the types `implements` judges exactly)
+fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> Option<String> {
+    let user_sm = |ii: usize| ii < user;
+    // (the bounded parameters of the program's structs named in t, with what t gives them)
+    fn needs(prog: &Program, sums: &[Summary], user: usize, t: Ty, out: &mut Vec<(Ty, String)>, depth: u32) {
+        if depth > 16 {
+            return;
+        }
+        match t {
+            Ty::Struct(s) => {
+                let sd = &prog.structs[s as usize];
+                if let Some(b) = sd.base {
+                    if let Some(sm) = prog.struct_item.get(b as usize).map(|&bi| bi as usize).filter(|&bi| bi < user).and_then(|bi| sums.get(bi)) {
+                        for (pn, trs) in &sm.adt_bounds {
+                            let Some(&a) = sm.adt_generics.iter().position(|g| g == pn).and_then(|k| sd.args.get(k)) else { continue };
+                            out.extend(trs.iter().filter(|tr| !tr.starts_with(crate::types::CONST_GENERIC)).map(|tr| (a, tr.clone())));
+                        }
+                    }
+                    for &a in &sd.args {
+                        needs(prog, sums, user, a, out, depth + 1);
+                    }
+                }
+            }
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => needs(prog, sums, user, *i, out, depth + 1),
+            Ty::Fn(f) => {
+                for &p in f.params.iter().chain([&f.ret]) {
+                    needs(prog, sums, user, p, out, depth + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    // (`n: ?Sized` / `n: Tr + ?Sized`, in the parameter list or a where clause: the `:` before a `?Sized` with only
+    // bounds between, and the parameter's name before the `:`)
+    let maybe_unsized = |text: &str, n: &str| param_maybe_unsized(text, n);
     // (a bound whose trait has `Sized` as a supertrait: std's `Clone`, `Copy`, `Default`, the conversions, or one of
     // the program's traits through its supertraits)
     let implies_sized = |b: &str| {

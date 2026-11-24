@@ -533,6 +533,7 @@ compile-fail	attributes/attr-order-must-use.rs
 compile-fail	attributes/attrs-on-params.rs
 compile-fail	attributes/attrs-with-no-formal-in-generics-3.rs
 check-pass	attributes/builtin-attr-macro-value-issue-145922.rs
+compile-fail	attributes/builtin-attribute-prefix.rs
 check-pass	attributes/cfg-attr-feature-gate-and-rustc-dummy.rs
 compile-fail	attributes/check-cfg_attr-ice.rs
 compile-fail	attributes/cold-attribute-application-54044.rs
@@ -540,10 +541,12 @@ compile-fail	attributes/crate-type-delimited.rs
 compile-fail	attributes/crate-type-empty.rs
 compile-fail	attributes/crate-type-macro-not-crate.rs
 compile-fail	attributes/crate-type-non-crate.rs
+compile-fail	attributes/custom_attr_multisegment_error.rs
 check-pass	attributes/decl_macro_ty_in_attr_macro.rs
 compile-fail	attributes/expected-word.rs
 compile-fail	attributes/export/crate-type.rs
 check-pass	attributes/fn-align-nameres-ambiguity-143834.rs
+compile-fail	attributes/illegal-macro-use.rs
 compile-fail	attributes/inline-attribute-enum-variant-error.rs
 run-pass	attributes/inline-main.rs
 compile-fail	attributes/inline/attr-usage-inline.rs
@@ -1266,6 +1269,7 @@ check-pass	cfg/expanded-cfg.rs
 compile-fail	cfg/nested-cfg-attr-conditional-compilation.rs
 run-pass	cfg/struct-field-empty.rs
 compile-fail	cfg/suggest-any-or-all.rs
+compile-fail	check-cfg/cfg-crate-features.rs
 check-pass	check-cfg/cfg-select.rs
 check-pass	check-cfg/nested-cfg.rs
 check-pass	closure-expected-type/expect-fn-supply-fn-multiple.rs
@@ -1980,6 +1984,7 @@ check-pass	consts/issue-37550-1.rs
 run-pass	consts/issue-37550.rs
 run-pass	consts/issue-37991.rs
 check-pass	consts/issue-39161-bogus-error.rs
+compile-fail	consts/issue-39974.rs
 check-pass	consts/issue-47789.rs
 check-pass	consts/issue-54387.rs
 run-pass	consts/issue-54582.rs
@@ -2433,6 +2438,7 @@ run-pass	enum/struct-like-variant-construct.rs
 run-pass	enum/struct-like-variant-match.rs
 compile-fail	enum/suggest-default-attribute.rs
 check-pass	enum/union-in-enum.rs
+compile-fail	enum/unsized-field-in-enum-variant.rs
 run-pass	enum/zero-variant-enum-pattern-matching-3037.rs
 compile-fail	env-macro/env-arg-2-not-string-literal.rs
 compile-fail	env-macro/env-escaped-var.rs
@@ -2667,6 +2673,7 @@ build-pass	extern/issue-10763.rs
 run-pass	extern/issue-10764-rpass.rs
 build-pass	extern/issue-1251.rs
 compile-fail	extern/issue-18819.rs
+compile-fail	extern/issue-36122-accessing-externed-dst.rs
 run-pass	extern/lgamma-linkage.rs
 compile-fail	extern/not-in-block.rs
 run-pass	extern/windows-tcb-trash-13259.rs
@@ -2686,7 +2693,17 @@ compile-fail	feature-gates/feature-gate-async-trait-bounds.rs
 compile-fail	feature-gates/feature-gate-auto-traits.rs
 compile-fail	feature-gates/feature-gate-avx10_target_feature.rs
 compile-fail	feature-gates/feature-gate-builtin_syntax.rs
+compile-fail	feature-gates/feature-gate-cfg-contract-checks.rs
+compile-fail	feature-gates/feature-gate-cfg-relocation-model.rs
+compile-fail	feature-gates/feature-gate-cfg-sanitizer_cfi.rs
+compile-fail	feature-gates/feature-gate-cfg-target-compact.rs
+compile-fail	feature-gates/feature-gate-cfg-target-has-atomic.rs
+compile-fail	feature-gates/feature-gate-cfg-target-has-threads.rs
 compile-fail	feature-gates/feature-gate-cfg-version.rs
+compile-fail	feature-gates/feature-gate-cfg_overflow_checks.rs
+compile-fail	feature-gates/feature-gate-cfg_sanitize.rs
+compile-fail	feature-gates/feature-gate-cfg_target_object_format.rs
+compile-fail	feature-gates/feature-gate-cfg_ub_checks.rs
 compile-fail	feature-gates/feature-gate-clflushopt_target_feature.rs
 compile-fail	feature-gates/feature-gate-closure_lifetime_binder.rs
 compile-fail	feature-gates/feature-gate-compiler-builtins.rs
@@ -5074,6 +5091,7 @@ run-pass	numbers-arithmetic/numeric-method-autoexport.rs
 run-pass	numbers-arithmetic/shift-various-types.rs
 run-pass	numbers-arithmetic/shift.rs
 run-pass	numbers-arithmetic/signed-shift-const-eval.rs
+compile-fail	numbers-arithmetic/suggest-float-literal.rs
 run-pass	numbers-arithmetic/u32-decr.rs
 run-pass	numbers-arithmetic/u8-incr-decr.rs
 run-pass	numbers-arithmetic/u8-incr.rs
@@ -6940,6 +6958,7 @@ compile-fail	static/duplicated-fields-issue-125842.rs
 compile-fail	static/extern-static-normalization-failure-issue-148161.rs
 compile-fail	static/global-variable-promotion-error-7364.rs
 run-pass	static/issue-1660.rs
+compile-fail	static/issue-24446.rs
 build-pass	static/issue-34194.rs
 compile-fail	static/issue-5216.rs
 compile-fail	static/missing-type.rs
@@ -7158,6 +7177,7 @@ compile-fail	suggestions/assoc-type-in-method-return.rs
 compile-fail	suggestions/assoc_fn_without_self.rs
 compile-fail	suggestions/async-fn-ctor-passed-as-arg-where-it-should-have-been-called.rs
 compile-fail	suggestions/attribute-typos.rs
+compile-fail	suggestions/bad-hex-float-lit.rs
 compile-fail	suggestions/bad-infer-in-trait-impl.rs
 compile-fail	suggestions/bool_typo_err_suggest.rs
 compile-fail	suggestions/borrow-cast-or-binexpr-with-parens.rs
@@ -7252,6 +7272,7 @@ compile-fail	suggestions/issue-114701.rs
 compile-fail	suggestions/issue-114797-bad-parentheses-dyn-trait.rs
 compile-fail	suggestions/issue-116434-2021.rs
 compile-fail	suggestions/issue-117669.rs
+compile-fail	suggestions/issue-21673.rs
 compile-fail	suggestions/issue-51055-missing-semicolon-between-call-and-tuple.rs
 compile-fail	suggestions/issue-52820.rs
 compile-fail	suggestions/issue-53692.rs
@@ -7272,6 +7293,7 @@ compile-fail	suggestions/issue-84973-2.rs
 compile-fail	suggestions/issue-84973-negative.rs
 compile-fail	suggestions/issue-84973.rs
 compile-fail	suggestions/issue-85347.rs
+compile-fail	suggestions/issue-85943-no-suggest-unsized-indirection-in-where-clause.rs
 compile-fail	suggestions/issue-85945-check-where-clause-before-suggesting-unsized.rs
 compile-fail	suggestions/issue-86100-tuple-paren-comma.rs
 compile-fail	suggestions/issue-86667.rs
@@ -7309,6 +7331,7 @@ compile-fail	suggestions/negative-literal-infered-to-unsigned.rs
 compile-fail	suggestions/nested-non-tuple-tuple-struct.rs
 compile-fail	suggestions/never-coercion-equality-suggestion.rs
 compile-fail	suggestions/never-coercion-suggestion-candidates.rs
+compile-fail	suggestions/no-method-found-suggest-trait-args.rs
 compile-fail	suggestions/no-method-over-suggestion-on-elem-mismatch.rs
 compile-fail	suggestions/non-existent-field-present-in-subfield-recursion-limit.rs
 compile-fail	suggestions/non-existent-field-present-in-subfield.rs
@@ -7504,7 +7527,9 @@ run-pass	threads-sendsync/yield2.rs
 check-pass	tool-attributes/diagnostic_item2.rs
 compile-fail	tool-attributes/tool-attributes-misplaced-1.rs
 compile-fail	tool-attributes/tool-attributes-misplaced-2.rs
+compile-fail	tool-attributes/tool-attributes-shadowing.rs
 run-pass	tool-attributes/tool_lints-rpass.rs
+compile-fail	tool-attributes/unknown-tool-name.rs
 check-pass	trait-bounds/anonymous-parameters-13775.rs
 compile-fail	trait-bounds/argument-with-unnecessary-method-call.rs
 compile-fail	trait-bounds/deep-level-send-bound-check-issue-40827.rs
@@ -7517,6 +7542,7 @@ check-pass	trait-bounds/issue-94999.rs
 compile-fail	trait-bounds/negative-bound-not-supported-58857.rs
 compile-fail	trait-bounds/ownership-mismatch-on-arg.rs
 compile-fail	trait-bounds/sort-missing-ord-bound.rs
+compile-fail	trait-bounds/suggest-maybe-sized-bound.rs
 compile-fail	trait-bounds/super-assoc-mismatch.rs
 compile-fail	trait-bounds/trait-bound-adt-issue-145611.rs
 compile-fail	trait-bounds/trait-selection-overflow-prevention-72839.rs
@@ -7597,6 +7623,7 @@ compile-fail	traits/dont-autoderef-ty-with-escaping-var.rs
 compile-fail	traits/dont-suggest-impl-as-closure-arg.rs
 compile-fail	traits/duplicate-generic-parameter-error-86756.rs
 compile-fail	traits/duplicate-methods.rs
+compile-fail	traits/dyn-trait-size-error-23281.rs
 run-pass	traits/dyn-trait.rs
 run-pass	traits/dynamic-dispatch-trait-objects-5666.rs
 run-pass	traits/early-vtbl-resolution.rs
@@ -7700,6 +7727,7 @@ check-pass	traits/issue-90195-2.rs
 check-pass	traits/issue-90195.rs
 check-pass	traits/issue-92292.rs
 run-pass	traits/issue-9394-inherited-calls.rs
+compile-fail	traits/issue-95898.rs
 check-pass	traits/issue-96665.rs
 run-pass	traits/item-inside-macro.rs
 compile-fail	traits/lifetime-mismatch-trait-impl-16048.rs
@@ -8074,6 +8102,7 @@ compile-fail	typeck/output-type-mismatch.rs
 compile-fail	typeck/parenthesized-type-param.rs
 compile-fail	typeck/parenthesized-type-params-in-paths.rs
 compile-fail	typeck/point-at-type-param-in-path-expr.rs
+compile-fail	typeck/point-at-type-parameter-definition.rs
 compile-fail	typeck/pointer-arith-assign.rs
 compile-fail	typeck/prim-with-args.rs
 run-pass	typeck/project-cache-issue-37154.rs
@@ -8286,6 +8315,7 @@ compile-fail	unsized/param-mentioned-by-different-field.rs
 compile-fail	unsized/relaxed-bounds-invalid-places.rs
 compile-fail	unsized/thin-ptr-to-unsized-projection.rs
 check-pass	unsized/unsize-coerce-multiple-adt-params.rs
+compile-fail	unsized/unsized-enum2.rs
 compile-fail	unsized/unsized-fn-param.rs
 compile-fail	unsized/unsized-function-argument-41229.rs
 compile-fail	unsized/unsized-non-last-field-overlapping-impls-83097.rs
@@ -8295,7 +8325,9 @@ compile-fail	unsized/unsized-trait-impl-self-type.rs
 compile-fail	unsized/unsized-trait-impl-trait-arg.rs
 run-pass	unsized/unsized.rs
 run-pass	unsized/unsized2.rs
+compile-fail	unsized/unsized5.rs
 compile-fail	unsized/unsized7.rs
+compile-fail	unsized/vec-of-unsized-type.rs
 compile-fail	unstable-feature-bound/unstable_feature_bound_staged_api.rs
 compile-fail	use/unused-trait-with-method-err.rs
 compile-fail	use/use-after-move-based-on-type.rs
@@ -8357,6 +8389,7 @@ check-pass	wf/wf-dyn-in-hrtb-bound-issue-157122.rs
 compile-fail	wf/wf-dyn-incompatible.rs
 compile-fail	wf/wf-fn-def-check-sig-2.rs
 compile-fail	wf/wf-impl-associated-type-region.rs
+compile-fail	wf/wf-impl-self-type.rs
 compile-fail	wf/wf-in-fn-type-arg.rs
 compile-fail	wf/wf-in-fn-type-ret.rs
 compile-fail	wf/wf-in-fn-type-static.rs
