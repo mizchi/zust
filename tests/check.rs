@@ -1253,6 +1253,47 @@ fn review106_third_round() {
 }
 
 #[test]
+fn unresolved_imports() {
+    // (each expected line, column and message is rustc 1.100's on the same source, in both editions unless one is
+    // given; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    for edition in [2015, 2021] {
+        // (a name the module does not define; on through a struct, a fn, a type alias's glob)
+        assert_eq!(check(edition, "mod m {}\nuse m::nothing as _;\nfn main() {}\n"), at(2, "unresolved import `m::nothing` (E0432)"), "missing");
+        assert_eq!(check(edition, "mod m { pub struct S; impl S { pub const C: u8 = 1; } }\nuse m::S::C;\nfn main() {}\n"), at(2, "unresolved import `m::S` (E0432)"), "through_struct");
+        assert_eq!(check(edition, "mod a { pub fn f() {} }\nfn main() { use a::f::g; }\n"), at(2, "unresolved import `a::f` (E0432)"), "through_fn");
+        assert_eq!(check(edition, "mod m { pub type A = u8; }\nuse m::A::*;\nfn main() {}\n"), at(2, "unresolved import `m::A` (E0432)"), "glob_of_alias");
+        assert_eq!(check(edition, "mod foo { pub fn f() {} }\nuse foo::f::{self};\nfn main() {}\n"), at(2, "unresolved import `foo::f` (E0432)"), "self_of_fn");
+        // (what else could define the name there: an `extern` block, a glob, a macro, an import; an enum's variant, a
+        // module of the same name as a fn)
+        for src in [
+            "mod m { extern \"C\" { pub fn abs(x: i32) -> i32; } }\nuse m::abs;\nfn main() {}\n",
+            "mod m { pub use std::fmt::*; }\nuse m::Debug;\nfn main() {}\n",
+            "mod m { macro_rules! mk { () => { pub fn g() {} } } mk!(); }\nuse m::g;\nfn main() {}\n",
+            "mod m { pub enum E { A } }\nuse m::E::A;\nfn main() { let _ = A; }\n",
+            "mod m { pub use std::fmt as f; }\nuse m::f::Debug;\nfn main() {}\n",
+            "mod m { pub mod n { pub fn f() {} } pub fn n() {} }\nuse m::n::f;\nfn main() { f() }\n",
+            "mod a { pub mod b {} }\nuse a::b::{self as c};\nfn main() {}\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+    // (an `extern crate` binds its name in the module: `use crate::m::alloc::..` is no unresolved import there)
+    assert_eq!(check(2021, "mod m { pub extern crate alloc; }\nuse crate::m::alloc::vec::Vec;\nfn main() { let _: Vec<u8> = Vec::new(); }\n"), None, "extern_crate_in_module");
+    // (E0433: `super` and `self` past the start of a path)
+    let src = "pub mod x {\n    pub use crate::x::super::{self as c1};\n    pub fn foo() {}\n}\nfn main() {}\n";
+    assert_eq!(check(2015, src), at(2, "`super` in paths can only be used in start position (E0433)"), "super_in_middle");
+    let src = "pub mod x {\n    pub fn foo() {}\n}\nfn main() {\n    crate::x::self::foo();\n}\n";
+    assert_eq!(check(2021, src), at(5, "`self` in paths can only be used in start position or last position (E0433)"), "self_in_middle");
+    // (2015: a path from the crate root, whose `main` is a fn)
+    assert_eq!(check(2015, "use main::bar;\nfn main() {}\n"), at(1, "unresolved import `main` (E0432)"), "from_root_2015");
+}
+
+#[test]
 fn fn_qualifier_order() {
     // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
     let check = |src: &str| {

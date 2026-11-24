@@ -897,8 +897,10 @@ impl Session2 {
                 }
             }
         }
-        // (the configured text's tokens, for the scans of its modules (E0428, E0603): read once, where it has a module)
-        let src0_toks = (self.ctx.map.inputs.is_empty() && src0.contains("mod ") && src0.contains("::")).then(|| crate::lexer::tokenize(src0.as_bytes()));
+        // (the configured text's tokens, for the scans of its modules (E0428, E0603, E0432): read once, where it has a
+        // module, or a `use` of 2015, whose paths start at the crate root: `use main::bar;`)
+        let modules = src0.contains("mod ") || self.opts.edition < 2018 && src0.contains("use ");
+        let src0_toks = (self.ctx.map.inputs.is_empty() && modules && src0.contains("::")).then(|| crate::lexer::tokenize(src0.as_bytes()));
         // (E0432: a top-level `use` of a path whose first segment names nothing; the `use` items come from the item
         // split, the names they could mean from the original text)
         if self.ctx.map.inputs.is_empty() {
@@ -1027,7 +1029,7 @@ impl Session2 {
         // (E0603: a path through the program's own modules to an item it may not see; resolved after the items parse,
         // as rustc reports a syntax error first)
         if let Some(toks) = &src0_toks {
-            if let Some(e) = private_path(src0, toks, self.opts.edition < 2018) {
+            if let Some(e) = private_path(src0, toks, &externs, self.opts.edition < 2018) {
                 return Err(e);
             }
         }
@@ -3967,6 +3969,15 @@ enum Def {
     Injected,
 }
 
+/// The names the `extern crate` items the configuring blanked bind: `extern crate a as b;` binds a and b
+fn extern_names(externs: &[(usize, String)]) -> impl Iterator<Item = &str> {
+    externs.iter().flat_map(|(_, text)| {
+        let w: Vec<&str> = text.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty()).collect();
+        let from = w.iter().position(|&x| x == "crate").map_or(w.len(), |i| i + 1);
+        w.into_iter().skip(from).filter(|&x| x != "as" && x != "r")
+    })
+}
+
 /// A visibility as written: `pub` (or `pub(crate)`), none (or `pub(self)`), `pub(super)`, `pub(in path)`
 #[derive(Clone)]
 enum PVis<'a> {
@@ -3987,8 +3998,17 @@ struct PItem<'a> {
 }
 
 /// The paths of a `use` tree that starts at token `k`, each as the tokens of its segments (`use a::{b, c::d}`: [a, b],
-/// [a, c, d]; a glob or a `self` gives the module's path), and the token past the tree
-fn use_leaves(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], k: usize, prefix: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) -> usize {
+/// [a, c, d]; a glob or a `self` gives the module's path, and `globs` which leaves those are: 1 a `self`, 2 a glob),
+/// and the token past the tree
+fn use_leaves(
+    b: &[u8],
+    toks: &[(u8, usize, usize)],
+    close: &[usize],
+    k: usize,
+    prefix: &mut Vec<usize>,
+    out: &mut Vec<Vec<usize>>,
+    globs: &mut Vec<u8>,
+) -> usize {
     let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
     let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
     let depth = prefix.len();
@@ -3998,7 +4018,7 @@ fn use_leaves(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], k: usize, 
             let Some(&e) = close.get(k).filter(|&&e| e != usize::MAX) else { break k };
             let mut j = k + 1;
             while j < e {
-                j = use_leaves(b, toks, close, j, prefix, out);
+                j = use_leaves(b, toks, close, j, prefix, out, globs);
                 if t(j) != b"," {
                     break;
                 }
@@ -4008,6 +4028,7 @@ fn use_leaves(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], k: usize, 
         }
         if t(k) == b"*" {
             out.push(prefix.clone());
+            globs.push(2);
             break k + 1;
         }
         if !is_id(k) {
@@ -4021,10 +4042,12 @@ fn use_leaves(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], k: usize, 
         }
         if t(s) == b"self" {
             out.push(prefix.clone());
+            globs.push(1);
         } else {
             let mut p = prefix.clone();
             p.push(s);
             out.push(p);
+            globs.push(0);
         }
         break if t(s + 1) == b"as" { s + 3 } else { s + 1 };
     };
@@ -4036,8 +4059,12 @@ fn use_leaves(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], k: usize, 
 /// module or item that is not visible where the path is written: "function `f` is private", at that segment, the
 /// first in the text. A path is read only as far as it names the program's own modules and items: one that starts at
 /// another crate, an import, a module of a fn body or a name some import binds, or that reaches a name only an import
-/// or a macro defines, is left alone. Not a path in an attribute or a macro's definition (resolved where it expands)
-fn private_path(src: &str, toks: &[(u8, usize, usize)], injected: bool) -> Option<String> {
+/// or a macro defines, is left alone. Not a path in an attribute or a macro's definition (resolved where it expands).
+/// E0432 too: a `use` path through the program's modules to a name its module does not define ("unresolved import
+/// `a::b`", the path to that segment), or on through an item that is no module (`use m::S::C`, `use m::f::{self}`,
+/// `use m::A::*` of a type alias), where nothing else could bind the name there: no glob import, no `use` or
+/// `extern crate` of it, no item-level macro call or definition, no `extern` block, no module of another file
+fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, String)], injected: bool) -> Option<String> {
     let b = src.as_bytes();
     let n = toks.len();
     let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
@@ -4065,6 +4092,13 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], injected: bool) -> Optio
     let mut skips: Vec<Vec<(usize, usize)>> = vec![];
     // (the names `use` binds anywhere, and the names of more than one `mod`: a path that starts there is left alone)
     let mut bound: FxSet<&[u8]> = FxSet::default();
+    // (in each module, the names its imports and `extern crate`s bind (`as` names too), and whether something else
+    // could define a name there: a glob import, an item-level macro, an `extern` block, a `macro`)
+    let mut binds: Vec<FxSet<&[u8]>> = vec![];
+    let mut open_ended: Vec<bool> = vec![];
+    // (a module of another file, `mod m;`, or a macro exported to the crate root: E0432 is not reported)
+    let unknown_mods = (0..n.saturating_sub(2)).any(|k| t(k) == b"mod" && is_id(k + 1) && t(k + 2) == b";" && !matches!(t(k.wrapping_sub(1)), b"." | b"$"))
+        || src.contains("macro_export");
     let mut mod_names: FxMap<&[u8], u32> = FxMap::default();
     for k in 0..n.saturating_sub(1) {
         if t(k) == b"mod" && is_id(k + 1) {
@@ -4075,6 +4109,13 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], injected: bool) -> Optio
         let m = items.len();
         let (lo, hi, _) = mods[m];
         let (mut its, mut sk): (Vec<PItem>, Vec<(usize, usize)>) = (vec![], vec![]);
+        let (mut bn, mut ended): (FxSet<&[u8]>, bool) = (FxSet::default(), false);
+        // (the crate root of 2015 has the injected `std` / `core`; the `extern crate` items the configuring blanked
+        // bind their names, here taken as bound in every module)
+        if m == 0 && injected {
+            bn.extend([&b"std"[..], b"core"]);
+        }
+        bn.extend(extern_names(externs).map(str::as_bytes));
         let mut k = lo;
         let mut vis = PVis::Priv;
         while k < hi {
@@ -4098,7 +4139,7 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], injected: bool) -> Optio
                 }
                 continue;
             }
-            if matches!(t(k), b"unsafe" | b"async" | b"default") || t(k) == b"const" && matches!(t(k + 1), b"fn" | b"unsafe" | b"extern" | b"async") {
+            if matches!(t(k), b"unsafe" | b"async" | b"default") || t(k) == b"auto" && t(k + 1) == b"trait" || t(k) == b"const" && matches!(t(k + 1), b"fn" | b"unsafe" | b"extern" | b"async") {
                 k += 1;
                 continue;
             }
@@ -4141,24 +4182,45 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], injected: bool) -> Optio
                 b"const" if is_id(k + 1) && t(k + 1) != b"_" => item = Some((k + 1, "constant")),
                 b"static" if is_id(k + 1) => item = Some((if t(k + 1) == b"mut" { k + 2 } else { k + 1 }, "static")),
                 b"use" => {
-                    let (mut prefix, mut leaves) = (vec![], vec![]);
+                    let (mut prefix, mut leaves, mut kinds) = (vec![], vec![], vec![]);
                     let mut j = k + 1;
                     if t(j) == b":" && t(j + 1) == b":" {
                         j += 2;
                     }
-                    use_leaves(b, &toks, &close, j, &mut prefix, &mut leaves);
-                    for l in &leaves {
+                    let end = use_leaves(b, &toks, &close, j, &mut prefix, &mut leaves, &mut kinds);
+                    for (l, &g) in leaves.iter().zip(&kinds) {
                         if let Some(&last) = l.last() {
                             bound.insert(t(last));
+                            if g != 2 {
+                                bn.insert(t(last));
+                            }
+                        }
+                        ended |= g == 2;
+                    }
+                    // (`use a::b as c;`: c)
+                    for x in k..end.min(hi) {
+                        if t(x) == b"as" && is_id(x + 1) {
+                            bn.insert(t(raw(x + 1)));
                         }
                     }
                 }
+                // (`extern crate a;` / `extern crate a as b;`)
+                b"extern" if t(k + 1) == b"crate" && is_id(k + 2) => {
+                    bn.insert(t(raw(k + 2)));
+                    if t(k + 3) == b"as" && is_id(k + 4) {
+                        bn.insert(t(raw(k + 4)));
+                    }
+                }
+                // (an `extern` block's items, a `macro`: not read)
+                b"extern" if t(k + 1) == b"{" || toks.get(k + 1).is_some_and(|x| x.0 == 2) && t(k + 2) == b"{" => ended = true,
+                b"macro" if is_id(k + 1) => ended = true,
                 // (`macro_rules! m { .. }` / `m! { .. }` / `m!(..);`: not read)
                 _ if is_id(k) && t(k + 1) == b"!" => {
                     let o = if is_id(k + 2) { k + 3 } else { k + 2 };
                     if close.get(o).is_some_and(|&e| e != usize::MAX) {
                         sk.push((k, close[o]));
                     }
+                    ended = true;
                 }
                 _ => {}
             }
@@ -4192,6 +4254,8 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], injected: bool) -> Optio
         }
         items.push(its);
         skips.push(sk);
+        binds.push(bn);
+        open_ended.push(ended);
     }
     let parent = |m: usize| mods[m].2;
     let within = |mut a: usize, b: usize| loop {
@@ -4237,7 +4301,14 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], injected: bool) -> Optio
         },
     };
     // (the first segment a path cannot reach: its token and rustc's word for it)
-    let check = |m: usize, segs: &[usize], from_root: bool, in_use: bool| -> Option<(usize, String)> {
+    // (E0432 at segment i: the path to it)
+    let unresolved = |segs: &[usize], i: usize| -> (usize, String) {
+        let p: Vec<String> = segs[..=i].iter().map(|&x| String::from_utf8_lossy(t(x)).into_owned()).collect();
+        (segs[i], format!("unresolved import `{}` (E0432)", p.join("::")))
+    };
+    // (whether only the module's own items define its names)
+    let closed = |cur: usize, name: &[u8]| !unknown_mods && !open_ended[cur] && !binds[cur].contains(name);
+    let check = |m: usize, segs: &[usize], from_root: bool, in_use: bool, glob: u8| -> Option<(usize, String)> {
         let first = t(segs[0]);
         let (mut cur, mut s) = match first {
             b"crate" => (0, 1),
@@ -4258,10 +4329,35 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], injected: bool) -> Optio
         }
         for i in s..segs.len() {
             let name = t(segs[i]);
-            let last = i + 1 == segs.len();
+            // (E0433: `super` / `crate` past the start, `self` past the start and before the end: `crate::x::super::f`)
+            if matches!(name, b"super" | b"crate") || name == b"self" && i + 1 < segs.len() {
+                let tail = if name == b"self" { " or last position" } else { "" };
+                return Some((segs[i], format!("`{}` in paths can only be used in start position{tail} (E0433)", String::from_utf8_lossy(name))));
+            }
+            // (a glob's or a `self`'s module, `use m::f::{self}`, is no item: it must be a module, as the segments
+            // before it)
+            let last = i + 1 == segs.len() && glob == 0;
             let defs: Vec<&PItem> = items[cur].iter().filter(|x| x.name == name).collect();
+            // (a `use` path from a module of the program: past the first segment of a relative path, which may name
+            // another crate)
+            let anchored = in_use && (i > 0 || from_root);
+            if defs.is_empty() && anchored && closed(cur, name) {
+                return Some(unresolved(segs, i));
+            }
             // (a name defined here or nowhere: what an import or a macro brings is not followed)
-            if defs.is_empty() || i == s && s == 0 && !defs.iter().any(|x| x.child != usize::MAX) {
+            if defs.is_empty() || i == s && s == 0 && !from_root && !defs.iter().any(|x| x.child != usize::MAX) {
+                return None;
+            }
+            // (on through an item that has no names of its own to import: a fn, a struct, a type alias, ..; not an
+            // enum's variants nor a trait's items)
+            if !last
+                && anchored
+                && !defs.iter().any(|x| x.child != usize::MAX || matches!(x.kind, "enum" | "trait"))
+                && closed(cur, name)
+            {
+                return Some(unresolved(segs, i));
+            }
+            if i == s && s == 0 && !defs.iter().any(|x| x.child != usize::MAX) {
                 return None;
             }
             if !last {
@@ -4369,11 +4465,11 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], injected: bool) -> Optio
                 if lead {
                     j += 2;
                 }
-                let (mut prefix, mut leaves) = (vec![], vec![]);
-                let end = use_leaves(b, &toks, &close, j, &mut prefix, &mut leaves);
+                let (mut prefix, mut leaves, mut kinds) = (vec![], vec![], vec![]);
+                let end = use_leaves(b, &toks, &close, j, &mut prefix, &mut leaves, &mut kinds);
                 if !lead || injected {
-                    for l in leaves.iter().filter(|l| !l.is_empty()) {
-                        keep(check(m, l, injected, true));
+                    for (l, &g) in leaves.iter().zip(&kinds).filter(|(l, _)| !l.is_empty()) {
+                        keep(check(m, l, injected, true, g));
                     }
                 }
                 k = end.max(k + 1);
@@ -4394,7 +4490,7 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], injected: bool) -> Optio
                     }
                 }
                 if reads {
-                    keep(check(m, &segs, false, false));
+                    keep(check(m, &segs, false, false, 0));
                 }
                 k = j + 1;
                 continue;
@@ -4408,7 +4504,7 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], injected: bool) -> Optio
                     segs.push(j);
                 }
                 if injected && segs.len() > 1 {
-                    keep(check(m, &segs, true, false));
+                    keep(check(m, &segs, true, false, 0));
                 }
                 k = j + 1;
                 continue;

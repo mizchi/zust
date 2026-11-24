@@ -3365,6 +3365,8 @@ compile-fail	imports/ambiguous-panic-rename-panics.rs
 check-pass	imports/ambiguous-trait-and-struct-in-scope.rs
 check-pass	imports/ambiguous-trait-with-mixed-import-paths.rs
 compile-fail	imports/append-import-suggestion.rs
+compile-fail	imports/bad-import-in-nested.rs
+compile-fail	imports/bad-import-with-rename.rs
 check-pass	imports/cycle-import-in-diff-module-0.rs
 check-pass	imports/cycle-import-in-diff-module-1.rs
 compile-fail	imports/double-import.rs
@@ -3409,6 +3411,7 @@ compile-fail	imports/import.rs
 run-pass	imports/import2-rpass.rs
 compile-fail	imports/import2.rs
 run-pass	imports/import3-rpass.rs
+compile-fail	imports/import3.rs
 run-pass	imports/import4-rpass.rs
 run-pass	imports/import5.rs
 run-pass	imports/import6.rs
@@ -3433,6 +3436,7 @@ check-pass	imports/issue-32222.rs
 compile-fail	imports/issue-32354-suggest-import-rename.rs
 compile-fail	imports/issue-33464.rs
 compile-fail	imports/issue-37887.rs
+compile-fail	imports/issue-38293.rs
 compile-fail	imports/issue-45799-bad-extern-crate-rename-suggestion-formatting.rs
 compile-fail	imports/issue-45829/import-self.rs
 compile-fail	imports/issue-45829/import-twice.rs
@@ -3471,6 +3475,7 @@ check-pass	imports/overwritten-extern-flag-ambig.rs
 check-pass	imports/overwritten-glob-ambig.rs
 run-pass	imports/reexport-star.rs
 compile-fail	imports/resolve_self_super_hint.rs
+compile-fail	imports/show-private-items-issue-138626.rs
 compile-fail	imports/tool-mod-child.rs
 compile-fail	imports/underscore-imports/shadow.rs
 compile-fail	imports/underscore-imports/unused-2018.rs
@@ -6537,6 +6542,7 @@ check-pass	rust-2018/uniform-paths/ambiguity-nested.rs
 check-pass	rust-2018/uniform-paths/ambiguity.rs
 check-pass	rust-2018/uniform-paths/block-scoped-shadow-nested.rs
 check-pass	rust-2018/uniform-paths/block-scoped-shadow.rs
+compile-fail	rust-2018/uniform-paths/issue-54253.rs
 compile-fail	rust-2018/uniform-paths/prelude-fail.rs
 run-pass	rust-2018/uniform-paths/redundant.rs
 compile-fail	rust-2018/unresolved-asterisk-imports.rs
@@ -8006,6 +8012,7 @@ compile-fail	union/unresolved-field-isnt-copy.rs
 compile-fail	unop/unop-neg-bool.rs
 compile-fail	unresolved/unresolved-asterisk-imports.rs
 compile-fail	unresolved/unresolved-extern-mod-suggestion.rs
+compile-fail	unresolved/unresolved-import-recovery.rs
 compile-fail	unresolved/unresolved-import.rs
 compile-fail	unsafe/break-inside-unsafe-block-issue-128604.rs
 check-pass	unsafe/edition-2024-unsafe_op_in_unsafe_fn.rs
@@ -8064,14 +8071,18 @@ compile-fail	use/unused-trait-with-method-err.rs
 compile-fail	use/use-after-move-based-on-type.rs
 compile-fail	use/use-after-move-self-based-on-type.rs
 compile-fail	use/use-after-move-self.rs
+compile-fail	use/use-associated-const.rs
+compile-fail	use/use-from-trait.rs
 check-pass	use/use-keyword.rs
 compile-fail	use/use-meta-mismatch.rs
 compile-fail	use/use-mod/use-mod-3.rs
 check-pass	use/use-mod/use-mod-5.rs
 check-pass	use/use-mod/use-mod-6.rs
 compile-fail	use/use-mod/use-mod.rs
+compile-fail	use/use-nested-groups-error.rs
 compile-fail	use/use-paths-as-items.rs
 compile-fail	use/use-self-type.rs
+compile-fail	use/use-super-in-middle.rs
 compile-fail	variance/leaking-unnameables.rs
 check-pass	variance/smart-pointers-covariant.rs
 compile-fail	variance/type-resolve-error-two-structs-deep.rs
