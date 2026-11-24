@@ -1717,7 +1717,11 @@ impl Cx<'_> {
             // (an `impl Trait` result of a fn with no region in its signature: its hidden type captures none, its
             // regions are 'static)
             let opaque = n == 0 && !sig.is_generic() && self.prog.opaque.contains(&self.rg.base) && regionck::count(self.prog, sig.ret, 0).is_some_and(|c| c > 0);
-            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) && !opaque {
+            // (a placeholder instance (zustc check of a generic fn nothing calls) where a struct or an enum of the program
+            // bounds a type parameter by 'static: its types' well-formedness may need T: 'static (`None::<Static<T>>`
+            // with `struct Static<T: 'static>(T)`, E0310))
+            let static_bounds = n == 1 && regionck::placeholder_static_bounds(self.prog, &self.rg.inst_args);
+            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) && !opaque && !static_bounds {
                 self.rg.on = false;
                 let se = f.sig.recv.as_ref().is_some_and(|r| r.starts_with('&'));
                 self.rg.late = Some((se, f.sig.recv.is_some() && !se));

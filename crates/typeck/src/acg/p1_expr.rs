@@ -708,6 +708,20 @@ impl Cx<'_> {
     }
 
     fn expr_at(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (the type arguments a path writes are well formed: `None::<Static<T>>` with `struct Static<T: 'static>(T)`)
+        if self.rg.on && self.inline_depth == 0 {
+            let p = match e {
+                Expr::Path(_, p) => Some(p),
+                Expr::Call(f, ..) => match &**f {
+                    Expr::Path(_, p) => Some(p),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(p) = p.filter(|p| p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(_))))) {
+                self.rg_path_wf(p, super::borrowck::pos(e));
+            }
+        }
         // (the places inside a sub-expression are accesses of their own)
         let pd = std::mem::take(&mut self.bk.place_depth);
         let hint_only = std::mem::take(&mut self.bk.move_mut_hint);

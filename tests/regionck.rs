@@ -3771,3 +3771,13 @@ fn part23_review() {
     let d = check("struct Bufferfor<'a>(&'a u32);\ntrait Get<A> { fn get(&self) -> A; }\nfn bad<'a, F: Get<Bufferfor<'a>>>(f: F) {\n    f.get();\n    let _x = f;\n    let _y = f;\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("use of moved value"), "{d:?}");
 }
+
+#[test]
+fn part24_static_bound_adt_wf() {
+    // (a struct that bounds its type parameter by 'static: a type written in a generic fn nothing calls needs
+    // T: 'static (E0310), in an annotation and in a path's type arguments
+    // (regions/wf-bound-region-in-local-issue-115175.rs))
+    let d = check("struct Static<T: 'static>(T);\nfn a<T>() {\n    let _: Option<Static<T>> = None;\n}\nfn b<T>() {\n    let _ = None::<Static<T>>;\n}\nfn c<T>() {\n    let _ = Vec::<Static<T>>::new();\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![3, 6, 9] && d.iter().all(|x| x.1.contains("E0310")), "{d:?}");
+    assert_eq!(check("struct Static<T: 'static>(T);\nfn d<T: 'static>() {\n    let _ = None::<Static<T>>;\n    let _: Option<Static<T>> = None;\n}\nfn main() {}\n"), vec![]);
+}

@@ -610,6 +610,30 @@ fn bound_targ_ptys(prog: &Program, sid: u32, tr: &str) -> Option<(Vec<PTy>, Vec<
     Some((args, lts))
 }
 
+/// A struct or an enum in t (under references, boxes, slices, arrays, type arguments) whose definition bounds a type
+/// parameter by 'static (`struct Static<T: 'static>(T)`)
+fn has_static_bound_adt(prog: &Program, t: Ty, depth: u32) -> bool {
+    if depth > 16 {
+        return false;
+    }
+    match t {
+        Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Slice(i) | Ty::Array(i, _) => has_static_bound_adt(prog, *i, depth + 1),
+        Ty::Struct(s) => {
+            let b = prog.base_of(s);
+            prog.adt_regions.get(&b).is_some_and(|r| r.ty_outlives.iter().any(|&(_, c)| c == R_STATIC)) || prog.structs[s as usize].args.iter().any(|&a| has_static_bound_adt(prog, a, depth + 1))
+        }
+        _ => false,
+    }
+}
+
+/// A placeholder instance (zustc check of a generic fn nothing calls) in a program one of whose own structs or enums
+/// bounds a type parameter by 'static (`struct Static<T: 'static>(T)`): its types' well-formedness may need T: 'static
+/// (`None::<Static<T>>`, E0310), so its region check is on with the placeholder's region alone
+pub(crate) fn placeholder_static_bounds(prog: &Program, inst_args: &[Ty]) -> bool {
+    inst_args.iter().any(|&t| matches!(t, Ty::Struct(s) if prog.is_placeholder(s)))
+        && prog.adt_regions.iter().any(|(&b, r)| r.ty_outlives.iter().any(|&(_, c)| c == R_STATIC) && prog.struct_item.get(b as usize).is_some_and(|&i| i < prog.prelude_from))
+}
+
 /// A closure's captures: their types (among its type arguments: a capture by reference is a pointer to it) and
 /// whether each is held by value
 fn captures(prog: &Program, sid: u32) -> Option<(&[Ty], &[bool])> {
@@ -1906,7 +1930,9 @@ impl RgSt {
                             }
                         }
                         for (tp, b) in &ar.ty_outlives {
-                            let (Some(g), Some(&y)) = (bd.generics.iter().position(|x| x == tp), own.get(*b as usize)) else { continue };
+                            // (`T: 'static` too: `struct Static<T: 'static>(T)` makes `Static<T>` need T: 'static)
+                            let y = if *b == R_STATIC { Some(&STATIC) } else { own.get(*b as usize) };
+                            let (Some(g), Some(&y)) = (bd.generics.iter().position(|x| x == tp), y) else { continue };
                             if let Some(Some(at)) = args.get(g) {
                                 for &x in at {
                                     self.imp_rel(x, y);
@@ -2178,7 +2204,7 @@ impl Cx<'_> {
         }
         let nuniv = rg.univ.len();
         // (or a signature that writes 'static: `fn f(x: isize) -> &'static [isize]`)
-        rg.on = force || nuniv >= 2 || (nuniv >= 1 && (rs.is_some() || has_dyn(prog, ret_t, 0))) || rs.is_some_and(Self::needs_static) || (opaque && rg.ret.is_some());
+        rg.on = force || nuniv >= 2 || (nuniv >= 1 && (rs.is_some() || has_dyn(prog, ret_t, 0) || placeholder_static_bounds(prog, &rg.inst_args))) || rs.is_some_and(Self::needs_static) || (opaque && rg.ret.is_some());
         if rg.on {
             for (i, &(loc, t)) in params.iter().enumerate() {
                 if let Some(tr) = trees[i].clone() {
@@ -3391,6 +3417,33 @@ impl Cx<'_> {
     }
 
     /// `let x: ann;` (`let _: ann;`): the annotation's type is well formed; x's tree is of it
+    /// The type arguments a path writes, in an expression (`None::<Static<T>>`, `Vec::<&'a u8>::new()`): well formed
+    pub(crate) fn rg_path_wf(&mut self, p: &crate::parse::Path, sp: Sp) {
+        let prog = self.prog;
+        for seg in &p.segs {
+            for a in &seg.args {
+                let GArg::Ty(pt) = a else { continue };
+                if crate::ast_summary::has_infer(pt) {
+                    continue;
+                }
+                let Ok(t) = self.parse_ty(pt) else { continue };
+                // (only a type with a struct or an enum that bounds a type parameter by 'static: other requirements
+                // (`None::<&'a A>`'s A: 'a) may hold by what a parameter's projection implies, which is not followed
+                // (implied-bounds/normalization.rs))
+                if !has_static_bound_adt(prog, t, 0) {
+                    continue;
+                }
+                let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut codes = vec![];
+                s.slots(pt, false, &mut codes);
+                let lts = self.rg.lts.clone();
+                if let Some(tree) = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var()) {
+                    self.rg.wf(prog, t, &tree, sp);
+                }
+            }
+        }
+    }
+
     pub(crate) fn rg_let_uninit(&mut self, name: Option<&str>, ann: &PTy, sp: Sp) {
         // (or a projection whose associated type's value names lifetimes, as for a `let` with an initializer:
         // `let x: <() as Foo>::Out; x = r;` with `type Out = &'static u32`)
