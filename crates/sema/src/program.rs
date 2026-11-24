@@ -5218,29 +5218,98 @@ impl Program {
     /// Whether the references in two types' struct arguments agree, `&` and `&mut` apart (match_ty does not tell them
     /// apart), past any references around the two: `Either<&L, &R>` is not `Either<&mut i32, &mut u8>`'s self type, and
     /// `&W<&T>` (a `&self` receiver) is not `W<&mut i32>`'s
-    /// Whether two impls' self types could be one type, each type parameter standing for any type (`Cake<T>` and
-    /// `Cake<Box<U>>` could; `W<i32>` and `W<u8>`, `Either<&L, &R>` and `Either<&mut L, &mut R>` could not)
+    /// Whether two impls' self types could be one type: they unify, each impl's type and const parameters its own
+    /// (`Cake<T>` and `Cake<Box<U>>` could, `[u8; N]` and `[u8; 1]` at N = 1, `fn(T)` and `fn(i32)`; `W<i32>` and
+    /// `W<u8>` could not, nor `Either<&L, &R>` and `Either<&mut L, &mut R>`, nor `W<T, T>` and `W<u8, u16>`)
     pub fn self_tys_overlap(&self, a: Ty, b: Ty) -> bool {
-        fn ov(p: &Program, a: Ty, b: Ty, depth: u32) -> bool {
-            if depth > 16 {
-                return true;
-            }
-            match (a, b) {
-                (Ty::Param(_), _) | (_, Ty::Param(_)) => true,
-                (Ty::Ref(m, x), Ty::Ref(n, y)) | (Ty::Ptr(m, x), Ty::Ptr(n, y)) => m == n && ov(p, *x, *y, depth + 1),
-                (Ty::Box(x), Ty::Box(y)) | (Ty::Slice(x), Ty::Slice(y)) => ov(p, *x, *y, depth + 1),
-                (Ty::Array(x, n), Ty::Array(y, k)) => n == k && ov(p, *x, *y, depth + 1),
-                (Ty::Struct(x), Ty::Struct(y)) if x != y => {
-                    if p.base_of(x) != p.base_of(y) {
-                        return false;
+        use crate::types::CONST_LEN_BASE;
+        // (a binding: of impl s's parameter, to a type of impl s2; of its const parameter, to a length of s2's)
+        struct U<'a> {
+            p: &'a Program,
+            tys: FxMap<(u8, u8), (u8, Ty)>,
+            lens: FxMap<(u8, u32), (u8, u32)>,
+        }
+        impl U<'_> {
+            fn len(&mut self, sa: u8, n: u32, sb: u8, k: u32) -> bool {
+                let (mut sa, mut n, mut sb, mut k) = (sa, n, sb, k);
+                while n >= CONST_LEN_BASE {
+                    match self.lens.get(&(sa, n)) {
+                        Some(&(s2, n2)) => {
+                            sa = s2;
+                            n = n2;
+                        }
+                        None => break,
                     }
-                    let (xa, ya) = (&p.structs[x as usize].args, &p.structs[y as usize].args);
-                    xa.len() != ya.len() || xa.iter().zip(ya).all(|(&u, &v)| ov(p, u, v, depth + 1))
                 }
-                _ => a == b,
+                while k >= CONST_LEN_BASE {
+                    match self.lens.get(&(sb, k)) {
+                        Some(&(s2, k2)) => {
+                            sb = s2;
+                            k = k2;
+                        }
+                        None => break,
+                    }
+                }
+                match (n >= CONST_LEN_BASE, k >= CONST_LEN_BASE) {
+                    (true, true) if sa == sb && n == k => true,
+                    (true, _) => {
+                        self.lens.insert((sa, n), (sb, k));
+                        true
+                    }
+                    (_, true) => {
+                        self.lens.insert((sb, k), (sa, n));
+                        true
+                    }
+                    _ => n == k,
+                }
+            }
+            fn ty(&mut self, sa: u8, a: Ty, sb: u8, b: Ty, depth: u32) -> bool {
+                if depth > 32 {
+                    return true;
+                }
+                if let Ty::Param(x) = a {
+                    if let Some(&(s2, t2)) = self.tys.get(&(sa, x)) {
+                        return self.ty(s2, t2, sb, b, depth + 1);
+                    }
+                }
+                if let Ty::Param(y) = b {
+                    if let Some(&(s2, t2)) = self.tys.get(&(sb, y)) {
+                        return self.ty(sa, a, s2, t2, depth + 1);
+                    }
+                }
+                match (a, b) {
+                    (Ty::Param(x), Ty::Param(y)) if sa == sb && x == y => true,
+                    (Ty::Param(x), _) => {
+                        self.tys.insert((sa, x), (sb, b));
+                        true
+                    }
+                    (_, Ty::Param(y)) => {
+                        self.tys.insert((sb, y), (sa, a));
+                        true
+                    }
+                    // (an associated type, `T::Item`, may be any type)
+                    (Ty::Assoc(_), _) | (_, Ty::Assoc(_)) => true,
+                    (Ty::Ref(m, x), Ty::Ref(n, y)) | (Ty::Ptr(m, x), Ty::Ptr(n, y)) => m == n && self.ty(sa, *x, sb, *y, depth + 1),
+                    (Ty::Box(x), Ty::Box(y)) | (Ty::Slice(x), Ty::Slice(y)) => self.ty(sa, *x, sb, *y, depth + 1),
+                    (Ty::Array(x, n), Ty::Array(y, k)) => self.len(sa, n, sb, k) && self.ty(sa, *x, sb, *y, depth + 1),
+                    (Ty::Fn(f), Ty::Fn(g)) => {
+                        f.params.len() == g.params.len()
+                            && f.params.iter().zip(&g.params).all(|(&u, &v)| self.ty(sa, u, sb, v, depth + 1))
+                            && self.ty(sa, f.ret, sb, g.ret, depth + 1)
+                    }
+                    (Ty::Struct(x), Ty::Struct(y)) => {
+                        let p = self.p;
+                        if p.base_of(x) != p.base_of(y) {
+                            return false;
+                        }
+                        let (xa, ya) = (p.structs[x as usize].args.clone(), p.structs[y as usize].args.clone());
+                        xa.len() != ya.len() || xa.iter().zip(&ya).all(|(&u, &v)| self.ty(sa, u, sb, v, depth + 1))
+                    }
+                    _ => a == b,
+                }
             }
         }
-        ov(self, a, b, 0)
+        U { p: self, tys: FxMap::default(), lens: FxMap::default() }.ty(0, a, 1, b, 0)
     }
 
     pub fn arg_refs_agree(&self, a: Ty, b: Ty) -> bool {
