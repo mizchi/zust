@@ -226,6 +226,7 @@ run-pass	associated-types/associated-types-duplicate-binding-in-env.rs
 compile-fail	associated-types/associated-types-eq-3.rs
 compile-fail	associated-types/associated-types-eq-expr-path.rs
 run-pass	associated-types/associated-types-eq-obj.rs
+compile-fail	associated-types/associated-types-for-unimpl-trait.rs
 run-pass	associated-types/associated-types-from-supertrait.rs
 run-pass	associated-types/associated-types-impl-redirect.rs
 compile-fail	associated-types/associated-types-in-ambiguous-context.rs
@@ -241,6 +242,8 @@ run-pass	associated-types/associated-types-issue-21212.rs
 run-pass	associated-types/associated-types-iterator-binding.rs
 run-pass	associated-types/associated-types-method.rs
 run-pass	associated-types/associated-types-nested-projections.rs
+compile-fail	associated-types/associated-types-no-suitable-supertrait-2.rs
+compile-fail	associated-types/associated-types-no-suitable-supertrait.rs
 run-pass	associated-types/associated-types-normalize-in-bounds-binding.rs
 check-pass	associated-types/associated-types-normalize-in-bounds-ufcs.rs
 check-pass	associated-types/associated-types-normalize-in-bounds.rs
@@ -252,6 +255,7 @@ check-pass	associated-types/associated-types-projection-bound-in-supertraits.rs
 run-pass	associated-types/associated-types-projection-in-object-type.rs
 run-pass	associated-types/associated-types-projection-in-supertrait.rs
 run-pass	associated-types/associated-types-projection-in-where-clause.rs
+compile-fail	associated-types/associated-types-projection-to-unrelated-trait-in-method-without-default.rs
 check-pass	associated-types/associated-types-projection-to-unrelated-trait.rs
 check-pass	associated-types/associated-types-qualified-path-with-trait-with-type-parameters.rs
 run-pass	associated-types/associated-types-ref-from-struct.rs
@@ -7936,6 +7940,8 @@ compile-fail	where-clauses/method-suggestion-no-duplication.rs
 compile-fail	where-clauses/normalization-of-unknown-type.rs
 run-pass	where-clauses/obligation-error-propagation.rs
 check-pass	where-clauses/where-clause-bounds-inconsistency.rs
+compile-fail	where-clauses/where-clause-constraints-are-local-for-inherent-impl.rs
+compile-fail	where-clauses/where-clause-constraints-are-local-for-trait-impl.rs
 run-pass	where-clauses/where-clause-early-bound-lifetimes.rs
 run-pass	where-clauses/where-clause-method-substituion-rpass.rs
 check-pass	where-clauses/where-clause-on-struct-definitions.rs

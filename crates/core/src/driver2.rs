@@ -1639,6 +1639,47 @@ impl Session2 {
                 }
             }
         }
+        // (E0277: a trait's method that names `<Self as Tr>::X` needs `Self: Tr`: the trait itself, one of its
+        // supertraits (all the way up), or the method's own `where Self: Tr`; a trait of the program's)
+        if !prog.tdb.user.is_empty() {
+            for (ii, it) in items.iter().enumerate().take(user.min(items.len())) {
+                let ItemKind::TraitMember(h) = it.kind else { continue };
+                let Some(own) = sums.get(h as usize).and_then(|s| s.trait_decl.clone()) else { continue };
+                let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
+                let head = text.split('{').next().unwrap_or("").split(';').next().unwrap_or("");
+                let mut supers: Vec<String> = vec![own.clone()];
+                let mut k = 0;
+                while k < supers.len() {
+                    let t = supers[k].clone();
+                    for sup in prog.trait_supers.get(&t).into_iter().flatten() {
+                        let n = sup.split('<').next().unwrap_or(sup).trim();
+                        let n = n.rsplit("::").next().unwrap_or(n).to_string();
+                        if !n.starts_with('#') && !supers.contains(&n) {
+                            supers.push(n);
+                        }
+                    }
+                    k += 1;
+                }
+                for (at, _) in head.match_indices("<Self as ") {
+                    let rest = &head[at + 9..];
+                    let n: String = rest.chars().take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':').collect();
+                    let n = n.rsplit("::").next().unwrap_or(&n).to_string();
+                    if !prog.tdb.user.contains(&n) || supers.contains(&n) {
+                        continue;
+                    }
+                    // (the method's own where clause: `where Self: Tr`)
+                    let given = head.split("where").nth(1).is_some_and(|w| {
+                        w.split(',').any(|p| {
+                            let mut sp = p.splitn(2, ':');
+                            sp.next().map(str::trim) == Some("Self") && sp.next().is_some_and(|b| b.split('+').any(|x| x.trim().split('<').next().map(str::trim) == Some(n.as_str())))
+                        })
+                    });
+                    if !given {
+                        return Err(format!("{}:1: the trait bound `Self: {n}` is not satisfied (E0277)", it.line));
+                    }
+                }
+            }
+        }
         // (E0277 / E0271: a non-generic fn's `-> impl Tr` return: the type its body gives holds Tr, by the trait solver
         // (`fn test() -> impl Test { () }` with no `impl Test for ()`))
         if let Some(e) = opaque_bound_error(&prog, &src, &items[..user.min(items.len())])? {

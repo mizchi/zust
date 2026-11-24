@@ -357,6 +357,52 @@ impl TraitDb {
         None
     }
 
+    /// A type parameter's placeholder t surely lacks std's trait tr (one of STD_EXACT): its bounds are all traits zustc
+    /// knows the supertraits of, and none of them gives tr (Copy gives Clone, Eq PartialEq, Ord Eq and PartialOrd,
+    /// PartialOrd PartialEq; the program's traits their recorded supertraits). Its bounds are its whole environment,
+    /// so this holds whatever the parameter is
+    pub fn placeholder_lacks(&self, p: &Program, t: Ty, tr: &str) -> bool {
+        let Ty::Struct(sid) = t else { return false };
+        let Some(bs) = &p.structs[sid as usize].placeholder else { return false };
+        if !STD_EXACT.contains(&tr) {
+            return false;
+        }
+        let std_gives = |b: &str, tr: &str| {
+            b == tr
+                || (b == "Copy" && tr == "Clone")
+                || (b == "Eq" && tr == "PartialEq")
+                || (b == "PartialOrd" && tr == "PartialEq")
+                || (b == "Ord" && matches!(tr, "Eq" | "PartialOrd" | "PartialEq"))
+        };
+        let mut todo: Vec<String> = bs.iter().map(|b| b.trim().to_string()).collect();
+        let mut seen: Vec<String> = vec![];
+        while let Some(b) = todo.pop() {
+            if b.starts_with('\'') || b.starts_with('?') || seen.contains(&b) {
+                continue;
+            }
+            seen.push(b.clone());
+            if b.contains('<') || b.contains('(') || b.contains('=') {
+                return false;
+            }
+            let n = b.rsplit("::").next().unwrap_or(&b).to_string();
+            if STD_EXACT.contains(&n.as_str()) {
+                if std_gives(&n, tr) {
+                    return false;
+                }
+            } else if self.user.contains(&n) {
+                for sup in p.trait_supers.get(&n).into_iter().flatten().chain(p.trait_marker_supers.get(&n).into_iter().flatten()) {
+                    if !sup.starts_with('#') {
+                        todo.push(sup.trim().to_string());
+                    }
+                }
+            } else if !matches!(n.as_str(), "Sized" | "Send" | "Sync" | "Unpin") {
+                // (a std trait zustc does not know the supertraits of)
+                return false;
+            }
+        }
+        true
+    }
+
     /// Whether a bound b of a type parameter gives it the auto trait tr: b itself, or a trait of the program's with
     /// tr among its supertraits, all the way up (Some(false): surely not; None: a trait zustc does not know)
     pub fn gives_auto(&self, p: &Program, b: &str, tr: &str) -> Option<bool> {

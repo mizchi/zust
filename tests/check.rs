@@ -509,3 +509,15 @@ fn trait_solver_opaque_std_traits_like_rustc() {
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
+
+/// A type parameter is Copy only by its bounds (a method's own where clause among them): a call needing it from a
+/// method without one is E0277, reported from the generic method nothing calls
+#[test]
+fn trait_solver_placeholder_lacks_copy() {
+    let src = "fn require_copy<T: Copy>(_x: T) {}\nstruct Bar<T> {\n    x: T,\n}\nimpl<T> Bar<T> {\n    fn needs_copy(self) where T: Copy {\n        require_copy(self.x);\n    }\n    fn fails_copy(self) {\n        require_copy(self.x);\n    }\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].line, 10, "{d:?}");
+    assert!(d[0].msg.contains("`T: Copy` is not satisfied"), "{d:?}");
+}

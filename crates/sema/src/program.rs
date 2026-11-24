@@ -725,6 +725,11 @@ impl Insts {
                 };
                 // (the solver's `No` holds whatever the caller's type parameters are when t names no placeholder: it
                 // is reported from a placeholder instance too, marked so)
+                // (std's trait of a type parameter's placeholder that none of its bounds gives (`T: Copy` of `fn
+                // g<T>`): it holds whatever the caller's parameters are, so it is reported from a placeholder instance)
+                if prog.tdb.placeholder_lacks(prog, t, tr.trim()) {
+                    return Err(format!("{} {}", crate::traits::not_held(&prog.tn(t), tr.trim()), crate::traits::SOLVED_NO));
+                }
                 // (an auto trait of a type parameter's placeholder: only by its bounds (Coinductive.lean's csolve, with
                 // the bounds as the environment); it holds whatever the caller's parameters are, so it is reported from a
                 // placeholder instance too)
