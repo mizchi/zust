@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795544938613,
+  "lastUpdate": 1795544941465,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -101179,6 +101179,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/4997517a776925c7e209f3a3ac4e4339b56c24d5"
         },
         "date": 1795544591602,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 82.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 96.97,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.118,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 87.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.109,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "64e1919b015fd2b2595e2c22fcf08f552950042f",
+          "message": "Region check part 26: a &mut passed as a &, reborrows at coercion sites, call arguments' reborrows, a &mut in an aggregate (#145)\n\nRegion check part 26: a &mut passed as a &, reborrows at coercion sites, call arguments' reborrows, a &mut in an aggregate",
+          "timestamp": "2026-11-25T03:23:49+09:00",
+          "tree_id": "b6fd45a8bee4986484ff7567e7ad5604e2f835b8",
+          "url": "https://github.com/mizchi/zust/commit/64e1919b015fd2b2595e2c22fcf08f552950042f"
+        },
+        "date": 1795544940894,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
