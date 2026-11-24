@@ -137,6 +137,15 @@ pub unsafe fn __core_read<T>(p: *const T) -> T {
 pub unsafe fn __core_write<T>(p: *mut T, v: T) {
     unsafe { p.write(v) }
 }
+// (`ptr::swap`: of two raw pointers, which may be the same. Not `mem::swap`'s two `&mut`, which the borrow check
+// would take for two unique borrows (`ptr::swap(test, test)`))
+pub unsafe fn __core_ptr_swap<T>(a: *mut T, b: *mut T) {
+    unsafe {
+        let t = a.read();
+        a.write(b.read());
+        b.write(t);
+    }
+}
 // `T::default()` / `Default::default()` / derive(Default): 本体は型ごとに codegen が作る
 // (0 で埋めてから、手書きの impl Default を持つフィールドはそれを呼ぶ)
 fn __exr_default<T>() -> T {
@@ -5530,6 +5539,10 @@ pub trait __FWr {
         let mut s = String::new();
         s.push(c);
         self.write_str(&s)
+    }
+    // (`fmt::Write::write_fmt(&mut w, format_args!(..))`: format_args! makes a String here, an `Arguments` holds one)
+    fn write_fmt<A: Display>(&mut self, args: A) -> Result<(), __FmtError> {
+        self.write_str(&format!("{}", args))
     }
 }
 

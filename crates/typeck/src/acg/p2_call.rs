@@ -2659,7 +2659,12 @@ impl Cx<'_> {
     pub(crate) fn check_unsafe_call(&self, id: u32, pos: Sp) -> R<()> {
         if self.unsafe_ok == 0 && pos.line != 0 && self.prog.sigs[id as usize].is_unsafe {
             let n = self.prog.names[id as usize].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
-            return err(pos, format!("call to unsafe function `{}` is unsafe and requires unsafe block (E0133)", n.strip_prefix("__core_").unwrap_or(n)));
+            // (`__core_ptr_swap` is `ptr::swap`, kept apart from `mem::swap`'s `__core_swap`)
+            let shown = match n.strip_prefix("__core_").unwrap_or(n) {
+                "ptr_swap" => "ptr::swap",
+                x => x,
+            };
+            return err(pos, format!("call to unsafe function `{shown}` is unsafe and requires unsafe block (E0133)"));
         }
         Ok(())
     }
@@ -2680,10 +2685,23 @@ impl Cx<'_> {
         let t0 = self.bk.call_temps.len();
         self.rg.depth += 1;
         let ha = std::mem::replace(&mut self.bk.hold_args, act.is_some());
+        let aa0 = std::mem::take(&mut self.bk.arg_acts);
         let r = self.call_fn_inner(id, recv, args, turbofish, expected, span);
+        let arg_acts = std::mem::replace(&mut self.bk.arg_acts, aa0);
         self.bk.hold_args = ha;
         // (the arguments are evaluated and their loans still live: the reservation ends, the `&mut` loan is taken)
         if let Some((ev, tid)) = act {
+            if self.bk_on() {
+                self.bk_ev(borrowck::Ev::Acc(borrowck::BPlace { local: tid, proj: vec![] }, borrowck::Acc::Read, SP));
+                self.bk_ev(borrowck::Ev::Dead(tid, SP));
+                if let Some(t) = self.bk.call_temps.iter_mut().rev().find(|t| **t == tid) {
+                    *t = u32::MAX;
+                }
+            }
+            self.bk_push(Some(ev));
+        }
+        // (and the arguments' implicit `&mut` reborrows, the same way)
+        for (ev, tid) in arg_acts {
             if self.bk_on() {
                 self.bk_ev(borrowck::Ev::Acc(borrowck::BPlace { local: tid, proj: vec![] }, borrowck::Acc::Read, SP));
                 self.bk_ev(borrowck::Ev::Dead(tid, SP));
@@ -2970,7 +2988,14 @@ impl Cx<'_> {
             // (the call's `&mut self` is taken after its arguments: what one that holds references borrows is held
             // until then)
             let hold = self.bk_on() && self.bk.hold_args;
-            if top_ref || hold {
+            // (a call's result passed for a reference: the loans it holds live until the call too, as a `&x`
+            // argument's: `f(x, id(&*x))` conflicts when the first argument's reborrow is taken)
+            let ref_result = self.bk_on()
+                && !top_ref
+                && !hold
+                && matches!(strip_paren(a), Expr::Call(..) | Expr::MethodCall(..))
+                && matches!((pt, self.prog.partial_subst(pt, &sol)), (Ty::Ref(..), _) | (_, Ty::Ref(..)));
+            if top_ref || hold || ref_result {
                 self.bk_frame();
             }
             let r = self.expr(a, exp);
@@ -2980,6 +3005,10 @@ impl Cx<'_> {
                     self.bk_call_temp_all(&srcs);
                 }
             }
+            if ref_result {
+                let srcs = self.bk_frame_end();
+                self.bk_call_temp(&srcs, true);
+            }
             // (also where a type parameter the call already knows is a `&mut` (`v.push(c.raw)` with v: `Vec<&mut T>`),
             // as rustc's coercion to the expected type)
             // (and where a `&` is: a shared reborrow, `pick(x, &b)` is `pick(&*x, &b)`)
@@ -2987,7 +3016,7 @@ impl Cx<'_> {
             // `let r = pick(x, &b); *x = 1; use(r)` is E0506)
             match (pt, self.prog.partial_subst(pt, &sol)) {
                 (Ty::Ref(m, _), _) | (_, Ty::Ref(m, _)) => {
-                    if let Some(ln) = self.bk_reborrow_arg(a, m) {
+                    if let Some(ln) = self.bk_reborrow_arg(a, m, true) {
                         if !self.rg.on && self.bk_ret_from(id, i + skip) {
                             self.bk.src(borrowck::Src::Loan(ln));
                         }
