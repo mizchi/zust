@@ -38,7 +38,7 @@ export default grammar({
       ),
 
     attribute: ($) => seq('@', field('name', alias(choice('wasm', 'simd'), $.attribute_name)), optional(seq('(', $.identifier, ')'))),
-    visibility: (_) => 'pub',
+    visibility: (_) => choice('export', 'pub'),
 
     type_item: ($) =>
       seq(optional($.visibility), 'type', field('name', $.type_identifier), optional($.type_parameters), '=', $.record_type),

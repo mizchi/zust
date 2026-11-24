@@ -14,14 +14,14 @@ wasm {
   fn sq(x: f64) -> f64 { x * x }
 }
 
-pub wasm fn mean(xs: &[f64]) -> f64 {
+export wasm fn mean(xs: &[f64]) -> f64 {
     if xs.is_empty() { return 0.0; }
     let mut s = 0.0;
     for x in xs { s += *x; }
     s / xs.len() as f64
 }
 
-pub wasm fn stddev(xs: &[f64]) -> f64 {
+export wasm fn stddev(xs: &[f64]) -> f64 {
     let m = mean(xs);
     let mut s = 0.0;
     for x in xs { s += sq(*x - m); }
@@ -29,19 +29,19 @@ pub wasm fn stddev(xs: &[f64]) -> f64 {
 }
 
 /// a borrowed callback: valid only during the call (the glue releases it when the call returns)
-pub wasm fn map_sum(xs: &[f64], f: &dyn Fn(f64) -> f64) -> f64 {
+export wasm fn map_sum(xs: &[f64], f: &dyn Fn(f64) -> f64) -> f64 {
     let mut s = 0.0;
     for x in xs { s += f(*x); }
     s
 }
 
 /// an owned callback: the wasm side keeps it; JS releases it when Rust drops the Box
-pub wasm fn call_twice(f: Box<dyn Fn(i32) -> i32>, x: i32) -> i32 {
+export wasm fn call_twice(f: Box<dyn Fn(i32) -> i32>, x: i32) -> i32 {
     let g = f;
     g(g(x))
 }
 
-pub wasm fn histogram(xs: &[f64], buckets: i32) -> Vec<i32> {
+export wasm fn histogram(xs: &[f64], buckets: i32) -> Vec<i32> {
     let mut h = vec![0i32; buckets as usize];
     let mut lo = f64::MAX;
     let mut hi = f64::MIN;
@@ -54,7 +54,7 @@ pub wasm fn histogram(xs: &[f64], buckets: i32) -> Vec<i32> {
     h
 }
 
-pub wasm fn shout(s: &str) -> String {
+export wasm fn shout(s: &str) -> String {
     let mut out = String::new();
     for c in s.chars() { out.push(c.to_ascii_uppercase()); }
     out.push_str("!");
@@ -63,7 +63,7 @@ pub wasm fn shout(s: &str) -> String {
 
 // ---- the JS layer
 
-pub fn stats(s: Sample) -> Stats {
+export fn stats(s: Sample) -> Stats {
   let m = mean(s.values);
   Stats { mean: m, stddev: stddev(s.values), max: s.values.fold(0.0, (a, x) => if x > a { x } else { a }) }
 }
@@ -75,7 +75,7 @@ fn bar(n: i32) -> Jsx {
   <span className="bar" style={BarStyle { width: (n * 10).to_string() + "px" }}>{n}</span>
 }
 
-pub fn Row(props: RowProps) -> Jsx {
+export fn Row(props: RowProps) -> Jsx {
   let st = stats(props.sample);
   <li onClick={() => props.onPick(props.sample.label)}>
     <b>{props.sample.label}</b> mean {st.mean.to_string()}, stddev {st.stddev.to_string()}
@@ -83,7 +83,7 @@ pub fn Row(props: RowProps) -> Jsx {
   </li>
 }
 
-pub fn App(props: AppProps) -> Jsx {
+export fn App(props: AppProps) -> Jsx {
   let (picked, setPicked) = useState("none");
   <>
     <h1>{shout("samples")}</h1>
@@ -92,7 +92,7 @@ pub fn App(props: AppProps) -> Jsx {
   </>
 }
 
-pub fn demo() -> String {
+export fn demo() -> String {
   let xs = [1.0, 2.0, 3.0, 4.0];
   let squares = map_sum(xs, (x) => x * x);
   let twice = call_twice((x) => x * 3, 7);

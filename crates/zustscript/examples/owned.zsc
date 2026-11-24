@@ -54,7 +54,7 @@ enum Shape { Polygon(Poly, i32), Empty }
 // arrays of arrays, and a fold that pushes into its accumulator (in place too)
 @wasm fn rows(n: i32) -> Array<Array<f64>> { range(0, n).fold([], (acc, i) => acc.push(ramp(i))) }
 
-@wasm pub fn summary(n: i32) -> Array<f64> {
+@wasm export fn summary(n: i32) -> Array<f64> {
   let ps = polys(n);
   let ss = shapes(n);
   let area = ss.fold(0.0, (acc, s) => acc + shape_area(s));
@@ -69,8 +69,8 @@ enum Shape { Polygon(Poly, i32), Empty }
 }
 
 // pushes 0..n one at a time: quadratic if each push copied the array
-@wasm pub fn ramp_sum(n: i32) -> f64 { ramp(n).fold(0.0, (s, x) => s + x) }
+@wasm export fn ramp_sum(n: i32) -> f64 { ramp(n).fold(0.0, (s, x) => s + x) }
 
 // across the boundary: an owned array parameter, and a borrowed result (an adapter converts for the glue)
-@wasm pub fn appended(xs: Array<f64>, x: f64) -> Array<f64> { xs.push(x) }
-@wasm pub fn longer(a: Array<f64>, b: Array<f64>) -> Array<f64> { if a.len() >= b.len() { a } else { b } }
+@wasm export fn appended(xs: Array<f64>, x: f64) -> Array<f64> { xs.push(x) }
+@wasm export fn longer(a: Array<f64>, b: Array<f64>) -> Array<f64> { if a.len() >= b.len() { a } else { b } }

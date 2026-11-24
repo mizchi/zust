@@ -9,13 +9,13 @@ type TodoItemProps = { todo: Todo, onToggle: fn(i32) -> () }
 type TodoListProps = { todos: Array<Todo>, onToggle: fn(i32) -> (), title: String }
 type AppProps = { initial: Array<Todo> }
 
-pub fn TodoItem(props: TodoItemProps) -> Jsx {
+export fn TodoItem(props: TodoItemProps) -> Jsx {
   <li className={if props.todo.done { "done" } else { "" }} onClick={() => props.onToggle(props.todo.id)}>
     {props.todo.title}
   </li>
 }
 
-pub fn TodoList(props: TodoListProps) -> Jsx {
+export fn TodoList(props: TodoListProps) -> Jsx {
   <section>
     <h2>{props.title}</h2>
     <ul>{props.todos |> .map((t) => <TodoItem key={t.id} todo={t} onToggle={props.onToggle} />)}</ul>
@@ -26,7 +26,7 @@ fn toggle(todos: Array<Todo>, id: i32) -> Array<Todo> {
   todos |> .map((t) => if t.id == id { Todo { done: !t.done, ..t } } else { t })
 }
 
-pub fn App(props: AppProps) -> Jsx {
+export fn App(props: AppProps) -> Jsx {
   let (todos, setTodos) = useState(props.initial);
   <TodoList title="todo" todos={todos} onToggle={(id) => setTodos(toggle(todos, id))} />
 }
@@ -34,6 +34,6 @@ pub fn App(props: AppProps) -> Jsx {
 // a value with a few fields that only this function uses still needs a named type
 type Stats = { total: i32, done: i32 }
 
-pub fn stats(todos: Array<Todo>) -> Stats {
+export fn stats(todos: Array<Todo>) -> Stats {
   Stats { total: todos.len(), done: todos.filter((t) => t.done).len() }
 }

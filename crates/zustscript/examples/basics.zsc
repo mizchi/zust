@@ -8,14 +8,14 @@ enum Filter { All, Active, Done }
 enum Option<T> { None, Some(T) }
 type Todo = { id: i32, title: String, done: bool }
 
-pub fn area(s: Shape) -> f64 {
+export fn area(s: Shape) -> f64 {
   match s {
     Circle(_, r) => 3.141592653589793 * r * r,
     Rect(a, b) => ((b.x - a.x) * (b.y - a.y)).abs(),
   }
 }
 
-pub fn visible(todos: Array<Todo>, f: Filter) -> Array<Todo> {
+export fn visible(todos: Array<Todo>, f: Filter) -> Array<Todo> {
   todos |> .filter((t) => match f {
     All => true,
     Active => !t.done,
@@ -33,11 +33,11 @@ fn find_title(todos: Array<Todo>, id: i32) -> Option<String> {
 }
 
 // num-traits style: one source, one JS function per numeric type (the arithmetic differs)
-pub fn sum<T: Num>(xs: Array<T>) -> T {
+export fn sum<T: Num>(xs: Array<T>) -> T {
   xs.fold(T::zero(), (acc, x) => acc + x)
 }
 
-pub fn mean(xs: Array<f64>) -> f64 {
+export fn mean(xs: Array<f64>) -> f64 {
   sum(xs) / (xs.len() as f64)
 }
 
@@ -48,7 +48,7 @@ fn describe(o: Option<String>) -> String {
   }
 }
 
-pub fn main() -> () {
+export fn main() -> () {
   let todos = [
     Todo { id: 1, title: "write the parser", done: true },
     Todo { id: 2, title: "type check", done: false },
