@@ -3890,3 +3890,10 @@ fn part25_where_clause_self_invariant() {
     let src = "trait Get { fn get(&self); }\nfn ok1<'a, G: 'a>() where &'a G: Get { impls_get::<&'a G>(); }\nfn ok2<'min, 'max, G: 'max>() where 'max: 'min, 'min: 'max, &'max G: Get { impls_get::<&'min G>(); }\nfn impls_get<G>() where G: Get {}\nfn main() {}\n";
     assert_eq!(check(src), vec![]);
 }
+
+#[test]
+fn part25_assoc_placeholder_copy() {
+    // (a placeholder's associated type is taken for Copy: its trait's where clause may make it so
+    // (associated-type-bounds/assoc-type-bound-through-where-clause.rs, rustc accepts it))
+    assert_eq!(check("trait Op where Self::Output: Copy { type Output; }\nfn duplicate<T: Op>(x: T::Output) -> (T::Output, T::Output) {\n    (x, x)\n}\nfn main() {}\n"), vec![]);
+}

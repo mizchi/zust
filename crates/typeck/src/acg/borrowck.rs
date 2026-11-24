@@ -710,8 +710,10 @@ pub fn is_copy(prog: &Program, t: Ty, depth: u32) -> bool {
             }
             // (a type parameter's placeholder: Copy when its bounds say so)
             // (a bound with Copy among its supertraits too, `T: Num` of `trait Num: Copy`)
+            // (a placeholder's associated type (`<T as Op>::Output#`): taken for Copy, as what makes it so may be
+            // a where clause of its trait (`trait Op where Self::Output: Copy`) or of the fn, which are not read)
             if let Some(bs) = &sd.placeholder {
-                return bs.iter().any(|b| prog.bound_implies(b, &["Copy"], false, 0));
+                return sd.name.starts_with('<') || bs.iter().any(|b| prog.bound_implies(b, &["Copy"], false, 0));
             }
             if prog.closure_of_struct.contains_key(&prog.base_of(sid)) || prog.is_tuple(sid) {
                 return sd.fields.iter().all(|f| is_copy(prog, f.1, depth + 1));
