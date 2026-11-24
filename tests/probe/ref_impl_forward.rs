@@ -2,8 +2,8 @@
 // SeqAccess / Serialize impls do: with the trait's default methods defined, an associated type from A, a method's own
 // type parameter, the UFCS form `A::m(&mut **self, ..)`, and calls through a generic parameter; an impl whose method
 // does more than forward, with direct calls only (they reach the type's own method, as in rustc). And modules that
-// import `fmt::Write` and `io::Write` each for itself (a crate's `mod lib` re-exports io's): a fn's own `use`, and a
-// use tree that imports io's `Write` beside `fmt`
+// import `fmt::Write` and `io::Write` each for itself (a crate's `mod lib` re-exports io's): a fn's own `use`, a use
+// tree that imports io's `Write` beside `fmt`, a comment in a `use`, `Write::{self}`, and an alias to io's `Write`
 use std::fmt;
 
 trait Access {
@@ -116,6 +116,43 @@ mod tree {
     }
 }
 
+// (a comment inside a `use`, `Write::{self}`, and an alias that binds the name to io's trait)
+mod commented {
+    use std::fmt::Write /* formatter */;
+    pub struct Buf(pub String);
+    impl Write for Buf {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            self.0.push_str(s);
+            Ok(())
+        }
+    }
+    pub fn render<W: Write>(w: &mut W) {
+        w.write_str("commented").unwrap();
+    }
+}
+mod selfed {
+    use std::fmt::Write::{self};
+    pub struct Buf(pub String);
+    impl Write for Buf {
+        fn write_str(&mut self, s: &str) -> std::fmt::Result {
+            self.0.push_str(s);
+            Ok(())
+        }
+    }
+    pub fn render<W: Write>(w: &mut W) {
+        w.write_str("selfed").unwrap();
+    }
+}
+mod aliased {
+    #![allow(unused_imports)]
+    use std::fmt::*;
+    pub use std::io::Write as IoWrite;
+    pub use self::IoWrite as Write;
+    pub fn send<W: self::Write>(w: &mut W) {
+        let _ = w.write(b"x");
+    }
+}
+
 mod lib {
     pub use std::fmt::{self, Write as FmtWrite};
     pub use std::io::Write;
@@ -157,4 +194,11 @@ fn main() {
     net::send(&mut v);
     tree::send(&mut v).unwrap();
     println!("{} {:?}", net::render(), String::from_utf8(v).unwrap());
+    let mut c = commented::Buf(String::new());
+    commented::render(&mut c);
+    let mut d = selfed::Buf(String::new());
+    selfed::render(&mut d);
+    let mut x: Vec<u8> = vec![];
+    aliased::send(&mut x);
+    println!("{} {} {:?}", c.0, d.0, x);
 }

@@ -934,7 +934,8 @@ impl UseScopes {
 }
 
 /// What a `use` tree (the text after `use`, to its `;`) imports of a name: (from module m, from elsewhere), by each leaf's
-/// own path: `std::{fmt, io::Write}` imports io's `Write`; `fmt::*` counts as m's; `Write as W` binds W, not the name
+/// own path: `std::{fmt, io::Write}` imports io's `Write`; `fmt::*` counts as m's; `Write as W` binds W, not the name,
+/// and `IoWrite as Write` binds the name to another item
 fn classify_use(u: &str, m: &str, name: &str) -> (bool, bool) {
     // (the tokens: identifiers, `::`, `{`, `}`, `,`, `*`)
     let mut toks: Vec<&str> = vec![];
@@ -953,6 +954,31 @@ fn classify_use(u: &str, m: &str, name: &str) -> (bool, bool) {
         if c == b':' && b.get(i + 1) == Some(&b':') {
             toks.push("::");
             i += 2;
+            continue;
+        }
+        // (comments are whitespace: `use std::fmt::Write /* formatter */;`)
+        if c == b'/' && b.get(i + 1) == Some(&b'/') {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if c == b'/' && b.get(i + 1) == Some(&b'*') {
+            let mut d = 0;
+            while i < b.len() {
+                if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                    d += 1;
+                    i += 2;
+                } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
+                    d -= 1;
+                    i += 2;
+                    if d == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
             continue;
         }
         if matches!(c, b'{' | b'}' | b',' | b'*') {
@@ -1004,16 +1030,23 @@ fn classify_use(u: &str, m: &str, name: &str) -> (bool, bool) {
     trees(&toks, 0, &[], &mut leaves);
     let (mut from_m, mut other) = (false, false);
     for (p, alias) in &leaves {
+        // (`Write::{self}` imports `Write`)
+        let p = if p.len() > 1 && p.last() == Some(&"self") { &p[..p.len() - 1] } else { &p[..] };
         let Some((&last, pre)) = p.split_last() else { continue };
         let from = pre.last() == Some(&m);
         if last == "*" {
             from_m |= from;
-        } else if last == name && alias.is_none_or(|a| a == name) {
-            if from {
-                from_m = true;
-            } else {
-                other = true;
-            }
+            continue;
+        }
+        // (the name a leaf binds is its alias's, if it has one: `self::IoWrite as Write` binds `Write` to another
+        // item; `fmt::Write as FmtWrite` binds none of the name)
+        if alias.unwrap_or(last) != name {
+            continue;
+        }
+        if from && last == name {
+            from_m = true;
+        } else {
+            other = true;
         }
     }
     (from_m, other)

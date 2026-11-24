@@ -3927,7 +3927,7 @@ fn allows_lint(text: &str, lint: &str) -> bool {
 
 /// The first method of `impl<T: Tr> Tr for &T` that does more than forward to T's, which the program may reach through
 /// a generic parameter: it calls a method of that name (`.m(`, `.m::<`, `::m(`) outside the method, and it uses the
-/// trait as a bound (`N: Tr`, `+ Tr`, `impl Tr`, `dyn Tr`, `<X as Tr>`) outside the impl's header. A direct call
+/// trait as a bound (`N: Tr`, `N: crate::Tr`, `+ Tr`, `impl Tr`, `dyn Tr`, `<X as Tr>`) outside the impl's header. A direct call
 /// `s.m()` reaches X's own method, as rustc's probe takes it first; only a call through a bound would run the impl's
 /// (#144), as an error
 #[cold]
@@ -3946,14 +3946,27 @@ fn first_called_ref_impl_fn(src: &str, items: &[SrcItem], sums: &[Summary]) -> O
         let tr = tr.split('<').next().unwrap_or(tr).trim();
         // (`impl Tr for X` heading an impl is not a bound: `impl` counts only outside the impl headers)
         let in_header = |at: usize| items.iter().any(|i| i.kind == crate::lexer::ItemKind::ImplHeader && (i.start..i.end).contains(&at));
+        // (the token before the path the trait's name ends: `N: crate::Tr` is a bound too)
+        let path_start = |mut k: usize| {
+            while k >= 3 && sym(k - 1, ":") && sym(k - 2, ":") && toks[k - 3].0 == 0 {
+                k -= 3;
+            }
+            // (a path from the root, `::Tr`)
+            if k >= 2 && sym(k - 1, ":") && sym(k - 2, ":") {
+                k -= 2;
+            }
+            k
+        };
         let as_bound = (1..toks.len()).any(|k| {
-            toks[k].0 == 0
-                && tk(k) == tr
-                && !(hdr.start..hdr.end).contains(&toks[k].1)
-                && ((sym(k - 1, ":") && !(k >= 2 && sym(k - 2, ":")))
-                    || sym(k - 1, "+")
-                    || matches!(tk(k - 1), "dyn" | "as")
-                    || (tk(k - 1) == "impl" && !in_header(toks[k].1)))
+            if toks[k].0 != 0 || tk(k) != tr || (hdr.start..hdr.end).contains(&toks[k].1) {
+                return false;
+            }
+            let p = path_start(k);
+            p >= 1
+                && ((sym(p - 1, ":") && !(p >= 2 && sym(p - 2, ":")))
+                    || sym(p - 1, "+")
+                    || matches!(tk(p - 1), "dyn" | "as")
+                    || (tk(p - 1) == "impl" && !in_header(toks[k].1)))
         });
         if !as_bound {
             continue;
