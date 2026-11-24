@@ -2283,11 +2283,12 @@ impl Cx<'_> {
                 if fid.parse::<u32>().is_ok() {
                     return err(SP, "expected a field name");
                 }
+                // (at the field, as rustc: its value's position, on its line)
                 let Some(fi) = v.fields.iter().position(|f| f.0 == *fid) else {
-                    return err(SP, format!("variant `{}` has no field named `{fid}`", v.name));
+                    return Err(self.at(err_pos(fe), format!("variant `{}` has no field named `{fid}`", v.name)));
                 };
                 if args.iter().any(|&(i, _)| i == fi) {
-                    return err(SP, format!("field `{fid}` specified more than once"));
+                    return Err(self.at(err_pos(fe), format!("field `{fid}` specified more than once")));
                 }
                 args.push((fi, fe));
             }
@@ -2452,13 +2453,20 @@ impl Cx<'_> {
             return Ok(r);
         }
         let fields = self.prog.structs[sid as usize].fields.clone();
+        // (`Result { .. }`: an enum's name where a struct goes, E0574, at the literal)
+        if self.prog.structs[self.prog.base_of(sid) as usize].is_enum {
+            let n = self.prog.tn(Ty::Struct(self.prog.base_of(sid)));
+            let n = n.split('<').next().unwrap_or(&n).to_string();
+            return err(SP, format!("expected struct, variant or union type, found enum `{n}` (E0574)"));
+        }
         let mut args = vec![];
         for (name, fe) in sfields {
+            // (at the field, as rustc: its value's position, on its line)
             let Some(fi) = fields.iter().position(|f| f.0 == *name) else {
-                return err(SP, format!("struct `{}` has no field named `{name}`", self.prog.structs[sid as usize].name));
+                return Err(self.at(err_pos(fe), format!("struct `{}` has no field named `{name}`", self.prog.structs[sid as usize].name)));
             };
             if args.iter().any(|&(i, _)| i == fi) {
-                return err(SP, format!("field `{name}` specified more than once"));
+                return Err(self.at(err_pos(fe), format!("field `{name}` specified more than once")));
             }
             args.push((fi, fe));
         }

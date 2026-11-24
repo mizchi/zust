@@ -2442,6 +2442,7 @@ compile-fail	error-codes/E0054.rs
 compile-fail	error-codes/E0057.rs
 compile-fail	error-codes/E0060.rs
 compile-fail	error-codes/E0061.rs
+compile-fail	error-codes/E0062.rs
 compile-fail	error-codes/E0063.rs
 compile-fail	error-codes/E0067.rs
 compile-fail	error-codes/E0070.rs
@@ -2929,6 +2930,7 @@ compile-fail	fully-qualified-type/fully-qualified-type-name4.rs
 run-pass	function-pointer/function-pointer-comparison-54696.rs
 compile-fail	function-pointer/signature-mismatch.rs
 compile-fail	functional-struct-update/fru-on-enum-variant.rs
+compile-fail	functional-struct-update/fru-unknown-field-in-closure.rs
 compile-fail	functional-struct-update/functional-struct-update-noncopyable.rs
 compile-fail	functional-struct-update/functional-struct-update-respects-privacy.rs
 run-pass	functions-closures/bare-fn-implements-fn-mut.rs
@@ -7013,8 +7015,13 @@ compile-fail	structs/struct-field-access-errors-24365.rs
 compile-fail	structs/struct-field-cfg.rs
 compile-fail	structs/struct-field-init-syntax.rs
 compile-fail	structs/struct-fields-decl-dupe.rs
+compile-fail	structs/struct-fields-dupe.rs
+compile-fail	structs/struct-fields-hints-no-dupe.rs
+compile-fail	structs/struct-fields-hints.rs
 compile-fail	structs/struct-fields-missing.rs
 compile-fail	structs/struct-fields-shorthand-unresolved.rs
+compile-fail	structs/struct-fields-shorthand.rs
+compile-fail	structs/struct-fields-too-many.rs
 compile-fail	structs/struct-fields-typo.rs
 compile-fail	structs/struct-fn-in-definition.rs
 run-pass	structs/struct-lit-functional-no-fields.rs
