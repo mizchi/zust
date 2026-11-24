@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795502695899,
+  "lastUpdate": 1795502698719,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -96322,6 +96322,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 91.775,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b5e23d04fd9d06c3db505ae5b49ed22089833f23",
+          "message": "Merge pull request #119 from mizchi/feat/zustscript-rust-target\n\n通常の zustscript 関数の Rust 出力と @wasm の必須ターゲットを実装",
+          "timestamp": "2026-11-24T15:32:37+09:00",
+          "tree_id": "b9488156a2face9d6b1d0f559b22730090908392",
+          "url": "https://github.com/mizchi/zust/commit/b5e23d04fd9d06c3db505ae5b49ed22089833f23"
+        },
+        "date": 1795502698222,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 84.615,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 70,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 70,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 85.185,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 88.235,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 83.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 88.137,
             "unit": "%"
           }
         ]
