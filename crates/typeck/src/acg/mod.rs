@@ -1717,7 +1717,11 @@ impl Cx<'_> {
             // (an `impl Trait` result of a fn with no region in its signature: its hidden type captures none, its
             // regions are 'static)
             let opaque = n == 0 && !sig.is_generic() && self.prog.opaque.contains(&self.rg.base) && regionck::count(self.prog, sig.ret, 0).is_some_and(|c| c > 0);
-            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) && !opaque {
+            // (a placeholder instance (zustc check of a generic fn nothing calls) where a struct or an enum of the program
+            // bounds a type parameter by 'static: its types' well-formedness may need T: 'static (`None::<Static<T>>`
+            // with `struct Static<T: 'static>(T)`, E0310))
+            let static_bounds = n == 1 && regionck::placeholder_static_bounds(self.prog, &self.rg.inst_args);
+            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) && !opaque && !static_bounds {
                 self.rg.on = false;
                 let se = f.sig.recv.as_ref().is_some_and(|r| r.starts_with('&'));
                 self.rg.late = Some((se, f.sig.recv.is_some() && !se));
@@ -1768,6 +1772,13 @@ impl Cx<'_> {
                 // impl's associated type's value, with the regions its self type writes; what it implies is known
                 // (implied-bounds/assoc-ty-wf-used-to-get-assoc-ty.rs))
                 if self.rg.on && !self.prog.assoc_regions.is_empty() {
+                    // (and a projection a parameter's type or the result's is requires what its impl's header declares
+                    // of the impl's lifetimes, reported at the type)
+                    for pty in f.sig.params.iter().map(|x| &x.1).chain(f.sig.ret.as_ref()) {
+                        if let Some(sp) = crate::wf::pos_of(pty) {
+                            self.rg_proj_wf(pty, sp);
+                        }
+                    }
                     for (k, (p, pty)) in f.sig.params.iter().enumerate() {
                         let (crate::parse::Ty::Path(Some(_), _), Some(&(loc, t))) = (pty, ps.get(k + f.sig.recv.is_some() as usize)) else { continue };
                         let _ = p;
@@ -2198,6 +2209,10 @@ impl Cx<'_> {
                         let (mut v, mut t) = self.expr(init, exp)?;
                         if t == Ty::Never {
                             diverged = true;
+                            // (the annotation's type is well formed all the same: `let _: &'a S<'b> = loop {};`)
+                            if let Some(at) = ann_ty.as_ref() {
+                                self.rg_let_uninit(None, at, *let_at);
+                            }
                             continue;
                         }
                         if let Some(a) = full.filter(|&a| a != t) {
@@ -2403,10 +2418,23 @@ impl Cx<'_> {
                                 } else {
                                     clif_ty(a).map(|ct| if ct == types::I128 { self.int_const(Ty::I128, 0) } else if ct.is_float() { if ct == types::F64 { self.b.ins().f64const(0.0) } else { self.b.ins().f32const(0.0) } } else { self.b.ins().iconst(ct, 0) })
                                 };
-                                self.bind(name, a, v);
+                                self.bind(name.clone(), a, v);
+                                // (and the annotation's type is well formed, as with any initializer:
+                                // `let _: &'a S<'b> = loop {};` needs 'b: 'a)
+                                if let Some(at) = ann_ty.as_ref() {
+                                    self.rg_let_uninit(Some(&name), at, *let_at);
+                                }
                             }
-                            None => self.bind(name, Ty::Never, None),
+                            None => {
+                                // (the annotation's type is well formed here too, a type that needs Drop
+                                // (`let x: Box<&'a S<'b>> = loop {};`): its tree is not the binding's, which has none)
+                                if let Some(at) = ann_ty.as_ref() {
+                                    self.rg_let_uninit(None, at, *let_at);
+                                }
+                                self.bind(name, Ty::Never, None)
+                            }
                         }
+                        self.rg.let_sp = let_sp0;
                         continue;
                     }
                     // (an annotation with holes, of another struct than the value's: `let x: Foo<_> = Bar::<usize>(..)`. No

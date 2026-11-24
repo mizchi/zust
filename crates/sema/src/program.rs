@@ -494,8 +494,9 @@ pub struct Program {
     /// type's slots (which say which of them a use's path writes)
     pub const_regions: FxMap<u32, (Vec<u8>, Vec<u8>)>,
     /// Summary::assoc_regions, by associated type (its index in assocs): the codes of its value against its impl's
-    /// lifetimes, and the impl's self type's codes
-    pub assoc_regions: FxMap<u32, (Vec<u8>, Vec<u8>)>,
+    /// lifetimes, the impl's self type's codes, the `'d: 'a` its header declares of them, and the codes of the
+    /// lifetimes its trait path writes (RImplSyn::trait_lts)
+    pub assoc_regions: FxMap<u32, AssocRegions>,
     /// The item (an impl's member) each associated type is defined in, by its index in assocs: a function's cache
     /// key holds the definitions of the program's own, whose values (and their lifetimes) the function's types and
     /// region check read
@@ -552,6 +553,9 @@ pub struct Program {
     /// The regions of the struct / enum definitions that name lifetimes (by definition id): region checking
     pub adt_regions: FxMap<u32, std::sync::Arc<RAdtSyn>>,
 }
+
+/// Program::assoc_regions' entry: (value codes, impl self type codes, header outlives, trait path lifetime codes)
+pub type AssocRegions = (Vec<u8>, Vec<u8>, Vec<(u8, u8)>, Vec<u8>);
 
 /// `impl<..> Trait for S<..> { type Name = Value; }`
 pub struct AssocDef {
@@ -4625,8 +4629,8 @@ impl Program {
         let Some((_, codes)) = sums[ii].assoc_regions.iter().find(|x| x.0 as usize == k) else { return };
         let crate::lexer::ItemKind::ImplMember(h) = items[ii].kind else { return };
         // (an impl that names no lifetime has no header regions: no self slots)
-        let self_slots = sums[h as usize].hdr_regions.as_ref().map(|r| r.self_slots.clone()).unwrap_or_default();
-        self.assoc_regions.insert(self.assocs.len() as u32 - 1, (codes.clone(), self_slots));
+        let (self_slots, outlives, trait_lts) = sums[h as usize].hdr_regions.as_ref().map(|r| (r.self_slots.clone(), r.outlives.clone(), r.trait_lts.clone())).unwrap_or_default();
+        self.assoc_regions.insert(self.assocs.len() as u32 - 1, (codes.clone(), self_slots, outlives, trait_lts));
     }
 
     pub fn assoc_of(&self, t: Ty, name: &str) -> Option<Ty> {

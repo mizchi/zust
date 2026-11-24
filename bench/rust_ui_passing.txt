@@ -3099,6 +3099,7 @@ run-pass	higher-ranked/trait-bounds/hrtb-closure-lifetime-infer.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-debruijn-in-receiver.rs
 run-pass	higher-ranked/trait-bounds/hrtb-debruijn-object-types-in-closures.rs
 run-pass	higher-ranked/trait-bounds/hrtb-fn-like-trait.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-identity-fn-borrows.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-malformed-lifetime-generics.rs
 run-pass	higher-ranked/trait-bounds/hrtb-opt-in-copy.rs
 run-pass	higher-ranked/trait-bounds/hrtb-parse.rs
@@ -4841,6 +4842,7 @@ compile-fail	nll/move-subpaths-moves-root.rs
 run-pass	nll/mutating_references.rs
 compile-fail	nll/nested-bodies-in-dead-code.rs
 compile-fail	nll/nll-anon-to-static.rs
+compile-fail	nll/normalization-bounds-error.rs
 check-pass	nll/normalization-bounds.rs
 compile-fail	nll/outlives-suggestion-more.rs
 compile-fail	nll/outlives-suggestion-simple.rs
@@ -4853,6 +4855,7 @@ run-pass	nll/rc-loop.rs
 compile-fail	nll/ref-suggestion.rs
 compile-fail	nll/reference-carried-through-struct-field.rs
 check-pass	nll/relate_tys/issue-48071.rs
+compile-fail	nll/relate_tys/var-appears-twice.rs
 compile-fail	nll/return-ref-mut-issue-46557.rs
 check-pass	nll/self-assign-ref-mut.rs
 compile-fail	nll/sugg-mut-for-binding-issue-137486.rs
@@ -5794,6 +5797,8 @@ check-pass	pattern/move-ref-patterns/by-move-sub-pat-unreachable.rs
 check-pass	pattern/move-ref-patterns/issue-53840.rs
 compile-fail	pattern/move-ref-patterns/move-ref-patterns-closure-captures-inside.rs
 check-pass	pattern/move-ref-patterns/move-ref-patterns-closure-captures-pass.rs
+compile-fail	pattern/move-ref-patterns/move-ref-patterns-default-binding-modes-fixable.rs
+compile-fail	pattern/move-ref-patterns/move-ref-patterns-default-binding-modes.rs
 compile-fail	pattern/move-ref-patterns/pattern-ref-bindings-reassignment.rs
 compile-fail	pattern/multiple-bindings-on-var.rs
 compile-fail	pattern/mut-pattern-of-immutable-borrow.rs
@@ -6057,6 +6062,7 @@ run-pass	regions/regions-addr-of-ret.rs
 compile-fail	regions/regions-addr-of-self.rs
 compile-fail	regions/regions-addr-of-upvar-self.rs
 compile-fail	regions/regions-adjusted-lvalue-op.rs
+compile-fail	regions/regions-assoc-type-in-supertrait-outlives-container.rs
 run-pass	regions/regions-assoc-type-region-bound.rs
 run-pass	regions/regions-assoc-type-static-bound.rs
 run-pass	regions/regions-borrow-at.rs
@@ -6148,6 +6154,8 @@ run-pass	regions/regions-no-bound-in-argument-cleanup.rs
 check-pass	regions/regions-no-variance-from-fn-generics.rs
 run-pass	regions/regions-nullary-variant.rs
 check-pass	regions/regions-outlives-nominal-type.rs
+compile-fail	regions/regions-outlives-projection-container-hrtb.rs
+compile-fail	regions/regions-outlives-projection-container-wc.rs
 check-pass	regions/regions-outlives-projection-hrtype.rs
 check-pass	regions/regions-outlives-projection-trait-def.rs
 check-pass	regions/regions-outlives-scalar.rs
@@ -6192,6 +6200,7 @@ compile-fail	regions/regions-wf-trait-object.rs
 check-pass	regions/relate-bound-region-ref-type-param.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429-2.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429.rs
+compile-fail	regions/wf-bound-region-in-local-issue-115175.rs
 run-pass	regions/wf-bound-region-in-object-type.rs
 check-pass	repeat-expr/can-have-side-effects-consider-element.rs
 compile-fail	repeat-expr/copy-check-const-element-uninferred-count.rs
@@ -6427,6 +6436,8 @@ run-pass	rfcs/rfc-2005-default-binding-mode/enum-ok.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/enum.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/explicit-mut.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/for-ok.rs
+compile-fail	rfcs/rfc-2005-default-binding-mode/for.rs
+run-pass	rfcs/rfc-2005-default-binding-mode/general.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/lit-ok.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/no-double-error.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/range.rs

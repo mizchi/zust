@@ -363,6 +363,9 @@ pub struct RImplSyn {
     /// names another item may relate
     pub wf_pairs: Vec<(String, String)>,
     pub wf_vague: Vec<String>,
+    /// The codes of the lifetimes an impl's trait path writes as its arguments (`impl<'a, 'd: 'a> Visitor<'d> for
+    /// &'a ()`: 'd's), in order: a projection that selects the impl gives them those it writes there
+    pub trait_lts: Vec<u8>,
 }
 
 /// enum のバリアント (要約に保存する形)
