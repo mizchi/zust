@@ -3712,3 +3712,62 @@ fn part22_local_closure_cast() {
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
     assert_eq!(check("fn main() {\n    let c = |_: &u32| {};\n    let f = c as fn(&u32);\n    f(&1);\n    let d = |_: &'static u32| {};\n    let g = d as fn(&'static u32);\n    g(&1);\n}\n"), vec![]);
 }
+
+#[test]
+fn part23_placeholder_outlived_from_outside() {
+    // (a closure's region from outside exempts only a placeholder it is known to outlive: `&'b u32` beside `&'a u32`
+    // implies nothing of 'b, so returning a capture for every 'b needs 'x: 'static)
+    one_error("fn take<'a, F>(_x: &'a u32, _f: F) where F: for<'b> FnOnce(&'b u32, &'a u32) -> &'b u32 {}\nfn bad<'x>(x: &'x u32) {\n    take(x, |_, _| x);\n}\nfn main() {}\n", 3);
+}
+
+#[test]
+fn part23_placeholder_bound_type_args() {
+    // (a method of a placeholder's bound whose trait's type arguments name lifetimes: the call's argument is of the
+    // bound's `&'a isize` (E0597), and the result of a `for<'a>` bound's holds what the argument borrows (E0506))
+    let src = |b: &str| format!("trait FnLike<A, R> {{ fn call(&self, arg: A) -> R; }}\nfn c<'a, F: FnLike<{b}>>(f: F) {{\n    let x: isize = 3;\n    let y = f.call(&x);\n    drop(y);\n}}\nfn main() {{}}\n");
+    for b in ["&'a isize, &'a isize", "&'a isize, u8"] {
+        let d = check(&src(b));
+        assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("does not live long enough"), "{b}: {d:?}");
+    }
+    let d = check("trait FnLike<A, R> { fn call(&self, arg: A) -> R; }\nfn call_repeatedly<F>(f: F) where F: for<'a> FnLike<&'a isize, &'a isize> {\n    let mut x = 3;\n    let y = f.call(&x);\n    x = 5;\n    drop(y);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `x` because it is borrowed"), "{d:?}");
+    assert_eq!(check("trait FnLike<A, R> { fn call(&self, arg: A) -> R; }\nfn a<'a, F: FnLike<&'a isize, &'a isize>>(f: F, x: &'a isize) -> &'a isize {\n    f.call(x)\n}\nfn b<F>(f: F) where F: for<'a> FnLike<&'a isize, &'a isize> {\n    let mut x: isize = 3;\n    f.call(&x);\n    f.call(&x);\n    x = 5;\n    let _ = x;\n}\nfn c<'z, F: FnLike<&'z isize, u8>>(f: F) -> u8 {\n    static S: isize = 1;\n    f.call(&S)\n}\nfn take<'a, F>(_x: &'a u32, _f: F) where F: for<'b> FnOnce(&'b u32, &'a u32) -> &'b u32 {}\nfn d<'x>(x: &'x u32) {\n    take(x, |y, _| y);\n}\nfn e<'a>(_: &'a i32, _: impl FnOnce(&mut &mut &'a i32)) {}\nfn g<'a>(p: &'a i32) { e(p, |x: &mut &mut &'a i32| { let _: &mut &mut &'a i32 = x; }) }\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part23_diverging_let_annotation_wf() {
+    // (a `let` whose initializer diverges: its annotation's type is well formed all the same, a named binding and `_`
+    // (regions/regions-outlives-projection-container-wc.rs))
+    let d = check("struct S<'b>(&'b ());\nfn f<'a, 'b>() {\n    let _: &'a S<'b> = loop {};\n}\nstruct W<T>(T);\nfn g<'a, 'b>() {\n    let _: &'a W<S<'b>> = loop {};\n}\nfn h<'a, 'b>() {\n    let _x: &'a &'b () = panic!();\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![3, 7, 10] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
+    assert_eq!(check("struct S<'b>(&'b ());\nfn f<'a, 'b: 'a>() {\n    let _: &'a S<'b> = loop {};\n}\nfn g<'a, 'b: 'a>() {\n    let _x: &'a &'b () = panic!();\n}\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part23_alias_param_twice() {
+    // (an annotation that is a type alias with a hole, its parameter twice in it: one tree for both occurrences
+    // (nll/relate_tys/var-appears-twice.rs). Under `Cell` they are invariant: `&'z u32` must be `&'static u32`)
+    let d = check("use std::cell::Cell;\ntype DoubleCell<A> = Cell<(A, A)>;\nfn make_cell<'b>(x: &'b u32) -> Cell<(&'static u32, &'b u32)> { panic!() }\nfn f<'z>(z: &'z u32) {\n    let _x: DoubleCell<_> = make_cell(z);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (a covariant alias, and the parameter written: accepted, as in rustc)
+    assert_eq!(check("use std::cell::Cell;\ntype DoubleCell<A> = Cell<(A, A)>;\ntype DoublePair<A> = (A, A);\nfn make_cell<'b>(x: &'b u32) -> Cell<(&'static u32, &'b u32)> { panic!() }\nfn make_pair<'b>(x: &'b u32) -> (&'static u32, &'b u32) { panic!() }\nfn f<'z>(z: &'z u32) {\n    let b = 44;\n    let _y: DoublePair<_> = make_pair(&b);\n    let _w: DoubleCell<&'static u32> = make_cell(&22);\n    let _v: DoublePair<_> = make_pair(z);\n}\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part23_review() {
+    // (a diverging `let` whose annotated type needs Drop: well formed too)
+    let d = check("struct S<'b>(&'b ());\nfn f<'a, 'b>() {\n    let _x: Box<&'a S<'b>> = loop {};\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (two bounds of one trait: the bound a call takes is not known, its arguments' regions are not taken (rustc
+    // accepts it))
+    assert_eq!(check("trait Take<A> { fn take(&self, a: A); }\nfn g<'a, 'b, F: Take<&'a u32> + Take<&'b u64>>(f: F, x: &'b u64) {\n    f.take(x);\n}\nfn main() {}\n"), vec![]);
+    // (a bound whose argument binds its own lifetimes (`for<'b> fn(&'b u32)`), and a literal that meets the method's
+    // types: accepted, as in rustc)
+    assert_eq!(check("trait Get<A> { fn get(&self) -> A; }\nfn h<'z, F: Get<for<'b> fn(&'b u32) -> &'b u32>>(f: F, z: &'z u32) -> &'z u32 {\n    let p = f.get();\n    let a = 1;\n    let _ra = p(&a);\n    p(z)\n}\nfn k<'z, F: Get<&'z u32>>(f: F) {\n    let a = 1;\n    let r = f.get();\n    let _ = *r == a;\n}\nfn main() {}\n"), vec![]);
+    // (and a trait whose method writes its parameter's type: the literal's local is of it; main had a false E0308)
+    assert_eq!(check("trait Get<'a> { fn get(&self, arg: &'a isize) -> &'a isize; }\nfn c<F>(f: F) where F: for<'a> Get<'a> {\n    let x = 3;\n    let y = f.get(&x);\n    drop(y);\n}\nfn main() {}\n"), vec![]);
+    // (`for` in a type's name (`Bufferfor<'a>`) binds nothing: the bound names 'a, and the fn's body is checked (its
+    // double move, E0382 in rustc))
+    let d = check("struct Bufferfor<'a>(&'a u32);\ntrait Get<A> { fn get(&self) -> A; }\nfn bad<'a, F: Get<Bufferfor<'a>>>(f: F) {\n    f.get();\n    let _x = f;\n    let _y = f;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("use of moved value"), "{d:?}");
+}
