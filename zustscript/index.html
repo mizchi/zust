@@ -1,19 +1,20 @@
 <!doctype html>
+<!-- Generated from crates/zustscript/docs/introduction.md -->
 <html lang="ja">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>zustscript 入門 ── JavaScript と WebAssembly のためのフロントエンド言語</title>
-<meta name="description" content="zustscript は TypeScript のアプリに組み込める静的型付き言語です。enum と match による状態の表現、JSX、関数単位で選べる WebAssembly を紹介します。">
+<meta name="description" content="zustscript は、Rust の enum や match と、TypeScript でおなじみのアロー関数や JSX を組み合わせた、フロントエンド向けの静的型付き言語です。TypeScript のアプリに一つのモジュールから組み込めます。">
 <link rel="stylesheet" href="../style.css">
 <style>
   article { max-width: 48rem; margin: auto; padding-block: clamp(32px, 7vw, 76px); font-size: 16px; line-height: 1.9; }
   article h1 { line-height: 1.35; font-size: clamp(28px, 4.5vw, 42px); margin: 0 0 24px; }
   article h2 { margin-top: 2.4em; margin-bottom: .6em; font-size: 23px; }
   article p { margin: .9em 0; }
-  article figure { margin-block: 1.25em; }
+  article p:has(> em:only-child):has(+ pre) { color: var(--muted); font-size: 14px; margin-bottom: 0; }
+  article p:has(> em:only-child) + pre { margin-top: .25em; }
   pre { overflow-x: auto; padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); line-height: 1.6; }
-  figure pre { margin: 0; }
   pre code { background: none; padding: 0; font-size: 14px; }
   pre .keyword, pre .constant, pre .variable.builtin { color: light-dark(#773590, #dda7ed); }
   pre .attribute, pre .property { color: light-dark(#83490c, #eac48a); }
@@ -31,29 +32,52 @@
 </div></header>
 <main class="wrap">
 <article>
-<!-- Code samples may be edited as plain escaped HTML inside code.language-*;
-     regenerate the Tree-sitter spans with: just --justfile zustscript/_tools/justfile highlight -->
-<h1>zustscript 入門<br>JavaScript と WebAssembly のためのフロントエンド言語</h1>
-<p>zustscript は、TypeScript のアプリに組み込める静的型付き言語の試作です。画面を組み立てる JSX も、整数の幅や浮動小数点の精度を指定した計算も、同じ言語で書けます。ふつうの関数は読みやすい JavaScript にコンパイルされ、選んだ関数だけを WebAssembly（Wasm）で動かせます。</p>
-<p>TypeScript のコードとは型定義を通じてつながります。たとえば、既存のアプリで使っている座標の型を zustscript に取り込めます。逆に、zustscript で書いた関数を公開すると、コンパイラの <code>zsc</code> が ES モジュールと <code>.d.ts</code> を生成するので、TypeScript 側でも引数と戻り値の型が分かります。</p>
-
+<h1>zustscript 入門 ── JavaScript と WebAssembly のためのフロントエンド言語</h1>
+<p>zustscript は、Rust の <code>enum</code> や <code>match</code> と、TypeScript でおなじみのアロー関数や JSX を組み合わせた、フロントエンド向けの静的型付き言語です。TypeScript のアプリに一つのモジュールから組み込めます。</p>
+<p>TypeScript で「状態を判別 union で表す」「元の配列を変更せず、<code>map</code> や <code>filter</code> で新しい値を作る」といった関数型の書き方をしていれば、その設計を zustscript にも持ち込めます。JS 上ではレコードはオブジェクト、配列は配列のままです。対応する TypeScript の型を <code>import type</code> で読み込めば、既存の値を呼び出し用に詰め直す手間もありません。</p>
+<p>コンパイラの <code>zsc</code> は、Rust で実装した zustscript 専用の型検査器でソースを検査します。通常の関数からは、TypeScript アプリがそのまま import できる JavaScript と型定義（<code>.d.ts</code>）を生成します。<code>@wasm</code> を付けた関数からは Rust ソースを生成し、Rust のサブセットを扱うコンパイラ <code>zustc</code> がその Rust コードを型検査して WebAssembly（Wasm）にコンパイルします。この言語とコンパイラは現在開発中です。</p>
 <h2>状態を enum で表し、match で読み出す</h2>
 <p>zustscript の <code>enum</code> では、状態ごとに異なるデータを持たせられます。たとえば地図で地点を選ぶ画面なら、選択中のときだけ地点名が必要です。</p>
-<figure><figcaption>選択状態から表示用の文字列を返す関数</figcaption><pre><code class="language-zustscript"><span class='keyword'>enum</span> <span class='type'><span class='type'>Selection</span></span> <span class='punctuation bracket'>{</span> <span class='constructor'><span class='constructor'>Empty</span></span><span class='punctuation delimiter'>,</span> <span class='constructor'><span class='constructor'>Selected</span></span><span class='punctuation bracket'>(</span><span class='type builtin'>String</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>}</span>
+<p><em>選択状態から表示用の文字列を返す関数</em></p>
+<pre><code class="language-zustscript"><span class='keyword'>enum</span> <span class='type'><span class='type'>Selection</span></span> <span class='punctuation bracket'>{</span> <span class='constructor'><span class='constructor'>Empty</span></span><span class='punctuation delimiter'>,</span> <span class='constructor'><span class='constructor'>Selected</span></span><span class='punctuation bracket'>(</span><span class='type builtin'>String</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>}</span>
 
 <span class='keyword'>export</span> <span class='keyword'>fn</span> <span class='function'>label</span><span class='punctuation bracket'>(</span><span class='variable'>s</span><span class='punctuation delimiter'>:</span> <span class='type'><span class='type'>Selection</span></span><span class='punctuation bracket'>)</span> <span class='operator'>-&gt;</span> <span class='type builtin'>String</span> <span class='punctuation bracket'>{</span>
   <span class='keyword'>match</span> <span class='variable'>s</span> <span class='punctuation bracket'>{</span>
     <span class='constructor'><span class='constructor'>Empty</span></span> <span class='operator'>=&gt;</span> <span class='string'>&quot;地点を選んでください&quot;</span><span class='punctuation delimiter'>,</span>
     <span class='constructor'><span class='constructor'>Selected</span></span><span class='punctuation bracket'>(</span><span class='variable'>name</span><span class='punctuation bracket'>)</span> <span class='operator'>=&gt;</span> <span class='variable'>name</span><span class='punctuation delimiter'>,</span>
   <span class='punctuation bracket'>}</span>
-<span class='punctuation bracket'>}</span></code></pre></figure>
+<span class='punctuation bracket'>}</span>
+</code></pre>
 <p><code>Selected(name)</code> の分岐では、<code>name</code> に選んだ地点の名前が入ります。たとえば後から「検索中」を表す <code>Searching</code> を <code>Selection</code> に加えると、<code>zsc</code> はこの <code>match</code> に分岐が足りないことをコンパイル時に指摘します。</p>
+<h2>TypeScript の union をそのまま受け取る</h2>
+<p>画面の状態をすでに TypeScript で定義しているときは、その型を zustscript に取り込めます。たとえば、地図のデータを取得中かどうかを次の型で表します。</p>
+<p><em>state.ts</em></p>
+<pre><code class="language-typescript"><span class='keyword'>export</span> <span class='keyword'>type</span> <span class='type'>State</span> <span class='operator'>=</span> <span class='punctuation bracket'>{</span> <span class='property'>kind</span>: <span class='string'>&quot;idle&quot;</span> <span class='punctuation bracket'>}</span> <span class='operator'>|</span> <span class='punctuation bracket'>{</span> <span class='property'>kind</span>: <span class='string'>&quot;busy&quot;</span><span class='punctuation delimiter'>;</span> <span class='property'>jobs</span>: <span class='type builtin'>number</span> <span class='punctuation bracket'>}</span><span class='punctuation delimiter'>;</span>
+</code></pre>
+<p><em>state-label.zsc</em></p>
+<pre><code class="language-zustscript"><span class='keyword'>import</span> <span class='keyword'>type</span> <span class='punctuation bracket'>{</span> <span class='type'><span class='type'>State</span></span> <span class='punctuation bracket'>}</span> <span class='keyword'>from</span> <span class='string'>&quot;./state.ts&quot;</span><span class='punctuation delimiter'>;</span>
 
+<span class='keyword'>export</span> <span class='keyword'>fn</span> <span class='function'>pending</span><span class='punctuation bracket'>(</span><span class='variable'>state</span><span class='punctuation delimiter'>:</span> <span class='type'><span class='type'>State</span></span><span class='punctuation bracket'>)</span> <span class='operator'>-&gt;</span> <span class='type builtin'>f64</span> <span class='punctuation bracket'>{</span>
+  <span class='keyword'>match</span> <span class='variable'>state</span> <span class='punctuation bracket'>{</span>
+    <span class='constructor'><span class='constructor'>Idle</span></span> <span class='operator'>=&gt;</span> <span class='number'>0.0</span><span class='punctuation delimiter'>,</span>
+    <span class='constructor'><span class='constructor'>Busy</span></span><span class='punctuation bracket'>(</span><span class='variable'>n</span><span class='punctuation bracket'>)</span> <span class='operator'>=&gt;</span> <span class='variable'>n</span><span class='punctuation delimiter'>,</span>
+  <span class='punctuation bracket'>}</span>
+<span class='punctuation bracket'>}</span>
+
+<span class='keyword'>export</span> <span class='keyword'>fn</span> <span class='function'>pending_counts</span><span class='punctuation bracket'>(</span><span class='variable'>states</span><span class='punctuation delimiter'>:</span> <span class='type'><span class='type'>Array</span></span>&lt;<span class='type'><span class='type'>State</span></span>&gt;<span class='punctuation bracket'>)</span> <span class='operator'>-&gt;</span> <span class='type'><span class='type'>Array</span></span>&lt;<span class='type builtin'>f64</span>&gt; <span class='punctuation bracket'>{</span>
+  <span class='variable'>states</span><span class='punctuation delimiter'>.</span><span class='property'>map</span><span class='punctuation bracket'>(</span><span class='variable'>pending</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>.</span><span class='property'>filter</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>(</span><span class='variable'>n</span><span class='punctuation bracket'>)</span> <span class='operator'>=&gt;</span> <span class='variable'>n</span> <span class='operator'>&gt;</span> <span class='number'>0.0</span><span class='punctuation bracket'>)</span>
+<span class='punctuation bracket'>}</span>
+</code></pre>
+<p>JavaScript から <code>pending({ kind: &quot;busy&quot;, jobs: 3 })</code> と呼ぶと <code>3</code> が返ります。<code>Idle</code> はタグだけなので括弧を付けず、<code>Busy(n)</code> は <code>jobs</code> の値を取り出します。値が複数あれば、括弧の中の変数はタグを除いた <strong>TypeScript のフィールド宣言順</strong> に対応します。たとえば <code>height, width</code> の順で定義した長方形なら、幅を高さで割る式は <code>Rect(h, w) =&gt; w / h</code> です。</p>
+<p><code>pending_counts</code> は各状態を件数に変換し、正の件数だけを新しい配列に残します。TypeScript 側から <code>[{ kind: &quot;idle&quot; }, { kind: &quot;busy&quot;, jobs: 3 }]</code> を渡したときの戻り値は <code>[3]</code> です。</p>
 <h2>関数ごとに WebAssembly を選ぶ</h2>
 <p>同じ地図で、クリックした位置が地点の中心から 5 ピクセル以内なら、その地点を選択できるとします。画面側は TypeScript の <code>Point</code> をそのまま使い、距離を計算する関数にだけ <code>@wasm</code> を付けます。この印が付いた関数を <code>zsc</code> が Rust に変換し、zust のコンパイラ <code>zustc</code> が Wasm にします。</p>
-<figure><figcaption>model.ts</figcaption><pre><code class="language-typescript"><span class='keyword'>export</span> <span class='keyword'>type</span> <span class='type'>Point</span> <span class='operator'>=</span> <span class='punctuation bracket'>{</span> <span class='property'>x</span>: <span class='type builtin'>number</span><span class='punctuation delimiter'>;</span> <span class='property'>y</span>: <span class='type builtin'>number</span> <span class='punctuation bracket'>}</span><span class='punctuation delimiter'>;</span></code></pre></figure>
+<p><em>model.ts</em></p>
+<pre><code class="language-typescript"><span class='keyword'>export</span> <span class='keyword'>type</span> <span class='type'>Point</span> <span class='operator'>=</span> <span class='punctuation bracket'>{</span> <span class='property'>x</span>: <span class='type builtin'>number</span><span class='punctuation delimiter'>;</span> <span class='property'>y</span>: <span class='type builtin'>number</span> <span class='punctuation bracket'>}</span><span class='punctuation delimiter'>;</span>
+</code></pre>
 <p>同じディレクトリに <code>pick.zsc</code> を置きます。<code>import type</code> で読み込んだ <code>Point</code> の各フィールドは、zustscript では倍精度浮動小数点数の <code>f64</code> になります。</p>
-<figure><figcaption>pick.zsc</figcaption><pre><code class="language-zustscript"><span class='keyword'>import</span> <span class='keyword'>type</span> <span class='punctuation bracket'>{</span> <span class='type'><span class='type'>Point</span></span> <span class='punctuation bracket'>}</span> <span class='keyword'>from</span> <span class='string'>&quot;./model.ts&quot;</span><span class='punctuation delimiter'>;</span>
+<p><em>pick.zsc</em></p>
+<pre><code class="language-zustscript"><span class='keyword'>import</span> <span class='keyword'>type</span> <span class='punctuation bracket'>{</span> <span class='type'><span class='type'>Point</span></span> <span class='punctuation bracket'>}</span> <span class='keyword'>from</span> <span class='string'>&quot;./model.ts&quot;</span><span class='punctuation delimiter'>;</span>
 
 <span class='attribute'>@</span><span class='attribute'>wasm</span> <span class='keyword'>export</span> <span class='keyword'>fn</span> <span class='function'>distance</span><span class='punctuation bracket'>(</span><span class='variable'>a</span><span class='punctuation delimiter'>:</span> <span class='type'><span class='type'>Point</span></span><span class='punctuation delimiter'>,</span> <span class='variable'>b</span><span class='punctuation delimiter'>:</span> <span class='type'><span class='type'>Point</span></span><span class='punctuation bracket'>)</span> <span class='operator'>-&gt;</span> <span class='type builtin'>f64</span> <span class='punctuation bracket'>{</span>
   <span class='keyword'>let</span> <span class='variable'>dx</span> <span class='operator'>=</span> <span class='variable'>a</span><span class='punctuation delimiter'>.</span><span class='property'>x</span> <span class='operator'>-</span> <span class='variable'>b</span><span class='punctuation delimiter'>.</span><span class='property'>x</span><span class='punctuation delimiter'>;</span>
@@ -63,48 +87,57 @@
 
 <span class='keyword'>export</span> <span class='keyword'>fn</span> <span class='function'>can_pick</span><span class='punctuation bracket'>(</span><span class='variable'>cursor</span><span class='punctuation delimiter'>:</span> <span class='type'><span class='type'>Point</span></span><span class='punctuation delimiter'>,</span> <span class='variable'>mark</span><span class='punctuation delimiter'>:</span> <span class='type'><span class='type'>Point</span></span><span class='punctuation bracket'>)</span> <span class='operator'>-&gt;</span> <span class='type builtin'>bool</span> <span class='punctuation bracket'>{</span>
   <span class='variable'>distance</span><span class='punctuation bracket'>(</span><span class='variable'>cursor</span><span class='punctuation delimiter'>,</span> <span class='variable'>mark</span><span class='punctuation bracket'>)</span> <span class='operator'>&lt;=</span> <span class='number'>5.0</span>
-<span class='punctuation bracket'>}</span></code></pre></figure>
+<span class='punctuation bracket'>}</span>
+</code></pre>
 <p><code>export</code> を付けた二つの関数は、どちらも JavaScript から名前で import できます。半径を 8 ピクセルに広げるなら、編集するのは <code>can_pick</code> の <code>5.0</code> だけです。</p>
-
 <h2>二つの座標は四つの数値になる</h2>
 <p>生成された <code>pick.js</code> には、クリック判定も、Wasm を呼ぶ関数も入っています。モジュールの初期化と読み込み処理を省いて、二つの関数を抜き出すとこうなります。</p>
-<figure><figcaption>pick.js の抜粋</figcaption><pre><code class="language-javascript"><span class='keyword'>export</span> <span class='keyword'>function</span> <span class='function'>can_pick</span><span class='punctuation bracket'>(</span><span class='variable parameter'>cursor</span><span class='punctuation delimiter'>,</span> <span class='variable parameter'>mark</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>{</span>
+<p><em>pick.js の抜粋</em></p>
+<pre><code class="language-javascript"><span class='keyword'>export</span> <span class='keyword'>function</span> <span class='function'>can_pick</span><span class='punctuation bracket'>(</span><span class='variable parameter'>cursor</span><span class='punctuation delimiter'>,</span> <span class='variable parameter'>mark</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>{</span>
   <span class='keyword'>return</span> <span class='function'>distance</span><span class='punctuation bracket'>(</span><span class='variable parameter'>cursor</span><span class='punctuation delimiter'>,</span> <span class='variable parameter'>mark</span><span class='punctuation bracket'>)</span> <span class='operator'>&lt;=</span> <span class='number'>5.0</span><span class='punctuation delimiter'>;</span>
 <span class='punctuation bracket'>}</span>
 
 <span class='keyword'>export</span> <span class='keyword'>function</span> <span class='function'>distance</span><span class='punctuation bracket'>(</span><span class='variable parameter'>a</span><span class='punctuation delimiter'>,</span> <span class='variable parameter'>b</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>{</span>
   <span class='keyword'>return</span> <span class='variable'>$w</span><span class='punctuation delimiter'>.</span><span class='function'>__zsc_w_distance</span><span class='punctuation bracket'>(</span><span class='variable parameter'>a</span><span class='punctuation delimiter'>.</span><span class='property'>x</span><span class='punctuation delimiter'>,</span> <span class='variable parameter'>a</span><span class='punctuation delimiter'>.</span><span class='property'>y</span><span class='punctuation delimiter'>,</span> <span class='variable parameter'>b</span><span class='punctuation delimiter'>.</span><span class='property'>x</span><span class='punctuation delimiter'>,</span> <span class='variable parameter'>b</span><span class='punctuation delimiter'>.</span><span class='property'>y</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
-<span class='punctuation bracket'>}</span></code></pre></figure>
+<span class='punctuation bracket'>}</span>
+</code></pre>
 <p><code>$w</code> は読み込み済みの Wasm モジュールが公開する関数やメモリです。二つの <code>Point</code> は境界で四つの数値に展開されます。呼び出し側はいつもの <code>{ x, y }</code> を渡せばよく、点をバイト列に詰めるコードは要りません。生成された <code>pick.d.ts</code> でも、引数の型は元の <code>model.ts</code> の <code>Point</code> を参照します。</p>
 <p>境界を越える値によっては転送コストがかかります。たとえば数値の配列を JS から渡すと、その中身を Wasm のメモリにコピーします。地図上の数万点から最も近い点を探すなら、点ごとに距離を問い合わせる方法と、探索ループを丸ごと Wasm に置く方法とで、境界を越える回数が変わります。</p>
-
 <h2>同じ入力で両方を動かす</h2>
 <p>Rust（edition 2024 対応）と Node.js 24 以降を用意します。リポジトリを取得し、サンプル用のディレクトリに移動します。</p>
 <pre><code class="language-bash"><span class='function'>git</span> clone https://github.com/mizchi/zust.git
 <span class='function'>cd</span> zust
 <span class='function'>mkdir</span> points
-<span class='function'>cd</span> points</code></pre>
+<span class='function'>cd</span> points
+</code></pre>
 <p>先ほどの <code>model.ts</code> と <code>pick.zsc</code> をここに保存します。まず <code>--all-js</code> を指定して、距離計算も含めて JavaScript に変換します。</p>
 <pre><code class="language-bash"><span class='function'>cargo</span> run <span class='constant'>--manifest-path</span> ../crates/zustscript/Cargo.toml <span class='constant'>--</span> \
-  pick.zsc <span class='constant'>--all-js</span> <span class='constant'>-o</span> js</code></pre>
-<figure><figcaption>try.mjs</figcaption><pre><code class="language-javascript"><span class='keyword'>const</span> <span class='punctuation bracket'>{</span> distance<span class='punctuation delimiter'>,</span> can_pick <span class='punctuation bracket'>}</span> <span class='operator'>=</span> <span class='keyword'>await</span> <span class='keyword'>import</span><span class='punctuation bracket'>(</span><span class='variable'>process</span><span class='punctuation delimiter'>.</span><span class='property'>argv</span><span class='punctuation bracket'>[</span><span class='number'>2</span><span class='punctuation bracket'>]</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
+  pick.zsc <span class='constant'>--all-js</span> <span class='constant'>-o</span> js
+</code></pre>
+<p><em>try.mjs</em></p>
+<pre><code class="language-javascript"><span class='keyword'>const</span> <span class='punctuation bracket'>{</span> distance<span class='punctuation delimiter'>,</span> can_pick <span class='punctuation bracket'>}</span> <span class='operator'>=</span> <span class='keyword'>await</span> <span class='keyword'>import</span><span class='punctuation bracket'>(</span><span class='variable'>process</span><span class='punctuation delimiter'>.</span><span class='property'>argv</span><span class='punctuation bracket'>[</span><span class='number'>2</span><span class='punctuation bracket'>]</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
 <span class='keyword'>const</span> <span class='variable'>mark</span> <span class='operator'>=</span> <span class='punctuation bracket'>{</span> <span class='property'>x</span>: <span class='number'>0</span><span class='punctuation delimiter'>,</span> <span class='property'>y</span>: <span class='number'>0</span> <span class='punctuation bracket'>}</span><span class='punctuation delimiter'>;</span>
 <span class='keyword'>for</span> <span class='punctuation bracket'>(</span><span class='keyword'>const</span> <span class='variable'>cursor</span> <span class='keyword'>of</span> <span class='punctuation bracket'>[</span><span class='punctuation bracket'>{</span> <span class='property'>x</span>: <span class='number'>3</span><span class='punctuation delimiter'>,</span> <span class='property'>y</span>: <span class='number'>4</span> <span class='punctuation bracket'>}</span><span class='punctuation delimiter'>,</span> <span class='punctuation bracket'>{</span> <span class='property'>x</span>: <span class='number'>0</span><span class='punctuation delimiter'>,</span> <span class='property'>y</span>: <span class='number'>6</span> <span class='punctuation bracket'>}</span><span class='punctuation bracket'>]</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>{</span>
   <span class='variable builtin'>console</span><span class='punctuation delimiter'>.</span><span class='function'>log</span><span class='punctuation bracket'>(</span><span class='function'>distance</span><span class='punctuation bracket'>(</span><span class='variable'>cursor</span><span class='punctuation delimiter'>,</span> <span class='variable'>mark</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>,</span> <span class='function'>can_pick</span><span class='punctuation bracket'>(</span><span class='variable'>cursor</span><span class='punctuation delimiter'>,</span> <span class='variable'>mark</span><span class='punctuation bracket'>)</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
-<span class='punctuation bracket'>}</span></code></pre></figure>
-<pre><code class="language-bash"><span class='function'>node</span> try.mjs ./js/pick.js</code></pre>
-<p>次に <code>zustc</code> をビルドし、同じ <code>pick.zsc</code> を <code>--all-js</code> を外してコンパイルします。出力先の <code>wasm/</code> には、JS と型定義に加えて、中間生成物の <code>pick.wasm.rs</code> と実行用の <code>pick.wasm</code> ができます。</p>
+<span class='punctuation bracket'>}</span>
+</code></pre>
+<pre><code class="language-bash"><span class='function'>node</span> try.mjs ./js/pick.js
+</code></pre>
+<p>次に <code>zustc</code> をビルドし、同じ <code>pick.zsc</code> を <code>--all-js</code> を外してコンパイルします。出力先の <code>wasm/</code> には、JS と型定義に加えて、中間生成物の <code>pick.wasm.rs</code> と実行用の <code>pick.wasm</code> ができます。たとえば <code>wasm/pick.wasm.rs</code> を開くと、<code>distance</code> の計算は Rust の <code>fn zs_distance(a: ZsPoint, b: ZsPoint) -&gt; f64</code> として読めます。画面の判定をする <code>can_pick</code> は <code>pick.js</code> にあります。</p>
 <pre><code class="language-bash"><span class='function'>cargo</span> build <span class='constant'>--release</span> <span class='constant'>--manifest-path</span> ../Cargo.toml <span class='constant'>--bin</span> zustc
 <span class='function'>cargo</span> run <span class='constant'>--manifest-path</span> ../crates/zustscript/Cargo.toml <span class='constant'>--</span> \
   pick.zsc <span class='constant'>--zustc</span> ../target/release/zustc <span class='constant'>-o</span> wasm
-<span class='function'>node</span> try.mjs ./wasm/pick.js</code></pre>
-<figure><figcaption>どちらの実行でも同じ出力</figcaption><pre><code>5 true
-6 false</code></pre></figure>
+<span class='function'>node</span> try.mjs ./wasm/pick.js
+</code></pre>
+<p><em>どちらの実行でも同じ出力</em></p>
+<pre><code class="language-text">5 true
+6 false
+</code></pre>
 <p>中心からちょうど 5 ピクセルの点は選択でき、6 ピクセルでは外れます。距離計算の実行場所を変えても、画面側が渡す座標と判定式は共通です。リポジトリには、この例を広げて点の列から最近傍を探す関数や、JSX で画面を組み立てる例もあります。</p>
 <ul>
-  <li><a href="https://github.com/mizchi/zust/blob/main/crates/zustscript/examples/shapes.zsc">図形の面積と最近傍を求める shapes.zsc</a></li>
-  <li><a href="https://github.com/mizchi/zust/blob/main/crates/zustscript/examples/app.zsc">JSX と Wasm を組み合わせた app.zsc</a></li>
-  <li><a href="https://github.com/mizchi/zust/tree/main/crates/zustscript">zustscript の言語仕様と実装状況</a></li>
+<li><a href="https://github.com/mizchi/zust/blob/main/crates/zustscript/examples/shapes.zsc">図形の面積と最近傍を求める shapes.zsc</a></li>
+<li><a href="https://github.com/mizchi/zust/blob/main/crates/zustscript/examples/app.zsc">JSX と Wasm を組み合わせた app.zsc</a></li>
+<li><a href="https://github.com/mizchi/zust/tree/main/crates/zustscript">zustscript の言語仕様と実装状況</a></li>
 </ul>
 </article>
 </main>
