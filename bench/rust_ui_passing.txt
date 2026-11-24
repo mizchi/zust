@@ -3318,6 +3318,8 @@ check-pass	implied-bounds/ice-unbound-region-vars.rs
 check-pass	implied-bounds/implied-bounds-entailment-wf-vars-issue-114783-1.rs
 check-pass	implied-bounds/implied-bounds-entailment-wf-vars-issue-114783-2.rs
 check-pass	implied-bounds/implied-bounds-on-nested-references-plus-variance-2.rs
+compile-fail	implied-bounds/implied-bounds-on-nested-references-plus-variance-early-bound.rs
+compile-fail	implied-bounds/implied-bounds-on-nested-references-plus-variance.rs
 compile-fail	implied-bounds/implied-bounds-on-trait-hierarchy-1.rs
 check-pass	implied-bounds/implied-bounds-on-trait-hierarchy-2.rs
 check-pass	implied-bounds/implied-bounds-unconstrained-1.rs
@@ -4463,6 +4465,7 @@ compile-fail	methods/wrong-ambig-message.rs
 compile-fail	mir/build-async-error-body-correctly.rs
 compile-fail	mir/drop-elaboration-after-borrowck-error.rs
 build-pass	mir/field-projection-invariant.rs
+compile-fail	mir/field-projection-mutating-context2.rs
 build-pass	mir/field-ty-ascription-enums.rs
 build-pass	mir/field-ty-ascription.rs
 compile-fail	mir/gvn-opt-138225.rs
