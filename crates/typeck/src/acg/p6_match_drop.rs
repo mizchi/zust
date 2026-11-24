@@ -2714,7 +2714,8 @@ impl Cx<'_> {
     }
 }
 
-/// t is a `&mut`, or a tuple or an array of one (which is_copy takes for Copy, as it does every reference)
+/// t is a `&mut`, or holds one in an array, a tuple, a struct's field or an enum's variant (`Option<&mut T>`, whose
+/// derived Copy is_copy takes to hold, as it takes every reference for Copy)
 fn holds_mut_ref(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
     if depth > 16 {
         return false;
@@ -2722,7 +2723,11 @@ fn holds_mut_ref(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
     match t {
         Ty::Ref(true, _) => true,
         Ty::Array(e, _) => holds_mut_ref(prog, *e, depth + 1),
-        Ty::Struct(s) if prog.is_tuple(s) => prog.structs[s as usize].fields.iter().any(|f| holds_mut_ref(prog, f.1, depth + 1)),
+        Ty::Struct(s) => {
+            let sd = &prog.structs[s as usize];
+            sd.placeholder.is_none()
+                && (sd.fields.iter().any(|f| holds_mut_ref(prog, f.1, depth + 1)) || sd.variants.iter().any(|v| v.fields.iter().any(|f| holds_mut_ref(prog, f.1, depth + 1))))
+        }
         _ => false,
     }
 }

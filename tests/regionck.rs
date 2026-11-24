@@ -3824,3 +3824,16 @@ fn part24_review() {
     let src = "struct Static<T: 'static>(T);\nstruct Receiver;\nimpl Receiver { fn use_ty<U>(&self) {} }\nfn good<T: 'static>(r: &Receiver) { r.use_ty::<Static<T>>(); }\ntrait Visitor<'d> { type Value; }\nimpl<'a, 'd: 'a> Visitor<'d> for &'a () { type Value = (); }\nfn ok<'d: 'a, 'a>() -> Option<<&'a () as Visitor<'d>>::Value> { None }\nfn ok2<'d: 'a, 'a>(_x: (u8, <&'a () as Visitor<'d>>::Value)) {}\nfn main() {\n    let t = (1u8, &2u8);\n    let (mut a, mut b) = &t;\n    a += 1;\n    b = &3;\n    let _ = (a, b);\n}\n";
     assert_eq!(check_ed(src, 2021), vec![]);
 }
+
+#[test]
+fn part24_review_2() {
+    // (a `mut` binding of a `&mut` within a Copy enum (`Option<&mut i32>`) through a shared reference moves it out
+    // (E0507))
+    let d = check_ed("fn main() {\n    let mut n = 0;\n    let t = ((Some(&mut n),),);\n    let ((mut x,),) = &t;\n    let _ = x.take();\n}\n", 2021);
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0507"), "{d:?}");
+    // (a projection within a `let`'s annotation with no initializer requires its impl's header outlives)
+    let d = check("trait Visitor<'d> { type Value; }\nimpl<'a, 'd: 'a> Visitor<'d> for &'a () { type Value = (); }\nfn bad<'d, 'a: 'd>() {\n    let _x: Option<<&'a () as Visitor<'d>>::Value>;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (accepted, as in rustc: a Copy struct and an `Option<&u8>`)
+    assert_eq!(check_ed("#[derive(Clone, Copy)]\nstruct P(u8);\nfn main() {\n    let t = (P(1), Some(&2u8));\n    let (mut a, mut b) = &t;\n    a.0 += 1;\n    b = None;\n    let _ = (a, b);\n}\n", 2021), vec![]);
+}

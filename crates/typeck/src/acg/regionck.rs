@@ -3489,9 +3489,8 @@ impl Cx<'_> {
         }
     }
 
-    /// `let x: ann;` (`let _: ann;`): the annotation's type is well formed; x's tree is of it
-    /// The type arguments a path writes, in an expression (`None::<Static<T>>`, `Vec::<&'a u8>::new()`): well formed
-    /// The type arguments a path's segment or a method call writes are well formed
+    /// The type arguments a path's segment or a method call writes are well formed (`None::<Static<T>>`,
+    /// `r.use_ty::<Static<T>>()`)
     pub(crate) fn rg_targs_wf(&mut self, args: &[GArg], sp: Sp) {
         let prog = self.prog;
         for a in args {
@@ -3516,6 +3515,7 @@ impl Cx<'_> {
         }
     }
 
+    /// `let x: ann;` (`let _: ann;`): the annotation's type is well formed; x's tree is of it
     pub(crate) fn rg_let_uninit(&mut self, name: Option<&str>, ann: &PTy, sp: Sp) {
         // (or a projection whose associated type's value names lifetimes, as for a `let` with an initializer:
         // `let x: <() as Foo>::Out; x = r;` with `type Out = &'static u32`)
@@ -3537,9 +3537,8 @@ impl Cx<'_> {
         let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
         self.rg.dyn_infer = false;
         let tree = if proj { self.rg_proj_ann(ann, t).or(tree) } else { tree };
-        if proj {
-            self.rg_proj_wf(ann, sp);
-        }
+        // (a projection anywhere in the annotation: `let _x: Option<<&'a () as Visitor<'d>>::Value>;`)
+        self.rg_proj_wf(ann, sp);
         let Some(tree) = tree else { return };
         self.rg.wf(prog, t, &tree, sp);
         if let Some((loc, _)) = name.and_then(|n| self.lookup(n)) {
