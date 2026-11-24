@@ -521,6 +521,17 @@ fn modules_diamond_and_directories() {
     let out = node(&d, "const m = await import('./diamond.js'); const { render } = await import('react/jsx-runtime'); console.log(m.both(), JSON.stringify(m.leaf(7)), render(m.view()));");
     assert_eq!(out, "6 {\"v\":7} <b>hi</b>\n");
 
+    // (a bare file name, compiled from its own directory: the importer's directory is the current one)
+    let o = Command::new(env!("CARGO_BIN_EXE_zsc")).current_dir(&m).arg("diamond.zsc").arg("-o").arg(d.join("bare")).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let dts = std::fs::read_to_string(d.join("bare/diamond.d.ts")).unwrap();
+    assert!(dts.contains("import type { Leaf } from \"./lib/leaf.js\";"), "{dts}");
+    // (a TS type that comes in with a function of another module, and by an `import type` of its own: one type)
+    for f in ["tsuser.zsc", "tsboth.zsc"] {
+        let o = zsc(&m.join(f), &d.join("ts"), &[]);
+        assert!(o.status.success(), "{f}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+
     let src = d.join("named.zsc");
     std::fs::write(&src, "type P = { label: String }\nextern \"react\" fn Fancy(props: P) -> Jsx = \"UI.Badge\";\nexport fn v() -> Jsx { <Fancy label=\"x\" /> }\n").unwrap();
     let o = zsc(&src, &d.join("named"), &[]);

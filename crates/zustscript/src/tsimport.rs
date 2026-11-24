@@ -716,6 +716,14 @@ pub fn expand(items: Vec<Item>, base: &Path) -> Result<Vec<Item>, Vec<TsError>> 
     let mut files: HashMap<PathBuf, TsFile> = HashMap::new();
     // (a type read once even when two imports, or two records, need it)
     let mut done: HashSet<(PathBuf, String)> = HashSet::new();
+    // (and a TS type already here, brought in with a function of another zustscript module: that file's type, once)
+    for it in &items {
+        if let Item::Record { name, from: Some(f), .. } | Item::Enum { name, from: Some(f), .. } = it {
+            if f.zsc.is_none() {
+                done.insert((f.path.clone(), name.clone()));
+            }
+        }
+    }
     for it in items {
         let Item::ImportType { names, from, values, pos } = it else {
             out.push(it);

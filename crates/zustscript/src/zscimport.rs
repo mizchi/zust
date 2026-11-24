@@ -31,6 +31,8 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
     let mut errs = vec![];
     // (a type brought in once, even when two imports need it: by the file that defines it and its name)
     let mut done: BTreeSet<(PathBuf, String)> = BTreeSet::new();
+    // (a bare input file name has an empty base: the current directory)
+    let base = if base.as_os_str().is_empty() { Path::new(".") } else { base };
     let here = std::fs::canonicalize(base).unwrap_or(base.to_path_buf());
     for it in items {
         let Item::ImportType { names, from, values, pos } = &it else {
