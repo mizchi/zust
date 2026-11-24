@@ -78,6 +78,13 @@ fn env_once(cell: &'static std::sync::OnceLock<bool>, name: &str) -> bool {
     *cell.get_or_init(|| std::env::var_os(name).is_some())
 }
 
+/// ZUSTC_NO_POLONIUS=1: the borrow check's NLL rules instead of Polonius Alpha's where they differ (issue #1): a
+/// reborrow returned lives to the function's end, and an assignment to a part of a local kills no loans
+pub(crate) fn no_polonius() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ZUSTC_NO_POLONIUS")
+}
+
 /// ACG_PANIC_ERR=1: an error panics (to find where it is made from the backtrace)
 /// An error of the borrow or region check's kind (lowering itself returns some: `m[k] = v` of a HashMap is E0594)
 pub fn borrow_error(e: &str) -> bool {

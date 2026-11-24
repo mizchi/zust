@@ -183,6 +183,10 @@ pub struct RgSt {
     pub temps: HashMap<usize, Ty>,
     /// Where values are returned (a borrow that escapes there is reported there: E0515)
     pub ret_sps: Vec<Sp>,
+    /// The constraints the returned values make (ranges of edges, rg_ret): they hold where the value is returned,
+    /// not before (Polonius Alpha's location-sensitive constraints, issue #1). A reborrow that must outlive a universal
+    /// region only through them is live while what holds it is, not to the function's end (Rg::forever)
+    pub ret_edges: Vec<(usize, usize)>,
     /// A closure's body: the locals that are its captures, the region its environment is borrowed for, the regions
     /// from outside
     pub cap_locs: Vec<Loc>,
@@ -1380,16 +1384,24 @@ impl RgSt {
     }
 
     /// The places (addresses) of the reborrows whose region must outlive a universal region ('static too): the loan
-    /// is live from where it is made to the end of the function
+    /// is live from where it is made to the end of the function. Not through the constraints of a returned value
+    /// (ret_edges): those hold at the return, after which nothing runs, so such a reborrow is live where what holds
+    /// it is live, as Polonius Alpha has it (`let b = &mut *a; if c { b } else { a }`)
     pub fn forever(&self) -> Vec<usize> {
         if self.reborrows.is_empty() {
             return vec![];
         }
         let n = self.n as usize + 1;
+        let mut keep = vec![true; self.edges.len()];
+        if !super::no_polonius() {
+            for &(a, b) in &self.ret_edges {
+                keep[a..b].iter_mut().for_each(|k| *k = false);
+            }
+        }
         // (what outlives each variable, as one array (CSR): no allocation per variable)
         let mut start = vec![0u32; n + 1];
-        for &(a, b, _) in &self.edges {
-            if (a as usize) < n && (b as usize) < n {
+        for (i, &(a, b, _)) in self.edges.iter().enumerate() {
+            if (a as usize) < n && (b as usize) < n && keep[i] {
                 start[b as usize + 1] += 1;
             }
         }
@@ -1398,8 +1410,8 @@ impl RgSt {
         }
         let mut fill = start.clone();
         let mut rev = vec![0u32; start[n] as usize];
-        for &(a, b, _) in &self.edges {
-            if (a as usize) < n && (b as usize) < n {
+        for (i, &(a, b, _)) in self.edges.iter().enumerate() {
+            if (a as usize) < n && (b as usize) < n && keep[i] {
                 rev[fill[b as usize] as usize] = a;
                 fill[b as usize] += 1;
             }
@@ -2796,7 +2808,12 @@ impl Cx<'_> {
         if sp.line != 0 && !rt.is_empty() {
             self.rg.ret_sps.push(sp);
         }
+        let e0 = self.rg.edges.len();
         self.rg.flow(prog, et, t, &tr, &rt, sp);
+        let e1 = self.rg.edges.len();
+        if e1 > e0 {
+            self.rg.ret_edges.push((e0, e1));
+        }
     }
 
     /// A call of id (generic signature sig0, type arguments sol, instance's parameter types params) with these

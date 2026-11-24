@@ -314,6 +314,8 @@ pub struct Bk {
     pub held_by: Vec<(u32, Vec<u32>)>,
     /// The loan of each method call's receiver, by the call's address (while the region check is on)
     pub recv_loans: HashMap<usize, u32>,
+    /// bk_loan_only is taking a method's receiver (`for x in v.iter_mut()`): a reference is auto-dereferenced
+    pub recv_deref: bool,
     /// The scrutinee being lowered is a `let`'s initializer (its temporary is extended)
     pub let_scrut: bool,
     /// The `let` being lowered binds a macro's hidden local (`assert_eq!`'s `__exr_l`): its temporaries live as long as
@@ -951,6 +953,19 @@ impl State {
             h.1.retain(|&ln| loans[ln as usize].place.local != l);
         }
     }
+    /// A part of the local the local owns (`list.0`, `*b` of a Box) was overwritten: the loans through the references
+    /// that part held are of the old value (Polonius' loan_killed_at for an assignment to a projection: `*list = n`
+    /// after `&mut list.value`), also those that escaped (they are of what the old reference points to)
+    fn kill_loans_through(&mut self, p: &BPlace, loans: &[Loan]) {
+        let gone = |ln: u32| {
+            let lp = &loans[ln as usize].place;
+            lp.local == p.local && prefix(&p.proj, &lp.proj) && lp.owned_len() >= p.proj.len() && lp.owned_len() < lp.proj.len()
+        };
+        for h in &mut self.holds {
+            h.1.retain(|&ln| !gone(ln));
+        }
+        self.escaped.retain(|&ln| !gone(ln));
+    }
     fn held(&self, l: u32) -> &[u32] {
         self.holds.iter().find(|h| h.0 == l).map(|h| h.1.as_slice()).unwrap_or(&[])
     }
@@ -1526,9 +1541,15 @@ impl Bk {
                                 // (a union's field written: the whole union is, its other fields too)
                                 st.moved.retain(|m| !(m.place.local == p.local && (prefix(&p.proj, &m.place.proj) || union_overlap(&p.proj, &m.place.proj))));
                             }
+                            if !p.proj.is_empty() && p.owned_len() == p.proj.len() && !p.proj.contains(&Proj::Index) && !super::no_polonius() {
+                                st.kill_loans_through(p, &self.loans);
+                            }
                             if p.proj.is_empty() {
                                 st.holds.retain(|h| h.0 != p.local);
                                 st.kill_loans_of(p.local, &self.loans);
+                                if !super::no_polonius() {
+                                    st.kill_loans_through(p, &self.loans);
+                                }
                                 if self.locals[p.local as usize].mutable == Some(false) || self.mut_flow.borrow().0.binary_search(&p.local).is_ok() {
                                     if let Err(i) = st.inited.binary_search(&p.local) {
                                         st.inited.insert(i, p.local);
@@ -3714,7 +3735,14 @@ impl Cx<'_> {
     }
 
     pub(crate) fn bk_loan_only(&mut self, e: &Expr, m: bool) -> Option<u32> {
-        let (p, _) = self.bk_place(e)?;
+        let (mut p, _) = self.bk_place(e)?;
+        // (a method's receiver that is a reference (`v.iter_mut()` with `v: &mut [T]`): it is auto-dereferenced, so
+        // the loan is of `*v`, a reborrow, not of the local v)
+        if let Some(Ty::Ref(rm, _)) = self.peek(e) {
+            if self.bk.recv_deref {
+                p.proj.push(ref_deref(rm));
+            }
+        }
         let sp = err_pos(e);
         // (unused_mut: `for x in v.iter_mut()` / `&mut v` takes a `&mut` of v, which no access records)
         if m && self.bk.lint_mut && p.owned_len() == p.proj.len() {

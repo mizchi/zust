@@ -1613,7 +1613,14 @@ impl Cx<'_> {
                         _ => Some(Ty::I32),
                     })
                 };
+                let f0 = self.bk.frames.last().map(|f| f.len());
                 let (v, from) = self.expr(x, hint)?;
+                // (a cast to a number holds nothing of what x borrows: `r as *mut _ as usize` does not keep r's loans)
+                if to.is_int() || to.is_float() || matches!(to, Ty::Bool | Ty::Char) {
+                    if let (Some(n), Some(f)) = (f0, self.bk.frames.last_mut()) {
+                        f.truncate(n);
+                    }
+                }
                 // `x as _` (the expected type, else the same type) / `&x as *const _` (the pointee of the source)
                 let to = match to {
                     Ty::Param(h) if h == crate::program::HOLE => expected.filter(|&e| !has_hole(self.prog, e)).unwrap_or(from),

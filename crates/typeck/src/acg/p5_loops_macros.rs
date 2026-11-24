@@ -378,7 +378,10 @@ impl Cx<'_> {
             }
             if let (true, Some((inner, m))) = (self.bk_on(), by_iter.filter(|x| is_place_expr(x.0))) {
                 let t0 = self.bk.call_temps.len();
-                if let Some(ln) = self.bk_loan_only(inner, m) {
+                self.bk.recv_deref = true;
+                let lo = self.bk_loan_only(inner, m);
+                self.bk.recv_deref = false;
+                if let Some(ln) = lo {
                     self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
                     let mut it = self.bk_for_items(inner, ln);
                     if copies {
