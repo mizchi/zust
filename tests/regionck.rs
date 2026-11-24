@@ -3447,4 +3447,8 @@ fn part19_review() {
     let d = check("struct S;\nimpl S {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let local = 1;\n    let f = |x| S.take::<&'static u32>(x);\n    f(&local);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("does not live long enough"), "{d:?}");
     assert_eq!(check("struct S;\nimpl S {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let local = 1;\n    let s = S;\n    let f = |x| s.take::<&u32>(x);\n    f(&local);\n    static C: u32 = 2;\n    let g = |x| S.take::<&'static u32>(x);\n    g(&C);\n}\n"), vec![]);
+    // (on a generic impl, the turbofish writes the method's own parameters, which come after the impl's)
+    let d = check("struct S<A>(A);\nimpl<A> S<A> {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let s = S(1u8);\n    let local = 1;\n    let f = |x| s.take::<&'static u32>(x);\n    f(&local);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("does not live long enough"), "{d:?}");
+    assert_eq!(check("struct S<A>(A);\nimpl<A> S<A> {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let s = S(1u8);\n    let local = 1;\n    let f = |x| s.take::<&u32>(x);\n    f(&local);\n}\n"), vec![]);
 }
