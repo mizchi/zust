@@ -3662,3 +3662,12 @@ fn part22_projection_annotations() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
     assert_eq!(check("trait Foo { type Out; }\nimpl Foo for () { type Out = &'static u32; }\nimpl<'a> Foo for &'a () { type Out = &'a u32; }\nstatic S: u32 = 3;\nfn f<'a>(r: &'a u32) -> &'a u32 {\n    let x: <&'a () as Foo>::Out = r;\n    let a = 22;\n    let _: <&'_ () as Foo>::Out = &a;\n    let _: <() as Foo>::Out = &S;\n    let _: <() as Foo>::Out = &5;\n    x\n}\nfn main() { let v = 1; f(&v); }\n"), vec![]);
 }
+
+#[test]
+fn part22_local_closure_cast() {
+    // (a closure held by a local and cast to a fn pointer type: its annotated parameters against the regions the type
+    // binds, reported at the cast (E0308 in rustc, there))
+    let d = check("fn main() {\n    let c = |_: &'static u32| {};\n    let f = c as fn(&u32);\n    f(&1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let c = |_: &u32| {};\n    let f = c as fn(&u32);\n    f(&1);\n    let d = |_: &'static u32| {};\n    let g = d as fn(&'static u32);\n    g(&1);\n}\n"), vec![]);
+}

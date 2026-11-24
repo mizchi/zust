@@ -486,6 +486,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         closure_prelude: false,
         closure_fn_only: false,
         hr_lost: vec![],
+        clo_ann: vec![],
         clo_ret_param: vec![],
         clo_ret_from: vec![],
         seg_self: None,
@@ -1039,6 +1040,9 @@ pub struct Cx<'p> {
     /// Closures made where nothing was expected (their kind, signature: from the body), by their definition: the
     /// parameters with no type written that are references (one region each, not higher-ranked)
     pub hr_lost: Vec<(u32, Vec<usize>)>,
+    /// The closures made with a parameter annotated with a lifetime (`|_: &'static u32| {}`), by struct: their
+    /// expressions, for a cast of a local holding one to a fn pointer type (rg_closure_fnptr)
+    pub clo_ann: Vec<(u32, Expr)>,
     /// Of those, the ones whose body is one of their parameters (`|y| y`): that parameter's type argument
     pub clo_ret_param: Vec<(u32, usize)>,
     /// A closure's parameters its result is made of, as its body is written (borrowck::closure_ret_params): a call's
