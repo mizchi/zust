@@ -158,7 +158,8 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   `<&'static J as BitAnd<&'static J>>::Output` beside another trait's `Output` (tests/probe/w1_items.rs);
   qualified paths whose self type is a reference or an associated type, an impl for a type itself before a blanket
   one, associated types naming another impl's, `&[T]`'s impl beside `&mut [u8]`'s, a renamed fn at a range's end
-  (tests/probe/w1_items2.rs); items in `const _: () = { .. };` (what `#[wasm_bindgen]` and derives wrap impls in),
+  (tests/probe/w1_items2.rs); items in a `const _: () = { .. };` a macro writes on one line (what `#[wasm_bindgen]`,
+  `closures!` and derives wrap impls in; one written by hand is still skipped),
   `<T as Tr>::null()` that is no `ptr::null()`, impls for references to generic structs as bounds,
   `<Box<[u8]>>::from_abi` among Box's impls, `<T as Tr>::Abi` of a parameter once it is known, a macro's `let`
   names beside a field or method of the name and in a struct literal's shorthand, `Vec::from_raw_parts`,
@@ -171,7 +172,8 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   - a method call on a `Box<[T]>` with the program's `impl Tr for Box<[T]>` derefs to `[T]` and misses it.
   - `<&J as Tr>::m()` where Tr's impl for `&J` is a blanket one (`impl<T: OptionIntoWasmAbi> MaybeIntoWasmAbi for
     T`): "cannot find value (unsupported path)".
-  - items in a `const _: () = { .. };` are visible outside it (rustc scopes its fns to the block).
+  - the items a macro's `const _: () = { .. };` moves out are visible outside it (rustc scopes its fns to the
+    block); the hand-written one in wasm-bindgen's lib.rs (`__wbindgen_skip_interpret_calls`) is not compiled.
 - Found while building memchr, not fixed:
   - a generic struct literal whose field is a `<v128 as Tr>::f(..)` call (`Pair { v1: <v128 as Vector>::splat(b) }`)
     does not infer `V = v128` ("expected `T0`, found `v128`"); an annotation or an intrinsic's value does;

@@ -5536,7 +5536,8 @@ impl Session2 {
 /// `Self` of the fn or impl around it, a local), an import, `_` in a signature, an item never used. Not what zustc
 /// does not read (`unsupported ..`, a parse error of syntax it does not know), nor a name the hoisting made (`X__h0`)
 fn hoisted_err_holds(msg: &str) -> bool {
-    let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword"];
+    // (and a syntax error, `expected `,` or `>` (found `=`)`: the item's text is moved as written)
+    let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword", "expected `"];
     let unused = msg.starts_with("function `") && msg.contains("is never used");
     // (a derive's field or a field's type without the bound it needs (derive_field_error, wf_error): a local
     // `#[derive(Eq)] struct S(f64);` too)

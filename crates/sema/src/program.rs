@@ -1321,6 +1321,13 @@ impl Program {
         }
         // (associated types without generic structs, `impl Tr for i32 { type Ty = i32; }`, before the fields: a field
         // or a const may be `<i32 as Tr>::Ty`. The others below, once the definitions are laid out)
+        // (the traits the program declares, known before the associated types are read: a qualified path's
+        // `<T as Tr>::Abi` keeps Tr when it is one of them)
+        for sm in &sums[..user.min(sums.len())] {
+            if let Some(tr) = &sm.trait_decl {
+                p.user_traits.insert(tr.clone());
+            }
+        }
         let mut early = vec![];
         // (the values that name other associated types, `type Prim1 = <WasmWord as WasmAbi>::Prim1;`: read again once
         // all are known, as one read before WasmWord's impl took a blanket impl's: (index in p.assocs, item, place))
@@ -3014,7 +3021,7 @@ impl Program {
                     // (with its trait, when another trait has an associated type of the name too: `<T as
                     // VectorFromWasmAbi>::Abi` is not T's IntoWasmAbi's once T is known)
                     let name = match tr {
-                        Some(tr) if self.assoc_traits_of(n) > 1 => format!("{}{tr}:{n}", crate::ast_types::TRAIT_ASSOC),
+                        Some(tr) if self.user_traits.contains(tr) && self.assoc_traits_of(n) > 1 => format!("{}{tr}:{n}", crate::ast_types::TRAIT_ASSOC),
                         _ => n.to_string(),
                     };
                     Ty::Assoc(intern_assoc(AssocTy { base: bt, name }))
@@ -5797,6 +5804,7 @@ impl Program {
                 ("Ref", "map") if !self.index.contains_key("Ref::map") => Some("__exr_ref_map"),
                 ("RefMut", "map") if !self.index.contains_key("RefMut::map") => Some("__exr_refmut_map"),
                 ("Ref", "clone") if !self.index.contains_key("Ref::clone") => Some("__exr_ref_clone"),
+                ("Vec", "from_raw_parts") if !self.index.contains_key("Vec::from_raw_parts") => Some("__exr_vec_from_raw_parts"),
                 _ => None,
             };
             if let Some(c) = core {

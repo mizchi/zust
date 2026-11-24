@@ -806,6 +806,8 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     // consts and statics go out, as a fn body's do. Its `{` (token), and whether the next `{` opens one)
     let mut anon_bodies: Vec<usize> = vec![];
     let mut pending_anon = false;
+    // (the types each of those bodies defines, which stay in it: an impl for one stays too)
+    let mut anon_types: Vec<Vec<&[u8]>> = vec![];
     let mut moves: Vec<(usize, usize)> = vec![];
     // 入れ子のアイテムの名前と、それを含む関数の本体 (開き括弧のトークン位置)。閉じた本体の (開き, 閉じ)
     let mut nested_names: Vec<(Vec<u8>, usize)> = vec![];
@@ -889,10 +891,52 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             // statics and types stay, what the const checks at compile time (`struct _Section([u8; _CHUNK_1_LEN])` of
             // `#[wasm_bindgen]`'s custom section, beside the const it names))
             let in_anon = fn_bodies.last().is_some_and(|&(_, open)| anon_bodies.last() == Some(&open));
-            let anon_keeps = in_anon && !extern_block && !matches!(t, b"impl" | b"use" | b"fn" | b"trait");
+            let local_impl = || {
+                let names = anon_types.last().map(|v| v.as_slice()).unwrap_or(&[]);
+                let mut j = ik + 1;
+                while j < toks.len() && !is_sym(j, b"{") && !is_sym(j, b";") {
+                    if toks[j].0 == 0 && names.contains(&tok(j)) {
+                        return true;
+                    }
+                    j += 1;
+                }
+                false
+            };
+            let anon_keeps = in_anon && !extern_block && (!matches!(t, b"impl" | b"use" | b"fn" | b"trait") || (t == b"impl" && local_impl()));
             // (an anonymous const that stays, in another one's body: its own body is one too)
             if anon_keeps && t == b"const" && ik + 1 < toks.len() && tok(ik + 1) == b"_" {
                 pending_anon = true;
+            } else if anon_keeps && item_kw && ik + 1 < toks.len() && toks[ik + 1].0 == 0 {
+                // (another item that stays, `impl Section { fn len(&self) .. }`: past its end, whose fns are its own)
+                let semi_only = matches!(t, b"const" | b"static" | b"type" | b"use");
+                let mut j = ik + 1;
+                let mut d = 0i32;
+                while j < toks.len() {
+                    if is_sym(j, b"(") || is_sym(j, b"[") || (semi_only && is_sym(j, b"{")) {
+                        d += 1;
+                    } else if is_sym(j, b")") || is_sym(j, b"]") || (semi_only && is_sym(j, b"}")) {
+                        d -= 1;
+                    } else if d == 0 && is_sym(j, b";") {
+                        break;
+                    } else if d == 0 && is_sym(j, b"{") {
+                        let mut e = 0i32;
+                        while j < toks.len() {
+                            if is_sym(j, b"{") {
+                                e += 1;
+                            } else if is_sym(j, b"}") {
+                                e -= 1;
+                                if e == 0 {
+                                    break;
+                                }
+                            }
+                            j += 1;
+                        }
+                        break;
+                    }
+                    j += 1;
+                }
+                k = j + 1;
+                continue;
             }
             // (`const` の後ろに `fn` や `|` (const クロージャ) が来るものは別扱い: `const fn` は fn で見る)
             if in_body && stmt_start && item_kw && !anon_keeps && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<")) || extern_block) {
@@ -1035,8 +1079,30 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                         fn_bodies.push((depth, k));
                         pending_fn = false;
                     } else if pending_anon {
-                        fn_bodies.push((depth, k));
-                        anon_bodies.push(k);
+                        // (its own types: at its top level)
+                        let mut names: Vec<&[u8]> = vec![];
+                        let mut d = 0i32;
+                        let mut j = k + 1;
+                        while j < toks.len() {
+                            if is_sym(j, b"{") || is_sym(j, b"(") || is_sym(j, b"[") {
+                                d += 1;
+                            } else if is_sym(j, b"}") || is_sym(j, b")") || is_sym(j, b"]") {
+                                if d == 0 {
+                                    break;
+                                }
+                                d -= 1;
+                            } else if d == 0 && toks[j].0 == 0 && matches!(tok(j), b"struct" | b"enum" | b"union" | b"type") && j + 1 < toks.len() && toks[j + 1].0 == 0 {
+                                names.push(tok(j + 1));
+                            }
+                            j += 1;
+                        }
+                        // (only one a macro wrote, on one line (a proc macro's output, a `macro_rules!` expansion):
+                        // one written by hand is checked where it is, its items' errors at their lines)
+                        if j < toks.len() && !s[toks[k].1..toks[j].1].contains(&b'\n') {
+                            fn_bodies.push((depth, k));
+                            anon_bodies.push(k);
+                            anon_types.push(names);
+                        }
                     }
                     pending_anon = false;
                     depth += 1;
@@ -1047,6 +1113,7 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                         let (_, open) = fn_bodies.pop().unwrap();
                         if anon_bodies.last() == Some(&open) {
                             anon_bodies.pop();
+                            anon_types.pop();
                         }
                         bodies.push((open, k));
                     }

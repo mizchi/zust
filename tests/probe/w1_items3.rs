@@ -35,38 +35,50 @@ impl<'a> Nullable for &'a JsValue {
     }
 }
 
-// (impls in an anonymous const, with doc comments; a nested one)
+// (impls in an anonymous const a macro writes, as `closures!` and `#[wasm_bindgen]` do, with doc comments; a
+// nested one; a type of its own and its impl stay in it)
 pub struct JsClosure {
     obj: JsValue,
 }
-const _: () = {
-    /// The closure's ABI is its JS value's.
-    ///
-    /// ## Docs
-    impl IntoAbi for JsClosure {
-        type Abi = <JsValue as IntoAbi>::Abi;
-        fn into_abi(self) -> Self::Abi {
-            self.obj.into_abi()
-        }
-    }
-    /** by reference */
-    impl<'r> IntoAbi for &'r JsClosure {
-        type Abi = <&'r JsValue as IntoAbi>::Abi;
-        fn into_abi(self) -> Self::Abi {
-            (&self.obj).into_abi()
-        }
-    }
-    const _: () = {
-        impl Nullable for JsClosure {
-            fn null() -> Self::Abi {
-                <JsValue as Nullable>::null()
+macro_rules! closure_impls {
+    () => {
+        const _: () = {
+            /// The closure's ABI is its JS value's.
+            ///
+            /// ## Docs
+            impl IntoAbi for JsClosure {
+                type Abi = <JsValue as IntoAbi>::Abi;
+                fn into_abi(self) -> Self::Abi {
+                    self.obj.into_abi()
+                }
             }
-        }
+            /** by reference */
+            impl<'r> IntoAbi for &'r JsClosure {
+                type Abi = <&'r JsValue as IntoAbi>::Abi;
+                fn into_abi(self) -> Self::Abi {
+                    (&self.obj).into_abi()
+                }
+            }
+            const _: () = {
+                impl Nullable for JsClosure {
+                    fn null() -> Self::Abi {
+                        <JsValue as Nullable>::null()
+                    }
+                }
+            };
+            #[allow(dead_code)]
+            struct Section([u8; LEN]);
+            impl Section {
+                #[allow(dead_code)]
+                fn len(&self) -> usize {
+                    self.0.len()
+                }
+            }
+            const LEN: usize = 3;
+        };
     };
-    #[allow(dead_code)]
-    struct Section([u8; LEN]);
-    const LEN: usize = 3;
-};
+}
+closure_impls!();
 impl<'r> Nullable for &'r JsClosure {
     fn null() -> Self::Abi {
         <&'r JsValue as Nullable>::null()
