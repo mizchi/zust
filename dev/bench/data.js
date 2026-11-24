@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795530845436,
+  "lastUpdate": 1795530848063,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -73576,6 +73576,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 110.559,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9658c3f1ba2e106e83c8277b56c07d1a2e4a2ac6",
+          "message": "Region check part 24: a struct's 'static bound in a generic fn's types, `mut` bindings under a by-reference binding mode, the outlives of the impl a projection selects (#130)\n\nRegion check part 24: a struct's 'static bound in a generic fn's types, `mut` bindings under a by-reference binding mode, the outlives of the impl a projection selects",
+          "timestamp": "2026-11-24T23:28:53+09:00",
+          "tree_id": "1302996273b34b1b93755c00fa296a4b92b94c34",
+          "url": "https://github.com/mizchi/zust/commit/9658c3f1ba2e106e83c8277b56c07d1a2e4a2ac6"
+        },
+        "date": 1795530847516,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.666,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.563,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.88,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.252,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.86,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.828,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.659,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 197.316,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 110.191,
             "unit": "MiB"
           }
         ]
