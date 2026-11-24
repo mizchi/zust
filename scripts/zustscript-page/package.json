@@ -6,6 +6,7 @@
     "markdown-it": "14.3.3",
     "tree-sitter-bash": "0.25.1",
     "tree-sitter-javascript": "0.23.1",
+    "tree-sitter-rust": "0.24.0",
     "tree-sitter-typescript": "0.23.2"
   }
 }
