@@ -1314,7 +1314,7 @@ impl Cx<'_> {
             Ok(())
         } else {
             if panic_err() {
-                panic!("mismatched types");
+                panic!("mismatched types: expected `{}`, found `{}`", self.prog.tn(want), self.prog.tn(got));
             }
             Err(self.at(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(want), self.prog.tn(got))))
         }
@@ -2890,8 +2890,31 @@ impl Cx<'_> {
             // trait's of the same name)
             if p.segs.len() >= 2 {
                 let tr = &p.segs[p.segs.len() - 2].name;
-                if let Some(i) = self.trait_candidate(&format!("{}::{m}", self.ty_key(t)), tr).or_else(|| self.trait_default(tr, &m, t)) {
+                // (among impls of the trait for instances of one type, `<Box<[f32]> as FromWasmAbi>::from_abi` beside
+                // Box<[u8]>'s: the one for the type itself)
+                let own = |c: u32| self.prog.sigs[c as usize].self_ty.is_some_and(|st| self.prog.match_ty_exact(st, t, &mut vec![None; self.prog.sigs[c as usize].generics.len()]));
+                let key = format!("{}::{m}", self.ty_key(t));
+                let multi = self.prog.overloads.contains_key(&key);
+                if let Some(i) = multi.then(|| self.trait_candidate_where(&key, tr, own)).flatten().or_else(|| self.trait_candidate(&key, tr)).or_else(|| self.trait_default(tr, &m, t)) {
                     return Some((i, &self.prog.sigs[i as usize]));
+                }
+                // (`<&J as Tr>::m`: the impl for the reference, whose functions are `J::__ref_m`)
+                if let Ty::Ref(..) = t {
+                    let (mut pre, mut b) = (String::new(), t);
+                    while let Ty::Ref(_, i) = b {
+                        pre.push_str("__ref_");
+                        b = *i;
+                    }
+                    // (an impl for `&[T]` / `&[T; N]` has its functions under `__slice` / `__array`)
+                    let base = match b {
+                        Ty::Slice(_) => "__slice".to_string(),
+                        Ty::Array(..) => "__array".to_string(),
+                        b => self.ty_key(b),
+                    };
+                    let key = format!("{base}::{pre}{m}");
+                    if let Some(i) = self.trait_candidate_where(&key, tr, own).or_else(|| self.trait_candidate(&key, tr)) {
+                        return Some((i, &self.prog.sigs[i as usize]));
+                    }
                 }
             }
             // (`<T as Tr>::A::m`: a fn of the associated type A, its instance's)

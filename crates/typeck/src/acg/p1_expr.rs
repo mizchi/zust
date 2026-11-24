@@ -4132,7 +4132,24 @@ impl Cx<'_> {
         // (a call of this kind in the arguments keeps the outer one's for after it)
         let outer = std::mem::replace(&mut self.rg.call_self, written);
         self.bk_arg_flows_before(id, &args);
+        // (`<&[u8] as Tr>::m(&v)`: the impl the qualified type names, whose self type it is; not another overload
+        // the arguments would pick (`&Vec<u8>` coerces to both `&[T]` and `&mut [u8]`'s receiver))
+        let mut kept = false;
+        if let Expr::Path(Some(q), _) = &**func {
+            let sig = &self.prog.sigs[id as usize];
+            if self.prog.overloads.contains_key(self.prog.names[id as usize].split('#').next().unwrap_or("")) {
+                if let (Ok(qt), Some(st)) = (self.parse_ty(q), sig.self_ty) {
+                    if !self.prog.has_param(qt) && self.prog.match_ty_exact(st, qt, &mut vec![None; sig.generics.len()]) {
+                        self.keep_overload.set(Some(id));
+                        kept = true;
+                    }
+                }
+            }
+        }
         let r = self.call_fn(id, None, &args, tf, expected, SP);
+        if kept {
+            self.keep_overload.set(None);
+        }
         self.rg.call_self = outer;
         if r.is_ok() {
             self.bk_arg_flows(id, &args);

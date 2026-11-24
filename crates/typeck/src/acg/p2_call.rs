@@ -2487,7 +2487,12 @@ impl Cx<'_> {
             });
             if last == Some(m.as_str()) || bare == Some(m.as_str()) {
                 let of_tr = |c: u32| base(c) == Some(tr.as_str());
-                if let Some(&c) = cands.iter().find(|&&c| of_tr(c) && fits(c, at)) {
+                // (one for the receiver's own type first: `&[T]`'s impl, not `&mut [T]`'s)
+                let exact = |c: u32| {
+                    let sig = &self.prog.sigs[c as usize];
+                    sig.params.first().is_some_and(|&pt| self.prog.match_ty_exact(pt, at, &mut vec![None; sig.generics.len()]))
+                };
+                if let Some(&c) = cands.iter().find(|&&c| of_tr(c) && exact(c)).or_else(|| cands.iter().find(|&&c| of_tr(c) && fits(c, at))) {
                     return c;
                 }
                 if let Some(c) = deref.and_then(|d| cands.iter().copied().find(|&c| of_tr(c) && fits(c, d))) {
@@ -2539,7 +2544,16 @@ impl Cx<'_> {
                 Some(second) => {
                     let all: Vec<u32> = [first, second].into_iter().chain(fit).collect();
                     let by = |f: &dyn Fn(u32) -> bool| all.iter().copied().find(|&c| f(c));
-                    by(&|c| args_fit(c) && bounds_hold(c, at)).or_else(|| by(&|c| args_fit(c))).or_else(|| by(&|c| bounds_hold(c, at))).or(Some(first))
+                    // (a receiver of the parameter's own type before a coercion: `&[T]`'s impl, not `&mut [T]`'s)
+                    let exact = |c: u32| {
+                        let sig = &self.prog.sigs[c as usize];
+                        sig.params.first().is_some_and(|&pt| self.prog.match_ty_exact(pt, at, &mut vec![None; sig.generics.len()]))
+                    };
+                    by(&|c| exact(c) && args_fit(c) && bounds_hold(c, at))
+                        .or_else(|| by(&|c| args_fit(c) && bounds_hold(c, at)))
+                        .or_else(|| by(&|c| args_fit(c)))
+                        .or_else(|| by(&|c| bounds_hold(c, at)))
+                        .or(Some(first))
                 }
             }
         };

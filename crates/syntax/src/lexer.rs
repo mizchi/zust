@@ -2422,7 +2422,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             k += 1;
             continue;
         }
-        let prev_dot = k >= 1 && is_sym(k - 1, b'.');
+        // (a field or method after `.`; not a range's end, `a..name()`)
+        let prev_dot = k >= 1 && is_sym(k - 1, b'.') && !(k >= 2 && is_sym(k - 2, b'.'));
         // (`::name` at a path's start, `::re::label` / `<T as ::re::Tr>`, is a path from the extern crate `name`: read as
         // `re::label` is)
         let leading = k >= 2

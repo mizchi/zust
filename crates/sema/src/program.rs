@@ -1322,6 +1322,9 @@ impl Program {
         // (associated types without generic structs, `impl Tr for i32 { type Ty = i32; }`, before the fields: a field
         // or a const may be `<i32 as Tr>::Ty`. The others below, once the definitions are laid out)
         let mut early = vec![];
+        // (the values that name other associated types, `type Prim1 = <WasmWord as WasmAbi>::Prim1;`: read again once
+        // all are known, as one read before WasmWord's impl took a blanket impl's: (index in p.assocs, item, place))
+        let mut reread: Vec<(usize, usize, usize)> = vec![];
         for (ii, sm) in sums.iter().enumerate() {
             // (of a trait impl: an inherent `impl S { type P = (); }` is unstable, `S::P` is not looked up through it)
             let of_trait = matches!(items[ii].kind, crate::lexer::ItemKind::ImplMember(h) if sums[h as usize].impl_trait.is_some());
@@ -1336,6 +1339,9 @@ impl Program {
                 if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
                     let (ngen, ngat) = gat_split(&gn);
                     let tr = impl_trait_of(items, sums, ii);
+                    if syn_has_assoc(&a.value) {
+                        reread.push((p.assocs.len(), ii, k));
+                    }
                     p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat, tr });
                     early.push((ii, k));
                 }
@@ -1467,6 +1473,9 @@ impl Program {
                     .resolve_g(&a.value, &gn)
                     .map_err(|e| format!("{}:1: {e}", it.line))?;
                 let (ngen, ngat) = gat_split(&gn);
+                if syn_has_assoc(&a.value) {
+                    reread.push((p.assocs.len(), ii, k));
+                }
                 p.assocs.push(AssocDef {
                     name: a.name.clone(),
                     self_ty,
@@ -1475,6 +1484,16 @@ impl Program {
                     ngat,
                     tr: impl_trait_of(items, sums, ii),
                 });
+            }
+        }
+        // (twice: a value may name one read again here)
+        for _ in 0..2 {
+            for &(at, ii, k) in &reread {
+                let a = &sums[ii].assocs[k];
+                let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
+                if let Ok(v) = p.resolve_g(&a.value, &gn) {
+                    p.assocs[at].value = v;
+                }
             }
         }
         // (the impls of each trait for each type so far: their self types and trait arguments, and parameters)
@@ -4383,7 +4402,15 @@ impl Program {
         if self.assocs.iter().filter(|a| fits(a)).nth(1).is_none() {
             return None;
         }
-        let a = self.assocs.iter().find(|a| a.tr.as_deref() == Some(tr) && fits(a))?;
+        let of_tr = |a: &&AssocDef| a.tr.as_deref() == Some(tr) && fits(a);
+        let concrete = |a: &&AssocDef| !matches!(a.self_ty, Ty::Param(_));
+        let a = self
+            .assocs
+            .iter()
+            .filter(concrete)
+            .find(|a| of_tr(a) && self.match_ty_exact(a.self_ty, t, &mut vec![None; a.ngen]))
+            .or_else(|| self.assocs.iter().filter(concrete).find(of_tr))
+            .or_else(|| self.assocs.iter().find(of_tr))?;
         let mut sol = vec![None; a.ngen];
         self.match_ty(a.self_ty, t, &mut sol);
         let args = sol.iter().copied().collect::<Option<Vec<Ty>>>()?;
@@ -4431,7 +4458,13 @@ impl Program {
             }
             return None;
         }
-        for a in &self.assocs {
+        // (an impl for the type itself before a blanket one, `impl WasmAbi for WasmSlice` before `impl<T: WasmPrimitive>
+        // WasmAbi for T`: when both are written, the blanket impl's bounds leave the type out, or they would overlap)
+        // (and first one whose self type is the type with no coercion: `impl Tr for &J` before `impl<T> Tr for *const T`)
+        let blanket = |a: &&AssocDef| matches!(a.self_ty, Ty::Param(_));
+        let exact = self.assocs.iter().filter(|a| !blanket(a)).map(|a| (a, true));
+        let rest = self.assocs.iter().filter(|a| !blanket(a)).chain(self.assocs.iter().filter(blanket)).map(|a| (a, false));
+        for (a, ex) in exact.chain(rest) {
             // (a generic associated type without its arguments (`<() as Outer>::Ty` of a qualified path): its value
             // when that does not use its own parameters)
             if a.name != name || (a.ngat != 0 && self.uses_params_from(a.value, a.ngen as u8)) {
@@ -4443,7 +4476,7 @@ impl Program {
                 }
             }
             let mut sol = vec![None; a.ngen];
-            if self.match_ty(a.self_ty, t, &mut sol) {
+            if if ex { self.match_ty_exact(a.self_ty, t, &mut sol) } else { self.match_ty(a.self_ty, t, &mut sol) } {
                 let Some(mut args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else {
                     continue;
                 };
