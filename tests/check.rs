@@ -2019,3 +2019,24 @@ fn unsized_where_sized_is_needed() {
     let ok = "struct W<T: ?Sized>(Box<T>);\nstruct P<T: ?Sized> {\n    a: u8,\n    b: T,\n}\nfn f(_: W<[u8]>, _: Box<str>, _: std::rc::Rc<dyn Fn()>, _: &P<str>) {}\nfn main() {}\n";
     assert_eq!(first(ok), None, "Sized");
 }
+
+#[test]
+fn method_of_an_unbounded_type_parameter() {
+    // (E0599: a method of a type parameter with no bounds but markers, in a fn nothing instantiates; each expected line
+    // and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, format!("no method named `{m}` found for type parameter `T` in the current scope (E0599)")));
+    assert_eq!(first("fn foo<T>(t: T) {\n    t.clone();\n}\nfn main() {}\n"), e(2, 7, "clone"), "clone");
+    // (behind a reference: rustc names `&T`, zustc the parameter; the place is the same)
+    assert_eq!(first("fn foo<T: Send + 'static>(x: &T) {\n    x.method();\n}\nfn main() {}\n").map(|d| (d.0, d.1)), Some((2, 7)), "behind a reference");
+    // (a blanket impl's method, std's `into`, a where clause of the impl's)
+    assert_eq!(first("trait Ext { fn ext(&self) {} }\nimpl<T> Ext for T {}\nfn foo<T>(t: T) -> u8 {\n    t.ext();\n    let _x: T = t.into();\n    0\n}\nfn main() {}\n"), None, "blanket");
+    assert_eq!(
+        first("trait Trait { fn method(self) -> isize; }\nstruct W<T> { field: T }\nimpl<'a, T> Trait for &'a W<T> where &'a T: Trait {\n    fn method(self) -> isize {\n        let r: &'a T = &self.field;\n        r.method()\n    }\n}\nfn main() {}\n"),
+        None,
+        "where clause"
+    );
+}

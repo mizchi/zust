@@ -9595,8 +9595,20 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
             continue;
         }
         let args: Vec<Ty> = sig.generics.iter().enumerate().map(|(k, (n, bs))| Ty::Struct(p.placeholder(id as u32, k as u32, n, bs))).collect();
-        if let (Ok(iid), true) = (g.request(p, id as u32, args), recheck) {
-            g.recheck.insert(iid);
+        // (a where clause of the fn's, or of its impl's header: `impl<'a, T> Tr for &'a W<T> where &'a T: Tr`)
+        let header = match a.items.get(ii).map(|it| it.kind) {
+            Some(crate::lexer::ItemKind::ImplMember(h) | crate::lexer::ItemKind::TraitMember(h)) => a.items.get(h as usize).and_then(|it| a.src.get(it.start..it.end)).unwrap_or(""),
+            _ => "",
+        };
+        let wheres = body.contains("where") || header.contains("where");
+        let r = g.request(p, id as u32, args);
+        if let Ok(iid) = r {
+            if recheck {
+                g.recheck.insert(iid);
+            }
+            if wheres {
+                g.where_bound.insert(iid);
+            }
         }
     }
     std::mem::take(&mut g.pending)

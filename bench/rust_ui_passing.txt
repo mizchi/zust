@@ -7269,6 +7269,7 @@ compile-fail	suggestions/issue-114701.rs
 compile-fail	suggestions/issue-114797-bad-parentheses-dyn-trait.rs
 compile-fail	suggestions/issue-116434-2021.rs
 compile-fail	suggestions/issue-117669.rs
+compile-fail	suggestions/issue-21673.rs
 compile-fail	suggestions/issue-51055-missing-semicolon-between-call-and-tuple.rs
 compile-fail	suggestions/issue-52820.rs
 compile-fail	suggestions/issue-53692.rs
@@ -7327,6 +7328,7 @@ compile-fail	suggestions/negative-literal-infered-to-unsigned.rs
 compile-fail	suggestions/nested-non-tuple-tuple-struct.rs
 compile-fail	suggestions/never-coercion-equality-suggestion.rs
 compile-fail	suggestions/never-coercion-suggestion-candidates.rs
+compile-fail	suggestions/no-method-found-suggest-trait-args.rs
 compile-fail	suggestions/no-method-over-suggestion-on-elem-mismatch.rs
 compile-fail	suggestions/non-existent-field-present-in-subfield-recursion-limit.rs
 compile-fail	suggestions/non-existent-field-present-in-subfield.rs
@@ -7720,6 +7722,7 @@ check-pass	traits/issue-90195-2.rs
 check-pass	traits/issue-90195.rs
 check-pass	traits/issue-92292.rs
 run-pass	traits/issue-9394-inherited-calls.rs
+compile-fail	traits/issue-95898.rs
 check-pass	traits/issue-96665.rs
 run-pass	traits/item-inside-macro.rs
 compile-fail	traits/lifetime-mismatch-trait-impl-16048.rs
@@ -8094,6 +8097,7 @@ compile-fail	typeck/output-type-mismatch.rs
 compile-fail	typeck/parenthesized-type-param.rs
 compile-fail	typeck/parenthesized-type-params-in-paths.rs
 compile-fail	typeck/point-at-type-param-in-path-expr.rs
+compile-fail	typeck/point-at-type-parameter-definition.rs
 compile-fail	typeck/pointer-arith-assign.rs
 compile-fail	typeck/prim-with-args.rs
 run-pass	typeck/project-cache-issue-37154.rs

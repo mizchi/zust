@@ -678,6 +678,9 @@ pub struct Insts {
     /// Of those, the instances of fns that instances were made of with `Copy` types only (driver2's
     /// placeholder_wave): checked for what moving a T does, nothing else
     pub recheck: FxSet<u32>,
+    /// Of those, the instances of fns that a where clause bounds (the fn's, its impl's): a parameter's bounds there
+    /// may not be its own (`where &'a T: Trait`)
+    pub where_bound: FxSet<u32>,
     /// Closures' bodies (by their fn id) whose kind no bound nor expected type decides, made in the program's code: one that
     /// returns a mutable borrow of what it captures by reference is `FnMut`, and the borrow escapes its body
     pub kind_free: FxSet<u32>,
@@ -786,6 +789,7 @@ impl Insts {
             imp_cache: HashMap::default(),
             lenient: false,
             recheck: FxSet::default(),
+            where_bound: FxSet::default(),
             kind_free: FxSet::default(),
             fx_log: vec![],
         }
