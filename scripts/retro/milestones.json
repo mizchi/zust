@@ -1,0 +1,16 @@
+[
+ {"time": "2026-11-15T17:52:50Z", "commit": "1c6db317", "label": "Start", "detail": "exrustc renamed to crustc (the first commit of this repository)"},
+ {"time": "2026-11-15T21:32:26Z", "commit": "86c30a74", "label": "Self-hosting begins", "detail": "the compiler's own lexer compiled by itself (step 1)"},
+ {"time": "2026-11-16T03:55:39Z", "commit": "9584ff9f", "label": "minclif", "detail": "a minimal x86-64 backend of its own, as the base for replacing Cranelift"},
+ {"time": "2026-11-16T09:33:41Z", "commit": "9275b8d3", "label": "Self-host fixed point", "detail": "rustc- and crustc-built compilers agree on all 139 programs; stage 2 reproduces itself"},
+ {"time": "2026-11-17T12:38:03Z", "commit": "128f6d18", "label": "LSP", "detail": "definition / references, checked against rust-analyzer"},
+ {"time": "2026-11-18T05:41:16Z", "commit": "bfd161cf", "label": "Renamed to zustc", "detail": "zust-analyzer, zust-* crates"},
+ {"time": "2026-11-18T08:59:23Z", "commit": "c155863e", "label": "tests/ui as the spec", "detail": "zustc run against rustc's own tests/ui, pass rates reported"},
+ {"time": "2026-11-18T10:31:03Z", "commit": "70569be9", "label": "Borrow checking", "detail": "moves, uninitialized locals and loans on the CFG"},
+ {"time": "2026-11-19T02:47:24Z", "commit": "1f25ac6f", "label": "KPIs per change", "detail": "bench/kpi_track.py logs the KPIs after each change"},
+ {"time": "2026-11-20T03:47:21Z", "commit": "3606ea21", "label": "Green threads", "detail": "std::thread as green threads"},
+ {"time": "2026-11-20T16:07:43Z", "commit": "fbd8c19c", "label": "Ratchet", "detail": "bench/rust_ui_ratchet.txt: the number of passing tests/ui tests may not go down"},
+ {"time": "2026-11-21T05:11:56Z", "commit": "41397329", "label": "CVE regression tests", "detail": "past Rust CVEs and soundness bugs"},
+ {"time": "2026-11-21T05:24:41Z", "commit": "b85f3eeb", "label": "wasm32", "detail": "wasm32-unknown-unknown output"},
+ {"time": "2026-11-21T16:10:06Z", "commit": "fc481a2f", "label": "zurgo", "detail": "a Cargo-compatible driver (M0)"}
+]
