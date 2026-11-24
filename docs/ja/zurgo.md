@@ -209,6 +209,9 @@ zurgo test --lib parse -- --include-ignored
 - テストは、プロセスが 0 で終われば通ったものとする。ランナーは libtest のコマンドラインで話すので、
   `cargo test --no-run` がビルドする実行ファイルも動かせる。テストは 2 つの実行の結果を比べる
   (`crates/zurgo/tests/zurgo.rs`)。
+- `cratebench/test.py` は、cratebench のクレート自身のテスト (上流のリポジトリのもの) を `zurgo test` と
+  `cargo test` で動かし、テストごとに比べる。CI は一致したクレート (`cratebench/test_passing.txt`) を確かめる。
+  `cratebench/test_result.md` にはすべてのクレートの結果があり、zurgo がまだビルドできないものは最初のエラーを載せる。
 - テストは cargo と同じく、パッケージのディレクトリで動く。結合テストは、パッケージのバイナリを
   `CARGO_BIN_EXE_<name>` で見つける。
 - 出力: テストが終わるたびに 1 行 (`PASS [ 0.012s] (3/9) pkg (lib) tests::adds`、または `FAIL`・`TIMEOUT`・`SIGNAL`)。
