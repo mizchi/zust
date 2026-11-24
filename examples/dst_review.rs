@@ -101,9 +101,9 @@ fn main() {
     println!("{} {} {}", std::mem::size_of::<Holder<u8>>(), unsafe { (&(*h.p).0).len() }, h.marker);
     let w: &W9<[u8]> = &W9(W8(W7(W6(W5(W4(W3(W2(W1(W0([1u8, 2]))))))))));
     println!("{} {}", std::mem::size_of::<&W9<[u8]>>(), std::mem::size_of_val(w));
-    let mut gb: Box<Guard<[Loud]>> = Box::new(Guard { id: 3, tail: [Loud(4)] });
-    let gp: *mut Guard<[Loud]> = &mut *gb;
+    // (dropped in place once, through a pointer to the unsized struct; ManuallyDrop keeps it from a second drop)
+    let mut gm = std::mem::ManuallyDrop::new(Guard { id: 3, tail: [Loud(4)] });
+    let gp: *mut Guard<[Loud]> = &mut *gm as &mut Guard<[Loud; 1]> as *mut Guard<[Loud; 1]> as *mut Guard<[Loud]>;
     unsafe { std::ptr::drop_in_place(gp) };
-    std::mem::forget(gb);
     println!("end");
 }
