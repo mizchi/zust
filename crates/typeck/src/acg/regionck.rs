@@ -2698,7 +2698,7 @@ impl Cx<'_> {
                 // (an annotation with holes whose regions are the inferred type's (`let f: fn(_) -> _ = foo;`): fresh
                 // ones, which the initializer flows into. A fn pointer type's parts that are no hole keep the regions
                 // they write: `fn(_, &'a T) -> &'static T`)
-                tr.or_else(|| self.rg_proj_ann(a, t)).or_else(|| if crate::ast_summary::has_infer(a) { self.rg_fn_ann_holes(a, t).or_else(|| self.rg.fresh(prog, t)) } else { None })
+                tr.or_else(|| self.rg_proj_ann(a, t)).or_else(|| if crate::ast_summary::has_infer(a) { self.rg_alias_ann(a, t).or_else(|| self.rg_fn_ann_holes(a, t)).or_else(|| self.rg.fresh(prog, t)) } else { None })
             }
             // (a fn item with no type written (`let g = id;`): the local is of the item's type, whose own regions a
             // call through it takes afresh, its type arguments' are fixed (`let f = id::<&'static u32>;`))
@@ -2906,6 +2906,46 @@ impl Cx<'_> {
         }
         let value = a.value;
         let tr = self.rg.instantiate(prog, value, Some(&codes), &lts, &targs, &mut |me| me.var())?;
+        (count(prog, t, 0) == Some(tr.len())).then_some(tr)
+    }
+
+    /// The tree of an annotation that is a generic type alias with holes among its arguments (`DoubleCell<_>` with
+    /// `type DoubleCell<A> = Cell<(A, A)>`): a parameter's occurrences in the alias share one tree, its argument's (a
+    /// hole's fresh). The alias's own regions are fresh: the summaries keep no lifetimes of its definition
+    fn rg_alias_ann(&mut self, a: &PTy, t: Ty) -> Option<RT> {
+        let PTy::Path(None, p) = a else { return None };
+        let [seg] = p.segs.as_slice() else { return None };
+        let prog = self.prog;
+        let (gens, syn) = prog.aliases.get(&seg.name)?;
+        if gens.is_empty() || gens.iter().any(|g| g.starts_with('\'')) || seg.args.len() != gens.len() {
+            return None;
+        }
+        let args: Vec<&PTy> = seg.args.iter().filter_map(|x| if let GArg::Ty(t) = x { Some(t) } else { None }).collect();
+        if args.len() != gens.len() {
+            return None;
+        }
+        let gn: Vec<&str> = gens.iter().map(|s| s.as_str()).collect();
+        let body = prog.resolve_g(syn, &gn).ok()?;
+        let mut sol = vec![None; gens.len()];
+        if !prog.match_ty(body, t, &mut sol) {
+            return None;
+        }
+        let names = self.rg.lt_names.clone();
+        let lts = self.rg.lts.clone();
+        let mut targs = vec![];
+        for (k, pa) in args.iter().enumerate() {
+            let st = sol[k]?;
+            let tr = if crate::ast_summary::has_infer(pa) {
+                self.rg.fresh(prog, st)
+            } else {
+                let mut sl = crate::regions::Slots { lts: names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut codes = vec![];
+                sl.slots(pa, false, &mut codes);
+                self.rg.instantiate(prog, st, Some(&codes), &lts, &[], &mut |me| me.var())
+            };
+            targs.push(Some(tr?));
+        }
+        let tr = self.rg.instantiate(prog, body, None, &lts, &targs, &mut |me| me.var())?;
         (count(prog, t, 0) == Some(tr.len())).then_some(tr)
     }
 
