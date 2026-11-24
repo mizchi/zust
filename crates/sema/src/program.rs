@@ -551,14 +551,50 @@ pub struct AssocDef {
 }
 
 /// t with `Self::X` (the impl's self type's X) replaced by the impl's own definition of X (own), recursively
-fn own_assoc_syn(t: &TySyn, self_ty: &TySyn, own: &[(String, TySyn)], depth: u32) -> TySyn {
+fn own_assoc_syn(t: &TySyn, self_ty: &TySyn, own: &[(String, Vec<String>, TySyn)], depth: u32) -> TySyn {
     if depth > 8 {
         return t.clone();
     }
     let r = |x: &TySyn| own_assoc_syn(x, self_ty, own, depth + 1);
     match t {
-        TySyn::Assoc(b, n) if **b == *self_ty => match own.iter().find(|(m, _)| m == n) {
-            Some((_, v)) => own_assoc_syn(v, self_ty, own, depth + 1),
+        TySyn::Assoc(b, n) if **b == *self_ty => match own.iter().find(|(m, g, _)| m == n && g.is_empty()) {
+            Some((_, _, v)) => own_assoc_syn(v, self_ty, own, depth + 1),
+            None => t.clone(),
+        },
+        // (`Self::Output<X>`: the generic associated type `#gat:Output` of (Self, X), its parameters given)
+        TySyn::Assoc(b, n) if n.starts_with(crate::ast_types::GAT_PREFIX) && matches!(&**b, TySyn::Tuple(p) if p.first() == Some(self_ty)) => {
+            let TySyn::Tuple(parts) = &**b else { unreachable!() };
+            let name = &n[crate::ast_types::GAT_PREFIX.len()..];
+            match own.iter().find(|(m, g, _)| m == name && g.len() == parts.len() - 1 && !g.is_empty()) {
+                Some((_, g, v)) => {
+                    let args: Vec<TySyn> = parts[1..].iter().map(r).collect();
+                    let v = subst_names_syn(v, g, &args, 0);
+                    own_assoc_syn(&v, self_ty, own, depth + 1)
+                }
+                None => t.clone(),
+            }
+        }
+        TySyn::Ref(m, i) => TySyn::Ref(*m, Box::new(r(i))),
+        TySyn::Ptr(m, i) => TySyn::Ptr(*m, Box::new(r(i))),
+        TySyn::Slice(i) => TySyn::Slice(Box::new(r(i))),
+        TySyn::Array(i, n) => TySyn::Array(Box::new(r(i)), n.clone()),
+        TySyn::App(n, v) => TySyn::App(n.clone(), v.iter().map(r).collect()),
+        TySyn::Tuple(v) => TySyn::Tuple(v.iter().map(r).collect()),
+        TySyn::FnPtr(v) => TySyn::FnPtr(v.iter().map(r).collect()),
+        TySyn::Assoc(b, n) => TySyn::Assoc(Box::new(r(b)), n.clone()),
+        t => t.clone(),
+    }
+}
+
+/// t with the names ns (type parameters) replaced by args
+fn subst_names_syn(t: &TySyn, ns: &[String], args: &[TySyn], depth: u32) -> TySyn {
+    if depth > 16 {
+        return t.clone();
+    }
+    let r = |x: &TySyn| subst_names_syn(x, ns, args, depth + 1);
+    match t {
+        TySyn::Named(n) => match ns.iter().position(|x| x == n) {
+            Some(k) => args.get(k).cloned().unwrap_or_else(|| t.clone()),
             None => t.clone(),
         },
         TySyn::Ref(m, i) => TySyn::Ref(*m, Box::new(r(i))),
@@ -1616,13 +1652,18 @@ impl Program {
                 };
                 let gnames: Vec<&str> = ss.generics.iter().map(|g| g.0.as_str()).collect();
                 // (`Self::X` of the impl's own X: see own_assocs)
-                let own: Vec<(String, TySyn)> = match (it.kind, &ss.self_ty) {
+                // (a generic associated type, `type Output<O> = O`: its own parameters after the mark, which the
+                // signature's `Self::Output<X>` gives)
+                let own: Vec<(String, Vec<String>, TySyn)> = match (it.kind, &ss.self_ty) {
                     (crate::lexer::ItemKind::ImplMember(h), Some(_)) => own_assocs
                         .get(&(h as usize))
                         .into_iter()
                         .flatten()
-                        .filter(|(_, g, _)| g.len() <= gnames.len() && g.iter().zip(&gnames).all(|(a, b)| a == b) && !g.iter().any(|x| x == "#gat"))
-                        .map(|(n, _, v)| (n.clone(), v.clone()))
+                        .filter_map(|(n, g, v)| {
+                            let k = g.iter().position(|x| x == "#gat").unwrap_or(g.len());
+                            let (impl_g, gat_g) = (&g[..k], g.get(k + 1..).unwrap_or(&[]));
+                            (impl_g.len() <= gnames.len() && impl_g.iter().zip(&gnames).all(|(a, b)| a == b)).then(|| (n.clone(), gat_g.to_vec(), v.clone()))
+                        })
                         .collect(),
                     _ => vec![],
                 };

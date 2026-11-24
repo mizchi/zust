@@ -1951,6 +1951,36 @@ impl Cx<'_> {
         Ok(())
     }
 
+    /// A default method of a generic trait (`trait Getter<T> { fn do_get2(&self) -> (T, T) { .. } }`) on a type with
+    /// one impl of the trait (`impl Getter<isize> for isize`): the trait's parameters (after Self) are that impl's
+    /// arguments, when nothing else gave them. Once Self is known, before the arguments are lowered, so a literal
+    /// argument takes that type (`p.translate(3)` with `impl Movable<isize> for Point`)
+    pub(crate) fn trait_args_from_impl(&self, sig: &FnSig, sol: &mut [Option<Ty>]) {
+        let (None, Some(tr), Some(Some(st))) = (sig.self_ty, sig.trait_of.as_deref(), sol.first().copied()) else { return };
+        if !sol.iter().skip(1).any(|x| x.is_none()) {
+            return;
+        }
+        let Some(imps) = self.prog.impl_targs.get(tr) else { return };
+        let fits: Vec<Vec<Ty>> = imps
+            .iter()
+            .filter_map(|(ist, args, ng)| {
+                let mut isol = vec![None; *ng];
+                if !self.prog.match_ty(*ist, st, &mut isol) {
+                    return None;
+                }
+                let a: Vec<Ty> = args.iter().map(|&a| self.prog.partial_subst(a, &isol)).collect();
+                a.iter().all(|&t| !self.prog.has_param(t)).then_some(a)
+            })
+            .collect();
+        if let [a] = fits.as_slice() {
+            for (i, &t) in a.iter().enumerate() {
+                if let Some(x @ None) = sol.get_mut(1 + i) {
+                    *x = Some(t);
+                }
+            }
+        }
+    }
+
     pub(crate) fn resolve_call(&mut self, id: u32, arg_tys: &[Ty], mut sol: Vec<Option<Ty>>, ret_hint: Option<Ty>, span: Sp) -> R<(u32, FnSig)> {
         let sig = self.prog.sigs[id as usize].clone();
         if !sig.is_generic() {
@@ -1969,32 +1999,7 @@ impl Cx<'_> {
             }
         }
         self.solve_assoc_bounds(&sig, &mut sol);
-        // (a default method of a generic trait: `trait Getter<T> { fn do_get2(&self) -> (T, T) { .. } }` on a type
-        // with `impl Getter<isize> for isize`: the trait's parameters (after Self) are that impl's arguments, when nothing else gave them)
-        if let (None, Some(tr), Some(Some(st))) = (sig.self_ty, sig.trait_of.as_deref(), sol.first().copied()) {
-            if sol.iter().skip(1).any(|x| x.is_none()) {
-                if let Some(imps) = self.prog.impl_targs.get(tr) {
-                    let fits: Vec<Vec<Ty>> = imps
-                        .iter()
-                        .filter_map(|(ist, args, ng)| {
-                            let mut isol = vec![None; *ng];
-                            if !self.prog.match_ty(*ist, st, &mut isol) {
-                                return None;
-                            }
-                            let a: Vec<Ty> = args.iter().map(|&a| self.prog.partial_subst(a, &isol)).collect();
-                            a.iter().all(|&t| !self.prog.has_param(t)).then_some(a)
-                        })
-                        .collect();
-                    if let [a] = fits.as_slice() {
-                        for (i, &t) in a.iter().enumerate() {
-                            if let Some(x @ None) = sol.get_mut(1 + i) {
-                                *x = Some(t);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        self.trait_args_from_impl(&sig, &mut sol);
         // prelude の helper のダミーの型引数 `G` (呼ばれた分だけインスタンスにするためのもの) は ()
         for (i, g) in sig.generics.iter().enumerate() {
             if g.0 == "G" && sol[i].is_none() {
@@ -2377,6 +2382,7 @@ impl Cx<'_> {
         if let Some((r, rt)) = recv {
             self.prog.match_ty(sig0.params[0], rt, &mut sol);
             vals.push((r, rt, span));
+            self.trait_args_from_impl(&sig0, &mut sol);
         }
         // `Iterator` を受ける引数に Vec / &Vec / スライス / 配列を渡したら (IntoIterator 相当) イテレータにする
         let conv: Vec<Option<Expr>> = args

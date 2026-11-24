@@ -250,6 +250,7 @@ check-pass	associated-types/associated-types-normalize-in-bounds.rs
 run-pass	associated-types/associated-types-normalize-unifield-struct.rs
 compile-fail	associated-types/associated-types-outlives.rs
 compile-fail	associated-types/associated-types-path-2.rs
+run-pass	associated-types/associated-types-project-from-type-param-via-bound-in-where.rs
 check-pass	associated-types/associated-types-projection-bound-ambiguity.rs
 check-pass	associated-types/associated-types-projection-bound-in-supertraits.rs
 run-pass	associated-types/associated-types-projection-in-object-type.rs
@@ -2924,6 +2925,7 @@ check-pass	generic-associated-types/issue-93141.rs
 check-pass	generic-associated-types/issue-93262.rs
 check-pass	generic-associated-types/issue-93341.rs
 check-pass	generic-associated-types/issue-93342.rs
+check-pass	generic-associated-types/issue-93874.rs
 compile-fail	generic-associated-types/missing-bounds.rs
 compile-fail	generic-associated-types/missing_lifetime_args.rs
 compile-fail	generic-associated-types/parse/trait-path-expected-token.rs
@@ -7302,6 +7304,7 @@ run-pass	traits/issue-3683.rs
 run-pass	traits/issue-38033.rs
 compile-fail	traits/issue-38604.rs
 compile-fail	traits/issue-3973.rs
+run-pass	traits/issue-3979-generics.rs
 run-pass	traits/issue-40085.rs
 run-pass	traits/issue-4107.rs
 run-pass	traits/issue-43132.rs
