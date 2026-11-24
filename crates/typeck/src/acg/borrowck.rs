@@ -104,6 +104,9 @@ pub enum Ev {
     /// locals those point to hold them. The flag: what is stored is a reference to something that holds references
     /// (`*q = &mut &y`), whose region is shared with what the `&mut`s point into (a `&mut T` is invariant in T)
     Store(u32, u32, bool, Vec<Src>),
+    /// These loans are held by what the local's references point to, shared ones too (a closure called through a
+    /// reference to it, `r(&a)` with `r = &g`: the closure's type holds the region its calls' arguments flow into)
+    HoldThrough(u32, Vec<Src>),
     /// A match's guard begins (rustc's fake borrows of the match: the places its patterns test, and the deref
     /// prefixes of the place its bindings are bound from, whose flag is false: what they point to is not borrowed) or
     /// ends (None). The events between are the guard's, in the order they are made: a guard's evaluation is one piece
@@ -1745,6 +1748,17 @@ impl Bk {
                 }
                 // (checked in the pre-pass, in the order the events are made)
                 Ev::Guard(_) => {}
+                Ev::HoldThrough(l, srcs) => {
+                    let ls = self.resolve(srcs, st);
+                    let targets: Vec<u32> = st.held(*l).iter().map(|&ln| &self.loans[ln as usize].place).filter(|p| p.owned_len() == p.proj.len()).map(|p| p.local).collect();
+                    for t in targets {
+                        if t != *l && self.locals[t as usize].refs {
+                            let mut h = st.held(t).to_vec();
+                            h.extend(ls.iter().copied());
+                            st.set_holds(t, h);
+                        }
+                    }
+                }
                 Ev::Store(l, derefs, deep, srcs) => {
                     let ls = self.resolve(srcs, st);
                     // (the locals the `&mut`s point to, deref by deref; one behind a parameter: it outlives the
@@ -2314,7 +2328,9 @@ impl Cx<'_> {
         }
         let id = self.bk.locals.len() as u32;
         let (copy, refs) = self.bk_ty(ty);
-        self.bk.locals.push(Local { name: name.to_string(), ty, copy, refs, mutable, decl: self.rg.let_sp, via_ref: false });
+        // (a closure whose parameters' regions are one for all its calls holds what its calls' arguments borrow)
+        let held = !refs && matches!(ty, Ty::Struct(s) if { let b = self.prog.base_of(s); self.hr_lost.iter().any(|h| h.0 == b) });
+        self.bk.locals.push(Local { name: name.to_string(), ty, copy, refs: refs || held, mutable, decl: self.rg.let_sp, via_ref: false });
         self.bk.by_loc.insert(loc, id);
         if refs && self.bk.level >= 2 && matches!(ty, Ty::Struct(_) | Ty::Box(_)) {
             let mut paths = vec![];
@@ -2929,6 +2945,8 @@ impl Cx<'_> {
             t = match (x, t) {
                 (Proj::Deref(_) | Proj::Shr, Ty::Ref(_, i) | Ty::Box(i) | Ty::Ptr(_, i)) => *i,
                 (Proj::Index, Ty::Array(i, _) | Ty::Slice(i)) => *i,
+                // (an element of the prelude's `Vec` / `VecDeque`, which index to their element)
+                (Proj::Index, Ty::Struct(sid)) if matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "Vec" | "VecDeque") => *self.prog.structs[sid as usize].args.first()?,
                 (Proj::Field(f), Ty::Struct(sid)) => self.prog.field(sid, f)?.0,
                 _ => return None,
             };
@@ -4305,6 +4323,50 @@ impl Cx<'_> {
         }
         let mut srcs = vec![];
         self.bk_direct(e, &mut srcs);
+        // (a local `c: &&U` returned as a `&U`, or passed to a constructor whose field is a `&U` (`Some(c)` returned as
+        // an `Option<&U>`): the deref coercion copies `*c` out, so the value holds what that holds, not the loan c is
+        // (as at a coercion site of a `let` or an argument, bk_copy_out_of))
+        if self.bk.level >= 2 && srcs.iter().any(|s| matches!(s, Src::Local(_))) {
+            let local_of = |me: &Self, a: &Expr| -> Option<(u32, Ty)> {
+                let Expr::Path(None, p) = strip_paren(a) else { return None };
+                let l = me.bk_local_of(super::ident_of(p)?)?;
+                match me.bk.locals[l as usize].ty {
+                    Ty::Ref(_, u @ Ty::Ref(false, _)) => Some((l, *u)),
+                    _ => None,
+                }
+            };
+            let mut coerced: Vec<(u32, Ty)> = vec![];
+            match strip_paren(e) {
+                x @ Expr::Path(..) => {
+                    if let (Some((l, u)), Ty::Ref(_, r)) = (local_of(self, x), self.ret) {
+                        if Ty::Ref(false, r) == u || matches!(u, Ty::Ref(false, i) if *i == *r) {
+                            coerced.push((l, u));
+                        }
+                    }
+                }
+                Expr::Call(f, args) if matches!(&**f, Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_uppercase()))) => {
+                    if let Some(Ty::Struct(sid)) = self.peek(e) {
+                        let targs = &self.prog.structs[sid as usize].args;
+                        for a in args {
+                            if let Some((l, u)) = local_of(self, a) {
+                                if targs.contains(&u) && !targs.contains(&self.bk.locals[l as usize].ty) {
+                                    coerced.push((l, u));
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            for (l, u) in coerced {
+                let c = self.bk_copy_out_of(l, u);
+                for s in srcs.iter_mut() {
+                    if *s == Src::Local(l) {
+                        *s = Src::Local(c);
+                    }
+                }
+            }
+        }
         // (`&f()`: a borrow of a temporary, which is not promoted to a static (as direct_temps))
         let mut x = e;
         while let Expr::Paren(i) = x {

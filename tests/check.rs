@@ -989,3 +989,107 @@ fn review100_fourth_round() {
     let src = "trait Id { type T; }\nimpl Id for u8 { type T = u8; }\ntrait Base<T, U = <u8 as Id>::T> { type A; type B; }\ntrait Mid: Base<u8, A = u8> {}\ntrait Root: Base<u8, <u8 as Id>::T, B = u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
     assert_eq!(first(src), None, "associated_segment_in_a_default");
 }
+
+/// An impl is for a type only when the type meets the impl's bounds, its where clauses' too (issue #2): nested goals of
+/// traits of the program's. Also a trait's supertraits must be implemented by an impl's self type, and an impl for a
+/// reference is not for the type it refers to. Each was checked against rustc 1.97
+#[test]
+fn impl_bounds_are_nested_goals() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let pre = "trait Bar {}\ntrait Foo { fn foo(&self) {} }\nstruct W<T>(T);\nimpl Bar for i32 {}\nfn need<F: Foo>(_: F) {}\n";
+    let bad = |body: &str| {
+        let src = format!("{pre}{body}\n");
+        let d = check(&src);
+        assert!(d.len() == 1 && d[0].msg.contains("is not satisfied"), "{src}\n{d:?}");
+    };
+    let ok = |body: &str| {
+        let src = format!("{pre}{body}\n");
+        let d = check(&src);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    };
+    for (imp, call) in [
+        ("impl<T: Bar> Foo for W<T> {}", "need(W(_))"),
+        ("impl<T> Foo for W<T> where T: Bar {}", "need(W(_))"),
+        ("impl<T: Bar> Foo for T {}", "need(_)"),
+        ("impl<T: Bar> Foo for W<T> {}", "W(_).foo()"),
+        ("impl Foo for W<i32> {}", "need(W(_))"),
+        ("impl<T: Bar> Foo for W<T> {}\nimpl<T: Foo> Bar for Vec<T> {}", "need(W(vec![W(_)]))"),
+    ] {
+        bad(&format!("{imp}\nfn main() {{ {}; }}", call.replace('_', "1u8")));
+        ok(&format!("{imp}\nfn main() {{ {}; }}", call.replace('_', "1i32")));
+    }
+    // (a cycle of blanket impls through each other's bounds is not followed forever. An obligation through it is
+    // E0275: goals_have_a_certainty)
+    ok("trait P {}\ntrait Q {}\nimpl<T: Q> P for T {}\nimpl<T: P> Q for T {}\nfn main() {}");
+    // (a goal asked again and again on the way (`T{i}: T{i-1} + T{i-2}`) is proved once: without that, 2^n goals)
+    let fib = |n: usize, imp0: &str| {
+        let mut s = format!("trait T0 {{}}\ntrait T1 {{}}\n{imp0}\nimpl T1 for i32 {{}}\n");
+        for i in 2..=n {
+            s += &format!("trait T{i} {{}}\nimpl<X: T{} + T{}> T{i} for X {{}}\n", i - 1, i - 2);
+        }
+        s + &format!("fn need2<X: T{n}>(_: X) {{}}\nfn main() {{ need2(1i32); }}")
+    };
+    ok(&fib(60, "impl T0 for i32 {}"));
+    bad(&fib(60, "impl T0 for u8 {}"));
+    // (a trait object implements its trait's supertraits, whatever a blanket impl of one asks)
+    ok("trait Sup {}\ntrait Sub2: Sup {}\ntrait Imp {}\nimpl<T: ?Sized + Sub2 + Imp> Sup for T {}\nfn n<T: ?Sized + Sup>() {}\nfn main() { n::<dyn Sub2>(); }");
+    // (supertraits)
+    bad("trait A {}\ntrait B: A {}\nstruct C;\nimpl B for C {}\nfn main() {}");
+    ok("trait A {}\ntrait B: A {}\nstruct C;\nimpl A for C {}\nimpl B for C {}\nfn main() {}");
+    // (an impl of the supertrait for exactly the self type, of a type implements does not see the program's impls of)
+    for t in ["[u8; 1]", "[u8]", "Box<u8>"] {
+        ok(&format!("trait A {{}}\ntrait B: A {{}}\nimpl A for {t} {{}}\nimpl B for {t} {{}}\nfn main() {{}}"));
+    }
+    // (two blanket impls of one trait each have their own bounds: one that holds is enough)
+    ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: A> Tr<u8> for T {}\nimpl<T: B> Tr<u16> for T {}\nimpl A for i32 {}\nfn need2<T: Tr<u8>>(_: T) {}\nfn main() { need2(1i32); }");
+    // (tuples: the impl's self type and bounds, as for a struct)
+    bad("impl Foo for (i32,) {}\nfn main() { need((1u8,)); }");
+    ok("impl Foo for (i32,) {}\nfn main() { need((1i32,)); }");
+    bad("impl<T: Bar> Foo for (T,) {}\nfn main() { need((1u8,)); }");
+    ok("impl<T: Bar> Foo for (T,) {}\nfn main() { need((1i32,)); }");
+    ok("impl Foo for (i32, u8) {}\nimpl Foo for (u8, i32) {}\nfn main() { need((1u8, 2i32)); }");
+    // (a raw pointer's mutability is part of the impl's self type)
+    bad("impl Foo for W<*const i32> {}\nfn main() { let mut x = 1; need(W(&mut x as *mut i32)); }");
+    ok("impl Foo for W<*const i32> {}\nfn main() { let x = 1; need(W(&x as *const i32)); }");
+    bad("impl Foo for W<*const i32> {}\nfn main() { let x = 1; need(W(&x)); }");
+    // (and inside a fn pointer's parameters)
+    bad("impl Foo for (fn(*const i32),) {}\nfn f(_: *mut i32) {}\nfn main() { need((f as fn(*mut i32),)); }");
+    ok("impl Foo for (fn(*const i32),) {}\nfn f(_: *const i32) {}\nfn main() { need((f as fn(*const i32),)); }");
+    // (an impl for `&mut i32` is not for i32)
+    bad("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { f(1i32); }");
+    ok("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { let mut x = 1i32; f(&mut x); }");
+}
+
+/// A goal's answer is Yes, Maybe or No (Program::evaluate, issue #2). A bound whose goal needs itself (an inductive
+/// cycle) is E0275, as rustc gives; a cycle no obligation goes through, or one another impl gets around, is not an
+/// error. Each was checked against rustc 1.97
+#[test]
+fn goals_have_a_certainty() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let e0275 = |src: &str, at: &str| {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].msg.contains("overflow evaluating the requirement") && d[0].msg.contains(at), "{src}\n{d:?}");
+    };
+    let ok = |src: &str| {
+        let d = check(src);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    };
+    let pq = "trait P {}\ntrait Q {}\nimpl<T: Q> P for T {}\nimpl<T: P> Q for T {}\nfn need<X: P>(_: X) {}\n";
+    e0275(&format!("{pq}fn main() {{ need(1u8); }}"), "`u8: P`");
+    ok(&format!("{pq}fn main() {{}}"));
+    // (a generic fn's own bound is a where clause: not followed)
+    ok(&format!("{pq}fn g<Y: P>(y: Y) {{ need(y); }}\nfn main() {{}}"));
+    // (a trait with arguments)
+    e0275("trait Loop<U> {}\nimpl<T: Loop<u8>> Loop<u8> for T {}\nfn need<T: Loop<u8>>() {}\nfn main() { need::<i32>(); }", "`i32: Loop");
+    ok("trait A {}\ntrait Tr<U> {}\nimpl<T: A> Tr<u8> for T {}\nimpl A for i32 {}\nfn need<T: Tr<u8>>() {}\nfn main() { need::<i32>(); }");
+    // (an impl whose bound is its own trait)
+    e0275("trait P {}\nimpl<T: P> P for T {}\nfn need<X: P>(_: X) {}\nfn main() { need(1u8); }", "`u8: P`");
+    // (through a supertrait's blanket impl: traits/inductive-overflow/simultaneous.rs)
+    e0275("trait A {}\ntrait B {}\nimpl<T: A> B for T {}\nimpl<T: B> A for T {}\ntrait C {}\nimpl<T: B + A> C for T {}\nfn need<X: C>(_: X) {}\nfn main() { need(4); }", "`i32: C`");
+    // (struct impls through each other end at a concrete impl: no cycle)
+    ok("trait P {}\ntrait Q {}\nstruct W<T>(T);\nimpl<T: Q> P for W<T> {}\nimpl<T: P> Q for W<T> {}\nimpl Q for u8 {}\nfn need<X: P>(_: X) {}\nfn main() { need(W(1u8)); }");
+    // (a recursive type list)
+    ok("trait P {}\nimpl P for () {}\nimpl<H: P, T: P> P for (H, T) {}\nfn need<X: P>(_: X) {}\nfn main() { need(((), ((), ((), ())))); }");
+    // (two blanket impls of one trait: the one that holds is taken, whatever the other's goals do)
+    ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: B> Tr<u8> for T {}\nimpl<T: A> Tr<u16> for T {}\nimpl<T: Tr<u8>> B for T {}\nimpl A for i32 {}\nfn need<T: Tr<u16>>(_: T) {}\nfn main() { need(1i32); }");
+}
