@@ -232,7 +232,8 @@ mod bounds {
             2
         }
     }
-    // (an impl for `&T` beside one for `Box<[T]>`: a Box is no reference)
+    // (an impl for `&T` beside one for `Box<[T]>`: a Box is no reference. The `&T` one forwards to T's, the only
+    // kind zustc compiles (main's #144 check))
     pub trait Erasable {
         fn erased(&self) -> usize;
     }
@@ -243,7 +244,7 @@ mod bounds {
     }
     impl<T: Erasable> Erasable for &T {
         fn erased(&self) -> usize {
-            10
+            (**self).erased()
         }
     }
     impl<T: Erasable> Erasable for Box<[T]> {
