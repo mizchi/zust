@@ -4057,4 +4057,8 @@ fn part26_review_2() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `x` because it is borrowed"), "{d:?}");
     assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut r = &mut x;\n    r = &mut *r;\n    *r = 2;\n    x = 1;\n}\n"), vec![]);
     assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut y = 0;\n    let mut r = &mut x;\n    r = &mut *r;\n    *r = 2;\n    r = &mut y;\n    x = 1;\n    *r = 3;\n    println!(\"{}\", x);\n}\n"), vec![]);
+    // (toward a trait object: `&mut &i32` as a `&dyn Tr` unsizes the `&i32` itself, so the loan is of `*x`, and
+    // `*x = &b` while y lives is E0506)
+    let d = check("trait Tr { fn get(&self) -> i32; }\nimpl Tr for &i32 {\n    fn get(&self) -> i32 { **self }\n}\nfn main() {\n    let a = 1;\n    let b = 2;\n    let mut slot = &a;\n    let x: &mut &i32 = &mut slot;\n    let y: &dyn Tr = x;\n    *x = &b;\n    println!(\"{}\", y.get());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
 }
