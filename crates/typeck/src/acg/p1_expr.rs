@@ -719,7 +719,15 @@ impl Cx<'_> {
                 _ => None,
             };
             if let Some(p) = p.filter(|p| p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(_))))) {
-                self.rg_path_wf(p, super::borrowck::pos(e));
+                for seg in &p.segs {
+                    self.rg_targs_wf(&seg.args, super::borrowck::pos(e));
+                }
+            }
+            // (and a method call's: `r.use_ty::<Static<T>>()`)
+            if let Expr::MethodCall(_, _, targs, ..) = e {
+                if targs.iter().any(|a| matches!(a, crate::parse::GArg::Ty(_))) {
+                    self.rg_targs_wf(targs, super::borrowck::pos(e));
+                }
             }
         }
         // (the places inside a sub-expression are accesses of their own)

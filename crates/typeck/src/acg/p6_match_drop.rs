@@ -1254,8 +1254,9 @@ impl Cx<'_> {
                 let mode = match mode {
                     _ if *by_ref => BindMode::Ref(*mutable),
                     BindMode::Ref(m) if *mutable && self.prog.edition < 2024 => {
-                        // (a value that is not Copy is moved out of the reference the pattern matched through)
-                        if !borrowck::is_copy(self.prog, p.ty(), 0) {
+                        // (a value that is not Copy is moved out of the reference the pattern matched through, a `&mut`
+                        // too, which is_copy takes for Copy as it does every reference: `let (mut r,) = &(&mut n,);`)
+                        if !borrowck::is_copy(self.prog, p.ty(), 0) || holds_mut_ref(self.prog, p.ty(), 0) {
                             let what = if m { "a mutable reference" } else { "a shared reference" };
                             let at = self.bk.scrut_place.as_ref().map(|x| x.1).filter(|s| s.line != 0).unwrap_or(SP);
                             return Err(self.at(at, format!("cannot move out of {what} (E0507)")));
@@ -2710,5 +2711,18 @@ impl Cx<'_> {
                 _ => return None,
             };
         }
+    }
+}
+
+/// t is a `&mut`, or a tuple or an array of one (which is_copy takes for Copy, as it does every reference)
+fn holds_mut_ref(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
+    if depth > 16 {
+        return false;
+    }
+    match t {
+        Ty::Ref(true, _) => true,
+        Ty::Array(e, _) => holds_mut_ref(prog, *e, depth + 1),
+        Ty::Struct(s) if prog.is_tuple(s) => prog.structs[s as usize].fields.iter().any(|f| holds_mut_ref(prog, f.1, depth + 1)),
+        _ => false,
     }
 }

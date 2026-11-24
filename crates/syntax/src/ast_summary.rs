@@ -2089,7 +2089,9 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     let mut s = crate::regions::Slots { lts, tparams: tps, self_slots, any: false, in_fn: 0 };
                     let mut v = vec![];
                     s.slots(t, false, &mut v);
-                    if (s.any || hdr_outlives) && !v.contains(&crate::types::R_UNKNOWN) {
+                    // (a value the codes do not follow (`<() as Base>::Out`) keeps the header's outlives all the same:
+                    // its codes have the mark R_UNKNOWN, so that no tree is made of them)
+                    if (s.any && !v.contains(&crate::types::R_UNKNOWN)) || hdr_outlives {
                         sm.assoc_regions.push((sm.assocs.len() as u64, v));
                     }
                 }

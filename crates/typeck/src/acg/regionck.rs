@@ -2989,8 +2989,35 @@ impl Cx<'_> {
     /// the impl it selects declares of its lifetimes: `<&'a () as Visitor<'d>>::Value` with `impl<'a, 'd: 'a> Visitor<'d>
     /// for &'a ()` requires `'d: 'a` (nll/normalization-bounds-error.rs)
     pub(crate) fn rg_proj_wf(&mut self, ann: &PTy, sp: Sp) {
-        if !matches!(ann, PTy::Path(Some(_), _)) || self.prog.assoc_regions.is_empty() {
+        if self.prog.assoc_regions.is_empty() {
             return;
+        }
+        // (a projection within the type too: `Option<<&'a () as Visitor<'d>>::Value>`, `&'x <S as Tr<'y>>::Out`)
+        match ann {
+            PTy::Path(Some(q), p) => {
+                self.rg_proj_wf(q, sp);
+                for a in p.segs.iter().flat_map(|s| &s.args) {
+                    if let GArg::Ty(t) = a {
+                        self.rg_proj_wf(t, sp);
+                    }
+                }
+            }
+            PTy::Path(None, p) => {
+                for a in p.segs.iter().flat_map(|s| &s.args) {
+                    if let GArg::Ty(t) = a {
+                        self.rg_proj_wf(t, sp);
+                    }
+                }
+                return;
+            }
+            PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => return self.rg_proj_wf(i, sp),
+            PTy::Tuple(ts) => {
+                for t in ts {
+                    self.rg_proj_wf(t, sp);
+                }
+                return;
+            }
+            _ => return,
         }
         let Some((ai, lts, _)) = self.proj_impl(ann) else { return };
         let Some(outlives) = self.prog.assoc_regions.get(&ai).map(|r| r.2.clone()) else { return };
@@ -3464,28 +3491,27 @@ impl Cx<'_> {
 
     /// `let x: ann;` (`let _: ann;`): the annotation's type is well formed; x's tree is of it
     /// The type arguments a path writes, in an expression (`None::<Static<T>>`, `Vec::<&'a u8>::new()`): well formed
-    pub(crate) fn rg_path_wf(&mut self, p: &crate::parse::Path, sp: Sp) {
+    /// The type arguments a path's segment or a method call writes are well formed
+    pub(crate) fn rg_targs_wf(&mut self, args: &[GArg], sp: Sp) {
         let prog = self.prog;
-        for seg in &p.segs {
-            for a in &seg.args {
-                let GArg::Ty(pt) = a else { continue };
-                if crate::ast_summary::has_infer(pt) {
-                    continue;
-                }
-                let Ok(t) = self.parse_ty(pt) else { continue };
-                // (only a type with a struct or an enum that bounds a type parameter by 'static: other requirements
-                // (`None::<&'a A>`'s A: 'a) may hold by what a parameter's projection implies, which is not followed
-                // (implied-bounds/normalization.rs))
-                if !has_static_bound_adt(prog, t, 0) {
-                    continue;
-                }
-                let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
-                let mut codes = vec![];
-                s.slots(pt, false, &mut codes);
-                let lts = self.rg.lts.clone();
-                if let Some(tree) = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var()) {
-                    self.rg.wf(prog, t, &tree, sp);
-                }
+        for a in args {
+            let GArg::Ty(pt) = a else { continue };
+            if crate::ast_summary::has_infer(pt) {
+                continue;
+            }
+            let Ok(t) = self.parse_ty(pt) else { continue };
+            // (only a type with a struct or an enum that bounds a type parameter by 'static: other requirements
+            // (`None::<&'a A>`'s A: 'a) may hold by what a parameter's projection implies, which is not followed
+            // (implied-bounds/normalization.rs))
+            if !has_static_bound_adt(prog, t, 0) {
+                continue;
+            }
+            let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+            let mut codes = vec![];
+            s.slots(pt, false, &mut codes);
+            let lts = self.rg.lts.clone();
+            if let Some(tree) = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var()) {
+                self.rg.wf(prog, t, &tree, sp);
             }
         }
     }
