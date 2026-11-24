@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795544592226,
+  "lastUpdate": 1795544595020,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -121448,6 +121448,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/1d612db16bfd91e496d92f1b6191d349ef5b030d"
         },
         "date": 1795541075204,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1861,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.11,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1525,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.93,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4722,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4997517a776925c7e209f3a3ac4e4339b56c24d5",
+          "message": "Merge pull request #146 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: modules (import { .. } from \"./lib.zsc\")",
+          "timestamp": "2026-11-25T03:17:48+09:00",
+          "tree_id": "eff40b74cb2bafede771836c042779021c744027",
+          "url": "https://github.com/mizchi/zust/commit/4997517a776925c7e209f3a3ac4e4339b56c24d5"
+        },
+        "date": 1795544594471,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
