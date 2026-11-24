@@ -36,8 +36,8 @@ type of one name, the first impl found answered for both.
 - **Normalizes-to goals** (`Program::normalize(t, tr, name)`): `<t as tr>::name` is the value the impls of `tr` give
   for `t`. Each associated type now records the trait of its impl (`AssocDef::trait_name`).
   - An impl counts when its self type matches `t` exactly (the mutability of references and pointers too).
-  - The answer is not known (`None`) when no impl says, when the value still has a parameter in it, or when two
-    impls that match disagree (`impl Tr<u8> for X` and `impl Tr<u16> for X`).
+  - The answer is not known (`None`) when no impl says, when the value still has a parameter or a projection in it
+    (`type A = T::A;`, which `subst` would look up by its name alone), or when two impls that match disagree (`impl Tr<u8> for X` and `impl Tr<u16> for X`).
   - Answers are kept per (type, trait, name), and the impls are indexed by name and self type's struct.
 - **Bindings** (`Program::binding_mismatch`): each binding of a bound of an instance is a goal. The binding's type is
   written with the fn's parameters, and the instance's arguments go in. A binding that normalizes to another type is

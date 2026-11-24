@@ -4762,6 +4762,11 @@ impl Program {
                 continue;
             }
             let args: Vec<Ty> = sol.into_iter().collect::<Option<Vec<Ty>>>()?;
+            // (a value with a projection in it, `type A = T::A;`, is not known: subst would look the projection up by
+            // its name alone, whatever trait T's bound names)
+            if self.mentions_assoc(a.value) {
+                return None;
+            }
             let v = self.subst(a.value, &args);
             if self.has_param(v) || found.is_some_and(|f| f != v) {
                 return None;
@@ -4805,9 +4810,12 @@ impl Program {
             }
             let mut traits: Vec<String> = if !qtr.is_empty() {
                 vec![qtr.to_string()]
-            } else {
-                let Ty::Param(i) = a.base else { return None };
+            } else if let Ty::Param(i) = a.base {
                 sig.generics.get(i as usize)?.1.iter().map(|b| b.split('<').next().unwrap_or(b).trim().to_string()).collect()
+            } else {
+                // (`Self::A` in a method of `impl Tr for S`: by the impl's trait, and its supertraits below)
+                let tr = sig.impl_trait.as_deref()?;
+                vec![tr.split('<').next().unwrap_or(tr).trim().to_string()]
             };
             // (a qualified projection is its trait's own associated type when that trait gives one: `<T as Sub>::A`)
             if !qtr.is_empty() {

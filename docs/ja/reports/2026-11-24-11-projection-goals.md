@@ -27,7 +27,7 @@ impl Tr2 for u8 { type A = u16; }          // E0277、u16: Bar
 
 - **normalizes-to の goal**（`Program::normalize(t, tr, name)`）: `<t as tr>::name` は、`tr` の impl が `t` に与える値。関連型はそれぞれ、自分の impl の trait を記録するようにした（`AssocDef::trait_name`）。
   - impl を数えるのは、その自己型が `t` にぴったり一致するときだけ（参照とポインタの可変性も含めて）。
-  - impl が何も言わないとき、値にまだパラメータが残るとき、一致する二つの impl が食い違うとき（`impl Tr<u8> for X` と `impl Tr<u16> for X`）は、答えは不明（`None`）。
+  - impl が何も言わないとき、値にまだパラメータか射影が残るとき（`type A = T::A;`。`subst` がその射影を名前だけで引いてしまう）、一致する二つの impl が食い違うとき（`impl Tr<u8> for X` と `impl Tr<u16> for X`）は、答えは不明（`None`）。
   - 答えは (型, trait, 名前) ごとに覚えておき、impl は名前と自己型の構造体で索引を引く。
 - **束縛**（`Program::binding_mismatch`）: インスタンスの境界の束縛は、それぞれが goal になる。束縛の型は関数のパラメータで書かれていて、インスタンスの引数を入れる。別の型に正規化される束縛は、呼び出しの位置で E0271 になる。正規化できない束縛は成り立つとみなす。E0271 は食い違いに対するもので、わからないことに対するものではない。
 - **プログラム自身の関数だけ**: prelude は、束縛を std の境界としてではなく、推論の手がかりとして書いている。`sum<S>` は `Self: Iterator<Item = S>` を求めるが、std が求めるのは `S: Sum<Self::Item>` だ。これを確かめると `v.iter().sum::<i32>()` を拒否してしまう。

@@ -1161,6 +1161,11 @@ fn projections_are_goals() {
     let sub = "trait Mark {}\ntrait Super { type A; }\ntrait Sub: Super { type A; }\nimpl Super for u8 { type A = u8; }\nimpl Sub for u8 { type A = u16; }\nfn f<T: Sub>() where <T as Sub>::A: Mark {}\nfn main() { f::<u8>(); }";
     bad(&format!("impl Mark for u8 {{}}\n{sub}"), "`u16: Mark`");
     ok(&format!("impl Mark for u16 {{}}\n{sub}"));
+    // (an impl's value with a projection in it, `type A = T::A;` with `T: Q`, is not known: looked up by the name A
+    // alone, P's u16 would be taken for Q's u32)
+    let iv = "trait P { type A; }\ntrait Q { type A; }\nimpl P for u8 { type A = u16; }\nimpl Q for u8 { type A = u32; }\nstruct W<T>(T);\ntrait Tr { type A; }\nimpl<T: Q> Tr for W<T> { type A = T::A; }\n";
+    ok(&format!("{iv}fn f<T>() where W<T>: Tr<A = u32> {{}}\nfn main() {{ f::<u8>(); }}"));
+    ok(&format!("{iv}fn f<X: Tr<A = u32>>() {{}}\nfn main() {{ f::<W<u8>>(); }}"));
     // (a where clause on a concrete type)
     bad("trait Bar {}\nstruct S;\nfn f<T>(_: T) where S: Bar {}\nfn main() { f(1u8); }", "`S: Bar`");
     ok("trait Bar {}\nstruct S;\nimpl Bar for S {}\nfn f<T>(_: T) where S: Bar {}\nfn main() { f(1u8); }");
