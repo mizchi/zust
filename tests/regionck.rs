@@ -3472,3 +3472,14 @@ fn part20_boxed_closure_signature() {
     assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![2, 6], "{d:?}");
     assert_eq!(check("fn t<'x>(_x: &'x isize) {\n    let mut f: Box<dyn FnMut(&isize) -> isize> = Box::new(|z| *z + 1);\n    let g: Box<dyn Fn(&str) -> &str> = Box::new(|s| s.trim());\n    println!(\"{} {}\", f(&1), g(\" a \"));\n}\nfn main() { t(&1); }\n"), vec![]);
 }
+
+/// A region of a local of the function a closure is in, captured: from outside, so a region the closure's signature
+/// binds must not flow into it ("borrowed data escapes outside of closure", E0521 in rustc: `ay = z` with `ay = &y`
+/// captured; regions/regions-nested-fns.rs)
+#[test]
+fn part20_capture_escape() {
+    let d = check("fn ignore<T>(_t: T) {}\nfn a<'x>(x: &'x isize) {\n    let y = 3;\n    let mut ay = &y;\n    ignore::<Box<dyn for<'z> FnMut(&'z isize)>>(Box::new(|z| {\n        ay = z;\n    }));\n    let _ = (x, ay);\n}\nfn b<'x>(x: &'x isize) {\n    let mut ay = x;\n    let mut f = |z: &isize| { ay = z; };\n    f(&1);\n    let _ = ay;\n}\nfn c(v: &mut Vec<&isize>) {\n    let mut f = |z: &isize| { v.push(z); };\n    f(&1);\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![6, 12, 17], "{d:?}");
+    assert!(d[0].1.contains("escapes outside of closure") && d[1].1.contains("escapes outside of closure"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let y = 3;\n    let mut ay = &y;\n    let mut f = |z| { ay = z; };\n    f(&4);\n    let _ = ay;\n}\n"), vec![]);
+}

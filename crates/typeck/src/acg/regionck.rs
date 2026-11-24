@@ -1731,8 +1731,9 @@ impl RgSt {
             }
         }
         let mut errs: Vec<(Sp, String)> = vec![];
-        // (a closure's signature with regions from outside it, its environment's aside: the callee's lifetimes)
-        let sig_ext = self.in_closure && self.externals.iter().any(|&e| e != self.env_r);
+        // (a closure's signature with regions from outside it, its environment's and its captures' aside: the
+        // callee's lifetimes)
+        let sig_ext = self.in_closure && self.externals.iter().any(|&e| e != self.env_r && !self.cap_regions.contains(&e));
         for (ui, &(u, ref uname)) in self.univ.iter().enumerate() {
             let i = ui + 1;
             let mut seen = vec![false; n];
@@ -3859,23 +3860,25 @@ impl Cx<'_> {
         let prog = self.prog;
         // (its regions that are of the function the closure is in: those)
         let codes = self.rg.closure.as_ref().and_then(|c| c.caps.get(i).cloned().flatten());
+        // (a region of a local of the function the closure is in: from outside, related to the others from outside as
+        // the function relates them, not known here; a placeholder of the closure's signature must not flow into it
+        // ("borrowed data escapes outside of closure": `ay = z` with `ay = &y` captured and z of a `&isize` the bound
+        // or the annotation binds))
+        let cap = |rg: &mut RgSt| -> u32 {
+            let v = rg.var();
+            for a in rg.externals.clone() {
+                rg.known.push((a, v));
+                rg.known.push((v, a));
+            }
+            rg.univ.push((v, "'_".to_string()));
+            rg.externals.push(v);
+            rg.cap_regions.push(v);
+            v
+        };
         let tr = match codes {
-            Some(cs) if count(prog, t, 0) == Some(cs.len()) => Some(cs.iter().map(|&c| self.rg.clo_reg(c)).collect()),
-            // (the regions of a local of the function the closure is in: from outside, related to the others from
-            // outside as the function relates them, not known here; a placeholder of the closure's signature must not
-            // flow into them ("borrowed data escapes outside of closure"))
-            _ => self.rg.fresh(prog, t).inspect(|tr| {
-                for &v in tr {
-                    let ex = self.rg.externals.clone();
-                    for a in ex {
-                        self.rg.known.push((a, v));
-                        self.rg.known.push((v, a));
-                    }
-                    self.rg.univ.push((v, "'_".to_string()));
-                    self.rg.externals.push(v);
-                    self.rg.cap_regions.push(v);
-                }
-            }),
+            // (one of the function's universal regions: that; one of its locals' (not universal there): as above)
+            Some(cs) if count(prog, t, 0) == Some(cs.len()) => Some(cs.iter().map(|&c| if c == R_ELIDED { cap(&mut self.rg) } else { self.rg.clo_reg(c) }).collect()),
+            _ => self.rg.fresh(prog, t).map(|tr| tr.iter().map(|_| cap(&mut self.rg)).collect()),
         };
         if let Some(tr) = tr {
             self.rg.locals.insert(loc, tr);
