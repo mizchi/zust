@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795556977895,
+  "lastUpdate": 1795556980901,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -75856,6 +75856,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 112.812,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "78e7ed631a53cf69241f471fb3392d32a75de44c",
+          "message": "Merge pull request #135 from mizchi/claude/serde-ref-impls\n\nserde_core: impl<T: Tr> Tr for &T / &mut T that forwards, and fmt::Write per module",
+          "timestamp": "2026-11-25T06:43:50+09:00",
+          "tree_id": "3d52b0a20e84d9ed20fc76410123b3900fd3df59",
+          "url": "https://github.com/mizchi/zust/commit/78e7ed631a53cf69241f471fb3392d32a75de44c"
+        },
+        "date": 1795556980230,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.06,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.791,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.778,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.839,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.086,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.174,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.55,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 249.694,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 112.328,
             "unit": "MiB"
           }
         ]
