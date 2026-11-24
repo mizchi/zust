@@ -3605,3 +3605,18 @@ fn polonius_alpha() {
     // (accepted by Alpha: the returned reborrow made in a loop, which goes on with a new borrow when it does not return)
     ok("fn f<'a>(x: &'a mut i32, n: i32) -> &'a mut i32 {\n    let mut i = 0;\n    loop {\n        let b = &mut *x;\n        if i == n {\n            return b;\n        }\n        i += 1;\n    }\n}\nfn main() {}\n");
 }
+
+#[test]
+fn part21_fn_item_coerced_wf() {
+    // (a fn item coerced to an annotation's fn pointer type: its signature's types are well formed (`&'a &'b ()` needs
+    // 'b: 'a), a generic item's type arguments solved from the annotation, a hole's regions fresh and the other parts'
+    // as written)
+    for src in ["static UNIT: &'static &'static () = &&();\nfn foo<'a, 'b>(_: &'a &'b (), v: &'b u32) -> &'a u32 { v }\nfn bad<'a>(x: &'a u32) -> &'static u32 {\n    let f: fn(_, &'a u32) -> &'static u32 = foo;\n    f(UNIT, x)\n}\nfn main() {}\n", "static UNIT: &'static &'static () = &&();\nfn foo<'a, 'b, T>(_: &'a &'b (), v: &'b T) -> &'a T { v }\nfn bad<'a, T>(x: &'a T) -> &'static T {\n    let f: fn(&'static &'static (), &'a T) -> &'static T = foo;\n    f(UNIT, x)\n}\nfn main() {}\n"] {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{src}: {d:?}");
+    }
+    assert_eq!(check("static UNIT: &'static &'static () = &&();\nfn foo<'a, 'b, T>(_: &'a &'b (), v: &'b T) -> &'a T { v }\nfn id<T>(x: &T) -> &T { x }\nfn pair<T, U>(t: T, _u: U) -> T { t }\nfn ok1<'a, T>(x: &'a T) -> &'a T {\n    let f: fn(_, &'a T) -> &'a T = foo;\n    f(UNIT, x)\n}\nfn ok2<'a>(x: &'a u32) -> &'a u32 {\n    let f: fn(&u32) -> &u32 = id;\n    let g: for<'z> fn(&'z u32) -> &'z u32 = id;\n    let h: fn(&'a u32, u8) -> &'a u32 = pair;\n    let _ = g(x);\n    let _ = h(x, 1);\n    f(x)\n}\nfn ok3(x: &'static u32) -> &'static u32 {\n    let f: fn(&'static &'static (), &'static u32) -> &'static u32 = foo;\n    f(UNIT, x)\n}\nfn main() {\n    let x = 1;\n    ok1(&x);\n    ok2(&x);\n    ok3(&5);\n}\n"), vec![]);
+    // (not where the fn pointer type binds a region: rustc accepts it (#25860,
+    // implied-bounds-on-nested-references-plus-variance-2.rs))
+    assert_eq!(check("static UNIT: &'static &'static () = &&();\nfn foo<'a, 'b, T>(_: &'a &'b (), v: &'b T, _: &()) -> &'a T { v }\nfn bad<'a, T>(x: &'a T) -> &'static T {\n    let f: fn(_, &'a T, &()) -> &'static T = foo;\n    f(UNIT, x, &())\n}\nfn main() {}\n"), vec![]);
+}
