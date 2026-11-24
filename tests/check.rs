@@ -1174,3 +1174,46 @@ fn review106_second_round() {
     let src = "#![deny(unsafe_attr_outside_unsafe)]\n\n#[allow(dead_code, unsafe_attr_outside_unsafe)]\n#[no_mangle]\npub fn f() {}\n\nfn main() { f(); }\n";
     assert_eq!(check(2021, src), None, "allow_in_a_list");
 }
+
+#[test]
+fn private_paths() {
+    // (E0603: each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, format!("{m} (E0603)")));
+    let m = "mod a {\n    fn f() {}\n    mod b { pub fn g() {} }\n    struct U;\n    struct T(u8);\n    struct S { x: u8 }\n    const C: u8 = 1;\n    type Al = u8;\n    enum E { V }\n    pub(super) fn sup() {}\n    pub mod c { pub(super) fn cs() {} pub(in crate::a) fn ci() {} }\n}\nfn main() {\n";
+    let main = |line: &str| format!("{m}{line}\n}}\n");
+    for (line, col, msg) in [
+        ("    a::f();", 8, "function `f` is private"),
+        ("    a::b::g();", 8, "module `b` is private"),
+        ("    let _ = a::U;", 16, "unit struct `U` is private"),
+        ("    let _ = &a::U;", 17, "unit struct `U` is private"),
+        ("    let _: a::U;", 15, "struct `U` is private"),
+        ("    let _ = a::T(1);", 16, "tuple struct constructor `T` is private"),
+        ("    let _ = a::S { x: 1 };", 16, "struct `S` is private"),
+        ("    let _ = a::C;", 16, "constant `C` is private"),
+        ("    let _: a::Al = 1;", 15, "type alias `Al` is private"),
+        ("    let _ = a::E::V;", 16, "enum `E` is private"),
+        ("    a::c::cs();", 11, "function `cs` is private"),
+        ("    a::c::ci();", 11, "function `ci` is private"),
+        ("    struct Z { u: u8 } let _ = Z { u: { let _ = a::U; 1 } };", 52, "unit struct `U` is private"),
+    ] {
+        assert_eq!(check(2021, &main(line)), at(14, col, msg), "{line}");
+    }
+    assert_eq!(check(2021, &main("    a::sup();")), None, "pub_super_from_the_parent");
+    // (an import: what rustc calls a struct of any kind there; 2015 and later read `use a::f` from the crate root here)
+    for ed in [2015, 2021] {
+        assert_eq!(check(ed, "mod a { struct U; }\nuse a::U;\nfn main() {}\n"), at(2, 8, "struct `U` is private"), "use_{ed}");
+    }
+    // (a child module sees its parent's private items; a re-export, a glob, a macro's item and a module of a fn body are
+    // not followed)
+    let src = "mod a {\n    fn f() {}\n    pub mod b { pub fn g() { super::f(); crate::a::f(); } }\n    mod c { pub fn j() {} }\n    pub use self::c::j;\n    macro_rules! mk { () => { pub fn made() {} } }\n    mk!();\n    pub struct S;\n    impl S { pub fn new() -> S { S } }\n}\nuse a::*;\nfn main() {\n    a::j();\n    a::made();\n    let _ = a::S::new();\n    mod a2 { pub fn z() {} }\n    a2::z();\n}\n";
+    for ed in [2015, 2021] {
+        assert_eq!(check(ed, src), None, "visible_{ed}");
+    }
+    // (a syntax error first, as rustc)
+    let src = "mod foo { mod bar { struct B; } }\nstruct Foo {\n    a: foo:A,\n    b: foo::bar::B,\n}\nfn main() {}\n";
+    assert!(check(2021, src).is_some_and(|(l, _, m)| l == 3 && !m.contains("E0603")), "syntax_error_first");
+}

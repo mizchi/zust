@@ -893,6 +893,8 @@ impl Session2 {
                 }
             }
         }
+        // (the configured text's tokens, for the scans of its modules (E0428, E0603): read once, where it has a module)
+        let src0_toks = (self.ctx.map.inputs.is_empty() && src0.contains("mod ") && src0.contains("::")).then(|| crate::lexer::tokenize(src0.as_bytes()));
         // (E0432: a top-level `use` of a path whose first segment names nothing; the `use` items come from the item
         // split, the names they could mean from the original text)
         if self.ctx.map.inputs.is_empty() {
@@ -904,7 +906,7 @@ impl Session2 {
             }
             // (E0428 of an inline module and an item: a whole-text pass, so not on each build of a crate loaded from
             // files, whose incremental builds would pay it every time)
-            if let Some(e) = duplicate_name(src0, &externs, self.opts.edition < 2018) {
+            if let Some(e) = duplicate_name(src0, src0_toks.as_deref(), &externs, self.opts.edition < 2018) {
                 return Err(e);
             }
             if let Some(e) = cfg_err.take().or_else(|| malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none(), self.opts.edition)) {
@@ -1016,6 +1018,13 @@ impl Session2 {
                 sm.encode(&mut b);
                 sums[i] = sm;
                 self.put(k, b);
+            }
+        }
+        // (E0603: a path through the program's own modules to an item it may not see; resolved after the items parse,
+        // as rustc reports a syntax error first)
+        if let Some(toks) = &src0_toks {
+            if let Some(e) = private_path(src0, toks, self.opts.edition < 2018) {
+                return Err(e);
             }
         }
         // 宣言の指紋 (要約の符号のハッシュはアイテムのハッシュで覚える)
@@ -3947,6 +3956,463 @@ enum Def {
     Injected,
 }
 
+/// A visibility as written: `pub` (or `pub(crate)`), none (or `pub(self)`), `pub(super)`, `pub(in path)`
+#[derive(Clone)]
+enum PVis<'a> {
+    Pub,
+    Priv,
+    Super,
+    In(Vec<&'a [u8]>),
+}
+
+/// An item of a module, as `private_path` reads it
+struct PItem<'a> {
+    name: &'a [u8],
+    /// what rustc calls it: "module", "struct", "unit struct", "tuple struct", "enum", ...
+    kind: &'static str,
+    vis: PVis<'a>,
+    /// the module it is, for a `mod m { .. }`
+    child: usize,
+}
+
+/// The paths of a `use` tree that starts at token `k`, each as the tokens of its segments (`use a::{b, c::d}`: [a, b],
+/// [a, c, d]; a glob or a `self` gives the module's path), and the token past the tree
+fn use_leaves(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], k: usize, prefix: &mut Vec<usize>, out: &mut Vec<Vec<usize>>) -> usize {
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let depth = prefix.len();
+    let mut k = k;
+    let end = loop {
+        if t(k) == b"{" {
+            let Some(&e) = close.get(k).filter(|&&e| e != usize::MAX) else { break k };
+            let mut j = k + 1;
+            while j < e {
+                j = use_leaves(b, toks, close, j, prefix, out);
+                if t(j) != b"," {
+                    break;
+                }
+                j += 1;
+            }
+            break e + 1;
+        }
+        if t(k) == b"*" {
+            out.push(prefix.clone());
+            break k + 1;
+        }
+        if !is_id(k) {
+            break k;
+        }
+        let s = if t(k) == b"r" && t(k + 1) == b"#" && is_id(k + 2) { k + 2 } else { k };
+        if t(s + 1) == b":" && t(s + 2) == b":" {
+            prefix.push(s);
+            k = s + 3;
+            continue;
+        }
+        if t(s) == b"self" {
+            out.push(prefix.clone());
+        } else {
+            let mut p = prefix.clone();
+            p.push(s);
+            out.push(p);
+        }
+        break if t(s + 1) == b"as" { s + 3 } else { s + 1 };
+    };
+    prefix.truncate(depth);
+    end
+}
+
+/// E0603: a path through the program's own inline modules (`a::b::f()`, `use crate::a::f;`, `super::m::C`) to a
+/// module or item that is not visible where the path is written: "function `f` is private", at that segment, the
+/// first in the text. A path is read only as far as it names the program's own modules and items: one that starts at
+/// another crate, an import, a module of a fn body or a name some import binds, or that reaches a name only an import
+/// or a macro defines, is left alone. Not a path in an attribute or a macro's definition (resolved where it expands)
+fn private_path(src: &str, toks: &[(u8, usize, usize)], injected: bool) -> Option<String> {
+    let b = src.as_bytes();
+    let n = toks.len();
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let raw = |k: usize| if t(k) == b"r" && t(k + 1) == b"#" && is_id(k + 2) { k + 2 } else { k };
+    let mut close = vec![usize::MAX; n];
+    let mut stack: Vec<usize> = vec![];
+    for k in 0..n {
+        if toks[k].0 == 1 {
+            match b[toks[k].1] {
+                b'(' | b'[' | b'{' => stack.push(k),
+                b')' | b']' | b'}' => {
+                    if let Some(o) = stack.pop() {
+                        close[o] = k;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    // (modules: the tokens of the body, the parent; the crate root first)
+    let mut mods: Vec<(usize, usize, usize)> = vec![(0, n, usize::MAX)];
+    let mut items: Vec<Vec<PItem>> = vec![];
+    // (in each module, the item-level ranges a path is not read in: a `macro_rules!` and a macro call)
+    let mut skips: Vec<Vec<(usize, usize)>> = vec![];
+    // (the names `use` binds anywhere, and the names of more than one `mod`: a path that starts there is left alone)
+    let mut bound: FxSet<&[u8]> = FxSet::default();
+    let mut mod_names: FxMap<&[u8], u32> = FxMap::default();
+    for k in 0..n.saturating_sub(1) {
+        if t(k) == b"mod" && is_id(k + 1) {
+            *mod_names.entry(t(raw(k + 1))).or_insert(0) += 1;
+        }
+    }
+    while items.len() < mods.len() {
+        let m = items.len();
+        let (lo, hi, _) = mods[m];
+        let (mut its, mut sk): (Vec<PItem>, Vec<(usize, usize)>) = (vec![], vec![]);
+        let mut k = lo;
+        let mut vis = PVis::Priv;
+        while k < hi {
+            if t(k) == b"#" && (t(k + 1) == b"[" || (t(k + 1) == b"!" && t(k + 2) == b"[")) {
+                let o = if t(k + 1) == b"[" { k + 1 } else { k + 2 };
+                k = close[o].saturating_add(1);
+                continue;
+            }
+            if t(k) == b"pub" {
+                vis = PVis::Pub;
+                k += 1;
+                if t(k) == b"(" && close[k] != usize::MAX {
+                    let e = close[k];
+                    vis = match t(k + 1) {
+                        b"self" => PVis::Priv,
+                        b"super" => PVis::Super,
+                        b"in" => PVis::In((k + 2..e).filter(|&j| is_id(j)).map(t).collect()),
+                        _ => PVis::Pub,
+                    };
+                    k = e + 1;
+                }
+                continue;
+            }
+            if matches!(t(k), b"unsafe" | b"async" | b"default") || t(k) == b"const" && matches!(t(k + 1), b"fn" | b"unsafe" | b"extern" | b"async") {
+                k += 1;
+                continue;
+            }
+            if t(k) == b"extern" && toks.get(k + 1).is_some_and(|x| x.0 == 2) && matches!(t(k + 2), b"fn" | b"unsafe") {
+                k += 2;
+                continue;
+            }
+            let mut item: Option<(usize, &'static str)> = None;
+            match t(k) {
+                b"mod" if is_id(k + 1) && t(k + 2) == b"{" && close[k + 2] < hi => {
+                    its.push(PItem { name: t(raw(k + 1)), kind: "module", vis: vis.clone(), child: mods.len() });
+                    mods.push((k + 3, close[k + 2], m));
+                }
+                b"struct" if is_id(k + 1) => {
+                    let mut j = k + 2;
+                    if t(j) == b"<" {
+                        let mut d = 0i32;
+                        while j < hi {
+                            match t(j) {
+                                b"<" => d += 1,
+                                b">" => {
+                                    d -= 1;
+                                    if d == 0 {
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                            j += 1;
+                        }
+                        j += 1;
+                    }
+                    item = Some((k + 1, match t(j) { b";" => "unit struct", b"(" => "tuple struct", _ => "struct" }));
+                }
+                b"enum" if is_id(k + 1) => item = Some((k + 1, "enum")),
+                b"trait" if is_id(k + 1) => item = Some((k + 1, "trait")),
+                b"type" if is_id(k + 1) => item = Some((k + 1, "type alias")),
+                b"union" if is_id(k + 1) && t(k + 1) != b"union" => item = Some((k + 1, "union")),
+                b"fn" if is_id(k + 1) => item = Some((k + 1, "function")),
+                b"const" if is_id(k + 1) && t(k + 1) != b"_" => item = Some((k + 1, "constant")),
+                b"static" if is_id(k + 1) => item = Some((if t(k + 1) == b"mut" { k + 2 } else { k + 1 }, "static")),
+                b"use" => {
+                    let (mut prefix, mut leaves) = (vec![], vec![]);
+                    let mut j = k + 1;
+                    if t(j) == b":" && t(j + 1) == b":" {
+                        j += 2;
+                    }
+                    use_leaves(b, &toks, &close, j, &mut prefix, &mut leaves);
+                    for l in &leaves {
+                        if let Some(&last) = l.last() {
+                            bound.insert(t(last));
+                        }
+                    }
+                }
+                // (`macro_rules! m { .. }` / `m! { .. }` / `m!(..);`: not read)
+                _ if is_id(k) && t(k + 1) == b"!" => {
+                    let o = if is_id(k + 2) { k + 3 } else { k + 2 };
+                    if close.get(o).is_some_and(|&e| e != usize::MAX) {
+                        sk.push((k, close[o]));
+                    }
+                }
+                _ => {}
+            }
+            if let Some((at, kind)) = item {
+                its.push(PItem { name: t(raw(at)), kind, vis: vis.clone(), child: usize::MAX });
+            }
+            vis = PVis::Priv;
+            // to the item's end: a `;` or a body `{ .. }`
+            let mut j = if item.is_some() || t(k) == b"mod" { k + 1 } else { k };
+            loop {
+                if j >= hi {
+                    break;
+                }
+                match t(j) {
+                    b";" => break,
+                    b"{" => {
+                        j = close[j];
+                        if t(j + 1) != b";" && !matches!(t(j + 1), b"." | b"?" | b"+" | b"-" | b"*" | b"/") {
+                            break;
+                        }
+                    }
+                    b"(" | b"[" => j = close[j],
+                    _ => {}
+                }
+                if j == usize::MAX {
+                    return None;
+                }
+                j += 1;
+            }
+            k = j.saturating_add(1);
+        }
+        items.push(its);
+        skips.push(sk);
+    }
+    let parent = |m: usize| mods[m].2;
+    let within = |mut a: usize, b: usize| loop {
+        if a == b {
+            break true;
+        }
+        if a == usize::MAX || a == 0 {
+            break false;
+        }
+        a = parent(a);
+    };
+    // (the module a path of segments names, from the crate root; None if it names none)
+    let module_at = |segs: &[&[u8]], from: usize| -> Option<usize> {
+        let (mut cur, mut s) = match segs.first() {
+            Some(&b"crate") => (0, 1),
+            Some(&b"self") => (from, 1),
+            _ => (from, 0),
+        };
+        while segs.get(s) == Some(&&b"super"[..]) {
+            cur = parent(cur);
+            if cur == usize::MAX {
+                return None;
+            }
+            s += 1;
+        }
+        for seg in &segs[s..] {
+            cur = items[cur].iter().find(|x| x.name == *seg && x.child != usize::MAX)?.child;
+        }
+        Some(cur)
+    };
+    let visible = |def: usize, vis: &PVis, from: usize| match vis {
+        PVis::Pub => true,
+        PVis::Priv => within(from, def),
+        PVis::Super => match parent(def) {
+            usize::MAX => within(from, def),
+            p => within(from, p),
+        },
+        // (`pub(in path)`: from the crate root in 2015, from the module later; one that names no module is taken as
+        // `pub`)
+        PVis::In(p) => match module_at(p, if injected { 0 } else { def }) {
+            Some(x) => within(from, x),
+            None => true,
+        },
+    };
+    // (the first segment a path cannot reach: its token and rustc's word for it)
+    let check = |m: usize, segs: &[usize], from_root: bool, in_use: bool| -> Option<(usize, String)> {
+        let first = t(segs[0]);
+        let (mut cur, mut s) = match first {
+            b"crate" => (0, 1),
+            b"self" => (m, 1),
+            b"super" => (m, 0),
+            _ if from_root => (0, 0),
+            _ => (m, 0),
+        };
+        while s < segs.len() && t(segs[s]) == b"super" {
+            cur = parent(cur);
+            if cur == usize::MAX {
+                return None;
+            }
+            s += 1;
+        }
+        if s >= segs.len() || s == 0 && (bound.contains(first) || mod_names.get(first).is_some_and(|&c| c > 1)) {
+            return None;
+        }
+        for i in s..segs.len() {
+            let name = t(segs[i]);
+            let last = i + 1 == segs.len();
+            let defs: Vec<&PItem> = items[cur].iter().filter(|x| x.name == name).collect();
+            // (a name defined here or nowhere: what an import or a macro brings is not followed)
+            if defs.is_empty() || i == s && s == 0 && !defs.iter().any(|x| x.child != usize::MAX) {
+                return None;
+            }
+            if !last {
+                // (a module goes on; a type ends the path, its associated items are not read: a struct there is the type,
+                // `a::Foo::new`)
+                let d = defs.iter().find(|x| x.child != usize::MAX).or_else(|| defs.iter().find(|x| matches!(x.kind, "struct" | "unit struct" | "tuple struct" | "enum" | "trait" | "type alias" | "union")))?;
+                if !visible(cur, &d.vis, m) {
+                    return Some((segs[i], format!("{} `{}` is private (E0603)", if d.kind.ends_with(" struct") { "struct" } else { d.kind }, String::from_utf8_lossy(name))));
+                }
+                if d.child == usize::MAX {
+                    return None;
+                }
+                cur = d.child;
+                continue;
+            }
+            if defs.iter().any(|d| visible(cur, &d.vis, m)) {
+                return None;
+            }
+            let d = defs[0];
+            // (what rustc calls a struct where the path is written: a value, a constructor, or the type)
+            let mut word = d.kind;
+            if word.ends_with(" struct") {
+                // (the token before the path, past a leading `::` and any `&` / `mut`)
+                let mut j = segs[0] as isize - if t(segs[0].wrapping_sub(1)) == b":" && t(segs[0].wrapping_sub(2)) == b":" { 3 } else { 1 };
+                let tk = |j: isize| if j < 0 { &b""[..] } else { t(j as usize) };
+                while matches!(tk(j), b"&" | b"mut") {
+                    j -= 1;
+                }
+                let (p, pp) = (tk(j), tk(j - 1));
+                // (`S { field: m::U }`: a struct literal's field takes a value; not a struct's or a variant's field)
+                let enclosing = |mut j: isize| -> isize {
+                    let mut d = 0i32;
+                    while j >= 0 {
+                        match tk(j) {
+                            b")" | b"]" | b"}" => d += 1,
+                            b"(" | b"[" | b"{" if d == 0 => return j,
+                            b"(" | b"[" | b"{" => d -= 1,
+                            _ => {}
+                        }
+                        j -= 1;
+                    }
+                    -1
+                };
+                let defines = |o: isize| o >= 1 && (matches!(tk(o - 2), b"struct" | b"union" | b"enum") || tk(o - 1) == b">");
+                let field_value = p == b":" && pp != b":" && is_id((j - 1) as usize) && matches!(tk(j - 2), b"{" | b",") && {
+                    let o = enclosing(j - 1);
+                    o >= 1 && tk(o) == b"{" && is_id((o - 1) as usize) && !defines(o) && !matches!(tk(o - 2), b"{" | b",") || {
+                        // (a variant's fields: `enum E { V { a: m::U } }`)
+                        o >= 2 && tk(o) == b"{" && is_id((o - 1) as usize) && matches!(tk(o - 2), b"{" | b",") && {
+                            let e = enclosing(o - 1);
+                            !(e >= 2 && tk(e) == b"{" && tk(e - 2) == b"enum")
+                        }
+                    }
+                };
+                let typed = !field_value && (matches!(p, b"<" | b"as" | b"impl" | b"for" | b"dyn") || p == b":" && pp != b":" || p == b">" && pp == b"-");
+                word = if in_use || typed {
+                    "struct"
+                } else if word == "tuple struct" {
+                    "tuple struct constructor"
+                } else {
+                    word
+                };
+            }
+            return Some((segs[i], format!("{word} `{}` is private (E0603)", String::from_utf8_lossy(name))));
+        }
+        None
+    };
+    // (each module's own tokens, past its child modules and its item-level macros, for the paths in them)
+    let mut found: Option<(usize, String)> = None;
+    let mut keep = |e: Option<(usize, String)>| {
+        if let Some(e) = e {
+            if found.as_ref().is_none_or(|f| e.0 < f.0) {
+                found = Some(e);
+            }
+        }
+    };
+    for m in 0..mods.len() {
+        let (lo, hi, _) = mods[m];
+        let mut jumps: Vec<(usize, usize)> = skips[m].clone();
+        jumps.extend(mods.iter().filter(|x| x.2 == m).map(|x| (x.0, x.1)));
+        jumps.sort_unstable();
+        let mut ji = 0;
+        let mut k = lo;
+        while k < hi {
+            while ji < jumps.len() && jumps[ji].1 < k {
+                ji += 1;
+            }
+            if ji < jumps.len() && jumps[ji].0 <= k {
+                k = jumps[ji].1 + 1;
+                continue;
+            }
+            // (an attribute; a module of a fn body, whose paths start there)
+            if t(k) == b"#" && (t(k + 1) == b"[" || t(k + 1) == b"!" && t(k + 2) == b"[") {
+                let o = if t(k + 1) == b"[" { k + 1 } else { k + 2 };
+                k = close[o].saturating_add(1);
+                continue;
+            }
+            if t(k) == b"mod" && is_id(k + 1) && t(k + 2) == b"{" && close[k + 2] != usize::MAX {
+                k = close[k + 2] + 1;
+                continue;
+            }
+            if t(k) == b"use" && !(t(k.wrapping_sub(1)) == b":" || t(k.wrapping_sub(1)) == b".") {
+                let mut j = k + 1;
+                let lead = t(j) == b":" && t(j + 1) == b":";
+                if lead {
+                    j += 2;
+                }
+                let (mut prefix, mut leaves) = (vec![], vec![]);
+                let end = use_leaves(b, &toks, &close, j, &mut prefix, &mut leaves);
+                if !lead || injected {
+                    for l in leaves.iter().filter(|l| !l.is_empty()) {
+                        keep(check(m, l, injected, true));
+                    }
+                }
+                k = end.max(k + 1);
+                continue;
+            }
+            // (a path's first segment: not after `::`, `.` or a macro's `$`)
+            let after_colons = |k: usize| t(k.wrapping_sub(1)) == b":" && t(k.wrapping_sub(2)) == b":";
+            if is_id(k) && t(k + 1) == b":" && t(k + 2) == b":" && is_id(k + 3) && !(after_colons(k) || matches!(t(k.wrapping_sub(1)), b"." | b"$" | b"'")) {
+                // (a path can reach a module of the program only from one of their names, `crate`, `self` or `super`)
+                let first = t(raw(k));
+                let reads = matches!(first, b"crate" | b"self" | b"super") || mod_names.contains_key(first);
+                let mut segs = if reads { vec![raw(k)] } else { vec![] };
+                let mut j = k;
+                while t(j + 1) == b":" && t(j + 2) == b":" && is_id(j + 3) {
+                    j = raw(j + 3);
+                    if reads {
+                        segs.push(j);
+                    }
+                }
+                if reads {
+                    keep(check(m, &segs, false, false));
+                }
+                k = j + 1;
+                continue;
+            }
+            // (`::a::b`: from the crate root in 2015)
+            if t(k) == b":" && t(k + 1) == b":" && is_id(k + 2) && !(is_id(k.wrapping_sub(1)) || matches!(t(k.wrapping_sub(1)), b">" | b"$" | b":")) {
+                let mut segs = vec![raw(k + 2)];
+                let mut j = segs[0];
+                while t(j + 1) == b":" && t(j + 2) == b":" && is_id(j + 3) {
+                    j = raw(j + 3);
+                    segs.push(j);
+                }
+                if injected && segs.len() > 1 {
+                    keep(check(m, &segs, true, false));
+                }
+                k = j + 1;
+                continue;
+            }
+            k += 1;
+        }
+    }
+    let (at, msg) = found?;
+    let off = toks[at].1;
+    let line = b[..off].iter().filter(|&&c| c == b'\n').count() + 1;
+    let col = off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1;
+    Some(format!("{line}:{col}: {msg}"))
+}
+
+
 /// A name a module defines, for duplicate_name
 struct DupDef<'a> {
     /// the namespaces: 1 types, 2 values (0: an import that names nothing found, not compared)
@@ -4055,7 +4521,7 @@ fn std_path_ns(path: &[&[u8]]) -> u8 {
 /// root in edition 2015 (`injected`; a later edition's is hygienic). Only read when the program has a `mod` or an
 /// `extern crate`, or in edition 2015 something that may define `std` / `core`. `src` is the configured text, `externs` the `extern crate` items
 /// the configuring blanked (cfg::strip_noting)
-fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Option<String> {
+fn duplicate_name(src: &str, src_toks: Option<&[(u8, usize, usize)]>, externs: &[(usize, String)], injected: bool) -> Option<String> {
     // (a few scans: a program without these has its other duplicates found when its items are collected)
     // (2015's injected `std` meets an item or import of that name: `struct std;`, `use x as std;`, `enum std {`)
     let names_std = || {
@@ -4081,7 +4547,15 @@ fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Opt
         restored.as_str()
     };
     let b = src.as_bytes();
-    let toks = crate::lexer::tokenize(b);
+    // (the configured text's tokens where the caller has them and no `extern crate` was put back)
+    let own;
+    let toks: &[(u8, usize, usize)] = match src_toks {
+        Some(t) if externs.is_empty() => t,
+        _ => {
+            own = crate::lexer::tokenize(b);
+            &own
+        }
+    };
     let n = toks.len();
     let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
     // (each open bracket's match)

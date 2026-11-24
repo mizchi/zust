@@ -3354,6 +3354,7 @@ check-pass	imports/ambiguous-panic-pick-std.rs
 compile-fail	imports/ambiguous-panic-rename-panics.rs
 check-pass	imports/ambiguous-trait-and-struct-in-scope.rs
 check-pass	imports/ambiguous-trait-with-mixed-import-paths.rs
+compile-fail	imports/append-import-suggestion.rs
 check-pass	imports/cycle-import-in-diff-module-0.rs
 check-pass	imports/cycle-import-in-diff-module-1.rs
 compile-fail	imports/double-import.rs
@@ -5887,18 +5888,24 @@ compile-fail	pattern/usefulness/type_polymorphic_byte_str_literals.rs
 compile-fail	pin-ergonomics/raw-ident.rs
 compile-fail	pin-macro/lifetime_errors_on_promotion_misusage.rs
 compile-fail	pin/pin-deref-target-partial-eq-67039.rs
+compile-fail	privacy/crate-private-reexport.rs
+compile-fail	privacy/export-tag-variant.rs
 run-pass	privacy/fn-returns-unnameable-type.rs
 check-pass	privacy/generic_struct_field_projection.rs
 check-pass	privacy/import-list-stem-visibility-issue-119126.rs
 compile-fail	privacy/inaccessible-private-fields-76077.rs
 compile-fail	privacy/inaccessible-private-fields-trailing-comma-149787.rs
+compile-fail	privacy/issue-13641.rs
 compile-fail	privacy/issue-29161.rs
+compile-fail	privacy/issue-75062-fieldless-tuple-struct.rs
 compile-fail	privacy/issue-79593.rs
 compile-fail	privacy/locally-pub-private-module-access.rs
 compile-fail	privacy/priv-in-bad-locations.rs
+compile-fail	privacy/privacy-in-paths.rs
 run-pass	privacy/privacy-ns.rs
 compile-fail	privacy/privacy-ns1.rs
 compile-fail	privacy/privacy-ns2.rs
+compile-fail	privacy/privacy-ufcs.rs
 run-pass	privacy/privacy1-rpass.rs
 run-pass	privacy/private-class-field.rs
 compile-fail	privacy/private-field-access-in-mutex-54062.rs
@@ -5907,6 +5914,7 @@ compile-fail	privacy/private-field-struct-construction-76077.rs
 compile-fail	privacy/private-field-ty-err.rs
 compile-fail	privacy/private-in-public-ill-formed.rs
 compile-fail	privacy/private-inferred-type-1.rs
+compile-fail	privacy/private-item-simple.rs
 run-pass	privacy/private-method-rpass.rs
 compile-fail	privacy/private-struct-field-in-module.rs
 compile-fail	privacy/private-tuple-struct-field-self-arg-issue-81447.rs
@@ -5916,6 +5924,9 @@ run-pass	privacy/pub-priv-dep/std-pub.rs
 run-pass	privacy/pub-restricted-path-usage-55376.rs
 run-pass	privacy/required-pub-in-blocks.rs
 check-pass	privacy/restricted/private-in-public.rs
+compile-fail	privacy/sealed-traits/private-trait.rs
+compile-fail	privacy/sealed-traits/re-exported-trait.rs
+compile-fail	privacy/struct-field-and-impl-expose-10545.rs
 compile-fail	privacy/suggest-box-new.rs
 compile-fail	privacy/suggest-new-projection-ice.rs
 compile-fail	privacy/trait-object-method-error.rs
@@ -6905,6 +6916,7 @@ compile-fail	structs/struct-record-suggestion.rs
 run-pass	structs/struct-size-with-drop-2895.rs
 run-pass	structs/struct-update-syntax-2463.rs
 check-pass	structs/struct-variant-field-visibility.rs
+compile-fail	structs/struct-variant-privacy.rs
 compile-fail	structs/suggest-replacing-field-when-specifying-same-type.rs
 compile-fail	structs/syntax-error-not-missing-field.rs
 run-pass	structs/trie-node-structure-usage-3389.rs
@@ -8021,6 +8033,7 @@ compile-fail	use/use-after-move-self-based-on-type.rs
 compile-fail	use/use-after-move-self.rs
 check-pass	use/use-keyword.rs
 compile-fail	use/use-meta-mismatch.rs
+compile-fail	use/use-mod/use-mod-3.rs
 check-pass	use/use-mod/use-mod-5.rs
 check-pass	use/use-mod/use-mod-6.rs
 compile-fail	use/use-mod/use-mod.rs
