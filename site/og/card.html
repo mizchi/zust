@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>zust social card</title>
+<!-- Rendered to og-home.png / og-dashboard.png (1200x630) by .github/workflows/pages.yml:
+     npx playwright screenshot --viewport-size "1200, 630" --wait-for-selector "body[data-ready]" og/card.html?page=home
+     Every number comes from dashboard/data/ (the retrospective data) or dev/bench/data.js (CI benchmark history). -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root { --bg: #0f1416; --panel: #162024; --fg: #eef2f3; --muted: #93a3a8; --line: #263236; --accent: #4fc0ad; --accent2: #7c9cf0;
+          --sans: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: var(--bg); color: var(--fg); font-family: var(--sans); }
+  .card { position: relative; width: 1200px; height: 630px; padding: 64px 72px 56px; display: flex; flex-direction: column; }
+  .card::before { content: ""; position: absolute; inset: 0; background:
+      radial-gradient(900px 420px at 100% 0%, rgba(79,192,173,.16), transparent 60%),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.025) 0 1px, transparent 1px 48px); pointer-events: none; }
+  .brand { font: 500 30px var(--mono); letter-spacing: -.01em; }
+  .brand span { color: var(--accent); }
+  .eyebrow { font: 500 20px var(--mono); color: var(--accent); text-transform: uppercase; letter-spacing: .06em; margin-top: 34px; }
+  h1 { font-size: 64px; line-height: 1.06; font-weight: 600; letter-spacing: -.025em; margin: 10px 0 0; max-width: 980px; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: auto; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; }
+  .num { font: 500 52px var(--mono); letter-spacing: -.03em; line-height: 1; }
+  .num small { font-size: 26px; color: var(--muted); margin-left: 4px; }
+  .lbl { font-size: 19px; color: var(--muted); margin-top: 10px; line-height: 1.35; }
+  .arrow { color: var(--muted); font-size: 34px; margin: 0 6px; }
+  .accent { color: var(--accent); }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 26px; font-size: 19px; color: var(--muted); }
+  .foot b { color: var(--fg); font-weight: 500; }
+  svg { display: block; margin-top: 12px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="card" id="home" hidden>
+  <div class="brand"><span>z</span>ust</div>
+  <div class="eyebrow">A compiler for a subset of Rust</div>
+  <h1>Edit one function,<br>rebuild in milliseconds.</h1>
+  <div class="stats">
+    <div class="stat"><div class="num" data-k="edit">—</div><div class="lbl">rebuild after editing one function, 5,000-function program</div></div>
+    <div class="stat"><div class="num" data-k="noop">—</div><div class="lbl">no-op build: nothing changed, no link</div></div>
+    <div class="stat"><div class="num accent" data-k="run">—</div><div class="lbl">of rustc's own tests/ui run-pass tests pass</div></div>
+  </div>
+  <div class="foot"><span>Built by coding agents, measured on every push</span><b>mizchi.github.io/zust</b></div>
+</div>
+
+<div class="card" id="dashboard" hidden>
+  <div class="brand"><span>z</span>ust</div>
+  <div class="eyebrow">Retrospective</div>
+  <h1><span class="accent" data-k="hours">—</span> hours of coding agents building a Rust-subset compiler</h1>
+  <div class="stats">
+    <div class="stat"><div class="num"><span data-k="run0">—</span><span class="arrow">→</span><span class="accent" data-k="run1">—</span></div>
+      <div class="lbl">rustc tests/ui run-pass rate</div><svg id="spark" width="300" height="44" aria-hidden="true"></svg></div>
+    <div class="stat"><div class="num" data-k="commits">—</div><div class="lbl">commits · <span data-k="sessions">—</span> agent sessions</div><svg id="spark2" width="300" height="44" aria-hidden="true"></svg></div>
+    <div class="stat"><div class="num accent" data-k="drift">—</div><div class="lbl">instructions for a rebuild after one edit, across <span data-k="changes">—</span> changes</div></div>
+  </div>
+  <div class="foot"><span>Commits, pass rates and KPIs from git history</span><b>mizchi.github.io/zust/dashboard</b></div>
+</div>
+
+<script src="../dev/bench/data.js"></script>
+<script>
+(async () => {
+  const page = new URLSearchParams(location.search).get('page') === 'dashboard' ? 'dashboard' : 'home';
+  const set = (k, v) => document.querySelectorAll(`#${page} [data-k="${k}"]`).forEach((e) => { e.textContent = v; });
+  const get = (f) => fetch(`../dashboard/data/${f}`).then((r) => r.json());
+  const fmt = (n) => n.toLocaleString('en-US');
+  const ui = await get('ui.json');
+  // (the first and last measured run-pass rates: a row may have none, null)
+  const runs = ui.filter((r) => r.run_pass_rate != null);
+  const u0 = runs[0], u1 = runs[runs.length - 1];
+  const rate = (u, d) => (u ? u.run_pass_rate.toFixed(d) : '—');
+  if (page === 'home') {
+    const e = (window.BENCHMARK_DATA?.entries?.zustc || []).slice(-1)[0];
+    const b = Object.fromEntries((e?.benches || []).map((x) => [x.name, x.value]));
+    const ms = (v) => (v == null ? '—' : v < 10 ? v.toFixed(2) : String(Math.round(v)));
+    document.querySelector('#home [data-k="edit"]').innerHTML = `${ms(b['gen5000 build edit 1 fn'])}<small>ms</small>`;
+    document.querySelector('#home [data-k="noop"]').innerHTML = `${ms(b['gen5000 build noop'])}<small>ms</small>`;
+    document.querySelector('#home [data-k="run"]').innerHTML = `${rate(u1, 1)}<small>%</small>`;
+  } else {
+    const [hourly, kpi, sessions] = await Promise.all([get('hourly.json'), get('kpi.json'), get('sessions.json')]);
+    const H = 36e5;
+    set('hours', String(Math.round((new Date(hourly[hourly.length - 1].hour) - new Date(hourly[0].hour)) / H) + 1));
+    set('run0', `${rate(u0, 0)}%`);
+    set('run1', `${rate(u1, 0)}%`);
+    set('commits', fmt(hourly.reduce((s, h) => s + h.commits, 0)));
+    set('sessions', String(sessions.length));
+    const ed = kpi.map((r) => r.edit_build_M).filter((v) => v != null);
+    const d = (ed[ed.length - 1] / ed[0] - 1) * 100;
+    set('drift', `${d < 0 ? '−' : '+'}${Math.abs(d).toFixed(1)}%`);
+    set('changes', fmt(kpi.length));
+    const spark = (id, pts, color) => {
+      const svg = document.getElementById(id), W = +svg.getAttribute('width'), Ht = +svg.getAttribute('height');
+      const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+      const path = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${((x - x0) / (x1 - x0 || 1) * (W - 4) + 2).toFixed(1)},${(Ht - 3 - (y - y0) / (y1 - y0 || 1) * (Ht - 6)).toFixed(1)}`).join('');
+      svg.innerHTML = `<path d="${path}" fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
+    };
+    spark('spark', runs.map((r) => [new Date(r.time).getTime(), r.run_pass_rate]), 'var(--accent)');
+    spark('spark2', hourly.map((h) => [new Date(h.hour).getTime(), h.cumulative]), 'var(--accent2)');
+  }
+  document.getElementById(page).hidden = false;
+  await document.fonts.ready;
+  document.body.dataset.ready = '1';
+})();
+</script>
+</body>
+</html>

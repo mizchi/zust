@@ -6,7 +6,7 @@
 |---|---|---:|---|
 | adler2 | match | 6 / 0 / 0 | テスト 6 個 |
 | cfg-if | match | 3 / 0 / 0 | テスト 3 個 |
-| either | zurgo-fails | 8 / 0 / 0 | error: ~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.229/src/crate_root.rs: file not found for module `de` |
+| either | zurgo-fails | 8 / 0 / 0 | error: crate `either`: src/lib.rs:1507:1: cannot find type `SeekFrom` |
 | fnv | match | 1 / 0 / 0 | テスト 1 個 |
 | hex | zurgo-fails | 16 / 0 / 0 | error: two packages give the library `bitflags`: `bitflags v1.3.2` and `bitflags v2.13.2`. Two versions of one crate are not supported yet (mizchi/zust#28) |
 | itoa | zurgo-fails | 11 / 0 / 0 | error: two packages give the library `itoa`: `itoa v1.0.19` and `itoa v1.0.19`. Two versions of one crate are not supported yet (mizchi/zust#28) |
