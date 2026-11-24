@@ -2676,10 +2676,23 @@ impl Cx<'_> {
         let t0 = self.bk.call_temps.len();
         self.rg.depth += 1;
         let ha = std::mem::replace(&mut self.bk.hold_args, act.is_some());
+        let aa0 = std::mem::take(&mut self.bk.arg_acts);
         let r = self.call_fn_inner(id, recv, args, turbofish, expected, span);
+        let arg_acts = std::mem::replace(&mut self.bk.arg_acts, aa0);
         self.bk.hold_args = ha;
         // (the arguments are evaluated and their loans still live: the reservation ends, the `&mut` loan is taken)
         if let Some((ev, tid)) = act {
+            if self.bk_on() {
+                self.bk_ev(borrowck::Ev::Acc(borrowck::BPlace { local: tid, proj: vec![] }, borrowck::Acc::Read, SP));
+                self.bk_ev(borrowck::Ev::Dead(tid, SP));
+                if let Some(t) = self.bk.call_temps.iter_mut().rev().find(|t| **t == tid) {
+                    *t = u32::MAX;
+                }
+            }
+            self.bk_push(Some(ev));
+        }
+        // (and the arguments' implicit `&mut` reborrows, the same way)
+        for (ev, tid) in arg_acts {
             if self.bk_on() {
                 self.bk_ev(borrowck::Ev::Acc(borrowck::BPlace { local: tid, proj: vec![] }, borrowck::Acc::Read, SP));
                 self.bk_ev(borrowck::Ev::Dead(tid, SP));
@@ -2983,7 +2996,7 @@ impl Cx<'_> {
             // `let r = pick(x, &b); *x = 1; use(r)` is E0506)
             match (pt, self.prog.partial_subst(pt, &sol)) {
                 (Ty::Ref(m, _), _) | (_, Ty::Ref(m, _)) => {
-                    if let Some(ln) = self.bk_reborrow_arg(a, m) {
+                    if let Some(ln) = self.bk_reborrow_arg(a, m, true) {
                         if !self.rg.on && self.bk_ret_from(id, i + skip) {
                             self.bk.src(borrowck::Src::Loan(ln));
                         }
