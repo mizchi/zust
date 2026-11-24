@@ -5987,8 +5987,9 @@ impl Program {
                 ("env", "split_paths") => Some("__exr_env_split_paths"),
                 ("fs", "remove_file") => Some("__exr_fs_remove_file"),
                 ("Path", "new") => Some("__exr_path_new"),
-                ("ptr", "eq") => Some("__exr_ptr_eq"),
-                ("ptr", "swap") => Some("__core_ptr_swap"),
+                // (not a program's own `ptr` type's or module's)
+                ("ptr", "eq") if !self.index.contains_key("ptr::eq") => Some("__exr_ptr_eq"),
+                ("ptr", "swap") if !self.index.contains_key("ptr::swap") => Some("__core_ptr_swap"),
                 ("array", "from_fn") => Some("__exr_array_from_fn"),
                 // (RefCell's guards: associated functions of the prelude's Ref / RefMut, unless the program has its own)
                 ("Ref", "map") if !self.index.contains_key("Ref::map") => Some("__exr_ref_map"),

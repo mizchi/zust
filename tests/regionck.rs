@@ -4095,6 +4095,17 @@ fn part27_ptr_swap() {
 }
 
 #[test]
+fn part27_review() {
+    // (#151's review: a program's own `ptr` type keeps its `swap` and `eq`; a call's result passed for a reference
+    // holds its loans until the call, as a `&x` argument does: `f(x, id(&*x))` is E0502 when the first argument's
+    // reborrow is taken. A result that is no reference (`f2(x, n(&*x))`), or that borrows something else, does not)
+    assert_eq!(check("#[allow(non_camel_case_types)]\nstruct ptr;\nimpl ptr {\n    fn swap() -> i32 { 42 }\n    fn eq() -> i32 { 1 }\n}\nfn main() {\n    println!(\"{} {}\", ptr::swap(), ptr::eq());\n}\n"), vec![], "r1");
+    assert_eq!(check("fn f(_: &mut i32, _: &i32) {}\nfn f2(_: &mut i32, _: i32) {}\nfn id<'a>(x: &'a i32, _y: &i32) -> &'a i32 { x }\nfn n(x: &i32) -> i32 { *x }\nstruct W(i32);\nimpl W { fn get(&self) -> &i32 { &self.0 } }\nfn main() {\n    let mut v = 1;\n    let w = 3;\n    let ww = W(4);\n    let x = &mut v;\n    f2(x, n(&*x));\n    f(x, id(&w, &*x));\n    f(x, ww.get());\n    println!(\"{}\", x);\n}\n"), vec![], "r4");
+    let d = check("fn f(_: &mut i32, _: &i32) {}\nfn id(x: &i32) -> &i32 { x }\nfn main() {\n    let mut v = 1;\n    let x = &mut v;\n    f(x, id(&*x));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot borrow `*x` as mutable because it is also borrowed as immutable"), "{d:?}");
+}
+
+#[test]
 fn part27_assoc_type_into_dyn() {
     // (a generic fn whose signature names a lifetime or `'static`, calling a bound's method that returns its `Self`'s
     // associated type: checked with placeholders, so `Box::new(v.into_item())` as a `Box<dyn X + 'static>` is E0310;

@@ -2984,7 +2984,14 @@ impl Cx<'_> {
             // (the call's `&mut self` is taken after its arguments: what one that holds references borrows is held
             // until then)
             let hold = self.bk_on() && self.bk.hold_args;
-            if top_ref || hold {
+            // (a call's result passed for a reference: the loans it holds live until the call too, as a `&x`
+            // argument's: `f(x, id(&*x))` conflicts when the first argument's reborrow is taken)
+            let ref_result = self.bk_on()
+                && !top_ref
+                && !hold
+                && matches!(strip_paren(a), Expr::Call(..) | Expr::MethodCall(..))
+                && matches!((pt, self.prog.partial_subst(pt, &sol)), (Ty::Ref(..), _) | (_, Ty::Ref(..)));
+            if top_ref || hold || ref_result {
                 self.bk_frame();
             }
             let r = self.expr(a, exp);
@@ -2993,6 +3000,10 @@ impl Cx<'_> {
                 if r.as_ref().is_ok_and(|x| self.bk_ty(x.1).1) {
                     self.bk_call_temp_all(&srcs);
                 }
+            }
+            if ref_result {
+                let srcs = self.bk_frame_end();
+                self.bk_call_temp(&srcs, true);
             }
             // (also where a type parameter the call already knows is a `&mut` (`v.push(c.raw)` with v: `Vec<&mut T>`),
             // as rustc's coercion to the expected type)
