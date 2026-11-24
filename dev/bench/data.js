@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795532093788,
+  "lastUpdate": 1795532097092,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -119593,6 +119593,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/9658c3f1ba2e106e83c8277b56c07d1a2e4a2ac6"
         },
         "date": 1795530852846,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.36,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1859,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.11,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1525,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.72,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4706,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "af6ecd7debffc2531c85d3e3c3e4a6096f48342e",
+          "message": "zustscript: the first-use eval of publishing functions, union imports in the README (#131)\n\n* zustscript: the first-use eval of publishing functions, union imports in the README\n\n- evals/publish-functions/: an agent new to zustscript writes a module and\n  its generated JS is called from an app (a shipping label: TS types and\n  what is exported; a waveform's sum of squares: wasm or JS). Tasks,\n  criteria, the verifier, recorded rounds and how to replay them, the\n  report and a follow-up on union field order\n- README: which TS types are imported (records, string-literal unions,\n  unions discriminated by a common tag), with an example; a variant's\n  positional pattern follows the TS declaration order\n- TODO: the next work after #119, by priority; the items #125 added stay\n  in their section (not listed twice)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* publish-functions eval: a deadline for each submission, has_signal's whole body\n\nFrom CodeRabbit's review of #131:\n- replay.py and collect.py give each verification 120 s. A submission\n  that never returns (a loop that does not advance) is a failed check:\n  replay goes on to the next one, collect writes its record. The\n  verifier's temporary files go in a directory the caller removes, as a\n  timeout kills it before its own cleanup\n- verify.mjs looks for the `energy(..)` call in all of has_signal's body\n  (braces balanced): `if xs.len() == 0 { false } else { energy(xs) > 0.0 }`\n  was rejected\n\nChecked: the recorded rounds 01 and 02 still pass (8 / 8); a looping\nsubmission fails in 120 s in replay and collect, leaving no temporary\ndirectory; the if/else has_signal passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* publish-functions eval: a timeout stops the compilers too; strings in has_signal\n\nFrom CodeRabbit's second review of #131:\n- the verifier runs in a process group of its own; on a timeout the group\n  is killed, the zsc / zustc it started included, before its temporary\n  directory goes (run_verifier in replay.py and collect.py).\n  VERIFY_TIMEOUT changes the 120 s\n- has_signal's body is found with braces balanced outside strings and\n  `//` comments (`let marker = \"{\";` made it unbalanced)\n\nChecked: a compiler that sleeps is gone after a 5 s timeout; the\nstring-brace and if/else has_signal pass; a looping submission fails in\ncollect; the recorded rounds 01 and 02 pass (8 / 8).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>",
+          "timestamp": "2026-11-24T23:49:10+09:00",
+          "tree_id": "4d0b952a7e7cb769ee3b8fb98ab8dd4479760bac",
+          "url": "https://github.com/mizchi/zust/commit/af6ecd7debffc2531c85d3e3c3e4a6096f48342e"
+        },
+        "date": 1795532096444,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
