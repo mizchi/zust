@@ -978,6 +978,71 @@ pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String
     hoist_parts_at(src, 0)
 }
 
+/// Where a moved item's text begins: its first doc comment (`/// ..` / `/** .. */`) between the token before it (lo)
+/// and its first token (from), or that token. Between two tokens there are only whitespace and comments
+#[inline(never)]
+fn doc_start(s: &[u8], lo: usize, from: usize) -> usize {
+    let mut i = lo;
+    let mut first_doc = None;
+    while i < from {
+        if s[i..].starts_with(b"//") {
+            if s[i..].starts_with(b"///") && !s[i..].starts_with(b"////") {
+                first_doc.get_or_insert(i);
+            }
+            while i < from && s[i] != b'\n' {
+                i += 1;
+            }
+        } else if s[i..].starts_with(b"/*") {
+            if s[i..].starts_with(b"/**") && !s[i..].starts_with(b"/**/") {
+                first_doc.get_or_insert(i);
+            }
+            let mut d = 0i32;
+            while i + 1 < from {
+                if s[i] == b'/' && s[i + 1] == b'*' {
+                    d += 1;
+                    i += 2;
+                } else if s[i] == b'*' && s[i + 1] == b'/' {
+                    d -= 1;
+                    i += 2;
+                    if d == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    first_doc.unwrap_or(from)
+}
+
+/// The body of an anonymous const that opens at token k (`const _: () = {`), when it is on one line (a macro wrote
+/// it): the names of the types it defines at its top level, which stay in it
+#[inline(never)]
+fn anon_body_types<'a>(s: &'a [u8], toks: &[(u8, usize, usize)], k: usize) -> Option<Vec<&'a [u8]>> {
+    let tok = |k: usize| -> &'a [u8] { &s[toks[k].1..toks[k].2] };
+    let is_sym = |k: usize, c: u8| toks[k].0 == 1 && s[toks[k].1] == c;
+    let mut names: Vec<&[u8]> = vec![];
+    let mut d = 0i32;
+    let mut j = k + 1;
+    while j < toks.len() {
+        if is_sym(j, b'{') || is_sym(j, b'(') || is_sym(j, b'[') {
+            d += 1;
+        } else if is_sym(j, b'}') || is_sym(j, b')') || is_sym(j, b']') {
+            if d == 0 {
+                break;
+            }
+            d -= 1;
+        } else if d == 0 && toks[j].0 == 0 && matches!(tok(j), b"struct" | b"enum" | b"union" | b"type") && j + 1 < toks.len() && toks[j + 1].0 == 0 {
+            names.push(tok(j + 1));
+        }
+        j += 1;
+    }
+    (j < toks.len() && !s[toks[k].1..toks[j].1].contains(&b'\n')).then_some(names)
+}
+
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
@@ -1228,45 +1293,7 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 }
                 // (and its doc comments before those, `/// ..` / `/** .. */`: left behind they would document nothing,
                 // E0585. Between two tokens there are only whitespace and comments)
-                let mut from = toks[st].1;
-                {
-                    let mut i = if st > 0 { toks[st - 1].2 } else { 0 };
-                    let mut first_doc = None;
-                    while i < from {
-                        if s[i..].starts_with(b"//") {
-                            if s[i..].starts_with(b"///") && !s[i..].starts_with(b"////") {
-                                first_doc.get_or_insert(i);
-                            }
-                            while i < from && s[i] != b'\n' {
-                                i += 1;
-                            }
-                        } else if s[i..].starts_with(b"/*") {
-                            if s[i..].starts_with(b"/**") && !s[i..].starts_with(b"/**/") {
-                                first_doc.get_or_insert(i);
-                            }
-                            let mut d = 0i32;
-                            while i + 1 < from {
-                                if s[i] == b'/' && s[i + 1] == b'*' {
-                                    d += 1;
-                                    i += 2;
-                                } else if s[i] == b'*' && s[i + 1] == b'/' {
-                                    d -= 1;
-                                    i += 2;
-                                    if d == 0 {
-                                        break;
-                                    }
-                                } else {
-                                    i += 1;
-                                }
-                            }
-                        } else {
-                            i += 1;
-                        }
-                    }
-                    if let Some(d) = first_doc {
-                        from = d;
-                    }
-                }
+                let from = doc_start(s, if st > 0 { toks[st - 1].2 } else { 0 }, toks[st].1);
                 moves.push((from, toks[e].2));
                 let nk = if matches!(t, b"static") && tok(ik + 1) == b"mut" { ik + 2 } else { ik + 1 };
                 if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" && !extern_block {
@@ -1296,26 +1323,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                         fn_bodies.push((depth, k));
                         pending_fn = false;
                     } else if pending_anon {
-                        // (its own types: at its top level)
-                        let mut names: Vec<&[u8]> = vec![];
-                        let mut d = 0i32;
-                        let mut j = k + 1;
-                        while j < toks.len() {
-                            if is_sym(j, b"{") || is_sym(j, b"(") || is_sym(j, b"[") {
-                                d += 1;
-                            } else if is_sym(j, b"}") || is_sym(j, b")") || is_sym(j, b"]") {
-                                if d == 0 {
-                                    break;
-                                }
-                                d -= 1;
-                            } else if d == 0 && toks[j].0 == 0 && matches!(tok(j), b"struct" | b"enum" | b"union" | b"type") && j + 1 < toks.len() && toks[j + 1].0 == 0 {
-                                names.push(tok(j + 1));
-                            }
-                            j += 1;
-                        }
                         // (only one a macro wrote, on one line (a proc macro's output, a `macro_rules!` expansion):
                         // one written by hand is checked where it is, its items' errors at their lines)
-                        if j < toks.len() && !s[toks[k].1..toks[j].1].contains(&b'\n') {
+                        if let Some(names) = anon_body_types(s, &toks, k) {
                             fn_bodies.push((depth, k));
                             anon_bodies.push(k);
                             anon_types.push(names);

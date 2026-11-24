@@ -2985,7 +2985,7 @@ impl Program {
                                 && self.match_ty(a[0], arg, &mut sol)
                                 && bounds.and_then(|b| b.get(k)).is_none_or(|bs| {
                                     bs.iter().zip(&sol).all(|(bs, a)| match a {
-                                        Some(a) if !self.has_param(*a) => bs.iter().all(|b| self.implements(*a, b)),
+                                        Some(a) if !self.has_param(*a) => bs.iter().all(|b| relaxed_bound(b) || self.implements(*a, b)),
                                         _ => true,
                                     })
                                 })
@@ -4582,7 +4582,7 @@ impl Program {
             ptr == tr
                 && self.match_ty_exact(*pt, t, &mut sol)
                 && bs.iter().zip(&sol).all(|(bs, a)| match a {
-                    Some(a) if !self.has_param(*a) => bs.iter().all(|b| self.implements(*a, b)),
+                    Some(a) if !self.has_param(*a) => bs.iter().all(|b| relaxed_bound(b) || self.implements(*a, b)),
                     _ => true,
                 })
         })
@@ -6579,4 +6579,9 @@ fn dyn_first(d: &str) -> String {
         Some(i) => first[i + 2..].to_string(),
         None => first,
     }
+}
+
+/// A bound that asks nothing of the type: `?Sized`, a lifetime (`'a`)
+fn relaxed_bound(b: &str) -> bool {
+    b.starts_with('?') || b.starts_with('\'')
 }

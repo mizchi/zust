@@ -1243,7 +1243,7 @@ impl Cx<'_> {
         };
         // (the receiver is written again in the call these fall back to: only one evaluated again without effects,
         // `refs[i]`, not `refs[next()]`)
-        let ref_call = ref_impl(p0_ty).filter(|_| is_place_expr(recv) && pure_place(recv));
+        let ref_call = ref_impl(p0_ty).filter(|_| is_place_expr(recv) && self.pure_place(recv));
         let (a, o, sid, id) = loop {
             let (a, o, sid) = loop {
                 p = match p {
@@ -1279,7 +1279,7 @@ impl Cx<'_> {
                         }
                         // (a blanket impl's `self`-by-value method for the reference as it is, `(*self).into_maybe_abi()`
                         // of a `&Box<str>` with `impl<T: OptionIntoWasmAbi> MaybeIntoWasmAbi for T`)
-                        if let Some(&bid) = self.prog.blanket.get(method).filter(|_| matches!(p0_ty, Ty::Ref(..)) && is_place_expr(recv) && pure_place(recv)) {
+                        if let Some(&bid) = self.prog.blanket.get(method).filter(|_| matches!(p0_ty, Ty::Ref(..)) && is_place_expr(recv) && self.pure_place(recv)) {
                             let bsig = &self.prog.sigs[bid as usize];
                             let by_value = !matches!(bsig.params.first(), Some(Ty::Ref(..)));
                             let bounds = bsig.trait_of.as_deref().or(bsig.impl_trait.as_deref()).and_then(|tr| self.prog.blanket_bounds.get(tr));
@@ -4189,14 +4189,24 @@ impl Cx<'_> {
     }
 }
 
-/// A place expression evaluated again without effects: a variable, its fields and derefs, an index by a literal or a
-/// variable (`refs[i].x`, not `refs[next()]`)
-fn pure_place(e: &Expr) -> bool {
-    match e {
-        Expr::Path(None, _) => true,
-        Expr::Field(b, _, _) | Expr::Paren(b) => pure_place(b),
-        Expr::Unary(op, b, _) => op == "*" && pure_place(b),
-        Expr::Index(b, i, _) => pure_place(b) && (matches!(&**i, Expr::Lit(..)) || pure_place(i)),
-        _ => false,
+impl Cx<'_> {
+    /// A place expression evaluated again without effects: a variable, its fields, derefs of references, boxes and
+    /// pointers, an index of an array, a slice or a Vec by a literal or a variable (`refs[i].x`; not `refs[next()]`,
+    /// nor a type's own `Index` or `Deref`, whose code would run again)
+    pub(crate) fn pure_place(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Path(None, _) => true,
+            Expr::Field(b, _, _) | Expr::Paren(b) => self.pure_place(b),
+            Expr::Unary(op, b, _) => op == "*" && matches!(self.peek(b), Some(Ty::Ref(..) | Ty::Box(_) | Ty::Ptr(..))) && self.pure_place(b),
+            Expr::Index(b, i, _) => {
+                let builtin = match self.peek(b).map(|t| self.strip_refs(t)) {
+                    Some(Ty::Array(..) | Ty::Slice(_)) => true,
+                    Some(Ty::Struct(sid)) => self.prog.structs[self.prog.base_of(sid) as usize].name == "Vec",
+                    _ => false,
+                };
+                builtin && self.pure_place(b) && (matches!(&**i, Expr::Lit(..)) || self.pure_place(i))
+            }
+            _ => false,
+        }
     }
 }
