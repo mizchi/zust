@@ -1,0 +1,94 @@
+<!doctype html>
+<!-- Generated from Markdown in crates/zustscript/docs/ -->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rust プログラマーのための zustscript</title>
+<meta name="description" content="Rust で xs.iter().copied().max() と書くと、空のスライスも扱える Option&lt;i32&gt; が返ります。zustscript でも「値があるか」を enum で表し、match で両方の場合を扱えます。この関数を TypeScript に公開するとき、配列の借用と enum の戻り値はどう見えるでしょうか。">
+<link rel="stylesheet" href="../style.css">
+<style>
+  .content.wrap { width: 100%; }
+  @media (max-width: 999px) { .shell .side { display: none; } }
+  article { max-width: 48rem; margin: auto; padding-block: clamp(32px, 7vw, 76px); font-size: 16px; line-height: 1.9; }
+  article h1 { line-height: 1.35; font-size: clamp(28px, 4.5vw, 42px); margin: 0 0 24px; }
+  article h2 { margin-top: 2.4em; margin-bottom: .6em; font-size: 23px; }
+  article p { margin: .9em 0; }
+  article p:has(> em:only-child):has(+ pre) { color: var(--muted); font-size: 14px; margin-bottom: 0; }
+  article p:has(> em:only-child) + pre { margin-top: .25em; }
+  pre { overflow-x: auto; padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); line-height: 1.6; }
+  pre code { background: none; padding: 0; font-size: 14px; }
+  pre .keyword, pre .constant, pre .variable.builtin { color: light-dark(#773590, #dda7ed); }
+  pre .attribute, pre .property { color: light-dark(#83490c, #eac48a); }
+  pre .type, pre .constructor { color: light-dark(#08616b, #7bdae4); }
+  pre .function { color: light-dark(#244da0, #95b8ff); }
+  pre .string { color: light-dark(#32642c, #a4d69c); }
+  pre .number { color: light-dark(#924017, #ffad87); }
+  pre .comment { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+<header class="bar"><div class="wrap bar-in">
+  <a class="brand" href="../"><span>z</span>ust</a>
+  <nav aria-label="サイト内"><a href="../">About</a><a href="./" aria-current="location">zustscript</a><a href="https://github.com/mizchi/zust">GitHub</a></nav>
+</div></header>
+<div class="shell">
+  <aside class="side">
+    <a class="brand" href="../"><span>z</span>ust</a>
+    <nav class="pages" aria-label="zustscript の記事">
+      <p class="label">zustscript の記事</p>
+      <a href="index.html">zustscript 入門</a>
+      <a href="for-rust-programmers.html" aria-current="page">For Rust programmers</a>
+      <a href="for-typescript-programmers.html">For TypeScript programmers</a>
+      <a href="rust-costs.html">Rust から見る変換コスト</a>
+    </nav>
+    <nav aria-label="サイト内">
+      <a href="../">About</a>
+      <a class="ext" href="https://github.com/mizchi/zust">GitHub</a>
+    </nav>
+  </aside>
+  <main class="content wrap">
+    <article>
+<h1>Rust プログラマーのための zustscript</h1>
+<p>Rust で <code>xs.iter().copied().max()</code> と書くと、空のスライスも扱える <code>Option&lt;i32&gt;</code> が返ります。zustscript でも「値があるか」を <code>enum</code> で表し、<code>match</code> で両方の場合を扱えます。この関数を TypeScript に公開するとき、配列の借用と enum の戻り値はどう見えるでしょうか。</p>
+<h2>最大値を返す関数を書く</h2>
+<p>リポジトリのルートに次の内容で <code>peak.zsc</code> を作ります。<code>Peak</code> は、この例で使う二つの状態を定義した型です。最初に読んだ値を候補にすれば、負数だけの入力でも正しい最大値を選べます。</p>
+<pre><code class="language-zustscript"><span class='keyword'>enum</span> <span class='type'><span class='type'>Peak</span></span> <span class='punctuation bracket'>{</span> <span class='constructor'><span class='constructor'>Empty</span></span><span class='punctuation delimiter'>,</span> <span class='constructor'><span class='constructor'>Value</span></span><span class='punctuation bracket'>(</span><span class='type builtin'>i32</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>}</span>
+
+<span class='attribute'>@</span><span class='attribute'>wasm</span> <span class='keyword'>export</span> <span class='keyword'>fn</span> <span class='function'>peak</span><span class='punctuation bracket'>(</span><span class='variable'>xs</span><span class='punctuation delimiter'>:</span> <span class='type'><span class='type'>Array</span></span>&lt;<span class='type builtin'>i32</span>&gt;<span class='punctuation bracket'>)</span> <span class='operator'>-&gt;</span> <span class='type'><span class='type'>Peak</span></span> <span class='punctuation bracket'>{</span>
+  <span class='keyword'>let</span> <span class='keyword'><span class='keyword'>mut</span></span> <span class='variable'>best</span> <span class='operator'>=</span> <span class='constructor'>Empty</span><span class='punctuation delimiter'>;</span>
+  <span class='keyword'>for</span> <span class='variable'>x</span> <span class='keyword'>in</span> <span class='variable'>xs</span> <span class='punctuation bracket'>{</span>
+    <span class='variable'>best</span> <span class='operator'>=</span> <span class='keyword'>match</span> <span class='variable'>best</span> <span class='punctuation bracket'>{</span>
+      <span class='constructor'><span class='constructor'>Empty</span></span> <span class='operator'>=&gt;</span> <span class='constructor'>Value</span><span class='punctuation bracket'>(</span><span class='variable'>x</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>,</span>
+      <span class='constructor'><span class='constructor'>Value</span></span><span class='punctuation bracket'>(</span><span class='variable'>n</span><span class='punctuation bracket'>)</span> <span class='operator'>=&gt;</span> <span class='keyword'>if</span> <span class='variable'>x</span> <span class='operator'>&gt;</span> <span class='variable'>n</span> <span class='punctuation bracket'>{</span> <span class='constructor'>Value</span><span class='punctuation bracket'>(</span><span class='variable'>x</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>}</span> <span class='keyword'>else</span> <span class='punctuation bracket'>{</span> <span class='constructor'>Value</span><span class='punctuation bracket'>(</span><span class='variable'>n</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>}</span><span class='punctuation delimiter'>,</span>
+    <span class='punctuation bracket'>}</span><span class='punctuation delimiter'>;</span>
+  <span class='punctuation bracket'>}</span>
+  <span class='variable'>best</span>
+<span class='punctuation bracket'>}</span>
+</code></pre>
+<p><code>let mut</code>、網羅性を検査する <code>match</code>、ブロックの最後の式を返す規則は Rust と共通です。バリアントは <code>Value(n)</code> と書けます。モジュールの外に関数を公開するキーワードは <code>export</code> です。</p>
+<h2>生成された Rust で借用を見る</h2>
+<p><code>@wasm</code> を付けた関数は、Rust で実装された <code>zsc</code> が型を検査して Rust ソースを生成し、<code>zustc</code> がその Rust を検査して Wasm にコンパイルします。リポジトリのルートで次を実行してください。</p>
+<pre><code class="language-bash"><span class='function'>cargo</span> build <span class='constant'>--release</span> <span class='constant'>--bin</span> zustc
+<span class='function'>cargo</span> run <span class='constant'>--manifest-path</span> crates/zustscript/Cargo.toml <span class='constant'>--</span> \
+  peak.zsc <span class='constant'>--zustc</span> ./target/release/zustc <span class='constant'>-o</span> out/peak
+</code></pre>
+<p><code>out/peak/peak.wasm.rs</code> を開くと、関数の引数は <code>fn zs_peak(xs: &amp;[i32]) -&gt; ZsPeak</code> です。元の宣言は <code>Array&lt;i32&gt;</code> ですが、本体は要素を読むだけなので、コンパイラはスライスを借用し、<code>xs.iter().copied()</code> で整数を一つずつ読みます。この借用が効くのは Wasm の中です。JS から渡す配列は、呼び出し時に Wasm のメモリへコピーされます。</p>
+<h2>TypeScript から enum を読む</h2>
+<p><code>out/peak/peak.d.ts</code> には、値のある側だけが <code>_0</code> フィールドを持つ判別 union が生成されます。TS 側は <code>TAG</code> を見ると型を絞り込めます。<code>i32</code> はモジュールが公開する数値変換関数で、引数の整数型を TypeScript にも伝えます。</p>
+<p><em>リポジトリのルートに置く try-peak.ts</em></p>
+<pre><code class="language-typescript"><span class='keyword'>import</span> <span class='punctuation bracket'>{</span> <span class='variable'>i32</span><span class='punctuation delimiter'>,</span> <span class='variable'>peak</span> <span class='punctuation bracket'>}</span> <span class='keyword'>from</span> <span class='string'>&quot;./out/peak/peak.js&quot;</span><span class='punctuation delimiter'>;</span>
+
+<span class='keyword'>const</span> <span class='variable'>best</span> <span class='operator'>=</span> <span class='function'>peak</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>[</span><span class='function'>i32</span><span class='punctuation bracket'>(</span><span class='operator'>-</span><span class='number'>7</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>,</span> <span class='function'>i32</span><span class='punctuation bracket'>(</span><span class='operator'>-</span><span class='number'>2</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>,</span> <span class='function'>i32</span><span class='punctuation bracket'>(</span><span class='operator'>-</span><span class='number'>5</span><span class='punctuation bracket'>)</span><span class='punctuation bracket'>]</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
+<span class='keyword'>if</span> <span class='punctuation bracket'>(</span><span class='variable'>best</span><span class='punctuation delimiter'>.</span><span class='property'>TAG</span> <span class='operator'>===</span> <span class='string'>&quot;Value&quot;</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>{</span>
+  <span class='variable builtin'>console</span><span class='punctuation delimiter'>.</span><span class='function'>log</span><span class='punctuation bracket'>(</span><span class='variable'>best</span><span class='punctuation delimiter'>.</span><span class='property'>_0</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
+<span class='punctuation bracket'>}</span>
+<span class='variable builtin'>console</span><span class='punctuation delimiter'>.</span><span class='function'>log</span><span class='punctuation bracket'>(</span><span class='function'>peak</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>[</span><span class='punctuation bracket'>]</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>.</span><span class='property'>TAG</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
+</code></pre>
+<p>Node.js 24 で <code>node try-peak.ts</code> を実行すると、順に <code>-2</code> と <code>Empty</code> が表示されます。</p>
+<p>同じ関数を JS で試すには、<code>zsc</code> に <code>--all-js</code> を渡します。所有権やバッファ確保を自分で指定したい関数は、<code>export wasm fn</code> で、zustc が扱える Rust のサブセットを本体に書けます。生成コードと手書きのループを比べる例は次の記事にあります。<a href="rust-costs.html">Rust から見る変換コスト</a> · <a href="index.html">zustscript 入門</a></p>
+    </article>
+  </main>
+</div>
+</body>
+</html>

@@ -38,6 +38,8 @@
     <nav class="pages" aria-label="zustscript の記事">
       <p class="label">zustscript の記事</p>
       <a href="index.html" aria-current="page">zustscript 入門</a>
+      <a href="for-rust-programmers.html">For Rust programmers</a>
+      <a href="for-typescript-programmers.html">For TypeScript programmers</a>
       <a href="rust-costs.html">Rust から見る変換コスト</a>
     </nav>
     <nav aria-label="サイト内">
@@ -51,6 +53,11 @@
 <p>zustscript は、Rust の <code>enum</code> や <code>match</code> と、TypeScript でおなじみのアロー関数や JSX を組み合わせた、フロントエンド向けの静的型付き言語です。TypeScript のアプリに一つのモジュールから組み込めます。</p>
 <p>TypeScript で「状態を判別 union で表す」「元の配列を変更せず、<code>map</code> や <code>filter</code> で新しい値を作る」といった関数型の書き方をしていれば、その設計を zustscript にも持ち込めます。JS 上ではレコードはオブジェクト、配列は配列のままです。対応する TypeScript の型を <code>import type</code> で読み込めば、既存の値を呼び出し用に詰め直す手間もありません。</p>
 <p>コンパイラの <code>zsc</code> は、Rust で実装した zustscript 専用の型検査器でソースを検査します。通常の関数からは、TypeScript アプリがそのまま import できる JavaScript と型定義（<code>.d.ts</code>）を生成します。<code>@wasm</code> を付けた関数からは Rust ソースを生成し、Rust のサブセットを扱うコンパイラ <code>zustc</code> がその Rust コードを型検査して WebAssembly（Wasm）にコンパイルします。この言語とコンパイラは現在開発中です。</p>
+<p>使い慣れた言語から読み始める方はこちらです。</p>
+<ul>
+<li><a href="for-rust-programmers.html">Rust プログラマー向け ── 借用と enum が JS からどう見えるか</a></li>
+<li><a href="for-typescript-programmers.html">TypeScript プログラマー向け ── アプリの判別 union をそのまま使う</a></li>
+</ul>
 <h2>状態を enum で表し、match で読み出す</h2>
 <p>zustscript の <code>enum</code> では、状態ごとに異なるデータを持たせられます。たとえば地図で地点を選ぶ画面なら、選択中のときだけ地点名が必要です。</p>
 <p><em>選択状態から表示用の文字列を返す関数</em></p>
