@@ -722,10 +722,12 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                 let inner_lets: &[String] = if is_mod_body(body, k) { &[] } else { lets };
                 // (a struct literal's shorthand fields of the body's own names, `MutSlice { contents, js }`: the field
                 // keeps its name, the value is the renamed local, `contents: contents__mh`. A type's name before the
-                // braces, and a `,` among them: a block does not have that shape)
+                // braces, and a `,` among them: a block does not have that shape. Nor an item's body, `enum E { value,
+                // other }`: its names are variants)
                 let shorthand = *d == Delimiter::Brace
                     && k > 0
                     && matches!(&body[k - 1], Pt::Tok(TokenTree::Ident(n)) if n.to_string().starts_with(|c: char| c.is_ascii_uppercase()))
+                    && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Ident(kw)) if matches!(kw.to_string().as_str(), "enum" | "struct" | "union" | "trait" | "impl" | "mod")))
                     && inner.iter().any(|p| matches!(p, Pt::Tok(TokenTree::Punct(q)) if q.as_char() == ','));
                 if shorthand && !inner_lets.is_empty() {
                     let mut fixed: Vec<Pt> = Vec::with_capacity(inner.len());

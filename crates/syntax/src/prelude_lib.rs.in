@@ -14698,11 +14698,12 @@ fn __exr_char_from_u8<G>(b: u8) -> char {
 }
 
 // (`Vec::from_raw_parts(ptr, len, cap)`: a buffer of `cap` elements the allocator gave, its first `len` initialized,
-// that the Vec owns. A dangling pointer, `NonNull::dangling()` (an address below the first page, which no allocation
-// has), is no buffer: the Vec's empty one, a null pointer that drop does not free. A buffer this prelude's Vec
-// allocated stays the Vec's, also of zero-sized elements (reserve gives them one byte))
+// that the Vec owns. A dangling pointer, `NonNull::dangling()` (the type's alignment as an address, also one of 4096 or
+// more; or another address below the first page, which no allocation has), is no buffer: the Vec's empty one, a null
+// pointer that drop does not free. A buffer this prelude's Vec allocated stays the Vec's, also of zero-sized elements
+// (reserve gives them one byte))
 unsafe fn __exr_vec_from_raw_parts<T>(ptr: *mut T, len: usize, cap: usize) -> Vec<T> {
-    if (ptr as usize) < 4096 {
+    if (ptr as usize) < 4096 || (ptr as usize) == core::mem::align_of::<T>() {
         let c = if core::mem::size_of::<T>() == 0 { len } else { 0 };
         return Vec { ptr: core::ptr::null_mut(), cap: c, len: len };
     }

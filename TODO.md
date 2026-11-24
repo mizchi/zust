@@ -179,9 +179,9 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   - a method call on a `Box<[T]>` with the program's `impl Tr for Box<[T]>` derefs to `[T]` and misses it; a
     `Box<str>` cannot be made (`into_boxed_str`, `"x".into()`).
   - the items a macro's `const _: () = { .. };` moves out are visible outside it (rustc scopes its fns to the
-    block); the hand-written one in wasm-bindgen's lib.rs (`__wbindgen_skip_interpret_calls`) is not compiled. A fn
-    or impl it moves out does not find a const, static or type that stays in it (`const N` or `struct Local<T>`
-    beside an `impl Tr for u8` that names it).
+    block); the hand-written one in wasm-bindgen's lib.rs (`__wbindgen_skip_interpret_calls`) is not compiled. One
+    whose fn, `use`, trait or impl that would go out names a const, static or type that stays in it (`const N` or
+    `struct Local<T>` beside an `impl Tr for u8` that names it) is skipped whole, as before this branch.
   - a trait object's auto traits are not in zustc's types (`dyn Obj + Send` is `dyn Obj`, ast_types::tysyn): an impl
     for `dyn Obj + Send` is one for `dyn Obj` too, where rustc reports E0277.
   - a blanket impl's `self`-by-value method on a `&Box<u8>` (`impl<T: Marker> Tr for T` with `impl Marker for

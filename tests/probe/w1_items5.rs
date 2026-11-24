@@ -93,6 +93,19 @@ trait RTr { fn m(&self) -> u8 { 1 } fn n() -> u8 { 10 } }
 impl<T> RTr for &Rw<T> { fn m(&self) -> u8 { 2 } }
 impl RTr for &Rv { fn n() -> u8 { 30 } }
 
+// (a macro's enum whose variant has the name of a `let` of the macro: the variant keeps it)
+macro_rules! enum_and_let {
+    () => { #[allow(non_camel_case_types, dead_code)] enum Ev { value, other } fn ev_f() -> u8 { let value = 3u8; value } };
+}
+enum_and_let!();
+
+// (a hand-written one-line anonymous const whose fn names a type of its own: read as before, not moved out)
+const _: () = { type Local = u32; fn helper(_: Local) {} };
+
+// (`Vec::from_raw_parts` of a dangling pointer of a type aligned to 4096: the empty buffer, not freed)
+#[repr(align(4096))]
+struct Big(u8);
+
 // (an impl for a reference to a Box, called on an element of a Vec of them: the index is evaluated once)
 trait BoxAbi { fn abi(self) -> u8; }
 impl BoxAbi for &Box<u8> { fn abi(self) -> u8 { **self + 10 } }
@@ -153,6 +166,12 @@ fn main() {
 
     let bx = Box::new(Bx);
     println!("{}", <&Box<Bx> as BxFlag>::flag(&&bx));
+
+    println!("{}", ev_f());
+    let bp: *mut Big = NonNull::dangling().as_ptr();
+    let bv = unsafe { Vec::<Big>::from_raw_parts(bp, 0, 0) };
+    println!("{} {}", bv.len(), std::mem::align_of::<Big>());
+    drop(bv);
 
     unsafe fn nested() -> u8 { 3 }
     fn inner() -> u8 { 4 }

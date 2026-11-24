@@ -1039,11 +1039,16 @@ fn anon_const_head(s: &[u8], toks: &[(u8, usize, usize)], k: usize) -> bool {
 
 /// The body of an anonymous const that opens at token k (`const _: () = {`), when it is on one line (a macro wrote
 /// it): the names of the types it defines at its top level, which stay in it
+/// (None, the body read as before (skipped), also when an item that would go out names a type, const or static that
+/// stays: `const _: () = { type Local = u32; fn helper(_: Local) {} };` would lose `Local`)
 #[inline(never)]
 fn anon_body_types<'a>(s: &'a [u8], toks: &[(u8, usize, usize)], k: usize) -> Option<Vec<&'a [u8]>> {
     let tok = |k: usize| -> &'a [u8] { &s[toks[k].1..toks[k].2] };
     let is_sym = |k: usize, c: u8| toks[k].0 == 1 && s[toks[k].1] == c;
+    let ident = |k: usize| toks[k].0 == 0;
     let mut names: Vec<&[u8]> = vec![];
+    // (and the consts and statics, which stay too)
+    let mut values: Vec<&[u8]> = vec![];
     let mut d = 0i32;
     let mut j = k + 1;
     while j < toks.len() {
@@ -1054,12 +1059,69 @@ fn anon_body_types<'a>(s: &'a [u8], toks: &[(u8, usize, usize)], k: usize) -> Op
                 break;
             }
             d -= 1;
-        } else if d == 0 && toks[j].0 == 0 && matches!(tok(j), b"struct" | b"enum" | b"union" | b"type") && j + 1 < toks.len() && toks[j + 1].0 == 0 {
+        } else if d == 0 && ident(j) && matches!(tok(j), b"struct" | b"enum" | b"union" | b"type") && j + 1 < toks.len() && ident(j + 1) {
             names.push(tok(j + 1));
+        } else if d == 0 && ident(j) && matches!(tok(j), b"const" | b"static") && j + 2 < toks.len() {
+            let n = if tok(j + 1) == b"mut" { j + 2 } else { j + 1 };
+            if ident(n) && tok(n) != b"_" && is_sym(n + 1, b':') {
+                values.push(tok(n));
+            }
         }
         j += 1;
     }
-    (j < toks.len() && !s[toks[k].1..toks[j].1].contains(&b'\n')).then_some(names)
+    if j >= toks.len() || s[toks[k].1..toks[j].1].contains(&b'\n') {
+        return None;
+    }
+    if names.is_empty() && values.is_empty() {
+        return Some(names);
+    }
+    // (its items at the top level, from their first word to their `;` or closing brace: one that goes out (a fn,
+    // `use`, trait, extern block, or an impl for none of its types) must not name what stays)
+    let mut i = k + 1;
+    while i < j {
+        if is_sym(i, b'#') || is_sym(i, b';') {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut kind: Option<&[u8]> = None;
+        let mut d = 0i32;
+        let mut end = i;
+        while end < j {
+            if is_sym(end, b'{') || is_sym(end, b'(') || is_sym(end, b'[') {
+                d += 1;
+            } else if is_sym(end, b'}') || is_sym(end, b')') || is_sym(end, b']') {
+                d -= 1;
+                if d == 0 && is_sym(end, b'}') && kind.is_some_and(|k| k != b"const" && k != b"static" && k != b"type") {
+                    break;
+                }
+            } else if d == 0 && is_sym(end, b';') {
+                break;
+            } else if d == 0 && kind.is_none() && ident(end) {
+                let w = tok(end);
+                kind = match w {
+                    // (`const fn`, `unsafe extern "C" fn`: the fn)
+                    b"const" | b"unsafe" | b"extern" | b"async" if end + 1 < j && (ident(end + 1) && tok(end + 1) != b"_" && !is_sym(end + 2, b':') || toks[end + 1].0 == 2) && w != b"const" || (w == b"const" && end + 1 < j && matches!(tok(end + 1), b"fn" | b"unsafe" | b"async" | b"extern")) => None,
+                    b"fn" | b"use" | b"trait" | b"impl" | b"mod" | b"struct" | b"enum" | b"union" | b"type" | b"const" | b"static" | b"extern" => Some(w),
+                    _ => None,
+                };
+            }
+            end += 1;
+        }
+        let local_impl = kind == Some(b"impl") && {
+            let mut h = start;
+            while h < end && !is_sym(h, b'{') {
+                h += 1;
+            }
+            (start..h).any(|q| ident(q) && names.contains(&tok(q)))
+        };
+        let goes_out = matches!(kind, Some(b"fn" | b"use" | b"trait" | b"impl" | b"mod" | b"extern")) && !local_impl;
+        if goes_out && (start..end.min(j)).any(|q| ident(q) && (names.contains(&tok(q)) || values.contains(&tok(q)))) {
+            return None;
+        }
+        i = end + 1;
+    }
+    Some(names)
 }
 
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)

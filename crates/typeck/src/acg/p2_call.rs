@@ -1228,7 +1228,7 @@ impl Cx<'_> {
         let p0_ty = p.ty();
         // (the receiver's place as evaluated, before the derefs below: a fallback that calls an impl for the reference
         // takes its value from here, not from the receiver evaluated again (`refs[next()]` once))
-        let p0 = p;
+        let p_recv = p;
         // (or `&Box<str>`'s, `Box::__ref_into_abi` among the impls for references to Boxes: the one whose self type
         // is the receiver's)
         let ref_impl = |t: Ty| -> Option<String> {
@@ -1265,7 +1265,7 @@ impl Cx<'_> {
                     }
                     p => {
                         // (the reference the receiver's place holds, read once: a thin one)
-                        let recv_ref = |this: &mut Self| match p0 {
+                        let recv_ref = |this: &mut Self| match p_recv {
                             Place::Var(v, Ty::Ref(_, i)) if !i.is_fat() => Some(this.b.use_var(v)),
                             Place::Mem(a, o, Ty::Ref(_, i)) if !i.is_fat() => Some(this.b.ins().load(PTR, mf(), a, o)),
                             _ => None,
