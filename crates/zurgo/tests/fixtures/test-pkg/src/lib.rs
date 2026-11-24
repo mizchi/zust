@@ -1,10 +1,17 @@
-pub fn add(a: i32, b: i32) -> i32 { a + b }
+// (a fn written inside another: hoisted out of it, still the lib's own (its .o has it))
+pub fn add(a: i32, b: i32) -> i32 {
+    fn sum(x: i32, y: i32) -> i32 { x + y }
+    sum(a, b)
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test]
-    fn adds() { assert_eq!(add(2, 2), 4); }
+    fn adds() {
+        fn check(x: i32) { assert_eq!(x, 4); }
+        check(add(2, 2));
+    }
     #[test]
     fn with_dev_dep() { assert_eq!(helper::twice(add(1, 2)), 6); }
     #[test]

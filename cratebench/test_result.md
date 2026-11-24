@@ -4,7 +4,7 @@
 
 | クレート | 結果 | cargo: ok / FAILED / ignored | 詳細 |
 |---|---|---:|---|
-| adler2 | zurgo-fails | 6 / 0 / 0 | error: crate `adler2_lib_test`: src/lib.rs:233:36: mismatched types: expected `&[u8]`, found `&[i32]` |
+| adler2 | match | 6 / 0 / 0 | テスト 6 個 |
 | cfg-if | match | 3 / 0 / 0 | テスト 3 個 |
 | either | zurgo-fails | 8 / 0 / 0 | error: ~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.229/src/crate_root.rs: file not found for module `de` |
 | fnv | match | 1 / 0 / 0 | テスト 1 個 |
