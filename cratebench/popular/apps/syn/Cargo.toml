@@ -1,0 +1,11 @@
+[package]
+name = "popular-syn"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# (not a member of zust's workspace)
+[workspace]
+
+[dependencies]
+syn = { version = "=2.0.119", features = ["full"] }

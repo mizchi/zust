@@ -2712,6 +2712,12 @@ impl Cx<'_> {
                     return Some(t);
                 }
             }
+            // (an array's as_mut: `&mut [T]`, its one AsMut)
+            if m == "as_mut" && a.is_empty() {
+                if let Some(Ty::Array(el, _)) = self.peek(r).map(|t| self.strip_refs(t)) {
+                    return Some(Ty::Ref(true, intern(Ty::Slice(el))));
+                }
+            }
         }
         if let Some(&t) = self.lets.get(&(e as *const Expr as usize)) {
             return Some(t);

@@ -303,6 +303,10 @@ impl Cx<'_> {
                 _ => unreachable!(),
             },
             None if newline || dest.is_some() => String::new(),
+            // (`write!(f, concat!(stringify!($Rng), " {{ ... }}"))`: a format string made by concat! / stringify!)
+            Some(Expr::Macro(mp, g, _)) if mp.segs.len() == 1 && matches!(mp.segs[0].name.as_str(), "concat" | "stringify") => {
+                crate::acg::p5_loops_macros::lit_macro_text(&mp.segs[0].name, g).or_else(|e| err(SP, e))?
+            }
             // (`format_args!(a!())` with no macro `a`: that is the error, before the format string's)
             Some(Expr::Macro(mp, _, _)) if mp.segs.len() == 1 && !crate::lexer::is_std_macro(&mp.segs[0].name) => {
                 return err(SP, format!("cannot find macro `{}` in this scope", mp.segs[0].name));
@@ -310,6 +314,21 @@ impl Cx<'_> {
             Some(_) => return err(SP, "format argument must be a string literal"),
             None => return err(span, format!("`{name}!` needs a format string")),
         };
+        // (`{r#type}`: a raw identifier is not an argument's name, rustc says so (tests/ui fmt/raw-idents.rs))
+        {
+            let b = fmt_s.as_bytes();
+            let mut i = 0;
+            while i < b.len() {
+                if b[i] == b'{' && b.get(i + 1) == Some(&b'{') {
+                    i += 2;
+                    continue;
+                }
+                if b[i] == b'{' && b[i + 1..].starts_with(b"r#") {
+                    return err(SP, "invalid format string: raw identifiers are not supported");
+                }
+                i += 1;
+            }
+        }
         let fmt_arg = args.first().copied();
         let rest: Vec<&Expr> = args.into_iter().skip(1).collect();
         // 位置引数と `name = expr`
