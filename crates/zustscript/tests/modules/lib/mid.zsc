@@ -1,0 +1,4 @@
+import { Leaf, mk } from "./leaf.zsc";
+import { Shared } from "../common.zsc";
+export fn wrap(v: i32) -> Leaf { mk(v) }
+export fn shared(n: i32) -> Shared { Shared { n } }

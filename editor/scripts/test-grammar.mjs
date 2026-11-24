@@ -5,7 +5,7 @@ await Parser.init();
 const lang = await Language.load("public/tree-sitter-zustscript.wasm");
 const p = new Parser();
 p.setLanguage(lang);
-const dirs = ["../crates/zustscript/examples", "../crates/zustscript/tests", "src/samples"];
+const dirs = ["../crates/zustscript/examples", "../crates/zustscript/tests", "../crates/zustscript/tests/modules", "src/samples"];
 let bad = 0;
 for (const d of dirs) {
   let files = [];
