@@ -47,13 +47,15 @@ type of one name, the first impl found answered for both.
 - **Where clauses on other types** (`SigSyn::preds`, `Program::fn_preds`): the summary keeps a fn's where clauses
   whose type is not a parameter, with the trait of a qualified path. Each instance proves them
   (`Program::pred_subject`):
-  - `<T as Tr>::A` is normalized by `Tr`, `T::A` by the traits of `T`'s bounds and their supertraits (`trait Sub:
+  - `<T as Tr>::A` is normalized by `Tr` (by its supertraits only when `Tr`'s impls do not give it), `T::A` by the
+    traits of `T`'s bounds and their supertraits (`trait Sub:
     Super` declares `Super::A` for `T: Sub`), which must agree;
   - a projection is taken apart before it is resolved, so `<u8 as Q>::A`, whose base is concrete, is `Q`'s `A` and
     not that of the first trait with an `A`;
   - another type (`W<T>`, `&T`, a concrete `S`) has the arguments put in. One with a projection inside is left out, because `subst`
     would look that projection up by its name alone.
-  - Bounds of the program's traits are checked, as for the nested goals of impls. A Box, an array, a slice or a type
+  - Bounds of the program's traits are checked, as for the nested goals of impls, and the bindings of any bound
+    (`where W<T>: Tr<A = u32>`), as for a parameter's. A Box, an array, a slice or a type
     with a trait object in it is not checked: `implements` does not see the program's impls for them
     (`impl Mark for [u8; 1]` with `where [T; 1]: Mark`), and a no would be a false error.
 - **Item bounds**: an impl with no parameters of a trait of the program's has its associated types checked against

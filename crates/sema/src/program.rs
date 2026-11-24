@@ -819,6 +819,11 @@ impl Insts {
                     continue;
                 }
                 for tr in bounds {
+                    // (its bindings too, `where W<T>: Tr<A = u32>`, as for a parameter's bounds: of the program's fns)
+                    let own = prog.item_of.get(base as usize).copied().flatten().is_some_and(|i| i < prog.prelude_from);
+                    if let Some((proj, want, got)) = own.then(|| prog.binding_mismatch(st, tr, &names, &args)).flatten() {
+                        return Err(format!("type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want), prog.tn(got)));
+                    }
                     let tname = tr.split('<').next().unwrap_or(tr).trim();
                     if !prog.user_traits.contains(tname) {
                         continue;
@@ -4804,6 +4809,12 @@ impl Program {
                 let Ty::Param(i) = a.base else { return None };
                 sig.generics.get(i as usize)?.1.iter().map(|b| b.split('<').next().unwrap_or(b).trim().to_string()).collect()
             };
+            // (a qualified projection is its trait's own associated type when that trait gives one: `<T as Sub>::A`)
+            if !qtr.is_empty() {
+                if let Some(v) = self.normalize(base, qtr, &a.name) {
+                    return Some(v);
+                }
+            }
             // (and their supertraits, which may declare it: `T::A` of `T: Sub` with `trait Sub: Super` and `Super::A`)
             let mut k = 0;
             while k < traits.len() && traits.len() < 64 {

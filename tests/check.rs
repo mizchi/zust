@@ -1154,6 +1154,13 @@ fn projections_are_goals() {
     let pq = "trait P { type A; }\ntrait Q { type A; }\ntrait Bar {}\nimpl P for u8 { type A = u16; }\nimpl Q for u8 { type A = u32; }\nfn f<T>(_: T) where <u8 as Q>::A: Bar {}\nfn main() { f(1i8); }";
     ok(&format!("impl Bar for u32 {{}}\n{pq}"));
     bad(&format!("impl Bar for u16 {{}}\n{pq}"), "`u32: Bar`");
+    // (a binding of a where clause on another type; a qualified projection is its trait's own associated type,
+    // before a supertrait's of the same name)
+    bad("trait Tr { type A; }\nstruct W<T>(T);\nimpl Tr for W<u8> { type A = u16; }\nfn f<T>() where W<T>: Tr<A = u32> {}\nfn main() { f::<u8>(); }", "E0271");
+    ok("trait Tr { type A; }\nstruct W<T>(T);\nimpl Tr for W<u8> { type A = u16; }\nfn f<T>() where W<T>: Tr<A = u16> {}\nfn main() { f::<u8>(); }");
+    let sub = "trait Mark {}\ntrait Super { type A; }\ntrait Sub: Super { type A; }\nimpl Super for u8 { type A = u8; }\nimpl Sub for u8 { type A = u16; }\nfn f<T: Sub>() where <T as Sub>::A: Mark {}\nfn main() { f::<u8>(); }";
+    bad(&format!("impl Mark for u8 {{}}\n{sub}"), "`u16: Mark`");
+    ok(&format!("impl Mark for u16 {{}}\n{sub}"));
     // (a where clause on a concrete type)
     bad("trait Bar {}\nstruct S;\nfn f<T>(_: T) where S: Bar {}\nfn main() { f(1u8); }", "`S: Bar`");
     ok("trait Bar {}\nstruct S;\nimpl Bar for S {}\nfn f<T>(_: T) where S: Bar {}\nfn main() { f(1u8); }");
