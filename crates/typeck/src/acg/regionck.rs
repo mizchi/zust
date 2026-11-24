@@ -448,6 +448,99 @@ fn adt(prog: &Program, sid: u32) -> (&crate::program::StructDef, u32, bool) {
     (sd, sd.base.unwrap_or(sid), tuple)
 }
 
+/// rg_closure_ann_bound: of each parameter the closure annotates with one of the function's lifetimes or 'static,
+/// each region the bound (or the fn pointer type) binds (codes below CLO_E) is a placeholder that lifetime would have
+/// to be; a region the type names (tgts, where known: `fn(&'a u32)`) must outlive the annotation's, as the closure
+/// is to take what the type gives (`|_: &'static u32|` as `fn(&'a u32)` needs 'a: 'static)
+fn closure_ann_bound(prog: &Program, rg: &mut RgSt, c: &Expr, codes: &[Vec<u8>], tgts: &[Vec<Option<u32>>], params: &[Ty]) {
+    let Expr::Closure(_, inputs, _, _, pos) = c else { return };
+    for (i, (_, ann)) in inputs.iter().enumerate() {
+        let (Some(ann), Some(bc), Some(&t)) = (ann, codes.get(i), params.get(i)) else { continue };
+        if !crate::regions::names_lt(ann) {
+            continue;
+        }
+        let outer = rg.lt_names.clone();
+        let mut ac = CloCodes { outer_lts: &outer, tparams: &[], named: vec![], np: 0, ne: 0, elided: None };
+        let mut av = vec![];
+        if !ac.of(prog, ann, t, &mut av, 0) || av.len() != bc.len() {
+            continue;
+        }
+        let tg = tgts.get(i).filter(|g| g.len() == bc.len());
+        for (j, (&b, &a)) in bc.iter().zip(&av).enumerate() {
+            // (the annotation's a function's lifetime or 'static)
+            let lt = match a {
+                R_STATIC => STATIC,
+                a if (CLO_E..CLO_U).contains(&a) => match ac.named.iter().find(|x| x.1 == a).and_then(|x| outer.iter().position(|n| *n == x.0)) {
+                    Some(k) => rg.lts[k],
+                    None => continue,
+                },
+                _ => continue,
+            };
+            if b >= CLO_E {
+                if let Some(Some(r)) = tg.and_then(|g| g.get(j)) {
+                    rg.edge(*r, lt, *pos);
+                }
+                continue;
+            }
+            // (the bound's own region, a placeholder)
+            let u = rg.var();
+            rg.univ.push((u, "'_".to_string()));
+            rg.edge(u, lt, *pos);
+            rg.edge(lt, u, *pos);
+        }
+    }
+}
+
+/// The parts of a tree (of type t) where pat (an impl's self type, its parameters Params) has its lifetimes (their
+/// codes ss, in the order of the tree) and its type parameters: into lts and targs. None where the two do not match
+fn proj_split(prog: &Program, pat: Ty, t: Ty, tree: &[u32], at: &mut usize, ss: &[u8], si: &mut usize, lts: &mut [Option<u32>], targs: &mut [Option<RT>], depth: u32) -> Option<()> {
+    if depth > 24 {
+        return None;
+    }
+    let mut region = |at: &mut usize, si: &mut usize, lts: &mut [Option<u32>]| -> Option<()> {
+        let (&c, &v) = (ss.get(*si)?, tree.get(*at)?);
+        if (c as usize) < lts.len() {
+            lts[c as usize] = Some(v);
+        }
+        *si += 1;
+        *at += 1;
+        Some(())
+    };
+    match (pat, t) {
+        (Ty::Param(k), _) => {
+            let n = count(prog, t, depth + 1)?;
+            let part = tree.get(*at..*at + n)?.to_vec();
+            if let Some(slot) = targs.get_mut(k as usize) {
+                *slot = Some(part);
+            }
+            *at += n;
+        }
+        (Ty::Ref(m1, p), Ty::Ref(m2, i)) if m1 == m2 => {
+            region(at, si, lts)?;
+            proj_split(prog, *p, *i, tree, at, ss, si, lts, targs, depth + 1)?;
+        }
+        (Ty::Ptr(m1, p), Ty::Ptr(m2, i)) if m1 == m2 => proj_split(prog, *p, *i, tree, at, ss, si, lts, targs, depth + 1)?,
+        (Ty::Box(p), Ty::Box(i)) | (Ty::Slice(p), Ty::Slice(i)) => proj_split(prog, *p, *i, tree, at, ss, si, lts, targs, depth + 1)?,
+        (Ty::Array(p, n1), Ty::Array(i, n2)) if n1 == n2 => proj_split(prog, *p, *i, tree, at, ss, si, lts, targs, depth + 1)?,
+        (Ty::Struct(ps), Ty::Struct(ts)) => {
+            let ((pd, pb, _), (td, tb, _)) = (adt(prog, ps), adt(prog, ts));
+            if pb != tb || prog.closure_of_struct.contains_key(&pb) || pd.args.len() != td.args.len() {
+                return None;
+            }
+            for _ in 0..lts_of(prog, pb) {
+                region(at, si, lts)?;
+            }
+            for (&pa, &ta) in pd.args.iter().zip(&td.args) {
+                proj_split(prog, pa, ta, tree, at, ss, si, lts, targs, depth + 1)?;
+            }
+        }
+        (Ty::Dyn(a), Ty::Dyn(b)) if a == b => region(at, si, lts)?,
+        _ if pat == t && count(prog, t, depth + 1) == Some(0) => {}
+        _ => return None,
+    }
+    Some(())
+}
+
 /// A closure's captures: their types (among its type arguments: a capture by reference is a pointer to it) and
 /// whether each is held by value
 fn captures(prog: &Program, sid: u32) -> Option<(&[Ty], &[bool])> {
@@ -2720,27 +2813,42 @@ impl Cx<'_> {
         let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
         let mut written = vec![];
         sl.slots(q, false, &mut written);
-        // (the impl's type arguments' trees: a blanket impl's `T` is the self type as written (`<&'a u8 as Tr>::Ty`
-        // with `impl<T> Tr for T`), the others' fresh)
+        // (the self type as written, its tree; the impl's lifetimes and type arguments are its parts where the impl's
+        // self type has them: `<W<'static, &'static u32> as Foo>::Out` with `impl<'a, T> Foo for W<'a, T>` gives 'a
+        // 'static and T `&'static u32`, and a blanket impl's `T` is all of it (`<&'a u8 as Tr>::Ty` with
+        // `impl<T> Tr for T`). What is not found is fresh)
         let fl = self.rg.lts.clone();
+        let qtree = self.rg.instantiate(prog, qt, Some(&written), &fl, &[], &mut |me| me.var());
+        let n = codes.iter().chain(&self_slots).filter(|&&c| c < R_STATIC).map(|&c| c as usize + 1).max().unwrap_or(0);
+        let mut found_l: Vec<Option<u32>> = vec![None; n];
+        let mut found_t: Vec<Option<RT>> = vec![None; sol.len()];
+        if let Some(qtree) = qtree.filter(|q| count(prog, qt, 0) == Some(q.len())) {
+            // (the marks of a path's elided lifetimes left out where the codes then match the impl's self type's
+            // regions)
+            let want = count(prog, a.self_ty, 0);
+            let ss: Vec<u8> = if want == Some(self_slots.len()) { self_slots.clone() } else { self_slots.iter().copied().filter(|&c| c != R_ELIDED_ADT).collect() };
+            if want == Some(ss.len()) {
+                let (mut at, mut si) = (0, 0);
+                if proj_split(prog, a.self_ty, qt, &qtree, &mut at, &ss, &mut si, &mut found_l, &mut found_t, 0).is_none() {
+                    found_l = vec![None; n];
+                    found_t = vec![None; sol.len()];
+                }
+            }
+        }
         let mut targs: Vec<Option<RT>> = vec![];
         for (k, s0) in sol.iter().enumerate() {
             let Some(st) = *s0 else { return None };
-            let tr = if a.self_ty == Ty::Param(k as u8) {
-                self.rg.instantiate(prog, st, Some(&written), &fl, &[], &mut |me| me.var())
-            } else {
-                self.rg.fresh(prog, st)
+            let tr = match found_t[k].take() {
+                Some(tr) => Some(tr),
+                None => self.rg.fresh(prog, st),
             };
             targs.push(tr);
         }
-        let n = codes.iter().chain(&self_slots).filter(|&&c| c < R_STATIC).map(|&c| c as usize + 1).max().unwrap_or(0);
         let mut lts = vec![];
         for k in 0..n {
-            let at = self_slots.iter().position(|&c| c as usize == k).filter(|_| written.len() == self_slots.len());
-            let v = match at.map(|j| written[j]) {
-                Some(R_STATIC) => STATIC,
-                Some(c) if (c as usize) < self.rg.lts.len() => self.rg.lts[c as usize],
-                _ => self.rg.var(),
+            let v = match found_l[k] {
+                Some(v) => v,
+                None => self.rg.var(),
             };
             lts.push(v);
         }
@@ -3168,7 +3276,10 @@ impl Cx<'_> {
 
     /// `let x: ann;` (`let _: ann;`): the annotation's type is well formed; x's tree is of it
     pub(crate) fn rg_let_uninit(&mut self, name: Option<&str>, ann: &PTy, sp: Sp) {
-        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && crate::regions::mentions_static(ann) {
+        // (or a projection whose associated type's value names lifetimes, as for a `let` with an initializer:
+        // `let x: <() as Foo>::Out; x = r;` with `type Out = &'static u32`)
+        let proj = matches!(ann, PTy::Path(Some(_), _)) && !self.prog.assoc_regions.is_empty();
+        if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && (crate::regions::mentions_static(ann) || proj) {
             self.rg_late_on();
         }
         if !self.rg_on() {
@@ -3184,6 +3295,7 @@ impl Cx<'_> {
         self.rg.dyn_infer = true;
         let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
         self.rg.dyn_infer = false;
+        let tree = if proj { self.rg_proj_ann(ann, t).or(tree) } else { tree };
         let Some(tree) = tree else { return };
         self.rg.wf(prog, t, &tree, sp);
         if let Some((loc, _)) = name.and_then(|n| self.lookup(n)) {
@@ -3345,6 +3457,7 @@ impl Cx<'_> {
         // (a closure passed where a fn pointer type binds the region of a parameter it annotates with one of the
         // function's lifetimes (`want(|_: &'static u32| {})` with `fn want(f: fn(&u32))`): as in a `let`
         // (rg_closure_fnptr). Without a summary, every region of the type is one it binds)
+        let mut clo_fnptr: Vec<(&Expr, Vec<Vec<u8>>, Vec<Vec<u8>>, Vec<Ty>)> = vec![];
         for (i, &pt) in sig0.params.iter().enumerate() {
             let Ty::Fn(ft) = pt else { continue };
             let Some(c) = i.checked_sub(has_recv as usize).and_then(|j| args.get(j)).map(|a| super::strip_paren(a)) else { continue };
@@ -3354,21 +3467,24 @@ impl Cx<'_> {
             }
             let Some(ns) = ft.params.iter().map(|&t| count(prog, t, 0)).collect::<Option<Vec<usize>>>() else { continue };
             // (the marks of paths written with no lifetime stand for no region where their types have none (`&S`))
-            let all: Vec<u8> = match codes(i).map(|c| c.iter().copied().filter(|&x| x != R_ELIDED_ADT).collect::<Vec<u8>>()) {
-                None => vec![CLO_P; ns.iter().sum()],
+            let (all, raw): (Vec<u8>, Vec<u8>) = match codes(i).map(|c| c.iter().copied().filter(|&x| x != R_ELIDED_ADT).collect::<Vec<u8>>()) {
+                None => (vec![CLO_P; ns.iter().sum()], vec![R_BOUND; ns.iter().sum()]),
                 Some(c) if c.first() == Some(&R_FN) && Some(c.len() - 1) == count(prog, ft.ret, 0).map(|r| r + ns.iter().sum::<usize>()) => {
-                    c[1..].iter().map(|&x| if x == R_BOUND { CLO_P } else { CLO_E }).collect()
+                    (c[1..].iter().map(|&x| if x == R_BOUND { CLO_P } else { CLO_E }).collect(), c[1..].to_vec())
                 }
                 Some(_) => continue,
             };
             let mut per = vec![];
+            let mut per_raw = vec![];
             let mut at = 0;
             for &n in &ns {
                 per.push(all[at..at + n].to_vec());
+                per_raw.push(raw[at..at + n].to_vec());
                 at += n;
             }
-            let params = ft.params.clone();
-            self.rg_closure_ann_bound(c, &per, &params);
+            // (with the regions the parameter's type names, the callee's lifetimes once instantiated below:
+            // `want(x, |_: &'static u32| {})` with `fn want<'a>(_: &'a u32, _f: fn(&'a u32))`)
+            clo_fnptr.push((c, per, per_raw, ft.params.clone()));
         }
         // (which parameters a fn item is passed to (`want(baz)`), by the parameter's index)
         let fn_item_args: Vec<bool> = (0..sig0.params.len())
@@ -3425,6 +3541,10 @@ impl Cx<'_> {
                     }
                 }
             }
+        }
+        for (c, per, per_raw, params) in clo_fnptr {
+            let tgts: Vec<Vec<Option<u32>>> = per_raw.iter().map(|v| v.iter().map(|&x| if x == R_STATIC { Some(STATIC) } else if x < R_STATIC { lts.get(x as usize).copied() } else { None }).collect()).collect();
+            closure_ann_bound(prog, rg, c, &per, &tgts, &params);
         }
         // (type parameters the arguments did not solve (a bound's `G: GetRef<'a, isize>` gives the trait's `T`): from
         // the instantiated signature)
@@ -3874,7 +3994,7 @@ impl Cx<'_> {
                 // (a parameter annotated with one of the function's lifetimes, or 'static, where the bound binds the
                 // region (`|x: &'x u32|` for `F: FnOnce(&u32)`): the closure must take every region there, so 'x
                 // would be all of them ("lifetime may not live long enough" both ways)
-                self.rg_closure_ann_bound(c, &codes, params);
+                self.rg_closure_ann_bound(c, &codes, &[], params);
                 // (the result's elided regions: the one region of the inputs, as fn elision)
                 let mut ins: Vec<u8> = codes.iter().flatten().copied().filter(|&c| c != R_ELIDED && c != R_STATIC).collect();
                 ins.sort();
@@ -3940,6 +4060,7 @@ impl Cx<'_> {
         }
         let names = self.rg.lt_names.clone();
         let mut codes = vec![];
+        let mut tgts = vec![];
         let mut params = vec![];
         for p in ps {
             let mut s = crate::regions::Slots { lts: names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
@@ -3953,44 +4074,15 @@ impl Cx<'_> {
                 return;
             }
             codes.push(cs.iter().map(|&x| if x == R_BOUND { CLO_P } else { CLO_E }).collect::<Vec<u8>>());
+            // (the regions the type names: 'static, or one of the function's lifetimes)
+            tgts.push(cs.iter().map(|&x| if x == R_STATIC { Some(STATIC) } else if x < R_STATIC { self.rg.lts.get(x as usize).copied() } else { None }).collect::<Vec<Option<u32>>>());
             params.push(t);
         }
-        self.rg_closure_ann_bound(c, &codes, &params);
+        self.rg_closure_ann_bound(c, &codes, &tgts, &params);
     }
 
-    fn rg_closure_ann_bound(&mut self, c: &Expr, codes: &[Vec<u8>], params: &[Ty]) {
-        let Expr::Closure(_, inputs, _, _, pos) = c else { return };
-        let prog = self.prog;
-        for (i, (_, ann)) in inputs.iter().enumerate() {
-            let (Some(ann), Some(bc), Some(&t)) = (ann, codes.get(i), params.get(i)) else { continue };
-            if !crate::regions::names_lt(ann) {
-                continue;
-            }
-            let outer = self.rg.lt_names.clone();
-            let mut ac = CloCodes { outer_lts: &outer, tparams: &[], named: vec![], np: 0, ne: 0, elided: None };
-            let mut av = vec![];
-            if !ac.of(prog, ann, t, &mut av, 0) || av.len() != bc.len() {
-                continue;
-            }
-            for (&b, &a) in bc.iter().zip(&av) {
-                // (the bound's own region, a placeholder; the annotation's a function's lifetime or 'static)
-                if b >= CLO_E {
-                    continue;
-                }
-                let lt = match a {
-                    R_STATIC => STATIC,
-                    a if (CLO_E..CLO_U).contains(&a) => match ac.named.iter().find(|x| x.1 == a).and_then(|x| outer.iter().position(|n| *n == x.0)) {
-                        Some(k) => self.rg.lts[k],
-                        None => continue,
-                    },
-                    _ => continue,
-                };
-                let u = self.rg.var();
-                self.rg.univ.push((u, "'_".to_string()));
-                self.rg.edge(u, lt, *pos);
-                self.rg.edge(lt, u, *pos);
-            }
-        }
+    fn rg_closure_ann_bound(&mut self, c: &Expr, codes: &[Vec<u8>], tgts: &[Vec<Option<u32>>], params: &[Ty]) {
+        closure_ann_bound(self.prog, &mut self.rg, c, codes, tgts, params);
     }
 
     /// The codes of a closure's captures (cid) as trees of this function: its universal regions are CLO_U + i; what
