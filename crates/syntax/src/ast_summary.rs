@@ -1137,7 +1137,7 @@ fn path_names(t: &PTy, depth: u32) -> Vec<String> {
 /// declaration's, `'static` or the trait's lifetime parameter by its place (`'0`), which the impl's trait path writes
 /// `is_alias`: a name of one of the program's type aliases. A value that writes one is not checked: an alias may name
 /// a lifetime its body does not use (`type Erased<'a> = ();`), and its body is not read here
-pub fn assoc_value_unmet(src: &str, header: &SrcItem, member: &SrcItem, bounds: &[String], is_alias: &dyn Fn(&str) -> bool) -> Option<(String, String)> {
+pub fn assoc_value_unmet(src: &str, header: &SrcItem, member: &SrcItem, bounds: &[String], is_alias: &dyn Fn(&str) -> bool, lt_bounded: &dyn Fn(&str) -> bool) -> Option<(String, String)> {
     let htext = format!("{}}}", src.get(header.start..header.end)?);
     let hf = parse_file(&htext).ok()?;
     let ItemKind::Impl(g, Some((false, tp)), self_ty, _) = &hf.items.first()?.kind else { return None };
@@ -1151,10 +1151,18 @@ pub fn assoc_value_unmet(src: &str, header: &SrcItem, member: &SrcItem, bounds: 
     let mut k = crate::wf::Known::default();
     k.add_generics(g);
     // (what the header's types imply: the self type's and the trait's type arguments' (`Foo<'a, &'a &'b ()>`, 'b: 'a))
+    // (a struct or enum there whose declaration bounds its lifetimes (`struct Static<'a: 'static>`) implies those
+    // bounds, which Known does not read: not checked)
+    if path_names(self_ty, 0).iter().any(|n| lt_bounded(n)) {
+        return None;
+    }
     k.implied(self_ty, 0);
     for s in &tp.segs {
         for a in &s.args {
             if let crate::parse::GArg::Ty(t) = a {
+                if path_names(t, 0).iter().any(|n| lt_bounded(n)) {
+                    return None;
+                }
                 k.implied(t, 0);
             }
         }

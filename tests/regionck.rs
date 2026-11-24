@@ -3948,4 +3948,9 @@ fn part25_review_2() {
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0477"), "{d:?}");
     // (a value with a where clause of its own (`where Self: 'b`) is not checked: the clause is not read)
     assert_eq!(check("trait Foo<'a> { type Value: 'a where Self: 'a; }\nimpl<'a, 'b> Foo<'b> for &'a i32 { type Value = &'a i32 where Self: 'b; }\nfn main() {}\n"), vec![]);
+    // (a self type whose declaration bounds its lifetime (`struct Static<'a: 'static>`) implies the bound: not
+    // checked; one that does not is)
+    assert_eq!(check("struct Static<'a: 'static>(&'a ());\ntrait Foo { type Value: 'static; }\nimpl<'a> Foo for Static<'a> {\n    type Value = &'a ();\n}\nfn main() {}\n"), vec![]);
+    let d = check("struct W<'a>(&'a ());\ntrait Foo { type Value: 'static; }\nimpl<'a> Foo for W<'a> {\n    type Value = &'a ();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0477"), "{d:?}");
 }

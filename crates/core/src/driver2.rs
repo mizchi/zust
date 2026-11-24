@@ -1188,6 +1188,13 @@ impl Session2 {
             if !decl.is_empty() {
                 let aliases: crate::fxhash::FxSet<&str> = sums.iter().flat_map(|sm| sm.aliases.iter().map(|a| a.0.as_str())).collect();
                 let is_alias = |n: &str| aliases.contains(n) || aliases.iter().any(|a| a.rsplit("::").next() == Some(n));
+                // (the structs and enums whose declarations bound their lifetimes (`struct Static<'a: 'static>`))
+                let bounded: crate::fxhash::FxSet<&str> = sums
+                    .iter()
+                    .filter(|sm| sm.adt_regions.as_ref().is_some_and(|r| !r.outlives.is_empty()))
+                    .flat_map(|sm| sm.structs.iter().map(|x| x.0.as_str()).chain(sm.enums.iter().map(|x| x.0.as_str())))
+                    .collect();
+                let lt_bounded = |n: &str| bounded.contains(n) || bounded.iter().any(|a| a.rsplit("::").next() == Some(n));
                 for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
                     let ItemKind::ImplMember(h) = it.kind else { continue };
                     let Some(tr) = sums.get(h as usize).and_then(|hs| hs.impl_trait.as_deref()) else { continue };
@@ -1195,7 +1202,7 @@ impl Session2 {
                     let short = short.rsplit("::").next().unwrap_or(short);
                     for a in &sm.assocs {
                         let Some(bs) = decl.get(&(short, a.name.as_str())) else { continue };
-                        if let Some((x, v)) = crate::ast_summary::assoc_value_unmet(&src, &items[h as usize], it, bs, &is_alias) {
+                        if let Some((x, v)) = crate::ast_summary::assoc_value_unmet(&src, &items[h as usize], it, bs, &is_alias, &lt_bounded) {
                             return Err(format!("{}:1: the type `{v}` does not fulfill the required lifetime (it must outlive `{x}`) (E0477)", it.line));
                         }
                     }
