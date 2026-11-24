@@ -1434,8 +1434,17 @@ impl Session2 {
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_mismatched_lts = lint("mismatched_lifetime_syntaxes");
             deny_deprecated = lint("deprecated") || (levels.contains(&"warnings") && !c.contains("#![allow(deprecated"));
-            // (warn by default: `deny(warnings)` makes them errors too, unless the crate allows them)
-            let ffi = |n: &str| lint(n) || (levels.contains(&"warnings") && !allows_lint(&c, n));
+            // (warn by default: the crate attribute naming the lint last sets its level, and `deny(warnings)` makes
+            // it an error while it is left at warn, unless a later attribute sets `warnings` back; `allow(x)` then
+            // `warn(x)` puts it back at warn)
+            let last_level = |names: &[&str]| {
+                ["forbid", "deny", "warn", "allow", "expect"].into_iter().filter_map(|l| last_of(l, names).map(|at| (at, l))).max().map(|(_, l)| l)
+            };
+            let ffi = |n: &str| match last_level(&[n]) {
+                Some("forbid" | "deny") => true,
+                Some("warn") | None => matches!(last_level(&["warnings"]), Some("forbid" | "deny")),
+                _ => false,
+            };
             deny_ctypes = (ffi("improper_ctypes"), ffi("improper_ctypes_definitions"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
