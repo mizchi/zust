@@ -1999,3 +1999,23 @@ fn integer_literal_where_a_float_is_expected() {
     // (a float literal, or one with a float suffix, is one)
     assert_eq!(first("fn main() {\n    let a: f64 = 2.0 + 1e3 + 2f64;\n    let b: f32 = 3.;\n    println!(\"{a} {b}\");\n}\n"), None, "floats");
 }
+
+#[test]
+fn unsized_where_sized_is_needed() {
+    // (E0277: an unsized type written where a Sized one is needed: an argument of std's containers or of a type of the
+    // program's whose parameter does not say `?Sized`, an enum variant's field, a struct's field before the last; each
+    // expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, t: &str| Some((l, c, format!("the size for values of type `{t}` cannot be known at compilation time (E0277)")));
+    assert_eq!(first("fn iceman(c: Vec<[i32]>) {}\nfn main() {}\n"), e(1, 14, "[i32]"), "Vec");
+    assert_eq!(first("trait Foo {}\nimpl Foo for Option<[u8]> {}\nfn main() {}\n"), e(2, 14, "[u8]"), "impl");
+    assert_eq!(first("struct A<T>(T);\nstruct B(A<[u8]>);\nfn main() {}\n"), e(2, 10, "[u8]"), "a type of the program's");
+    assert_eq!(first("enum E {\n    V([Box<E>]),\n}\nfn main() {}\n"), e(2, 7, "[Box<E>]"), "variant");
+    assert_eq!(first("struct S<X: ?Sized> {\n    f1: X,\n    f2: isize,\n}\nfn main() {}\n"), e(2, 9, "X"), "field before the last");
+    // (a parameter that says `?Sized`, std's that allow it, the last field)
+    let ok = "struct W<T: ?Sized>(Box<T>);\nstruct P<T: ?Sized> {\n    a: u8,\n    b: T,\n}\nfn f(_: W<[u8]>, _: Box<str>, _: std::rc::Rc<dyn Fn()>, _: &P<str>) {}\nfn main() {}\n";
+    assert_eq!(first(ok), None, "Sized");
+}
