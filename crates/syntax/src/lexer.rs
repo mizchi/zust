@@ -845,6 +845,17 @@ mod tests {
         assert!(out.contains("let _x = d__leaf__T; let _y = d__leaf__T;"), "{out}");
     }
 
+    /// A path to a module's private item still names it (the test harness calls `b::foo()` for a private
+    /// `#[test] fn foo`; whether it may is E0603's check); a glob still brings only what is visible
+    /// (tests/ui test-attrs/issue-52557.rs: `use a::*; use b::*;` with b's `foo` private is a's `foo`)
+    #[test]
+    fn a_path_names_a_private_item() {
+        let src = "mod a {\n    pub fn foo() -> bool { true }\n}\nmod b {\n    fn foo() {}\n}\nuse a::*;\nuse b::*;\npub fn conflict() { let _: bool = foo(); }\nfn run() { b::foo(); }\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &[]).unwrap();
+        assert!(out.contains("let _: bool = a__foo();"), "{out}");
+        assert!(out.contains("fn run() { b__foo(); }"), "{out}");
+    }
+
     /// A const generic parameter (`fn read_words<W, const N: usize>`, `impl<const N: usize>`) is no item of the
     /// module: a module's `const N` elsewhere does not make it collide, and it keeps its name (rand_core 0.10's
     /// utils.rs became `rand_core__utils__N`, "cannot find constant")
@@ -2619,7 +2630,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         {
             let names = names_with!(&final_globs, &map);
             for p in std::mem::take(&mut pending) {
-                match names.item_at(p.0, p.2, &p.3, NS_ANY) {
+                // (as module p.2 sees it: what its globs bring is what it imports)
+                match names.item_at(p.2, p.2, &p.3, NS_ANY) {
                     GlobHit::Item(nn, ns) => found_any.push((p, nn, ns)),
                     _ => rest.push(p),
                 }
@@ -3641,12 +3653,14 @@ impl<'a> Names<'a> {
 
     /// From module m along segs, as viewer sees them: each a child module (first) or one the globs bring in, if it is
     /// one
-    fn walk(&self, viewer: usize, m: usize, segs: &[Vec<u8>]) -> Option<usize> {
+    fn walk(&self, _viewer: usize, m: usize, segs: &[Vec<u8>]) -> Option<usize> {
+        // (each step as the module it is in sees it: a path that names a module's own child reaches it (whether it
+        //  may is another check, E0603), and what its globs bring is what that module imports)
         let mut cur = m;
         for seg in segs {
-            cur = match self.child(viewer, cur, seg) {
+            cur = match self.child(cur, cur, seg) {
                 Some(c) => c,
-                None => match self.module_via_globs(viewer, cur, seg) {
+                None => match self.module_via_globs(cur, cur, seg) {
                     ModHit::One(c) => c,
                     _ => return None,
                 },
@@ -3714,9 +3728,12 @@ impl<'a> Names<'a> {
 
     /// lookup, of module m's n as viewer (where the path is written) sees it
     fn lookup_from(&self, viewer: usize, m: usize, n: &[u8], want: u8) -> Option<Vec<u8>> {
-        match self.item_at(viewer, m, n, want) {
+        // (m's item as m sees it: a path to a module's private item still names it (the test harness calls
+        //  `b::foo()` for a private `#[test] fn foo`), and m's globs bring what m imports)
+        let _ = viewer;
+        match self.item_at(m, m, n, want) {
             GlobHit::Item(nn, _) => Some(nn),
-            GlobHit::None if want != NS_ANY => self.lookup_from(viewer, m, n, NS_ANY),
+            GlobHit::None if want != NS_ANY => self.lookup_from(m, m, n, NS_ANY),
             _ => None,
         }
     }
