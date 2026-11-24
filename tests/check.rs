@@ -1018,8 +1018,8 @@ fn impl_bounds_are_nested_goals() {
         bad(&format!("{imp}\nfn main() {{ {}; }}", call.replace('_', "1u8")));
         ok(&format!("{imp}\nfn main() {{ {}; }}", call.replace('_', "1i32")));
     }
-    // (a cycle of blanket impls through each other's bounds is not followed forever. An obligation through it,
-    // `req::<u8>` with `fn req<T: P>`, is E0275 in rustc; zustc takes it to hold, the old answer)
+    // (a cycle of blanket impls through each other's bounds is not followed forever. An obligation through it is
+    // E0275: goals_have_a_certainty)
     ok("trait P {}\ntrait Q {}\nimpl<T: Q> P for T {}\nimpl<T: P> Q for T {}\nfn main() {}");
     // (a goal asked again and again on the way (`T{i}: T{i-1} + T{i-2}`) is proved once: without that, 2^n goals)
     let fib = |n: usize, imp0: &str| {
@@ -1051,4 +1051,35 @@ fn impl_bounds_are_nested_goals() {
     // (an impl for `&mut i32` is not for i32)
     bad("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { f(1i32); }");
     ok("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { let mut x = 1i32; f(&mut x); }");
+}
+
+/// A goal's answer is Yes, Maybe or No (Program::evaluate, issue #2). A bound whose goal needs itself (an inductive
+/// cycle) is E0275, as rustc gives; a cycle no obligation goes through, or one another impl gets around, is not an
+/// error. Each was checked against rustc 1.97
+#[test]
+fn goals_have_a_certainty() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let e0275 = |src: &str, at: &str| {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].msg.contains("overflow evaluating the requirement") && d[0].msg.contains(at), "{src}\n{d:?}");
+    };
+    let ok = |src: &str| {
+        let d = check(src);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    };
+    let pq = "trait P {}\ntrait Q {}\nimpl<T: Q> P for T {}\nimpl<T: P> Q for T {}\nfn need<X: P>(_: X) {}\n";
+    e0275(&format!("{pq}fn main() {{ need(1u8); }}"), "`u8: P`");
+    ok(&format!("{pq}fn main() {{}}"));
+    // (a generic fn's own bound is a where clause: not followed)
+    ok(&format!("{pq}fn g<Y: P>(y: Y) {{ need(y); }}\nfn main() {{}}"));
+    // (an impl whose bound is its own trait)
+    e0275("trait P {}\nimpl<T: P> P for T {}\nfn need<X: P>(_: X) {}\nfn main() { need(1u8); }", "`u8: P`");
+    // (through a supertrait's blanket impl: traits/inductive-overflow/simultaneous.rs)
+    e0275("trait A {}\ntrait B {}\nimpl<T: A> B for T {}\nimpl<T: B> A for T {}\ntrait C {}\nimpl<T: B + A> C for T {}\nfn need<X: C>(_: X) {}\nfn main() { need(4); }", "`i32: C`");
+    // (struct impls through each other end at a concrete impl: no cycle)
+    ok("trait P {}\ntrait Q {}\nstruct W<T>(T);\nimpl<T: Q> P for W<T> {}\nimpl<T: P> Q for W<T> {}\nimpl Q for u8 {}\nfn need<X: P>(_: X) {}\nfn main() { need(W(1u8)); }");
+    // (a recursive type list)
+    ok("trait P {}\nimpl P for () {}\nimpl<H: P, T: P> P for (H, T) {}\nfn need<X: P>(_: X) {}\nfn main() { need(((), ((), ((), ())))); }");
+    // (two blanket impls of one trait: the one that holds is taken, whatever the other's goals do)
+    ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: B> Tr<u8> for T {}\nimpl<T: A> Tr<u16> for T {}\nimpl<T: Tr<u8>> B for T {}\nimpl A for i32 {}\nfn need<T: Tr<u16>>(_: T) {}\nfn main() { need(1i32); }");
 }

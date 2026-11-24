@@ -650,6 +650,73 @@ pub struct CloRg {
     pub lts: Vec<(String, u8)>,
 }
 
+/// How sure the answer to a trait goal is (Program::evaluate; rustc's next solver's `Certainty`, issue #2)
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Certainty {
+    Yes,
+    /// Neither proved nor disproved
+    Maybe(MaybeCause),
+    No,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MaybeCause {
+    /// The goal was met again while it was being proved: `impl<T: Q> P for T` with `impl<T: P> Q for T`. rustc
+    /// reports E0275 for an obligation that needs it (a program trait's goals are inductive)
+    Cycle,
+    /// More than 64 goals deep
+    Overflow,
+}
+
+impl Certainty {
+    /// Either holds: `Yes` over `Maybe` over `No`
+    pub fn or(self, o: Certainty) -> Certainty {
+        match (self, o) {
+            (Certainty::Yes, _) | (_, Certainty::Yes) => Certainty::Yes,
+            (Certainty::Maybe(c), _) | (_, Certainty::Maybe(c)) => Certainty::Maybe(c),
+            _ => Certainty::No,
+        }
+    }
+
+    /// Both hold: `No` over `Maybe` over `Yes`
+    pub fn and(self, o: Certainty) -> Certainty {
+        match (self, o) {
+            (Certainty::No, _) | (_, Certainty::No) => Certainty::No,
+            (Certainty::Maybe(c), _) | (_, Certainty::Maybe(c)) => Certainty::Maybe(c),
+            _ => Certainty::Yes,
+        }
+    }
+
+    /// Some one holds (stops at the first `Yes`)
+    pub fn any(it: impl Iterator<Item = Certainty>) -> Certainty {
+        let mut r = Certainty::No;
+        for c in it {
+            r = r.or(c);
+            if r == Certainty::Yes {
+                break;
+            }
+        }
+        r
+    }
+
+    /// All hold (stops at the first `No`)
+    pub fn all(it: impl Iterator<Item = Certainty>) -> Certainty {
+        let mut r = Certainty::Yes;
+        for c in it {
+            r = r.and(c);
+            if r == Certainty::No {
+                break;
+            }
+        }
+        r
+    }
+}
+
+thread_local! {
+    /// How sure implements_concrete's last struct or tuple impl answer was (Program::impl_applies_noted)
+    static NOTED: std::cell::Cell<Option<Certainty>> = const { std::cell::Cell::new(None) };
+}
+
 impl Insts {
     pub fn new(prog: &Program) -> Insts {
         Insts {
@@ -691,11 +758,16 @@ impl Insts {
                 if pn == "Self" && prog.prim_impls.contains(&(t, tr.clone())) {
                     continue;
                 }
-                if !prog.implements(t, tr) {
-                    return Err(format!(
-                        "the trait bound `{}: {tr}` is not satisfied (for `{pn}`)",
-                        prog.tn(t)
-                    ));
+                match prog.evaluate(t, tr) {
+                    Certainty::No => {
+                        return Err(format!("the trait bound `{}: {tr}` is not satisfied (for `{pn}`)", prog.tn(t)));
+                    }
+                    // (the bound needs a goal that needs itself: inductive, so it does not hold. Overflow stays
+                    // accepted: the limit is not rustc's)
+                    Certainty::Maybe(MaybeCause::Cycle) => {
+                        return Err(format!("overflow evaluating the requirement `{}: {tr}` (E0275)", prog.tn(t)));
+                    }
+                    _ => {}
                 }
             }
         }
@@ -2440,39 +2512,61 @@ impl Program {
     }
 
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
-        (self.blanket_traits.contains(tr) && self.blanket_holds(t, tr)) || self.implements_concrete(t, tr)
+        self.evaluate(t, tr) != Certainty::No
+    }
+
+    /// The goal `t: tr`, with how sure the answer is (issue #2). `Maybe` comes from a goal met again while it is
+    /// being proved (a cycle), or one past 64 deep (overflow). implements takes `Maybe` to hold, the old answer.
+    ///
+    /// Only the goals of the program's traits carry `Maybe` (blanket impls' and struct and tuple impls' bounds);
+    /// the rest of the answers are written case by case and are `Yes` or `No`. A `Maybe` lost on the way (through
+    /// a derived impl's or a `Box`'s arguments) becomes `Yes`, which accepts, as before
+    pub fn evaluate(&self, t: Ty, tr: &str) -> Certainty {
+        let b = if self.blanket_traits.contains(tr) { self.blanket_certainty(t, tr) } else { Certainty::No };
+        if b == Certainty::Yes {
+            return b;
+        }
+        NOTED.with(|n| n.set(None));
+        let c = self.implements_concrete(t, tr);
+        let noted = NOTED.with(|n| n.take());
+        let c = match (c, noted) {
+            (false, _) => Certainty::No,
+            (true, Some(m @ Certainty::Maybe(_))) => m,
+            (true, _) => Certainty::Yes,
+        };
+        b.or(c)
     }
 
     /// A blanket impl of tr (`impl<T: Bar> Tr for T`) is for t when t meets its bounds, its where clauses' too: those
-    /// of traits of the program's, nested goals of their own (goal_holds); std's are taken to hold (issue #2)
-    fn blanket_holds(&self, t: Ty, tr: &str) -> bool {
-        let Some(bs) = self.blanket_bounds.get(tr) else { return true };
+    /// of traits of the program's, nested goals of their own (goal); std's are taken to hold (issue #2)
+    fn blanket_certainty(&self, t: Ty, tr: &str) -> Certainty {
+        let Some(bs) = self.blanket_bounds.get(tr) else { return Certainty::Yes };
         // (a trait object implements its trait's supertraits itself, whatever the blanket impl asks: `dyn Trait:
         // Supertrait` with `trait Trait: Supertrait`)
         if matches!(t, Ty::Dyn(_)) {
-            return true;
+            return Certainty::Yes;
         }
         // (some one impl's bounds all hold)
-        bs.iter().any(|bs| {
-            bs.iter().all(|b| {
+        Certainty::any(bs.iter().map(|bs| {
+            Certainty::all(bs.iter().map(|b| {
                 let name = b.split('<').next().unwrap_or(b).trim();
-                !self.user_traits.contains(name) || name == tr || self.goal_holds(t, name)
-            })
-        })
+                if !self.user_traits.contains(name) { Certainty::Yes } else { self.goal(t, name) }
+            }))
+        }))
     }
 
     /// A nested goal `t: tr` of an impl's bounds. One already being proved (a cycle: `impl<T: Bar> Foo for T` with
-    /// `impl<T: Foo> Bar for T`), or past 64 goals deep (overflow), is taken to hold: the old answer, which accepted
-    /// every impl, rather than an error rustc may not give.
+    /// `impl<T: Foo> Bar for T`), or past 64 goals deep (overflow), is `Maybe`.
     ///
-    /// A goal proved without meeting a cycle or the overflow is kept for the rest of the outermost goal (`T2: T1 + T0`,
-    /// `T3: T2 + T1`, ... asks T1 of one type again and again). One that did meet either is not: its answer leaned
-    /// on a guess. The cache starts empty with each outermost goal, so it never outlives the impls it was proved by
-    fn goal_holds(&self, t: Ty, tr: &str) -> bool {
+    /// A goal answered without meeting a cycle or the overflow is kept for the rest of the outermost goal (`T2: T1 +
+    /// T0`, `T3: T2 + T1`, ... asks T1 of one type again and again). One that did meet either is not: its answer
+    /// leaned on a guess. The cache starts empty with each outermost goal, so it never outlives the impls it was
+    /// proved by
+    fn goal(&self, t: Ty, tr: &str) -> Certainty {
         #[derive(Default)]
         struct Goals {
             stack: Vec<(Ty, String)>,
-            done: FxMap<(Ty, String), bool>,
+            done: FxMap<(Ty, String), Certainty>,
             guesses: u64,
         }
         thread_local! {
@@ -2484,11 +2578,14 @@ impl Program {
             if g.stack.is_empty() {
                 g.done.clear();
             }
-            // (the overflow first: a goal past 64 deep is a guess, as it was before the cache, whatever an earlier,
-            // shallower proof of it found)
-            if g.stack.len() >= 64 || g.stack.contains(&key) {
+            // (the overflow first: a goal past 64 deep is a guess, whatever an earlier, shallower proof of it found)
+            if g.stack.len() >= 64 {
                 g.guesses += 1;
-                return Err(true);
+                return Err(Certainty::Maybe(MaybeCause::Overflow));
+            }
+            if g.stack.contains(&key) {
+                g.guesses += 1;
+                return Err(Certainty::Maybe(MaybeCause::Cycle));
             }
             if let Some(&r) = g.done.get(&key) {
                 return Err(r);
@@ -2500,7 +2597,7 @@ impl Program {
             Ok(n) => n,
             Err(r) => return r,
         };
-        let r = self.implements(t, tr);
+        let r = self.evaluate(t, tr);
         GOALS.with(|g| {
             let mut g = g.borrow_mut();
             g.stack.pop();
@@ -2514,18 +2611,35 @@ impl Program {
     /// An impl of tr for t's struct is for t itself: for an instance (`W<u8>`), an impl whose self type matches it, or
     /// one for every instance (`impl<T> A for W<T>`, `impl A for W`)
     pub fn impl_applies(&self, t: Ty, tr: &str) -> bool {
-        let Ty::Struct(sid) = t else { return true };
+        self.impl_certainty(t, tr) != Certainty::No
+    }
+
+    /// impl_applies, with how sure it is: the bounds of the impl that matches are nested goals
+    fn impl_certainty(&self, t: Ty, tr: &str) -> Certainty {
+        let Ty::Struct(sid) = t else { return Certainty::Yes };
         let b = self.base_of(sid);
         match self.impl_selfs.get(&(b, tr.to_string())) {
-            Some(v) if b != sid => v.iter().any(|(st, n, bounds)| {
+            Some(v) if b != sid => Certainty::any(v.iter().map(|(st, n, bounds)| {
                 let mut sol = vec![None; *n];
+                if !(self.match_ty(*st, t, &mut sol) && self.refs_agree(*st, t, 0)) {
+                    return Certainty::No;
+                }
                 // (a bound of a trait of the program's holds by its impls; std's are not checked)
-                self.match_ty(*st, t, &mut sol)
-                    && self.refs_agree(*st, t, 0)
-                    && bounds.iter().all(|(i, b)| !self.user_traits.contains(b) || sol.get(*i).copied().flatten().is_none_or(|a| self.goal_holds(a, b)))
-            }),
-            _ => true,
+                Certainty::all(bounds.iter().map(|(i, b)| match sol.get(*i).copied().flatten() {
+                    Some(a) if self.user_traits.contains(b) => self.goal(a, b),
+                    _ => Certainty::Yes,
+                }))
+            })),
+            _ => Certainty::Yes,
         }
+    }
+
+    /// impl_applies for implements_concrete's answer, noting how sure it is for evaluate (NOTED): the answer is
+    /// implements_concrete's own, so nothing runs between this and evaluate reading it but returns
+    fn impl_applies_noted(&self, t: Ty, tr: &str) -> bool {
+        let c = self.impl_certainty(t, tr);
+        NOTED.with(|n| n.set(Some(c)));
+        c != Certainty::No
     }
 
     /// The references and raw pointers in a and b (a pattern with `Param`s, a type) agree in mutability, as match_ty
@@ -2654,7 +2768,7 @@ impl Program {
                     self.structs[sid as usize].fields.iter().all(|f| self.implements(f.1, tr))
                 } else {
                     // ユーザの `impl<A, B> Tr for (A, B)`: its self type matches t, and its bounds hold (as a struct's)
-                    self.impls.contains(&(self.base_of(sid), tr.to_string())) && self.impl_applies(t, tr)
+                    self.impls.contains(&(self.base_of(sid), tr.to_string())) && self.impl_applies_noted(t, tr)
                 }
             }
             // prelude のコレクションと Option は Default (空 / None。中身が 0 のビット列)
@@ -2683,7 +2797,7 @@ impl Program {
             }
             // (an impl for the struct, whose self type t matches and whose bounds t's arguments meet: `impl<T: Bar> Foo
             // for W<T>` is not for W<u8> without `impl Bar for u8`, `impl Foo for W<i32>` is not for W<u8> (issue #2))
-            Ty::Struct(sid) => self.impls.contains(&(self.base_of(sid), tr.to_string())) && self.impl_applies(t, tr),
+            Ty::Struct(sid) => self.impls.contains(&(self.base_of(sid), tr.to_string())) && self.impl_applies_noted(t, tr),
             // (配列・スライス: 比較・Debug・Hash は要素が実装していれば)
             Ty::Array(e, _) => {
                 tr == "Sized"
