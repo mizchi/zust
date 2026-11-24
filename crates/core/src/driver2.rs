@@ -617,6 +617,7 @@ impl Options2 {
             wasm: self.module_writer.is_some(),
             cfgs: self.cfgs.iter().chain(cfgs).cloned().chain(self.test.then(|| ("test".to_string(), None))).collect(),
             env: env.to_vec(),
+            edition: self.edition,
         }
     }
 }
@@ -1261,6 +1262,10 @@ impl Session2 {
                 // (the self type the bare parameter: not `impl<T> Tr for &T` / `&mut T`, whose self path is T too)
                 let bare = matches!(&sm.impl_self_ty, Some(crate::types::TySyn::Named(n)) if n == st);
                 if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) || !bare {
+                    continue;
+                }
+                // (the bare parameter itself, not a reference to it: `impl<T> Tr for &T` and `.. for &mut T` do not overlap)
+                if !matches!(&sm.impl_self_ty, Some(crate::types::TySyn::Named(n)) if n == st) {
                     continue;
                 }
                 // (an impl whose `where` clause may make it disjoint is no candidate either way)

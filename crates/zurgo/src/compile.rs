@@ -456,7 +456,7 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
             if c.test && !cfgs.iter().any(|x| x.0 == "test" && x.1.is_none()) {
                 cfgs.push(("test".to_string(), None));
             }
-            let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs, env: c.env.clone() };
+            let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs, env: c.env.clone(), ..Default::default() };
             let (text, _) = zustc::srcmap::load_crate(&c.root, &c.display, &cfg)?;
             let u = proc_macro_stub::uses_in(&text);
             for (p, m) in pm_macros.iter().filter(|(p, _)| pm_deps.contains(p)) {

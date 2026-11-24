@@ -1878,7 +1878,8 @@ impl Program {
             }
         }
         // (`impl<T> Tr for T` and `impl Tr for Box<U>` overlap: Box<U> is one of the T, E0119)
-        if let Some((tr, line)) = box_impls.iter().find(|(tr, _)| p.blanket_traits.contains(tr)) {
+        // (not one for `&T` / `&mut T`: a Box is no reference)
+        if let Some((tr, line)) = box_impls.iter().find(|(tr, _)| bare_blankets.contains(tr)) {
             return Err(format!("{line}:1: conflicting implementations of trait `{tr}` for type `Box<_>`"));
         }
         // derive は実装扱い (Clone / Copy など。中身は常にビットコピーなので本体は要らない)
@@ -4307,6 +4308,22 @@ impl Program {
                 if a.name != gname || a.ngat != gargs.len() {
                     continue;
                 }
+                // (match_ty lets `&mut` meet `&` (a coercion): an impl for `&T` and one for `&mut T` are two)
+                if let (Ty::Ref(m1, _), Ty::Ref(m2, _)) = (a.self_ty, base) {
+                    if m1 != m2 {
+                        continue;
+                    }
+                }
+                // (nor a pointer's impl a reference's: match_ty lets `*const T` meet `&x`, a coercion)
+                if matches!((a.self_ty, base), (Ty::Ptr(..), Ty::Ref(..))) {
+                    continue;
+                }
+                // (and `*const T`'s impl is not `*mut T`'s)
+                if let (Ty::Ptr(m1, _), Ty::Ptr(m2, _)) = (a.self_ty, base) {
+                    if m1 != m2 {
+                        continue;
+                    }
+                }
                 let mut sol = vec![None; a.ngen];
                 if self.match_ty(a.self_ty, base, &mut sol) {
                     let Some(mut args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else { continue };
@@ -4326,6 +4343,22 @@ impl Program {
             }
             if let Ty::Assoc(v) = a.value {
                 if v.base == a.self_ty && v.name == name {
+                    continue;
+                }
+            }
+            // (match_ty lets `&mut` meet `&` (a coercion): an impl for `&T` and one for `&mut T` are two)
+            if let (Ty::Ref(m1, _), Ty::Ref(m2, _)) = (a.self_ty, t) {
+                if m1 != m2 {
+                    continue;
+                }
+            }
+            // (nor a pointer's impl a reference's: match_ty lets `*const T` meet `&x`, a coercion)
+            if matches!((a.self_ty, t), (Ty::Ptr(..), Ty::Ref(..))) {
+                continue;
+            }
+            // (and `*const T`'s impl is not `*mut T`'s)
+            if let (Ty::Ptr(m1, _), Ty::Ptr(m2, _)) = (a.self_ty, t) {
+                if m1 != m2 {
                     continue;
                 }
             }
