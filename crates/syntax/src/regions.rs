@@ -647,6 +647,18 @@ impl<'a> Slots<'a> {
                 }
                 return;
             }
+            // (another type bounded by a lifetime (`StrategyFor<A>: 'static` of a type alias): the mark `#?`, as what
+            // the function may assume is not all read)
+            let plain = matches!(lhs, PTy::Path(None, p) if matches!(p.segs.as_slice(), [s] if s.args.is_empty() || s.name.starts_with('\'')));
+            if !plain {
+                for b in bs {
+                    if let Bound::Lifetime(l) = b {
+                        let c = me.code(Some(l));
+                        ty_outlives.push(("#?".to_string(), c));
+                    }
+                }
+                return;
+            }
             let PTy::Path(None, p) = lhs else { return };
             let [s] = p.segs.as_slice() else { return };
             for b in bs {

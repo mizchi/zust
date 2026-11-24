@@ -3863,3 +3863,17 @@ fn part25_placeholder_assoc_type_outlives() {
         assert_eq!(check(&format!("{src}{bar}")), vec![], "{src}");
     }
 }
+
+#[test]
+fn part25_path_type_arg_ref_to_placeholder() {
+    // (a type argument a path writes that is a reference to a placeholder's type is well formed: `wf::<&'x T>()`
+    // requires T: 'x, which `&'x T::Foo` does not imply (regions/regions-implied-bounds-projection-gap-1.rs); `&'x T`
+    // and `&'x T::Foo` as the parameter's type imply what their own use needs)
+    let src = "trait Trait1<'x> { type Foo; }\nfn wf<T>() {}\nfn func<'x, T: Trait1<'x>>(_t: &'x T::Foo) {\n    wf::<&'x T>();\n}\nfn caller2<'x, T: Trait1<'x>>(_t: &'x T) {\n    wf::<&'x T::Foo>();\n}\nfn caller3<'x, T: Trait1<'x>>(_t: &'x T::Foo) {\n    wf::<&'x T::Foo>();\n}\nfn main() {}\n";
+    let d = check(src);
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("the parameter type `T` may not live long enough"), "{d:?}");
+    // (a where clause on a type the summaries do not read (a type alias of a projection): nothing is required of the
+    // placeholder's associated types (nll/ty-outlives/issue-53789-1.rs))
+    let src = "trait Tr<'a> { type S; }\ntype SFor<A> = <A as Tr<'static>>::S;\nfn need<K: 'static>() {}\nfn f<A: Tr<'static>>() where SFor<A>: 'static {\n    need::<A::S>();\n}\nfn main() {}\n";
+    assert_eq!(check(src), vec![]);
+}

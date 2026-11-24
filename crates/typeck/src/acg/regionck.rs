@@ -150,6 +150,11 @@ pub struct RgSt {
     /// A placeholder's associated type's universal region, and the regions it is of (its placeholder's, its bound's
     /// lifetimes'): it outlives what they all outlive
     pub proj_comps: Vec<(u32, Vec<u32>)>,
+    /// Those regions by the type parameter and the associated type's name (`T::Output` of the instance's first: 0,
+    /// "Output")
+    pub assoc_regs: Vec<(u8, String, u32)>,
+    /// A parameter's or the result's type is not followed: what the signature implies is not all known
+    pub implied_partial: bool,
     /// Outlives relations among universal regions the function may assume (a: b)
     pub known: Vec<(u32, u32)>,
     /// Constraints a: b, with where they come from
@@ -615,6 +620,21 @@ fn bound_targ_ptys(prog: &Program, sid: u32, tr: &str) -> Option<(Vec<PTy>, Vec<
 
 /// A struct or an enum in t (under references, boxes, slices, arrays, type arguments) whose definition bounds a type
 /// parameter by 'static (`struct Static<T: 'static>(T)`)
+/// t has a reference to a type that holds a placeholder (`&'x T#`, `Vec<&'x <T# as Tr>::Out#>`); `under` is whether
+/// a reference is around t
+fn refs_placeholder(prog: &Program, t: Ty, under: bool, depth: u32) -> bool {
+    if depth > 16 {
+        return false;
+    }
+    match t {
+        Ty::Ref(_, i) => refs_placeholder(prog, *i, true, depth + 1),
+        Ty::Ptr(_, i) | Ty::Box(i) | Ty::Slice(i) | Ty::Array(i, _) => refs_placeholder(prog, *i, under, depth + 1),
+        Ty::Struct(s) if prog.is_placeholder(s) => under,
+        Ty::Struct(s) => prog.structs[s as usize].args.iter().any(|&a| refs_placeholder(prog, a, under, depth + 1)),
+        _ => false,
+    }
+}
+
 fn has_static_bound_adt(prog: &Program, t: Ty, depth: u32) -> bool {
     if depth > 16 {
         return false;
@@ -1461,7 +1481,23 @@ impl RgSt {
                     c.ok = ok && none.ok;
                 }
             }
-            Ty::Assoc(_) => c.ok = false,
+            // (a placeholder instance's associated type of a type parameter: its placeholder's region, the same
+            // wherever it is (rg_begin). The mark a path `T::Foo` is written with, R_ELIDED_ADT, is read)
+            Ty::Assoc(a) => {
+                let v = match a.base {
+                    Ty::Param(g) => self.assoc_regs.iter().find(|x| x.0 == g && x.1 == a.name).map(|x| x.2),
+                    _ => None,
+                };
+                match v {
+                    Some(v) => {
+                        if c.codes.is_some_and(|cs| cs.get(c.pos) == Some(&R_ELIDED_ADT)) {
+                            c.pos += 1;
+                        }
+                        out.push(v);
+                    }
+                    None => c.ok = false,
+                }
+            }
             _ => {}
         }
     }
@@ -2140,6 +2176,59 @@ impl Cx<'_> {
         let gsig = &prog.sigs[rg.base as usize];
         let generic = !rg.inst_args.is_empty() && gsig.params.len() == params.len();
         let targs: Vec<Option<RT>> = if generic { rg.inst_args.clone().into_iter().map(|t| rg.fresh(prog, t)).collect() } else { vec![] };
+        // (a placeholder's associated types its bounds' traits declare (`<T# as MyTrait<'a>>::Output`): a region each,
+        // the same wherever the type is (a parameter's `&'x T::Foo` too), universal (below). It outlives what the
+        // trait's declaration bounds it by (`type Output: 'a`), what the function's where clauses do (`T::Output:
+        // 'b`), and what its placeholder and the bound's lifetimes all outlive (nll/ty-outlives/
+        // projection-where-clause-*.rs). Not of a bound with type arguments, or with a lifetime the function does not
+        // name (the bound's own `for<'x>`): what it is of is not known)
+        let mut assoc_ph: Vec<(usize, u32, u32, Vec<u32>, Vec<u32>)> = vec![];
+        // (nor where a where clause bounds a type not read by a lifetime (`StrategyFor<A>: 'static` of a type alias,
+        // the mark `#?`): it may be one of them)
+        let unread = rs.is_some_and(|r| r.ty_outlives.iter().any(|x| x.0 == "#?"));
+        if generic && !unread && !prog.assoc_bounds.is_empty() {
+            for (k, &t) in rg.inst_args.clone().iter().enumerate() {
+                let Ty::Struct(sid) = t else { continue };
+                if !prog.is_placeholder(sid) {
+                    continue;
+                }
+                let pname = gsig.generics.get(k).map(|g| g.0.clone()).unwrap_or_default();
+                let bs = prog.structs[sid as usize].placeholder.clone().unwrap_or_default();
+                for b in &bs {
+                    let tr = b.split('<').next().unwrap_or(b).trim();
+                    let short = tr.rsplit("::").next().unwrap_or(tr).to_string();
+                    let blts = bound_lts(b);
+                    let n_args = b.find('<').map_or(0, |_| b.matches(',').count() + 1);
+                    if n_args != blts.len() {
+                        continue;
+                    }
+                    let Some(regs) = blts.iter().map(|l| if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|x| x == l).and_then(|p| lts.get(p).copied()) }).collect::<Option<Vec<u32>>>() else { continue };
+                    let mut names: Vec<(&String, &Vec<String>)> = prog.assoc_bounds.iter().filter(|((t, _), _)| *t == short).map(|((_, n), d)| (n, d)).collect();
+                    names.sort();
+                    for (name, decl) in names {
+                        let Some(asid) = prog.assoc_placeholder(sid, name) else { continue };
+                        if rg.ph.iter().any(|x| x.0 == asid) {
+                            continue;
+                        }
+                        let va = rg.var();
+                        rg.ph.push((asid, va));
+                        rg.assoc_regs.push((k as u8, name.clone(), va));
+                        let mut known = vec![];
+                        for d in decl.iter().filter(|d| d.starts_with('\'')) {
+                            let r = if d == "'static" { Some(STATIC) } else { d[1..].parse::<usize>().ok().and_then(|i| regs.get(i).copied()) };
+                            known.extend(r);
+                        }
+                        let key = format!("{pname}::{name}");
+                        for (tp, c) in rs.map(|r| r.ty_outlives.as_slice()).unwrap_or(&[]) {
+                            if *tp == key {
+                                known.extend(if *c == R_STATIC { Some(STATIC) } else { lts.get(*c as usize).copied() });
+                            }
+                        }
+                        assoc_ph.push((k, asid, va, regs.clone(), known));
+                    }
+                }
+            }
+        }
         let mut trees: Vec<Option<RT>> = vec![];
         let mut inputs: Vec<u32> = vec![];
         for (i, &(_, t)) in params.iter().enumerate() {
@@ -2171,6 +2260,7 @@ impl Cx<'_> {
         };
         let gret = if generic { gsig.ret } else { ret_t };
         let ret = rg.instantiate(prog, gret, codes(params.len()), &lts, &targs, &mut el);
+        rg.implied_partial = trees.iter().any(|t| t.is_none()) || ret.is_none();
         rg.ret = ret.filter(|_| !bad);
         // (an `impl Trait` result with no region among the parameters: its hidden type's regions are 'static)
         // (or one written `+ 'static`: `fn f<T>(x: T) -> impl Any + 'static`, its hidden type T must be 'static (E0310))
@@ -2223,51 +2313,17 @@ impl Cx<'_> {
                         }
                     }
                 }
-                // (its associated types its bounds' traits declare (`<T# as MyTrait<'a>>::Output`): a universal region
-                // each, which outlives what the trait's declaration bounds it by (`type Output: 'a`), what the
-                // function's where clauses do (`T::Output: 'b`), and what its placeholder and the bound's lifetimes
-                // all outlive (nll/ty-outlives/projection-where-clause-*.rs). Not of a bound with type arguments, or
-                // with a lifetime the function does not name (the bound's own `for<'x>`): what it is of is not known)
-                if !prog.assoc_bounds.is_empty() {
-                    let bs = prog.structs[sid as usize].placeholder.clone().unwrap_or_default();
-                    for b in &bs {
-                        let tr = b.split('<').next().unwrap_or(b).trim();
-                        let short = tr.rsplit("::").next().unwrap_or(tr).to_string();
-                        let blts = bound_lts(b);
-                        let n_args = b.find('<').map_or(0, |_| b.matches(',').count() + 1);
-                        if n_args != blts.len() {
-                            continue;
-                        }
-                        let Some(regs) = blts.iter().map(|l| if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|x| x == l).and_then(|p| lts.get(p).copied()) }).collect::<Option<Vec<u32>>>() else { continue };
-                        let mut names: Vec<(&String, &Vec<String>)> = prog.assoc_bounds.iter().filter(|((t, _), _)| *t == short).map(|((_, n), d)| (n, d)).collect();
-                        names.sort();
-                        for (name, decl) in names {
-                            let Some(asid) = prog.assoc_placeholder(sid, name) else { continue };
-                            if rg.ph.iter().any(|x| x.0 == asid) {
-                                continue;
-                            }
-                            let va = rg.var();
-                            rg.univ.push((va, prog.structs[asid as usize].name.clone()));
-                            rg.ph.push((asid, va));
-                            for d in decl.iter().filter(|d| d.starts_with('\'')) {
-                                let r = if d == "'static" { Some(STATIC) } else { d[1..].parse::<usize>().ok().and_then(|i| regs.get(i).copied()) };
-                                if let Some(r) = r {
-                                    rg.known.push((va, r));
-                                }
-                            }
-                            let key = format!("{pname}::{name}");
-                            for (tp, c) in rs.map(|r| r.ty_outlives.as_slice()).unwrap_or(&[]) {
-                                if *tp == key {
-                                    if let Some(r) = if *c == R_STATIC { Some(STATIC) } else { lts.get(*c as usize).copied() } {
-                                        rg.known.push((va, r));
-                                    }
-                                }
-                            }
-                            let mut comps = vec![v];
-                            comps.extend(regs.iter().copied());
-                            rg.proj_comps.push((va, comps));
-                        }
+                // (its associated types' regions, made before the parameters' trees: universal, and what each outlives)
+                for (k2, asid, va, comps, known) in std::mem::take(&mut assoc_ph) {
+                    if k2 != k {
+                        assoc_ph.push((k2, asid, va, comps, known));
+                        continue;
                     }
+                    rg.univ.push((va, prog.structs[asid as usize].name.clone()));
+                    rg.known.extend(known.into_iter().map(|r| (va, r)));
+                    let mut cs = vec![v];
+                    cs.extend(comps);
+                    rg.proj_comps.push((va, cs));
                 }
             }
         }
@@ -3568,10 +3624,12 @@ impl Cx<'_> {
                 continue;
             }
             let Ok(t) = self.parse_ty(pt) else { continue };
-            // (only a type with a struct or an enum that bounds a type parameter by 'static: other requirements
-            // (`None::<&'a A>`'s A: 'a) may hold by what a parameter's projection implies, which is not followed
+            // (only a type with a struct or an enum that bounds a type parameter by 'static, or a reference to a
+            // placeholder's type where every parameter's type is followed (`wf::<&'x T>()`: T: 'x,
+            // regions/regions-implied-bounds-projection-gap-1.rs): other requirements (`None::<&'a A>`'s A: 'a)
+            // may hold by what a parameter's projection implies, which is not followed
             // (implied-bounds/normalization.rs))
-            if !has_static_bound_adt(prog, t, 0) {
+            if !has_static_bound_adt(prog, t, 0) && (self.rg.implied_partial || !refs_placeholder(prog, t, false, 0)) {
                 continue;
             }
             let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
