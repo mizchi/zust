@@ -78,6 +78,10 @@ pub struct Analysis {
     pub sig_keys: Mutex<Vec<Key>>,
     /// 依存するクレートのテキストの範囲と、そこから見えるクレート (CrateCtx::dep_ranges)
     pub dep_ranges: Vec<(u32, u32, Vec<usize>, u32)>,
+    /// The definitions of the program's associated types (not the prelude's), for the functions' cache keys: all of
+    /// them, and those of each dependency crate (by dep_ranges' index). A function's types and region check read an
+    /// associated type's value (`<() as Foo>::Out`, its lifetimes too), which its body and signatures do not show
+    pub assoc_keys: (Key, Vec<Key>),
 }
 
 /// クレートの印 (panic の場所の行の上位ビット。ライブラリの panic の表の 8 byte 目): 1..=4000
@@ -444,6 +448,27 @@ impl Analysis {
         let k = h.finish() | 1;
         ks[id as usize] = k;
         k
+    }
+
+    /// Analysis::assoc_keys: of each associated type the program defines, its impl member's text (which holds its
+    /// impl's header's), combined independently of their order
+    fn assoc_keys(&self) -> (Key, Vec<Key>) {
+        let mut all: Key = 0;
+        let mut per = vec![0; self.dep_ranges.len()];
+        for (i, &ii) in self.prog.assoc_items.iter().enumerate() {
+            if ii >= self.prog.prelude_from {
+                continue;
+            }
+            let mut h = KeyHasher::new();
+            h.add(&self.prog.assocs[i].name);
+            h.add(&self.items[ii as usize].hash);
+            let k = h.finish();
+            all ^= k;
+            if let Some(c) = self.crate_of_item(ii as usize) {
+                per[c] ^= k;
+            }
+        }
+        (all, per)
     }
 
     pub fn crate_of_item(&self, ii: usize) -> Option<usize> {
@@ -1736,7 +1761,8 @@ impl Session2 {
             crefs.push(c);
         }
         tm.lap("refs", String::new());
-        let mut a = Analysis { iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()) };
+        let mut a = Analysis { iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
+        a.assoc_keys = a.assoc_keys();
         if self.opts.opt && std::env::var_os("ZUSTC_NO_INLINE").is_none() {
             a.inl = inline_bodies(&a);
         }
@@ -5352,6 +5378,14 @@ impl Session2 {
             if !a.crefs[id].is_empty() {
                 h.add(&aliases());
             }
+            // (the associated types of the crates it sees)
+            let mut ak: Key = 0;
+            for (c, &seen) in u.iter().enumerate() {
+                if seen {
+                    ak ^= a.assoc_keys.1.get(c).copied().unwrap_or(0);
+                }
+            }
+            h.add(&ak);
             match a.prog.panic_handler {
                 Some(p) => h.add(&a.prog.names[p as usize]),
                 None => h.add(&0u8),
@@ -5434,6 +5468,9 @@ impl Session2 {
         }
         // (and a cast in the body's own constants: `::<{ 257u32 as Lane }>`)
         h.add(&aliases());
+        // (and the program's associated types: `type Out = u32;` changed to `u64`, or `&'a u32` to `&'static u32`,
+        // changes what `<() as Foo>::Out` is with the body the same)
+        h.add(&a.assoc_keys.0);
         h.finish()
     }
 

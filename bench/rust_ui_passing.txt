@@ -4894,6 +4894,7 @@ compile-fail	nll/user-annotations/method-ufcs-inherent-1.rs
 compile-fail	nll/user-annotations/method-ufcs-inherent-2.rs
 compile-fail	nll/user-annotations/method-ufcs-inherent-3.rs
 compile-fail	nll/user-annotations/method-ufcs-inherent-4.rs
+compile-fail	nll/user-annotations/normalization.rs
 check-pass	nll/user-annotations/normalize-self-ty.rs
 compile-fail	nll/user-annotations/pattern_substs_on_brace_enum_variant.rs
 compile-fail	nll/user-annotations/pattern_substs_on_brace_struct.rs

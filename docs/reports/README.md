@@ -105,3 +105,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-24 | [Region (lifetime) checking, part 21: fn items coerced to fn pointers, deref coercions through shared references, `ref mut` bindings of annotated lets](2026-11-24-05-region-check-21.md) |
 | 2026-11-24 | [Trait solving, first step: an impl's bounds as nested goals (#2)](2026-11-24-06-impl-bounds-nested-goals.md) |
 | 2026-11-24 | [Trait solving, step 1: a goal's answer is yes, maybe or no (#2)](2026-11-24-07-goal-certainty.md) |
+| 2026-11-24 | [Region (lifetime) checking, part 22: projections' associated types in annotations and parameters, closures cast from a local](2026-11-24-08-region-check-22.md) |

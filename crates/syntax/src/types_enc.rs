@@ -161,6 +161,7 @@ crate::enc_struct!(Summary {
     assoc_bounds,
     hdr_regions,
     adt_regions,
+    assoc_regions,
 });
 crate::enc_struct!(RAdtSyn { lts, fields, outlives, ty_outlives });
 crate::enc_struct!(AssocSyn {

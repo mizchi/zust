@@ -486,6 +486,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         closure_prelude: false,
         closure_fn_only: false,
         hr_lost: vec![],
+        clo_ann: vec![],
         clo_ret_param: vec![],
         clo_ret_from: vec![],
         seg_self: None,
@@ -1039,6 +1040,9 @@ pub struct Cx<'p> {
     /// Closures made where nothing was expected (their kind, signature: from the body), by their definition: the
     /// parameters with no type written that are references (one region each, not higher-ranked)
     pub hr_lost: Vec<(u32, Vec<usize>)>,
+    /// The closures made with a parameter annotated with a lifetime (`|_: &'static u32| {}`), by struct: their
+    /// expressions, for a cast of a local holding one to a fn pointer type (rg_closure_fnptr)
+    pub clo_ann: Vec<(u32, Expr)>,
     /// Of those, the ones whose body is one of their parameters (`|y| y`): that parameter's type argument
     pub clo_ret_param: Vec<(u32, usize)>,
     /// A closure's parameters its result is made of, as its body is written (borrowck::closure_ret_params): a call's
@@ -1760,6 +1764,23 @@ impl Cx<'_> {
                 if other_self {
                     self.rg.ret = None;
                 }
+                // (a parameter whose type is a projection the summary does not follow (`_wf: <&'a u8 as Tr>::Ty`): its
+                // impl's associated type's value, with the regions its self type writes; what it implies is known
+                // (implied-bounds/assoc-ty-wf-used-to-get-assoc-ty.rs))
+                if self.rg.on && !self.prog.assoc_regions.is_empty() {
+                    for (k, (p, pty)) in f.sig.params.iter().enumerate() {
+                        let (crate::parse::Ty::Path(Some(_), _), Some(&(loc, t))) = (pty, ps.get(k + f.sig.recv.is_some() as usize)) else { continue };
+                        let _ = p;
+                        if self.rg.locals.contains_key(&loc) {
+                            continue;
+                        }
+                        if let Some(tr) = self.rg_proj_ann(pty, t) {
+                            let prog = self.prog;
+                            self.rg.implied(prog, t, &tr, 0);
+                            self.rg.locals.insert(loc, tr);
+                        }
+                    }
+                }
             } else {
                 self.rg.on = false;
             }
@@ -2139,7 +2160,10 @@ impl Cx<'_> {
                         continue;
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
-                    if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(crate::regions::mentions_static) {
+                    // (or a projection whose associated type's value names lifetimes: `let _: <() as Foo>::Out = &a;`
+                    // with `type Out = &'static u32`)
+                    let proj = |a: &crate::parse::Ty| matches!(a, crate::parse::Ty::Path(Some(_), _)) && !self.prog.assoc_regions.is_empty();
+                    if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(|a| crate::regions::mentions_static(a) || proj(a)) {
                         self.rg_late_on();
                     }
                     // (`let _ = Foo;` with Foo a unit struct (or a const) is a value: dropped at once)
@@ -2335,7 +2359,8 @@ impl Cx<'_> {
                     // owns must not have to be 'static. What came before has no trees and adds no constraint)
                     let static_cast = || matches!(strip_paren(init), Expr::Cast(_, t) if crate::regions::mentions_static(t));
                     let ctor_lts = || self.prog.path_lts && self.inline_depth == 0 && crate::regions::writes_path_lts(init);
-                    if !self.rg.on && self.rg.eligible && (static_cast() || ann_ty.as_ref().is_some_and(crate::regions::mentions_static) || ctor_lts()) {
+                    let proj = |a: &crate::parse::Ty| matches!(a, crate::parse::Ty::Path(Some(_), _)) && !self.prog.assoc_regions.is_empty();
+                    if !self.rg.on && self.rg.eligible && (static_cast() || ann_ty.as_ref().is_some_and(|a| crate::regions::mentions_static(a) || proj(a)) || ctor_lts()) {
                         self.rg_late_on();
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
