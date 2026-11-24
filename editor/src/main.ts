@@ -169,9 +169,27 @@ function changed(now = false) {
   }
 }
 
+/** Loads a compiler (at the start, or after a crash). A failed load is reported, and the next edit tries again. */
+let loading: Promise<void> | null = null;
+function loadZsc(skipIfUnchanged: string | null) {
+  loading = loadCompiler(zscUrl).then(
+    (c) => {
+      compile = c;
+      loading = null;
+      if (source.value !== skipIfUnchanged) recompile();
+    },
+    (e) => {
+      loading = null;
+      status.textContent = `failed to load the compiler: ${e} (edit the source to try again; build it with \`npm run build:wasm\`)`;
+      status.className = "status bad";
+    },
+  );
+}
+
 function recompile() {
   syncSample();
   if (!compile) {
+    if (!loading) loadZsc(null);
     render([]);
     return;
   }
@@ -182,14 +200,10 @@ function recompile() {
     // (the instance is unusable after a trap: no edit reaches it while a fresh one loads, and the fresh one
     // compiles the source only when it changed since the crash, so a source that crashes zsc is not retried in a loop)
     last = { ok: false, js: "", dts: "", diagnostics: [], ms: 0 };
-    const crashed = source.value;
     compile = null;
     status.textContent = `zsc crashed: ${e.message} (edit the source to try again)`;
     status.className = "status bad";
-    void loadCompiler(zscUrl).then((c) => {
-      compile = c;
-      if (source.value !== crashed) recompile();
-    });
+    loadZsc(source.value);
     render([]);
     return;
   }
@@ -311,16 +325,14 @@ for (const b of document.querySelectorAll<HTMLButtonElement>(".tabs button")) {
 
 // ---- load the compiler and the grammar
 render([]);
-Promise.all([
-  loadHighlighter(grammarUrl).then((h) => {
+loadHighlighter(grammarUrl).then(
+  (h) => {
     highlighter = h;
     render(last?.diagnostics ?? []);
-  }),
-  loadCompiler(zscUrl).then((c) => {
-    compile = c;
-    recompile();
-  }),
-]).catch((e) => {
-  status.textContent = `failed to load: ${e} (build the wasm files with \`npm run build:wasm\`)`;
-  status.className = "status bad";
-});
+  },
+  (e) => {
+    status.textContent = `failed to load the grammar: ${e} (build the wasm files with \`npm run build:wasm\`)`;
+    status.className = "status bad";
+  },
+);
+loadZsc(null);
