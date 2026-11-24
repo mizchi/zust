@@ -431,6 +431,9 @@ pub struct Summary {
     /// impl ヘッダの型パラメータと self 型 (`impl<T> Option<T>`)
     pub impl_generics: Vec<(String, Vec<String>)>,
     pub impl_self_ty: Option<TySyn>,
+    /// The self type is written with a path, `impl From<TokenStream> for proc_macro::TokenStream`: another type than
+    /// a same-named one of this module, though the summary's name may be the last segment
+    pub impl_self_path: bool,
     /// The type arguments of the trait of an `impl Trait<A, B> for S` header
     pub impl_trait_args: Vec<TySyn>,
     /// The header's trait path writes a lifetime (`impl Tr<&'a u8>`, `impl Tr<&'static u8>`): its regions are not

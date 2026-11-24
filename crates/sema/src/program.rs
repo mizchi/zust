@@ -1850,7 +1850,8 @@ impl Program {
             }
             // (`impl From<S> for S` / `impl TryFrom<S> for S`: std's `impl<T> From<T> for T`, and the TryFrom it gives,
             //  already cover it (E0119))
-            if (tr == "From" || tr == "TryFrom") && sm.impl_trait_args.len() == 1 && sm.impl_self_ty.as_ref() == Some(&sm.impl_trait_args[0]) {
+            // (not `impl From<TokenStream> for proc_macro::TokenStream`: a path names another crate's type, proc-macro2)
+            if (tr == "From" || tr == "TryFrom") && !sm.impl_self_path && sm.impl_trait_args.len() == 1 && sm.impl_self_ty.as_ref() == Some(&sm.impl_trait_args[0]) {
                 return Err(format!("{}:1: conflicting implementations of trait `{tr}<{sn}>` for type `{sn}` (E0119)", it.line));
             }
             // プリミティブ型への trait 実装 (`impl Tr for u32`)

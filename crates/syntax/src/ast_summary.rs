@@ -2493,6 +2493,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 };
                 sm.impl_self = Some(n);
                 sm.impl_self_ty = Some(tysyn(self_ty, None)?);
+                sm.impl_self_path = true;
                 return Ok(sm);
             }
             sm.impl_self = Some(tp.segs[0].name.clone());
