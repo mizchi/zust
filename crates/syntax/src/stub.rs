@@ -223,7 +223,9 @@ pub fn items(src: &str) -> Vec<StubItem> {
             continue;
         }
         // アイテムの終わり: `;` か、本体の `}` (const / static / use / type は `;` まで)
-        let semi_kind = (j..n.min(j + 4)).any(|q| id(q, b"const") && !id(q + 1, b"fn") || id(q, b"static") || id(q, b"use") || id(q, b"type"));
+        // (`const fn` / `const unsafe fn` / `const async fn` / `const extern "C" fn` are fns)
+        let const_fn = |q: usize| id(q, b"const") && (id(q + 1, b"fn") || id(q + 1, b"unsafe") || id(q + 1, b"async") || id(q + 1, b"extern"));
+        let semi_kind = (j..n.min(j + 4)).any(|q| id(q, b"const") && !const_fn(q) || id(q, b"static") || id(q, b"use") || id(q, b"type"));
         // (`#![..]` (内側の属性) はそれだけで 1 つ)
         if sym(k, b'#') && sym(k + 1, b'!') && sym(k + 2, b'[') && close[k + 2] != usize::MAX {
             k = close[k + 2] + 1;
@@ -271,7 +273,7 @@ pub fn items(src: &str) -> Vec<StubItem> {
             let w = t(q);
             if toks[q].0 == 0 && matches!(w, b"fn" | b"struct" | b"enum" | b"union" | b"trait" | b"type" | b"const" | b"static") && toks.get(q + 1).is_some_and(|x| x.0 == 0) {
                 let nm = if w == b"static" && id(q + 1, b"mut") { q + 2 } else { q + 1 };
-                if !(w == b"const" && id(nm, b"fn")) {
+                if !(w == b"const" && const_fn(q)) {
                     names.push(String::from_utf8_lossy(t(nm)).into_owned());
                     break;
                 }
@@ -382,6 +384,15 @@ mod tests {
 
     fn norm(s: &str) -> String {
         s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// `const unsafe fn` (also `const async fn`, `const extern "C" fn`) is a fn: it ends at its body and is named
+    /// by its fn name, not taken for a constant named `unsafe` that runs to the next `;` (libc 0.2)
+    #[test]
+    fn const_unsafe_fn_is_one_fn_item() {
+        let src = "pub const unsafe fn f() -> u8 { 1 }\npub const extern \"C\" fn e() {}\npub fn g() {}\npub const N: u8 = 1;\n";
+        let names: Vec<String> = items(src).iter().map(|i| i.names.join("+")).collect();
+        assert_eq!(names, ["f", "e", "g", "N"]);
     }
 
     #[test]

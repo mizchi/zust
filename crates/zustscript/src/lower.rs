@@ -1,13 +1,12 @@
-//! `@wasm fn`: a zustscript function lowered to Rust, which zustc compiles to wasm. The body is checked by the
-//! same checker as the JS layer, so the same source can run as JS (`zsc --all-js`) or as wasm, with the same
-//! results: the Rust keeps the JS layer's meaning of numbers (i32 / u32 / i64 wrap: `wrapping_*`; `/` and `%`
-//! fail on zero; `as` saturates from f64, as Rust's `as` does).
+//! Rust lowering for standalone modules and the Wasm backend. The generated code preserves zustscript numeric
+//! semantics across targets: integer operations wrap (`wrapping_*`), `/` and `%`
+//! fail on zero; `as` saturates from f64, as Rust's `as` does.
 //!
 //! The subset (anything else is an error naming the construct):
 //! - types: i32 u32 i64 f64 bool, arrays, and records and enums of them (nested, generic); an array or a record /
 //!   enum that holds one is not Copy (see "Ownership" below);
 //! - `let`, `if`, `match`, loops, arithmetic, comparisons, `as`, `T::zero()` / `T::one()`;
-//! - calls of other `@wasm` functions and of `wasm fn`s (Rust), recursion;
+//! - calls of ordinary Rust-compatible functions, `@wasm` functions and of `wasm fn`s (Rust), recursion;
 //! - on arrays: `len` `map` `filter` `fold` `any` `all` `push` `concat` and array literals; a closure only as
 //!   the argument of one of those (it becomes a Rust closure, the call an iterator chain);
 //! - f64's `sqrt` `abs` `floor` `round`.
@@ -166,7 +165,7 @@ fn show(t: &Ty) -> String {
 type LResult<X> = Result<X, (Pos, String)>;
 
 fn not_in_subset<X>(pos: Pos, what: &str) -> LResult<X> {
-    Err((pos, format!("{what} is not in the @wasm subset (numbers, bools, arrays, records and enums of them, let / let mut / if / match / loops, map / filter / fold)")))
+    Err((pos, format!("{what} is not supported by Rust lowering (numbers, bools, arrays, records and enums of them, let / let mut / if / match / loops, map / filter / fold)")))
 }
 
 /// Where the value of a lowered expression lives, for an expression whose type is not Copy (a Copy one is always
@@ -203,7 +202,14 @@ struct Modes {
     region: HashMap<String, BTreeSet<usize>>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Rust,
+    Wasm { scalar_simd: bool },
+}
+
 pub struct Lower<'a> {
+    target: Target,
     info: &'a Info,
     fns: HashMap<&'a str, &'a Item>,
     subst: HashMap<String, Ty>,
@@ -242,14 +248,31 @@ fn rs_type(n: &str) -> String {
     format!("Zs{n}")
 }
 
-/// Lowers the wanted `@wasm` instances (those the JS layer calls, and the public ones) and every instance they
-/// call. Returns the ones that need glue, and the Rust of the others.
-/// (`simd_as_wasm`: `@simd fn`s are lowered too: `zsc --no-simd`)
-pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_wasm: bool) -> Result<(Vec<WFn>, String), Vec<(Pos, String)>> {
+/// Emit a Rust module with native signatures and any embedded Rust definitions.
+pub fn rust_module(items: &[Item], info: &Info) -> Result<String, Vec<(Pos, String)>> {
+    let (_, mut rust) = lower(items, info, &[], Target::Rust)?;
+    for item in items {
+        match item {
+            Item::WasmFn { text, public, .. } => {
+                if *public {
+                    rust.push_str("pub ");
+                }
+                rust.push_str(text);
+            }
+            Item::WasmRaw(text) => rust.push_str(text),
+            _ => continue,
+        }
+        rust.push_str("\n\n");
+    }
+    Ok(rust)
+}
+
+/// Only `wanted` entry points need JS boundary adapters. Standalone Rust modules use an empty list.
+pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], target: Target) -> Result<(Vec<WFn>, String), Vec<(Pos, String)>> {
     let fns: HashMap<&str, &Item> = items
         .iter()
         .filter_map(|it| match it {
-            Item::Fn { name, wasm, simd, .. } if *wasm || (*simd && simd_as_wasm) => Some((name.as_str(), it)),
+            Item::Fn { name, simd, .. } if !*simd || !matches!(target, Target::Wasm { scalar_simd: false }) => Some((name.as_str(), it)),
             _ => None,
         })
         .collect();
@@ -260,6 +283,7 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_
         }
     }
     let mut l = Lower {
+        target,
         info,
         fns,
         subst: HashMap::new(),
@@ -281,6 +305,17 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_
         helpers: Default::default(),
         str_helpers: Default::default(),
     };
+    // Even a private @wasm definition that has no callers must be valid Rust.
+    // Only instances reached from JS need a boundary adapter.
+    for item in items {
+        if let Item::Fn { name, generics, bounds, wasm, .. } = item
+            && (target == Target::Rust || *wasm)
+        {
+            for types in crate::js::all_instances(generics, bounds) {
+                l.want(name, types);
+            }
+        }
+    }
     l.all(wanted)
 }
 
@@ -429,18 +464,19 @@ impl Lower<'_> {
             let ps = self.info.records.get(n).map(|r| &r.params).unwrap_or_else(|| &self.info.enums[n].params);
             ps.iter().map(|p| Ty::Param(p.clone())).collect()
         });
+        let vis = if self.target == Target::Rust { "pub " } else { "" };
         let mut s = String::from(if own::is_copy(&generic, self.info) { "#[derive(Clone, Copy, PartialEq)]\n" } else { "#[derive(Clone, PartialEq)]\n" });
         if let Some(r) = self.info.records.get(n) {
             let g = if r.params.is_empty() { String::new() } else { format!("<{}>", r.params.join(", ")) };
-            let _ = writeln!(s, "struct {}{g} {{", rs_type(n));
+            let _ = writeln!(s, "{vis}struct {}{g} {{", rs_type(n));
             for (f, t) in r.fields.clone() {
-                let _ = writeln!(s, "    {}: {},", local(&f), self.field_ty(&t, pos)?);
+                let _ = writeln!(s, "    {vis}{}: {},", local(&f), self.field_ty(&t, pos)?);
             }
             s.push_str("}\n\n");
         } else {
             let e = &self.info.enums[n];
             let g = if e.params.is_empty() { String::new() } else { format!("<{}>", e.params.join(", ")) };
-            let _ = writeln!(s, "enum {}{g} {{", rs_type(n));
+            let _ = writeln!(s, "{vis}enum {}{g} {{", rs_type(n));
             for (v, fs) in e.variants.clone() {
                 if fs.is_empty() {
                     let _ = writeln!(s, "    {v},");
@@ -691,13 +727,13 @@ impl<'a> Lower<'a> {
 
     /// One instance: (its Rust text, its parameters' and result's types)
     fn function(&mut self, name: &str, targs: &[Ty]) -> LResult<(String, Vec<(String, Ty)>, Ty)> {
-        let Item::Fn { args, body, pos, generics, bounds, .. } = self.fns[name] else { unreachable!() };
+        let Item::Fn { args, body, pos, generics, bounds, public, .. } = self.fns[name] else { unreachable!() };
         if !self.info.effects[name].is_empty() {
-            return Err((*pos, format!("a @wasm function cannot perform effects ({:?})", self.info.effects[name])));
+            return Err((*pos, format!("a function lowered to Rust cannot perform effects ({:?})", self.info.effects[name])));
         }
         for g in generics {
             if !bounds.iter().any(|b| b.0 == *g) {
-                return Err((*pos, format!("the generic parameter `{g}` of a @wasm function needs a numeric bound (`{g}: Num`)")));
+                return Err((*pos, format!("the generic parameter `{g}` of a function lowered to Rust needs a numeric bound (`{g}: Num`)")));
             }
         }
         self.subst = generics.iter().cloned().zip(targs.iter().cloned()).collect();
@@ -758,7 +794,8 @@ impl<'a> Lower<'a> {
         }
         let rt = self.rty(&ret, *pos, if lt.is_some() { Some(lt) } else { None })?;
         let g = if lt.is_some() { "<'a>" } else { "" };
-        let text = format!("fn {rs}{g}({}) -> {rt} {b}", ps.join(", "));
+        let vis = if self.target == Target::Rust && *public { "pub " } else { "" };
+        let text = format!("{vis}fn {rs}{g}({}) -> {rt} {b}", ps.join(", "));
         let named = args.iter().map(|a| a.0.clone()).zip(ats).collect();
         Ok((text, named, ret))
     }
@@ -1216,7 +1253,7 @@ impl<'a> Lower<'a> {
                             Ok((s, Form::Brw { is_ref: true, roots: all, param: None }))
                         }
                     }
-                    Some(Callee::Fn) => Err((pos, format!("`{n}` is a JS-layer function: a @wasm function calls only @wasm and `wasm fn` functions (mark `{n}` @wasm)"))),
+                    Some(Callee::Fn) => Err((pos, format!("`{n}` is a SIMD kernel: use --no-simd to lower this SIMD kernel to scalar Rust"))),
                     Some(Callee::Wasm) => {
                         let (wargs, _) = &self.info.wasm[n];
                         let arrs: Vec<bool> = wargs.iter().map(|(_, w)| matches!(w, WTy::Slice(_))).collect();

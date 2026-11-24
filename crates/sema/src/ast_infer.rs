@@ -2071,6 +2071,41 @@ impl Inf<'_> {
         self.with(Shape::Clo(st, n))
     }
 
+    /// The declaration of method n that the bound of placeholder ps declares, with the type arguments of its
+    /// signature's generics the bound gives: `Self` the placeholder, the trait's parameters the bound's arguments
+    /// (when it has one bound of the trait). None where no bound's trait declares it
+    fn placeholder_decl(&self, ps: u32, n: &str) -> Option<(u32, Vec<Option<Ty>>)> {
+        let bs = self.prog.structs[ps as usize].placeholder.clone().unwrap_or_default();
+        for b in &bs {
+            let tr = b.split('<').next().unwrap_or(b).trim();
+            let tail = format!("::{tr}");
+            let Some(ds) = self.prog.traits.get(tr).or_else(|| self.prog.traits.iter().find(|(k, _)| k.ends_with(&tail)).map(|(_, v)| v)) else { continue };
+            let Some(d) = ds.iter().copied().find(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(n) && self.prog.sigs[d as usize].has_self) else { continue };
+            let mut sol: Vec<Option<Ty>> = vec![None; self.prog.sigs[d as usize].generics.len()];
+            if let Some(s0) = sol.first_mut() {
+                *s0 = Some(Ty::Struct(ps));
+            }
+            // (the bound's arguments, where it is the only bound of its trait)
+            let same = bs.iter().filter(|x| x.split('<').next().unwrap_or(x).trim() == tr).count();
+            if same == 1 && b.contains('<') {
+                if let Ok(f) = crate::parse::parse_file(&format!("type __B = dyn {b};")) {
+                    if let Some(crate::parse::ItemKind::Type(_, _, _, Some(PTy::Dyn(dbs)))) = f.items.first().map(|i| &i.kind) {
+                        if let Some(crate::parse::Bound::Trait(_, p)) = dbs.first() {
+                            let args: Vec<&PTy> = p.segs.last().map(|s| s.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect()).unwrap_or_default();
+                            for (i, t) in args.into_iter().enumerate() {
+                                if let (Some(slot), Some(t)) = (sol.get_mut(1 + i), self.parse_ty(t)) {
+                                    *slot = Some(t);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            return Some((d, sol));
+        }
+        None
+    }
+
     fn method_call(&mut self, recv: &Expr, n: &str, tf: &Vec<GArg>, args: &[Expr]) -> u32 {
         // (`s.as_ref()` on a `&str` / `String` (also through references, `&&str` of an `AsRef<str>` instance): `&str`,
         // or `&[u8]` where the bounds in scope ask for `AsRef<[u8]>` alone, as the code generator's as_ref gives)
@@ -2194,6 +2229,8 @@ impl Inf<'_> {
         if matches!(n, "zip" | "chain") && avs.len() == 1 {
             let mut base = self.resolve(avs[0]);
             let is_ref = matches!(base, Some(Ty::Ref(..)));
+            // (`it.zip(dst)` with dst: &mut [T] / `zip(&mut v)`: its iter_mut, as IntoIterator for &mut gives)
+            let is_mut = matches!(base, Some(Ty::Ref(true, _)));
             while let Some(Ty::Ref(_, i)) = base {
                 if matches!(i, Ty::Slice(_)) {
                     break;
@@ -2210,9 +2247,10 @@ impl Inf<'_> {
             let syntactic_array = matches!(&args[0], Expr::Array(_) | Expr::Repeat(..));
             if seq || syntactic_array {
                 let a = &args[0];
+                let it = if is_mut { "iter_mut" } else { "iter" };
                 let x = match (is_ref, a) {
-                    (true, Expr::Ref(_, inner)) => mcall((**inner).clone(), "iter", vec![]),
-                    (true, _) => mcall(a.clone(), "iter", vec![]),
+                    (true, Expr::Ref(_, inner)) => mcall((**inner).clone(), it, vec![]),
+                    (true, _) => mcall(a.clone(), it, vec![]),
                     _ => mcall(a.clone(), "into_iter", vec![]),
                 };
                 avs[0] = self.expr_kept(x, false);
@@ -2242,6 +2280,30 @@ impl Inf<'_> {
                 }
             }
             return self.var();
+        }
+        // (a type parameter's placeholder (zustc check of a generic fn nothing calls): the method its bound's trait
+        // declares, its parameters' and result's types as the declaration writes them, the trait's parameters the
+        // bound's arguments (`F: Get<&'z u32>` with `fn get(&self) -> A`: `&u32`), as for `dyn`. So an unsuffixed
+        // literal that meets them takes their type (`let a = 1; *f.get() == a`))
+        if let (None, Some(Ty::Struct(ps))) = (callee, dt) {
+            if self.prog.is_placeholder(ps) {
+                if let Some((d, sol)) = self.placeholder_decl(ps, n) {
+                    let sig = &self.prog.sigs[d as usize];
+                    let (ps, ret) = (sig.params[1..].to_vec(), sig.ret);
+                    for (a, p) in avs.into_iter().zip(ps) {
+                        let p = self.prog.partial_subst(p, &sol);
+                        if !self.prog.has_param(p) {
+                            let k = self.known(p);
+                            self.unify(a, k);
+                        }
+                    }
+                    let ret = self.prog.partial_subst(ret, &sol);
+                    if !self.prog.has_param(ret) {
+                        return self.known(ret);
+                    }
+                    return self.var();
+                }
+            }
         }
         if callee.is_none() && n == "to_string" && avs.is_empty() {
             if let Some(&ss) = self.prog.struct_index.get("String") {
@@ -2481,6 +2543,17 @@ impl Inf<'_> {
             "as_slice" | "as_mut_slice" => {
                 let sl = self.with(Shape::Slc(el));
                 self.with(Shape::Ref(n == "as_mut_slice", sl))
+            }
+            // (an array's as_mut: its one AsMut is `AsMut<[T]>`; a Vec's has two, left to the use)
+            "as_mut" if args.is_empty() && {
+                let mut t = self.resolve(r);
+                while let Some(Ty::Ref(_, i)) = t {
+                    t = Some(*i);
+                }
+                matches!(t, Some(Ty::Array(..)))
+            } => {
+                let sl = self.with(Shape::Slc(el));
+                self.with(Shape::Ref(true, sl))
             }
             _ => self.var(),
         }

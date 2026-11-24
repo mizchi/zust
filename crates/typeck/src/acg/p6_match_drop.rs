@@ -1249,7 +1249,23 @@ impl Cx<'_> {
                     self.pat_bind(sub, p, mode)?;
                 }
                 let name = name.clone();
-                let mode = if *by_ref { BindMode::Ref(*mutable) } else { mode };
+                // (`mut x` where the default binding mode is by reference: by value again, before edition 2024
+                // (`for (n, mut m) in &tups` moves out of the shared reference, E0507; `let (_, mut m) = &(1u8, 2u8);`
+                // makes m a u8))
+                let mode = match mode {
+                    _ if *by_ref => BindMode::Ref(*mutable),
+                    BindMode::Ref(m) if *mutable && self.prog.edition < 2024 => {
+                        // (a value that is not Copy is moved out of the reference the pattern matched through, a `&mut`
+                        // too, which is_copy takes for Copy as it does every reference: `let (mut r,) = &(&mut n,);`)
+                        if !borrowck::is_copy(self.prog, p.ty(), 0) || holds_mut_ref(self.prog, p.ty(), 0) {
+                            let what = if m { "a mutable reference" } else { "a shared reference" };
+                            let at = self.bk.scrut_place.as_ref().map(|x| x.1).filter(|s| s.line != 0).unwrap_or(SP);
+                            return Err(self.at(at, format!("cannot move out of {what} (E0507)")));
+                        }
+                        BindMode::Move
+                    }
+                    m => m,
+                };
                 match mode {
                     BindMode::Move => {
                         let (v, t) = self.read(p);
@@ -2696,5 +2712,23 @@ impl Cx<'_> {
                 _ => return None,
             };
         }
+    }
+}
+
+/// t is a `&mut`, or holds one in an array, a tuple, a struct's field or an enum's variant (`Option<&mut T>`, whose
+/// derived Copy is_copy takes to hold, as it takes every reference for Copy)
+fn holds_mut_ref(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
+    if depth > 16 {
+        return false;
+    }
+    match t {
+        Ty::Ref(true, _) => true,
+        Ty::Array(e, _) => holds_mut_ref(prog, *e, depth + 1),
+        Ty::Struct(s) => {
+            let sd = &prog.structs[s as usize];
+            sd.placeholder.is_none()
+                && (sd.fields.iter().any(|f| holds_mut_ref(prog, f.1, depth + 1)) || sd.variants.iter().any(|v| v.fields.iter().any(|f| holds_mut_ref(prog, f.1, depth + 1))))
+        }
+        _ => false,
     }
 }

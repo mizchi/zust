@@ -62,8 +62,18 @@ const sources = [
   ...readdirSync(join(root, "examples")).filter((f) => f.endsWith(".zsc")).map((f) => join(root, "examples", f)),
   join(root, "bench/js/workloads.zsc"),
 ];
+// JS controls have ordinary functions with the same bodies as the annotated examples.
+const controls = join(out, "sources");
+mkdirSync(controls);
+const jsSources = sources.map((src) => {
+  const code = readFileSync(src, "utf8");
+  if (!/^@wasm /m.test(code)) return src;
+  const plain = join(controls, src.split("/").pop());
+  writeFileSync(plain, code.replace(/^@wasm /gm, ""));
+  return plain;
+});
 const size = {};
-for (const src of sources) {
+for (const src of jsSources) {
   const name = src.split("/").pop().replace(/\.zsc$/, "");
   const dir = join(out, name);
   execFileSync(zsc, [src, "-o", dir, "--all-js", ...extra], { stdio: "pipe" });
@@ -84,7 +94,7 @@ if (hasEsbuild) {
   const dir = join(out, "all");
   mkdirSync(dir, { recursive: true });
   const names = Object.keys(size);
-  for (const name of names) execFileSync(zsc, [sources.find((s) => s.endsWith(`/${name}.zsc`)), "-o", dir, "--all-js", ...extra], { stdio: "pipe" });
+  for (const name of names) execFileSync(zsc, [jsSources.find((s) => s.endsWith(`/${name}.zsc`)), "-o", dir, "--all-js", ...extra], { stdio: "pipe" });
   writeFileSync(join(dir, "entry.js"), names.map((n, i) => `export * as m${i} from "./${n}.js";`).join("\n") + "\n");
   const min = execFileSync(esbuild, [join(dir, "entry.js"), "--bundle", "--minify", "--format=esm", "--external:react", "--external:react/*", "--external:node:*"], { stdio: ["pipe", "pipe", "pipe"] });
   all = { min: min.length, gz: gzipSync(min, { level: 9 }).length };

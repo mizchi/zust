@@ -422,7 +422,7 @@ pub struct Program {
     pub blanket: FxMap<String, u32>,
     /// A blanket impl's trait → the bounds of its self type's parameter, its where clauses' too
     /// (`impl<T: ?Sized> FutureExt for T where T: Future`: ?Sized, Future)
-    pub blanket_bounds: FxMap<String, Vec<String>>,
+    pub blanket_bounds: FxMap<String, Vec<Vec<String>>>,
     pub blanket_selfs: HashSet<String>,
     /// Traits with a blanket impl (`impl<T> Tr for T`): every type implements them (bounds are not checked)
     pub blanket_traits: HashSet<String>,
@@ -457,6 +457,9 @@ pub struct Program {
     pub ref_impls: HashSet<(Ty, String)>,
     /// generic impls for references: (self type with the impl's parameters, trait, number of parameters)
     pub ref_impl_pats: Vec<(Ty, String, usize)>,
+    /// The program's impls for trait objects, `impl WasmClosure for dyn Fn() -> R + '_`: (trait, the object's trait's
+    /// name, `Fn`), which a `dyn Fn(..)` then implements
+    pub dyn_impls: FxSet<(String, String)>,
     /// traits implemented for fn pointers (`impl Tr for fn(A) -> B`; generic ones count for every fn pointer)
     pub fnptr_impls: HashSet<(Option<Ty>, String)>,
     /// 親トレイト (`trait Bar: Foo`)
@@ -493,6 +496,14 @@ pub struct Program {
     /// Summary::const_regions, by constant: the codes of its type against its impl's lifetimes, and the impl's self
     /// type's slots (which say which of them a use's path writes)
     pub const_regions: FxMap<u32, (Vec<u8>, Vec<u8>)>,
+    /// Summary::assoc_regions, by associated type (its index in assocs): the codes of its value against its impl's
+    /// lifetimes, the impl's self type's codes, the `'d: 'a` its header declares of them, and the codes of the
+    /// lifetimes its trait path writes (RImplSyn::trait_lts)
+    pub assoc_regions: FxMap<u32, AssocRegions>,
+    /// The item (an impl's member) each associated type is defined in, by its index in assocs: a function's cache
+    /// key holds the definitions of the program's own, whose values (and their lifetimes) the function's types and
+    /// region check read
+    pub assoc_items: Vec<u32>,
     /// The declared type (as written) of a constant whose type is not known yet during layout (`[u8; 1]`, `(u8,)`):
     /// what an element or field of it is before its type is resolved
     pub early_syn: FxMap<u32, crate::types::TySyn>,
@@ -505,6 +516,9 @@ pub struct Program {
     pub const_by_last: FxMap<String, Vec<u32>>,
     /// プリミティブ型への trait 実装 (型, trait)
     pub prim_impls: HashSet<(Ty, String)>,
+    /// prim_impls that only an impl for a reference to the type makes (`impl Tr for &mut i32`): the type itself does not
+    /// implement the trait (implements_std)
+    pub prim_ref_only: HashSet<(Ty, String)>,
     /// `&[T]` に実装された trait (`impl BufRead for &[u8]`)
     pub ref_slice_traits: HashSet<String>,
     /// クロージャの fn id → 定義
@@ -542,6 +556,9 @@ pub struct Program {
     /// The regions of the struct / enum definitions that name lifetimes (by definition id): region checking
     pub adt_regions: FxMap<u32, std::sync::Arc<RAdtSyn>>,
 }
+
+/// Program::assoc_regions' entry: (value codes, impl self type codes, header outlives, trait path lifetime codes)
+pub type AssocRegions = (Vec<u8>, Vec<u8>, Vec<(u8, u8)>, Vec<u8>);
 
 /// `impl<..> Trait for S<..> { type Name = Value; }`
 pub struct AssocDef {
@@ -649,6 +666,73 @@ pub struct CloRg {
     pub lts: Vec<(String, u8)>,
 }
 
+/// How sure the answer to a trait goal is (Program::evaluate; rustc's next solver's `Certainty`, issue #2)
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Certainty {
+    Yes,
+    /// Neither proved nor disproved
+    Maybe(MaybeCause),
+    No,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MaybeCause {
+    /// The goal was met again while it was being proved: `impl<T: Q> P for T` with `impl<T: P> Q for T`. rustc
+    /// reports E0275 for an obligation that needs it (a program trait's goals are inductive)
+    Cycle,
+    /// More than 64 goals deep
+    Overflow,
+}
+
+impl Certainty {
+    /// Either holds: `Yes` over `Maybe` over `No`
+    pub fn or(self, o: Certainty) -> Certainty {
+        match (self, o) {
+            (Certainty::Yes, _) | (_, Certainty::Yes) => Certainty::Yes,
+            (Certainty::Maybe(c), _) | (_, Certainty::Maybe(c)) => Certainty::Maybe(c),
+            _ => Certainty::No,
+        }
+    }
+
+    /// Both hold: `No` over `Maybe` over `Yes`
+    pub fn and(self, o: Certainty) -> Certainty {
+        match (self, o) {
+            (Certainty::No, _) | (_, Certainty::No) => Certainty::No,
+            (Certainty::Maybe(c), _) | (_, Certainty::Maybe(c)) => Certainty::Maybe(c),
+            _ => Certainty::Yes,
+        }
+    }
+
+    /// Some one holds (stops at the first `Yes`)
+    pub fn any(it: impl Iterator<Item = Certainty>) -> Certainty {
+        let mut r = Certainty::No;
+        for c in it {
+            r = r.or(c);
+            if r == Certainty::Yes {
+                break;
+            }
+        }
+        r
+    }
+
+    /// All hold (stops at the first `No`)
+    pub fn all(it: impl Iterator<Item = Certainty>) -> Certainty {
+        let mut r = Certainty::Yes;
+        for c in it {
+            r = r.and(c);
+            if r == Certainty::No {
+                break;
+            }
+        }
+        r
+    }
+}
+
+thread_local! {
+    /// How sure implements_concrete's last struct or tuple impl answer was (Program::impl_applies_noted)
+    static NOTED: std::cell::Cell<Option<Certainty>> = const { std::cell::Cell::new(None) };
+}
+
 impl Insts {
     pub fn new(prog: &Program) -> Insts {
         Insts {
@@ -685,11 +769,21 @@ impl Insts {
         }
         for ((pn, bounds), &t) in b.generics.iter().zip(&args) {
             for tr in bounds {
-                if !prog.implements(t, tr) {
-                    return Err(format!(
-                        "the trait bound `{}: {tr}` is not satisfied (for `{pn}`)",
-                        prog.tn(t)
-                    ));
+                // (a trait's default method for an impl for a reference to a primitive (`impl Third for &&u32`) is an
+                // instance whose Self is the primitive: the impl is for it there (prim_ref_only))
+                if pn == "Self" && prog.prim_impls.contains(&(t, tr.clone())) {
+                    continue;
+                }
+                match prog.evaluate(t, tr) {
+                    Certainty::No => {
+                        return Err(format!("the trait bound `{}: {tr}` is not satisfied (for `{pn}`)", prog.tn(t)));
+                    }
+                    // (the bound needs a goal that needs itself: inductive, so it does not hold. Overflow stays
+                    // accepted: the limit is not rustc's)
+                    Certainty::Maybe(MaybeCause::Cycle) => {
+                        return Err(format!("overflow evaluating the requirement `{}: {tr}` (E0275)", prog.tn(t)));
+                    }
+                    _ => {}
                 }
             }
         }
@@ -994,6 +1088,8 @@ impl Program {
             static_copy: FxSet::default(),
             static_self_consts: FxMap::default(),
             const_regions: FxMap::default(),
+            assoc_regions: FxMap::default(),
+            assoc_items: Vec::new(),
             early_syn: FxMap::default(),
             alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
@@ -1001,6 +1097,7 @@ impl Program {
             impl_targs_lts: HashSet::default(),
             ref_impls: Default::default(),
             ref_impl_pats: vec![],
+            dyn_impls: FxSet::default(),
             fnptr_impls: Default::default(),
             deny_unreachable: false,
             deny_must_use: false,
@@ -1049,6 +1146,7 @@ impl Program {
             lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
+            prim_ref_only: HashSet::default(),
             ref_slice_traits: HashSet::default(),
             closures: FxMap::default(),
             closure_by: FxMap::default(),
@@ -1195,9 +1293,16 @@ impl Program {
                 if let Some(&prev) = p.const_index.get(&n) {
                     let pk = p.consts[prev as usize].item as usize;
                     match (trait_of(ii), trait_of(pk)) {
-                        // (two of one trait impl's: a real duplicate)
+                        // (two of one trait impl's: a real duplicate. But impls for trait objects of each arity,
+                        // `impl Tr for dyn Fn(A) -> R` and `.. for dyn Fn(A, B) -> R`, are one `__dyn_Fn` here: the
+                        // first one's stands when they give it alike, `const IS_MUT: bool = false;`)
                         (Some(a), Some(b)) if a == b => {
-                            return Err(format!("{}:1: duplicate definition of `{n}`", items[ii].line));
+                            if n.starts_with("__dyn_") && sums[pk].consts.iter().any(|c| c.0 == n && c.2 == *e) {
+                                // (kept under a name no path reaches: the consts stay in the summaries' order)
+                                n = format!("{n}#dyn{}", p.consts.len());
+                            } else {
+                                return Err(format!("{}:1: duplicate definition of `{n}`", items[ii].line));
+                            }
                         }
                         (Some(tr), _) => {
                             let (base, last) = n.rsplit_once("::").map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
@@ -1350,6 +1455,8 @@ impl Program {
                         reread.push((p.assocs.len(), ii, k));
                     }
                     p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat, tr });
+                    p.note_assoc_regions(items, sums, ii, k);
+                    p.assoc_items.push(ii as u32);
                     early.push((ii, k));
                 }
             }
@@ -1361,6 +1468,32 @@ impl Program {
                 p.layout(id, &sdefs, items, &mut state)?;
             }
         }
+        // (and those of generic types, `impl<R> Generator for Core<R> { type Output = [u32; 64]; }`, once the generic
+        // definitions are there: a field `BlockRng<Core<R8>>` of a non-generic struct, laid out next, has a field of type
+        // `G::Output` (rand_core 0.10 with chacha20). Those that do not resolve yet are taken below, as before)
+        for (ii, sm) in sums.iter().enumerate() {
+            let of_trait = matches!(items[ii].kind, crate::lexer::ItemKind::ImplMember(h) if sums[h as usize].impl_trait.is_some());
+            if sm.assocs.is_empty() || !of_trait {
+                continue;
+            }
+            for (k, a) in sm.assocs.iter().enumerate() {
+                if early.contains(&(ii, k)) || !syn_has_app(&a.self_ty, &p.aliases) || syn_has_app(&a.value, &p.aliases) {
+                    continue;
+                }
+                let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
+                if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
+                    let (ngen, ngat) = gat_split(&gn);
+                    if syn_has_assoc(&a.value) {
+                        reread.push((p.assocs.len(), ii, k));
+                    }
+                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat, tr: impl_trait_of(items, sums, ii) });
+                    p.note_assoc_regions(items, sums, ii, k);
+                    p.assoc_items.push(ii as u32);
+                    early.push((ii, k));
+                }
+            }
+        }
+        let early: HashSet<(usize, usize)> = early.into_iter().collect();
         for id in 0..sdefs.len() {
             p.layout(id, &sdefs, items, &mut state)?;
         }
@@ -1464,12 +1597,9 @@ impl Program {
             }
         }
         // 関連型 (関数のシグネチャの `Self::Item` を解決するので先に)
-        let mut next_early = 0;
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             for (k, a) in sm.assocs.iter().enumerate() {
-                // (`early` is in the same order as this loop)
-                if early.get(next_early) == Some(&(ii, k)) {
-                    next_early += 1;
+                if early.contains(&(ii, k)) {
                     continue;
                 }
                 let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
@@ -1491,6 +1621,8 @@ impl Program {
                     ngat,
                     tr: impl_trait_of(items, sums, ii),
                 });
+                p.note_assoc_regions(items, sums, ii, k);
+                p.assoc_items.push(ii as u32);
             }
         }
         // (twice: a value may name one read again here)
@@ -1753,6 +1885,14 @@ impl Program {
                 other_impls.push((tr.clone(), it.line));
             }
             // (右辺の型を持つ比較の impl と、配列・スライスへの impl は、`==` が関数を直接選ぶので数えない)
+            // (an impl for a trait object, `impl Tr for dyn Fn(A) -> R`: by the object's trait's name)
+            if sn.starts_with("__dyn_") {
+                if let Some(TySyn::Dyn(d)) = &sm.impl_self_ty {
+                    let first = d.split('+').next().unwrap_or(d).trim();
+                    let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(first).trim();
+                    p.dyn_impls.insert((tr.clone(), name.rsplit("::").next().unwrap_or(name).to_string()));
+                }
+            }
             if tr.starts_with("PartialEq<") || tr.starts_with("PartialOrd<") || sn == "__array" || sn == "__slice" || sn.starts_with("__dyn_") {
                 // (`impl BufRead for &[u8]`: 境界を満たすかのために覚える)
                 if sn == "__slice" && matches!(sm.impl_self_ty, Some(TySyn::Ref(false, _))) && !tr.contains('<') {
@@ -1797,17 +1937,20 @@ impl Program {
                     let st = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok());
                     let args: Option<Vec<Ty>> = sm.impl_trait_args.iter().map(|a| p.resolve_g(a, &gn).ok()).collect();
                     if let (Some(st), Some(args)) = (st, args) {
-                        // (one std's blanket impls give already, E0119: `impl<T> From<T> for T`, `impl<T, U: Into<T>>
-                        // TryFrom<U> for T` (U is T, or the program's `impl From<U> for T`), `impl<T> AsRef<T> for Box<T>`)
+                        // (one std's blanket impls give already, E0119: `impl<T, U: Into<T>> TryFrom<U> for T` with the
+                        // program's `impl From<U> for T`, `impl<T> AsRef<T> for Box<T>`. The reflexive `From<S> for S` /
+                        // `TryFrom<S> for S` below; a self type written with a path is another crate's)
                         let from_too = || {
                             sums.iter().any(|o| o.impl_trait.as_deref() == Some("From") && o.impl_self_ty == sm.impl_self_ty && o.impl_trait_args == sm.impl_trait_args)
                         };
-                        let std_has = match (tr.as_str(), args.as_slice()) {
-                            ("From", [a]) => *a == st,
-                            ("TryFrom", [a]) => *a == st || from_too(),
-                            ("AsRef", [a]) => st == Ty::Box(intern(*a)),
-                            _ => false,
-                        };
+                        let arg0 = sm.impl_trait_args.first();
+                        let boxed_syn = matches!((&sm.impl_self_ty, arg0), (Some(TySyn::App(b, xs)), Some(a)) if b == "Box" && xs.len() == 1 && xs[0] == *a);
+                        let std_has = !sm.impl_self_path
+                            && match (tr.as_str(), args.as_slice()) {
+                                ("TryFrom", [a]) => *a != st && from_too(),
+                                ("AsRef", [a]) => st == Ty::Box(intern(*a)) && boxed_syn,
+                                _ => false,
+                            };
                         if std_has && ii < user {
                             return Err(format!("{}:1: conflicting implementations of trait `{tr}<{}>` for type `{}` (E0119)", it.line, p.tn(args[0]), p.tn(st)));
                         }
@@ -1817,6 +1960,12 @@ impl Program {
                         p.impl_targs.entry(tr.clone()).or_default().push((st, args, gn.len()));
                     }
                 }
+            }
+            // (`impl From<S> for S` / `impl TryFrom<S> for S`: std's `impl<T> From<T> for T`, and the TryFrom it gives,
+            //  already cover it (E0119))
+            // (not `impl From<TokenStream> for proc_macro::TokenStream`: a path names another crate's type, proc-macro2)
+            if (tr == "From" || tr == "TryFrom") && !sm.impl_self_path && sm.impl_trait_args.len() == 1 && sm.impl_self_ty.as_ref() == Some(&sm.impl_trait_args[0]) {
+                return Err(format!("{}:1: conflicting implementations of trait `{tr}<{sn}>` for type `{sn}` (E0119)", it.line));
             }
             // プリミティブ型への trait 実装 (`impl Tr for u32`)
             // (`impl Hash for str`: str も組み込みの型として持つ)
@@ -1850,6 +1999,15 @@ impl Program {
             // (not `impl Tr for &__m128i`, which the reference implements: registered above)
             let vec_ty = crate::simd_sig::vector_name(sn).filter(|_| !p.struct_index.contains_key(sn.as_str()) && !matches!(sm.impl_self_ty, Some(TySyn::Ref(..))));
             if let Some(pt) = Ty::prim(sn).or((sn == "str").then_some(Ty::Str)).or((sn == "#tuple0").then_some(Ty::Unit)).or(vec_ty) {
+                // (`impl Tr for &mut i32` is for the reference, registered above: not for i32 itself, which a bound
+                // asks of (prim_ref_only); the method lookup still finds it from i32 (issue #2))
+                if matches!(sm.impl_self_ty, Some(TySyn::Ref(..))) {
+                    if !p.prim_impls.contains(&(pt, tr.clone())) {
+                        p.prim_ref_only.insert((pt, tr.clone()));
+                    }
+                } else {
+                    p.prim_ref_only.remove(&(pt, tr.clone()));
+                }
                 let dup = !p.prim_impls.insert((pt, tr.clone()));
                 if impl_overlaps(&mut self_tys, sums, user, ii, sn, tr, dup) {
                     return Err(format!(
@@ -1906,9 +2064,9 @@ impl Program {
                 bare_blankets.insert(tr.clone());
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
-                if let Some(g) = sm.impl_generics.iter().find(|g| g.0 == *sn) {
-                    p.blanket_bounds.entry(tr.clone()).or_default().extend(g.1.iter().cloned());
-                }
+                // (one list of bounds per impl: `impl<T: A> Tr<u8> for T` and `impl<T: B> Tr<u16> for T` are two)
+                let bs = sm.impl_generics.iter().find(|g| g.0 == *sn).map(|g| g.1.clone()).unwrap_or_default();
+                p.blanket_bounds.entry(tr.clone()).or_default().push(bs);
                 // (the trait's default methods are methods of every type)
                 let ids: Vec<u32> = p.traits.get(tr).cloned().unwrap_or_default();
                 for id in ids {
@@ -1977,7 +2135,7 @@ impl Program {
             }
         }
         // (`impl<T> Tr for T` and `impl Tr for Box<U>` overlap: Box<U> is one of the T, E0119)
-        // (not one for references, `impl<T: Tr> Tr for &T`: a Box is no reference)
+        // (not one for `&T` / `&mut T`: a Box is no reference)
         if let Some((tr, line)) = box_impls.iter().find(|(tr, _)| bare_blankets.contains(tr)) {
             return Err(format!("{line}:1: conflicting implementations of trait `{tr}` for type `Box<_>`"));
         }
@@ -2149,6 +2307,42 @@ impl Program {
                 let once = |t: &str| sums[..user].iter().filter(|s| s.trait_decl.as_deref() == Some(t)).count() == 1;
                 if cycle && once(tr) && seen.iter().all(|t| once(t)) {
                     return Err(format!("{}:1: cycle detected when computing the super predicates of `{tr}` (E0391)", items[ii].line));
+                }
+            }
+        }
+        // (an impl of a trait with supertraits needs the self type to implement them: `trait B: A` and `impl B for C`
+        // without `impl A for C` (E0277). For impls of a type with no parameters, and supertraits of the program's: a
+        // nested goal of the impl, as the trait solver proves it (issue #2))
+        if !user_traits.is_empty() && !p.trait_supers.is_empty() {
+            for (ii, sm) in sums[..user].iter().enumerate() {
+                let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self_ty.as_ref()) else { continue };
+                if !sm.impl_generics.is_empty() {
+                    continue;
+                }
+                let Some(sup) = p.trait_supers.get(tr) else { continue };
+                let Ok(t) = p.resolve_g(st, &[]) else { continue };
+                // (nor a type with a trait object in it: `dyn T2` and `dyn T2 + 'static` are told apart by their text here,
+                // where rustc sees one type with two lifetimes)
+                if p.has_param(t) || p.tn(t).contains("dyn ") {
+                    continue;
+                }
+                // (nor a Box, an array or a slice: implements does not know the program's impls for them)
+                let opaque = matches!(t, Ty::Box(_) | Ty::Array(..) | Ty::Slice(_));
+                for s in sup {
+                    let name = s.split('<').next().unwrap_or(s).trim();
+                    if s.contains('<') || !user_traits.contains(name) || p.implements(t, name) {
+                        continue;
+                    }
+                    // (an impl of the supertrait for exactly this type, written out: `impl A for [u8; 1]`)
+                    let written = sums[..user].iter().any(|o| {
+                        o.impl_generics.is_empty()
+                            && o.impl_trait.as_deref().is_some_and(|x| x.split('<').next().unwrap_or(x).trim() == name)
+                            && o.impl_self_ty.as_ref().and_then(|x| p.resolve_g(x, &[]).ok()) == Some(t)
+                    });
+                    if written || opaque {
+                        continue;
+                    }
+                    return Err(format!("{}:1: the trait bound `{}: {name}` is not satisfied (E0277)", items[ii].line, p.tn(t)));
                 }
             }
         }
@@ -2489,33 +2683,166 @@ impl Program {
         false
     }
 
+    /// The primitive t implements tr by an impl of the program's (prim_impls), not one for a reference to t only
+    fn prim_has(&self, t: Ty, tr: &str) -> bool {
+        let k = (t, tr.to_string());
+        self.prim_impls.contains(&k) && !self.prim_ref_only.contains(&k)
+    }
+
     pub fn implements(&self, t: Ty, tr: &str) -> bool {
-        self.blanket_traits.contains(tr) || self.implements_concrete(t, tr)
+        self.evaluate(t, tr) != Certainty::No
+    }
+
+    /// The goal `t: tr`, with how sure the answer is (issue #2). `Maybe` comes from a goal met again while it is
+    /// being proved (a cycle), or one past 64 deep (overflow). implements takes `Maybe` to hold, the old answer.
+    ///
+    /// Only the goals of the program's traits carry `Maybe` (blanket impls' and struct and tuple impls' bounds);
+    /// the rest of the answers are written case by case and are `Yes` or `No`. A `Maybe` lost on the way (through
+    /// a derived impl's or a `Box`'s arguments) becomes `Yes`, which accepts, as before
+    pub fn evaluate(&self, t: Ty, tr: &str) -> Certainty {
+        let b = if self.blanket_traits.contains(tr) { self.blanket_certainty(t, tr) } else { Certainty::No };
+        if b == Certainty::Yes {
+            return b;
+        }
+        NOTED.with(|n| n.set(None));
+        let c = self.implements_concrete(t, tr);
+        let noted = NOTED.with(|n| n.take());
+        let c = match (c, noted) {
+            (false, _) => Certainty::No,
+            (true, Some(m @ Certainty::Maybe(_))) => m,
+            (true, _) => Certainty::Yes,
+        };
+        b.or(c)
+    }
+
+    /// A blanket impl of tr (`impl<T: Bar> Tr for T`) is for t when t meets its bounds, its where clauses' too: those
+    /// of traits of the program's, nested goals of their own (goal); std's are taken to hold (issue #2)
+    fn blanket_certainty(&self, t: Ty, tr: &str) -> Certainty {
+        let Some(bs) = self.blanket_bounds.get(tr) else { return Certainty::Yes };
+        // (a trait object implements its trait's supertraits itself, whatever the blanket impl asks: `dyn Trait:
+        // Supertrait` with `trait Trait: Supertrait`)
+        if matches!(t, Ty::Dyn(_)) {
+            return Certainty::Yes;
+        }
+        // (some one impl's bounds all hold)
+        Certainty::any(bs.iter().map(|bs| {
+            Certainty::all(bs.iter().map(|b| {
+                let name = b.split('<').next().unwrap_or(b).trim();
+                if !self.user_traits.contains(name) { Certainty::Yes } else { self.goal(t, name) }
+            }))
+        }))
+    }
+
+    /// A nested goal `t: tr` of an impl's bounds. One already being proved (a cycle: `impl<T: Bar> Foo for T` with
+    /// `impl<T: Foo> Bar for T`), or past 64 goals deep (overflow), is `Maybe`.
+    ///
+    /// A goal answered without meeting a cycle or the overflow is kept for the rest of the outermost goal (`T2: T1 +
+    /// T0`, `T3: T2 + T1`, ... asks T1 of one type again and again). One that did meet either is not: its answer
+    /// leaned on a guess. The cache starts empty with each outermost goal, so it never outlives the impls it was
+    /// proved by
+    fn goal(&self, t: Ty, tr: &str) -> Certainty {
+        #[derive(Default)]
+        struct Goals {
+            stack: Vec<(Ty, String)>,
+            /// A goal's answer, and how many goals deep its proof went below it: reused only where the same proof
+            /// would stay within 64 (with fewer goals left above it, the proof could have met the overflow)
+            done: FxMap<(Ty, String), (Certainty, usize)>,
+            guesses: u64,
+            /// The deepest the stack went in the proof being made
+            peak: usize,
+        }
+        thread_local! {
+            static GOALS: std::cell::RefCell<Goals> = std::cell::RefCell::new(Goals::default());
+        }
+        let key = (t, tr.to_string());
+        let before = GOALS.with(|g| {
+            let mut g = g.borrow_mut();
+            let d = g.stack.len();
+            if d == 0 {
+                g.done.clear();
+                g.peak = 0;
+            }
+            // (the overflow first: a goal past 64 deep is a guess, whatever an earlier, shallower proof of it found)
+            if d >= 64 {
+                g.guesses += 1;
+                return Err(Certainty::Maybe(MaybeCause::Overflow));
+            }
+            if g.stack.contains(&key) {
+                g.guesses += 1;
+                return Err(Certainty::Maybe(MaybeCause::Cycle));
+            }
+            if let Some(&(r, h)) = g.done.get(&key) {
+                if d + h < 64 {
+                    g.peak = g.peak.max(d + h);
+                    return Err(r);
+                }
+            }
+            g.stack.push(key.clone());
+            let peak = std::mem::replace(&mut g.peak, d + 1);
+            Ok((g.guesses, d, peak))
+        });
+        let (before, d, outer_peak) = match before {
+            Ok(x) => x,
+            Err(r) => return r,
+        };
+        let r = self.evaluate(t, tr);
+        GOALS.with(|g| {
+            let mut g = g.borrow_mut();
+            g.stack.pop();
+            let h = g.peak - d;
+            if g.guesses == before {
+                g.done.insert(key, (r, h));
+            }
+            g.peak = g.peak.max(outer_peak);
+        });
+        r
     }
 
     /// An impl of tr for t's struct is for t itself: for an instance (`W<u8>`), an impl whose self type matches it, or
     /// one for every instance (`impl<T> A for W<T>`, `impl A for W`)
     pub fn impl_applies(&self, t: Ty, tr: &str) -> bool {
-        let Ty::Struct(sid) = t else { return true };
+        self.impl_certainty(t, tr) != Certainty::No
+    }
+
+    /// impl_applies, with how sure it is: the bounds of the impl that matches are nested goals
+    fn impl_certainty(&self, t: Ty, tr: &str) -> Certainty {
+        let Ty::Struct(sid) = t else { return Certainty::Yes };
         let b = self.base_of(sid);
         match self.impl_selfs.get(&(b, tr.to_string())) {
-            Some(v) if b != sid => v.iter().any(|(st, n, bounds)| {
+            Some(v) if b != sid => Certainty::any(v.iter().map(|(st, n, bounds)| {
                 let mut sol = vec![None; *n];
+                if !(self.match_ty(*st, t, &mut sol) && self.refs_agree(*st, t, 0)) {
+                    return Certainty::No;
+                }
                 // (a bound of a trait of the program's holds by its impls; std's are not checked)
-                self.match_ty(*st, t, &mut sol)
-                    && self.refs_agree(*st, t, 0)
-                    && bounds.iter().all(|(i, b)| !self.user_traits.contains(b) || sol.get(*i).copied().flatten().is_none_or(|a| self.implements(a, b)))
-            }),
-            _ => true,
+                Certainty::all(bounds.iter().map(|(i, b)| match sol.get(*i).copied().flatten() {
+                    Some(a) if self.user_traits.contains(b) => self.goal(a, b),
+                    _ => Certainty::Yes,
+                }))
+            })),
+            _ => Certainty::Yes,
         }
     }
 
-    /// The references in a and b (a pattern with `Param`s, a type) agree in mutability, as match_ty does not check:
-    /// `W<&mut i32>` is not `W<&i32>`
+    /// impl_applies for implements_concrete's answer, noting how sure it is for evaluate (NOTED): the answer is
+    /// implements_concrete's own, so nothing runs between this and evaluate reading it but returns
+    fn impl_applies_noted(&self, t: Ty, tr: &str) -> bool {
+        let c = self.impl_certainty(t, tr);
+        NOTED.with(|n| n.set(Some(c)));
+        c != Certainty::No
+    }
+
+    /// The references and raw pointers in a and b (a pattern with `Param`s, a type) agree in mutability, as match_ty
+    /// does not check: `W<&mut i32>` is not `W<&i32>`, nor `W<*mut i32>` `W<*const i32>`, nor `W<&i32>` `W<*const i32>`
     pub fn refs_agree(&self, a: Ty, b: Ty, depth: u32) -> bool {
         match (a, b) {
-            (Ty::Ref(m, x), Ty::Ref(n, y)) => m == n && self.refs_agree(*x, *y, depth + 1),
-            (Ty::Array(x, _), Ty::Array(y, _)) | (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) | (Ty::Ptr(_, x), Ty::Ptr(_, y)) => self.refs_agree(*x, *y, depth + 1),
+            (Ty::Ref(m, x), Ty::Ref(n, y)) | (Ty::Ptr(m, x), Ty::Ptr(n, y)) => m == n && self.refs_agree(*x, *y, depth + 1),
+            // (match_ty lets a raw pointer pattern take a reference, as a call coerces it; a self type does not)
+            (Ty::Ptr(..), Ty::Ref(..)) | (Ty::Ref(..), Ty::Ptr(..)) => false,
+            (Ty::Array(x, _), Ty::Array(y, _)) | (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) => self.refs_agree(*x, *y, depth + 1),
+            (Ty::Fn(f), Ty::Fn(g)) if f != g && depth < 16 => {
+                f.params.len() == g.params.len() && f.params.iter().zip(&g.params).chain([(&f.ret, &g.ret)]).all(|(&p, &q)| self.refs_agree(p, q, depth + 1))
+            }
             (Ty::Struct(x), Ty::Struct(y)) if x != y && depth < 16 => {
                 self.structs[x as usize].args.iter().zip(&self.structs[y as usize].args).all(|(&p, &q)| self.refs_agree(p, q, depth + 1))
             }
@@ -2627,7 +2954,10 @@ impl Program {
         // `Iterator<Item = T>` は trait の名前で見る (関連型の制約は呼び出し側で解く)
         if let Some(i) = tr.find('<') {
             if parse_fn_bound(tr).is_none() {
-                return self.implements(t, tr[..i].trim());
+                // (the trait's name alone: its certainty goes on to evaluate, as impl_applies_noted's does)
+                let c = self.evaluate(t, tr[..i].trim());
+                NOTED.with(|n| n.set(Some(c)));
+                return c != Certainty::No;
             }
         }
         match t {
@@ -2651,8 +2981,8 @@ impl Program {
                 ) {
                     self.structs[sid as usize].fields.iter().all(|f| self.implements(f.1, tr))
                 } else {
-                    // ユーザの `impl<A, B> Tr for (A, B)`
-                    self.impls.contains(&(self.base_of(sid), tr.to_string()))
+                    // ユーザの `impl<A, B> Tr for (A, B)`: its self type matches t, and its bounds hold (as a struct's)
+                    self.impls.contains(&(self.base_of(sid), tr.to_string())) && self.impl_applies_noted(t, tr)
                 }
             }
             // prelude のコレクションと Option は Default (空 / None。中身が 0 のビット列)
@@ -2679,7 +3009,9 @@ impl Program {
             {
                 self.structs[sid as usize].args.iter().all(|&a| self.implements(a, tr))
             }
-            Ty::Struct(sid) => self.impls.contains(&(self.base_of(sid), tr.to_string())),
+            // (an impl for the struct, whose self type t matches and whose bounds t's arguments meet: `impl<T: Bar> Foo
+            // for W<T>` is not for W<u8> without `impl Bar for u8`, `impl Foo for W<i32>` is not for W<u8> (issue #2))
+            Ty::Struct(sid) => self.impls.contains(&(self.base_of(sid), tr.to_string())) && self.impl_applies_noted(t, tr),
             // (配列・スライス: 比較・Debug・Hash は要素が実装していれば)
             Ty::Array(e, _) => {
                 tr == "Sized"
@@ -2688,7 +3020,7 @@ impl Program {
             }
             Ty::Str => {
                 matches!(tr, "Display" | "Debug" | "PartialEq" | "Eq" | "Hash" | "PartialOrd" | "Ord")
-                    || self.prim_impls.contains(&(Ty::Str, tr.to_string()))
+                    || self.prim_has(Ty::Str, tr)
             }
             Ty::Slice(e) => matches!(tr, "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Debug" | "Hash") && self.implements(*e, tr),
             // (`dyn Tr` implements Tr, and the other traits written in it: `dyn Tr + Send`; the bindings of
@@ -2701,6 +3033,11 @@ impl Program {
                 };
                 let name = name.rsplit("::").next().unwrap_or(name);
                 name == tr && self.dyn_bindings_ok(name, args)
+            }) || (!self.dyn_impls.is_empty() && {
+                // (the program's impl for objects of its trait, `impl WasmClosure for dyn Fn() -> R`)
+                let first = d.split('+').next().unwrap_or(d).trim();
+                let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(first).trim();
+                self.dyn_impls.contains(&(tr.to_string(), name.rsplit("::").next().unwrap_or(name).to_string()))
             }),
             // 関数ポインタ: Fn 系 (引数の数が合うもの) と Copy
             // (impls for fn pointers / raw pointers / `!`: the exact type, or a generic one (None) of that kind)
@@ -2729,7 +3066,7 @@ impl Program {
             Ty::F32 | Ty::F64 => matches!(
                 tr,
                 "Copy" | "Clone" | "Sized" | "PartialEq" | "PartialOrd" | "Default" | "Debug" | "Display"
-            ) || NUM_OPS.contains(&tr) || matches!(tr, "FromStr" | "ToString") || self.prim_impls.contains(&(t, tr.to_string())),
+            ) || NUM_OPS.contains(&tr) || matches!(tr, "FromStr" | "ToString") || self.prim_has(t, tr),
             // (the operators core implements for integers: `T: Add<Output = T>` with T = i32)
             t if t.is_int() && (NUM_OPS.contains(&tr) || INT_OPS.contains(&tr) || matches!(tr, "FromStr" | "ToString")) => true,
             Ty::Bool | Ty::Char if matches!(tr, "FromStr" | "ToString") || (t == Ty::Bool && matches!(tr, "Not" | "BitAnd" | "BitOr" | "BitXor")) => true,
@@ -2747,9 +3084,9 @@ impl Program {
                         | "Debug"
                         | "Display"
                         | "Hash"
-                ) || self.prim_impls.contains(&(t, tr.to_string()))
+                ) || self.prim_has(t, tr)
             }
-            _ => matches!(tr, "Copy" | "Clone" | "Sized") || self.prim_impls.contains(&(t, tr.to_string())),
+            _ => matches!(tr, "Copy" | "Clone" | "Sized") || self.prim_has(t, tr),
         }
     }
 
@@ -3488,6 +3825,48 @@ impl Program {
                 r
             }
             Expr::Path(None, p) if p.segs.len() == 1 && (p.segs[0].name == "true" || p.segs[0].name == "false") => un((p.segs[0].name == "true") as i128),
+            // (`size_of::<T>()` / `align_of::<T>()` of a primitive, a pointer or an alias of one: an array length in
+            //  libc 0.2, `[u8; 128 - 2 * size_of::<c_int>()]`. Other types are not known here)
+            Expr::Call(f, args)
+                if args.is_empty()
+                    && matches!(&**f, Expr::Path(None, p) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "size_of" | "align_of") && s.args.len() == 1)
+                        // (a program's own fn named size_of / align_of is not core's: a `const fn` without type parameters is
+                        //  called as itself below; a generic one is not evaluated here, as before, rather than taken for core's)
+                        && !(p.segs.len() == 1 && (self.const_fns.contains_key(p.segs[0].name.as_str()) || self.index.contains_key(p.segs[0].name.as_str())))) =>
+            {
+                let Expr::Path(None, p) = &**f else { unreachable!() };
+                let seg = p.segs.last().unwrap();
+                let crate::parse::GArg::Ty(t) = &seg.args[0] else { return Err("size_of needs a type".into()) };
+                // (a pointer to a slice, a str or a trait object is two words; its alignment is one word's)
+                let fat = |i: &crate::parse::Ty| {
+                    matches!(i, crate::parse::Ty::Slice(_) | crate::parse::Ty::Dyn(_))
+                        || matches!(i, crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "str")
+                };
+                let size = match t {
+                    crate::parse::Ty::Ptr(_, i) | crate::parse::Ty::Ref(_, _, i) if fat(i) => Some(if seg.name == "align_of" { 8 } else { 16 }),
+                    crate::parse::Ty::Ptr(..) | crate::parse::Ty::Ref(..) => Some(8),
+                    crate::parse::Ty::Tuple(v) if v.is_empty() => Some(0),
+                    crate::parse::Ty::Path(None, tp) if tp.segs.len() == 1 && tp.segs[0].args.is_empty() => {
+                        match self.prim_of_name(&tp.segs[0].name).as_str() {
+                            "u8" | "i8" | "bool" => Some(1),
+                            "u16" | "i16" => Some(2),
+                            "u32" | "i32" | "f32" | "char" => Some(4),
+                            "u64" | "i64" | "f64" | "usize" | "isize" => Some(8),
+                            "u128" | "i128" => Some(16),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                // (on x86-64 these types' alignment is their size, except the empty tuple's, which is 1)
+                let v = match size {
+                    Some(0) if seg.name == "align_of" => 1,
+                    Some(n) => n,
+                    None => return Err(format!("cannot evaluate `{}` of this type in a constant", seg.name)),
+                };
+                // (both return a usize: `size_of::<u64>().leading_zeros()` counts 64 bits)
+                Ok((v, It::of_name("usize")))
+            }
             // (a call of a `const fn` with integer arguments: its body with the parameters bound)
             Expr::Call(f, args) if matches!(&**f, Expr::Path(None, p) if p.segs.len() == 1 && self.const_fns.contains_key(p.segs[0].name.as_str())) => {
                 let Expr::Path(None, p) = &**f else { unreachable!() };
@@ -4414,6 +4793,16 @@ impl Program {
     }
 
     /// 具体型 t の関連型 name (`impl Iterator for Counter { type Item = u32; }` なら u32)
+    /// The region codes of the associated type just pushed (the k-th of item ii's summary), if its value names a
+    /// lifetime (Summary::assoc_regions), with its impl's self type's
+    fn note_assoc_regions(&mut self, items: &[SrcItem], sums: &[Summary], ii: usize, k: usize) {
+        let Some((_, codes)) = sums[ii].assoc_regions.iter().find(|x| x.0 as usize == k) else { return };
+        let crate::lexer::ItemKind::ImplMember(h) = items[ii].kind else { return };
+        // (an impl that names no lifetime has no header regions: no self slots)
+        let (self_slots, outlives, trait_lts) = sums[h as usize].hdr_regions.as_ref().map(|r| (r.self_slots.clone(), r.outlives.clone(), r.trait_lts.clone())).unwrap_or_default();
+        self.assoc_regions.insert(self.assocs.len() as u32 - 1, (codes.clone(), self_slots, outlives, trait_lts));
+    }
+
     pub fn assoc_of(&self, t: Ty, name: &str) -> Option<Ty> {
         self.assoc_of_with(t, name, true)
     }
@@ -4490,6 +4879,22 @@ impl Program {
                 if a.name != gname || a.ngat != gargs.len() {
                     continue;
                 }
+                // (match_ty lets `&mut` meet `&` (a coercion): an impl for `&T` and one for `&mut T` are two)
+                if let (Ty::Ref(m1, _), Ty::Ref(m2, _)) = (a.self_ty, base) {
+                    if m1 != m2 {
+                        continue;
+                    }
+                }
+                // (nor a pointer's impl a reference's: match_ty lets `*const T` meet `&x`, a coercion)
+                if matches!((a.self_ty, base), (Ty::Ptr(..), Ty::Ref(..))) {
+                    continue;
+                }
+                // (and `*const T`'s impl is not `*mut T`'s)
+                if let (Ty::Ptr(m1, _), Ty::Ptr(m2, _)) = (a.self_ty, base) {
+                    if m1 != m2 {
+                        continue;
+                    }
+                }
                 let mut sol = vec![None; a.ngen];
                 if self.match_ty(a.self_ty, base, &mut sol) {
                     let Some(mut args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else { continue };
@@ -4516,6 +4921,22 @@ impl Program {
             }
             if let Ty::Assoc(v) = a.value {
                 if v.base == a.self_ty && v.name == name {
+                    continue;
+                }
+            }
+            // (match_ty lets `&mut` meet `&` (a coercion): an impl for `&T` and one for `&mut T` are two)
+            if let (Ty::Ref(m1, _), Ty::Ref(m2, _)) = (a.self_ty, t) {
+                if m1 != m2 {
+                    continue;
+                }
+            }
+            // (nor a pointer's impl a reference's: match_ty lets `*const T` meet `&x`, a coercion)
+            if matches!((a.self_ty, t), (Ty::Ptr(..), Ty::Ref(..))) {
+                continue;
+            }
+            // (and `*const T`'s impl is not `*mut T`'s)
+            if let (Ty::Ptr(m1, _), Ty::Ptr(m2, _)) = (a.self_ty, t) {
+                if m1 != m2 {
                     continue;
                 }
             }

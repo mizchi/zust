@@ -581,8 +581,9 @@ impl Cx<'_> {
             }
         }
         // 受け手が `a.as_slice()` (a: 配列) なら `(&a[..])` にして呼び直す (`a.as_slice().len()`)
+        // (an array's `as_mut()` too: its one AsMut is `AsMut<[T]>`, `seed.as_mut().iter_mut()` in rand_core)
         if let Expr::MethodCall(ir, iname, _, iargs, _) = strip_paren(recv) {
-            if iargs.is_empty() && matches!(iname.as_str(), "as_slice" | "as_mut_slice") {
+            if iargs.is_empty() && matches!(iname.as_str(), "as_slice" | "as_mut_slice" | "as_mut") {
                 if let Some(Ty::Array(..)) = self.peek(ir).map(|t| self.strip_refs(t)) {
                     let r = (**ir).clone();
                     let ix = Expr::Index(Box::new(paren(r)), Box::new(full_range()), crate::parse::Span::default());
@@ -593,7 +594,7 @@ impl Cx<'_> {
             }
         }
         // `[T; N]::as_slice()` / `as_mut_slice()`: `&a[..]` / `&mut a[..]`
-        if margs.is_empty() && matches!(method, "as_slice" | "as_mut_slice") {
+        if margs.is_empty() && matches!(method, "as_slice" | "as_mut_slice" | "as_mut") {
             if let Some(Ty::Array(..)) = self.peek(recv).map(|t| self.strip_refs(t)) {
                 let ix = Expr::Index(Box::new(paren(recv.clone())), Box::new(full_range()), crate::parse::Span::default());
                 let e = Expr::Ref(method != "as_slice", Box::new(ix));
@@ -759,7 +760,7 @@ impl Cx<'_> {
             let bsig = &self.prog.sigs[bid as usize];
             let bounds = bsig.trait_of.as_deref().or(bsig.impl_trait.as_deref()).and_then(|tr| self.prog.blanket_bounds.get(tr));
             let prog = self.prog;
-            let holds = |t: Ty| bounds.is_none_or(|bs| blanket_bounds_hold(prog, t, bs, &mut vec![], &mut vec![]));
+            let holds = |t: Ty| bounds.is_none_or(|bs| blanket_impls_hold(prog, t, bs, &mut vec![], &mut vec![]));
             let extra = |t: Ty| (prim(t) || matches!(t, Ty::Unit | Ty::Box(_))) && holds(t);
             let to_prim = matches!(pt, Some(Ty::Ref(_, i)) if extra(*i));
             // (a number's only when the blanket impl's bounds hold of it)
@@ -935,9 +936,43 @@ impl Cx<'_> {
                 }
             }
         }
-        // (`x.try_into()` to a type with the program's `impl TryFrom<X> for T`: `T::try_from(x)`; between numbers, the
-        // builtin one)
+        // `x.try_into()` into `Result<U, E>` where U implements TryFrom (`impl TryFrom<&str> for Alphabet`): `U::try_from(x)`,
+        // as std's blanket `impl<T, U: TryFrom<T>> TryInto<U> for T` gives it. Integers and slices are handled elsewhere
         if method == "try_into" && margs.is_empty() {
+            // (a receiver's own try_into, also through references (`(&source).try_into()`), is that method)
+            let recv_own = match self.peek(recv).map(|t| self.strip_refs(t)) {
+                Some(Ty::Struct(sid)) => self.prog.method(sid, "try_into").is_some(),
+                _ => false,
+            };
+            let target = expected.or_else(|| self.lets.get(&(e as *const Expr as usize)).copied());
+            // (`let a: Alphabet = "x".try_into().unwrap()`: the target is the unwrap's, left in try_into_hint)
+            if !recv_own && target.is_none() {
+                if let Some(Ty::Struct(uid)) = self.try_into_hint {
+                    if let Some(id) = self.prog.method(uid, "try_from") {
+                        self.try_into_hint = None;
+                        let args: [&Expr; 1] = [recv];
+                        return self.call_fn(id, None, &args, None, None, SP);
+                    }
+                }
+            }
+            if !recv_own {
+                if let Some(Ty::Struct(rs)) = target {
+                    if self.prog.structs[rs as usize].name.starts_with("Result") {
+                        if let Some(&Ty::Struct(uid)) = self.prog.structs[rs as usize].args.first() {
+                            if let Some(id) = self.prog.method(uid, "try_from") {
+                                let args: [&Expr; 1] = [recv];
+                                return self.call_fn(id, None, &args, None, target, SP);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // (and to a number or another type whose `try_from` is the program's impl of TryFrom, `impl TryFrom<J> for u32`:
+        // `u32::try_from(x)`; between numbers, the builtin one)
+        // (not a receiver's own try_into, `impl Source { fn try_into(&self) }`)
+        let own_try_into = || matches!(self.peek(recv).map(|t| self.strip_refs(t)), Some(Ty::Struct(sid)) if self.prog.method(sid, "try_into").is_some());
+        if method == "try_into" && margs.is_empty() && !own_try_into() {
             let target = expected.or_else(|| self.lets.get(&(e as *const Expr as usize)).copied());
             let num = |a: Ty| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char);
             let num_recv = self.peek(recv).is_some_and(num);
@@ -1240,7 +1275,7 @@ impl Cx<'_> {
                             let bsig = &self.prog.sigs[bid as usize];
                             let by_value = !matches!(bsig.params.first(), Some(Ty::Ref(..)));
                             let bounds = bsig.trait_of.as_deref().or(bsig.impl_trait.as_deref()).and_then(|tr| self.prog.blanket_bounds.get(tr));
-                            if by_value && bounds.is_some_and(|bs| blanket_bounds_hold(self.prog, p0_ty, bs, &mut vec![], &mut vec![])) {
+                            if by_value && bounds.is_some_and(|bs| blanket_impls_hold(self.prog, p0_ty, bs, &mut vec![], &mut vec![])) {
                                 let (v, t) = self.expr(recv, None)?;
                                 let Some(v) = v else { return Ok((None, Ty::Never)) };
                                 let args: Vec<&Expr> = margs.iter().collect();
@@ -1262,6 +1297,15 @@ impl Cx<'_> {
             // (and its impl's method when it has one, chosen here: the receiver is then taken as that method takes it,
             // `(&q).qux()` of ByRef's `qux(&self)` beside ByValue's `qux(self)`)
             if let Some((_, tr)) = self.explicit_trait.as_ref().filter(|(m, _)| *m == name) {
+                // (`Display::fmt(self, f)` in the type's Debug: its Display / Debug methods are `S::<Display>::fmt`)
+                // (of a generic type's instance, the generic impl's: `VecDeque<i32>`'s is `VecDeque::<Debug>::fmt`)
+                if matches!(tr.as_str(), "Display" | "Debug") {
+                    let own = format!("{}::<{tr}>::{name}", self.prog.structs[sid as usize].name);
+                    let generic = format!("{}::<{tr}>::{name}", self.prog.structs[self.prog.base_of(sid) as usize].name);
+                    if let Some(&id) = self.prog.index.get(&own).or_else(|| self.prog.index.get(&generic)) {
+                        break (a, o, sid, id);
+                    }
+                }
                 let key = format!("{}::{name}", self.prog.structs[self.prog.base_of(sid) as usize].name);
                 let user = |d: u32| self.prog.item_of.get(d as usize).copied().flatten().is_some_and(|x| x < self.prog.prelude_from);
                 match self.trait_candidate_where(&key, tr, |i| self.self_fits(i, Ty::Struct(sid))) {
@@ -1711,6 +1755,31 @@ impl Cx<'_> {
             let tr = b.split('<').next().unwrap_or(b).trim();
             decls(tr)?.iter().copied().find(|&d| self.prog.names[d as usize].rsplit("::").next() == Some(name))
         })
+    }
+
+    /// The type arguments the bound of placeholder sid on trait tr writes (`FnLike<&'a isize, u8>`: `&isize`, `u8`),
+    /// each None where it is not a type this function knows
+    pub(crate) fn placeholder_bound_targs(&self, sid: u32, tr: &str) -> Option<Vec<Option<Ty>>> {
+        let bs = self.prog.structs[sid as usize].placeholder.as_ref()?;
+        let short = tr.split('<').next().unwrap_or(tr).trim();
+        let short = short.rsplit("::").next().unwrap_or(short);
+        let mut of = bs.iter().filter(|b| {
+            let n = b.split('<').next().unwrap_or(b).trim();
+            n == short || n.rsplit("::").next() == Some(short)
+        });
+        let b = of.next()?;
+        // (two bounds of the trait: which one a call takes is its arguments', not known here)
+        if of.next().is_some() || !b.contains('<') {
+            return None;
+        }
+        let f = crate::parse::parse_file(&format!("type __B = dyn {b};")).ok()?;
+        let Some(crate::parse::ItemKind::Type(_, _, _, Some(crate::parse::Ty::Dyn(dbs)))) = f.items.first().map(|i| &i.kind) else { return None };
+        let Some(crate::parse::Bound::Trait(_, p)) = dbs.first() else { return None };
+        let seg = p.segs.last()?;
+        Some(seg.args.iter().filter_map(|a| match a {
+            crate::parse::GArg::Ty(t) => Some(self.parse_ty(t).ok()),
+            _ => None,
+        }).collect())
     }
 
     fn check_spawn_closure(&self, c: &Expr) -> R<()> {
@@ -2345,6 +2414,20 @@ impl Cx<'_> {
                 }
             }
         }
+        // (a method of a placeholder's bound's trait (zustc check of a generic fn nothing calls): the trait's parameters
+        // the arguments did not give are the bound's arguments (`F: FnLike<&'a isize, &'a isize>` gives `R` of
+        // `fn call(&self, arg: A) -> R`))
+        if let (Some(tr), Some(Some(Ty::Struct(ps)))) = (sig.trait_of.as_deref(), sol.first().copied()) {
+            if self.prog.is_placeholder(ps) && sol.iter().skip(1).any(|x| x.is_none()) {
+                if let Some(targs) = self.placeholder_bound_targs(ps, tr) {
+                    for (i, t) in targs.into_iter().enumerate() {
+                        if let (Some(x @ None), Some(t)) = (sol.get_mut(1 + i), t) {
+                            *x = Some(t);
+                        }
+                    }
+                }
+            }
+        }
         // prelude の helper のダミーの型引数 `G` (呼ばれた分だけインスタンスにするためのもの) は ()
         for (i, g) in sig.generics.iter().enumerate() {
             if g.0 == "G" && sol[i].is_none() {
@@ -2442,7 +2525,7 @@ impl Cx<'_> {
                     }
                 }
                 let bounds = self.prog.blanket_bounds.get(tr);
-                bounds.is_none_or(|bs| blanket_bounds_hold(self.prog, args[0], bs, &mut vec![], &mut vec![])).then_some(bid)
+                bounds.is_none_or(|bs| blanket_impls_hold(self.prog, args[0], bs, &mut vec![], &mut vec![])).then_some(bid)
             });
             if imp.is_none() && ambiguous.get() {
                 return err(span, format!("`{}` has no implementation for `{}` that is told apart from the trait's other blanket impls", self.prog.names[id as usize], self.prog.tn(args[0])));
@@ -2861,9 +2944,11 @@ impl Cx<'_> {
                 if !seq {
                     return None;
                 }
+                // (a `&mut` one, `zip(dst)` with dst: &mut [u32]: its iter_mut, as IntoIterator for &mut [T] gives)
+                let it = if matches!(t, Ty::Ref(true, _)) { "iter_mut" } else { "iter" };
                 Some(match (t, strip_paren(a)) {
-                    (Ty::Ref(..), Expr::Ref(_, inner)) => mcall(paren((**inner).clone()), "iter", vec![]),
-                    (Ty::Ref(..), _) => mcall(paren((*a).clone()), "iter", vec![]),
+                    (Ty::Ref(..), Expr::Ref(_, inner)) => mcall(paren((**inner).clone()), it, vec![]),
+                    (Ty::Ref(..), _) => mcall(paren((*a).clone()), it, vec![]),
                     _ => mcall(paren((*a).clone()), "into_iter", vec![]),
                 })
             })
@@ -3244,6 +3329,25 @@ impl Cx<'_> {
         if self.prog.names[id as usize] == "__core_transmute" && sig.params.len() == 1 {
             self.check_transmute(sig.params[0], sig.ret, span)?;
         }
+        // (`size_of_val(s)` / `align_of_val(s)` of a slice or str: the length times the element's size, the element's
+        //  alignment; the prelude's `size_of::<T>()` has no length)
+        if matches!(self.prog.names[id as usize].as_str(), "__core_size_of_val" | "__core_align_of_val") && vals.len() == 1 {
+            let el = match sig.params[0] {
+                Ty::Ref(_, Ty::Slice(e)) => Some(**e),
+                Ty::Ref(_, Ty::Str) => Some(Ty::U8),
+                _ => None,
+            };
+            if let Some(e) = el {
+                let (es, ea) = self.prog.size_align(e);
+                if self.prog.names[id as usize] == "__core_align_of_val" {
+                    return Ok((Some(self.b.ins().iconst(types::I64, ea as i64)), Ty::Usize));
+                }
+                let fat = vals[0].0;
+                let n = self.b.ins().load(types::I64, mf(), fat, 8);
+                let k = self.b.ins().iconst(types::I64, es as i64);
+                return Ok((Some(self.b.ins().imul(n, k)), Ty::Usize));
+            }
+        }
         let mut cv = vec![];
         let sret = if is_sret(&sig) {
             let a = match hint {
@@ -3274,6 +3378,8 @@ impl Cx<'_> {
                 }
                 // (`&mut x` for a `*mut T` parameter)
                 (Ty::Ref(m1, a), Ty::Ptr(m2, b)) if a == b && (m1 || !m2) && !a.is_fat() => (v, pt),
+                // (a `&mut [T]` for a generic `&T`, `size_of_val(iv_dst)`: the same value, thin or fat)
+                (Ty::Ref(true, a), Ty::Ref(false, b)) if a == b => (v, pt),
                 _ => (v, t),
             };
             self.same(sp, t, pt)?;
@@ -3940,6 +4046,11 @@ fn hidden_param(n: &str) -> bool {
     n.starts_with("__impl") && n.len() > 6 && n.as_bytes()[6..].iter().all(|c| c.is_ascii_digit())
 }
 
+/// The bounds of some one of a trait's blanket impls (`impl<T: A> Tr<u8> for T`, `impl<T: B> Tr<u16> for T`) hold of t
+pub(crate) fn blanket_impls_hold(prog: &crate::program::Program, t: Ty, impls: &[Vec<String>], path: &mut Vec<String>, seen: &mut Vec<(String, bool)>) -> bool {
+    impls.iter().any(|bs| blanket_bounds_hold(prog, t, bs, path, seen))
+}
+
 /// The bounds of a blanket impl's self type hold of t (`?Sized` and lifetimes aside). A bound that is a trait with a
 /// blanket impl of its own holds when that impl's bounds do (`impl<T: Marker> Other for T`)
 pub(crate) fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], path: &mut Vec<String>, seen: &mut Vec<(String, bool)>) -> bool {
@@ -3949,7 +4060,7 @@ pub(crate) fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[S
         }
         // (an impl for t itself (`impl Other for ()`), or the blanket impl's bounds. A trait met again on the way
         // (a cycle of blanket impls), or a chain past rustc's recursion limit (128), does not hold: rustc reports
-        // E0275 there. Each trait is decided once (seen): a trait has one blanket impl, so its answer for t is one)
+        // E0275 there. Each trait is decided once (seen): its answer for t is one, over all its blanket impls)
         match prog.blanket_bounds.get(b.as_str()) {
             Some(inner) if prog.blanket_traits.contains(b.as_str()) => {
                 if prog.implements_concrete(t, b) {
@@ -3962,7 +4073,7 @@ pub(crate) fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[S
                     return false;
                 }
                 path.push(b.clone());
-                let r = blanket_bounds_hold(prog, t, inner, path, seen);
+                let r = blanket_impls_hold(prog, t, inner, path, seen);
                 path.pop();
                 seen.push((b.clone(), r));
                 r

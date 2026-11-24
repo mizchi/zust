@@ -33,11 +33,70 @@ cargo run --manifest-path crates/zustscript/Cargo.toml -- \
   peak.zsc --zustc ./target/release/zustc -o out/peak
 ```
 
-`out/peak/peak.wasm.rs` を開くと、関数の引数は `fn zs_peak(xs: &[i32]) -> ZsPeak` です。元の宣言は `Array<i32>` ですが、本体は要素を読むだけなので、コンパイラはスライスを借用し、`xs.iter().copied()` で整数を一つずつ読みます。この借用が効くのは Wasm の中です。JS から渡す配列は、呼び出し時に Wasm のメモリへコピーされます。
+*out/peak/peak.wasm.rs の抜粋（改行とインデントを調整）*
+
+```rust
+fn zs_peak(xs: &[i32]) -> ZsPeak {
+    {
+        let mut best: ZsPeak = ZsPeak::Empty;
+        for x in xs.iter().copied() {
+            best = match best {
+                ZsPeak::Empty => ZsPeak::Value(x),
+                ZsPeak::Value(n) => if (x > n) {
+                    ZsPeak::Value(x)
+                } else {
+                    ZsPeak::Value(n)
+                },
+            };
+        };
+        best
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ZsPeak {
+    Empty,
+    Value(i32),
+}
+```
+
+`Array<i32>` はこの関数では `&[i32]` になります。ループは `xs.iter().copied()` で借用したスライスから整数を一つずつ読み、`match` は Rust の `ZsPeak` に対する分岐になります。
+
+## JavaScript と Wasm の境界を読む
+
+JS から呼ぶ `peak` は、Wasm のメモリに入力用の領域を確保し、`.set(xs)` で配列の中身をコピーします。Wasm 側が返したタグを読み、空なら `{ TAG: "Empty" }`、値があればその整数を持つオブジェクトを組み立てます。
+
+*out/peak/peak.js の抜粋（改行とインデントを調整）*
+
+```javascript
+export function peak(xs) {
+  const xs$p = $w.__zsc_alloc(BigInt(xs.length * 4));
+  new Int32Array($w.memory.buffer, Number(xs$p), xs.length).set(xs);
+  try {
+    $w.__zsc_w_peak($out, xs$p, BigInt(xs.length));
+    const $o = new DataView($w.memory.buffer, Number($out), 16);
+    return (Number($o.getBigInt64(0, true)) === 0
+      ? { TAG: "Empty" }
+      : { TAG: "Value", _0: Number($o.getBigInt64(8, true)) });
+  } finally {
+    $w.__zsc_free(xs$p);
+  }
+}
+```
 
 ## TypeScript から enum を読む
 
-`out/peak/peak.d.ts` には、値のある側だけが `_0` フィールドを持つ判別 union が生成されます。TS 側は `TAG` を見ると型を絞り込めます。`i32` はモジュールが公開する数値変換関数で、引数の整数型を TypeScript にも伝えます。
+*out/peak/peak.d.ts の抜粋（改行とインデントを調整）*
+
+```typescript
+export type Peak =
+  { readonly TAG: "Empty" }
+  | { readonly TAG: "Value"; readonly _0: i32 };
+
+export declare function peak(xs: readonly i32[]): Peak;
+```
+
+`TAG` を調べると、TypeScript は `"Value"` の分岐でだけ整数フィールド `_0` を読めるようにします。引数の各要素には、同じモジュールが公開する `i32` 変換関数を使います。
 
 *リポジトリのルートに置く try-peak.ts*
 
@@ -53,4 +112,15 @@ console.log(peak([]).TAG);
 
 Node.js 24 で `node try-peak.ts` を実行すると、順に `-2` と `Empty` が表示されます。
 
-同じ関数を JS で試すには、`zsc` に `--all-js` を渡します。所有権やバッファ確保を自分で指定したい関数は、`export wasm fn` で、zustc が扱える Rust のサブセットを本体に書けます。生成コードと手書きのループを比べる例は次の記事にあります。[Rust から見る変換コスト](rust-costs.md) · [zustscript 入門](introduction.md)
+## 通常の関数を Rust モジュールとして使う
+
+`@wasm` は通常のビルドで Rust 経由の Wasm 実行を必須にする属性です。Rust ソースだけ欲しい場合は、普通の `export fn` にも `--emit-rust` が使えます。たとえば `peak.zsc` の `@wasm export fn peak` を `export fn peak` に変えて、次を実行します。
+
+```bash
+cargo run --manifest-path crates/zustscript/Cargo.toml -- peak.zsc --emit-rust -o out/native
+rustc --edition=2024 --crate-type lib out/native/peak.rs -o out/native/libpeak.rlib
+```
+
+`out/native/peak.rs` には `pub fn zs_peak(xs: &[i32]) -> ZsPeak` と `pub enum ZsPeak` が生成されます。Rust から直接呼ぶ場合はスライスをそのまま渡せます。この出力ではモジュール内の関数を Rust に変換するため、JS の extern 呼び出しや JSX などの非対応構文はソース位置付きのエラーになります。
+
+同じ本体を JS で実行するときは属性のない `export fn` を使います。`@wasm` を残したまま `--all-js` を指定すると、対象の関数名と位置が報告されます。所有権やバッファ確保を自分で指定したい関数は、`export wasm fn` で、zustc が扱える Rust のサブセットを本体に書けます。生成コードと手書きのループを比べる例は次の記事にあります。[Rust から見る変換コスト](rust-costs.md) · [zustscript 入門](introduction.md)

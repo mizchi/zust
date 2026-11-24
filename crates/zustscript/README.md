@@ -7,7 +7,8 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
 - `zsc x.zsc -o out/` は次を書き出す
   - `x.js`: 読める ES module。JS 層の本体と、wasm 層のグルー
   - `x.d.ts`
-  - `x.wasm.rs` と `x.wasm`: `wasm fn` があるときだけ。zustc でコンパイルする
+  - `x.wasm.rs` と `x.wasm`: Rust 経由の Wasm 関数があるときに生成する。
+- `zsc x.zsc --emit-rust -o out/` はモジュール全体を `out/x.rs` に変換する。属性のない関数も対象で、`export fn f` は `pub fn zs_f` になる。標準の Rust で使う例は [Rust プログラマー向けガイド](docs/for-rust-programmers.md) にある。
 - **zust の改善を妨げないように、独立させている**
   - `crates/zustscript` に置いているが、zust のワークスペースには入れない(`[workspace]` を自前で持つ)。zust の `cargo build/test --workspace` には含まれない
   - CI も独立した workflow(`.github/workflows/zustscript.yml`)。`crates/zustscript/**` が変わったときだけ動き、zust の CI と KPI には関わらない
@@ -18,7 +19,7 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
   - あとで決めることと、次にやること: [TODO.md](TODO.md)(文法の提案は [evals/syntax/](evals/syntax/README.md))
 - ブラウザで試すプレイグラウンド: [editor/](../../editor/README.md)
   - tree-sitter でハイライトし、wasm にした zsc で編集のたびにトランスパイルして、iframe で `main` を実行する(JSX を返せば React で描画)
-  - `@wasm fn` は JS のまま動かす(`--all-js` 相当。ブラウザでは zustc を動かせない)
+  - ブラウザでは通常の関数を JS で実行する。`@wasm` は Rust バックエンドを必要とするため、対象の宣言位置でエラーになる。
 - テスト: `cargo test --release`
   - **Node 26** を使う(PATH 上の `node`。計測も Node 26.13.1。relaxed SIMD はフラグなしで動く)
   - app の例は zust 側の `target/release/zustc` を使う
@@ -68,13 +69,34 @@ import type { User, Post } from "./model.ts";
 
 ### TS の型の取り込み: `import type`
 
+取り込めるのはレコード型、文字列リテラルの union、共通のタグで判別できる union です。たとえば、TypeScript で処理の状態を次のように定義します。
+
+```ts
+// model.ts
+export type State = { kind: "idle" } | { kind: "busy"; jobs: number };
+```
+
+```zsc
+import type { State } from "./model.ts";
+
+export fn jobs(state: State) -> f64 {
+  match state {
+    Idle => 0.0,
+    Busy(n) => n,
+  }
+}
+```
+
+JS から `jobs({ kind: "busy", jobs: 3 })` と呼ぶと `3` が返ります。タグだけの `idle` は括弧を付けず `Idle`、値を持つ `busy` は `Busy(n)` と書きます。複数の値を受け取る場合、括弧内の変数はタグを除いたフィールドの **TS での宣言順** に対応します。変数名は自分で付けられます。
+たとえば `{ kind: "rect"; height: number; width: number }` の幅 ÷ 高さは `Rect(h, w) => w / h` です。TS 側を `width, height` の順に変えたら、パターンも `Rect(w, h)` に直します。両方とも `number` なので、元のパターンのままでもコンパイルは通り、計算結果だけが変わります。
+
 ```zsc
 import type { User, Post } from "./model.ts";   // model.ts の interface / type を、レコード型として読む
 
 export fn display(u: User) -> String { u.name + " #" + (u.id as i32).to_string() }
 ```
 
-- まずは**プレーンなレコード型**だけを読む(src/tsimport.rs)。`interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
+- **レコード型** (src/tsimport.rs): `interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
   - フィールドの型: `string` は `String`、`number` は `f64`(JS の number は倍精度。整数にするときは `as i32`)、`boolean` は `bool`、`bigint` は `i64`。配列(`T[]`、`readonly T[]`、`Array<T>`、`ReadonlyArray<T>`)と、同じファイルの別のレコード型
   - 読み込む型が使う型(`Post` の `author: User`)も一緒に読む。export されていない型でもよい
   - ファイルの残り(関数、union、総称型など)は、import しない限り読まない。import した型が部分集合の外なら、TS のファイルのその位置でエラーになる(`` `Opt.name` is optional ``、tests/errors/ts_*.zsc)
@@ -166,13 +188,13 @@ export fn primes_below(n: i32) -> i32 {
 | `u32` | ハッシュ、ビット列、色など、符号なしの wrap が要るもの | number のまま(`>>> 0`) |
 | `i64` | **JS 層では避ける**。2^31 を超える整数が本当に要る計算は `@wasm` に置く | BigInt になる(遅く、割り当てが起きる)。JS 層で i64 の演算を書くと、コンパイラが警告を出す |
 
-**どの層で書くか**(同じソースのまま切り替えられる)
+**関数の実行場所と出力先**
 
 | 書き方 | 向いているもの | 切り替え |
 |---|---|---|
 | 普通の `fn`(JS 層) | UI、データの整形、ほとんどのロジック。f64 / i32 のループも、V8 の JIT で十分に速い | - |
 | `@simd fn` | 数値の配列に対する畳み込み(内積、合計)と要素ごとの計算。f64x2 / i32x4 で処理する | `--no-simd` で `@wasm` に、`--all-js` で JS に戻せる |
-| `@wasm fn` | i64 を多用する計算、整数の wrap を多用する計算、レコードや enum を使う重い処理 | `--all-js` で JS に戻せる |
+| `@wasm fn` | i64 を多用する計算、整数の wrap を多用する計算、レコードや enum を使う重い処理 | Rust 経由で実行。JS 専用出力と併用するとエラー |
 | `wasm fn`(本体は Rust) | Rust のライブラリ的なコード、所有権やメモリを直接扱う処理 | - |
 
 - 小さい関数を何度も呼ぶ用途には、`@wasm` / `@simd` を使わない。境界を越えるたびにコストがかかる
@@ -245,7 +267,7 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
   - 制約: 引数と戻り値はスカラーだけ
 - テストで確かめていること: 借用・所有の両方とも、呼び出しの後で JS 側の表は空になる
 
-### `@wasm fn`: 同じ zustscript を JS でも wasm でも実行する(方向 A の合流)
+### `@wasm fn` で Rust 経由の Wasm 実行を指定する
 
 ```zsc
 @wasm export fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
@@ -256,7 +278,7 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
 
 - 本体は普通の zustscript で、JS 層と同じ検査器で型を検査する。そのうえで `lower.rs` が、型の付いた構文木から Rust のソースへ落とし、zustc が wasm にする。境界のグルーは `wasm fn` と同じ仕組みで生成する
   - 例: `dot` は `(0i32..(a.len() as i32)).fold(0.0f64, |s, i| s + a[i as usize] * b[i as usize])` になる
-- `zsc --all-js` を付けると、同じ関数を JS として出す。テスト `numeric_same_in_js_and_wasm` で、両方の出力が一致することを確かめている(差分テスト)。比べている結果は次のとおり
+- JS 版と比較するときは、同じ本体から `@wasm` を外して `--all-js` でコンパイルする。テスト `numeric_same_in_js_and_wasm` で、両方の出力が一致することを確かめている(差分テスト)。比べている結果は次のとおり
   - i32 / u32 の wrap
   - 2^53 を超える i64
   - f64 から整数への `as` の飽和
@@ -273,13 +295,14 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
     - JS との境界を越えられるのは、数値の配列、スカラーだけのレコード / enum、そして文字列や配列を含むレコードと、レコード・文字列・配列の配列(次の「バイト列で越える値」)
   - 構文: `let` / `let mut` と代入、`while` / `for` / `break` / `continue`、`if`、`match`(数値、bool、enum のバリアント、入れ子のパターン)、レコードの生成・フィールド・`..base` での更新、`as`、`T::zero()` / `T::one()`
   - 配列の操作: `len` `map` `filter` `fold` `any` `all` `push` `concat`、添字、`range(a, b)`(Rust では配列を作らずイテレータ `a..b` になる)
-  - 呼び出し: 他の `@wasm` 関数、`wasm fn`、再帰
+  - 呼び出し: Rust に変換可能な通常の補助関数、他の `@wasm` 関数、`wasm fn`、再帰
   - 文字列: 引数は `&str`、戻り値は `String`。`+`、`==` と大小比較、`len` `to_upper` `trim` `contains` `split`、配列の `join`、整数と bool の `to_string`(次の「文字列と `==`」)
   - 使えないもの: タプル、effect、値としての関数、文字列のパターン、浮動小数点数の `to_string`(JS と Rust で書式が違う)
 - `T: Num` の関数は、wasm でもインスタンスごとに単相化する(`zs_total__f64`、`zs_total__i64` など)
   - JS から呼ばれるインスタンスだけに wrapper とグルーを付ける
   - 他の `@wasm` 関数からだけ呼ばれるもの(例の `step`)は、ただの Rust 関数になる
 - 境界を越えられる配列は、i32 / u32 / i64 / f64 のもの(`Int32Array` / `Uint32Array` / `BigInt64Array` / `Float64Array` でコピーする)
+- JS 側で生のバイト列を扱う試作は `zustscript-helper/bytes` から読み込める。`Uint8Array` や `DataView` の部分ビューをそのまま扱う。手書き `wasm fn` の `&[u8]` / `Vec<u8>` への接続は実装予定。[所有権とビルドサイズの実測](docs/target-spec.md#バイト列を-js-と共有する)
 - レコードと enum は、境界を**スカラーのスロットに分解して**越える。線形メモリへのコピーも、それを解放する処理も要らない
   - 引数: フィールドごとに wasm の引数にする。`p: Vec2` は `p__x: f64, p__y: f64` になる
     - enum は、i32 のタグと、全バリアントのフィールドのスロットになる。選ばれていないバリアントの分は 0 で埋める

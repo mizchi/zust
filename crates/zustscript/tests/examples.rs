@@ -20,7 +20,7 @@ fn out_dir(name: &str) -> PathBuf {
     // (the JS side of the helpers, as a package: the glue imports `zustscript-helper`)
     let helper = d.join("node_modules/zustscript-helper");
     std::fs::create_dir_all(&helper).unwrap();
-    for f in ["package.json", "index.js", "index.d.ts"] {
+    for f in ["package.json", "index.js", "index.d.ts", "bytes.js", "bytes.d.ts"] {
         std::fs::copy(root().join("helper/ts").join(f), helper.join(f)).unwrap();
     }
     // (a stand-in for React: renders to a string)
@@ -178,6 +178,18 @@ fn dts_typechecks() {
     assert!(o.status.success(), "tsc:\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
 }
 
+// The JS control uses the same bodies as ordinary functions. The annotated fixture exercises the Wasm target.
+fn compare_build(src: &Path, out: &Path, flags: &[&str]) -> std::process::Output {
+    if !flags.contains(&"--all-js") {
+        return zsc(src, out, flags);
+    }
+    let plain = out.join(src.file_name().unwrap());
+    let source = std::fs::read_to_string(src).unwrap();
+    let lines: Vec<_> = source.lines().map(|line| line.strip_prefix("@wasm ").unwrap_or(line)).collect();
+    std::fs::write(&plain, lines.join("\n")).unwrap();
+    zsc(&plain, out, flags)
+}
+
 /// examples/numeric.zsc's `@wasm fn`s give the same results lowered to Rust and run as wasm, and run as JS
 /// (`--all-js`): numbers keep their meaning in both (i32 / u32 wrapping, i64 past 2^53, saturating `as`, errors)
 #[test]
@@ -186,7 +198,7 @@ fn numeric_same_in_js_and_wasm() {
     let mut outs = vec![];
     for (name, flags) in [("numeric-wasm", &[][..]), ("numeric-js", &["--all-js"][..])] {
         let d = out_dir(name);
-        let o = zsc(&src, &d, flags);
+        let o = compare_build(&src, &d, flags);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         assert_eq!(d.join("numeric.wasm").exists(), flags.is_empty());
         let r = Command::new("node").arg(root().join("tests/numeric_driver.mjs")).arg(d.join("numeric.js")).output().unwrap();
@@ -210,7 +222,7 @@ fn shapes_same_in_js_and_wasm() {
     let mut outs = vec![];
     for (name, flags) in [("shapes-wasm", &[][..]), ("shapes-js", &["--all-js"][..])] {
         let d = out_dir(name);
-        let o = zsc(&src, &d, flags);
+        let o = compare_build(&src, &d, flags);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         let c = Command::new("node").arg("--check").arg(d.join("shapes.js")).output().unwrap();
         assert!(c.status.success(), "{}", String::from_utf8_lossy(&c.stderr));
@@ -240,7 +252,7 @@ fn owned_same_in_js_and_wasm() {
         let mut rust = String::new();
         for (name, flags) in [(format!("{stem}-wasm"), &[][..]), (format!("{stem}-js"), &["--all-js"][..])] {
             let d = out_dir(&name);
-            let o = zsc(&root().join(src), &d, flags);
+            let o = compare_build(&root().join(src), &d, flags);
             assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
             outs.push(node(&d, &format!("const m = await import('./{stem}.js'); console.log(JSON.stringify({call}))")));
             if flags.is_empty() {
@@ -314,7 +326,7 @@ fn text_same_in_js_and_wasm() {
     let mut rs = String::new();
     for (name, flags) in [("text-wasm", &[][..]), ("text-js", &["--all-js"][..])] {
         let d = out_dir(name);
-        let o = zsc(&root().join("examples/text.zsc"), &d, flags);
+        let o = compare_build(&root().join("examples/text.zsc"), &d, flags);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         outs.push(node(&d, "const m = await import('./text.js'); console.log(JSON.stringify([m.text(4), m.shout('  hé '), m.conflict_report(5)]))"));
         if flags.is_empty() {
@@ -363,7 +375,7 @@ console.log(m.shadow(ana, 2), h.decode("str", h.encode("str", "\uFEFFhi")).lengt
     let want = "[\"Ana (30) a/😀\",{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"Bö\",\"age\":41,\"tags\":[]},6.5,[\"ANA\",\"BO\",\"CY\"],[[0],[0,1],[0,1,2]]]\n{\"title\":\"T\",\"people\":[{\"name\":\"Ana\",\"age\":30,\"tags\":[\"a\",\"😀\"]},{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"cy\",\"age\":7,\"tags\":[\"x\"]}],\"scores\":[[1,2.5],[],[3],[1.5]],\"open\":false,\"id\":\"9007199254740994\"}\n[[\"héllo\",\"-\",\"7/2\"],[{\"text\":\"a\",\"tag\":{\"TAG\":\"Pair\",\"_0\":5,\"_1\":[1.5]},\"mood\":\"Sad\"},{\"text\":\"b\",\"tag\":{\"TAG\":\"Named\",\"_0\":\"x\"},\"mood\":\"Happy\"},{\"text\":\"c\",\"tag\":{\"TAG\":\"Anon\"},\"mood\":\"Sad\"}],[{\"TAG\":\"Named\",\"_0\":\"héllo\"},{\"TAG\":\"Anon\"},{\"TAG\":\"Pair\",\"_0\":7,\"_1\":[1,2]}]]\n32 3 {\"__proto__\":\"x\"}\n";
     for flags in [&[][..], &["--all-js"][..]] {
         let d = out_dir(if flags.is_empty() { "wire" } else { "wire_js" });
-        let o = zsc(&root().join("tests/wire.zsc"), &d, flags);
+        let o = compare_build(&root().join("tests/wire.zsc"), &d, flags);
         assert!(o.status.success(), "zsc {flags:?} failed:\n{}", String::from_utf8_lossy(&o.stderr));
         assert_eq!(node(&d, script), want, "{flags:?}");
     }
@@ -587,4 +599,47 @@ fn runtime_name_collisions() {
     let o = zsc(&root().join("examples/basics.zsc"), &e, &[]);
     assert!(!o.status.success(), "the shared runtime must not overwrite a module named like it");
     assert!(std::fs::read_to_string(e.join("zsc-runtime.js")).unwrap().contains("function one"));
+}
+
+#[test]
+fn rust_source_for_plain_functions() {
+    let d = out_dir("plain-rust");
+    let src = d.join("math.zsc");
+    std::fs::write(&src, "type Reading = { value: i32 }\nfn twice(n: i32) -> i32 { n + n }\nexport fn total(xs: Array<Reading>) -> i32 { xs.fold(0, (s, x) => s + twice(x.value)) }").unwrap();
+    let out = zsc(&src, &d, &["--emit-rust", "--zustc", "unused-zustc"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!d.join("math.js").exists() && !d.join("math.wasm").exists());
+    let driver = d.join("driver.rs");
+    std::fs::write(&driver, "mod math; fn main() { assert_eq!(math::zs_total(&[math::ZsReading { value: 21 }]), 42); }").unwrap();
+    let binary = d.join("run");
+    let build = Command::new("rustc").arg("--edition=2024").arg(driver).arg("-o").arg(&binary).output().unwrap();
+    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
+    assert!(Command::new(binary).status().unwrap().success());
+}
+
+#[test]
+fn wasm_can_call_a_rust_compatible_plain_helper() {
+    let d = out_dir("plain-helper");
+    let src = d.join("mixed.zsc");
+    std::fs::write(&src, "fn helper(n: i32) -> i32 { n + 1 }\n@wasm export fn calc(n: i32) -> i32 { helper(n) }\nexport fn twice(n: i32) -> i32 { calc(n) * 2 }").unwrap();
+    let out = zsc(&src, &d, &[]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(node(&d, "const m = await import('./mixed.js'); console.log(m.twice(20));"), "42\n");
+}
+
+#[test]
+fn wasm_requires_rust_even_for_unused_functions() {
+    let d = out_dir("rust-required");
+    let src = d.join("require.zsc");
+    std::fs::write(&src, "@wasm fn only_rust() -> i32 { 1 }").unwrap();
+    let js = zsc(&src, &d, &["--all-js"]);
+    assert!(!js.status.success());
+    assert!(String::from_utf8_lossy(&js.stderr).contains("requires the Rust backend"));
+    assert!(!d.join("require.js").exists());
+    std::fs::write(&src, "extern fn host(x: i32) -> i32 = \"host\";\nfn h(x: i32) -> i32 { host(x) }\n@wasm fn unused(x: i32) -> i32 { h(x) }").unwrap();
+    for flags in [&[][..], &["--emit-rust"][..]] {
+        let bad = zsc(&src, &d, flags);
+        assert!(!bad.status.success());
+        assert!(String::from_utf8_lossy(&bad.stderr).contains("calling `host`"));
+    }
 }

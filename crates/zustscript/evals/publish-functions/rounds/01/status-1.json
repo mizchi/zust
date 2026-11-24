@@ -1,0 +1,59 @@
+{
+  "case": "status",
+  "hashes_sha256": {
+    "TASK.md": "fecabb9298549520c680f125b9cc301a2215f0d8346eea11f5619048b10a35ad",
+    "CASE.md": "0fca5950c1e6c35b1d5e07a43b85e3d5f2f780868babe64b77166e7e582e6083",
+    "README.md": "c17c83238c812655f679735be2224cfb2d1a32cac8c890420a6d944434982e54",
+    "zsc": "f9beff151e7fd4cecadecfd60076c22722c0d69406be37095bd0ecc979c05821",
+    "zustc": "ff800802f7534225411a7c54ea7515778a5d95ae924a2a11bdd4c6f4d32394b0",
+    "model.ts": "71c03c41c7ae3341b49eb5b9d173e357cc3d85b76e919deeac402b7979656f47"
+  },
+  "attempts": [
+    {
+      "source": "import type { Shipment } from \"./model.ts\";\n\nfn format_code(code: String) -> String {\n  \"便 \" + code\n}\n\nexport fn label(shipment: Shipment) -> String {\n  match shipment {\n    Waiting => \"準備中\",\n    Shipped(code) => format_code(code),\n  }\n}\n",
+      "exit_code": "0\n",
+      "compiler_log": "zsc: answer.zsc → out/answer.js, .d.ts (front 0.9 ms)\n"
+    }
+  ],
+  "answer": "import type { Shipment } from \"./model.ts\";\n\nfn format_code(code: String) -> String {\n  \"便 \" + code\n}\n\nexport fn label(shipment: Shipment) -> String {\n  match shipment {\n    Waiting => \"準備中\",\n    Shipped(code) => format_code(code),\n  }\n}\n",
+  "executor_test": "import assert from 'node:assert/strict';\nimport * as answer from './out/answer.js';\n\nassert.equal(answer.label({ state: 'waiting' }), '準備中');\nassert.equal(answer.label({ state: 'shipped', code: 'A01' }), '便 A01');\nassert.equal(answer.label({ state: 'shipped', code: '' }), '便 ');\nassert.equal('format_code' in answer, false);\n",
+  "feedback": "# 配送ラベルの試行\n\n「文法(現時点の案と決定事項)」の冒頭に公開関数は `export fn`、非公開関数は `fn` と明記されていた。「TS の型の取り込み」の判別キーつき union の説明を読み、最初から `import type { Shipment } from \"./model.ts\";` と書いて、`match shipment` に `Waiting` と `Shipped(code)` を並べると予想した。文字列の連結は同節の `display` の例を参考にした。\n\n迷ったのは、ペイロードを持たないオブジェクト型を `Waiting` と書くか、`Waiting()` と書くかだった。判別 union の節では `empty` が型の例に登場するが、それに対応するパターンが載っていない。「文法」にある引数なしの `All` を参考に前者を選んだ。\n\nコンパイルは初回で成功し、再試行はなかった。Node の確認は実装前とコンパイル後の計2回。実装前は生成物が存在しないため読み込みに失敗した。生成後は準備中・配送中・空の code の結果、および format_code が非公開であることを確認できた。生成された型定義でも label の引数は元の Shipment 型だった。\n\n資料の改善案は、「TS の型の取り込み」の判別 union の説明に、タグだけのメンバーとフィールド付きのメンバーを同時に扱う短い match 式を添えること。これで引数なしパターンの括弧の有無をその場で確認できる。\n",
+  "verification": {
+    "task": "status",
+    "passed": true,
+    "checks": [
+      {
+        "name": "compile",
+        "passed": true
+      },
+      {
+        "name": "waiting",
+        "passed": true
+      },
+      {
+        "name": "shipped",
+        "passed": true
+      },
+      {
+        "name": "empty code",
+        "passed": true
+      },
+      {
+        "name": "Unicode code",
+        "passed": true
+      },
+      {
+        "name": "export spelling",
+        "passed": true
+      },
+      {
+        "name": "private helper",
+        "passed": true
+      },
+      {
+        "name": "original TS type",
+        "passed": true
+      }
+    ]
+  }
+}

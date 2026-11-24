@@ -97,12 +97,92 @@
       "path": "docs/ja/reports/2026-11-23-07-region-check-18.md",
       "role": "historical"
     },
+    "docs_reports_2026-11-23-08-rust-frontier-survey.en": {
+      "path": "docs/reports/2026-11-23-08-rust-frontier-survey.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-08-rust-frontier-survey.ja": {
+      "path": "docs/ja/reports/2026-11-23-08-rust-frontier-survey.md",
+      "role": "historical"
+    },
     "docs_reports_2026-11-24-01-region-check-19.en": {
       "path": "docs/reports/2026-11-24-01-region-check-19.md",
       "role": "historical"
     },
     "docs_reports_2026-11-24-01-region-check-19.ja": {
       "path": "docs/ja/reports/2026-11-24-01-region-check-19.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-02-parallel-check.en": {
+      "path": "docs/reports/2026-11-24-02-parallel-check.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-02-parallel-check.ja": {
+      "path": "docs/ja/reports/2026-11-24-02-parallel-check.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-03-polonius-alpha.en": {
+      "path": "docs/reports/2026-11-24-03-polonius-alpha.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-03-polonius-alpha.ja": {
+      "path": "docs/ja/reports/2026-11-24-03-polonius-alpha.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-04-region-check-20.en": {
+      "path": "docs/reports/2026-11-24-04-region-check-20.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-04-region-check-20.ja": {
+      "path": "docs/ja/reports/2026-11-24-04-region-check-20.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-05-region-check-21.en": {
+      "path": "docs/reports/2026-11-24-05-region-check-21.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-05-region-check-21.ja": {
+      "path": "docs/ja/reports/2026-11-24-05-region-check-21.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-06-impl-bounds-nested-goals.en": {
+      "path": "docs/reports/2026-11-24-06-impl-bounds-nested-goals.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-06-impl-bounds-nested-goals.ja": {
+      "path": "docs/ja/reports/2026-11-24-06-impl-bounds-nested-goals.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-07-goal-certainty.en": {
+      "path": "docs/reports/2026-11-24-07-goal-certainty.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-07-goal-certainty.ja": {
+      "path": "docs/ja/reports/2026-11-24-07-goal-certainty.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-08-region-check-22.en": {
+      "path": "docs/reports/2026-11-24-08-region-check-22.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-08-region-check-22.ja": {
+      "path": "docs/ja/reports/2026-11-24-08-region-check-22.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-09-region-check-23.en": {
+      "path": "docs/reports/2026-11-24-09-region-check-23.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-09-region-check-23.ja": {
+      "path": "docs/ja/reports/2026-11-24-09-region-check-23.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-10-region-check-24.en": {
+      "path": "docs/reports/2026-11-24-10-region-check-24.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-10-region-check-24.ja": {
+      "path": "docs/ja/reports/2026-11-24-10-region-check-24.md",
       "role": "historical"
     }
   },
@@ -240,6 +320,17 @@
       }
     },
     {
+      "id": "docs_reports_2026-11-23-08-rust-frontier-survey",
+      "topic": "The Japanese file docs/ja/reports/2026-11-23-08-rust-frontier-survey.md is a faithful translation of docs/reports/2026-11-23-08-rust-frontier-survey.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-23-08-rust-frontier-survey.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-23-08-rust-frontier-survey.ja"
+      }
+    },
+    {
       "id": "docs_reports_2026-11-24-01-region-check-19",
       "topic": "The Japanese file docs/ja/reports/2026-11-24-01-region-check-19.md is a faithful translation of docs/reports/2026-11-24-01-region-check-19.md",
       "mode": "translation",
@@ -248,6 +339,105 @@
       },
       "target": {
         "source": "docs_reports_2026-11-24-01-region-check-19.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-02-parallel-check",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-02-parallel-check.md is a faithful translation of docs/reports/2026-11-24-02-parallel-check.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-02-parallel-check.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-02-parallel-check.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-03-polonius-alpha",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-03-polonius-alpha.md is a faithful translation of docs/reports/2026-11-24-03-polonius-alpha.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-03-polonius-alpha.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-03-polonius-alpha.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-04-region-check-20",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-04-region-check-20.md is a faithful translation of docs/reports/2026-11-24-04-region-check-20.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-04-region-check-20.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-04-region-check-20.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-05-region-check-21",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-05-region-check-21.md is a faithful translation of docs/reports/2026-11-24-05-region-check-21.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-05-region-check-21.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-05-region-check-21.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-06-impl-bounds-nested-goals",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-06-impl-bounds-nested-goals.md is a faithful translation of docs/reports/2026-11-24-06-impl-bounds-nested-goals.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-06-impl-bounds-nested-goals.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-06-impl-bounds-nested-goals.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-07-goal-certainty",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-07-goal-certainty.md is a faithful translation of docs/reports/2026-11-24-07-goal-certainty.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-07-goal-certainty.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-07-goal-certainty.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-08-region-check-22",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-08-region-check-22.md is a faithful translation of docs/reports/2026-11-24-08-region-check-22.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-08-region-check-22.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-08-region-check-22.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-09-region-check-23",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-09-region-check-23.md is a faithful translation of docs/reports/2026-11-24-09-region-check-23.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-09-region-check-23.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-09-region-check-23.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-10-region-check-24",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-10-region-check-24.md is a faithful translation of docs/reports/2026-11-24-10-region-check-24.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-10-region-check-24.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-10-region-check-24.ja"
       }
     }
   ]

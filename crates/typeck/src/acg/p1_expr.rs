@@ -697,6 +697,39 @@ impl Cx<'_> {
 
     /// 式を評価し、期待型への暗黙の変換 (`&[T; N]` → `&[T]`) をする
     pub(crate) fn expr(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (a returned position: what is borrowed and read in it is returned (Bk::ret_leaves))
+        if !self.bk.ret_leaves.is_empty() && self.bk.ret_leaves.contains(&(e as *const Expr as usize)) {
+            self.bk.in_ret += 1;
+            let r = self.expr_at(e, expected);
+            self.bk.in_ret -= 1;
+            return r;
+        }
+        self.expr_at(e, expected)
+    }
+
+    fn expr_at(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (the type arguments a path writes are well formed: `None::<Static<T>>` with `struct Static<T: 'static>(T)`)
+        if self.rg.on && self.inline_depth == 0 {
+            let p = match e {
+                Expr::Path(_, p) => Some(p),
+                Expr::Call(f, ..) => match &**f {
+                    Expr::Path(_, p) => Some(p),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(p) = p.filter(|p| p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(_))))) {
+                for seg in &p.segs {
+                    self.rg_targs_wf(&seg.args, super::borrowck::pos(e));
+                }
+            }
+            // (and a method call's: `r.use_ty::<Static<T>>()`)
+            if let Expr::MethodCall(_, _, targs, ..) = e {
+                if targs.iter().any(|a| matches!(a, crate::parse::GArg::Ty(_))) {
+                    self.rg_targs_wf(targs, super::borrowck::pos(e));
+                }
+            }
+        }
         // (the places inside a sub-expression are accesses of their own)
         let pd = std::mem::take(&mut self.bk.place_depth);
         let hint_only = std::mem::take(&mut self.bk.move_mut_hint);
@@ -743,7 +776,8 @@ impl Cx<'_> {
             }
         }
         if let (Some((n, k)), Ok((_, t))) = (mark, &r) {
-            if self.bk.frames.len() == n && *t != Ty::Never && self.bk_on() && !self.bk_ty(*t).1 {
+            // (not a call whose result `impl Trait` captures its arguments' borrows: it holds them, whatever its hidden type)
+            if self.bk.frames.len() == n && *t != Ty::Never && self.bk_on() && !self.bk_ty(*t).1 && !self.bk_opaque_call(e) {
                 if let Some(f) = self.bk.frames.last_mut() {
                     f.truncate(k);
                 }
@@ -1429,6 +1463,7 @@ impl Cx<'_> {
                 let v = match value {
                     Some(e) => {
                         self.mark_ret_call(e);
+                        self.bk_ret_leaves(e);
                         self.bk_frame();
                         let r = self.expr(e, Some(ret));
                         let srcs = self.bk_frame_end();
@@ -1566,12 +1601,31 @@ impl Cx<'_> {
                 if matches!(to, Ty::Fn(_)) && matches!(strip_paren(x), Expr::Closure(..)) {
                     let (v, t) = self.expr(x, Some(to))?;
                     self.same(SP, t, to)?;
+                    // (its annotated parameters against the regions the type binds, as in a `let`: `(|_: &'static u32|
+                    // {}) as fn(&u32)` is "lifetime may not live long enough")
+                    if self.rg_on() {
+                        self.rg_closure_fnptr(ty, x);
+                    }
                     return Ok((v, t));
                 }
                 // (`c as fn(&str)` with c a closure value that captures nothing: its fn-pointer instance)
                 if let (Ty::Fn(_), Some(Ty::Struct(sid))) = (to, self.peek(x)) {
                     let base = self.prog.base_of(sid);
                     if let Some(&cid) = self.prog.closure_of_struct.get(&base) {
+                        // (its annotated parameters against the regions the type binds, as for a closure written there:
+                        // `let c = |_: &'static u32| {}; c as fn(&u32)`)
+                        if let Some(mut ce) = self.clo_ann.iter().find(|x| x.0 == base).map(|x| x.1.clone()) {
+                            // (reported at the cast's value, as rustc does)
+                            if let Expr::Closure(_, _, _, _, p) = &mut ce {
+                                *p = borrowck::pos(x);
+                            }
+                            if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
+                                self.rg_late_on();
+                            }
+                            if self.rg_on() {
+                                self.rg_closure_fnptr(ty, &ce);
+                            }
+                        }
                         if self.prog.structs[sid as usize].fields.is_empty() {
                             // (the value carries nothing; evaluated for its effects)
                             self.expr(x, None)?;
@@ -1619,7 +1673,14 @@ impl Cx<'_> {
                         _ => Some(Ty::I32),
                     })
                 };
+                let f0 = self.bk.frames.last().map(|f| f.len());
                 let (v, from) = self.expr(x, hint)?;
+                // (a cast to a number holds nothing of what x borrows: `r as *mut _ as usize` does not keep r's loans)
+                if to.is_int() || to.is_float() || matches!(to, Ty::Bool | Ty::Char) {
+                    if let (Some(n), Some(f)) = (f0, self.bk.frames.last_mut()) {
+                        f.truncate(n);
+                    }
+                }
                 // `x as _` (the expected type, else the same type) / `&x as *const _` (the pointee of the source)
                 let to = match to {
                     Ty::Param(h) if h == crate::program::HOLE => expected.filter(|&e| !has_hole(self.prog, e)).unwrap_or(from),
@@ -2622,8 +2683,17 @@ impl Cx<'_> {
         let Some(args) = sol.into_iter().collect::<Option<Vec<Ty>>>() else {
             return err(SP, "cannot infer the return type of this closure; annotate it (`|..| -> T { .. }`)");
         };
+        // (one with a parameter annotated with a lifetime, which a cast of a local holding it may coerce)
+        if self.user_code && self.bk.level >= 2 && cd.captures.is_empty() && inputs.iter().any(|x| x.1.as_ref().is_some_and(crate::regions::names_lt)) && !self.clo_ann.iter().any(|x| x.0 == cd.sid) {
+            self.clo_ann.push((cd.sid, c.clone()));
+        }
         // (a closure with no captures where a fn pointer is expected: the address of its fn-pointer instance)
         if matches!(expected, Some(Ty::Fn(_))) && cd.captures.is_empty() {
+            // (a parameter annotated with a lifetime, which the type may bind (`let _: fn(&u32) = |_: &'static u32|
+            // {};`): checked from here on (rg_closure_fnptr))
+            if self.user_code && self.bk.level >= 2 && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() && inputs.iter().any(|x| x.1.as_ref().is_some_and(crate::regions::names_lt)) {
+                self.rg_late_on();
+            }
             let (iid, sig) = {
                 let mut g = self.insts.lock().unwrap();
                 let iid = g.request_fnptr(prog, cid, args).or_else(|e| err(SP, e))?;
@@ -2695,7 +2765,10 @@ impl Cx<'_> {
             && !inputs.iter().any(|x| x.1.is_some())
             && regionck::enabled()
             && matches!(c, Expr::Closure(_, _, _, b, _) if crate::regions::writes_lifetime(b));
-        if (ann_static || writes_lt) && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
+        // (or a parameter annotated with a lifetime where a bound gives the signature (`|x: &'static u32|` for
+        // `F: Fn(&u32)`): rg_closure_sig relates the two)
+        let ann_lt = bound.is_some() && self.user_code && self.bk.level >= 2 && !to_prelude && inputs.iter().any(|x| x.1.as_ref().is_some_and(crate::regions::names_lt));
+        if (ann_static || writes_lt || ann_lt) && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
             self.rg_late_on();
         }
         // (the region signature its body is checked with: from a bound not the prelude's, else from annotated
@@ -3636,6 +3709,31 @@ impl Cx<'_> {
                 let r = self.call_fn(cid, Some(recv), &args, None, expected, SP);
                 self.rg.shared_clo = None;
                 self.rg_took_call(c);
+                // (those regions are in the closure's type, so they last while it is used: the closure holds what the
+                // arguments passed to such parameters borrow (`g(&a); a = 2; g(&a);` is E0506). A local's closure called
+                // by its name: one in a struct's field may have the field's bound as its signature)
+                let callee = strip_paren(func);
+                if r.is_ok() && self.bk_on() && self.bk.level >= 2 && matches!(callee, Expr::Path(None, p) if p.segs.len() == 1) {
+                    if let Some(ps) = self.hr_lost.iter().find(|h| h.0 == base).map(|h| h.1.clone()) {
+                        let mut srcs = vec![];
+                        for &i in &ps {
+                            if let Some(a) = args.get(i) {
+                                self.bk_direct_pub(a, &mut srcs);
+                            }
+                        }
+                        // (through a reference to the closure (`r(&a)` with `r = &g`): the closure it points to holds
+                        // them too)
+                        let through = matches!(callee, Expr::Path(None, p) if ident_of(p).and_then(|n| self.bk_local_of(n)).is_some_and(|l| matches!(self.bk.locals[l as usize].ty, Ty::Ref(..))));
+                        if through && !srcs.is_empty() {
+                            if let Expr::Path(None, p) = callee {
+                                if let Some(l) = ident_of(p).and_then(|n| self.bk_local_of(n)) {
+                                    self.bk_ev(borrowck::Ev::HoldThrough(l, srcs.clone()));
+                                }
+                            }
+                        }
+                        self.bk_flow_into(callee, &srcs);
+                    }
+                }
                 // (a result that holds references holds what the arguments its body makes it of borrow: `some(&x)`
                 // with `let some = |a| Some(a);`, or `let some = Some;`)
                 if let Ok((_, rt)) = &r {

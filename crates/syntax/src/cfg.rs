@@ -19,6 +19,9 @@ pub struct CfgSet {
     /// the crate's compile-time environment for `env!` / `option_env!` (cargo's `CARGO_PKG_*`, `OUT_DIR`, a build
     /// script's `rustc-env`). A name that is not here is looked up in zustc's own environment, as rustc does
     pub env: Vec<(String, String)>,
+    /// the crate's edition, for what its tokens mean (2021's reserved prefixes: lexer::unknown_prefix). 0: unknown,
+    /// and nothing edition-dependent is checked
+    pub edition: u16,
 }
 
 impl CfgSet {
@@ -252,6 +255,96 @@ fn format_like(name: &[u8]) -> bool {
             | b"assert_eq" | b"assert_ne" | b"debug_assert" | b"debug_assert_eq" | b"debug_assert_ne" | b"unreachable"
             | b"unimplemented" | b"todo" | b"vec" | b"dbg"
     )
+}
+
+/// The byte ranges of the branches of `cfg_if! { if #[cfg(P)] { .. } else if #[cfg(Q)] { .. } else { .. } }` calls
+/// that are not taken (the first branch whose predicate holds is; the else branch when none does), and of items
+/// inside a call's branches whose own `#[cfg(..)]` does not hold. Only for what is read before expansion: the
+/// out-of-line modules a branch declares (srcmap). Not inside `macro_rules!` bodies
+pub(crate) fn cfg_if_not_taken(src: &str, c: &CfgSet) -> Vec<(usize, usize)> {
+    let mut out = vec![];
+    if !src.contains("cfg_if") {
+        return out;
+    }
+    let s = src.as_bytes();
+    let toks = crate::lexer::tokenize(s);
+    let t = |k: usize| -> &[u8] {
+        match toks.get(k) {
+            Some(&(_, a, b)) => &s[a..b],
+            None => b"",
+        }
+    };
+    // (`#[cfg(P)]` at k: (whether P holds, the token after `]`))
+    let cfg_attr = |k: usize| -> Option<(bool, usize)> {
+        if t(k) == b"#" && t(k + 1) == b"[" && t(k + 2) == b"cfg" && t(k + 3) == b"(" {
+            let (v, j) = eval(s, &toks, k + 4, c);
+            let close = matching(s, &toks, k + 1);
+            (j <= close).then_some((v, close + 1))
+        } else {
+            None
+        }
+    };
+    let mut i = 0;
+    while i + 2 < toks.len() {
+        if t(i) == b"macro_rules" && t(i + 1) == b"!" && toks.get(i + 2).is_some_and(|x| x.0 == 0) && is_open(t(i + 3)) {
+            i = matching(s, &toks, i + 3) + 1;
+            continue;
+        }
+        if !(t(i) == b"cfg_if" && t(i + 1) == b"!" && t(i + 2) == b"{") {
+            i += 1;
+            continue;
+        }
+        let close = matching(s, &toks, i + 2);
+        let mut k = i + 3;
+        let mut taken = false;
+        while k < close {
+            // (`if #[cfg(P)] {` / `else if #[cfg(P)] {` / `else {`)
+            let mut holds = true;
+            if t(k) == b"else" {
+                k += 1;
+            }
+            if t(k) == b"if" {
+                let Some((v, j)) = cfg_attr(k + 1) else { break };
+                holds = v;
+                k = j;
+            }
+            if t(k) != b"{" {
+                break;
+            }
+            let end = matching(s, &toks, k);
+            if taken || !holds {
+                out.push((toks[k].1, toks[end].2));
+            } else {
+                taken = true;
+                // (an item's own `#[cfg(..)]` in the taken branch, `#[cfg(feature = "rng")] mod avx2;`: up to its `;`
+                //  or its braces)
+                let mut m = k + 1;
+                while m < end {
+                    if let Some((false, j)) = cfg_attr(m) {
+                        let mut e = j;
+                        while e < end && t(e) != b";" && t(e) != b"{" {
+                            e += 1;
+                        }
+                        let e = if t(e) == b"{" { matching(s, &toks, e) } else { e };
+                        out.push((toks[m].1, toks[e.min(end)].2));
+                        m = e + 1;
+                        continue;
+                    }
+                    if is_open(t(m)) && t(m) != b"[" {
+                        // (nested braces: a nested `cfg_if!` is taken up by the outer loop, its own items below)
+                        if !(m >= 2 && t(m - 1) == b"!" && t(m - 2) == b"cfg_if") {
+                            m = matching(s, &toks, m) + 1;
+                            continue;
+                        }
+                    }
+                    m += 1;
+                }
+            }
+            k = end + 1;
+        }
+        i += 3;
+    }
+    out
 }
 
 /// src の cfg を評価する。変わらなければ None

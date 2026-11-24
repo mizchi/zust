@@ -1,4 +1,4 @@
-// @wasm with records, enums and local mutation: the same source as JS (zsc --all-js) and as wasm.
+// @wasm with records, enums and local mutation: the annotated Wasm build and the unannotated JS build.
 // Records and enums are Copy structs / enums in Rust and cross the boundary as their scalar fields (no copy
 // into linear memory).
 

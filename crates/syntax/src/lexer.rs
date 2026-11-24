@@ -586,8 +586,52 @@ fn string_lit(s: &[u8], mut i: usize) -> Option<usize> {
 mod tests {
     use super::*;
 
+    /// Edition 2021's reserved prefixes: an identifier right before `#` / `"` / `'`, and what only looks like one
+    #[test]
+    fn reserved_prefixes() {
+        let bad = |s: &str| unknown_prefix(s).unwrap_or_default();
+        assert_eq!(bad("m!(foo#bar);"), "1:4: prefix `foo` is unknown");
+        assert_eq!(bad("x\nm!(foo\"s\");"), "2:4: prefix `foo` is unknown");
+        assert_eq!(bad("m!(foo'b');"), "1:4: prefix `foo` is unknown");
+        assert_eq!(bad("m!('prefix#lt);"), "1:5: prefix `prefix` is unknown");
+        assert_eq!(bad("m!($x#y);"), "1:5: prefix `x` is unknown");
+        for ok in [
+            "let s = \"abc\"; let c = 'x'; let t = b\"by\"; let u = b'y';",
+            "let r = r#\"a \"q\" foo#bar\"#; let rr = r##\"x\"#y\"##; let raw = br\"z\"; let cs = c\"c\";",
+            "fn f<'a>(x: &'a str) -> &'a str { x } let e = '\\n'; let q = '\\'';",
+            "// foo#bar \"x\"y\n/* a\"b /* foo#bar */ */ let n = 1u8;",
+            "m!(r#let#foo); let r#match = 1; m!($x # y); let s = \"foo#bar\";",
+            "m!(\"x\"tag#tail); m!('c'tag#t); m!('r#a); fn g<'a>(_: &'a u8) {} let n = 'a';",
+        ] {
+            assert_eq!(unknown_prefix(ok), None, "{ok}");
+        }
+    }
+
     fn hashes(src: &str) -> Vec<Key> {
         split(src).unwrap().iter().map(|i| i.hash).collect()
+    }
+
+    /// A const generic parameter (`fn read_words<W, const N: usize>`, `impl<const N: usize>`) is no item of the
+    /// module: a module's `const N` elsewhere does not make it collide, and it keeps its name (rand_core 0.10's
+    /// utils.rs became `rand_core__utils__N`, "cannot find constant")
+    #[test]
+    fn const_generic_parameter_is_not_a_module_constant() {
+        let src = "mod utils {\n    pub fn read_words<W: Copy, const N: usize>(_s: &[u8]) -> [W; N] { loop {} }\n    pub struct A<const N: usize>;\n    impl<const N: usize> A<N> { pub fn n(&self) -> usize { N } }\n}\nmod block {\n    pub const N: usize = 2;\n    pub fn first<const N: usize>(a: [u8; N]) -> u8 { a[0] }\n}\nfn main() {}\n";
+        let out = rename_module_collisions(src).unwrap_or_else(|| src.to_string());
+        assert!(!out.contains("utils__N"), "{out}");
+        assert!(out.contains("const N: usize>(_s: &[u8]) -> [W; N]"), "{out}");
+        assert!(out.contains("pub fn first<const N: usize>(a: [u8; N])"), "{out}");
+    }
+
+    /// `const unsafe fn` (and `const async fn`, `const extern "C" fn`) is a fn, not a constant named `unsafe`: libc
+    /// 0.2 has `pub const unsafe fn` in several modules, and taking `unsafe` for a colliding name renamed the
+    /// `unsafe` of `unsafe impl Send for DIR {}` to `a__unsafe`
+    #[test]
+    fn const_unsafe_fn_is_not_a_constant() {
+        let src = "mod a {\n    pub struct DIR;\n    pub const unsafe fn f() -> u8 { 1 }\n    unsafe impl Send for DIR {}\n}\nmod b {\n    pub struct DIR;\n    pub const unsafe fn f() -> u8 { 2 }\n    unsafe impl Send for DIR {}\n}\nfn main() {}\n";
+        let out = rename_module_collisions(src).unwrap_or_else(|| src.to_string());
+        assert!(!out.contains("__unsafe"), "{out}");
+        assert!(out.contains("unsafe impl Send for a__DIR") && out.contains("unsafe impl Send for b__DIR"), "{out}");
     }
 
     #[test]
@@ -670,6 +714,166 @@ mod tests {
 /// `#[cfg(test)] mod tests { .. }` はまるごと消す。モジュールのパス (`geo::f`) は名前解決が先頭を読み飛ばす。
 /// モジュールがなければ None
 /// 簡単な字句解析: (種類, 開始, 終了)。0 = 識別子, 1 = 記号 1 文字, 2 = リテラル (コメントは飛ばす)
+/// Edition 2021 reserves `prefix#`, `prefix"..."` and `prefix'..'` for every identifier but the literal prefixes (`b`,
+/// `r`, `br`, `c`, `cr`): `foo#bar` is no longer the three tokens `foo # bar`. The first such one, as
+/// `line:col: prefix `foo` is unknown`. A look at the bytes first: tokenized only when an identifier character is
+/// right before one of the three
+pub fn unknown_prefix(src: &str) -> Option<String> {
+    // (it runs on every file a build reads: no tokens, a jump from one of `/` `"` `'` `#` to the next, as only they
+    // start a comment or literal or can follow a prefix. A string's or char's closing quote is stepped over with it,
+    // so a quote looked at is an opening one, and the identifier right before it its prefix)
+    let b = src.as_bytes();
+    let n = b.len();
+    // (the identifier ending right before i: its start, when it is one (not a number's suffix `1u8`, a lifetime
+    // `'a`, a macro's fragment `$x`)
+    let prefix_at = |i: usize| -> Option<usize> {
+        let mut a = i;
+        while a > 0 && is_ident_cont(b[a - 1]) {
+            a -= 1;
+        }
+        // (and not a raw name `r#let`, whose `#` is not a prefix's)
+        let raw = a >= 2 && b[a - 1] == b'#' && b[a - 2] == b'r' && (a == 2 || !is_ident_cont(b[a - 3]));
+        // (a literal's suffix `"x"tag` / `'c'tag` is no prefix either; a lifetime's name is looked at with its quote. A
+        // macro's `$x#y` is one: rustc's lexer reads `$` alone)
+        (a < i && is_ident_start(b[a]) && !raw && !(a > 0 && matches!(b[a - 1], b'\'' | b'"'))).then_some(a)
+    };
+    let skip_str = |mut i: usize| {
+        while i < n && b[i] != b'"' {
+            i += if b[i] == b'\\' { 2 } else { 1 };
+        }
+        (i + 1).min(n)
+    };
+    // (from a raw string's first `#` or `"` at i: past its end `"#..`)
+    let skip_raw = |i: usize| {
+        let mut j = i;
+        while j < n && b[j] == b'#' {
+            j += 1;
+        }
+        let h = j - i;
+        let mut k = j + 1;
+        while k < n && !(b[k] == b'"' && k + h < n && b[k + 1..=k + h].iter().all(|&x| x == b'#')) {
+            k += 1;
+        }
+        (k + 1 + h).min(n)
+    };
+    // (a char literal at the quote i, or a lifetime's quote: past it)
+    let skip_quote = |i: usize| {
+        if b.get(i + 1) == Some(&b'\\') {
+            let mut j = i + 3;
+            while j < n && b[j] != b'\'' {
+                j += 1;
+            }
+            return (j + 1).min(n);
+        }
+        let l = utf8_len(b.get(i + 1).copied().unwrap_or(0));
+        if b.get(i + 1 + l) == Some(&b'\'') { i + 2 + l } else { i + 1 }
+    };
+    let mut i = 0;
+    while i < n {
+        i = next_special(b, i);
+        if i >= n {
+            break;
+        }
+        let c = b[i];
+        if c == b'/' {
+            if b.get(i + 1) == Some(&b'/') {
+                i = b[i..].iter().position(|&c| c == b'\n').map_or(n, |k| i + k);
+            } else if b.get(i + 1) == Some(&b'*') {
+                let mut d = 0;
+                while i < n {
+                    if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                        d += 1;
+                        i += 2;
+                    } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
+                        d -= 1;
+                        i += 2;
+                        if d == 0 {
+                            break;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        let w = prefix_at(i).map(|a| (a, &src[a..i]));
+        match (c, w) {
+            (b'"', None | Some((_, "b" | "c"))) => i = skip_str(i + 1),
+            (b'"', Some((_, "r" | "br" | "cr"))) => i = skip_raw(i),
+            (b'\'', None) | (b'\'', Some((_, "b"))) => {
+                let j = skip_quote(i);
+                if j != i + 1 {
+                    i = j;
+                    continue;
+                }
+                // (a lifetime: `'a#` is a reserved prefix too, but for the raw lifetime `'r#a`)
+                let mut e = j;
+                while e < n && is_ident_cont(b[e]) {
+                    e += 1;
+                }
+                if e > j && e < n && b[e] == b'#' && &src[j..e] != "r" {
+                    return Some(prefix_error(b, j, &src[j..e]));
+                }
+                i = e;
+            }
+            (b'#', None) => i += 1,
+            (b'#', Some((_, "r" | "br" | "cr"))) => {
+                let mut j = i;
+                while j < n && b[j] == b'#' {
+                    j += 1;
+                }
+                if b.get(j) == Some(&b'"') {
+                    i = skip_raw(i);
+                } else if w.is_some_and(|(_, w)| w == "r") && j == i + 1 {
+                    // (a raw name `r#let`: past it)
+                    i = j;
+                    while i < n && is_ident_cont(b[i]) {
+                        i += 1;
+                    }
+                } else {
+                    let (a, w) = w.unwrap();
+                    return Some(prefix_error(b, a, w));
+                }
+            }
+            (_, Some((a, w))) => return Some(prefix_error(b, a, w)),
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// The first of `/` `"` `'` `#` at or after i (b.len() if none): 8 bytes at a time (a byte equal to c makes a zero
+/// byte of `x ^ c..c`, found by the carry trick)
+fn next_special(b: &[u8], mut i: usize) -> usize {
+    const LO: u64 = 0x0101_0101_0101_0101;
+    const HI: u64 = 0x8080_8080_8080_8080;
+    let has = |x: u64, c: u8| {
+        let y = x ^ (LO * c as u64);
+        y.wrapping_sub(LO) & !y & HI
+    };
+    while i + 8 <= b.len() {
+        let x = u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+        let m = has(x, b'/') | has(x, b'"') | has(x, b'\'') | has(x, b'#');
+        if m != 0 {
+            break;
+        }
+        i += 8;
+    }
+    while i < b.len() && !matches!(b[i], b'/' | b'"' | b'\'' | b'#') {
+        i += 1;
+    }
+    i
+}
+
+fn prefix_error(b: &[u8], a: usize, w: &str) -> String {
+    let line = b[..a].iter().filter(|&&c| c == b'\n').count() + 1;
+    let col = a - b[..a].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1) + 1;
+    format!("{line}:{col}: prefix `{w}` is unknown")
+}
+
 pub fn tokenize(s: &[u8]) -> Vec<(u8, usize, usize)> {
     let n = s.len();
     // (種類, 開始, 終了): 0 = 識別子, 1 = 記号 1 文字, 2 = リテラル
@@ -868,6 +1072,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 }
             } else if let Some(f) = qual_fn(k) {
                 f
+            } else if t == b"unsafe" && k + 1 < toks.len() && matches!(tok(k + 1), b"impl" | b"trait") {
+                // (`unsafe impl Tr for S { .. }` / `unsafe trait Tr { .. }`)
+                k + 1
             } else if t == b"unsafe" && k + 1 < toks.len() && tok(k + 1) == b"extern" {
                 // (`unsafe extern "C" { .. }`)
                 k + 1
@@ -1847,8 +2054,11 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             let generic = kw == b"const" && k >= 1 && (is_sym(k - 1, b'<') || is_sym(k - 1, b','));
             if matches!(kw, b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"const" | b"static" | b"union") && k + 1 < toks.len() && !after_star && !after_tick && !generic {
                 let nk = if kw == b"static" && is_id(k + 1, b"mut") { k + 2 } else { k + 1 };
-                // (`const fn f` は fn で数える)
-                if nk < toks.len() && toks[nk].0 == 0 && !(kw == b"const" && is_id(nk, b"fn")) && tok(nk) != b"_" {
+                // (`const fn f` は fn で数える。`const unsafe fn` / `const async fn` / `const extern "C" fn` も)
+                let const_fn = kw == b"const" && (is_id(nk, b"fn") || is_id(nk, b"unsafe") || is_id(nk, b"async") || is_id(nk, b"extern"));
+                // (a const generic parameter, `<W, const N: usize>`, follows `<` or `,`: it is no item of the module)
+                let const_param = kw == b"const" && k >= 1 && (is_sym(k - 1, b'<') || is_sym(k - 1, b','));
+                if nk < toks.len() && toks[nk].0 == 0 && !const_fn && !const_param && tok(nk) != b"_" {
                     let sc = scope_depth.last().unwrap().0;
                     defs.push((tok(nk).to_vec(), sc, nk));
                     // (a fn of an extern block: renamed, it keeps its symbol through a `#[link_name]` before the

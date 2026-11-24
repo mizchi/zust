@@ -97,4 +97,14 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-23 | [Test time: where it goes, what was cut, and a nextest-like `zurgo test`](2026-11-23-05-test-time.md) |
 | 2026-11-23 | [Region (lifetime) checking, part 17: raw pointers, `DerefMut` receivers, scrutinee and loop temporaries, and false errors of indexing, dispatch and turbofish inference](2026-11-23-06-region-check-17.md) |
 | 2026-11-23 | [Region (lifetime) checking, part 18: let extension through constructors, closure capture reborrows, trait objects' drops, `&mut` moved by value, and a scrutinee's drop per arm](2026-11-23-07-region-check-18.md) |
+| 2026-11-23 | [Survey: the Rust compiler's frontier (November 2026), and what zustc takes from it](2026-11-23-08-rust-frontier-survey.md) |
 | 2026-11-24 | [Region (lifetime) checking, part 19: closures' calls and requirements, fn items as higher-ranked fn pointers, impl constants' lifetimes](2026-11-24-01-region-check-19.md) |
+| 2026-11-24 | [`check` in forked children (#101)](2026-11-24-02-parallel-check.md) |
+| 2026-11-24 | [The borrow check toward Polonius Alpha (#1)](2026-11-24-03-polonius-alpha.md) |
+| 2026-11-24 | [Region (lifetime) checking, part 20: closures against the regions their bounds bind, boxed closures' signatures, captured locals' regions, what a closure's calls borrow](2026-11-24-04-region-check-20.md) |
+| 2026-11-24 | [Region (lifetime) checking, part 21: fn items coerced to fn pointers, deref coercions through shared references, `ref mut` bindings of annotated lets](2026-11-24-05-region-check-21.md) |
+| 2026-11-24 | [Trait solving, first step: an impl's bounds as nested goals (#2)](2026-11-24-06-impl-bounds-nested-goals.md) |
+| 2026-11-24 | [Trait solving, step 1: a goal's answer is yes, maybe or no (#2)](2026-11-24-07-goal-certainty.md) |
+| 2026-11-24 | [Region (lifetime) checking, part 22: projections' associated types in annotations and parameters, closures cast from a local](2026-11-24-08-region-check-22.md) |
+| 2026-11-24 | [Region (lifetime) checking, part 23: placeholders against regions from outside, a placeholder's bound's type arguments, diverging initializers, type aliases with a parameter twice](2026-11-24-09-region-check-23.md) |
+| 2026-11-24 | [Region (lifetime) checking, part 24: a struct's 'static bound in a generic fn's types, `mut` bindings under a by-reference default binding mode, the outlives of the impl a projection selects](2026-11-24-10-region-check-24.md) |

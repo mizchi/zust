@@ -1,0 +1,59 @@
+{
+  "case": "status",
+  "hashes_sha256": {
+    "TASK.md": "fecabb9298549520c680f125b9cc301a2215f0d8346eea11f5619048b10a35ad",
+    "CASE.md": "0fca5950c1e6c35b1d5e07a43b85e3d5f2f780868babe64b77166e7e582e6083",
+    "README.md": "c17c83238c812655f679735be2224cfb2d1a32cac8c890420a6d944434982e54",
+    "zsc": "f9beff151e7fd4cecadecfd60076c22722c0d69406be37095bd0ecc979c05821",
+    "zustc": "ff800802f7534225411a7c54ea7515778a5d95ae924a2a11bdd4c6f4d32394b0",
+    "model.ts": "71c03c41c7ae3341b49eb5b9d173e357cc3d85b76e919deeac402b7979656f47"
+  },
+  "attempts": [
+    {
+      "source": "import type { Shipment } from \"./model.ts\";\n\nfn format_code(code: String) -> String { \"便 \" + code }\n\nexport fn label(shipment: Shipment) -> String {\n  match shipment {\n    Waiting => \"準備中\",\n    Shipped(code) => format_code(code),\n  }\n}\n",
+      "exit_code": "0\n",
+      "compiler_log": "zsc: answer.zsc → out/answer.js, .d.ts (front 1.1 ms)\n"
+    }
+  ],
+  "answer": "import type { Shipment } from \"./model.ts\";\n\nfn format_code(code: String) -> String { \"便 \" + code }\n\nexport fn label(shipment: Shipment) -> String {\n  match shipment {\n    Waiting => \"準備中\",\n    Shipped(code) => format_code(code),\n  }\n}\n",
+  "executor_test": "import assert from 'node:assert/strict';\nimport * as api from './out/answer.js';\n\nassert.equal(api.label({state: 'waiting'}), '準備中');\nassert.equal(api.label({state: 'shipped', code: '朝12'}), '便 朝12');\nassert.equal(api.label({state: 'shipped', code: ''}), '便 ');\nassert.equal('format_code' in api, false);\n",
+  "feedback": "「文法(現時点の案と決定事項)」の公開関数と非公開関数の例、および「TS の型の取り込み」の判別キー付き union を参考にした。\n\n最初は、Shipment を import type で読み、match shipment の Waiting と Shipped(code) で分岐し、export fn label から通常の fn format_code を呼ぶと予想した。コンパイルは初回で成功し、再試行はなかった。Node で元のオブジェクトを渡し、準備中、配送中、日本語と空の code の出力、補助関数が非公開であることを確認した。\n\n実装上の失敗はなかった。資料を読む際には、取り込みの節の冒頭が「プレーンなレコード型だけ」とあるため、Shipment が対象か一度迷った。同じ節を読み進めると union の規則が分かった。タグ以外のフィールドがゼロの場合に Waiting と書くことは、別の箇所にある Filter の match 例から推測した。\n\n改善案は、取り込み節の冒頭にレコード、文字列 union、判別キー付き union を列挙し、タグだけのメンバーと値を持つメンバーが混ざる union の match を一例載せること。\n",
+  "verification": {
+    "task": "status",
+    "passed": true,
+    "checks": [
+      {
+        "name": "compile",
+        "passed": true
+      },
+      {
+        "name": "waiting",
+        "passed": true
+      },
+      {
+        "name": "shipped",
+        "passed": true
+      },
+      {
+        "name": "empty code",
+        "passed": true
+      },
+      {
+        "name": "Unicode code",
+        "passed": true
+      },
+      {
+        "name": "export spelling",
+        "passed": true
+      },
+      {
+        "name": "private helper",
+        "passed": true
+      },
+      {
+        "name": "original TS type",
+        "passed": true
+      }
+    ]
+  }
+}

@@ -78,6 +78,13 @@ fn env_once(cell: &'static std::sync::OnceLock<bool>, name: &str) -> bool {
     *cell.get_or_init(|| std::env::var_os(name).is_some())
 }
 
+/// ZUSTC_NO_POLONIUS=1: the borrow check's NLL rules instead of Polonius Alpha's where they differ (issue #1): a
+/// reborrow returned lives to the function's end, and an assignment to a part of a local kills no loans
+pub(crate) fn no_polonius() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ZUSTC_NO_POLONIUS")
+}
+
 /// ACG_PANIC_ERR=1: an error panics (to find where it is made from the backtrace)
 /// An error of the borrow or region check's kind (lowering itself returns some: `m[k] = v` of a HashMap is E0594)
 pub fn borrow_error(e: &str) -> bool {
@@ -479,6 +486,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         closure_prelude: false,
         closure_fn_only: false,
         hr_lost: vec![],
+        clo_ann: vec![],
         clo_ret_param: vec![],
         clo_ret_from: vec![],
         seg_self: None,
@@ -1032,6 +1040,9 @@ pub struct Cx<'p> {
     /// Closures made where nothing was expected (their kind, signature: from the body), by their definition: the
     /// parameters with no type written that are references (one region each, not higher-ranked)
     pub hr_lost: Vec<(u32, Vec<usize>)>,
+    /// The closures made with a parameter annotated with a lifetime (`|_: &'static u32| {}`), by struct: their
+    /// expressions, for a cast of a local holding one to a fn pointer type (rg_closure_fnptr)
+    pub clo_ann: Vec<(u32, Expr)>,
     /// Of those, the ones whose body is one of their parameters (`|y| y`): that parameter's type argument
     pub clo_ret_param: Vec<(u32, usize)>,
     /// A closure's parameters its result is made of, as its body is written (borrowck::closure_ret_params): a call's
@@ -1706,7 +1717,11 @@ impl Cx<'_> {
             // (an `impl Trait` result of a fn with no region in its signature: its hidden type captures none, its
             // regions are 'static)
             let opaque = n == 0 && !sig.is_generic() && self.prog.opaque.contains(&self.rg.base) && regionck::count(self.prog, sig.ret, 0).is_some_and(|c| c > 0);
-            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) && !opaque {
+            // (a placeholder instance (zustc check of a generic fn nothing calls) where a struct or an enum of the program
+            // bounds a type parameter by 'static: its types' well-formedness may need T: 'static (`None::<Static<T>>`
+            // with `struct Static<T: 'static>(T)`, E0310))
+            let static_bounds = n == 1 && regionck::placeholder_static_bounds(self.prog, &self.rg.inst_args);
+            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) && !opaque && !static_bounds {
                 self.rg.on = false;
                 let se = f.sig.recv.as_ref().is_some_and(|r| r.starts_with('&'));
                 self.rg.late = Some((se, f.sig.recv.is_some() && !se));
@@ -1753,6 +1768,30 @@ impl Cx<'_> {
                 if other_self {
                     self.rg.ret = None;
                 }
+                // (a parameter whose type is a projection the summary does not follow (`_wf: <&'a u8 as Tr>::Ty`): its
+                // impl's associated type's value, with the regions its self type writes; what it implies is known
+                // (implied-bounds/assoc-ty-wf-used-to-get-assoc-ty.rs))
+                if self.rg.on && !self.prog.assoc_regions.is_empty() {
+                    // (and a projection a parameter's type or the result's is requires what its impl's header declares
+                    // of the impl's lifetimes, reported at the type)
+                    for pty in f.sig.params.iter().map(|x| &x.1).chain(f.sig.ret.as_ref()) {
+                        if let Some(sp) = crate::wf::pos_of(pty) {
+                            self.rg_proj_wf(pty, sp);
+                        }
+                    }
+                    for (k, (p, pty)) in f.sig.params.iter().enumerate() {
+                        let (crate::parse::Ty::Path(Some(_), _), Some(&(loc, t))) = (pty, ps.get(k + f.sig.recv.is_some() as usize)) else { continue };
+                        let _ = p;
+                        if self.rg.locals.contains_key(&loc) {
+                            continue;
+                        }
+                        if let Some(tr) = self.rg_proj_ann(pty, t) {
+                            let prog = self.prog;
+                            self.rg.implied(prog, t, &tr, 0);
+                            self.rg.locals.insert(loc, tr);
+                        }
+                    }
+                }
             } else {
                 self.rg.on = false;
             }
@@ -1797,6 +1836,7 @@ impl Cx<'_> {
         if let Some(Stmt::Expr(e, false)) = f.block.stmts.last() {
             self.mark_ret_call(e);
             self.bk.tail = e as *const Expr as usize;
+            self.bk_ret_leaves(e);
         }
         self.bk.cap_vals = cap_vals;
         let (v, t) = self.block(&f.block, Some(self.ret))?;
@@ -2038,6 +2078,12 @@ impl Cx<'_> {
                     // (`let (y, _): (&'a u32, u32) = ..;`: the pattern binds from a value of the annotation's type)
                     if let Some(a) = ann_ty {
                         if let Some((t, tr)) = self.rg_let_ann(a, init, Some(place.ty())) {
+                            // (a `ref mut` binding of a place: the place is of the annotation's type, invariantly
+                            // (`let Foo(ref mut y): Foo<fn(&'static str)> = x;` with x: `Foo<fn(&'a str)>` needs
+                            // 'a: 'static))
+                            if pat_binds_ref_mut(pat) {
+                                self.rg_place_is_ann(init, t, &tr);
+                            }
                             if t == place.ty() {
                                 self.rg.scrut = Some((t, tr));
                             }
@@ -2125,7 +2171,10 @@ impl Cx<'_> {
                         continue;
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
-                    if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(crate::regions::mentions_static) {
+                    // (or a projection whose associated type's value names lifetimes: `let _: <() as Foo>::Out = &a;`
+                    // with `type Out = &'static u32`)
+                    let proj = |a: &crate::parse::Ty| matches!(a, crate::parse::Ty::Path(Some(_), _)) && !self.prog.assoc_regions.is_empty();
+                    if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(|a| crate::regions::mentions_static(a) || proj(a)) {
                         self.rg_late_on();
                     }
                     // (`let _ = Foo;` with Foo a unit struct (or a const) is a value: dropped at once)
@@ -2160,6 +2209,10 @@ impl Cx<'_> {
                         let (mut v, mut t) = self.expr(init, exp)?;
                         if t == Ty::Never {
                             diverged = true;
+                            // (the annotation's type is well formed all the same: `let _: &'a S<'b> = loop {};`)
+                            if let Some(at) = ann_ty.as_ref() {
+                                self.rg_let_uninit(None, at, *let_at);
+                            }
                             continue;
                         }
                         if let Some(a) = full.filter(|&a| a != t) {
@@ -2321,7 +2374,8 @@ impl Cx<'_> {
                     // owns must not have to be 'static. What came before has no trees and adds no constraint)
                     let static_cast = || matches!(strip_paren(init), Expr::Cast(_, t) if crate::regions::mentions_static(t));
                     let ctor_lts = || self.prog.path_lts && self.inline_depth == 0 && crate::regions::writes_path_lts(init);
-                    if !self.rg.on && self.rg.eligible && (static_cast() || ann_ty.as_ref().is_some_and(crate::regions::mentions_static) || ctor_lts()) {
+                    let proj = |a: &crate::parse::Ty| matches!(a, crate::parse::Ty::Path(Some(_), _)) && !self.prog.assoc_regions.is_empty();
+                    if !self.rg.on && self.rg.eligible && (static_cast() || ann_ty.as_ref().is_some_and(|a| crate::regions::mentions_static(a) || proj(a)) || ctor_lts()) {
                         self.rg_late_on();
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
@@ -2364,10 +2418,23 @@ impl Cx<'_> {
                                 } else {
                                     clif_ty(a).map(|ct| if ct == types::I128 { self.int_const(Ty::I128, 0) } else if ct.is_float() { if ct == types::F64 { self.b.ins().f64const(0.0) } else { self.b.ins().f32const(0.0) } } else { self.b.ins().iconst(ct, 0) })
                                 };
-                                self.bind(name, a, v);
+                                self.bind(name.clone(), a, v);
+                                // (and the annotation's type is well formed, as with any initializer:
+                                // `let _: &'a S<'b> = loop {};` needs 'b: 'a)
+                                if let Some(at) = ann_ty.as_ref() {
+                                    self.rg_let_uninit(Some(&name), at, *let_at);
+                                }
                             }
-                            None => self.bind(name, Ty::Never, None),
+                            None => {
+                                // (the annotation's type is well formed here too, a type that needs Drop
+                                // (`let x: Box<&'a S<'b>> = loop {};`): its tree is not the binding's, which has none)
+                                if let Some(at) = ann_ty.as_ref() {
+                                    self.rg_let_uninit(None, at, *let_at);
+                                }
+                                self.bind(name, Ty::Never, None)
+                            }
                         }
+                        self.rg.let_sp = let_sp0;
                         continue;
                     }
                     // (an annotation with holes, of another struct than the value's: `let x: Foo<_> = Bar::<usize>(..)`. No
@@ -2643,6 +2710,12 @@ impl Cx<'_> {
             if m == "as_ref" && a.is_empty() {
                 if let Some(t) = self.as_ref_ty(r, None) {
                     return Some(t);
+                }
+            }
+            // (an array's as_mut: `&mut [T]`, its one AsMut)
+            if m == "as_mut" && a.is_empty() {
+                if let Some(Ty::Array(el, _)) = self.peek(r).map(|t| self.strip_refs(t)) {
+                    return Some(Ty::Ref(true, intern(Ty::Slice(el))));
                 }
             }
         }
@@ -2974,7 +3047,7 @@ impl Cx<'_> {
                         && bs.impl_trait.as_deref().is_some_and(|it| it.split('<').next().unwrap_or(it).trim() == tr.as_str())
                         && self.prog.names[i].split('#').next().is_some_and(|n| n.ends_with(&suffix))
                 };
-                let holds = || self.prog.blanket_bounds.get(tr.as_str()).is_none_or(|b| super::acg::p2_call::blanket_bounds_hold(self.prog, t, b, &mut vec![], &mut vec![]));
+                let holds = || self.prog.blanket_bounds.get(tr.as_str()).is_none_or(|b| super::acg::p2_call::blanket_impls_hold(self.prog, t, b, &mut vec![], &mut vec![]));
                 if !self.prog.has_param(t) && self.prog.blanket_traits.contains(tr.as_str()) {
                     if let Some(bid) = (0..self.prog.sigs.len()).find(|&i| of_tr(i)).filter(|_| holds()) {
                         return Some((bid as u32, &self.prog.sigs[bid]));
@@ -3229,6 +3302,17 @@ pub(crate) fn plainly_irrefutable(p: &Pat) -> bool {
         Pat::Ident(_, _, n, sub) => n.starts_with(|c: char| c.is_lowercase() || c == '_') && sub.as_deref().is_none_or(plainly_irrefutable),
         Pat::Tuple(ps) => ps.iter().all(plainly_irrefutable),
         Pat::Ref(_, i) => plainly_irrefutable(i),
+        _ => false,
+    }
+}
+
+/// p binds a name by `ref mut` somewhere
+pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(r, m, _, sub) => (*r && *m) || sub.as_deref().is_some_and(pat_binds_ref_mut),
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps) | Pat::Slice(ps) => ps.iter().any(pat_binds_ref_mut),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| pat_binds_ref_mut(&f.1)),
+        Pat::Ref(_, x) => pat_binds_ref_mut(x),
         _ => false,
     }
 }

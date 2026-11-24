@@ -47,7 +47,7 @@ impl Session2 {
                 return Err("pipe failed".into());
             }
             // SAFETY: 子はコンパイルして書くだけで _exit する
-            let pid = unsafe { c_fork() };
+            let pid = fork_counted();
             if pid < 0 {
                 return Err("fork failed".into());
             }
@@ -1345,7 +1345,10 @@ impl Session2 {
         let mut loaded: Vec<Option<(String, crate::srcmap::SrcMap)>> = vec![None; crates.len()];
         for &i in &order {
             let c = &crates[i];
-            let (text, map) = crate::srcmap::load_crate(c.root.as_path(), &c.display, &self.opts.cfg_of(&c.features, &c.cfgs, &c.env))?;
+            // (a workspace's crates have no edition of their own here (zurgo gives each package's to rustc only): the
+            // edition-dependent token checks stay off, as an edition 2018 package may write `m!(foo#bar)`)
+            let cfg = crate::cfg::CfgSet { edition: 0, ..self.opts.cfg_of(&c.features, &c.cfgs, &c.env) };
+            let (text, map) = crate::srcmap::load_crate(c.root.as_path(), &c.display, &cfg)?;
             let text = if c.test { with_harness(&text, &c.display, &self.opts.cfg_of(&c.features, &c.cfgs, &c.env)) } else { text };
             let text = if c.lib { format!("pub mod {} {{ {text}\n}}\n", c.name) } else { text };
             loaded[i] = Some((text, map));
@@ -1535,7 +1538,7 @@ impl Session2 {
                         }
                     }
                 }
-                let marker = "\n// __zustc_dep_macros__\n";
+                let marker = crate::macros::DEP_MACROS_MARKER;
                 let exp = if dd.is_empty() && !text.contains("macro_rules!") && pms.is_empty() {
                     text.clone()
                 } else {
@@ -1612,7 +1615,7 @@ impl Session2 {
                     if unsafe { c_pipe(fds.as_mut_ptr()) } != 0 {
                         continue;
                     }
-                    let pid = unsafe { c_fork() };
+                    let pid = fork_counted();
                     if pid == 0 {
                         unsafe { c_close(fds[0]) };
                         self.opts.jobs = inner;

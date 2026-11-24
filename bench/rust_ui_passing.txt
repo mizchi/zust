@@ -1339,6 +1339,7 @@ compile-fail	closures/closure-arg-assoc-type-mismatch.rs
 compile-fail	closures/closure-arg-type-mismatch-method-receiver.rs
 compile-fail	closures/closure-bounds-static-cant-capture-borrowed.rs
 compile-fail	closures/closure-bounds-subtype.rs
+compile-fail	closures/closure-expected-type/expect-region-supply-region-2.rs
 compile-fail	closures/closure-expected-type/expect-region-supply-region.rs
 compile-fail	closures/closure-expected.rs
 compile-fail	closures/closure-immutable-outer-variable.rs
@@ -2594,6 +2595,7 @@ run-pass	expr/scope.rs
 compile-fail	extern/bad-external-async-fn-issue-146754.rs
 run-pass	extern/empty-struct-extern-fn-16441.rs
 run-pass	extern/extern-1.rs
+check-pass	extern/extern-C-non-FFI-safe-arg-ice-52334.rs
 check-pass	extern/extern-C-str-arg-ice-80125.rs
 build-pass	extern/extern-c-method-with-str-param.rs
 run-pass	extern/extern-compare-with-return-type.rs
@@ -3107,6 +3109,7 @@ run-pass	higher-ranked/trait-bounds/hrtb-closure-lifetime-infer.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-debruijn-in-receiver.rs
 run-pass	higher-ranked/trait-bounds/hrtb-debruijn-object-types-in-closures.rs
 run-pass	higher-ranked/trait-bounds/hrtb-fn-like-trait.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-identity-fn-borrows.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-malformed-lifetime-generics.rs
 run-pass	higher-ranked/trait-bounds/hrtb-opt-in-copy.rs
 run-pass	higher-ranked/trait-bounds/hrtb-parse.rs
@@ -3327,6 +3330,8 @@ check-pass	implied-bounds/ice-unbound-region-vars.rs
 check-pass	implied-bounds/implied-bounds-entailment-wf-vars-issue-114783-1.rs
 check-pass	implied-bounds/implied-bounds-entailment-wf-vars-issue-114783-2.rs
 check-pass	implied-bounds/implied-bounds-on-nested-references-plus-variance-2.rs
+compile-fail	implied-bounds/implied-bounds-on-nested-references-plus-variance-early-bound.rs
+compile-fail	implied-bounds/implied-bounds-on-nested-references-plus-variance.rs
 compile-fail	implied-bounds/implied-bounds-on-trait-hierarchy-1.rs
 check-pass	implied-bounds/implied-bounds-on-trait-hierarchy-2.rs
 check-pass	implied-bounds/implied-bounds-unconstrained-1.rs
@@ -3660,6 +3665,7 @@ run-pass	let-else/let-else-temp-borrowck.rs
 compile-fail	let-else/let-else-then-diverge.rs
 run-pass	let-else/let-else.rs
 compile-fail	let-else/uninitialized-refutable-let-issue-123844.rs
+compile-fail	lexer/dont-ice-on-invalid-lifetime-in-macro-definition.rs
 compile-fail	lexer/lex-bad-binary-literal.rs
 compile-fail	lexer/lex-bad-char-literals-2.rs
 compile-fail	lexer/lex-bad-char-literals-3.rs
@@ -3671,11 +3677,13 @@ compile-fail	lexer/lex-bad-numeric-literals.rs
 compile-fail	lexer/lex-bad-octal-literal.rs
 compile-fail	lexer/lex-bad-str-literal-as-char-1.rs
 compile-fail	lexer/lex-bad-str-literal-as-char-2.rs
+compile-fail	lexer/lex-bad-str-literal-as-char-4.rs
 compile-fail	lexer/lex-bad-token.rs
 run-pass	lexer/lex-bare-cr-nondoc-comment.rs
 compile-fail	lexer/lex-emoji-identifiers.rs
 compile-fail	lexer/lex-invisible-characters.rs
 compile-fail	lexer/lex-stray-backslash.rs
+compile-fail	lexer/prefixed-lifetime.rs
 run-pass	lexer/underscores-in-unicode-escapes.rs
 run-pass	lexer/unicode-pattern-white-space.rs
 compile-fail	lexer/unterminated-comment.rs
@@ -3684,6 +3692,7 @@ compile-fail	lifetimes/E0106-trailing-comma-in-lifetime-suggestion.rs
 compile-fail	lifetimes/apit-not-targeted-by-lifetime-suggestion.rs
 check-pass	lifetimes/array-pattern-matching-10396.rs
 compile-fail	lifetimes/borrowck-let-suggestion.rs
+compile-fail	lifetimes/closure-lifetime-bounds-10291.rs
 compile-fail	lifetimes/closure-must-return-bound-lifetime.rs
 compile-fail	lifetimes/constructor-lifetime-early-binding-error.rs
 compile-fail	lifetimes/container-lifetime-error-11374.rs
@@ -3839,6 +3848,7 @@ check-pass	lint/clashing-extern-fn-wasm.rs
 check-pass	lint/const-item-interior-mutations-const-atomics.rs
 check-pass	lint/const-item-interior-mutations-const-deref.rs
 check-pass	lint/dangling-pointers-from-locals.rs
+compile-fail	lint/dangling-pointers-from-temporaries/calls.rs
 compile-fail	lint/dangling-pointers-from-temporaries/cstring-as-ptr.rs
 compile-fail	lint/dangling-pointers-from-temporaries/example-from-issue123613.rs
 compile-fail	lint/dangling-pointers-from-temporaries/ext.rs
@@ -4474,6 +4484,7 @@ compile-fail	methods/wrong-ambig-message.rs
 compile-fail	mir/build-async-error-body-correctly.rs
 compile-fail	mir/drop-elaboration-after-borrowck-error.rs
 build-pass	mir/field-projection-invariant.rs
+compile-fail	mir/field-projection-mutating-context2.rs
 build-pass	mir/field-ty-ascription-enums.rs
 build-pass	mir/field-ty-ascription.rs
 compile-fail	mir/gvn-opt-138225.rs
@@ -4847,6 +4858,7 @@ compile-fail	nll/move-subpaths-moves-root.rs
 run-pass	nll/mutating_references.rs
 compile-fail	nll/nested-bodies-in-dead-code.rs
 compile-fail	nll/nll-anon-to-static.rs
+compile-fail	nll/normalization-bounds-error.rs
 check-pass	nll/normalization-bounds.rs
 compile-fail	nll/outlives-suggestion-more.rs
 compile-fail	nll/outlives-suggestion-simple.rs
@@ -4859,6 +4871,7 @@ run-pass	nll/rc-loop.rs
 compile-fail	nll/ref-suggestion.rs
 compile-fail	nll/reference-carried-through-struct-field.rs
 check-pass	nll/relate_tys/issue-48071.rs
+compile-fail	nll/relate_tys/var-appears-twice.rs
 compile-fail	nll/return-ref-mut-issue-46557.rs
 check-pass	nll/self-assign-ref-mut.rs
 compile-fail	nll/sugg-mut-for-binding-issue-137486.rs
@@ -4891,6 +4904,7 @@ compile-fail	nll/user-annotations/constant-in-expr-trait-item-1.rs
 check-pass	nll/user-annotations/downcast-infer.rs
 compile-fail	nll/user-annotations/fns.rs
 compile-fail	nll/user-annotations/inherent-associated-constants.rs
+compile-fail	nll/user-annotations/issue-54124.rs
 check-pass	nll/user-annotations/issue-55219.rs
 run-pass	nll/user-annotations/issue-55241.rs
 compile-fail	nll/user-annotations/issue-55748-pat-types-constrain-bindings.rs
@@ -4901,6 +4915,7 @@ compile-fail	nll/user-annotations/method-ufcs-inherent-1.rs
 compile-fail	nll/user-annotations/method-ufcs-inherent-2.rs
 compile-fail	nll/user-annotations/method-ufcs-inherent-3.rs
 compile-fail	nll/user-annotations/method-ufcs-inherent-4.rs
+compile-fail	nll/user-annotations/normalization.rs
 check-pass	nll/user-annotations/normalize-self-ty.rs
 compile-fail	nll/user-annotations/pattern_substs_on_brace_enum_variant.rs
 compile-fail	nll/user-annotations/pattern_substs_on_brace_struct.rs
@@ -5801,6 +5816,8 @@ check-pass	pattern/move-ref-patterns/by-move-sub-pat-unreachable.rs
 check-pass	pattern/move-ref-patterns/issue-53840.rs
 compile-fail	pattern/move-ref-patterns/move-ref-patterns-closure-captures-inside.rs
 check-pass	pattern/move-ref-patterns/move-ref-patterns-closure-captures-pass.rs
+compile-fail	pattern/move-ref-patterns/move-ref-patterns-default-binding-modes-fixable.rs
+compile-fail	pattern/move-ref-patterns/move-ref-patterns-default-binding-modes.rs
 compile-fail	pattern/move-ref-patterns/pattern-ref-bindings-reassignment.rs
 compile-fail	pattern/multiple-bindings-on-var.rs
 compile-fail	pattern/mut-pattern-of-immutable-borrow.rs
@@ -5928,6 +5945,8 @@ run-pass	privacy/pub-priv-dep/std-pub.rs
 run-pass	privacy/pub-restricted-path-usage-55376.rs
 run-pass	privacy/required-pub-in-blocks.rs
 check-pass	privacy/restricted/private-in-public.rs
+compile-fail	privacy/sealed-traits/false-sealed-traits-note.rs
+compile-fail	privacy/sealed-traits/sealed-trait-local.rs
 compile-fail	privacy/suggest-box-new.rs
 compile-fail	privacy/suggest-new-projection-ice.rs
 compile-fail	privacy/trait-object-method-error.rs
@@ -6062,6 +6081,7 @@ run-pass	regions/regions-addr-of-ret.rs
 compile-fail	regions/regions-addr-of-self.rs
 compile-fail	regions/regions-addr-of-upvar-self.rs
 compile-fail	regions/regions-adjusted-lvalue-op.rs
+compile-fail	regions/regions-assoc-type-in-supertrait-outlives-container.rs
 run-pass	regions/regions-assoc-type-region-bound.rs
 run-pass	regions/regions-assoc-type-static-bound.rs
 run-pass	regions/regions-borrow-at.rs
@@ -6148,10 +6168,13 @@ compile-fail	regions/regions-name-duplicated.rs
 compile-fail	regions/regions-name-static.rs
 compile-fail	regions/regions-name-undeclared.rs
 compile-fail	regions/regions-nested-fns-2.rs
+compile-fail	regions/regions-nested-fns.rs
 run-pass	regions/regions-no-bound-in-argument-cleanup.rs
 check-pass	regions/regions-no-variance-from-fn-generics.rs
 run-pass	regions/regions-nullary-variant.rs
 check-pass	regions/regions-outlives-nominal-type.rs
+compile-fail	regions/regions-outlives-projection-container-hrtb.rs
+compile-fail	regions/regions-outlives-projection-container-wc.rs
 check-pass	regions/regions-outlives-projection-hrtype.rs
 check-pass	regions/regions-outlives-projection-trait-def.rs
 check-pass	regions/regions-outlives-scalar.rs
@@ -6196,6 +6219,7 @@ compile-fail	regions/regions-wf-trait-object.rs
 check-pass	regions/relate-bound-region-ref-type-param.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429-2.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429.rs
+compile-fail	regions/wf-bound-region-in-local-issue-115175.rs
 run-pass	regions/wf-bound-region-in-object-type.rs
 check-pass	repeat-expr/can-have-side-effects-consider-element.rs
 compile-fail	repeat-expr/copy-check-const-element-uninferred-count.rs
@@ -6431,6 +6455,8 @@ run-pass	rfcs/rfc-2005-default-binding-mode/enum-ok.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/enum.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/explicit-mut.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/for-ok.rs
+compile-fail	rfcs/rfc-2005-default-binding-mode/for.rs
+run-pass	rfcs/rfc-2005-default-binding-mode/general.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/lit-ok.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/no-double-error.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/range.rs
@@ -6532,6 +6558,7 @@ check-pass	rust-2024/box-slice-into-iter-ambiguous.rs
 check-pass	rust-2024/gen-kw-in-macro.rs
 compile-fail	rust-2024/prelude-migration/in_2024_compatibility.rs
 check-pass	rust-2024/raw-gen-lt.rs
+compile-fail	rust-2024/reserved-guarded-strings-lexing.rs
 check-pass	rust-2024/reserved-guarded-strings-migration.rs
 compile-fail	rust-2024/reserved-guarded-strings.rs
 compile-fail	rust-2024/safe-outside-extern.rs
@@ -6706,7 +6733,6 @@ compile-fail	span/regions-escape-loop-via-variable.rs
 compile-fail	span/regions-escape-loop-via-vec.rs
 compile-fail	span/regions-infer-borrow-scope-within-loop.rs
 compile-fail	span/send-is-not-static-ensures-scoping.rs
-compile-fail	span/send-is-not-static-std-sync-2.rs
 compile-fail	span/slice-borrow.rs
 compile-fail	span/suggestion-non-ascii.rs
 compile-fail	span/suggestion-raw-68962.rs
@@ -7046,6 +7072,7 @@ compile-fail	suggestions/issue-82566-2.rs
 compile-fail	suggestions/issue-83943.rs
 compile-fail	suggestions/issue-84592.rs
 compile-fail	suggestions/issue-84700.rs
+compile-fail	suggestions/issue-84973-2.rs
 compile-fail	suggestions/issue-84973-negative.rs
 compile-fail	suggestions/issue-84973.rs
 compile-fail	suggestions/issue-85347.rs
@@ -7293,6 +7320,7 @@ check-pass	trait-bounds/issue-94999.rs
 compile-fail	trait-bounds/negative-bound-not-supported-58857.rs
 compile-fail	trait-bounds/ownership-mismatch-on-arg.rs
 compile-fail	trait-bounds/sort-missing-ord-bound.rs
+compile-fail	trait-bounds/super-assoc-mismatch.rs
 compile-fail	trait-bounds/trait-bound-adt-issue-145611.rs
 compile-fail	trait-bounds/trait-selection-overflow-prevention-72839.rs
 compile-fail	traits/alias/generic-default-in-dyn.rs
@@ -7398,6 +7426,9 @@ run-pass	traits/impl-inherent-prefer-over-trait.rs
 run-pass	traits/impl-object-overlap-issue-23853.rs
 check-pass	traits/impl_trait_as_trait_return_position.rs
 compile-fail	traits/incoherent-impl-ambiguity.rs
+compile-fail	traits/inductive-overflow/simultaneous.rs
+compile-fail	traits/inductive-overflow/supertrait.rs
+compile-fail	traits/inductive-overflow/two-traits.rs
 run-pass	traits/infer-from-object-issue-26952.rs
 run-pass	traits/inheritance/auto.rs
 run-pass	traits/inheritance/basic.rs
@@ -7431,6 +7462,7 @@ build-pass	traits/issue-104322.rs
 compile-fail	traits/issue-105231.rs
 compile-fail	traits/issue-106072.rs
 run-pass	traits/issue-15155.rs
+compile-fail	traits/issue-18400.rs
 run-pass	traits/issue-18412.rs
 compile-fail	traits/issue-21837.rs
 run-pass	traits/issue-22019.rs
@@ -7640,6 +7672,7 @@ compile-fail	type-alias-enum-variants/resolve-to-enum-variant-in-type-namespace-
 compile-fail	type-alias-impl-trait/coherence/orphanck-tait-with-projection-arg.rs
 check-pass	type-alias-impl-trait/cross_inference_rpit.rs
 check-pass	type-alias-impl-trait/implied_bounds3.rs
+compile-fail	type-alias-impl-trait/implied_bounds_closure.rs
 compile-fail	type-alias-impl-trait/issue-60371.rs
 check-pass	type-alias-impl-trait/issue-87455-static-lifetime-ice.rs
 check-pass	type-alias-impl-trait/multiple_definitions.rs
@@ -8123,4 +8156,5 @@ run-pass	windows-subsystem/console.rs
 run-pass	windows-subsystem/windows.rs
 run-pass	zero-sized/zero-size-type-destructors.rs
 run-pass	zero-sized/zero-sized-btreemap-insert.rs
+run-pass	zero-sized/zero-sized-linkedlist-push.rs
 run-pass	zero-sized/zero-sized-tuple-struct.rs

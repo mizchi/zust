@@ -1689,9 +1689,9 @@ impl Parser {
                 let m = self.eat_ident("mut");
                 let n = self.decl_ident()?;
                 if self.eat_punct(":") {
-                    fs.push((n, self.pat()?));
+                    fs.push((field_name(n), self.pat()?));
                 } else {
-                    fs.push((n.clone(), Pat::Ident(r, m, n, None)));
+                    fs.push((field_name(n.clone()), Pat::Ident(r, m, n, None)));
                 }
                 if !self.eat_punct(",") {
                     break;
@@ -2408,11 +2408,11 @@ impl Parser {
                     _ => self.ident()?,
                 };
                 if self.eat_punct(":") {
-                    fs.push((n, self.expr(true)?));
+                    fs.push((field_name(n), self.expr(true)?));
                 } else {
                     // (shorthand `S { t }`: the local `t`, at the field's name)
                     let e = Expr::Path(None, Path { global: false, segs: vec![Seg { name: n.clone(), args: Vec::new(), fn_args: None, text: String::new() }], pos: at });
-                    fs.push((n, e));
+                    fs.push((field_name(n), e));
                 }
                 if !self.eat_punct(",") {
                     break;
@@ -2701,7 +2701,7 @@ impl Parser {
             while !self.is_close() {
                 self.attrs()?;
                 self.vis()?;
-                let n = self.decl_ident()?;
+                let n = field_name(self.decl_ident()?);
                 if v.iter().any(|(m, _): &(String, Ty)| *m == n) {
                     return Err(self.err(&format!("field `{n}` is already declared (E0124)")));
                 }
@@ -3452,7 +3452,9 @@ pub fn unused_kw(s: &str) -> bool {
 pub(crate) fn double_binding<'a>(p: &'a Pat, seen: &mut crate::fxhash::FxSet<&'a str>) -> Option<&'a str> {
     match p {
         Pat::Ident(_, _, n, sub) => {
-            if n.starts_with(|c: char| c.is_lowercase() || c == '_') && n != "_" && !seen.insert(n.as_str()) {
+            // (a name the module renaming made (`serde_core__de__ignored_any__IgnoredAny`): its last part says what it is)
+            let base = n.rsplit("__").next().filter(|b| !b.is_empty()).unwrap_or(n);
+            if base.starts_with(|c: char| c.is_lowercase() || c == '_') && n != "_" && !seen.insert(n.as_str()) {
                 return Some(n);
             }
             sub.as_deref().and_then(|s| double_binding(s, seen))
@@ -3504,3 +3506,13 @@ fn ty_has_infer(t: &Ty) -> bool {
 }
 
 const PLACEHOLDER_FN: &str = "the placeholder `_` is not allowed within types on item signatures for functions (E0121)";
+
+/// A field's name: a macro body's name renamed for hygiene (`core__mh`, the body has a `let core`) names the field
+/// `core`, as rustc's hygiene does not apply to fields (chacha20 0.10: `Outer { core }` in `impl_chacha_rng!`)
+fn field_name(n: String) -> String {
+    let mut s = n.as_str();
+    while let Some(t) = s.strip_suffix("__mh") {
+        s = t;
+    }
+    if s.len() == n.len() { n } else { s.to_string() }
+}
