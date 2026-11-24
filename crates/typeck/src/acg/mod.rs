@@ -1717,7 +1717,11 @@ impl Cx<'_> {
             // (an `impl Trait` result of a fn with no region in its signature: its hidden type captures none, its
             // regions are 'static)
             let opaque = n == 0 && !sig.is_generic() && self.prog.opaque.contains(&self.rg.base) && regionck::count(self.prog, sig.ret, 0).is_some_and(|c| c > 0);
-            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) && !opaque {
+            // (a placeholder instance (zustc check of a generic fn nothing calls) where a struct or an enum of the program
+            // bounds a type parameter by 'static: its types' well-formedness may need T: 'static (`None::<Static<T>>`
+            // with `struct Static<T: 'static>(T)`, E0310))
+            let static_bounds = n == 1 && regionck::placeholder_static_bounds(self.prog, &self.rg.inst_args);
+            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) && !opaque && !static_bounds {
                 self.rg.on = false;
                 let se = f.sig.recv.as_ref().is_some_and(|r| r.starts_with('&'));
                 self.rg.late = Some((se, f.sig.recv.is_some() && !se));
@@ -1768,6 +1772,13 @@ impl Cx<'_> {
                 // impl's associated type's value, with the regions its self type writes; what it implies is known
                 // (implied-bounds/assoc-ty-wf-used-to-get-assoc-ty.rs))
                 if self.rg.on && !self.prog.assoc_regions.is_empty() {
+                    // (and a projection a parameter's type or the result's is requires what its impl's header declares
+                    // of the impl's lifetimes, reported at the type)
+                    for pty in f.sig.params.iter().map(|x| &x.1).chain(f.sig.ret.as_ref()) {
+                        if let Some(sp) = crate::wf::pos_of(pty) {
+                            self.rg_proj_wf(pty, sp);
+                        }
+                    }
                     for (k, (p, pty)) in f.sig.params.iter().enumerate() {
                         let (crate::parse::Ty::Path(Some(_), _), Some(&(loc, t))) = (pty, ps.get(k + f.sig.recv.is_some() as usize)) else { continue };
                         let _ = p;
@@ -2699,6 +2710,12 @@ impl Cx<'_> {
             if m == "as_ref" && a.is_empty() {
                 if let Some(t) = self.as_ref_ty(r, None) {
                     return Some(t);
+                }
+            }
+            // (an array's as_mut: `&mut [T]`, its one AsMut)
+            if m == "as_mut" && a.is_empty() {
+                if let Some(Ty::Array(el, _)) = self.peek(r).map(|t| self.strip_refs(t)) {
+                    return Some(Ty::Ref(true, intern(Ty::Slice(el))));
                 }
             }
         }

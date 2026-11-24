@@ -1,0 +1,63 @@
+{
+  "case": "aspect",
+  "hashes_sha256": {
+    "TASK.md": "fecabb9298549520c680f125b9cc301a2215f0d8346eea11f5619048b10a35ad",
+    "CASE.md": "553ae0fc96b14434941295b40398f7b8f9e45b74d8e01e43851672369b7bd6ea",
+    "README.md": "362b0c9d339ce45a337ec8bf6a66b8ed9c98e70a19f431e99502071a49130f02",
+    "zsc": "f9beff151e7fd4cecadecfd60076c22722c0d69406be37095bd0ecc979c05821",
+    "zustc": "ff800802f7534225411a7c54ea7515778a5d95ae924a2a11bdd4c6f4d32394b0",
+    "model.ts": "2158b40fa905ac393d44ac00dc07bfc453c9fe3206d7807349e2f460d98a03a9"
+  },
+  "attempts": [
+    {
+      "source": "import type { Viewport } from \"./model.ts\";\n\nexport fn aspect(viewport: Viewport) -> f64 {\n  match viewport {\n    Hidden => 0.0,\n    Rect(height, width) => if height == 0.0 { 0.0 } else { width / height },\n  }\n}\n",
+      "exit_code": "0\n",
+      "compiler_log": "zsc: answer.zsc → out/answer.js, .d.ts (front 2.0 ms)\n"
+    }
+  ],
+  "answer": "import type { Viewport } from \"./model.ts\";\n\nexport fn aspect(viewport: Viewport) -> f64 {\n  match viewport {\n    Hidden => 0.0,\n    Rect(height, width) => if height == 0.0 { 0.0 } else { width / height },\n  }\n}\n",
+  "executor_test": "import assert from \"node:assert/strict\";\nimport { aspect } from \"./out/answer.js\";\n\nassert.equal(aspect({ kind: \"hidden\" }), 0);\nassert.equal(aspect({ kind: \"rect\", width: 4.5, height: 2 }), 2.25);\nassert.equal(aspect({ kind: \"rect\", height: 0, width: 7 }), 0);\nassert.equal(aspect({ kind: \"rect\", height: 3.5, width: 0 }), 0);\n",
+  "feedback": "README.md の「TS の型の取り込み」で State と jobs の例を読み、「文法」の export fn と「数値」の f64 を参照した。最初から import type した Viewport を match し、Hidden と Rect の二つの枝を書くつもりだった。\n\nRect の引数に幅と高さをどちらから書くかは model.ts に戻って確認した。どちらも number なので、引数を逆にしても型では区別できない。jobs の例の直後に「タグを除いたフィールドの TS での宣言順」とあり、Rect(height, width) と書けた。この規則は探しやすかった。複数の値を束縛するパターンの実例だけは、最初のサンプルにはなかった。たとえば TS の宣言が height, width 順のときに Rect(h, w) => w / h とする短い例があれば、変数名を変えても対応が保たれることまで一目で分かる。\n\nコンパイルは 1 回で成功し、書き直しや再試行はなかった。実装前の Node テストは、出力ファイルがまだないため想定どおり失敗した。コンパイル後は非表示、小数を含む矩形、高さゼロ、幅ゼロの 4 ケースが通った。\n",
+  "verification": {
+    "task": "aspect",
+    "passed": true,
+    "checks": [
+      {
+        "name": "compile",
+        "passed": true
+      },
+      {
+        "name": "hidden",
+        "passed": true
+      },
+      {
+        "name": "wide",
+        "passed": true
+      },
+      {
+        "name": "tall, different JS key order",
+        "passed": true
+      },
+      {
+        "name": "fractional dimensions",
+        "passed": true
+      },
+      {
+        "name": "zero height",
+        "passed": true
+      },
+      {
+        "name": "zero width",
+        "passed": true
+      },
+      {
+        "name": "export spelling",
+        "passed": true
+      },
+      {
+        "name": "original TS type",
+        "passed": true
+      }
+    ]
+  }
+}

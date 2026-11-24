@@ -581,8 +581,9 @@ impl Cx<'_> {
             }
         }
         // 受け手が `a.as_slice()` (a: 配列) なら `(&a[..])` にして呼び直す (`a.as_slice().len()`)
+        // (an array's `as_mut()` too: its one AsMut is `AsMut<[T]>`, `seed.as_mut().iter_mut()` in rand_core)
         if let Expr::MethodCall(ir, iname, _, iargs, _) = strip_paren(recv) {
-            if iargs.is_empty() && matches!(iname.as_str(), "as_slice" | "as_mut_slice") {
+            if iargs.is_empty() && matches!(iname.as_str(), "as_slice" | "as_mut_slice" | "as_mut") {
                 if let Some(Ty::Array(..)) = self.peek(ir).map(|t| self.strip_refs(t)) {
                     let r = (**ir).clone();
                     let ix = Expr::Index(Box::new(paren(r)), Box::new(full_range()), crate::parse::Span::default());
@@ -593,7 +594,7 @@ impl Cx<'_> {
             }
         }
         // `[T; N]::as_slice()` / `as_mut_slice()`: `&a[..]` / `&mut a[..]`
-        if margs.is_empty() && matches!(method, "as_slice" | "as_mut_slice") {
+        if margs.is_empty() && matches!(method, "as_slice" | "as_mut_slice" | "as_mut") {
             if let Some(Ty::Array(..)) = self.peek(recv).map(|t| self.strip_refs(t)) {
                 let ix = Expr::Index(Box::new(paren(recv.clone())), Box::new(full_range()), crate::parse::Span::default());
                 let e = Expr::Ref(method != "as_slice", Box::new(ix));
@@ -897,6 +898,38 @@ impl Cx<'_> {
                         return self.expr(&e, Some(t));
                     }
                     _ => {}
+                }
+            }
+        }
+        // `x.try_into()` into `Result<U, E>` where U implements TryFrom (`impl TryFrom<&str> for Alphabet`): `U::try_from(x)`,
+        // as std's blanket `impl<T, U: TryFrom<T>> TryInto<U> for T` gives it. Integers and slices are handled elsewhere
+        if method == "try_into" && margs.is_empty() {
+            // (a receiver's own try_into, also through references (`(&source).try_into()`), is that method)
+            let recv_own = match self.peek(recv).map(|t| self.strip_refs(t)) {
+                Some(Ty::Struct(sid)) => self.prog.method(sid, "try_into").is_some(),
+                _ => false,
+            };
+            let target = expected.or_else(|| self.lets.get(&(e as *const Expr as usize)).copied());
+            // (`let a: Alphabet = "x".try_into().unwrap()`: the target is the unwrap's, left in try_into_hint)
+            if !recv_own && target.is_none() {
+                if let Some(Ty::Struct(uid)) = self.try_into_hint {
+                    if let Some(id) = self.prog.method(uid, "try_from") {
+                        self.try_into_hint = None;
+                        let args: [&Expr; 1] = [recv];
+                        return self.call_fn(id, None, &args, None, None, SP);
+                    }
+                }
+            }
+            if !recv_own {
+                if let Some(Ty::Struct(rs)) = target {
+                    if self.prog.structs[rs as usize].name.starts_with("Result") {
+                        if let Some(&Ty::Struct(uid)) = self.prog.structs[rs as usize].args.first() {
+                            if let Some(id) = self.prog.method(uid, "try_from") {
+                                let args: [&Expr; 1] = [recv];
+                                return self.call_fn(id, None, &args, None, target, SP);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2746,9 +2779,11 @@ impl Cx<'_> {
                 if !seq {
                     return None;
                 }
+                // (a `&mut` one, `zip(dst)` with dst: &mut [u32]: its iter_mut, as IntoIterator for &mut [T] gives)
+                let it = if matches!(t, Ty::Ref(true, _)) { "iter_mut" } else { "iter" };
                 Some(match (t, strip_paren(a)) {
-                    (Ty::Ref(..), Expr::Ref(_, inner)) => mcall(paren((**inner).clone()), "iter", vec![]),
-                    (Ty::Ref(..), _) => mcall(paren((*a).clone()), "iter", vec![]),
+                    (Ty::Ref(..), Expr::Ref(_, inner)) => mcall(paren((**inner).clone()), it, vec![]),
+                    (Ty::Ref(..), _) => mcall(paren((*a).clone()), it, vec![]),
                     _ => mcall(paren((*a).clone()), "into_iter", vec![]),
                 })
             })
@@ -3129,6 +3164,25 @@ impl Cx<'_> {
         if self.prog.names[id as usize] == "__core_transmute" && sig.params.len() == 1 {
             self.check_transmute(sig.params[0], sig.ret, span)?;
         }
+        // (`size_of_val(s)` / `align_of_val(s)` of a slice or str: the length times the element's size, the element's
+        //  alignment; the prelude's `size_of::<T>()` has no length)
+        if matches!(self.prog.names[id as usize].as_str(), "__core_size_of_val" | "__core_align_of_val") && vals.len() == 1 {
+            let el = match sig.params[0] {
+                Ty::Ref(_, Ty::Slice(e)) => Some(**e),
+                Ty::Ref(_, Ty::Str) => Some(Ty::U8),
+                _ => None,
+            };
+            if let Some(e) = el {
+                let (es, ea) = self.prog.size_align(e);
+                if self.prog.names[id as usize] == "__core_align_of_val" {
+                    return Ok((Some(self.b.ins().iconst(types::I64, ea as i64)), Ty::Usize));
+                }
+                let fat = vals[0].0;
+                let n = self.b.ins().load(types::I64, mf(), fat, 8);
+                let k = self.b.ins().iconst(types::I64, es as i64);
+                return Ok((Some(self.b.ins().imul(n, k)), Ty::Usize));
+            }
+        }
         let mut cv = vec![];
         let sret = if is_sret(&sig) {
             let a = match hint {
@@ -3159,6 +3213,8 @@ impl Cx<'_> {
                 }
                 // (`&mut x` for a `*mut T` parameter)
                 (Ty::Ref(m1, a), Ty::Ptr(m2, b)) if a == b && (m1 || !m2) && !a.is_fat() => (v, pt),
+                // (a `&mut [T]` for a generic `&T`, `size_of_val(iv_dst)`: the same value, thin or fat)
+                (Ty::Ref(true, a), Ty::Ref(false, b)) if a == b => (v, pt),
                 _ => (v, t),
             };
             self.same(sp, t, pt)?;

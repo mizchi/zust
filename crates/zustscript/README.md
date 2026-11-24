@@ -69,13 +69,34 @@ import type { User, Post } from "./model.ts";
 
 ### TS の型の取り込み: `import type`
 
+取り込めるのはレコード型、文字列リテラルの union、共通のタグで判別できる union です。たとえば、TypeScript で処理の状態を次のように定義します。
+
+```ts
+// model.ts
+export type State = { kind: "idle" } | { kind: "busy"; jobs: number };
+```
+
+```zsc
+import type { State } from "./model.ts";
+
+export fn jobs(state: State) -> f64 {
+  match state {
+    Idle => 0.0,
+    Busy(n) => n,
+  }
+}
+```
+
+JS から `jobs({ kind: "busy", jobs: 3 })` と呼ぶと `3` が返ります。タグだけの `idle` は括弧を付けず `Idle`、値を持つ `busy` は `Busy(n)` と書きます。複数の値を受け取る場合、括弧内の変数はタグを除いたフィールドの **TS での宣言順** に対応します。変数名は自分で付けられます。
+たとえば `{ kind: "rect"; height: number; width: number }` の幅 ÷ 高さは `Rect(h, w) => w / h` です。TS 側を `width, height` の順に変えたら、パターンも `Rect(w, h)` に直します。両方とも `number` なので、元のパターンのままでもコンパイルは通り、計算結果だけが変わります。
+
 ```zsc
 import type { User, Post } from "./model.ts";   // model.ts の interface / type を、レコード型として読む
 
 export fn display(u: User) -> String { u.name + " #" + (u.id as i32).to_string() }
 ```
 
-- まずは**プレーンなレコード型**だけを読む(src/tsimport.rs)。`interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
+- **レコード型** (src/tsimport.rs): `interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
   - フィールドの型: `string` は `String`、`number` は `f64`(JS の number は倍精度。整数にするときは `as i32`)、`boolean` は `bool`、`bigint` は `i64`。配列(`T[]`、`readonly T[]`、`Array<T>`、`ReadonlyArray<T>`)と、同じファイルの別のレコード型
   - 読み込む型が使う型(`Post` の `author: User`)も一緒に読む。export されていない型でもよい
   - ファイルの残り(関数、union、総称型など)は、import しない限り読まない。import した型が部分集合の外なら、TS のファイルのその位置でエラーになる(`` `Opt.name` is optional ``、tests/errors/ts_*.zsc)

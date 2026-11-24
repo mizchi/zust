@@ -1,0 +1,51 @@
+name: Popular crates
+
+# Builds and runs programs that use popular crates.io crates (cratebench/popular/apps) with rustc and with zustc
+# (through zurgo) and compares their output. It reports; it does not fail on a crate that does not work yet.
+on:
+  push:
+    paths:
+      - src/**
+      - crates/**
+      - Cargo.lock
+      - cratebench/popular/**
+      - .github/workflows/popular-crates.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: popular-crates-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  crates:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+      - name: Build zustc and zurgo
+        run: cargo build --release -p zustc -p zurgo
+      - name: Run the popular crates
+        run: python3 cratebench/popular/run.py --json out/popular/results.json --markdown out/popular/summary.md
+      - name: Summary
+        if: always()
+        run: cat out/popular/summary.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: popular-crates
+          path: |
+            out/popular/results.json
+            out/popular/summary.md
+            out/popular/*/zurgo.log
+            out/popular/*/expected.txt
+            out/popular/*/actual.txt

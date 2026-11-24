@@ -884,8 +884,15 @@ fn may_hide_lifetimes(t: &PTy) -> bool {
         PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => may_hide_lifetimes(i),
         PTy::Tuple(ts) => ts.iter().any(may_hide_lifetimes),
         PTy::Path(None, p) => p.segs.last().is_some_and(|s| {
-            let std = matches!(s.name.as_str(), "String" | "Vec" | "Box" | "Option" | "Result" | "Rc" | "Arc" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "VecDeque" | "str" | "Self")
-                || s.name.chars().next().is_some_and(|c| c.is_ascii_lowercase());
+            // (a module's item flattened with its path, `parse__Cursor`: its own name decides. A name of the program's
+            //  own with `__` in it, `Foo__bar`, is not one: the part after `__` of a flattened type is its name, which
+            //  starts with a capital letter)
+            let base = match s.name.rsplit_once("__") {
+                Some((_, n)) if n.starts_with(|c: char| c.is_ascii_uppercase()) => n,
+                _ => s.name.as_str(),
+            };
+            let std = matches!(base, "String" | "Vec" | "Box" | "Option" | "Result" | "Rc" | "Arc" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "VecDeque" | "str" | "Self")
+                || base.chars().next().is_some_and(|c| c.is_ascii_lowercase());
             let lts = s.args.iter().any(|a| matches!(a, crate::parse::GArg::Lifetime(_)));
             (!std && !lts) || s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) if may_hide_lifetimes(t)))
         }),
@@ -1138,7 +1145,47 @@ fn static_fields(g: &Generics, tys: &[&PTy]) -> Option<String> {
     None
 }
 
+/// Whether an array length in t uses one of the type parameters ps (`[u8; size_of::<T>()]`): rustc rejects it
+/// ("generic parameters may not be used in const operations") unless generic_const_exprs is on
+fn type_param_in_array_len(t: &PTy, ps: &[&str]) -> bool {
+    fn names_param(t: &PTy, ps: &[&str]) -> bool {
+        matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && ps.contains(&p.segs[0].name.as_str()))
+    }
+    fn in_expr(e: &crate::parse::Expr, ps: &[&str]) -> bool {
+        use crate::parse::Expr;
+        match e {
+            Expr::Path(None, p) => p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) if names_param(t, ps)))),
+            Expr::Call(f, args) => in_expr(f, ps) || args.iter().any(|a| in_expr(a, ps)),
+            Expr::Binary(_, l, r, _) => in_expr(l, ps) || in_expr(r, ps),
+            Expr::Unary(_, x, _) | Expr::Paren(x) | Expr::Cast(x, _) => in_expr(x, ps),
+            _ => false,
+        }
+    }
+    match t {
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) => type_param_in_array_len(i, ps),
+        PTy::Array(i, n) => type_param_in_array_len(i, ps) || in_expr(n, ps),
+        PTy::Tuple(ts) => ts.iter().any(|t| type_param_in_array_len(t, ps)),
+        PTy::Path(q, p) => {
+            q.as_deref().is_some_and(|q| type_param_in_array_len(q, ps))
+                || p.segs.iter().flat_map(|s| s.args.iter()).any(|a| match a {
+                    crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) => type_param_in_array_len(t, ps),
+                    _ => false,
+                })
+        }
+        _ => false,
+    }
+}
+
 fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields: usize) -> R<()> {
+    // (a type parameter in an array length of a field or of a parameter's default: `struct Foo<T, U = [u8;
+    //  size_of::<T>()]>` (tests/ui generics/param-in-ct-in-ty-param-default.rs))
+    {
+        let tps: Vec<&str> = g.params.iter().filter_map(|p| if let GParam::Ty(n, ..) = p { Some(n.as_str()) } else { None }).collect();
+        let defaults = g.params.iter().filter_map(|p| if let GParam::Ty(_, _, Some(d)) = p { Some(d) } else { None });
+        if !tps.is_empty() && (tys.iter().any(|t| type_param_in_array_len(t, &tps)) || defaults.into_iter().any(|d| type_param_in_array_len(d, &tps))) {
+            return Err("generic parameters may not be used in const operations".to_string());
+        }
+    }
     // (E0261: the fields name only the lifetimes the type declares)
     {
         let declared: Vec<&str> = g.params.iter().filter_map(|p| match p {
@@ -1340,7 +1387,7 @@ fn ret_from(sig: &PSig) -> u64 {
     let (mut rl, mut relided, mut opaque) = (vec![], false, false);
     lifetimes(ret, &mut rl, &mut relided, &mut opaque);
     if opaque {
-        return 0;
+        return opaque_from(sig);
     }
     // (a lifetime declared to outlive one of the result's may be the result's too: `fn f<'a, 'b: 'a>(x: &'b T) -> &'a T`)
     // (and so may one a parameter's projection implies to: `<&'a &'b () as Tr>::Type`)
@@ -1383,6 +1430,59 @@ fn ret_from(sig: &PSig) -> u64 {
         }
     }
     KNOWN | mask
+}
+
+/// SigSyn::ret_from of a result `impl Trait` (OPAQUE_FROM): the arguments it may borrow from. Edition 2024 captures
+/// every lifetime in scope (the arguments' elided ones too) unless `use<..>` lists them; 2021 only those its bounds
+/// name (`impl Display + 'a`). 0 (not known) for another opaque result, or more than 31 arguments
+fn opaque_from(sig: &PSig) -> u64 {
+    let Some(PTy::Impl(bs)) = &sig.ret else { return 0 };
+    let mut inputs: Vec<&PTy> = vec![];
+    if let Some(r) = &sig.recv_ty {
+        inputs.push(r);
+    }
+    inputs.extend(sig.params.iter().map(|p| &p.1));
+    if inputs.len() > 31 {
+        return 0;
+    }
+    // (`use<'a, T>`: parsed as a bound named `use`)
+    let used: Option<Vec<String>> = bs.iter().find_map(|b| match b {
+        Bound::Trait(_, p) if p.segs.len() == 1 && p.segs[0].name == "use" => {
+            Some(p.segs[0].args.iter().filter_map(|a| if let crate::parse::GArg::Lifetime(l) = a { Some(l.clone()) } else { None }).collect())
+        }
+        _ => None,
+    });
+    let mut named: Vec<String> = vec![];
+    for b in bs {
+        match b {
+            Bound::Lifetime(l) => named.push(l.clone()),
+            Bound::Trait(_, p) if !(p.segs.len() == 1 && p.segs[0].name == "use") => {
+                let (mut e, mut o) = (false, false);
+                lifetimes(&PTy::Path(None, p.clone()), &mut named, &mut e, &mut o);
+            }
+            _ => {}
+        }
+    }
+    let mask = |pick: &dyn Fn(&[String], bool) -> bool| {
+        let mut m = 0u64;
+        for (i, t) in inputs.iter().enumerate() {
+            let (mut l, mut e, mut o) = (vec![], false, false);
+            lifetimes(t, &mut l, &mut e, &mut o);
+            l.retain(|x| x != "'static");
+            if pick(&l, e) {
+                m |= 1 << i;
+            }
+        }
+        m
+    };
+    let (m24, m21) = match &used {
+        Some(u) => {
+            let m = mask(&|l: &[String], _: bool| l.iter().any(|x| u.contains(x)));
+            (m, m)
+        }
+        None => (mask(&|l: &[String], e: bool| e || !l.is_empty()), mask(&|l: &[String], _: bool| l.iter().any(|x| named.contains(x)))),
+    };
+    crate::types::OPAQUE_FROM | m24 | m21 << 31
 }
 
 /// `Fn(A, B) -> R` 形式の境界なら (種類, 引数, 戻り値)
@@ -2079,14 +2179,19 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             }
             // (a value that names a lifetime, the impl's or 'static: its codes against the impl's lifetimes)
             // (an impl that names no lifetime (`impl Foo for () { type Out = &'static u32; }`): none to instantiate)
-            if !ow.is_trait && crate::regions::names_lt(t) {
+            // (or an impl whose header requires `'d: 'a` of its lifetimes: a projection that selects it requires it of
+            // the lifetimes its self type and trait write (nll/normalization-bounds-error.rs), whatever its value)
+            let hdr_outlives = ow.regions.as_deref().is_some_and(|r| !r.outlives.is_empty());
+            if !ow.is_trait && (crate::regions::names_lt(t) || hdr_outlives) {
                 let (lts, self_slots) = ow.regions.as_deref().map(|r| (r.lts.clone(), r.self_slots.as_slice())).unwrap_or_default();
                 {
                     let tps: Vec<&str> = ow.generics.iter().map(|g| g.0.as_str()).collect();
                     let mut s = crate::regions::Slots { lts, tparams: tps, self_slots, any: false, in_fn: 0 };
                     let mut v = vec![];
                     s.slots(t, false, &mut v);
-                    if s.any && !v.contains(&crate::types::R_UNKNOWN) {
+                    // (a value the codes do not follow (`<() as Base>::Out`) keeps the header's outlives all the same:
+                    // its codes have the mark R_UNKNOWN, so that no tree is made of them)
+                    if (s.any && !v.contains(&crate::types::R_UNKNOWN)) || hdr_outlives {
                         sm.assoc_regions.push((sm.assocs.len() as u64, v));
                     }
                 }
@@ -2256,6 +2361,12 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         }
         ItemKind::Impl(g, tr, self_ty, _) => {
             sm.hdr_regions = crate::regions::hdr_regions(g, Some(self_ty));
+            // (the lifetimes the trait path writes as its arguments, as codes of the header's)
+            if let (Some(r), Some((_, p))) = (sm.hdr_regions.as_mut(), tr.as_ref()) {
+                let code = |l: &str| if l == "'static" { crate::types::R_STATIC } else { r.lts.iter().position(|x| x == l).map_or(crate::types::R_UNKNOWN, |i| i as u8) };
+                let lts: Vec<u8> = p.segs.last().map(|s| s.args.iter().filter_map(|a| if let crate::parse::GArg::Lifetime(l) = a { Some(code(l)) } else { None }).collect()).unwrap_or_default();
+                r.trait_lts = lts;
+            }
             sm.impl_trait_lts = tr.as_ref().is_some_and(|(_, p)| crate::regions::path_names_lt(p));
             // (E0261: the header names only the lifetimes it declares; E0207: a lifetime parameter an associated type
             // names must be constrained by the self type or the trait)
@@ -2446,6 +2557,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 };
                 sm.impl_self = Some(n);
                 sm.impl_self_ty = Some(tysyn(self_ty, None)?);
+                sm.impl_self_path = true;
                 return Ok(sm);
             }
             sm.impl_self = Some(tp.segs[0].name.clone());
