@@ -75,6 +75,25 @@ impl<T> W<&mut T> {
     }
 }
 
+// (a method with a scalar method's name, and overloads that take self differently)
+struct V<T>(T);
+impl V<i32> {
+    fn checked_add(&self, x: i32) -> i32 {
+        self.0 + x
+    }
+    fn h(self) -> i32 {
+        self.0 + 1
+    }
+}
+impl V<u8> {
+    fn checked_add(&self, x: u8) -> u8 {
+        self.0 * x
+    }
+    fn h(&self) -> u8 {
+        self.0 * 2
+    }
+}
+
 fn main() {
     let (a, b) = (String::from("x"), 5u8);
     let e: Either<&String, &u8> = Left(&a);
@@ -93,4 +112,8 @@ fn main() {
     println!("{}", w.f());
     let mut x = 0;
     println!("{} {}", W(&5).g(), W(&mut x).g());
+    println!("{} {}", V(1i32).checked_add(2), V(3u8).checked_add(2));
+    let v = V(3u8);
+    let r = &v;
+    println!("{} {} {}", V(1i32).h(), r.h(), v.h());
 }

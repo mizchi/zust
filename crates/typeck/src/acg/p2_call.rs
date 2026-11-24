@@ -1213,7 +1213,9 @@ impl Cx<'_> {
                 }
             }
             if let Some(id) = self.prog.method(sid, &name).or_else(|| self.prog.default_method(sid, &name)) {
-                break (a, o, sid, id);
+                // (inherent overloads, in impls for other instances of the type: the one for this receiver's, before its
+                // receiver is borrowed (or not) as that method takes self)
+                break (a, o, sid, self.prog.inherent_overload_for(id, Ty::Struct(sid)));
             }
             let sd = &self.prog.structs[sid as usize];
             let gens = sd.args.clone();

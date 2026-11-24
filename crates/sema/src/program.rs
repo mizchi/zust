@@ -5312,6 +5312,30 @@ impl Program {
         U { p: self, tys: FxMap::default(), lens: FxMap::default() }.ty(0, a, 1, b, 0)
     }
 
+    /// Of the inherent methods with `self` overloading `id` (in impls for other instances of the type), the one whose
+    /// self type `t` is (match_ty and arg_refs_agree); `id` when there is not exactly one, or when `id` is not inherent
+    pub fn inherent_overload_for(&self, id: u32, t: Ty) -> u32 {
+        // (only from an inherent method: a trait impl's (`impl Foo for AtomicUsize { fn store(self, ..) }` beside the
+        // inherent `store(&self, ..)`) is chosen by the receiver later, as rustc's by-value step before the autoref)
+        if self.sigs[id as usize].impl_trait.is_some() || !self.sigs[id as usize].has_self {
+            return id;
+        }
+        let Some(group) = self.overloads.get(&self.names[id as usize]) else { return id };
+        let fit: Vec<u32> = group
+            .iter()
+            .copied()
+            .filter(|&c| {
+                let sig = &self.sigs[c as usize];
+                let mut sol = vec![None; sig.generics.len()];
+                sig.has_self && sig.impl_trait.is_none() && sig.self_ty.is_some_and(|st| self.match_ty(st, t, &mut sol) && self.arg_refs_agree(st, t))
+            })
+            .collect();
+        match fit.as_slice() {
+            [c] => *c,
+            _ => id,
+        }
+    }
+
     pub fn arg_refs_agree(&self, a: Ty, b: Ty) -> bool {
         fn strip(mut t: Ty) -> Ty {
             while let Ty::Ref(_, i) = t {

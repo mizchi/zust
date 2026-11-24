@@ -2198,7 +2198,10 @@ impl Inf<'_> {
                 _ => None,
             };
             if let Some(id) = sid.and_then(|s| self.prog.method(s, n)) {
-                return self.apply_recv(Some(id), avs, rv);
+                // (a method of the program's own type that has a scalar method's name (`checked_add`): its overloads too,
+                // as below)
+                let id = self.pick_inherent_overload(id, rv);
+                return self.apply_recv(id, avs, rv);
             }
             return self.scalar_method(n, tf, args, r, rv, avs);
         }
