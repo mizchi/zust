@@ -1800,6 +1800,7 @@ impl Cx<'_> {
         if let Some(Stmt::Expr(e, false)) = f.block.stmts.last() {
             self.mark_ret_call(e);
             self.bk.tail = e as *const Expr as usize;
+            self.bk_ret_leaves(e);
         }
         self.bk.cap_vals = cap_vals;
         let (v, t) = self.block(&f.block, Some(self.ret))?;

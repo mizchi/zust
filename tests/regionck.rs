@@ -3400,4 +3400,21 @@ fn polonius_alpha() {
     err("fn f<'a>(a: &'a mut i32, out: &mut Option<&'a i32>) {\n    let b = &*a;\n    *out = Some(b);\n    *a += 1;\n}\nfn main() {}\n");
     err("fn f(v: &mut Vec<i32>) {\n    for x in v.iter_mut() {\n        v.push(*x);\n    }\n}\nfn main() {}\n");
     err("fn f<'a>(a: &'a mut i32, n: i32) -> &'a mut i32 {\n    let mut i = 0;\n    loop {\n        let b = &mut *a;\n        if i == n {\n            return b;\n        }\n        i += 1;\n        *a += 1;\n        let _ = &b;\n    }\n}\nfn main() {}\n");
+    // (rejected by both: two reborrows in one returned value, made in it or through a local read in it (PR #104's
+    // review): a reborrow returned is live from where the returned value reads or makes it to the return)
+    for body in [
+        "(&mut *x, &mut *x)",
+        "[&mut *x, &mut *x]",
+        "Some((&mut *x, &*x))",
+        "(&mut *x, { *x += 1; &mut *x })",
+        "{ let a = &mut *x; (a, &mut *x) }",
+        "{ let a = &mut *x; let b = &mut *x; (a, b) }",
+        "if true { (&mut *x, &mut *x) } else { panic!() }",
+        "match 1 { 1 => (&mut *x, &mut *x), _ => panic!() }",
+    ] {
+        err(&format!("fn f<'a>(x: &'a mut i32) -> (&'a mut i32, &'a mut i32) {{\n    {body}\n}}\nfn main() {{}}\n").replace("[&mut *x, &mut *x]", "{ let [a, b] = [&mut *x, &mut *x]; (a, b) }"));
+    }
+    err("fn f<'a>(x: &'a mut i32) -> (&'a mut i32, &'a mut i32) {\n    return (&mut *x, &mut *x);\n}\nfn main() {}\n");
+    // (accepted by Alpha: the returned reborrow made in a loop, which goes on with a new borrow when it does not return)
+    ok("fn f<'a>(x: &'a mut i32, n: i32) -> &'a mut i32 {\n    let mut i = 0;\n    loop {\n        let b = &mut *x;\n        if i == n {\n            return b;\n        }\n        i += 1;\n    }\n}\nfn main() {}\n");
 }

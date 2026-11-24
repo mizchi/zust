@@ -1388,11 +1388,23 @@ impl RgSt {
     /// (ret_edges): those hold at the return, after which nothing runs, so such a reborrow is live where what holds
     /// it is live, as Polonius Alpha has it (`let b = &mut *a; if c { b } else { a }`)
     pub fn forever(&self) -> Vec<usize> {
+        self.forever_by(self.kept_edges())
+    }
+
+    /// forever through every constraint, the returned values' too: what must outlive a universal region by being
+    /// returned as well (Bk::ret_only is this less forever)
+    pub fn forever_returned(&self) -> Vec<usize> {
+        if self.ret_edges.is_empty() || super::no_polonius() {
+            return vec![];
+        }
+        self.forever_by(vec![true; self.edges.len()])
+    }
+
+    fn forever_by(&self, keep: Vec<bool>) -> Vec<usize> {
         if self.reborrows.is_empty() {
             return vec![];
         }
         let n = self.n as usize + 1;
-        let keep = self.kept_edges();
         // (what outlives each variable, as one array (CSR): no allocation per variable)
         let mut start = vec![0u32; n + 1];
         for (i, &(a, b, _)) in self.edges.iter().enumerate() {

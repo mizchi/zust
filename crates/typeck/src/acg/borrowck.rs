@@ -94,6 +94,10 @@ pub enum Ev {
     Ret(Vec<Src>, Sp),
     /// These loans are stored behind a reference the function was given
     Escape(Vec<Src>),
+    /// The local is read in a returned position (Bk::ret_leaves): the loans it holds that reach a universal region
+    /// only by being returned (Bk::ret_only) are live from here to the return (Polonius Alpha: the constraint holds
+    /// where the value is returned)
+    RetHold(u32),
     /// The local keeps these loans (what its initializer borrows directly): they must not be of a dead local
     Keep(u32, Vec<Src>),
     /// These loans are stored behind the local's `&mut`s, so many derefs deep (`*q = &y` with q = &mut p): the
@@ -280,6 +284,16 @@ pub struct Bk {
     /// Loans the region check found must outlive the function (a reborrow through a parameter flowing into a
     /// universal region): live from where each is made to the end (sorted)
     pub forever: Vec<u32>,
+    /// Reborrows that must outlive a universal region only by being returned (Rg::forever with the returned values'
+    /// constraints, less forever): live while what holds them is, and from a read in a returned position to the
+    /// return (Ev::RetHold), and from where they are made if that is in a returned position (sorted)
+    pub ret_only: Vec<u32>,
+    /// The loans made in a returned position (sorted)
+    pub ret_made: Vec<u32>,
+    /// The returned positions of the body (its tail's and its `return`s' leaves: a block's tail, an `if`'s branches,
+    /// a `match`'s arms; addresses), and how deep the lowering is in one
+    pub ret_leaves: crate::fxhash::FxSet<usize>,
+    pub in_ret: u32,
     /// Hidden locals that hold a value copied out of what a local points to (`*r` of `r: &&String`, bk_copy_out_of),
     /// with the copied type: they hold what r holds, with each loan of a place that holds such values replaced by
     /// what that place's local holds (copy_masks, made by bk_check)
@@ -1593,7 +1607,7 @@ impl Bk {
                             if let Ok(i) = st.dead.binary_search(ln) {
                                 st.dead.remove(i);
                             }
-                            if self.forever.binary_search(ln).is_ok() {
+                            if self.forever.binary_search(ln).is_ok() || (self.ret_only.binary_search(ln).is_ok() && self.ret_made.binary_search(ln).is_ok()) {
                                 add_sorted(&mut st.escaped, *ln);
                             }
                             if let Ok(k) = self.held_by.binary_search_by_key(ln, |x| x.0) {
@@ -1690,6 +1704,42 @@ impl Bk {
                 }
                 Ev::Escape(srcs) => {
                     for ln in self.resolve(srcs, st) {
+                        add_sorted(&mut st.escaped, ln);
+                    }
+                }
+                Ev::RetHold(l) => {
+                    let held: Vec<u32> = st.held(*l).to_vec();
+                    let ls: Vec<u32> = held.iter().copied().filter(|ln| self.ret_only.binary_search(ln).is_ok()).collect();
+                    for ln in ls {
+                        // (and the loans made after it that the same local holds (`let t = (&mut *x, &mut *x); t.0`):
+                        // it was live when they were made. Not a two-phase borrow's reservation, which its arguments
+                        // may read (`let r = v.get_mut(v.len() - 1); r`))
+                        if let (true, Some(errs)) = (loans_on, errs.as_deref_mut()) {
+                            if !self.reserved.contains(&ln) {
+                                for &later in held.iter().filter(|&&o| o > ln) {
+                                    let lo = &self.loans[later as usize];
+                                    let n0 = errs.len();
+                                    self.check_loans(&[ln], &lo.place, Acc::Borrow(later), lo.sp, errs);
+                                    if errs.len() > n0 {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        // (two reborrows returned for a universal region are both live at the return: the later one
+                        // conflicts with the earlier, also when one expression made both (`let t = (&mut *x, &mut *x);
+                        // t`), whose conflicts inside it the loans of locals do not see)
+                        if let (true, Some(errs)) = (loans_on, errs.as_deref_mut()) {
+                            for &other in st.escaped.iter().filter(|&&o| o != ln && self.ret_only.binary_search(&o).is_ok()) {
+                                let (l1, l2) = if other < ln { (other, ln) } else { (ln, other) };
+                                let lo = &self.loans[l2 as usize];
+                                let n0 = errs.len();
+                                self.check_loans(&[l1], &lo.place, Acc::Borrow(l2), lo.sp, errs);
+                                if errs.len() > n0 {
+                                    break;
+                                }
+                            }
+                        }
                         add_sorted(&mut st.escaped, ln);
                     }
                 }
@@ -2118,7 +2168,59 @@ impl Cx<'_> {
 
     pub(crate) fn bk_ev(&mut self, e: Ev) {
         let b = self.b.live_block();
+        // (in a returned position: the loans made here, and the locals read here (Ev::RetHold))
+        if self.bk.in_ret > 0 {
+            if let Ev::Acc(p, a, _) = &e {
+                match a {
+                    Acc::Borrow(ln) => {
+                        add_sorted(&mut self.bk.ret_made, *ln);
+                    }
+                    Acc::Read | Acc::Move => {
+                        let l = p.local;
+                        self.bk.ev(b, e);
+                        self.bk.ev(b, Ev::RetHold(l));
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
         self.bk.ev(b, e);
+    }
+
+    /// The returned positions of e (as rg_ret_at follows them): what is returned when e is
+    pub(crate) fn bk_ret_leaves(&mut self, e: &Expr) {
+        if !self.bk_on() {
+            return;
+        }
+        match e {
+            Expr::Paren(x) => self.bk_ret_leaves(x),
+            Expr::Block(None, _, b) => {
+                if let Some(crate::parse::Stmt::Expr(t, false)) = b.stmts.last() {
+                    self.bk_ret_leaves(t);
+                }
+            }
+            Expr::If(_, b, els) => {
+                if let Some(crate::parse::Stmt::Expr(t, false)) = b.stmts.last() {
+                    self.bk_ret_leaves(t);
+                }
+                if let Some(x) = els {
+                    self.bk_ret_leaves(x);
+                }
+            }
+            Expr::Match(_, arms) => {
+                for a in arms {
+                    self.bk_ret_leaves(&a.body);
+                }
+            }
+            // (a loop's value comes from its `break`s, not its body, and the region check does not follow those)
+            Expr::Loop(..) => {}
+            // (a jump returns nothing here)
+            Expr::While(..) | Expr::For(..) | Expr::Return(..) | Expr::Break(..) | Expr::Continue(..) => {}
+            _ => {
+                self.bk.ret_leaves.insert(e as *const Expr as usize);
+            }
+        }
     }
 
     /// A local comes into scope at loc
@@ -4370,7 +4472,11 @@ impl Cx<'_> {
             let mut f: Vec<u32> = self.rg.forever().into_iter().filter_map(loan).collect();
             f.sort_unstable();
             f.dedup();
+            let mut r: Vec<u32> = self.rg.forever_returned().into_iter().filter_map(loan).filter(|l| f.binary_search(l).is_err()).collect();
+            r.sort_unstable();
+            r.dedup();
             bk.forever = f;
+            bk.ret_only = r;
             // (and those that must outlive a region of a local's type: held by the local)
             let mut hb: Vec<(u32, Vec<u32>)> = vec![];
             for (p, locs) in self.rg.holders() {
