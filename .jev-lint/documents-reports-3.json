@@ -81,12 +81,20 @@
       "path": "docs/ja/reports/2026-11-23-05-test-time.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-23-06-rust-frontier-survey.en": {
-      "path": "docs/reports/2026-11-23-06-rust-frontier-survey.md",
+    "docs_reports_2026-11-23-06-region-check-17.en": {
+      "path": "docs/reports/2026-11-23-06-region-check-17.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-23-06-rust-frontier-survey.ja": {
-      "path": "docs/ja/reports/2026-11-23-06-rust-frontier-survey.md",
+    "docs_reports_2026-11-23-06-region-check-17.ja": {
+      "path": "docs/ja/reports/2026-11-23-06-region-check-17.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-07-rust-frontier-survey.en": {
+      "path": "docs/reports/2026-11-23-07-rust-frontier-survey.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-23-07-rust-frontier-survey.ja": {
+      "path": "docs/ja/reports/2026-11-23-07-rust-frontier-survey.md",
       "role": "historical"
     },
     "docs_reports_2026-11-24-01-parallel-check.en": {
@@ -210,14 +218,25 @@
       }
     },
     {
-      "id": "docs_reports_2026-11-23-06-rust-frontier-survey",
-      "topic": "The Japanese file docs/ja/reports/2026-11-23-06-rust-frontier-survey.md is a faithful translation of docs/reports/2026-11-23-06-rust-frontier-survey.md",
+      "id": "docs_reports_2026-11-23-06-region-check-17",
+      "topic": "The Japanese file docs/ja/reports/2026-11-23-06-region-check-17.md is a faithful translation of docs/reports/2026-11-23-06-region-check-17.md",
       "mode": "translation",
       "reference": {
-        "source": "docs_reports_2026-11-23-06-rust-frontier-survey.en"
+        "source": "docs_reports_2026-11-23-06-region-check-17.en"
       },
       "target": {
-        "source": "docs_reports_2026-11-23-06-rust-frontier-survey.ja"
+        "source": "docs_reports_2026-11-23-06-region-check-17.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-23-07-rust-frontier-survey",
+      "topic": "The Japanese file docs/ja/reports/2026-11-23-07-rust-frontier-survey.md is a faithful translation of docs/reports/2026-11-23-07-rust-frontier-survey.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-23-07-rust-frontier-survey.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-23-07-rust-frontier-survey.ja"
       }
     },
     {

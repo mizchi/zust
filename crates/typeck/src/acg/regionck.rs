@@ -927,6 +927,16 @@ impl RgSt {
         cur
     }
 
+    /// The variance of each of a signature's lifetimes (the codes below n) in t, one of its types whose region slots
+    /// are codes (ng: its type parameters). None when t has what the walk does not follow (a closure's type)
+    pub(crate) fn code_variances(&mut self, prog: &Program, t: Ty, codes: &[u8], n: usize, ng: usize) -> Option<Vec<Var>> {
+        let mut acc = vec![Var::Bi; n + ng];
+        let mut c = Codes { codes: Some(codes), pos: 0, ok: true, parent: None };
+        self.var_walk(prog, t, &mut c, Var::Co, n, &mut acc, 0);
+        acc.truncate(n);
+        c.ok.then_some(acc)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn var_walk(&mut self, prog: &Program, t: Ty, c: &mut Codes, v: Var, nl: usize, acc: &mut Vec<Var>, depth: u32) {
         if depth > 24 {

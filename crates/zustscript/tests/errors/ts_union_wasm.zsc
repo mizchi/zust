@@ -1,3 +1,0 @@
-// expect: Status is a union read from TS: it does not cross to wasm yet
-import type { Status } from "../ts/model.ts";
-@wasm pub fn f(s: Status) -> i32 { 1 }

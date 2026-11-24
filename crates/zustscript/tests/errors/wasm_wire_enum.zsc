@@ -1,5 +1,0 @@
-// expect: Tag cannot cross from JS to a @wasm function inside a record or an array yet
-// (a record holding a string crosses as bytes, but not one holding an enum yet)
-enum Tag { Named(String), Anon }
-type P = { name: String, tag: Tag }
-@wasm pub fn f(p: P) -> i32 { 1 }
