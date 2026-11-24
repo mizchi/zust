@@ -3452,7 +3452,9 @@ pub fn unused_kw(s: &str) -> bool {
 pub(crate) fn double_binding<'a>(p: &'a Pat, seen: &mut crate::fxhash::FxSet<&'a str>) -> Option<&'a str> {
     match p {
         Pat::Ident(_, _, n, sub) => {
-            if n.starts_with(|c: char| c.is_lowercase() || c == '_') && n != "_" && !seen.insert(n.as_str()) {
+            // (a name the module renaming made (`serde_core__de__ignored_any__IgnoredAny`): its last part says what it is)
+            let base = n.rsplit("__").next().filter(|b| !b.is_empty()).unwrap_or(n);
+            if base.starts_with(|c: char| c.is_lowercase() || c == '_') && n != "_" && !seen.insert(n.as_str()) {
                 return Some(n);
             }
             sub.as_deref().and_then(|s| double_binding(s, seen))

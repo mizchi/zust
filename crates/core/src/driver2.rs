@@ -618,6 +618,7 @@ impl Options2 {
             wasm: self.module_writer.is_some(),
             cfgs: self.cfgs.iter().chain(cfgs).cloned().chain(self.test.then(|| ("test".to_string(), None))).collect(),
             env: env.to_vec(),
+            edition: self.edition,
         }
     }
 }
@@ -952,7 +953,8 @@ impl Session2 {
                 miss.push((i, k));
             }
             // (多ければ fork して分けて作る: 子 k は j % jobs == k のものを作り、直列化して返す)
-            let jobs = self.opts.jobs.min(miss.len() / 32).max(1);
+            // (not in a process of more threads than this one: single_threaded)
+            let jobs = if single_threaded() { self.opts.jobs.min(miss.len() / 32).max(1) } else { 1 };
             let mut got: Vec<Option<Summary>> = vec![None; miss.len()];
             if jobs > 1 {
                 let mut kids: Vec<(i32, i32)> = vec![];
@@ -962,7 +964,7 @@ impl Session2 {
                     if unsafe { c_pipe(fds.as_mut_ptr()) } != 0 {
                         continue;
                     }
-                    let pid = unsafe { c_fork() };
+                    let pid = fork_counted();
                     if pid == 0 {
                         unsafe { c_close(fds[0]) };
                         let mut buf = vec![];
@@ -1281,6 +1283,10 @@ impl Session2 {
                 // (the self type the bare parameter: not `impl<T> Tr for &T` / `&mut T`, whose self path is T too)
                 let bare = matches!(&sm.impl_self_ty, Some(crate::types::TySyn::Named(n)) if n == st);
                 if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) || !bare {
+                    continue;
+                }
+                // (the bare parameter itself, not a reference to it: `impl<T> Tr for &T` and `.. for &mut T` do not overlap)
+                if !matches!(&sm.impl_self_ty, Some(crate::types::TySyn::Named(n)) if n == st) {
                     continue;
                 }
                 // (an impl whose `where` clause may make it disjoint is no candidate either way)
@@ -7297,6 +7303,235 @@ fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u
     lower_blob(a, c, req).map(|(b, req)| (Blob { clo_facts, ..b }, req))
 }
 
+/// What `check` keeps of a checked fn: no machine code, only the relocations to the instances it requested
+fn check_blob(b: Blob, req: &[u32]) -> Blob {
+    let relocs = req.iter().map(|&i| acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(i) }).collect();
+    Blob { relocs, ..b }
+}
+
+/// Whether the instances ids (of a forked child's) can be sent to the parent: their type arguments have a written form
+/// the cache's encoding takes (types_enc: not a type parameter, not one only inference has)
+fn sendable(a: &Analysis, g: &Insts, ids: &[u32]) -> bool {
+    // (not a closure's fn-pointer instance (request_fnptr): the encoding writes it as the closure's own instance, which
+    // the parent would request instead)
+    ids.iter().all(|&i| g.get(i).is_none_or(|inst| !inst.fnptr && inst.args.iter().all(|&t| syn_sendable(&a.prog.ty_syn(t)))))
+}
+
+/// Whether this process has one thread: a fork copies only the calling thread, and a lock another thread holds (an
+/// interner's) would stay held in the child. A host that runs Session2 beside other threads checks in process
+pub(crate) fn single_threaded() -> bool {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| s.lines().find(|l| l.starts_with("Threads:")).and_then(|l| l[8..].trim().parse::<u32>().ok()))
+        == Some(1)
+}
+
+/// How many times this process has forked for parallel work (summaries, checks, builds): tests read it to see that a
+/// threaded host did not fork
+static FORKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn forks() -> usize {
+    FORKS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// fork, counted (FORKS)
+pub(crate) fn fork_counted() -> i32 {
+    FORKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // SAFETY: the callers' children only work and write, then _exit
+    unsafe { c_fork() }
+}
+
+/// Waits for a child, again when a signal interrupts the wait
+fn wait_child(pid: i32) {
+    let mut st = 0i32;
+    loop {
+        // SAFETY: st is an int
+        if unsafe { c_waitpid(pid, &mut st, 0) } == pid || std::io::Error::last_os_error().raw_os_error() != Some(4) {
+            return;
+        }
+    }
+}
+
+/// In a forked child: a panic that unwinds past this exits the child at once, so it never runs its parent's frames
+struct ChildExit;
+
+impl Drop for ChildExit {
+    fn drop(&mut self) {
+        // SAFETY: the child only exits
+        unsafe { c_exit(1) };
+    }
+}
+
+fn syn_sendable(t: &crate::types::TySyn) -> bool {
+    match t {
+        crate::types::TySyn::Prim(Ty::Vec(_)) => true,
+        crate::types::TySyn::Prim(p) => crate::types::TYS.contains(p),
+        crate::types::TySyn::Ref(_, i) | crate::types::TySyn::Array(i, _) | crate::types::TySyn::Slice(i) | crate::types::TySyn::Ptr(_, i) | crate::types::TySyn::Assoc(i, _) => syn_sendable(i),
+        crate::types::TySyn::App(_, v) | crate::types::TySyn::Tuple(v) | crate::types::TySyn::FnPtr(v) => v.iter().all(syn_sendable),
+        crate::types::TySyn::Named(_) | crate::types::TySyn::Str | crate::types::TySyn::Dyn(_) | crate::types::TySyn::Infer => true,
+    }
+}
+
+/// A checked fn: the instances it requested and its Blob as the cache keeps it (None when nothing needs it), or its error
+type Checked = R<(Vec<u32>, Option<Vec<u8>>)>;
+
+impl Session2 {
+    /// Checks ids, in forked children when there are many (#101): child k checks ids[i] with i % jobs == k and sends
+    /// back each one's Blob (encoded by name, as a parallel build's children do) or its error. The parent reads them
+    /// back in the order of ids, which requests again the instances each one requested, so what follows (the
+    /// diagnostics, the next wave) is as with one process. Only when checking (no machine code), with -j above 1
+    fn check_many(&self, a: &Analysis, insts: &Mutex<Insts>, ids: &[u32], check_only: bool) -> Vec<Checked> {
+        let one = |id: u32| -> Checked {
+            let (b, req) = compile_id_req(a, insts, id)?;
+            if self.opts.no_cache {
+                return Ok((req, None));
+            }
+            let b = if check_only { check_blob(b, &req) } else { b };
+            let mut e = vec![];
+            {
+                let g = insts.lock().unwrap();
+                crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+            }
+            Ok((req, Some(e)))
+        };
+        let per_job = std::env::var("ZUSTC_CHECK_FORK_MIN").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(32).max(1);
+        let jobs = if check_only { self.opts.jobs.min(ids.len() / per_job).max(1) } else { 1 };
+        if jobs <= 1 || !single_threaded() {
+            return ids.iter().map(|&id| one(id)).collect();
+        }
+        let mut kids: Vec<(i32, i32)> = vec![];
+        for k in 0..jobs {
+            let mut fds = [0i32; 2];
+            // SAFETY: fds は 2 つの int
+            if unsafe { c_pipe(fds.as_mut_ptr()) } != 0 {
+                continue;
+            }
+            // SAFETY: 子は検査して書くだけで _exit する
+            let pid = fork_counted();
+            if pid < 0 {
+                unsafe { c_close(fds[0]) };
+                unsafe { c_close(fds[1]) };
+                continue;
+            }
+            if pid == 0 {
+                let _exit_on_panic = ChildExit;
+                unsafe { c_close(fds[0]) };
+                let mut buf = vec![];
+                let mut i = k;
+                while i < ids.len() {
+                    crate::cache2::put_uv(&mut buf, i as u64);
+                    let (p0, l0) = {
+                        let g = insts.lock().unwrap();
+                        (g.pending.len(), g.fx_log.len())
+                    };
+                    match compile_id_req(a, insts, ids[i]) {
+                        Ok((b, req)) => {
+                            let mut e = vec![];
+                            {
+                                let g = insts.lock().unwrap();
+                                // (the instances it made, in the order it made them (what the parent's pending gets
+                                // when it checks the fn itself), then the others it requested: lowering makes some that
+                                // it does not return in req)
+                                let mut all: Vec<u32> = g.pending[p0..].to_vec();
+                                all.extend(req.iter().filter(|i| !all.contains(i)).copied().collect::<Vec<u32>>());
+                                if sendable(a, &*g, &all) {
+                                    crate::cache2::encode_blob(&check_blob(b, &all), &a.prog, &*g, &mut e);
+                                }
+                            }
+                            // (what cannot be sent is checked again by the parent)
+                            if e.is_empty() {
+                                buf.push(2);
+                                crate::cache2::put_uv(&mut buf, 0);
+                                i += jobs;
+                                continue;
+                            }
+                            buf.push(0);
+                            crate::cache2::put_uv(&mut buf, e.len() as u64);
+                            buf.extend_from_slice(&e);
+                        }
+                        Err(m) => {
+                            // (and what it did before it failed, which the fn checked here leaves behind: the instances
+                            // it made, pending, and what it told the closures it makes)
+                            let mut e = vec![];
+                            {
+                                let g = insts.lock().unwrap();
+                                let made = g.pending[p0..].to_vec();
+                                if sendable(a, &*g, &made) {
+                                    let b = Blob { clo_facts: g.facts_since(l0), ..acg::Compiled::empty_blob() };
+                                    crate::cache2::encode_blob(&check_blob(b, &made), &a.prog, &*g, &mut e);
+                                }
+                            }
+                            if e.is_empty() {
+                                buf.push(2);
+                                crate::cache2::put_uv(&mut buf, 0);
+                                i += jobs;
+                                continue;
+                            }
+                            buf.push(1);
+                            crate::cache2::put_uv(&mut buf, m.len() as u64);
+                            buf.extend_from_slice(m.as_bytes());
+                            crate::cache2::put_uv(&mut buf, e.len() as u64);
+                            buf.extend_from_slice(&e);
+                        }
+                    }
+                    i += jobs;
+                }
+                write_all(fds[1], &buf);
+                unsafe { c_close(fds[1]) };
+                unsafe { c_exit(0) };
+            }
+            unsafe { c_close(fds[1]) };
+            kids.push((pid, fds[0]));
+        }
+        let mut got: Vec<Option<Result<Vec<u8>, (String, Vec<u8>)>>> = (0..ids.len()).map(|_| None).collect();
+        for &(pid, fd) in &kids {
+            let d = read_all(fd);
+            unsafe { c_close(fd) };
+            wait_child(pid);
+            let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+            while r.pos < d.len() {
+                let (Some(i), Some(fail), Some(n)) = (r.uv(), r.u8(), r.uv()) else { break };
+                let Some(body) = r.take(n as usize) else { break };
+                let v = if fail == 2 {
+                    continue;
+                } else if fail == 0 {
+                    Ok(body.to_vec())
+                } else {
+                    let m = String::from_utf8_lossy(body).into_owned();
+                    let Some(n2) = r.uv() else { break };
+                    let Some(made) = r.take(n2 as usize) else { break };
+                    Err((m, made.to_vec()))
+                };
+                if let Some(slot) = got.get_mut(i as usize) {
+                    *slot = Some(v);
+                }
+            }
+        }
+        // (in order: reading a Blob back requests the instances it requested. What a child did not send (it failed, or
+        // was not started) is checked here)
+        got.into_iter()
+            .zip(ids)
+            .map(|(g, &id)| match g {
+                Some(Ok(d)) => match crate::cache2::decode_blob(&d, &a.prog, insts) {
+                    Some(b) => {
+                        let req = b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect();
+                        Ok((req, if self.opts.no_cache { None } else { Some(d) }))
+                    }
+                    None => one(id),
+                },
+                // (what the failed fn left behind, read back; when it cannot be (a name only the child knows), the fn is
+                // checked here, which leaves it as the serial check does: requests are made once, so what the reading
+                // requested before it failed is not requested twice)
+                Some(Err((m, made))) => match crate::cache2::decode_blob(&made, &a.prog, insts) {
+                    Some(_) => Err(m),
+                    None => one(id),
+                },
+                None => one(id),
+            })
+            .collect()
+    }
+}
+
 /// 記録を機械語にして Blob を作る (バックエンドなしでは作れない)
 #[cfg(not(feature = "build"))]
 fn lower_blob(_: &Analysis, _: acg::Compiled, _: Vec<u32>) -> R<(Blob, Vec<u32>)> { Err("internal: zust-core was built without the backend (feature `build`)".into()) }
@@ -7450,6 +7685,9 @@ impl Session2 {
         // (in the placeholders' round)
         let mut ph_round = false;
         let mut ph_depth = 0;
+        // (a wave's functions to check, and what each gives the record: id, name, body, requested, ok)
+        let mut todo: Vec<(u32, String, String, Key, Key)> = vec![];
+        let mut recs: Vec<(u32, String, String, Option<Vec<u32>>, bool)> = vec![];
         loop {
             while !wave.is_empty() {
                 for &id in &wave {
@@ -7498,67 +7736,65 @@ impl Session2 {
                         None if check_only => self.get(kc).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)),
                         None => None,
                     };
-                    let mut ok = true;
-                    let req: Option<Vec<u32>> = match hit {
+                    match hit {
                         Some(b) => {
                             n_hit += 1;
-                            Some(b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect())
+                            let req = b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect();
+                            recs.push((id, name, body, Some(req), true));
                         }
-                        None => {
-                            n_checked += 1;
-                            match compile_id_req(&a, &insts, id) {
-                                Ok((b, req)) => {
-                                    if !self.opts.no_cache {
-                                        let b = if check_only {
-                                            let relocs = req.iter().map(|&i| acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(i) }).collect();
-                                            Blob { relocs, ..b }
-                                        } else {
-                                            b
-                                        };
-                                        let mut e = vec![];
-                                        {
-                                            let g = insts.lock().unwrap();
-                                            crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
-                                        }
-                                        self.put(if check_only { kc } else { k }, e);
-                                    }
-                                    Some(req)
-                                }
-                                Err(e) => {
-                                    // (a fn that reads a constant: its type errors are the constant's, at its line; what
-                                    // zustc cannot evaluate in a constant is not an error of the program)
-                                    match body.strip_prefix(self.const_fn.as_str()).and_then(|k| k.parse::<usize>().ok()).filter(|_| !self.const_lines.is_empty()) {
-                                        Some(k) => {
-                                            // (nor a mismatch zustc's coercions may make: of a raw pointer, or of a type
-                                            // that has no size, which rustc rejects another way)
-                                            // (nor a reference to a type with a Deref, whose coercion zustc does not make)
-                                            // (a cycle of constants, E0391, is the constant's too)
-                                            let m = e.find("cycle detected when const-evaluating").or_else(|| e.find("mismatched types").filter(|&m| {
-                                                let tys = &e[m..];
-                                                let unsized_ty = |t: &str| t == "str" || t.starts_with('[') && !t.contains(';') || t.starts_with("dyn ");
-                                                let derefs = |t: &str| {
-                                                    let n = t.strip_prefix('&').map(|x| x.strip_prefix("mut ").unwrap_or(x)).unwrap_or("");
-                                                    a.prog.struct_index.get(n).is_some_and(|&sid| a.prog.method(sid, "deref").is_some())
-                                                };
-                                                // (a coercion to a raw pointer zustc may not make: the expected type's)
-                                                let expected = tys.split('`').nth(1).unwrap_or("");
-                                                !expected.contains("*const") && !expected.contains("*mut") && !tys.split('`').skip(1).step_by(2).any(|t| unsized_ty(t) || derefs(t))
-                                            }))
-                                            // (`const BAD: i8 = -129;`: overflowing_literals, denied)
-                                            .or_else(|| e.find("literal out of range for"));
-                                            if let (Some(&l), Some(m)) = (self.const_lines.get(k), m) {
-                                                errs.push(format!("{l}:1: {}", &e[m..]));
-                                            }
-                                        }
-                                        None => errs.push(e),
-                                    }
-                                    ok = false;
-                                    Some(vec![])
-                                }
+                        None => todo.push((id, name, body, k, kc)),
+                    }
+                }
+                // (the wave's misses: checked here or, when there are many, in forked children (check_many); their
+                // results are taken in the wave's order either way, so the diagnostics do not depend on -j)
+                let ids: Vec<u32> = todo.iter().map(|t| t.0).collect();
+                let res = self.check_many(&a, &insts, &ids, check_only);
+                for ((id, name, body, k, kc), r) in todo.drain(..).zip(res) {
+                    n_checked += 1;
+                    let mut ok = true;
+                    let req = match r {
+                        Ok((req, enc)) => {
+                            if let Some(e) = enc.filter(|_| !self.opts.no_cache) {
+                                self.put(if check_only { kc } else { k }, e);
                             }
+                            Some(req)
+                        }
+                        Err(e) => {
+                            // (a fn that reads a constant: its type errors are the constant's, at its line; what
+                            // zustc cannot evaluate in a constant is not an error of the program)
+                            match body.strip_prefix(self.const_fn.as_str()).and_then(|k| k.parse::<usize>().ok()).filter(|_| !self.const_lines.is_empty()) {
+                                Some(k) => {
+                                    // (nor a mismatch zustc's coercions may make: of a raw pointer, or of a type
+                                    // that has no size, which rustc rejects another way)
+                                    // (nor a reference to a type with a Deref, whose coercion zustc does not make)
+                                    // (a cycle of constants, E0391, is the constant's too)
+                                    let m = e.find("cycle detected when const-evaluating").or_else(|| e.find("mismatched types").filter(|&m| {
+                                        let tys = &e[m..];
+                                        let unsized_ty = |t: &str| t == "str" || t.starts_with('[') && !t.contains(';') || t.starts_with("dyn ");
+                                        let derefs = |t: &str| {
+                                            let n = t.strip_prefix('&').map(|x| x.strip_prefix("mut ").unwrap_or(x)).unwrap_or("");
+                                            a.prog.struct_index.get(n).is_some_and(|&sid| a.prog.method(sid, "deref").is_some())
+                                        };
+                                        // (a coercion to a raw pointer zustc may not make: the expected type's)
+                                        let expected = tys.split('`').nth(1).unwrap_or("");
+                                        !expected.contains("*const") && !expected.contains("*mut") && !tys.split('`').skip(1).step_by(2).any(|t| unsized_ty(t) || derefs(t))
+                                    }))
+                                    // (`const BAD: i8 = -129;`: overflowing_literals, denied)
+                                    .or_else(|| e.find("literal out of range for"));
+                                    if let (Some(&l), Some(m)) = (self.const_lines.get(k), m) {
+                                        errs.push(format!("{l}:1: {}", &e[m..]));
+                                    }
+                                }
+                                None => errs.push(e),
+                            }
+                            ok = false;
+                            Some(vec![])
                         }
                     };
-                    // (記録)
+                    recs.push((id, name, body, req, ok));
+                }
+                // (記録)
+                for (id, name, body, req, ok) in recs.drain(..) {
                     if !keep {
                         continue;
                     }

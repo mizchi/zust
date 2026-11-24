@@ -1,9 +1,10 @@
 //! zsc: the zustscript prototype's compiler.
 //!
-//!   zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd] [--inline-runtime] [--check-externs]
+//!   zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js | --emit-rust] [--no-simd] [--inline-runtime] [--check-externs]
 //!
 //! (`--no-simd` compiles `@simd fn`s through zustc like `@wasm` ones (no vectors).
-//! `--all-js` keeps `@wasm fn`s in the JS output: the same source, run as JS.
+//! `--emit-rust` writes a Rust module instead of a JS/Wasm package.
+//! `--all-js` runs SIMD kernels as JS and rejects Rust-only `@wasm fn`s.
 //! `--wasm-O` passes -O to zustc: faster code, but zustc's inlining makes the module larger, so the default is
 //! without it)
 //!
@@ -35,6 +36,7 @@ fn main() {
     let mut jsx_runtime = "react/jsx-runtime".to_string();
     let mut wasm_opt = false;
     let mut all_js = false;
+    let mut emit_rust = false;
     let mut no_simd = false;
     let mut inline_runtime = false;
     let mut check_externs = false;
@@ -45,6 +47,7 @@ fn main() {
             "--zustc" => zustc = Some(PathBuf::from(it.next().expect("--zustc needs a path"))),
             "--jsx-runtime" => jsx_runtime = it.next().expect("--jsx-runtime needs a module").clone(),
             "--wasm-O" => wasm_opt = true,
+            "--emit-rust" => emit_rust = true,
             "--all-js" => all_js = true,
             "--no-simd" => no_simd = true,
             "--inline-runtime" => inline_runtime = true,
@@ -54,16 +57,19 @@ fn main() {
         }
     }
     let Some(input) = input else { usage() };
+    if emit_rust && (all_js || check_externs) {
+        die("--emit-rust cannot be combined with --all-js or --check-externs");
+    }
     let src = std::fs::read_to_string(&input).unwrap_or_else(|e| die(&format!("{}: {e}", input.display())));
     let file = input.display().to_string();
     let stem = input.file_stem().unwrap().to_string_lossy().to_string();
-    if stem == js::RUNTIME && !inline_runtime {
+    if !emit_rust && stem == js::RUNTIME && !inline_runtime {
         die(&format!("{}: `{stem}` is the name of the shared runtime the modules import: rename the file, or use --inline-runtime", input.display()));
     }
 
     // (the shared runtime and a module named like it must not overwrite each other in one directory)
     let rt_path = out_dir.join(format!("{}.js", js::RUNTIME));
-    if let Ok(existing) = std::fs::read_to_string(&rt_path) {
+    if !emit_rust && let Ok(existing) = std::fs::read_to_string(&rt_path) {
         let is_runtime = existing.starts_with(js::RUNTIME_HEADER);
         if inline_runtime && stem == js::RUNTIME && is_runtime {
             die(&format!("{}: holds the shared runtime other modules import: compile `{stem}` with --inline-runtime into another directory", rt_path.display()));
@@ -95,8 +101,15 @@ fn main() {
             std::process::exit(1);
         }
     };
+    if all_js {
+        let errors = check::js_target_errors(&items);
+        if !errors.is_empty() {
+            report(&file, &src, &errors);
+            std::process::exit(1);
+        }
+    }
     let mut ck = check::Checker::new();
-    ck.check_file(&items);
+    ck.check_file(&items, emit_rust);
     if !ck.errors.is_empty() {
         let mut errs = ck.errors.clone();
         errs.sort_by_key(|e| (e.0.line, e.0.col));
@@ -108,6 +121,22 @@ fn main() {
     warns.sort_by_key(|e| (e.0.line, e.0.col));
     report_warnings(&file, &src, &warns);
     let info = ck.info;
+    if emit_rust {
+        let rust = lower::rust_module(&items, &info).unwrap_or_else(|mut errors| {
+            errors.sort_by_key(|(pos, _)| (pos.line, pos.col));
+            errors.dedup();
+            report(&file, &src, &errors);
+            std::process::exit(1)
+        });
+        std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| die(&format!("{}: {e}", out_dir.display())));
+        let path = out_dir.join(format!("{stem}.rs"));
+        if let Ok(existing) = path.canonicalize() && Some(existing) == input.canonicalize().ok() {
+            die("the Rust output would overwrite the input; choose another directory with -o");
+        }
+        publish_atomic(&path, rust);
+        eprintln!("zsc: {file} → {}", path.display());
+        return;
+    }
     let mut j = js::Js::new(&info, &jsx_runtime);
     j.shared_runtime = !inline_runtime;
     if !all_js {
@@ -128,7 +157,7 @@ fn main() {
     std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| die(&format!("{}: {e}", out_dir.display())));
     let (dts, brands) = js::dts(&items, &info, !inline_runtime, &|ts| tsimport::specifier(&out_dir, ts));
     let wasm_name = format!("{stem}.wasm");
-    // `@wasm fn`s: lowered to Rust (with --all-js they stay in the JS output)
+    // `@wasm fn`s and their transitive ordinary helpers are lowered to Rust.
     // `@simd fn`s: vectorized kernels (with --no-simd they go through zustc as @wasm ones)
     let is_simd = |n: &str| items.iter().any(|it| matches!(it, ast::Item::Fn { name, simd: true, .. } if name == n));
     let (simd_wanted, wasm_wanted): (Vec<_>, Vec<_>) = j.wasm_wanted.iter().cloned().partition(|(n, _)| is_simd(n) && !no_simd);
@@ -141,7 +170,7 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let (lowered, raw) = match lower::lower(&items, &info, &wasm_wanted, no_simd) {
+    let (lowered, raw) = match lower::lower(&items, &info, &wasm_wanted, lower::Target::Wasm { scalar_simd: no_simd }) {
         Ok(x) => x,
         Err(mut errs) => {
             errs.sort_by_key(|e| (e.0.line, e.0.col));
@@ -284,7 +313,7 @@ fn report_warnings(file: &str, src: &str, ws: &[(ast::Pos, String)]) {
 }
 
 fn usage() -> ! {
-    die("usage: zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js] [--no-simd] [--inline-runtime] [--check-externs]")
+    die("usage: zsc <input.zsc> [-o out-dir] [--zustc PATH] [--jsx-runtime MODULE] [--wasm-O] [--all-js | --emit-rust] [--no-simd] [--inline-runtime] [--check-externs]")
 }
 
 fn die(m: &str) -> ! {

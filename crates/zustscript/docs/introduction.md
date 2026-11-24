@@ -4,7 +4,7 @@ zustscript は、Rust の `enum` や `match` と、TypeScript でおなじみの
 
 TypeScript で「状態を判別 union で表す」「元の配列を変更せず、`map` や `filter` で新しい値を作る」といった関数型の書き方をしていれば、その設計を zustscript にも持ち込めます。JS 上ではレコードはオブジェクト、配列は配列のままです。対応する TypeScript の型を `import type` で読み込めば、既存の値を呼び出し用に詰め直す手間もありません。
 
-コンパイラの `zsc` は、Rust で実装した zustscript 専用の型検査器でソースを検査します。通常の関数からは、TypeScript アプリがそのまま import できる JavaScript と型定義（`.d.ts`）を生成します。`@wasm` を付けた関数からは Rust ソースを生成し、Rust のサブセットを扱うコンパイラ `zustc` がその Rust コードを型検査して WebAssembly（Wasm）にコンパイルします。この言語とコンパイラは現在開発中です。
+コンパイラの `zsc` は、Rust で実装した zustscript 専用の型検査器でソースを検査します。通常の関数からは、TypeScript アプリがそのまま import できる JavaScript と型定義（`.d.ts`）を生成します。`@wasm` を付けた関数からは Rust ソースを生成し、Rust のサブセットを扱うコンパイラ `zustc` がその Rust コードを型検査して WebAssembly（Wasm）にコンパイルします。`--emit-rust` を選ぶと、属性のない通常の関数も対応する構文の範囲で Rust モジュールに変換できます。この言語とコンパイラは現在開発中です。
 
 使い慣れた言語から読み始める方はこちらです。
 
@@ -124,11 +124,12 @@ mkdir points
 cd points
 ```
 
-先ほどの `model.ts` と `pick.zsc` をここに保存します。まず `--all-js` を指定して、距離計算も含めて JavaScript に変換します。
+先ほどの `model.ts` と `pick.zsc` をここに保存します。JS 版では距離計算も通常の関数にします。次のコマンドで `@wasm` を外した比較用ファイルを作ります。
 
 ```bash
+sed 's/^@wasm //' pick.zsc > pick-js.zsc
 cargo run --manifest-path ../crates/zustscript/Cargo.toml -- \
-  pick.zsc --all-js -o js
+  pick-js.zsc --all-js -o js
 ```
 
 *try.mjs*
@@ -142,10 +143,10 @@ for (const cursor of [{ x: 3, y: 4 }, { x: 0, y: 6 }]) {
 ```
 
 ```bash
-node try.mjs ./js/pick.js
+node try.mjs ./js/pick-js.js
 ```
 
-次に `zustc` をビルドし、同じ `pick.zsc` を `--all-js` を外してコンパイルします。出力先の `wasm/` には、JS と型定義に加えて、中間生成物の `pick.wasm.rs` と実行用の `pick.wasm` ができます。たとえば `wasm/pick.wasm.rs` を開くと、`distance` の計算は Rust の `fn zs_distance(a: ZsPoint, b: ZsPoint) -> f64` として読めます。画面の判定をする `can_pick` は `pick.js` にあります。
+次に `zustc` をビルドし、`@wasm` を付けた元の `pick.zsc` をコンパイルします。出力先の `wasm/` には、JS と型定義に加えて、中間生成物の `pick.wasm.rs` と実行用の `pick.wasm` ができます。たとえば `wasm/pick.wasm.rs` を開くと、`distance` の計算は Rust の `fn zs_distance(a: ZsPoint, b: ZsPoint) -> f64` として読めます。画面の判定をする `can_pick` は `pick.js` にあります。
 
 ```bash
 cargo build --release --manifest-path ../Cargo.toml --bin zustc
