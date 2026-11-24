@@ -2,7 +2,7 @@
 """Extract the data behind the development retrospective dashboard (commits, tests/ui pass rates, KPIs, code size,
 agent sessions) from git history, so the dashboard can be rebuilt at any later commit.
 
-usage: python3 scripts/retro/extract.py [--out out/retro] [--rev HEAD] [--loc-every-hours 3]
+usage: python3 scripts/retro/extract.py [--out out/retro] [--rev HEAD] [--loc-every-hours 3] [--pulls pulls.jsonl]
 
 Writes one JSON array per dataset into --out (see scripts/retro/README.md for how they become the dashboard):
 - hourly.json      commits per UTC hour (no merges, no github-actions[bot]) and their running total
@@ -12,6 +12,9 @@ Writes one JSON array per dataset into --out (see scripts/retro/README.md for ho
 - daily.json       commits, merged PRs, end-of-day pass rates and code size per UTC day
 - sessions.json    agent sessions (the Claude-Session trailer) with at least 5 commits
 - milestones.json  copied from scripts/retro/milestones.json (hand-picked decision points)
+- pending.json     what each open pull request adds to bench/rust_ui_ratchet.txt, by kind (--pulls: the open PRs)
+- forecast.json    by kind and in all: the last CI run's passing tests, what the open PRs add, and the days to 90% at
+                   the pace of the last two days
 
 Classification of .rs lines (loc.json):
 - crates/zustscript/** is counted only as zustscript_lines
@@ -24,6 +27,7 @@ import collections
 import csv
 import datetime as dt
 import json
+import math
 import os
 import re
 import subprocess
@@ -123,6 +127,98 @@ def kpi_rows():
                 **{k: num(r[v]) for k, v in cols.items()}) for i, r in enumerate(rows)]
     # the log is in the order changes were measured, which parallel sessions make differ from commit time
     return sorted(out, key=lambda r: (r["time"], r["n"]))
+
+
+def ratchet_at(rev):
+    """{kind: tests} of bench/rust_ui_ratchet.txt at rev (empty when it has none)"""
+    out = {}
+    for line in git("show", f"{rev}:bench/rust_ui_ratchet.txt").splitlines():
+        f = line.split("\t")
+        if len(f) >= 2 and not line.startswith("#") and f[1].strip().isdigit():
+            out[f[0]] = int(f[1])
+    return out
+
+
+def read_pulls(path):
+    """The open pull requests, one JSON object a line (pages.yml writes them with `gh api`): number, title, head and
+    base branch names. None when no list was given"""
+    if not path:
+        return None
+    out = []
+    for line in open(path):
+        if line.strip():
+            p = json.loads(line)
+            out.append(dict(number=int(p["number"]), title=p["title"], head=p["head"], base=p["base"], draft=bool(p.get("draft"))))
+    return out
+
+
+def pending(prs):
+    """What each open PR adds to the ratchet, by kind: its head's ratchet against the ratchet where it left its base
+    (their merge base). A PR stacked on another one counts only its own part, so the rows add up to what merging them
+    all would add; two PRs to main that pass the same test count it twice. A kind a PR has fewer of than its base (not
+    yet merged with it) adds 0"""
+    if not prs:
+        return []
+    refs = [f"+refs/pull/{p['number']}/head:refs/retro/pull/{p['number']}" for p in prs]
+    refs += [f"+refs/heads/{b}:refs/retro/base/{b}" for b in sorted({p["base"] for p in prs})]
+    if subprocess.run(["git", "-C", ROOT, "fetch", "-q", "origin", *refs], capture_output=True).returncode != 0:
+        # (one ref that is gone (a base branch deleted) fails the fetch: each on its own then)
+        for r in refs:
+            git("fetch", "-q", "origin", r)
+    rows = []
+    for p in sorted(prs, key=lambda p: p["number"]):
+        head, base = f"refs/retro/pull/{p['number']}", f"refs/retro/base/{p['base']}"
+        mb = git("merge-base", head, base).strip()
+        if not mb:
+            continue
+        new, old = ratchet_at(head), ratchet_at(mb)
+        row = dict(pr=p["number"], title=p["title"], head=p["head"], base=p["base"], draft=p["draft"],
+                   commit=git("rev-parse", "--short=8", head).strip())
+        for k in UI_KINDS:
+            row[k.replace("-", "_") + "_gain"] = max(0, new.get(k, 0) - old.get(k, 0)) if new else 0
+        rows.append(row)
+    return rows
+
+
+def forecast(ui, pend, target=0.9, days=2.0):
+    """By kind and in all: the last CI run that measured every kind (its passing tests, and the applicable ones from
+    its rate), what the open PRs add, and the days until `target` of the applicable tests pass at the pace of the
+    `days` days before that run: the same number of tests a day (linear), or the same share of the remaining tests a
+    day (geometric, which slows down as the easy tests are taken)"""
+    keys = [k.replace("-", "_") for k in UI_KINDS]
+    runs = [r for r in ui if all(r[f"{k}_passing"] is not None and r[f"{k}_rate"] for k in keys)]
+    if not runs:
+        return []
+    last = runs[-1]
+    t1 = utc(last["time"])
+    before = [r for r in runs if utc(r["time"]) <= t1 - dt.timedelta(days=days)]
+    first = before[-1] if before else runs[0]
+    span = max((t1 - utc(first["time"])).total_seconds() / 86400, 1e-9)
+    rows = []
+    for k in keys + ["all"]:
+        ks = keys if k == "all" else [k]
+        n = sum(round(last[f"{q}_passing"] * 100 / last[f"{q}_rate"]) for q in ks)
+        p = sum(int(last[f"{q}_passing"]) for q in ks)
+        p0 = sum(int(first[f"{q}_passing"]) for q in ks)
+        pe = sum(r[f"{q}_gain"] for r in pend for q in ks)
+        target_n = math.ceil(target * n)
+        need = max(0, target_n - p - pe)
+        pace = (p - p0) / span
+        lin = geo = None
+        if need == 0:
+            lin = geo = 0.0
+        elif pace > 0:
+            lin = need / pace
+            share = pace / max(n - p, 1)
+            gap0, gap1 = n - p - pe, n - target_n
+            if 0 < share < 1 and gap0 > 0 and gap1 > 0:
+                geo = math.log(gap1 / gap0) / math.log(1 - share)
+        rows.append(dict(kind=k.replace("_", "-"), time=last["time"], commit=last["commit"], applicable=n, passing=p,
+                         rate=round(p * 100 / n, 2), pending=pe, rate_with_pending=round((p + pe) * 100 / n, 2),
+                         target_rate=round(target * 100, 2), target_passing=target_n, needed=need,
+                         pace_from=first["time"], pace_days=round(span, 2), pace_per_day=round(pace, 1),
+                         days_linear=None if lin is None else round(lin, 1), days_geometric=None if geo is None else round(geo, 1)))
+    return rows
 
 
 def classify(path):
@@ -275,6 +371,29 @@ def datasets_spec():
                            source="scripts/retro/milestones.json",
                            columns=dict(time=T, commit=C, label=col("string"), detail=col("string"),
                                         phase=col("enum", "", values=["build-up", "compat"]))),
+        "pending": dict(title="Open pull requests' tests/ui gains", grain="one open pull request", provenance="derived",
+                        source="the open pull requests (GitHub API, pages.yml) and bench/rust_ui_ratchet.txt at each one's "
+                               "head and at its merge base with its base branch; empty when no list was given",
+                        columns=dict(pr=col("int", "pull request number"), title=col("string"),
+                                     head=col("string", "head branch"), base=col("string", "base branch: main, or the PR it is stacked on"),
+                                     draft=col("bool", "a draft"), commit=col("commit", "the head, first 8 hex digits"),
+                                     **{f"{k}_gain": col("int", f"{k} tests its ratchet adds to its base's", "tests") for k in kinds})),
+        "forecast": dict(title="tests/ui now, with the open pull requests, and the way to 90%", grain="one kind, and all kinds",
+                         provenance="derived", source="the ui and pending datasets",
+                         columns=dict(kind=col("enum", "", values=list(UI_KINDS) + ["all"]),
+                                      time=col("time", "the CI run the numbers are from"), commit=C,
+                                      applicable=col("int", "tests zustc can be asked to handle (passing / rate)", "tests"),
+                                      passing=col("int", "passing in that run", "tests"), rate=col("number", "", "%"),
+                                      pending=col("int", "what the open pull requests add (the pending dataset)", "tests"),
+                                      rate_with_pending=col("number", "the rate once they are merged", "%"),
+                                      target_rate=col("number", "the target", "%"),
+                                      target_passing=col("int", "tests passing at the target", "tests"),
+                                      needed=col("int", "tests still needed for the target after the open pull requests", "tests"),
+                                      pace_from=col("time", "the run the pace is measured from"),
+                                      pace_days=col("number", "days between the two runs", "days"),
+                                      pace_per_day=col("number", "passing tests gained a day between them", "tests/day"),
+                                      days_linear=col("number", "days to the target at pace_per_day; null when the pace is not positive", "days", True),
+                                      days_geometric=col("number", "days to the target gaining the same share of the remaining tests a day", "days", True))),
     }
 
 
@@ -283,6 +402,7 @@ def main():
     ap.add_argument("--out", default=os.path.join(ROOT, "out/retro"))
     ap.add_argument("--rev", default="HEAD")
     ap.add_argument("--loc-every-hours", type=int, default=3)
+    ap.add_argument("--pulls", default=None, help="the open pull requests, one JSON object a line (number, title, head, base, draft)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
 
@@ -294,8 +414,9 @@ def main():
     milestones = json.load(open(os.path.join(HERE, "milestones.json")))
     for m in milestones:
         m["phase"] = "compat" if utc(m["time"]) >= compat_t else "build-up"
+    pend = pending(read_pulls(a.pulls))
     data = dict(hourly=hourly(cs, compat_t), ui=ui, kpi=kpi_rows(), loc=loc, daily=daily(cs, prs, ui, loc),
-                sessions=sessions(cs), milestones=milestones)
+                sessions=sessions(cs), milestones=milestones, pending=pend, forecast=forecast(ui, pend))
     spec = datasets_spec()
     for name, rows in data.items():
         spec[name]["file"] = f"{name}.json"
