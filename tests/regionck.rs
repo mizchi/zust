@@ -3377,3 +3377,43 @@ fn part19_fn_item_subtyping() {
     assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
     assert_eq!(check("struct S;\nfn baz(x: &S) -> &S { x }\nfn f<'a>(x: &'a S) -> &'a S {\n    let g: for<'cx> fn(&'cx S) -> &'cx S = baz;\n    g(x)\n}\nfn main() { let s = S; f(&s); }\n"), vec![]);
 }
+
+/// A closure's call holds what the arguments its body makes its result of borrow (`|a| Some(a)`, `let some = Some;`),
+/// as rustc infers the closure's one signature; not those its body only reads or calls with (`|k| m.get(k)`)
+#[test]
+fn part19_closure_call_results() {
+    let t = "fn temp() -> String { String::from(\"Hello\") }\n";
+    for body in ["let some = Some; let g = some(&temp());", "let some = |a| Some(a); let g = some(&temp());", "let some = |a| a; let g: &String = some(&temp());"] {
+        let d = check(&format!("{t}fn main() {{\n    {body}\n    println!(\"{{g:?}}\");\n}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0716"), "{body}: {d:?}");
+    }
+    let d = check(&format!("{t}fn main() {{\n    let x = temp(); let some = |a| Some(a); let g = some(&x); drop(x);\n    println!(\"{{g:?}}\");\n}}\n"));
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("cannot move out of `x`"), "{d:?}");
+    for body in [
+        "let m = vec![temp()]; let look = |k: &String| m.iter().find(|x| *x == k); let g = look(&temp());",
+        "let x = temp(); let f = |a: &String| a.len(); let g = f(&x); drop(x);",
+        "let x = temp(); let f = |a: &String| -> String { a.clone() }; let g = f(&x); drop(x);",
+        "let x = temp(); let f = |a: &String| -> &'static str { if a.is_empty() { \"e\" } else { \"n\" } }; let g = f(&x); drop(x);",
+    ] {
+        assert_eq!(check(&format!("{t}fn main() {{\n    {body}\n    println!(\"{{g:?}}\");\n}}\n")), vec![], "{body}");
+    }
+}
+
+/// What a closure's body requires of its parameters (`let y: &'static u32 = x;`, `W::<&'static u32>(x)`) is required
+/// of its calls' arguments, as rustc propagates a closure's requirements; and a body that writes a lifetime is checked
+/// though nothing else asks for it (nll/user-annotations/adt-tuple-struct-calls.rs)
+#[test]
+fn part19_closure_requirements() {
+    let w = "struct W<T>(T);\nfn id<T>(t: T) -> T { t }\n";
+    for body in ["let f = |x| { let _y: &'static u32 = x; };", "let f = |x| W::<&'static u32>(x);", "let f = W::<&'static u32>;", "let f = |x| id::<&'static u32>(x);", "let f = Some::<&'static u32>;"] {
+        let d = check(&format!("{w}fn main() {{\n    let c = 66;\n    {body}\n    f(&c);\n}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("does not live long enough"), "{body}: {d:?}");
+    }
+    for body in ["let c = 66; let f = W::<&u32>; f(&c);", "static C: u32 = 1; let f = |x| { let _y: &'static u32 = x; }; f(&C);"] {
+        assert_eq!(check(&format!("{w}fn main() {{\n    {body}\n}}\n")), vec![], "{body}");
+    }
+    // (in a closure's body: `'static`, the function's 'a, and a constructor value that names it)
+    let d = check("fn st() {\n    let _c = || {\n        let c = 66;\n        let _y: &'static u32 = &c;\n    };\n}\nfn named<'a>(x: &'a u32) -> &'a u32 {\n    let _c = || {\n        let c = 66;\n        let _y: &'a u32 = &c;\n    };\n    x\n}\nstruct S<T>(T);\nfn ctor<'a>(_: &'a u32) {\n    let _c = || {\n        let c = 66;\n        let f = S::<&'a u32>;\n        f(&c);\n    };\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 10, 19], "{d:?}");
+    assert_eq!(check("struct S<T>(T);\nfn ok<'a>(c: &'a u32) {\n    let _cl = || {\n        let f = S::<&'a u32>;\n        f(c);\n    };\n}\nfn ok2<'a>(c: &'a u32) -> S<&'a u32> {\n    let f = S::<&'a u32>;\n    f(c)\n}\nfn main() { ok(&1); ok2(&2); }\n"), vec![]);
+}

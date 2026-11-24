@@ -688,6 +688,61 @@ fn recv_sp(r: &Option<Sp>, or: Sp) -> Sp {
     r.unwrap_or(or)
 }
 
+/// A requirement a closure's body writes on one of its parameters (closure_reqs)
+pub(crate) struct ClosureReq<'e> {
+    /// the parameter's type argument (the closure's)
+    pub param: usize,
+    /// a `let`'s annotation, the parameter its initializer (`let y: &'static u32 = x;`)
+    pub ann: Option<&'e PTy>,
+    /// or a call whose turbofish writes a lifetime (`W::<&'static u32>(x)`), the parameter its argument `arg`
+    pub call: Option<&'e Expr>,
+    pub arg: usize,
+    pub sp: Sp,
+}
+
+/// The requirements a closure's body (its statements and its value, not nested blocks) writes on its parameters
+/// (params: by name, their type arguments), as rustc propagates a closure's region requirements to its calls
+pub(crate) fn closure_reqs<'e>(body: &'e Expr, params: &[(String, usize)], out: &mut Vec<ClosureReq<'e>>) {
+    if params.is_empty() {
+        return;
+    }
+    let param = |e: &Expr| match strip(e) {
+        Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => params.iter().find(|x| x.0 == p.segs[0].name).map(|x| x.1),
+        _ => None,
+    };
+    let mut call = |e: &'e Expr, out: &mut Vec<ClosureReq<'e>>| {
+        let Expr::Call(f, a) = strip(e) else { return };
+        let Expr::Path(None, p) = strip(f) else { return };
+        let writes = p.segs.last().is_some_and(|s| s.args.iter().any(|g| matches!(g, GArg::Ty(t) if crate::regions::names_lt(t))));
+        if !writes {
+            return;
+        }
+        for (j, x) in a.iter().enumerate() {
+            if let Some(g) = param(x) {
+                out.push(ClosureReq { param: g, ann: None, call: Some(e), arg: j, sp: super::borrowck::pos(x) });
+            }
+        }
+    };
+    let Expr::Block(_, _, b) = strip(body) else {
+        call(body, out);
+        return;
+    };
+    for st in &b.stmts {
+        match st {
+            Stmt::Let(_, Some(t), Some(init), None, _) => {
+                if let Some(g) = param(init).filter(|_| crate::regions::names_lt(t)) {
+                    out.push(ClosureReq { param: g, ann: Some(t), call: None, arg: 0, sp: super::borrowck::pos(init) });
+                } else {
+                    call(init, out);
+                }
+            }
+            Stmt::Let(_, None, Some(init), None, _) => call(init, out),
+            Stmt::Expr(e, _) => call(e, out),
+            _ => {}
+        }
+    }
+}
+
 fn strip(e: &Expr) -> &Expr {
     match e {
         Expr::Paren(x) => strip(x),
@@ -2594,6 +2649,61 @@ impl Cx<'_> {
         }
     }
 
+    /// What a closure made where nothing was expected (by its definition base, of type arguments args) requires of its
+    /// parameters, as its body writes it (closure_reqs): their shared trees (clo_targs) outlive the regions the
+    /// annotation or the turbofish names, so a call's arguments must too (`f(&c)` with `let f = |x| W::<&'static
+    /// u32>(x);`, or `let f = W::<&'static u32>;`: E0597, as rustc propagates a closure's requirements)
+    pub(crate) fn rg_closure_reqs(&mut self, base: u32, args: &[Ty], reqs: &[ClosureReq]) {
+        if !self.rg_on() || reqs.is_empty() {
+            return;
+        }
+        let prog = self.prog;
+        let Some(targs) = self.rg.clo_targs.iter().find(|x| x.0 == base).map(|x| x.1.clone()) else { return };
+        for r in reqs {
+            let pt: &PTy = match r.call {
+                None => r.ann.unwrap(),
+                Some(call) => {
+                    let Expr::Call(f, _) = strip(call) else { continue };
+                    let Expr::Path(None, p) = strip(f) else { continue };
+                    let tys: Vec<&PTy> = p.segs.last().map(|s| s.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect()).unwrap_or_default();
+                    // (the callee's parameter the argument is passed to: one of its type parameters, which the
+                    // turbofish writes)
+                    let declared = if let Some(id) = self.fn_item(f) {
+                        prog.sigs[id as usize].params.get(r.arg).copied()
+                    } else {
+                        // (the path without its turbofish names the type)
+                        let mut q = p.clone();
+                        for sg in &mut q.segs {
+                            sg.args.clear();
+                        }
+                        let pp = crate::program::PPath::of(&q);
+                        if let Some((sid, vi)) = prog.variant_by_p(&pp, None) {
+                            prog.structs[sid as usize].variants[vi].fields.get(r.arg).map(|f| f.1)
+                        } else if let Some(sid) = prog.struct_by_p(&pp, None) {
+                            prog.structs[sid as usize].fields.get(r.arg).map(|f| f.1)
+                        } else {
+                            None
+                        }
+                    };
+                    let Some(Ty::Param(k)) = declared else { continue };
+                    let Some(&t) = tys.get(k as usize) else { continue };
+                    t
+                }
+            };
+            let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+            let mut codes = vec![];
+            sl.slots(pt, false, &mut codes);
+            if !sl.any {
+                continue;
+            }
+            let (Some(&pty), Some(Some(ptr))) = (args.get(r.param), targs.get(r.param)) else { continue };
+            let lts = self.rg.lts.clone();
+            let Some(req) = self.rg.instantiate(prog, pty, Some(&codes), &lts, &[], &mut |me| me.var()) else { continue };
+            let ptr = ptr.clone();
+            self.rg.flow(prog, pty, pty, &ptr, &req, r.sp);
+        }
+    }
+
     /// A call through a fn pointer (f: the callee's value, of type t once dereferenced): the arguments flow into its
     /// parameters' regions, the result is of its result's
     /// A `&mut` local passed where a `&mut` is expected is reborrowed (`f(x)` is `f(&mut *x)`): a region of its own,
@@ -3368,7 +3478,8 @@ impl Cx<'_> {
         let any_cap = caps.iter().flatten().flatten().any(|&c| c >= CLO_U);
         // (nothing to check when no region is in its signature nor its captures are this function's, unless its
         // body writes `'static` (what it reaches through its environment is borrowed from outside, for less))
-        let ann_static = !caps.is_empty() && crate::regions::annotates_static(body);
+        // (or one that writes a lifetime the function names, or `'static`, with nothing else that asks: writes_lifetime)
+        let ann_static = (!caps.is_empty() && crate::regions::annotates_static(body)) || (bound.is_none() && !inputs.iter().any(|x| x.1.is_some()) && crate::regions::writes_lifetime(body));
         if !any_cap && !ann_static && params.iter().chain([&ret]).all(|&t| count(prog, t, 0) == Some(0)) {
             return;
         }
