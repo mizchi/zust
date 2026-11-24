@@ -1555,6 +1555,7 @@ compile-fail	coherence/coherence-overlap-unnormalizable-projection-1.rs
 compile-fail	coherence/coherence-projection-conflict-ty-param.rs
 check-pass	coherence/coherence-projection-ok-orphan.rs
 check-pass	coherence/coherence-projection-ok.rs
+run-pass	coherence/coherence-rfc447-constrained.rs
 check-pass	coherence/coherence-subtyping.rs
 compile-fail	coherence/coherence-tuple-conflict.rs
 run-pass	coherence/coherence-where-clause.rs
@@ -6553,6 +6554,7 @@ compile-fail	self/arbitrary_self_types_pin_lifetime_impl_trait.rs
 compile-fail	self/arbitrary_self_types_pin_lifetime_mismatch-async.rs
 compile-fail	self/arbitrary_self_types_pin_lifetime_mismatch.rs
 compile-fail	self/arbitrary_self_types_pin_needing_borrow.rs
+run-pass	self/builtin-superkinds-self-type.rs
 run-pass	self/by-value-self-in-mut-slot.rs
 compile-fail	self/class-missing-self.rs
 check-pass	self/dispatch-from-dyn-layout-2.rs
