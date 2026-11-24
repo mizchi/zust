@@ -3499,6 +3499,9 @@ fn part20_closure_holds_call_args() {
     // calls' arguments borrow is held while the closure is used)
     let d = check("fn main() {\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    g(&a);\n    a = 2;\n    g(&a);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    // (also called through parentheses: `(g)(&a)`)
+    let d = check("fn main() {\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    (g)(&a);\n    a = 2;\n    (g)(&a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it is borrowed"), "{d:?}");
     let d = check("fn main() {\n    let f = |_| {};\n    for a in [1] {\n        f(&a);\n    }\n}\n");
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("does not live long enough"), "{d:?}");
     let d = check("fn main() {\n    let m = |x| { let _: &str = x; };\n    let st = String::new();\n    m(st.as_str());\n    drop(st);\n    m(\"b\");\n}\n");
@@ -3521,6 +3524,9 @@ fn part20_closure_fnptr_annotated() {
         let d = check(src);
         assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{src}: {d:?}");
     }
+    // (a closure cast to such a type, as in a `let`)
+    let d = check("fn main() {\n    let f = (|_: &'static u32| {}) as fn(&u32);\n    f(&1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
     // (a struct with no lifetime parameters behind the reference (`&S`): its path's mark stands for no region)
     for (src, line) in [("struct S;\nfn main() {\n    let _: fn(&S) = |_: &'static S| {};\n}\n", 3), ("struct S;\nfn want<'b>(_f: fn(&S), _y: &'b u32) {}\nfn main() {\n    want(|_: &'static S| {}, &1);\n}\n", 4)] {
         let d = check(src);

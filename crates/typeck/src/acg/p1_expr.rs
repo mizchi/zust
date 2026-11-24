@@ -1578,6 +1578,11 @@ impl Cx<'_> {
                 if matches!(to, Ty::Fn(_)) && matches!(strip_paren(x), Expr::Closure(..)) {
                     let (v, t) = self.expr(x, Some(to))?;
                     self.same(SP, t, to)?;
+                    // (its annotated parameters against the regions the type binds, as in a `let`: `(|_: &'static u32|
+                    // {}) as fn(&u32)` is "lifetime may not live long enough")
+                    if self.rg_on() {
+                        self.rg_closure_fnptr(ty, x);
+                    }
                     return Ok((v, t));
                 }
                 // (`c as fn(&str)` with c a closure value that captures nothing: its fn-pointer instance)
@@ -3666,7 +3671,8 @@ impl Cx<'_> {
                 // (those regions are in the closure's type, so they last while it is used: the closure holds what the
                 // arguments passed to such parameters borrow (`g(&a); a = 2; g(&a);` is E0506). A local's closure called
                 // by its name: one in a struct's field may have the field's bound as its signature)
-                if r.is_ok() && self.bk_on() && self.bk.level >= 2 && matches!(&**func, Expr::Path(None, p) if p.segs.len() == 1) {
+                let callee = strip_paren(func);
+                if r.is_ok() && self.bk_on() && self.bk.level >= 2 && matches!(callee, Expr::Path(None, p) if p.segs.len() == 1) {
                     if let Some(ps) = self.hr_lost.iter().find(|h| h.0 == base).map(|h| h.1.clone()) {
                         let mut srcs = vec![];
                         for &i in &ps {
@@ -3674,7 +3680,7 @@ impl Cx<'_> {
                                 self.bk_direct_pub(a, &mut srcs);
                             }
                         }
-                        self.bk_flow_into(func, &srcs);
+                        self.bk_flow_into(callee, &srcs);
                     }
                 }
                 // (a result that holds references holds what the arguments its body makes it of borrow: `some(&x)`

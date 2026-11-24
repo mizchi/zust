@@ -3741,7 +3741,7 @@ impl Cx<'_> {
     /// be (codes: the bound's, per parameter)
     /// A closure where a fn pointer type binds the region of a parameter whose annotation names one of the function's
     /// lifetimes or 'static (`let _: fn(&()) = |_: &'a ()| {};`): as where a bound binds it (rg_closure_ann_bound)
-    fn rg_closure_fnptr(&mut self, ann: &PTy, init: &Expr) {
+    pub(crate) fn rg_closure_fnptr(&mut self, ann: &PTy, init: &Expr) {
         let c = super::strip_paren(init);
         let (PTy::Fn(ps, _), Expr::Closure(_, inputs, ..)) = (ann, c) else { return };
         if ps.len() != inputs.len() || !inputs.iter().any(|(_, a)| a.as_ref().is_some_and(crate::regions::names_lt)) {
