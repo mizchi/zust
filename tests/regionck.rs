@@ -124,7 +124,8 @@ fn main() {
     assert_eq!(check(ok), vec![]);
     // (a borrow of a temporary that must be 'static)
     let d = check("fn bar<'a>() -> &'a mut u32 {\n    &mut 4\n}\nfn main() {}\n");
-    assert!(d.len() == 1 && d[0].0 == 2, "{d:?}");
+    // (the second `&mut *x` reads `*x` first, which is where zustc reports the conflict with the first, at 2:11)
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("`*x` because it was mutably borrowed (at 2:11)"), "{d:?}");
 }
 
 /// What the review of the first version found (#19): code rustc accepts that must stay accepted, and errors that must
