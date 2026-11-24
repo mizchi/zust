@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795499727463,
+  "lastUpdate": 1795499730087,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -114028,6 +114028,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/1061d587bc0188afc5edaf18a49588703266ca1e"
         },
         "date": 1795499275447,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.4,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1846,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.06,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1519,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.47,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4670,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b445821e7e0379b8ffdd779ea94d27d3a7ddf6b1",
+          "message": "Merge pull request #114 from mizchi/docs/zustscript-rust-costs\n\nRust 利用者向けに zustscript の変換コストと調べ方を公開する",
+          "timestamp": "2026-11-24T14:47:00+09:00",
+          "tree_id": "01089114a48f635957ac86f9396dfe21ad052b0c",
+          "url": "https://github.com/mizchi/zust/commit/b445821e7e0379b8ffdd779ea94d27d3a7ddf6b1"
+        },
+        "date": 1795499729574,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
