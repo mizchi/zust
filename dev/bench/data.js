@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795538453713,
+  "lastUpdate": 1795538456674,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -99951,6 +99951,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/4bb6d55888653c444b02056660292ab424677e7e"
         },
         "date": 1795535108582,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 75,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 83.871,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 96.154,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.444,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 75,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.921,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "2ea7bf4cbb6d4b31a188bb8e28ddbcb8be1136ef",
+          "message": "probe std_io_hash: a file beside its own executable, not a fixed /tmp path (#133)\n\ndriver2, driver2_inline and driver2_cranelift build and run the probes at\nthe same time; std_io_hash wrote, read back and emptied\n/tmp/zustc_probe_std_io_hash.txt, so one run could read another's file.\n#110's CI failed once that way (cranelift_backend_matches_minclif:\n\"std_io_hash (opt true): differs\", both exit 0), and passed on a rerun.\n\nThe file is now the executable's path plus `.txt` (each test builds into\nits own directory), and it is removed at the end. The output is the same:\ntests/expected is unchanged (checked with rustc, and with zustc with and\nwithout -O on Linux).\n\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>",
+          "timestamp": "2026-11-25T01:35:56+09:00",
+          "tree_id": "c1d2886531857af3660800bd5bd88df9b64c947f",
+          "url": "https://github.com/mizchi/zust/commit/2ea7bf4cbb6d4b31a188bb8e28ddbcb8be1136ef"
+        },
+        "date": 1795538456142,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
