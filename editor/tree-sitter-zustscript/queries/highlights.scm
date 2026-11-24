@@ -4,6 +4,10 @@
 (block_comment) @comment
 
 (string) @string
+(template_string "`" @string)
+(string_fragment) @string
+(escape_sequence) @string.escape
+(template_substitution ["${" "}"] @punctuation.special)
 (char) @string
 (jsx_attribute value: (string) @string)
 (number) @number
