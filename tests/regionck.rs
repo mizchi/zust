@@ -3733,3 +3733,12 @@ fn part23_placeholder_bound_type_args() {
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `x` because it is borrowed"), "{d:?}");
     assert_eq!(check("trait FnLike<A, R> { fn call(&self, arg: A) -> R; }\nfn a<'a, F: FnLike<&'a isize, &'a isize>>(f: F, x: &'a isize) -> &'a isize {\n    f.call(x)\n}\nfn b<F>(f: F) where F: for<'a> FnLike<&'a isize, &'a isize> {\n    let mut x: isize = 3;\n    f.call(&x);\n    f.call(&x);\n    x = 5;\n    let _ = x;\n}\nfn c<'z, F: FnLike<&'z isize, u8>>(f: F) -> u8 {\n    static S: isize = 1;\n    f.call(&S)\n}\nfn take<'a, F>(_x: &'a u32, _f: F) where F: for<'b> FnOnce(&'b u32, &'a u32) -> &'b u32 {}\nfn d<'x>(x: &'x u32) {\n    take(x, |y, _| y);\n}\nfn e<'a>(_: &'a i32, _: impl FnOnce(&mut &mut &'a i32)) {}\nfn g<'a>(p: &'a i32) { e(p, |x: &mut &mut &'a i32| { let _: &mut &mut &'a i32 = x; }) }\nfn main() {}\n"), vec![]);
 }
+
+#[test]
+fn part23_diverging_let_annotation_wf() {
+    // (a `let` whose initializer diverges: its annotation's type is well formed all the same, a named binding and `_`
+    // (regions/regions-outlives-projection-container-wc.rs))
+    let d = check("struct S<'b>(&'b ());\nfn f<'a, 'b>() {\n    let _: &'a S<'b> = loop {};\n}\nstruct W<T>(T);\nfn g<'a, 'b>() {\n    let _: &'a W<S<'b>> = loop {};\n}\nfn h<'a, 'b>() {\n    let _x: &'a &'b () = panic!();\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![3, 7, 10] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
+    assert_eq!(check("struct S<'b>(&'b ());\nfn f<'a, 'b: 'a>() {\n    let _: &'a S<'b> = loop {};\n}\nfn g<'a, 'b: 'a>() {\n    let _x: &'a &'b () = panic!();\n}\nfn main() {}\n"), vec![]);
+}
