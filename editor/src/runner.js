@@ -45,7 +45,7 @@ addEventListener("message", async (e) => {
     const m = await import(url);
     if (typeof m.main !== "function") {
       const names = Object.keys(m).filter((n) => typeof m[n] === "function");
-      post("system", `no \`pub fn main\` to run${names.length ? ` (exports: ${names.join(", ")})` : ""}`);
+      post("system", `no \`export fn main\` to run${names.length ? ` (exports: ${names.join(", ")})` : ""}`);
       return;
     }
     const t0 = performance.now();

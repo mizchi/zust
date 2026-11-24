@@ -11,7 +11,7 @@ type Hit = { index: i32, dist: f64, inside: bool }
 @wasm fn sub(a: Vec2, b: Vec2) -> Vec2 { Vec2 { x: a.x - b.x, y: a.y - b.y } }
 @wasm fn len(v: Vec2) -> f64 { (v.x * v.x + v.y * v.y).sqrt() }
 
-@wasm pub fn area(s: Shape) -> f64 {
+@wasm export fn area(s: Shape) -> f64 {
   match s {
     Circle(_, r) => 3.141592653589793 * r * r,
     Rect(a, b) => ((b.x - a.x) * (b.y - a.y)).abs(),
@@ -19,7 +19,7 @@ type Hit = { index: i32, dist: f64, inside: bool }
   }
 }
 
-@wasm pub fn center(s: Shape) -> Vec2 {
+@wasm export fn center(s: Shape) -> Vec2 {
   match s {
     Circle(c, _) => c,
     Rect(a, b) => Vec2 { x: (a.x + b.x) / 2.0, y: (a.y + b.y) / 2.0 },
@@ -27,7 +27,7 @@ type Hit = { index: i32, dist: f64, inside: bool }
   }
 }
 
-@wasm pub fn grow(s: Shape, k: f64) -> Shape {
+@wasm export fn grow(s: Shape, k: f64) -> Shape {
   match s {
     Circle(c, r) => Circle(c, r * k),
     Rect(a, b) => Rect(a, Vec2 { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }),
@@ -36,7 +36,7 @@ type Hit = { index: i32, dist: f64, inside: bool }
 }
 
 // the nearest of points (as two arrays) to p, with a loop and mutable locals
-@wasm pub fn nearest(xs: Array<f64>, ys: Array<f64>, p: Vec2, mode: Mode) -> Option<Hit> {
+@wasm export fn nearest(xs: Array<f64>, ys: Array<f64>, p: Vec2, mode: Mode) -> Option<Hit> {
   let mut best = -1;
   let mut bd = 0.0;
   for i in range(0, xs.len()) {
@@ -49,7 +49,7 @@ type Hit = { index: i32, dist: f64, inside: bool }
   if best < 0 { None } else { Some(Hit { index: best, dist: bd, inside: bd < 1.0 }) }
 }
 
-@wasm pub fn collatz_max(limit: i64) -> Option<i64> {
+@wasm export fn collatz_max(limit: i64) -> Option<i64> {
   let mut best = 0;
   let mut arg = 0;
   let mut n = 1;

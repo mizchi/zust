@@ -1,3 +1,3 @@
 // expect: `helper` is a JS-layer function: a @wasm function calls only @wasm and `wasm fn` functions
 fn helper(x: f64) -> f64 { x * 2.0 }
-@wasm pub fn f(x: f64) -> f64 { helper(x) }
+@wasm export fn f(x: f64) -> f64 { helper(x) }

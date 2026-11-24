@@ -13,7 +13,7 @@ A page to write [zustscript](../crates/zustscript) in the browser: the editor hi
     as JS.
   - A Rust `wasm fn` cannot become JS. It is reported as a warning, and calling it throws.
   - `import type` has no TS files to read here.
-- **preview**: the module runs in a sandboxed iframe (a new one per run) and calls `pub fn main`.
+- **preview**: the module runs in a sandboxed iframe (a new one per run) and calls `export fn main`.
   - Its console output and its result are shown.
   - When `main` returns JSX, the element is rendered with React 19 from esm.sh, through an import map. Other bare
     imports (`extern "pkg" fn ..`) load from esm.sh too.

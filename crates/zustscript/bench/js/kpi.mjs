@@ -5,7 +5,7 @@
 // Size: every examples/*.zsc and bench/js/workloads.zsc is compiled with --all-js, then each module is bundled
 // with esbuild (--bundle --minify, react kept external) and gzipped. "raw" is zsc's own output, "min" and "gz" the
 // bundle, which is what an app ships. Without esbuild only raw and raw+gz are reported.
-// Speed: each `pub fn w_*` of bench/js/workloads.zsc runs a fixed number of times after a warm-up; the median of
+// Speed: each `export fn w_*` of bench/js/workloads.zsc runs a fixed number of times after a warm-up; the median of
 // several runs is reported, with the workload's result so a change in behaviour shows up.
 // --save writes the numbers as JSON; --against compares with a saved file (the change is marked when past 5% for
 // speed, any change for size).
