@@ -101,3 +101,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-24 | [Region (lifetime) checking, part 19: closures' calls and requirements, fn items as higher-ranked fn pointers, impl constants' lifetimes](2026-11-24-01-region-check-19.md) |
 | 2026-11-24 | [`check` in forked children (#101)](2026-11-24-02-parallel-check.md) |
 | 2026-11-24 | [The borrow check toward Polonius Alpha (#1)](2026-11-24-03-polonius-alpha.md) |
+| 2026-11-24 | [Trait solving, first step: an impl's bounds as nested goals (#2)](2026-11-24-04-impl-bounds-nested-goals.md) |

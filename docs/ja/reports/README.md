@@ -100,3 +100,4 @@ zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの�
 | 2026-11-24 | [リージョン (ライフタイム) 検査、その 19: クロージャの呼び出しと要件、高階の関数ポインタとしての関数アイテム、impl の定数のライフタイム](2026-11-24-01-region-check-19.md) |
 | 2026-11-24 | [`check` を fork した子プロセスで分ける (#101)](2026-11-24-02-parallel-check.md) |
 | 2026-11-24 | [borrow check を Polonius Alpha に寄せる (#1)](2026-11-24-03-polonius-alpha.md) |
+| 2026-11-24 | [trait の解決、最初の一歩: impl の境界を入れ子の goal にする (#2)](2026-11-24-04-impl-bounds-nested-goals.md) |

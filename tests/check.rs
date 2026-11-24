@@ -989,3 +989,43 @@ fn review100_fourth_round() {
     let src = "trait Id { type T; }\nimpl Id for u8 { type T = u8; }\ntrait Base<T, U = <u8 as Id>::T> { type A; type B; }\ntrait Mid: Base<u8, A = u8> {}\ntrait Root: Base<u8, <u8 as Id>::T, B = u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
     assert_eq!(first(src), None, "associated_segment_in_a_default");
 }
+
+/// An impl is for a type only when the type meets the impl's bounds, its where clauses' too (issue #2): nested goals of
+/// traits of the program's. Also a trait's supertraits must be implemented by an impl's self type, and an impl for a
+/// reference is not for the type it refers to. Each was checked against rustc 1.97
+#[test]
+fn impl_bounds_are_nested_goals() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let pre = "trait Bar {}\ntrait Foo { fn foo(&self) {} }\nstruct W<T>(T);\nimpl Bar for i32 {}\nfn need<F: Foo>(_: F) {}\n";
+    let bad = |body: &str| {
+        let src = format!("{pre}{body}\n");
+        let d = check(&src);
+        assert!(d.len() == 1 && d[0].msg.contains("is not satisfied"), "{src}\n{d:?}");
+    };
+    let ok = |body: &str| {
+        let src = format!("{pre}{body}\n");
+        let d = check(&src);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    };
+    for (imp, call) in [
+        ("impl<T: Bar> Foo for W<T> {}", "need(W(_))"),
+        ("impl<T> Foo for W<T> where T: Bar {}", "need(W(_))"),
+        ("impl<T: Bar> Foo for T {}", "need(_)"),
+        ("impl<T: Bar> Foo for W<T> {}", "W(_).foo()"),
+        ("impl Foo for W<i32> {}", "need(W(_))"),
+        ("impl<T: Bar> Foo for W<T> {}\nimpl<T: Foo> Bar for Vec<T> {}", "need(W(vec![W(_)]))"),
+    ] {
+        bad(&format!("{imp}\nfn main() {{ {}; }}", call.replace('_', "1u8")));
+        ok(&format!("{imp}\nfn main() {{ {}; }}", call.replace('_', "1i32")));
+    }
+    // (a cycle of blanket impls through each other's bounds is not followed forever)
+    ok("trait P {}\ntrait Q {}\nimpl<T: Q> P for T {}\nimpl<T: P> Q for T {}\nfn main() {}");
+    // (a trait object implements its trait's supertraits, whatever a blanket impl of one asks)
+    ok("trait Sup {}\ntrait Sub2: Sup {}\ntrait Imp {}\nimpl<T: ?Sized + Sub2 + Imp> Sup for T {}\nfn n<T: ?Sized + Sup>() {}\nfn main() { n::<dyn Sub2>(); }");
+    // (supertraits)
+    bad("trait A {}\ntrait B: A {}\nstruct C;\nimpl B for C {}\nfn main() {}");
+    ok("trait A {}\ntrait B: A {}\nstruct C;\nimpl A for C {}\nimpl B for C {}\nfn main() {}");
+    // (an impl for `&mut i32` is not for i32)
+    bad("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { f(1i32); }");
+    ok("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { let mut x = 1i32; f(&mut x); }");
+}

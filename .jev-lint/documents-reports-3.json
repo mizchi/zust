@@ -128,6 +128,14 @@
     "docs_reports_2026-11-24-03-polonius-alpha.ja": {
       "path": "docs/ja/reports/2026-11-24-03-polonius-alpha.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-24-04-impl-bounds-nested-goals.en": {
+      "path": "docs/reports/2026-11-24-04-impl-bounds-nested-goals.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-04-impl-bounds-nested-goals.ja": {
+      "path": "docs/ja/reports/2026-11-24-04-impl-bounds-nested-goals.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -305,6 +313,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-24-03-polonius-alpha.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-04-impl-bounds-nested-goals",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-04-impl-bounds-nested-goals.md is a faithful translation of docs/reports/2026-11-24-04-impl-bounds-nested-goals.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-04-impl-bounds-nested-goals.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-04-impl-bounds-nested-goals.ja"
       }
     }
   ]
