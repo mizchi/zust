@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795539711922,
+  "lastUpdate": 1795539714487,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -120706,6 +120706,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/2ea7bf4cbb6d4b31a188bb8e28ddbcb8be1136ef"
         },
         "date": 1795538459294,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1861,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.11,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1525,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.8,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4712,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d0f960054fd01522d595fee327ef58c46d9a35bb",
+          "message": "Merge pull request #134 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: template strings (no core::fmt in @wasm); #103 follow-ups; TODO stock-take",
+          "timestamp": "2026-11-25T01:56:08+09:00",
+          "tree_id": "036a318b844b76a3c9e733e67893967f50d71835",
+          "url": "https://github.com/mizchi/zust/commit/d0f960054fd01522d595fee327ef58c46d9a35bb"
+        },
+        "date": 1795539714113,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
