@@ -761,7 +761,28 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             crate::regions::sig_regions(sig, owner.and_then(|o| o.regions.as_deref()), &otp)
         },
         is_unsafe: sig.quals.iter().any(|q| q == "unsafe") || (is_extern && !sig.quals.iter().any(|q| q == "safe")),
+        preds: other_preds(&sig.generics, self_ty),
     })
+}
+
+/// The where clauses on other than a parameter (SigSyn::preds): `where T::A: Bar`, `where <T as Tr>::A: Bar`,
+/// `where W<T>: Bar`. Lifetimes' and bare parameters' are not (collect_generics has those), nor one whose type is not
+/// written in a way the summary takes
+fn other_preds(g: &Generics, self_ty: Option<&TySyn>) -> Vec<(TySyn, String, Vec<String>)> {
+    let mut out = vec![];
+    for (t, bs) in &g.preds {
+        let tr = match t {
+            PTy::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() && p.segs[0].fn_args.is_none() => continue,
+            // (`<T as Tr>::A`: the trait is the segment before the name)
+            PTy::Path(Some(_), p) => p.segs.len().checked_sub(2).map(|i| p.segs[i].name.clone()).unwrap_or_default(),
+            _ => String::new(),
+        };
+        let (Ok(ts), Ok(names)) = (tysyn(t, self_ty), bound_names(bs)) else { continue };
+        if !names.is_empty() {
+            out.push((ts, tr, names));
+        }
+    }
+    out
 }
 
 thread_local! {

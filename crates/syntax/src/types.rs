@@ -287,6 +287,10 @@ pub struct SigSyn {
     pub ret_from: u64,
     /// The regions of the signature (None: it writes no reference and no lifetime, so every region in it is elided)
     pub regions: Option<Box<RSigSyn>>,
+    /// The fn's own where clauses on other than a parameter (`where T::A: Bar`, `where <T as Tr>::A: Bar`, `where
+    /// W<T>: Bar`): the type, the trait of a qualified path (`Tr`; empty otherwise), the bounds. The trait solver
+    /// proves them as goals once the parameters are known (issue #2)
+    pub preds: Vec<(TySyn, String, Vec<String>)>,
 }
 
 // ---- regions of signatures (region checking; `Ty` itself carries none) ----

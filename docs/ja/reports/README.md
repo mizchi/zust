@@ -104,3 +104,4 @@ zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの�
 | 2026-11-24 | [リージョン (ライフタイム) 検査、その 21: 関数ポインタに強制する関数アイテム、共有参照を通した deref 強制、注釈付きの `let` の `ref mut` 束縛](2026-11-24-05-region-check-21.md) |
 | 2026-11-24 | [trait の解決、最初の一歩: impl の境界を入れ子の goal にする (#2)](2026-11-24-06-impl-bounds-nested-goals.md) |
 | 2026-11-24 | [trait の解決、段階 1: goal の答えを「はい」「不明」「いいえ」にする (#2)](2026-11-24-07-goal-certainty.md) |
+| 2026-11-24 | [trait の解決、段階 3: 射影を normalizes-to の goal にする (#2)](2026-11-24-08-projection-goals.md) |

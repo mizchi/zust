@@ -1093,3 +1093,53 @@ fn goals_have_a_certainty() {
     // (two blanket impls of one trait: the one that holds is taken, whatever the other's goals do)
     ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: B> Tr<u8> for T {}\nimpl<T: A> Tr<u16> for T {}\nimpl<T: Tr<u8>> B for T {}\nimpl A for i32 {}\nfn need<T: Tr<u16>>(_: T) {}\nfn main() { need(1i32); }");
 }
+
+/// Projections as normalizes-to goals (issue #2 step 3), each checked against rustc 1.97:
+/// - a bound's bindings (`T: Tr<A = u32>`): `<t as Tr>::A`, by Tr's impls, must be the bound type (E0271);
+/// - where clauses on a projection (`where T::A: Bar`, `where <T as Tr>::A: Bar`) or another type (`where W<T>:
+///   Bar`) are goals of the instance;
+/// - an impl's associated type meets the bounds its trait declares for it (`type A: Bar;`).
+#[test]
+fn projections_are_goals() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let bad = |src: &str, want: &str| {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].msg.contains(want), "{src}\n{d:?}");
+    };
+    let ok = |src: &str| {
+        let d = check(src);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    };
+    let tr = "trait Tr { type A; }\nimpl Tr for u8 { type A = u16; }\nimpl Tr for i8 { type A = i16; }\n";
+    // (bindings)
+    bad(&format!("{tr}fn f<X: Tr<A = u32>>(_: X) {{}}\nfn main() {{ f(1u8); }}"), "type mismatch resolving `<u8 as Tr>::A == u32`");
+    ok(&format!("{tr}fn f<X: Tr<A = u16>>(_: X) {{}}\nfn main() {{ f(1u8); }}"));
+    ok(&format!("{tr}fn f<X>(_: X) where X: Tr<A = u16> {{}}\nfn main() {{ f(1u8); }}"));
+    // (the binding names another parameter, given by the call)
+    ok(&format!("{tr}fn f<X: Tr<A = Y>, Y>(_: X, _: Y) {{}}\nfn main() {{ f(1u8, 2u16); }}"));
+    bad(&format!("{tr}fn f<X: Tr<A = Y>, Y>(_: X, _: Y) {{}}\nfn main() {{ f(1u8, 2u32); }}"), "E0271");
+    // (an impl for a generic struct; two impls of one struct)
+    bad("trait Tr { type A; }\nstruct W<T>(T);\nimpl<T> Tr for W<T> { type A = T; }\nfn f<X: Tr<A = u8>>(_: X) {}\nfn main() { f(W(1u16)); }", "E0271");
+    bad("trait Tr { type A; }\nstruct W<T>(T);\nimpl Tr for W<i32> { type A = u32; }\nimpl Tr for W<u32> { type A = i32; }\nfn f<T: Tr<A = ()>>() {}\nfn main() { f::<W<i32>>(); }", "E0271");
+    // (two traits with an associated type of one name: each by its own trait)
+    ok("trait P { type A; }\ntrait Q { type A; }\nimpl P for u8 { type A = u16; }\nimpl Q for u8 { type A = u32; }\nfn f<X: P<A = u16> + Q<A = u32>>(_: X) {}\nfn main() { f(1u8); }");
+    // (a generic trait's impls that disagree: not known, not an error)
+    ok("trait Tr<T> { type A; }\nimpl Tr<u8> for i32 { type A = u8; }\nimpl Tr<u16> for i32 { type A = u16; }\nfn f<X: Tr<u16, A = u16>>(_: X) {}\nfn main() { f(1i32); }");
+    // (std's iterators: a reference item is not the item; the prelude's own bindings (`sum`) are hints, not checked)
+    bad("fn f<I: Iterator<Item = u8>>(_: I) {}\nfn main() { let v = vec![1u8]; f(v.iter()); }", "E0271");
+    ok("fn f<I: Iterator<Item = u8>>(_: I) {}\nfn main() { let v = vec![1u8]; f(v.iter().copied()); f(v.into_iter()); }");
+    ok("fn main() { let v = vec![1i32, 2]; let a: i32 = v.iter().sum(); let b = v.iter().product::<i32>(); println!(\"{a} {b}\"); }");
+    // (where clauses on a projection, and on another type)
+    let wb = format!("{tr}trait Bar {{}}\nimpl Bar for i16 {{}}\n");
+    bad(&format!("{wb}fn f<X: Tr>(_: X) where X::A: Bar {{}}\nfn main() {{ f(1u8); }}"), "the trait bound `u16: Bar` is not satisfied");
+    ok(&format!("{wb}fn f<X: Tr>(_: X) where X::A: Bar {{}}\nfn main() {{ f(1i8); }}"));
+    bad(&format!("{wb}fn f<X: Tr>(_: X) where <X as Tr>::A: Bar {{}}\nfn main() {{ f(1u8); }}"), "`u16: Bar`");
+    ok(&format!("{wb}fn f<X: Tr>(_: X) where <X as Tr>::A: Bar {{}}\nfn main() {{ f(1i8); }}"));
+    bad("trait Bar {}\nimpl Bar for u8 {}\nfn f<I: Iterator>(_: I) where I::Item: Bar {}\nfn main() { f(vec![1u16].into_iter()); }", "`u16: Bar`");
+    ok("trait Bar {}\nimpl<'a> Bar for &'a u8 {}\nfn f<I: Iterator>(_: I) where I::Item: Bar {}\nfn main() { let v = vec![1u8]; f(v.iter()); }");
+    bad("trait Bar {}\nstruct W<T>(T);\nimpl Bar for W<i32> {}\nfn f<T>(_: T) where W<T>: Bar {}\nfn main() { f(1u8); }", "`W<u8>: Bar`");
+    ok("trait Bar {}\nstruct W<T>(T);\nimpl Bar for W<i32> {}\nfn f<T>(_: T) where W<T>: Bar {}\nfn main() { f(1i32); }");
+    // (an impl's associated type against its trait's bounds for it)
+    bad("trait Bar {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}", "`u16: Bar`");
+    ok("trait Bar {}\nimpl Bar for u16 {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}");
+}

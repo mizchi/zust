@@ -160,6 +160,14 @@
     "docs_reports_2026-11-24-07-goal-certainty.ja": {
       "path": "docs/ja/reports/2026-11-24-07-goal-certainty.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-24-08-projection-goals.en": {
+      "path": "docs/reports/2026-11-24-08-projection-goals.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-08-projection-goals.ja": {
+      "path": "docs/ja/reports/2026-11-24-08-projection-goals.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -381,6 +389,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-24-07-goal-certainty.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-08-projection-goals",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-08-projection-goals.md is a faithful translation of docs/reports/2026-11-24-08-projection-goals.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-08-projection-goals.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-08-projection-goals.ja"
       }
     }
   ]
