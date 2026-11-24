@@ -31,6 +31,15 @@ fn first<T: Copy>(x: &Wrap<[T]>) -> T {
 }
 
 // a struct laid out before the definition of the struct with an unsized tail it points to
+// (a tail through an alias, requested (by AHolder's field) before AOuter's fields are resolved)
+struct AHolder<T> {
+    p: *const AOuter<[u8]>,
+    marker: T,
+}
+struct AInner<T: ?Sized>(u8, T);
+type AAlias<T> = AInner<T>;
+struct AOuter<T: ?Sized>(u16, AAlias<T>);
+
 struct Holder<T> {
     p: *const Tail<[u8]>,
     marker: T,
@@ -105,5 +114,7 @@ fn main() {
     let mut gm = std::mem::ManuallyDrop::new(Guard { id: 3, tail: [Loud(4)] });
     let gp: *mut Guard<[Loud]> = &mut *gm as &mut Guard<[Loud; 1]> as *mut Guard<[Loud; 1]> as *mut Guard<[Loud]>;
     unsafe { std::ptr::drop_in_place(gp) };
+    let _ah: Option<AHolder<u8>> = None;
+    println!("{} {}", std::mem::size_of::<&AOuter<[u8]>>(), std::mem::size_of::<AHolder<u8>>());
     println!("end");
 }

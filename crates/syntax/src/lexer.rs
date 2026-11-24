@@ -987,6 +987,11 @@ pub fn has_inline_item(src: &str) -> bool {
         // (after attributes on the same line too: `{ #[inline] fn f() {} }`)
         while let Some(rest) = t.strip_prefix("#[") {
             let Some(end) = rest.find(']') else { break };
+            // (an attribute with a string or brackets in it (`#[doc = "]"]`) is not followed: taken as an item, the
+            // full preparation decides)
+            if rest[..end].contains(['"', '[', '\'']) {
+                return true;
+            }
             t = rest[end + 1..].trim_start_matches([' ', '\t']);
         }
         matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p')) && HOIST_KWS.iter().any(|k| t.starts_with(k))

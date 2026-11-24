@@ -3381,6 +3381,41 @@ impl Program {
                 let rest = &n[crate::ast_types::TARGS_PREFIX.len()..];
                 let (tr, name) = rest.split_once('#').unwrap_or(("", rest));
                 let bt = r(&parts[0])?;
+                // (a const argument zustc cannot evaluate: one value for all the impls whose other arguments match,
+                // or an error; never the first impl by self type alone)
+                if parts[1..].iter().any(|p| matches!(p, TySyn::Infer)) {
+                    let args = parts[1..].iter().map(|p| if matches!(p, TySyn::Infer) { Ok(None) } else { r(p).map(Some) }).collect::<R<Vec<Option<Ty>>>>()?;
+                    let nm = name.strip_prefix(crate::ast_types::NO_STD_ASSOC).unwrap_or(name);
+                    let trn = tr.rsplit("::").next().unwrap_or(tr);
+                    let mut found: Option<Ty> = None;
+                    let mut ambiguous = false;
+                    for a in &self.assocs {
+                        if a.name != nm || a.trait_name != trn || a.ngat != 0 {
+                            continue;
+                        }
+                        let Some(ta) = &a.trait_args else { continue };
+                        if ta.len() != args.len() {
+                            continue;
+                        }
+                        let mut sol = vec![None; a.ngen];
+                        if !crate::traits::mtch(self, a.self_ty, bt, &mut sol, false, 0)
+                            || !ta.iter().zip(&args).all(|(&p, x)| x.is_none_or(|x| crate::traits::mtch(self, p, x, &mut sol, false, 0)))
+                        {
+                            continue;
+                        }
+                        let Some(full) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else {
+                            ambiguous = true;
+                            continue;
+                        };
+                        let v = self.subst(a.value, &full);
+                        ambiguous |= found.is_some_and(|f| f != v);
+                        found = Some(v);
+                    }
+                    return match (found, ambiguous) {
+                        (Some(t), false) => Ok(t),
+                        _ => Err(format!("unsupported: the const argument of `{trn}` that selects `{nm}` for `{}` cannot be evaluated", self.tn(bt))),
+                    };
+                }
                 let args = parts[1..].iter().map(r).collect::<R<Vec<Ty>>>()?;
                 if !self.has_param(bt) && !args.iter().any(|&a| self.has_param(a)) {
                     if let Some(t) = self.assoc_of_targs(bt, tr, &args, name.strip_prefix(crate::ast_types::NO_STD_ASSOC).unwrap_or(name)) {
@@ -4796,7 +4831,20 @@ impl Program {
         fn syn_unsized(p: &Program, gens: &[String], t: &TySyn, may: &dyn Fn(usize) -> bool, pu: &dyn Fn(u8) -> bool, depth: u32) -> bool {
             match t {
                 TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_) => true,
-                TySyn::Named(n) => gens.iter().position(|g| g == n).is_some_and(|i| may(i) && pu(i as u8)),
+                TySyn::Named(n) if gens.iter().any(|g| g == n) => gens.iter().position(|g| g == n).is_some_and(|i| may(i) && pu(i as u8)),
+                // (an alias (`type Alias<T: ?Sized> = Inner<T>`): its body, its parameters being the arguments)
+                TySyn::Named(n) | TySyn::App(n, _) if depth < 64 && p.aliases.contains_key(n) && !p.struct_index.contains_key(n) => {
+                    let (ag, body) = &p.aliases[n];
+                    let args: &[TySyn] = match t {
+                        TySyn::App(_, a) => a,
+                        _ => &[],
+                    };
+                    if args.len() != ag.len() {
+                        return false;
+                    }
+                    let inner = |k: u8| args.get(k as usize).is_some_and(|a| syn_unsized(p, gens, a, may, pu, depth + 1));
+                    syn_unsized(p, ag, body, &|_| true, &inner, depth + 1)
+                }
                 TySyn::App(n, args) if depth < 64 => {
                     let Some(&sid) = p.struct_index.get(n) else { return false };
                     let inner = |k: u8| args.get(k as usize).is_some_and(|a| syn_unsized(p, gens, a, may, pu, depth + 1));

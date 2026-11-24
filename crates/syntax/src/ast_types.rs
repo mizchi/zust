@@ -329,13 +329,13 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
             let targs: Vec<&crate::parse::GArg> = p.segs.len().checked_sub(2).map(|i| &p.segs[i]).map_or(vec![], |sg| {
                 sg.args.iter().filter(|a| matches!(a, crate::parse::GArg::Ty(_) | crate::parse::GArg::Const(_))).collect()
             });
-            // (a const argument that cannot be lowered (`{ match .. }`): the projection without the trait's arguments,
-            // as before they were kept; the lookup by self type then decides, or fails, as it did)
+            // (a const argument that cannot be lowered (`{ match .. }`): a hole, the trait kept; Program::resolve takes
+            // the impl only when one value fits whatever the hole is)
             let lowered: Option<Vec<TySyn>> = targs
                 .iter()
                 .map(|a| match a {
                     crate::parse::GArg::Ty(t) => tysyn(t, self_ty).ok(),
-                    crate::parse::GArg::Const(e) => const_arg_syn(e).ok(),
+                    crate::parse::GArg::Const(e) => Some(const_arg_syn(e).unwrap_or(TySyn::Infer)),
                     _ => None,
                 })
                 .collect();

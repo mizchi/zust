@@ -122,6 +122,14 @@ From the review of the pull request, each checked against rustc with a program o
   - `foo(Const)` against `impl<const N: usize> Foo<N> for Const<N>`;
   - a supertrait the impl's own where clause gives (`impl<T> Child for W<T> where W<T>: Parent`). Only a predicate
     on the self type itself (or `Self`) counts: `where T: Parent` is still E0277.
+- Missed errors, now reported (as rustc): `size_of_val` of a raw pointer and `drop_in_place` of a `*const` (E0308);
+  a tail `if` whose arms are `S` and a call returning `S`, for `-> impl Local` without `S: Local` (E0277).
+- A projection whose const argument zustc cannot evaluate (`<S as Pick<{ match .. }>>::Out`) takes the one impl
+  that fits; when several do, it is an "unsupported" error, not the first impl by self type.
+- A tail through a type alias (`struct Outer<T: ?Sized>(u16, Alias<T>)`) is unsized even when the instance is
+  requested before `Outer`'s fields are resolved.
+- prep: an item after an attribute with a string or brackets in it (`#[doc = "]"] fn inner`) sends the source to
+  the full preparation.
 - A missed error main reported, back: `require::<i32>()` with only `impl Mark for u8`. The solver takes a goal's
   i32 for any integer, for a literal zustc defaulted early; a call with a turbofish has its types written, and is
   checked strictly.

@@ -2355,7 +2355,19 @@ fn opaque_bound_error(prog: &Program, src: &str, items: &[SrcItem]) -> R<Option<
         // name one type (`if b { S } else { S }`) are checked as one value)
         if let Some(crate::parse::Stmt::Expr(tail @ (crate::parse::Expr::If(..) | crate::parse::Expr::Match(..)), false)) = f.block.stmts.last() {
             let mut heads = vec![];
-            if !arm_heads(tail, &mut heads, 0) || heads.windows(2).any(|w| w[0] != w[1]) {
+            // (a call to a non-generic fn names its return type: `if b { S } else { make_s() }` is one type)
+            let heads: Vec<String> = if arm_heads(tail, &mut heads, 0) {
+                heads
+                    .into_iter()
+                    .map(|h| match prog.index.get(h.as_str()).map(|&g| &prog.sigs[g as usize]) {
+                        Some(s) if !s.is_generic() && ground(s.ret) && !prog.struct_index.contains_key(h.as_str()) => prog.tn(s.ret),
+                        _ => h,
+                    })
+                    .collect()
+            } else {
+                continue;
+            };
+            if heads.windows(2).any(|w| w[0] != w[1]) {
                 continue;
             }
         }

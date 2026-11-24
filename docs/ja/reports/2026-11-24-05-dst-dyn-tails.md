@@ -122,6 +122,13 @@ yes・maybe・no で返す) があった。2 つが出会うのはインスタ�
   - `impl<const N: usize> Foo<N> for Const<N>` に対する `foo(Const)`。
   - impl 自身の where 句が与えるスーパートレイト (`impl<T> Child for W<T> where W<T>: Parent`)。数えるのは self 型
     そのもの (か `Self`) についての述語だけで、`where T: Parent` は今も E0277。
+- 見逃していたエラーを報告するようにした (rustc と同じ): 生ポインタへの `size_of_val` と `*const` への
+  `drop_in_place` (E0308)、`S: Local` がないときの `-> impl Local` で、腕が `S` と `S` を返す呼び出しの末尾 `if` (E0277)。
+- zustc が評価できない const 引数の射影 (`<S as Pick<{ match .. }>>::Out`) は、当てはまる impl が 1 つならそれを
+  取り、複数なら self 型だけで最初の impl を選ばず「未対応」のエラーにする。
+- 型エイリアスを通した末尾 (`struct Outer<T: ?Sized>(u16, Alias<T>)`) は、`Outer` のフィールドを解決する前に
+  インスタンスを求められても unsized とする。
+- prep: 文字列や括弧を含む属性の後のアイテム (`#[doc = "]"] fn inner`) があるソースは、全体の前処理に回す。
 - main が報告していて見逃すようになっていたエラーを戻した: `impl Mark for u8` だけがあるときの `require::<i32>()`。
   solver はゴールの i32 を、zustc が早く既定の型にしたリテラルかもしれないので任意の整数として扱う。turbofish の
   ある呼び出しでは型が書かれているので、厳密に確かめる。

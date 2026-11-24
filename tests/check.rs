@@ -1329,3 +1329,24 @@ fn review_three_cases() {
     let d = check("struct S<T: ?Sized> { a: u8, tail: T }\nfn main() { let r: &S<[u8]> = &S { a: 1, tail: [1, 2] }; let _m = r.tail; let _ = r.a; }\n");
     assert!(d.len() == 1 && d[0].msg.contains("cannot be known at compilation time"), "{d:?}");
 }
+
+/// Fourth review of #128, each checked against rustc: `size_of_val` of a raw pointer and `drop_in_place` of a
+/// `*const` are E0308; a tail `if` whose arms are `S` and a call returning `S` is checked as one `S`; a qualified
+/// projection whose const argument zustc cannot evaluate takes the one impl that fits, and is not the first impl by
+/// self type when several do
+#[test]
+fn review_four_cases() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let d = check("fn main() { let a = [1u8, 2, 3]; let p: *const [u8] = &a; let _ = std::mem::size_of_val(p); }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("mismatched types"), "{d:?}");
+    let d = check("struct Tail<T: ?Sized>(u8, T);\nfn main() { let b: Box<Tail<[u8]>> = Box::new(Tail(1, [1, 2])); let p: *const Tail<[u8]> = &*b; unsafe { std::ptr::drop_in_place(p); } }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("mismatched types"), "{d:?}");
+    let d = check("trait Local {}\nstruct S;\nfn make_s() -> S { S }\nfn f(b: bool) -> impl Local { if b { S } else { make_s() } }\nfn main() { let _ = f(true); }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("S: Local"), "{d:?}");
+    let one = "trait Pick<const N: usize> { type Out; }\nstruct S;\nimpl Pick<2> for S { type Out = u8; }\nfn main() { let _x: <S as Pick<{ match true { true => 2, false => 3 } }>>::Out = 0u8; }\n";
+    let d = check(one);
+    assert!(d.is_empty(), "{d:?}");
+    let two = "trait Pick<const N: usize> { type Out; }\nstruct S;\nimpl Pick<3> for S { type Out = u64; }\nimpl Pick<2> for S { type Out = u8; }\nfn main() { let _x: <S as Pick<{ match true { true => 2, false => 3 } }>>::Out = 0; }\n";
+    let d = check(two);
+    assert!(d.len() == 1 && d[0].msg.contains("cannot be evaluated"), "{d:?}");
+}
