@@ -540,6 +540,23 @@ fn modules_diamond_and_directories() {
     assert!(js.contains("import { UI } from \"react\";") && js.contains("_jsx(UI.Badge, { label: \"x\" })"), "{js}");
 }
 
+/// tests/async.zsc: `async fn`, `await` and `async` closures are JS's, and the .d.ts gives Promises. An `await` in a
+/// block that is a function in JS (a `match` in an operand) makes it an awaited async one
+#[test]
+fn async_await() {
+    let d = out_dir("async");
+    let o = zsc(&root().join("tests/async.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let js = std::fs::read_to_string(d.join("async.js")).unwrap();
+    assert!(js.contains("export async function titles(ids) {") && js.contains("return async (id) => prefix + (await fetch_title(id));"), "{js}");
+    assert!(js.contains("\"<\" + (await (async () => {"), "{js}");
+    let dts = std::fs::read_to_string(d.join("async.d.ts")).unwrap();
+    assert!(dts.contains("export declare function titles(ids: readonly i32[]): Promise<readonly string[]>;"), "{dts}");
+    assert!(dts.contains("export declare function loader(prefix: string): (a0: i32) => Promise<string>;"), "{dts}");
+    let out = node(&d, "globalThis.delay = (ms, v) => new Promise((r) => setTimeout(() => r(v), ms)); const m = await import('./async.js'); console.log(await m.run());");
+    assert_eq!(out, "> title 3 | title 1,title 2 | many: title 5! | one! | title 7 | <zero><title 4>\n");
+}
+
 /// tests/js_inplace.zsc: the JS layer appends in place only onto a local array no one else can see, so every
 /// result is what the copying push gives
 #[test]

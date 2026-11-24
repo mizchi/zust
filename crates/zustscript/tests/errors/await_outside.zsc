@@ -1,0 +1,3 @@
+// expect: `await` is only allowed in an `async fn` or an `async (..) =>` closure
+extern fn p() -> Promise<i32> = "p";
+export fn f() -> i32 { await p() }

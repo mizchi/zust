@@ -1,0 +1,43 @@
+// async fn / await / async closures (tests/examples.rs: async_await)
+extern fn delay(ms: i32, v: String) -> Promise<String> = "globalThis.delay";
+
+type Item = { id: i32, title: String }
+
+async fn fetch_title(id: i32) -> String {
+  await delay(1, `title ${id}`)
+}
+
+export async fn titles(ids: Array<i32>) -> Array<String> {
+  let mut out = [];
+  for id in ids {
+    out = out.push(await fetch_title(id));
+  }
+  out
+}
+
+// an `await` in a block that is an expression: the block is an awaited async function in JS
+export async fn summary(n: i32) -> String {
+  let label = if n > 1 { let t = await fetch_title(n); `many: ${t}` } else { "one" };
+  label + "!"
+}
+
+// a closure that is async: its callers get a Promise
+export fn loader(prefix: String) -> fn(i32) -> Promise<String> {
+  async (id) => prefix + (await fetch_title(id))
+}
+
+export async fn item(id: i32) -> Item {
+  Item { id, title: await fetch_title(id) }
+}
+
+export async fn run() -> String {
+  let load = loader("> ");
+  let a = await load(3);
+  let ts = await titles([1, 2]);
+  `${a} | ${ts.join(",")} | ${await summary(5)} | ${await summary(0)} | ${(await item(7)).title} | ${await picked(0)}${await picked(4)}`
+}
+
+// a match in an operand is a function in JS: with an `await` inside, an awaited async one
+export async fn picked(n: i32) -> String {
+  "<" + (match n { 0 => "zero", _ => { let t = await fetch_title(n); t } }) + ">"
+}
