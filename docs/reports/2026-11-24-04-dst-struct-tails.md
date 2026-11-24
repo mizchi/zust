@@ -63,4 +63,16 @@ coercion makes the pair `(address, N)`. It applies where `&[T; N]` to `&[T]` alr
 
 ## Results
 
-RESULTS
+No regressions in the full run. Newly passing: `dst/dst-struct.rs`, `dst/dst-struct-sole.rs`,
+`dst/dst-irrefutable-bind.rs`, `box/box-dst-node-with-empty-slice.rs`, `mir/mir_fat_ptr.rs`,
+`cast/cast-rfc0401-vtable-kinds.rs`, `consts/array-to-slice-cast.rs`, and the compile-fail tests
+`dst/dst-bad-coerce4.rs` and `consts/const_in_pattern/arrays-and-slices.rs` (a `&Fat<[T]>` is not a `&Fat<[T; 3]>`).
+`dst/dst-bad-deep.rs` and `dst/dst-bad-deep-2.rs` also pass, but by accident: rustc reports E0277 (an unsized local),
+and zustc reports a move error on the same line. They are listed in `bench/rust_ui_accidental.txt`.
+
+| kind | before | after |
+|---|---:|---:|
+| run-pass | 1857 | 1863 |
+| check-pass | 1526 | 1527 |
+| build-pass | 104 | 104 |
+| compile-fail | 4551 | 4555 |

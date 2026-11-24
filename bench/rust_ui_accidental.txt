@@ -69,3 +69,5 @@ compile-fail	privacy/projections.rs
 compile-fail	closure_context/issue-26046-fn-mut.rs
 compile-fail	implied-bounds/implied-bounds-on-nested-references-plus-variance-unnormalized.rs
 compile-fail	cast/cast-rfc0401-fail.rs
+compile-fail	dst/dst-bad-deep.rs
+compile-fail	dst/dst-bad-deep-2.rs

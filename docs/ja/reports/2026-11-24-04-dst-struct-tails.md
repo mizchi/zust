@@ -60,4 +60,16 @@ unsized (`[T]`、`str`、またはそういうインスタンス) な struct の
 
 ## 結果
 
-RESULTS
+全体の実行で退行はない。新しく通るもの: `dst/dst-struct.rs`、`dst/dst-struct-sole.rs`、`dst/dst-irrefutable-bind.rs`、
+`box/box-dst-node-with-empty-slice.rs`、`mir/mir_fat_ptr.rs`、`cast/cast-rfc0401-vtable-kinds.rs`、
+`consts/array-to-slice-cast.rs`。compile-fail では `dst/dst-bad-coerce4.rs` と `consts/const_in_pattern/arrays-and-slices.rs`
+(`&Fat<[T]>` は `&Fat<[T; 3]>` ではない)。`dst/dst-bad-deep.rs` と `dst/dst-bad-deep-2.rs` も通るが、これは偶然。rustc は
+E0277 (unsized なローカル) を報告し、zustc は同じ行で move のエラーを報告している。この 2 つは
+`bench/rust_ui_accidental.txt` に載せた。
+
+| 種類 | 前 | 後 |
+|---|---:|---:|
+| run-pass | 1857 | 1863 |
+| check-pass | 1526 | 1527 |
+| build-pass | 104 | 104 |
+| compile-fail | 4551 | 4555 |

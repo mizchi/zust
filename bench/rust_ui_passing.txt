@@ -1129,6 +1129,7 @@ compile-fail	borrowck/writing-to-immutable-vec.rs
 run-pass	box/box-array-match-temporary-drop.rs
 run-pass	box/box-deref-in-match-arm-no-invalid-ir.rs
 run-pass	box/box-deref-match-arm.rs
+run-pass	box/box-dst-node-with-empty-slice.rs
 run-pass	box/box-fixed-array-coerce-unsized-match.rs
 compile-fail	box/boxed-value-matching-57741.rs
 compile-fail	box/dereferencing-boxed-enum-in-match-57741.rs
@@ -1180,6 +1181,7 @@ run-pass	cast/cast-not-treated-as-lvalue.rs
 check-pass	cast/cast-pointee-projection.rs
 run-pass	cast/cast-ptr-to-fat-ptr.rs
 run-pass	cast/cast-region-to-uint.rs
+run-pass	cast/cast-rfc0401-vtable-kinds.rs
 compile-fail	cast/cast-to-bare-fn.rs
 run-pass	cast/cast-to-box-arr.rs
 check-pass	cast/cast-to-char-compare.rs
@@ -1739,6 +1741,7 @@ build-pass	const_prop/unreachable-overflow.rs
 run-pass	consts/arithmetic-expr-in-array-len.rs
 build-pass	consts/array-literal-index-oob.rs
 compile-fail	consts/array-literal-len-mismatch.rs
+check-pass	consts/array-to-slice-cast.rs
 check-pass	consts/assoc-const-elided-lifetime.rs
 check-pass	consts/assoc-const-with-self-in-trait-object.rs
 compile-fail	consts/bad-array-size-in-type-err.rs
@@ -1882,6 +1885,7 @@ run-pass	consts/const-vec-syntax.rs
 run-pass	consts/const-vecs-and-slices.rs
 run-pass	consts/const_discriminant.rs
 check-pass	consts/const_forget.rs
+compile-fail	consts/const_in_pattern/arrays-and-slices.rs
 check-pass	consts/const_in_pattern/const-bytes-slice-pattern.rs
 run-pass	consts/const_in_pattern/cyclic-const-dag-pass.rs
 compile-fail	consts/const_in_pattern/incomplete-slice.rs
@@ -2268,9 +2272,13 @@ check-pass	dropck/transitive-outlives-2.rs
 compile-fail	dropck/unconstrained_const_param_on_drop.rs
 compile-fail	dst/dst-bad-coerce1.rs
 compile-fail	dst/dst-bad-coerce2.rs
+compile-fail	dst/dst-bad-coerce4.rs
 compile-fail	dst/dst-bad-coercions.rs
 run-pass	dst/dst-coercions.rs
+run-pass	dst/dst-irrefutable-bind.rs
 compile-fail	dst/dst-rvalue.rs
+run-pass	dst/dst-struct-sole.rs
+run-pass	dst/dst-struct.rs
 compile-fail	dst/issue-90528-unsizing-not-suggestion-110063.rs
 compile-fail	dst/issue-90528-unsizing-suggestion-1.rs
 compile-fail	dst/issue-90528-unsizing-suggestion-2.rs
@@ -4416,6 +4424,7 @@ run-pass	mir/mir_codegen_switchint.rs
 run-pass	mir/mir_coercion_casts.rs
 run-pass	mir/mir_constval_adts.rs
 run-pass	mir/mir_early_return_scope.rs
+run-pass	mir/mir_fat_ptr.rs
 run-pass	mir/mir_match_arm_guard.rs
 run-pass	mir/mir_match_test.rs
 run-pass	mir/mir_small_agg_arg.rs
