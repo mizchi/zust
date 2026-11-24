@@ -88,8 +88,9 @@ zustc check hello.rs
 ```
 
 This runs up to type checking (no code generation) and prints all diagnostics. It also checks unreachable functions
-and every requested instance of generic functions. A program with many functions is checked in `-j N` forked
-processes (the number of CPUs by default); the diagnostics are the same at any `-j`.
+and every requested instance of generic functions. When a round of the check has at least 32 functions per worker to
+check, they are split across at most `-j N` forked processes (N is the number of CPUs by default); the diagnostics are
+the same at any `-j`.
 
 ### Multiple crates
 
@@ -152,7 +153,7 @@ zurgo run
 | `--features=a,b` | enable `#[cfg(feature = "..")]` |
 | `--cfg NAME` / `--cfg NAME="V"` | set a cfg, as rustc's `--cfg` |
 | `--test` | build the `#[test]` functions with a harness: `--list`, and one test per process (see [docs/zurgo.md](docs/zurgo.md#tests)) |
-| `-j N` | number of code generation threads |
+| `-j N` | at most N worker processes: for code generation, and for `check` (default: the number of CPUs) |
 | `--time` | print the time of each phase and the peak RSS |
 | `--no-cache` | neither read nor write the cache |
 

@@ -1,9 +1,6 @@
 //! `check` in forked children (#101) gives the same diagnostics as in one process.
 //!
-//! One test in its own binary: the children are forked from the test's thread, and no other test thread may hold a
-//! lock (an interner's) at the fork.
-use zustc::{Options2, Session2};
-
+//! zustc runs as its own process: check_many forks only in a process of one thread, which a test harness is not.
 /// A program with enough fns that the first wave is split across children (32 per child), and among them the cases
 /// that once lost diagnostics in a child: a fn whose check fails after it requested a closure's instance (the closure
 /// is checked only if the parent learns of the request), a fn whose failed lowering told its closure about its
@@ -52,13 +49,24 @@ fn main() {
 
 #[test]
 fn forked_check_gives_the_same_diagnostics() {
-    let src = program();
-    let one = Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(&src);
-    let many = Session2::new(Options2 { jobs: 4, no_cache: true, ..Options2::default() }).check(&src);
-    assert!(one.len() >= 4, "{one:?}");
-    assert_eq!(one, many);
-    // (with the cache: the children's Blobs go into it, and a second check reads them back)
-    let mut s = Session2::new(Options2 { jobs: 4, ..Options2::default() });
-    assert_eq!(s.check(&src), one);
-    assert_eq!(s.check(&src), one);
+    let dir = std::env::temp_dir().join(format!("zust_check_parallel_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let src = dir.join("p.rs");
+    std::fs::write(&src, program()).unwrap();
+    let run = |jobs: &str, fork_min: Option<&str>| {
+        let mut c = std::process::Command::new(env!("CARGO_BIN_EXE_zustc"));
+        c.args(["check", "--edition=2021", "-j", jobs]).arg(&src).env_remove("ZUSTC_CHECK_FORK_MIN");
+        if let Some(m) = fork_min {
+            c.env("ZUSTC_CHECK_FORK_MIN", m);
+        }
+        let o = c.output().unwrap();
+        (o.status.code(), String::from_utf8_lossy(&o.stderr).into_owned())
+    };
+    let one = run("1", None);
+    assert!(one.1.lines().count() >= 4, "{}", one.1);
+    // (the default threshold: the first wave's 300 fns go to children)
+    assert_eq!(run("4", None), one);
+    // (a fork for every wave: the closures', the placeholders')
+    assert_eq!(run("4", Some("1")), one);
+    let _ = std::fs::remove_dir_all(&dir);
 }

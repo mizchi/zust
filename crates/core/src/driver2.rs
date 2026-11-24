@@ -5506,7 +5506,39 @@ fn check_blob(b: Blob, req: &[u32]) -> Blob {
 /// Whether the instances ids (of a forked child's) can be sent to the parent: their type arguments have a written form
 /// the cache's encoding takes (types_enc: not a type parameter, not one only inference has)
 fn sendable(a: &Analysis, g: &Insts, ids: &[u32]) -> bool {
-    ids.iter().all(|&i| g.get(i).is_none_or(|inst| inst.args.iter().all(|&t| syn_sendable(&a.prog.ty_syn(t)))))
+    // (not a closure's fn-pointer instance (request_fnptr): the encoding writes it as the closure's own instance, which
+    // the parent would request instead)
+    ids.iter().all(|&i| g.get(i).is_none_or(|inst| !inst.fnptr && inst.args.iter().all(|&t| syn_sendable(&a.prog.ty_syn(t)))))
+}
+
+/// Whether this process has one thread: a fork copies only the calling thread, and a lock another thread holds (an
+/// interner's) would stay held in the child. A host that runs Session2 beside other threads checks in process
+fn single_threaded() -> bool {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| s.lines().find(|l| l.starts_with("Threads:")).and_then(|l| l[8..].trim().parse::<u32>().ok()))
+        == Some(1)
+}
+
+/// Waits for a child, again when a signal interrupts the wait
+fn wait_child(pid: i32) {
+    let mut st = 0i32;
+    for _ in 0..64 {
+        // SAFETY: st is an int
+        if unsafe { c_waitpid(pid, &mut st, 0) } == pid || std::io::Error::last_os_error().raw_os_error() != Some(4) {
+            return;
+        }
+    }
+}
+
+/// In a forked child: a panic that unwinds past this exits the child at once, so it never runs its parent's frames
+struct ChildExit;
+
+impl Drop for ChildExit {
+    fn drop(&mut self) {
+        // SAFETY: the child only exits
+        unsafe { c_exit(1) };
+    }
 }
 
 fn syn_sendable(t: &crate::types::TySyn) -> bool {
@@ -5543,7 +5575,7 @@ impl Session2 {
         };
         let per_job = std::env::var("ZUSTC_CHECK_FORK_MIN").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(32).max(1);
         let jobs = if check_only { self.opts.jobs.min(ids.len() / per_job).max(1) } else { 1 };
-        if jobs <= 1 {
+        if jobs <= 1 || !single_threaded() {
             return ids.iter().map(|&id| one(id)).collect();
         }
         let mut kids: Vec<(i32, i32)> = vec![];
@@ -5561,6 +5593,7 @@ impl Session2 {
                 continue;
             }
             if pid == 0 {
+                let _exit_on_panic = ChildExit;
                 unsafe { c_close(fds[0]) };
                 let mut buf = vec![];
                 let mut i = k;
@@ -5633,8 +5666,7 @@ impl Session2 {
         for &(pid, fd) in &kids {
             let d = read_all(fd);
             unsafe { c_close(fd) };
-            let mut st = 0i32;
-            unsafe { c_waitpid(pid, &mut st, 0) };
+            wait_child(pid);
             let mut r = crate::cache2::Rd { d: &d, pos: 0 };
             while r.pos < d.len() {
                 let (Some(i), Some(fail), Some(n)) = (r.uv(), r.u8(), r.uv()) else { break };
@@ -5666,10 +5698,13 @@ impl Session2 {
                     }
                     None => one(id),
                 },
-                Some(Err((m, made))) => {
-                    let _ = crate::cache2::decode_blob(&made, &a.prog, insts);
-                    Err(m)
-                }
+                // (what the failed fn left behind, read back; when it cannot be (a name only the child knows), the fn is
+                // checked here, which leaves it as the serial check does: requests are made once, so what the reading
+                // requested before it failed is not requested twice)
+                Some(Err((m, made))) => match crate::cache2::decode_blob(&made, &a.prog, insts) {
+                    Some(_) => Err(m),
+                    None => one(id),
+                },
                 None => one(id),
             })
             .collect()
