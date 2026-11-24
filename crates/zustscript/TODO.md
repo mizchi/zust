@@ -52,7 +52,7 @@
 zsc に小さなコードを通して確かめた(機能ごとに 1 つの `.zsc` を `--all-js` でコンパイル)。
 
 **結論: 1 ファイルで完結する小さな React の画面や数値カーネルは書けるが、実アプリにはまだ足りない。**
-足りないのは主に、複数ファイル、非同期、`Option` / `Result`、JS の値の型、標準ライブラリの量。
+足りないのは主に、非同期、`Option` / `Result`、JS の値の型、標準ライブラリの量。
 
 今あるもの:
 
@@ -66,9 +66,13 @@ zsc に小さなコードを通して確かめた(機能ごとに 1 つの `.zsc
 
 ### P0: 実アプリを書く前に要るもの
 
-1. **`.zsc` どうしのモジュール**
-   - 今は 1 ファイルだけで、`import { f } from "./other.zsc"` はできない
-   - 公開は `export` で書けるので、読む側の解決(パスとシンボル表)、`.d.ts` と JS の import の出力、`@wasm` の関数が別ファイルにあるときの扱いが要る
+1. **済: `.zsc` どうしのモジュール**(README の「モジュール」)。`import { Shape, area } from "./shapes.zsc";` で型、`export fn`、コンポーネント、`@wasm export fn` を取り込む
+   - 残り
+     - 数値の bound を持つ総称関数、effect を perform する関数、Rust の `wasm fn` の取り込み
+     - `@wasm fn` から取り込んだ関数を呼ぶこと(相手の Rust も一緒にコンパイルする)
+     - `--emit-rust` でのモジュール(Rust の `mod` / `use` にする)
+     - パッケージからの取り込み、プレイグラウンドでの複数ファイル
+     - 名前を変えて取り込む(`import { area as shapeArea }`)、`export` の付かない型を取り込めないようにするか
 2. **非同期**
    - `async fn` / `await` と `Promise<T>` の型がない。`fetch` も、イベントの後の処理も書けない
    - 段階 3 の「async の effect」を待たず、まず `extern` で受けた `Promise<T>` を `await` できる最小の形を入れる(JS ではそのまま `async` / `await`。`@wasm` では使えない、とする)

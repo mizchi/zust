@@ -1016,6 +1016,7 @@ run-pass	borrowck/issue-23338-params-outlive-temps-of-body.rs
 compile-fail	borrowck/issue-24267-flow-exit.rs
 compile-fail	borrowck/issue-31287-drop-in-guard.rs
 compile-fail	borrowck/issue-33819.rs
+compile-fail	borrowck/issue-36082.rs
 compile-fail	borrowck/issue-41962.rs
 compile-fail	borrowck/issue-42344.rs
 compile-fail	borrowck/issue-45199.rs
@@ -2323,6 +2324,7 @@ run-pass	dst/unsized-str-mutability.rs
 check-pass	dst/unsized-tuple-trait-tail.rs
 compile-fail	duplicate/duplicate-parameter.rs
 compile-fail	duplicate/duplicate-type-parameter.rs
+check-pass	duplicate/inherent-impls-overlap-check/disjoint-ref-mut-method.rs
 compile-fail	duplicate/multiple-types-with-same-name-and-derive.rs
 compile-fail	dyn-compatibility/almost-supertrait-associated-type.rs
 compile-fail	dyn-compatibility/assoc_type_bounds.rs
@@ -4517,6 +4519,7 @@ compile-fail	methods/filter-relevant-fn-bounds.rs
 compile-fail	methods/ident-from-macro-expansion.rs
 check-pass	methods/inherent-method-on-dyn-with-default.rs
 run-pass	methods/inherent-method-resolution-on-deref-type-53843.rs
+run-pass	methods/inherent-methods-same-name.rs
 compile-fail	methods/issue-19521.rs
 compile-fail	methods/issue-3707.rs
 compile-fail	methods/issue-7950.rs
@@ -4746,6 +4749,7 @@ compile-fail	moves/moves-sru-moved-field.rs
 compile-fail	moves/needs-clone-through-deref.rs
 compile-fail	moves/no-capture-arc.rs
 compile-fail	moves/no-reuse-move-arc.rs
+compile-fail	moves/pin-mut-reborrow-infer-var-issue-107419.rs
 compile-fail	moves/recreating-value-in-loop-condition.rs
 compile-fail	moves/suggest-clone.rs
 compile-fail	moves/unconstrained-impl-param-clone-suggestion.rs

@@ -3954,3 +3954,111 @@ fn part25_review_2() {
     let d = check("struct W<'a>(&'a ());\ntrait Foo { type Value: 'static; }\nimpl<'a> Foo for W<'a> {\n    type Value = &'a ();\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0477"), "{d:?}");
 }
+
+#[test]
+fn part26_mut_ref_passed_as_shared() {
+    // (`let x = &mut v; f(x);` with f taking `&T`: x stays a `&mut T` (inference does not make it the `&T` it is
+    // coerced to), so writing through it after is accepted, as in rustc; and the explicit and implicit self-reborrows
+    // `y = &mut *y;` / `y = y;` (nll/self-assign-ref-mut.rs)
+    assert_eq!(check("fn g(_: &i32) {}\nfn main() {\n    let mut r: i32 = 0;\n    let x = &mut r;\n    g(x);\n    *x = 1;\n}\n"), vec![], "a2f");
+    assert_eq!(check("fn g(_: &Vec<i32>) {}\nfn main() {\n    let mut r = Vec::new();\n    r.push(1);\n    let x = &mut r;\n    g(x);\n    x.push(2);\n}\n"), vec![], "a2h");
+    assert_eq!(check("fn g(_: &i32) {}\nfn main() {\n    let mut r: i32 = 0;\n    let x = &mut r;\n    *x = 2;\n    g(x);\n    *x = 1;\n}\n"), vec![], "b2");
+    assert_eq!(check("fn main() {\n    let mut r = 0;\n    let x = &mut r;\n    let v: &i32 = x;\n    println!(\"{}\", v);\n    *x = 1;\n    println!(\"{}\", x);\n}\n"), vec![], "a2");
+    assert_eq!(check("struct S<'a> { f: &'a i32 }\nfn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let s = S { f: x };\n    println!(\"{}\", s.f);\n    *x = 1;\n}\n"), vec![], "f4");
+    assert_eq!(check("struct S<'a> { f: &'a mut i32 }\nfn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let s = S { f: x };\n    *s.f = 2;\n    *x = 1;\n}\n"), vec![], "g1");
+    assert_eq!(check("fn main() {\n    let mut a = 0;\n    let mut b = 0;\n    let y = &mut a;\n    let mut x = &mut b;\n    *x = 0;\n    x = y;\n    *x = 2;\n    *y = 1;\n}\n"), vec![], "h2");
+    assert_eq!(check("fn main() {\n    let mut a = 0;\n    let mut b = 0;\n    let mut x = &mut a;\n    let v: &i32 = x;\n    x = &mut b;\n    *x = 1;\n    println!(\"{}\", v);\n}\n"), vec![], "c1");
+    assert_eq!(check("fn main() {\n    let mut x = 1;\n    {\n        let mut y = &mut x;\n        y = &mut *y;\n        y = &mut *y;\n        *y = 2;\n    }\n    x;\n}\n"), vec![], "i1");
+    assert_eq!(check("fn main() {\n    let mut v = vec![1, 2];\n    let x = &mut v;\n    for _ in 0..2 {\n        let s: &[i32] = x;\n        println!(\"{}\", s.len());\n        x.push(3);\n    }\n}\n"), vec![], "c7");
+    assert_eq!(check("fn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let v: &i32 = x;\n    let w: &i32 = x;\n    println!(\"{} {}\", v, w);\n    *x += 1;\n}\n"), vec![], "c9");
+}
+
+#[test]
+fn part26_let_reborrow_of_places() {
+    // (`let v: &T = p;` with p a place of a `&mut T` (a local, a field, through a Box or a guard): v reborrows `*p`)
+    let d = check("fn main() {\n    let mut r = 0;\n    let x = &mut r;\n    let v: &i32 = x;\n    *x = 1;\n    println!(\"{}\", v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut r = 0;\n    let t = (&mut r, 0);\n    let v: &i32 = t.0;\n    *t.0 = 1;\n    println!(\"{}\", v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `*t.0` because it is borrowed"), "{d:?}");
+    let d = check("use std::cell::RefCell;\nfn main() {\n    let mut r = 0;\n    let s = 0;\n    let x = RefCell::new((&mut r, s));\n    let val: &i32 = x.borrow().0;\n    println!(\"{}\", val);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
+    let d = check("fn main() {\n    let mut r = 0;\n    let t = (&mut r, 0);\n    let b = Box::new(t);\n    let val: &i32 = b.0;\n    drop(b);\n    println!(\"{}\", val);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot move out of `b` because it is borrowed"), "{d:?}");
+}
+
+#[test]
+fn part26_reborrow_at_coercion_sites() {
+    // (a constructor's field (`S { f: x }`, `Some(x)`) and an assignment's right side reborrow a place of a `&mut`)
+    let d = check("struct S<'a> { f: &'a i32 }\nfn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let s = S { f: x };\n    *x = 1;\n    println!(\"{}\", s.f);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let v: Option<&mut i32> = Some(x);\n    *x = 1;\n    if let Some(r) = v { *r = 3; }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let v: &i32;\n    v = x;\n    *x = 1;\n    println!(\"{}\", v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = 0;\n    let mut b = 0;\n    let y = &mut a;\n    let mut x = &mut b;\n    x = y;\n    *y = 1;\n    *x = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot assign to `*y` because it is borrowed"), "{d:?}");
+}
+
+#[test]
+fn part26_call_arg_reborrows() {
+    // (a call's `&mut` / `&` argument from a place of a `&mut` borrows `*x` at the call, also without the region
+    // check; a result the signature says borrows from it holds the loan)
+    let d = check("fn pick<'a>(a: &'a i32, _b: &i32) -> &'a i32 { a }\nfn main() {\n    let mut a = 0;\n    let b = 0;\n    let x = &mut a;\n    let r = pick(x, &b);\n    *x = 1;\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    let d = check("fn take(_: &mut i32) {}\nfn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let v = &*x;\n    take(x);\n    println!(\"{}\", v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot borrow `*x` as mutable because it is also borrowed as immutable"), "{d:?}");
+    let d = check("fn take(_: &mut i32) {}\nfn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let v: &i32 = x;\n    take(x);\n    println!(\"{}\", v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot borrow `*x` as mutable because it is also borrowed as immutable"), "{d:?}");
+}
+
+#[test]
+fn part26_mut_ref_in_aggregate_moves() {
+    // (a tuple holding a `&mut` is not Copy: `let t2 = t;` moves t)
+    let d = check("fn main() {\n    let mut a = 0;\n    let t = (&mut a, 0);\n    let v = &*t.0;\n    let t2 = t;\n    println!(\"{} {}\", v, t2.1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot move out of `t` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = 0;\n    let t = (&mut a, 0);\n    let u = t;\n    *t.0 = 1;\n    println!(\"{}\", u.1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("assign to part of moved value"), "{d:?}");
+}
+
+#[test]
+fn part26_annotation_hole_mutability() {
+    // (`let y: &mut [_] = &x[..];`: the annotation's holes are filled keeping the mutability it writes)
+    let d = check("fn main() {\n    let x: &[i32] = &[1, 2];\n    let y: &mut [_] = &x[..];\n    let _ = y;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("mismatched types"), "{d:?}");
+}
+
+#[test]
+fn part26_review() {
+    // (a self-reborrow assigned to its local drops only the loans through a reference: a loan of an owned field
+    // (`s = S { r: &s.n, .. }`) stays, so writing `s.n` while it lives is E0506)
+    let d = check("struct S<'a> { r: &'a i32, n: i32 }\nfn main() {\n    let zero = 0;\n    let mut s = S { r: &zero, n: 0 };\n    s = S { r: &s.n, n: 1 };\n    s.n = 5;\n    println!(\"{}\", s.r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot assign to `s.n` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut x = 1;\n    let mut y = &mut x;\n    y = &mut *y;\n    *y = 2;\n    let mut v = vec![1];\n    let mut r = &mut v;\n    r = r;\n    r.push(2);\n}\n"), vec![]);
+    // (a deref coercion through the reference a `&mut` points to (`&mut &i32` to `&i32`): the loan is of `**x`, which
+    // overwriting `*x` does not touch; `&mut &i32` to `&&i32` borrows `*x`)
+    assert_eq!(check("fn main() {\n    let a = 1;\n    let b = 2;\n    let mut slot = &a;\n    let x = &mut slot;\n    let y: &i32 = x;\n    *x = &b;\n    println!(\"{}\", y);\n}\n"), vec![]);
+    let d = check("fn main() {\n    let a = 1;\n    let mut slot = &a;\n    let x = &mut slot;\n    let y: &&i32 = x;\n    *x = &a;\n    println!(\"{}\", y);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    // (a fn pointer's result that holds references holds the reborrow of the argument's place, without the region
+    // check too; one that holds none does not)
+    let d = check("fn id(x: &i32) -> &i32 { x }\nfn main() {\n    let mut a = 0;\n    let f: fn(&i32) -> &i32 = id;\n    let x = &mut a;\n    let r = f(x);\n    *x = 1;\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn id(x: &i32) -> &i32 { x }\nfn len(x: &i32) -> usize { *x as usize }\nfn main() {\n    let mut a = 0;\n    let f: fn(&i32) -> &i32 = id;\n    let g: fn(&i32) -> usize = len;\n    let x = &mut a;\n    let r = f(x);\n    println!(\"{}\", r);\n    let n = g(x);\n    *x = 1;\n    println!(\"{}\", n);\n}\n"), vec![]);
+}
+
+#[test]
+fn part26_review_2() {
+    // (a value that holds what its local holds, assigned to the local (`r = &mut *r;`, `r = r;`): it keeps the old
+    // value's loans of what r points to, so `x = 1` while r lives is E0506; and once r is assigned another place, it
+    // holds those no longer)
+    let d = check("fn main() {\n    let mut x = 0;\n    let mut r = &mut x;\n    r = &mut *r;\n    x = 1;\n    *r = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `x` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = 0;\n    let mut r = &mut x;\n    r = r;\n    x = 1;\n    *r = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `x` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut r = &mut x;\n    r = &mut *r;\n    *r = 2;\n    x = 1;\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut y = 0;\n    let mut r = &mut x;\n    r = &mut *r;\n    *r = 2;\n    r = &mut y;\n    x = 1;\n    *r = 3;\n    println!(\"{}\", x);\n}\n"), vec![]);
+    // (toward a trait object: `&mut &i32` as a `&dyn Tr` unsizes the `&i32` itself, so the loan is of `*x`, and
+    // `*x = &b` while y lives is E0506)
+    let d = check("trait Tr { fn get(&self) -> i32; }\nimpl Tr for &i32 {\n    fn get(&self) -> i32 { **self }\n}\nfn main() {\n    let a = 1;\n    let b = 2;\n    let mut slot = &a;\n    let x: &mut &i32 = &mut slot;\n    let y: &dyn Tr = x;\n    *x = &b;\n    println!(\"{}\", y.get());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+}

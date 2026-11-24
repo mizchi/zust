@@ -67,6 +67,37 @@ extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
 import type { User, Post } from "./model.ts";
 ```
 
+### モジュール: `import { .. } from "./lib.zsc"`
+
+別の `.zsc` の型と関数を使えます。各モジュールは TS と同じく 1 つずつコンパイルし、出力は同じディレクトリの木に置きます(`./lib.zsc` は `./lib.js` / `./lib.d.ts` になります)。
+
+```zsc
+// shapes.zsc
+export type Point = { x: f64, y: f64 }
+export enum Shape { Circle(Point, f64), Rect(Point, Point) }
+export fn area(s: Shape) -> f64 { .. }
+export fn Badge(props: Labeled) -> Jsx { .. }
+```
+
+```zsc
+// app.zsc
+import { Shape, area, Badge } from "./shapes.zsc";
+
+export fn total(shapes: Array<Shape>) -> f64 { shapes.fold(0.0, (acc, s) => acc + area(s)) }
+```
+
+- 取り込めるもの
+  - レコード型と enum。取り込んだ型が使う型(`Shape` の `Point`)も一緒に入る
+  - `export fn`。コンポーネントも、`@wasm export fn` も(その JS の export を呼ぶ)
+- 出力
+  - JS は `import { area, Badge } from "./shapes.js";`。`.d.ts` は `import type { Shape } from "./shapes.js";` で、型を宣言し直さない(TS からは同じ型)
+  - 取り込んだ関数は、そのモジュールの JS を指す `extern fn` と同じ扱い
+- 取り込む側は、相手のモジュールを読んで型検査する。相手のエラーは相手のファイルの位置で報告する。循環した import はエラー
+- まだできないこと
+  - 数値の bound を持つ総称関数(数値の型ごとに別の JS 関数になる)、effect を perform する関数(JS では generator)、Rust の `wasm fn`
+  - `@wasm fn` から、取り込んだ関数を呼ぶこと(この wasm の中にはない: JS の関数になる)。取り込んだ型は `@wasm fn` でも使える
+  - `--emit-rust` での取り込み、パッケージ(`"lib"`)からの取り込み、プレイグラウンドでの複数ファイル
+
 ### TS の型の取り込み: `import type`
 
 取り込めるのはレコード型、文字列リテラルの union、共通のタグで判別できる union です。たとえば、TypeScript で処理の状態を次のように定義します。
