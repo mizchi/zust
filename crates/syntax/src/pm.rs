@@ -904,7 +904,7 @@ pub fn expand_items(text: &str, libs: &[Lib], env: &[(String, String)]) -> Resul
                 None => break,
             }
         }
-        let start = crate::cfg::outer_docs_start(b, toks[first].1);
+        let start = crate::cfg::outer_docs_start(b, if first > 0 { toks[first - 1].2 } else { 0 }, toks[first].1);
         let Some(end) = item_end(b, &toks, &close, &depth, ae + 1) else {
             // (not on an item (a statement, a field, an expression): left as it is)
             k = ae + 1;

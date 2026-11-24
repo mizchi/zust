@@ -426,65 +426,45 @@ fn attrs_start(s: &[u8], toks: &[Tok], i: usize) -> usize {
         }
         j = o - 1;
     }
-    outer_docs_start(s, toks[j].1)
+    outer_docs_start(s, if j > 0 { toks[j - 1].2 } else { 0 }, toks[j].1)
 }
 
-/// Before the byte p (an item or its first attribute), the outer doc comments (`///`, `/** */`) on the lines just
-/// above it: they are attributes of that item and go with it (rustc: no E0585 for a doc before a cfg'd-out item)
-pub(crate) fn outer_docs_start(s: &[u8], p: usize) -> usize {
-    let mut start = p;
-    loop {
-        // (the text from the line's start up to here must be blank)
-        let ls = s[..start].iter().rposition(|&c| c == b'\n').map_or(0, |k| k + 1);
-        if !s[ls..start].iter().all(|c| c.is_ascii_whitespace()) || ls == 0 {
-            return start;
-        }
-        let prev_end = ls - 1;
-        let pls = s[..prev_end].iter().rposition(|&c| c == b'\n').map_or(0, |k| k + 1);
-        let line = &s[pls..prev_end];
-        let lead = line.iter().take_while(|c| c.is_ascii_whitespace()).count();
-        // (and without the blanks after it: `*/  `, a CRLF line's `\r`)
-        let tail = line.iter().rev().take_while(|c| c.is_ascii_whitespace()).count();
-        let text = &line[lead..line.len().saturating_sub(tail).max(lead)];
-        let doc_line = text.starts_with(b"///") && !text.starts_with(b"////");
-        if doc_line {
-            start = pls + lead;
-            continue;
-        }
-        // (a block doc comment, `/** .. */` on this line or over several, `/** ..\n .. */`: back to its `/**`, at a
-        // line's start. The comment this `*/` closes opens at the `/*` that matches it, comments nesting: not a `/**`
-        // in it, `/* outer\n/** nested */ */`, or further back, in a string)
-        if text.ends_with(b"*/") {
+/// Before the byte p (an item or its first attribute), the outer doc comments (`///`, `/** */`) between it and the
+/// token before it (which ends at `from`): they are attributes of that item and go with it (rustc: no E0585 for a doc
+/// before a cfg'd-out item). The comments there are read forward, as the lexer reads them: they nest, and a `///` or
+/// `/**` inside another comment, `/* outer\n/// nested */`, is text. Where the first doc comment starts, or p
+pub(crate) fn outer_docs_start(s: &[u8], from: usize, p: usize) -> usize {
+    let mut i = from.min(p);
+    while i < p {
+        if s[i..p].starts_with(b"//") {
+            if s[i..].starts_with(b"///") && !s[i..].starts_with(b"////") {
+                return i;
+            }
+            i += s[i..p].iter().position(|&c| c == b'\n').unwrap_or(p - i);
+        } else if s[i..p].starts_with(b"/*") {
+            if s[i..].starts_with(b"/**") && !s[i..].starts_with(b"/***") && !s[i..].starts_with(b"/**/") {
+                return i;
+            }
             let mut d = 0usize;
-            let mut i = pls + lead + text.len();
-            let mut opener = None;
-            while i >= 2 {
-                match &s[i - 2..i] {
-                    b"*/" => {
-                        d += 1;
-                        i -= 2;
+            while i < p {
+                if s[i..].starts_with(b"/*") {
+                    d += 1;
+                    i += 2;
+                } else if s[i..].starts_with(b"*/") {
+                    d -= 1;
+                    i += 2;
+                    if d == 0 {
+                        break;
                     }
-                    b"/*" => {
-                        d -= 1;
-                        i -= 2;
-                        if d == 0 {
-                            opener = Some(i);
-                            break;
-                        }
-                    }
-                    _ => i -= 1,
+                } else {
+                    i += 1;
                 }
             }
-            if let Some(o) = opener.filter(|&o| s[o..].starts_with(b"/**") && !s[o..].starts_with(b"/***") && !s[o..].starts_with(b"/**/")) {
-                let ols = s[..o].iter().rposition(|&c| c == b'\n').map_or(0, |k| k + 1);
-                if o < pls + lead + text.len() && s[ols..o].iter().all(|c| c.is_ascii_whitespace()) {
-                    start = o;
-                    continue;
-                }
-            }
+        } else {
+            i += 1;
         }
-        return start;
     }
+    p
 }
 
 fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs: &mut Vec<(usize, usize)>) -> Option<String> {
@@ -653,7 +633,9 @@ mod tests {
     fn outer_docs_are_comments_only() {
         fn start(src: &str) -> &str {
             let p = src.find("#[").unwrap();
-            &src[outer_docs_start(src.as_bytes(), p)..p]
+            let toks = crate::lexer::tokenize(src.as_bytes());
+            let from = toks.iter().take_while(|t| t.1 < p).last().map_or(0, |t| t.2);
+            &src[outer_docs_start(src.as_bytes(), from, p)..p]
         }
         assert_eq!(start("fn a() {}\n/**\n * doc\n */\n#[x]\nfn f() {}"), "/**\n * doc\n */\n");
         // (blanks after `*/`, CRLF lines)
@@ -667,6 +649,13 @@ mod tests {
         assert_eq!(start(nested1), "");
         let o1 = strip(nested1, &CfgSet::default()).unwrap();
         assert!(o1.contains("/* outer") && o1.contains("/** nested */ */") && o1.contains("fn main() {}") && !o1.contains("gone"), "{o1}");
+        // (a `///` in a block comment is text: `/* outer\n/// nested */`)
+        let nested2 = "fn a() {}\n/* outer\n/// nested */\n#[cfg(any())]\nfn gone() {}\nfn main() {}\n";
+        assert_eq!(start(nested2), "");
+        let o2 = strip(nested2, &CfgSet::default()).unwrap();
+        assert!(o2.contains("/* outer") && o2.contains("/// nested */") && o2.contains("fn main() {}") && !o2.contains("gone"), "{o2}");
+        // (the item's docs with a plain comment after them, and a `///` that ends in `*/`)
+        assert_eq!(start("fn a() {}\n/// doc */\n// plain\n#[x]\nfn f() {}"), "/// doc */\n// plain\n");
         // (a one-line doc comment is still the item's)
         assert_eq!(start("fn a() {}\n/** one */\n#[x]\nfn f() {}"), "/** one */\n");
         assert_eq!(start("fn a() {}\n/**/\n#[x]\nfn f() {}"), "");
