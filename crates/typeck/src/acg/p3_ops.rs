@@ -1818,7 +1818,10 @@ impl Cx<'_> {
         let is_clo = |t: Option<Ty>| matches!(t, Some(Ty::Struct(s)) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(s)));
         if elem.is_none() || is_clo(elem) {
             if let Some(f) = self.closures_lub(&elems.iter().collect::<Vec<_>>()) {
-                elem = Some(f);
+                self.lub_fnptr += 1;
+                let r = self.array_lit(e, Some(Ty::Array(crate::types::intern(f), elems.len() as u32)));
+                self.lub_fnptr -= 1;
+                return r;
             }
         }
         // (Vec から取った要素の型は目安: 要素の型が違えばそちらにする (`v == ["a"]` で v: Vec<String>))

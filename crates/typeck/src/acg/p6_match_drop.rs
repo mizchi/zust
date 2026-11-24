@@ -162,11 +162,17 @@ impl Cx<'_> {
         // them to that fn pointer)
         // (inference may have given the match its first arm's closure type: that is no fn pointer either)
         let lub = || self.closures_lub(&arms.iter().map(|a| &a.body).collect::<Vec<_>>());
-        let expected = match expected {
+        let lubbed = match expected {
             None => lub(),
-            Some(Ty::Struct(s)) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(s)) => lub().or(expected),
-            e => e,
+            Some(Ty::Struct(s)) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(s)) => lub(),
+            _ => None,
         };
+        if lubbed.is_some() {
+            self.lub_fnptr += 1;
+            let r = self.match_(m, lubbed);
+            self.lub_fnptr -= 1;
+            return r;
+        }
         // (an arm with a guard and an or-pattern: the guard runs for each alternative that matches, left to right.
         // The arm becomes one arm per alternative)
         if arms.iter().any(|a| a.guard.is_some() && has_or(&a.pat)) {

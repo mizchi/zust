@@ -1350,6 +1350,8 @@ run-pass	closures/closure-upvar-last-use-analysis.rs
 run-pass	closures/closure-upvar-trait-caching.rs
 run-pass	closures/closure-with-fixed-size-array-param.rs
 compile-fail	closures/closure-wrong-kind.rs
+check-pass	closures/closure_no_cap_coerce_many_check_pass.rs
+run-pass	closures/closure_no_cap_coerce_many_run_pass.rs
 run-pass	closures/closure_no_cap_coerce_many_unsafe_1.rs
 check-pass	closures/closure_promotion.rs
 check-pass	closures/closure_requires_expectation.rs

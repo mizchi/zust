@@ -1184,9 +1184,12 @@ impl Cx<'_> {
         let kept: Vec<&Expr> = args.into_iter().map(|a| &*self.keep_expr(a)).collect();
         // (elements that are distinct closures with no captures and one signature: their fn pointer, as for an array)
         let is_clo = |t: Option<Ty>| matches!(t, Some(Ty::Struct(s)) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(s)));
+        let mut lubbed = false;
         if elem.is_none() || is_clo(elem) {
             if let Some(f) = self.closures_lub(&kept) {
                 elem = Some(f);
+                lubbed = true;
+                self.lub_fnptr += 1;
             }
         }
         let mut vals = vec![];
@@ -1198,15 +1201,29 @@ impl Cx<'_> {
             }
             let r = self.expr(a, elem);
             self.bk.direct.truncate(d0);
-            let (v, t) = r?;
+            let r = r.and_then(|(v, t)| if t == Ty::Never { Ok((v, t)) } else { match elem { Some(e) => self.same(SP, t, e).map(|_| (v, t)), None => Ok((v, t)) } });
+            let (v, t) = match r {
+                Ok(x) => x,
+                Err(er) => {
+                    if lubbed {
+                        self.lub_fnptr -= 1;
+                    }
+                    return Err(er);
+                }
+            };
             if t == Ty::Never {
+                if lubbed {
+                    self.lub_fnptr -= 1;
+                }
                 return Ok((None, Ty::Never));
             }
-            match elem {
-                Some(e) => self.same(SP, t, e)?,
-                None => elem = Some(t),
+            if elem.is_none() {
+                elem = Some(t);
             }
             vals.push(v);
+        }
+        if lubbed {
+            self.lub_fnptr -= 1;
         }
         let Some(e) = elem else {
             return err(span, "type annotations needed for an empty `vec![]`");

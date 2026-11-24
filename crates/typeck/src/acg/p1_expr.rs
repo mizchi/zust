@@ -710,6 +710,24 @@ impl Cx<'_> {
                 return Ok((Some(p), want));
             }
         }
+        // (a value of a closure type with no captures where a fn pointer is expected: its fn-pointer instance)
+        if let (Some(want @ Ty::Fn(_)), Ty::Struct(sid), true) = (expected, t, self.lub_fnptr > 0 && matches!(e, Expr::Path(None, p) if p.segs.len() == 1)) {
+            let b = self.prog.base_of(sid);
+            if let Some(&cid) = self.prog.closure_of_struct.get(&b) {
+                if self.prog.structs[sid as usize].fields.is_empty() && self.closure_sig(t).is_some_and(|s| matches!(want, Ty::Fn(f) if f.params == s.0 && f.ret == s.1)) {
+                    let args = self.prog.structs[sid as usize].args.clone();
+                    let (iid, sig) = {
+                        let mut g = self.insts.lock().unwrap();
+                        let iid = g.request_fnptr(self.prog, cid, args).or_else(|e| err(SP, e))?;
+                        (iid, g.sig(self.prog, iid).clone())
+                    };
+                    self.requested.push(iid);
+                    let fr = self.fref(iid, &sig);
+                    let v = self.b.ins().func_addr(PTR, fr);
+                    return Ok((Some(v), want));
+                }
+            }
+        }
         // `&T` / `&mut T` → `*const T` / `*mut T`
         if let (Some(want @ Ty::Ptr(m2, pe)), Ty::Ref(m1, re)) = (expected, t) {
             if pe == re && (m1 || !m2) {
@@ -3098,46 +3116,116 @@ impl Cx<'_> {
         if es.len() < 2 {
             return None;
         }
-        // (each a closure expression with no captures and every parameter's type written; its result, the body's)
+        // (each member: a closure with no captures (an expression, or a local of such a closure's type), a fn item
+        // that is not generic, a fn pointer, or an arm that diverges (`unimplemented!()`), which asks nothing. The
+        // signature from those whose types are known; a closure whose parameters are not written takes it when it has
+        // as many)
         let mut sig: Option<(Vec<Ty>, Ty)> = None;
+        let mut open_arity: Vec<usize> = vec![];
+        let mut kinds: Vec<Option<Ty>> = vec![];
+        let mut members = 0;
+        let mut any_closure = false;
+        let mut agree = |sig: &mut Option<(Vec<Ty>, Ty)>, s: (Vec<Ty>, Ty)| -> bool {
+            if s.0.iter().chain([&s.1]).any(|&x| self.prog.has_param(x)) {
+                return false;
+            }
+            match sig {
+                Some(prev) => *prev == s,
+                None => {
+                    *sig = Some(s);
+                    true
+                }
+            }
+        };
         for e in es {
             let c = strip_paren(e);
-            let Expr::Closure(_, ps, ret_ann, _, _) = c else { return None };
-            // (no captures: by its definition when it is found, else none of its free names is a local in scope, as
-            // for a macro's argument that is parsed again)
-            let k = self.closure_ix.get(&format!("@{}", c as *const Expr as usize)).or_else(|| self.closure_ix.get(&crate::ast_closure::closure_key(c)));
-            match k.and_then(|k| self.prog.closure_by.get(&(self.root, *k))) {
-                Some(cid) => {
-                    if !self.prog.closures[cid].captures.is_empty() {
+            match c {
+                Expr::Macro(p, _, _) if matches!(p.segs.last().map(|s| s.name.as_str()), Some("panic" | "todo" | "unimplemented" | "unreachable")) => continue,
+                Expr::Closure(_, ps, ret_ann, _, _) => {
+                    let k = self.closure_ix.get(&format!("@{}", c as *const Expr as usize)).or_else(|| self.closure_ix.get(&crate::ast_closure::closure_key(c)));
+                    match k.and_then(|k| self.prog.closure_by.get(&(self.root, *k))) {
+                        Some(cid) => {
+                            if !self.prog.closures[cid].captures.is_empty() {
+                                return None;
+                            }
+                        }
+                        None => {
+                            if crate::ast_closure::free_vars(c).iter().any(|n| self.lookup(n).is_some()) {
+                                return None;
+                            }
+                        }
+                    }
+                    let written: Option<Vec<Ty>> = ps.iter().map(|(_, t)| t.as_ref().and_then(|t| self.parse_ty(t).ok())).collect();
+                    let ret = match ret_ann {
+                        Some(t) => self.parse_ty(t).ok(),
+                        None => self.peek(e).filter(|t| !matches!(t, Ty::Struct(s) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(*s)))),
+                    };
+                    match (written, ret) {
+                        (Some(params), Some(ret)) => {
+                            if !agree(&mut sig, (params, ret)) {
+                                return None;
+                            }
+                        }
+                        _ => open_arity.push(ps.len()),
+                    }
+                    kinds.push(None);
+                    any_closure = true;
+                }
+                Expr::Path(None, p) if p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_some() => {
+                    let (_, t) = self.lookup(&p.segs[0].name)?;
+                    match t {
+                        Ty::Struct(sid) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(sid)) => {
+                            if !self.prog.structs[sid as usize].fields.is_empty() {
+                                return None;
+                            }
+                            if !agree(&mut sig, self.closure_sig(t)?) {
+                                return None;
+                            }
+                            any_closure = true;
+                        }
+                        Ty::Fn(f) => {
+                            if !agree(&mut sig, (f.params.clone(), f.ret)) {
+                                return None;
+                            }
+                        }
+                        _ => return None,
+                    }
+                    kinds.push(Some(t));
+                }
+                _ => {
+                    // (a fn item that is not generic, or a value of a fn pointer type (`foo as FnPointer`))
+                    let ft = match self.fn_item(c) {
+                        Some(fid) if self.prog.sigs[fid as usize].generics.is_empty() => {
+                            let fs = &self.prog.sigs[fid as usize];
+                            kinds.push(Some(Ty::Param(crate::program::HOLE)));
+                            (fs.params.clone(), fs.ret)
+                        }
+                        Some(_) => return None,
+                        None => match self.peek(c)? {
+                            Ty::Fn(f) => {
+                                kinds.push(Some(Ty::Fn(f)));
+                                (f.params.clone(), f.ret)
+                            }
+                            _ => return None,
+                        },
+                    };
+                    if !agree(&mut sig, ft) {
                         return None;
                     }
                 }
-                None => {
-                    if crate::ast_closure::free_vars(c).iter().any(|n| self.lookup(n).is_some()) {
-                        return None;
-                    }
-                }
             }
-            let mut params = vec![];
-            for (_, t) in ps {
-                params.push(self.parse_ty(t.as_ref()?).ok()?);
-            }
-            // (the result written, else the body's type as recorded)
-            let ret = match ret_ann {
-                Some(t) => self.parse_ty(t).ok()?,
-                None => self.peek(e)?,
-            };
-            if params.iter().chain([&ret]).any(|&x| self.prog.has_param(x)) {
-                return None;
-            }
-            match &sig {
-                Some((p, r)) if *p != params || *r != ret => return None,
-                Some(_) => {}
-                None => sig = Some((params, ret)),
-            }
+            members += 1;
         }
         let (params, ret) = sig?;
-        Some(Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params, ret })))
+        if members < 2 || open_arity.iter().any(|&n| n != params.len()) {
+            return None;
+        }
+        // (one closure type alone is no coercion: `[|x| x; 2]`-like arms of the same closure stay it)
+        let distinct_closures = kinds.iter().filter(|k| k.is_none()).count() >= 2 || kinds.iter().any(|k| k.is_some());
+        if !any_closure && !kinds.iter().any(|k| matches!(k, Some(Ty::Param(_)))) {
+            return None;
+        }
+        distinct_closures.then(|| Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params, ret })))
     }
 
     /// クロージャの型 (struct のインスタンス) なら、その引数と戻り値の型
