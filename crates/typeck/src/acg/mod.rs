@@ -1848,6 +1848,28 @@ impl Cx<'_> {
                 // (a parameter whose type is a projection the summary does not follow (`_wf: <&'a u8 as Tr>::Ty`): its
                 // impl's associated type's value, with the regions its self type writes; what it implies is known
                 // (implied-bounds/assoc-ty-wf-used-to-get-assoc-ty.rs))
+                // (the where clauses on a type that is no type parameter (`&'max G: Get`), with their trees as written:
+                // a call whose bound only such a clause meets takes its regions)
+                if self.rg.on {
+                    for (subj, bs) in &f.sig.generics.preds {
+                        if matches!(subj, crate::parse::Ty::Path(None, p) if p.segs.len() == 1) {
+                            continue;
+                        }
+                        let trs: Vec<String> = bs.iter().filter_map(|b| if let crate::parse::Bound::Trait(false, p) = b { p.segs.last().map(|s| s.name.clone()) } else { None }).collect();
+                        if trs.is_empty() || !crate::regions::names_lt(subj) {
+                            continue;
+                        }
+                        let Ok(t) = self.parse_ty(subj) else { continue };
+                        let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                        let mut codes = vec![];
+                        sl.slots(subj, false, &mut codes);
+                        let lts = self.rg.lts.clone();
+                        let prog = self.prog;
+                        if let Some(tr) = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var()) {
+                            self.rg.where_trees.push((t, tr, trs));
+                        }
+                    }
+                }
                 if self.rg.on && !self.prog.assoc_regions.is_empty() {
                     // (and a projection a parameter's type or the result's is requires what its impl's header declares
                     // of the impl's lifetimes, reported at the type)
