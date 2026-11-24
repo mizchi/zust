@@ -1,0 +1,26 @@
+// A module that app.zsc imports from (tests/examples.rs: modules_import_types_and_functions)
+
+export type Point = { x: f64, y: f64 }
+export enum Shape { Circle(Point, f64), Rect(Point, Point) }
+type Hidden = { n: i32 }
+export type Labeled = { label: String, shape: Shape }
+
+export fn area(s: Shape) -> f64 {
+  match s {
+    Circle(_, r) => 3.0 * r * r,
+    Rect(a, b) => (b.x - a.x) * (b.y - a.y),
+  }
+}
+
+export fn first<T>(xs: Array<T>, fallback: T) -> T {
+  if xs.len() == 0 { fallback } else { xs[0] }
+}
+
+// runs as wasm in this module: the importer calls its JS export
+@wasm export fn twice(x: i32) -> i32 { x * 2 }
+
+fn helper() -> i32 { 1 }
+
+export fn Badge(props: Labeled) -> Jsx {
+  <span>{props.label}</span>
+}

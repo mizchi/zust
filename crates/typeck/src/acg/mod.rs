@@ -2395,8 +2395,10 @@ impl Cx<'_> {
                                     Some(Ty::Ref(m, intern(Ty::Slice(*e))))
                                 }
                                 // (only an instance of the annotation: `Box<_>` is not filled with a `bool`)
+                                // (a reference's mutability as written: inference does not unify `&mut T` with the `&T` of
+                                // its initializer (`let y: &mut [_] = &x[..];` is a mismatch))
                                 Some(inf) if has_hole(self.prog, a) && !has_hole(self.prog, inf) && !self.prog.has_param(inf) && std::mem::discriminant(&inf) == std::mem::discriminant(&a)
-                                    && !matches!((inf, a), (Ty::Struct(x), Ty::Struct(y)) if self.prog.base_of(x) != self.prog.base_of(y)) => Some(inf),
+                                    && !matches!((inf, a), (Ty::Struct(x), Ty::Struct(y)) if self.prog.base_of(x) != self.prog.base_of(y)) => Some(written_muts(inf, a)),
                                 _ => Some(a),
                             }
                         }
@@ -2524,10 +2526,11 @@ impl Cx<'_> {
                     let plain0 = std::mem::replace(&mut self.bk.plain_init, plain);
                     let r = self.expr(init, ann.or(hint));
                     self.bk.plain_init = plain0;
-                    // (`let b: &mut T = a;` with a: `&mut T`: a coercion site, b reborrows `*a` (rustc's `&mut *a`), not
-                    // a copy of a: a use of `*a` while b lives conflicts)
-                    if r.is_ok() && ann_ty.is_some() && matches!(ann, Some(Ty::Ref(true, _))) && matches!(strip_paren(init), Expr::Path(None, _)) {
-                        self.bk_reborrow_let(init);
+                    // (`let b: &mut T = a;` / `let b: &T = s.f;` with a place of a `&mut T`: a coercion site, b reborrows
+                    // what it points to (rustc's `&mut *a` / `&*s.f`), not a copy or a move of it: a use of `*a` while b
+                    // lives conflicts)
+                    if let (true, Some(w @ Ty::Ref(..))) = (r.is_ok() && ann_ty.is_some(), ann) {
+                        self.bk_reborrow_let(init, w);
                     }
                     // (`let v: &T = x.borrow().0;` with the field a `&mut T`: a coercion site, v reborrows `*x.borrow().0`
                     // through the temporary guard, which goes away at the end of the statement (E0716 when v is used
@@ -3342,5 +3345,15 @@ pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
         Pat::Struct(_, fs, _) => fs.iter().any(|f| pat_binds_ref_mut(&f.1)),
         Pat::Ref(_, x) => pat_binds_ref_mut(x),
         _ => false,
+    }
+}
+
+/// inf with the mutabilities of the references a writes where inf has references too (`&[i32]` for `&mut [_]`:
+/// `&mut [i32]`)
+fn written_muts(inf: Ty, a: Ty) -> Ty {
+    match (inf, a) {
+        (Ty::Ref(_, i), Ty::Ref(m, j)) => Ty::Ref(m, intern(written_muts(*i, *j))),
+        (Ty::Ptr(_, i), Ty::Ptr(m, j)) => Ty::Ptr(m, intern(written_muts(*i, *j))),
+        _ => inf,
     }
 }

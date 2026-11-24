@@ -1,0 +1,4 @@
+// User comes in with `same` and by its own `import type`: one type
+import { same } from "./tsuser.zsc";
+import type { User } from "../ts/model.ts";
+export fn again(u: User) -> User { same(u) }

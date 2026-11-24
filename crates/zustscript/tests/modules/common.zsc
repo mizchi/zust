@@ -1,0 +1,4 @@
+// (tests/examples.rs: modules_diamond_and_directories) a type two modules import, and a lowercase one
+export type Shared = { n: i32 }
+type row = { value: i32 }
+export fn get(r: row) -> i32 { r.value }

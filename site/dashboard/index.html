@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zust retrospective</title>
+<meta name="description" content="How zust was built by coding agents: commits, rustc tests/ui pass rates, speed KPIs and code size over time, from git history.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="zust">
+<meta property="og:url" content="https://mizchi.github.io/zust/dashboard/">
+<meta property="og:title" content="How zust was built">
+<meta property="og:description" content="Coding agents building a Rust-subset compiler: commits, rustc tests/ui pass rates, speed KPIs and code size over time, from git history.">
+<meta property="og:image" content="https://mizchi.github.io/zust/og-dashboard.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="How zust was built">
+<meta name="twitter:description" content="Coding agents building a Rust-subset compiler: commits, rustc tests/ui pass rates, speed KPIs and code size over time, from git history.">
+<meta name="twitter:image" content="https://mizchi.github.io/zust/og-dashboard.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="../style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+</head>
+<body>
+<header class="bar">
+  <div class="bar-in">
+    <a class="brand" href="../"><span>z</span>ust</a>
+    <button class="menu" id="menu" type="button" aria-controls="side" aria-expanded="false">Menu</button>
+  </div>
+</header>
+<div class="scrim" id="scrim" hidden></div>
+<div class="shell">
+  <aside class="side" id="side" aria-label="Site">
+    <a class="brand" href="../"><span>z</span>ust</a>
+    <nav class="pages" aria-label="Pages">
+      <a href="../">About</a>
+      <a href="../dashboard/" aria-current="page">Retrospective</a>
+      <a class="ext" href="../dev/bench/">Benchmarks</a>
+      <a class="ext" href="https://github.com/mizchi/zust">GitHub</a>
+    </nav>
+    <nav class="toc" aria-label="On this page">
+      <p class="label">On this page</p>
+      <a href="#tiles">Summary</a>
+      <a href="#commits">Commits</a>
+      <a href="#ui">tests/ui pass rate</a>
+      <a href="#kpi">Speed KPIs</a>
+      <a href="#code">Code size</a>
+      <a href="#sessions">Agent sessions</a>
+      <a href="#daily">By day</a>
+      <a href="#method">How the numbers are made</a>
+    </nav>
+  </aside>
+  <div class="content">
+
+<main class="wrap stack">
+  <section class="head">
+    <p class="eyebrow">Retrospective</p>
+    <h1>How zust was built</h1>
+    <p class="lede" id="lede">Loading the data…</p>
+    <p class="note">From the git history of mizchi/zust (main, up to <span id="asof">—</span>). The repository starts at the
+      rename of exrustc to crustc; earlier work is not included. Merge commits and the README updates by
+      github-actions[bot] are not counted. Times are shown in your time zone.</p>
+  </section>
+
+  <section class="tiles" id="tiles" aria-label="Summary"></section>
+
+  <section class="sec" id="commits">
+    <h2>Commits</h2>
+    <p class="note">Left: the running total. Right: commits in each hour. Both share the time axis; point at either to
+      follow the same hour in both. The shaded part is after tests/ui became the spec; numbers mark the milestones in
+      the table below.</p>
+    <div class="pair">
+      <figure><figcaption>Running total</figcaption><div class="chart" id="c-cum"></div></figure>
+      <figure><figcaption>Commits per hour</figcaption><div class="chart" id="c-hour"></div></figure>
+    </div>
+    <details class="fold" open>
+      <summary>Milestones</summary>
+      <div class="tablewrap"><table class="table" id="t-ms">
+        <thead><tr><th>#</th><th>Time</th><th class="l">Event</th><th class="l">What</th><th class="l">Commit</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </details>
+  </section>
+
+  <section class="sec" id="ui">
+    <h2>rustc tests/ui pass rate, by kind</h2>
+    <p class="note">Measured by CI on each push (bench/rust_ui.py against rust-lang/rust 1.100.0). The rate is over the
+      tests zustc can be asked to handle: no nightly features, auxiliary crates or special flags. A compile-fail test
+      passes only when zustc reports an error on a line its annotations point at. Each chart has its own scale.</p>
+    <div class="grid4" id="ui-grid"></div>
+  </section>
+
+  <section class="sec" id="kpi">
+    <h2>Speed KPIs against the first measurement</h2>
+    <p class="note">bench/kpi_log.tsv, one row per change, in instructions executed (lower is faster). The no-op build is
+      left out: a stat-stamp short-circuit took it from <span id="noop-a">—</span>M to <span id="noop-b">—</span>M
+      instructions. Rows whose commit was rebased away are placed between their neighbours.</p>
+    <div class="chart tall" id="c-kpi"></div>
+    <div class="tiles small" id="kpi-tiles"></div>
+  </section>
+
+  <section class="sec" id="code">
+    <h2>Implementation and test code, without zustscript</h2>
+    <p class="note">Lines of .rs. Implementation: src/ and crates/*/ (without tests, benches, examples). Tests: tests/ and
+      crates/*/tests/, plus each source file from its first <code>#[cfg(test)]</code> to its end. crates/zustscript
+      (<span id="zs">—</span> lines now) is left out of both; cratebench, examples and formal are not counted.</p>
+    <div class="pair">
+      <figure><figcaption>Lines of code</figcaption><div class="chart" id="c-loc"></div></figure>
+      <figure><figcaption>rustc error codes (E0xxx) in the source</figcaption><div class="chart" id="c-ecode"></div></figure>
+    </div>
+  </section>
+
+  <section class="sec" id="sessions">
+    <h2>Agent sessions</h2>
+    <p class="note">Commits grouped by their Claude-Session trailer, sessions with 5 or more commits. A bar spans the
+      first to the last commit, which does not mean the agent worked all of that time.</p>
+    <div class="chart short" id="c-sess"></div>
+  </section>
+
+  <section class="sec" id="daily">
+    <h2>By day (UTC)</h2>
+    <div class="tablewrap"><table class="table" id="t-daily">
+      <thead><tr><th class="l">Date</th><th>Commits</th><th>PRs merged</th><th>run-pass</th><th>check-pass</th><th>build-pass</th><th>compile-fail</th><th>Impl. lines</th><th>Test lines</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <details class="fold" id="method">
+    <summary>How the numbers are made</summary>
+    <ul>
+      <li>All data comes from <code>python3 scripts/retro/extract.py</code>, which reads git history, bench/kpi_log.tsv and the
+        benchmark history on the gh-pages branch. The Pages workflow reruns it after each benchmark run.</li>
+      <li>Commits: <code>git log --no-merges</code> without github-actions[bot]. Days and hours are cut in UTC.</li>
+      <li>KPI noise: the same binary measured again moves by about 0.01% (builds) and 0.1% (LSP).</li>
+      <li>Code size is counted on one first-parent commit every 3 hours. The peak on 11-16 is when the old and the new
+        driver both existed.</li>
+    </ul>
+  </details>
+</main>
+<footer class="wrap foot"><a href="https://github.com/mizchi/zust/tree/main/scripts/retro">scripts/retro</a> · data <span id="foot-asof">—</span></footer>
+  </div>
+</div>
+
+<div class="tip" id="tip" hidden></div>
+
+<script>
+(() => {
+  const NAMES = ['hourly', 'ui', 'kpi', 'loc', 'daily', 'sessions', 'milestones'];
+  const KINDS = [['run_pass', 'run-pass', 'builds, runs, same output'], ['check_pass', 'check-pass', 'accepted by zustc check'],
+                 ['build_pass', 'build-pass', 'builds'], ['compile_fail', 'compile-fail', 'rejected at an annotated line']];
+  const KPIS = [['edit_build_M', 'gen5000 edit one fn'], ['check_M', 'gen5000 check'], ['traits_check_M', 'traits check'],
+                ['crates_edit_M', 'crates edit build'], ['patterns_check_M', 'patterns check'], ['lsp_session_G', 'LSP session']];
+  const fmt = d3.format(','), si = d3.format('.3~s');
+  const pct = (v, d = 1) => (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v).toFixed(d) + '%';
+  const pt = (v) => (v == null || Number.isNaN(v) ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v).toFixed(1) + ' pt');
+  // (a measurement may be null (the benchmark did not run that kind): a missing one is shown as —)
+  const f1 = (v) => (v == null ? '—' : v.toFixed(1));
+  const tfmt = d3.timeFormat('%b %d %H:%M'), dayFmt = d3.timeFormat('%b %d'), hourFmt = d3.timeFormat('%H:%M');
+  // axis ticks: the date at midnight, the time of day otherwise (12-hour ticks would repeat the date)
+  const dfmt = (d) => (d.getHours() === 0 && d.getMinutes() === 0 ? dayFmt(d) : hourFmt(d));
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const series = () => [1, 2, 3, 4, 5, 6].map((i) => css(`--s${i}`));
+  const tip = document.getElementById('tip');
+  const el = (tag, attrs = {}, text) => { const e = document.createElement(tag); Object.assign(e, attrs); if (text != null) e.textContent = text; return e; };
+
+  function showTip(ev, lines) {
+    tip.replaceChildren(...lines.map(([t, cls]) => el('div', {className: cls || ''}, t)));
+    tip.hidden = false;
+    const r = tip.getBoundingClientRect(), W = document.documentElement.clientWidth;
+    let x = ev.pageX + 14; if (x + r.width > window.scrollX + W - 8) x = ev.pageX - r.width - 14;
+    tip.style.left = Math.max(window.scrollX + 8, x) + 'px'; tip.style.top = (ev.pageY + 12) + 'px';
+  }
+  const hideTip = () => { tip.hidden = true; };
+
+  function measure(svg, texts) {
+    const g = svg.append('g'); let w = 0;
+    texts.forEach((t) => { w = Math.max(w, g.append('text').attr('class', 'lbl').text(t).node().getComputedTextLength()); });
+    g.remove(); return Math.ceil(w);
+  }
+  function frame(node, h, label) {
+    node.replaceChildren();
+    const W = node.clientWidth;
+    const svg = d3.select(node).append('svg').attr('width', W).attr('height', h).attr('viewBox', `0 0 ${W} ${h}`).attr('role', 'img').attr('aria-label', label);
+    return {svg, W, h};
+  }
+  const ticksFor = (W) => Math.max(2, Math.min(8, Math.floor(W / 95)));
+  function axes(svg, x, y, m, W, h, yFmt, yTicks) {
+    svg.append('g').attr('class', 'grid').attr('transform', `translate(${m.l},0)`)
+      .call(d3.axisLeft(y).tickValues(yTicks).tickSize(-(W - m.l - m.r)).tickFormat(yFmt)).call((g) => g.select('.domain').remove());
+    svg.append('g').attr('class', 'axis').attr('transform', `translate(0,${h - m.b})`).call(d3.axisBottom(x).ticks(ticksFor(W - m.l)).tickFormat(dfmt));
+  }
+
+  // ---- summary ----
+  function summarize(D) {
+    const H = 36e5, t = (s) => +new Date(s), last = (a) => a[a.length - 1];
+    const kpiFL = (k) => { const v = D.kpi.map((r) => r[k]).filter((x) => x != null); return [v[0], last(v)]; };
+    const drift = (k) => { const [a, b] = kpiFL(k); return (b / a - 1) * 100; };
+    const ms = D.milestones.find((m) => m.commit === 'c155863e');
+    const u0 = D.ui[0], u1 = last(D.ui), l0 = D.loc[0], l1 = last(D.loc);
+    return {
+      hours: Math.round((t(last(D.hourly).hour) - t(D.hourly[0].hour)) / H) + 1,
+      active: D.hourly.filter((h) => h.commits > 0).length,
+      commits: d3.sum(D.hourly, (h) => h.commits),
+      commitsCompat: d3.sum(D.hourly.filter((h) => h.phase === 'compat'), (h) => h.commits),
+      compatHours: Math.round((t(u1.time) - t(ms ? ms.time : u0.time)) / H),
+      u0, u1, l0, l1, kpiChanges: D.kpi.length, drift, kpiFL,
+    };
+  }
+
+  function renderText(D, S) {
+    // (each kind's first and last measured rows: a row may have no measurement of a kind)
+    const ends = (k) => { const v = D.ui.filter((x) => x[k + '_rate'] != null); return [v[0], v[v.length - 1]]; };
+    const r = (k) => ends(k)[1]?.[k + '_rate'], r0 = (k) => ends(k)[0]?.[k + '_rate'];
+    const since = (k) => (ends(k)[0] ? dayFmt(new Date(ends(k)[0].time)) : '—');
+    const dlt = (k) => (r(k) == null || r0(k) == null ? null : r(k) - r0(k));
+    document.getElementById('lede').textContent =
+      `In the ${S.compatHours} hours after rustc's tests/ui became the spec, the run-pass rate went from ${f1(r0('run_pass'))}% to ` +
+      `${f1(r('run_pass'))}% and the compile-fail rate from ${f1(r0('compile_fail'))}% to ${f1(r('compile_fail'))}%. ` +
+      `Across the ${S.kpiChanges} changes measured meanwhile, a rebuild after editing one function took ${pct(S.drift('edit_build_M'))} instructions ` +
+      `and check ${pct(S.drift('check_M'))}.`;
+    const asof = `${S.u1.commit}, ${d3.utcFormat('%Y-%m-%d')(new Date(S.u1.time))}`;
+    document.getElementById('asof').textContent = asof; document.getElementById('foot-asof').textContent = asof;
+    const [na, nb] = S.kpiFL('noop_build_M');
+    document.getElementById('noop-a').textContent = na.toFixed(1); document.getElementById('noop-b').textContent = nb.toFixed(1);
+    document.getElementById('zs').textContent = fmt(S.l1.zustscript_lines);
+
+    const tile = (label, big, sub, cls) => {
+      const d = el('div', {className: 'tile'});
+      d.append(el('span', {className: 'tl'}, label), el('span', {className: 'big ' + (cls || '')}, big), el('span', {className: 'sub'}, sub));
+      return d;
+    };
+    const good = (v) => (Math.abs(v) < 0.05 ? '' : v < 0 ? 'good' : 'bad');
+    const e = S.drift('edit_build_M');
+    document.getElementById('tiles').replaceChildren(
+      tile('Elapsed, first to last commit', `${S.hours} h`, `commits in ${S.active} of those hours`),
+      tile('Commits', fmt(S.commits), `${fmt(S.commitsCompat)} after tests/ui became the spec`),
+      tile('run-pass rate', `${f1(r('run_pass'))}%`, `${pt(dlt('run_pass'))} since ${since('run_pass')}`, 'good'),
+      tile('compile-fail rate', `${f1(r('compile_fail'))}%`, `${pt(dlt('compile_fail'))} since ${since('compile_fail')}`, 'good'),
+      tile('Rebuild after one edit', pct(e), `instructions, over ${S.kpiChanges} changes`, good(e)),
+      tile('Implementation / tests', `${si(S.l1.impl_lines)} / ${si(S.l1.test_lines)}`,
+        `lines; ×${(S.l1.impl_lines / S.l0.impl_lines).toFixed(1)} / ×${(S.l1.test_lines / S.l0.test_lines).toFixed(1)} since the start`),
+    );
+    document.getElementById('kpi-tiles').replaceChildren(...KPIS.slice(2).map(([k, n]) => { const v = S.drift(k); return tile(n, pct(v), 'against the first measurement', good(v)); }));
+  }
+
+  // ---- commits: two linked charts ----
+  function renderCommits(D) {
+    const rows = D.hourly.map((h) => ({...h, t: new Date(h.hour)}));
+    const ms = D.milestones.map((m, i) => ({...m, i: i + 1, t: new Date(m.time)}));
+    const compat = ms.find((m) => m.commit === 'c155863e');
+    const C = series(), bis = d3.bisector((r) => r.t).center;
+    const charts = [];
+    const build = (node, key, kind) => {
+      const {svg, W, h} = frame(node, 280, kind === 'area' ? 'Running total of commits' : 'Commits per hour');
+      const yMax = d3.max(rows, (r) => r[key]);
+      const y = d3.scaleLinear().domain([0, yMax]).nice();
+      const yt = y.ticks(4);
+      const m = {t: 40, r: 12, b: 24, l: measure(svg, yt.map(fmt)) + 10};
+      y.range([h - m.b, m.t]);
+      const x = d3.scaleTime().domain(d3.extent(rows, (r) => r.t)).range([m.l, W - m.r]);
+      if (compat) svg.append('rect').attr('class', 'shade').attr('x', x(compat.t)).attr('y', m.t - 32).attr('width', W - m.r - x(compat.t)).attr('height', h - m.b - m.t + 32);
+      axes(svg, x, y, m, W, h, fmt, yt);
+      if (kind === 'area') {
+        svg.append('path').datum(rows).attr('fill', C[0]).attr('opacity', 0.14).attr('d', d3.area().x((r) => x(r.t)).y0(y(0)).y1((r) => y(r.cumulative)));
+        svg.append('path').datum(rows).attr('fill', 'none').attr('stroke', C[0]).attr('stroke-width', 2).attr('d', d3.line().x((r) => x(r.t)).y((r) => y(r.cumulative)));
+      } else {
+        const bw = Math.max(1, (W - m.l - m.r) / rows.length - 0.6);
+        svg.append('g').selectAll('rect').data(rows).join('rect').attr('fill', C[1])
+          .attr('x', (r) => x(r.t)).attr('width', bw).attr('y', (r) => y(r.commits)).attr('height', (r) => y(0) - y(r.commits));
+      }
+      ms.forEach((mm, j) => {
+        const mx = x(mm.t), my = m.t - 26 + (j % 2) * 15;
+        svg.append('line').attr('class', 'ref').attr('x1', mx).attr('x2', mx).attr('y1', my + 6).attr('y2', h - m.b);
+        svg.append('circle').attr('class', 'pin').attr('cx', mx).attr('cy', my).attr('r', 7);
+        svg.append('text').attr('class', 'pin-t').attr('x', mx).attr('y', my + 3.5).attr('text-anchor', 'middle').text(mm.i);
+      });
+      const focus = svg.append('line').attr('class', 'focus').attr('y1', m.t).attr('y2', h - m.b).style('display', 'none');
+      const dot = kind === 'area' ? svg.append('circle').attr('r', 4).attr('fill', C[0]).style('display', 'none') : null;
+      const c = {x, y, focus, dot, key};
+      charts.push(c);
+      svg.append('rect').attr('fill', 'transparent').attr('x', m.l).attr('y', m.t - 34).attr('width', W - m.l - m.r).attr('height', h - m.b - m.t + 34)
+        .on('pointermove', (ev) => {
+          const r = rows[bis(rows, x.invert(d3.pointer(ev)[0]))];
+          charts.forEach((o) => {
+            o.focus.attr('x1', o.x(r.t)).attr('x2', o.x(r.t)).style('display', null);
+            if (o.dot) o.dot.attr('cx', o.x(r.t)).attr('cy', o.y(r.cumulative)).style('display', null);
+          });
+          const near = ms.filter((mm) => Math.abs(mm.t - r.t) < 36e5 * 0.75);
+          showTip(ev, [[tfmt(r.t), 'mute'], [`${r.commits} commits this hour`], [`${fmt(r.cumulative)} in total`],
+            ...near.map((mm) => [`#${mm.i} ${mm.label}`, 'mute'])]);
+        })
+        .on('pointerleave', () => { hideTip(); charts.forEach((o) => { o.focus.style('display', 'none'); if (o.dot) o.dot.style('display', 'none'); }); });
+    };
+    build(document.getElementById('c-cum'), 'cumulative', 'area');
+    build(document.getElementById('c-hour'), 'commits', 'bar');
+
+    const tb = document.querySelector('#t-ms tbody');
+    tb.replaceChildren(...ms.map((mm) => {
+      const tr = el('tr');
+      tr.append(el('td', {}, mm.i), el('td', {}, tfmt(mm.t)), el('td', {className: 'l'}, mm.label), el('td', {className: 'l wrap'}, mm.detail));
+      const td = el('td', {className: 'l mono'}); td.append(el('a', {href: `https://github.com/mizchi/zust/commit/${mm.commit}`}, mm.commit)); tr.append(td);
+      return tr;
+    }));
+  }
+
+  // ---- tests/ui small multiples ----
+  function renderUI(D) {
+    const grid = document.getElementById('ui-grid'); grid.replaceChildren();
+    const rows = D.ui.map((r) => ({...r, t: new Date(r.time)}));
+    const C = series(), xd = d3.extent(rows, (r) => r.t);
+    KINDS.forEach(([k, name, what], i) => {
+      const fig = el('figure', {className: 'mult'});
+      const pts = rows.filter((r) => r[k + '_rate'] != null);
+      const a = pts[0], b = pts[pts.length - 1];
+      const head = el('div', {className: 'mhead'});
+      // (a kind never measured: its name and "no measurements yet", no chart)
+      if (!b) {
+        head.append(el('span', {className: 'mname'}, name), el('span', {className: 'mval'}, '—'));
+        fig.append(head, el('figcaption', {}, 'no measurements yet'));
+        grid.append(fig);
+        return;
+      }
+      head.append(el('span', {className: 'mname'}, name), el('span', {className: 'mval'}, `${b[k + '_rate'].toFixed(1)}%`),
+        el('span', {className: 'mdelta good'}, pt(b[k + '_rate'] - a[k + '_rate'])));
+      const cap = el('figcaption', {}, `${what} · ${fmt(b[k + '_passing'])} passing`);
+      const box = el('div', {className: 'chart short'});
+      fig.append(head, cap, box); grid.append(fig);
+      const {svg, W, h} = frame(box, 170, `${name} pass rate over time`);
+      const lo = d3.min(pts, (r) => r[k + '_rate']), hi = d3.max(pts, (r) => r[k + '_rate']);
+      const y = d3.scaleLinear().domain([Math.max(0, Math.floor((lo - 3) / 5) * 5), Math.min(100, Math.ceil((hi + 3) / 5) * 5)]);
+      const yt = y.ticks(4);
+      const m = {t: 10, r: 10, b: 22, l: measure(svg, yt.map((v) => v + '%')) + 8};
+      y.range([h - m.b, m.t]);
+      const x = d3.scaleTime().domain(xd).range([m.l, W - m.r]);
+      axes(svg, x, y, m, W, h, (v) => v + '%', yt);
+      const c = C[i % C.length];
+      svg.append('path').datum(pts).attr('fill', c).attr('opacity', 0.12)
+        .attr('d', d3.area().curve(d3.curveStepAfter).x((r) => x(r.t)).y0(h - m.b).y1((r) => y(r[k + '_rate'])));
+      svg.append('path').datum(pts).attr('fill', 'none').attr('stroke', c).attr('stroke-width', 2)
+        .attr('d', d3.line().curve(d3.curveStepAfter).x((r) => x(r.t)).y((r) => y(r[k + '_rate'])));
+      svg.append('circle').attr('cx', x(b.t)).attr('cy', y(b[k + '_rate'])).attr('r', 3.5).attr('fill', c);
+      const focus = svg.append('circle').attr('r', 4).attr('fill', c).style('display', 'none');
+      const bis = d3.bisector((r) => r.t).left;
+      svg.append('rect').attr('fill', 'transparent').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', h - m.t - m.b)
+        .on('pointermove', (ev) => {
+          const r = pts[Math.max(0, bis(pts, x.invert(d3.pointer(ev)[0])) - 1)];
+          focus.attr('cx', x(r.t)).attr('cy', y(r[k + '_rate'])).style('display', null);
+          showTip(ev, [[`${tfmt(r.t)} · ${r.commit}`, 'mute'], [`${name}: ${r[k + '_rate'].toFixed(2)}%`, 'strong'], [`${fmt(r[k + '_passing'])} passing`]]);
+        })
+        .on('pointerleave', () => { hideTip(); focus.style('display', 'none'); });
+    });
+  }
+
+  // ---- KPI drift ----
+  function renderKPI(D) {
+    const node = document.getElementById('c-kpi');
+    const rows = D.kpi.map((r) => ({...r, t: new Date(r.time)}));
+    const C = series();
+    const ser = KPIS.map(([k, n], i) => {
+      const p = rows.filter((r) => r[k] != null), base = p[0][k];
+      return {k, n, c: C[i % C.length], base, p: p.map((r) => ({t: r.t, v: (r[k] / base - 1) * 100}))};
+    });
+    node.replaceChildren();
+    const lg = el('div', {className: 'legend'});
+    ser.forEach((s) => { const sp = el('span'); const sw = el('i'); sw.style.background = s.c; sp.append(sw, s.n); lg.append(sp); });
+    node.append(lg);
+    const holder = el('div'); node.append(holder);
+    const {svg, W, h} = frame(holder, 300, 'Change of each speed KPI against its first measurement');
+    const all = ser.flatMap((s) => s.p.map((q) => q.v));
+    const y = d3.scaleLinear().domain([Math.min(-2, d3.min(all)), Math.max(2, d3.max(all))]).nice();
+    const yt = y.ticks(6);
+    const m = {t: 10, r: 12, b: 24, l: measure(svg, yt.map((v) => pct(v, 0))) + 10};
+    y.range([h - m.b, m.t]);
+    const x = d3.scaleTime().domain(d3.extent(rows, (r) => r.t)).range([m.l, W - m.r]);
+    axes(svg, x, y, m, W, h, (v) => pct(v, 0), yt);
+    svg.append('line').attr('class', 'zero').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(0)).attr('y2', y(0));
+    ser.forEach((s) => {
+      svg.append('path').datum(s.p).attr('fill', 'none').attr('stroke', s.c).attr('stroke-width', 1.6).attr('d', d3.line().x((q) => x(q.t)).y((q) => y(q.v)));
+      const e = s.p[s.p.length - 1]; svg.append('circle').attr('cx', x(e.t)).attr('cy', y(e.v)).attr('r', 3).attr('fill', s.c);
+    });
+    const focus = svg.append('line').attr('class', 'focus').attr('y1', m.t).attr('y2', h - m.b).style('display', 'none');
+    const bis = d3.bisector((r) => r.t).center;
+    svg.append('rect').attr('fill', 'transparent').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', h - m.t - m.b)
+      .on('pointermove', (ev) => {
+        const r = rows[bis(rows, x.invert(d3.pointer(ev)[0]))];
+        focus.attr('x1', x(r.t)).attr('x2', x(r.t)).style('display', null);
+        showTip(ev, [[`#${r.n + 1} · ${r.commit}${r.time_estimated ? ' (time estimated)' : ''}`, 'mute'], [r.change, 'strong'],
+          ...ser.filter((s) => r[s.k] != null).map((s) => [`${s.n}: ${pct((r[s.k] / s.base - 1) * 100)}`])]);
+      })
+      .on('pointerleave', () => { hideTip(); focus.style('display', 'none'); });
+  }
+
+  // ---- code size ----
+  function lines(node, rows, keys, label, yFmt) {
+    const C = series();
+    node.replaceChildren();
+    const lg = el('div', {className: 'legend'});
+    keys.forEach(([, n], i) => { const sp = el('span'); const sw = el('i'); sw.style.background = C[i]; sp.append(sw, n); lg.append(sp); });
+    node.append(lg);
+    const holder = el('div'); node.append(holder);
+    const {svg, W, h} = frame(holder, 240, label);
+    const y = d3.scaleLinear().domain([0, d3.max(rows, (r) => d3.max(keys, ([k]) => r[k]))]).nice();
+    const yt = y.ticks(5), last = rows[rows.length - 1];
+    const ends = keys.map(([k]) => yFmt(last[k]));
+    const m = {t: 10, r: measure(svg, ends) + 10, b: 24, l: measure(svg, yt.map(yFmt)) + 10};
+    y.range([h - m.b, m.t]);
+    const x = d3.scaleTime().domain(d3.extent(rows, (r) => r.t)).range([m.l, W - m.r]);
+    axes(svg, x, y, m, W, h, yFmt, yt);
+    let ly = keys.map(([k]) => y(last[k]));
+    if (ly.length === 2 && Math.abs(ly[0] - ly[1]) < 14) { const mid = (ly[0] + ly[1]) / 2, s = ly[0] <= ly[1] ? -7 : 7; ly = [mid + s, mid - s]; }
+    keys.forEach(([k], i) => {
+      svg.append('path').datum(rows).attr('fill', 'none').attr('stroke', C[i]).attr('stroke-width', 2).attr('d', d3.line().x((r) => x(r.t)).y((r) => y(r[k])));
+      svg.append('circle').attr('cx', x(last.t)).attr('cy', y(last[k])).attr('r', 3).attr('fill', C[i]);
+      svg.append('text').attr('class', 'lbl').attr('x', W - m.r + 6).attr('y', ly[i] + 4).text(ends[i]);
+    });
+    const bis = d3.bisector((r) => r.t).center;
+    const focus = svg.append('line').attr('class', 'focus').attr('y1', m.t).attr('y2', h - m.b).style('display', 'none');
+    svg.append('rect').attr('fill', 'transparent').attr('x', m.l).attr('y', m.t).attr('width', W - m.l - m.r).attr('height', h - m.t - m.b)
+      .on('pointermove', (ev) => {
+        const r = rows[bis(rows, x.invert(d3.pointer(ev)[0]))];
+        focus.attr('x1', x(r.t)).attr('x2', x(r.t)).style('display', null);
+        showTip(ev, [[`${tfmt(r.t)} · ${r.commit}`, 'mute'], ...keys.map(([k, n]) => [`${n}: ${fmt(r[k])}`])]);
+      })
+      .on('pointerleave', () => { hideTip(); focus.style('display', 'none'); });
+  }
+  function renderCode(D) {
+    const rows = D.loc.map((r) => ({...r, t: new Date(r.time)}));
+    lines(document.getElementById('c-loc'), rows, [['impl_lines', 'Implementation'], ['test_lines', 'Tests']], 'Lines of implementation and test code over time', si);
+    lines(document.getElementById('c-ecode'), rows, [['error_codes', 'Distinct error codes']], 'Distinct rustc error codes in the source over time', fmt);
+  }
+
+  // ---- sessions ----
+  function renderSessions(D) {
+    const rows = D.sessions.map((s) => ({...s, a: new Date(s.first), b: new Date(s.last)}));
+    const node = document.getElementById('c-sess'), C = series();
+    const {svg, W, h} = frame(node, rows.length * 32 + 34, 'Agent sessions: first to last commit');
+    const labels = rows.map((r) => `${r.session} · ${fmt(r.commits)} commits`);
+    const m = {t: 6, r: 12, b: 24, l: measure(svg, labels) + 14};
+    const x = d3.scaleTime().domain(d3.extent(D.hourly, (r) => new Date(r.hour))).range([m.l, W - m.r]);
+    const y = d3.scaleBand().domain(rows.map((r) => r.session)).range([m.t, h - m.b]).padding(0.3);
+    svg.append('g').attr('class', 'grid').attr('transform', `translate(0,${h - m.b})`).call(d3.axisBottom(x).ticks(ticksFor(W - m.l)).tickFormat(dfmt).tickSize(-(h - m.b - m.t)));
+    rows.forEach((r, i) => {
+      svg.append('text').attr('class', 'lbl').attr('x', m.l - 8).attr('y', y(r.session) + y.bandwidth() / 2 + 4).attr('text-anchor', 'end').text(labels[i]);
+      svg.append('rect').attr('x', x(r.a)).attr('y', y(r.session)).attr('width', Math.max(2, x(r.b) - x(r.a))).attr('height', y.bandwidth()).attr('rx', 3).attr('fill', C[i % C.length])
+        .on('pointermove', (ev) => showTip(ev, [[`${r.session} (…${r.session_id})`, 'mute'], [`${tfmt(r.a)} → ${tfmt(r.b)}`], [`${fmt(r.commits)} commits`]]))
+        .on('pointerleave', hideTip);
+    });
+  }
+
+  function renderDaily(D) {
+    document.querySelector('#t-daily tbody').replaceChildren(...D.daily.map((r) => {
+      const tr = el('tr');
+      const rate = (k) => (r[k + '_rate_end'] == null ? '—' : r[k + '_rate_end'].toFixed(1) + '%');
+      tr.append(el('td', {className: 'l mono'}, r.date), el('td', {}, fmt(r.commits)), el('td', {}, fmt(r.prs_merged)),
+        ...KINDS.map(([k]) => el('td', {}, rate(k))), el('td', {}, fmt(r.impl_lines_end)), el('td', {}, fmt(r.test_lines_end)));
+      return tr;
+    }));
+  }
+
+  let D = null;
+  function render() {
+    if (!D) return;
+    const S = summarize(D);
+    renderText(D, S); renderCommits(D); renderUI(D); renderKPI(D); renderCode(D); renderSessions(D); renderDaily(D);
+  }
+  // The data directory follows the repo-retrospective/v1 contract: read the manifest, then the files it names.
+  const getJSON = (f) => fetch(`data/${f}`).then((r) => { if (!r.ok) throw new Error(`${f}: ${r.status}`); return r.json(); });
+  getJSON('manifest.json')
+    .then((man) => {
+      if (man.contract !== 'repo-retrospective/v1') throw new Error(`unsupported contract ${man.contract}`);
+      const missing = NAMES.filter((n) => !man.datasets[n]);
+      if (missing.length) throw new Error(`manifest lacks ${missing.join(', ')}`);
+      return Promise.all(NAMES.map((n) => getJSON(man.datasets[n].file)));
+    })
+    .then((arr) => { D = Object.fromEntries(NAMES.map((n, i) => [n, arr[i]])); render(); })
+    .catch((e) => { document.getElementById('lede').textContent = `The data did not load (${e.message}). Run scripts/retro/extract.py --out site/dashboard/data.`; });
+  let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(render, 150); });
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
+})();
+</script>
+<script src="../nav.js"></script>
+</body>
+</html>
