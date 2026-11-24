@@ -6251,15 +6251,7 @@ fn moved_msg_lines(msg: &str, moved: &[(usize, usize)], user_lines: usize) -> St
 /// A bound whose text names a lifetime other than those a `for<..>` in it binds (a placeholder's bound is written
 /// without its own `for<'a>`: `FnLike<&'a isize, &'a isize>` names 'a, `Get<for<'b> fn(&'b u32)>` none)
 fn bound_names_lt(b: &str) -> bool {
-    let mut nested: Vec<&str> = vec![];
-    let mut rest = b;
-    while let Some(i) = rest.find("for") {
-        let after = rest[i + 3..].trim_start();
-        if let (true, Some(j)) = (after.starts_with('<'), after.find('>')) {
-            nested.extend(after[1..j].split(',').map(|l| l.trim()).filter(|l| l.starts_with('\'')));
-        }
-        rest = &rest[i + 3..];
-    }
+    let nested = acg::regionck::nested_binder_lts(b);
     let cs: Vec<(usize, char)> = b.char_indices().collect();
     let mut k = 0;
     while k < cs.len() {

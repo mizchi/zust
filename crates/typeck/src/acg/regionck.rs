@@ -548,6 +548,25 @@ fn proj_split(prog: &Program, pat: Ty, t: Ty, tree: &[u32], at: &mut usize, ss: 
     Some(())
 }
 
+/// The lifetimes a `for<..>` in a bound's text binds (`Get<for<'b> fn(&'b u32)>`: `'b`): those of a type within the
+/// bound, not the bound's own. `for` is the keyword only where no identifier goes on before it (`Bufferfor<'a>` is a
+/// type's name)
+pub fn nested_binder_lts(b: &str) -> Vec<&str> {
+    let mut nested = vec![];
+    let mut from = 0;
+    while let Some(i) = b[from..].find("for").map(|i| from + i) {
+        from = i + 3;
+        if b[..i].chars().next_back().is_some_and(|c| c.is_alphanumeric() || c == '_') {
+            continue;
+        }
+        let after = b[from..].trim_start();
+        if let (true, Some(j)) = (after.starts_with('<'), after.find('>')) {
+            nested.extend(after[1..j].split(',').map(|l| l.trim()).filter(|l| l.starts_with('\'')));
+        }
+    }
+    nested
+}
+
 /// The type arguments the bound of placeholder sid on trait tr writes (`FnLike<&'a isize, u8>`), and the lifetimes
 /// they name
 fn bound_targ_ptys(prog: &Program, sid: u32, tr: &str) -> Option<(Vec<PTy>, Vec<String>)> {
@@ -569,15 +588,7 @@ fn bound_targ_ptys(prog: &Program, sid: u32, tr: &str) -> Option<(Vec<PTy>, Vec<
     let args: Vec<PTy> = p.segs.last()?.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t.clone()) } else { None }).collect();
     // (the bound's own `for<'a>` is not in its text; a `for<'b>` there is a type's within it (`Get<for<'b> fn(&'b u32)>`),
     // whose lifetimes are that type's own: not the bound's)
-    let mut nested: Vec<String> = vec![];
-    let mut rest = b.as_str();
-    while let Some(i) = rest.find("for") {
-        let after = rest[i + 3..].trim_start();
-        if let (true, Some(j)) = (after.starts_with('<'), after.find('>')) {
-            nested.extend(after[1..j].split(',').map(|l| l.trim().to_string()).filter(|l| l.starts_with('\'')));
-        }
-        rest = &rest[i + 3..];
-    }
+    let nested = nested_binder_lts(b);
     let mut lts: Vec<String> = vec![];
     let cs: Vec<char> = b.chars().collect();
     let mut i = 0;
@@ -588,7 +599,7 @@ fn bound_targ_ptys(prog: &Program, sid: u32, tr: &str) -> Option<(Vec<PTy>, Vec<
                 j += 1;
             }
             let l: String = cs[i..j].iter().collect();
-            if l.len() > 1 && l != "'static" && l != "'_" && !lts.contains(&l) && !nested.contains(&l) {
+            if l.len() > 1 && l != "'static" && l != "'_" && !lts.contains(&l) && !nested.contains(&l.as_str()) {
                 lts.push(l);
             }
             i = j;
