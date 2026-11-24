@@ -74,10 +74,32 @@
 </code></pre>
 <p>TypeScript の <code>switch (event.kind)</code> に相当するのが <code>match event</code> です。<code>Received(n)</code> は <code>kind: &quot;received&quot;</code> のケースを選び、<code>units</code> の値を <code>n</code> に束縛します。たとえば <code>warehouse.ts</code> の union に <code>{ kind: &quot;returned&quot;; units: number }</code> を加えると、次のコンパイルで <code>delta</code> に分岐が足りないと分かります。</p>
 <p>配列の <code>fold(初期値, 関数)</code> は TypeScript の <code>reduce(関数, 初期値)</code> に対応します。ここでは合計だけを更新し、呼び出し側の配列には書き込みません。TypeScript の <code>number</code> フィールドは zustscript で <code>f64</code> として読めるので、集計の初期値も浮動小数点の <code>0.0</code> にしています。</p>
-<h2>生成したモジュールをアプリから呼ぶ</h2>
+<h2>生成された JavaScript と型定義を読む</h2>
 <p>リポジトリのルートで次を実行します。通常の <code>export fn</code> からは JavaScript と型定義が生成されます。補助関数の <code>delta</code> はこのモジュール内だけで使えます。</p>
 <pre><code class="language-bash"><span class='function'>cargo</span> run <span class='constant'>--manifest-path</span> crates/zustscript/Cargo.toml <span class='constant'>--</span> stock.zsc <span class='constant'>-o</span> out/stock
 </code></pre>
+<p><em>out/stock/stock.js の抜粋</em></p>
+<pre><code class="language-javascript"><span class='keyword'>import</span> <span class='punctuation bracket'>{</span> <span class='variable'>$fold</span> <span class='punctuation bracket'>}</span> <span class='keyword'>from</span> <span class='string'>&quot;./zsc-runtime.js&quot;</span><span class='punctuation delimiter'>;</span>
+<span class='keyword'>function</span> <span class='function'>delta</span><span class='punctuation bracket'>(</span><span class='variable parameter'>event</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>{</span>
+  <span class='keyword'>if</span> <span class='punctuation bracket'>(</span><span class='variable parameter'>event</span><span class='punctuation delimiter'>.</span><span class='property'>kind</span> <span class='operator'>===</span> <span class='string'>&quot;received&quot;</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>{</span>
+    <span class='keyword'>const</span> <span class='variable'>n</span> <span class='operator'>=</span> <span class='variable parameter'>event</span><span class='punctuation delimiter'>.</span><span class='property'>units</span><span class='punctuation delimiter'>;</span>
+    <span class='keyword'>return</span> <span class='variable'>n</span><span class='punctuation delimiter'>;</span>
+  <span class='punctuation bracket'>}</span> <span class='keyword'>else</span> <span class='punctuation bracket'>{</span>
+    <span class='keyword'>const</span> <span class='variable'>n$1</span> <span class='operator'>=</span> <span class='variable parameter'>event</span><span class='punctuation delimiter'>.</span><span class='property'>units</span><span class='punctuation delimiter'>;</span>
+    <span class='keyword'>return</span> <span class='operator'>-</span><span class='variable'>n$1</span><span class='punctuation delimiter'>;</span>
+  <span class='punctuation bracket'>}</span>
+<span class='punctuation bracket'>}</span>
+
+<span class='keyword'>export</span> <span class='keyword'>function</span> <span class='function'>stock_change</span><span class='punctuation bracket'>(</span><span class='variable parameter'>events</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>{</span>
+  <span class='keyword'>return</span> <span class='function'>$fold</span><span class='punctuation bracket'>(</span><span class='variable parameter'>events</span><span class='punctuation delimiter'>,</span> <span class='number'>0.0</span><span class='punctuation delimiter'>,</span> <span class='punctuation bracket'>(</span><span class='variable parameter'>total</span><span class='punctuation delimiter'>,</span> <span class='variable parameter'>event</span><span class='punctuation bracket'>)</span> <span class='operator'>=&gt;</span> <span class='variable parameter'>total</span> <span class='operator'>+</span> <span class='function'>delta</span><span class='punctuation bracket'>(</span><span class='variable parameter'>event</span><span class='punctuation bracket'>)</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
+<span class='punctuation bracket'>}</span>
+</code></pre>
+<p><code>match</code> は <code>event.kind</code> を調べる <code>if</code> に変わります。どちらの分岐も元のオブジェクトの <code>units</code> を直接読みます。<code>events.fold(...)</code> の呼び出し先は、生成されたランタイムから読み込む <code>$fold</code> です。</p>
+<p><em>out/stock/stock.d.ts の抜粋</em></p>
+<pre><code class="language-typescript"><span class='keyword'>export</span> <span class='keyword'>declare</span> <span class='keyword'>function</span> <span class='variable'>stock_change</span><span class='punctuation bracket'>(</span><span class='variable'>events</span>: <span class='keyword'>readonly</span> <span class='type'>StockEvent</span><span class='punctuation bracket'>[</span><span class='punctuation bracket'>]</span><span class='punctuation bracket'>)</span>: <span class='type'>f64</span><span class='punctuation delimiter'>;</span>
+</code></pre>
+<p><code>StockEvent</code> は元の <code>warehouse.ts</code> から取り込んだ型です。公開シグネチャでは <code>Array&lt;StockEvent&gt;</code> が <code>readonly StockEvent[]</code> になるため、アプリが持っている読み取り専用配列をそのまま渡せます。</p>
+<h2>TypeScript アプリから呼ぶ</h2>
 <p><em>同じディレクトリに置く try-stock.ts</em></p>
 <pre><code class="language-typescript"><span class='keyword'>import</span> <span class='keyword'>type</span> <span class='punctuation bracket'>{</span> <span class='constructor'>StockEvent</span> <span class='punctuation bracket'>}</span> <span class='keyword'>from</span> <span class='string'>&quot;./warehouse.ts&quot;</span><span class='punctuation delimiter'>;</span>
 <span class='keyword'>import</span> <span class='punctuation bracket'>{</span> <span class='variable'>stock_change</span> <span class='punctuation bracket'>}</span> <span class='keyword'>from</span> <span class='string'>&quot;./out/stock/stock.js&quot;</span><span class='punctuation delimiter'>;</span>
@@ -90,7 +112,7 @@
 <span class='variable builtin'>console</span><span class='punctuation delimiter'>.</span><span class='function'>log</span><span class='punctuation bracket'>(</span><span class='function'>stock_change</span><span class='punctuation bracket'>(</span><span class='variable'>events</span><span class='punctuation bracket'>)</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
 <span class='variable builtin'>console</span><span class='punctuation delimiter'>.</span><span class='function'>log</span><span class='punctuation bracket'>(</span><span class='function'>stock_change</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>[</span><span class='punctuation bracket'>]</span><span class='punctuation bracket'>)</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
 </code></pre>
-<p>Node.js 24 で <code>node try-stock.ts</code> を実行すると、順に <code>7</code> と <code>0</code> が表示されます。<code>out/stock/stock.d.ts</code> の引数は <code>readonly StockEvent[]</code> で、元の TypeScript の型を参照しています。生成された JS は渡されたオブジェクトの <code>kind</code> と <code>units</code> を直接読みます。</p>
+<p>Node.js 24 で <code>node try-stock.ts</code> を実行すると、順に <code>7</code> と <code>0</code> が表示されます。</p>
 <p>画面の状態やイベントはこのように JS のモジュールで扱えます。配列の計算などを Wasm で試したくなったら、対応する関数に <code>@wasm</code> を付けます。座標を渡す例で、TypeScript 側の呼び出し方と Wasm に渡る値を確認できます。<a href="index.html">zustscript 入門</a> · <a href="rust-costs.html">Rust から見る変換コスト</a></p>
     </article>
   </main>
