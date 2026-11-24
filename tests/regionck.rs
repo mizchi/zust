@@ -3837,3 +3837,120 @@ fn part24_review_2() {
     // (accepted, as in rustc: a Copy struct and an `Option<&u8>`)
     assert_eq!(check_ed("#[derive(Clone, Copy)]\nstruct P(u8);\nfn main() {\n    let t = (P(1), Some(&2u8));\n    let (mut a, mut b) = &t;\n    a.0 += 1;\n    b = None;\n    let _ = (a, b);\n}\n", 2021), vec![]);
 }
+
+#[test]
+fn part25_placeholder_assoc_type_outlives() {
+    // (a placeholder's associated type is a type of its own: what it outlives is what the trait declares, what the
+    // function's where clauses say, and what its parameter and the bound's lifetimes all outlive
+    // (nll/ty-outlives/projection-where-clause-*.rs))
+    let bar = "fn bar<'a, T>() -> &'a () where T: 'a { &() }\nfn main() {}\n";
+    let d = check(&format!("trait MyTrait<'a> {{ type Output; }}\nfn foo<'a, T>() -> &'a () where T: MyTrait<'a> {{\n    bar::<T::Output>()\n}}\n{bar}"));
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("the associated type `<T as MyTrait<'a>>::Output` may not live long enough") && d[0].1.contains("E0309"), "{d:?}");
+    let d = check(&format!("trait MyTrait {{ type Output; }}\nfn foo<'a, T>() -> &'a () where T: MyTrait {{\n    bar::<T::Output>()\n}}\n{bar}"));
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0309"), "{d:?}");
+    // (a where clause of another lifetime that is not known to outlive 'a)
+    let d = check(&format!("trait MyTrait<'a> {{ type Output; }}\nfn foo1<'a, 'b, T>() -> &'a () where T: MyTrait<'a>, <T as MyTrait<'a>>::Output: 'b {{\n    bar::<T::Output>()\n}}\n{bar}"));
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    // (accepted: the where clause, with `'b: 'a`, or of 'a; the trait's `type Output: 'a`; `T: 'a` with the trait's
+    // 'a; `T: 'static` and a trait with no lifetime)
+    for src in [
+        "trait MyTrait<'a> { type Output; }\nfn foo2<'a, 'b, T>() -> &'a () where T: MyTrait<'a>, <T as MyTrait<'a>>::Output: 'b, 'b: 'a {\n    bar::<T::Output>()\n}\n",
+        "trait MyTrait<'a> { type Output; }\nfn foo<'a, T>() -> &'a () where T: MyTrait<'a>, T::Output: 'a {\n    bar::<T::Output>()\n}\n",
+        "trait MyTrait<'a> { type Output: 'a; }\nfn foo<'a, T>() -> &'a () where T: MyTrait<'a> {\n    bar::<T::Output>()\n}\n",
+        "trait MyTrait<'a> { type Output; }\nfn foo<'a, T>() -> &'a () where T: MyTrait<'a> + 'a {\n    bar::<T::Output>()\n}\n",
+        "trait MyTrait { type Output; }\nfn foo<'a, T: 'static>() -> &'a () where T: MyTrait {\n    bar::<T::Output>()\n}\n",
+    ] {
+        assert_eq!(check(&format!("{src}{bar}")), vec![], "{src}");
+    }
+}
+
+#[test]
+fn part25_path_type_arg_ref_to_placeholder() {
+    // (a type argument a path writes that is a reference to a placeholder's type is well formed: `wf::<&'x T>()`
+    // requires T: 'x, which `&'x T::Foo` does not imply (regions/regions-implied-bounds-projection-gap-1.rs); `&'x T`
+    // and `&'x T::Foo` as the parameter's type imply what their own use needs)
+    let src = "trait Trait1<'x> { type Foo; }\nfn wf<T>() {}\nfn func<'x, T: Trait1<'x>>(_t: &'x T::Foo) {\n    wf::<&'x T>();\n}\nfn caller2<'x, T: Trait1<'x>>(_t: &'x T) {\n    wf::<&'x T::Foo>();\n}\nfn caller3<'x, T: Trait1<'x>>(_t: &'x T::Foo) {\n    wf::<&'x T::Foo>();\n}\nfn main() {}\n";
+    let d = check(src);
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("the parameter type `T` may not live long enough"), "{d:?}");
+    // (a where clause on a type the summaries do not read (a type alias of a projection): nothing is required of the
+    // placeholder's associated types (nll/ty-outlives/issue-53789-1.rs))
+    let src = "trait Tr<'a> { type S; }\ntype SFor<A> = <A as Tr<'static>>::S;\nfn need<K: 'static>() {}\nfn f<A: Tr<'static>>() where SFor<A>: 'static {\n    need::<A::S>();\n}\nfn main() {}\n";
+    assert_eq!(check(src), vec![]);
+}
+
+#[test]
+fn part25_where_clause_self_invariant() {
+    // (a callee's `G: Get` filled by a type only the caller's where clause makes implement Get (`&'max G: Get`, no
+    // impl for a reference): the type is the where clause's, and `Self` is invariant (variance/variance-*-self-trait-
+    // match.rs))
+    let src = "trait Get { fn get(&self); }\nfn get_min_from_max<'min, 'max, G>() where 'max: 'min, G: 'max, &'max G: Get {\n    impls_get::<&'min G>();\n}\nfn impls_get<G>() where G: Get {}\nfn main() {}\n";
+    let d = check(src);
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (the same lifetime, or two known to be equal: accepted, as in rustc)
+    let src = "trait Get { fn get(&self); }\nfn ok1<'a, G: 'a>() where &'a G: Get { impls_get::<&'a G>(); }\nfn ok2<'min, 'max, G: 'max>() where 'max: 'min, 'min: 'max, &'max G: Get { impls_get::<&'min G>(); }\nfn impls_get<G>() where G: Get {}\nfn main() {}\n";
+    assert_eq!(check(src), vec![]);
+}
+
+#[test]
+fn part25_assoc_placeholder_copy() {
+    // (a placeholder's associated type is taken for Copy: its trait's where clause may make it so
+    // (associated-type-bounds/assoc-type-bound-through-where-clause.rs, rustc accepts it))
+    assert_eq!(check("trait Op where Self::Output: Copy { type Output; }\nfn duplicate<T: Op>(x: T::Output) -> (T::Output, T::Output) {\n    (x, x)\n}\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part25_assoc_placeholder_as_typeck_finds_it() {
+    // (an associated type an impl gives (`impl<T> Trait for T { type Assoc = T; }`) is that type, not a placeholder of
+    // its own, in the region check as in typeck: the body's values are of it)
+    assert_eq!(check("trait Trait { type Assoc; }\nimpl<T> Trait for T { type Assoc = T; }\nfn id<'a, T: Trait>(x: T::Assoc, _r: &'a u8) -> T::Assoc { let y = x; y }\nfn main() {}\n"), vec![]);
+    // (the message names the placeholder's type by its parameter: no `#`)
+    let d = check("trait MyTrait { type Output; }\nfn foo<'a, T>() -> &'a () where T: MyTrait {\n    bar::<T::Output>()\n}\nfn bar<'a, T>() -> &'a () where T: 'a { &() }\nfn main() {}\n");
+    assert!(d.len() == 1 && !d[0].1.contains('#'), "{d:?}");
+}
+
+#[test]
+fn part25_assoc_value_trait_bound() {
+    // (an impl's associated type's value outlives what its trait's declaration bounds it by, with the trait's
+    // lifetimes the impl's trait path writes (E0477, regions/regions-assoc-type-*-bound-in-trait-not-met.rs))
+    let d = check("trait Foo<'a> { type Value: 'a; }\nimpl<'a> Foo<'static> for &'a i32 {\n    type Value = &'a i32;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0477"), "{d:?}");
+    let d = check("trait Foo { type Value: 'static; }\nimpl<'a> Foo for &'a i32 {\n    type Value = &'a i32;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0477"), "{d:?}");
+    // (accepted: the same lifetime, one the header makes outlive it, 'static, a lifetime a `for<..>` binds)
+    assert_eq!(check("trait Foo<'a> { type Value: 'a; }\nimpl<'a> Foo<'a> for &'a i16 { type Value = &'a i32; }\nimpl<'a: 'b, 'b> Foo<'b> for &'a i64 { type Value = &'a i32; }\nimpl<'a> Foo<'a> for &'a u8 { type Value = &'static i32; }\nimpl<'a> Foo<'a> for &'a u16 { type Value = for<'x> fn(&'x u8); }\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part25_review() {
+    // (a callee's `V::Out` is of the placeholder that fills V (`take::<U>(x)`), not the caller's parameter at V's
+    // place: accepted, as in rustc; and a real requirement through it is still found)
+    assert_eq!(check("trait Tr { type Out; }\nfn take<V: Tr>(_: &V::Out) {}\nfn f<'a, T: Tr, U: Tr>(x: &'a U::Out) {\n    take::<U>(x);\n}\nfn main() {}\n"), vec![]);
+    let d = check("trait Tr { type Out; }\nfn take<'b, V: Tr>(_: &'b V::Out) -> &'b V::Out { loop {} }\nfn bad<'a, T: Tr, U: Tr>(x: &'a U::Out) -> &'static U::Out {\n    take::<U>(x)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (a type alias in the associated type's value is not read for E0477: `type Erased<'a> = ();` names a lifetime
+    // its body does not use)
+    assert_eq!(check("type Erased<'a> = ();\ntrait Foo { type Value: 'static; }\nimpl<'a> Foo for &'a i32 {\n    type Value = Erased<'a>;\n}\nfn main() {}\n"), vec![]);
+    // (an impl in a fn body: E0477 at the line it is written on)
+    let d = check("trait Foo { type Value: 'static; }\nfn main() {\n    let _x = 1;\n    impl<'a> Foo for &'a i32 {\n        type Value = &'a i32;\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0477"), "{d:?}");
+}
+
+#[test]
+fn part25_review_2() {
+    // (two where clauses on the same type with the same trait, other arguments: which one meets a callee's bound is
+    // not known from the trees, so neither is taken; one that fits alone still is)
+    assert_eq!(check("trait Get<T> {}\nfn need8<X: Get<u8>>() {}\nfn need16<X: Get<u16>>() {}\nfn caller<'a, 'b, G: 'a + 'b>()\nwhere\n    &'a G: Get<u8>,\n    &'b G: Get<u16>,\n{\n    need8::<&'a G>();\n    need16::<&'b G>();\n}\nfn main() {}\n"), vec![]);
+    let d = check("trait Get<T> {}\nfn need8<X: Get<u8>>() {}\nfn caller<'a, 'b: 'a, G: 'b>()\nwhere\n    &'b G: Get<u8>,\n{\n    need8::<&'a G>();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (E0477: what the trait's type arguments in the impl's header imply is known (`&'a &'b ()`: 'b: 'a))
+    assert_eq!(check("trait Foo<'a, T> { type Value: 'a; }\nimpl<'a, 'b> Foo<'a, &'a &'b ()> for () { type Value = &'b i32; }\nfn main() {}\n"), vec![]);
+    let d = check("trait Foo<'a, T> { type Value: 'a; }\nimpl<'a, 'b> Foo<'a, &'b ()> for () { type Value = &'b i32; }\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0477"), "{d:?}");
+    // (a value with a where clause of its own (`where Self: 'b`) is not checked: the clause is not read)
+    assert_eq!(check("trait Foo<'a> { type Value: 'a where Self: 'a; }\nimpl<'a, 'b> Foo<'b> for &'a i32 { type Value = &'a i32 where Self: 'b; }\nfn main() {}\n"), vec![]);
+    // (a self type whose declaration bounds its lifetime (`struct Static<'a: 'static>`) implies the bound: not
+    // checked; one that does not is)
+    assert_eq!(check("struct Static<'a: 'static>(&'a ());\ntrait Foo { type Value: 'static; }\nimpl<'a> Foo for Static<'a> {\n    type Value = &'a ();\n}\nfn main() {}\n"), vec![]);
+    let d = check("struct W<'a>(&'a ());\ntrait Foo { type Value: 'static; }\nimpl<'a> Foo for W<'a> {\n    type Value = &'a ();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0477"), "{d:?}");
+}

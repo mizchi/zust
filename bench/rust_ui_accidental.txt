@@ -73,3 +73,5 @@ compile-fail	dst/dst-bad-deep.rs
 compile-fail	dst/dst-bad-deep-2.rs
 compile-fail	iterators/rpit-method-chain-no-ice.rs
 compile-fail	span/send-is-not-static-std-sync-2.rs
+compile-fail	pin-macro/pin_move.rs
+compile-fail	parser/macro/kw-in-const-item-pos-recovery-149692.rs
