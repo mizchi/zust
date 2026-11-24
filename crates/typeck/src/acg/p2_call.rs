@@ -3097,8 +3097,18 @@ impl Cx<'_> {
             }
             // (also where a type parameter the call already knows is a `&mut` (`v.push(c.raw)` with v: `Vec<&mut T>`),
             // as rustc's coercion to the expected type)
-            if matches!(pt, Ty::Ref(true, _)) || matches!(self.prog.partial_subst(pt, &sol), Ty::Ref(true, _)) {
-                self.bk_reborrow_arg(a);
+            // (and where a `&` is: a shared reborrow, `pick(x, &b)` is `pick(&*x, &b)`)
+            // (without the region check, a result the signature says borrows from the argument holds the reborrow:
+            // `let r = pick(x, &b); *x = 1; use(r)` is E0506)
+            match (pt, self.prog.partial_subst(pt, &sol)) {
+                (Ty::Ref(m, _), _) | (_, Ty::Ref(m, _)) => {
+                    if let Some(ln) = self.bk_reborrow_arg(a, m) {
+                        if !self.rg.on && self.bk_ret_from(id, i + skip) {
+                            self.bk.src(borrowck::Src::Loan(ln));
+                        }
+                    }
+                }
+                _ => {}
             }
             // (a closure written where a bound wants `Fn` / `FnMut`: it is that, so its body moving out what it captures
             // by value (`|| { let s = val; }`) is E0507, at the move. Passed by name, it is E0525 (above))

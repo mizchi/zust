@@ -1491,6 +1491,11 @@ impl Cx<'_> {
             if vt == Ty::Never {
                 return Ok((None, Ty::Never));
             }
+            // (a field's value is a coercion site: a place of a `&mut` where a reference is expected is reborrowed, and
+            // the value holds the loan (`S { f: x }` with `f: &i32`, then `*x = 1` while it lives, E0506))
+            if let Some(w @ Ty::Ref(..)) = exp {
+                self.bk_reborrow_let(e, w);
+            }
             if inst.is_none() {
                 self.prog.match_ty(gen_fields[fi].1, vt, &mut sol);
             }

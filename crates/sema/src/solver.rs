@@ -322,7 +322,7 @@ impl Solver<'_> {
                     self.link(b, a)
                 }
             }
-            (Some(Shape::Ref(_, x)), Some(Shape::Ref(_, y))) => {
+            (Some(Shape::Ref(ma, x)), Some(Shape::Ref(mb, y))) => {
                 // `&T` と `&dyn Trait`: 強制変換なので中身は単一化せず、dyn の方を代表にする
                 let is_dyn = |s: &mut Self, v: u32| {
                     let r = s.find(v);
@@ -398,7 +398,9 @@ impl Solver<'_> {
                             self.unify(x, i);
                             return;
                         }
-                        if !coerce {
+                        // (`&mut T` を `&T` に渡すのも強制変換: つなぐと、`let x = &mut v; f(x);` (f が `&T` を取る) の
+                        //  x が `&T` になり、後の `*x = ..` を `&` 越しの書き込みとしてしまう)
+                        if !coerce && ma == mb {
                             self.link(a, b);
                         }
                         self.unify(x, y);

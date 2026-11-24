@@ -1354,6 +1354,11 @@ impl Cx<'_> {
                 let t = p.ty();
                 self.bk_frame();
                 let r = self.expr(right, Some(t));
+                // (a place of a `&mut` assigned where a reference is: reborrowed, as at a `let` (`x = y;` is `x = &mut
+                // *y`; `*y = 1` while x lives is E0506))
+                if let (true, Ty::Ref(..)) = (r.is_ok(), t) {
+                    self.bk_reborrow_let(right, t);
+                }
                 let srcs = self.bk_frame_end();
                 let cur = self.b.live_block();
                 for (b, e) in lhs_evs {
@@ -3248,13 +3253,20 @@ impl Cx<'_> {
             Indirect::Ptr(_) => None,
         };
         let mut vals = vec![];
+        let mut reborrows = vec![];
         for (a, &pt) in args.iter().zip(params) {
             let (mut v, mut t) = self.expr(a, Some(pt))?;
             if t == Ty::Never {
                 return Ok((None, Ty::Never));
             }
-            if matches!(pt, Ty::Ref(true, _)) {
-                self.bk_reborrow_arg(a);
+            // (without the region check, the reborrow by the argument's place, for a result that borrows from it
+            // (Bk::fnptr_reborrows): `let r = f(x); *x = 1; use(r)` with `f: fn(&i32) -> &i32` is E0506)
+            if let Ty::Ref(m, _) = pt {
+                if let Some(ln) = self.bk_reborrow_arg(a, m) {
+                    if !self.rg.on {
+                        reborrows.push((vals.len(), ln));
+                    }
+                }
             }
             // (`&Box<T>` / `&&T` を `&T` の引数に: deref の強制変換)
             while let (Ty::Ref(_, _), Ty::Ref(m, inner @ (Ty::Ref(..) | Ty::Box(_))), Some(val)) = (pt, t, v) {
@@ -3270,6 +3282,7 @@ impl Cx<'_> {
             self.same(SP, t, pt)?;
             vals.push(v);
         }
+        self.bk.fnptr_reborrows = reborrows;
         let fp = match callee {
             Indirect::Vtable(fat, idx) => {
                 let vt = self.b.ins().load(PTR, mf(), fat, 8);
@@ -4056,6 +4069,12 @@ impl Cx<'_> {
                 if holds && !static_ret {
                     let from: Vec<usize> = f.params.iter().enumerate().filter(|(_, p)| self.bk_ty(**p).1).map(|(i, _)| i).collect();
                     self.bk_frame_end_call_from(&args, &from);
+                    // (and the reborrows of those arguments' places of a `&mut`, without the region check)
+                    for (i, ln) in std::mem::take(&mut self.bk.fnptr_reborrows) {
+                        if from.contains(&i) {
+                            self.bk.src(borrowck::Src::Loan(ln));
+                        }
+                    }
                     return r;
                 }
                 r

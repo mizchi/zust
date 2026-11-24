@@ -716,11 +716,23 @@ pub fn expand(items: Vec<Item>, base: &Path) -> Result<Vec<Item>, Vec<TsError>> 
     let mut files: HashMap<PathBuf, TsFile> = HashMap::new();
     // (a type read once even when two imports, or two records, need it)
     let mut done: HashSet<(PathBuf, String)> = HashSet::new();
+    // (and a TS type already here, brought in with a function of another zustscript module: that file's type, once)
+    for it in &items {
+        if let Item::Record { name, from: Some(f), .. } | Item::Enum { name, from: Some(f), .. } = it {
+            if f.zsc.is_none() {
+                done.insert((f.path.clone(), name.clone()));
+            }
+        }
+    }
     for it in items {
-        let Item::ImportType { names, from, pos } = it else {
+        let Item::ImportType { names, from, values, pos } = it else {
             out.push(it);
             continue;
         };
+        if values {
+            errs.push(TsError { file: None, pos, msg: format!("`{from}`: a TS file gives types only: `import type {{ .. }} from \"{from}\";` (functions from JS come in as `extern fn`)") });
+            continue;
+        }
         let path = base.join(&from);
         if !from.starts_with("./") && !from.starts_with("../") {
             errs.push(TsError { file: None, pos, msg: format!("`{from}`: zsc reads TS files by a relative path for now (`./model.ts`), not packages") });
@@ -763,12 +775,12 @@ pub fn expand(items: Vec<Item>, base: &Path) -> Result<Vec<Item>, Vec<TsError>> 
             match f.decl(&n) {
                 Ok((Read::Record(fields, members), uses)) => {
                     todo.extend(uses.into_iter().map(|(u, up)| (u, up, false)));
-                    recs.push(Item::Record { name: n, params: vec![], fields, pos: at, from: Some(TsFrom { path: abs.clone(), exported, members, text: String::new(), repr: None }) });
+                    recs.push(Item::Record { name: n, params: vec![], fields, pos: at, from: Some(TsFrom { path: abs.clone(), exported, members, text: String::new(), repr: None, zsc: None }) });
                 }
                 Ok((Read::Enum(variants, repr, text), uses)) => {
                     todo.extend(uses.into_iter().map(|(u, up)| (u, up, false)));
                     let variants = variants.into_iter().map(|(v, ts)| (v, ts, None)).collect();
-                    recs.push(Item::Enum { name: n, params: vec![], variants, pos: at, from: Some(TsFrom { path: abs.clone(), exported, members: vec![], text, repr: Some(repr) }) });
+                    recs.push(Item::Enum { name: n, params: vec![], variants, pos: at, from: Some(TsFrom { path: abs.clone(), exported, members: vec![], text, repr: Some(repr), zsc: None }) });
                 }
                 Err(e) => errs.push(e),
             }
@@ -781,6 +793,10 @@ pub fn expand(items: Vec<Item>, base: &Path) -> Result<Vec<Item>, Vec<TsError>> 
 /// The module specifier of TS file `ts` from directory `dir` (where the `.d.ts` is written), as TS resolves it from
 /// a `.d.ts` next to ES modules: `./model.ts` → `./model.js`
 pub fn specifier(dir: &Path, ts: &Path) -> String {
+    // (a type from another zustscript module: its specifier as the import wrote it, `./lib.js`)
+    if let Some(s) = ts.to_str().filter(|s| s.starts_with("./") || s.starts_with("../")) {
+        return s.to_string();
+    }
     let dir = std::fs::canonicalize(dir).unwrap_or(dir.to_path_buf());
     let a: Vec<_> = dir.components().collect();
     let b: Vec<_> = ts.components().collect();

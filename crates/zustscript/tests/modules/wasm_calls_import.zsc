@@ -1,0 +1,4 @@
+// (tests/examples.rs: an @wasm fn uses imported types, but cannot call an imported function: it is JS here)
+import { Point, Shape, area } from "./shapes.zsc";
+@wasm export fn norm(p: Point) -> f64 { p.x * p.x + p.y * p.y }
+@wasm export fn a2(s: Shape) -> f64 { area(s) }

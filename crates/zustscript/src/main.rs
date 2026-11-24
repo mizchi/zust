@@ -22,6 +22,7 @@ mod lower;
 mod own;
 mod simd;
 mod tsimport;
+mod zscimport;
 mod parse;
 mod wasm;
 
@@ -87,9 +88,10 @@ fn main() {
             std::process::exit(1);
         }
     };
-    // `import type`: the records of TS files
+    // `import { .. } from "./lib.zsc"`: the types and functions of other modules; `import type`: the records of TS files
     let base = input.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-    let items = match tsimport::expand(items, &base) {
+    let key = std::fs::canonicalize(&input).unwrap_or(input.clone());
+    let items = match zscimport::expand(items, &base, &mut vec![key]).and_then(|items| tsimport::expand(items, &base)) {
         Ok(i) => i,
         Err(errs) => {
             for e in &errs {

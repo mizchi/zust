@@ -351,11 +351,14 @@ impl Parser {
                 let body = self.block()?;
                 Ok(Item::Fn { name, public, wasm, simd, relaxed, generics, bounds, args, ret, body, pos })
             }
-            // `import type { User, Post } from "./model.ts";`
+            // `import type { User, Post } from "./model.ts";` / `import { greet, Shape } from "./lib.zsc";`
             "import" => {
-                let (t, tpos) = self.ident()?;
-                if t != "type" {
-                    return Err((tpos, "zsc imports only types for now: `import type { User } from \"./model.ts\";`".into()));
+                let values = self.is("{")?;
+                if !values {
+                    let (t, tpos) = self.ident()?;
+                    if t != "type" {
+                        return Err((tpos, "expected `import { .. } from \"./lib.zsc\";` or `import type { .. } from \"./model.ts\";`".into()));
+                    }
                 }
                 self.expect("{")?;
                 let mut names = vec![];
@@ -369,10 +372,10 @@ impl Parser {
                 }
                 let from = match self.next()? {
                     Tok { t: T::Str(s), .. } => s,
-                    t => return Err((t.pos, "expected the TS file's path as a string".into())),
+                    t => return Err((t.pos, "expected the file's path as a string".into())),
                 };
                 self.expect(";")?;
-                Ok(Item::ImportType { names, from, pos })
+                Ok(Item::ImportType { names, from, values, pos })
             }
             "extern" => {
                 let module = match &self.peek()?.t {
