@@ -3516,6 +3516,12 @@ fn part20_closure_fnptr_annotated() {
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
     let d = check("fn main() {\n    let g: fn(&u32) = |_: &'static u32| {};\n    g(&1);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (passed to a parameter of such a type, a summary's or not)
+    for src in ["fn want(_f: fn(&u32)) {}\nfn main() {\n    want(|_: &'static u32| {});\n}\n", "fn want<'b>(_f: for<'x> fn(&'x u32) -> &'x u32, _y: &'b u32) {}\nfn main() {\n    want(|x: &'static u32| x, &1);\n}\n"] {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{src}: {d:?}");
+    }
+    assert_eq!(check("fn want(_f: fn(&u32)) {}\nfn want2<'a>(_f: fn(&'a u32), _x: &'a u32) {}\nfn want3(_f: fn(&'static u32)) {}\nstatic X: u32 = 1;\nfn main() {\n    want2(|_: &'static u32| {}, &X);\n    want3(|_: &'static u32| {});\n    want(|_: &u32| {});\n}\n"), vec![]);
     let d = check("fn b<'a>(_: &'a ()) {\n    let _: for<'x> fn(&'x ()) = |_: &'static ()| {};\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
     // (not where the type names the lifetime too, nor an annotation that names none)

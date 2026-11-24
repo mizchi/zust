@@ -3113,6 +3113,33 @@ impl Cx<'_> {
         // (the prelude writes no lifetimes: what its results borrow is not known from elision. A closure's call
         // elides as a fn)
         let prelude = prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= prog.prelude_from) && !prog.closures.contains_key(&id);
+        // (a closure passed where a fn pointer type binds the region of a parameter it annotates with one of the
+        // function's lifetimes (`want(|_: &'static u32| {})` with `fn want(f: fn(&u32))`): as in a `let`
+        // (rg_closure_fnptr). Without a summary, every region of the type is one it binds)
+        for (i, &pt) in sig0.params.iter().enumerate() {
+            let Ty::Fn(ft) = pt else { continue };
+            let Some(c) = i.checked_sub(has_recv as usize).and_then(|j| args.get(j)).map(|a| super::strip_paren(a)) else { continue };
+            let Expr::Closure(_, inputs, ..) = c else { continue };
+            if inputs.len() != ft.params.len() || !inputs.iter().any(|(_, x)| x.as_ref().is_some_and(crate::regions::names_lt)) {
+                continue;
+            }
+            let Some(ns) = ft.params.iter().map(|&t| count(prog, t, 0)).collect::<Option<Vec<usize>>>() else { continue };
+            let all: Vec<u8> = match codes(i) {
+                None => vec![CLO_P; ns.iter().sum()],
+                Some([R_FN, rest @ ..]) if Some(rest.len()) == count(prog, ft.ret, 0).map(|r| r + ns.iter().sum::<usize>()) => {
+                    rest.iter().map(|&x| if x == R_BOUND { CLO_P } else { CLO_E }).collect()
+                }
+                Some(_) => continue,
+            };
+            let mut per = vec![];
+            let mut at = 0;
+            for &n in &ns {
+                per.push(all[at..at + n].to_vec());
+                at += n;
+            }
+            let params = ft.params.clone();
+            self.rg_closure_ann_bound(c, &per, &params);
+        }
         // (which parameters a fn item is passed to (`want(baz)`), by the parameter's index)
         let fn_item_args: Vec<bool> = (0..sig0.params.len())
             .map(|i| i.checked_sub(has_recv as usize).and_then(|j| args.get(j)).is_some_and(|a| self.fn_item(super::strip_paren(a)).is_some()))
