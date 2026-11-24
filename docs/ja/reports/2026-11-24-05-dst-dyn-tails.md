@@ -120,6 +120,8 @@ yes・maybe・no で返す) があった。2 つが出会うのはインスタ�
   - 境界で縛った関連型が一致しない impl への E0119 (`impl<T: Select<Item = u8>> Mark for T` と `impl Mark for u8`、
     u8 の `Item = u16`)。
   - `impl<const N: usize> Foo<N> for Const<N>` に対する `foo(Const)`。
+  - impl 自身の where 句が与えるスーパートレイト (`impl<T> Child for W<T> where W<T>: Parent`)。数えるのは self 型
+    そのもの (か `Self`) についての述語だけで、`where T: Parent` は今も E0277。
 - main が報告していて見逃すようになっていたエラーを戻した: `impl Mark for u8` だけがあるときの `require::<i32>()`。
   solver はゴールの i32 を、zustc が早く既定の型にしたリテラルかもしれないので任意の整数として扱う。turbofish の
   ある呼び出しでは型が書かれているので、厳密に確かめる。

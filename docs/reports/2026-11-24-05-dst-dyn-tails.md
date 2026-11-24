@@ -119,7 +119,9 @@ From the review of the pull request, each checked against rustc with a program o
   - `where Self: Child` with `trait Child: Parent` for `<Self as Parent>::A`;
   - E0119 for an impl whose bound binds an associated type that does not match
     (`impl<T: Select<Item = u8>> Mark for T` and `impl Mark for u8` with u8's `Item = u16`);
-  - `foo(Const)` against `impl<const N: usize> Foo<N> for Const<N>`.
+  - `foo(Const)` against `impl<const N: usize> Foo<N> for Const<N>`;
+  - a supertrait the impl's own where clause gives (`impl<T> Child for W<T> where W<T>: Parent`). Only a predicate
+    on the self type itself (or `Self`) counts: `where T: Parent` is still E0277.
 - A missed error main reported, back: `require::<i32>()` with only `impl Mark for u8`. The solver takes a goal's
   i32 for any integer, for a literal zustc defaulted early; a call with a turbofish has its types written, and is
   checked strictly.

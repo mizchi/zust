@@ -1899,9 +1899,22 @@ impl Session2 {
                 let assumed: Vec<String> = {
                     let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
                     let head = text.split('{').next().unwrap_or("");
+                    // (only a predicate on the impl's self type itself (or `Self`): `where T: Parent` gives nothing
+                    // about `W<T>`)
+                    let squash = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+                    let self_txt = head.rfind(" for ").map(|i| {
+                        let rest = &head[i + 5..];
+                        let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+                        let end = rest.match_indices("where").find(|(j, _)| ok(rest[..*j].chars().next_back()) && ok(rest[j + 5..].chars().next())).map_or(rest.len(), |(j, _)| j);
+                        squash(&rest[..end])
+                    });
                     where_preds(head)
                         .unwrap_or_default()
                         .into_iter()
+                        .filter(|(subj, _)| {
+                            let subj = squash(subj);
+                            subj == "Self" || self_txt.as_deref() == Some(subj.as_str())
+                        })
                         .flat_map(|(_, bs)| bs)
                         .map(|b| {
                             let b = b.trim().split('<').next().unwrap_or("").trim().to_string();

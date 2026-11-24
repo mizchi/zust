@@ -1321,6 +1321,9 @@ fn review_three_cases() {
         let d = check(src);
         assert!(d.is_empty(), "{src}\n{d:?}");
     }
+    // (a predicate on another subject gives nothing about the self type: `T: Parent` is not `W<T>: Parent`)
+    let d = check("trait Parent {}\ntrait Child: Parent {}\nstruct W<T>(T);\nimpl<T: Copy> Parent for W<T> {}\nimpl<T> Child for W<T> where T: Parent {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("Parent"), "{d:?}");
     let d = check("trait Local {}\nstruct S;\nfn f(b: bool) -> impl Local { if b { S } else { S } }\nfn main() { let _ = f(true); }\n");
     assert!(d.len() == 1 && d[0].msg.contains("S: Local"), "{d:?}");
     let d = check("struct S<T: ?Sized> { a: u8, tail: T }\nfn main() { let r: &S<[u8]> = &S { a: 1, tail: [1, 2] }; let _m = r.tail; let _ = r.a; }\n");
