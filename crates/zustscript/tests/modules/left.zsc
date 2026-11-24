@@ -1,0 +1,2 @@
+import { Shared } from "./common.zsc";
+export fn left(n: i32) -> Shared { Shared { n } }

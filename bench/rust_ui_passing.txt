@@ -1004,6 +1004,7 @@ run-pass	borrowck/issue-23338-params-outlive-temps-of-body.rs
 compile-fail	borrowck/issue-24267-flow-exit.rs
 compile-fail	borrowck/issue-31287-drop-in-guard.rs
 compile-fail	borrowck/issue-33819.rs
+compile-fail	borrowck/issue-36082.rs
 compile-fail	borrowck/issue-41962.rs
 compile-fail	borrowck/issue-42344.rs
 compile-fail	borrowck/issue-45199.rs
@@ -4664,6 +4665,7 @@ compile-fail	moves/moves-sru-moved-field.rs
 compile-fail	moves/needs-clone-through-deref.rs
 compile-fail	moves/no-capture-arc.rs
 compile-fail	moves/no-reuse-move-arc.rs
+compile-fail	moves/pin-mut-reborrow-infer-var-issue-107419.rs
 compile-fail	moves/recreating-value-in-loop-condition.rs
 compile-fail	moves/suggest-clone.rs
 compile-fail	moves/unconstrained-impl-param-clone-suggestion.rs

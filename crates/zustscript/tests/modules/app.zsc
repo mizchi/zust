@@ -1,0 +1,14 @@
+import { Shape, Labeled, area, first, twice, Badge } from "./shapes.zsc";
+
+export fn total(shapes: Array<Shape>) -> f64 {
+  shapes.fold(0.0, (acc, s) => acc + area(s))
+}
+
+export fn demo() -> String {
+  let c = Circle(Point { x: 0.0, y: 0.0 }, 1.0);
+  let r = Rect(Point { x: 0.0, y: 0.0 }, Point { x: 2.0, y: 3.0 });
+  let l = Labeled { label: "c", shape: c };
+  `${total([c, r])} ${first([3, 4], 0)} ${first([], "none")} ${twice(21)} ${l.label}`
+}
+
+export fn view(l: Labeled) -> Jsx { <Badge label={l.label} shape={l.shape} /> }
