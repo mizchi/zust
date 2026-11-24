@@ -389,7 +389,45 @@ fn attrs_start(s: &[u8], toks: &[Tok], i: usize) -> usize {
         }
         j = o - 1;
     }
-    toks[j].1
+    outer_docs_start(s, if j > 0 { toks[j - 1].2 } else { 0 }, toks[j].1)
+}
+
+/// Before the byte p (an item or its first attribute), the outer doc comments (`///`, `/** */`) between it and the
+/// token before it (which ends at `from`): they are attributes of that item and go with it (rustc: no E0585 for a doc
+/// before a cfg'd-out item). The comments there are read forward, as the lexer reads them: they nest, and a `///` or
+/// `/**` inside another comment, `/* outer\n/// nested */`, is text. Where the first doc comment starts, or p
+pub(crate) fn outer_docs_start(s: &[u8], from: usize, p: usize) -> usize {
+    let mut i = from.min(p);
+    while i < p {
+        if s[i..p].starts_with(b"//") {
+            if s[i..].starts_with(b"///") && !s[i..].starts_with(b"////") {
+                return i;
+            }
+            i += s[i..p].iter().position(|&c| c == b'\n').unwrap_or(p - i);
+        } else if s[i..p].starts_with(b"/*") {
+            if s[i..].starts_with(b"/**") && !s[i..].starts_with(b"/***") && !s[i..].starts_with(b"/**/") {
+                return i;
+            }
+            let mut d = 0usize;
+            while i < p {
+                if s[i..].starts_with(b"/*") {
+                    d += 1;
+                    i += 2;
+                } else if s[i..].starts_with(b"*/") {
+                    d -= 1;
+                    i += 2;
+                    if d == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    p
 }
 
 fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs: &mut Vec<(usize, usize)>) -> Option<String> {
@@ -455,9 +493,24 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs:
             if t(e) == b";" {
                 externs.push((toks[i].1, toks[e].2));
                 blank(&mut out, toks[i].1, toks[e].2);
+                // (its visibility too: `pub extern crate alloc;`, `pub(crate) extern crate core;`. A path through it
+                // (`rt::alloc::vec::Vec`) is the crate's path. `pub(in path)` stays: its path is checked)
+                let renamed = e == i + 5 && t(i + 3) == b"as" && t(i + 4) != b"_" && !matches!(t(i + 2), b"std" | b"core" | b"alloc");
+                if !renamed && i >= 1 {
+                    let vs = if t(i - 1) == b"pub" {
+                        Some(i - 1)
+                    } else if i >= 4 && t(i - 1) == b")" && matches!(t(i - 2), b"crate" | b"self" | b"super") && t(i - 3) == b"(" && t(i - 4) == b"pub" {
+                        Some(i - 4)
+                    } else {
+                        None
+                    };
+                    if let Some(vs) = vs {
+                        blank(&mut out, toks[vs].1, toks[i].1);
+                    }
+                }
                 // (`extern crate util as u;` names the crate `u` too: `use util as u;` in its place. `use` where `extern`
                 // was, and `util as u;` where it was, so a line break in the item stays where it is)
-                if e == i + 5 && t(i + 3) == b"as" && t(i + 4) != b"_" && !matches!(t(i + 2), b"std" | b"core" | b"alloc") {
+                if renamed {
                     out[toks[i].1..toks[i].1 + 3].copy_from_slice(b"use");
                     let (a, b) = (toks[i + 2].1, toks[e].2);
                     out[a..b].copy_from_slice(&s[a..b]);
@@ -540,6 +593,44 @@ mod tests {
     }
 
     #[test]
+    fn outer_docs_are_comments_only() {
+        fn start(src: &str) -> &str {
+            let p = src.find("#[").unwrap();
+            let toks = crate::lexer::tokenize(src.as_bytes());
+            let from = toks.iter().take_while(|t| t.1 < p).last().map_or(0, |t| t.2);
+            &src[outer_docs_start(src.as_bytes(), from, p)..p]
+        }
+        assert_eq!(start("fn a() {}\n/**\n * doc\n */\n#[x]\nfn f() {}"), "/**\n * doc\n */\n");
+        // (blanks after `*/`, CRLF lines)
+        assert_eq!(start("fn a() {}\n/**\n * doc\n */  \n#[x]\nfn f() {}"), "/**\n * doc\n */  \n");
+        assert_eq!(start("fn a() {}\r\n/**\r\n * doc\r\n */\r\n/// more\r\n#[x]\r\nfn f() {}"), "/**\r\n * doc\r\n */\r\n/// more\r\n");
+        // (a `/**` in a string is no comment's: the `*/` closes the `/*` nearest before it)
+        // (comments nest: this `*/ */` closes `/* outer`)
+        let nested = "fn a() {}\n/* outer\n/**\n*/ */\n#[cfg(any())]\nfn gone() {}\nfn main() {}\n";
+        assert_eq!(start(nested), "");
+        let nested1 = "fn a() {}\n/* outer\n/** nested */ */\n#[cfg(any())]\nfn gone() {}\nfn main() {}\n";
+        assert_eq!(start(nested1), "");
+        let o1 = strip(nested1, &CfgSet::default()).unwrap();
+        assert!(o1.contains("/* outer") && o1.contains("/** nested */ */") && o1.contains("fn main() {}") && !o1.contains("gone"), "{o1}");
+        // (a `///` in a block comment is text: `/* outer\n/// nested */`)
+        let nested2 = "fn a() {}\n/* outer\n/// nested */\n#[cfg(any())]\nfn gone() {}\nfn main() {}\n";
+        assert_eq!(start(nested2), "");
+        let o2 = strip(nested2, &CfgSet::default()).unwrap();
+        assert!(o2.contains("/* outer") && o2.contains("/// nested */") && o2.contains("fn main() {}") && !o2.contains("gone"), "{o2}");
+        // (the item's docs with a plain comment after them, and a `///` that ends in `*/`)
+        assert_eq!(start("fn a() {}\n/// doc */\n// plain\n#[x]\nfn f() {}"), "/// doc */\n// plain\n");
+        // (a one-line doc comment is still the item's)
+        assert_eq!(start("fn a() {}\n/** one */\n#[x]\nfn f() {}"), "/** one */\n");
+        assert_eq!(start("fn a() {}\n/**/\n#[x]\nfn f() {}"), "");
+        let o = strip(nested, &CfgSet::default()).unwrap();
+        assert!(o.contains("/* outer") && o.contains("*/ */") && o.contains("fn main() {}") && !o.contains("gone"), "{o}");
+        let src = "const K: &str = r#\"\n/**\n\"#;\nfn main() {}\n/* ordinary comment\n*/\n#[cfg(any())]\nfn removed() {}\n";
+        assert_eq!(start(src), "");
+        let o = strip(src, &CfgSet::default()).unwrap();
+        assert!(o.contains("fn main() {}") && o.contains("\"#;") && !o.contains("removed"), "{o}");
+    }
+
+    #[test]
     fn items_fields_arms() {
         assert_eq!(run("#[cfg(feature = \"std\")] fn a() {} fn b() {}", &[]), "fn b() {}");
         assert_eq!(run("#[cfg(feature = \"std\")] fn a() {} fn b() {}", &["std"]), "fn a() {} fn b() {}");
@@ -580,6 +671,7 @@ mod tests {
         assert_eq!(run("m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }", &[]), "m! { if #[cfg(test)] { a } } macro_rules! n { () => { #[cfg(test)] fn f() {} } }");
         assert_eq!(run("#[cfg(feature = \"alloc\")] extern crate alloc; extern crate std as s; fn f() {}", &["alloc"]), "fn f() {}");
         assert_eq!(run("extern crate util as u; extern crate geom as _; fn f() {}", &[]), "use util as u; fn f() {}");
+        assert_eq!(run("pub extern crate alloc; pub(crate) extern crate core; pub extern crate util as u; fn f() {}", &[]), "pub use util as u; fn f() {}");
         // (a line break in the item stays on its line)
         let o = strip("extern\ncrate util as u;\n#[cfg(any())] fn f() {}", &CfgSet::default()).unwrap();
         assert_eq!(o.lines().map(str::trim).take(2).collect::<Vec<_>>(), ["use", "util as u;"]);
