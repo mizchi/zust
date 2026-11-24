@@ -3262,7 +3262,7 @@ impl Cx<'_> {
             // (without the region check, the reborrow by the argument's place, for a result that borrows from it
             // (Bk::fnptr_reborrows): `let r = f(x); *x = 1; use(r)` with `f: fn(&i32) -> &i32` is E0506)
             if let Ty::Ref(m, _) = pt {
-                if let Some(ln) = self.bk_reborrow_arg(a, m) {
+                if let Some(ln) = self.bk_reborrow_arg(a, m, false) {
                     if !self.rg.on {
                         reborrows.push((vals.len(), ln));
                     }
