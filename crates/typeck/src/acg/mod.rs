@@ -480,6 +480,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         closure_fn_only: false,
         hr_lost: vec![],
         clo_ret_param: vec![],
+        clo_ret_from: vec![],
         seg_self: None,
         loop_bounds: vec![],
         pending_bound: None,
@@ -1033,6 +1034,9 @@ pub struct Cx<'p> {
     pub hr_lost: Vec<(u32, Vec<usize>)>,
     /// Of those, the ones whose body is one of their parameters (`|y| y`): that parameter's type argument
     pub clo_ret_param: Vec<(u32, usize)>,
+    /// A closure's parameters its result is made of, as its body is written (borrowck::closure_ret_params): a call's
+    /// result holds what those arguments borrow
+    pub clo_ret_from: Vec<(u32, Vec<usize>)>,
     pub seg_self: Option<Ty>,
     pub loop_bounds: Vec<(Loc, u64)>,
     pub pending_bound: Option<u64>,

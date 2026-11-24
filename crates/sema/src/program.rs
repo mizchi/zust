@@ -487,6 +487,9 @@ pub struct Program {
     /// Associated consts of impls whose self type names 'static (`impl A<'static> { const IC: i32 = 10; }`), with
     /// the region slots of that self type: `A::<'a>::IC` requires 'a to be 'static
     pub static_self_consts: FxMap<u32, Vec<u8>>,
+    /// Summary::const_regions, by constant: the codes of its type against its impl's lifetimes, and the impl's self
+    /// type's slots (which say which of them a use's path writes)
+    pub const_regions: FxMap<u32, (Vec<u8>, Vec<u8>)>,
     /// The declared type (as written) of a constant whose type is not known yet during layout (`[u8; 1]`, `(u8,)`):
     /// what an element or field of it is before its type is resolved
     pub early_syn: FxMap<u32, crate::types::TySyn>,
@@ -975,6 +978,7 @@ impl Program {
             any_immutable_static: false,
             static_copy: FxSet::default(),
             static_self_consts: FxMap::default(),
+            const_regions: FxMap::default(),
             early_syn: FxMap::default(),
             alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
@@ -1216,6 +1220,10 @@ impl Program {
                 if let crate::lexer::ItemKind::ImplMember(h) = items[ii].kind {
                     if let Some(r) = sums[h as usize].hdr_regions.as_ref().filter(|r| r.self_slots.contains(&R_STATIC)) {
                         p.static_self_consts.insert(p.consts.len() as u32, r.self_slots.clone());
+                    }
+                    // (one whose type names the impl's lifetimes: a use instantiates them)
+                    if let (Some(r), Some((_, codes))) = (sums[h as usize].hdr_regions.as_ref(), sm.const_regions.iter().find(|x| x.0 == *n)) {
+                        p.const_regions.insert(p.consts.len() as u32, (codes.clone(), r.self_slots.clone()));
                     }
                 }
                 // (an integer type is known already, before the layouts that evaluate constants (`[u8; N]`); the other
