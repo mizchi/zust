@@ -1021,6 +1021,16 @@ fn impl_bounds_are_nested_goals() {
     // (a cycle of blanket impls through each other's bounds is not followed forever. An obligation through it,
     // `req::<u8>` with `fn req<T: P>`, is E0275 in rustc; zustc takes it to hold, the old answer)
     ok("trait P {}\ntrait Q {}\nimpl<T: Q> P for T {}\nimpl<T: P> Q for T {}\nfn main() {}");
+    // (a goal asked again and again on the way (`T{i}: T{i-1} + T{i-2}`) is proved once: without that, 2^n goals)
+    let fib = |n: usize, imp0: &str| {
+        let mut s = format!("trait T0 {{}}\ntrait T1 {{}}\n{imp0}\nimpl T1 for i32 {{}}\n");
+        for i in 2..=n {
+            s += &format!("trait T{i} {{}}\nimpl<X: T{} + T{}> T{i} for X {{}}\n", i - 1, i - 2);
+        }
+        s + &format!("fn need2<X: T{n}>(_: X) {{}}\nfn main() {{ need2(1i32); }}")
+    };
+    ok(&fib(60, "impl T0 for i32 {}"));
+    bad(&fib(60, "impl T0 for u8 {}"));
     // (a trait object implements its trait's supertraits, whatever a blanket impl of one asks)
     ok("trait Sup {}\ntrait Sub2: Sup {}\ntrait Imp {}\nimpl<T: ?Sized + Sub2 + Imp> Sup for T {}\nfn n<T: ?Sized + Sup>() {}\nfn main() { n::<dyn Sub2>(); }");
     // (supertraits)

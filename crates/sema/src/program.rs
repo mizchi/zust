@@ -2463,22 +2463,48 @@ impl Program {
 
     /// A nested goal `t: tr` of an impl's bounds. One already being proved (a cycle: `impl<T: Bar> Foo for T` with
     /// `impl<T: Foo> Bar for T`), or past 64 goals deep (overflow), is taken to hold: the old answer, which accepted
-    /// every impl, rather than an error rustc may not give
+    /// every impl, rather than an error rustc may not give.
+    ///
+    /// A goal proved without meeting a cycle or the overflow is kept for the rest of the outermost goal (`T2: T1 + T0`,
+    /// `T3: T2 + T1`, ... asks T1 of one type again and again). One that did meet either is not: its answer leaned
+    /// on a guess. The cache starts empty with each outermost goal, so it never outlives the impls it was proved by
     fn goal_holds(&self, t: Ty, tr: &str) -> bool {
+        #[derive(Default)]
+        struct Goals {
+            stack: Vec<(Ty, String)>,
+            done: FxMap<(Ty, String), bool>,
+            guesses: u64,
+        }
         thread_local! {
-            static GOALS: std::cell::RefCell<Vec<(Ty, String)>> = const { std::cell::RefCell::new(Vec::new()) };
+            static GOALS: std::cell::RefCell<Goals> = std::cell::RefCell::new(Goals::default());
         }
-        let seen = GOALS.with(|g| {
-            let g = g.borrow();
-            g.len() >= 64 || g.iter().any(|(a, b)| *a == t && b == tr)
+        let key = (t, tr.to_string());
+        let before = GOALS.with(|g| {
+            let mut g = g.borrow_mut();
+            if g.stack.is_empty() {
+                g.done.clear();
+            }
+            if let Some(&r) = g.done.get(&key) {
+                return Err(r);
+            }
+            if g.stack.len() >= 64 || g.stack.contains(&key) {
+                g.guesses += 1;
+                return Err(true);
+            }
+            g.stack.push(key.clone());
+            Ok(g.guesses)
         });
-        if seen {
-            return true;
-        }
-        GOALS.with(|g| g.borrow_mut().push((t, tr.to_string())));
+        let before = match before {
+            Ok(n) => n,
+            Err(r) => return r,
+        };
         let r = self.implements(t, tr);
         GOALS.with(|g| {
-            g.borrow_mut().pop();
+            let mut g = g.borrow_mut();
+            g.stack.pop();
+            if g.guesses == before {
+                g.done.insert(key, r);
+            }
         });
         r
     }

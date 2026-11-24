@@ -38,6 +38,9 @@ lookup of trait bounds did not call it. It was used only by one path of method c
 - **Nested goals**: each bound is proved with `goal_holds`, which keeps a stack of the goals being proved.
   - A goal already on the stack (a cycle: `impl<T: Q> P for T` with `impl<T: P> Q for T`) is taken to hold.
   - So is one more than 64 goals deep (overflow).
+  - A goal proved without meeting either is kept until the outermost goal is done, so a chain like
+    `impl<X: T1 + T0> T2 for X`, `impl<X: T2 + T1> T3 for X`, ... proves each goal once, not 2^n times
+    (`T35`: 4.2 s before, 6 ms now). One that met a cycle or the overflow leaned on a guess and is not kept.
   - Both give the old answer, not an error rustc may not give. The new solver makes these "maybe", and treats cycles
     through auto traits as coinductive.
 - **One impl at a time**: each blanket impl keeps its own bounds, and one whose bounds all hold is enough.
@@ -98,8 +101,6 @@ main too in this environment.
 - A cycle (`impl<T: Q> P for T` with `impl<T: P> Q for T`) is taken to hold, where an obligation through it
   (`fn req<T: P>`, `req(1u8)`) is E0275 in rustc. That is a false accept, not a false error, and is where "maybe"
   goes.
-- Completed goals are not cached. The traits KPI is +0.15%; a cache is worth it once goals carry inference
-  constraints.
 - Supertraits of generic impls (`impl<T: A> B for W<T>` needs `W<T>: A` from the impl's own bounds).
 - Generic bodies: a bound that fails only for the placeholder of a generic fn nothing instantiates with a failing
   type is not reported. Placeholder checks skip bodies that call their bounds' methods.
