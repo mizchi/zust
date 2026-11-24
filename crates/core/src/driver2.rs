@@ -5523,7 +5523,7 @@ fn single_threaded() -> bool {
 /// Waits for a child, again when a signal interrupts the wait
 fn wait_child(pid: i32) {
     let mut st = 0i32;
-    for _ in 0..64 {
+    loop {
         // SAFETY: st is an int
         if unsafe { c_waitpid(pid, &mut st, 0) } == pid || std::io::Error::last_os_error().raw_os_error() != Some(4) {
             return;
