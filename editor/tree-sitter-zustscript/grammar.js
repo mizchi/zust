@@ -80,7 +80,7 @@ export default grammar({
       ),
 
     import_item: ($) =>
-      seq('import', 'type', '{', commaSep($.type_identifier), '}', 'from', field('path', $.string), ';'),
+      seq('import', optional('type'), '{', commaSep(alias($.identifier, $.import_name)), '}', 'from', field('path', $.string), ';'),
 
     // ---- the wasm layer: Rust, as tokens
     wasm_block: ($) => seq('wasm', alias($.rust_braces, $.rust_block)),

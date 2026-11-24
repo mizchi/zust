@@ -717,10 +717,14 @@ pub fn expand(items: Vec<Item>, base: &Path) -> Result<Vec<Item>, Vec<TsError>> 
     // (a type read once even when two imports, or two records, need it)
     let mut done: HashSet<(PathBuf, String)> = HashSet::new();
     for it in items {
-        let Item::ImportType { names, from, pos } = it else {
+        let Item::ImportType { names, from, values, pos } = it else {
             out.push(it);
             continue;
         };
+        if values {
+            errs.push(TsError { file: None, pos, msg: format!("`{from}`: a TS file gives types only: `import type {{ .. }} from \"{from}\";` (functions from JS come in as `extern fn`)") });
+            continue;
+        }
         let path = base.join(&from);
         if !from.starts_with("./") && !from.starts_with("../") {
             errs.push(TsError { file: None, pos, msg: format!("`{from}`: zsc reads TS files by a relative path for now (`./model.ts`), not packages") });
@@ -781,6 +785,10 @@ pub fn expand(items: Vec<Item>, base: &Path) -> Result<Vec<Item>, Vec<TsError>> 
 /// The module specifier of TS file `ts` from directory `dir` (where the `.d.ts` is written), as TS resolves it from
 /// a `.d.ts` next to ES modules: `./model.ts` → `./model.js`
 pub fn specifier(dir: &Path, ts: &Path) -> String {
+    // (a type from another zustscript module: its specifier as the import wrote it, `./lib.js`)
+    if let Some(s) = ts.to_str().filter(|s| s.starts_with("./") || s.starts_with("../")) {
+        return s.to_string();
+    }
     let dir = std::fs::canonicalize(dir).unwrap_or(dir.to_path_buf());
     let a: Vec<_> = dir.components().collect();
     let b: Vec<_> = ts.components().collect();

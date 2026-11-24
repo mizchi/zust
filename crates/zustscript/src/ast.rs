@@ -260,7 +260,9 @@ pub enum Item {
     /// (`from`: read from a TS file by an `import type`, see tsimport.rs)
     Record { name: String, params: Vec<String>, fields: Vec<(String, TyS)>, pos: Pos, from: Option<TsFrom> },
     /// `import type { User, Post } from "./model.ts";` (replaced by the records before checking, see tsimport.rs)
-    ImportType { names: Vec<(String, Pos)>, from: String, pos: Pos },
+    /// `import { greet, Shape } from "./lib.zsc";` (`values`: functions too; replaced by the types and `extern`s of
+    /// the other module before checking, see zscimport.rs)
+    ImportType { names: Vec<(String, Pos)>, from: String, values: bool, pos: Pos },
     /// (a variant with `-> R` is an effect operation)
     Enum { name: String, params: Vec<String>, variants: Vec<(String, Vec<TyS>, Option<TyS>)>, pos: Pos, from: Option<TsFrom> },
     /// (bounds: `T: Num` / `T: Integer` / `T: Float`; a function with one is monomorphized per numeric type)

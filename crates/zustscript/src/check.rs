@@ -1535,7 +1535,9 @@ impl Checker {
     fn jsx(&mut self, j: &Jsx) {
         let component = j.tag.chars().next().is_some_and(|c| c.is_uppercase());
         if component {
-            match self.info.fns.get(&j.tag).map(|s| (s.args.clone(), s.ret.clone(), s.generics.is_empty())) {
+            // (a component may be imported from another module: an `extern` of its JS)
+            let sig = self.info.fns.get(&j.tag).or_else(|| self.info.externs.get(&j.tag).map(|e| &e.0));
+            match sig.map(|s| (s.args.clone(), s.ret.clone(), s.generics.is_empty())) {
                 Some((args, ret, true)) if args.len() <= 1 && ret == Ty::Jsx => {
                     let fields = match args.first() {
                         Some(Ty::Named(n, _)) if self.info.records.contains_key(n) => self.info.records[n].fields.clone(),
