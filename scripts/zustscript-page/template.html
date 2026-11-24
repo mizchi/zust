@@ -1,0 +1,54 @@
+<!doctype html>
+<!-- Generated from Markdown in crates/zustscript/docs/ -->
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{title}}</title>
+<meta name="description" content="{{description}}">
+<link rel="stylesheet" href="../style.css">
+<style>
+  .content.wrap { width: 100%; }
+  @media (max-width: 999px) { .shell .side { display: none; } }
+  article { max-width: 48rem; margin: auto; padding-block: clamp(32px, 7vw, 76px); font-size: 16px; line-height: 1.9; }
+  article h1 { line-height: 1.35; font-size: clamp(28px, 4.5vw, 42px); margin: 0 0 24px; }
+  article h2 { margin-top: 2.4em; margin-bottom: .6em; font-size: 23px; }
+  article p { margin: .9em 0; }
+  article p:has(> em:only-child):has(+ pre) { color: var(--muted); font-size: 14px; margin-bottom: 0; }
+  article p:has(> em:only-child) + pre { margin-top: .25em; }
+  pre { overflow-x: auto; padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); line-height: 1.6; }
+  pre code { background: none; padding: 0; font-size: 14px; }
+  pre .keyword, pre .constant, pre .variable.builtin { color: light-dark(#773590, #dda7ed); }
+  pre .attribute, pre .property { color: light-dark(#83490c, #eac48a); }
+  pre .type, pre .constructor { color: light-dark(#08616b, #7bdae4); }
+  pre .function { color: light-dark(#244da0, #95b8ff); }
+  pre .string { color: light-dark(#32642c, #a4d69c); }
+  pre .number { color: light-dark(#924017, #ffad87); }
+  pre .comment { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+<header class="bar"><div class="wrap bar-in">
+  <a class="brand" href="../"><span>z</span>ust</a>
+  <nav aria-label="サイト内"><a href="../">About</a><a href="./" aria-current="{{current}}">zustscript</a><a href="https://github.com/mizchi/zust">GitHub</a></nav>
+</div></header>
+<div class="shell">
+  <aside class="side">
+    <a class="brand" href="../"><span>z</span>ust</a>
+    <nav class="pages" aria-label="zustscript の記事">
+      <p class="label">zustscript の記事</p>
+      {{articleLinks}}
+    </nav>
+    <nav aria-label="サイト内">
+      <a href="../">About</a>
+      <a class="ext" href="https://github.com/mizchi/zust">GitHub</a>
+    </nav>
+  </aside>
+  <main class="content wrap">
+    <article>
+{{article}}
+    </article>
+  </main>
+</div>
+</body>
+</html>

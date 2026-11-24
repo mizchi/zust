@@ -131,6 +131,14 @@ fn main() {
     if mode == "check" {
         // (`mod x;` のファイルも読む。診断の行は結合したソースのもの: 1 ファイルならそのまま)
         let (src, mut map) = zustc::srcmap::load_crate_keeping_externs(&input, "src/main.rs", &o.cfg_with(&o.features)).unwrap_or_else(|e| die(e));
+        // (`--test`: checked with the harness, as it is built: a crate of tests needs no `main` of its own)
+        let src = if o.test {
+            let cfg = o.cfg_with(&o.features);
+            let expanded = if src.contains("macro_rules!") { zustc::macros::expand_cfg(&src, Some(&cfg)).ok().flatten() } else { None };
+            zustc::test_harness::apply_with(&src, expanded.as_deref(), cfg.wasm).0
+        } else {
+            src
+        };
         let mut s = Session2::new(Options2 { no_cache: true, jobs: 1, ..o });
         // (a crate of one file: the `extern crate` items the configuring blanked, in their places in it (the loader
         // drops them when an expansion moved them))

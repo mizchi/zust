@@ -2,27 +2,27 @@
 // multiply-add, relaxed max). The same source runs as JS (--all-js) and through zustc (--no-simd).
 
 // a dense layer: y = W x + b, W is m×n in rows
-@simd pub fn dense(w: F32Array, x: F32Array, b: F32Array, m: i32, n: i32) -> F32Array {
+@simd export fn dense(w: F32Array, x: F32Array, b: F32Array, m: i32, n: i32) -> F32Array {
   range(0, m).map((r) => b[r] + range(0, n).fold(0.0, (s, i) => s + w[r * n + i] * x[i]))
 }
 
 // the same with relaxed SIMD: the products are fused into the sums (relaxed_madd)
-@simd(relaxed) pub fn dense_fma(w: F32Array, x: F32Array, b: F32Array, m: i32, n: i32) -> F32Array {
+@simd(relaxed) export fn dense_fma(w: F32Array, x: F32Array, b: F32Array, m: i32, n: i32) -> F32Array {
   range(0, m).map((r) => b[r] + range(0, n).fold(0.0, (s, i) => s + w[r * n + i] * x[i]))
 }
 
-@simd pub fn relu(xs: F32Array) -> F32Array { xs.map((x) => x.max(0.0)) }
+@simd export fn relu(xs: F32Array) -> F32Array { xs.map((x) => x.max(0.0)) }
 
-@simd(relaxed) pub fn relu_relaxed(xs: F32Array) -> F32Array { xs.map((x) => x.max(0.0)) }
+@simd(relaxed) export fn relu_relaxed(xs: F32Array) -> F32Array { xs.map((x) => x.max(0.0)) }
 
 // y = a * x + y, fused under relaxed
-@simd(relaxed) pub fn saxpy(a: f32, xs: F32Array, ys: F32Array) -> F32Array {
+@simd(relaxed) export fn saxpy(a: f32, xs: F32Array, ys: F32Array) -> F32Array {
   range(0, xs.len()).map((i) => a * xs[i] + ys[i])
 }
 
-@simd pub fn sumsq(xs: F32Array) -> f32 { xs.fold(0.0, (acc, x) => acc + x * x) }
+@simd export fn sumsq(xs: F32Array) -> f32 { xs.fold(0.0, (acc, x) => acc + x * x) }
 
 // the layer as the JS layer uses it
-pub fn mlp(w1: F32Array, b1: F32Array, w2: F32Array, b2: F32Array, x: F32Array, hidden: i32, inputs: i32, outputs: i32) -> F32Array {
+export fn mlp(w1: F32Array, b1: F32Array, w2: F32Array, b2: F32Array, x: F32Array, hidden: i32, inputs: i32, outputs: i32) -> F32Array {
   dense(w2, relu(dense(w1, x, b1, hidden, inputs)), b2, outputs, hidden)
 }

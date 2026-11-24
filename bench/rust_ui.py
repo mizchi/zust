@@ -14,7 +14,7 @@ Each test's kind comes from its header directives, as in rustc's compiletest:
 Each is compiled in its `//@ edition:` (`--edition=`), 2015 without one, as compiletest does.
 
 Tests zustc cannot be asked to handle are counted as "not applicable", not as failures: nightly `#![feature(..)]`,
-auxiliary crates (`aux-build`, `aux-crate`), `compile-flags`, `revisions`, `needs-*` other than what Linux x86-64 has,
+auxiliary crates (`aux-build`, `aux-crate`), `compile-flags` other than `--test` and `--cfg`, `revisions`, `needs-*` other than what Linux x86-64 has,
 `only-*` / `ignore-*` that exclude Linux x86-64, and `ignore-test`. A zustc panic or signal is counted as a crash.
 """
 import argparse, json, os, re, subprocess, sys, tempfile, time
@@ -56,6 +56,24 @@ def directives(text):
     return out
 
 
+def extra_flags(text):
+    """The `//@ compile-flags:` zustc takes, as arguments to pass on: `--test` and `--cfg NAME`. None when there are
+    others"""
+    words = " ".join(directives(text).get("compile-flags", [])).split()
+    out, i = [], 0
+    while i < len(words):
+        w = words[i]
+        if w == "--test":
+            out.append(w)
+        elif w == "--cfg" and i + 1 < len(words):
+            out += [w, words[i + 1]]
+            i += 1
+        else:
+            return None
+        i += 1
+    return out
+
+
 def classify(path):
     """(kind, reason-if-not-applicable)"""
     text = open(path, errors="replace").read()
@@ -70,7 +88,7 @@ def classify(path):
             return kind, "auxiliary crate"
     if "revisions" in ds:
         return kind, "revisions"
-    if "compile-flags" in ds or "rustc-env" in ds or "exec-env" in ds:
+    if (ds.get("compile-flags") and extra_flags(text) is None) or "rustc-env" in ds or "exec-env" in ds:
         return kind, "compile flags / env"
     for d in ds:
         if d.startswith("only-") and d not in ("only-x86_64", "only-linux", "only-unix", "only-64bit", "only-gnu", "only-elf"):
@@ -144,10 +162,13 @@ def edition(text):
 def run_one(path, kind, tmp):
     name = os.path.splitext(os.path.basename(path))[0]
     exe = os.path.join(tmp, re.sub(r"[^\w]", "_", os.path.relpath(path, TESTS)))
-    ed = "--edition=" + edition(open(path, errors="replace").read())
+    text = open(path, errors="replace").read()
+    ed = "--edition=" + edition(text)
+    # (`//@ compile-flags: --test`: the test harness; a run runs every test, as compiletest runs the test binary)
+    flags = extra_flags(text) or []
     try:
         if kind in ("check-pass", "compile-fail"):
-            r = subprocess.run([*LIMIT, ZUSTC, "check", path, ed], capture_output=True, text=True, timeout=30)
+            r = subprocess.run([*LIMIT, ZUSTC, "check", path, ed, *flags], capture_output=True, text=True, timeout=30)
             if crashed(r):
                 return "crash"
             ok = r.returncode == 0
@@ -160,7 +181,7 @@ def run_one(path, kind, tmp):
             got = {int(m.group(1)) for m in re.finditer(r"^error: [^\n]*?:(\d+):\d+:", r.stderr, re.M)}
             return "pass" if want & got else "wrong-line"
         libs = ["-L", HELPERS] if HELPERS else []
-        r = subprocess.run([*LIMIT, ZUSTC, path, "-o", exe, "--no-cache", ed, *libs], capture_output=True, text=True, timeout=60)
+        r = subprocess.run([*LIMIT, ZUSTC, path, "-o", exe, "--no-cache", ed, *flags, *libs], capture_output=True, text=True, timeout=60)
         if crashed(r):
             return "crash"
         if r.returncode != 0:

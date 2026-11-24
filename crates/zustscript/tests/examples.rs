@@ -50,6 +50,20 @@ fn build(name: &str) -> PathBuf {
 }
 
 #[test]
+fn export_visibility() {
+    let d = out_dir("export_visibility");
+    let src = d.join("visibility.zsc");
+    std::fs::write(&src, "fn hidden() -> i32 { 1 }\nexport fn current() -> i32 { hidden() }\npub fn legacy() -> i32 { current() }").unwrap();
+    let o = zsc(&src, &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(&d, "const m = await import('./visibility.js'); console.log(m.current(), m.legacy(), 'hidden' in m);");
+    assert_eq!(out.trim(), "1 1 false");
+    let dts = std::fs::read_to_string(d.join("visibility.d.ts")).unwrap();
+    assert!(dts.contains("export declare function current(") && dts.contains("export declare function legacy("));
+    assert!(!dts.contains("hidden"));
+}
+
+#[test]
 fn basics() {
     let d = build("basics");
     let out = node(&d, "const m = await import('./basics.js'); m.main();");
@@ -512,7 +526,7 @@ console.log(JSON.stringify(y.value), JSON.stringify(g.next(41)), m.handles_far()
 fn no_jsx_no_react_import() {
     let d = out_dir("no_jsx");
     let src = d.join("nojsx.zsc");
-    std::fs::write(&src, "pub fn f<T: Num, ReactElement>(x: T) -> T { x }\npub fn g(x: i32) -> i32 { f(x) }\n").unwrap();
+    std::fs::write(&src, "export fn f<T: Num, ReactElement>(x: T) -> T { x }\nexport fn g(x: i32) -> i32 { f(x) }\n").unwrap();
     let o = zsc(&src, &d, &[]);
     assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
     let dts = std::fs::read_to_string(d.join("nojsx.d.ts")).unwrap();
@@ -559,7 +573,7 @@ fn runtime_name_collisions() {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     let src = d.join("zsc-runtime.zsc");
-    std::fs::write(&src, "pub fn one() -> i32 { 1 }\n").unwrap();
+    std::fs::write(&src, "export fn one() -> i32 { 1 }\n").unwrap();
     let o = zsc(&src, &d, &[]);
     assert!(!o.status.success(), "a module named like the runtime is refused in shared mode");
     assert!(zsc(&root().join("examples/basics.zsc"), &d, &[]).status.success());

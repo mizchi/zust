@@ -2464,10 +2464,22 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 }
             }
             let export = has_attr(&item.attrs, "no_mangle");
-            let is_main = name == "main" && !export;
-            let mut sig = parse_sig(fs, false, is_main, None)?;
+            // (`zustc --test`'s entry point, crate::test_harness: a `main` too. The program keeps it as the one, and
+            //  the crate's own `main` as an ordinary function: sema::program)
+            let entry = has_attr(&item.attrs, "zust_test_entry");
+            // (a `main` that cannot be the program's (generic, with parameters, or another result) is summed up as an
+            //  ordinary function: under `--test` the crate's `main` is one. sema::program reports it when it would be
+            //  the entry. The summary does not depend on the rest of the crate, as it is cached by the item's text)
+            let named_main = name == "main" && !export && !entry;
+            let generic = named_main && !fs.generics.params.is_empty();
+            let mut sig = parse_sig(fs, false, (named_main && !generic) || entry, None)?;
             let result_ret = matches!(&sig.ret, TySyn::App(n, _) if n == "Result");
-            if is_main && (!sig.params.is_empty() || (sig.ret != TySyn::Prim(Ty::Unit) && !result_ret)) {
+            let bad_main = named_main && (generic || !sig.params.is_empty() || (sig.ret != TySyn::Prim(Ty::Unit) && !result_ret));
+            if bad_main {
+                sig.is_main = false;
+                sig.symbol = format!("_x{name}");
+            }
+            if entry && (!sig.params.is_empty() || sig.ret != TySyn::Prim(Ty::Unit)) {
                 return err("`main` must be `fn main()`");
             }
             if export {

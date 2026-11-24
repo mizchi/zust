@@ -1233,6 +1233,8 @@ compile-fail	cfg/cfg-method-receiver.rs
 run-pass	cfg/cfg-target-abi.rs
 build-pass	cfg/cfg-target-family.rs
 run-pass	cfg/cfg-target-vendor.rs
+run-pass	cfg/cfg_attr.rs
+compile-fail	cfg/cmdline-false.rs
 run-pass	cfg/conditional-compilation-struct-11085.rs
 run-pass	cfg/conditional-compile-arch.rs
 run-pass	cfg/conditional-compile.rs
@@ -2323,6 +2325,7 @@ build-pass	entry-point/hello-world.rs
 compile-fail	entry-point/imported_main_conflict.rs
 check-pass	entry-point/imported_main_conflict_lib.rs
 compile-fail	entry-point/main-with-invalid-signature.rs
+compile-fail	entry-point/main-with-lifetime-param.rs
 compile-fail	entry-point/return-ty-has-bound-vars.rs
 run-pass	enum-discriminant/const-implicit-enum-discriminant.rs
 compile-fail	enum-discriminant/discriminant-ill-typed.rs
@@ -3854,6 +3857,10 @@ check-pass	lint/dead-code/expect-dead-code-field-read-in-dead-fn.rs
 check-pass	lint/dead-code/expect-dead-code-through-non-expect-item.rs
 check-pass	lint/dead-code/expect-on-assoc-fn-issue-148861.rs
 compile-fail	lint/dead-code/impl-trait.rs
+check-pass	lint/dead-code/imported_main_dead_code_under_test.rs
+check-pass	lint/dead-code/imported_main_glob_under_test.rs
+check-pass	lint/dead-code/imported_main_path_under_test.rs
+check-pass	lint/dead-code/imported_main_renamed_from_mod_under_test.rs
 compile-fail	lint/dead-code/in-closure.rs
 check-pass	lint/dead-code/inferred-generic-arg.rs
 compile-fail	lint/dead-code/issue-41883.rs
@@ -3955,6 +3962,7 @@ check-pass	lint/lint-level-macro-def-mod.rs
 check-pass	lint/lint-level-macro-def.rs
 compile-fail	lint/lint-malformed.rs
 check-pass	lint/lint-missing-copy-implementations-allow.rs
+check-pass	lint/lint-missing-doc-test.rs
 compile-fail	lint/lint-non-camel-case-types.rs
 check-pass	lint/lint-non-camel-case-variant.rs
 check-pass	lint/lint-non-camel-case-with-trailing-underscores.rs
@@ -4025,6 +4033,7 @@ check-pass	lint/rfc-2457-non-ascii-idents/lint-mixed-script-confusables-2.rs
 check-pass	lint/runtime-symbols-no-std.rs
 check-pass	lint/special-upper-lower-cases.rs
 compile-fail	lint/suggestions.rs
+run-pass	lint/test-allow-dead-extern-static-no-warning.rs
 compile-fail	lint/trivial-casts.rs
 compile-fail	lint/trivial_casts.rs
 check-pass	lint/type-overflow.rs
@@ -7197,6 +7206,17 @@ check-pass	target-feature/const-target-feature-fn-ptr-coercion.rs
 compile-fail	target-feature/gate.rs
 build-pass	target-feature/implied-features.rs
 run-pass	target-feature/target-feature-detection.rs
+compile-fail	test-attrs/inaccessible-test-modules.rs
+run-pass	test-attrs/issue-16597-empty.rs
+run-pass	test-attrs/issue-16597.rs
+run-pass	test-attrs/issue-20823.rs
+run-pass	test-attrs/issue-36768.rs
+run-pass	test-attrs/issue-52557.rs
+run-pass	test-attrs/test-main-not-dead.rs
+run-pass	test-attrs/test-runner-hides-main.rs
+run-pass	test-attrs/test-should-fail-good-message.rs
+run-pass	test-attrs/test-vs-cfg-test.rs
+compile-fail	test-attrs/test-warns-dead-code.rs
 check-pass	thread-local/long-docs.rs
 check-pass	thread-local/name-collision.rs
 run-pass	thread-local/thread-local-with-attributes-30756.rs

@@ -1,2 +1,2 @@
 // expect: @simd: a fold other than a sum `acc + ..`
-@simd pub fn prod(xs: Array<f64>) -> f64 { xs.fold(1.0, (acc, x) => acc * x) }
+@simd export fn prod(xs: Array<f64>) -> f64 { xs.fold(1.0, (acc, x) => acc * x) }
