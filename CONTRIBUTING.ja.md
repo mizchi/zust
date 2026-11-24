@@ -174,7 +174,7 @@ python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check
 テストの種類は、compiletest と同じく頭の指示から決める。run-pass のテストは、ビルドでき、終了コード 0 で、
 `.run.stdout` と同じものを出すこと。check-pass のテストは `zustc check` が通すこと。compile-fail のテストは、
 `//~ ERROR` の注釈が指す行にエラーを出して拒むこと。zustc に求められないもの (nightly の `#![feature]`・補助の
-クレート・`compile-flags`・`revisions`・ほかのターゲット) が要るテストは「対象外」に数える。
+クレート・`--test` と `--cfg` 以外の `compile-flags`・`revisions`・ほかのターゲット) が要るテストは「対象外」に数える。
 
 `bench/rust_ui_passing.txt` は zustc が通るテストの一覧。そのどれかが通らなくなると CI が失敗する。変更で通る
 テストが増えたら、一覧を書き直す:

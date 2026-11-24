@@ -33,7 +33,7 @@ README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画の�
 - 別の enum の同名のバリアントが同じ TAG になること(`Parsed.None` と `Hit.None`)
 - データなしの enum にデータつきのバリアントを足すと `.d.ts` の形が変わること
 - TS 側でバリアントの値を作るコンストラクタ(`Shape.Circle(…)`、`Option` / `Result`)
-- `pub` な関数の境界の `Option<T>` を `T | undefined` にするか、`Result` を JS の例外にするか(`@throws` のような印。wasm_bindgen と同じ)
+- 公開関数の境界の `Option<T>` を `T | undefined` にするか、`Result` を JS の例外にするか(`@throws` のような印。wasm_bindgen と同じ)
 
 ### 001 バリアント
 
@@ -48,7 +48,7 @@ README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画の�
 
 ### 002 レコード
 
-- `pub` な関数の無名の戻り値の型に、`.d.ts` で名前を付けるか
+- 公開関数の無名の戻り値の型に、`.d.ts` で名前を付けるか
 - `void` を `()` の別名として受け付けるか(型の位置だけ)
 - 総称的な無名のレコード `{ value: T }`。総称的な別名に Rust の総称の別名を出すか
 - spread を 2 つ以上書けるようにするか(`{ ...defaults, ...props }`)
@@ -78,7 +78,7 @@ README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画の�
 r5 / r2 を書いた agent が報告したもの。次の改訂で直す。
 
 - 001 の例の `Shape` には `Label { text: String }` があるので、002 の「`@wasm` で使えるのは Copy にできる形だけ」に照らすと `@wasm` で使えない(wasm の例は「Copy の形だとして」と断り書きにしてある)
-- 001 の決定 9(`pub` の入口で TAG を検査し、内部の呼び出しは検査しない): `@wasm` の `pub` な関数では、JS 層の中からの呼び出しも glue の検査を通る
+- 001 の決定 9(公開関数の入口で TAG を検査し、内部の呼び出しは検査しない): `@wasm` の公開関数では、JS 層の中からの呼び出しも glue の検査を通る
 - 001 の引数のあるバリアント(`if c { Parsed::Ok(1) } else { Ok(2) }`)は、`EK::If` が他の分岐の型を期待する型として渡すので、分岐の順で結果が変わりうる(003 は「書いた型」だけを数える規則で避けた。001 にも同じ規則を入れる)
 
 ## JS ターゲット: サイズ、速さ、TS との型の接続
@@ -88,7 +88,7 @@ r5 / r2 を書いた agent が報告したもの。次の改訂で直す。
 決めたこと(順に入れて、1 つずつ効果を測る):
 
 1. **済: effect の tail-resumptive な handler を、直接の関数呼び出しにした**(`check::direct_effects`、`$perform` / `$handleD`)
-   - handler のすべての arm が末尾で `k(x)` を呼ぶだけで、`pub` な関数から外へ出ず、generator の effect と混ざらない effect は、普通の呼び出しになる。それ以外は generator のまま
+   - handler のすべての arm が末尾で `k(x)` を呼ぶだけで、公開関数から外へ出ず、generator の effect と混ざらない effect は、普通の呼び出しになる。それ以外は generator のまま
    - `w_effects` は 676 ms → 6.5 ms(約 100 倍)。結果は同じ。operation を 100 万回しても、スタックはあふれない(回帰テスト `many_ops`)
    - **済: generator の deep handler のスタックのあふれ**: 命令を 1 つのループ(`$run`)で実行し、フレームをヒープ上のスタックに積む(trampoline)。1 つの `handle` の中で operation を 10 万回しても、あふれない。速さも 4〜7 倍
 2. **済: 実行時の補助関数を共通の runtime モジュールにした**: `zsc-runtime.js` / `.d.ts`(補助関数と、数値の brand とそのコンストラクタ)を出力先に 1 つ書き、各モジュールは使うものだけ import する。モジュールは使う brand を re-export するので、TS 側の import は変わらない。`--inline-runtime` で、これまでどおりモジュールの中に書く

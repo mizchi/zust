@@ -1084,8 +1084,11 @@ fn add_crate_cfg(h: &mut KeyHasher, c: &CrateSpec) {
 
 /// `--test`'s crate: its source with the harness (crate::test_harness). A `#[test]` it cannot see (made by a
 /// `macro_rules!`) is not run: the build says so
-fn with_harness(src: &str, display: &str) -> String {
-    let (out, unlisted) = crate::test_harness::apply_noting(src);
+fn with_harness(src: &str, display: &str, cfg: &crate::cfg::CfgSet) -> String {
+    // (the tests are collected from the source with its `macro_rules!` expanded, as the build expands them: a test a
+    //  macro makes runs too. When the expansion fails here, the build reports it; the harness counts what it saw)
+    let expanded = if src.contains("macro_rules!") { crate::macros::expand_cfg(src, Some(cfg)).ok().flatten() } else { None };
+    let (out, unlisted) = crate::test_harness::apply_with(src, expanded.as_deref(), cfg.wasm);
     if unlisted > 0 {
         eprintln!("warning: {display}: {unlisted} `#[test]` function(s) made by a macro (counting each `#[$attr]` in a macro's body, which may be one) are not run yet (mizchi/zust#96)");
     }
@@ -1100,7 +1103,7 @@ impl Session2 {
     /// 1 つのクレート (複数のファイル) をビルドする: 根のファイルから `mod x;` を辿る
     pub fn build_path(&mut self, root: &std::path::Path, display: &str, output: &std::path::Path) -> R<Report2> {
         let (src, map) = crate::srcmap::load_crate(root, display, &self.opts.cfg_with(&self.opts.features))?;
-        let src = if self.opts.test { with_harness(&src, display) } else { src };
+        let src = if self.opts.test { with_harness(&src, display, &self.opts.cfg_with(&self.opts.features)) } else { src };
         self.ctx = CrateCtx { map: map.clone(), ..Default::default() };
         // (1 ファイルなら場所は `行:桁:` のまま (呼ぶ側がファイル名を付ける))
         let r = self.build(&src, output).map_err(|e| if map.files.len() > 1 { self.ctx.map.relocate_err(&e) } else { e });
@@ -1343,7 +1346,7 @@ impl Session2 {
         for &i in &order {
             let c = &crates[i];
             let (text, map) = crate::srcmap::load_crate(c.root.as_path(), &c.display, &self.opts.cfg_of(&c.features, &c.cfgs, &c.env))?;
-            let text = if c.test { with_harness(&text, &c.display) } else { text };
+            let text = if c.test { with_harness(&text, &c.display, &self.opts.cfg_of(&c.features, &c.cfgs, &c.env)) } else { text };
             let text = if c.lib { format!("pub mod {} {{ {text}\n}}\n", c.name) } else { text };
             loaded[i] = Some((text, map));
         }

@@ -2034,6 +2034,83 @@ pub(crate) fn value_tail(e: &Expr) -> &Expr {
     }
 }
 
+/// The parameters of a closure whose value its result is made of, as the body is written (`|a| Some(a)`, `|a| &a.x`,
+/// `|a| if c { a } else { b }`, `|s| s.as_str()`): the result of a call holds what those arguments borrow, as rustc
+/// infers the closure's one signature. `names`: the parameters bound by name, with their indices. Not what a call or
+/// a copy out of the parameter gives (`|k| map.get(k)` borrows the map)
+pub(crate) fn closure_ret_params(e: &Expr, names: &[(String, usize)], out: &mut Vec<usize>, depth: u32) {
+    if depth > 16 || names.is_empty() {
+        return;
+    }
+    // (the parameter a place is rooted at: `a`, `a.x`, `a[0]`, `*a`)
+    fn root<'e>(e: &'e Expr) -> Option<&'e str> {
+        match e {
+            Expr::Paren(x) | Expr::Field(x, ..) | Expr::Index(x, ..) => root(x),
+            Expr::Unary(op, x, _) if op == "*" => root(x),
+            Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => Some(p.segs[0].name.as_str()),
+            _ => None,
+        }
+    }
+    fn block(b: &crate::parse::Block, names: &[(String, usize)], out: &mut Vec<usize>, depth: u32) {
+        // (a parameter a `let` of the block shadows is not the tail's)
+        let Some(crate::parse::Stmt::Expr(t, false)) = b.stmts.last() else { return };
+        let lets = |n: &str| b.stmts.iter().any(|s| matches!(s, crate::parse::Stmt::Let(q, ..) if pat_any(q, &|q| matches!(q, Pat::Ident(_, _, m, _) if m == n))));
+        let names: Vec<(String, usize)> = names.iter().filter(|x| !lets(&x.0)).cloned().collect();
+        closure_ret_params(t, &names, out, depth + 1);
+    }
+    let add = |n: &str, out: &mut Vec<usize>| {
+        if let Some(&(_, i)) = names.iter().find(|x| x.0 == n) {
+            if !out.contains(&i) {
+                out.push(i);
+            }
+        }
+    };
+    match e {
+        Expr::Paren(x) | Expr::Cast(x, _) => closure_ret_params(x, names, out, depth + 1),
+        Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => add(&p.segs[0].name, out),
+        Expr::Ref(_, x) => {
+            if let Some(n) = root(x) {
+                add(n, out);
+            }
+        }
+        // (a constructor's arguments: `Some(a)`, `Wrap(a, 1)`)
+        Expr::Call(f, args) if matches!(&**f, Expr::Path(None, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_uppercase()))) => {
+            for a in args {
+                closure_ret_params(a, names, out, depth + 1);
+            }
+        }
+        Expr::Tuple(xs) | Expr::Array(xs) => {
+            for x in xs {
+                closure_ret_params(x, names, out, depth + 1);
+            }
+        }
+        Expr::Struct(_, fs, _) => {
+            for (_, x) in fs {
+                closure_ret_params(x, names, out, depth + 1);
+            }
+        }
+        // (a view the receiver's referent gives: `s.as_str()`, `v.first()`)
+        Expr::MethodCall(recv, m, _, args, _) if args.is_empty() && ["as_str", "as_slice", "as_ref", "as_mut", "as_deref", "as_deref_mut", "as_bytes", "as_mut_slice", "trim", "trim_start", "trim_end", "first", "last", "first_mut", "last_mut", "iter", "iter_mut", "chars", "bytes", "lines", "unwrap"].contains(&m.as_str()) => {
+            closure_ret_params(recv, names, out, depth + 1)
+        }
+        Expr::Block(None, false, b) => block(b, names, out, depth),
+        Expr::If(_, t, els) => {
+            block(t, names, out, depth);
+            if let Some(x) = els {
+                closure_ret_params(x, names, out, depth + 1);
+            }
+        }
+        Expr::Match(_, arms) => {
+            for a in arms {
+                // (an arm's pattern may shadow a parameter)
+                let names: Vec<(String, usize)> = names.iter().filter(|x| !pat_any(&a.pat, &|q| matches!(q, Pat::Ident(_, _, m, _) if *m == x.0))).cloned().collect();
+                closure_ret_params(&a.body, &names, out, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// A pattern that binds the whole value by value (`x`, `x @ ..`): it moves the scrutinee
 pub(crate) fn pat_takes_whole(q: &Pat) -> bool {
     match q {
@@ -2051,6 +2128,11 @@ pub(crate) fn pat_binds_ref(p: &Pat) -> bool {
 
 pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
     pat_any(p, &|q| matches!(q, Pat::Ident(true, true, ..)))
+}
+
+/// p binds the name n somewhere
+pub(crate) fn pat_binds(p: &Pat, n: &str) -> bool {
+    pat_any(p, &|q| matches!(q, Pat::Ident(_, _, m, _) if m == n))
 }
 
 fn pat_any(p: &Pat, f: &dyn Fn(&Pat) -> bool) -> bool {

@@ -16,6 +16,9 @@ use crate::ast_summary::parse_fn_bound;
 pub type R<T> = Result<T, String>;
 
 
+/// `zustc --test`'s entry point (zust_syntax::test_harness): the program's `main` when it is there
+pub const TEST_ENTRY: &str = "__zust_test_entry";
+
 #[derive(Clone, Debug)]
 pub struct FnSig {
     pub params: Vec<Ty>,
@@ -487,6 +490,9 @@ pub struct Program {
     /// Associated consts of impls whose self type names 'static (`impl A<'static> { const IC: i32 = 10; }`), with
     /// the region slots of that self type: `A::<'a>::IC` requires 'a to be 'static
     pub static_self_consts: FxMap<u32, Vec<u8>>,
+    /// Summary::const_regions, by constant: the codes of its type against its impl's lifetimes, and the impl's self
+    /// type's slots (which say which of them a use's path writes)
+    pub const_regions: FxMap<u32, (Vec<u8>, Vec<u8>)>,
     /// The declared type (as written) of a constant whose type is not known yet during layout (`[u8; 1]`, `(u8,)`):
     /// what an element or field of it is before its type is resolved
     pub early_syn: FxMap<u32, crate::types::TySyn>,
@@ -958,6 +964,16 @@ impl Program {
     /// need_main: false ならライブラリ (main がなくてよい)
     /// `user`: how many of the items are the program's (the rest are the prelude's)
     pub fn build_with(items: &[SrcItem], sums: &[Summary], need_main: bool, user: usize) -> R<Program> {
+        // (the crate's `main`, summed up as an ordinary function because it cannot be the entry (ast_summary): an error
+        //  when it would be, so not under `--test`. First, as it was when the summary reported it)
+        if need_main && !sums.iter().any(|s| s.fns.iter().any(|(n, _)| n == TEST_ENTRY)) {
+            for (i, s) in sums[..user.min(sums.len())].iter().enumerate() {
+                if let Some((_, sig)) = s.fns.iter().find(|(n, sig)| n == "main" && !sig.is_main && !sig.export && !sig.is_extern && sig.symbol == "_xmain") {
+                    let msg = if sig.generics.is_empty() { "`main` must be `fn main()`" } else { "`main` cannot be generic" };
+                    return Err(format!("{}:1: {msg}", items.get(i).map_or(1, |it| it.line)));
+                }
+            }
+        }
         let mut p = Program {
             names: vec![],
             index: FxMap::default(),
@@ -975,6 +991,7 @@ impl Program {
             any_immutable_static: false,
             static_copy: FxSet::default(),
             static_self_consts: FxMap::default(),
+            const_regions: FxMap::default(),
             early_syn: FxMap::default(),
             alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
@@ -1216,6 +1233,10 @@ impl Program {
                 if let crate::lexer::ItemKind::ImplMember(h) = items[ii].kind {
                     if let Some(r) = sums[h as usize].hdr_regions.as_ref().filter(|r| r.self_slots.contains(&R_STATIC)) {
                         p.static_self_consts.insert(p.consts.len() as u32, r.self_slots.clone());
+                    }
+                    // (one whose type names the impl's lifetimes: a use instantiates them)
+                    if let (Some(r), Some((_, codes))) = (sums[h as usize].hdr_regions.as_ref(), sm.const_regions.iter().find(|x| x.0 == *n)) {
+                        p.const_regions.insert(p.consts.len() as u32, (codes.clone(), r.self_slots.clone()));
                     }
                 }
                 // (an integer type is known already, before the layouts that evaluate constants (`[u8; N]`); the other
@@ -2075,7 +2096,20 @@ impl Program {
                 }
             }
         }
-        if need_main && !p.index.contains_key("main") {
+        // (`zustc --test`: the harness's entry point is the program's `main`; the crate's own `main` is an ordinary
+        //  function, under its own name, with an ordinary symbol)
+        if let Some(&e) = p.index.get(TEST_ENTRY) {
+            if p.sigs[e as usize].is_main {
+                for (i, s) in p.sigs.iter_mut().enumerate() {
+                    if i != e as usize && s.is_main {
+                        s.is_main = false;
+                        s.symbol = format!("_x{}", s.symbol);
+                    }
+                }
+                p.sigs[e as usize].symbol = "main".to_string();
+            }
+        }
+        if need_main && !p.index.contains_key("main") && !p.index.contains_key(TEST_ENTRY) {
             return Err("no `main` function".into());
         }
         p.deref_to_seq = p
@@ -4941,6 +4975,7 @@ impl Program {
         let mut seen = vec![false; self.names.len()];
         // 根: main・外に見せる関数・panic handler (panic はどこからでも起こりうる)
         let mut stack: Vec<u32> = self.index.get("main").copied().into_iter().collect();
+        stack.extend(self.index.get(TEST_ENTRY).copied());
         stack.extend((0..self.names.len() as u32).filter(|&i| self.sigs[i as usize].export));
         stack.extend(self.panic_handler);
         // `Box::new` が呼ぶアロケータと drop が呼ぶ free (prelude にあるのは Box / Drop が使われたときだけ)

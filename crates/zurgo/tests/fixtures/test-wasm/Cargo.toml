@@ -1,0 +1,8 @@
+[package]
+name = "tw"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# (a test package of zurgo: `zurgo test --target wasm32-unknown-unknown`, run under the runner variable)
+[workspace]
