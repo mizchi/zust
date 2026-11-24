@@ -1185,6 +1185,40 @@ impl Session2 {
                 }
             }
         }
+        // (an impl's associated type's value against the lifetime bounds its trait's declaration gives it (E0477))
+        {
+            let decl: crate::fxhash::FxMap<(&str, &str), Vec<String>> = sums
+                .iter()
+                .flat_map(|sm| sm.assoc_bounds.iter())
+                .filter_map(|(t, n, bs)| {
+                    let lb: Vec<String> = bs.iter().filter(|b| b.starts_with('\'')).cloned().collect();
+                    (!lb.is_empty()).then_some(((t.as_str(), n.as_str()), lb))
+                })
+                .collect();
+            if !decl.is_empty() {
+                let aliases: crate::fxhash::FxSet<&str> = sums.iter().flat_map(|sm| sm.aliases.iter().map(|a| a.0.as_str())).collect();
+                let is_alias = |n: &str| aliases.contains(n) || aliases.iter().any(|a| a.rsplit("::").next() == Some(n));
+                // (the structs and enums whose declarations bound their lifetimes (`struct Static<'a: 'static>`))
+                let bounded: crate::fxhash::FxSet<&str> = sums
+                    .iter()
+                    .filter(|sm| sm.adt_regions.as_ref().is_some_and(|r| !r.outlives.is_empty()))
+                    .flat_map(|sm| sm.structs.iter().map(|x| x.0.as_str()).chain(sm.enums.iter().map(|x| x.0.as_str())))
+                    .collect();
+                let lt_bounded = |n: &str| bounded.contains(n) || bounded.iter().any(|a| a.rsplit("::").next() == Some(n));
+                for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
+                    let ItemKind::ImplMember(h) = it.kind else { continue };
+                    let Some(tr) = sums.get(h as usize).and_then(|hs| hs.impl_trait.as_deref()) else { continue };
+                    let short = tr.split('<').next().unwrap_or(tr).trim();
+                    let short = short.rsplit("::").next().unwrap_or(short);
+                    for a in &sm.assocs {
+                        let Some(bs) = decl.get(&(short, a.name.as_str())) else { continue };
+                        if let Some((x, v)) = crate::ast_summary::assoc_value_unmet(&src, &items[h as usize], it, bs, &is_alias, &lt_bounded) {
+                            return Err(format!("{}:1: the type `{v}` does not fulfill the required lifetime (it must outlive `{x}`) (E0477)", it.line));
+                        }
+                    }
+                }
+            }
+        }
         // (struct / enum / union definitions of the program: unused parameters, union fields ..)
         for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
             if let Some(e) = &sm.adt_err {
@@ -6090,11 +6124,13 @@ impl Session2 {
 fn hoisted_err_holds(msg: &str) -> bool {
     let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword"];
     let unused = msg.starts_with("function `") && msg.contains("is never used");
+    // (an impl's associated type against its trait's bound (E0477): an impl in a fn body is hoisted)
+    let unmet = msg.starts_with("the type `") && msg.contains("does not fulfill the required lifetime");
     // (a derive's field or a field's type without the bound it needs (derive_field_error, wf_error): a local
     // `#[derive(Eq)] struct S(f64);` too)
     let bounds = ["the trait bound `", "binary operation `==` cannot be applied to type `", "can't compare `"].iter().any(|n| msg.starts_with(n))
         || (msg.starts_with('`') && (msg.contains("` doesn't implement `Debug`") || msg.contains("` is not an iterator")));
-    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused || bounds)
+    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused || bounds || unmet)
 }
 
 /// e with its leading line `L:` made l
