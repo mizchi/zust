@@ -180,34 +180,46 @@ def pending(prs):
     return rows
 
 
-def forecast(ui, pend, target=0.9, days=2.0):
-    """By kind and in all: the last CI run that measured every kind (its passing tests, and the applicable ones from
-    its rate), what the open PRs add, and the days until `target` of the applicable tests pass at the pace of the
-    `days` days before that run: the same number of tests a day (linear), or the same share of the remaining tests a
-    day (geometric, which slows down as the easy tests are taken)"""
+def readme_applicable(rev):
+    """{kind: applicable tests} of the README's tests/ui table at rev (`<!-- auto:ui -->`, which CI writes from its
+    results): the exact counts, which the benchmark's rates (rounded to two decimals) only approximate"""
+    text = git("show", f"{rev}:README.md")
+    out = {}
+    for k in UI_KINDS:
+        m = re.search(r"^\| " + re.escape(k) + r"\b[^|]*\| (\d+) \|", text, re.M)
+        if m:
+            out[k.replace("-", "_")] = int(m.group(1))
+    return out
+
+
+def forecast(ui, pend, applicable, target=0.9, days=2.0):
+    """By kind and in all: the last CI run that measured every kind (its passing tests; the applicable ones from the
+    README's table, else from the run's rate), what the open PRs add, and the days until `target` of the applicable
+    tests pass at the pace of the runs in the `days` days before that one, from the earliest of them: the same number
+    of tests a day (linear), or the same share of the remaining tests a day (geometric, which slows down as the easy
+    tests are taken). No pace (nor days) when that window has no earlier run"""
     keys = [k.replace("-", "_") for k in UI_KINDS]
     runs = [r for r in ui if all(r[f"{k}_passing"] is not None and r[f"{k}_rate"] for k in keys)]
     if not runs:
         return []
     last = runs[-1]
     t1 = utc(last["time"])
-    before = [r for r in runs if utc(r["time"]) <= t1 - dt.timedelta(days=days)]
-    first = before[-1] if before else runs[0]
-    span = max((t1 - utc(first["time"])).total_seconds() / 86400, 1e-9)
+    first = next(r for r in runs if utc(r["time"]) >= t1 - dt.timedelta(days=days))
+    span = (t1 - utc(first["time"])).total_seconds() / 86400
     rows = []
     for k in keys + ["all"]:
         ks = keys if k == "all" else [k]
-        n = sum(round(last[f"{q}_passing"] * 100 / last[f"{q}_rate"]) for q in ks)
+        n = sum(applicable.get(q) or round(last[f"{q}_passing"] * 100 / last[f"{q}_rate"]) for q in ks)
         p = sum(int(last[f"{q}_passing"]) for q in ks)
         p0 = sum(int(first[f"{q}_passing"]) for q in ks)
         pe = sum(r[f"{q}_gain"] for r in pend for q in ks)
         target_n = math.ceil(target * n)
         need = max(0, target_n - p - pe)
-        pace = (p - p0) / span
+        pace = (p - p0) / span if span > 0 else None
         lin = geo = None
         if need == 0:
             lin = geo = 0.0
-        elif pace > 0:
+        elif pace is not None and pace > 0:
             lin = need / pace
             share = pace / max(n - p, 1)
             gap0, gap1 = n - p - pe, n - target_n
@@ -216,7 +228,7 @@ def forecast(ui, pend, target=0.9, days=2.0):
         rows.append(dict(kind=k.replace("_", "-"), time=last["time"], commit=last["commit"], applicable=n, passing=p,
                          rate=round(p * 100 / n, 2), pending=pe, rate_with_pending=round((p + pe) * 100 / n, 2),
                          target_rate=round(target * 100, 2), target_passing=target_n, needed=need,
-                         pace_from=first["time"], pace_days=round(span, 2), pace_per_day=round(pace, 1),
+                         pace_from=first["time"], pace_days=round(span, 2), pace_per_day=None if pace is None else round(pace, 1),
                          days_linear=None if lin is None else round(lin, 1), days_geometric=None if geo is None else round(geo, 1)))
     return rows
 
@@ -382,16 +394,16 @@ def datasets_spec():
                          provenance="derived", source="the ui and pending datasets",
                          columns=dict(kind=col("enum", "", values=list(UI_KINDS) + ["all"]),
                                       time=col("time", "the CI run the numbers are from"), commit=C,
-                                      applicable=col("int", "tests zustc can be asked to handle (passing / rate)", "tests"),
+                                      applicable=col("int", "tests zustc can be asked to handle (the README's table, else passing / rate)", "tests"),
                                       passing=col("int", "passing in that run", "tests"), rate=col("number", "", "%"),
                                       pending=col("int", "what the open pull requests add (the pending dataset)", "tests"),
                                       rate_with_pending=col("number", "the rate once they are merged", "%"),
                                       target_rate=col("number", "the target", "%"),
                                       target_passing=col("int", "tests passing at the target", "tests"),
                                       needed=col("int", "tests still needed for the target after the open pull requests", "tests"),
-                                      pace_from=col("time", "the run the pace is measured from"),
+                                      pace_from=col("time", "the run the pace is measured from: the earliest in the two days before the last"),
                                       pace_days=col("number", "days between the two runs", "days"),
-                                      pace_per_day=col("number", "passing tests gained a day between them", "tests/day"),
+                                      pace_per_day=col("number", "passing tests gained a day between them; null with no earlier run in the window", "tests/day", True),
                                       days_linear=col("number", "days to the target at pace_per_day; null when the pace is not positive", "days", True),
                                       days_geometric=col("number", "days to the target gaining the same share of the remaining tests a day", "days", True))),
     }
@@ -416,7 +428,7 @@ def main():
         m["phase"] = "compat" if utc(m["time"]) >= compat_t else "build-up"
     pend = pending(read_pulls(a.pulls))
     data = dict(hourly=hourly(cs, compat_t), ui=ui, kpi=kpi_rows(), loc=loc, daily=daily(cs, prs, ui, loc),
-                sessions=sessions(cs), milestones=milestones, pending=pend, forecast=forecast(ui, pend))
+                sessions=sessions(cs), milestones=milestones, pending=pend, forecast=forecast(ui, pend, readme_applicable(a.rev)))
     spec = datasets_spec()
     for name, rows in data.items():
         spec[name]["file"] = f"{name}.json"

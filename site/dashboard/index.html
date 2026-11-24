@@ -476,7 +476,8 @@
   // ---- open pull requests and the forecast ----
   function renderProgress(D, man) {
     const all = D.forecast.find((r) => r.kind === 'all');
-    const days = (v) => (v == null ? '—' : v === 0 ? 'reached' : `${v.toFixed(1)} days`);
+    // (reached when nothing is needed; a rounded estimate of 0 with tests left is under a tenth of a day)
+    const days = (v, need) => (need === 0 ? 'reached' : v == null ? '—' : v < 0.1 ? 'less than 0.1 days' : `${v.toFixed(1)} days`);
     const raised = D.pending.filter((r) => KINDS.some(([k]) => r[k + '_gain'] > 0));
     document.getElementById('pend-asof').textContent = man.generated_at ? tfmt(new Date(man.generated_at)) : '—';
     if (all) {
@@ -484,7 +485,7 @@
         tile('All kinds on main', `${all.rate.toFixed(1)}%`, `${fmt(all.passing)} of ${fmt(all.applicable)} tests, CI run ${all.commit}`),
         tile('With the open PRs', `${all.rate_with_pending.toFixed(1)}%`, `+${fmt(all.pending)} tests in ${raised.length} PRs`, all.pending > 0 ? 'good' : ''),
         tile('Needed for 90%', fmt(all.needed), 'tests after the open PRs'),
-        tile('At the recent pace', days(all.days_linear), `${fmt(all.pace_per_day)} tests a day; geometric ${days(all.days_geometric)}`),
+        tile('At the recent pace', days(all.days_linear, all.needed), `${all.pace_per_day == null ? '—' : fmt(all.pace_per_day)} tests a day; geometric ${days(all.days_geometric, all.needed)}`),
       );
     }
     const name = (k) => (k === 'all' ? 'all kinds' : k);
@@ -492,7 +493,7 @@
       const tr = el('tr');
       tr.append(el('td', {className: 'l mono'}, name(r.kind)), el('td', {}, fmt(r.applicable)), el('td', {}, `${fmt(r.passing)} (${r.rate.toFixed(1)}%)`),
         el('td', {}, r.pending ? `+${fmt(r.pending)}` : '0'), el('td', {}, `${r.rate_with_pending.toFixed(1)}%`), el('td', {}, fmt(r.needed)),
-        el('td', {}, fmt(r.pace_per_day)), el('td', {}, days(r.days_linear)), el('td', {}, days(r.days_geometric)));
+        el('td', {}, r.pace_per_day == null ? '—' : fmt(r.pace_per_day)), el('td', {}, days(r.days_linear, r.needed)), el('td', {}, days(r.days_geometric, r.needed)));
       if (r.kind === 'all') tr.className = 'total';
       return tr;
     }));

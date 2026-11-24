@@ -217,9 +217,12 @@
     const a = rows.find((r) => r.kind === 'all');
     if (!a) return;
     const n = document.getElementById('ui-pending');
-    const days = a.days_linear == null ? '' : a.days_linear === 0 ? ' 90% is reached.'
-      : ` 90% of them is about ${Math.round(a.days_linear)} days away at the last two days' pace (${Math.round(a.pace_per_day)} tests a day), or ${a.days_geometric == null ? 'longer' : Math.round(a.days_geometric) + ' days'} if it slows down as the easier tests are taken.`;
-    n.textContent = `All kinds: ${a.passing.toLocaleString('en')} of ${a.applicable.toLocaleString('en')} (${a.rate.toFixed(1)}%). ` +
+    // (reached when nothing is needed; the days are rounded, so "under a day" rather than 0 with tests left)
+    const d = (v) => (v < 1 ? 'less than a day' : `about ${Math.round(v)} days`);
+    const days = a.needed === 0 ? ' 90% is reached.' : a.days_linear == null ? ''
+      : ` 90% of them is ${d(a.days_linear)} away at the last two days' pace (${Math.round(a.pace_per_day)} tests a day), or ${a.days_geometric == null ? 'longer' : d(a.days_geometric)} if it slows down as the easier tests are taken.`;
+    // (the CI run these totals are from: the last that measured every kind, which may be older than the bars')
+    n.textContent = `All kinds, CI run ${a.commit.slice(0, 7)}: ${a.passing.toLocaleString('en')} of ${a.applicable.toLocaleString('en')} (${a.rate.toFixed(1)}%). ` +
       (a.pending ? `Open pull requests add ${a.pending.toLocaleString('en')} more (${a.rate_with_pending.toFixed(1)}%).` : '') + days + ' ';
     const l = document.createElement('a'); l.href = 'dashboard/#progress'; l.textContent = 'By kind and by pull request.';
     n.append(l); n.hidden = false;

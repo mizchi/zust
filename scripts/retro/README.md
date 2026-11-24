@@ -20,6 +20,7 @@ replaced by another view) without touching the data. Check a data directory with
 ## Rebuilding it locally
 
 ```bash
+mkdir -p out
 gh api --paginate "repos/mizchi/zust/pulls?state=open&per_page=100" \
   --jq '.[] | {number, title, head: .head.ref, base: .base.ref, draft} | tojson' > out/pulls.jsonl   # optional
 python3 scripts/retro/extract.py --out out/site/dashboard/data --pulls out/pulls.jsonl
@@ -53,6 +54,7 @@ suite, benchmark or CI gate, and the first commit of each dated report under `do
 - Open pull requests (`pending.json`): each one's `bench/rust_ui_ratchet.txt` at its head less the one at its merge
   base with its base branch, by kind, 0 for a kind it has fewer of. A PR stacked on another one counts only its own
   part; two PRs to main that pass the same test count it twice.
-- Forecast (`forecast.json`): the last CI run that measured every kind, its applicable tests as passing over the rate,
-  the open pull requests' gains, and the days to 90% at the pace of the CI runs in the two days before it, at the
-  same number of tests a day (linear) or the same share of the remaining tests a day (geometric).
+- Forecast (`forecast.json`): the last CI run that measured every kind, its applicable tests from the README's tests/ui
+  table (passing over the rate without one), the open pull requests' gains, and the days to 90% at the pace from the
+  earliest CI run in the two days before it, at the same number of tests a day (linear) or the same share of the
+  remaining tests a day (geometric); no pace when that window has no other run.
