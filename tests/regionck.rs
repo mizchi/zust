@@ -3919,3 +3919,18 @@ fn part25_assoc_value_trait_bound() {
     // (accepted: the same lifetime, one the header makes outlive it, 'static, a lifetime a `for<..>` binds)
     assert_eq!(check("trait Foo<'a> { type Value: 'a; }\nimpl<'a> Foo<'a> for &'a i16 { type Value = &'a i32; }\nimpl<'a: 'b, 'b> Foo<'b> for &'a i64 { type Value = &'a i32; }\nimpl<'a> Foo<'a> for &'a u8 { type Value = &'static i32; }\nimpl<'a> Foo<'a> for &'a u16 { type Value = for<'x> fn(&'x u8); }\nfn main() {}\n"), vec![]);
 }
+
+#[test]
+fn part25_review() {
+    // (a callee's `V::Out` is of the placeholder that fills V (`take::<U>(x)`), not the caller's parameter at V's
+    // place: accepted, as in rustc; and a real requirement through it is still found)
+    assert_eq!(check("trait Tr { type Out; }\nfn take<V: Tr>(_: &V::Out) {}\nfn f<'a, T: Tr, U: Tr>(x: &'a U::Out) {\n    take::<U>(x);\n}\nfn main() {}\n"), vec![]);
+    let d = check("trait Tr { type Out; }\nfn take<'b, V: Tr>(_: &'b V::Out) -> &'b V::Out { loop {} }\nfn bad<'a, T: Tr, U: Tr>(x: &'a U::Out) -> &'static U::Out {\n    take::<U>(x)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (a type alias in the associated type's value is not read for E0477: `type Erased<'a> = ();` names a lifetime
+    // its body does not use)
+    assert_eq!(check("type Erased<'a> = ();\ntrait Foo { type Value: 'static; }\nimpl<'a> Foo for &'a i32 {\n    type Value = Erased<'a>;\n}\nfn main() {}\n"), vec![]);
+    // (an impl in a fn body: E0477 at the line it is written on)
+    let d = check("trait Foo { type Value: 'static; }\nfn main() {\n    let _x = 1;\n    impl<'a> Foo for &'a i32 {\n        type Value = &'a i32;\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0477"), "{d:?}");
+}

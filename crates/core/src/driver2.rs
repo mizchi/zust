@@ -1186,6 +1186,8 @@ impl Session2 {
                 })
                 .collect();
             if !decl.is_empty() {
+                let aliases: crate::fxhash::FxSet<&str> = sums.iter().flat_map(|sm| sm.aliases.iter().map(|a| a.0.as_str())).collect();
+                let is_alias = |n: &str| aliases.contains(n) || aliases.iter().any(|a| a.rsplit("::").next() == Some(n));
                 for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
                     let ItemKind::ImplMember(h) = it.kind else { continue };
                     let Some(tr) = sums.get(h as usize).and_then(|hs| hs.impl_trait.as_deref()) else { continue };
@@ -1193,7 +1195,7 @@ impl Session2 {
                     let short = short.rsplit("::").next().unwrap_or(short);
                     for a in &sm.assocs {
                         let Some(bs) = decl.get(&(short, a.name.as_str())) else { continue };
-                        if let Some((x, v)) = crate::ast_summary::assoc_value_unmet(&src, &items[h as usize], it, bs) {
+                        if let Some((x, v)) = crate::ast_summary::assoc_value_unmet(&src, &items[h as usize], it, bs, &is_alias) {
                             return Err(format!("{}:1: the type `{v}` does not fulfill the required lifetime (it must outlive `{x}`) (E0477)", it.line));
                         }
                     }
@@ -5950,11 +5952,13 @@ impl Session2 {
 fn hoisted_err_holds(msg: &str) -> bool {
     let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword"];
     let unused = msg.starts_with("function `") && msg.contains("is never used");
+    // (an impl's associated type against its trait's bound (E0477): an impl in a fn body is hoisted)
+    let unmet = msg.starts_with("the type `") && msg.contains("does not fulfill the required lifetime");
     // (a derive's field or a field's type without the bound it needs (derive_field_error, wf_error): a local
     // `#[derive(Eq)] struct S(f64);` too)
     let bounds = ["the trait bound `", "binary operation `==` cannot be applied to type `", "can't compare `"].iter().any(|n| msg.starts_with(n))
         || (msg.starts_with('`') && (msg.contains("` doesn't implement `Debug`") || msg.contains("` is not an iterator")));
-    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused || bounds)
+    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused || bounds || unmet)
 }
 
 /// e with its leading line `L:` made l

@@ -1100,11 +1100,44 @@ pub fn trait_obls(src: &str, it: &SrcItem) -> Vec<crate::types::WfObl> {
     out
 }
 
+/// The last segments' names of the paths t writes (`Erased<'a>`, `Vec<Erased<'a>>`: `Erased`, `Vec`)
+fn path_names(t: &PTy, depth: u32) -> Vec<String> {
+    let mut out = vec![];
+    if depth > 16 {
+        return out;
+    }
+    match t {
+        PTy::Path(q, p) => {
+            if let Some(q) = q {
+                out.extend(path_names(q, depth + 1));
+            }
+            if let Some(s) = p.segs.last() {
+                out.push(s.name.clone());
+            }
+            for a in p.segs.iter().flat_map(|s| &s.args) {
+                if let crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) = a {
+                    out.extend(path_names(t, depth + 1));
+                }
+            }
+        }
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => out.extend(path_names(i, depth + 1)),
+        PTy::Tuple(ts) => ts.iter().for_each(|t| out.extend(path_names(t, depth + 1))),
+        PTy::Fn(ps, r) => {
+            ps.iter().for_each(|t| out.extend(path_names(t, depth + 1)));
+            out.extend(path_names(r, depth + 1));
+        }
+        _ => {}
+    }
+    out
+}
+
 /// An impl's associated type's value against the lifetime bounds its trait's declaration gives it (`type Value:
 /// 'a;`, E0477): a lifetime of the impl's the value names that the header does not make outlive the bound (`impl<'a>
 /// Foo<'static> for &'a i32 { type Value = &'a i32; }`), as (the bound, the value as written). `bounds` are the
 /// declaration's, `'static` or the trait's lifetime parameter by its place (`'0`), which the impl's trait path writes
-pub fn assoc_value_unmet(src: &str, header: &SrcItem, member: &SrcItem, bounds: &[String]) -> Option<(String, String)> {
+/// `is_alias`: a name of one of the program's type aliases. A value that writes one is not checked: an alias may name
+/// a lifetime its body does not use (`type Erased<'a> = ();`), and its body is not read here
+pub fn assoc_value_unmet(src: &str, header: &SrcItem, member: &SrcItem, bounds: &[String], is_alias: &dyn Fn(&str) -> bool) -> Option<(String, String)> {
     let htext = format!("{}}}", src.get(header.start..header.end)?);
     let hf = parse_file(&htext).ok()?;
     let ItemKind::Impl(g, Some((false, tp)), self_ty, _) = &hf.items.first()?.kind else { return None };
@@ -1115,6 +1148,9 @@ pub fn assoc_value_unmet(src: &str, header: &SrcItem, member: &SrcItem, bounds: 
     k.add_generics(g);
     k.implied(self_ty, 0);
     let args: Vec<&String> = tp.segs.last()?.args.iter().filter_map(|a| if let crate::parse::GArg::Lifetime(l) = a { Some(l) } else { None }).collect();
+    if path_names(value, 0).iter().any(|n| is_alias(n)) {
+        return None;
+    }
     let mut named = vec![];
     named_lifetimes_deep(value, &mut named, 0);
     for b in bounds {

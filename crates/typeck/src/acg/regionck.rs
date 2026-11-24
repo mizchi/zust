@@ -150,9 +150,10 @@ pub struct RgSt {
     /// A placeholder's associated type's universal region, and the regions it is of (its placeholder's, its bound's
     /// lifetimes'): it outlives what they all outlive
     pub proj_comps: Vec<(u32, Vec<u32>)>,
-    /// Those regions by the type parameter and the associated type's name (`T::Output` of the instance's first: 0,
-    /// "Output")
-    pub assoc_regs: Vec<(u8, String, u32)>,
+    /// Those regions by their placeholder's region and the associated type's name: a signature's `V::Output` is of
+    /// the placeholder its type arguments' trees give V (the instance's own `T`, or a callee's `V` that a caller's `U`
+    /// fills: `take::<U>(x)` with `fn take<V: Tr>(_: &V::Out)`)
+    pub assoc_regs: Vec<(u32, String, u32)>,
     /// A parameter's or the result's type is not followed: what the signature implies is not all known
     pub implied_partial: bool,
     /// The function's where clauses on a type that is no type parameter (`&'max G: Get`): the type, its tree as
@@ -1488,7 +1489,10 @@ impl RgSt {
             // wherever it is (rg_begin). The mark a path `T::Foo` is written with, R_ELIDED_ADT, is read)
             Ty::Assoc(a) => {
                 let v = match a.base {
-                    Ty::Param(g) => self.assoc_regs.iter().find(|x| x.0 == g && x.1 == a.name).map(|x| x.2),
+                    Ty::Param(g) => match targs.get(g as usize) {
+                        Some(Some(t)) if t.len() == 1 => self.assoc_regs.iter().find(|x| x.0 == t[0] && x.1 == a.name).map(|x| x.2),
+                        _ => None,
+                    },
                     _ => None,
                 };
                 match v {
@@ -2220,7 +2224,10 @@ impl Cx<'_> {
                         }
                         let va = rg.var();
                         rg.ph.push((asid, va));
-                        rg.assoc_regs.push((k as u8, name.clone(), va));
+                        // (by the placeholder's region: its tree's one region, which becomes the universal one)
+                        if let Some(Some([vt])) = targs.get(k).map(|t| t.as_deref()) {
+                            rg.assoc_regs.push((*vt, name.clone(), va));
+                        }
                         let mut known = vec![];
                         for d in decl.iter().filter(|d| d.starts_with('\'')) {
                             let r = if d == "'static" { Some(STATIC) } else { d[1..].parse::<usize>().ok().and_then(|i| regs.get(i).copied()) };
