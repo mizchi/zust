@@ -1092,7 +1092,10 @@ impl Cx<'_> {
                 if matches!(p.ty(), Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
                     return err(expr_start(e), format!("the size for values of type `{}` cannot be known at compilation time", self.prog.tn(p.ty())));
                 }
-                if self.bk_on() && !self.bk_ty(p.ty()).0 {
+                // (a `&mut` a `let` with no type written is initialized from (`let y = unsafe { *p };`): moved, not
+                // reborrowed)
+                let mut_moved = self.bk.plain_init == e as *const Expr as usize && self.bk.level >= 2 && matches!(p.ty(), Ty::Ref(true, _));
+                if self.bk_on() && (!self.bk_ty(p.ty()).0 || mut_moved) {
                     // (`*x` with x a raw pointer: what it points to is not owned, E0507)
                     if matches!(self.peek(x), Some(Ty::Ptr(..))) && self.bk.level >= 1 {
                         self.drop_move_check(e)?;
@@ -1493,7 +1496,10 @@ impl Cx<'_> {
                     }
                 }
                 let p = p?;
-                if self.bk_on() && !self.bk_ty(p.ty()).0 {
+                // (a `&mut` element a `let` with no type written is initialized from (`let b = a[0];`): moved, not
+                // reborrowed (E0508))
+                let mut_moved = self.bk.plain_init == e as *const Expr as usize && self.bk.level >= 2 && matches!(p.ty(), Ty::Ref(true, _));
+                if self.bk_on() && (!self.bk_ty(p.ty()).0 || mut_moved) {
                     // (out of an array that is no local's place (a constant's, a temporary: `C[0]`, `[S][0]`): E0508,
                     // as out of a local's, which the borrow check's events report)
                     if let Some(at @ Ty::Array(..)) = self.peek(b) {
@@ -2608,6 +2614,11 @@ impl Cx<'_> {
         if sol[ri].is_none() && diverging_tail(&c_body(c)) {
             sol[ri] = Some(Ty::Unit);
         }
+        // (a parameter of a size not known: `|a0: [i32]| ..`, as the constructor of `struct Test([i32]);` used as a
+        // value is written (E0277))
+        if let Some(u) = pslots.iter().filter_map(|&(_, g)| sol[g]).find(|t| matches!(t, Ty::Slice(_) | Ty::Str | Ty::Dyn(_))) {
+            return err(expr_start(c), format!("the size for values of type `{}` cannot be known at compilation time (E0277)", self.prog.tn(u)));
+        }
         let Some(args) = sol.into_iter().collect::<Option<Vec<Ty>>>() else {
             return err(SP, "cannot infer the return type of this closure; annotate it (`|..| -> T { .. }`)");
         };
@@ -3617,6 +3628,24 @@ impl Cx<'_> {
                 let r = self.indirect_call(Indirect::Ptr(v), &f.params, f.ret, &args, SP);
                 self.rg_fnptr_call(func, t, &args);
                 self.rg_took_call(c);
+                // (a result that holds references may hold what the arguments of such types borrow, as an elided
+                // signature's: `let f: fn(&String) -> &String = id; let g = f(&temp());`, `some(&temp())` of
+                // `let some = Some;`. Not a result whose regions the region check knows are all 'static
+                // (`f: fn(&i32) -> &'static i32`): the type keeps no region, the pointer's tree does)
+                let holds = r.is_ok() && self.bk_on() && self.bk_ty(f.ret).1;
+                let static_ret = holds && self.rg_on() && {
+                    let prog = self.prog;
+                    let n = f.params.iter().try_fold(0usize, |k, &p| Some(k + super::regionck::count(prog, p, 0)?));
+                    match (self.rt_expr(func), n) {
+                        (Some((_, tr)), Some(n)) => tr.get(n..).is_some_and(|ret| !ret.is_empty() && ret.iter().all(|&r| r == super::regionck::STATIC)),
+                        _ => false,
+                    }
+                };
+                if holds && !static_ret {
+                    let from: Vec<usize> = f.params.iter().enumerate().filter(|(_, p)| self.bk_ty(**p).1).map(|(i, _)| i).collect();
+                    self.bk_frame_end_call_from(&args, &from);
+                    return r;
+                }
                 r
             }
             t => err(SP, format!("expected a function, found `{}`", self.prog.tn(t))),
