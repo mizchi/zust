@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795520043758,
+  "lastUpdate": 1795520046180,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -117738,6 +117738,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/014c605ac277611cc31281b9ff5f923ae5b52693"
         },
         "date": 1795519361793,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1857,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.06,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1524,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.57,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4695,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b49b3fd3580713ccafdee40510e48b4faee0fe6f",
+          "message": "Add opt-in JS byte interop helpers and document target builds (#125)",
+          "timestamp": "2026-11-24T20:29:35+09:00",
+          "tree_id": "4b6890dcdb77a7abcc5ef598f82a730059d39809",
+          "url": "https://github.com/mizchi/zust/commit/b49b3fd3580713ccafdee40510e48b4faee0fe6f"
+        },
+        "date": 1795520045674,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
