@@ -1140,7 +1140,47 @@ fn static_fields(g: &Generics, tys: &[&PTy]) -> Option<String> {
     None
 }
 
+/// Whether an array length in t uses one of the type parameters ps (`[u8; size_of::<T>()]`): rustc rejects it
+/// ("generic parameters may not be used in const operations") unless generic_const_exprs is on
+fn type_param_in_array_len(t: &PTy, ps: &[&str]) -> bool {
+    fn names_param(t: &PTy, ps: &[&str]) -> bool {
+        matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && ps.contains(&p.segs[0].name.as_str()))
+    }
+    fn in_expr(e: &crate::parse::Expr, ps: &[&str]) -> bool {
+        use crate::parse::Expr;
+        match e {
+            Expr::Path(None, p) => p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) if names_param(t, ps)))),
+            Expr::Call(f, args) => in_expr(f, ps) || args.iter().any(|a| in_expr(a, ps)),
+            Expr::Binary(_, l, r, _) => in_expr(l, ps) || in_expr(r, ps),
+            Expr::Unary(_, x, _) | Expr::Paren(x) | Expr::Cast(x, _) => in_expr(x, ps),
+            _ => false,
+        }
+    }
+    match t {
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) => type_param_in_array_len(i, ps),
+        PTy::Array(i, n) => type_param_in_array_len(i, ps) || in_expr(n, ps),
+        PTy::Tuple(ts) => ts.iter().any(|t| type_param_in_array_len(t, ps)),
+        PTy::Path(q, p) => {
+            q.as_deref().is_some_and(|q| type_param_in_array_len(q, ps))
+                || p.segs.iter().flat_map(|s| s.args.iter()).any(|a| match a {
+                    crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) => type_param_in_array_len(t, ps),
+                    _ => false,
+                })
+        }
+        _ => false,
+    }
+}
+
 fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields: usize) -> R<()> {
+    // (a type parameter in an array length of a field or of a parameter's default: `struct Foo<T, U = [u8;
+    //  size_of::<T>()]>` (tests/ui generics/param-in-ct-in-ty-param-default.rs))
+    {
+        let tps: Vec<&str> = g.params.iter().filter_map(|p| if let GParam::Ty(n, ..) = p { Some(n.as_str()) } else { None }).collect();
+        let defaults = g.params.iter().filter_map(|p| if let GParam::Ty(_, _, Some(d)) = p { Some(d) } else { None });
+        if !tps.is_empty() && (tys.iter().any(|t| type_param_in_array_len(t, &tps)) || defaults.into_iter().any(|d| type_param_in_array_len(d, &tps))) {
+            return Err("generic parameters may not be used in const operations".to_string());
+        }
+    }
     // (E0261: the fields name only the lifetimes the type declares)
     {
         let declared: Vec<&str> = g.params.iter().filter_map(|p| match p {
