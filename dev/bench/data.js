@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795520038825,
+  "lastUpdate": 1795520041295,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -72664,6 +72664,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 92.559,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "b49b3fd3580713ccafdee40510e48b4faee0fe6f",
+          "message": "Add opt-in JS byte interop helpers and document target builds (#125)",
+          "timestamp": "2026-11-24T20:29:35+09:00",
+          "tree_id": "4b6890dcdb77a7abcc5ef598f82a730059d39809",
+          "url": "https://github.com/mizchi/zust/commit/b49b3fd3580713ccafdee40510e48b4faee0fe6f"
+        },
+        "date": 1795520040779,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.777,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.591,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.395,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 3.692,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.967,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.735,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.548,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 191.243,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 92.566,
             "unit": "MiB"
           }
         ]
