@@ -61,17 +61,18 @@ fn harness_like_rustc() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// A `#[test]` that a `macro_rules!` makes is not run yet: the build says so
+/// A `#[test]` that a `macro_rules!` makes runs too: the tests are collected from the expanded source
 #[test]
-fn macro_made_tests_are_reported() {
+fn macro_made_tests_run() {
     let d = dir("test_harness_macro");
     let src = d.join("m.rs");
-    std::fs::write(&src, "macro_rules! make {\n    () => {\n        #[test]\n        fn generated() {}\n    };\n}\nmake!();\nmacro_rules! named {\n    ($attr:ident) => {\n        #[$attr]\n        fn generated2() {}\n    };\n}\nnamed!(test);\n#[test]\nfn plain() {}\n").unwrap();
+    std::fs::write(&src, "macro_rules! make {\n    () => {\n        #[test]\n        fn generated() {}\n    };\n}\nmake!();\nmacro_rules! named {\n    ($attr:ident) => {\n        #[$attr]\n        fn generated2() { panic!(\"ran\") }\n    };\n}\nnamed!(test);\n#[test]\nfn plain() {}\n").unwrap();
     let o = Command::new(ZUSTC).args(["--test", "--no-cache"]).arg(&src).arg("-o").arg(d.join("m")).output().unwrap();
     let err = String::from_utf8_lossy(&o.stderr);
     assert!(o.status.success(), "{err}");
-    assert!(err.contains("2 `#[test]` function(s) made by a macro") && err.contains("are not run yet"), "{err}");
-    assert_eq!(out(&d.join("m"), &["--list", "--format", "terse"]).1, "plain: test\n");
+    assert!(!err.contains("not run yet"), "{err}");
+    assert_eq!(out(&d.join("m"), &["--list", "--format", "terse"]).1, "generated: test\ngenerated2: test\nplain: test\n");
+    assert_eq!(out(&d.join("m"), &["generated2", "--exact"]).0, Some(101));
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -86,6 +87,21 @@ fn should_panic_needs_a_panic() {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     assert_ne!(out(&d.join("e"), &["exits", "--exact"]).0, Some(0));
     assert_eq!(out(&d.join("e"), &["panics_empty", "--exact"]).0, Some(0));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Under `--test` the crate's `main` is an ordinary function, whatever its signature: a test may call one with
+/// parameters. Built on its own, the same `main` is an error
+#[test]
+fn main_with_parameters() {
+    let d = dir("test_harness_main_params");
+    let src = d.join("p.rs");
+    std::fs::write(&src, "fn main(value: i32) -> i32 {\n    value\n}\n#[test]\nfn calls() {\n    assert_eq!(main(3), 3);\n}\n").unwrap();
+    let o = Command::new(ZUSTC).args(["--test", "--no-cache"]).arg(&src).arg("-o").arg(d.join("p")).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(out(&d.join("p"), &["calls", "--exact"]).0, Some(0));
+    let o = Command::new(ZUSTC).args(["--no-cache"]).arg(&src).arg("-o").arg(d.join("q")).output().unwrap();
+    assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("`main` must be `fn main()`"));
     let _ = std::fs::remove_dir_all(&d);
 }
 

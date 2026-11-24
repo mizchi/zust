@@ -143,7 +143,22 @@ fn package(g: &Graph, p: usize) -> J {
         if !t.required_features.is_empty() {
             fields.push(("required-features", J::Arr(t.required_features.iter().map(|f| s(f)).collect())));
         }
-        fields.extend([("doc", J::Bool(true)), ("doctest", J::Bool(t.kind.iter().any(|k| k == "lib" || k == "rlib"))), ("test", J::Bool(true))]);
+        fields.extend([("doc", J::Bool(true)), ("doctest", J::Bool(t.kind.iter().any(|k| k == "lib" || k == "rlib"))), ("test", J::Bool(t.test))]);
+        targets.push(J::Obj(fields));
+    }
+    // (the integration tests, as cargo lists them: after the lib and the bins)
+    for t in &m.tests {
+        let mut fields = vec![
+            ("kind", J::Arr(vec![s("test")])),
+            ("crate_types", J::Arr(vec![s("bin")])),
+            ("name", s(&t.name)),
+            ("src_path", s(&t.path.display().to_string())),
+            ("edition", s(&t.edition)),
+        ];
+        if !t.required_features.is_empty() {
+            fields.push(("required-features", J::Arr(t.required_features.iter().map(|f| s(f)).collect())));
+        }
+        fields.extend([("doc", J::Bool(false)), ("doctest", J::Bool(false)), ("test", J::Bool(t.test))]);
         targets.push(J::Obj(fields));
     }
     if let Some(b) = &m.build {
