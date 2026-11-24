@@ -1139,6 +1139,16 @@ fn projections_are_goals() {
     ok("trait Bar {}\nimpl<'a> Bar for &'a u8 {}\nfn f<I: Iterator>(_: I) where I::Item: Bar {}\nfn main() { let v = vec![1u8]; f(v.iter()); }");
     bad("trait Bar {}\nstruct W<T>(T);\nimpl Bar for W<i32> {}\nfn f<T>(_: T) where W<T>: Bar {}\nfn main() { f(1u8); }", "`W<u8>: Bar`");
     ok("trait Bar {}\nstruct W<T>(T);\nimpl Bar for W<i32> {}\nfn f<T>(_: T) where W<T>: Bar {}\nfn main() { f(1i32); }");
+    // (a Box, an array, a slice, a type with a trait object: implements does not see the program's impls for them,
+    // so a where clause on one is not checked)
+    for (imp, pred) in [("impl Mark for [u8; 1] {}", "[T; 1]"), ("impl<T> Mark for [T; 1] {}", "[T; 1]"), ("impl Mark for Box<u8> {}", "Box<T>"), ("impl Mark for [u8] {}", "[T]")] {
+        ok(&format!("trait Mark {{}}\n{imp}\nfn f<T>(_: T) where {pred}: Mark {{}}\nfn main() {{ f(1u8); }}"));
+    }
+    ok("trait Mark {}\ntrait D {}\nimpl Mark for Box<dyn D> {}\nfn f<T: ?Sized>(_: &T) where Box<dyn D>: Mark {}\nfn main() { f(&1u8); }");
+    // (an associated type a supertrait declares: `T::A` of `T: Sub`)
+    let sup = "trait Mark {}\ntrait Super { type A; }\ntrait Sub: Super {}\nimpl Super for u8 { type A = u16; }\nimpl Sub for u8 {}\nfn f<T: Sub>(_: T) where T::A: Mark {}\nfn main() { f(1u8); }";
+    bad(sup, "`u16: Mark`");
+    ok(&format!("impl Mark for u16 {{}}\n{sup}"));
     // (an impl's associated type against its trait's bounds for it)
     bad("trait Bar {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}", "`u16: Bar`");
     ok("trait Bar {}\nimpl Bar for u16 {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}");

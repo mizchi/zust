@@ -813,6 +813,11 @@ impl Insts {
             let names: Vec<&str> = b.generics.iter().map(|g| g.0.as_str()).collect();
             for (syn, qtr, bounds) in preds {
                 let Some(st) = prog.pred_subject(syn, qtr, b, &names, &args) else { continue };
+                // (nor a type implements does not see the program's impls for: a Box, an array, a slice, a type with a
+                // trait object in it; as for the supertraits and item bounds of impls)
+                if prog.opaque_to_impls(st) {
+                    continue;
+                }
                 for tr in bounds {
                     let tname = tr.split('<').next().unwrap_or(tr).trim();
                     if !prog.user_traits.contains(tname) {
@@ -2248,8 +2253,7 @@ impl Program {
         // impls for them)
         let holds = |p: &Program, t: Ty, name: &str| {
             p.has_param(t)
-                || p.tn(t).contains("dyn ")
-                || matches!(t, Ty::Box(_) | Ty::Array(..) | Ty::Slice(_))
+                || p.opaque_to_impls(t)
                 || p.implements(t, name)
                 || sums[..user].iter().any(|o| {
                     o.impl_generics.is_empty()
@@ -4773,12 +4777,23 @@ impl Program {
             if self.has_param(base) {
                 return None;
             }
-            let traits: Vec<String> = if !qtr.is_empty() {
+            let mut traits: Vec<String> = if !qtr.is_empty() {
                 vec![qtr.to_string()]
             } else {
                 let Ty::Param(i) = a.base else { return None };
                 sig.generics.get(i as usize)?.1.iter().map(|b| b.split('<').next().unwrap_or(b).trim().to_string()).collect()
             };
+            // (and their supertraits, which may declare it: `T::A` of `T: Sub` with `trait Sub: Super` and `Super::A`)
+            let mut k = 0;
+            while k < traits.len() && traits.len() < 64 {
+                for sup in self.trait_supers.get(&traits[k]).into_iter().flatten() {
+                    let sup = sup.split('<').next().unwrap_or(sup).trim().to_string();
+                    if !traits.contains(&sup) {
+                        traits.push(sup);
+                    }
+                }
+                k += 1;
+            }
             let mut found = None;
             for tr in &traits {
                 if let Some(v) = self.normalize(base, tr, &a.name) {
@@ -4795,6 +4810,13 @@ impl Program {
         }
         let t = self.subst(t, args);
         (!self.has_param(t)).then_some(t)
+    }
+
+    /// t is a type whose impls of the program's implements does not see: a Box, an array or a slice, or one with a
+    /// trait object in it (`dyn T2` and `dyn T2 + 'static` are told apart by their text here, where rustc sees one
+    /// type with two lifetimes). A bound on one is not checked: a no would be a false error
+    pub fn opaque_to_impls(&self, t: Ty) -> bool {
+        matches!(t, Ty::Box(_) | Ty::Array(..) | Ty::Slice(_)) || self.tn(t).contains("dyn ")
     }
 
     /// t has a projection (`Ty::Assoc`) in it
