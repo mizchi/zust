@@ -1613,17 +1613,41 @@ impl Program {
                         // `impl<L, R> Either<&L, &R> { fn cloned(self) }` and `.. Either<&mut L, &mut R>`, or `impl W<i32>` and
                         // `impl W<u8>`): overloads, told apart by the receiver as trait impls' are. The same self type twice is
                         // E0592 still, as is a function without `self`, which a receiver does not choose)
-                        let other_self = ss.has_self && p.sigs[prev as usize].has_self && {
+                        // (against every inherent method of the name so far, not the first alone: a third `W<u8>::f` is
+                        // E0592 too. Self types overlap when one could be the other, `Cake<T>` and `Cake<Box<U>>` (tests/ui
+                        // coherence-overlap-issue-23516-inherent): E0592 as well)
+                        let mine = ss.self_ty.as_ref().and_then(|t| {
                             let gn: Vec<&str> = ss.generics.iter().map(|g| g.0.as_str()).collect();
-                            let mine = ss.self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok());
-                            let theirs = p.sigs[prev as usize].self_ty;
-                            let blocks = matches!((p.item_of.get(prev as usize).copied().flatten().map(|k| items[k as usize].kind), it.kind), (Some(crate::lexer::ItemKind::ImplMember(a)), crate::lexer::ItemKind::ImplMember(b)) if a != b);
-                            blocks && mine.is_some() && theirs.is_some() && mine != theirs
+                            p.resolve_g(t, &gn).ok()
+                        });
+                        let group: Vec<u32> = p.overloads.get(name.as_str()).cloned().unwrap_or_else(|| vec![prev]);
+                        let block_of = |c: u32| match p.item_of.get(c as usize).copied().flatten().map(|k| items[k as usize].kind) {
+                            Some(crate::lexer::ItemKind::ImplMember(h)) => Some(h),
+                            _ => None,
                         };
-                        if ss.impl_trait.is_none() && p.sigs[prev as usize].impl_trait.is_none() && !other_self {
-                            // (in two impl blocks, E0592 is reported at the first definition)
-                            let line = match p.item_of.get(prev as usize).copied().flatten().map(|k| &items[k as usize]) {
-                                Some(pit) if matches!((pit.kind, it.kind), (crate::lexer::ItemKind::ImplMember(a), crate::lexer::ItemKind::ImplMember(b)) if a != b) => pit.line,
+                        let own_block = match it.kind {
+                            crate::lexer::ItemKind::ImplMember(h) => Some(h),
+                            _ => None,
+                        };
+                        // (the inherent method of the name this one cannot stand beside: E0592, at that one's line when it is
+                        // in another impl block)
+                        let clash = ss.impl_trait.is_none().then(|| {
+                            group.iter().copied().find(|&c| {
+                                let cs = &p.sigs[c as usize];
+                                if cs.impl_trait.is_some() {
+                                    return false;
+                                }
+                                let apart = ss.has_self
+                                    && cs.has_self
+                                    && block_of(c).is_some()
+                                    && block_of(c) != own_block
+                                    && matches!((mine, cs.self_ty), (Some(a), Some(b)) if !p.self_tys_overlap(a, b));
+                                !apart
+                            })
+                        });
+                        if let Some(Some(c)) = clash {
+                            let line = match p.item_of.get(c as usize).copied().flatten().map(|k| &items[k as usize]) {
+                                Some(pit) if block_of(c).is_some() && block_of(c) != own_block => pit.line,
                                 _ => it.line,
                             };
                             return Err(format!("{line}:1: duplicate definition of `{name}`"));
@@ -5123,6 +5147,31 @@ impl Program {
     /// Whether the references in two types' struct arguments agree, `&` and `&mut` apart (match_ty does not tell them
     /// apart), past any references around the two: `Either<&L, &R>` is not `Either<&mut i32, &mut u8>`'s self type, and
     /// `&W<&T>` (a `&self` receiver) is not `W<&mut i32>`'s
+    /// Whether two impls' self types could be one type, each type parameter standing for any type (`Cake<T>` and
+    /// `Cake<Box<U>>` could; `W<i32>` and `W<u8>`, `Either<&L, &R>` and `Either<&mut L, &mut R>` could not)
+    pub fn self_tys_overlap(&self, a: Ty, b: Ty) -> bool {
+        fn ov(p: &Program, a: Ty, b: Ty, depth: u32) -> bool {
+            if depth > 16 {
+                return true;
+            }
+            match (a, b) {
+                (Ty::Param(_), _) | (_, Ty::Param(_)) => true,
+                (Ty::Ref(m, x), Ty::Ref(n, y)) | (Ty::Ptr(m, x), Ty::Ptr(n, y)) => m == n && ov(p, *x, *y, depth + 1),
+                (Ty::Box(x), Ty::Box(y)) | (Ty::Slice(x), Ty::Slice(y)) => ov(p, *x, *y, depth + 1),
+                (Ty::Array(x, n), Ty::Array(y, k)) => n == k && ov(p, *x, *y, depth + 1),
+                (Ty::Struct(x), Ty::Struct(y)) if x != y => {
+                    if p.base_of(x) != p.base_of(y) {
+                        return false;
+                    }
+                    let (xa, ya) = (&p.structs[x as usize].args, &p.structs[y as usize].args);
+                    xa.len() != ya.len() || xa.iter().zip(ya).all(|(&u, &v)| ov(p, u, v, depth + 1))
+                }
+                _ => a == b,
+            }
+        }
+        ov(self, a, b, 0)
+    }
+
     pub fn arg_refs_agree(&self, a: Ty, b: Ty) -> bool {
         fn strip(mut t: Ty) -> Ty {
             while let Ty::Ref(_, i) = t {
@@ -5135,8 +5184,10 @@ impl Program {
                 return true;
             }
             match (a, b) {
-                (Ty::Ref(m, x), Ty::Ref(n, y)) => m == n && deep(p, *x, *y, depth + 1),
+                (Ty::Ref(m, x), Ty::Ref(n, y)) | (Ty::Ptr(m, x), Ty::Ptr(n, y)) => m == n && deep(p, *x, *y, depth + 1),
                 (Ty::Ref(..), _) => false,
+                // (and beneath arrays, slices and boxes: `W<[&i32; 1]>` is not `W<[&mut i32; 1]>`)
+                (Ty::Array(x, _), Ty::Array(y, _)) | (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) => deep(p, *x, *y, depth + 1),
                 (Ty::Struct(x), Ty::Struct(y)) if x != y => {
                     let (xa, ya) = (&p.structs[x as usize].args, &p.structs[y as usize].args);
                     xa.len() != ya.len() || xa.iter().zip(ya).all(|(&u, &v)| deep(p, u, v, depth + 1))
