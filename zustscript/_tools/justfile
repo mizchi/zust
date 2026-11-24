@@ -12,6 +12,6 @@ highlight:
     ln -s ../../tree-sitter-javascript "$grammars/tree-sitter-typescript/node_modules/tree-sitter-javascript"
     zsc="$grammars/tree-sitter-zustscript"
     mkdir "$zsc"
-    git -C "$(git rev-parse --show-toplevel)" archive e2bdf5dbf4c2011bcbe6d76336dc834a5c4bd3d5:editor/tree-sitter-zustscript | tar -x -C "$zsc"
+    git -C "$(git rev-parse --show-toplevel)" archive 2ff5500ac8f1d7501d3cff646ee5c7b5cc24c4f1:editor/tree-sitter-zustscript | tar -x -C "$zsc"
     (cd "$zsc" && tree-sitter generate)
     python3 highlight.py "$work"
