@@ -104,6 +104,9 @@ pub enum Ev {
     /// locals those point to hold them. The flag: what is stored is a reference to something that holds references
     /// (`*q = &mut &y`), whose region is shared with what the `&mut`s point into (a `&mut T` is invariant in T)
     Store(u32, u32, bool, Vec<Src>),
+    /// These loans are held by what the local's references point to, shared ones too (a closure called through a
+    /// reference to it, `r(&a)` with `r = &g`: the closure's type holds the region its calls' arguments flow into)
+    HoldThrough(u32, Vec<Src>),
     /// A match's guard begins (rustc's fake borrows of the match: the places its patterns test, and the deref
     /// prefixes of the place its bindings are bound from, whose flag is false: what they point to is not borrowed) or
     /// ends (None). The events between are the guard's, in the order they are made: a guard's evaluation is one piece
@@ -1745,6 +1748,17 @@ impl Bk {
                 }
                 // (checked in the pre-pass, in the order the events are made)
                 Ev::Guard(_) => {}
+                Ev::HoldThrough(l, srcs) => {
+                    let ls = self.resolve(srcs, st);
+                    let targets: Vec<u32> = st.held(*l).iter().map(|&ln| &self.loans[ln as usize].place).filter(|p| p.owned_len() == p.proj.len()).map(|p| p.local).collect();
+                    for t in targets {
+                        if t != *l && self.locals[t as usize].refs {
+                            let mut h = st.held(t).to_vec();
+                            h.extend(ls.iter().copied());
+                            st.set_holds(t, h);
+                        }
+                    }
+                }
                 Ev::Store(l, derefs, deep, srcs) => {
                     let ls = self.resolve(srcs, st);
                     // (the locals the `&mut`s point to, deref by deref; one behind a parameter: it outlives the
@@ -2314,7 +2328,9 @@ impl Cx<'_> {
         }
         let id = self.bk.locals.len() as u32;
         let (copy, refs) = self.bk_ty(ty);
-        self.bk.locals.push(Local { name: name.to_string(), ty, copy, refs, mutable, decl: self.rg.let_sp, via_ref: false });
+        // (a closure whose parameters' regions are one for all its calls holds what its calls' arguments borrow)
+        let held = !refs && matches!(ty, Ty::Struct(s) if { let b = self.prog.base_of(s); self.hr_lost.iter().any(|h| h.0 == b) });
+        self.bk.locals.push(Local { name: name.to_string(), ty, copy, refs: refs || held, mutable, decl: self.rg.let_sp, via_ref: false });
         self.bk.by_loc.insert(loc, id);
         if refs && self.bk.level >= 2 && matches!(ty, Ty::Struct(_) | Ty::Box(_)) {
             let mut paths = vec![];

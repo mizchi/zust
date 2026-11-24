@@ -3453,6 +3453,96 @@ fn part19_review() {
     assert_eq!(check("struct S<A>(A);\nimpl<A> S<A> {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let s = S(1u8);\n    let local = 1;\n    let f = |x| s.take::<&u32>(x);\n    f(&local);\n}\n"), vec![]);
 }
 
+/// A closure whose result is tied to a parameter its bound binds, returning what it captures: the function's region
+/// must outlive every region the bound binds ("lifetime may not live long enough", as rustc). Not where the bound has
+/// the callee's lifetimes, through which the parameters' implied bounds relate them (closures/explicit-closure-lifetime-
+/// issue-87290.rs)
+#[test]
+fn part20_closure_result_placeholder() {
+    let d = check("fn take<F: FnMut(&isize) -> &isize>(_f: F) {}\nfn take2<F: for<'z> FnMut(&'z isize) -> &'z isize>(_f: F) {}\nfn t4<'x>(x: &'x isize) {\n    take(|_z| x);\n}\nfn t5<'x>(x: &'x isize) {\n    take2(|_z| x);\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 7] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
+    assert_eq!(check("fn take<F: FnMut(&isize) -> &isize>(_f: F) {}\nfn t<'x>(_x: &'x isize) {\n    take(|z| z);\n}\npub fn f<'a>(_: &'a i32, _: impl FnOnce(&mut &mut &'a i32)) {}\npub fn h<'a>(p: &'a i32) {\n    f(p, |x: &mut &mut &'a i32| {\n        let _: &mut &mut &'a i32 = x;\n    })\n}\nfn main() {}\n"), vec![]);
+}
+
+/// A closure boxed where a `Box<dyn Fn(..)>` is expected (a `let` annotation, a turbofish): the trait object is its
+/// signature, as for `&|x| ..` where a `&dyn Fn(..)` is (lifetimes/closure-lifetime-bounds-10291.rs)
+#[test]
+fn part20_boxed_closure_signature() {
+    let d = check("fn t1<'x>(x: &'x isize) {\n    let _f: Box<dyn for<'z> FnMut(&'z isize) -> &'z isize> = Box::new(|_z| x);\n}\nfn t2<'x>(x: &'x isize) {\n    drop::<Box<dyn for<'z> FnMut(&'z isize) -> &'z isize>>(Box::new(|_z| {\n        x\n    }));\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![2, 6], "{d:?}");
+    assert_eq!(check("fn t<'x>(_x: &'x isize) {\n    let mut f: Box<dyn FnMut(&isize) -> isize> = Box::new(|z| *z + 1);\n    let g: Box<dyn Fn(&str) -> &str> = Box::new(|s| s.trim());\n    println!(\"{} {}\", f(&1), g(\" a \"));\n}\nfn main() { t(&1); }\n"), vec![]);
+}
+
+/// A region of a local of the function a closure is in, captured: from outside, so a region the closure's signature
+/// binds must not flow into it ("borrowed data escapes outside of closure", E0521 in rustc: `ay = z` with `ay = &y`
+/// captured; regions/regions-nested-fns.rs)
+#[test]
+fn part20_capture_escape() {
+    let d = check("fn ignore<T>(_t: T) {}\nfn a<'x>(x: &'x isize) {\n    let y = 3;\n    let mut ay = &y;\n    ignore::<Box<dyn for<'z> FnMut(&'z isize)>>(Box::new(|z| {\n        ay = z;\n    }));\n    let _ = (x, ay);\n}\nfn b<'x>(x: &'x isize) {\n    let mut ay = x;\n    let mut f = |z: &isize| { ay = z; };\n    f(&1);\n    let _ = ay;\n}\nfn c(v: &mut Vec<&isize>) {\n    let mut f = |z: &isize| { v.push(z); };\n    f(&1);\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![6, 12, 17], "{d:?}");
+    assert!(d[0].1.contains("escapes outside of closure") && d[1].1.contains("escapes outside of closure"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let y = 3;\n    let mut ay = &y;\n    let mut f = |z| { ay = z; };\n    f(&4);\n    let _ = ay;\n}\n"), vec![]);
+}
+
+/// A closure's parameter annotated with one of the function's lifetimes where its bound binds the region
+/// (`|x: &'x u32|` for `F: Fn(&u32)`): the closure must take every region there ("lifetime may not live long enough",
+/// closures/closure-expected-type/expect-region-supply-region-2.rs). Not the callee's lifetime (`F: Fn(&'a u32)`)
+#[test]
+fn part20_annotated_param_bound() {
+    let d = check("fn take<F: Fn(&u32)>(_f: F) {}\nfn take2<'a, F: Fn(&'a u32)>(_: &'a u32, _f: F) {}\nfn take3<F: Fn(&u32) -> u32>(_f: F) {}\nfn g1<'x>(y: &'x u32) { take(|x: &'x u32| { let _ = (x, y); }); }\nfn g2<'x>(y: &'x u32) { take2(y, |x: &'x u32| { let _ = x; }); }\nfn g3() { take(|_x: &'static u32| {}); }\nfn g4() { take3(|x: &u32| *x); take(|_x: &'_ u32| {}); }\nfn main() { g1(&1); g2(&1); g3(); g4(); }\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 6] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
+}
+
+#[test]
+fn part20_closure_holds_call_args() {
+    // (a closure made where nothing was expected, its parameter a reference: the region is its type's, so what its
+    // calls' arguments borrow is held while the closure is used)
+    let d = check("fn main() {\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    g(&a);\n    a = 2;\n    g(&a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    // (also through a reference to it, which the closure it points to holds them for)
+    let d = check("fn main() {\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    let r = &g;\n    r(&a);\n    a = 2;\n    g(&a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    let r = &g;\n    r(&a);\n    a = 2;\n    let _ = a;\n}\n"), vec![]);
+    // (also called through parentheses: `(g)(&a)`)
+    let d = check("fn main() {\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    (g)(&a);\n    a = 2;\n    (g)(&a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let f = |_| {};\n    for a in [1] {\n        f(&a);\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("does not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let m = |x| { let _: &str = x; };\n    let st = String::new();\n    m(st.as_str());\n    drop(st);\n    m(\"b\");\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    // (not a closure whose parameter's type is written (one region for each call), nor one a bound gives its
+    // signature, nor one not used after)
+    assert_eq!(check("struct S<F: Fn(&u32)> {\n    f: F,\n}\nfn hold<F: Fn(&u32)>(f: F) -> F {\n    f\n}\nfn main() {\n    let k = |x: &u32| { let _ = x; };\n    let mut d = 1;\n    k(&d);\n    d = 2;\n    k(&d);\n    let s = S { f: |x| { let _ = x; } };\n    let mut b = 1;\n    (s.f)(&b);\n    b = 2;\n    (s.f)(&b);\n    let h = hold(|x| { let _ = x; });\n    let mut c = 1;\n    h(&c);\n    c = 2;\n    h(&c);\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    g(&a);\n    a = 2;\n    let _ = a;\n}\n"), vec![]);
+}
+
+#[test]
+fn part20_closure_fnptr_annotated() {
+    // (a closure where a fn pointer type binds the region of a parameter annotated with the function's lifetime or
+    // 'static: that lifetime would have to be every region there)
+    let d = check("fn test<'a>() {\n    let _: fn(&()) = |_: &'a ()| {};\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let g: fn(&u32) = |_: &'static u32| {};\n    g(&1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (passed to a parameter of such a type, a summary's or not)
+    for src in ["fn want(_f: fn(&u32)) {}\nfn main() {\n    want(|_: &'static u32| {});\n}\n", "fn want<'b>(_f: for<'x> fn(&'x u32) -> &'x u32, _y: &'b u32) {}\nfn main() {\n    want(|x: &'static u32| x, &1);\n}\n"] {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{src}: {d:?}");
+    }
+    // (a closure cast to such a type, as in a `let`)
+    let d = check("fn main() {\n    let f = (|_: &'static u32| {}) as fn(&u32);\n    f(&1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (a struct with no lifetime parameters behind the reference (`&S`): its path's mark stands for no region)
+    for (src, line) in [("struct S;\nfn main() {\n    let _: fn(&S) = |_: &'static S| {};\n}\n", 3), ("struct S;\nfn want<'b>(_f: fn(&S), _y: &'b u32) {}\nfn main() {\n    want(|_: &'static S| {}, &1);\n}\n", 4)] {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].0 == line && d[0].1.contains("lifetime may not live long enough"), "{src}: {d:?}");
+    }
+    assert_eq!(check("fn want(_f: fn(&u32)) {}\nfn want2<'a>(_f: fn(&'a u32), _x: &'a u32) {}\nfn want3(_f: fn(&'static u32)) {}\nstatic X: u32 = 1;\nfn main() {\n    want2(|_: &'static u32| {}, &X);\n    want3(|_: &'static u32| {});\n    want(|_: &u32| {});\n}\n"), vec![]);
+    let d = check("fn b<'a>(_: &'a ()) {\n    let _: for<'x> fn(&'x ()) = |_: &'static ()| {};\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (not where the type names the lifetime too, nor an annotation that names none)
+    assert_eq!(check("fn a<'a>(_: &'a ()) {\n    let _: fn(&'a ()) = |_: &'a ()| {};\n    let _: fn(&()) = |_: &()| {};\n    let _: fn(&'static ()) = |_: &'static ()| {};\n    let f: fn(&'a (), &()) = |_: &'a (), _| {};\n    f(&(), &());\n}\nfn main() {}\n"), vec![]);
+}
+
 /// Polonius Alpha (issue #1): a reborrow returned in one branch is live only where what holds it is live, an
 /// assignment to a part of a local kills the loans through the reference it held, `for x in v.iter_mut()` with v a
 /// reference reborrows `*v`, and a cast to a number holds nothing. Each was checked against rustc 1.102-nightly
