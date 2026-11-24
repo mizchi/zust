@@ -1707,6 +1707,7 @@ compile-fail	const-generics/min_const_generics/invalid-patterns.rs
 compile-fail	const-generics/min_const_generics/macro-fail.rs
 compile-fail	const-generics/min_const_generics/self-ty-in-const-1.rs
 run-pass	const-generics/min_const_generics/type_and_const_defaults.rs
+compile-fail	const-generics/mistyped_const_in_pat.rs
 compile-fail	const-generics/not_wf_param_in_rpitit.rs
 compile-fail	const-generics/parent_generics_of_nested_in_default.rs
 compile-fail	const-generics/parser-error-recovery/issue-89013-no-assoc.rs
@@ -2220,6 +2221,7 @@ run-pass	drop/drop-trait-generic.rs
 run-pass	drop/drop-trait.rs
 run-pass	drop/drop-uninhabited-enum.rs
 run-pass	drop/drop-value-by-method.rs
+run-pass	drop/drop-with-trait-bound-calls-method-on-self.rs
 run-pass	drop/drop-with-type-ascription-1.rs
 run-pass	drop/drop-with-type-ascription-2.rs
 compile-fail	drop/drop_elaboration_with_errors2.rs
@@ -4520,6 +4522,7 @@ run-pass	mir/mir_match_arm_guard.rs
 run-pass	mir/mir_match_test.rs
 run-pass	mir/mir_small_agg_arg.rs
 run-pass	mir/mir_static_subtype.rs
+run-pass	mir/mir_struct_with_assoc_ty.rs
 run-pass	mir/mir_temp_promotions.rs
 run-pass	mir/mir_void_return.rs
 run-pass	mir/mir_void_return_2.rs
@@ -5474,6 +5477,7 @@ compile-fail	parser/macro/break-in-unlabeled-block-in-macro.rs
 compile-fail	parser/macro/do-not-suggest-semicolon-between-macro-without-exclamation-mark-and-array.rs
 check-pass	parser/macro/extern-abi-from-mac-literal-frag.rs
 compile-fail	parser/macro/issue-33569.rs
+compile-fail	parser/macro/kw-in-const-item-pos-recovery-149692.rs
 compile-fail	parser/macro/kw-in-item-pos-recovery-149692.rs
 compile-fail	parser/macro/macro-bad-delimiter-ident.rs
 check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
@@ -5915,6 +5919,7 @@ compile-fail	pattern/usefulness/tuple-struct-nonexhaustive.rs
 compile-fail	pattern/usefulness/type_polymorphic_byte_str_literals.rs
 compile-fail	pin-ergonomics/raw-ident.rs
 compile-fail	pin-macro/lifetime_errors_on_promotion_misusage.rs
+compile-fail	pin-macro/pin_move.rs
 compile-fail	pin/pin-deref-target-partial-eq-67039.rs
 run-pass	privacy/fn-returns-unnameable-type.rs
 check-pass	privacy/generic_struct_field_projection.rs
