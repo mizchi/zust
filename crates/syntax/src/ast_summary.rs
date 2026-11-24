@@ -1100,6 +1100,94 @@ pub fn trait_obls(src: &str, it: &SrcItem) -> Vec<crate::types::WfObl> {
     out
 }
 
+/// The last segments' names of the paths t writes (`Erased<'a>`, `Vec<Erased<'a>>`: `Erased`, `Vec`)
+fn path_names(t: &PTy, depth: u32) -> Vec<String> {
+    let mut out = vec![];
+    if depth > 16 {
+        return out;
+    }
+    match t {
+        PTy::Path(q, p) => {
+            if let Some(q) = q {
+                out.extend(path_names(q, depth + 1));
+            }
+            if let Some(s) = p.segs.last() {
+                out.push(s.name.clone());
+            }
+            for a in p.segs.iter().flat_map(|s| &s.args) {
+                if let crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) = a {
+                    out.extend(path_names(t, depth + 1));
+                }
+            }
+        }
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => out.extend(path_names(i, depth + 1)),
+        PTy::Tuple(ts) => ts.iter().for_each(|t| out.extend(path_names(t, depth + 1))),
+        PTy::Fn(ps, r) => {
+            ps.iter().for_each(|t| out.extend(path_names(t, depth + 1)));
+            out.extend(path_names(r, depth + 1));
+        }
+        _ => {}
+    }
+    out
+}
+
+/// An impl's associated type's value against the lifetime bounds its trait's declaration gives it (`type Value:
+/// 'a;`, E0477): a lifetime of the impl's the value names that the header does not make outlive the bound (`impl<'a>
+/// Foo<'static> for &'a i32 { type Value = &'a i32; }`), as (the bound, the value as written). `bounds` are the
+/// declaration's, `'static` or the trait's lifetime parameter by its place (`'0`), which the impl's trait path writes
+/// `is_alias`: a name of one of the program's type aliases. A value that writes one is not checked: an alias may name
+/// a lifetime its body does not use (`type Erased<'a> = ();`), and its body is not read here
+pub fn assoc_value_unmet(src: &str, header: &SrcItem, member: &SrcItem, bounds: &[String], is_alias: &dyn Fn(&str) -> bool, lt_bounded: &dyn Fn(&str) -> bool) -> Option<(String, String)> {
+    let htext = format!("{}}}", src.get(header.start..header.end)?);
+    let hf = parse_file(&htext).ok()?;
+    let ItemKind::Impl(g, Some((false, tp)), self_ty, _) = &hf.items.first()?.kind else { return None };
+    let mtext = src.get(member.start..member.end)?;
+    let mf = parse_file(mtext).ok()?;
+    let ItemKind::Type(_, mg, _, Some(value)) = &mf.items.first()?.kind else { return None };
+    // (a where clause of the value (`type Value = &'a i32 where Self: 'b;`) may give what the bound needs: not read)
+    if !mg.preds.is_empty() {
+        return None;
+    }
+    let mut k = crate::wf::Known::default();
+    k.add_generics(g);
+    // (what the header's types imply: the self type's and the trait's type arguments' (`Foo<'a, &'a &'b ()>`, 'b: 'a))
+    // (a struct or enum there whose declaration bounds its lifetimes (`struct Static<'a: 'static>`) implies those
+    // bounds, which Known does not read: not checked)
+    if path_names(self_ty, 0).iter().any(|n| lt_bounded(n)) {
+        return None;
+    }
+    k.implied(self_ty, 0);
+    for s in &tp.segs {
+        for a in &s.args {
+            if let crate::parse::GArg::Ty(t) = a {
+                if path_names(t, 0).iter().any(|n| lt_bounded(n)) {
+                    return None;
+                }
+                k.implied(t, 0);
+            }
+        }
+    }
+    let args: Vec<&String> = tp.segs.last()?.args.iter().filter_map(|a| if let crate::parse::GArg::Lifetime(l) = a { Some(l) } else { None }).collect();
+    if path_names(value, 0).iter().any(|n| is_alias(n)) {
+        return None;
+    }
+    let mut named = vec![];
+    named_lifetimes_deep(value, &mut named, 0);
+    for b in bounds {
+        let x = if b == "'static" { b.clone() } else { (*args.get(b[1..].parse::<usize>().ok()?)?).clone() };
+        if x == "'_" {
+            continue;
+        }
+        // (the impl's own lifetimes only: one a `for<..>` in the value binds is the value's)
+        for l in named.iter().filter(|l| k.lts.contains(l)) {
+            if !k.vague.contains(l) && !k.outlives(l, &x) {
+                return Some((x, crate::parse::ty_text(value)));
+            }
+        }
+    }
+    None
+}
+
 fn dyn_obls(g: &Generics, tys: &[&PTy], out: &mut Vec<crate::types::WfObl>) {
     let mut k = None;
     for t in tys.iter().filter(|t| has_dyn_syn(t)) {
@@ -2903,7 +2991,19 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
             // (one without bounds too: a `dyn Tr` must bind every associated type the trait leaves without a
             // default (E0191))
             ItemKind::Type(n, _, bs, None) => {
-                let names = if bs.is_empty() { vec![] } else { bound_names(bs)? };
+                let mut names = if bs.is_empty() { vec![] } else { bound_names(bs)? };
+                // (and its lifetime bounds (`type Output: 'a;`): `'static`, or the trait's lifetime parameter by its
+                // place, `'0` for the first (a placeholder's associated type outlives it, regionck))
+                for b in bs {
+                    if let Bound::Lifetime(l) = b {
+                        let lts = ow.regions.as_deref().map(|r| r.lts.as_slice()).unwrap_or(&[]);
+                        match lts.iter().position(|x| x == l) {
+                            _ if l == "'static" => names.push(l.clone()),
+                            Some(i) => names.push(format!("'{i}")),
+                            None => {}
+                        }
+                    }
+                }
                 let mut sm = Summary::default();
                 sm.assoc_bounds.push((ow.base.clone(), n.clone(), names));
                 return Ok(sm);

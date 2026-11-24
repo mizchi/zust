@@ -69,3 +69,5 @@ compile-fail	privacy/projections.rs
 compile-fail	closure_context/issue-26046-fn-mut.rs
 compile-fail	iterators/rpit-method-chain-no-ice.rs
 compile-fail	span/send-is-not-static-std-sync-2.rs
+compile-fail	pin-macro/pin_move.rs
+compile-fail	parser/macro/kw-in-const-item-pos-recovery-149692.rs

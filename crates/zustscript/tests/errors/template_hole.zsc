@@ -1,0 +1,2 @@
+// expect: a `${..}` of a template string takes a String, a number or a bool, not Array<i32>
+export fn f(xs: Array<i32>) -> String { `xs: ${xs}` }

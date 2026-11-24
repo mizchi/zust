@@ -276,7 +276,7 @@ fn children(e: &Expr) -> Vec<&Expr> {
         EK::Field(x, _) | EK::Un(_, x) | EK::Cast(x, _) => vec![x],
         EK::Bin(_, l, r) | EK::Index(l, r) => vec![l, r],
         EK::Record(_, fs, base) => fs.iter().map(|f| &f.1).chain(base.as_deref()).collect(),
-        EK::Array(xs) | EK::Tuple(xs) | EK::Perform(_, _, xs) => xs.iter().collect(),
+        EK::Array(xs) | EK::Tuple(xs) | EK::Perform(_, _, xs) | EK::Interp(_, xs) => xs.iter().collect(),
         EK::If(c, t, el) => std::iter::once(&**c).chain(std::iter::once(&**t)).chain(el.as_deref()).collect(),
         EK::While(c, b) => vec![c, b],
         EK::Assign(_, x) => vec![x],
@@ -591,7 +591,7 @@ impl Lv<'_> {
             }
             EK::Bin(_, a, b) | EK::Index(a, b) => self.operands(&[a, b], live),
             EK::Record(_, fs, base) => self.operands(&fs.iter().map(|f| &f.1).chain(base.as_deref()).collect::<Vec<_>>(), live),
-            EK::Array(xs) | EK::Tuple(xs) => self.operands(&xs.iter().collect::<Vec<_>>(), live),
+            EK::Array(xs) | EK::Tuple(xs) | EK::Interp(_, xs) => self.operands(&xs.iter().collect::<Vec<_>>(), live),
             _ => {
                 for c in children(e).into_iter().rev() {
                     self.expr(c, live);
