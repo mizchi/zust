@@ -136,18 +136,47 @@ Every crate also gets cargo's variables for `env!` / `option_env!`: `CARGO_PKG_*
 
 ## Proc-macro dependencies
 
-Proc macros cannot run yet (mizchi/zust#29). A proc-macro dependency is built as a stub library of its name, so a
-crate that only re-exports it builds: `pub use thiserror_impl::*;`, or serde's `derive` feature.
+Proc macros run (mizchi/zust#29, backend A). rustc builds a proc-macro dependency as a dylib, and its dependencies as
+rlibs. Their build scripts run first, and the builds are kept as the build scripts' host libraries are. zustc gets the
+crate as a stub library of its name with the dylib beside it (`pm=PATH` in the workspace file). The toolchain's
+proc-macro server (`libexec/rust-analyzer-proc-macro-srv` in rustc's sysroot, from the `rustc` component) loads the
+dylib and expands each use:
+- **What is a use.** zustc finds a use by its name, as zurgo's check found them before:
+  - an attribute macro: `#[wasm_bindgen]`, `#[wasm_bindgen_macro::wasm_bindgen(..)]`, or a name brought in by `use`
+    (also renamed);
+  - a derive: `#[derive(.., Describe)]`. A derive of the language's name counts only when the crate imports one of
+    that name from outside std;
+  - a function-like macro: `pm::html!(..)`, in item, statement or expression position. Its output is placed as a
+    `macro_rules!` call's expansion is.
+  - Only the proc-macro crates a crate reaches count: its dependencies, or what its libraries re-export. A path into
+    std or a tool (`#[rustfmt::skip]`) is never a proc macro's.
+  - **Which crate's.** A path is the macro of the crate it starts from: `pm::make!()`, or `re::make!()` when the
+    library `re` re-exports it (its `pub use`s, renames and globs too). Such a path stays the proc macro's beside a
+    `macro_rules! make`, and in `stringify!(..)` it is kept as written. A name brought in by `use` (also in a brace
+    group) is the macro of the crate that `use` starts from. The `use`s are one table per crate, so two modules that
+    import different crates' macros under one name are not told apart.
+- **What a macro gets.**
+  - The item as tokens, with its cfgs already evaluated and its doc comments as `#[doc = ".."]`.
+  - The crate's compile-time environment (`CARGO_PKG_*`), with `CARGO_MANIFEST_DIR` as its current directory.
+  - An attribute macro's item comes without that attribute. A derive's item comes without that `#[derive]`, and the
+    item keeps its other derives.
+- **Its output is read again**, so the macros it uses expand in turn, outermost first as rustc does. The arguments of
+  a macro call are not read before the call expands.
+- **Caching.** The expansions are kept with the crate's other preprocessing. A rebuilt dylib expands again.
+- **Not yet.**
+  - Every span is the call site's. zustc has no hygiene for proc-macro output, and an error in an expansion points at
+    the use.
+  - A proc macro among a build script's build-dependencies: rustc builds that script.
 
-zustc would drop an unknown attribute silently, so using a proc macro is an error before anything is built:
+Without the server (`ZUSTC_PROC_MACRO_SRV` set and empty, or a toolchain without it), a proc-macro dependency is a
+stub library of its name only, so a crate that only re-exports it builds (`pub use thiserror_impl::*;`, serde's
+`derive` feature). zustc would drop an unknown attribute silently, so using a proc macro is then an error before
+anything is built:
 - a crate of the build that uses one of the stub's derives (`#[derive(thiserror::Error)]`), or one of its attribute
   macros (`#[wasm_bindgen]`, also renamed: `use wasm_bindgen::prelude::wasm_bindgen as wb;`), is an error naming #29.
-  - Only the proc-macro crates a crate reaches count: its dependencies, or what its libraries re-export.
   - Each crate is read as zustc reads it: the files of its module tree, with its features and cfgs. So a use in a
     file it does not reach, under a cfg that is off, or in a `macro_rules!` body that is neither called nor exported
     does not count.
-  - A derive of the language (`#[derive(Debug)]`) is a proc macro's only when the crate imports one of that name
-    from outside std (`use derive_more::Debug;`).
   - The proc-macro crate's root is read with its features, so `#[cfg_attr(feature = "x", proc_macro_attribute)]`
     counts when the feature is on;
 - a function-like macro (`html!(..)`) expands to a `compile_error!` naming #29.

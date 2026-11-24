@@ -136,9 +136,9 @@ zurgo run
   `target/zust/wasm32-unknown-unknown/<profile>/`, and `zurgo run` runs it with
   `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER`, as cargo does.
 - Build scripts run as under cargo (compiled by zustc, or by rustc when zustc cannot), and their cfgs, `rustc-env` and
-  `OUT_DIR` reach the crates. A proc-macro dependency is a stub: using its macros is an error.
-- Not yet: running proc macros, two versions of one crate, renamed dependencies, git dependencies, its own resolver
-  (mizchi/zust#28, mizchi/zust#29).
+  `OUT_DIR` reach the crates. A proc-macro dependency is built by rustc and run by the toolchain's proc-macro server
+  (`rust-analyzer-proc-macro-srv`): its attributes, derives and function-like macros expand (mizchi/zust#29).
+- Not yet: two versions of one crate, renamed dependencies, git dependencies, its own resolver (mizchi/zust#28).
 
 ### Options
 
@@ -218,7 +218,7 @@ Known differences from rust-analyzer are listed in [CONTRIBUTING.md](CONTRIBUTIN
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-23, f35ffc4<!-- /measured --> by CI on each push to main. Details:
+Numbers measured <!-- measured -->2026-11-24, 16245a0<!-- /measured --> by CI on each push to main. Details:
 [SUPPORT.md](SUPPORT.md) (what is supported) and [PERFORMANCE.md](PERFORMANCE.md) (speed, size, memory, and
 comparisons with rustc and others).
 
@@ -230,10 +230,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1839 (77.1%) |
+| run-pass (builds, runs, same output) | 2385 | 1840 (77.1%) |
 | check-pass (accepted by `zustc check`) | 1807 | 1515 (83.8%) |
 | build-pass | 135 | 102 (75.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 4655 (63.3%) |
+| compile-fail (rejected at an annotated line) | 7358 | 4660 (63.3%) |
 <!-- /auto:ui -->
 
 [SUPPORT.md](SUPPORT.md) breaks this down by area: the language, the checks, the runtime and std, and what is left.
@@ -246,10 +246,10 @@ table, with instruction counts, cache and binary sizes and memory, is in [PERFOR
 <!-- auto:kpi-summary -->
 | | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 128 ms | 568 ms |
-| no-op build | 0.7 ms | 0.6 ms |
-| build after editing one function | 17.9 ms | 65.0 ms |
-| `check` | 79 ms | 383 ms |
+| cold build | 123 ms | 559 ms |
+| no-op build | 0.7 ms | 0.7 ms |
+| build after editing one function | 16.9 ms | 62.2 ms |
+| `check` | 78 ms | 379 ms |
 <!-- /auto:kpi-summary -->
 
 Against `rustc -C incremental` on gen1000 (a snapshot measured by hand): about 6x faster cold, 15x faster after an

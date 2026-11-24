@@ -134,20 +134,48 @@ zurgo run
 
 ## proc-macro の依存
 
-proc macro はまだ動かせない (mizchi/zust#29)。proc-macro の依存は、その名前の空のライブラリ (スタブ) としてビルド
-するので、それを再エクスポートするだけのクレートはビルドできる: `pub use thiserror_impl::*;` や、serde の `derive`
-feature。
+proc macro は動く (mizchi/zust#29、方式 A)。rustc が proc-macro の依存を dylib に、その依存を rlib にビルドする。
+それらのビルドスクリプトが先に走り、ビルドしたものはビルドスクリプトのホスト用ライブラリと同じように取っておく。
+zustc には、そのクレートを、その名前のスタブのライブラリと、横に置いた dylib として渡す (ワークスペースのファイルの
+`pm=PATH`)。ツールチェインの proc-macro サーバ (rustc の sysroot の `libexec/rust-analyzer-proc-macro-srv`。`rustc`
+コンポーネントに入っている) が dylib を読み込み、使っているところを 1 つずつ展開する:
+- **何が「使っているところ」か。** zustc は名前で見つける。前に zurgo の検査が見つけていたのと同じ:
+  - 属性マクロ: `#[wasm_bindgen]`、`#[wasm_bindgen_macro::wasm_bindgen(..)]`、または `use` で取り込んだ名前
+    (名前を変えたものも);
+  - derive: `#[derive(.., Describe)]`。言語の derive と同じ名前のものは、std の外からその名前を取り込んでいるとき
+    だけ数える;
+  - 関数のようなマクロ: `pm::html!(..)`。アイテム・文・式のどの位置でもよい。その出力は、`macro_rules!` の呼び出しを
+    展開したものと同じところに置く。
+  - 数えるのは、そのクレートからたどり着く proc-macro のクレートだけ: 依存、またはそのライブラリが再エクスポート
+    するもの。std やツールへのパス (`#[rustfmt::skip]`) は、proc macro のものではない。
+  - **どのクレートのものか。** パスは、それが始まるクレートのマクロ: `pm::make!()`、またはライブラリ `re` が
+    再エクスポートしているなら `re::make!()` (その `pub use`。名前の変更やグロブも)。そうしたパスは、
+    `macro_rules! make` があっても proc macro のもので、`stringify!(..)` の中では書いたまま残す。`use` で取り込んだ
+    名前は (波括弧の中でも)、その `use` が始まるクレートのマクロ。`use` はクレートごとに 1 つの表なので、2 つの
+    モジュールが別々のクレートのマクロを同じ名前で取り込むと、区別しない。
+- **マクロが受け取るもの。**
+  - アイテムのトークン。cfg は評価済みで、doc コメントは `#[doc = ".."]` になっている。
+  - そのクレートのコンパイル時の環境 (`CARGO_PKG_*`)。`CARGO_MANIFEST_DIR` をカレントディレクトリにする。
+  - 属性マクロのアイテムには、その属性を含めない。derive のアイテムには、その `#[derive]` を含めず、アイテムは
+    ほかの derive を持ったまま残る。
+- **出力はもう一度読む**。なので、出力が使うマクロも順に展開する (rustc と同じく外側から)。マクロの呼び出しの引数は、
+  その呼び出しを展開するまで読まない。
+- **キャッシュ。** 展開したものは、そのクレートのほかの前処理と一緒に取っておく。dylib をビルドし直したら、展開も
+  やり直す。
+- **まだのもの。**
+  - span はどれも呼び出したところのもの。zustc は proc macro の出力の衛生性 (hygiene) を持たず、展開したものの中の
+    エラーは使っているところを指す。
+  - ビルドスクリプトのビルド用の依存に proc macro があるもの: そのスクリプトは rustc がビルドする。
 
-zustc は知らない属性を黙って捨てるので、proc macro を使うと、何もビルドする前にエラーになる:
+サーバがないとき (`ZUSTC_PROC_MACRO_SRV` が空で設定されている、またはツールチェインにない) は、proc-macro の依存は
+その名前のスタブのライブラリだけになる。なので、それを再エクスポートするだけのクレートはビルドできる
+(`pub use thiserror_impl::*;` や、serde の `derive` feature)。zustc は知らない属性を黙って捨てるので、そのときは
+proc macro を使うと、何もビルドする前にエラーになる:
 - ビルドのどれかのクレートが、スタブの derive (`#[derive(thiserror::Error)]`) か属性マクロ (`#[wasm_bindgen]`。
   名前を変えたもの `use wasm_bindgen::prelude::wasm_bindgen as wb;` も) を使っていれば、#29 を示すエラーになる。
-  - 数えるのは、そのクレートからたどり着く proc-macro のクレートだけ: 依存、またはそのライブラリが再エクスポート
-    するもの。
   - それぞれのクレートは zustc が読むとおりに読む: そのモジュールの木のファイルを、その feature と cfg で。なので、
     たどり着かないファイルの中、無効な cfg の下、呼ばれもエクスポートもされない `macro_rules!` の本体で使っている
     ものは数えない。
-  - 言語の derive (`#[derive(Debug)]`) は、std の外から同じ名前のものを取り込んでいるとき
-    (`use derive_more::Debug;`) だけ proc macro のものとする。
   - proc-macro のクレートのルートは、その feature で読む。なので、`#[cfg_attr(feature = "x", proc_macro_attribute)]`
     は、その feature が有効なら数える;
 - 関数のようなマクロ (`html!(..)`) は、#29 を示す `compile_error!` に展開する。
