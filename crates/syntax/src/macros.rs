@@ -218,6 +218,67 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
             Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => Some((1, false)),
             _ => None,
         },
+        // (one item: to its `;`, or to its `{ .. }` (fn, struct, enum, impl, trait, mod, a macro call); `const` /
+        //  `static` / `use` / `type` / `extern crate` to their `;` only (`const X: S = S { .. };`). A group is one token,
+        //  so `[u8; 3]` does not end it. `$($it:item)*` takes one item each: libc 0.2's cfg_if puts its cfg on each)
+        "item" => {
+            let mut n = 0;
+            while matches!(toks.get(n), Some(TokenTree::Punct(p)) if p.as_char() == '#')
+                && matches!(toks.get(n + 1), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Bracket)
+            {
+                n += 2;
+            }
+            let mut k = n;
+            let mut semi = false;
+            while let Some(t) = toks.get(k) {
+                match t {
+                    TokenTree::Ident(i) => match i.to_string().as_str() {
+                        "pub" => {
+                            k += 1;
+                            if matches!(toks.get(k), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Parenthesis) {
+                                k += 1;
+                            }
+                        }
+                        "unsafe" | "async" | "extern" | "default" | "safe" => k += 1,
+                        "const" => {
+                            semi = !matches!(toks.get(k + 1), Some(TokenTree::Ident(j)) if matches!(j.to_string().as_str(), "fn" | "unsafe" | "async" | "extern"));
+                            break;
+                        }
+                        "static" | "use" | "type" => {
+                            semi = true;
+                            break;
+                        }
+                        "crate" => {
+                            semi = k > n;
+                            break;
+                        }
+                        _ => break,
+                    },
+                    // (`extern "C"`)
+                    TokenTree::Literal(_) => k += 1,
+                    _ => break,
+                }
+            }
+            let mut m = n;
+            // (inside generic arguments a brace is a const argument, not the body: `struct S<const N: usize = { 1 }>;`.
+            //  The `>` of `->` closes nothing)
+            let mut angle = 0u32;
+            while m < toks.len() {
+                match &toks[m] {
+                    TokenTree::Punct(p) if p.as_char() == '<' => angle += 1,
+                    TokenTree::Punct(p) if p.as_char() == '>' && angle > 0
+                        && !(m > 0 && matches!(&toks[m - 1], TokenTree::Punct(q) if q.as_char() == '-' && q.spacing() == Spacing::Joint)) =>
+                    {
+                        angle -= 1
+                    }
+                    TokenTree::Punct(p) if p.as_char() == ';' && angle == 0 => return Some((m + 1, false)),
+                    TokenTree::Group(g) if !semi && angle == 0 && g.delimiter() == Delimiter::Brace => return Some((m + 1, false)),
+                    _ => {}
+                }
+                m += 1;
+            }
+            if m == 0 { None } else { Some((m, false)) }
+        }
         _ => {
             // expr / ty / pat / path / stmt / item: 次の区切りまで (グループの中は見ない)
             let mut n = 0;
@@ -523,6 +584,18 @@ fn tt_text(t: &TokenTree, out: &mut String) {
     }
 }
 
+/// Whether every attribute in an expansion is `#[cfg(..)]` / `#[cfg_attr(..)]` (cfg-if's): evaluated with what they are
+/// on, they leave nothing behind, so the expansion may be spliced into a block as statements
+fn only_cfg_attrs(body: &str) -> bool {
+    body.match_indices('#').all(|(k, _)| {
+        let r = body[k + 1..].trim_start();
+        r.strip_prefix('[').is_some_and(|r| {
+            let r = r.trim_start();
+            r.starts_with("cfg(") || r.starts_with("cfg (") || r.starts_with("cfg_attr")
+        })
+    })
+}
+
 /// The names a macro body binds with `let` (not from its variables): hygiene keeps them apart from the caller's names
 /// (`macro_rules! m { ($e:expr) => {{ let x = 9; $e }} }` with `m!(x)` uses the caller's x)
 fn body_lets(body: &[Pt], out: &mut Vec<String>) {
@@ -602,8 +675,14 @@ impl<'a> Binds<'a> {
 }
 
 fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> Result<(), String> {
+    let punct = |k: usize, c: char| matches!(body.get(k), Some(Pt::Tok(TokenTree::Punct(q))) if q.as_char() == c);
     for (k, p) in body.iter().enumerate() {
         match p {
+            // (a field or method of a let's name is not renamed: `r.core`, `x.seed()` (not the range `..core`). Field names
+            //  in struct literals, patterns and definitions drop the hygiene suffix where they are parsed)
+            Pt::Tok(TokenTree::Ident(i)) if lets.iter().any(|l| *i == l.as_str()) && k > 0 && punct(k - 1, '.') && !(k > 1 && punct(k - 2, '.')) => {
+                tt_text(&TokenTree::Ident(i.clone()), out);
+            }
             // (a label of the body's own: `'x` -> `'x__mh`)
             Pt::Tok(TokenTree::Ident(i))
                 if k > 0
@@ -795,7 +874,8 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
         if toks[k].0 == 1 && (t == b";" || t == b"{" || t == b"}") {
             return false;
         }
-        if toks[k].0 == 0 && (t == b"mod" || t == b"impl" || t == b"trait") {
+        // (`extern "C" { .. }`: foreign items. `extern "C" fn f() {` meets `fn` first, going back)
+        if toks[k].0 == 0 && (t == b"mod" || t == b"impl" || t == b"trait" || t == b"extern") {
             return true;
         }
         if toks[k].0 == 0 && (t == b"fn" || t == b"struct" || t == b"enum" || t == b"union" || t == b"let") {
@@ -817,6 +897,30 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
 /// ソースの中の macro_rules! を展開する。なければ None。
 /// ソース全体は速い lexer::tokenize で見て、proc_macro2 の字句解析は定義と呼び出しの括弧の中だけにする
 /// (全体を proc_macro2 で読むと、大きなソース (zustc 自身) で遅い)。結果は expand_reference と同じ
+/// The line that separates a crate's own text from the `macro_rules!` of its dependencies appended for its
+/// expansion (driver2's workspace build)
+pub const DEP_MACROS_MARKER: &str = "\n// __zustc_dep_macros__\n";
+
+/// How deep macro expansion may go: the crate's `#![recursion_limit = "N"]`, else rustc's default, 128
+pub fn recursion_limit(src: &str) -> usize {
+    if !src.contains("recursion_limit") {
+        return 128;
+    }
+    // (by tokens, so a comment or a string that spells the attribute changes nothing)
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
+    for k in 0..toks.len().saturating_sub(6) {
+        if tk(k) == b"#" && tk(k + 1) == b"!" && tk(k + 2) == b"[" && tk(k + 3) == b"recursion_limit" && tk(k + 4) == b"=" && toks[k + 5].0 == 2 {
+            let lit = tk(k + 5);
+            if let Some(n) = std::str::from_utf8(lit).ok().map(|l| l.trim_matches('"')).and_then(|l| l.trim().parse::<usize>().ok()) {
+                return n;
+            }
+        }
+    }
+    128
+}
+
 pub fn expand(src: &str) -> Result<Option<String>, String> {
     expand_cfg(src, None)
 }
@@ -946,8 +1050,15 @@ fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>, mut 
         let mut i = 0;
         while i + 3 < toks.len() {
             let is_def = toks[i].0 == 0 && tk(i) == b"macro_rules" && sym(i + 1, b'!') && toks[i + 2].0 == 0 && close[i + 3] != usize::MAX;
-            // (`stringify!(macro_rules! m { .. })`: the tokens of an opaque macro's arguments are text, not items)
-            if !is_def && toks[i].0 == 0 && matches!(tk(i), b"stringify" | b"concat_idents" | b"log_syntax") && sym(i + 1, b'!') && close[i + 2] != usize::MAX {
+            // (a macro call's arguments are its input, not items: `stringify!(macro_rules! m { .. })` is text, and quote's
+            //  `__quote![ macro_rules! quote { .. } ]` defines `quote!` only when the call expands, in a later round)
+            //  A std macro's arguments are not expanded by macro_rules, so a definition there is collected now:
+            //  `println!("{}", { macro_rules! foo { .. } foo!(1) })`)
+            if !is_def && toks[i].0 == 0 && tk(i) != b"macro_rules" && sym(i + 1, b'!') && close[i + 2] != usize::MAX
+                && (sym(i + 2, b'(') || sym(i + 2, b'[') || sym(i + 2, b'{'))
+                && (matches!(tk(i), b"stringify" | b"concat_idents" | b"log_syntax")
+                    || !crate::lexer::is_std_macro(std::str::from_utf8(tk(i)).unwrap_or("")))
+            {
                 i = close[i + 2] + 1;
                 continue;
             }
@@ -959,15 +1070,19 @@ fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>, mut 
             let name = String::from_utf8_lossy(tk(i + 2)).into_owned();
             let rules = parse_rules(&text[toks[i + 3].2..toks[ge].1])?;
             macros.insert(name.clone(), rules);
-            // `#[macro_export]` などの属性も消す
+            // `#[macro_export]` などの属性も消す (all of them: `#[macro_export] #[doc(hidden)] macro_rules! m`)
             let mut st = toks[i].1;
-            if i >= 2 && sym(i - 1, b']') {
-                let mut o = i - 1;
-                while o > 0 && close[o - 1] != i - 1 {
+            let mut at = i;
+            while at >= 3 && sym(at - 1, b']') {
+                let mut o = at - 1;
+                while o > 0 && close[o - 1] != at - 1 {
                     o -= 1;
                 }
                 if o >= 2 && sym(o - 1, b'[') && sym(o - 2, b'#') {
                     st = toks[o - 2].1;
+                    at = o - 2;
+                } else {
+                    break;
                 }
             }
             if let Some(f) = first.as_deref_mut() {
@@ -1286,12 +1401,48 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
         }
     }
     collect_defs(&mut text, &mut macros, Some(&mut first))?;
+    // (a dependency's macros, after the marker, are in scope from the top: `#[macro_use] extern crate x;` or a
+    //  `use` brought them in, and the dependency was checked on its own)
+    if let Some(mpos) = text.find(DEP_MACROS_MARKER) {
+        for d in first.values_mut() {
+            if *d != usize::MAX && *d > mpos {
+                *d = usize::MAX;
+            }
+        }
+    }
+    // (and so are the macros of a `#[macro_use] mod m { .. }`: srcmap appends a file's modules at its end, keeping
+    //  that attribute, so `#[macro_use] mod macros;` at the top of lib.rs puts libc's `cfg_if!` below its uses)
+    if text.contains("macro_use") {
+        let b = text.as_bytes();
+        let toks = crate::lexer::tokenize(b);
+        let (close, _) = brackets(b, &toks);
+        let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
+        let mut spans: Vec<(usize, usize)> = vec![];
+        for k in 0..toks.len().saturating_sub(4) {
+            if tk(k) == b"#" && tk(k + 1) == b"[" && tk(k + 2) == b"macro_use" && tk(k + 3) == b"]" {
+                let mut j = k + 4;
+                while j < toks.len() && matches!(tk(j), b"pub") {
+                    j += 1;
+                }
+                if j + 2 < toks.len() && tk(j) == b"mod" && toks[j + 1].0 == 0 && tk(j + 2) == b"{" && close[j + 2] != usize::MAX {
+                    spans.push((toks[j + 2].1, toks[close[j + 2]].2));
+                }
+            }
+        }
+        for d in first.values_mut() {
+            if spans.iter().any(|&(a, e)| *d >= a && *d < e) {
+                *d = usize::MAX;
+            }
+        }
+    }
     if macros.is_empty() && pms.is_empty() {
         return Ok(Some(text));
     }
     // 2. 呼び出しを展開する (いちばん外側の呼び出しだけ。展開したものの中の呼び出しは次の周)
     let limit = text.len().saturating_mul(64).max(16 << 20);
-    for round in 0..64 {
+    let depth_limit = recursion_limit(&text);
+    // (one more round than the limit: the last one only finds that nothing is left to expand)
+    for round in 0..=depth_limit {
         // (definitions an expansion produced: `macro_rules! foo { () => { macro_rules! bar { .. } } }`)
         if round > 0 && text.contains("macro_rules") {
             collect_defs(&mut text, &mut macros, None)?;
@@ -1441,7 +1592,9 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
             // (not with attributes: a `#[cfg(false)]` item removed later would leave the attributes before it)
             // (`m! { .. }` in statement position is a statement by itself, whatever follows: `defer! { .. }
             // let x = ..;`)
-            let spliced = !top && stmt_pos && (sym(ge + 1, b';') || sym(ge + 1, b'}') || sym(ge, b'}')) && !body.contains('#');
+            //  Attributes that are only `#[cfg(..)]` / `#[cfg_attr(..)]` (cfg-if's expansions) are evaluated with what they
+            //  are on, so they leave nothing behind)
+            let spliced = !top && stmt_pos && (sym(ge + 1, b';') || sym(ge + 1, b'}') || sym(ge, b'}')) && only_cfg_attrs(&body);
             // (the call's own `;` goes when the expansion ends a statement itself: no stray `;` after attributes)
             let drop_semi = spliced && sym(ge + 1, b';') && body.trim_end().ends_with(';');
             let rep = if operand {
@@ -1532,7 +1685,7 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
             return Ok(Some(text));
         }
     }
-    Err("1:1: macro expansion is too deep (recursion limit 64)".into())
+    Err(format!("1:1: macro expansion is too deep (recursion limit {depth_limit})"))
 }
 
 /// 前の版の expand (ソース全体を proc_macro2 で読む)。expand と結果が同じかを確かめるため
@@ -1625,7 +1778,8 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
     }
     // 2. 呼び出しを展開する (展開したものの中の呼び出しも)
     let limit = text.len().saturating_mul(64).max(16 << 20);
-    for _round in 0..64 {
+    let depth_limit = recursion_limit(&text);
+    for _round in 0..=depth_limit {
         let ts = TokenStream::from_str(&text).map_err(|e| format!("1:1: {e}"))?;
         let mut reps: Vec<(usize, usize, String)> = vec![];
         find_calls(ts, &macros, &text, 0, false, true, &mut reps)?;
@@ -1653,7 +1807,7 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
             return Ok(Some(text));
         }
     }
-    Err("1:1: macro expansion is too deep (recursion limit 64)".into())
+    Err(format!("1:1: macro expansion is too deep (recursion limit {depth_limit})"))
 }
 
 /// `name!(..)` / `name![..]` / `name!{..}` の呼び出し (いちばん外側だけ。中は次の周で展開する)
@@ -1708,7 +1862,9 @@ fn find_calls(
                                         || matches!(&toks[ps - 1], TokenTree::Punct(q) if q.as_char() == ';')
                                         || matches!(&toks[ps - 1], TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace));
                                 let next_semi = matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if q.as_char() == ';');
-                                let spliced = depth > 0 && stmt_pos && (next_semi || toks.get(i + 3).is_none()) && !body.contains('#');
+                                // (`m! { .. }` is a statement by itself, whatever follows, as in expand_cfg)
+                                let braced = matches!(toks.get(i + 2), Some(TokenTree::Group(cg)) if cg.delimiter() == proc_macro2::Delimiter::Brace);
+                                let spliced = depth > 0 && stmt_pos && (next_semi || braced || toks.get(i + 3).is_none()) && only_cfg_attrs(&body);
                                 let drop_semi = spliced && next_semi && body.trim_end().ends_with(';');
                                 // (as expand_cfg: at the top, an item only where an item starts (after an attribute
                                 // too); after a binary operator, one operand that keeps the `;` after it)
@@ -2150,5 +2306,146 @@ mod env_tests {
         assert!(!may_use_env("use std::env; fn environment() {}"));
         assert!(may_use_env("env /* a comment */ !(\"X\")") && may_use_env("env // why\n !(\"X\")"));
         assert_eq!(x("env /* c */ !(\"LABEL\")"), "\"v\"");
+    }
+
+    /// A dependency's macros come after DEP_MACROS_MARKER, at the end of the text: they are in scope from the top
+    /// (`#[macro_use] extern crate cfg_if;` as getrandom 0.4 has), unlike the crate's own `macro_rules!`, which is
+    /// usable only below its definition
+    #[test]
+    fn dependency_macros_are_in_scope_above_their_text() {
+        let own = "fn main() { m!(); }\nmacro_rules! m { () => {}; }\n";
+        assert!(expand(own).is_err());
+        let dep = format!("fn main() {{ m!(); }}\n{DEP_MACROS_MARKER}macro_rules! m {{ () => {{}}; }}\n");
+        assert!(expand(&dep).is_ok(), "{:?}", expand(&dep).err());
+    }
+
+    /// A macro invoked in an `extern` block expands to items there (foreign fns), not to an expression: libc 0.2
+    /// calls `cfg_if!` inside `extern "C" { .. }`, and cfg_if calls itself again behind `#[cfg(..)]` (`ci!` here has
+    /// the same shape). An `extern "C" fn` body is still a block of statements
+    #[test]
+    fn macro_in_extern_block_is_items() {
+        let src = "macro_rules! decl { ($n:ident) => { pub fn $n(x: i32) -> i32; }; }\nmacro_rules! ci { ($(#[$m:meta] $i:item)*) => { $( #[$m] ci! { @id $i } )* }; (@id $($t:tt)*) => { $($t)* }; }\nunsafe extern \"C\" {\n    ci! { #[cfg(unix)] pub fn abs(x: i32) -> i32; #[cfg(unix)] pub fn labs(x: i32) -> i32; }\n}\nmacro_rules! decl2 { () => { 1 }; }\nextern \"C\" fn g() -> i32 { decl2!() }\n";
+        let out = expand(src).unwrap().unwrap();
+        let norm = out.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(!norm.contains("({"), "{out}");
+        assert!(norm.contains("pub fn abs (x : i32 ) -> i32 ;") && norm.contains("pub fn labs (x : i32 ) -> i32 ;"), "{out}");
+        assert!(norm.contains("extern \"C\" fn g() -> i32 { 1 }"), "{out}");
+    }
+
+    /// `$($it:item)*` takes each item on its own: two `const` items are two fragments, so `$(#[$m] $it)*` puts the
+    /// attribute on both (libc 0.2's `cfg_if!` applies each branch's cfg this way; taking both consts as one item
+    /// left the second without its cfg, a duplicate definition)
+    #[test]
+    fn item_fragments_split_at_each_item() {
+        let src = "macro_rules! ap { ($m:meta, $($it:item)*) => { $(#[$m] $it)* }; }\nap! { cfg(any()), pub const A: i32 = 0; pub const B: i32 = 1; pub static S: u8 = 2; pub fn f() {} }\nfn main() {}\n";
+        let c = crate::cfg::CfgSet { debug_assertions: true, ..Default::default() };
+        let out = expand_cfg(src, Some(&c)).unwrap().unwrap();
+        for n in ["A", "B", "S", "f"] {
+            assert!(!out.split(|c: char| !c.is_alphanumeric()).any(|w| w == n), "{n} left: {out}");
+        }
+    }
+
+    /// A `macro_rules!` inside another macro's arguments is that macro's input, not a definition yet: quote 1.0
+    /// wraps its `quote!` in `__quote![ #[macro_export] macro_rules! quote { .. } ];`. Taking it out of the call
+    /// left the call empty ("no rules matched"); it is defined when the call's expansion puts it in place
+    #[test]
+    fn macro_rules_in_call_arguments() {
+        let src = "macro_rules! wrap { ($it:item) => { $it }; }\nwrap![ #[macro_export] macro_rules! q { () => { 0 }; ($t:tt) => { $t }; } ];\nfn main() { let _a = q!(); let _b = q!(5); }\n";
+        let out = expand(src);
+        assert!(out.is_ok(), "{out:?}");
+        let norm = out.unwrap().unwrap().split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(norm.contains("let _a = ({ 0 })") && norm.contains("let _b = ({ 5 })"), "{norm}");
+    }
+
+    /// ..but a std macro's arguments (`println!("{}", { macro_rules! foo { .. } foo!("rust") })`, tests/ui
+    /// macro-nested_definition_issue-31946) are not expanded by macro_rules: a definition there is collected
+    #[test]
+    fn macro_rules_in_std_macro_arguments() {
+        let src = "fn main() {\n    println!(\"{}\", {\n        macro_rules! foo { ($n:expr) => { $n + 1 } }\n        foo!(41)\n    });\n}\n";
+        let out = expand(src);
+        assert!(out.is_ok(), "{out:?}");
+        let norm = out.unwrap().unwrap().split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(!norm.contains("foo!"), "{norm}");
+    }
+
+    /// A definition goes with all its attributes: `#[macro_export] #[doc(hidden)] macro_rules! m { .. }` (bitflags
+    /// 2) left `#[macro_export]` with no item after it ("unterminated item")
+    #[test]
+    fn macro_definition_with_several_attributes() {
+        let src = "#[macro_export]\n#[doc(hidden)]\nmacro_rules! m { () => { 1 }; }\nfn main() { let _x = m!(); }\n";
+        let out = expand(src).unwrap().unwrap();
+        assert!(!out.contains("#["), "{out}");
+        assert!(crate::parse::parse_file(&out).is_ok(), "{out}");
+    }
+
+    /// `$i:item` does not end at a brace inside generic arguments: `struct S<const N: usize = { 1 }>;`
+    #[test]
+    fn item_fragment_with_braces_in_generics() {
+        let src = "macro_rules! keep { ($i:item) => { $i }; }\nkeep! { struct S<const N: usize = { 1 }>; }\nfn main() {}\n";
+        let out = expand(src);
+        assert!(out.is_ok(), "{out:?}");
+        let flat: String = out.unwrap().unwrap().chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(flat.contains("structS<constN:usize={1}>;"), "{flat}");
+    }
+
+    /// `#![recursion_limit]` is read from the crate's attribute, not from a comment or a string
+    #[test]
+    fn recursion_limit_from_the_attribute_only() {
+        assert_eq!(super::recursion_limit("// #![recursion_limit = \"0\"]\nfn main() {}"), 128);
+        assert_eq!(super::recursion_limit("const S: &str = \"#![recursion_limit = \\\"3\\\"]\";"), 128);
+        assert_eq!(super::recursion_limit("#![recursion_limit = \"300\"]\nfn main() {}"), 300);
+        assert_eq!(super::recursion_limit("#![ recursion_limit = \"64\" ]"), 64);
+    }
+
+    /// A limit counts expansion depth: with `#![recursion_limit = "1"]` a call whose expansion needs no more
+    /// expansion completes, even though the expansion's text names the macro (`"m"`)
+    #[test]
+    fn recursion_limit_one_completes() {
+        let src = "#![recursion_limit = \"1\"]\nmacro_rules! m { () => { \"m\" }; }\nfn main() { let _ = m!(); }\n";
+        assert!(expand(src).is_ok(), "{:?}", expand(src).err());
+        assert!(expand_reference(src).is_ok());
+    }
+
+    /// A braced call in statement position whose expansion carries only `#[cfg(..)]` attributes (cfg-if's
+    /// `cfg_if! { if #[cfg(..)] { let tokens = ..; } else { .. } }`, chacha20 0.10) puts its statements into the
+    /// block, so a `let` it declares is seen by what follows (`Self { tokens }`)
+    #[test]
+    fn statement_cfg_if_declares_into_the_block() {
+        let src = "macro_rules! pick { (if #[cfg($m:meta)] { $($a:tt)* } else { $($b:tt)* }) => { #[cfg($m)] pick! { @id $($a)* } #[cfg(not($m))] pick! { @id $($b)* } }; (@id $($t:tt)*) => { $($t)* }; }\nfn f() -> u8 {\n    pick! {\n        if #[cfg(unix)] { let tokens = 1; } else { let tokens = 2; }\n    }\n    tokens\n}\nfn main() {}\n";
+        let c = crate::cfg::CfgSet { debug_assertions: true, ..Default::default() };
+        let out = expand_cfg(src, Some(&c)).unwrap().unwrap();
+        let norm = out.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(!norm.contains("({"), "{norm}");
+        assert!(crate::parse::parse_file(&out).is_ok(), "{norm}");
+    }
+
+    /// A body's own `let core` is renamed for hygiene, but not a field or method of that name after `.`:
+    /// `self.core.core` (chacha20 0.10's `impl_chacha_rng!`). A parameter of the name is renamed with it
+    #[test]
+    fn hygiene_keeps_fields_of_a_let_name() {
+        let src = "macro_rules! imp { () => { fn h(core: u8) -> u8 { core } fn f(r: &mut R) -> u8 { let core = 1; r.core.core = core; let x = core..core; r.core() } } }\nimp!();\nfn main() {}\n";
+        let out = expand_cfg(src, Some(&crate::cfg::CfgSet::default())).unwrap().unwrap();
+        let norm: String = out.split_whitespace().collect();
+        assert!(norm.contains("r.core.core=core__mh"), "{norm}");
+        assert!(norm.contains("core__mh..core__mh"), "{norm}");
+        assert!(norm.contains("r.core()"), "{norm}");
+        assert!(norm.contains("fnh(core__mh:u8)->u8{core__mh}"), "{norm}");
+    }
+
+    /// The depth of recursive expansion is limited as in rustc: 128 by default, or the crate's
+    /// `#![recursion_limit = "N"]` (libc 0.2's `cfg_if!` chains and `s!` items go deeper than 64)
+    #[test]
+    fn recursion_limit() {
+        let src = |n: usize, attr: &str| {
+            format!(
+                "{attr}macro_rules! deep {{ () => {{ 0 }}; ($x:tt $($rest:tt)*) => {{ 1 + deep!($($rest)*) }}; }}\nfn main() {{ let _n = deep!({}); }}\n",
+                "a ".repeat(n)
+            )
+        };
+        for (n, attr, ok) in [(100, "", true), (150, "", false), (200, "#![recursion_limit = \"300\"]\n", true)] {
+            let s = src(n, attr);
+            assert_eq!(expand(&s).is_ok(), ok, "fast, depth {n} {attr:?}: {:?}", expand(&s).err());
+            assert_eq!(expand_reference(&s).is_ok(), ok, "reference, depth {n} {attr:?}");
+        }
     }
 }

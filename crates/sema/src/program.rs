@@ -501,8 +501,9 @@ pub struct Program {
     /// type's slots (which say which of them a use's path writes)
     pub const_regions: FxMap<u32, (Vec<u8>, Vec<u8>)>,
     /// Summary::assoc_regions, by associated type (its index in assocs): the codes of its value against its impl's
-    /// lifetimes, and the impl's self type's codes
-    pub assoc_regions: FxMap<u32, (Vec<u8>, Vec<u8>)>,
+    /// lifetimes, the impl's self type's codes, the `'d: 'a` its header declares of them, and the codes of the
+    /// lifetimes its trait path writes (RImplSyn::trait_lts)
+    pub assoc_regions: FxMap<u32, AssocRegions>,
     /// The item (an impl's member) each associated type is defined in, by its index in assocs: a function's cache
     /// key holds the definitions of the program's own, whose values (and their lifetimes) the function's types and
     /// region check read
@@ -559,6 +560,9 @@ pub struct Program {
     /// The regions of the struct / enum definitions that name lifetimes (by definition id): region checking
     pub adt_regions: FxMap<u32, std::sync::Arc<RAdtSyn>>,
 }
+
+/// Program::assoc_regions' entry: (value codes, impl self type codes, header outlives, trait path lifetime codes)
+pub type AssocRegions = (Vec<u8>, Vec<u8>, Vec<(u8, u8)>, Vec<u8>);
 
 /// `impl<..> Trait for S<..> { type Name = Value; }`
 pub struct AssocDef {
@@ -1487,6 +1491,30 @@ impl Program {
                 p.layout(id, &sdefs, items, &mut state)?;
             }
         }
+        // (and those of generic types, `impl<R> Generator for Core<R> { type Output = [u32; 64]; }`, once the generic
+        // definitions are there: a field `BlockRng<Core<R8>>` of a non-generic struct, laid out next, has a field of type
+        // `G::Output` (rand_core 0.10 with chacha20). Those that do not resolve yet are taken below, as before)
+        for (ii, sm) in sums.iter().enumerate() {
+            let of_trait = matches!(items[ii].kind, crate::lexer::ItemKind::ImplMember(h) if sums[h as usize].impl_trait.is_some());
+            if sm.assocs.is_empty() || !of_trait {
+                continue;
+            }
+            for (k, a) in sm.assocs.iter().enumerate() {
+                if early.contains(&(ii, k)) || !syn_has_app(&a.self_ty, &p.aliases) || syn_has_app(&a.value, &p.aliases) {
+                    continue;
+                }
+                let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
+                if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
+                    let (ngen, ngat) = gat_split(&gn);
+                    let trait_name = impl_trait_name(&items[ii].kind, sums);
+                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat, trait_name });
+                    p.note_assoc_regions(items, sums, ii, k);
+                    p.assoc_items.push(ii as u32);
+                    early.push((ii, k));
+                }
+            }
+        }
+        let early: HashSet<(usize, usize)> = early.into_iter().collect();
         for id in 0..sdefs.len() {
             p.layout(id, &sdefs, items, &mut state)?;
         }
@@ -1590,12 +1618,9 @@ impl Program {
             }
         }
         // 関連型 (関数のシグネチャの `Self::Item` を解決するので先に)
-        let mut next_early = 0;
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             for (k, a) in sm.assocs.iter().enumerate() {
-                // (`early` is in the same order as this loop)
-                if early.get(next_early) == Some(&(ii, k)) {
-                    next_early += 1;
+                if early.contains(&(ii, k)) {
                     continue;
                 }
                 let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
@@ -1883,6 +1908,12 @@ impl Program {
                         p.impl_targs.entry(tr.clone()).or_default().push((st, args, gn.len()));
                     }
                 }
+            }
+            // (`impl From<S> for S` / `impl TryFrom<S> for S`: std's `impl<T> From<T> for T`, and the TryFrom it gives,
+            //  already cover it (E0119))
+            // (not `impl From<TokenStream> for proc_macro::TokenStream`: a path names another crate's type, proc-macro2)
+            if (tr == "From" || tr == "TryFrom") && !sm.impl_self_path && sm.impl_trait_args.len() == 1 && sm.impl_self_ty.as_ref() == Some(&sm.impl_trait_args[0]) {
+                return Err(format!("{}:1: conflicting implementations of trait `{tr}<{sn}>` for type `{sn}` (E0119)", it.line));
             }
             // プリミティブ型への trait 実装 (`impl Tr for u32`)
             // (`impl Hash for str`: str も組み込みの型として持つ)
@@ -3726,6 +3757,48 @@ impl Program {
                 r
             }
             Expr::Path(None, p) if p.segs.len() == 1 && (p.segs[0].name == "true" || p.segs[0].name == "false") => un((p.segs[0].name == "true") as i128),
+            // (`size_of::<T>()` / `align_of::<T>()` of a primitive, a pointer or an alias of one: an array length in
+            //  libc 0.2, `[u8; 128 - 2 * size_of::<c_int>()]`. Other types are not known here)
+            Expr::Call(f, args)
+                if args.is_empty()
+                    && matches!(&**f, Expr::Path(None, p) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "size_of" | "align_of") && s.args.len() == 1)
+                        // (a program's own fn named size_of / align_of is not core's: a `const fn` without type parameters is
+                        //  called as itself below; a generic one is not evaluated here, as before, rather than taken for core's)
+                        && !(p.segs.len() == 1 && (self.const_fns.contains_key(p.segs[0].name.as_str()) || self.index.contains_key(p.segs[0].name.as_str())))) =>
+            {
+                let Expr::Path(None, p) = &**f else { unreachable!() };
+                let seg = p.segs.last().unwrap();
+                let crate::parse::GArg::Ty(t) = &seg.args[0] else { return Err("size_of needs a type".into()) };
+                // (a pointer to a slice, a str or a trait object is two words; its alignment is one word's)
+                let fat = |i: &crate::parse::Ty| {
+                    matches!(i, crate::parse::Ty::Slice(_) | crate::parse::Ty::Dyn(_))
+                        || matches!(i, crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "str")
+                };
+                let size = match t {
+                    crate::parse::Ty::Ptr(_, i) | crate::parse::Ty::Ref(_, _, i) if fat(i) => Some(if seg.name == "align_of" { 8 } else { 16 }),
+                    crate::parse::Ty::Ptr(..) | crate::parse::Ty::Ref(..) => Some(8),
+                    crate::parse::Ty::Tuple(v) if v.is_empty() => Some(0),
+                    crate::parse::Ty::Path(None, tp) if tp.segs.len() == 1 && tp.segs[0].args.is_empty() => {
+                        match self.prim_of_name(&tp.segs[0].name).as_str() {
+                            "u8" | "i8" | "bool" => Some(1),
+                            "u16" | "i16" => Some(2),
+                            "u32" | "i32" | "f32" | "char" => Some(4),
+                            "u64" | "i64" | "f64" | "usize" | "isize" => Some(8),
+                            "u128" | "i128" => Some(16),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                // (on x86-64 these types' alignment is their size, except the empty tuple's, which is 1)
+                let v = match size {
+                    Some(0) if seg.name == "align_of" => 1,
+                    Some(n) => n,
+                    None => return Err(format!("cannot evaluate `{}` of this type in a constant", seg.name)),
+                };
+                // (both return a usize: `size_of::<u64>().leading_zeros()` counts 64 bits)
+                Ok((v, It::of_name("usize")))
+            }
             // (a call of a `const fn` with integer arguments: its body with the parameters bound)
             Expr::Call(f, args) if matches!(&**f, Expr::Path(None, p) if p.segs.len() == 1 && self.const_fns.contains_key(p.segs[0].name.as_str())) => {
                 let Expr::Path(None, p) = &**f else { unreachable!() };
@@ -4771,8 +4844,8 @@ impl Program {
         let Some((_, codes)) = sums[ii].assoc_regions.iter().find(|x| x.0 as usize == k) else { return };
         let crate::lexer::ItemKind::ImplMember(h) = items[ii].kind else { return };
         // (an impl that names no lifetime has no header regions: no self slots)
-        let self_slots = sums[h as usize].hdr_regions.as_ref().map(|r| r.self_slots.clone()).unwrap_or_default();
-        self.assoc_regions.insert(self.assocs.len() as u32 - 1, (codes.clone(), self_slots));
+        let (self_slots, outlives, trait_lts) = sums[h as usize].hdr_regions.as_ref().map(|r| (r.self_slots.clone(), r.outlives.clone(), r.trait_lts.clone())).unwrap_or_default();
+        self.assoc_regions.insert(self.assocs.len() as u32 - 1, (codes.clone(), self_slots, outlives, trait_lts));
     }
 
     pub fn assoc_of(&self, t: Ty, name: &str) -> Option<Ty> {

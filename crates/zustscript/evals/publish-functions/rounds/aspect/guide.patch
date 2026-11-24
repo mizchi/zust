@@ -1,0 +1,26 @@
+--- a/README.md
++++ b/README.md
+@@ -68,0 +69,20 @@
++取り込めるのはレコード型、文字列リテラルの union、共通のタグで判別できる union です。たとえば、TypeScript で処理の状態を次のように定義します。
++
++```ts
++// model.ts
++export type State = { kind: "idle" } | { kind: "busy"; jobs: number };
++```
++
++```zsc
++import type { State } from "./model.ts";
++
++export fn jobs(state: State) -> f64 {
++  match state {
++    Idle => 0.0,
++    Busy(n) => n,
++  }
++}
++```
++
++JS から `jobs({ kind: "busy", jobs: 3 })` と呼ぶと `3` が返ります。タグだけの `idle` は括弧を付けず `Idle`、値を持つ `busy` は `Busy(n)` と書きます。複数の値を受け取る場合、括弧内の変数はタグを除いたフィールドの **TS での宣言順** に対応します。変数名は自分で付けられます。
++
+@@ -75 +95 @@
+-- まずは**プレーンなレコード型**だけを読む(src/tsimport.rs)。`interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
++- **レコード型** (src/tsimport.rs): `interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの

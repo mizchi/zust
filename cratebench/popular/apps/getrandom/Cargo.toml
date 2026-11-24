@@ -1,0 +1,11 @@
+[package]
+name = "popular-getrandom"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# (not a member of zust's workspace)
+[workspace]
+
+[dependencies]
+getrandom = "=0.4.3"

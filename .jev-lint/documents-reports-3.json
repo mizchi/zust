@@ -169,12 +169,28 @@
       "path": "docs/ja/reports/2026-11-24-08-region-check-22.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-24-09-projection-goals.en": {
-      "path": "docs/reports/2026-11-24-09-projection-goals.md",
+    "docs_reports_2026-11-24-09-region-check-23.en": {
+      "path": "docs/reports/2026-11-24-09-region-check-23.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-24-09-projection-goals.ja": {
-      "path": "docs/ja/reports/2026-11-24-09-projection-goals.md",
+    "docs_reports_2026-11-24-09-region-check-23.ja": {
+      "path": "docs/ja/reports/2026-11-24-09-region-check-23.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-10-region-check-24.en": {
+      "path": "docs/reports/2026-11-24-10-region-check-24.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-10-region-check-24.ja": {
+      "path": "docs/ja/reports/2026-11-24-10-region-check-24.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-11-projection-goals.en": {
+      "path": "docs/reports/2026-11-24-11-projection-goals.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-11-projection-goals.ja": {
+      "path": "docs/ja/reports/2026-11-24-11-projection-goals.md",
       "role": "historical"
     }
   },
@@ -411,14 +427,36 @@
       }
     },
     {
-      "id": "docs_reports_2026-11-24-09-projection-goals",
-      "topic": "The Japanese file docs/ja/reports/2026-11-24-09-projection-goals.md is a faithful translation of docs/reports/2026-11-24-09-projection-goals.md",
+      "id": "docs_reports_2026-11-24-09-region-check-23",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-09-region-check-23.md is a faithful translation of docs/reports/2026-11-24-09-region-check-23.md",
       "mode": "translation",
       "reference": {
-        "source": "docs_reports_2026-11-24-09-projection-goals.en"
+        "source": "docs_reports_2026-11-24-09-region-check-23.en"
       },
       "target": {
-        "source": "docs_reports_2026-11-24-09-projection-goals.ja"
+        "source": "docs_reports_2026-11-24-09-region-check-23.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-10-region-check-24",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-10-region-check-24.md is a faithful translation of docs/reports/2026-11-24-10-region-check-24.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-10-region-check-24.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-10-region-check-24.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-11-projection-goals",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-11-projection-goals.md is a faithful translation of docs/reports/2026-11-24-11-projection-goals.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-11-projection-goals.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-11-projection-goals.ja"
       }
     }
   ]
