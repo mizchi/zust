@@ -1,11 +1,11 @@
-// A React component: `pub fn main() -> Jsx` is rendered in the preview
+// A React component: `export fn main() -> Jsx` is rendered in the preview
 extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
 
 type Item = { label: String, done: bool }
 type RowProps = { item: Item, onToggle: fn(String) -> () }
 
 // a @wasm fn: compiled to wasm by `zsc`, run as JS here (`--all-js`)
-@wasm pub fn score(xs: Array<i32>) -> i32 {
+@wasm export fn score(xs: Array<i32>) -> i32 {
   let mut s = 0;
   for x in xs { s += x * x; }
   s
@@ -17,7 +17,7 @@ fn Row(props: RowProps) -> Jsx {
   </li>
 }
 
-pub fn App() -> Jsx {
+export fn App() -> Jsx {
   let (count, setCount) = useState(0);
   let items = [Item { label: "parse", done: true }, Item { label: "check", done: count > 2 }, Item { label: "emit", done: count > 5 }];
   <div>
@@ -28,6 +28,6 @@ pub fn App() -> Jsx {
   </div>
 }
 
-pub fn main() -> Jsx {
+export fn main() -> Jsx {
   <App />
 }

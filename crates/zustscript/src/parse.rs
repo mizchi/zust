@@ -286,7 +286,7 @@ impl Parser {
             false
         };
         let wasm_attr = wasm || simd;
-        let public = if self.is_kw("pub")? {
+        let public = if self.is_kw("export")? || self.is_kw("pub")? {
             self.next()?;
             true
         } else {

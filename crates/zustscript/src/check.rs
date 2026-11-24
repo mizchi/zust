@@ -1816,7 +1816,7 @@ impl EffWalk<'_> {
 
 /// The effects that can run as plain calls in JS. An effect is direct when:
 /// - every `handle` of it is tail-resumptive (each arm calls `k` once, in tail position, and nowhere else),
-/// - it does not leave a `pub` function (TS callers drive the generator of such a function),
+/// - it does not leave an exported function (TS callers drive the generator of such a function),
 /// - every `handle` of it handles only direct effects, and lets only direct effects through its body and its arms
 ///   (a plain call cannot carry a generator's `yield`).
 /// The last rule is a fixpoint: removing an effect can make another one non-direct.

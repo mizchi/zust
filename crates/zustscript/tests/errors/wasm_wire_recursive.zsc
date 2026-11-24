@@ -1,3 +1,3 @@
 // expect: Node holds itself: a recursive record or enum cannot cross
 type Node = { name: String, children: Array<Node> }
-@wasm pub fn size(n: Node) -> i32 { n.children.len() }
+@wasm export fn size(n: Node) -> i32 { n.children.len() }

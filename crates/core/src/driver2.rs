@@ -3432,6 +3432,7 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             "async_trait", "allow_internal_unstable", "allow_internal_unsafe", "compiler_builtins", "needs_allocator", "panic_runtime",
             "needs_panic_runtime", "profiler_runtime", "no_core", "prelude_import", "rustc_std_internal_symbol", "unstable_feature_bound",
             "rustc_main", "test_runner", "reexport_test_harness_main", "default", "main", "plugin", "plugin_registrar",
+            "zust_test_entry",
         ];
         // (`rustc_*`: rustc's internal attributes; without `#![feature(rustc_attrs)]` the gate's E0658, at the same
         // attribute)

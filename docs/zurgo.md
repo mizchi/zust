@@ -196,7 +196,8 @@ zurgo test
 zurgo test --lib parse -- --include-ignored
 ```
 
-- Each test crate is built with `zustc --test`. That keeps `#[cfg(test)]` items, collects the `#[test]` functions
+- Each test crate (but a `harness = false` one, below) is built with `zustc --test`. That keeps `#[cfg(test)]` items, collects the `#[test]` functions (those a `macro_rules!` makes too: they are
+  collected from the expanded source)
   and adds a harness `main` (the crate's own `main` is not called). The harness only lists its tests and runs the
   one named:
   - a panic exits with 101, and a `Result` test that returns `Err` exits with 1;
@@ -217,7 +218,8 @@ zurgo test --lib parse -- --include-ignored
 - The longest tests start first, ordered by their last times in `target/zust/<profile>/test-times`. A long test that
   starts last would run alone at the end.
 - Options:
-  - `--lib`, `--bin <name>`, `--bins`, `--tests` and `--test <name>` choose the targets;
+  - `--lib`, `--bin <name>`, `--bins`, `--tests` and `--test <name>` choose the targets: only those are built (the
+    bins too, for `CARGO_BIN_EXE_`);
   - `--no-run` builds them and lists the executables;
   - `--fail-fast` stops starting tests after a failure (by default every test runs, and `--no-fail-fast` is
     accepted).
@@ -226,12 +228,16 @@ zurgo test --lib parse -- --include-ignored
   always shown.
 - A test still running after 60s is marked `SLOW`, and one running after 300s is stopped and fails
   (`ZURGO_TEST_SLOW`, `ZURGO_TEST_TIMEOUT`, in seconds).
-- Not yet:
-  - doc tests and benchmarks;
-  - `#[test]` functions that a `macro_rules!` makes (the build warns about them);
-  - `test = false` on a target;
-  - wasm32;
-  - building only the chosen targets (`--lib` and the others choose what runs; everything is built).
+- `test = false` on a target leaves its tests out, unless the target is named (`--lib`, `--bin x`, `--test x`), as under
+  cargo. A `harness = false` target is built without the harness (its own `main`, with `cfg(test)`, as cargo builds
+  it) and run as one test, named after the target, that passes when it exits with 0. `zurgo metadata` lists
+  the integration tests as cargo does.
+- `--target wasm32-unknown-unknown`: each test crate is a wasm module, and each test runs as
+  `$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER <module> <name> --exact` (in this repository the runner is
+  `node tests/wasm/run.mjs`). A module starts no child process, so a `#[should_panic]` test runs in its module and the
+  runner checks its exit code (101) and panic message. An arithmetic check traps there without a message, so
+  `expected` cannot match it.
+- Not yet: doc tests and benchmarks.
 
 ## Not yet (mizchi/zust#28)
 

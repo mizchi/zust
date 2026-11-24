@@ -39,10 +39,10 @@ for (const d of ["src/samples", "../crates/zustscript/examples"]) {
   }
 }
 // the errors come with their positions
-const e = compile("pub fn f() -> i32 {\n  \"no\"\n}\n");
+const e = compile("export fn f() -> i32 {\n  \"no\"\n}\n");
 check(!e.ok && e.diagnostics[0]?.line === 2 && e.diagnostics[0]?.severity === "error", `a type error is reported at 2:${e.diagnostics[0]?.col}`);
 // a Rust `wasm fn` cannot run here: a warning, and a stub that throws
-const w = compile("pub wasm fn f(x: i32) -> i32 { x }\n");
+const w = compile("export wasm fn f(x: i32) -> i32 { x }\n");
 check(w.ok && w.diagnostics.some((d) => d.severity === "warning") && w.js.includes("export function f()"), "a `wasm fn` is a warning and a stub");
 
 console.log(bad ? `${bad} failure(s)` : "compile: all ok");

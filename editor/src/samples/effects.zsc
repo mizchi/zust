@@ -37,7 +37,7 @@ fn with_state(start: i32) -> i32 {
   }
 }
 
-pub fn main() -> () {
+export fn main() -> () {
   let who = handle greet() {
     Print(s), k => { log("[out] " + s); k(()) },
     Ask(q), k => { log("[ask] " + q); k("taro") },
