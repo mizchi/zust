@@ -715,28 +715,87 @@ pub fn rename_user_collisions(src: &str, user_items: &[SrcItem]) -> Option<Strin
     Some(out)
 }
 
-/// b[i] is in a `//` comment or a string literal of its line (a block comment or a string over lines is not seen)
-fn in_comment_or_str(b: &[u8], i: usize) -> bool {
-    let mut k = b[..i].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1);
-    let mut in_str = false;
-    while k < i {
-        let c = b[k];
-        if in_str {
-            if c == b'\\' {
-                k += 1;
-            } else if c == b'"' {
-                in_str = false;
+/// Where a forward scan of the program is: in code, a `//` comment, a `/* */` comment (its depth), a string, or a raw
+/// string (its `#`s). rename_shadowed moves it only to a name that would count, so a program without one is not read
+/// byte by byte
+#[derive(Clone, Copy, PartialEq)]
+enum LexAt {
+    Code,
+    Line,
+    Block(u32),
+    Str,
+    Raw(usize),
+}
+
+/// The scan from (k, st) moved to i: what i is in (out of rename_shadowed's loop over every byte, which it would slow)
+#[cold]
+#[inline(never)]
+fn lex_to(b: &[u8], k: &mut usize, st: &mut LexAt, i: usize) -> LexAt {
+    let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    while *k < i {
+        let c = b[*k];
+        match *st {
+            LexAt::Line => {
+                if c == b'\n' {
+                    *st = LexAt::Code;
+                }
             }
-        } else if c == b'"' {
-            in_str = true;
-        } else if c == b'/' && b.get(k + 1) == Some(&b'/') {
-            return true;
-        } else if c == b'\'' && b.get(k + 2) == Some(&b'\'') {
-            k += 2;
+            LexAt::Block(d) => {
+                if c == b'*' && b.get(*k + 1) == Some(&b'/') {
+                    *st = if d == 1 { LexAt::Code } else { LexAt::Block(d - 1) };
+                    *k += 1;
+                } else if c == b'/' && b.get(*k + 1) == Some(&b'*') {
+                    *st = LexAt::Block(d + 1);
+                    *k += 1;
+                }
+            }
+            LexAt::Str => {
+                if c == b'\\' {
+                    *k += 1;
+                } else if c == b'"' {
+                    *st = LexAt::Code;
+                }
+            }
+            LexAt::Raw(h) => {
+                if c == b'"' && *k + h < b.len() && b[*k + 1..=*k + h].iter().all(|&x| x == b'#') {
+                    *st = LexAt::Code;
+                    *k += h;
+                }
+            }
+            LexAt::Code => {
+                if c == b'/' && b.get(*k + 1) == Some(&b'/') {
+                    *st = LexAt::Line;
+                } else if c == b'/' && b.get(*k + 1) == Some(&b'*') {
+                    *st = LexAt::Block(1);
+                    *k += 1;
+                } else if c == b'"' {
+                    *st = LexAt::Str;
+                } else if c == b'r' && (*k == 0 || !is_id(b[*k - 1])) && matches!(b.get(*k + 1), Some(b'"' | b'#')) {
+                    let mut j = *k + 1;
+                    while j < b.len() && b[j] == b'#' {
+                        j += 1;
+                    }
+                    if b.get(j) == Some(&b'"') {
+                        *st = LexAt::Raw(j - *k - 1);
+                        *k = j;
+                    }
+                } else if c == b'\'' {
+                    // (a char literal, `'"'` or escaped `'\"'`, `'\''`: past it; a lifetime's quote stays)
+                    if b.get(*k + 1) == Some(&b'\\') {
+                        let mut j = *k + 3;
+                        while j < b.len() && b[j] != b'\'' {
+                            j += 1;
+                        }
+                        *k = j;
+                    } else if b.get(*k + 2) == Some(&b'\'') {
+                        *k += 2;
+                    }
+                }
+            }
         }
-        k += 1;
+        *k += 1;
     }
-    in_str
+    *st
 }
 
 pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
@@ -745,6 +804,8 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
     let mut defined: Vec<&str> = vec![];
     let b = user_src.as_bytes();
     let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    // (the scan that tells comments and strings, moved forward only to a candidate: lex_to)
+    let (mut lk, mut ls) = (0usize, LexAt::Code);
     let mut i = 0;
     while i < b.len() {
         let c = b[i];
@@ -762,8 +823,8 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
                 }
                 let w = &user_src[a..e];
                 // (not in a comment or a string: a doc comment's `# struct IpAddr;`, `#[doc = " # struct IpAddr;"]`
-                // defines nothing. Looked at only for a name that would count, from the line's start)
-                if SHADOWABLE.contains(&w) && !defined.contains(&w) && !in_comment_or_str(b, i) {
+                // defines nothing. Looked at only for a name that would count)
+                if SHADOWABLE.contains(&w) && !defined.contains(&w) && lex_to(b, &mut lk, &mut ls, i) == LexAt::Code {
                     defined.push(w);
                 }
                 i = e.max(i + 1);
