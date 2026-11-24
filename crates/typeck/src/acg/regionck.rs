@@ -721,9 +721,19 @@ pub(crate) fn closure_reqs<'e>(body: &'e Expr, params: &[(String, usize)], out: 
         }
     }
     fn call<'e>(live: &[(String, usize)], e: &'e Expr, out: &mut Vec<ClosureReq<'e>>) {
-        let Expr::Call(f, a) = strip(e) else { return };
-        let Expr::Path(None, p) = strip(f) else { return };
-        let writes = p.segs.last().is_some_and(|s| s.args.iter().any(|g| matches!(g, GArg::Ty(t) if crate::regions::names_lt(t))));
+        // (a fn's or a constructor's turbofish, or a method's: `S.take::<&'static u32>(x)`)
+        let (gs, a): (&[GArg], &[Expr]) = match strip(e) {
+            Expr::Call(f, a) => match strip(f) {
+                Expr::Path(None, p) => match p.segs.last() {
+                    Some(sg) => (&sg.args, a),
+                    None => return,
+                },
+                _ => return,
+            },
+            Expr::MethodCall(_, _, gs, a, _) => (gs, a),
+            _ => return,
+        };
+        let writes = gs.iter().any(|g| matches!(g, GArg::Ty(t) if crate::regions::names_lt(t)));
         if !writes {
             return;
         }
@@ -2708,6 +2718,35 @@ impl Cx<'_> {
         for r in reqs {
             let pt: &PTy = match r.call {
                 None => r.ann.unwrap(),
+                // (a method's: of the receiver's type where it is known here, a local's or a struct's path)
+                Some(call) if matches!(strip(call), Expr::MethodCall(..)) => {
+                    let Expr::MethodCall(recv, m, gs, _, _) = strip(call) else { continue };
+                    let sid = match strip(recv) {
+                        Expr::Path(None, p) if p.segs.len() == 1 => match self.lookup(&p.segs[0].name) {
+                            Some((_, t)) => {
+                                let mut t = t;
+                                while let Ty::Ref(_, i) = t {
+                                    t = *i;
+                                }
+                                match t {
+                                    Ty::Struct(sid) => Some(sid),
+                                    _ => None,
+                                }
+                            }
+                            None => prog.struct_by_p(&crate::program::PPath::of(p), None),
+                        },
+                        _ => None,
+                    };
+                    let Some(id) = sid.and_then(|sid| prog.method(sid, m)) else { continue };
+                    let sig = &prog.sigs[id as usize];
+                    let tys: Vec<&PTy> = gs.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect();
+                    if !sig.has_self || tys.len() != sig.generics.len() {
+                        continue;
+                    }
+                    let Some(Ty::Param(k)) = sig.params.get(r.arg + 1).copied() else { continue };
+                    let Some(&t) = tys.get(k as usize) else { continue };
+                    t
+                }
                 Some(call) => {
                     let Expr::Call(f, _) = strip(call) else { continue };
                     let Expr::Path(None, p) = strip(f) else { continue };

@@ -3443,4 +3443,8 @@ fn part19_review() {
     }
     let d = check("fn id(x: &u32) -> &u32 { x }\nfn f1<'a>(x: &'a u32) -> &'static u32 {\n    let g: fn(&u32) -> &u32 = id;\n    g(x)\n}\nfn f2<'a>(x: &'a u32) -> &'static u32 {\n    let g = id;\n    g(x)\n}\nfn f3<'a>(x: &'a u32) -> &'a u32 {\n    let g = id;\n    let _ = g(&5);\n    g(x)\n}\nfn main() {}\n");
     assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 8] && d.iter().all(|x| x.1.contains("must outlive `'static`")), "{d:?}");
+    // (a method's turbofish in a closure's body is required of its calls' arguments too, the receiver's type known)
+    let d = check("struct S;\nimpl S {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let local = 1;\n    let f = |x| S.take::<&'static u32>(x);\n    f(&local);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("does not live long enough"), "{d:?}");
+    assert_eq!(check("struct S;\nimpl S {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let local = 1;\n    let s = S;\n    let f = |x| s.take::<&u32>(x);\n    f(&local);\n    static C: u32 = 2;\n    let g = |x| S.take::<&'static u32>(x);\n    g(&C);\n}\n"), vec![]);
 }
