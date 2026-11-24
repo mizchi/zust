@@ -1633,7 +1633,7 @@ impl Session2 {
                 let t = prog.subst(t, &rigid);
                 for sup in &supers {
                     if prog.tdb.holds_rigid(&prog, t, sup) == crate::traits::Ans::No {
-                        let n = prog.tn(t).replace("__u_", "").replace('#', "");
+                        let n = crate::traits::display_ty(&prog, t);
                         return Err(format!("{}:1: {} (E0277)", items[ii].line, crate::traits::not_held(&n, sup)));
                     }
                 }
@@ -1720,7 +1720,7 @@ impl Session2 {
                             return Err(format!("{line}:1: type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want).replace('#', ""), prog.tn(got).replace('#', "")));
                         }
                         (crate::traits::Ans::No, None) => {
-                            let tn = prog.tn(v).replace("__u_", "").replace('#', "");
+                            let tn = crate::traits::display_ty(&prog, v);
                             return Err(format!("{line}:1: {} (E0277)", crate::traits::not_held(&tn, b)));
                         }
                         _ => {}
@@ -1949,7 +1949,7 @@ fn opaque_bound_error(prog: &Program, src: &str, items: &[SrcItem]) -> R<Option<
         } else {
             n.to_string()
         };
-        let tn = prog.tn(t).replace("__u_", "");
+        let tn = crate::traits::display_ty(prog, t);
         if user && b.contains('=') {
             if let Some((proj, got, want)) = prog.tdb.binding_mismatch(prog, t, b, &[], &[]) {
                 return Some(format!("{line}:1: type mismatch resolving `{proj} == {}`: it is `{}` (E0271)", prog.tn(want), prog.tn(got)));

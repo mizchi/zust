@@ -158,8 +158,68 @@ pub fn unit_judged(tr: &str) -> bool {
     STD_EXACT.contains(&tr) || matches!(tr, "Sized" | "Send" | "Sync" | "Iterator")
 }
 
+/// A type as rustc would print it in a message: an `impl Trait` argument's parameter (`__impl0`) as `impl Sync`,
+/// without the module path zustc flattens names into (`a__b__Hidden` is `Hidden`) and zustc's own marks (`T#`,
+/// `__u_`)
+pub fn display_ty(p: &Program, t: Ty) -> String {
+    let mut out = p.tn(t);
+    // (the placeholders of `impl Trait` arguments in t, with their bounds)
+    let mut todo = vec![t];
+    let mut n = 0;
+    while let Some(x) = todo.pop() {
+        n += 1;
+        if n > 64 {
+            break;
+        }
+        match x {
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => todo.push(*i),
+            Ty::Struct(sid) => {
+                let sd = &p.structs[sid as usize];
+                if let (Some(bs), true) = (&sd.placeholder, sd.name.starts_with("__impl")) {
+                    let shown: Vec<String> = bs.iter().map(|b| bound_text(b)).collect();
+                    out = out.replace(&sd.name, &format!("impl {}", shown.join(" + ")));
+                }
+                todo.extend(sd.args.iter().copied());
+            }
+            _ => {}
+        }
+    }
+    display_name(&out)
+}
+
+/// A name without the module path zustc flattens it into (`a__b__Hidden`: `Hidden`) and its marks (`#`, `__u_`)
+pub fn display_name(s: &str) -> String {
+    let s = s.replace("__u_", "").replace('#', "");
+    let cs: Vec<char> = s.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    let mut after_seg = false;
+    while i < cs.len() {
+        // (a path segment `seg__`: starts a word (or follows one just dropped), a lowercase letter first, then `__` and
+        // an identifier)
+        let word_start = after_seg || i == 0 || !(cs[i - 1].is_alphanumeric() || cs[i - 1] == '_');
+        after_seg = false;
+        if word_start && cs[i].is_ascii_lowercase() {
+            let mut j = i;
+            while j < cs.len() && (cs[j].is_ascii_lowercase() || cs[j].is_ascii_digit() || (cs[j] == '_' && cs.get(j + 1) != Some(&'_'))) {
+                j += 1;
+            }
+            if j + 2 < cs.len() && cs[j] == '_' && cs[j + 1] == '_' && (cs[j + 2].is_alphabetic()) {
+                i = j + 2;
+                after_seg = true;
+                continue;
+            }
+        }
+        out.push(cs[i]);
+        i += 1;
+    }
+    out
+}
+
 /// rustc's words for `t: tr` not holding
 pub fn not_held(t: &str, tr: &str) -> String {
+    let tr_shown = display_name(tr);
+    let tr = tr_shown.as_str();
     match tr {
         "Send" => format!("`{t}` cannot be sent between threads safely"),
         "Sync" => format!("`{t}` cannot be shared between threads safely"),
@@ -1349,6 +1409,16 @@ pub fn mtch(p: &Program, pt: Ty, t: Ty, sol: &mut [Option<Ty>], lenient: bool, d
 #[cfg(test)]
 mod tests {
     use super::Ans;
+
+    #[test]
+    fn display_names() {
+        assert_eq!(super::display_name("a__b__Hidden"), "Hidden");
+        assert_eq!(super::display_name("Vec<m__Foo>"), "Vec<Foo>");
+        assert_eq!(super::display_name("__CowStr"), "__CowStr");
+        assert_eq!(super::display_name("T#"), "T");
+        assert_eq!(super::display_name("__u_Error"), "Error");
+        assert_eq!(super::display_name("snake_case__Item"), "Item");
+    }
 
     /// The tables of `Res.and` / `Res.or` in Solver.lean, case by case
     #[test]
