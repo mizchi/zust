@@ -709,6 +709,15 @@ mod tests {
         assert!(out.contains("fn id<C>(x: C) -> C {"), "{out}");
     }
 
+    /// A fn called after `&` is a value, not a type's place: `&pcg32(&mut state)` (rand_core's `seed_from_u64`, the
+    /// private fn renamed with its module) calls the fn
+    #[test]
+    fn a_call_after_a_borrow_is_the_fn() {
+        let src = "mod mylib {\n    pub mod seedable {\n        pub fn seed(state: &mut u64) -> u8 {\n            let b = &pcg32(state);\n            b[0]\n        }\n        fn pcg32(state: &mut u64) -> [u8; 4] {\n            *state += 1;\n            [*state as u8; 4]\n        }\n    }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["mylib".to_string()]).unwrap();
+        assert!(out.contains("let b = &mylib__seedable__pcg32(state);"), "{out}");
+    }
+
     /// A const generic parameter (`fn read_words<W, const N: usize>`, `impl<const N: usize>`) is no item of the
     /// module: a module's `const N` elsewhere does not make it collide, and it keeps its name (rand_core 0.10's
     /// utils.rs became `rand_core__utils__N`, "cannot find constant")
@@ -2863,14 +2872,20 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let sc = scope_of(k);
         // (a type's place: after `*mut` / `*const`, `&` / `&mut`, `->`, a single `:`, `<` or `as`. A fn of the name
         //  there is not the type: the type is looked for through the globs, past the scope's fn)
-        let type_pos = k >= 1 && {
-            let p = k - 1;
-            (is_id(p, b"mut") || is_id(p, b"const")) && p >= 1 && (is_sym(p - 1, b'*') || is_sym(p - 1, b'&'))
-                || is_sym(p, b'&')
-                || is_sym(p, b'<')
-                || is_id(p, b"as")
+        // (`&` / `&mut` only after `:`, `->` or `<`: elsewhere it borrows a value, `&pcg32(state)`. And not a name a
+        //  `(` follows: a call)
+        let type_after = |p: usize| {
+            is_sym(p, b'<')
                 || (is_sym(p, b'>') && p >= 1 && is_sym(p - 1, b'-'))
                 || (is_sym(p, b':') && !(p >= 1 && is_sym(p - 1, b':')) && !(p + 1 < toks.len() && is_sym(p + 1, b':')))
+        };
+        let type_pos = k >= 1 && !(k + 1 < toks.len() && is_sym(k + 1, b'(')) && {
+            let p = k - 1;
+            let amp = |q: usize| is_sym(q, b'&') && q >= 1 && type_after(q - 1);
+            ((is_id(p, b"mut") || is_id(p, b"const")) && p >= 1 && (is_sym(p - 1, b'*') || amp(p - 1)))
+                || amp(p)
+                || is_id(p, b"as")
+                || type_after(p)
         };
         if segs.len() >= 2 {
             // 接頭辞のいちばん長いモジュールから見る
