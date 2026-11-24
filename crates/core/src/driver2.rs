@@ -1425,6 +1425,7 @@ impl Session2 {
         // (`#![crate_type = "lib"]`: a library, no `main` needed)
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;
+        let mut forbid_unused_vars = false;
         let mut deny_dead_code = false;
         // (`deny(warnings)` / `forbid(warnings)` of the crate: a lint an item or field sets to warn is an error)
         let mut warn_denied = false;
@@ -1464,7 +1465,10 @@ impl Session2 {
                     }
                 }
             }
-            deny_unused_vars = levels.iter().any(|l| matches!(*l, "unused_variables" | "unused" | "warnings")) && !c.contains("#![allow(unused");
+            // (`#![forbid(unused_variables)]` is not undone by an `#![allow(unused)]`)
+            // (a group's `forbid(unused)` lets a member be allowed, with a warning)
+            forbid_unused_vars = c.match_indices("#![forbid(").any(|(k, _)| c[k + 10..].split(')').next().is_some_and(|l| l.split(',').any(|l| l == "unused_variables")));
+            deny_unused_vars = forbid_unused_vars || (levels.iter().any(|l| matches!(*l, "unused_variables" | "unused" | "warnings")) && !c.contains("#![allow(unused"));
             deny_dead_code = levels.iter().any(|l| matches!(*l, "dead_code" | "unused" | "warnings")) && !c.contains("#![allow(dead_code") && !c.contains("#![expect(dead_code") && !c.contains("#![allow(unused");
             deny_dead_pub = levels.contains(&"dead_code_pub_in_binary");
             deny_unused_imports = levels.iter().any(|l| matches!(*l, "unused_imports" | "unused" | "warnings")) && !c.contains("#![allow(unused");
@@ -1631,19 +1635,65 @@ impl Session2 {
                 return Err(e);
             }
         }
-        // (unused_variables: the first binding nothing reads, in the program's own fns)
-        if deny_unused_vars {
+        // (unused_variables: the first binding nothing reads, in the program's own fns, where the lint is denied: for
+        // the crate, or by an attribute of the fn (`#[deny(unused)] fn main`) or of the statement or arm the binding
+        // is in; an `allow` there covers it (`#[allow(unused_variables)] let x = 1;`), one of the crate's or the fn's
+        // all of the fn)
+        // (or an item of the program's whose own attributes deny it: an item starts with its attributes. A `deny` on a
+        // statement or an arm alone, with none on an item, is not seen: finding one would read all of the source)
+        let scoped_vars = !deny_unused_vars
+            && items[..user_src].iter().any(|it| {
+                src.as_bytes().get(it.start) == Some(&b'#') && src.get(it.start..it.end).is_some_and(|t| t.starts_with("#[")) && {
+                    let head = leading_attrs(&src[it.start..it.end]);
+                    (head.contains("deny") || head.contains("forbid")) && unused_var_attrs(head).iter().any(|a| a.2 > 0)
+                }
+            });
+        if deny_unused_vars || scoped_vars {
             for it in &items[..user_src] {
                 let text = src.get(it.start..it.end).unwrap_or("");
-                if !text.contains("fn ") || text.contains("allow(unused") || text.contains("#[cfg") {
+                if !text.contains("fn ") || text.contains("#[cfg") {
                     continue;
                 }
+                let attrs = if text.contains("unused") || text.contains("warnings") { unused_var_attrs(text) } else { vec![] };
+                if !deny_unused_vars && !attrs.iter().any(|a| a.2 > 0) {
+                    continue;
+                }
+                // (the level at a place of the item's text: the crate's, then each attribute that covers it, in order)
+                let denied = |o: usize| {
+                    let (mut on, mut forbid) = (deny_unused_vars, forbid_unused_vars);
+                    for &(_, _, l) in attrs.iter().filter(|a| a.0 <= o && o < a.1) {
+                        if l == 2 {
+                            on = true;
+                            forbid = true;
+                        } else if !forbid {
+                            on = l == 1;
+                        }
+                    }
+                    on
+                };
                 let Ok(Some(f)) = parse_fn(&src, it) else { continue };
-                let params: Vec<String> = f.sig.params.iter().filter_map(|(p, _)| match p {
-                    Pat::Ident(_, _, n, None) => Some(n.clone()),
-                    _ => None,
-                }).collect();
-                if let Some((pos, n)) = crate::ast_closure::first_unused_binding(&params, &f.block) {
+                let params: Vec<&Pat> = f.sig.params.iter().map(|(p, _)| p).collect();
+                let starts: Vec<usize> = std::iter::once(0).chain(text.match_indices('\n').map(|(i, _)| i + 1)).collect();
+                let sig_at = text.find("fn ").unwrap_or(0);
+                for (pos, n) in crate::ast_closure::unused_bindings(&params, &f.block) {
+                    let at = match pos {
+                        Some(p) if p.line > 0 => starts.get(p.line as usize - 1).map_or(sig_at, |&l| l + p.col as usize),
+                        _ => sig_at,
+                    };
+                    // (at the binding itself, the name's first whole word from there: a field of a pattern may have
+                    // an attribute of its own)
+                    let tb = text.as_bytes();
+                    let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+                    let own = text.get(at..).and_then(|r| r.match_indices(n.as_str()).map(|(i, _)| at + i).find(|&i| (i == 0 || !id(tb[i - 1])) && tb.get(i + n.len()).is_none_or(|&c| !id(c))));
+                    if !denied(own.unwrap_or(at)) {
+                        continue;
+                    }
+                    // (reported there when it is on the line of the binding's statement, arm or condition)
+                    if let Some(o) = own.filter(|&o| !text[at.min(o)..o].contains('\n')) {
+                        let abs = it.start + o;
+                        let col = abs - src[..abs].rfind('\n').map_or(0, |p| p + 1) + 1;
+                        return Err(format!("{}:{col}: unused variable: `{n}`", it.line + text[..o].matches('\n').count()));
+                    }
                     let (line, col) = match pos {
                         Some(p) if p.line > 0 => (it.line + p.line as usize - 1, p.col as usize + 1),
                         _ => (it.line, 1),
@@ -8539,6 +8589,114 @@ fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
         Some(i) => format!("{}:1: {rest}", line + text[..i].matches('\n').count()),
         None => e.to_string(),
     }
+}
+
+/// The outer attributes an item's text starts with (`#[..]` groups, with the space between them)
+fn leading_attrs(t: &str) -> &str {
+    let b = t.as_bytes();
+    let mut i = 0;
+    while b.get(i) == Some(&b'#') && b.get(i + 1) == Some(&b'[') {
+        let mut d = 0;
+        while i < b.len() {
+            match b[i] {
+                b'[' => d += 1,
+                b']' => d -= 1,
+                _ => {}
+            }
+            i += 1;
+            if d == 0 && b[i - 1] == b']' {
+                break;
+            }
+        }
+        // (the space and the comments after it: `#[deny(x)] // note`)
+        loop {
+            while i < b.len() && b[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if b[i..].starts_with(b"//") {
+                i += b[i..].iter().position(|&c| c == b'\n').unwrap_or(b.len() - i);
+            } else if b[i..].starts_with(b"/*") {
+                i += t[i + 2..].find("*/").map_or(b.len() - i, |k| k + 4);
+            } else {
+                break;
+            }
+        }
+    }
+    &t[..i]
+}
+
+/// The lint attributes of an item's text that name `unused_variables` (or `unused`, `warnings`), in order: where each
+/// starts, the end of what it covers (all of the item for one of the item's own, before its first other token; the
+/// statement, arm or field for one inside), and its level: 0 allow / expect / warn, 1 deny, 2 forbid
+fn unused_var_attrs(text: &str) -> Vec<(usize, usize, u8)> {
+    let b = text.as_bytes();
+    let mut out = vec![];
+    let (mut from, mut outer) = (0, true);
+    while let Some(k) = text[from..].find("#[") {
+        let at = from + k;
+        outer = outer && text[from..at].trim().is_empty();
+        let Some(close) = (at + 1..b.len()).scan(0i32, |d, j| {
+            *d += match b[j] { b'[' => 1, b']' => -1, _ => 0 };
+            Some((j, *d))
+        }).find(|&(_, d)| d == 0).map(|(j, _)| j) else { break };
+        from = close + 1;
+        let attr: String = text[at + 2..close].chars().filter(|c| !c.is_whitespace()).collect();
+        let Some((name, rest)) = attr.split_once('(') else { continue };
+        let lints: Vec<&str> = rest.trim_end_matches(')').split(',').filter(|l| matches!(*l, "unused_variables" | "unused" | "warnings")).collect();
+        // (only a `forbid` of the lint itself is not undone by an `allow`: a group's lets a member be allowed)
+        let level = match name {
+            _ if lints.is_empty() => continue,
+            "allow" | "expect" | "warn" => 0,
+            "deny" => 1,
+            "forbid" if lints.contains(&"unused_variables") => 2,
+            "forbid" => 1,
+            _ => continue,
+        };
+        out.push((at, if outer { b.len() } else { scope_end(b, from) }, level));
+    }
+    out
+}
+
+/// The end of the statement, arm or field that starts at `i`: its `;` or `,`, the end of the block it ends with
+/// (unless `else`, `.`, `?` or an operator goes on after it), or the end of the block around it
+fn scope_end(b: &[u8], mut i: usize) -> usize {
+    let mut d = 0i32;
+    while i < b.len() {
+        match b[i] {
+            b'"' => {
+                i += 1;
+                while i < b.len() && b[i] != b'"' {
+                    i += if b[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'\'' if b.get(i + 2) == Some(&b'\'') => i += 2,
+            b'/' if b.get(i + 1) == Some(&b'/') => {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'(' | b'[' | b'{' => d += 1,
+            b')' | b']' | b'}' => {
+                d -= 1;
+                if d < 0 {
+                    return i;
+                }
+                if d == 0 && b[i] == b'}' {
+                    let j = (i + 1..b.len()).find(|&j| !b[j].is_ascii_whitespace()).unwrap_or(b.len());
+                    let goes_on = matches!(b.get(j), Some(b';' | b',' | b'.' | b'?' | b'+' | b'-' | b'*' | b'/' | b'%' | b'=' | b'<' | b'>' | b'!' | b'&' | b'^'))
+                        || b[j..].starts_with(b"else")
+                        || b[j..].starts_with(b"as ");
+                    if !goes_on {
+                        return i + 1;
+                    }
+                }
+            }
+            b';' | b',' if d == 0 => return i + 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    b.len()
 }
 
 /// Where a part of a fn's signature starts in its item's text, as rustc points at it: `f` the signature (after the

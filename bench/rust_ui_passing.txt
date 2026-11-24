@@ -3730,9 +3730,12 @@ compile-fail	let-else/accidental-if.rs
 run-pass	let-else/const-fn.rs
 check-pass	let-else/detect-invisible-delimiter.rs
 compile-fail	let-else/issue-94176.rs
+compile-fail	let-else/let-else-allow-in-expr.rs
+compile-fail	let-else/let-else-allow-unused.rs
 check-pass	let-else/let-else-binding-explicit-mut-pass.rs
 compile-fail	let-else/let-else-binding-explicit-mut.rs
 compile-fail	let-else/let-else-binding-immutable.rs
+compile-fail	let-else/let-else-check.rs
 compile-fail	let-else/let-else-deref-coercion.rs
 compile-fail	let-else/let-else-destructuring.rs
 compile-fail	let-else/let-else-if.rs
@@ -4068,6 +4071,7 @@ check-pass	lint/lint-invalid-atomic-ordering-false-positive.rs
 check-pass	lint/lint-level-macro-def-mod.rs
 check-pass	lint/lint-level-macro-def.rs
 compile-fail	lint/lint-malformed.rs
+compile-fail	lint/lint-match-arms.rs
 check-pass	lint/lint-missing-copy-implementations-allow.rs
 check-pass	lint/lint-missing-doc-test.rs
 compile-fail	lint/lint-non-camel-case-types.rs
@@ -4085,6 +4089,10 @@ check-pass	lint/lint-pub-unreachable-for-nested-glob.rs
 compile-fail	lint/lint-qualification.rs
 compile-fail	lint/lint-range-endpoint-overflow.rs
 check-pass	lint/lint-raw-borrows-via-references.rs
+compile-fail	lint/lint-removed-allow.rs
+compile-fail	lint/lint-removed.rs
+compile-fail	lint/lint-renamed-allow.rs
+compile-fail	lint/lint-renamed.rs
 compile-fail	lint/lint-type-overflow.rs
 check-pass	lint/lints-on-stmt-not-overridden-130142.rs
 check-pass	lint/mention-lint-group-in-default-level-lint-note-issue-65464.rs
@@ -4128,6 +4136,7 @@ check-pass	lint/rfc-2383-lint-reason/expect_inside_dead_code.rs
 check-pass	lint/rfc-2383-lint-reason/expect_inside_macro.rs
 check-pass	lint/rfc-2383-lint-reason/expect_lint_from_macro.rs
 check-pass	lint/rfc-2383-lint-reason/expect_multiple_lints.rs
+compile-fail	lint/rfc-2383-lint-reason/expect_nested_lint_levels.rs
 check-pass	lint/rfc-2383-lint-reason/expect_on_fn_params.rs
 check-pass	lint/rfc-2383-lint-reason/expect_unfulfilled_expectation.rs
 check-pass	lint/rfc-2383-lint-reason/expect_unused_inside_impl_block.rs
@@ -4164,6 +4173,7 @@ check-pass	lint/unused/import_remove_line.rs
 check-pass	lint/unused/issue-103320-must-use-ops.rs
 check-pass	lint/unused/issue-104397.rs
 check-pass	lint/unused/issue-117142-invalid-remove-parens.rs
+compile-fail	lint/unused/issue-119383-if-let-guard.rs
 compile-fail	lint/unused/issue-30730.rs
 check-pass	lint/unused/issue-47390-unused-variable-in-struct-pattern.rs
 compile-fail	lint/unused/issue-54180-unused-ref-field.rs
@@ -7183,6 +7193,7 @@ compile-fail	suggestions/format-borrow.rs
 compile-fail	suggestions/ice-unwrap-probe-many-result-125876.rs
 compile-fail	suggestions/if-let-typo.rs
 compile-fail	suggestions/if-then-neeing-semi.rs
+compile-fail	suggestions/ignore-nested-field-binding.rs
 compile-fail	suggestions/imm-ref-trait-object-literal.rs
 compile-fail	suggestions/imm-ref-trait-object.rs
 compile-fail	suggestions/import-trait-for-method-call.rs

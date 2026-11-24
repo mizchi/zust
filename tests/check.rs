@@ -1907,3 +1907,36 @@ fn method_signature_mismatch() {
     // (an `-> impl Trait` or `async fn` declaration: the impl may return a type of its own)
     assert_eq!(first("use std::fmt::Display;\ntrait Foo {\n    fn bar(&self) -> impl Display;\n}\nimpl Foo for i32 {\n    fn bar(&self) -> i32 { *self }\n}\nfn main() {}\n"), None, "impl Trait");
 }
+
+#[test]
+fn unused_variables_where_the_lint_is_denied() {
+    // (unused_variables at the levels its attributes give: the crate's, the fn's, a statement's or an arm's; each
+    // expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2024, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, n: &str| Some((l, c, format!("unused variable: `{n}`")));
+    let deny = "#![deny(unused_variables)]\n";
+    // (an `allow` on a statement covers what is in it, a `let`'s `else` block too)
+    assert_eq!(
+        first(&format!("{deny}fn main() {{\n    #[allow(unused_variables)]\n    let Some(_) = Some(1) else {{\n        let x = 1;\n        return;\n    }};\n    let y = 2;\n}}\n")),
+        e(8, 9, "y"),
+        "allow on a statement"
+    );
+    assert_eq!(first("#[deny(unused)]\nfn main() {\n    let unused = ();\n}\nfn other() {\n    let fine = ();\n}\n"), e(3, 9, "unused"), "deny on the fn");
+    // (an arm's or a statement's own level is read where some item of the program, or the crate, names the lint's
+    // level: a `deny` on an arm alone, with none on an item, is not seen)
+    assert_eq!(
+        first("fn f() {\n    match 0 {\n        #[deny(unused_variables)]\n        y => (),\n    }\n}\n#[deny(unused_variables)]\nfn g() {\n    match 0 {\n        #[allow(unused_variables)]\n        z => (),\n    }\n}\nfn main() {}\n"),
+        e(4, 9, "y"),
+        "deny on an arm"
+    );
+    assert_eq!(first(&format!("{deny}fn main() {{\n    match () {{\n        () if let Some(b) = Some(()) => {{}}\n        _ => {{}}\n    }}\n}}\n")), e(4, 24, "b"), "guard");
+    assert_eq!(first(&format!("{deny}fn main() {{\n    let o = Some(1);\n    if let Some(b) = o {{}}\n}}\n")), e(4, 17, "b"), "if let");
+    // (a crate's `allow(unused)` does not undo its `forbid(unused_variables)`; a parameter's pattern)
+    assert_eq!(first("#![allow(unused)]\n#![forbid(unused_variables)]\nstruct Inner { i: i32 }\nfn foo(Inner { i }: Inner) {}\nfn main() {}\n"), e(4, 16, "i"), "forbid");
+    assert_eq!(first(&format!("{deny}fn main() {{\n    #[allow(unused_variables)]\n    let a = 1;\n    let b = {{\n        #[allow(unused_variables)]\n        let c = 3;\n        4\n    }};\n    println!(\"{{b}}\");\n}}\n")), None, "allowed");
+    // (a group's `forbid` lets a member be allowed)
+    assert_eq!(first("#![forbid(unused)]\n#[allow(unused_variables)]\nfn main() {\n    let a: ();\n}\n"), None, "forbid of a group");
+}
