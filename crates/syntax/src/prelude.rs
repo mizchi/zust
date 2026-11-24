@@ -571,10 +571,12 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "Bytes" | "ToCase" | "CharEscape" | "ParseIntError" | "IntErrorKind" | "Rev" | "StepBy" | "Peekable"
                         | "SkipWhile" | "PreludeScan" | "Inspect" | "FlatMap" | "Flatten" | "Cloned" | "Windows" | "Chunks" | "ChunksExact" | "ChunksMut" | "Iter" | "IterMut" | "MaybeUninit"
                         | "HashSet" | "SetIntoIter" | "BTreeMap" | "BTreeSet" | "BtEntry" | "BtIter" | "BtIterMut"
-                        | "BtIntoIter" | "VecDeque" | "DqIter" | "DqIntoIter" | "f64" | "f32" | "ParseFloatError" | "i128" | "u128" | "FromUtf8Error" | "Utf8Error" | "Rc" | "Arc" | "ManuallyDrop" | "Pin" | "NonNull" | "UnsafeCell" | "RefCell" | "Ref" | "RefMut" | "BorrowError" | "BorrowMutError" | "Cell" | "JoinHandle" | "__Sndr" | "__SyncSndr" | "__Rcvr__" | "__RecvIter" | "AtomicUsize" | "AtomicIsize" | "AtomicU8" | "AtomicU16" | "AtomicU32" | "AtomicU64" | "AtomicI8" | "AtomicI16" | "AtomicI32" | "AtomicI64" | "AtomicBool" | "OnceLock" | "Mutex" | "MutexGuard" | "RangeFrom" | "TryFromIntError" | "TryFromSliceError" | "Stdin" | "StdinLock" | "StdinLines" | "Stdout" | "StdoutLock"
+                        | "BtIntoIter" | "VecDeque" | "DqIter" | "DqIntoIter" | "f64" | "f32" | "ParseFloatError" | "i128" | "u128" | "FromUtf8Error" | "Utf8Error" | "Rc" | "Arc" | "ManuallyDrop" | "Pin" | "NonNull" | "UnsafeCell" | "RefCell" | "Ref" | "RefMut" | "BorrowError" | "BorrowMutError" | "Cell" | "JoinHandle" | "__Sndr" | "__SyncSndr" | "__Rcvr__" | "__RecvIter" | "AtomicUsize" | "AtomicIsize" | "AtomicU8" | "AtomicU16" | "AtomicU32" | "AtomicU64" | "AtomicI8" | "AtomicI16" | "AtomicI32" | "AtomicI64" | "AtomicBool" | "OnceLock" | "Mutex" | "MutexGuard" | "RwLock" | "RwLockReadGuard" | "RwLockWriteGuard" | "SystemTime" | "SystemTimeError" | "Bound" | "Arguments" | "RangeFrom" | "TryFromIntError" | "TryFromSliceError" | "Stdin" | "StdinLock" | "StdinLines" | "Stdout" | "StdoutLock"
                         | "BufWriter" | "BufReader" | "Cursor" | "ChunksMut" | "IoError" | "__DynError" | "Args" | "DefaultHasher" | "VarError"
                         | "PathBuf" | "__PathExt" | "__AsPathStr" | "Command" | "__ExitStatus" | "Cow" | "__CowStr"
-                        | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating" => Some(w),
+                        | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating"
+                        | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList"
+                        | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap のイテレータ (HmIter など) は HashMap を使うときだけ
@@ -613,6 +615,8 @@ const SHADOWABLE: &[&str] = &[
     "AtomicPtr", "TryReserveError", "c_void", "Infallible", "Cycle", "JoinHandle", "Chars", "Poll", "Waker", "Context", "Future",
     "Wrapping", "Saturating", "NonZeroU8", "NonZeroU16", "NonZeroU32", "NonZeroU64", "NonZeroU128", "NonZeroUsize",
     "NonZeroI8", "NonZeroI16", "NonZeroI32", "NonZeroI64", "NonZeroI128", "NonZeroIsize",
+    "FromStr", "CString", "CStr", "NulError", "LinkedList", "Ipv4Addr", "Ipv6Addr", "IpAddr", "SocketAddrV4", "SocketAddrV6",
+    "SocketAddr", "AddrParseError", "RwLock", "SystemTime", "SystemTimeError", "Bound", "Arguments",
 ];
 
 /// The name a struct / enum / trait / union item defines (from its first identifiers: `pub struct Name`)
@@ -720,6 +724,62 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
     let mut i = 0;
     while i < b.len() {
         let c = b[i];
+        // (not in a comment, a string or a char: a doc comment's `# struct IpAddr;` defines nothing)
+        if c == b'/' && b.get(i + 1) == Some(&b'/') {
+            i = b[i..].iter().position(|&x| x == b'\n').map_or(b.len(), |k| i + k);
+            continue;
+        }
+        if c == b'/' && b.get(i + 1) == Some(&b'*') {
+            let mut d = 0;
+            while i < b.len() {
+                if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                    d += 1;
+                    i += 2;
+                } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
+                    d -= 1;
+                    i += 2;
+                    if d == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        if c == b'r' && (i == 0 || !is_id(b[i - 1])) && matches!(b.get(i + 1), Some(b'"' | b'#')) {
+            // (a raw string `r#".."#`: to its `"` and as many `#`)
+            let mut j = i + 1;
+            while j < b.len() && b[j] == b'#' {
+                j += 1;
+            }
+            if b.get(j) == Some(&b'"') {
+                let h = j - i - 1;
+                let mut k = j + 1;
+                while k < b.len() && !(b[k] == b'"' && k + h < b.len() && b[k + 1..=k + h].iter().all(|&x| x == b'#')) {
+                    k += 1;
+                }
+                i = (k + 1 + h).min(b.len());
+                continue;
+            }
+        }
+        if c == b'"' {
+            i += 1;
+            while i < b.len() && b[i] != b'"' {
+                i += if b[i] == b'\\' { 2 } else { 1 };
+            }
+            i += 1;
+            continue;
+        }
+        if c == b'\'' && (b.get(i + 1) == Some(&b'\\') || b.get(i + 2) == Some(&b'\'')) {
+            // (a char literal: `'"'`, `'\''`)
+            let mut j = i + 2;
+            while j < b.len() && b[j] != b'\'' {
+                j += 1;
+            }
+            i = j + 1;
+            continue;
+        }
         if matches!(c, b's' | b'e' | b't' | b'u') && (i == 0 || !is_id(b[i - 1])) {
             let rest = &b[i..];
             let kw = [&b"struct "[..], b"enum ", b"trait ", b"type ", b"union "].into_iter().find(|k| rest.starts_with(k));
@@ -1272,7 +1332,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.insert("__exr_char_from_u32_checked");
     }
     if need.contains("parse") {
-        need.extend(["__from_str", "__FromStr"]);
+        need.extend(["from_str", "FromStr"]);
     }
     if need.contains("flat_map") || need.contains("flatten") {
         need.extend(["__flat_prep", "__flat_next", "__Flat", "__flat_mark", "reverse", "pop", "take"]);
@@ -1626,11 +1686,18 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("PathBuf") {
         op_impls.extend(["Deref", "From", "IntoIterator"]);
     }
-    if need.contains("Cow") || need.contains("Mutex") {
+    // (std::net's addresses impl From: `Ipv4Addr::from([a, b, c, d])`, `IpAddr::from(v4)`)
+    if ["Ipv4Addr", "Ipv6Addr", "IpAddr"].iter().any(|n| need.contains(*n)) {
+        op_impls.push("From");
+    }
+    if need.contains("Cow") || need.contains("Mutex") || need.contains("RwLock") {
         op_impls.push("Deref");
     }
     if need.contains("Mutex") {
         need.extend(["MutexGuard", "Deref", "deref", "Result"]);
+    }
+    if need.contains("RwLock") {
+        need.extend(["RwLockReadGuard", "RwLockWriteGuard", "Deref", "deref", "deref_mut", "Drop", "drop", "Result"]);
     }
     // (BinaryHeap の peek_mut もガードを返す)
     if need.contains("BinaryHeap") && need.contains("peek_mut") {

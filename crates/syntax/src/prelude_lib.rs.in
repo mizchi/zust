@@ -5175,15 +5175,15 @@ fn __exr_ieq<G>(a: &str, b: &str) -> bool {
     true
 }
 
-impl __FromStr for f64 {
+impl FromStr for f64 {
     type Err = ParseFloatError;
-    fn __from_str(s: &str) -> Result<f64, ParseFloatError> {
+    fn from_str(s: &str) -> Result<f64, ParseFloatError> {
         __exr_parse_float::<()>(s, false)
     }
 }
-impl __FromStr for f32 {
+impl FromStr for f32 {
     type Err = ParseFloatError;
-    fn __from_str(s: &str) -> Result<f32, ParseFloatError> {
+    fn from_str(s: &str) -> Result<f32, ParseFloatError> {
         match __exr_parse_float::<()>(s, true) {
             Ok(v) => Ok(v as f32),
             Err(e) => Err(e),
@@ -6130,6 +6130,695 @@ impl Debug for __CowStr {
             __CowStr::Owned(v) => v.as_str(),
         };
         write!(f, "{:?}", s)
+    }
+}
+
+// --- std::net: IP addresses and socket addresses (values only: no sockets). Displayed and parsed as std's are
+// (IPv6 in RFC 5952's form: the longest run of 2 or more zero groups as `::`, lowercase hex) ---
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Ipv4Addr {
+    o: [u8; 4],
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Ipv6Addr {
+    o: [u8; 16],
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum IpAddr {
+    V4(Ipv4Addr),
+    V6(Ipv6Addr),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SocketAddrV4 {
+    ip: Ipv4Addr,
+    port: u16,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SocketAddrV6 {
+    ip: Ipv6Addr,
+    port: u16,
+    flowinfo: u32,
+    scope_id: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SocketAddr {
+    V4(SocketAddrV4),
+    V6(SocketAddrV6),
+}
+
+/// What an address's `parse` gives for text that is not one
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AddrParseError(u8);
+
+impl Display for AddrParseError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad(match self.0 {
+            0 => "invalid IP address syntax",
+            1 => "invalid IPv4 address syntax",
+            2 => "invalid IPv6 address syntax",
+            3 => "invalid socket address syntax",
+            4 => "invalid IPv4 socket address syntax",
+            _ => "invalid IPv6 socket address syntax",
+        })
+    }
+}
+
+impl Ipv4Addr {
+    pub const LOCALHOST: Ipv4Addr = Ipv4Addr { o: [127, 0, 0, 1] };
+    pub const UNSPECIFIED: Ipv4Addr = Ipv4Addr { o: [0, 0, 0, 0] };
+    pub const BROADCAST: Ipv4Addr = Ipv4Addr { o: [255, 255, 255, 255] };
+    pub const fn new(a: u8, b: u8, c: u8, d: u8) -> Ipv4Addr {
+        Ipv4Addr { o: [a, b, c, d] }
+    }
+    pub const fn octets(&self) -> [u8; 4] {
+        self.o
+    }
+    pub fn is_loopback(&self) -> bool {
+        self.o[0] == 127
+    }
+    pub fn is_unspecified(&self) -> bool {
+        self.o[0] == 0 && self.o[1] == 0 && self.o[2] == 0 && self.o[3] == 0
+    }
+    pub fn to_bits(&self) -> u32 {
+        ((self.o[0] as u32) << 24) | ((self.o[1] as u32) << 16) | ((self.o[2] as u32) << 8) | self.o[3] as u32
+    }
+}
+
+impl From<[u8; 4]> for Ipv4Addr {
+    fn from(o: [u8; 4]) -> Ipv4Addr {
+        Ipv4Addr { o }
+    }
+}
+
+impl Display for Ipv4Addr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let s = format!("{}.{}.{}.{}", self.o[0], self.o[1], self.o[2], self.o[3]);
+        f.pad(&s)
+    }
+}
+
+impl Debug for Ipv4Addr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        Display::fmt(self, f)
+    }
+}
+
+// (dotted decimal: four numbers of 1 to 3 digits, no leading zero, each at most 255)
+fn __exr_parse_v4<G>(s: &str) -> Option<[u8; 4]> {
+    let b = s.as_bytes();
+    let mut o = [0u8; 4];
+    let mut k = 0;
+    let mut i = 0;
+    while k < 4 {
+        let st = i;
+        let mut v: u32 = 0;
+        while i < b.len() && b[i] >= b'0' && b[i] <= b'9' && i - st < 3 {
+            v = v * 10 + (b[i] - b'0') as u32;
+            i += 1;
+        }
+        if i == st || v > 255 || (i - st > 1 && b[st] == b'0') {
+            return None;
+        }
+        o[k] = v as u8;
+        k += 1;
+        if k < 4 {
+            if i >= b.len() || b[i] != b'.' {
+                return None;
+            }
+            i += 1;
+        }
+    }
+    if i == b.len() { Some(o) } else { None }
+}
+
+impl FromStr for Ipv4Addr {
+    type Err = AddrParseError;
+    fn from_str(s: &str) -> Result<Ipv4Addr, AddrParseError> {
+        match __exr_parse_v4::<()>(s) {
+            Some(o) => Ok(Ipv4Addr { o }),
+            None => Err(AddrParseError(1)),
+        }
+    }
+}
+
+impl Ipv6Addr {
+    pub const LOCALHOST: Ipv6Addr = Ipv6Addr { o: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1] };
+    pub const UNSPECIFIED: Ipv6Addr = Ipv6Addr { o: [0; 16] };
+    pub fn new(a: u16, b: u16, c: u16, d: u16, e: u16, f: u16, g: u16, h: u16) -> Ipv6Addr {
+        let s = [a, b, c, d, e, f, g, h];
+        let mut o = [0u8; 16];
+        let mut i = 0;
+        while i < 8 {
+            o[2 * i] = (s[i] >> 8) as u8;
+            o[2 * i + 1] = s[i] as u8;
+            i += 1;
+        }
+        Ipv6Addr { o }
+    }
+    pub const fn octets(&self) -> [u8; 16] {
+        self.o
+    }
+    pub fn segments(&self) -> [u16; 8] {
+        let mut s = [0u16; 8];
+        let mut i = 0;
+        while i < 8 {
+            s[i] = ((self.o[2 * i] as u16) << 8) | self.o[2 * i + 1] as u16;
+            i += 1;
+        }
+        s
+    }
+    pub fn is_loopback(&self) -> bool {
+        *self == Ipv6Addr::LOCALHOST
+    }
+    pub fn is_unspecified(&self) -> bool {
+        *self == Ipv6Addr::UNSPECIFIED
+    }
+}
+
+impl From<[u8; 16]> for Ipv6Addr {
+    fn from(o: [u8; 16]) -> Ipv6Addr {
+        Ipv6Addr { o }
+    }
+}
+
+impl Display for Ipv6Addr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let g = self.segments();
+        let mut out = String::new();
+        // (an IPv4-mapped address `::ffff:a.b.c.d` and the unspecified / loopback ones as std writes them)
+        if g[0] == 0 && g[1] == 0 && g[2] == 0 && g[3] == 0 && g[4] == 0 && g[5] == 0xffff {
+            out.push_str(&format!("::ffff:{}.{}.{}.{}", self.o[12], self.o[13], self.o[14], self.o[15]));
+            return f.pad(&out);
+        }
+        // (the longest run of zero groups, the first of the longest, when it is at least 2 long)
+        let (mut best, mut best_len) = (8usize, 0usize);
+        let mut i = 0;
+        while i < 8 {
+            if g[i] == 0 {
+                let st = i;
+                while i < 8 && g[i] == 0 {
+                    i += 1;
+                }
+                if i - st > best_len {
+                    best = st;
+                    best_len = i - st;
+                }
+            } else {
+                i += 1;
+            }
+        }
+        if best_len < 2 {
+            best = 8;
+        }
+        let mut i = 0;
+        while i < 8 {
+            if i == best {
+                out.push_str("::");
+                i += best_len;
+                continue;
+            }
+            if i > 0 && i != best + best_len {
+                out.push(':');
+            }
+            out.push_str(&format!("{:x}", g[i]));
+            i += 1;
+        }
+        f.pad(&out)
+    }
+}
+
+impl Debug for Ipv6Addr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        Display::fmt(self, f)
+    }
+}
+
+// (groups of 1 to 4 hex digits, `::` once for the zero groups it stands for, an IPv4 address as the last 2 groups)
+fn __exr_parse_v6<G>(s: &str) -> Option<[u8; 16]> {
+    let b = s.as_bytes();
+    let mut head: Vec<u16> = Vec::new();
+    let mut tail: Vec<u16> = Vec::new();
+    let mut gap = false;
+    let mut i = 0;
+    if b.len() >= 2 && b[0] == b':' && b[1] == b':' {
+        gap = true;
+        i = 2;
+    }
+    while i < b.len() {
+        // (an IPv4 address at the end)
+        // (the rest is one group with dots in it: no `:` after them)
+        let mut dot = false;
+        let mut colon = false;
+        let mut k = i;
+        while k < b.len() {
+            if b[k] == b'.' {
+                dot = true;
+            } else if b[k] == b':' {
+                colon = true;
+            }
+            k += 1;
+        }
+        if dot && !colon {
+            let o = __exr_parse_v4::<()>(&s[i..])?;
+            let cur = if gap { &mut tail } else { &mut head };
+            cur.push(((o[0] as u16) << 8) | o[1] as u16);
+            cur.push(((o[2] as u16) << 8) | o[3] as u16);
+            i = b.len();
+            break;
+        }
+        let st = i;
+        let mut v: u32 = 0;
+        while i < b.len() && i - st < 4 {
+            let c = b[i];
+            let d = if c >= b'0' && c <= b'9' {
+                c - b'0'
+            } else if c >= b'a' && c <= b'f' {
+                c - b'a' + 10
+            } else if c >= b'A' && c <= b'F' {
+                c - b'A' + 10
+            } else {
+                break;
+            };
+            v = v * 16 + d as u32;
+            i += 1;
+        }
+        if i == st {
+            return None;
+        }
+        if gap {
+            tail.push(v as u16);
+        } else {
+            head.push(v as u16);
+        }
+        if i == b.len() {
+            break;
+        }
+        if b[i] != b':' {
+            return None;
+        }
+        i += 1;
+        if i < b.len() && b[i] == b':' {
+            if gap {
+                return None;
+            }
+            gap = true;
+            i += 1;
+            if i == b.len() {
+                break;
+            }
+        } else if i == b.len() {
+            return None;
+        }
+    }
+    let n = head.len() + tail.len();
+    if n > 8 || (!gap && n != 8) || (gap && n > 7) {
+        return None;
+    }
+    let mut g = [0u16; 8];
+    let mut k = 0;
+    while k < head.len() {
+        g[k] = head[k];
+        k += 1;
+    }
+    let mut k = 0;
+    while k < tail.len() {
+        g[8 - tail.len() + k] = tail[k];
+        k += 1;
+    }
+    let mut o = [0u8; 16];
+    let mut k = 0;
+    while k < 8 {
+        o[2 * k] = (g[k] >> 8) as u8;
+        o[2 * k + 1] = g[k] as u8;
+        k += 1;
+    }
+    Some(o)
+}
+
+impl FromStr for Ipv6Addr {
+    type Err = AddrParseError;
+    fn from_str(s: &str) -> Result<Ipv6Addr, AddrParseError> {
+        match __exr_parse_v6::<()>(s) {
+            Some(o) => Ok(Ipv6Addr { o }),
+            None => Err(AddrParseError(2)),
+        }
+    }
+}
+
+impl IpAddr {
+    pub fn is_ipv4(&self) -> bool {
+        match self {
+            IpAddr::V4(_) => true,
+            IpAddr::V6(_) => false,
+        }
+    }
+    pub fn is_ipv6(&self) -> bool {
+        !self.is_ipv4()
+    }
+    pub fn is_loopback(&self) -> bool {
+        match self {
+            IpAddr::V4(a) => a.is_loopback(),
+            IpAddr::V6(a) => a.is_loopback(),
+        }
+    }
+}
+
+impl From<Ipv4Addr> for IpAddr {
+    fn from(a: Ipv4Addr) -> IpAddr {
+        IpAddr::V4(a)
+    }
+}
+
+impl From<Ipv6Addr> for IpAddr {
+    fn from(a: Ipv6Addr) -> IpAddr {
+        IpAddr::V6(a)
+    }
+}
+
+impl Display for IpAddr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            IpAddr::V4(a) => Display::fmt(a, f),
+            IpAddr::V6(a) => Display::fmt(a, f),
+        }
+    }
+}
+
+impl Debug for IpAddr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        Display::fmt(self, f)
+    }
+}
+
+impl FromStr for IpAddr {
+    type Err = AddrParseError;
+    fn from_str(s: &str) -> Result<IpAddr, AddrParseError> {
+        if let Some(o) = __exr_parse_v4::<()>(s) {
+            return Ok(IpAddr::V4(Ipv4Addr { o }));
+        }
+        match __exr_parse_v6::<()>(s) {
+            Some(o) => Ok(IpAddr::V6(Ipv6Addr { o })),
+            None => Err(AddrParseError(0)),
+        }
+    }
+}
+
+impl SocketAddrV4 {
+    pub const fn new(ip: Ipv4Addr, port: u16) -> SocketAddrV4 {
+        SocketAddrV4 { ip, port }
+    }
+    pub const fn ip(&self) -> &Ipv4Addr {
+        &self.ip
+    }
+    pub const fn port(&self) -> u16 {
+        self.port
+    }
+}
+
+impl SocketAddrV6 {
+    pub const fn new(ip: Ipv6Addr, port: u16, flowinfo: u32, scope_id: u32) -> SocketAddrV6 {
+        SocketAddrV6 { ip, port, flowinfo, scope_id }
+    }
+    pub const fn ip(&self) -> &Ipv6Addr {
+        &self.ip
+    }
+    pub const fn port(&self) -> u16 {
+        self.port
+    }
+    pub const fn flowinfo(&self) -> u32 {
+        self.flowinfo
+    }
+    pub const fn scope_id(&self) -> u32 {
+        self.scope_id
+    }
+}
+
+impl SocketAddr {
+    pub fn new(ip: IpAddr, port: u16) -> SocketAddr {
+        match ip {
+            IpAddr::V4(a) => SocketAddr::V4(SocketAddrV4::new(a, port)),
+            IpAddr::V6(a) => SocketAddr::V6(SocketAddrV6::new(a, port, 0, 0)),
+        }
+    }
+    pub fn ip(&self) -> IpAddr {
+        match self {
+            SocketAddr::V4(a) => IpAddr::V4(a.ip),
+            SocketAddr::V6(a) => IpAddr::V6(a.ip),
+        }
+    }
+    pub fn port(&self) -> u16 {
+        match self {
+            SocketAddr::V4(a) => a.port,
+            SocketAddr::V6(a) => a.port,
+        }
+    }
+    pub fn is_ipv4(&self) -> bool {
+        match self {
+            SocketAddr::V4(_) => true,
+            SocketAddr::V6(_) => false,
+        }
+    }
+    pub fn is_ipv6(&self) -> bool {
+        !self.is_ipv4()
+    }
+}
+
+impl Display for SocketAddrV4 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let s = format!("{}:{}", self.ip, self.port);
+        f.pad(&s)
+    }
+}
+
+impl Debug for SocketAddrV4 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        Display::fmt(self, f)
+    }
+}
+
+impl Display for SocketAddrV6 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let s = if self.scope_id == 0 {
+            format!("[{}]:{}", self.ip, self.port)
+        } else {
+            format!("[{}%{}]:{}", self.ip, self.scope_id, self.port)
+        };
+        f.pad(&s)
+    }
+}
+
+impl Debug for SocketAddrV6 {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        Display::fmt(self, f)
+    }
+}
+
+impl Display for SocketAddr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        match self {
+            SocketAddr::V4(a) => Display::fmt(a, f),
+            SocketAddr::V6(a) => Display::fmt(a, f),
+        }
+    }
+}
+
+impl Debug for SocketAddr {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        Display::fmt(self, f)
+    }
+}
+
+// (a decimal number of at most `max`, all of b)
+fn __exr_net_num<G>(b: &[u8], max: u64) -> Option<u64> {
+    if b.len() == 0 || b.len() > 10 {
+        return None;
+    }
+    let mut v: u64 = 0;
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] < b'0' || b[i] > b'9' {
+            return None;
+        }
+        v = v * 10 + (b[i] - b'0') as u64;
+        i += 1;
+    }
+    if v > max { None } else { Some(v) }
+}
+
+// (the last place of c in b)
+fn __exr_net_last<G>(b: &[u8], c: u8) -> Option<usize> {
+    let mut i = b.len();
+    while i > 0 {
+        i -= 1;
+        if b[i] == c {
+            return Some(i);
+        }
+    }
+    None
+}
+
+// (`a.b.c.d:port`)
+fn __exr_parse_sock_v4<G>(s: &str) -> Option<SocketAddrV4> {
+    let b = s.as_bytes();
+    let k = __exr_net_last::<()>(b, b':')?;
+    let o = __exr_parse_v4::<()>(&s[..k])?;
+    let port = __exr_net_num::<()>(&b[k + 1..], 65535)? as u16;
+    Some(SocketAddrV4 { ip: Ipv4Addr { o }, port })
+}
+
+// (`[v6]:port` or `[v6%scope]:port`)
+fn __exr_parse_sock_v6<G>(s: &str) -> Option<SocketAddrV6> {
+    let b = s.as_bytes();
+    if b.len() == 0 || b[0] != b'[' {
+        return None;
+    }
+    let close = __exr_net_last::<()>(b, b']')?;
+    let (end, scope) = match __exr_net_last::<()>(&b[..close], b'%') {
+        Some(p) => (p, __exr_net_num::<()>(&b[p + 1..close], 4294967295)? as u32),
+        None => (close, 0),
+    };
+    let o = __exr_parse_v6::<()>(&s[1..end])?;
+    if close + 1 >= b.len() || b[close + 1] != b':' {
+        return None;
+    }
+    let port = __exr_net_num::<()>(&b[close + 2..], 65535)? as u16;
+    Some(SocketAddrV6 { ip: Ipv6Addr { o }, port, flowinfo: 0, scope_id: scope })
+}
+
+impl FromStr for SocketAddrV4 {
+    type Err = AddrParseError;
+    fn from_str(s: &str) -> Result<SocketAddrV4, AddrParseError> {
+        match __exr_parse_sock_v4::<()>(s) {
+            Some(a) => Ok(a),
+            None => Err(AddrParseError(4)),
+        }
+    }
+}
+
+impl FromStr for SocketAddrV6 {
+    type Err = AddrParseError;
+    fn from_str(s: &str) -> Result<SocketAddrV6, AddrParseError> {
+        match __exr_parse_sock_v6::<()>(s) {
+            Some(a) => Ok(a),
+            None => Err(AddrParseError(5)),
+        }
+    }
+}
+
+impl FromStr for SocketAddr {
+    type Err = AddrParseError;
+    fn from_str(s: &str) -> Result<SocketAddr, AddrParseError> {
+        if let Some(a) = __exr_parse_sock_v4::<()>(s) {
+            return Ok(SocketAddr::V4(a));
+        }
+        match __exr_parse_sock_v6::<()>(s) {
+            Some(a) => Ok(SocketAddr::V6(a)),
+            None => Err(AddrParseError(3)),
+        }
+    }
+}
+
+// --- std::ffi::CString / CStr: bytes with no 0 in them (the 0 at the end is not stored). CStr has CString's layout,
+// so a CString is borrowed as one; `Box<CStr>` holds one ---
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]
+pub struct CString {
+    b: Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]
+pub struct CStr {
+    b: Vec<u8>,
+}
+
+/// `CString::new` of bytes with a 0 in them: where it is, and the bytes
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct NulError(usize, Vec<u8>);
+
+impl NulError {
+    pub fn nul_position(&self) -> usize {
+        self.0
+    }
+    pub fn into_vec(self) -> Vec<u8> {
+        self.1
+    }
+}
+
+impl Display for NulError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        write!(f, "nul byte found in provided data at position: {}", self.0)
+    }
+}
+
+/// What `CString::new` takes (std's `Into<Vec<u8>>`)
+pub trait __CStrBytes {
+    fn __cstr_bytes(self) -> Vec<u8>;
+}
+impl __CStrBytes for Vec<u8> {
+    fn __cstr_bytes(self) -> Vec<u8> {
+        self
+    }
+}
+impl __CStrBytes for String {
+    fn __cstr_bytes(self) -> Vec<u8> {
+        self.into_bytes()
+    }
+}
+impl<'a> __CStrBytes for &'a str {
+    fn __cstr_bytes(self) -> Vec<u8> {
+        self.as_bytes().to_vec()
+    }
+}
+impl<'a> __CStrBytes for &'a [u8] {
+    fn __cstr_bytes(self) -> Vec<u8> {
+        self.to_vec()
+    }
+}
+
+impl CString {
+    pub fn new<T: __CStrBytes>(t: T) -> Result<CString, NulError> {
+        let b = t.__cstr_bytes();
+        let mut i = 0;
+        while i < b.len() {
+            if b[i] == 0 {
+                return Err(NulError(i, b));
+            }
+            i += 1;
+        }
+        Ok(CString { b })
+    }
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.b
+    }
+    pub fn to_bytes(&self) -> &[u8] {
+        &self.b
+    }
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.b
+    }
+    pub fn as_c_str(&self) -> &CStr {
+        unsafe { &*(self as *const CString as *const CStr) }
+    }
+    pub fn into_boxed_c_str(self) -> Box<CStr> {
+        Box::new(CStr { b: self.b })
+    }
+}
+
+impl CStr {
+    pub fn to_bytes(&self) -> &[u8] {
+        &self.b
+    }
+    pub fn to_str(&self) -> Result<&str, Utf8Error> {
+        str::from_utf8(&self.b)
+    }
+    pub fn to_owned(&self) -> CString {
+        CString { b: self.b.clone() }
     }
 }
 
@@ -8944,6 +9633,111 @@ pub fn __core_yield_now() {
 // (`thread::panicking()`: a panic stops the process without unwinding, so no drop ever runs while panicking)
 pub fn __core_panicking() -> bool { false }
 
+/// `std::fmt::Arguments`: a formatted text (`format_args!` makes a String here, so this holds one)
+#[derive(Clone)]
+pub struct Arguments<'a> {
+    __args_s: String,
+    __args_p: PhantomData<&'a ()>,
+}
+
+impl<'a> Arguments<'a> {
+    pub fn as_str(&self) -> Option<&'static str> {
+        None
+    }
+}
+
+impl<'a> Display for Arguments<'a> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str(&self.__args_s);
+        Ok(())
+    }
+}
+
+impl<'a> Debug for Arguments<'a> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str(&self.__args_s);
+        Ok(())
+    }
+}
+
+/// `std::ops::Bound`: one end of a range
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Bound<T> {
+    Included(T),
+    Excluded(T),
+    Unbounded,
+}
+
+impl<T> Bound<T> {
+    pub fn as_ref(&self) -> Bound<&T> {
+        match self {
+            Bound::Included(x) => Bound::Included(x),
+            Bound::Excluded(x) => Bound::Excluded(x),
+            Bound::Unbounded => Bound::Unbounded,
+        }
+    }
+    pub fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Bound<U> {
+        match self {
+            Bound::Included(x) => Bound::Included(f(x)),
+            Bound::Excluded(x) => Bound::Excluded(f(x)),
+            Bound::Unbounded => Bound::Unbounded,
+        }
+    }
+}
+
+// `std::time::SystemTime`: the time since UNIX_EPOCH (arithmetic and comparison; no clock is read here, so no `now`)
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SystemTime {
+    __st_d: Duration,
+}
+
+pub const UNIX_EPOCH: SystemTime = SystemTime { __st_d: Duration { secs: 0, nanos: 0 } };
+
+/// `duration_since` of an earlier time: how much later it is
+#[derive(Clone, Debug)]
+pub struct SystemTimeError(Duration);
+
+impl SystemTimeError {
+    pub fn duration(&self) -> Duration {
+        self.0
+    }
+}
+
+impl Display for SystemTimeError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.pad("second time provided was later than self")
+    }
+}
+
+impl SystemTime {
+    pub const UNIX_EPOCH: SystemTime = SystemTime { __st_d: Duration { secs: 0, nanos: 0 } };
+    pub fn duration_since(&self, earlier: SystemTime) -> Result<Duration, SystemTimeError> {
+        match self.__st_d.checked_sub(earlier.__st_d) {
+            Some(d) => Ok(d),
+            None => Err(SystemTimeError(earlier.__st_d.checked_sub(self.__st_d).unwrap_or(Duration::ZERO))),
+        }
+    }
+    pub fn checked_add(&self, d: Duration) -> Option<SystemTime> {
+        match self.__st_d.checked_add(d) {
+            Some(t) => Some(SystemTime { __st_d: t }),
+            None => None,
+        }
+    }
+    pub fn checked_sub(&self, d: Duration) -> Option<SystemTime> {
+        match self.__st_d.checked_sub(d) {
+            Some(t) => Some(SystemTime { __st_d: t }),
+            None => None,
+        }
+    }
+}
+
+impl Debug for SystemTime {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        let s = format!("SystemTime {{ tv_sec: {}, tv_nsec: {} }}", self.__st_d.as_secs(), self.__st_d.subsec_nanos());
+        f.pad(&s)
+    }
+}
+
 // `std::time::Duration` (seconds and nanoseconds, as std)
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Duration {
@@ -9706,6 +10500,101 @@ impl<T> Drop for MutexGuard<T> {
             *self.m = false;
         }
         __exr_green_progress();
+    }
+}
+
+// `std::sync::RwLock` (green threads, as Mutex: `read` waits while a writer holds it, `write` while anyone does; a
+// guard's drop lets it go)
+pub struct RwLock<T> {
+    val: T,
+    readers: usize,
+    writer: bool,
+}
+
+pub struct RwLockReadGuard<T> {
+    p: *const T,
+    l: *mut usize,
+}
+
+pub struct RwLockWriteGuard<T> {
+    p: *mut T,
+    w: *mut bool,
+}
+
+impl<T> RwLock<T> {
+    pub const fn new(v: T) -> RwLock<T> {
+        RwLock { val: v, readers: 0, writer: false }
+    }
+    pub fn read(&self) -> Result<RwLockReadGuard<T>, ()> {
+        let w = &self.writer as *const bool;
+        __exr_green_wait(|| unsafe { !*w });
+        let r = &self.readers as *const usize as *mut usize;
+        unsafe {
+            *r += 1;
+        }
+        Ok(RwLockReadGuard { p: &self.val as *const T, l: r })
+    }
+    pub fn write(&self) -> Result<RwLockWriteGuard<T>, ()> {
+        let w = &self.writer as *const bool as *mut bool;
+        let r = &self.readers as *const usize;
+        __exr_green_wait(|| unsafe { !*w && *r == 0 });
+        unsafe {
+            *w = true;
+        }
+        Ok(RwLockWriteGuard { p: &self.val as *const T as *mut T, w: w })
+    }
+    pub fn into_inner(self) -> Result<T, ()> {
+        Ok(self.val)
+    }
+    pub fn get_mut(&mut self) -> Result<&mut T, ()> {
+        Ok(&mut self.val)
+    }
+}
+
+impl<T> Deref for RwLockReadGuard<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        unsafe { &*self.p }
+    }
+}
+
+impl<T> Drop for RwLockReadGuard<T> {
+    fn drop(&mut self) {
+        unsafe {
+            *self.l -= 1;
+        }
+        __exr_green_progress();
+    }
+}
+
+impl<T> Deref for RwLockWriteGuard<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        unsafe { &*self.p }
+    }
+}
+
+impl<T> RwLockWriteGuard<T> {
+    pub fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.p }
+    }
+}
+
+impl<T> Drop for RwLockWriteGuard<T> {
+    fn drop(&mut self) {
+        unsafe {
+            *self.w = false;
+        }
+        __exr_green_progress();
+    }
+}
+
+impl<T: Debug> Debug for RwLock<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        f.buf.push_str("RwLock { data: ");
+        __exr_debug(&self.val, f);
+        f.buf.push_str(", poisoned: false, .. }");
+        Ok(())
     }
 }
 
@@ -12036,6 +12925,68 @@ impl<T> Iterator for DqIntoIter<T> {
     }
 }
 
+/// `std::collections::LinkedList`: a VecDeque inside (the same operations at its ends; no cursors)
+#[derive(Clone, Default)]
+pub struct LinkedList<T> {
+    d: VecDeque<T>,
+}
+
+impl<T> LinkedList<T> {
+    pub fn new() -> LinkedList<T> {
+        LinkedList { d: VecDeque::new() }
+    }
+    pub fn len(&self) -> usize {
+        self.d.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.d.len() == 0
+    }
+    pub fn clear(&mut self) {
+        self.d.clear()
+    }
+    pub fn push_back(&mut self, x: T) {
+        self.d.push_back(x)
+    }
+    pub fn push_front(&mut self, x: T) {
+        self.d.push_front(x)
+    }
+    pub fn pop_back(&mut self) -> Option<T> {
+        self.d.pop_back()
+    }
+    pub fn pop_front(&mut self) -> Option<T> {
+        self.d.pop_front()
+    }
+    pub fn front(&self) -> Option<&T> {
+        self.d.front()
+    }
+    pub fn back(&self) -> Option<&T> {
+        self.d.back()
+    }
+    pub fn iter(&self) -> DqIter<T> {
+        self.d.iter()
+    }
+    pub fn into_iter(self) -> DqIntoIter<T> {
+        DqIntoIter { d: self.d }
+    }
+    pub fn append(&mut self, other: &mut LinkedList<T>) {
+        while let Some(x) = other.d.pop_front() {
+            self.d.push_back(x);
+        }
+    }
+}
+
+impl<T> __FromIter for LinkedList<T> {
+    fn __from_iter<I: Iterator>(it: I) -> LinkedList<T> {
+        LinkedList { d: VecDeque::__from_iter(it) }
+    }
+}
+
+impl<T: Debug> Debug for LinkedList<T> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), __FmtError> {
+        Debug::fmt(&self.d, f)
+    }
+}
+
 impl<T> __FromIter for VecDeque<T> {
     fn __from_iter<I: Iterator>(it: I) -> VecDeque<T> {
         let mut it = it;
@@ -13056,9 +14007,9 @@ impl Display for ParseIntError {
     }
 }
 
-pub trait __FromStr {
+pub trait FromStr {
     type Err;
-    fn __from_str(s: &str) -> Result<Self, Self::Err>;
+    fn from_str(s: &str) -> Result<Self, Self::Err>;
 }
 
 // 符号と絶対値 (u64) に読む。max は正の上限、neg_max は負の絶対値の上限
@@ -13103,90 +14054,90 @@ fn __exr_parse_int<G>(s: &str, signed: bool, max: u64, neg_max: u64) -> Result<(
     Ok((neg, v))
 }
 
-impl __FromStr for i8 {
+impl FromStr for i8 {
     type Err = ParseIntError;
-    fn __from_str(s: &str) -> Result<i8, ParseIntError> {
+    fn from_str(s: &str) -> Result<i8, ParseIntError> {
         match __exr_parse_int::<()>(s, true, 127, 128) {
             Ok((n, v)) => Ok(if n { (v as i8).wrapping_neg() } else { v as i8 }),
             Err(e) => Err(e),
         }
     }
 }
-impl __FromStr for i16 {
+impl FromStr for i16 {
     type Err = ParseIntError;
-    fn __from_str(s: &str) -> Result<i16, ParseIntError> {
+    fn from_str(s: &str) -> Result<i16, ParseIntError> {
         match __exr_parse_int::<()>(s, true, 32767, 32768) {
             Ok((n, v)) => Ok(if n { (v as i16).wrapping_neg() } else { v as i16 }),
             Err(e) => Err(e),
         }
     }
 }
-impl __FromStr for i32 {
+impl FromStr for i32 {
     type Err = ParseIntError;
-    fn __from_str(s: &str) -> Result<i32, ParseIntError> {
+    fn from_str(s: &str) -> Result<i32, ParseIntError> {
         match __exr_parse_int::<()>(s, true, 2147483647, 2147483648) {
             Ok((n, v)) => Ok(if n { (v as i32).wrapping_neg() } else { v as i32 }),
             Err(e) => Err(e),
         }
     }
 }
-impl __FromStr for i64 {
+impl FromStr for i64 {
     type Err = ParseIntError;
-    fn __from_str(s: &str) -> Result<i64, ParseIntError> {
+    fn from_str(s: &str) -> Result<i64, ParseIntError> {
         match __exr_parse_int::<()>(s, true, 9223372036854775807, 9223372036854775808) {
             Ok((n, v)) => Ok(if n { (v as i64).wrapping_neg() } else { v as i64 }),
             Err(e) => Err(e),
         }
     }
 }
-impl __FromStr for isize {
+impl FromStr for isize {
     type Err = ParseIntError;
-    fn __from_str(s: &str) -> Result<isize, ParseIntError> {
+    fn from_str(s: &str) -> Result<isize, ParseIntError> {
         match __exr_parse_int::<()>(s, true, 9223372036854775807, 9223372036854775808) {
             Ok((n, v)) => Ok(if n { (v as isize).wrapping_neg() } else { v as isize }),
             Err(e) => Err(e),
         }
     }
 }
-impl __FromStr for u8 {
+impl FromStr for u8 {
     type Err = ParseIntError;
-    fn __from_str(s: &str) -> Result<u8, ParseIntError> {
+    fn from_str(s: &str) -> Result<u8, ParseIntError> {
         match __exr_parse_int::<()>(s, false, 255, 0) {
             Ok((_, v)) => Ok(v as u8),
             Err(e) => Err(e),
         }
     }
 }
-impl __FromStr for u16 {
+impl FromStr for u16 {
     type Err = ParseIntError;
-    fn __from_str(s: &str) -> Result<u16, ParseIntError> {
+    fn from_str(s: &str) -> Result<u16, ParseIntError> {
         match __exr_parse_int::<()>(s, false, 65535, 0) {
             Ok((_, v)) => Ok(v as u16),
             Err(e) => Err(e),
         }
     }
 }
-impl __FromStr for u32 {
+impl FromStr for u32 {
     type Err = ParseIntError;
-    fn __from_str(s: &str) -> Result<u32, ParseIntError> {
+    fn from_str(s: &str) -> Result<u32, ParseIntError> {
         match __exr_parse_int::<()>(s, false, 4294967295, 0) {
             Ok((_, v)) => Ok(v as u32),
             Err(e) => Err(e),
         }
     }
 }
-impl __FromStr for u64 {
+impl FromStr for u64 {
     type Err = ParseIntError;
-    fn __from_str(s: &str) -> Result<u64, ParseIntError> {
+    fn from_str(s: &str) -> Result<u64, ParseIntError> {
         match __exr_parse_int::<()>(s, false, 18446744073709551615, 0) {
             Ok((_, v)) => Ok(v),
             Err(e) => Err(e),
         }
     }
 }
-impl __FromStr for usize {
+impl FromStr for usize {
     type Err = ParseIntError;
-    fn __from_str(s: &str) -> Result<usize, ParseIntError> {
+    fn from_str(s: &str) -> Result<usize, ParseIntError> {
         match __exr_parse_int::<()>(s, false, 18446744073709551615, 0) {
             Ok((_, v)) => Ok(v as usize),
             Err(e) => Err(e),
@@ -13234,18 +14185,18 @@ fn __exr_parse_int128<G>(s: &str, signed: bool) -> Result<(bool, u128), ParseInt
     }
     Ok((neg, v))
 }
-impl __FromStr for i128 {
+impl FromStr for i128 {
     type Err = ParseIntError;
-    fn __from_str(s: &str) -> Result<i128, ParseIntError> {
+    fn from_str(s: &str) -> Result<i128, ParseIntError> {
         match __exr_parse_int128::<()>(s, true) {
             Ok((n, v)) => Ok(if n { (!v + 1) as i128 } else { v as i128 }),
             Err(e) => Err(e),
         }
     }
 }
-impl __FromStr for u128 {
+impl FromStr for u128 {
     type Err = ParseIntError;
-    fn __from_str(s: &str) -> Result<u128, ParseIntError> {
+    fn from_str(s: &str) -> Result<u128, ParseIntError> {
         match __exr_parse_int128::<()>(s, false) {
             Ok((_, v)) => Ok(v),
             Err(e) => Err(e),
@@ -13419,8 +14370,8 @@ impl __Radix for usize {
     }
 }
 
-fn __exr_str_parse<T: __FromStr>(s: &str) -> Result<T, T::Err> {
-    <T as __FromStr>::__from_str(s)
+fn __exr_str_parse<T: FromStr>(s: &str) -> Result<T, T::Err> {
+    <T as FromStr>::from_str(s)
 }
 
 // char のメソッド (Unicode の表は持たないので、ASCII と Latin-1 / ギリシャ文字 / キリル文字 / 仮名・漢字の範囲で近似する)

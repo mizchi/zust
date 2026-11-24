@@ -2584,6 +2584,7 @@ run-pass	expr/scope.rs
 compile-fail	extern/bad-external-async-fn-issue-146754.rs
 run-pass	extern/empty-struct-extern-fn-16441.rs
 run-pass	extern/extern-1.rs
+check-pass	extern/extern-C-non-FFI-safe-arg-ice-52334.rs
 check-pass	extern/extern-C-str-arg-ice-80125.rs
 build-pass	extern/extern-c-method-with-str-param.rs
 run-pass	extern/extern-compare-with-return-type.rs
@@ -3828,6 +3829,7 @@ check-pass	lint/clashing-extern-fn-wasm.rs
 check-pass	lint/const-item-interior-mutations-const-atomics.rs
 check-pass	lint/const-item-interior-mutations-const-deref.rs
 check-pass	lint/dangling-pointers-from-locals.rs
+compile-fail	lint/dangling-pointers-from-temporaries/calls.rs
 compile-fail	lint/dangling-pointers-from-temporaries/cstring-as-ptr.rs
 compile-fail	lint/dangling-pointers-from-temporaries/example-from-issue123613.rs
 compile-fail	lint/dangling-pointers-from-temporaries/ext.rs
@@ -6690,7 +6692,6 @@ compile-fail	span/regions-escape-loop-via-variable.rs
 compile-fail	span/regions-escape-loop-via-vec.rs
 compile-fail	span/regions-infer-borrow-scope-within-loop.rs
 compile-fail	span/send-is-not-static-ensures-scoping.rs
-compile-fail	span/send-is-not-static-std-sync-2.rs
 compile-fail	span/slice-borrow.rs
 compile-fail	span/suggestion-non-ascii.rs
 compile-fail	span/suggestion-raw-68962.rs
@@ -8104,4 +8105,5 @@ run-pass	windows-subsystem/console.rs
 run-pass	windows-subsystem/windows.rs
 run-pass	zero-sized/zero-size-type-destructors.rs
 run-pass	zero-sized/zero-sized-btreemap-insert.rs
+run-pass	zero-sized/zero-sized-linkedlist-push.rs
 run-pass	zero-sized/zero-sized-tuple-struct.rs

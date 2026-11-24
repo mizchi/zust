@@ -1158,6 +1158,15 @@ impl Cx<'_> {
             // (and its impl's method when it has one, chosen here: the receiver is then taken as that method takes it,
             // `(&q).qux()` of ByRef's `qux(&self)` beside ByValue's `qux(self)`)
             if let Some((_, tr)) = self.explicit_trait.as_ref().filter(|(m, _)| *m == name) {
+                // (`Display::fmt(self, f)` in the type's Debug: its Display / Debug methods are `S::<Display>::fmt`)
+                // (of a generic type's instance, the generic impl's: `VecDeque<i32>`'s is `VecDeque::<Debug>::fmt`)
+                if matches!(tr.as_str(), "Display" | "Debug") {
+                    let own = format!("{}::<{tr}>::{name}", self.prog.structs[sid as usize].name);
+                    let generic = format!("{}::<{tr}>::{name}", self.prog.structs[self.prog.base_of(sid) as usize].name);
+                    if let Some(&id) = self.prog.index.get(&own).or_else(|| self.prog.index.get(&generic)) {
+                        break (a, o, sid, id);
+                    }
+                }
                 let key = format!("{}::{name}", self.prog.structs[self.prog.base_of(sid) as usize].name);
                 let user = |d: u32| self.prog.item_of.get(d as usize).copied().flatten().is_some_and(|x| x < self.prog.prelude_from);
                 match self.trait_candidate_where(&key, tr, |i| self.self_fits(i, Ty::Struct(sid))) {
