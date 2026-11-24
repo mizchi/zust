@@ -670,6 +670,13 @@ impl Cx<'_> {
                     }
                 }
                 [_, _, ..] if segs.len() >= 3 && segs[segs.len() - 2] == "Default" => exp,
+                // (`Self::Seed::default()` / `T::Output::default()`: the path before `default` is a type, an associated
+                //  one of Self or a type parameter (rand_core's `SeedableRng::seed_from_u64`))
+                [_, _, ..] => {
+                    let mut tp = path.clone();
+                    tp.segs.pop();
+                    self.parse_ty(&crate::parse::Ty::Path(None, tp)).ok().or(exp)
+                }
                 _ => None,
             }
         };

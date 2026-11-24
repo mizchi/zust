@@ -1,6 +1,25 @@
 # zustscript の TODO と、あとで決めること
 
-README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画のメモ(ML 用途、vector IR との関係)。このファイルは、文法の改善ループで**決めずに残したこと**と、次にやることの一覧。
+現在の仕様は [README.md](README.md)、ML 用途と vector IR の計画は [docs/plan.md](docs/plan.md) にある。
+
+## Rust 出力とガイドの次の作業
+
+通常の関数の `--emit-rust`、`@wasm` からの通常関数呼び出し、JS 専用出力での `@wasm` の診断は [#119](https://github.com/mizchi/zust/pull/119) で実装済み。以下はそのマージ後の `main`（`61293a7f`）を基準とした残件。
+
+### 先に直すこと・決めること
+
+- [ ] **Rust 2024 の予約語を含むコードを正しく出力する。** `type Reading = { gen: i32 }` と `export fn read(x: Reading) -> i32 { x.gen }` は `--emit-rust` に成功するが、生成した宣言とフィールド参照の `gen` を `rustc --edition=2024` が拒否する。名前変換を両方に適用し、`gen` と `gen_` が同居するレコードを別の Rust モジュールから読み書きする回帰テストを追加する。
+- [ ] **手書きの Rust を含むときの `--all-js` の契約を決める。** `@wasm fn` はエラーになる一方、`export wasm fn twice(x: i32) -> i32 { x + x }` を CLI に渡すと `zustc` が起動して `.wasm` ができる。ブラウザ版は同じ手書き関数に警告とスタブを出す。JS だけを要求した場合にビルドを拒否するか、現行の混在出力を許すかを決め、両方の入口で診断と生成物をテストする。
+- [ ] **既存レビューの正しさに関わる指摘を再判定する。** [#35](https://github.com/mizchi/zust/issues/35) は未完了で、記録の一部は過去のコミットを基準にしている。所有権・名前衝突・SIMD の各指摘を現行テストと突き合わせ、修正済みの項目には対応コミット、未解決の項目には回帰テストを対応付ける。[元の調査記録](docs/review-31.md)
+
+### 回帰テストと初見評価
+
+- [ ] **記事の生成コード例を CI で照合する。** 入門・言語別ガイド・変換コスト記事と PC 用サイドバーは公開済み。現在の Pages ビルドは Markdown を HTML にし、ハイライト前後のコードが一致することを検査する。Rust 向け記事の `peak` と TypeScript 向け記事の `stock_change` を本文からコンパイルし、掲載した抜粋を実出力と照合する。通常関数の Rust 版も `rustc` で実行し、空配列・負数・入出庫イベントの結果を確かめる。この検査をコンパイラ変更時にも走らせる。
+- [ ] **公開関数の初見評価を本流に取り込み、union の名前付きパターンを評価する。** [evals/publish-functions/](evals/publish-functions/README.md) に課題・採点・再実行手順がある。幅と高さがともに `number` のとき、TS の宣言順を入れ替えると位置パターンの意味が変わる。既存の評価記録を保存し、提案 001 の名前付きパターンでも同じ課題を試す。縦長・横長のどちらでも、宣言順にかかわらず幅 ÷ 高さを返せるかで比較する。
+
+### 計測してから決める最適化
+
+- [ ] **Wasm 内の中間配列と、JS 境界の転送を別々に測る。** `evens_squared` は `filter` と `map` の間に `Vec` を作る。同じ入出力の一回走査版と比較する。`relu(dense(...))` では前段の出力が JS を往復するので、呼び出し回数と転送バイト数を測り、Wasm 側に配列を保持するハンドルが必要か判断する。[生成コードと比較例](https://github.com/mizchi/zust/blob/main/crates/zustscript/docs/rust-costs.md)
 
 ## ターゲットと JS 相互運用
 
@@ -27,6 +46,68 @@ README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画の�
    - 001: パターンの Id と side table、候補つきの型変数、絞り込みのメタデータ、パターン行列の網羅性
    - 002: `Ty::Rec`、`{` の 2 トークンの判定、struct 名を形から作る lower
    - 003: prelude、`?` の脱糖(型検査の後の AST の書き換え)、境界での `undefined` の変換
+
+## 実用に向けて: 足りない機能の棚卸し(2026-11)
+
+zsc に小さなコードを通して確かめた(機能ごとに 1 つの `.zsc` を `--all-js` でコンパイル)。
+
+**結論: 1 ファイルで完結する小さな React の画面や数値カーネルは書けるが、実アプリにはまだ足りない。**
+足りないのは主に、非同期、`Option` / `Result`、JS の値の型、標準ライブラリの量。
+
+今あるもの:
+
+- レコード、enum、`match`、bound つきの総称関数・総称のレコード、クロージャ、`|>`、JSX
+- 数値の型(i32 / u32 / i64 / f32 / f64 と typed array)
+- 代数的エフェクト
+- `@wasm` / `@simd`、`--emit-rust`
+- `import type` での TS の型の読み込み、`extern fn`
+- 文字列の補間
+- ブラウザのプレイグラウンド(editor/)
+
+### P0: 実アプリを書く前に要るもの
+
+1. **済: `.zsc` どうしのモジュール**(README の「モジュール」)。`import { Shape, area } from "./shapes.zsc";` で型、`export fn`、コンポーネント、`@wasm export fn` を取り込む
+   - 残り
+     - 数値の bound を持つ総称関数、effect を perform する関数、Rust の `wasm fn` の取り込み
+     - `@wasm fn` から取り込んだ関数を呼ぶこと(相手の Rust も一緒にコンパイルする)
+     - `--emit-rust` でのモジュール(Rust の `mod` / `use` にする)
+     - パッケージからの取り込み、プレイグラウンドでの複数ファイル
+     - 名前を変えて取り込む(`import { area as shapeArea }`)、`export` の付かない型を取り込めないようにするか
+2. **非同期**
+   - `async fn` / `await` と `Promise<T>` の型がない。`fetch` も、イベントの後の処理も書けない
+   - 段階 3 の「async の effect」を待たず、まず `extern` で受けた `Promise<T>` を `await` できる最小の形を入れる(JS ではそのまま `async` / `await`。`@wasm` では使えない、とする)
+3. **`Option` / `Result` と `?`**(提案 003)
+   - 自前の enum なら書けるが、標準の型(prelude)、`?`、`if let`、任意のフィールド `x?: T` がない
+   - `import type` で TS の任意のフィールドを読むのも、これが前提
+4. **JS の値の型**
+   - `extern type Element;` のような中身の見えない型がない。`extern` は関数だけで、DOM、`Date`、`Response` などを型として持てない
+   - JS のオブジェクトのメソッドやプロパティを呼ぶ方法もない(今は `extern fn` を 1 つずつ書く)
+   - 上の「ターゲットと JS 相互運用」の `@js` の DOM ラッパー([docs/target-spec.md](docs/target-spec.md))と重なるので、一緒に設計する
+5. **標準ライブラリ**: 今あるのは、配列の `len` `map` `filter` `fold` `any` `all` `push` `concat` `join`、文字列の `len` `to_upper` `trim` `contains` `split`、数値の `to_string` `floor` `round` `sqrt` `abs` `max` `min` だけ
+   - 配列: `sort`(比較関数つき)、`find` / `find_index` / `index_of`、`slice`、`reverse`、`flat_map`、`includes`、`enumerate` 相当
+   - 文字列: `slice`、`starts_with` / `ends_with`、`replace`、`to_lower`、`index_of`、文字の取り出し、数値への `parse`(失敗は `Option` で。3 が前提)
+   - 数値: 三角関数、`pow`、`exp` / `ln`、乱数(`@wasm` では JS と同じ結果にできないものは JS 層だけ)
+   - キーつきの集まり(`Map` / `Set`)と JSON
+   - いずれも JS と `@wasm` で同じ意味にする(文字列の長さと順序は UTF-16 の単位。README の「文字列と `==`」と同じ方針)
+6. **パターン**: or パターン(`A | B =>`)とガード(`n if n > 1 =>`)(提案 004)
+7. **例外**: 例外を投げる JS の関数(`JSON.parse`、`fetch`)を受ける手段がない。`extern` を `-> Result<T, String>` で受ける(003 の未決事項)のが候補
+
+### P1: 使い心地
+
+- メソッド(`impl`)とインターフェース(`trait`)を入れるかどうか。今は関数と `|>` だけ
+- トップレベルの定数(`const N: i32 = 3;`)、関数の中の関数
+- 可変のローカル変数をクロージャが捕まえられないこと(`let mut s = 0; xs.map((x) => { s += x; .. })` は型エラー)。イベントハンドラでは React の state を使うので困りにくいが、ガイドに書く
+- 道具
+  - LSP(診断、hover、定義へ移動)、フォーマッタ、source map(段階 2)
+  - テストの書き方(`#[test]` 相当か、TS のテストから呼ぶか)
+- プレイグラウンド: 複数ファイルと、`import type` で読む TS ファイルのタブ
+
+### P2: 残りの細部
+
+- `@wasm` の中の浮動小数点数の `to_string` と補間の穴: JS の `Number#toString`(往復できる最短の桁)を、`core::fmt` を使わずに書く必要がある(`format!` は wasm を大きくする。README の「文字列と `==`」の表)。最短の桁を求める Ryu などの表も、サイズを測って決める
+- typed array をバイト列の形式に載せる
+- zustscript-helper を npm に公開する
+- enum の JS での表現を選べるようにする(`@tag`。下の「あとで決めること」)
 
 ## あとで決めること
 
@@ -72,7 +153,7 @@ README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画の�
 
 ### 文法の refine の残り(提案になっていないもの)
 
-- 文字列の補間 `` `hi ${name}` ``
+- **済: 文字列の補間 `` `hi ${name}` ``**(README の「文字列と `==`」)。`@wasm` では `format!` を使わず `push_str` と `zs_push_int` で組み立てる。残り: `@wasm` の中の浮動小数点数の穴(下の P2)
 - モジュールと import(`import { a } from "./b.zsc"`、npm の型との接続)
   - **済: TS のファイルのプレーンなレコード型を `import type` で読む**(README の「TS の型の取り込み」)。残り: 任意のフィールド(003 の `Option` と一緒に)、総称型、`extends`、union(**済: 文字列リテラルの union と判別キーつきの union を enum として読む**。**済: その enum を `@wasm` との境界で渡す**。残り: zustscript の enum の表現を `@tag` で選べるようにする)、パッケージの .d.ts からの読み込み、関数の型(`extern` の代わり)
   - **済: 文字列や配列を含むレコードを `@wasm` との境界で渡す**: 補助のパッケージ zustscript-helper(TS)と crate zustscript_helper(Rust)の、1 つの固定したバイト列の形式で(README の「バイト列で越える値」)。**済: enum もこの形式に載せる**。残り: typed array をこの形式に載せる、zustscript-helper を npm に公開する(今は helper/ts をそのまま置く)
@@ -88,7 +169,7 @@ r5 / r2 を書いた agent が報告したもの。次の改訂で直す。
 
 ## JS ターゲット: サイズ、速さ、TS との型の接続
 
-計測は `node bench/js/kpi.mjs`(`--esbuild PATH`、`--save FILE`、`--against FILE`)。`examples/*.zsc` と `bench/js/workloads.zsc` を `--all-js` でコンパイルし、esbuild で bundle + minify + gzip したサイズと、`w_*` の速さを出す。ベースラインは `bench/js/baseline.json`(node 26.13.1、esbuild 0.28.2)。
+計測は `node bench/js/kpi.mjs`(`--esbuild PATH`、`--save FILE`、`--against FILE`)。JS 比較用にサンプルの `@wasm` 属性を外し、`bench/js/workloads.zsc` とともに `--all-js` でコンパイルし、esbuild で bundle + minify + gzip したサイズと、`w_*` の速さを出す。ベースラインは `bench/js/baseline.json`(node 26.13.1、esbuild 0.28.2)。
 
 決めたこと(順に入れて、1 つずつ効果を測る):
 
@@ -120,10 +201,9 @@ r5 / r2 を書いた agent が報告したもの。次の改訂で直す。
   - 残り: `fold` の累積値(`xs.fold([], (acc, x) => acc.push(x))`)は、まだコピーする(初期値が新しい配列で、closure の結果もそうなら、その場にできる)。`let mut` から `let mut` へ移すと、移した先は対象から外れる
 - **済: 所有するローカル変数への長い借用**: `let firsts = first_pts(ps)` は、`ps` が所有するローカル変数でもコピーしない。ブロックの残りが `ps` を代入しないなら借用のままにして、ブロックの終わりまで `ps` を凍結する(move せず clone)。ブロックやアームの外へ出る借用、結果として返る借用は所有にする
 - lowering の回数: 今は各関数を平均 3 回 lowering する(鎖の例)。callee から先に lowering する順にすれば、ほぼ 2 回になる
-- **済: 文字列(`String` / `&str`)と、配列・レコード・enum の `==`**(README の「文字列と `==`」)。残り: タプル、文字列のパターン(`match s { "a" => .. }`)、浮動小数点数の `to_string`(JS の書式を Rust で再現する)、配列を含むレコードと文字列を含むレコードを JS との境界で渡すこと
+- **済: 文字列(`String` / `&str`)と、配列・レコード・enum の `==`**(README の「文字列と `==`」)。文字列・配列を含むレコードの境界転送も [wire.zsc](tests/wire.zsc) で検証済み。残り: タプル、文字列のパターン(`match s { "a" => .. }`)、浮動小数点数の `to_string`(JS の書式を Rust で再現する)
 - (推論とは別の問題) 検査器が、関数が多いと線形より遅くなる(1,600 関数で関数あたりの費用が増える)。`check_file` のソートが目立つ
 
 ## 実装の残り(文法以外)
 
-- PR #31 のレビューで直さずに残した指摘: [mizchi/zust#35](https://github.com/mizchi/zust/issues/35)(検証の結果は [docs/review-31.md](docs/review-31.md))
 - vector IR: [mizchi/zust#30](https://github.com/mizchi/zust/issues/30)(別のセッションで進行中)

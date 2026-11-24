@@ -26,6 +26,8 @@ mod parse;
 mod simd;
 #[path = "../../../crates/zustscript/src/tsimport.rs"]
 mod tsimport;
+#[path = "../../../crates/zustscript/src/zscimport.rs"]
+mod zscimport;
 #[path = "../../../crates/zustscript/src/wasm.rs"]
 #[allow(dead_code)]
 mod wasm;
@@ -80,9 +82,9 @@ fn sorted(mut v: Vec<Diag>) -> Vec<Diag> {
 /// The pipeline of `zsc --all-js --inline-runtime` (src/main.rs), without the files
 fn compile(src: &str) -> Result<(String, String, Vec<Diag>), Vec<Diag>> {
     let items = parse::Parser::new(src).file().map_err(|e| vec![e])?;
-    let items = tsimport::expand(items, Path::new(".")).map_err(|errs| {
+    let items = zscimport::expand(items, Path::new("."), &mut vec![]).and_then(|items| tsimport::expand(items, Path::new("."))).map_err(|errs| {
         errs.into_iter()
-            .map(|e| (e.pos, if e.file.is_some() { e.msg } else { format!("{} (the playground has no TS files to import)", e.msg) }))
+            .map(|e| (e.pos, if e.file.is_some() { e.msg } else { format!("{} (the playground has one file: no modules or TS files to import)", e.msg) }))
             .collect::<Vec<_>>()
     })?;
     let errors = check::js_target_errors(&items);

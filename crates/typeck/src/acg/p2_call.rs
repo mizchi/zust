@@ -581,8 +581,9 @@ impl Cx<'_> {
             }
         }
         // 受け手が `a.as_slice()` (a: 配列) なら `(&a[..])` にして呼び直す (`a.as_slice().len()`)
+        // (an array's `as_mut()` too: its one AsMut is `AsMut<[T]>`, `seed.as_mut().iter_mut()` in rand_core)
         if let Expr::MethodCall(ir, iname, _, iargs, _) = strip_paren(recv) {
-            if iargs.is_empty() && matches!(iname.as_str(), "as_slice" | "as_mut_slice") {
+            if iargs.is_empty() && matches!(iname.as_str(), "as_slice" | "as_mut_slice" | "as_mut") {
                 if let Some(Ty::Array(..)) = self.peek(ir).map(|t| self.strip_refs(t)) {
                     let r = (**ir).clone();
                     let ix = Expr::Index(Box::new(paren(r)), Box::new(full_range()), crate::parse::Span::default());
@@ -593,7 +594,7 @@ impl Cx<'_> {
             }
         }
         // `[T; N]::as_slice()` / `as_mut_slice()`: `&a[..]` / `&mut a[..]`
-        if margs.is_empty() && matches!(method, "as_slice" | "as_mut_slice") {
+        if margs.is_empty() && matches!(method, "as_slice" | "as_mut_slice" | "as_mut") {
             if let Some(Ty::Array(..)) = self.peek(recv).map(|t| self.strip_refs(t)) {
                 let ix = Expr::Index(Box::new(paren(recv.clone())), Box::new(full_range()), crate::parse::Span::default());
                 let e = Expr::Ref(method != "as_slice", Box::new(ix));
@@ -897,6 +898,38 @@ impl Cx<'_> {
                         return self.expr(&e, Some(t));
                     }
                     _ => {}
+                }
+            }
+        }
+        // `x.try_into()` into `Result<U, E>` where U implements TryFrom (`impl TryFrom<&str> for Alphabet`): `U::try_from(x)`,
+        // as std's blanket `impl<T, U: TryFrom<T>> TryInto<U> for T` gives it. Integers and slices are handled elsewhere
+        if method == "try_into" && margs.is_empty() {
+            // (a receiver's own try_into, also through references (`(&source).try_into()`), is that method)
+            let recv_own = match self.peek(recv).map(|t| self.strip_refs(t)) {
+                Some(Ty::Struct(sid)) => self.prog.method(sid, "try_into").is_some(),
+                _ => false,
+            };
+            let target = expected.or_else(|| self.lets.get(&(e as *const Expr as usize)).copied());
+            // (`let a: Alphabet = "x".try_into().unwrap()`: the target is the unwrap's, left in try_into_hint)
+            if !recv_own && target.is_none() {
+                if let Some(Ty::Struct(uid)) = self.try_into_hint {
+                    if let Some(id) = self.prog.method(uid, "try_from") {
+                        self.try_into_hint = None;
+                        let args: [&Expr; 1] = [recv];
+                        return self.call_fn(id, None, &args, None, None, SP);
+                    }
+                }
+            }
+            if !recv_own {
+                if let Some(Ty::Struct(rs)) = target {
+                    if self.prog.structs[rs as usize].name.starts_with("Result") {
+                        if let Some(&Ty::Struct(uid)) = self.prog.structs[rs as usize].args.first() {
+                            if let Some(id) = self.prog.method(uid, "try_from") {
+                                let args: [&Expr; 1] = [recv];
+                                return self.call_fn(id, None, &args, None, target, SP);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1618,6 +1651,31 @@ impl Cx<'_> {
         })
     }
 
+    /// The type arguments the bound of placeholder sid on trait tr writes (`FnLike<&'a isize, u8>`: `&isize`, `u8`),
+    /// each None where it is not a type this function knows
+    pub(crate) fn placeholder_bound_targs(&self, sid: u32, tr: &str) -> Option<Vec<Option<Ty>>> {
+        let bs = self.prog.structs[sid as usize].placeholder.as_ref()?;
+        let short = tr.split('<').next().unwrap_or(tr).trim();
+        let short = short.rsplit("::").next().unwrap_or(short);
+        let mut of = bs.iter().filter(|b| {
+            let n = b.split('<').next().unwrap_or(b).trim();
+            n == short || n.rsplit("::").next() == Some(short)
+        });
+        let b = of.next()?;
+        // (two bounds of the trait: which one a call takes is its arguments', not known here)
+        if of.next().is_some() || !b.contains('<') {
+            return None;
+        }
+        let f = crate::parse::parse_file(&format!("type __B = dyn {b};")).ok()?;
+        let Some(crate::parse::ItemKind::Type(_, _, _, Some(crate::parse::Ty::Dyn(dbs)))) = f.items.first().map(|i| &i.kind) else { return None };
+        let Some(crate::parse::Bound::Trait(_, p)) = dbs.first() else { return None };
+        let seg = p.segs.last()?;
+        Some(seg.args.iter().filter_map(|a| match a {
+            crate::parse::GArg::Ty(t) => Some(self.parse_ty(t).ok()),
+            _ => None,
+        }).collect())
+    }
+
     fn check_spawn_closure(&self, c: &Expr) -> R<()> {
         let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else { return Ok(()) };
         for n in crate::ast_closure::free_vars(strip_paren(c)) {
@@ -2250,6 +2308,20 @@ impl Cx<'_> {
                 }
             }
         }
+        // (a method of a placeholder's bound's trait (zustc check of a generic fn nothing calls): the trait's parameters
+        // the arguments did not give are the bound's arguments (`F: FnLike<&'a isize, &'a isize>` gives `R` of
+        // `fn call(&self, arg: A) -> R`))
+        if let (Some(tr), Some(Some(Ty::Struct(ps)))) = (sig.trait_of.as_deref(), sol.first().copied()) {
+            if self.prog.is_placeholder(ps) && sol.iter().skip(1).any(|x| x.is_none()) {
+                if let Some(targs) = self.placeholder_bound_targs(ps, tr) {
+                    for (i, t) in targs.into_iter().enumerate() {
+                        if let (Some(x @ None), Some(t)) = (sol.get_mut(1 + i), t) {
+                            *x = Some(t);
+                        }
+                    }
+                }
+            }
+        }
         // prelude の helper のダミーの型引数 `G` (呼ばれた分だけインスタンスにするためのもの) は ()
         for (i, g) in sig.generics.iter().enumerate() {
             if g.0 == "G" && sol[i].is_none() {
@@ -2707,9 +2779,11 @@ impl Cx<'_> {
                 if !seq {
                     return None;
                 }
+                // (a `&mut` one, `zip(dst)` with dst: &mut [u32]: its iter_mut, as IntoIterator for &mut [T] gives)
+                let it = if matches!(t, Ty::Ref(true, _)) { "iter_mut" } else { "iter" };
                 Some(match (t, strip_paren(a)) {
-                    (Ty::Ref(..), Expr::Ref(_, inner)) => mcall(paren((**inner).clone()), "iter", vec![]),
-                    (Ty::Ref(..), _) => mcall(paren((*a).clone()), "iter", vec![]),
+                    (Ty::Ref(..), Expr::Ref(_, inner)) => mcall(paren((**inner).clone()), it, vec![]),
+                    (Ty::Ref(..), _) => mcall(paren((*a).clone()), it, vec![]),
                     _ => mcall(paren((*a).clone()), "into_iter", vec![]),
                 })
             })
@@ -2904,8 +2978,18 @@ impl Cx<'_> {
             }
             // (also where a type parameter the call already knows is a `&mut` (`v.push(c.raw)` with v: `Vec<&mut T>`),
             // as rustc's coercion to the expected type)
-            if matches!(pt, Ty::Ref(true, _)) || matches!(self.prog.partial_subst(pt, &sol), Ty::Ref(true, _)) {
-                self.bk_reborrow_arg(a);
+            // (and where a `&` is: a shared reborrow, `pick(x, &b)` is `pick(&*x, &b)`)
+            // (without the region check, a result the signature says borrows from the argument holds the reborrow:
+            // `let r = pick(x, &b); *x = 1; use(r)` is E0506)
+            match (pt, self.prog.partial_subst(pt, &sol)) {
+                (Ty::Ref(m, _), _) | (_, Ty::Ref(m, _)) => {
+                    if let Some(ln) = self.bk_reborrow_arg(a, m) {
+                        if !self.rg.on && self.bk_ret_from(id, i + skip) {
+                            self.bk.src(borrowck::Src::Loan(ln));
+                        }
+                    }
+                }
+                _ => {}
             }
             // (a closure written where a bound wants `Fn` / `FnMut`: it is that, so its body moving out what it captures
             // by value (`|| { let s = val; }`) is E0507, at the move. Passed by name, it is E0525 (above))
@@ -3090,6 +3174,25 @@ impl Cx<'_> {
         if self.prog.names[id as usize] == "__core_transmute" && sig.params.len() == 1 {
             self.check_transmute(sig.params[0], sig.ret, span)?;
         }
+        // (`size_of_val(s)` / `align_of_val(s)` of a slice or str: the length times the element's size, the element's
+        //  alignment; the prelude's `size_of::<T>()` has no length)
+        if matches!(self.prog.names[id as usize].as_str(), "__core_size_of_val" | "__core_align_of_val") && vals.len() == 1 {
+            let el = match sig.params[0] {
+                Ty::Ref(_, Ty::Slice(e)) => Some(**e),
+                Ty::Ref(_, Ty::Str) => Some(Ty::U8),
+                _ => None,
+            };
+            if let Some(e) = el {
+                let (es, ea) = self.prog.size_align(e);
+                if self.prog.names[id as usize] == "__core_align_of_val" {
+                    return Ok((Some(self.b.ins().iconst(types::I64, ea as i64)), Ty::Usize));
+                }
+                let fat = vals[0].0;
+                let n = self.b.ins().load(types::I64, mf(), fat, 8);
+                let k = self.b.ins().iconst(types::I64, es as i64);
+                return Ok((Some(self.b.ins().imul(n, k)), Ty::Usize));
+            }
+        }
         let mut cv = vec![];
         let sret = if is_sret(&sig) {
             let a = match hint {
@@ -3120,6 +3223,8 @@ impl Cx<'_> {
                 }
                 // (`&mut x` for a `*mut T` parameter)
                 (Ty::Ref(m1, a), Ty::Ptr(m2, b)) if a == b && (m1 || !m2) && !a.is_fat() => (v, pt),
+                // (a `&mut [T]` for a generic `&T`, `size_of_val(iv_dst)`: the same value, thin or fat)
+                (Ty::Ref(true, a), Ty::Ref(false, b)) if a == b => (v, pt),
                 _ => (v, t),
             };
             self.same(sp, t, pt)?;

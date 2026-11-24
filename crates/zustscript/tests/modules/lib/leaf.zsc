@@ -1,0 +1,5 @@
+// (a module in another directory: an importer elsewhere imports its types from ./lib/leaf.js)
+export type Leaf = { v: i32 }
+export fn mk(v: i32) -> Leaf { Leaf { v } }
+type Props<T> = { label: T }
+export fn Tag(props: Props<String>) -> Jsx { <b>{props.label}</b> }

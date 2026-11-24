@@ -801,6 +801,7 @@ impl Checker {
                     }
                     ok
                 }
+                "hole" => r == Ty::Str || r == Ty::Bool || self.numeric(&r),
                 "child" => match &r {
                     Ty::Jsx | Ty::Str => true,
                     t if self.numeric(t) => true,
@@ -817,6 +818,7 @@ impl Checker {
                     "num" | "div" => format!("expected a number (i32, u32, i64, f64), found {s}"),
                     "add" => format!("`+` takes numbers or String, found {s}"),
                     "ord" => format!("cannot compare {s} with `<`"),
+                    "hole" => format!("a `${{..}}` of a template string takes a String, a number or a bool, not {s}"),
                     "eq" => format!("`==` compares values (numbers, strings, bools, and arrays, records, enums and tuples of them, by content), not {s}"),
                     _ => format!("a JSX child is Jsx, String, a number or an Array of Jsx / String, found {s}"),
                 };
@@ -1483,6 +1485,15 @@ impl Checker {
                 Ty::Array(Box::new(et))
             }
             EK::Tuple(xs) => Ty::Tuple(xs.iter().map(|x| self.infer(x, None)).collect()),
+            // (a hole is a string, or what has `to_string`: a number or a bool, written as `to_string` writes it.
+            // Checked when the function's types are known: a closure's parameter may be decided by a later argument)
+            EK::Interp(_, holes) => {
+                for h in holes {
+                    let t = self.infer(h, None);
+                    self.deferred.push((h.pos, h.id, "hole", t));
+                }
+                Ty::Str
+            }
             EK::Jsx(j) => {
                 self.jsx(j);
                 Ty::Jsx
@@ -1524,10 +1535,17 @@ impl Checker {
     fn jsx(&mut self, j: &Jsx) {
         let component = j.tag.chars().next().is_some_and(|c| c.is_uppercase());
         if component {
-            match self.info.fns.get(&j.tag).map(|s| (s.args.clone(), s.ret.clone(), s.generics.is_empty())) {
+            // (a component may be imported from another module: an `extern` of its JS)
+            let sig = self.info.fns.get(&j.tag).or_else(|| self.info.externs.get(&j.tag).map(|e| &e.0));
+            match sig.map(|s| (s.args.clone(), s.ret.clone(), s.generics.is_empty())) {
                 Some((args, ret, true)) if args.len() <= 1 && ret == Ty::Jsx => {
                     let fields = match args.first() {
-                        Some(Ty::Named(n, _)) if self.info.records.contains_key(n) => self.info.records[n].fields.clone(),
+                        // (a generic record of props: its fields at the component's type arguments)
+                        Some(Ty::Named(n, targs)) if self.info.records.contains_key(n) => {
+                            let r = &self.info.records[n];
+                            let m: HashMap<String, Ty> = r.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                            r.fields.iter().map(|(f, t)| (f.clone(), Self::subst_params(t, &m))).collect()
+                        }
                         None => vec![],
                         _ => {
                             self.err(j.pos, format!("component `{}` must take one record of props", j.tag));
@@ -1801,7 +1819,7 @@ impl EffWalk<'_> {
                     out.extend(self.expr(b));
                 }
             }
-            EK::Array(xs) | EK::Tuple(xs) => {
+            EK::Array(xs) | EK::Tuple(xs) | EK::Interp(_, xs) => {
                 for x in xs {
                     out.extend(self.expr(x));
                 }
@@ -1958,7 +1976,7 @@ pub fn subexprs(e: &Expr) -> Vec<&Expr> {
                 v.push(b);
             }
         }
-        EK::Array(xs) | EK::Tuple(xs) => v.extend(xs),
+        EK::Array(xs) | EK::Tuple(xs) | EK::Interp(_, xs) => v.extend(xs),
         EK::Jsx(j) => {
             v.extend(j.attrs.iter().map(|a| &a.1));
             for c in &j.children {

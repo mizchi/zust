@@ -283,7 +283,9 @@ pub struct SigSyn {
     /// `unsafe fn`, or a fn of an `extern` block (calling it needs `unsafe`, E0133)
     pub is_unsafe: bool,
     /// Which reference arguments the return value may borrow from (borrow checking): bit i for argument i (self
-    /// first), bit 63 set when known. 0: not known (any of them)
+    /// first), bit 63 set when known. 0: not known (any of them). With bit 62 instead (OPAQUE_FROM), a result
+    /// `impl Trait`: bits 0..31 the arguments it may borrow from by edition 2024's rules (every lifetime of the
+    /// arguments, or those of its `use<..>`), bits 31..62 by 2021's (the lifetimes its bounds name)
     pub ret_from: u64,
     /// The regions of the signature (None: it writes no reference and no lifetime, so every region in it is elided)
     pub regions: Option<Box<RSigSyn>>,
@@ -361,6 +363,9 @@ pub struct RImplSyn {
     /// names another item may relate
     pub wf_pairs: Vec<(String, String)>,
     pub wf_vague: Vec<String>,
+    /// The codes of the lifetimes an impl's trait path writes as its arguments (`impl<'a, 'd: 'a> Visitor<'d> for
+    /// &'a ()`: 'd's), in order: a projection that selects the impl gives them those it writes there
+    pub trait_lts: Vec<u8>,
 }
 
 /// enum のバリアント (要約に保存する形)
@@ -431,6 +436,9 @@ pub struct Summary {
     /// impl ヘッダの型パラメータと self 型 (`impl<T> Option<T>`)
     pub impl_generics: Vec<(String, Vec<String>)>,
     pub impl_self_ty: Option<TySyn>,
+    /// The self type is written with a path, `impl From<TokenStream> for proc_macro::TokenStream`: another type than
+    /// a same-named one of this module, though the summary's name may be the last segment
+    pub impl_self_path: bool,
     /// The type arguments of the trait of an `impl Trait<A, B> for S` header
     pub impl_trait_args: Vec<TySyn>,
     /// The header's trait path writes a lifetime (`impl Tr<&'a u8>`, `impl Tr<&'static u8>`): its regions are not
@@ -539,6 +547,8 @@ pub const CONST_LEN_BASE: u32 = 0xFFFF_FF00;
 /// 戻り値位置の `impl Trait` の仮の型名
 pub const IMPL_RET: &str = "impl Trait";
 /// クロージャでない `impl Trait` の戻り値 (`-> impl Iterator<Item = u32>`): 本体の型推論で決める
+/// SigSyn::ret_from's mark for a result `impl Trait`
+pub const OPAQUE_FROM: u64 = 1 << 62;
 pub const OPAQUE_RET: &str = "impl Trait (opaque)";
 /// `-> Option<impl Debug>`: `App(OPAQUE_NESTED, [the declared type with each impl Trait as _])`. The whole type comes
 /// from the body, as for OPAQUE_RET; the declared type is resolved only for the names it does not find

@@ -462,6 +462,10 @@ impl Analysis {
             let mut h = KeyHasher::new();
             h.add(&self.prog.assocs[i].name);
             h.add(&self.items[ii as usize].hash);
+            // (and its impl's header: the `'d: 'a` it declares are required where a projection selects it)
+            if let ItemKind::ImplMember(hd) = self.items[ii as usize].kind {
+                h.add(&self.items[hd as usize].hash);
+            }
             let k = h.finish();
             all ^= k;
             if let Some(c) = self.crate_of_item(ii as usize) {
@@ -1166,6 +1170,40 @@ impl Session2 {
                                     format!("{line}:1: the parameter type `{s}` may not live long enough (E0{})", if x == "'static" { 310 } else { 309 })
                                 });
                             }
+                        }
+                    }
+                }
+            }
+        }
+        // (an impl's associated type's value against the lifetime bounds its trait's declaration gives it (E0477))
+        {
+            let decl: crate::fxhash::FxMap<(&str, &str), Vec<String>> = sums
+                .iter()
+                .flat_map(|sm| sm.assoc_bounds.iter())
+                .filter_map(|(t, n, bs)| {
+                    let lb: Vec<String> = bs.iter().filter(|b| b.starts_with('\'')).cloned().collect();
+                    (!lb.is_empty()).then_some(((t.as_str(), n.as_str()), lb))
+                })
+                .collect();
+            if !decl.is_empty() {
+                let aliases: crate::fxhash::FxSet<&str> = sums.iter().flat_map(|sm| sm.aliases.iter().map(|a| a.0.as_str())).collect();
+                let is_alias = |n: &str| aliases.contains(n) || aliases.iter().any(|a| a.rsplit("::").next() == Some(n));
+                // (the structs and enums whose declarations bound their lifetimes (`struct Static<'a: 'static>`))
+                let bounded: crate::fxhash::FxSet<&str> = sums
+                    .iter()
+                    .filter(|sm| sm.adt_regions.as_ref().is_some_and(|r| !r.outlives.is_empty()))
+                    .flat_map(|sm| sm.structs.iter().map(|x| x.0.as_str()).chain(sm.enums.iter().map(|x| x.0.as_str())))
+                    .collect();
+                let lt_bounded = |n: &str| bounded.contains(n) || bounded.iter().any(|a| a.rsplit("::").next() == Some(n));
+                for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
+                    let ItemKind::ImplMember(h) = it.kind else { continue };
+                    let Some(tr) = sums.get(h as usize).and_then(|hs| hs.impl_trait.as_deref()) else { continue };
+                    let short = tr.split('<').next().unwrap_or(tr).trim();
+                    let short = short.rsplit("::").next().unwrap_or(short);
+                    for a in &sm.assocs {
+                        let Some(bs) = decl.get(&(short, a.name.as_str())) else { continue };
+                        if let Some((x, v)) = crate::ast_summary::assoc_value_unmet(&src, &items[h as usize], it, bs, &is_alias, &lt_bounded) {
+                            return Err(format!("{}:1: the type `{v}` does not fulfill the required lifetime (it must outlive `{x}`) (E0477)", it.line));
                         }
                     }
                 }
@@ -5993,11 +6031,13 @@ impl Session2 {
 fn hoisted_err_holds(msg: &str) -> bool {
     let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword"];
     let unused = msg.starts_with("function `") && msg.contains("is never used");
+    // (an impl's associated type against its trait's bound (E0477): an impl in a fn body is hoisted)
+    let unmet = msg.starts_with("the type `") && msg.contains("does not fulfill the required lifetime");
     // (a derive's field or a field's type without the bound it needs (derive_field_error, wf_error): a local
     // `#[derive(Eq)] struct S(f64);` too)
     let bounds = ["the trait bound `", "binary operation `==` cannot be applied to type `", "can't compare `"].iter().any(|n| msg.starts_with(n))
         || (msg.starts_with('`') && (msg.contains("` doesn't implement `Debug`") || msg.contains("` is not an iterator")));
-    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused || bounds)
+    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused || bounds || unmet)
 }
 
 /// e with its leading line `L:` made l
@@ -6320,6 +6360,32 @@ fn moved_msg_lines(msg: &str, moved: &[(usize, usize)], user_lines: usize) -> St
     out
 }
 
+/// A bound whose text names a lifetime other than those a `for<..>` in it binds (a placeholder's bound is written
+/// without its own `for<'a>`: `FnLike<&'a isize, &'a isize>` names 'a, `Get<for<'b> fn(&'b u32)>` none)
+fn bound_names_lt(b: &str) -> bool {
+    let nested = acg::regionck::nested_binder_lts(b);
+    let cs: Vec<(usize, char)> = b.char_indices().collect();
+    let mut k = 0;
+    while k < cs.len() {
+        if cs[k].1 == '\'' {
+            let from = cs[k].0;
+            let mut j = k + 1;
+            while j < cs.len() && (cs[j].1.is_alphanumeric() || cs[j].1 == '_') {
+                j += 1;
+            }
+            let to = cs.get(j).map_or(b.len(), |c| c.0);
+            let l = &b[from..to];
+            if l.len() > 1 && !nested.contains(&l) {
+                return true;
+            }
+            k = j;
+        } else {
+            k += 1;
+        }
+    }
+    false
+}
+
 /// The program's generic fns (not a trait's default methods, not a closure's body, not a dependency's) that no
 /// instance was requested of: one instance of each with a placeholder for each type parameter (Program::placeholder),
 /// as `zustc check` checks every fn. The ids requested
@@ -6363,6 +6429,12 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         let calls_bound = sig.generics.iter().flat_map(|(_, bs)| bs.iter()).any(|b| {
             // (`Fn(..)` / `FnMut(..)` / `FnOnce(..)`: a call of the parameter is checked against the bound itself)
             if matches!(b.as_str(), "Copy" | "Sized" | "?Sized" | "Send" | "Sync" | "Unpin") || crate::ast_summary::parse_fn_bound(b).is_some() {
+                return false;
+            }
+            // (nor where the bound's arguments name lifetimes (`F: FnLike<&'a isize, &'a isize>`): the call's types are
+            // of them. Not those a type in them binds (`Get<for<'b> fn(&'b u32) -> &'b u32>`): a local the call's result
+            // is held in takes them as its own regions, not bound ones)
+            if bound_names_lt(b) {
                 return false;
             }
             let tr = b.split('<').next().unwrap_or(b).trim();

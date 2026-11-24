@@ -625,6 +625,40 @@ impl<'a> Slots<'a> {
     /// Declared outlives relations of generics: `'a: 'b` and `T: 'a`, inline or in the where clause
     pub fn bounds(&mut self, g: &Generics, outlives: &mut Vec<(u8, u8)>, ty_outlives: &mut Vec<(String, u8)>) {
         let mut add = |me: &mut Self, lhs: &PTy, bs: &[Bound]| {
+            // (a type parameter's associated type, `T::Output: 'b` or `<T as Tr<'a>>::Output: 'b`: by the name
+            // `T::Output`, the trait's arguments aside (a placeholder's associated type outlives it, regionck))
+            let proj = match lhs {
+                PTy::Path(None, p) => match p.segs.as_slice() {
+                    [t, n] if t.args.is_empty() && n.args.is_empty() && !t.name.starts_with('\'') => Some(format!("{}::{}", t.name, n.name)),
+                    _ => None,
+                },
+                PTy::Path(Some(q), p) => match (&**q, p.segs.last()) {
+                    (PTy::Path(None, qp), Some(n)) if qp.segs.len() == 1 && qp.segs[0].args.is_empty() && n.args.is_empty() => Some(format!("{}::{}", qp.segs[0].name, n.name)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(name) = proj {
+                for b in bs {
+                    if let Bound::Lifetime(l) = b {
+                        let c = me.code(Some(l));
+                        ty_outlives.push((name.clone(), c));
+                    }
+                }
+                return;
+            }
+            // (another type bounded by a lifetime (`StrategyFor<A>: 'static` of a type alias): the mark `#?`, as what
+            // the function may assume is not all read)
+            let plain = matches!(lhs, PTy::Path(None, p) if matches!(p.segs.as_slice(), [s] if s.args.is_empty() || s.name.starts_with('\'')));
+            if !plain {
+                for b in bs {
+                    if let Bound::Lifetime(l) = b {
+                        let c = me.code(Some(l));
+                        ty_outlives.push(("#?".to_string(), c));
+                    }
+                }
+                return;
+            }
             let PTy::Path(None, p) = lhs else { return };
             let [s] = p.segs.as_slice() else { return };
             for b in bs {
@@ -733,7 +767,7 @@ pub fn hdr_regions(g: &Generics, self_ty: Option<&PTy>) -> Option<Box<RImplSyn>>
     if !s.any && outlives.is_empty() && ty_outlives.is_empty() {
         return None;
     }
-    Some(Box::new(RImplSyn { lts: s.lts, self_slots, outlives, ty_outlives, free: vec![], wf_pairs: vec![], wf_vague: vec![] }))
+    Some(Box::new(RImplSyn { lts: s.lts, self_slots, outlives, ty_outlives, free: vec![], wf_pairs: vec![], wf_vague: vec![], trait_lts: vec![] }))
 }
 
 #[cfg(test)]

@@ -89,6 +89,8 @@ pub enum EK {
     Perform(Option<String>, String, Vec<Expr>),
     /// `handle body { Log(s), k => .. }`: a deep handler; `k` resumes the body once
     Handle(Box<Expr>, Vec<HArm>),
+    /// `` `hi ${name}, ${n}` ``: the literal parts (one more than the holes) and the holes (strings, numbers, bools)
+    Interp(Vec<String>, Vec<Expr>),
 }
 
 #[derive(Clone, Debug)]
@@ -240,6 +242,9 @@ pub struct TsFrom {
     pub text: String,
     /// an enum's values in JS: TS's, not zustscript's `{ TAG, _0 }`
     pub repr: Option<TsEnum>,
+    /// a type of another zustscript module: that module's file (canonical). `path` is then the specifier of its JS
+    /// from the module that uses the type (`./lib/leaf.js`), written again at each import
+    pub zsc: Option<std::path::PathBuf>,
 }
 
 /// How the values of an enum read from a TS union look in JS (they are TS's own)
@@ -258,7 +263,9 @@ pub enum Item {
     /// (`from`: read from a TS file by an `import type`, see tsimport.rs)
     Record { name: String, params: Vec<String>, fields: Vec<(String, TyS)>, pos: Pos, from: Option<TsFrom> },
     /// `import type { User, Post } from "./model.ts";` (replaced by the records before checking, see tsimport.rs)
-    ImportType { names: Vec<(String, Pos)>, from: String, pos: Pos },
+    /// `import { greet, Shape } from "./lib.zsc";` (`values`: functions too; replaced by the types and `extern`s of
+    /// the other module before checking, see zscimport.rs)
+    ImportType { names: Vec<(String, Pos)>, from: String, values: bool, pos: Pos },
     /// (a variant with `-> R` is an effect operation)
     Enum { name: String, params: Vec<String>, variants: Vec<(String, Vec<TyS>, Option<TyS>)>, pos: Pos, from: Option<TsFrom> },
     /// (bounds: `T: Num` / `T: Integer` / `T: Float`; a function with one is monomorphized per numeric type)

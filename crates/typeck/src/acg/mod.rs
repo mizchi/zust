@@ -1717,7 +1717,11 @@ impl Cx<'_> {
             // (an `impl Trait` result of a fn with no region in its signature: its hidden type captures none, its
             // regions are 'static)
             let opaque = n == 0 && !sig.is_generic() && self.prog.opaque.contains(&self.rg.base) && regionck::count(self.prog, sig.ret, 0).is_some_and(|c| c > 0);
-            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) && !opaque {
+            // (a placeholder instance (zustc check of a generic fn nothing calls) where a struct or an enum of the program
+            // bounds a type parameter by 'static: its types' well-formedness may need T: 'static (`None::<Static<T>>`
+            // with `struct Static<T: 'static>(T)`, E0310))
+            let static_bounds = n == 1 && regionck::placeholder_static_bounds(self.prog, &self.rg.inst_args);
+            if n < 2 && !(n == 1 && regionck::has_dyn(self.prog, sig.ret, 0)) && !opaque && !static_bounds {
                 self.rg.on = false;
                 let se = f.sig.recv.as_ref().is_some_and(|r| r.starts_with('&'));
                 self.rg.late = Some((se, f.sig.recv.is_some() && !se));
@@ -1767,7 +1771,36 @@ impl Cx<'_> {
                 // (a parameter whose type is a projection the summary does not follow (`_wf: <&'a u8 as Tr>::Ty`): its
                 // impl's associated type's value, with the regions its self type writes; what it implies is known
                 // (implied-bounds/assoc-ty-wf-used-to-get-assoc-ty.rs))
+                // (the where clauses on a type that is no type parameter (`&'max G: Get`), with their trees as written:
+                // a call whose bound only such a clause meets takes its regions)
+                if self.rg.on {
+                    for (subj, bs) in &f.sig.generics.preds {
+                        if matches!(subj, crate::parse::Ty::Path(None, p) if p.segs.len() == 1) {
+                            continue;
+                        }
+                        let trs: Vec<String> = bs.iter().filter_map(|b| if let crate::parse::Bound::Trait(false, p) = b { p.segs.last().map(|s| s.name.clone()) } else { None }).collect();
+                        if trs.is_empty() || !crate::regions::names_lt(subj) {
+                            continue;
+                        }
+                        let Ok(t) = self.parse_ty(subj) else { continue };
+                        let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                        let mut codes = vec![];
+                        sl.slots(subj, false, &mut codes);
+                        let lts = self.rg.lts.clone();
+                        let prog = self.prog;
+                        if let Some(tr) = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var()) {
+                            self.rg.where_trees.push((t, tr, trs));
+                        }
+                    }
+                }
                 if self.rg.on && !self.prog.assoc_regions.is_empty() {
+                    // (and a projection a parameter's type or the result's is requires what its impl's header declares
+                    // of the impl's lifetimes, reported at the type)
+                    for pty in f.sig.params.iter().map(|x| &x.1).chain(f.sig.ret.as_ref()) {
+                        if let Some(sp) = crate::wf::pos_of(pty) {
+                            self.rg_proj_wf(pty, sp);
+                        }
+                    }
                     for (k, (p, pty)) in f.sig.params.iter().enumerate() {
                         let (crate::parse::Ty::Path(Some(_), _), Some(&(loc, t))) = (pty, ps.get(k + f.sig.recv.is_some() as usize)) else { continue };
                         let _ = p;
@@ -2198,6 +2231,10 @@ impl Cx<'_> {
                         let (mut v, mut t) = self.expr(init, exp)?;
                         if t == Ty::Never {
                             diverged = true;
+                            // (the annotation's type is well formed all the same: `let _: &'a S<'b> = loop {};`)
+                            if let Some(at) = ann_ty.as_ref() {
+                                self.rg_let_uninit(None, at, *let_at);
+                            }
                             continue;
                         }
                         if let Some(a) = full.filter(|&a| a != t) {
@@ -2240,8 +2277,10 @@ impl Cx<'_> {
                                     Some(Ty::Ref(m, intern(Ty::Slice(*e))))
                                 }
                                 // (only an instance of the annotation: `Box<_>` is not filled with a `bool`)
+                                // (a reference's mutability as written: inference does not unify `&mut T` with the `&T` of
+                                // its initializer (`let y: &mut [_] = &x[..];` is a mismatch))
                                 Some(inf) if has_hole(self.prog, a) && !has_hole(self.prog, inf) && !self.prog.has_param(inf) && std::mem::discriminant(&inf) == std::mem::discriminant(&a)
-                                    && !matches!((inf, a), (Ty::Struct(x), Ty::Struct(y)) if self.prog.base_of(x) != self.prog.base_of(y)) => Some(inf),
+                                    && !matches!((inf, a), (Ty::Struct(x), Ty::Struct(y)) if self.prog.base_of(x) != self.prog.base_of(y)) => Some(written_muts(inf, a)),
                                 _ => Some(a),
                             }
                         }
@@ -2369,10 +2408,11 @@ impl Cx<'_> {
                     let plain0 = std::mem::replace(&mut self.bk.plain_init, plain);
                     let r = self.expr(init, ann.or(hint));
                     self.bk.plain_init = plain0;
-                    // (`let b: &mut T = a;` with a: `&mut T`: a coercion site, b reborrows `*a` (rustc's `&mut *a`), not
-                    // a copy of a: a use of `*a` while b lives conflicts)
-                    if r.is_ok() && ann_ty.is_some() && matches!(ann, Some(Ty::Ref(true, _))) && matches!(strip_paren(init), Expr::Path(None, _)) {
-                        self.bk_reborrow_let(init);
+                    // (`let b: &mut T = a;` / `let b: &T = s.f;` with a place of a `&mut T`: a coercion site, b reborrows
+                    // what it points to (rustc's `&mut *a` / `&*s.f`), not a copy or a move of it: a use of `*a` while b
+                    // lives conflicts)
+                    if let (true, Some(w @ Ty::Ref(..))) = (r.is_ok() && ann_ty.is_some(), ann) {
+                        self.bk_reborrow_let(init, w);
                     }
                     // (`let v: &T = x.borrow().0;` with the field a `&mut T`: a coercion site, v reborrows `*x.borrow().0`
                     // through the temporary guard, which goes away at the end of the statement (E0716 when v is used
@@ -2403,10 +2443,23 @@ impl Cx<'_> {
                                 } else {
                                     clif_ty(a).map(|ct| if ct == types::I128 { self.int_const(Ty::I128, 0) } else if ct.is_float() { if ct == types::F64 { self.b.ins().f64const(0.0) } else { self.b.ins().f32const(0.0) } } else { self.b.ins().iconst(ct, 0) })
                                 };
-                                self.bind(name, a, v);
+                                self.bind(name.clone(), a, v);
+                                // (and the annotation's type is well formed, as with any initializer:
+                                // `let _: &'a S<'b> = loop {};` needs 'b: 'a)
+                                if let Some(at) = ann_ty.as_ref() {
+                                    self.rg_let_uninit(Some(&name), at, *let_at);
+                                }
                             }
-                            None => self.bind(name, Ty::Never, None),
+                            None => {
+                                // (the annotation's type is well formed here too, a type that needs Drop
+                                // (`let x: Box<&'a S<'b>> = loop {};`): its tree is not the binding's, which has none)
+                                if let Some(at) = ann_ty.as_ref() {
+                                    self.rg_let_uninit(None, at, *let_at);
+                                }
+                                self.bind(name, Ty::Never, None)
+                            }
                         }
+                        self.rg.let_sp = let_sp0;
                         continue;
                     }
                     // (an annotation with holes, of another struct than the value's: `let x: Foo<_> = Bar::<usize>(..)`. No
@@ -2682,6 +2735,12 @@ impl Cx<'_> {
             if m == "as_ref" && a.is_empty() {
                 if let Some(t) = self.as_ref_ty(r, None) {
                     return Some(t);
+                }
+            }
+            // (an array's as_mut: `&mut [T]`, its one AsMut)
+            if m == "as_mut" && a.is_empty() {
+                if let Some(Ty::Array(el, _)) = self.peek(r).map(|t| self.strip_refs(t)) {
+                    return Some(Ty::Ref(true, intern(Ty::Slice(el))));
                 }
             }
         }
@@ -3165,5 +3224,15 @@ pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
         Pat::Struct(_, fs, _) => fs.iter().any(|f| pat_binds_ref_mut(&f.1)),
         Pat::Ref(_, x) => pat_binds_ref_mut(x),
         _ => false,
+    }
+}
+
+/// inf with the mutabilities of the references a writes where inf has references too (`&[i32]` for `&mut [_]`:
+/// `&mut [i32]`)
+fn written_muts(inf: Ty, a: Ty) -> Ty {
+    match (inf, a) {
+        (Ty::Ref(_, i), Ty::Ref(m, j)) => Ty::Ref(m, intern(written_muts(*i, *j))),
+        (Ty::Ptr(_, i), Ty::Ptr(m, j)) => Ty::Ptr(m, intern(written_muts(*i, *j))),
+        _ => inf,
     }
 }

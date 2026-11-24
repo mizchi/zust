@@ -1,0 +1,2 @@
+// expect: a float in a template string (JS and Rust format floats differently)
+@wasm export fn f(x: f64) -> String { `x = ${x}` }

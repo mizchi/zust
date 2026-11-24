@@ -3712,3 +3712,353 @@ fn part22_local_closure_cast() {
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
     assert_eq!(check("fn main() {\n    let c = |_: &u32| {};\n    let f = c as fn(&u32);\n    f(&1);\n    let d = |_: &'static u32| {};\n    let g = d as fn(&'static u32);\n    g(&1);\n}\n"), vec![]);
 }
+
+#[test]
+fn part23_placeholder_outlived_from_outside() {
+    // (a closure's region from outside exempts only a placeholder it is known to outlive: `&'b u32` beside `&'a u32`
+    // implies nothing of 'b, so returning a capture for every 'b needs 'x: 'static)
+    one_error("fn take<'a, F>(_x: &'a u32, _f: F) where F: for<'b> FnOnce(&'b u32, &'a u32) -> &'b u32 {}\nfn bad<'x>(x: &'x u32) {\n    take(x, |_, _| x);\n}\nfn main() {}\n", 3);
+}
+
+#[test]
+fn part23_placeholder_bound_type_args() {
+    // (a method of a placeholder's bound whose trait's type arguments name lifetimes: the call's argument is of the
+    // bound's `&'a isize` (E0597), and the result of a `for<'a>` bound's holds what the argument borrows (E0506))
+    let src = |b: &str| format!("trait FnLike<A, R> {{ fn call(&self, arg: A) -> R; }}\nfn c<'a, F: FnLike<{b}>>(f: F) {{\n    let x: isize = 3;\n    let y = f.call(&x);\n    drop(y);\n}}\nfn main() {{}}\n");
+    for b in ["&'a isize, &'a isize", "&'a isize, u8"] {
+        let d = check(&src(b));
+        assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("does not live long enough"), "{b}: {d:?}");
+    }
+    let d = check("trait FnLike<A, R> { fn call(&self, arg: A) -> R; }\nfn call_repeatedly<F>(f: F) where F: for<'a> FnLike<&'a isize, &'a isize> {\n    let mut x = 3;\n    let y = f.call(&x);\n    x = 5;\n    drop(y);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `x` because it is borrowed"), "{d:?}");
+    assert_eq!(check("trait FnLike<A, R> { fn call(&self, arg: A) -> R; }\nfn a<'a, F: FnLike<&'a isize, &'a isize>>(f: F, x: &'a isize) -> &'a isize {\n    f.call(x)\n}\nfn b<F>(f: F) where F: for<'a> FnLike<&'a isize, &'a isize> {\n    let mut x: isize = 3;\n    f.call(&x);\n    f.call(&x);\n    x = 5;\n    let _ = x;\n}\nfn c<'z, F: FnLike<&'z isize, u8>>(f: F) -> u8 {\n    static S: isize = 1;\n    f.call(&S)\n}\nfn take<'a, F>(_x: &'a u32, _f: F) where F: for<'b> FnOnce(&'b u32, &'a u32) -> &'b u32 {}\nfn d<'x>(x: &'x u32) {\n    take(x, |y, _| y);\n}\nfn e<'a>(_: &'a i32, _: impl FnOnce(&mut &mut &'a i32)) {}\nfn g<'a>(p: &'a i32) { e(p, |x: &mut &mut &'a i32| { let _: &mut &mut &'a i32 = x; }) }\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part23_diverging_let_annotation_wf() {
+    // (a `let` whose initializer diverges: its annotation's type is well formed all the same, a named binding and `_`
+    // (regions/regions-outlives-projection-container-wc.rs))
+    let d = check("struct S<'b>(&'b ());\nfn f<'a, 'b>() {\n    let _: &'a S<'b> = loop {};\n}\nstruct W<T>(T);\nfn g<'a, 'b>() {\n    let _: &'a W<S<'b>> = loop {};\n}\nfn h<'a, 'b>() {\n    let _x: &'a &'b () = panic!();\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![3, 7, 10] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
+    assert_eq!(check("struct S<'b>(&'b ());\nfn f<'a, 'b: 'a>() {\n    let _: &'a S<'b> = loop {};\n}\nfn g<'a, 'b: 'a>() {\n    let _x: &'a &'b () = panic!();\n}\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part23_alias_param_twice() {
+    // (an annotation that is a type alias with a hole, its parameter twice in it: one tree for both occurrences
+    // (nll/relate_tys/var-appears-twice.rs). Under `Cell` they are invariant: `&'z u32` must be `&'static u32`)
+    let d = check("use std::cell::Cell;\ntype DoubleCell<A> = Cell<(A, A)>;\nfn make_cell<'b>(x: &'b u32) -> Cell<(&'static u32, &'b u32)> { panic!() }\nfn f<'z>(z: &'z u32) {\n    let _x: DoubleCell<_> = make_cell(z);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (a covariant alias, and the parameter written: accepted, as in rustc)
+    assert_eq!(check("use std::cell::Cell;\ntype DoubleCell<A> = Cell<(A, A)>;\ntype DoublePair<A> = (A, A);\nfn make_cell<'b>(x: &'b u32) -> Cell<(&'static u32, &'b u32)> { panic!() }\nfn make_pair<'b>(x: &'b u32) -> (&'static u32, &'b u32) { panic!() }\nfn f<'z>(z: &'z u32) {\n    let b = 44;\n    let _y: DoublePair<_> = make_pair(&b);\n    let _w: DoubleCell<&'static u32> = make_cell(&22);\n    let _v: DoublePair<_> = make_pair(z);\n}\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part23_review() {
+    // (a diverging `let` whose annotated type needs Drop: well formed too)
+    let d = check("struct S<'b>(&'b ());\nfn f<'a, 'b>() {\n    let _x: Box<&'a S<'b>> = loop {};\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (two bounds of one trait: the bound a call takes is not known, its arguments' regions are not taken (rustc
+    // accepts it))
+    assert_eq!(check("trait Take<A> { fn take(&self, a: A); }\nfn g<'a, 'b, F: Take<&'a u32> + Take<&'b u64>>(f: F, x: &'b u64) {\n    f.take(x);\n}\nfn main() {}\n"), vec![]);
+    // (a bound whose argument binds its own lifetimes (`for<'b> fn(&'b u32)`), and a literal that meets the method's
+    // types: accepted, as in rustc)
+    assert_eq!(check("trait Get<A> { fn get(&self) -> A; }\nfn h<'z, F: Get<for<'b> fn(&'b u32) -> &'b u32>>(f: F, z: &'z u32) -> &'z u32 {\n    let p = f.get();\n    let a = 1;\n    let _ra = p(&a);\n    p(z)\n}\nfn k<'z, F: Get<&'z u32>>(f: F) {\n    let a = 1;\n    let r = f.get();\n    let _ = *r == a;\n}\nfn main() {}\n"), vec![]);
+    // (and a trait whose method writes its parameter's type: the literal's local is of it; main had a false E0308)
+    assert_eq!(check("trait Get<'a> { fn get(&self, arg: &'a isize) -> &'a isize; }\nfn c<F>(f: F) where F: for<'a> Get<'a> {\n    let x = 3;\n    let y = f.get(&x);\n    drop(y);\n}\nfn main() {}\n"), vec![]);
+    // (`for` in a type's name (`Bufferfor<'a>`) binds nothing: the bound names 'a, and the fn's body is checked (its
+    // double move, E0382 in rustc))
+    let d = check("struct Bufferfor<'a>(&'a u32);\ntrait Get<A> { fn get(&self) -> A; }\nfn bad<'a, F: Get<Bufferfor<'a>>>(f: F) {\n    f.get();\n    let _x = f;\n    let _y = f;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("use of moved value"), "{d:?}");
+}
+
+#[test]
+fn part24_static_bound_adt_wf() {
+    // (a struct that bounds its type parameter by 'static: a type written in a generic fn nothing calls needs
+    // T: 'static (E0310), in an annotation and in a path's type arguments
+    // (regions/wf-bound-region-in-local-issue-115175.rs))
+    let d = check("struct Static<T: 'static>(T);\nfn a<T>() {\n    let _: Option<Static<T>> = None;\n}\nfn b<T>() {\n    let _ = None::<Static<T>>;\n}\nfn c<T>() {\n    let _ = Vec::<Static<T>>::new();\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![3, 6, 9] && d.iter().all(|x| x.1.contains("E0310")), "{d:?}");
+    assert_eq!(check("struct Static<T: 'static>(T);\nfn d<T: 'static>() {\n    let _ = None::<Static<T>>;\n    let _: Option<Static<T>> = None;\n}\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part24_mut_binding_resets_ref_mode() {
+    // (`mut m` where the default binding mode is by reference is by value again before edition 2024: a value that is
+    // not Copy is moved out of the reference (E0507, rfc-2005-default-binding-mode/for.rs), and a Copy one is the
+    // value's type (`m += 1` of a u8, not a `&u8`))
+    let src = "struct Foo {}\nfn a() {\n    let tup = (Foo {}, Foo {});\n    let (_n, mut _m) = &tup;\n}\nfn b() {\n    let tups = vec![(Foo {}, Foo {})];\n    for (_n, mut _m) in &tups {}\n}\nfn main() {}\n";
+    let d = check_ed(src, 2021);
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 8] && d.iter().all(|x| x.1.contains("E0507")), "{d:?}");
+    assert_eq!(check_ed("struct Foo {}\nfn c() {\n    let tup = (Foo {}, Foo {});\n    let (_n, _m) = &tup;\n}\nfn d() {\n    let tup = (1u8, 2u8);\n    let (_n, mut m) = &tup;\n    m += 1;\n    let _ = m;\n}\nfn main() {}\n", 2021), vec![]);
+}
+
+#[test]
+fn part24_projection_impl_header_outlives() {
+    // (a projection requires what the header of the impl it selects declares of the impl's lifetimes: `'d: 'a` of
+    // `<&'a () as Visitor<'d>>`, as the result's type, a `let`'s and a parameter's (nll/normalization-bounds-error.rs))
+    let src = "trait Visitor<'d> { type Value; }\nimpl<'a, 'd: 'a> Visitor<'d> for &'a () { type Value = (); }\nfn visit_seq<'d, 'a: 'd>() -> <&'a () as Visitor<'d>>::Value {}\nfn visit_let<'d, 'a: 'd>() { let _: <&'a () as Visitor<'d>>::Value = (); }\nfn visit_arg<'d, 'a: 'd>(_x: <&'a () as Visitor<'d>>::Value) {}\nfn main() {}\n";
+    let d = check(src);
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![3, 4, 5] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
+    // (the impl's where clause, and 'static in the trait path; what the function knows, or a lifetime the path
+    // elides, meets it)
+    let d = check("trait Visitor<'d> { type Value; }\nimpl<'a, 'd> Visitor<'d> for &'a () where 'd: 'a { type Value = (); }\nfn a1<'d: 'a, 'a>() -> <&'a () as Visitor<'d>>::Value {}\nfn a2<'d, 'a>() { let x: <&'a () as Visitor<'d>>::Value = (); let _ = x; }\nfn a3<'a>() { let _: <&'a () as Visitor<'_>>::Value = (); }\nfn a5<'a>() -> <&'a () as Visitor<'static>>::Value {}\nfn a6<'a>() -> <&'static () as Visitor<'a>>::Value {}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 7] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
+}
+
+#[test]
+fn part24_review() {
+    // (a method call's type arguments are well formed too: `r.use_ty::<Static<T>>()` requires T: 'static (E0310))
+    let d = check("struct Static<T: 'static>(T);\nstruct Receiver;\nimpl Receiver { fn use_ty<U>(&self) {} }\nfn bad<T>(r: &Receiver) { r.use_ty::<Static<T>>(); }\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0310"), "{d:?}");
+    // (the header's `'d: 'a` holds where the associated type's value is not followed (`<() as Base>::Out`), and of a
+    // projection within the written type (`Option<<&'a () as Visitor<'d>>::Value>`))
+    let d = check("trait Base { type Out; }\nimpl Base for () { type Out = (); }\ntrait Visitor<'d> { type Value; }\nimpl<'a, 'd: 'a> Visitor<'d> for &'a () { type Value = <() as Base>::Out; }\nfn visit_seq<'d, 'a: 'd>() -> <&'a () as Visitor<'d>>::Value {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("trait Visitor<'d> { type Value; }\nimpl<'a, 'd: 'a> Visitor<'d> for &'a () { type Value = (); }\nfn visit_seq<'d, 'a: 'd>() -> Option<<&'a () as Visitor<'d>>::Value> { None }\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (a `mut` binding of a `&mut` through a shared reference moves it out (E0507))
+    let d = check_ed("fn main() {\n    let mut n = 0;\n    let pair = (&mut n,);\n    let (mut r,) = &pair;\n    *r = 1;\n}\n", 2021);
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0507"), "{d:?}");
+    // (accepted, as in rustc)
+    let src = "struct Static<T: 'static>(T);\nstruct Receiver;\nimpl Receiver { fn use_ty<U>(&self) {} }\nfn good<T: 'static>(r: &Receiver) { r.use_ty::<Static<T>>(); }\ntrait Visitor<'d> { type Value; }\nimpl<'a, 'd: 'a> Visitor<'d> for &'a () { type Value = (); }\nfn ok<'d: 'a, 'a>() -> Option<<&'a () as Visitor<'d>>::Value> { None }\nfn ok2<'d: 'a, 'a>(_x: (u8, <&'a () as Visitor<'d>>::Value)) {}\nfn main() {\n    let t = (1u8, &2u8);\n    let (mut a, mut b) = &t;\n    a += 1;\n    b = &3;\n    let _ = (a, b);\n}\n";
+    assert_eq!(check_ed(src, 2021), vec![]);
+}
+
+#[test]
+fn part24_review_2() {
+    // (a `mut` binding of a `&mut` within a Copy enum (`Option<&mut i32>`) through a shared reference moves it out
+    // (E0507))
+    let d = check_ed("fn main() {\n    let mut n = 0;\n    let t = ((Some(&mut n),),);\n    let ((mut x,),) = &t;\n    let _ = x.take();\n}\n", 2021);
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0507"), "{d:?}");
+    // (a projection within a `let`'s annotation with no initializer requires its impl's header outlives)
+    let d = check("trait Visitor<'d> { type Value; }\nimpl<'a, 'd: 'a> Visitor<'d> for &'a () { type Value = (); }\nfn bad<'d, 'a: 'd>() {\n    let _x: Option<<&'a () as Visitor<'d>>::Value>;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (accepted, as in rustc: a Copy struct and an `Option<&u8>`)
+    assert_eq!(check_ed("#[derive(Clone, Copy)]\nstruct P(u8);\nfn main() {\n    let t = (P(1), Some(&2u8));\n    let (mut a, mut b) = &t;\n    a.0 += 1;\n    b = None;\n    let _ = (a, b);\n}\n", 2021), vec![]);
+}
+
+#[test]
+fn part25_placeholder_assoc_type_outlives() {
+    // (a placeholder's associated type is a type of its own: what it outlives is what the trait declares, what the
+    // function's where clauses say, and what its parameter and the bound's lifetimes all outlive
+    // (nll/ty-outlives/projection-where-clause-*.rs))
+    let bar = "fn bar<'a, T>() -> &'a () where T: 'a { &() }\nfn main() {}\n";
+    let d = check(&format!("trait MyTrait<'a> {{ type Output; }}\nfn foo<'a, T>() -> &'a () where T: MyTrait<'a> {{\n    bar::<T::Output>()\n}}\n{bar}"));
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("the associated type `<T as MyTrait<'a>>::Output` may not live long enough") && d[0].1.contains("E0309"), "{d:?}");
+    let d = check(&format!("trait MyTrait {{ type Output; }}\nfn foo<'a, T>() -> &'a () where T: MyTrait {{\n    bar::<T::Output>()\n}}\n{bar}"));
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0309"), "{d:?}");
+    // (a where clause of another lifetime that is not known to outlive 'a)
+    let d = check(&format!("trait MyTrait<'a> {{ type Output; }}\nfn foo1<'a, 'b, T>() -> &'a () where T: MyTrait<'a>, <T as MyTrait<'a>>::Output: 'b {{\n    bar::<T::Output>()\n}}\n{bar}"));
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    // (accepted: the where clause, with `'b: 'a`, or of 'a; the trait's `type Output: 'a`; `T: 'a` with the trait's
+    // 'a; `T: 'static` and a trait with no lifetime)
+    for src in [
+        "trait MyTrait<'a> { type Output; }\nfn foo2<'a, 'b, T>() -> &'a () where T: MyTrait<'a>, <T as MyTrait<'a>>::Output: 'b, 'b: 'a {\n    bar::<T::Output>()\n}\n",
+        "trait MyTrait<'a> { type Output; }\nfn foo<'a, T>() -> &'a () where T: MyTrait<'a>, T::Output: 'a {\n    bar::<T::Output>()\n}\n",
+        "trait MyTrait<'a> { type Output: 'a; }\nfn foo<'a, T>() -> &'a () where T: MyTrait<'a> {\n    bar::<T::Output>()\n}\n",
+        "trait MyTrait<'a> { type Output; }\nfn foo<'a, T>() -> &'a () where T: MyTrait<'a> + 'a {\n    bar::<T::Output>()\n}\n",
+        "trait MyTrait { type Output; }\nfn foo<'a, T: 'static>() -> &'a () where T: MyTrait {\n    bar::<T::Output>()\n}\n",
+    ] {
+        assert_eq!(check(&format!("{src}{bar}")), vec![], "{src}");
+    }
+}
+
+#[test]
+fn part25_path_type_arg_ref_to_placeholder() {
+    // (a type argument a path writes that is a reference to a placeholder's type is well formed: `wf::<&'x T>()`
+    // requires T: 'x, which `&'x T::Foo` does not imply (regions/regions-implied-bounds-projection-gap-1.rs); `&'x T`
+    // and `&'x T::Foo` as the parameter's type imply what their own use needs)
+    let src = "trait Trait1<'x> { type Foo; }\nfn wf<T>() {}\nfn func<'x, T: Trait1<'x>>(_t: &'x T::Foo) {\n    wf::<&'x T>();\n}\nfn caller2<'x, T: Trait1<'x>>(_t: &'x T) {\n    wf::<&'x T::Foo>();\n}\nfn caller3<'x, T: Trait1<'x>>(_t: &'x T::Foo) {\n    wf::<&'x T::Foo>();\n}\nfn main() {}\n";
+    let d = check(src);
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("the parameter type `T` may not live long enough"), "{d:?}");
+    // (a where clause on a type the summaries do not read (a type alias of a projection): nothing is required of the
+    // placeholder's associated types (nll/ty-outlives/issue-53789-1.rs))
+    let src = "trait Tr<'a> { type S; }\ntype SFor<A> = <A as Tr<'static>>::S;\nfn need<K: 'static>() {}\nfn f<A: Tr<'static>>() where SFor<A>: 'static {\n    need::<A::S>();\n}\nfn main() {}\n";
+    assert_eq!(check(src), vec![]);
+}
+
+#[test]
+fn part25_where_clause_self_invariant() {
+    // (a callee's `G: Get` filled by a type only the caller's where clause makes implement Get (`&'max G: Get`, no
+    // impl for a reference): the type is the where clause's, and `Self` is invariant (variance/variance-*-self-trait-
+    // match.rs))
+    let src = "trait Get { fn get(&self); }\nfn get_min_from_max<'min, 'max, G>() where 'max: 'min, G: 'max, &'max G: Get {\n    impls_get::<&'min G>();\n}\nfn impls_get<G>() where G: Get {}\nfn main() {}\n";
+    let d = check(src);
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (the same lifetime, or two known to be equal: accepted, as in rustc)
+    let src = "trait Get { fn get(&self); }\nfn ok1<'a, G: 'a>() where &'a G: Get { impls_get::<&'a G>(); }\nfn ok2<'min, 'max, G: 'max>() where 'max: 'min, 'min: 'max, &'max G: Get { impls_get::<&'min G>(); }\nfn impls_get<G>() where G: Get {}\nfn main() {}\n";
+    assert_eq!(check(src), vec![]);
+}
+
+#[test]
+fn part25_assoc_placeholder_copy() {
+    // (a placeholder's associated type is taken for Copy: its trait's where clause may make it so
+    // (associated-type-bounds/assoc-type-bound-through-where-clause.rs, rustc accepts it))
+    assert_eq!(check("trait Op where Self::Output: Copy { type Output; }\nfn duplicate<T: Op>(x: T::Output) -> (T::Output, T::Output) {\n    (x, x)\n}\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part25_assoc_placeholder_as_typeck_finds_it() {
+    // (an associated type an impl gives (`impl<T> Trait for T { type Assoc = T; }`) is that type, not a placeholder of
+    // its own, in the region check as in typeck: the body's values are of it)
+    assert_eq!(check("trait Trait { type Assoc; }\nimpl<T> Trait for T { type Assoc = T; }\nfn id<'a, T: Trait>(x: T::Assoc, _r: &'a u8) -> T::Assoc { let y = x; y }\nfn main() {}\n"), vec![]);
+    // (the message names the placeholder's type by its parameter: no `#`)
+    let d = check("trait MyTrait { type Output; }\nfn foo<'a, T>() -> &'a () where T: MyTrait {\n    bar::<T::Output>()\n}\nfn bar<'a, T>() -> &'a () where T: 'a { &() }\nfn main() {}\n");
+    assert!(d.len() == 1 && !d[0].1.contains('#'), "{d:?}");
+}
+
+#[test]
+fn part25_assoc_value_trait_bound() {
+    // (an impl's associated type's value outlives what its trait's declaration bounds it by, with the trait's
+    // lifetimes the impl's trait path writes (E0477, regions/regions-assoc-type-*-bound-in-trait-not-met.rs))
+    let d = check("trait Foo<'a> { type Value: 'a; }\nimpl<'a> Foo<'static> for &'a i32 {\n    type Value = &'a i32;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0477"), "{d:?}");
+    let d = check("trait Foo { type Value: 'static; }\nimpl<'a> Foo for &'a i32 {\n    type Value = &'a i32;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0477"), "{d:?}");
+    // (accepted: the same lifetime, one the header makes outlive it, 'static, a lifetime a `for<..>` binds)
+    assert_eq!(check("trait Foo<'a> { type Value: 'a; }\nimpl<'a> Foo<'a> for &'a i16 { type Value = &'a i32; }\nimpl<'a: 'b, 'b> Foo<'b> for &'a i64 { type Value = &'a i32; }\nimpl<'a> Foo<'a> for &'a u8 { type Value = &'static i32; }\nimpl<'a> Foo<'a> for &'a u16 { type Value = for<'x> fn(&'x u8); }\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part25_review() {
+    // (a callee's `V::Out` is of the placeholder that fills V (`take::<U>(x)`), not the caller's parameter at V's
+    // place: accepted, as in rustc; and a real requirement through it is still found)
+    assert_eq!(check("trait Tr { type Out; }\nfn take<V: Tr>(_: &V::Out) {}\nfn f<'a, T: Tr, U: Tr>(x: &'a U::Out) {\n    take::<U>(x);\n}\nfn main() {}\n"), vec![]);
+    let d = check("trait Tr { type Out; }\nfn take<'b, V: Tr>(_: &'b V::Out) -> &'b V::Out { loop {} }\nfn bad<'a, T: Tr, U: Tr>(x: &'a U::Out) -> &'static U::Out {\n    take::<U>(x)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (a type alias in the associated type's value is not read for E0477: `type Erased<'a> = ();` names a lifetime
+    // its body does not use)
+    assert_eq!(check("type Erased<'a> = ();\ntrait Foo { type Value: 'static; }\nimpl<'a> Foo for &'a i32 {\n    type Value = Erased<'a>;\n}\nfn main() {}\n"), vec![]);
+    // (an impl in a fn body: E0477 at the line it is written on)
+    let d = check("trait Foo { type Value: 'static; }\nfn main() {\n    let _x = 1;\n    impl<'a> Foo for &'a i32 {\n        type Value = &'a i32;\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0477"), "{d:?}");
+}
+
+#[test]
+fn part25_review_2() {
+    // (two where clauses on the same type with the same trait, other arguments: which one meets a callee's bound is
+    // not known from the trees, so neither is taken; one that fits alone still is)
+    assert_eq!(check("trait Get<T> {}\nfn need8<X: Get<u8>>() {}\nfn need16<X: Get<u16>>() {}\nfn caller<'a, 'b, G: 'a + 'b>()\nwhere\n    &'a G: Get<u8>,\n    &'b G: Get<u16>,\n{\n    need8::<&'a G>();\n    need16::<&'b G>();\n}\nfn main() {}\n"), vec![]);
+    let d = check("trait Get<T> {}\nfn need8<X: Get<u8>>() {}\nfn caller<'a, 'b: 'a, G: 'b>()\nwhere\n    &'b G: Get<u8>,\n{\n    need8::<&'a G>();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (E0477: what the trait's type arguments in the impl's header imply is known (`&'a &'b ()`: 'b: 'a))
+    assert_eq!(check("trait Foo<'a, T> { type Value: 'a; }\nimpl<'a, 'b> Foo<'a, &'a &'b ()> for () { type Value = &'b i32; }\nfn main() {}\n"), vec![]);
+    let d = check("trait Foo<'a, T> { type Value: 'a; }\nimpl<'a, 'b> Foo<'a, &'b ()> for () { type Value = &'b i32; }\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0477"), "{d:?}");
+    // (a value with a where clause of its own (`where Self: 'b`) is not checked: the clause is not read)
+    assert_eq!(check("trait Foo<'a> { type Value: 'a where Self: 'a; }\nimpl<'a, 'b> Foo<'b> for &'a i32 { type Value = &'a i32 where Self: 'b; }\nfn main() {}\n"), vec![]);
+    // (a self type whose declaration bounds its lifetime (`struct Static<'a: 'static>`) implies the bound: not
+    // checked; one that does not is)
+    assert_eq!(check("struct Static<'a: 'static>(&'a ());\ntrait Foo { type Value: 'static; }\nimpl<'a> Foo for Static<'a> {\n    type Value = &'a ();\n}\nfn main() {}\n"), vec![]);
+    let d = check("struct W<'a>(&'a ());\ntrait Foo { type Value: 'static; }\nimpl<'a> Foo for W<'a> {\n    type Value = &'a ();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0477"), "{d:?}");
+}
+
+#[test]
+fn part26_mut_ref_passed_as_shared() {
+    // (`let x = &mut v; f(x);` with f taking `&T`: x stays a `&mut T` (inference does not make it the `&T` it is
+    // coerced to), so writing through it after is accepted, as in rustc; and the explicit and implicit self-reborrows
+    // `y = &mut *y;` / `y = y;` (nll/self-assign-ref-mut.rs)
+    assert_eq!(check("fn g(_: &i32) {}\nfn main() {\n    let mut r: i32 = 0;\n    let x = &mut r;\n    g(x);\n    *x = 1;\n}\n"), vec![], "a2f");
+    assert_eq!(check("fn g(_: &Vec<i32>) {}\nfn main() {\n    let mut r = Vec::new();\n    r.push(1);\n    let x = &mut r;\n    g(x);\n    x.push(2);\n}\n"), vec![], "a2h");
+    assert_eq!(check("fn g(_: &i32) {}\nfn main() {\n    let mut r: i32 = 0;\n    let x = &mut r;\n    *x = 2;\n    g(x);\n    *x = 1;\n}\n"), vec![], "b2");
+    assert_eq!(check("fn main() {\n    let mut r = 0;\n    let x = &mut r;\n    let v: &i32 = x;\n    println!(\"{}\", v);\n    *x = 1;\n    println!(\"{}\", x);\n}\n"), vec![], "a2");
+    assert_eq!(check("struct S<'a> { f: &'a i32 }\nfn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let s = S { f: x };\n    println!(\"{}\", s.f);\n    *x = 1;\n}\n"), vec![], "f4");
+    assert_eq!(check("struct S<'a> { f: &'a mut i32 }\nfn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let s = S { f: x };\n    *s.f = 2;\n    *x = 1;\n}\n"), vec![], "g1");
+    assert_eq!(check("fn main() {\n    let mut a = 0;\n    let mut b = 0;\n    let y = &mut a;\n    let mut x = &mut b;\n    *x = 0;\n    x = y;\n    *x = 2;\n    *y = 1;\n}\n"), vec![], "h2");
+    assert_eq!(check("fn main() {\n    let mut a = 0;\n    let mut b = 0;\n    let mut x = &mut a;\n    let v: &i32 = x;\n    x = &mut b;\n    *x = 1;\n    println!(\"{}\", v);\n}\n"), vec![], "c1");
+    assert_eq!(check("fn main() {\n    let mut x = 1;\n    {\n        let mut y = &mut x;\n        y = &mut *y;\n        y = &mut *y;\n        *y = 2;\n    }\n    x;\n}\n"), vec![], "i1");
+    assert_eq!(check("fn main() {\n    let mut v = vec![1, 2];\n    let x = &mut v;\n    for _ in 0..2 {\n        let s: &[i32] = x;\n        println!(\"{}\", s.len());\n        x.push(3);\n    }\n}\n"), vec![], "c7");
+    assert_eq!(check("fn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let v: &i32 = x;\n    let w: &i32 = x;\n    println!(\"{} {}\", v, w);\n    *x += 1;\n}\n"), vec![], "c9");
+}
+
+#[test]
+fn part26_let_reborrow_of_places() {
+    // (`let v: &T = p;` with p a place of a `&mut T` (a local, a field, through a Box or a guard): v reborrows `*p`)
+    let d = check("fn main() {\n    let mut r = 0;\n    let x = &mut r;\n    let v: &i32 = x;\n    *x = 1;\n    println!(\"{}\", v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut r = 0;\n    let t = (&mut r, 0);\n    let v: &i32 = t.0;\n    *t.0 = 1;\n    println!(\"{}\", v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `*t.0` because it is borrowed"), "{d:?}");
+    let d = check("use std::cell::RefCell;\nfn main() {\n    let mut r = 0;\n    let s = 0;\n    let x = RefCell::new((&mut r, s));\n    let val: &i32 = x.borrow().0;\n    println!(\"{}\", val);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
+    let d = check("fn main() {\n    let mut r = 0;\n    let t = (&mut r, 0);\n    let b = Box::new(t);\n    let val: &i32 = b.0;\n    drop(b);\n    println!(\"{}\", val);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot move out of `b` because it is borrowed"), "{d:?}");
+}
+
+#[test]
+fn part26_reborrow_at_coercion_sites() {
+    // (a constructor's field (`S { f: x }`, `Some(x)`) and an assignment's right side reborrow a place of a `&mut`)
+    let d = check("struct S<'a> { f: &'a i32 }\nfn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let s = S { f: x };\n    *x = 1;\n    println!(\"{}\", s.f);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let v: Option<&mut i32> = Some(x);\n    *x = 1;\n    if let Some(r) = v { *r = 3; }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let v: &i32;\n    v = x;\n    *x = 1;\n    println!(\"{}\", v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = 0;\n    let mut b = 0;\n    let y = &mut a;\n    let mut x = &mut b;\n    x = y;\n    *y = 1;\n    *x = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot assign to `*y` because it is borrowed"), "{d:?}");
+}
+
+#[test]
+fn part26_call_arg_reborrows() {
+    // (a call's `&mut` / `&` argument from a place of a `&mut` borrows `*x` at the call, also without the region
+    // check; a result the signature says borrows from it holds the loan)
+    let d = check("fn pick<'a>(a: &'a i32, _b: &i32) -> &'a i32 { a }\nfn main() {\n    let mut a = 0;\n    let b = 0;\n    let x = &mut a;\n    let r = pick(x, &b);\n    *x = 1;\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    let d = check("fn take(_: &mut i32) {}\nfn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let v = &*x;\n    take(x);\n    println!(\"{}\", v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot borrow `*x` as mutable because it is also borrowed as immutable"), "{d:?}");
+    let d = check("fn take(_: &mut i32) {}\nfn main() {\n    let mut a = 0;\n    let x = &mut a;\n    let v: &i32 = x;\n    take(x);\n    println!(\"{}\", v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot borrow `*x` as mutable because it is also borrowed as immutable"), "{d:?}");
+}
+
+#[test]
+fn part26_mut_ref_in_aggregate_moves() {
+    // (a tuple holding a `&mut` is not Copy: `let t2 = t;` moves t)
+    let d = check("fn main() {\n    let mut a = 0;\n    let t = (&mut a, 0);\n    let v = &*t.0;\n    let t2 = t;\n    println!(\"{} {}\", v, t2.1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot move out of `t` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = 0;\n    let t = (&mut a, 0);\n    let u = t;\n    *t.0 = 1;\n    println!(\"{}\", u.1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("assign to part of moved value"), "{d:?}");
+}
+
+#[test]
+fn part26_annotation_hole_mutability() {
+    // (`let y: &mut [_] = &x[..];`: the annotation's holes are filled keeping the mutability it writes)
+    let d = check("fn main() {\n    let x: &[i32] = &[1, 2];\n    let y: &mut [_] = &x[..];\n    let _ = y;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("mismatched types"), "{d:?}");
+}
+
+#[test]
+fn part26_review() {
+    // (a self-reborrow assigned to its local drops only the loans through a reference: a loan of an owned field
+    // (`s = S { r: &s.n, .. }`) stays, so writing `s.n` while it lives is E0506)
+    let d = check("struct S<'a> { r: &'a i32, n: i32 }\nfn main() {\n    let zero = 0;\n    let mut s = S { r: &zero, n: 0 };\n    s = S { r: &s.n, n: 1 };\n    s.n = 5;\n    println!(\"{}\", s.r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot assign to `s.n` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut x = 1;\n    let mut y = &mut x;\n    y = &mut *y;\n    *y = 2;\n    let mut v = vec![1];\n    let mut r = &mut v;\n    r = r;\n    r.push(2);\n}\n"), vec![]);
+    // (a deref coercion through the reference a `&mut` points to (`&mut &i32` to `&i32`): the loan is of `**x`, which
+    // overwriting `*x` does not touch; `&mut &i32` to `&&i32` borrows `*x`)
+    assert_eq!(check("fn main() {\n    let a = 1;\n    let b = 2;\n    let mut slot = &a;\n    let x = &mut slot;\n    let y: &i32 = x;\n    *x = &b;\n    println!(\"{}\", y);\n}\n"), vec![]);
+    let d = check("fn main() {\n    let a = 1;\n    let mut slot = &a;\n    let x = &mut slot;\n    let y: &&i32 = x;\n    *x = &a;\n    println!(\"{}\", y);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    // (a fn pointer's result that holds references holds the reborrow of the argument's place, without the region
+    // check too; one that holds none does not)
+    let d = check("fn id(x: &i32) -> &i32 { x }\nfn main() {\n    let mut a = 0;\n    let f: fn(&i32) -> &i32 = id;\n    let x = &mut a;\n    let r = f(x);\n    *x = 1;\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn id(x: &i32) -> &i32 { x }\nfn len(x: &i32) -> usize { *x as usize }\nfn main() {\n    let mut a = 0;\n    let f: fn(&i32) -> &i32 = id;\n    let g: fn(&i32) -> usize = len;\n    let x = &mut a;\n    let r = f(x);\n    println!(\"{}\", r);\n    let n = g(x);\n    *x = 1;\n    println!(\"{}\", n);\n}\n"), vec![]);
+}
+
+#[test]
+fn part26_review_2() {
+    // (a value that holds what its local holds, assigned to the local (`r = &mut *r;`, `r = r;`): it keeps the old
+    // value's loans of what r points to, so `x = 1` while r lives is E0506; and once r is assigned another place, it
+    // holds those no longer)
+    let d = check("fn main() {\n    let mut x = 0;\n    let mut r = &mut x;\n    r = &mut *r;\n    x = 1;\n    *r = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `x` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = 0;\n    let mut r = &mut x;\n    r = r;\n    x = 1;\n    *r = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `x` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut r = &mut x;\n    r = &mut *r;\n    *r = 2;\n    x = 1;\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut y = 0;\n    let mut r = &mut x;\n    r = &mut *r;\n    *r = 2;\n    r = &mut y;\n    x = 1;\n    *r = 3;\n    println!(\"{}\", x);\n}\n"), vec![]);
+    // (toward a trait object: `&mut &i32` as a `&dyn Tr` unsizes the `&i32` itself, so the loan is of `*x`, and
+    // `*x = &b` while y lives is E0506)
+    let d = check("trait Tr { fn get(&self) -> i32; }\nimpl Tr for &i32 {\n    fn get(&self) -> i32 { **self }\n}\nfn main() {\n    let a = 1;\n    let b = 2;\n    let mut slot = &a;\n    let x: &mut &i32 = &mut slot;\n    let y: &dyn Tr = x;\n    *x = &b;\n    println!(\"{}\", y.get());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+}
