@@ -98,3 +98,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-23 | [The trait solver, part 3: associated types](2026-11-23-06-trait-solver-3.md) |
 | 2026-11-23 | [The trait solver, part 4: fewer false errors](2026-11-23-07-trait-solver-4.md) |
 | 2026-11-24 | [The trait solver, part 5: the rest of the list](2026-11-24-01-trait-solver-5.md) |
+| 2026-11-24 | [False "mismatched types" on valid code: literals, generic arguments, coercions](2026-11-24-02-inference-coercions.md) |
