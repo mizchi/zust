@@ -5,11 +5,18 @@
   "license": "MIT OR Apache-2.0",
   "type": "module",
   "sideEffects": false,
+  "scripts": {
+    "test": "node --test"
+  },
   "exports": {
     ".": {
       "types": "./index.d.ts",
       "default": "./index.js"
+    },
+    "./bytes": {
+      "types": "./bytes.d.ts",
+      "default": "./bytes.js"
     }
   },
-  "files": ["index.js", "index.d.ts"]
+  "files": ["index.js", "index.d.ts", "bytes.js", "bytes.d.ts"]
 }
