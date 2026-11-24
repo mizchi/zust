@@ -222,5 +222,18 @@ fn macro_use_modules_and_check_lines() {
     assert!(err.contains(":5:11: prefix `foo` is unknown"), "{err}");
     let o = Command::new(zustc).arg("check").arg("--edition=2018").arg(dir.join("p.rs")).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    // (a raw identifier before `#`: `r#let#foo` is three tokens in 2021 too)
+    put("q.rs", "macro_rules! demo {\n    ($a:tt $b:tt $c:tt) => {};\n}\nfn main() {\n    demo!(r#let#foo);\n}\n");
+    let o = Command::new(zustc).arg("check").arg(dir.join("q.rs")).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    // (`#[macro_use] #[path = ..] mod`: the path beside the declaring file, the module where it is declared)
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    put("sub/outer.rs", "#[macro_use]\n#[path = \"helpers.rs\"]\nmod helpers;\npub fn four() -> u8 {\n    two!() * 2\n}\n");
+    put("sub/helpers.rs", "macro_rules! two {\n    () => {\n        2\n    };\n}\n");
+    put("r.rs", "#[path = \"sub/outer.rs\"]\nmod outer;\nfn main() {\n    println!(\"{}\", outer::four());\n}\n");
+    let exe = dir.join("r");
+    let o = Command::new(zustc).arg("--no-cache").arg(dir.join("r.rs")).arg("-o").arg(&exe).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(run(&exe, &dir, 0).0, "4\n");
     let _ = std::fs::remove_dir_all(&dir);
 }

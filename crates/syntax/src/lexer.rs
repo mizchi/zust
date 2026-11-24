@@ -586,6 +586,24 @@ fn string_lit(s: &[u8], mut i: usize) -> Option<usize> {
 mod tests {
     use super::*;
 
+    /// Edition 2021's reserved prefixes: an identifier right before `#` / `"` / `'`, and what only looks like one
+    #[test]
+    fn reserved_prefixes() {
+        let bad = |s: &str| unknown_prefix(s).unwrap_or_default();
+        assert_eq!(bad("m!(foo#bar);"), "1:4: prefix `foo` is unknown");
+        assert_eq!(bad("x\nm!(foo\"s\");"), "2:4: prefix `foo` is unknown");
+        assert_eq!(bad("m!(foo'b');"), "1:4: prefix `foo` is unknown");
+        for ok in [
+            "let s = \"abc\"; let c = 'x'; let t = b\"by\"; let u = b'y';",
+            "let r = r#\"a \"q\" foo#bar\"#; let rr = r##\"x\"#y\"##; let raw = br\"z\"; let cs = c\"c\";",
+            "fn f<'a>(x: &'a str) -> &'a str { x } let e = '\\n'; let q = '\\'';",
+            "// foo#bar \"x\"y\n/* a\"b /* foo#bar */ */ let n = 1u8;",
+            "m!(r#let#foo); let r#match = 1; m!($x#y); let s = \"foo#bar\";",
+        ] {
+            assert_eq!(unknown_prefix(ok), None, "{ok}");
+        }
+    }
+
     fn hashes(src: &str) -> Vec<Key> {
         split(src).unwrap().iter().map(|i| i.hash).collect()
     }
@@ -675,29 +693,142 @@ mod tests {
 /// `line:col: prefix `foo` is unknown`. A look at the bytes first: tokenized only when an identifier character is
 /// right before one of the three
 pub fn unknown_prefix(src: &str) -> Option<String> {
+    // (it runs on every file a build reads: no tokens, a jump from one of `/` `"` `'` `#` to the next, as only they
+    // start a comment or literal or can follow a prefix. A string's or char's closing quote is stepped over with it,
+    // so a quote looked at is an opening one, and the identifier right before it its prefix)
     let b = src.as_bytes();
-    if !b.windows(2).any(|w| is_ident_cont(w[0]) && matches!(w[1], b'#' | b'"' | b'\'')) {
-        return None;
-    }
-    let toks = tokenize(b);
-    for (k, &(kind, a, e)) in toks.iter().enumerate() {
-        if kind != 0 || e >= b.len() || !matches!(b[e], b'#' | b'"' | b'\'') {
+    let n = b.len();
+    // (the identifier ending right before i: its start, when it is one (not a number's suffix `1u8`, a lifetime
+    // `'a`, a macro's fragment `$x`)
+    let prefix_at = |i: usize| -> Option<usize> {
+        let mut a = i;
+        while a > 0 && is_ident_cont(b[a - 1]) {
+            a -= 1;
+        }
+        // (and not a raw name `r#let`, whose `#` is not a prefix's)
+        let raw = a >= 2 && b[a - 1] == b'#' && b[a - 2] == b'r' && (a == 2 || !is_ident_cont(b[a - 3]));
+        (a < i && is_ident_start(b[a]) && !raw && !(a > 0 && matches!(b[a - 1], b'\'' | b'$'))).then_some(a)
+    };
+    let skip_str = |mut i: usize| {
+        while i < n && b[i] != b'"' {
+            i += if b[i] == b'\\' { 2 } else { 1 };
+        }
+        (i + 1).min(n)
+    };
+    // (from a raw string's first `#` or `"` at i: past its end `"#..`)
+    let skip_raw = |i: usize| {
+        let mut j = i;
+        while j < n && b[j] == b'#' {
+            j += 1;
+        }
+        let h = j - i;
+        let mut k = j + 1;
+        while k < n && !(b[k] == b'"' && k + h < n && b[k + 1..=k + h].iter().all(|&x| x == b'#')) {
+            k += 1;
+        }
+        (k + 1 + h).min(n)
+    };
+    // (a char literal at the quote i, or a lifetime's quote: past it)
+    let skip_quote = |i: usize| {
+        if b.get(i + 1) == Some(&b'\\') {
+            let mut j = i + 3;
+            while j < n && b[j] != b'\'' {
+                j += 1;
+            }
+            return (j + 1).min(n);
+        }
+        let l = utf8_len(b.get(i + 1).copied().unwrap_or(0));
+        if b.get(i + 1 + l) == Some(&b'\'') { i + 2 + l } else { i + 1 }
+    };
+    let mut i = 0;
+    while i < n {
+        i = next_special(b, i);
+        if i >= n {
+            break;
+        }
+        let c = b[i];
+        if c == b'/' {
+            if b.get(i + 1) == Some(&b'/') {
+                i = b[i..].iter().position(|&c| c == b'\n').map_or(n, |k| i + k);
+            } else if b.get(i + 1) == Some(&b'*') {
+                let mut d = 0;
+                while i < n {
+                    if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                        d += 1;
+                        i += 2;
+                    } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
+                        d -= 1;
+                        i += 2;
+                        if d == 0 {
+                            break;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+            } else {
+                i += 1;
+            }
             continue;
         }
-        let w = &src[a..e];
-        // (a lifetime `'a`, a number's suffix `1u8`, a literal's prefix (one token with its literal), a raw name `r#x`)
-        if matches!(w, "b" | "r" | "br" | "c" | "cr") || (a > 0 && (b[a - 1] == b'\'' || b[a - 1].is_ascii_alphanumeric())) {
-            continue;
+        let w = prefix_at(i).map(|a| (a, &src[a..i]));
+        match (c, w) {
+            (b'"', None | Some((_, "b" | "c"))) => i = skip_str(i + 1),
+            (b'"', Some((_, "r" | "br" | "cr"))) => i = skip_raw(i),
+            (b'\'', None) | (b'\'', Some((_, "b"))) => i = skip_quote(i),
+            (b'#', None) => i += 1,
+            (b'#', Some((_, "r" | "br" | "cr"))) => {
+                let mut j = i;
+                while j < n && b[j] == b'#' {
+                    j += 1;
+                }
+                if b.get(j) == Some(&b'"') {
+                    i = skip_raw(i);
+                } else if w.is_some_and(|(_, w)| w == "r") && j == i + 1 {
+                    // (a raw name `r#let`: past it)
+                    i = j;
+                    while i < n && is_ident_cont(b[i]) {
+                        i += 1;
+                    }
+                } else {
+                    let (a, w) = w.unwrap();
+                    return Some(prefix_error(b, a, w));
+                }
+            }
+            (_, Some((a, w))) => return Some(prefix_error(b, a, w)),
+            _ => i += 1,
         }
-        // (a macro's fragment `$x`: still a prefix to rustc, but its own tests keep to the names)
-        if k > 0 && toks[k - 1].0 == 1 && b[toks[k - 1].1] == b'$' && toks[k - 1].2 == a {
-            continue;
-        }
-        let line = b[..a].iter().filter(|&&c| c == b'\n').count() + 1;
-        let col = a - b[..a].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1) + 1;
-        return Some(format!("{line}:{col}: prefix `{w}` is unknown"));
     }
     None
+}
+
+/// The first of `/` `"` `'` `#` at or after i (b.len() if none): 8 bytes at a time (a byte equal to c makes a zero
+/// byte of `x ^ c..c`, found by the carry trick)
+fn next_special(b: &[u8], mut i: usize) -> usize {
+    const LO: u64 = 0x0101_0101_0101_0101;
+    const HI: u64 = 0x8080_8080_8080_8080;
+    let has = |x: u64, c: u8| {
+        let y = x ^ (LO * c as u64);
+        y.wrapping_sub(LO) & !y & HI
+    };
+    while i + 8 <= b.len() {
+        let x = u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+        let m = has(x, b'/') | has(x, b'"') | has(x, b'\'') | has(x, b'#');
+        if m != 0 {
+            break;
+        }
+        i += 8;
+    }
+    while i < b.len() && !matches!(b[i], b'/' | b'"' | b'\'' | b'#') {
+        i += 1;
+    }
+    i
+}
+
+fn prefix_error(b: &[u8], a: usize, w: &str) -> String {
+    let line = b[..a].iter().filter(|&&c| c == b'\n').count() + 1;
+    let col = a - b[..a].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1) + 1;
+    format!("{line}:{col}: prefix `{w}` is unknown")
 }
 
 pub fn tokenize(s: &[u8]) -> Vec<(u8, usize, usize)> {

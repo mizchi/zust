@@ -1644,6 +1644,8 @@ impl Program {
         let mut ref_blankets: HashSet<String> = Default::default();
         // (the mutabilities of each trait's `impl<T> Tr for &T` / `&mut T`: the two do not overlap each other)
         let mut ref_muts: HashMap<String, Vec<bool>> = Default::default();
+        // (the traits with an `impl<T> Tr for T`: blanket_traits also holds the reference ones)
+        let mut bare_blankets: HashSet<String> = Default::default();
         // (impls for Box: (trait, line), checked against blanket impls of the same trait after the loop)
         let mut box_impls: Vec<(String, usize)> = vec![];
         // (unbounded blanket impls (trait, line), and every impl of the program's (trait, line))
@@ -1763,8 +1765,7 @@ impl Program {
                 }
                 // (`impl<T> Foo for T` covers `&U` too; one for `&T` and one for `&mut T` are two types)
                 let seen = ref_muts.entry(tr.clone()).or_default();
-                let other_ref_only = !seen.is_empty() && !seen.contains(&ref_mut);
-                if seen.contains(&ref_mut) || (p.blanket_traits.contains(tr) && !other_ref_only) {
+                if seen.contains(&ref_mut) || bare_blankets.contains(tr) {
                     return Err(format!("{}:1: conflicting implementations of trait `{tr}` for type `&_` (E0119)", it.line));
                 }
                 seen.push(ref_mut);
@@ -1783,6 +1784,7 @@ impl Program {
                 }
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
+                bare_blankets.insert(tr.clone());
                 if let Some(g) = sm.impl_generics.iter().find(|g| g.0 == *sn) {
                     p.blanket_bounds.entry(tr.clone()).or_default().extend(g.1.iter().cloned());
                 }
@@ -1854,7 +1856,8 @@ impl Program {
             }
         }
         // (`impl<T> Tr for T` and `impl Tr for Box<U>` overlap: Box<U> is one of the T, E0119)
-        if let Some((tr, line)) = box_impls.iter().find(|(tr, _)| p.blanket_traits.contains(tr)) {
+        // (not one for `&T` / `&mut T`: a Box is no reference)
+        if let Some((tr, line)) = box_impls.iter().find(|(tr, _)| bare_blankets.contains(tr)) {
             return Err(format!("{line}:1: conflicting implementations of trait `{tr}` for type `Box<_>`"));
         }
         // derive は実装扱い (Clone / Copy など。中身は常にビットコピーなので本体は要らない)
@@ -4218,6 +4221,12 @@ impl Program {
             }
             if let Ty::Assoc(v) = a.value {
                 if v.base == a.self_ty && v.name == name {
+                    continue;
+                }
+            }
+            // (match_ty lets `&mut` meet `&` (a coercion): an impl for `&T` and one for `&mut T` are two)
+            if let (Ty::Ref(m1, _), Ty::Ref(m2, _)) = (a.self_ty, t) {
+                if m1 != m2 {
                     continue;
                 }
             }

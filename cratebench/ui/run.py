@@ -99,6 +99,17 @@ def cargo_env(p, t):
             "CARGO_MANIFEST_DIR": os.path.dirname(p["manifest_path"]), "CARGO_CRATE_NAME": t["name"].replace("-", "_")}
 
 
+_HOST = []
+
+
+def host_triple():
+    """the host tuple of the rustc that builds the scripts (`host:` of `rustc -vV`), as cargo's HOST"""
+    if not _HOST:
+        r = subprocess.run(["rustc", "-vV"], capture_output=True, text=True)
+        _HOST.append(next((l.split(":", 1)[1].strip() for l in r.stdout.splitlines() if l.startswith("host:")), ""))
+    return _HOST[0]
+
+
 def build_script(c, out):
     """Run a crate's build script as cargo would, when it has no build-dependencies (rustc builds it for the host):
     its `rustc-cfg` and `rustc-env` lines and OUT_DIR, as (cfgs, env). None when it has none, or cannot run"""
@@ -110,13 +121,18 @@ def build_script(c, out):
     out_dir = os.path.join(d, "out")
     os.makedirs(out_dir, exist_ok=True)
     exe = os.path.join(d, "build-script-build")
+    # (compiled as cargo compiles it: the package's variables for `env!` (CARGO_CRATE_NAME the script's own), and the
+    # features as `--cfg feature="x"`)
+    cenv = dict(os.environ)
+    cenv.update(cargo_env(p, script))
+    feats = [a for f in c["features"] for a in ("--cfg", f'feature="{f}"')]
     r = subprocess.run(["rustc", "--edition", script["edition"], "--crate-name", "build_script_build", "--crate-type", "bin",
-                        "--cap-lints", "allow", "-o", exe, script["src_path"]], capture_output=True, text=True)
+                        "--cap-lints", "allow", *feats, "-o", exe, script["src_path"]], env=cenv, capture_output=True, text=True)
     if r.returncode != 0:
         return None
     env = dict(os.environ)
     env.update(c["env"])
-    env.update({"OUT_DIR": out_dir, "TARGET": TARGET, "HOST": "x86_64-unknown-linux-gnu", "PROFILE": "debug", "OPT_LEVEL": "0",
+    env.update({"OUT_DIR": out_dir, "TARGET": TARGET, "HOST": host_triple(), "PROFILE": "debug", "OPT_LEVEL": "0",
                 "DEBUG": "true", "NUM_JOBS": "4", "RUSTC": "rustc"})
     for f in c["features"]:
         env["CARGO_FEATURE_" + f.upper().replace("-", "_")] = "1"
@@ -125,7 +141,10 @@ def build_script(c, out):
         cfgs.setdefault(k, []).append(v)
     for k, vs in cfgs.items():
         env["CARGO_CFG_" + k.upper()] = ",".join(v for v in vs if v is not None)
-    r = subprocess.run([exe], cwd=os.path.dirname(p["manifest_path"]), env=env, capture_output=True, text=True, timeout=120)
+    try:
+        r = subprocess.run([exe], cwd=os.path.dirname(p["manifest_path"]), env=env, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return None
     if r.returncode != 0:
         return None
     out_cfgs, out_env = [], {"OUT_DIR": out_dir}

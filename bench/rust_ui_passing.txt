@@ -2939,6 +2939,7 @@ check-pass	generic-associated-types/issue-76407.rs
 compile-fail	generic-associated-types/issue-76535.rs
 run-pass	generic-associated-types/issue-76826.rs
 compile-fail	generic-associated-types/issue-78671.rs
+compile-fail	generic-associated-types/issue-79422.rs
 compile-fail	generic-associated-types/issue-79636-1.rs
 compile-fail	generic-associated-types/issue-79636-2.rs
 check-pass	generic-associated-types/issue-80433-reduced.rs

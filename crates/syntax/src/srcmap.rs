@@ -208,6 +208,8 @@ fn env_values(src: String, cfg: &crate::cfg::CfgSet) -> String {
 #[allow(clippy::too_many_arguments)]
 fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: u32, map: &mut SrcMap, cfg: &crate::cfg::CfgSet, open: &mut Vec<(String, String)>) -> Result<String, String> {
     let src = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    // (the file as written: a `mod x;` not in it came from a macro's body (written_mod))
+    let raw = src.clone();
     // (edition 2021's reserved prefixes, before any macro takes the tokens as its input: `m!(foo#bar)`)
     if cfg.edition >= 2021 {
         if let Some(e) = crate::lexer::unknown_prefix(&src) {
@@ -283,6 +285,13 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
             ddisp = join_disp(&ddisp, d);
         }
         let (p, disp, sub, sub_disp) = match path_attr {
+            // (`#[macro_use] #[path = "x.rs"] mod m;` outside inline modules: beside this file, as a top-level one)
+            Some(pa) if parts.is_empty() => {
+                let p = path.parent().unwrap_or(Path::new(".")).join(&pa);
+                map.probes.push(p.clone());
+                let sub = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
+                (p, join_disp(disp_dir, &pa), sub, disp_dir.to_string())
+            }
             Some(pa) => {
                 let p = dir.join(&pa);
                 let sub = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
@@ -307,7 +316,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
                     (a, join_disp(&ddisp, &format!("{name}.rs")), dir.join(&name), join_disp(&ddisp, &name))
                 } else if b.exists() {
                     (b, join_disp(&ddisp, &format!("{name}/mod.rs")), dir.join(&name), join_disp(&ddisp, &name))
-                } else if hdir != dir && (c.exists() || d.exists()) {
+                } else if hdir != dir && !written_mod(&raw, &name) && (c.exists() || d.exists()) {
                     map.probes.push(c.clone());
                     map.probes.push(d.clone());
                     let pdisp = match display.rsplit_once('/') {
@@ -372,6 +381,57 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         map.segs.push((start + line_count(&text) - 1, fi, 1 + line_count(&src)));
     }
     Ok(text)
+}
+
+/// The file as written declares `mod name;` (an ordinary declaration: its file is only where its module path says)
+fn written_mod(raw: &str, name: &str) -> bool {
+    if !raw.contains(name) {
+        return false;
+    }
+    // (outside the bodies of `macro_rules!`: a declaration in one is the macro's, made where it is called)
+    let mut kept = raw.as_bytes().to_vec();
+    let toks = crate::lexer::tokenize(raw.as_bytes());
+    let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && raw.as_bytes()[toks[k].1] == c;
+    let mut i = 0;
+    while i + 3 < toks.len() {
+        if toks[i].0 == 0 && &raw[toks[i].1..toks[i].2] == "macro_rules" && sym(i + 1, b'!') && (sym(i + 3, b'{') || sym(i + 3, b'(')) {
+            let mut d = 0i32;
+            let mut j = i + 3;
+            while j < toks.len() {
+                if sym(j, b'{') || sym(j, b'(') || sym(j, b'[') {
+                    d += 1;
+                } else if sym(j, b'}') || sym(j, b')') || sym(j, b']') {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            let end = toks.get(j).map_or(kept.len(), |t| t.2);
+            for c in &mut kept[toks[i].1..end] {
+                if !c.is_ascii_whitespace() {
+                    *c = b' ';
+                }
+            }
+            i = j;
+        }
+        i += 1;
+    }
+    let raw = String::from_utf8_lossy(&kept).into_owned();
+    let raw = raw.as_str();
+    let b = raw.as_bytes();
+    raw.match_indices(name).any(|(k, _)| {
+        let mut a = k;
+        while a > 0 && b[a - 1].is_ascii_whitespace() {
+            a -= 1;
+        }
+        let mut e = k + name.len();
+        while e < b.len() && b[e].is_ascii_whitespace() {
+            e += 1;
+        }
+        a >= 3 && &raw[a - 3..a] == "mod" && (a == 3 || !(b[a - 4].is_ascii_alphanumeric() || b[a - 4] == b'_')) && a < k && b.get(e) == Some(&b';')
+    })
 }
 
 fn join_disp(dir: &str, rest: &str) -> String {

@@ -1330,7 +1330,10 @@ impl Session2 {
         let mut loaded: Vec<Option<(String, crate::srcmap::SrcMap)>> = vec![None; crates.len()];
         for &i in &order {
             let c = &crates[i];
-            let (text, map) = crate::srcmap::load_crate(c.root.as_path(), &c.display, &self.opts.cfg_of(&c.features, &c.cfgs, &c.env))?;
+            // (a workspace's crates have no edition of their own here (zurgo gives each package's to rustc only): the
+            // edition-dependent token checks stay off, as an edition 2018 package may write `m!(foo#bar)`)
+            let cfg = crate::cfg::CfgSet { edition: 0, ..self.opts.cfg_of(&c.features, &c.cfgs, &c.env) };
+            let (text, map) = crate::srcmap::load_crate(c.root.as_path(), &c.display, &cfg)?;
             let text = if c.test { with_harness(&text, &c.display) } else { text };
             let text = if c.lib { format!("pub mod {} {{ {text}\n}}\n", c.name) } else { text };
             loaded[i] = Some((text, map));
