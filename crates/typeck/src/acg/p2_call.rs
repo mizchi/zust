@@ -1219,7 +1219,9 @@ impl Cx<'_> {
                 }
             }
             if let Some(id) = self.prog.method(sid, &name).or_else(|| self.prog.default_method(sid, &name)) {
-                break (a, o, sid, id);
+                // (inherent overloads, in impls for other instances of the type: the one for this receiver's, before its
+                // receiver is borrowed (or not) as that method takes self)
+                break (a, o, sid, self.prog.inherent_overload_for(id, Ty::Struct(sid)));
             }
             let sd = &self.prog.structs[sid as usize];
             let gens = sd.args.clone();
@@ -2513,10 +2515,12 @@ impl Cx<'_> {
         let Some(at) = recv.or_else(|| args.first().and_then(|a| self.peek(a))) else {
             return id;
         };
+        // (an inherent method of an impl for one instance of the type (`impl<T> W<&T>` beside `impl<T> W<&mut T>`):
+        // the receiver's references inside the type arguments are its own too)
         let fits = |c: u32, at: Ty| {
             let sig = &self.prog.sigs[c as usize];
             let mut sol = vec![None; sig.generics.len()];
-            sig.params.first().is_some_and(|&pt| self.prog.match_ty(pt, at, &mut sol))
+            sig.params.first().is_some_and(|&pt| self.prog.match_ty(pt, at, &mut sol) && (sig.impl_trait.is_some() || self.prog.arg_refs_agree(pt, at)))
         };
         // (impls of two traits of one name, `a::M` and `b::M` for u32: the one whose trait is in scope here)
         let base = |c: u32| self.prog.sigs[c as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
@@ -2984,8 +2988,18 @@ impl Cx<'_> {
             }
             // (also where a type parameter the call already knows is a `&mut` (`v.push(c.raw)` with v: `Vec<&mut T>`),
             // as rustc's coercion to the expected type)
-            if matches!(pt, Ty::Ref(true, _)) || matches!(self.prog.partial_subst(pt, &sol), Ty::Ref(true, _)) {
-                self.bk_reborrow_arg(a);
+            // (and where a `&` is: a shared reborrow, `pick(x, &b)` is `pick(&*x, &b)`)
+            // (without the region check, a result the signature says borrows from the argument holds the reborrow:
+            // `let r = pick(x, &b); *x = 1; use(r)` is E0506)
+            match (pt, self.prog.partial_subst(pt, &sol)) {
+                (Ty::Ref(m, _), _) | (_, Ty::Ref(m, _)) => {
+                    if let Some(ln) = self.bk_reborrow_arg(a, m) {
+                        if !self.rg.on && self.bk_ret_from(id, i + skip) {
+                            self.bk.src(borrowck::Src::Loan(ln));
+                        }
+                    }
+                }
+                _ => {}
             }
             // (a closure written where a bound wants `Fn` / `FnMut`: it is that, so its body moving out what it captures
             // by value (`|| { let s = val; }`) is E0507, at the move. Passed by name, it is E0525 (above))

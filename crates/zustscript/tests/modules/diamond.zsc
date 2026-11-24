@@ -1,0 +1,9 @@
+// Shared comes in through lib/mid.zsc and left.zsc (once), Leaf through lib/mid.zsc from lib/leaf.zsc
+import { wrap, shared } from "./lib/mid.zsc";
+import { left } from "./left.zsc";
+import { get } from "./common.zsc";
+import { Tag } from "./lib/leaf.zsc";
+
+export fn both() -> i32 { wrap(1).v + shared(2).n + left(3).n }
+export fn leaf(v: i32) -> Leaf { wrap(v) }
+export fn view() -> Jsx { <Tag label="hi" /> }

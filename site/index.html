@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zust</title>
+<meta name="description" content="zust: a compiler for a subset of Rust built for fast incremental builds, a lightweight LSP server, and a Cargo-compatible driver.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="zust">
+<meta property="og:url" content="https://mizchi.github.io/zust/">
+<meta property="og:title" content="zust: edit one function, rebuild in milliseconds">
+<meta property="og:description" content="A compiler for a subset of Rust, tuned for the edit-and-rebuild loop, with a lightweight LSP server and a Cargo-compatible driver. Built by coding agents and measured on every push.">
+<meta property="og:image" content="https://mizchi.github.io/zust/og-home.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="zust: edit one function, rebuild in milliseconds">
+<meta name="twitter:description" content="A compiler for a subset of Rust, tuned for the edit-and-rebuild loop, with a lightweight LSP server and a Cargo-compatible driver. Built by coding agents and measured on every push.">
+<meta name="twitter:image" content="https://mizchi.github.io/zust/og-home.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+  .hero { padding-block: 24px 4px; display: flex; flex-direction: column; gap: 14px; }
+  .hero h1 { font-size: clamp(32px, 5.4vw, 52px); max-width: 18ch; margin: 0; }
+  .hero .lede { font-size: 18px; }
+  .cta { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn { display: inline-block; padding: 9px 16px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); text-decoration: none; font-size: 14px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  .term { background: var(--code-bg); border-radius: 8px; padding: 14px 16px; font: 13.5px/1.7 var(--mono); overflow-x: auto; margin: 0; }
+  .term .p { color: var(--muted); user-select: none; }
+  .term .c { color: var(--muted); }
+  .tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  @media (max-width: 820px) { .tools { grid-template-columns: minmax(0, 1fr); } }
+  .tool { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; display: flex; flex-direction: column; gap: 8px; }
+  .tool h3 { margin: 0; font: 500 17px var(--mono); }
+  .tool p { margin: 0; font-size: 14px; }
+  .tool ul { margin: 0; padding-left: 1.1em; font-size: 13.5px; color: var(--muted); }
+  .cols { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; }
+  @media (max-width: 820px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+  .bar-row { display: grid; grid-template-columns: 9.5em minmax(0, 1fr) 4.2em; align-items: center; gap: 10px; font-size: 13px; }
+  .bar-row .name { font-family: var(--mono); }
+  .bar-row .track, .bar-row .fill { display: block; }
+  .bar-row .track { height: 10px; background: var(--grid); border-radius: 5px; overflow: hidden; }
+  .bar-row .fill { height: 100%; background: var(--accent); border-radius: 5px; width: 0; }
+  .bar-row .v { text-align: right; font-variant-numeric: tabular-nums; }
+  .bars { display: flex; flex-direction: column; gap: 10px; }
+  .status { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; border-radius: 0 6px 6px 0; font-size: 14px; }
+  .status p { margin: 0; }
+  .doclist { columns: 2 260px; padding-left: 1.1em; margin: 0; font-size: 14px; }
+  .doclist li { break-inside: avoid; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="bar-in">
+    <a class="brand" href=""><span>z</span>ust</a>
+    <button class="menu" id="menu" type="button" aria-controls="side" aria-expanded="false">Menu</button>
+  </div>
+</header>
+<div class="scrim" id="scrim" hidden></div>
+<div class="shell">
+  <aside class="side" id="side" aria-label="Site">
+    <a class="brand" href=""><span>z</span>ust</a>
+    <nav class="pages" aria-label="Pages">
+      <a href="" aria-current="page">About</a>
+      <a href="dashboard/">Retrospective</a>
+      <a class="ext" href="dev/bench/">Benchmarks</a>
+      <a class="ext" href="https://github.com/mizchi/zust">GitHub</a>
+    </nav>
+    <nav class="toc" aria-label="On this page">
+      <p class="label">On this page</p>
+      <a href="#speed">Measured on every push</a>
+      <a href="#tools">Three tools</a>
+      <a href="#try">Try it</a>
+      <a href="#coverage">How much of Rust</a>
+      <a href="#docs">Documentation</a>
+    </nav>
+  </aside>
+  <div class="content">
+
+<main class="wrap stack">
+  <section class="hero">
+    <p class="eyebrow">A compiler for a subset of Rust</p>
+    <h1>Edit one function, rebuild in milliseconds.</h1>
+    <p class="lede">zustc has its own lexer, parser and type inference, generates code with Cranelift or its own small x86-64
+      backend, and is tuned for the edit-and-rebuild loop: rebuild time, peak memory, cache size and binary size.
+      It compiles itself.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/mizchi/zust#install">Install</a>
+      <a class="btn" href="dashboard/">How it was built</a>
+      <a class="btn" href="dev/bench/">Benchmark history</a>
+    </div>
+  </section>
+
+  <section class="sec" id="speed">
+    <h2>Measured on every push</h2>
+    <p class="note">Latest CI run (<span id="kpi-commit">—</span>) on generated programs of 5000 functions, shared GitHub Actions runners.</p>
+    <div class="tiles" id="kpi-tiles">
+      <div class="tile"><span class="tl">Build after editing one function</span><span class="big" data-b="gen5000 build edit 1 fn">—</span><span class="sub">gen5000</span></div>
+      <div class="tile"><span class="tl">No-op build</span><span class="big" data-b="gen5000 build noop">—</span><span class="sub">nothing changed, no link</span></div>
+      <div class="tile"><span class="tl">Cold build</span><span class="big" data-b="gen5000 build cold">—</span><span class="sub">gen5000</span></div>
+      <div class="tile"><span class="tl"><code>zustc check</code></span><span class="big" data-b="gen5000 check">—</span><span class="sub">gen5000</span></div>
+      <div class="tile"><span class="tl">Build cache</span><span class="big" data-b="gen5000 cache">—</span><span class="sub">gen5000, on disk</span></div>
+      <div class="tile"><span class="tl">LSP go-to-definition</span><span class="big" data-b="lsp definition p50">—</span><span class="sub">zust-analyzer, p50</span></div>
+    </div>
+  </section>
+
+  <section class="sec" id="tools">
+    <h2>Three tools</h2>
+    <div class="tools">
+      <div class="tool">
+        <h3>zustc</h3>
+        <p>The compiler. Only the functions that changed are recompiled; if nothing changed it does not even link.</p>
+        <ul><li>Cranelift (default) or minclif backend</li><li>multi-crate workspaces, relinks without recompiling dependents</li><li><code>--target wasm32-unknown-unknown</code> (experimental)</li></ul>
+      </div>
+      <div class="tool">
+        <h3>zust-analyzer</h3>
+        <p>A lightweight LSP server for ordinary Rust workspaces, indexing std and dependency crates.</p>
+        <ul><li>definition, references, hover, completion</li><li>rename, signatureHelp, documentHighlight</li><li>diagnostics from <code>zustc check</code></li></ul>
+      </div>
+      <div class="tool">
+        <h3>zurgo</h3>
+        <p>A Cargo-compatible driver: reads Cargo.toml and Cargo.lock and builds the package with zustc.</p>
+        <ul><li><code>build</code>, <code>run</code>, <code>metadata</code>, <code>clean</code></li><li>build scripts run as under cargo</li><li>crates.io sources from <code>cargo fetch</code></li></ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="try">
+    <h2>Try it</h2>
+    <pre class="term"><span class="c"># Linux x86-64, Rust (edition 2024), cc, and a linker (wild, mold, lld or ld)</span>
+<span class="p">$ </span>git clone https://github.com/mizchi/zust.git &amp;&amp; cd zust
+<span class="p">$ </span>cargo install --path . &amp;&amp; cargo install --path crates/analyzer &amp;&amp; cargo install --path crates/zurgo
+<span class="p">$ </span>zustc hello.rs -o hello &amp;&amp; ./hello
+<span class="p">$ </span>zustc check hello.rs      <span class="c"># types only, all diagnostics</span>
+<span class="p">$ </span>zurgo run                 <span class="c"># a Cargo package</span></pre>
+  </section>
+
+  <section class="sec" id="coverage">
+    <div class="cols">
+      <div class="sec">
+        <h2>How much of Rust</h2>
+        <p class="note">rustc's own UI tests (rust-lang/rust 1.100.0 <code>tests/ui</code>), counting only tests zustc can be asked to
+          handle. Latest CI run: <span id="ui-commit">—</span>.</p>
+        <div class="bars" id="ui-bars">
+          <div class="bar-row" data-k="run_pass"><span class="name">run-pass</span><span class="track"><span class="fill"></span></span><span class="v">—</span></div>
+          <div class="bar-row" data-k="check_pass"><span class="name">check-pass</span><span class="track"><span class="fill"></span></span><span class="v">—</span></div>
+          <div class="bar-row" data-k="build_pass"><span class="name">build-pass</span><span class="track"><span class="fill"></span></span><span class="v">—</span></div>
+          <div class="bar-row" data-k="compile_fail"><span class="name">compile-fail</span><span class="track"><span class="fill"></span></span><span class="v">—</span></div>
+        </div>
+      </div>
+      <div class="sec">
+        <h2>Status</h2>
+        <div class="status">
+          <p>Experimental. zustc targets Linux x86-64 and does not support all of Rust. Its checks (types, borrows, regions)
+            are partial, so it does not replace rustc for checking correctness. zust-analyzer implements part of what
+            rust-analyzer does.</p>
+        </div>
+        <p class="note">This repository's history spans about eight days, and almost all of its commits were made by
+          coding agents, with rustc's test suite as the spec and the KPIs checked on every change.
+          <a href="dashboard/">See the retrospective.</a></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="docs">
+    <h2>Documentation</h2>
+    <ul class="doclist">
+      <li><a href="https://github.com/mizchi/zust/blob/main/docs/language.md">The supported language</a></li>
+      <li><a href="https://github.com/mizchi/zust/blob/main/docs/architecture.md">Architecture</a></li>
+      <li><a href="https://github.com/mizchi/zust/blob/main/SUPPORT.md">What is supported, by area</a></li>
+      <li><a href="https://github.com/mizchi/zust/blob/main/PERFORMANCE.md">Performance and comparisons with rustc</a></li>
+      <li><a href="https://github.com/mizchi/zust/blob/main/docs/zurgo.md">zurgo</a></li>
+      <li><a href="https://github.com/mizchi/zust/blob/main/docs/reports/README.md">Work log (dated reports)</a></li>
+      <li><a href="https://github.com/mizchi/zust/blob/main/CONTRIBUTING.md">Contributing and roadmap</a></li>
+      <li><a href="https://github.com/mizchi/zust/blob/main/TODO.md">What is left</a></li>
+    </ul>
+  </section>
+</main>
+<footer class="wrap foot">zust is dual-licensed under Apache-2.0 and MIT · <a href="https://github.com/mizchi/zust">github.com/mizchi/zust</a></footer>
+  </div>
+</div>
+
+<script src="dev/bench/data.js"></script>
+<script>
+(() => {
+  // Latest numbers from the benchmark history (github-action-benchmark writes window.BENCHMARK_DATA).
+  const B = window.BENCHMARK_DATA;
+  if (B && B.entries) {
+    const latest = {};
+    for (const key of ['zustc', 'zust-analyzer']) {
+      const e = (B.entries[key] || []).slice(-1)[0];
+      if (!e) continue;
+      for (const b of e.benches) latest[b.name] = b;
+      if (key === 'zustc') document.getElementById('kpi-commit').textContent = e.commit.id.slice(0, 7);
+    }
+    const show = (b) => {
+      if (b.unit === 'ms') return b.value < 10 ? `${b.value.toFixed(2)} ms` : `${Math.round(b.value)} ms`;
+      if (b.unit === 'KiB') return b.value >= 1024 ? `${(b.value / 1024).toFixed(1)} MiB` : `${Math.round(b.value)} KiB`;
+      return `${b.value} ${b.unit}`;
+    };
+    document.querySelectorAll('[data-b]').forEach((n) => { const b = latest[n.dataset.b]; if (b) n.textContent = show(b); });
+  }
+  fetch('dashboard/data/ui.json').then((r) => (r.ok ? r.json() : Promise.reject())).then((rows) => {
+    const u = rows[rows.length - 1];
+    document.getElementById('ui-commit').textContent = u.commit.slice(0, 7);
+    document.querySelectorAll('#ui-bars .bar-row').forEach((row) => {
+      const v = u[row.dataset.k + '_rate']; if (v == null) return;
+      row.querySelector('.fill').style.width = v + '%';
+      row.querySelector('.v').textContent = v.toFixed(1) + '%';
+    });
+  }).catch(() => {});
+})();
+</script>
+<script src="nav.js"></script>
+</body>
+</html>
