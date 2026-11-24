@@ -1046,6 +1046,9 @@ fn anon_body_types<'a>(s: &'a [u8], toks: &[(u8, usize, usize)], k: usize) -> Op
     let tok = |k: usize| -> &'a [u8] { &s[toks[k].1..toks[k].2] };
     let is_sym = |k: usize, c: u8| toks[k].0 == 1 && s[toks[k].1] == c;
     let ident = |k: usize| toks[k].0 == 0;
+    // (an item's first word: after the body's `{`, a `;`, a `}`, an attribute's `]` or `pub`; not a const generic
+    // parameter, `fn invoke<R, const UNWIND_SAFE: bool>`, whose `<` is no bracket here)
+    let item_start = |j: usize| j == k + 1 || is_sym(j - 1, b';') || is_sym(j - 1, b'}') || is_sym(j - 1, b']') || is_sym(j - 1, b')') || (ident(j - 1) && tok(j - 1) == b"pub");
     let mut names: Vec<&[u8]> = vec![];
     // (and the consts and statics, which stay too)
     let mut values: Vec<&[u8]> = vec![];
@@ -1059,9 +1062,9 @@ fn anon_body_types<'a>(s: &'a [u8], toks: &[(u8, usize, usize)], k: usize) -> Op
                 break;
             }
             d -= 1;
-        } else if d == 0 && ident(j) && matches!(tok(j), b"struct" | b"enum" | b"union" | b"type") && j + 1 < toks.len() && ident(j + 1) {
+        } else if d == 0 && ident(j) && matches!(tok(j), b"struct" | b"enum" | b"union" | b"type") && j + 1 < toks.len() && ident(j + 1) && item_start(j) {
             names.push(tok(j + 1));
-        } else if d == 0 && ident(j) && matches!(tok(j), b"const" | b"static") && j + 2 < toks.len() {
+        } else if d == 0 && ident(j) && matches!(tok(j), b"const" | b"static") && j + 2 < toks.len() && item_start(j) {
             let n = if tok(j + 1) == b"mut" { j + 2 } else { j + 1 };
             if ident(n) && tok(n) != b"_" && is_sym(n + 1, b':') {
                 values.push(tok(n));

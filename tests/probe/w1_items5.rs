@@ -99,6 +99,14 @@ macro_rules! enum_and_let {
 }
 enum_and_let!();
 
+// (a macro's anonymous const whose fn has a const generic parameter, `fn invoke<const SAFE: bool>`, as `closures!`'s
+// `invoke<.., const UNWIND_SAFE: bool>`: the parameter is no const of the body, and its impl goes out)
+trait Inv { fn inv(&self) -> u8; }
+macro_rules! anon_const_generic {
+    () => { const _: () = { fn invoke<const SAFE: bool>() -> u8 { if SAFE { 1 } else { 2 } } impl Inv for u16 { fn inv(&self) -> u8 { invoke::<true>() + invoke::<false>() } } }; };
+}
+anon_const_generic!();
+
 // (a hand-written one-line anonymous const whose fn names a type of its own: read as before, not moved out)
 const _: () = { type Local = u32; fn helper(_: Local) {} };
 
@@ -168,6 +176,7 @@ fn main() {
     println!("{}", <&Box<Bx> as BxFlag>::flag(&&bx));
 
     println!("{}", ev_f());
+    println!("{}", 7u16.inv());
     let bp: *mut Big = NonNull::dangling().as_ptr();
     let bv = unsafe { Vec::<Big>::from_raw_parts(bp, 0, 0) };
     println!("{} {}", bv.len(), std::mem::align_of::<Big>());
