@@ -6815,7 +6815,10 @@ impl<'a> __CStrBytes for &'a [u8] {
 impl CString {
     /// (an inherent fn, not `impl Default`: the prelude keeps a trait's impl only where the trait is used)
     pub fn default() -> CString {
-        CString { b: vec![0u8] }
+        // (not `vec![0u8]`: the prelude selects vec!'s helpers by the program's text, which may not write `vec`)
+        let mut b = Vec::new();
+        b.push(0u8);
+        CString { b }
     }
     pub fn new<T: __CStrBytes>(t: T) -> Result<CString, NulError> {
         let b = t.__cstr_bytes();
@@ -6845,7 +6848,13 @@ impl CString {
         b
     }
     pub fn into_bytes_with_nul(self) -> Vec<u8> {
-        if self.b.is_empty() { vec![0u8] } else { self.b }
+        if self.b.is_empty() {
+            let mut b = Vec::new();
+            b.push(0u8);
+            b
+        } else {
+            self.b
+        }
     }
     pub fn as_ptr(&self) -> *const i8 {
         __exr_cstr_ptr(&self.b)

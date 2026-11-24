@@ -825,6 +825,26 @@ mod tests {
         assert!(out.contains("{ d__helper() }"), "{out}");
     }
 
+    /// Review of #147 (2): a braced struct is a type only, so `T()` calls a globbed fn T; a call is in the value
+    /// namespace (`facade::T()` with a type alias T and a fn T); a type alias's right-hand side is a type's place
+    #[test]
+    fn value_and_type_places() {
+        let src = "mod d {\n    pub mod funcs { pub fn T() -> u8 { 1 } }\n    pub mod types { pub struct T { pub x: u8 } pub type U = u8; }\n    pub mod one {\n        pub struct T { pub x: u8 }\n        use crate::funcs::*;\n        pub fn g() -> u8 { T() }\n    }\n    pub mod facade { pub use crate::funcs::*; pub mod inner { pub type T = u8; } pub use self::inner::*; }\n    pub fn h() -> u8 { crate::facade::T() }\n    pub mod alias {\n        fn T() {}\n        use crate::types::*;\n        pub type A = T;\n    }\n}\nfn main() {}\n";
+        let out = ren(src);
+        assert!(out.contains("pub fn d__one__g() -> u8 { d__funcs__T() }"), "{out}");
+        assert!(out.contains("-> u8 { d__funcs__T() }\n    pub mod alias"), "{out}");
+        assert!(out.contains("pub type d__alias__A = d__types__T;"), "{out}");
+    }
+
+    /// Review of #147 (2): a lookup that meets one in progress (a cycle) is not kept as a miss: `a` globs `b` then
+    /// `leaf`, `b` globs `a`; both `a::T` and `b::T` are leaf's
+    #[test]
+    fn a_cycle_does_not_cache_a_miss() {
+        let src = "mod d {\n    pub mod leaf { pub struct T; }\n    pub mod a { pub use crate::b::*; pub use crate::leaf::*; }\n    pub mod b { pub use crate::a::*; }\n    pub fn f() { let _x = crate::a::T; let _y = crate::b::T; }\n}\nfn main() {}\n";
+        let out = ren(src);
+        assert!(out.contains("let _x = d__leaf__T; let _y = d__leaf__T;"), "{out}");
+    }
+
     /// A const generic parameter (`fn read_words<W, const N: usize>`, `impl<const N: usize>`) is no item of the
     /// module: a module's `const N` elsewhere does not make it collide, and it keeps its name (rand_core 0.10's
     /// utils.rs became `rand_core__utils__N`, "cannot find constant")
@@ -2381,8 +2401,30 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let kw = if d.2 >= 2 && is_id(d.2 - 1, b"mut") { d.2 - 2 } else { d.2.saturating_sub(1) };
         let ns = if is_id(kw, b"fn") || is_id(kw, b"const") || is_id(kw, b"static") {
             NS_VALUE
-        } else if is_id(kw, b"enum") || is_id(kw, b"trait") || is_id(kw, b"type") {
+        } else if is_id(kw, b"enum") || is_id(kw, b"trait") || is_id(kw, b"type") || is_id(kw, b"union") {
             NS_TYPE
+        } else if is_id(kw, b"struct") {
+            // (a braced struct is a type only; a tuple or unit struct's name is its constructor too)
+            let mut q = d.2 + 1;
+            if q < toks.len() && is_sym(q, b'<') {
+                let mut depth = 0i32;
+                while q < toks.len() {
+                    if is_sym(q, b'<') {
+                        depth += 1;
+                    } else if is_sym(q, b'>') {
+                        depth -= 1;
+                        if depth == 0 {
+                            q += 1;
+                            break;
+                        }
+                    }
+                    q += 1;
+                }
+            }
+            while q < toks.len() && !is_sym(q, b'{') && !is_sym(q, b'(') && !is_sym(q, b';') {
+                q += 1;
+            }
+            if q < toks.len() && is_sym(q, b'{') { NS_TYPE } else { NS_ANY }
         } else {
             NS_ANY
         };
@@ -2408,11 +2450,21 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 mod_of_path: &mod_of_path,
                 mod_alias: &mod_alias,
                 globs: $g,
+                adj: {
+                    let mut a: LMap<usize, Vec<(usize, usize)>> = LMap::default();
+                    for &g in $g.iter() {
+                        a.entry(g.0).or_default().push(g);
+                    }
+                    a
+                },
+                cycles: Default::default(),
                 renamed: &renamed_map,
                 def_ns: &def_ns,
                 imports: $i,
                 items: Default::default(),
                 modules: Default::default(),
+                active_items: Default::default(),
+                active_mods: Default::default(),
             }
         };
     }
@@ -2469,7 +2521,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 }
             }
         }
-        let before = globs.len();
+        let before = (globs.len(), vis.globs.len());
         for (g, is_pub) in added {
             if is_pub {
                 vis.globs.insert(g);
@@ -2478,7 +2530,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 globs.push(g);
             }
         }
-        if globs.len() == before {
+        // (a glob made visible by this pass counts too: a later one may go through it)
+        if (globs.len(), vis.globs.len()) == before {
             break;
         }
     }
@@ -2968,7 +3021,14 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         // (a type's place looks only at types: `*mut stat` beside `fn stat` is the struct a glob brings. Not a path a `(`
         //  follows, after its last segment: a call, `0 < dep::f()`)
         let call = j + 1 < toks.len() && (is_sym(j + 1, b'(') || is_sym(j + 1, b'!'));
-        let want = if !call && type_place_before(&toks, s, if leading { k - 2 } else { k }) { NS_TYPE } else { NS_ANY };
+        // (a call's name is a value (a fn, a tuple struct's constructor); a type's place, a type)
+        let want = if call {
+            NS_VALUE
+        } else if type_place_before(&toks, s, if leading { k - 2 } else { k }) {
+            NS_TYPE
+        } else {
+            NS_ANY
+        };
         if segs.len() >= 2 {
             // 接頭辞のいちばん長いモジュールから見る
             let mut done = false;
@@ -2983,7 +3043,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     }
                     // (its item, what it imports, or what its globs pass on, globs of globs too: libc's root
                     //  `pub use unix::*;` then unix's `pub use self::linux::*;` give `crate::gid_t` / `libc::passwd`)
-                    if let Some(nn) = names.lookup_from(sc, m, &segs[cut], want) {
+                    // (a segment a path goes on after names a type or module: `m::E::V(..)`'s E is no call)
+                    let w = if cut + 1 < segs.len() { NS_TYPE } else { want };
+                    if let Some(nn) = names.lookup_from(sc, m, &segs[cut], w) {
                         // segs[..=cut] を新しい名前にする (`::re::label`: the leading `::` too, as the name is the item's)
                         repl.push((if leading { k - 2 } else { k }, k + 3 * cut, nn));
                         done = true;
@@ -3033,7 +3095,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             let in_block = || if is_def { None } else { block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n && b.4 == sc).max_by_key(|b| b.0).map(|b| b.3.clone()) };
             // (the scope's own item, its import, or what its globs pass on, globs of globs too, all of them compared
             //  (two distinct is ambiguous): libc's unix sees `time_t` of linux_like/linux/gnu/b64; a definition is its own)
-            let nn = in_block().or_else(|| if is_def { renamed_in(sc, n) } else { names.lookup(sc, n, want) });
+            // (the first segment of a path that goes on is a type or module: `E::V(..)`)
+            let w = if j > k { NS_TYPE } else { want };
+            let nn = in_block().or_else(|| if is_def { renamed_in(sc, n) } else { names.lookup(sc, n, w) });
             // (not a macro's name: `use core::panic as p;` then `p!()` stays as it is written)
             let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));
             // (a name before a `:` only when it is no field: the walk back to a `where` is for a name that is renamed)
@@ -3479,7 +3543,13 @@ struct Names<'a> {
     mod_pub: &'a [bool],
     mod_of_path: &'a LMap<Vec<Vec<u8>>, usize>,
     mod_alias: &'a LMap<(usize, Vec<u8>), usize>,
+    #[allow(dead_code)]
     globs: &'a [(usize, usize)],
+    /// the globs by the module they are written in
+    adj: LMap<usize, Vec<(usize, usize)>>,
+    /// how many lookups met one in progress (a cycle): a result found then is not kept, it may lack what the
+    /// unfinished lookup gives
+    cycles: std::cell::Cell<usize>,
     /// the globs, aliases, items and imports written `pub`
     vis: &'a Vis,
     renamed: &'a LMap<(usize, Vec<u8>), Vec<u8>>,
@@ -3488,6 +3558,9 @@ struct Names<'a> {
     imports: &'a LMap<(usize, Vec<u8>), (Vec<u8>, u8)>,
     items: std::cell::RefCell<LMap<(usize, usize, Vec<u8>, u8), GlobHit>>,
     modules: std::cell::RefCell<LMap<(usize, usize, Vec<u8>), ModHit>>,
+    /// the lookups in progress
+    active_items: std::cell::RefCell<LSet<(usize, usize, Vec<u8>, u8)>>,
+    active_mods: std::cell::RefCell<LSet<(usize, usize, Vec<u8>)>>,
 }
 
 /// What is written `pub` (rename_module_collisions), for Names
@@ -3523,7 +3596,7 @@ impl<'a> Names<'a> {
     /// m's globs that viewer sees
     fn globs_of(&self, viewer: usize, m: usize) -> impl Iterator<Item = usize> + '_ {
         let inner = self.within(viewer, m);
-        self.globs.iter().filter(move |g| g.0 == m && (inner || self.vis.globs.contains(g))).map(|g| g.1)
+        self.adj.get(&m).into_iter().flatten().filter(move |g| inner || self.vis.globs.contains(g)).map(|g| g.1)
     }
 
     /// The module seg that m's globs bring in (libc: `pub use new::*;` at the root, `pub(crate) use linux_uapi::*;` in
@@ -3531,8 +3604,13 @@ impl<'a> Names<'a> {
     fn module_via_globs(&self, viewer: usize, m: usize, seg: &[u8]) -> ModHit {
         let key = (viewer, m, seg.to_vec());
         if let Some(&r) = self.modules.borrow().get(&key) {
+            if r == ModHit::None && self.active_mods.borrow().contains(&key) {
+                self.cycles.set(self.cycles.get() + 1);
+            }
             return r;
         }
+        let c0 = self.cycles.get();
+        self.active_mods.borrow_mut().insert(key.clone());
         self.modules.borrow_mut().insert(key.clone(), ModHit::None);
         let mut found = ModHit::None;
         let targets: Vec<usize> = self.globs_of(viewer, m).collect();
@@ -3552,7 +3630,12 @@ impl<'a> Names<'a> {
                 break;
             }
         }
-        self.modules.borrow_mut().insert(key, found);
+        self.active_mods.borrow_mut().remove(&key);
+        if self.cycles.get() == c0 {
+            self.modules.borrow_mut().insert(key, found);
+        } else {
+            self.modules.borrow_mut().remove(&key);
+        }
         found
     }
 
@@ -3597,8 +3680,13 @@ impl<'a> Names<'a> {
     fn via_globs(&self, viewer: usize, m: usize, n: &[u8], want: u8) -> GlobHit {
         let key = (viewer, m, n.to_vec(), want);
         if let Some(r) = self.items.borrow().get(&key) {
+            if *r == GlobHit::None && self.active_items.borrow().contains(&key) {
+                self.cycles.set(self.cycles.get() + 1);
+            }
             return r.clone();
         }
+        let c0 = self.cycles.get();
+        self.active_items.borrow_mut().insert(key.clone());
         self.items.borrow_mut().insert(key.clone(), GlobHit::None);
         let mut found = GlobHit::None;
         let targets: Vec<usize> = self.globs_of(viewer, m).collect();
@@ -3609,7 +3697,12 @@ impl<'a> Names<'a> {
                 break;
             }
         }
-        self.items.borrow_mut().insert(key, found.clone());
+        self.active_items.borrow_mut().remove(&key);
+        if self.cycles.get() == c0 {
+            self.items.borrow_mut().insert(key, found.clone());
+        } else {
+            self.items.borrow_mut().remove(&key);
+        }
         found
     }
 
@@ -3681,6 +3774,22 @@ fn type_place_before(toks: &[(u8, usize, usize)], s: &[u8], q: usize) -> bool {
     }
     if id(p, b"as") || after(p) {
         return true;
+    }
+    // (the right-hand side of a type alias, `type Alias<T> = T;`: back over its name and generics to `type`, within
+    //  the item)
+    if sym(p, b'=') {
+        let mut j = p;
+        let mut n = 0;
+        while j > 0 && n < 64 {
+            j -= 1;
+            n += 1;
+            if id(j, b"type") {
+                return true;
+            }
+            if sym(j, b';') || sym(j, b'{') || sym(j, b'}') || sym(j, b'=') || sym(j, b'(') {
+                return false;
+            }
+        }
     }
     // (`&T`, `&mut T`, `&'a T`, `&'a mut T`)
     if id(p, b"mut") && p >= 1 {

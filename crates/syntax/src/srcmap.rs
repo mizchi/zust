@@ -698,7 +698,8 @@ fn blank_mod_decls(src: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, Vec<(
             }
             // (a private `mod x;` stays private where its file goes in: `pub(self) mod x { .. }`, so a glob of the module
             //  does not bring it (libc's unix/linux_like `mod linux;` beside new's `pub(crate) mod linux;`))
-            let private = b == k;
+            // (`pub(self)` is private too)
+            let private = b == k || src[toks[b].1..toks[k].1].split_whitespace().collect::<String>() == "pub(self)";
             let (b2, cfg_test, path_attr) = attrs_before(src, s, &toks, b);
             b = b2;
             // (`#[macro_use] mod m;`: m's macros are usable right after the declaration, so its file goes in at that
@@ -814,6 +815,17 @@ mod circular_tests {
         let (src, _) = super::load_crate(&dir.join("main.rs"), "src/main.rs", &cfg).unwrap();
         assert!(src.contains("plain_fn"), "{src}");
         assert!(!src.contains("fancy_fn"), "{src}");
+    }
+
+    /// A file module keeps its privacy where its file goes in: `mod a;` and `pub(self) mod b;` are `pub(self) mod`,
+    /// `pub mod c;` and `pub(crate) mod e;` are `pub mod` (review of #147)
+    #[test]
+    fn file_modules_keep_their_privacy() {
+        let dir = tmp_crate("mod_privacy", &[("main.rs", "mod a;\npub(self) mod b;\npub mod c;\npub(crate) mod e;\nfn main() {}\n"), ("a.rs", ""), ("b.rs", ""), ("c.rs", ""), ("e.rs", "")]);
+        let (src, _) = super::load_crate(&dir.join("main.rs"), "src/main.rs", &crate::cfg::CfgSet::default()).unwrap();
+        for (m, v) in [("a", "pub(self)"), ("b", "pub(self)"), ("c", "pub"), ("e", "pub")] {
+            assert!(src.contains(&format!("{v} mod {m} {{")), "{m}: {src}");
+        }
     }
 
     /// The hoisted declaration goes with its visibility: `macro_rules! declare { () => { pub mod child; } }` left
