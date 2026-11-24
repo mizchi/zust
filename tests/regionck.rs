@@ -3651,3 +3651,64 @@ fn part21_ref_mut_let_invariant() {
     let d = check("struct Foo<T>(T);\nfn ok1<'a>(mut x: Foo<fn(&'a str)>) {\n    let Foo(ref mut y): Foo<fn(&'a str)> = x;\n    let _ = y;\n    let mut t = (1u32, 2u32);\n    let (ref mut a, _b): (u32, u32) = t;\n    *a = 3;\n    let s: &'static u32 = &5;\n    let (ref mut r,): (&'a u32,) = (s,);\n    let _ = r;\n    let _ = &mut x;\n}\nfn bad2<'a, 'b: 'a>(mut x: Foo<&'b u32>) {\n    let Foo(ref mut y): Foo<&'a u32> = x;\n    let _ = y;\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 14 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
 }
+
+#[test]
+fn part22_projection_annotations() {
+    // (a projection written as a `let`'s type whose associated type's value names lifetimes: of the regions the value
+    // writes, the impl's lifetimes those the self type writes (nll/user-annotations/normalization.rs))
+    let d = check("trait Foo { type Out; }\nimpl Foo for () { type Out = &'static u32; }\nimpl<'a> Foo for &'a () { type Out = &'a u32; }\nfn main() {\n    let a = 22;\n    let _: <() as Foo>::Out = &a;\n}\nfn h() {\n    let a = 22;\n    let _: <&'static () as Foo>::Out = &a;\n}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![6, 10] && d.iter().all(|x| x.1.contains("does not live long enough")), "{d:?}");
+    let d = check("trait Foo { type Out; }\nimpl<'a> Foo for &'a () { type Out = &'a u32; }\nfn g<'a>(r: &'a u32) -> &'static u32 {\n    let x: <&'a () as Foo>::Out = r;\n    let y: <&'static () as Foo>::Out = x;\n    y\n}\nfn main() { let v = 1; g(&v); }\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("trait Foo { type Out; }\nimpl Foo for () { type Out = &'static u32; }\nimpl<'a> Foo for &'a () { type Out = &'a u32; }\nstatic S: u32 = 3;\nfn f<'a>(r: &'a u32) -> &'a u32 {\n    let x: <&'a () as Foo>::Out = r;\n    let a = 22;\n    let _: <&'_ () as Foo>::Out = &a;\n    let _: <() as Foo>::Out = &S;\n    let _: <() as Foo>::Out = &5;\n    x\n}\nfn main() { let v = 1; f(&v); }\n"), vec![]);
+    // (a parameter of such a type: what its value implies is known (`'a: 'static` here); main had a false error)
+    assert_eq!(check("trait Tr {\n    type Ty;\n}\nimpl<T: 'static> Tr for T {\n    type Ty = &'static T;\n}\nfn test<'a>(x: &'a u8, _wf: <&'a u8 as Tr>::Ty) -> &'static u8 { x }\nfn main() {\n    let _: &'static u8 = test(&3, &&3);\n}\n"), vec![]);
+}
+
+#[test]
+fn part22_projection_review() {
+    // (a `let` with no initializer: the projection's tree, which the assignment flows into)
+    let d = check("trait Foo { type Out; }\nimpl Foo for () { type Out = &'static u32; }\nfn f(r: &u32) {\n    let x: <() as Foo>::Out;\n    x = r;\n    let _ = x;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("trait Foo { type Out; }\nimpl Foo for () { type Out = &'static u32; }\nstatic S: u32 = 3;\nfn f() -> u32 {\n    let x: <() as Foo>::Out;\n    x = &S;\n    *x\n}\nfn main() {}\n"), vec![]);
+    // (an impl's type argument in its self type: the written type's part there, `&'static u32` of `W<&'static u32>`)
+    let d = check("trait Foo { type Out; }\nstruct W<T>(T);\nimpl<T> Foo for W<T> { type Out = (&'static u32, T); }\nfn f(anchor: &'static u32) {\n    let local = 3;\n    let _: <W<&'static u32> as Foo>::Out = (anchor, &local);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("does not live long enough"), "{d:?}");
+    // (an impl's lifetime next to a type argument with regions: matched where the self type has it)
+    let d = check("trait Foo { type Out; }\nstruct W<'a, T>(&'a u8, T);\nimpl<'a, T> Foo for W<'a, T> { type Out = &'a u32; }\nfn f(r: &u32) {\n    let _: <W<'static, &'static u32> as Foo>::Out = r;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (an impl's lifetime in a fn pointer self type)
+    let d = check("trait Foo { type Out; }\nimpl<'a> Foo for fn(&'a ()) { type Out = &'a u32; }\nfn f(r: &u32) {\n    let _: <fn(&'static ()) as Foo>::Out = r;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("trait Foo { type Out; }\nimpl<'a> Foo for fn(&'a ()) { type Out = &'a u32; }\nstatic S: u32 = 1;\nfn f<'b>(r: &'b u32) -> &'b u32 {\n    let _: <fn(&'static ()) as Foo>::Out = &S;\n    let x: <fn(&'b ()) as Foo>::Out = r;\n    x\n}\nfn main() {}\n"), vec![]);
+    assert_eq!(check("trait Foo { type Out; }\nstruct W<T>(T);\nimpl<T> Foo for W<T> { type Out = (&'static u32, T); }\nstruct V<'a, T>(&'a u8, T);\nimpl<'a, T> Foo for V<'a, T> { type Out = &'a u32; }\nstatic S: u32 = 3;\nfn f<'b>(anchor: &'static u32, r: &'b u32) -> &'b u32 {\n    let _: <W<&'static u32> as Foo>::Out = (anchor, anchor);\n    let _: <W<&'b u32> as Foo>::Out = (anchor, r);\n    let _: <V<'static, &'b u32> as Foo>::Out = &S;\n    let x: <V<'b, &'static u32> as Foo>::Out = r;\n    x\n}\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part22_closure_fnptr_named() {
+    // (a fn pointer type that names a lifetime where a closure annotates its parameter: the type's region outlives
+    // the annotation's, as the closure takes what the type gives. In a cast of a local, a `let`, a cast and a call)
+    for (src, line) in [
+        ("fn f<'a>(_: &'a u32) {\n    let c = |_: &'static u32| {};\n    let _ = c as fn(&'a u32);\n}\nfn main() {}\n", 3),
+        ("fn f<'a>(_: &'a u32) {\n    let _: fn(&'a u32) = |_: &'static u32| {};\n}\nfn main() {}\n", 2),
+        ("fn f<'a>(_: &'a u32) {\n    let _ = (|_: &'static u32| {}) as fn(&'a u32);\n}\nfn main() {}\n", 2),
+        ("fn want<'a>(_: &'a u32, _f: fn(&'a u32)) {}\nfn f<'a>(x: &'a u32) {\n    want(x, |_: &'static u32| {});\n}\nfn main() {}\n", 3),
+    ] {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].0 == line && d[0].1.contains("lifetime may not live long enough"), "{src}: {d:?}");
+    }
+    let g = |w: &str| format!("fn f<'a, 'b>(_: &'a u32, _: &'b u32) where {w} {{\n    let _: fn(&'a u32) = |_: &'b u32| {{}};\n}}\nfn g<'a, 'b>(_: &'a u32, _: &'b u32) where {w} {{\n    let c = |_: &'b u32| {{}};\n    let _ = c as fn(&'a u32);\n}}\nfn main() {{}}\n");
+    let d = check(&g("'b: 'a"));
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![2, 6], "{d:?}");
+    assert_eq!(check(&g("'a: 'b")), vec![]);
+    assert_eq!(check("fn f<'a>(_: &'a u32) {\n    let c = |_: &'a u32| {};\n    let _ = c as fn(&'static u32);\n    let _: fn(&'a u32) = |_: &'a u32| {};\n}\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part22_local_closure_cast() {
+    // (a closure held by a local and cast to a fn pointer type: its annotated parameters against the regions the type
+    // binds, reported at the cast (E0308 in rustc, there))
+    let d = check("fn main() {\n    let c = |_: &'static u32| {};\n    let f = c as fn(&u32);\n    f(&1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let c = |_: &u32| {};\n    let f = c as fn(&u32);\n    f(&1);\n    let d = |_: &'static u32| {};\n    let g = d as fn(&'static u32);\n    g(&1);\n}\n"), vec![]);
+}

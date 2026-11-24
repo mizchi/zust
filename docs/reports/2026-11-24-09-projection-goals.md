@@ -57,9 +57,9 @@ type of one name, the first impl found answered for both.
 
 ## Measured
 
-`bench/rust_ui.py --check` against main (b376a37), both run in this environment:
+`bench/rust_ui.py --check` on main (a6b265c) merged in:
 
-- compile-fail 4695 → 4702 (+7), 0 regressions:
+- compile-fail +7 against main's baseline, 0 regressions:
   - `error-codes/E0271.rs`
   - `associated-types/mismatch-two-relevant-impls.rs`
   - `associated-types/associated-types-eq-hr.rs`
@@ -69,9 +69,9 @@ type of one name, the first impl found answered for both.
   - `where-clauses/where-for-self-2.rs` (`where for<'a> &'a T: Bar`; rustc says "not general enough", zustc,
     which has no lifetimes in types, says the bound does not hold, on the same line)
 - run-pass, check-pass and build-pass unchanged. The baseline and the ratchet were rewritten (compile-fail ratchet
-  4639 → 4646).
+  4640 → 4647).
 
-Instructions of `zustc check -j 1` (cachegrind), main against this change:
+Instructions of `zustc check -j 1` (cachegrind), main (b376a37) against this change:
 
 | | main | this | change |
 |---|---:|---:|---:|

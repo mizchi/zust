@@ -39,9 +39,9 @@ impl Tr2 for u8 { type A = u16; }          // E0277、u16: Bar
 
 ## 測った結果
 
-main（b376a37）に対する `bench/rust_ui.py --check`。どちらもこの環境で走らせた:
+main（a6b265c）をマージした上での `bench/rust_ui.py --check`:
 
-- compile-fail 4695 → 4702（+7）、回帰は 0 件:
+- compile-fail は main のベースラインに対して +7 件、回帰は 0 件:
   - `error-codes/E0271.rs`
   - `associated-types/mismatch-two-relevant-impls.rs`
   - `associated-types/associated-types-eq-hr.rs`
@@ -49,9 +49,9 @@ main（b376a37）に対する `bench/rust_ui.py --check`。どちらもこの環
   - `impl-trait/in-trait/dont-probe-missing-item-name-4.rs`
   - `suggestions/imm-ref-trait-object-literal-bound-regions.rs`（`where for<'b> &'b X: Trait`）
   - `where-clauses/where-for-self-2.rs`（`where for<'a> &'a T: Bar`。rustc は「not general enough」と言う。型にライフタイムを持たない zustc は、同じ行で境界が成り立たないと言う）
-- run-pass、check-pass、build-pass は変わらず。ベースラインとラチェットを書き直した（compile-fail のラチェットは 4639 → 4646）。
+- run-pass、check-pass、build-pass は変わらず。ベースラインとラチェットを書き直した（compile-fail のラチェットは 4640 → 4647）。
 
-`zustc check -j 1` の命令数（cachegrind）、main とこの変更:
+`zustc check -j 1` の命令数（cachegrind）、main（b376a37）とこの変更:
 
 | | main | この変更 | 変化 |
 |---|---:|---:|---:|

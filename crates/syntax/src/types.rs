@@ -458,6 +458,10 @@ pub struct Summary {
     /// An impl's constants whose types name its lifetimes (`impl<'a> Foo<'a> { const C: &'a u32 }`): the region codes of
     /// the type against the impl's lifetimes (a use instantiates them with those its path writes: `<Foo<'a>>::C`)
     pub const_regions: Vec<(String, Vec<u8>)>,
+    /// An impl's associated types whose values name its lifetimes (`impl<'a> Foo for &'a () { type Out = &'a u32; }`,
+    /// `type Out = &'static u32`): by the index in assocs, the region codes of the value against the impl's lifetimes
+    /// (a projection written in a body instantiates them with those its self type writes: `<&'static () as Foo>::Out`)
+    pub assoc_regions: Vec<(u64, Vec<u8>)>,
     /// The concrete (non-parameter, non-primitive) types bounded in the item's where clauses (`where Local: Any`):
     /// Program checks that they exist
     pub where_types: Vec<String>,

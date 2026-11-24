@@ -500,6 +500,13 @@ pub struct Program {
     /// Summary::const_regions, by constant: the codes of its type against its impl's lifetimes, and the impl's self
     /// type's slots (which say which of them a use's path writes)
     pub const_regions: FxMap<u32, (Vec<u8>, Vec<u8>)>,
+    /// Summary::assoc_regions, by associated type (its index in assocs): the codes of its value against its impl's
+    /// lifetimes, and the impl's self type's codes
+    pub assoc_regions: FxMap<u32, (Vec<u8>, Vec<u8>)>,
+    /// The item (an impl's member) each associated type is defined in, by its index in assocs: a function's cache
+    /// key holds the definitions of the program's own, whose values (and their lifetimes) the function's types and
+    /// region check read
+    pub assoc_items: Vec<u32>,
     /// The declared type (as written) of a constant whose type is not known yet during layout (`[u8; 1]`, `(u8,)`):
     /// what an element or field of it is before its type is resolved
     pub early_syn: FxMap<u32, crate::types::TySyn>,
@@ -1121,6 +1128,8 @@ impl Program {
             static_copy: FxSet::default(),
             static_self_consts: FxMap::default(),
             const_regions: FxMap::default(),
+            assoc_regions: FxMap::default(),
+            assoc_items: Vec::new(),
             early_syn: FxMap::default(),
             alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
@@ -1465,6 +1474,8 @@ impl Program {
                     let (ngen, ngat) = gat_split(&gn);
                     let trait_name = impl_trait_name(&items[ii].kind, sums);
                     p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat, trait_name });
+                    p.note_assoc_regions(items, sums, ii, k);
+                    p.assoc_items.push(ii as u32);
                     early.push((ii, k));
                 }
             }
@@ -1603,6 +1614,8 @@ impl Program {
                     ngat,
                     trait_name: impl_trait_name(&it.kind, sums),
                 });
+                p.note_assoc_regions(items, sums, ii, k);
+                p.assoc_items.push(ii as u32);
             }
         }
         // (the impls of each trait for each type so far: their self types and trait arguments, and parameters)
@@ -4752,6 +4765,16 @@ impl Program {
     }
 
     /// 具体型 t の関連型 name (`impl Iterator for Counter { type Item = u32; }` なら u32)
+    /// The region codes of the associated type just pushed (the k-th of item ii's summary), if its value names a
+    /// lifetime (Summary::assoc_regions), with its impl's self type's
+    fn note_assoc_regions(&mut self, items: &[SrcItem], sums: &[Summary], ii: usize, k: usize) {
+        let Some((_, codes)) = sums[ii].assoc_regions.iter().find(|x| x.0 as usize == k) else { return };
+        let crate::lexer::ItemKind::ImplMember(h) = items[ii].kind else { return };
+        // (an impl that names no lifetime has no header regions: no self slots)
+        let self_slots = sums[h as usize].hdr_regions.as_ref().map(|r| r.self_slots.clone()).unwrap_or_default();
+        self.assoc_regions.insert(self.assocs.len() as u32 - 1, (codes.clone(), self_slots));
+    }
+
     pub fn assoc_of(&self, t: Ty, name: &str) -> Option<Ty> {
         self.assoc_of_with(t, name, true)
     }
