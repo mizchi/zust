@@ -496,6 +496,10 @@ pub struct Program {
     /// Summary::assoc_regions, by associated type (its index in assocs): the codes of its value against its impl's
     /// lifetimes, and the impl's self type's codes
     pub assoc_regions: FxMap<u32, (Vec<u8>, Vec<u8>)>,
+    /// The item (an impl's member) each associated type is defined in, by its index in assocs: a function's cache
+    /// key holds the definitions of the program's own, whose values (and their lifetimes) the function's types and
+    /// region check read
+    pub assoc_items: Vec<u32>,
     /// The declared type (as written) of a constant whose type is not known yet during layout (`[u8; 1]`, `(u8,)`):
     /// what an element or field of it is before its type is resolved
     pub early_syn: FxMap<u32, crate::types::TySyn>,
@@ -996,6 +1000,7 @@ impl Program {
             static_self_consts: FxMap::default(),
             const_regions: FxMap::default(),
             assoc_regions: FxMap::default(),
+            assoc_items: Vec::new(),
             early_syn: FxMap::default(),
             alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
@@ -1339,6 +1344,7 @@ impl Program {
                     let (ngen, ngat) = gat_split(&gn);
                     p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat });
                     p.note_assoc_regions(items, sums, ii, k);
+                    p.assoc_items.push(ii as u32);
                     early.push((ii, k));
                 }
             }
@@ -1477,6 +1483,7 @@ impl Program {
                     ngat,
                 });
                 p.note_assoc_regions(items, sums, ii, k);
+                p.assoc_items.push(ii as u32);
             }
         }
         // (the impls of each trait for each type so far: their self types and trait arguments, and parameters)
