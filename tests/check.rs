@@ -2040,3 +2040,19 @@ fn method_of_an_unbounded_type_parameter() {
         "where clause"
     );
 }
+
+#[test]
+fn attribute_paths_that_resolve_to_nothing() {
+    // (E0433: an attribute written as a path whose first segment is no tool and no module, or a module's that has no
+    // such attribute; each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, format!("{m} (E0433)")));
+    assert_eq!(first("#[foo::bar]\nfn main() {}\n"), e(1, 3, "cannot find module or crate `foo` in this scope"), "unknown");
+    assert_eq!(first("mod existent {}\n\n#[existent::nonexistent]\nfn main() {}\n"), e(3, 13, "cannot find `nonexistent` in `existent`"), "a module's");
+    assert_eq!(first("mod rustfmt {}\n\n#[rustfmt::skip]\nfn main() {}\n"), e(3, 12, "cannot find `skip` in `rustfmt`"), "a module shadows a tool");
+    // (a tool's attribute)
+    assert_eq!(first("#[rustfmt::skip]\n#[allow(clippy::all)]\n#[diagnostic::on_unimplemented(message = \"x\")]\ntrait T {}\nfn main() {}\n"), None, "tools");
+}

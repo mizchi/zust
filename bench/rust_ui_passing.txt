@@ -533,6 +533,7 @@ compile-fail	attributes/attr-order-must-use.rs
 compile-fail	attributes/attrs-on-params.rs
 compile-fail	attributes/attrs-with-no-formal-in-generics-3.rs
 check-pass	attributes/builtin-attr-macro-value-issue-145922.rs
+compile-fail	attributes/builtin-attribute-prefix.rs
 check-pass	attributes/cfg-attr-feature-gate-and-rustc-dummy.rs
 compile-fail	attributes/check-cfg_attr-ice.rs
 compile-fail	attributes/cold-attribute-application-54044.rs
@@ -540,10 +541,12 @@ compile-fail	attributes/crate-type-delimited.rs
 compile-fail	attributes/crate-type-empty.rs
 compile-fail	attributes/crate-type-macro-not-crate.rs
 compile-fail	attributes/crate-type-non-crate.rs
+compile-fail	attributes/custom_attr_multisegment_error.rs
 check-pass	attributes/decl_macro_ty_in_attr_macro.rs
 compile-fail	attributes/expected-word.rs
 compile-fail	attributes/export/crate-type.rs
 check-pass	attributes/fn-align-nameres-ambiguity-143834.rs
+compile-fail	attributes/illegal-macro-use.rs
 compile-fail	attributes/inline-attribute-enum-variant-error.rs
 run-pass	attributes/inline-main.rs
 compile-fail	attributes/inline/attr-usage-inline.rs
@@ -7524,7 +7527,9 @@ run-pass	threads-sendsync/yield2.rs
 check-pass	tool-attributes/diagnostic_item2.rs
 compile-fail	tool-attributes/tool-attributes-misplaced-1.rs
 compile-fail	tool-attributes/tool-attributes-misplaced-2.rs
+compile-fail	tool-attributes/tool-attributes-shadowing.rs
 run-pass	tool-attributes/tool_lints-rpass.rs
+compile-fail	tool-attributes/unknown-tool-name.rs
 check-pass	trait-bounds/anonymous-parameters-13775.rs
 compile-fail	trait-bounds/argument-with-unnecessary-method-call.rs
 compile-fail	trait-bounds/deep-level-send-bound-check-issue-40827.rs

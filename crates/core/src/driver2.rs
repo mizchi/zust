@@ -1317,6 +1317,13 @@ impl Session2 {
                     return Err(e);
                 }
             }
+            // (E0433: an outer attribute's path whose first segment is no tool and no module of the crate's
+            // (`#[foo::bar]`), or a module's that has no such attribute (`#[existent::nonexistent]`))
+            if head.starts_with("#[") {
+                if let Some(e) = attr_path_error(&src, src0, it.start, leading_attrs(head).len(), it.line) {
+                    return Err(e);
+                }
+            }
             // (an unstable ABI: `extern "rust-cold" fn`)
             // (`extern` among the item's first names, `pub unsafe extern "C" fn`, from the lexer's identifiers: no
             // search of its text)
@@ -8649,6 +8656,56 @@ fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
         Some(i) => format!("{}:1: {rest}", line + text[..i].matches('\n').count()),
         None => e.to_string(),
     }
+}
+
+/// E0433 of an attribute written as a path, in src[start..start + len] (an item's outer attributes): "cannot find
+/// module or crate `foo` in this scope" at its first segment when that is no tool (rustfmt, clippy, diagnostic, ..,
+/// or one `register_tool` names) and no module of the crate's (in `src0`, the source as written); "cannot find `bar`
+/// in `m`" at its second when the first is a module (which shadows a tool of its name). Not a path from `std` /
+/// `core` / `crate` and the like
+fn attr_path_error(src: &str, src0: &str, start: usize, len: usize, line: usize) -> Option<String> {
+    let text = src.get(start..start + len)?;
+    if !text.contains("::") {
+        return None;
+    }
+    let toks = crate::lexer::tokenize(text.as_bytes());
+    let tk = |k: usize| toks.get(k).map_or("", |t| &text[t.1..t.2]);
+    let id = |k: usize| toks.get(k).is_some_and(|t| t.0 == 0);
+    let word_in = |hay: &str, w: &str| {
+        let b = hay.as_bytes();
+        let ok = |c: Option<&u8>| c.is_none_or(|&c| !(c == b'_' || c.is_ascii_alphanumeric()));
+        hay.match_indices(w).any(|(i, _)| ok(i.checked_sub(1).and_then(|j| b.get(j))) && ok(b.get(i + w.len())))
+    };
+    let module = |m: &str| src0.match_indices("mod").any(|(i, _)| {
+        let b = src0.as_bytes();
+        (i == 0 || !(b[i - 1] == b'_' || b[i - 1].is_ascii_alphanumeric())) && src0[i + 3..].starts_with(char::is_whitespace) && {
+            let r = src0[i + 3..].trim_start();
+            r.starts_with(m) && !r[m.len()..].starts_with(|c: char| c == '_' || c.is_alphanumeric())
+        }
+    });
+    for k in 0..toks.len() {
+        if !(tk(k) == "#" && tk(k + 1) == "[" && id(k + 2) && tk(k + 3) == ":" && tk(k + 4) == ":" && id(k + 5)) {
+            continue;
+        }
+        let (first, second) = (tk(k + 2), tk(k + 5));
+        if matches!(first, "std" | "core" | "alloc" | "crate" | "self" | "super" | "unsafe") {
+            continue;
+        }
+        let tool = matches!(first, "rustfmt" | "clippy" | "rustdoc" | "rust_analyzer" | "diagnostic" | "miri") || (src0.contains("register_tool") && word_in(src0, first) && src0.contains(&format!("register_tool({first}")));
+        let at = |j: usize| {
+            let i = start + toks[j].1;
+            (line + text[..toks[j].1].matches('\n').count(), i - src[..i].rfind('\n').map_or(0, |p| p + 1) + 1)
+        };
+        if module(first) {
+            let (l, c) = at(k + 5);
+            return Some(format!("{l}:{c}: cannot find `{second}` in `{first}` (E0433)"));
+        }
+        if !tool {
+            let (l, c) = at(k + 2);
+            return Some(format!("{l}:{c}: cannot find module or crate `{first}` in this scope (E0433)"));
+        }
+    }
+    None
 }
 
 /// The outer attributes an item's text starts with (`#[..]` groups, with the space between them)
