@@ -441,12 +441,23 @@ type Person = { name: String, age: i32 }
   `${p.name} (${p.age}): ${n * 2}`
 }
 // JS(--all-js):  return `${p.name} (${p.age}): ${BigInt.asIntN(64, n * 2n)}`;
-// Rust:           format!("{} ({}): {}", &p.name[..], p.age, (n).wrapping_mul(2i64))
+// Rust:           { let mut __zs_t = String::new(); __zs_t.push_str(&p.name[..]); __zs_t.push_str(" ("); zs_push_int(&mut __zs_t, (p.age) as i64); .. }
 ```
 
 - `${..}` に書けるのは、文字列と、`to_string` を持つもの(整数、浮動小数点数、bool、`Num` などの bound つきの型変数)。書き方は `to_string` と同じ
   - 配列、レコード、enum などは型エラー(何を書くかを選んでから `${..}` に入れる)
-- JS ではテンプレートリテラルのまま出す。`@wasm` では `format!` にし、穴は借りて渡す
+- JS ではテンプレートリテラルのまま出す。`@wasm` では `String` に順に `push_str` していき、穴は借りて渡す
+  - **`format!` は使わない**: `core::fmt` が wasm に入ると、それだけで大きくなる。整数は自前の `zs_push_int` で書く(整数の `to_string` も同じ)
+  - zustc で測った wasm のサイズ(1 つの関数のモジュール):
+
+    | 本体 | `format!` / `to_string` | `push_str` / `zs_push_int` |
+    |---|---:|---:|
+    | `` `hi ${name}!` `` | 24,948 B | 19,505 B |
+    | `` `hi ${name} ${n}` `` | 32,902 B | 23,775 B |
+    | `"hi " + name + " " + n.to_string()` | 34,704 B | 27,316 B |
+    | (比較: `"hi " + name + "!"`) | 21,047 B | 21,047 B |
+
+  - 手書きの `wasm fn`(Rust そのまま)では `format!` も使えるが、同じ費用がかかる
   - `@wasm` の中の浮動小数点数の穴はエラー(JS と Rust で書き方が違う。`to_string` と同じ扱い)
 - エスケープは文字列リテラルと同じ(`\n` `\t` `\\`)に加えて、`` \` `` と `\$`。`{` だけ、`$` だけは普通の文字
 

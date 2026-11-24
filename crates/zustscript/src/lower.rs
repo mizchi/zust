@@ -111,6 +111,11 @@ fn sliced(t: &Ty) -> bool {
 /// `encode_utf16` and no `memmem`, so the UTF-16 length and order and the substring search are written here
 const STR_HELPERS: &[(&str, &[&str], &str)] = &[
     (
+        "zs_push_int",
+        &[],
+        "/// An integer in decimal, appended: `to_string` and the holes of a template string without `core::fmt`\n/// (`format!` and `to_string` pull its formatting machinery into the wasm: about 10 KB)\nfn zs_push_int(s: &mut String, v: i64) {\n    if v < 0 {\n        s.push('-');\n    }\n    let mut u = v.unsigned_abs();\n    let mut buf = [0u8; 20];\n    let mut i = buf.len();\n    loop {\n        i -= 1;\n        buf[i] = b'0' + (u % 10) as u8;\n        u /= 10;\n        if u == 0 {\n            break;\n        }\n    }\n    while i < buf.len() {\n        s.push(buf[i] as char);\n        i += 1;\n    }\n}",
+    ),
+    (
         "zs_len16",
         &[],
         "/// JS's `length`: UTF-16 code units\nfn zs_len16(s: &str) -> i32 {\n    let mut n = 0i32;\n    for c in s.chars() {\n        n += if (c as u32) > 0xffff { 2 } else { 1 };\n    }\n    n\n}",
@@ -1470,23 +1475,37 @@ impl<'a> Lower<'a> {
                 val(format!("{} {{ {} }}", rs_type(n), parts.join(", ")))
             }
             EK::Tuple(_) => not_in_subset(pos, "a tuple"),
-            // (`format!`: the holes borrowed through the arguments' path; Rust's `{}` writes integers, bools and strings
-            // as JS does, floats not)
+            // (appended piece by piece: `format!` would pull `core::fmt` into the wasm (about 10 KB). The holes are
+            // borrowed through the arguments' path; an integer is written by `zs_push_int`, as JS writes it. A float
+            // is written differently by JS and Rust)
             EK::Interp(parts, holes) => {
                 let tys: Vec<Ty> = holes.iter().map(|h| subst_ty(&self.ty(h.id), &self.subst)).collect();
                 if let Some(k) = tys.iter().position(|t| matches!(t, Ty::F32 | Ty::F64)) {
                     return not_in_subset(holes[k].pos, "a float in a template string (JS and Rust format floats differently)");
                 }
                 let (vs, _) = self.args_as(holes, &vec![true; holes.len()], &tys)?;
-                let mut f = String::new();
+                let mut o = String::from("{ let mut __zs_t = String::new();");
                 for (k, p) in parts.iter().enumerate() {
-                    f.push_str(&p.replace('{', "{{").replace('}', "}}"));
-                    if k < holes.len() {
-                        f.push_str("{}");
+                    if !p.is_empty() {
+                        let _ = write!(o, " __zs_t.push_str({p:?});");
+                    }
+                    if let (Some(v), Some(t)) = (vs.get(k), tys.get(k)) {
+                        match t {
+                            Ty::Str => {
+                                let _ = write!(o, " __zs_t.push_str({v});");
+                            }
+                            Ty::Bool => {
+                                let _ = write!(o, " __zs_t.push_str(if {v} {{ \"true\" }} else {{ \"false\" }});");
+                            }
+                            _ => {
+                                self.str_helpers.insert("zs_push_int");
+                                let _ = write!(o, " zs_push_int(&mut __zs_t, ({v}) as i64);");
+                            }
+                        }
                     }
                 }
-                let args: String = vs.iter().map(|v| format!(", {v}")).collect();
-                val(format!("format!({f:?}{args})"))
+                o.push_str(" __zs_t }");
+                val(o)
             }
             EK::Path(..) => not_in_subset(pos, "this path"),
             EK::Jsx(_) => not_in_subset(pos, "JSX"),
@@ -1579,7 +1598,11 @@ impl<'a> Lower<'a> {
             }
             // (JS's and Rust's formats agree for integers and bools; not for floats)
             B::ToString if matches!(rt, Ty::F32 | Ty::F64) => not_in_subset(pos, "`to_string` of a float (JS and Rust format floats differently)"),
-            B::ToString => val(format!("{recv}.to_string()")),
+            B::ToString if rt == Ty::Bool => val(format!("String::from(if {recv} {{ \"true\" }} else {{ \"false\" }})")),
+            B::ToString => {
+                self.str_helpers.insert("zs_push_int");
+                val(format!("{{ let mut __zs_t = String::new(); zs_push_int(&mut __zs_t, ({recv}) as i64); __zs_t }}"))
+            }
             B::Map => val(format!("{it}.map({}).collect::<Vec<_>>()", self.closure(&args[0], &[k("")])?)),
             B::Filter => {
                 // (filter's closure gets `&Item`. For copied items and for references `|&x|` binds the item; for
