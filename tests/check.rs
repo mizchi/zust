@@ -2216,3 +2216,30 @@ fn stricter_bounds_than_the_trait() {
     assert_eq!(first("trait Foo {\n    fn f<T: Ord + Copy>(&self);\n}\nimpl Foo for u8 {\n    fn f<T: Eq + Clone + PartialOrd>(&self) {}\n}\nfn main() {}\n"), None, "supertraits");
     assert_eq!(first("trait A {}\ntrait B: A {}\ntrait Foo {\n    fn f<T: B>(&self);\n}\nimpl Foo for u8 {\n    fn f<T: A>(&self) {}\n}\nfn main() {}\n"), None, "a supertrait of the program's");
 }
+
+#[test]
+fn duplicate_items_in_an_impl() {
+    // (E0201 in a trait's impl, E0592 in an inherent one: the second item of a name in one namespace, at its start;
+    // each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(
+        first("struct Foo;\nimpl Foo {\n    const bar: bool = true;\n    fn bar() {}\n}\nfn main() {}\n"),
+        Some((4, 5, "duplicate definitions with name `bar` (E0592)".to_string())),
+        "a const and a fn"
+    );
+    assert_eq!(
+        first("trait Bar { fn bar(&self) -> isize; }\nstruct Foo;\nimpl Bar for Foo {\n    fn bar(&self) -> isize { 1 }\n    fn bar(&self) -> isize { 2 }\n}\nfn main() {}\n"),
+        Some((5, 5, "duplicate definitions with name `bar`: (E0201)".to_string())),
+        "two fns of a trait's impl"
+    );
+    assert_eq!(
+        first("trait Foo { type Bar; }\nstruct Baz;\nimpl Foo for Baz {\n    type Bar = i16;\n    type Bar = u16;\n}\nfn main() {}\n"),
+        Some((5, 5, "duplicate definitions with name `Bar`: (E0201)".to_string())),
+        "two types"
+    );
+    // (a `const fn` is a fn; items of other names)
+    assert_eq!(first("struct S;\nimpl S {\n    const fn f() {}\n    const F: u8 = 0;\n}\nimpl S {\n    fn g() {}\n}\nfn main() {}\n"), None, "no duplicate");
+}

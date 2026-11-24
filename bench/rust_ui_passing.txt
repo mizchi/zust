@@ -154,6 +154,8 @@ compile-fail	associated-consts/wrong-projection-self-ty-invalid-bivariant-arg.rs
 compile-fail	associated-inherent-types/dont-select-if-disabled.rs
 compile-fail	associated-inherent-types/issue-109768.rs
 compile-fail	associated-item/ambiguous-associated-type-with-generics.rs
+compile-fail	associated-item/associated-item-duplicate-names-2.rs
+compile-fail	associated-item/associated-item-duplicate-names-3.rs
 compile-fail	associated-item/associated-item-duplicate-names.rs
 compile-fail	associated-item/associated-item-enum.rs
 check-pass	associated-item/associated-item-two-bounds.rs
@@ -7779,6 +7781,7 @@ compile-fail	traits/issue-75627.rs
 compile-fail	traits/issue-77982.rs
 compile-fail	traits/issue-78372.rs
 check-pass	traits/issue-78632.rs
+compile-fail	traits/issue-8153.rs
 compile-fail	traits/issue-87558.rs
 check-pass	traits/issue-90195-2.rs
 check-pass	traits/issue-90195.rs

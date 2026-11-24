@@ -943,6 +943,11 @@ impl Session2 {
         // (E0432: a top-level `use` of a path whose first segment names nothing; the `use` items come from the item
         // split, the names they could mean from the original text)
         let mut dyn_err: Option<String> = None;
+        // (E0201 / E0592: two items of one name and namespace in one impl block, before the program is built (which
+        // would report it as another error))
+        if let Some(e) = duplicate_impl_item(&src, &items[..user_src]) {
+            return Err(e);
+        }
         if self.ctx.map.inputs.is_empty() {
             if let Some(e) = unresolved_import(src0, &src, &items[..user_src], &self.ctx.deps) {
                 return Err(e);
@@ -9521,6 +9526,51 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize)
                     return Some((line, col));
                 }
             }
+        }
+    }
+    None
+}
+
+/// Two items of one name in one impl block, in one namespace (a fn's and a const's are values, a type's is a type):
+/// "duplicate definitions with name `bar`:" (E0201) in a trait's impl, "duplicate definitions with name `bar`"
+/// (E0592) in an inherent one, at the second item's start (rustc 1.100). Read from the items' own identifiers
+fn duplicate_impl_item(src: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind as K;
+    let mut seen: crate::fxhash::FxSet<(u32, bool, &str)> = Default::default();
+    for it in items {
+        let K::ImplMember(h) = it.kind else { continue };
+        let ids = || it.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or(""));
+        // (the item's keyword and name, past its visibility and qualifiers: `pub const fn f`, `const C`, `type T`)
+        let mut w = ids().take(8).peekable();
+        let mut found = None;
+        while let Some(x) = w.next() {
+            match x {
+                "fn" | "type" => {
+                    found = w.next().map(|n| (x == "type", n));
+                    break;
+                }
+                "const" if !matches!(w.peek(), Some(&("fn" | "unsafe" | "async" | "extern"))) => {
+                    found = w.next().map(|n| (false, n));
+                    break;
+                }
+                "pub" | "crate" | "self" | "super" | "in" | "const" | "unsafe" | "async" | "extern" | "default" => {}
+                _ => break,
+            }
+        }
+        let Some((ty, name)) = found else { continue };
+        if name == "_" {
+            continue;
+        }
+        if !seen.insert((h, ty, name)) {
+            let head = items.get(h as usize).map_or("", |hi| src.get(hi.start..hi.end).unwrap_or(""));
+            let head = &head[..head.find('{').unwrap_or(head.len())];
+            let trait_impl = head.contains(" for ");
+            let col = it.start - src[..it.start].rfind('\n').map_or(0, |k| k + 1) + 1;
+            return Some(if trait_impl {
+                format!("{}:{col}: duplicate definitions with name `{name}`: (E0201)", it.line)
+            } else {
+                format!("{}:{col}: duplicate definitions with name `{name}` (E0592)", it.line)
+            });
         }
     }
     None
