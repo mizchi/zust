@@ -814,6 +814,74 @@ pub fn branch_pos(e: &Expr) -> Sp {
     }
 }
 
+/// Where rustc points when a value has not the type its place wants (a `let`'s annotation, a parameter): a block's
+/// tail expression, or the block itself when it has none (SP: the caller's position, its statement), or the expression
+pub fn value_pos(e: &Expr) -> Sp {
+    match e {
+        Expr::Block(_, false, b) => match b.stmts.last() {
+            Some(Stmt::Expr(t, false)) => value_pos(t),
+            _ => SP,
+        },
+        e => expr_start(e),
+    }
+}
+
+/// Where the value of an expression comes from, as rustc blames a mismatch: a `match`'s first arm that does not
+/// diverge (`None => ()` beside `Some(v) => { return v; }`), a block's tail, the expression itself; SP if unknown
+pub fn value_origin(e: &Expr) -> Sp {
+    fn diverges(e: &Expr) -> bool {
+        match e {
+            Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
+            Expr::Macro(p, _, _) => p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")),
+            Expr::Block(_, _, b) => match b.stmts.last() {
+                Some(Stmt::Expr(x, _)) => diverges(x),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+    match e {
+        Expr::Match(_, arms) if !arms.is_empty() => match arms.iter().find(|a| !diverges(&a.body)) {
+            Some(a) => match value_origin(&a.body) {
+                p if p.line != 0 => p,
+                _ => a.pos,
+            },
+            None => SP,
+        },
+        Expr::Block(_, false, b) => match b.stmts.last() {
+            Some(Stmt::Expr(t, false)) => value_origin(t),
+            _ => SP,
+        },
+        e => expr_start(e),
+    }
+}
+
+/// A `loop`'s value is its `break`s': where the first one without a value is (not one of a loop or closure inside it)
+pub fn loop_break_pos(e: &Expr) -> Sp {
+    fn in_block(b: &crate::parse::Block) -> Sp {
+        b.stmts.iter().map(|s| match s {
+            Stmt::Expr(x, _) => find(x),
+            _ => SP,
+        }).find(|p| p.line != 0).unwrap_or(SP)
+    }
+    fn find(e: &Expr) -> Sp {
+        match e {
+            Expr::Break(None, None, p) => *p,
+            Expr::Block(_, _, b) => in_block(b),
+            Expr::If(_, b, els) => match in_block(b) {
+                p if p.line != 0 => p,
+                _ => els.as_deref().map_or(SP, find),
+            },
+            Expr::Match(_, arms) => arms.iter().map(|a| find(&a.body)).find(|p| p.line != 0).unwrap_or(SP),
+            _ => SP,
+        }
+    }
+    match e {
+        Expr::Loop(None, b) => in_block(b),
+        _ => SP,
+    }
+}
+
 /// [`branch_pos`] of a block
 pub fn block_end_pos(b: &crate::parse::Block) -> Sp {
     match b.stmts.last() {
@@ -842,6 +910,11 @@ pub fn expr_start(e: &Expr) -> Sp {
         Expr::Array(es) | Expr::Tuple(es) => es.first().map_or(SP, expr_start),
         _ => SP,
     }
+}
+
+/// A message of what zustc does not support (not an error rustc reports)
+pub fn unsupported(m: &str) -> bool {
+    m.contains("not supported") || m.contains("unsupported") || m.starts_with("array length must be a literal or a const")
 }
 
 /// メッセージが `行:桁: ` で始まるか
@@ -1869,14 +1942,26 @@ impl Cx<'_> {
             self.b.ins().trap(TrapCode::unwrap_user(1));
             return Ok(());
         }
-        // (エラーの場所は末尾の式 (なければ関数の先頭))
-        let tail = match f.block.stmts.last() {
-            Some(Stmt::Expr(e, false)) => err_pos(e),
-            _ => SP,
+        // (エラーの場所は末尾の式 (なければ関数の先頭)): its value's position (a block's tail, a `loop`'s `break`), else
+        // where its statement starts (`()`, `unsafe { .. }`)
+        let tail = || {
+            let n = f.block.stmts.len();
+            match f.block.stmts.last() {
+                Some(Stmt::Expr(e, false)) => match if matches!(e, Expr::Match(..)) { value_origin(e) } else { err_pos(e) } {
+                    p if p.line != 0 => p,
+                    _ => match loop_break_pos(e) {
+                        p if p.line != 0 => p,
+                        _ => f.block.spos.get(n - 1).unwrap_or(SP),
+                    },
+                },
+                _ => SP,
+            }
         };
         // (`fn f(x: &&T) -> &T { x }`: the deref coercion)
         let (v, t) = if t != self.ret { self.deref_coerce(v, t, self.ret) } else { (v, t) };
-        self.same(tail, t, self.ret)?;
+        if let Err(m) = self.same(SP, t, self.ret) {
+            return Err(self.at(tail(), m));
+        }
         self.drop_for_exit(0, 0);
         self.emit_return(v);
         Ok(())
@@ -2011,6 +2096,12 @@ impl Cx<'_> {
                     Some(Stmt::Expr(e, _)) => expr_start(e),
                     _ => SP,
                 };
+                // (`[];`, `match () {}`, a block's tail `()`: where the parser saw the statement start. Not what zustc
+                // does not support, which is no error of the program's at any line of it)
+                let sp = match blk.spos.get(self.stmt_i) {
+                    Some(p) if sp.line == 0 && !unsupported(&m) => p,
+                    _ => sp,
+                };
                 // (none here either: the block's own statement in the block around it decides)
                 self.stmt_i = saved;
                 Err(self.at(sp, m))
@@ -2035,7 +2126,7 @@ impl Cx<'_> {
                     st => stmts.push(st.clone()),
                 }
             }
-            let nb: &'static crate::parse::Block = Box::leak(Box::new(crate::parse::Block { stmts }));
+            let nb: &'static crate::parse::Block = Box::leak(Box::new(crate::parse::Block { stmts, spos: Default::default() }));
             return self.block_stmts(nb, expected);
         }
         self.scopes.push(vec![]);
@@ -2247,7 +2338,7 @@ impl Cx<'_> {
                             // (`dyn Foo<Bar = &'a u32>`, which keeps the text of its bounds) are the region check's)
                             let ptr = matches!((t, a), (Ty::Ptr(true, x), Ty::Ptr(false, y)) if x == y);
                             if !ptr && !self.apart_in_lifetimes(t, a) {
-                                self.same(SP, t, a).map_err(|m| self.at(expr_start(init), m))?;
+                                self.same(SP, t, a).map_err(|m| self.at(value_pos(init), m))?;
                             }
                         }
                         if let Some(v) = v {
@@ -2486,7 +2577,8 @@ impl Cx<'_> {
                             t = ty;
                         }
                     }
-                    self.same(SP, t, ty).map_err(|m| self.at(expr_start(init), m))?;
+                    // (a block's value is its tail's: rustc points there, `let _: ! = { 'a: while break 'a {} };`)
+                    self.same(SP, t, ty).map_err(|m| self.at(value_pos(init), m))?;
                     self.bk.mut_next = pat_mut(pat);
                     let rg_init = if self.rg_on() { self.rt_expr(init) } else { None };
                     self.bind(name.clone(), ty, v);
@@ -2656,8 +2748,10 @@ impl Cx<'_> {
                         result = r;
                         self.drop_tail_temps(t0, result);
                     } else {
+                        // (a block-like statement, `if .. {}` / `const { 2 }` without `;`, has the type `()`: rustc's
+                        // E0308)
                         if !*semi && !matches!(r.1, Ty::Unit | Ty::Never) {
-                            return err(SP, "expected `;` after non-unit expression");
+                            return err(SP, format!("mismatched types: expected `()`, found `{}`", self.prog.tn(r.1).replace('#', "")));
                         }
                         // (unused_must_use: a `Result` dropped by its statement)
                         if self.prog.deny_must_use && self.user_code {

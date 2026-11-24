@@ -667,6 +667,17 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             }
         }
     }
+    // (E0277: a returned value needs a size too, a `str` or `[T]` (a `dyn Trait` is E0746, checked elsewhere); a
+    // trait's declaration without a body does not)
+    if let Some(r) = sig.ret.as_ref().filter(|_| !owner.is_some_and(|o| o.is_trait) && !is_extern) {
+        if let Some(u) = unsized_value(r).filter(|u| !u.starts_with("dyn")) {
+            let m = format!("the size for values of type `{u}` cannot be known at compilation time (E0277)");
+            return Err(match crate::wf::pos_of(r) {
+                Some(p) => format!("{}:{}: {m}", p.line, p.col + 1),
+                None => m,
+            });
+        }
+    }
     for (_, t) in &sig.params {
         // (E0277: a parameter's value needs a size; a trait's declaration without a body does not)
         if !owner.is_some_and(|o| o.is_trait) && !is_extern {
@@ -1353,7 +1364,8 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
     let derives = derive_names(attrs);
     for d in &derives {
         if !matches!(d.as_str(), "Clone" | "Copy" | "Debug" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Default") {
-            return Err(format!("cannot find derive macro `{d}` in this scope"));
+            // (`\u{5}word\u{5}msg`: at the word in the item's text, the derive's name)
+            return Err(format!("\u{5}{d}\u{5}cannot find derive macro `{d}` in this scope"));
         }
     }
     if union {
@@ -1361,7 +1373,7 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
             return err("unions cannot have zero fields");
         }
         if let Some(d) = derives.iter().find(|d| !matches!(d.as_str(), "Clone" | "Copy")) {
-            return Err(format!("this trait cannot be derived for unions: `{d}`"));
+            return Err(format!("\u{5}{d}\u{5}this trait cannot be derived for unions: `{d}`"));
         }
         if derives.iter().any(|d| d == "Clone") && !derives.iter().any(|d| d == "Copy") {
             return err("the trait bound `Copy` is not satisfied: a union can derive `Clone` only with `Copy`");
@@ -1374,7 +1386,12 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
                 _ => false,
             };
             if owning {
-                return err("field must implement `Copy` or be wrapped in `ManuallyDrop<...>` to be used in a union");
+                // (at the field's type, as rustc)
+                let m = "field must implement `Copy` or be wrapped in `ManuallyDrop<...>` to be used in a union";
+                return Err(match crate::wf::pos_of(t) {
+                    Some(p) => format!("\u{3}{}\u{3}{m}", p.line),
+                    None => m.to_string(),
+                });
             }
         }
     }

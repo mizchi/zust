@@ -449,9 +449,44 @@ pub struct Arm {
     pub body: Expr,
 }
 
+/// Where a pattern starts, when it has a path or holds one (else no position)
+pub fn pat_pos(p: &Pat) -> Pos {
+    match p {
+        Pat::Path(pa) | Pat::TupleStruct(pa, _) | Pat::Struct(pa, _, _) => pa.pos,
+        Pat::Ref(_, i) => pat_pos(i),
+        Pat::Tuple(ps) | Pat::Or(ps) | Pat::Slice(ps) => ps.iter().map(pat_pos).find(|q| q.line != 0).unwrap_or_default(),
+        _ => Pos::default(),
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
+    /// where each statement starts, as parsed (one per statement; empty for a block made by the compiler): for an
+    /// error with no position of its own, that of its statement
+    pub spos: Spos,
+}
+
+/// The starts of those statements of a block whose expressions have no position of their own, by the statement's
+/// index: one pointer (a `Vec` in Block made every `Expr` larger), nothing allocated for a block without one
+#[derive(Clone, Debug, Default)]
+pub struct Spos(Option<Box<Vec<(u32, Pos)>>>);
+
+impl Spos {
+    pub fn of(v: Vec<(u32, Pos)>) -> Spos {
+        Spos(if v.is_empty() { None } else { Some(Box::new(v)) })
+    }
+    pub fn entries(&self) -> &[(u32, Pos)] {
+        self.0.as_deref().map_or(&[], |v| v.as_slice())
+    }
+    /// The start of statement i, if kept
+    pub fn get(&self, i: usize) -> Option<Pos> {
+        self.entries().iter().find(|e| e.0 as usize == i).map(|e| e.1)
+    }
+    /// The same starts for the statements moved by `by` (`from` and on: the ones before are dropped)
+    pub fn shifted(&self, from: usize, by: isize) -> Spos {
+        Spos::of(self.entries().iter().filter(|e| e.0 as usize >= from).map(|&(i, p)| ((i as isize + by) as u32, p)).collect())
+    }
 }
 
 /// The suffix of a number literal that is not a numeric type (`123X1a3`: `X1a3`; `0XYZ`: `XYZ`, an uppercase base
@@ -536,7 +571,7 @@ fn destructure_assign(l: &Expr, r: &Expr, at: Pos) -> Option<Expr> {
         let v = Expr::Path(None, Path { global: false, segs: vec![Seg { name: t.clone(), args: Vec::new(), fn_args: None, text: t }], pos: at });
         stmts.push(Stmt::Expr(Expr::Assign(Box::new(place), Box::new(v)), true));
     }
-    Some(Expr::Block(None, false, Block { stmts }))
+    Some(Expr::Block(None, false, Block { stmts, spos: Default::default() }))
 }
 
 #[derive(Clone, Debug)]
@@ -2441,6 +2476,10 @@ impl Parser {
     pub fn block(&mut self) -> R<Block> {
         self.expect_open("{")?;
         let mut stmts = Vec::new();
+        // (the statements' starts, kept only for a block with a statement whose expression has no position of its own:
+        // `loop` / `unsafe` / `const` / `async` blocks, a block, `return;`, `[]`, `()`, `match () {}`. Most blocks have
+        // none, and allocate nothing)
+        let mut spos: Vec<(u32, Pos)> = Vec::new();
         while !self.is_close() {
             if self.at_end() {
                 return Err(self.err("unclosed block"));
@@ -2455,6 +2494,26 @@ impl Parser {
             }
             // (`let (a, mut b);` / `let (a, b): (T, U);`: a `let` for each name, without a value yet. Only a `let (`
             // is looked at: moving every statement once more costs a copy of it)
+            let need = match self.tok(0) {
+                Some(t) if t.kind == TokKind::Ident => match t.text.as_str() {
+                    "loop" | "unsafe" | "const" | "async" => true,
+                    "return" => self.peek_is(1, ";") || self.tok(1).is_some_and(|t| t.kind == TokKind::Close),
+                    "match" => self.peek_is(1, "(") && self.tok(2).is_some_and(|t| t.kind == TokKind::Close),
+                    // (`for _ in ..10`, `for x in mac!(..)`: an iterable that may have none either; `while {} {}`)
+                    "for" => true,
+                    "while" | "if" => self.peek_is(1, "{"),
+                    _ => false,
+                },
+                // (`{ .. }`, `[]`, `()`, `(return)(..)`)
+                Some(t) if t.kind == TokKind::Open => {
+                    t.text == "{"
+                        || self.tok(1).is_some_and(|t| t.kind == TokKind::Close || (t.kind == TokKind::Ident && matches!(t.text.as_str(), "return" | "loop" | "break" | "match" | "unsafe")))
+                }
+                _ => false,
+            };
+            if need {
+                spos.push((stmts.len() as u32, self.pos()));
+            }
             if !(self.is_ident("let") && self.peek_is(1, "(")) {
                 stmts.push(self.stmt()?);
                 continue;
@@ -2480,7 +2539,7 @@ impl Parser {
             stmts.push(st);
         }
         self.expect_close("}")?;
-        Ok(Block { stmts: stmts })
+        Ok(Block { stmts, spos: Spos::of(spos) })
     }
 
     fn item_follows(&self) -> bool {

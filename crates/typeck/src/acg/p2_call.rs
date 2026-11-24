@@ -72,7 +72,7 @@ pub(crate) fn vec_of(es: &[Expr]) -> Expr {
         return m;
     }
     lets.push(Stmt::Expr(m, false));
-    Expr::Block(None, false, PBlock { stmts: lets })
+    Expr::Block(None, false, PBlock { stmts: lets, spos: Default::default() })
 }
 
 impl Cx<'_> {
@@ -280,6 +280,12 @@ impl Cx<'_> {
     fn method_call_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let msp = *msp;
+        // (E0624: a private fn of the receiver's inherent impl, where the program has such)
+        if self.prog.field_priv.as_deref().is_some_and(|fp| !fp.methods.is_empty()) {
+            if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)) {
+                self.method_privacy(sid, method, msp.at)?;
+            }
+        }
         // (`0.0.cmp()` with `impl MyCmp for f32` only: an unsuffixed literal takes the one numeric type whose impl has
         // the method, when its default type (f64 / i32) has none)
         if let Expr::Lit(t, sp) = strip_paren(recv) {
@@ -620,7 +626,7 @@ impl Cx<'_> {
                             let hs = Expr::Ref(true, Box::new(Expr::Unary("*".into(), Box::new(path_expr("__hs")), crate::parse::Span::default())));
                             stmts.push(Stmt::Expr(mcall(f, "hash", vec![hs]), true));
                         }
-                        let e = Expr::Block(None, false, PBlock { stmts });
+                        let e = Expr::Block(None, false, PBlock { stmts, spos: Default::default() });
                         return self.expr(&e, expected);
                     }
                     if self.prog.structs[self.prog.base_of(sid) as usize].name == "Option" {
@@ -3114,7 +3120,8 @@ impl Cx<'_> {
                 Some(v) => v,
                 None => self.b.ins().iconst(types::I8, 0),
             };
-            vals.push((v, t, expr_start(a)));
+            // (a block argument's type is its tail's: rustc points there, `f({ String::new() })`)
+            vals.push((v, t, value_pos(a)));
         }
         let arg_tys: Vec<Ty> = vals.iter().map(|v| v.1).collect();
         // 引数の型から改めて解く。引数に現れない型パラメータ (クロージャの戻り値など) は sol から

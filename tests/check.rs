@@ -167,7 +167,8 @@ fn errors_of_items_in_fn_bodies_at_their_lines() {
     let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
     let d = s.check(bad);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2], "{d:?}");
-    assert!(d[0].msg.contains("cannot find type `T`"), "{d:?}");
+    // (rustc's E0401: the inner fn cannot name the outer one's parameter)
+    assert!(d[0].msg.contains("can't use generic parameters from outer item (E0401)"), "{d:?}");
     let dir = std::env::temp_dir().join(format!("zust-unhoist-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let e = Session2::new(Options2 { jobs: 1, ..Options2::default() }).build(bad, &dir.join("a")).unwrap_err();
@@ -1401,6 +1402,157 @@ fn field_privacy() {
 }
 
 #[test]
+fn method_privacy() {
+    // (E0624: a fn or const of an inherent impl, not `pub`, used outside the module of the impl; each expected line,
+    // column and message is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        let src = "mod a { pub struct S; impl S { fn new() -> S { S } } }\nfn main() {\n    let _ = a::S::new();\n}\n";
+        assert_eq!(check(edition, src), at(3, 19, "associated function `new` is private (E0624)"), "path");
+        let src = "mod a { pub struct Foo; impl Foo { fn f(&self) {} } }\nfn main() {\n    let x = a::Foo;\n    x.f();\n}\n";
+        assert_eq!(check(edition, src), at(4, 7, "method `f` is private (E0624)"), "method");
+        let src = "mod a { pub struct Foo; impl Foo { const ID: i32 = 1; } }\nfn main() {\n    let _ = a::Foo::ID;\n}\n";
+        assert_eq!(check(edition, src), at(3, 21, "associated constant `ID` is private (E0624)"), "const");
+        // (the impl's module, not the type's)
+        let src = "mod a { pub struct S; }\nmod b { impl crate::a::S { fn g(&self) {} } }\nfn main() {\n    a::S.g();\n}\n";
+        assert_eq!(check(edition, src), at(4, 10, "method `g` is private (E0624)"), "impl_elsewhere");
+        // (in the impl's module, `pub(crate)`, a child module, a trait's fn of the name, an impl in a fn of the root)
+        for src in [
+            "mod a { pub struct S; impl S { fn new() -> S { S } pub fn make() -> S { S::new() } } }\nfn main() { let _ = a::S::make(); }\n",
+            "mod a { pub struct S; impl S { pub(crate) fn new() -> S { S } } }\nfn main() { let _ = a::S::new(); }\n",
+            "mod a { pub struct S; impl S { fn f(&self) {} } pub mod c { pub fn g() { super::S.f(); } } }\nfn main() { a::c::g(); }\n",
+            "mod a { pub struct S; impl S { fn f(&self) {} } pub trait T { fn f(&self); } impl T for S { fn f(&self) {} } }\nuse a::T;\nfn main() { a::S.f(); }\n",
+            "mod a { pub struct Foo; }\nfn f() { impl a::Foo { fn bar(&self) {} } }\nfn main() { a::Foo.bar(); f(); }\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
+fn import_privacy_and_reexports() {
+    // (E0603 through a private import; E0364 / E0365: a re-export wider than what it names. Each expected line,
+    // column and message is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        let src = "mod public { pub struct Hi; }\nmod testing { use super::public::Hi; }\nuse testing::Hi;\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(3, 14, "struct import `Hi` is private (E0603)"), "use");
+        let src = "mod a { pub struct S; }\nmod b { use crate::a::S; }\nfn main() {\n    let _ = b::S;\n}\n";
+        assert_eq!(check(edition, src), at(4, 16, "unit struct import `S` is private (E0603)"), "value");
+        let src = "fn f() {}\nmod m { pub use crate::f; }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(2, 17, "`f` is only public within the crate, and cannot be re-exported outside (E0364)"), "crate_item");
+        let src = "mod a { fn foo() {} pub mod b { pub use super::foo; } }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(1, 41, "`foo` is private, and cannot be re-exported (E0364)"), "private_item");
+        let src = "mod a { mod inner {} pub mod b { pub use super::inner; } }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(1, 42, "`inner` is private, and cannot be re-exported (E0365)"), "module");
+        // (a `pub` item, a `pub(crate)` or `pub(super)` re-export as narrow as the item, a `pub use` re-exported, a
+        // private import used in its module)
+        for src in [
+            "pub fn f() {}\nmod m { pub use crate::f; }\nfn main() {}\n",
+            "fn f() {}\nmod m { pub(crate) use crate::f; }\nfn main() {}\n",
+            "mod a { fn foo() {} pub mod b { pub(super) use super::foo; } }\nfn main() {}\n",
+            "mod a { pub struct S; }\nmod b { pub use crate::a::S; }\nuse b::S;\nfn main() { let _ = S; }\n",
+            "mod a { pub struct S; }\nmod b { use crate::a::S; pub fn f() -> S { S } }\nfn main() { let _ = b::f(); }\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
+fn import_cycles() {
+    // (E0432: an import that names only itself through other imports, a glob of a module into itself; each expected
+    // line, column and message is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        assert_eq!(check(edition, "mod y {\n    pub use crate::y::x;\n}\nfn main() {}\n"), at(2, 13, "unresolved import `crate::y::x` (E0432)"), "self");
+        let src = "mod a { pub use crate::b::foo; }\nmod b { pub use crate::a::foo; }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(1, 17, "unresolved import `crate::b::foo` (E0432)"), "two");
+        assert_eq!(check(edition, "use self::*;\nfn main() {}\n"), at(1, 5, "unresolved import `self::*` (E0432)"), "glob_self");
+        // (a cycle of globs, an import of an item, one through another crate's)
+        for src in [
+            "mod a { pub use crate::b::*; pub fn f() {} }\nmod b { pub use crate::a::*; }\nfn main() { b::f(); }\n",
+            "mod a { pub use crate::b::x; }\nmod b { pub fn x() {} }\nfn main() { a::x(); }\n",
+            "mod a { pub use std::fmt::Debug; }\nmod b { pub use crate::a::Debug; }\nfn main() {}\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
+fn tuple_constructors_and_leading_super() {
+    // (a tuple struct with a field a module may not see: its constructor is as private as that field; more leading
+    // `super`s than the module has parents. Each expected line, column and message is rustc 1.100's on the same source,
+    // in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        let src = "mod a { pub struct S(u8); }\nfn main() {\n    let _ = a::S(1);\n}\n";
+        assert_eq!(check(edition, src), at(3, 16, "tuple struct constructor `S` is private (E0603)"), "path");
+        let src = "mod a { pub struct S(pub u8, u8); }\nuse a::S;\nfn main() {\n    let _ = S(1, 2);\n}\n";
+        assert_eq!(check(edition, src), at(4, 13, "cannot initialize a tuple struct which contains private fields (E0423)"), "call");
+        let src = "mod a { pub struct S(u8); }\nuse a::S;\nfn f(s: S) { let S(_) = s; }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(3, 18, "cannot match against a tuple struct which contains private fields (E0532)"), "pattern");
+        let src = "mod outer {\n    mod inner {\n        struct Example(super::super::super::Impl);\n    }\n}\nstruct Impl;\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(3, 38, "too many leading `super` keywords within `crate::outer::inner` (E0433)"), "super");
+        // (a `pub` field, the constructor in its module, the struct as a type, `super` within the crate)
+        for src in [
+            "mod a { pub struct S(pub u8); }\nuse a::S;\nfn main() {\n    let _ = S(1);\n}\n",
+            "mod a { pub struct S(u8); pub fn f() -> S { S(1) } }\nfn main() { let _ = a::f(); }\n",
+            "mod a { pub struct S(u8); pub fn f() -> S { S(1) } }\nfn g(_: a::S) {}\nfn main() { g(a::f()); }\n",
+            "mod a { pub fn f() {} mod b { fn g() { super::f(); } } }\nfn main() {}\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
+fn generic_parameters_from_outer_item() {
+    // (E0401: an item in a fn body that names a generic parameter or `Self` of an item around it; each expected line,
+    // column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    let src = "fn foo<U>(v: Vec<U>) -> U {\n    fn bar(w: Vec<U>) -> u8 { 0 }\n    v.into_iter().next().unwrap()\n}\nfn main() {}\n";
+    assert_eq!(check(src), at(2, 19, "can't use generic parameters from outer item (E0401)"), "type");
+    let src = "fn foo<const X: u32>() {\n    fn bar() -> u32 {\n        X\n    }\n}\nfn main() {}\n";
+    assert_eq!(check(src), at(3, 9, "can't use generic parameters from outer item (E0401)"), "const");
+    let src = "struct S;\nimpl S {\n    fn f() {\n        fn g(_: Self) {}\n    }\n}\nfn main() {}\n";
+    assert_eq!(check(src), at(4, 17, "can't use `Self` from outer item (E0401)"), "self_type");
+    let src = "struct S0<T>(T);\nimpl<T> S0<T> {\n    fn foo() {\n        fn bar() -> S0<i32> {\n            Self(0)\n        }\n    }\n}\nfn main() {}\n";
+    assert_eq!(check(src), at(5, 13, "can't reference `Self` constructor from outer item (E0401)"), "self_ctor");
+    // (the item's own parameter of the name, a non-generic impl's constructor (a warning), lifetimes, an impl of a
+    // local struct)
+    for src in [
+        "fn foo<T>(x: T) {\n    fn bar<T>(y: T) {}\n}\nfn main() {}\n",
+        "struct S0(usize);\nimpl S0 {\n    fn foo() {\n        fn bar() -> S0 { Self(0) }\n    }\n}\nfn main() {}\n",
+        "fn f<'a>(x: &'a str) -> usize {\n    fn g<'b>(y: &'b str) -> usize { y.len() }\n    g(x)\n}\nfn main() {}\n",
+        "fn f<T>() {\n    struct L;\n    impl L { fn new() -> Self { L } }\n}\nfn main() {}\n",
+    ] {
+        assert_eq!(check(src), None, "{src}");
+    }
+}
+
+#[test]
 fn glob_ambiguity() {
     // (E0659: a name two glob imports bring with different definitions, where a path names it; each expected line
     // and column is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
@@ -1519,6 +1671,51 @@ fn review106_fourth_round() {
     }
 }
 
+#[test]
+fn item_errors_at_their_part() {
+    // (an error of an item's definition at the part rustc points at: the union field that needs dropping, the derive
+    // a union cannot have or that is unknown, the variant whose implicit discriminant overflows, also in a fn body;
+    // each expected line is rustc 1.100's on the same source)
+    let line = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let src = "union U {\n    a: u8,\n    b: String,\n}\nfn main() {}\n";
+    assert_eq!(line(src).map(|d| d.0), Some(3), "union field");
+    let src = "#[derive(\n    Clone,\n    Copy,\n    PartialEq,\n)]\nunion U {\n    a: u8,\n}\nfn main() {}\n";
+    assert_eq!(line(src).map(|d| d.0), Some(4), "union derive");
+    let src = "#[derive(Clone,\n         Sync,\n         Copy)]\nenum Foo {}\nfn main() {}\n";
+    assert_eq!(line(src), Some((2, "cannot find derive macro `Sync` in this scope".to_string())), "unknown derive");
+    let src = "#[repr(u8)]\nenum A {\n    Ok = 254,\n    Ok2,\n    OhNo,\n}\nfn main() {}\n";
+    assert_eq!(line(src).map(|d| d.0), Some(5), "E0370");
+    let src = "fn f() {\n    #[repr(i8)]\n    enum A {\n        Ok = i8::MAX - 1,\n        Ok2,\n        OhNo,\n    }\n    let _ = A::Ok;\n}\nfn main() {}\n";
+    assert_eq!(line(src).map(|d| d.0), Some(6), "E0370 in a fn body");
+}
+
+#[test]
+fn errors_at_their_statement() {
+    // (an error whose expression has no position of its own, at the statement's line, and the checks that come with
+    // it; each expected line and message is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("fn main() {\n    let x = 1;\n    [];\n}\n"), at(3, "type annotations needed for an empty array"), "empty array");
+    assert_eq!(first("fn main() {\n    let x = 1;\n    match () {}\n}\n"), at(3, "non-exhaustive patterns: type `()` is non-empty (E0004)"), "match without arms");
+    assert_eq!(first("fn f() -> u8 {\n    let x = 1;\n    return;\n}\nfn main() {}\n"), at(3, "`return;` in a function whose return type is not `()` (E0069)"), "E0069");
+    assert_eq!(first("fn main() {\n    for _ in ..10 {}\n}\n"), at(2, "`RangeTo<{integer}>` is not an iterator (E0277)"), "RangeTo");
+    assert_eq!(first("fn f(x: &mut i32) {\n    for _ in *x {}\n}\nfn main() {}\n"), at(2, "`i32` is not an iterator (E0277)"), "i32 iterated");
+    assert_eq!(first("fn main() {\n    const { 2 } - const { 1 };\n}\n"), at(2, "mismatched types: expected `()`, found `i32`"), "block-like statement");
+    assert_eq!(first("fn f() {\n    if let Some(v) = Some(1) {\n        const { v }\n    }\n}\nfn main() {}\n"), at(3, "attempt to use a non-constant value in a constant (E0435)"), "E0435");
+    assert_eq!(first("fn f() -> str {\n    loop {}\n}\nfn main() {}\n"), at(1, "the size for values of type `str` cannot be known at compilation time (E0277)"), "unsized return");
+    // (union patterns: one field, reading it is unsafe, `_` reads nothing)
+    let u = "union U { a: u8, b: u16 }\n";
+    assert_eq!(first(&format!("{u}fn f(U {{ a }}: U) -> u8 {{\n    a\n}}\nfn main() {{}}\n")), at(2, "access to union field is unsafe and requires unsafe function or block (E0133)"), "union parameter");
+    assert_eq!(first(&format!("{u}fn f(u: U) {{\n    let U {{ a, b }} = u;\n}}\nfn main() {{}}\n")), at(3, "union patterns should have exactly one field"), "two fields");
+    assert_eq!(first(&format!("{u}fn f(u: U) {{\n    let U {{ a: _ }} = u;\n    unsafe {{ let U {{ b }} = u; }}\n}}\nfn main() {{}}\n")), None, "wildcard and unsafe");
+}
+
 /// An impl is for a type only when the type meets the impl's bounds, its where clauses' too (issue #2): nested goals of
 /// traits of the program's. Also a trait's supertraits must be implemented by an impl's self type, and an impl for a
 /// reference is not for the type it refers to. Each was checked against rustc 1.97
@@ -1621,4 +1818,41 @@ fn goals_have_a_certainty() {
     ok("trait P {}\nimpl P for () {}\nimpl<H: P, T: P> P for (H, T) {}\nfn need<X: P>(_: X) {}\nfn main() { need(((), ((), ((), ())))); }");
     // (two blanket impls of one trait: the one that holds is taken, whatever the other's goals do)
     ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: B> Tr<u8> for T {}\nimpl<T: A> Tr<u16> for T {}\nimpl<T: Tr<u8>> B for T {}\nimpl A for i32 {}\nfn need<T: Tr<u16>>(_: T) {}\nfn main() { need(1i32); }");
+}
+
+#[test]
+fn format_string_errors_at_their_char() {
+    // (an invalid format string at the char rustc points at, escapes, line continuations and raw strings counted;
+    // each expected line, column and message is rustc 1.100's on the same source)
+    let first = |body: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(&format!("fn main() {{\n    {body}\n}}\n")).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |c: usize, m: &str| Some((2, c, format!("invalid format string: {m}")));
+    assert_eq!(first(r#"let _ = format!("{ x}", x = 1);"#), at(24, "expected `}`, found `x`"), "space before the argument");
+    assert_eq!(first(r#"let _ = format!("{x", x = 1);"#), at(24, "expected `}` but string was terminated"), "unterminated");
+    assert_eq!(first(r#"let _ = format!("ab}");"#), at(24, "unmatched `}` found"), "unmatched");
+    assert_eq!(first(r#"let _ = format!("{\n x}", x = 1);"#), at(26, "expected `}`, found `x`"), "after an escape");
+    assert_eq!(first(r##"let _ = format!(r#"{ \n"#);"##), at(26, "expected `}`, found `\\`"), "raw");
+    assert_eq!(first(r#"let _ = format!("{ }", 1);"#), None, "white space only");
+    assert_eq!(first(r#"let _ = format!("{x }", x = 1);"#), None, "white space after");
+    // (a line continuation: the next line's char)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check("fn main() {\n    let _ = format!(\"  \\\n    { \\\n    b\");\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.msg.clone())), Some((4, "invalid format string: expected `}`, found `b`".to_string())), "continuation");
+}
+
+#[test]
+fn fn_value_mismatch_at_its_origin() {
+    // (a fn body's value that is not of the return type, where rustc points: the tail `()`, a `loop`'s `break`, the
+    // `match` arm that does not diverge, an `unsafe` block; each expected line is rustc 1.100's on the same source)
+    let line = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| d.line)
+    };
+    assert_eq!(line("fn foo() -> usize {\n    ()\n}\nfn main() {}\n"), Some(2), "unit tail");
+    assert_eq!(line("fn f() -> i32 {\n    loop {\n        if false { break; }\n        return 42;\n    }\n}\nfn main() {}\n"), Some(3), "break");
+    assert_eq!(line("fn f(a: Option<u32>) -> u32 {\n    match a {\n        Some(v) => return v,\n        None => (),\n    }\n}\nfn main() {}\n"), Some(4), "arm");
+    assert_eq!(line("fn g() -> u8 { 0 }\nfn main() {\n    match () {\n        () => g()\n    }\n}\n"), Some(4), "arm of main");
+    assert_eq!(line("fn f() -> ! {\n    unsafe {\n        let _x = 1;\n    }\n}\nfn main() {}\n"), Some(2), "unsafe block");
 }

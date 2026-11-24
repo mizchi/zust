@@ -193,6 +193,7 @@ impl Cx<'_> {
                     crate::parse::Stmt::Let(Pat::Ident(false, false, tk.clone(), None), None, Some((**scrut).clone()), None, Default::default()),
                     crate::parse::Stmt::Expr(Expr::Match(Box::new(path_expr(&tk)), arms.clone()), false),
                 ],
+                spos: Default::default(),
             };
             let ne: &Expr = self.keep_expr(Expr::Block(None, false, blk));
             // (the move into the local is the rewrite's, not the program's: `match cap { None => .., Some(x) => cap =
@@ -230,6 +231,11 @@ impl Cx<'_> {
         // (E0004: the arms must cover the scrutinee's type; user code only)
         if self.user_code {
             if let Some(w) = self.non_exhaustive(arms, place.ty()) {
+                // (no arms at all: rustc names the type, `match () {}`)
+                if arms.is_empty() {
+                    let t = self.prog.tn(place.ty()).replace('#', "");
+                    return Err(self.at(expr_start(scrut), format!("non-exhaustive patterns: type `{t}` is non-empty (E0004)")));
+                }
                 return Err(self.at(expr_start(scrut), format!("non-exhaustive patterns: `{w}` not covered (E0004)")));
             }
             if self.prog.deny_unreachable {
@@ -1161,7 +1167,8 @@ impl Cx<'_> {
         }
         match t {
             Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => Ok(self.prog.structs[x as usize].fields.clone()),
-            _ => err(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.structs[sid as usize].name)),
+            // (at the pattern's path: a sub-pattern `Tau { t: x }` on its own line is where rustc points)
+            _ => Err(self.at(path.pos, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.structs[sid as usize].name))),
         }
     }
 
@@ -1211,6 +1218,31 @@ impl Cx<'_> {
                 return err(SP, format!("no field `{fid}`"));
             };
             out.push((fpat, Self::field_place(p, fty, off)?));
+        }
+        // (a union's pattern names exactly one field, without `..`, and reading it, by a binding or a value to test, is
+        // unsafe (E0133); `U { a: _ }` reads nothing)
+        let union = match p.ty() {
+            Ty::Struct(sid) => self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name),
+            _ => false,
+        };
+        if union {
+            if out.len() != 1 {
+                return Err(self.at(path.pos, "union patterns should have exactly one field".into()));
+            }
+            if *has_rest {
+                return Err(self.at(path.pos, "`..` cannot be used in union patterns".into()));
+            }
+            fn reads(p: &Pat) -> bool {
+                match p {
+                    Pat::Wild => false,
+                    Pat::Or(ps) => ps.iter().any(reads),
+                    _ => true,
+                }
+            }
+            if self.unsafe_ok == 0 && reads(out[0].0) {
+                return Err(self.at(path.pos, "access to union field is unsafe and requires unsafe function or block (E0133)".into()));
+            }
+            return Ok(out);
         }
         if !*has_rest && out.len() != fields.len() {
             return err(SP, "pattern does not mention all fields (add `..`)");
