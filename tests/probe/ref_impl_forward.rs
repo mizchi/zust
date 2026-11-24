@@ -166,6 +166,40 @@ mod aliased {
     }
 }
 
+// (a child module that takes its parent's `fmt::Write` through `use super::*`, and a string that holds the name)
+mod forwarded {
+    use std::fmt::Write;
+    pub const LABEL: &str = "Write";
+    pub mod child {
+        use super::*;
+        pub struct Buf(pub String);
+        impl Write for Buf {
+            fn write_str(&mut self, s: &str) -> std::fmt::Result {
+                self.0.push_str(s);
+                Ok(())
+            }
+        }
+    }
+}
+// (a turbofish of the method's own parameter forwards it)
+trait Size {
+    fn size<const N: usize>(&self) -> usize;
+}
+struct Sized3;
+impl Size for Sized3 {
+    fn size<const N: usize>(&self) -> usize {
+        N
+    }
+}
+impl<'a, T: ?Sized + Size> Size for &'a T {
+    fn size<const N: usize>(&self) -> usize {
+        (**self).size::<N>()
+    }
+}
+fn size_of_3<Z: Size>(z: Z) -> usize {
+    z.size::<3>()
+}
+
 mod lib {
     pub use std::fmt::{self, Write as FmtWrite};
     pub use std::io::Write;
@@ -217,4 +251,7 @@ fn main() {
     let mut y: Vec<u8> = vec![];
     late::send(&mut y);
     println!("{} {:?}", late::render(), y);
+    let mut f = forwarded::child::Buf(String::new());
+    fmt::Write::write_str(&mut f, "sup").unwrap();
+    println!("{} {} {}", f.0, forwarded::LABEL, size_of_3(&Sized3));
 }

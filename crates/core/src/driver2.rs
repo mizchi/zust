@@ -3965,7 +3965,8 @@ fn allows_lint(text: &str, lint: &str) -> bool {
 
 /// The first method of `impl<T: Tr> Tr for &T` that does more than forward to T's, which the program may reach through
 /// a generic parameter: it calls a method of that name (`.m(`, `.m::<`, `::m(`) outside the method, and it uses the
-/// trait as a bound (`N: Tr`, `N: crate::Tr`, `+ Tr`, `impl Tr`, `dyn Tr`, `<X as Tr>`) outside the impl's header. A direct call
+/// trait as a bound (`N: Tr`, `N: crate::Tr`, `N: for<'a> Tr`, `N: (Tr)`, `+ Tr`, `impl Tr`, `dyn Tr`, `<X as Tr>`)
+/// outside the impl's header. A direct call
 /// `s.m()` reaches X's own method, as rustc's probe takes it first; only a call through a bound would run the impl's
 /// (#144), as an error
 #[cold]
@@ -3999,7 +4000,20 @@ fn first_called_ref_impl_fn(src: &str, items: &[SrcItem], sums: &[Summary]) -> O
             if toks[k].0 != 0 || tk(k) != tr || (hdr.start..hdr.end).contains(&toks[k].1) {
                 return false;
             }
-            let p = path_start(k);
+            let mut p = path_start(k);
+            // (`N: for<'a> Tr`: the bound after its `for<..>`; `N: (Tr)`: inside its parentheses)
+            if p >= 1 && sym(p - 1, ">") {
+                let mut j = p - 1;
+                while j > 0 && !sym(j, "<") {
+                    j -= 1;
+                }
+                if j >= 1 && tk(j - 1) == "for" {
+                    p = j - 1;
+                }
+            }
+            while p >= 1 && sym(p - 1, "(") {
+                p -= 1;
+            }
             p >= 1
                 && ((sym(p - 1, ":") && !(p >= 2 && sym(p - 2, ":")))
                     || sym(p - 1, "+")

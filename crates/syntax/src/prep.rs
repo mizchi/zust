@@ -876,10 +876,12 @@ pub fn std_renames(src: &str) -> Option<String> {
             let after_m = cur[..at].ends_with(&format!("{m}::"));
             let qualified = at >= 2 && &cb[at - 2..at] == b"::";
             out.push_str(&cur[i..at]);
+            // (not inside a string: `"Write"` is text)
             let bare = match &scoped {
-                Some(sc) => sc.bare_at(at),
+                Some(sc) => sc.bare_at(at) && !sc.in_lit(at),
                 None => bare,
             };
+            let after_m = after_m && scoped.as_ref().is_none_or(|sc| !sc.in_lit(at));
             if word && (after_m || (bare && (!qualified || cur[..at].ends_with("mpsc::") || cur[..at].ends_with("atomic::") || cur[..at].ends_with("fmt::")))) {
                 out.push_str(to);
                 changed = true;
@@ -900,6 +902,10 @@ struct UseScopes {
     blocks: Vec<(usize, usize, bool)>,
     /// (from m, from elsewhere), by block: 0 the root, k + 1 the block k
     uses: Vec<(bool, bool)>,
+    /// The blocks with a `use super::*;`: a module's body that has one sees its parent's imports
+    super_globs: Vec<bool>,
+    /// The literals' byte ranges, in order: a name inside a string is text, not renamed
+    lits: Vec<(usize, usize)>,
 }
 
 impl UseScopes {
@@ -924,12 +930,18 @@ impl UseScopes {
             if from_m || other {
                 return from_m && !other;
             }
-            if self.blocks[k].2 {
+            if self.blocks[k].2 && !self.super_globs[k + 1] {
                 return false;
             }
         }
         let (from_m, other) = self.uses[0];
         from_m && !other
+    }
+
+    /// Byte i is inside a literal (`"Write"`)
+    fn in_lit(&self, i: usize) -> bool {
+        let k = self.lits.partition_point(|&(a, _)| a <= i);
+        k > 0 && i < self.lits[k - 1].1
     }
 }
 
@@ -1088,7 +1100,8 @@ fn use_scopes(src: &str, m: &str, name: &str) -> UseScopes {
             }
         }
     }
-    let mut sc = UseScopes { uses: vec![(false, false); blocks.len() + 1], blocks };
+    let lits: Vec<(usize, usize)> = toks.iter().filter(|t| t.0 == 2).map(|t| (t.1, t.2)).collect();
+    let mut sc = UseScopes { uses: vec![(false, false); blocks.len() + 1], super_globs: vec![false; blocks.len() + 1], blocks, lits };
     let mut k = 0;
     while k < toks.len() {
         if toks[k].0 == 0 && tk(k) == "use" {
@@ -1097,10 +1110,16 @@ fn use_scopes(src: &str, m: &str, name: &str) -> UseScopes {
             while j < toks.len() && !sym(j, ";") {
                 j += 1;
             }
-            let (from_m, elsewhere) = classify_use(&src[start..toks.get(j).map_or(b.len(), |t| t.1)], m, name);
+            let tree = &src[start..toks.get(j).map_or(b.len(), |t| t.1)];
+            let (from_m, elsewhere) = classify_use(tree, m, name);
             let slot = sc.block_at(toks[k].1);
             sc.uses[slot].0 |= from_m;
             sc.uses[slot].1 |= elsewhere;
+            // (`use super::*;`: the module's parent's imports are its own too)
+            let flat: String = tree.chars().filter(|c| !c.is_whitespace()).collect();
+            if flat == "super::*" {
+                sc.super_globs[slot] = true;
+            }
             k = j;
         }
         k += 1;
