@@ -3,7 +3,7 @@
 Date: 2026-11-24
 
 rustc nightly has checked borrows with Polonius Alpha by default since 2026-08-04, and stable is to follow before
-the end of 2026 ([survey](2026-11-23-07-rust-frontier-survey.md), [#1](https://github.com/mizchi/zust/issues/1#issuecomment-7110120344)).
+the end of 2026 ([survey](2026-11-23-08-rust-frontier-survey.md), [#1](https://github.com/mizchi/zust/issues/1#issuecomment-7110120344)).
 zustc's borrow check already followed loans through one origin per local (the Polonius view). In some places it
 still had NLL's location-insensitive rule, and in others it had false errors of its own. This work moves it to
 Alpha's answers. Each case was checked with rustc 1.102.0-nightly (2026-11-22, Alpha) and rustc 1.97.0 (NLL).

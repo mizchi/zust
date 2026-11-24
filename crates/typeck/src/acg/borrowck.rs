@@ -287,6 +287,13 @@ pub struct Bk {
     /// What the items of each `for` loop being lowered hold (the loan of v for `for x in &v` / `v.iter()`): the
     /// bindings of an item that holds references hold it
     pub for_items: Vec<Vec<Src>>,
+    /// The drop of a `match` scrutinee some of whose arms take the whole value (`x => drop(x)`): those arms move it,
+    /// so it holds nothing there (bk_scrutinee; the match takes it)
+    pub scrut_drop: Option<u32>,
+    /// The address of the value a `let` with no type written is initialized from (through parentheses and block
+    /// tails, value_tail): no coercion site, so a `&mut` read out of a place there by value is moved, not reborrowed
+    /// (`let b = a[0];`, `let y = unsafe { *p };`)
+    pub plain_init: usize,
     /// For each of copy_out's locals, its mask in masks: whether each loan is of a place that holds the copied type
     pub copy_masks: HashMap<u32, usize>,
     /// copy_masks' masks, one for each copied type
@@ -333,6 +340,16 @@ pub struct Bk {
 /// temporaries are left alone (the loans that flow into a local are approximated, and a temporary whose lifetime the
 /// `let` extends (`let x = &f();`, `S { r: &f() }`) lives as long as the block)
 pub fn direct_temps(prog: &Program, e: &Expr, out: &mut Vec<usize>) {
+    direct_temps_in(prog, e, false, out)
+}
+
+/// The temporaries of a `let`'s initializer the statement drops (direct_temps): a `&` of a temporary in a
+/// constructor's arguments is the `let`'s to extend (extended_refs), not a statement's
+pub fn direct_temps_let(prog: &Program, e: &Expr, out: &mut Vec<usize>) {
+    direct_temps_in(prog, e, true, out)
+}
+
+fn direct_temps_in(prog: &Program, e: &Expr, in_let: bool, out: &mut Vec<usize>) {
     fn strip(mut e: &Expr) -> &Expr {
         while let Expr::Paren(p) = e {
             e = p;
@@ -343,21 +360,38 @@ pub fn direct_temps(prog: &Program, e: &Expr, out: &mut Vec<usize>) {
         // (`let x: &str = { mk().as_str() };`: the block's value is its tail's, and so are its temporaries)
         Expr::Block(_, _, b) => {
             if let Some(crate::parse::Stmt::Expr(t, false)) = b.stmts.last() {
-                direct_temps(prog, t, out);
+                direct_temps_in(prog, t, in_let, out);
             }
             return;
         }
         // (a tuple / array / struct of such calls: each element's (`{ (String::new().as_str(),) }` of edition 2024))
         Expr::Tuple(xs) | Expr::Array(xs) => {
             for x in xs {
-                direct_temps(prog, x, out);
+                direct_temps_in(prog, x, in_let, out);
             }
             return;
         }
         Expr::Struct(_, fs, None) => {
             for f in fs {
-                direct_temps(prog, &f.1, out);
+                direct_temps_in(prog, &f.1, in_let, out);
             }
+            return;
+        }
+        // (a tuple struct's or a variant's constructor (`Some(&[name])`) in a `let`'s initializer: an extending
+        // expression, so a `&` of a temporary in its arguments is extended by the `let` (extended_refs), as rustc does
+        // since 1.79; what its arguments' calls borrow is not. Elsewhere (an edition 2024 block's tail,
+        // `consume({ (Some(&temp()),) })`) its arguments are a call's)
+        Expr::Call(f, a) if in_let && is_ctor_path(prog, f) => {
+            for x in a {
+                direct_temps_in(prog, x, in_let, out);
+            }
+            return;
+        }
+        // (a `&` there (a constructor's argument, a tuple's field): what it borrows is extended, not the receiver of a
+        // method it is made from, as for the `let`'s own `&` (direct_ref_recv): `let r = Some(&*temp().get());` used
+        // after is E0716)
+        Expr::Ref(..) if in_let => {
+            direct_ref_recv(prog, e, out);
             return;
         }
         Expr::Call(_, a) => a,
@@ -547,6 +581,48 @@ pub fn direct_ref_recv(prog: &Program, a: &Expr, out: &mut Vec<usize>) {
             }
             _ => return,
         }
+    }
+}
+
+/// A path that names a tuple struct's or a variant's constructor, not a fn (`Some`, `W`, `Self`, `Option::Some::<T>`;
+/// not `some` of `let some = Some;`)
+fn is_ctor_path(prog: &Program, f: &Expr) -> bool {
+    let Expr::Path(_, p) = f else { return false };
+    // (a path that names a variant or a tuple struct, not a local fn pointer written in upper case
+    // (`let F: fn(&String) -> &String = id; F(&temp())`), whose arguments are a call's)
+    if !p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_uppercase())) {
+        return false;
+    }
+    let pp = crate::program::PPath::of(p);
+    prog.variant_by_p(&pp, None).is_some() || (prog.struct_by_p(&pp, None).is_some() && prog.fn_by_p(&pp, None).is_none())
+}
+
+/// The temporaries a `let`'s initializer borrows that the `let` extends: `&e` (direct_ref) as the initializer or
+/// within its extending expressions, the arguments of a tuple struct's or a variant's constructor, the fields of a
+/// tuple, array or struct literal, a block's tail (`let x = Some((&temp(), W(&temp())));`)
+pub fn extended_refs(prog: &Program, e: &Expr, out: &mut Vec<usize>) {
+    let mut x = e;
+    while let Expr::Paren(p) | Expr::Cast(p, _) = x {
+        x = p;
+    }
+    match x {
+        Expr::Ref(..) => direct_ref(prog, x, out),
+        Expr::Call(f, a) if is_ctor_path(prog, f) => {
+            for y in a {
+                extended_refs(prog, y, out);
+            }
+        }
+        Expr::Tuple(xs) | Expr::Array(xs) => {
+            for y in xs {
+                extended_refs(prog, y, out);
+            }
+        }
+        Expr::Struct(_, fs, None) => {
+            for f in fs {
+                extended_refs(prog, &f.1, out);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1967,6 +2043,28 @@ pub enum CapMode {
     Val,
 }
 
+/// The expression whose value e is: through parentheses and the tails of blocks (`unsafe { *p }`)
+pub(crate) fn value_tail(e: &Expr) -> &Expr {
+    match e {
+        Expr::Paren(x) => value_tail(x),
+        Expr::Block(None, _, b) => match b.stmts.last() {
+            Some(crate::parse::Stmt::Expr(t, false)) => value_tail(t),
+            _ => e,
+        },
+        e => e,
+    }
+}
+
+/// A pattern that binds the whole value by value (`x`, `x @ ..`): it moves the scrutinee
+pub(crate) fn pat_takes_whole(q: &Pat) -> bool {
+    match q {
+        Pat::Ident(false, _, n, _) => n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_",
+        // (`x @ Some(_) | x @ None`: each alternative takes it)
+        Pat::Or(ps) => !ps.is_empty() && ps.iter().all(pat_takes_whole),
+        _ => false,
+    }
+}
+
 /// p binds by reference somewhere (`ref x`, `ref mut x`)
 pub(crate) fn pat_binds_ref(p: &Pat) -> bool {
     pat_any(p, &|q| matches!(q, Pat::Ident(true, ..)))
@@ -2046,6 +2144,23 @@ impl Cx<'_> {
             if let Some(srcs) = self.bk.bind_srcs.clone().filter(|s| !s.is_empty()) {
                 self.bk_ev(Ev::Def(id, srcs));
             }
+        }
+    }
+
+    /// q binds the whole scrutinee by value (pat_takes_whole), not a constant it is compared with (a lowercase
+    /// `const` name, which a pattern of a program with `lower_consts` takes)
+    pub(crate) fn takes_whole(&self, q: &Pat) -> bool {
+        match q {
+            Pat::Or(ps) => !ps.is_empty() && ps.iter().all(|p| self.takes_whole(p)),
+            // (not a constant's name, nor a unit variant's in scope (`none` of `use G::*;`): the pattern compares with
+            // it. A static's is a binding (no pattern names a static))
+            Pat::Ident(_, _, n, sub) => {
+                pat_takes_whole(q)
+                    && !(sub.is_none()
+                        && (self.prog.const_index.get(n.as_str()).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_none())
+                            || super::unit_variant_ident(self.prog, q).is_some()))
+            }
+            _ => false,
         }
     }
 
@@ -2148,8 +2263,10 @@ impl Cx<'_> {
         // of the prelude in it): a temporary of the statement, dropped at its end, so its loans live through the
         // arms; also when an arm moves a part out (`Some(t)`), as the drop is then of what may be left. Not when a
         // pattern takes the whole value (`x`, `x @ ..`))
-        let whole = |q: &Pat| matches!(q, Pat::Ident(false, _, n, _) if n.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') && n != "_");
-        if self.bk.level >= 2 && !in_let && self.user_code && !super::is_place_expr(e) && !srcs.is_empty() && !pats.iter().any(|q| whole(q)) {
+        // (when only some of the arms take the whole value (`x if flag => drop(x), _ => ..`), those arms move it: the
+        // match ends its drop there (Bk::scrut_drop), the others keep it)
+        self.bk.scrut_drop = None;
+        if self.bk.level >= 2 && !in_let && self.user_code && !super::is_place_expr(e) && !srcs.is_empty() && !pats.iter().all(|q| self.takes_whole(q)) {
             if let Ok(Some(p)) = &r {
                 let t = p.ty();
                 if self.dropck(t, 0) {
@@ -2162,6 +2279,9 @@ impl Cx<'_> {
                     self.bk_ev(Ev::Def(id, held));
                     self.bk.stmt_temps.push(id);
                     self.bk.drop_temps.push(id);
+                    if pats.iter().any(|q| self.takes_whole(q)) {
+                        self.bk.scrut_drop = Some(id);
+                    }
                 }
             }
         }
@@ -2352,6 +2472,9 @@ impl Cx<'_> {
                     || sd.variants.iter().any(|v| v.fields.iter().any(|f| self.dropck(f.1, depth + 1)))
             }
             Ty::Box(i) | Ty::Array(i, _) => self.dropck(*i, depth + 1),
+            // (a trait object's drop is not known: it may use all it borrows (`Box<dyn FnMut()>` of a closure that
+            // borrows v mutably, used when it is dropped))
+            Ty::Dyn(_) => true,
             _ => false,
         }
     }

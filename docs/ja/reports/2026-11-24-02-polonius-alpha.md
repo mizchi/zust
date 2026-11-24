@@ -2,7 +2,7 @@
 
 日付: 2026-11-24
 
-rustc の nightly は 2026-08-04 から Polonius Alpha で借用を検査していて、stable も 2026 年末までにそうなる予定（[調査](2026-11-23-07-rust-frontier-survey.md)、[#1](https://github.com/mizchi/zust/issues/1#issuecomment-7110120344)）。zustc の borrow check は、もともとローカルごとに origin 1 つで借用をたどっていた（Polonius の見方）。ただし、ところどころに NLL の位置によらない規則が残っていて、別のところには zustc 独自の誤ったエラーもあった。この作業では答えを Alpha に寄せる。どの場合も rustc 1.102.0-nightly（2026-11-22、Alpha）と rustc 1.97.0（NLL）で確かめた。
+rustc の nightly は 2026-08-04 から Polonius Alpha で借用を検査していて、stable も 2026 年末までにそうなる予定（[調査](2026-11-23-08-rust-frontier-survey.md)、[#1](https://github.com/mizchi/zust/issues/1#issuecomment-7110120344)）。zustc の borrow check は、もともとローカルごとに origin 1 つで借用をたどっていた（Polonius の見方）。ただし、ところどころに NLL の位置によらない規則が残っていて、別のところには zustc 独自の誤ったエラーもあった。この作業では答えを Alpha に寄せる。どの場合も rustc 1.102.0-nightly（2026-11-22、Alpha）と rustc 1.97.0（NLL）で確かめた。
 
 ## 変えたこと
 
