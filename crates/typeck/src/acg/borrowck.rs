@@ -4346,7 +4346,11 @@ impl Cx<'_> {
         }
         if self.bk.locals[l as usize].refs {
             if whole {
-                self.bk_ev(Ev::Def(l, srcs.to_vec()));
+                // (a reborrow through the local itself (`y = &mut *y;`, `y = y;`): overwriting y kills the loans of
+                // what its old value points to (Polonius' loan_killed_at), the new value's too. What the old value
+                // borrowed stays with the reborrow)
+                let srcs: Vec<Src> = srcs.iter().copied().filter(|s| !matches!(s, Src::Loan(ln) if self.bk.loans[*ln as usize].place.local == l && !self.bk.loans[*ln as usize].place.proj.is_empty())).collect();
+                self.bk_ev(Ev::Def(l, srcs));
             } else if !srcs.is_empty() {
                 self.bk_ev(Ev::Flow(l, srcs.to_vec()));
             }

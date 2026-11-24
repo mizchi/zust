@@ -2277,8 +2277,10 @@ impl Cx<'_> {
                                     Some(Ty::Ref(m, intern(Ty::Slice(*e))))
                                 }
                                 // (only an instance of the annotation: `Box<_>` is not filled with a `bool`)
+                                // (a reference's mutability as written: inference does not unify `&mut T` with the `&T` of
+                                // its initializer (`let y: &mut [_] = &x[..];` is a mismatch))
                                 Some(inf) if has_hole(self.prog, a) && !has_hole(self.prog, inf) && !self.prog.has_param(inf) && std::mem::discriminant(&inf) == std::mem::discriminant(&a)
-                                    && !matches!((inf, a), (Ty::Struct(x), Ty::Struct(y)) if self.prog.base_of(x) != self.prog.base_of(y)) => Some(inf),
+                                    && !matches!((inf, a), (Ty::Struct(x), Ty::Struct(y)) if self.prog.base_of(x) != self.prog.base_of(y)) => Some(written_muts(inf, a)),
                                 _ => Some(a),
                             }
                         }
@@ -3222,5 +3224,15 @@ pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
         Pat::Struct(_, fs, _) => fs.iter().any(|f| pat_binds_ref_mut(&f.1)),
         Pat::Ref(_, x) => pat_binds_ref_mut(x),
         _ => false,
+    }
+}
+
+/// inf with the mutabilities of the references a writes where inf has references too (`&[i32]` for `&mut [_]`:
+/// `&mut [i32]`)
+fn written_muts(inf: Ty, a: Ty) -> Ty {
+    match (inf, a) {
+        (Ty::Ref(_, i), Ty::Ref(m, j)) => Ty::Ref(m, intern(written_muts(*i, *j))),
+        (Ty::Ptr(_, i), Ty::Ptr(m, j)) => Ty::Ptr(m, intern(written_muts(*i, *j))),
+        _ => inf,
     }
 }
