@@ -6370,11 +6370,14 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
             let decls = p.traits.get(tr).or_else(|| p.traits.iter().find(|(k, _)| k.ends_with(&tail)).map(|(_, v)| v));
             // (a trait not known: as calling)
             // (but a method whose declaration names lifetimes (the trait's `'a`, its own): its call says something of
-            // the regions)
+            // the regions. So does one that returns an associated type of its `Self` (`fn into_item(self) ->
+            // Self::Item`): the placeholder's associated type, whose region is a universal one (`Box::new(v.into_item())`
+            // as a `Box<dyn X + 'static>`, regions/regions-close-associated-type-into-object.rs))
             decls.is_none_or(|ds| {
                 ds.iter().any(|&d| {
                     let called = p.names[d as usize].rsplit("::").next().is_some_and(|m| body.contains(&format!(".{m}(")) || body.contains(&format!("::{m}(")));
-                    called && !p.sigs[d as usize].regions.as_deref().is_some_and(|r| !r.lts.is_empty())
+                    let self_assoc = matches!(p.sigs[d as usize].ret, Ty::Assoc(x) if matches!(x.base, Ty::Param(_)));
+                    called && !self_assoc && !p.sigs[d as usize].regions.as_deref().is_some_and(|r| !r.lts.is_empty())
                 })
             })
         });
