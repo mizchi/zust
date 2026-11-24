@@ -8,6 +8,8 @@
 <meta name="description" content="{{description}}">
 <link rel="stylesheet" href="../style.css">
 <style>
+  .content.wrap { width: 100%; }
+  @media (max-width: 999px) { .shell .side { display: none; } }
   article { max-width: 48rem; margin: auto; padding-block: clamp(32px, 7vw, 76px); font-size: 16px; line-height: 1.9; }
   article h1 { line-height: 1.35; font-size: clamp(28px, 4.5vw, 42px); margin: 0 0 24px; }
   article h2 { margin-top: 2.4em; margin-bottom: .6em; font-size: 23px; }
@@ -30,10 +32,23 @@
   <a class="brand" href="../"><span>z</span>ust</a>
   <nav aria-label="サイト内"><a href="../">About</a><a href="./" aria-current="{{current}}">zustscript</a><a href="https://github.com/mizchi/zust">GitHub</a></nav>
 </div></header>
-<main class="wrap">
-<article>
+<div class="shell">
+  <aside class="side">
+    <a class="brand" href="../"><span>z</span>ust</a>
+    <nav class="pages" aria-label="zustscript の記事">
+      <p class="label">zustscript の記事</p>
+      {{articleLinks}}
+    </nav>
+    <nav aria-label="サイト内">
+      <a href="../">About</a>
+      <a class="ext" href="https://github.com/mizchi/zust">GitHub</a>
+    </nav>
+  </aside>
+  <main class="content wrap">
+    <article>
 {{article}}
-</article>
-</main>
+    </article>
+  </main>
+</div>
 </body>
 </html>

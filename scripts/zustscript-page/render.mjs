@@ -32,14 +32,14 @@ function highlight(code, language) {
 
 const md = new MarkdownIt({ highlight });
 const pages = new Map([
-  ["introduction.md", output],
-  ["rust-costs.md", join(dirname(output), "rust-costs.html")],
+  ["introduction.md", { destination: output, label: "zustscript 入門" }],
+  ["rust-costs.md", { destination: join(dirname(output), "rust-costs.html"), label: "Rust から見る変換コスト" }],
 ]);
 const template = readFileSync(new URL("./template.html", import.meta.url), "utf8");
 const plain = token => token.children.map(child => child.content).join("");
 mkdirSync(dirname(output), { recursive: true });
 
-for (const [file, destination] of pages) {
+for (const [file, { destination }] of pages) {
   const source = readFileSync(new URL("../../crates/zustscript/docs/" + file, import.meta.url), "utf8");
   const tokens = md.parse(source, {});
   const lead = tokens.findIndex(t => t.type === "paragraph_open");
@@ -47,14 +47,20 @@ for (const [file, destination] of pages) {
   for (const token of tokens) {
     for (const child of token.children ?? []) {
       const target = pages.get(child.attrGet("href"));
-      if (target) child.attrSet("href", basename(target));
+      if (target) child.attrSet("href", basename(target.destination));
     }
   }
+  const articleLinks = Array.from(pages, ([sourceFile, page]) => {
+    const href = md.utils.escapeHtml(basename(page.destination));
+    const current = sourceFile === file ? ' aria-current="page"' : "";
+    return `<a href="${href}"${current}>${md.utils.escapeHtml(page.label)}</a>`;
+  });
   const slots = {
+    articleLinks: articleLinks.join("\n      "),
     title: md.utils.escapeHtml(plain(tokens[1])),
     description: md.utils.escapeHtml(plain(tokens[lead + 1])),
     article: md.renderer.render(tokens, md.options, {}).trimEnd(),
     current: destination === output ? "page" : "location",
   };
-  writeFileSync(destination, template.replace(/\{\{(title|description|article|current)\}\}/g, (_, key) => slots[key]));
+  writeFileSync(destination, template.replace(/\{\{(title|description|article|current|articleLinks)\}\}/g, (_, key) => slots[key]));
 }
