@@ -1670,3 +1670,24 @@ fn review106_fourth_round() {
         assert_eq!(check(src), at(line, msg), "{src}");
     }
 }
+
+#[test]
+fn item_errors_at_their_part() {
+    // (an error of an item's definition at the part rustc points at: the union field that needs dropping, the derive
+    // a union cannot have or that is unknown, the variant whose implicit discriminant overflows, also in a fn body;
+    // each expected line is rustc 1.100's on the same source)
+    let line = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let src = "union U {\n    a: u8,\n    b: String,\n}\nfn main() {}\n";
+    assert_eq!(line(src).map(|d| d.0), Some(3), "union field");
+    let src = "#[derive(\n    Clone,\n    Copy,\n    PartialEq,\n)]\nunion U {\n    a: u8,\n}\nfn main() {}\n";
+    assert_eq!(line(src).map(|d| d.0), Some(4), "union derive");
+    let src = "#[derive(Clone,\n         Sync,\n         Copy)]\nenum Foo {}\nfn main() {}\n";
+    assert_eq!(line(src), Some((2, "cannot find derive macro `Sync` in this scope".to_string())), "unknown derive");
+    let src = "#[repr(u8)]\nenum A {\n    Ok = 254,\n    Ok2,\n    OhNo,\n}\nfn main() {}\n";
+    assert_eq!(line(src).map(|d| d.0), Some(5), "E0370");
+    let src = "fn f() {\n    #[repr(i8)]\n    enum A {\n        Ok = i8::MAX - 1,\n        Ok2,\n        OhNo,\n    }\n    let _ = A::Ok;\n}\nfn main() {}\n";
+    assert_eq!(line(src).map(|d| d.0), Some(6), "E0370 in a fn body");
+}

@@ -1206,6 +1206,15 @@ impl Session2 {
                 if let Some((l, m)) = e.strip_prefix('\u{3}').and_then(|r| r.split_once('\u{3}')) {
                     return Err(format!("{}:1: {m}", it.line + l.parse::<usize>().unwrap_or(1) - 1));
                 }
+                // (`\u{5}word\u{5}msg`: at the line of the first whole word `word` of the item's text)
+                if let Some((w, m)) = e.strip_prefix('\u{5}').and_then(|r| r.split_once('\u{5}')) {
+                    let text = src.get(it.start..it.end).unwrap_or("");
+                    let b = text.as_bytes();
+                    let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+                    let at = text.match_indices(w).map(|(i, _)| i).find(|&i| (i == 0 || !id(b[i - 1])) && b.get(i + w.len()).is_none_or(|&c| !id(c)));
+                    let line = at.map(|i| it.line + text[..i].matches('\n').count()).unwrap_or(it.line);
+                    return Err(format!("{line}:1: {m}"));
+                }
                 // (`\u{1}field\u{1}msg`: at the line of the field `field:`)
                 if let Some((f, m)) = e.strip_prefix('\u{1}').and_then(|r| r.split_once('\u{1}')) {
                     let text = src.get(it.start..it.end).unwrap_or("");
@@ -8350,7 +8359,7 @@ impl Session2 {
 fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
     let Some((l, rest)) = e.split_once(":1: ") else { return e.to_string() };
     let Ok(line) = l.parse::<usize>() else { return e.to_string() };
-    let name = ["cannot find type `", "cannot find trait `", "cannot find value `", "cannot find struct `", "the name `"]
+    let name = ["cannot find type `", "cannot find trait `", "cannot find value `", "cannot find struct `", "the name `", "enum discriminant overflowed (E0370): `"]
         .iter()
         .find_map(|p| rest.strip_prefix(p))
         .and_then(|r| r.split('`').next());
@@ -8666,7 +8675,9 @@ impl Session2 {
 /// `Self` of the fn or impl around it, a local), an import, `_` in a signature, an item never used. Not what zustc
 /// does not read (`unsupported ..`, a parse error of syntax it does not know), nor a name the hoisting made (`X__h0`)
 fn hoisted_err_holds(msg: &str) -> bool {
-    let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword"];
+    let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword",
+        // (an item's own definition: a discriminant past its repr, a union's fields and derives)
+        "enum discriminant overflowed (E0370)", "field must implement `Copy`", "this trait cannot be derived for unions", "cannot find derive macro `"];
     let unused = msg.starts_with("function `") && msg.contains("is never used");
     // (a derive's field or a field's type without the bound it needs (derive_field_error, wf_error): a local
     // `#[derive(Eq)] struct S(f64);` too)
