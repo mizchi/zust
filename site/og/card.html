@@ -67,20 +67,23 @@
   const get = (f) => fetch(`../dashboard/data/${f}`).then((r) => r.json());
   const fmt = (n) => n.toLocaleString('en-US');
   const ui = await get('ui.json');
-  const u0 = ui[0], u1 = ui[ui.length - 1];
+  // (the first and last measured run-pass rates: a row may have none, null)
+  const runs = ui.filter((r) => r.run_pass_rate != null);
+  const u0 = runs[0], u1 = runs[runs.length - 1];
+  const rate = (u, d) => (u ? u.run_pass_rate.toFixed(d) : '—');
   if (page === 'home') {
     const e = (window.BENCHMARK_DATA?.entries?.zustc || []).slice(-1)[0];
     const b = Object.fromEntries((e?.benches || []).map((x) => [x.name, x.value]));
     const ms = (v) => (v == null ? '—' : v < 10 ? v.toFixed(2) : String(Math.round(v)));
     document.querySelector('#home [data-k="edit"]').innerHTML = `${ms(b['gen5000 build edit 1 fn'])}<small>ms</small>`;
     document.querySelector('#home [data-k="noop"]').innerHTML = `${ms(b['gen5000 build noop'])}<small>ms</small>`;
-    document.querySelector('#home [data-k="run"]').innerHTML = `${u1.run_pass_rate.toFixed(1)}<small>%</small>`;
+    document.querySelector('#home [data-k="run"]').innerHTML = `${rate(u1, 1)}<small>%</small>`;
   } else {
     const [hourly, kpi, sessions] = await Promise.all([get('hourly.json'), get('kpi.json'), get('sessions.json')]);
     const H = 36e5;
     set('hours', String(Math.round((new Date(hourly[hourly.length - 1].hour) - new Date(hourly[0].hour)) / H) + 1));
-    set('run0', `${u0.run_pass_rate.toFixed(0)}%`);
-    set('run1', `${u1.run_pass_rate.toFixed(0)}%`);
+    set('run0', `${rate(u0, 0)}%`);
+    set('run1', `${rate(u1, 0)}%`);
     set('commits', fmt(hourly.reduce((s, h) => s + h.commits, 0)));
     set('sessions', String(sessions.length));
     const ed = kpi.map((r) => r.edit_build_M).filter((v) => v != null);
@@ -94,7 +97,7 @@
       const path = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${((x - x0) / (x1 - x0 || 1) * (W - 4) + 2).toFixed(1)},${(Ht - 3 - (y - y0) / (y1 - y0 || 1) * (Ht - 6)).toFixed(1)}`).join('');
       svg.innerHTML = `<path d="${path}" fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>`;
     };
-    spark('spark', ui.map((r) => [new Date(r.time).getTime(), r.run_pass_rate]), 'var(--accent)');
+    spark('spark', runs.map((r) => [new Date(r.time).getTime(), r.run_pass_rate]), 'var(--accent)');
     spark('spark2', hourly.map((h) => [new Date(h.hour).getTime(), h.cumulative]), 'var(--accent2)');
   }
   document.getElementById(page).hidden = false;

@@ -69,7 +69,9 @@ def commits(rev):
 
 def hourly(cs, compat_t):
     by = collections.Counter(c["t"].replace(minute=0, second=0) for c in cs)
-    h, end, cum, rows = cs[0]["t"].replace(minute=0, second=0), cs[-1]["t"], 0, []
+    # (the bounds from all commits' times: git's traversal order is not author-time order)
+    ts = [c["t"] for c in cs]
+    h, end, cum, rows = min(ts).replace(minute=0, second=0), max(ts), 0, []
     while h <= end:
         cum += by[h]
         rows.append(dict(hour=iso(h), commits=by[h], cumulative=cum, phase="compat" if h >= compat_t.replace(minute=0, second=0) else "build-up"))
@@ -160,16 +162,14 @@ def loc_at(full):
 
 
 def loc_series(rev, every):
-    rows, last = [], None
+    # (one sample a bucket, its last commit: the closing size of the bucket, and the requested revision itself in the
+    #  last bucket)
+    picked = collections.OrderedDict()
     for l in git("log", "--reverse", "--first-parent", "--format=%H|%aI", rev).splitlines():
         h, d = l.split("|")
         t = utc(d)
-        key = (t.date(), t.hour // every)
-        if key == last:
-            continue
-        last = key
-        rows.append(dict(time=iso(t), commit=h[:8], **loc_at(h)))
-    return rows
+        picked[(t.date(), t.hour // every)] = (h, t)
+    return [dict(time=iso(t), commit=h[:8], **loc_at(h)) for h, t in picked.values()]
 
 
 def daily(cs, prs, ui, loc):

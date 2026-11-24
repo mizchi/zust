@@ -153,7 +153,9 @@
                 ['crates_edit_M', 'crates edit build'], ['patterns_check_M', 'patterns check'], ['lsp_session_G', 'LSP session']];
   const fmt = d3.format(','), si = d3.format('.3~s');
   const pct = (v, d = 1) => (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v).toFixed(d) + '%';
-  const pt = (v) => (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v).toFixed(1) + ' pt';
+  const pt = (v) => (v == null || Number.isNaN(v) ? '—' : (v > 0 ? '+' : v < 0 ? '−' : '±') + Math.abs(v).toFixed(1) + ' pt');
+  // (a measurement may be null (the benchmark did not run that kind): a missing one is shown as —)
+  const f1 = (v) => (v == null ? '—' : v.toFixed(1));
   const tfmt = d3.timeFormat('%b %d %H:%M'), dayFmt = d3.timeFormat('%b %d'), hourFmt = d3.timeFormat('%H:%M');
   // axis ticks: the date at midnight, the time of day otherwise (12-hour ticks would repeat the date)
   const dfmt = (d) => (d.getHours() === 0 && d.getMinutes() === 0 ? dayFmt(d) : hourFmt(d));
@@ -207,10 +209,14 @@
   }
 
   function renderText(D, S) {
-    const r = (k) => S.u1[k + '_rate'], r0 = (k) => S.u0[k + '_rate'];
+    // (each kind's first and last measured rows: a row may have no measurement of a kind)
+    const ends = (k) => { const v = D.ui.filter((x) => x[k + '_rate'] != null); return [v[0], v[v.length - 1]]; };
+    const r = (k) => ends(k)[1]?.[k + '_rate'], r0 = (k) => ends(k)[0]?.[k + '_rate'];
+    const since = (k) => (ends(k)[0] ? dayFmt(new Date(ends(k)[0].time)) : '—');
+    const dlt = (k) => (r(k) == null || r0(k) == null ? null : r(k) - r0(k));
     document.getElementById('lede').textContent =
-      `In the ${S.compatHours} hours after rustc's tests/ui became the spec, the run-pass rate went from ${r0('run_pass').toFixed(1)}% to ` +
-      `${r('run_pass').toFixed(1)}% and the compile-fail rate from ${r0('compile_fail').toFixed(1)}% to ${r('compile_fail').toFixed(1)}%. ` +
+      `In the ${S.compatHours} hours after rustc's tests/ui became the spec, the run-pass rate went from ${f1(r0('run_pass'))}% to ` +
+      `${f1(r('run_pass'))}% and the compile-fail rate from ${f1(r0('compile_fail'))}% to ${f1(r('compile_fail'))}%. ` +
       `Across the ${S.kpiChanges} changes measured meanwhile, a rebuild after editing one function took ${pct(S.drift('edit_build_M'))} instructions ` +
       `and check ${pct(S.drift('check_M'))}.`;
     const asof = `${S.u1.commit}, ${d3.utcFormat('%Y-%m-%d')(new Date(S.u1.time))}`;
@@ -229,8 +235,8 @@
     document.getElementById('tiles').replaceChildren(
       tile('Elapsed, first to last commit', `${S.hours} h`, `commits in ${S.active} of those hours`),
       tile('Commits', fmt(S.commits), `${fmt(S.commitsCompat)} after tests/ui became the spec`),
-      tile('run-pass rate', `${r('run_pass').toFixed(1)}%`, `${pt(r('run_pass') - r0('run_pass'))} since ${dayFmt(new Date(S.u0.time))}`, 'good'),
-      tile('compile-fail rate', `${r('compile_fail').toFixed(1)}%`, `${pt(r('compile_fail') - r0('compile_fail'))} since ${dayFmt(new Date(S.u0.time))}`, 'good'),
+      tile('run-pass rate', `${f1(r('run_pass'))}%`, `${pt(dlt('run_pass'))} since ${since('run_pass')}`, 'good'),
+      tile('compile-fail rate', `${f1(r('compile_fail'))}%`, `${pt(dlt('compile_fail'))} since ${since('compile_fail')}`, 'good'),
       tile('Rebuild after one edit', pct(e), `instructions, over ${S.kpiChanges} changes`, good(e)),
       tile('Implementation / tests', `${si(S.l1.impl_lines)} / ${si(S.l1.test_lines)}`,
         `lines; ×${(S.l1.impl_lines / S.l0.impl_lines).toFixed(1)} / ×${(S.l1.test_lines / S.l0.test_lines).toFixed(1)} since the start`),
@@ -308,6 +314,13 @@
       const pts = rows.filter((r) => r[k + '_rate'] != null);
       const a = pts[0], b = pts[pts.length - 1];
       const head = el('div', {className: 'mhead'});
+      // (a kind never measured: its name and "no measurements yet", no chart)
+      if (!b) {
+        head.append(el('span', {className: 'mname'}, name), el('span', {className: 'mval'}, '—'));
+        fig.append(head, el('figcaption', {}, 'no measurements yet'));
+        grid.append(fig);
+        return;
+      }
       head.append(el('span', {className: 'mname'}, name), el('span', {className: 'mval'}, `${b[k + '_rate'].toFixed(1)}%`),
         el('span', {className: 'mdelta good'}, pt(b[k + '_rate'] - a[k + '_rate'])));
       const cap = el('figcaption', {}, `${what} · ${fmt(b[k + '_passing'])} passing`);

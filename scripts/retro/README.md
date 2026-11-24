@@ -22,6 +22,7 @@ replaced by another view) without touching the data. Check a data directory with
 ```bash
 python3 scripts/retro/extract.py --out out/site/dashboard/data
 cp -R site/. out/site/
+mkdir -p out/site/dev/bench
 git show origin/gh-pages:dev/bench/data.js > out/site/dev/bench/data.js   # for the numbers on /
 python3 -m http.server -d out/site 8000                                     # then open /dashboard/
 ```
