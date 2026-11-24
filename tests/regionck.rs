@@ -3837,3 +3837,29 @@ fn part24_review_2() {
     // (accepted, as in rustc: a Copy struct and an `Option<&u8>`)
     assert_eq!(check_ed("#[derive(Clone, Copy)]\nstruct P(u8);\nfn main() {\n    let t = (P(1), Some(&2u8));\n    let (mut a, mut b) = &t;\n    a.0 += 1;\n    b = None;\n    let _ = (a, b);\n}\n", 2021), vec![]);
 }
+
+#[test]
+fn part25_placeholder_assoc_type_outlives() {
+    // (a placeholder's associated type is a type of its own: what it outlives is what the trait declares, what the
+    // function's where clauses say, and what its parameter and the bound's lifetimes all outlive
+    // (nll/ty-outlives/projection-where-clause-*.rs))
+    let bar = "fn bar<'a, T>() -> &'a () where T: 'a { &() }\nfn main() {}\n";
+    let d = check(&format!("trait MyTrait<'a> {{ type Output; }}\nfn foo<'a, T>() -> &'a () where T: MyTrait<'a> {{\n    bar::<T::Output>()\n}}\n{bar}"));
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("the associated type `<T as MyTrait<'a>>::Output` may not live long enough") && d[0].1.contains("E0309"), "{d:?}");
+    let d = check(&format!("trait MyTrait {{ type Output; }}\nfn foo<'a, T>() -> &'a () where T: MyTrait {{\n    bar::<T::Output>()\n}}\n{bar}"));
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0309"), "{d:?}");
+    // (a where clause of another lifetime that is not known to outlive 'a)
+    let d = check(&format!("trait MyTrait<'a> {{ type Output; }}\nfn foo1<'a, 'b, T>() -> &'a () where T: MyTrait<'a>, <T as MyTrait<'a>>::Output: 'b {{\n    bar::<T::Output>()\n}}\n{bar}"));
+    assert!(d.len() == 1 && d[0].0 == 3, "{d:?}");
+    // (accepted: the where clause, with `'b: 'a`, or of 'a; the trait's `type Output: 'a`; `T: 'a` with the trait's
+    // 'a; `T: 'static` and a trait with no lifetime)
+    for src in [
+        "trait MyTrait<'a> { type Output; }\nfn foo2<'a, 'b, T>() -> &'a () where T: MyTrait<'a>, <T as MyTrait<'a>>::Output: 'b, 'b: 'a {\n    bar::<T::Output>()\n}\n",
+        "trait MyTrait<'a> { type Output; }\nfn foo<'a, T>() -> &'a () where T: MyTrait<'a>, T::Output: 'a {\n    bar::<T::Output>()\n}\n",
+        "trait MyTrait<'a> { type Output: 'a; }\nfn foo<'a, T>() -> &'a () where T: MyTrait<'a> {\n    bar::<T::Output>()\n}\n",
+        "trait MyTrait<'a> { type Output; }\nfn foo<'a, T>() -> &'a () where T: MyTrait<'a> + 'a {\n    bar::<T::Output>()\n}\n",
+        "trait MyTrait { type Output; }\nfn foo<'a, T: 'static>() -> &'a () where T: MyTrait {\n    bar::<T::Output>()\n}\n",
+    ] {
+        assert_eq!(check(&format!("{src}{bar}")), vec![], "{src}");
+    }
+}

@@ -147,6 +147,9 @@ pub struct RgSt {
     /// The placeholders of the instance's type parameters (zustc check of a generic fn nothing calls), with their
     /// universal regions: a placeholder's region is the same wherever its type is
     pub ph: Vec<(u32, u32)>,
+    /// A placeholder's associated type's universal region, and the regions it is of (its placeholder's, its bound's
+    /// lifetimes'): it outlives what they all outlive
+    pub proj_comps: Vec<(u32, Vec<u32>)>,
     /// Outlives relations among universal regions the function may assume (a: b)
     pub known: Vec<(u32, u32)>,
     /// Constraints a: b, with where they come from
@@ -1975,15 +1978,34 @@ impl RgSt {
                 k[i][j] = true;
             }
         }
-        for m in 0..nu {
-            for i in 0..nu {
-                if k[i][m] {
-                    for j in 0..nu {
-                        if k[m][j] {
-                            k[i][j] = true;
+        let close = |k: &mut Vec<Vec<bool>>| {
+            for m in 0..nu {
+                for i in 0..nu {
+                    if k[i][m] {
+                        for j in 0..nu {
+                            if k[m][j] {
+                                k[i][j] = true;
+                            }
                         }
                     }
                 }
+            }
+        };
+        close(&mut k);
+        // (a placeholder's associated type outlives what its placeholder and its bound's lifetimes all outlive)
+        if !self.proj_comps.is_empty() {
+            let mut changed = false;
+            for (a, comps) in &self.proj_comps {
+                let (Some(ai), Some(cs)) = (ix(*a), comps.iter().map(|&c| ix(c)).collect::<Option<Vec<usize>>>()) else { continue };
+                for j in 0..nu {
+                    if !k[ai][j] && cs.iter().all(|&c| k[c][j]) {
+                        k[ai][j] = true;
+                        changed = true;
+                    }
+                }
+            }
+            if changed {
+                close(&mut k);
             }
         }
         let n = self.n as usize + 1;
@@ -2038,7 +2060,8 @@ impl RgSt {
                                     (_, "'_") => 311,
                                     _ => 309,
                                 };
-                                format!("the parameter type `{tp}` may not live long enough (it must outlive `{other}`) (E0{code})")
+                                let what = if tp.starts_with('<') { "associated type" } else { "parameter type" };
+                                format!("the {what} `{tp}` may not live long enough (it must outlive `{other}`) (E0{code})")
                             } else {
                                 format!("lifetime may not live long enough (`{uname}` must outlive `{other}`)")
                             };
@@ -2197,6 +2220,52 @@ impl Cx<'_> {
                         let b = if *c == R_STATIC { Some(STATIC) } else { lts.get(*c as usize).copied() };
                         if let Some(b) = b {
                             rg.known.push((v, b));
+                        }
+                    }
+                }
+                // (its associated types its bounds' traits declare (`<T# as MyTrait<'a>>::Output`): a universal region
+                // each, which outlives what the trait's declaration bounds it by (`type Output: 'a`), what the
+                // function's where clauses do (`T::Output: 'b`), and what its placeholder and the bound's lifetimes
+                // all outlive (nll/ty-outlives/projection-where-clause-*.rs). Not of a bound with type arguments, or
+                // with a lifetime the function does not name (the bound's own `for<'x>`): what it is of is not known)
+                if !prog.assoc_bounds.is_empty() {
+                    let bs = prog.structs[sid as usize].placeholder.clone().unwrap_or_default();
+                    for b in &bs {
+                        let tr = b.split('<').next().unwrap_or(b).trim();
+                        let short = tr.rsplit("::").next().unwrap_or(tr).to_string();
+                        let blts = bound_lts(b);
+                        let n_args = b.find('<').map_or(0, |_| b.matches(',').count() + 1);
+                        if n_args != blts.len() {
+                            continue;
+                        }
+                        let Some(regs) = blts.iter().map(|l| if l == "'static" { Some(STATIC) } else { rg.lt_names.iter().position(|x| x == l).and_then(|p| lts.get(p).copied()) }).collect::<Option<Vec<u32>>>() else { continue };
+                        let mut names: Vec<(&String, &Vec<String>)> = prog.assoc_bounds.iter().filter(|((t, _), _)| *t == short).map(|((_, n), d)| (n, d)).collect();
+                        names.sort();
+                        for (name, decl) in names {
+                            let Some(asid) = prog.assoc_placeholder(sid, name) else { continue };
+                            if rg.ph.iter().any(|x| x.0 == asid) {
+                                continue;
+                            }
+                            let va = rg.var();
+                            rg.univ.push((va, prog.structs[asid as usize].name.clone()));
+                            rg.ph.push((asid, va));
+                            for d in decl.iter().filter(|d| d.starts_with('\'')) {
+                                let r = if d == "'static" { Some(STATIC) } else { d[1..].parse::<usize>().ok().and_then(|i| regs.get(i).copied()) };
+                                if let Some(r) = r {
+                                    rg.known.push((va, r));
+                                }
+                            }
+                            let key = format!("{pname}::{name}");
+                            for (tp, c) in rs.map(|r| r.ty_outlives.as_slice()).unwrap_or(&[]) {
+                                if *tp == key {
+                                    if let Some(r) = if *c == R_STATIC { Some(STATIC) } else { lts.get(*c as usize).copied() } {
+                                        rg.known.push((va, r));
+                                    }
+                                }
+                            }
+                            let mut comps = vec![v];
+                            comps.extend(regs.iter().copied());
+                            rg.proj_comps.push((va, comps));
                         }
                     }
                 }

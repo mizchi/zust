@@ -2802,7 +2802,19 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
             // (one without bounds too: a `dyn Tr` must bind every associated type the trait leaves without a
             // default (E0191))
             ItemKind::Type(n, _, bs, None) => {
-                let names = if bs.is_empty() { vec![] } else { bound_names(bs)? };
+                let mut names = if bs.is_empty() { vec![] } else { bound_names(bs)? };
+                // (and its lifetime bounds (`type Output: 'a;`): `'static`, or the trait's lifetime parameter by its
+                // place, `'0` for the first (a placeholder's associated type outlives it, regionck))
+                for b in bs {
+                    if let Bound::Lifetime(l) = b {
+                        let lts = ow.regions.as_deref().map(|r| r.lts.as_slice()).unwrap_or(&[]);
+                        match lts.iter().position(|x| x == l) {
+                            _ if l == "'static" => names.push(l.clone()),
+                            Some(i) => names.push(format!("'{i}")),
+                            None => {}
+                        }
+                    }
+                }
                 let mut sm = Summary::default();
                 sm.assoc_bounds.push((ow.base.clone(), n.clone(), names));
                 return Ok(sm);
