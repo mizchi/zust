@@ -5083,7 +5083,8 @@ impl Cx<'_> {
         }
         match self.rg.check() {
             // (a placeholder's type by its parameter's name: `T`, `<T as Tr>::Out`, not `T#`)
-            Some((sp, m)) => Err(self.at(sp, if self.rg.ph.is_empty() { m } else { m.replace("#`", "`").replace("#>", ">") })),
+            // (and a name the program shares with the prelude's, kept apart as `__u_Iter`, as written)
+            Some((sp, m)) => Err(self.at(sp, if self.rg.ph.is_empty() { m } else { m.replace("#`", "`").replace("#>", ">").replace("__u_", "") })),
             None => Ok(()),
         }
     }
