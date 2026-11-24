@@ -133,7 +133,9 @@ pub fn rewrite_ctor_values(src: &str) -> Option<String> {
         // 前: `(` / `,` / `=` (`==` などでない)
         let p = k - 1;
         let eq = is_sym(p, b'=') && !(p >= 1 && matches!(s[toks[p].1 - 1], b'=' | b'!' | b'<' | b'>' | b'+' | b'-' | b'*' | b'/' | b'|' | b'&' | b'^' | b'%')) && !is_sym(k, b'=');
-        let prev_ok = is_sym(p, b'(') || is_sym(p, b',') || eq;
+        // (not a type alias's right side: `type Ok = Ok;` names a type (a parameter `Ok`), not the variant)
+        let alias = eq && p >= 2 && toks[p - 1].0 == 0 && toks[p - 2].0 == 0 && tok(p - 2) == b"type";
+        let prev_ok = (is_sym(p, b'(') || is_sym(p, b',') || eq) && !alias;
         if !prev_ok {
             k += 1;
             continue;

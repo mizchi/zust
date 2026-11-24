@@ -6,6 +6,11 @@ TypeScript で「状態を判別 union で表す」「元の配列を変更せ�
 
 コンパイラの `zsc` は、Rust で実装した zustscript 専用の型検査器でソースを検査します。通常の関数からは、TypeScript アプリがそのまま import できる JavaScript と型定義（`.d.ts`）を生成します。`@wasm` を付けた関数からは Rust ソースを生成し、Rust のサブセットを扱うコンパイラ `zustc` がその Rust コードを型検査して WebAssembly（Wasm）にコンパイルします。この言語とコンパイラは現在開発中です。
 
+使い慣れた言語から読み始める方はこちらです。
+
+- [Rust プログラマー向け ── 借用と enum が JS からどう見えるか](for-rust-programmers.md)
+- [TypeScript プログラマー向け ── アプリの判別 union をそのまま使う](for-typescript-programmers.md)
+
 ## 状態を enum で表し、match で読み出す
 
 zustscript の `enum` では、状態ごとに異なるデータを持たせられます。たとえば地図で地点を選ぶ画面なら、選択中のときだけ地点名が必要です。

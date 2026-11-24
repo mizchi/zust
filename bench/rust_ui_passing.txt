@@ -2948,6 +2948,7 @@ check-pass	generic-associated-types/issue-76407.rs
 compile-fail	generic-associated-types/issue-76535.rs
 run-pass	generic-associated-types/issue-76826.rs
 compile-fail	generic-associated-types/issue-78671.rs
+compile-fail	generic-associated-types/issue-79422.rs
 compile-fail	generic-associated-types/issue-79636-1.rs
 compile-fail	generic-associated-types/issue-79636-2.rs
 check-pass	generic-associated-types/issue-80433-reduced.rs
@@ -3646,6 +3647,7 @@ run-pass	let-else/let-else-temp-borrowck.rs
 compile-fail	let-else/let-else-then-diverge.rs
 run-pass	let-else/let-else.rs
 compile-fail	let-else/uninitialized-refutable-let-issue-123844.rs
+compile-fail	lexer/dont-ice-on-invalid-lifetime-in-macro-definition.rs
 compile-fail	lexer/lex-bad-binary-literal.rs
 compile-fail	lexer/lex-bad-char-literals-2.rs
 compile-fail	lexer/lex-bad-char-literals-3.rs
@@ -3657,11 +3659,13 @@ compile-fail	lexer/lex-bad-numeric-literals.rs
 compile-fail	lexer/lex-bad-octal-literal.rs
 compile-fail	lexer/lex-bad-str-literal-as-char-1.rs
 compile-fail	lexer/lex-bad-str-literal-as-char-2.rs
+compile-fail	lexer/lex-bad-str-literal-as-char-4.rs
 compile-fail	lexer/lex-bad-token.rs
 run-pass	lexer/lex-bare-cr-nondoc-comment.rs
 compile-fail	lexer/lex-emoji-identifiers.rs
 compile-fail	lexer/lex-invisible-characters.rs
 compile-fail	lexer/lex-stray-backslash.rs
+compile-fail	lexer/prefixed-lifetime.rs
 run-pass	lexer/underscores-in-unicode-escapes.rs
 run-pass	lexer/unicode-pattern-white-space.rs
 compile-fail	lexer/unterminated-comment.rs
@@ -6516,6 +6520,7 @@ check-pass	rust-2024/box-slice-into-iter-ambiguous.rs
 check-pass	rust-2024/gen-kw-in-macro.rs
 compile-fail	rust-2024/prelude-migration/in_2024_compatibility.rs
 check-pass	rust-2024/raw-gen-lt.rs
+compile-fail	rust-2024/reserved-guarded-strings-lexing.rs
 check-pass	rust-2024/reserved-guarded-strings-migration.rs
 compile-fail	rust-2024/reserved-guarded-strings.rs
 compile-fail	rust-2024/safe-outside-extern.rs

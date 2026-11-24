@@ -697,6 +697,17 @@ impl Cx<'_> {
 
     /// 式を評価し、期待型への暗黙の変換 (`&[T; N]` → `&[T]`) をする
     pub(crate) fn expr(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (a returned position: what is borrowed and read in it is returned (Bk::ret_leaves))
+        if !self.bk.ret_leaves.is_empty() && self.bk.ret_leaves.contains(&(e as *const Expr as usize)) {
+            self.bk.in_ret += 1;
+            let r = self.expr_at(e, expected);
+            self.bk.in_ret -= 1;
+            return r;
+        }
+        self.expr_at(e, expected)
+    }
+
+    fn expr_at(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         // (the places inside a sub-expression are accesses of their own)
         let pd = std::mem::take(&mut self.bk.place_depth);
         let hint_only = std::mem::take(&mut self.bk.move_mut_hint);
@@ -1429,6 +1440,7 @@ impl Cx<'_> {
                 let v = match value {
                     Some(e) => {
                         self.mark_ret_call(e);
+                        self.bk_ret_leaves(e);
                         self.bk_frame();
                         let r = self.expr(e, Some(ret));
                         let srcs = self.bk_frame_end();
@@ -1619,7 +1631,14 @@ impl Cx<'_> {
                         _ => Some(Ty::I32),
                     })
                 };
+                let f0 = self.bk.frames.last().map(|f| f.len());
                 let (v, from) = self.expr(x, hint)?;
+                // (a cast to a number holds nothing of what x borrows: `r as *mut _ as usize` does not keep r's loans)
+                if to.is_int() || to.is_float() || matches!(to, Ty::Bool | Ty::Char) {
+                    if let (Some(n), Some(f)) = (f0, self.bk.frames.last_mut()) {
+                        f.truncate(n);
+                    }
+                }
                 // `x as _` (the expected type, else the same type) / `&x as *const _` (the pointee of the source)
                 let to = match to {
                     Ty::Param(h) if h == crate::program::HOLE => expected.filter(|&e| !has_hole(self.prog, e)).unwrap_or(from),

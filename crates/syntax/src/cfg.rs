@@ -19,6 +19,9 @@ pub struct CfgSet {
     /// the crate's compile-time environment for `env!` / `option_env!` (cargo's `CARGO_PKG_*`, `OUT_DIR`, a build
     /// script's `rustc-env`). A name that is not here is looked up in zustc's own environment, as rustc does
     pub env: Vec<(String, String)>,
+    /// the crate's edition, for what its tokens mean (2021's reserved prefixes: lexer::unknown_prefix). 0: unknown,
+    /// and nothing edition-dependent is checked
+    pub edition: u16,
 }
 
 impl CfgSet {

@@ -375,6 +375,8 @@ whichever side is wrong (or, if the finding is wrong, commit with `--no-verify`)
 | `ZUSTC_IR_VERIFY=1` | check that the value types of the rebuilt instructions match the type checker's record |
 | `ZUSTC_CLIF_VERIFY=1` / `ZUSTC_CLIF_DUMP=1` | verify / dump the Cranelift IR |
 | `ZUSTC_PREP_VERIFY=1` | compare the result of incremental preprocessing with a full rerun |
+| `ZUSTC_CHECK_FORK_MIN=N` | `check` forks children for a wave of functions only when it has at least N per child (default 32); `1` forks for nearly every wave, to test that the diagnostics are as at `-j 1` |
+| `ZUSTC_NO_POLONIUS=1` | the borrow check's NLL rules where Polonius Alpha's differ (#1): a reborrow returned is live to the end of the function, and an assignment to a part of a local kills no loans |
 | `ZUSTC_DUMP_PRE=FILE` | write the source after preprocessing (`macro_rules!` expansion, merging `mod x;` files) to FILE |
 | `ZUSTC_LOG_COMPILED=1` | print the names of compiled functions (and why, for those that could not be read from the cache) |
 | `ZUSTC_PROF=1` | print detailed time per phase |

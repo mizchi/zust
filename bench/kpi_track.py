@@ -62,8 +62,9 @@ def build_kpis():
     edit = instructions(build)
     gen(5000, 0, src)
     run_measured(build)
-    # (the least of 3 runs, as for the no-op build: one run moves by ~0.06%)
-    check = min(instructions([ZUSTC, "check", src]) for _ in range(3))
+    # (the least of 3 runs, as for the no-op build: one run moves by ~0.06%. At -j 1: valgrind does not count the
+    # children a parallel check forks, #101)
+    check = min(instructions([ZUSTC, "check", "-j", "1", src]) for _ in range(3))
     cache = os.path.getsize(exe + ".crcache2") / 1024
     return noop, edit, check, cache
 
@@ -80,7 +81,7 @@ def traits_kpis(n=50):
     gen_t(0)
     build = [ZUSTC, src, "-o", exe]
     run_measured(build)
-    check = min(instructions([ZUSTC, "check", src]) for _ in range(3))
+    check = min(instructions([ZUSTC, "check", "-j", "1", src]) for _ in range(3))
     gen_t(3)
     edit = instructions(build)
     return check, edit
@@ -120,7 +121,7 @@ def patterns_kpis(n=4):
     gen_p(0)
     build = [ZUSTC, src, "-o", exe]
     run_measured(build)
-    check = min(instructions([ZUSTC, "check", src]) for _ in range(3))
+    check = min(instructions([ZUSTC, "check", "-j", "1", src]) for _ in range(3))
     # (a build under valgrind does not take the stamps' shortcut, and leaves the cache the edit build reads)
     instructions(build, env={"ZUSTC_NO_STAMP": "1"})
     gen_p(3)
