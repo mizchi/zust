@@ -1343,6 +1343,7 @@ compile-fail	closures/closure-reform-bad.rs
 compile-fail	closures/closure-return-type-mismatch.rs
 compile-fail	closures/closure-to-fn-pointer-lifetime-error.rs
 run-pass	closures/closure-type-inference-in-context-9129.rs
+run-pass	closures/closure-upvar-last-use-analysis.rs
 run-pass	closures/closure-upvar-trait-caching.rs
 run-pass	closures/closure-with-fixed-size-array-param.rs
 compile-fail	closures/closure-wrong-kind.rs

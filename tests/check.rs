@@ -521,3 +521,13 @@ fn trait_solver_placeholder_lacks_copy() {
     assert_eq!(d[0].line, 10, "{d:?}");
     assert!(d[0].msg.contains("`T: Copy` is not satisfied"), "{d:?}");
 }
+
+/// `b.clone()` of a Box whose integer literal is not settled yet keeps it open for what the clone must be
+/// (`Box<isize>`), and a clone coerced to a trait object does not make the receiver one
+#[test]
+fn clone_of_box_keeps_its_literal_open() {
+    let src = "#[derive(Clone)]\nstruct B1;\ntrait A {}\nimpl A for B1 {}\nstruct Holder { a: Box<isize> }\nfn main() {\n    let k = Box::new(22);\n    let h = Holder { a: k.clone() };\n    let v: Box<_> = Box::new(B1);\n    let _c: Box<dyn A> = v.clone();\n    let _ = (h.a, k, v);\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert!(d.is_empty(), "{d:?}");
+}

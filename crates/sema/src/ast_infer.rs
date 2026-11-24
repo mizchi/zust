@@ -2115,8 +2115,26 @@ impl Inf<'_> {
             }
             hops += 1;
         }
-        // (`x.clone()`: struct で clone を持たない (derive の Copy など) か、整数・浮動小数点・bool・char・生ポインタ)
+        // (`b.clone()` of a Box or an array: the receiver's own type, its variables kept (`Box::new(22).clone()`
+        // where a `Box<isize>` is wanted: the literal is not settled to i32 here))
         let rroot = self.find(rv);
+        {
+            // (the receiver before auto-deref: for a Box, deref_expr gave its contents)
+            // (only when what the Box holds is a numeric literal not settled yet: sharing the variable otherwise would let a
+            // coercion's target (`let c: Box<dyn A> = v.clone()`) flow back into the receiver)
+            let r0 = self.find(r);
+            let lit = match self.shape[r0 as usize] {
+                Some(Shape::Bx(i) | Shape::Arr(i, _)) => {
+                    let ir = self.find(i);
+                    self.shape[ir as usize].is_none() && (self.int_lit[ir as usize] || self.float_lit[ir as usize])
+                }
+                _ => false,
+            };
+            if callee.is_none() && n == "clone" && args.is_empty() && lit {
+                return r;
+            }
+        }
+        // (`x.clone()`: struct で clone を持たない (derive の Copy など) か、整数・浮動小数点・bool・char・生ポインタ)
         let prim = matches!(self.shape[rroot as usize], Some(Shape::Known(t)) if t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Ptr(..)));
         if callee.is_none() && n == "clone" && args.is_empty() && (sid.is_some() || prim) {
             // (`r.clone()` with `r: &S` and S a type of the program that is not Clone: the reference's clone, `&S`)

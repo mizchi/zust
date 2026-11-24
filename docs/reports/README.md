@@ -97,3 +97,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-23 | [The trait solver, part 2: coherence, supertraits, dyn coercions, impl selection, auto traits](2026-11-23-05-trait-solver-2.md) |
 | 2026-11-23 | [The trait solver, part 3: associated types](2026-11-23-06-trait-solver-3.md) |
 | 2026-11-23 | [The trait solver, part 4: fewer false errors](2026-11-23-07-trait-solver-4.md) |
+| 2026-11-24 | [The trait solver, part 5: the rest of the list](2026-11-24-01-trait-solver-5.md) |
