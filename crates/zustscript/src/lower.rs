@@ -1270,6 +1270,10 @@ impl<'a> Lower<'a> {
                         val(format!("{n}({})", a.join(", ")))
                     }
                     Some(Callee::Local) => not_in_subset(pos, "calling a function value"),
+                    // (an `extern`, or a function imported from another module, which is one: JS, not in this wasm)
+                    _ if self.info.externs.get(n).is_some_and(|e| e.1.as_deref().is_some_and(|m| m.ends_with(".js") && (m.starts_with("./") || m.starts_with("../")))) => {
+                        not_in_subset(pos, &format!("calling `{n}` (imported from another module, so it is JS here)"))
+                    }
                     _ => not_in_subset(pos, &format!("calling `{n}`")),
                 }
             }

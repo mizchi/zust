@@ -1,0 +1,3 @@
+// (tests/examples.rs: modules_diamond_and_directories) a TS type that a function of this module uses
+import type { User } from "../ts/model.ts";
+export fn same(u: User) -> User { u }

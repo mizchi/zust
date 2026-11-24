@@ -1325,7 +1325,13 @@ impl<'a> Js<'a> {
         let tag = if j.tag.is_empty() {
             "_Fragment".to_string()
         } else if j.tag.chars().next().is_some_and(|c| c.is_uppercase()) {
-            ident(&j.tag)
+            // (a component imported from another module is imported in the JS)
+            self.note_extern(&j.tag);
+            match self.info.externs.get(&j.tag) {
+                // (an extern's JS may be another name, `UI.Badge`)
+                Some((_, _, js)) => js.clone(),
+                None => ident(&j.tag),
+            }
         } else {
             js_str(&j.tag)
         };
@@ -1473,8 +1479,8 @@ fn balanced(s: &str) -> bool {
         }
         match c {
             '"' | '\'' => quote = Some(c),
-            // (a template's text and holes nest (`${`(`}`): not scanned here. Not a single call, so the caller
-            // keeps its parentheses)
+            // (a template's text and holes nest (`${`(`}`): not scanned here. Not known to be balanced, so the
+            // caller keeps the parentheses and the group as they are)
             '`' => return false,
             '(' => d += 1,
             ')' => {

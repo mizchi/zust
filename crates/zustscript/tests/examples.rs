@@ -451,6 +451,95 @@ console.log(m.same_user(u, { ...u, tags: ["a"] }), m.same_user(u, m.promote(u)),
     assert!(o.status.success(), "tsc:\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
 }
 
+/// tests/modules: app.zsc imports types, functions, an `@wasm fn` and a component from shapes.zsc. Each module is
+/// compiled on its own into one directory; the JS imports `./shapes.js`, the .d.ts imports its types, and TS code
+/// passes a type of one module to the other (tests/modules/consumer.ts, checked with tsc when it is available)
+#[test]
+fn modules_import_types_and_functions() {
+    let d = out_dir("modules");
+    let m = root().join("tests/modules");
+    for f in ["shapes.zsc", "app.zsc"] {
+        let o = zsc(&m.join(f), &d, &[]);
+        assert!(o.status.success(), "{f}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+    let js = std::fs::read_to_string(d.join("app.js")).unwrap();
+    assert!(js.contains("import { Badge, area, first, twice } from \"./shapes.js\";"), "{js}");
+    let dts = std::fs::read_to_string(d.join("app.d.ts")).unwrap();
+    assert!(dts.contains("import type { Labeled, Shape } from \"./shapes.js\";"), "{dts}");
+    assert!(!dts.contains("interface Labeled"), "{dts}");
+    let out = node(&d, "const m = await import('./app.js'); const { render } = await import('react/jsx-runtime'); console.log(m.demo(), render(m.view({ label: 'x', shape: { TAG: 'Circle', _0: { x: 0, y: 0 }, _1: 1 } })));");
+    assert_eq!(out, "9 3 none 42 c <span>x</span>\n");
+
+    // what cannot be imported, and a cycle
+    let errs = d.join("errs.zsc");
+    for (src, want) in [
+        ("import { helper } from \"./shapes.zsc\";", "does not export `helper` (write `export fn helper` there)"),
+        ("import { nothing } from \"./shapes.zsc\";", "declares no type or function `nothing`"),
+        ("import type { area } from \"./shapes.zsc\";", "`area` is a function: `import { area } from"),
+        ("import { area } from \"./shapes.ts\";", "a TS file gives types only"),
+        ("import { a } from \"./cycle_a.zsc\";", "an import cycle"),
+        (include_str!("modules/wasm_calls_import.zsc"), "calling `area` (imported from another module, so it is JS here)"),
+    ] {
+        std::fs::write(&errs, src).unwrap();
+        for f in ["shapes.zsc", "cycle_a.zsc", "cycle_b.zsc"] {
+            std::fs::copy(m.join(f), d.join(f)).unwrap();
+        }
+        let o = zsc(&errs, &d.join("errs-out"), &[]);
+        let e = String::from_utf8_lossy(&o.stderr);
+        assert!(!o.status.success() && e.contains(want), "{src}: {e}");
+    }
+
+    let tsc = std::env::var("TSC").unwrap_or_else(|_| "tsc".into());
+    if Command::new(&tsc).arg("--version").output().is_err() {
+        eprintln!("skipped tsc: no tsc (set TSC)");
+        return;
+    }
+    std::fs::copy(m.join("consumer.ts"), d.join("consumer.ts")).unwrap();
+    std::fs::write(d.join("package.json"), "{ \"type\": \"module\" }\n").unwrap();
+    let o = Command::new(&tsc)
+        .current_dir(&d)
+        .args(["--strict", "--noEmit", "--skipLibCheck", "--target", "es2022", "--module", "nodenext", "--moduleResolution", "nodenext", "consumer.ts"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "tsc:\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+}
+
+/// tests/modules: a type two modules import comes in once (by the file that defines it), a type of a module in
+/// another directory is imported from that module's JS as seen from the importer, a lowercase type comes in with the
+/// function that uses it, an imported component takes a generic record of props, and a component whose JS has
+/// another name is written by that name
+#[test]
+fn modules_diamond_and_directories() {
+    let d = out_dir("modules_diamond");
+    let m = root().join("tests/modules");
+    for (f, o) in [("common.zsc", "."), ("left.zsc", "."), ("lib/leaf.zsc", "lib"), ("lib/mid.zsc", "lib"), ("diamond.zsc", ".")] {
+        let o = zsc(&m.join(f), &d.join(o), &[]);
+        assert!(o.status.success(), "{f}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+    let dts = std::fs::read_to_string(d.join("diamond.d.ts")).unwrap();
+    assert!(dts.contains("import type { Leaf } from \"./lib/leaf.js\";"), "{dts}");
+    let out = node(&d, "const m = await import('./diamond.js'); const { render } = await import('react/jsx-runtime'); console.log(m.both(), JSON.stringify(m.leaf(7)), render(m.view()));");
+    assert_eq!(out, "6 {\"v\":7} <b>hi</b>\n");
+
+    // (a bare file name, compiled from its own directory: the importer's directory is the current one)
+    let o = Command::new(env!("CARGO_BIN_EXE_zsc")).current_dir(&m).arg("diamond.zsc").arg("-o").arg(d.join("bare")).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let dts = std::fs::read_to_string(d.join("bare/diamond.d.ts")).unwrap();
+    assert!(dts.contains("import type { Leaf } from \"./lib/leaf.js\";"), "{dts}");
+    // (a TS type that comes in with a function of another module, and by an `import type` of its own: one type)
+    for f in ["tsuser.zsc", "tsboth.zsc"] {
+        let o = zsc(&m.join(f), &d.join("ts"), &[]);
+        assert!(o.status.success(), "{f}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+
+    let src = d.join("named.zsc");
+    std::fs::write(&src, "type P = { label: String }\nextern \"react\" fn Fancy(props: P) -> Jsx = \"UI.Badge\";\nexport fn v() -> Jsx { <Fancy label=\"x\" /> }\n").unwrap();
+    let o = zsc(&src, &d.join("named"), &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let js = std::fs::read_to_string(d.join("named/named.js")).unwrap();
+    assert!(js.contains("import { UI } from \"react\";") && js.contains("_jsx(UI.Badge, { label: \"x\" })"), "{js}");
+}
+
 /// tests/js_inplace.zsc: the JS layer appends in place only onto a local array no one else can see, so every
 /// result is what the copying push gives
 #[test]

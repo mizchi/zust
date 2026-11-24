@@ -28,6 +28,7 @@
 
 (primitive_type) @type.builtin
 (type_identifier) @type
+(import_name) @variable
 (variant_identifier) @constructor
 (constructor) @constructor
 
