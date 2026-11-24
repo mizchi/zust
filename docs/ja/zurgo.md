@@ -197,8 +197,8 @@ zurgo test --lib parse -- --include-ignored
 - 60 秒たっても動いているテストには `SLOW` と出し、300 秒たっても動いているものは止めて失敗にする
   (`ZURGO_TEST_SLOW`、`ZURGO_TEST_TIMEOUT`。秒で)。
 - ターゲットの `test = false` は、そのテストを外す (cargo と同じく、名前で選んだとき (`--lib`、`--bin x`、`--test x`) は
-  動かす)。`harness = false` のターゲットはそのままビルドし (自分の `main`、
-  `cfg(test)` なし)、ターゲットの名前の 1 つのテストとして動かす: 0 で終われば通る。`zurgo metadata` は結合テストを
+  動かす)。`harness = false` のターゲットはハーネスなしでビルドし (自分の `main`。cargo と同じく `cfg(test)` は付ける)、
+  ターゲットの名前の 1 つのテストとして動かす: 0 で終われば通る。`zurgo metadata` は結合テストを
   cargo と同じく並べる。
 - `--target wasm32-unknown-unknown`: テストのクレートはどれも wasm のモジュールになり、各テストを
   `$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER <module> <name> --exact` で動かす (このリポジトリではランナーは
