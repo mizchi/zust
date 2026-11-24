@@ -26,6 +26,8 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
 
 決定事項:
 
+- 関数は既定で非公開。JS から呼べる関数は `export fn` と書く。属性は `@wasm export fn` の順に付ける。従来の `pub` も互換性のために受け付ける。
+
 - クロージャは `(x) => e` に一本化する
 - 数値は `i32` / `u32` / `i64` / `f64` で、暗黙変換はしない(`Int` / `Float` の別名は置かない)
 - class は持たない
@@ -44,16 +46,16 @@ enum Filter { All, Active, Done }          // データなし → "All" | "Activ
 enum Option<T> { None, Some(T) }           // データあり → { TAG: "Some", _0: x } (TS の判別共用体)
 
 // 関数: トップレベルのシグネチャは注釈必須、本体は推論。let は不変
-pub fn visible(todos: Array<Todo>, f: Filter) -> Array<Todo> {
+export fn visible(todos: Array<Todo>, f: Filter) -> Array<Todo> {
   todos |> .filter((t) => match f { All => true, Active => !t.done, Done => t.done })
 }
 fn toggle(t: Todo) -> Todo { Todo { done: !t.done, ..t } }   // 更新は新しい値を作る
 
 // num-traits 相当: 数値の bound を持つ関数は型ごとに単相化される (sum$i32 / sum$f64 / ...)
-pub fn sum<T: Num>(xs: Array<T>) -> T { xs.fold(T::zero(), (acc, x) => acc + x) }
+export fn sum<T: Num>(xs: Array<T>) -> T { xs.fold(T::zero(), (acc, x) => acc + x) }
 
 // JSX: コンポーネントは `fn Name(props: Record) -> Jsx`。props は型検査される
-pub fn Row(props: RowProps) -> Jsx { <li onClick={() => props.onPick(props.sample.label)}>{props.sample.label}</li> }
+export fn Row(props: RowProps) -> Jsx { <li onClick={() => props.onPick(props.sample.label)}>{props.sample.label}</li> }
 
 // JS の関数を手書きで宣言して取り込む (関数の型の自動取り込みはまだない)
 extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
@@ -67,7 +69,7 @@ import type { User, Post } from "./model.ts";
 ```zsc
 import type { User, Post } from "./model.ts";   // model.ts の interface / type を、レコード型として読む
 
-pub fn display(u: User) -> String { u.name + " #" + (u.id as i32).to_string() }
+export fn display(u: User) -> String { u.name + " #" + (u.id as i32).to_string() }
 ```
 
 - まずは**プレーンなレコード型**だけを読む(src/tsimport.rs)。`interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
@@ -103,7 +105,7 @@ pub fn display(u: User) -> String { u.name + " #" + (u.id as i32).to_string() }
 let w: F32Array = [0.5, -1.0, 2.0];          // 型の注釈があるリテラルは new Float32Array([..]) になる
 let z = F64Array::zeros(n);                  // new Float64Array(n)
 let p = F64Array::from(xs);                  // Array<f64> から明示的に変換する(暗黙の変換はない)
-pub fn dense(..) -> F32Array { range(0, m).map((r) => ..) }   // 期待する型が F32Array なら、range の map もそれを作る
+export fn dense(..) -> F32Array { range(0, m).map((r) => ..) }   // 期待する型が F32Array なら、range の map もそれを作る
 ```
 
 - JS では typed array そのもの(`Float64Array` / `Float32Array` / `Int32Array`)。`.d.ts` でもその型になる
@@ -126,13 +128,13 @@ pub fn dense(..) -> F32Array { range(0, m).map((r) => ..) }   // 期待する型
 - `x + 1`(x が f64)は型エラーになる
 - 変換は `as` だけ。f64 からの変換は Rust と同じく飽和する(`1e10 as i32 == 2147483647`)
 - 数値の bound(`Num` / `Integer` / `Float`)付きの総称関数は、使われた型ごとに別の JS 関数として書き出す(演算の JS 表現が型ごとに違うので、型消去ではなく単相化する)
-  - pub なものは、bound が許すすべての型の分を export する
+  - 公開した関数は、bound が許すすべての型の分を export する
   - `.d.ts` も型ごとに出す
 
 ### ローカルな可変性とループ
 
 ```zsc
-pub fn primes_below(n: i32) -> i32 {
+export fn primes_below(n: i32) -> i32 {
   let mut count = 0;
   for k in range(2, n) {            // JS: for (let k = 2; k < n; k++)    Rust: for k in (2i32)..(n)
     let mut d = 2;
@@ -198,9 +200,9 @@ let who = handle greet() {
 
 - JS では、effect の handler がすべて tail-resumptive(arm が末尾で `k(x)` を呼ぶだけ)なら、普通の関数呼び出しになる
   - `perform` は `$perform("Op", ..)` で、最も内側の handler の arm を直接呼ぶ。`k(x)` は `x` を返すことになる。arm は、その `handle` の外側の handler の下で動く(深いハンドラの意味のまま)
-  - それ以外の effect(arm が `k` を呼ばずに抜けるもの、`pub` な関数から外へ出るもの、それらと混ざるもの)では、関数は `function*`、`perform` は `yield`、その呼び出しは `yield*` になる。`handle` は深いハンドラ(一度だけ再開できる継続)で、generator は `$handle(..)` / `$resume(k, x)` を命令として `yield` する
+  - それ以外の effect(arm が `k` を呼ばずに抜けるもの、公開関数から外へ出るもの、それらと混ざるもの)では、関数は `function*`、`perform` は `yield`、その呼び出しは `yield*` になる。`handle` は深いハンドラ(一度だけ再開できる継続)で、generator は `$handle(..)` / `$resume(k, x)` を命令として `yield` する
   - 命令は 1 つのループ `$run` が実行する。フレーム(generator)はヒープ上のスタックに積み、operation はその handler から上のフレームを切り取って継続にし、再開はそれを積み直す。そのため、1 つの `handle` の中で operation を何回しても JS のスタックは深くならない(回帰テスト `gen_after_k` / `gen_outer_op` / `gen_plus_one`、10 万回)
-  - `pub` な関数の generator は、本体をこのループ(`$drive`)の下で動かす。TS の呼び出し元に届くのは、その関数が扱わずに外へ出す operation だけで、`.next(x)` の値がその operation の結果になる(ループの命令は見えない)
+  - 公開関数の generator は、本体をこのループ(`$drive`)の下で動かす。TS の呼び出し元に届くのは、その関数が扱わずに外へ出す operation だけで、`.next(x)` の値がその operation の結果になる(ループの命令は見えない)
   - arm が最後に `k(x)` を返すとき(`$tail`)は、arm のフレームを捨ててから再開するので、ヒープのスタックも伸びない。`k(()) + 1` のように再開の後に続きがあるときは、待っている arm の分だけヒープに積まれる
   - 直接の呼び出しは generator の約 100 倍速い(`bench/js` の `w_effects`)。generator の handler は、以前の `yield*` を入れ子にする実装より 4〜7 倍速い(operation 1000 回で 1.2〜1.4 ms → 0.2〜0.3 ms)
   - 扱わない effect は外側のハンドラへ転送される
@@ -218,9 +220,9 @@ let who = handle greet() {
 ### wasm 層(Rust そのまま)と境界
 
 ```rust
-pub wasm fn stddev(xs: &[f64]) -> f64 { ... }                       // 本体は Rust。zustc がコンパイルする
-pub wasm fn map_sum(xs: &[f64], f: &dyn Fn(f64) -> f64) -> f64 { ... }  // 借用コールバック
-pub wasm fn call_twice(f: Box<dyn Fn(i32) -> i32>, x: i32) -> i32 { ... } // 所有コールバック
+export wasm fn stddev(xs: &[f64]) -> f64 { ... }                       // 本体は Rust。zustc がコンパイルする
+export wasm fn map_sum(xs: &[f64], f: &dyn Fn(f64) -> f64) -> f64 { ... }  // 借用コールバック
+export wasm fn call_twice(f: Box<dyn Fn(i32) -> i32>, x: i32) -> i32 { ... } // 所有コールバック
 wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側だけの補助
 ```
 
@@ -244,10 +246,10 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
 ### `@wasm fn`: 同じ zustscript を JS でも wasm でも実行する(方向 A の合流)
 
 ```zsc
-@wasm pub fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
+@wasm export fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
   range(0, a.len()).fold(0.0, (s, i) => s + a[i] * b[i])
 }
-@wasm pub fn total<T: Num>(xs: Array<T>) -> T { xs.fold(T::zero(), (acc, x) => acc + x) }
+@wasm export fn total<T: Num>(xs: Array<T>) -> T { xs.fold(T::zero(), (acc, x) => acc + x) }
 ```
 
 - 本体は普通の zustscript で、JS 層と同じ検査器で型を検査する。そのうえで `lower.rs` が、型の付いた構文木から Rust のソースへ落とし、zustc が wasm にする。境界のグルーは `wasm fn` と同じ仕組みで生成する
@@ -419,11 +421,11 @@ type Person = { name: String, age: i32 }
 ### `@simd fn`: v128 で処理する配列カーネル
 
 ```zsc
-@simd pub fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
+@simd export fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
   range(0, a.len()).fold(0.0, (s, i) => s + a[i] * b[i])      // f64x2: 2 要素ずつ
 }
-@simd pub fn isum(xs: Array<i32>) -> i32 { xs.fold(0, (acc, x) => acc + x) }   // i32x4: 4 要素ずつ
-@simd pub fn norms(xs: Array<f64>, ys: Array<f64>) -> Array<f64> {
+@simd export fn isum(xs: Array<i32>) -> i32 { xs.fold(0, (acc, x) => acc + x) }   // i32x4: 4 要素ずつ
+@simd export fn norms(xs: Array<f64>, ys: Array<f64>) -> Array<f64> {
   range(0, xs.len()).map((i) => (xs[i] * xs[i] + ys[i] * ys[i]).sqrt())
 }
 ```
@@ -461,11 +463,11 @@ type Person = { name: String, age: i32 }
 
 ```zsc
 // 全結合層: y = W x + b(W は m×n を行ごとに並べたもの)
-@simd pub fn dense(w: F32Array, x: F32Array, b: F32Array, m: i32, n: i32) -> F32Array {
+@simd export fn dense(w: F32Array, x: F32Array, b: F32Array, m: i32, n: i32) -> F32Array {
   range(0, m).map((r) => b[r] + range(0, n).fold(0.0, (s, i) => s + w[r * n + i] * x[i]))
 }
-@simd(relaxed) pub fn dense_fma(..) -> F32Array { /* 同じ本体 */ }   // 積和を relaxed_madd(FMA)に
-@simd pub fn relu(xs: F32Array) -> F32Array { xs.map((x) => x.max(0.0)) }
+@simd(relaxed) export fn dense_fma(..) -> F32Array { /* 同じ本体 */ }   // 積和を relaxed_madd(FMA)に
+@simd export fn relu(xs: F32Array) -> F32Array { xs.map((x) => x.max(0.0)) }
 ```
 
 - **f32x4**: `F32Array` のカーネルは 4 レーンで処理する。f64x2 / i32x4 と同じ形で書ける

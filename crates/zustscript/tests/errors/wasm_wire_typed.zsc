@@ -1,4 +1,4 @@
 // expect: a typed array cannot cross from JS to a @wasm function inside a record, an enum or an array yet
 // (a typed array crosses on its own, not inside a value that crosses as bytes)
 type Sig = { name: String, xs: F64Array }
-@wasm pub fn f(s: Sig) -> i32 { 1 }
+@wasm export fn f(s: Sig) -> i32 { 1 }

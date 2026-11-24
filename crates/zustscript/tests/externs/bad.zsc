@@ -1,4 +1,4 @@
 // the setter takes the state's type, not an i32: tsrs rejects this declaration
 extern "react" fn useState<T>(init: T) -> (T, fn(i32) -> ()) = "useState";
 extern fn log(s: String) = "console.log";
-pub fn f() -> i32 { 1 }
+export fn f() -> i32 { 1 }

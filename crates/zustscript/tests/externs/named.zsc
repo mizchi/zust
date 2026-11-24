@@ -2,4 +2,4 @@
 type Pt = { x: f64, y: f64 }
 extern "./lib.js" fn point() -> Pt = "point";
 extern "./lib.js" fn read() -> String = "api.read";
-pub fn f() -> f64 { point().x }
+export fn f() -> f64 { point().x }

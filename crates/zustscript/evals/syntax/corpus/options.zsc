@@ -69,11 +69,11 @@ fn rename(todos: Array<Todo>, id: i32, d: Draft) -> Result<Array<Todo>, FormErro
   }
 }
 
-pub fn title_of(todos: Array<Todo>, id: i32) -> String {
+export fn title_of(todos: Array<Todo>, id: i32) -> String {
   unwrap_or(map_opt(find(todos, id), (t) => t.title), "(none)")
 }
 
-pub fn message(e: FormError) -> String {
+export fn message(e: FormError) -> String {
   match e {
     Empty(f) => f + " is empty",
     TooLong(f, n) => f + " is longer than " + n.to_string(),
@@ -84,7 +84,7 @@ pub fn message(e: FormError) -> String {
 // a prop that may be absent is still a prop: every caller passes it, even when there is none
 type TodoRowProps = { todo: Todo, subtitle: Option<String> }
 
-pub fn TodoRow(props: TodoRowProps) -> Jsx {
+export fn TodoRow(props: TodoRowProps) -> Jsx {
   <li>
     {props.todo.title}
     {match props.subtitle { Some(s) => <small>{s}</small>, None => <small /> }}
@@ -93,6 +93,6 @@ pub fn TodoRow(props: TodoRowProps) -> Jsx {
 
 type TodoListProps = { todos: Array<Todo> }
 
-pub fn TodoList(props: TodoListProps) -> Jsx {
+export fn TodoList(props: TodoListProps) -> Jsx {
   <ul>{props.todos |> .map((t) => <TodoRow key={t.id} todo={t} subtitle={None} />)}</ul>
 }
