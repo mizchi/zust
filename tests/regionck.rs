@@ -3452,3 +3452,14 @@ fn part19_review() {
     assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("does not live long enough"), "{d:?}");
     assert_eq!(check("struct S<A>(A);\nimpl<A> S<A> {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let s = S(1u8);\n    let local = 1;\n    let f = |x| s.take::<&u32>(x);\n    f(&local);\n}\n"), vec![]);
 }
+
+/// A closure whose result is tied to a parameter its bound binds, returning what it captures: the function's region
+/// must outlive every region the bound binds ("lifetime may not live long enough", as rustc). Not where the bound has
+/// the callee's lifetimes, through which the parameters' implied bounds relate them (closures/explicit-closure-lifetime-
+/// issue-87290.rs)
+#[test]
+fn part20_closure_result_placeholder() {
+    let d = check("fn take<F: FnMut(&isize) -> &isize>(_f: F) {}\nfn take2<F: for<'z> FnMut(&'z isize) -> &'z isize>(_f: F) {}\nfn t4<'x>(x: &'x isize) {\n    take(|_z| x);\n}\nfn t5<'x>(x: &'x isize) {\n    take2(|_z| x);\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 7] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
+    assert_eq!(check("fn take<F: FnMut(&isize) -> &isize>(_f: F) {}\nfn t<'x>(_x: &'x isize) {\n    take(|z| z);\n}\npub fn f<'a>(_: &'a i32, _: impl FnOnce(&mut &mut &'a i32)) {}\npub fn h<'a>(p: &'a i32) {\n    f(p, |x: &mut &mut &'a i32| {\n        let _: &mut &mut &'a i32 = x;\n    })\n}\nfn main() {}\n"), vec![]);
+}

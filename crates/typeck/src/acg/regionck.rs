@@ -1731,6 +1731,8 @@ impl RgSt {
             }
         }
         let mut errs: Vec<(Sp, String)> = vec![];
+        // (a closure's signature with regions from outside it, its environment's aside: the callee's lifetimes)
+        let sig_ext = self.in_closure && self.externals.iter().any(|&e| e != self.env_r);
         for (ui, &(u, ref uname)) in self.univ.iter().enumerate() {
             let i = ui + 1;
             let mut seen = vec![false; n];
@@ -1748,9 +1750,11 @@ impl RgSt {
                         // (not the closure's environment required to be 'static: the closure has it for no longer
                         // than a call (a capture reborrowed into a `&'static mut`))
                         let outside = |a: u32, b: u32| self.externals.contains(&a) && (b == STATIC || self.outer_univ.contains(&b)) && !(self.in_closure && a == self.env_r && b == STATIC);
-                        // (nor one of the function's that must outlive a placeholder: the callee's lifetimes in the
-                        // bound may be it, and what they imply is of them)
-                        let placeholder = |b: u32| self.in_closure && !self.externals.contains(&b) && !self.outer_univ.contains(&b) && b != STATIC;
+                        // (nor one of the function's that must outlive a placeholder, when the signature has regions
+                        // from outside: the callee's lifetimes in the bound may be it, and what they imply is of them
+                        // (`impl FnOnce(&mut &mut &'a i32)` with the function's 'a). With none, it must outlive every
+                        // region the bound binds: `take(|_z| x)` with `F: FnMut(&isize) -> &isize`)
+                        let placeholder = |b: u32| sig_ext && !self.externals.contains(&b) && !self.outer_univ.contains(&b) && b != STATIC;
                         if !k[i][j] && !outside(u, y) && !outside(y, u) && !(self.outer_univ.contains(&u) && placeholder(y)) && !self.soft.contains(&u) && !self.soft.contains(&y) {
                             let other = if j == 0 { "'static".to_string() } else { self.univ[j - 1].1.clone() };
                             // (a region the closure's signature binds flowing into one from outside)
