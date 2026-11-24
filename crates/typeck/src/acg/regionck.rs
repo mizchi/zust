@@ -1246,7 +1246,8 @@ impl RgSt {
                     ins.dedup();
                     self.fn_bound_ret = if ins.len() == 1 { Some(ins[0]) } else { None };
                     self.inst(prog, ft.ret, c, lts, targs, &mut own, out, depth + 1);
-                    (self.fn_bound, self.fn_bound_ret) = saved;
+                    self.fn_bound = saved.0;
+                    self.fn_bound_ret = saved.1;
                 } else {
                     let ok = c.ok;
                     let mut none = Codes { codes: None, pos: 0, ok: true, parent: None };
