@@ -2130,6 +2130,11 @@ pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
     pat_any(p, &|q| matches!(q, Pat::Ident(true, true, ..)))
 }
 
+/// p binds the name n somewhere
+pub(crate) fn pat_binds(p: &Pat, n: &str) -> bool {
+    pat_any(p, &|q| matches!(q, Pat::Ident(_, _, m, _) if m == n))
+}
+
 fn pat_any(p: &Pat, f: &dyn Fn(&Pat) -> bool) -> bool {
     if f(p) {
         return true;

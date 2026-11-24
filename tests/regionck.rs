@@ -3425,3 +3425,22 @@ fn part19_impl_const_regions() {
     let d = check("struct Foo<'a> { x: &'a u32 }\nimpl<'a> Foo<'a> {\n    const C: &'a u32 = &22;\n}\nfn foo<'a>(_: &'a u32) -> &'static u32 {\n    <Foo<'a>>::C\n}\nfn bar<'a>(_: &'a u32) -> &'static u32 {\n    Foo::<'a>::C\n}\nfn ok<'a>(_: &'a u32) -> &'a u32 {\n    <Foo<'a>>::C\n}\nfn ok2() -> &'static u32 {\n    <Foo<'static>>::C\n}\nfn ok3<'a>(_: &'a u32) -> &'static u32 {\n    Foo::C\n}\nfn main() { let f = Foo { x: &1 }; let _ = f.x; }\n");
     assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![6, 9] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
 }
+
+/// The review of #109: a closure's body that writes a lifetime only in a method's turbofish is checked; a `let` that
+/// shadows a parameter ends what the body requires of it; an impl's constant takes a lifetime written in a type
+/// argument of its path (`Foo::<&'b u32>::C` with `impl<'a> Foo<&'a u32>`)
+#[test]
+fn part19_review() {
+    let d = check("struct S;\nimpl S { fn take<T>(&self, _t: T) {} }\nfn main() {\n    let _c = || {\n        let c = 66;\n        S.take::<&'static u32>(&c);\n    };\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("does not live long enough"), "{d:?}");
+    assert_eq!(check("static C: u32 = 1;\nfn main() {\n    let local = 5;\n    let f = |x| {\n        let x = &C;\n        let _y: &'static u32 = x;\n    };\n    f(&local);\n}\n"), vec![]);
+    let d = check("struct Foo<T>(T);\nimpl<'a> Foo<&'a u32> {\n    const C: &'a u32 = &1;\n}\nfn f<'b>(_: &'b u32) -> &'b u32 {\n    Foo::<&'b u32>::C\n}\nfn g<'b>(_: &'b u32) -> &'static u32 {\n    Foo::<&'b u32>::C\n}\nfn main() { let x = 1; f(&x); g(&x); let _ = Foo(&x).0; }\n");
+    assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (a call through a fn pointer local takes the regions its type binds afresh: two calls relate neither argument
+    // to the other; the result is still the argument's)
+    for src in ["fn id(x: &u32) -> &u32 { x }\nfn f<'a, 'b>(a: &'a u32, b: &'b u32) -> (&'a u32, &'b u32) {\n    let g: fn(&u32) -> &u32 = id;\n    (g(a), g(b))\n}\nfn main() { let (x, y) = (1, 2); let _ = f(&x, &y); }\n", "fn id(x: &u32) -> &u32 { x }\nfn f<'a, 'b>(a: &'a u32, b: &'b u32) -> (&'a u32, &'b u32) {\n    let g = id;\n    (g(a), g(b))\n}\nfn h<'a, 'b>(a: &'a u32, b: &'b u32) -> (&'a u32, &'b u32) {\n    let g: for<'x> fn(&'x u32) -> &'x u32 = id;\n    (g(a), g(b))\n}\nfn main() { let (x, y) = (1, 2); let _ = f(&x, &y); let _ = h(&x, &y); }\n", "fn id<'x>(x: &'x u32) -> &'x u32 { x }\nfn f<'a, 'b>(a: &'a u32, b: &'b u32) -> (&'a u32, &'b u32) {\n    let g: fn(&u32) -> &u32 = id;\n    (g(a), g(b))\n}\nfn h<'a, 'b>(a: &'a u32, b: &'b u32) -> (&'a u32, &'b u32) {\n    let g = id;\n    (g(a), g(b))\n}\nfn main() { let (x, y) = (1, 2); let _ = f(&x, &y); let _ = h(&x, &y); }\n"] {
+        assert_eq!(check(src), vec![], "{src}");
+    }
+    let d = check("fn id(x: &u32) -> &u32 { x }\nfn f1<'a>(x: &'a u32) -> &'static u32 {\n    let g: fn(&u32) -> &u32 = id;\n    g(x)\n}\nfn f2<'a>(x: &'a u32) -> &'static u32 {\n    let g = id;\n    g(x)\n}\nfn f3<'a>(x: &'a u32) -> &'a u32 {\n    let g = id;\n    let _ = g(&5);\n    g(x)\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 8] && d.iter().all(|x| x.1.contains("must outlive `'static`")), "{d:?}");
+}

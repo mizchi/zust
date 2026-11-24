@@ -196,6 +196,13 @@ pub struct RgSt {
     /// While a callee's fn pointer parameter is instantiated for a fn item passed to it: the region its type binds
     /// (`for<'cx> fn(&'cx S) -> &'static S`) is a placeholder, the same for each it binds (inst)
     pub bound_univ: Option<u32>,
+    /// While a fn pointer type's parameters are instantiated: the regions it binds there; while its result is: the
+    /// one of them its elided regions are (`fn(&u32) -> &u32` is `for<'x> fn(&'x u32) -> &'x u32`), when there is one
+    pub fn_bound: Option<Vec<u32>>,
+    pub fn_bound_ret: Option<u32>,
+    /// The regions a fn pointer's or fn item's type binds (its own lifetimes, those elided in it, those `for<..>`
+    /// binds): a call through a local of that type takes them afresh (rg_fnptr_call)
+    pub late_bound: Vec<u32>,
     /// Rg::wf: imp's relations are required, at this span (not those of the fields: wf_declared)
     pub wf_sp: Option<Sp>,
     pub wf_no_fields: bool,
@@ -706,11 +713,14 @@ pub(crate) fn closure_reqs<'e>(body: &'e Expr, params: &[(String, usize)], out: 
     if params.is_empty() {
         return;
     }
-    let param = |e: &Expr| match strip(e) {
-        Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => params.iter().find(|x| x.0 == p.segs[0].name).map(|x| x.1),
-        _ => None,
-    };
-    let mut call = |e: &'e Expr, out: &mut Vec<ClosureReq<'e>>| {
+    // (the parameters still in scope: a `let` that binds a name shadows it for the statements after it)
+    fn param(live: &[(String, usize)], e: &Expr) -> Option<usize> {
+        match strip(e) {
+            Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].args.is_empty() => live.iter().find(|x| x.0 == p.segs[0].name).map(|x| x.1),
+            _ => None,
+        }
+    }
+    fn call<'e>(live: &[(String, usize)], e: &'e Expr, out: &mut Vec<ClosureReq<'e>>) {
         let Expr::Call(f, a) = strip(e) else { return };
         let Expr::Path(None, p) = strip(f) else { return };
         let writes = p.segs.last().is_some_and(|s| s.args.iter().any(|g| matches!(g, GArg::Ty(t) if crate::regions::names_lt(t))));
@@ -718,26 +728,29 @@ pub(crate) fn closure_reqs<'e>(body: &'e Expr, params: &[(String, usize)], out: 
             return;
         }
         for (j, x) in a.iter().enumerate() {
-            if let Some(g) = param(x) {
+            if let Some(g) = param(live, x) {
                 out.push(ClosureReq { param: g, ann: None, call: Some(e), arg: j, sp: super::borrowck::pos(x) });
             }
         }
-    };
+    }
+    let mut live: Vec<(String, usize)> = params.to_vec();
     let Expr::Block(_, _, b) = strip(body) else {
-        call(body, out);
+        call(&live, body, out);
         return;
     };
     for st in &b.stmts {
         match st {
-            Stmt::Let(_, Some(t), Some(init), None, _) => {
-                if let Some(g) = param(init).filter(|_| crate::regions::names_lt(t)) {
-                    out.push(ClosureReq { param: g, ann: Some(t), call: None, arg: 0, sp: super::borrowck::pos(init) });
-                } else {
-                    call(init, out);
+            Stmt::Let(q, t, init, _, _) => {
+                if let Some(init) = init {
+                    match (t, param(&live, init)) {
+                        (Some(t), Some(g)) if crate::regions::names_lt(t) => out.push(ClosureReq { param: g, ann: Some(t), call: None, arg: 0, sp: super::borrowck::pos(init) }),
+                        _ => call(&live, init, out),
+                    }
                 }
+                // (`let x = &C;`: the x after it is that local, not the parameter)
+                live.retain(|x| !super::borrowck::pat_binds(q, &x.0));
             }
-            Stmt::Let(_, None, Some(init), None, _) => call(init, out),
-            Stmt::Expr(e, _) => call(e, out),
+            Stmt::Expr(e, _) => call(&live, e, out),
             _ => {}
         }
     }
@@ -1105,9 +1118,17 @@ impl RgSt {
             match c.next() {
                 R_STATIC => STATIC,
                 R_ELIDED => elided(me),
-                R_BOUND => match me.bound_univ {
-                    Some(u) => u,
-                    None => me.var(),
+                R_BOUND => match (me.bound_univ, me.fn_bound_ret) {
+                    (Some(u), _) => u,
+                    (None, Some(v)) => v,
+                    (None, None) => {
+                        let v = me.var();
+                        if let Some(b) = &mut me.fn_bound {
+                            b.push(v);
+                        }
+                        me.late_bound.push(v);
+                        v
+                    }
                 },
                 x if (x as usize) < lts.len() => lts[x as usize],
                 _ => {
@@ -1214,10 +1235,18 @@ impl RgSt {
             Ty::Fn(ft) => {
                 let mut own = |me: &mut RgSt| me.var();
                 if c.next() == R_FN {
+                    // (the regions its parameters bind; its result's are the one of them, as elision makes them, or
+                    // fresh. A fn pointer within is a binder of its own)
+                    let saved = (self.fn_bound.replace(vec![]), self.fn_bound_ret.take());
                     for &p in &ft.params {
                         self.inst(prog, p, c, lts, targs, &mut own, out, depth + 1);
                     }
+                    let mut ins = self.fn_bound.take().unwrap_or_default();
+                    ins.sort_unstable();
+                    ins.dedup();
+                    self.fn_bound_ret = if ins.len() == 1 { Some(ins[0]) } else { None };
                     self.inst(prog, ft.ret, c, lts, targs, &mut own, out, depth + 1);
+                    (self.fn_bound, self.fn_bound_ret) = saved;
                 } else {
                     let ok = c.ok;
                     let mut none = Codes { codes: None, pos: 0, ok: true, parent: None };
@@ -2436,6 +2465,12 @@ impl Cx<'_> {
                 // ones, which the initializer flows into)
                 tr.or_else(|| if crate::ast_summary::has_infer(a) { self.rg.fresh(prog, t) } else { None })
             }
+            // (a fn item with no type written (`let g = id;`): the local is of the item's type, whose own regions a
+            // call through it takes afresh, its type arguments' are fixed (`let f = id::<&'static u32>;`))
+            None if fn_item_init => match &init_tree {
+                Some((it, itr)) if *it == t => Some(itr.clone()),
+                _ => self.rg.fresh(prog, t),
+            },
             None => self.rg.fresh(prog, t),
         };
         let Some(tree) = tree else { return };
@@ -2546,14 +2581,20 @@ impl Cx<'_> {
         let sig = &prog.sigs[id as usize];
         let rs = sig.regions.clone();
         let codes = |i: usize| rs.as_deref().map(|r| r.slots.get(i).map(|c| c.as_slice()).unwrap_or(&[]));
+        // (its own lifetimes and those elided in it are its type's: a call through a local of it takes them afresh)
         let lts: Vec<u32> = rs.as_deref().map(|r| r.lts.iter().map(|_| self.rg.var()).collect()).unwrap_or_default();
+        self.rg.late_bound.extend(lts.iter().copied());
         let opt: Vec<Option<Ty>> = sol.iter().map(|&t| Some(t)).collect();
         let mut tree = vec![];
         let mut params = vec![];
         let mut inputs: Vec<u32> = vec![];
         let mut self_r = None;
         for (i, &pt) in sig.params.iter().enumerate() {
-            let t = self.rg.instantiate(prog, pt, codes(i), &lts, targs, &mut |me| me.var())?;
+            let t = self.rg.instantiate(prog, pt, codes(i), &lts, targs, &mut |me| {
+                let v = me.var();
+                me.late_bound.push(v);
+                v
+            })?;
             if i == 0 && sig.has_self && matches!(pt, Ty::Ref(..)) {
                 self_r = t.first().copied();
             }
@@ -2568,7 +2609,11 @@ impl Cx<'_> {
         let one = if inputs.len() == 1 { Some(inputs[0]) } else { None };
         tree.extend(self.rg.instantiate(prog, sig.ret, codes(sig.params.len()), &lts, targs, &mut |me| match self_r.or(one) {
             Some(v) => v,
-            None => me.var(),
+            None => {
+                let v = me.var();
+                me.late_bound.push(v);
+                v
+            }
         })?);
         let ret = prog.partial_subst(sig.ret, &opt);
         if params.iter().any(|&t| prog.has_param(t)) || prog.has_param(ret) {
@@ -2754,6 +2799,23 @@ impl Cx<'_> {
         }
         if ft0 != t {
             return;
+        }
+        // (each call instantiates the regions the pointer's type binds afresh: `(g(a), g(b))` with
+        // `let g: fn(&u32) -> &u32 = id;` relates neither a to b. The function's own regions and 'static stay what
+        // they are; one region within the tree stays one)
+        let mut map: Vec<(u32, u32)> = vec![];
+        for v in tr.iter_mut() {
+            if !self.rg.late_bound.contains(v) {
+                continue;
+            }
+            *v = match map.iter().find(|m| m.0 == *v) {
+                Some(m) => m.1,
+                None => {
+                    let w = self.rg.var();
+                    map.push((*v, w));
+                    w
+                }
+            };
         }
         let prog = self.prog;
         let mut k = 0;
@@ -3657,17 +3719,26 @@ impl Cx<'_> {
             },
             _ => None,
         };
-        let written: Vec<&String> = seg.map(|s| s.args.iter().filter_map(|a| if let GArg::Lifetime(l) = a { Some(l) } else { None }).collect()).unwrap_or_default();
+        // (the codes of the self type as the path writes it, against the function's lifetimes: a lifetime written
+        // in a type argument too (`Foo::<&'b u32>::C` with `impl<'a> Foo<&'a u32>`), in the place of the impl's)
+        let written: Vec<u8> = match seg {
+            Some(sg) => {
+                let t = PTy::Path(None, crate::parse::Path { global: false, segs: vec![sg.clone()], pos: Default::default() });
+                let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut v = vec![];
+                sl.slots(&t, false, &mut v);
+                v
+            }
+            None => vec![],
+        };
         let n = codes.iter().chain(self_slots).filter(|&&c| c < R_STATIC).map(|&c| c as usize + 1).max().unwrap_or(0);
         let mut lts = vec![];
         for k in 0..n {
-            let v = match self_slots.iter().position(|&c| c as usize == k).and_then(|j| written.get(j)) {
-                Some(l) if l.as_str() == "'static" => STATIC,
-                Some(l) => match self.rg.lt_names.iter().position(|x| x == *l) {
-                    Some(i) => self.rg.lts[i],
-                    None => self.rg.var(),
-                },
-                None => self.rg.var(),
+            let at = self_slots.iter().position(|&c| c as usize == k).filter(|_| written.len() == self_slots.len());
+            let v = match at.map(|j| written[j]) {
+                Some(R_STATIC) => STATIC,
+                Some(c) if (c as usize) < self.rg.lts.len() => self.rg.lts[c as usize],
+                _ => self.rg.var(),
             };
             lts.push(v);
         }

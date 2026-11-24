@@ -175,7 +175,7 @@ pub fn annotates_static(e: &crate::parse::Expr) -> bool {
 
 /// A closure's body writes a lifetime the region check follows: a `let` annotation that names one
 /// (`let y: &'static u32 = &c;`, `let y: &'a u32 = ..` of the function's 'a), a cast to a type that does, or a path's
-/// turbofish (`W::<&'a u32>`). Then the body is checked with the function's regions though nothing else asks for it
+/// or a method's turbofish (`W::<&'a u32>`, `s.take::<&'static u32>(..)`). Then the body is checked with the function's regions though nothing else asks for it
 /// (no bound, annotated parameter or capture). In a nested closure too: what it requires of its parameters is
 /// required of the calls the body makes of it (`let f = W::<&'a u32>; f(&c);`)
 pub fn writes_lifetime(e: &crate::parse::Expr) -> bool {
@@ -190,6 +190,8 @@ pub fn writes_lifetime(e: &crate::parse::Expr) -> bool {
         Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) | Expr::If(_, b, _) | Expr::While(_, _, b) | Expr::For(_, _, _, b) => block(b),
         Expr::Path(None, p) => p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Ty(t) if names_lt(t)) || matches!(a, GArg::Lifetime(l) if l != "'_"))),
         Expr::Cast(_, t) => names_lt(t),
+        // (a method's turbofish: `S.take::<&'static u32>(&c)`)
+        Expr::MethodCall(_, _, gs, _, _) => gs.iter().any(|a| matches!(a, GArg::Ty(t) if names_lt(t)) || matches!(a, GArg::Lifetime(l) if l != "'_")),
         _ => false,
     };
     if here {
