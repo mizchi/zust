@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795530853381,
+  "lastUpdate": 1795532086985,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -51356,6 +51356,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 38.231,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "af6ecd7debffc2531c85d3e3c3e4a6096f48342e",
+          "message": "zustscript: the first-use eval of publishing functions, union imports in the README (#131)\n\n* zustscript: the first-use eval of publishing functions, union imports in the README\n\n- evals/publish-functions/: an agent new to zustscript writes a module and\n  its generated JS is called from an app (a shipping label: TS types and\n  what is exported; a waveform's sum of squares: wasm or JS). Tasks,\n  criteria, the verifier, recorded rounds and how to replay them, the\n  report and a follow-up on union field order\n- README: which TS types are imported (records, string-literal unions,\n  unions discriminated by a common tag), with an example; a variant's\n  positional pattern follows the TS declaration order\n- TODO: the next work after #119, by priority; the items #125 added stay\n  in their section (not listed twice)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* publish-functions eval: a deadline for each submission, has_signal's whole body\n\nFrom CodeRabbit's review of #131:\n- replay.py and collect.py give each verification 120 s. A submission\n  that never returns (a loop that does not advance) is a failed check:\n  replay goes on to the next one, collect writes its record. The\n  verifier's temporary files go in a directory the caller removes, as a\n  timeout kills it before its own cleanup\n- verify.mjs looks for the `energy(..)` call in all of has_signal's body\n  (braces balanced): `if xs.len() == 0 { false } else { energy(xs) > 0.0 }`\n  was rejected\n\nChecked: the recorded rounds 01 and 02 still pass (8 / 8); a looping\nsubmission fails in 120 s in replay and collect, leaving no temporary\ndirectory; the if/else has_signal passes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* publish-functions eval: a timeout stops the compilers too; strings in has_signal\n\nFrom CodeRabbit's second review of #131:\n- the verifier runs in a process group of its own; on a timeout the group\n  is killed, the zsc / zustc it started included, before its temporary\n  directory goes (run_verifier in replay.py and collect.py).\n  VERIFY_TIMEOUT changes the 120 s\n- has_signal's body is found with braces balanced outside strings and\n  `//` comments (`let marker = \"{\";` made it unbalanced)\n\nChecked: a compiler that sleeps is gone after a 5 s timeout; the\nstring-brace and if/else has_signal pass; a looping submission fails in\ncollect; the recorded rounds 01 and 02 pass (8 / 8).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>",
+          "timestamp": "2026-11-24T23:49:10+09:00",
+          "tree_id": "4d0b952a7e7cb769ee3b8fb98ab8dd4479760bac",
+          "url": "https://github.com/mizchi/zust/commit/af6ecd7debffc2531c85d3e3c3e4a6096f48342e"
+        },
+        "date": 1795532086212,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 170.846,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 1.119,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 25.353,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 65.486,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 20.461,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.557,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 128.366,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 777.535,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 728.298,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 1.316,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 91.468,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 305.587,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 53.84,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.557,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 604.083,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3836.786,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 72.855,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 131.459,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 48.909,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 91.604,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 96.34,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 238.636,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 80.867,
             "unit": "ms"
           }
         ]
