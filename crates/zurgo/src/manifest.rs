@@ -343,14 +343,14 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
     }
     // (integration tests: `[[test]]`, then tests/*.rs and tests/*/main.rs unless `autotests = false`)
     let mut tests: Vec<Target> = vec![];
-    let test_target = |n: String, path: PathBuf, ed: &str, rf: Vec<String>, harness: bool| Target {
+    let test_target = |n: String, path: PathBuf, ed: &str, rf: Vec<String>, test: bool, harness: bool| Target {
         name: n,
         kind: vec!["test".into()],
         crate_types: vec!["bin".into()],
         path,
         edition: ed.to_string(),
         required_features: rf,
-        test: true,
+        test,
         harness,
     };
     for b in t.get("test").and_then(Value::as_array).unwrap_or(&[]) {
@@ -361,7 +361,7 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
             None => [format!("tests/{tname}.rs"), format!("tests/{tname}/main.rs")].iter().map(|x| dir.join(x)).find(|x| x.is_file()).unwrap_or_else(|| dir.join(format!("tests/{tname}.rs"))),
         };
         let rf = b.get("required-features").or_else(|| b.get("required_features")).map(Value::str_list).unwrap_or_default();
-        tests.push(test_target(tname, tpath, toml::get_str(b, &["edition"]).unwrap_or(&edition), rf, flag(b, "harness")));
+        tests.push(test_target(tname, tpath, toml::get_str(b, &["edition"]).unwrap_or(&edition), rf, flag(b, "test"), flag(b, "harness")));
     }
     if auto("autotests") {
         if let Ok(rd) = std::fs::read_dir(dir.join("tests")) {
@@ -377,7 +377,7 @@ fn package(t: &Table, p: &Table, dir: &Path, path: &Path, ws: Option<&Workspace>
                 };
                 if let Some((n, x)) = found {
                     if !tests.iter().any(|b| b.name == n || b.path == x) {
-                        tests.push(test_target(n, x, &edition, vec![], true));
+                        tests.push(test_target(n, x, &edition, vec![], true, true));
                     }
                 }
             }

@@ -13,3 +13,7 @@ test = false
 [[test]]
 name = "custom"
 harness = false
+
+[[test]]
+name = "off"
+test = false

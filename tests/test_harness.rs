@@ -90,6 +90,21 @@ fn should_panic_needs_a_panic() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// Under `--test` the crate's `main` is an ordinary function, whatever its signature: a test may call one with
+/// parameters. Built on its own, the same `main` is an error
+#[test]
+fn main_with_parameters() {
+    let d = dir("test_harness_main_params");
+    let src = d.join("p.rs");
+    std::fs::write(&src, "fn main(value: i32) -> i32 {\n    value\n}\n#[test]\nfn calls() {\n    assert_eq!(main(3), 3);\n}\n").unwrap();
+    let o = Command::new(ZUSTC).args(["--test", "--no-cache"]).arg(&src).arg("-o").arg(d.join("p")).output().unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(out(&d.join("p"), &["calls", "--exact"]).0, Some(0));
+    let o = Command::new(ZUSTC).args(["--no-cache"]).arg(&src).arg("-o").arg(d.join("q")).output().unwrap();
+    assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("`main` must be `fn main()`"));
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// `--cfg name` and `--cfg name="value"`, as rustc takes them
 #[test]
 fn cfg_flag() {

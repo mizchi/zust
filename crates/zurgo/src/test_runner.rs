@@ -21,6 +21,8 @@ use std::time::{Duration, Instant};
 #[derive(Clone, Debug)]
 pub struct TestExe {
     pub label: String,
+    /// the target's name (the name of the one test of an executable with no harness)
+    pub target: String,
     pub exe: PathBuf,
     pub dir: PathBuf,
     pub harness: bool,
@@ -29,7 +31,7 @@ pub struct TestExe {
 impl TestExe {
     /// one with a harness (cargo's own executables too)
     pub fn new(label: &str, exe: impl Into<PathBuf>, dir: impl Into<PathBuf>) -> TestExe {
-        TestExe { label: label.to_string(), exe: exe.into(), dir: dir.into(), harness: true }
+        TestExe { label: label.to_string(), target: label.to_string(), exe: exe.into(), dir: dir.into(), harness: true }
     }
 }
 
@@ -160,11 +162,18 @@ fn debug_str(s: &str) -> String {
     out
 }
 
-/// A panic's message in a test's stderr: after the last `' panicked at ..:` line, to the `note:` line. None: no panic
+/// A panic's message in a test's stderr: after the last panic header (a line `thread '..' panicked at ..:`), to the
+/// `note:` line. None: no panic
 fn panic_msg(err: &str) -> Option<String> {
-    let i = err.rfind("' panicked at ")?;
-    let r = &err[i..];
-    let m = r.find('\n').map(|j| &r[j + 1..]).unwrap_or("");
+    let mut at = None;
+    let mut pos = 0;
+    for l in err.split('\n') {
+        if l.starts_with("thread '") && l.contains("' panicked at ") && l.ends_with(':') {
+            at = Some(pos + l.len() + 1);
+        }
+        pos += l.len() + 1;
+    }
+    let m = err.get(at?..).unwrap_or("");
     let m = m.find("\nnote: run with `RUST_BACKTRACE").map_or(m, |e| &m[..e]);
     Some(m.to_string())
 }
@@ -292,7 +301,8 @@ fn run_one(exe: &Path, dir: &Path, name: &str, ignored: bool, harness: bool, sho
     }
     // (a wasm32 `#[should_panic]` test ran in the module: it passes when it panicked, with the expected text)
     let outcome = match (should_panic, outcome) {
-        (Some(exp), Outcome::Fail(Some(101))) if panic_msg(&String::from_utf8_lossy(&err)).is_some_and(|m| m.contains(exp)) => Outcome::Pass,
+        // (no expected text: any panic, a trap too (wasm32's checks trap without a message))
+        (Some(exp), Outcome::Fail(Some(101))) if exp.is_empty() || panic_msg(&String::from_utf8_lossy(&err)).is_some_and(|m| m.contains(exp)) => Outcome::Pass,
         (Some(exp), Outcome::Fail(Some(101))) => {
             err.extend_from_slice(format!("note: panic did not contain expected string\n      expected substring: {exp:?}\n").as_bytes());
             Outcome::Fail(Some(101))
@@ -330,8 +340,7 @@ pub fn run(exes: &[TestExe], o: &RunOpts, times_path: &Path) -> Result<Summary, 
         // (a wasm32 module: zustc's harness says each test's flags at once; its `should_panic` the runner checks)
         let mut panics: BTreeMap<String, String> = BTreeMap::new();
         let (names, ign) = if !x.harness {
-            let n = label.rsplit_once(' ').map(|(_, n)| n.trim_end_matches(')')).unwrap_or(label).to_string();
-            (vec![n], vec![])
+            (vec![x.target.clone()], vec![])
         } else if exe.extension().is_some_and(|e| e == "wasm") {
             let l = list_zust(exe, dir)?;
             for (n, _, sp) in &l {
@@ -461,4 +470,17 @@ pub fn run(exes: &[TestExe], o: &RunOpts, times_path: &Path) -> Result<Summary, 
         eprintln!("        FAIL {} {}", exes[jobs[j].exe].label, jobs[j].name);
     }
     Ok(Summary { results, skipped })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn panic_message() {
+        let err = "thread 'main' panicked at src/lib.rs:3:5:\nworker' panicked at failure\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n";
+        assert_eq!(panic_msg(err).as_deref(), Some("worker' panicked at failure"));
+        assert_eq!(panic_msg("wasm trap: unreachable\n"), None);
+        assert_eq!(debug_str("\"a\\\"b\\n\\u{41}\""), "a\"b\nA");
+    }
 }

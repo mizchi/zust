@@ -2321,6 +2321,7 @@ build-pass	entry-point/hello-world.rs
 compile-fail	entry-point/imported_main_conflict.rs
 check-pass	entry-point/imported_main_conflict_lib.rs
 compile-fail	entry-point/main-with-invalid-signature.rs
+compile-fail	entry-point/main-with-lifetime-param.rs
 compile-fail	entry-point/return-ty-has-bound-vars.rs
 run-pass	enum-discriminant/const-implicit-enum-discriminant.rs
 compile-fail	enum-discriminant/discriminant-ill-typed.rs

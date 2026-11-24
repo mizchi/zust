@@ -84,7 +84,7 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
 
 /// plan, and each test crate: its index in the crates, its label (`pkg (lib)`, `pkg (bin x)`, `pkg (test x)`), and
 /// whether it has the harness (`harness = false`: no)
-pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, String, bool)>)> {
+pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, String, bool, String)>)> {
     let host = Target::host();
     let target = match &o.target {
         Some(t) => Target::by_triple(t).ok_or_else(|| format!("unknown target `{t}` (x86_64-unknown-linux-gnu, wasm32-unknown-unknown)"))?,
@@ -319,7 +319,7 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
     // (`zurgo test`: a test crate for the lib's unit tests, each bin's, and each integration test. Each is a bin
     //  crate built with `test` (zustc's harness), with the dev-dependencies; an integration test also with the lib)
     // (each test crate: its index in crates, its label, whether it has the harness)
-    let mut labels: Vec<(usize, String, bool)> = vec![];
+    let mut labels: Vec<(usize, String, bool, String)> = vec![];
     if o.test {
         let built_bins: Vec<(String, String)> = crates.iter().filter_map(|c| c.exe.clone().map(|e| (e.clone(), e))).collect();
         for &m in &selected {
@@ -361,7 +361,11 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
                 }
                 // (the executable is named after the crate's unique name: two packages' targets cannot share it)
                 let exe = name.clone();
-                let (cfgs, mut env) = build_script::crate_env(&pk.m, &t.name, bs_out.get(&n));
+                let (mut cfgs, mut env) = build_script::crate_env(&pk.m, &t.name, bs_out.get(&n));
+                // (`cfg(test)` with the harness or without it (`harness = false`), as cargo builds a test target)
+                if !t.harness {
+                    cfgs.push(("test".into(), None));
+                }
                 if kind == "bin" {
                     env.push(("CARGO_BIN_NAME".into(), t.name.clone()));
                 }
@@ -391,7 +395,7 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
                     // (`harness = false`: its own `main`, no `cfg(test)`)
                     test: t.harness,
                 });
-                labels.push((crates.len() - 1, label, t.harness));
+                labels.push((crates.len() - 1, label, t.harness, t.name.clone()));
             }
         }
     }
@@ -401,11 +405,14 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
     if !pm_macros.is_empty() {
         let wasm = target.triple.starts_with("wasm32");
         let mut reach: BTreeMap<Node, Vec<usize>> = BTreeMap::new();
-        for (c, &n) in crates[n_stubs..].iter().zip(&node_of) {
+        // (the test crates, with or without a harness: they link the dev-dependencies)
+        let test_crates: Vec<usize> = labels.iter().map(|l| l.0).collect();
+        for (k, (c, &n)) in crates[n_stubs..].iter().zip(&node_of).enumerate() {
+            let is_test_crate = test_crates.contains(&(n_stubs + k));
             let mut pm_deps = pm_reach(g, &r, n, &mut reach);
             // (a test crate also links the package's dev-dependencies: the proc macros they are or reach count too.
             //  Added here, not in the memo, which holds the normal dependencies' reach)
-            if c.test {
+            if is_test_crate {
                 for &(ei, t) in &r.nodes[&n].edges {
                     if g.decl(n.0, &g.edges[n.0][ei]).kind != crate::manifest::DepKind::Dev || t.0 == n.0 {
                         continue;
@@ -421,9 +428,9 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
             if pm_deps.is_empty() {
                 continue;
             }
-            // (a test crate is configured with `test`, as zustc builds it)
+            // (a test crate is configured with `test`, as zustc builds it (one without a harness has it in its cfgs))
             let mut cfgs = c.cfgs.clone();
-            if c.test {
+            if c.test && !cfgs.iter().any(|x| x.0 == "test" && x.1.is_none()) {
                 cfgs.push(("test".to_string(), None));
             }
             let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs, env: c.env.clone() };
@@ -571,10 +578,10 @@ pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
         .collect();
     let tests = labels
         .into_iter()
-        .filter_map(|(i, label, harness)| {
+        .filter_map(|(i, label, harness, target)| {
             let c = &crates[i];
             let dir = c.env.iter().find(|(k, _)| k == "CARGO_MANIFEST_DIR").map(|(_, v)| PathBuf::from(v)).unwrap_or_else(|| g.ws_dir.clone());
-            c.exe.as_ref().map(|e| crate::test_runner::TestExe { label, exe: if wasm { out.join(format!("{e}.wasm")) } else { out.join(e) }, dir, harness })
+            c.exe.as_ref().map(|e| crate::test_runner::TestExe { label, target, exe: if wasm { out.join(format!("{e}.wasm")) } else { out.join(e) }, dir, harness })
         })
         .collect();
     Ok(Built { out_dir: out, bins, tests, crates })

@@ -604,7 +604,7 @@ fn test_flags_like_cargo() {
     let (ok, out, err) = cargo(&["test", "--offline"], &m, &tdir("test-flags-cargo"));
     assert!(ok, "{out}{err}");
     assert!(out.contains("custom ran") || err.contains("custom ran"), "{out}{err}");
-    assert!(!out.contains("never"), "{out}");
+    assert!(!out.contains("never") && !err.contains("this test target is off"), "{out}{err}");
     let t = tdir("test-flags");
     let (ok, _, err) = zurgo(&["test"], &m, &t);
     assert!(ok, "{err}");

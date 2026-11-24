@@ -299,11 +299,12 @@ pub fn apply_with(src: &str, expanded: Option<&str>, wasm: bool) -> (String, usi
         })
         .collect();
     out.push_str(&format!(
-        "#[allow(dead_code)] fn __zust_test_run(i: usize) {{ match i {{ {} _ => {{}} }} }} #[allow(dead_code)] #[zust_test_entry] fn __zust_test_entry() {{ let t: &[(&str, u8, &str)] = &[{}]; let a: Vec<String> = std::env::args().collect(); std::process::exit(__zust_test_main(t, &a)); }} {HARNESS}\n",
+        "#[allow(dead_code)] fn __zust_test_run(i: usize) {{ match i {{ {} _ => {{}} }} }} #[allow(dead_code)] #[zust_test_entry] fn __zust_test_entry() {{ let t: &[(&str, u8, &str)] = &[{}]; let a: Vec<String> = std::env::args().collect(); std::process::exit(__zust_test_main(t, &a)); }} {}\n",
         arms.join(" "),
-        table.join(", ")
+        table.join(", "),
+        // (the child process or not: in the harness's text alone, not in the source's)
+        HARNESS.replacen("&& CHILD {", if wasm { "&& false {" } else { "&& true {" }, 1)
     ));
-    let mut out = out.replacen("&& CHILD {", if wasm { "&& false {" } else { "&& true {" }, 1);
     // (on the harness's line: the source's lines stay as they are, and the harness is one more)
     out.pop();
     out.push(' ');
@@ -333,8 +334,9 @@ const HARNESS: &str = concat!(
     "#[allow(dead_code)] fn __zust_test_matches(n: &str, pats: &Vec<String>, exact: bool) -> bool { ",
     "for p in pats { if (exact && n == p.as_str()) || (!exact && n.contains(p.as_str())) { return true; } } false } ",
     "#[allow(dead_code)] fn __zust_test_panic_msg(err: &str) -> Option<String> { ",
-    "let i = err.rfind(\"' panicked at \")?; let r = &err[i..]; let Some(j) = r.find('\\n') else { return Some(String::new()); }; ",
-    "let m = &r[j + 1..]; let m = match m.find(\"\\nnote: run with `RUST_BACKTRACE\") { Some(e) => &m[..e], None => m }; ",
+    "let mut at: Option<usize> = None; let mut pos = 0; ",
+    "for l in err.split('\\n') { if l.starts_with(\"thread '\") && l.contains(\"' panicked at \") && l.ends_with(\":\") { at = Some(pos + l.len() + 1); } pos += l.len() + 1; } ",
+    "let i = at?; let m = if i <= err.len() { &err[i..] } else { \"\" }; let m = match m.find(\"\\nnote: run with `RUST_BACKTRACE\") { Some(e) => &m[..e], None => m }; ",
     "let m = match m.find(\"\\nstack backtrace:\") { Some(e) => &m[..e], None => m }; Some(m.to_string()) } ",
     "#[allow(dead_code)] fn __zust_test_main(t: &[(&str, u8, &str)], a: &Vec<String>) -> i32 { ",
     "let mut list = false; let mut exact = false; let mut ignored = false; let mut include = false; let mut raw = false; let mut fmt = String::new(); ",

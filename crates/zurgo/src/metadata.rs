@@ -158,7 +158,7 @@ fn package(g: &Graph, p: usize) -> J {
         if !t.required_features.is_empty() {
             fields.push(("required-features", J::Arr(t.required_features.iter().map(|f| s(f)).collect())));
         }
-        fields.extend([("doc", J::Bool(false)), ("doctest", J::Bool(false)), ("test", J::Bool(true))]);
+        fields.extend([("doc", J::Bool(false)), ("doctest", J::Bool(false)), ("test", J::Bool(t.test))]);
         targets.push(J::Obj(fields));
     }
     if let Some(b) = &m.build {
