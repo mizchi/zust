@@ -584,6 +584,18 @@ fn tt_text(t: &TokenTree, out: &mut String) {
     }
 }
 
+/// Whether every attribute in an expansion is `#[cfg(..)]` / `#[cfg_attr(..)]` (cfg-if's): evaluated with what they are
+/// on, they leave nothing behind, so the expansion may be spliced into a block as statements
+fn only_cfg_attrs(body: &str) -> bool {
+    body.match_indices('#').all(|(k, _)| {
+        let r = body[k + 1..].trim_start();
+        r.strip_prefix('[').is_some_and(|r| {
+            let r = r.trim_start();
+            r.starts_with("cfg(") || r.starts_with("cfg (") || r.starts_with("cfg_attr")
+        })
+    })
+}
+
 /// The names a macro body binds with `let` (not from its variables): hygiene keeps them apart from the caller's names
 /// (`macro_rules! m { ($e:expr) => {{ let x = 9; $e }} }` with `m!(x)` uses the caller's x)
 fn body_lets(body: &[Pt], out: &mut Vec<String>) {
@@ -663,8 +675,14 @@ impl<'a> Binds<'a> {
 }
 
 fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> Result<(), String> {
+    let punct = |k: usize, c: char| matches!(body.get(k), Some(Pt::Tok(TokenTree::Punct(q))) if q.as_char() == c);
     for (k, p) in body.iter().enumerate() {
         match p {
+            // (a field or method of a let's name is not renamed: `r.core`, `x.seed()` (not the range `..core`). Field names
+            //  in struct literals, patterns and definitions drop the hygiene suffix where they are parsed)
+            Pt::Tok(TokenTree::Ident(i)) if lets.iter().any(|l| *i == l.as_str()) && k > 0 && punct(k - 1, '.') && !(k > 1 && punct(k - 2, '.')) => {
+                tt_text(&TokenTree::Ident(i.clone()), out);
+            }
             // (a label of the body's own: `'x` -> `'x__mh`)
             Pt::Tok(TokenTree::Ident(i))
                 if k > 0
@@ -1574,7 +1592,9 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
             // (not with attributes: a `#[cfg(false)]` item removed later would leave the attributes before it)
             // (`m! { .. }` in statement position is a statement by itself, whatever follows: `defer! { .. }
             // let x = ..;`)
-            let spliced = !top && stmt_pos && (sym(ge + 1, b';') || sym(ge + 1, b'}') || sym(ge, b'}')) && !body.contains('#');
+            //  Attributes that are only `#[cfg(..)]` / `#[cfg_attr(..)]` (cfg-if's expansions) are evaluated with what they
+            //  are on, so they leave nothing behind)
+            let spliced = !top && stmt_pos && (sym(ge + 1, b';') || sym(ge + 1, b'}') || sym(ge, b'}')) && only_cfg_attrs(&body);
             // (the call's own `;` goes when the expansion ends a statement itself: no stray `;` after attributes)
             let drop_semi = spliced && sym(ge + 1, b';') && body.trim_end().ends_with(';');
             let rep = if operand {
@@ -1842,7 +1862,9 @@ fn find_calls(
                                         || matches!(&toks[ps - 1], TokenTree::Punct(q) if q.as_char() == ';')
                                         || matches!(&toks[ps - 1], TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace));
                                 let next_semi = matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if q.as_char() == ';');
-                                let spliced = depth > 0 && stmt_pos && (next_semi || toks.get(i + 3).is_none()) && !body.contains('#');
+                                // (`m! { .. }` is a statement by itself, whatever follows, as in expand_cfg)
+                                let braced = matches!(toks.get(i + 2), Some(TokenTree::Group(cg)) if cg.delimiter() == proc_macro2::Delimiter::Brace);
+                                let spliced = depth > 0 && stmt_pos && (next_semi || braced || toks.get(i + 3).is_none()) && only_cfg_attrs(&body);
                                 let drop_semi = spliced && next_semi && body.trim_end().ends_with(';');
                                 // (as expand_cfg: at the top, an item only where an item starts (after an attribute
                                 // too); after a binary operator, one operand that keeps the `;` after it)
@@ -2382,6 +2404,32 @@ mod env_tests {
         let src = "#![recursion_limit = \"1\"]\nmacro_rules! m { () => { \"m\" }; }\nfn main() { let _ = m!(); }\n";
         assert!(expand(src).is_ok(), "{:?}", expand(src).err());
         assert!(expand_reference(src).is_ok());
+    }
+
+    /// A braced call in statement position whose expansion carries only `#[cfg(..)]` attributes (cfg-if's
+    /// `cfg_if! { if #[cfg(..)] { let tokens = ..; } else { .. } }`, chacha20 0.10) puts its statements into the
+    /// block, so a `let` it declares is seen by what follows (`Self { tokens }`)
+    #[test]
+    fn statement_cfg_if_declares_into_the_block() {
+        let src = "macro_rules! pick { (if #[cfg($m:meta)] { $($a:tt)* } else { $($b:tt)* }) => { #[cfg($m)] pick! { @id $($a)* } #[cfg(not($m))] pick! { @id $($b)* } }; (@id $($t:tt)*) => { $($t)* }; }\nfn f() -> u8 {\n    pick! {\n        if #[cfg(unix)] { let tokens = 1; } else { let tokens = 2; }\n    }\n    tokens\n}\nfn main() {}\n";
+        let c = crate::cfg::CfgSet { debug_assertions: true, ..Default::default() };
+        let out = expand_cfg(src, Some(&c)).unwrap().unwrap();
+        let norm = out.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(!norm.contains("({"), "{norm}");
+        assert!(crate::parse::parse_file(&out).is_ok(), "{norm}");
+    }
+
+    /// A body's own `let core` is renamed for hygiene, but not a field or method of that name after `.`:
+    /// `self.core.core` (chacha20 0.10's `impl_chacha_rng!`). A parameter of the name is renamed with it
+    #[test]
+    fn hygiene_keeps_fields_of_a_let_name() {
+        let src = "macro_rules! imp { () => { fn h(core: u8) -> u8 { core } fn f(r: &mut R) -> u8 { let core = 1; r.core.core = core; let x = core..core; r.core() } } }\nimp!();\nfn main() {}\n";
+        let out = expand_cfg(src, Some(&crate::cfg::CfgSet::default())).unwrap().unwrap();
+        let norm: String = out.split_whitespace().collect();
+        assert!(norm.contains("r.core.core=core__mh"), "{norm}");
+        assert!(norm.contains("core__mh..core__mh"), "{norm}");
+        assert!(norm.contains("r.core()"), "{norm}");
+        assert!(norm.contains("fnh(core__mh:u8)->u8{core__mh}"), "{norm}");
     }
 
     /// The depth of recursive expansion is limited as in rustc: 128 by default, or the crate's

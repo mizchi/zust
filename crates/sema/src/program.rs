@@ -1437,6 +1437,27 @@ impl Program {
                 p.layout(id, &sdefs, items, &mut state)?;
             }
         }
+        // (and those of generic types, `impl<R> Generator for Core<R> { type Output = [u32; 64]; }`, once the generic
+        // definitions are there: a field `BlockRng<Core<R8>>` of a non-generic struct, laid out next, has a field of type
+        // `G::Output` (rand_core 0.10 with chacha20). Those that do not resolve yet are taken below, as before)
+        for (ii, sm) in sums.iter().enumerate() {
+            let of_trait = matches!(items[ii].kind, crate::lexer::ItemKind::ImplMember(h) if sums[h as usize].impl_trait.is_some());
+            if sm.assocs.is_empty() || !of_trait {
+                continue;
+            }
+            for (k, a) in sm.assocs.iter().enumerate() {
+                if early.contains(&(ii, k)) || !syn_has_app(&a.self_ty, &p.aliases) || syn_has_app(&a.value, &p.aliases) {
+                    continue;
+                }
+                let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
+                if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
+                    let (ngen, ngat) = gat_split(&gn);
+                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat });
+                    early.push((ii, k));
+                }
+            }
+        }
+        let early: HashSet<(usize, usize)> = early.into_iter().collect();
         for id in 0..sdefs.len() {
             p.layout(id, &sdefs, items, &mut state)?;
         }
@@ -1540,12 +1561,9 @@ impl Program {
             }
         }
         // 関連型 (関数のシグネチャの `Self::Item` を解決するので先に)
-        let mut next_early = 0;
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             for (k, a) in sm.assocs.iter().enumerate() {
-                // (`early` is in the same order as this loop)
-                if early.get(next_early) == Some(&(ii, k)) {
-                    next_early += 1;
+                if early.contains(&(ii, k)) {
                     continue;
                 }
                 let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();

@@ -611,6 +611,18 @@ mod tests {
         split(src).unwrap().iter().map(|i| i.hash).collect()
     }
 
+    /// A const generic parameter (`fn read_words<W, const N: usize>`, `impl<const N: usize>`) is no item of the
+    /// module: a module's `const N` elsewhere does not make it collide, and it keeps its name (rand_core 0.10's
+    /// utils.rs became `rand_core__utils__N`, "cannot find constant")
+    #[test]
+    fn const_generic_parameter_is_not_a_module_constant() {
+        let src = "mod utils {\n    pub fn read_words<W: Copy, const N: usize>(_s: &[u8]) -> [W; N] { loop {} }\n    pub struct A<const N: usize>;\n    impl<const N: usize> A<N> { pub fn n(&self) -> usize { N } }\n}\nmod block {\n    pub const N: usize = 2;\n    pub fn first<const N: usize>(a: [u8; N]) -> u8 { a[0] }\n}\nfn main() {}\n";
+        let out = rename_module_collisions(src).unwrap_or_else(|| src.to_string());
+        assert!(!out.contains("utils__N"), "{out}");
+        assert!(out.contains("const N: usize>(_s: &[u8]) -> [W; N]"), "{out}");
+        assert!(out.contains("pub fn first<const N: usize>(a: [u8; N])"), "{out}");
+    }
+
     /// `const unsafe fn` (and `const async fn`, `const extern "C" fn`) is a fn, not a constant named `unsafe`: libc
     /// 0.2 has `pub const unsafe fn` in several modules, and taking `unsafe` for a colliding name renamed the
     /// `unsafe` of `unsafe impl Send for DIR {}` to `a__unsafe`
@@ -1888,7 +1900,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 let nk = if kw == b"static" && is_id(k + 1, b"mut") { k + 2 } else { k + 1 };
                 // (`const fn f` は fn で数える。`const unsafe fn` / `const async fn` / `const extern "C" fn` も)
                 let const_fn = kw == b"const" && (is_id(nk, b"fn") || is_id(nk, b"unsafe") || is_id(nk, b"async") || is_id(nk, b"extern"));
-                if nk < toks.len() && toks[nk].0 == 0 && !const_fn && tok(nk) != b"_" {
+                // (a const generic parameter, `<W, const N: usize>`, follows `<` or `,`: it is no item of the module)
+                let const_param = kw == b"const" && k >= 1 && (is_sym(k - 1, b'<') || is_sym(k - 1, b','));
+                if nk < toks.len() && toks[nk].0 == 0 && !const_fn && !const_param && tok(nk) != b"_" {
                     let sc = scope_depth.last().unwrap().0;
                     defs.push((tok(nk).to_vec(), sc, nk));
                     // (a fn of an extern block: renamed, it keeps its symbol through a `#[link_name]` before the

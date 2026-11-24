@@ -259,7 +259,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     let fi = map.files.len() as u32;
     map.files.push(display.to_string());
     map.segs.push((start, fi, 1));
-    let (blanked, kids) = blank_mod_decls(&src).map_err(|e| format!("{display}: {e}"))?;
+    let (blanked, kids) = blank_mod_decls(&src, cfg).map_err(|e| format!("{display}: {e}"))?;
     let end_line = 1 + line_count(&src);
     if kids.is_empty() {
         return hoist_macro_mods(blanked, path, mod_dir, disp_dir, start, map, cfg, open, fi, end_line);
@@ -625,10 +625,12 @@ fn attrs_before(src: &str, s: &[u8], toks: &[(u8, usize, usize)], mut b: usize) 
 
 #[allow(clippy::type_complexity)]
 #[inline(never)]
-fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>, Nested)>), String> {
+fn blank_mod_decls(src: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, Vec<(String, Option<String>, Nested)>), String> {
     if !src.contains("mod") {
         return Ok((src.to_string(), vec![]));
     }
+    // (the branches of `cfg_if!` calls not taken: their `mod x;` is blanked and not read)
+    let not_taken = crate::cfg::cfg_if_not_taken(src, cfg);
     let s = src.as_bytes();
     let toks = crate::lexer::tokenize(s);
     let tok = |k: usize| -> &[u8] { &s[toks[k].1..toks[k].2] };
@@ -712,7 +714,8 @@ fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>, Ne
                     *c = b' ';
                 }
             }
-            if !cfg_test {
+            let at = toks[k].1;
+            if !cfg_test && !not_taken.iter().any(|&(a, e)| a <= at && at < e) {
                 let name = String::from_utf8_lossy(tok(k + 1)).into_owned();
                 kids.push((if macro_use { format!("#{name}") } else { name }, path_attr, nested));
             }
@@ -802,6 +805,19 @@ mod circular_tests {
             std::fs::write(p, t).unwrap();
         }
         dir
+    }
+
+    /// `mod x;` in a branch of `cfg_if!` that is not taken is not read (chacha20 0.10's backends.rs declares
+    /// `mod avx512;` under `if #[cfg(all(chacha20_avx512, ..))]` and under `#[cfg(chacha20_avx512)]` in the else
+    /// branch; its file uses AVX-512 intrinsics). A taken branch's module is read, nested calls too
+    #[test]
+    fn cfg_if_branch_not_taken_is_not_read() {
+        let main = "cfg_if! {\n    if #[cfg(all(nothing_set, also_not))] {\n        mod fancy;\n    } else if #[cfg(target_os = \"nowhere\")] {\n        mod fancy;\n    } else {\n        cfg_if! {\n            if #[cfg(unix)] { mod plain; } else { mod fancy; }\n        }\n        #[cfg(nothing_set)]\n        mod fancy;\n    }\n}\nfn main() {}\n";
+        let dir = tmp_crate("cfg_if_mods", &[("main.rs", main), ("plain.rs", "pub fn plain_fn() {}\n"), ("fancy.rs", "pub fn fancy_fn() {}\n")]);
+        let cfg = crate::cfg::CfgSet::default();
+        let (src, _) = super::load_crate(&dir.join("main.rs"), "src/main.rs", &cfg).unwrap();
+        assert!(src.contains("plain_fn"), "{src}");
+        assert!(!src.contains("fancy_fn"), "{src}");
     }
 
     /// The hoisted declaration goes with its visibility: `macro_rules! declare { () => { pub mod child; } }` left

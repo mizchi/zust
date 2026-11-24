@@ -2194,6 +2194,8 @@ impl Inf<'_> {
         if matches!(n, "zip" | "chain") && avs.len() == 1 {
             let mut base = self.resolve(avs[0]);
             let is_ref = matches!(base, Some(Ty::Ref(..)));
+            // (`it.zip(dst)` with dst: &mut [T] / `zip(&mut v)`: its iter_mut, as IntoIterator for &mut gives)
+            let is_mut = matches!(base, Some(Ty::Ref(true, _)));
             while let Some(Ty::Ref(_, i)) = base {
                 if matches!(i, Ty::Slice(_)) {
                     break;
@@ -2210,9 +2212,10 @@ impl Inf<'_> {
             let syntactic_array = matches!(&args[0], Expr::Array(_) | Expr::Repeat(..));
             if seq || syntactic_array {
                 let a = &args[0];
+                let it = if is_mut { "iter_mut" } else { "iter" };
                 let x = match (is_ref, a) {
-                    (true, Expr::Ref(_, inner)) => mcall((**inner).clone(), "iter", vec![]),
-                    (true, _) => mcall(a.clone(), "iter", vec![]),
+                    (true, Expr::Ref(_, inner)) => mcall((**inner).clone(), it, vec![]),
+                    (true, _) => mcall(a.clone(), it, vec![]),
                     _ => mcall(a.clone(), "into_iter", vec![]),
                 };
                 avs[0] = self.expr_kept(x, false);
@@ -2462,6 +2465,17 @@ impl Inf<'_> {
             "as_slice" | "as_mut_slice" => {
                 let sl = self.with(Shape::Slc(el));
                 self.with(Shape::Ref(n == "as_mut_slice", sl))
+            }
+            // (an array's as_mut: its one AsMut is `AsMut<[T]>`; a Vec's has two, left to the use)
+            "as_mut" if args.is_empty() && {
+                let mut t = self.resolve(r);
+                while let Some(Ty::Ref(_, i)) = t {
+                    t = Some(*i);
+                }
+                matches!(t, Some(Ty::Array(..)))
+            } => {
+                let sl = self.with(Shape::Slc(el));
+                self.with(Shape::Ref(true, sl))
             }
             _ => self.var(),
         }
