@@ -3490,5 +3490,5 @@ fn part20_capture_escape() {
 #[test]
 fn part20_annotated_param_bound() {
     let d = check("fn take<F: Fn(&u32)>(_f: F) {}\nfn take2<'a, F: Fn(&'a u32)>(_: &'a u32, _f: F) {}\nfn take3<F: Fn(&u32) -> u32>(_f: F) {}\nfn g1<'x>(y: &'x u32) { take(|x: &'x u32| { let _ = (x, y); }); }\nfn g2<'x>(y: &'x u32) { take2(y, |x: &'x u32| { let _ = x; }); }\nfn g3() { take(|_x: &'static u32| {}); }\nfn g4() { take3(|x: &u32| *x); take(|_x: &'_ u32| {}); }\nfn main() { g1(&1); g2(&1); g3(); g4(); }\n");
-    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 6] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
 }

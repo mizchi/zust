@@ -2695,7 +2695,10 @@ impl Cx<'_> {
             && !inputs.iter().any(|x| x.1.is_some())
             && regionck::enabled()
             && matches!(c, Expr::Closure(_, _, _, b, _) if crate::regions::writes_lifetime(b));
-        if (ann_static || writes_lt) && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
+        // (or a parameter annotated with a lifetime where a bound gives the signature (`|x: &'static u32|` for
+        // `F: Fn(&u32)`): rg_closure_sig relates the two)
+        let ann_lt = bound.is_some() && self.user_code && self.bk.level >= 2 && !to_prelude && inputs.iter().any(|x| x.1.as_ref().is_some_and(crate::regions::names_lt));
+        if (ann_static || writes_lt || ann_lt) && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
             self.rg_late_on();
         }
         // (the region signature its body is checked with: from a bound not the prelude's, else from annotated
