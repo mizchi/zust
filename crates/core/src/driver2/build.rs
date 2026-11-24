@@ -47,7 +47,7 @@ impl Session2 {
                 return Err("pipe failed".into());
             }
             // SAFETY: 子はコンパイルして書くだけで _exit する
-            let pid = unsafe { c_fork() };
+            let pid = fork_counted();
             if pid < 0 {
                 return Err("fork failed".into());
             }
@@ -1612,7 +1612,7 @@ impl Session2 {
                     if unsafe { c_pipe(fds.as_mut_ptr()) } != 0 {
                         continue;
                     }
-                    let pid = unsafe { c_fork() };
+                    let pid = fork_counted();
                     if pid == 0 {
                         unsafe { c_close(fds[0]) };
                         self.opts.jobs = inner;
