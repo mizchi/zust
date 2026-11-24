@@ -1400,7 +1400,10 @@ fn single_call(s: &str) -> bool {
             continue;
         }
         match c {
-            '"' | '\'' | '`' => quote = Some(c),
+            '"' | '\'' => quote = Some(c),
+            // (a template's text and holes nest (`${`(`}`): not scanned here. Not a single call, so the caller
+            // keeps its parentheses)
+            '`' => return false,
             '(' => d += 1,
             ')' => {
                 d -= 1;
@@ -1469,7 +1472,10 @@ fn balanced(s: &str) -> bool {
             continue;
         }
         match c {
-            '"' | '\'' | '`' => quote = Some(c),
+            '"' | '\'' => quote = Some(c),
+            // (a template's text and holes nest (`${`(`}`): not scanned here. Not a single call, so the caller
+            // keeps its parentheses)
+            '`' => return false,
             '(' => d += 1,
             ')' => {
                 d -= 1;

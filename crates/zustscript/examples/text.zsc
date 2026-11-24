@@ -80,3 +80,9 @@ export fn later_hole() -> String {
   apply((x) => `<${x}>`, 1) + "|" + { let n = 2; `a
 b${n}` }
 }
+
+// parentheses inside templates (and templates inside holes) are text, not structure: `.len()` applies to the sum
+fn id(s: String) -> String { s }
+export fn paren_text() -> i32 {
+  (id(`${`(`}`) + id(`${`)`}`)).len()
+}
