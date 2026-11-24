@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795497639603,
+  "lastUpdate": 1795497642224,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -94118,6 +94118,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/e58383360c032e74a9a8d13c1d83f8fa184ef5c7"
         },
         "date": 1795491710434,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 72.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 75.758,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 84.848,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.444,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.755,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e180023dc571235afed5b8ee258e26c8c6ddf6e5",
+          "message": "Merge pull request #112 from mizchi/zustscript-export\n\nzustscript: use export for public declarations",
+          "timestamp": "2026-11-24T14:10:25+09:00",
+          "tree_id": "cadad4f055dbd883b0737c2711966075b978ed0c",
+          "url": "https://github.com/mizchi/zust/commit/e180023dc571235afed5b8ee258e26c8c6ddf6e5"
+        },
+        "date": 1795497641665,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
