@@ -1,8 +1,8 @@
 # zustscript 入門記事の編集
 
-入門は [introduction.md](../../crates/zustscript/docs/introduction.md)、Rust 向けの解説は [rust-costs.md](../../crates/zustscript/docs/rust-costs.md) を編集します。最初の H1 はページタイトル、最初の段落はページの説明文にも使います。コードフェンスには `zustscript`、`typescript`、`javascript`、`bash`、`rust` のいずれかを指定すると Tree-sitter が色を付けます。実行結果には `text` を使います。
+原稿は [crates/zustscript/docs](../../crates/zustscript/docs) にあります。公開する記事とサイドバーの表示名は [render.mjs](render.mjs) で指定します。最初の H1 はページタイトル、最初の段落はページの説明文にも使います。コードフェンスには `zustscript`、`typescript`、`javascript`、`bash`、`rust` のいずれかを指定すると Tree-sitter が色を付けます。実行結果には `text` を使います。
 
-リポジトリのルートで次を実行すると、公開用の `index.html` と `rust-costs.html` が `out/pages/zustscript/` にできます。Node.js 24、pnpm 10、just、Tree-sitter CLI 0.26.8 と C コンパイラを使います。プレビューには公開サイトの共通スタイルを添えます。
+リポジトリのルートで次を実行すると、各記事の HTML が `out/pages/zustscript/` にできます。Node.js 24、pnpm 10、just、Tree-sitter CLI 0.26.8 と C コンパイラを使います。プレビューには公開サイトの共通スタイルを添えます。
 
 ```sh
 just -f scripts/zustscript-page/justfile build

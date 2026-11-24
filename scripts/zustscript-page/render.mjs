@@ -1,4 +1,4 @@
-// Render the public introduction, and Rust guide with Tree-sitter highlighting, before deployment.
+// Render the public zustscript guides with Tree-sitter highlighting before deployment.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -33,6 +33,8 @@ function highlight(code, language) {
 const md = new MarkdownIt({ highlight });
 const pages = new Map([
   ["introduction.md", { destination: output, label: "zustscript 入門" }],
+  ["for-rust-programmers.md", { destination: join(dirname(output), "for-rust-programmers.html"), label: "For Rust programmers" }],
+  ["for-typescript-programmers.md", { destination: join(dirname(output), "for-typescript-programmers.html"), label: "For TypeScript programmers" }],
   ["rust-costs.md", { destination: join(dirname(output), "rust-costs.html"), label: "Rust から見る変換コスト" }],
 ]);
 const template = readFileSync(new URL("./template.html", import.meta.url), "utf8");

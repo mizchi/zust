@@ -6,6 +6,7 @@ on:
     paths: &inputs
       - crates/zustscript/docs/introduction.md
       - crates/zustscript/docs/rust-costs.md
+      - crates/zustscript/docs/for-*-programmers.md
       - scripts/zustscript-page/**
       - editor/tree-sitter-zustscript/**
       - .github/workflows/zustscript-page.yml
@@ -68,7 +69,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add zustscript/index.html zustscript/rust-costs.html
+          git add -- zustscript/*.html
           if ! git diff --cached --quiet; then
             git commit -m "Build zustscript introduction from ${GITHUB_SHA::8}"
             # Benchmarks also append to gh-pages.
