@@ -70,3 +70,16 @@ fn forked_check_gives_the_same_diagnostics() {
     assert_eq!(run("4", Some("1")), one);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A host with threads of its own (a test harness is one) that asks Session2 for 4 jobs: neither the item summaries
+/// nor the check fork there (a lock another thread holds would stay held in a child), and the answer is the same
+#[test]
+fn threaded_host_checks_in_process() {
+    let src = program();
+    let one = zustc::Session2::new(zustc::Options2 { jobs: 1, no_cache: true, ..zustc::Options2::default() }).check(&src);
+    let busy = std::thread::spawn(|| (0..2_000_000u64).fold(0u64, |a, x| a.wrapping_add(x * x)));
+    let many = zustc::Session2::new(zustc::Options2 { jobs: 4, no_cache: true, ..zustc::Options2::default() }).check(&src);
+    let _ = busy.join();
+    assert!(one.len() >= 4, "{one:?}");
+    assert_eq!(one, many);
+}

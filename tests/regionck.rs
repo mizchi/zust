@@ -3371,9 +3371,10 @@ fn polonius_alpha() {
         let d = check_ed(src, 2021);
         assert!(d.is_empty(), "{src}\n{d:?}");
     };
+    // (a borrow conflict: E0499 / E0502 / E0506 and their kin, not another error)
     let err = |src: &str| {
         let d = check_ed(src, 2021);
-        assert!(!d.is_empty(), "{src}");
+        assert!(!d.is_empty() && d.iter().all(|x| x.1.contains("borrow")), "{src}\n{d:?}");
     };
     // (accepted by Alpha, rejected by NLL)
     ok("fn f<'a>(a: &'a mut i32) -> &'a mut i32 {\n    let b = &mut *a;\n    if true { b } else { a }\n}\nfn main() {}\n");
@@ -3405,7 +3406,6 @@ fn polonius_alpha() {
     for body in [
         "(&mut *x, &mut *x)",
         "[&mut *x, &mut *x]",
-        "Some((&mut *x, &*x))",
         "(&mut *x, { *x += 1; &mut *x })",
         "{ let a = &mut *x; (a, &mut *x) }",
         "{ let a = &mut *x; let b = &mut *x; (a, b) }",
@@ -3415,6 +3415,10 @@ fn polonius_alpha() {
         err(&format!("fn f<'a>(x: &'a mut i32) -> (&'a mut i32, &'a mut i32) {{\n    {body}\n}}\nfn main() {{}}\n").replace("[&mut *x, &mut *x]", "{ let [a, b] = [&mut *x, &mut *x]; (a, b) }"));
     }
     err("fn f<'a>(x: &'a mut i32) -> (&'a mut i32, &'a mut i32) {\n    return (&mut *x, &mut *x);\n}\nfn main() {}\n");
+    err("fn f<'a>(x: &'a mut i32) -> Option<(&'a mut i32, &'a i32)> {\n    Some((&mut *x, &*x))\n}\nfn main() {}\n");
+    // (the two reborrows are E0499 where rustc reports it, at the second)
+    let d = check_ed("fn f<'a>(x: &'a mut i32) -> (&'a mut i32, &'a mut i32) {\n    (&mut *x, &mut *x)\n}\nfn main() {}\n", 2021);
+    assert!(d.len() == 1 && d[0].0 == 2, "{d:?}");
     // (accepted by Alpha: the returned reborrow made in a loop, which goes on with a new borrow when it does not return)
     ok("fn f<'a>(x: &'a mut i32, n: i32) -> &'a mut i32 {\n    let mut i = 0;\n    loop {\n        let b = &mut *x;\n        if i == n {\n            return b;\n        }\n        i += 1;\n    }\n}\nfn main() {}\n");
 }

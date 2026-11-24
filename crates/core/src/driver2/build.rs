@@ -30,7 +30,7 @@ pub fn build(src: &str, output: &std::path::Path, opt: bool, linker: Option<&str
 impl Session2 {
     /// ids をコンパイルする (jobs > 1 で数が多ければ fork した子プロセスで分けて)。結果は ids と同じ順
     fn compile_many(&self, a: &Analysis, insts: &Mutex<Insts>, ids: &[u32]) -> R<Vec<Blob>> {
-        let jobs = self.opts.jobs.min(ids.len() / 16).max(1);
+        let jobs = if single_threaded() { self.opts.jobs.min(ids.len() / 16).max(1) } else { 1 };
         if jobs <= 1 {
             let mut out = vec![];
             for &id in ids {
@@ -1551,7 +1551,7 @@ impl Session2 {
         // (クレートは互いのソースしか使わない (.o は使わない) ので、古いものを fork して同時にコンパイルする)
         let par = self.opts.jobs.min(stale.len()).max(1);
         let mut results: Vec<Option<R<(Report2, bool, u64)>>> = vec![None; stale.len()];
-        if par > 1 {
+        if par > 1 && single_threaded() {
             let inner = (self.opts.jobs / par).max(1);
             let mut k0 = 0;
             while k0 < stale.len() {

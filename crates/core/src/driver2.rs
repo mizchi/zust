@@ -938,7 +938,8 @@ impl Session2 {
                 miss.push((i, k));
             }
             // (多ければ fork して分けて作る: 子 k は j % jobs == k のものを作り、直列化して返す)
-            let jobs = self.opts.jobs.min(miss.len() / 32).max(1);
+            // (not in a process of more threads than this one: single_threaded)
+            let jobs = if single_threaded() { self.opts.jobs.min(miss.len() / 32).max(1) } else { 1 };
             let mut got: Vec<Option<Summary>> = vec![None; miss.len()];
             if jobs > 1 {
                 let mut kids: Vec<(i32, i32)> = vec![];
@@ -5513,7 +5514,7 @@ fn sendable(a: &Analysis, g: &Insts, ids: &[u32]) -> bool {
 
 /// Whether this process has one thread: a fork copies only the calling thread, and a lock another thread holds (an
 /// interner's) would stay held in the child. A host that runs Session2 beside other threads checks in process
-fn single_threaded() -> bool {
+pub(crate) fn single_threaded() -> bool {
     std::fs::read_to_string("/proc/self/status")
         .ok()
         .and_then(|s| s.lines().find(|l| l.starts_with("Threads:")).and_then(|l| l[8..].trim().parse::<u32>().ok()))
