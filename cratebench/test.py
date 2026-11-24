@@ -4,7 +4,7 @@ usage: python3 cratebench/test.py [名前 ..] [--check] [--write]   (リポジ�
        git submodule update --init cratebench/vendor)
   名前: vendor/ の名前。省くとすべて (--check では test_passing.txt にあるもの)
   --check: test_passing.txt のクレートが一つでも cargo と食い違えば 1 で終わる (CI はこれ)
-  --write: 結果の表を test_result.md に書き、cargo と一致したクレートを test_passing.txt に足す (減らさない)
+  --write: 結果の表を test_result.md に書き (走らせなかったクレートの行は残す)、cargo と一致したクレートを test_passing.txt に足す (減らさない)
 
 どちらも同じものを走らせる: lib・bin・tests/ のテスト (`--lib --bins --tests`。doc テストとベンチは #96 の範囲外)。
 クレートは out/cratebench-test/<名前>/ に写し、locks/<名前>.lock を Cargo.lock として置く (`--locked`。cargo と zurgo が
@@ -42,12 +42,15 @@ def passing():
 
 def run(cmd, cwd, env=None, merge=False):
     """(exit code or None on a timeout, stdout, stderr). merge: stderr into stdout, in the order written"""
-    e = dict(os.environ, **(env or {}))
+    # (no colors: CI sets CARGO_TERM_COLOR=always, and the lines read here are matched as text)
+    e = dict(os.environ, CARGO_TERM_COLOR="never", **(env or {}))
     try:
         p = subprocess.run(cmd, cwd=cwd, env=e, stdout=subprocess.PIPE, stderr=subprocess.STDOUT if merge else subprocess.PIPE, text=True, timeout=TIMEOUT)
         return p.returncode, p.stdout, p.stderr or ""
     except subprocess.TimeoutExpired as x:
-        return None, x.stdout or "", (x.stderr or "") + f"\n(timeout after {TIMEOUT}s)"
+        # (what was captured before the timeout is bytes, even with text=True)
+        text = lambda b: b.decode(errors="replace") if isinstance(b, bytes) else (b or "")
+        return None, text(x.stdout), text(x.stderr) + f"\n(timeout after {TIMEOUT}s)"
 
 
 def label(t):
@@ -98,6 +101,9 @@ def first_error(text):
 def one(name):
     """(status, detail, cargo's outcomes, zurgo's outcomes) of one crate. status: match / differs / zurgo-fails / cargo-fails"""
     d = os.path.join(OUT, name)
+    # (removed only inside OUT: main takes only vendor/'s names, this checks it again before deleting)
+    if os.path.dirname(os.path.realpath(d)) != os.path.realpath(OUT):
+        sys.exit(f"internal: {d} is not in {OUT}")
     if os.path.isdir(d):
         shutil.rmtree(d)
     shutil.copytree(os.path.join(HERE, "vendor", name), os.path.join(d, "src"), ignore=shutil.ignore_patterns(".git"))
@@ -139,13 +145,30 @@ def one(name):
     return "differs", "; ".join(diff[:6]) + (f" (+{len(diff) - 6})" if len(diff) > 6 else ""), want, got
 
 
+def old_rows():
+    """test_result.md's rows, by crate"""
+    if not os.path.exists(RESULT):
+        return {}
+    rows = {}
+    for l in open(RESULT):
+        r = re.match(r"\| (\S+) \| (match|differs|zurgo-fails|cargo-fails) \|", l)
+        if r:
+            rows[r.group(1)] = l.rstrip("\n")
+    return rows
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     check, write = "--check" in sys.argv, "--write" in sys.argv
     if not os.path.exists(ZURGO):
         sys.exit(f"no {ZURGO}: cargo build --release -p zurgo first")
     names = args or (passing() if check else crates())
-    missing = [n for n in names if not os.path.isfile(os.path.join(HERE, "vendor", n, "Cargo.toml"))]
+    # (a name is one of vendor/'s directories, never a path: its copy in out/ is removed before each run)
+    known = set(os.listdir(os.path.join(HERE, "vendor")))
+    unknown = [n for n in names if n not in known or os.sep in n or n in (".", "..")]
+    if unknown:
+        sys.exit(f"not a crate of cratebench/vendor: {', '.join(unknown)}")
+    missing = [n for n in names if n not in crates()]
     if missing:
         sys.exit(f"not checked out: {', '.join(missing)} (git submodule update --init cratebench/vendor)")
     rows = []
@@ -155,12 +178,16 @@ def main():
         rows.append((n, status, counts, detail))
         print(f"{n}: {status}: {detail}", flush=True)
     if write:
+        # (the crates not run this time keep their rows)
+        table = old_rows()
+        for n, status, c, detail in rows:
+            cell = detail.replace("|", "\\|")
+            table[n] = f"| {n} | {status} | {c['ok']} / {c['FAILED']} / {c['ignored']} | {cell} |"
         with open(RESULT, "w") as f:
             f.write("# cratebench: `zurgo test` と `cargo test`\n\n`python3 cratebench/test.py --write` の結果 "
                     "(lib・bin・tests/ のテスト。doc テストは数えない)。cargo の列は cargo での結果の数。\n\n")
             f.write("| クレート | 結果 | cargo: ok / FAILED / ignored | 詳細 |\n|---|---|---:|---|\n")
-            for n, status, c, detail in rows:
-                f.write(f"| {n} | {status} | {c['ok']} / {c['FAILED']} / {c['ignored']} | {detail.replace('|', '\\|')} |\n")
+            f.writelines(table[n] + "\n" for n in sorted(table))
         keep = sorted(set(passing()) | {n for n, s, _, _ in rows if s == "match"})
         with open(PASSING, "w") as f:
             f.write("# cratebench のクレートのうち、zurgo test が cargo test とテストごとに一致するもの "

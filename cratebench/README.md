@@ -28,7 +28,7 @@ vendor/ のクレート自身のテスト (lib・bin・tests/。doc テストは
 
 - `locks/<名前>.lock`: 両方が使う Cargo.lock (`--locked`)。ないものは cargo が作り、ここに残す
 - `test_passing.txt`: cargo と一致したクレート。`--check` (CI) はこれらが一致し続けることを確かめる
-- `test_result.md`: `--write` が書く、すべてのクレートの結果
+- `test_result.md`: `--write` が書く、すべてのクレートの結果 (名前を指定したときは、そのクレートの行だけを書き換える)
 
 ## ui/: UI フレームワーク (dioxus / leptos) を wasm32 向けに
 
