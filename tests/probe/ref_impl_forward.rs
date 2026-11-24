@@ -1,7 +1,9 @@
 // impls of a trait for `&mut A` / `&T` of a type parameter that forward each method to the referent, as serde's
 // SeqAccess / Serialize impls do: with the trait's default methods defined, an associated type from A, a method's own
-// type parameter, the UFCS form `A::m(&mut **self, ..)`, and calls through a generic parameter. And modules that
-// import `fmt::Write` and `io::Write` each for itself (a crate's `mod lib` re-exports io's)
+// type parameter, the UFCS form `A::m(&mut **self, ..)`, and calls through a generic parameter; an impl whose method
+// does more than forward, with direct calls only (they reach the type's own method, as in rustc). And modules that
+// import `fmt::Write` and `io::Write` each for itself (a crate's `mod lib` re-exports io's): a fn's own `use`, and a
+// use tree that imports io's `Write` beside `fmt`
 use std::fmt;
 
 trait Access {
@@ -72,6 +74,48 @@ fn twice<S: Show>(s: S) -> String {
     format!("{} {}", s.show(1), s.show(2))
 }
 
+// (direct calls only: `Plain.label()` is Plain's own method; the impl for `&T` would run only through a bound)
+trait Label {
+    fn label(&self) -> String;
+}
+struct Plain;
+impl Label for Plain {
+    fn label(&self) -> String {
+        "plain".to_string()
+    }
+}
+impl<'a, T: ?Sized + Label> Label for &'a T {
+    fn label(&self) -> String {
+        format!("ref {}", (**self).label())
+    }
+}
+struct Unrelated;
+impl Unrelated {
+    fn label(&self) -> &'static str {
+        "unrelated"
+    }
+}
+
+mod net {
+    use std::io::*;
+    pub fn render() -> String {
+        use std::fmt::Write;
+        let mut s = String::new();
+        write!(s, "fmt").unwrap();
+        s
+    }
+    pub fn send<W: Write>(w: &mut W) {
+        let _ = w.write(b"io");
+    }
+}
+mod tree {
+    use std::{fmt, io::Write};
+    pub fn send<W: Write>(w: &mut W) -> fmt::Result {
+        let _ = w.write(b"tree");
+        Ok(())
+    }
+}
+
 mod lib {
     pub use std::fmt::{self, Write as FmtWrite};
     pub use std::io::Write;
@@ -108,4 +152,9 @@ fn main() {
     let mut out = vec![];
     bytes::put(&mut out);
     println!("{} {:?}", b.s, out);
+    println!("{} {}", Plain.label(), Unrelated.label());
+    let mut v: Vec<u8> = vec![];
+    net::send(&mut v);
+    tree::send(&mut v).unwrap();
+    println!("{} {:?}", net::render(), String::from_utf8(v).unwrap());
 }

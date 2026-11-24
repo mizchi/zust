@@ -2,3 +2,5 @@
 Ok(Some(23)) 3
 leaf@1 leaf@2
 1-2 [105, 111]
+plain unrelated
+fmt "iotree"

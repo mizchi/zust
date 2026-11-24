@@ -834,7 +834,6 @@ pub fn std_renames(src: &str) -> Option<String> {
     }
     let b = src.as_bytes();
     let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
-    let words = |u: &str| -> Vec<String> { u.split(|c: char| !(c.is_alphanumeric() || c == '_')).map(|w| w.to_string()).collect() };
     let mut out = src.to_string();
     let mut changed = false;
     for &(m, name, to) in STD_RENAMES {
@@ -850,16 +849,9 @@ pub fn std_renames(src: &str) -> Option<String> {
                 t = t[nl + 1..].trim_start();
             }
             let Some(u) = t.strip_prefix("use ").or_else(|| t.strip_prefix("pub use ")) else { continue };
-            let ws = words(u);
-            if u.contains(&format!("{m}::*")) {
-                imported = true;
-            } else if ws.iter().any(|w| w == name) {
-                if ws.iter().any(|w| w == m) {
-                    imported = true;
-                } else {
-                    other = true;
-                }
-            }
+            let (from_m, elsewhere) = classify_use(u, m, name);
+            imported |= from_m;
+            other |= elsewhere;
         }
         let defined = ["struct", "enum", "trait", "type", "union"].iter().any(|k| {
             let pat = format!("{k} {name}");
@@ -901,31 +893,130 @@ pub fn std_renames(src: &str) -> Option<String> {
     changed.then_some(out)
 }
 
-/// The `mod name { .. }` blocks of a source and, for each module (the root first), whether its own `use`s import a
-/// name from module m and whether they import it from elsewhere
+/// The brace blocks of a source and, for each (the root first), whether its own `use`s import a name from module m
+/// and whether they import it from elsewhere
 struct UseScopes {
-    /// (body start, body end) of each block
-    mods: Vec<(usize, usize)>,
-    /// (from m, from elsewhere), by module: 0 the root, k + 1 the block k
+    /// (start, end, a module's body) of each block, in the order they open
+    blocks: Vec<(usize, usize, bool)>,
+    /// (from m, from elsewhere), by block: 0 the root, k + 1 the block k
     uses: Vec<(bool, bool)>,
 }
 
 impl UseScopes {
     /// The innermost block at byte i (0: none)
-    fn module_at(&self, i: usize) -> usize {
+    fn block_at(&self, i: usize) -> usize {
         let mut best: Option<usize> = None;
-        for (k, &(a, b)) in self.mods.iter().enumerate() {
-            if a < i && i < b && best.is_none_or(|j| self.mods[j].0 < a) {
+        for (k, &(a, b, _)) in self.blocks.iter().enumerate() {
+            if a < i && i < b && best.is_none_or(|j| self.blocks[j].0 < a) {
                 best = Some(k);
             }
         }
         best.map_or(0, |k| k + 1)
     }
 
+    /// The name at byte i is the one module m's: the nearest block around it whose `use`s import the name decides,
+    /// up to the module it is in (a module's body does not see its parent's imports)
     fn bare_at(&self, i: usize) -> bool {
-        let (from_m, other) = self.uses[self.module_at(i)];
+        let mut chain: Vec<usize> = self.blocks.iter().enumerate().filter(|(_, t)| t.0 < i && i < t.1).map(|(k, _)| k).collect();
+        chain.sort_by_key(|&k| std::cmp::Reverse(self.blocks[k].0));
+        for k in chain {
+            let (from_m, other) = self.uses[k + 1];
+            if from_m || other {
+                return from_m && !other;
+            }
+            if self.blocks[k].2 {
+                return false;
+            }
+        }
+        let (from_m, other) = self.uses[0];
         from_m && !other
     }
+}
+
+/// What a `use` tree (the text after `use`, to its `;`) imports of a name: (from module m, from elsewhere), by each leaf's
+/// own path: `std::{fmt, io::Write}` imports io's `Write`; `fmt::*` counts as m's; `Write as W` binds W, not the name
+fn classify_use(u: &str, m: &str, name: &str) -> (bool, bool) {
+    // (the tokens: identifiers, `::`, `{`, `}`, `,`, `*`)
+    let mut toks: Vec<&str> = vec![];
+    let b = u.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_ascii_alphanumeric() || c == b'_' {
+            let s0 = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                i += 1;
+            }
+            toks.push(&u[s0..i]);
+            continue;
+        }
+        if c == b':' && b.get(i + 1) == Some(&b':') {
+            toks.push("::");
+            i += 2;
+            continue;
+        }
+        if matches!(c, b'{' | b'}' | b',' | b'*') {
+            toks.push(&u[i..i + 1]);
+        }
+        i += 1;
+    }
+    // (each leaf: its whole path, and the name it binds)
+    let mut leaves: Vec<(Vec<&str>, Option<&str>)> = vec![];
+    fn trees<'a>(toks: &[&'a str], mut k: usize, prefix: &[&'a str], out: &mut Vec<(Vec<&'a str>, Option<&'a str>)>) -> usize {
+        loop {
+            let mut path = prefix.to_vec();
+            while k < toks.len() && !matches!(toks[k], "{" | "}" | "," | "*") {
+                if toks[k] == "as" {
+                    break;
+                }
+                if toks[k] != "::" {
+                    path.push(toks[k]);
+                }
+                k += 1;
+            }
+            match toks.get(k).copied() {
+                Some("{") => {
+                    k = trees(toks, k + 1, &path, out);
+                    // (past the group's `}`)
+                    k += 1;
+                }
+                Some("*") => {
+                    path.push("*");
+                    out.push((path, None));
+                    k += 1;
+                }
+                Some("as") => {
+                    out.push((path, toks.get(k + 1).copied()));
+                    k += 2;
+                }
+                _ => {
+                    if path.len() > prefix.len() {
+                        out.push((path, None));
+                    }
+                }
+            }
+            match toks.get(k).copied() {
+                Some(",") => k += 1,
+                _ => return k,
+            }
+        }
+    }
+    trees(&toks, 0, &[], &mut leaves);
+    let (mut from_m, mut other) = (false, false);
+    for (p, alias) in &leaves {
+        let Some((&last, pre)) = p.split_last() else { continue };
+        let from = pre.last() == Some(&m);
+        if last == "*" {
+            from_m |= from;
+        } else if last == name && alias.is_none_or(|a| a == name) {
+            if from {
+                from_m = true;
+            } else {
+                other = true;
+            }
+        }
+    }
+    (from_m, other)
 }
 
 /// Some `use` (from the keyword to its `;`) names module m and the name, or m's glob: a cheap look before
@@ -950,26 +1041,21 @@ fn use_scopes(src: &str, m: &str, name: &str) -> UseScopes {
     let toks = crate::lexer::tokenize(b);
     let tk = |k: usize| &src[toks[k].1..toks[k].2];
     let sym = |k: usize, c: &str| toks[k].0 == 1 && tk(k) == c;
-    let mut mods = vec![];
-    for k in 0..toks.len().saturating_sub(2) {
-        if toks[k].0 == 0 && tk(k) == "mod" && toks[k + 1].0 == 0 && sym(k + 2, "{") {
-            let (mut d, mut j) = (0i32, k + 2);
-            while j < toks.len() {
-                if sym(j, "{") {
-                    d += 1;
-                } else if sym(j, "}") {
-                    d -= 1;
-                    if d == 0 {
-                        break;
-                    }
-                }
-                j += 1;
+    // (every brace block, with whether it is a module's body: a `use` in a fn body is that body's)
+    let mut blocks: Vec<(usize, usize, bool)> = vec![];
+    let mut open: Vec<usize> = vec![];
+    for k in 0..toks.len() {
+        if sym(k, "{") {
+            let is_mod = k >= 2 && toks[k - 1].0 == 0 && toks[k - 2].0 == 0 && tk(k - 2) == "mod";
+            open.push(blocks.len());
+            blocks.push((toks[k].1, b.len(), is_mod));
+        } else if sym(k, "}") {
+            if let Some(o) = open.pop() {
+                blocks[o].1 = toks[k].1;
             }
-            mods.push((toks[k + 2].1, toks.get(j).map_or(b.len(), |t| t.1)));
         }
     }
-    let mut sc = UseScopes { uses: vec![(false, false); mods.len() + 1], mods };
-    let glob = format!("{m}::*");
+    let mut sc = UseScopes { uses: vec![(false, false); blocks.len() + 1], blocks };
     let mut k = 0;
     while k < toks.len() {
         if toks[k].0 == 0 && tk(k) == "use" {
@@ -978,14 +1064,10 @@ fn use_scopes(src: &str, m: &str, name: &str) -> UseScopes {
             while j < toks.len() && !sym(j, ";") {
                 j += 1;
             }
-            let u: String = src[start..toks.get(j).map_or(b.len(), |t| t.1)].chars().filter(|c| !c.is_whitespace()).collect();
-            let ws: Vec<&str> = u.split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
-            let slot = sc.module_at(toks[k].1);
-            if u.contains(&glob) || (ws.contains(&name) && ws.contains(&m)) {
-                sc.uses[slot].0 = true;
-            } else if ws.contains(&name) {
-                sc.uses[slot].1 = true;
-            }
+            let (from_m, elsewhere) = classify_use(&src[start..toks.get(j).map_or(b.len(), |t| t.1)], m, name);
+            let slot = sc.block_at(toks[k].1);
+            sc.uses[slot].0 |= from_m;
+            sc.uses[slot].1 |= elsewhere;
             k = j;
         }
         k += 1;
