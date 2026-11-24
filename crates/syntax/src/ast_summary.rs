@@ -1671,7 +1671,7 @@ fn nested_impl(t: &PTy) -> bool {
 }
 
 /// whether a `_` appears in t (not inside `impl Trait`, whose bounds are not types)
-fn has_infer(t: &PTy) -> bool {
+pub fn has_infer(t: &PTy) -> bool {
     match t {
         PTy::Infer => true,
         PTy::Path(q, p) => {

@@ -761,9 +761,11 @@ pub(crate) fn addr_taken(b: &crate::parse::Block, mut_methods: &crate::fxhash::F
                 let es = crate::ast_closure::macro_exprs(g);
                 if es.is_empty() {
                     if let Some(es) = crate::ast_closure::macro_args(g) {
+                        // (a formatting macro's `&x` is read for its value; another's takes x's address (`vec![&mut x]`))
+                        let fmt = matches!(name, "println" | "print" | "eprintln" | "eprint" | "format" | "format_args" | "write" | "writeln" | "panic" | "assert" | "debug_assert" | "unreachable" | "todo" | "unimplemented");
                         for e in &es {
                             match e {
-                                Expr::Ref(_, x) => visit(x, out, mm),
+                                Expr::Ref(_, x) if fmt => visit(x, out, mm),
                                 Expr::Path(..) | Expr::Lit(_, _) => {}
                                 e => visit(e, out, mm),
                             }
@@ -1120,6 +1122,8 @@ pub fn has_hole(prog: &Program, t: Ty) -> bool {
         Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => has_hole(prog, *i),
         // (`_` は型パラメータなので、型パラメータの残らないインスタンス (symbolic でない) には無い: 辿らない)
         Ty::Struct(sid) => prog.structs[sid as usize].symbolic && prog.structs[sid as usize].args.iter().any(|&a| has_hole(prog, a)),
+        // (`let f: fn(_) -> _ = foo;`: its parameters' and result's)
+        Ty::Fn(f) => f.params.iter().any(|&p| has_hole(prog, p)) || has_hole(prog, f.ret),
         _ => false,
     }
 }
@@ -2018,7 +2022,7 @@ impl Cx<'_> {
                     // (`let &Foo(ref x) = &f();`: the temporary lives as long as the block)
                     let ext1 = self.bk.extended.len();
                     if self.bk_on() {
-                        borrowck::direct_ref(self.prog, init, &mut self.bk.extended);
+                        borrowck::extended_refs(self.prog, init, &mut self.bk.extended);
                     }
                     let sc = self.bk_scrutinee(init, ann, &[pat]);
                     self.bk.extended.truncate(ext1);
@@ -2303,10 +2307,11 @@ impl Cx<'_> {
                     let ext0 = self.bk.direct.len();
                     let ext1 = self.bk.extended.len();
                     if self.bk_on() {
-                        borrowck::direct_temps(self.prog, init, &mut self.bk.direct);
+                        borrowck::direct_temps_let(self.prog, init, &mut self.bk.direct);
                         borrowck::direct_ref_recv(self.prog, init, &mut self.bk.direct);
-                        // (`let x = &f();`: the temporary lives as long as x's block)
-                        borrowck::direct_ref(self.prog, init, &mut self.bk.extended);
+                        // (`let x = &f();`: the temporary lives as long as x's block; also within the initializer's
+                        // extending expressions, `let x = Some(&f());`)
+                        borrowck::extended_refs(self.prog, init, &mut self.bk.extended);
                     }
                     // (a function the gate left out, with `let x: &'static T = ..`: from here on, a borrow of what it
                     // owns must not have to be 'static. What came before has no trees and adds no constraint)
@@ -2317,7 +2322,10 @@ impl Cx<'_> {
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
                     let ml0 = std::mem::replace(&mut self.bk.macro_let, name.starts_with("__exr_"));
+                    let plain = if ann_ty.is_none() && self.bk_on() { borrowck::value_tail(init) as *const Expr as usize } else { 0 };
+                    let plain0 = std::mem::replace(&mut self.bk.plain_init, plain);
                     let r = self.expr(init, ann.or(hint));
+                    self.bk.plain_init = plain0;
                     // (`let b: &mut T = a;` with a: `&mut T`: a coercion site, b reborrows `*a` (rustc's `&mut *a`), not
                     // a copy of a: a use of `*a` while b lives conflicts)
                     if r.is_ok() && ann_ty.is_some() && matches!(ann, Some(Ty::Ref(true, _))) && matches!(strip_paren(init), Expr::Path(None, _)) {
