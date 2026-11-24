@@ -1,7 +1,7 @@
 //! zustc の CLI。
 //!   zustc <input.rs> [-o out] [...]   ビルド (自前のフロントエンド + Cranelift。`--backend=minclif` で minclif)
 //!   zustc build <workspace> [-o dir]   ワークスペース (複数のクレート) をビルド
-//!   zustc check <input.rs>            型検査だけ (全診断を表示)
+//!   zustc check <input.rs> [-j N]     型検査だけ (全診断を表示。関数が多ければ N 個の子プロセスで分ける)
 
 use std::path::PathBuf;
 
@@ -11,7 +11,7 @@ mod stamp;
 
 fn usage() -> ! {
     eprintln!(
-        "usage: zustc <input.rs> [-o out] [-O] [--backend=cranelift|minclif] [--target=wasm32-unknown-unknown] [--linker=NAME] [--features=a,b] [--cfg spec] [--test] [-L dir] [--time] [-j N] [--no-cache] [--edition=2015|2018|2021|2024]\n       zustc build <workspace-file> [-o out-dir] [-O] [--backend=..] [--target=..] [-j N] [--time] [--no-cache]\n       zustc check <input.rs> [--edition=..]"
+        "usage: zustc <input.rs> [-o out] [-O] [--backend=cranelift|minclif] [--target=wasm32-unknown-unknown] [--linker=NAME] [--features=a,b] [--cfg spec] [--test] [-L dir] [--time] [-j N] [--no-cache] [--edition=2015|2018|2021|2024]\n       zustc build <workspace-file> [-o out-dir] [-O] [--backend=..] [--target=..] [-j N] [--time] [--no-cache]\n       zustc check <input.rs> [-j N] [--edition=..]"
     );
     std::process::exit(2)
 }
@@ -139,7 +139,7 @@ fn main() {
         } else {
             src
         };
-        let mut s = Session2::new(Options2 { no_cache: true, jobs: 1, ..o });
+        let mut s = Session2::new(Options2 { no_cache: true, ..o });
         // (a crate of one file: the `extern crate` items the configuring blanked, in their places in it (the loader
         // drops them when an expansion moved them))
         // (the root file's first malformed `cfg`, at its line in the combined source: other files' lines come before
@@ -150,11 +150,17 @@ fn main() {
         });
         s.cfg_err = cfg_err;
         if map.inputs.len() == 1 {
-            s.externs = map.externs;
+            s.externs = std::mem::take(&mut map.externs);
         }
         let diags = s.check(&src);
         for d in &diags {
-            eprintln!("error: {}:{}:{}: {}", input.display(), d.line, d.col, d.msg.replace("__u_", ""));
+            // (a line of the root file: its line there (a `#[macro_use] mod` is inlined where it is declared); one of
+            // another file stays the combined source's line)
+            let line = match map.locate(d.line as u32) {
+                (f, l) if f == "src/main.rs" => l as usize,
+                _ => d.line,
+            };
+            eprintln!("error: {}:{}:{}: {}", input.display(), line, d.col, d.msg.replace("__u_", ""));
         }
         std::process::exit(if diags.is_empty() { 0 } else { 1 });
     }

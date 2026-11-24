@@ -3452,3 +3452,66 @@ fn part19_review() {
     assert!(d.len() == 1 && d[0].0 == 9 && d[0].1.contains("does not live long enough"), "{d:?}");
     assert_eq!(check("struct S<A>(A);\nimpl<A> S<A> {\n    fn take<T>(&self, _: T) {}\n}\nfn main() {\n    let s = S(1u8);\n    let local = 1;\n    let f = |x| s.take::<&u32>(x);\n    f(&local);\n}\n"), vec![]);
 }
+
+/// Polonius Alpha (issue #1): a reborrow returned in one branch is live only where what holds it is live, an
+/// assignment to a part of a local kills the loans through the reference it held, `for x in v.iter_mut()` with v a
+/// reference reborrows `*v`, and a cast to a number holds nothing. Each was checked against rustc 1.102-nightly
+/// (Polonius Alpha) and 1.97 (NLL)
+#[test]
+fn polonius_alpha() {
+    let ok = |src: &str| {
+        let d = check_ed(src, 2021);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    };
+    // (a borrow conflict: E0499 / E0502 / E0506 and their kin, not another error)
+    let err = |src: &str| {
+        let d = check_ed(src, 2021);
+        assert!(!d.is_empty() && d.iter().all(|x| x.1.contains("borrow")), "{src}\n{d:?}");
+    };
+    // (accepted by Alpha, rejected by NLL)
+    ok("fn f<'a>(a: &'a mut i32) -> &'a mut i32 {\n    let b = &mut *a;\n    if true { b } else { a }\n}\nfn main() {}\n");
+    ok("fn f<'a>(a: &'a mut Option<i32>) -> &'a mut i32 {\n    match a.as_mut() {\n        Some(v) => v,\n        None => {\n            *a = Some(0);\n            a.as_mut().unwrap()\n        }\n    }\n}\nfn main() {}\n");
+    ok("fn f<'a>(v: &'a mut Vec<i32>) -> &'a mut i32 {\n    if let Some(x) = v.first_mut() {\n        return x;\n    }\n    v.push(0);\n    v.last_mut().unwrap()\n}\nfn main() {}\n");
+    ok("fn g(list: &mut [Option<u8>]) -> &mut Option<u8> {\n    for i in list.iter_mut() {\n        if i.is_none() {\n            return i;\n        }\n    }\n    &mut list[0]\n}\nfn main() {}\n");
+    // (accepted by both: assignments to a part of a local, and casts)
+    let list = "struct List<T> { value: T, next: Option<Box<List<T>>> }\n";
+    ok(&format!("{list}fn f<T>(mut list: Box<&mut List<T>>) -> Vec<&mut T> {{\n    let mut result = vec![];\n    loop {{\n        result.push(&mut list.value);\n        if let Some(n) = list.next.as_mut() {{\n            *list = n;\n        }} else {{\n            return result;\n        }}\n    }}\n}}\nfn main() {{}}\n"));
+    ok(&format!("{list}fn f<T>(mut list: (&mut List<T>,)) -> Vec<&mut T> {{\n    let mut result = vec![];\n    loop {{\n        result.push(&mut list.0.value);\n        if let Some(n) = list.0.next.as_mut() {{\n            list.0 = n;\n        }} else {{\n            return result;\n        }}\n    }}\n}}\nfn main() {{}}\n"));
+    ok(&format!("{list}fn f<'a>(mut list: &'a mut List<i32>, out: &mut Vec<&'a mut i32>) {{\n    loop {{\n        out.push(&mut list.value);\n        let n = list.next.as_mut().unwrap();\n        list = n;\n    }}\n}}\nfn main() {{}}\n"));
+    ok("fn g(list: &mut [u8]) -> &mut u8 { &mut list[0] }\nfn main() {\n    let mut l = [1u8];\n    let v = g(&mut l);\n    assert_eq!(v as *mut u8 as usize, l.as_ptr() as usize);\n}\n");
+    // (a returned borrow is not held by `self`, whose type names the region it is returned for: the loop takes a new
+    // borrow of `self.b` each turn)
+    ok(&"struct D { b: B }\nstruct B;\nimpl B {\n    fn fill(&mut self) -> &[u8] { &[] }\n}\nfn dec(_: &[u8]) -> Option<&str> { None }\nimpl D {\n    fn next<'a>(&'a mut self) -> &'a str {\n        loop {\n            let buf = self.b.fill();\n            if let Some(s) = dec(buf) {\n%s                return s;\n            }\n        }\n    }\n}\nfn main() {}\n".replace("%s", ""));
+    // (rejected by both)
+    err("fn f<'a>(a: &'a mut i32) -> &'a mut i32 {\n    let b = &mut *a;\n    *a += 1;\n    b\n}\nfn main() {}\n");
+    err(&"struct D { b: B }\nstruct B;\nimpl B {\n    fn fill(&mut self) -> &[u8] { &[] }\n}\nfn dec(_: &[u8]) -> Option<&str> { None }\nimpl D {\n    fn next<'a>(&'a mut self) -> &'a str {\n        loop {\n            let buf = self.b.fill();\n            if let Some(s) = dec(buf) {\n%s                return s;\n            }\n        }\n    }\n}\nfn main() {}\n".replace("%s", "                self.b.fill();\n"));
+    err("struct D<'a> { r: Option<&'a i32>, v: i32 }\nimpl<'a> D<'a> {\n    fn f(&'a mut self) -> &'a i32 {\n        let x = &self.v;\n        self.r = Some(x);\n        self.v = 1;\n        x\n    }\n}\nfn main() {}\n");
+    err("fn f<'a>(a: &'a mut i32) -> &'a mut i32 {\n    let b = &mut *a;\n    let c = b;\n    *a += 1;\n    c\n}\nfn main() {}\n");
+    err("fn f<'a>(v: &'a mut Vec<i32>) -> &'a i32 {\n    let r = &v[0];\n    v.push(1);\n    r\n}\nfn main() {}\n");
+    err("fn id<T>(t: T) -> T { t }\nfn f<'a>(a: &'a mut i32) -> &'a mut i32 {\n    let r = id(&mut *a);\n    *a += 1;\n    r\n}\nfn main() {}\n");
+    err("fn f<'a>(a: &'a mut i32) -> Option<&'a mut i32> {\n    let b = Some(&mut *a);\n    *a += 1;\n    b\n}\nfn main() {}\n");
+    err("fn f<'a>(a: &'a mut i32, out: &mut Option<&'a i32>) {\n    let b = &*a;\n    *out = Some(b);\n    *a += 1;\n}\nfn main() {}\n");
+    err("fn f(v: &mut Vec<i32>) {\n    for x in v.iter_mut() {\n        v.push(*x);\n    }\n}\nfn main() {}\n");
+    err("fn f<'a>(a: &'a mut i32, n: i32) -> &'a mut i32 {\n    let mut i = 0;\n    loop {\n        let b = &mut *a;\n        if i == n {\n            return b;\n        }\n        i += 1;\n        *a += 1;\n        let _ = &b;\n    }\n}\nfn main() {}\n");
+    // (rejected by both: two reborrows in one returned value, made in it or through a local read in it (PR #104's
+    // review): a reborrow returned is live from where the returned value reads or makes it to the return)
+    for body in [
+        "(&mut *x, &mut *x)",
+        "[&mut *x, &mut *x]",
+        "(&mut *x, { *x += 1; &mut *x })",
+        "{ let a = &mut *x; (a, &mut *x) }",
+        "{ let a = &mut *x; let b = &mut *x; (a, b) }",
+        "if true { (&mut *x, &mut *x) } else { panic!() }",
+        "match 1 { 1 => (&mut *x, &mut *x), _ => panic!() }",
+    ] {
+        err(&format!("fn f<'a>(x: &'a mut i32) -> (&'a mut i32, &'a mut i32) {{\n    {body}\n}}\nfn main() {{}}\n").replace("[&mut *x, &mut *x]", "{ let [a, b] = [&mut *x, &mut *x]; (a, b) }"));
+    }
+    err("fn f<'a>(x: &'a mut i32) -> (&'a mut i32, &'a mut i32) {\n    return (&mut *x, &mut *x);\n}\nfn main() {}\n");
+    err("fn f<'a>(x: &'a mut i32) -> Option<(&'a mut i32, &'a i32)> {\n    Some((&mut *x, &*x))\n}\nfn main() {}\n");
+    // (the two reborrows are E0499 where rustc reports it, at the second)
+    let d = check_ed("fn f<'a>(x: &'a mut i32) -> (&'a mut i32, &'a mut i32) {\n    (&mut *x, &mut *x)\n}\nfn main() {}\n", 2021);
+    // (the second `&mut *x` reads `*x` first, which is where zustc reports the conflict with the first, at 2:11)
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("`*x` because it was mutably borrowed (at 2:11)"), "{d:?}");
+    // (accepted by Alpha: the returned reborrow made in a loop, which goes on with a new borrow when it does not return)
+    ok("fn f<'a>(x: &'a mut i32, n: i32) -> &'a mut i32 {\n    let mut i = 0;\n    loop {\n        let b = &mut *x;\n        if i == n {\n            return b;\n        }\n        i += 1;\n    }\n}\nfn main() {}\n");
+}

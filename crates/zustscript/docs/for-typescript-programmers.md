@@ -91,4 +91,4 @@ console.log(stock_change([]));
 
 Node.js 24 で `node try-stock.ts` を実行すると、順に `7` と `0` が表示されます。
 
-画面の状態やイベントはこのように JS のモジュールで扱えます。配列の計算などを Wasm で試したくなったら、対応する関数に `@wasm` を付けます。座標を渡す例で、TypeScript 側の呼び出し方と Wasm に渡る値を確認できます。[zustscript 入門](introduction.md) · [Rust から見る変換コスト](rust-costs.md)
+同じ `stock.zsc` に `--emit-rust -o out/native` を指定すると、通常の関数のまま Rust にも変換できます。`out/native/stock.rs` では公開関数の型が `pub fn zs_stock_change(events: &[ZsStockEvent]) -> f64` になります。配列の計算などを Wasm で試したくなったら、対応する関数に `@wasm` を付けます。座標を渡す例で、TypeScript 側の呼び出し方と Wasm に渡る値を確認できます。[zustscript 入門](introduction.md) · [Rust から見る変換コスト](rust-costs.md)

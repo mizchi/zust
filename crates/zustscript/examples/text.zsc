@@ -1,4 +1,4 @@
-// Strings and `==` by content in @wasm: the same source as JS (zsc --all-js) and as wasm, with the same results
+// Strings and `==` by content in @wasm: the annotated Wasm build and the unannotated JS build, with the same results
 // (tests/examples.rs: text_same_in_js_and_wasm). Lengths and order are JS's (UTF-16 code units), and `==` on
 // arrays, records and enums compares contents in both layers.
 
