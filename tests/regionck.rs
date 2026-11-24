@@ -3632,3 +3632,14 @@ fn part21_deref_coercion_copies_inner() {
     let d = check("fn bad1<'a>(s: &'a String) -> &'a String {\n    let v: Vec<String> = vec![s.clone()];\n    let c: &String = &v[0];\n    let d: &&String = &c;\n    d\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
 }
+
+#[test]
+fn part21_ref_mut_let_invariant() {
+    // (a `ref mut` binding of a place in a `let` with a type written: the place is of that type both ways, a `&mut`
+    // being invariant (mir/field-projection-mutating-context2.rs); `(x.0)(&string)` is a deref coercion, no borrow of
+    // string kept)
+    let d = check("struct Foo<T>(T);\nfn foo<'a>(mut x: Foo<fn(&'a str)>, string: &'a str) {\n    let Foo(ref mut y): Foo<fn(&'static str)> = x;\n    *y = |_s| {};\n    (x.0)(&string);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("struct Foo<T>(T);\nfn ok1<'a>(mut x: Foo<fn(&'a str)>) {\n    let Foo(ref mut y): Foo<fn(&'a str)> = x;\n    let _ = y;\n    let mut t = (1u32, 2u32);\n    let (ref mut a, _b): (u32, u32) = t;\n    *a = 3;\n    let s: &'static u32 = &5;\n    let (ref mut r,): (&'a u32,) = (s,);\n    let _ = r;\n    let _ = &mut x;\n}\nfn bad2<'a, 'b: 'a>(mut x: Foo<&'b u32>) {\n    let Foo(ref mut y): Foo<&'a u32> = x;\n    let _ = y;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 14 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+}

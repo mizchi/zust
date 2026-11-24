@@ -3026,6 +3026,21 @@ impl Cx<'_> {
 
     /// `let PAT: ann = init;`: init flows into a value of the annotation's type, whose tree is returned (what the
     /// pattern binds from: `let (y, _): (&'a u32, u32) = (&22, 44);` makes y a `&'a u32`)
+    /// A place init that a `ref mut` binding of a `let` annotated with type t (tree tr) borrows: the place's value is
+    /// of that type both ways (a `&mut` is invariant), as well as flowing into it
+    pub(crate) fn rg_place_is_ann(&mut self, init: &Expr, t: Ty, tr: &RT) {
+        if !self.rg_on() || !super::is_place_expr(init) {
+            return;
+        }
+        let Some((it, itr)) = self.rt_expr(init) else { return };
+        if it != t {
+            return;
+        }
+        let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
+        let prog = self.prog;
+        self.rg.flow(prog, t, it, tr, &itr, sp);
+    }
+
     pub(crate) fn rg_let_ann(&mut self, ann: &PTy, init: &Expr, actual: Option<Ty>) -> Option<(Ty, RT)> {
         if !self.rg_on() {
             return None;
