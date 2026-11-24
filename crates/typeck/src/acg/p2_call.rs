@@ -2354,6 +2354,25 @@ impl Cx<'_> {
                 self.prog.match_ty(sig0.ret, Ty::Struct(es), &mut sol);
             }
         }
+        // (a parameter that is a fn pointer over the type parameters, `f: fn(T)`, and an argument of a fn type (a fn
+        // item that is not generic, a fn pointer): it decides them before the arguments are lowered in order, so an
+        // earlier literal (`spawn(100, f)` with `fn f(i: isize)`) takes their type, not i32)
+        for (a, &pt) in args.iter().zip(&sig0.params[skip.min(sig0.params.len())..]) {
+            if !matches!(pt, Ty::Fn(_)) || !self.prog.has_param(pt) {
+                continue;
+            }
+            let ft = match self.fn_item(a) {
+                Some(fid) if self.prog.sigs[fid as usize].generics.is_empty() => {
+                    let fs = &self.prog.sigs[fid as usize];
+                    Some(Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params: fs.params.clone(), ret: fs.ret })))
+                }
+                Some(_) => None,
+                None => self.peek(a).filter(|t| matches!(t, Ty::Fn(_)) && !self.prog.has_param(*t)),
+            };
+            if let Some(ft) = ft {
+                self.prog.match_ty(pt, ft, &mut sol);
+            }
+        }
         let mut vals: Vec<(Value, Ty, Sp)> = vec![];
         if let Some((r, rt)) = recv {
             self.prog.match_ty(sig0.params[0], rt, &mut sol);

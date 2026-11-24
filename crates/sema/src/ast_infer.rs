@@ -1967,6 +1967,38 @@ impl Inf<'_> {
                 self.pre_pv = pre;
             }
         }
+        // (a parameter that is a fn pointer over the callee's type parameters, `f: fn(T) -> T`, and an argument that
+        // is a fn item that is not generic: its signature gives them, `spawn(1 + 40, double)` with `fn double(isize)`)
+        if let Some(id) = callee {
+            let sig = &self.prog.sigs[id as usize];
+            let mut sol: Vec<Option<Ty>> = vec![None; sig.generics.len()];
+            let mut any = false;
+            for (a, &pt) in args.iter().zip(&sig.params) {
+                if !matches!(pt, Ty::Fn(_)) || !self.prog.has_param(pt) {
+                    continue;
+                }
+                let Expr::Path(None, ap) = a else { continue };
+                if ident(ap).is_some_and(|n| self.lookup(n).is_some()) {
+                    continue;
+                }
+                let Some(fid) = self.fn_by(ap) else { continue };
+                let fs = &self.prog.sigs[fid as usize];
+                if !fs.generics.is_empty() {
+                    continue;
+                }
+                let ft = Ty::Fn(intern_fn(crate::types::FnTy { params: fs.params.clone(), ret: fs.ret }));
+                any |= self.prog.match_ty(pt, ft, &mut sol);
+            }
+            if any {
+                let known: Vec<(usize, Ty)> = sol.iter().enumerate().filter_map(|(k, t)| t.filter(|t| !self.prog.has_param(*t)).map(|t| (k, t))).collect();
+                for (k, t) in known {
+                    if !self.pre_pv.iter().any(|x| x.0 == k) {
+                        let v = self.known(t);
+                        self.pre_pv.push((k, v));
+                    }
+                }
+            }
+        }
         if callee.is_none() {
             let fv = self.expr(f);
             return match self.callable(fv, avs.len()) {

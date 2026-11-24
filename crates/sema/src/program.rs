@@ -4454,12 +4454,53 @@ impl Program {
         }
     }
 
+    /// t is pattern with its holes (`_`, Param(HOLE)) filled: `Box<_>` and `Box<i32>`. Only when pattern has a hole
+    pub fn fits_holes(&self, pattern: Ty, t: Ty, depth: u32) -> bool {
+        if depth > 32 {
+            return false;
+        }
+        let holes = |x: Ty| self.uses_hole(x, 0);
+        if !holes(pattern) {
+            return false;
+        }
+        let go = |a: Ty, b: Ty| a == b || self.fits_holes(a, b, depth + 1);
+        match (pattern, t) {
+            (Ty::Param(HOLE), _) => true,
+            (Ty::Ref(m, a), Ty::Ref(n, b)) | (Ty::Ptr(m, a), Ty::Ptr(n, b)) => m == n && go(*a, *b),
+            (Ty::Box(a), Ty::Box(b)) | (Ty::Slice(a), Ty::Slice(b)) => go(*a, *b),
+            (Ty::Array(a, n), Ty::Array(b, m)) => n == m && go(*a, *b),
+            (Ty::Struct(x), Ty::Struct(y)) => {
+                let (sx, sy) = (&self.structs[x as usize], &self.structs[y as usize]);
+                sx.base.is_some() && sx.base == sy.base && sx.args.len() == sy.args.len() && sx.args.iter().zip(&sy.args).all(|(&a, &b)| go(a, b))
+            }
+            _ => false,
+        }
+    }
+
+    fn uses_hole(&self, t: Ty, depth: u32) -> bool {
+        if depth > 32 {
+            return false;
+        }
+        match t {
+            Ty::Param(HOLE) => true,
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => self.uses_hole(*i, depth + 1),
+            Ty::Struct(s) => self.structs[s as usize].args.iter().any(|&a| self.uses_hole(a, depth + 1)),
+            _ => false,
+        }
+    }
+
     /// 仮引数型 pt (型パラメータを含む) と実引数型 at を突き合わせて型パラメータを解く
     pub fn match_ty(&self, pt: Ty, at: Ty, sol: &mut [Option<Ty>]) -> bool {
         match (pt, at) {
             // 関連型からは解けない (具体型が分かってから置き換わる)
             (Ty::Assoc(_), _) => true,
             (Ty::Param(i), t) => match sol.get(i as usize).copied().flatten() {
+                // (a turbofish's type with holes, `f::<Box<_>>(Box::new(100))`: the argument's type that fits it fills
+                // them)
+                Some(prev) if prev != t && self.fits_holes(prev, t, 0) => {
+                    sol[i as usize] = Some(t);
+                    true
+                }
                 Some(prev) => prev == t,
                 None => {
                     if let Some(s) = sol.get_mut(i as usize) {

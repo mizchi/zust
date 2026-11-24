@@ -577,6 +577,7 @@ build-pass	attributes/unsafe/unsafe-attributes.rs
 check-pass	attributes/used/used-not-dead-code-lint.rs
 run-pass	auto-traits/auto-is-contextual.rs
 check-pass	auto-traits/auto-trait-projection-recursion.rs
+run-pass	auto-traits/auto-traits-type-parameter.rs
 compile-fail	auto-traits/hashmap-send-requires-send-contents.rs
 compile-fail	auto-traits/issue-117789.rs
 run-pass	autoref-autoderef/auto-ref-bounded-ty-param.rs
@@ -1135,6 +1136,7 @@ run-pass	box/match-box-deref-codegen.rs
 run-pass	box/new-box.rs
 run-pass	box/self-assignment.rs
 compile-fail	box/suggest-box-for-expr-field-issue-139631.rs
+run-pass	box/unit/basic-operations.rs
 run-pass	box/unit/expr-block-generic-unique1.rs
 run-pass	box/unit/expr-block-generic-unique2.rs
 run-pass	box/unit/unique-generic-assign.rs
@@ -1442,6 +1444,7 @@ run-pass	codegen/issue-16602-1.rs
 run-pass	codegen/issue-16602-2.rs
 run-pass	codegen/issue-16602-3.rs
 run-pass	codegen/issue-27859.rs
+build-pass	codegen/issue-64401.rs
 run-pass	codegen/match-enum-range-metadata-misopt.rs
 run-pass	codegen/mono-respects-abi-alignment.rs
 run-pass	codegen/nested-enum-match-optimization-15793.rs
@@ -2864,6 +2867,7 @@ run-pass	functions-closures/fn-bare-assign.rs
 run-pass	functions-closures/fn-bare-coerce-to-block.rs
 run-pass	functions-closures/fn-bare-item.rs
 run-pass	functions-closures/fn-bare-size.rs
+run-pass	functions-closures/fn-bare-spawn.rs
 run-pass	functions-closures/fn-coerce-field.rs
 compile-fail	functions-closures/fn-help-with-err-generic-is-not-function.rs
 compile-fail	functions-closures/fn-help-with-err.rs
@@ -2917,6 +2921,7 @@ check-pass	generic-associated-types/issue-92954.rs
 check-pass	generic-associated-types/issue-93141.rs
 check-pass	generic-associated-types/issue-93262.rs
 check-pass	generic-associated-types/issue-93341.rs
+check-pass	generic-associated-types/issue-93342.rs
 compile-fail	generic-associated-types/missing-bounds.rs
 compile-fail	generic-associated-types/missing_lifetime_args.rs
 compile-fail	generic-associated-types/parse/trait-path-expected-token.rs
@@ -4696,6 +4701,7 @@ compile-fail	nll/issue-54556-stephaneyfx.rs
 compile-fail	nll/issue-54556-temps-in-tail-diagnostic.rs
 compile-fail	nll/issue-54556-used-vs-unused-tails.rs
 compile-fail	nll/issue-54556-wrap-it-up.rs
+check-pass	nll/issue-54943-3.rs
 compile-fail	nll/issue-54943.rs
 check-pass	nll/issue-55288.rs
 check-pass	nll/issue-55344.rs
