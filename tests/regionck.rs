@@ -4114,3 +4114,20 @@ fn part27_assoc_type_into_dyn() {
     assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("the associated type `<T as Iter>::Item` may not live long enough (it must outlive `'static`) (E0310)"), "{d:?}");
     assert_eq!(check("trait X {}\ntrait Iter {\n    type Item: X;\n    fn into_item(self) -> Self::Item;\n}\nfn ok1<'a, T: Iter>(v: T) -> Box<dyn X + 'a>\n    where T::Item: 'a\n{\n    let item = v.into_item();\n    Box::new(item)\n}\nfn ok2<T: Iter>(v: T) -> Box<dyn X + 'static>\n    where T::Item: 'static\n{\n    Box::new(v.into_item())\n}\nfn main() {}\n"), vec![], "t3");
 }
+
+#[test]
+fn part28_generic_dyn_args() {
+    // (a trait object's type arguments that name a type parameter: in a generic type's field (`Box<dyn Fn(U) -> U>`,
+    // `&dyn A<T>`), a generic fn's parameter and result. They are given as the type's or fn's arguments are; the
+    // parameters' names were looked up where the type was used ("cannot find type `U`"), and nothing inferred them)
+    assert_eq!(check("struct S<U> { f: Box<dyn Fn(U) -> U> }\nfn mk() -> S<i32> { S { f: Box::new(|x| x + 1) } }\nfn app<T>(s: &S<T>, x: T) -> T { (s.f)(x) }\nfn app2(s: &S<i32>, x: i32) -> i32 { (s.f)(x) * 2 }\nfn main() {\n    let s = mk();\n    println!(\"{} {}\", app(&s, 3), app2(&s, 3));\n}\n"), vec![], "u1");
+    assert_eq!(check("trait A<T> { fn get(&self) -> T; }\nstruct B<'a, T: 'a>(&'a (dyn A<T> + 'a));\nimpl A<i32> for i32 { fn get(&self) -> i32 { *self } }\nfn f(v: &dyn A<i32>) -> i32 {\n    let b = B(v);\n    b.0.get()\n}\nfn g<'a>(v: &'a dyn A<i32>) -> B<'a, i32> { B(v) }\nfn main() { println!(\"{} {}\", f(&3), g(&4).0.get()); }\n"), vec![], "u2");
+    assert_eq!(check("fn bar<'a, T: Clone + 'a>(t: T) -> Box<dyn FnMut() -> T + 'a> { Box::new(move || t.clone()) }\nfn main() {\n    let mut f = bar(42_u32);\n    assert_eq!(f(), 42);\n    let mut g = bar(\"forty-two\");\n    assert_eq!(g(), \"forty-two\");\n}\n"), vec![], "u3");
+    assert_eq!(check("trait Clam<A> { fn chowder(&self, y: A); }\nstruct Foo<A> { x: A }\nimpl<A> Clam<A> for Foo<A> { fn chowder(&self, _y: A) {} }\nfn f<A>(x: Box<dyn Clam<A>>, a: A) { x.chowder(a); }\nfn main() {\n    let c = Foo { x: 42isize };\n    let d: Box<dyn Clam<isize>> = Box::new(c) as Box<dyn Clam<isize>>;\n    f(d, 3);\n}\n"), vec![], "u4");
+    // (a closure where the parameter is not known yet: coerced to the trait object as written, as before)
+    assert_eq!(check("fn apply<T>(f: Box<dyn Fn(T) -> T>, x: T) -> T { f(x) }\nfn twice<T: Copy>(f: &dyn Fn(T) -> T, x: T) -> T { f(f(x)) }\nfn each<T>(v: Vec<T>, f: &mut dyn FnMut(T)) { for x in v { f(x); } }\nfn main() {\n    let typed: Box<dyn Fn(i64) -> i64> = Box::new(|x| x * 3);\n    let mut s = 0;\n    each(vec![1, 2, 3], &mut |x| s += x);\n    println!(\"{} {} {} {}\", apply(Box::new(|x| x + 1), 3), apply(typed, 5), twice(&|x| x * 2, 3), s);\n}\n"), vec![], "u5");
+    // (the region check of a generic type's trait object that refers to a local, which a type annotation error
+    // hid: regions/regions-close-object-into-object-1.rs)
+    let d = check("trait A<T> {}\nstruct B<'a, T: 'a>(&'a (dyn A<T> + 'a));\ntrait X {}\nimpl<'a, T> X for B<'a, T> {}\nfn f<'a, T: 'static, U>(v: Box<dyn A<T> + 'static>) -> Box<dyn X + 'static> {\n    Box::new(B(&*v)) as Box<dyn X>\n}\nfn g(v: Box<dyn A<i32> + 'static>) -> Box<dyn X + 'static> {\n    Box::new(B(&*v))\n}\nfn main() {}\n");
+    assert!(d.len() == 2 && d[0].0 == 6 && d[1].0 == 9 && d.iter().all(|x| x.1.contains("cannot return a reference to a local variable: `*v` is dropped when the function returns")), "{d:?}");
+}
