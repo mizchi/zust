@@ -1538,7 +1538,7 @@ impl Session2 {
                         }
                     }
                 }
-                let marker = "\n// __zustc_dep_macros__\n";
+                let marker = crate::macros::DEP_MACROS_MARKER;
                 let exp = if dd.is_empty() && !text.contains("macro_rules!") && pms.is_empty() {
                     text.clone()
                 } else {

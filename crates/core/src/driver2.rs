@@ -463,6 +463,10 @@ impl Analysis {
             let mut h = KeyHasher::new();
             h.add(&self.prog.assocs[i].name);
             h.add(&self.items[ii as usize].hash);
+            // (and its impl's header: the `'d: 'a` it declares are required where a projection selects it)
+            if let ItemKind::ImplMember(hd) = self.items[ii as usize].kind {
+                h.add(&self.items[hd as usize].hash);
+            }
             let k = h.finish();
             all ^= k;
             if let Some(c) = self.crate_of_item(ii as usize) {

@@ -1,0 +1,25 @@
+# stage/check use the compilers in the repository's default release directories.
+toolchain := justfile_directory() / "../../../.."
+zsc := toolchain / "crates/zustscript/target/release/zsc"
+zustc := toolchain / "target/release/zustc"
+guide := toolchain / "crates/zustscript/README.md"
+
+build:
+    cargo build --release --manifest-path {{quote(toolchain / "crates/zustscript/Cargo.toml")}}
+    cargo build --release --bin zustc --manifest-path {{quote(toolchain / "Cargo.toml")}}
+
+stage case directory:
+    python3 stage.py {{quote(case)}} {{quote(directory)}} --guide {{quote(guide)}} --zsc {{quote(zsc)}} --zustc {{quote(zustc)}}
+
+check case source:
+    node verify.mjs {{quote(case)}} {{quote(source)}} {{quote(zsc)}} {{quote(zustc)}}
+
+collect case directory record:
+    python3 collect.py {{quote(case)}} {{quote(directory)}} {{quote(record)}}
+
+replay round model="":
+    python3 replay.py {{quote(round)}} {{quote(zsc)}} {{quote(zustc)}} {{if model == "" { "" } else { quote(model) }}}
+
+# Uses two independent Codex CLI sessions per case. WORK and RECORDS must be fresh paths.
+run work records resource=guide case="":
+    python3 run-round.py {{quote(work)}} {{quote(records)}} --guide {{quote(resource)}} --zsc {{quote(zsc)}} --zustc {{quote(zustc)}} {{if case == "" { "" } else { "--cases " + quote(case) }}}
