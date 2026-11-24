@@ -131,6 +131,7 @@ run-pass	associated-consts/associated-const-inherent-impl.rs
 run-pass	associated-consts/associated-const-marks-live-code.rs
 check-pass	associated-consts/associated-const-outer-ty-refs.rs
 run-pass	associated-consts/associated-const-overwrite-default.rs
+compile-fail	associated-consts/associated-const-private-impl.rs
 run-pass	associated-consts/associated-const-public-impl.rs
 run-pass	associated-consts/associated-const-resolution-order.rs
 run-pass	associated-consts/associated-const-self-type.rs
@@ -2552,6 +2553,7 @@ compile-fail	error-codes/E0617.rs
 compile-fail	error-codes/E0618.rs
 compile-fail	error-codes/E0620.rs
 compile-fail	error-codes/E0621-does-not-trigger-for-closures.rs
+compile-fail	error-codes/E0624.rs
 compile-fail	error-codes/E0637.rs
 compile-fail	error-codes/E0659.rs
 compile-fail	error-codes/E0746.rs
@@ -5977,10 +5979,13 @@ compile-fail	privacy/private-field-access-in-mutex-54062.rs
 compile-fail	privacy/private-field-access-violation-3763.rs
 compile-fail	privacy/private-field-struct-construction-76077.rs
 compile-fail	privacy/private-field-ty-err.rs
+compile-fail	privacy/private-impl-method.rs
 compile-fail	privacy/private-in-public-ill-formed.rs
 compile-fail	privacy/private-inferred-type-1.rs
 compile-fail	privacy/private-item-simple.rs
+compile-fail	privacy/private-method-inherited.rs
 run-pass	privacy/private-method-rpass.rs
+compile-fail	privacy/private-method.rs
 compile-fail	privacy/private-struct-field-ctor.rs
 compile-fail	privacy/private-struct-field-in-module.rs
 compile-fail	privacy/private-struct-field-pattern.rs
@@ -6824,6 +6829,7 @@ compile-fail	static/static-items-cant-move.rs
 compile-fail	static/static-lifetime-bound.rs
 compile-fail	static/static-lifetime.rs
 run-pass	static/static-list-initialization-5917.rs
+compile-fail	static/static-method-privacy.rs
 compile-fail	static/static-mut-bad-types.rs
 compile-fail	static/static-mut-foreign-requires-unsafe.rs
 compile-fail	static/static-mut-not-pat.rs

@@ -86,6 +86,22 @@ impl Cx<'_> {
         }
     }
 
+    /// E0624: a method call `x.f()` of a fn of an inherent impl of another module, not `pub`, written outside the
+    /// module it is visible within (Program::field_priv)
+    pub(crate) fn method_privacy(&self, sid: u32, mname: &str, at: Sp) -> R<()> {
+        let Some(fp) = self.prog.field_priv.as_deref() else { return Ok(()) };
+        if !self.user_code || at.line == 0 || self.line_base >= 1 << 20 {
+            return Ok(());
+        }
+        let base = self.prog.structs[sid as usize].base.unwrap_or(sid);
+        let Some(ms) = fp.methods.get(self.prog.structs[base as usize].name.as_str()) else { return Ok(()) };
+        let Some(&(_, scope)) = ms.iter().find(|f| f.0 == mname) else { return Ok(()) };
+        match fp.module_of(self.line_base + at.line) {
+            Some(site) if !fp.within(site, scope) => Err(self.at(at, format!("method `{mname}` is private (E0624)"))),
+            _ => Ok(()),
+        }
+    }
+
     /// The type of a place `let _ = place;` names (a variable and its fields), when known: E0609 for a field its type
     /// does not have (through references and boxes; not through a `Deref` of the program's, which is not followed)
     pub(crate) fn wild_place_ty(&self, e: &Expr) -> R<Option<Ty>> {

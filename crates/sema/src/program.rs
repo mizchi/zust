@@ -78,6 +78,8 @@ pub struct FieldPriv {
     pub mods: Vec<(u32, u32, u32)>,
     /// the struct's or union's name -> (`struct` / `union`, [(a field, the module it is visible within)])
     pub fields: FxMap<String, (&'static str, Vec<(String, u32)>)>,
+    /// E0624: a type's name -> [(a fn of its inherent impls that is not `pub`, the module it is visible within)]
+    pub methods: FxMap<String, Vec<(String, u32)>>,
 }
 
 impl FieldPriv {

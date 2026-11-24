@@ -280,6 +280,12 @@ impl Cx<'_> {
     fn method_call_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let msp = *msp;
+        // (E0624: a private fn of the receiver's inherent impl, where the program has such)
+        if self.prog.field_priv.as_deref().is_some_and(|fp| !fp.methods.is_empty()) {
+            if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)) {
+                self.method_privacy(sid, method, msp.at)?;
+            }
+        }
         // (`0.0.cmp()` with `impl MyCmp for f32` only: an unsuffixed literal takes the one numeric type whose impl has
         // the method, when its default type (f64 / i32) has none)
         if let Expr::Lit(t, sp) = strip_paren(recv) {

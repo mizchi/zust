@@ -1401,6 +1401,38 @@ fn field_privacy() {
 }
 
 #[test]
+fn method_privacy() {
+    // (E0624: a fn or const of an inherent impl, not `pub`, used outside the module of the impl; each expected line,
+    // column and message is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        let src = "mod a { pub struct S; impl S { fn new() -> S { S } } }\nfn main() {\n    let _ = a::S::new();\n}\n";
+        assert_eq!(check(edition, src), at(3, 19, "associated function `new` is private (E0624)"), "path");
+        let src = "mod a { pub struct Foo; impl Foo { fn f(&self) {} } }\nfn main() {\n    let x = a::Foo;\n    x.f();\n}\n";
+        assert_eq!(check(edition, src), at(4, 7, "method `f` is private (E0624)"), "method");
+        let src = "mod a { pub struct Foo; impl Foo { const ID: i32 = 1; } }\nfn main() {\n    let _ = a::Foo::ID;\n}\n";
+        assert_eq!(check(edition, src), at(3, 21, "associated constant `ID` is private (E0624)"), "const");
+        // (the impl's module, not the type's)
+        let src = "mod a { pub struct S; }\nmod b { impl crate::a::S { fn g(&self) {} } }\nfn main() {\n    a::S.g();\n}\n";
+        assert_eq!(check(edition, src), at(4, 10, "method `g` is private (E0624)"), "impl_elsewhere");
+        // (in the impl's module, `pub(crate)`, a child module, a trait's fn of the name, an impl in a fn of the root)
+        for src in [
+            "mod a { pub struct S; impl S { fn new() -> S { S } pub fn make() -> S { S::new() } } }\nfn main() { let _ = a::S::make(); }\n",
+            "mod a { pub struct S; impl S { pub(crate) fn new() -> S { S } } }\nfn main() { let _ = a::S::new(); }\n",
+            "mod a { pub struct S; impl S { fn f(&self) {} } pub mod c { pub fn g() { super::S.f(); } } }\nfn main() { a::c::g(); }\n",
+            "mod a { pub struct S; impl S { fn f(&self) {} } pub trait T { fn f(&self); } impl T for S { fn f(&self) {} } }\nuse a::T;\nfn main() { a::S.f(); }\n",
+            "mod a { pub struct Foo; }\nfn f() { impl a::Foo { fn bar(&self) {} } }\nfn main() { a::Foo.bar(); f(); }\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
 fn glob_ambiguity() {
     // (E0659: a name two glob imports bring with different definitions, where a path names it; each expected line
     // and column is rustc 1.100's on the same source, in both editions; None where rustc accepts it)

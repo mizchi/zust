@@ -4750,10 +4750,11 @@ fn private_path(
         }
     }
     let priv_on = !hidden_structs.is_empty();
-    if priv_on {
-        *fpriv = Some(Box::new(field_priv(b, toks, &close, &mods, &items, injected)));
-    }
-    let mut amb = (amb_on || priv_on).then(|| Ambiguity {
+    // (E0624: the inherent impls of modules other than the crate root that have a member that is not `pub`; the names
+    // trait fns have, whose calls may be the trait's)
+    let (impls, trait_fns) = if mods.len() > 1 && !unknown_mods && src.contains("impl") { impl_members(b, toks, &close, &mods) } else { (vec![], FxSet::default()) };
+    let assoc_on = impls.iter().any(|r| r.m != 0 && r.members.iter().any(|x| !matches!(x.2, PVis::Pub)));
+    let mut amb = (amb_on || priv_on || assoc_on).then(|| Ambiguity {
         b,
         toks,
         close: &close,
@@ -4793,6 +4794,61 @@ fn private_path(
             }
         }
         amb_names.extend(imps.iter().flatten().map(|x| x.name).filter(|x| !x.is_empty()));
+    }
+    // (E0624: each private member of an inherent impl, by its type and name: what it is and the module it is visible
+    // within; a member two impls give different visibilities is left out. The type check's share: by the type's name,
+    // where no other item has it, the fns, not of a name a trait fn has)
+    let mut assoc: FxMap<(u32, u32, &[u8]), Option<(&'static str, usize)>> = FxMap::default();
+    let mut methods: FxMap<String, Vec<(String, u32)>> = FxMap::default();
+    if let (true, Some(a)) = (assoc_on, amb.as_mut()) {
+        let mut count: FxMap<&[u8], u32> = FxMap::default();
+        for it in items.iter().flatten() {
+            *count.entry(it.name).or_insert(0) += 1;
+        }
+        for r in &impls {
+            if r.self_path.is_empty() {
+                continue;
+            }
+            let APath::Defs(d) = a.path(r.m, &r.self_path, false, 1) else { continue };
+            let types: Vec<ADef> = d.iter().filter(|x| x.0 & 1 != 0).map(|x| x.1).collect();
+            let &[x] = &types[..] else { continue };
+            let it = &items[x.m as usize][x.i as usize];
+            if x.v != u32::MAX || !matches!(it.kind, "struct" | "unit struct" | "tuple struct" | "enum" | "union") {
+                continue;
+            }
+            for &(nt, kind, ref vis) in &r.members {
+                let scope = match vis {
+                    PVis::Pub => None,
+                    PVis::Priv => Some(r.m),
+                    PVis::Super => Some(if r.m == 0 { 0 } else { mods[r.m].2 }),
+                    PVis::In(p) => a.module_at(p, if injected { 0 } else { r.m }),
+                };
+                let key = (x.m, x.i, t(nt));
+                let v = scope.map(|sc| (kind, sc));
+                match assoc.get(&key) {
+                    Some(old) if *old != v => {
+                        assoc.insert(key, None);
+                    }
+                    _ => {
+                        assoc.entry(key).or_insert(v);
+                    }
+                }
+            }
+        }
+        for (&(m, i, name), v) in &assoc {
+            let it = &items[m as usize][i as usize];
+            if let Some(("associated function", sc)) = v {
+                if count.get(it.name) == Some(&1) && !trait_fns.contains(name) && *sc != 0 {
+                    methods.entry(String::from_utf8_lossy(it.name).into_owned()).or_default().push((String::from_utf8_lossy(name).into_owned(), *sc as u32));
+                }
+            }
+        }
+    }
+    let assoc_names: FxSet<&[u8]> = assoc.keys().map(|k| k.2).collect();
+    if priv_on || !methods.is_empty() {
+        let mut fp = field_priv(b, toks, &close, &mods, &items, injected);
+        fp.methods = methods;
+        *fpriv = Some(Box::new(fp));
     }
     let amb_msg = |k: usize| Some((k, format!("`{}` is ambiguous (E0659)", String::from_utf8_lossy(t(k)))));
     // (each module's own tokens, past its child modules and its item-level macros, for the paths in them)
@@ -4911,7 +4967,8 @@ fn private_path(
                 // names a struct with such a field; the scope facts last, as they are read only then)
                 let x = j;
                 let lit = priv_on && t(x + 1) == b"{" && hidden_structs.contains(t(x));
-                if amb.is_some() && (amb_on || lit) {
+                let member = assoc_on && assoc_names.contains(t(x));
+                if amb.is_some() && (amb_on || lit || member) {
                     let mut all = vec![raw(k)];
                     let mut y = raw(k);
                     while t(y + 1) == b":" && t(y + 2) == b":" && is_id(y + 3) {
@@ -4924,6 +4981,20 @@ fn private_path(
                             APath::Amb(i) => keep(amb_msg(all[i])),
                             APath::Defs(d) if ambiguous_in(&d, a.site_ns(raw(k), x)) => keep(amb_msg(x)),
                             _ => {}
+                        }
+                    }
+                    // (E0624: `a::S::new()`, `Foo::ID`: a private member of the type's inherent impl)
+                    if member && all.len() >= 2 {
+                        let a = amb.as_mut().unwrap();
+                        if let APath::Defs(d) = a.path(m, &all[..all.len() - 1], false, 1) {
+                            let types: Vec<ADef> = d.iter().filter(|x| x.0 & 1 != 0).map(|x| x.1).collect();
+                            if let &[ty] = &types[..] {
+                                if let Some(&Some((kind, sc))) = assoc.get(&(ty.m, ty.i, t(x))) {
+                                    if !a.within(m, sc) && free!(a, raw(k)) {
+                                        keep(Some((x, format!("{kind} `{}` is private (E0624)", String::from_utf8_lossy(t(x))))));
+                                    }
+                                }
+                            }
                         }
                     }
                     if lit && literal_at(raw(k)) {
@@ -5023,6 +5094,149 @@ fn private_path(
     found.map(place)
 }
 
+
+/// An inherent impl, as impl_members reads it: its module, its self type's path, and its fns and consts (the name's
+/// token, rustc's word for it, its visibility)
+struct ImplRec<'a> {
+    m: usize,
+    self_path: Vec<usize>,
+    members: Vec<(usize, &'static str, PVis<'a>)>,
+}
+
+/// The inherent impls in each module's own text (in its fn bodies too: a block is no module), and the names of the fns
+/// of traits and trait impls
+fn impl_members<'a>(b: &'a [u8], toks: &[(u8, usize, usize)], close: &[usize], mods: &[(usize, usize, usize)]) -> (Vec<ImplRec<'a>>, FxSet<&'a [u8]>) {
+    let t = |k: usize| -> &'a [u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let (mut out, mut trait_fns): (Vec<ImplRec<'a>>, FxSet<&'a [u8]>) = (vec![], FxSet::default());
+    for (m, &(lo, hi, _)) in mods.iter().enumerate() {
+        let mut kids: Vec<(usize, usize)> = mods.iter().filter(|x| x.2 == m && x.0 > 0).map(|x| (x.0, x.1)).collect();
+        kids.sort_unstable();
+        let mut ki = 0;
+        let mut k = lo;
+        while k < hi {
+            while ki < kids.len() && kids[ki].1 < k {
+                ki += 1;
+            }
+            if ki < kids.len() && kids[ki].0 <= k {
+                k = kids[ki].1 + 1;
+                continue;
+            }
+            let is_trait = t(k) == b"trait" && is_id(k + 1);
+            let is_impl = t(k) == b"impl" && (k == lo || matches!(t(k - 1), b"}" | b";" | b"{" | b"]" | b"unsafe" | b"default"));
+            if !is_trait && !is_impl {
+                k += 1;
+                continue;
+            }
+            // (the header, to the body's `{`: generics skipped; `for` makes it a trait impl)
+            let mut j = k + 1;
+            let mut d = 0i32;
+            let mut path: Vec<usize> = vec![];
+            let mut for_ = false;
+            let mut done_path = false;
+            if t(j) == b"<" && is_impl {
+                while j < hi {
+                    match t(j) {
+                        b"<" => d += 1,
+                        b">" if t(j - 1) != b"-" => {
+                            d -= 1;
+                            if d == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                j += 1;
+                d = 0;
+            }
+            while j < hi && !(t(j) == b"{" && d == 0) {
+                match t(j) {
+                    b"<" => d += 1,
+                    b">" if t(j - 1) != b"-" => d -= 1,
+                    b"(" | b"[" if close[j] != usize::MAX => {
+                        j = close[j];
+                        done_path = true;
+                    }
+                    b"for" if d == 0 => for_ = true,
+                    b"where" if d == 0 => done_path = true,
+                    b";" if d == 0 => break,
+                    _ => {}
+                }
+                if d == 0 && !done_path && !for_ && is_id(j) && (path.is_empty() || t(j - 1) == b":") {
+                    path.push(j);
+                } else if d == 0 && !matches!(t(j), b":" | b"<" | b">") && !is_id(j) {
+                    done_path = true;
+                }
+                if d > 0 {
+                    done_path = true;
+                }
+                j += 1;
+            }
+            let Some(&e) = close.get(j).filter(|&&e| t(j) == b"{" && e != usize::MAX) else {
+                k = j + 1;
+                continue;
+            };
+            let mut rec = ImplRec { m, self_path: path, members: vec![] };
+            let mut x = j + 1;
+            while x < e {
+                while t(x) == b"#" && t(x + 1) == b"[" && close[x + 1] != usize::MAX {
+                    x = close[x + 1] + 1;
+                }
+                let mut vis = PVis::Priv;
+                if t(x) == b"pub" {
+                    vis = PVis::Pub;
+                    x += 1;
+                    if t(x) == b"(" && close[x] != usize::MAX {
+                        let c = close[x];
+                        vis = match t(x + 1) {
+                            b"self" => PVis::Priv,
+                            b"super" => PVis::Super,
+                            b"in" => PVis::In((x + 2..c).filter(|&q| is_id(q)).map(t).collect()),
+                            _ => PVis::Pub,
+                        };
+                        x = c + 1;
+                    }
+                }
+                while matches!(t(x), b"default" | b"async" | b"unsafe" | b"safe") || t(x) == b"const" && matches!(t(x + 1), b"fn" | b"unsafe" | b"async" | b"extern") || t(x) == b"extern" && toks.get(x + 1).is_some_and(|q| q.0 == 2) {
+                    x += if t(x) == b"extern" { 2 } else { 1 };
+                }
+                let item = match t(x) {
+                    b"fn" if is_id(x + 1) => Some((x + 1, "associated function")),
+                    b"const" if is_id(x + 1) && t(x + 2) == b":" => Some((x + 1, "associated constant")),
+                    _ => None,
+                };
+                if let Some((nt, kind)) = item {
+                    if is_trait || for_ {
+                        if kind == "associated function" {
+                            trait_fns.insert(t(nt));
+                        }
+                    } else {
+                        rec.members.push((nt, kind, vis));
+                    }
+                }
+                // (to the member's end: its `;` or its body)
+                while x < e && t(x) != b";" {
+                    if t(x) == b"{" && close[x] != usize::MAX {
+                        x = close[x];
+                        break;
+                    }
+                    if matches!(t(x), b"(" | b"[") && close[x] != usize::MAX {
+                        x = close[x];
+                    }
+                    x += 1;
+                }
+                x += 1;
+            }
+            if is_impl && !for_ && !rec.members.is_empty() {
+                out.push(rec);
+            }
+            k = e + 1;
+        }
+    }
+    (out, trait_fns)
+}
 
 /// For E0616: the modules by their lines, and the fields of the structs and unions of modules other than the crate
 /// root that are not `pub`, with the module each is visible within. Only a name no other item of the program has: the
