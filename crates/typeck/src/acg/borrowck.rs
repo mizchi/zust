@@ -215,6 +215,10 @@ pub struct Bk {
     /// A fn pointer call's implicit argument reborrows without the region check, by the argument's index: the result
     /// holds those of the arguments it may borrow from (`let r = f(x); *x = 1; use(r)` is E0506)
     pub fnptr_reborrows: Vec<(usize, u32)>,
+    /// The `&mut` loans of a call's implicit argument reborrows, without the region check, and the call temporaries
+    /// of their reservations: two-phase borrows (rustc's), taken once the arguments are evaluated (call_fn). `f(x, *x)`
+    /// reads `*x` while it is reserved; `f(x, &*x)` conflicts when it is taken (E0502)
+    pub arg_acts: Vec<(Ev, u32)>,
     /// The call being lowered takes its `&mut self` once its arguments are evaluated (activate): what the arguments
     /// borrow, shared loans too, is held until then (`s.take(s.get())`: E0502)
     pub hold_args: bool,
@@ -2888,7 +2892,7 @@ impl Cx<'_> {
     /// A `&mut` local passed where a `&mut` is expected is reborrowed (`f(x)` is `f(&mut *x)`; where a `&` is, m false,
     /// `f(&*x)`): the loan of `*x`, which lives as long as the region check finds it must (Rg::forever, Rg::holders), by
     /// the argument's address
-    pub(crate) fn bk_reborrow_arg(&mut self, a: &Expr, m: bool) -> Option<u32> {
+    pub(crate) fn bk_reborrow_arg(&mut self, a: &Expr, m: bool, two_phase: bool) -> Option<u32> {
         // (a field of a local too (`v.push(c.raw)`): the reborrow is of `*c.raw`, which a `Drop` c must not outlive
         // (E0713))
         let mut root = strip_paren(a);
@@ -2909,9 +2913,25 @@ impl Cx<'_> {
         let ln = self.bk.loans.len() as u32;
         // (without the region check: a borrow of `*x` at the call that nothing holds after it. A loan of `*x` still
         // live there conflicts (`let v = &*x; take(x); use(v)` is E0502))
+        // (a call's (two_phase): held until the call is made, as an argument `&x` is. A `&mut` one is reserved
+        // until then, a shared loan, and taken at the call (Bk::arg_acts))
         if !self.rg.on {
+            if two_phase && m {
+                self.bk.loans.push(Loan { place: p.clone(), mutable: false, sp, at: sp, quiet: false, capture: false });
+                self.bk.reserved.push(ln);
+                self.bk_ev(Ev::Acc(p.clone(), Acc::Borrow(ln), sp));
+                self.bk_call_temp(&[Src::Loan(ln)], true);
+                let tid = *self.bk.call_temps.last()?;
+                let real = self.bk.loans.len() as u32;
+                self.bk.loans.push(Loan { place: p.clone(), mutable: true, sp, at: sp, quiet: false, capture: false });
+                self.bk.arg_acts.push((Ev::Acc(p, Acc::Borrow(real), sp), tid));
+                return Some(real);
+            }
             self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false, capture: false });
             self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+            if two_phase {
+                self.bk_call_temp(&[Src::Loan(ln)], true);
+            }
             return Some(ln);
         }
         self.bk.loan_of.insert(a as *const Expr as usize, ln);
