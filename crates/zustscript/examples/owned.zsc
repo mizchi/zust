@@ -1,6 +1,6 @@
 // @wasm with values that are not Copy (arrays, records and enums that hold them): the Rust needs `&`, `'a`, moves
-// and clones, and zsc infers them (src/lower.rs, "Ownership"). The same source runs as JS (zsc --all-js) and as
-// wasm, with the same results (tests/examples.rs: owned_same_in_js_and_wasm).
+// and clones, and zsc infers them (src/lower.rs, "Ownership"). Tests compare the unannotated JS version with the annotated
+// Wasm version (tests/examples.rs: owned_same_in_js_and_wasm).
 
 type Poly = { pts: Array<f64>, weight: f64 }
 enum Shape { Polygon(Poly, i32), Empty }

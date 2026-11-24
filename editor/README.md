@@ -9,8 +9,7 @@ A page to write [zustscript](../crates/zustscript) in the browser: the editor hi
   errors and warnings are underlined, and listed under the editor (click one to go to it).
 - **compiler**: [zsc-wasm](zsc-wasm/src/lib.rs) builds crates/zustscript's own modules (not a copy) for
   `wasm32-unknown-unknown`, as `zsc --all-js --inline-runtime`.
-  - zustc does not run in the browser, so every `@wasm` / `@simd` fn stays in the JS output: the same source, run
-    as JS.
+  - zustc does not run in the browser, so `@wasm` produces a target error. Plain functions and `@simd` kernels can run as JS.
   - A Rust `wasm fn` cannot become JS. It is reported as a warning, and calling it throws.
   - `import type` has no TS files to read here.
 - **preview**: the module runs in a sandboxed iframe (a new one per run) and calls `export fn main`.
