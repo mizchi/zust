@@ -1683,10 +1683,45 @@ impl Program {
                         // (the same foreign fn declared in two `extern` blocks: one more name for the same symbol)
                         format!("{name}#extern{}", p.names.len())
                     } else {
-                        if ss.impl_trait.is_none() && p.sigs[prev as usize].impl_trait.is_none() {
-                            // (in two impl blocks, E0592 is reported at the first definition)
-                            let line = match p.item_of.get(prev as usize).copied().flatten().map(|k| &items[k as usize]) {
-                                Some(pit) if matches!((pit.kind, it.kind), (crate::lexer::ItemKind::ImplMember(a), crate::lexer::ItemKind::ImplMember(b)) if a != b) => pit.line,
+                        // (inherent methods with `self` in impls for two instances of one type (either's
+                        // `impl<L, R> Either<&L, &R> { fn cloned(self) }` and `.. Either<&mut L, &mut R>`, or `impl W<i32>` and
+                        // `impl W<u8>`): overloads, told apart by the receiver as trait impls' are. The same self type twice is
+                        // E0592 still, as is a function without `self`, which a receiver does not choose)
+                        // (against every inherent method of the name so far, not the first alone: a third `W<u8>::f` is
+                        // E0592 too. Self types overlap when one could be the other, `Cake<T>` and `Cake<Box<U>>` (tests/ui
+                        // coherence-overlap-issue-23516-inherent): E0592 as well)
+                        let mine = ss.self_ty.as_ref().and_then(|t| {
+                            let gn: Vec<&str> = ss.generics.iter().map(|g| g.0.as_str()).collect();
+                            p.resolve_g(t, &gn).ok()
+                        });
+                        let group: Vec<u32> = p.overloads.get(name.as_str()).cloned().unwrap_or_else(|| vec![prev]);
+                        let block_of = |c: u32| match p.item_of.get(c as usize).copied().flatten().map(|k| items[k as usize].kind) {
+                            Some(crate::lexer::ItemKind::ImplMember(h)) => Some(h),
+                            _ => None,
+                        };
+                        let own_block = match it.kind {
+                            crate::lexer::ItemKind::ImplMember(h) => Some(h),
+                            _ => None,
+                        };
+                        // (the inherent method of the name this one cannot stand beside: E0592, at that one's line when it is
+                        // in another impl block)
+                        let clash = ss.impl_trait.is_none().then(|| {
+                            group.iter().copied().find(|&c| {
+                                let cs = &p.sigs[c as usize];
+                                if cs.impl_trait.is_some() {
+                                    return false;
+                                }
+                                let apart = ss.has_self
+                                    && cs.has_self
+                                    && block_of(c).is_some()
+                                    && block_of(c) != own_block
+                                    && matches!((mine, cs.self_ty), (Some(a), Some(b)) if !p.self_tys_overlap(a, b));
+                                !apart
+                            })
+                        });
+                        if let Some(Some(c)) = clash {
+                            let line = match p.item_of.get(c as usize).copied().flatten().map(|k| &items[k as usize]) {
+                                Some(pit) if block_of(c).is_some() && block_of(c) != own_block => pit.line,
                                 _ => it.line,
                             };
                             return Err(format!("{line}:1: duplicate definition of `{name}`"));
@@ -5457,6 +5492,159 @@ impl Program {
     }
 
     /// struct `sid` のメソッド `name`
+    /// Whether the references in two types' struct arguments agree, `&` and `&mut` apart (match_ty does not tell them
+    /// apart), past any references around the two: `Either<&L, &R>` is not `Either<&mut i32, &mut u8>`'s self type, and
+    /// `&W<&T>` (a `&self` receiver) is not `W<&mut i32>`'s
+    /// Whether two impls' self types could be one type: they unify, each impl's type and const parameters its own
+    /// (`Cake<T>` and `Cake<Box<U>>` could, `[u8; N]` and `[u8; 1]` at N = 1, `fn(T)` and `fn(i32)`; `W<i32>` and
+    /// `W<u8>` could not, nor `Either<&L, &R>` and `Either<&mut L, &mut R>`, nor `W<T, T>` and `W<u8, u16>`)
+    pub fn self_tys_overlap(&self, a: Ty, b: Ty) -> bool {
+        use crate::types::CONST_LEN_BASE;
+        // (a binding: of impl s's parameter (a type parameter, or a const one), to a type of impl s2's. A const value is
+        // `Array(Unit, n)`, as match_ty has it, and an array length `CONST_LEN_BASE + i` is const parameter i: one
+        // binding for a const parameter, whether it stands as a type argument or as a length)
+        struct U<'a> {
+            p: &'a Program,
+            tys: FxMap<(u8, u8), (u8, Ty)>,
+        }
+        fn len_ty(n: u32) -> Ty {
+            if n >= CONST_LEN_BASE { Ty::Param((n - CONST_LEN_BASE) as u8) } else { Ty::Array(intern(Ty::Unit), n) }
+        }
+        impl U<'_> {
+            /// Whether impl s's parameter x occurs in t (of impl st), through the bindings so far
+            fn occurs(&self, s: u8, x: u8, st: u8, t: Ty, depth: u32) -> bool {
+                if depth > 32 {
+                    return true;
+                }
+                match t {
+                    Ty::Param(y) if (st, y) == (s, x) => true,
+                    Ty::Param(y) => self.tys.get(&(st, y)).is_some_and(|&(s2, t2)| self.occurs(s, x, s2, t2, depth + 1)),
+                    Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Slice(i) => self.occurs(s, x, st, *i, depth + 1),
+                    Ty::Array(i, n) => (n >= CONST_LEN_BASE && self.occurs(s, x, st, len_ty(n), depth + 1)) || self.occurs(s, x, st, *i, depth + 1),
+                    Ty::Fn(f) => f.params.iter().any(|&u| self.occurs(s, x, st, u, depth + 1)) || self.occurs(s, x, st, f.ret, depth + 1),
+                    Ty::Struct(sid) => self.p.structs[sid as usize].args.iter().any(|&u| self.occurs(s, x, st, u, depth + 1)),
+                    _ => false,
+                }
+            }
+            fn bind(&mut self, s: u8, x: u8, st: u8, t: Ty) -> bool {
+                // (`T = Box<T>` has no finite solution: no overlap)
+                if self.occurs(s, x, st, t, 0) {
+                    return false;
+                }
+                self.tys.insert((s, x), (st, t));
+                true
+            }
+            fn ty(&mut self, sa: u8, a: Ty, sb: u8, b: Ty, depth: u32) -> bool {
+                if depth > 32 {
+                    return true;
+                }
+                if let Ty::Param(x) = a {
+                    if let Some(&(s2, t2)) = self.tys.get(&(sa, x)) {
+                        return self.ty(s2, t2, sb, b, depth + 1);
+                    }
+                }
+                if let Ty::Param(y) = b {
+                    if let Some(&(s2, t2)) = self.tys.get(&(sb, y)) {
+                        return self.ty(sa, a, s2, t2, depth + 1);
+                    }
+                }
+                match (a, b) {
+                    (Ty::Param(x), Ty::Param(y)) if sa == sb && x == y => true,
+                    (Ty::Param(x), _) => self.bind(sa, x, sb, b),
+                    (_, Ty::Param(y)) => self.bind(sb, y, sa, a),
+                    // (an associated type, `T::Item`, may be any type)
+                    (Ty::Assoc(_), _) | (_, Ty::Assoc(_)) => true,
+                    (Ty::Ref(m, x), Ty::Ref(n, y)) | (Ty::Ptr(m, x), Ty::Ptr(n, y)) => m == n && self.ty(sa, *x, sb, *y, depth + 1),
+                    (Ty::Box(x), Ty::Box(y)) | (Ty::Slice(x), Ty::Slice(y)) => self.ty(sa, *x, sb, *y, depth + 1),
+                    (Ty::Array(x, n), Ty::Array(y, k)) => {
+                        let lens = if n < CONST_LEN_BASE && k < CONST_LEN_BASE { n == k } else { self.ty(sa, len_ty(n), sb, len_ty(k), depth + 1) };
+                        lens && self.ty(sa, *x, sb, *y, depth + 1)
+                    }
+                    (Ty::Fn(f), Ty::Fn(g)) => {
+                        f.params.len() == g.params.len()
+                            && f.params.iter().zip(&g.params).all(|(&u, &v)| self.ty(sa, u, sb, v, depth + 1))
+                            && self.ty(sa, f.ret, sb, g.ret, depth + 1)
+                    }
+                    (Ty::Struct(x), Ty::Struct(y)) => {
+                        let p = self.p;
+                        if p.base_of(x) != p.base_of(y) {
+                            return false;
+                        }
+                        let (xa, ya) = (p.structs[x as usize].args.clone(), p.structs[y as usize].args.clone());
+                        xa.len() != ya.len() || xa.iter().zip(&ya).all(|(&u, &v)| self.ty(sa, u, sb, v, depth + 1))
+                    }
+                    _ => a == b,
+                }
+            }
+        }
+        U { p: self, tys: FxMap::default() }.ty(0, a, 1, b, 0)
+    }
+
+    /// Of the inherent methods with `self` overloading `id` (in impls for other instances of the type), the one whose
+    /// self type `t` is (match_ty and arg_refs_agree); `id` when there is not exactly one, or when `id` is not inherent
+    pub fn inherent_overload_for(&self, id: u32, t: Ty) -> u32 {
+        // (only from an inherent method: a trait impl's (`impl Foo for AtomicUsize { fn store(self, ..) }` beside the
+        // inherent `store(&self, ..)`) is chosen by the receiver later, as rustc's by-value step before the autoref)
+        if self.sigs[id as usize].impl_trait.is_some() || !self.sigs[id as usize].has_self {
+            return id;
+        }
+        let Some(group) = self.overloads.get(&self.names[id as usize]) else { return id };
+        let fit: Vec<u32> = group
+            .iter()
+            .copied()
+            .filter(|&c| {
+                let sig = &self.sigs[c as usize];
+                let mut sol = vec![None; sig.generics.len()];
+                sig.has_self && sig.impl_trait.is_none() && sig.self_ty.is_some_and(|st| self.match_ty(st, t, &mut sol) && self.arg_refs_agree(st, t))
+            })
+            .collect();
+        match fit.as_slice() {
+            [c] => *c,
+            _ => id,
+        }
+    }
+
+    pub fn arg_refs_agree(&self, a: Ty, b: Ty) -> bool {
+        fn strip(mut t: Ty) -> Ty {
+            while let Ty::Ref(_, i) = t {
+                t = *i;
+            }
+            t
+        }
+        fn deep(p: &Program, a: Ty, b: Ty, depth: u32) -> bool {
+            if depth > 16 {
+                return true;
+            }
+            match (a, b) {
+                (Ty::Ref(m, x), Ty::Ref(n, y)) | (Ty::Ptr(m, x), Ty::Ptr(n, y)) => m == n && deep(p, *x, *y, depth + 1),
+                (Ty::Ref(..), _) => false,
+                // (a raw pointer's self type is not a reference's: `W<*const i32>` is not `W<&i32>`'s, which match_ty lets
+                // through as a coercion)
+                (Ty::Ptr(..), _) => false,
+                // (and beneath arrays, slices and boxes: `W<[&i32; 1]>` is not `W<[&mut i32; 1]>`)
+                (Ty::Array(x, _), Ty::Array(y, _)) | (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) => deep(p, *x, *y, depth + 1),
+                // (and in a function pointer's parameters and result: `W<fn(&i32)>` is not `W<fn(&mut i32)>`)
+                (Ty::Fn(f), Ty::Fn(g)) => {
+                    f.params.len() == g.params.len()
+                        && f.params.iter().zip(&g.params).all(|(&u, &v)| deep(p, u, v, depth + 1))
+                        && deep(p, f.ret, g.ret, depth + 1)
+                }
+                (Ty::Struct(x), Ty::Struct(y)) if x != y => {
+                    let (xa, ya) = (&p.structs[x as usize].args, &p.structs[y as usize].args);
+                    xa.len() != ya.len() || xa.iter().zip(ya).all(|(&u, &v)| deep(p, u, v, depth + 1))
+                }
+                _ => true,
+            }
+        }
+        match (strip(a), strip(b)) {
+            (Ty::Struct(x), Ty::Struct(y)) if x != y => {
+                let (xa, ya) = (&self.structs[x as usize].args, &self.structs[y as usize].args);
+                xa.len() != ya.len() || xa.iter().zip(ya).all(|(&u, &v)| deep(self, u, v, 0))
+            }
+            _ => true,
+        }
+    }
+
     pub fn method(&self, sid: u32, name: &str) -> Option<u32> {
         self.index
             .get(&format!(

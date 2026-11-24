@@ -2071,6 +2071,32 @@ impl Inf<'_> {
         self.with(Shape::Clo(st, n))
     }
 
+    /// Of the inherent methods with `self` overloading `id` (Program's overloads: impls for other instances of the
+    /// type), the one whose self type the receiver `rv` fits; `id` when it has none, None when the receiver does not
+    /// tell them apart yet
+    fn pick_inherent_overload(&mut self, id: u32, rv: u32) -> Option<u32> {
+        let p = self.prog;
+        let Some(group) = p.overloads.get(&p.names[id as usize]) else { return Some(id) };
+        let inh: Vec<u32> = group.iter().copied().filter(|&c| p.sigs[c as usize].has_self && p.sigs[c as usize].impl_trait.is_none() && p.sigs[c as usize].self_ty.is_some()).collect();
+        if inh.len() < 2 || !inh.contains(&id) {
+            return Some(id);
+        }
+        let Some(t) = self.resolve(rv) else { return None };
+        let fit: Vec<u32> = inh
+            .iter()
+            .copied()
+            .filter(|&c| {
+                let sig = &p.sigs[c as usize];
+                let mut sol = vec![None; sig.generics.len()];
+                sig.self_ty.is_some_and(|st| p.match_ty(st, t, &mut sol) && p.arg_refs_agree(st, t))
+            })
+            .collect();
+        match fit.as_slice() {
+            [c] => Some(*c),
+            _ => None,
+        }
+    }
+
     /// The declaration of method n that the bound of placeholder ps declares, with the type arguments of its
     /// signature's generics the bound gives: `Self` the placeholder, the trait's parameters the bound's arguments
     /// (when it has one bound of the trait). None where no bound's trait declares it
@@ -2172,7 +2198,10 @@ impl Inf<'_> {
                 _ => None,
             };
             if let Some(id) = sid.and_then(|s| self.prog.method(s, n)) {
-                return self.apply_recv(Some(id), avs, rv);
+                // (a method of the program's own type that has a scalar method's name (`checked_add`): its overloads too,
+                // as below)
+                let id = self.pick_inherent_overload(id, rv);
+                return self.apply_recv(id, avs, rv);
             }
             return self.scalar_method(n, tf, args, r, rv, avs);
         }
@@ -2207,6 +2236,12 @@ impl Inf<'_> {
                 break;
             }
             hops += 1;
+        }
+        // (inherent methods of one name in impls for two instances of the type (`impl W<i32> { fn f(&self) }`, `impl
+        // W<u8> ..`, either's `Either<&L, &R>` / `Either<&mut L, &mut R>`): the one whose self type the receiver is.
+        // While the receiver is not known that far, none: its type is not taken from a candidate's)
+        if let Some(id) = callee {
+            callee = self.pick_inherent_overload(id, rv);
         }
         // (`x.clone()`: struct で clone を持たない (derive の Copy など) か、整数・浮動小数点・bool・char・生ポインタ)
         let rroot = self.find(rv);
