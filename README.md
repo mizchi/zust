@@ -88,7 +88,8 @@ zustc check hello.rs
 ```
 
 This runs up to type checking (no code generation) and prints all diagnostics. It also checks unreachable functions
-and every requested instance of generic functions.
+and every requested instance of generic functions. A program with many functions is checked in `-j N` forked
+processes (the number of CPUs by default); the diagnostics are the same at any `-j`.
 
 ### Multiple crates
 

@@ -96,3 +96,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-23 | [Region (lifetime) checking, part 16: deref coercions, block values and guards that outlive a block's locals, `&mut` arguments, and temporaries' places](2026-11-23-04-region-check-16.md) |
 | 2026-11-23 | [Test time: where it goes, what was cut, and a nextest-like `zurgo test`](2026-11-23-05-test-time.md) |
 | 2026-11-23 | [Survey: the Rust compiler's frontier (November 2026), and what zustc takes from it](2026-11-23-06-rust-frontier-survey.md) |
+| 2026-11-24 | [`check` in forked children (#101)](2026-11-24-01-parallel-check.md) |

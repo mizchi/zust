@@ -90,7 +90,7 @@ def bench_build(n, reps, work, vg, out):
         out.append((f"{name} build edit 1 fn instructions", instructions(build), "M instr"))
         gen(n, 0, src)
         run_measured(build)
-        out.append((f"{name} check instructions", instructions([ZUSTC, "check", src]), "M instr"))
+        out.append((f"{name} check instructions", instructions([ZUSTC, "check", "-j", "1", src]), "M instr"))
 
 
 def bench_runtime(reps, work, out):

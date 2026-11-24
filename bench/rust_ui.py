@@ -147,7 +147,7 @@ def run_one(path, kind, tmp):
     ed = "--edition=" + edition(open(path, errors="replace").read())
     try:
         if kind in ("check-pass", "compile-fail"):
-            r = subprocess.run([*LIMIT, ZUSTC, "check", path, ed], capture_output=True, text=True, timeout=30)
+            r = subprocess.run([*LIMIT, ZUSTC, "check", "-j", "1", path, ed], capture_output=True, text=True, timeout=30)
             if crashed(r):
                 return "crash"
             ok = r.returncode == 0

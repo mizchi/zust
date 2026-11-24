@@ -88,6 +88,14 @@
     "docs_reports_2026-11-23-06-rust-frontier-survey.ja": {
       "path": "docs/ja/reports/2026-11-23-06-rust-frontier-survey.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-24-01-parallel-check.en": {
+      "path": "docs/reports/2026-11-24-01-parallel-check.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-01-parallel-check.ja": {
+      "path": "docs/ja/reports/2026-11-24-01-parallel-check.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -210,6 +218,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-23-06-rust-frontier-survey.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-01-parallel-check",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-01-parallel-check.md is a faithful translation of docs/reports/2026-11-24-01-parallel-check.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-01-parallel-check.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-01-parallel-check.ja"
       }
     }
   ]
