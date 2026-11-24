@@ -1,8 +1,8 @@
-// Render the public introduction, including its Tree-sitter spans, before deployment.
+// Render the public introduction, and Rust guide with Tree-sitter highlighting, before deployment.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 const work = resolve(process.argv[2]);
 const output = resolve(process.argv[3]);
@@ -10,7 +10,7 @@ const require = createRequire(join(work, "package.json"));
 const MarkdownIt = require("markdown-it");
 const { decodeHTML } = require("entities");
 const scopes = new Map(Object.entries({
-  zustscript: "zustscript", typescript: "ts", javascript: "js", bash: "bash",
+  zustscript: "zustscript", typescript: "ts", javascript: "js", bash: "bash", rust: "rust",
 }));
 const config = join(work, "config.json");
 writeFileSync(config, JSON.stringify({ "parser-directories": [join(work, "node_modules")] }));
@@ -31,17 +31,30 @@ function highlight(code, language) {
 }
 
 const md = new MarkdownIt({ highlight });
-const source = readFileSync(new URL("../../crates/zustscript/docs/introduction.md", import.meta.url), "utf8");
-const tokens = md.parse(source, {});
-const heading = tokens.findIndex(t => t.type === "heading_open" && t.tag === "h1");
-const lead = tokens.findIndex(t => t.type === "paragraph_open");
-if (heading !== 0 || lead < 0) throw new Error("Start the introduction with an H1 and an introductory paragraph");
-const plain = token => token.children.map(child => child.content).join("");
-const slots = {
-  title: md.utils.escapeHtml(plain(tokens[heading + 1])),
-  description: md.utils.escapeHtml(plain(tokens[lead + 1])),
-  article: md.renderer.render(tokens, md.options, {}).trimEnd(),
-};
+const pages = new Map([
+  ["introduction.md", output],
+  ["rust-costs.md", join(dirname(output), "rust-costs.html")],
+]);
 const template = readFileSync(new URL("./template.html", import.meta.url), "utf8");
+const plain = token => token.children.map(child => child.content).join("");
 mkdirSync(dirname(output), { recursive: true });
-writeFileSync(output, template.replace(/\{\{(title|description|article)\}\}/g, (_, key) => slots[key]));
+
+for (const [file, destination] of pages) {
+  const source = readFileSync(new URL("../../crates/zustscript/docs/" + file, import.meta.url), "utf8");
+  const tokens = md.parse(source, {});
+  const lead = tokens.findIndex(t => t.type === "paragraph_open");
+  if (tokens[0]?.tag !== "h1" || lead < 0) throw new Error(file + " must begin with an H1 and a lead paragraph");
+  for (const token of tokens) {
+    for (const child of token.children ?? []) {
+      const target = pages.get(child.attrGet("href"));
+      if (target) child.attrSet("href", basename(target));
+    }
+  }
+  const slots = {
+    title: md.utils.escapeHtml(plain(tokens[1])),
+    description: md.utils.escapeHtml(plain(tokens[lead + 1])),
+    article: md.renderer.render(tokens, md.options, {}).trimEnd(),
+    current: destination === output ? "page" : "location",
+  };
+  writeFileSync(destination, template.replace(/\{\{(title|description|article|current)\}\}/g, (_, key) => slots[key]));
+}
