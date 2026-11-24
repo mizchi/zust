@@ -162,5 +162,4 @@ listed there, which main has too.
 
 ## Not done
 
-- A user `impl Drop` for a struct with an unsized tail is not called when its box is dropped (the fields are).
 - `str` tails are not tested: no coercion makes one (rustc has none either).
