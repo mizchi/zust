@@ -1,0 +1,58 @@
+{
+  "case": "energy",
+  "hashes_sha256": {
+    "TASK.md": "fecabb9298549520c680f125b9cc301a2215f0d8346eea11f5619048b10a35ad",
+    "CASE.md": "9b0d7ebeae6c65296ca6db701af76cc653bbc9eaf571e2f47ba34fd96bcaac5e",
+    "README.md": "0df862c22e782a79584ad223682b574dc14509776a45b069d2c26c04ed308f20",
+    "zsc": "f9beff151e7fd4cecadecfd60076c22722c0d69406be37095bd0ecc979c05821",
+    "zustc": "ff800802f7534225411a7c54ea7515778a5d95ae924a2a11bdd4c6f4d32394b0"
+  },
+  "attempts": [
+    {
+      "source": "@wasm export fn energy(xs: F32Array) -> f32 {\n  let mut sum: f32 = 0.0;\n  for x in xs {\n    sum += x * x;\n  }\n  sum\n}\n\nexport fn has_signal(xs: F32Array) -> bool {\n  energy(xs) > 0.0\n}\n",
+      "exit_code": "0\n",
+      "compiler_log": "zsc: answer.zsc → out/answer.js, .d.ts (front 1.0 ms; wasm layer via zustc 395.0 ms, 12818 bytes)\n"
+    }
+  ],
+  "answer": "@wasm export fn energy(xs: F32Array) -> f32 {\n  let mut sum: f32 = 0.0;\n  for x in xs {\n    sum += x * x;\n  }\n  sum\n}\n\nexport fn has_signal(xs: F32Array) -> bool {\n  energy(xs) > 0.0\n}\n",
+  "executor_test": "import assert from 'node:assert/strict';\nimport { energy, has_signal } from './out/answer.js';\n\nfor (const values of [[], [0, -0], [3, -4], [0.1, -0.2, 0.3], [4096, 1, 1, 1], [NaN], [Infinity]]) {\n  const xs = new Float32Array(values);\n  const expected = xs.reduce((sum, x) => Math.fround(sum + Math.fround(x * x)), 0);\n  assert.equal(energy(xs), expected);\n  assert.equal(has_signal(xs), expected > 0);\n}\n",
+  "feedback": "「文法(現時点の案と決定事項)」にある属性の順序を見て、最初から energy は `@wasm export fn`、has_signal は `export fn` と書くと予想した。「数値専用の配列」で JS の Float32Array に対応する型名が F32Array であり、for で要素を取り出せることを確認した。「ローカルな可変性とループ」に沿って合計を可変変数とし、「数値」の小数リテラルの規則に従って初期値の型を f32 と明示した。\n\n迷ったのは、Node.js から生成関数を呼ぶ前に Wasm の初期化が必要かどうかだった。「Node.js」で README を検索して、生成 ES モジュールの import だけでよいと分かった。手順自体は使えたが、冒頭の生成ファイル一覧から呼び出し例に移るリンクがあると探しやすい。\n\nコンパイルは初回で成功し、書き直しや再コンパイルはなかった。実装前に Node.js の確認を走らせたときだけ、生成モジュールがまだ存在せず想定どおり失敗した。コンパイル後は同じ確認が通った。空配列、符号付きゼロ、負の入力、計算途中の f32 丸め、NaN、Infinity を含む全 7 ケースで両関数を検査した。生成 JS でも energy が Wasm の関数を呼び、has_signal が通常の JS で比較していることを確認した。\n",
+  "verification": {
+    "task": "energy",
+    "passed": true,
+    "checks": [
+      {
+        "name": "compile",
+        "passed": true
+      },
+      {
+        "name": "empty",
+        "passed": true
+      },
+      {
+        "name": "zero",
+        "passed": true
+      },
+      {
+        "name": "mixed signs",
+        "passed": true
+      },
+      {
+        "name": "fractional",
+        "passed": true
+      },
+      {
+        "name": "export spelling",
+        "passed": true
+      },
+      {
+        "name": "typed JS API",
+        "passed": true
+      },
+      {
+        "name": "wasm energy and JS has_signal",
+        "passed": true
+      }
+    ]
+  }
+}

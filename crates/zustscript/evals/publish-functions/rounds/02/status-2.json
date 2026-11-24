@@ -1,0 +1,59 @@
+{
+  "case": "status",
+  "hashes_sha256": {
+    "TASK.md": "fecabb9298549520c680f125b9cc301a2215f0d8346eea11f5619048b10a35ad",
+    "CASE.md": "0fca5950c1e6c35b1d5e07a43b85e3d5f2f780868babe64b77166e7e582e6083",
+    "README.md": "0df862c22e782a79584ad223682b574dc14509776a45b069d2c26c04ed308f20",
+    "zsc": "f9beff151e7fd4cecadecfd60076c22722c0d69406be37095bd0ecc979c05821",
+    "zustc": "ff800802f7534225411a7c54ea7515778a5d95ae924a2a11bdd4c6f4d32394b0",
+    "model.ts": "71c03c41c7ae3341b49eb5b9d173e357cc3d85b76e919deeac402b7979656f47"
+  },
+  "attempts": [
+    {
+      "source": "import type { Shipment } from \"./model.ts\";\n\nfn format_code(code: String) -> String {\n  \"便 \" + code\n}\n\nexport fn label(shipment: Shipment) -> String {\n  match shipment {\n    Waiting => \"準備中\",\n    Shipped(code) => format_code(code)\n  }\n}\n",
+      "exit_code": "0\n",
+      "compiler_log": "zsc: answer.zsc → out/answer.js, .d.ts (front 0.8 ms)\n"
+    }
+  ],
+  "answer": "import type { Shipment } from \"./model.ts\";\n\nfn format_code(code: String) -> String {\n  \"便 \" + code\n}\n\nexport fn label(shipment: Shipment) -> String {\n  match shipment {\n    Waiting => \"準備中\",\n    Shipped(code) => format_code(code)\n  }\n}\n",
+  "executor_test": "import assert from \"node:assert/strict\";\nimport * as api from \"./out/answer.js\";\n\nassert.equal(api.label({ state: \"waiting\" }), \"準備中\");\nassert.equal(api.label({ state: \"shipped\", code: \"ABC-7\" }), \"便 ABC-7\");\nassert.equal(api.label({ state: \"shipped\", code: \"\" }), \"便 \");\nassert.equal(\"format_code\" in api, false);\n",
+  "feedback": "README「文法(現時点の案と決定事項)」の関数例に従い、最初から label を export fn、format_code を fn と書くつもりだった。「TS の型の取り込み」の Idle と Busy(n) の例を見て、元のタグ waiting と shipped は Waiting と Shipped(code) で照合できると判断した。文字列連結は同じ節の display にある + を使った。\n\n迷ったのは、タグしかない waiting を Waiting() と書くかどうかだった。空の括弧を付けないという説明に該当する例があり、実装前に解決できた。例は union の長い箇条書きの途中にある。改善するなら、TS の union 定義と対応する zustscript の match を、節冒頭のレコードの例に続くコードブロックで並べてほしい。\n\nコンパイルは初回で成功し、再試行はなかった。実装前の Node.js テストは生成物がなく失敗した。実装後は同じテストで準備中、配送中、空の code、ヘルパーが非公開であることを確認できた。生成された型定義でも label の引数は元の Shipment だった。\n",
+  "verification": {
+    "task": "status",
+    "passed": true,
+    "checks": [
+      {
+        "name": "compile",
+        "passed": true
+      },
+      {
+        "name": "waiting",
+        "passed": true
+      },
+      {
+        "name": "shipped",
+        "passed": true
+      },
+      {
+        "name": "empty code",
+        "passed": true
+      },
+      {
+        "name": "Unicode code",
+        "passed": true
+      },
+      {
+        "name": "export spelling",
+        "passed": true
+      },
+      {
+        "name": "private helper",
+        "passed": true
+      },
+      {
+        "name": "original TS type",
+        "passed": true
+      }
+    ]
+  }
+}

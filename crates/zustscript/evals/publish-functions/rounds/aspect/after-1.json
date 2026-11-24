@@ -1,0 +1,63 @@
+{
+  "case": "aspect",
+  "hashes_sha256": {
+    "TASK.md": "fecabb9298549520c680f125b9cc301a2215f0d8346eea11f5619048b10a35ad",
+    "CASE.md": "553ae0fc96b14434941295b40398f7b8f9e45b74d8e01e43851672369b7bd6ea",
+    "README.md": "362b0c9d339ce45a337ec8bf6a66b8ed9c98e70a19f431e99502071a49130f02",
+    "zsc": "f9beff151e7fd4cecadecfd60076c22722c0d69406be37095bd0ecc979c05821",
+    "zustc": "ff800802f7534225411a7c54ea7515778a5d95ae924a2a11bdd4c6f4d32394b0",
+    "model.ts": "2158b40fa905ac393d44ac00dc07bfc453c9fe3206d7807349e2f460d98a03a9"
+  },
+  "attempts": [
+    {
+      "source": "import type { Viewport } from \"./model.ts\";\n\nexport fn aspect(viewport: Viewport) -> f64 {\n  match viewport {\n    Hidden => 0.0,\n    Rect(height, width) => if height == 0.0 { 0.0 } else { width / height },\n  }\n}\n",
+      "exit_code": "0\n",
+      "compiler_log": "zsc: answer.zsc → out/answer.js, .d.ts (front 1.7 ms)\n"
+    }
+  ],
+  "answer": "import type { Viewport } from \"./model.ts\";\n\nexport fn aspect(viewport: Viewport) -> f64 {\n  match viewport {\n    Hidden => 0.0,\n    Rect(height, width) => if height == 0.0 { 0.0 } else { width / height },\n  }\n}\n",
+  "executor_test": "import assert from \"node:assert/strict\";\nimport { aspect } from \"./out/answer.js\";\n\nassert.equal(aspect({ kind: \"rect\", width: 4.5, height: 2.5 }), 1.8);\nassert.equal(aspect({ kind: \"rect\", width: 9, height: 0 }), 0);\nassert.equal(aspect({ kind: \"hidden\" }), 0);\n",
+  "feedback": "「文法」の公開関数の説明と「TS の型の取り込み」の State の例から、最初の案は `import type` と `export fn` を使い、`match viewport` で `Hidden` と `Rect(height, width)` を分ける形だった。「数値」の節を参照して分母の比較も戻り値も `f64` に揃えた。\n\n迷ったのは Rect の引数の順序だった。比を計算する順序は幅、高さだが、model.ts の宣言では高さ、幅となる。State の例の直後に「TS での宣言順」と明記されており、型の節だけで解決できた。値を二つ持つ実際のパターンまで見たい場合は、下の Shape の説明にも Rect の型しか出てこない。Shape の宣言と `Rect(w, h) => w / h` を並べると、多引数の対応も一目で確認できる。\n\nコンパイルは初回で成功し、再試行はなかった。実装前の Node テストは生成物が存在せず失敗した。実装後は同じテストで小数の比 4.5 ÷ 2.5、非表示、高さゼロの全件が通った。\n",
+  "verification": {
+    "task": "aspect",
+    "passed": true,
+    "checks": [
+      {
+        "name": "compile",
+        "passed": true
+      },
+      {
+        "name": "hidden",
+        "passed": true
+      },
+      {
+        "name": "wide",
+        "passed": true
+      },
+      {
+        "name": "tall, different JS key order",
+        "passed": true
+      },
+      {
+        "name": "fractional dimensions",
+        "passed": true
+      },
+      {
+        "name": "zero height",
+        "passed": true
+      },
+      {
+        "name": "zero width",
+        "passed": true
+      },
+      {
+        "name": "export spelling",
+        "passed": true
+      },
+      {
+        "name": "original TS type",
+        "passed": true
+      }
+    ]
+  }
+}
