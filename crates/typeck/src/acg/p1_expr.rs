@@ -3794,6 +3794,34 @@ impl Cx<'_> {
                 }
             }
         }
+        // (`<J as PartialEq<str>>::eq(a, b)`: the program's impl for that right-hand side, `J::<PartialEq<str>>::eq`
+        // (`ne` is its negation), which `a == b` would not find from b's type alone (`&&str` coerces to `&str`))
+        if let (Expr::Path(Some(qs), p), [a, b]) = (&**func, cargs.as_slice()) {
+            let n = p.segs.len();
+            if n >= 2 && p.segs[n - 2].name == "PartialEq" && matches!(p.segs[n - 1].name.as_str(), "eq" | "ne") && !self.prog.peq.is_empty() {
+                if let [GArg::Ty(rt)] = p.segs[n - 2].args.as_slice() {
+                    if let (Ok(st), Ok(r)) = (self.parse_ty(qs), self.parse_ty(rt)) {
+                        let (sr, rr) = (Ty::Ref(false, intern(st)), Ty::Ref(false, intern(r)));
+                        let f = self.prog.peq.iter().copied().find(|&f| {
+                            let sg = &self.prog.sigs[f as usize];
+                            sg.generics.is_empty() && sg.params.len() == 2 && sg.params[0] == sr && sg.params[1] == rr
+                        });
+                        if let Some(f) = f {
+                            if p.segs[n - 1].name == "ne" {
+                                let mut q = p.clone();
+                                q.segs[n - 1].name = "eq".into();
+                                q.segs[n - 1].text = "eq".into();
+                                let call = Expr::Call(Box::new(Expr::Path(Some(qs.clone()), q)), cargs.clone());
+                                let ne = self.keep_expr(Expr::Unary("!".into(), Box::new(Expr::Paren(Box::new(call))), Default::default()));
+                                return self.expr(ne, expected);
+                            }
+                            let args: [&Expr; 2] = [a, b];
+                            return self.call_fn(f, None, &args, None, Some(Ty::Bool), SP);
+                        }
+                    }
+                }
+            }
+        }
         // (`<T as Clone>::clone(x)`: `(x).clone()` naming its trait (not an inherent `clone` of T), for x: &T, a derive's
         // clone too; x of another referent is mismatched types (`<u8 as Clone>::clone(&1u32)`))
         if let (Expr::Path(Some(qs), p), [x]) = (&**func, cargs.as_slice()) {
@@ -3872,7 +3900,9 @@ impl Cx<'_> {
             if let [ts, m] = p.segs.as_slice() {
                 if m.name == "from" && ts.args.is_empty() && m.args.is_empty() {
                     if let Some(t) = Ty::prim(&ts.name).filter(|t| t.is_int() || t.is_float()) {
-                        if self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none() {
+                        // (the program's own `from` of the number is one of another trait's; its `impl From<J> for f64`
+                        // leaves the numbers' widening `from`)
+                        if self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_none() || self.trait_candidate(&format!("{}::from", ts.name), "From").is_some() {
                             if let Some(a) = self.peek(x).filter(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char)) {
                                 // (not `f32::from(3.14)`: an unsuffixed float literal falls back to f32 there, which rustc accepts;
                                 // `f32::from(1f64)` is E0277)
@@ -3885,10 +3915,15 @@ impl Cx<'_> {
                 }
             }
         }
-        // `i32::try_from(x)` (an integer type): `x.try_into()` to that type
+        // `i32::try_from(x)` (an integer type): `x.try_into()` to that type; not of a value of another type with the
+        // program's `impl TryFrom<J> for u32`, which is called as written
         if let (Expr::Path(None, p), [x]) = (&**func, cargs.as_slice()) {
             if p.segs.len() == 2 && p.segs[1].name == "try_from" {
-                if let Some(t) = Ty::from_suffix(&p.segs[0].name).filter(|t| t.is_int()) {
+                let own = || {
+                    self.trait_candidate(&format!("{}::try_from", p.segs[0].name), "TryFrom").is_some()
+                        && !self.peek(x).is_some_and(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char))
+                };
+                if let Some(t) = Ty::from_suffix(&p.segs[0].name).filter(|t| t.is_int() && !own()) {
                     if let Some(rt) = self.result_of(t, "TryFromIntError") {
                         let e = self.keep_expr(mcall(x.clone(), "try_into", vec![]));
                         self.try_into_hint = Some(t);

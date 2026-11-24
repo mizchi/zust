@@ -48,6 +48,15 @@ impl Cx<'_> {
                 return self.expr(ne, expected);
             }
         }
+        // (`-&v` / `!&v` with `impl Neg for &J`: that impl's, `(&v).__ref_neg()`)
+        if let ("-" | "!", Some(Ty::Ref(_, Ty::Struct(sid)))) = (op, self.peek(x)) {
+            let m = if op == "-" { "__ref_neg" } else { "__ref_not" };
+            if self.prog.method(*sid, m).is_some() {
+                let ne = mcall(paren(x), m, vec![]);
+                let ne = self.keep_expr(ne);
+                return self.expr(ne, expected);
+            }
+        }
         // 負のリテラル (`-128i8` / `-2147483648`) はその場で値にする (検査で MIN の符号反転にしない)
         if op == "-" {
             if let Expr::Lit(t, _) = strip_paren(x) {
@@ -348,6 +357,8 @@ impl Cx<'_> {
                 ("&", false) => "bitand",
                 ("|", false) => "bitor",
                 ("^", false) => "bitxor",
+                ("<<", false) => "shl",
+                (">>", false) => "shr",
                 _ => "",
             };
             let rm = format!("__ref_{m}");

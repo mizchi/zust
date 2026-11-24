@@ -147,13 +147,20 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   macro calls in an item's expression, doc comments on a cfg'd-out item, `pub extern crate`, `::dep::path`, an
   `extern` block in a function body, a type bound in a `where` clause, `AssertUnwindSafe`, `LocalKey` and
   `LazyCell` (as types of the prelude), the unwind-safety auto traits, default type parameters (`LazyCell<T, F =
-  fn() -> T>` used as `LazyCell<T>`), std items imported under another name (`use core::cell::LazyCell as Lazy;`).
-  It stops on:
-  - inherent impls for two instances with one method name, `impl<T: Copy> Nullable<&T> { fn copied }` beside
-    `impl<T: Copy> Nullable<&mut T> { fn copied }` (`nullable.rs:256`, as std's `Option<&T>::copied`): a duplicate
-    definition.
+  fn() -> T>` used as `LazyCell<T>`), std items imported under another name (`use core::cell::LazyCell as Lazy;`),
+  inherent impls for two disjoint instances with one method name (`Nullable<&T>::copied` / `Nullable<&mut T>::copied`),
+  a module named `__rt`, const generic parameters inside a module, a nested `unsafe extern "C" fn`, names a glob
+  re-export brings in through chains of globs (`use crate::{convert::*}` with `pub use self::traits::*;`, also in
+  paths `crate::convert::WasmRet`), the program's `impl TryFrom<X> for T` / `impl From<J> for f64`, two impls of
+  one trait for one type with their own associated types (`TryFrom<JsValue>` / `TryFrom<&JsValue>` for f64), impls
+  told apart by a parameter's bound (`Result<T: Into<JsValue>, E>` beside `Result<(), E>`), `<J as
+  PartialEq<str>>::eq(..)`, operators' impls for references (`-&v`, `&a << &b`, `BitAnd::bitand(&a, b)`) and
+  `<&'static J as BitAnd<&'static J>>::Output` beside another trait's `Output`
+  (tests/probe/w1_items.rs). It stops on:
+  - `lib.rs:1271` (a `#[wasm_bindgen]` expansion): "cannot find value (unsupported path)".
   - `LocalKey<T>` is a type with `with`, but a `thread_local!` is not one of them yet (each has a key type of its
     own), so a `&'static LocalKey<T>` cannot point at one.
+  - a method call on a `Box<[T]>` with the program's `impl Tr for Box<[T]>` derefs to `[T]` and misses it.
 - Found while building memchr, not fixed:
   - a generic struct literal whose field is a `<v128 as Tr>::f(..)` call (`Pair { v1: <v128 as Vector>::splat(b) }`)
     does not infer `V = v128` ("expected `T0`, found `v128`"); an annotation or an intrinsic's value does;

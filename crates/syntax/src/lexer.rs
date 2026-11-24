@@ -829,6 +829,18 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 k += 1;
                 continue;
             }
+            // (`unsafe fn` / `extern "C" fn` / `unsafe extern "C" fn` / `async fn`: the `fn`)
+            let qual_fn = |mut j: usize| -> Option<usize> {
+                let mut any = false;
+                while j < toks.len() && toks[j].0 == 0 && matches!(tok(j), b"unsafe" | b"async" | b"extern") {
+                    if tok(j) == b"extern" && j + 1 < toks.len() && toks[j + 1].0 == 2 {
+                        j += 1;
+                    }
+                    j += 1;
+                    any = true;
+                }
+                (any && j + 1 < toks.len() && toks[j].0 == 0 && tok(j) == b"fn" && toks[j + 1].0 == 0).then_some(j)
+            };
             let ik = if t == b"pub" && k + 1 < toks.len() {
                 let mut j = k + 1;
                 if is_sym(j, b"(") {
@@ -839,9 +851,13 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 }
                 if j < toks.len() && toks[j].0 == 0 && matches!(tok(j), b"fn" | b"struct" | b"enum" | b"const" | b"use" | b"static" | b"mod" | b"trait" | b"type" | b"union") {
                     j
+                } else if let Some(f) = qual_fn(j) {
+                    f
                 } else {
                     k
                 }
+            } else if let Some(f) = qual_fn(k) {
+                f
             } else if t == b"unsafe" && k + 1 < toks.len() && tok(k + 1) == b"extern" {
                 // (`unsafe extern "C" { .. }`)
                 k + 1
@@ -1692,7 +1708,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // (`*const T` の const / `&'static` の static は定義でない)
             let after_star = k >= 1 && is_sym(k - 1, b'*');
             let after_tick = toks[k].1 >= 1 && s[toks[k].1 - 1] == b'\'';
-            if matches!(kw, b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"const" | b"static" | b"union") && k + 1 < toks.len() && !after_star && !after_tick {
+            // (nor a const generic parameter, `fn f<const N: usize, const M: usize>`: an item is never after `<` / `,`)
+            let generic = kw == b"const" && k >= 1 && (is_sym(k - 1, b'<') || is_sym(k - 1, b','));
+            if matches!(kw, b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"const" | b"static" | b"union") && k + 1 < toks.len() && !after_star && !after_tick && !generic {
                 let nk = if kw == b"static" && is_id(k + 1, b"mut") { k + 2 } else { k + 1 };
                 // (`const fn f` は fn で数える)
                 if nk < toks.len() && toks[nk].0 == 0 && !(kw == b"const" && is_id(nk, b"fn")) && tok(nk) != b"_" {
@@ -2010,7 +2028,16 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let mut progress = false;
         let mut rest = vec![];
         for p in std::mem::take(&mut pending) {
-            let found = imports.iter().find(|i| i.0 == p.2 && i.1 == p.3).map(|i| i.2.clone());
+            // (or a glob re-export of that module, `pub use self::traits::*;`: an item of the module it brings in, or
+            // a name that module imports)
+            // (one item only: two globs that bring in two of the name make it ambiguous)
+            let found = imports.iter().find(|i| i.0 == p.2 && i.1 == p.3).map(|i| i.2.clone()).or_else(|| {
+                let mut cands = globs.iter().filter(|g| g.0 == p.2).filter_map(|g| {
+                    renamed_in(g.1, &p.3).or_else(|| imports.iter().find(|i| i.0 == g.1 && i.1 == p.3).map(|i| i.2.clone()))
+                });
+                let first = cands.next()?;
+                cands.all(|c| c == first).then_some(first)
+            });
             match found {
                 Some(nn) => {
                     match p.4 {
@@ -2353,6 +2380,42 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     // (the items each scope defines, for the glob imports they shadow: built only when there is a glob)
     let own_defs: LSet<(usize, &[u8])> =
         if globs.is_empty() { Default::default() } else { defs.iter().map(|d| (d.1, d.0.as_slice())).collect() };
+    // (a name the modules that `m` glob-imports bring in, renamed: through chains of them, `pub use convert::*;` at
+    // the root with `pub use self::traits::*;` in `convert`; a module's own item of the name shadows its globs)
+    // (two globs that bring in two items of the name make it ambiguous (E0659): none, as for a name not found)
+    let glob_find = |m: usize, n: &[u8]| -> Option<Vec<u8>> {
+        // (the modules seen, and those whose globs are still to follow: not past one that has the name itself)
+        let mut seen = vec![m];
+        let mut queue = vec![m];
+        let mut found: Option<Vec<u8>> = None;
+        let mut at = 0;
+        while at < queue.len() && seen.len() < 64 {
+            let cur = queue[at];
+            at += 1;
+            for g in globs.iter().filter(|g| g.0 == cur) {
+                if seen.contains(&g.1) {
+                    continue;
+                }
+                seen.push(g.1);
+                if let Some(nn) = renamed_in(g.1, n).or_else(|| imported(g.1, n)) {
+                    if found.as_ref().is_some_and(|f| *f != nn) {
+                        return None;
+                    }
+                    found = Some(nn);
+                } else if own_defs.contains(&(g.1, n)) {
+                    // (an item of the name that keeps it: the module's own, which its globs do not reach past)
+                    let own = n.to_vec();
+                    if found.as_ref().is_some_and(|f| *f != own) {
+                        return None;
+                    }
+                    found = Some(own);
+                } else {
+                    queue.push(g.1);
+                }
+            }
+        }
+        found.filter(|f| f.as_slice() != n)
+    };
     let mut k = 0;
     while k < toks.len() {
         if toks[k].0 != 0 || skip[k] || local_tok[k] {
@@ -2405,7 +2468,15 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                         continue;
                     }
                     let re = || imported(m, &segs[cut]);
-                    if let Some(nn) = renamed_in(m, &segs[cut]).or_else(re) {
+                    // (through a glob re-export of the module, `crate::convert::WasmRet` with `pub use self::traits::*;`
+                    // in `convert`, unless the module has an item of that name)
+                    let via_glob = || {
+                        if own_defs.contains(&(m, segs[cut].as_slice())) {
+                            return None;
+                        }
+                        glob_find(m, &segs[cut])
+                    };
+                    if let Some(nn) = renamed_in(m, &segs[cut]).or_else(re).or_else(via_glob) {
                         // segs[..=cut] を新しい名前にする (`::re::label`: the leading `::` too, as the name is the item's)
                         repl.push((if leading { k - 2 } else { k }, k + 3 * cut, nn));
                         done = true;
@@ -2459,9 +2530,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             let nn = in_block()
                 .or_else(|| renamed_in(sc, n))
                 .or_else(|| imported(sc, n))
+                // (`use super::*;` は親が use で取り込んだ名前も見える; through chains of globs too, `use crate::convert::*;`
+                // with `pub use self::traits::*;` in `convert`)
                 .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| renamed_in(g.1, n)) })
-                // (`use super::*;` は親が use で取り込んだ名前も見える)
-                .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| imported(g.1, n)) });
+                .or_else(|| if own() { None } else { glob_find(sc, n) });
             // (not a macro's name: `use core::panic as p;` then `p!()` stays as it is written)
             let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));
             // (a name before a `:` only when it is no field: the walk back to a `where` is for a name that is renamed)

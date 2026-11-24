@@ -553,6 +553,8 @@ pub struct AssocDef {
     pub ngen: usize,
     /// a generic associated type's own parameters (`type Pointer<T>`: 1), Params after the impl's and a mark
     pub ngat: usize,
+    /// the impl's trait (its name without arguments)
+    pub tr: Option<String>,
 }
 
 /// (the impl's parameter count, the generic associated type's) of an associated type's parameter names: those after
@@ -1333,7 +1335,8 @@ impl Program {
                 let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
                 if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
                     let (ngen, ngat) = gat_split(&gn);
-                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat });
+                    let tr = impl_trait_of(items, sums, ii);
+                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat, tr });
                     early.push((ii, k));
                 }
             }
@@ -1470,14 +1473,32 @@ impl Program {
                     value,
                     ngen,
                     ngat,
+                    tr: impl_trait_of(items, sums, ii),
                 });
             }
         }
         // (the impls of each trait for each type so far: their self types and trait arguments, and parameters)
         let mut self_tys: FxMap<(&str, &str), Vec<usize>> = FxMap::default();
+        // (the associated types of each trait impl, by its header: two impls for one type, `impl TryFrom<A> for f64`
+        // and `impl TryFrom<&A> for f64`, or `impl Not for &J` and `impl Neg for &J`, each have their own
+        // `Self::Error` / `Self::Output`, which their functions' signatures name)
+        let mut own_assocs: FxMap<usize, Vec<(&TySyn, &str, &TySyn)>> = FxMap::default();
+        for (it, sm) in items.iter().zip(sums) {
+            if let crate::lexer::ItemKind::ImplMember(h) = it.kind {
+                if sums[h as usize].impl_trait.is_some() {
+                    for a in sm.assocs.iter().filter(|a| !a.generics.iter().any(|g| g == "#gat")) {
+                        own_assocs.entry(h as usize).or_default().push((&a.self_ty, a.name.as_str(), &a.value));
+                    }
+                }
+            }
+        }
         // 3. 関数
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             let first = p.names.len() as u32;
+            let own = match it.kind {
+                crate::lexer::ItemKind::ImplMember(h) => own_assocs.get(&(h as usize)),
+                _ => None,
+            };
             let cnames: Vec<String> = sm.closures.iter().map(|c| format!("{}::call", c.name)).collect();
             let fns = sm
                 .fns
@@ -1491,7 +1512,16 @@ impl Program {
                         // (the same foreign fn declared in two `extern` blocks: one more name for the same symbol)
                         format!("{name}#extern{}", p.names.len())
                     } else {
-                        if ss.impl_trait.is_none() && p.sigs[prev as usize].impl_trait.is_none() {
+                        // (two inherent impls' methods of one name are one only when their self types can meet:
+                        // `impl<T: Copy> W<&T> { fn copied }` beside `impl<T: Copy> W<&mut T> { fn copied }`, or
+                        // `W<u8>` / `W<u16>`, are two, as rustc has them; the receiver picks)
+                        let apart = || {
+                            let gn: Vec<&str> = ss.generics.iter().map(|g| g.0.as_str()).collect();
+                            let mine = ss.self_ty.as_ref().filter(|_| ss.has_self).and_then(|t| p.resolve_g(t, &gn).ok());
+                            let others: Vec<u32> = p.overloads.get(name).cloned().unwrap_or_else(|| vec![prev]);
+                            mine.is_some_and(|m| others.iter().all(|&o| p.sigs[o as usize].has_self && p.sigs[o as usize].impl_trait.is_none() && p.sigs[o as usize].self_ty.is_some_and(|t| p.disjoint(m, t))))
+                        };
+                        if ss.impl_trait.is_none() && p.sigs[prev as usize].impl_trait.is_none() && !apart() {
                             // (in two impl blocks, E0592 is reported at the first definition)
                             let line = match p.item_of.get(prev as usize).copied().flatten().map(|k| &items[k as usize]) {
                                 Some(pit) if matches!((pit.kind, it.kind), (crate::lexer::ItemKind::ImplMember(a), crate::lexer::ItemKind::ImplMember(b)) if a != b) => pit.line,
@@ -1508,6 +1538,18 @@ impl Program {
                     name.clone()
                 };
                 let gnames: Vec<&str> = ss.generics.iter().map(|g| g.0.as_str()).collect();
+                let owned;
+                let ss = match own {
+                    Some(o) if ss.params.iter().chain(std::iter::once(&ss.ret)).any(syn_has_assoc) => {
+                        let mut c = ss.clone();
+                        for t in c.params.iter_mut().chain(std::iter::once(&mut c.ret)) {
+                            *t = own_assoc_syn(t, o);
+                        }
+                        owned = c;
+                        &owned
+                    }
+                    _ => ss,
+                };
                 let mut params = vec![];
                 for t in &ss.params {
                     params.push(
@@ -1729,6 +1771,20 @@ impl Program {
                     let st = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok());
                     let args: Option<Vec<Ty>> = sm.impl_trait_args.iter().map(|a| p.resolve_g(a, &gn).ok()).collect();
                     if let (Some(st), Some(args)) = (st, args) {
+                        // (one std's blanket impls give already, E0119: `impl<T> From<T> for T`, `impl<T, U: Into<T>>
+                        // TryFrom<U> for T` (U is T, or the program's `impl From<U> for T`), `impl<T> AsRef<T> for Box<T>`)
+                        let from_too = || {
+                            sums.iter().any(|o| o.impl_trait.as_deref() == Some("From") && o.impl_self_ty == sm.impl_self_ty && o.impl_trait_args == sm.impl_trait_args)
+                        };
+                        let std_has = match (tr.as_str(), args.as_slice()) {
+                            ("From", [a]) => *a == st,
+                            ("TryFrom", [a]) => *a == st || from_too(),
+                            ("AsRef", [a]) => st == Ty::Box(intern(*a)),
+                            _ => false,
+                        };
+                        if std_has && ii < user {
+                            return Err(format!("{}:1: conflicting implementations of trait `{tr}<{}>` for type `{}` (E0119)", it.line, p.tn(args[0]), p.tn(st)));
+                        }
                         if sm.impl_trait_lts {
                             p.impl_targs_lts.insert((tr.clone(), st));
                         }
@@ -1760,7 +1816,7 @@ impl Program {
             let vec_ty = crate::simd_sig::vector_name(sn).filter(|_| !p.struct_index.contains_key(sn.as_str()) && !matches!(sm.impl_self_ty, Some(TySyn::Ref(..))));
             if let Some(pt) = Ty::prim(sn).or((sn == "str").then_some(Ty::Str)).or((sn == "#tuple0").then_some(Ty::Unit)).or(vec_ty) {
                 let dup = !p.prim_impls.insert((pt, tr.clone()));
-                if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup) {
+                if impl_overlaps(&mut self_tys, sums, user, ii, sn, tr, dup) {
                     return Err(format!(
                         "{}:1: conflicting implementations of trait `{tr}` for `{sn}`",
                         it.line
@@ -1770,7 +1826,11 @@ impl Program {
             }
             // (`impl Tr for Box<S>`: a trait of that Box type, as for primitives; `impl<T> Tr for Box<T>` has no single type)
             if sn == "Box" && !p.struct_index.contains_key("Box") {
-                box_impls.push((tr.clone(), it.line as usize));
+                // (one for a reference to a Box, `impl Tr for &Box<str>`, is a reference's, which a blanket impl of
+                // `T` can also cover only when the reference meets its bounds)
+                if !matches!(sm.impl_self_ty, Some(TySyn::Ref(..))) {
+                    box_impls.push((tr.clone(), it.line as usize));
+                }
                 if let Some(t) = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &[]).ok()) {
                     p.prim_impls.insert((t, tr.clone()));
                 }
@@ -1857,7 +1917,7 @@ impl Program {
                 p.static_copy.insert(sid);
             }
 
-            if impl_overlaps(&mut self_tys, sums, ii, sn, tr, dup)
+            if impl_overlaps(&mut self_tys, sums, user, ii, sn, tr, dup)
                 && !matches!(
                     tr.as_str(),
                     "From" | "TryFrom" | "Add" | "Sub" | "Mul" | "Div" | "Rem" | "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr"
@@ -1878,7 +1938,8 @@ impl Program {
             }
         }
         // (`impl<T> Tr for T` and `impl Tr for Box<U>` overlap: Box<U> is one of the T, E0119)
-        if let Some((tr, line)) = box_impls.iter().find(|(tr, _)| p.blanket_traits.contains(tr)) {
+        // (not one for references, `impl<T: Tr> Tr for &T`: a Box is no reference)
+        if let Some((tr, line)) = box_impls.iter().find(|(tr, _)| bare_blankets.contains(tr)) {
             return Err(format!("{line}:1: conflicting implementations of trait `{tr}` for type `Box<_>`"));
         }
         // derive は実装扱い (Clone / Copy など。中身は常にビットコピーなので本体は要らない)
@@ -2506,6 +2567,24 @@ impl Program {
                 }
             }
         }
+        // (`t: Into<X>` for a type X of the program's: std's `impl<T, U: From<T>> Into<U> for T`, so X's `From<t>`, X
+        // itself, or the program's `impl Into<X> for t`; anything else as before)
+        if let Some(x) = tr.strip_prefix("Into").and_then(|r| r.trim().strip_prefix('<')).and_then(|r| r.strip_suffix('>')).map(str::trim) {
+            if let Some(&xs) = self.struct_index.get(x).filter(|&&xs| self.structs[xs as usize].generics.is_empty()) {
+                let xt = Ty::Struct(xs);
+                let hit = |trn: &str, st: Ty, arg: Ty| {
+                    self.impl_targs.get(trn).is_some_and(|v| {
+                        v.iter().any(|(s, a, n)| {
+                            let mut sol = vec![None; *n];
+                            a.len() == 1 && self.match_ty(*s, st, &mut sol) && self.match_ty(a[0], arg, &mut sol)
+                        })
+                    })
+                };
+                if t == xt || hit("From", xt, t) || hit("Into", t, xt) {
+                    return true;
+                }
+            }
+        }
         // `Iterator<Item = T>` は trait の名前で見る (関連型の制約は呼び出し側で解く)
         if let Some(i) = tr.find('<') {
             if parse_fn_bound(tr).is_none() {
@@ -2898,9 +2977,10 @@ impl Program {
             }
             TySyn::Assoc(b, n) => {
                 let bt = r(b)?;
+                let (n, tr) = crate::ast_types::split_trait_assoc(n);
                 let (n, std_impls) = match n.strip_prefix(crate::ast_types::NO_STD_ASSOC) {
                     Some(x) => (x, false),
-                    None => (n.as_str(), true),
+                    None => (n, true),
                 };
                 if self.has_param(bt) {
                     Ty::Assoc(intern_assoc(AssocTy {
@@ -2908,7 +2988,7 @@ impl Program {
                         name: n.to_string(),
                     }))
                 } else {
-                    match self.assoc_of_with(bt, n, std_impls) {
+                    match tr.and_then(|tr| self.assoc_of_trait(bt, n, tr)).or_else(|| self.assoc_of_with(bt, n, std_impls)) {
                         Some(t) => t,
                         None => {
                             return Err(format!(
@@ -3969,6 +4049,25 @@ impl Program {
         self.structs[sid as usize].base.unwrap_or(sid)
     }
 
+    /// Whether no type is both a and b (two impls' self types): they differ somewhere neither has a generic
+    /// parameter. `W<u8>` / `W<u16>`, `W<&T>` / `W<&mut T>` are; `W<T>` / `W<u8>` are not
+    pub fn disjoint(&self, a: Ty, b: Ty) -> bool {
+        match (a, b) {
+            (Ty::Param(_), _) | (_, Ty::Param(_)) | (Ty::Assoc(_), _) | (_, Ty::Assoc(_)) => false,
+            (Ty::Ref(m1, x), Ty::Ref(m2, y)) | (Ty::Ptr(m1, x), Ty::Ptr(m2, y)) => m1 != m2 || self.disjoint(*x, *y),
+            (Ty::Array(x, n1), Ty::Array(y, n2)) => n1 != n2 || self.disjoint(*x, *y),
+            (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) => self.disjoint(*x, *y),
+            (Ty::Struct(s1), Ty::Struct(s2)) => {
+                let (b1, b2) = (self.base_of(s1), self.base_of(s2));
+                let (a1, a2) = (&self.structs[s1 as usize].args, &self.structs[s2 as usize].args);
+                b1 != b2 || (a1.len() == a2.len() && a1.iter().zip(a2.iter()).any(|(&x, &y)| self.disjoint(x, y)))
+            }
+            // (fn pointers, dyn: told apart by their shape only when it is plainly another)
+            (Ty::Fn(_), Ty::Fn(_)) | (Ty::Dyn(_), Ty::Dyn(_)) => false,
+            _ => std::mem::discriminant(&a) != std::mem::discriminant(&b),
+        }
+    }
+
     fn relayout_instances(&mut self) {
         for _ in 0..8 {
             let mut ids: Vec<(u32, u32, Vec<Ty>)> =
@@ -4277,6 +4376,20 @@ impl Program {
         self.assoc_of_with(t, name, true)
     }
 
+    /// The associated type `name` of t that an impl of trait tr gives (`<&J as BitAnd>::Output`), when the impls of
+    /// two traits give one of that name for t; None when only one does (assoc_of answers then)
+    pub fn assoc_of_trait(&self, t: Ty, name: &str, tr: &str) -> Option<Ty> {
+        let fits = |a: &AssocDef| a.name == name && a.ngat == 0 && self.match_ty(a.self_ty, t, &mut vec![None; a.ngen]);
+        if self.assocs.iter().filter(|a| fits(a)).nth(1).is_none() {
+            return None;
+        }
+        let a = self.assocs.iter().find(|a| a.tr.as_deref() == Some(tr) && fits(a))?;
+        let mut sol = vec![None; a.ngen];
+        self.match_ty(a.self_ty, t, &mut sol);
+        let args = sol.iter().copied().collect::<Option<Vec<Ty>>>()?;
+        Some(self.subst(a.value, &args))
+    }
+
     /// assoc_of; with std_impls false, not std's impls the prelude does not write out (`<i32 as Local>::Output`)
     pub fn assoc_of_with(&self, t: Ty, name: &str, std_impls: bool) -> Option<Ty> {
         thread_local! {
@@ -4421,6 +4534,23 @@ impl Program {
 
     /// 仮引数型 pt (型パラメータを含む) と実引数型 at を突き合わせて型パラメータを解く
     pub fn match_ty(&self, pt: Ty, at: Ty, sol: &mut [Option<Ty>]) -> bool {
+        self.match_ty_in(pt, at, sol, false)
+    }
+
+    /// match_ty with no coercion: a `&` is no `&mut`, a reference no raw pointer. For the inherent methods of one name
+    /// in impls for disjoint instances (`W<&T>::copied` / `W<&mut T>::copied`): the receiver's own
+    pub fn match_ty_exact(&self, pt: Ty, at: Ty, sol: &mut [Option<Ty>]) -> bool {
+        self.match_ty_in(pt, at, sol, true)
+    }
+
+    fn match_ty_in(&self, pt: Ty, at: Ty, sol: &mut [Option<Ty>], exact: bool) -> bool {
+        if exact {
+            match (pt, at) {
+                (Ty::Ref(m1, _), Ty::Ref(m2, _)) | (Ty::Ptr(m1, _), Ty::Ptr(m2, _)) if m1 != m2 => return false,
+                (Ty::Ptr(..), Ty::Ref(..)) => return false,
+                _ => {}
+            }
+        }
         match (pt, at) {
             // 関連型からは解けない (具体型が分かってから置き換わる)
             (Ty::Assoc(_), _) => true,
@@ -4438,19 +4568,19 @@ impl Program {
             // (`&mut x` passed for a `*mut T` coerces)
             | (Ty::Ptr(_, a), Ty::Ref(_, b))
             | (Ty::Slice(a), Ty::Slice(b))
-            | (Ty::Box(a), Ty::Box(b)) => self.match_ty(*a, *b, sol),
+            | (Ty::Box(a), Ty::Box(b)) => self.match_ty_in(*a, *b, sol, exact),
             // (const ジェネリクスの長さ: 長さを持つ Ty::Array(Unit, m) で解く)
             (Ty::Array(a, n), Ty::Array(b, m)) if n >= CONST_LEN_BASE && m < CONST_LEN_BASE => {
-                self.match_ty(Ty::Param((n - CONST_LEN_BASE) as u8), Ty::Array(intern(Ty::Unit), m), sol) && self.match_ty(*a, *b, sol)
+                self.match_ty_in(Ty::Param((n - CONST_LEN_BASE) as u8), Ty::Array(intern(Ty::Unit), m), sol, exact) && self.match_ty_in(*a, *b, sol, exact)
             }
-            (Ty::Array(a, n), Ty::Array(b, m)) => n == m && self.match_ty(*a, *b, sol),
+            (Ty::Array(a, n), Ty::Array(b, m)) => n == m && self.match_ty_in(*a, *b, sol, exact),
             (Ty::Fn(a), Ty::Fn(b)) if a != b => {
                 a.params.len() == b.params.len()
                     && a.params
                         .iter()
                         .zip(&b.params)
                         .chain([(&a.ret, &b.ret)])
-                        .all(|(&p, &q)| self.match_ty(p, q, sol))
+                        .all(|(&p, &q)| self.match_ty_in(p, q, sol, exact))
             }
             (Ty::Struct(a), Ty::Struct(b)) if a != b => {
                 let (sa, sb) = (&self.structs[a as usize], &self.structs[b as usize]);
@@ -4459,7 +4589,7 @@ impl Program {
                         .args
                         .iter()
                         .zip(&sb.args)
-                        .all(|(&p, &q)| self.match_ty(p, q, sol)),
+                        .all(|(&p, &q)| self.match_ty_in(p, q, sol, exact)),
                     _ => false,
                 }
             }
@@ -5108,7 +5238,7 @@ pub fn char_lit(s: &str) -> Option<char> {
 
 /// The impl of header sm overlaps an earlier impl of trait tr for sn: their self types and trait arguments unify
 /// (`impl<T> Tr for (T, T)` and `impl Tr for (usize, isize)` do not; nor `impl Tr<u8> for S` and `impl Tr<u16> for S`)
-fn impl_overlaps<'a>(seen: &mut FxMap<(&'a str, &'a str), Vec<usize>>, sums: &[Summary], ii: usize, sn: &'a str, tr: &'a str, dup: bool) -> bool {
+fn impl_overlaps<'a>(seen: &mut FxMap<(&'a str, &'a str), Vec<usize>>, sums: &[Summary], user: usize, ii: usize, sn: &'a str, tr: &'a str, dup: bool) -> bool {
     let list = seen.entry((sn, tr)).or_default();
     // (only compared when the type already implements the trait: most impls are the first of their pair)
     let key = |sm: &Summary| {
@@ -5121,11 +5251,52 @@ fn impl_overlaps<'a>(seen: &mut FxMap<(&'a str, &'a str), Vec<usize>>, sums: &[S
         let (t, gs) = key(&sums[ii]);
         list.iter().any(|&k| {
             let (u, g) = key(&sums[k]);
-            syn_unify(&u, &g, &t, &gs, &mut vec![])
+            let mut sub = vec![];
+            // (not when a parameter meets a type its bound cannot hold for: `impl<T: Into<J>, E> Tr for Result<T, E>`
+            // beside `impl<E> Tr for Result<(), E>`, with no `impl From<()> for J`)
+            syn_unify(&u, &g, &t, &gs, &mut sub)
+                && !sub.iter().any(|((side, n), (s2, c))| {
+                    let vars = if *s2 { &gs } else { &g };
+                    let concrete = !matches!(c, TySyn::Named(m) if vars.iter().any(|x| x.strip_prefix('?').unwrap_or(x) == m));
+                    let sm = if *side { &sums[ii] } else { &sums[k] };
+                    concrete && sm.impl_generics.iter().find(|x| x.0 == *n).is_some_and(|x| x.1.iter().any(|b| bound_unmet_syn(b, c, sums, user)))
+                })
         })
     };
     list.push(ii);
     r
+}
+
+/// The bound b cannot hold for the type c (one with no parameters of the impls'): b is `Into<X>` of a type X the
+/// program defines with no `impl From<c> for X` (nor an `Into<X>` that could be c's), or a trait the program
+/// declares with no impl that could be c's. Only for c `()`, a number, a tuple or a named type
+fn bound_unmet_syn(b: &str, c: &TySyn, sums: &[Summary], user: usize) -> bool {
+    if !matches!(c, TySyn::Prim(_) | TySyn::Tuple(_) | TySyn::Named(_)) {
+        return false;
+    }
+    let user = user.min(sums.len());
+    let applies = |s: &Summary, st: &TySyn| {
+        let gs: Vec<String> = s.impl_generics.iter().map(|g| g.0.clone()).collect();
+        syn_unify(st, &gs, c, &[], &mut vec![])
+    };
+    // (the bound as written, `Into < JsValue >`)
+    let b: String = b.chars().filter(|c| !c.is_whitespace()).collect();
+    let b = b.as_str();
+    if let Some(x) = b.strip_prefix("Into<").and_then(|r| r.strip_suffix('>')).map(str::trim) {
+        let local = sums[..user].iter().any(|s| s.structs.iter().any(|d| d.0 == x) || s.enums.iter().any(|d| d.0 == x));
+        if !local || matches!(c, TySyn::Named(n) if n == x) {
+            return false;
+        }
+        return !sums.iter().any(|s| match s.impl_trait.as_deref() {
+            Some("From") => s.impl_self.as_deref() == Some(x) && s.impl_trait_args.first().is_none_or(|a| applies(s, a)),
+            Some("Into") => s.impl_self_ty.as_ref().is_none_or(|st| applies(s, st)),
+            _ => false,
+        });
+    }
+    if b.chars().all(|ch| ch.is_alphanumeric() || ch == '_') && sums[..user].iter().any(|s| s.trait_decl.as_deref() == Some(b)) {
+        return !sums.iter().any(|s| s.impl_trait.as_deref() == Some(b) && s.impl_self_ty.as_ref().is_none_or(|st| applies(s, st)));
+    }
+    false
 }
 
 /// The self types of two impls can be the same type: a and b unify, with the names in ga / gb (the impls' parameters)
@@ -5185,6 +5356,34 @@ fn subst_tysyn(t: &TySyn, ps: &[String], args: &[TySyn]) -> TySyn {
         TySyn::Tuple(v) => TySyn::Tuple(v.iter().map(r).collect()),
         TySyn::FnPtr(v) => TySyn::FnPtr(v.iter().map(r).collect()),
         TySyn::Assoc(b, n) => TySyn::Assoc(Box::new(r(b)), n.clone()),
+        t => t.clone(),
+    }
+}
+
+/// The trait (without its arguments) of the impl that item ii is a member of
+fn impl_trait_of(items: &[SrcItem], sums: &[Summary], ii: usize) -> Option<String> {
+    match items.get(ii)?.kind {
+        crate::lexer::ItemKind::ImplMember(h) => sums.get(h as usize)?.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim().to_string()),
+        _ => None,
+    }
+}
+
+/// t with the impl's own associated types (`Self::Error` in `impl TryFrom<J> for f64 { type Error = i64; .. }`) as
+/// their values: (self type, name, value)
+fn own_assoc_syn(t: &TySyn, own: &[(&TySyn, &str, &TySyn)]) -> TySyn {
+    let r = |t: &TySyn| own_assoc_syn(t, own);
+    match t {
+        TySyn::Assoc(b, n) => match own.iter().find(|o| **b == *o.0 && n == o.1) {
+            Some(o) => o.2.clone(),
+            None => TySyn::Assoc(Box::new(r(b)), n.clone()),
+        },
+        TySyn::App(n, a) => TySyn::App(n.clone(), a.iter().map(r).collect()),
+        TySyn::Ref(m, i) => TySyn::Ref(*m, Box::new(r(i))),
+        TySyn::Ptr(m, i) => TySyn::Ptr(*m, Box::new(r(i))),
+        TySyn::Slice(i) => TySyn::Slice(Box::new(r(i))),
+        TySyn::Array(i, n) => TySyn::Array(Box::new(r(i)), n.clone()),
+        TySyn::Tuple(v) => TySyn::Tuple(v.iter().map(r).collect()),
+        TySyn::FnPtr(v) => TySyn::FnPtr(v.iter().map(r).collect()),
         t => t.clone(),
     }
 }
@@ -5337,8 +5536,11 @@ impl Program {
         let n = p.segs.len();
         while k + 1 < n {
             let s = p.segs[k].name.as_str();
+            // (also one with leading underscores, `__rt::f` (wasm-bindgen's): not zustc's own heads, `__slice::m`)
+            let internal = matches!(s, "__array" | "__slice" | "__fnptr" | "__ptr" | "__never") || s.starts_with("__dyn_") || s.starts_with("__exr");
             let module = matches!(s, "crate" | "self" | "super")
-                || (s.starts_with(|c: char| c.is_ascii_lowercase())
+                || (s.trim_start_matches('_').starts_with(|c: char| c.is_ascii_lowercase())
+                    && !internal
                     && !matches!(s, "std" | "core" | "alloc" | "str" | "char" | "bool")
                     && Ty::prim(s).is_none()
                     && !self.struct_index.contains_key(s)
@@ -5551,8 +5753,9 @@ impl Program {
             2 => {
                 let (ty, m) = (name(0), name(1));
                 // `f64::max` / `f64::sqrt` (関数として): prelude の `__exr_f64_*`、`i32::max` は core::cmp::max
+                // (or a trait's method of the program's, `impl From<J> for f64`: `f64::from`)
                 if ty == "f64" || ty == "f32" {
-                    return self.index.get(&format!("__exr_{ty}_{m}")).copied();
+                    return self.index.get(&format!("__exr_{ty}_{m}")).or_else(|| self.index.get(&format!("{ty}::{m}"))).copied();
                 }
                 if Ty::from_suffix(ty).is_some() && matches!(m, "max" | "min") {
                     return self.index.get(&format!("__core_{m}")).copied();

@@ -893,10 +893,43 @@ impl Cx<'_> {
                         }
                     }
                     Some(t) if t.is_int() || t.is_float() => {
-                        let e = Expr::Cast(Box::new(paren(recv.clone())), ty_named(&self.prog.tn(t)));
+                        // (a value of a type of the program's, `impl From<J> for f64`: that `from`; a number's is the
+                        // widening cast)
+                        let num = self.peek(recv).is_some_and(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char));
+                        let tn = self.prog.tn(t);
+                        let e = if !num && self.trait_candidate(&format!("{tn}::from"), "From").is_some() {
+                            let mut fp = path_of(&tn);
+                            fp.segs.push(crate::parse::Seg { name: "from".into(), args: vec![], fn_args: None, text: "from".into() });
+                            Expr::Call(Box::new(Expr::Path(None, fp)), vec![recv.clone()])
+                        } else {
+                            Expr::Cast(Box::new(paren(recv.clone())), ty_named(&tn))
+                        };
                         return self.expr(&e, Some(t));
                     }
                     _ => {}
+                }
+            }
+        }
+        // (`x.try_into()` to a type with the program's `impl TryFrom<X> for T`: `T::try_from(x)`; between numbers, the
+        // builtin one)
+        if method == "try_into" && margs.is_empty() {
+            let target = expected.or_else(|| self.lets.get(&(e as *const Expr as usize)).copied());
+            let num = |a: Ty| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char);
+            let num_recv = self.peek(recv).is_some_and(num);
+            if let Some(Ty::Struct(rs)) = target {
+                let r = &self.prog.structs[rs as usize];
+                if self.prog.structs[self.prog.base_of(rs) as usize].name == "Result" && !r.args.is_empty() {
+                    let t = r.args[0];
+                    let key = format!("{}::try_from", self.ty_key(t));
+                    if !self.prog.has_param(t) && !(num_recv && num(t)) && self.trait_candidate(&key, "TryFrom").is_some() {
+                        let mut fp = path_of(&self.prog.tn(t));
+                        if let Ty::Struct(sid) = t {
+                            fp = path_of(&self.prog.structs[self.prog.base_of(sid) as usize].name);
+                        }
+                        fp.segs.push(crate::parse::Seg { name: "try_from".into(), args: vec![], fn_args: None, text: "try_from".into() });
+                        let c = self.keep_expr(Expr::Call(Box::new(Expr::Path(None, fp)), vec![recv.clone()]));
+                        return self.expr(c, expected);
+                    }
                 }
             }
         }
@@ -2465,14 +2498,59 @@ impl Cx<'_> {
                 }
             }
         }
-        // (an inherent method that fits comes first, as in rustc's method lookup: then nothing changes here)
-        let inherent = cands.iter().any(|&c| self.prog.sigs[c as usize].impl_trait.is_none() && fits(c, at));
-        if let Some(vis) = self.traits_in_scope().filter(|_| !inherent) {
-            if let Some(&c) = cands.iter().find(|&&c| base(c).is_some_and(|t| vis.iter().any(|v| v == t)) && fits(c, at)) {
+        // (inherent methods of one name in impls for disjoint instances, `W<&T>::copied` / `W<&mut T>::copied`: the one
+        // whose self type is the receiver's own, no coercion)
+        let inherent_only = cands.iter().all(|&c| self.prog.sigs[c as usize].impl_trait.is_none() && self.prog.sigs[c as usize].has_self);
+        if inherent_only {
+            let exact = |c: u32, at: Ty| {
+                let sig = &self.prog.sigs[c as usize];
+                let mut sol = vec![None; sig.generics.len()];
+                sig.params.first().is_some_and(|&pt| self.prog.match_ty_exact(pt, at, &mut sol))
+            };
+            if let Some(&c) = cands.iter().find(|&&c| exact(c, at)) {
                 return c;
             }
         }
-        if let Some(&c) = cands.iter().find(|&&c| fits(c, at)) {
+        // (of the impls that fit, one whose parameters' bounds hold for what they matched: `impl<T: Into<J>, E> Tr for
+        // Result<T, E>` is not `Result<(), E>`'s when `(): Into<J>` does not hold, `impl<E> Tr for Result<(), E>` is)
+        let bounds_hold = |c: u32, at: Ty| {
+            let sig = &self.prog.sigs[c as usize];
+            let mut sol = vec![None; sig.generics.len()];
+            sig.params.first().is_some_and(|&pt| self.prog.match_ty(pt, at, &mut sol))
+                && sig.generics.iter().zip(&sol).all(|((_, bs), a)| match a {
+                    Some(a) if !self.prog.has_param(*a) => bs.iter().all(|b| self.prog.implements(*a, b)),
+                    _ => true,
+                })
+        };
+        // (and whose other parameters take the other arguments' types: `impl Add<A> for S` / `impl Add<B> for S`, the
+        // right-hand side's)
+        let rest: &[&Expr] = if recv.is_some() { args } else { args.get(1..).unwrap_or(&[]) };
+        let args_fit = |c: u32| {
+            let sig = &self.prog.sigs[c as usize];
+            let mut sol = vec![None; sig.generics.len()];
+            sig.params.first().is_some_and(|&pt| self.prog.match_ty(pt, at, &mut sol))
+                && sig.params.iter().skip(1).zip(rest).all(|(&pt, a)| self.peek(a).is_none_or(|t| self.prog.has_param(t) || self.prog.match_ty(pt, t, &mut sol)))
+        };
+        let first_fit = |pick: &dyn Fn(u32) -> bool| {
+            let mut fit = cands.iter().copied().filter(|&c| pick(c) && fits(c, at));
+            let first = fit.next()?;
+            match fit.next() {
+                None => Some(first),
+                Some(second) => {
+                    let all: Vec<u32> = [first, second].into_iter().chain(fit).collect();
+                    let by = |f: &dyn Fn(u32) -> bool| all.iter().copied().find(|&c| f(c));
+                    by(&|c| args_fit(c) && bounds_hold(c, at)).or_else(|| by(&|c| args_fit(c))).or_else(|| by(&|c| bounds_hold(c, at))).or(Some(first))
+                }
+            }
+        };
+        // (an inherent method that fits comes first, as in rustc's method lookup: then nothing changes here)
+        let inherent = cands.iter().any(|&c| self.prog.sigs[c as usize].impl_trait.is_none() && fits(c, at));
+        if let Some(vis) = self.traits_in_scope().filter(|_| !inherent) {
+            if let Some(c) = first_fit(&|c| base(c).is_some_and(|t| vis.iter().any(|v| v == t))) {
+                return c;
+            }
+        }
+        if let Some(c) = first_fit(&|_| true) {
             return c;
         }
         deref.and_then(|d| cands.iter().copied().find(|&c| fits(c, d))).unwrap_or(id)
@@ -3545,7 +3623,10 @@ impl Cx<'_> {
                     let selfm = ds
                         .iter()
                         .any(|&d| self.prog.sigs[d as usize].has_self && self.prog.names[d as usize].rsplit("::").next() == Some(ms.as_str()));
-                    if selfm && !matches!(tr.as_str(), "Ord" | "PartialOrd" | "PartialEq" | "Eq") {
+                    // (not an operator's, whose method takes self by value: `BitAnd::bitand(&a, b)` is `(&a) & (b)`,
+                    // the impl for `&A`, not `a.bitand(b)`)
+                    let op_trait = matches!(tr.as_str(), "Add" | "Sub" | "Mul" | "Div" | "Rem" | "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr" | "Neg" | "Not");
+                    if selfm && !op_trait && !matches!(tr.as_str(), "Ord" | "PartialOrd" | "PartialEq" | "Eq") {
                         let mut args = cargs.iter();
                         let a0 = args.next()?;
                         let rest: Vec<Expr> = args.cloned().collect();
@@ -3609,7 +3690,14 @@ impl Cx<'_> {
         let ms = p.segs[1].name.as_str();
         let pp = PPath::of(p);
         // `i64::from(7u32)` / `u32::from('a')`: 数値への変換はキャスト (広げる変換だけが書ける)
-        if ms == "from" && cargs.len() == 1 && self.prog.fn_by_p(&pp, self.self_sid).is_none() {
+        // (also beside the program's `impl From<J> for f64`, for a number: a program cannot implement From of a
+        // number for a number, E0117)
+        let num_arg = || {
+            cargs.len() == 1
+                && self.peek(&cargs[0]).is_some_and(|a| a.is_int() || a.is_float() || matches!(a, Ty::Bool | Ty::Char))
+                && self.trait_candidate(&format!("{ty}::from"), "From").is_some()
+        };
+        if ms == "from" && cargs.len() == 1 && (self.prog.fn_by_p(&pp, self.self_sid).is_none() || num_arg()) {
             let a0 = &cargs[0];
             return Some(paren(Expr::Cast(Box::new(paren(a0.clone())), ty_named(ty))));
         }

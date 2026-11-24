@@ -2381,6 +2381,25 @@ impl Inf<'_> {
                 }
             }
         }
+        // (an inherent method of one name in impls for disjoint instances, `W<u8>::get` / `W<u16>::get`, `W<&T>::copied`
+        // / `W<&mut T>::copied`: the receiver's, once its type tells them apart; until then nothing is learned from it)
+        if let Some(id) = callee {
+            let prog = self.prog;
+            if let Some(cands) = prog.overloads.get(&prog.names[id as usize]) {
+                let inherent = |c: &u32| prog.sigs[*c as usize].impl_trait.is_none() && prog.sigs[*c as usize].has_self;
+                if cands.iter().all(inherent) {
+                    let fits = |c: u32, t: Ty| {
+                        let sig = &prog.sigs[c as usize];
+                        let mut sol = vec![None; sig.generics.len()];
+                        sig.self_ty.is_some_and(|st| prog.match_ty_exact(st, t, &mut sol))
+                    };
+                    match self.resolve(rv).and_then(|t| cands.iter().copied().find(|&c| fits(c, t))) {
+                        Some(c) => callee = Some(c),
+                        None => return self.var(),
+                    }
+                }
+            }
+        }
         self.turbofish = if tf.is_empty() { None } else { Some(tf as *const Vec<GArg>) };
         let r = self.apply_recv(callee, avs, rv);
         self.turbofish = None;
