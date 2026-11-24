@@ -9235,6 +9235,21 @@ fn hoisted_err_holds(msg: &str) -> bool {
     !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || msg.ends_with("is not dyn compatible (E0038)") || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused || bounds || unmet)
 }
 
+/// A type check's error in an item hoisted out of a fn body that holds wherever the item is: a type nothing declares,
+/// a local where a constant goes (E0435), a tuple pattern's fields (E0023) or one of a unit or struct variant (E0532,
+/// E0164), an unsafe call outside `unsafe` (E0133). Not one naming `Self` (of an impl around the item, which the
+/// hoisting leaves behind), a name the hoisting made, or what zustc does not read
+fn hoisted_check_err_holds(msg: &str) -> bool {
+    const HOLDS: [&str; 5] = [
+        "cannot find type `",
+        "attempt to use a non-constant value in a constant",
+        "this pattern has ",
+        "expected tuple struct or tuple variant, found ",
+        "call to unsafe function",
+    ];
+    HOLDS.iter().any(|h| msg.starts_with(h)) && !msg.contains("Self") && !msg.contains("__h") && !msg.contains("unsupported")
+}
+
 /// e with its leading line `L:` made l
 fn with_line(e: &str, l: usize) -> String {
     let lead = e.trim_start();
@@ -9503,12 +9518,14 @@ impl Session2 {
         }
         let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).collect();
         // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its borrow
-        // and region checks' errors are at the lines it was moved from. Not its other errors: typeck does not know all
-        // such an item may name where it was (`Self` of the impl around it), so they are left out as before)
-        if d.iter().any(|x| x.line > user_lines && acg::borrow_check_error(&x.msg)) {
+        // and region checks' errors are at the lines it was moved from, and the type errors that hold wherever it is
+        // (hoisted_check_err_holds). Not its other errors: typeck does not know all such an item may name where it was
+        // (`Self` of the impl around it), so they are left out as before)
+        let holds = |m: &str| acg::borrow_check_error(m) || hoisted_check_err_holds(m);
+        if d.iter().any(|x| x.line > user_lines && holds(&x.msg)) {
             if let Some(moved) = self.moved_lines(src) {
                 for x in &mut d {
-                    if x.line > user_lines && acg::borrow_check_error(&x.msg) {
+                    if x.line > user_lines && holds(&x.msg) {
                         if let Some(l) = moved_line(&moved, user_lines, x.line) {
                             x.line = l;
                             x.msg = moved_msg_lines(&x.msg, &moved, user_lines);

@@ -347,6 +347,7 @@ run-pass	associated-types/self-type-projection-dyn-coerce.rs
 check-pass	associated-types/simple-associated-type-impl.rs
 check-pass	associated-types/size-of-assoc-type-output.rs
 run-pass	associated-types/sized-recursive-type-via-associated-type.rs
+compile-fail	associated-types/suggest-assoc-type-from-bounds.rs
 check-pass	associated-types/supertrait-bound-references-own-associated-type.rs
 compile-fail	associated-types/unconstrained-lifetime-assoc-type.rs
 compile-fail	associated-types/unconstrained-lifetime-in-projection.rs
@@ -1771,6 +1772,7 @@ build-pass	const_prop/unreachable-overflow.rs
 run-pass	consts/arithmetic-expr-in-array-len.rs
 build-pass	consts/array-literal-index-oob.rs
 compile-fail	consts/array-literal-len-mismatch.rs
+compile-fail	consts/array-repeat-expr-not-const.rs
 check-pass	consts/assoc-const-elided-lifetime.rs
 check-pass	consts/assoc-const-with-self-in-trait-object.rs
 compile-fail	consts/bad-array-size-in-type-err.rs
@@ -4517,6 +4519,8 @@ run-pass	match/match-nested-enum-box-3121.rs
 compile-fail	match/match-no-arms-unreachable-after.rs
 run-pass	match/match-on-negative-integer-ranges.rs
 compile-fail	match/match-option-result-mismatch.rs
+compile-fail	match/match-pattern-field-mismatch-2.rs
+compile-fail	match/match-pattern-field-mismatch.rs
 run-pass	match/match-range-char-const.rs
 compile-fail	match/match-range-fail.rs
 compile-fail	match/match-ref-mut-invariance.rs
@@ -6004,6 +6008,7 @@ compile-fail	pattern/struct-parser-recovery-issue-126344.rs
 run-pass	pattern/struct-pattern-in-fn-arg.rs
 compile-fail	pattern/struct-pattern-on-non-struct-resolve-error.rs
 compile-fail	pattern/struct-pattern-with-missing-fields-resolve-error.rs
+compile-fail	pattern/struct-variant-as-tuple-variant.rs
 run-pass	pattern/struct-wildcard-pattern-14308.rs
 compile-fail	pattern/struct_pattern_on_tuple_enum.rs
 compile-fail	pattern/suggest-adding-appropriate-missing-pattern-excluding-comments.rs
@@ -6013,6 +6018,7 @@ compile-fail	pattern/type_mismatch.rs
 compile-fail	pattern/uninit-trivial.rs
 run-pass	pattern/unit-pattern-matching-in-function-argument-7519.rs
 compile-fail	pattern/unit-type-struct-pattern-mismatch-16401.rs
+compile-fail	pattern/unit-variant-pattern-matching-29383.rs
 check-pass	pattern/unused-parameters-const-pattern.rs
 compile-fail	pattern/usefulness/conflicting_bindings.rs
 compile-fail	pattern/usefulness/const-partial_eq-fallback-ice.rs
@@ -8304,6 +8310,7 @@ run-pass	unsafe/unsafe-fn-called-from-unsafe-blk.rs
 run-pass	unsafe/unsafe-fn-called-from-unsafe-fn.rs
 compile-fail	unsafe/unsafe-fn-called-through-ref.rs
 compile-fail	unsafe/unsafe-fn-deref-ptr.rs
+compile-fail	unsafe/unsafe-not-inherited.rs
 run-pass	unsafe/unsafe-pointer-assignability.rs
 compile-fail	unsafe/unsafe-trait-impl.rs
 check-pass	unsafe/unsafe_op_in_unsafe_fn/edition_2024_default.rs

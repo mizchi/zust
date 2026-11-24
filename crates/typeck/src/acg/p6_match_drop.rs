@@ -726,7 +726,25 @@ impl Cx<'_> {
         }
     }
 
-    /// パターン列 (`V(a, .., z)`) とフィールド列の対応 (`..` は途中を飛ばす)
+    /// A tuple struct pattern (`V(..)`) of a unit variant (E0532) or a struct variant (E0164; E0532 by its name alone),
+    /// at its path, with rustc 1.100's message
+    fn tuple_pat_of_variant(&self, path: &crate::parse::Path, sid: u32, vi: usize) -> R<()> {
+        // (a type the program has no variants of, as an unresolved projection's: its own error comes later)
+        let (kind, code) = match self.prog.structs[sid as usize].variants.get(vi).map(|v| v.kind) {
+            Some(crate::types::VariantKind::Unit) => ("unit variant", "E0532"),
+            Some(crate::types::VariantKind::Struct) => ("struct variant", "E0164"),
+            _ => return Ok(()),
+        };
+        let name = path.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
+        // (a struct variant by its name alone (`use E::V;`) is none in the value namespace)
+        if code == "E0164" && path.segs.len() == 1 {
+            return Err(self.at(path.pos, format!("cannot find tuple struct or tuple variant `{name}` in this scope (E0532)")));
+        }
+        Err(self.at(path.pos, format!("expected tuple struct or tuple variant, found {kind} `{name}` ({code})")))
+    }
+
+    /// パターン列 (`V(a, .., z)`) とフィールド列の対応 (`..` は途中を飛ばす)。数が合わなければ "this pattern has N fields, but
+    /// the corresponding variant has M" (e0023 makes it rustc's where the pattern's path is known)
     pub(crate) fn tuple_fields<'e>(elems: impl Iterator<Item = &'e Pat>, nfields: usize, span: Sp) -> R<Vec<(usize, &'e Pat)>> {
         let elems: Vec<&Pat> = elems.collect();
         let rest = elems.iter().position(|p| matches!(p, Pat::Rest));
@@ -1105,15 +1123,17 @@ impl Cx<'_> {
                         self.test_variant(p, sid, vi, SP, fail)
                     }
                     Pat::TupleStruct(path, elems) => {
-                        let fields = match self.variant_on(path, t) {
+                        let on = self.variant_on(path, t);
+                        let fields = match on {
                             Some((sid, vi)) => {
+                                self.tuple_pat_of_variant(path, sid, vi)?;
                                 self.variant_turbofish(path, sid)?;
                                 self.test_variant(p, sid, vi, SP, fail)?;
                                 self.prog.structs[sid as usize].variants[vi].fields.clone()
                             }
                             None => self.tuple_struct_fields(path, t, SP)?,
                         };
-                        for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, m))? {
+                        for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, e0023(m, on.is_some())))? {
                             let (_, fty, off) = fields[fi];
                             self.pat_test(sub, Self::field_place(p, fty, off)?, fail)?;
                         }
@@ -1509,13 +1529,14 @@ impl Cx<'_> {
                 self.rg_pat_lifetimes(path);
                 let (fields, vname, rvi) = match self.variant_on(path, p.ty()) {
                     Some((sid, vi)) => {
+                        self.tuple_pat_of_variant(path, sid, vi)?;
                         let v = &self.prog.structs[sid as usize].variants[vi];
                         (v.fields.clone(), Some(v.name.clone()), Some(vi))
                     }
                     None => (self.tuple_struct_fields(path, p.ty(), SP)?, None, None),
                 };
                 let deref = matches!(mode, BindMode::Ref(_));
-                for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, m))? {
+                for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, e0023(m, rvi.is_some())))? {
                     let (fname, fty, off) = fields[fi].clone();
                     let saved = self.bk_pat_field(deref, vname.as_deref(), &fname);
                     let rs = self.rg_pat_field(p.ty(), rvi, fi);
@@ -2762,4 +2783,13 @@ fn holds_mut_ref(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
         }
         _ => false,
     }
+}
+
+/// rustc's E0023 of tuple_fields' "this pattern has N fields, but the corresponding variant has M": of a tuple variant
+/// or a tuple struct, "field" for one (rustc 1.100)
+fn e0023(m: String, variant: bool) -> String {
+    let Some((n, r)) = m.strip_prefix("this pattern has ").and_then(|r| r.split_once(" fields, but the corresponding variant has ")) else { return m };
+    let (Ok(a), Ok(b)) = (n.parse::<usize>(), r.parse::<usize>()) else { return m };
+    let f = |k: usize| if k == 1 { "field" } else { "fields" };
+    format!("this pattern has {a} {}, but the corresponding tuple {} has {b} {} (E0023)", f(a), if variant { "variant" } else { "struct" }, f(b))
 }

@@ -2078,3 +2078,50 @@ fn local_where_a_constant_goes() {
     assert_eq!(first("const FOO: u32 = 1;\nfn main() {\n    let x = 2;\n    const BAR: u32 = FOO + 1;\n    static Z: u32 = { let x = 3; x };\n    let _ = (x, BAR, Z);\n}\n"), None, "items and the value's own let");
     assert_eq!(first("fn main() {\n    {\n        let a = 1;\n        let _ = a;\n    }\n    const A: i32 = 2;\n    let _ = A;\n}\n"), None, "a closed block's let");
 }
+
+#[test]
+fn errors_in_a_fn_written_in_another() {
+    // (a fn written inside another one is checked hoisted out of it: the type errors that hold wherever it is are
+    // reported where it was written; each expected line (and column, where given) is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |src: &str| first(src).map(|d| (d.0, d.1));
+    assert_eq!(
+        first("fn main() {\n    fn g(n: usize) {\n        let _x = [0; n];\n    }\n    g(1);\n}\n"),
+        Some((3, 22, "attempt to use a non-constant value in a constant (E0435)".to_string())),
+        "E0435"
+    );
+    assert_eq!(at("unsafe fn f() {}\nfn main() {\n    fn g() {\n        f();\n    }\n    g();\n}\n"), Some((4, 9)), "E0133");
+    assert_eq!(first("fn main() {\n    fn g() -> Missing {\n        loop {}\n    }\n}\n").map(|d| (d.0, d.2)), Some((2, "cannot find type `Missing`".to_string())), "E0412");
+    // (E0023, rustc's wording: zustc points at the pattern's path, rustc at its fields)
+    assert_eq!(
+        first("enum E { A(u8, u8, u8), B }\nfn main() {\n    fn g(e: E) {\n        match e { E::A(a, b) => {}, _ => {} }\n    }\n}\n").map(|d| (d.0, d.2)),
+        Some((4, "this pattern has 2 fields, but the corresponding tuple variant has 3 fields (E0023)".to_string())),
+        "E0023 of a variant"
+    );
+    assert_eq!(
+        first("struct S(u8, u8);\nfn main() {\n    let S(x) = S(1, 2);\n}\n").map(|d| (d.0, d.2)),
+        Some((3, "this pattern has 1 field, but the corresponding tuple struct has 2 fields (E0023)".to_string())),
+        "E0023 of a struct"
+    );
+    // (a tuple pattern of a unit variant (E0532) or a struct variant (E0164), at its path)
+    assert_eq!(
+        first("enum C { A, B(u8) }\nfn g(c: C) { if let C::A(..) = c {} }\nfn main() {}\n"),
+        Some((2, 21, "expected tuple struct or tuple variant, found unit variant `C::A` (E0532)".to_string())),
+        "E0532"
+    );
+    assert_eq!(
+        first("enum C { D { x: u8 }, E }\nfn g(c: C) { match c { C::D(x) => {}, _ => {} } }\nfn main() {}\n"),
+        Some((2, 24, "expected tuple struct or tuple variant, found struct variant `C::D` (E0164)".to_string())),
+        "E0164"
+    );
+    assert_eq!(
+        first("use C::D;\nenum C { D { x: u8 }, A }\nfn g(c: C) { match c { D(x) => {}, _ => {} } }\nfn main() {}\n"),
+        Some((3, 24, "cannot find tuple struct or tuple variant `D` in this scope (E0532)".to_string())),
+        "a struct variant by its name alone"
+    );
+    // (`Self` of the impl around it, which rustc takes from an outer item with a warning)
+    assert_eq!(first("struct S0(usize);\nimpl S0 {\n    fn foo() {\n        fn bar() -> S0 {\n            Self(0)\n        }\n    }\n}\nfn main() {}\n"), None, "Self");
+}
