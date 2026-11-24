@@ -212,6 +212,9 @@ pub struct Bk {
     /// A compound assignment's `&mut self` loan and the call temporary of its reservation: the next call_fn takes the
     /// loan once its arguments are evaluated, before their loans end (`s += &s` conflicts), ending the reservation first
     pub activate: Option<(Ev, u32)>,
+    /// A fn pointer call's implicit argument reborrows without the region check, by the argument's index: the result
+    /// holds those of the arguments it may borrow from (`let r = f(x); *x = 1; use(r)` is E0506)
+    pub fnptr_reborrows: Vec<(usize, u32)>,
     /// The call being lowered takes its `&mut self` once its arguments are evaluated (activate): what the arguments
     /// borrow, shared loans too, is held until then (`s.take(s.get())`: E0502)
     pub hold_args: bool,
@@ -3036,13 +3039,33 @@ impl Cx<'_> {
         None
     }
 
-    /// `let b: &mut T = a;` (`&T`, m false) with a place a of a `&mut`: the loan of `*a` b holds
-    pub(crate) fn bk_reborrow_let(&mut self, a: &Expr, m: bool) {
+    /// `let b: &mut T = a;` (want `&T` too) with a place a of a `&mut`: the loan of `*a` b holds
+    pub(crate) fn bk_reborrow_let(&mut self, a: &Expr, want: Ty) {
+        let Ty::Ref(m, want_in) = want else { return };
         if !self.bk_on() {
             return;
         }
-        let Some((mut p, Some(Ty::Ref(true, _)))) = self.bk_place(a) else { return };
+        let Some((mut p, Some(Ty::Ref(true, inner)))) = self.bk_place(a) else { return };
         p.proj.push(ref_deref(true));
+        // (a deref coercion through what a points to (`let y: &i32 = x;` with `x: &mut &i32`, or a `Box`): the loan is
+        // of what that points to (`**x`), which overwriting `*x` does not touch, as in rustc)
+        let mut t = *inner;
+        for _ in 0..4 {
+            if t == *want_in {
+                break;
+            }
+            match t {
+                Ty::Ref(rm, i) => {
+                    p.proj.push(ref_deref(rm));
+                    t = *i;
+                }
+                Ty::Box(i) => {
+                    p.proj.push(Proj::Deref(true));
+                    t = *i;
+                }
+                _ => break,
+            }
+        }
         let sp = err_pos(a);
         let ln = self.bk.loans.len() as u32;
         self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false, capture: false });
@@ -4349,7 +4372,9 @@ impl Cx<'_> {
                 // (a reborrow through the local itself (`y = &mut *y;`, `y = y;`): overwriting y kills the loans of
                 // what its old value points to (Polonius' loan_killed_at), the new value's too. What the old value
                 // borrowed stays with the reborrow)
-                let srcs: Vec<Src> = srcs.iter().copied().filter(|s| !matches!(s, Src::Loan(ln) if self.bk.loans[*ln as usize].place.local == l && !self.bk.loans[*ln as usize].place.proj.is_empty())).collect();
+                // (only those through a reference: a loan of an owned part (`s = S { r: &s.n, .. }`) stays, and writing
+                // `s.n` while it lives conflicts)
+                let srcs: Vec<Src> = srcs.iter().copied().filter(|s| !matches!(s, Src::Loan(ln) if self.bk.loans[*ln as usize].place.local == l && self.bk.loans[*ln as usize].place.owned_len() < self.bk.loans[*ln as usize].place.proj.len())).collect();
                 self.bk_ev(Ev::Def(l, srcs));
             } else if !srcs.is_empty() {
                 self.bk_ev(Ev::Flow(l, srcs.to_vec()));

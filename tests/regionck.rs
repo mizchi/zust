@@ -4026,3 +4026,22 @@ fn part26_annotation_hole_mutability() {
     let d = check("fn main() {\n    let x: &[i32] = &[1, 2];\n    let y: &mut [_] = &x[..];\n    let _ = y;\n}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("mismatched types"), "{d:?}");
 }
+
+#[test]
+fn part26_review() {
+    // (a self-reborrow assigned to its local drops only the loans through a reference: a loan of an owned field
+    // (`s = S { r: &s.n, .. }`) stays, so writing `s.n` while it lives is E0506)
+    let d = check("struct S<'a> { r: &'a i32, n: i32 }\nfn main() {\n    let zero = 0;\n    let mut s = S { r: &zero, n: 0 };\n    s = S { r: &s.n, n: 1 };\n    s.n = 5;\n    println!(\"{}\", s.r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot assign to `s.n` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut x = 1;\n    let mut y = &mut x;\n    y = &mut *y;\n    *y = 2;\n    let mut v = vec![1];\n    let mut r = &mut v;\n    r = r;\n    r.push(2);\n}\n"), vec![]);
+    // (a deref coercion through the reference a `&mut` points to (`&mut &i32` to `&i32`): the loan is of `**x`, which
+    // overwriting `*x` does not touch; `&mut &i32` to `&&i32` borrows `*x`)
+    assert_eq!(check("fn main() {\n    let a = 1;\n    let b = 2;\n    let mut slot = &a;\n    let x = &mut slot;\n    let y: &i32 = x;\n    *x = &b;\n    println!(\"{}\", y);\n}\n"), vec![]);
+    let d = check("fn main() {\n    let a = 1;\n    let mut slot = &a;\n    let x = &mut slot;\n    let y: &&i32 = x;\n    *x = &a;\n    println!(\"{}\", y);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    // (a fn pointer's result that holds references holds the reborrow of the argument's place, without the region
+    // check too; one that holds none does not)
+    let d = check("fn id(x: &i32) -> &i32 { x }\nfn main() {\n    let mut a = 0;\n    let f: fn(&i32) -> &i32 = id;\n    let x = &mut a;\n    let r = f(x);\n    *x = 1;\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn id(x: &i32) -> &i32 { x }\nfn len(x: &i32) -> usize { *x as usize }\nfn main() {\n    let mut a = 0;\n    let f: fn(&i32) -> &i32 = id;\n    let g: fn(&i32) -> usize = len;\n    let x = &mut a;\n    let r = f(x);\n    println!(\"{}\", r);\n    let n = g(x);\n    *x = 1;\n    println!(\"{}\", n);\n}\n"), vec![]);
+}
