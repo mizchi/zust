@@ -30,6 +30,8 @@ and uses it once: a bound whose goal needs itself is E0275, as in rustc.
   not at 64, so an error here could be a false one.
 - An impl whose bound is its own trait (`impl<T: P> P for T`) is a goal too now, and so a cycle; before, that bound
   was skipped.
+- A bound of a trait with arguments (`T: Loop<u8>`) is answered by the trait's name, and keeps that answer's
+  certainty.
 
 ```rust
 trait P {}
@@ -52,10 +54,11 @@ Cycles that are not errors stay accepted, each checked against rustc 1.97 (`test
 
 `bench/rust_ui.py --check`, on main (d6202b6) merged in:
 
-- compile-fail 4628 → 4635 (+7) against main. Three are this step's:
+- compile-fail 4628 → 4636 (+8) against main. Four are this step's:
   - `traits/inductive-overflow/simultaneous.rs`
   - `traits/inductive-overflow/supertrait.rs`
   - `traits/inductive-overflow/two-traits.rs`
+  - `traits/issue-18400.rs` (`impl<T, S: Set<T>> Set<&[T]> for S`, an obligation that grows)
 
   Each is rejected with E0275 at the line the test marks. The other four are the previous step's.
 - run-pass, check-pass and build-pass unchanged, 0 regressions. The baseline and the ratchet were rewritten.

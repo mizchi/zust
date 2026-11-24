@@ -13,6 +13,7 @@
 - **E0275**: インスタンスの境界（`Insts::request`）が `Maybe(Cycle)` なら、「overflow evaluating the requirement」（E0275）を出す。プログラムの trait の goal は帰納的なので、自分自身を必要とする goal は成り立たない。エラーは rustc が出す行に出る。
 - `Maybe(Overflow)` はこれまでどおり受理する。rustc もそこで E0275 を出すが、64 段ではなく自身の再帰の上限（既定で 128）でのことなので、ここでのエラーは誤ったものになりうる。
 - 境界が自分の trait である impl（`impl<T: P> P for T`）も goal になり、したがって循環になる。以前はその境界を飛ばしていた。
+- 引数を持つ trait の境界（`T: Loop<u8>`）は trait の名前で答え、その答えの確実さを保つ。
 
 ```rust
 trait P {}
@@ -35,10 +36,11 @@ fn main() { need(1u8); } // E0275: overflow evaluating the requirement `u8: P`
 
 main（d6202b6）をマージした上での `bench/rust_ui.py --check`:
 
-- compile-fail は main に対して 4628 → 4635（+7）。うち 3 件がこの段階のもの:
+- compile-fail は main に対して 4628 → 4636（+8）。うち 4 件がこの段階のもの:
   - `traits/inductive-overflow/simultaneous.rs`
   - `traits/inductive-overflow/supertrait.rs`
   - `traits/inductive-overflow/two-traits.rs`
+  - `traits/issue-18400.rs`（`impl<T, S: Set<T>> Set<&[T]> for S`、育ち続ける要求）
 
   どれも、テストが示す行で E0275 として拒否される。残りの 4 件は前の段階のもの。
 - run-pass、check-pass、build-pass は変わらず、回帰は 0 件。ベースラインとラチェットを書き直した。

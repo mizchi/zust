@@ -7424,6 +7424,7 @@ build-pass	traits/issue-104322.rs
 compile-fail	traits/issue-105231.rs
 compile-fail	traits/issue-106072.rs
 run-pass	traits/issue-15155.rs
+compile-fail	traits/issue-18400.rs
 run-pass	traits/issue-18412.rs
 compile-fail	traits/issue-21837.rs
 run-pass	traits/issue-22019.rs

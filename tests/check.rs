@@ -1079,6 +1079,9 @@ fn goals_have_a_certainty() {
     ok(&format!("{pq}fn main() {{}}"));
     // (a generic fn's own bound is a where clause: not followed)
     ok(&format!("{pq}fn g<Y: P>(y: Y) {{ need(y); }}\nfn main() {{}}"));
+    // (a trait with arguments)
+    e0275("trait Loop<U> {}\nimpl<T: Loop<u8>> Loop<u8> for T {}\nfn need<T: Loop<u8>>() {}\nfn main() { need::<i32>(); }", "`i32: Loop");
+    ok("trait A {}\ntrait Tr<U> {}\nimpl<T: A> Tr<u8> for T {}\nimpl A for i32 {}\nfn need<T: Tr<u8>>() {}\nfn main() { need::<i32>(); }");
     // (an impl whose bound is its own trait)
     e0275("trait P {}\nimpl<T: P> P for T {}\nfn need<X: P>(_: X) {}\nfn main() { need(1u8); }", "`u8: P`");
     // (through a supertrait's blanket impl: traits/inductive-overflow/simultaneous.rs)

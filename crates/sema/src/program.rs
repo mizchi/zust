@@ -2769,7 +2769,10 @@ impl Program {
         // `Iterator<Item = T>` は trait の名前で見る (関連型の制約は呼び出し側で解く)
         if let Some(i) = tr.find('<') {
             if parse_fn_bound(tr).is_none() {
-                return self.implements(t, tr[..i].trim());
+                // (the trait's name alone: its certainty goes on to evaluate, as impl_applies_noted's does)
+                let c = self.evaluate(t, tr[..i].trim());
+                NOTED.with(|n| n.set(Some(c)));
+                return c != Certainty::No;
             }
         }
         match t {
