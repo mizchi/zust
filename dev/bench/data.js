@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795519355283,
+  "lastUpdate": 1795519358320,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -97495,6 +97495,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/235dae84b45d342d2d8a318561bcc791596557cc"
         },
         "date": 1795509821723,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.818,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 85.714,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.849,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "014c605ac277611cc31281b9ff5f923ae5b52693",
+          "message": "Merge pull request #120 from mizchi/claude/loving-ride-ydcwvg\n\nsema: an impl's bounds as nested goals, goals answer yes / maybe / no (#2)",
+          "timestamp": "2026-11-24T20:17:11+09:00",
+          "tree_id": "15179c10628566606fe723c6dda83b1d6740bddf",
+          "url": "https://github.com/mizchi/zust/commit/014c605ac277611cc31281b9ff5f923ae5b52693"
+        },
+        "date": 1795519357578,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
