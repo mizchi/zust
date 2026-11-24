@@ -8,10 +8,16 @@ macro_rules! value {
         3
     };
 }
+macro_rules! sum {
+    () => {
+        1 + 2
+    };
+}
 mod m {
     pub const C: u8 = value!();
     pub const D: u8 = 1 + value!();
     pub const E: u8 = value!() * 2;
+    pub const F: &u8 = &sum!();
 }
 // (the same name in two modules, and a local of that name compared with `!=`)
 mod p1 {
@@ -57,6 +63,9 @@ trait Mark {
 impl<T> Mark for *const T {
     type Out = u32;
 }
+impl<T> Mark for *mut T {
+    type Out = u64;
+}
 impl<'a, T> Mark for &'a T {
     type Out = u8;
 }
@@ -79,5 +88,6 @@ fn main() {
     let r#let = 5;
     println!("{}", r#let);
     let mut y = 1i32;
-    println!("{} {} {}", size(&y), size(&mut y), size(&y as *const i32));
+    println!("{} {} {} {}", size(&y), size(&mut y), size(&y as *const i32), size(&mut y as *mut i32));
+    println!("{}", *m::F);
 }

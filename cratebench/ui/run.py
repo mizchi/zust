@@ -112,7 +112,8 @@ def host_triple():
 
 def build_script(c, out):
     """Run a crate's build script as cargo would, when it has no build-dependencies (rustc builds it for the host):
-    its `rustc-cfg` and `rustc-env` lines and OUT_DIR, as (cfgs, env). None when it has none, or cannot run"""
+    its `rustc-cfg` and `rustc-env` lines and OUT_DIR, as (cfgs, env). None when it has none (or has build-dependencies,
+    not run here); {"fail": reason} when it does not compile, run or finish: the crate then fails as cargo's build would"""
     p = c["pkg"]
     script = next((t for t in p["targets"] if "custom-build" in t["kind"]), None)
     if script is None or any(d.get("kind") == "build" for d in p.get("dependencies", [])):
@@ -129,7 +130,7 @@ def build_script(c, out):
     r = subprocess.run(["rustc", "--edition", script["edition"], "--crate-name", "build_script_build", "--crate-type", "bin",
                         "--cap-lints", "allow", *feats, "-o", exe, script["src_path"]], env=cenv, capture_output=True, text=True)
     if r.returncode != 0:
-        return None
+        return {"fail": "build script does not compile: " + next((l for l in r.stderr.splitlines() if l.startswith("error")), "")}
     env = dict(os.environ)
     env.update(c["env"])
     env.update({"OUT_DIR": out_dir, "TARGET": TARGET, "HOST": host_triple(), "PROFILE": "debug", "OPT_LEVEL": "0",
@@ -145,9 +146,9 @@ def build_script(c, out):
     try:
         r = subprocess.run([exe], cwd=os.path.dirname(p["manifest_path"]), env=env, capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
-        return None
+        return {"fail": "build script timed out (120 s)"}
     if r.returncode != 0:
-        return None
+        return {"fail": f"build script exited with {r.returncode}: " + (r.stderr.strip().splitlines() or [""])[-1]}
     out_cfgs, out_env = [], {"OUT_DIR": out_dir}
     for line in r.stdout.splitlines():
         for pre in ("cargo::", "cargo:"):
@@ -233,6 +234,7 @@ def sweep(app):
             continue
         # (2 つの版のあるクレートは、ワークスペースでは名前が 1 つなので、依存の順で後のもの (近いもの) を使う)
         ws = {}
+        script_fail = None
         for j in deps + [i]:
             cj = C[j]
             dn = sorted({ext(C[d]) for d in cj["deps"] if d in tset})
@@ -242,11 +244,17 @@ def sweep(app):
             if cj["build_rs"]:
                 if "bs" not in cj:
                     cj["bs"] = build_script(cj, out)
-                if cj["bs"]:
+                if isinstance(cj["bs"], dict):
+                    script_fail = cj["bs"]["fail"]
+                elif cj["bs"]:
                     cs, be = cj["bs"]
                     e += "".join(f" cfg={ws_escape(k)}" + (f"={ws_escape(v)}" if v is not None else "") for k, v in cs)
                     e += "".join(f" env={k}={ws_escape(v)}" for k, v in be.items())
             ws[ext(cj)] = f'{"bin" if cj["root"] else "lib"} {ext(cj)} {cj["src"]} {" ".join(dn)}{f}{e}'.rstrip()
+        # (a build script that fails fails its crate, as cargo's build does: not built without what it gives)
+        if script_fail:
+            r["status"], r["first"] = "fail", script_fail
+            continue
         d = os.path.join(out, f'{c["name"]}-{c["version"]}')
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "ws.txt"), "w") as h:

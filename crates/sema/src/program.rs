@@ -4284,6 +4284,12 @@ impl Program {
                 if matches!((a.self_ty, base), (Ty::Ptr(..), Ty::Ref(..))) {
                     continue;
                 }
+                // (and `*const T`'s impl is not `*mut T`'s)
+                if let (Ty::Ptr(m1, _), Ty::Ptr(m2, _)) = (a.self_ty, base) {
+                    if m1 != m2 {
+                        continue;
+                    }
+                }
                 let mut sol = vec![None; a.ngen];
                 if self.match_ty(a.self_ty, base, &mut sol) {
                     let Some(mut args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else { continue };
@@ -4315,6 +4321,12 @@ impl Program {
             // (nor a pointer's impl a reference's: match_ty lets `*const T` meet `&x`, a coercion)
             if matches!((a.self_ty, t), (Ty::Ptr(..), Ty::Ref(..))) {
                 continue;
+            }
+            // (and `*const T`'s impl is not `*mut T`'s)
+            if let (Ty::Ptr(m1, _), Ty::Ptr(m2, _)) = (a.self_ty, t) {
+                if m1 != m2 {
+                    continue;
+                }
             }
             let mut sol = vec![None; a.ngen];
             if self.match_ty(a.self_ty, t, &mut sol) {

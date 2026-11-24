@@ -1171,6 +1171,27 @@ fn rename_shadowed_macros(text: &str) -> Option<String> {
         return None;
     }
     let ends: HashMap<usize, usize> = dup.values().flat_map(|v| v.iter().map(|&d| (d, scope_end(d)))).collect();
+    // (a call has its brackets after the `!`: `m != 0` is a comparison; not a path's last segment `a::name!`)
+    let is_call = |k: usize| sym(k + 1, b'!') && (sym(k + 2, b'(') || sym(k + 2, b'[') || sym(k + 2, b'{')) && !(k >= 1 && sym(k - 1, b':'));
+    // (the block / module a definition is in contains k, up to the definition's scope's end)
+    let in_region = |d: usize, k: usize| (encl[d] == usize::MAX || encl[d] < k) && k < ends[&d];
+    // (a call in a macro body that no definition's block contains (`invoke!` at the top calling the `pick!` that
+    // `mod a` and `mod b` each define) is resolved where `invoke!` is called, which this pass does not know: the
+    // name keeps its definitions' names, as before)
+    let mut unknown: Vec<&[u8]> = vec![];
+    for k in 0..toks.len() {
+        if in_body[k] && toks[k].0 == 0 && !opaque[k] && is_call(k) {
+            if let Some(ds) = dup.get(tk(k)) {
+                if !ds.iter().any(|&d| in_region(d, k)) && !unknown.contains(&tk(k)) {
+                    unknown.push(tk(k));
+                }
+            }
+        }
+    }
+    dup.retain(|n, _| !unknown.contains(n));
+    if dup.is_empty() {
+        return None;
+    }
     let mut out = String::with_capacity(text.len() + 64);
     let mut last = 0;
     for k in 0..toks.len() {
@@ -1180,15 +1201,14 @@ fn rename_shadowed_macros(text: &str) -> Option<String> {
         let Some(ds) = dup.get(tk(k)) else { continue };
         // (a definition's name, or a call `name!`, not a path's last segment `a::name!`)
         let is_def = ds.contains(&k);
-        // (a call has its brackets after the `!`: `m != 0` is a comparison)
-        let is_call = sym(k + 1, b'!') && (sym(k + 2, b'(') || sym(k + 2, b'[') || sym(k + 2, b'{')) && !(k >= 1 && sym(k - 1, b':'));
+        let is_call = is_call(k);
         if !is_def && !is_call {
             continue;
         }
         let n = if is_def {
             ds.iter().position(|&d| d == k)
         } else if in_body[k] {
-            (0..ds.len()).min_by_key(|&n| ds[n].abs_diff(k))
+            (0..ds.len()).filter(|&n| in_region(ds[n], k)).min_by_key(|&n| ds[n].abs_diff(k))
         } else {
             ds.iter().rposition(|&d| d <= k && k < ends[&d])
         };
@@ -1417,7 +1437,7 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
             // in an item's expression or type, `const N: u32 = 0 + m!(u8);`, and keeps the `;` after it; after
             // a binary operator its expansion is one operand, as rustc's is)
             let item_start = stmt_pos || sym(ps - 1, b']');
-            let operand = top && !item_start && matches!(tk(ps - 1), b"+" | b"-" | b"*" | b"/" | b"%" | b"^" | b"|");
+            let operand = top && !item_start && matches!(tk(ps - 1), b"+" | b"-" | b"*" | b"/" | b"%" | b"^" | b"|" | b"&" | b"!");
             // (not with attributes: a `#[cfg(false)]` item removed later would leave the attributes before it)
             // (`m! { .. }` in statement position is a statement by itself, whatever follows: `defer! { .. }
             // let x = ..;`)
@@ -1697,7 +1717,7 @@ fn find_calls(
                                     || matches!(&toks[ps - 1], TokenTree::Group(pg) if matches!(pg.delimiter(), proc_macro2::Delimiter::Brace | proc_macro2::Delimiter::Bracket));
                                 let operand = top
                                     && !item_start
-                                    && matches!(&toks[ps - 1], TokenTree::Punct(q) if matches!(q.as_char(), '+' | '-' | '*' | '/' | '%' | '^' | '|'));
+                                    && matches!(&toks[ps - 1], TokenTree::Punct(q) if matches!(q.as_char(), '+' | '-' | '*' | '/' | '%' | '^' | '|' | '&' | '!'));
                                 let rep = if operand {
                                     format!("({body})")
                                 } else if top || spliced {
