@@ -199,6 +199,9 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   - `a != b` calls `!a.eq(b)`, not the impl's own `ne` (a qualified `<S as PartialEq<R>>::ne` calls it).
   - `Vec::<u32>::from_raw_parts(NonNull::dangling().as_ptr(), 0, 0)`: "cannot infer type parameter `T`" (with
     `let p: *mut u32 = ..` it compiles).
+  - `Vec::from_raw_parts` of zero-sized elements takes a pointer that is not dangling (not below 4096, not the
+    alignment) for the prelude's one-byte buffer, which drop frees: the prelude's `reserve` allocates for zero-sized
+    elements, where std's Vec never does.
   - a cycle of associated types through blanket impls (`impl<T> A for T { type Out = <T as B>::Out; }` and B's
     back) is no error while nothing names it, and not E0275 where something does.
 - Found while building memchr, not fixed:
