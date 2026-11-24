@@ -2629,7 +2629,9 @@ impl Parser {
         if blocky || mac_brace || self.is_close() {
             return Ok(Stmt::Expr(e, false));
         }
-        Err(self.err("expected `;`"))
+        // (where expect_punct puts a missing `;`: right after the expression when the next token is on a later line)
+        self.expect_punct(";")?;
+        Ok(Stmt::Expr(e, true))
     }
 
     /// An assignment to a place that starts with a block, `{ x }.a = 1` / `{ t }.0 += 1` (e when none follows)

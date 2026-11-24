@@ -8826,7 +8826,9 @@ impl Session2 {
 fn hoisted_err_holds(msg: &str) -> bool {
     let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword",
         // (an item's own definition: a discriminant past its repr, a union's fields and derives)
-        "enum discriminant overflowed (E0370)", "field must implement `Copy`", "this trait cannot be derived for unions", "cannot find derive macro `"];
+        "enum discriminant overflowed (E0370)", "field must implement `Copy`", "this trait cannot be derived for unions", "cannot find derive macro `",
+        // (an item's own syntax: `struct Test { Very\n Bad }` in a fn body)
+        "expected `:` (found `", "expected `,` (found `"];
     let unused = msg.starts_with("function `") && msg.contains("is never used");
     // (a derive's field or a field's type without the bound it needs (derive_field_error, wf_error): a local
     // `#[derive(Eq)] struct S(f64);` too)

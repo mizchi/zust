@@ -5326,6 +5326,7 @@ compile-fail	parser/issues/issue-101540.rs
 compile-fail	parser/issues/issue-102182-impl-trait-recover.rs
 compile-fail	parser/issues/issue-102806.rs
 compile-fail	parser/issues/issue-103143.rs
+compile-fail	parser/issues/issue-103425.rs
 compile-fail	parser/issues/issue-103451.rs
 compile-fail	parser/issues/issue-103748-ICE-wrong-braces.rs
 compile-fail	parser/issues/issue-10392-2.rs
@@ -5721,6 +5722,7 @@ compile-fail	parser/recover/recover-pat-ranges.rs
 compile-fail	parser/recover/recover-pat-wildcards.rs
 compile-fail	parser/recover/recover-quantified-closure.rs
 compile-fail	parser/recover/recover-ref-dyn-mut.rs
+compile-fail	parser/recover/recover-struct.rs
 compile-fail	parser/recover/recover-tuple-pat.rs
 compile-fail	parser/recover/recover-tuple.rs
 compile-fail	parser/recover/recover-unticked-labels.rs

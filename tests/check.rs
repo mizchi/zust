@@ -1856,3 +1856,15 @@ fn fn_value_mismatch_at_its_origin() {
     assert_eq!(line("fn g() -> u8 { 0 }\nfn main() {\n    match () {\n        () => g()\n    }\n}\n"), Some(4), "arm of main");
     assert_eq!(line("fn f() -> ! {\n    unsafe {\n        let _x = 1;\n    }\n}\nfn main() {}\n"), Some(2), "unsafe block");
 }
+
+#[test]
+fn parse_errors_where_rustc_points() {
+    // (a missing `;` before a token on a later line: right after the expression; a struct field's missing `:` in a
+    // fn body's struct: at its line, not past the file. Each expected line and column is rustc 1.100's)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col))
+    };
+    assert_eq!(first("fn f() -> f32 {\n    3\n    5.0\n}\nfn main() {}\n"), Some((2, 6)), "missing semicolon");
+    assert_eq!(first("fn main() {\n    struct Test {\n        Very\n        Bad\n        Stuff\n    }\n}\n").map(|d| d.0), Some(4), "struct in a fn body");
+}
