@@ -3534,6 +3534,14 @@ impl Program {
                 let l1 = if mutual && l0.1.is_none() && r0.1.is_some() { self.eval_t(l, depth, r0.1)? } else { l0 };
                 let r1 = if mutual && r0.1.is_none() && l1.1.is_some() { self.eval_t(r, depth, l1.1)? } else { r0 };
                 let ((lv, lt), (rv, rt)) = (l1, r1);
+                // (two operands of different integer types: `i8::MAX + 1u8` is rustc's E0308, not an overflow)
+                if !shift {
+                    if let (Some(a), Some(b)) = (lt, rt) {
+                        if a != b {
+                            return Err(format!("mismatched types: expected `{}`, found `{}`", a.name(), b.name()));
+                        }
+                    }
+                }
                 // (a shift has its left operand's type; another operator its operands' (one may be unsuffixed))
                 let t = if op == "<<" || op == ">>" { lt } else { lt.or(rt) };
                 let b = |x: bool| un(x as i128);
@@ -4263,6 +4271,10 @@ impl Program {
         vs: Vec<(String, VariantKind, Vec<(String, Ty)>, i64)>,
         tag: Ty,
     ) -> (Vec<VariantDef>, u32, u32) {
+        // (an enum of no variants has no values: no tag, size 0, as rustc lays it out)
+        if vs.is_empty() {
+            return (vec![], 0, self.min_align.get(name).copied().unwrap_or(1).max(1));
+        }
         let tag_size = tag.bits() / 8;
         // (`#[repr(u8)]` and the like on an enum with fields (RFC 2195): each variant is laid out as a `#[repr(C)]`
         // struct of the tag and its fields, the enum as their union)

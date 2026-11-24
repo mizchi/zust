@@ -8874,7 +8874,7 @@ impl Session2 {
                                         errs.push(format!("{l}:1: {}", &e[m..]));
                                     }
                                 }
-                                None => errs.push(e),
+                                None => errs.push(const_err_line(e, src)),
                             }
                             ok = false;
                             Some(vec![])
@@ -8952,6 +8952,47 @@ impl Session2 {
         d.dedup();
         d
     }
+}
+
+/// An error of a constant's evaluation that has no place (`0:1: in constant `X`: overflow in constant`): at the line
+/// of its initializer in the source (`const X: u8 = ..`, the `=`), as rustc's E0080; a position inside the message is
+/// left out
+fn const_err_line(e: String, src: &str) -> String {
+    let Some(rest) = e.strip_prefix("0:1: in constant `") else { return e };
+    let Some((name, tail)) = rest.split_once("`: ") else { return e };
+    // (what rustc reports at the constant: an overflow, a transmute of sizes, mismatched types; not what zustc does
+    // not evaluate)
+    if !["overflow in constant", "cannot transmute between types of different sizes", "mismatched types"].iter().any(|m| tail.contains(m)) {
+        return e;
+    }
+    let name = name.rsplit("::").next().unwrap_or(name);
+    let b = src.as_bytes();
+    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let at = src.match_indices(name).map(|(i, _)| i).find(|&i| {
+        let before = src[..i].trim_end();
+        (i == 0 || !word(b[i - 1])) && b.get(i + name.len()).is_none_or(|&c| !word(c)) && (before.ends_with("const") || before.ends_with("static"))
+    });
+    let Some(at) = at else { return e };
+    // (the `=` of its initializer: not one inside its type's brackets, `[u8; N]`)
+    let mut eq = at + name.len();
+    let mut depth = 0i32;
+    while eq < b.len() {
+        match b[eq] {
+            b'[' | b'(' | b'{' => depth += 1,
+            b']' | b')' | b'}' => depth -= 1,
+            b';' if depth <= 0 => break,
+            b'=' if depth <= 0 && !matches!(b.get(eq + 1), Some(b'=') | Some(b'>')) && !matches!(b.get(eq.wrapping_sub(1)), Some(b'=') | Some(b'!') | Some(b'<') | Some(b'>')) => break,
+            _ => {}
+        }
+        eq += 1;
+    }
+    let line = src[..eq.min(b.len())].matches('\n').count() + 1;
+    // (a position inside: `21:2: overflow in constant`)
+    let msg = match tail.split_once(": ") {
+        Some((pos, m)) if pos.split(':').all(|x| !x.is_empty() && x.bytes().all(|c| c.is_ascii_digit())) => m,
+        _ => tail,
+    };
+    format!("{line}:1: in constant `{name}`: {msg}")
 }
 
 /// The line (1-based) in the source of line `line` of the prepared text, past the source's `user_lines`: in the

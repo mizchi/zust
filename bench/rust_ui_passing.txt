@@ -1811,6 +1811,9 @@ run-pass	consts/const-enum-vector.rs
 compile-fail	consts/const-err-early.rs
 run-pass	consts/const-err-rpass.rs
 compile-fail	consts/const-eval/array-len-mismatch-type.rs
+compile-fail	consts/const-eval/const-eval-overflow-2.rs
+compile-fail	consts/const-eval/const-eval-overflow-3.rs
+compile-fail	consts/const-eval/const-eval-overflow-3b.rs
 compile-fail	consts/const-eval/const_panic-normalize-tabs-115498.rs
 check-pass	consts/const-eval/const_prop_errors.rs
 check-pass	consts/const-eval/const_signed_pat.rs
@@ -1822,6 +1825,7 @@ compile-fail	consts/const-eval/ice-unhandled-type-122191.rs
 compile-fail	consts/const-eval/ice-unsized-struct-const-eval-123154.rs
 build-pass	consts/const-eval/issue-100878.rs
 compile-fail	consts/const-eval/issue-104390.rs
+compile-fail	consts/const-eval/issue-43197.rs
 check-pass	consts/const-eval/issue-47971.rs
 check-pass	consts/const-eval/issue-50706.rs
 check-pass	consts/const-eval/issue-51300.rs
@@ -2041,6 +2045,7 @@ run-pass	consts/static-ref-to-const-array-element.rs
 compile-fail	consts/std/conjure_zst.rs
 run-pass	consts/std/iter.rs
 run-pass	consts/transmute-const.rs
+compile-fail	consts/transmute-size-mismatch-before-typeck.rs
 check-pass	consts/unnormalized-param-env.rs
 check-pass	consts/unsafe_cell_in_const.rs
 check-pass	consts/unwind-abort.rs
