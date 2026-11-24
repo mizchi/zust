@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795530848063,
+  "lastUpdate": 1795530850676,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -99085,6 +99085,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 90.633,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "9658c3f1ba2e106e83c8277b56c07d1a2e4a2ac6",
+          "message": "Region check part 24: a struct's 'static bound in a generic fn's types, `mut` bindings under a by-reference binding mode, the outlives of the impl a projection selects (#130)\n\nRegion check part 24: a struct's 'static bound in a generic fn's types, `mut` bindings under a by-reference binding mode, the outlives of the impl a projection selects",
+          "timestamp": "2026-11-24T23:28:53+09:00",
+          "tree_id": "1302996273b34b1b93755c00fa296a4b92b94c34",
+          "url": "https://github.com/mizchi/zust/commit/9658c3f1ba2e106e83c8277b56c07d1a2e4a2ac6"
+        },
+        "date": 1795530850155,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 75,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 83.871,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 96.154,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.444,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 75,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.921,
             "unit": "%"
           }
         ]
