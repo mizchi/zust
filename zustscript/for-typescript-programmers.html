@@ -113,7 +113,7 @@
 <span class='variable builtin'>console</span><span class='punctuation delimiter'>.</span><span class='function'>log</span><span class='punctuation bracket'>(</span><span class='function'>stock_change</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>[</span><span class='punctuation bracket'>]</span><span class='punctuation bracket'>)</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
 </code></pre>
 <p>Node.js 24 で <code>node try-stock.ts</code> を実行すると、順に <code>7</code> と <code>0</code> が表示されます。</p>
-<p>画面の状態やイベントはこのように JS のモジュールで扱えます。配列の計算などを Wasm で試したくなったら、対応する関数に <code>@wasm</code> を付けます。座標を渡す例で、TypeScript 側の呼び出し方と Wasm に渡る値を確認できます。<a href="index.html">zustscript 入門</a> · <a href="rust-costs.html">Rust から見る変換コスト</a></p>
+<p>同じ <code>stock.zsc</code> に <code>--emit-rust -o out/native</code> を指定すると、通常の関数のまま Rust にも変換できます。<code>out/native/stock.rs</code> では公開関数の型が <code>pub fn zs_stock_change(events: &amp;[ZsStockEvent]) -&gt; f64</code> になります。配列の計算などを Wasm で試したくなったら、対応する関数に <code>@wasm</code> を付けます。座標を渡す例で、TypeScript 側の呼び出し方と Wasm に渡る値を確認できます。<a href="index.html">zustscript 入門</a> · <a href="rust-costs.html">Rust から見る変換コスト</a></p>
     </article>
   </main>
 </div>

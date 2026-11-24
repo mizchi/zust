@@ -52,7 +52,7 @@
 <h1>zustscript 入門 ── JavaScript と WebAssembly のためのフロントエンド言語</h1>
 <p>zustscript は、Rust の <code>enum</code> や <code>match</code> と、TypeScript でおなじみのアロー関数や JSX を組み合わせた、フロントエンド向けの静的型付き言語です。TypeScript のアプリに一つのモジュールから組み込めます。</p>
 <p>TypeScript で「状態を判別 union で表す」「元の配列を変更せず、<code>map</code> や <code>filter</code> で新しい値を作る」といった関数型の書き方をしていれば、その設計を zustscript にも持ち込めます。JS 上ではレコードはオブジェクト、配列は配列のままです。対応する TypeScript の型を <code>import type</code> で読み込めば、既存の値を呼び出し用に詰め直す手間もありません。</p>
-<p>コンパイラの <code>zsc</code> は、Rust で実装した zustscript 専用の型検査器でソースを検査します。通常の関数からは、TypeScript アプリがそのまま import できる JavaScript と型定義（<code>.d.ts</code>）を生成します。<code>@wasm</code> を付けた関数からは Rust ソースを生成し、Rust のサブセットを扱うコンパイラ <code>zustc</code> がその Rust コードを型検査して WebAssembly（Wasm）にコンパイルします。この言語とコンパイラは現在開発中です。</p>
+<p>コンパイラの <code>zsc</code> は、Rust で実装した zustscript 専用の型検査器でソースを検査します。通常の関数からは、TypeScript アプリがそのまま import できる JavaScript と型定義（<code>.d.ts</code>）を生成します。<code>@wasm</code> を付けた関数からは Rust ソースを生成し、Rust のサブセットを扱うコンパイラ <code>zustc</code> がその Rust コードを型検査して WebAssembly（Wasm）にコンパイルします。<code>--emit-rust</code> を選ぶと、属性のない通常の関数も対応する構文の範囲で Rust モジュールに変換できます。この言語とコンパイラは現在開発中です。</p>
 <p>使い慣れた言語から読み始める方はこちらです。</p>
 <ul>
 <li><a href="for-rust-programmers.html">Rust プログラマー向け ── 借用と enum が JS からどう見えるか</a></li>
@@ -133,9 +133,10 @@
 <span class='function'>mkdir</span> points
 <span class='function'>cd</span> points
 </code></pre>
-<p>先ほどの <code>model.ts</code> と <code>pick.zsc</code> をここに保存します。まず <code>--all-js</code> を指定して、距離計算も含めて JavaScript に変換します。</p>
-<pre><code class="language-bash"><span class='function'>cargo</span> run <span class='constant'>--manifest-path</span> ../crates/zustscript/Cargo.toml <span class='constant'>--</span> \
-  pick.zsc <span class='constant'>--all-js</span> <span class='constant'>-o</span> js
+<p>先ほどの <code>model.ts</code> と <code>pick.zsc</code> をここに保存します。JS 版では距離計算も通常の関数にします。次のコマンドで <code>@wasm</code> を外した比較用ファイルを作ります。</p>
+<pre><code class="language-bash"><span class='function'>sed</span> <span class='string'>&#39;s/^@wasm //&#39;</span> pick.zsc <span class='operator'>&gt;</span> pick-js.zsc
+<span class='function'>cargo</span> run <span class='constant'>--manifest-path</span> ../crates/zustscript/Cargo.toml <span class='constant'>--</span> \
+  pick-js.zsc <span class='constant'>--all-js</span> <span class='constant'>-o</span> js
 </code></pre>
 <p><em>try.mjs</em></p>
 <pre><code class="language-javascript"><span class='keyword'>const</span> <span class='punctuation bracket'>{</span> distance<span class='punctuation delimiter'>,</span> can_pick <span class='punctuation bracket'>}</span> <span class='operator'>=</span> <span class='keyword'>await</span> <span class='keyword'>import</span><span class='punctuation bracket'>(</span><span class='variable'>process</span><span class='punctuation delimiter'>.</span><span class='property'>argv</span><span class='punctuation bracket'>[</span><span class='number'>2</span><span class='punctuation bracket'>]</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
@@ -144,9 +145,9 @@
   <span class='variable builtin'>console</span><span class='punctuation delimiter'>.</span><span class='function'>log</span><span class='punctuation bracket'>(</span><span class='function'>distance</span><span class='punctuation bracket'>(</span><span class='variable'>cursor</span><span class='punctuation delimiter'>,</span> <span class='variable'>mark</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>,</span> <span class='function'>can_pick</span><span class='punctuation bracket'>(</span><span class='variable'>cursor</span><span class='punctuation delimiter'>,</span> <span class='variable'>mark</span><span class='punctuation bracket'>)</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
 <span class='punctuation bracket'>}</span>
 </code></pre>
-<pre><code class="language-bash"><span class='function'>node</span> try.mjs ./js/pick.js
+<pre><code class="language-bash"><span class='function'>node</span> try.mjs ./js/pick-js.js
 </code></pre>
-<p>次に <code>zustc</code> をビルドし、同じ <code>pick.zsc</code> を <code>--all-js</code> を外してコンパイルします。出力先の <code>wasm/</code> には、JS と型定義に加えて、中間生成物の <code>pick.wasm.rs</code> と実行用の <code>pick.wasm</code> ができます。たとえば <code>wasm/pick.wasm.rs</code> を開くと、<code>distance</code> の計算は Rust の <code>fn zs_distance(a: ZsPoint, b: ZsPoint) -&gt; f64</code> として読めます。画面の判定をする <code>can_pick</code> は <code>pick.js</code> にあります。</p>
+<p>次に <code>zustc</code> をビルドし、<code>@wasm</code> を付けた元の <code>pick.zsc</code> をコンパイルします。出力先の <code>wasm/</code> には、JS と型定義に加えて、中間生成物の <code>pick.wasm.rs</code> と実行用の <code>pick.wasm</code> ができます。たとえば <code>wasm/pick.wasm.rs</code> を開くと、<code>distance</code> の計算は Rust の <code>fn zs_distance(a: ZsPoint, b: ZsPoint) -&gt; f64</code> として読めます。画面の判定をする <code>can_pick</code> は <code>pick.js</code> にあります。</p>
 <pre><code class="language-bash"><span class='function'>cargo</span> build <span class='constant'>--release</span> <span class='constant'>--manifest-path</span> ../Cargo.toml <span class='constant'>--bin</span> zustc
 <span class='function'>cargo</span> run <span class='constant'>--manifest-path</span> ../crates/zustscript/Cargo.toml <span class='constant'>--</span> \
   pick.zsc <span class='constant'>--zustc</span> ../target/release/zustc <span class='constant'>-o</span> wasm

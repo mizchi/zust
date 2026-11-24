@@ -104,7 +104,7 @@
 <span class='function'>rg</span> <span class='constant'>-n</span> <span class='string'>&#39;zs_evens_squared|zs_longer|to_vec&#39;</span> out/costs/*.wasm.rs
 <span class='function'>rg</span> <span class='constant'>-A12</span> <span class='string'>&#39;function (dot|longer)\(&#39;</span> out/costs/*.js
 </code></pre>
-<p>実行時間を比較するときは、同じ入力で JS から公開関数を呼ぶと転送も測定に入ります。<code>@wasm</code> で書いた元の例は <code>--all-js</code> で JS 版も生成できます。手書きの <code>wasm fn</code> は Rust 本体を Wasm として実行します。<a href="https://github.com/mizchi/zust/blob/main/crates/zustscript/tests/numeric_bench.mjs">数値計算のベンチマーク</a> · <a href="index.html">zustscript 入門に戻る</a></p>
+<p>実行時間を比較するときは、同じ入力で JS から公開関数を呼ぶと転送も測定に入ります。同じ本体を JS で計測するには、比較用のソースで <code>@wasm</code> を外し、<code>--all-js</code> を指定します。手書きの <code>wasm fn</code> は Rust 本体を Wasm として実行します。<a href="https://github.com/mizchi/zust/blob/main/crates/zustscript/tests/numeric_bench.mjs">数値計算のベンチマーク</a> · <a href="index.html">zustscript 入門に戻る</a></p>
     </article>
   </main>
 </div>

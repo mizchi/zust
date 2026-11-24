@@ -134,7 +134,13 @@
 <span class='variable builtin'>console</span><span class='punctuation delimiter'>.</span><span class='function'>log</span><span class='punctuation bracket'>(</span><span class='function'>peak</span><span class='punctuation bracket'>(</span><span class='punctuation bracket'>[</span><span class='punctuation bracket'>]</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>.</span><span class='property'>TAG</span><span class='punctuation bracket'>)</span><span class='punctuation delimiter'>;</span>
 </code></pre>
 <p>Node.js 24 で <code>node try-peak.ts</code> を実行すると、順に <code>-2</code> と <code>Empty</code> が表示されます。</p>
-<p>同じ関数を JS で試すには、<code>zsc</code> に <code>--all-js</code> を渡します。所有権やバッファ確保を自分で指定したい関数は、<code>export wasm fn</code> で、zustc が扱える Rust のサブセットを本体に書けます。生成コードと手書きのループを比べる例は次の記事にあります。<a href="rust-costs.html">Rust から見る変換コスト</a> · <a href="index.html">zustscript 入門</a></p>
+<h2>通常の関数を Rust モジュールとして使う</h2>
+<p><code>@wasm</code> は通常のビルドで Rust 経由の Wasm 実行を必須にする属性です。Rust ソースだけ欲しい場合は、普通の <code>export fn</code> にも <code>--emit-rust</code> が使えます。たとえば <code>peak.zsc</code> の <code>@wasm export fn peak</code> を <code>export fn peak</code> に変えて、次を実行します。</p>
+<pre><code class="language-bash"><span class='function'>cargo</span> run <span class='constant'>--manifest-path</span> crates/zustscript/Cargo.toml <span class='constant'>--</span> peak.zsc <span class='constant'>--emit-rust</span> <span class='constant'>-o</span> out/native
+<span class='function'>rustc</span> <span class='constant'>--edition=2024</span> <span class='constant'>--crate-type</span> lib out/native/peak.rs <span class='constant'>-o</span> out/native/libpeak.rlib
+</code></pre>
+<p><code>out/native/peak.rs</code> には <code>pub fn zs_peak(xs: &amp;[i32]) -&gt; ZsPeak</code> と <code>pub enum ZsPeak</code> が生成されます。Rust から直接呼ぶ場合はスライスをそのまま渡せます。この出力ではモジュール内の関数を Rust に変換するため、JS の extern 呼び出しや JSX などの非対応構文はソース位置付きのエラーになります。</p>
+<p>同じ本体を JS で実行するときは属性のない <code>export fn</code> を使います。<code>@wasm</code> を残したまま <code>--all-js</code> を指定すると、対象の関数名と位置が報告されます。所有権やバッファ確保を自分で指定したい関数は、<code>export wasm fn</code> で、zustc が扱える Rust のサブセットを本体に書けます。生成コードと手書きのループを比べる例は次の記事にあります。<a href="rust-costs.html">Rust から見る変換コスト</a> · <a href="index.html">zustscript 入門</a></p>
     </article>
   </main>
 </div>
