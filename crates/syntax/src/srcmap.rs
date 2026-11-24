@@ -228,7 +228,8 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     let mut externs = vec![];
     let stripped = crate::cfg::strip_noting(&src, cfg, &mut env, &mut externs);
     if map.inputs.is_empty() && map.keep_externs {
-        map.cfg_err = crate::cfg::malformed_cfg(&src, stripped.as_deref(), cfg);
+        // (a fn's qualifiers out of order, a parse error, before a malformed `cfg`)
+        map.cfg_err = crate::cfg::fn_qualifier_order(&src).or_else(|| crate::cfg::malformed_cfg(&src, stripped.as_deref(), cfg));
     }
     let src = match stripped {
         Some(t) => {

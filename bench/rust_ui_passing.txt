@@ -507,6 +507,7 @@ compile-fail	async-await/multiple-lifetimes/ret-ref.rs
 run-pass	async-await/multiple-lifetimes/variance.rs
 check-pass	async-await/no-params-non-move-async-closure.rs
 check-pass	async-await/no-std.rs
+compile-fail	async-await/no-unsafe-async.rs
 compile-fail	async-await/partial-initialization-across-await.rs
 compile-fail	async-await/pin-needed-to-poll.rs
 compile-fail	async-await/proper-span-for-type-error.rs
@@ -5251,6 +5252,7 @@ compile-fail	parser/issues/issue-17718-const-mut.rs
 run-pass	parser/issues/issue-17718-parse-const.rs
 compile-fail	parser/issues/issue-17904-2.rs
 compile-fail	parser/issues/issue-19096.rs
+compile-fail	parser/issues/issue-19398.rs
 compile-fail	parser/issues/issue-20616-1.rs
 compile-fail	parser/issues/issue-20616-2.rs
 compile-fail	parser/issues/issue-20616-3.rs
@@ -5365,7 +5367,14 @@ compile-fail	parser/issues/issue-86895.rs
 compile-fail	parser/issues/issue-87086-colon-path-sep.rs
 compile-fail	parser/issues/issue-87197-missing-semicolon.rs
 compile-fail	parser/issues/issue-87217-keyword-order/const-async-const.rs
+compile-fail	parser/issues/issue-87217-keyword-order/recovery.rs
+compile-fail	parser/issues/issue-87217-keyword-order/several-kw-jump.rs
+compile-fail	parser/issues/issue-87217-keyword-order/wrong-async.rs
 compile-fail	parser/issues/issue-87217-keyword-order/wrong-const-async-unsafe-abi.rs
+compile-fail	parser/issues/issue-87217-keyword-order/wrong-const-unsafe-abi.rs
+compile-fail	parser/issues/issue-87217-keyword-order/wrong-const.rs
+compile-fail	parser/issues/issue-87217-keyword-order/wrong-unsafe-abi.rs
+compile-fail	parser/issues/issue-87217-keyword-order/wrong-unsafe.rs
 compile-fail	parser/issues/issue-87635.rs
 compile-fail	parser/issues/issue-87694-duplicated-pub.rs
 compile-fail	parser/issues/issue-87694-misplaced-pub.rs

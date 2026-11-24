@@ -1251,3 +1251,28 @@ fn review106_third_round() {
     let _ = check(2021, "fn main() { let _ = cfg!(x '\\");
     let _ = check(2021, "#[cfg(a = '\\");
 }
+
+#[test]
+fn fn_qualifier_order() {
+    // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    for (q, col, msg) in [
+        ("unsafe async", 8, "expected one of `extern` or `fn`, found keyword `async`"),
+        ("async const", 7, "expected one of `extern`, `fn`, `safe`, or `unsafe`, found keyword `const`"),
+        ("extern \"C\" unsafe", 12, "expected `fn`, found keyword `unsafe`"),
+        ("async unsafe const", 14, "expected one of `extern` or `fn`, found keyword `const`"),
+        ("unsafe extern \"C\" async", 19, "expected `fn`, found keyword `async`"),
+        ("extern extern", 8, "expected `fn`, found keyword `extern`"),
+    ] {
+        assert_eq!(check(&format!("{q} fn f() {{}}\nfn main() {{}}\n")), Some((1, col, msg.to_string())), "{q}");
+    }
+    // (an item a false `cfg` takes away is parsed too; a fn pointer type's qualifiers are read the same way)
+    assert_eq!(check("#[cfg(false)]\nunsafe async fn f() {}\nfn main() {}\n").map(|x| (x.0, x.1)), Some((2, 8)), "configured_away");
+    assert_eq!(check("type F = extern \"C\" unsafe fn(u8);\nfn main() {}\n").map(|x| (x.0, x.1)), Some((1, 21)), "fn_pointer");
+    // (in order, or not before a `fn`, or in a comment or a macro: nothing)
+    let src = "const unsafe extern \"C\" fn f() {}\ntype G = *const unsafe fn(u8);\nfn main() { unsafe { let _ = async { 1 }; } }\nextern \"C\" { fn x(); }\nconst C: u8 = 1;\n// unsafe async fn bad() {}\nmacro_rules! m { () => { unsafe async fn z() {} } }\n";
+    assert_eq!(check(src), None, "in_order");
+}

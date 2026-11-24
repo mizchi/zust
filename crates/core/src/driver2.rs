@@ -837,7 +837,7 @@ impl Session2 {
             let mut ext = vec![];
             let configured = crate::cfg::strip_noting(src0, &cfg, &mut None, &mut ext);
             if cfg_err.is_none() {
-                cfg_err = malformed_cfg(src0, configured.as_deref(), &cfg);
+                cfg_err = crate::cfg::fn_qualifier_order(src0).or_else(|| malformed_cfg(src0, configured.as_deref(), &cfg));
             }
             match configured {
                 Some(t) => {

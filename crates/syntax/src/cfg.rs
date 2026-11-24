@@ -844,6 +844,146 @@ pub fn not_a_literal(found: &str) -> String {
     format!("expected a literal (`1u8`, `1.0f32`, `\"string\"`, etc.) here, found {found}")
 }
 
+/// The first fn qualifier out of rustc's order `const` `async` `unsafe`/`safe` `extern "abi"` before a `fn` (of an
+/// item, an associated fn or a fn pointer type), as rustc's parser reports it at that keyword: `unsafe async fn`
+/// "expected one of `extern` or `fn`, found keyword `async`". The parser reads every item, a configured-away one
+/// too, so this reads the source as written; not a macro's definition or input, a comment or a literal, and only a
+/// run of qualifiers that ends at `fn`
+pub fn fn_qualifier_order(src: &str) -> Option<String> {
+    if !src.contains("fn") {
+        return None;
+    }
+    let b = src.as_bytes();
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let ws = |mut k: usize| {
+        while k < b.len() && b[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        k
+    };
+    let word = |k: usize| &b[k..k + b[k..].iter().take_while(|&&c| ident(c)).count()];
+    // (the rank of a qualifier: rustc's order)
+    let rank = |w: &[u8]| match w {
+        b"const" => Some(0),
+        b"async" => Some(1),
+        b"unsafe" | b"safe" => Some(2),
+        b"extern" => Some(3),
+        _ => None,
+    };
+    // (first a cheap look: a qualifier whose next word is one that may not follow it; the text is read in order only
+    // where there is one)
+    let next_word = |k: usize| {
+        let a = ws(k);
+        if a < b.len() && ident(b[a]) { word(a) } else { &b""[..] }
+    };
+    // (`const` is left out: only another `const` may not follow it, and `const const fn` is read as no item first)
+    let suspect = ["async", "unsafe", "extern"].iter().any(|q| {
+        src.match_indices(q).any(|(m, _)| {
+            let e = m + q.len();
+            if m > 0 && ident(b[m - 1]) || b.get(e).is_some_and(|&c| ident(c)) {
+                return false;
+            }
+            let mut k = e;
+            if *q == "extern" {
+                let a = ws(k);
+                if b.get(a) == Some(&b'"') {
+                    k = lit_end(b, a).unwrap_or(b.len());
+                }
+            }
+            let n = next_word(k);
+            n != b"safe" && rank(n).is_some_and(|r| r <= rank(q.as_bytes()).unwrap_or(0))
+        })
+    });
+    if !suspect {
+        return None;
+    }
+    let mut i = 0;
+    while i < b.len() {
+        if let Some(e) = lit_end(b, i) {
+            i = e;
+            continue;
+        }
+        if !ident(b[i]) || i > 0 && ident(b[i - 1]) {
+            i += 1;
+            continue;
+        }
+        let w = word(i);
+        let after = ws(i + w.len());
+        // (a macro's definition or call: its group is not read, `m! { .. }`, `macro_rules! m { .. }`)
+        if b.get(after) == Some(&b'!') && b.get(after + 1) != Some(&b'=') {
+            let mut k = ws(after + 1);
+            if k < b.len() && ident(b[k]) {
+                k = ws(k + word(k).len());
+            }
+            if matches!(b.get(k), Some(b'{' | b'(' | b'[')) {
+                let mut d = 0i32;
+                while k < b.len() {
+                    if let Some(e) = lit_end(b, k) {
+                        k = e;
+                        continue;
+                    }
+                    match b[k] {
+                        b'{' | b'(' | b'[' => d += 1,
+                        b'}' | b')' | b']' => {
+                            d -= 1;
+                            if d == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    k += 1;
+                }
+            }
+            i = k.max(i + 1);
+            continue;
+        }
+        // (a run of qualifiers from here; `*const` is a pointer's)
+        let pointer = src[..i].trim_end().ends_with('*');
+        if rank(w).is_none() || pointer {
+            i += w.len();
+            continue;
+        }
+        let (mut k, mut last, mut bad): (usize, i32, Option<(usize, &[u8], i32)>) = (i, -1, None);
+        let ends_at_fn = loop {
+            k = ws(k);
+            if k >= b.len() || !ident(b[k]) {
+                break false;
+            }
+            let q = word(k);
+            if q == b"fn" {
+                break true;
+            }
+            let Some(r) = rank(q) else { break false };
+            if bad.is_none() && r <= last && q != b"safe" {
+                bad = Some((k, q, last));
+            }
+            last = last.max(r);
+            k += q.len();
+            // (`extern "C"`: its ABI)
+            if q == b"extern" {
+                let a = ws(k);
+                if b.get(a) == Some(&b'"') {
+                    k = lit_end(b, a).unwrap_or(b.len());
+                }
+            }
+        };
+        if let (true, Some((at, q, prev))) = (ends_at_fn, bad) {
+            let expected = match prev {
+                0 => "one of `async`, `extern`, `fn`, `safe`, or `unsafe`",
+                1 => "one of `extern`, `fn`, `safe`, or `unsafe`",
+                2 => "one of `extern` or `fn`",
+                _ => "`fn`",
+            };
+            let line = b[..at].iter().filter(|&&c| c == b'\n').count() + 1;
+            let col = at - src[..at].rfind('\n').map_or(0, |p| p + 1) + 1;
+            return Some(format!("{line}:{col}: expected {expected}, found keyword `{}`", String::from_utf8_lossy(q)));
+        }
+        i = k.max(i + 1);
+    }
+    None
+}
+
 /// Whether a predicate holds in a configuration: `unix`, `all(..)`, `not(feature = "x")`
 pub fn cfg_holds(p: &str, c: &CfgSet) -> bool {
     let b = p.as_bytes();
