@@ -103,3 +103,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-24 | [The borrow check toward Polonius Alpha (#1)](2026-11-24-03-polonius-alpha.md) |
 | 2026-11-24 | [Region (lifetime) checking, part 20: closures against the regions their bounds bind, boxed closures' signatures, captured locals' regions, what a closure's calls borrow](2026-11-24-04-region-check-20.md) |
 | 2026-11-24 | [Region (lifetime) checking, part 21: fn items coerced to fn pointers, deref coercions through shared references, `ref mut` bindings of annotated lets](2026-11-24-05-region-check-21.md) |
+| 2026-11-24 | [Region (lifetime) checking, part 22: projections' associated types in annotations and parameters, closures cast from a local](2026-11-24-06-region-check-22.md) |
