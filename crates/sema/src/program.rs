@@ -422,7 +422,7 @@ pub struct Program {
     pub blanket: FxMap<String, u32>,
     /// A blanket impl's trait → the bounds of its self type's parameter, its where clauses' too
     /// (`impl<T: ?Sized> FutureExt for T where T: Future`: ?Sized, Future)
-    pub blanket_bounds: FxMap<String, Vec<String>>,
+    pub blanket_bounds: FxMap<String, Vec<Vec<String>>>,
     pub blanket_selfs: HashSet<String>,
     /// Traits with a blanket impl (`impl<T> Tr for T`): every type implements them (bounds are not checked)
     pub blanket_traits: HashSet<String>,
@@ -1825,9 +1825,9 @@ impl Program {
                 bare_blankets.insert(tr.clone());
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
-                if let Some(g) = sm.impl_generics.iter().find(|g| g.0 == *sn) {
-                    p.blanket_bounds.entry(tr.clone()).or_default().extend(g.1.iter().cloned());
-                }
+                // (one list of bounds per impl: `impl<T: A> Tr<u8> for T` and `impl<T: B> Tr<u16> for T` are two)
+                let bs = sm.impl_generics.iter().find(|g| g.0 == *sn).map(|g| g.1.clone()).unwrap_or_default();
+                p.blanket_bounds.entry(tr.clone()).or_default().push(bs);
                 // (the trait's default methods are methods of every type)
                 let ids: Vec<u32> = p.traits.get(tr).cloned().unwrap_or_default();
                 for id in ids {
@@ -2452,9 +2452,12 @@ impl Program {
         if matches!(t, Ty::Dyn(_)) {
             return true;
         }
-        bs.iter().all(|b| {
-            let name = b.split('<').next().unwrap_or(b).trim();
-            !self.user_traits.contains(name) || name == tr || self.goal_holds(t, name)
+        // (some one impl's bounds all hold)
+        bs.iter().any(|bs| {
+            bs.iter().all(|b| {
+                let name = b.split('<').next().unwrap_or(b).trim();
+                !self.user_traits.contains(name) || name == tr || self.goal_holds(t, name)
+            })
         })
     }
 
@@ -2497,12 +2500,12 @@ impl Program {
         }
     }
 
-    /// The references in a and b (a pattern with `Param`s, a type) agree in mutability, as match_ty does not check:
-    /// `W<&mut i32>` is not `W<&i32>`
+    /// The references and raw pointers in a and b (a pattern with `Param`s, a type) agree in mutability, as match_ty
+    /// does not check: `W<&mut i32>` is not `W<&i32>`, nor `W<*mut i32>` `W<*const i32>`
     pub fn refs_agree(&self, a: Ty, b: Ty, depth: u32) -> bool {
         match (a, b) {
-            (Ty::Ref(m, x), Ty::Ref(n, y)) => m == n && self.refs_agree(*x, *y, depth + 1),
-            (Ty::Array(x, _), Ty::Array(y, _)) | (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) | (Ty::Ptr(_, x), Ty::Ptr(_, y)) => self.refs_agree(*x, *y, depth + 1),
+            (Ty::Ref(m, x), Ty::Ref(n, y)) | (Ty::Ptr(m, x), Ty::Ptr(n, y)) => m == n && self.refs_agree(*x, *y, depth + 1),
+            (Ty::Array(x, _), Ty::Array(y, _)) | (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) => self.refs_agree(*x, *y, depth + 1),
             (Ty::Struct(x), Ty::Struct(y)) if x != y && depth < 16 => {
                 self.structs[x as usize].args.iter().zip(&self.structs[y as usize].args).all(|(&p, &q)| self.refs_agree(p, q, depth + 1))
             }

@@ -40,6 +40,10 @@ lookup of trait bounds did not call it. It was used only by one path of method c
   - So is one more than 64 goals deep (overflow).
   - Both give the old answer, not an error rustc may not give. The new solver makes these "maybe", and treats cycles
     through auto traits as coinductive.
+- **One impl at a time**: each blanket impl keeps its own bounds, and one whose bounds all hold is enough.
+  `impl<T: A> Tr<u8> for T` with `impl<T: B> Tr<u16> for T` does not ask `i32: Tr<u8>` for both `A` and `B`.
+- **Raw pointers**: an impl's self type matches only with the same mutability, of references as before and now of raw
+  pointers: `impl Foo for W<*const i32>` is not for `W<*mut i32>`.
 - **Only the program's traits**: as `impl_applies` did, a bound of a std trait is taken to hold. zustc's answers for
   std traits are written case by case (`implements_std`), and an error there would be a false one.
 - **Supertraits**: an impl of `trait B: A` needs its self type to implement `A`
@@ -89,6 +93,13 @@ main too in this environment.
 - Bounds on associated types (`where T::A: Bar`) as normalizes-to goals.
 - Candidate preference: where-clauses before impls, alias bounds.
 - std traits as goals, once their answers are exact enough not to give false errors.
+- Where clauses on other than a parameter (`impl<T> Foo for T where W<T>: Bar`) are not checked, as before: the
+  impl is taken for every `T`. Checking them needs the clause's type with the impl's parameters put in.
+- A cycle (`impl<T: Q> P for T` with `impl<T: P> Q for T`) is taken to hold, where an obligation through it
+  (`fn req<T: P>`, `req(1u8)`) is E0275 in rustc. That is a false accept, not a false error, and is where "maybe"
+  goes.
+- Completed goals are not cached. The traits KPI is +0.15%; a cache is worth it once goals carry inference
+  constraints.
 - Supertraits of generic impls (`impl<T: A> B for W<T>` needs `W<T>: A` from the impl's own bounds).
 - Generic bodies: a bound that fails only for the placeholder of a generic fn nothing instantiates with a failing
   type is not reported. Placeholder checks skip bodies that call their bounds' methods.

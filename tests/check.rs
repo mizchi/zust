@@ -1018,13 +1018,19 @@ fn impl_bounds_are_nested_goals() {
         bad(&format!("{imp}\nfn main() {{ {}; }}", call.replace('_', "1u8")));
         ok(&format!("{imp}\nfn main() {{ {}; }}", call.replace('_', "1i32")));
     }
-    // (a cycle of blanket impls through each other's bounds is not followed forever)
+    // (a cycle of blanket impls through each other's bounds is not followed forever. An obligation through it,
+    // `req::<u8>` with `fn req<T: P>`, is E0275 in rustc; zustc takes it to hold, the old answer)
     ok("trait P {}\ntrait Q {}\nimpl<T: Q> P for T {}\nimpl<T: P> Q for T {}\nfn main() {}");
     // (a trait object implements its trait's supertraits, whatever a blanket impl of one asks)
     ok("trait Sup {}\ntrait Sub2: Sup {}\ntrait Imp {}\nimpl<T: ?Sized + Sub2 + Imp> Sup for T {}\nfn n<T: ?Sized + Sup>() {}\nfn main() { n::<dyn Sub2>(); }");
     // (supertraits)
     bad("trait A {}\ntrait B: A {}\nstruct C;\nimpl B for C {}\nfn main() {}");
     ok("trait A {}\ntrait B: A {}\nstruct C;\nimpl A for C {}\nimpl B for C {}\nfn main() {}");
+    // (two blanket impls of one trait each have their own bounds: one that holds is enough)
+    ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: A> Tr<u8> for T {}\nimpl<T: B> Tr<u16> for T {}\nimpl A for i32 {}\nfn need2<T: Tr<u8>>(_: T) {}\nfn main() { need2(1i32); }");
+    // (a raw pointer's mutability is part of the impl's self type)
+    bad("impl Foo for W<*const i32> {}\nfn main() { let mut x = 1; need(W(&mut x as *mut i32)); }");
+    ok("impl Foo for W<*const i32> {}\nfn main() { let x = 1; need(W(&x as *const i32)); }");
     // (an impl for `&mut i32` is not for i32)
     bad("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { f(1i32); }");
     ok("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { let mut x = 1i32; f(&mut x); }");
