@@ -4060,7 +4060,7 @@ impl Cx<'_> {
         if let Some(r) = self.intrinsic_call(c, expected)? {
             return Ok(r);
         }
-        let Some((id, _)) = self.callee(func) else {
+        let Some((mut id, _)) = self.callee(func) else {
             // 値の呼び出し: クロージャ / `&dyn Fn`
             return self.call_value(c, expected);
         };
@@ -4083,7 +4083,19 @@ impl Cx<'_> {
             } else if n >= 2 && !p.segs[n - 2].args.is_empty() {
                 let seg = p.segs[n - 2].clone();
                 let ty = crate::parse::Ty::Path(None, Path { global: false, segs: vec![seg], pos: Default::default() });
-                self.seg_self = Some(self.parse_ty(&ty)?);
+                let st = self.parse_ty(&ty)?;
+                self.seg_self = Some(st);
+                // (`<Box<[u8]>>::from_abi(js)` / `Box::<[u8]>::from_abi`: among impls for instances of the type, the one
+                // for this one)
+                let group = self.prog.names[id as usize].split('#').next().unwrap_or("").to_string();
+                if let Some(cs) = self.prog.overloads.get(&group).filter(|_| !self.prog.has_param(st)) {
+                    let own = |c: u32| self.prog.sigs[c as usize].self_ty.is_some_and(|t| self.prog.match_ty_exact(t, st, &mut vec![None; self.prog.sigs[c as usize].generics.len()]));
+                    if !own(id) {
+                        if let Some(&c) = cs.iter().find(|&&c| own(c)) {
+                            id = c;
+                        }
+                    }
+                }
             } else if n == 2 && self.prog.sigs[id as usize].self_ty.is_some_and(|t| self.prog.has_param(t)) {
                 // `T::dec(r)` (T はインスタンスの中で具体的な型): ジェネリックな impl の型引数を Self から
                 let seg = p.segs[0].clone();
@@ -4135,6 +4147,12 @@ impl Cx<'_> {
         // (`<&[u8] as Tr>::m(&v)`: the impl the qualified type names, whose self type it is; not another overload
         // the arguments would pick (`&Vec<u8>` coerces to both `&[T]` and `&mut [u8]`'s receiver))
         let mut kept = false;
+        if let (Some(st), Expr::Path(None, _)) = (self.seg_self, &**func) {
+            if self.prog.overloads.contains_key(self.prog.names[id as usize].split('#').next().unwrap_or("")) && self.prog.sigs[id as usize].self_ty.is_some_and(|t| self.prog.match_ty_exact(t, st, &mut vec![None; self.prog.sigs[id as usize].generics.len()])) {
+                self.keep_overload.set(Some(id));
+                kept = true;
+            }
+        }
         if let Expr::Path(Some(q), _) = &**func {
             let sig = &self.prog.sigs[id as usize];
             if self.prog.overloads.contains_key(self.prog.names[id as usize].split('#').next().unwrap_or("")) {

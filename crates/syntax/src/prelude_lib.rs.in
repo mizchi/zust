@@ -1136,6 +1136,10 @@ impl<T: Ord> Vec<T> {
 }
 
 impl<T> Vec<T> {
+    // (a buffer of `cap` elements the allocator gave, its first `len` initialized: the Vec owns it)
+    pub unsafe fn from_raw_parts(ptr: *mut T, len: usize, cap: usize) -> Vec<T> {
+        Vec { ptr: ptr, cap: cap, len: len }
+    }
     // (the buffer becomes the Box's: a Box<[T]> is its (pointer, length) and frees the pointer)
     pub fn into_boxed_slice(self) -> Box<[T]> {
         let p = self.ptr;
@@ -13282,6 +13286,10 @@ fn __exr_char_from_digit<G>(d: u32, radix: u32) -> Option<char> {
 
 fn __exr_char_from_u8<G>(b: u8) -> char {
     unsafe { __exr_char_from_u32(b as u32) }
+}
+
+unsafe fn __exr_char_from_u32_unchecked<G>(u: u32) -> char {
+    unsafe { __exr_char_from_u32(u) }
 }
 
 fn __exr_char_from_u32_checked<G>(u: u32) -> Option<char> {

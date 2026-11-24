@@ -2923,7 +2923,17 @@ impl Cx<'_> {
                     return Some((i, &self.prog.sigs[i as usize]));
                 }
             }
-            let i = by_ty(t, &m)?;
+            let mut i = by_ty(t, &m)?;
+            // (`<Box<[u8]>>::from_abi(js)`: among impls for instances of one type, the one for the type itself)
+            let group = self.prog.names[i as usize].split('#').next().unwrap_or("");
+            if let Some(cs) = self.prog.overloads.get(group) {
+                let own = |c: u32| self.prog.sigs[c as usize].self_ty.is_some_and(|st| self.prog.match_ty_exact(st, t, &mut vec![None; self.prog.sigs[c as usize].generics.len()]));
+                if !own(i) {
+                    if let Some(&c) = cs.iter().find(|&&c| own(c)) {
+                        i = c;
+                    }
+                }
+            }
             return Some((i, &self.prog.sigs[i as usize]));
         }
         // (`T::A::m(..)`: a fn of the associated type A of the type parameter T)

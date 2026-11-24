@@ -802,6 +802,10 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     let mut depth = 0i32;
     let mut fn_bodies: Vec<(i32, usize)> = vec![];
     let mut pending_fn = false;
+    // (the body of a `const _: () = { .. };`, what derives and `#[wasm_bindgen]` wrap impls in: its items but its
+    // consts and statics go out, as a fn body's do. Its `{` (token), and whether the next `{` opens one)
+    let mut anon_bodies: Vec<usize> = vec![];
+    let mut pending_anon = false;
     let mut moves: Vec<(usize, usize)> = vec![];
     // 入れ子のアイテムの名前と、それを含む関数の本体 (開き括弧のトークン位置)。閉じた本体の (開き, 閉じ)
     let mut nested_names: Vec<(Vec<u8>, usize)> = vec![];
@@ -825,6 +829,10 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             if !stmt_start {
                 if t == b"fn" && k + 1 < toks.len() && toks[k + 1].0 == 0 {
                     pending_fn = true;
+                }
+                // (`const _: T = {`: not after `fn`'s parameters (`const fn`), nor a const generic `<const N: ..>`)
+                if t == b"const" && k + 1 < toks.len() && toks[k + 1].0 == 0 && tok(k + 1) == b"_" && !pending_fn {
+                    pending_anon = true;
                 }
                 k += 1;
                 continue;
@@ -877,8 +885,17 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 || (t == b"union" && ik + 1 < toks.len() && toks[ik + 1].0 == 0)
                 || extern_block;
             let impl_like = t == b"impl";
+            // (in an anonymous const's body, only its impls, `use`s, fns, traits and extern blocks go out: its consts,
+            // statics and types stay, what the const checks at compile time (`struct _Section([u8; _CHUNK_1_LEN])` of
+            // `#[wasm_bindgen]`'s custom section, beside the const it names))
+            let in_anon = fn_bodies.last().is_some_and(|&(_, open)| anon_bodies.last() == Some(&open));
+            let anon_keeps = in_anon && !extern_block && !matches!(t, b"impl" | b"use" | b"fn" | b"trait");
+            // (an anonymous const that stays, in another one's body: its own body is one too)
+            if anon_keeps && t == b"const" && ik + 1 < toks.len() && tok(ik + 1) == b"_" {
+                pending_anon = true;
+            }
             // (`const` の後ろに `fn` や `|` (const クロージャ) が来るものは別扱い: `const fn` は fn で見る)
-            if in_body && stmt_start && item_kw && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<")) || extern_block) {
+            if in_body && stmt_start && item_kw && !anon_keeps && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<")) || extern_block) {
                 // アイテムの終わり: `{ .. }` (fn / struct / enum) か `;`
                 let mut j = ik + 1;
                 let mut d = 0i32;
@@ -948,7 +965,48 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                         break;
                     }
                 }
-                moves.push((toks[st].1, toks[e].2));
+                // (and its doc comments before those, `/// ..` / `/** .. */`: left behind they would document nothing,
+                // E0585. Between two tokens there are only whitespace and comments)
+                let mut from = toks[st].1;
+                {
+                    let mut i = if st > 0 { toks[st - 1].2 } else { 0 };
+                    let mut first_doc = None;
+                    while i < from {
+                        if s[i..].starts_with(b"//") {
+                            if s[i..].starts_with(b"///") && !s[i..].starts_with(b"////") {
+                                first_doc.get_or_insert(i);
+                            }
+                            while i < from && s[i] != b'\n' {
+                                i += 1;
+                            }
+                        } else if s[i..].starts_with(b"/*") {
+                            if s[i..].starts_with(b"/**") && !s[i..].starts_with(b"/**/") {
+                                first_doc.get_or_insert(i);
+                            }
+                            let mut d = 0i32;
+                            while i + 1 < from {
+                                if s[i] == b'/' && s[i + 1] == b'*' {
+                                    d += 1;
+                                    i += 2;
+                                } else if s[i] == b'*' && s[i + 1] == b'/' {
+                                    d -= 1;
+                                    i += 2;
+                                    if d == 0 {
+                                        break;
+                                    }
+                                } else {
+                                    i += 1;
+                                }
+                            }
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    if let Some(d) = first_doc {
+                        from = d;
+                    }
+                }
+                moves.push((from, toks[e].2));
                 let nk = if matches!(t, b"static") && tok(ik + 1) == b"mut" { ik + 2 } else { ik + 1 };
                 if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" && !extern_block {
                     nested_names.push((tok(nk).to_vec(), fn_bodies.last().unwrap().1));
@@ -976,18 +1034,28 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                     if pending_fn {
                         fn_bodies.push((depth, k));
                         pending_fn = false;
+                    } else if pending_anon {
+                        fn_bodies.push((depth, k));
+                        anon_bodies.push(k);
                     }
+                    pending_anon = false;
                     depth += 1;
                 }
                 b"}" => {
                     depth -= 1;
                     if fn_bodies.last().is_some_and(|&(d, _)| d == depth) {
                         let (_, open) = fn_bodies.pop().unwrap();
+                        if anon_bodies.last() == Some(&open) {
+                            anon_bodies.pop();
+                        }
                         bodies.push((open, k));
                     }
                 }
                 // `fn f();` (宣言だけ) は本体なし
-                b";" => pending_fn = false,
+                b";" => {
+                    pending_fn = false;
+                    pending_anon = false;
+                }
                 _ => {}
             }
         }

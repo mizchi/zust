@@ -1267,6 +1267,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("from_u32") {
         need.insert("__exr_char_from_u32_checked");
     }
+    if need.contains("from_u32_unchecked") {
+        need.insert("__exr_char_from_u32_unchecked");
+    }
     if need.contains("parse") {
         need.extend(["__from_str", "__FromStr"]);
     }

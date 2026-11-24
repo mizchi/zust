@@ -2076,11 +2076,12 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
             }
             // (on the line a fn starts or ends on, its columns say whether it is around: `fn a(x: u8) {} fn b() {
             // fn c() {} }` on one line)
+            // (when the text as written does not have them, a macro's expansion on one line, `closures! { .. }` with
+            // its `const _: () = { fn invoke() .. }`, it is not known to be around: no E0434)
             if line == a || line == b {
-                if let (Some(x), Some(y)) = (orig_at(gi), orig_at(it)) {
-                    if !encloses(x, y) {
-                        continue;
-                    }
+                match (orig_at(gi), orig_at(it)) {
+                    (Some(x), Some(y)) if encloses(x, y) => {}
+                    _ => continue,
                 }
             }
             let Ok(Some(gf)) = parse_fn(src, gi) else { continue };

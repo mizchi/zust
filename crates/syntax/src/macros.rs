@@ -584,11 +584,19 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
             // (not a tt-muncher's marker, `closures!(@closure ..)` in a body with `let closure`: the marker is matched
             // against a rule's `@closure`, as rustc matches it by name. A binding's `@`, `whole @ x`, has a name
             // before it: its `x` is the body's own)
+            // (nor a field or method of the name, `vector.len()` / `js.len` beside `let len`, nor a field in a struct
+            // literal, `WasmSlice { len: n }`)
             Pt::Tok(TokenTree::Ident(i))
                 if lets.iter().any(|l| *i == l.as_str())
                     && !(k > 0
                         && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '@')
-                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Ident(_)) | Pt::Var(..)))) =>
+                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Ident(_)) | Pt::Var(..))))
+                    && !(k > 0
+                        && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.')
+                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.')))
+                    && !(k > 0
+                        && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == ',')
+                        && matches!(body.get(k + 1), Some(Pt::Tok(TokenTree::Punct(q))) if q.as_char() == ':' && q.spacing() == proc_macro2::Spacing::Alone)) =>
             {
                 out.push_str(&i.to_string());
                 out.push_str("__mh ");
@@ -602,7 +610,43 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                     Delimiter::None => ("", ""),
                 };
                 out.push_str(o);
-                transcribe(inner, binds, out, lets)?;
+                // (a struct literal's shorthand fields of the body's own names, `MutSlice { contents, js }`: the field
+                // keeps its name, the value is the renamed local, `contents: contents__mh`. A type's name before the
+                // braces, and a `,` among them: a block does not have that shape)
+                let shorthand = *d == Delimiter::Brace
+                    && k > 0
+                    && matches!(&body[k - 1], Pt::Tok(TokenTree::Ident(n)) if n.to_string().starts_with(|c: char| c.is_ascii_uppercase()))
+                    && inner.iter().any(|p| matches!(p, Pt::Tok(TokenTree::Punct(q)) if q.as_char() == ','));
+                if shorthand && !lets.is_empty() {
+                    let mut fixed: Vec<Pt> = Vec::with_capacity(inner.len());
+                    let sep = |p: Option<&Pt>| p.is_none_or(|p| matches!(p, Pt::Tok(TokenTree::Punct(q)) if q.as_char() == ','));
+                    let mut parts: Vec<(usize, String)> = vec![];
+                    for (j, p) in inner.iter().enumerate() {
+                        if let Pt::Tok(TokenTree::Ident(n)) = p {
+                            let n = n.to_string();
+                            if lets.iter().any(|l| *l == n) && (j == 0 || sep(inner.get(j - 1))) && sep(inner.get(j + 1)) {
+                                parts.push((j, n));
+                            }
+                        }
+                    }
+                    if parts.is_empty() {
+                        transcribe(inner, binds, out, lets)?;
+                    } else {
+                        let mut last = 0;
+                        for (j, n) in &parts {
+                            fixed.clear();
+                            fixed.extend_from_slice(&inner[last..*j]);
+                            transcribe(&fixed, binds, out, lets)?;
+                            out.push_str(&format!("{n}: {n}__mh "));
+                            last = j + 1;
+                        }
+                        fixed.clear();
+                        fixed.extend_from_slice(&inner[last..]);
+                        transcribe(&fixed, binds, out, lets)?;
+                    }
+                } else {
+                    transcribe(inner, binds, out, lets)?;
+                }
                 out.push_str(c);
                 out.push(' ');
             }

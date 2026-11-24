@@ -1827,6 +1827,15 @@ impl Program {
             if let Some(TySyn::Ref(..)) = &sm.impl_self_ty {
                 if let Some(t) = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &[]).ok()) {
                     p.ref_impls.insert((t, tr.clone()));
+                } else {
+                    // (one with the impl's parameters, `impl<T> Tr for &ScopedClosure<'_, T>`: its self type as a
+                    // pattern, matched against a type for bounds)
+                    let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                    if let Some(t) = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok()) {
+                        if !matches!(t, Ty::Ref(_, Ty::Param(_))) {
+                            p.ref_impl_pats.push((t, tr.clone(), gn.len()));
+                        }
+                    }
                 }
             }
             // (and a vector type of core::arch, when the program has no type of the name: `impl Vector for __m128i`.
@@ -3002,10 +3011,13 @@ impl Program {
                     None => (n, true),
                 };
                 if self.has_param(bt) {
-                    Ty::Assoc(intern_assoc(AssocTy {
-                        base: bt,
-                        name: n.to_string(),
-                    }))
+                    // (with its trait, when another trait has an associated type of the name too: `<T as
+                    // VectorFromWasmAbi>::Abi` is not T's IntoWasmAbi's once T is known)
+                    let name = match tr {
+                        Some(tr) if self.assoc_traits_of(n) > 1 => format!("{}{tr}:{n}", crate::ast_types::TRAIT_ASSOC),
+                        _ => n.to_string(),
+                    };
+                    Ty::Assoc(intern_assoc(AssocTy { base: bt, name }))
                 } else {
                     match tr.and_then(|tr| self.assoc_of_trait(bt, n, tr)).or_else(|| self.assoc_of_with(bt, n, std_impls)) {
                         Some(t) => t,
@@ -4409,7 +4421,7 @@ impl Program {
             .iter()
             .filter(concrete)
             .find(|a| of_tr(a) && self.match_ty_exact(a.self_ty, t, &mut vec![None; a.ngen]))
-            .or_else(|| self.assocs.iter().filter(concrete).find(of_tr))
+            .or_else(|| self.assocs.iter().filter(|a| !concrete(a)).find(of_tr))
             .or_else(|| self.assocs.iter().find(of_tr))?;
         let mut sol = vec![None; a.ngen];
         self.match_ty(a.self_ty, t, &mut sol);
@@ -4417,8 +4429,28 @@ impl Program {
         Some(self.subst(a.value, &args))
     }
 
+    /// How many traits' impls give an associated type of the name
+    pub fn assoc_traits_of(&self, name: &str) -> usize {
+        let mut trs: Vec<&str> = vec![];
+        for a in self.assocs.iter().filter(|a| a.name == name) {
+            let t = a.tr.as_deref().unwrap_or("");
+            if !trs.contains(&t) {
+                trs.push(t);
+                if trs.len() > 1 {
+                    break;
+                }
+            }
+        }
+        trs.len()
+    }
+
     /// assoc_of; with std_impls false, not std's impls the prelude does not write out (`<i32 as Local>::Output`)
     pub fn assoc_of_with(&self, t: Ty, name: &str, std_impls: bool) -> Option<Ty> {
+        // (`#tr:Tr:Abi`, of a qualified path with a parameter that is known now: Tr's impl gives it)
+        let (name, tr) = crate::ast_types::split_trait_assoc(name);
+        if let Some(r) = tr.and_then(|tr| self.assoc_of_trait(t, name, tr)) {
+            return Some(r);
+        }
         thread_local! {
             static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
         }
@@ -4461,9 +4493,10 @@ impl Program {
         // (an impl for the type itself before a blanket one, `impl WasmAbi for WasmSlice` before `impl<T: WasmPrimitive>
         // WasmAbi for T`: when both are written, the blanket impl's bounds leave the type out, or they would overlap)
         // (and first one whose self type is the type with no coercion: `impl Tr for &J` before `impl<T> Tr for *const T`)
+        // (one that matches only through a coercion last, `impl<T> Tr for *const T` for a `&J`: a blanket impl's before it)
         let blanket = |a: &&AssocDef| matches!(a.self_ty, Ty::Param(_));
         let exact = self.assocs.iter().filter(|a| !blanket(a)).map(|a| (a, true));
-        let rest = self.assocs.iter().filter(|a| !blanket(a)).chain(self.assocs.iter().filter(blanket)).map(|a| (a, false));
+        let rest = self.assocs.iter().filter(blanket).chain(self.assocs.iter().filter(|a| !blanket(a))).map(|a| (a, false));
         for (a, ex) in exact.chain(rest) {
             // (a generic associated type without its arguments (`<() as Outer>::Ty` of a qualified path): its value
             // when that does not use its own parameters)
@@ -4934,7 +4967,7 @@ impl Program {
             Ty::Str => "str".into(),
             Ty::Dyn(s) => format!("dyn {}", s.replace(" (", "(").replace("( ", "(").replace(" )", ")")),
             Ty::Box(i) => format!("Box<{}>", self.tn(*i)),
-            Ty::Assoc(a) => format!("<{}>::{}", self.tn(a.base), a.name),
+            Ty::Assoc(a) => format!("<{}>::{}", self.tn(a.base), crate::ast_types::split_trait_assoc(&a.name).0),
             Ty::Fn(f) => {
                 let ps: Vec<String> = f.params.iter().map(|&p| self.tn(p)).collect();
                 match f.ret {

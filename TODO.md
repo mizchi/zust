@@ -155,12 +155,23 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   one trait for one type with their own associated types (`TryFrom<JsValue>` / `TryFrom<&JsValue>` for f64), impls
   told apart by a parameter's bound (`Result<T: Into<JsValue>, E>` beside `Result<(), E>`), `<J as
   PartialEq<str>>::eq(..)`, operators' impls for references (`-&v`, `&a << &b`, `BitAnd::bitand(&a, b)`) and
-  `<&'static J as BitAnd<&'static J>>::Output` beside another trait's `Output`
-  (tests/probe/w1_items.rs). It stops on:
-  - `lib.rs:1271` (a `#[wasm_bindgen]` expansion): "cannot find value (unsupported path)".
+  `<&'static J as BitAnd<&'static J>>::Output` beside another trait's `Output` (tests/probe/w1_items.rs);
+  qualified paths whose self type is a reference or an associated type, an impl for a type itself before a blanket
+  one, associated types naming another impl's, `&[T]`'s impl beside `&mut [u8]`'s, a renamed fn at a range's end
+  (tests/probe/w1_items2.rs); items in `const _: () = { .. };` (what `#[wasm_bindgen]` and derives wrap impls in),
+  `<T as Tr>::null()` that is no `ptr::null()`, impls for references to generic structs as bounds,
+  `<Box<[u8]>>::from_abi` among Box's impls, `<T as Tr>::Abi` of a parameter once it is known, a macro's `let`
+  names beside a field or method of the name and in a struct literal's shorthand, `Vec::from_raw_parts`,
+  `char::from_u32_unchecked` (tests/probe/w1_items3.rs). It stops on:
+  - `convert/slices.rs:509`: a generic method called right in a `match`, `match js.try_decode() { Ok(d) => d, .. }`
+    with its `T` known from the arms' type only: "cannot infer type parameter `T`" (`let r = js.try_decode();
+    match r { .. }` infers it).
   - `LocalKey<T>` is a type with `with`, but a `thread_local!` is not one of them yet (each has a key type of its
     own), so a `&'static LocalKey<T>` cannot point at one.
   - a method call on a `Box<[T]>` with the program's `impl Tr for Box<[T]>` derefs to `[T]` and misses it.
+  - `<&J as Tr>::m()` where Tr's impl for `&J` is a blanket one (`impl<T: OptionIntoWasmAbi> MaybeIntoWasmAbi for
+    T`): "cannot find value (unsupported path)".
+  - items in a `const _: () = { .. };` are visible outside it (rustc scopes its fns to the block).
 - Found while building memchr, not fixed:
   - a generic struct literal whose field is a `<v128 as Tr>::f(..)` call (`Pair { v1: <v128 as Vector>::splat(b) }`)
     does not infer `V = v128` ("expected `T0`, found `v128`"); an annotation or an intrinsic's value does;
