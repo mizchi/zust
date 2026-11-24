@@ -5483,7 +5483,6 @@ compile-fail	parser/macro/break-in-unlabeled-block-in-macro.rs
 compile-fail	parser/macro/do-not-suggest-semicolon-between-macro-without-exclamation-mark-and-array.rs
 check-pass	parser/macro/extern-abi-from-mac-literal-frag.rs
 compile-fail	parser/macro/issue-33569.rs
-compile-fail	parser/macro/kw-in-const-item-pos-recovery-149692.rs
 compile-fail	parser/macro/kw-in-item-pos-recovery-149692.rs
 compile-fail	parser/macro/macro-bad-delimiter-ident.rs
 check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
@@ -5925,7 +5924,6 @@ compile-fail	pattern/usefulness/tuple-struct-nonexhaustive.rs
 compile-fail	pattern/usefulness/type_polymorphic_byte_str_literals.rs
 compile-fail	pin-ergonomics/raw-ident.rs
 compile-fail	pin-macro/lifetime_errors_on_promotion_misusage.rs
-compile-fail	pin-macro/pin_move.rs
 compile-fail	pin/pin-deref-target-partial-eq-67039.rs
 run-pass	privacy/fn-returns-unnameable-type.rs
 check-pass	privacy/generic_struct_field_projection.rs
