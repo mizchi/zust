@@ -1,7 +1,7 @@
 import runner from "./runner.js?raw";
 
 // The preview: the compiled module runs in a sandboxed iframe (an opaque origin, a new one per run).
-// `pub fn main` is called; when it returns a React element it is rendered (React from a CDN, through an import map).
+// `export fn main` is called; when it returns a React element it is rendered (React from a CDN, through an import map).
 
 export type LogKind = "log" | "info" | "warn" | "error" | "result" | "system";
 /** what the run did besides logging: `render` when `main` returned a React element */

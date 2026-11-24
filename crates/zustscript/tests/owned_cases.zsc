@@ -162,14 +162,14 @@ enum Tree { Leaf(Array<f64>), Node(Poly, Array<f64>), Nil }
 @wasm fn wrap(a: Array<f64>) -> Array<f64> { first(a, [2.0]) }
 
 // a function whose Rust name is an adapter's name
-@wasm pub fn grow(xs: Array<f64>) -> Array<f64> { xs.push(1.0) }
+@wasm export fn grow(xs: Array<f64>) -> Array<f64> { xs.push(1.0) }
 @wasm fn grow__js(x: f64) -> f64 { x + 1.0 }
 
-@wasm pub fn more(n: i32) -> Array<f64> {
+@wasm export fn more(n: i32) -> Array<f64> {
   [arg_assign(n), typed_concat(n), shadow_call(n), long_rows(n), loop_call(n), loop_dead(n), short_circuit(n), match_call(n), sum(wrap(mk(n).pts)), grow__js(1.0), match_index(n)]
 }
 
-@wasm pub fn cases(n: i32) -> Array<f64> {
+@wasm export fn cases(n: i32) -> Array<f64> {
   let ts = trees(n);
   [both(n), field_then_whole(n), match_then_use(n), iterate_and_grow(n), captured(n), shadow(n), ts.fold(0.0, (s, t) => s + depth(t)), depth(ts[1])]
 }
@@ -196,4 +196,4 @@ enum Tree { Leaf(Array<f64>), Node(Poly, Array<f64>), Nil }
   sum(g) + sum(h)
 }
 
-@wasm pub fn borrows(n: i32) -> Array<f64> { [borrow_then_move(n), borrow_then_assign(n), borrow_leaves_block(n)] }
+@wasm export fn borrows(n: i32) -> Array<f64> { [borrow_then_move(n), borrow_then_assign(n), borrow_leaves_block(n)] }

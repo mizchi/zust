@@ -194,7 +194,8 @@ zurgo test
 zurgo test --lib parse -- --include-ignored
 ```
 
-- テストのクレートはどれも `zustc --test` でビルドする。`#[cfg(test)]` のアイテムを残し、`#[test]` の関数を集め、
+- テストのクレートは (後述の `harness = false` のものを除き) どれも `zustc --test` でビルドする。`#[cfg(test)]` のアイテムを残し、`#[test]` の関数を集め (`macro_rules!` が作るものも:
+  展開したソースから集める)、
   ハーネスの `main` を足す (クレート自身の `main` は呼ばれない)。ハーネスがするのは、テストの列挙と、名前を
   指定されたテストを 1 つ動かすことだけ:
   - panic は 101 で終わり、`Err` を返す `Result` のテストは 1 で終わる。
@@ -215,19 +216,24 @@ zurgo test --lib parse -- --include-ignored
 - 長いテストから始める。順番は `target/zust/<profile>/test-times` に残した前回の時間で決める。長いテストが最後に
   始まると、終わりにそれだけが残って動くことになる。
 - オプション:
-  - `--lib`、`--bin <name>`、`--bins`、`--tests`、`--test <name>` でターゲットを選ぶ。
+  - `--lib`、`--bin <name>`、`--bins`、`--tests`、`--test <name>` でターゲットを選ぶ: それだけをビルドする
+    (`CARGO_BIN_EXE_` のために bin も)。
   - `--no-run` はビルドして、実行ファイルを並べるだけ。
   - `--fail-fast` は、失敗の後に新しいテストを始めない (既定ではすべてのテストを動かす。`--no-fail-fast` も受け付ける)。
 - `--` の後: `<filter>`、`--exact`、`--skip <s>`、`--ignored`、`--include-ignored`、`--list`、`--test-threads <n>`
   (既定はコアの数)。`--nocapture` と `--show-output` も受け付ける: 失敗したテストの出力は必ず出す。
 - 60 秒たっても動いているテストには `SLOW` と出し、300 秒たっても動いているものは止めて失敗にする
   (`ZURGO_TEST_SLOW`、`ZURGO_TEST_TIMEOUT`。秒で)。
-- まだのもの:
-  - doc テストとベンチマーク。
-  - `macro_rules!` が作る `#[test]` の関数 (ビルドが警告する)。
-  - ターゲットの `test = false`。
-  - wasm32。
-  - 選んだターゲットだけをビルドすること (`--lib` などは動かすものを選ぶだけで、すべてビルドする)。
+- ターゲットの `test = false` は、そのテストを外す (cargo と同じく、名前で選んだとき (`--lib`、`--bin x`、`--test x`) は
+  動かす)。`harness = false` のターゲットはハーネスなしでビルドし (自分の `main`。cargo と同じく `cfg(test)` は付ける)、
+  ターゲットの名前の 1 つのテストとして動かす: 0 で終われば通る。`zurgo metadata` は結合テストを
+  cargo と同じく並べる。
+- `--target wasm32-unknown-unknown`: テストのクレートはどれも wasm のモジュールになり、各テストを
+  `$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER <module> <name> --exact` で動かす (このリポジトリではランナーは
+  `node tests/wasm/run.mjs`)。モジュールは子プロセスを起こせないので、`#[should_panic]` のテストはモジュールの中で動き、
+  ランナーがその終了コード (101) と panic のメッセージを確かめる。そこでは算術の検査はメッセージなしで trap するので、
+  `expected` はそれに合わない。
+- まだのもの: doc テストとベンチマーク。
 
 ## まだのもの (mizchi/zust#28)
 

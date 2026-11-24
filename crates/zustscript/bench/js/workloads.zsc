@@ -1,4 +1,4 @@
-// JS-target workloads: bench/js/kpi.mjs compiles this with `zsc --all-js` and times each `pub fn w_*`.
+// JS-target workloads: bench/js/kpi.mjs compiles this with `zsc --all-js` and times each `export fn w_*`.
 // Each workload returns a number so runs can be compared across compiler changes.
 
 enum State { Get -> i32, Put(i32) -> () }
@@ -14,7 +14,7 @@ fn steps(n: i32) -> i32 {
   perform Get
 }
 
-pub fn w_effects(n: i32) -> i32 {
+export fn w_effects(n: i32) -> i32 {
   let mut s = 0;
   handle steps(n) {
     Get, k => k(s),
@@ -27,7 +27,7 @@ type Todo = { id: i32, done: bool, weight: i32 }
 
 fn toggle(t: Todo) -> Todo { Todo { done: !t.done, ..t } }
 
-pub fn w_records(n: i32) -> i32 {
+export fn w_records(n: i32) -> i32 {
   let mut todos = [];
   for i in range(0, 1000) { todos = todos.push(Todo { id: i, done: i % 3 == 0, weight: i % 11 }); }
   let mut total = 0;
@@ -50,7 +50,7 @@ fn area(s: Shape) -> f64 {
   }
 }
 
-pub fn w_enums(n: i32) -> f64 {
+export fn w_enums(n: i32) -> f64 {
   let mut shapes = [];
   for i in range(0, 1000) {
     let p = Vec2 { x: i as f64, y: (i % 17) as f64 };
@@ -63,14 +63,14 @@ pub fn w_enums(n: i32) -> f64 {
 }
 
 // numbers: wrapping i32 arithmetic and division
-pub fn w_numeric(n: i32) -> i32 {
+export fn w_numeric(n: i32) -> i32 {
   let mut h = 17;
   for i in range(0, n) { h = h * 31 + i / 3 - i % 5; }
   h
 }
 
 // strings: building and joining
-pub fn w_strings(n: i32) -> i32 {
+export fn w_strings(n: i32) -> i32 {
   let mut total = 0;
   for r in range(0, n) {
     let parts = range(0, 200).map((i) => "k" + i.to_string());

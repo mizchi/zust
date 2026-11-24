@@ -181,7 +181,7 @@ python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check
 Each test's kind comes from its header directives, as in compiletest. A run-pass test must build, exit 0 and print
 its `.run.stdout`. A check-pass test must pass `zustc check`. A compile-fail test must be rejected with an error on a
 line that one of its `//~ ERROR` annotations points at. Tests that need what zustc cannot be asked for (nightly
-`#![feature]`, auxiliary crates, `compile-flags`, `revisions`, other targets) are counted as not applicable.
+`#![feature]`, auxiliary crates, `compile-flags` other than `--test` and `--cfg`, `revisions`, other targets) are counted as not applicable.
 
 `bench/rust_ui_passing.txt` lists the tests zustc passes. CI fails if one of them no longer passes. When a change
 makes more tests pass, rewrite the list:

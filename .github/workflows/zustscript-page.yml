@@ -1,0 +1,81 @@
+name: zustscript introduction
+
+on:
+  push:
+    branches: [main]
+    paths: &inputs
+      - crates/zustscript/docs/introduction.md
+      - crates/zustscript/docs/rust-costs.md
+      - scripts/zustscript-page/**
+      - editor/tree-sitter-zustscript/**
+      - .github/workflows/zustscript-page.yml
+  pull_request:
+    paths: *inputs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zustscript-page-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+      - uses: extractions/setup-just@v3
+      - name: Install Tree-sitter CLI 0.26.8
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl -fsSLo tree-sitter.zip https://github.com/tree-sitter/tree-sitter/releases/download/v0.26.8/tree-sitter-cli-linux-x64.zip
+          echo '9377d83479ee8e05dce7d2b51442087c7fdd620015834c24fea1a86d4bd0a85b  tree-sitter.zip' | sha256sum -c -
+          unzip -q tree-sitter.zip -d tree-sitter-bin
+          chmod +x tree-sitter-bin/tree-sitter
+          echo "$RUNNER_TEMP/tree-sitter-bin" >> "$GITHUB_PATH"
+      - run: just -f scripts/zustscript-page/justfile build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zustscript-page
+          path: out/pages/zustscript/*.html
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+      - uses: actions/download-artifact@v4
+        with:
+          name: zustscript-page
+          path: zustscript
+      - name: Publish the generated article
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add zustscript/index.html zustscript/rust-costs.html
+          if ! git diff --cached --quiet; then
+            git commit -m "Build zustscript introduction from ${GITHUB_SHA::8}"
+            # Benchmarks also append to gh-pages.
+            for attempt in 1 2 3; do
+              git pull --rebase origin gh-pages
+              if git push origin HEAD:gh-pages; then break; fi
+              if [ "$attempt" = 3 ]; then exit 1; fi
+            done
+          fi
+          gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds" --silent

@@ -2,6 +2,15 @@ pub fn add(a: i32, b: i32) -> i32 { a + b }
 
 fn main() { println!("real main"); }
 
+// A test a macro makes
+macro_rules! make_test {
+    ($name:ident, $v:expr) => {
+        #[test]
+        fn $name() { assert_eq!(add($v, 0), $v); }
+    };
+}
+make_test!(made_by_macro, 3);
+
 #[cfg(not(test))]
 fn only_not_test() {}
 
@@ -39,6 +48,20 @@ mod tests {
     // (the crate's own `main`, which the harness renamed)
     #[test]
     fn calls_main() { main(); super::main(); }
+    // (the crate's own `main` through imports, beside a module's own `main`)
+    mod own {
+        pub fn main() { println!("own's main"); }
+        mod by_import {
+            use crate::main;
+            #[test]
+            fn root_main() { main(); }
+        }
+        mod by_glob {
+            use super::*;
+            #[test]
+            fn own_main() { main(); }
+        }
+    }
     mod inner {
         #[test]
         fn deep() { println!("deep out"); }

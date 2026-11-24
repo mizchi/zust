@@ -1,0 +1,17 @@
+# Run from the repository root with: just -f scripts/zustscript-page/justfile build
+build output="../../out/pages/zustscript/index.html":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    work=$(mktemp -d)
+    trap 'rm -rf "$work"' EXIT
+    cp package.json pnpm-lock.yaml "$work/"
+    pnpm --dir "$work" --config.node-linker=hoisted install --ignore-scripts --frozen-lockfile
+    grammars="$work/node_modules"
+    mkdir -p "$grammars/tree-sitter-typescript/node_modules"
+    ln -s ../../tree-sitter-javascript "$grammars/tree-sitter-typescript/node_modules/tree-sitter-javascript"
+    zsc="$grammars/tree-sitter-zustscript"
+    mkdir "$zsc"
+    cp ../../editor/tree-sitter-zustscript/{grammar.js,tree-sitter.json} "$zsc/"
+    cp -R ../../editor/tree-sitter-zustscript/queries "$zsc/"
+    (cd "$zsc" && tree-sitter generate)
+    node render.mjs "$work" {{quote(output)}}
