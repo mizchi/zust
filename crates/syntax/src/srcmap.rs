@@ -226,10 +226,11 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     // (and whether it may call `env!` / `option_env!`, seen by the same tokens)
     let mut env = None;
     let mut externs = vec![];
+    let stripped = crate::cfg::strip_noting(&src, cfg, &mut env, &mut externs);
     if map.inputs.is_empty() && map.keep_externs {
-        map.cfg_err = crate::cfg::malformed_cfg(&src);
+        map.cfg_err = crate::cfg::malformed_cfg(&src, stripped.as_deref(), cfg);
     }
-    let src = match crate::cfg::strip_noting(&src, cfg, &mut env, &mut externs) {
+    let src = match stripped {
         Some(t) => {
             // (the root file's `extern crate` items, for a caller that asked)
             if map.inputs.is_empty() && map.keep_externs {
