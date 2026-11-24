@@ -1167,7 +1167,8 @@ impl Cx<'_> {
         }
         match t {
             Ty::Struct(x) if self.prog.base_of(x) == self.prog.base_of(sid) => Ok(self.prog.structs[x as usize].fields.clone()),
-            _ => err(span, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.structs[sid as usize].name)),
+            // (at the pattern's path: a sub-pattern `Tau { t: x }` on its own line is where rustc points)
+            _ => Err(self.at(path.pos, format!("mismatched types: expected `{}`, found `{}`", self.prog.tn(t), self.prog.structs[sid as usize].name))),
         }
     }
 

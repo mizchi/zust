@@ -395,6 +395,7 @@ compile-fail	async-await/clone-suggestion.rs
 run-pass	async-await/context-is-sorta-unwindsafe.rs
 compile-fail	async-await/coroutine-desc.rs
 build-pass	async-await/default-struct-update.rs
+compile-fail	async-await/dont-ice-for-type-mismatch-in-closure-in-async.rs
 compile-fail	async-await/dont-print-desugared-async.rs
 compile-fail	async-await/dont-suggest-await-on-method-return-mismatch.rs
 build-pass	async-await/drop-and-assign.rs
@@ -2865,6 +2866,7 @@ run-pass	for-loop-while/auto-loop.rs
 compile-fail	for-loop-while/break-continue-in-loop-while-condition.rs
 compile-fail	for-loop-while/break-outside-loop.rs
 run-pass	for-loop-while/break-value.rs
+compile-fail	for-loop-while/break-while-condition.rs
 run-pass	for-loop-while/break.rs
 run-pass	for-loop-while/cleanup-rvalue-during-if-and-while.rs
 compile-fail	for-loop-while/dont-suggest-break-from-unbreakable-loops.rs
@@ -5854,6 +5856,7 @@ compile-fail	pattern/constructor-type-mismatch.rs
 compile-fail	pattern/deref-patterns/deref-non-pointer.rs
 compile-fail	pattern/deref-patterns/deref-pointer-cast-mutability-71676.rs
 compile-fail	pattern/deref-patterns/needs-gate.rs
+compile-fail	pattern/enum-struct-pattern-mismatch-15896.rs
 compile-fail	pattern/enum-variant-not-found.rs
 compile-fail	pattern/fn-in-pat.rs
 compile-fail	pattern/for-loop-bad-item.rs
@@ -6536,6 +6539,7 @@ compile-fail	return/return-type.rs
 compile-fail	return/return-unit-from-diverging.rs
 compile-fail	return/suggest-a-value.rs
 compile-fail	return/tail-expr-as-potential-return.rs
+compile-fail	return/tail-expr-if-as-return.rs
 compile-fail	rfcs/rfc-0000-never_patterns/ICE-119271-never-arm-attr-in-guard.rs
 run-pass	rfcs/rfc-0107-bind-by-move-pattern-guards/bind-by-move-no-guards.rs
 check-pass	rfcs/rfc-0107-bind-by-move-pattern-guards/former-E0008-now-pass.rs
@@ -7897,6 +7901,7 @@ compile-fail	typeck/coercion-check-for-indexing-expression-issue-40861.rs
 compile-fail	typeck/consider-borrowing-141810-1.rs
 compile-fail	typeck/consider-borrowing-141810-2.rs
 compile-fail	typeck/consider-borrowing-141810-3.rs
+compile-fail	typeck/consider-borrowing-141810-4.rs
 compile-fail	typeck/conversion-methods.rs
 compile-fail	typeck/deref-multi.rs
 compile-fail	typeck/derive-sugg-arg-arity.rs

@@ -3046,7 +3046,8 @@ impl Cx<'_> {
                 Some(v) => v,
                 None => self.b.ins().iconst(types::I8, 0),
             };
-            vals.push((v, t, expr_start(a)));
+            // (a block argument's type is its tail's: rustc points there, `f({ String::new() })`)
+            vals.push((v, t, value_pos(a)));
         }
         let arg_tys: Vec<Ty> = vals.iter().map(|v| v.1).collect();
         // 引数の型から改めて解く。引数に現れない型パラメータ (クロージャの戻り値など) は sol から

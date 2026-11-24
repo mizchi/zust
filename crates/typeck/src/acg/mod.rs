@@ -814,6 +814,18 @@ pub fn branch_pos(e: &Expr) -> Sp {
     }
 }
 
+/// Where rustc points when a value has not the type its place wants (a `let`'s annotation, a parameter): a block's
+/// tail expression, or the block itself when it has none (SP: the caller's position, its statement), or the expression
+pub fn value_pos(e: &Expr) -> Sp {
+    match e {
+        Expr::Block(_, false, b) => match b.stmts.last() {
+            Some(Stmt::Expr(t, false)) => value_pos(t),
+            _ => SP,
+        },
+        e => expr_start(e),
+    }
+}
+
 /// [`branch_pos`] of a block
 pub fn block_end_pos(b: &crate::parse::Block) -> Sp {
     match b.stmts.last() {
@@ -2221,7 +2233,7 @@ impl Cx<'_> {
                             // (`dyn Foo<Bar = &'a u32>`, which keeps the text of its bounds) are the region check's)
                             let ptr = matches!((t, a), (Ty::Ptr(true, x), Ty::Ptr(false, y)) if x == y);
                             if !ptr && !self.apart_in_lifetimes(t, a) {
-                                self.same(SP, t, a).map_err(|m| self.at(expr_start(init), m))?;
+                                self.same(SP, t, a).map_err(|m| self.at(value_pos(init), m))?;
                             }
                         }
                         if let Some(v) = v {
@@ -2447,7 +2459,8 @@ impl Cx<'_> {
                             t = ty;
                         }
                     }
-                    self.same(SP, t, ty).map_err(|m| self.at(expr_start(init), m))?;
+                    // (a block's value is its tail's: rustc points there, `let _: ! = { 'a: while break 'a {} };`)
+                    self.same(SP, t, ty).map_err(|m| self.at(value_pos(init), m))?;
                     self.bk.mut_next = pat_mut(pat);
                     let rg_init = if self.rg_on() { self.rt_expr(init) } else { None };
                     self.bind(name.clone(), ty, v);

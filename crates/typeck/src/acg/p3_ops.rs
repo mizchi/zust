@@ -1341,6 +1341,15 @@ impl Cx<'_> {
 
         self.b.switch_to_block(then_blk);
         let (tv, tt) = self.block(then_branch, expected)?;
+        // (`if c { false }` with no `else`, where no value is wanted: the block must be `()`, at its tail as rustc
+        // points (E0308); where one is wanted, E0317 below)
+        if else_branch.is_none() && expected.is_none_or(|t| t == Ty::Unit) && !matches!(tt, Ty::Unit | Ty::Never) && self.user_code {
+            let at = block_end_pos(then_branch);
+            if at.line != 0 {
+                let t = self.prog.tn(tt).replace('#', "");
+                return Err(self.at(at, format!("mismatched types: expected `()`, found `{t}`")));
+            }
+        }
         self.finish_arm(tv, tt, merge, &mut result_ty, &mut param, SP)?;
 
         self.b.switch_to_block(else_blk);
