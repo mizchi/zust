@@ -118,7 +118,7 @@ impl Cx<'_> {
             // (`impl PartialEq for &X`: the reference's own impl, before its target's)
             Ty::Ref(_, i) => {
                 let own = self.prog.ref_impls.contains(&(t, tr.to_string()))
-                    || self.prog.ref_impl_pats.iter().any(|(pt, ptr, n)| ptr == tr && self.prog.match_ty(*pt, t, &mut vec![None; *n]));
+                    || self.prog.ref_impl_pat_holds(t, tr);
                 !own && self.lacks_cmp(*i, &|| match rt() { Some(Ty::Ref(_, r)) => Some(*r), _ => None }, tr, depth + 1)
             }
             // (`impl PartialEq<R> for [N; 1]`: an impl for arrays / slices of the program's answers the comparison as a

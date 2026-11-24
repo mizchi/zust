@@ -695,8 +695,8 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
             // (not a tt-muncher's marker, `closures!(@closure ..)` in a body with `let closure`: the marker is matched
             // against a rule's `@closure`, as rustc matches it by name. A binding's `@`, `whole @ x`, has a name
             // before it: its `x` is the body's own)
-            // (nor a field or method of the name, `vector.len()` / `js.len` beside `let len`, nor a field in a struct
-            // literal, `WasmSlice { len: n }`)
+            // (nor a field or method of the name, `vector.len()` / `js.len` beside `let len`. A field's name in a struct
+            // literal, `WasmSlice { len: n }`, is renamed as well: the parser drops the suffix of field names)
             Pt::Tok(TokenTree::Ident(i))
                 if lets.iter().any(|l| *i == l.as_str())
                     && !(k > 0
@@ -704,10 +704,7 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                         && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Ident(_)) | Pt::Var(..))))
                     && !(k > 0
                         && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.')
-                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.')))
-                    && !(k > 0
-                        && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == ',')
-                        && matches!(body.get(k + 1), Some(Pt::Tok(TokenTree::Punct(q))) if q.as_char() == ':' && q.spacing() == proc_macro2::Spacing::Alone)) =>
+                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.'))) =>
             {
                 out.push_str(&i.to_string());
                 out.push_str("__mh ");

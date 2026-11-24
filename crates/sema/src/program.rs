@@ -459,11 +459,15 @@ pub struct Program {
     pub traits: FxMap<String, Vec<u32>>,
     /// impls whose self type is a reference to a concrete type (`impl Tr for &i32` / `for &S`): (that type, trait)
     pub ref_impls: HashSet<(Ty, String)>,
-    /// generic impls for references: (self type with the impl's parameters, trait, number of parameters)
-    pub ref_impl_pats: Vec<(Ty, String, usize)>,
-    /// The program's impls for trait objects, `impl WasmClosure for dyn Fn() -> R + '_`: (trait, the object's trait's
-    /// name, `Fn`), which a `dyn Fn(..)` then implements
+    /// generic impls for references: (self type with the impl's parameters, trait, number of parameters, each
+    /// parameter's bounds)
+    pub ref_impl_pats: Vec<(Ty, String, usize, Vec<Vec<String>>)>,
+    /// The program's generic impls for trait objects, `impl<R> WasmClosure for dyn Fn() -> R + '_`: (trait, the
+    /// object's trait's name, `Fn`), which a `dyn Fn(..)` then implements
     pub dyn_impls: FxSet<(String, String)>,
+    /// And the ones with no parameters, `impl Marker for dyn Obj<u8>`: (trait, the object's first trait as written,
+    /// without spaces), which only that object implements (not `dyn Obj<u16>`)
+    pub dyn_impls_exact: FxSet<(String, String)>,
     /// traits implemented for fn pointers (`impl Tr for fn(A) -> B`; generic ones count for every fn pointer)
     pub fnptr_impls: HashSet<(Option<Ty>, String)>,
     /// 親トレイト (`trait Bar: Foo`)
@@ -484,6 +488,9 @@ pub struct Program {
     pub impl_targs: FxMap<String, Vec<(Ty, Vec<Ty>, usize)>>,
     /// Of those, the (trait, self type) whose header's trait path writes a lifetime (SigSyn::impl_trait_lts)
     pub impl_targs_lts: HashSet<(String, Ty)>,
+    /// The bounds of each impl_targs entry's generic parameters, in the same order (`impl<T: Marker> From<W<T>> for
+    /// J`: `[["Marker"]]`)
+    pub impl_targ_bounds: FxMap<String, Vec<Vec<Vec<String>>>>,
     /// (型, trait) の実装
     pub impls: HashSet<(u32, String)>,
     /// the self types of the impls of a trait for a struct's instances (`impl A for W<u8>`), by (struct, trait), with
@@ -1101,10 +1108,12 @@ impl Program {
             alias_fixed_lt: false,
             trait_ngen: FxMap::default(),
             impl_targs: FxMap::default(),
+            impl_targ_bounds: FxMap::default(),
             impl_targs_lts: HashSet::default(),
             ref_impls: Default::default(),
             ref_impl_pats: vec![],
             dyn_impls: FxSet::default(),
+            dyn_impls_exact: FxSet::default(),
             fnptr_impls: Default::default(),
             deny_unreachable: false,
             deny_must_use: false,
@@ -1304,7 +1313,13 @@ impl Program {
                         // `impl Tr for dyn Fn(A) -> R` and `.. for dyn Fn(A, B) -> R`, are one `__dyn_Fn` here: the
                         // first one's stands when they give it alike, `const IS_MUT: bool = false;`)
                         (Some(a), Some(b)) if a == b => {
-                            if n.starts_with("__dyn_") && sums[pk].consts.iter().any(|c| c.0 == n && c.2 == *e) {
+                            // (not two in one impl: `impl Tr for dyn Obj { const N: bool = false; const N: bool = false; }`
+                            // is E0201's duplicate)
+                            let header = |k: usize| match items[k].kind {
+                                crate::lexer::ItemKind::ImplMember(h) => Some(h),
+                                _ => None,
+                            };
+                            if n.starts_with("__dyn_") && ii != pk && header(ii) != header(pk) && sums[pk].consts.iter().any(|c| c.0 == n && c.2 == *e) {
                                 // (kept under a name no path reaches: the consts stay in the summaries' order)
                                 n = format!("{n}#dyn{}", p.consts.len());
                             } else {
@@ -1880,6 +1895,7 @@ impl Program {
         let mut bare_blankets: HashSet<String> = Default::default();
         // (impls for Box: (trait, line), checked against blanket impls of the same trait after the loop)
         let mut box_impls: Vec<(String, usize)> = vec![];
+        let mut ref_box_impls: Vec<(String, usize, Ty)> = vec![];
         // (unbounded blanket impls (trait, line), and every impl of the program's (trait, line))
         let mut unbounded_blankets: Vec<(String, usize)> = vec![];
         let mut other_impls: Vec<(String, usize)> = vec![];
@@ -1892,12 +1908,17 @@ impl Program {
                 other_impls.push((tr.clone(), it.line));
             }
             // (右辺の型を持つ比較の impl と、配列・スライスへの impl は、`==` が関数を直接選ぶので数えない)
-            // (an impl for a trait object, `impl Tr for dyn Fn(A) -> R`: by the object's trait's name)
+            // (an impl for a trait object, `impl<A, R> Tr for dyn Fn(A) -> R`: by the object's trait's name; one with no
+            // parameters by the object as written)
             if sn.starts_with("__dyn_") {
                 if let Some(TySyn::Dyn(d)) = &sm.impl_self_ty {
-                    let first = d.split('+').next().unwrap_or(d).trim();
-                    let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(first).trim();
-                    p.dyn_impls.insert((tr.clone(), name.rsplit("::").next().unwrap_or(name).to_string()));
+                    if sm.impl_generics.is_empty() {
+                        p.dyn_impls_exact.insert((tr.clone(), dyn_first(d)));
+                    } else {
+                        let first = d.split('+').next().unwrap_or(d).trim();
+                        let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(first).trim();
+                        p.dyn_impls.insert((tr.clone(), name.rsplit("::").next().unwrap_or(name).to_string()));
+                    }
                 }
             }
             if tr.starts_with("PartialEq<") || tr.starts_with("PartialOrd<") || sn == "__array" || sn == "__slice" || sn.starts_with("__dyn_") {
@@ -1910,7 +1931,7 @@ impl Program {
                 if (sn == "__array" || sn == "__slice") && matches!(sm.impl_self_ty, Some(TySyn::Ref(..))) && !tr.contains('<') && p.traits.contains_key(tr) {
                     let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
                     if let Some(t) = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok()) {
-                        p.ref_impl_pats.push((t, tr.clone(), gn.len()));
+                        p.ref_impl_pats.push((t, tr.clone(), gn.len(), sm.impl_generics.iter().map(|g| g.1.clone()).collect()));
                     }
                 }
                 continue;
@@ -1965,6 +1986,7 @@ impl Program {
                             p.impl_targs_lts.insert((tr.clone(), st));
                         }
                         p.impl_targs.entry(tr.clone()).or_default().push((st, args, gn.len()));
+                        p.impl_targ_bounds.entry(tr.clone()).or_default().push(sm.impl_generics.iter().map(|g| g.1.clone()).collect());
                     }
                 }
             }
@@ -1996,7 +2018,7 @@ impl Program {
                     let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
                     if let Some(t) = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok()) {
                         if !matches!(t, Ty::Ref(_, Ty::Param(_))) {
-                            p.ref_impl_pats.push((t, tr.clone(), gn.len()));
+                            p.ref_impl_pats.push((t, tr.clone(), gn.len(), sm.impl_generics.iter().map(|g| g.1.clone()).collect()));
                         }
                     }
                 }
@@ -2036,6 +2058,7 @@ impl Program {
                     // (`impl Tr for &Box<str>`: the reference implements Tr, as other references' impls say)
                     if matches!(t, Ty::Ref(..)) {
                         p.ref_impls.insert((t, tr.clone()));
+                        ref_box_impls.push((tr.clone(), it.line as usize, t));
                     }
                 }
                 continue;
@@ -2145,6 +2168,11 @@ impl Program {
         // (not one for `&T` / `&mut T`: a Box is no reference)
         if let Some((tr, line)) = box_impls.iter().find(|(tr, _)| bare_blankets.contains(tr)) {
             return Err(format!("{line}:1: conflicting implementations of trait `{tr}` for type `Box<_>`"));
+        }
+        // (and `impl Tr for &Box<S>` when the reference meets the blanket impl's bounds, or may: `impl<T: Marker> Tr for
+        // T` with `impl Marker for &Box<S>`)
+        if let Some((tr, line, _)) = ref_box_impls.iter().find(|(tr, _, t)| bare_blankets.contains(tr) && !matches!(p.blanket_certainty(*t, tr), Certainty::No)) {
+            return Err(format!("{line}:1: conflicting implementations of trait `{tr}` for type `&Box<_>` (E0119)"));
         }
         // derive は実装扱い (Clone / Copy など。中身は常にビットコピーなので本体は要らない)
         for sm in sums {
@@ -2869,7 +2897,7 @@ impl Program {
         if matches!(t, Ty::Ref(..)) && !self.ref_impls.is_empty() && self.ref_impls.contains(&(t, tr.to_string())) {
             return true;
         }
-        if matches!(t, Ty::Ref(..)) && self.ref_impl_pats.iter().any(|(pt, ptr, n)| ptr == tr && self.match_ty(*pt, t, &mut vec![None; *n])) {
+        if matches!(t, Ty::Ref(..)) && self.ref_impl_pat_holds(t, tr) {
             return true;
         }
         if let Some(r) = self.implements_std(t, tr) {
@@ -2945,11 +2973,22 @@ impl Program {
         if let Some(x) = tr.strip_prefix("Into").and_then(|r| r.trim().strip_prefix('<')).and_then(|r| r.strip_suffix('>')).map(str::trim) {
             if let Some(&xs) = self.struct_index.get(x).filter(|&&xs| self.structs[xs as usize].generics.is_empty()) {
                 let xt = Ty::Struct(xs);
+                // (an impl whose parameters' bounds hold of what they matched: `impl<T: Marker> From<W<T>> for J` is
+                // not `W<u8>`'s without `u8: Marker`)
                 let hit = |trn: &str, st: Ty, arg: Ty| {
+                    let bounds = self.impl_targ_bounds.get(trn);
                     self.impl_targs.get(trn).is_some_and(|v| {
-                        v.iter().any(|(s, a, n)| {
+                        v.iter().enumerate().any(|(k, (s, a, n))| {
                             let mut sol = vec![None; *n];
-                            a.len() == 1 && self.match_ty(*s, st, &mut sol) && self.match_ty(a[0], arg, &mut sol)
+                            a.len() == 1
+                                && self.match_ty(*s, st, &mut sol)
+                                && self.match_ty(a[0], arg, &mut sol)
+                                && bounds.and_then(|b| b.get(k)).is_none_or(|bs| {
+                                    bs.iter().zip(&sol).all(|(bs, a)| match a {
+                                        Some(a) if !self.has_param(*a) => bs.iter().all(|b| self.implements(*a, b)),
+                                        _ => true,
+                                    })
+                                })
                         })
                     })
                 };
@@ -3045,7 +3084,7 @@ impl Program {
                 let first = d.split('+').next().unwrap_or(d).trim();
                 let name = first.split(|c: char| c == '(' || c == '<').next().unwrap_or(first).trim();
                 self.dyn_impls.contains(&(tr.to_string(), name.rsplit("::").next().unwrap_or(name).to_string()))
-            }),
+            }) || (!self.dyn_impls_exact.is_empty() && self.dyn_impls_exact.contains(&(tr.to_string(), dyn_first(d)))),
             // 関数ポインタ: Fn 系 (引数の数が合うもの) と Copy
             // (impls for fn pointers / raw pointers / `!`: the exact type, or a generic one (None) of that kind)
             Ty::Fn(_) | Ty::Ptr(..) | Ty::Never
@@ -4535,13 +4574,28 @@ impl Program {
         self.structs[sid as usize].base.unwrap_or(sid)
     }
 
+    /// A generic impl for references is for t (`impl<T: Marker> Flag for &W<T>`): t is its self type as it is, not
+    /// through a coercion (`&mut W<u8>` is not `&W<T>`), and its parameters' bounds hold of what they matched
+    pub fn ref_impl_pat_holds(&self, t: Ty, tr: &str) -> bool {
+        self.ref_impl_pats.iter().any(|(pt, ptr, n, bs)| {
+            let mut sol = vec![None; *n];
+            ptr == tr
+                && self.match_ty_exact(*pt, t, &mut sol)
+                && bs.iter().zip(&sol).all(|(bs, a)| match a {
+                    Some(a) if !self.has_param(*a) => bs.iter().all(|b| self.implements(*a, b)),
+                    _ => true,
+                })
+        })
+    }
+
     /// Whether no type is both a and b (two impls' self types): they differ somewhere neither has a generic
     /// parameter. `W<u8>` / `W<u16>`, `W<&T>` / `W<&mut T>` are; `W<T>` / `W<u8>` are not
     pub fn disjoint(&self, a: Ty, b: Ty) -> bool {
         match (a, b) {
             (Ty::Param(_), _) | (_, Ty::Param(_)) | (Ty::Assoc(_), _) | (_, Ty::Assoc(_)) => false,
             (Ty::Ref(m1, x), Ty::Ref(m2, y)) | (Ty::Ptr(m1, x), Ty::Ptr(m2, y)) => m1 != m2 || self.disjoint(*x, *y),
-            (Ty::Array(x, n1), Ty::Array(y, n2)) => n1 != n2 || self.disjoint(*x, *y),
+            // (two lengths only when both are written: `[u8; N]` may be `[u8; 3]`)
+            (Ty::Array(x, n1), Ty::Array(y, n2)) => (n1 != n2 && n1 < CONST_LEN_BASE && n2 < CONST_LEN_BASE) || self.disjoint(*x, *y),
             (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) => self.disjoint(*x, *y),
             (Ty::Struct(s1), Ty::Struct(s2)) => {
                 let (b1, b2) = (self.base_of(s1), self.base_of(s2));
@@ -4911,21 +4965,19 @@ impl Program {
 
     /// assoc_of; with std_impls false, not std's impls the prelude does not write out (`<i32 as Local>::Output`)
     pub fn assoc_of_with(&self, t: Ty, name: &str, std_impls: bool) -> Option<Ty> {
-        // (`#tr:Tr:Abi`, of a qualified path with a parameter that is known now: Tr's impl gives it)
-        let (name, tr) = crate::ast_types::split_trait_assoc(name);
-        if let Some(r) = tr.and_then(|tr| self.assoc_of_trait(t, name, tr)) {
-            return Some(r);
-        }
         thread_local! {
             static DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
         }
         // (`impl<F: Future> IntoFuture for F { type Item = F::Item; }` refers to another trait's `Item` of the same
-        // type: a cycle through the blanket impl. Bounded, and such a definition is not used to answer its own name)
+        // type: a cycle through the blanket impl. Bounded, and such a definition is not used to answer its own name.
+        // A qualified one's too, `<T as B>::Out` in A's impl and `<T as A>::Out` in B's)
         if DEPTH.with(|d| d.get()) > 32 {
             return None;
         }
         DEPTH.with(|d| d.set(d.get() + 1));
-        let r = self.assoc_of0(t, name, std_impls);
+        // (`#tr:Tr:Abi`, of a qualified path with a parameter that is known now: Tr's impl gives it)
+        let (name, tr) = crate::ast_types::split_trait_assoc(name);
+        let r = tr.and_then(|tr| self.assoc_of_trait(t, name, tr)).or_else(|| self.assoc_of0(t, name, std_impls));
         DEPTH.with(|d| d.set(d.get() - 1));
         r
     }
@@ -5840,6 +5892,20 @@ fn impl_overlaps<'a>(seen: &mut FxMap<(&'a str, &'a str), Vec<usize>>, sums: &[S
 /// program defines with no `impl From<c> for X` (nor an `Into<X>` that could be c's), or a trait the program
 /// declares with no impl that could be c's. Only for c `()`, a number, a tuple or a named type
 fn bound_unmet_syn(b: &str, c: &TySyn, sums: &[Summary], user: usize) -> bool {
+    // (a type alias is the type it names, `impl Tr for W<Alias>` with `type Alias = S;`: S's impls decide. A generic
+    // one, or a chain that does not end, decides nothing)
+    let mut c = c;
+    for _ in 0..16 {
+        let TySyn::Named(n) = c else { break };
+        match sums.iter().flat_map(|s| s.aliases.iter()).find(|a| a.0 == *n) {
+            Some((_, g, t)) if g.is_empty() => c = t,
+            Some(_) => return false,
+            None => break,
+        }
+    }
+    if matches!(c, TySyn::Named(n) if sums.iter().flat_map(|s| s.aliases.iter()).any(|a| a.0 == *n)) {
+        return false;
+    }
     if !matches!(c, TySyn::Prim(_) | TySyn::Tuple(_) | TySyn::Named(_)) {
         return false;
     }
@@ -6276,8 +6342,10 @@ impl Program {
         // `std::collections::HashMap::new` などは `HashMap::new`
         if n >= 3 && matches!(name(0), "core" | "std" | "alloc") {
             let ty = name(n - 2);
-            // (`std::cell::Ref::map`: below, as `Ref::map`)
-            if self.struct_index.contains_key(ty) && !matches!(ty, "Ref" | "RefMut") {
+            // (`std::cell::Ref::map`: below, as `Ref::map`; `std::vec::Vec::from_raw_parts` as well, when the prelude's
+            // helper stands for it)
+            let helper = matches!((ty, name(n - 1)), ("Vec", "from_raw_parts") | ("String", "from_utf8_unchecked"));
+            if self.struct_index.contains_key(ty) && !matches!(ty, "Ref" | "RefMut") && !(helper && !self.index.contains_key(&format!("{ty}::{}", name(n - 1)))) {
                 return self.index.get(&format!("{ty}::{}", name(n - 1))).copied();
             }
         }
@@ -6500,5 +6568,15 @@ fn alias_structs(t: &TySyn, index: &FxMap<String, u32>, out: &mut Vec<u32>) {
         TySyn::Ref(_, i) | TySyn::Ptr(_, i) | TySyn::Slice(i) | TySyn::Array(i, _) | TySyn::Assoc(i, _) => alias_structs(i, index, out),
         TySyn::Tuple(ts) | TySyn::FnPtr(ts) => ts.iter().for_each(|a| alias_structs(a, index, out)),
         _ => {}
+    }
+}
+
+/// A trait object's first trait as written, without spaces or a path (`Obj<u8>` of `dyn m::Obj< u8 > + Send`)
+fn dyn_first(d: &str) -> String {
+    let first: String = d.split('+').next().unwrap_or(d).chars().filter(|c| !c.is_whitespace()).collect();
+    let cut = first.find(|c: char| c == '<' || c == '(').unwrap_or(first.len());
+    match first[..cut].rfind("::") {
+        Some(i) => first[i + 2..].to_string(),
+        None => first,
     }
 }

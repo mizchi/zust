@@ -981,20 +981,23 @@ pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
-    const KWS: [&str; 21] = [
-        "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "pub fn ", "pub struct ",
-        "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) ",
+    // (and the qualified fns, impls and traits the scan below moves too: `unsafe fn`, `async fn`, `unsafe impl`)
+    const KWS: [&str; 25] = [
+        "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "unsafe fn ",
+        "unsafe impl", "unsafe trait ", "async fn ", "pub fn ", "pub struct ", "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ",
+        "pub(crate) ",
     ];
     let indented = src.split('\n').any(|l| {
         let t = l.trim_start();
         // (the keywords' first letters first: most lines start with none of them)
         t.len() < l.len()
-            && matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p'))
+            && matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p' | b'a'))
             && KWS.iter().any(|k| t.starts_with(k))
     });
     // (a proc macro's output is one line, marked (PM_MARK): the items in its bodies, `{#[link(..)] extern "C" {..}`,
     // are not at a line's start. Looked for only once this process expanded one)
-    if !indented && !(PM_EXPANDED.load(std::sync::atomic::Ordering::Relaxed) && src.contains(PM_MARK)) {
+    // (nor an anonymous const a `macro_rules!` expansion wrote on one line, `const _: () = { impl Tr for u8 {..} };`)
+    if !indented && !(PM_EXPANDED.load(std::sync::atomic::Ordering::Relaxed) && src.contains(PM_MARK)) && !src.contains("const _") {
         return None;
     }
     let s = src.as_bytes();
@@ -1113,8 +1116,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             // (an anonymous const that stays, in another one's body: its own body is one too)
             if anon_keeps && t == b"const" && ik + 1 < toks.len() && tok(ik + 1) == b"_" {
                 pending_anon = true;
-            } else if anon_keeps && item_kw && ik + 1 < toks.len() && toks[ik + 1].0 == 0 {
-                // (another item that stays, `impl Section { fn len(&self) .. }`: past its end, whose fns are its own)
+            } else if anon_keeps && item_kw && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<"))) {
+                // (another item that stays, `impl Section { fn len(&self) .. }`, `impl<T> Local<T> { .. }`: past its end,
+                // whose fns are its own)
                 let semi_only = matches!(t, b"const" | b"static" | b"type" | b"use");
                 let mut j = ik + 1;
                 let mut d = 0i32;
@@ -2376,12 +2380,34 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // (or a glob re-export of that module, `pub use self::traits::*;`: an item of the module it brings in, or
             // a name that module imports)
             // (one item only: two globs that bring in two of the name make it ambiguous)
+            // (through chains of globs, `c` re-exporting `b::*` and `b` re-exporting `a::*`: past a module that has
+            // neither the name nor an import of it, as glob_find below follows them)
             let found = imports.iter().find(|i| i.0 == p.2 && i.1 == p.3).map(|i| i.2.clone()).or_else(|| {
-                let mut cands = globs.iter().filter(|g| g.0 == p.2).filter_map(|g| {
-                    renamed_in(g.1, &p.3).or_else(|| imports.iter().find(|i| i.0 == g.1 && i.1 == p.3).map(|i| i.2.clone()))
-                });
-                let first = cands.next()?;
-                cands.all(|c| c == first).then_some(first)
+                let mut seen = vec![p.2];
+                let mut queue = vec![p.2];
+                let mut found: Option<Vec<u8>> = None;
+                let mut at = 0;
+                while at < queue.len() && seen.len() < 64 {
+                    let cur = queue[at];
+                    at += 1;
+                    for g in globs.iter().filter(|g| g.0 == cur) {
+                        if seen.contains(&g.1) {
+                            continue;
+                        }
+                        seen.push(g.1);
+                        match renamed_in(g.1, &p.3).or_else(|| imports.iter().find(|i| i.0 == g.1 && i.1 == p.3).map(|i| i.2.clone())) {
+                            Some(nn) => {
+                                if found.as_ref().is_some_and(|f| *f != nn) {
+                                    return None;
+                                }
+                                found = Some(nn);
+                            }
+                            None if !defs.iter().any(|d| d.1 == g.1 && d.0 == p.3) => queue.push(g.1),
+                            None => {}
+                        }
+                    }
+                }
+                found
             });
             match found {
                 Some(nn) => {

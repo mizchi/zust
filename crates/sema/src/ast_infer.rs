@@ -1128,7 +1128,20 @@ impl Inf<'_> {
             }
             // (the left operand's type, a number behind a reference dereferenced: `let _: u8 = &0 << 0;`)
             "<<" | ">>" if !adt => self.num_operand(l),
-            "<<" | ">>" => l,
+            // (a struct's, or a reference to one's: the impl's `shl` / `shr`, whose Output is the type, `impl Shl<u8> for
+            // &S { type Output = u32; .. }`; the operands are not unified)
+            "<<" | ">>" => {
+                let m = if op == "<<" { "shl" } else { "shr" };
+                let found = match self.resolve(l) {
+                    Some(Ty::Struct(sid)) => self.prog.method(sid, m),
+                    Some(Ty::Ref(_, Ty::Struct(sid))) => self.prog.method(*sid, &format!("__ref_{m}")),
+                    _ => None,
+                };
+                match found {
+                    Some(id) => self.apply_recv(Some(id), vec![r], l),
+                    None => l,
+                }
+            }
             "<<=" | ">>=" => self.known(Ty::Unit),
             "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "&=" | "|=" => {
                 self.unify(l, r);

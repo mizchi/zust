@@ -3905,6 +3905,15 @@ impl Cx<'_> {
                             sg.generics.is_empty() && sg.params.len() == 2 && sg.params[0] == sr && sg.params[1] == rr
                         });
                         if let Some(f) = f {
+                            // (the impl's own `ne` when it has one, `J::<PartialEq<str>>::ne`; else the default, `!eq`)
+                            let own_ne = (p.segs[n - 1].name == "ne")
+                                .then(|| self.prog.names[f as usize].split('#').next().unwrap_or("").strip_suffix("::eq").map(|b| format!("{b}::ne")))
+                                .flatten()
+                                .and_then(|ne| self.prog.index.get(&ne).copied());
+                            if let Some(g) = own_ne {
+                                let args: [&Expr; 2] = [a, b];
+                                return self.call_fn(g, None, &args, None, Some(Ty::Bool), SP);
+                            }
                             if p.segs[n - 1].name == "ne" {
                                 let mut q = p.clone();
                                 q.segs[n - 1].name = "eq".into();
@@ -4244,18 +4253,24 @@ impl Cx<'_> {
         self.bk_arg_flows_before(id, &args);
         // (`<&[u8] as Tr>::m(&v)`: the impl the qualified type names, whose self type it is; not another overload
         // the arguments would pick (`&Vec<u8>` coerces to both `&[T]` and `&mut [u8]`'s receiver))
+        // (only when it is the one impl for that self type: `From<u8>` and `From<u16>` for `W<u32>` are still told apart
+        // by the argument, `W::<u32>::from(1u16)`)
         let mut kept = false;
+        let group = self.prog.overloads.get(self.prog.names[id as usize].split('#').next().unwrap_or(""));
+        let one_for = |st: Ty| {
+            let exact = |c: u32| self.prog.sigs[c as usize].self_ty.is_some_and(|t| self.prog.match_ty_exact(t, st, &mut vec![None; self.prog.sigs[c as usize].generics.len()]));
+            exact(id) && group.is_some_and(|g| g.iter().filter(|&&c| exact(c)).count() == 1)
+        };
         if let (Some(st), Expr::Path(None, _)) = (self.seg_self, &**func) {
-            if self.prog.overloads.contains_key(self.prog.names[id as usize].split('#').next().unwrap_or("")) && self.prog.sigs[id as usize].self_ty.is_some_and(|t| self.prog.match_ty_exact(t, st, &mut vec![None; self.prog.sigs[id as usize].generics.len()])) {
+            if one_for(st) {
                 self.keep_overload.set(Some(id));
                 kept = true;
             }
         }
         if let Expr::Path(Some(q), _) = &**func {
-            let sig = &self.prog.sigs[id as usize];
-            if self.prog.overloads.contains_key(self.prog.names[id as usize].split('#').next().unwrap_or("")) {
-                if let (Ok(qt), Some(st)) = (self.parse_ty(q), sig.self_ty) {
-                    if !self.prog.has_param(qt) && self.prog.match_ty_exact(st, qt, &mut vec![None; sig.generics.len()]) {
+            if group.is_some() {
+                if let Ok(qt) = self.parse_ty(q) {
+                    if !self.prog.has_param(qt) && one_for(qt) {
                         self.keep_overload.set(Some(id));
                         kept = true;
                     }

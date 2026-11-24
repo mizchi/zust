@@ -14698,8 +14698,12 @@ fn __exr_char_from_u8<G>(b: u8) -> char {
 }
 
 // (`Vec::from_raw_parts(ptr, len, cap)`: a buffer of `cap` elements the allocator gave, its first `len` initialized,
-// that the Vec owns)
+// that the Vec owns. No buffer when cap is 0 or the elements take no bytes, `NonNull::dangling()`: the Vec's empty
+// one, a null pointer that drop does not free)
 unsafe fn __exr_vec_from_raw_parts<T>(ptr: *mut T, len: usize, cap: usize) -> Vec<T> {
+    if cap == 0 || core::mem::size_of::<T>() == 0 {
+        return Vec { ptr: core::ptr::null_mut(), cap: len, len: len };
+    }
     Vec { ptr: ptr, cap: cap, len: len }
 }
 

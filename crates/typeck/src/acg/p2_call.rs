@@ -830,10 +830,16 @@ impl Cx<'_> {
             // (`self` by value on a reference to a struct the blanket impl covers as it is, `(&s).into_maybe_abi()` of
             // `impl<T: OptionIntoWasmAbi> MaybeIntoWasmAbi for T` with `&S: OptionIntoWasmAbi`: Self is the reference,
             // as rustc's probe takes the receiver's type first; no move out of it)
+            // (not when the struct's inherent method takes the reference as it is, `fn pick(&self)` for `(&s).pick()`:
+            // an inherent method comes first at the same receiver type)
             let by_value = !matches!(self.prog.sigs[bid as usize].params.first(), Some(Ty::Ref(..)));
-            if let Some(rt @ Ty::Ref(_, Ty::Struct(sid))) = pt {
+            if let Some(rt @ Ty::Ref(rm, Ty::Struct(sid))) = pt {
                 let ref_own = self.prog.method(*sid, &format!("__ref_{method}")).is_some();
-                if by_value && !ref_own && bounds.is_some() && holds(rt) {
+                let inherent = self.prog.method(*sid, method).is_some_and(|id| {
+                    let s = &self.prog.sigs[id as usize];
+                    s.impl_trait.is_none() && s.trait_of.is_none() && matches!(s.params.first(), Some(Ty::Ref(m, _)) if *m == rm)
+                });
+                if by_value && !ref_own && !inherent && bounds.is_some() && holds(rt) {
                     self.check_unsafe_call(bid, msp.start)?;
                     let (v, t) = self.expr(recv, None)?;
                     let Some(v) = v else { return Ok((None, Ty::Never)) };
@@ -1235,7 +1241,9 @@ impl Cx<'_> {
             let c = std::iter::once(first).chain(self.prog.overloads.get(&f).into_iter().flatten().copied()).find(|&c| fits(c))?;
             Some(self.prog.names[c as usize].clone())
         };
-        let ref_call = ref_impl(p0_ty).filter(|_| is_place_expr(recv));
+        // (the receiver is written again in the call these fall back to: only one evaluated again without effects,
+        // `refs[i]`, not `refs[next()]`)
+        let ref_call = ref_impl(p0_ty).filter(|_| is_place_expr(recv) && pure_place(recv));
         let (a, o, sid, id) = loop {
             let (a, o, sid) = loop {
                 p = match p {
@@ -1271,11 +1279,13 @@ impl Cx<'_> {
                         }
                         // (a blanket impl's `self`-by-value method for the reference as it is, `(*self).into_maybe_abi()`
                         // of a `&Box<str>` with `impl<T: OptionIntoWasmAbi> MaybeIntoWasmAbi for T`)
-                        if let Some(&bid) = self.prog.blanket.get(method).filter(|_| matches!(p0_ty, Ty::Ref(..)) && is_place_expr(recv)) {
+                        if let Some(&bid) = self.prog.blanket.get(method).filter(|_| matches!(p0_ty, Ty::Ref(..)) && is_place_expr(recv) && pure_place(recv)) {
                             let bsig = &self.prog.sigs[bid as usize];
                             let by_value = !matches!(bsig.params.first(), Some(Ty::Ref(..)));
                             let bounds = bsig.trait_of.as_deref().or(bsig.impl_trait.as_deref()).and_then(|tr| self.prog.blanket_bounds.get(tr));
                             if by_value && bounds.is_some_and(|bs| blanket_impls_hold(self.prog, p0_ty, bs, &mut vec![], &mut vec![])) {
+                                // (an `unsafe fn` of the trait: E0133 outside `unsafe`, as the other blanket calls)
+                                self.check_unsafe_call(bid, msp.start)?;
                                 let (v, t) = self.expr(recv, None)?;
                                 let Some(v) = v else { return Ok((None, Ty::Never)) };
                                 let args: Vec<&Expr> = margs.iter().collect();
@@ -2696,7 +2706,17 @@ impl Cx<'_> {
             match fit.next() {
                 None => Some(first),
                 Some(second) => {
-                    let all: Vec<u32> = [first, second].into_iter().chain(fit).collect();
+                    let mut all: Vec<u32> = [first, second].into_iter().chain(fit).collect();
+                    // (an inherent method that fits before the traits' methods, also when a trait's takes the arguments'
+                    // types and the inherent one does not: `s.run(7u16)` is `S::run(&self, u8)`'s E0308, as in rustc's
+                    // method lookup)
+                    let inherent = |c: &u32| self.prog.sigs[*c as usize].impl_trait.is_none();
+                    if all.iter().any(inherent) && !all.iter().all(inherent) {
+                        all.retain(inherent);
+                        if let [one] = all[..] {
+                            return Some(one);
+                        }
+                    }
                     let by = |f: &dyn Fn(u32) -> bool| all.iter().copied().find(|&c| f(c));
                     // (a receiver of the parameter's own type before a coercion: `&[T]`'s impl, not `&mut [T]`'s)
                     let exact = |c: u32| {
@@ -4166,5 +4186,17 @@ impl Cx<'_> {
             }
         }
         (1..sig.params.len()).filter(|&j| rs.slots.get(j).is_some_and(|s| s.iter().any(|c| inv.contains(c)))).collect()
+    }
+}
+
+/// A place expression evaluated again without effects: a variable, its fields and derefs, an index by a literal or a
+/// variable (`refs[i].x`, not `refs[next()]`)
+fn pure_place(e: &Expr) -> bool {
+    match e {
+        Expr::Path(None, _) => true,
+        Expr::Field(b, _, _) | Expr::Paren(b) => pure_place(b),
+        Expr::Unary(op, b, _) => op == "*" && pure_place(b),
+        Expr::Index(b, i, _) => pure_place(b) && (matches!(&**i, Expr::Lit(..)) || pure_place(i)),
+        _ => false,
     }
 }

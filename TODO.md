@@ -168,14 +168,35 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   WasmDescribe>::describe()`), a blanket impl's `self`-by-value method on a number, on a reference and through a
   qualified path (`<&Box<str> as MaybeIntoWasmAbi>::none()`), a reference's or a number's own impl before a blanket
   one, `T::none()` of T's bound's trait beside another trait's `none`, `String::from_utf8_unchecked`
-  (tests/probe/w1_items4.rs). It stops on:
+  (tests/probe/w1_items4.rs); the cases of #139's review: an inherent method before a blanket or trait one at the same
+  receiver, overloads of one self type told apart by the argument, an impl's own `ne`, a shift's `Output`, a
+  zero-capacity `Vec::from_raw_parts`, a renamed name through two globs under `use .. as`, a generic impl kept in an
+  anonymous const, impls for two instances of a trait object, and E0119 / E0277 / E0592 / E0201 through aliases,
+  `&Box<S>`, `From`'s bounds, const generic lengths (tests/probe/w1_items5.rs, tests/compile_errors/w1_*). It stops on:
   - `externref.rs:130`: "expected a function".
   - `LocalKey<T>` is a type with `with`, but a `thread_local!` is not one of them yet (each has a key type of its
     own), so a `&'static LocalKey<T>` cannot point at one.
   - a method call on a `Box<[T]>` with the program's `impl Tr for Box<[T]>` derefs to `[T]` and misses it; a
     `Box<str>` cannot be made (`into_boxed_str`, `"x".into()`).
   - the items a macro's `const _: () = { .. };` moves out are visible outside it (rustc scopes its fns to the
-    block); the hand-written one in wasm-bindgen's lib.rs (`__wbindgen_skip_interpret_calls`) is not compiled.
+    block); the hand-written one in wasm-bindgen's lib.rs (`__wbindgen_skip_interpret_calls`) is not compiled. A fn
+    or impl it moves out does not find a const, static or type that stays in it (`const N` or `struct Local<T>`
+    beside an `impl Tr for u8` that names it).
+  - impls for trait objects with parameters (`impl<R> Tr for dyn Fn() -> R`) are matched by the object's trait's name;
+    two impls for instances of one object (`dyn Obj<u8>` / `dyn Obj<u16>`) that override one method call the first
+    one's. Equal associated consts of `dyn Fn(..)` impls of each arity are kept once.
+- Found in the review of #139, also so before it:
+  - `<S as Tr<u8>>::Out` beside `<S as Tr<u16>>::Out`: the trait's arguments do not pick the impl (the first one's
+    `Out`).
+  - a struct field of `<W as B>::Out` whose value is `<u8 as B>::Out`, with `impl B for u8` written after W's: the
+    field takes the value before that impl is read.
+  - `m::f()` finds an `f` that only a fn body in `m` glob-imports (`fn helper() { use crate::a::*; .. }`): accepted
+    where rustc reports E0425.
+  - `a != b` calls `!a.eq(b)`, not the impl's own `ne` (a qualified `<S as PartialEq<R>>::ne` calls it).
+  - `Vec::<u32>::from_raw_parts(NonNull::dangling().as_ptr(), 0, 0)`: "cannot infer type parameter `T`" (with
+    `let p: *mut u32 = ..` it compiles).
+  - a cycle of associated types through blanket impls (`impl<T> A for T { type Out = <T as B>::Out; }` and B's
+    back) is no error while nothing names it, and not E0275 where something does.
 - Found while building memchr, not fixed:
   - a generic struct literal whose field is a `<v128 as Tr>::f(..)` call (`Pair { v1: <v128 as Vector>::splat(b) }`)
     does not infer `V = v128` ("expected `T0`, found `v128`"); an annotation or an intrinsic's value does;
