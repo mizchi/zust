@@ -3629,8 +3629,19 @@ impl Cx<'_> {
                 self.rg_fnptr_call(func, t, &args);
                 self.rg_took_call(c);
                 // (a result that holds references may hold what the arguments of such types borrow, as an elided
-                // signature's: `let f = id::<&String>; let g = f(&temp());`, `some(&temp())` of `let some = Some;`)
-                if r.is_ok() && self.bk_on() && self.bk_ty(f.ret).1 {
+                // signature's: `let f: fn(&String) -> &String = id; let g = f(&temp());`, `some(&temp())` of
+                // `let some = Some;`. Not a result whose regions the region check knows are all 'static
+                // (`f: fn(&i32) -> &'static i32`): the type keeps no region, the pointer's tree does)
+                let holds = r.is_ok() && self.bk_on() && self.bk_ty(f.ret).1;
+                let static_ret = holds && self.rg_on() && {
+                    let prog = self.prog;
+                    let n = f.params.iter().try_fold(0usize, |k, &p| Some(k + super::regionck::count(prog, p, 0)?));
+                    match (self.rt_expr(func), n) {
+                        (Some((_, tr)), Some(n)) => tr.get(n..).is_some_and(|ret| !ret.is_empty() && ret.iter().all(|&r| r == super::regionck::STATIC)),
+                        _ => false,
+                    }
+                };
+                if holds && !static_ret {
                     let from: Vec<usize> = f.params.iter().enumerate().filter(|(_, p)| self.bk_ty(**p).1).map(|(i, _)| i).collect();
                     self.bk_frame_end_call_from(&args, &from);
                     return r;

@@ -3341,4 +3341,8 @@ fn part18_review() {
     // (a lowercase constant in a pattern is compared with, not bound: the arm keeps the scrutinee's drop)
     let d = check("#![allow(non_upper_case_globals)]\n#[derive(PartialEq, Eq)]\nstruct W<'a>(Option<&'a i32>);\nimpl Drop for W<'_> { fn drop(&mut self) {} }\nconst none: Option<W<'static>> = None;\nfn mk(n: &i32) -> Option<W<'_>> { Some(W(Some(n))) }\nfn main() {\n    let mut n = 0;\n    match mk(&n) {\n        none => { n = 1; }\n        _ => {}\n    };\n    println!(\"{}\", n);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 10, "{d:?}");
+    // (a fn pointer whose result is `'static`: it holds nothing of its arguments; an elided one does)
+    assert_eq!(check("fn fixed(_: &i32) -> &'static i32 { &42 }\nfn main() {\n    let f: fn(&i32) -> &'static i32 = fixed;\n    let r;\n    {\n        let x = 1;\n        r = f(&x);\n    }\n    println!(\"{}\", r);\n}\n"), vec![]);
+    let d = check("fn fixed(x: &i32) -> &i32 { x }\nfn main() {\n    let f: fn(&i32) -> &i32 = fixed;\n    let r;\n    {\n        let x = 1;\n        r = f(&x);\n    }\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
 }
