@@ -1,0 +1,4 @@
+# Requires Node 24+, esbuild on PATH (or ESBUILD), and the wasm32-unknown-unknown Rust target.
+check:
+    node --test ../../helper/ts/bytes.test.mjs
+    node check.mjs

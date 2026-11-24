@@ -1,0 +1,2 @@
+// expect: the type of `Uni.status` is not one zsc reads
+import type { Uni } from "../ts/unsupported.ts";

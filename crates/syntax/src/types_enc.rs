@@ -146,6 +146,7 @@ crate::enc_struct!(Summary {
     adt_generics,
     adt_bounds,
     adt_unsized,
+    adt_defaults,
     impl_generics,
     impl_self_ty,
     consts,
@@ -154,12 +155,14 @@ crate::enc_struct!(Summary {
     assocs,
     aliases,
     alias_fixed_lts,
+    const_regions,
     where_types,
     impl_trait_args,
     impl_trait_lts,
     assoc_bounds,
     hdr_regions,
     adt_regions,
+    assoc_regions,
 });
 crate::enc_struct!(RAdtSyn { lts, fields, outlives, ty_outlives });
 crate::enc_struct!(AssocSyn {

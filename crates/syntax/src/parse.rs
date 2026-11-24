@@ -1156,7 +1156,10 @@ impl Parser {
     /// 式の中のパス (`a::b::<T>::c`)。型の中では `::` なしの `<..>` も取る
     fn path(&mut self, in_ty: bool) -> R<Path> {
         let pos = self.pos();
-        let global = self.eat_punct("::");
+        // (`::name::..` names the extern crate `name` (2018 and later): the crate's items are reached as `name::..`
+        // is. Kept for `::crate` / `::self` / `::super`, which are errors (E0433). One name, `::f()` (2015: the crate
+        // root's), is the item `f`, which is where the flattened program has it)
+        let global = self.eat_punct("::") && self.tok(0).is_some_and(|t| matches!(t.text.as_str(), "crate" | "self" | "super" | "Self"));
         let mut segs = Vec::new();
         loop {
             let st = self.i;
@@ -2013,8 +2016,36 @@ impl Parser {
         self.expr(false)
     }
 
+    /// rustc's error for a condition (or an iterator) that took the block meant to follow it, at the keyword `kw`
+    /// (the token index): `if {}` / `for x in {}` (bare: no condition), `if 5 == { .. }` (unfinished). None when a
+    /// block follows, or the expression does not end with one
+    fn swallowed_block(&self, kw: usize, e: &Expr, bare: &str, unfinished: Option<&str>) -> Option<String> {
+        fn ends_with_block(e: &Expr) -> bool {
+            match e {
+                Expr::Block(None, false, _) => true,
+                Expr::Binary(_, _, r, _) => ends_with_block(r),
+                Expr::Unary(_, x, _) | Expr::Let(_, x) => ends_with_block(x),
+                _ => false,
+            }
+        }
+        if self.is_open("{") {
+            return None;
+        }
+        let msg = match e {
+            Expr::Block(None, false, _) => bare,
+            e if ends_with_block(e) => unfinished?,
+            _ => return None,
+        };
+        let t = self.toks.get(kw)?;
+        Some(format!("{}:{}: {msg}", t.line, t.col + 1))
+    }
+
     fn if_expr(&mut self) -> R<Expr> {
+        let kw = self.i.saturating_sub(1);
         let c = self.cond()?;
+        if let Some(m) = self.swallowed_block(kw, &c, "missing condition for `if` expression", Some("this `if` expression is missing a block after the condition")) {
+            return Err(m);
+        }
         let then = self.block()?;
         let els = if self.eat_ident("else") {
             if self.eat_ident("if") {
@@ -2329,11 +2360,15 @@ impl Parser {
     }
 
     fn for_rest(&mut self, l: Option<String>) -> R<Expr> {
+        let kw = self.i.saturating_sub(1);
         let p = self.pat()?;
         if !self.eat_ident("in") {
             return Err(self.err("expected `in`"));
         }
         let e = self.expr(false)?;
+        if let Some(m) = self.swallowed_block(kw, &e, "missing expression to iterate on in `for` loop", None) {
+            return Err(m);
+        }
         let b = self.block()?;
         Ok(Expr::For(l, Box::new(p), Box::new(e), b))
     }
@@ -2363,6 +2398,7 @@ impl Parser {
                     base = Some(Box::new(self.expr(true)?));
                     break;
                 }
+                let at = self.pos();
                 let n = match self.tok(0) {
                     Some(t) if t.kind == TokKind::Lit => {
                         let s = t.text.clone();
@@ -2374,7 +2410,8 @@ impl Parser {
                 if self.eat_punct(":") {
                     fs.push((n, self.expr(true)?));
                 } else {
-                    let e = Expr::Path(None, Path { global: false, segs: vec![Seg { name: n.clone(), args: Vec::new(), fn_args: None, text: String::new() }], pos: Default::default() });
+                    // (shorthand `S { t }`: the local `t`, at the field's name)
+                    let e = Expr::Path(None, Path { global: false, segs: vec![Seg { name: n.clone(), args: Vec::new(), fn_args: None, text: String::new() }], pos: at });
                     fs.push((n, e));
                 }
                 if !self.eat_punct(",") {
@@ -3415,7 +3452,9 @@ pub fn unused_kw(s: &str) -> bool {
 pub(crate) fn double_binding<'a>(p: &'a Pat, seen: &mut crate::fxhash::FxSet<&'a str>) -> Option<&'a str> {
     match p {
         Pat::Ident(_, _, n, sub) => {
-            if n.starts_with(|c: char| c.is_lowercase() || c == '_') && n != "_" && !seen.insert(n.as_str()) {
+            // (a name the module renaming made (`serde_core__de__ignored_any__IgnoredAny`): its last part says what it is)
+            let base = n.rsplit("__").next().filter(|b| !b.is_empty()).unwrap_or(n);
+            if base.starts_with(|c: char| c.is_lowercase() || c == '_') && n != "_" && !seen.insert(n.as_str()) {
                 return Some(n);
             }
             sub.as_deref().and_then(|s| double_binding(s, seen))

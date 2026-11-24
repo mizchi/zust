@@ -1,0 +1,22 @@
+{
+  "name": "zustscript-helper",
+  "version": "0.1.0",
+  "description": "The values a zustscript module passes between JS and wasm, in one stable byte format (the JS side of the Rust crate zustscript_helper)",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "scripts": {
+    "test": "node --test"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./bytes": {
+      "types": "./bytes.d.ts",
+      "default": "./bytes.js"
+    }
+  },
+  "files": ["index.js", "index.d.ts", "bytes.js", "bytes.d.ts"]
+}

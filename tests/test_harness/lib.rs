@@ -1,0 +1,69 @@
+pub fn add(a: i32, b: i32) -> i32 { a + b }
+
+fn main() { println!("real main"); }
+
+// A test a macro makes
+macro_rules! make_test {
+    ($name:ident, $v:expr) => {
+        #[test]
+        fn $name() { assert_eq!(add($v, 0), $v); }
+    };
+}
+make_test!(made_by_macro, 3);
+
+#[cfg(not(test))]
+fn only_not_test() {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn adds() { assert_eq!(add(2, 2), 4); }
+    #[test]
+    fn fails() { assert_eq!(add(2, 2), 5); }
+    #[test]
+    #[should_panic(expected = "bo om")]
+    fn panics() { panic!("bo om {}", 1); }
+    #[test]
+    #[should_panic(expected = "nope")]
+    fn panics_wrong() { panic!("other"); }
+    #[test]
+    #[ignore]
+    fn slow() {}
+    #[test]
+    fn result() -> Result<(), String> { Err("bad".into()) }
+    // (the panic's message is what `expected` matches, not what the test printed before it)
+    #[test]
+    #[should_panic(expected = "wanted")]
+    fn printed_then_panicked() { eprintln!("wanted"); panic!("different"); }
+    #[test]
+    #[should_panic(expected /* a comment */ = "wanted")]
+    fn commented_expected() { panic!("different"); }
+    #[test]
+    #[should_panic(expected = r"a\b")]
+    fn raw_expected() { panic!(r"x a\b y"); }
+    #[test]
+    #[should_panic(expected = "\u{41}B")]
+    fn escaped_expected() { panic!("xABy"); }
+    // (the crate's own `main`, which the harness renamed)
+    #[test]
+    fn calls_main() { main(); super::main(); }
+    // (the crate's own `main` through imports, beside a module's own `main`)
+    mod own {
+        pub fn main() { println!("own's main"); }
+        mod by_import {
+            use crate::main;
+            #[test]
+            fn root_main() { main(); }
+        }
+        mod by_glob {
+            use super::*;
+            #[test]
+            fn own_main() { main(); }
+        }
+    }
+    mod inner {
+        #[test]
+        fn deep() { println!("deep out"); }
+    }
+}

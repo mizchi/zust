@@ -92,6 +92,13 @@ fn env_once(cell: &'static std::sync::OnceLock<bool>, name: &str) -> bool {
     *cell.get_or_init(|| std::env::var_os(name).is_some())
 }
 
+/// ZUSTC_NO_POLONIUS=1: the borrow check's NLL rules instead of Polonius Alpha's where they differ (issue #1): a
+/// reborrow returned lives to the function's end, and an assignment to a part of a local kills no loans
+pub(crate) fn no_polonius() -> bool {
+    static C: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    env_once(&C, "ZUSTC_NO_POLONIUS")
+}
+
 /// ACG_PANIC_ERR=1: an error panics (to find where it is made from the backtrace)
 /// An error of the borrow or region check's kind (lowering itself returns some: `m[k] = v` of a HashMap is E0594)
 pub fn borrow_error(e: &str) -> bool {
@@ -494,7 +501,9 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         closure_fn_only: false,
         lub_fnptr: 0,
         hr_lost: vec![],
+        clo_ann: vec![],
         clo_ret_param: vec![],
+        clo_ret_from: vec![],
         seg_self: None,
         loop_bounds: vec![],
         pending_bound: None,
@@ -779,9 +788,11 @@ pub(crate) fn addr_taken(b: &crate::parse::Block, mut_methods: &crate::fxhash::F
                 let es = crate::ast_closure::macro_exprs(g);
                 if es.is_empty() {
                     if let Some(es) = crate::ast_closure::macro_args(g) {
+                        // (a formatting macro's `&x` is read for its value; another's takes x's address (`vec![&mut x]`))
+                        let fmt = matches!(name, "println" | "print" | "eprintln" | "eprint" | "format" | "format_args" | "write" | "writeln" | "panic" | "assert" | "debug_assert" | "unreachable" | "todo" | "unimplemented");
                         for e in &es {
                             match e {
-                                Expr::Ref(_, x) => visit(x, out, mm),
+                                Expr::Ref(_, x) if fmt => visit(x, out, mm),
                                 Expr::Path(..) | Expr::Lit(_, _) => {}
                                 e => visit(e, out, mm),
                             }
@@ -808,6 +819,26 @@ pub fn err_pos(e: &Expr) -> Sp {
     match e {
         Expr::MethodCall(_, _, _, _, s) | Expr::Field(_, _, s) => s.at,
         e => expr_start(e),
+    }
+}
+
+/// Where rustc points when a branch's value does not have the type of the branches before it (`if`/`else`, `match`
+/// arms): a block's tail, the last statement of a block without one (whose `;` made the block `()`), or the
+/// expression itself. SP when that has no position (an empty block): the caller's own position then
+pub fn branch_pos(e: &Expr) -> Sp {
+    match e {
+        Expr::Block(_, _, b) => block_end_pos(b),
+        e => expr_start(e),
+    }
+}
+
+/// [`branch_pos`] of a block
+pub fn block_end_pos(b: &crate::parse::Block) -> Sp {
+    match b.stmts.last() {
+        Some(Stmt::Expr(e, false)) => branch_pos(e),
+        Some(Stmt::Expr(e, true)) => expr_start(e),
+        Some(Stmt::Let(.., p)) => *p,
+        _ => SP,
     }
 }
 
@@ -1030,8 +1061,14 @@ pub struct Cx<'p> {
     /// Closures made where nothing was expected (their kind, signature: from the body), by their definition: the
     /// parameters with no type written that are references (one region each, not higher-ranked)
     pub hr_lost: Vec<(u32, Vec<usize>)>,
+    /// The closures made with a parameter annotated with a lifetime (`|_: &'static u32| {}`), by struct: their
+    /// expressions, for a cast of a local holding one to a fn pointer type (rg_closure_fnptr)
+    pub clo_ann: Vec<(u32, Expr)>,
     /// Of those, the ones whose body is one of their parameters (`|y| y`): that parameter's type argument
     pub clo_ret_param: Vec<(u32, usize)>,
+    /// A closure's parameters its result is made of, as its body is written (borrowck::closure_ret_params): a call's
+    /// result holds what those arguments borrow
+    pub clo_ret_from: Vec<(u32, Vec<usize>)>,
     pub seg_self: Option<Ty>,
     pub loop_bounds: Vec<(Loc, u64)>,
     pub pending_bound: Option<u64>,
@@ -1121,6 +1158,8 @@ pub fn has_hole(prog: &Program, t: Ty) -> bool {
         Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => has_hole(prog, *i),
         // (`_` は型パラメータなので、型パラメータの残らないインスタンス (symbolic でない) には無い: 辿らない)
         Ty::Struct(sid) => prog.structs[sid as usize].symbolic && prog.structs[sid as usize].args.iter().any(|&a| has_hole(prog, a)),
+        // (`let f: fn(_) -> _ = foo;`: its parameters' and result's)
+        Ty::Fn(f) => f.params.iter().any(|&p| has_hole(prog, p)) || has_hole(prog, f.ret),
         _ => false,
     }
 }
@@ -1746,6 +1785,23 @@ impl Cx<'_> {
                 if other_self {
                     self.rg.ret = None;
                 }
+                // (a parameter whose type is a projection the summary does not follow (`_wf: <&'a u8 as Tr>::Ty`): its
+                // impl's associated type's value, with the regions its self type writes; what it implies is known
+                // (implied-bounds/assoc-ty-wf-used-to-get-assoc-ty.rs))
+                if self.rg.on && !self.prog.assoc_regions.is_empty() {
+                    for (k, (p, pty)) in f.sig.params.iter().enumerate() {
+                        let (crate::parse::Ty::Path(Some(_), _), Some(&(loc, t))) = (pty, ps.get(k + f.sig.recv.is_some() as usize)) else { continue };
+                        let _ = p;
+                        if self.rg.locals.contains_key(&loc) {
+                            continue;
+                        }
+                        if let Some(tr) = self.rg_proj_ann(pty, t) {
+                            let prog = self.prog;
+                            self.rg.implied(prog, t, &tr, 0);
+                            self.rg.locals.insert(loc, tr);
+                        }
+                    }
+                }
             } else {
                 self.rg.on = false;
             }
@@ -1790,6 +1846,7 @@ impl Cx<'_> {
         if let Some(Stmt::Expr(e, false)) = f.block.stmts.last() {
             self.mark_ret_call(e);
             self.bk.tail = e as *const Expr as usize;
+            self.bk_ret_leaves(e);
         }
         self.bk.cap_vals = cap_vals;
         let (v, t) = self.block(&f.block, Some(self.ret))?;
@@ -1805,6 +1862,8 @@ impl Cx<'_> {
             Some(Stmt::Expr(e, false)) => err_pos(e),
             _ => SP,
         };
+        // (`fn f(x: &&T) -> &T { x }`: the deref coercion)
+        let (v, t) = if t != self.ret { self.deref_coerce(v, t, self.ret) } else { (v, t) };
         self.same(tail, t, self.ret)?;
         self.drop_for_exit(0, 0);
         self.emit_return(v);
@@ -1896,8 +1955,9 @@ impl Cx<'_> {
 
     /// `&&T` (`&&&T` ..) を `&T` の場所に渡すときの deref の強制変換
     pub fn deref_coerce(&mut self, mut v: Option<Value>, mut t: Ty, want: Ty) -> (Option<Value>, Ty) {
-        while let (Ty::Ref(..), Ty::Ref(_, inner @ Ty::Ref(..)), Some(val)) = (want, t, v) {
-            if t == want || t.is_fat() {
+        while let (Ty::Ref(wm, _), Ty::Ref(om, inner @ Ty::Ref(..)), Some(val)) = (want, t, v) {
+            // (a `&mut` is not reached through a shared reference: `&&mut u8` is no `&mut u8`)
+            if t == want || t.is_fat() || (wm && !om) {
                 break;
             }
             // (`&&str` の値は `&str` (fat) の置き場所のアドレスで、`&str` の表現と同じ: 読まない)
@@ -2016,7 +2076,7 @@ impl Cx<'_> {
                     // (`let &Foo(ref x) = &f();`: the temporary lives as long as the block)
                     let ext1 = self.bk.extended.len();
                     if self.bk_on() {
-                        borrowck::direct_ref(self.prog, init, &mut self.bk.extended);
+                        borrowck::extended_refs(self.prog, init, &mut self.bk.extended);
                     }
                     let sc = self.bk_scrutinee(init, ann, &[pat]);
                     self.bk.extended.truncate(ext1);
@@ -2028,6 +2088,12 @@ impl Cx<'_> {
                     // (`let (y, _): (&'a u32, u32) = ..;`: the pattern binds from a value of the annotation's type)
                     if let Some(a) = ann_ty {
                         if let Some((t, tr)) = self.rg_let_ann(a, init, Some(place.ty())) {
+                            // (a `ref mut` binding of a place: the place is of the annotation's type, invariantly
+                            // (`let Foo(ref mut y): Foo<fn(&'static str)> = x;` with x: `Foo<fn(&'a str)>` needs
+                            // 'a: 'static))
+                            if pat_binds_ref_mut(pat) {
+                                self.rg_place_is_ann(init, t, &tr);
+                            }
                             if t == place.ty() {
                                 self.rg.scrut = Some((t, tr));
                             }
@@ -2115,7 +2181,10 @@ impl Cx<'_> {
                         continue;
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
-                    if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(crate::regions::mentions_static) {
+                    // (or a projection whose associated type's value names lifetimes: `let _: <() as Foo>::Out = &a;`
+                    // with `type Out = &'static u32`)
+                    let proj = |a: &crate::parse::Ty| matches!(a, crate::parse::Ty::Path(Some(_), _)) && !self.prog.assoc_regions.is_empty();
+                    if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(|a| crate::regions::mentions_static(a) || proj(a)) {
                         self.rg_late_on();
                     }
                     // (`let _ = Foo;` with Foo a unit struct (or a const) is a value: dropped at once)
@@ -2301,24 +2370,41 @@ impl Cx<'_> {
                     let ext0 = self.bk.direct.len();
                     let ext1 = self.bk.extended.len();
                     if self.bk_on() {
-                        borrowck::direct_temps(self.prog, init, &mut self.bk.direct);
-                        // (`let x = &f();`: the temporary lives as long as x's block)
-                        borrowck::direct_ref(self.prog, init, &mut self.bk.extended);
+                        borrowck::direct_temps_let(self.prog, init, &mut self.bk.direct);
+                        borrowck::direct_ref_recv(self.prog, init, &mut self.bk.direct);
+                        // (`let x = &f();`: the temporary lives as long as x's block; also within the initializer's
+                        // extending expressions, `let x = Some(&f());`)
+                        borrowck::extended_refs(self.prog, init, &mut self.bk.extended);
                     }
                     // (a function the gate left out, with `let x: &'static T = ..`: from here on, a borrow of what it
                     // owns must not have to be 'static. What came before has no trees and adds no constraint)
                     let static_cast = || matches!(strip_paren(init), Expr::Cast(_, t) if crate::regions::mentions_static(t));
                     let ctor_lts = || self.prog.path_lts && self.inline_depth == 0 && crate::regions::writes_path_lts(init);
-                    if !self.rg.on && self.rg.eligible && (static_cast() || ann_ty.as_ref().is_some_and(crate::regions::mentions_static) || ctor_lts()) {
+                    let proj = |a: &crate::parse::Ty| matches!(a, crate::parse::Ty::Path(Some(_), _)) && !self.prog.assoc_regions.is_empty();
+                    if !self.rg.on && self.rg.eligible && (static_cast() || ann_ty.as_ref().is_some_and(|a| crate::regions::mentions_static(a) || proj(a)) || ctor_lts()) {
                         self.rg_late_on();
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
                     let ml0 = std::mem::replace(&mut self.bk.macro_let, name.starts_with("__exr_"));
+                    let plain = if ann_ty.is_none() && self.bk_on() { borrowck::value_tail(init) as *const Expr as usize } else { 0 };
+                    let plain0 = std::mem::replace(&mut self.bk.plain_init, plain);
                     let r = self.expr(init, ann.or(hint));
+                    self.bk.plain_init = plain0;
                     // (`let b: &mut T = a;` with a: `&mut T`: a coercion site, b reborrows `*a` (rustc's `&mut *a`), not
                     // a copy of a: a use of `*a` while b lives conflicts)
                     if r.is_ok() && ann_ty.is_some() && matches!(ann, Some(Ty::Ref(true, _))) && matches!(strip_paren(init), Expr::Path(None, _)) {
                         self.bk_reborrow_let(init);
+                    }
+                    // (`let v: &T = x.borrow().0;` with the field a `&mut T`: a coercion site, v reborrows `*x.borrow().0`
+                    // through the temporary guard, which goes away at the end of the statement (E0716 when v is used
+                    // after): rustc's `&*`, which the `let` does not extend, as it is not written)
+                    if let (true, Some(Ty::Ref(m, _)), Some(Ty::Ref(true, _))) = (r.is_ok() && ann_ty.is_some() && self.bk_on(), ann, self.owned_field_ty(init)) {
+                        if let Some(t) = self.temp_root(init).and_then(|x| self.peek(x)) {
+                            if self.bk_place(init).is_none() {
+                                self.bk.direct.push(init as *const Expr as usize);
+                                self.bk_temp_borrow(init, m, t);
+                            }
+                        }
                     }
                     self.bk.macro_let = ml0;
                     self.bk.direct.truncate(ext0);
@@ -2442,15 +2528,75 @@ impl Cx<'_> {
                             _ => {}
                         }
                     }
-                    let watch = if last && !*semi { self.bk_watch_tail(e) } else { vec![] };
+                    let watch = if last && !*semi { self.bk_watch_tail(e) } else { (vec![], self.bk.watch_at.len()) };
                     // (edition 2024: what the block's value holds, for its temporaries' end below)
                     let tail24 = !*semi && last && self.prog.edition >= 2024 && self.bk_on() && !tail;
                     if tail24 {
                         self.bk_frame();
                     }
+                    // (a block's value that a statement discards (`{ let t = D(1); d.next(&t) };`) is a temporary of
+                    // the statement: made at the block's tail, while its locals live, and dropped at the statement's
+                    // end, after them (E0597 when its `Drop` may see a borrow of one of them). In every edition: 2024
+                    // changes when the tail's temporaries go, not the block's value)
+                    let saved_discard = self.bk.discard;
+                    let saved_stmt_block = self.bk.stmt_block;
+                    if let (true, Expr::Block(None, _, b)) = (*semi, strip_paren(e)) {
+                        self.bk.stmt_block = b as *const crate::parse::Block as usize;
+                    }
+                    let mark_discard = self.bk.discard_temps.len();
+                    let stmt_block = *semi && self.bk_on() && self.bk.level >= 2 && self.user_code;
+                    if let (true, Expr::Block(None, _, b)) = (stmt_block, strip_paren(e)) {
+                        self.bk.discard = b as *const crate::parse::Block as usize;
+                    }
+                    // (the tail of such a block: an inner block's value is the same value; another expression makes it)
+                    let made_here = last && !*semi && self.bk.discard != 0 && self.bk.discard == blk as *const crate::parse::Block as usize;
+                    if made_here {
+                        match strip_paren(e) {
+                            Expr::Block(None, _, b) => self.bk.discard = b as *const crate::parse::Block as usize,
+                            _ => self.bk_frame(),
+                        }
+                    }
+                    let made_value = made_here && !matches!(strip_paren(e), Expr::Block(None, ..));
+                    // (a statement's value is discarded: what it holds is no part of the enclosing value
+                    // (`{ *v += 1; f(&format!("{v}")); (x, y) }`), but what a `break` in it gives the loop)
+                    fn breaks_value(e: &Expr, depth: u32) -> bool {
+                        if depth > 64 || matches!(e, Expr::Closure(..)) {
+                            return false;
+                        }
+                        if matches!(e, Expr::Break(_, Some(_), _)) {
+                            return true;
+                        }
+                        let mut found = false;
+                        crate::ast_closure::each_child_pub(e, &mut |c| found = found || breaks_value(c, depth + 1));
+                        found
+                    }
+                    let stmt_mark = if *semi && self.bk_on() && !breaks_value(e, 0) { self.bk.frames.last().map(|f| (self.bk.frames.len(), f.len())) } else { None };
                     let r = self.expr(e, exp);
+                    if let Some((n, k)) = stmt_mark {
+                        if self.bk.frames.len() == n {
+                            if let Some(f) = self.bk.frames.last_mut() {
+                                f.truncate(k);
+                            }
+                        }
+                    }
                     if tail24 {
                         tail_srcs = self.bk_frame_end();
+                    }
+                    if made_value {
+                        let srcs = self.bk_frame_end();
+                        if let Ok((_, t)) = &r {
+                            if !srcs.is_empty() && self.dropck(*t, 0) {
+                                self.bk_hold_value(srcs, *t);
+                            }
+                        }
+                    }
+                    if made_here || stmt_block {
+                        self.bk.discard = saved_discard;
+                    }
+                    self.bk.stmt_block = saved_stmt_block;
+                    if stmt_block && self.bk.discard_temps.len() > mark_discard {
+                        let ts: Vec<u32> = self.bk.discard_temps.drain(mark_discard..).collect();
+                        self.bk_drop_held(&ts, borrowck::pos(e));
                     }
                     self.bk.direct.truncate(ext0);
                     if last && !*semi && self.bk.tail == e as *const Expr as usize && r.is_ok() {
@@ -2460,6 +2606,11 @@ impl Cx<'_> {
                     if last && !*semi && r.is_ok() {
                         self.rg_keep(e);
                         self.bk_tail_drop_temps(e);
+                        if !tail {
+                            if let Ok((_, t)) = &r {
+                                self.bk_block_value(blk, e, *t);
+                            }
+                        }
                     }
                     self.bk_unwatch(&watch);
                     if tail {
@@ -2511,6 +2662,11 @@ impl Cx<'_> {
                     return err(SP, format!("nested items are not supported ({k})"));
                 }
             }
+        }
+        // (a last statement that is no tail (`match heap.peek_mut() { .. };`, a `let`): its temporaries end with it,
+        // before the block's locals, as any statement's)
+        if !matches!(blk.stmts.last(), Some(Stmt::Expr(_, false))) {
+            self.bk_temps_end(bk_mark);
         }
         // (edition 2024: the tail expression's temporaries go away at the end of the block, before its locals)
         if self.prog.edition >= 2024 {
@@ -3018,6 +3174,17 @@ pub(crate) fn plainly_irrefutable(p: &Pat) -> bool {
         Pat::Ident(_, _, n, sub) => n.starts_with(|c: char| c.is_lowercase() || c == '_') && sub.as_deref().is_none_or(plainly_irrefutable),
         Pat::Tuple(ps) => ps.iter().all(plainly_irrefutable),
         Pat::Ref(_, i) => plainly_irrefutable(i),
+        _ => false,
+    }
+}
+
+/// p binds a name by `ref mut` somewhere
+pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(r, m, _, sub) => (*r && *m) || sub.as_deref().is_some_and(pat_binds_ref_mut),
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps) | Pat::Slice(ps) => ps.iter().any(pat_binds_ref_mut),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| pat_binds_ref_mut(&f.1)),
+        Pat::Ref(_, x) => pat_binds_ref_mut(x),
         _ => false,
     }
 }

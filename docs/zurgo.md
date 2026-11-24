@@ -18,6 +18,7 @@ zurgo run
 |---|---|
 | `zurgo build` | builds the package of the manifest (every member, for a virtual workspace) and its dependencies |
 | `zurgo run [-- args]` | builds, then runs the binary (`--bin` chooses one when there are several) |
+| `zurgo test [filter] [-- args]` | builds the tests, then runs each one in a process of its own, all at once (below) |
 | `zurgo metadata` | the package graph as `cargo metadata --format-version 1` writes it |
 | `zurgo clean` | removes `target/zust` |
 
@@ -135,27 +136,117 @@ Every crate also gets cargo's variables for `env!` / `option_env!`: `CARGO_PKG_*
 
 ## Proc-macro dependencies
 
-Proc macros cannot run yet (mizchi/zust#29). A proc-macro dependency is built as a stub library of its name, so a
-crate that only re-exports it builds: `pub use thiserror_impl::*;`, or serde's `derive` feature.
+Proc macros run (mizchi/zust#29, backend A). rustc builds a proc-macro dependency as a dylib, and its dependencies as
+rlibs. Their build scripts run first, and the builds are kept as the build scripts' host libraries are. zustc gets the
+crate as a stub library of its name with the dylib beside it (`pm=PATH` in the workspace file). The toolchain's
+proc-macro server (`libexec/rust-analyzer-proc-macro-srv` in rustc's sysroot, from the `rustc` component) loads the
+dylib and expands each use:
+- **What is a use.** zustc finds a use by its name, as zurgo's check found them before:
+  - an attribute macro: `#[wasm_bindgen]`, `#[wasm_bindgen_macro::wasm_bindgen(..)]`, or a name brought in by `use`
+    (also renamed);
+  - a derive: `#[derive(.., Describe)]`. A derive of the language's name counts only when the crate imports one of
+    that name from outside std;
+  - a function-like macro: `pm::html!(..)`, in item, statement or expression position. Its output is placed as a
+    `macro_rules!` call's expansion is.
+  - Only the proc-macro crates a crate reaches count: its dependencies, or what its libraries re-export. A path into
+    std or a tool (`#[rustfmt::skip]`) is never a proc macro's.
+  - **Which crate's.** A path is the macro of the crate it starts from: `pm::make!()`, or `re::make!()` when the
+    library `re` re-exports it (its `pub use`s, renames and globs too). Such a path stays the proc macro's beside a
+    `macro_rules! make`, and in `stringify!(..)` it is kept as written. A name brought in by `use` (also in a brace
+    group) is the macro of the crate that `use` starts from. The `use`s are one table per crate, so two modules that
+    import different crates' macros under one name are not told apart.
+- **What a macro gets.**
+  - The item as tokens, with its cfgs already evaluated and its doc comments as `#[doc = ".."]`.
+  - The crate's compile-time environment (`CARGO_PKG_*`), with `CARGO_MANIFEST_DIR` as its current directory.
+  - An attribute macro's item comes without that attribute. A derive's item comes without that `#[derive]`, and the
+    item keeps its other derives.
+- **Its output is read again**, so the macros it uses expand in turn, outermost first as rustc does. The arguments of
+  a macro call are not read before the call expands.
+- **Caching.** The expansions are kept with the crate's other preprocessing. A rebuilt dylib expands again.
+- **Not yet.**
+  - Every span is the call site's. zustc has no hygiene for proc-macro output, and an error in an expansion points at
+    the use.
+  - A proc macro among a build script's build-dependencies: rustc builds that script.
 
-zustc would drop an unknown attribute silently, so using a proc macro is an error before anything is built:
+Without the server (`ZUSTC_PROC_MACRO_SRV` set and empty, or a toolchain without it), a proc-macro dependency is a
+stub library of its name only, so a crate that only re-exports it builds (`pub use thiserror_impl::*;`, serde's
+`derive` feature). zustc would drop an unknown attribute silently, so using a proc macro is then an error before
+anything is built:
 - a crate of the build that uses one of the stub's derives (`#[derive(thiserror::Error)]`), or one of its attribute
   macros (`#[wasm_bindgen]`, also renamed: `use wasm_bindgen::prelude::wasm_bindgen as wb;`), is an error naming #29.
-  - Only the proc-macro crates a crate reaches count: its dependencies, or what its libraries re-export.
   - Each crate is read as zustc reads it: the files of its module tree, with its features and cfgs. So a use in a
     file it does not reach, under a cfg that is off, or in a `macro_rules!` body that is neither called nor exported
     does not count.
-  - A derive of the language (`#[derive(Debug)]`) is a proc macro's only when the crate imports one of that name
-    from outside std (`use derive_more::Debug;`).
   - The proc-macro crate's root is read with its features, so `#[cfg_attr(feature = "x", proc_macro_attribute)]`
     counts when the feature is on;
 - a function-like macro (`html!(..)`) expands to a `compile_error!` naming #29.
+
+## Tests
+
+`zurgo test` works on nextest's model, not libtest's (mizchi/zust#96). It builds the selected packages' test crates:
+the lib's unit tests, each bin's, and each integration test (`[[test]]`, `tests/*.rs`, `tests/*/main.rs`), with the
+dev-dependencies. It lists the tests of every executable, then runs each test in a process of its own, over the cores
+at once.
+
+```bash
+zurgo test
+```
+
+```bash
+zurgo test --lib parse -- --include-ignored
+```
+
+- Each test crate (but a `harness = false` one, below) is built with `zustc --test`. That keeps `#[cfg(test)]` items, collects the `#[test]` functions (those a `macro_rules!` makes too: they are
+  collected from the expanded source)
+  and adds a harness `main` (the crate's own `main` is not called). The harness only lists its tests and runs the
+  one named:
+  - a panic exits with 101, and a `Result` test that returns `Err` exits with 1;
+  - a `#[should_panic]` test runs in a child process, whose exit code and stderr tell whether it panicked with the
+    `expected` text.
+
+  So the compiled program needs no `catch_unwind`, threads or output capture. The command line is libtest's
+  (`--list --format terse`, `--exact`, `--ignored`, `--include-ignored`, `--skip`, filters), so cargo-nextest can
+  run these executables too. Run directly with no arguments, an executable runs its tests one after another, each in
+  a child, and prints libtest's report.
+- A test passes when its process exits with 0. The runner speaks libtest's command line, so it runs the executables
+  `cargo test --no-run` builds as well. The tests compare the two runs (`crates/zurgo/tests/zurgo.rs`).
+- `cratebench/test.py` runs the cratebench crates' own tests (their upstream repositories) under `zurgo test` and
+  `cargo test`, and compares them test by test. CI checks the crates that matched (`cratebench/test_passing.txt`);
+  `cratebench/test_result.md` has every crate's result, with the first error of those zurgo cannot build yet.
+- Tests run in the package's directory, as under cargo. An integration test finds the package's binaries in
+  `CARGO_BIN_EXE_<name>`.
+- Output: one line per test as it finishes (`PASS [ 0.012s] (3/9) pkg (lib) tests::adds`, or `FAIL`, `TIMEOUT`,
+  `SIGNAL`). A failure is followed by its stdout and stderr. A summary comes last. The exit code is 101 when a test
+  failed.
+- The longest tests start first, ordered by their last times in `target/zust/<profile>/test-times`. A long test that
+  starts last would run alone at the end.
+- Options:
+  - `--lib`, `--bin <name>`, `--bins`, `--tests` and `--test <name>` choose the targets: only those are built (the
+    bins too, for `CARGO_BIN_EXE_`);
+  - `--no-run` builds them and lists the executables;
+  - `--fail-fast` stops starting tests after a failure (by default every test runs, and `--no-fail-fast` is
+    accepted).
+- After `--`: `<filter>`, `--exact`, `--skip <s>`, `--ignored`, `--include-ignored`, `--list` and
+  `--test-threads <n>` (the cores by default). `--nocapture` and `--show-output` are accepted: a failure's output is
+  always shown.
+- A test still running after 60s is marked `SLOW`, and one running after 300s is stopped and fails
+  (`ZURGO_TEST_SLOW`, `ZURGO_TEST_TIMEOUT`, in seconds).
+- `test = false` on a target leaves its tests out, unless the target is named (`--lib`, `--bin x`, `--test x`), as under
+  cargo. A `harness = false` target is built without the harness (its own `main`, with `cfg(test)`, as cargo builds
+  it) and run as one test, named after the target, that passes when it exits with 0. `zurgo metadata` lists
+  the integration tests as cargo does.
+- `--target wasm32-unknown-unknown`: each test crate is a wasm module, and each test runs as
+  `$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER <module> <name> --exact` (in this repository the runner is
+  `node tests/wasm/run.mjs`). A module starts no child process, so a `#[should_panic]` test runs in its module and the
+  runner checks its exit code (101) and panic message. An arithmetic check traps there without a message, so
+  `expected` cannot match it.
+- Not yet: doc tests and benchmarks.
 
 ## Not yet (mizchi/zust#28)
 
 - **Two versions of one library**, and **renamed dependencies**, are errors: zustc's workspace has one name per
   crate.
 - **Other sources:** git dependencies, other registries, source replacement.
-- **No `[patch]`, no resolver of its own, no downloads, no `test` / `doc`.**
+- **No `[patch]`, no resolver of its own, no downloads, no `doc`.**
 - **Editions:** zustc has no edition setting: it accepts what any edition accepts, so a crate's edition is not
   passed on. (rustc, building build scripts, gets each crate's own.)

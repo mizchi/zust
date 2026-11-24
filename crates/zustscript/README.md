@@ -2,10 +2,13 @@
 
 zust を土台にした、フロントエンド向け言語の試作。目標は、表面は TS 風の高水準な言語で、必要な箇所だけ Rust と同じ低レベルで書け、境界(コールバックの寿命を含む)をコンパイラが面倒を見ること。
 
+[日本語の入門記事](docs/introduction.md) · [Rust プログラマー向け](docs/for-rust-programmers.md) · [TypeScript プログラマー向け](docs/for-typescript-programmers.md) · [Rust から見る変換コスト](docs/rust-costs.md) · [GitHub Pages で読む](https://mizchi.github.io/zust/zustscript/)
+
 - `zsc x.zsc -o out/` は次を書き出す
   - `x.js`: 読める ES module。JS 層の本体と、wasm 層のグルー
   - `x.d.ts`
-  - `x.wasm.rs` と `x.wasm`: `wasm fn` があるときだけ。zustc でコンパイルする
+  - `x.wasm.rs` と `x.wasm`: Rust 経由の Wasm 関数があるときに生成する。
+- `zsc x.zsc --emit-rust -o out/` はモジュール全体を `out/x.rs` に変換する。属性のない関数も対象で、`export fn f` は `pub fn zs_f` になる。標準の Rust で使う例は [Rust プログラマー向けガイド](docs/for-rust-programmers.md) にある。
 - **zust の改善を妨げないように、独立させている**
   - `crates/zustscript` に置いているが、zust のワークスペースには入れない(`[workspace]` を自前で持つ)。zust の `cargo build/test --workspace` には含まれない
   - CI も独立した workflow(`.github/workflows/zustscript.yml`)。`crates/zustscript/**` が変わったときだけ動き、zust の CI と KPI には関わらない
@@ -14,6 +17,9 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
   - `--check-externs`: 各 `extern` の宣言が、実際の TS の .d.ts の型に合うかを tsrs(`npm i tsrs`、または `TSRS`)で確かめる。合わなければ、その `extern` の位置でエラーになる
   - JS ターゲットのサイズと速さの計測: `node bench/js/kpi.mjs --esbuild PATH`(`--against bench/js/baseline.json` で比べる)
   - あとで決めることと、次にやること: [TODO.md](TODO.md)(文法の提案は [evals/syntax/](evals/syntax/README.md))
+- ブラウザで試すプレイグラウンド: [editor/](../../editor/README.md)
+  - tree-sitter でハイライトし、wasm にした zsc で編集のたびにトランスパイルして、iframe で `main` を実行する(JSX を返せば React で描画)
+  - ブラウザでは通常の関数を JS で実行する。`@wasm` は Rust バックエンドを必要とするため、対象の宣言位置でエラーになる。
 - テスト: `cargo test --release`
   - **Node 26** を使う(PATH 上の `node`。計測も Node 26.13.1。relaxed SIMD はフラグなしで動く)
   - app の例は zust 側の `target/release/zustc` を使う
@@ -22,6 +28,8 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
 ## 文法(現時点の案と決定事項)
 
 決定事項:
+
+- 関数は既定で非公開。JS から呼べる関数は `export fn` と書く。属性は `@wasm export fn` の順に付ける。従来の `pub` も互換性のために受け付ける。
 
 - クロージャは `(x) => e` に一本化する
 - 数値は `i32` / `u32` / `i64` / `f64` で、暗黙変換はしない(`Int` / `Float` の別名は置かない)
@@ -41,20 +49,45 @@ enum Filter { All, Active, Done }          // データなし → "All" | "Activ
 enum Option<T> { None, Some(T) }           // データあり → { TAG: "Some", _0: x } (TS の判別共用体)
 
 // 関数: トップレベルのシグネチャは注釈必須、本体は推論。let は不変
-pub fn visible(todos: Array<Todo>, f: Filter) -> Array<Todo> {
+export fn visible(todos: Array<Todo>, f: Filter) -> Array<Todo> {
   todos |> .filter((t) => match f { All => true, Active => !t.done, Done => t.done })
 }
 fn toggle(t: Todo) -> Todo { Todo { done: !t.done, ..t } }   // 更新は新しい値を作る
 
 // num-traits 相当: 数値の bound を持つ関数は型ごとに単相化される (sum$i32 / sum$f64 / ...)
-pub fn sum<T: Num>(xs: Array<T>) -> T { xs.fold(T::zero(), (acc, x) => acc + x) }
+export fn sum<T: Num>(xs: Array<T>) -> T { xs.fold(T::zero(), (acc, x) => acc + x) }
 
 // JSX: コンポーネントは `fn Name(props: Record) -> Jsx`。props は型検査される
-pub fn Row(props: RowProps) -> Jsx { <li onClick={() => props.onPick(props.sample.label)}>{props.sample.label}</li> }
+export fn Row(props: RowProps) -> Jsx { <li onClick={() => props.onPick(props.sample.label)}>{props.sample.label}</li> }
 
-// JS の関数を手書きで宣言して取り込む (TS の型の自動取り込みはまだない)
+// JS の関数を手書きで宣言して取り込む (関数の型の自動取り込みはまだない)
 extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
+
+// TS のファイルのレコード型を、その型定義のとおりに読み込む (下の「TS の型の取り込み」)
+import type { User, Post } from "./model.ts";
 ```
+
+### TS の型の取り込み: `import type`
+
+```zsc
+import type { User, Post } from "./model.ts";   // model.ts の interface / type を、レコード型として読む
+
+export fn display(u: User) -> String { u.name + " #" + (u.id as i32).to_string() }
+```
+
+- まずは**プレーンなレコード型**だけを読む(src/tsimport.rs)。`interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
+  - フィールドの型: `string` は `String`、`number` は `f64`(JS の number は倍精度。整数にするときは `as i32`)、`boolean` は `bool`、`bigint` は `i64`。配列(`T[]`、`readonly T[]`、`Array<T>`、`ReadonlyArray<T>`)と、同じファイルの別のレコード型
+  - 読み込む型が使う型(`Post` の `author: User`)も一緒に読む。export されていない型でもよい
+  - ファイルの残り(関数、union、総称型など)は、import しない限り読まない。import した型が部分集合の外なら、TS のファイルのその位置でエラーになる(`` `Opt.name` is optional ``、tests/errors/ts_*.zsc)
+  - パスは zsc のファイルからの相対パス。パッケージ(`"react"`)からはまだ読まない
+- **union は enum として読む**(JS では TS の値そのまま)
+  - 文字列リテラルの union `type Status = "draft" | "published"`: データのない enum。バリアントはタグの先頭を大文字にした名前(`Draft`、`Published`)で、JS の値は TS の文字列そのもの(`"draft"`)
+  - 判別キーつきの union `type Shape = { kind: "circle"; r: number } | { kind: "rect"; w: number; h: number }`: 全メンバーが同じ文字列リテラルのフィールド(タグ)を持つもの。メンバーはファイルの別のオブジェクト型の名前でもよい(`Square | { kind: "empty" }`)。バリアントは `Circle(f64)`、`Rect(f64, f64)` で、フィールドは TS のメンバーの順。パターン `Circle(r)` は `s.kind === "circle"` と `s.r` になり、`Circle(2.0)` は `{ kind: "circle", r: 2.0 }` を作る。`==` もタグとメンバー名で比べる
+  - 読まないもの(エラー): 文字列とオブジェクトが混ざった union、共通のタグがない union、名前にならないタグ(`"in-progress"`)、大文字にすると同じになるタグ
+  - TS から読んだ union も `@wasm` との境界を越える(下の「バイト列で越える値」、TS の形のまま)
+- 読み込んだ型は、zustscript のレコードと同じに使える(フィールドの読み出し、`{ ..u }` の更新、`==`、`@wasm` との境界)
+- JS の出力には何も足さない(レコードは素のオブジェクト)。`.d.ts` は自分で interface を書かず、`import type { User } from "./model.js"` で TS の型そのものを使う。TS 側は自分の値をそのまま渡せる(tests/ts/consumer.ts を tsc で検査)
+  - export されていない型が `.d.ts` に出るときだけ、TS と同じ形(数値は素の `number`)の interface を書く。TS は構造で型を比べるので、同じ型として扱われる
 
 ### 数値(AssemblyScript と同じ程度の表現力)
 
@@ -75,7 +108,7 @@ extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
 let w: F32Array = [0.5, -1.0, 2.0];          // 型の注釈があるリテラルは new Float32Array([..]) になる
 let z = F64Array::zeros(n);                  // new Float64Array(n)
 let p = F64Array::from(xs);                  // Array<f64> から明示的に変換する(暗黙の変換はない)
-pub fn dense(..) -> F32Array { range(0, m).map((r) => ..) }   // 期待する型が F32Array なら、range の map もそれを作る
+export fn dense(..) -> F32Array { range(0, m).map((r) => ..) }   // 期待する型が F32Array なら、range の map もそれを作る
 ```
 
 - JS では typed array そのもの(`Float64Array` / `Float32Array` / `Int32Array`)。`.d.ts` でもその型になる
@@ -98,13 +131,13 @@ pub fn dense(..) -> F32Array { range(0, m).map((r) => ..) }   // 期待する型
 - `x + 1`(x が f64)は型エラーになる
 - 変換は `as` だけ。f64 からの変換は Rust と同じく飽和する(`1e10 as i32 == 2147483647`)
 - 数値の bound(`Num` / `Integer` / `Float`)付きの総称関数は、使われた型ごとに別の JS 関数として書き出す(演算の JS 表現が型ごとに違うので、型消去ではなく単相化する)
-  - pub なものは、bound が許すすべての型の分を export する
+  - 公開した関数は、bound が許すすべての型の分を export する
   - `.d.ts` も型ごとに出す
 
 ### ローカルな可変性とループ
 
 ```zsc
-pub fn primes_below(n: i32) -> i32 {
+export fn primes_below(n: i32) -> i32 {
   let mut count = 0;
   for k in range(2, n) {            // JS: for (let k = 2; k < n; k++)    Rust: for k in (2i32)..(n)
     let mut d = 2;
@@ -134,13 +167,13 @@ pub fn primes_below(n: i32) -> i32 {
 | `u32` | ハッシュ、ビット列、色など、符号なしの wrap が要るもの | number のまま(`>>> 0`) |
 | `i64` | **JS 層では避ける**。2^31 を超える整数が本当に要る計算は `@wasm` に置く | BigInt になる(遅く、割り当てが起きる)。JS 層で i64 の演算を書くと、コンパイラが警告を出す |
 
-**どの層で書くか**(同じソースのまま切り替えられる)
+**関数の実行場所と出力先**
 
 | 書き方 | 向いているもの | 切り替え |
 |---|---|---|
 | 普通の `fn`(JS 層) | UI、データの整形、ほとんどのロジック。f64 / i32 のループも、V8 の JIT で十分に速い | - |
 | `@simd fn` | 数値の配列に対する畳み込み(内積、合計)と要素ごとの計算。f64x2 / i32x4 で処理する | `--no-simd` で `@wasm` に、`--all-js` で JS に戻せる |
-| `@wasm fn` | i64 を多用する計算、整数の wrap を多用する計算、レコードや enum を使う重い処理 | `--all-js` で JS に戻せる |
+| `@wasm fn` | i64 を多用する計算、整数の wrap を多用する計算、レコードや enum を使う重い処理 | Rust 経由で実行。JS 専用出力と併用するとエラー |
 | `wasm fn`(本体は Rust) | Rust のライブラリ的なコード、所有権やメモリを直接扱う処理 | - |
 
 - 小さい関数を何度も呼ぶ用途には、`@wasm` / `@simd` を使わない。境界を越えるたびにコストがかかる
@@ -170,8 +203,11 @@ let who = handle greet() {
 
 - JS では、effect の handler がすべて tail-resumptive(arm が末尾で `k(x)` を呼ぶだけ)なら、普通の関数呼び出しになる
   - `perform` は `$perform("Op", ..)` で、最も内側の handler の arm を直接呼ぶ。`k(x)` は `x` を返すことになる。arm は、その `handle` の外側の handler の下で動く(深いハンドラの意味のまま)
-  - それ以外の effect(arm が `k` を呼ばずに抜けるもの、`pub` な関数から外へ出るもの、それらと混ざるもの)では、関数は `function*`、`perform` は `yield`、その呼び出しは `yield*` になる。`handle` は深いハンドラ `$handle`(一度だけ再開できる継続)で、外側では `$run` が結果を取り出す
-  - 直接の呼び出しは generator の約 100 倍速い(`bench/js` の `w_effects`)。generator の handler は operation のたびにスタックが深くなるので、1 つの `handle` の中で operation が 1000 回前後になるとあふれる(未修正)
+  - それ以外の effect(arm が `k` を呼ばずに抜けるもの、公開関数から外へ出るもの、それらと混ざるもの)では、関数は `function*`、`perform` は `yield`、その呼び出しは `yield*` になる。`handle` は深いハンドラ(一度だけ再開できる継続)で、generator は `$handle(..)` / `$resume(k, x)` を命令として `yield` する
+  - 命令は 1 つのループ `$run` が実行する。フレーム(generator)はヒープ上のスタックに積み、operation はその handler から上のフレームを切り取って継続にし、再開はそれを積み直す。そのため、1 つの `handle` の中で operation を何回しても JS のスタックは深くならない(回帰テスト `gen_after_k` / `gen_outer_op` / `gen_plus_one`、10 万回)
+  - 公開関数の generator は、本体をこのループ(`$drive`)の下で動かす。TS の呼び出し元に届くのは、その関数が扱わずに外へ出す operation だけで、`.next(x)` の値がその operation の結果になる(ループの命令は見えない)
+  - arm が最後に `k(x)` を返すとき(`$tail`)は、arm のフレームを捨ててから再開するので、ヒープのスタックも伸びない。`k(()) + 1` のように再開の後に続きがあるときは、待っている arm の分だけヒープに積まれる
+  - 直接の呼び出しは generator の約 100 倍速い(`bench/js` の `w_effects`)。generator の handler は、以前の `yield*` を入れ子にする実装より 4〜7 倍速い(operation 1000 回で 1.2〜1.4 ms → 0.2〜0.3 ms)
   - 扱わない effect は外側のハンドラへ転送される
   - handler の arm の中で別の effect を `perform` することもできる
 - 制約(effect 多相の代わりに置いた簡単な規則)
@@ -187,9 +223,9 @@ let who = handle greet() {
 ### wasm 層(Rust そのまま)と境界
 
 ```rust
-pub wasm fn stddev(xs: &[f64]) -> f64 { ... }                       // 本体は Rust。zustc がコンパイルする
-pub wasm fn map_sum(xs: &[f64], f: &dyn Fn(f64) -> f64) -> f64 { ... }  // 借用コールバック
-pub wasm fn call_twice(f: Box<dyn Fn(i32) -> i32>, x: i32) -> i32 { ... } // 所有コールバック
+export wasm fn stddev(xs: &[f64]) -> f64 { ... }                       // 本体は Rust。zustc がコンパイルする
+export wasm fn map_sum(xs: &[f64], f: &dyn Fn(f64) -> f64) -> f64 { ... }  // 借用コールバック
+export wasm fn call_twice(f: Box<dyn Fn(i32) -> i32>, x: i32) -> i32 { ... } // 所有コールバック
 wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側だけの補助
 ```
 
@@ -210,18 +246,18 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
   - 制約: 引数と戻り値はスカラーだけ
 - テストで確かめていること: 借用・所有の両方とも、呼び出しの後で JS 側の表は空になる
 
-### `@wasm fn`: 同じ zustscript を JS でも wasm でも実行する(方向 A の合流)
+### `@wasm fn` で Rust 経由の Wasm 実行を指定する
 
 ```zsc
-@wasm pub fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
+@wasm export fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
   range(0, a.len()).fold(0.0, (s, i) => s + a[i] * b[i])
 }
-@wasm pub fn total<T: Num>(xs: Array<T>) -> T { xs.fold(T::zero(), (acc, x) => acc + x) }
+@wasm export fn total<T: Num>(xs: Array<T>) -> T { xs.fold(T::zero(), (acc, x) => acc + x) }
 ```
 
 - 本体は普通の zustscript で、JS 層と同じ検査器で型を検査する。そのうえで `lower.rs` が、型の付いた構文木から Rust のソースへ落とし、zustc が wasm にする。境界のグルーは `wasm fn` と同じ仕組みで生成する
   - 例: `dot` は `(0i32..(a.len() as i32)).fold(0.0f64, |s, i| s + a[i as usize] * b[i as usize])` になる
-- `zsc --all-js` を付けると、同じ関数を JS として出す。テスト `numeric_same_in_js_and_wasm` で、両方の出力が一致することを確かめている(差分テスト)。比べている結果は次のとおり
+- JS 版と比較するときは、同じ本体から `@wasm` を外して `--all-js` でコンパイルする。テスト `numeric_same_in_js_and_wasm` で、両方の出力が一致することを確かめている(差分テスト)。比べている結果は次のとおり
   - i32 / u32 の wrap
   - 2^53 を超える i64
   - f64 から整数への `as` の飽和
@@ -235,22 +271,31 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
   - 型: 数値、bool、配列、それらを組み合わせたレコードと enum(入れ子、総称の `Option<T>` なども可)
     - スカラーだけのレコードと enum は、Rust では `#[derive(Clone, Copy, PartialEq)]` の struct / enum(`ZsVec2`、`ZsShape`)になり、値で渡す
     - 配列と、配列を含むレコード / enum は Copy にならない。借用、move、clone は zsc が推論する(次の「所有権の推論」)
-    - JS との境界を越えられるのは、これまでどおり数値の配列と、スカラーだけのレコード / enum。配列を含むレコードは wasm の内側で使う
+    - JS との境界を越えられるのは、数値の配列、スカラーだけのレコード / enum、そして文字列や配列を含むレコードと、レコード・文字列・配列の配列(次の「バイト列で越える値」)
   - 構文: `let` / `let mut` と代入、`while` / `for` / `break` / `continue`、`if`、`match`(数値、bool、enum のバリアント、入れ子のパターン)、レコードの生成・フィールド・`..base` での更新、`as`、`T::zero()` / `T::one()`
   - 配列の操作: `len` `map` `filter` `fold` `any` `all` `push` `concat`、添字、`range(a, b)`(Rust では配列を作らずイテレータ `a..b` になる)
-  - 呼び出し: 他の `@wasm` 関数、`wasm fn`、再帰
+  - 呼び出し: Rust に変換可能な通常の補助関数、他の `@wasm` 関数、`wasm fn`、再帰
   - 文字列: 引数は `&str`、戻り値は `String`。`+`、`==` と大小比較、`len` `to_upper` `trim` `contains` `split`、配列の `join`、整数と bool の `to_string`(次の「文字列と `==`」)
   - 使えないもの: タプル、effect、値としての関数、文字列のパターン、浮動小数点数の `to_string`(JS と Rust で書式が違う)
 - `T: Num` の関数は、wasm でもインスタンスごとに単相化する(`zs_total__f64`、`zs_total__i64` など)
   - JS から呼ばれるインスタンスだけに wrapper とグルーを付ける
   - 他の `@wasm` 関数からだけ呼ばれるもの(例の `step`)は、ただの Rust 関数になる
 - 境界を越えられる配列は、i32 / u32 / i64 / f64 のもの(`Int32Array` / `Uint32Array` / `BigInt64Array` / `Float64Array` でコピーする)
+- JS 側で生のバイト列を扱う試作は `zustscript-helper/bytes` から読み込める。`Uint8Array` や `DataView` の部分ビューをそのまま扱う。手書き `wasm fn` の `&[u8]` / `Vec<u8>` への接続は実装予定。[所有権とビルドサイズの実測](docs/target-spec.md#バイト列を-js-と共有する)
 - レコードと enum は、境界を**スカラーのスロットに分解して**越える。線形メモリへのコピーも、それを解放する処理も要らない
   - 引数: フィールドごとに wasm の引数にする。`p: Vec2` は `p__x: f64, p__y: f64` になる
     - enum は、i32 のタグと、全バリアントのフィールドのスロットになる。選ばれていないバリアントの分は 0 で埋める
     - Rust 側の wrapper が値に組み立て直す
   - 戻り値: wrapper が glue の out 領域に、1 スロット 8 byte で書き込む。glue はそれを `DataView` で読み、`{ TAG: "Some", _0: { .. } }` を組み立てる
   - 例: `nearest(xs, ys, p: Vec2, mode: Mode) -> Option<Hit>`
+- **バイト列で越える値**: 文字列や配列を含むレコード(`{ name: String, tags: Array<String> }`)、レコード・文字列・配列の配列(`Array<Person>`、`Array<Array<f64>>`)は、1 つの固定した形式のバイト列にして越える
+  - 両側の補助: JS 側は npm のパッケージ **zustscript-helper**(helper/ts、`encode` / `decode` だけの約 100 行)、Rust 側は crate **zustscript_helper**(helper/rust、trait `Wire` と `to_bytes` / `from_bytes`)。zustc は 1 つのファイルをコンパイルするので、zsc は crate のソースを `mod zustscript_helper` として埋め込み、レコードごとの `impl Wire` を書く
+  - 形式(第 1 版、helper/rust/src/lib.rs に表): little-endian、詰め物なし、型のタグなし(両側が型を知っている)。数値は 4 / 8 byte、bool は 1 byte、文字列は UTF-8 の長さ(u32)と UTF-8、配列は長さ(u32)と要素、レコードは宣言順のフィールド、enum はバリアントの番号(u32)とそのフィールド。両側の単体テストで、同じ値が同じバイト列になることを確かめている
+  - glue は引数を `encode` して線形メモリに置き、Rust の wrapper が `from_bytes` で値に戻して参照で渡す。結果は `to_bytes` して返し、glue が `decode` する。JS の出力は `import { encode, decode } from "zustscript-helper"` を含むので、使う側はこのパッケージを入れる
+  - 載る型: 数値、bool、文字列、配列、レコード、enum。スカラーだけのレコードと enum は、これまでどおりスロットで越える(速い)。スロットに収まらないもの(文字列を持つ enum など)と、TS から読んだ union がこの形式になる
+    - enum の JS の形はスキーマが持つ(`["enum", key, variants]`): zustscript の enum は `{ TAG, _0 }`、データのない enum は文字列、TS の union は TS の形(`{ kind: "circle", r }`、`"draft"`)。Rust 側は zsc が `impl Wire` を書く
+  - typed array と関数は、まだこの形式に載せない(tests/errors/wasm_wire_typed.zsc)
+  - 差分テスト `wire_same_in_js_and_wasm`(tests/wire.zsc): 文字列と配列を含むレコード、レコードの配列、入れ子の配列、i64 の結果が、JS と wasm で一致する。TS から読み込んだレコード(`User`)もそのまま越える(`ts_records` の `badge`)
 - 差分テスト `shapes_same_in_js_and_wasm`: examples/shapes.zsc で、レコード、enum、総称の `Option<T>`、ループ、可変のローカル変数の結果が、JS と wasm で一致することを確かめている
 
 同じソースを JS と wasm で走らせた速さ(node 22、examples/numeric.zsc、`tests/numeric_bench.mjs`)。両方の結果は一致している。
@@ -380,11 +425,11 @@ type Person = { name: String, age: i32 }
 ### `@simd fn`: v128 で処理する配列カーネル
 
 ```zsc
-@simd pub fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
+@simd export fn dot(a: Array<f64>, b: Array<f64>) -> f64 {
   range(0, a.len()).fold(0.0, (s, i) => s + a[i] * b[i])      // f64x2: 2 要素ずつ
 }
-@simd pub fn isum(xs: Array<i32>) -> i32 { xs.fold(0, (acc, x) => acc + x) }   // i32x4: 4 要素ずつ
-@simd pub fn norms(xs: Array<f64>, ys: Array<f64>) -> Array<f64> {
+@simd export fn isum(xs: Array<i32>) -> i32 { xs.fold(0, (acc, x) => acc + x) }   // i32x4: 4 要素ずつ
+@simd export fn norms(xs: Array<f64>, ys: Array<f64>) -> Array<f64> {
   range(0, xs.len()).map((i) => (xs[i] * xs[i] + ys[i] * ys[i]).sqrt())
 }
 ```
@@ -422,11 +467,11 @@ type Person = { name: String, age: i32 }
 
 ```zsc
 // 全結合層: y = W x + b(W は m×n を行ごとに並べたもの)
-@simd pub fn dense(w: F32Array, x: F32Array, b: F32Array, m: i32, n: i32) -> F32Array {
+@simd export fn dense(w: F32Array, x: F32Array, b: F32Array, m: i32, n: i32) -> F32Array {
   range(0, m).map((r) => b[r] + range(0, n).fold(0.0, (s, i) => s + w[r * n + i] * x[i]))
 }
-@simd(relaxed) pub fn dense_fma(..) -> F32Array { /* 同じ本体 */ }   // 積和を relaxed_madd(FMA)に
-@simd pub fn relu(xs: F32Array) -> F32Array { xs.map((x) => x.max(0.0)) }
+@simd(relaxed) export fn dense_fma(..) -> F32Array { /* 同じ本体 */ }   // 積和を relaxed_madd(FMA)に
+@simd export fn relu(xs: F32Array) -> F32Array { xs.map((x) => x.max(0.0)) }
 ```
 
 - **f32x4**: `F32Array` のカーネルは 4 レーンで処理する。f64x2 / i32x4 と同じ形で書ける
@@ -524,7 +569,7 @@ zust は到達しない関数をそもそも出さないので、`wasm-gc` に�
 | 3 | effect 多相(関数型の effect 行)、async の effect(Promise で継続を再開) | 2〜4 週 | 生成はジェネレータのまま |
 | 4 | 方向 A の合流の続き: どの関数を wasm に置くかの判断材料(コピーの量と呼び出しの回数の見積もり)、`range(..).fold` などの JS 側での `for` への最適化、文字列やタプルへの部分集合の拡張、データを wasm 側に置いたまま繰り返し処理する仕組み(ハンドル) | 2〜4 週 | 数値、レコード、enum、ループまでは試作済み |
 | 5 | wasm バックエンドの改善(reactor、stackifier、wasm32 レイアウト) | 1〜2 か月 | zust 本体の作業 |
-| 6 | TS の型の取り込み(限定した部分集合、tsc API による抽出) | 範囲次第 | 今は手書きの extern |
+| 6 | TS の型の取り込み(限定した部分集合、tsc API による抽出) | 範囲次第 | プレーンなレコード型は `import type` で読める。関数は手書きの extern |
 
 - 小さな実アプリ(React 上)が書けるまで: 段階 1〜2 で 1.5〜2 か月
 - wasm の島が実用サイズになるまで: 段階 5 が必要

@@ -306,8 +306,8 @@ fn wf_bounds_held_by_bounds_where_clauses_and_supertraits() {
 }
 
 /// A parameter that says `?Sized` (in its bounds or a where clause) does not hold a `Sized` bound, even with the word
-/// `Sized` in its `?Sized`, unless another of its bounds implies it (std's `Clone`); another parameter of the same item
-/// still does
+/// `Sized` in its `?Sized`, unless another of its bounds has `Sized` as a supertrait (`Clone`); another parameter of the
+/// same item still does, and a `?Sized` in a string declares nothing
 #[test]
 fn wf_maybe_unsized_parameter_does_not_hold_sized() {
     let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
@@ -315,13 +315,19 @@ fn wf_maybe_unsized_parameter_does_not_hold_sized() {
     let ds = s.check(bad);
     assert_eq!(ds.iter().map(|d| d.line).collect::<Vec<_>>(), vec![3], "{ds:?}");
     assert!(ds[0].msg.contains("`K: Sized`"), "{ds:?}");
-    let wher = "use std::fmt::Debug;\nstruct Sz<T: Sized>(T);\nstruct J<K>\nwhere\n    K: Debug + ?Sized,\n{\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
-    assert_eq!(s.check(wher).iter().map(|d| d.line).collect::<Vec<_>>(), vec![7], "{:?}", s.check(wher));
-    // (std's `Clone` has `Sized` as a supertrait: `K: Clone + ?Sized` is Sized, as rustc accepts it)
-    let clone = "struct Sz<T: Sized>(T);\nstruct J<K>\nwhere\n    K: Clone + ?Sized,\n{\n    s: Box<Sz<K>>,\n}\nstruct W<T: ?Sized + Clone> {\n    value: Sz<T>,\n}\nfn main() {}\n";
-    assert!(s.check(clone).is_empty(), "{:?}", s.check(clone));
+    let wher = "struct Sz<T: Sized>(T);\nstruct J<K>\nwhere\n    K: std::fmt::Debug + ?Sized,\n{\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    let ds = s.check(wher);
+    assert_eq!(ds.iter().map(|d| (d.line, d.msg.contains("`K: Sized`"))).collect::<Vec<_>>(), vec![(6, true)], "{ds:?}");
+    // (std's `Clone` has `Sized` as a supertrait, before or after the `?Sized`: `T: ?Sized + Clone` is Sized)
+    let clone_first = "struct Sz<T: Sized>(T);\nstruct W<T: ?Sized + Clone> {\n    value: Sz<T>,\n}\nfn main() {}\n";
+    assert!(s.check(clone_first).is_empty(), "{:?}", s.check(clone_first));
     let ok = "struct Sz<T: Sized>(T);\nstruct J<K, V: ?Sized> {\n    s: Sz<K>,\n    v: Box<V>,\n}\nfn main() {}\n";
     assert!(s.check(ok).is_empty(), "{:?}", s.check(ok));
+    // (`Clone` has `Sized` as a supertrait: `K: Clone + ?Sized` is Sized; a `?Sized` in a string declares nothing)
+    let clone = "struct Sz<T: Sized>(T);\nstruct J<K>\nwhere\n    K: Clone + ?Sized,\n{\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    assert!(s.check(clone).is_empty(), "{:?}", s.check(clone));
+    let doc = "struct Sz<T: Sized>(T);\n#[doc = \"K: ?Sized\"]\nstruct J<K> {\n    s: Sz<K>,\n}\nfn main() {}\n";
+    assert!(s.check(doc).is_empty(), "{:?}", s.check(doc));
 }
 
 /// A name nothing declares, in a generic fn nothing calls or a trait's default method, is E0425 there too, whatever it
@@ -344,6 +350,748 @@ fn undeclared_names_in_uncalled_generic_fns() {
     assert!(s.check(ok).is_empty(), "{:?}", s.check(ok));
     let newline = "use\nstd::convert::identity;\nfn g<T: Copy>(x: T) -> T {\n    let f = identity;\n    f(x)\n}\nfn main() {}\n";
     assert!(s.check(newline).is_empty(), "{:?}", s.check(newline));
+    let semi = "use std::convert::{ /* ; */ identity };\nfn g<T: Copy>(x: T) -> T {\n    let f = identity;\n    f(x)\n}\nfn main() {}\n";
+    assert!(s.check(semi).is_empty(), "{:?}", s.check(semi));
+}
+
+/// `#![deny(dead_code)]` below the item level: a field nothing reads (a derived Debug / Clone reads none), a variant
+/// nothing constructs (a pattern does not, a `match` scrutinee does), an inherent impl's const nothing names, a type
+/// alias nothing names. `#![allow(unused_variables)]` leaves dead_code denied; a type named only in `*const T` or an
+/// impl header, a union field something writes and a tuple struct's `()` field are used
+#[test]
+fn dead_code_fields_variants_members_aliases() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let field = "#![allow(unused_variables)]\n#![deny(dead_code)]\n#[derive(Debug, Clone)]\nstruct A {\n    x: u8,\n    f: u8,\n}\nfn main() {\n    let a = A { x: 1, f: 2 };\n    let _ = a.x;\n}\n";
+    assert_eq!(first(field), Some((6, "field `f` is never read".to_string())));
+    let tuple = "#![deny(dead_code)]\nstruct T(u8, u8);\nstruct U(u8, u8);\nfn main() {\n    let t = T(1, 2);\n    let u = U(1, 2);\n    let _ = (t.0, u.0, u.1);\n}\n";
+    assert_eq!(first(tuple), Some((2, "field `1` is never read".to_string())));
+    let variant = "#![deny(dead_code)]\nenum E {\n    A,\n    B,\n}\nfn main() {\n    match E::A {\n        E::A => {}\n        E::B => {}\n    }\n}\n";
+    assert_eq!(first(variant), Some((4, "variant `B` is never constructed".to_string())));
+    let member = "#![deny(dead_code)]\nstruct S;\nimpl S {\n    const C: u8 = 1;\n}\nfn main() {\n    let _ = S;\n}\n";
+    assert_eq!(first(member), Some((4, "associated constant `C` is never used".to_string())));
+    let alias = "#![deny(dead_code)]\ntype Used = u8;\ntype Unused = u8;\nfn id(x: Used) -> Used {\n    x\n}\nfn main() {\n    id(0);\n}\n";
+    assert_eq!(first(alias), Some((3, "type alias `Unused` is never used".to_string())));
+    let ok = "#![deny(dead_code)]\nstruct W;\ntype WI = W;\ntrait T {\n    fn t(&self) {}\n}\nimpl T for WI {}\nenum V {}\nextern \"C\" {\n    fn free(p: *const V);\n}\nunion U {\n    a: u8,\n    b: u8,\n}\nstruct P(u8, ());\nfn main() {\n    W.t();\n    unsafe { free(std::ptr::null()) };\n    let u = U { a: 1 };\n    let _ = unsafe { u.b };\n    let p = P(1, ());\n    let _ = p.0;\n}\n";
+    assert_eq!(first(ok), None);
+}
+
+/// `#![deny(unreachable_code)]` inside expressions: an argument after one that diverges, a call whose last argument
+/// diverges, an operation whose operand diverges, and the statement after a `match` on an empty enum or an
+/// `if`/`else` whose branches both diverge; not the right of `||`, which may not run
+#[test]
+fn unreachable_code_in_expressions() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let arg = "#![deny(unreachable_code)]\nfn foo(x: u8, y: usize) {}\nfn a() {\n    foo(return, 22);\n}\nfn main() {}\n";
+    assert_eq!(first(arg), Some((4, "unreachable expression".to_string())));
+    let call = "#![deny(unreachable_code)]\nfn bar(x: u8) {}\nfn b() {\n    bar(return);\n}\nfn main() {}\n";
+    assert_eq!(first(call), Some((4, "unreachable call".to_string())));
+    let op = "#![deny(unreachable_code)]\nfn c() -> u8 {\n    let x = 1 + return 2;\n    x\n}\nfn main() {}\n";
+    assert_eq!(first(op).map(|f| f.0), Some(3));
+    let empty = "#![deny(unreachable_code)]\nenum Void {}\nfn d(v: Void) {\n    match v {}\n    let x = 2;\n}\nfn main() {}\n";
+    assert_eq!(first(empty), Some((5, "unreachable statement".to_string())));
+    let both = "#![deny(unreachable_code)]\nfn e(b: bool) {\n    if b {\n        return;\n    } else {\n        return;\n    }\n    println!(\"dead\");\n}\nfn main() {}\n";
+    assert_eq!(first(both), Some((8, "unreachable statement".to_string())));
+    let ok = "#![deny(unreachable_code)]\nfn f(b: bool) -> bool {\n    let x = b || return false;\n    if b {\n        return true;\n    }\n    x\n}\nfn main() {}\n";
+    assert_eq!(first(ok), None);
+}
+
+/// `#![deny(unused_variables)]` beyond `let`: a `match` arm's binding its guard and body never read (an or-pattern's
+/// names once), a closure's parameter its body never reads, a `for` loop's binding the body never reads
+#[test]
+fn unused_variables_in_arms_closures_and_loops() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let arm = "#![deny(unused_variables)]\nfn main() {\n    let v = match 0u8 {\n        a => 0,\n    };\n    let _ = v;\n}\n";
+    assert_eq!(first(arm), Some((4, "unused variable: `a`".to_string())));
+    let or = "#![deny(unused_variables)]\nenum E {\n    A(i32),\n    B(i32),\n}\nfn main() {\n    match E::A(1) {\n        E::A(x) | E::B(x) => {}\n    }\n}\n";
+    assert_eq!(first(or), Some((8, "unused variable: `x`".to_string())));
+    let closure = "#![deny(unused_variables)]\nfn main() {\n    let f = |x: u8| 1;\n    let _ = f(2);\n}\n";
+    assert_eq!(first(closure), Some((3, "unused variable: `x`".to_string())));
+    let ok = "#![deny(unused_variables)]\nfn main() {\n    let v = [1u8, 2];\n    for x in v.iter() {\n        let _ = x;\n    }\n    let n = match 3u8 {\n        k if k > 2 => 1,\n        _ => 0,\n    };\n    let g = |y: u8| y + n;\n    let _ = g(1);\n}\n";
+    assert_eq!(first(ok), None);
+}
+
+/// Review of #72: a variant in a `match` arm's body (`true => E::A, false => E::B`) is constructed; a value a fn
+/// returns (`let s = make()`) is no struct's own; a comma in a tuple field's type (`Result<u8, u8>`) splits nothing;
+/// `warn(dead_code)` (of the crate, a field) denies nothing, but `deny(warnings)` makes it an error; `export_name`
+/// uses an inherent fn; an empty braced struct is a 1-ZST field; `F::B` of another enum constructs no `E::B`; block
+/// comments nest in a `use`; `Iterator<Item = u8> + ?Sized` is still `?Sized`
+#[test]
+fn review72_dead_code_and_sized() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let flag = true;\n    let _e = match flag { true => E::A, false => E::B };\n}\n";
+    assert!(s.check(src).is_empty(), "arms_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let flag = true;\n    let _e = match flag {\n        true => { E::A }\n        false => E::B,\n    };\n}\n";
+    assert!(s.check(src).is_empty(), "block_arm_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nstruct S { value: u8 }\nfn make() -> S { S { value: 1 } }\nfn main() {\n    let s = make();\n    let _ = s.value;\n}\n";
+    assert!(s.check(src).is_empty(), "factory_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nstruct Pair(Result<u8, u8>, u8);\nfn main() {\n    let p = Pair(Ok(1), 2);\n    let _ = (p.0, p.1);\n}\n";
+    assert!(s.check(src).is_empty(), "tuple_result_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\n#![warn(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert!(s.check(src).is_empty(), "warn_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nstruct S {\n    x: u8,\n    #[warn(dead_code)]\n    y: u8,\n}\nfn main() {\n    let s = S { x: 1, y: 2 };\n    let _ = s.x;\n}\n";
+    assert!(s.check(src).is_empty(), "field_warn_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nstruct S;\nimpl S {\n    #[unsafe(export_name = \"entry\")]\n    extern \"C\" fn dispatch() {}\n}\nfn main() {\n    let _ = S;\n}\n";
+    assert!(s.check(src).is_empty(), "export_ok: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nstruct Marker {}\nstruct Pair(u8, Marker);\nfn main() {\n    let p = Pair(1, Marker {});\n    let _ = p.0;\n}\n";
+    assert!(s.check(src).is_empty(), "marker_ok: {:?}", s.check(src));
+    let src = "use std::convert::{ /* a /* b */ ; */ identity };\nfn g<T: Copy>(x: T) -> T {\n    let f = identity;\n    f(x)\n}\nfn main() {}\n";
+    assert!(s.check(src).is_empty(), "nested_comment_ok: {:?}", s.check(src));
+    let src = "#![expect(dead_code)]\n#![deny(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(s.check(src).first().map(|d| d.line), Some(3), "expect_then_deny_err: {:?}", s.check(src));
+    let src = "#![deny(warnings)]\n#![allow(dead_code)]\n#![warn(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(s.check(src).first().map(|d| d.line), Some(4), "warnings_warn_err: {:?}", s.check(src));
+    let src = "#![deny(dead_code)]\nenum E {\n    A,\n    B,\n}\nenum F {\n    B,\n}\nfn main() {\n    let _ = E::A;\n    let _ = F::B;\n}\n";
+    assert_eq!(s.check(src).first().map(|d| d.line), Some(4), "owner_err: {:?}", s.check(src));
+    let src = "struct Sz<T: Sized>(T);\nstruct J<K: Iterator<Item = u8> + ?Sized> {\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    assert_eq!(s.check(src).first().map(|d| d.line), Some(3), "iter_unsized_err: {:?}", s.check(src));
+}
+
+/// Second review of #72: `forbid(warnings)` reaches only the lints left at warn (an `allow(dead_code)` after it
+/// stands); `Fn() + ?Sized` / `FnOnce(u8) -> u8 + ?Sized` are still `?Sized`; `<<` in a discriminant is a shift, not
+/// a type's arguments; `#[derive (PartialEq)]` is a derive; `self.f` in an `impl` of an alias reads the aliased
+/// struct's field
+#[test]
+fn review72_second_round() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let src = "#![forbid(warnings)]\n#![allow(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "forbid_warnings_allow_ok");
+    let src = "#![forbid(warnings)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(first(src).map(|d| d.0), Some(2), "forbid_warnings_err");
+    let src = "struct Sz<T: Sized>(T);\nstruct J<K: Fn() + ?Sized> {\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    assert_eq!(first(src).map(|d| (d.0, d.1.contains("`K: Sized`"))), Some((3, true)), "fn_unsized_err");
+    let src = "struct Sz<T: Sized>(T);\nstruct J<K: FnOnce(u8) -> u8 + ?Sized> {\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    assert_eq!(first(src).map(|d| d.0), Some(3), "fnonce_unsized_err");
+    let src = "struct Sz<T: Sized>(T);\nstruct J<K: Fn() + Clone + ?Sized> {\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
+    assert_eq!(first(src), None, "fn_clone_sized_ok");
+    let src = "#![deny(dead_code)]\nenum E {\n    A = 1 << 0,\n    B,\n}\nfn main() {\n    let _ = E::A;\n}\n";
+    assert_eq!(first(src), Some((4, "variant `B` is never constructed".to_string())), "shift_discr_err");
+    let src = "#![deny(dead_code)]\nenum E {\n    A = 1 << 0,\n    B = 1 << 1,\n    C,\n}\nfn main() {\n    let _ = (E::A, E::B, E::C);\n}\n";
+    assert_eq!(first(src), None, "shift_discr_ok");
+    let src = "#![deny(dead_code)]\n#[derive (PartialEq)]\nstruct S {\n    value: u8,\n}\nfn main() {\n    let a = S { value: 1 };\n    let b = S { value: 2 };\n    let _ = a == b;\n}\n";
+    assert_eq!(first(src), None, "spaced_derive_ok");
+    let src = "#![deny(dead_code)]\nstruct S {\n    value: u8,\n}\ntype Alias = S;\nimpl Alias {\n    fn read(&self) -> u8 {\n        self.value\n    }\n}\nfn main() {\n    let s = S { value: 1 };\n    let _ = s.read();\n}\n";
+    assert_eq!(first(src), None, "alias_impl_ok");
+    // (third round: an arm's body in parentheses is an expression; `fn S()` beside `struct S { .. }` constructs no
+    // S; an item's or a field's own warn is an error under the crate's `deny(warnings)`)
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let flag = true;\n    let _e = match flag {\n        true => (E::A),\n        false => (E::B),\n    };\n}\n";
+    assert_eq!(first(src), None, "paren_arms_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let _e = match 1 {\n        0 => Some((E::A)),\n        _ => Some(E::B),\n    };\n}\n";
+    assert_eq!(first(src), None, "nested_paren_arm_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn f(e: Option<E>) -> u8 {\n    match e {\n        Some(E::A) => 1,\n        _ => 0,\n    }\n}\nfn main() {\n    let _ = f(Some(E::B));\n}\n";
+    assert_eq!(first(src), Some((2, "variant `A` is never constructed".to_string())), "pattern_in_some_err");
+    let src = "#![deny(dead_code)]\n#![allow(non_snake_case)]\nstruct S {\n    other: u8,\n}\nstruct T {\n    value: u8,\n}\nfn S() -> T {\n    T { value: 1 }\n}\nfn main() {\n    let _ = S { other: 1 }.other;\n    let t = S();\n    let _ = t.value;\n}\n";
+    assert_eq!(first(src), None, "fn_named_like_struct_ok");
+    let src = "#![deny(warnings)]\n#[allow(dead_code)]\n#[warn(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(first(src).map(|d| d.0), Some(4), "item_allow_then_warn_err");
+    let src = "#![deny(dead_code)]\n#[warn(dead_code)]\nfn unused() {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "item_warn_ok");
+    let src = "#![deny(warnings)]\nstruct S {\n    x: u8,\n    #[warn(dead_code)]\n    y: u8,\n}\nfn main() {\n    let s = S { x: 1, y: 2 };\n    let _ = s.x;\n}\n";
+    assert_eq!(first(src), Some((5, "field `y` is never read".to_string())), "field_warn_warnings_err");
+    let src = "#![deny(warnings)]\nmod m {\n    #[allow(unused_variables)]\n    fn _foo() {}\n}\nfn main() {}\n";
+    assert_eq!(first(src), None, "underscore_in_module_ok");
+    // (fourth round: an element of a group is what the group is (a struct literal's field, a call's argument, a
+    // tuple pattern's element); a closure's body is an expression; `S { .. }.inner` binds no S)
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let make = || E::A;\n    let _ = make();\n    let id = |x: u8| E::B;\n    let _ = id(1);\n}\n";
+    assert_eq!(first(src), None, "closure_body_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nstruct Holder {\n    a: E,\n    b: u8,\n}\nfn main() {\n    let h = Holder { a: E::A, b: 0 };\n    let _ = (h.a, h.b, E::B);\n}\n";
+    assert_eq!(first(src), None, "struct_field_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn f(_: E, _: u8) {}\nfn main() {\n    f(E::A, 1);\n    let _ = [E::B, E::B];\n}\n";
+    assert_eq!(first(src), None, "call_and_array_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn g(t: (E, u8)) -> u8 {\n    match t {\n        (E::A, x) => x,\n        _ => 0,\n    }\n}\nfn main() {\n    let _ = g((E::B, 1));\n}\n";
+    assert_eq!(first(src), Some((2, "variant `A` is never constructed".to_string())), "tuple_pattern_err");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nstruct Holder {\n    a: E,\n}\nfn h(x: Holder) -> u8 {\n    match x {\n        Holder { a: E::A } => 1,\n        _ => 0,\n    }\n}\nfn main() {\n    let _ = h(Holder { a: E::B });\n}\n";
+    assert_eq!(first(src), Some((2, "variant `A` is never constructed".to_string())), "struct_pattern_err");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn k(e: E) -> u8 {\n    match e {\n        E::B | E::A => 1,\n    }\n}\nfn main() {\n    let _ = k(E::B);\n}\n";
+    assert_eq!(first(src), Some((2, "variant `A` is never constructed".to_string())), "or_pattern_err");
+    let src = "#![deny(dead_code)]\nstruct Inner {\n    value: u8,\n}\nstruct Outer {\n    inner: Inner,\n}\nfn main() {\n    let t = Outer { inner: Inner { value: 1 } }.inner;\n    let _ = t.value;\n}\n";
+    assert_eq!(first(src), None, "projected_initializer_ok");
+    // (fifth round, with patterns from the parsed program: `matches!`'s first argument is an expression, its second a
+    // pattern; `!(..)` after `=` is no macro; a leading `|` of an or-pattern is a pattern's; `|` between two values
+    // is a bitwise or; a closure's parameter shadowing a `let` gives no owner)
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let _ = matches!(E::A, E::B);\n    let _ = E::B;\n}\n";
+    assert_eq!(first(src), None, "matches_first_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let _ = matches!(E::A, E::B);\n}\n";
+    assert_eq!(first(src), Some((2, "variant `B` is never constructed".to_string())), "matches_second_err");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let _ = !(E::A as u8 == 0);\n    let _ = E::B;\n}\n";
+    assert_eq!(first(src), None, "not_operator_ok");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    match (E::A, 0) {\n        (| E::A | E::B, _) => (),\n    }\n}\n";
+    assert_eq!(first(src), Some((2, "variant `B` is never constructed".to_string())), "leading_pipe_err");
+    let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let _ = E::A as u8 | E::B as u8;\n}\n";
+    assert_eq!(first(src), None, "bitwise_or_ok");
+    let src = "#![deny(dead_code)]\nstruct S {\n    other: u8,\n}\nstruct T {\n    value: u8,\n}\nfn main() {\n    let x = S { other: 1 };\n    let _ = x.other;\n    let f = |x: T| x.value;\n    let _ = f(T { value: 1 });\n}\n";
+    assert_eq!(first(src), None, "closure_shadow_ok");
+    // (sixth round: the parsed region runs through an impl's closing brace after the last member; a `matches!` guard
+    // is an expression; a closure's parameter inside a macro's arguments is a binding too)
+    let src = "#![deny(dead_code)]\nenum E {\n    A,\n}\nfn main() {\n    let _ = E::A;\n    E::ping();\n}\nimpl E {\n    fn ping() {}\n}\n";
+    assert_eq!(first(src), None, "impl_last_ok");
+    let src = "#![deny(dead_code)]\nenum E {\n    A,\n    B,\n}\nfn main() {\n    let _ = matches!(E::A, _ if E::B as u8 == 1);\n}\n";
+    assert_eq!(first(src), None, "matches_guard_ok");
+    let src = "#![deny(dead_code)]\nstruct S {\n    other: u8,\n}\nstruct T {\n    value: u8,\n}\nfn main() {\n    let x = S { other: 1 };\n    let t = T { value: 1 };\n    assert!((|x: T| x.value)(t) == x.other);\n}\n";
+    assert_eq!(first(src), None, "closure_in_macro_ok");
+}
+
+/// E0308 where rustc points: the branch whose type differs from the ones before it (its tail, the last statement of
+/// a block without one, the arm of an empty block), a loop body with a value (its tail), a struct literal's field (its
+/// value, the name of a shorthand field)
+#[test]
+fn mismatch_at_the_branch_rustc_points_at() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut line = |src: &str| s.check(src).first().map(|d| d.line);
+    let if_else = "fn main() {\n    let _ = if true {\n        1i32\n    } else {\n        2u32\n    };\n}\n";
+    assert_eq!(line(if_else), Some(5));
+    let semi = "fn main() {\n    let _ = match 3u8 {\n        0 => {\n            1i32\n        }\n        _ => {\n            0;\n        }\n    };\n}\n";
+    assert_eq!(line(semi), Some(7));
+    let empty = "fn f() {\n    match Some(0u32) {\n        Some(x) => {\n            x\n        }\n        None => {}\n    };\n}\nfn main() {}\n";
+    assert_eq!(line(empty), Some(6));
+    let lp = "fn main() {\n    let _a: i8 = loop {\n        1\n    };\n}\n";
+    assert_eq!(line(lp), Some(3));
+    let short = "struct Foo {\n    t: Thing,\n}\nstruct Thing;\nfn main() {\n    let t = &Thing;\n    let _f = Foo {\n        t\n    };\n}\n";
+    assert_eq!(line(short), Some(8));
+    // (no else: at the `if`, as rustc reports E0317)
+    let no_else = "fn main() {\n    let _x: i32 = if true {\n        1\n    };\n}\n";
+    assert_eq!(line(no_else), Some(2));
+}
+
+/// A condition (or iterator) that took the block meant to follow it: rustc's error at the `if` / `for`
+#[test]
+fn swallowed_block_at_the_keyword() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let bare = "fn a() {\n    if {}\n}\nfn main() {}\n";
+    assert_eq!(first(bare), Some((2, "missing condition for `if` expression".to_string())));
+    let unfinished = "fn main() {\n    let n = 1;\n    if n == {\n        println!(\"five\");\n    }\n}\n";
+    assert_eq!(first(unfinished), Some((3, "this `if` expression is missing a block after the condition".to_string())));
+    let for_in = "fn main() {\n    for i in {\n    }\n}\n";
+    assert_eq!(first(for_in), Some((2, "missing expression to iterate on in `for` loop".to_string())));
+    // (a block as the condition, followed by the block: fine)
+    let ok = "fn main() {\n    if { true } {\n        println!(\"ok\");\n    }\n}\n";
+    assert_eq!(first(ok), None);
+}
+
+/// E0658 for the attributes and ABIs behind a feature gate the source does not enable, with rustc's messages; none
+/// when the source enables it
+#[test]
+fn feature_gated_attributes_and_abis() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let cases = [
+        ("#[lang = \"foo\"]\nfn f() {}\nfn main() {}\n", 1, "lang items are subject to change", "lang_items"),
+        ("#![needs_allocator]\nfn main() {}\n", 1, "the `needs_allocator` attribute is an experimental feature", "allocator_internals"),
+        ("fn f() {}\n#[rustc_nonnull_optimization_guaranteed]\nstruct S {}\nfn main() {}\n", 2, "use of an internal attribute", "rustc_attrs"),
+        ("#[stable(feature = \"a\", since = \"1.0.0\")]\nfn f() {}\nfn main() {}\n", 1, "stability attributes may not be used outside of the standard library", "staged_api"),
+        ("#[repr(simd)]\nstruct F([f32; 4]);\nfn main() {}\n", 1, "SIMD types are experimental and possibly buggy", "repr_simd"),
+        ("#[repr(transparent)]\nunion U {\n    f: u8,\n}\nfn main() {}\n", 2, "transparent unions are unstable", "transparent_unions"),
+        ("#[doc(cfg(unix))]\nfn main() {}\n", 1, "the `doc(cfg)` and `doc(auto_cfg)` attributes are experimental", "doc_cfg"),
+        ("extern \"rust-cold\" fn f() {}\nfn main() {}\n", 1, "the extern \"rust-cold\" ABI is experimental and subject to change", "rust_cold_cc"),
+    ];
+    for (src, line, msg, feat) in cases {
+        assert_eq!(first(src), Some((line, format!("{msg} (E0658)"))), "{src}");
+        let enabled = format!("#![feature({feat})]\n{src}");
+        assert!(first(&enabled).is_none_or(|d| !d.1.contains("E0658")), "enabled: {enabled}");
+    }
+    // (a stable `doc` / `repr`: no gate)
+    assert_eq!(first("#[doc = \"x\"]\n#[repr(C)]\nstruct S;\nfn main() {}\n"), None);
+}
+
+/// unused_imports reads a `use` past its outer attributes: `#[deprecated] #[cfg(not(FALSE))] use std::fs;` is unused;
+/// a `cfg` that is false strips it, an allow of the lint leaves it alone
+#[test]
+fn unused_import_after_attributes() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    let src = "#![deny(unused_imports)]\n#[deprecated]\n#[cfg(not(FALSE))]\nuse std::fs;\nfn main() {}\n";
+    assert_eq!(first(src), Some((4, "unused import: `std::fs`".to_string())));
+    assert_eq!(first("#![deny(unused_imports)]\n#[cfg(FALSE)]\nuse std::fs;\nfn main() {}\n"), None);
+    assert_eq!(first("#![deny(unused_imports)]\n#[allow(unused_imports)]\nuse std::fs;\nfn main() {}\n"), None);
+}
+
+#[test]
+fn trait_arity_at_impls() {
+    // (E0107 at an impl of the program's trait with the wrong number of generic arguments; messages, lines and
+    // columns as rustc 1.100 gives them. Lifetimes and defaulted parameters are counted as rustc does)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let src = "trait Seq {}\nimpl Seq<bool> for u32 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 6, "trait takes 0 generic arguments but 1 generic argument was supplied (E0107)".to_string())), "too_many");
+    let src = "trait Tr<T> {}\nimpl Tr for u8 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 6, "missing generics for trait `Tr` (E0107)".to_string())), "missing");
+    let src = "trait Tr<'a, T, U = u8> {}\nimpl<'a> Tr<'a, i32, u16, u32> for u8 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 10, "trait takes at most 2 generic arguments but 3 generic arguments were supplied (E0107)".to_string())), "at_most");
+    let src = "fn main() {\n    trait Tr<T> {}\n    impl Tr<u8, u8> for u8 {}\n}\n";
+    assert_eq!(first(src), Some((3, 10, "trait takes 1 generic argument but 2 generic arguments were supplied (E0107)".to_string())), "in_fn_body");
+    let src = "trait Tr<'a, T, U = u8> {}\nimpl<'a> Tr<'a, i32> for u8 {}\nimpl<'a> Tr<'a, i32, u16> for u16 {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "lifetime_and_default_ok");
+    let src = "trait It { type Item; }\nimpl It for u8 { type Item = u8; }\nfn main() {}\n";
+    assert_eq!(first(src), None, "assoc_type_ok");
+    // (review of #91: an `=` inside a bound is no default; a braced const argument's `<`)
+    let src = "trait Tr<T: Iterator<Item = u8>> {}\nimpl Tr for u8 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 6, "missing generics for trait `Tr` (E0107)".to_string())), "eq_in_bound");
+    let src = "trait Tr<const B: bool, T> {}\nimpl Tr<{ 0 < 1 }> for u8 {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 6, "trait takes 2 generic arguments but 1 generic argument was supplied (E0107)".to_string())), "braced_const");
+    // (second round: a braced comparison inside a bound does not hide the parameter's default)
+    let src = "trait Flag<const B: bool> {}\ntrait Tr<T: Flag<{ 1 > 0 }> = u8> {}\nimpl Tr for () {}\nfn main() {}\n";
+    assert_eq!(first(src).filter(|d| d.2.contains("E0107")), None, "braced_bound_default");
+}
+
+#[test]
+fn review91_attributes_imports_unreachable() {
+    // (review of #91, each checked with rustc 1.100)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
+    // (unused_imports: a `]` in an attribute's string; `expect(unused_must_use)` is another lint; a name another
+    // `use` starts with is used)
+    let src = "#![deny(unused_imports)]\n#[doc = \"]\"]\nuse std::fs as unused_fs;\nfn main() {}\n";
+    assert_eq!(first(src), Some((3, "unused import: `std::fs as unused_fs`".to_string())), "bracket_in_string");
+    let src = "#![deny(unused_imports)]\n#[expect(unused_must_use)]\nuse std::fs as unused_fs;\nfn main() {}\n";
+    assert_eq!(first(src), Some((3, "unused import: `std::fs as unused_fs`".to_string())), "other_lint");
+    let src = "#![deny(unused_imports)]\n#[deprecated]\nuse std::fs as files;\nuse files::File;\nfn main() { let _: Option<File> = None; }\n";
+    // (zustc does not yet resolve `File` through the alias; only the lint is checked here)
+    assert_eq!(first(src).filter(|d| d.1.starts_with("unused import")), None, "used_by_use");
+    // (fourth round: the last lint attribute that names the lint or its group sets the level, and a warn is not an
+    // error; a `*` in an attribute is not a glob)
+    let unused_fs = Some((2, "unused import: `std::fs`".to_string()));
+    for (attrs, want) in [
+        ("#[warn(unused_imports)]", None),
+        ("#[warn(unused)]", None),
+        ("#[allow(unused)] #[warn(unused_imports)]", None),
+        ("#[warn(unused_imports)] #[allow(unused)]", None),
+        ("#[deny(unused_imports)] #[allow(unused_imports)]", None),
+        ("#[allow(unused_imports)] #[deny(unused_imports)]", unused_fs.clone()),
+        ("#[allow(unused_imports, warnings)] #[forbid(unused_imports)]", unused_fs.clone()),
+        ("#[allow(warnings)]", unused_fs.clone()),
+    ] {
+        let src = format!("#![deny(unused_imports)]\n{attrs} use std::fs;\nfn main() {{}}\n");
+        assert_eq!(first(&src), want, "lint_level {attrs}");
+    }
+    // (fifth round: a warn is still an error where `warnings` is denied, by the crate or the item)
+    for (krate, attrs, want) in [
+        ("#![deny(warnings)]", "#[warn(unused_imports)]", unused_fs.clone()),
+        ("#![deny(warnings)]", "#[warn(unused)]", unused_fs.clone()),
+        ("#![deny(warnings)]", "", unused_fs.clone()),
+        ("#![deny(warnings)]", "#[allow(warnings)]", None),
+        ("#![deny(warnings)]", "#[allow(warnings)] #[warn(unused_imports)]", None),
+        ("#![deny(warnings)]", "#[warn(unused_imports)] #[allow(warnings)]", None),
+        ("#![deny(warnings)]", "#[warn(warnings)] #[warn(unused_imports)]", None),
+        ("#![deny(unused_imports)]", "#[warn(unused_imports)] #[deny(warnings)]", unused_fs.clone()),
+    ] {
+        let src = format!("{krate}\n{attrs} use std::fs;\nfn main() {{}}\n");
+        assert_eq!(first(&src), want, "warnings_level {krate} {attrs}");
+    }
+    let src = "#![deny(unused_imports)]\n#[doc = \"*\"] use std::fs as unused_fs;\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, "unused import: `std::fs as unused_fs`".to_string())), "star_in_attribute");
+    // (the unstable ABIs: after any number of attributes; a raw string)
+    let src = "#[doc = \"a\"]\n#[doc = \"b\"]\n#[doc = \"c\"]\n#[allow(dead_code, unused)]\npub extern \"rust-cold\" fn f() {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((5, "the extern \"rust-cold\" ABI is experimental and subject to change (E0658)".to_string())), "abi_after_attrs");
+    let src = "extern r\"rust-cold\" fn f() {}\nfn main() {}\n";
+    assert_eq!(first(src), Some((1, "the extern \"rust-cold\" ABI is experimental and subject to change (E0658)".to_string())), "raw_abi");
+    // (repr(transparent): the item it is on, past a raw-string attribute and `pub(crate)`; no slice inside a char)
+    let src = "#[repr(transparent)]\n#[doc = r\"note\"]\nstruct Wrap(u8);\nunion Slot { x: u8 }\nfn main() { let _ = Wrap(1); let _ = Slot { x: 1 }; }\n";
+    assert_eq!(first(src), None, "transparent_struct_then_union");
+    let src = "#[repr(transparent)]\npub(crate) union U { x: u8 }\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, "transparent unions are unstable (E0658)".to_string())), "transparent_pub_crate_union");
+    let src = format!("#[repr(transparent)]\n#[doc = \"{}\"]\npub union U {{ x: u8 }}\nfn main() {{}}\n", "a".repeat(600));
+    assert_eq!(first(&src), Some((3, "transparent unions are unstable (E0658)".to_string())), "transparent_after_long_attribute");
+    // (a window that ends inside `union`: grown until the name is whole)
+    for n in 470..490 {
+        let src = format!("#[repr(transparent)]\n#[doc = \"{}\"]\nunion U {{ x: u8 }}\nfn main() {{}}\n", "a".repeat(n));
+        assert_eq!(first(&src), Some((3, "transparent unions are unstable (E0658)".to_string())), "transparent_window_edge_{n}");
+    }
+    for n in 480..510 {
+        for vis in ["", "pub ", "pub(crate) "] {
+            let src = format!("#[repr(transparent)]\n#[doc = \"{}\"]\n{vis}union U {{ x: u8 }}\nfn main() {{}}\n", "a".repeat(n));
+            assert_eq!(first(&src), Some((3, "transparent unions are unstable (E0658)".to_string())), "transparent_window_edge_{vis}{n}");
+        }
+    }
+    let pad = "é".repeat(300);
+    let src = format!("#[repr(transparent)]\nstruct W(u8);\nfn main() {{ let _s = \"{pad}\"; let _ = W(1); }}\n");
+    for k in 0..4 {
+        let src = format!("{}{src}", " ".repeat(k));
+        assert_eq!(first(&src), None, "multibyte_after_{k}");
+    }
+    // (unreachable_code: the program's own `process::exit` returns)
+    let src = "#![deny(unreachable_code)]\nmod process { pub fn exit() -> u8 { 1 } }\nfn take(_: u8, _: u8) {}\nfn main() { take(process::exit(), 2); }\n";
+    // (zustc resolves `process::exit` to std's here, a separate gap; only the lint is checked)
+    assert_eq!(first(src).filter(|d| d.1.starts_with("unreachable")), None, "user_process_exit");
+    // (third round: `mod` and `process` apart; std's `process::exit` still diverges beside the program's module)
+    let src = "#![deny(unreachable_code)]\nmod\n    process { pub fn exit() -> u8 { 1 } }\nfn take(_: u8, _: u8) {}\nfn main() { take(process::exit(), 2); }\n";
+    assert_eq!(first(src).filter(|d| d.1.starts_with("unreachable")), None, "user_process_split");
+    let src = "#![deny(unreachable_code)]\nmod process { pub fn exit() -> u8 { 1 } }\nfn take(_: u8, _: u8) {}\nfn main() { take(std::process::exit(0), 2); }\n";
+    assert_eq!(first(src), Some((4, "unreachable expression".to_string())), "std_process_exit");
+}
+
+#[test]
+fn fn_item_cannot_capture() {
+    // (E0434 at the use, at rustc 1.100's line and column; a nested fn's own parameters, the program's items and
+    // closures are left alone)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let e = |l: usize, c: usize| Some((l, c, "can't capture dynamic environment in a fn item (E0434)".to_string()));
+    assert_eq!(first("fn foo() {\n    let y = 5;\n    fn bar() -> u32 {\n        y\n    }\n}\nfn main() {}\n"), e(4, 9), "let");
+    assert_eq!(first("fn main() {\n    let bar: isize = 5;\n    fn foo() -> isize { return bar; }\n}\n"), e(3, 32), "one_line");
+    assert_eq!(first("fn foo(x: isize) {\n    fn mth() {\n        fn bar() -> isize { x }\n    }\n}\nfn main() { foo(2); }\n"), e(3, 29), "two_levels");
+    assert_eq!(first("struct A;\nimpl A {\n    fn m(&self) {\n        fn x() {\n            self.m()\n        }\n    }\n}\nfn main() {}\n"), e(5, 13), "self");
+    let ok = "const N: u32 = 7;\nfn main() {\n    let x = 1u32;\n    let n2 = 2;\n    fn inner(x: u32) -> u32 { x + N }\n    let c = || x + n2;\n    println!(\"{} {}\", inner(x), c());\n}\n";
+    assert_eq!(first(ok), None, "own_params_items_closures_ok");
+}
+
+#[test]
+fn visibility_where_it_means_nothing() {
+    // (E0449 at the `pub`, at rustc 1.100's line and column; a visibility where it means something is left alone)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let e = |l: usize, c: usize| Some((l, c, "visibility qualifiers are not permitted here (E0449)".to_string()));
+    assert_eq!(first("struct B;\npub impl B {}\nfn main() {}\n"), e(2, 1), "impl");
+    assert_eq!(first("trait A { fn f(&self); }\nstruct B;\nimpl A for B {\n    #[inline]\n    pub fn f(&self) {}\n}\nfn main() {}\n"), e(5, 5), "trait_impl_item");
+    assert_eq!(first("trait A {\n    pub const N: u8;\n}\nfn main() {}\n"), e(2, 5), "trait_item");
+    assert_eq!(first("pub extern \"C\" {\n    pub fn bar();\n}\nfn main() {}\n"), e(1, 1), "extern_block");
+    assert_eq!(first("enum Foo {\n    V1 { pub f: i32 },\n}\nfn main() { let _ = Foo::V1 { f: 1 }; }\n"), e(2, 10), "variant_field");
+    assert_eq!(first("enum Foo {\n    V2(pub i32),\n}\nfn main() { let _ = Foo::V2(1); }\n"), e(2, 8), "tuple_variant_field");
+    let ok = "#[derive(Clone, Debug, PartialEq)]\npub enum E { A(u8), B { x: u8 } }\npub struct S { pub x: u8 }\nimpl S {\n    pub fn new() -> S { S { x: 1 } }\n}\npub trait T { fn f(&self) -> u8; }\nimpl T for S { fn f(&self) -> u8 { self.x } }\npub extern \"C\" fn g() {}\nfn main() { let s = S::new(); let _ = (s.f(), E::A(1).clone(), E::B { x: 2 }); g(); }\n";
+    assert_eq!(first(ok), None, "valid_visibility");
+}
+
+#[test]
+fn dyn_without_associated_types() {
+    // (E0191 at a trait object written in a type that leaves an associated type of its trait, or of a supertrait,
+    // without a value, as rustc 1.100 reports it)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let e = |line: usize, col: usize, what: &str| Some((line, col, format!("the value of the associated {what} must be specified (E0191)")));
+    let src = "trait Trait {\n    type Bar;\n}\ntype Foo = dyn Trait;\nfn main() {}\n";
+    assert_eq!(first(src), e(4, 16, "type `Bar` in `Trait`"), "type_alias");
+    let src = "trait Foo { type A; fn dummy(&self) {} }\nfn bar(_x: &dyn Foo) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(2, 17, "type `A` in `Foo`"), "parameter");
+    let src = "trait Tr { type A; type B; }\nfn f(_: &dyn Tr<A = u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(2, 14, "type `B` in `Tr`"), "one_bound");
+    let src = "trait T3 { type A; type B; type C; }\nfn f(_: &dyn T3) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(2, 14, "types `A`, `B` and `C` in `T3`"), "three_in_one_trait");
+    // (several traits: each `X` in `Tr`, sorted)
+    let src = "trait Sub: Super + Zed { type Y; }\ntrait Zed { type Z; }\ntrait Super { type X; }\nfn f(_: &dyn Sub) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(4, 14, "types `X` in `Super`, `Y` in `Sub`, `Z` in `Zed`"), "supertraits");
+    // (a binding on the object goes to its own trait first; a supertrait's binding in the trait's header counts,
+    // unless it names `Self`)
+    let src = "pub trait Super { type X; }\npub trait Sub: Super { type X; }\nfn f<T>(_: Box<dyn Sub<X = T>>) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(3, 20, "type `X` in `Super`"), "shadowed");
+    let src = "trait Super { type X; }\ntrait Sub: Super<X = u8> { type Y; }\nfn f(_: &dyn Sub<Y = u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "bound_in_header");
+    let src = "trait Base { type Output; }\ntrait Helper: Base<Output = <Self as Helper>::Target> { type Target; }\nfn f(_: Box<dyn Helper<Target = i32>>) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(3, 17, "type `Output` in `Base`"), "self_in_header_binding");
+    // (the trait's own arguments as written)
+    let src = "trait G<T> { type A; }\nfn f<'a>(_: Box<dyn G<&'a str> + Send + 'a>) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(2, 21, "type `A` in `G<&'a str>`"), "arguments_shown");
+    // (std's traits; a path to std's beside the program's trait of the name)
+    let src = "fn f(_: &dyn Iterator) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(1, 14, "type `Item` in `Iterator`"), "std_iterator");
+    let src = "fn f(_: &dyn DoubleEndedIterator) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(1, 14, "type `Item` in `Iterator`"), "std_supertrait");
+    let src = "fn g(_: Box<dyn std::ops::Deref>) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(1, 17, "type `Target` in `Deref`"), "std_path");
+    let src = "trait Iterator { fn go(&self); }\nfn f(_: &dyn Iterator) {}\nfn g(_: &dyn std::iter::Iterator) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(3, 14, "type `Item` in `std::iter::Iterator`"), "own_trait_of_std_name");
+    // (before E0038, as rustc: `fn new() -> Self` alone does not hide it)
+    let src = "trait Tr { type A; fn new() -> Self; }\nfn f(_: &dyn Tr) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(2, 14, "type `A` in `Tr`"), "before_e0038");
+    // (left alone: every type bound, `where Self: Sized`, `Fn(..)` sugar, a generic associated type (E0038), a
+    // `dyn` in a string or a comment, a name that only contains `dyn`)
+    let src = "trait S { type A where Self: Sized; type B; fn g(&self) {} }\nfn f(_: &dyn S<B = u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "where_self_sized");
+    let src = "fn f(_: &dyn Fn(u8) -> u8, _: Box<dyn Iterator<Item = u8> + Send>, _: &dyn IntoIterator<Item = u8, IntoIter = std::vec::IntoIter<u8>>) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "all_bound");
+    let src = "trait Ga { type A<'a>; }\nfn f(_: &dyn Ga) {}\nfn main() {}\n";
+    assert!(first(src).is_none_or(|d| !d.2.contains("E0191")), "gat");
+    let src = "trait Tr { type A; }\n// dyn Tr\nfn dyn_tr() -> &'static str { \"dyn Tr\" }\nfn main() { let _ = dyn_tr(); }\n";
+    assert_eq!(first(src), None, "string_and_comment");
+    // (a bound that implies Sized; a supertrait bound by two paths, one type each (rust-lang/rust#102933))
+    let src = "trait Other: Sized {}\ntrait Boo { type Assoc where Self: Other; }\nfn boo(_: &dyn Boo) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "implies_sized");
+    let src = "pub trait Service { type Response; type Fut; }\npub trait A1: Service<Response = i32> {}\npub trait A2: Service<Fut = u8> + A1 { fn foo(&self) {} }\nfn f(_: &dyn A2) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "bound_by_two_paths");
+    // (a binding two supertraits could take binds neither (E0222 too); a wrong count of arguments is E0107 alone)
+    let src = "pub trait Vehicle { type Color; }\npub trait Bx { type Color; }\npub trait BoxCar: Bx + Vehicle {}\nfn d<C>(_: &dyn BoxCar<Color = C>) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(4, 17, "types `Color` in `Bx`, `Color` in `Vehicle`"), "ambiguous_binding");
+    let src = "trait T<X, Y = u8> { type A; }\nfn f(_: &dyn T<u8, A = u8>) {}\nfn g(_: &dyn T<u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), e(3, 14, "type `A` in `T<u8>`"), "defaulted_parameter");
+    let src = "pub trait T<X, Y> { type A; type B; type C; }\npub struct Foo { i: Box<dyn T<usize, usize, usize, usize, B = usize>> }\nfn main() {}\n";
+    assert_eq!(first(src), Some((2, 29, "trait takes 2 generic arguments but 4 generic arguments were supplied (E0107)".to_string())), "too_many_arguments");
+}
+
+#[test]
+fn review100_capture_visibility_dyn_gat() {
+    // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    // (E0449: past a nested comment; `pub(crate)` and `unsafe` before `extern`; not an item in a discriminant)
+    let vis = "visibility qualifiers are not permitted here (E0449)";
+    let src = "trait T { fn f(&self); }\nstruct S;\nimpl T for S { #[inline] /* a /* b */ c */ pub fn f(&self) {} }\nfn main() {}\n";
+    assert_eq!(first(src), at(3, 44, vis), "nested_comment");
+    let src = "pub(crate) unsafe extern \"C\" { fn f(); }\npub unsafe extern \"C\" { fn g(); }\nfn main() {}\n";
+    assert_eq!(first(src), at(1, 1, vis), "pub_crate_unsafe_extern");
+    let src = "unsafe extern \"C\" { fn f(); }\npub unsafe extern \"C\" { fn g(); }\nfn main() {}\n";
+    assert_eq!(first(src), at(2, 1, vis), "pub_unsafe_extern");
+    let src = "enum E { A = { pub const N: isize = 1; N } }\nfn main() { let _ = E::A; }\n";
+    assert_eq!(first(src), None, "discriminant_block");
+    let src = "enum E { A = { pub const N: isize = 1; N }, B(pub u8) }\nfn main() {}\n";
+    assert_eq!(first(src), at(1, 47, vis), "field_after_discriminant");
+    // (E0434: at the free use, not one a nested block or a closure binds; not a sibling fn's parameter on the same
+    // line; columns in characters)
+    let cap = "can't capture dynamic environment in a fn item (E0434)";
+    let src = "fn outer(x: u32) -> u32 {\n    fn inner() -> u32 { { let x = 1u32; let _ = x; } x }\n    x\n}\nfn main() { outer(1); }\n";
+    assert_eq!(first(src), at(2, 54, cap), "free_use_after_block");
+    let src = "fn outer() {\n    let s = 1u8;\n    fn inner() -> u8 { let f = |s: u8| s; f(1) + s }\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), at(3, 50, cap), "free_use_after_closure");
+    let src = "    fn unrelated(drop: u8) { let _ = drop; } fn outer() { fn inner() { drop(0u8); } inner(); }\nfn main() { unrelated(1); outer(); }\n";
+    assert_eq!(first(src), None, "sibling_on_one_line");
+    let src = "fn main() {\n    let x = 1u8;\n    fn inner() -> u8 { let _s = \"ああああああああああああああ\"; x }\n}\n";
+    assert_eq!(first(src), at(3, 51, cap), "non_ascii_first_line");
+    // (E0191: a turbofish; a `<..>` far after the name; the principal trait after auto traits and a lifetime; each
+    // instantiation of a supertrait; `where Self: Base` as a supertrait)
+    let src = "fn f(_: &dyn Iterator::<Item = u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "turbofish");
+    let src = format!("fn f(_: &dyn Iterator{}<Item = u8>) {{}}\nfn main() {{}}\n", " ".repeat(49));
+    assert_eq!(first(&src), None, "far_arguments");
+    let src = "fn f(_: Box<dyn Fn(u8) -> u8 + Send>, _: &dyn Send, _: &(dyn Sync + Send)) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "auto_traits_alone");
+    let item = |what: &str| format!("the value of the associated {what} must be specified (E0191)");
+    let src = "type Obj = dyn Send + Iterator;\nfn main() {}\n";
+    assert_eq!(first(src), at(1, 23, &item("type `Item` in `Iterator`")), "after_auto_trait");
+    let src = "fn f<'a>(_: &(dyn 'a + Iterator)) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(1, 24, &item("type `Item` in `Iterator`")), "after_lifetime");
+    let src = "trait Sup<T> { type Assoc: Default; }\nimpl<T: Default> Sup<T> for () { type Assoc = T; }\nimpl<T: Default, U: Default> Dyn<T, U> for () {}\ntrait Dyn<A, B>: Sup<A, Assoc = A> + Sup<B> {}\nfn main() { let _q: <dyn Dyn<i32, u32> as Sup<u32>>::Assoc = Default::default(); }\n";
+    assert_eq!(first(src), at(5, 26, &item("type `Assoc` in `Sup<u32>`")), "per_instantiation");
+    let src = "trait Sup<T> { type Assoc; }\ntrait Dyn<A>: Sup<A, Assoc = A> + Sup<u8, Assoc = u8> {}\nfn f(_: &dyn Dyn<i32>) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "both_instantiations_bound");
+    let src = "trait Base { type A; }\ntrait Sub where Self: Base {}\nfn f(_: &dyn Sub) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(3, 14, &item("type `A` in `Base`")), "where_self");
+    let src = "trait Base { type A; }\ntrait Other {}\ntrait Sub where Self: Other, Self: Fn(u8, u8) + Base {}\nfn f(_: &dyn Sub) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(4, 14, &item("type `A` in `Base`")), "where_self_clauses");
+    let src = "trait Base { type A; }\ntrait Sub where Self: Base<A = u8> {}\nfn f(_: &dyn Sub) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "where_self_bound");
+    // (a supertrait walk cut short at 64 traits says nothing about the ones it did not reach: here the binding of
+    // `Base::A` is past the cut, and rustc accepts the object)
+    let mut src = String::from("trait Base { type A; }\ntrait T0: Base + T1 {}\n");
+    for i in 1..70 {
+        src += &format!("trait T{i}: T{} {{}}\n", i + 1);
+    }
+    src += "trait T70: Base<A = u8> {}\nfn f(_: &dyn T0) {}\nfn main() {}\n";
+    assert_eq!(first(&src), None, "long_chain");
+    // (E0107: a GAT's turbofish; a qualified path whose trait has arguments; a dyn's count of trait arguments)
+    let src = "trait Lend { type Item<'a> where Self: 'a; fn next<'a>(&'a mut self) -> Self::Item::<'a>; }\nfn main() {}\n";
+    assert_eq!(first(src), None, "gat_turbofish");
+    let src = "trait Tr<T> { type Item<'a>; }\nfn f<U: Tr<u8>>() { let _: Option<<U as Tr<u8>>::Item> = None; }\nfn main() {}\n";
+    assert_eq!(first(src), at(2, 50, "missing generics for associated type `Tr::Item` (E0107)"), "qualified_trait_arguments");
+    let src = "trait T<X> { type A; }\nfn f(_: &dyn T<A = u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(2, 14, "trait takes 1 generic argument but 0 generic arguments were supplied (E0107)"), "dyn_binding_only");
+    let src = "trait T<X> { type A; }\nfn f(_: &dyn T) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(2, 14, "missing generics for trait `T` (E0107)"), "dyn_no_arguments");
+    let src = "trait T<X, Y = u8> { type A; }\nfn f(_: &dyn T<u8, u8, u8, A = u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(2, 14, "trait takes at most 2 generic arguments but 3 generic arguments were supplied (E0107)"), "dyn_too_many");
+}
+
+#[test]
+fn gat_arity_at_uses() {
+    // (E0107 at a use of a generic associated type without its arguments or with the wrong number of lifetimes,
+    // as rustc 1.100 reports them; valid uses, bindings with arguments and other traits' names are left alone)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let src = "trait StreamingIterator {\n    type Item<'a>;\n    fn next(&mut self) -> Option<Self::Item>;\n}\nfn main() {}\n";
+    assert_eq!(first(src), Some((3, 40, "missing generics for associated type `StreamingIterator::Item` (E0107)".to_string())), "self_path");
+    let src = "trait Provider {\n    type A<'a>;\n}\nstruct Holder<B> {\n    inner: Box<dyn Provider<A = B>>,\n}\nfn main() {}\n";
+    assert_eq!(first(src), Some((5, 29, "missing generics for associated type `Provider::A` (E0107)".to_string())), "binding");
+    let src = "trait Foo {\n    type Assoc<'a, const N: usize>;\n}\nfn foo<T: Foo>() {\n    let _: <T as Foo>::Assoc<3>;\n}\nfn main() {}\n";
+    assert_eq!(first(src), Some((5, 24, "associated type takes 1 lifetime argument but 0 lifetime arguments were supplied (E0107)".to_string())), "qualified_lifetime");
+    let src = "trait Lend {\n    type Item<'a> where Self: 'a;\n    fn next<'a>(&'a mut self) -> Option<Self::Item<'a>>;\n}\nstruct W(Vec<u8>);\nimpl Lend for W {\n    type Item<'a> = &'a u8;\n    fn next<'a>(&'a mut self) -> Option<Self::Item<'a>> { self.0.first() }\n}\nfn take<T: for<'a> Lend<Item<'a> = &'a u8>>(t: &mut T) -> u8 { *t.next().unwrap() }\nfn main() {\n    let v: Vec<u8> = vec![1];\n    let _: Box<dyn Iterator<Item = &u8>> = Box::new(v.iter());\n    let _ = take(&mut W(vec![3]));\n}\n";
+    assert_eq!(first(src), None, "valid_uses_ok");
+}
+
+#[test]
+fn review100_second_round() {
+    // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    let item = |what: &str| format!("the value of the associated {what} must be specified (E0191)");
+    let cap = "can't capture dynamic environment in a fn item (E0434)";
+    // (E0449: a comment inside `pub(..)`)
+    let src = "pub(in crate /* ) */) unsafe extern \"C\" { fn f(); }\nfn main() {}\n";
+    assert_eq!(first(src), at(1, 1, "visibility qualifiers are not permitted here (E0449)"), "comment_in_restricted_visibility");
+    // (E0434: a format string's capture, and `matches!`'s operands)
+    let src = "fn outer(x: u8) {\n    fn inner() {\n        let _ = format!(\"{x}\");\n    }\n}\nfn main() { outer(1); }\n";
+    assert_eq!(first(src), at(3, 27, cap), "format_capture");
+    let src = "fn outer(x: u8) {\n    fn inner() -> bool {\n        matches!(\n            x, 1)\n    }\n}\nfn main() { outer(1); }\n";
+    assert_eq!(first(src), at(4, 13, cap), "matches_operand");
+    let src = "fn outer(x: u8) {\n    fn inner(y: u8) -> bool {\n        matches!(y,\n            1 if x > 0)\n    }\n}\nfn main() { outer(1); }\n";
+    assert_eq!(first(src), at(4, 18, cap), "matches_guard");
+    // (E0107: an associated fn of a GAT's name is a value; a trait that requires arguments is not settled by its name)
+    let src = "trait Tr { type A<'a>; #[allow(non_snake_case)] fn A() {} fn f() { Self::A(); } }\nfn main() {}\n";
+    assert_eq!(first(src), None, "assoc_fn_of_the_name");
+    let src = "trait Tr { type A<'a>; fn f() -> Self::A; }\nfn main() {}\n";
+    assert_eq!(first(src), at(1, 40, "missing generics for associated type `Tr::A` (E0107)"), "type_use_still_reported");
+    let src = "trait T<X> {}\ntype Obj = dyn T;\nfn main() {}\n";
+    assert_eq!(first(src), at(2, 16, "missing generics for trait `T` (E0107)"), "dyn_of_trait_without_types");
+    // (E0191: an instantiation with its defaults is one, however written; a lifetime is not a type argument)
+    let src = "trait Base<T = u8> { type A; type B; }\ntrait Mid: Base<A = u8> {}\ntrait Root: Base<u8, B = u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "defaults_merge");
+    let src = "trait Base<T = u8> { type A; type B; }\ntrait Mid: Base<A = u8> {}\ntrait Root: Base<u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(4, 14, &item("type `B` in `Base`")), "defaults_left_out_of_the_message");
+    let src = "trait Base<T = u8> { type A; }\ntrait Mid: Base<u16, A = u8> {}\ntrait Root: Base + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(4, 14, &item("type `A` in `Base`")), "other_instantiation_apart");
+    let src = "trait Base<T> { type A; }\ntrait Obj<'a, T>: Base<T, A = u8> + Base<u8> {}\nfn f(_: &dyn Obj<'static, u8>) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "lifetime_argument_not_substituted");
+}
+
+#[test]
+fn review100_third_round() {
+    // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    let cap = "can't capture dynamic environment in a fn item (E0434)";
+    // (E0434: a raw string's `\` is no escape; a sibling block's `let` is not in scope at the nested fn, an enclosing
+    // block's is; a pattern's names are its bindings, not its fields or types)
+    let src = "fn outer(x: u8) {\n    fn inner() {\n        let _ = format!(r\"{x}\\\");\n    }\n}\nfn main() { outer(1); }\n";
+    assert_eq!(first(src), at(3, 28, cap), "raw_string_capture");
+    let src = "fn outer() {\n    fn inner() { drop(0u8); }\n    { let drop = 1u8; let _ = drop; }\n    inner();\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), None, "sibling_block_let");
+    let src = "fn outer() {\n    let x = 1u8;\n    {\n        let y = 2u8;\n        fn inner() -> u8 { y }\n        let _ = (x, inner());\n    }\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), at(5, 28, cap), "enclosing_block_let");
+    let src = "fn outer(p: u8) {\n    let Point { x: a, y } = Point { x: 1, y: 2 };\n    let (m, mut n): (u8, u8) = (1, 2);\n    fn inner() -> u8 { a + y + m + n + p }\n    let _ = (a, y, m, n);\n}\nstruct Point { x: u8, y: u8 }\nfn main() { outer(1); }\n";
+    assert_eq!(first(src), at(4, 24, cap), "pattern_bindings");
+    // (E0191: a default that names an earlier parameter takes its argument)
+    let item = |what: &str| format!("the value of the associated {what} must be specified (E0191)");
+    let src = "trait Base<T, U = T> { type A; type B; }\ntrait Mid: Base<u8, A = u8> {}\ntrait Root: Base<u8, u8, B = u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "default_of_an_earlier_parameter");
+    let src = "trait Base<T, U = T> { type A; type B; }\ntrait Mid: Base<u8, A = u8> {}\ntrait Root: Base<u8, u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
+    assert_eq!(first(src), at(4, 14, &item("type `B` in `Base<u8>`")), "default_of_an_earlier_parameter_shown");
+}
+
+#[test]
+fn review100_fourth_round() {
+    // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    let cap = "can't capture dynamic environment in a fn item (E0434)";
+    // (E0434: an `if let`'s names are in its body only; a `let`'s start after its `;`, not in its initializer)
+    let src = "fn outer() {\n    if let Some(drop) = Some(1u8) {\n        let _ = drop;\n    }\n    fn inner() { drop(0u8); }\n    inner();\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), None, "if_let_ends_with_its_body");
+    let src = "fn outer() {\n    if let Some(y) = Some(1u8) {\n        fn inner() -> u8 { y }\n        let _ = (y, inner());\n    }\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), at(3, 28, cap), "if_let_in_its_body");
+    let src = "fn outer() {\n    let drop = {\n        fn inner() { drop(0u8); }\n        inner();\n        1u8\n    };\n    let _ = drop;\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), None, "let_not_in_its_initializer");
+    let src = "fn outer() {\n    let Some(z) = Some(1u8) else { return };\n    fn inner() -> u8 { z }\n    let _ = (z, inner());\n}\nfn main() { outer(); }\n";
+    assert_eq!(first(src), at(3, 24, cap), "let_else_after_its_semicolon");
+    // (E0191: an associated type's segment in a default is not a parameter)
+    let src = "trait Id { type T; }\nimpl Id for u8 { type T = u8; }\ntrait Base<T, U = <u8 as Id>::T> { type A; type B; }\ntrait Mid: Base<u8, A = u8> {}\ntrait Root: Base<u8, <u8 as Id>::T, B = u8> + Mid {}\nfn f(_: &dyn Root) {}\nfn main() {}\n";
+    assert_eq!(first(src), None, "associated_segment_in_a_default");
+}
+
+/// An impl is for a type only when the type meets the impl's bounds, its where clauses' too (issue #2): nested goals of
+/// traits of the program's. Also a trait's supertraits must be implemented by an impl's self type, and an impl for a
+/// reference is not for the type it refers to. Each was checked against rustc 1.97
+#[test]
+fn impl_bounds_are_nested_goals() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let pre = "trait Bar {}\ntrait Foo { fn foo(&self) {} }\nstruct W<T>(T);\nimpl Bar for i32 {}\nfn need<F: Foo>(_: F) {}\n";
+    let bad = |body: &str| {
+        let src = format!("{pre}{body}\n");
+        let d = check(&src);
+        assert!(d.len() == 1 && d[0].msg.contains("is not satisfied"), "{src}\n{d:?}");
+    };
+    let ok = |body: &str| {
+        let src = format!("{pre}{body}\n");
+        let d = check(&src);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    };
+    for (imp, call) in [
+        ("impl<T: Bar> Foo for W<T> {}", "need(W(_))"),
+        ("impl<T> Foo for W<T> where T: Bar {}", "need(W(_))"),
+        ("impl<T: Bar> Foo for T {}", "need(_)"),
+        ("impl<T: Bar> Foo for W<T> {}", "W(_).foo()"),
+        ("impl Foo for W<i32> {}", "need(W(_))"),
+        ("impl<T: Bar> Foo for W<T> {}\nimpl<T: Foo> Bar for Vec<T> {}", "need(W(vec![W(_)]))"),
+    ] {
+        bad(&format!("{imp}\nfn main() {{ {}; }}", call.replace('_', "1u8")));
+        ok(&format!("{imp}\nfn main() {{ {}; }}", call.replace('_', "1i32")));
+    }
+    // (a cycle of blanket impls through each other's bounds is not followed forever. An obligation through it is
+    // E0275: goals_have_a_certainty)
+    ok("trait P {}\ntrait Q {}\nimpl<T: Q> P for T {}\nimpl<T: P> Q for T {}\nfn main() {}");
+    // (a goal asked again and again on the way (`T{i}: T{i-1} + T{i-2}`) is proved once: without that, 2^n goals)
+    let fib = |n: usize, imp0: &str| {
+        let mut s = format!("trait T0 {{}}\ntrait T1 {{}}\n{imp0}\nimpl T1 for i32 {{}}\n");
+        for i in 2..=n {
+            s += &format!("trait T{i} {{}}\nimpl<X: T{} + T{}> T{i} for X {{}}\n", i - 1, i - 2);
+        }
+        s + &format!("fn need2<X: T{n}>(_: X) {{}}\nfn main() {{ need2(1i32); }}")
+    };
+    ok(&fib(60, "impl T0 for i32 {}"));
+    bad(&fib(60, "impl T0 for u8 {}"));
+    // (a trait object implements its trait's supertraits, whatever a blanket impl of one asks)
+    ok("trait Sup {}\ntrait Sub2: Sup {}\ntrait Imp {}\nimpl<T: ?Sized + Sub2 + Imp> Sup for T {}\nfn n<T: ?Sized + Sup>() {}\nfn main() { n::<dyn Sub2>(); }");
+    // (supertraits)
+    bad("trait A {}\ntrait B: A {}\nstruct C;\nimpl B for C {}\nfn main() {}");
+    ok("trait A {}\ntrait B: A {}\nstruct C;\nimpl A for C {}\nimpl B for C {}\nfn main() {}");
+    // (an impl of the supertrait for exactly the self type, of a type implements does not see the program's impls of)
+    for t in ["[u8; 1]", "[u8]", "Box<u8>"] {
+        ok(&format!("trait A {{}}\ntrait B: A {{}}\nimpl A for {t} {{}}\nimpl B for {t} {{}}\nfn main() {{}}"));
+    }
+    // (two blanket impls of one trait each have their own bounds: one that holds is enough)
+    ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: A> Tr<u8> for T {}\nimpl<T: B> Tr<u16> for T {}\nimpl A for i32 {}\nfn need2<T: Tr<u8>>(_: T) {}\nfn main() { need2(1i32); }");
+    // (tuples: the impl's self type and bounds, as for a struct)
+    bad("impl Foo for (i32,) {}\nfn main() { need((1u8,)); }");
+    ok("impl Foo for (i32,) {}\nfn main() { need((1i32,)); }");
+    bad("impl<T: Bar> Foo for (T,) {}\nfn main() { need((1u8,)); }");
+    ok("impl<T: Bar> Foo for (T,) {}\nfn main() { need((1i32,)); }");
+    ok("impl Foo for (i32, u8) {}\nimpl Foo for (u8, i32) {}\nfn main() { need((1u8, 2i32)); }");
+    // (a raw pointer's mutability is part of the impl's self type)
+    bad("impl Foo for W<*const i32> {}\nfn main() { let mut x = 1; need(W(&mut x as *mut i32)); }");
+    ok("impl Foo for W<*const i32> {}\nfn main() { let x = 1; need(W(&x as *const i32)); }");
+    bad("impl Foo for W<*const i32> {}\nfn main() { let x = 1; need(W(&x)); }");
+    // (and inside a fn pointer's parameters)
+    bad("impl Foo for (fn(*const i32),) {}\nfn f(_: *mut i32) {}\nfn main() { need((f as fn(*mut i32),)); }");
+    ok("impl Foo for (fn(*const i32),) {}\nfn f(_: *const i32) {}\nfn main() { need((f as fn(*const i32),)); }");
+    // (an impl for `&mut i32` is not for i32)
+    bad("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { f(1i32); }");
+    ok("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { let mut x = 1i32; f(&mut x); }");
+}
+
+/// A goal's answer is Yes, Maybe or No (Program::evaluate, issue #2). A bound whose goal needs itself (an inductive
+/// cycle) is E0275, as rustc gives; a cycle no obligation goes through, or one another impl gets around, is not an
+/// error. Each was checked against rustc 1.97
+#[test]
+fn goals_have_a_certainty() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let e0275 = |src: &str, at: &str| {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].msg.contains("overflow evaluating the requirement") && d[0].msg.contains(at), "{src}\n{d:?}");
+    };
+    let ok = |src: &str| {
+        let d = check(src);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    };
+    let pq = "trait P {}\ntrait Q {}\nimpl<T: Q> P for T {}\nimpl<T: P> Q for T {}\nfn need<X: P>(_: X) {}\n";
+    e0275(&format!("{pq}fn main() {{ need(1u8); }}"), "`u8: P`");
+    ok(&format!("{pq}fn main() {{}}"));
+    // (a generic fn's own bound is a where clause: not followed)
+    ok(&format!("{pq}fn g<Y: P>(y: Y) {{ need(y); }}\nfn main() {{}}"));
+    // (a trait with arguments)
+    e0275("trait Loop<U> {}\nimpl<T: Loop<u8>> Loop<u8> for T {}\nfn need<T: Loop<u8>>() {}\nfn main() { need::<i32>(); }", "`i32: Loop");
+    ok("trait A {}\ntrait Tr<U> {}\nimpl<T: A> Tr<u8> for T {}\nimpl A for i32 {}\nfn need<T: Tr<u8>>() {}\nfn main() { need::<i32>(); }");
+    // (an impl whose bound is its own trait)
+    e0275("trait P {}\nimpl<T: P> P for T {}\nfn need<X: P>(_: X) {}\nfn main() { need(1u8); }", "`u8: P`");
+    // (through a supertrait's blanket impl: traits/inductive-overflow/simultaneous.rs)
+    e0275("trait A {}\ntrait B {}\nimpl<T: A> B for T {}\nimpl<T: B> A for T {}\ntrait C {}\nimpl<T: B + A> C for T {}\nfn need<X: C>(_: X) {}\nfn main() { need(4); }", "`i32: C`");
+    // (struct impls through each other end at a concrete impl: no cycle)
+    ok("trait P {}\ntrait Q {}\nstruct W<T>(T);\nimpl<T: Q> P for W<T> {}\nimpl<T: P> Q for W<T> {}\nimpl Q for u8 {}\nfn need<X: P>(_: X) {}\nfn main() { need(W(1u8)); }");
+    // (a recursive type list)
+    ok("trait P {}\nimpl P for () {}\nimpl<H: P, T: P> P for (H, T) {}\nfn need<X: P>(_: X) {}\nfn main() { need(((), ((), ((), ())))); }");
+    // (two blanket impls of one trait: the one that holds is taken, whatever the other's goals do)
+    ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: B> Tr<u8> for T {}\nimpl<T: A> Tr<u16> for T {}\nimpl<T: Tr<u8>> B for T {}\nimpl A for i32 {}\nfn need<T: Tr<u16>>(_: T) {}\nfn main() { need(1i32); }");
 }
 
 /// The trait solver's `No` of a goal with no type parameter in it (`Vec<u8>: Foo` with `impl<T: Bar> Foo for Vec<T>`

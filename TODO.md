@@ -10,12 +10,6 @@ only shrink. `todo_md_lists_every_todo` checks that every marked case is named h
 
 These are in the type and borrow checks that the compat and region-check work changes, so they were left there.
 
-### Borrow and region checking
-
-| case | what is accepted that rustc rejects |
-|---|---|
-| `region_block_tail_escapes` | a loan held by a block's local, or by what a by-value method returns (`Some(&v).unwrap()`), is not followed out of the block's tail (E0597) |
-
 ### Privacy
 
 | case | what is accepted that rustc rejects |
@@ -106,7 +100,9 @@ rustc's wasm32-wasip1 builds (tests/wasm/README.md). Left:
   claims the address is aligned) although `ptr::read_unaligned` and a gather off an unaligned base (scale >= the
   element size) use them too. x86 scalar moves do not need alignment, so the code is right today; an alignment
   operand (or an unaligned load op) on `Op::Load` / `Op::Store` would make the flag true.
-- memchr (42 crates of dioxus, 29 of leptos depend on it) stops at items a `macro_rules!` expansion puts in a function
+- memchr 2.8.3 builds for wasm32 (what dioxus and leptos use) and gives rustc's results under node
+  (`memchr`, `memrchr`, `memchr2/3`, `memmem::find/rfind`, `Finder::find_iter`). Its x86-64 build (a host program)
+  stops at items a `macro_rules!` expansion puts in a function
   body (`unsafe_ifunc!`: `type Fn = *mut ();`, `static FN: AtomicPtr<()>`, `fn detect()` inside a block): "nested
   items are not supported". Nested items written in a body are hoisted; those of an expression macro's expansion are
   not. Also `is_x86_feature_detected!` is `true` only for sse / sse2 (no detection at run time), and the vector types
@@ -142,7 +138,8 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   build scripts and gives their cfgs, `rustc-env` and `OUT_DIR` to the crates (M1). thiserror 2's library builds.
   Builds for wasm32 too (one module per bin, run with cargo's runner variable). Left: two versions of one crate and
   renamed dependencies (zustc's workspace has one name per crate), a crate's own edition, link instructions of build
-  scripts, `zurgo test`.
+  scripts. `zurgo test` runs each test in a process of its own ([#96](https://github.com/mizchi/zust/issues/96));
+  left there: doc tests, `test = false`, building only the chosen targets.
   - What the caches do not see yet:
     - the process environment that an `env!($k)` made by a macro reads (the crate's own environment is in its
       fingerprint, the values zustc falls back to are not);
@@ -153,20 +150,37 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
     - reads a proc-macro crate's root with its features but not with its own build script's cfgs;
     - evaluates `cfg!` in the arguments of a user's macro named like std's format macros (`print!`) before that
       macro's rules match.
-- Proc macros ([#29](https://github.com/mizchi/zust/issues/29)): none can run. zurgo builds a proc-macro dependency as a
-  stub and stops on a use of its derives or attributes; zustc alone still drops an unknown attribute silently
-  (`#[wasm_bindgen]`, `#[component]`).
+- Proc macros ([#29](https://github.com/mizchi/zust/issues/29)) run through the toolchain's proc-macro server: zurgo
+  builds the dylib with rustc, zustc finds the uses by name and expands them (crates/syntax/src/pm.rs). Not yet:
+  - hygiene and spans of their output (every span is the call site's);
+  - a proc macro among a build script's build-dependencies (rustc builds that script);
+  - zustc alone (`zustc build` with no `pm=` dylib, or without the server) still drops an unknown attribute silently
+    (`#[wasm_bindgen]`, `#[component]`).
 - Crates that zurgo now reaches and that stop on zustc: anyhow 1.0.104 (`error.rs:808`, E0106), libc 0.2.191 and
   serde_core 1.0.229 (`mod x;` inside a `macro_rules!` body: rustc finds the file where the macro is expanded, zustc
   beside the macro's own file). Their build scripts compile with rustc only (`env::vars()`, `Command` with an
   `OsString`, `Output` and other std gaps).
 - wasm-bindgen-shared 0.2.130 (W0 of [#38](https://github.com/mizchi/zust/issues/38)) builds with zurgo for x86-64 and
   for wasm32. An app that calls its whole API prints, under node, what its cargo build prints
-  (`crates/zurgo/tests/zurgo.rs`). Next, the wasm-bindgen crate itself (W1), which stops on:
-  - `closures!` (a tt-muncher) matches none of its calls;
-  - `impl IntoWasmAbi for &&str` from `ref_by_copy!`: an impl for a reference to a reference.
-- memchr 2.8.3, which 42 crates of dioxus and 29 of leptos depend on: an impl of a trait for a SIMD vector type is
-  "cannot find type" (`impl Vector for v128` in its wasm32 module, `impl Vector for __m128i` in its x86-64 one).
+  (`crates/zurgo/tests/zurgo.rs`). Next, the wasm-bindgen crate itself (W1). Its `#[wasm_bindgen]` uses expand
+  (proc macros, above), and these no longer stop it: `closures!` (a tt-muncher's `@closure` marker), impls for `&&str`,
+  macro calls in an item's expression, doc comments on a cfg'd-out item, `pub extern crate`, `::dep::path`, an
+  `extern` block in a function body, a type bound in a `where` clause, `AssertUnwindSafe`, `LocalKey` and
+  `LazyCell` (as types of the prelude), the unwind-safety auto traits, default type parameters (`LazyCell<T, F =
+  fn() -> T>` used as `LazyCell<T>`), std items imported under another name (`use core::cell::LazyCell as Lazy;`).
+  It stops on:
+  - inherent impls for two instances with one method name, `impl<T: Copy> Nullable<&T> { fn copied }` beside
+    `impl<T: Copy> Nullable<&mut T> { fn copied }` (`nullable.rs:256`, as std's `Option<&T>::copied`): a duplicate
+    definition.
+  - `LocalKey<T>` is a type with `with`, but a `thread_local!` is not one of them yet (each has a key type of its
+    own), so a `&'static LocalKey<T>` cannot point at one.
+- Found while building memchr, not fixed:
+  - a generic struct literal whose field is a `<v128 as Tr>::f(..)` call (`Pair { v1: <v128 as Vector>::splat(b) }`)
+    does not infer `V = v128` ("expected `T0`, found `v128`"); an annotation or an intrinsic's value does;
+  - `fn f<'a>(x: &&'a T) -> &'a T { x }`: the deref coercion is applied, but the region check takes the outer
+    reference's lifetime ("`'_` must outlive `'a`"). With elided lifetimes (`fn as_slice(&self) -> &[u8]`) it passes;
+  - `None => &[]` in a match whose type is `&'a [u8]`: "type annotations needed for an empty array";
+  - zustc's own parser counts the destructuring assignment `(a.x, a.y) = t;` as a `let` (tests/parse.rs).
 - `cratebench/ui/run.py` does not run build scripts: a crate gets cargo's variables (`CARGO_PKG_*`) but not what its
   script would give (zurgo does both).
 - `x.as_ref()` on text takes the `AsRef` targets of all the bounds in scope, not those of `x`'s own parameter: in
@@ -190,8 +204,6 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
 - `!FLAG` with `const FLAG: bool` (and `!{ true }`) is folded as an integer complement: `(!FLAG) as u8` is 254, not 0.
   `is_bool_expr` sees only literals, comparisons and `&&`/`||`; the bool type should be carried through constants and
   blocks.
-- A vector type's overload group with an `unsafe fn m` and a safe `fn m` (two traits): when the unsafe one stays
-  selected, no E0133 is reported. Check the id `pick_overload` returns, after selection.
 - Serialized const arguments drop a local's type annotation (`{ let x: u8 = !0; ... }` in `Buf<{ .. }>`), and a const
   fn's return type through an alias (`type Id<T> = T; const fn f() -> Id<u8>`) is not applied.
 

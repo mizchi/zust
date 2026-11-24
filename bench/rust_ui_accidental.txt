@@ -71,3 +71,5 @@ compile-fail	implied-bounds/implied-bounds-on-nested-references-plus-variance-un
 compile-fail	cast/cast-rfc0401-fail.rs
 compile-fail	dst/dst-bad-deep.rs
 compile-fail	dst/dst-bad-deep-2.rs
+compile-fail	iterators/rpit-method-chain-no-ice.rs
+compile-fail	span/send-is-not-static-std-sync-2.rs

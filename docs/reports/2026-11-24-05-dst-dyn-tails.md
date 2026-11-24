@@ -82,6 +82,32 @@ rustc's error, not only its line.
 The two analyzer tests that failed in part 1 (`hover_and_completion`, `type_inference_like_rust_analyzer`) depend
 on `rust-src`, which CI installs and this container did not. With the component added they pass.
 
+## Merging main
+
+main had moved 374 commits, among them its own trait work (#2: `Program::evaluate`, a goal's answer as yes, maybe
+or no). The two meet at the bound check of an instance (`Insts::request`):
+
+- main's cycle (`Maybe(Cycle)`) is reported first, as E0275. rustc agrees: `tests/compile_errors/trait_solver_cycle.rs`
+  now expects E0275, not E0277.
+- Then the trait solver's checks of this branch. Its std side already asks `implements`, which is
+  `evaluate(..) != No` on main.
+- Where the solver runs out of fuel on a trait of the program's (a chain of 60 blanket impls, main's
+  `impl_bounds_are_nested_goals`), `evaluate`'s no decides, for a bound without arguments (`evaluate` does not read
+  lifetimes, and `for<'a> Yokeable<'a>` would be a false no).
+- main's skip for a default method's instance whose Self is a primitive is limited to what it is for, an impl for a
+  reference only (`prim_ref_only`). Otherwise `impl<'a> Visit for () where (): Array<Element = &'a ()>` was skipped.
+- The `-> impl Tr` check of this branch leaves a body whose tail is an `if` / `match` to the arms' check: its
+  recorded type is the first arm's, and arms of other types are E0308.
+
+Against the union of both baselines: no regressions, and 3 more tests pass.
+
+| kind | main | this branch | merged |
+|---|---:|---:|---:|
+| run-pass | 1858 | 1868 | 1892 |
+| check-pass | 1525 | 1527 | 1540 |
+| build-pass | 102 | 104 | 104 |
+| compile-fail | 4640 | 4559 | 4750 |
+
 ## Not done
 
 - A user `impl Drop` for a struct with an unsized tail is not called when its box is dropped (the fields are).

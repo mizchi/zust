@@ -302,6 +302,8 @@ impl<'a> Runner<'a> {
                 exe: None,
                 cfgs,
                 env,
+                proc_macro: None,
+                test: false,
             });
         }
         let pk = &self.g.pkgs[n.0].m;
@@ -325,6 +327,8 @@ impl<'a> Runner<'a> {
             exe: Some("build-script-build".into()),
             cfgs,
             env,
+            proc_macro: None,
+            test: false,
         });
         let zd = dir.join("zust");
         let mut opts = Options2 { backend: Some(zustc::clif_backend::compile), ..Options2::default() };
@@ -335,52 +339,32 @@ impl<'a> Runner<'a> {
         Ok(zd.join("build-script-build"))
     }
 
+    /// A proc-macro crate (a host node) as rustc builds it: a dylib, with its dependencies as rlibs (their build scripts
+    /// run first). zustc runs its macros through the toolchain's proc-macro server
+    pub fn proc_macro_dylib(&mut self, pm: Node) -> R<PathBuf> {
+        fn visit(s: &Runner, m: Node, out: &mut Vec<Node>) {
+            if out.contains(&m) {
+                return;
+            }
+            for (_, t) in s.edges(m, DepKind::Normal) {
+                visit(s, t, out);
+            }
+            out.push(m);
+        }
+        let mut closure = vec![];
+        visit(self, pm, &mut closure);
+        let mut outs: BTreeMap<Node, Option<Output>> = BTreeMap::new();
+        for &m in &closure {
+            let o = self.run(m)?;
+            outs.insert(m, o);
+        }
+        let art = self.host_libs_rustc(&closure, &outs)?;
+        art.get(&pm).cloned().ok_or_else(|| format!("`{}` was not built", self.g.pkgs[pm.0].m.name))
+    }
+
     fn compile_rustc(&self, n: Node, script: &Path, dir: &Path, closure: &[Node], outs: &BTreeMap<Node, Option<Output>>) -> R<PathBuf> {
         let deps_dir = self.out.join("build").join("deps");
-        mkdir(&deps_dir)?;
-        // (a host library as an rlib (a proc macro as a dylib), named by a hash of what it is built from)
-        let mut art: BTreeMap<Node, PathBuf> = BTreeMap::new();
-        for &m in closure {
-            let p = &self.g.pkgs[m.0].m;
-            let lib = p.lib.as_ref().ok_or_else(|| format!("`{}` has no library", p.name))?;
-            let feats: Vec<String> = self.r.nodes[&m].features.iter().cloned().collect();
-            let o = outs.get(&m).cloned().flatten();
-            let externs: Vec<(String, PathBuf)> = self.externs(m, DepKind::Normal).into_iter().filter_map(|(e, t)| art.get(&t).map(|a| (e, a.clone()))).collect();
-            // (what it is built from: the compiler, the package, its features, its dependencies' artifacts (their
-            //  contents, not only their paths), what its build script gave, and the files that script wrote to OUT_DIR)
-            let deps_fp: Vec<String> = externs.iter().map(|(e, a)| format!("{e}={}", file_fp(a))).collect();
-            let (cfgs, env) = crate_env(p, &lib.name, o.as_ref());
-            let out_fp = env.iter().find(|(k, _)| k == "OUT_DIR").map(|(_, d)| scan(Path::new(d), None, true).fp()).unwrap_or_default();
-            let h = hash(&[&rustc_id(), &self.g.pkgs[m.0].id, &feats.join(","), &format!("{externs:?}"), &deps_fp.join(","), &format!("{:?}", o.as_ref().map(|o| (&o.cfgs, &o.env))), &out_fp]);
-            let pm = lib.is_proc_macro();
-            let file = deps_dir.join(format!("lib{}-{h}.{}", lib.name, if pm { "so" } else { "rlib" }));
-            let fresh = file.is_file() && (self.g.pkgs[m.0].source.is_some() || src_fp(&p.dir, &self.skip) == std::fs::read_to_string(file.with_extension("fp")).unwrap_or_default());
-            if !fresh {
-                let mut c = Command::new(rustc());
-                c.args(["--crate-name", &lib.name, "--edition", &lib.edition, "--crate-type", if pm { "proc-macro" } else { "lib" }, "--emit=link", "--cap-lints", "allow"]);
-                c.args(["-C", "opt-level=0", "-C", &format!("metadata={h}"), "-C", &format!("extra-filename=-{h}"), "--out-dir"]).arg(&deps_dir);
-                c.arg("-L").arg(format!("dependency={}", deps_dir.display()));
-                for f in &feats {
-                    c.args(["--cfg", &format!("feature=\"{f}\"")]);
-                }
-                if pm {
-                    c.args(["--extern", "proc_macro"]);
-                }
-                for (e, a) in &externs {
-                    c.arg("--extern").arg(format!("{e}={}", a.display()));
-                }
-                for (k, v) in &cfgs {
-                    c.args(["--cfg", &match v {
-                        Some(v) => format!("{k}=\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\"")),
-                        None => k.clone(),
-                    }]);
-                }
-                c.envs(env.iter().map(|(k, v)| (k, v))).current_dir(&p.dir).arg(&lib.path);
-                run_rustc(c, &format!("`{} v{}`", p.name, p.version))?;
-                let _ = std::fs::write(file.with_extension("fp"), src_fp(&p.dir, &self.skip));
-            }
-            art.insert(m, file);
-        }
+        let art = self.host_libs_rustc(closure, outs)?;
         let pk = &self.g.pkgs[n.0].m;
         let rd = dir.join("rustc");
         mkdir(&rd)?;
@@ -410,6 +394,73 @@ impl<'a> Runner<'a> {
         run_rustc(c, &format!("the build script of `{} v{}`", pk.name, pk.version))?;
         let _ = std::fs::write(&kp, key);
         Ok(exe)
+    }
+
+    /// Host libraries (dependencies first) as rustc builds them: rlibs, a proc macro as a dylib, each named by a hash
+    /// of what it is built from
+    fn host_libs_rustc(&self, closure: &[Node], outs: &BTreeMap<Node, Option<Output>>) -> R<BTreeMap<Node, PathBuf>> {
+        let deps_dir = self.out.join("build").join("deps");
+        mkdir(&deps_dir)?;
+        let mut art: BTreeMap<Node, PathBuf> = BTreeMap::new();
+        for &m in closure {
+            let p = &self.g.pkgs[m.0].m;
+            let lib = p.lib.as_ref().ok_or_else(|| format!("`{}` has no library", p.name))?;
+            let feats: Vec<String> = self.r.nodes[&m].features.iter().cloned().collect();
+            let o = outs.get(&m).cloned().flatten();
+            let externs: Vec<(String, PathBuf)> = self.externs(m, DepKind::Normal).into_iter().filter_map(|(e, t)| art.get(&t).map(|a| (e, a.clone()))).collect();
+            // (what it is built from: the compiler, the package, its features, its dependencies' artifacts (their
+            //  contents, not only their paths), what its build script gave, and the files that script wrote to OUT_DIR)
+            let deps_fp: Vec<String> = externs.iter().map(|(e, a)| format!("{e}={}", file_fp(a))).collect();
+            let (cfgs, env) = crate_env(p, &lib.name, o.as_ref());
+            let out_fp = env.iter().find(|(k, _)| k == "OUT_DIR").map(|(_, d)| scan(Path::new(d), None, true).fp()).unwrap_or_default();
+            // (debug assertions as cargo's profile has them: off in a release build, although the host code is built at
+            //  opt-level 0, where rustc turns them on)
+            let da = if self.release { "debug-assertions=off" } else { "debug-assertions=on" };
+            let h = hash(&[&rustc_id(), &self.g.pkgs[m.0].id, &feats.join(","), &format!("{externs:?}"), &deps_fp.join(","), &format!("{:?}", o.as_ref().map(|o| (&o.cfgs, &o.env))), &out_fp, da]);
+            let pm = lib.is_proc_macro();
+            let file = deps_dir.join(format!("lib{}-{h}.{}", lib.name, if pm { "so" } else { "rlib" }));
+            // (rustc's dep-info: the files it read outside the package, `include_str!("../../shared.txt")`, count too)
+            let dep_info = deps_dir.join(format!("{}-{h}.d", lib.name));
+            let local_fp = || format!("{}|{}", src_fp(&p.dir, &self.skip), outside_fp(&dep_info, &p.dir).0);
+            let fresh = file.is_file() && (self.g.pkgs[m.0].source.is_some() || local_fp() == std::fs::read_to_string(file.with_extension("fp")).unwrap_or_default());
+            if !fresh {
+                let mut c = Command::new(rustc());
+                c.args(["--crate-name", &lib.name, "--edition", &lib.edition, "--crate-type", if pm { "proc-macro" } else { "lib" }, "--emit=link,dep-info", "--cap-lints", "allow"]);
+                c.args(["-C", "opt-level=0", "-C", da, "-C", &format!("metadata={h}"), "-C", &format!("extra-filename=-{h}"), "--out-dir"]).arg(&deps_dir);
+                c.arg("-L").arg(format!("dependency={}", deps_dir.display()));
+                for f in &feats {
+                    c.args(["--cfg", &format!("feature=\"{f}\"")]);
+                }
+                if pm {
+                    c.args(["--extern", "proc_macro"]);
+                }
+                for (e, a) in &externs {
+                    c.arg("--extern").arg(format!("{e}={}", a.display()));
+                }
+                for (k, v) in &cfgs {
+                    c.args(["--cfg", &match v {
+                        Some(v) => format!("{k}=\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\"")),
+                        None => k.clone(),
+                    }]);
+                }
+                c.envs(env.iter().map(|(k, v)| (k, v))).current_dir(&p.dir).arg(&lib.path);
+                // (the sources as they were when rustc started: a file saved while it ran leaves the artifact stale, so
+                //  its fingerprint is not written and the next build builds it again)
+                // (and the files outside the package that rustc read: none of them saved after it started)
+                let before = src_fp(&p.dir, &self.skip);
+                let started = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+                run_rustc(c, &format!("`{} v{}`", p.name, p.version))?;
+                let after = src_fp(&p.dir, &self.skip);
+                let (outside, newest) = outside_fp(&dep_info, &p.dir);
+                if before == after && newest <= started {
+                    let _ = std::fs::write(file.with_extension("fp"), format!("{before}|{outside}"));
+                } else {
+                    let _ = std::fs::remove_file(file.with_extension("fp"));
+                }
+            }
+            art.insert(m, file);
+        }
+        Ok(art)
     }
 }
 
@@ -629,6 +680,28 @@ fn unquote(v: &str) -> String {
 }
 
 /// A file's size and modification time ("-" when it does not exist)
+/// The files rustc's dep-info (`--emit=dep-info`) lists outside the package's directory, with their sizes and times
+fn outside_fp(dep_info: &Path, pkg_dir: &Path) -> (String, u128) {
+    let Ok(t) = std::fs::read_to_string(dep_info) else { return (String::new(), 0) };
+    let dir = std::fs::canonicalize(pkg_dir).unwrap_or_else(|_| pkg_dir.to_path_buf());
+    let mut v: Vec<String> = vec![];
+    // (and the newest modification time among them)
+    let mut newest = 0;
+    // (each file it read is a line `path:` of its own, spaces written `\ `)
+    for l in t.lines() {
+        let Some(f) = l.strip_suffix(':') else { continue };
+        let f = f.replace("\\ ", " ");
+        let fp = Path::new(&f);
+        let real = std::fs::canonicalize(fp).unwrap_or_else(|_| fp.to_path_buf());
+        if real.starts_with(&dir) || real.starts_with(pkg_dir) {
+            continue;
+        }
+        v.push(format!("{f}={}", file_fp(fp)));
+        newest = newest.max(mtime(fp).unwrap_or(0));
+    }
+    (v.join(","), newest)
+}
+
 fn file_fp(p: &Path) -> String {
     match std::fs::metadata(p) {
         Ok(m) => format!("{}:{}", m.len(), mtime(p).unwrap_or(0)),

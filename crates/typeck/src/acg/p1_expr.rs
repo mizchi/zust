@@ -506,8 +506,27 @@ impl Cx<'_> {
                 // `*g` (g: MutexGuard など Deref を実装した型): `*g.deref_mut()` / `*g.deref()`
                 if let Some(d) = self.user_deref(x) {
                     let d = self.keep_expr(d);
+                    // (the temporaries the borrow check follows in x (`*RefCell::new(1).borrow_mut()`'s receiver) are
+                    // followed in its copy too)
+                    if let Expr::Unary(_, c, _) = d {
+                        if let Expr::MethodCall(r, ..) = &**c {
+                            if let Expr::Paren(xc) = &**r {
+                                if !self.bk.direct.is_empty() {
+                                    borrowck::copy_marks(x, xc, &mut self.bk.direct, 0);
+                                }
+                            }
+                        }
+                    }
                     self.deref_shared(d);
-                    return self.place(d);
+                    let r = self.place(d);
+                    // (the loan the deref's call takes of x is the loan of `*x`: `(&mut *w).push(w.len())` holds it
+                    // while the arguments are evaluated)
+                    if let (true, Expr::Unary(_, c, _)) = (self.bk_on(), d) {
+                        if let Some(&ln) = self.bk.loan_of.get(&(&**c as *const Expr as usize)) {
+                            self.bk.loan_of.insert(e as *const Expr as usize, ln);
+                        }
+                    }
+                    return r;
                 }
                 // `*b` は b をムーブしない
                 let (v, t) = self.read_no_move(x)?;
@@ -711,19 +730,81 @@ impl Cx<'_> {
         if self.user_code && matches!(e, Expr::MethodCall(..) | Expr::Index(..)) {
             self.implicit_autoref(e)?;
         }
+        // (a returned position: what is borrowed and read in it is returned (Bk::ret_leaves))
+        if !self.bk.ret_leaves.is_empty() && self.bk.ret_leaves.contains(&(e as *const Expr as usize)) {
+            self.bk.in_ret += 1;
+            let r = self.expr_at(e, expected);
+            self.bk.in_ret -= 1;
+            return r;
+        }
+        self.expr_at(e, expected)
+    }
+
+    fn expr_at(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         // (the places inside a sub-expression are accesses of their own)
         let pd = std::mem::take(&mut self.bk.place_depth);
         let hint_only = std::mem::take(&mut self.bk.move_mut_hint);
         self.bk.exp_none = std::mem::take(&mut self.bk.move_mut_next) && (expected.is_none() || hint_only);
         // (a block's tail's receiver that is a temporary: what its value holds (bk_watch_tail))
         let watched = !self.bk.watch.is_empty() && self.bk.watch.contains(&(e as *const Expr as usize));
-        if watched {
+        // (or a copy of one: a method call at a watched position)
+        let at = if !self.bk.watch_at.is_empty() && matches!(e, Expr::MethodCall(..)) {
+            let p = super::err_pos(e);
+            self.bk.watch_at.iter().position(|w| w.0 == p)
+        } else {
+            None
+        };
+        if watched || at.is_some() {
             self.bk_frame();
         }
+        // (a place read or a call's result of a type that holds no reference (`*d` of `d: &mut bool`, `p.0` of a
+        // number, `mem::replace(d, false)`) carries none of the loans it is reached through or made from: `(*d, log)`
+        // holds only what log holds)
+        let read = self.bk.on && (matches!(e, Expr::Unary(op, ..) if op == "*") || matches!(e, Expr::Field(..) | Expr::Index(..) | Expr::Call(..) | Expr::MethodCall(..)));
+        let mark = if read { self.bk.frames.last().map(|f| (self.bk.frames.len(), f.len())) } else { None };
+        // (a local `s: &&U` where a `&U` is expected: the deref coercion copies `*s` out, so the value holds what that
+        // holds, not the loan s is (bk_copy_out_of))
+        let coerced = match (expected, strip_paren(e)) {
+            (Some(Ty::Ref(_, w)), Expr::Path(None, p)) if self.bk.on && self.bk.level >= 2 && !matches!(w, Ty::Ref(..) | Ty::Param(_)) => {
+                match ident_of(p).and_then(|n| self.bk_local_of(n)).map(|l| (l, self.bk.locals[l as usize].ty)) {
+                    Some((l, Ty::Ref(_, u @ Ty::Ref(false, i)))) if *i == w => self.bk.frames.last().map(|f| (self.bk.frames.len(), f.len(), l, *u)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
         let r = self.expr_inner(e, expected);
-        if watched {
+        if let (Some((n, k, l, u)), true) = (coerced, self.bk_on()) {
+            if self.bk.frames.len() == n && self.bk.frames.last().is_some_and(|f| f[k..].contains(&borrowck::Src::Local(l))) {
+                let c = self.bk_copy_out_of(l, u);
+                if let Some(f) = self.bk.frames.last_mut() {
+                    for s in f[k..].iter_mut() {
+                        if *s == borrowck::Src::Local(l) {
+                            *s = borrowck::Src::Local(c);
+                        }
+                    }
+                }
+            }
+        }
+        if let (Some((n, k)), Ok((_, t))) = (mark, &r) {
+            if self.bk.frames.len() == n && *t != Ty::Never && self.bk_on() && !self.bk_ty(*t).1 {
+                if let Some(f) = self.bk.frames.last_mut() {
+                    f.truncate(k);
+                }
+            }
+        }
+        if watched || at.is_some() {
             let s = self.bk_frame_end();
-            self.bk.watched.insert(e as *const Expr as usize, s);
+            if let Some(i) = at {
+                for x in &s {
+                    if !self.bk.watch_at[i].1.contains(x) {
+                        self.bk.watch_at[i].1.push(*x);
+                    }
+                }
+            }
+            if watched {
+                self.bk.watched.insert(e as *const Expr as usize, s);
+            }
         }
         self.bk.place_depth = pd;
         let (v, t) = r.map_err(|m| {
@@ -903,6 +984,15 @@ impl Cx<'_> {
                     None => self.block(b, expected),
                 };
                 self.unsafe_ok -= *uns as u32;
+                // (a value that holds what the block's locals hold (bk_block_value), used here, after them: a match's
+                // scrutinee, a receiver, an argument. Not one a statement discards)
+                let key = b as *const crate::parse::Block as usize;
+                if self.bk_on() && self.bk.stmt_block != key {
+                    if let Some(&t) = self.bk.block_val.get(&key) {
+                        self.bk_ev(borrowck::Ev::Acc(borrowck::BPlace { local: t, proj: vec![] }, borrowck::Acc::Read, borrowck::pos(e)));
+                        self.bk.src(borrowck::Src::Local(t));
+                    }
+                }
                 r
             }
             // (`[a, a]` after `let a = foo;` (foo generic): the fn foo)
@@ -1060,7 +1150,16 @@ impl Cx<'_> {
                 // (a reference copied out of what a call's result points into (`*names.first().unwrap()` with
                 // `names: Vec<&str>`): it does not hold the borrow of names that reached it (bk_copy_out))
                 let copy_out = self.bk_on() && !is_place_expr(x) && matches!(self.peek(x), Some(Ty::Ref(_, i)) if self.bk_ty(*i) == (true, true));
-                if copy_out {
+                // (`*r` of a local `r: &U`: the U copied out holds what r's referent holds, not the loan r is
+                // (bk_copy_out_of): `let r = &a; t = *r;` holds what a holds)
+                let local_copy = match (copy_out || !self.bk_on() || self.bk.level < 2, strip_paren(x)) {
+                    (false, Expr::Path(None, p)) => match ident_of(p).and_then(|n| self.bk_local_of(n)).map(|l| (l, self.bk.locals[l as usize].ty)) {
+                        Some((l, Ty::Ref(_, u))) if self.bk_ty(*u) == (true, true) => Some((l, *u)),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if copy_out || local_copy.is_some() {
                     self.bk_frame();
                 }
                 let p = self.place(e);
@@ -1070,12 +1169,29 @@ impl Cx<'_> {
                         self.bk_copy_out(&srcs, *u);
                     }
                 }
+                if let Some((l, u)) = local_copy {
+                    let srcs = self.bk.frames.pop().unwrap_or_default();
+                    let c = srcs.contains(&borrowck::Src::Local(l)).then(|| self.bk_copy_out_of(l, u));
+                    for s in srcs {
+                        match (s, c) {
+                            (borrowck::Src::Local(x), Some(c)) if x == l => self.bk.src(borrowck::Src::Local(c)),
+                            _ => self.bk.src(s),
+                        }
+                    }
+                }
                 let p = p?;
                 // (`*slice` as a value: its size is not known; only a place (a pattern, `&*s`) can be one)
                 if p.ty().is_unsized() {
                     return err(expr_start(e), format!("the size for values of type `{}` cannot be known at compilation time", self.prog.tn(p.ty())));
                 }
-                if self.bk_on() && !self.bk_ty(p.ty()).0 {
+                // (a `&mut` a `let` with no type written is initialized from (`let y = unsafe { *p };`): moved, not
+                // reborrowed)
+                let mut_moved = self.bk.plain_init == e as *const Expr as usize && self.bk.level >= 2 && matches!(p.ty(), Ty::Ref(true, _));
+                if self.bk_on() && (!self.bk_ty(p.ty()).0 || mut_moved) {
+                    // (`*x` with x a raw pointer: what it points to is not owned, E0507)
+                    if matches!(self.peek(x), Some(Ty::Ptr(..))) && self.bk.level >= 1 {
+                        self.drop_move_check(e)?;
+                    }
                     // (`*rc` with rc an Rc / a Deref type of the program's: its deref gives a reference, which cannot
                     // be moved out of (Box is the one type whose `*` moves))
                     if let Some(Ty::Struct(sid)) = self.peek(x).map(|t| self.strip_refs(t)) {
@@ -1114,8 +1230,8 @@ impl Cx<'_> {
             }
             // (deref coercion of a guard: `&g` where a `&T` (or `&[U]` / `&str` of a Vec / String T) is expected, with
             // g a RefCell's Ref / RefMut or a MutexGuard: `&*g`)
-            Expr::Ref(_, x) if self.guard_coercion(x, expected).is_some() => {
-                let ne = self.guard_coercion(x, expected).unwrap();
+            Expr::Ref(m, x) if self.guard_coercion(x, *m, expected).is_some() => {
+                let ne = self.guard_coercion(x, *m, expected).unwrap();
                 let ne: &Expr = self.keep_expr(ne);
                 self.expr(ne, expected)
             }
@@ -1144,6 +1260,9 @@ impl Cx<'_> {
                 if let Some(m) = self.prog.any_immutable_static.then(|| self.immutable_static(left)).flatten() {
                     return err(expr_start(left), m);
                 }
+                if let Some(m) = self.const_ptr_write(left).filter(|_| self.bk.level >= 1) {
+                    return err(expr_start(left), m);
+                }
                 // (an overloaded `+=` is a call of `add_assign(&mut self, ..)`: no access of its own)
                 let builtin = !matches!(self.peek(left), Some(Ty::Struct(_) | Ty::Ref(_, Ty::Struct(_))));
                 let r = self.binary(e, expected)?;
@@ -1154,6 +1273,9 @@ impl Cx<'_> {
             }
             Expr::Assign(left, right) => {
                 if let Some(m) = self.prog.any_immutable_static.then(|| self.immutable_static(left)).flatten() {
+                    return err(expr_start(left), m);
+                }
+                if let Some(m) = self.const_ptr_write(left).filter(|_| self.bk.level >= 1) {
                     return err(expr_start(left), m);
                 }
                 // (`map[&k] = v`: a map's index is not a place to assign to (E0594); `insert` or `get_mut`)
@@ -1281,11 +1403,14 @@ impl Cx<'_> {
                     temps: t0,
                     no_value: Some("while"),
                 });
+                let bk_t0 = self.bk.stmt_temps.len();
                 let (_, bt) = self.block(wbody, Some(Ty::Unit))?;
                 self.loops.pop();
                 if bt != Ty::Never {
-                    self.same(SP, bt, Ty::Unit)?;
+                    // (a body with a value: at its tail, as rustc points)
+                    self.same(block_end_pos(wbody), bt, Ty::Unit)?;
                     self.drop_for_exit(usize::MAX, t0);
+                    self.bk_iteration_end(bk_t0);
                     self.b.ins().jump(header, &[]);
                 } else {
                     self.b.ins().trap(TrapCode::unwrap_user(1));
@@ -1312,11 +1437,14 @@ impl Cx<'_> {
                     temps: self.temps.len(),
                     no_value: None,
                 });
+                let bk_t0 = self.bk.stmt_temps.len();
                 let (_, bt) = self.block(lbody, Some(Ty::Unit))?;
                 let lp = self.loops.pop().unwrap();
                 if bt != Ty::Never {
-                    self.same(SP, bt, Ty::Unit)?;
+                    // (a body with a value: at its tail, as rustc points)
+                    self.same(block_end_pos(lbody), bt, Ty::Unit)?;
                     self.drop_for_exit(usize::MAX, lp.temps);
+                    self.bk_iteration_end(bk_t0);
                     self.b.ins().jump(body, &[]);
                 } else {
                     self.b.ins().trap(TrapCode::unwrap_user(1));
@@ -1393,6 +1521,7 @@ impl Cx<'_> {
                 let v = match value {
                     Some(e) => {
                         self.mark_ret_call(e);
+                        self.bk_ret_leaves(e);
                         self.bk_frame();
                         let r = self.expr(e, Some(ret));
                         let srcs = self.bk_frame_end();
@@ -1404,6 +1533,7 @@ impl Cx<'_> {
                             { let _ = &srcs; self.bk_ret(e); }
                         }
                         self.rg_ret(e);
+                        let (v, t) = if t != ret { self.deref_coerce(v, t, ret) } else { (v, t) };
                         self.same(expr_start(e), t, ret)?;
                         v
                     }
@@ -1459,7 +1589,17 @@ impl Cx<'_> {
                     }
                 }
                 let p = p?;
-                if self.bk_on() && !self.bk_ty(p.ty()).0 {
+                // (a `&mut` element a `let` with no type written is initialized from (`let b = a[0];`): moved, not
+                // reborrowed (E0508))
+                let mut_moved = self.bk.plain_init == e as *const Expr as usize && self.bk.level >= 2 && matches!(p.ty(), Ty::Ref(true, _));
+                if self.bk_on() && (!self.bk_ty(p.ty()).0 || mut_moved) {
+                    // (out of an array that is no local's place (a constant's, a temporary: `C[0]`, `[S][0]`): E0508,
+                    // as out of a local's, which the borrow check's events report)
+                    if let Some(at @ Ty::Array(..)) = self.peek(b) {
+                        if self.bk.level >= 1 && self.bk_place(e).is_none() {
+                            return err(expr_start(e), format!("cannot move out of type `{}`, a non-copy array (E0508)", self.prog.tn(at)));
+                        }
+                    }
                     self.bk_acc(e, borrowck::Acc::Move);
                 }
                 Ok(self.read(p))
@@ -1519,12 +1659,31 @@ impl Cx<'_> {
                 if matches!(to, Ty::Fn(_)) && matches!(strip_paren(x), Expr::Closure(..)) {
                     let (v, t) = self.expr(x, Some(to))?;
                     self.same(SP, t, to)?;
+                    // (its annotated parameters against the regions the type binds, as in a `let`: `(|_: &'static u32|
+                    // {}) as fn(&u32)` is "lifetime may not live long enough")
+                    if self.rg_on() {
+                        self.rg_closure_fnptr(ty, x);
+                    }
                     return Ok((v, t));
                 }
                 // (`c as fn(&str)` with c a closure value that captures nothing: its fn-pointer instance)
                 if let (Ty::Fn(_), Some(Ty::Struct(sid))) = (to, self.peek(x)) {
                     let base = self.prog.base_of(sid);
                     if let Some(&cid) = self.prog.closure_of_struct.get(&base) {
+                        // (its annotated parameters against the regions the type binds, as for a closure written there:
+                        // `let c = |_: &'static u32| {}; c as fn(&u32)`)
+                        if let Some(mut ce) = self.clo_ann.iter().find(|x| x.0 == base).map(|x| x.1.clone()) {
+                            // (reported at the cast's value, as rustc does)
+                            if let Expr::Closure(_, _, _, _, p) = &mut ce {
+                                *p = borrowck::pos(x);
+                            }
+                            if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
+                                self.rg_late_on();
+                            }
+                            if self.rg_on() {
+                                self.rg_closure_fnptr(ty, &ce);
+                            }
+                        }
                         if self.prog.structs[sid as usize].fields.is_empty() {
                             // (the value carries nothing; evaluated for its effects)
                             self.expr(x, None)?;
@@ -1572,7 +1731,14 @@ impl Cx<'_> {
                         _ => Some(Ty::I32),
                     })
                 };
+                let f0 = self.bk.frames.last().map(|f| f.len());
                 let (v, from) = self.expr(x, hint)?;
+                // (a cast to a number holds nothing of what x borrows: `r as *mut _ as usize` does not keep r's loans)
+                if to.is_int() || to.is_float() || matches!(to, Ty::Bool | Ty::Char) {
+                    if let (Some(n), Some(f)) = (f0, self.bk.frames.last_mut()) {
+                        f.truncate(n);
+                    }
+                }
                 // `x as _` (the expected type, else the same type) / `&x as *const _` (the pointee of the source)
                 let to = match to {
                     Ty::Param(h) if h == crate::program::HOLE => expected.filter(|&e| !has_hole(self.prog, e)).unwrap_or(from),
@@ -1851,7 +2017,7 @@ impl Cx<'_> {
     /// A borrow guard (`Ref<T>` / `RefMut<T>` / `MutexGuard<T>`): (its struct, T, whether it derefs mutably)
     pub(crate) fn guard_of(&self, t: Ty) -> Option<(u32, Ty, bool)> {
         let Ty::Struct(sid) = t else { return None };
-        if !matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard") {
+        if !matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard" | "PeekMut") {
             return None;
         }
         let target = *self.prog.structs[sid as usize].args.first()?;
@@ -1881,8 +2047,12 @@ impl Cx<'_> {
     /// `&g` (g: Ref<T> / RefMut<T> / MutexGuard<T>) where a reference to T, or the slice / str of a Vec / String T, is
     /// expected: the expression to use instead (`&*g`, `&(*g)[..]`, `(*g).as_str()`). None when no coercion applies
     /// (a `&dyn Trait` is expected, or a reference to the guard itself)
-    pub(crate) fn guard_coercion(&self, x: &Expr, expected: Option<Ty>) -> Option<Expr> {
+    pub(crate) fn guard_coercion(&self, x: &Expr, written_mut: bool, expected: Option<Ty>) -> Option<Expr> {
         let Some(Ty::Ref(wm, want)) = expected else { return None };
+        // (`&g` where a `&mut T` is expected: no coercion makes a shared borrow of the guard mutable (E0308))
+        if wm && !written_mut {
+            return None;
+        }
         let (sid, target, _) = self.guard_of(self.peek(x)?)?;
         if *want == Ty::Struct(sid) || matches!(want, Ty::Dyn(_)) || self.prog.has_param(*want) {
             return None;
@@ -1939,6 +2109,13 @@ impl Cx<'_> {
                         _ => unreachable!(),
                     };
                     let (v, _) = self.read_no_move(inner)?;
+                    // (of a Box: a borrow of what the box owns, as `&*b` of a `Box<T>` (E0505 when b is moved while
+                    // it lives, E0515 when it is returned))
+                    // (a method call's auto-ref (`b.iter_mut()`) is made with no position: the box's)
+                    if matches!(it, Ty::Box(_)) && !matches!(expected, Some(Ty::Ptr(..))) {
+                        let sp = err_pos(rexpr);
+                        self.bk_borrow(rexpr, m, if sp.line == 0 { err_pos(inner) } else { sp });
+                    }
                     return Ok((v, Ty::Ref(m, intern(pointee))));
                 }
             }
@@ -1949,6 +2126,10 @@ impl Cx<'_> {
                 let r = self.slice_range(b, ix, m)?;
                 // (a borrow of the elements: `&mut x[1..3]` with x: &[T] is E0596, and it conflicts as `&mut x[1]`)
                 self.bk_borrow(rexpr, m, err_pos(rexpr));
+                // (`&f().0[..]`: of a temporary's elements)
+                if let Some(t) = self.temp_root(rexpr).and_then(|r| self.peek(r)).filter(|_| self.bk_on() && self.bk_place(rexpr).is_none()) {
+                    self.bk_temp_borrow(rexpr, m, t);
+                }
                 return Ok(r);
             }
         }
@@ -1964,16 +2145,86 @@ impl Cx<'_> {
             e => e,
         };
         if is_place_expr(rexpr) && !fn_item && !not_var(inner) {
+            // (`&**s` with `s: &&T`: what the reborrow holds is what bk_borrow copies out of `*s`, not all s holds,
+            // which reading s gives)
+            let shr_root = match strip_paren(rexpr) {
+                Expr::Unary(o, x, _) if o == "*" && self.bk_on() && self.bk.level >= 2 => match strip_paren(x) {
+                    Expr::Unary(o, x, _) if o == "*" => self
+                        .bk_place(x)
+                        .filter(|(p, _)| p.proj.is_empty() && matches!(self.bk.locals[p.local as usize].ty, Ty::Ref(_, Ty::Ref(false, _))))
+                        .map(|(p, _)| p.local),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if shr_root.is_some() {
+                self.bk_frame();
+            }
             let pm = std::mem::replace(&mut self.bk.place_mut, m);
             let pl = self.place(rexpr);
             self.bk.place_mut = pm;
+            if let Some(l) = shr_root {
+                for s in self.bk.frames.pop().unwrap_or_default() {
+                    if s != borrowck::Src::Local(l) {
+                        self.bk.src(s);
+                    }
+                }
+            }
             let pl = pl?;
+            // (`&a` of a reference `a: &T` (or `&&T` ..) where a `&T` is expected (a deref coercion, also as a result): the
+            // pointer a holds, a reborrow of `*a` (`**a` ..), not a borrow of the local a)
+            if let (Some(Ty::Ref(_, want)), Ty::Ref(..)) = (expected, pl.ty()) {
+                // (the derefs to a `&T` (`&mut T` when one is taken), as far as a few)
+                let (mut t, mut n, mut muts) = (pl.ty(), 0usize, true);
+                while let Ty::Ref(rm, i) = t {
+                    muts &= rm;
+                    if *i == *want || n > 4 {
+                        break;
+                    }
+                    t = *i;
+                    n += 1;
+                }
+                let thin = !matches!(want, Ty::Str | Ty::Slice(_) | Ty::Dyn(_));
+                if matches!(t, Ty::Ref(_, i) if *i == *want) && thin && (muts || !m) && matches!(pl, Place::Mem(..) | Place::Var(..)) {
+                    let sp = crate::parse::Span { start: expr_start(rexpr), at: expr_start(rexpr) };
+                    let mut star: &Expr = rexpr;
+                    for _ in 0..=n {
+                        star = self.keep_expr(Expr::Unary("*".into(), Box::new(star.clone()), sp));
+                    }
+                    // (`&mut a` is a mutable borrow of the local a, which needs it `mut` (E0596 of `test(&mut x)` with
+                    // `ref mut x`), and what it reborrows through it lives no longer than that borrow: as before)
+                    if m {
+                        self.bk_borrow(rexpr, true, err_pos(rexpr));
+                    } else {
+                        let n0 = self.bk.loans.len();
+                        self.bk_borrow(star, m, err_pos(rexpr));
+                        if self.bk.loans.len() > n0 {
+                            self.bk.loan_of.insert(&**rexpr as *const Expr as usize, n0 as u32);
+                        }
+                    }
+                    let mut v = match pl {
+                        Place::Mem(a, o, _) => self.b.ins().load(PTR, mf(), a, o),
+                        Place::Var(v, _) => self.b.use_var(v),
+                        _ => unreachable!(),
+                    };
+                    for _ in 0..n {
+                        v = self.b.ins().load(PTR, mf(), v, 0);
+                    }
+                    if !m && (self.rg_on() || self.rg.eligible) {
+                        self.rg.coerced.push((e as *const Expr as usize, n));
+                    }
+                    return Ok((Some(v), Ty::Ref(m, want)));
+                }
+            }
             // (`&mut x as *mut _` / coerced to a raw pointer: not a loan)
             if !matches!(expected, Some(Ty::Ptr(..))) {
                 self.bk_borrow(rexpr, m, err_pos(rexpr));
                 // (`&*Box::new(1)`: a borrow of what a temporary owns, which goes away with it (E0716))
                 if matches!(strip_paren(rexpr), Expr::Unary(op, _, _) if op == "*") && self.bk_place(rexpr).is_none() {
                     self.bk_temp_borrow(rexpr, m, pl.ty());
+                } else if let Some(t) = self.temp_root(rexpr).and_then(|r| self.peek(r)).filter(|_| self.bk_on() && self.bk_place(rexpr).is_none()) {
+                    // (`&f().0`, `&x.borrow().1`: a borrow of a place in a temporary, which goes away with it)
+                    self.bk_temp_borrow(rexpr, m, t);
                 }
             }
             return match pl {
@@ -2071,7 +2322,11 @@ impl Cx<'_> {
 
     fn struct_lit_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Struct(path, sfields, rest) = e else { return err(SP, "internal: expected a struct literal") };
-        if let Some((sid, vi)) = self.prog.variant_by_p(&PPath::of(path), self.self_sid) {
+        // (a variant that is not struct-like yields to a struct of that name: `Skip { .. }` with `use E::*`'s `Skip`)
+        let variant = self.prog.variant_by_p(&PPath::of(path), self.self_sid).filter(|&(sid, vi)| {
+            self.prog.structs[sid as usize].variants[vi].kind == crate::types::VariantKind::Struct || self.prog.struct_by_p(&PPath::of(path), self.self_sid).is_none()
+        });
+        if let Some((sid, vi)) = variant {
             let v = &self.prog.structs[sid as usize].variants[vi];
             if v.kind != crate::types::VariantKind::Struct {
                 return err(SP, "this variant is not a struct-like variant");
@@ -2478,11 +2733,25 @@ impl Cx<'_> {
         if sol[ri].is_none() && diverging_tail(&c_body(c)) {
             sol[ri] = Some(Ty::Unit);
         }
+        // (a parameter of a size not known: `|a0: [i32]| ..`, as the constructor of `struct Test([i32]);` used as a
+        // value is written (E0277))
+        if let Some(u) = pslots.iter().filter_map(|&(_, g)| sol[g]).find(|t| matches!(t, Ty::Slice(_) | Ty::Str | Ty::Dyn(_))) {
+            return err(expr_start(c), format!("the size for values of type `{}` cannot be known at compilation time (E0277)", self.prog.tn(u)));
+        }
         let Some(args) = sol.into_iter().collect::<Option<Vec<Ty>>>() else {
             return err(SP, "cannot infer the return type of this closure; annotate it (`|..| -> T { .. }`)");
         };
+        // (one with a parameter annotated with a lifetime, which a cast of a local holding it may coerce)
+        if self.user_code && self.bk.level >= 2 && cd.captures.is_empty() && inputs.iter().any(|x| x.1.as_ref().is_some_and(crate::regions::names_lt)) && !self.clo_ann.iter().any(|x| x.0 == cd.sid) {
+            self.clo_ann.push((cd.sid, c.clone()));
+        }
         // (a closure with no captures where a fn pointer is expected: the address of its fn-pointer instance)
         if matches!(expected, Some(Ty::Fn(_))) && cd.captures.is_empty() {
+            // (a parameter annotated with a lifetime, which the type may bind (`let _: fn(&u32) = |_: &'static u32|
+            // {};`): checked from here on (rg_closure_fnptr))
+            if self.user_code && self.bk.level >= 2 && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() && inputs.iter().any(|x| x.1.as_ref().is_some_and(crate::regions::names_lt)) {
+                self.rg_late_on();
+            }
             let (iid, sig) = {
                 let mut g = self.insts.lock().unwrap();
                 let iid = g.request_fnptr(prog, cid, args).or_else(|e| err(SP, e))?;
@@ -2495,6 +2764,18 @@ impl Cx<'_> {
             return Ok((Some(v), t));
         }
         let sid = prog.instantiate(cd.sid, args.clone()).or_else(|e| err(SP, e))?;
+        // (the parameters its result is made of: a call's result holds what those arguments borrow)
+        if self.user_code && self.bk.level >= 2 && !self.clo_ret_from.iter().any(|x| x.0 == cd.sid) {
+            if let Expr::Closure(_, ins, _, body, _) = c {
+                let names: Vec<(String, usize)> = ins.iter().enumerate().filter_map(|(i, (p, _))| match p {
+                    Pat::Ident(false, _, n, None) => Some((n.clone(), i)),
+                    _ => None,
+                }).collect();
+                let mut from = vec![];
+                borrowck::closure_ret_params(body, &names, &mut from, 0);
+                self.clo_ret_from.push((cd.sid, from));
+            }
+        }
         // (made where nothing was expected: a parameter with no type written that is a reference has one region,
         // not one for each call (see call_fn_inner))
         if hint.is_none() && (expected.is_none() || own_type) && self.user_code && self.bk.level >= 2 && regionck::enabled() {
@@ -2518,18 +2799,39 @@ impl Cx<'_> {
                     _ => None,
                 }).collect();
                 let link = self.clo_ret_param.iter().find(|x| x.0 == cd.sid).map(|x| x.1);
+                // (what its body requires of its parameters (`let y: &'static u32 = x;`): checked from here on, so
+                // its calls' arguments are)
+                let mut reqs = vec![];
+                regionck::closure_reqs(body, &names, &mut reqs);
+                if !reqs.is_empty() && !self.rg.on && self.rg.eligible && self.inline_depth == 0 {
+                    self.rg_late_on();
+                }
                 self.rg_closure_stores(cd.sid, &args, link, body, &names, &cd.captures);
+                self.rg_closure_reqs(cd.sid, &args, &reqs);
             }
         }
         // (a body with a `let` whose annotation writes `'static`: the function is checked from here on, as for its own
         // `let x: &'static T`, so what the closure captures has its trees)
         let ann_static = self.user_code && self.bk.level >= 2 && !cd.captures.is_empty() && matches!(c, Expr::Closure(_, _, _, b, _) if crate::regions::annotates_static(b));
-        if ann_static && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
+        // (or one whose body writes a lifetime (`let y: &'static u32 = &c;`, `W::<&'a u32>`), with nothing else that
+        // asks for its body to be checked: it is, with the function's regions)
+        let writes_lt = !ann_static
+            && self.user_code
+            && self.bk.level >= 2
+            && !to_prelude
+            && bound.is_none()
+            && !inputs.iter().any(|x| x.1.is_some())
+            && regionck::enabled()
+            && matches!(c, Expr::Closure(_, _, _, b, _) if crate::regions::writes_lifetime(b));
+        // (or a parameter annotated with a lifetime where a bound gives the signature (`|x: &'static u32|` for
+        // `F: Fn(&u32)`): rg_closure_sig relates the two)
+        let ann_lt = bound.is_some() && self.user_code && self.bk.level >= 2 && !to_prelude && inputs.iter().any(|x| x.1.as_ref().is_some_and(crate::regions::names_lt));
+        if (ann_static || writes_lt || ann_lt) && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
             self.rg_late_on();
         }
         // (the region signature its body is checked with: from a bound not the prelude's, else from annotated
         // parameters)
-        if self.user_code && self.bk.level >= 2 && !to_prelude && (bound.is_some() || inputs.iter().any(|x| x.1.is_some()) || (self.rg_on() && !cd.captures.is_empty())) && regionck::enabled() {
+        if self.user_code && self.bk.level >= 2 && !to_prelude && (bound.is_some() || inputs.iter().any(|x| x.1.is_some()) || (self.rg_on() && (!cd.captures.is_empty() || writes_lt))) && regionck::enabled() {
             if let Some((ps, r)) = self.closure_sig(Ty::Struct(sid)) {
                 self.rg_closure_sig(c, cid, &ps, r, bound.map(|b| *b));
             }
@@ -3600,7 +3902,10 @@ impl Cx<'_> {
                         // (the arguments flow into the regions the bound's parameters write, as for a `dyn Fn`)
                         self.rg_dyn_fn_args(&b, &args);
                         let r = if never { (None, Ty::Never) } else { self.zero_of(ret) };
-                        self.bk_frame_end_call();
+                        // (a result that borrows an argument by the bound's lifetimes holds the argument's loans:
+                        // `let y = f(&x);` with `F: Fn(&isize) -> &isize`)
+                        let from = if matches!(ret, Ty::Ref(..)) || self.bk_ty(ret).1 { crate::ast_summary::fn_bound_ret_from(&b) } else { vec![] };
+                        self.bk_frame_end_call_from(&args, &from);
                         return Ok(r);
                     }
                     return err(SP, format!("expected a function, found `{}`", self.prog.tn(t)));
@@ -3618,6 +3923,41 @@ impl Cx<'_> {
                 let r = self.call_fn(cid, Some(recv), &args, None, expected, SP);
                 self.rg.shared_clo = None;
                 self.rg_took_call(c);
+                // (those regions are in the closure's type, so they last while it is used: the closure holds what the
+                // arguments passed to such parameters borrow (`g(&a); a = 2; g(&a);` is E0506). A local's closure called
+                // by its name: one in a struct's field may have the field's bound as its signature)
+                let callee = strip_paren(func);
+                if r.is_ok() && self.bk_on() && self.bk.level >= 2 && matches!(callee, Expr::Path(None, p) if p.segs.len() == 1) {
+                    if let Some(ps) = self.hr_lost.iter().find(|h| h.0 == base).map(|h| h.1.clone()) {
+                        let mut srcs = vec![];
+                        for &i in &ps {
+                            if let Some(a) = args.get(i) {
+                                self.bk_direct_pub(a, &mut srcs);
+                            }
+                        }
+                        // (through a reference to the closure (`r(&a)` with `r = &g`): the closure it points to holds
+                        // them too)
+                        let through = matches!(callee, Expr::Path(None, p) if ident_of(p).and_then(|n| self.bk_local_of(n)).is_some_and(|l| matches!(self.bk.locals[l as usize].ty, Ty::Ref(..))));
+                        if through && !srcs.is_empty() {
+                            if let Expr::Path(None, p) = callee {
+                                if let Some(l) = ident_of(p).and_then(|n| self.bk_local_of(n)) {
+                                    self.bk_ev(borrowck::Ev::HoldThrough(l, srcs.clone()));
+                                }
+                            }
+                        }
+                        self.bk_flow_into(callee, &srcs);
+                    }
+                }
+                // (a result that holds references holds what the arguments its body makes it of borrow: `some(&x)`
+                // with `let some = |a| Some(a);`, or `let some = Some;`)
+                if let Ok((_, rt)) = &r {
+                    if self.bk_on() && self.bk_ty(*rt).1 {
+                        if let Some(from) = self.clo_ret_from.iter().find(|x| x.0 == base).map(|x| x.1.clone()).filter(|f| !f.is_empty()) {
+                            self.bk_frame_end_call_from(&args, &from);
+                            return r;
+                        }
+                    }
+                }
                 r
             }
             Ty::Ref(_, Ty::Dyn(s)) | Ty::Box(Ty::Dyn(s)) => {
@@ -3627,12 +3967,37 @@ impl Cx<'_> {
                 }
                 let r = self.dyn_fn_call(v, s, &args, SP);
                 self.rg_dyn_fn_args(s, &args);
+                // (its result holds the loans of the arguments it borrows by the bound's lifetimes, as a generic
+                // `F: Fn(&i32) -> &i32`'s: `let r = f(&x);` with `f: &dyn Fn(&i32) -> &i32`)
+                if let Ok((_, rt)) = &r {
+                    let from = if matches!(rt, Ty::Ref(..)) || self.bk_ty(*rt).1 { crate::ast_summary::fn_bound_ret_from(s) } else { vec![] };
+                    self.bk_frame_end_call_from(&args, &from);
+                    return r;
+                }
                 r
             }
             Ty::Fn(f) => {
                 let r = self.indirect_call(Indirect::Ptr(v), &f.params, f.ret, &args, SP);
                 self.rg_fnptr_call(func, t, &args);
                 self.rg_took_call(c);
+                // (a result that holds references may hold what the arguments of such types borrow, as an elided
+                // signature's: `let f: fn(&String) -> &String = id; let g = f(&temp());`, `some(&temp())` of
+                // `let some = Some;`. Not a result whose regions the region check knows are all 'static
+                // (`f: fn(&i32) -> &'static i32`): the type keeps no region, the pointer's tree does)
+                let holds = r.is_ok() && self.bk_on() && self.bk_ty(f.ret).1;
+                let static_ret = holds && self.rg_on() && {
+                    let prog = self.prog;
+                    let n = f.params.iter().try_fold(0usize, |k, &p| Some(k + super::regionck::count(prog, p, 0)?));
+                    match (self.rt_expr(func), n) {
+                        (Some((_, tr)), Some(n)) => tr.get(n..).is_some_and(|ret| !ret.is_empty() && ret.iter().all(|&r| r == super::regionck::STATIC)),
+                        _ => false,
+                    }
+                };
+                if holds && !static_ret {
+                    let from: Vec<usize> = f.params.iter().enumerate().filter(|(_, p)| self.bk_ty(**p).1).map(|(i, _)| i).collect();
+                    self.bk_frame_end_call_from(&args, &from);
+                    return r;
+                }
                 r
             }
             t => err(SP, format!("expected a function, found `{}`", self.prog.tn(t))),
@@ -4043,8 +4408,12 @@ impl Cx<'_> {
         }
         // (a call of this kind in the arguments keeps the outer one's for after it)
         let outer = std::mem::replace(&mut self.rg.call_self, written);
+        self.bk_arg_flows_before(id, &args);
         let r = self.call_fn(id, None, &args, tf, expected, SP);
         self.rg.call_self = outer;
+        if r.is_ok() {
+            self.bk_arg_flows(id, &args);
+        }
         self.rg_took_call(c);
         self.seg_self = None;
         r

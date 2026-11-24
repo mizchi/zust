@@ -317,7 +317,17 @@ impl Cx<'_> {
                     Ty::Struct(sid) => self.vec_fields(sid).is_some(),
                     _ => false,
                 };
-                seq.then(|| (x.clone(), path_expr("for#tmp")))
+                // (the local is where the value was written: a borrow of it (`for ref x in [s]`) is reported there; an
+                // array literal's first element's)
+                let at = match x {
+                    Expr::Array(xs) if !xs.is_empty() => expr_start(&xs[0]),
+                    _ => expr_start(x),
+                };
+                let mut pe = path_expr("for#tmp");
+                if let Expr::Path(_, p) = &mut pe {
+                    p.pos = at;
+                }
+                seq.then(|| (x.clone(), pe))
             }
             _ => None,
         }
@@ -342,17 +352,23 @@ impl Cx<'_> {
             }
         }
         let mut temp = None;
+        let mut items = None;
         if let Expr::For(_, _, fexpr, _) = f {
             // (`for x in v.iter()` / `v.iter_mut()`, through `copied` / `cloned` / `enumerate` / `rev`: a loan of v for
             // the loop, as `&v` / `&mut v`)
             let mut base = strip_paren(fexpr);
             let mut by_iter = None;
+            // (through `copied` / `cloned`: the items are copies, which hold what v holds, not the loan of v)
+            let mut copies = false;
             while let Expr::MethodCall(r, name, _, args, _) = base {
                 if !args.is_empty() {
                     break;
                 }
                 match name.as_str() {
-                    "copied" | "cloned" | "enumerate" | "rev" => base = strip_paren(r),
+                    "copied" | "cloned" | "enumerate" | "rev" => {
+                        copies |= matches!(name.as_str(), "copied" | "cloned");
+                        base = strip_paren(r);
+                    }
                     "iter" | "iter_mut" => {
                         by_iter = Some((strip_paren(r), name == "iter_mut"));
                         break;
@@ -362,8 +378,16 @@ impl Cx<'_> {
             }
             if let (true, Some((inner, m))) = (self.bk_on(), by_iter.filter(|x| is_place_expr(x.0))) {
                 let t0 = self.bk.call_temps.len();
-                if let Some(ln) = self.bk_loan_only(inner, m) {
+                self.bk.recv_deref = true;
+                let lo = self.bk_loan_only(inner, m);
+                self.bk.recv_deref = false;
+                if let Some(ln) = lo {
                     self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                    let mut it = self.bk_for_items(inner, ln);
+                    if copies {
+                        it.retain(|s| !matches!(s, borrowck::Src::Loan(_)));
+                    }
+                    items = Some(it);
                 }
                 if self.bk.call_temps.len() > t0 {
                     temp = Some(t0);
@@ -374,17 +398,33 @@ impl Cx<'_> {
                 let t0 = self.bk.call_temps.len();
                 if let Some(ln) = self.bk_loan_only(inner, *m) {
                     self.bk_call_temp(&[borrowck::Src::Loan(ln)], true);
+                    items = Some(self.bk_for_items(inner, ln));
                 }
                 if self.bk.call_temps.len() > t0 {
                     temp = Some(t0);
                 }
             }
         }
+        // (an entry for every loop, empty for one over a value: its items hold nothing of an enclosing loop's)
+        self.bk.for_items.push(items.unwrap_or_default());
         let r = self.for_inner(f);
+        self.bk.for_items.pop();
         if let Some(t0) = temp {
             self.bk_call_temps_end(t0);
         }
         r
+    }
+
+    /// What an item of a loop over `&v` / `v.iter()` holds: the loop's loan of v, and what v holds (its own
+    /// references, `for s in &names` with `names: Vec<&str>`)
+    fn bk_for_items(&mut self, v: &Expr, ln: u32) -> Vec<borrowck::Src> {
+        let mut out = vec![borrowck::Src::Loan(ln)];
+        if let Some((p, _)) = self.bk_place(v) {
+            if self.bk.locals[p.local as usize].refs {
+                out.push(borrowck::Src::Local(p.local));
+            }
+        }
+        out
     }
 
     fn for_inner(&mut self, f: &Expr) -> R<V> {
@@ -738,11 +778,16 @@ impl Cx<'_> {
             let pi = to_place(self, Some(idx), Ty::Usize);
             self.for_pat_check(&tp[0], Ty::Usize)?;
             self.runtime_pat_guard(&tp[0], pi)?;
-            self.pat_bind(&tp[0], pi, BindMode::Move)?;
             let pv = to_place(self, v, t);
             self.for_pat_check(&tp[1], t)?;
             self.runtime_pat_guard(&tp[1], pv)?;
-            self.pat_bind(&tp[1], pv, BindMode::Move)?;
+            // (`for (ref i, ref x) in v.iter().enumerate()`: the pair is a temporary of the iteration too)
+            let srcs0 = self.bk_for_item_srcs(t);
+            let saved = self.bk_for_item_begin(f, t);
+            let r = self.pat_bind(&tp[0], pi, BindMode::Move).and_then(|_| self.pat_bind(&tp[1], pv, BindMode::Move));
+            self.bk_for_item_end(saved);
+            self.bk.bind_srcs = srcs0;
+            r?;
         } else {
             let place = to_place(self, val, vt);
             // (`for _ in arr`: `_` binds nothing; the element moved out of arr is dropped at once)
@@ -754,7 +799,12 @@ impl Cx<'_> {
             self.rg_for_item(f, vt);
             self.for_pat_check(fpat, place.ty())?;
             self.runtime_pat_guard(fpat, place)?;
-            self.pat_bind(fpat, place, BindMode::Move)?;
+            let srcs0 = self.bk_for_item_srcs(place.ty());
+            let saved = self.bk_for_item_begin(f, place.ty());
+            let r = self.pat_bind(fpat, place, BindMode::Move);
+            self.bk_for_item_end(saved);
+            self.bk.bind_srcs = srcs0;
+            r?;
             self.rg.pat = None;
         }
         let bound = self.pending_bound.take();
@@ -783,7 +833,8 @@ impl Cx<'_> {
         self.loop_bounds.truncate(nb);
         self.pop_scope();
         if bt != Ty::Never {
-            self.same(SP, bt, Ty::Unit)?;
+            // (a body with a value: at its tail, as rustc points)
+            self.same(block_end_pos(fbody), bt, Ty::Unit)?;
             self.b.ins().jump(step, &[]);
         } else {
             self.b.ins().trap(TrapCode::unwrap_user(1));
@@ -1927,6 +1978,14 @@ impl Cx<'_> {
             }
             // (not when the program has its own `impl From<S> for Box<T>` (S a struct or a Box): that impl is the conversion)
             let user_from = self.prog.names.iter().enumerate().any(|(i, n)| n.starts_with("Box::from") && self.prog.sigs[i].impl_trait.as_deref().is_some_and(|t| t.starts_with("From")));
+            // (`Box::from(s)` of a `&[T]` into a `Box<[T]>`: a copy, `s.to_vec().into_boxed_slice()`)
+            let to_slice = matches!(expected, Some(Ty::Box(Ty::Slice(_))));
+            if !user_from && (to_slice || matches!(arg, Some(Ty::Ref(_, Ty::Slice(_))))) && !matches!(arg, Some(Ty::Box(_) | Ty::Struct(_))) {
+                let sp = crate::parse::Span { start: p.pos, at: p.pos };
+                let v = Expr::MethodCall(Box::new(cargs[0].clone()), "to_vec".into(), vec![], vec![], sp);
+                let ne: &Expr = self.keep_expr(Expr::MethodCall(Box::new(v), "into_boxed_slice".into(), vec![], vec![], sp));
+                return self.expr(ne, expected).map(Some);
+            }
             if arg.is_some_and(owned) && !(user_from && matches!(arg, Some(Ty::Struct(_) | Ty::Box(_)))) {
                 // (the `Box` segment as written, with its arguments: `Box::<u64>::from(1)`)
                 let seg = |n: &str| crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() };
@@ -1950,6 +2009,9 @@ impl Cx<'_> {
             }
             let inner = match expected {
                 Some(Ty::Box(t)) if !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) => Some(*t),
+                // (a closure boxed where a `Box<dyn Fn(..)>` is expected: the trait object is its signature, as for
+                // `&|x| ..` where a `&dyn Fn(..)` is (its parameters' types, the bound its body is checked with))
+                Some(Ty::Box(t @ Ty::Dyn(_))) if matches!(crate::acg::strip_paren(&cargs[0]), Expr::Closure(..)) => Some(*t),
                 _ => None,
             };
             // (`Box::<[bool; 0]>::new([])`: the turbofish names the content)
@@ -1960,6 +2022,10 @@ impl Cx<'_> {
             let (v, t) = self.expr(&cargs[0], inner)?;
             if t == Ty::Never {
                 return Ok(Some((None, Ty::Never)));
+            }
+            // (a closure boxed where a `Box<dyn Fn()>` is expected: the coercion wants it `Fn`)
+            if let (Some(Ty::Box(Ty::Dyn(want))), true) = (expected, self.bk_on()) {
+                self.fn_kind_move_check(&cargs[0], want)?;
             }
             let Some(&alloc) = self.prog.index.get(crate::prelude::BOX_ALLOC) else {
                 return err(SP, "internal: the allocator is missing from the prelude");
@@ -2431,6 +2497,22 @@ impl Cx<'_> {
                 let tr_impl = |t: Ty| self.trait_candidate(&format!("{}::{}", self.ty_key(t), segs[1]), &segs[0]).is_some();
                 if let Some(st) = st.filter(|&t| !self.prog.has_param(t) && (t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char | Ty::Str) || matches!(t, Ty::Struct(sid) if self.prog.structs[sid as usize].base.is_none())) && tr_impl(t)) {
                     if let Ok(ne) = crate::parse::parse_expr(&format!("<{} as {}>::{}", self.prog.tn(st), segs[0], segs[1])) {
+                        let ne: &Expr = self.keep_expr(ne);
+                        return self.expr(ne, _expected);
+                    }
+                }
+            }
+        }
+        // (`V::Mask::first_offset` as a value, V a type parameter: the method of the associated type's trait impl, as
+        // `<V::Mask as MoveMask>::first_offset`)
+        if q.is_none() && segs.len() == 3 && p.segs.iter().all(|s| s.args.is_empty()) {
+            let syn = crate::parse::Ty::Path(None, crate::parse::Path { global: false, segs: p.segs[..2].to_vec(), pos: p.pos });
+            if let Some(t) = self.parse_ty(&syn).ok().filter(|&t| !self.prog.has_param(t)) {
+                let key = format!("{}::{}", self.ty_key(t), segs[2]);
+                let mut trs: Vec<&String> = self.prog.traits.keys().filter(|tr| self.trait_candidate(&key, tr).is_some()).collect();
+                trs.sort();
+                if let [tr] = trs[..] {
+                    if let Ok(ne) = crate::parse::parse_expr(&format!("<{} as {}>::{}", self.prog.tn(t), tr, segs[2])) {
                         let ne: &Expr = self.keep_expr(ne);
                         return self.expr(ne, _expected);
                     }

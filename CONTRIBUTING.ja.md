@@ -20,6 +20,7 @@ clone したばかりのところから、順に行う。終わると、この�
    - あれば:
      - rust-analyzer (`bench/lsp_parity.py`、`bench/ide_golden_ra.py`)
      - cargo-mutants (ミューテーションテスト)
+     - cargo-nextest (テストを速く回す。「テスト」を参照。CI はこれで回す)
      - blaze (`bench/vs_blaze.py`)
      - Node 24 以上と TypeSafe の API キー (jev-lint。「英語の文書と日本語訳」を参照)
 2. submodule ごと clone する。`cratebench/` と `bench/deps_bench.py` は、そこにある実在のクレートをビルドする。
@@ -98,7 +99,18 @@ crate ごとの詳しい中身は [docs/ja/architecture.md](docs/ja/architecture
 cargo test --release --workspace
 ```
 
-全部のテスト。次のものが入っている。
+全部のテスト。[cargo-nextest](https://nexte.st/) なら、同じテストが 2/3 ほどの時間で終わる (テストごとに別のプロセスで、
+テストのバイナリを並べて動かす。4 コアで 71 秒 → 50 秒)。doc テストは動かさないので、CI はそれを `cargo test --doc` で動かす。
+
+```bash
+cargo nextest run --release --workspace
+```
+
+設定は `.config/nextest.toml` にある (`ci` プロファイル: 最初の失敗で止めない、止まったテストは 5 分で打ち切る)。
+多くのプログラムをビルドして動かすテストは、自分でそれをコアに分けて回す (`tests/common/par.rs`) ので、`cargo test` でも
+遅くはない。
+
+テストには次のものが入っている。
 
 - lexer などの単体テスト
 - check の診断 (エラーの後も止まらないこと、キャッシュされた呼び出し元越しに総称関数の本体のエラーを拾うこと)
@@ -162,7 +174,7 @@ python3 bench/rust_ui.py --baseline bench/rust_ui_passing.txt --check
 テストの種類は、compiletest と同じく頭の指示から決める。run-pass のテストは、ビルドでき、終了コード 0 で、
 `.run.stdout` と同じものを出すこと。check-pass のテストは `zustc check` が通すこと。compile-fail のテストは、
 `//~ ERROR` の注釈が指す行にエラーを出して拒むこと。zustc に求められないもの (nightly の `#![feature]`・補助の
-クレート・`compile-flags`・`revisions`・ほかのターゲット) が要るテストは「対象外」に数える。
+クレート・`--test` と `--cfg` 以外の `compile-flags`・`revisions`・ほかのターゲット) が要るテストは「対象外」に数える。
 
 `bench/rust_ui_passing.txt` は zustc が通るテストの一覧。そのどれかが通らなくなると CI が失敗する。変更で通る
 テストが増えたら、一覧を書き直す:
@@ -286,8 +298,10 @@ origin/main からの差分の行だけを変異させ、テストで見つか�
 
 ## CI とベンチマークのダッシュボード
 
-- `.github/workflows/ci.yml`: push と pull request ごとに、release ビルド、`cargo test --release --workspace`、
-  `tests/compare.sh`、tests/ui の一覧との比較を走らせる。サイズ予算はリンカで変わるので、CI は wild 0.11.0 を入れて `ZUSTC_BENCH_LINKER=wild` で測る
+- `.github/workflows/ci.yml`: push と pull request ごとに、release ビルド、テスト
+  (`cargo nextest run --release --workspace --profile ci` と doc テスト)、`tests/compare.sh`、tests/ui の一覧との比較を
+  走らせる。test ジョブはクレート内の ThinLTO なしでビルドし (`CARGO_PROFILE_RELEASE_LTO=off`: ワークスペースのビルドが
+  2/3 ほどの時間になる)、ビルドの間に、キャッシュしたパッケージから valgrind を入れる。サイズ予算はリンカで変わるので、CI は wild 0.11.0 を入れて `ZUSTC_BENCH_LINKER=wild` で測る
   (`bench/budget.txt` も wild の大きさ)。
 - `.github/workflows/kpi.yml`: pull request への push ごとに走る。分岐点 (merge base) と head を同じランナーで順にビルドし、
   どちらも `bench/kpi_track.py --lsp --dry-run` で測る (zust-analyzer のセッションも含む)。`bench/kpi_pr.py` が
@@ -349,6 +363,8 @@ Markdown を変えたコミットでは、フックが `scripts/docs_check.sh --
 | `ZUSTC_IR_VERIFY=1` | 組み立て直した命令の値の型が、型検査の記録と同じかを確かめる |
 | `ZUSTC_CLIF_VERIFY=1` / `ZUSTC_CLIF_DUMP=1` | Cranelift の IR を検証する / 出す |
 | `ZUSTC_PREP_VERIFY=1` | 前処理の差分の結果を、全部やり直した結果と比べる |
+| `ZUSTC_CHECK_FORK_MIN=N` | `check` が関数の wave を子プロセスに分けるのは、子 1 つあたり N 個以上あるときだけ (既定 32)。`1` にするとほぼすべての wave で fork し、診断が `-j 1` と同じかを試せる |
+| `ZUSTC_NO_POLONIUS=1` | Polonius Alpha と違うところで borrow check を NLL の規則にする (#1): 返される reborrow は関数の終わりまで生き、ローカルの一部への代入は借用を kill しない |
 | `ZUSTC_DUMP_PRE=FILE` | 前処理 (macro_rules! の展開・`mod x;` の結合) の後のソースを FILE に書く |
 | `ZUSTC_LOG_COMPILED=1` | コンパイルした関数の名前を出す (キャッシュから読めなかったものはその理由も) |
 | `ZUSTC_PROF=1` | 段ごとの時間を細かく出す |

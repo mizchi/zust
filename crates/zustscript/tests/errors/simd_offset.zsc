@@ -1,4 +1,4 @@
 // expect: @simd: an offset that is not affine in `r`
-@simd pub fn bad(w: F32Array, x: F32Array, m: i32, n: i32) -> F32Array {
+@simd export fn bad(w: F32Array, x: F32Array, m: i32, n: i32) -> F32Array {
   range(0, m).map((r) => range(0, n).fold(0.0, (s, i) => s + w[r * r + i] * x[i]))
 }

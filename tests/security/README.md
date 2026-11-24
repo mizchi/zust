@@ -58,7 +58,7 @@ case. `every_std_cve_has_a_case` checks that the table and the cases agree.
 | CVE-2021-28876, -28878 | Zip | the same index fetched twice | unsupported (Zip has no `next_back`) |
 | CVE-2021-28877 | nested Zip | the same index fetched twice | passes |
 | CVE-2021-28879 | Zip | a consumed Zip used again overflowed | passes |
-| CVE-2021-29922 | Ipv4Addr::from_str | leading zeros stripped | unsupported (no `std::net`) |
+| CVE-2021-29922 | Ipv4Addr::from_str | leading zeros stripped | passes (leading zeros rejected) |
 | CVE-2021-31162 | Vec::from_iter | double free when a drop panicked | passes |
 | CVE-2022-21658 | fs::remove_dir_all | a symlink swapped in during the walk was followed | unsupported (no `remove_dir_all`) |
 | CVE-2024-24576 | process::Command (Windows) | batch file arguments not escaped | n/a: Windows only |

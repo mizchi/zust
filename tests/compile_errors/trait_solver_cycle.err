@@ -1,1 +1,1 @@
- 10:5: the trait bound `i32: Combo` is not satisfied (for `T`) (E0277)
+ 10:5: overflow evaluating the requirement `i32: Combo` (E0275)

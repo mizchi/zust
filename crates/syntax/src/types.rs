@@ -439,6 +439,8 @@ pub struct Summary {
     /// Those parameters declared `?Sized` (`struct Foo<T: ?Sized>`): only they may be an unsized type, in the last
     /// field
     pub adt_unsized: Vec<String>,
+    /// The defaults of those parameters, by place (`struct W<T, F = fn() -> T>`: [None, Some(fn() -> T)])
+    pub adt_defaults: Vec<Option<TySyn>>,
     /// The regions of an impl / trait header (None: it names no lifetime)
     pub hdr_regions: Option<Box<RImplSyn>>,
     /// The regions of the struct / enum defined (None: it names no lifetime, so it has no region of its own)
@@ -466,6 +468,13 @@ pub struct Summary {
     /// The aliases whose definitions name a lifetime that is not their own (`type S = &'static u8;`): TySyn keeps no
     /// lifetimes, so a use of one written without lifetimes cannot be told from an elided one
     pub alias_fixed_lts: Vec<String>,
+    /// An impl's constants whose types name its lifetimes (`impl<'a> Foo<'a> { const C: &'a u32 }`): the region codes of
+    /// the type against the impl's lifetimes (a use instantiates them with those its path writes: `<Foo<'a>>::C`)
+    pub const_regions: Vec<(String, Vec<u8>)>,
+    /// An impl's associated types whose values name its lifetimes (`impl<'a> Foo for &'a () { type Out = &'a u32; }`,
+    /// `type Out = &'static u32`): by the index in assocs, the region codes of the value against the impl's lifetimes
+    /// (a projection written in a body instantiates them with those its self type writes: `<&'static () as Foo>::Out`)
+    pub assoc_regions: Vec<(u64, Vec<u8>)>,
     /// The concrete (non-parameter, non-primitive) types bounded in the item's where clauses (`where Local: Any`):
     /// Program checks that they exist
     pub where_types: Vec<String>,

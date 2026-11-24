@@ -1,0 +1,2 @@
+// expect: the tag "in-progress" of `BadTag` is not a name
+import type { BadTag } from "../ts/unsupported.ts";

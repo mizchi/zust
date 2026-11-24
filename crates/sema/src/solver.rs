@@ -819,7 +819,7 @@ impl Solver<'_> {
 
     /// RefCell's Ref / RefMut, or MutexGuard: a guard that derefs to its one type argument
     pub fn is_guard(&self, base: u32) -> bool {
-        matches!(self.prog.structs[base as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard")
+        matches!(self.prog.structs[base as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard" | "PeekMut")
     }
 
     pub fn is_vec(&self, base: u32) -> bool {
@@ -935,11 +935,28 @@ impl Solver<'_> {
         skip: usize,
         self_ty: Option<Ty>,
     ) -> u32 {
+        self.apply_with(callee, args, skip, self_ty, vec![])
+    }
+
+    /// apply_self, with the type variables of some of the callee's generics given (a turbofish's: `id::<u32>(c)`)
+    pub fn apply_with(
+        &mut self,
+        callee: Option<u32>,
+        args: Vec<u32>,
+        skip: usize,
+        self_ty: Option<Ty>,
+        pre: Vec<Option<u32>>,
+    ) -> u32 {
         match callee {
             Some(id) => {
                 let sig = &self.prog.sigs[id as usize];
                 let (params, ret) = (sig.params[skip.min(sig.params.len())..].to_vec(), sig.ret);
                 let mut pv: Vec<Option<u32>> = vec![None; sig.generics.len()];
+                for (i, v) in pre.into_iter().enumerate() {
+                    if i < pv.len() {
+                        pv[i] = v;
+                    }
+                }
                 for (k, v) in std::mem::take(&mut self.pre_pv) {
                     if let Some(slot) = pv.get_mut(k) {
                         *slot = Some(v);

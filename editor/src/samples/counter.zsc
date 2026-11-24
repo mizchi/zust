@@ -1,0 +1,33 @@
+// A React component: `export fn main() -> Jsx` is rendered in the preview
+extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
+
+type Item = { label: String, done: bool }
+type RowProps = { item: Item, onToggle: fn(String) -> () }
+
+// A plain numeric function runs as JS here; zsc --emit-rust can lower it to Rust.
+export fn score(xs: Array<i32>) -> i32 {
+  let mut s = 0;
+  for x in xs { s += x * x; }
+  s
+}
+
+fn Row(props: RowProps) -> Jsx {
+  <li onClick={() => props.onToggle(props.item.label)}>
+    {if props.item.done { "✔ " } else { "· " }}{props.item.label}
+  </li>
+}
+
+export fn App() -> Jsx {
+  let (count, setCount) = useState(0);
+  let items = [Item { label: "parse", done: true }, Item { label: "check", done: count > 2 }, Item { label: "emit", done: count > 5 }];
+  <div>
+    <h1>zustscript</h1>
+    <button onClick={() => setCount(count + 1)}>clicked {count.to_string()} times</button>
+    <p>score: {score([1, 2, 3] |> .map((x) => x * count)).to_string()}</p>
+    <ul>{items |> .map((it) => <Row key={it.label} item={it} onToggle={(l) => setCount(count + 2)} />)}</ul>
+  </div>
+}
+
+export fn main() -> Jsx {
+  <App />
+}

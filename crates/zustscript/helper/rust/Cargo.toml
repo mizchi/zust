@@ -1,0 +1,12 @@
+[package]
+name = "zustscript_helper"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "The values a zustscript module passes between JS and wasm, in one stable byte format (the Rust side of the npm package zustscript-helper)"
+
+# (standalone: not a member of any workspace)
+[workspace]
+
+[lib]
+path = "src/lib.rs"

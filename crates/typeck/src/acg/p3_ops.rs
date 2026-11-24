@@ -1366,7 +1366,9 @@ impl Cx<'_> {
             Some(e) => self.expr(e, result_ty.or(expected))?,
             None => (None, Ty::Unit),
         };
-        self.finish_arm(ev, et, merge, &mut result_ty, &mut param, SP)?;
+        // (a mismatch is the else branch's, at its tail as rustc points; with no else, at the `if` (E0317))
+        let at = else_branch.as_deref().map_or(SP, branch_pos);
+        self.finish_arm(ev, et, merge, &mut result_ty, &mut param, at)?;
 
         self.b.switch_to_block(merge);
         match result_ty {
@@ -1388,6 +1390,11 @@ impl Cx<'_> {
             self.b.ins().trap(TrapCode::unwrap_user(1));
             return Ok(());
         }
+        // (`&&T` where the arms are `&T`: the deref coercion, `Imp::Borrowed(x) => x` with x: &&[u8])
+        let (v, t) = match *result_ty {
+            Some(rt) if rt != t => self.deref_coerce(v, t, rt),
+            _ => (v, t),
+        };
         match *result_ty {
             Some(rt) => self.same(span, t, rt)?,
             None => {
@@ -1485,7 +1492,8 @@ impl Cx<'_> {
             if inst.is_none() {
                 self.prog.match_ty(gen_fields[fi].1, vt, &mut sol);
             }
-            vals.push((fi, v, vt, SP));
+            // (a field's value of the wrong type: at the value (the field's name when shorthand), as rustc points)
+            vals.push((fi, v, vt, expr_start(e)));
         }
         let inst = match inst.take() {
             Some(i) => i,
@@ -1732,7 +1740,13 @@ impl Cx<'_> {
         if self.vec_fields(sid).is_some() {
             return None;
         }
-        let m = if self.prog.method(sid, "deref_mut").is_some() { "deref_mut" } else { "deref" };
+        // (the prelude's `Pin<&T>`: its `deref_mut` would borrow the pin itself mutably, where std's `Pin` has no
+        // `DerefMut` for a shared pointer (`s.0.borrow_mut()` of `s: Pin<&S>` needs no `mut s`))
+        let base = self.prog.base_of(sid);
+        let shared_pin = self.prog.structs[base as usize].name == "Pin"
+            && self.prog.struct_item.get(base as usize).is_none_or(|&i| i >= self.prog.prelude_from)
+            && matches!(self.prog.structs[sid as usize].args.first(), Some(Ty::Ref(false, _)));
+        let m = if !shared_pin && self.prog.method(sid, "deref_mut").is_some() { "deref_mut" } else { "deref" };
         let did = self.prog.method(sid, m)?;
         if !matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, i) if !i.is_fat() && !matches!(i, Ty::Str | Ty::Slice(_) | Ty::Dyn(_))) {
             return None;
@@ -1762,6 +1776,23 @@ impl Cx<'_> {
                     self.index_check(ok, len, i, sp);
                 }
                 return Ok((b, l, t));
+            }
+        }
+        // (`c[0]` of a struct whose `Deref` is to a slice / str (`type Target = [T]`): `c.deref()[0]`, `deref_mut`
+        // for a `&mut c[0]`)
+        let mut pt = self.peek(e);
+        while let Some(Ty::Ref(_, i)) = pt {
+            pt = Some(*i);
+        }
+        if let Some(Ty::Struct(sid)) = pt {
+            if self.vec_fields(sid).is_none() {
+                let m = if self.bk.place_mut && self.prog.method(sid, "deref_mut").is_some() { "deref_mut" } else { "deref" };
+                if let Some(did) = self.prog.method(sid, m) {
+                    if matches!(self.prog.sigs[did as usize].ret, Ty::Ref(_, Ty::Slice(_))) {
+                        let d = self.keep_expr(mcall(paren(e), m, vec![]));
+                        return self.indexable(d);
+                    }
+                }
             }
         }
         let is_const = matches!(e, Expr::Path(..)) && self.const_of(e).is_some();
@@ -1999,8 +2030,10 @@ impl Cx<'_> {
             (true, Some(Ty::Array(_, n))) if n < crate::types::CONST_LEN_BASE => n,
             _ => self.array_len(len)?,
         };
+        // (the element's type: of an expected array, or of a slice, as `&[0; N]` where `&[u8]` is expected, behind a
+        // reference that is not promoted to static data (a length that is not a literal))
         let exp = match expected {
-            Some(Ty::Array(t, _)) => Some(*t),
+            Some(Ty::Array(t, _) | Ty::Slice(t)) => Some(*t),
             _ => None,
         };
         let (v, elem) = self.expr(x, exp)?;

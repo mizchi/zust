@@ -1,4 +1,4 @@
-// An inductive cycle proves nothing: `i32: Combo` needs `i32: Dee`, which needs `i32: Dum`, which needs `i32: Dee`
+// An inductive cycle proves nothing: `i32: Combo` needs `i32: Dee`, which needs `i32: Dum`, which needs `i32: Dee` (E0275, as rustc)
 trait Dee {}
 trait Dum {}
 impl<T: Dum> Dee for T {}

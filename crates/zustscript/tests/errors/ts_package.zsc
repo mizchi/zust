@@ -1,0 +1,2 @@
+// expect: by a relative path
+import type { ReactNode } from "react";

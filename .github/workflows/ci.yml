@@ -19,22 +19,58 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      # (the workspace's crates are built again on every run: without the crate-local ThinLTO they build in ~2/3 of
+      # the time, and zustc runs ~15% slower, which the tests spend less on. bench.yml measures the release profile
+      # as it is)
+      CARGO_PROFILE_RELEASE_LTO: "off"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rust-src
       - uses: Swatinem/rust-cache@v2
-      - name: Install wild and valgrind
+        with:
+          workspaces: |
+            . -> target
+            formal/connect -> target
+      # (valgrind's packages, kept between runs: a slow mirror once took 5 minutes to download them)
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: Restore valgrind's packages
+        uses: actions/cache@v4
+        with:
+          path: ~/apt-debs
+          key: apt-valgrind-ubuntu-24.04-v1
+      - name: Install wild, and valgrind in the background
         run: |
           command -v wild || cargo install --locked wild-linker@0.11.0
-          sudo apt-get update && sudo apt-get install -y valgrind
+          # (the "Wait for valgrind" step waits for it: the build does not need valgrind. Nothing of the step's stdout or
+          # stderr stays open in the background, or the runner waits for it before the next step)
+          { scripts/ci_install_valgrind.sh >~/valgrind-install.log 2>&1 </dev/null && echo 0 || echo 1; } >~/valgrind-install.done 2>/dev/null &
       - name: Build
         run: cargo build --release --workspace
+      - name: Wait for valgrind
+        run: |
+          while [ ! -s ~/valgrind-install.done ]; do sleep 1; done
+          cat ~/valgrind-install.log
+          [ "$(cat ~/valgrind-install.done)" = 0 ] || { echo "valgrind's install failed"; exit 1; }
+          valgrind --version
+      # (nextest runs the test binaries side by side too, where cargo test runs them one after another: 71s -> 50s
+      # on 4 cores. `cargo test` runs the same tests. .config/nextest.toml has the ci profile)
       - name: Test
-        run: cargo test --release --workspace
+        run: |
+          cargo nextest run --release --workspace --profile ci
+          cargo test --release --workspace --doc
       - name: Compare with rustc (examples)
         run: tests/compare.sh
+      # (the cratebench crates' own tests, under zurgo test and cargo test, test by test: the crates that matched,
+      # cratebench/test_passing.txt. Only their submodules are fetched)
+      - name: cratebench's tests against cargo test
+        run: |
+          git submodule update --init --depth 1 $(grep -v '^#' cratebench/test_passing.txt | sed 's|^|cratebench/vendor/|')
+          python3 cratebench/test.py --check
       # (zustc's prelude, compiled by zustc, against TLA+ models: formal/connect)
       - name: Implementation against the models
         run: cargo test --release --manifest-path formal/connect/Cargo.toml

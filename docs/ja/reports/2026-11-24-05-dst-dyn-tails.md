@@ -81,6 +81,33 @@ fat から thin へのポインタのキャスト、unsized な場所を値と�
 その 1 で失敗していた analyzer のテスト 2 つ (`hover_and_completion`、`type_inference_like_rust_analyzer`) は
 `rust-src` を必要とする。CI はこれを入れているが、このコンテナには入っていなかった。コンポーネントを足すと通る。
 
+## main のマージ
+
+main は 374 コミット進んでいて、その中に main 自身のトレイトの作業 (#2: `Program::evaluate`、ゴールの答えを
+yes・maybe・no で返す) があった。2 つが出会うのはインスタンスの境界の確認 (`Insts::request`):
+
+- main の循環 (`Maybe(Cycle)`) を先に E0275 として報告する。rustc も同じ: `tests/compile_errors/trait_solver_cycle.rs`
+  の期待は E0277 でなく E0275 にした。
+- そのあとにこのブランチの trait solver の確認を行う。その std 側はもともと `implements` に聞いており、main ではそれが
+  `evaluate(..) != No` になっている。
+- プログラムのトレイトで solver が燃料を使い切る場合 (60 段の blanket impl の連鎖、main の
+  `impl_bounds_are_nested_goals`) は、引数のない境界に限って `evaluate` の no で決める。`evaluate` はライフタイムを
+  読まないので、`for<'a> Yokeable<'a>` では誤った no になる。
+- Self がプリミティブになるデフォルトメソッドのインスタンスを飛ばす main の規則は、本来の対象である「参照への impl
+  だけがある」場合 (`prim_ref_only`) に限った。そうしないと `impl<'a> Visit for () where (): Array<Element = &'a ()>`
+  が飛ばされていた。
+- このブランチの `-> impl Tr` の確認は、末尾が `if` / `match` の本体を腕の確認に任せる: 記録される型は最初の腕の
+  もので、型の違う腕は E0308 になる。
+
+両方の baseline を合わせたものに対して退行はなく、さらに 3 つ通るようになった。
+
+| 種類 | main | このブランチ | マージ後 |
+|---|---:|---:|---:|
+| run-pass | 1858 | 1868 | 1892 |
+| check-pass | 1525 | 1527 | 1540 |
+| build-pass | 102 | 104 | 104 |
+| compile-fail | 4640 | 4559 | 4750 |
+
 ## やっていないこと
 
 - 末尾が unsized な struct に利用者の `impl Drop` があっても、その Box を drop するときに呼ばれない (フィールドは

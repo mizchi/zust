@@ -32,12 +32,20 @@ pub struct BuildOpts {
     pub no_cache: bool,
     /// `--build-script-compiler`
     pub bs_compiler: Compiler,
+    /// `zurgo test`: also the selected packages' test crates (their lib's and bins' unit tests, their integration
+    /// tests), with the dev-dependencies
+    pub test: bool,
+    /// `zurgo test --lib` / `--bin x` / `--test x` ..: only the test crates whose label contains one of these
+    /// (`(lib)`, `(bin x)`, `(test x)`; empty: every one)
+    pub test_targets: Vec<String>,
 }
 
 pub struct Built {
     pub out_dir: PathBuf,
     /// (binary name, executable)
     pub bins: Vec<(String, PathBuf)>,
+    /// `zurgo test`'s test executables
+    pub tests: Vec<crate::test_runner::TestExe>,
     pub crates: Vec<CrateSpec>,
 }
 
@@ -71,6 +79,12 @@ pub fn out_dir(g: &Graph, o: &BuildOpts) -> PathBuf {
 
 /// The workspace for zustc (also written by `-v`, in the format of `zustc build`)
 pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
+    plan_labeled(g, o).map(|p| p.0)
+}
+
+/// plan, and each test crate: its index in the crates, its label (`pkg (lib)`, `pkg (bin x)`, `pkg (test x)`), and
+/// whether it has the harness (`harness = false`: no)
+pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, String, bool, String)>)> {
     let host = Target::host();
     let target = match &o.target {
         Some(t) => Target::by_triple(t).ok_or_else(|| format!("unknown target `{t}` (x86_64-unknown-linux-gnu, wasm32-unknown-unknown)"))?,
@@ -82,7 +96,7 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
         g,
         &Opts {
             mode: Mode::Split,
-            dev: false,
+            dev: o.test,
             target: Some(&target),
             host: &host,
             features: o.features.clone(),
@@ -124,6 +138,25 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
     for &m in &selected {
         visit(g, &r, (m, false), &mut order, &mut state, &mut pms)?;
     }
+    // (`zurgo test`: the members' dev-dependencies too, and what they need)
+    if o.test {
+        for &m in &selected {
+            let n = (m, false);
+            for &(ei, t) in &r.nodes[&n].edges {
+                let d = g.decl(n.0, &g.edges[n.0][ei]);
+                if d.kind != crate::manifest::DepKind::Dev || t.0 == m {
+                    continue;
+                }
+                if g.pkgs[t.0].m.is_proc_macro() {
+                    if !pms.iter().any(|p| p.0 == t.0) {
+                        pms.push(t);
+                    }
+                    continue;
+                }
+                visit(g, &r, t, &mut order, &mut state, &mut pms)?;
+            }
+        }
+    }
     let display = |p: &Path| -> String {
         // (cargo gives rustc the members' paths from the workspace root, and the others' as they are)
         p.strip_prefix(&g.ws_dir).map(|x| x.display().to_string()).unwrap_or_else(|_| p.display().to_string())
@@ -164,6 +197,7 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
     // (the proc macros of each stub, checked against the crates once they are all planned)
     let mut pm_macros: Vec<(usize, proc_macro_stub::Macros)> = vec![];
     if !pms.is_empty() {
+        let run_pm = zustc::pm::server_path().is_some();
         let stub_dir = out_dir(g, o).join("proc-macro-stubs");
         std::fs::create_dir_all(&stub_dir).map_err(|e| format!("{}: {e}", stub_dir.display()))?;
         for &pn in &pms {
@@ -182,12 +216,21 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
             let cfg = zustc::cfg::CfgSet { features: r.nodes[&pn].features.iter().cloned().collect(), debug_assertions: !o.release, ..Default::default() };
             let m = proc_macro_stub::macros_of(&zustc::cfg::strip(&src, &cfg).unwrap_or(src));
             let stub = stub_dir.join(format!("{}.rs", lib.name));
-            let text = proc_macro_stub::stub_text(&pk.name, &m);
+            // (its macros run when rustc builds it and the toolchain's proc-macro server is there: zustc asks the
+            //  server. Otherwise its uses are errors, below)
+            let dylib = if run_pm { Some(bs.proc_macro_dylib(pn)?) } else { None };
+            let text = match &dylib {
+                Some(_) => format!("// (zurgo: `{}` is a proc-macro crate: rustc builds it, the toolchain's proc-macro server runs its macros)\n", pk.name),
+                None => proc_macro_stub::stub_text(&pk.name, &m),
+            };
             if std::fs::read_to_string(&stub).ok().as_deref() != Some(text.as_str()) {
                 std::fs::write(&stub, &text).map_err(|e| format!("{}: {e}", stub.display()))?;
             }
             if o.verbose {
-                eprintln!("note: `{} v{}` is a proc-macro crate: built as a stub (mizchi/zust#29)", pk.name, pk.version);
+                match &dylib {
+                    Some(d) => eprintln!("note: `{} v{}` is a proc-macro crate: {}", pk.name, pk.version, d.display()),
+                    None => eprintln!("note: `{} v{}` is a proc-macro crate: built as a stub, as the toolchain has no proc-macro server (mizchi/zust#29)", pk.name, pk.version),
+                }
             }
             lib_of.insert(lib.name.clone(), p);
             crates.push(CrateSpec {
@@ -200,8 +243,12 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
                 exe: None,
                 cfgs: vec![],
                 env: vec![],
+                proc_macro: dylib.clone(),
+                test: false,
             });
-            pm_macros.push((p, m));
+            if dylib.is_none() {
+                pm_macros.push((p, m));
+            }
         }
     }
     let n_stubs = crates.len();
@@ -224,11 +271,13 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
             root: lib.path.clone(),
             display: display(&lib.path),
             lib: true,
-            deps: deps_of(g, &r, n)?,
+            deps: deps_of(g, &r, n, false)?,
             features: r.nodes[&n].features.iter().cloned().collect(),
             exe: None,
             cfgs,
             env,
+            proc_macro: None,
+            test: false,
         });
     }
     // (the requested binaries, over all the selected packages)
@@ -247,7 +296,7 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
             if !missing_features(g, &r, n, b).is_empty() {
                 continue;
             }
-            let mut deps = deps_of(g, &r, n)?;
+            let mut deps = deps_of(g, &r, n, false)?;
             if let Some(l) = &pk.m.lib {
                 deps.insert(0, l.name.clone());
             }
@@ -273,6 +322,8 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
                 exe: Some(b.name.clone()),
                 cfgs,
                 env,
+                proc_macro: None,
+                test: false,
             });
         }
     }
@@ -280,18 +331,132 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
     if !missing.is_empty() {
         return Err(format!("no bin target named `{}`", missing.iter().map(|b| b.as_str()).collect::<Vec<_>>().join("`, `")));
     }
+    // (`zurgo test`: a test crate for the lib's unit tests, each bin's, and each integration test. Each is a bin
+    //  crate built with `test` (zustc's harness), with the dev-dependencies; an integration test also with the lib)
+    // (each test crate: its index in crates, its label, whether it has the harness)
+    let mut labels: Vec<(usize, String, bool, String)> = vec![];
+    if o.test {
+        let built_bins: Vec<(String, String)> = crates.iter().filter_map(|c| c.exe.clone().map(|e| (e.clone(), e))).collect();
+        for &m in &selected {
+            let pk = &g.pkgs[m];
+            let n = (m, false);
+            let dev = deps_of(g, &r, n, true)?;
+            let lib = pk.m.lib.as_ref().filter(|l| !l.is_proc_macro());
+            let mut units: Vec<(String, &crate::manifest::Target, bool)> = vec![];
+            if let Some(l) = lib {
+                units.push((format!("{} (lib)", pk.m.name), l, false));
+            }
+            for b in &pk.m.bins {
+                if missing_features(g, &r, n, b).is_empty() {
+                    units.push((format!("{} (bin {})", pk.m.name, b.name), b, true));
+                }
+            }
+            for t in &pk.m.tests {
+                if missing_features(g, &r, n, t).is_empty() {
+                    units.push((format!("{} (test {})", pk.m.name, t.name), t, true));
+                }
+            }
+            // (`--lib`, `--bin x`, `--test x` ..: only those are built. `test = false` leaves a target out, unless it is
+            //  named (`--lib`, `--bin x`, `--test x`), as cargo runs it then; `--bins` and `--tests` do not name one)
+            let named = |w: &str| w == "(lib)" || (w.ends_with(')') && (w.starts_with("(bin ") || w.starts_with("(test ")));
+            units.retain(|u| {
+                if o.test_targets.is_empty() {
+                    return u.1.test;
+                }
+                o.test_targets.iter().any(|w| u.0.contains(w.as_str()) && (u.1.test || named(w)))
+            });
+            for (label, t, with_lib) in units {
+                let mut deps = dev.clone();
+                if with_lib {
+                    if let Some(l) = lib {
+                        deps.retain(|d| *d != l.name);
+                        deps.insert(0, l.name.clone());
+                    }
+                } else if let Some(l) = lib {
+                    // (the lib's own unit tests are the lib: a dev-dependency on the package itself is left out)
+                    deps.retain(|d| *d != l.name);
+                }
+                let kind = if t.kind.iter().any(|k| k == "test") { "test" } else if t.kind.iter().any(|k| k == "bin") { "bin" } else { "lib" };
+                let mut name = format!("{}_{kind}_test", t.name.replace('-', "_"));
+                while lib_of.contains_key(&name) || crates.iter().any(|c| c.name == name) {
+                    name.push('_');
+                }
+                // (the executable is named after the crate's unique name: two packages' targets cannot share it)
+                let exe = name.clone();
+                let (mut cfgs, mut env) = build_script::crate_env(&pk.m, &t.name, bs_out.get(&n));
+                // (`cfg(test)` with the harness or without it (`harness = false`), as cargo builds a test target)
+                if !t.harness {
+                    cfgs.push(("test".into(), None));
+                }
+                if kind == "bin" {
+                    env.push(("CARGO_BIN_NAME".into(), t.name.clone()));
+                }
+                env.push(("CARGO_PRIMARY_PACKAGE".into(), "1".into()));
+                env.push(("CARGO_CRATE_NAME".into(), t.name.replace('-', "_")));
+                // (an integration test finds the package's binaries by `CARGO_BIN_EXE_<name>`)
+                if kind == "test" {
+                    let out = out_dir(g, o);
+                    for (b, e) in &built_bins {
+                        if pk.m.bins.iter().any(|x| &x.name == b) {
+                            let wasm = o.target.as_deref() == Some("wasm32-unknown-unknown");
+                            env.push((format!("CARGO_BIN_EXE_{b}"), if wasm { out.join(format!("{e}.wasm")) } else { out.join(e) }.display().to_string()));
+                        }
+                    }
+                }
+                node_of.push(n);
+                crates.push(CrateSpec {
+                    name,
+                    root: t.path.clone(),
+                    display: display(&t.path),
+                    lib: false,
+                    deps,
+                    features: r.nodes[&n].features.iter().cloned().collect(),
+                    exe: Some(format!("{exe}.test")),
+                    cfgs,
+                    env,
+                    // (`harness = false`: its own `main`; `cfg(test)` comes from `cfgs` above)
+                    proc_macro: None,
+                    test: t.harness,
+                });
+                labels.push((crates.len() - 1, label, t.harness, t.name.clone()));
+            }
+        }
+    }
     // (a crate that uses one of a stub's derives or attributes: an error, as zustc would drop the attribute. Each crate
     //  is read as zustc reads it: its module tree, with its features and cfgs. Only the proc-macro crates it reaches
     //  count, directly or through the libraries that re-export them)
     if !pm_macros.is_empty() {
         let wasm = target.triple.starts_with("wasm32");
         let mut reach: BTreeMap<Node, Vec<usize>> = BTreeMap::new();
-        for (c, &n) in crates[n_stubs..].iter().zip(&node_of) {
-            let pm_deps = pm_reach(g, &r, n, &mut reach);
+        // (the test crates, with or without a harness: they link the dev-dependencies)
+        let test_crates: Vec<usize> = labels.iter().map(|l| l.0).collect();
+        for (k, (c, &n)) in crates[n_stubs..].iter().zip(&node_of).enumerate() {
+            let is_test_crate = test_crates.contains(&(n_stubs + k));
+            let mut pm_deps = pm_reach(g, &r, n, &mut reach);
+            // (a test crate also links the package's dev-dependencies: the proc macros they are or reach count too.
+            //  Added here, not in the memo, which holds the normal dependencies' reach)
+            if is_test_crate {
+                for &(ei, t) in &r.nodes[&n].edges {
+                    if g.decl(n.0, &g.edges[n.0][ei]).kind != crate::manifest::DepKind::Dev || t.0 == n.0 {
+                        continue;
+                    }
+                    let more = if g.pkgs[t.0].m.is_proc_macro() { vec![t.0] } else { pm_reach(g, &r, t, &mut reach) };
+                    for p in more {
+                        if !pm_deps.contains(&p) {
+                            pm_deps.push(p);
+                        }
+                    }
+                }
+            }
             if pm_deps.is_empty() {
                 continue;
             }
-            let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs: c.cfgs.clone(), env: c.env.clone() };
+            // (a test crate is configured with `test`, as zustc builds it (one without a harness has it in its cfgs))
+            let mut cfgs = c.cfgs.clone();
+            if c.test && !cfgs.iter().any(|x| x.0 == "test" && x.1.is_none()) {
+                cfgs.push(("test".to_string(), None));
+            }
+            let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs, env: c.env.clone(), ..Default::default() };
             let (text, _) = zustc::srcmap::load_crate(&c.root, &c.display, &cfg)?;
             let u = proc_macro_stub::uses_in(&text);
             for (p, m) in pm_macros.iter().filter(|(p, _)| pm_deps.contains(p)) {
@@ -302,7 +467,7 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
             }
         }
     }
-    Ok(crates)
+    Ok((crates, labels))
 }
 
 /// The `required-features` of a bin that are off (`dep/feat` is a feature of the dependency `dep`, on the node this
@@ -341,11 +506,12 @@ fn pm_reach(g: &Graph, r: &resolve::Resolved, n: Node, memo: &mut BTreeMap<Node,
 }
 
 /// The extern names of a node's normal dependencies (as zustc's workspace names them: the library names)
-fn deps_of(g: &Graph, r: &resolve::Resolved, n: Node) -> R<Vec<String>> {
+/// (`dev`: the dev-dependencies too, for a test crate)
+fn deps_of(g: &Graph, r: &resolve::Resolved, n: Node, dev: bool) -> R<Vec<String>> {
     let mut out: Vec<String> = vec![];
     for &(ei, t) in &r.nodes[&n].edges {
         let d = g.decl(n.0, &g.edges[n.0][ei]);
-        if d.kind != crate::manifest::DepKind::Normal {
+        if d.kind != crate::manifest::DepKind::Normal && !(dev && d.kind == crate::manifest::DepKind::Dev) {
             continue;
         }
         let to = &g.pkgs[t.0].m;
@@ -389,6 +555,12 @@ fn ws_text_in(crates: &[CrateSpec], redact: bool) -> String {
         for (k, v) in &c.env {
             e.push_str(&format!(" env={}={}", esc(k), if redact { "…".to_string() } else { esc(v) }));
         }
+        if let Some(p) = &c.proc_macro {
+            e.push_str(&format!(" pm={}", esc(&p.display().to_string())));
+        }
+        if c.test {
+            e.push_str(" test=true");
+        }
         s.push_str(&format!("{} {} {} {}{f}{e}\n", if c.lib { "lib" } else { "bin" }, c.name, c.root.display(), c.deps.join(" ")));
     }
     s
@@ -400,7 +572,7 @@ pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
     // (one zurgo build at a time in a target directory, as cargo locks its build directory: the OUT_DIR a build script
     //  filled stays the one this build's crates read)
     let _lock = build_script::lock_file(&out.join(".zurgo-lock"))?;
-    let crates = plan(g, o)?;
+    let (crates, labels) = plan_labeled(g, o)?;
     if o.verbose {
         let ws = ws_text(&crates);
         let p = out.join("zurgo-ws.txt");
@@ -423,6 +595,20 @@ pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
     let wasm = opts.module_writer.is_some();
     Session2::new(opts).build_workspace(&crates, &out)?;
     // (wasm32: a bin is the module `<name>.wasm`)
-    let bins = crates.iter().filter_map(|c| c.exe.as_ref().map(|e| (e.clone(), if wasm { out.join(format!("{e}.wasm")) } else { out.join(e) }))).collect();
-    Ok(Built { out_dir: out, bins, crates })
+    let is_test: Vec<usize> = labels.iter().map(|l| l.0).collect();
+    let bins = crates
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !is_test.contains(i))
+        .filter_map(|(_, c)| c.exe.as_ref().map(|e| (e.clone(), if wasm { out.join(format!("{e}.wasm")) } else { out.join(e) })))
+        .collect();
+    let tests = labels
+        .into_iter()
+        .filter_map(|(i, label, harness, target)| {
+            let c = &crates[i];
+            let dir = c.env.iter().find(|(k, _)| k == "CARGO_MANIFEST_DIR").map(|(_, v)| PathBuf::from(v)).unwrap_or_else(|| g.ws_dir.clone());
+            c.exe.as_ref().map(|e| crate::test_runner::TestExe { label, target, exe: if wasm { out.join(format!("{e}.wasm")) } else { out.join(e) }, dir, harness })
+        })
+        .collect();
+    Ok(Built { out_dir: out, bins, tests, crates })
 }

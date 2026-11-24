@@ -1,4 +1,4 @@
-// Strings and `==` by content in @wasm: the same source as JS (zsc --all-js) and as wasm, with the same results
+// Strings and `==` by content in @wasm: the annotated Wasm build and the unannotated JS build, with the same results
 // (tests/examples.rs: text_same_in_js_and_wasm). Lengths and order are JS's (UTF-16 code units), and `==` on
 // arrays, records and enums compares contents in both layers.
 
@@ -33,7 +33,7 @@ enum Tag { Named(String), Anon }
   s
 }
 
-@wasm pub fn text(n: i32) -> String {
+@wasm export fn text(n: i32) -> String {
   let ana = Person { name: "  ana ", age: 30 };
   let bo = Person { name: "bo", age: 41 };
   let people = [ana, bo, Person { name: "😀x", age: 7 }];
@@ -51,7 +51,7 @@ enum Tag { Named(String), Anon }
     + "😀".len().to_string() + " " + f + " " + build(n)
 }
 
-@wasm pub fn shout(s: String) -> String { s.trim().to_upper() + "!" }
+@wasm export fn shout(s: String) -> String { s.trim().to_upper() + "!" }
 
 // operands that assign what another operand reads: the left value / the receiver is the one before the assignment
 @wasm fn conflicts(n: i32) -> String {
@@ -66,4 +66,4 @@ enum Tag { Named(String), Anon }
   (if a { "T" } else { "F" }) + (if b { "T" } else { "F" }) + c + j + (n as i32).to_string()
 }
 
-@wasm pub fn conflict_report(n: i32) -> String { conflicts(n) }
+@wasm export fn conflict_report(n: i32) -> String { conflicts(n) }

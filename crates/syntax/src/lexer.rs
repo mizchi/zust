@@ -586,6 +586,27 @@ fn string_lit(s: &[u8], mut i: usize) -> Option<usize> {
 mod tests {
     use super::*;
 
+    /// Edition 2021's reserved prefixes: an identifier right before `#` / `"` / `'`, and what only looks like one
+    #[test]
+    fn reserved_prefixes() {
+        let bad = |s: &str| unknown_prefix(s).unwrap_or_default();
+        assert_eq!(bad("m!(foo#bar);"), "1:4: prefix `foo` is unknown");
+        assert_eq!(bad("x\nm!(foo\"s\");"), "2:4: prefix `foo` is unknown");
+        assert_eq!(bad("m!(foo'b');"), "1:4: prefix `foo` is unknown");
+        assert_eq!(bad("m!('prefix#lt);"), "1:5: prefix `prefix` is unknown");
+        assert_eq!(bad("m!($x#y);"), "1:5: prefix `x` is unknown");
+        for ok in [
+            "let s = \"abc\"; let c = 'x'; let t = b\"by\"; let u = b'y';",
+            "let r = r#\"a \"q\" foo#bar\"#; let rr = r##\"x\"#y\"##; let raw = br\"z\"; let cs = c\"c\";",
+            "fn f<'a>(x: &'a str) -> &'a str { x } let e = '\\n'; let q = '\\'';",
+            "// foo#bar \"x\"y\n/* a\"b /* foo#bar */ */ let n = 1u8;",
+            "m!(r#let#foo); let r#match = 1; m!($x # y); let s = \"foo#bar\";",
+            "m!(\"x\"tag#tail); m!('c'tag#t); m!('r#a); fn g<'a>(_: &'a u8) {} let n = 'a';",
+        ] {
+            assert_eq!(unknown_prefix(ok), None, "{ok}");
+        }
+    }
+
     fn hashes(src: &str) -> Vec<Key> {
         split(src).unwrap().iter().map(|i| i.hash).collect()
     }
@@ -670,6 +691,166 @@ mod tests {
 /// `#[cfg(test)] mod tests { .. }` はまるごと消す。モジュールのパス (`geo::f`) は名前解決が先頭を読み飛ばす。
 /// モジュールがなければ None
 /// 簡単な字句解析: (種類, 開始, 終了)。0 = 識別子, 1 = 記号 1 文字, 2 = リテラル (コメントは飛ばす)
+/// Edition 2021 reserves `prefix#`, `prefix"..."` and `prefix'..'` for every identifier but the literal prefixes (`b`,
+/// `r`, `br`, `c`, `cr`): `foo#bar` is no longer the three tokens `foo # bar`. The first such one, as
+/// `line:col: prefix `foo` is unknown`. A look at the bytes first: tokenized only when an identifier character is
+/// right before one of the three
+pub fn unknown_prefix(src: &str) -> Option<String> {
+    // (it runs on every file a build reads: no tokens, a jump from one of `/` `"` `'` `#` to the next, as only they
+    // start a comment or literal or can follow a prefix. A string's or char's closing quote is stepped over with it,
+    // so a quote looked at is an opening one, and the identifier right before it its prefix)
+    let b = src.as_bytes();
+    let n = b.len();
+    // (the identifier ending right before i: its start, when it is one (not a number's suffix `1u8`, a lifetime
+    // `'a`, a macro's fragment `$x`)
+    let prefix_at = |i: usize| -> Option<usize> {
+        let mut a = i;
+        while a > 0 && is_ident_cont(b[a - 1]) {
+            a -= 1;
+        }
+        // (and not a raw name `r#let`, whose `#` is not a prefix's)
+        let raw = a >= 2 && b[a - 1] == b'#' && b[a - 2] == b'r' && (a == 2 || !is_ident_cont(b[a - 3]));
+        // (a literal's suffix `"x"tag` / `'c'tag` is no prefix either; a lifetime's name is looked at with its quote. A
+        // macro's `$x#y` is one: rustc's lexer reads `$` alone)
+        (a < i && is_ident_start(b[a]) && !raw && !(a > 0 && matches!(b[a - 1], b'\'' | b'"'))).then_some(a)
+    };
+    let skip_str = |mut i: usize| {
+        while i < n && b[i] != b'"' {
+            i += if b[i] == b'\\' { 2 } else { 1 };
+        }
+        (i + 1).min(n)
+    };
+    // (from a raw string's first `#` or `"` at i: past its end `"#..`)
+    let skip_raw = |i: usize| {
+        let mut j = i;
+        while j < n && b[j] == b'#' {
+            j += 1;
+        }
+        let h = j - i;
+        let mut k = j + 1;
+        while k < n && !(b[k] == b'"' && k + h < n && b[k + 1..=k + h].iter().all(|&x| x == b'#')) {
+            k += 1;
+        }
+        (k + 1 + h).min(n)
+    };
+    // (a char literal at the quote i, or a lifetime's quote: past it)
+    let skip_quote = |i: usize| {
+        if b.get(i + 1) == Some(&b'\\') {
+            let mut j = i + 3;
+            while j < n && b[j] != b'\'' {
+                j += 1;
+            }
+            return (j + 1).min(n);
+        }
+        let l = utf8_len(b.get(i + 1).copied().unwrap_or(0));
+        if b.get(i + 1 + l) == Some(&b'\'') { i + 2 + l } else { i + 1 }
+    };
+    let mut i = 0;
+    while i < n {
+        i = next_special(b, i);
+        if i >= n {
+            break;
+        }
+        let c = b[i];
+        if c == b'/' {
+            if b.get(i + 1) == Some(&b'/') {
+                i = b[i..].iter().position(|&c| c == b'\n').map_or(n, |k| i + k);
+            } else if b.get(i + 1) == Some(&b'*') {
+                let mut d = 0;
+                while i < n {
+                    if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                        d += 1;
+                        i += 2;
+                    } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
+                        d -= 1;
+                        i += 2;
+                        if d == 0 {
+                            break;
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        let w = prefix_at(i).map(|a| (a, &src[a..i]));
+        match (c, w) {
+            (b'"', None | Some((_, "b" | "c"))) => i = skip_str(i + 1),
+            (b'"', Some((_, "r" | "br" | "cr"))) => i = skip_raw(i),
+            (b'\'', None) | (b'\'', Some((_, "b"))) => {
+                let j = skip_quote(i);
+                if j != i + 1 {
+                    i = j;
+                    continue;
+                }
+                // (a lifetime: `'a#` is a reserved prefix too, but for the raw lifetime `'r#a`)
+                let mut e = j;
+                while e < n && is_ident_cont(b[e]) {
+                    e += 1;
+                }
+                if e > j && e < n && b[e] == b'#' && &src[j..e] != "r" {
+                    return Some(prefix_error(b, j, &src[j..e]));
+                }
+                i = e;
+            }
+            (b'#', None) => i += 1,
+            (b'#', Some((_, "r" | "br" | "cr"))) => {
+                let mut j = i;
+                while j < n && b[j] == b'#' {
+                    j += 1;
+                }
+                if b.get(j) == Some(&b'"') {
+                    i = skip_raw(i);
+                } else if w.is_some_and(|(_, w)| w == "r") && j == i + 1 {
+                    // (a raw name `r#let`: past it)
+                    i = j;
+                    while i < n && is_ident_cont(b[i]) {
+                        i += 1;
+                    }
+                } else {
+                    let (a, w) = w.unwrap();
+                    return Some(prefix_error(b, a, w));
+                }
+            }
+            (_, Some((a, w))) => return Some(prefix_error(b, a, w)),
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// The first of `/` `"` `'` `#` at or after i (b.len() if none): 8 bytes at a time (a byte equal to c makes a zero
+/// byte of `x ^ c..c`, found by the carry trick)
+fn next_special(b: &[u8], mut i: usize) -> usize {
+    const LO: u64 = 0x0101_0101_0101_0101;
+    const HI: u64 = 0x8080_8080_8080_8080;
+    let has = |x: u64, c: u8| {
+        let y = x ^ (LO * c as u64);
+        y.wrapping_sub(LO) & !y & HI
+    };
+    while i + 8 <= b.len() {
+        let x = u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+        let m = has(x, b'/') | has(x, b'"') | has(x, b'\'') | has(x, b'#');
+        if m != 0 {
+            break;
+        }
+        i += 8;
+    }
+    while i < b.len() && !matches!(b[i], b'/' | b'"' | b'\'' | b'#') {
+        i += 1;
+    }
+    i
+}
+
+fn prefix_error(b: &[u8], a: usize, w: &str) -> String {
+    let line = b[..a].iter().filter(|&&c| c == b'\n').count() + 1;
+    let col = a - b[..a].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1) + 1;
+    format!("{line}:{col}: prefix `{w}` is unknown")
+}
+
 pub fn tokenize(s: &[u8]) -> Vec<(u8, usize, usize)> {
     let n = s.len();
     // (種類, 開始, 終了): 0 = 識別子, 1 = 記号 1 文字, 2 = リテラル
@@ -745,6 +926,12 @@ pub fn tokenize(s: &[u8]) -> Vec<(u8, usize, usize)> {
     toks
 }
 
+/// What a proc macro's expansion starts with (crate::pm): a comment, so the preprocessing knows that a line holds one
+pub const PM_MARK: &str = "/*zust:pm*/";
+
+/// Whether this process expanded a proc macro (crate::pm::expand): only then can a text hold PM_MARK
+pub static PM_EXPANDED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// 関数の本体の中に書いたアイテム (`fn helper() {..}` / `struct` / `enum` / `const` / `use`) をファイルの末尾へ移す。
 /// 元の場所は空白にして (改行は残す)、後ろの行番号を変えない
 pub fn hoist_nested_items(src: &str) -> Option<String> {
@@ -771,11 +958,20 @@ pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
+    const KWS: [&str; 21] = [
+        "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "pub fn ", "pub struct ",
+        "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) ",
+    ];
     let indented = src.split('\n').any(|l| {
         let t = l.trim_start();
-        t.len() < l.len() && ["fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "pub fn ", "pub struct ", "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) "].iter().any(|k| t.starts_with(k))
+        // (the keywords' first letters first: most lines start with none of them)
+        t.len() < l.len()
+            && matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p'))
+            && KWS.iter().any(|k| t.starts_with(k))
     });
-    if !indented {
+    // (a proc macro's output is one line, marked (PM_MARK): the items in its bodies, `{#[link(..)] extern "C" {..}`,
+    // are not at a line's start. Looked for only once this process expanded one)
+    if !indented && !(PM_EXPANDED.load(std::sync::atomic::Ordering::Relaxed) && src.contains(PM_MARK)) {
         return None;
     }
     let s = src.as_bytes();
@@ -827,18 +1023,27 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 } else {
                     k
                 }
+            } else if t == b"unsafe" && k + 1 < toks.len() && tok(k + 1) == b"extern" {
+                // (`unsafe extern "C" { .. }`)
+                k + 1
             } else {
                 k
             };
             let pt = t;
             let t = tok(ik);
+            // (an extern block, `extern "C" { fn f(); }` (also with no ABI): the block goes out whole, its declarations
+            // are not items of their own)
+            let extern_block = t == b"extern"
+                && ik + 1 < toks.len()
+                && (is_sym(ik + 1, b"{") || (toks[ik + 1].0 == 2 && ik + 2 < toks.len() && is_sym(ik + 2, b"{")));
             // (`mod m { .. }` / `trait T { .. }` / `impl S { .. }` / `type A = ..;` / `union U { .. }` too; `union` is a
             // keyword only before a name)
             let item_kw = matches!(t, b"fn" | b"struct" | b"enum" | b"const" | b"use" | b"static" | b"mod" | b"trait" | b"impl" | b"type")
-                || (t == b"union" && ik + 1 < toks.len() && toks[ik + 1].0 == 0);
+                || (t == b"union" && ik + 1 < toks.len() && toks[ik + 1].0 == 0)
+                || extern_block;
             let impl_like = t == b"impl";
             // (`const` の後ろに `fn` や `|` (const クロージャ) が来るものは別扱い: `const fn` は fn で見る)
-            if in_body && stmt_start && item_kw && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<"))) {
+            if in_body && stmt_start && item_kw && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<")) || extern_block) {
                 // アイテムの終わり: `{ .. }` (fn / struct / enum) か `;`
                 let mut j = ik + 1;
                 let mut d = 0i32;
@@ -910,8 +1115,17 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 }
                 moves.push((toks[st].1, toks[e].2));
                 let nk = if matches!(t, b"static") && tok(ik + 1) == b"mut" { ik + 2 } else { ik + 1 };
-                if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" {
+                if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" && !extern_block {
                     nested_names.push((tok(nk).to_vec(), fn_bodies.last().unwrap().1));
+                }
+                // (an extern block's functions: names of the block's function, renamed like its other items when
+                // another function's block declares the name too; the declaration then keeps its symbol, link_name)
+                if extern_block {
+                    for q in ik + 1..e {
+                        if toks[q].0 == 0 && tok(q) == b"fn" && q + 1 < e && toks[q + 1].0 == 0 {
+                            nested_names.push((tok(q + 1).to_vec(), fn_bodies.last().unwrap().1));
+                        }
+                    }
                 }
                 k = e + 1;
                 continue;
@@ -976,10 +1190,56 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
         // (同じトークンに複数あれば、元の順で最初のもの (renames.iter().find と同じ))
         at.sort();
         at.dedup_by_key(|x| x.0);
+        // (a foreign function's declaration, `fn abs(x: i32) -> i32;` with no body, renamed: it keeps its symbol, a
+        // `#[link_name = "abs"]` before it unless it has one)
+        let foreign_decl = |k: usize| -> Option<usize> {
+            if k < 1 || !(toks[k - 1].0 == 0 && tok(k - 1) == b"fn") {
+                return None;
+            }
+            let mut d = 0i32;
+            let mut j = k + 1;
+            while j < toks.len() {
+                if toks[j].0 == 1 {
+                    match tok(j) {
+                        b"(" | b"[" => d += 1,
+                        b")" | b"]" => d -= 1,
+                        b";" if d == 0 => break,
+                        b"{" if d == 0 => return None,
+                        _ => {}
+                    }
+                }
+                j += 1;
+            }
+            let mut st = k - 1;
+            loop {
+                if st >= 1 && toks[st - 1].0 == 0 && matches!(tok(st - 1), b"unsafe" | b"safe" | b"pub") {
+                    st -= 1;
+                } else if st >= 4 && is_sym(st - 1, b")") && toks[st - 2].0 == 0 && is_sym(st - 3, b"(") && tok(st - 4) == b"pub" {
+                    // (`pub(crate)` / `pub(super)`: the attribute goes before it)
+                    st -= 4;
+                } else {
+                    break;
+                }
+            }
+            // (its attributes, back to the block's `{` or the previous item's `;`)
+            let mut a = st;
+            while a >= 1 && !(toks[a - 1].0 == 1 && matches!(tok(a - 1), b"{" | b";" | b"}")) {
+                a -= 1;
+                if toks[a].0 == 0 && tok(a) == b"link_name" {
+                    return None;
+                }
+            }
+            Some(st)
+        };
         let mut out = Vec::with_capacity(s.len() + 64);
         let mut last = 0;
         for &(k, ri) in &at {
             let t = toks[k];
+            if let Some(st) = foreign_decl(k) {
+                out.extend_from_slice(&s[last..toks[st].1]);
+                out.extend_from_slice(format!("#[link_name = \"{}\"] ", String::from_utf8_lossy(&renames[ri].2)).as_bytes());
+                last = toks[st].1;
+            }
             out.extend_from_slice(&s[last..t.1]);
             out.extend_from_slice(&renames[ri].3);
             last = t.2;
@@ -1479,8 +1739,45 @@ pub fn rename_module_collisions_in(src: &str, crates: &[String]) -> Option<Strin
 
 /// fix: 名前を変えて桁がずれた所 (行, 新しいテキストでの桁, その行でそこから後ろのずれの合計)。
 /// 元の桁 = 桁 - ずれ (その行で桁が col 以上の最後の項)
+/// Whether a `use` renames an item of std (`use std::cell::LazyCell as Lazy;`): the name it brings in is that path
+fn renames_std(src: &str) -> bool {
+    // (the source can be large and most have none: `contains` first (it is much faster than `match_indices` over a
+    // large text), then the lines that have a `use `)
+    if !src.contains("use ") {
+        return false;
+    }
+    let b = src.as_bytes();
+    let mut off = 0;
+    for line in src.split('\n') {
+        let start = off;
+        off += line.len() + 1;
+        if !line.contains("use ") {
+            continue;
+        }
+        for (j, _) in line.match_indices("use ") {
+            let i = start + j;
+            if i > 0 && (b[i - 1].is_ascii_alphanumeric() || b[i - 1] == b'_') {
+                continue;
+            }
+            let r = src[i + 4..].trim_start();
+            let r = r.strip_prefix("::").unwrap_or(r);
+            if !(r.starts_with("std::") || r.starts_with("core::") || r.starts_with("alloc::")) {
+                continue;
+            }
+            let stmt = &r[..r.find(';').unwrap_or(r.len())];
+            if stmt.match_indices(" as ").any(|(j, _)| stmt[j + 4..].trim_start().starts_with(|c: char| c.is_alphabetic())) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>) -> Option<String> {
-    if !src.contains("mod") {
+    let has_mod = src.contains("mod");
+    // (only without modules: with them the pass runs anyway)
+    let std_renames = !has_mod && renames_std(src);
+    if !has_mod && !std_renames {
         return None;
     }
     let s = src.as_bytes();
@@ -1514,7 +1811,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         k += 1;
     }
-    if mods.is_empty() {
+    // (no module: only for a `use` that renames an item of std)
+    if mods.is_empty() && !std_renames && !renames_std(src) {
         return None;
     }
     // トークン k のスコープ (いちばん内側のモジュール。なければ usize::MAX = ルート)。
@@ -1796,7 +2094,12 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             }
         }
     }
-    let resolve_mod = |from: usize, segs: &[Vec<u8>], at: usize| -> Option<usize> {
+    // (lead: the path is `::a::b`, whose first name is a crate's (the crate root's in 2015), not an alias a block
+    // or a module brings in)
+    let resolve_mod_at = |from: usize, segs: &[Vec<u8>], at: usize, lead: bool| -> Option<usize> {
+        if lead {
+            return resolve_mod(usize::MAX, segs);
+        }
         let alias = segs.first().and_then(|f| {
             // (the innermost block's alias or module of that name, then the module's alias)
             block_alias
@@ -1814,6 +2117,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         resolve_mod(from, segs)
     };
+    let resolve_mod = |from: usize, segs: &[Vec<u8>], at: usize| resolve_mod_at(from, segs, at, false);
     let renamed_in = |m: usize, n: &[u8]| -> Option<Vec<u8>> { renamed_map.get(&(m, n.to_vec())).cloned() };
     // use 文で取り込んだ名前: (スコープ, 使う名前) → 新しい名前。use 文のトークン範囲は書き換えない
     let mut imports: Vec<(usize, Vec<u8>, Vec<u8>)> = vec![];
@@ -1856,6 +2160,18 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 continue;
             }
             let (mpath, name) = path.split_at(path.len() - 1);
+            // (an item of std under another name, `use std::cell::LazyCell as Lazy;`: the name is its path)
+            if matches!(mpath[0].as_slice(), b"std" | b"core" | b"alloc") && local != name[0] && local.as_slice() != b"_" && !def_set.contains(&(sc, local.clone())) {
+                let mut full = vec![];
+                for (i, seg) in path.iter().enumerate() {
+                    if i > 0 {
+                        full.extend_from_slice(b"::");
+                    }
+                    full.extend_from_slice(seg);
+                }
+                add(local, full);
+                continue;
+            }
             if let Some(m) = resolve_mod(sc, mpath, k) {
                 if let Some(nn) = renamed_in(m, &name[0]) {
                     add(local, nn);
@@ -1970,73 +2286,195 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     {
         let mut close: Vec<usize> = vec![usize::MAX; toks.len()];
         let mut st: Vec<usize> = vec![];
-        for k in 0..toks.len() {
-            if is_sym(k, b'(') || is_sym(k, b'{') || is_sym(k, b'[') {
-                st.push(k);
-            } else if is_sym(k, b')') || is_sym(k, b'}') || is_sym(k, b']') {
-                if let Some(o) = st.pop() {
-                    close[o] = k;
+        // (and where the `<`s and the `fn`s are: the loops below start only there)
+        let mut lts: Vec<usize> = vec![];
+        let mut fns: Vec<usize> = vec![];
+        for (k, t) in toks.iter().enumerate() {
+            match t.0 {
+                1 if t.2 == t.1 + 1 => match s[t.1] {
+                    b'(' | b'{' | b'[' => st.push(k),
+                    b')' | b'}' | b']' => {
+                        if let Some(o) = st.pop() {
+                            close[o] = k;
+                        }
+                    }
+                    b'<' => lts.push(k),
+                    _ => {}
+                },
+                0 if t.2 == t.1 + 2 && &s[t.1..t.2] == b"fn" => fns.push(k),
+                _ => {}
+            }
+        }
+        // (and the names of std items under another name: `let release = 1;` beside `use std::mem::drop as release;`
+        // is the local)
+        let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));
+        let renamed_names: Vec<&[u8]> = renamed
+            .iter()
+            .map(|r| r.1.as_slice())
+            .chain(imports.iter().filter(|i| std_path(&i.2)).map(|i| i.1.as_slice()))
+            .chain(block_imports.iter().filter(|i| std_path(&i.3)).map(|i| i.2.as_slice()))
+            .collect();
+        // (the names a generic parameter list `<..>` at g declares, of those, and the index of its `>`: `<C, const N:
+        // usize, T: Tr<C>>` declares C, N and T)
+        let generics = |g: usize| -> (Vec<&[u8]>, usize) {
+            let mut names = vec![];
+            let mut d = 0usize;
+            let mut q = g;
+            while q < toks.len() {
+                if is_sym(q, b'<') {
+                    d += 1;
+                } else if is_sym(q, b'>') && !(q >= 1 && is_sym(q - 1, b'-')) {
+                    d -= 1;
+                    if d == 0 {
+                        return (names, q);
+                    }
+                } else if (is_sym(q, b'(') || is_sym(q, b'[') || is_sym(q, b'{')) && close[q] != usize::MAX {
+                    // (`const B: bool = { 2 > 1 }`: its `>` is no end)
+                    q = close[q];
+                } else if d == 1 && toks[q].0 == 0 && (is_sym(q - 1, b'<') || is_sym(q - 1, b',') || is_id(q - 1, b"const")) && renamed_names.contains(&tok(q)) {
+                    names.push(tok(q));
+                }
+                q += 1;
+            }
+            (names, toks.len() - 1)
+        };
+        // (a generic parameter in its scope, where it is no later path segment: `C`, `x: C`, `C: Tr`, and a path's root,
+        // `C::default()`; not `a::C`)
+        let local_at = |q: usize| toks[q].0 == 0 && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':'));
+        // (an item's generic parameters, in the whole item: `impl<C> X<C> { .. }`, `struct S<C>(C);`)
+        // (from each `<`: an item's when `impl` or `struct S` / `enum E` / .. is before it)
+        for &g in lts.iter().filter(|_| !renamed_names.is_empty()) {
+            let k = g;
+            if k == 0 || k + 1 >= toks.len() {
+                continue;
+            }
+            let item = is_id(k - 1, b"impl")
+                || (k >= 2 && toks[k - 1].0 == 0 && [&b"struct"[..], b"enum", b"union", b"trait", b"type"].iter().any(|w| is_id(k - 2, w)));
+            if !item {
+                continue;
+            }
+            let (names, ge) = generics(g);
+            if !names.is_empty() {
+                let mut e = ge + 1;
+                while e < toks.len() && !is_sym(e, b'{') && !is_sym(e, b';') {
+                    if (is_sym(e, b'(') || is_sym(e, b'[')) && close[e] != usize::MAX {
+                        e = close[e];
+                    }
+                    e += 1;
+                }
+                let until = if e < toks.len() && is_sym(e, b'{') && close[e] != usize::MAX { close[e] } else { e.min(toks.len() - 1) };
+                for q in g + 1..until {
+                    if names.contains(&tok(q)) && local_at(q) {
+                        local_tok[q] = true;
+                    }
                 }
             }
         }
-        let renamed_names: Vec<&[u8]> = renamed.iter().map(|r| r.1.as_slice()).collect();
+        // (no name to bind: nothing for a function to make local)
+        let mut fi = if renamed_names.is_empty() { fns.len() } else { 0 };
         let mut k = 0;
-        while k + 2 < toks.len() {
-            if !is_id(k, b"fn") || toks[k + 1].0 != 0 {
-                k += 1;
+        while fi < fns.len() {
+            // (the next `fn` at or after k: one inside a body that was read goes too, as before)
+            if fns[fi] < k {
+                fi += 1;
                 continue;
             }
-            // (the parameters: `(`, after the generics)
+            k = fns[fi];
+            fi += 1;
+            if k + 2 >= toks.len() || toks[k + 1].0 != 0 {
+                continue;
+            }
+            // (each name and where it is the local: a generic parameter or a parameter in the whole function, a `let`
+            // after its statement to the end of its block)
+            let mut bound: Vec<(&[u8], usize, usize)> = vec![];
+            // (the parameters: `(`, after the generics; a generic parameter is a path's root too, `C::default()`)
             let mut p = k + 2;
+            let mut generic_names: Vec<&[u8]> = vec![];
             if is_sym(p, b'<') {
-                let mut d = 0;
-                while p < toks.len() {
-                    if is_sym(p, b'<') {
-                        d += 1;
-                    } else if is_sym(p, b'>') && !(p >= 1 && is_sym(p - 1, b'-')) {
-                        d -= 1;
-                        if d == 0 {
-                            p += 1;
-                            break;
-                        }
-                    }
-                    p += 1;
+                let (names, ge) = generics(p);
+                for n in names {
+                    bound.push((n, p + 1, usize::MAX));
+                    generic_names.push(n);
                 }
+                p = ge + 1;
             }
             if p >= toks.len() || !is_sym(p, b'(') || close[p] == usize::MAX {
                 k += 1;
                 continue;
             }
             let pe = close[p];
-            let mut bound: Vec<&[u8]> = vec![];
             for q in p + 1..pe {
                 if toks[q].0 == 0 && q + 2 <= pe && is_sym(q + 1, b':') && !is_sym(q + 2, b':') && renamed_names.contains(&tok(q)) {
-                    bound.push(tok(q));
+                    bound.push((tok(q), p + 1, usize::MAX));
                 }
             }
-            // (the body: the first `{` after the parameters, or none (`;`))
+            // (the body: the first `{` after the parameters, or none (`;`: then the signature's end))
             let mut b = pe + 1;
             while b < toks.len() && !is_sym(b, b'{') && !is_sym(b, b';') {
                 b += 1;
             }
-            if b >= toks.len() || !is_sym(b, b'{') || close[b] == usize::MAX {
-                k = pe;
-                continue;
-            }
-            let be = close[b];
-            for q in b + 1..be {
+            let body = b < toks.len() && is_sym(b, b'{') && close[b] != usize::MAX;
+            let be = if body { close[b] } else { b.min(toks.len() - 1) };
+            for q in (b + 1..be).filter(|_| body) {
                 if is_id(q, b"let") {
                     let n = if q + 1 < be && is_id(q + 1, b"mut") { q + 2 } else { q + 1 };
                     // (a plain name: `let FnvHasher(mut h) = ..` is a pattern of the struct)
                     let plain = n + 1 < be && (is_sym(n + 1, b'=') || is_sym(n + 1, b';') || (is_sym(n + 1, b':') && !is_sym(n + 2, b':')));
                     if n < be && toks[n].0 == 0 && plain && renamed_names.contains(&tok(n)) {
-                        bound.push(tok(n));
+                        // (the end of the innermost block around the `let`)
+                        let mut d = 0usize;
+                        let mut o = q;
+                        let mut until = be;
+                        while o > b {
+                            o -= 1;
+                            if is_sym(o, b'}') {
+                                d += 1;
+                            } else if is_sym(o, b'{') {
+                                if d == 0 {
+                                    until = close[o];
+                                    break;
+                                }
+                                d -= 1;
+                            }
+                        }
+                        // (the name itself, then after its statement: `let release = release(1);` calls the item. An
+                        // `if let` / `while let` binds in its body only: from its `{`, not in its scrutinee)
+                        let cond = q > b + 1 && (is_id(q - 1, b"if") || is_id(q - 1, b"while") || is_sym(q - 1, b'&'));
+                        // (the scrutinee's own blocks are not the body: `= { 3 } {`, after an operator, and the block of
+                        // a `match` / `if` / `loop` .. in it)
+                        let mut pend = 0usize;
+                        let mut j = n + 1;
+                        while j < be && !is_sym(j, b';') {
+                            if cond && is_sym(j, b'{') {
+                                let after_op = toks[j - 1].0 == 1 && b"=+-*/%&|^!<>,([".contains(&s[toks[j - 1].1]);
+                                if (pend > 0 || after_op) && close[j] != usize::MAX {
+                                    pend = pend.saturating_sub(1);
+                                    j = close[j] + 1;
+                                    continue;
+                                }
+                                break;
+                            }
+                            if cond && toks[j].0 == 0 && matches!(tok(j), b"match" | b"if" | b"while" | b"for" | b"loop" | b"unsafe" | b"async" | b"else") {
+                                pend += 1;
+                            }
+                            if (is_sym(j, b'(') || is_sym(j, b'[') || (!cond && is_sym(j, b'{'))) && close[j] != usize::MAX {
+                                j = close[j];
+                            }
+                            j += 1;
+                        }
+                        let until = if cond && j < be && is_sym(j, b'{') && close[j] != usize::MAX { close[j] } else { until };
+                        bound.push((tok(n), n, n));
+                        bound.push((tok(n), j, until));
                     }
                 }
             }
             if !bound.is_empty() {
-                for q in p + 1..be {
-                    if toks[q].0 == 0 && bound.contains(&tok(q)) && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':')) && !is_sym(q + 1, b':') || (toks[q].0 == 0 && bound.contains(&tok(q)) && q + 2 <= be && is_sym(q + 1, b':') && !is_sym(q + 2, b':')) {
+                let is_bound = |q: usize| bound.iter().any(|&(nm, from, until)| nm == tok(q) && q >= from && q <= until);
+                for q in k + 2..be {
+                    if toks[q].0 == 0 && is_bound(q) && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':')) && !is_sym(q + 1, b':')
+                        || (toks[q].0 == 0 && is_bound(q) && q + 2 <= be && is_sym(q + 1, b':') && !is_sym(q + 2, b':'))
+                        || (generic_names.contains(&tok(q)) && is_bound(q) && local_at(q))
+                    {
                         local_tok[q] = true;
                     }
                 }
@@ -2044,6 +2482,54 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             k = b;
         }
     }
+    // (whether token k is directly in an impl / trait body: its innermost `{` opens one, `impl .. {` / `trait .. {`)
+    let assoc_body: Vec<bool> = {
+        let mut out = vec![false; toks.len()];
+        let mut stack: Vec<bool> = vec![];
+        for k in 0..toks.len() {
+            if is_sym(k, b'{') {
+                // (the item's head: back to the last `;` / `{` / `}`)
+                let mut j = k;
+                let (mut assoc, mut is_fn) = (false, false);
+                // (inside `<..>` of the head, a brace group is a const argument (`impl T for S<{ 1 }> {`): skipped)
+                let mut angle = 0i32;
+                while j > 0 {
+                    j -= 1;
+                    // (the `>` of `->` / `=>` is none)
+                    let arrow = j > 0 && (is_sym(j - 1, b'-') || is_sym(j - 1, b'=')) && toks[j - 1].2 == toks[j].1;
+                    if is_sym(j, b'>') && !arrow {
+                        angle += 1;
+                    } else if is_sym(j, b'<') {
+                        angle -= 1;
+                    } else if angle > 0 && is_sym(j, b'}') {
+                        let mut d = 1;
+                        while j > 0 && d > 0 {
+                            j -= 1;
+                            if is_sym(j, b'}') {
+                                d += 1;
+                            } else if is_sym(j, b'{') {
+                                d -= 1;
+                            }
+                        }
+                        continue;
+                    }
+                    if is_sym(j, b';') || is_sym(j, b'{') || is_sym(j, b'}') {
+                        break;
+                    }
+                    // (`fn f() -> impl Iterator {` is a fn's body, not an impl's; a fn pointer type (`impl T for fn() {`)
+                    // is no fn: a declaration names one, `fn f`)
+                    is_fn |= is_id(j, b"fn") && j + 1 < k && toks[j + 1].0 == 0;
+                    assoc |= is_id(j, b"impl") || is_id(j, b"trait");
+                }
+                stack.push(assoc && !is_fn);
+            } else if is_sym(k, b'}') {
+                stack.pop();
+            } else {
+                out[k] = stack.last().copied().unwrap_or(false);
+            }
+        }
+        out
+    };
     let mut repl: Vec<(usize, usize, Vec<u8>)> = vec![]; // (開始トークン, 終了トークン (含む), 新しいテキスト)
     // (the items each scope defines, for the glob imports they shadow: built only when there is a glob)
     let own_defs: LSet<(usize, &[u8])> =
@@ -2055,10 +2541,22 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             continue;
         }
         let prev_dot = k >= 1 && is_sym(k - 1, b'.');
-        let prev_path = k >= 2 && is_sym(k - 1, b':') && is_sym(k - 2, b':');
+        // (`::name` at a path's start, `::re::label` / `<T as ::re::Tr>`, is a path from the extern crate `name`: read as
+        // `re::label` is)
+        let leading = k >= 2
+            && is_sym(k - 1, b':')
+            && is_sym(k - 2, b':')
+            && (k == 2
+                || !(toks[k - 3].0 == 0 || is_sym(k - 3, b'>'))
+                || (toks[k - 3].0 == 0
+                    && matches!(tok(k - 3), b"as" | b"dyn" | b"impl" | b"for" | b"in" | b"return" | b"let" | b"mut" | b"ref" | b"box" | b"where" | b"use" | b"pub" | b"else" | b"match" | b"if" | b"while" | b"move" | b"break" | b"yield" | b"const" | b"static" | b"unsafe")));
+        let prev_path = k >= 2 && is_sym(k - 1, b':') && is_sym(k - 2, b':') && !leading;
         // (impl / trait の中の関連型の定義 `type Buffer = ..;` は、同じ名前のトップレベルの型があっても変えない)
         let assoc_def = k >= 1 && is_id(k - 1, b"type") && !def_tok[k];
-        if prev_dot || prev_path || assoc_def {
+        // (nor a method's `fn find(&self ..)` in an impl / trait beside a module's `fn find`: only the item is renamed.
+        // A fn nested in a body is renamed with its calls, as before)
+        let method_def = k >= 1 && is_id(k - 1, b"fn") && !def_tok[k] && assoc_body[k];
+        if prev_dot || prev_path || assoc_def || method_def {
             k += 1;
             continue;
         }
@@ -2083,14 +2581,14 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // 接頭辞のいちばん長いモジュールから見る
             let mut done = false;
             for cut in (1..segs.len()).rev() {
-                if let Some(m) = resolve_mod(sc, &segs[..cut], k) {
+                if let Some(m) = resolve_mod_at(sc, &segs[..cut], k, leading) {
                     if m == usize::MAX && !(segs[0].as_slice() == b"crate") {
                         continue;
                     }
                     let re = || imported(m, &segs[cut]);
                     if let Some(nn) = renamed_in(m, &segs[cut]).or_else(re) {
-                        // segs[..=cut] を新しい名前にする
-                        repl.push((k, k + 3 * cut, nn));
+                        // segs[..=cut] を新しい名前にする (`::re::label`: the leading `::` too, as the name is the item's)
+                        repl.push((if leading { k - 2 } else { k }, k + 3 * cut, nn));
                         done = true;
                     }
                     break;
@@ -2103,8 +2601,36 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
         // 裸の名前 (フィールドの宣言・初期化 `name: ..` は除く)
         let next_colon = k + 1 < toks.len() && is_sym(k + 1, b':') && !(k + 2 < toks.len() && is_sym(k + 2, b':'));
+        // (but a bound of a `where` clause, `where JsValue: From<T>`, is a type: back over the clause's other bounds to
+        // its `where`, not past an unclosed bracket or the end of an item)
+        let in_where = || {
+            let mut j = k;
+            let mut d = 0i32;
+            let mut n = 0;
+            while j > 0 && n < 400 {
+                j -= 1;
+                n += 1;
+                if toks[j].0 == 0 && tok(j) == b"where" && d == 0 {
+                    return true;
+                }
+                if toks[j].0 == 1 {
+                    match s[toks[j].1] {
+                        b')' | b']' | b'}' => d += 1,
+                        b'(' | b'[' | b'{' => {
+                            if d == 0 {
+                                return false;
+                            }
+                            d -= 1;
+                        }
+                        b';' if d == 0 => return false,
+                        _ => {}
+                    }
+                }
+            }
+            false
+        };
         let is_def = def_tok[k];
-        if !next_colon || is_def {
+        {
             let n = tok(k);
             // (a glob import is shadowed by the scope's own item of that name: the crate root's `enum Thing` beside
             // `use thing::*;` stays the root's)
@@ -2117,8 +2643,13 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| renamed_in(g.1, n)) })
                 // (`use super::*;` は親が use で取り込んだ名前も見える)
                 .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| imported(g.1, n)) });
-            if let Some(nn) = nn {
-                repl.push((k, k, nn));
+            // (not a macro's name: `use core::panic as p;` then `p!()` stays as it is written)
+            let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));
+            // (a name before a `:` only when it is no field: the walk back to a `where` is for a name that is renamed)
+            if let Some(nn) = nn.filter(|nn| !(std_path(nn) && k + 1 < toks.len() && is_sym(k + 1, b'!'))) {
+                if !next_colon || is_def || in_where() {
+                    repl.push((k, k, nn));
+                }
             }
         }
         k += 1;
@@ -2290,8 +2821,9 @@ pub fn expand_module_aliases(src: &str) -> Option<String> {
 fn flatten_modules_fix_in(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>) -> Option<String> {
     let renamed = rename_module_collisions_fix(src, crates, fix);
     let src: &str = renamed.as_deref().unwrap_or(src);
+    // (no module: what the renaming did, a `use std::cell::Cell as C;`)
     if !src.contains("mod") {
-        return None;
+        return renamed;
     }
     let r = flatten_modules_inner(src);
     r.or(renamed)

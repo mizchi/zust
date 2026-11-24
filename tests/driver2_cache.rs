@@ -78,3 +78,36 @@ fn alias_in_a_constant_invalidates() {
     assert_eq!(run(&src("u16")), "11\n");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An associated type's value changed, the function that writes the projection the same: it is compiled and checked
+/// again (`type Out = u32;` to `u64` changes its size; `&'a u32` to `&'static u32` makes its `let` an error)
+#[test]
+fn associated_type_invalidates() {
+    let dir = std::env::temp_dir().join(format!("d2cache_assoc_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("p");
+    let cp = dir.join("p.crcache2");
+    let run = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Default::default() });
+        s.load_cache(&cp);
+        let r = s.build(src, &out);
+        s.save_cache(&cp).unwrap();
+        r.map(|_| String::from_utf8(std::process::Command::new(&out).output().unwrap().stdout).unwrap())
+    };
+    let size = |t: &str| {
+        format!(
+            "trait Foo {{ type Out; }}\nimpl Foo for () {{ type Out = {t}; }}\nfn f() -> usize {{ let x: <() as Foo>::Out = 3; std::mem::size_of_val(&x) }}\nfn main() {{ println!(\"{{}}\", f()); }}\n"
+        )
+    };
+    assert_eq!(run(&size("u32")).unwrap(), "4\n");
+    assert_eq!(run(&size("u64")).unwrap(), "8\n");
+    let lt = |t: &str| {
+        format!(
+            "trait Foo {{ type Out; }}\nimpl<'a> Foo for &'a () {{ type Out = {t}; }}\nfn f<'b>(r: &'b u32) -> u32 {{ let x: <&'b () as Foo>::Out = r; *x }}\nfn main() {{ let v = 3; println!(\"{{}}\", f(&v)); }}\n"
+        )
+    };
+    assert_eq!(run(&lt("&'a u32")).unwrap(), "3\n");
+    let e = run(&lt("&'static u32")).unwrap_err().to_string();
+    assert!(e.contains("lifetime may not live long enough"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

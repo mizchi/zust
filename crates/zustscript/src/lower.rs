@@ -1,13 +1,12 @@
-//! `@wasm fn`: a zustscript function lowered to Rust, which zustc compiles to wasm. The body is checked by the
-//! same checker as the JS layer, so the same source can run as JS (`zsc --all-js`) or as wasm, with the same
-//! results: the Rust keeps the JS layer's meaning of numbers (i32 / u32 / i64 wrap: `wrapping_*`; `/` and `%`
-//! fail on zero; `as` saturates from f64, as Rust's `as` does).
+//! Rust lowering for standalone modules and the Wasm backend. The generated code preserves zustscript numeric
+//! semantics across targets: integer operations wrap (`wrapping_*`), `/` and `%`
+//! fail on zero; `as` saturates from f64, as Rust's `as` does.
 //!
 //! The subset (anything else is an error naming the construct):
 //! - types: i32 u32 i64 f64 bool, arrays, and records and enums of them (nested, generic); an array or a record /
 //!   enum that holds one is not Copy (see "Ownership" below);
 //! - `let`, `if`, `match`, loops, arithmetic, comparisons, `as`, `T::zero()` / `T::one()`;
-//! - calls of other `@wasm` functions and of `wasm fn`s (Rust), recursion;
+//! - calls of ordinary Rust-compatible functions, `@wasm` functions and of `wasm fn`s (Rust), recursion;
 //! - on arrays: `len` `map` `filter` `fold` `any` `all` `push` `concat` and array literals; a closure only as
 //!   the argument of one of those (it becomes a Rust closure, the call an iterator chain);
 //! - f64's `sqrt` `abs` `floor` `round`.
@@ -166,7 +165,7 @@ fn show(t: &Ty) -> String {
 type LResult<X> = Result<X, (Pos, String)>;
 
 fn not_in_subset<X>(pos: Pos, what: &str) -> LResult<X> {
-    Err((pos, format!("{what} is not in the @wasm subset (numbers, bools, arrays, records and enums of them, let / let mut / if / match / loops, map / filter / fold)")))
+    Err((pos, format!("{what} is not supported by Rust lowering (numbers, bools, arrays, records and enums of them, let / let mut / if / match / loops, map / filter / fold)")))
 }
 
 /// Where the value of a lowered expression lives, for an expression whose type is not Copy (a Copy one is always
@@ -203,7 +202,14 @@ struct Modes {
     region: HashMap<String, BTreeSet<usize>>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Rust,
+    Wasm { scalar_simd: bool },
+}
+
 pub struct Lower<'a> {
+    target: Target,
     info: &'a Info,
     fns: HashMap<&'a str, &'a Item>,
     subst: HashMap<String, Ty>,
@@ -242,14 +248,31 @@ fn rs_type(n: &str) -> String {
     format!("Zs{n}")
 }
 
-/// Lowers the wanted `@wasm` instances (those the JS layer calls, and the public ones) and every instance they
-/// call. Returns the ones that need glue, and the Rust of the others.
-/// (`simd_as_wasm`: `@simd fn`s are lowered too: `zsc --no-simd`)
-pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_wasm: bool) -> Result<(Vec<WFn>, String), Vec<(Pos, String)>> {
+/// Emit a Rust module with native signatures and any embedded Rust definitions.
+pub fn rust_module(items: &[Item], info: &Info) -> Result<String, Vec<(Pos, String)>> {
+    let (_, mut rust) = lower(items, info, &[], Target::Rust)?;
+    for item in items {
+        match item {
+            Item::WasmFn { text, public, .. } => {
+                if *public {
+                    rust.push_str("pub ");
+                }
+                rust.push_str(text);
+            }
+            Item::WasmRaw(text) => rust.push_str(text),
+            _ => continue,
+        }
+        rust.push_str("\n\n");
+    }
+    Ok(rust)
+}
+
+/// Only `wanted` entry points need JS boundary adapters. Standalone Rust modules use an empty list.
+pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], target: Target) -> Result<(Vec<WFn>, String), Vec<(Pos, String)>> {
     let fns: HashMap<&str, &Item> = items
         .iter()
         .filter_map(|it| match it {
-            Item::Fn { name, wasm, simd, .. } if *wasm || (*simd && simd_as_wasm) => Some((name.as_str(), it)),
+            Item::Fn { name, simd, .. } if !*simd || !matches!(target, Target::Wasm { scalar_simd: false }) => Some((name.as_str(), it)),
             _ => None,
         })
         .collect();
@@ -260,6 +283,7 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_
         }
     }
     let mut l = Lower {
+        target,
         info,
         fns,
         subst: HashMap::new(),
@@ -281,6 +305,17 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], simd_as_
         helpers: Default::default(),
         str_helpers: Default::default(),
     };
+    // Even a private @wasm definition that has no callers must be valid Rust.
+    // Only instances reached from JS need a boundary adapter.
+    for item in items {
+        if let Item::Fn { name, generics, bounds, wasm, .. } = item
+            && (target == Target::Rust || *wasm)
+        {
+            for types in crate::js::all_instances(generics, bounds) {
+                l.want(name, types);
+            }
+        }
+    }
     l.all(wanted)
 }
 
@@ -401,7 +436,8 @@ impl Lower<'_> {
     fn adapter(&mut self, rs: &str, text: String, args: &[(String, Ty)], ret: &Ty) -> Result<(String, String), Vec<(Pos, String)>> {
         let owned: Vec<bool> = (0..args.len()).map(|i| self.modes.owned.contains(&(rs.to_string(), i))).collect();
         let ret_ref = !self.copy(ret) && !self.modes.owned_result.contains(rs);
-        if !owned.iter().zip(args).any(|(o, (_, t))| *o && sliced(t)) && !ret_ref {
+        // (the glue hands a value that is not Copy by reference: one the instance owns is cloned here)
+        if !owned.iter().zip(args).any(|(o, (_, t))| *o && !self.copy(t)) && !ret_ref {
             return Ok((text, rs.to_string()));
         }
         let pos = Pos::default();
@@ -409,7 +445,7 @@ impl Lower<'_> {
         let mut call = vec![];
         for ((n, t), o) in args.iter().zip(&owned) {
             ps.push(format!("{}: {}", local(n), self.rty(t, pos, Some(None)).map_err(|e| vec![e])?));
-            call.push(if *o && sliced(t) { self.clone_of(&local(n), t) } else { local(n) });
+            call.push(if *o && !self.copy(t) { self.clone_of(&local(n), t) } else { local(n) });
         }
         let rt = self.rty(ret, pos, None).map_err(|e| vec![e])?;
         let mut body = format!("{rs}({})", call.join(", "));
@@ -428,18 +464,19 @@ impl Lower<'_> {
             let ps = self.info.records.get(n).map(|r| &r.params).unwrap_or_else(|| &self.info.enums[n].params);
             ps.iter().map(|p| Ty::Param(p.clone())).collect()
         });
+        let vis = if self.target == Target::Rust { "pub " } else { "" };
         let mut s = String::from(if own::is_copy(&generic, self.info) { "#[derive(Clone, Copy, PartialEq)]\n" } else { "#[derive(Clone, PartialEq)]\n" });
         if let Some(r) = self.info.records.get(n) {
             let g = if r.params.is_empty() { String::new() } else { format!("<{}>", r.params.join(", ")) };
-            let _ = writeln!(s, "struct {}{g} {{", rs_type(n));
+            let _ = writeln!(s, "{vis}struct {}{g} {{", rs_type(n));
             for (f, t) in r.fields.clone() {
-                let _ = writeln!(s, "    {}: {},", local(&f), self.field_ty(&t, pos)?);
+                let _ = writeln!(s, "    {vis}{}: {},", local(&f), self.field_ty(&t, pos)?);
             }
             s.push_str("}\n\n");
         } else {
             let e = &self.info.enums[n];
             let g = if e.params.is_empty() { String::new() } else { format!("<{}>", e.params.join(", ")) };
-            let _ = writeln!(s, "enum {}{g} {{", rs_type(n));
+            let _ = writeln!(s, "{vis}enum {}{g} {{", rs_type(n));
             for (v, fs) in e.variants.clone() {
                 if fs.is_empty() {
                     let _ = writeln!(s, "    {v},");
@@ -480,6 +517,10 @@ impl Lower<'_> {
                     Ok(VTy::Record(rt, fs))
                 } else {
                     let e = &self.info.enums[n];
+                    // (a union read from TS has TS's shape in JS, not the `{ TAG, _0 }` the glue reads)
+                    if e.ts.is_some() {
+                        return Err((pos, format!("{n} is a union read from TS: it does not cross to wasm yet (use it in the JS layer)")));
+                    }
                     let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
                     let string_enum = e.unit_only() && !e.is_effect();
                     let vs: Vec<(String, Vec<Ty>)> = e.variants.iter().map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_ty(t, &m)).collect())).collect();
@@ -494,6 +535,75 @@ impl Lower<'_> {
         }
     }
 
+    /// The schema a value crosses in as bytes: numbers, bools, strings, arrays and records of them (the stable part
+    /// of the format; enums, typed arrays and functions do not cross this way yet)
+    fn ws(&mut self, t: &Ty, pos: Pos) -> LResult<WS> {
+        self.ws_in(t, pos, &mut vec![])
+    }
+
+    /// (`open`: the records being expanded: one that holds itself, through an array, has no fixed schema)
+    fn ws_in(&mut self, t: &Ty, pos: Pos, open: &mut Vec<Ty>) -> LResult<WS> {
+        Ok(match t {
+            Ty::I32 => WS::Scalar(WTy::I32),
+            Ty::U32 => WS::Scalar(WTy::U32),
+            Ty::I64 => WS::Scalar(WTy::I64),
+            Ty::F32 => WS::Scalar(WTy::F32),
+            Ty::F64 => WS::Scalar(WTy::F64),
+            Ty::Bool => WS::Scalar(WTy::Bool),
+            Ty::Str => WS::Str,
+            Ty::Array(e) => WS::Arr(Box::new(self.ws_in(e, pos, open)?)),
+            // (or a type whose arguments grow on each expansion, `Grow<T> { More(Array<Grow<Array<T>>>) }`: finite
+            // nesting like `Wrap<Wrap<i32>>` stays well under the bound)
+            Ty::Named(n, _) if open.contains(t) || open.iter().filter(|o| matches!(o, Ty::Named(m, _) if m == n)).count() >= 16 => {
+                return Err((pos, format!("{n} holds itself: a recursive record or enum cannot cross from JS to a @wasm function yet")));
+            }
+            Ty::Named(n, targs) if self.info.records.contains_key(n) => {
+                let r = &self.info.records[n];
+                let m: HashMap<String, Ty> = r.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                let fields: Vec<(String, Ty)> = r.fields.iter().map(|(f, ft)| (f.clone(), subst_ty(ft, &m))).collect();
+                let rt = self.rty(t, pos, None)?;
+                open.push(t.clone());
+                let fs = fields.iter().map(|(f, ft)| Ok((f.clone(), self.ws_in(ft, pos, open)?))).collect::<LResult<Vec<_>>>();
+                open.pop();
+                WS::Rec(rt, fs?)
+            }
+            Ty::Named(n, targs) if self.info.enums.get(n).is_some_and(|e| !e.is_effect()) => {
+                let e = &self.info.enums[n];
+                let m: HashMap<String, Ty> = e.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                let vs: Vec<(String, Vec<Ty>)> = e.variants.iter().map(|(v, fs)| (v.clone(), fs.iter().map(|t| subst_ty(t, &m)).collect())).collect();
+                let ts = e.ts.clone();
+                // (the JS shape: TS's own for a union read from TS, else zustscript's `{ TAG, _0 }` or a string)
+                let string = e.unit_only() && ts.as_ref().is_none_or(|t| t.key.is_none());
+                let key = if string { None } else { Some(ts.as_ref().and_then(|t| t.key.clone()).unwrap_or_else(|| "TAG".into())) };
+                let rt = self.rty(t, pos, None)?;
+                open.push(t.clone());
+                let mut variants = vec![];
+                let mut err = None;
+                for (vi, (v, fs)) in vs.iter().enumerate() {
+                    let tag = ts.as_ref().map_or_else(|| v.clone(), |t| t.tags[vi].clone());
+                    let mut fields = vec![];
+                    for (k, ft) in fs.iter().enumerate() {
+                        let name = ts.as_ref().map_or_else(|| format!("_{k}"), |t| t.fields[vi][k].clone());
+                        match self.ws_in(ft, pos, open) {
+                            Ok(w) => fields.push((name, w)),
+                            Err(x) => err = err.or(Some(x)),
+                        }
+                    }
+                    variants.push((v.clone(), tag, fields));
+                }
+                open.pop();
+                if let Some(x) = err {
+                    return Err(x);
+                }
+                WS::Enum { rt, key, variants }
+            }
+            _ => {
+                let what = if let Ty::Typed(_) = t { "a typed array".to_string() } else { show(t) };
+                return Err((pos, format!("{what} cannot cross from JS to a @wasm function inside a record, an enum or an array yet (numbers, bools, strings, arrays, records and enums of them)")));
+            }
+        })
+    }
+
     /// The boundary types of a lowered function's signature (what its glue converts)
     fn boundary(&mut self, args: &[(String, Ty)], ret: &Ty, pos: Pos) -> LResult<(Vec<(String, WTy)>, WTy)> {
         let mut a = vec![];
@@ -504,8 +614,21 @@ impl Lower<'_> {
     }
 
     fn wty(&mut self, t: &Ty, arg: bool, pos: Pos) -> LResult<WTy> {
+        // (a record or enum of numbers: as its scalar slots; one holding a string or an array, a union read from TS,
+        // and an array of anything but numbers: as bytes, through the helpers)
         if let Ty::Named(..) = t {
-            return Ok(WTy::Value(Box::new(self.vty(t, pos)?)));
+            let by_ref = !self.copy(t);
+            if !by_ref {
+                if let Ok(v) = self.vty(t, pos) {
+                    return Ok(WTy::Value(Box::new(v)));
+                }
+            }
+            return Ok(WTy::Wire(Box::new(self.ws(t, pos)?), self.rty(t, pos, None)?, by_ref));
+        }
+        if let Ty::Array(e) = t {
+            if scalar(e).and_then(Elem::parse).is_none() {
+                return Ok(WTy::Wire(Box::new(self.ws(t, pos)?), self.rty(t, pos, None)?, true));
+            }
         }
         Ok(match t {
             Ty::I32 => WTy::I32,
@@ -604,13 +727,13 @@ impl<'a> Lower<'a> {
 
     /// One instance: (its Rust text, its parameters' and result's types)
     fn function(&mut self, name: &str, targs: &[Ty]) -> LResult<(String, Vec<(String, Ty)>, Ty)> {
-        let Item::Fn { args, body, pos, generics, bounds, .. } = self.fns[name] else { unreachable!() };
+        let Item::Fn { args, body, pos, generics, bounds, public, .. } = self.fns[name] else { unreachable!() };
         if !self.info.effects[name].is_empty() {
-            return Err((*pos, format!("a @wasm function cannot perform effects ({:?})", self.info.effects[name])));
+            return Err((*pos, format!("a function lowered to Rust cannot perform effects ({:?})", self.info.effects[name])));
         }
         for g in generics {
             if !bounds.iter().any(|b| b.0 == *g) {
-                return Err((*pos, format!("the generic parameter `{g}` of a @wasm function needs a numeric bound (`{g}: Num`)")));
+                return Err((*pos, format!("the generic parameter `{g}` of a function lowered to Rust needs a numeric bound (`{g}: Num`)")));
             }
         }
         self.subst = generics.iter().cloned().zip(targs.iter().cloned()).collect();
@@ -671,7 +794,8 @@ impl<'a> Lower<'a> {
         }
         let rt = self.rty(&ret, *pos, if lt.is_some() { Some(lt) } else { None })?;
         let g = if lt.is_some() { "<'a>" } else { "" };
-        let text = format!("fn {rs}{g}({}) -> {rt} {b}", ps.join(", "));
+        let vis = if self.target == Target::Rust && *public { "pub " } else { "" };
+        let text = format!("{vis}fn {rs}{g}({}) -> {rt} {b}", ps.join(", "));
         let named = args.iter().map(|a| a.0.clone()).zip(ats).collect();
         Ok((text, named, ret))
     }
@@ -1129,7 +1253,7 @@ impl<'a> Lower<'a> {
                             Ok((s, Form::Brw { is_ref: true, roots: all, param: None }))
                         }
                     }
-                    Some(Callee::Fn) => Err((pos, format!("`{n}` is a JS-layer function: a @wasm function calls only @wasm and `wasm fn` functions (mark `{n}` @wasm)"))),
+                    Some(Callee::Fn) => Err((pos, format!("`{n}` is a SIMD kernel: use --no-simd to lower this SIMD kernel to scalar Rust"))),
                     Some(Callee::Wasm) => {
                         let (wargs, _) = &self.info.wasm[n];
                         let arrs: Vec<bool> = wargs.iter().map(|(_, w)| matches!(w, WTy::Slice(_))).collect();

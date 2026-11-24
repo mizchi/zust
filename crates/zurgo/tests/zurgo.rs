@@ -9,12 +9,17 @@
 //! - `build_scripts_match_cargo`: build scripts (a build-dependency, `links` metadata as `DEP_*`, code written to
 //!   `OUT_DIR`, `rustc-cfg`, `rustc-env`, cargo's variables) give what they give under cargo, whichever compiler builds
 //!   them, and run again only when what they depend on changes;
-//! - `errors`: what M0 does not do yet is an error that says so.
+//! - `proc_macros_run_like_cargo`: a proc-macro crate (attribute, derive, function-like) is built by rustc and run by
+//!   the toolchain's proc-macro server, and its users print what their cargo builds print;
+//! - `errors`: what M0 does not do yet is an error that says so (proc macros without the server among them).
 //!
 //! The registry tests need cargo and the network (`cargo fetch`), as the rest of zust's tests do.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+#[path = "../../../tests/common/par.rs"]
+mod par;
 
 const ZURGO: &str = env!("CARGO_BIN_EXE_zurgo");
 
@@ -63,6 +68,11 @@ fn run(cmd: &mut Command) -> (bool, String, String) {
 
 fn zurgo(args: &[&str], manifest: &Path, target_dir: &Path) -> (bool, String, String) {
     run(Command::new(ZURGO).args(args).arg("--manifest-path").arg(manifest).env("CARGO_TARGET_DIR", target_dir))
+}
+
+/// zurgo without the toolchain's proc-macro server (`ZUSTC_PROC_MACRO_SRV` empty): proc-macro crates are stubs
+fn zurgo_no_pm(args: &[&str], manifest: &Path, target_dir: &Path) -> (bool, String, String) {
+    run(Command::new(ZURGO).args(args).arg("--manifest-path").arg(manifest).env("CARGO_TARGET_DIR", target_dir).env("ZUSTC_PROC_MACRO_SRV", ""))
 }
 
 fn cargo(args: &[&str], manifest: &Path, target_dir: &Path) -> (bool, String, String) {
@@ -141,6 +151,40 @@ fn build_scripts_match_cargo() {
 /// The same programs built for wasm32 and run under the repository's sandbox host print what their native builds print:
 /// the build scripts run on the host, the crates are one module
 #[test]
+fn proc_macros_run_like_cargo() {
+    // (a proc-macro crate of the workspace: an attribute with arguments, used through a library that re-exports it; a
+    //  derive with a helper attribute, whose output calls that library; function-like macros as an item and in an
+    //  expression; doc comments as `#[doc]`; the expansion's environment; paths from the crate and from the library
+    //  beside `macro_rules!` of their names, and in `stringify!`. rustc builds it, the toolchain's proc-macro server
+    //  runs it)
+    let sc = Scratch::new("proc-macro");
+    copy_dir(&fixture("proc-macro"), &sc.0);
+    let m = sc.0.join("Cargo.toml");
+    let (ok, want, err) = cargo(&["run", "-q", "--offline"], &m, &sc.0.join("cargo-target"));
+    assert!(ok, "cargo run: {err}");
+    let t = sc.0.join("zurgo-target");
+    let (ok, got, err) = zurgo(&["run"], &m, &t);
+    assert!(ok, "zurgo run: {err}");
+    assert_eq!(got, want);
+    // (again: nothing rebuilt, the dylib and the expansions are kept)
+    let (ok, _, err) = zurgo(&["build", "--time"], &m, &t);
+    assert!(ok, "{err}");
+    assert!(err.contains("fresh") && !err.contains("fns compiled"), "a no-op build did work:\n{err}");
+    // (a change to the proc macro: rebuilt, and the crates that use it see its new output)
+    let lib = sc.0.join("pm/src/lib.rs");
+    let src = std::fs::read_to_string(&lib).unwrap();
+    std::fs::write(&lib, src.replace("{n}() * {k}", "{n}() * {k} + 1")).unwrap();
+    let (ok, got, err) = zurgo(&["run"], &m, &t);
+    assert!(ok, "zurgo run: {err}");
+    assert_eq!(got.lines().next(), Some("7 22"), "{got}");
+    // (a file the proc macro includes from outside its package: rustc's dep-info has it)
+    std::fs::write(sc.0.join("shared.txt"), "shared v2\n").unwrap();
+    let (ok, got, err) = zurgo(&["run"], &m, &t);
+    assert!(ok, "zurgo run: {err}");
+    assert_eq!(got.lines().last(), Some("shared v2"), "{got}");
+}
+
+#[test]
 fn wasm32_runs_like_native() {
     if !Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success()) {
         eprintln!("note: no node: wasm32_runs_like_native skipped");
@@ -159,8 +203,8 @@ fn wasm32_runs_like_native() {
         assert!(ok, "cargo fetch {n}: {err}");
         cases.push((n.to_string(), m));
     }
-    let mut bad = vec![];
-    for (n, m) in &cases {
+    // (the crates on every core: each builds twice and runs under node)
+    let bad: Vec<String> = par::par_map(&cases, |(n, m)| -> Option<String> {
         let (ok, want, err) = zurgo(&["run"], m, &tdir(&format!("{n}-native")));
         assert!(ok, "zurgo run {n}: {err}");
         // (what depends on the target: the build script reads `CARGO_CFG_*` for wasm32; `cfg(unix)` is off there)
@@ -175,17 +219,19 @@ fn wasm32_runs_like_native() {
             .env("CARGO_TARGET_DIR", tdir(&format!("{n}-wasm")))
             .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER", host)
             .current_dir(&root));
-        if !r.0 || r.1 != want {
-            bad.push(format!("{n}: {}\n--- want\n{want}--- got\n{}", r.2, r.1));
-        }
-    }
+        (!r.0 || r.1 != want).then(|| format!("{n}: {}\n--- want\n{want}--- got\n{}", r.2, r.1))
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
 #[test]
 fn registry_crates_run_like_cargo() {
-    let mut bad = vec![];
-    for n in ["fnv", "adler2", "hex", "itoa", "rustc-hash", "cfg-if", "thiserror", "wasm-bindgen-shared"] {
+    // (the crates on every core: each is built by cargo and by zurgo)
+    let crates = ["fnv", "adler2", "hex", "itoa", "rustc-hash", "cfg-if", "thiserror", "wasm-bindgen-shared"];
+    let bad: Vec<String> = par::par_map(&crates, |&n| -> Option<String> {
         let m = fixture(&format!("{n}/Cargo.toml"));
         let (ok, _, err) = cargo(&["fetch", "--locked"], &m, &tdir(n));
         assert!(ok, "cargo fetch {n}: {err}");
@@ -193,11 +239,16 @@ fn registry_crates_run_like_cargo() {
         assert!(ok, "cargo run {n}: {err}");
         let (ok, got, err) = zurgo(&["run"], &m, &tdir(n));
         if !ok {
-            bad.push(format!("{n}: zurgo run failed: {err}"));
+            Some(format!("{n}: zurgo run failed: {err}"))
         } else if got != want {
-            bad.push(format!("{n}: output differs\n--- zurgo\n{got}--- cargo\n{want}"));
+            Some(format!("{n}: output differs\n--- zurgo\n{got}--- cargo\n{want}"))
+        } else {
+            None
         }
-    }
+    })
+    .into_iter()
+    .flatten()
+    .collect();
     assert!(bad.is_empty(), "\n{}", bad.join("\n"));
 }
 
@@ -214,7 +265,7 @@ fn graph(json: &str) -> Vec<String> {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|t| t["kind"].as_array().unwrap().iter().all(|k| matches!(k.as_str(), Some("lib" | "rlib" | "proc-macro" | "bin" | "cdylib" | "staticlib" | "dylib" | "custom-build"))))
+            .filter(|t| t["kind"].as_array().unwrap().iter().all(|k| matches!(k.as_str(), Some("lib" | "rlib" | "proc-macro" | "bin" | "cdylib" | "staticlib" | "dylib" | "custom-build" | "test"))))
             .map(|t| format!("{} {} {} {}", t["kind"], t["name"], t["src_path"], t["edition"]))
             .collect();
         ts.sort();
@@ -243,7 +294,7 @@ fn graph(json: &str) -> Vec<String> {
 #[test]
 fn metadata_matches_cargo() {
     let ui = repo().join("cratebench/ui/apps");
-    let mut manifests: Vec<PathBuf> = ["path-ws", "fnv", "hex", "cfg-if"].iter().map(|n| fixture(n).join("Cargo.toml")).collect();
+    let mut manifests: Vec<PathBuf> = ["path-ws", "fnv", "hex", "cfg-if", "test-pkg", "test-flags"].iter().map(|n| fixture(n).join("Cargo.toml")).collect();
     manifests.push(ui.join("dioxus/Cargo.toml"));
     manifests.push(ui.join("leptos/Cargo.toml"));
     let mut bad = vec![];
@@ -288,8 +339,10 @@ fn errors() {
     assert!(!ok && err.contains("cargo generate-lockfile"), "{err}");
     let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &m, &d.join("t"));
     assert!(ok, "{err}");
-    // (a proc-macro dependency is a stub: unused, the build goes on; so does a use in a file the crate does not reach,
-    //  under a cfg that is off (before or after the attribute), or in a macro_rules! body nothing calls)
+    // (without the toolchain's proc-macro server, a proc-macro dependency is a stub: unused, the build goes on; so does
+    //  a use in a file the crate does not reach, under a cfg that is off (before or after the attribute), or in a
+    //  macro_rules! body nothing calls)
+    let zurgo = zurgo_no_pm;
     let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
     assert!(ok, "{err}");
     sc.write(&[
@@ -316,6 +369,14 @@ fn errors() {
     // (but metadata works)
     let (ok, out, err) = zurgo(&["metadata"], &m, &d.join("t"));
     assert!(ok && out.contains("\"proc-macro\""), "{err}");
+    // (with the server, the proc macros run: `traced` gives the item back, `html!` its input, which is not Rust)
+    let zurgo = self::zurgo;
+    sc.write(&[("p/src/main.rs", "#[pm::traced]\nfn main() {}\n")]);
+    let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
+    assert!(ok, "{err}");
+    sc.write(&[("p/src/main.rs", "fn main() {\n    pm::html!(<p>);\n}\n")]);
+    let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
+    assert!(!ok && !err.contains("#29"), "{err}");
     // (a target name that is a path: it would put the executable outside the target directory)
     sc.write(&[
         ("q/Cargo.toml", "[package]\nname = \"q\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[[bin]]\nname = \"../escape\"\npath = \"src/main.rs\"\n"),
@@ -453,4 +514,190 @@ fn root_package_and_default_members_glob() {
     assert!(ok, "{err}");
     assert_eq!(out, "a 2\n");
     assert!(!t.join("zust/debug/rootpkg").exists(), "the root package was built");
+}
+
+/// `cargo test`'s outcome of each test: name → "ok", "FAILED" or "ignored" (the fixture's names are unique across
+/// its test binaries)
+fn cargo_outcomes(out: &str) -> std::collections::BTreeMap<String, String> {
+    let mut m = std::collections::BTreeMap::new();
+    for l in out.lines() {
+        let Some(r) = l.strip_prefix("test ") else { continue };
+        let Some((name, res)) = r.split_once(" ... ") else { continue };
+        let name = name.trim_end_matches(" - should panic").to_string();
+        m.insert(name, res.trim().to_string());
+    }
+    m
+}
+
+/// `zurgo test`'s outcome of each test that ran: name → "ok" / "FAILED" (its lines `PASS [..] (k/n) label name`)
+fn zurgo_outcomes(err: &str) -> std::collections::BTreeMap<String, String> {
+    let mut m = std::collections::BTreeMap::new();
+    for l in err.lines() {
+        let t = l.trim_start();
+        let pass = t.starts_with("PASS [");
+        if !(pass || t.starts_with("FAIL (") || t.starts_with("TIMEOUT [") || t.starts_with("SIGNAL [")) || !t.contains("] (") {
+            continue;
+        }
+        let name = t.rsplit(' ').next().unwrap().to_string();
+        m.insert(name, if pass { "ok" } else { "FAILED" }.to_string());
+    }
+    m
+}
+
+/// `zurgo test` runs the same tests as `cargo test`, with the same outcomes: the lib's unit tests (with a
+/// dev-dependency, `#[should_panic]` right and wrong, a `Result` test, two ignored), a bin's, and an integration test
+/// against the lib and the bin (`CARGO_BIN_EXE_`), from the package's directory. A failing test fails the run (101)
+#[test]
+fn test_runs_like_cargo_test() {
+    let m = fixture("test-pkg/Cargo.toml");
+    let (ok, out, _) = cargo(&["test", "--no-fail-fast", "--offline"], &m, &tdir("test-pkg-cargo"));
+    assert!(!ok, "the fixture has failing tests");
+    let want = cargo_outcomes(&out);
+    assert_eq!(want.len(), 13, "{want:?}");
+    let o = Command::new(ZURGO).args(["test", "--manifest-path"]).arg(&m).env("CARGO_TARGET_DIR", tdir("test-pkg")).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(101), "{err}");
+    let got = zurgo_outcomes(&err);
+    let ran: std::collections::BTreeMap<String, String> = want.iter().filter(|(_, v)| *v != "ignored").map(|(k, v)| (k.clone(), v.clone())).collect();
+    assert_eq!(got, ran, "\n{err}");
+    // (the ignored ones are listed as such)
+    let (ok, listed, _) = run(Command::new(ZURGO).args(["test", "--manifest-path"]).arg(&m).args(["--", "--list"]).env("CARGO_TARGET_DIR", tdir("test-pkg")));
+    assert!(ok, "{listed}");
+    for (n, _) in want.iter().filter(|(_, v)| *v == "ignored") {
+        assert!(listed.contains(&format!("tp (lib): {n} (ignored)")), "{n}:\n{listed}");
+    }
+    // (the times, for the next run's order)
+    let times = std::fs::read_to_string(tdir("test-pkg").join("zust/debug/test-times")).unwrap();
+    assert!(times.contains("tp (lib)\ttests::adds\t"), "{times}");
+    // (a filter, and one target)
+    let (ok, _, err) = zurgo(&["test", "--lib", "adds"], &m, &tdir("test-pkg"));
+    assert!(ok, "{err}");
+    assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["tests::adds"], "{err}");
+    // (cargo's `--tests`: the unit tests too)
+    let (_, _, err) = zurgo(&["test", "--tests", "adds"], &m, &tdir("test-pkg"));
+    assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["tests::adds"], "{err}");
+    // (`--bin x`: that bin's unit tests alone)
+    let (ok, _, err) = zurgo(&["test", "--bin", "tp"], &m, &tdir("test-pkg"));
+    assert!(ok, "{err}");
+    assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["greets"], "{err}");
+    let (ok, _, err) = zurgo(&["test", "--bin", "nope"], &m, &tdir("test-pkg"));
+    assert!(!ok && err.contains("no bin target named `nope`"), "{err}");
+    // (`--list --ignored`: the ignored ones alone)
+    let (ok, listed, _) = run(Command::new(ZURGO).args(["test", "--lib", "--manifest-path"]).arg(&m).args(["--", "--list", "--ignored"]).env("CARGO_TARGET_DIR", tdir("test-pkg")));
+    assert!(ok);
+    assert!(listed.lines().all(|l| l.ends_with("(ignored)")) && listed.lines().count() == 3, "{listed}");
+    // (a test target that does not exist is an error, not a run of nothing)
+    let (ok, _, err) = zurgo(&["test", "--test", "nope"], &m, &tdir("test-pkg"));
+    assert!(!ok && err.contains("no test target named `nope`"), "{err}");
+}
+
+/// A test that never ends is stopped at `ZURGO_TEST_TIMEOUT`, and fails
+#[test]
+fn test_timeout() {
+    let m = fixture("test-pkg/Cargo.toml");
+    let o = Command::new(ZURGO)
+        .args(["test", "--lib", "--manifest-path"])
+        .arg(&m)
+        .args(["--", "--ignored", "--exact", "tests::hangs"])
+        .env("CARGO_TARGET_DIR", tdir("test-pkg-timeout"))
+        .env("ZURGO_TEST_TIMEOUT", "1")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(101), "{err}");
+    assert!(err.contains("TIMEOUT [") && err.contains("tests::hangs"), "{err}");
+    // (a test that ends but leaves a process holding its output: it passes, the process is stopped, and the run
+    //  does not wait for it)
+    let t0 = std::time::Instant::now();
+    let o = Command::new(ZURGO)
+        .args(["test", "--lib", "--manifest-path"])
+        .arg(&m)
+        .args(["--", "--ignored", "--exact", "tests::leaves_a_child"])
+        .env("CARGO_TARGET_DIR", tdir("test-pkg-timeout"))
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(o.status.success(), "{err}");
+    assert!(t0.elapsed() < std::time::Duration::from_secs(20), "{err}");
+}
+
+/// The runner speaks libtest's command line: it runs the executables `cargo test` builds as well, with the outcomes
+/// cargo's own run gives (libtest checks `#[should_panic]` itself)
+#[test]
+fn runner_drives_libtest_executables() {
+    let m = fixture("test-pkg/Cargo.toml");
+    let td = tdir("test-pkg-libtest");
+    let (ok, out, err) = cargo(&["test", "--no-run", "--offline", "--message-format=json"], &m, &td);
+    assert!(ok, "{err}");
+    let mut exes: Vec<zurgo::test_runner::TestExe> = vec![];
+    for l in out.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(l) else { continue };
+        if v["reason"] == "compiler-artifact" && v["profile"]["test"] == true {
+            if let Some(e) = v["executable"].as_str() {
+                exes.push(zurgo::test_runner::TestExe::new(v["target"]["name"].as_str().unwrap(), e, fixture("test-pkg")));
+            }
+        }
+    }
+    assert_eq!(exes.len(), 3, "{out}");
+    let s = zurgo::test_runner::run(&exes, &zurgo::test_runner::RunOpts::default(), &td.join("test-times")).unwrap();
+    let got: std::collections::BTreeMap<String, String> = s.results.iter().map(|r| (r.1.clone(), if r.2 { "ok" } else { "FAILED" }.to_string())).collect();
+    let (_, out, _) = cargo(&["test", "--no-fail-fast", "--offline"], &m, &td);
+    let want: std::collections::BTreeMap<String, String> = cargo_outcomes(&out).into_iter().filter(|(_, v)| v != "ignored").collect();
+    assert_eq!(got, want);
+    assert_eq!(s.skipped, 3);
+}
+
+/// `test = false` leaves a target's tests out; a `harness = false` target is one test, its own `main`, that passes when
+/// it exits with 0 (as `cargo test` runs them). `--test x` builds that test crate alone
+#[test]
+fn test_flags_like_cargo() {
+    let m = fixture("test-flags/Cargo.toml");
+    let (ok, out, err) = cargo(&["test", "--offline"], &m, &tdir("test-flags-cargo"));
+    assert!(ok, "{out}{err}");
+    assert!(out.contains("custom ran") || err.contains("custom ran"), "{out}{err}");
+    assert!(!out.contains("never") && !err.contains("this test target is off"), "{out}{err}");
+    let t = tdir("test-flags");
+    let (ok, _, err) = zurgo(&["test"], &m, &t);
+    assert!(ok, "{err}");
+    assert_eq!(zurgo_outcomes(&err).into_iter().collect::<Vec<_>>(), [("custom".to_string(), "ok".to_string()), ("uses_lib".to_string(), "ok".to_string())], "{err}");
+    // (`--test normal`: that test crate alone is built)
+    let t2 = tdir("test-flags-one");
+    let _ = std::fs::remove_dir_all(&t2);
+    let (ok, _, err) = zurgo(&["test", "--test", "normal"], &m, &t2);
+    assert!(ok, "{err}");
+    assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["uses_lib"], "{err}");
+    assert!(!t2.join("zust/debug/custom_test_test.test").exists() && t2.join("zust/debug/normal_test_test.test").exists());
+    // (`--test off` names the `test = false` target: it runs, and fails, as under cargo)
+    let (ok, _, err) = zurgo(&["test", "--test", "off"], &m, &t);
+    assert!(!ok, "{err}");
+    assert_eq!(zurgo_outcomes(&err).into_iter().collect::<Vec<_>>(), [("never".to_string(), "FAILED".to_string())], "{err}");
+    let (ok, out, _) = cargo(&["test", "--offline", "--test", "off"], &m, &tdir("test-flags-cargo"));
+    assert!(!ok && out.contains("test never ... FAILED"), "{out}");
+}
+
+/// `zurgo test --target wasm32-unknown-unknown`: each test in a module of its own, under cargo's runner variable;
+/// `#[should_panic]` is the runner's to check there (a module starts no child process). The outcomes are `cargo test`'s
+/// on the host
+#[test]
+fn test_wasm32_like_cargo_test() {
+    if !Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success()) {
+        eprintln!("note: no node: test_wasm32_like_cargo_test skipped");
+        return;
+    }
+    let m = fixture("test-wasm/Cargo.toml");
+    let (ok, out, _) = cargo(&["test", "--no-fail-fast", "--offline"], &m, &tdir("test-wasm-cargo"));
+    assert!(!ok);
+    let want: std::collections::BTreeMap<String, String> = cargo_outcomes(&out).into_iter().filter(|(_, v)| v != "ignored").collect();
+    assert_eq!(want.len(), 6, "{want:?}");
+    let host = format!("node {}", repo().join("tests/wasm/run.mjs").display());
+    let o = Command::new(ZURGO)
+        .args(["test", "--target", "wasm32-unknown-unknown", "--manifest-path"])
+        .arg(&m)
+        .env("CARGO_TARGET_DIR", tdir("test-wasm"))
+        .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER", host)
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(101), "{err}");
+    assert_eq!(zurgo_outcomes(&err), want, "\n{err}");
 }

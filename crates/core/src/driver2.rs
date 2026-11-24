@@ -20,6 +20,7 @@ pub type R<T> = Result<T, String>;
 /// ビルド (機械語・オブジェクト・リンク・ワークスペース)。feature `build` (既定) のときだけ
 #[cfg(feature = "build")]
 mod build;
+mod dead;
 #[cfg(feature = "build")]
 pub use build::*;
 
@@ -77,6 +78,10 @@ pub struct Analysis {
     pub sig_keys: Mutex<Vec<Key>>,
     /// 依存するクレートのテキストの範囲と、そこから見えるクレート (CrateCtx::dep_ranges)
     pub dep_ranges: Vec<(u32, u32, Vec<usize>, u32)>,
+    /// The definitions of the program's associated types (not the prelude's), for the functions' cache keys: all of
+    /// them, and those of each dependency crate (by dep_ranges' index). A function's types and region check read an
+    /// associated type's value (`<() as Foo>::Out`, its lifetimes too), which its body and signatures do not show
+    pub assoc_keys: (Key, Vec<Key>),
 }
 
 /// クレートの印 (panic の場所の行の上位ビット。ライブラリの panic の表の 8 byte 目): 1..=4000
@@ -445,6 +450,27 @@ impl Analysis {
         k
     }
 
+    /// Analysis::assoc_keys: of each associated type the program defines, its impl member's text (which holds its
+    /// impl's header's), combined independently of their order
+    fn assoc_keys(&self) -> (Key, Vec<Key>) {
+        let mut all: Key = 0;
+        let mut per = vec![0; self.dep_ranges.len()];
+        for (i, &ii) in self.prog.assoc_items.iter().enumerate() {
+            if ii >= self.prog.prelude_from {
+                continue;
+            }
+            let mut h = KeyHasher::new();
+            h.add(&self.prog.assocs[i].name);
+            h.add(&self.items[ii as usize].hash);
+            let k = h.finish();
+            all ^= k;
+            if let Some(c) = self.crate_of_item(ii as usize) {
+                per[c] ^= k;
+            }
+        }
+        (all, per)
+    }
+
     pub fn crate_of_item(&self, ii: usize) -> Option<usize> {
         if ii >= self.prog.prelude_from as usize || !self.ext_items.get(ii).copied().unwrap_or(false) {
             return None;
@@ -577,6 +603,10 @@ pub struct Options2 {
     /// The edition (`--edition`, 2021 by default). Only what differs between 2015 and later reads it: the crate root's
     /// own `extern crate std` holds the name `std` in 2015 alone
     pub edition: u16,
+    /// `--cfg name` / `--cfg name="value"`: more cfgs of the crate (`--test` adds `test`)
+    pub cfgs: Vec<(String, Option<String>)>,
+    /// `--test`: build the crate's `#[test]` functions with a harness for its `main` (crate::test_harness)
+    pub test: bool,
 }
 
 /// Writes the output from the functions and data build.rs lays out (in place of the ELF object)
@@ -584,7 +614,7 @@ pub type ModuleWriter = fn(&[(String, Vec<u8>, Vec<crate::ir::Reloc>, bool)], &[
 
 impl Default for Options2 {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021 }
+        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021, cfgs: vec![], test: false }
     }
 }
 
@@ -610,10 +640,17 @@ impl Options2 {
             features: features.to_vec(),
             debug_assertions: !self.opt,
             wasm: self.module_writer.is_some(),
-            cfgs: cfgs.to_vec(),
+            cfgs: self.cfgs.iter().chain(cfgs).cloned().chain(self.test.then(|| ("test".to_string(), None))).collect(),
             env: env.to_vec(),
+            edition: self.edition,
         }
     }
+}
+
+/// Whether a line of a crate's source (its own `ol` lines, then its dependencies) is the crate's own: in its lines, or
+/// in an item hoisted out of a fn body written in them (`marks`: prep::hoist_marks)
+fn own_line(marks: &[(usize, usize)], ol: usize, line: usize) -> bool {
+    line <= ol || crate::prep::hoisted_at(marks, line).is_some_and(|w| w <= ol)
 }
 
 /// 複数のクレートのうちの 1 つをコンパイルするときの情報。ソースは「このクレートのコード (1..=own_lines 行)」の後ろに
@@ -933,7 +970,8 @@ impl Session2 {
                 miss.push((i, k));
             }
             // (多ければ fork して分けて作る: 子 k は j % jobs == k のものを作り、直列化して返す)
-            let jobs = self.opts.jobs.min(miss.len() / 32).max(1);
+            // (not in a process of more threads than this one: single_threaded)
+            let jobs = if single_threaded() { self.opts.jobs.min(miss.len() / 32).max(1) } else { 1 };
             let mut got: Vec<Option<Summary>> = vec![None; miss.len()];
             if jobs > 1 {
                 let mut kids: Vec<(i32, i32)> = vec![];
@@ -943,7 +981,7 @@ impl Session2 {
                     if unsafe { c_pipe(fds.as_mut_ptr()) } != 0 {
                         continue;
                     }
-                    let pid = unsafe { c_fork() };
+                    let pid = fork_counted();
                     if pid == 0 {
                         unsafe { c_close(fds[0]) };
                         let mut buf = vec![];
@@ -1039,7 +1077,8 @@ impl Session2 {
         tm.lap("summaries", {
             if tm.on {
                 let ol = self.ctx.own_lines as usize;
-                let own = items[..user_src].iter().filter(|it| ol == 0 || it.line <= ol).count();
+                let marks = crate::prep::hoist_marks(&src);
+                let own = items[..user_src].iter().filter(|it| ol == 0 || own_line(&marks, ol, it.line)).count();
                 format!("{} items: own {own}, deps {}, prelude {}", items.len(), user - own, items.len() - user)
             } else {
                 String::new()
@@ -1164,6 +1203,75 @@ impl Session2 {
                     return Err(e);
                 }
             }
+            // (an unstable ABI: `extern "rust-cold" fn`)
+            // (`extern` among the item's first names, `pub unsafe extern "C" fn`, from the lexer's identifiers: no
+            // search of its text)
+            const KEYWORDS: &[&str] = &["fn", "struct", "enum", "union", "trait", "impl", "type", "const", "static", "mod", "use", "macro_rules"];
+            let ids = || it.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or(""));
+            if ids().take_while(|w| !KEYWORDS.contains(w)).any(|w| w == "extern") {
+                if let Some(e) = gated_abi(&src, it.start, it.end, &mut feats) {
+                    return Err(e);
+                }
+            }
+        }
+        // (E0449: a visibility where it means nothing: on an impl, an extern block, a trait's items, a trait impl's
+        // items, an enum's variants and their fields. An item's names are looked at by their length first: most are
+        // fns with none of these)
+        {
+            let bytes = src.as_bytes();
+            let is = |&(a, b): &(u32, u32), w: &str| (b - a) as usize == w.len() && &bytes[a as usize..b as usize] == w.as_bytes();
+            let report = |it: &SrcItem, off: usize| {
+                let (line, col) = item_pos(&src, src0, &crate::prep::hoist_marks(&src), it, off);
+                format!("{line}:{col}: visibility qualifiers are not permitted here (E0449)")
+            };
+            for it in &items[..user_src] {
+                let text = src.get(it.start..it.end).unwrap_or("");
+                let v = match it.kind {
+                    crate::lexer::ItemKind::ImplHeader | crate::lexer::ItemKind::TraitMember(_) => leading_pub(text),
+                    crate::lexer::ItemKind::ImplMember(h) if sums.get(h as usize).is_some_and(|sm| sm.impl_trait.is_some()) => leading_pub(text),
+                    crate::lexer::ItemKind::Normal => {
+                        let head = &it.idents[..it.idents.len().min(8)];
+                        // (an enum: a `pub` among its names after its own)
+                        if let Some(e) = head.iter().position(|x| is(x, "enum")) {
+                            if it.idents[e..].iter().any(|x| is(x, "pub")) {
+                                if let Some(off) = enum_inner_pub(text) {
+                                    return Err(report(it, off));
+                                }
+                            }
+                        }
+                        // (`pub extern "C" { .. }`, `pub(crate) unsafe extern "C" { .. }`)
+                        if head.iter().any(|x| is(x, "extern")) {
+                            leading_pub(text).filter(|&v| {
+                                let b = text.as_bytes();
+                                let mut j = skip_space(b, v + 3);
+                                // (a `pub(..)`'s path, past the comments in it: `pub(in crate /* ) */)`)
+                                if b.get(j) == Some(&b'(') {
+                                    j += 1;
+                                    loop {
+                                        j = skip_space(b, j);
+                                        match b.get(j) {
+                                            Some(b')') => break j += 1,
+                                            None => break,
+                                            _ => j += 1,
+                                        }
+                                    }
+                                }
+                                extern_block(b, skip_space(b, j))
+                            })
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(v) = v {
+                    return Err(report(it, v));
+                }
+            }
+        }
+        // (E0434: a fn written inside another fn that uses one of its locals; only with hoisted items)
+        if let Some(e) = first_env_capture(&src, src0, &items[..user_src]) {
+            return Err(e);
         }
         // (E0119: two blanket impls of one trait for a bare parameter, `impl<T: A> Tr for T` and `impl<T: B> Tr for T`,
         // overlap whatever their bounds say. Only the program's own traits declared once (modules flatten names),
@@ -1183,7 +1291,13 @@ impl Session2 {
             let mut first: FxMap<&str, (usize, &str)> = FxMap::default();
             for (ii, sm) in sums[..user_src].iter().enumerate() {
                 let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self.as_deref()) else { continue };
-                if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) {
+                // (the self type the bare parameter: not `impl<T> Tr for &T` / `&mut T`, whose self path is T too)
+                let bare = matches!(&sm.impl_self_ty, Some(crate::types::TySyn::Named(n)) if n == st);
+                if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) || !bare {
+                    continue;
+                }
+                // (the bare parameter itself, not a reference to it: `impl<T> Tr for &T` and `.. for &mut T` do not overlap)
+                if !matches!(&sm.impl_self_ty, Some(crate::types::TySyn::Named(n)) if n == st) {
                     continue;
                 }
                 // (an impl whose `where` clause may make it disjoint is no candidate either way)
@@ -1242,8 +1356,12 @@ impl Session2 {
         let mut deny_unreachable = false;
         let mut deny_unused_vars = false;
         let mut deny_dead_code = false;
+        // (`deny(warnings)` / `forbid(warnings)` of the crate: a lint an item or field sets to warn is an error)
+        let mut warn_denied = false;
         let mut deny_dead_pub = false;
         let mut deny_unused_imports = false;
+        // (unused_imports denied by its own name or its group's, not only through `deny(warnings)`)
+        let mut imports_denied = false;
         let mut deny_unreachable_code = false;
         let mut deny_must_use = false;
         let mut deny_unused_alloc = false;
@@ -1252,6 +1370,8 @@ impl Session2 {
         let mut deny_unused_lifetimes = (false, false);
         let mut deny_mismatched_lts = false;
         let mut deny_deprecated = false;
+        // (improper_ctypes (an `extern` block's fns), improper_ctypes_definitions (an `extern "C" fn`))
+        let mut deny_ctypes = (false, false);
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
         let lib_attr = {
@@ -1297,10 +1417,60 @@ impl Session2 {
                 };
                 levels.contains(&n) && (last("forbid").is_some() || last("allow") < last("deny"))
             };
+            // (a lint of a group: denied by its name, the group's or `warnings`, unless an allow of its name or the
+            // group's comes after that (`#![allow(unused_variables)]` leaves dead_code as it is); forbid stays)
+            let last_of = |a: &str, names: &[&str]| -> Option<usize> {
+                let open = format!("#![{a}(");
+                c.match_indices(&open)
+                    .filter(|(i, _)| {
+                        let rest = &c[i + open.len()..];
+                        let list = &rest[..rest.find(')').unwrap_or(rest.len())];
+                        list.split(',').any(|x| names.contains(&x.trim()))
+                    })
+                    .map(|(i, _)| i)
+                    .last()
+            };
+            // (the level of a lint of a group, by the last of its levels in source order: a forbid of it or its group
+            // wins; a deny of it or its group denies; a warn of it (or no level of its own) is denied by
+            // `deny(warnings)` or `forbid(warnings)`, which reach only the lints left at warn; an allow or an expect
+            // does not deny)
+            let grouped = |n: &str, group: &str| {
+                if last_of("forbid", &[n, group]).is_some() {
+                    return true;
+                }
+                let own = [n, group];
+                let levels = [("deny", last_of("deny", &own)), ("warn", last_of("warn", &own)), ("allow", last_of("allow", &own)), ("expect", last_of("expect", &own))];
+                let last = levels.iter().filter_map(|(l, at)| at.map(|at| (at, *l))).max();
+                let warnings = last_of("deny", &["warnings"]).is_some() || last_of("forbid", &["warnings"]).is_some();
+                match last.map(|(_, l)| l) {
+                    Some("deny") => true,
+                    Some("warn") | None => warnings,
+                    _ => false,
+                }
+            };
+            deny_dead_code = grouped("dead_code", "unused");
+            warn_denied = last_of("deny", &["warnings"]).is_some() || last_of("forbid", &["warnings"]).is_some();
+            imports_denied = last_of("forbid", &["unused_imports", "unused"]).is_some() || {
+                let own = ["unused_imports", "unused"];
+                let levels = [("deny", last_of("deny", &own)), ("warn", last_of("warn", &own)), ("allow", last_of("allow", &own)), ("expect", last_of("expect", &own))];
+                levels.iter().filter_map(|(l, at)| at.map(|at| (at, *l))).max().is_some_and(|(_, l)| l == "deny")
+            };
             deny_trivial_casts = (lint("trivial_casts"), lint("trivial_numeric_casts"));
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_mismatched_lts = lint("mismatched_lifetime_syntaxes");
             deny_deprecated = lint("deprecated") || (levels.contains(&"warnings") && !c.contains("#![allow(deprecated"));
+            // (warn by default: the crate attribute naming the lint last sets its level, and `deny(warnings)` makes
+            // it an error while it is left at warn, unless a later attribute sets `warnings` back; `allow(x)` then
+            // `warn(x)` puts it back at warn)
+            let last_level = |names: &[&str]| {
+                ["forbid", "deny", "warn", "allow", "expect"].into_iter().filter_map(|l| last_of(l, names).map(|at| (at, l))).max().map(|(_, l)| l)
+            };
+            let ffi = |n: &str| match last_level(&[n]) {
+                Some("forbid" | "deny") => true,
+                Some("warn") | None => matches!(last_level(&["warnings"]), Some("forbid" | "deny")),
+                _ => false,
+            };
+            deny_ctypes = (ffi("improper_ctypes"), ffi("improper_ctypes_definitions"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             deny_unused_mut = lint("unused_mut") || (!levels.contains(&"unused_mut") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
@@ -1313,13 +1483,17 @@ impl Session2 {
         // appears nowhere but in its own definition and in `impl` headers)
         if deny_dead_code && self.ctx.lib.is_none() {
             // (a `pub` item counts as used, except in a binary under `deny(dead_code_pub_in_binary)`)
-            if let Some((line, msg)) = first_dead_item(&src, &items[..user_src], deny_dead_pub && !lib_attr) {
+            if let Some((line, msg)) = first_dead_item(&src, &items[..user_src], deny_dead_pub && !lib_attr, warn_denied) {
+                return Err(format!("{line}:1: {msg}"));
+            }
+            // (a field nothing reads, a variant nothing constructs, an inherent impl's const or fn nothing names)
+            if let Some((line, msg)) = dead::first_dead_part(&src, &items[..user_src], warn_denied) {
                 return Err(format!("{line}:1: {msg}"));
             }
         }
         // (unused_imports: a top-level `use` whose name nothing else mentions)
         if deny_unused_imports && self.ctx.lib.is_none() {
-            if let Some((line, col, msg)) = first_unused_import(&src, &items[..user_src]) {
+            if let Some((line, col, msg)) = first_unused_import(&src, &items[..user_src], imports_denied, warn_denied) {
                 return Err(format!("{line}:{col}: {msg}"));
             }
         }
@@ -1331,17 +1505,30 @@ impl Session2 {
         }
         // (unreachable_code: a statement after one that diverges)
         if deny_unreachable_code && self.ctx.lib.is_none() {
+            // (the source as written, as flattening blanks a `mod process {` header: `mod`, any space, `process`)
+            let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+            let b0 = src0.as_bytes();
+            let user_process = src0.match_indices("process").any(|(i, _)| {
+                let before = src0[..i].trim_end();
+                i > before.len() && before.ends_with("mod") && !b0.get(i + 7).is_some_and(|&c| word(c)) && !before[..before.len() - 3].bytes().last().is_some_and(word)
+            });
             for it in &items[..user_src] {
                 let text = src.get(it.start..it.end).unwrap_or("");
                 if !text.contains("fn ") || text.contains("allow(unreachable") || text.contains("#[cfg") {
                     continue;
                 }
                 let Ok(Some(f)) = parse_fn(&src, it) else { continue };
-                if let Some((p, what)) = first_unreachable(&f.block) {
+                if let Some((p, what)) = first_unreachable(&f.block, user_process) {
                     if p.line > 0 {
                         return Err(format!("{}:{}: unreachable {what}", it.line + p.line as usize - 1, p.col + 1));
                     }
                 }
+            }
+        }
+        // (improper_ctypes: a C string type of std's, `CStr` / `CString`, in an `extern "C"` block's or fn's signature)
+        if deny_ctypes.0 || deny_ctypes.1 {
+            if let Some(e) = first_cstr_in_extern(&src, &items[..user_src], deny_ctypes) {
+                return Err(e);
             }
         }
         // (deprecated: a path through `std::intrinsics` to what is stable elsewhere (`std::mem::transmute`))
@@ -1402,8 +1589,15 @@ impl Session2 {
         if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
             return Err(e);
         }
+        // (E0191 at a `dyn Tr` in a type that leaves one of the trait's associated types without a value; before
+        // E0038, as rustc)
+        // (one look at the program's own text for `dyn`, for this and E0038's check)
+        let has_dyn = items[..user].last().is_some_and(|l| src[..l.end.min(src.len())].contains("dyn"));
+        if let Some(e) = has_dyn.then(|| first_dyn_unspecified_assoc(&src, src0, &items[..user])).flatten() {
+            return Err(e);
+        }
         // (in a check (zustc check, the LSP): a build stays as fast as it was, and reports it when it makes the vtable)
-        if let Some(e) = self.checking.then(|| dyn_in_signature(&prog, &src, &items)).flatten() {
+        if let Some(e) = (self.checking && has_dyn).then(|| dyn_in_signature(&prog, &src, &items)).flatten() {
             return Err(e);
         }
         // (E0277: a static is reachable from every thread, so its type must be Sync)
@@ -1509,7 +1703,35 @@ impl Session2 {
                 if b - a != 3 || sb.get(a..b) != Some(b"use") {
                     continue;
                 }
-                let end = sb[b..it.end.min(sb.len())].iter().position(|&c| c == b';').map_or(it.end, |k| b + k);
+                // (the declaration's `;`: not one in a comment, `use a::{ /* ; */ b };`)
+                let stop = it.end.min(sb.len());
+                let mut end = stop;
+                let mut i = b;
+                while i < stop {
+                    if sb[i] == b'/' && sb.get(i + 1) == Some(&b'/') {
+                        i = sb[i..stop].iter().position(|&c| c == b'\n').map_or(stop, |k| i + k);
+                    } else if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
+                        // (block comments nest: `/* a /* b */ ; */`)
+                        let mut depth = 1;
+                        i += 2;
+                        while i < stop && depth > 0 {
+                            if sb[i] == b'/' && sb.get(i + 1) == Some(&b'*') {
+                                depth += 1;
+                                i += 2;
+                            } else if sb[i] == b'*' && sb.get(i + 1) == Some(&b'/') {
+                                depth -= 1;
+                                i += 2;
+                            } else {
+                                i += 1;
+                            }
+                        }
+                    } else if sb[i] == b';' {
+                        end = i;
+                        break;
+                    } else {
+                        i += 1;
+                    }
+                }
                 // (its identifier tokens: not the words of a comment in it)
                 prog.use_names.extend(it.idents.iter().map(|&(x, y)| (x as usize, y as usize)).filter(|&(x, y)| x > b && y <= end).filter_map(|(x, y)| src.get(x..y)).map(str::to_string));
             }
@@ -1737,6 +1959,17 @@ impl Session2 {
             let ty = g.map(|g| format!(" for type `{}`", prog.tn(g).replace("__u_", ""))).unwrap_or_default();
             return Err(format!("{line}:1: conflicting implementations of trait `{tr}`{ty} (E0119)"));
         }
+        // (E0107: an impl giving one of the program's traits the wrong number of generic arguments; only with a trait
+        // header and an impl header)
+        if items[..user].iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::TraitHeader)) && items[..user].iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::ImplHeader)) {
+            if let Some(e) = first_trait_arity_error(&src, src0, &items[..user]) {
+                return Err(e);
+            }
+        }
+        // (E0107 at a use of a generic associated type without its arguments, or with the wrong number)
+        if let Some(e) = first_gat_arity_error(&src, src0, &items[..user]) {
+            return Err(e);
+        }
         // (a derive whose field has not the trait: `#[derive(Hash)] struct S { x: Error }`)
         if !prog.derived.is_empty() {
             if let Some(e) = derive_field_error(&prog, &src, &items[..user]) {
@@ -1744,7 +1977,10 @@ impl Session2 {
             }
         }
         let ol = self.ctx.own_lines as usize;
-        let ext_items: Vec<bool> = items.iter().enumerate().map(|(i, it)| ol > 0 && i < user && it.line > ol).collect();
+        // (an item past this crate's own lines is a dependency's, but for one hoisted out of a fn body of this crate
+        // (prep::HOIST_MARK): hoisted items come last, and are this crate's when they were written in its lines)
+        let marks = crate::prep::hoist_marks(&src);
+        let ext_items: Vec<bool> = items.iter().enumerate().map(|(i, it)| ol > 0 && i < user && !own_line(&marks, ol, it.line)).collect();
         // (ライブラリ: 自分の総称でない関数は全部外に見せる (使う側のクレートが呼ぶ))
         if self.ctx.lib.is_some() {
             for id in 0..prog.names.len() {
@@ -1764,7 +2000,8 @@ impl Session2 {
             crefs.push(c);
         }
         tm.lap("refs", String::new());
-        let mut a = Analysis { iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()) };
+        let mut a = Analysis { iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
+        a.assoc_keys = a.assoc_keys();
         if self.opts.opt && std::env::var_os("ZUSTC_NO_INLINE").is_none() {
             a.inl = inline_bodies(&a);
         }
@@ -1972,6 +2209,11 @@ fn opaque_bound_error(prog: &Program, src: &str, items: &[SrcItem]) -> R<Option<
         let Some(f) = parse_fn(src, &items[ii])? else { continue };
         let Some(crate::parse::Ty::Impl(bs)) = &f.sig.ret else { continue };
         let Ok(names) = crate::ast_summary::bound_names(bs) else { continue };
+        // (a tail `if` / `match`: the type recorded is its first arm's; arms of other types are the arms' error
+        // (E0308, "`if` and `else` have incompatible types"), reported by the body's check)
+        if matches!(f.block.stmts.last(), Some(crate::parse::Stmt::Expr(crate::parse::Expr::If(..) | crate::parse::Expr::Match(..), false))) {
+            continue;
+        }
         for b in &names {
             if let Some(e) = check(t, b, items[ii].line) {
                 return Ok(Some(e));
@@ -2036,10 +2278,1254 @@ fn relocate(e: String, it: &SrcItem) -> String {
     format!("{}:1: {e}", it.line)
 }
 
+/// E0434: a fn item written inside another fn (hoisted out of it) that uses a local of a fn it is in, or its `self`:
+/// `fn foo() { let y = 5; fn bar() -> u32 { y } }`. A name the program also has an item of is that item
+fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::parse::Expr;
+    // (hoisted items come last, each piece's first line starting with a mark: none when the last item's isn't)
+    let last = items.last()?;
+    let head = match last.kind {
+        crate::lexer::ItemKind::ImplMember(h) | crate::lexer::ItemKind::TraitMember(h) => items.get(h as usize)?,
+        _ => last,
+    };
+    let line_start = src[..head.start].rfind('\n').map_or(0, |n| n + 1);
+    if !src[line_start..].starts_with(crate::prep::HOIST_MARK) && !src[head.start..].starts_with(crate::prep::HOIST_MARK) {
+        return None;
+    }
+    let marks = crate::prep::hoist_marks(src);
+    if marks.is_empty() {
+        return None;
+    }
+    let text_of = |it: &SrcItem| src.get(it.start..it.end).unwrap_or("");
+    // (each item's lines as written)
+    let range = |it: &SrcItem| {
+        let a = crate::prep::hoisted_at(&marks, it.line).unwrap_or(it.line);
+        (a, a + text_of(it).matches('\n').count())
+    };
+    let hoisted: Vec<usize> = (0..items.len()).filter(|&i| crate::prep::hoisted_at(&marks, items[i].line).is_some() && text_of(&items[i]).contains("fn ")).collect();
+    if hoisted.is_empty() {
+        return None;
+    }
+    // (the program's item names)
+    const KEYWORDS: &[&str] = &["fn", "const", "static", "struct", "enum", "union", "type", "mod", "trait"];
+    let mut item_names: crate::fxhash::FxSet<&str> = Default::default();
+    for it in items {
+        let ids: Vec<&str> = it.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or("")).collect();
+        if let Some(k) = ids.iter().take(8).position(|w| KEYWORDS.contains(w)) {
+            if let Some(n) = ids.get(k + 1) {
+                item_names.insert(n);
+            }
+        }
+    }
+    // (a fn's own locals: its parameters, its `let`s and its `self`)
+    fn locals_of(sig: &crate::parse::FnSig, body: &crate::parse::Block, out: &mut Vec<String>) {
+        if sig.recv.is_some() {
+            out.push("self".to_string());
+        }
+        for (p, _) in &sig.params {
+            crate::ast_closure::pat_idents(p, out);
+        }
+        out.extend(crate::ast_closure::let_bindings(body).into_iter().map(|(_, n)| n));
+    }
+    // (the first fn in `body` or nested in it (one level of items per hoisting) that names an outer local: the fn's
+    // name, the local, and where the fn's text uses it free (line 0 when not known))
+    fn capture(sig: &crate::parse::FnSig, body: &crate::parse::Block, outer: &[String], items: &crate::fxhash::FxSet<&str>) -> Option<(String, String, crate::parse::Pos)> {
+        let mut used = crate::ast_closure::used_vars_at(&Expr::Block(None, false, body.clone()));
+        if sig.recv.is_none() && format!("{body:?}").contains("\"self\"") && !used.iter().any(|(n, _)| n == "self") {
+            used.push(("self".to_string(), Default::default()));
+        }
+        // (its own parameters are in its signature, not its body)
+        let mut own = vec![];
+        for (p, _) in &sig.params {
+            crate::ast_closure::pat_idents(p, &mut own);
+        }
+        if sig.recv.is_some() {
+            own.push("self".to_string());
+        }
+        used.retain(|(n, _)| !own.contains(n));
+        if let Some((n, at)) = used.iter().find(|(n, _)| !items.contains(n.as_str()) && outer.contains(n)) {
+            return Some((sig.name.clone(), n.clone(), *at));
+        }
+        let mut mine = outer.to_vec();
+        locals_of(sig, body, &mut mine);
+        body.stmts.iter().find_map(|st| match st {
+            crate::parse::Stmt::Item(crate::parse::Item { kind: crate::parse::ItemKind::Fn(s2, Some(b2)), .. }) => capture(s2, b2, &mine, items),
+            _ => None,
+        })
+    }
+    // (where an item starts in the file as written: its first line up to its `{` (a fn's body, which the items
+    // hoisted out of it leave), found in the line it was written on)
+    let orig_at = |it: &SrcItem| -> Option<usize> {
+        let text = text_of(it);
+        let first = &text[..text.find('\n').unwrap_or(text.len())];
+        let skip = first.find("*/").filter(|_| first.starts_with(crate::prep::HOIST_MARK)).map_or(0, |n| n + 2);
+        let first = first[skip..].trim_start();
+        let head = first[..first.find('{').unwrap_or(first.len())].trim_end();
+        let line = crate::prep::hoisted_at(&marks, it.line).unwrap_or(it.line);
+        let l = orig.split('\n').nth(line.checked_sub(1)?)?;
+        Some(l.as_ptr() as usize - orig.as_ptr() as usize + l.find(head).filter(|_| !head.is_empty())?)
+    };
+    // (the fn written at `a` has what is written at `b` in its body: no `}` closes the body between them)
+    let encloses = |a: usize, b: usize| {
+        let Some(seg) = orig.as_bytes().get(a..b) else { return false };
+        let mut d = 0i32;
+        for &(k, s, _) in &crate::lexer::tokenize(seg) {
+            if k == 1 && seg[s] == b'{' {
+                d += 1;
+            } else if k == 1 && seg[s] == b'}' {
+                d -= 1;
+                if d <= 0 {
+                    return false;
+                }
+            }
+        }
+        d > 0
+    };
+    // (the `let`s of the fn written at `a` that are in scope at `b`: those before it in the blocks still open there, not
+    // a sibling block's, `{ let drop = 1u8; }` beside `fn inner() { drop(0u8); }`. A `let`'s names start after its `;`,
+    // not in its initializer; an `if let` / `while let`'s in its body only. None when the text is not read)
+    let scoped_lets = |a: usize, b: usize| -> Option<Vec<String>> {
+        let seg = orig.as_bytes().get(a..b)?;
+        let t = crate::lexer::tokenize(seg);
+        let w = |q: usize| if q < t.len() && t[q].0 == 0 { std::str::from_utf8(&seg[t[q].1..t[q].2]).unwrap_or("") } else { "" };
+        let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && seg[t[q].1] == c;
+        let mut open: Vec<Vec<String>> = vec![];
+        // (a `let`'s names until its `;`, and an `if let`'s until its body opens: with the depth they were written at)
+        let mut pending: Vec<(usize, Vec<String>)> = vec![];
+        let mut cond: Option<(usize, Vec<String>)> = None;
+        let mut q = 0;
+        while q < t.len() {
+            if sym(q, b'{') {
+                let body = cond.take_if(|(d, _)| *d == open.len());
+                open.push(body.map(|(_, ns)| ns).unwrap_or_default());
+            } else if sym(q, b'}') {
+                open.pop()?;
+                pending.retain(|(d, _)| *d <= open.len());
+            } else if sym(q, b';') {
+                let depth = open.len();
+                for (_, ns) in pending.extract_if(.., |(d, _)| *d == depth) {
+                    open.last_mut()?.extend(ns);
+                }
+            } else if w(q) == "let" && !open.is_empty() {
+                let conditional = q > 0 && (w(q - 1) == "if" || w(q - 1) == "while" || sym(q - 1, b'&'));
+                let mut names = vec![];
+                // (its pattern's names, to the `=`, `;` or type at the pattern's own level)
+                let mut d = 0i32;
+                q += 1;
+                while q < t.len() {
+                    let path = sym(q + 1, b':') && sym(q + 2, b':') || q > 0 && sym(q - 1, b':') && q > 1 && sym(q - 2, b':');
+                    if d == 0 && (sym(q, b'=') || sym(q, b';') || (sym(q, b':') && !sym(q + 1, b':') && !(q > 0 && sym(q - 1, b':')))) {
+                        break;
+                    }
+                    if sym(q, b'(') || sym(q, b'[') || sym(q, b'{') {
+                        d += 1;
+                    } else if sym(q, b')') || sym(q, b']') || sym(q, b'}') {
+                        d -= 1;
+                    } else if t[q].0 == 0 && !path && !(t[q].1 > 0 && seg[t[q].1 - 1] == b'\'') {
+                        let n = w(q);
+                        let binds = n.starts_with(|c: char| c.is_lowercase() || c == '_') && !matches!(n, "mut" | "ref" | "box" | "_");
+                        if binds && !sym(q + 1, b'(') && !sym(q + 1, b'{') && !(sym(q + 1, b':') && d > 0) {
+                            names.push(n.to_string());
+                        }
+                    }
+                    q += 1;
+                }
+                if conditional {
+                    cond = Some((open.len(), names));
+                } else {
+                    pending.push((open.len(), names));
+                }
+                continue;
+            }
+            q += 1;
+        }
+        Some(open.into_iter().flatten().collect())
+    };
+    for &h in &hoisted {
+        let it = &items[h];
+        let Ok(Some(f)) = parse_fn(src, it) else { continue };
+        // (the locals of the fns it is written in)
+        let line = range(it).0;
+        let mut outer: Vec<String> = vec![];
+        for (g, gi) in items.iter().enumerate() {
+            let (a, b) = range(gi);
+            if g == h || !(a <= line && line <= b) || !text_of(gi).contains("fn ") {
+                continue;
+            }
+            // (on the line a fn starts or ends on, its columns say whether it is around: `fn a(x: u8) {} fn b() {
+            // fn c() {} }` on one line)
+            if line == a || line == b {
+                if let (Some(x), Some(y)) = (orig_at(gi), orig_at(it)) {
+                    if !encloses(x, y) {
+                        continue;
+                    }
+                }
+            }
+            let Ok(Some(gf)) = parse_fn(src, gi) else { continue };
+            match orig_at(gi).zip(orig_at(it)).filter(|(x, y)| x < y).and_then(|(x, y)| scoped_lets(x, y)) {
+                Some(lets) => {
+                    if gf.sig.recv.is_some() {
+                        outer.push("self".to_string());
+                    }
+                    for (p, _) in &gf.sig.params {
+                        crate::ast_closure::pat_idents(p, &mut outer);
+                    }
+                    outer.extend(lets);
+                }
+                None => locals_of(&gf.sig, &gf.block, &mut outer),
+            }
+        }
+        if outer.is_empty() {
+            continue;
+        }
+        let Some((fname, name, at)) = capture(&f.sig, &f.block, &outer, &item_names) else { continue };
+        let text = text_of(it);
+        // (rustc points at the use: the free one the walk found, at its line (from 1) and column (in characters, from
+        // 0) in the item's text)
+        let found = (at.line > 0)
+            .then(|| {
+                let l = text.split('\n').nth(at.line as usize - 1)?;
+                let base = l.as_ptr() as usize - text.as_ptr() as usize;
+                Some(base + l.char_indices().nth(at.col as usize).map_or(l.len(), |(i, _)| i))
+            })
+            .flatten()
+            .and_then(|o| {
+                let r = &text[o..];
+                if r.starts_with(name.as_str()) {
+                    return Some(o);
+                }
+                // (a format string's `{x}` / `{x:?}`: the name in it)
+                let end = str_lit_len(r)?;
+                ['}', ':'].iter().find_map(|c| r[..end].find(&format!("{{{name}{c}"))).map(|k| o + k + 1)
+            });
+        // (else (`self`) the first in that fn's body that is not a field or a path's segment)
+        let off = match found {
+            Some(o) => o,
+            None => {
+                let b = text.as_bytes();
+                let t = crate::lexer::tokenize(b);
+                let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+                let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+                let from = (1..t.len()).find(|&k| w(k) == fname && w(k - 1) == "fn").unwrap_or(0);
+                let open = (from..t.len()).find(|&k| sym(k, b'{'))?;
+                let Some(k) = (open..t.len()).find(|&k| w(k) == name && !(k > 0 && (sym(k - 1, b'.') || sym(k - 1, b':'))) && !sym(k + 1, b':') && !sym(k + 1, b'!')) else {
+                    continue;
+                };
+                t[k].1
+            }
+        };
+        let (line, col) = item_pos(src, orig, &marks, it, off);
+        return Some(format!("{line}:{col}: can't capture dynamic environment in a fn item (E0434)"));
+    }
+    None
+}
+
+/// The length of the string literal `r` starts with (`"..."`, `r"..."`, `r#"..."#`), None when it starts with none
+fn str_lit_len(r: &str) -> Option<usize> {
+    let b = r.as_bytes();
+    let (raw, hashes, open) = match b.first()? {
+        b'"' => (false, 0, 1),
+        b'r' => {
+            let h = b[1..].iter().take_while(|&&c| c == b'#').count();
+            (b.get(1 + h) == Some(&b'"')).then_some((true, h, 2 + h))?
+        }
+        _ => return None,
+    };
+    let mut i = open;
+    while i < b.len() {
+        // (escapes only in a cooked string: `r"\"` ends at its second byte's quote)
+        if !raw && b[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        if b[i] == b'"' && b[i + 1..].iter().take(hashes).filter(|&&c| c == b'#').count() == hashes {
+            return Some(i + 1 + hashes);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The offset of a `pub` an item's text starts with, past its outer attributes and comments
+fn leading_pub(text: &str) -> Option<usize> {
+    let b = text.as_bytes();
+    let mut i = 0;
+    loop {
+        // (whitespace and comments, nested ones too)
+        i = skip_space(b, i);
+        if b[i..].starts_with(b"#[") || b[i..].starts_with(b"#![") {
+            // (an attribute: to its `]`, past the strings in it)
+            let mut d = 0i32;
+            while i < b.len() {
+                match b[i] {
+                    b'"' => {
+                        i += 1;
+                        while i < b.len() && b[i] != b'"' {
+                            i += if b[i] == b'\\' { 2 } else { 1 };
+                        }
+                    }
+                    b'[' => d += 1,
+                    b']' => {
+                        d -= 1;
+                        if d == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+        } else {
+            break;
+        }
+    }
+    (b[i..].starts_with(b"pub") && b.get(i + 3).is_none_or(|c| !(c.is_ascii_alphanumeric() || *c == b'_'))).then_some(i)
+}
+
+/// In an enum's text: the offset of a `pub` on one of its variants or their fields (`V1 { pub f: i32 }`, `V2(pub i32)`)
+fn enum_inner_pub(text: &str) -> Option<usize> {
+    let b = text.as_bytes();
+    let t = crate::lexer::tokenize(b);
+    let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+    let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+    let e = (0..t.len()).find(|&k| w(k) == "enum")?;
+    // (the body: its `{`, past the generics and a where clause)
+    let open = (e..t.len()).find(|&k| sym(k, b'{'))?;
+    // (`disc`: in a variant's discriminant, `A = { pub const N: isize = 1; N }`, whose items may be `pub`)
+    let (mut d, mut disc) = (0i32, false);
+    for k in open..t.len() {
+        if sym(k, b'{') || sym(k, b'(') || sym(k, b'[') {
+            d += 1;
+        } else if sym(k, b'}') || sym(k, b')') || sym(k, b']') {
+            d -= 1;
+            if d == 0 {
+                break;
+            }
+        } else if d == 1 && (sym(k, b'=') || sym(k, b',')) {
+            disc = sym(k, b'=');
+        } else if !disc && (d == 1 || d == 2) && w(k) == "pub" && k > 0 && (sym(k - 1, b'{') || sym(k - 1, b'(') || sym(k - 1, b',') || sym(k - 1, b']')) {
+            return Some(t[k].1);
+        }
+    }
+    None
+}
+
+/// The line and column, in the file as written (`orig`), of the byte at `off` in an item's text. An item hoisted out
+/// of a fn body is given the line it was written on; on its first line, whose indent the hoisted text does not keep,
+/// the column is found from that line as written
+fn item_pos(src: &str, orig: &str, marks: &[(usize, usize)], it: &SrcItem, off: usize) -> (usize, usize) {
+    let text = &src[it.start..it.end];
+    let line = it.line + text[..off].matches('\n').count();
+    // (columns count characters, as rustc's do)
+    match crate::prep::hoisted_at(marks, line) {
+        Some(at) => {
+            let col = text[text[..off].rfind('\n').map_or(0, |n| n + 1)..off].chars().count() + 1;
+            if text[..off].contains('\n') {
+                return (at, col);
+            }
+            // (the item's first line, past a hoist mark, as it is in the line it was written on)
+            let first = &text[..text.find('\n').unwrap_or(text.len())];
+            let skip = first.find("*/").filter(|_| first.starts_with(crate::prep::HOIST_MARK)).map_or(0, |n| n + 2);
+            // (up to 40 bytes, cut at a character's boundary)
+            let end = (skip..=first.len().min(skip + 40)).rev().find(|&n| first.is_char_boundary(n)).unwrap_or(skip);
+            let head = &first[skip..end];
+            let l = orig.split('\n').nth(at.wrapping_sub(1)).unwrap_or("");
+            let found = l.find(head).filter(|_| !head.trim().is_empty() && off >= skip);
+            (at, found.map_or(col, |f| l[..f].chars().count() + text[skip..off].chars().count() + 1))
+        }
+        None => {
+            let at = it.start + off;
+            (line, src[src[..at].rfind('\n').map_or(0, |n| n + 1)..at].chars().count() + 1)
+        }
+    }
+}
+
+/// The top-level parts of a `<..>` of tokens that starts at `open` (its `<`): (first token, last token) of each, and
+/// the index of its `>`. None when it does not close
+fn angle_parts(t: &[(u8, usize, usize)], text: &[u8], open: usize) -> Option<(Vec<(usize, usize)>, usize)> {
+    let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && text[t[k].1] == c;
+    let (mut d, mut braces, mut parts, mut from) = (0i32, 0i32, vec![], open + 1);
+    for k in open..t.len() {
+        if sym(k, b'{') {
+            braces += 1;
+            continue;
+        }
+        if sym(k, b'}') {
+            braces -= 1;
+            continue;
+        }
+        if braces > 0 {
+            continue;
+        }
+        if sym(k, b'<') || sym(k, b'(') || sym(k, b'[') {
+            d += 1;
+        } else if (sym(k, b'>') && !(k > 0 && sym(k - 1, b'-'))) || sym(k, b')') || sym(k, b']') {
+            d -= 1;
+            if d == 0 {
+                if from < k {
+                    parts.push((from, k - 1));
+                }
+                return Some((parts, k));
+            }
+        } else if d == 1 && sym(k, b',') {
+            if from < k {
+                parts.push((from, k - 1));
+            }
+            from = k + 1;
+        }
+    }
+    None
+}
+
+/// E0107 at an impl of one of the program's traits that gives it more generic (type / const) arguments than the
+/// trait declares, or fewer than it requires: `impl Seq<bool> for u32` with `trait Seq {}`. Read from the trait
+/// headers and the impl headers only (lifetimes and `Item = ..` bindings are not counted)
+fn first_trait_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind;
+    // (each trait's (required, declared) count; a name declared twice is left out)
+    let mut decl: crate::fxhash::FxMap<&str, Option<(usize, usize)>> = Default::default();
+    for it in items.iter().filter(|it| matches!(it.kind, ItemKind::TraitHeader)) {
+        let text = &src[it.start..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let Some(k) = (0..t.len()).find(|&k| w(k) == "trait") else { continue };
+        let name = w(k + 1);
+        if name.is_empty() {
+            continue;
+        }
+        let counts = if k + 2 < t.len() && t[k + 2].0 == 1 && b[t[k + 2].1] == b'<' {
+            let Some((parts, _)) = angle_parts(&t, b, k + 2) else { continue };
+            // (a lifetime, `'a`, whose token may start after its quote)
+            let lifetime = |q: usize| b[t[q].1] == b'\'' || (t[q].1 > 0 && b[t[q].1 - 1] == b'\'');
+            let tys: Vec<&(usize, usize)> = parts.iter().filter(|p| !lifetime(p.0)).collect();
+            // (braces, a const expression's `{ 1 > 0 }`, are skipped whole)
+            let top_eq = |p: &(usize, usize)| {
+                let (mut d, mut braces) = (0i32, 0i32);
+                (p.0..=p.1).any(|q| {
+                    if t[q].0 == 1 {
+                        match b[t[q].1] {
+                            b'{' => braces += 1,
+                            b'}' => braces -= 1,
+                            _ if braces > 0 => {}
+                            b'<' | b'(' | b'[' => d += 1,
+                            b'>' if !(q > 0 && t[q - 1].0 == 1 && b[t[q - 1].1] == b'-') => d -= 1,
+                            b')' | b']' => d -= 1,
+                            b'=' => return d == 0,
+                            _ => {}
+                        }
+                    }
+                    false
+                })
+            };
+            let defaults = tys.iter().filter(|p| top_eq(p)).count();
+            (tys.len() - defaults, tys.len())
+        } else {
+            (0, 0)
+        };
+        decl.entry(name).and_modify(|e| *e = None).or_insert(Some(counts));
+    }
+    if decl.is_empty() {
+        return None;
+    }
+    let plural = |n: usize| if n == 1 { "generic argument" } else { "generic arguments" };
+    for it in items.iter().filter(|it| matches!(it.kind, ItemKind::ImplHeader)) {
+        let text = &src[it.start..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+        let Some(mut k) = (0..t.len()).find(|&k| w(k) == "impl") else { continue };
+        k += 1;
+        if sym(k, b'<') {
+            let Some((_, close)) = angle_parts(&t, b, k) else { continue };
+            k = close + 1;
+        }
+        // (the trait's path, up to `for`: its last segment and its arguments)
+        if sym(k, b'!') {
+            continue;
+        }
+        let mut name_at = None;
+        while k < t.len() && w(k) != "for" && !sym(k, b'{') {
+            if t[k].0 == 0 && w(k) != "dyn" {
+                name_at = Some(k);
+                k += 1;
+                if sym(k, b'<') {
+                    let Some((_, close)) = angle_parts(&t, b, k) else { break };
+                    k = close + 1;
+                }
+                continue;
+            }
+            k += 1;
+        }
+        if w(k) != "for" {
+            continue;
+        }
+        let Some(nk) = name_at else { continue };
+        let Some(&Some((required, declared))) = decl.get(w(nk)) else { continue };
+        let given = if sym(nk + 1, b'<') {
+            let Some((parts, _)) = angle_parts(&t, b, nk + 1) else { continue };
+            parts
+                .iter()
+                .filter(|p| !(b[t[p.0].1] == b'\'' || (t[p.0].1 > 0 && b[t[p.0].1 - 1] == b'\'')) && !(t[p.0].0 == 0 && p.1 > p.0 && sym(p.0 + 1, b'=') && !sym(p.0 + 2, b'=')))
+                .count()
+        } else {
+            0
+        };
+        if given > declared || given < required {
+            let what = if given == 0 {
+                format!("missing generics for trait `{}`", w(nk))
+            } else {
+                let takes = if required == declared { format!("{declared}") } else if given > declared { format!("at most {declared}") } else { format!("at least {required}") };
+                format!("trait takes {takes} {} but {given} {} {} supplied", plural(declared.max(required)), plural(given), if given == 1 { "was" } else { "were" })
+            };
+            // (rustc points at the trait's name)
+            let (line, col) = item_pos(src, orig, &crate::prep::hoist_marks(src), it, t[nk].1);
+            return Some(format!("{line}:{col}: {what} (E0107)"));
+        }
+    }
+    None
+}
+
+/// E0107 at a use of one of the program's generic associated types with the wrong number of arguments: none at all
+/// (`Self::Item` / `Tr<Item = X>` for `type Item<'a>`: "missing generics"), too few / many lifetimes, or too few / many
+/// types and consts. Only uses whose trait is known are read: `Self::A` in the trait or in an impl of it, `<T as Tr>::A`,
+/// `<Self>::A`, and the binding `Tr<A = ..>`. Nothing is tokenized unless a trait declares a generic associated type
+fn first_gat_arity_error(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind;
+    let id = |&(a, b): &(u32, u32)| &src[a as usize..b as usize];
+    // (the trait an item's `Self` implements or is: a trait's members, an impl's members of `impl Tr for X`)
+    let trait_of_header = |h: usize| -> Option<&str> {
+        let it = items.get(h)?;
+        match it.kind {
+            ItemKind::TraitHeader => it.idents.iter().position(|x| id(x) == "trait").and_then(|k| it.idents.get(k + 1)).map(id),
+            ItemKind::ImplHeader => {
+                let text = &src[it.start..it.end];
+                let b = text.as_bytes();
+                let t = crate::lexer::tokenize(b);
+                let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+                let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+                let f = (0..t.len()).find(|&k| w(k) == "for")?;
+                // (the last segment before `for`, past its own `<..>`)
+                let mut k = f.checked_sub(1)?;
+                if sym(k, b'>') {
+                    let mut d = 0i32;
+                    loop {
+                        if sym(k, b'>') && !(k > 0 && sym(k - 1, b'-')) {
+                            d += 1;
+                        } else if sym(k, b'<') {
+                            d -= 1;
+                            if d == 0 {
+                                break;
+                            }
+                        }
+                        k = k.checked_sub(1)?;
+                    }
+                    k = k.checked_sub(1)?;
+                }
+                (t[k].0 == 0).then(|| w(k))
+            }
+            _ => None,
+        }
+    };
+    // (the generic associated types: (trait, name) -> (lifetimes, types and consts))
+    let mut gats: crate::fxhash::FxMap<(&str, &str), (usize, usize)> = Default::default();
+    for it in items {
+        let ItemKind::TraitMember(h) = it.kind else { continue };
+        let Some(k) = it.idents.iter().take(4).position(|x| id(x) == "type") else { continue };
+        let Some(&(_, ne)) = it.idents.get(k + 1) else { continue };
+        if !src[ne as usize..it.end].trim_start().starts_with('<') {
+            continue;
+        }
+        let Some(tr) = trait_of_header(h as usize) else { continue };
+        let text = &src[ne as usize..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let Some((parts, _)) = angle_parts(&t, b, 0) else { continue };
+        let lifetime = |q: usize| b[t[q].1] == b'\'' || (t[q].1 > 0 && b[t[q].1 - 1] == b'\'');
+        let lts = parts.iter().filter(|p| lifetime(p.0)).count();
+        gats.insert((tr, id(&it.idents[k + 1])), (lts, parts.len() - lts));
+    }
+    if gats.is_empty() {
+        return None;
+    }
+    let names: Vec<&str> = gats.keys().map(|k| k.1).collect();
+    let marks = crate::prep::hoist_marks(src);
+    for (i, it) in items.iter().enumerate() {
+        if !it.idents.iter().any(|x| names.contains(&id(x))) {
+            continue;
+        }
+        let self_trait = match it.kind {
+            ItemKind::TraitMember(h) | ItemKind::ImplMember(h) => trait_of_header(h as usize),
+            ItemKind::TraitHeader => trait_of_header(i),
+            _ => None,
+        };
+        let text = &src[it.start..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+        // (the opener of the group a closing `>` / `)` / `]` at k ends, reading back)
+        let opener = |mut k: usize| -> Option<usize> {
+            let mut d = 0i32;
+            loop {
+                if (sym(k, b'>') && !(k > 0 && sym(k - 1, b'-'))) || sym(k, b')') || sym(k, b']') {
+                    d += 1;
+                } else if sym(k, b'<') || sym(k, b'(') || sym(k, b'[') {
+                    d -= 1;
+                    if d == 0 {
+                        return Some(k);
+                    }
+                }
+                k = k.checked_sub(1)?;
+            }
+        };
+        for k in 1..t.len() {
+            if t[k].0 != 0 || !names.contains(&w(k)) || w(k - 1) == "type" {
+                continue;
+            }
+            let name = w(k);
+            // (whose trait: `Self::A` / `<Self>::A` / `<T as Tr>::A`, or the binding `Tr<.., A = ..>`)
+            let mut tr = None;
+            if k >= 3 && sym(k - 1, b':') && sym(k - 2, b':') {
+                if w(k - 3) == "Self" && !(k >= 5 && sym(k - 4, b':') && sym(k - 5, b':')) {
+                    tr = self_trait;
+                } else if sym(k - 3, b'>') {
+                    if let Some(o) = opener(k - 3) {
+                        if o + 2 == k - 3 && w(o + 1) == "Self" {
+                            tr = self_trait;
+                        } else {
+                            // (the `as` at the group's own level: not one in `<<T as A>::X as Tr>`'s inner group)
+                            let mut d = 0i32;
+                            let as_at = (o + 1..k - 3).find(|&q| {
+                                if sym(q, b'<') {
+                                    d += 1;
+                                } else if sym(q, b'>') && !sym(q - 1, b'-') {
+                                    d -= 1;
+                                }
+                                d == 0 && w(q) == "as"
+                            });
+                            // (the trait after it: its path's last segment, `<U as m::Tr<u8>>::A`)
+                            if let Some(a) = as_at {
+                                let mut q = a + 1;
+                                while t[q].0 == 0 && sym(q + 1, b':') && sym(q + 2, b':') && q + 3 < k - 3 && t[q + 3].0 == 0 {
+                                    q += 3;
+                                }
+                                if q < k - 3 && t[q].0 == 0 && (q + 1 == k - 3 || sym(q + 1, b'<')) {
+                                    tr = Some(w(q));
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if sym(k - 1, b'<') || sym(k - 1, b',') {
+                // (a binding: `A = ..` / `A<..> = ..`, not `==` / `=>`)
+                let mut e = k + 1;
+                if sym(e, b'<') {
+                    let Some((_, close)) = angle_parts(&t, b, e) else { continue };
+                    e = close + 1;
+                }
+                let eq = sym(e, b'=') && !(sym(e + 1, b'=') || sym(e + 1, b'>'));
+                if !eq {
+                    continue;
+                }
+                // (the `<` the list is in, reading back over balanced groups, and the trait's name before it)
+                let mut q = k - 1;
+                let open = loop {
+                    if sym(q, b'<') {
+                        break Some(q);
+                    }
+                    if sym(q, b';') || sym(q, b'{') || sym(q, b'}') || sym(q, b'(') || sym(q, b'[') {
+                        break None;
+                    }
+                    if (sym(q, b'>') && !(q > 0 && sym(q - 1, b'-'))) || sym(q, b')') || sym(q, b']') {
+                        let Some(o) = opener(q) else { break None };
+                        q = o;
+                    }
+                    let Some(n) = q.checked_sub(1) else { break None };
+                    q = n;
+                };
+                if let Some(o) = open.filter(|&o| o > 0 && t[o - 1].0 == 0) {
+                    tr = Some(w(o - 1));
+                }
+            }
+            let Some(tr) = tr else { continue };
+            let Some(&(lts, tys)) = gats.get(&(tr, name)) else { continue };
+            // (its arguments, `Self::A<'a>` or `Self::A::<'a>`)
+            let args = if sym(k + 1, b'<') {
+                Some(k + 1)
+            } else {
+                (sym(k + 1, b':') && sym(k + 2, b':') && sym(k + 3, b'<')).then_some(k + 3)
+            };
+            // (a call of an associated fn of the name, `Self::A()` / `Self::A::<u8>()`: the value namespace)
+            let next = match args {
+                Some(open) => angle_parts(&t, b, open).map(|(_, c)| c + 1),
+                None => Some(k + 1),
+            };
+            if next.is_some_and(|q| sym(q, b'(')) {
+                continue;
+            }
+            let (glts, gtys) = if let Some(open) = args {
+                let Some((parts, _)) = angle_parts(&t, b, open) else { continue };
+                let lifetime = |q: usize| b[t[q].1] == b'\'' || (t[q].1 > 0 && b[t[q].1 - 1] == b'\'');
+                let binding = |p: &(usize, usize)| t[p.0].0 == 0 && p.1 > p.0 && sym(p.0 + 1, b'=') && !sym(p.0 + 2, b'=');
+                let l = parts.iter().filter(|p| lifetime(p.0)).count();
+                (Some(l), parts.iter().filter(|p| !lifetime(p.0) && !binding(p)).count())
+            } else {
+                (None, 0)
+            };
+            let what = match glts {
+                None => format!("missing generics for associated type `{tr}::{name}`"),
+                Some(g) if g != lts => format!("associated type takes {lts} lifetime argument{} but {g} lifetime argument{} supplied", if lts == 1 { "" } else { "s" }, if g == 1 { " was" } else { "s were" }),
+                Some(_) if gtys != tys => format!("associated type takes {tys} generic argument{} but {gtys} generic argument{} supplied", if tys == 1 { "" } else { "s" }, if gtys == 1 { " was" } else { "s were" }),
+                _ => continue,
+            };
+            let (line, col) = item_pos(src, orig, &marks, it, t[k].1);
+            return Some(format!("{line}:{col}: {what} (E0107)"));
+        }
+    }
+    None
+}
+
+/// One trait bound of a bound list (`Super<X = u8> + Zed + 'a`), from the token at `k`: (its first token, its name's
+/// token, the parts of its `<..>`, the token after it). None at a lifetime, `?Sized`, `Fn(..)` (whose sugar binds
+/// `Output`) or anything else that is not a path
+fn bound_at(t: &[(u8, usize, usize)], b: &[u8], mut k: usize) -> Option<(usize, usize, Vec<(usize, usize)>, usize)> {
+    let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && b[t[q].1] == c;
+    let word = |q: usize| q < t.len() && t[q].0 == 0;
+    // (`for<'a> Tr<'a>`)
+    if word(k) && &b[t[k].1..t[k].2] == b"for" && sym(k + 1, b'<') {
+        k = angle_parts(t, b, k + 1)?.1 + 1;
+    }
+    let at = k;
+    if sym(k, b':') && sym(k + 1, b':') {
+        k += 2;
+    }
+    if !word(k) || (t[k].1 > 0 && b[t[k].1 - 1] == b'\'') {
+        return None;
+    }
+    while word(k) && sym(k + 1, b':') && sym(k + 2, b':') && word(k + 3) {
+        k += 3;
+    }
+    let name = k;
+    let mut parts = vec![];
+    k += 1;
+    // (`Iterator::<Item = u8>`)
+    if sym(k, b':') && sym(k + 1, b':') && sym(k + 2, b'<') {
+        k += 2;
+    }
+    if sym(k, b'<') {
+        let (p, c) = angle_parts(t, b, k)?;
+        parts = p;
+        k = c + 1;
+    } else if sym(k, b'(') {
+        return None;
+    }
+    Some((at, name, parts, k))
+}
+
+/// The associated types a `<..>`'s parts bind (`Item = u8`, `Item: Copy`); a supertrait's binding whose value names
+/// `Self` (`Base<Output = <Self as Helper>::Target>`) is left out with `self_free`, as dyn does not know `Self`
+fn assoc_bindings<'a>(t: &[(u8, usize, usize)], text: &'a str, parts: &[(usize, usize)], self_free: bool) -> Vec<&'a str> {
+    let b = text.as_bytes();
+    let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && b[t[q].1] == c;
+    let mut bound = vec![];
+    for &(a, z) in parts {
+        let binds = sym(a + 1, b'=') && !sym(a + 2, b'=') || sym(a + 1, b':') && !sym(a + 2, b':');
+        if t[a].0 == 0 && a < z && binds && !(t[a].1 > 0 && b[t[a].1 - 1] == b'\'') && (!self_free || !(a + 2..=z).any(|q| t[q].0 == 0 && &text[t[q].1..t[q].2] == "Self")) {
+            bound.push(&text[t[a].1..t[a].2]);
+        }
+    }
+    bound
+}
+
+/// The arguments of a trait as shown_args shows it (`Sup<A, Vec<u8>>`: `A` and `Vec<u8>`), none without `<..>`
+fn type_args(shown: &str) -> Vec<&str> {
+    let (Some(a), Some(z)) = (shown.find('<'), shown.rfind('>')) else { return vec![] };
+    let inner = &shown[a + 1..z.max(a + 1)];
+    let (mut out, mut d, mut from) = (vec![], 0i32, 0);
+    for (i, c) in inner.char_indices() {
+        match c {
+            '<' | '(' | '[' => d += 1,
+            '>' if !inner[..i].ends_with('-') => d -= 1,
+            ')' | ']' => d -= 1,
+            ',' if d == 0 => {
+                out.push(inner[from..i].trim());
+                from = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(inner[from..].trim());
+    out
+}
+
+/// `s` with each identifier that is one of `params` replaced by the argument at its place (one past `args` stays)
+fn subst_idents(s: &str, params: &[&str], args: &[&str]) -> String {
+    let b = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i].is_ascii_alphabetic() || b[i] == b'_' {
+            let j = i + b[i..].iter().position(|c| !(c.is_ascii_alphanumeric() || *c == b'_')).unwrap_or(b.len() - i);
+            let word = &s[i..j];
+            let lifetime = i > 0 && b[i - 1] == b'\'';
+            // (a segment after `::` names an associated item, `<u8 as Id>::T`, not a parameter)
+            let path_segment = i >= 2 && &b[i - 2..i] == b"::";
+            match params.iter().position(|p| *p == word).and_then(|k| args.get(k)).filter(|_| !lifetime && !path_segment) {
+                Some(a) => out.push_str(a),
+                None => out.push_str(word),
+            }
+            i = j;
+        } else {
+            let j = i + s[i..].chars().next().map_or(1, char::len_utf8);
+            out.push_str(&s[i..j]);
+            i = j;
+        }
+    }
+    out
+}
+
+/// A `<..>`'s type and const arguments as rustc shows them (`<(), Vec<u8>>`), or "" without any
+fn shown_args(t: &[(u8, usize, usize)], text: &str, parts: &[(usize, usize)]) -> String {
+    let b = text.as_bytes();
+    let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && b[t[q].1] == c;
+    let mut shown = vec![];
+    for &(a, z) in parts {
+        let binds = sym(a + 1, b'=') && !sym(a + 2, b'=') || sym(a + 1, b':') && !sym(a + 2, b':');
+        let lifetime = t[a].1 > 0 && b[t[a].1 - 1] == b'\'';
+        if !(t[a].0 == 0 && a < z && binds && !lifetime) {
+            shown.push(text[t[a].1 - usize::from(lifetime)..t[z].2].split_whitespace().collect::<Vec<_>>().join(" "));
+        }
+    }
+    if shown.is_empty() { String::new() } else { format!("<{}>", shown.join(", ")) }
+}
+
+/// E0191 at a trait object written in a type (`type Foo = dyn Tr;`, `fn f(x: &dyn Tr)`) that leaves an associated
+/// type of its trait, or of a supertrait, without a value: the program's traits and a few of std's. A generic
+/// associated type makes the trait not dyn compatible instead (E0038), and `where Self: Sized` exempts a type
+fn first_dyn_unspecified_assoc(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind;
+    // (the `dyn`s of the program: identifiers the lexer found, so none in a string or a comment)
+    let sb = src.as_bytes();
+    let dyns: Vec<(usize, usize, Option<(u32, u32)>)> = items
+        .iter()
+        .enumerate()
+        .flat_map(|(i, it)| {
+            let ids = &it.idents;
+            (0..ids.len()).filter(move |&k| ids[k].1 - ids[k].0 == 3 && &sb[ids[k].0 as usize..ids[k].1 as usize] == b"dyn").map(move |k| (i, ids[k].0 as usize, ids.get(k + 1).copied()))
+        })
+        .collect();
+    if dyns.is_empty() {
+        return None;
+    }
+    // (the auto traits, which an object may add to its principal trait: `dyn Send + Iterator`)
+    const AUTO: &[&str] = &["Send", "Sync", "Unpin", "UnwindSafe", "RefUnwindSafe"];
+    // (the object's principal trait from the token after `dyn`: the first bound not an auto trait or a lifetime; and
+    // whether the bounds read may go on past the window's end: one runs to it, or a `<` is not closed in it)
+    fn principal(t: &[(u8, usize, usize)], b: &[u8]) -> (Option<(usize, usize, Vec<(usize, usize)>, usize)>, bool) {
+        let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && b[t[q].1] == c;
+        let mut k = 1;
+        while k < t.len() {
+            if t[k].0 == 0 && t[k].1 > 0 && b[t[k].1 - 1] == b'\'' {
+                k += 1;
+            } else {
+                match bound_at(t, b, k) {
+                    Some(bd) if !AUTO.iter().any(|a| a.as_bytes() == &b[t[bd.1].1..t[bd.1].2]) => {
+                        let open = bd.3 >= t.len();
+                        return (Some(bd), open);
+                    }
+                    Some(bd) => k = bd.3,
+                    None => {
+                        let opens = (k..t.len()).filter(|&q| sym(q, b'<')).count();
+                        let closes = (k..t.len()).filter(|&q| sym(q, b'>') && !sym(q - 1, b'-')).count();
+                        return (None, opens > closes);
+                    }
+                }
+            }
+            if !sym(k, b'+') {
+                return (None, k >= t.len());
+            }
+            k += 1;
+        }
+        (None, true)
+    }
+    // (std's traits with associated types: (name, associated types, supertraits))
+    const STD: &[(&str, &[&str], &[&str])] = &[
+        ("Iterator", &["Item"], &[]),
+        ("DoubleEndedIterator", &[], &["Iterator"]),
+        ("ExactSizeIterator", &[], &["Iterator"]),
+        ("FusedIterator", &[], &["Iterator"]),
+        ("IntoIterator", &["Item", "IntoIter"], &[]),
+        ("Deref", &["Target"], &[]),
+        ("DerefMut", &[], &["Deref"]),
+        ("Future", &["Output"], &[]),
+    ];
+    // (the program's traits: name -> (associated types, supertraits as (name, shown, the types the bound binds), how
+    // many type and const parameters it requires and takes, and their names), or None when one has a generic
+    // associated type or two traits share the name)
+    type Sup<'s> = (&'s str, String, Vec<&'s str>);
+    type Trait<'s> = (Vec<&'s str>, Vec<Sup<'s>>, (usize, usize), Vec<&'s str>);
+    let id = |&(a, b): &(u32, u32)| &src[a as usize..b as usize];
+    // (a trait as rustc shows it: without the flattened modules' `a__` prefix and the renamer's `__u_`)
+    let plain = |n: &str, args: &str| format!("{}{}", n.rsplit("__").next().unwrap_or(n).trim_start_matches("u_"), args.replace("__u_", ""));
+    let mut traits: crate::fxhash::FxMap<&str, Option<Trait>> = Default::default();
+    let mut header_of: crate::fxhash::FxMap<usize, &str> = Default::default();
+    // (the defaults of a trait's type and const parameters, for a trait with any)
+    let mut defaults_of: crate::fxhash::FxMap<&str, Vec<Option<String>>> = Default::default();
+    for (i, it) in items.iter().enumerate() {
+        if !matches!(it.kind, ItemKind::TraitHeader) {
+            continue;
+        }
+        let Some(k) = it.idents.iter().position(|x| id(x) == "trait") else { continue };
+        let Some(&(_, ne)) = it.idents.get(k + 1) else { continue };
+        let name = id(&it.idents[k + 1]);
+        header_of.insert(i, name);
+        if traits.contains_key(name) {
+            traits.insert(name, None);
+            continue;
+        }
+        // (`trait Tr {`: no parameters and no supertraits, nothing to read)
+        if !src[ne as usize..it.end].contains(['<', ':']) {
+            traits.insert(name, Some((vec![], vec![], (0, 0), vec![])));
+            continue;
+        }
+        let text = &src[it.start..it.end];
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let sym = |q: usize, c: u8| q < t.len() && t[q].0 == 1 && b[t[q].1] == c;
+        let w = |q: usize| if q < t.len() && t[q].0 == 0 { &text[t[q].1..t[q].2] } else { "" };
+        let mut sup = vec![];
+        let mut params = (0, 0);
+        let mut pnames = vec![];
+        let mut pdefaults: Vec<Option<String>> = vec![];
+        // (a bound list from q (`Super<X = u8> + Zed + 'a`), up to `where`, `{`, or with `clause` a `,` that ends a
+        // where clause: where it ends, and its traits)
+        let read_bounds = |mut q: usize, clause: bool| {
+            let mut sup = vec![];
+            let end = |q: usize, d: i32| q >= t.len() || w(q) == "where" || sym(q, b'{') || (clause && d == 0 && sym(q, b','));
+            while !end(q, 0) {
+                match bound_at(&t, b, q) {
+                    Some((_, n, parts, after)) => {
+                        sup.push((w(n), plain(w(n), &shown_args(&t, text, &parts)), assoc_bindings(&t, text, &parts, true)));
+                        q = after;
+                    }
+                    None => q += 1,
+                }
+                // (to the next `+` of the list, past a group: `Fn(A, B)`)
+                let mut d = 0i32;
+                while !end(q, d) && !(d == 0 && sym(q, b'+')) {
+                    if sym(q, b'(') || sym(q, b'[') || sym(q, b'<') {
+                        d += 1;
+                    } else if sym(q, b')') || sym(q, b']') || (sym(q, b'>') && !sym(q - 1, b'-')) {
+                        d -= 1;
+                    }
+                    q += 1;
+                }
+                q += usize::from(sym(q, b'+'));
+            }
+            (q, sup)
+        };
+        if let Some(mut q) = (0..t.len()).find(|&q| w(q) == "trait" && w(q + 1) == name).map(|q| q + 2) {
+            if sym(q, b'<') {
+                // (`<'a, T, U = u8, const N: usize>`: a default is an `=` at the parameter's own level)
+                let Some((ps, c)) = angle_parts(&t, b, q) else { continue };
+                for &(a, z) in &ps {
+                    if t[a].1 > 0 && b[t[a].1 - 1] == b'\'' {
+                        continue;
+                    }
+                    pnames.push(if w(a) == "const" { w(a + 1) } else { w(a) });
+                    let mut d = 0i32;
+                    let default = (a..=z).find(|&r| {
+                        if sym(r, b'<') {
+                            d += 1;
+                        } else if sym(r, b'>') && !(r > 0 && sym(r - 1, b'-')) {
+                            d -= 1;
+                        }
+                        d == 0 && sym(r, b'=')
+                    });
+                    pdefaults.push(default.filter(|&r| r < z).map(|r| text[t[r + 1].1..t[z].2].split_whitespace().collect::<Vec<_>>().join(" ")));
+                    params = (params.0 + usize::from(default.is_none()), params.1 + 1);
+                }
+                q = c + 1;
+            }
+            if sym(q, b':') && !sym(q + 1, b':') {
+                let (e, list) = read_bounds(q + 1, false);
+                sup = list;
+                q = e;
+            }
+            // (`where Self: Base` is a supertrait too)
+            if w(q) == "where" {
+                q += 1;
+                while q < t.len() && !sym(q, b'{') {
+                    if w(q) == "Self" && sym(q + 1, b':') && !sym(q + 2, b':') {
+                        let (e, more) = read_bounds(q + 2, true);
+                        sup.extend(more);
+                        q = e;
+                    } else {
+                        let mut d = 0i32;
+                        while q < t.len() && !sym(q, b'{') && !(d == 0 && sym(q, b',')) {
+                            if sym(q, b'(') || sym(q, b'[') || sym(q, b'<') {
+                                d += 1;
+                            } else if sym(q, b')') || sym(q, b']') || (sym(q, b'>') && !sym(q - 1, b'-')) {
+                                d -= 1;
+                            }
+                            q += 1;
+                        }
+                    }
+                    q += usize::from(sym(q, b','));
+                }
+            }
+        }
+        if pdefaults.iter().any(Option::is_some) {
+            defaults_of.insert(name, pdefaults);
+        }
+        traits.insert(name, Some((vec![], sup, params, pnames)));
+    }
+    for it in items {
+        let ItemKind::TraitMember(h) = it.kind else { continue };
+        let Some(&tr) = header_of.get(&(h as usize)) else { continue };
+        let Some(k) = it.idents.iter().take(6).position(|x| id(x) == "type") else { continue };
+        let Some(&(_, ne)) = it.idents.get(k + 1) else { continue };
+        let rest = &src[ne as usize..it.end];
+        if rest.trim_start().starts_with('<') {
+            traits.insert(tr, None);
+            continue;
+        }
+        // (`where Self: Sized`, or a bound that implies it (`where Self: Other` with `trait Other: Sized`): one that
+        // bounds `Self` at all is left alone)
+        if rest.find("where").is_some_and(|w| rest[w..].contains("Self")) {
+            continue;
+        }
+        if let Some(Some(entry)) = traits.get_mut(tr) {
+            entry.0.push(id(&it.idents[k + 1]));
+        }
+    }
+    // (a trait's type and const arguments with its defaults for the ones left out, a default naming an earlier
+    // parameter taking that one's argument (`trait Base<T, U = T>`: `Base<u8>` is `Base<u8, u8>`); None when there is
+    // nothing to fill or a left-out one has no default)
+    let filled_args = |tn: &str, tys: &[&str]| -> Option<Vec<String>> {
+        let ds = defaults_of.get(tn)?;
+        if tys.len() >= ds.len() {
+            return None;
+        }
+        let ps: &[&str] = match traits.get(tn) {
+            Some(Some((_, _, _, ps))) => ps,
+            _ => &[],
+        };
+        let mut all: Vec<String> = tys.iter().map(|a| a.to_string()).collect();
+        for d in &ds[tys.len()..] {
+            let d = d.as_deref()?;
+            let k = all.len().min(ps.len());
+            let refs: Vec<&str> = all.iter().map(String::as_str).collect();
+            all.push(subst_idents(d, &ps[..k], &refs[..k]));
+        }
+        Some(all)
+    };
+    for (i, off, next) in dyns {
+        let it = &items[i];
+        // (`dyn Handler` of a trait with no associated types and no supertraits, `dyn Any` of a trait this does not
+        // know: settled by the name after `dyn`, when it is the whole path, without reading tokens)
+        if let Some(n) = next.filter(|&(a, b)| src[off + 3..a as usize].trim().is_empty() && sb.get(b as usize) != Some(&b':')).map(|x| id(&x)).filter(|n| !AUTO.contains(n)) {
+            let simple = match traits.get(n) {
+                Some(Some((a, sups, (req, _), _))) => a.is_empty() && sups.is_empty() && *req == 0,
+                Some(None) => true,
+                None => !STD.iter().any(|s| s.0 == n),
+            };
+            if simple {
+                continue;
+            }
+        }
+        // (the tokens from the `dyn` on, as far as its bound goes: a window that grows while the bound's `<..>` is
+        // not closed in it)
+        let mut len = 48;
+        let (text, t, bound) = loop {
+            let mut end = (off + len).min(it.end);
+            while !src.is_char_boundary(end) {
+                end -= 1;
+            }
+            let text = &src[off..end];
+            let t = crate::lexer::tokenize(text.as_bytes());
+            let (bound, open) = principal(&t, text.as_bytes());
+            if !open || end == it.end || len >= 1 << 16 {
+                break (text, t, bound);
+            }
+            len *= 4;
+        };
+        let b = text.as_bytes();
+        let w = |q: usize| if q < t.len() && t[q].0 == 0 { &text[t[q].1..t[q].2] } else { "" };
+        {
+            let Some((q, n, parts, _)) = bound else { continue };
+            let name = w(n);
+            let bound = assoc_bindings(&t, text, &parts, false);
+            // (the type and const arguments: a wrong count is E0107 instead, as rustc)
+            let sym = |r: usize, c: u8| r < t.len() && t[r].0 == 1 && b[t[r].1] == c;
+            let args = parts
+                .iter()
+                .filter(|&&(a, z)| !(t[a].1 > 0 && b[t[a].1 - 1] == b'\'') && !(t[a].0 == 0 && a < z && (sym(a + 1, b'=') && !sym(a + 2, b'=') || sym(a + 1, b':') && !sym(a + 2, b':'))))
+                .count();
+            // (`std::iter::Iterator` is std's even when the program has a trait of the name)
+            let first_seg = if w(q).is_empty() { w(q + 2) } else { w(q) };
+            let std_path = n > q && matches!(first_seg, "std" | "core" | "alloc");
+            // (the usual case first: a trait without supertraits whose every associated type the object binds, or one
+            // left to another error (a wrong count of arguments, a generic associated type, not a trait this knows))
+            let in_std = STD.iter().find(|s| s.0 == name);
+            // (a wrong count of the program's trait's type and const arguments: E0107 at its name, as rustc)
+            if let Some(Some((_, _, (req, all), _))) = traits.get(name).filter(|_| !(std_path && in_std.is_some())) {
+                let (required, declared) = (*req, *all);
+                if args < required || args > declared {
+                    let plural = |n: usize| if n == 1 { "generic argument" } else { "generic arguments" };
+                    // (`dyn T` without `<..>`; `dyn T<A = u8>` is "takes 1 .. but 0")
+                    let what = if parts.is_empty() {
+                        format!("missing generics for trait `{}`", plain(name, ""))
+                    } else {
+                        let takes = if required == declared { format!("{declared}") } else if args > declared { format!("at most {declared}") } else { format!("at least {required}") };
+                        format!("trait takes {takes} {} but {args} {} {} supplied", plural(declared.max(required)), plural(args), if args == 1 { "was" } else { "were" })
+                    };
+                    let (line, col) = item_pos(src, orig, &crate::prep::hoist_marks(src), it, off - it.start + t[n].1);
+                    return Some(format!("{line}:{col}: {what} (E0107)"));
+                }
+            }
+            let settled = match traits.get(name) {
+                Some(None) => true,
+                Some(Some((a, sups, (req, all), _))) if !(std_path && in_std.is_some()) => args < *req || args > *all || sups.is_empty() && a.iter().all(|x| bound.contains(x)),
+                _ => in_std.is_none_or(|s| args > 0 || s.2.is_empty() && s.1.iter().all(|x| bound.contains(x))),
+            };
+            if settled {
+                continue;
+            }
+            let shown = shown_args(&t, text, &parts);
+            // (breadth first from the trait: a binding written on the object goes to the first trait that has the
+            // name; a supertrait's binding to that supertrait, by whichever path it is reached (`A2: Service<Future =
+            // F> + A1` with `A1: Service<Response = i32>` binds both))
+            let mut pending = bound;
+            // (std's trait beside the program's of the name: rustc shows its path)
+            let path: String = if std_path && (traits.contains_key(name) || traits.contains_key(format!("__u_{name}").as_str())) { text[t[q].1..t[n].2].split_whitespace().collect() } else { plain(name, "") };
+            let mut queue: Vec<Sup> = vec![(name, format!("{path}{}", plain("", &shown)), vec![])];
+            let mut order: Vec<(&str, String, Vec<&str>, String)> = vec![];
+            // (an instantiation's key: its arguments with the trait's defaults for the ones left out, so `Base` and
+            // `Base<u8>` of `trait Base<T = u8>` are one)
+            let key = |tn: &str, ts: &str| -> String {
+                let (lts, tys): (Vec<&str>, Vec<&str>) = type_args(ts).into_iter().partition(|a| a.starts_with('\''));
+                match filled_args(tn, &tys) {
+                    Some(all) => format!("{}<{}>", &ts[..ts.find('<').unwrap_or(ts.len())], lts.into_iter().map(str::to_string).chain(all).collect::<Vec<_>>().join(", ")),
+                    None => ts.to_string(),
+                }
+            };
+            // (the bindings each instantiation gets: `Sup<i32>` and `Sup<u32>` are two)
+            let mut bound_by: crate::fxhash::FxMap<String, Vec<&str>> = Default::default();
+            let mut seen: Vec<String> = vec![];
+            let mut known = true;
+            let mut n = 0;
+            while n < queue.len() && n < 64 {
+                let (tn, ts, local) = queue[n].clone();
+                n += 1;
+                let k = key(tn, &ts);
+                bound_by.entry(k.clone()).or_default().extend(local);
+                if seen.contains(&k) {
+                    continue;
+                }
+                seen.push(k.clone());
+                let in_std = STD.iter().find(|s| s.0 == tn);
+                let (assoc, sups): (Vec<&str>, Vec<Sup>) = match traits.get(tn) {
+                    Some(Some((_, _, (req, all), _))) if n == 1 && !(std_path && in_std.is_some()) && (args < *req || args > *all) => {
+                        known = false;
+                        break;
+                    }
+                    Some(Some((a, s, _, ps))) if !(std_path && n == 1 && in_std.is_some()) => {
+                        // (a supertrait as this instantiation has it: `trait Dyn<A, B>: Sup<B>` of `Dyn<i32, u32>` is
+                        // `Sup<u32>`)
+                        // (by the type and const arguments, defaults filled: a lifetime is not one of `ps`)
+                        let args: Vec<&str> = type_args(&k).into_iter().filter(|a| !a.starts_with('\'')).collect();
+                        let s = s.iter().map(|(sn, sts, sb)| (*sn, if ps.is_empty() || args.is_empty() { sts.clone() } else { subst_idents(sts, ps, &args) }, sb.clone())).collect();
+                        (a.clone(), s)
+                    }
+                    Some(None) => {
+                        known = false;
+                        break;
+                    }
+                    _ => match in_std {
+                        Some(_) if n == 1 && args > 0 => {
+                            known = false;
+                            break;
+                        }
+                        Some(s) => (s.1.to_vec(), s.2.iter().map(|x| (*x, x.to_string(), vec![])).collect()),
+                        None if n == 1 => {
+                            known = false;
+                            break;
+                        }
+                        None => (vec![], vec![]),
+                    },
+                };
+                order.push((tn, ts, assoc, k));
+                queue.extend(sups);
+            }
+            // (a walk cut short leaves the types of the traits it did not reach unknown)
+            if n < queue.len() {
+                known = false;
+            }
+            // (a binding of a name the trait does not have itself, but two of its supertraits do, binds neither: E0222)
+            if let Some((_, _, own, _)) = order.first() {
+                pending.retain(|p| own.contains(p) || order[1..].iter().filter(|o| o.2.contains(p)).count() < 2);
+            }
+            let mut missing: Vec<(&str, String)> = vec![];
+            for (_, ts, assoc, k) in &order {
+                for &a in assoc {
+                    if bound_by.get(k).is_some_and(|b| b.contains(&a)) {
+                        continue;
+                    }
+                    if let Some(p) = pending.iter().position(|x| *x == a) {
+                        pending.remove(p);
+                        continue;
+                    }
+                    missing.push((a, ts.clone()));
+                }
+            }
+            if !known || missing.is_empty() {
+                continue;
+            }
+            // (as rustc prints a trait: without the trailing arguments that are its defaults, `Base<u8>` of `trait
+            // Base<T = u8>` is `Base`)
+            for (_, ts) in missing.iter_mut() {
+                let Some(tn) = defaults_of.keys().find(|n| ts.starts_with(**n) && ts[n.len()..].starts_with('<')).copied() else { continue };
+                let all = type_args(ts);
+                let lts = all.iter().take_while(|a| a.starts_with('\'')).count();
+                let mut keep = all.len();
+                // (each trailing argument against its default as the arguments before it fill it)
+                while keep > lts && filled_args(tn, &all[lts..keep - 1]).is_some_and(|f| f.get(keep - lts - 1).is_some_and(|d| d == all[keep - 1])) {
+                    keep -= 1;
+                }
+                if keep < all.len() {
+                    let base = &ts[..ts.find('<').unwrap_or(ts.len())];
+                    *ts = if keep == 0 { base.to_string() } else { format!("{base}<{}>", all[..keep].join(", ")) };
+                }
+            }
+            // (one trait: its types in the order it declares them; several: each `X` in `Tr`, sorted)
+            let what = if missing.iter().all(|m| m.1 == missing[0].1) {
+                let names: Vec<String> = missing.iter().map(|m| format!("`{}`", m.0)).collect();
+                let list = match names.split_last() {
+                    Some((l, rest)) if !rest.is_empty() => format!("{} and {l}", rest.join(", ")),
+                    _ => names[0].clone(),
+                };
+                format!("type{} {list} in `{}`", if names.len() == 1 { "" } else { "s" }, missing[0].1)
+            } else {
+                let mut each: Vec<String> = missing.iter().map(|m| format!("`{}` in `{}`", m.0, m.1)).collect();
+                each.sort();
+                format!("types {}", each.join(", "))
+            };
+            let (line, col) = item_pos(src, orig, &crate::prep::hoist_marks(src), it, off - it.start + t[q].1);
+            return Some(format!("{line}:{col}: the value of the associated {what} must be specified (E0191)"));
+        }
+    }
+    None
+}
+
 /// アイテムの関数を自前の構文木で読む (本体がなければ None)。引数のパターンは本体の先頭の let にする
 /// `#![deny(unused_imports)]`: the first name a top-level `use` brings in that no other item mentions. Traits
-/// (std's usual ones and the program's) are left alone: their methods use them without naming them
-fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, String)> {
+/// (std's usual ones and the program's) are left alone: their methods use them without naming them. `lint_denied`:
+/// the crate denies the lint (or its group) itself; `warn_denied`: it denies `warnings`, which turns a warn into an error
+fn first_unused_import(src: &str, items: &[SrcItem], lint_denied: bool, warn_denied: bool) -> Option<(usize, usize, String)> {
     const TRAITS: &[&str] = &[
         "Read", "Write", "BufRead", "Seek", "Hash", "Hasher", "BuildHasher", "FromStr", "Display", "Debug", "Iterator", "IntoIterator",
         "DoubleEndedIterator", "ExactSizeIterator", "FromIterator", "Extend", "Deref", "DerefMut", "Borrow", "BorrowMut", "AsRef", "AsMut",
@@ -2067,6 +3553,11 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
             if toks[k].0 == 1 && b[toks[k].1] == b';' {
                 in_use = false;
             }
+            // (a path's first segment in a `use`: after `use`, `{` or `,`, and followed by `::`)
+            let sym = |q: usize, c: u8| q < toks.len() && toks[q].0 == 1 && b[toks[q].1] == c;
+            if toks[k].0 == 0 && w != "use" && k > 0 && (word(k - 1) == "use" || sym(k - 1, b'{') || sym(k - 1, b',')) && sym(k + 1, b':') && sym(k + 2, b':') {
+                used.insert(w);
+            }
             continue;
         }
         if k > 0 && word(k - 1) == "trait" {
@@ -2081,8 +3572,60 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
             continue;
         }
         let text = &src[it.start..it.end];
-        let t = text.trim_start();
-        if !t.starts_with("use ") || text.contains("allow(unused") || text.contains("#[cfg") || text.contains('*') {
+        // (past its outer attributes, `#[deprecated] #[cfg(not(FALSE))] use std::fs;`: a false `cfg` is stripped
+        // before; the last of its lint attributes that names the lint or its group sets its level, and the last that
+        // names `warnings` whether a warn is an error)
+        let mut t = text.trim_start();
+        let (mut level, mut warnings) = (None, None);
+        if t.starts_with('#') {
+            let tb = text.as_bytes();
+            let tt = crate::lexer::tokenize(tb);
+            let ts = |q: usize, c: u8| q < tt.len() && tt[q].0 == 1 && tb[tt[q].1] == c;
+            let tw = |q: usize| if q < tt.len() && tt[q].0 == 0 { &text[tt[q].1..tt[q].2] } else { "" };
+            let mut q = 0;
+            while ts(q, b'#') && ts(q + 1, b'[') {
+                // (`#[allow(a, unused_imports)]` / `#[warn(unused)]` / `#[deny(unused_imports)]`: the lint or its group;
+                // `#[allow(warnings)]`)
+                let l = tw(q + 2);
+                if matches!(l, "allow" | "expect" | "warn" | "deny" | "forbid") && ts(q + 3, b'(') {
+                    let mut r = q + 4;
+                    while r < tt.len() && !ts(r, b')') {
+                        match tw(r) {
+                            "unused_imports" | "unused" => level = Some(l),
+                            "warnings" => warnings = Some(l),
+                            _ => {}
+                        }
+                        r += 1;
+                    }
+                }
+                let (mut d, mut r) = (0i32, q + 1);
+                while r < tt.len() {
+                    if ts(r, b'[') || ts(r, b'(') {
+                        d += 1;
+                    } else if ts(r, b']') || ts(r, b')') {
+                        d -= 1;
+                        if d == 0 {
+                            break;
+                        }
+                    }
+                    r += 1;
+                }
+                if r >= tt.len() {
+                    break;
+                }
+                t = text[tt[r].2..].trim_start();
+                q = r + 1;
+            }
+        }
+        // (a warn is an error only where `warnings` is denied: by the item's own level of it, or else the crate's)
+        let warn_is_error = warnings.map_or(warn_denied, |w| matches!(w, "deny" | "forbid"));
+        let lint_off = match level {
+            Some("allow" | "expect") => true,
+            Some("warn") => !warn_is_error,
+            Some(_) => false,
+            None => !lint_denied && !warn_is_error,
+        };
+        if !t.starts_with("use ") || lint_off || t.contains('*') {
             continue;
         }
         let body = t["use ".len()..].trim_end().trim_end_matches(';').trim();
@@ -2114,19 +3657,43 @@ fn first_unused_import(src: &str, items: &[SrcItem]) -> Option<(usize, usize, St
     None
 }
 
+thread_local! {
+    /// (first_unreachable: the program has a module named `process`, so `process::exit` may not be std's)
+    static USER_PROCESS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// `#![deny(unreachable_code)]`: the first statement of a block after one that always diverges (`return`,
 /// `break`, `continue`, `panic!` and its kin, a `loop` with no `break`), and whether it is a statement or the
 /// block's value
-fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'static str)> {
+fn first_unreachable(b: &crate::parse::Block, user_process: bool) -> Option<(crate::parse::Pos, &'static str)> {
     use crate::parse::{Expr, Stmt};
+    USER_PROCESS.with(|c| c.set(user_process));
     fn diverges(e: &Expr) -> bool {
         match e {
             Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
             Expr::Macro(p, _, _) => matches!(p.segs.last().map(|s| s.name.as_str()), Some("panic" | "unreachable" | "todo" | "unimplemented")),
             Expr::Loop(_, body) => !format!("{body:?}").contains("Break("),
-            Expr::Paren(x) => diverges(x),
+            Expr::Paren(x) | Expr::Unary(_, x, _) | Expr::Ref(_, x) | Expr::Cast(x, _) | Expr::Field(x, _, _) => diverges(x),
+            // (an operand or an argument that diverges: evaluated first, the rest never runs; not the right of `&&` /
+            // `||`, which may not run)
+            Expr::Binary(op, l, r, _) => diverges(l) || (!matches!(op.as_str(), "&&" | "||") && diverges(r)),
+            Expr::Call(f, args) => diverges(f) || args.iter().any(diverges) || matches!(&**f, Expr::Path(None, p) if p.segs.len() >= 2 && p.segs[p.segs.len() - 2].name == "process" && matches!(p.segs[p.segs.len() - 1].name.as_str(), "exit" | "abort")
+                && ((p.segs.len() >= 3 && p.segs[p.segs.len() - 3].name == "std") || !USER_PROCESS.with(|c| c.get()))),
+            Expr::MethodCall(r, _, _, args, _) => diverges(r) || args.iter().any(diverges),
+            // (both branches; a `match` with no arm (on an empty enum) or whose every arm diverges)
+            Expr::If(c, t, Some(els)) => diverges(c) || (block_diverges(t) && diverges(els)),
+            Expr::If(c, _, None) => diverges(c),
+            Expr::Match(x, arms) => diverges(x) || arms.iter().all(|a| diverges(&a.body)),
+            Expr::Block(None, false, b) => block_diverges(b),
             _ => false,
         }
+    }
+    fn block_diverges(b: &crate::parse::Block) -> bool {
+        b.stmts.iter().any(|s| match s {
+            Stmt::Expr(e, _) => diverges(e),
+            Stmt::Let(_, _, Some(e), None, _) => diverges(e),
+            _ => false,
+        })
     }
     fn block(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'static str)> {
         let n = b.stmts.len();
@@ -2164,10 +3731,49 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
         None
     }
     fn inner(e: &Expr) -> Option<(crate::parse::Pos, &'static str)> {
+        // (the arguments after one that diverges are unreachable expressions; when the last one diverges, the call)
+        let args = |all: &[&Expr], call: crate::parse::Pos| -> Option<(crate::parse::Pos, &'static str)> {
+            for (i, a) in all.iter().enumerate() {
+                if let Some(r) = inner(a) {
+                    return Some(r);
+                }
+                if diverges(a) {
+                    return Some(match all.get(i + 1) {
+                        Some(next) => (acg::expr_start(next), "expression"),
+                        None => (call, "call"),
+                    });
+                }
+            }
+            None
+        };
         match e {
             Expr::Block(_, _, b) | Expr::Loop(_, b) => block(b),
-            Expr::If(_, t, els) => block(t).or_else(|| els.as_deref().and_then(inner)),
-            Expr::While(_, _, b) | Expr::For(_, _, _, b) => block(b),
+            Expr::If(c, t, els) => inner(c).or_else(|| block(t)).or_else(|| els.as_deref().and_then(inner)),
+            Expr::While(_, c, b) => inner(c).or_else(|| block(b)),
+            Expr::For(_, _, x, b) => inner(x).or_else(|| block(b)),
+            Expr::Call(f, xs) => {
+                let all: Vec<&Expr> = std::iter::once(&**f).chain(xs.iter()).collect();
+                args(&all, acg::expr_start(e))
+            }
+            Expr::MethodCall(r, _, _, xs, sp) => {
+                let all: Vec<&Expr> = std::iter::once(&**r).chain(xs.iter()).collect();
+                args(&all, sp.start)
+            }
+            // (an operand that diverges: the right is never evaluated, or (the right diverging) the operation)
+            Expr::Binary(op, l, r, sp) => {
+                if let Some(x) = inner(l) {
+                    return Some(x);
+                }
+                if diverges(l) {
+                    return Some((acg::expr_start(r), "expression"));
+                }
+                if let Some(x) = inner(r) {
+                    return Some(x);
+                }
+                (!matches!(op.as_str(), "&&" | "||") && diverges(r)).then_some((sp.start, "expression"))
+            }
+            Expr::Paren(x) | Expr::Unary(_, x, _) | Expr::Ref(_, x) | Expr::Cast(x, _) | Expr::Field(x, _, _) => inner(x),
+            Expr::Match(x, arms) => inner(x).or_else(|| arms.iter().find_map(|a| inner(&a.body))),
             _ => None,
         }
     }
@@ -2179,7 +3785,6 @@ fn first_unreachable(b: &crate::parse::Block) -> Option<(crate::parse::Pos, &'st
 fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) -> Option<String> {
     // (a crate with no dependency (so no proc macro) knows only the built-in attributes and its tools' paths)
     // (both looked up only when such an attribute is there: not a search of every file)
-    let rustc_attrs = || src0.contains("rustc_attrs");
     let unknown = |name: &str| {
         const BUILTIN: &[&str] = &[
             "cfg", "cfg_attr", "test", "ignore", "should_panic", "bench", "derive", "automatically_derived", "macro_export", "macro_use",
@@ -2195,8 +3800,11 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
             "async_trait", "allow_internal_unstable", "allow_internal_unsafe", "compiler_builtins", "needs_allocator", "panic_runtime",
             "needs_panic_runtime", "profiler_runtime", "no_core", "prelude_import", "rustc_std_internal_symbol", "unstable_feature_bound",
             "rustc_main", "test_runner", "reexport_test_harness_main", "default", "main", "plugin", "plugin_registrar",
+            "zust_test_entry",
         ];
-        if name.contains("::") || name.is_empty() || (name.starts_with("rustc_") && rustc_attrs()) {
+        // (`rustc_*`: rustc's internal attributes; without `#![feature(rustc_attrs)]` the gate's E0658, at the same
+        // attribute)
+        if name.contains("::") || name.is_empty() || name.starts_with("rustc_") {
             return false;
         }
         // (`#[default]` is the derive(Default) helper, `#[main]` was removed)
@@ -2363,12 +3971,8 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool) 
 
 /// E0038: a fn of the program whose parameters or result name `dyn Tr` of a trait that is not dyn compatible (rustc
 /// checks the types a signature writes, called or not): at the fn's line
+/// (called only for a program whose own text has `dyn`)
 fn dyn_in_signature(prog: &Program, src: &str, items: &[SrcItem]) -> Option<String> {
-    // (only a program that writes `dyn`: one look at its own text)
-    let user_end = items.get((prog.prelude_from as usize).wrapping_sub(1)).map_or(0, |it| it.end);
-    if !src[..user_end.min(src.len())].contains("dyn") {
-        return None;
-    }
     fn dyns(prog: &Program, t: Ty, depth: u32, out: &mut Vec<&'static String>) {
         if depth > 8 {
             return;
@@ -2617,6 +4221,88 @@ fn std_path_ns(path: &[&[u8]]) -> u8 {
 /// root in edition 2015 (`injected`; a later edition's is hygienic). Only read when the program has a `mod` or an
 /// `extern crate`, or in edition 2015 something that may define `std` / `core`. `src` is the configured text, `externs` the `extern crate` items
 /// the configuring blanked (cfg::strip_noting)
+/// improper_ctypes: the first `CStr` / `CString` in the parameters or result of a fn of an `extern "C" { .. }` block,
+/// or of an `extern "C" fn` (improper_ctypes_definitions), as `line:col: msg`. Behind a pointer too: neither has a C
+/// layout
+/// text names `lint` in an `allow(..)` (`#[allow(a, improper_ctypes)]`, `#![allow(..)]`): that lint, not one it is
+/// a prefix of
+fn allows_lint(text: &str, lint: &str) -> bool {
+    let sq: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    sq.match_indices("allow(").any(|(i, _)| {
+        let rest = &sq[i + 6..];
+        rest[..rest.find(')').unwrap_or(rest.len())].split(',').any(|n| n == lint)
+    })
+}
+
+fn first_cstr_in_extern(src: &str, items: &[SrcItem], (blocks, defs): (bool, bool)) -> Option<String> {
+    for it in items {
+        let text = src.get(it.start..it.end).unwrap_or("");
+        if !text.contains("extern") || !(text.contains("CStr")) {
+            continue;
+        }
+        let b = text.as_bytes();
+        let toks = crate::lexer::tokenize(b);
+        let tk = |k: usize| &text[toks[k].1..toks[k].2];
+        let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tk(k) == c;
+        // (a fn's signature from `fn` to its `;` or body: the first C string type in it)
+        let sig_cstr = |k: usize| -> Option<&str> {
+            let mut j = k;
+            while j < toks.len() && !sym(j, ";") && !sym(j, "{") {
+                if toks[j].0 == 0 && matches!(tk(j), "CStr" | "CString") {
+                    return Some(tk(j));
+                }
+                j += 1;
+            }
+            None
+        };
+        let line_of = |k: usize| it.line as usize + b[..toks[k].1].iter().filter(|&&c| c == b'\n').count();
+        // (the attributes of the item or declaration token k starts: back to the `;` / `{` / `}` before them)
+        let attrs_allow = |k: usize, lint: &str| {
+            let mut a = k;
+            while a > 0 && !(sym(a - 1, ";") || sym(a - 1, "{") || sym(a - 1, "}")) {
+                a -= 1;
+            }
+            let from = if a < toks.len() { toks[a].1 } else { 0 };
+            allows_lint(&text[from..toks[k].1], lint)
+        };
+        let mut k = 0;
+        while k + 2 < toks.len() {
+            if toks[k].0 == 0 && tk(k) == "extern" && toks[k + 1].0 == 2 && tk(k + 1) == "\"C\"" {
+                if sym(k + 2, "{") {
+                    // (`#[allow(improper_ctypes)]` on the block: none of its fns; on one fn: that one)
+                    if !blocks || attrs_allow(k, "improper_ctypes") {
+                        k += 3;
+                        continue;
+                    }
+                    let mut j = k + 3;
+                    let mut d = 1;
+                    while j < toks.len() && d > 0 {
+                        if sym(j, "{") {
+                            d += 1;
+                        } else if sym(j, "}") {
+                            d -= 1;
+                        } else if d == 1 && toks[j].0 == 0 && tk(j) == "fn" && !attrs_allow(j, "improper_ctypes") {
+                            if let Some(t) = sig_cstr(j) {
+                                return Some(format!("{}:1: `extern` block uses type `{t}`, which is not FFI-safe", line_of(j)));
+                            }
+                        }
+                        j += 1;
+                    }
+                    k = j;
+                    continue;
+                }
+                if defs && toks[k + 2].0 == 0 && tk(k + 2) == "fn" && !attrs_allow(k, "improper_ctypes_definitions") {
+                    if let Some(t) = sig_cstr(k + 2) {
+                        return Some(format!("{}:1: `extern` fn uses type `{t}`, which is not FFI-safe", line_of(k)));
+                    }
+                }
+            }
+            k += 1;
+        }
+    }
+    None
+}
+
 fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Option<String> {
     // (a few scans: a program without these has its other duplicates found when its items are collected)
     // (2015's injected `std` meets an item or import of that name: `struct std;`, `use x as std;`, `enum std {`)
@@ -3266,7 +4952,7 @@ fn first_bad_name(src: &str, items: &[SrcItem], deny: [bool; 3]) -> Option<(usiz
 }
 
 /// `#![deny(dead_code)]`: the first top-level item of the program that nothing uses (see the caller)
-fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usize, String)> {
+fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool, warn_denied: bool) -> Option<(usize, String)> {
     let (Some(first), Some(last)) = (items.first(), items.last()) else { return None };
     let region = &src[first.start..last.end];
     let b = region.as_bytes();
@@ -3275,6 +4961,7 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
     let sym = |k: usize, c: u8| toks[k].0 == 1 && b[toks[k].1] == c;
     // (uses of each name: every occurrence but the definition's, the one after `impl` / `for` in an impl header)
     let mut uses: crate::fxhash::FxMap<&str, usize> = Default::default();
+    let mut impl_uses: crate::fxhash::FxMap<&str, usize> = Default::default();
     let mut in_impl_header = false;
     for k in 0..toks.len() {
         let w = word(k);
@@ -3287,10 +4974,15 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
         if toks[k].0 != 0 {
             continue;
         }
-        let defn = k > 0 && matches!(word(k - 1), "fn" | "struct" | "enum" | "const" | "static" | "trait" | "union" | "type");
+        // (not a raw pointer's `*const T`)
+        let defn = k > 0 && matches!(word(k - 1), "fn" | "struct" | "enum" | "const" | "static" | "trait" | "union" | "type") && !(k > 1 && sym(k - 2, b'*'));
         let impl_self = in_impl_header && k > 0 && (word(k - 1) == "impl" || word(k - 1) == "for" || sym(k - 1, b'>'));
         if !defn && !impl_self {
             *uses.entry(w).or_default() += 1;
+        }
+        // (a type alias an impl header names is used: `impl Tr for Alias`)
+        if impl_self {
+            *impl_uses.entry(w).or_default() += 1;
         }
     }
     for it in items {
@@ -3299,18 +4991,43 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
             continue;
         }
         let text = &src[it.start..it.end];
-        if text.contains("allow(dead_code") || text.contains("expect(dead_code") || text.contains("allow(unused") || text.contains("no_mangle") || text.contains("#[test]")
-            || text.contains("#[derive") || text.contains("export_name") || text.contains("#[cfg")
-        {
+        // (the item's own level, the last of its attributes naming dead_code: `#[allow(dead_code)] #[warn(dead_code)]`
+        // is a warn, an error under `deny(warnings)`; with none of its own, any allow in it leaves it alone)
+        let allowed = match item_lint_level(text, "dead_code").or_else(|| item_lint_level(text, "unused")) {
+            Some("allow" | "expect") => true,
+            Some("warn") => !warn_denied,
+            Some(_) => false,
+            None => text.contains("allow(dead_code") || text.contains("expect(dead_code") || text.contains("allow(unused"),
+        };
+        if allowed || text.contains("no_mangle") || text.contains("#[test]") || text.contains("#[derive") || text.contains("export_name") || text.contains("#[cfg") {
             continue;
         }
         let t = crate::lexer::tokenize(text.as_bytes());
         let tw = |k: usize| -> &str { if t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" } };
-        // (the item's keyword and name, after its attributes and visibility)
+        // (the item's keyword and name, after its lint-level attributes and visibility; another attribute (`#[used]`,
+        // `#[panic_handler]` ..) may make it used: the scan stops at its name, and the item is left alone)
+        let sym_at = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && text.as_bytes()[t[k].1] == c;
         let mut k = 0;
         while k < t.len() && (tw(k) == "pub" || tw(k) == "unsafe" || tw(k) == "async" || tw(k) == "extern" || t[k].0 != 0) {
             if tw(k) == "extern" || tw(k) == "impl" || tw(k) == "mod" || tw(k) == "use" || tw(k) == "macro_rules" {
                 break;
+            }
+            if sym_at(k, b'#') && sym_at(k + 1, b'[') && matches!(tw(k + 2), "allow" | "warn" | "deny" | "forbid" | "expect") {
+                let mut d = 0;
+                let mut j = k + 1;
+                while j < t.len() {
+                    if sym_at(j, b'[') {
+                        d += 1;
+                    } else if sym_at(j, b']') {
+                        d -= 1;
+                        if d == 0 {
+                            break;
+                        }
+                    }
+                    j += 1;
+                }
+                k = j + 1;
+                continue;
             }
             k += 1;
         }
@@ -3321,7 +5038,8 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
         if !check_pub && (0..k).any(|j| tw(j) == "pub") {
             continue;
         }
-        if name.is_empty() || name.starts_with('_') || name == "main" {
+        // (`_foo`, also in a flattened module: `m___foo`)
+        if name.is_empty() || name.starts_with('_') || name.split("__").last().is_some_and(|s| s.starts_with('_')) || name == "main" {
             continue;
         }
         // (the name as written: without the flattened modules' `a__` prefix and the renamer's `__u_`)
@@ -3334,9 +5052,11 @@ fn first_dead_item(src: &str, items: &[SrcItem], check_pub: bool) -> Option<(usi
             "const" => format!("constant `{shown}` is never used"),
             "static" => format!("static `{shown}` is never used"),
             "trait" => format!("trait `{shown}` is never used"),
+            "type" => format!("type alias `{shown}` is never used"),
             _ => continue,
         };
-        if uses.get(name).copied().unwrap_or(0) == 0 {
+        let alias_in_impl = kw == "type" && impl_uses.get(name).copied().unwrap_or(0) > 0;
+        if uses.get(name).copied().unwrap_or(0) == 0 && !alias_in_impl {
             let line = it.line + text[..t[k].1].matches('\n').count();
             return Some((line, what));
         }
@@ -3503,6 +5223,12 @@ fn item_lint_level(text: &str, n: &str) -> Option<&'static str> {
         rest = rest.trim_start();
         if let Some(r) = rest.strip_prefix("//") {
             rest = r.split_once('\n').map_or("", |x| x.1);
+            continue;
+        }
+        // (the crate's inner attributes, at the head of the first item's text: the crate's levels, not the item's)
+        if let Some(r) = rest.strip_prefix("#![") {
+            let Some(end) = r.find(']') else { break };
+            rest = &r[end + 1..];
             continue;
         }
         let Some(r) = rest.strip_prefix("#[") else { break };
@@ -4070,6 +5796,14 @@ impl Session2 {
             if !a.crefs[id].is_empty() {
                 h.add(&aliases());
             }
+            // (the associated types of the crates it sees)
+            let mut ak: Key = 0;
+            for (c, &seen) in u.iter().enumerate() {
+                if seen {
+                    ak ^= a.assoc_keys.1.get(c).copied().unwrap_or(0);
+                }
+            }
+            h.add(&ak);
             match a.prog.panic_handler {
                 Some(p) => h.add(&a.prog.names[p as usize]),
                 None => h.add(&0u8),
@@ -4152,6 +5886,9 @@ impl Session2 {
         }
         // (and a cast in the body's own constants: `::<{ 257u32 as Lane }>`)
         h.add(&aliases());
+        // (and the program's associated types: `type Out = u32;` changed to `u64`, or `&'a u32` to `&'static u32`,
+        // changes what `<() as Foo>::Out` is with the body the same)
+        h.add(&a.assoc_keys.0);
         h.finish()
     }
 
@@ -4232,6 +5969,235 @@ fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u
         return Ok((Blob { clo_facts, ..acg::Compiled::empty_blob() }, req));
     }
     lower_blob(a, c, req).map(|(b, req)| (Blob { clo_facts, ..b }, req))
+}
+
+/// What `check` keeps of a checked fn: no machine code, only the relocations to the instances it requested
+fn check_blob(b: Blob, req: &[u32]) -> Blob {
+    let relocs = req.iter().map(|&i| acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(i) }).collect();
+    Blob { relocs, ..b }
+}
+
+/// Whether the instances ids (of a forked child's) can be sent to the parent: their type arguments have a written form
+/// the cache's encoding takes (types_enc: not a type parameter, not one only inference has)
+fn sendable(a: &Analysis, g: &Insts, ids: &[u32]) -> bool {
+    // (not a closure's fn-pointer instance (request_fnptr): the encoding writes it as the closure's own instance, which
+    // the parent would request instead)
+    ids.iter().all(|&i| g.get(i).is_none_or(|inst| !inst.fnptr && inst.args.iter().all(|&t| syn_sendable(&a.prog.ty_syn(t)))))
+}
+
+/// Whether this process has one thread: a fork copies only the calling thread, and a lock another thread holds (an
+/// interner's) would stay held in the child. A host that runs Session2 beside other threads checks in process
+pub(crate) fn single_threaded() -> bool {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| s.lines().find(|l| l.starts_with("Threads:")).and_then(|l| l[8..].trim().parse::<u32>().ok()))
+        == Some(1)
+}
+
+/// How many times this process has forked for parallel work (summaries, checks, builds): tests read it to see that a
+/// threaded host did not fork
+static FORKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn forks() -> usize {
+    FORKS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// fork, counted (FORKS)
+pub(crate) fn fork_counted() -> i32 {
+    FORKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // SAFETY: the callers' children only work and write, then _exit
+    unsafe { c_fork() }
+}
+
+/// Waits for a child, again when a signal interrupts the wait
+fn wait_child(pid: i32) {
+    let mut st = 0i32;
+    loop {
+        // SAFETY: st is an int
+        if unsafe { c_waitpid(pid, &mut st, 0) } == pid || std::io::Error::last_os_error().raw_os_error() != Some(4) {
+            return;
+        }
+    }
+}
+
+/// In a forked child: a panic that unwinds past this exits the child at once, so it never runs its parent's frames
+struct ChildExit;
+
+impl Drop for ChildExit {
+    fn drop(&mut self) {
+        // SAFETY: the child only exits
+        unsafe { c_exit(1) };
+    }
+}
+
+fn syn_sendable(t: &crate::types::TySyn) -> bool {
+    match t {
+        crate::types::TySyn::Prim(Ty::Vec(_)) => true,
+        crate::types::TySyn::Prim(p) => crate::types::TYS.contains(p),
+        crate::types::TySyn::Ref(_, i) | crate::types::TySyn::Array(i, _) | crate::types::TySyn::Slice(i) | crate::types::TySyn::Ptr(_, i) | crate::types::TySyn::Assoc(i, _) => syn_sendable(i),
+        crate::types::TySyn::App(_, v) | crate::types::TySyn::Tuple(v) | crate::types::TySyn::FnPtr(v) => v.iter().all(syn_sendable),
+        crate::types::TySyn::Named(_) | crate::types::TySyn::Str | crate::types::TySyn::Dyn(_) | crate::types::TySyn::Infer => true,
+    }
+}
+
+/// A checked fn: the instances it requested and its Blob as the cache keeps it (None when nothing needs it), or its error
+type Checked = R<(Vec<u32>, Option<Vec<u8>>)>;
+
+impl Session2 {
+    /// Checks ids, in forked children when there are many (#101): child k checks ids[i] with i % jobs == k and sends
+    /// back each one's Blob (encoded by name, as a parallel build's children do) or its error. The parent reads them
+    /// back in the order of ids, which requests again the instances each one requested, so what follows (the
+    /// diagnostics, the next wave) is as with one process. Only when checking (no machine code), with -j above 1
+    fn check_many(&self, a: &Analysis, insts: &Mutex<Insts>, ids: &[u32], check_only: bool) -> Vec<Checked> {
+        let one = |id: u32| -> Checked {
+            let (b, req) = compile_id_req(a, insts, id)?;
+            if self.opts.no_cache {
+                return Ok((req, None));
+            }
+            let b = if check_only { check_blob(b, &req) } else { b };
+            let mut e = vec![];
+            {
+                let g = insts.lock().unwrap();
+                crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+            }
+            Ok((req, Some(e)))
+        };
+        let per_job = std::env::var("ZUSTC_CHECK_FORK_MIN").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(32).max(1);
+        let jobs = if check_only { self.opts.jobs.min(ids.len() / per_job).max(1) } else { 1 };
+        if jobs <= 1 || !single_threaded() {
+            return ids.iter().map(|&id| one(id)).collect();
+        }
+        let mut kids: Vec<(i32, i32)> = vec![];
+        for k in 0..jobs {
+            let mut fds = [0i32; 2];
+            // SAFETY: fds は 2 つの int
+            if unsafe { c_pipe(fds.as_mut_ptr()) } != 0 {
+                continue;
+            }
+            // SAFETY: 子は検査して書くだけで _exit する
+            let pid = fork_counted();
+            if pid < 0 {
+                unsafe { c_close(fds[0]) };
+                unsafe { c_close(fds[1]) };
+                continue;
+            }
+            if pid == 0 {
+                let _exit_on_panic = ChildExit;
+                unsafe { c_close(fds[0]) };
+                let mut buf = vec![];
+                let mut i = k;
+                while i < ids.len() {
+                    crate::cache2::put_uv(&mut buf, i as u64);
+                    let (p0, l0) = {
+                        let g = insts.lock().unwrap();
+                        (g.pending.len(), g.fx_log.len())
+                    };
+                    match compile_id_req(a, insts, ids[i]) {
+                        Ok((b, req)) => {
+                            let mut e = vec![];
+                            {
+                                let g = insts.lock().unwrap();
+                                // (the instances it made, in the order it made them (what the parent's pending gets
+                                // when it checks the fn itself), then the others it requested: lowering makes some that
+                                // it does not return in req)
+                                let mut all: Vec<u32> = g.pending[p0..].to_vec();
+                                all.extend(req.iter().filter(|i| !all.contains(i)).copied().collect::<Vec<u32>>());
+                                if sendable(a, &*g, &all) {
+                                    crate::cache2::encode_blob(&check_blob(b, &all), &a.prog, &*g, &mut e);
+                                }
+                            }
+                            // (what cannot be sent is checked again by the parent)
+                            if e.is_empty() {
+                                buf.push(2);
+                                crate::cache2::put_uv(&mut buf, 0);
+                                i += jobs;
+                                continue;
+                            }
+                            buf.push(0);
+                            crate::cache2::put_uv(&mut buf, e.len() as u64);
+                            buf.extend_from_slice(&e);
+                        }
+                        Err(m) => {
+                            // (and what it did before it failed, which the fn checked here leaves behind: the instances
+                            // it made, pending, and what it told the closures it makes)
+                            let mut e = vec![];
+                            {
+                                let g = insts.lock().unwrap();
+                                let made = g.pending[p0..].to_vec();
+                                if sendable(a, &*g, &made) {
+                                    let b = Blob { clo_facts: g.facts_since(l0), ..acg::Compiled::empty_blob() };
+                                    crate::cache2::encode_blob(&check_blob(b, &made), &a.prog, &*g, &mut e);
+                                }
+                            }
+                            if e.is_empty() {
+                                buf.push(2);
+                                crate::cache2::put_uv(&mut buf, 0);
+                                i += jobs;
+                                continue;
+                            }
+                            buf.push(1);
+                            crate::cache2::put_uv(&mut buf, m.len() as u64);
+                            buf.extend_from_slice(m.as_bytes());
+                            crate::cache2::put_uv(&mut buf, e.len() as u64);
+                            buf.extend_from_slice(&e);
+                        }
+                    }
+                    i += jobs;
+                }
+                write_all(fds[1], &buf);
+                unsafe { c_close(fds[1]) };
+                unsafe { c_exit(0) };
+            }
+            unsafe { c_close(fds[1]) };
+            kids.push((pid, fds[0]));
+        }
+        let mut got: Vec<Option<Result<Vec<u8>, (String, Vec<u8>)>>> = (0..ids.len()).map(|_| None).collect();
+        for &(pid, fd) in &kids {
+            let d = read_all(fd);
+            unsafe { c_close(fd) };
+            wait_child(pid);
+            let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+            while r.pos < d.len() {
+                let (Some(i), Some(fail), Some(n)) = (r.uv(), r.u8(), r.uv()) else { break };
+                let Some(body) = r.take(n as usize) else { break };
+                let v = if fail == 2 {
+                    continue;
+                } else if fail == 0 {
+                    Ok(body.to_vec())
+                } else {
+                    let m = String::from_utf8_lossy(body).into_owned();
+                    let Some(n2) = r.uv() else { break };
+                    let Some(made) = r.take(n2 as usize) else { break };
+                    Err((m, made.to_vec()))
+                };
+                if let Some(slot) = got.get_mut(i as usize) {
+                    *slot = Some(v);
+                }
+            }
+        }
+        // (in order: reading a Blob back requests the instances it requested. What a child did not send (it failed, or
+        // was not started) is checked here)
+        got.into_iter()
+            .zip(ids)
+            .map(|(g, &id)| match g {
+                Some(Ok(d)) => match crate::cache2::decode_blob(&d, &a.prog, insts) {
+                    Some(b) => {
+                        let req = b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect();
+                        Ok((req, if self.opts.no_cache { None } else { Some(d) }))
+                    }
+                    None => one(id),
+                },
+                // (what the failed fn left behind, read back; when it cannot be (a name only the child knows), the fn is
+                // checked here, which leaves it as the serial check does: requests are made once, so what the reading
+                // requested before it failed is not requested twice)
+                Some(Err((m, made))) => match crate::cache2::decode_blob(&made, &a.prog, insts) {
+                    Some(_) => Err(m),
+                    None => one(id),
+                },
+                None => one(id),
+            })
+            .collect()
+    }
 }
 
 /// 記録を機械語にして Blob を作る (バックエンドなしでは作れない)
@@ -4387,6 +6353,9 @@ impl Session2 {
         // (in the placeholders' round)
         let mut ph_round = false;
         let mut ph_depth = 0;
+        // (a wave's functions to check, and what each gives the record: id, name, body, requested, ok)
+        let mut todo: Vec<(u32, String, String, Key, Key)> = vec![];
+        let mut recs: Vec<(u32, String, String, Option<Vec<u32>>, bool)> = vec![];
         loop {
             while !wave.is_empty() {
                 for &id in &wave {
@@ -4435,67 +6404,65 @@ impl Session2 {
                         None if check_only => self.get(kc).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)),
                         None => None,
                     };
-                    let mut ok = true;
-                    let req: Option<Vec<u32>> = match hit {
+                    match hit {
                         Some(b) => {
                             n_hit += 1;
-                            Some(b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect())
+                            let req = b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect();
+                            recs.push((id, name, body, Some(req), true));
                         }
-                        None => {
-                            n_checked += 1;
-                            match compile_id_req(&a, &insts, id) {
-                                Ok((b, req)) => {
-                                    if !self.opts.no_cache {
-                                        let b = if check_only {
-                                            let relocs = req.iter().map(|&i| acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(i) }).collect();
-                                            Blob { relocs, ..b }
-                                        } else {
-                                            b
-                                        };
-                                        let mut e = vec![];
-                                        {
-                                            let g = insts.lock().unwrap();
-                                            crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
-                                        }
-                                        self.put(if check_only { kc } else { k }, e);
-                                    }
-                                    Some(req)
-                                }
-                                Err(e) => {
-                                    // (a fn that reads a constant: its type errors are the constant's, at its line; what
-                                    // zustc cannot evaluate in a constant is not an error of the program)
-                                    match body.strip_prefix(self.const_fn.as_str()).and_then(|k| k.parse::<usize>().ok()).filter(|_| !self.const_lines.is_empty()) {
-                                        Some(k) => {
-                                            // (nor a mismatch zustc's coercions may make: of a raw pointer, or of a type
-                                            // that has no size, which rustc rejects another way)
-                                            // (nor a reference to a type with a Deref, whose coercion zustc does not make)
-                                            // (a cycle of constants, E0391, is the constant's too)
-                                            let m = e.find("cycle detected when const-evaluating").or_else(|| e.find("mismatched types").filter(|&m| {
-                                                let tys = &e[m..];
-                                                let unsized_ty = |t: &str| t == "str" || t.starts_with('[') && !t.contains(';') || t.starts_with("dyn ");
-                                                let derefs = |t: &str| {
-                                                    let n = t.strip_prefix('&').map(|x| x.strip_prefix("mut ").unwrap_or(x)).unwrap_or("");
-                                                    a.prog.struct_index.get(n).is_some_and(|&sid| a.prog.method(sid, "deref").is_some())
-                                                };
-                                                // (a coercion to a raw pointer zustc may not make: the expected type's)
-                                                let expected = tys.split('`').nth(1).unwrap_or("");
-                                                !expected.contains("*const") && !expected.contains("*mut") && !tys.split('`').skip(1).step_by(2).any(|t| unsized_ty(t) || derefs(t))
-                                            }))
-                                            // (`const BAD: i8 = -129;`: overflowing_literals, denied)
-                                            .or_else(|| e.find("literal out of range for"));
-                                            if let (Some(&l), Some(m)) = (self.const_lines.get(k), m) {
-                                                errs.push(format!("{l}:1: {}", &e[m..]));
-                                            }
-                                        }
-                                        None => errs.push(e),
-                                    }
-                                    ok = false;
-                                    Some(vec![])
-                                }
+                        None => todo.push((id, name, body, k, kc)),
+                    }
+                }
+                // (the wave's misses: checked here or, when there are many, in forked children (check_many); their
+                // results are taken in the wave's order either way, so the diagnostics do not depend on -j)
+                let ids: Vec<u32> = todo.iter().map(|t| t.0).collect();
+                let res = self.check_many(&a, &insts, &ids, check_only);
+                for ((id, name, body, k, kc), r) in todo.drain(..).zip(res) {
+                    n_checked += 1;
+                    let mut ok = true;
+                    let req = match r {
+                        Ok((req, enc)) => {
+                            if let Some(e) = enc.filter(|_| !self.opts.no_cache) {
+                                self.put(if check_only { kc } else { k }, e);
                             }
+                            Some(req)
+                        }
+                        Err(e) => {
+                            // (a fn that reads a constant: its type errors are the constant's, at its line; what
+                            // zustc cannot evaluate in a constant is not an error of the program)
+                            match body.strip_prefix(self.const_fn.as_str()).and_then(|k| k.parse::<usize>().ok()).filter(|_| !self.const_lines.is_empty()) {
+                                Some(k) => {
+                                    // (nor a mismatch zustc's coercions may make: of a raw pointer, or of a type
+                                    // that has no size, which rustc rejects another way)
+                                    // (nor a reference to a type with a Deref, whose coercion zustc does not make)
+                                    // (a cycle of constants, E0391, is the constant's too)
+                                    let m = e.find("cycle detected when const-evaluating").or_else(|| e.find("mismatched types").filter(|&m| {
+                                        let tys = &e[m..];
+                                        let unsized_ty = |t: &str| t == "str" || t.starts_with('[') && !t.contains(';') || t.starts_with("dyn ");
+                                        let derefs = |t: &str| {
+                                            let n = t.strip_prefix('&').map(|x| x.strip_prefix("mut ").unwrap_or(x)).unwrap_or("");
+                                            a.prog.struct_index.get(n).is_some_and(|&sid| a.prog.method(sid, "deref").is_some())
+                                        };
+                                        // (a coercion to a raw pointer zustc may not make: the expected type's)
+                                        let expected = tys.split('`').nth(1).unwrap_or("");
+                                        !expected.contains("*const") && !expected.contains("*mut") && !tys.split('`').skip(1).step_by(2).any(|t| unsized_ty(t) || derefs(t))
+                                    }))
+                                    // (`const BAD: i8 = -129;`: overflowing_literals, denied)
+                                    .or_else(|| e.find("literal out of range for"));
+                                    if let (Some(&l), Some(m)) = (self.const_lines.get(k), m) {
+                                        errs.push(format!("{l}:1: {}", &e[m..]));
+                                    }
+                                }
+                                None => errs.push(e),
+                            }
+                            ok = false;
+                            Some(vec![])
                         }
                     };
-                    // (記録)
+                    recs.push((id, name, body, req, ok));
+                }
+                // (記録)
+                for (id, name, body, req, ok) in recs.drain(..) {
                     if !keep {
                         continue;
                     }
@@ -4751,18 +6718,69 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
     // (`n: ?Sized` / `n: Tr + ?Sized`, in the parameter list or a where clause: the `:` before a `?Sized` with only
     // bounds between, and the parameter's name before the `:`)
     let maybe_unsized = |text: &str, n: &str| {
-        text.match_indices("?Sized").any(|(i, _)| {
-            let before = &text[..i];
-            let b = before.as_bytes();
-            let mut j = b.len();
-            while j > 0 && (b[j - 1].is_ascii_alphanumeric() || matches!(b[j - 1], b'_' | b' ' | b'\t' | b'\n' | b'\r' | b'+' | b'\'' | b'<' | b'>' | b',')) {
-                j -= 1;
-            }
-            if j == 0 || b[j - 1] != b':' || (j >= 2 && b[j - 2] == b':') {
+        // (from the tokens: not a `?Sized` in a string, `#[doc = "K: ?Sized"]`)
+        let b = text.as_bytes();
+        let t = crate::lexer::tokenize(b);
+        let w = |k: usize| if t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
+        let sym = |k: usize, c: u8| t[k].0 == 1 && b[t[k].1] == c;
+        (1..t.len()).any(|k| {
+            if !(w(k) == "Sized" && sym(k - 1, b'?')) {
                 return false;
             }
-            before[..j - 1].trim_end().rsplit(|c: char| !(c.is_alphanumeric() || c == '_')).next() == Some(n)
+            // (back over the other bounds, `Tr<A, B> + 'a + std::fmt::Debug + Iterator<Item = u8> + FnOnce(u8) -> u8
+            // +`, to the `:` after the name: anything inside a bound's `<..>` or `(..)`)
+            let mut j = k - 1;
+            let mut angle = 0i32;
+            let mut paren = 0i32;
+            while j > 0 {
+                j -= 1;
+                if sym(j, b')') {
+                    paren += 1;
+                    continue;
+                }
+                if sym(j, b'(') {
+                    paren -= 1;
+                    continue;
+                }
+                if paren > 0 {
+                    continue;
+                }
+                if sym(j, b'>') && !(j > 0 && sym(j - 1, b'-')) {
+                    angle += 1;
+                    continue;
+                }
+                if sym(j, b'<') {
+                    angle -= 1;
+                    continue;
+                }
+                if angle > 0 {
+                    continue;
+                }
+                // (the `->` of a `Fn(..) -> R` bound)
+                if sym(j, b'-') && j + 1 < t.len() && sym(j + 1, b'>') {
+                    continue;
+                }
+                if sym(j, b':') {
+                    if j > 0 && sym(j - 1, b':') {
+                        j -= 1;
+                        continue;
+                    }
+                    return j > 0 && w(j - 1) == n;
+                }
+                if !(t[j].0 == 0 || sym(j, b'+') || sym(j, b'<') || sym(j, b'>') || sym(j, b',') || sym(j, b'?')) {
+                    return false;
+                }
+            }
+            false
         })
+    };
+    // (a bound whose trait has `Sized` as a supertrait: std's `Clone`, `Copy`, `Default`, the conversions, or one of
+    // the program's traits through its supertraits)
+    let implies_sized = |b: &str| {
+        let tr = b.split('<').next().unwrap_or(b).trim();
+        let tr = tr.rsplit("::").next().unwrap_or(tr);
+        matches!(tr, "Sized" | "Clone" | "Copy" | "Default" | "From" | "Into" | "TryFrom" | "TryInto" | "FromStr" | "FromIterator")
+            || prog.bound_implies(b, &["Sized", "Clone", "Copy", "Default"], false, 0)
     };
     let word = |text: &str, w: &str| text.match_indices(w).any(|(i, _)| {
         let ok = |c: Option<char>| c.is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
@@ -4778,8 +6796,7 @@ fn wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user
                     // bound that implies Sized holds it, not the word `Sized` of its `?Sized`)
                     let bs = bounds(n);
                     let held = if tr == "Sized" {
-                        // (std's `Clone`, `Copy` and `Default` have `Sized` as a supertrait: `T: ?Sized + Clone` is Sized)
-                        bs.iter().any(|b| b == "Sized" || prog.bound_implies(b, &["Sized", "Clone", "Copy", "Default"], false, 0)) || !maybe_unsized(text, n)
+                        bs.iter().any(|b| implies_sized(b)) || !maybe_unsized(text, n)
                     } else {
                         bs.iter().any(|b| b == tr || prog.bound_implies(b, &[tr.as_str()], true, 0)) || word(text, tr)
                     };
@@ -5198,13 +7215,183 @@ fn gated_attr(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>
             }
             continue;
         }
-        let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) else { continue };
+        // (the first-level names of its arguments: `doc(cfg(..))` / `repr(C, simd)`)
+        let mut args: Vec<&str> = vec![];
+        if sym(j + 1, "(") {
+            let (mut q, mut d) = (j + 2, 1);
+            while q < toks.len() && d > 0 {
+                if sym(q, "(") || sym(q, "[") {
+                    d += 1;
+                } else if sym(q, ")") || sym(q, "]") {
+                    d -= 1;
+                } else if d == 1 && toks[q].0 == 0 {
+                    args.push(tx(q));
+                }
+                q += 1;
+            }
+        }
+        // (`#[repr(transparent)] union U`: rustc points at the union)
+        if name == "repr" && args.contains(&"transparent") {
+            // (this attribute's `]`)
+            let (mut e, mut d) = (j + 1, 0i32);
+            while e < toks.len() {
+                if sym(e, "(") || sym(e, "[") {
+                    d += 1;
+                } else if sym(e, ")") {
+                    d -= 1;
+                } else if sym(e, "]") {
+                    if d == 0 {
+                        break;
+                    }
+                    d -= 1;
+                }
+                e += 1;
+            }
+            let start = if e < toks.len() { from + toks[e].2 } else { to };
+            // (a window past the attributes after it, however long: doubled until the item's keyword is in it)
+            let mut len = 512;
+            let (rest, rt) = loop {
+                let mut end = src.len().min(start + len);
+                while !src.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let rest = &src[start..end];
+                let rt = lexer::tokenize(rest.as_bytes());
+                // (complete when an identifier other than `pub` follows the attributes, or at the source's end)
+                let (rb, mut q, mut d) = (rest.as_bytes(), 0, 0i32);
+                let mut done = end == src.len();
+                while q < rt.len() && !done {
+                    let c = (rt[q].0 == 1).then(|| rb[rt[q].1]);
+                    match c {
+                        Some(b'[' | b'(') => d += 1,
+                        Some(b']' | b')') => d -= 1,
+                        // (a whole identifier: one that ends where the window does may be cut)
+                        _ if d == 0 && rt[q].0 == 0 && (rt[q].2 < rest.len() || end == src.len()) && &rest[rt[q].1..rt[q].2] != "pub" => done = true,
+                        _ => {}
+                    }
+                    q += 1;
+                }
+                if done {
+                    break (rest, rt);
+                }
+                len *= 2;
+            };
+            let rb = rest.as_bytes();
+            let rw = |q: usize| if q < rt.len() && rt[q].0 == 0 { &rest[rt[q].1..rt[q].2] } else { "" };
+            let rs = |q: usize, c: u8| q < rt.len() && rt[q].0 == 1 && rb[rt[q].1] == c;
+            // (the group that opens at q: the index after its close)
+            let skip_group = |q: usize| -> usize {
+                let mut d = 0i32;
+                for k in q..rt.len() {
+                    if rs(k, b'(') || rs(k, b'[') {
+                        d += 1;
+                    } else if rs(k, b')') || rs(k, b']') {
+                        d -= 1;
+                        if d == 0 {
+                            return k + 1;
+                        }
+                    }
+                }
+                rt.len()
+            };
+            let mut q = 0;
+            loop {
+                if rs(q, b'#') && rs(q + 1, b'[') {
+                    q = skip_group(q + 1);
+                } else if rw(q) == "pub" {
+                    q += 1;
+                    if rs(q, b'(') {
+                        q = skip_group(q);
+                    }
+                } else {
+                    break;
+                }
+            }
+            if rw(q) == "union" && !feats.get_or_insert_with(|| enabled_features(src)).iter().any(|f| f == "transparent_unions") {
+                let i = start + rt[q].1;
+                let line = src[..i].matches('\n').count() + 1;
+                return Some(format!("{line}:{}: transparent unions are unstable (E0658)", i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1));
+            }
+        }
+        let Some((feat, msg)) = attr_gate(name, &args) else { continue };
         // (the source's enabled features: read once, at the first gated attribute)
         let enabled = feats.get_or_insert_with(|| enabled_features(src));
         if !enabled.iter().any(|f| f == feat) {
             let (line, col) = at(k);
-            return Some(format!("{line}:{col}: the `{name}` attribute is an experimental feature (E0658)"));
+            return Some(format!("{line}:{col}: {msg} (E0658)"));
         }
+    }
+    None
+}
+
+/// The feature gate of an attribute named `name` with the first-level argument names `args`, and rustc's message
+/// when the source does not enable it (rustc 1.100)
+fn attr_gate(name: &str, args: &[&str]) -> Option<(&'static str, String)> {
+    if let Some(&(_, feat)) = GATED.iter().find(|g| g.0 == name) {
+        return Some((feat, format!("the `{name}` attribute is an experimental feature")));
+    }
+    let experimental = |feat: &'static str| Some((feat, format!("the `{name}` attribute is an experimental feature")));
+    match name {
+        "allow_internal_unstable" => Some(("allow_internal_unstable", "the `allow_internal_unstable` attribute side-steps feature gating and stability checks".into())),
+        "allow_internal_unsafe" => Some(("allow_internal_unsafe", "the `allow_internal_unsafe` attribute side-steps the `unsafe_code` lint".into())),
+        "compiler_builtins" => Some(("compiler_builtins", "the `compiler_builtins` attribute is used to identify the `compiler_builtins` crate which contains compiler-rt intrinsics and will never be stable".into())),
+        "profiler_runtime" => Some(("profiler_runtime", "the `profiler_runtime` attribute is used to identify the `profiler_builtins` crate which contains the profiler runtime and will never be stable".into())),
+        "prelude_import" => Some(("prelude_import", "the `prelude_import` attribute is for use by rustc only".into())),
+        "linkage" => Some(("linkage", "the `linkage` attribute is experimental and not portable across platforms".into())),
+        "lang" => Some(("lang_items", "lang items are subject to change".into())),
+        "needs_allocator" => experimental("allocator_internals"),
+        "panic_runtime" => experimental("panic_runtime"),
+        "needs_panic_runtime" => experimental("needs_panic_runtime"),
+        "rustc_unroll" => experimental("loop_hints"),
+        "rustc_splat" => experimental("splat"),
+        // (stability attributes: the standard library's)
+        "stable" | "unstable" | "rustc_const_stable" | "rustc_const_unstable" | "rustc_default_body_unstable" | "unstable_feature_bound" => {
+            Some(("staged_api", "stability attributes may not be used outside of the standard library".into()))
+        }
+        "pattern_complexity_limit" => Some(("rustc_attrs", "use of an internal attribute".into())),
+        n if n.starts_with("rustc_") => Some(("rustc_attrs", "use of an internal attribute".into())),
+        "repr" if args.contains(&"simd") => Some(("repr_simd", "SIMD types are experimental and possibly buggy".into())),
+        "doc" => {
+            if args.iter().any(|a| matches!(*a, "cfg" | "auto_cfg")) {
+                Some(("doc_cfg", "the `doc(cfg)` and `doc(auto_cfg)` attributes are experimental".into()))
+            } else if args.contains(&"masked") {
+                Some(("doc_masked", "the `doc(masked)` attribute is experimental".into()))
+            } else if args.contains(&"notable_trait") {
+                Some(("doc_notable_trait", "the `doc(notable_trait)` attribute is experimental".into()))
+            } else if args.iter().any(|a| matches!(*a, "rust_logo" | "keyword" | "attribute" | "fake_variadic" | "search_unbox")) {
+                Some(("rustdoc_internals", "this subset of the `doc` attribute is meant for internal use only".into()))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// An ABI behind a feature gate the source does not enable, `extern "rust-cold" fn f()` (rustc 1.100): `line:col:
+/// the extern "x" ABI is experimental and subject to change (E0658)`, at the ABI's string
+fn gated_abi(src: &str, from: usize, to: usize, feats: &mut Option<Vec<String>>) -> Option<String> {
+    let toks = lexer::tokenize(&src.as_bytes()[from..to]);
+    let tx = |k: usize| &src[from + toks[k].1..from + toks[k].2];
+    for k in 1..toks.len() {
+        if toks[k].0 != 2 || toks[k - 1].0 != 0 || tx(k - 1) != "extern" {
+            continue;
+        }
+        let Some(abi) = str_lit_value(tx(k)) else { continue };
+        let (feat, how) = match abi.as_str() {
+            "rust-cold" => ("rust_cold_cc", "is experimental and subject to change"),
+            "tail" => ("rust_tail_cc", "is experimental and subject to change"),
+            "rust-preserve-none" => ("rust_preserve_none_cc", "is experimental and subject to change"),
+            "llvm-intrinsic" => ("link_llvm_intrinsics", "is an implementation detail and perma-unstable"),
+            _ => continue,
+        };
+        if feats.get_or_insert_with(|| enabled_features(src)).iter().any(|f| f == feat) {
+            continue;
+        }
+        let i = from + toks[k].1;
+        let line = src[..i].matches('\n').count() + 1;
+        let col = i - src[..i].rfind('\n').map_or(0, |n| n + 1) + 1;
+        return Some(format!("{line}:{col}: the extern \"{abi}\" ABI {how} (E0658)"));
     }
     None
 }
@@ -5329,7 +7516,9 @@ fn gated_attrs_len(b: &[u8]) -> Option<usize> {
                     }
                     let name = &b[n0..j];
                     skip(&mut j);
-                    if !name.is_empty() && b.get(j) != Some(&b':') && (GATED.iter().any(|g| g.0.as_bytes() == name) || name == b"target_feature") {
+                    // (a name some gate is on: `attr_gate`'s, or one whose arguments decide, `doc(..)` / `repr(..)`)
+                    let gate_named = std::str::from_utf8(name).is_ok_and(|n| attr_gate(n, &[]).is_some() || matches!(n, "doc" | "repr" | "target_feature"));
+                    if !name.is_empty() && b.get(j) != Some(&b':') && gate_named {
                         gated = true;
                     }
                     i = j;

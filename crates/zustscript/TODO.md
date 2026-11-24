@@ -2,6 +2,11 @@
 
 README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画のメモ(ML 用途、vector IR との関係)。このファイルは、文法の改善ループで**決めずに残したこと**と、次にやることの一覧。
 
+## ターゲットと JS 相互運用
+
+- [ ] [ターゲット属性とビルドの設計方針](docs/target-spec.md)を実装する。`@simd` の Wasm 固定、`@js` の DOM ラッパー、`@rust` の Rust モジュール取り込みを、同一ソースの web・JS 単独・Rust ビルドで検証する。
+- [ ] 手書き `wasm fn` の `&[u8]` / `Vec<u8>` を JS の `Uint8Array` につなぐ。部分ビューと所有権を生成ラッパー経由で検証し、未使用時の増分 0 B と、使用時の JS・Wasm サイズを測る。[JS ヘルパー試作と基準値](docs/target-spec.md#配布サイズと採用範囲)
+
 ## 文法の提案の状態
 
 提案は [evals/syntax/](evals/syntax/README.md) の改善ループ(提案 → ルーブリックの評価 → 改訂)で進めている。**どれもまだ実装していない**(今の zsc の文法は README のとおり)。
@@ -33,7 +38,7 @@ README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画の�
 - 別の enum の同名のバリアントが同じ TAG になること(`Parsed.None` と `Hit.None`)
 - データなしの enum にデータつきのバリアントを足すと `.d.ts` の形が変わること
 - TS 側でバリアントの値を作るコンストラクタ(`Shape.Circle(…)`、`Option` / `Result`)
-- `pub` な関数の境界の `Option<T>` を `T | undefined` にするか、`Result` を JS の例外にするか(`@throws` のような印。wasm_bindgen と同じ)
+- 公開関数の境界の `Option<T>` を `T | undefined` にするか、`Result` を JS の例外にするか(`@throws` のような印。wasm_bindgen と同じ)
 
 ### 001 バリアント
 
@@ -48,7 +53,7 @@ README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画の�
 
 ### 002 レコード
 
-- `pub` な関数の無名の戻り値の型に、`.d.ts` で名前を付けるか
+- 公開関数の無名の戻り値の型に、`.d.ts` で名前を付けるか
 - `void` を `()` の別名として受け付けるか(型の位置だけ)
 - 総称的な無名のレコード `{ value: T }`。総称的な別名に Rust の総称の別名を出すか
 - spread を 2 つ以上書けるようにするか(`{ ...defaults, ...props }`)
@@ -69,6 +74,8 @@ README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画の�
 
 - 文字列の補間 `` `hi ${name}` ``
 - モジュールと import(`import { a } from "./b.zsc"`、npm の型との接続)
+  - **済: TS のファイルのプレーンなレコード型を `import type` で読む**(README の「TS の型の取り込み」)。残り: 任意のフィールド(003 の `Option` と一緒に)、総称型、`extends`、union(**済: 文字列リテラルの union と判別キーつきの union を enum として読む**。**済: その enum を `@wasm` との境界で渡す**。残り: zustscript の enum の表現を `@tag` で選べるようにする)、パッケージの .d.ts からの読み込み、関数の型(`extern` の代わり)
+  - **済: 文字列や配列を含むレコードを `@wasm` との境界で渡す**: 補助のパッケージ zustscript-helper(TS)と crate zustscript_helper(Rust)の、1 つの固定したバイト列の形式で(README の「バイト列で越える値」)。**済: enum もこの形式に載せる**。残り: typed array をこの形式に載せる、zustscript-helper を npm に公開する(今は helper/ts をそのまま置く)
 - ML 用途の文法: [docs/plan.md](docs/plan.md) の「TODO: ML 用途」
 
 ## 提案の中の、分かっている食い違い
@@ -76,7 +83,7 @@ README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画の�
 r5 / r2 を書いた agent が報告したもの。次の改訂で直す。
 
 - 001 の例の `Shape` には `Label { text: String }` があるので、002 の「`@wasm` で使えるのは Copy にできる形だけ」に照らすと `@wasm` で使えない(wasm の例は「Copy の形だとして」と断り書きにしてある)
-- 001 の決定 9(`pub` の入口で TAG を検査し、内部の呼び出しは検査しない): `@wasm` の `pub` な関数では、JS 層の中からの呼び出しも glue の検査を通る
+- 001 の決定 9(公開関数の入口で TAG を検査し、内部の呼び出しは検査しない): `@wasm` の公開関数では、JS 層の中からの呼び出しも glue の検査を通る
 - 001 の引数のあるバリアント(`if c { Parsed::Ok(1) } else { Ok(2) }`)は、`EK::If` が他の分岐の型を期待する型として渡すので、分岐の順で結果が変わりうる(003 は「書いた型」だけを数える規則で避けた。001 にも同じ規則を入れる)
 
 ## JS ターゲット: サイズ、速さ、TS との型の接続
@@ -86,9 +93,9 @@ r5 / r2 を書いた agent が報告したもの。次の改訂で直す。
 決めたこと(順に入れて、1 つずつ効果を測る):
 
 1. **済: effect の tail-resumptive な handler を、直接の関数呼び出しにした**(`check::direct_effects`、`$perform` / `$handleD`)
-   - handler のすべての arm が末尾で `k(x)` を呼ぶだけで、`pub` な関数から外へ出ず、generator の effect と混ざらない effect は、普通の呼び出しになる。それ以外は generator のまま
+   - handler のすべての arm が末尾で `k(x)` を呼ぶだけで、公開関数から外へ出ず、generator の effect と混ざらない effect は、普通の呼び出しになる。それ以外は generator のまま
    - `w_effects` は 676 ms → 6.5 ms(約 100 倍)。結果は同じ。operation を 100 万回しても、スタックはあふれない(回帰テスト `many_ops`)
-   - **残る不具合**: generator の deep handler は、operation のたびに JS のスタックが深くなり、1 つの `handle` の中で operation が 1000 回前後になるとあふれる。ループの形の再開(trampoline)が要る
+   - **済: generator の deep handler のスタックのあふれ**: 命令を 1 つのループ(`$run`)で実行し、フレームをヒープ上のスタックに積む(trampoline)。1 つの `handle` の中で operation を 10 万回しても、あふれない。速さも 4〜7 倍
 2. **済: 実行時の補助関数を共通の runtime モジュールにした**: `zsc-runtime.js` / `.d.ts`(補助関数と、数値の brand とそのコンストラクタ)を出力先に 1 つ書き、各モジュールは使うものだけ import する。モジュールは使う brand を re-export するので、TS 側の import は変わらない。`--inline-runtime` で、これまでどおりモジュールの中に書く
    - 1 つのモジュールの bundle は変わらない(tree-shaking)。全モジュールを 1 つに bundle すると minify 後で 18,376 → 14,249 バイト(−22%)、gzip 後で −6.5%。zsc が出す .js は −30%
    - 003 の prelude(`Option` / `Result` の型)も、ここに置く予定

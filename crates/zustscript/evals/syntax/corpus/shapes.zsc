@@ -14,7 +14,7 @@ enum Shape {
 enum Parsed { Ok(Shape), Missing, Bad(String) }
 enum Hit { NoHit, Hit(i32) }
 
-pub fn area(s: Shape) -> f64 {
+export fn area(s: Shape) -> f64 {
   match s {
     Circle(_, r) => 3.141592653589793 * r * r,
     Rect(a, b) => ((b.x - a.x) * (b.y - a.y)).abs(),
@@ -22,7 +22,7 @@ pub fn area(s: Shape) -> f64 {
   }
 }
 
-pub fn moved(s: Shape, d: Vec2) -> Shape {
+export fn moved(s: Shape, d: Vec2) -> Shape {
   let add = (p: Vec2) => Vec2 { x: p.x + d.x, y: p.y + d.y };
   match s {
     Circle(c, r) => Circle(add(c), r),
@@ -31,7 +31,7 @@ pub fn moved(s: Shape, d: Vec2) -> Shape {
   }
 }
 
-pub fn describe(p: Parsed) -> String {
+export fn describe(p: Parsed) -> String {
   match p {
     Ok(s) => "shape with area " + area(s).to_string(),
     Missing => "nothing",
@@ -39,7 +39,7 @@ pub fn describe(p: Parsed) -> String {
   }
 }
 
-pub fn first_hit(shapes: Array<Shape>, at: Vec2) -> Hit {
+export fn first_hit(shapes: Array<Shape>, at: Vec2) -> Hit {
   let mut found = -1;
   for i in range(0, shapes.len()) {
     if found < 0 && contains(shapes[i], at) { found = i; }

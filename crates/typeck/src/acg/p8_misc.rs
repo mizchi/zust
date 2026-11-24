@@ -809,6 +809,9 @@ impl Cx<'_> {
         if !self.prog.static_self_consts.is_empty() {
             self.rg_static_self_const(p, ci);
         }
+        if !self.prog.const_regions.is_empty() {
+            self.rg_const_regions(p, ci);
+        }
         let prog = self.prog;
         let c = &prog.consts[ci as usize];
         let (t, src) = (c.ty, c.expr.clone());
@@ -834,10 +837,35 @@ impl Cx<'_> {
         // (行番号は今は出さない: Sp は場所を持たない)
         // (a type that names the impl's parameters is a hole: the expression takes the expected type at the use)
         let hint = self.const_hint.take();
-        if has_hole(prog, t) {
-            return self.expr(ce, hint.filter(|&h| !has_hole(prog, h))).map_err(|e| format!("{}:1: in constant `{}`: {e}", SP.line, c.name));
+        // (an impl's const: `Self` in it is the impl's type, `const ALIGN: usize = Self::BYTES - 1;` of `S::ALIGN` /
+        // `v128 as Vector::ALIGN`)
+        let saved = (self.self_sid, self.env.self_ty);
+        let word = |c: char| c.is_alphanumeric() || c == '_';
+        let mentions_self = src.match_indices("Self").any(|(i, _)| !src[..i].ends_with(word) && !src[i + 4..].starts_with(word));
+        if mentions_self {
+            let base = c.name.rsplit_once("::").map(|(a, _)| a.split(" as ").next().unwrap_or(a));
+            let st = base.and_then(|b| match prog.struct_index.get(b) {
+                Some(&sid) => Some(Ty::Struct(sid)),
+                None => Ty::prim(b).or_else(|| crate::simd_sig::vector_name(b)),
+            });
+            if let Some(st) = st {
+                if let Ty::Struct(sid) = st {
+                    self.self_sid = Some(sid);
+                }
+                self.env.self_ty = Some(st);
+            }
         }
-        let (v, vt) = self.expr(ce, Some(t)).map_err(|e| format!("{}:1: in constant `{}`: {e}", SP.line, c.name))?;
+        let r = if has_hole(prog, t) {
+            self.expr(ce, hint.filter(|&h| !has_hole(prog, h))).map_err(|e| format!("{}:1: in constant `{}`: {e}", SP.line, c.name))
+        } else {
+            self.expr(ce, Some(t)).map_err(|e| format!("{}:1: in constant `{}`: {e}", SP.line, c.name))
+        };
+        self.self_sid = saved.0;
+        self.env.self_ty = saved.1;
+        if has_hole(prog, t) {
+            return r;
+        }
+        let (v, vt) = r?;
         self.same(SP, vt, t)?;
         Ok((v, t))
     }

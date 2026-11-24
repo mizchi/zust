@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 # examples/*.rs を zustc と rustc の両方でビルドし、実行結果が一致するか確かめる。
 # usage: tests/compare.sh   (このディレクトリで、cargo build --release の後に実行)
+# (例ごとに別のプロセスで、コアの数だけ並べて動かす。出力は例の順にまとめて出す)
 set -u
+self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
 out=out/compare
 mkdir -p "$out"
-fail=0
-for src in examples/*.rs; do
+check() {
+  local src=$1 name rflags c0 c1 c2
   name=$(basename "$src" .rs)
   # キャッシュなし (cold) とキャッシュからの再ビルド (warm) の両方を確かめる
   rm -f "$out/$name.crcache2" "$out/$name.cold.crcache2"
   if ! ./target/release/zustc "$src" -o "$out/$name.cold" >"$out/$name.log" 2>&1; then
-    echo "FAIL $name (zustc)"; cat "$out/$name.log"; fail=1; continue
+    echo "FAIL $name (zustc)"; cat "$out/$name.log"; return 1
   fi
   cp "$out/$name.cold.crcache2" "$out/$name.crcache2" 2>/dev/null
   if ! ./target/release/zustc "$src" -o "$out/$name" >"$out/$name.log" 2>&1; then
-    echo "FAIL $name (zustc, warm)"; cat "$out/$name.log"; fail=1; continue
+    echo "FAIL $name (zustc, warm)"; cat "$out/$name.log"; return 1
   fi
   # no_std (#![no_std] + #![no_main]) は libcore だけで、panic=abort・libc をリンクしてビルドする
   # (rust_eh_personality は panic=abort では呼ばれないので 0 に定義しておく)
@@ -24,13 +26,13 @@ for src in examples/*.rs; do
   else
     rflags=()
   fi
-  rustc -Awarnings "${rflags[@]}" "$src" -o "$out/$name.rustc" || { echo "FAIL $name (rustc)"; fail=1; continue; }
+  rustc -Awarnings "${rflags[@]}" "$src" -o "$out/$name.rustc" || { echo "FAIL $name (rustc)"; return 1; }
   # 終了コードも比べる (no_std の main は戻り値が終了コード)
   "$out/$name.cold" >"$out/$name.out0"; c0=$?
   "$out/$name" >"$out/$name.out1"; c1=$?
   echo "exit=$c0" >>"$out/$name.out0"
   if ! diff -q "$out/$name.out0" <("$out/$name"; echo "exit=$?") >/dev/null; then
-    echo "FAIL $name (cold and warm builds differ)"; fail=1; continue
+    echo "FAIL $name (cold and warm builds differ)"; return 1
   fi
   "$out/$name.rustc" >"$out/$name.out2"; c2=$?
   echo "exit=$c1" >>"$out/$name.out1"; echo "exit=$c2" >>"$out/$name.out2"
@@ -40,13 +42,25 @@ for src in examples/*.rs; do
     valgrind -q --leak-check=full --errors-for-leak-kinds=definite --log-file="$out/$name.vg" \
         "$out/$name" >/dev/null 2>/dev/null
     if [ -s "$out/$name.vg" ]; then
-      echo "FAIL $name (valgrind)"; head -20 "$out/$name.vg"; fail=1; continue
+      echo "FAIL $name (valgrind)"; head -20 "$out/$name.vg"; return 1
     fi
   fi
   if diff "$out/$name.out1" "$out/$name.out2" >"$out/$name.diff"; then
     echo "ok   $name"
   else
-    echo "FAIL $name (output differs)"; cat "$out/$name.diff"; fail=1
+    echo "FAIL $name (output differs)"; cat "$out/$name.diff"; return 1
   fi
+}
+
+if [ "${1:-}" = "--one" ]; then
+  name=$(basename "$2" .rs)
+  check "$2" >"$out/$name.result" 2>&1
+  exit $?
+fi
+
+printf '%s\n' examples/*.rs | xargs -P "$(nproc)" -n1 "$self" --one
+fail=$?
+for src in examples/*.rs; do
+  cat "$out/$(basename "$src" .rs).result"
 done
-exit $fail
+[ "$fail" -eq 0 ]

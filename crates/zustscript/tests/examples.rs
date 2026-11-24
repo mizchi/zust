@@ -17,6 +17,12 @@ fn out_dir(name: &str) -> PathBuf {
     let d = root().join("target/test-out").join(name);
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("node_modules")).unwrap();
+    // (the JS side of the helpers, as a package: the glue imports `zustscript-helper`)
+    let helper = d.join("node_modules/zustscript-helper");
+    std::fs::create_dir_all(&helper).unwrap();
+    for f in ["package.json", "index.js", "index.d.ts", "bytes.js", "bytes.d.ts"] {
+        std::fs::copy(root().join("helper/ts").join(f), helper.join(f)).unwrap();
+    }
     // (a stand-in for React: renders to a string)
     let stub = root().join("tests/stub/react");
     let dst = d.join("node_modules/react");
@@ -41,6 +47,20 @@ fn build(name: &str) -> PathBuf {
     let c = Command::new("node").arg("--check").arg(d.join(format!("{name}.js"))).output().unwrap();
     assert!(c.status.success(), "the output is not valid JS:\n{}", String::from_utf8_lossy(&c.stderr));
     d
+}
+
+#[test]
+fn export_visibility() {
+    let d = out_dir("export_visibility");
+    let src = d.join("visibility.zsc");
+    std::fs::write(&src, "fn hidden() -> i32 { 1 }\nexport fn current() -> i32 { hidden() }\npub fn legacy() -> i32 { current() }").unwrap();
+    let o = zsc(&src, &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(&d, "const m = await import('./visibility.js'); console.log(m.current(), m.legacy(), 'hidden' in m);");
+    assert_eq!(out.trim(), "1 1 false");
+    let dts = std::fs::read_to_string(d.join("visibility.d.ts")).unwrap();
+    assert!(dts.contains("export declare function current(") && dts.contains("export declare function legacy("));
+    assert!(!dts.contains("hidden"));
 }
 
 #[test]
@@ -158,6 +178,18 @@ fn dts_typechecks() {
     assert!(o.status.success(), "tsc:\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
 }
 
+// The JS control uses the same bodies as ordinary functions. The annotated fixture exercises the Wasm target.
+fn compare_build(src: &Path, out: &Path, flags: &[&str]) -> std::process::Output {
+    if !flags.contains(&"--all-js") {
+        return zsc(src, out, flags);
+    }
+    let plain = out.join(src.file_name().unwrap());
+    let source = std::fs::read_to_string(src).unwrap();
+    let lines: Vec<_> = source.lines().map(|line| line.strip_prefix("@wasm ").unwrap_or(line)).collect();
+    std::fs::write(&plain, lines.join("\n")).unwrap();
+    zsc(&plain, out, flags)
+}
+
 /// examples/numeric.zsc's `@wasm fn`s give the same results lowered to Rust and run as wasm, and run as JS
 /// (`--all-js`): numbers keep their meaning in both (i32 / u32 wrapping, i64 past 2^53, saturating `as`, errors)
 #[test]
@@ -166,7 +198,7 @@ fn numeric_same_in_js_and_wasm() {
     let mut outs = vec![];
     for (name, flags) in [("numeric-wasm", &[][..]), ("numeric-js", &["--all-js"][..])] {
         let d = out_dir(name);
-        let o = zsc(&src, &d, flags);
+        let o = compare_build(&src, &d, flags);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         assert_eq!(d.join("numeric.wasm").exists(), flags.is_empty());
         let r = Command::new("node").arg(root().join("tests/numeric_driver.mjs")).arg(d.join("numeric.js")).output().unwrap();
@@ -190,7 +222,7 @@ fn shapes_same_in_js_and_wasm() {
     let mut outs = vec![];
     for (name, flags) in [("shapes-wasm", &[][..]), ("shapes-js", &["--all-js"][..])] {
         let d = out_dir(name);
-        let o = zsc(&src, &d, flags);
+        let o = compare_build(&src, &d, flags);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         let c = Command::new("node").arg("--check").arg(d.join("shapes.js")).output().unwrap();
         assert!(c.status.success(), "{}", String::from_utf8_lossy(&c.stderr));
@@ -220,7 +252,7 @@ fn owned_same_in_js_and_wasm() {
         let mut rust = String::new();
         for (name, flags) in [(format!("{stem}-wasm"), &[][..]), (format!("{stem}-js"), &["--all-js"][..])] {
             let d = out_dir(&name);
-            let o = zsc(&root().join(src), &d, flags);
+            let o = compare_build(&root().join(src), &d, flags);
             assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
             outs.push(node(&d, &format!("const m = await import('./{stem}.js'); console.log(JSON.stringify({call}))")));
             if flags.is_empty() {
@@ -294,7 +326,7 @@ fn text_same_in_js_and_wasm() {
     let mut rs = String::new();
     for (name, flags) in [("text-wasm", &[][..]), ("text-js", &["--all-js"][..])] {
         let d = out_dir(name);
-        let o = zsc(&root().join("examples/text.zsc"), &d, flags);
+        let o = compare_build(&root().join("examples/text.zsc"), &d, flags);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         outs.push(node(&d, "const m = await import('./text.js'); console.log(JSON.stringify([m.text(4), m.shout('  hé '), m.conflict_report(5)]))"));
         if flags.is_empty() {
@@ -320,6 +352,84 @@ fn eq_check_is_linear() {
         assert!(o.status.success(), "{name}: {}", String::from_utf8_lossy(&o.stderr));
         assert!(t.elapsed().as_secs() < 5, "{name} took {:?}", t.elapsed());
     }
+}
+
+/// tests/wire.zsc: records holding strings and arrays, arrays of records and strings, nested arrays cross to @wasm
+/// as bytes (zustscript-helper on the JS side, zustscript_helper in the Rust), and give the JS layer's results
+#[test]
+fn wire_same_in_js_and_wasm() {
+    let script = r#"
+const m = await import('./wire.js');
+const ana = { name: "Ana", age: 30, tags: ["a", "😀"] }, bo = { name: "bo", age: 41, tags: [] };
+const t = { title: "T", people: [ana, bo], scores: [[1, 2.5], [], [3]], open: true, id: 9007199254740993n };
+const g = m.grow(t, { name: "cy", age: 7, tags: ["x"] });
+console.log(JSON.stringify([m.describe(ana), m.oldest([ana, bo, ana]), m.rename(bo, "Bö"), m.total(t), m.names(g), m.grid(3)]));
+console.log(JSON.stringify(g, (k, v) => typeof v === "bigint" ? v.toString() : v));
+// the helper keeps a leading U+FEFF and a field named __proto__
+const h = await import('zustscript-helper');
+const rec = ["rec", [["__proto__", "str"]]];
+const notes = [{ text: "a", tag: { TAG: "Named", _0: "héllo" }, mood: "Happy" }, { text: "b", tag: { TAG: "Anon" }, mood: "Sad" }, { text: "c", tag: { TAG: "Pair", _0: 7, _1: [1, 2] }, mood: "Happy" }];
+console.log(JSON.stringify([notes.map((n) => m.tag_name(n.tag)), notes.map((n) => m.retag(n)), m.tags(notes)]));
+console.log(m.shadow(ana, 2), h.decode("str", h.encode("str", "\uFEFFhi")).length, JSON.stringify(h.decode(rec, h.encode(rec, JSON.parse('{"__proto__":"x"}')))));
+"#;
+    let want = "[\"Ana (30) a/😀\",{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"Bö\",\"age\":41,\"tags\":[]},6.5,[\"ANA\",\"BO\",\"CY\"],[[0],[0,1],[0,1,2]]]\n{\"title\":\"T\",\"people\":[{\"name\":\"Ana\",\"age\":30,\"tags\":[\"a\",\"😀\"]},{\"name\":\"bo\",\"age\":41,\"tags\":[]},{\"name\":\"cy\",\"age\":7,\"tags\":[\"x\"]}],\"scores\":[[1,2.5],[],[3],[1.5]],\"open\":false,\"id\":\"9007199254740994\"}\n[[\"héllo\",\"-\",\"7/2\"],[{\"text\":\"a\",\"tag\":{\"TAG\":\"Pair\",\"_0\":5,\"_1\":[1.5]},\"mood\":\"Sad\"},{\"text\":\"b\",\"tag\":{\"TAG\":\"Named\",\"_0\":\"x\"},\"mood\":\"Happy\"},{\"text\":\"c\",\"tag\":{\"TAG\":\"Anon\"},\"mood\":\"Sad\"}],[{\"TAG\":\"Named\",\"_0\":\"héllo\"},{\"TAG\":\"Anon\"},{\"TAG\":\"Pair\",\"_0\":7,\"_1\":[1,2]}]]\n32 3 {\"__proto__\":\"x\"}\n";
+    for flags in [&[][..], &["--all-js"][..]] {
+        let d = out_dir(if flags.is_empty() { "wire" } else { "wire_js" });
+        let o = compare_build(&root().join("tests/wire.zsc"), &d, flags);
+        assert!(o.status.success(), "zsc {flags:?} failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(node(&d, script), want, "{flags:?}");
+    }
+    // (the wasm build goes through the helpers)
+    let js = std::fs::read_to_string(root().join("target/test-out/wire/wire.js")).unwrap();
+    assert!(js.contains("from \"zustscript-helper\""), "{js}");
+}
+
+/// tests/ts_import.zsc: records read from a TS file (tests/ts/model.ts) with `import type`. The JS takes TS's objects
+/// as they are, and the .d.ts imports model.ts's types, so TS code passes its own values (tests/ts/consumer.ts,
+/// checked with tsc when it is available)
+#[test]
+fn ts_records() {
+    let d = out_dir("ts_import");
+    // (the module and its TS file side by side, as in a project: the .d.ts imports `./ts/model.js`)
+    std::fs::create_dir_all(d.join("ts")).unwrap();
+    std::fs::copy(root().join("tests/ts/model.ts"), d.join("ts/model.ts")).unwrap();
+    std::fs::copy(root().join("tests/ts/cr.ts"), d.join("ts/cr.ts")).unwrap();
+    std::fs::copy(root().join("tests/ts_import.zsc"), d.join("ts_import.zsc")).unwrap();
+    let o = zsc(&d.join("ts_import.zsc"), &d, &[]);
+    assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(
+        &d,
+        r#"
+const m = await import('./ts_import.js');
+const u = { id: 7, name: "ana", admin: false, tags: ["a"] };
+const p = m.reply({ author: u, title: "Hi", scores: [1, 2, 4.5], replies: [] }, u, "ok");
+console.log(m.display(u), "|", m.summary(p), "|", JSON.stringify(m.promote(u)));
+const doc = { title: "D", status: "draft", shapes: [{ kind: "circle", r: 1 }, { kind: "rect", w: 2, h: 3 }] };
+console.log(m.label("published"), m.label(doc.status), m.total_area(doc), JSON.stringify(m.publish(doc)), m.same_shape({ kind: "rect", w: 2, h: 3 }, { kind: "rect", h: 3, w: 2 }), m.same_shape(doc.shapes[0], doc.shapes[1]), m.tile({ kind: "square", side: 4 }), m.tile({ kind: "empty" }));
+console.log(m.area_w({ kind: "circle", r: 1 }), m.area_w({ kind: "rect", w: 2, h: 3 }), m.label_w("published"), JSON.stringify(m.publish_w(doc)) === JSON.stringify(m.publish(doc)));
+console.log(m.same_flag({ kind: "on" }, { kind: "on" }), m.same_flag({ kind: "on" }, { kind: "off" }), JSON.stringify(m.item_of({ item: { kind: "crate", n: 3 } })), m.crates({ item: { kind: "nothing" } }), m.esc("done"), m.par("p"), m.loc("l2"), m.sur("bc"), m.sur_first() === "\uD835\uDC9Ca");
+console.log(m.same_user(u, { ...u, tags: ["a"] }), m.same_user(u, m.promote(u)), m.dist({ x: 3, y: 4 }, { x: 0, y: 0 }), m.badge(m.promote(u)), m.cr({ a: 2, b: "x", c: true }));
+"#,
+    );
+    assert_eq!(out, "ana (member, #7) | Hi by ana (member, #7): 1 replies, score 7 | {\"id\":7,\"name\":\"ana\",\"admin\":true,\"tags\":[\"a\",\"staff\"]}\nlive draft! 9 {\"title\":\"D\",\"status\":\"published\",\"shapes\":[{\"kind\":\"circle\",\"r\":2},{\"kind\":\"rect\",\"w\":3,\"h\":2}]} true false 4 0\n3 6 live true\ntrue false {\"kind\":\"crate\",\"n\":3} 0 d q 2 2 true\ntrue false 5 ANA #7 a+staff x2!\n");
+    let dts = std::fs::read_to_string(d.join("ts_import.d.ts")).unwrap();
+    assert!(dts.contains("import type { Doc, Esc, Flag, Loc, Par, Point, Post, Shape, Shelf, Status, Sur, Tile, User } from \"./ts/model.js\";"), "{dts}");
+    assert!(!dts.contains("export interface User"), "{dts}");
+    // (an unexported union with a named member: written with the member's object, which needs no name)
+    assert!(dts.contains("export type Item = { kind: \"crate\"; n: number } | { kind: \"nothing\" };"), "{dts}");
+    let tsc = std::env::var("TSC").unwrap_or_else(|_| "tsc".into());
+    if Command::new(&tsc).arg("--version").output().is_err() {
+        eprintln!("skipped tsc: no tsc (set TSC)");
+        return;
+    }
+    std::fs::copy(root().join("tests/ts/consumer.ts"), d.join("consumer.ts")).unwrap();
+    std::fs::write(d.join("package.json"), "{ \"type\": \"module\" }\n").unwrap();
+    let o = Command::new(&tsc)
+        .current_dir(&d)
+        .args(["--strict", "--noEmit", "--target", "es2022", "--module", "nodenext", "--moduleResolution", "nodenext", "consumer.ts"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "tsc:\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
 }
 
 /// tests/js_inplace.zsc: the JS layer appends in place only onto a local array no one else can see, so every
@@ -410,9 +520,13 @@ console.log(m.add_all([1, 2]).join(","), m.push_v([1, 2], 3).join(","));
 console.log(m.shadow_fn(), m.prec_str(3), m.push_zs([1], 2).join(","), m.re({ value: 5 }));
 console.log(m.zs_inj(5, 2), m.kw_inj(7, 3), JSON.stringify(m.kw_rec({ async_: 1, move: 2 })));
 console.log(m.many_ops(100000), m.own_ops(), m.nested_k(), m.proto_op());
+console.log(m.gen_after_k(100000), m.gen_outer_op(100000), m.gen_plus_one(100000));
+try { m.resume_twice(); } catch (e) { console.log(e.message); }
+const g = m.leaks_far(), y = g.next();
+console.log(JSON.stringify(y.value), JSON.stringify(g.next(41)), m.handles_far(), m.paren_str());
 "#,
     );
-    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n99999 42 101 7\n");
+    assert_eq!(out, "4 9\n12 1 3 9\n2,3 1,2,3\n7 6 1,2 5\n3 4 {\"async_\":2,\"move\":1}\n99999 42 101 7\n99999 199999 100000\nzustscript: a continuation was resumed twice\n{\"TAG\":\"FarOp\"} {\"value\":42,\"done\":true} 42 ()!\n");
     let dts = std::fs::read_to_string(d.join("regress.d.ts")).unwrap();
     assert!(dts.contains("import type { ReactElement as $ReactElement } from \"react\";"), "{dts}");
     assert!(dts.contains("export interface ReactElement {"), "{dts}");
@@ -424,7 +538,7 @@ console.log(m.many_ops(100000), m.own_ops(), m.nested_k(), m.proto_op());
 fn no_jsx_no_react_import() {
     let d = out_dir("no_jsx");
     let src = d.join("nojsx.zsc");
-    std::fs::write(&src, "pub fn f<T: Num, ReactElement>(x: T) -> T { x }\npub fn g(x: i32) -> i32 { f(x) }\n").unwrap();
+    std::fs::write(&src, "export fn f<T: Num, ReactElement>(x: T) -> T { x }\nexport fn g(x: i32) -> i32 { f(x) }\n").unwrap();
     let o = zsc(&src, &d, &[]);
     assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
     let dts = std::fs::read_to_string(d.join("nojsx.d.ts")).unwrap();
@@ -471,7 +585,7 @@ fn runtime_name_collisions() {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     let src = d.join("zsc-runtime.zsc");
-    std::fs::write(&src, "pub fn one() -> i32 { 1 }\n").unwrap();
+    std::fs::write(&src, "export fn one() -> i32 { 1 }\n").unwrap();
     let o = zsc(&src, &d, &[]);
     assert!(!o.status.success(), "a module named like the runtime is refused in shared mode");
     assert!(zsc(&root().join("examples/basics.zsc"), &d, &[]).status.success());
@@ -485,4 +599,47 @@ fn runtime_name_collisions() {
     let o = zsc(&root().join("examples/basics.zsc"), &e, &[]);
     assert!(!o.status.success(), "the shared runtime must not overwrite a module named like it");
     assert!(std::fs::read_to_string(e.join("zsc-runtime.js")).unwrap().contains("function one"));
+}
+
+#[test]
+fn rust_source_for_plain_functions() {
+    let d = out_dir("plain-rust");
+    let src = d.join("math.zsc");
+    std::fs::write(&src, "type Reading = { value: i32 }\nfn twice(n: i32) -> i32 { n + n }\nexport fn total(xs: Array<Reading>) -> i32 { xs.fold(0, (s, x) => s + twice(x.value)) }").unwrap();
+    let out = zsc(&src, &d, &["--emit-rust", "--zustc", "unused-zustc"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!d.join("math.js").exists() && !d.join("math.wasm").exists());
+    let driver = d.join("driver.rs");
+    std::fs::write(&driver, "mod math; fn main() { assert_eq!(math::zs_total(&[math::ZsReading { value: 21 }]), 42); }").unwrap();
+    let binary = d.join("run");
+    let build = Command::new("rustc").arg("--edition=2024").arg(driver).arg("-o").arg(&binary).output().unwrap();
+    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
+    assert!(Command::new(binary).status().unwrap().success());
+}
+
+#[test]
+fn wasm_can_call_a_rust_compatible_plain_helper() {
+    let d = out_dir("plain-helper");
+    let src = d.join("mixed.zsc");
+    std::fs::write(&src, "fn helper(n: i32) -> i32 { n + 1 }\n@wasm export fn calc(n: i32) -> i32 { helper(n) }\nexport fn twice(n: i32) -> i32 { calc(n) * 2 }").unwrap();
+    let out = zsc(&src, &d, &[]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(node(&d, "const m = await import('./mixed.js'); console.log(m.twice(20));"), "42\n");
+}
+
+#[test]
+fn wasm_requires_rust_even_for_unused_functions() {
+    let d = out_dir("rust-required");
+    let src = d.join("require.zsc");
+    std::fs::write(&src, "@wasm fn only_rust() -> i32 { 1 }").unwrap();
+    let js = zsc(&src, &d, &["--all-js"]);
+    assert!(!js.status.success());
+    assert!(String::from_utf8_lossy(&js.stderr).contains("requires the Rust backend"));
+    assert!(!d.join("require.js").exists());
+    std::fs::write(&src, "extern fn host(x: i32) -> i32 = \"host\";\nfn h(x: i32) -> i32 { host(x) }\n@wasm fn unused(x: i32) -> i32 { h(x) }").unwrap();
+    for flags in [&[][..], &["--emit-rust"][..]] {
+        let bad = zsc(&src, &d, flags);
+        assert!(!bad.status.success());
+        assert!(String::from_utf8_lossy(&bad.stderr).contains("calling `host`"));
+    }
 }

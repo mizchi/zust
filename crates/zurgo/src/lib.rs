@@ -23,4 +23,5 @@ pub mod platform;
 pub mod proc_macro_stub;
 pub mod resolve;
 pub mod semver;
+pub mod test_runner;
 pub mod toml;

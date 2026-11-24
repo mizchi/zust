@@ -949,7 +949,8 @@ impl Inf<'_> {
                         self.lets.push((stmt_key(st), v));
                     }
                     match pat {
-                        Pat::Ident(_, _, n, None) => self.scopes.last_mut().unwrap().push((n.clone(), v)),
+                        // (`let ref x = e;` binds a reference to e's value: as a pattern)
+                        Pat::Ident(false, _, n, None) => self.scopes.last_mut().unwrap().push((n.clone(), v)),
                         p => self.pat(p, v, None),
                     }
                 }
@@ -1319,6 +1320,19 @@ impl Inf<'_> {
             Expr::Index(base, ix, _) => self.index(base, ix),
             Expr::For(_, p, it, body) => self.for_loop(p, it, body),
             Expr::Block(_, _, b) => self.block(b),
+            // (`T::BYTES` with T a type parameter: the type the impls' `BYTES` all have, `cur.add(2 * V::BYTES)`)
+            Expr::Path(None, p)
+                if p.segs.len() == 2 && (self.env.params.iter().any(|(g, _)| *g == p.segs[0].name) || p.segs[0].name == "Self") && self.prog.const_by_last.contains_key(&p.segs[1].name)
+                    && self.variant_by(p).is_none() =>
+            {
+                let cs = &self.prog.const_by_last[&p.segs[1].name];
+                let t = self.prog.consts[cs[0] as usize].ty;
+                if t.is_int() && cs.iter().all(|&c| self.prog.consts[c as usize].ty == t) {
+                    self.known(t)
+                } else {
+                    self.var()
+                }
+            }
             Expr::Path(None, p)
                 if p.segs.len() >= 2
                     || (p.segs.len() == 1 && self.lookup(&p.segs[0].name).is_none() && self.variant_by(p).is_some()) =>
@@ -1397,6 +1411,20 @@ impl Inf<'_> {
                         let s = &self.prog.sigs[id as usize];
                         let f = intern_fn(FnTy { params: s.params.clone(), ret: s.ret });
                         self.known(Ty::Fn(f))
+                    }
+                    // (a free generic fn with every type argument written (`id::<&'static u32>`): its instance's
+                    // pointer type, so that a call through it knows its arguments' types)
+                    Some(id) if self.prog.sigs[id as usize].impl_of.is_none() && self.prog.sigs[id as usize].trait_of.is_none() => {
+                        let ng = self.prog.sigs[id as usize].generics.len();
+                        let ts: Option<Vec<Ty>> = p.segs.last().map(|sg| sg.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).map(|t| self.parse_ty(t)).collect()).unwrap_or(None);
+                        match ts.filter(|ts| ts.len() == ng && ng > 0 && ts.iter().all(|&t| !self.prog.has_param(t))) {
+                            Some(ts) => {
+                                let s = &self.prog.sigs[id as usize];
+                                let f = intern_fn(FnTy { params: s.params.iter().map(|&t| self.prog.subst(t, &ts)).collect(), ret: self.prog.subst(s.ret, &ts) });
+                                self.known(Ty::Fn(f))
+                            }
+                            None => self.var(),
+                        }
                     }
                     _ => self.var(),
                 },
@@ -1873,8 +1901,18 @@ impl Inf<'_> {
                                     let kv = self.known(Ty::Ref(false, intern(t)));
                                     self.unify(av, kv);
                                 }
-                                // (a raw pointer: acg checks it, with rustc's coercions)
-                                crate::simd_sig::SArg::P(..) => {}
+                                // (a raw pointer: acg checks it, with rustc's coercions. A `p.cast()` gets its type from it:
+                                // `v128_load(data.cast())`)
+                                crate::simd_sig::SArg::P(t, m) => {
+                                    let mut inner: &Expr = a;
+                                    while let Expr::Paren(x) = inner {
+                                        inner = x;
+                                    }
+                                    if matches!(inner, Expr::MethodCall(_, n, tf, xs, _) if n == "cast" && tf.is_empty() && xs.is_empty()) {
+                                        let kv = self.known(Ty::Ptr(m, intern(t)));
+                                        self.unify(av, kv);
+                                    }
+                                }
                             }
                         }
                         return self.known(r);
@@ -2012,6 +2050,26 @@ impl Inf<'_> {
                 }
                 None => self.var(),
             };
+        }
+        // (`id::<u32>(c)`: the turbofish's arguments are a free fn's generics, in order, as the lowering takes them
+        // (turbofish_sol). Its types seed the inference; a const argument (`take::<u8, 1>`, `f::<true>()`) is not a
+        // type, and its slot is left to the lowering)
+        if let (Some(id), Expr::Path(None, p)) = (callee, f) {
+            let sig = &self.prog.sigs[id as usize];
+            let free = sig.self_ty.is_none() && sig.impl_of.is_none() && sig.trait_of.is_none();
+            let args: Vec<&GArg> = p.segs.last().map(|s| s.args.iter().filter(|a| !matches!(a, GArg::Lifetime(_))).collect()).unwrap_or_default();
+            let ng = sig.generics.len();
+            if free && !args.is_empty() && args.len() <= ng && args.iter().any(|a| matches!(a, GArg::Ty(t) if crate::ast_types::bool_arg(t).is_none())) {
+                let mut pre = vec![None; ng];
+                for (k, a) in args.iter().enumerate() {
+                    if let GArg::Ty(t) = a {
+                        if crate::ast_types::bool_arg(t).is_none() {
+                            pre[k] = Some(self.ty_var(t));
+                        }
+                    }
+                }
+                return self.apply_with(callee, avs, 0, None, pre);
+            }
         }
         self.apply(callee, avs, 0)
     }
@@ -2170,7 +2228,7 @@ impl Inf<'_> {
             let Some(s0) = sid else { break };
             let Some(did) = self.prog.method(s0, "deref") else { break };
             // (a guard (RefCell's Ref / RefMut, MutexGuard) has none of these itself: `g.clone()` is the value's)
-            let guard = matches!(self.prog.structs[self.prog.base_of(s0) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard");
+            let guard = matches!(self.prog.structs[self.prog.base_of(s0) as usize].name.as_str(), "Ref" | "RefMut" | "MutexGuard" | "PeekMut");
             if guard || !matches!(n, "clone" | "to_string" | "cmp" | "partial_cmp" | "eq") {
                 let r = self.apply_recv(Some(did), vec![], rv);
                 rv = self.deref_expr(r);
@@ -2570,16 +2628,29 @@ impl Inf<'_> {
         }
         if let Some(Ty::Ptr(m, e)) = self.resolve(r) {
             return match name {
-                "add" | "sub" | "offset" | "wrapping_add" | "wrapping_sub" | "wrapping_offset" => r,
+                // (the count is a usize (an isize for the offsets): `p.add(2 * V::BYTES)`'s literal is one)
+                "add" | "sub" | "offset" | "wrapping_add" | "wrapping_sub" | "wrapping_offset" => {
+                    let k = self.known(if name.contains("offset") { Ty::Isize } else { Ty::Usize });
+                    for a in avs {
+                        self.unify(a, k);
+                    }
+                    r
+                }
                 // (`x.cast::<u32>()`: a pointer to the turbofish's type, of the same mutability)
                 "cast" => match tf.first() {
                     Some(GArg::Ty(t)) => match self.parse_ty(t) {
                         Some(u) => self.known(Ty::Ptr(m, intern(u))),
                         None => self.var(),
                     },
-                    _ => self.var(),
+                    // (no turbofish: a pointer of the same mutability to what the use wants, `v128_load(p.cast())`)
+                    _ => {
+                        let i = self.var();
+                        self.with(crate::solver::Shape::Ptr(m, i))
+                    }
                 },
                 "is_null" => self.known(Ty::Bool),
+                // (the argument may be a `*mut` of a `*const` receiver, or the other way: not unified with it)
+                "offset_from" => self.known(Ty::Isize),
                 "read" | "read_volatile" | "read_unaligned" => self.known(*e),
                 _ => self.known(Ty::Unit),
             };

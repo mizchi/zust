@@ -92,7 +92,7 @@ def measure(pattern, n, reps, vg, rustc, work):
             write(src, pattern, n, 0)
             timed("build", build)
             for _ in range(2):
-                take("check_M", "check (counted)", [ZUSTC, "check", src])
+                take("check_M", "check (counted)", [ZUSTC, "check", "-j", "1", src])
             # (as kpi_track.py: a build under valgrind does not take the stamps' shortcut, and leaves the cache it reads)
             counted("build (counted)", build, env={"ZUSTC_NO_STAMP": "1"})
             write(src, pattern, n, 3)

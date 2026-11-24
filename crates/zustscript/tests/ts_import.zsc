@@ -1,0 +1,66 @@
+// Records read from a TS file (tests/ts/model.ts): `number` is f64, arrays are arrays, and a record a record uses
+// (`Reply`) is read with it (tests/examples.rs: ts_records)
+import type { User, Post, Point, Doc, Tile, Flag, Shelf, Esc, Par, Loc, Sur } from "./ts/model.ts";
+import type { Cr } from "./ts/cr.ts";
+
+export fn display(u: User) -> String {
+  let role = if u.admin { "admin" } else { "member" };
+  u.name + " (" + role + ", #" + (u.id as i32).to_string() + ")"
+}
+
+export fn summary(p: Post) -> String {
+  let total = p.scores.fold(0.0, (s, x) => s + x);
+  p.title + " by " + display(p.author) + ": " + p.replies.len().to_string() + " replies, score " + (total as i32).to_string()
+}
+
+export fn promote(u: User) -> User { User { admin: true, tags: u.tags.push("staff"), ..u } }
+
+export fn reply(p: Post, by: User, text: String) -> Post {
+  Post { replies: p.replies.push(Reply { by: by, text: text, tags: [], grid: [[1.0, 2.0], [3.0]] }), ..p }
+}
+
+// a type model.ts does not export, returned to TS
+export fn first_reply(p: Post) -> Reply { p.replies[0] }
+
+export fn same_user(a: User, b: User) -> bool { a == b }
+
+// a TS record of numbers crosses to wasm like a zustscript one
+@wasm export fn dist(a: Point, b: Point) -> f64 {
+  let dx = a.x - b.x;
+  let dy = a.y - b.y;
+  (dx * dx + dy * dy).sqrt()
+}
+
+// a TS record holding strings and arrays crosses to wasm as bytes (zustscript-helper / zustscript_helper)
+@wasm export fn badge(u: User) -> String { u.name.to_upper() + " #" + (u.id as i32).to_string() + " " + u.tags.join("+") }
+
+// members separated by CR, U+2028 and U+2029 only (tests/ts/cr.ts)
+export fn cr(c: Cr) -> String { c.b + (c.a as i32).to_string() + (if c.c { "!" } else { "?" }) }
+
+// unions read as enums (Status, Shape come with Doc): matched, built and compared in TS's own shape
+export fn label(s: Status) -> String { match s { Draft => "draft!", Published => "live" } }
+export fn area(s: Shape) -> f64 {
+  match s {
+    Circle(r) => 3.0 * r * r,
+    Rect(w, h) => w * h,
+  }
+}
+export fn turn(s: Shape) -> Shape { match s { Circle(r) => Circle(r * 2.0), Rect(w, h) => Rect(h, w) } }
+export fn publish(d: Doc) -> Doc { Doc { status: Published, shapes: d.shapes.map(turn), ..d } }
+export fn total_area(d: Doc) -> f64 { d.shapes.fold(0.0, (a, s) => a + area(s)) }
+export fn same_shape(a: Shape, b: Shape) -> bool { a == b }
+export fn tile(t: Tile) -> f64 { match t { Square(s) => s, Empty => 0.0 } }
+export fn same_flag(a: Flag, b: Flag) -> bool { a == b }
+export fn item_of(s: Shelf) -> Item { s.item }
+export fn crates(s: Shelf) -> f64 { match s.item { Crate(n) => n, Nothing => 0.0 } }
+export fn esc(e: Esc) -> String { match e { Done => "d", Todo => "t" } }
+export fn par(p: Par) -> Par { match p { P => Q, Q => P } }
+export fn loc(l: Loc) -> i32 { match l { L1 => 1, L2 => 2 } }
+export fn sur(s: Sur) -> i32 { match s { Bc => 2, _ => 1 } }
+export fn sur_first() -> Sur { 𝒜a }
+
+// unions read from TS cross to wasm as bytes, in TS's own shape (a union of strings, one with a tag field, a
+// record holding both)
+@wasm export fn area_w(s: Shape) -> f64 { match s { Circle(r) => 3.0 * r * r, Rect(w, h) => w * h } }
+@wasm export fn label_w(s: Status) -> String { match s { Draft => "draft!", Published => "live" } }
+@wasm export fn publish_w(d: Doc) -> Doc { Doc { status: Published, shapes: d.shapes.map((s) => match s { Circle(r) => Circle(r * 2.0), Rect(w, h) => Rect(h, w) }), ..d } }

@@ -88,7 +88,9 @@ zustc check hello.rs
 ```
 
 This runs up to type checking (no code generation) and prints all diagnostics. It also checks unreachable functions
-and every requested instance of generic functions.
+and every requested instance of generic functions. When a round of the check has at least 32 functions per worker to
+check, they are split across at most `-j N` forked processes (N is the number of CPUs by default); the diagnostics are
+the same at any `-j`.
 
 ### Multiple crates
 
@@ -130,14 +132,15 @@ zustc workspace ([docs/zurgo.md](docs/zurgo.md)).
 zurgo run
 ```
 
-- Commands: `build`, `run`, `metadata` (the JSON of `cargo metadata`), `clean`, with cargo's flags for them.
+- Commands: `build`, `run`, `test`, `metadata` (the JSON of `cargo metadata`), `clean`, with cargo's flags for them.
+  `zurgo test` runs each test in a process of its own, all at once, as cargo-nextest does.
 - Output goes to `target/zust/<profile>/`. With `--target wasm32-unknown-unknown`, each bin is a wasm module in
   `target/zust/wasm32-unknown-unknown/<profile>/`, and `zurgo run` runs it with
   `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER`, as cargo does.
 - Build scripts run as under cargo (compiled by zustc, or by rustc when zustc cannot), and their cfgs, `rustc-env` and
-  `OUT_DIR` reach the crates. A proc-macro dependency is a stub: using its macros is an error.
-- Not yet: running proc macros, two versions of one crate, renamed dependencies, git dependencies, its own resolver
-  (mizchi/zust#28, mizchi/zust#29).
+  `OUT_DIR` reach the crates. A proc-macro dependency is built by rustc and run by the toolchain's proc-macro server
+  (`rust-analyzer-proc-macro-srv`): its attributes, derives and function-like macros expand (mizchi/zust#29).
+- Not yet: two versions of one crate, renamed dependencies, git dependencies, its own resolver (mizchi/zust#28).
 
 ### Options
 
@@ -148,7 +151,9 @@ zurgo run
 | `--backend=cranelift\|minclif` | code generator (default cranelift; also `ZUSTC_BACKEND`) |
 | `--linker=wild\|mold\|lld\|bfd\|PATH` | choose the linker |
 | `--features=a,b` | enable `#[cfg(feature = "..")]` |
-| `-j N` | number of code generation threads |
+| `--cfg NAME` / `--cfg NAME="V"` | set a cfg, as rustc's `--cfg` |
+| `--test` | build the `#[test]` functions with a harness: `--list`, and one test per process (see [docs/zurgo.md](docs/zurgo.md#tests)) |
+| `-j N` | at most N worker processes: for code generation, and for `check` (default: the number of CPUs) |
 | `--time` | print the time of each phase and the peak RSS |
 | `--no-cache` | neither read nor write the cache |
 
@@ -215,7 +220,7 @@ Known differences from rust-analyzer are listed in [CONTRIBUTING.md](CONTRIBUTIN
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-23, 9cff4a6<!-- /measured --> by CI on each push to main. Details:
+Numbers measured <!-- measured -->2026-11-24, 6259151<!-- /measured --> by CI on each push to main. Details:
 [SUPPORT.md](SUPPORT.md) (what is supported) and [PERFORMANCE.md](PERFORMANCE.md) (speed, size, memory, and
 comparisons with rustc and others).
 
@@ -227,10 +232,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2385 | 1831 (76.8%) |
-| check-pass (accepted by `zustc check`) | 1807 | 1512 (83.7%) |
+| run-pass (builds, runs, same output) | 2403 | 1857 (77.3%) |
+| check-pass (accepted by `zustc check`) | 1813 | 1524 (84.1%) |
 | build-pass | 135 | 102 (75.6%) |
-| compile-fail (rejected at an annotated line) | 7358 | 4484 (60.9%) |
+| compile-fail (rejected at an annotated line) | 7386 | 4696 (63.6%) |
 <!-- /auto:ui -->
 
 [SUPPORT.md](SUPPORT.md) breaks this down by area: the language, the checks, the runtime and std, and what is left.
@@ -243,10 +248,10 @@ table, with instruction counts, cache and binary sizes and memory, is in [PERFOR
 <!-- auto:kpi-summary -->
 | | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 122 ms | 554 ms |
-| no-op build | 0.7 ms | 0.7 ms |
-| build after editing one function | 17.9 ms | 64.8 ms |
-| `check` | 77 ms | 377 ms |
+| cold build | 122 ms | 566 ms |
+| no-op build | 0.6 ms | 0.7 ms |
+| build after editing one function | 16.0 ms | 62.6 ms |
+| `check` | 38 ms | 181 ms |
 <!-- /auto:kpi-summary -->
 
 Against `rustc -C incremental` on gen1000 (a snapshot measured by hand): about 6x faster cold, 15x faster after an
