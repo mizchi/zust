@@ -269,9 +269,10 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     let mut text = String::new();
     let mut last = 0;
     let mut top = vec![];
-    for (name, path_attr, nested) in kids {
+    for (name, path_attr, nested, private) in kids {
+        let vis = if private { "pub(self)" } else { "pub" };
         let Some((pos, parts)) = nested else {
-            top.push((name, path_attr));
+            top.push((name, path_attr, private));
             continue;
         };
         text.push_str(&blanked[last..pos]);
@@ -335,7 +336,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
                 }
             }
         };
-        text.push_str(&format!("\npub mod {name} {{\n"));
+        text.push_str(&format!("\n{vis} mod {name} {{\n"));
         let at = start + line_count(&text);
         let body = load_file(p.as_path(), &disp, sub.as_path(), &sub_disp, at, map, cfg, open)?;
         text.push_str(&body);
@@ -347,7 +348,8 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         return hoist_macro_mods(text, path, mod_dir, disp_dir, start, map, cfg, open, fi, end_line);
     }
     text.push('\n');
-    for (name, path_attr) in top {
+    for (name, path_attr, private) in top {
+        let vis = if private { "pub(self)" } else { "pub" };
         // (`#[path = "x.rs"] mod m;`: that file, beside this one; its own modules are beside it too)
         if let Some(pa) = path_attr {
             let here = path.parent().unwrap_or(Path::new("."));
@@ -355,7 +357,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
             map.probes.push(p.clone());
             let disp = join_disp(disp_dir, &pa);
             let sub = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
-            text.push_str(&format!("pub mod {name} {{\n"));
+            text.push_str(&format!("{vis} mod {name} {{\n"));
             let at = start + line_count(&text);
             let body = load_file(p.as_path(), &disp, sub.as_path(), disp_dir, at, map, cfg, open)?;
             text.push_str(&body);
@@ -374,7 +376,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         } else {
             return Err(format!("{display}: file not found for module `{name}`"));
         };
-        text.push_str(&format!("pub mod {name} {{\n"));
+        text.push_str(&format!("{vis} mod {name} {{\n"));
         let at = start + line_count(&text);
         let body = load_file(p.as_path(), &disp, sub.as_path(), &sub_disp, at, map, cfg, open)?;
         text.push_str(&body);
@@ -620,7 +622,7 @@ fn attrs_before(src: &str, s: &[u8], toks: &[(u8, usize, usize)], mut b: usize) 
 
 #[allow(clippy::type_complexity)]
 #[inline(never)]
-fn blank_mod_decls(src: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, Vec<(String, Option<String>, Nested)>), String> {
+fn blank_mod_decls(src: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, Vec<(String, Option<String>, Nested, bool)>), String> {
     if !src.contains("mod") {
         return Ok((src.to_string(), vec![]));
     }
@@ -694,6 +696,9 @@ fn blank_mod_decls(src: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, Vec<(
             } else if b >= 1 && toks[b - 1].0 == 0 && tok(b - 1) == b"pub" {
                 b -= 1;
             }
+            // (a private `mod x;` stays private where its file goes in: `pub(self) mod x { .. }`, so a glob of the module
+            //  does not bring it (libc's unix/linux_like `mod linux;` beside new's `pub(crate) mod linux;`))
+            let private = b == k;
             let (b2, cfg_test, path_attr) = attrs_before(src, s, &toks, b);
             b = b2;
             // (`#[macro_use] mod m;`: m's macros are usable right after the declaration, so its file goes in at that
@@ -708,7 +713,7 @@ fn blank_mod_decls(src: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, Vec<(
             let at = toks[k].1;
             if !cfg_test && !not_taken.iter().any(|&(a, e)| a <= at && at < e) {
                 let name = String::from_utf8_lossy(tok(k + 1)).into_owned();
-                kids.push((name, path_attr, nested));
+                kids.push((name, path_attr, nested, private));
             }
             k += 3;
             continue;
@@ -780,7 +785,8 @@ mod circular_tests {
         // (`mod nowhere;` belongs to a macro nobody invokes: nothing is read for it)
         assert!(src.contains("mod nowhere;"), "{src}");
         // (the `#[macro_use]` module goes in at its declaration, above the invocation)
-        assert!(src.find("pub mod macros {").is_some_and(|m| src.find("prelude!").is_none_or(|c| m < c)), "{src}");
+        // (private as it was declared: `pub(self) mod`)
+        assert!(src.find("pub(self) mod macros {").is_some_and(|m| src.find("prelude!").is_none_or(|c| m < c)), "{src}");
         let e = crate::macros::expand(&src);
         assert!(e.is_ok(), "{e:?}");
         let _ = std::fs::remove_dir_all(&dir);

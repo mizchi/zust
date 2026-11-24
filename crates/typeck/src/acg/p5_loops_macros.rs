@@ -2423,7 +2423,8 @@ impl Cx<'_> {
             // (an alias of a primitive, or one of core::ffi's C types: `c_int::MAX` in libc 0.2's types.rs)
             let alias = || {
                 let prim = self.prog.prim_of_name(&segs[0]);
-                Ty::from_suffix(&prim).or_else(|| crate::ast_types::ffi_alias(&prim).filter(|_| !self.prog.struct_index.contains_key(prim.as_str())))
+                // (the integer ones: `c_float::MAX` / `c_double::MAX` are not integer bounds)
+                Ty::from_suffix(&prim).or_else(|| crate::ast_types::ffi_alias(&prim).filter(|t| t.is_int() && !self.prog.struct_index.contains_key(prim.as_str())))
             };
             if let Some(t) = Ty::from_suffix(&segs[0]).or(if segs[0] == "char" { Some(Ty::Char) } else { None }).or_else(alias) {
                 if let Some(v) = crate::program::prim_assoc_const(t, &segs[1]) {

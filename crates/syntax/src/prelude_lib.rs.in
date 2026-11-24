@@ -6742,13 +6742,13 @@ impl FromStr for SocketAddr {
 // has CString's layout, so a CString is borrowed as one; `Box<CStr>` holds one. A `&CStr` of C's memory
 // (`CStr::from_ptr`) and of a literal `c"..."` is a copy that lives to the end of the program ---
 
-// (the default's b is empty: the empty C string, its 0 not stored)
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]
+// (b always ends in the 0: the empty one is `[0]`, from `new("")` and `default()` alike, so they compare equal)
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CString {
     b: Vec<u8>,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct CStr {
     b: Vec<u8>,
 }
@@ -6813,6 +6813,10 @@ impl<'a> __CStrBytes for &'a [u8] {
 }
 
 impl CString {
+    /// (an inherent fn, not `impl Default`: the prelude keeps a trait's impl only where the trait is used)
+    pub fn default() -> CString {
+        CString { b: vec![0u8] }
+    }
     pub fn new<T: __CStrBytes>(t: T) -> Result<CString, NulError> {
         let b = t.__cstr_bytes();
         let mut i = 0;

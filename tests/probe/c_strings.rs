@@ -19,5 +19,5 @@ fn main() {
     println!("{} {}", back.to_str().unwrap(), back.to_bytes().len());
     println!("{:?}", CString::new("a\0b").is_err());
     let v = CString::new(vec![b'x', b'y']).unwrap().into_bytes();
-    println!("{:?} {}", v, CString::default().as_bytes().len());
+    println!("{:?} {} {}", v, CString::default().as_bytes().len(), CString::default() == CString::new("").unwrap());
 }

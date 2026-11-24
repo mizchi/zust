@@ -1204,17 +1204,18 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         cache.map.insert(it.hash, (names, c));
     }
     let mut sc = PreludeScan::new(user_src, user_items, &mut cache.scan);
+    // (`c"..."`: codegen makes it a call of __exr_cstr_lit, a `&'static CStr`; before the `no_std` return, which a
+    //  program needing nothing else takes)
+    if has_cstr_literal(user_src) {
+        need.insert("__exr_cstr_lit");
+        need.insert("CStr");
+    }
     // (std のプログラムは panic のハンドラを必ず使うので、何も使わなくても prelude を付ける)
     if need.is_empty() && sc.has("no_std") {
         return String::new();
     }
     // (Duration is not in std's prelude: without `time` written (`use std::time::Duration` / `time::Duration`),
     // `Duration` is the program's own or an error)
-    // (`c"..."`: codegen makes it a call of __exr_cstr_lit, a `&'static CStr`)
-    if has_cstr_literal(user_src) {
-        need.insert("__exr_cstr_lit");
-        need.insert("CStr");
-    }
     if need.contains("Duration") && !sc.has("time") {
         need.remove("Duration");
     }
