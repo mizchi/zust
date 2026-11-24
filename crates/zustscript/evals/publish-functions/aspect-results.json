@@ -1,0 +1,242 @@
+{
+  "before-1": {
+    "record": "rounds/aspect/before-1.json",
+    "judge": {
+      "functionality": 2,
+      "public_boundary": 2,
+      "usage_path": 2,
+      "total": 6,
+      "accepted": true,
+      "reasons": {
+        "functionality": "非表示と高さゼロで 0 を返し、それ以外は幅を高さで割る。横長、キー順が異なる縦長、小数、幅ゼロを含む全6入力が合格した。",
+        "public_boundary": "元の model.ts から Viewport を取り込んで aspect を export し、JS と .d.ts が生成された。公開名と元の型を検査する両項目が合格した。",
+        "usage_path": "初回提出でコンパイルに成功し、同一のソースが全検査に合格した。"
+      }
+    },
+    "reordered_schema": {
+      "task": "aspect",
+      "passed": false,
+      "checks": [
+        {
+          "name": "compile",
+          "passed": true
+        },
+        {
+          "name": "hidden",
+          "passed": true
+        },
+        {
+          "name": "wide",
+          "passed": false,
+          "message": "Expected values to be strictly equal:\n\n0.25 !== 4\n"
+        },
+        {
+          "name": "tall, different JS key order",
+          "passed": false,
+          "message": "Expected values to be strictly equal:\n\n4 !== 0.25\n"
+        },
+        {
+          "name": "fractional dimensions",
+          "passed": false,
+          "message": "Expected values to be strictly equal:\n+ actual - expected\n\n+ 0.3333333333333333\n- 3\n"
+        },
+        {
+          "name": "zero height",
+          "passed": true
+        },
+        {
+          "name": "zero width",
+          "passed": true
+        },
+        {
+          "name": "export spelling",
+          "passed": true
+        },
+        {
+          "name": "original TS type",
+          "passed": true
+        }
+      ]
+    }
+  },
+  "before-2": {
+    "record": "rounds/aspect/before-2.json",
+    "judge": {
+      "functionality": 2,
+      "public_boundary": 2,
+      "usage_path": 2,
+      "total": 6,
+      "accepted": true,
+      "reasons": {
+        "functionality": "非表示と高さゼロで 0 を返し、それ以外は幅を高さで割る。横長、キー順が異なる縦長、小数、幅ゼロを含む全6入力が合格した。",
+        "public_boundary": "元の model.ts から Viewport を取り込んで aspect を export し、JS と .d.ts が生成された。公開名と元の型を検査する両項目が合格した。",
+        "usage_path": "初回提出でコンパイルに成功し、同一のソースが全検査に合格した。"
+      }
+    },
+    "reordered_schema": {
+      "task": "aspect",
+      "passed": false,
+      "checks": [
+        {
+          "name": "compile",
+          "passed": true
+        },
+        {
+          "name": "hidden",
+          "passed": true
+        },
+        {
+          "name": "wide",
+          "passed": false,
+          "message": "Expected values to be strictly equal:\n\n0.25 !== 4\n"
+        },
+        {
+          "name": "tall, different JS key order",
+          "passed": false,
+          "message": "Expected values to be strictly equal:\n\n4 !== 0.25\n"
+        },
+        {
+          "name": "fractional dimensions",
+          "passed": false,
+          "message": "Expected values to be strictly equal:\n+ actual - expected\n\n+ 0.3333333333333333\n- 3\n"
+        },
+        {
+          "name": "zero height",
+          "passed": true
+        },
+        {
+          "name": "zero width",
+          "passed": true
+        },
+        {
+          "name": "export spelling",
+          "passed": true
+        },
+        {
+          "name": "original TS type",
+          "passed": true
+        }
+      ]
+    }
+  },
+  "after-1": {
+    "record": "rounds/aspect/after-1.json",
+    "judge": {
+      "functionality": 2,
+      "public_boundary": 2,
+      "usage_path": 2,
+      "total": 6,
+      "accepted": true,
+      "reasons": {
+        "functionality": "非表示と高さゼロで 0 を返し、それ以外は幅を高さで割る。横長、キー順が異なる縦長、小数、幅ゼロを含む全6入力が合格した。",
+        "public_boundary": "元の model.ts から Viewport を取り込んで aspect を export し、JS と .d.ts が生成された。公開名と元の型を検査する両項目が合格した。",
+        "usage_path": "初回提出でコンパイルに成功し、同一のソースが全検査に合格した。"
+      }
+    },
+    "reordered_schema": {
+      "task": "aspect",
+      "passed": false,
+      "checks": [
+        {
+          "name": "compile",
+          "passed": true
+        },
+        {
+          "name": "hidden",
+          "passed": true
+        },
+        {
+          "name": "wide",
+          "passed": false,
+          "message": "Expected values to be strictly equal:\n\n0.25 !== 4\n"
+        },
+        {
+          "name": "tall, different JS key order",
+          "passed": false,
+          "message": "Expected values to be strictly equal:\n\n4 !== 0.25\n"
+        },
+        {
+          "name": "fractional dimensions",
+          "passed": false,
+          "message": "Expected values to be strictly equal:\n+ actual - expected\n\n+ 0.3333333333333333\n- 3\n"
+        },
+        {
+          "name": "zero height",
+          "passed": true
+        },
+        {
+          "name": "zero width",
+          "passed": true
+        },
+        {
+          "name": "export spelling",
+          "passed": true
+        },
+        {
+          "name": "original TS type",
+          "passed": true
+        }
+      ]
+    }
+  },
+  "after-2": {
+    "record": "rounds/aspect/after-2.json",
+    "judge": {
+      "functionality": 2,
+      "public_boundary": 2,
+      "usage_path": 2,
+      "total": 6,
+      "accepted": true,
+      "reasons": {
+        "functionality": "非表示と高さゼロで 0 を返し、それ以外は幅を高さで割る。横長、キー順が異なる縦長、小数、幅ゼロを含む全6入力が合格した。",
+        "public_boundary": "元の model.ts から Viewport を取り込んで aspect を export し、JS と .d.ts が生成された。公開名と元の型を検査する両項目が合格した。",
+        "usage_path": "初回提出でコンパイルに成功し、同一のソースが全検査に合格した。"
+      }
+    },
+    "reordered_schema": {
+      "task": "aspect",
+      "passed": false,
+      "checks": [
+        {
+          "name": "compile",
+          "passed": true
+        },
+        {
+          "name": "hidden",
+          "passed": true
+        },
+        {
+          "name": "wide",
+          "passed": false,
+          "message": "Expected values to be strictly equal:\n\n0.25 !== 4\n"
+        },
+        {
+          "name": "tall, different JS key order",
+          "passed": false,
+          "message": "Expected values to be strictly equal:\n\n4 !== 0.25\n"
+        },
+        {
+          "name": "fractional dimensions",
+          "passed": false,
+          "message": "Expected values to be strictly equal:\n+ actual - expected\n\n+ 0.3333333333333333\n- 3\n"
+        },
+        {
+          "name": "zero height",
+          "passed": true
+        },
+        {
+          "name": "zero width",
+          "passed": true
+        },
+        {
+          "name": "export spelling",
+          "passed": true
+        },
+        {
+          "name": "original TS type",
+          "passed": true
+        }
+      ]
+    }
+  }
+}

@@ -4,7 +4,7 @@ The percentages are rustc's own UI tests that pass in that area: run-pass + chec
 directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). They count only the tests
 `bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special flags or targets other than
 Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
-<!-- measured -->2026-11-24, 954c1fa<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
+<!-- measured -->2026-11-24, 2ea7bf4<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
 [docs/language.md](docs/language.md), and the [reports](docs/reports/) explain each step.
@@ -44,7 +44,7 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 - [x] generics: <!-- ui:generics -->95.2% (an integer literal for `T: Foo` takes the one integer type that implements Foo; a type
   parameter known only from the expected type is not inferred)
 - [ ] consts: <!-- ui:consts -->78.4% (no heap values, no generic `const fn`; a const of a generic impl (`const C: Option<T> = None`) takes its type at each use)
-- [ ] drop: <!-- ui:drop -->66.7% (the drop order of some temporaries differs)
+- [ ] drop: <!-- ui:drop -->68.1% (the drop order of some temporaries differs)
 - [ ] traits: <!-- ui:traits -->72.2% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
 - [ ] `macro_rules!`: <!-- ui:macros -->77.9% (hygiene for `let`, labels, arm bindings; not every fragment kind)
 - [ ] unions: <!-- ui:union -->76.9% (no `repr(packed)`)
@@ -75,10 +75,10 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
   must outlive the fn live to its end, closures that are not general enough or let borrowed data escape, generic fns
   that are never called (checked with placeholder types). Not yet: what a closure's body requires of its fn,
   higher-ranked trait selection, the requirements of the impl a coercion selects, the prelude's iterators (their types
-  hold no lifetimes). regions <!-- cf:regions -->76.7%, lifetimes <!-- cf:lifetimes -->81.2%
+  hold no lifetimes). regions <!-- cf:regions -->81.0%, lifetimes <!-- cf:lifetimes -->82.0%
   ([issue #1](https://github.com/mizchi/zust/issues/1))
 - [ ] coherence, bounds of blanket impls, dyn compatibility (E0038), the bindings of `dyn Tr<A = T>` against the associated type's bounds (done when T is a primitive, `str` or a struct name)
-- [ ] lints and warnings: lint <!-- cf:lint -->39.4%
+- [ ] lints and warnings: lint <!-- cf:lint -->39.9%
 - [ ] editions (2015-only errors)
 
 ## Runtime and std

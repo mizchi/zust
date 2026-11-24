@@ -1,0 +1,11 @@
+[package]
+name = "popular-hashbrown"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# (not a member of zust's workspace)
+[workspace]
+
+[dependencies]
+hashbrown = "=0.17.2"
