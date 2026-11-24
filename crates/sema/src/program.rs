@@ -1453,6 +1453,8 @@ impl Program {
                 if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
                     let (ngen, ngat) = gat_split(&gn);
                     p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat });
+                    p.note_assoc_regions(items, sums, ii, k);
+                    p.assoc_items.push(ii as u32);
                     early.push((ii, k));
                 }
             }
