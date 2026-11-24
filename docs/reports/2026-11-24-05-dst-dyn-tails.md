@@ -125,7 +125,8 @@ From the review of the pull request, each checked against rustc with a program o
 - Missed errors, now reported (as rustc): `size_of_val` of a raw pointer and `drop_in_place` of a `*const` (E0308);
   a tail `if` whose arms are `S` and a call returning `S`, for `-> impl Local` without `S: Local` (E0277).
 - A projection whose const argument zustc cannot evaluate (`<S as Pick<{ match .. }>>::Out`) takes the one impl
-  that fits; when several do, it is an "unsupported" error, not the first impl by self type.
+  that fits; when several do, or an impl of the self type has trait arguments not resolved
+  (`impl Pick<{ <u8 as K>::N }>`), it is an "unsupported" error, not the first impl by self type.
 - A tail through a type alias (`struct Outer<T: ?Sized>(u16, Alias<T>)`) is unsized even when the instance is
   requested before `Outer`'s fields are resolved.
 - prep: an item after an attribute with a string or brackets in it (`#[doc = "]"] fn inner`) sends the source to

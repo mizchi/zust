@@ -3393,11 +3393,16 @@ impl Program {
                         if a.name != nm || a.trait_name != trn || a.ngat != 0 {
                             continue;
                         }
-                        let Some(ta) = &a.trait_args else { continue };
-                        if ta.len() != args.len() {
-                            continue;
-                        }
                         let mut sol = vec![None; a.ngen];
+                        // (an impl of the self type whose trait arguments are not resolved (none kept, or fewer than
+                        // the trait has: `impl Pick<{ <u8 as K>::N }>`) may be the one: ambiguous)
+                        let ta = match &a.trait_args {
+                            Some(ta) if ta.len() == args.len() => ta,
+                            _ => {
+                                ambiguous |= crate::traits::mtch(self, a.self_ty, bt, &mut sol, false, 0);
+                                continue;
+                            }
+                        };
                         if !crate::traits::mtch(self, a.self_ty, bt, &mut sol, false, 0)
                             || !ta.iter().zip(&args).all(|(&p, x)| x.is_none_or(|x| crate::traits::mtch(self, p, x, &mut sol, false, 0)))
                         {

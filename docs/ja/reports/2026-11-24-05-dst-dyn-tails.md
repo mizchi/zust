@@ -125,7 +125,8 @@ yes・maybe・no で返す) があった。2 つが出会うのはインスタ�
 - 見逃していたエラーを報告するようにした (rustc と同じ): 生ポインタへの `size_of_val` と `*const` への
   `drop_in_place` (E0308)、`S: Local` がないときの `-> impl Local` で、腕が `S` と `S` を返す呼び出しの末尾 `if` (E0277)。
 - zustc が評価できない const 引数の射影 (`<S as Pick<{ match .. }>>::Out`) は、当てはまる impl が 1 つならそれを
-  取り、複数なら self 型だけで最初の impl を選ばず「未対応」のエラーにする。
+  取る。複数あるとき、または self 型の impl にトレイト引数を解決できていないもの (`impl Pick<{ <u8 as K>::N }>`)
+  があるときは、self 型だけで最初の impl を選ばず「未対応」のエラーにする。
 - 型エイリアスを通した末尾 (`struct Outer<T: ?Sized>(u16, Alias<T>)`) は、`Outer` のフィールドを解決する前に
   インスタンスを求められても unsized とする。
 - prep: 文字列や括弧を含む属性の後のアイテム (`#[doc = "]"] fn inner`) があるソースは、全体の前処理に回す。

@@ -1349,4 +1349,8 @@ fn review_four_cases() {
     let two = "trait Pick<const N: usize> { type Out; }\nstruct S;\nimpl Pick<3> for S { type Out = u64; }\nimpl Pick<2> for S { type Out = u8; }\nfn main() { let _x: <S as Pick<{ match true { true => 2, false => 3 } }>>::Out = 0; }\n";
     let d = check(two);
     assert!(d.len() == 1 && d[0].msg.contains("cannot be evaluated"), "{d:?}");
+    // (an impl whose trait argument is not resolved (`{ <u8 as K>::N }`, 2) may be the one: not the other impl)
+    let unres = "trait K { const N: usize; }\nimpl K for u8 { const N: usize = 2; }\ntrait Pick<const N: usize> { type Out; }\nstruct S;\nimpl Pick<3> for S { type Out = u64; }\nimpl Pick<{ <u8 as K>::N }> for S { type Out = u8; }\nfn main() { let _x: <S as Pick<{ match true { true => 2, false => 3 } }>>::Out = 0; }\n";
+    let d = check(unres);
+    assert!(d.len() == 1 && d[0].msg.contains("cannot be evaluated"), "{d:?}");
 }
