@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795504712356,
+  "lastUpdate": 1795504715055,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -116254,6 +116254,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/b5e23d04fd9d06c3db505ae5b49ed22089833f23"
         },
         "date": 1795502700796,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1857,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.06,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1524,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.35,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4679,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "954c1fab0c0d98af459e61facc118009caa79cc4",
+          "message": "Merge pull request #118 from mizchi/claude/tender-sagan-iatvun\n\ncratebench/test.py: the cratebench crates' own tests under zurgo test and cargo test, test by test; adler2 passes",
+          "timestamp": "2026-11-24T16:08:39+09:00",
+          "tree_id": "c6fd902a99fa801c457659e1f5f85e07f47b7238",
+          "url": "https://github.com/mizchi/zust/commit/954c1fab0c0d98af459e61facc118009caa79cc4"
+        },
+        "date": 1795504714530,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
