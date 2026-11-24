@@ -2945,6 +2945,8 @@ impl Cx<'_> {
             t = match (x, t) {
                 (Proj::Deref(_) | Proj::Shr, Ty::Ref(_, i) | Ty::Box(i) | Ty::Ptr(_, i)) => *i,
                 (Proj::Index, Ty::Array(i, _) | Ty::Slice(i)) => *i,
+                // (an element of the prelude's `Vec` / `VecDeque`, which index to their element)
+                (Proj::Index, Ty::Struct(sid)) if matches!(self.prog.structs[self.prog.base_of(sid) as usize].name.as_str(), "Vec" | "VecDeque") => *self.prog.structs[sid as usize].args.first()?,
                 (Proj::Field(f), Ty::Struct(sid)) => self.prog.field(sid, f)?.0,
                 _ => return None,
             };
@@ -4321,6 +4323,50 @@ impl Cx<'_> {
         }
         let mut srcs = vec![];
         self.bk_direct(e, &mut srcs);
+        // (a local `c: &&U` returned as a `&U`, or passed to a constructor whose field is a `&U` (`Some(c)` returned as
+        // an `Option<&U>`): the deref coercion copies `*c` out, so the value holds what that holds, not the loan c is
+        // (as at a coercion site of a `let` or an argument, bk_copy_out_of))
+        if self.bk.level >= 2 && srcs.iter().any(|s| matches!(s, Src::Local(_))) {
+            let local_of = |me: &Self, a: &Expr| -> Option<(u32, Ty)> {
+                let Expr::Path(None, p) = strip_paren(a) else { return None };
+                let l = me.bk_local_of(super::ident_of(p)?)?;
+                match me.bk.locals[l as usize].ty {
+                    Ty::Ref(_, u @ Ty::Ref(false, _)) => Some((l, *u)),
+                    _ => None,
+                }
+            };
+            let mut coerced: Vec<(u32, Ty)> = vec![];
+            match strip_paren(e) {
+                x @ Expr::Path(..) => {
+                    if let (Some((l, u)), Ty::Ref(_, r)) = (local_of(self, x), self.ret) {
+                        if Ty::Ref(false, r) == u || matches!(u, Ty::Ref(false, i) if *i == *r) {
+                            coerced.push((l, u));
+                        }
+                    }
+                }
+                Expr::Call(f, args) if matches!(&**f, Expr::Path(_, p) if p.segs.last().is_some_and(|s| s.name.starts_with(|c: char| c.is_ascii_uppercase()))) => {
+                    if let Some(Ty::Struct(sid)) = self.peek(e) {
+                        let targs = &self.prog.structs[sid as usize].args;
+                        for a in args {
+                            if let Some((l, u)) = local_of(self, a) {
+                                if targs.contains(&u) && !targs.contains(&self.bk.locals[l as usize].ty) {
+                                    coerced.push((l, u));
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            for (l, u) in coerced {
+                let c = self.bk_copy_out_of(l, u);
+                for s in srcs.iter_mut() {
+                    if *s == Src::Local(l) {
+                        *s = Src::Local(c);
+                    }
+                }
+            }
+        }
         // (`&f()`: a borrow of a temporary, which is not promoted to a static (as direct_temps))
         let mut x = e;
         while let Expr::Paren(i) = x {

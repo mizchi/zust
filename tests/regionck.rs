@@ -3620,3 +3620,15 @@ fn part21_fn_item_coerced_wf() {
     // implied-bounds-on-nested-references-plus-variance-2.rs))
     assert_eq!(check("static UNIT: &'static &'static () = &&();\nfn foo<'a, 'b, T>(_: &'a &'b (), v: &'b T, _: &()) -> &'a T { v }\nfn bad<'a, T>(x: &'a T) -> &'static T {\n    let f: fn(_, &'a T, &()) -> &'static T = foo;\n    f(UNIT, x, &())\n}\nfn main() {}\n"), vec![]);
 }
+
+#[test]
+fn part21_deref_coercion_copies_inner() {
+    // (a deref coercion of `c: &'1 &'a U` to a `&U` is the reborrow `&**c`: through the shared `&'a U` only, so it
+    // holds what `*c` holds, not the loan c is (rustc accepts these; main had false E0515 / "lifetime may not live
+    // long enough"))
+    assert_eq!(check("fn first<'a>(s: &'a String) -> Option<&'a str> {\n    let parts: Vec<&'a str> = s.split('|').collect();\n    if let [commit, ..] = &parts[..] { Some(commit) } else { None }\n}\nfn second<'a>(s: &'a String) -> &'a str {\n    let parts: Vec<&'a str> = s.split('|').collect();\n    let c: &&'a str = &parts[0];\n    c\n}\nfn main() {\n    let s = String::from(\"a|b\");\n    let _ = first(&s);\n    let _ = second(&s);\n}\n"), vec![]);
+    assert_eq!(check("fn f<'a>(x: &'a mut &'static u32) -> &'static u32 { x }\nfn h<'a, 'b>(x: &'a &'b u32) -> &'b u32 { x }\nfn main() {}\n"), vec![]);
+    // (an owned value behind the inner reference is still the local's: E0515)
+    let d = check("fn bad1<'a>(s: &'a String) -> &'a String {\n    let v: Vec<String> = vec![s.clone()];\n    let c: &String = &v[0];\n    let d: &&String = &c;\n    d\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+}

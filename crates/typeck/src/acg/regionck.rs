@@ -1353,7 +1353,41 @@ impl RgSt {
             *j += c;
             return true;
         }
+        let refs = |mut t: Ty| {
+            let mut n = 0;
+            while let Ty::Ref(_, i) = t {
+                n += 1;
+                t = *i;
+            }
+            n
+        };
         match (from, to) {
+            // (a deref coercion (`c: &&'a str` where a `&str` is expected): the reborrow `&**c` it is lives no longer
+            // than the references it goes through from the inside out, and a shared one stops that (NLL's reborrow
+            // constraints): of `&'1 &'a str` only 'a)
+            (Ty::Ref(..), Ty::Ref(m, b)) if refs(from) > refs(to) => {
+                let mut f = from;
+                let mut crossed: Vec<(u32, bool)> = vec![];
+                while refs(f) >= refs(to) {
+                    let (Ty::Ref(fm, fi), Some(&x)) = (f, sub.get(*i)) else { return false };
+                    crossed.push((x, fm));
+                    *i += 1;
+                    if refs(f) == refs(to) {
+                        f = *fi;
+                        break;
+                    }
+                    f = *fi;
+                }
+                let Some(&y) = sup.get(*j) else { return false };
+                for &(x, fm) in crossed.iter().rev() {
+                    self.constrain(x, y, v, sp);
+                    if !fm {
+                        break;
+                    }
+                }
+                *j += 1;
+                self.co(prog, f, *b, sub, sup, (i, j), if m { v.then(Var::Inv) } else { v }, sp, depth + 1)
+            }
             (Ty::Ref(_, a), Ty::Ref(m, b)) => {
                 let (Some(&x), Some(&y)) = (sub.get(*i), sup.get(*j)) else { return false };
                 self.constrain(x, y, v, sp);
