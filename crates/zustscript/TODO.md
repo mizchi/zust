@@ -2,6 +2,11 @@
 
 README.md は「今あるもの」、[docs/plan.md](docs/plan.md) は計画のメモ(ML 用途、vector IR との関係)。このファイルは、文法の改善ループで**決めずに残したこと**と、次にやることの一覧。
 
+## ターゲットと JS 相互運用
+
+- [ ] [ターゲット属性とビルドの設計方針](docs/target-spec.md)を実装する。`@simd` の Wasm 固定、`@js` の DOM ラッパー、`@rust` の Rust モジュール取り込みを、同一ソースの web・JS 単独・Rust ビルドで検証する。
+- [ ] 手書き `wasm fn` の `&[u8]` / `Vec<u8>` を JS の `Uint8Array` につなぐ。部分ビューと所有権を生成ラッパー経由で検証し、未使用時の増分 0 B と、使用時の JS・Wasm サイズを測る。[JS ヘルパー試作と基準値](docs/target-spec.md#配布サイズと採用範囲)
+
 ## 文法の提案の状態
 
 提案は [evals/syntax/](evals/syntax/README.md) の改善ループ(提案 → ルーブリックの評価 → 改訂)で進めている。**どれもまだ実装していない**(今の zsc の文法は README のとおり)。

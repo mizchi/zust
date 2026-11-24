@@ -1619,6 +1619,20 @@ impl Cx<'_> {
                 if let (Ty::Fn(_), Some(Ty::Struct(sid))) = (to, self.peek(x)) {
                     let base = self.prog.base_of(sid);
                     if let Some(&cid) = self.prog.closure_of_struct.get(&base) {
+                        // (its annotated parameters against the regions the type binds, as for a closure written there:
+                        // `let c = |_: &'static u32| {}; c as fn(&u32)`)
+                        if let Some(mut ce) = self.clo_ann.iter().find(|x| x.0 == base).map(|x| x.1.clone()) {
+                            // (reported at the cast's value, as rustc does)
+                            if let Expr::Closure(_, _, _, _, p) = &mut ce {
+                                *p = borrowck::pos(x);
+                            }
+                            if !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
+                                self.rg_late_on();
+                            }
+                            if self.rg_on() {
+                                self.rg_closure_fnptr(ty, &ce);
+                            }
+                        }
                         if self.prog.structs[sid as usize].fields.is_empty() {
                             // (the value carries nothing; evaluated for its effects)
                             self.expr(x, None)?;
@@ -2677,6 +2691,10 @@ impl Cx<'_> {
         let Some(args) = sol.into_iter().collect::<Option<Vec<Ty>>>() else {
             return err(SP, "cannot infer the return type of this closure; annotate it (`|..| -> T { .. }`)");
         };
+        // (one with a parameter annotated with a lifetime, which a cast of a local holding it may coerce)
+        if self.user_code && self.bk.level >= 2 && cd.captures.is_empty() && inputs.iter().any(|x| x.1.as_ref().is_some_and(crate::regions::names_lt)) && !self.clo_ann.iter().any(|x| x.0 == cd.sid) {
+            self.clo_ann.push((cd.sid, c.clone()));
+        }
         // (a closure with no captures where a fn pointer is expected: the address of its fn-pointer instance)
         if matches!(expected, Some(Ty::Fn(_))) && cd.captures.is_empty() {
             // (a parameter annotated with a lifetime, which the type may bind (`let _: fn(&u32) = |_: &'static u32|
