@@ -61,6 +61,9 @@ obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-
   is a false "mismatched types"; each element should be coerced to the expected type.
 - dangerous_implicit_autorefs: the range-index form (`(*p)[..2]`) is not caught, and an `#[allow]` anywhere turns
   the lint off for the whole crate (as `overflowing_literals` already does): never a false error, a missed one.
+- A qualified projection whose const argument zustc cannot evaluate (`<S as Pick<{ match .. }>>::Out`) with several
+  impls that may fit, or one whose trait arguments are not resolved: an "unsupported" error (never the wrong impl).
+  Evaluating such const expressions would select the impl.
 - Missed errors (zustc accepts; main did too), from the review of #128: a supertrait's arguments (`trait Sub:
   Base<u8>` with only `impl Base<u16>`); `<S as Tr<u8>>::Item` falling back to another impl's definition; a
   binding checked against the trait's arguments (`T: Tr<u8, Item = u8>`); an explicit `unsafe impl Send for W<u8>`
