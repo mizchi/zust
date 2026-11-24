@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795501328011,
+  "lastUpdate": 1795501330447,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -95346,6 +95346,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/ab6134fe56d6ea78b6d17cbd48e03af8e3d17b24"
         },
         "date": 1795500650837,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 72.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 75.758,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 84.848,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 94.444,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 91.755,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "5716d31e7c0971d26341820dfcc511eb7598e46d",
+          "message": "Merge pull request #116 from mizchi/docs/zustscript-programmer-guides\n\nRust・TypeScript プログラマー向けの zustscript ガイドを公開",
+          "timestamp": "2026-11-24T15:07:45+09:00",
+          "tree_id": "a65a8b3517edf908ead3ff084607f548c90f05a9",
+          "url": "https://github.com/mizchi/zust/commit/5716d31e7c0971d26341820dfcc511eb7598e46d"
+        },
+        "date": 1795501329905,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
