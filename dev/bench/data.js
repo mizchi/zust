@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795501667853,
+  "lastUpdate": 1795501670568,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -115141,6 +115141,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/5716d31e7c0971d26341820dfcc511eb7598e46d"
         },
         "date": 1795501332818,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1857,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.06,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1524,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4674,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "74fd5e3876093dc32fa6c6034caaed096ba48008",
+          "message": "Merge pull request #117 from mizchi/docs/zustscript-generated-examples\n\n言語別ガイドに zustscript の生成コード例を掲載",
+          "timestamp": "2026-11-24T15:19:47+09:00",
+          "tree_id": "6f6458be1fac60ddc66f15c9e7972ee2cb49d5e3",
+          "url": "https://github.com/mizchi/zust/commit/74fd5e3876093dc32fa6c6034caaed096ba48008"
+        },
+        "date": 1795501669931,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
