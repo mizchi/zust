@@ -1764,6 +1764,23 @@ impl Cx<'_> {
                 if other_self {
                     self.rg.ret = None;
                 }
+                // (a parameter whose type is a projection the summary does not follow (`_wf: <&'a u8 as Tr>::Ty`): its
+                // impl's associated type's value, with the regions its self type writes; what it implies is known
+                // (implied-bounds/assoc-ty-wf-used-to-get-assoc-ty.rs))
+                if self.rg.on && !self.prog.assoc_regions.is_empty() {
+                    for (k, (p, pty)) in f.sig.params.iter().enumerate() {
+                        let (crate::parse::Ty::Path(Some(_), _), Some(&(loc, t))) = (pty, ps.get(k + f.sig.recv.is_some() as usize)) else { continue };
+                        let _ = p;
+                        if self.rg.locals.contains_key(&loc) {
+                            continue;
+                        }
+                        if let Some(tr) = self.rg_proj_ann(pty, t) {
+                            let prog = self.prog;
+                            self.rg.implied(prog, t, &tr, 0);
+                            self.rg.locals.insert(loc, tr);
+                        }
+                    }
+                }
             } else {
                 self.rg.on = false;
             }

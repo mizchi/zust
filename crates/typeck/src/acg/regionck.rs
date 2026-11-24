@@ -2711,13 +2711,28 @@ impl Cx<'_> {
                 if found.is_some() {
                     return None;
                 }
-                found = Some(i as u32);
+                found = Some((i as u32, sol));
             }
         }
-        let (codes, self_slots) = prog.assoc_regions.get(&found?)?.clone();
+        let (ai, sol) = found?;
+        let (codes, self_slots) = prog.assoc_regions.get(&ai)?.clone();
+        let a = &prog.assocs[ai as usize];
         let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
         let mut written = vec![];
         sl.slots(q, false, &mut written);
+        // (the impl's type arguments' trees: a blanket impl's `T` is the self type as written (`<&'a u8 as Tr>::Ty`
+        // with `impl<T> Tr for T`), the others' fresh)
+        let fl = self.rg.lts.clone();
+        let mut targs: Vec<Option<RT>> = vec![];
+        for (k, s0) in sol.iter().enumerate() {
+            let Some(st) = *s0 else { return None };
+            let tr = if a.self_ty == Ty::Param(k as u8) {
+                self.rg.instantiate(prog, st, Some(&written), &fl, &[], &mut |me| me.var())
+            } else {
+                self.rg.fresh(prog, st)
+            };
+            targs.push(tr);
+        }
         let n = codes.iter().chain(&self_slots).filter(|&&c| c < R_STATIC).map(|&c| c as usize + 1).max().unwrap_or(0);
         let mut lts = vec![];
         for k in 0..n {
@@ -2729,7 +2744,9 @@ impl Cx<'_> {
             };
             lts.push(v);
         }
-        self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var())
+        let value = a.value;
+        let tr = self.rg.instantiate(prog, value, Some(&codes), &lts, &targs, &mut |me| me.var())?;
+        (count(prog, t, 0) == Some(tr.len())).then_some(tr)
     }
 
     /// The tree of a fn pointer annotation with holes (`fn(_, &'a T) -> &'static T`), part by part: a hole's regions

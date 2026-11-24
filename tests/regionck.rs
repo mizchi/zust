@@ -3661,6 +3661,8 @@ fn part22_projection_annotations() {
     let d = check("trait Foo { type Out; }\nimpl<'a> Foo for &'a () { type Out = &'a u32; }\nfn g<'a>(r: &'a u32) -> &'static u32 {\n    let x: <&'a () as Foo>::Out = r;\n    let y: <&'static () as Foo>::Out = x;\n    y\n}\nfn main() { let v = 1; g(&v); }\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
     assert_eq!(check("trait Foo { type Out; }\nimpl Foo for () { type Out = &'static u32; }\nimpl<'a> Foo for &'a () { type Out = &'a u32; }\nstatic S: u32 = 3;\nfn f<'a>(r: &'a u32) -> &'a u32 {\n    let x: <&'a () as Foo>::Out = r;\n    let a = 22;\n    let _: <&'_ () as Foo>::Out = &a;\n    let _: <() as Foo>::Out = &S;\n    let _: <() as Foo>::Out = &5;\n    x\n}\nfn main() { let v = 1; f(&v); }\n"), vec![]);
+    // (a parameter of such a type: what its value implies is known (`'a: 'static` here); main had a false error)
+    assert_eq!(check("trait Tr {\n    type Ty;\n}\nimpl<T: 'static> Tr for T {\n    type Ty = &'static T;\n}\nfn test<'a>(x: &'a u8, _wf: <&'a u8 as Tr>::Ty) -> &'static u8 { x }\nfn main() {\n    let _: &'static u8 = test(&3, &&3);\n}\n"), vec![]);
 }
 
 #[test]
