@@ -109,4 +109,5 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-24 | [Region (lifetime) checking, part 23: placeholders against regions from outside, a placeholder's bound's type arguments, diverging initializers, type aliases with a parameter twice](2026-11-24-09-region-check-23.md) |
 | 2026-11-24 | [Region (lifetime) checking, part 24: a struct's 'static bound in a generic fn's types, `mut` bindings under a by-reference default binding mode, the outlives of the impl a projection selects](2026-11-24-10-region-check-24.md) |
 | 2026-11-24 | [Region (lifetime) checking, part 25: placeholders' associated types, a path's type arguments referring to a placeholder, a callee's bound met by the caller's where clause, an impl's associated type against its trait's bound](2026-11-24-11-region-check-25.md) |
-| 2026-11-24 | [Trait solving, step 3: projections as normalizes-to goals (#2)](2026-11-24-12-projection-goals.md) |
+| 2026-11-24 | [Region (lifetime) checking, part 26: a `&mut` passed as a `&`, reborrows at coercion sites, call arguments' reborrows, a `&mut` in an aggregate](2026-11-24-12-region-check-26.md) |
+| 2026-11-24 | [Trait solving, step 3: projections as normalizes-to goals (#2)](2026-11-24-13-projection-goals.md) |

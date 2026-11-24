@@ -1,0 +1,2 @@
+import { b } from "./cycle_b.zsc";
+export fn a() -> i32 { b() }
