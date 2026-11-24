@@ -1833,6 +1833,13 @@ impl Cx<'_> {
                     (Ty::Ptr(_, a), t) if a.is_unsized() && matches!(t, Ty::Usize | Ty::U64 | Ty::Isize | Ty::I64) => {
                         return Ok((v.map(|a| self.b.ins().load(PTR, mf(), a, 0)), to));
                     }
+                    // (`p as *const S<[T]>` with p: `*const S<[T; N]>` / `*const S<T>` to `*const S<dyn Tr>`: the
+                    // unsizing of a struct's tail, the address and N or the vtable)
+                    (Ty::Ptr(m, gi), Ty::Ptr(pm, wi)) if wi.is_dst_struct() && (m || !pm) && self.unsize_tail(*wi, *gi).is_some() => {
+                        let Some(a) = v else { return Ok((None, to)) };
+                        let meta = self.unsize_tail(*wi, *gi).unwrap();
+                        return Ok((Some(self.make_unsized(a, meta, SP)?), to));
+                    }
                     // (`p as *const dyn Tr` with p: `*const S`: the unsizing to a (data, vtable) pair)
                     (Ty::Ptr(m, inner), Ty::Ptr(pm, Ty::Dyn(tr))) if !matches!(inner, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) && (m || !pm) => {
                         let Some(a) = v else { return Ok((None, to)) };

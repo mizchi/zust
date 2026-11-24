@@ -1900,15 +1900,14 @@ impl Session2 {
                     // (the method's own where clause: `where Self: Tr`, or a trait of it whose supertraits (all the
                     // way up) have Tr: `where Self: Child` with `trait Child: Parent`)
                     let mut own_bounds: Vec<String> = vec![];
-                    if let Some(w) = head.split("where").nth(1) {
-                        for p in w.split(',') {
-                            let mut sp = p.splitn(2, ':');
-                            if sp.next().map(str::trim) == Some("Self") {
-                                for x in sp.next().unwrap_or("").split('+') {
-                                    let b = x.trim().split('<').next().unwrap_or("").trim();
-                                    own_bounds.push(b.rsplit("::").next().unwrap_or(b).to_string());
-                                }
-                            }
+                    // (split with nesting kept: `Self: Pair<u8, u16> + Parent`)
+                    for (subj, bs) in where_preds(head).unwrap_or_default() {
+                        if subj != "Self" {
+                            continue;
+                        }
+                        for x in bs {
+                            let b = x.trim().split('<').next().unwrap_or("").trim();
+                            own_bounds.push(b.rsplit("::").next().unwrap_or(b).to_string());
                         }
                     }
                     let mut k = 0;

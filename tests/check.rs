@@ -1292,3 +1292,14 @@ fn dst_struct_tail_coercions_check() {
     let d = s.check(src);
     assert!(d.is_empty(), "{d:?}");
 }
+
+/// A method's own `where Self: Pair<u8, u16> + Parent` (nested commas) gives `Self: Parent`; an uninferred const
+/// argument takes the value a bound meets, so the impl's where clause on it is checked with that value
+#[test]
+fn review_where_self_nested_and_const_refined() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let src = "trait Parent { type X; }\ntrait Pair<A, B> {}\ntrait Child {\n    fn get(&self) -> <Self as Parent>::X where Self: Pair<u8, u16> + Parent;\n}\nfn main() {}\n";
+    assert!(s.check(src).is_empty(), "{:?}", s.check(src));
+    let src = "struct Const<const N: usize>;\ntrait Bar<const N: usize> {}\nimpl Bar<3> for () {}\ntrait Foo<const N: usize> {}\nimpl<const N: usize> Foo<N> for Const<N> where (): Bar<N> {}\nfn f(_: impl Foo<3>) {}\nfn main() { f(Const); }\n";
+    assert!(s.check(src).is_empty(), "{:?}", s.check(src));
+}

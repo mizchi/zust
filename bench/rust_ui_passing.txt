@@ -3679,6 +3679,7 @@ run-pass	layout/aggregate-lang/union-offsets.rs
 run-pass	layout/aggregate-lang/union-size.rs
 compile-fail	layout/cannot-transmute-unnormalizable-type.rs
 compile-fail	layout/failed-to-get-layout-for-type-error-ice-92979.rs
+run-pass	layout/issue-112048-unsizing-field-order.rs
 compile-fail	layout/issue-unsized-tail-restatic-ice-122488.rs
 compile-fail	layout/malformed-unsized-type-in-union.rs
 run-pass	layout/opt-repr-i32-min.rs

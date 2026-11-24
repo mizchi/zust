@@ -971,14 +971,20 @@ pub fn hoist_nested_items(src: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// What an item that hoist_parts_at may move starts with
+const HOIST_KWS: [&str; 21] = [
+    "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "pub fn ", "pub struct ",
+    "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) ",
+];
+
 /// An item keyword right after a brace or a `;` on a line (`f({ fn inner() {} })`): whether hoist_nested_items moves
 /// such an item depends on the rest of the source (its quick check looks for indented items only), so the incremental
 /// preprocessing, which hoists a chunk alone, cannot reuse chunks of a source that has one
 pub fn has_inline_item(src: &str) -> bool {
-    const KWS: [&str; 10] = ["fn ", "struct ", "enum ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union "];
+    // (the keywords hoist_parts_at looks for)
     src.match_indices(['{', ';', '}']).any(|(i, _)| {
         let t = src[i + 1..].trim_start_matches([' ', '\t']);
-        matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'c' | b'm' | b't' | b'i' | b'u')) && KWS.iter().any(|k| t.starts_with(k))
+        matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p')) && HOIST_KWS.iter().any(|k| t.starts_with(k))
     })
 }
 
@@ -992,10 +998,7 @@ pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
-    const KWS: [&str; 21] = [
-        "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "pub fn ", "pub struct ",
-        "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) ",
-    ];
+    const KWS: [&str; 21] = HOIST_KWS;
     let indented = src.split('\n').any(|l| {
         let t = l.trim_start();
         // (the keywords' first letters first: most lines start with none of them)

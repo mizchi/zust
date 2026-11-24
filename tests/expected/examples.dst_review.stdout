@@ -10,5 +10,10 @@ drop Guard 1
 drop Loud 1
 drop Loud 2
 3
+24 3 0
+16 2
+drop Guard 3
+drop Loud 4
+end
 drop Guard 2
 drop Loud 3

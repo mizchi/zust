@@ -1381,7 +1381,12 @@ pub fn mtch(p: &Program, pt: Ty, t: Ty, sol: &mut [Option<Ty>], lenient: bool, d
         (Ty::Param(i), _) => match sol.get(i as usize).copied() {
             // (a const argument zustc could not infer is `()` (`foo(Const)` with `impl<const N: usize> Foo<N> for
             // Const<N>`): it may be any const, the goal weakened as for a defaulted literal)
-            Some(Some(prev)) => prev == t || (lenient && matches!((prev, t), (Ty::Unit, Ty::Array(Ty::Unit, _)) | (Ty::Array(Ty::Unit, _), Ty::Unit))),
+            // (and the first const value that meets it replaces it, so a where clause on the parameter sees that value)
+            Some(Some(Ty::Unit)) if lenient && matches!(t, Ty::Array(Ty::Unit, _)) => {
+                sol[i as usize] = Some(t);
+                true
+            }
+            Some(Some(prev)) => prev == t || (lenient && matches!((prev, t), (Ty::Array(Ty::Unit, _), Ty::Unit))),
             Some(None) => {
                 sol[i as usize] = Some(t);
                 true

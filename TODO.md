@@ -65,6 +65,9 @@ obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-
   Base<u8>` with only `impl Base<u16>`); `<S as Tr<u8>>::Item` falling back to another impl's definition; a
   binding checked against the trait's arguments (`T: Tr<u8, Item = u8>`); an explicit `unsafe impl Send for W<u8>`
   taken for every `W<T>`; `<S as Other>::Item` in a method of `impl Own for S` rewritten as `Own`'s.
+- A qualified call names the trait's arguments, which method selection does not match against each impl's
+  (`<S as Tag<u16>>::tag(&s)` with `impl Tag<u8> for S` and `impl Tag<u16> for S` takes `Tag<u8>`'s; main too): a
+  per-impl record of the trait's arguments is needed.
 - `<S as Tr<2>>::get()` with impls of `Tr<1>` and `Tr<2>`: the call takes `Tr<1>`'s method (now a compile error,
   as the annotation `<S as Tr<2>>::Item` resolves to the right type; main printed the wrong value).
 - A local named like an intrinsic (`let size_of = || 7u8; size_of()`) is a false error (main too).

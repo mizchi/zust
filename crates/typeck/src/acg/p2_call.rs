@@ -3259,6 +3259,24 @@ impl Cx<'_> {
                 return Ok((None, Ty::Unit));
             }
         }
+        // (`drop_in_place(p)` of a pointer to a struct with an unsized tail: no value of it can be read out, the drop
+        // glue drops it in place through the pair)
+        if self.prog.names[id as usize] == "__core_drop_in_place" && vals.len() == 1 {
+            if let Ty::Ptr(_, t) = vals[0].1 {
+                if t.is_dst_struct() {
+                    let Some(&g) = self.prog.index.get(crate::prelude::DROP_GLUE) else { return err(span, "internal: no drop glue") };
+                    let iid = {
+                        let mut ins = self.insts.lock().unwrap();
+                        ins.request(self.prog, g, vec![*t]).or_else(|e| err(span, e))?
+                    };
+                    self.requested.push(iid);
+                    let fs = self.insts.lock().unwrap().sig(self.prog, iid).clone();
+                    let f = self.fref(iid, &fs);
+                    self.b.ins().call(f, &[vals[0].0]);
+                    return Ok((None, Ty::Unit));
+                }
+            }
+        }
         // (`size_of_val(x)` / `align_of_val(x)` of a pointer to an unsized type: from the pair's second word)
         if matches!(self.prog.names[id as usize].as_str(), "__core_size_of_val" | "__core_align_of_val") && vals.len() == 1 {
             if let Ty::Ref(_, t) | Ty::Ptr(_, t) = vals[0].1 {

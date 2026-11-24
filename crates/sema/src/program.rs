@@ -379,6 +379,10 @@ pub struct Program {
     pub copy_params: FxMap<u32, Vec<usize>>,
     /// A struct's type parameters declared `?Sized` (base ids: the places), which its last field may make unsized
     pub unsized_params: FxMap<u32, Vec<usize>>,
+    /// A struct's parameter names and its last field's type as written (base ids, the structs with `?Sized`
+    /// parameters): whether an instance's tail is unsized, asked before the definition's fields are resolved
+    /// (`struct Holder<T> { p: *const Tail<[u8]> }` laid out before `struct Tail<T: ?Sized>(T)`)
+    pub tail_syn: FxMap<u32, (Vec<String>, TySyn)>,
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
     /// be out of scope where the name is written
     pub has_mods: bool,
@@ -1282,6 +1286,7 @@ impl Program {
             struct_defaults: FxMap::default(),
             copy_params: FxMap::default(),
             unsized_params: FxMap::default(),
+            tail_syn: FxMap::default(),
             has_mods: false,
             trait_clone_fns: false,
             multi_trait_methods: FxSet::default(),
@@ -1535,6 +1540,13 @@ impl Program {
                 }
                 if !sm.adt_defaults.is_empty() {
                     p.struct_defaults.insert(sdefs.len() as u32, sm.adt_defaults.clone());
+                }
+                if !sm.adt_unsized.is_empty() {
+                    if let AdtShape::Struct(fs) = &shape {
+                        if let Some((_, last)) = fs.last() {
+                            p.tail_syn.insert(sdefs.len() as u32, (sm.adt_generics.clone(), last.clone()));
+                        }
+                    }
                 }
                 sdefs.push((ii, name.clone(), shape, sm.adt_generics.clone()));
             }
@@ -4672,16 +4684,20 @@ impl Program {
             Ty::Struct(_) if t.is_dst_struct() => true,
             // (a struct application as the tail (`Middle<T>` ending in `Inner<T>`): its definition's tail, with its
             // parameters unsized when its arguments are; an indirection (`Box<Inner<T>>`) is not a struct here)
-            Ty::Struct(s) if depth < 8 => {
+            Ty::Struct(s) if depth < 64 => {
                 let sd = &self.structs[s as usize];
                 let Some(b) = sd.base else { return false };
                 let bd = &self.structs[b as usize];
                 if bd.is_enum {
                     return false;
                 }
-                let Some(&(_, lt, _)) = bd.fields.last() else { return false };
                 let args = &sd.args;
-                self.tail_unsized(b, lt, &|j| args.get(j as usize).is_some_and(|&a| self.tail_unsized(base, a, param_unsized, depth + 1)), depth + 1)
+                let inner = |j: u8| args.get(j as usize).is_some_and(|&a| self.tail_unsized(base, a, param_unsized, depth + 1));
+                match bd.fields.last() {
+                    Some(&(_, lt, _)) => self.tail_unsized(b, lt, &inner, depth + 1),
+                    // (a definition not resolved yet: from its last field as written)
+                    None => self.tail_syn_unsized(b, &inner, depth + 1),
+                }
             }
             _ => false,
         }
@@ -4690,7 +4706,40 @@ impl Program {
     /// Whether the instance of base with args has an unsized tail (its id carries DST_TAG)
     fn instance_unsized(&self, base: u32, args: &[Ty]) -> bool {
         let b = &self.structs[base as usize];
-        !b.is_enum && b.fields.last().is_some_and(|f| self.tail_unsized(base, f.1, &|i| args.get(i as usize).is_some_and(|a| a.is_unsized()), 0))
+        if b.is_enum {
+            return false;
+        }
+        let oracle = |i: u8| args.get(i as usize).is_some_and(|a| a.is_unsized());
+        match b.fields.last() {
+            Some(f) => self.tail_unsized(base, f.1, &oracle, 0),
+            // (the definition's fields are not resolved yet: from its last field as written)
+            None => self.tail_syn_unsized(base, &oracle, 0),
+        }
+    }
+
+    /// tail_unsized from a definition's last field as written (tail_syn), for a definition not resolved yet
+    fn tail_syn_unsized(&self, base: u32, param_unsized: &dyn Fn(u8) -> bool, depth: u32) -> bool {
+        let Some((gens, last)) = self.tail_syn.get(&base) else { return false };
+        let may = |i: usize| self.unsized_params.get(&base).is_some_and(|v| v.contains(&i));
+        // (a type as written, in the parameters' terms: unsized when it is `[T]` / `str` / `dyn Tr`, an unsized
+        // parameter, or a struct application whose tail is)
+        fn syn_unsized(p: &Program, gens: &[String], t: &TySyn, may: &dyn Fn(usize) -> bool, pu: &dyn Fn(u8) -> bool, depth: u32) -> bool {
+            match t {
+                TySyn::Slice(_) | TySyn::Str | TySyn::Dyn(_) => true,
+                TySyn::Named(n) => gens.iter().position(|g| g == n).is_some_and(|i| may(i) && pu(i as u8)),
+                TySyn::App(n, args) if depth < 64 => {
+                    let Some(&sid) = p.struct_index.get(n) else { return false };
+                    let inner = |k: u8| args.get(k as usize).is_some_and(|a| syn_unsized(p, gens, a, may, pu, depth + 1));
+                    let bd = &p.structs[sid as usize];
+                    match bd.fields.last() {
+                        Some(&(_, lt, _)) if !bd.is_enum => p.tail_unsized(sid, lt, &inner, depth + 1),
+                        _ => p.tail_syn_unsized(sid, &inner, depth + 1),
+                    }
+                }
+                _ => false,
+            }
+        }
+        syn_unsized(self, gens, last, &may, param_unsized, depth)
     }
 
     fn instantiate_inner(&self, base: u32, args: Vec<Ty>) -> R<StructDef> {

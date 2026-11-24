@@ -30,6 +30,25 @@ fn first<T: Copy>(x: &Wrap<[T]>) -> T {
     x.tail[0]
 }
 
+// a struct laid out before the definition of the struct with an unsized tail it points to
+struct Holder<T> {
+    p: *const Tail<[u8]>,
+    marker: T,
+}
+struct Tail<T: ?Sized>(T);
+
+// a tail nested ten structs deep
+struct W0<T: ?Sized>(T);
+struct W1<T: ?Sized>(W0<T>);
+struct W2<T: ?Sized>(W1<T>);
+struct W3<T: ?Sized>(W2<T>);
+struct W4<T: ?Sized>(W3<T>);
+struct W5<T: ?Sized>(W4<T>);
+struct W6<T: ?Sized>(W5<T>);
+struct W7<T: ?Sized>(W6<T>);
+struct W8<T: ?Sized>(W7<T>);
+struct W9<T: ?Sized>(W8<T>);
+
 struct Loud(u8);
 impl Drop for Loud {
     fn drop(&mut self) {
@@ -76,4 +95,15 @@ fn main() {
     drop(g);
     let d: Box<Guard<dyn Named>> = Box::new(Guard { id: 2, tail: Loud(3) });
     println!("{}", d.tail.n());
+
+    let t = Tail([1u8, 2, 3]);
+    let h = Holder { p: &t as *const Tail<[u8; 3]> as *const Tail<[u8]>, marker: 0u8 };
+    println!("{} {} {}", std::mem::size_of::<Holder<u8>>(), unsafe { (&(*h.p).0).len() }, h.marker);
+    let w: &W9<[u8]> = &W9(W8(W7(W6(W5(W4(W3(W2(W1(W0([1u8, 2]))))))))));
+    println!("{} {}", std::mem::size_of::<&W9<[u8]>>(), std::mem::size_of_val(w));
+    let mut gb: Box<Guard<[Loud]>> = Box::new(Guard { id: 3, tail: [Loud(4)] });
+    let gp: *mut Guard<[Loud]> = &mut *gb;
+    unsafe { std::ptr::drop_in_place(gp) };
+    std::mem::forget(gb);
+    println!("end");
 }

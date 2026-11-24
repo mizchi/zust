@@ -2005,7 +2005,13 @@ impl Inf<'_> {
             });
             if tys.iter().any(|t| t.is_some()) {
                 let sig = &self.prog.sigs[id as usize];
-                let named: Vec<usize> = (0..sig.generics.len()).filter(|&k| !sig.generics[k].0.starts_with("__impl")).collect();
+                // (the hidden `impl Trait` parameters are `__impl` and digits, as the lowering's hidden_param has it)
+                let named: Vec<usize> = (0..sig.generics.len())
+                    .filter(|&k| {
+                        let n: &str = &sig.generics[k].0;
+                        !(n.starts_with("__impl") && n.len() > 6 && n.as_bytes()[6..].iter().all(|c| c.is_ascii_digit()))
+                    })
+                    .collect();
                 let member = sig.self_ty.is_some() || sig.impl_of.is_some();
                 let start = if member { named.len().saturating_sub(tys.len()) } else { sig.trait_of.is_some() as usize };
                 let mut pre = vec![];

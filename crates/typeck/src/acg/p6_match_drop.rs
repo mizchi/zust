@@ -2622,6 +2622,12 @@ impl Cx<'_> {
                 self.b.ins().jump(head, &[]);
                 self.b.switch_to_block(done);
             }
+            // (`drop_in_place::<Wrap<[T]>>(p)`: p is the address of the (data, metadata) pair)
+            Ty::Struct(_) if t.is_dst_struct() => {
+                let data = self.b.ins().load(PTR, mf(), p, 0);
+                let meta = self.b.ins().load(types::I64, mf(), p, 8);
+                self.drop_dst_struct(data, meta, t)?;
+            }
             Ty::Struct(sid) => {
                 // 先に `impl Drop` の drop(&mut self)、それからフィールド
                 if self.prog.drop_impls.contains(&self.prog.base_of(sid)) {
