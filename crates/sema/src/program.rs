@@ -5223,45 +5223,39 @@ impl Program {
     /// `W<u8>` could not, nor `Either<&L, &R>` and `Either<&mut L, &mut R>`, nor `W<T, T>` and `W<u8, u16>`)
     pub fn self_tys_overlap(&self, a: Ty, b: Ty) -> bool {
         use crate::types::CONST_LEN_BASE;
-        // (a binding: of impl s's parameter, to a type of impl s2; of its const parameter, to a length of s2's)
+        // (a binding: of impl s's parameter (a type parameter, or a const one), to a type of impl s2's. A const value is
+        // `Array(Unit, n)`, as match_ty has it, and an array length `CONST_LEN_BASE + i` is const parameter i: one
+        // binding for a const parameter, whether it stands as a type argument or as a length)
         struct U<'a> {
             p: &'a Program,
             tys: FxMap<(u8, u8), (u8, Ty)>,
-            lens: FxMap<(u8, u32), (u8, u32)>,
+        }
+        fn len_ty(n: u32) -> Ty {
+            if n >= CONST_LEN_BASE { Ty::Param((n - CONST_LEN_BASE) as u8) } else { Ty::Array(intern(Ty::Unit), n) }
         }
         impl U<'_> {
-            fn len(&mut self, sa: u8, n: u32, sb: u8, k: u32) -> bool {
-                let (mut sa, mut n, mut sb, mut k) = (sa, n, sb, k);
-                while n >= CONST_LEN_BASE {
-                    match self.lens.get(&(sa, n)) {
-                        Some(&(s2, n2)) => {
-                            sa = s2;
-                            n = n2;
-                        }
-                        None => break,
-                    }
+            /// Whether impl s's parameter x occurs in t (of impl st), through the bindings so far
+            fn occurs(&self, s: u8, x: u8, st: u8, t: Ty, depth: u32) -> bool {
+                if depth > 32 {
+                    return true;
                 }
-                while k >= CONST_LEN_BASE {
-                    match self.lens.get(&(sb, k)) {
-                        Some(&(s2, k2)) => {
-                            sb = s2;
-                            k = k2;
-                        }
-                        None => break,
-                    }
+                match t {
+                    Ty::Param(y) if (st, y) == (s, x) => true,
+                    Ty::Param(y) => self.tys.get(&(st, y)).is_some_and(|&(s2, t2)| self.occurs(s, x, s2, t2, depth + 1)),
+                    Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Slice(i) => self.occurs(s, x, st, *i, depth + 1),
+                    Ty::Array(i, n) => (n >= CONST_LEN_BASE && self.occurs(s, x, st, len_ty(n), depth + 1)) || self.occurs(s, x, st, *i, depth + 1),
+                    Ty::Fn(f) => f.params.iter().any(|&u| self.occurs(s, x, st, u, depth + 1)) || self.occurs(s, x, st, f.ret, depth + 1),
+                    Ty::Struct(sid) => self.p.structs[sid as usize].args.iter().any(|&u| self.occurs(s, x, st, u, depth + 1)),
+                    _ => false,
                 }
-                match (n >= CONST_LEN_BASE, k >= CONST_LEN_BASE) {
-                    (true, true) if sa == sb && n == k => true,
-                    (true, _) => {
-                        self.lens.insert((sa, n), (sb, k));
-                        true
-                    }
-                    (_, true) => {
-                        self.lens.insert((sb, k), (sa, n));
-                        true
-                    }
-                    _ => n == k,
+            }
+            fn bind(&mut self, s: u8, x: u8, st: u8, t: Ty) -> bool {
+                // (`T = Box<T>` has no finite solution: no overlap)
+                if self.occurs(s, x, st, t, 0) {
+                    return false;
                 }
+                self.tys.insert((s, x), (st, t));
+                true
             }
             fn ty(&mut self, sa: u8, a: Ty, sb: u8, b: Ty, depth: u32) -> bool {
                 if depth > 32 {
@@ -5279,19 +5273,16 @@ impl Program {
                 }
                 match (a, b) {
                     (Ty::Param(x), Ty::Param(y)) if sa == sb && x == y => true,
-                    (Ty::Param(x), _) => {
-                        self.tys.insert((sa, x), (sb, b));
-                        true
-                    }
-                    (_, Ty::Param(y)) => {
-                        self.tys.insert((sb, y), (sa, a));
-                        true
-                    }
+                    (Ty::Param(x), _) => self.bind(sa, x, sb, b),
+                    (_, Ty::Param(y)) => self.bind(sb, y, sa, a),
                     // (an associated type, `T::Item`, may be any type)
                     (Ty::Assoc(_), _) | (_, Ty::Assoc(_)) => true,
                     (Ty::Ref(m, x), Ty::Ref(n, y)) | (Ty::Ptr(m, x), Ty::Ptr(n, y)) => m == n && self.ty(sa, *x, sb, *y, depth + 1),
                     (Ty::Box(x), Ty::Box(y)) | (Ty::Slice(x), Ty::Slice(y)) => self.ty(sa, *x, sb, *y, depth + 1),
-                    (Ty::Array(x, n), Ty::Array(y, k)) => self.len(sa, n, sb, k) && self.ty(sa, *x, sb, *y, depth + 1),
+                    (Ty::Array(x, n), Ty::Array(y, k)) => {
+                        let lens = if n < CONST_LEN_BASE && k < CONST_LEN_BASE { n == k } else { self.ty(sa, len_ty(n), sb, len_ty(k), depth + 1) };
+                        lens && self.ty(sa, *x, sb, *y, depth + 1)
+                    }
                     (Ty::Fn(f), Ty::Fn(g)) => {
                         f.params.len() == g.params.len()
                             && f.params.iter().zip(&g.params).all(|(&u, &v)| self.ty(sa, u, sb, v, depth + 1))
@@ -5309,7 +5300,7 @@ impl Program {
                 }
             }
         }
-        U { p: self, tys: FxMap::default(), lens: FxMap::default() }.ty(0, a, 1, b, 0)
+        U { p: self, tys: FxMap::default() }.ty(0, a, 1, b, 0)
     }
 
     /// Of the inherent methods with `self` overloading `id` (in impls for other instances of the type), the one whose
@@ -5355,6 +5346,12 @@ impl Program {
                 (Ty::Ptr(..), _) => false,
                 // (and beneath arrays, slices and boxes: `W<[&i32; 1]>` is not `W<[&mut i32; 1]>`)
                 (Ty::Array(x, _), Ty::Array(y, _)) | (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) => deep(p, *x, *y, depth + 1),
+                // (and in a function pointer's parameters and result: `W<fn(&i32)>` is not `W<fn(&mut i32)>`)
+                (Ty::Fn(f), Ty::Fn(g)) => {
+                    f.params.len() == g.params.len()
+                        && f.params.iter().zip(&g.params).all(|(&u, &v)| deep(p, u, v, depth + 1))
+                        && deep(p, f.ret, g.ret, depth + 1)
+                }
                 (Ty::Struct(x), Ty::Struct(y)) if x != y => {
                     let (xa, ya) = (&p.structs[x as usize].args, &p.structs[y as usize].args);
                     xa.len() != ya.len() || xa.iter().zip(ya).all(|(&u, &v)| deep(p, u, v, depth + 1))
