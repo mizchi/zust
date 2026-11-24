@@ -2655,7 +2655,12 @@ impl Cx<'_> {
     pub(crate) fn check_unsafe_call(&self, id: u32, pos: Sp) -> R<()> {
         if self.unsafe_ok == 0 && pos.line != 0 && self.prog.sigs[id as usize].is_unsafe {
             let n = self.prog.names[id as usize].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
-            return err(pos, format!("call to unsafe function `{}` is unsafe and requires unsafe block (E0133)", n.strip_prefix("__core_").unwrap_or(n)));
+            // (`__core_ptr_swap` is `ptr::swap`, kept apart from `mem::swap`'s `__core_swap`)
+            let shown = match n.strip_prefix("__core_").unwrap_or(n) {
+                "ptr_swap" => "ptr::swap",
+                x => x,
+            };
+            return err(pos, format!("call to unsafe function `{shown}` is unsafe and requires unsafe block (E0133)"));
         }
         Ok(())
     }

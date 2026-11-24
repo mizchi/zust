@@ -4062,3 +4062,44 @@ fn part26_review_2() {
     let d = check("trait Tr { fn get(&self) -> i32; }\nimpl Tr for &i32 {\n    fn get(&self) -> i32 { **self }\n}\nfn main() {\n    let a = 1;\n    let b = 2;\n    let mut slot = &a;\n    let x: &mut &i32 = &mut slot;\n    let y: &dyn Tr = x;\n    *x = &b;\n    println!(\"{}\", y.get());\n}\n");
     assert!(d.len() == 1 && d[0].0 == 11 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
 }
+
+#[test]
+fn part27_two_phase_arg_reborrows() {
+    // (a call's implicit `&mut` argument reborrow is a two-phase borrow, also without the region check: reserved (a
+    // shared loan) until the arguments are evaluated, then taken. `f(x, *x)` and `f(x, x.len())` read `*x` while it
+    // is reserved; `f(x, &*x)` conflicts when it is taken, `f(x, g(x))` while it is reserved; a `&` argument's reborrow
+    // lives until the call (`f(x, x)` with `f(&i32, &mut i32)`)
+    assert_eq!(check("fn f(_a: &mut i32, _b: i32) {}\nfn main() {\n    let mut v = 0;\n    let x = &mut v;\n    f(x, *x);\n}\n"), vec![], "m3");
+    assert_eq!(check("fn f(_a: &mut Vec<i32>, _b: usize) {}\nfn main() {\n    let mut v = vec![1];\n    let x = &mut v;\n    f(x, x.len());\n}\n"), vec![], "m4");
+    assert_eq!(check("fn main() {\n    let mut a = 1;\n    let mut b = 2;\n    let x = &mut a;\n    let y = &mut b;\n    std::mem::swap(x, y);\n    std::mem::swap(x, y);\n    println!(\"{} {}\", x, y);\n}\n"), vec![], "n2");
+    assert_eq!(check("fn first<'a>(v: &'a mut Vec<i32>, _k: usize) -> &'a mut i32 { &mut v[0] }\nfn main() {\n    let mut v = vec![1, 2];\n    let x = &mut v;\n    let r = first(x, x.len());\n    *r = 5;\n    x.push(3);\n}\n"), vec![], "n4");
+    assert_eq!(check("use std::collections::HashMap;\nfn ins(m: &mut HashMap<i32, i32>, k: i32, v: i32) { m.insert(k, v); }\nfn main() {\n    let mut m = HashMap::new();\n    let r = &mut m;\n    ins(r, 1, r.len() as i32);\n    let n = r.len();\n    ins(r, 2, n as i32);\n    let s = String::from(\"a\");\n    let t = &mut s.clone();\n    t.push_str(&s);\n    println!(\"{:?}\", m);\n}\n"), vec![], "n5");
+    let d = check("fn f(_a: &mut i32, _b: &i32) {}\nfn main() {\n    let mut v = 0;\n    let x = &mut v;\n    f(x, &*x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot borrow `*x` as mutable because it is also borrowed as immutable"), "{d:?}");
+    let d = check("fn f(_a: &i32, _b: &mut i32) {}\nfn main() {\n    let mut v = 0;\n    let x = &mut v;\n    f(x, x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot borrow `*x` as mutable because it is also borrowed as immutable"), "{d:?}");
+    let d = check("fn g(x: &mut i32) -> i32 { *x }\nfn f(_a: &mut i32, _b: i32) {}\nfn main() {\n    let mut v = 0;\n    let x = &mut v;\n    f(x, g(x));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("cannot borrow `*x` as mutable more than once at a time"), "{d:?}");
+}
+
+#[test]
+fn part27_ptr_swap() {
+    // (`ptr::swap` takes two raw pointers, which may be the same: `ptr::swap(t, t)` is no two unique borrows (as
+    // `mem::swap(x, x)` is, E0499), raw pointers can be passed, and a call outside `unsafe` is E0133)
+    assert_eq!(check("use std::ptr;\nfn main() {\n    let mut a = 1;\n    let mut b = 2;\n    unsafe { ptr::swap(&mut a, &mut b); }\n    let pa: *mut i32 = &mut a;\n    let pb: *mut i32 = &mut b;\n    unsafe { std::ptr::swap(pa, pb); ptr::swap(pa, pa); }\n    let mut x = 5;\n    let mut y = 6;\n    std::mem::swap(&mut x, &mut y);\n    println!(\"{} {} {} {}\", a, b, x, y);\n}\n"), vec![], "o1");
+    assert_eq!(check("use std::ptr;\nfn d(t: &mut i32) {\n    unsafe { ptr::swap(t, t); }\n}\nfn main() {\n    let mut a = 1;\n    d(&mut a);\n    println!(\"{}\", a);\n}\n"), vec![], "q3");
+    let d = check("use std::ptr;\nfn main() {\n    let mut a = 1;\n    let mut b = 2;\n    ptr::swap(&mut a, &mut b);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("call to unsafe function `ptr::swap` is unsafe and requires unsafe block (E0133)"), "{d:?}");
+    let d = check("fn main() {\n    let mut a = 1;\n    let x = &mut a;\n    std::mem::swap(x, x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("cannot borrow `*x` as mutable more than once at a time"), "{d:?}");
+}
+
+#[test]
+fn part27_assoc_type_into_dyn() {
+    // (a generic fn whose signature names a lifetime or `'static`, calling a bound's method that returns its `Self`'s
+    // associated type: checked with placeholders, so `Box::new(v.into_item())` as a `Box<dyn X + 'static>` is E0310;
+    // with `where T::Item: 'a` it is accepted)
+    let d = check("trait X {}\ntrait Iter {\n    type Item: X;\n    fn into_item(self) -> Self::Item;\n}\nfn bad1<T: Iter>(v: T) -> Box<dyn X + 'static> {\n    let item = v.into_item();\n    Box::new(item)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("the associated type `<T as Iter>::Item` may not live long enough (it must outlive `'static`) (E0310)"), "{d:?}");
+    assert_eq!(check("trait X {}\ntrait Iter {\n    type Item: X;\n    fn into_item(self) -> Self::Item;\n}\nfn ok1<'a, T: Iter>(v: T) -> Box<dyn X + 'a>\n    where T::Item: 'a\n{\n    let item = v.into_item();\n    Box::new(item)\n}\nfn ok2<T: Iter>(v: T) -> Box<dyn X + 'static>\n    where T::Item: 'static\n{\n    Box::new(v.into_item())\n}\nfn main() {}\n"), vec![], "t3");
+}
