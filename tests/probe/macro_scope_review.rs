@@ -54,6 +54,9 @@ mod a {
 trait Mark {
     type Out;
 }
+impl<T> Mark for *const T {
+    type Out = u32;
+}
 impl<'a, T> Mark for &'a T {
     type Out = u8;
 }
@@ -76,5 +79,5 @@ fn main() {
     let r#let = 5;
     println!("{}", r#let);
     let mut y = 1i32;
-    println!("{} {}", size(&y), size(&mut y));
+    println!("{} {} {}", size(&y), size(&mut y), size(&y as *const i32));
 }

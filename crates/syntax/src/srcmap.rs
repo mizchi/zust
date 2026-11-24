@@ -208,8 +208,6 @@ fn env_values(src: String, cfg: &crate::cfg::CfgSet) -> String {
 #[allow(clippy::too_many_arguments)]
 fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, start: u32, map: &mut SrcMap, cfg: &crate::cfg::CfgSet, open: &mut Vec<(String, String)>) -> Result<String, String> {
     let src = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    // (the file as written: a `mod x;` not in it came from a macro's body (written_mod))
-    let raw = src.clone();
     // (edition 2021's reserved prefixes, before any macro takes the tokens as its input: `m!(foo#bar)`)
     if cfg.edition >= 2021 {
         if let Some(e) = crate::lexer::unknown_prefix(&src) {
@@ -230,6 +228,9 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         }
         None => src,
     };
+    // (the file as written, its cfgs evaluated, before any macro: a `mod x;` not in it came from a macro's body
+    // (written_mod))
+    let raw = src.clone();
     map.inputs.push(path.to_path_buf());
     // (the configured root, while its `extern crate` items are kept: the expansions below may move what follows)
     let configured = if map.inputs.len() == 1 && !map.externs.is_empty() { Some(src.clone()) } else { None };
@@ -396,7 +397,7 @@ fn written_mod(raw: &str, name: &str) -> bool {
     let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && b[toks[k].1] == c;
     let mut i = 0;
     while i < toks.len() {
-        if toks[i].0 == 0 && tk(i) == b"macro_rules" && sym(i + 1, b'!') && (sym(i + 3, b'{') || sym(i + 3, b'(')) {
+        if toks[i].0 == 0 && tk(i) == b"macro_rules" && sym(i + 1, b'!') && (sym(i + 3, b'{') || sym(i + 3, b'(') || sym(i + 3, b'[')) {
             let mut d = 0i32;
             let mut j = i + 3;
             while j < toks.len() {
