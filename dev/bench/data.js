@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795500651394,
+  "lastUpdate": 1795500655198,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -114399,6 +114399,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/b445821e7e0379b8ffdd779ea94d27d3a7ddf6b1"
         },
         "date": 1795499729574,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.4,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1846,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.06,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1519,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.47,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4670,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ab6134fe56d6ea78b6d17cbd48e03af8e3d17b24",
+          "message": "Merge pull request #115 from mizchi/docs/zustscript-article-sidebar\n\nzustscript の各記事に PC 用サイドバーを追加",
+          "timestamp": "2026-11-24T15:02:04+09:00",
+          "tree_id": "cb296073a11c9134951fec4f7493720ff5b32be4",
+          "url": "https://github.com/mizchi/zust/commit/ab6134fe56d6ea78b6d17cbd48e03af8e3d17b24"
+        },
+        "date": 1795500654682,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
