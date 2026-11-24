@@ -715,6 +715,30 @@ pub fn rename_user_collisions(src: &str, user_items: &[SrcItem]) -> Option<Strin
     Some(out)
 }
 
+/// b[i] is in a `//` comment or a string literal of its line (a block comment or a string over lines is not seen)
+fn in_comment_or_str(b: &[u8], i: usize) -> bool {
+    let mut k = b[..i].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1);
+    let mut in_str = false;
+    while k < i {
+        let c = b[k];
+        if in_str {
+            if c == b'\\' {
+                k += 1;
+            } else if c == b'"' {
+                in_str = false;
+            }
+        } else if c == b'"' {
+            in_str = true;
+        } else if c == b'/' && b.get(k + 1) == Some(&b'/') {
+            return true;
+        } else if c == b'\'' && b.get(k + 2) == Some(&b'\'') {
+            k += 2;
+        }
+        k += 1;
+    }
+    in_str
+}
+
 pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
     // (one pass over the bytes: the name after `struct ` / `enum ` / `trait ` / `type ` / `union `. It replaces a
     // search for each name: those were most of the cost of a no-op build of a large program)
@@ -724,62 +748,6 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
     let mut i = 0;
     while i < b.len() {
         let c = b[i];
-        // (not in a comment, a string or a char: a doc comment's `# struct IpAddr;` defines nothing)
-        if c == b'/' && b.get(i + 1) == Some(&b'/') {
-            i = b[i..].iter().position(|&x| x == b'\n').map_or(b.len(), |k| i + k);
-            continue;
-        }
-        if c == b'/' && b.get(i + 1) == Some(&b'*') {
-            let mut d = 0;
-            while i < b.len() {
-                if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
-                    d += 1;
-                    i += 2;
-                } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
-                    d -= 1;
-                    i += 2;
-                    if d == 0 {
-                        break;
-                    }
-                } else {
-                    i += 1;
-                }
-            }
-            continue;
-        }
-        if c == b'r' && (i == 0 || !is_id(b[i - 1])) && matches!(b.get(i + 1), Some(b'"' | b'#')) {
-            // (a raw string `r#".."#`: to its `"` and as many `#`)
-            let mut j = i + 1;
-            while j < b.len() && b[j] == b'#' {
-                j += 1;
-            }
-            if b.get(j) == Some(&b'"') {
-                let h = j - i - 1;
-                let mut k = j + 1;
-                while k < b.len() && !(b[k] == b'"' && k + h < b.len() && b[k + 1..=k + h].iter().all(|&x| x == b'#')) {
-                    k += 1;
-                }
-                i = (k + 1 + h).min(b.len());
-                continue;
-            }
-        }
-        if c == b'"' {
-            i += 1;
-            while i < b.len() && b[i] != b'"' {
-                i += if b[i] == b'\\' { 2 } else { 1 };
-            }
-            i += 1;
-            continue;
-        }
-        if c == b'\'' && (b.get(i + 1) == Some(&b'\\') || b.get(i + 2) == Some(&b'\'')) {
-            // (a char literal: `'"'`, `'\''`)
-            let mut j = i + 2;
-            while j < b.len() && b[j] != b'\'' {
-                j += 1;
-            }
-            i = j + 1;
-            continue;
-        }
         if matches!(c, b's' | b'e' | b't' | b'u') && (i == 0 || !is_id(b[i - 1])) {
             let rest = &b[i..];
             let kw = [&b"struct "[..], b"enum ", b"trait ", b"type ", b"union "].into_iter().find(|k| rest.starts_with(k));
@@ -793,7 +761,9 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
                     e += 1;
                 }
                 let w = &user_src[a..e];
-                if SHADOWABLE.contains(&w) && !defined.contains(&w) {
+                // (not in a comment or a string: a doc comment's `# struct IpAddr;`, `#[doc = " # struct IpAddr;"]`
+                // defines nothing. Looked at only for a name that would count, from the line's start)
+                if SHADOWABLE.contains(&w) && !defined.contains(&w) && !in_comment_or_str(b, i) {
                     defined.push(w);
                 }
                 i = e.max(i + 1);
