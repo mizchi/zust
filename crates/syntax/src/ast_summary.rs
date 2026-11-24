@@ -2504,6 +2504,16 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 Some(ow) => format!("{}::{}", ow.base, n),
                 None => n.clone(),
             };
+            // (an impl's whose type names the impl's lifetimes: its codes against them)
+            if let Some(r) = owner.and_then(|o| o.regions.as_deref()).filter(|r| !r.lts.is_empty() && crate::regions::names_lt(t)) {
+                let tps: Vec<&str> = owner.map(|o| o.generics.iter().map(|g| g.0.as_str()).collect()).unwrap_or_default();
+                let mut s = crate::regions::Slots { lts: r.lts.clone(), tparams: tps, self_slots: &r.self_slots, any: false, in_fn: 0 };
+                let mut v = vec![];
+                s.slots(t, false, &mut v);
+                if s.any && !v.contains(&crate::types::R_UNKNOWN) && v.iter().any(|&c| (c as usize) < r.lts.len()) {
+                    sm.const_regions.push((name.clone(), v));
+                }
+            }
             sm.consts.push((name, tysyn(t, owner.map(|o| &o.self_ty))?, item.init_text.clone()));
         }
         ItemKind::Static(m, n, t, _) => {
