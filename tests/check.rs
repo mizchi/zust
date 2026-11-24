@@ -167,7 +167,8 @@ fn errors_of_items_in_fn_bodies_at_their_lines() {
     let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
     let d = s.check(bad);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2], "{d:?}");
-    assert!(d[0].msg.contains("cannot find type `T`"), "{d:?}");
+    // (rustc's E0401: the inner fn cannot name the outer one's parameter)
+    assert!(d[0].msg.contains("can't use generic parameters from outer item (E0401)"), "{d:?}");
     let dir = std::env::temp_dir().join(format!("zust-unhoist-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let e = Session2::new(Options2 { jobs: 1, ..Options2::default() }).build(bad, &dir.join("a")).unwrap_err();
@@ -1519,6 +1520,35 @@ fn tuple_constructors_and_leading_super() {
         ] {
             assert_eq!(check(edition, src), None, "{edition} {src}");
         }
+    }
+}
+
+#[test]
+fn generic_parameters_from_outer_item() {
+    // (E0401: an item in a fn body that names a generic parameter or `Self` of an item around it; each expected line,
+    // column and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    let src = "fn foo<U>(v: Vec<U>) -> U {\n    fn bar(w: Vec<U>) -> u8 { 0 }\n    v.into_iter().next().unwrap()\n}\nfn main() {}\n";
+    assert_eq!(check(src), at(2, 19, "can't use generic parameters from outer item (E0401)"), "type");
+    let src = "fn foo<const X: u32>() {\n    fn bar() -> u32 {\n        X\n    }\n}\nfn main() {}\n";
+    assert_eq!(check(src), at(3, 9, "can't use generic parameters from outer item (E0401)"), "const");
+    let src = "struct S;\nimpl S {\n    fn f() {\n        fn g(_: Self) {}\n    }\n}\nfn main() {}\n";
+    assert_eq!(check(src), at(4, 17, "can't use `Self` from outer item (E0401)"), "self_type");
+    let src = "struct S0<T>(T);\nimpl<T> S0<T> {\n    fn foo() {\n        fn bar() -> S0<i32> {\n            Self(0)\n        }\n    }\n}\nfn main() {}\n";
+    assert_eq!(check(src), at(5, 13, "can't reference `Self` constructor from outer item (E0401)"), "self_ctor");
+    // (the item's own parameter of the name, a non-generic impl's constructor (a warning), lifetimes, an impl of a
+    // local struct)
+    for src in [
+        "fn foo<T>(x: T) {\n    fn bar<T>(y: T) {}\n}\nfn main() {}\n",
+        "struct S0(usize);\nimpl S0 {\n    fn foo() {\n        fn bar() -> S0 { Self(0) }\n    }\n}\nfn main() {}\n",
+        "fn f<'a>(x: &'a str) -> usize {\n    fn g<'b>(y: &'b str) -> usize { y.len() }\n    g(x)\n}\nfn main() {}\n",
+        "fn f<T>() {\n    struct L;\n    impl L { fn new() -> Self { L } }\n}\nfn main() {}\n",
+    ] {
+        assert_eq!(check(src), None, "{src}");
     }
 }
 

@@ -1653,6 +1653,7 @@ compile-fail	const-generics/defaults/wfness.rs
 check-pass	const-generics/deref-into-array-generic.rs
 compile-fail	const-generics/early/closing-args-token.rs
 compile-fail	const-generics/early/const-expression-parameter.rs
+compile-fail	const-generics/early/const-param-from-outer-fn.rs
 run-pass	const-generics/early/const-param-hygiene.rs
 compile-fail	const-generics/early/const_arg_trivial_macro_expansion-2.rs
 compile-fail	const-generics/early/invalid-const-arguments.rs
@@ -3052,6 +3053,7 @@ run-pass	generics/generic-ivec-leak.rs
 compile-fail	generics/generic-lifetime-trait-impl.rs
 run-pass	generics/generic-newtype-struct.rs
 run-pass	generics/generic-object.rs
+compile-fail	generics/generic-params-nested-fn-scope-error.rs
 run-pass	generics/generic-recursive-tag.rs
 run-pass	generics/generic-static-methods.rs
 run-pass	generics/generic-tag-corruption.rs
@@ -4392,6 +4394,7 @@ compile-fail	macros/undefined-macro-in-impl.rs
 check-pass	macros/user-defined-macro-rules.rs
 compile-fail	macros/vec-macro-in-pattern.rs
 compile-fail	macros/write-missing-destination.rs
+compile-fail	malformed/do-not-ice-on-note_and_explain.rs
 compile-fail	malformed/issue-107423-unused-delim-only-one-no-pair.rs
 compile-fail	malformed/malformed-regressions.rs
 compile-fail	malformed/malformed-special-attrs.rs
@@ -6343,6 +6346,7 @@ compile-fail	resolve/field-and-method-in-self-not-available-in-assoc-fn.rs
 compile-fail	resolve/filter-intrinsics.rs
 compile-fail	resolve/fn-item-cant-capture-dynamic-env.rs
 compile-fail	resolve/function-module-ambiguity-error-71406.rs
+compile-fail	resolve/generic-params-from-outer-item-suggestion.rs
 check-pass	resolve/generic-struct-and-fn-share-name.rs
 check-pass	resolve/hidden_glob_reexports.rs
 compile-fail	resolve/ice-inconsistent-resolution-151213.rs
@@ -6395,6 +6399,7 @@ check-pass	resolve/issue-57523.rs
 compile-fail	resolve/issue-5927.rs
 compile-fail	resolve/issue-60057.rs
 compile-fail	resolve/issue-65025-extern-static-parent-generics.rs
+compile-fail	resolve/issue-65035-static-with-parent-generics.rs
 compile-fail	resolve/issue-6642.rs
 compile-fail	resolve/issue-6702.rs
 compile-fail	resolve/issue-69401-trait-fn-no-body-ty-local.rs
@@ -6443,6 +6448,7 @@ run-pass	resolve/resolve-pseudo-shadowing.rs
 run-pass	resolve/resolve-same-name-struct.rs
 compile-fail	resolve/resolve-self-in-impl-2.rs
 compile-fail	resolve/resolve-speculative-adjustment.rs
+compile-fail	resolve/resolve-type-param-in-item-in-trait.rs
 compile-fail	resolve/resolve-unknown-trait.rs
 compile-fail	resolve/resolve-variant-assoc-item.rs
 check-pass	resolve/slice-as-slice.rs
@@ -6709,6 +6715,7 @@ compile-fail	self/point-at-arbitrary-self-type-method.rs
 compile-fail	self/point-at-arbitrary-self-type-trait-method.rs
 run-pass	self/self-as-trait-call-in-method-body.rs
 check-pass	self/self-ctor-nongeneric.rs
+compile-fail	self/self-ctor.rs
 check-pass	self/self-in-method-body-resolves.rs
 run-pass	self/self-in-mut-slot-immediate-value.rs
 compile-fail	self/self-infer.rs
@@ -7794,6 +7801,7 @@ compile-fail	type/option-ref-advice.rs
 compile-fail	type/struct-constructor-as-value.rs
 check-pass	type/type-alias-bounds.rs
 compile-fail	type/type-annotation-needed.rs
+compile-fail	type/type-arg-out-of-scope.rs
 compile-fail	type/type-ascription-instead-of-initializer.rs
 compile-fail	type/type-ascription-instead-of-statement-end.rs
 compile-fail	type/type-ascription-with-fn-call.rs

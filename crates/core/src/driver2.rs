@@ -1016,10 +1016,23 @@ impl Session2 {
                     Some(sm) => sm,
                     None => {
                         let ow = if pass == 1 { crate::ast_summary::owner_of(it, &sums) } else { None };
-                        crate::ast_summary::parse_and_summarize(&src, it, ow.as_ref()).map_err(|e| match (e.strip_prefix('\u{2}'), it.kind) {
-                            // (`\u{2}msg`: an impl member's error that is at its impl's header)
-                            (Some(m), ItemKind::ImplMember(h)) => format!("{}:1: {m}", items[h as usize].line),
-                            _ => relocate(e.trim_start_matches('\u{2}').to_string(), it),
+                        crate::ast_summary::parse_and_summarize(&src, it, ow.as_ref()).map_err(|e| {
+                            let e = match (e.strip_prefix('\u{2}'), it.kind) {
+                                // (`\u{2}msg`: an impl member's error that is at its impl's header)
+                                (Some(m), ItemKind::ImplMember(h)) => format!("{}:1: {m}", items[h as usize].line),
+                                _ => relocate(e.trim_start_matches('\u{2}').to_string(), it),
+                            };
+                            // (an item moved out of a fn body that cannot see a name of the items around it: rustc's
+                            // E0401, where that is what it names)
+                            let line_start = src[..it.start.min(src.len())].rfind('\n').map_or(0, |p| p + 1);
+                            let hoisted = src[line_start..].starts_with(crate::prep::HOIST_MARK) || src[it.start.min(src.len())..].starts_with(crate::prep::HOIST_MARK);
+                            let unseen = hoisted || ["`Self` is only available in impls", "cannot find type `", "cannot find value `"].iter().any(|m| e.contains(m));
+                            if unseen && self.ctx.map.inputs.is_empty() && src.contains(crate::prep::HOIST_MARK) {
+                                if let Some(o) = outer_generics(src0, &crate::lexer::tokenize(src0.as_bytes())) {
+                                    return o;
+                                }
+                            }
+                            e
                         })?
                     }
                 };
@@ -1036,6 +1049,21 @@ impl Session2 {
         let mut late_err: Option<String> = None;
         if let Some(toks) = &src0_toks {
             if let Some(e) = private_path(src0, toks, &externs, self.opts.edition < 2018, &mut fpriv, &mut late_err) {
+                return Err(e);
+            }
+        }
+        // (E0401: an item in a fn body that names a generic parameter, or `Self`, of an item around it; read where an
+        // item was moved out of a fn body, after the items parse)
+        if self.ctx.map.inputs.is_empty() && src.contains(crate::prep::HOIST_MARK) {
+            let own;
+            let toks: &[(u8, usize, usize)] = match &src0_toks {
+                Some(t) => t,
+                None => {
+                    own = crate::lexer::tokenize(src0.as_bytes());
+                    &own
+                }
+            };
+            if let Some(e) = outer_generics(src0, toks) {
                 return Err(e);
             }
         }
@@ -6382,6 +6410,191 @@ impl<'a, 'b> Ambiguity<'a, 'b> {
             _ => 3,
         }
     }
+}
+
+/// E0401: an item written in a fn body (a fn, struct, enum, union, type alias, const, static, trait, impl, module)
+/// that names a generic parameter of an item around that fn, or its `Self`: "can't use generic parameters from outer
+/// item", "can't use `Self` from outer item", at the first such name. The names the nested item's own generics give
+/// are its own. Not in attributes or macro definitions
+fn outer_generics(src: &str, toks: &[(u8, usize, usize)]) -> Option<String> {
+    let b = src.as_bytes();
+    let n = toks.len();
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    // (an identifier; not a lifetime, whose `'` the tokens leave out)
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0 && (x.1 == 0 || b[x.1 - 1] != b'\''));
+    let mut close = vec![usize::MAX; n];
+    let mut stack: Vec<usize> = vec![];
+    for k in 0..n {
+        if toks[k].0 == 1 {
+            match b[toks[k].1] {
+                b'(' | b'[' | b'{' => stack.push(k),
+                b')' | b']' | b'}' => {
+                    if let Some(o) = stack.pop() {
+                        close[o] = k;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    // (the names a `<..>` of generics from token lt declares, and the token past its `>`)
+    let generics = |lt: usize| -> (Vec<&[u8]>, usize) {
+        let mut out = vec![];
+        let (mut k, mut d, mut start) = (lt + 1, 0i32, true);
+        while k < n {
+            match t(k) {
+                b"<" | b"(" | b"[" => d += 1,
+                b">" if t(k - 1) != b"-" => {
+                    if d == 0 {
+                        return (out, k + 1);
+                    }
+                    d -= 1;
+                }
+                b")" | b"]" => d -= 1,
+                b"," if d == 0 => {
+                    start = true;
+                    k += 1;
+                    continue;
+                }
+                b"const" if start => {
+                    k += 1;
+                    continue;
+                }
+                x if start && is_id(k) && t(k.wrapping_sub(1)) != b"'" => out.push(x),
+                _ => {}
+            }
+            start = false;
+            k += 1;
+        }
+        (out, n)
+    };
+    struct Ctx<'s> {
+        visible: Vec<&'s [u8]>,
+        beyond: Vec<&'s [u8]>,
+        self_ok: bool,
+        self_beyond: bool,
+        /// (the `Self` beyond is a generic impl's or a trait's: its constructor is an error too, not a warning)
+        self_generic: bool,
+    }
+    // (what context a range of tokens is: an item's header or a type's body (0), a fn body (1), an impl's or trait's
+    // body (2))
+    fn walk<'s>(
+        lo: usize,
+        hi: usize,
+        cx: &Ctx<'s>,
+        body: u8,
+        t: &dyn Fn(usize) -> &'s [u8],
+        is_id: &dyn Fn(usize) -> bool,
+        close: &[usize],
+        generics: &dyn Fn(usize) -> (Vec<&'s [u8]>, usize),
+    ) -> Option<(usize, &'static str)> {
+        let mut k = lo;
+        while k < hi {
+            let tk = t(k);
+            if tk == b"#" && (t(k + 1) == b"[" || t(k + 1) == b"!" && t(k + 2) == b"[") {
+                let o = if t(k + 1) == b"[" { k + 1 } else { k + 2 };
+                k = close[o].saturating_add(1);
+                continue;
+            }
+            if tk == b"macro_rules" && t(k + 1) == b"!" {
+                let o = if is_id(k + 2) { k + 3 } else { k + 2 };
+                k = close.get(o).map_or(hi, |&e| e.saturating_add(1));
+                continue;
+            }
+            // (an item: its kind, the token of its generics' `<`)
+            let prev = t(k.wrapping_sub(1));
+            let item = match tk {
+                b"fn" if is_id(k + 1) => Some("fn"),
+                b"struct" | b"enum" | b"union" | b"trait" if is_id(k + 1) => Some("adt"),
+                b"impl" if matches!(prev, b"}" | b";" | b"{" | b"]" | b"unsafe" | b"") => Some("impl"),
+                b"type" if is_id(k + 1) && body != 2 => Some("adt"),
+                b"const" | b"static" if body == 1 && is_id(k + 1) && t(k + 2) == b":" || body == 1 && tk == b"static" && t(k + 1) == b"mut" => Some("value"),
+                b"mod" if is_id(k + 1) && t(k + 2) == b"{" => Some("mod"),
+                _ => None,
+            };
+            if let Some(kind) = item {
+                let lt = if kind == "impl" { k + 1 } else { k + 2 };
+                let (own, mut j) = if t(lt) == b"<" { generics(lt) } else { (vec![], lt) };
+                // (the item's extent: its body's brace, or its `;`)
+                let mut open = usize::MAX;
+                while j < hi {
+                    match t(j) {
+                        b"{" => {
+                            open = j;
+                            break;
+                        }
+                        b";" => break,
+                        b"(" | b"[" if close[j] != usize::MAX => j = close[j],
+                        _ => {}
+                    }
+                    j += 1;
+                }
+                let end = if open != usize::MAX { close[open].min(hi) } else { j.min(hi) };
+                // (a barrier where the item is in a fn body: what was visible is beyond it)
+                let generic_self = tk == b"trait" || kind == "impl" && !own.is_empty();
+                let ncx = if body == 1 {
+                    let mut beyond = cx.beyond.clone();
+                    beyond.extend(cx.visible.iter().copied());
+                    let self_ok = kind == "impl" || tk == b"trait";
+                    Ctx { visible: own.clone(), beyond, self_ok, self_beyond: cx.self_beyond || cx.self_ok, self_generic: if self_ok { generic_self } else { cx.self_generic } }
+                } else {
+                    let mut visible = cx.visible.clone();
+                    visible.extend(own.iter().copied());
+                    let opens = kind == "impl" || tk == b"trait";
+                    Ctx { visible, beyond: cx.beyond.clone(), self_ok: cx.self_ok || opens, self_beyond: cx.self_beyond, self_generic: if opens { generic_self } else { cx.self_generic } }
+                };
+                // (the header, then the body)
+                let head_end = if open != usize::MAX { open } else { end };
+                if let Some(e) = walk(k + 1, head_end, &ncx, 0, t, is_id, close, generics) {
+                    return Some(e);
+                }
+                if open != usize::MAX {
+                    let inner = match kind {
+                        "fn" => 1,
+                        "impl" => 2,
+                        _ if tk == b"trait" => 2,
+                        "mod" => 3,
+                        _ => 0,
+                    };
+                    let mcx;
+                    let bcx = if inner == 3 {
+                        mcx = Ctx { visible: vec![], beyond: vec![], self_ok: false, self_beyond: false, self_generic: false };
+                        &mcx
+                    } else {
+                        &ncx
+                    };
+                    if let Some(e) = walk(open + 1, end, bcx, if inner == 3 { 0 } else { inner }, t, is_id, close, generics) {
+                        return Some(e);
+                    }
+                }
+                k = end + 1;
+                continue;
+            }
+            if is_id(k) && !matches!(prev, b"." | b"'") && !(prev == b":" && t(k.wrapping_sub(2)) == b":") {
+                if tk == b"Self" && cx.self_beyond && !cx.self_ok {
+                    // (`Self(0)` / `Self` as a value: the constructor, which a non-generic impl's only warns of)
+                    let value = t(k + 1) == b"(" || matches!(prev, b"=" | b"(" | b"," | b"return" | b"{" | b";" | b">") && t(k + 1) != b"::" && t(k + 1) != b"{" && prev != b">";
+                    if !value {
+                        return Some((k, "can't use `Self` from outer item (E0401)"));
+                    }
+                    if cx.self_generic {
+                        return Some((k, "can't reference `Self` constructor from outer item (E0401)"));
+                    }
+                }
+                if cx.beyond.contains(&tk) && !cx.visible.contains(&tk) {
+                    return Some((k, "can't use generic parameters from outer item (E0401)"));
+                }
+            }
+            k += 1;
+        }
+        None
+    }
+    let cx = Ctx { visible: vec![], beyond: vec![], self_ok: false, self_beyond: false, self_generic: false };
+    let (at, msg) = walk(0, n, &cx, 0, &t, &is_id, &close, &generics)?;
+    let off = toks[at].1;
+    let line = b[..off].iter().filter(|&&c| c == b'\n').count() + 1;
+    let col = off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1;
+    Some(format!("{line}:{col}: {msg}"))
 }
 
 /// A name a module defines, for duplicate_name
