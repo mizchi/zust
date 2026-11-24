@@ -2241,8 +2241,23 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                         // (the name itself, then after its statement: `let release = release(1);` calls the item. An
                         // `if let` / `while let` binds in its body only: from its `{`, not in its scrutinee)
                         let cond = q > b + 1 && (is_id(q - 1, b"if") || is_id(q - 1, b"while") || is_sym(q - 1, b'&'));
+                        // (the scrutinee's own blocks are not the body: `= { 3 } {`, after an operator, and the block of
+                        // a `match` / `if` / `loop` .. in it)
+                        let mut pend = 0usize;
                         let mut j = n + 1;
-                        while j < be && !is_sym(j, b';') && !(cond && is_sym(j, b'{')) {
+                        while j < be && !is_sym(j, b';') {
+                            if cond && is_sym(j, b'{') {
+                                let after_op = toks[j - 1].0 == 1 && b"=+-*/%&|^!<>,([".contains(&s[toks[j - 1].1]);
+                                if (pend > 0 || after_op) && close[j] != usize::MAX {
+                                    pend = pend.saturating_sub(1);
+                                    j = close[j] + 1;
+                                    continue;
+                                }
+                                break;
+                            }
+                            if cond && toks[j].0 == 0 && matches!(tok(j), b"match" | b"if" | b"while" | b"for" | b"loop" | b"unsafe" | b"async" | b"else") {
+                                pend += 1;
+                            }
                             if (is_sym(j, b'(') || is_sym(j, b'[') || (!cond && is_sym(j, b'{'))) && close[j] != usize::MAX {
                                 j = close[j];
                             }

@@ -84,6 +84,14 @@ fn main() {
         let r: i32 = release;
         println!("{}", r + 1);
     }
+    if let release = { 3 } {
+        let r: i32 = release;
+        println!("{}", r * 2);
+    }
+    if let release = match 1 { _ => 5 } {
+        let r: i32 = release;
+        println!("{}", r * 3);
+    }
     let f = Flag::<true, u8>(9);
     println!("{} {}", made::<u8>(), f.0);
     let c = C::new(3);
