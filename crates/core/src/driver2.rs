@@ -8340,7 +8340,7 @@ impl Session2 {
 fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
     let Some((l, rest)) = e.split_once(":1: ") else { return e.to_string() };
     let Ok(line) = l.parse::<usize>() else { return e.to_string() };
-    let name = ["cannot find type `", "cannot find trait `", "cannot find value `", "cannot find struct `"]
+    let name = ["cannot find type `", "cannot find trait `", "cannot find value `", "cannot find struct `", "the name `"]
         .iter()
         .find_map(|p| rest.strip_prefix(p))
         .and_then(|r| r.split('`').next());

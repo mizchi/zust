@@ -1308,7 +1308,8 @@ impl Program {
                 .chain(sm.enums.iter().map(|(n, v)| (n, AdtShape::Enum(v.clone()))));
             for (name, shape) in adts {
                 if p.struct_index.contains_key(name) {
-                    return Err(format!("{}:1: duplicate definition of `{name}`", it.line));
+                    // (rustc's E0428, at the second's name: the driver moves it to that line)
+                    return Err(format!("{}:1: the name `{name}` is defined multiple times (E0428)", it.line));
                 }
                 p.struct_index.insert(name.clone(), sdefs.len() as u32);
                 if let Some(r) = &sm.adt_regions {

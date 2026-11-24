@@ -2309,6 +2309,7 @@ run-pass	dst/unsized-str-mutability.rs
 check-pass	dst/unsized-tuple-trait-tail.rs
 compile-fail	duplicate/duplicate-parameter.rs
 compile-fail	duplicate/duplicate-type-parameter.rs
+compile-fail	duplicate/multiple-types-with-same-name-and-derive.rs
 compile-fail	dyn-compatibility/almost-supertrait-associated-type.rs
 compile-fail	dyn-compatibility/assoc_type_bounds.rs
 check-pass	dyn-compatibility/assoc_type_bounds_sized.rs
@@ -6417,6 +6418,7 @@ compile-fail	resolve/missing-in-namespace.rs
 compile-fail	resolve/missing-type-in-scope-58712.rs
 compile-fail	resolve/module-type-name-conflict.rs
 compile-fail	resolve/module-used-as-struct-constructor.rs
+compile-fail	resolve/multiple_definitions_attribute_merging.rs
 compile-fail	resolve/name-clash-nullary.rs
 check-pass	resolve/name-collision-in-trait-fn-sig.rs
 compile-fail	resolve/no-implicit-prelude-nested.rs
