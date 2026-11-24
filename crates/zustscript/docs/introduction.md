@@ -1,8 +1,10 @@
 # zustscript 入門 ── JavaScript と WebAssembly のためのフロントエンド言語
 
-zustscript は、TypeScript のアプリに組み込める静的型付き言語の試作です。画面を組み立てる JSX も、整数の幅や浮動小数点の精度を指定した計算も、同じ言語で書けます。ふつうの関数は読みやすい JavaScript にコンパイルされ、選んだ関数だけを WebAssembly（Wasm）で動かせます。
+zustscript は、Rust の `enum` や `match` と、TypeScript でおなじみのアロー関数や JSX を組み合わせた、フロントエンド向けの静的型付き言語です。TypeScript のアプリに一つのモジュールから組み込めます。
 
-TypeScript のコードとは型定義を通じてつながります。たとえば、既存のアプリで使っている座標の型を zustscript に取り込めます。逆に、zustscript で書いた関数を公開すると、コンパイラの `zsc` が ES モジュールと `.d.ts` を生成するので、TypeScript 側でも引数と戻り値の型が分かります。
+TypeScript で「状態を判別 union で表す」「元の配列を変更せず、`map` や `filter` で新しい値を作る」といった関数型の書き方をしていれば、その設計を zustscript にも持ち込めます。JS 上ではレコードはオブジェクト、配列は配列のままです。対応する TypeScript の型を `import type` で読み込めば、既存の値を呼び出し用に詰め直す手間もありません。
+
+コンパイラの `zsc` は、Rust で実装した zustscript 専用の型検査器でソースを検査します。通常の関数からは、TypeScript アプリがそのまま import できる JavaScript と型定義（`.d.ts`）を生成します。`@wasm` を付けた関数からは Rust ソースを生成し、Rust のサブセットを扱うコンパイラ `zustc` がその Rust コードを型検査して WebAssembly（Wasm）にコンパイルします。この言語とコンパイラは現在開発中です。
 
 ## 状態を enum で表し、match で読み出す
 
@@ -44,9 +46,15 @@ export fn pending(state: State) -> f64 {
     Busy(n) => n,
   }
 }
+
+export fn pending_counts(states: Array<State>) -> Array<f64> {
+  states.map(pending).filter((n) => n > 0.0)
+}
 ```
 
 JavaScript から `pending({ kind: "busy", jobs: 3 })` と呼ぶと `3` が返ります。`Idle` はタグだけなので括弧を付けず、`Busy(n)` は `jobs` の値を取り出します。値が複数あれば、括弧の中の変数はタグを除いた **TypeScript のフィールド宣言順** に対応します。たとえば `height, width` の順で定義した長方形なら、幅を高さで割る式は `Rect(h, w) => w / h` です。
+
+`pending_counts` は各状態を件数に変換し、正の件数だけを新しい配列に残します。TypeScript 側から `[{ kind: "idle" }, { kind: "busy", jobs: 3 }]` を渡したときの戻り値は `[3]` です。
 
 ## 関数ごとに WebAssembly を選ぶ
 
@@ -130,7 +138,7 @@ for (const cursor of [{ x: 3, y: 4 }, { x: 0, y: 6 }]) {
 node try.mjs ./js/pick.js
 ```
 
-次に `zustc` をビルドし、同じ `pick.zsc` を `--all-js` を外してコンパイルします。出力先の `wasm/` には、JS と型定義に加えて、中間生成物の `pick.wasm.rs` と実行用の `pick.wasm` ができます。
+次に `zustc` をビルドし、同じ `pick.zsc` を `--all-js` を外してコンパイルします。出力先の `wasm/` には、JS と型定義に加えて、中間生成物の `pick.wasm.rs` と実行用の `pick.wasm` ができます。たとえば `wasm/pick.wasm.rs` を開くと、`distance` の計算は Rust の `fn zs_distance(a: ZsPoint, b: ZsPoint) -> f64` として読めます。画面の判定をする `can_pick` は `pick.js` にあります。
 
 ```bash
 cargo build --release --manifest-path ../Cargo.toml --bin zustc
