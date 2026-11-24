@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795558166309,
+  "lastUpdate": 1795558169055,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -123343,6 +123343,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 4724,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c34ea94ecd2249e396fcaba197a6fa40d5a4cfa7",
+          "message": "Region check part 27: two-phase argument reborrows, ptr::swap of raw pointers, a placeholder's associated type through its bound's method (#151)\n\nRegion check part 27: two-phase argument reborrows, ptr::swap of raw pointers, a placeholder's associated type through its bound's method",
+          "timestamp": "2026-11-25T07:03:10+09:00",
+          "tree_id": "51c4e711bf5299b451fcc9d4d973021e4b1d9ce9",
+          "url": "https://github.com/mizchi/zust/commit/c34ea94ecd2249e396fcaba197a6fa40d5a4cfa7"
+        },
+        "date": 1795558168494,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.53,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1863,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.17,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1526,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.97,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4725,
             "unit": "tests"
           }
         ]
