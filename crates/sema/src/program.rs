@@ -138,6 +138,9 @@ pub struct AdtTable {
     tuples: Mutex<HashMap<usize, u32>>,
     /// The placeholders made, by (fn, type parameter)
     placeholders: Mutex<HashMap<(u32, u32), u32>>,
+    /// The placeholders of placeholders' associated types, by (placeholder, name), and what each is of: (placeholder,
+    /// the bound whose trait declares it, name)
+    assoc_placeholders: Mutex<(HashMap<(u32, String), u32>, HashMap<u32, (u32, String, String)>)>,
     /// Whether any was made (read without the lock, on hot paths)
     any_placeholder: std::sync::atomic::AtomicBool,
 }
@@ -149,6 +152,7 @@ impl AdtTable {
             inst: Mutex::new(HashMap::default()),
             tuples: Mutex::new(HashMap::default()),
             placeholders: Mutex::new(HashMap::default()),
+            assoc_placeholders: Mutex::new((HashMap::default(), HashMap::default())),
             any_placeholder: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -786,6 +790,9 @@ impl Insts {
                     continue;
                 }
                 match prog.evaluate(t, tr) {
+                    // (zustc check's last round: a type with a placeholder in it (`&G#`) may meet the bound by a where
+                    // clause of the generic fn the request comes from (`&'max G: Get`), which is not known here)
+                    Certainty::No if self.lenient && prog.holds_placeholder(t, 0) && !prog.is_placeholder_ty(t) => {}
                     Certainty::No => {
                         return Err(format!("the trait bound `{}: {tr}` is not satisfied (for `{pn}`)", prog.tn(t)));
                     }
@@ -816,6 +823,11 @@ impl Insts {
                 // (nor a type implements does not see the program's impls for: a Box, an array, a slice, a type with a
                 // trait object in it; as for the supertraits and item bounds of impls)
                 if prog.opaque_to_impls(st) {
+                    continue;
+                }
+                // (nor one with a placeholder in it: the instance checks the generic fn's own body, where its where
+                // clauses are what it may assume, not what it must prove (`where &'max G: Get`))
+                if prog.holds_placeholder(st, 0) {
                     continue;
                 }
                 for tr in bounds {
@@ -3053,7 +3065,8 @@ impl Program {
                     None => return true,
                 },
             };
-            bs.iter().all(|b| self.implements(ty, b))
+            // (not its lifetime bounds, `'static` / `'0`: of no type written here)
+            bs.iter().filter(|b| !b.starts_with('\'')).all(|b| self.implements(ty, b))
         })
     }
 
@@ -4239,6 +4252,63 @@ impl Program {
         s
     }
 
+    /// A placeholder's associated type (`<T# as MyTrait>::Output` with `T: MyTrait` and `trait MyTrait { type Output;
+    /// }`): a placeholder of its own, made once, bounded as the trait declares it. None where no bound's trait
+    /// declares it, or the bound binds it (`T: Iterator<Item = u32>`)
+    pub fn assoc_placeholder(&self, sid: u32, name: &str) -> Option<u32> {
+        if let Some(&s) = self.structs.assoc_placeholders.lock().unwrap().0.get(&(sid, name.to_string())) {
+            return Some(s);
+        }
+        let bs = self.structs[sid as usize].placeholder.as_ref()?;
+        let (b, decl) = bs.iter().find_map(|b| {
+            let tr = b.split('<').next().unwrap_or(b).trim();
+            let short = tr.rsplit("::").next().unwrap_or(tr);
+            self.assoc_bounds.get(&(short.to_string(), name.to_string())).map(|d| (b, d))
+        })?;
+        // (a binding of it in the bound: its type is the bound's, not a placeholder)
+        if b.split(|c: char| c == '<' || c == ',').any(|a| a.split('=').next().is_some_and(|x| x.trim() == name) && a.contains('=')) {
+            return None;
+        }
+        let base = self.structs[sid as usize].name.trim_end_matches('#').to_string();
+        // (the bound as written, its tokens joined: `MyTrait < 'a >` shown `MyTrait<'a>`)
+        let shown = b.replace(" <", "<").replace("< ", "<").replace(" >", ">").replace(" ,", ",");
+        let mut d = StructDef::blank(format!("<{base} as {shown}>::{name}#"), false);
+        d.placeholder = Some(decl.iter().filter(|x| !x.starts_with('\'')).cloned().collect());
+        let mut h = KeyHasher::new();
+        h.add(&("assoc placeholder", self.structs[sid as usize].deep, name));
+        d.deep = h.finish();
+        let mut g = self.structs.assoc_placeholders.lock().unwrap();
+        if let Some(&s) = g.0.get(&(sid, name.to_string())) {
+            return Some(s);
+        }
+        let s = self.structs.push(d);
+        g.0.insert((sid, name.to_string()), s);
+        g.1.insert(s, (sid, b.clone(), name.to_string()));
+        Some(s)
+    }
+
+    /// t is a placeholder or has one in it (`&G#`, `Vec<T#>`)
+    pub fn holds_placeholder(&self, t: Ty, depth: u32) -> bool {
+        if depth > 16 {
+            return false;
+        }
+        match t {
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) | Ty::Slice(i) | Ty::Array(i, _) => self.holds_placeholder(*i, depth + 1),
+            Ty::Struct(s) => self.is_placeholder(s) || self.structs[s as usize].args.iter().any(|&a| self.holds_placeholder(a, depth + 1)),
+            _ => false,
+        }
+    }
+
+    /// t is a placeholder itself (its bounds are what it implements)
+    pub fn is_placeholder_ty(&self, t: Ty) -> bool {
+        matches!(t, Ty::Struct(s) if self.is_placeholder(s))
+    }
+
+    /// What a placeholder's associated type is of: (the placeholder, the bound whose trait declares it, its name)
+    pub fn assoc_placeholder_of(&self, s: u32) -> Option<(u32, String, String)> {
+        self.structs.assoc_placeholders.lock().unwrap().1.get(&s).cloned()
+    }
+
     /// Whether the program has placeholders for type parameters (zustc check's last round) at all
     pub fn any_placeholder(&self) -> bool {
         self.structs.any_placeholder.load(std::sync::atomic::Ordering::Relaxed)
@@ -5000,6 +5070,12 @@ impl Program {
                 };
                 args.extend(std::iter::repeat_n(Ty::Unit, if a.ngat > 0 { a.ngat + 1 } else { 0 }));
                 return Some(self.subst(a.value, &args));
+            }
+        }
+        // (a placeholder's associated type its bounds' traits declare: a placeholder of its own)
+        if let Ty::Struct(sid) = t {
+            if self.is_placeholder(sid) && self.assoc_placeholder_of(sid).is_none() {
+                return self.assoc_placeholder(sid, name).map(Ty::Struct);
             }
         }
         // (std's impls the prelude does not write out: `<i32 as Add<T>>::Output` is i32 (the operators of a number or

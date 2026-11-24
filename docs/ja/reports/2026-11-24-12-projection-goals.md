@@ -35,12 +35,13 @@ impl Tr2 for u8 { type A = u16; }          // E0277、u16: Bar
   - `<T as Tr>::A` は `Tr` で（`Tr` の impl が与えないときだけその supertrait で）、`T::A` は `T` の境界の trait とその supertrait で正規化する（`T: Sub` の `Super::A` は `trait Sub: Super` が宣言する）。後者は答えが食い違ってはならない。
   - 射影は解決する前に分解する。基が具体型の `<u8 as Q>::A` は `Q` の `A` で、`A` を持つ最初の trait のものではない。
   - ほかの型（`W<T>`、`&T`、具体的な `S`）には引数を入れる。中に射影を含むものは除く。`subst` がその射影を名前だけで引いてしまうから。
+  - プレースホルダを含む型は確かめない。呼ばれないジェネリック関数の本体はプレースホルダで検査し、そこでは自分の where 句は証明すべきものではなく、前提にしてよいもの（`where &'max G: Get`）だから。
   - 確かめるのは、プログラム自身の trait の境界（impl の入れ子の goal と同じ）と、どの境界の束縛も（`where W<T>: Tr<A = u32>`。パラメータの境界と同じ）。`Box`、配列、スライス、trait オブジェクトを含む型は確かめない。`implements` がそれらへのプログラムの impl を見ないので（`impl Mark for [u8; 1]` と `where [T; 1]: Mark`）、「いいえ」が誤ったエラーになるから。
 - **item bound**: プログラム自身の trait の、パラメータのない impl では、関連型を、trait がそれに宣言する境界（`type A: Bar;`）と突き合わせる。規則は supertrait の検査と同じで、その型そのものに対して書かれた impl は数え、`Box`、配列、スライスはそれ以上確かめない。
 
 ## 測った結果
 
-main（25c18d6）をマージした上での `bench/rust_ui.py --check`:
+main（1d612db）をマージした上での `bench/rust_ui.py --check`:
 
 - compile-fail は main のベースラインに対して +8 件、回帰は 0 件:
   - `error-codes/E0271.rs`
@@ -51,7 +52,7 @@ main（25c18d6）をマージした上での `bench/rust_ui.py --check`:
   - `suggestions/imm-ref-trait-object-literal-bound-regions.rs`（`where for<'b> &'b X: Trait`）
   - `where-clauses/where-clause-method-substituion.rs`（`where X: Foo<U>`、具体型への where 句）
   - `where-clauses/where-for-self-2.rs`（`where for<'a> &'a T: Bar`。rustc は「not general enough」と言う。型にライフタイムを持たない zustc は、同じ行で境界が成り立たないと言う）
-- run-pass、check-pass、build-pass は変わらず。ベースラインとラチェットを書き直した（compile-fail のラチェットは 4650 → 4664。compile-fail 6 件と run-pass 2 件は main のバイナリでも通るのに、ベースラインに入っていなかった）。
+- run-pass、check-pass、build-pass は変わらず。ベースラインとラチェットを書き直した（compile-fail のラチェットは 4664 → 4672）。
 
 `zustc check -j 1` の命令数（cachegrind）、main（b376a37）とこの変更:
 

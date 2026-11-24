@@ -1166,6 +1166,9 @@ fn projections_are_goals() {
     let iv = "trait P { type A; }\ntrait Q { type A; }\nimpl P for u8 { type A = u16; }\nimpl Q for u8 { type A = u32; }\nstruct W<T>(T);\ntrait Tr { type A; }\nimpl<T: Q> Tr for W<T> { type A = T::A; }\n";
     ok(&format!("{iv}fn f<T>() where W<T>: Tr<A = u32> {{}}\nfn main() {{ f::<u8>(); }}"));
     ok(&format!("{iv}fn f<X: Tr<A = u32>>() {{}}\nfn main() {{ f::<W<u8>>(); }}"));
+    // (an uncalled generic fn's own where clause is what its body may assume, not an obligation: checking the body
+    // with placeholders does not prove it)
+    ok("trait Get { fn get() -> Self; }\nfn g<'a, G: 'a>() where &'a G: Get {}\nfn main() {}");
     // (a where clause on a concrete type)
     bad("trait Bar {}\nstruct S;\nfn f<T>(_: T) where S: Bar {}\nfn main() { f(1u8); }", "`S: Bar`");
     ok("trait Bar {}\nstruct S;\nimpl Bar for S {}\nfn f<T>(_: T) where S: Bar {}\nfn main() { f(1u8); }");

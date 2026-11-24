@@ -54,6 +54,8 @@ type of one name, the first impl found answered for both.
     not that of the first trait with an `A`;
   - another type (`W<T>`, `&T`, a concrete `S`) has the arguments put in. One with a projection inside is left out, because `subst`
     would look that projection up by its name alone.
+  - A type with a placeholder in it is not checked: an uncalled generic fn's body is checked with placeholders, and
+    there its own where clauses are what it may assume (`where &'max G: Get`), not what it must prove.
   - Bounds of the program's traits are checked, as for the nested goals of impls, and the bindings of any bound
     (`where W<T>: Tr<A = u32>`), as for a parameter's. A Box, an array, a slice or a type
     with a trait object in it is not checked: `implements` does not see the program's impls for them
@@ -64,7 +66,7 @@ type of one name, the first impl found answered for both.
 
 ## Measured
 
-`bench/rust_ui.py --check` on main (25c18d6) merged in:
+`bench/rust_ui.py --check` on main (1d612db) merged in:
 
 - compile-fail +8 against main's baseline, 0 regressions:
   - `error-codes/E0271.rs`
@@ -77,8 +79,7 @@ type of one name, the first impl found answered for both.
   - `where-clauses/where-for-self-2.rs` (`where for<'a> &'a T: Bar`; rustc says "not general enough", zustc,
     which has no lifetimes in types, says the bound does not hold, on the same line)
 - run-pass, check-pass and build-pass unchanged. The baseline and the ratchet were rewritten (compile-fail ratchet
-  4650 → 4664: 6 compile-fail and 2 run-pass tests of the baseline pass on main's binary too and had not
-  been added to it).
+  4664 → 4672).
 
 Instructions of `zustc check -j 1` (cachegrind), main (b376a37) against this change:
 
