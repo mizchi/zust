@@ -869,6 +869,11 @@ pub fn std_renames(src: &str) -> Option<String> {
             })
         });
         let bare = imported && !other && !defined;
+        // (imported from that module in one module and from another in a second (a crate's files, loaded as
+        // `mod name { .. }`): each module's own `use`s decide for it)
+        // (also when the scan above may have missed a module's `use`: it reads only statements that start with one,
+        // not a `use` right after `mod name {`)
+        let scoped = (!defined && (other || !imported) && src.contains("mod ") && imports_from(src, m, name)).then(|| use_scopes(src, m, name));
         let cur = std::mem::take(&mut out);
         let cb = cur.as_bytes();
         let mut i = 0;
@@ -879,6 +884,10 @@ pub fn std_renames(src: &str) -> Option<String> {
             let after_m = cur[..at].ends_with(&format!("{m}::"));
             let qualified = at >= 2 && &cb[at - 2..at] == b"::";
             out.push_str(&cur[i..at]);
+            let bare = match &scoped {
+                Some(sc) => sc.bare_at(at),
+                None => bare,
+            };
             if word && (after_m || (bare && (!qualified || cur[..at].ends_with("mpsc::") || cur[..at].ends_with("atomic::") || cur[..at].ends_with("fmt::")))) {
                 out.push_str(to);
                 changed = true;
@@ -890,6 +899,98 @@ pub fn std_renames(src: &str) -> Option<String> {
         out.push_str(&cur[i..]);
     }
     changed.then_some(out)
+}
+
+/// The `mod name { .. }` blocks of a source and, for each module (the root first), whether its own `use`s import a
+/// name from module m and whether they import it from elsewhere
+struct UseScopes {
+    /// (body start, body end) of each block
+    mods: Vec<(usize, usize)>,
+    /// (from m, from elsewhere), by module: 0 the root, k + 1 the block k
+    uses: Vec<(bool, bool)>,
+}
+
+impl UseScopes {
+    /// The innermost block at byte i (0: none)
+    fn module_at(&self, i: usize) -> usize {
+        let mut best: Option<usize> = None;
+        for (k, &(a, b)) in self.mods.iter().enumerate() {
+            if a < i && i < b && best.is_none_or(|j| self.mods[j].0 < a) {
+                best = Some(k);
+            }
+        }
+        best.map_or(0, |k| k + 1)
+    }
+
+    fn bare_at(&self, i: usize) -> bool {
+        let (from_m, other) = self.uses[self.module_at(i)];
+        from_m && !other
+    }
+}
+
+/// Some `use` (from the keyword to its `;`) names module m and the name, or m's glob: a cheap look before
+/// use_scopes tokenizes the source
+fn imports_from(src: &str, m: &str, name: &str) -> bool {
+    let word = |u: &str, w: &str| u.match_indices(w).any(|(i, _)| {
+        let b = u.as_bytes();
+        let id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+        (i == 0 || !id(b[i - 1])) && b.get(i + w.len()).is_none_or(|&c| !id(c))
+    });
+    src.match_indices("use ").any(|(i, _)| {
+        let u = &src[i + 4..];
+        let u = &u[..u.find(';').unwrap_or(u.len())];
+        word(u, m) && (word(u, name) || u.contains('*'))
+    })
+}
+
+#[cold]
+#[inline(never)]
+fn use_scopes(src: &str, m: &str, name: &str) -> UseScopes {
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| &src[toks[k].1..toks[k].2];
+    let sym = |k: usize, c: &str| toks[k].0 == 1 && tk(k) == c;
+    let mut mods = vec![];
+    for k in 0..toks.len().saturating_sub(2) {
+        if toks[k].0 == 0 && tk(k) == "mod" && toks[k + 1].0 == 0 && sym(k + 2, "{") {
+            let (mut d, mut j) = (0i32, k + 2);
+            while j < toks.len() {
+                if sym(j, "{") {
+                    d += 1;
+                } else if sym(j, "}") {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            mods.push((toks[k + 2].1, toks.get(j).map_or(b.len(), |t| t.1)));
+        }
+    }
+    let mut sc = UseScopes { uses: vec![(false, false); mods.len() + 1], mods };
+    let glob = format!("{m}::*");
+    let mut k = 0;
+    while k < toks.len() {
+        if toks[k].0 == 0 && tk(k) == "use" {
+            let start = toks[k].2;
+            let mut j = k + 1;
+            while j < toks.len() && !sym(j, ";") {
+                j += 1;
+            }
+            let u: String = src[start..toks.get(j).map_or(b.len(), |t| t.1)].chars().filter(|c| !c.is_whitespace()).collect();
+            let ws: Vec<&str> = u.split(|c: char| !(c.is_alphanumeric() || c == '_')).collect();
+            let slot = sc.module_at(toks[k].1);
+            if u.contains(&glob) || (ws.contains(&name) && ws.contains(&m)) {
+                sc.uses[slot].0 = true;
+            } else if ws.contains(&name) {
+                sc.uses[slot].1 = true;
+            }
+            k = j;
+        }
+        k += 1;
+    }
+    sc
 }
 
 /// Where the items moved out of function bodies came from (Prep::moved), for the source `prep` is given: their

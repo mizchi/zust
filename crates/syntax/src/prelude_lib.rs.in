@@ -5521,6 +5521,10 @@ pub trait __FWr {
         s.push(c);
         self.write_str(&s)
     }
+    // (`fmt::Write::write_fmt(&mut w, format_args!(..))`: format_args! makes a String here, an `Arguments` holds one)
+    fn write_fmt<A: Display>(&mut self, args: A) -> Result<(), __FmtError> {
+        self.write_str(&format!("{}", args))
+    }
 }
 
 impl __FWr for String {

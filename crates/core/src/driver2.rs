@@ -1525,6 +1525,13 @@ impl Session2 {
                 }
             }
         }
+        // (a method of `impl<T: Tr> Tr for &T` that does more than forward to T's (Summary::ref_impl_bad): its calls
+        // would reach T's method through the deref, so it is reported where the program calls a method of that name)
+        if sums[..user_src].iter().any(|sm| !sm.ref_impl_bad.is_empty()) {
+            if let Some(e) = first_called_ref_impl_fn(&src, &items[..user_src], &sums[..user_src]) {
+                return Err(e);
+            }
+        }
         // (improper_ctypes: a C string type of std's, `CStr` / `CString`, in an `extern "C"` block's or fn's signature)
         if deny_ctypes.0 || deny_ctypes.1 {
             if let Some(e) = first_cstr_in_extern(&src, &items[..user_src], deny_ctypes) {
@@ -3916,6 +3923,34 @@ fn allows_lint(text: &str, lint: &str) -> bool {
         let rest = &sq[i + 6..];
         rest[..rest.find(')').unwrap_or(rest.len())].split(',').any(|n| n == lint)
     })
+}
+
+/// The first method of `impl<T: Tr> Tr for &T` that does more than forward to T's and that the program calls by its
+/// name (`.m(`, `.m::<`, `::m(`) outside the method itself, as an error
+#[cold]
+#[inline(never)]
+fn first_called_ref_impl_fn(src: &str, items: &[SrcItem], sums: &[Summary]) -> Option<String> {
+    let toks = crate::lexer::tokenize(src.as_bytes());
+    let tk = |k: usize| &src[toks[k].1..toks[k].2];
+    let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tk(k) == c;
+    for (it, sm) in items.iter().zip(sums) {
+        for m in &sm.ref_impl_bad {
+            let called = (1..toks.len()).any(|k| {
+                toks[k].0 == 0
+                    && tk(k) == m
+                    && !(it.start..it.end).contains(&toks[k].1)
+                    && (sym(k - 1, ".") || (k >= 2 && sym(k - 1, ":") && sym(k - 2, ":")))
+                    && (sym(k + 1, "(") || (sym(k + 1, ":") && sym(k + 2, ":")))
+            });
+            if called {
+                return Some(format!(
+                    "{}:1: impls for references to a type parameter (`impl<T: Tr> Tr for &T`) are supported only with methods that forward to T's (`(**self).{m}(..)`), as calls reach T's through the deref: `{m}` does not",
+                    it.line
+                ));
+            }
+        }
+    }
+    None
 }
 
 fn first_cstr_in_extern(src: &str, items: &[SrcItem], (blocks, defs): (bool, bool)) -> Option<String> {
