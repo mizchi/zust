@@ -1615,11 +1615,13 @@ impl Cx<'_> {
         let bs = self.prog.structs[sid as usize].placeholder.as_ref()?;
         let short = tr.split('<').next().unwrap_or(tr).trim();
         let short = short.rsplit("::").next().unwrap_or(short);
-        let b = bs.iter().find(|b| {
+        let mut of = bs.iter().filter(|b| {
             let n = b.split('<').next().unwrap_or(b).trim();
             n == short || n.rsplit("::").next() == Some(short)
-        })?;
-        if !b.contains('<') {
+        });
+        let b = of.next()?;
+        // (two bounds of the trait: which one a call takes is its arguments', not known here)
+        if of.next().is_some() || !b.contains('<') {
             return None;
         }
         let f = crate::parse::parse_file(&format!("type __B = dyn {b};")).ok()?;

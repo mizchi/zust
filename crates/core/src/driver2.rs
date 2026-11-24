@@ -6146,6 +6146,40 @@ fn moved_msg_lines(msg: &str, moved: &[(usize, usize)], user_lines: usize) -> St
     out
 }
 
+/// A bound whose text names a lifetime other than those a `for<..>` in it binds (a placeholder's bound is written
+/// without its own `for<'a>`: `FnLike<&'a isize, &'a isize>` names 'a, `Get<for<'b> fn(&'b u32)>` none)
+fn bound_names_lt(b: &str) -> bool {
+    let mut nested: Vec<&str> = vec![];
+    let mut rest = b;
+    while let Some(i) = rest.find("for") {
+        let after = rest[i + 3..].trim_start();
+        if let (true, Some(j)) = (after.starts_with('<'), after.find('>')) {
+            nested.extend(after[1..j].split(',').map(|l| l.trim()).filter(|l| l.starts_with('\'')));
+        }
+        rest = &rest[i + 3..];
+    }
+    let cs: Vec<(usize, char)> = b.char_indices().collect();
+    let mut k = 0;
+    while k < cs.len() {
+        if cs[k].1 == '\'' {
+            let from = cs[k].0;
+            let mut j = k + 1;
+            while j < cs.len() && (cs[j].1.is_alphanumeric() || cs[j].1 == '_') {
+                j += 1;
+            }
+            let to = cs.get(j).map_or(b.len(), |c| c.0);
+            let l = &b[from..to];
+            if l.len() > 1 && !nested.contains(&l) {
+                return true;
+            }
+            k = j;
+        } else {
+            k += 1;
+        }
+    }
+    false
+}
+
 /// The program's generic fns (not a trait's default methods, not a closure's body, not a dependency's) that no
 /// instance was requested of: one instance of each with a placeholder for each type parameter (Program::placeholder),
 /// as `zustc check` checks every fn. The ids requested
@@ -6192,8 +6226,9 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
                 return false;
             }
             // (nor where the bound's arguments name lifetimes (`F: FnLike<&'a isize, &'a isize>`): the call's types are
-            // of them)
-            if b.contains('\'') {
+            // of them. Not those a type in them binds (`Get<for<'b> fn(&'b u32) -> &'b u32>`): a local the call's result
+            // is held in takes them as its own regions, not bound ones)
+            if bound_names_lt(b) {
                 return false;
             }
             let tr = b.split('<').next().unwrap_or(b).trim();

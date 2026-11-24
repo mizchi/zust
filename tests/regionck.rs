@@ -3747,6 +3747,23 @@ fn part23_diverging_let_annotation_wf() {
 fn part23_alias_param_twice() {
     // (an annotation that is a type alias with a hole, its parameter twice in it: one tree for both occurrences
     // (nll/relate_tys/var-appears-twice.rs). Under `Cell` they are invariant: `&'z u32` must be `&'static u32`)
-    let d = check("use std::cell::Cell;\ntype DoubleCell<A> = Cell<(A, A)>;\ntype DoublePair<A> = (A, A);\nfn make_cell<'b>(x: &'b u32) -> Cell<(&'static u32, &'b u32)> { panic!() }\nfn make_pair<'b>(x: &'b u32) -> (&'static u32, &'b u32) { panic!() }\nfn f<'z>(z: &'z u32) {\n    let b = 44;\n    let _x: DoubleCell<_> = make_cell(z);\n    let _y: DoublePair<_> = make_pair(&b);\n    let _w: DoubleCell<&'static u32> = make_cell(&22);\n}\nfn main() {}\n");
-    assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("use std::cell::Cell;\ntype DoubleCell<A> = Cell<(A, A)>;\nfn make_cell<'b>(x: &'b u32) -> Cell<(&'static u32, &'b u32)> { panic!() }\nfn f<'z>(z: &'z u32) {\n    let _x: DoubleCell<_> = make_cell(z);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (a covariant alias, and the parameter written: accepted, as in rustc)
+    assert_eq!(check("use std::cell::Cell;\ntype DoubleCell<A> = Cell<(A, A)>;\ntype DoublePair<A> = (A, A);\nfn make_cell<'b>(x: &'b u32) -> Cell<(&'static u32, &'b u32)> { panic!() }\nfn make_pair<'b>(x: &'b u32) -> (&'static u32, &'b u32) { panic!() }\nfn f<'z>(z: &'z u32) {\n    let b = 44;\n    let _y: DoublePair<_> = make_pair(&b);\n    let _w: DoubleCell<&'static u32> = make_cell(&22);\n    let _v: DoublePair<_> = make_pair(z);\n}\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part23_review() {
+    // (a diverging `let` whose annotated type needs Drop: well formed too)
+    let d = check("struct S<'b>(&'b ());\nfn f<'a, 'b>() {\n    let _x: Box<&'a S<'b>> = loop {};\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (two bounds of one trait: the bound a call takes is not known, its arguments' regions are not taken (rustc
+    // accepts it))
+    assert_eq!(check("trait Take<A> { fn take(&self, a: A); }\nfn g<'a, 'b, F: Take<&'a u32> + Take<&'b u64>>(f: F, x: &'b u64) {\n    f.take(x);\n}\nfn main() {}\n"), vec![]);
+    // (a bound whose argument binds its own lifetimes (`for<'b> fn(&'b u32)`), and a literal that meets the method's
+    // types: accepted, as in rustc)
+    assert_eq!(check("trait Get<A> { fn get(&self) -> A; }\nfn h<'z, F: Get<for<'b> fn(&'b u32) -> &'b u32>>(f: F, z: &'z u32) -> &'z u32 {\n    let p = f.get();\n    let a = 1;\n    let _ra = p(&a);\n    p(z)\n}\nfn k<'z, F: Get<&'z u32>>(f: F) {\n    let a = 1;\n    let r = f.get();\n    let _ = *r == a;\n}\nfn main() {}\n"), vec![]);
+    // (and a trait whose method writes its parameter's type: the literal's local is of it; main had a false E0308)
+    assert_eq!(check("trait Get<'a> { fn get(&self, arg: &'a isize) -> &'a isize; }\nfn c<F>(f: F) where F: for<'a> Get<'a> {\n    let x = 3;\n    let y = f.get(&x);\n    drop(y);\n}\nfn main() {}\n"), vec![]);
 }

@@ -2414,7 +2414,14 @@ impl Cx<'_> {
                                     self.rg_let_uninit(Some(&name), at, *let_at);
                                 }
                             }
-                            None => self.bind(name, Ty::Never, None),
+                            None => {
+                                // (the annotation's type is well formed here too, a type that needs Drop
+                                // (`let x: Box<&'a S<'b>> = loop {};`): its tree is not the binding's, which has none)
+                                if let Some(at) = ann_ty.as_ref() {
+                                    self.rg_let_uninit(None, at, *let_at);
+                                }
+                                self.bind(name, Ty::Never, None)
+                            }
                         }
                         self.rg.let_sp = let_sp0;
                         continue;

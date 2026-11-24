@@ -554,17 +554,30 @@ fn bound_targ_ptys(prog: &Program, sid: u32, tr: &str) -> Option<(Vec<PTy>, Vec<
     let bs = prog.structs[sid as usize].placeholder.as_ref()?;
     let short = tr.split('<').next().unwrap_or(tr).trim();
     let short = short.rsplit("::").next().unwrap_or(short);
-    let b = bs.iter().find(|b| {
+    // (one bound of the trait: two (`F: Take<&'a u32> + Take<&'b u64>`) leave which one a call takes to its types)
+    let mut of = bs.iter().filter(|b| {
         let n = b.split('<').next().unwrap_or(b).trim();
         n == short || n.rsplit("::").next() == Some(short)
-    })?;
-    if !b.contains('\'') {
+    });
+    let b = of.next()?;
+    if of.next().is_some() || !b.contains('\'') {
         return None;
     }
     let f = crate::parse::parse_file(&format!("type __B = dyn {b};")).ok()?;
     let Some(crate::parse::ItemKind::Type(_, _, _, Some(PTy::Dyn(dbs)))) = f.items.first().map(|i| &i.kind) else { return None };
     let Some(crate::parse::Bound::Trait(_, p)) = dbs.first() else { return None };
     let args: Vec<PTy> = p.segs.last()?.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t.clone()) } else { None }).collect();
+    // (the bound's own `for<'a>` is not in its text; a `for<'b>` there is a type's within it (`Get<for<'b> fn(&'b u32)>`),
+    // whose lifetimes are that type's own: not the bound's)
+    let mut nested: Vec<String> = vec![];
+    let mut rest = b.as_str();
+    while let Some(i) = rest.find("for") {
+        let after = rest[i + 3..].trim_start();
+        if let (true, Some(j)) = (after.starts_with('<'), after.find('>')) {
+            nested.extend(after[1..j].split(',').map(|l| l.trim().to_string()).filter(|l| l.starts_with('\'')));
+        }
+        rest = &rest[i + 3..];
+    }
     let mut lts: Vec<String> = vec![];
     let cs: Vec<char> = b.chars().collect();
     let mut i = 0;
@@ -575,7 +588,7 @@ fn bound_targ_ptys(prog: &Program, sid: u32, tr: &str) -> Option<(Vec<PTy>, Vec<
                 j += 1;
             }
             let l: String = cs[i..j].iter().collect();
-            if l.len() > 1 && l != "'static" && l != "'_" && !lts.contains(&l) {
+            if l.len() > 1 && l != "'static" && l != "'_" && !lts.contains(&l) && !nested.contains(&l) {
                 lts.push(l);
             }
             i = j;
