@@ -4045,3 +4045,16 @@ fn part26_review() {
     assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("cannot assign to `*x` because it is borrowed"), "{d:?}");
     assert_eq!(check("fn id(x: &i32) -> &i32 { x }\nfn len(x: &i32) -> usize { *x as usize }\nfn main() {\n    let mut a = 0;\n    let f: fn(&i32) -> &i32 = id;\n    let g: fn(&i32) -> usize = len;\n    let x = &mut a;\n    let r = f(x);\n    println!(\"{}\", r);\n    let n = g(x);\n    *x = 1;\n    println!(\"{}\", n);\n}\n"), vec![]);
 }
+
+#[test]
+fn part26_review_2() {
+    // (a value that holds what its local holds, assigned to the local (`r = &mut *r;`, `r = r;`): it keeps the old
+    // value's loans of what r points to, so `x = 1` while r lives is E0506; and once r is assigned another place, it
+    // holds those no longer)
+    let d = check("fn main() {\n    let mut x = 0;\n    let mut r = &mut x;\n    r = &mut *r;\n    x = 1;\n    *r = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `x` because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = 0;\n    let mut r = &mut x;\n    r = r;\n    x = 1;\n    *r = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot assign to `x` because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut r = &mut x;\n    r = &mut *r;\n    *r = 2;\n    x = 1;\n}\n"), vec![]);
+    assert_eq!(check("fn main() {\n    let mut x = 0;\n    let mut y = 0;\n    let mut r = &mut x;\n    r = &mut *r;\n    *r = 2;\n    r = &mut y;\n    x = 1;\n    *r = 3;\n    println!(\"{}\", x);\n}\n"), vec![]);
+}

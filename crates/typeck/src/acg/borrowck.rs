@@ -3049,9 +3049,10 @@ impl Cx<'_> {
         p.proj.push(ref_deref(true));
         // (a deref coercion through what a points to (`let y: &i32 = x;` with `x: &mut &i32`, or a `Box`): the loan is
         // of what that points to (`**x`), which overwriting `*x` does not touch, as in rustc)
+        // (not toward a trait object: `&mut &i32` as a `&dyn Debug` unsizes the `&i32` itself, which is borrowed)
         let mut t = *inner;
         for _ in 0..4 {
-            if t == *want_in {
+            if t == *want_in || matches!(want_in, Ty::Dyn(_)) {
                 break;
             }
             match t {
@@ -4359,6 +4360,20 @@ impl Cx<'_> {
                 self.bk_ev(Ev::Acc(p.clone(), Acc::Drop, err_pos(left)));
             }
         }
+        // (a value that holds what the local holds (`r = &mut *r;`, `r = r;`): what it holds now, taken before the
+        // write clears it (a hidden local holds it), so the new value keeps the old loans of what r points to)
+        let snap;
+        let srcs = if whole && self.bk.locals[l as usize].refs && srcs.contains(&Src::Local(l)) {
+            let id = self.bk.locals.len() as u32;
+            let (ty, copy) = (self.bk.locals[l as usize].ty, self.bk.locals[l as usize].copy);
+            self.bk.locals.push(Local { name: "<old>".into(), ty, copy, refs: true, mutable: None, decl: super::SP, via_ref: false });
+            self.bk_ev(Ev::Bind(id, true));
+            self.bk_ev(Ev::Def(id, vec![Src::Local(l)]));
+            snap = srcs.iter().map(|&s| if s == Src::Local(l) { Src::Local(id) } else { s }).collect::<Vec<Src>>();
+            &snap[..]
+        } else {
+            srcs
+        };
         self.bk_ev(Ev::Acc(p, Acc::Write, err_pos(left)));
         if through && !srcs.is_empty() {
             self.bk_ev(Ev::Escape(srcs.to_vec()));
