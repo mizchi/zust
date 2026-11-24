@@ -4202,6 +4202,12 @@ impl Program {
                 if a.name != gname || a.ngat != gargs.len() {
                     continue;
                 }
+                // (match_ty lets `&mut` meet `&` (a coercion): an impl for `&T` and one for `&mut T` are two)
+                if let (Ty::Ref(m1, _), Ty::Ref(m2, _)) = (a.self_ty, base) {
+                    if m1 != m2 {
+                        continue;
+                    }
+                }
                 let mut sol = vec![None; a.ngen];
                 if self.match_ty(a.self_ty, base, &mut sol) {
                     let Some(mut args) = sol.iter().copied().collect::<Option<Vec<Ty>>>() else { continue };

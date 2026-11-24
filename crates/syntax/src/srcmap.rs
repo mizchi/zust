@@ -388,13 +388,15 @@ fn written_mod(raw: &str, name: &str) -> bool {
     if !raw.contains(name) {
         return false;
     }
-    // (outside the bodies of `macro_rules!`: a declaration in one is the macro's, made where it is called)
-    let mut kept = raw.as_bytes().to_vec();
-    let toks = crate::lexer::tokenize(raw.as_bytes());
-    let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && raw.as_bytes()[toks[k].1] == c;
+    // (on the tokens, so not in a comment or string; and outside the bodies of `macro_rules!`: a declaration in one
+    // is the macro's, made where it is called)
+    let b = raw.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| &b[toks[k].1..toks[k].2];
+    let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && b[toks[k].1] == c;
     let mut i = 0;
-    while i + 3 < toks.len() {
-        if toks[i].0 == 0 && &raw[toks[i].1..toks[i].2] == "macro_rules" && sym(i + 1, b'!') && (sym(i + 3, b'{') || sym(i + 3, b'(')) {
+    while i < toks.len() {
+        if toks[i].0 == 0 && tk(i) == b"macro_rules" && sym(i + 1, b'!') && (sym(i + 3, b'{') || sym(i + 3, b'(')) {
             let mut d = 0i32;
             let mut j = i + 3;
             while j < toks.len() {
@@ -408,30 +410,15 @@ fn written_mod(raw: &str, name: &str) -> bool {
                 }
                 j += 1;
             }
-            let end = toks.get(j).map_or(kept.len(), |t| t.2);
-            for c in &mut kept[toks[i].1..end] {
-                if !c.is_ascii_whitespace() {
-                    *c = b' ';
-                }
-            }
-            i = j;
+            i = j + 1;
+            continue;
+        }
+        if toks[i].0 == 0 && tk(i) == b"mod" && i + 2 < toks.len() && toks[i + 1].0 == 0 && tk(i + 1) == name.as_bytes() && sym(i + 2, b';') {
+            return true;
         }
         i += 1;
     }
-    let raw = String::from_utf8_lossy(&kept).into_owned();
-    let raw = raw.as_str();
-    let b = raw.as_bytes();
-    raw.match_indices(name).any(|(k, _)| {
-        let mut a = k;
-        while a > 0 && b[a - 1].is_ascii_whitespace() {
-            a -= 1;
-        }
-        let mut e = k + name.len();
-        while e < b.len() && b[e].is_ascii_whitespace() {
-            e += 1;
-        }
-        a >= 3 && &raw[a - 3..a] == "mod" && (a == 3 || !(b[a - 4].is_ascii_alphanumeric() || b[a - 4] == b'_')) && a < k && b.get(e) == Some(&b';')
-    })
+    false
 }
 
 fn join_disp(dir: &str, rest: &str) -> String {

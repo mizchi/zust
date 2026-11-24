@@ -593,12 +593,14 @@ mod tests {
         assert_eq!(bad("m!(foo#bar);"), "1:4: prefix `foo` is unknown");
         assert_eq!(bad("x\nm!(foo\"s\");"), "2:4: prefix `foo` is unknown");
         assert_eq!(bad("m!(foo'b');"), "1:4: prefix `foo` is unknown");
+        assert_eq!(bad("m!('prefix#lt);"), "1:5: prefix `prefix` is unknown");
         for ok in [
             "let s = \"abc\"; let c = 'x'; let t = b\"by\"; let u = b'y';",
             "let r = r#\"a \"q\" foo#bar\"#; let rr = r##\"x\"#y\"##; let raw = br\"z\"; let cs = c\"c\";",
             "fn f<'a>(x: &'a str) -> &'a str { x } let e = '\\n'; let q = '\\'';",
             "// foo#bar \"x\"y\n/* a\"b /* foo#bar */ */ let n = 1u8;",
             "m!(r#let#foo); let r#match = 1; m!($x#y); let s = \"foo#bar\";",
+            "m!(\"x\"tag#tail); m!('c'tag#t); m!('r#a); fn g<'a>(_: &'a u8) {} let n = 'a';",
         ] {
             assert_eq!(unknown_prefix(ok), None, "{ok}");
         }
@@ -707,7 +709,8 @@ pub fn unknown_prefix(src: &str) -> Option<String> {
         }
         // (and not a raw name `r#let`, whose `#` is not a prefix's)
         let raw = a >= 2 && b[a - 1] == b'#' && b[a - 2] == b'r' && (a == 2 || !is_ident_cont(b[a - 3]));
-        (a < i && is_ident_start(b[a]) && !raw && !(a > 0 && matches!(b[a - 1], b'\'' | b'$'))).then_some(a)
+        // (a literal's suffix `"x"tag` / `'c'tag` is no prefix either; a lifetime's name is looked at with its quote)
+        (a < i && is_ident_start(b[a]) && !raw && !(a > 0 && matches!(b[a - 1], b'\'' | b'"' | b'$'))).then_some(a)
     };
     let skip_str = |mut i: usize| {
         while i < n && b[i] != b'"' {
@@ -775,7 +778,22 @@ pub fn unknown_prefix(src: &str) -> Option<String> {
         match (c, w) {
             (b'"', None | Some((_, "b" | "c"))) => i = skip_str(i + 1),
             (b'"', Some((_, "r" | "br" | "cr"))) => i = skip_raw(i),
-            (b'\'', None) | (b'\'', Some((_, "b"))) => i = skip_quote(i),
+            (b'\'', None) | (b'\'', Some((_, "b"))) => {
+                let j = skip_quote(i);
+                if j != i + 1 {
+                    i = j;
+                    continue;
+                }
+                // (a lifetime: `'a#` is a reserved prefix too, but for the raw lifetime `'r#a`)
+                let mut e = j;
+                while e < n && is_ident_cont(b[e]) {
+                    e += 1;
+                }
+                if e > j && e < n && b[e] == b'#' && &src[j..e] != "r" {
+                    return Some(prefix_error(b, j, &src[j..e]));
+                }
+                i = e;
+            }
             (b'#', None) => i += 1,
             (b'#', Some((_, "r" | "br" | "cr"))) => {
                 let mut j = i;

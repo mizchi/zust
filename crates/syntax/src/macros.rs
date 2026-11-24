@@ -1154,7 +1154,8 @@ fn rename_shadowed_macros(text: &str) -> Option<String> {
         let Some(ds) = dup.get(tk(k)) else { continue };
         // (a definition's name, or a call `name!`, not a path's last segment `a::name!`)
         let is_def = ds.contains(&k);
-        let is_call = sym(k + 1, b'!') && !(k >= 1 && sym(k - 1, b':'));
+        // (a call has its brackets after the `!`: `m != 0` is a comparison)
+        let is_call = sym(k + 1, b'!') && (sym(k + 2, b'(') || sym(k + 2, b'[') || sym(k + 2, b'{')) && !(k >= 1 && sym(k - 1, b':'));
         if !is_def && !is_call {
             continue;
         }
@@ -1246,7 +1247,20 @@ pub fn expand_cfg(src: &str, cfg: Option<&crate::cfg::CfgSet>) -> Result<Option<
                     transcribe_h(&r.body, &binds, &mut body)?;
                     // 式の位置は `({ .. })`、トップレベルと `mod` / `impl` / `trait` の中はアイテムとしてそのまま
                     // (`const C: T = m!();` at the top or in an impl is an expression)
-                    let top = (depth[i] == 0 || item_scope(b, &toks, &close, &depth, i)) && !(i > 0 && sym(i - 1, b'='));
+                    // (and only where an item can start: after `;`, a block or an attribute, from the path's start
+                    // (`crate::m!`); `= 1 + m!()` is an expression in an item)
+                    let mut p0 = i;
+                    while p0 >= 3 && sym(p0 - 1, b':') && sym(p0 - 2, b':') && toks[p0 - 3].0 == 0 {
+                        p0 -= 3;
+                    }
+                    // (`::m!` from the root, `$crate::m!`)
+                    if p0 >= 2 && sym(p0 - 1, b':') && sym(p0 - 2, b':') {
+                        p0 -= 2;
+                    } else if p0 >= 1 && sym(p0 - 1, b'$') {
+                        p0 -= 1;
+                    }
+                    let item_pos = p0 == 0 || sym(p0 - 1, b';') || sym(p0 - 1, b'{') || sym(p0 - 1, b'}') || sym(p0 - 1, b']');
+                    let top = (depth[i] == 0 || item_scope(b, &toks, &close, &depth, i)) && item_pos;
                     // (a call in statement position: the items it expands to are items of the enclosing block, not
                     // of the `({ .. })` around the rest: `fn main() { m!(); S }` with `struct S;` from m)
                     let stmt_pos = i == 0 || sym(i - 1, b';') || sym(i - 1, b'{') || sym(i - 1, b'}');
@@ -1507,9 +1521,27 @@ fn find_calls(
                                 let next_semi = matches!(toks.get(i + 3), Some(TokenTree::Punct(q)) if q.as_char() == ';');
                                 let spliced = depth > 0 && stmt_pos && (next_semi || toks.get(i + 3).is_none()) && !body.contains('#');
                                 let drop_semi = spliced && next_semi && body.trim_end().ends_with(';');
-                                // (in a module's items, a call after `=` is an initializer's expression, as expand_cfg reads it)
-                                let item = item && !(i > 0 && matches!(&toks[i - 1], TokenTree::Punct(q) if q.as_char() == '='));
-                                let rep = if depth == 0 || item || spliced {
+                                // (an item only where one can start, from the path's start, as expand_cfg reads it: `= 1 +
+                                // m!()` is an initializer's expression)
+                                let mut p0 = i;
+                                while p0 >= 3
+                                    && matches!((&toks[p0 - 3], &toks[p0 - 2], &toks[p0 - 1]), (TokenTree::Ident(_), TokenTree::Punct(c1), TokenTree::Punct(c2)) if c1.as_char() == ':' && c2.as_char() == ':')
+                                {
+                                    p0 -= 3;
+                                }
+                                // (`::m!` from the root, `$crate::m!`)
+                                let colon = |k: usize| matches!(&toks[k], TokenTree::Punct(c) if c.as_char() == ':');
+                                if p0 >= 2 && colon(p0 - 1) && colon(p0 - 2) {
+                                    p0 -= 2;
+                                } else if p0 >= 1 && matches!(&toks[p0 - 1], TokenTree::Punct(c) if c.as_char() == '$') {
+                                    p0 -= 1;
+                                }
+                                let item_pos = p0 == 0
+                                    || matches!(&toks[p0 - 1], TokenTree::Punct(q) if q.as_char() == ';')
+                                    || matches!(&toks[p0 - 1], TokenTree::Group(pg) if matches!(pg.delimiter(), Delimiter::Brace | Delimiter::Bracket));
+                                let top_level = depth == 0 && item_pos;
+                                let item = item && item_pos;
+                                let rep = if top_level || item || spliced {
                                     body
                                 } else if stmt_pos {
                                     match split_items(&body) {
@@ -1535,7 +1567,7 @@ fn find_calls(
                                 }
                                 let mut e = g.span().byte_range().end;
                                 // (トップレベルの `name!(..);` の `;` も取る)
-                                if depth == 0 || item || drop_semi {
+                                if top_level || item || drop_semi {
                                     if let Some(TokenTree::Punct(s)) = toks.get(i + 3) {
                                         if s.as_char() == ';' {
                                             e = s.span().byte_range().end;

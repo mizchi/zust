@@ -1,4 +1,5 @@
-// A macro call after `=` in a module's items, hygiene around a module a macro body defines, a definition inside
+// A macro call after `=` (or in an expression after it) in a module's items, a name two modules define beside a
+// local of that name compared with `!=`, hygiene around a module a macro body defines, a definition inside
 // `stringify!` (text, not a definition), a macro re-exported by `use`, a raw identifier, an
 // associated type of `&T` beside `&mut T`'s, and impls for `&T` / `&mut T` / `Box<u8>` of one trait
 #![allow(dead_code, unused_imports)]
@@ -9,6 +10,30 @@ macro_rules! value {
 }
 mod m {
     pub const C: u8 = value!();
+    pub const D: u8 = 1 + value!();
+    pub const E: u8 = value!() * 2;
+}
+// (the same name in two modules, and a local of that name compared with `!=`)
+mod p1 {
+    macro_rules! k {
+        () => {
+            1
+        };
+    }
+    pub fn f() -> u8 {
+        k!()
+    }
+}
+mod p2 {
+    macro_rules! k {
+        () => {
+            2
+        };
+    }
+    pub fn f() -> u8 {
+        let k = 3;
+        if k != 0 { k!() + k } else { 0 }
+    }
 }
 macro_rules! h {
     ($e:expr) => {{
@@ -47,6 +72,7 @@ fn main() {
     let _ = stringify!(macro_rules! value { () => { 9 } });
     println!("{} {} {}", m::C, h!(x), value!());
     println!("{}", a::twice!(5));
+    println!("{} {} {} {}", m::D, m::E, p1::f(), p2::f());
     let r#let = 5;
     println!("{}", r#let);
     let mut y = 1i32;

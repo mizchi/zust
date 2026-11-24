@@ -202,7 +202,7 @@ fn macro_use_modules_and_check_lines() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let put = |p: &str, t: &str| std::fs::write(dir.join(p), t).unwrap();
-    put("crate_root.rs", "macro_rules! crate_root {\n    () => {\n        pub mod de;\n    };\n}\nmacro_rules! twice {\n    ($e:expr) => {\n        $e * 2\n    };\n}\n");
+    put("crate_root.rs", "// 😀 mod de; (a comment: no declaration)\nmacro_rules! crate_root {\n    () => {\n        pub mod de;\n    };\n}\nmacro_rules! twice {\n    ($e:expr) => {\n        $e * 2\n    };\n}\n");
     put("de.rs", "pub fn name() -> &'static str {\n    \"de\"\n}\n");
     put("main.rs", "#[macro_use]\nmod crate_root;\n\ncrate_root!();\n\nfn main() {\n    println!(\"{} {}\", twice!(4), de::name());\n}\n");
     let zustc = env!("CARGO_BIN_EXE_zustc");
@@ -211,7 +211,7 @@ fn macro_use_modules_and_check_lines() {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     let (got, _, code) = run(&exe, &dir, 0);
     assert_eq!((got.as_str(), code), ("8 de\n", Some(0)));
-    // (the error on line 7 of main.rs, past the 10 lines of crate_root.rs inlined at line 2)
+    // (the error on line 7 of main.rs, past the 11 lines of crate_root.rs inlined at line 2)
     put("main.rs", "#[macro_use]\nmod crate_root;\n\ncrate_root!();\n\nfn main() {\n    let x: u8 = \"s\";\n    println!(\"{} {} {x}\", twice!(4), de::name());\n}\n");
     let o = Command::new(zustc).arg("check").arg(dir.join("main.rs")).output().unwrap();
     let err = String::from_utf8_lossy(&o.stderr);

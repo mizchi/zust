@@ -133,7 +133,8 @@ def build_script(c, out):
     env = dict(os.environ)
     env.update(c["env"])
     env.update({"OUT_DIR": out_dir, "TARGET": TARGET, "HOST": host_triple(), "PROFILE": "debug", "OPT_LEVEL": "0",
-                "DEBUG": "true", "NUM_JOBS": "4", "RUSTC": "rustc"})
+                "DEBUG": "true", "NUM_JOBS": "4", "RUSTC": "rustc",
+                "CARGO_ENCODED_RUSTFLAGS": ""})
     for f in c["features"]:
         env["CARGO_FEATURE_" + f.upper().replace("-", "_")] = "1"
     cfgs = {}
