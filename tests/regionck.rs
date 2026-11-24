@@ -3781,3 +3781,14 @@ fn part24_static_bound_adt_wf() {
     assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![3, 6, 9] && d.iter().all(|x| x.1.contains("E0310")), "{d:?}");
     assert_eq!(check("struct Static<T: 'static>(T);\nfn d<T: 'static>() {\n    let _ = None::<Static<T>>;\n    let _: Option<Static<T>> = None;\n}\nfn main() {}\n"), vec![]);
 }
+
+#[test]
+fn part24_mut_binding_resets_ref_mode() {
+    // (`mut m` where the default binding mode is by reference is by value again before edition 2024: a value that is
+    // not Copy is moved out of the reference (E0507, rfc-2005-default-binding-mode/for.rs), and a Copy one is the
+    // value's type (`m += 1` of a u8, not a `&u8`))
+    let src = "struct Foo {}\nfn a() {\n    let tup = (Foo {}, Foo {});\n    let (_n, mut _m) = &tup;\n}\nfn b() {\n    let tups = vec![(Foo {}, Foo {})];\n    for (_n, mut _m) in &tups {}\n}\nfn main() {}\n";
+    let d = check_ed(src, 2021);
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 8] && d.iter().all(|x| x.1.contains("E0507")), "{d:?}");
+    assert_eq!(check_ed("struct Foo {}\nfn c() {\n    let tup = (Foo {}, Foo {});\n    let (_n, _m) = &tup;\n}\nfn d() {\n    let tup = (1u8, 2u8);\n    let (_n, mut m) = &tup;\n    m += 1;\n    let _ = m;\n}\nfn main() {}\n", 2021), vec![]);
+}

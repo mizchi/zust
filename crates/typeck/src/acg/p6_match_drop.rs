@@ -1248,7 +1248,22 @@ impl Cx<'_> {
                     self.pat_bind(sub, p, mode)?;
                 }
                 let name = name.clone();
-                let mode = if *by_ref { BindMode::Ref(*mutable) } else { mode };
+                // (`mut x` where the default binding mode is by reference: by value again, before edition 2024
+                // (`for (n, mut m) in &tups` moves out of the shared reference, E0507; `let (_, mut m) = &(1u8, 2u8);`
+                // makes m a u8))
+                let mode = match mode {
+                    _ if *by_ref => BindMode::Ref(*mutable),
+                    BindMode::Ref(m) if *mutable && self.prog.edition < 2024 => {
+                        // (a value that is not Copy is moved out of the reference the pattern matched through)
+                        if !borrowck::is_copy(self.prog, p.ty(), 0) {
+                            let what = if m { "a mutable reference" } else { "a shared reference" };
+                            let at = self.bk.scrut_place.as_ref().map(|x| x.1).filter(|s| s.line != 0).unwrap_or(SP);
+                            return Err(self.at(at, format!("cannot move out of {what} (E0507)")));
+                        }
+                        BindMode::Move
+                    }
+                    m => m,
+                };
                 match mode {
                     BindMode::Move => {
                         let (v, t) = self.read(p);
