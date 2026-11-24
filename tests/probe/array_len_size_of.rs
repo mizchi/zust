@@ -33,4 +33,8 @@ fn main() {
     println!("{} {}", p.len(), p[9]);
     let q = [0u8; five()];
     println!("{}", q.len());
+    // (a reference to a slice or str is two words; size_of's result is a usize, whose leading_zeros counts 64 bits)
+    let fat = [0u8; size_of::<&[u8]>() + size_of::<&str>() + align_of::<&[u8]>()];
+    let lz = [0u8; size_of::<u64>().leading_zeros() as usize];
+    println!("{} {}", fat.len(), lz.len());
 }

@@ -36,7 +36,11 @@ def run(cmd, cwd, env=None, timeout=TIMEOUT):
         p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env={**os.environ, **(env or {})}, timeout=timeout)
         return p.returncode, p.stdout, p.stderr, time.time() - t
     except subprocess.TimeoutExpired as e:
-        return None, e.stdout or "", f"timeout ({timeout} s)", time.time() - t
+        # (what the command printed before the timeout comes as bytes, even with text=True)
+        out = e.stdout or ""
+        if isinstance(out, bytes):
+            out = out.decode("utf-8", "replace")
+        return None, out, f"timeout ({timeout} s)", time.time() - t
 
 
 def pinned(app_dir):
@@ -103,7 +107,8 @@ def markdown(rows):
     out = [f"## Popular crates: {n} / {len(rows)} run with the same output as rustc\n",
            "| crate | status | where it stops | first error | rustc s | zustc s |", "|---|---|---|---|---:|---:|"]
     for r in rows:
-        e = (r["first_error"] or "").replace("|", "\\|")
+        # (one table row per crate: a multi-line diagnostic on one line)
+        e = " ".join((r["first_error"] or "").split()).replace("|", "\\|")
         out.append(f'| {r["crate"]} {r["version"]} | {r["status"]} | {r["failing_crate"] or ""} | {e[:160]} | '
                    f'{r["rustc_seconds"] or ""} | {r["zustc_seconds"] or ""} |')
     return "\n".join(out) + "\n"

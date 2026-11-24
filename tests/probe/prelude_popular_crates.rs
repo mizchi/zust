@@ -17,6 +17,22 @@ struct Alphabet(String);
 #[derive(Debug, PartialEq)]
 struct BadAlphabet(usize);
 
+// (a type's own try_into method, called through a reference, is that method: not the target's try_from)
+struct Source;
+#[derive(Debug, PartialEq)]
+struct Target(u8);
+impl Source {
+    fn try_into(&self) -> Result<Target, BadAlphabet> {
+        Ok(Target(1))
+    }
+}
+impl TryFrom<&Source> for Target {
+    type Error = BadAlphabet;
+    fn try_from(_: &Source) -> Result<Self, Self::Error> {
+        Ok(Target(2))
+    }
+}
+
 impl TryFrom<&str> for Alphabet {
     type Error = BadAlphabet;
     fn try_from(s: &str) -> Result<Self, Self::Error> {
@@ -40,5 +56,9 @@ fn main() {
     println!("{:?} {:?}", Alphabet::try_from("abcd"), Alphabet::try_from("abc"));
     let a: Result<Alphabet, BadAlphabet> = "wxyz".try_into();
     println!("{:?}", a);
+    let t: Result<Target, BadAlphabet> = (&Source).try_into();
+    println!("{:?}", t);
+    let b: Alphabet = "pqrs".try_into().unwrap();
+    println!("{:?}", b);
     println!("{:?} {:?}", u8::try_from(200i32).is_ok(), u8::try_from(300i32).is_ok());
 }

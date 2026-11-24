@@ -409,6 +409,8 @@ fn hoist_macro_mods(text: String, path: &Path, mod_dir: &Path, disp_dir: &str, s
     // 1. the macros' bodies (token ranges) and the out-of-line modules they declare: (macro, module, #[path], bytes)
     let mut bodies: Vec<(usize, usize)> = vec![];
     let mut decls: Vec<(String, String, Option<String>, usize, usize)> = vec![];
+    // (the macros each macro's body calls: `outer!()` that calls `inner!()`, whose body declares the module)
+    let mut calls: Vec<(String, Vec<String>)> = vec![];
     let mut k = 0;
     while k + 3 < toks.len() {
         if toks[k].0 == 0 && tk(k) == b"macro_rules" && is_sym(k + 1, b'!') && toks[k + 2].0 == 0 && opens(k + 3) {
@@ -426,16 +428,34 @@ fn hoist_macro_mods(text: String, path: &Path, mod_dir: &Path, disp_dir: &str, s
                 j += 1;
             }
             bodies.push((k + 3, j));
+            let mut called = vec![];
             let mut m = k + 4;
             while m + 2 < j {
                 if toks[m].0 == 0 && tk(m) == b"mod" && toks[m + 1].0 == 0 && is_sym(m + 2, b';') {
-                    let (b0, _, pa) = attrs_before(&text, b, &toks, m);
+                    // (with its visibility, `pub` / `pub(crate)`, and its attributes, as blank_mod_decls takes them)
+                    let mut st = m;
+                    if st >= 1 && is_sym(st - 1, b')') {
+                        let mut q = st - 1;
+                        while q > 0 && !is_sym(q, b'(') {
+                            q -= 1;
+                        }
+                        if q >= 1 && toks[q - 1].0 == 0 && tk(q - 1) == b"pub" {
+                            st = q - 1;
+                        }
+                    } else if st >= 1 && toks[st - 1].0 == 0 && tk(st - 1) == b"pub" {
+                        st -= 1;
+                    }
+                    let (b0, _, pa) = attrs_before(&text, b, &toks, st);
                     decls.push((name.clone(), String::from_utf8_lossy(tk(m + 1)).into_owned(), pa, toks[b0].1, toks[m + 2].2));
                     m += 3;
                     continue;
                 }
+                if toks[m].0 == 0 && is_sym(m + 1, b'!') && tk(m) != b"macro_rules" {
+                    called.push(String::from_utf8_lossy(tk(m)).into_owned());
+                }
                 m += 1;
             }
+            calls.push((name.clone(), called));
             k = j + 1;
             continue;
         }
@@ -444,31 +464,39 @@ fn hoist_macro_mods(text: String, path: &Path, mod_dir: &Path, disp_dir: &str, s
     if decls.is_empty() {
         return Ok(text);
     }
-    // 2. which of those macros this file invokes at its own module level
+    // 2. which of those macros this file invokes at its own module level: outside fn bodies, impls and inline
+    //  modules, but also in another macro's arguments (`cfg_if! { if #[cfg(..)] { prelude!(); } }`). A call in a fn
+    //  body declares the module in that block; zustc leaves it as it was. Then the macros they call, and so on
     let mut invoked: Vec<String> = vec![];
-    let (mut depth, mut inline): (i32, Vec<i32>) = (0, vec![]);
+    // (each open bracket: whether it is a macro call's arguments, or inside them)
+    let mut stack: Vec<bool> = vec![];
     let mut k = 0;
     while k < toks.len() {
         if let Some(&(_, e)) = bodies.iter().find(|&&(s, _)| s == k) {
             k = e + 1;
             continue;
         }
-        if is_sym(k, b'{') {
-            depth += 1;
-        } else if is_sym(k, b'}') {
-            if inline.last() == Some(&depth) {
-                inline.pop();
-            }
-            depth -= 1;
-        } else if toks[k].0 == 0 && tk(k) == b"mod" && k + 2 < toks.len() && toks[k + 1].0 == 0 && is_sym(k + 2, b'{') {
-            inline.push(depth + 1);
-        } else if inline.is_empty() && toks[k].0 == 0 && k + 1 < toks.len() && is_sym(k + 1, b'!') && !(k >= 1 && is_sym(k - 1, b':')) {
+        if opens(k) {
+            stack.push((k >= 1 && is_sym(k - 1, b'!')) || stack.last() == Some(&true));
+        } else if closes(k) {
+            stack.pop();
+        } else if stack.iter().all(|&m| m) && toks[k].0 == 0 && k + 1 < toks.len() && is_sym(k + 1, b'!') && !(k >= 1 && is_sym(k - 1, b':')) {
             let n = String::from_utf8_lossy(tk(k)).into_owned();
-            if decls.iter().any(|d| d.0 == n) && !invoked.contains(&n) {
+            if calls.iter().any(|c| c.0 == n) && !invoked.contains(&n) {
                 invoked.push(n);
             }
         }
         k += 1;
+    }
+    let mut i = 0;
+    while i < invoked.len() {
+        let more: Vec<String> = calls.iter().filter(|c| c.0 == invoked[i]).flat_map(|c| c.1.iter().cloned()).collect();
+        for n in more {
+            if calls.iter().any(|c| c.0 == n) && !invoked.contains(&n) {
+                invoked.push(n);
+            }
+        }
+        i += 1;
     }
     let mut out = b.to_vec();
     let mut mods: Vec<(String, Option<String>)> = vec![];
@@ -762,6 +790,63 @@ mod circular_tests {
         assert!(src.contains("#[macro_use] pub mod macros {"), "{src}");
         let e = crate::macros::expand(&src);
         assert!(e.is_ok(), "{e:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn tmp_crate(tag: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("srcmap_{tag}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (n, t) in files {
+            let p = dir.join(n);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, t).unwrap();
+        }
+        dir
+    }
+
+    /// The hoisted declaration goes with its visibility: `macro_rules! declare { () => { pub mod child; } }` left
+    /// `pub` in the macro's body (`pub pub mod child` once expanded)
+    #[test]
+    fn hoisted_mod_takes_its_visibility() {
+        let dir = tmp_crate("hoist_pub", &[("main.rs", "macro_rules! declare { () => { pub mod child; } }\ndeclare!();\nfn main() { child::f(); }\n"), ("child.rs", "pub fn f() {}\n")]);
+        let (src, _) = super::load_crate(&dir.join("main.rs"), "src/main.rs", &crate::cfg::CfgSet::default()).unwrap();
+        let norm = src.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(norm.contains("macro_rules! declare { () => { } }"), "{norm}");
+        assert!(norm.contains("pub fn f() {}"), "{norm}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Only calls at the module's level (also inside other macros' arguments, as `cfg_if! { .. }`) put a module in
+    /// the file: a call in a fn body declares it in that block, which zustc leaves as it was
+    #[test]
+    fn no_hoisting_from_fn_bodies() {
+        let dir = tmp_crate("hoist_fn", &[
+            ("main.rs", "macro_rules! declare { () => { mod child; } }\nmacro_rules! wrap { ($($t:tt)*) => { $($t)* }; }\nwrap! { declare!(); }\nfn f() { declare!(); }\nfn main() {}\n"),
+            ("child.rs", "pub const C: u8 = 1;\n"),
+        ]);
+        let (src, _) = super::load_crate(&dir.join("main.rs"), "src/main.rs", &crate::cfg::CfgSet::default()).unwrap();
+        assert_eq!(src.matches("pub const C: u8 = 1;").count(), 1, "{src}");
+        let dir2 = tmp_crate("hoist_fn_only", &[
+            ("main.rs", "macro_rules! declare { () => { mod child; } }\nfn f() { declare!(); }\nfn main() {}\n"),
+            ("child.rs", "pub const C: u8 = 1;\n"),
+        ]);
+        let (src2, _) = super::load_crate(&dir2.join("main.rs"), "src/main.rs", &crate::cfg::CfgSet::default()).unwrap();
+        assert!(!src2.contains("pub const C: u8 = 1;"), "{src2}");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir2);
+    }
+
+    /// A module declared by a macro that another invoked macro calls is read too: `outer!()` calls `inner!()`,
+    /// whose body declares `mod child;`
+    #[test]
+    fn hoisting_follows_nested_macro_calls() {
+        let dir = tmp_crate("hoist_nested", &[
+            ("main.rs", "macro_rules! inner { () => { mod child; } }\nmacro_rules! outer { () => { inner!(); } }\nouter!();\nfn main() {}\n"),
+            ("child.rs", "pub const C: u8 = 1;\n"),
+        ]);
+        let (src, _) = super::load_crate(&dir.join("main.rs"), "src/main.rs", &crate::cfg::CfgSet::default()).unwrap();
+        assert!(src.contains("pub const C: u8 = 1;"), "{src}");
+        assert!(!src.contains("mod child;"), "{src}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

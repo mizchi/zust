@@ -90,7 +90,8 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
         // of them; libc 0.2's `[u8; 128 - 2 * size_of::<c_int>()]`)
         Expr::Call(f, args)
             if args.is_empty()
-                && matches!(&**f, Expr::Path(None, p) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "size_of" | "align_of"))) =>
+                && matches!(&**f, Expr::Path(None, p) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "size_of" | "align_of")
+                    && matches!(s.args.as_slice(), [crate::parse::GArg::Ty(_)]))) =>
         {
             let Expr::Path(None, p) = &**f else { return None };
             let last = p.segs.last()?;
@@ -101,12 +102,21 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
             }
             let crate::parse::GArg::Ty(t) = &last.args[0] else { return None };
             let ty = match t {
+                // (a pointer to a slice / str / trait object stays a fat one: two words)
+                crate::parse::Ty::Ptr(_, i) | crate::parse::Ty::Ref(_, _, i)
+                    if matches!(&**i, crate::parse::Ty::Slice(_) | crate::parse::Ty::Dyn(_))
+                        || matches!(&**i, crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "str") =>
+                {
+                    "*const [()]".to_string()
+                }
                 crate::parse::Ty::Ptr(..) | crate::parse::Ty::Ref(..) => "*const ()".to_string(),
                 crate::parse::Ty::Path(None, tp) if tp.segs.iter().all(|s| s.args.is_empty()) => tp.segs.last()?.name.clone(),
                 crate::parse::Ty::Tuple(v) if v.is_empty() => "()".to_string(),
                 _ => return None,
             };
-            format!("{}::<{ty}>()", last.name)
+            // (a path to core's keeps it, so a program's own fn of the name does not take the call: `mem::size_of`
+            //  is core's even beside `fn size_of`)
+            if p.segs.len() > 1 { format!("core::mem::{}::<{ty}>()", last.name) } else { format!("{}::<{ty}>()", last.name) }
         }
         Expr::MethodCall(r, m, g, a, _) if g.is_empty() && a.is_empty() => format!("{}.{m}()", const_expr_text(r)?),
         Expr::Unary(op, x, _) if op == "!" => format!("(!{})", const_expr_text(x)?),

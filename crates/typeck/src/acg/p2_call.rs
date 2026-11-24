@@ -903,11 +903,22 @@ impl Cx<'_> {
         // `x.try_into()` into `Result<U, E>` where U implements TryFrom (`impl TryFrom<&str> for Alphabet`): `U::try_from(x)`,
         // as std's blanket `impl<T, U: TryFrom<T>> TryInto<U> for T` gives it. Integers and slices are handled elsewhere
         if method == "try_into" && margs.is_empty() {
-            let recv_own = match self.peek(recv) {
+            // (a receiver's own try_into, also through references (`(&source).try_into()`), is that method)
+            let recv_own = match self.peek(recv).map(|t| self.strip_refs(t)) {
                 Some(Ty::Struct(sid)) => self.prog.method(sid, "try_into").is_some(),
                 _ => false,
             };
             let target = expected.or_else(|| self.lets.get(&(e as *const Expr as usize)).copied());
+            // (`let a: Alphabet = "x".try_into().unwrap()`: the target is the unwrap's, left in try_into_hint)
+            if !recv_own && target.is_none() {
+                if let Some(Ty::Struct(uid)) = self.try_into_hint {
+                    if let Some(id) = self.prog.method(uid, "try_from") {
+                        self.try_into_hint = None;
+                        let args: [&Expr; 1] = [recv];
+                        return self.call_fn(id, None, &args, None, None, SP);
+                    }
+                }
+            }
             if !recv_own {
                 if let Some(Ty::Struct(rs)) = target {
                     if self.prog.structs[rs as usize].name.starts_with("Result") {

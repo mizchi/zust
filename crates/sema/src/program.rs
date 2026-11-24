@@ -3653,12 +3653,21 @@ impl Program {
             //  libc 0.2, `[u8; 128 - 2 * size_of::<c_int>()]`. Other types are not known here)
             Expr::Call(f, args)
                 if args.is_empty()
-                    && matches!(&**f, Expr::Path(None, p) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "size_of" | "align_of") && s.args.len() == 1)) =>
+                    && matches!(&**f, Expr::Path(None, p) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "size_of" | "align_of") && s.args.len() == 1)
+                        // (a program's own fn named size_of / align_of is not core's: a `const fn` without type parameters is
+                        //  called as itself below; a generic one is not evaluated here, as before, rather than taken for core's)
+                        && !(p.segs.len() == 1 && (self.const_fns.contains_key(p.segs[0].name.as_str()) || self.index.contains_key(p.segs[0].name.as_str())))) =>
             {
                 let Expr::Path(None, p) = &**f else { unreachable!() };
                 let seg = p.segs.last().unwrap();
                 let crate::parse::GArg::Ty(t) = &seg.args[0] else { return Err("size_of needs a type".into()) };
+                // (a pointer to a slice, a str or a trait object is two words; its alignment is one word's)
+                let fat = |i: &crate::parse::Ty| {
+                    matches!(i, crate::parse::Ty::Slice(_) | crate::parse::Ty::Dyn(_))
+                        || matches!(i, crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "str")
+                };
                 let size = match t {
+                    crate::parse::Ty::Ptr(_, i) | crate::parse::Ty::Ref(_, _, i) if fat(i) => Some(if seg.name == "align_of" { 8 } else { 16 }),
                     crate::parse::Ty::Ptr(..) | crate::parse::Ty::Ref(..) => Some(8),
                     crate::parse::Ty::Tuple(v) if v.is_empty() => Some(0),
                     crate::parse::Ty::Path(None, tp) if tp.segs.len() == 1 && tp.segs[0].args.is_empty() => {
@@ -3679,7 +3688,8 @@ impl Program {
                     Some(n) => n,
                     None => return Err(format!("cannot evaluate `{}` of this type in a constant", seg.name)),
                 };
-                un(v)
+                // (both return a usize: `size_of::<u64>().leading_zeros()` counts 64 bits)
+                Ok((v, It::of_name("usize")))
             }
             // (a call of a `const fn` with integer arguments: its body with the parameters bound)
             Expr::Call(f, args) if matches!(&**f, Expr::Path(None, p) if p.segs.len() == 1 && self.const_fns.contains_key(p.segs[0].name.as_str())) => {

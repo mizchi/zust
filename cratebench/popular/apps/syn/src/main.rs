@@ -30,7 +30,8 @@ fn main() {
     }
     let e: syn::Expr = syn::parse_str("a + b * (c - 1)").expect("expr");
     println!("expr is binary: {}", matches!(e, syn::Expr::Binary(_)));
-    let bad = syn::parse_str::<syn::Expr>("a + * b");
+    // (`a + * b` would parse, as `a + (*b)`: an operator with no right operand cannot)
+    let bad = syn::parse_str::<syn::Expr>("a +");
     println!("bad expr rejected: {}", bad.is_err());
     println!("done");
 }

@@ -260,10 +260,19 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
                 }
             }
             let mut m = n;
+            // (inside generic arguments a brace is a const argument, not the body: `struct S<const N: usize = { 1 }>;`.
+            //  The `>` of `->` closes nothing)
+            let mut angle = 0u32;
             while m < toks.len() {
                 match &toks[m] {
-                    TokenTree::Punct(p) if p.as_char() == ';' => return Some((m + 1, false)),
-                    TokenTree::Group(g) if !semi && g.delimiter() == Delimiter::Brace => return Some((m + 1, false)),
+                    TokenTree::Punct(p) if p.as_char() == '<' => angle += 1,
+                    TokenTree::Punct(p) if p.as_char() == '>' && angle > 0
+                        && !(m > 0 && matches!(&toks[m - 1], TokenTree::Punct(q) if q.as_char() == '-' && q.spacing() == Spacing::Joint)) =>
+                    {
+                        angle -= 1
+                    }
+                    TokenTree::Punct(p) if p.as_char() == ';' && angle == 0 => return Some((m + 1, false)),
+                    TokenTree::Group(g) if !semi && angle == 0 && g.delimiter() == Delimiter::Brace => return Some((m + 1, false)),
                     _ => {}
                 }
                 m += 1;
@@ -876,18 +885,20 @@ pub const DEP_MACROS_MARKER: &str = "\n// __zustc_dep_macros__\n";
 
 /// How deep macro expansion may go: the crate's `#![recursion_limit = "N"]`, else rustc's default, 128
 pub fn recursion_limit(src: &str) -> usize {
-    let mut rest = src;
-    while let Some(i) = rest.find("recursion_limit") {
-        let before = rest[..i].trim_end();
-        let after = rest[i + "recursion_limit".len()..].trim_start();
-        if before.ends_with('[') && before[..before.len() - 1].trim_end().ends_with("#!") {
-            if let Some(v) = after.strip_prefix('=').map(str::trim_start).and_then(|v| v.strip_prefix('"')) {
-                if let Some(n) = v.split('"').next().and_then(|n| n.trim().parse::<usize>().ok()) {
-                    return n;
-                }
+    if !src.contains("recursion_limit") {
+        return 128;
+    }
+    // (by tokens, so a comment or a string that spells the attribute changes nothing)
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
+    for k in 0..toks.len().saturating_sub(6) {
+        if tk(k) == b"#" && tk(k + 1) == b"!" && tk(k + 2) == b"[" && tk(k + 3) == b"recursion_limit" && tk(k + 4) == b"=" && toks[k + 5].0 == 2 {
+            let lit = tk(k + 5);
+            if let Some(n) = std::str::from_utf8(lit).ok().map(|l| l.trim_matches('"')).and_then(|l| l.trim().parse::<usize>().ok()) {
+                return n;
             }
         }
-        rest = &rest[i + 1..];
     }
     128
 }
@@ -1412,7 +1423,8 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
     // 2. 呼び出しを展開する (いちばん外側の呼び出しだけ。展開したものの中の呼び出しは次の周)
     let limit = text.len().saturating_mul(64).max(16 << 20);
     let depth_limit = recursion_limit(&text);
-    for round in 0..depth_limit {
+    // (one more round than the limit: the last one only finds that nothing is left to expand)
+    for round in 0..=depth_limit {
         // (definitions an expansion produced: `macro_rules! foo { () => { macro_rules! bar { .. } } }`)
         if round > 0 && text.contains("macro_rules") {
             collect_defs(&mut text, &mut macros, None)?;
@@ -1747,7 +1759,7 @@ pub fn expand_reference(src: &str) -> Result<Option<String>, String> {
     // 2. 呼び出しを展開する (展開したものの中の呼び出しも)
     let limit = text.len().saturating_mul(64).max(16 << 20);
     let depth_limit = recursion_limit(&text);
-    for _round in 0..depth_limit {
+    for _round in 0..=depth_limit {
         let ts = TokenStream::from_str(&text).map_err(|e| format!("1:1: {e}"))?;
         let mut reps: Vec<(usize, usize, String)> = vec![];
         find_calls(ts, &macros, &text, 0, false, true, &mut reps)?;
@@ -2342,6 +2354,34 @@ mod env_tests {
         let out = expand(src).unwrap().unwrap();
         assert!(!out.contains("#["), "{out}");
         assert!(crate::parse::parse_file(&out).is_ok(), "{out}");
+    }
+
+    /// `$i:item` does not end at a brace inside generic arguments: `struct S<const N: usize = { 1 }>;`
+    #[test]
+    fn item_fragment_with_braces_in_generics() {
+        let src = "macro_rules! keep { ($i:item) => { $i }; }\nkeep! { struct S<const N: usize = { 1 }>; }\nfn main() {}\n";
+        let out = expand(src);
+        assert!(out.is_ok(), "{out:?}");
+        let flat: String = out.unwrap().unwrap().chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(flat.contains("structS<constN:usize={1}>;"), "{flat}");
+    }
+
+    /// `#![recursion_limit]` is read from the crate's attribute, not from a comment or a string
+    #[test]
+    fn recursion_limit_from_the_attribute_only() {
+        assert_eq!(super::recursion_limit("// #![recursion_limit = \"0\"]\nfn main() {}"), 128);
+        assert_eq!(super::recursion_limit("const S: &str = \"#![recursion_limit = \\\"3\\\"]\";"), 128);
+        assert_eq!(super::recursion_limit("#![recursion_limit = \"300\"]\nfn main() {}"), 300);
+        assert_eq!(super::recursion_limit("#![ recursion_limit = \"64\" ]"), 64);
+    }
+
+    /// A limit counts expansion depth: with `#![recursion_limit = "1"]` a call whose expansion needs no more
+    /// expansion completes, even though the expansion's text names the macro (`"m"`)
+    #[test]
+    fn recursion_limit_one_completes() {
+        let src = "#![recursion_limit = \"1\"]\nmacro_rules! m { () => { \"m\" }; }\nfn main() { let _ = m!(); }\n";
+        assert!(expand(src).is_ok(), "{:?}", expand(src).err());
+        assert!(expand_reference(src).is_ok());
     }
 
     /// The depth of recursive expansion is limited as in rustc: 128 by default, or the crate's

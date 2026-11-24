@@ -20,9 +20,17 @@ mod b {
     }
 }
 
+// (a name of the program's own with `__` in it is not a module path: `Foo__bar` still has its lifetime)
+#[allow(non_camel_case_types)]
+struct Foo__bar<'a>(&'a u8);
+fn get(x: Foo__bar) -> &u8 {
+    x.0
+}
+
 fn main() {
     let c = a::Cursor { rest: "hello world" };
     println!("{:?}", a::word(c));
     let d = b::Cursor { rest: &[7, 8] };
     println!("{:?}", b::first(d));
+    println!("{}", get(Foo__bar(&3)));
 }

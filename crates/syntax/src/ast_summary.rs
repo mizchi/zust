@@ -884,8 +884,13 @@ fn may_hide_lifetimes(t: &PTy) -> bool {
         PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => may_hide_lifetimes(i),
         PTy::Tuple(ts) => ts.iter().any(may_hide_lifetimes),
         PTy::Path(None, p) => p.segs.last().is_some_and(|s| {
-            // (a module's item flattened with its path, `parse__Cursor`: its own name decides)
-            let base = s.name.rsplit("__").next().unwrap_or(&s.name);
+            // (a module's item flattened with its path, `parse__Cursor`: its own name decides. A name of the program's
+            //  own with `__` in it, `Foo__bar`, is not one: the part after `__` of a flattened type is its name, which
+            //  starts with a capital letter)
+            let base = match s.name.rsplit_once("__") {
+                Some((_, n)) if n.starts_with(|c: char| c.is_ascii_uppercase()) => n,
+                _ => s.name.as_str(),
+            };
             let std = matches!(base, "String" | "Vec" | "Box" | "Option" | "Result" | "Rc" | "Arc" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "VecDeque" | "str" | "Self")
                 || base.chars().next().is_some_and(|c| c.is_ascii_lowercase());
             let lts = s.args.iter().any(|a| matches!(a, crate::parse::GArg::Lifetime(_)));
