@@ -1258,7 +1258,9 @@ impl Session2 {
             let mut first: FxMap<&str, (usize, &str)> = FxMap::default();
             for (ii, sm) in sums[..user_src].iter().enumerate() {
                 let (Some(tr), Some(st)) = (sm.impl_trait.as_deref(), sm.impl_self.as_deref()) else { continue };
-                if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) {
+                // (the self type the bare parameter: not `impl<T> Tr for &T` / `&mut T`, whose self path is T too)
+                let bare = matches!(&sm.impl_self_ty, Some(crate::types::TySyn::Named(n)) if n == st);
+                if !sm.impl_trait_args.is_empty() || tr.contains(['<', ':']) || !sm.impl_generics.iter().any(|g| g.0 == st) || !bare {
                     continue;
                 }
                 // (the bare parameter itself, not a reference to it: `impl<T> Tr for &T` and `.. for &mut T` do not overlap)

@@ -136,9 +136,9 @@ zurgo run
   `target/zust/wasm32-unknown-unknown/<profile>/`, and `zurgo run` runs it with
   `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER`, as cargo does.
 - Build scripts run as under cargo (compiled by zustc, or by rustc when zustc cannot), and their cfgs, `rustc-env` and
-  `OUT_DIR` reach the crates. A proc-macro dependency is a stub: using its macros is an error.
-- Not yet: running proc macros, two versions of one crate, renamed dependencies, git dependencies, its own resolver
-  (mizchi/zust#28, mizchi/zust#29).
+  `OUT_DIR` reach the crates. A proc-macro dependency is built by rustc and run by the toolchain's proc-macro server
+  (`rust-analyzer-proc-macro-srv`): its attributes, derives and function-like macros expand (mizchi/zust#29).
+- Not yet: two versions of one crate, renamed dependencies, git dependencies, its own resolver (mizchi/zust#28).
 
 ### Options
 

@@ -194,6 +194,7 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<String>)
     // (the proc macros of each stub, checked against the crates once they are all planned)
     let mut pm_macros: Vec<(usize, proc_macro_stub::Macros)> = vec![];
     if !pms.is_empty() {
+        let run_pm = zustc::pm::server_path().is_some();
         let stub_dir = out_dir(g, o).join("proc-macro-stubs");
         std::fs::create_dir_all(&stub_dir).map_err(|e| format!("{}: {e}", stub_dir.display()))?;
         for &pn in &pms {
@@ -212,12 +213,21 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<String>)
             let cfg = zustc::cfg::CfgSet { features: r.nodes[&pn].features.iter().cloned().collect(), debug_assertions: !o.release, ..Default::default() };
             let m = proc_macro_stub::macros_of(&zustc::cfg::strip(&src, &cfg).unwrap_or(src));
             let stub = stub_dir.join(format!("{}.rs", lib.name));
-            let text = proc_macro_stub::stub_text(&pk.name, &m);
+            // (its macros run when rustc builds it and the toolchain's proc-macro server is there: zustc asks the
+            //  server. Otherwise its uses are errors, below)
+            let dylib = if run_pm { Some(bs.proc_macro_dylib(pn)?) } else { None };
+            let text = match &dylib {
+                Some(_) => format!("// (zurgo: `{}` is a proc-macro crate: rustc builds it, the toolchain's proc-macro server runs its macros)\n", pk.name),
+                None => proc_macro_stub::stub_text(&pk.name, &m),
+            };
             if std::fs::read_to_string(&stub).ok().as_deref() != Some(text.as_str()) {
                 std::fs::write(&stub, &text).map_err(|e| format!("{}: {e}", stub.display()))?;
             }
             if o.verbose {
-                eprintln!("note: `{} v{}` is a proc-macro crate: built as a stub (mizchi/zust#29)", pk.name, pk.version);
+                match &dylib {
+                    Some(d) => eprintln!("note: `{} v{}` is a proc-macro crate: {}", pk.name, pk.version, d.display()),
+                    None => eprintln!("note: `{} v{}` is a proc-macro crate: built as a stub, as the toolchain has no proc-macro server (mizchi/zust#29)", pk.name, pk.version),
+                }
             }
             lib_of.insert(lib.name.clone(), p);
             crates.push(CrateSpec {
@@ -230,9 +240,12 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<String>)
                 exe: None,
                 cfgs: vec![],
                 env: vec![],
+                proc_macro: dylib.clone(),
                 test: false,
             });
-            pm_macros.push((p, m));
+            if dylib.is_none() {
+                pm_macros.push((p, m));
+            }
         }
     }
     let n_stubs = crates.len();
@@ -260,6 +273,7 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<String>)
             exe: None,
             cfgs,
             env,
+            proc_macro: None,
             test: false,
         });
     }
@@ -305,6 +319,7 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<String>)
                 exe: Some(b.name.clone()),
                 cfgs,
                 env,
+                proc_macro: None,
                 test: false,
             });
         }
@@ -382,6 +397,7 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<String>)
                     exe: Some(format!("{exe}.test")),
                     cfgs,
                     env,
+                    proc_macro: None,
                     test: true,
                 });
                 labels.push(label);
@@ -517,6 +533,9 @@ fn ws_text_in(crates: &[CrateSpec], redact: bool) -> String {
         }
         for (k, v) in &c.env {
             e.push_str(&format!(" env={}={}", esc(k), if redact { "…".to_string() } else { esc(v) }));
+        }
+        if let Some(p) = &c.proc_macro {
+            e.push_str(&format!(" pm={}", esc(&p.display().to_string())));
         }
         if c.test {
             e.push_str(" test=true");
