@@ -4842,10 +4842,12 @@ compile-fail	nll/user-annotations/adt-brace-enums.rs
 compile-fail	nll/user-annotations/adt-brace-structs.rs
 compile-fail	nll/user-annotations/adt-nullary-enums.rs
 compile-fail	nll/user-annotations/adt-tuple-enums.rs
+compile-fail	nll/user-annotations/adt-tuple-struct-calls.rs
 compile-fail	nll/user-annotations/adt-tuple-struct.rs
 compile-fail	nll/user-annotations/cast_static_lifetime.rs
 check-pass	nll/user-annotations/closure-sig.rs
 compile-fail	nll/user-annotations/closure-substs.rs
+compile-fail	nll/user-annotations/constant-in-expr-inherent-1.rs
 compile-fail	nll/user-annotations/constant-in-expr-normalize.rs
 compile-fail	nll/user-annotations/constant-in-expr-trait-item-1.rs
 check-pass	nll/user-annotations/downcast-infer.rs
