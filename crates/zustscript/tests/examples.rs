@@ -206,6 +206,21 @@ fn numeric_same_in_js_and_wasm() {
         outs.push(String::from_utf8(r.stdout).unwrap());
     }
     assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    // an argument that throws while it is copied in (an array element's getter, in `.set`) gives back what the call
+    // took before it: many such calls with large arrays leave the module's memory as it was
+    let leak = node(
+        &root().join("target/test-out/numeric-wasm"),
+        "let ex; const inst = WebAssembly.instantiate; WebAssembly.instantiate = async (...a) => { const r = await inst(...a); ex = (r.instance ?? r).exports; return r; };
+const m = await import('./numeric.js');
+const big = new Array(200000).fill(1.5);
+const bad = new Array(200000).fill(1); Object.defineProperty(bad, 7, { get() { throw new Error('getter'); } });
+m.dot([1], [1]);
+const before = ex.memory.buffer.byteLength;
+let thrown = 0;
+for (let i = 0; i < 200; i++) { try { m.dot(big, bad); } catch (e) { thrown++; } }
+console.log(thrown, ex.memory.buffer.byteLength - before < 8 << 20, m.dot([2], [3]));",
+    );
+    assert_eq!(leak, "200 true 6\n");
     assert_eq!(
         outs[0],
         "dot 33.5\ntotal$i32 -2147483643\ntotal$u32 1\ntotal$i64 18014398509481986n\ntotal$f64 0.30000000000000004\n\
@@ -328,13 +343,17 @@ fn text_same_in_js_and_wasm() {
         let d = out_dir(name);
         let o = compare_build(&root().join("examples/text.zsc"), &d, flags);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
-        outs.push(node(&d, "const m = await import('./text.js'); console.log(JSON.stringify([m.text(4), m.shout('  hé '), m.conflict_report(5)]))"));
+        outs.push(node(&d, "const m = await import('./text.js'); console.log(JSON.stringify([m.text(4), m.shout('  hé '), m.conflict_report(5), m.card({ name: 'Ana`', age: 30 }, 21n), m.card({ name: '', age: -5 }, -4611686018427387904n), m.later_hole(), m.paren_text()]))"));
         if flags.is_empty() {
             rs = std::fs::read_to_string(d.join("text.wasm.rs")).unwrap();
         }
     }
     assert_eq!(outs[0], outs[1], "wasm and JS differ");
-    assert_eq!(outs[0], "[\"Hello, bo! ANA,BO,😀X abc 3 110 2 TFTFTT 0;1;2;3;\",\"HÉ!\",\"FTxya,b5\"]\n");
+    assert_eq!(outs[0], "[\"Hello, bo! ANA,BO,😀X abc 3 110 2 TFTFTT 0;1;2;3;\",\"HÉ!\",\"FTxya,b5\",\"Ana` (30): 42 {not a hole} ${nor this} true\",\" (-5): -9223372036854775808 {not a hole} ${nor this} false\",\"<1>|a\\nb2\",2]\n");
+    // a template string is appended piece by piece, its holes borrowed: no `format!` (core::fmt is about 10 KB of
+    // wasm), and integers (in templates and `to_string`) are written by zs_push_int
+    assert!(rs.contains("__zs_t.push_str(&p.name[..]); __zs_t.push_str(\" (\"); zs_push_int(&mut __zs_t, (p.age) as i64);"), "{rs}");
+    assert!(!rs.contains("format!("), "{rs}");
     // borrowed strings, a borrowed result with a lifetime, `==` through borrows, and a string grown in place
     assert!(rs.contains("fn zs_longest<'a>(a: &'a str, b: &'a str) -> &'a str"), "{rs}");
     assert!(rs.contains("fn zs_same(p: &ZsPerson, q: &ZsPerson) -> bool {\n{\n(p == q)"), "{rs}");

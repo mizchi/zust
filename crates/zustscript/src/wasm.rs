@@ -382,8 +382,33 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
         let _ = writeln!(glue, "{}function {name}({}) {{", if public.contains(name) { "export " } else { "" }, jps.join(", "));
         // (every argument is encoded, which can throw, before anything is allocated in wasm or registered: a
         // rejected value leaves nothing behind)
-        for l in jenc.iter().chain(&jpre) {
+        for l in &jenc {
             let _ = writeln!(glue, "  {l}");
+        }
+        // (what is taken in wasm or registered before the call (a buffer `$p`, a callback `$id`) is given back if
+        // a later step throws: an array element's getter can, in `.set`)
+        let taken: Vec<String> = jpre
+            .iter()
+            .filter_map(|l| l.strip_prefix("const ").and_then(|r| r.split_once(" = ")).map(|(n, _)| n.to_string()))
+            .filter(|n| n.ends_with("$p") || n.ends_with("$id"))
+            .collect();
+        if taken.len() > 1 || (taken.len() == 1 && jpre.len() > 1) {
+            let _ = writeln!(glue, "  let {};", taken.join(", "));
+            glue.push_str("  try {\n");
+            for l in &jpre {
+                let l = l.strip_prefix("const ").filter(|r| taken.iter().any(|n| r.starts_with(&format!("{n} = ")))).unwrap_or(l);
+                let _ = writeln!(glue, "    {l}");
+            }
+            glue.push_str("  } catch ($e) {\n");
+            for n in &taken {
+                let undo = if n.ends_with("$p") { format!("$w.__zsc_free({n})") } else { format!("$cbs.delete({n})") };
+                let _ = writeln!(glue, "    if ({n} !== undefined) {undo};");
+            }
+            glue.push_str("    throw $e;\n  }\n");
+        } else {
+            for l in &jpre {
+                let _ = writeln!(glue, "  {l}");
+            }
         }
         let callw = format!("$w.__zsc_w_{wname}({})", jargs.join(", "));
         let has_post = !jpost.is_empty();
