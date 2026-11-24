@@ -22,6 +22,7 @@ pub type R<T> = Result<T, String>;
 #[cfg(feature = "build")]
 mod build;
 mod dead;
+mod dyncompat;
 #[cfg(feature = "build")]
 pub use build::*;
 
@@ -937,6 +938,7 @@ impl Session2 {
         let src0_toks = (self.ctx.map.inputs.is_empty() && modules && src0.contains("::")).then(|| crate::lexer::tokenize(src0.as_bytes()));
         // (E0432: a top-level `use` of a path whose first segment names nothing; the `use` items come from the item
         // split, the names they could mean from the original text)
+        let mut dyn_err: Option<String> = None;
         if self.ctx.map.inputs.is_empty() {
             if let Some(e) = unresolved_import(src0, &src, &items[..user_src], &self.ctx.deps) {
                 return Err(e);
@@ -949,6 +951,9 @@ impl Session2 {
             if let Some(e) = duplicate_name(src0, src0_toks.as_deref(), &externs, self.opts.edition < 2018) {
                 return Err(e);
             }
+            // (E0038: a `dyn` of a trait of the program's that is not dyn compatible. rustc's well-formedness check
+            // reports it after the errors of resolution and the type check: as late_err below)
+            dyn_err = dyncompat::check(&src, &items[..user_src]);
             if let Some(e) = cfg_err.take().or_else(|| malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none(), self.opts.edition)) {
                 return Err(e);
             }
@@ -1082,6 +1087,9 @@ impl Session2 {
             if let Some(e) = private_path(src0, toks, &externs, self.opts.edition < 2018, &mut fpriv, &mut late_err) {
                 return Err(e);
             }
+        }
+        if late_err.is_none() {
+            late_err = dyn_err;
         }
         // (E0401: an item in a fn body that names a generic parameter, or `Self`, of an item around it; read where an
         // item was moved out of a fn body, after the items parse)
@@ -1660,7 +1668,8 @@ impl Session2 {
         }
         // (in a check (zustc check, the LSP): a build stays as fast as it was, and reports it when it makes the vtable)
         if let Some(e) = (self.checking && has_dyn).then(|| dyn_in_signature(&prog, &src, &items)).flatten() {
-            return Err(e);
+            // (the program's own `dyn` scan, when it found one: at the `dyn`, naming the trait rustc names)
+            return Err(late_err.take().filter(|l| l.ends_with("is not dyn compatible (E0038)")).unwrap_or(e));
         }
         // (E0277: a static is reachable from every thread, so its type must be Sync)
         if let Some((ci, tn)) = crate::acg::static_not_sync(&prog) {
@@ -8834,7 +8843,7 @@ fn hoisted_err_holds(msg: &str) -> bool {
     // `#[derive(Eq)] struct S(f64);` too)
     let bounds = ["the trait bound `", "binary operation `==` cannot be applied to type `", "can't compare `"].iter().any(|n| msg.starts_with(n))
         || (msg.starts_with('`') && (msg.contains("` doesn't implement `Debug`") || msg.contains("` is not an iterator")));
-    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused || bounds)
+    !msg.contains("__h") && !msg.contains("unsupported") && (named.iter().any(|n| msg.starts_with(n)) || msg.ends_with("is not dyn compatible (E0038)") || (msg.starts_with("cannot find constant `") && !msg.starts_with("cannot find constant `_`")) || unused || bounds)
 }
 
 /// e with its leading line `L:` made l

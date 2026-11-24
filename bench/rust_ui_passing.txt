@@ -419,6 +419,7 @@ check-pass	async-await/in-trait/async-lifetimes-and-bounds.rs
 check-pass	async-await/in-trait/async-lifetimes.rs
 compile-fail	async-await/in-trait/bad-signatures.rs
 compile-fail	async-await/in-trait/coherence-constrained.rs
+compile-fail	async-await/in-trait/dyn-compatibility.rs
 check-pass	async-await/in-trait/early-bound-1.rs
 check-pass	async-await/in-trait/early-bound-2.rs
 check-pass	async-await/in-trait/fn-not-async-err2.rs
@@ -433,6 +434,7 @@ compile-fail	async-await/in-trait/return-not-existing-type-wrapping-rpitit.rs
 check-pass	async-await/in-trait/returning-possibly-unsized-self.rs
 compile-fail	async-await/in-trait/unconstrained-impl-region.rs
 compile-fail	async-await/incorrect-move-async-order-issue-79694.rs
+compile-fail	async-await/inference_var_self_argument.rs
 compile-fail	async-await/issue-108572.rs
 check-pass	async-await/issue-54239-private-type-triggers-lint.rs
 compile-fail	async-await/issue-61076.rs
@@ -2325,12 +2327,16 @@ compile-fail	dyn-compatibility/assoc_type_bounds.rs
 check-pass	dyn-compatibility/assoc_type_bounds_sized.rs
 compile-fail	dyn-compatibility/assoc_type_bounds_sized_others.rs
 check-pass	dyn-compatibility/assoc_type_bounds_sized_unnecessary.rs
+compile-fail	dyn-compatibility/associated-consts.rs
 check-pass	dyn-compatibility/associated_type_bound_mentions_self.rs
+compile-fail	dyn-compatibility/bounds.rs
 check-pass	dyn-compatibility/by-value-self.rs
 compile-fail	dyn-compatibility/dyn-compatible-trait-implementation-20939.rs
+compile-fail	dyn-compatibility/dyn-incompat-const-slice.rs
 compile-fail	dyn-compatibility/dyn-incompatible-supertrait.rs
 check-pass	dyn-compatibility/elaborated-predicates-ordering.rs
 compile-fail	dyn-compatibility/erroneous_signature.rs
+compile-fail	dyn-compatibility/gat-incompatible-supertrait.rs
 compile-fail	dyn-compatibility/generics.rs
 check-pass	dyn-compatibility/impossible-predicates-multiple_supertrait_upcastable-check.rs
 check-pass	dyn-compatibility/item-bounds-can-reference-self.rs
@@ -2338,6 +2344,8 @@ compile-fail	dyn-compatibility/mention-correct-dyn-incompatible-trait.rs
 compile-fail	dyn-compatibility/mentions-Self-in-super-predicates.rs
 compile-fail	dyn-compatibility/mentions-Self.rs
 compile-fail	dyn-compatibility/method-with-self-trait-bound-not-dyn-safe.rs
+compile-fail	dyn-compatibility/missing-assoc-type.rs
+compile-fail	dyn-compatibility/no-duplicate-e0038.rs
 compile-fail	dyn-compatibility/no-static.rs
 check-pass	dyn-compatibility/phantom-fn.rs
 compile-fail	dyn-compatibility/reference-to-bare-trait-in-fn-inputs-and-outputs-issue-125139.rs
@@ -2346,6 +2354,8 @@ compile-fail	dyn-compatibility/sized-2.rs
 compile-fail	dyn-compatibility/sized.rs
 compile-fail	dyn-compatibility/static-constructor-prevents-dyn-no-api-guidance.rs
 compile-fail	dyn-compatibility/supertrait-mentions-GAT.rs
+compile-fail	dyn-compatibility/supertrait-mentions-Self.rs
+compile-fail	dyn-compatibility/taint-const-eval.rs
 compile-fail	dyn-keyword/dyn-2015-edition-keyword-ident-lint.rs
 compile-fail	dyn-keyword/dyn-2018-edition-lint.rs
 compile-fail	dyn-keyword/dyn-2021-edition-error.rs
@@ -2667,6 +2677,7 @@ compile-fail	feature-gates/feature-gate-asm_goto_with_outputs.rs
 compile-fail	feature-gates/feature-gate-asm_unwind.rs
 compile-fail	feature-gates/feature-gate-associated_const_equality.rs
 compile-fail	feature-gates/feature-gate-async-drop.rs
+compile-fail	feature-gates/feature-gate-async-fn-in-dyn-trait.rs
 compile-fail	feature-gates/feature-gate-async-trait-bounds.rs
 compile-fail	feature-gates/feature-gate-auto-traits.rs
 compile-fail	feature-gates/feature-gate-avx10_target_feature.rs
@@ -3260,6 +3271,7 @@ check-pass	impl-trait/in-trait/default-method-binder-shifting.rs
 check-pass	impl-trait/in-trait/default-method-constraint.rs
 compile-fail	impl-trait/in-trait/dont-consider-unconstrained-rpitits.rs
 compile-fail	impl-trait/in-trait/dont-probe-missing-item-name-3.rs
+compile-fail	impl-trait/in-trait/dyn-compatibility.rs
 check-pass	impl-trait/in-trait/early.rs
 compile-fail	impl-trait/in-trait/ensure-rpitits-are-created-before-freezing.rs
 check-pass	impl-trait/in-trait/expeced-refree-to-map-to-reearlybound-ice-108580.rs
@@ -6938,6 +6950,7 @@ build-pass	statics/static-mut-with-assoc-type-field.rs
 run-pass	statics/static-promotion.rs
 run-pass	statics/static-recursive.rs
 compile-fail	statics/uninhabited-static.rs
+compile-fail	statics/unsizing-wfcheck-issue-127299.rs
 run-pass	std/issue-3563-3.rs
 run-pass	std/thread-sleep-ms.rs
 run-pass	stdlib-unit-tests/matches2021.rs
@@ -7144,6 +7157,7 @@ compile-fail	suggestions/dyn-incompatible-trait-references-self.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021-without-dyn.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self-2021.rs
 compile-fail	suggestions/dyn-incompatible-trait-should-use-self.rs
+compile-fail	suggestions/dyn-incompatible-trait-should-use-where-sized.rs
 compile-fail	suggestions/enum-method-probe.rs
 compile-fail	suggestions/enum-variant-arg-mismatch.rs
 compile-fail	suggestions/field-access-considering-privacy.rs
@@ -7599,12 +7613,14 @@ run-pass	traits/inheritance/static2.rs
 run-pass	traits/inheritance/subst.rs
 run-pass	traits/inheritance/subst2.rs
 check-pass	traits/inheritance/supertrait-operator-issue-18088.rs
+compile-fail	traits/inherited-copy-bound.rs
 build-pass	traits/issue-104322.rs
 compile-fail	traits/issue-105231.rs
 compile-fail	traits/issue-106072.rs
 run-pass	traits/issue-15155.rs
 compile-fail	traits/issue-18400.rs
 run-pass	traits/issue-18412.rs
+compile-fail	traits/issue-20692.rs
 compile-fail	traits/issue-21837.rs
 run-pass	traits/issue-22019.rs
 run-pass	traits/issue-22110.rs
@@ -7618,6 +7634,7 @@ compile-fail	traits/issue-32963.rs
 check-pass	traits/issue-33187.rs
 run-pass	traits/issue-3683.rs
 run-pass	traits/issue-38033.rs
+compile-fail	traits/issue-38404.rs
 compile-fail	traits/issue-38604.rs
 compile-fail	traits/issue-3973.rs
 run-pass	traits/issue-40085.rs
@@ -7629,6 +7646,7 @@ build-pass	traits/issue-56202.rs
 run-pass	traits/issue-6128.rs
 run-pass	traits/issue-6334.rs
 check-pass	traits/issue-70944.rs
+compile-fail	traits/issue-72410.rs
 check-pass	traits/issue-72455.rs
 compile-fail	traits/issue-75627.rs
 compile-fail	traits/issue-77982.rs
@@ -7669,9 +7687,11 @@ check-pass	traits/object/bounds-cycle-1.rs
 check-pass	traits/object/bounds-cycle-2.rs
 check-pass	traits/object/bounds-cycle-3.rs
 check-pass	traits/object/bounds-cycle-4.rs
+compile-fail	traits/object/canonicalize-fresh-infer-vars-issue-103626.rs
 check-pass	traits/object/constrain-via-unnecessary-bound.rs
 check-pass	traits/object/crash-due-to-projections-modulo-norm.rs
 run-pass	traits/object/dyn-iterator-with-non-ord-item.rs
+compile-fail	traits/object/dyn-proj-non-dyn-compat.rs
 compile-fail	traits/object/elaborated-predicates-unconstrained-late-bound.rs
 compile-fail	traits/object/enforce-supertrait-projection.rs
 run-pass	traits/object/exclusion.rs
@@ -8276,6 +8296,7 @@ compile-fail	wf/ice-hir-wf-check-anon-const-issue-122199.rs
 compile-fail	wf/ice-hir-wf-issue-135341.rs
 compile-fail	wf/ice-wf-missing-span-in-error-130012.rs
 compile-fail	wf/issue-110157.rs
+compile-fail	wf/issue-87495.rs
 compile-fail	wf/issue-95665.rs
 compile-fail	wf/issue-96810.rs
 compile-fail	wf/let-pat-inferred-non-wf.rs
@@ -8284,6 +8305,7 @@ check-pass	wf/unnormalized-projection-guides-inference.rs
 compile-fail	wf/wf-array-elem-sized.rs
 compile-fail	wf/wf-associated-const.rs
 check-pass	wf/wf-dyn-in-hrtb-bound-issue-157122.rs
+compile-fail	wf/wf-dyn-incompatible.rs
 compile-fail	wf/wf-fn-def-check-sig-2.rs
 compile-fail	wf/wf-impl-associated-type-region.rs
 compile-fail	wf/wf-in-fn-type-arg.rs

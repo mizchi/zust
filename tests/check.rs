@@ -1868,3 +1868,23 @@ fn parse_errors_where_rustc_points() {
     assert_eq!(first("fn f() -> f32 {\n    3\n    5.0\n}\nfn main() {}\n"), Some((2, 6)), "missing semicolon");
     assert_eq!(first("fn main() {\n    struct Test {\n        Very\n        Bad\n        Stuff\n    }\n}\n").map(|d| d.0), Some(4), "struct in a fn body");
 }
+
+#[test]
+fn dyn_compatibility() {
+    // (E0038: a `dyn` of a trait that is not dyn compatible, at the `dyn`, naming the trait whose own definition
+    // makes it so; each expected line, column and message is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, t: &str| Some((l, c, format!("the trait `{t}` is not dyn compatible (E0038)")));
+    let use_a = "fn f(_: &dyn A) {}\nfn main() {}\n";
+    assert_eq!(first("trait Bar {\n    const X: usize;\n}\nfn f(_: &dyn Bar) {}\nfn main() {}\n"), e(4, 10, "Bar"), "associated const");
+    assert_eq!(first(&format!("trait A {{\n    fn new() -> u8;\n}}\n{use_a}")), e(4, 10, "A"), "no receiver");
+    assert_eq!(first(&format!("trait A {{\n    fn g<T>(&self, t: T);\n}}\n{use_a}")), e(4, 10, "A"), "generic method");
+    assert_eq!(first(&format!("trait A {{\n    fn eq(&self, o: &Self) -> bool;\n}}\n{use_a}")), e(4, 10, "A"), "Self parameter");
+    assert_eq!(first(&format!("trait A: Clone {{}}\n{use_a}")), e(2, 10, "A"), "Clone supertrait");
+    assert_eq!(first("trait Super {\n    type G<T>;\n}\ntrait Child: Super {}\nfn f(_: &dyn Child) {}\nfn main() {}\n"), e(5, 14, "Super"), "through a supertrait");
+    // (a method that requires `Self: Sized`, and a projection of `Self`, keep it dyn compatible)
+    assert_eq!(first("trait A {\n    fn new() -> Self where Self: Sized;\n    type T;\n    fn get(&self) -> Self::T;\n}\nfn f(_: &dyn A<T = u8>) {}\nfn main() {}\n"), None, "exempt");
+}
