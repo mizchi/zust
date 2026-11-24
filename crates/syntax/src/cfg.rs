@@ -447,14 +447,13 @@ pub(crate) fn outer_docs_start(s: &[u8], p: usize) -> usize {
         let tail = line.iter().rev().take_while(|c| c.is_ascii_whitespace()).count();
         let text = &line[lead..line.len().saturating_sub(tail).max(lead)];
         let doc_line = text.starts_with(b"///") && !text.starts_with(b"////");
-        let doc_block = text.starts_with(b"/**") && !text.starts_with(b"/***") && text.ends_with(b"*/") && text.len() > 4;
-        if doc_line || doc_block {
+        if doc_line {
             start = pls + lead;
             continue;
         }
-        // (a block doc comment over several lines, `/** ..\n .. */`: back to its `/**`, at a line's start. The
-        // comment this `*/` closes opens at the `/*` that matches it, comments nesting: not a `/**` in it or further
-        // back, in a string)
+        // (a block doc comment, `/** .. */` on this line or over several, `/** ..\n .. */`: back to its `/**`, at a
+        // line's start. The comment this `*/` closes opens at the `/*` that matches it, comments nesting: not a `/**`
+        // in it, `/* outer\n/** nested */ */`, or further back, in a string)
         if text.ends_with(b"*/") {
             let mut d = 0usize;
             let mut i = pls + lead + text.len();
@@ -478,7 +477,7 @@ pub(crate) fn outer_docs_start(s: &[u8], p: usize) -> usize {
             }
             if let Some(o) = opener.filter(|&o| s[o..].starts_with(b"/**") && !s[o..].starts_with(b"/***") && !s[o..].starts_with(b"/**/")) {
                 let ols = s[..o].iter().rposition(|&c| c == b'\n').map_or(0, |k| k + 1);
-                if o < pls && s[ols..o].iter().all(|c| c.is_ascii_whitespace()) {
+                if o < pls + lead + text.len() && s[ols..o].iter().all(|c| c.is_ascii_whitespace()) {
                     start = o;
                     continue;
                 }
@@ -664,6 +663,13 @@ mod tests {
         // (comments nest: this `*/ */` closes `/* outer`)
         let nested = "fn a() {}\n/* outer\n/**\n*/ */\n#[cfg(any())]\nfn gone() {}\nfn main() {}\n";
         assert_eq!(start(nested), "");
+        let nested1 = "fn a() {}\n/* outer\n/** nested */ */\n#[cfg(any())]\nfn gone() {}\nfn main() {}\n";
+        assert_eq!(start(nested1), "");
+        let o1 = strip(nested1, &CfgSet::default()).unwrap();
+        assert!(o1.contains("/* outer") && o1.contains("/** nested */ */") && o1.contains("fn main() {}") && !o1.contains("gone"), "{o1}");
+        // (a one-line doc comment is still the item's)
+        assert_eq!(start("fn a() {}\n/** one */\n#[x]\nfn f() {}"), "/** one */\n");
+        assert_eq!(start("fn a() {}\n/**/\n#[x]\nfn f() {}"), "");
         let o = strip(nested, &CfgSet::default()).unwrap();
         assert!(o.contains("/* outer") && o.contains("*/ */") && o.contains("fn main() {}") && !o.contains("gone"), "{o}");
         let src = "const K: &str = r#\"\n/**\n\"#;\nfn main() {}\n/* ordinary comment\n*/\n#[cfg(any())]\nfn removed() {}\n";
