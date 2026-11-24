@@ -4765,7 +4765,11 @@ fn private_path(
         imps.iter().skip(1).flatten().filter(|x| x.glob != 2 && !x.name.is_empty() && !matches!(x.vis, PVis::Pub | PVis::Crate)).map(|x| x.name).collect()
     };
     let reexp_on = !unknown_mods && mods.len() > 1 && imps.iter().flatten().any(|x| x.glob == 0 && !matches!(x.vis, PVis::Priv));
-    let mut amb = (amb_on || priv_on || assoc_on || !imp_priv_names.is_empty() || reexp_on).then(|| Ambiguity {
+    // (E0432 of an import cycle or a glob of a module into itself: a `pub use` of a path through the program's modules,
+    // or a glob of `self` / `super` / `crate`)
+    let cycle_on = !unknown_mods && imps.iter().flatten().any(|x| x.glob == 0 && x.segs.len() >= 2 && !matches!(x.vis, PVis::Priv))
+        || !unknown_mods && imps.iter().flatten().any(|x| x.glob == 2 && x.segs.first().is_some_and(|&f| matches!(t(f), b"self" | b"super" | b"crate")));
+    let mut amb = (amb_on || priv_on || assoc_on || !imp_priv_names.is_empty() || reexp_on || cycle_on).then(|| Ambiguity {
         b,
         toks,
         close: &close,
@@ -4788,6 +4792,8 @@ fn private_path(
                 ix
             })
             .collect(),
+        cycles: vec![],
+        unknown: false,
     });
     // (the names a glob may bring: the program's items, enum variants and import names; for E0451 alone, the names a
     // literal's path starts with: those structs' and the modules')
@@ -4951,6 +4957,14 @@ fn private_path(
                         }
                         if reexp_on && g == 0 && !matches!(imp.vis, PVis::Priv) {
                             keep(a.reexport(m, l, imp.root, &imp.vis));
+                        }
+                        if cycle_on && g == 0 && !matches!(imp.vis, PVis::Priv) {
+                            keep(a.import_cycle(m, j0 + li, l, imp.root));
+                        }
+                        // (a glob of the module into itself: `use self::*;`)
+                        if g == 2 && a.glob_target(m, j0 + li) == Some((m, None)) {
+                            let p: Vec<String> = l.iter().map(|&x| String::from_utf8_lossy(t(x)).into_owned()).collect();
+                            keep(Some((l[0], format!("unresolved import `{}::*` (E0432)", p.join("::")))));
                         }
                         a.busy_imp.pop();
                     }
@@ -5456,6 +5470,10 @@ struct Ambiguity<'a, 'b> {
     targets: FxMap<(usize, usize), Option<(usize, Option<usize>)>>,
     /// (each module's items by name)
     named: Vec<FxMap<&'a [u8], Vec<u32>>>,
+    /// (the imports a lookup passed over as being resolved: a cycle; and whether a lookup met something it does not
+    /// know (a glob of another crate's module, a module with macro-made items), for E0432 of a cycle)
+    cycles: Vec<(usize, usize)>,
+    unknown: bool,
 }
 
 /// what the namespaces of an item `private_path` reads are (1 types, 2 values)
@@ -5566,7 +5584,11 @@ impl<'a, 'b> Ambiguity<'a, 'b> {
         // (an import of the name: it takes the name before a glob does, in the namespaces it binds)
         let mut bound = 0u8;
         for j in 0..self.imps[cur].len() {
-            if self.imps[cur][j].glob == 2 || self.imps[cur][j].name != name || self.busy_imp.contains(&(cur, j)) {
+            if self.imps[cur][j].glob == 2 || self.imps[cur][j].name != name {
+                continue;
+            }
+            if self.busy_imp.contains(&(cur, j)) {
+                self.cycles.push((cur, j));
                 continue;
             }
             let seen = self.visible(cur, &self.imps[cur][j].vis, viewer);
@@ -5584,6 +5606,7 @@ impl<'a, 'b> Ambiguity<'a, 'b> {
             return Some(());
         }
         if self.opaque[cur] {
+            self.unknown = true;
             return None;
         }
         for j in 0..self.imps[cur].len() {
@@ -5618,7 +5641,7 @@ impl<'a, 'b> Ambiguity<'a, 'b> {
                         }
                     }
                 }
-                None => {}
+                None => self.unknown = true,
             }
         }
         Some(())
@@ -5826,6 +5849,23 @@ impl<'a, 'b> Ambiguity<'a, 'b> {
             cur = c;
         }
         None
+    }
+    /// E0432 of an import of module m (import j) that names itself through other imports and nothing else
+    /// (`pub use crate::y::x;` in y, `mod a { pub use crate::b::foo; } mod b { pub use crate::a::foo; }`): its path, as
+    /// written, is unresolved. Only a path through the program's own modules, where nothing it meets is unknown
+    fn import_cycle(&mut self, m: usize, j: usize, segs: &[usize], root: bool) -> Option<(usize, String)> {
+        if segs.len() < 2 {
+            return None;
+        }
+        self.cycles.clear();
+        self.unknown = false;
+        let r = self.path(m, segs, root, 3);
+        let APath::Defs(d) = r else { return None };
+        if !d.is_empty() || self.unknown || !self.cycles.contains(&(m, j)) {
+            return None;
+        }
+        let p: Vec<String> = segs.iter().map(|&x| String::from_utf8_lossy(self.t(x)).into_owned()).collect();
+        Some((segs[0], format!("unresolved import `{}` (E0432)", p.join("::"))))
     }
     /// E0364 / E0365: an import of module m that re-exports (vis wider than private) what it names, the module's own
     /// item (or an enum's variant), where every item of that name is seen in less than the import makes it:

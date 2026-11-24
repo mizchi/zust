@@ -3423,6 +3423,8 @@ run-pass	imports/import-glob-1.rs
 compile-fail	imports/import-glob-circular.rs
 run-pass	imports/import-glob-crate.rs
 run-pass	imports/import-in-block.rs
+compile-fail	imports/import-loop-2.rs
+compile-fail	imports/import-loop.rs
 run-pass	imports/import-prefix-macro.rs
 run-pass	imports/import-rpass.rs
 run-pass	imports/import-trailing-comma.rs
@@ -3433,6 +3435,7 @@ compile-fail	imports/import2.rs
 run-pass	imports/import3-rpass.rs
 compile-fail	imports/import3.rs
 run-pass	imports/import4-rpass.rs
+compile-fail	imports/import4.rs
 run-pass	imports/import5.rs
 run-pass	imports/import6.rs
 run-pass	imports/import7.rs
@@ -3452,6 +3455,7 @@ check-pass	imports/issue-26930.rs
 compile-fail	imports/issue-28134.rs
 compile-fail	imports/issue-28388-1.rs
 compile-fail	imports/issue-2937.rs
+compile-fail	imports/issue-31212.rs
 check-pass	imports/issue-32119.rs
 check-pass	imports/issue-32222.rs
 compile-fail	imports/issue-32354-suggest-import-rename.rs
@@ -3478,6 +3482,7 @@ compile-fail	imports/issue-57015.rs
 check-pass	imports/issue-62767.rs
 check-pass	imports/issue-68103.rs
 compile-fail	imports/issue-81413.rs
+compile-fail	imports/issue-8208.rs
 compile-fail	imports/issue-8640.rs
 check-pass	imports/local-modularized-tricky-pass-1.rs
 check-pass	imports/local-modularized.rs

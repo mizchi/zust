@@ -1467,6 +1467,31 @@ fn import_privacy_and_reexports() {
 }
 
 #[test]
+fn import_cycles() {
+    // (E0432: an import that names only itself through other imports, a glob of a module into itself; each expected
+    // line, column and message is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        assert_eq!(check(edition, "mod y {\n    pub use crate::y::x;\n}\nfn main() {}\n"), at(2, 13, "unresolved import `crate::y::x` (E0432)"), "self");
+        let src = "mod a { pub use crate::b::foo; }\nmod b { pub use crate::a::foo; }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(1, 17, "unresolved import `crate::b::foo` (E0432)"), "two");
+        assert_eq!(check(edition, "use self::*;\nfn main() {}\n"), at(1, 5, "unresolved import `self::*` (E0432)"), "glob_self");
+        // (a cycle of globs, an import of an item, one through another crate's)
+        for src in [
+            "mod a { pub use crate::b::*; pub fn f() {} }\nmod b { pub use crate::a::*; }\nfn main() { b::f(); }\n",
+            "mod a { pub use crate::b::x; }\nmod b { pub fn x() {} }\nfn main() { a::x(); }\n",
+            "mod a { pub use std::fmt::Debug; }\nmod b { pub use crate::a::Debug; }\nfn main() {}\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
 fn glob_ambiguity() {
     // (E0659: a name two glob imports bring with different definitions, where a path names it; each expected line
     // and column is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
