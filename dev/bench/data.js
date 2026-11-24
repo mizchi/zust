@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795502041357,
+  "lastUpdate": 1795502043683,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -115512,6 +115512,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/74fd5e3876093dc32fa6c6034caaed096ba48008"
         },
         "date": 1795501669931,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1857,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.06,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1524,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4674,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "485cb186152d1b6d38589c97dbd7ca816580005e",
+          "message": "Merge pull request #104 from mizchi/claude/loving-ride-ydcwvg\n\nParallel `check` (#101), the borrow check toward Polonius Alpha (#1), and a survey of the Rust compiler's frontier",
+          "timestamp": "2026-11-24T15:27:31+09:00",
+          "tree_id": "d5d55a15f86225744a4fdeadb1dba6252bd0f803",
+          "url": "https://github.com/mizchi/zust/commit/485cb186152d1b6d38589c97dbd7ca816580005e"
+        },
+        "date": 1795502043299,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
