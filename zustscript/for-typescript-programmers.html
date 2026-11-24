@@ -59,7 +59,7 @@
   <span class='operator'>|</span> <span class='punctuation bracket'>{</span> <span class='property'>kind</span>: <span class='string'>&quot;shipped&quot;</span><span class='punctuation delimiter'>;</span> <span class='property'>units</span>: <span class='type builtin'>number</span> <span class='punctuation bracket'>}</span><span class='punctuation delimiter'>;</span>
 </code></pre>
 <p><em>stock.zsc</em></p>
-<pre><code class="language-zustscript"><span class='keyword'>import</span> <span class='keyword'>type</span> <span class='punctuation bracket'>{</span> <span class='type'><span class='type'>StockEvent</span></span> <span class='punctuation bracket'>}</span> <span class='keyword'>from</span> <span class='string'>&quot;./warehouse.ts&quot;</span><span class='punctuation delimiter'>;</span>
+<pre><code class="language-zustscript"><span class='keyword'>import</span> <span class='keyword'>type</span> <span class='punctuation bracket'>{</span> <span class='variable'>StockEvent</span> <span class='punctuation bracket'>}</span> <span class='keyword'>from</span> <span class='string'>&quot;./warehouse.ts&quot;</span><span class='punctuation delimiter'>;</span>
 
 <span class='keyword'>fn</span> <span class='function'>delta</span><span class='punctuation bracket'>(</span><span class='variable'>event</span><span class='punctuation delimiter'>:</span> <span class='type'><span class='type'>StockEvent</span></span><span class='punctuation bracket'>)</span> <span class='operator'>-&gt;</span> <span class='type builtin'>f64</span> <span class='punctuation bracket'>{</span>
   <span class='keyword'>match</span> <span class='variable'>event</span> <span class='punctuation bracket'>{</span>
