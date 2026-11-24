@@ -3124,10 +3124,11 @@ impl Cx<'_> {
                 continue;
             }
             let Some(ns) = ft.params.iter().map(|&t| count(prog, t, 0)).collect::<Option<Vec<usize>>>() else { continue };
-            let all: Vec<u8> = match codes(i) {
+            // (the marks of paths written with no lifetime stand for no region where their types have none (`&S`))
+            let all: Vec<u8> = match codes(i).map(|c| c.iter().copied().filter(|&x| x != R_ELIDED_ADT).collect::<Vec<u8>>()) {
                 None => vec![CLO_P; ns.iter().sum()],
-                Some([R_FN, rest @ ..]) if Some(rest.len()) == count(prog, ft.ret, 0).map(|r| r + ns.iter().sum::<usize>()) => {
-                    rest.iter().map(|&x| if x == R_BOUND { CLO_P } else { CLO_E }).collect()
+                Some(c) if c.first() == Some(&R_FN) && Some(c.len() - 1) == count(prog, ft.ret, 0).map(|r| r + ns.iter().sum::<usize>()) => {
+                    c[1..].iter().map(|&x| if x == R_BOUND { CLO_P } else { CLO_E }).collect()
                 }
                 Some(_) => continue,
             };
@@ -3715,8 +3716,14 @@ impl Cx<'_> {
             let mut s = crate::regions::Slots { lts: names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
             let mut cs = vec![];
             s.slots(p, false, &mut cs);
-            codes.push(cs.iter().map(|&x| if x == R_BOUND { CLO_P } else { CLO_E }).collect::<Vec<u8>>());
             let Ok(t) = self.parse_ty(p) else { return };
+            // (a path written with no lifetime is a mark that stands for no region when its type has none (`&S`):
+            // the regions are the codes but those marks, as many as the type has)
+            let cs: Vec<u8> = cs.into_iter().filter(|&x| x != R_ELIDED_ADT).collect();
+            if count(self.prog, t, 0) != Some(cs.len()) {
+                return;
+            }
+            codes.push(cs.iter().map(|&x| if x == R_BOUND { CLO_P } else { CLO_E }).collect::<Vec<u8>>());
             params.push(t);
         }
         self.rg_closure_ann_bound(c, &codes, &params);

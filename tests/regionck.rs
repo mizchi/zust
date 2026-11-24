@@ -3521,6 +3521,11 @@ fn part20_closure_fnptr_annotated() {
         let d = check(src);
         assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{src}: {d:?}");
     }
+    // (a struct with no lifetime parameters behind the reference (`&S`): its path's mark stands for no region)
+    for (src, line) in [("struct S;\nfn main() {\n    let _: fn(&S) = |_: &'static S| {};\n}\n", 3), ("struct S;\nfn want<'b>(_f: fn(&S), _y: &'b u32) {}\nfn main() {\n    want(|_: &'static S| {}, &1);\n}\n", 4)] {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].0 == line && d[0].1.contains("lifetime may not live long enough"), "{src}: {d:?}");
+    }
     assert_eq!(check("fn want(_f: fn(&u32)) {}\nfn want2<'a>(_f: fn(&'a u32), _x: &'a u32) {}\nfn want3(_f: fn(&'static u32)) {}\nstatic X: u32 = 1;\nfn main() {\n    want2(|_: &'static u32| {}, &X);\n    want3(|_: &'static u32| {});\n    want(|_: &u32| {});\n}\n"), vec![]);
     let d = check("fn b<'a>(_: &'a ()) {\n    let _: for<'x> fn(&'x ()) = |_: &'static ()| {};\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
