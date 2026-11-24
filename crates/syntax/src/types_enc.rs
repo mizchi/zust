@@ -124,6 +124,7 @@ crate::enc_struct!(SigSyn {
     export,
     panic_handler,
     ret_from,
+    opaque_from,
     is_unsafe,
     regions,
 });

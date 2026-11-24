@@ -754,7 +754,8 @@ impl Cx<'_> {
             }
         }
         if let (Some((n, k)), Ok((_, t))) = (mark, &r) {
-            if self.bk.frames.len() == n && *t != Ty::Never && self.bk_on() && !self.bk_ty(*t).1 {
+            // (not a call whose result `impl Trait` captures its arguments' borrows: it holds them, whatever its hidden type)
+            if self.bk.frames.len() == n && *t != Ty::Never && self.bk_on() && !self.bk_ty(*t).1 && !self.bk_opaque_call(e) {
                 if let Some(f) = self.bk.frames.last_mut() {
                     f.truncate(k);
                 }

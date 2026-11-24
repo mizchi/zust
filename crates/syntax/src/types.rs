@@ -285,6 +285,10 @@ pub struct SigSyn {
     /// Which reference arguments the return value may borrow from (borrow checking): bit i for argument i (self
     /// first), bit 63 set when known. 0: not known (any of them)
     pub ret_from: u64,
+    /// For a result `impl Trait`: the arguments it may borrow from, as ret_from, by edition 2024's rules (every
+    /// lifetime of the arguments, or those of its `use<..>`) and by 2021's (the lifetimes its bounds name). 0 for
+    /// another result
+    pub opaque_from: (u64, u64),
     /// The regions of the signature (None: it writes no reference and no lifetime, so every region in it is elided)
     pub regions: Option<Box<RSigSyn>>,
 }

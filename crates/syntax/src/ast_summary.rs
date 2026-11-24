@@ -756,6 +756,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         export: false,
         panic_handler: false,
         ret_from: ret_from(sig),
+        opaque_from: opaque_from(sig),
         regions: {
             let otp: Vec<&str> = owner.map(|o| o.generics.iter().map(|g| g.0.as_str()).collect()).unwrap_or_default();
             crate::regions::sig_regions(sig, owner.and_then(|o| o.regions.as_deref()), &otp)
@@ -1430,6 +1431,59 @@ fn ret_from(sig: &PSig) -> u64 {
         }
     }
     KNOWN | mask
+}
+
+/// SigSyn::opaque_from: the arguments a result `impl Trait` may borrow from. Edition 2024 captures every lifetime in
+/// scope (the arguments' elided ones too) unless `use<..>` lists them; 2021 only those its bounds name
+/// (`impl Display + 'a`). [2024, 2021], each as ret_from (bit 63: known)
+fn opaque_from(sig: &PSig) -> (u64, u64) {
+    const KNOWN: u64 = 1 << 63;
+    let Some(PTy::Impl(bs)) = &sig.ret else { return (0, 0) };
+    let mut inputs: Vec<&PTy> = vec![];
+    if let Some(r) = &sig.recv_ty {
+        inputs.push(r);
+    }
+    inputs.extend(sig.params.iter().map(|p| &p.1));
+    if inputs.len() > 62 {
+        return (0, 0);
+    }
+    // (`use<'a, T>`: parsed as a bound named `use`)
+    let used: Option<Vec<String>> = bs.iter().find_map(|b| match b {
+        Bound::Trait(_, p) if p.segs.len() == 1 && p.segs[0].name == "use" => {
+            Some(p.segs[0].args.iter().filter_map(|a| if let crate::parse::GArg::Lifetime(l) = a { Some(l.clone()) } else { None }).collect())
+        }
+        _ => None,
+    });
+    let mut named: Vec<String> = vec![];
+    for b in bs {
+        match b {
+            Bound::Lifetime(l) => named.push(l.clone()),
+            Bound::Trait(_, p) if !(p.segs.len() == 1 && p.segs[0].name == "use") => {
+                let (mut e, mut o) = (false, false);
+                lifetimes(&PTy::Path(None, p.clone()), &mut named, &mut e, &mut o);
+            }
+            _ => {}
+        }
+    }
+    let mask = |pick: &dyn Fn(&[String], bool) -> bool| {
+        let mut m = KNOWN;
+        for (i, t) in inputs.iter().enumerate() {
+            let (mut l, mut e, mut o) = (vec![], false, false);
+            lifetimes(t, &mut l, &mut e, &mut o);
+            l.retain(|x| x != "'static");
+            if pick(&l, e) {
+                m |= 1 << i;
+            }
+        }
+        m
+    };
+    match &used {
+        Some(u) => {
+            let m = mask(&|l: &[String], _: bool| l.iter().any(|x| u.contains(x)));
+            (m, m)
+        }
+        None => (mask(&|l: &[String], e: bool| e || !l.is_empty()), mask(&|l: &[String], _: bool| l.iter().any(|x| named.contains(x)))),
+    }
 }
 
 /// `Fn(A, B) -> R` 形式の境界なら (種類, 引数, 戻り値)
