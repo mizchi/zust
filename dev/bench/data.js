@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795491705881,
+  "lastUpdate": 1795491708490,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -69700,6 +69700,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 106.793,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e58383360c032e74a9a8d13c1d83f8fa184ef5c7",
+          "message": "Region check part 19: closures' calls and requirements, fn items as higher-ranked fn pointers, impl constants' lifetimes (#109)\n\nRegion check part 19: closures' calls and requirements, fn items as higher-ranked fn pointers, impl constants' lifetimes",
+          "timestamp": "2026-11-24T12:36:35+09:00",
+          "tree_id": "418cc2c0f9b8b3728bf893d8bc3a0896b8b75373",
+          "url": "https://github.com/mizchi/zust/commit/e58383360c032e74a9a8d13c1d83f8fa184ef5c7"
+        },
+        "date": 1795491707985,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.707,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.687,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.474,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.232,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.862,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.855,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.034,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 192.26,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 107.309,
             "unit": "MiB"
           }
         ]
