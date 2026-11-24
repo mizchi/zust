@@ -2174,15 +2174,28 @@ impl Program {
                 continue;
             }
             // (`impl<T> Tr for T`, with or without members)
-            // (`impl<T: Tr> Tr for &T` / `&mut T` with no functions (only types and consts), and a trait with no default
-            // methods: nothing to call, so it counts as a blanket impl. With functions, calls on `&T` would reach T's
-            // methods instead: not supported)
+            // (`impl<T: Tr> Tr for &T` / `&mut T` that defines each default method of the trait: a call on `&T` reaches
+            // T's method through the deref (its own methods forward to it, or are not called), so it counts as a
+            // blanket impl)
             let ref_of_param = matches!(&sm.impl_self_ty, Some(TySyn::Ref(_, i)) if matches!(&**i, TySyn::Named(n) if n == sn))
                 && sm.impl_generics.iter().any(|g| g.0 == *sn);
             if ref_of_param {
-                let defaults = p.traits.get(tr).is_some_and(|ids| ids.iter().any(|&id| p.sigs[id as usize].has_body));
-                if !sm.fns.is_empty() || defaults {
-                    return Err(format!("{}:1: impls for references to a type parameter (`impl<T> {tr} for &T`) are not supported", it.line));
+                // (its methods are not called: a call on the reference reaches T's through the deref, which is what
+                // one that forwards to T's does (the driver reports one that does more). A default method it leaves out
+                // would run with Self = &T, not T's: not supported)
+                // (the impl's members: the items that name this header)
+                let defined: Vec<&String> = items
+                    .iter()
+                    .zip(sums)
+                    .skip(ii + 1)
+                    .take_while(|(m, _)| matches!(m.kind, crate::lexer::ItemKind::ImplMember(h) if h as usize == ii))
+                    .flat_map(|(_, s)| s.ref_impl_fns.iter())
+                    .collect();
+                let left_out = p.traits.get(tr).and_then(|ids| {
+                    ids.iter().filter(|&&id| p.sigs[id as usize].has_body).map(|&id| p.names[id as usize].rsplit("::").next().unwrap_or("")).find(|m| !defined.iter().any(|f| f == m))
+                });
+                if let Some(m) = left_out {
+                    return Err(format!("{}:1: impls for references to a type parameter (`impl<T> {tr} for &T`) are supported only when they define each default method of the trait, forwarding to T's: `{m}` is left out", it.line));
                 }
                 // (`impl<T> Foo for T` covers `&U` too; `&T` and `&mut T` are two types)
                 let m = matches!(&sm.impl_self_ty, Some(TySyn::Ref(true, _)));

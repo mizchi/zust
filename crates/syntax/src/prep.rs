@@ -834,7 +834,6 @@ pub fn std_renames(src: &str) -> Option<String> {
     }
     let b = src.as_bytes();
     let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
-    let words = |u: &str| -> Vec<String> { u.split(|c: char| !(c.is_alphanumeric() || c == '_')).map(|w| w.to_string()).collect() };
     let mut out = src.to_string();
     let mut changed = false;
     for &(m, name, to) in STD_RENAMES {
@@ -850,16 +849,9 @@ pub fn std_renames(src: &str) -> Option<String> {
                 t = t[nl + 1..].trim_start();
             }
             let Some(u) = t.strip_prefix("use ").or_else(|| t.strip_prefix("pub use ")) else { continue };
-            let ws = words(u);
-            if u.contains(&format!("{m}::*")) {
-                imported = true;
-            } else if ws.iter().any(|w| w == name) {
-                if ws.iter().any(|w| w == m) {
-                    imported = true;
-                } else {
-                    other = true;
-                }
-            }
+            let (from_m, elsewhere) = classify_use(u, m, name);
+            imported |= from_m;
+            other |= elsewhere;
         }
         let defined = ["struct", "enum", "trait", "type", "union"].iter().any(|k| {
             let pat = format!("{k} {name}");
@@ -869,6 +861,11 @@ pub fn std_renames(src: &str) -> Option<String> {
             })
         });
         let bare = imported && !other && !defined;
+        // (when some `use` imports the name from that module, each block's own `use`s decide for it: a fn's
+        // `use std::fmt::Write;` is that fn's, and a module's are that module's (a crate's files, loaded as
+        // `mod name { .. }`). The scan above is the answer only without one: it reads every statement that starts with
+        // `use` alike, wherever it is, and misses one right after `mod name {`)
+        let scoped = (!defined && imports_from(src, m, name)).then(|| use_scopes(src, m, name));
         let cur = std::mem::take(&mut out);
         let cb = cur.as_bytes();
         let mut i = 0;
@@ -879,6 +876,12 @@ pub fn std_renames(src: &str) -> Option<String> {
             let after_m = cur[..at].ends_with(&format!("{m}::"));
             let qualified = at >= 2 && &cb[at - 2..at] == b"::";
             out.push_str(&cur[i..at]);
+            // (not inside a string: `"Write"` is text)
+            let bare = match &scoped {
+                Some(sc) => sc.bare_at(at) && !sc.in_lit(at),
+                None => bare,
+            };
+            let after_m = after_m && scoped.as_ref().is_none_or(|sc| !sc.in_lit(at));
             if word && (after_m || (bare && (!qualified || cur[..at].ends_with("mpsc::") || cur[..at].ends_with("atomic::") || cur[..at].ends_with("fmt::")))) {
                 out.push_str(to);
                 changed = true;
@@ -890,6 +893,238 @@ pub fn std_renames(src: &str) -> Option<String> {
         out.push_str(&cur[i..]);
     }
     changed.then_some(out)
+}
+
+/// The brace blocks of a source and, for each (the root first), whether its own `use`s import a name from module m
+/// and whether they import it from elsewhere
+struct UseScopes {
+    /// (start, end, a module's body) of each block, in the order they open
+    blocks: Vec<(usize, usize, bool)>,
+    /// (from m, from elsewhere), by block: 0 the root, k + 1 the block k
+    uses: Vec<(bool, bool)>,
+    /// The blocks with a `use super::*;`: a module's body that has one sees its parent's imports
+    super_globs: Vec<bool>,
+    /// The literals' byte ranges, in order: a name inside a string is text, not renamed
+    lits: Vec<(usize, usize)>,
+}
+
+impl UseScopes {
+    /// The innermost block at byte i (0: none)
+    fn block_at(&self, i: usize) -> usize {
+        let mut best: Option<usize> = None;
+        for (k, &(a, b, _)) in self.blocks.iter().enumerate() {
+            if a < i && i < b && best.is_none_or(|j| self.blocks[j].0 < a) {
+                best = Some(k);
+            }
+        }
+        best.map_or(0, |k| k + 1)
+    }
+
+    /// The name at byte i is the one module m's: the nearest block around it whose `use`s import the name decides,
+    /// up to the module it is in (a module's body does not see its parent's imports)
+    fn bare_at(&self, i: usize) -> bool {
+        let mut chain: Vec<usize> = self.blocks.iter().enumerate().filter(|(_, t)| t.0 < i && i < t.1).map(|(k, _)| k).collect();
+        chain.sort_by_key(|&k| std::cmp::Reverse(self.blocks[k].0));
+        for k in chain {
+            let (from_m, other) = self.uses[k + 1];
+            if from_m || other {
+                return from_m && !other;
+            }
+            if self.blocks[k].2 && !self.super_globs[k + 1] {
+                return false;
+            }
+        }
+        let (from_m, other) = self.uses[0];
+        from_m && !other
+    }
+
+    /// Byte i is inside a literal (`"Write"`)
+    fn in_lit(&self, i: usize) -> bool {
+        let k = self.lits.partition_point(|&(a, _)| a <= i);
+        k > 0 && i < self.lits[k - 1].1
+    }
+}
+
+/// What a `use` tree (the text after `use`, to its `;`) imports of a name: (from module m, from elsewhere), by each leaf's
+/// own path: `std::{fmt, io::Write}` imports io's `Write`; `fmt::*` counts as m's; `Write as W` binds W, not the name,
+/// and `IoWrite as Write` binds the name to another item
+fn classify_use(u: &str, m: &str, name: &str) -> (bool, bool) {
+    // (the tokens: identifiers, `::`, `{`, `}`, `,`, `*`)
+    let mut toks: Vec<&str> = vec![];
+    let b = u.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if c.is_ascii_alphanumeric() || c == b'_' {
+            let s0 = i;
+            while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                i += 1;
+            }
+            toks.push(&u[s0..i]);
+            continue;
+        }
+        if c == b':' && b.get(i + 1) == Some(&b':') {
+            toks.push("::");
+            i += 2;
+            continue;
+        }
+        // (comments are whitespace: `use std::fmt::Write /* formatter */;`)
+        if c == b'/' && b.get(i + 1) == Some(&b'/') {
+            while i < b.len() && b[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if c == b'/' && b.get(i + 1) == Some(&b'*') {
+            let mut d = 0;
+            while i < b.len() {
+                if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                    d += 1;
+                    i += 2;
+                } else if b[i] == b'*' && b.get(i + 1) == Some(&b'/') {
+                    d -= 1;
+                    i += 2;
+                    if d == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        if matches!(c, b'{' | b'}' | b',' | b'*') {
+            toks.push(&u[i..i + 1]);
+        }
+        i += 1;
+    }
+    // (each leaf: its whole path, and the name it binds)
+    let mut leaves: Vec<(Vec<&str>, Option<&str>)> = vec![];
+    fn trees<'a>(toks: &[&'a str], mut k: usize, prefix: &[&'a str], out: &mut Vec<(Vec<&'a str>, Option<&'a str>)>) -> usize {
+        loop {
+            let mut path = prefix.to_vec();
+            while k < toks.len() && !matches!(toks[k], "{" | "}" | "," | "*") {
+                if toks[k] == "as" {
+                    break;
+                }
+                if toks[k] != "::" {
+                    path.push(toks[k]);
+                }
+                k += 1;
+            }
+            match toks.get(k).copied() {
+                Some("{") => {
+                    k = trees(toks, k + 1, &path, out);
+                    // (past the group's `}`)
+                    k += 1;
+                }
+                Some("*") => {
+                    path.push("*");
+                    out.push((path, None));
+                    k += 1;
+                }
+                Some("as") => {
+                    out.push((path, toks.get(k + 1).copied()));
+                    k += 2;
+                }
+                _ => {
+                    if path.len() > prefix.len() {
+                        out.push((path, None));
+                    }
+                }
+            }
+            match toks.get(k).copied() {
+                Some(",") => k += 1,
+                _ => return k,
+            }
+        }
+    }
+    trees(&toks, 0, &[], &mut leaves);
+    let (mut from_m, mut other) = (false, false);
+    for (p, alias) in &leaves {
+        // (`Write::{self}` imports `Write`)
+        let p = if p.len() > 1 && p.last() == Some(&"self") { &p[..p.len() - 1] } else { &p[..] };
+        let Some((&last, pre)) = p.split_last() else { continue };
+        let from = pre.last() == Some(&m);
+        if last == "*" {
+            from_m |= from;
+            continue;
+        }
+        // (the name a leaf binds is its alias's, if it has one: `self::IoWrite as Write` binds `Write` to another
+        // item; `fmt::Write as FmtWrite` binds none of the name)
+        if alias.unwrap_or(last) != name {
+            continue;
+        }
+        if from && last == name {
+            from_m = true;
+        } else {
+            other = true;
+        }
+    }
+    (from_m, other)
+}
+
+/// Some `use` (from the keyword to its `;`) names module m and the name, or m's glob: a cheap look before
+/// use_scopes tokenizes the source
+fn imports_from(src: &str, m: &str, name: &str) -> bool {
+    let word = |u: &str, w: &str| u.match_indices(w).any(|(i, _)| {
+        let b = u.as_bytes();
+        let id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+        (i == 0 || !id(b[i - 1])) && b.get(i + w.len()).is_none_or(|&c| !id(c))
+    });
+    src.match_indices("use ").any(|(i, _)| {
+        let u = &src[i + 4..];
+        let u = &u[..u.find(';').unwrap_or(u.len())];
+        word(u, m) && (word(u, name) || u.contains('*'))
+    })
+}
+
+#[cold]
+#[inline(never)]
+fn use_scopes(src: &str, m: &str, name: &str) -> UseScopes {
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| &src[toks[k].1..toks[k].2];
+    let sym = |k: usize, c: &str| toks[k].0 == 1 && tk(k) == c;
+    // (every brace block, with whether it is a module's body: a `use` in a fn body is that body's)
+    let mut blocks: Vec<(usize, usize, bool)> = vec![];
+    let mut open: Vec<usize> = vec![];
+    for k in 0..toks.len() {
+        if sym(k, "{") {
+            let is_mod = k >= 2 && toks[k - 1].0 == 0 && toks[k - 2].0 == 0 && tk(k - 2) == "mod";
+            open.push(blocks.len());
+            blocks.push((toks[k].1, b.len(), is_mod));
+        } else if sym(k, "}") {
+            if let Some(o) = open.pop() {
+                blocks[o].1 = toks[k].1;
+            }
+        }
+    }
+    let lits: Vec<(usize, usize)> = toks.iter().filter(|t| t.0 == 2).map(|t| (t.1, t.2)).collect();
+    let mut sc = UseScopes { uses: vec![(false, false); blocks.len() + 1], super_globs: vec![false; blocks.len() + 1], blocks, lits };
+    let mut k = 0;
+    while k < toks.len() {
+        if toks[k].0 == 0 && tk(k) == "use" {
+            let start = toks[k].2;
+            let mut j = k + 1;
+            while j < toks.len() && !sym(j, ";") {
+                j += 1;
+            }
+            let tree = &src[start..toks.get(j).map_or(b.len(), |t| t.1)];
+            let (from_m, elsewhere) = classify_use(tree, m, name);
+            let slot = sc.block_at(toks[k].1);
+            sc.uses[slot].0 |= from_m;
+            sc.uses[slot].1 |= elsewhere;
+            // (`use super::*;`: the module's parent's imports are its own too)
+            let flat: String = tree.chars().filter(|c| !c.is_whitespace()).collect();
+            if flat == "super::*" {
+                sc.super_globs[slot] = true;
+            }
+            k = j;
+        }
+        k += 1;
+    }
+    sc
 }
 
 /// Where the items moved out of function bodies came from (Prep::moved), for the source `prep` is given: their
