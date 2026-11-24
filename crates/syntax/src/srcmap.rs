@@ -229,28 +229,28 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         None => src,
     };
     // (the file as written, its cfgs evaluated, before any macro: a `mod x;` not in it came from a macro's body
-    // (written_mod))
-    let raw = src.clone();
+    // (written_mod). Kept as it is; what `env!` / `include!` change is a text of its own, so no file is copied)
+    let raw = src;
     map.inputs.push(path.to_path_buf());
     // (the configured root, while its `extern crate` items are kept: the expansions below may move what follows)
-    let configured = if map.inputs.len() == 1 && !map.externs.is_empty() { Some(src.clone()) } else { None };
+    let configured = if map.inputs.len() == 1 && !map.externs.is_empty() { Some(raw.clone()) } else { None };
     // (`env!` / `option_env!` read the environment, which file stamps do not cover. A workspace's no-op build reads
     // every file: one more look at the source only when the cfg pass did not read its tokens)
-    let src = if env.unwrap_or_else(|| crate::macros::may_use_env(&src)) {
+    let mut changed: Option<String> = None;
+    if env.unwrap_or_else(|| crate::macros::may_use_env(&raw)) {
         map.volatile = true;
-        env_values(src, cfg)
-    } else {
-        src
-    };
-    let src = match crate::macros::expand_includes(&src, path.parent().unwrap_or(Path::new("."))) {
+        changed = crate::macros::expand_env(&raw, cfg);
+    }
+    match crate::macros::expand_includes(changed.as_deref().unwrap_or(&raw), path.parent().unwrap_or(Path::new("."))) {
         Ok(Some(s)) => {
             map.volatile = true;
             // (and the `env!` of what `include!` put in: before it, `env!` gave the include's path)
-            if crate::macros::may_use_env(&s) { env_values(s, cfg) } else { s }
+            changed = Some(if crate::macros::may_use_env(&s) { env_values(s, cfg) } else { s });
         }
-        Ok(None) => src,
+        Ok(None) => {}
         Err(e) => return Err(format!("{display}: {e}")),
-    };
+    }
+    let src: &str = changed.as_deref().unwrap_or(&raw);
     // (the root's `extern crate` items keep their places before the first byte an expansion changed)
     if let Some(c) = configured {
         let same = c.bytes().zip(src.bytes()).take_while(|(a, b)| a == b).count();
