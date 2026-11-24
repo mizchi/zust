@@ -1830,6 +1830,11 @@ impl Program {
                     }
                 }
             }
+            // (`impl From<S> for S` / `impl TryFrom<S> for S`: std's `impl<T> From<T> for T`, and the TryFrom it gives,
+            //  already cover it (E0119))
+            if (tr == "From" || tr == "TryFrom") && sm.impl_trait_args.len() == 1 && sm.impl_self_ty.as_ref() == Some(&sm.impl_trait_args[0]) {
+                return Err(format!("{}:1: conflicting implementations of trait `{tr}<{sn}>` for type `{sn}` (E0119)", it.line));
+            }
             // プリミティブ型への trait 実装 (`impl Tr for u32`)
             // (`impl Hash for str`: str も組み込みの型として持つ)
             if matches!(sn.as_str(), "__fnptr" | "__ptr" | "__never") {
@@ -3644,6 +3649,38 @@ impl Program {
                 r
             }
             Expr::Path(None, p) if p.segs.len() == 1 && (p.segs[0].name == "true" || p.segs[0].name == "false") => un((p.segs[0].name == "true") as i128),
+            // (`size_of::<T>()` / `align_of::<T>()` of a primitive, a pointer or an alias of one: an array length in
+            //  libc 0.2, `[u8; 128 - 2 * size_of::<c_int>()]`. Other types are not known here)
+            Expr::Call(f, args)
+                if args.is_empty()
+                    && matches!(&**f, Expr::Path(None, p) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "size_of" | "align_of") && s.args.len() == 1)) =>
+            {
+                let Expr::Path(None, p) = &**f else { unreachable!() };
+                let seg = p.segs.last().unwrap();
+                let crate::parse::GArg::Ty(t) = &seg.args[0] else { return Err("size_of needs a type".into()) };
+                let size = match t {
+                    crate::parse::Ty::Ptr(..) | crate::parse::Ty::Ref(..) => Some(8),
+                    crate::parse::Ty::Tuple(v) if v.is_empty() => Some(0),
+                    crate::parse::Ty::Path(None, tp) if tp.segs.len() == 1 && tp.segs[0].args.is_empty() => {
+                        match self.prim_of_name(&tp.segs[0].name).as_str() {
+                            "u8" | "i8" | "bool" => Some(1),
+                            "u16" | "i16" => Some(2),
+                            "u32" | "i32" | "f32" | "char" => Some(4),
+                            "u64" | "i64" | "f64" | "usize" | "isize" => Some(8),
+                            "u128" | "i128" => Some(16),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                // (on x86-64 these types' alignment is their size, except the empty tuple's, which is 1)
+                let v = match size {
+                    Some(0) if seg.name == "align_of" => 1,
+                    Some(n) => n,
+                    None => return Err(format!("cannot evaluate `{}` of this type in a constant", seg.name)),
+                };
+                un(v)
+            }
             // (a call of a `const fn` with integer arguments: its body with the parameters bound)
             Expr::Call(f, args) if matches!(&**f, Expr::Path(None, p) if p.segs.len() == 1 && self.const_fns.contains_key(p.segs[0].name.as_str())) => {
                 let Expr::Path(None, p) = &**f else { unreachable!() };

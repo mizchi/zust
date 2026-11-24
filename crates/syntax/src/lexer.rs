@@ -611,6 +611,17 @@ mod tests {
         split(src).unwrap().iter().map(|i| i.hash).collect()
     }
 
+    /// `const unsafe fn` (and `const async fn`, `const extern "C" fn`) is a fn, not a constant named `unsafe`: libc
+    /// 0.2 has `pub const unsafe fn` in several modules, and taking `unsafe` for a colliding name renamed the
+    /// `unsafe` of `unsafe impl Send for DIR {}` to `a__unsafe`
+    #[test]
+    fn const_unsafe_fn_is_not_a_constant() {
+        let src = "mod a {\n    pub struct DIR;\n    pub const unsafe fn f() -> u8 { 1 }\n    unsafe impl Send for DIR {}\n}\nmod b {\n    pub struct DIR;\n    pub const unsafe fn f() -> u8 { 2 }\n    unsafe impl Send for DIR {}\n}\nfn main() {}\n";
+        let out = rename_module_collisions(src).unwrap_or_else(|| src.to_string());
+        assert!(!out.contains("__unsafe"), "{out}");
+        assert!(out.contains("unsafe impl Send for a__DIR") && out.contains("unsafe impl Send for b__DIR"), "{out}");
+    }
+
     #[test]
     fn formatting_and_comments_do_not_change_hash() {
         let a = hashes("fn f(x: u32) -> u32 { x + 1 }\nfn g() {}");
@@ -1875,8 +1886,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             let after_tick = toks[k].1 >= 1 && s[toks[k].1 - 1] == b'\'';
             if matches!(kw, b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"const" | b"static" | b"union") && k + 1 < toks.len() && !after_star && !after_tick {
                 let nk = if kw == b"static" && is_id(k + 1, b"mut") { k + 2 } else { k + 1 };
-                // (`const fn f` は fn で数える)
-                if nk < toks.len() && toks[nk].0 == 0 && !(kw == b"const" && is_id(nk, b"fn")) && tok(nk) != b"_" {
+                // (`const fn f` は fn で数える。`const unsafe fn` / `const async fn` / `const extern "C" fn` も)
+                let const_fn = kw == b"const" && (is_id(nk, b"fn") || is_id(nk, b"unsafe") || is_id(nk, b"async") || is_id(nk, b"extern"));
+                if nk < toks.len() && toks[nk].0 == 0 && !const_fn && tok(nk) != b"_" {
                     let sc = scope_depth.last().unwrap().0;
                     defs.push((tok(nk).to_vec(), sc, nk));
                     // (a fn of an extern block: renamed, it keeps its symbol through a `#[link_name]` before the

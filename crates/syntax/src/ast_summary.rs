@@ -884,8 +884,10 @@ fn may_hide_lifetimes(t: &PTy) -> bool {
         PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => may_hide_lifetimes(i),
         PTy::Tuple(ts) => ts.iter().any(may_hide_lifetimes),
         PTy::Path(None, p) => p.segs.last().is_some_and(|s| {
-            let std = matches!(s.name.as_str(), "String" | "Vec" | "Box" | "Option" | "Result" | "Rc" | "Arc" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "VecDeque" | "str" | "Self")
-                || s.name.chars().next().is_some_and(|c| c.is_ascii_lowercase());
+            // (a module's item flattened with its path, `parse__Cursor`: its own name decides)
+            let base = s.name.rsplit("__").next().unwrap_or(&s.name);
+            let std = matches!(base, "String" | "Vec" | "Box" | "Option" | "Result" | "Rc" | "Arc" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "VecDeque" | "str" | "Self")
+                || base.chars().next().is_some_and(|c| c.is_ascii_lowercase());
             let lts = s.args.iter().any(|a| matches!(a, crate::parse::GArg::Lifetime(_)));
             (!std && !lts) || s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(t) if may_hide_lifetimes(t)))
         }),

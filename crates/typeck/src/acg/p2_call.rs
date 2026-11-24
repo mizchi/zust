@@ -900,6 +900,27 @@ impl Cx<'_> {
                 }
             }
         }
+        // `x.try_into()` into `Result<U, E>` where U implements TryFrom (`impl TryFrom<&str> for Alphabet`): `U::try_from(x)`,
+        // as std's blanket `impl<T, U: TryFrom<T>> TryInto<U> for T` gives it. Integers and slices are handled elsewhere
+        if method == "try_into" && margs.is_empty() {
+            let recv_own = match self.peek(recv) {
+                Some(Ty::Struct(sid)) => self.prog.method(sid, "try_into").is_some(),
+                _ => false,
+            };
+            let target = expected.or_else(|| self.lets.get(&(e as *const Expr as usize)).copied());
+            if !recv_own {
+                if let Some(Ty::Struct(rs)) = target {
+                    if self.prog.structs[rs as usize].name.starts_with("Result") {
+                        if let Some(&Ty::Struct(uid)) = self.prog.structs[rs as usize].args.first() {
+                            if let Some(id) = self.prog.method(uid, "try_from") {
+                                let args: [&Expr; 1] = [recv];
+                                return self.call_fn(id, None, &args, None, target, SP);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // `x.to_string()` (Display を実装した型。&str は str_method が String::from にする)
         if method == "to_string" && margs.is_empty() && self.prog.index.contains_key("__exr_display") {
             if let Some(t) = self.peek(recv) {

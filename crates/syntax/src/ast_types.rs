@@ -86,6 +86,28 @@ pub(crate) fn const_expr_text(e: &Expr) -> Option<String> {
         Expr::Binary(op, l, r, _) => format!("({} {op} {})", const_expr_text(l)?, const_expr_text(r)?),
         Expr::Unary(op, x, _) if op == "-" => format!("(-{})", const_expr_text(x)?),
         Expr::Paren(x) => const_expr_text(x)?,
+        // (`size_of::<c_long>()` / `mem::align_of::<T>()`: Program::eval_const knows primitives, pointers and aliases
+        // of them; libc 0.2's `[u8; 128 - 2 * size_of::<c_int>()]`)
+        Expr::Call(f, args)
+            if args.is_empty()
+                && matches!(&**f, Expr::Path(None, p) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "size_of" | "align_of"))) =>
+        {
+            let Expr::Path(None, p) = &**f else { return None };
+            let last = p.segs.last()?;
+            let prefix_ok = p.segs[..p.segs.len() - 1].iter().map(|s| s.name.as_str()).collect::<Vec<_>>();
+            let prefix_ok = matches!(prefix_ok.as_slice(), [] | ["mem"] | ["core" | "std", "mem"] | ["crate", "mem"]);
+            if !prefix_ok || !matches!(last.name.as_str(), "size_of" | "align_of") || last.args.len() != 1 {
+                return None;
+            }
+            let crate::parse::GArg::Ty(t) = &last.args[0] else { return None };
+            let ty = match t {
+                crate::parse::Ty::Ptr(..) | crate::parse::Ty::Ref(..) => "*const ()".to_string(),
+                crate::parse::Ty::Path(None, tp) if tp.segs.iter().all(|s| s.args.is_empty()) => tp.segs.last()?.name.clone(),
+                crate::parse::Ty::Tuple(v) if v.is_empty() => "()".to_string(),
+                _ => return None,
+            };
+            format!("{}::<{ty}>()", last.name)
+        }
         Expr::MethodCall(r, m, g, a, _) if g.is_empty() && a.is_empty() => format!("{}.{m}()", const_expr_text(r)?),
         Expr::Unary(op, x, _) if op == "!" => format!("(!{})", const_expr_text(x)?),
         // (a cast keeps its type's name, which Program::eval_const wraps to when it is an integer type or an alias

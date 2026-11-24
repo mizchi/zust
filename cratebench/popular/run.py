@@ -24,7 +24,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-ZURGO = os.path.join(ROOT, "target/release/zurgo")
+ZURGO = os.environ.get("ZURGO") or os.path.join(os.environ.get("CARGO_TARGET_DIR") or os.path.join(ROOT, "target"), "release/zurgo")
 OUT = os.path.join(ROOT, "out/popular")
 TIMEOUT = 900
 REG = re.compile(r"index\.crates\.io-[0-9a-f]+/([A-Za-z0-9_.-]+?)-(\d+\.\d+\.\d+[^/]*)/")

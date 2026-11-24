@@ -260,8 +260,9 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     map.files.push(display.to_string());
     map.segs.push((start, fi, 1));
     let (blanked, kids) = blank_mod_decls(&src).map_err(|e| format!("{display}: {e}"))?;
+    let end_line = 1 + line_count(&src);
     if kids.is_empty() {
-        return Ok(blanked);
+        return hoist_macro_mods(blanked, path, mod_dir, disp_dir, start, map, cfg, open, fi, end_line);
     }
     // (a `mod x;` inside inline modules: its file goes in that place, `pub mod x { .. }` on lines of its own; the
     // rest of the line continues on the line of the closing brace)
@@ -343,10 +344,15 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     }
     text.push_str(&blanked[last..]);
     if top.is_empty() {
-        return Ok(text);
+        return hoist_macro_mods(text, path, mod_dir, disp_dir, start, map, cfg, open, fi, end_line);
     }
     text.push('\n');
     for (name, path_attr) in top {
+        // (a `#` in front: the declaration had `#[macro_use]`, which the appended module keeps)
+        let (name, mu) = match name.strip_prefix('#') {
+            Some(n) => (n.to_string(), "#[macro_use] "),
+            None => (name, ""),
+        };
         // (`#[path = "x.rs"] mod m;`: that file, beside this one; its own modules are beside it too)
         if let Some(pa) = path_attr {
             let here = path.parent().unwrap_or(Path::new("."));
@@ -354,7 +360,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
             map.probes.push(p.clone());
             let disp = join_disp(disp_dir, &pa);
             let sub = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
-            text.push_str(&format!("pub mod {name} {{\n"));
+            text.push_str(&format!("{mu}pub mod {name} {{\n"));
             let at = start + line_count(&text);
             let body = load_file(p.as_path(), &disp, sub.as_path(), disp_dir, at, map, cfg, open)?;
             text.push_str(&body);
@@ -373,13 +379,139 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         } else {
             return Err(format!("{display}: file not found for module `{name}`"));
         };
-        text.push_str(&format!("pub mod {name} {{\n"));
+        text.push_str(&format!("{mu}pub mod {name} {{\n"));
         let at = start + line_count(&text);
         let body = load_file(p.as_path(), &disp, sub.as_path(), &sub_disp, at, map, cfg, open)?;
         text.push_str(&body);
         text.push_str("\n}\n");
         // (`}` の行は、元のファイルの最後の行の続きにしておく)
         map.segs.push((start + line_count(&text) - 1, fi, 1 + line_count(&src)));
+    }
+    hoist_macro_mods(text, path, mod_dir, disp_dir, start, map, cfg, open, fi, end_line)
+}
+
+/// `mod x;` declared in the body of a `macro_rules!` that this file invokes at its own module level (outside inline
+/// modules): rustc reads x.rs where the macro is invoked, as a module of the invoking file (libc 0.2's `prelude!`,
+/// defined in src/macros.rs and invoked in src/lib.rs, declares `mod types;`: src/types.rs). The file is read here,
+/// appended as `pub mod x { .. }`, and the declaration in the macro's body is blanked so the expansion does not
+/// declare the module a second time. Invocations inside inline modules are left as they were.
+#[allow(clippy::too_many_arguments)]
+fn hoist_macro_mods(text: String, path: &Path, mod_dir: &Path, disp_dir: &str, start: u32, map: &mut SrcMap, cfg: &crate::cfg::CfgSet, open: &mut Vec<(String, String)>, fi: u32, end_line: u32) -> Result<String, String> {
+    if !text.contains("macro_rules") || !text.contains("mod") {
+        return Ok(text);
+    }
+    let b = text.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| -> &[u8] { &b[toks[k].1..toks[k].2] };
+    let is_sym = |k: usize, c: u8| toks[k].0 == 1 && toks[k].2 == toks[k].1 + 1 && b[toks[k].1] == c;
+    let opens = |k: usize| is_sym(k, b'{') || is_sym(k, b'(') || is_sym(k, b'[');
+    let closes = |k: usize| is_sym(k, b'}') || is_sym(k, b')') || is_sym(k, b']');
+    // 1. the macros' bodies (token ranges) and the out-of-line modules they declare: (macro, module, #[path], bytes)
+    let mut bodies: Vec<(usize, usize)> = vec![];
+    let mut decls: Vec<(String, String, Option<String>, usize, usize)> = vec![];
+    let mut k = 0;
+    while k + 3 < toks.len() {
+        if toks[k].0 == 0 && tk(k) == b"macro_rules" && is_sym(k + 1, b'!') && toks[k + 2].0 == 0 && opens(k + 3) {
+            let name = String::from_utf8_lossy(tk(k + 2)).into_owned();
+            let (mut d, mut j) = (0i32, k + 3);
+            while j < toks.len() {
+                if opens(j) {
+                    d += 1;
+                } else if closes(j) {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                j += 1;
+            }
+            bodies.push((k + 3, j));
+            let mut m = k + 4;
+            while m + 2 < j {
+                if toks[m].0 == 0 && tk(m) == b"mod" && toks[m + 1].0 == 0 && is_sym(m + 2, b';') {
+                    let (b0, _, pa) = attrs_before(&text, b, &toks, m);
+                    decls.push((name.clone(), String::from_utf8_lossy(tk(m + 1)).into_owned(), pa, toks[b0].1, toks[m + 2].2));
+                    m += 3;
+                    continue;
+                }
+                m += 1;
+            }
+            k = j + 1;
+            continue;
+        }
+        k += 1;
+    }
+    if decls.is_empty() {
+        return Ok(text);
+    }
+    // 2. which of those macros this file invokes at its own module level
+    let mut invoked: Vec<String> = vec![];
+    let (mut depth, mut inline): (i32, Vec<i32>) = (0, vec![]);
+    let mut k = 0;
+    while k < toks.len() {
+        if let Some(&(_, e)) = bodies.iter().find(|&&(s, _)| s == k) {
+            k = e + 1;
+            continue;
+        }
+        if is_sym(k, b'{') {
+            depth += 1;
+        } else if is_sym(k, b'}') {
+            if inline.last() == Some(&depth) {
+                inline.pop();
+            }
+            depth -= 1;
+        } else if toks[k].0 == 0 && tk(k) == b"mod" && k + 2 < toks.len() && toks[k + 1].0 == 0 && is_sym(k + 2, b'{') {
+            inline.push(depth + 1);
+        } else if inline.is_empty() && toks[k].0 == 0 && k + 1 < toks.len() && is_sym(k + 1, b'!') && !(k >= 1 && is_sym(k - 1, b':')) {
+            let n = String::from_utf8_lossy(tk(k)).into_owned();
+            if decls.iter().any(|d| d.0 == n) && !invoked.contains(&n) {
+                invoked.push(n);
+            }
+        }
+        k += 1;
+    }
+    let mut out = b.to_vec();
+    let mut mods: Vec<(String, Option<String>)> = vec![];
+    for (mac, m, pa, s, e) in &decls {
+        if !invoked.contains(mac) {
+            continue;
+        }
+        for c in &mut out[*s..*e] {
+            if *c != b'\n' {
+                *c = b' ';
+            }
+        }
+        if !mods.iter().any(|x| &x.0 == m) {
+            mods.push((m.clone(), pa.clone()));
+        }
+    }
+    let mut text = String::from_utf8(out).map_err(|e| e.to_string())?;
+    // 3. the modules' files, beside the invoking file, appended as at the top level
+    for (name, pa) in mods {
+        let (p, disp, sub, sub_disp) = if let Some(pa) = pa {
+            let p = path.parent().unwrap_or(Path::new(".")).join(pa.as_str());
+            map.probes.push(p.clone());
+            let sub = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
+            (p, join_disp(disp_dir, &pa), sub, disp_dir.to_string())
+        } else {
+            let a = mod_dir.join(format!("{name}.rs"));
+            let c = mod_dir.join(&name).join("mod.rs");
+            map.probes.push(a.clone());
+            map.probes.push(c.clone());
+            if a.exists() {
+                (a, join_disp(disp_dir, &format!("{name}.rs")), mod_dir.join(&name), join_disp(disp_dir, &name))
+            } else if c.exists() {
+                (c, join_disp(disp_dir, &format!("{name}/mod.rs")), mod_dir.join(&name), join_disp(disp_dir, &name))
+            } else {
+                return Err(format!("{}: file not found for module `{name}` (declared by a macro invoked here)", path.display()));
+            }
+        };
+        text.push_str(&format!("\npub mod {name} {{\n"));
+        let at = start + line_count(&text);
+        let body = load_file(p.as_path(), &disp, sub.as_path(), &sub_disp, at, map, cfg, open)?;
+        text.push_str(&body);
+        text.push_str("\n}\n");
+        map.segs.push((start + line_count(&text) - 1, fi, end_line));
     }
     Ok(text)
 }
@@ -480,6 +612,29 @@ fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>, Ne
     let mut inline: Vec<(i32, Result<String, String>)> = vec![];
     let mut k = 0;
     while k < toks.len() {
+        // (the body of `macro_rules! name { .. }` (or `( .. );` / `[ .. ];`) defined at the file's own level is tokens,
+        //  not items: a `mod x;` there is declared where the macro is invoked (hoist_macro_mods). A macro inside an
+        //  inline module is invoked there too, as far as zustc follows: its `mod x;` is read in that module, as before)
+        if inline.is_empty() && toks[k].0 == 0 && tok(k) == b"macro_rules" && k + 3 < toks.len() && is_sym(k + 1, b'!') && toks[k + 2].0 == 0 {
+            let open = k + 3;
+            if is_sym(open, b'{') || is_sym(open, b'(') || is_sym(open, b'[') {
+                let mut d = 0i32;
+                let mut j = open;
+                while j < toks.len() {
+                    if is_sym(j, b'{') || is_sym(j, b'(') || is_sym(j, b'[') {
+                        d += 1;
+                    } else if is_sym(j, b'}') || is_sym(j, b')') || is_sym(j, b']') {
+                        d -= 1;
+                        if d == 0 {
+                            break;
+                        }
+                    }
+                    j += 1;
+                }
+                k = j + 1;
+                continue;
+            }
+        }
         if is_sym(k, b'{') {
             depth += 1;
         } else if is_sym(k, b'}') {
@@ -500,6 +655,10 @@ fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>, Ne
             let name = String::from_utf8_lossy(tok(k + 1)).into_owned();
             inline.push((depth + 1, pa.ok_or(name)));
         } else if toks[k].0 == 0 && tok(k) == b"mod" && k + 2 < toks.len() && toks[k + 1].0 == 0 && is_sym(k + 2, b';') {
+            // (`#[macro_use] mod x;`: the module keeps the attribute where it is appended (macros::expand_cfg takes
+            //  its macros as in scope from the top))
+            let (b_attr, _, _) = attrs_before(src, s, &toks, k);
+            let macro_use = depth == 0 && src[toks[b_attr].1..toks[k].1].contains("macro_use");
             let nested = (depth != 0).then(|| (toks[k + 2].2, inline.iter().map(|m| m.1.clone()).collect::<Vec<_>>()));
             // (前の `pub` / `pub(crate)` と `#[..]` も消す)
             let mut b = k;
@@ -526,7 +685,8 @@ fn blank_mod_decls(src: &str) -> Result<(String, Vec<(String, Option<String>, Ne
                 }
             }
             if !cfg_test {
-                kids.push((String::from_utf8_lossy(tok(k + 1)).into_owned(), path_attr, nested));
+                let name = String::from_utf8_lossy(tok(k + 1)).into_owned();
+                kids.push((if macro_use { format!("#{name}") } else { name }, path_attr, nested));
             }
             k += 3;
             continue;
@@ -570,6 +730,102 @@ mod circular_tests {
             let r = super::load_crate(&dir.join("p/a.rs"), "src/main.rs", &cfg);
             assert!(r.is_ok(), "{:?}", r.err());
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `mod x;` in the body of a `macro_rules!` is tokens, not a declaration: it is found where the macro is
+    /// invoked, beside the invoking file (libc 0.2's `prelude!` in src/macros.rs declares `mod types;`, invoked in
+    /// src/lib.rs, which means src/types.rs)
+    #[test]
+    fn mod_decl_inside_macro_rules() {
+        let dir = std::env::temp_dir().join(format!("srcmap_macro_mod_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("lib.rs"), "#[macro_use]\nmod macros;\nprelude!();\npub fn f() -> types::T { 1 }\n").unwrap();
+        std::fs::write(
+            dir.join("macros.rs"),
+            "macro_rules! prelude {\n    () => {\n        mod types;\n    };\n}\nmacro_rules! other [ () => { mod nowhere; } ];\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("types.rs"), "pub type T = u8;\n").unwrap();
+        let cfg = crate::cfg::CfgSet::default();
+        let r = super::load_crate(&dir.join("lib.rs"), "src/lib.rs", &cfg);
+        assert!(r.is_ok(), "{:?}", r.err());
+        let (src, _) = r.unwrap();
+        // (types.rs is read, as a module of the invoking file, and the macro no longer declares it again)
+        assert!(src.contains("pub type T = u8;"), "{src}");
+        assert!(!src.contains("mod types;"), "{src}");
+        // (`mod nowhere;` belongs to a macro nobody invokes: nothing is read for it)
+        assert!(src.contains("mod nowhere;"), "{src}");
+        // (the `#[macro_use]` module keeps its attribute where it is appended, so expansion sees its macros as in
+        //  scope above it)
+        assert!(src.contains("#[macro_use] pub mod macros {"), "{src}");
+        let e = crate::macros::expand(&src);
+        assert!(e.is_ok(), "{e:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A line below `#[macro_use] mod m;` maps back to its own line of the file: the module's body is put in place
+    /// of the declaration, and the lines after it go on from the declaration's line (tests/ui
+    /// macros/cross-file-errors.rs reports at the invocation, line 5)
+    #[test]
+    fn macro_use_module_keeps_lines() {
+        let dir = std::env::temp_dir().join(format!("srcmap_macro_use_lines_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("main.rs"), "#[macro_use]\nmod underscore;\n\nfn main() {\n    underscore!();\n}\n").unwrap();
+        std::fs::write(dir.join("underscore.rs"), "// a\n// b\n// c\nmacro_rules! underscore {\n    () => (\n        _\n    )\n}\n").unwrap();
+        let cfg = crate::cfg::CfgSet::default();
+        let (src, map) = super::load_crate(&dir.join("main.rs"), "src/main.rs", &cfg).unwrap();
+        let line = 1 + src[..src.find("underscore!();").unwrap()].matches('\n').count() as u32;
+        assert_eq!(map.locate(line), ("src/main.rs", 5), "{:?}\n{src}", map.segs);
+        let def = 1 + src[..src.find("macro_rules!").unwrap()].matches('\n').count() as u32;
+        assert_eq!(map.locate(def), ("src/underscore.rs", 4), "{:?}", map.segs);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A macro defined and invoked inside an inline `#[path]` module declares its `mod x;` in that module, beside
+    /// the module's directory (tests/ui modules/mod_dir_path.rs: `#[path = "auxiliary"] mod bar { macro_rules! m {
+    /// () => { mod two_macros_2; } } m!(); }`)
+    #[test]
+    fn mod_decl_in_macro_inside_inline_module() {
+        let dir = std::env::temp_dir().join(format!("srcmap_inline_macro_mod_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("auxiliary")).unwrap();
+        std::fs::write(
+            dir.join("main.rs"),
+            "fn main() {\n    #[path = \"auxiliary\"]\n    mod bar {\n        macro_rules! m { () => { mod two; } }\n        m!();\n    }\n}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("auxiliary/two.rs"), "pub const TWO: u8 = 2;\n").unwrap();
+        let cfg = crate::cfg::CfgSet::default();
+        let r = super::load_crate(&dir.join("main.rs"), "src/main.rs", &cfg);
+        assert!(r.is_ok(), "{:?}", r.err());
+        assert!(r.unwrap().0.contains("pub const TWO: u8 = 2;"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A `#[path]` module inside a fn body is relative to the directory of the file, as at the top level: a block
+    /// is not a module and adds no directory (getrandom 0.4's backends/rdrand.rs has
+    /// `fn is_rdrand_good() { #[path = "../utils/lazy_bool.rs"] mod lazy; .. }`, which is src/utils/lazy_bool.rs)
+    #[test]
+    fn path_mod_inside_fn_body() {
+        let dir = std::env::temp_dir().join(format!("srcmap_fn_path_mod_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("backends")).unwrap();
+        std::fs::create_dir_all(dir.join("utils")).unwrap();
+        std::fs::write(dir.join("lib.rs"), "mod backends;\n").unwrap();
+        std::fs::write(dir.join("backends.rs"), "mod rdrand;\n").unwrap();
+        std::fs::write(
+            dir.join("backends/rdrand.rs"),
+            "fn good() -> bool {\n    #[path = \"../utils/lazy_bool.rs\"]\n    mod lazy;\n    lazy::YES\n}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("utils/lazy_bool.rs"), "pub const YES: bool = true;\n").unwrap();
+        let cfg = crate::cfg::CfgSet::default();
+        let r = super::load_crate(&dir.join("lib.rs"), "src/lib.rs", &cfg);
+        assert!(r.is_ok(), "{:?}", r.err());
+        assert!(r.unwrap().0.contains("pub const YES: bool = true;"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
