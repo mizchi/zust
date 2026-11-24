@@ -715,6 +715,15 @@ impl Cx<'_> {
             if pe == re && (m1 || !m2) {
                 return Ok((v, want));
             }
+            // (`&[T; N]` → `*const [T]`: the fat pointer (address, N), as the cast makes it; `&[T]` is one already)
+            match (pe, re, v) {
+                (Ty::Slice(we), Ty::Array(ge, n), Some(v)) if we == ge && (m1 || !m2) => {
+                    let fat = self.make_fat(v, *n as i64);
+                    return Ok((Some(fat), want));
+                }
+                (Ty::Slice(we), Ty::Slice(ge), _) if we == ge && (m1 || !m2) => return Ok((v, want)),
+                _ => {}
+            }
         }
         if let (Some(want @ Ty::Ref(m2, Ty::Slice(we))), Some(v), Ty::Ref(m1, Ty::Array(ge, n))) = (expected, v, t) {
             if we == ge && (m1 || !m2) {
@@ -3080,6 +3089,55 @@ impl Cx<'_> {
         let names: Vec<&str> = sig.generics.iter().map(|g| g.0.as_str()).collect();
         let ps = ps.iter().map(|t| self.prog.resolve_g(t, &names).ok()).collect::<Option<Vec<Ty>>>()?;
         Some((ps, self.prog.resolve_g(&r, &names).ok()?, text))
+    }
+
+    /// The fn pointer type that expressions es all coerce to when they are two or more distinct closures with no
+    /// captures and one signature (rustc's coercion of a match's arms or an array's elements to their least upper
+    /// bound). None otherwise, also when they are one closure type
+    pub(crate) fn closures_lub(&self, es: &[&Expr]) -> Option<Ty> {
+        if es.len() < 2 {
+            return None;
+        }
+        // (each a closure expression with no captures and every parameter's type written; its result, the body's)
+        let mut sig: Option<(Vec<Ty>, Ty)> = None;
+        for e in es {
+            let c = strip_paren(e);
+            let Expr::Closure(_, ps, ret_ann, _, _) = c else { return None };
+            // (no captures: by its definition when it is found, else none of its free names is a local in scope, as
+            // for a macro's argument that is parsed again)
+            let k = self.closure_ix.get(&format!("@{}", c as *const Expr as usize)).or_else(|| self.closure_ix.get(&crate::ast_closure::closure_key(c)));
+            match k.and_then(|k| self.prog.closure_by.get(&(self.root, *k))) {
+                Some(cid) => {
+                    if !self.prog.closures[cid].captures.is_empty() {
+                        return None;
+                    }
+                }
+                None => {
+                    if crate::ast_closure::free_vars(c).iter().any(|n| self.lookup(n).is_some()) {
+                        return None;
+                    }
+                }
+            }
+            let mut params = vec![];
+            for (_, t) in ps {
+                params.push(self.parse_ty(t.as_ref()?).ok()?);
+            }
+            // (the result written, else the body's type as recorded)
+            let ret = match ret_ann {
+                Some(t) => self.parse_ty(t).ok()?,
+                None => self.peek(e)?,
+            };
+            if params.iter().chain([&ret]).any(|&x| self.prog.has_param(x)) {
+                return None;
+            }
+            match &sig {
+                Some((p, r)) if *p != params || *r != ret => return None,
+                Some(_) => {}
+                None => sig = Some((params, ret)),
+            }
+        }
+        let (params, ret) = sig?;
+        Some(Ty::Fn(crate::types::intern_fn(crate::types::FnTy { params, ret })))
     }
 
     /// クロージャの型 (struct のインスタンス) なら、その引数と戻り値の型

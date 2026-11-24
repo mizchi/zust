@@ -1813,6 +1813,14 @@ impl Cx<'_> {
             }
             _ => None,
         };
+        // (elements that are distinct closures with no captures and one signature: their fn pointer, as rustc
+        // coerces them; also over the first element's closure type inference may have given)
+        let is_clo = |t: Option<Ty>| matches!(t, Some(Ty::Struct(s)) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(s)));
+        if elem.is_none() || is_clo(elem) {
+            if let Some(f) = self.closures_lub(&elems.iter().collect::<Vec<_>>()) {
+                elem = Some(f);
+            }
+        }
         // (Vec から取った要素の型は目安: 要素の型が違えばそちらにする (`v == ["a"]` で v: Vec<String>))
         let mut soft = matches!(expected, Some(Ty::Struct(_)));
         // `[&a as &dyn Tr, &b]`: 要素のどれかが `&dyn` なら全体をそれに揃える

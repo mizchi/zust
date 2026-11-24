@@ -158,6 +158,15 @@ impl Cx<'_> {
         let Expr::Match(scrut, arms) = m else {
             return err(SP, "internal: match_ on a non-match expression");
         };
+        // (arms that are distinct closures with no captures and one signature, with nothing expected: rustc coerces
+        // them to that fn pointer)
+        // (inference may have given the match its first arm's closure type: that is no fn pointer either)
+        let lub = || self.closures_lub(&arms.iter().map(|a| &a.body).collect::<Vec<_>>());
+        let expected = match expected {
+            None => lub(),
+            Some(Ty::Struct(s)) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(s)) => lub().or(expected),
+            e => e,
+        };
         // (an arm with a guard and an or-pattern: the guard runs for each alternative that matches, left to right.
         // The arm becomes one arm per alternative)
         if arms.iter().any(|a| a.guard.is_some() && has_or(&a.pat)) {

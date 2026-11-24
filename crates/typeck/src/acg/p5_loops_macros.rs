@@ -1181,9 +1181,16 @@ impl Cx<'_> {
             return Ok((Some(v), vt));
         }
         let args = self.macro_args(p, g)?;
+        let kept: Vec<&Expr> = args.into_iter().map(|a| &*self.keep_expr(a)).collect();
+        // (elements that are distinct closures with no captures and one signature: their fn pointer, as for an array)
+        let is_clo = |t: Option<Ty>| matches!(t, Some(Ty::Struct(s)) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(s)));
+        if elem.is_none() || is_clo(elem) {
+            if let Some(f) = self.closures_lub(&kept) {
+                elem = Some(f);
+            }
+        }
         let mut vals = vec![];
-        for a in args {
-            let a: &Expr = self.keep_expr(a);
+        for a in kept {
             // (`vec![&f()]`: a macro's arguments are not extended, the temporary goes away with the statement)
             let d0 = self.bk.direct.len();
             if self.bk_on() && !self.bk.macro_let {
