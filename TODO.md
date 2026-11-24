@@ -61,10 +61,9 @@ obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-
   (unsized/issue-40231-*.rs).
 - Most of std's traits are still judged by `Program::implements` at calls (with known exceptions); the prelude's
   impls as solver clauses would make both directions exact (measured in part 5: few tests depend on it).
-- "mismatched types" on valid code ([report](docs/reports/2026-11-24-02-inference-coercions.md)): unsizing into
-  structs (`&Foo<[u8; 3]>` to `&Foo<[u8]>`: fat pointers to unsized struct tails); the general least upper bound of
-  match arms (closure variables, fn items, unannotated closures); literals through generic associated types.
-- The `dangerous_implicit_autorefs` deny lint (`(*p).len()` on a raw slice pointer) is not reported.
+- Unsizing into structs (`&Foo<[u8; 3]>` to `&Foo<[u8]>`, 11 valid tests): needs fat pointers to structs with an
+  unsized last field, a change of the pointer representation ([why](docs/reports/2026-11-24-03-inference-coercions-2.md)).
+- dangerous_implicit_autorefs: the range-index form (`(*p)[..2]`) is not caught.
 
 ## Security: CVEs whose API zustc does not have (`expect: unsupported`)
 

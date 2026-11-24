@@ -98,3 +98,4 @@ zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの�
 | 2026-11-23 | [trait solver、その 4: 誤ったエラーを減らす](2026-11-23-07-trait-solver-4.md) |
 | 2026-11-24 | [trait solver、その 5: 残りの課題](2026-11-24-01-trait-solver-5.md) |
 | 2026-11-24 | [正しいコードへの誤った「mismatched types」: リテラル、ジェネリックな引数、型強制](2026-11-24-02-inference-coercions.md) |
+| 2026-11-24 | [正しいコードへの誤ったエラー、その 2: 最小上界、トレイトのパラメータ、リント](2026-11-24-03-inference-coercions-2.md) |
