@@ -3897,3 +3897,13 @@ fn part25_assoc_placeholder_copy() {
     // (associated-type-bounds/assoc-type-bound-through-where-clause.rs, rustc accepts it))
     assert_eq!(check("trait Op where Self::Output: Copy { type Output; }\nfn duplicate<T: Op>(x: T::Output) -> (T::Output, T::Output) {\n    (x, x)\n}\nfn main() {}\n"), vec![]);
 }
+
+#[test]
+fn part25_assoc_placeholder_as_typeck_finds_it() {
+    // (an associated type an impl gives (`impl<T> Trait for T { type Assoc = T; }`) is that type, not a placeholder of
+    // its own, in the region check as in typeck: the body's values are of it)
+    assert_eq!(check("trait Trait { type Assoc; }\nimpl<T> Trait for T { type Assoc = T; }\nfn id<'a, T: Trait>(x: T::Assoc, _r: &'a u8) -> T::Assoc { let y = x; y }\nfn main() {}\n"), vec![]);
+    // (the message names the placeholder's type by its parameter: no `#`)
+    let d = check("trait MyTrait { type Output; }\nfn foo<'a, T>() -> &'a () where T: MyTrait {\n    bar::<T::Output>()\n}\nfn bar<'a, T>() -> &'a () where T: 'a { &() }\nfn main() {}\n");
+    assert!(d.len() == 1 && !d[0].1.contains('#'), "{d:?}");
+}

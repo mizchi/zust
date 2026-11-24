@@ -2209,7 +2209,12 @@ impl Cx<'_> {
                     let mut names: Vec<(&String, &Vec<String>)> = prog.assoc_bounds.iter().filter(|((t, _), _)| *t == short).map(|((_, n), d)| (n, d)).collect();
                     names.sort();
                     for (name, decl) in names {
-                        let Some(asid) = prog.assoc_placeholder(sid, name) else { continue };
+                        // (the associated type as typeck finds it: not where an impl gives it (`impl<T> Trait for T {
+                        // type Assoc = T; }`), as the body's types are then of that)
+                        let Some(Ty::Struct(asid)) = prog.assoc_of(Ty::Struct(sid), name) else { continue };
+                        if prog.assoc_placeholder_of(asid).is_none() {
+                            continue;
+                        }
                         if rg.ph.iter().any(|x| x.0 == asid) {
                             continue;
                         }
@@ -5067,7 +5072,8 @@ impl Cx<'_> {
             return Ok(());
         }
         match self.rg.check() {
-            Some((sp, m)) => Err(self.at(sp, m)),
+            // (a placeholder's type by its parameter's name: `T`, `<T as Tr>::Out`, not `T#`)
+            Some((sp, m)) => Err(self.at(sp, if self.rg.ph.is_empty() { m } else { m.replace("#`", "`").replace("#>", ">") })),
             None => Ok(()),
         }
     }
