@@ -745,6 +745,7 @@ compile-fail	borrowck/access-mode-in-closures.rs
 check-pass	borrowck/alias-liveness/escaping-bounds.rs
 check-pass	borrowck/alias-liveness/gat-static.rs
 check-pass	borrowck/alias-liveness/higher-ranked.rs
+compile-fail	borrowck/alias-liveness/name-region.rs
 check-pass	borrowck/alias-liveness/opaque-capture.rs
 check-pass	borrowck/alias-liveness/rpit-static.rs
 check-pass	borrowck/alias-liveness/rpitit-static.rs
@@ -4882,7 +4883,10 @@ check-pass	nll/ty-outlives/issue-53789-1.rs
 check-pass	nll/ty-outlives/issue-53789-2.rs
 check-pass	nll/ty-outlives/issue-55756.rs
 check-pass	nll/ty-outlives/projection-body.rs
+compile-fail	nll/ty-outlives/projection-implied-bounds.rs
+compile-fail	nll/ty-outlives/projection-where-clause-env-wrong-bound.rs
 check-pass	nll/ty-outlives/projection-where-clause-env.rs
+compile-fail	nll/ty-outlives/projection-where-clause-none.rs
 check-pass	nll/ty-outlives/projection-where-clause-trait.rs
 compile-fail	nll/ty-outlives/ty-param-fn-body.rs
 compile-fail	nll/ty-outlives/ty-param-fn.rs
@@ -5477,7 +5481,6 @@ compile-fail	parser/macro/break-in-unlabeled-block-in-macro.rs
 compile-fail	parser/macro/do-not-suggest-semicolon-between-macro-without-exclamation-mark-and-array.rs
 check-pass	parser/macro/extern-abi-from-mac-literal-frag.rs
 compile-fail	parser/macro/issue-33569.rs
-compile-fail	parser/macro/kw-in-const-item-pos-recovery-149692.rs
 compile-fail	parser/macro/kw-in-item-pos-recovery-149692.rs
 compile-fail	parser/macro/macro-bad-delimiter-ident.rs
 check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
@@ -5919,7 +5922,6 @@ compile-fail	pattern/usefulness/tuple-struct-nonexhaustive.rs
 compile-fail	pattern/usefulness/type_polymorphic_byte_str_literals.rs
 compile-fail	pin-ergonomics/raw-ident.rs
 compile-fail	pin-macro/lifetime_errors_on_promotion_misusage.rs
-compile-fail	pin-macro/pin_move.rs
 compile-fail	pin/pin-deref-target-partial-eq-67039.rs
 run-pass	privacy/fn-returns-unnameable-type.rs
 check-pass	privacy/generic_struct_field_projection.rs
@@ -6087,7 +6089,9 @@ compile-fail	regions/regions-addr-of-self.rs
 compile-fail	regions/regions-addr-of-upvar-self.rs
 compile-fail	regions/regions-adjusted-lvalue-op.rs
 compile-fail	regions/regions-assoc-type-in-supertrait-outlives-container.rs
+compile-fail	regions/regions-assoc-type-region-bound-in-trait-not-met.rs
 run-pass	regions/regions-assoc-type-region-bound.rs
+compile-fail	regions/regions-assoc-type-static-bound-in-trait-not-met.rs
 run-pass	regions/regions-assoc-type-static-bound.rs
 run-pass	regions/regions-borrow-at.rs
 run-pass	regions/regions-borrow-evec-fixed.rs
@@ -6132,6 +6136,7 @@ compile-fail	regions/regions-free-region-ordering-caller1.rs
 compile-fail	regions/regions-free-region-ordering-incorrect.rs
 run-pass	regions/regions-free-region-outlives-static-outlives-free-region.rs
 compile-fail	regions/regions-glb-free-free.rs
+compile-fail	regions/regions-implied-bounds-projection-gap-1.rs
 check-pass	regions/regions-implied-bounds-projection-gap-2.rs
 check-pass	regions/regions-implied-bounds-projection-gap-3.rs
 check-pass	regions/regions-implied-bounds-projection-gap-4.rs
@@ -8099,11 +8104,14 @@ compile-fail	variance/type-resolve-error-two-structs-deep.rs
 compile-fail	variance/variance-cell-is-invariant.rs
 compile-fail	variance/variance-contravariant-arg-object.rs
 compile-fail	variance/variance-contravariant-arg-trait-match.rs
+compile-fail	variance/variance-contravariant-self-trait-match.rs
 compile-fail	variance/variance-covariant-arg-object.rs
 compile-fail	variance/variance-covariant-arg-trait-match.rs
+compile-fail	variance/variance-covariant-self-trait-match.rs
 run-pass	variance/variance-intersection-of-ref-and-opt-ref.rs
 compile-fail	variance/variance-invariant-arg-object.rs
 compile-fail	variance/variance-invariant-arg-trait-match.rs
+compile-fail	variance/variance-invariant-self-trait-match.rs
 compile-fail	variance/variance-issue-20533.rs
 run-pass	variance/variance-iterators-in-libcore.rs
 compile-fail	variance/variance-regions-unused-direct.rs
