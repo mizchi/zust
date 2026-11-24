@@ -8134,6 +8134,7 @@ run-pass	where-clauses/obligation-error-propagation.rs
 check-pass	where-clauses/where-clause-bounds-inconsistency.rs
 run-pass	where-clauses/where-clause-early-bound-lifetimes.rs
 run-pass	where-clauses/where-clause-method-substituion-rpass.rs
+compile-fail	where-clauses/where-clause-method-substituion.rs
 check-pass	where-clauses/where-clause-on-struct-definitions.rs
 check-pass	where-clauses/where-clause-placement-assoc-type-in-impl.rs
 run-pass	where-clauses/where-clause-region-outlives.rs

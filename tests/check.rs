@@ -1149,6 +1149,14 @@ fn projections_are_goals() {
     let sup = "trait Mark {}\ntrait Super { type A; }\ntrait Sub: Super {}\nimpl Super for u8 { type A = u16; }\nimpl Sub for u8 {}\nfn f<T: Sub>(_: T) where T::A: Mark {}\nfn main() { f(1u8); }";
     bad(sup, "`u16: Mark`");
     ok(&format!("impl Mark for u16 {{}}\n{sup}"));
+    // (a qualified projection of a concrete type is normalized by its own trait, not by the name of the associated
+    // type: P's A is u16, Q's is u32)
+    let pq = "trait P { type A; }\ntrait Q { type A; }\ntrait Bar {}\nimpl P for u8 { type A = u16; }\nimpl Q for u8 { type A = u32; }\nfn f<T>(_: T) where <u8 as Q>::A: Bar {}\nfn main() { f(1i8); }";
+    ok(&format!("impl Bar for u32 {{}}\n{pq}"));
+    bad(&format!("impl Bar for u16 {{}}\n{pq}"), "`u32: Bar`");
+    // (a where clause on a concrete type)
+    bad("trait Bar {}\nstruct S;\nfn f<T>(_: T) where S: Bar {}\nfn main() { f(1u8); }", "`S: Bar`");
+    ok("trait Bar {}\nstruct S;\nimpl Bar for S {}\nfn f<T>(_: T) where S: Bar {}\nfn main() { f(1u8); }");
     // (an impl's associated type against its trait's bounds for it)
     bad("trait Bar {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}", "`u16: Bar`");
     ok("trait Bar {}\nimpl Bar for u16 {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}");

@@ -49,7 +49,9 @@ type of one name, the first impl found answered for both.
   (`Program::pred_subject`):
   - `<T as Tr>::A` is normalized by `Tr`, `T::A` by the traits of `T`'s bounds and their supertraits (`trait Sub:
     Super` declares `Super::A` for `T: Sub`), which must agree;
-  - another type (`W<T>`, `&T`) has the arguments put in. One with a projection inside is left out, because `subst`
+  - a projection is taken apart before it is resolved, so `<u8 as Q>::A`, whose base is concrete, is `Q`'s `A` and
+    not that of the first trait with an `A`;
+  - another type (`W<T>`, `&T`, a concrete `S`) has the arguments put in. One with a projection inside is left out, because `subst`
     would look that projection up by its name alone.
   - Bounds of the program's traits are checked, as for the nested goals of impls. A Box, an array, a slice or a type
     with a trait object in it is not checked: `implements` does not see the program's impls for them
@@ -62,17 +64,18 @@ type of one name, the first impl found answered for both.
 
 `bench/rust_ui.py --check` on main (25c18d6) merged in:
 
-- compile-fail +7 against main's baseline, 0 regressions:
+- compile-fail +8 against main's baseline, 0 regressions:
   - `error-codes/E0271.rs`
   - `associated-types/mismatch-two-relevant-impls.rs`
   - `associated-types/associated-types-eq-hr.rs`
   - `associated-types/point-at-type-on-obligation-failure-2.rs` (an item bound)
   - `impl-trait/in-trait/dont-probe-missing-item-name-4.rs`
   - `suggestions/imm-ref-trait-object-literal-bound-regions.rs` (`where for<'b> &'b X: Trait`)
+  - `where-clauses/where-clause-method-substituion.rs` (`where X: Foo<U>`, a concrete type's where clause)
   - `where-clauses/where-for-self-2.rs` (`where for<'a> &'a T: Bar`; rustc says "not general enough", zustc,
     which has no lifetimes in types, says the bound does not hold, on the same line)
 - run-pass, check-pass and build-pass unchanged. The baseline and the ratchet were rewritten (compile-fail ratchet
-  4650 → 4663: 6 compile-fail and 2 run-pass tests of the baseline pass on main's binary too and had not
+  4650 → 4664: 6 compile-fail and 2 run-pass tests of the baseline pass on main's binary too and had not
   been added to it).
 
 Instructions of `zustc check -j 1` (cachegrind), main (b376a37) against this change:

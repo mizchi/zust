@@ -4771,10 +4771,31 @@ impl Program {
     /// the traits T's bounds name, which must agree. None when it is not known (a parameter is left, nothing
     /// normalizes it, or a projection is inside another type, which subst would look up by its name alone)
     pub fn pred_subject(&self, syn: &crate::types::TySyn, qtr: &str, sig: &FnSig, names: &[&str], args: &[Ty]) -> Option<Ty> {
+        // (a projection is taken apart before it is resolved: resolve_g would look `<u8 as Q>::A`, whose base is
+        // concrete, up by the name A alone, whatever trait gives it)
+        if let crate::types::TySyn::Assoc(bsyn, name) = syn {
+            if name.starts_with(crate::ast_types::GAT_PREFIX) {
+                return None;
+            }
+            // (`<i32 as Local>::Output` is marked as not std's: normalize asks the impls of the trait it names anyway)
+            let name = name.strip_prefix(crate::ast_types::NO_STD_ASSOC).unwrap_or(name);
+            let bt = self.resolve_g(bsyn, names).ok()?;
+            let a = crate::types::AssocTy { base: bt, name: name.to_string() };
+            return self.projection_subject(&a, qtr, sig, args);
+        }
         let t = self.resolve_g(syn, names).ok()?;
-        if let Ty::Assoc(a) = t {
+        if self.mentions_assoc(t) {
+            return None;
+        }
+        let t = self.subst(t, args);
+        (!self.has_param(t)).then_some(t)
+    }
+
+    /// pred_subject's projection `<base as qtr>::name` (`base::name` when qtr is empty), normalized
+    fn projection_subject(&self, a: &crate::types::AssocTy, qtr: &str, sig: &FnSig, args: &[Ty]) -> Option<Ty> {
+        {
             let base = self.subst(a.base, args);
-            if self.has_param(base) {
+            if self.has_param(base) || self.mentions_assoc(base) {
                 return None;
             }
             let mut traits: Vec<String> = if !qtr.is_empty() {
@@ -4803,13 +4824,8 @@ impl Program {
                     found = Some(v);
                 }
             }
-            return found;
+            found
         }
-        if self.mentions_assoc(t) {
-            return None;
-        }
-        let t = self.subst(t, args);
-        (!self.has_param(t)).then_some(t)
     }
 
     /// t is a type whose impls of the program's implements does not see: a Box, an array or a slice, or one with a
