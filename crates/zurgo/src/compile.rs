@@ -328,21 +328,28 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
             let dev = deps_of(g, &r, n, true)?;
             let lib = pk.m.lib.as_ref().filter(|l| !l.is_proc_macro());
             let mut units: Vec<(String, &crate::manifest::Target, bool)> = vec![];
-            if let Some(l) = lib.filter(|l| l.test) {
+            if let Some(l) = lib {
                 units.push((format!("{} (lib)", pk.m.name), l, false));
             }
-            for b in pk.m.bins.iter().filter(|b| b.test) {
+            for b in &pk.m.bins {
                 if missing_features(g, &r, n, b).is_empty() {
                     units.push((format!("{} (bin {})", pk.m.name, b.name), b, true));
                 }
             }
-            for t in pk.m.tests.iter().filter(|t| t.test) {
+            for t in &pk.m.tests {
                 if missing_features(g, &r, n, t).is_empty() {
                     units.push((format!("{} (test {})", pk.m.name, t.name), t, true));
                 }
             }
-            // (`--lib`, `--bin x`, `--test x` ..: only those are built)
-            units.retain(|u| o.test_targets.is_empty() || o.test_targets.iter().any(|w| u.0.contains(w.as_str())));
+            // (`--lib`, `--bin x`, `--test x` ..: only those are built. `test = false` leaves a target out, unless it is
+            //  named (`--lib`, `--bin x`, `--test x`), as cargo runs it then; `--bins` and `--tests` do not name one)
+            let named = |w: &str| w == "(lib)" || (w.ends_with(')') && (w.starts_with("(bin ") || w.starts_with("(test ")));
+            units.retain(|u| {
+                if o.test_targets.is_empty() {
+                    return u.1.test;
+                }
+                o.test_targets.iter().any(|w| u.0.contains(w.as_str()) && (u.1.test || named(w)))
+            });
             for (label, t, with_lib) in units {
                 let mut deps = dev.clone();
                 if with_lib {

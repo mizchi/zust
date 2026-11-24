@@ -199,7 +199,8 @@ zurgo test --lib parse -- --include-ignored
   always shown.
 - A test still running after 60s is marked `SLOW`, and one running after 300s is stopped and fails
   (`ZURGO_TEST_SLOW`, `ZURGO_TEST_TIMEOUT`, in seconds).
-- `test = false` on a target leaves its tests out. A `harness = false` target is built as it is (its own `main`, no
+- `test = false` on a target leaves its tests out, unless the target is named (`--lib`, `--bin x`, `--test x`), as under
+  cargo. A `harness = false` target is built as it is (its own `main`, no
   `cfg(test)`) and run as one test, named after the target, that passes when it exits with 0. `zurgo metadata` lists
   the integration tests as cargo does.
 - `--target wasm32-unknown-unknown`: each test crate is a wasm module, and each test runs as

@@ -616,6 +616,12 @@ fn test_flags_like_cargo() {
     assert!(ok, "{err}");
     assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["uses_lib"], "{err}");
     assert!(!t2.join("zust/debug/custom_test_test.test").exists() && t2.join("zust/debug/normal_test_test.test").exists());
+    // (`--test off` names the `test = false` target: it runs, and fails, as under cargo)
+    let (ok, _, err) = zurgo(&["test", "--test", "off"], &m, &t);
+    assert!(!ok, "{err}");
+    assert_eq!(zurgo_outcomes(&err).into_iter().collect::<Vec<_>>(), [("never".to_string(), "FAILED".to_string())], "{err}");
+    let (ok, out, _) = cargo(&["test", "--offline", "--test", "off"], &m, &tdir("test-flags-cargo"));
+    assert!(!ok && out.contains("test never ... FAILED"), "{out}");
 }
 
 /// `zurgo test --target wasm32-unknown-unknown`: each test in a module of its own, under cargo's runner variable;
