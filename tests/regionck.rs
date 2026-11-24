@@ -3492,3 +3492,18 @@ fn part20_annotated_param_bound() {
     let d = check("fn take<F: Fn(&u32)>(_f: F) {}\nfn take2<'a, F: Fn(&'a u32)>(_: &'a u32, _f: F) {}\nfn take3<F: Fn(&u32) -> u32>(_f: F) {}\nfn g1<'x>(y: &'x u32) { take(|x: &'x u32| { let _ = (x, y); }); }\nfn g2<'x>(y: &'x u32) { take2(y, |x: &'x u32| { let _ = x; }); }\nfn g3() { take(|_x: &'static u32| {}); }\nfn g4() { take3(|x: &u32| *x); take(|_x: &'_ u32| {}); }\nfn main() { g1(&1); g2(&1); g3(); g4(); }\n");
     assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 6] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
 }
+
+#[test]
+fn part20_closure_holds_call_args() {
+    // (a closure made where nothing was expected, its parameter a reference: the region is its type's, so what its
+    // calls' arguments borrow is held while the closure is used)
+    let d = check("fn main() {\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    g(&a);\n    a = 2;\n    g(&a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    let d = check("fn main() {\n    let f = |_| {};\n    for a in [1] {\n        f(&a);\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("does not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let m = |x| { let _: &str = x; };\n    let st = String::new();\n    m(st.as_str());\n    drop(st);\n    m(\"b\");\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    // (not a closure whose parameter's type is written (one region for each call), nor one a bound gives its
+    // signature, nor one not used after)
+    assert_eq!(check("struct S<F: Fn(&u32)> {\n    f: F,\n}\nfn hold<F: Fn(&u32)>(f: F) -> F {\n    f\n}\nfn main() {\n    let k = |x: &u32| { let _ = x; };\n    let mut d = 1;\n    k(&d);\n    d = 2;\n    k(&d);\n    let s = S { f: |x| { let _ = x; } };\n    let mut b = 1;\n    (s.f)(&b);\n    b = 2;\n    (s.f)(&b);\n    let h = hold(|x| { let _ = x; });\n    let mut c = 1;\n    h(&c);\n    c = 2;\n    h(&c);\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    g(&a);\n    a = 2;\n    let _ = a;\n}\n"), vec![]);
+}

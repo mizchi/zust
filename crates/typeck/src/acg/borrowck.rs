@@ -2191,7 +2191,9 @@ impl Cx<'_> {
         }
         let id = self.bk.locals.len() as u32;
         let (copy, refs) = self.bk_ty(ty);
-        self.bk.locals.push(Local { name: name.to_string(), ty, copy, refs, mutable, decl: self.rg.let_sp, via_ref: false });
+        // (a closure whose parameters' regions are one for all its calls holds what its calls' arguments borrow)
+        let held = !refs && matches!(ty, Ty::Struct(s) if { let b = self.prog.base_of(s); self.hr_lost.iter().any(|h| h.0 == b) });
+        self.bk.locals.push(Local { name: name.to_string(), ty, copy, refs: refs || held, mutable, decl: self.rg.let_sp, via_ref: false });
         self.bk.by_loc.insert(loc, id);
         if refs && self.bk.level >= 2 && matches!(ty, Ty::Struct(_) | Ty::Box(_)) {
             let mut paths = vec![];
