@@ -2159,6 +2159,7 @@ compile-fail	diagnostic_namespace/on_unimplemented/do_not_fail_parsing_on_invali
 compile-fail	diagnostic_namespace/on_unimplemented/multiple_notes.rs
 compile-fail	diagnostic_namespace/on_unimplemented/on_unimplemented_simple.rs
 compile-fail	diagnostic_namespace/on_unimplemented/report_warning_on_duplicated_options.rs
+compile-fail	diagnostic_namespace/requires_path.rs
 compile-fail	did_you_mean/E0178.rs
 compile-fail	did_you_mean/bad-assoc-expr.rs
 compile-fail	did_you_mean/bad-assoc-pat.rs
@@ -2395,6 +2396,7 @@ run-pass	enum/simple-enum-usage-8506.rs
 compile-fail	enum/single-variant-enum-deref-error-9814.rs
 run-pass	enum/struct-like-variant-construct.rs
 run-pass	enum/struct-like-variant-match.rs
+compile-fail	enum/suggest-default-attribute.rs
 check-pass	enum/union-in-enum.rs
 run-pass	enum/zero-variant-enum-pattern-matching-3037.rs
 compile-fail	env-macro/env-arg-2-not-string-literal.rs
@@ -6285,7 +6287,9 @@ compile-fail	resolve/fn-item-cant-capture-dynamic-env.rs
 compile-fail	resolve/function-module-ambiguity-error-71406.rs
 check-pass	resolve/generic-struct-and-fn-share-name.rs
 check-pass	resolve/hidden_glob_reexports.rs
+compile-fail	resolve/ice-inconsistent-resolution-151213.rs
 compile-fail	resolve/ice-inconsistent-resolution-with-import-separators-issue-147208.rs
+compile-fail	resolve/ice-on-shadowing-std-with-attr.rs
 compile-fail	resolve/impl-method-cant-capture-env.rs
 compile-fail	resolve/impl-on-non-type.rs
 compile-fail	resolve/impl-trait-for-type-cant-capture-env.rs
@@ -6321,6 +6325,7 @@ compile-fail	resolve/issue-3214.rs
 compile-fail	resolve/issue-33876.rs
 compile-fail	resolve/issue-35675.rs
 compile-fail	resolve/issue-39559-2.rs
+compile-fail	resolve/issue-49074.rs
 compile-fail	resolve/issue-5035.rs
 compile-fail	resolve/issue-5099.rs
 compile-fail	resolve/issue-54379.rs

@@ -1253,6 +1253,40 @@ fn review106_third_round() {
 }
 
 #[test]
+fn unknown_attributes_anywhere() {
+    // (each expected line is rustc 1.100's "cannot find attribute" on the same source; None where rustc accepts it)
+    let check = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, n: &str| Some((l, format!("cannot find attribute `{n}` in this scope")));
+    for (src, line) in [
+        ("#[foobar] macro_rules! m { () => {} }\nfn main() {}\n", 1),
+        ("#[foobar] mod m { pub fn f() {} }\nfn main() {}\n", 1),
+        ("enum E {\n    #[foobar] A,\n}\nfn main() {}\n", 2),
+        ("struct S {\n    #[foobar] x: u8,\n}\nfn main() {}\n", 2),
+        ("fn main() {\n    #[foobar] let x = 1;\n}\n", 2),
+        ("fn f(#[foobar] x: u8) {}\nfn main() {}\n", 1),
+        ("extern \"C\" {\n    #[foobar] fn g();\n}\nfn main() {}\n", 2),
+    ] {
+        assert_eq!(check(src), at(line, "foobar"), "{src}");
+    }
+    // (`diagnostic` is a namespace, not an attribute)
+    assert_eq!(check("#[diagnostic]\npub struct Bar;\nfn main() {}\n"), at(1, "diagnostic"), "bare_diagnostic");
+    // (accepted: a macro's input or body, a tool's path, a derive's helper, a comment, a namespaced one)
+    for src in [
+        "macro_rules! m { ($i:item) => { $i } }\nm!(#[foobar] fn f() {});\nfn main() {}\n",
+        "macro_rules! m { () => { #[foobar] fn f() {} } }\nfn main() {}\n",
+        "#[rustfmt::skip]\nfn main() {}\n",
+        "#[derive(Default)]\nenum E {\n    #[default]\n    A,\n}\nfn main() {}\n",
+        "// #[foobar]\nfn main() { let _ = \"#[foobar]\"; }\n",
+        "#[diagnostic::on_unimplemented(message = \"m\")]\ntrait T {}\nfn main() {}\n",
+    ] {
+        assert_eq!(check(src), None, "{src}");
+    }
+}
+
+#[test]
 fn unresolved_imports() {
     // (each expected line, column and message is rustc 1.100's on the same source, in both editions unless one is
     // given; None where rustc accepts it)

@@ -3432,7 +3432,7 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
         const BUILTIN: &[&str] = &[
             "cfg", "cfg_attr", "test", "ignore", "should_panic", "bench", "derive", "automatically_derived", "macro_export", "macro_use",
             "proc_macro", "proc_macro_derive", "proc_macro_attribute", "allow", "warn", "deny", "forbid", "expect", "deprecated", "must_use",
-            "diagnostic", "link", "link_name", "link_ordinal", "no_link", "repr", "export_name", "link_section", "no_mangle", "used", "crate_name",
+            "link", "link_name", "link_ordinal", "no_link", "repr", "export_name", "link_section", "no_mangle", "used", "crate_name",
             "crate_type", "no_builtins", "no_main", "no_std", "no_implicit_prelude", "recursion_limit", "type_length_limit", "windows_subsystem",
             "inline", "cold", "no_builtins", "target_feature", "track_caller", "instruction_set", "doc", "path", "non_exhaustive", "panic_handler",
             "global_allocator", "default_lib_allocator", "feature", "unsafe", "naked", "debugger_visualizer", "collapse_debuginfo", "coverage",
@@ -3820,6 +3820,97 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             if warned && unused_attributes_denied {
                 return Some(format!("{}:1: the `{name}` attribute cannot be used on {kind}", line()));
             }
+        }
+    }
+    if standalone { unknown_attr_anywhere(src0, &unknown) } else { None }
+}
+
+/// "cannot find attribute `x` in this scope" of an attribute anywhere in the code, not only on an item: on a field,
+/// a variant, a parameter, a statement, a `macro_rules!`, a module. Not one in a comment or a literal, in a macro's
+/// body or input (what the expansion reads), a name an import binds (`use derive as my_derive;`), nor any where the
+/// crate has a derive not std's, whose helpers it could be. Read only where an attribute's name is unknown at all
+fn unknown_attr_anywhere(src: &str, unknown: &dyn Fn(&str) -> bool) -> Option<String> {
+    // (the candidates: `#[name` / `# [name` whose name is no built-in attribute)
+    let cands: Vec<usize> = src
+        .match_indices('#')
+        .filter(|&(i, _)| {
+            let Some(r) = crate::cfg::trim_trivia(&src[i + 1..]).strip_prefix('[') else { return false };
+            let r = crate::cfg::trim_trivia(r);
+            let n = &r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(r.len())];
+            unknown(n)
+        })
+        .map(|(i, _)| i)
+        .collect();
+    // (a parse error comes first in rustc: a merge's diff marker)
+    if cands.is_empty() || src.contains("<<<<<<<") {
+        return None;
+    }
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let n = toks.len();
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let mut close = vec![usize::MAX; n];
+    let mut stack: Vec<usize> = vec![];
+    for k in 0..n {
+        if toks[k].0 == 1 {
+            match t(k) {
+                b"(" | b"[" | b"{" => stack.push(k),
+                b")" | b"]" | b"}" => {
+                    if let Some(o) = stack.pop() {
+                        close[o] = k;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    // (the macros' bodies and inputs: `m!(..)`, `macro_rules! m { .. }`; the names imports bind; a derive not std's)
+    let mut macros: Vec<(usize, usize)> = vec![];
+    let mut bound: FxSet<&[u8]> = FxSet::default();
+    for k in 0..n {
+        if is_id(k) && t(k + 1) == b"!" && t(k.wrapping_sub(1)) != b"$" {
+            let o = if is_id(k + 2) { k + 3 } else { k + 2 };
+            if matches!(t(o), b"(" | b"[" | b"{") && close[o] != usize::MAX {
+                macros.push((toks[o].1, toks[close[o]].2));
+            }
+        }
+        if t(k) == b"use" {
+            let mut j = k + 1;
+            while j < n && t(j) != b";" {
+                if is_id(j) {
+                    bound.insert(t(j));
+                }
+                j += 1;
+            }
+        }
+        if t(k) == b"derive" && t(k + 1) == b"(" && close[k + 1] != usize::MAX {
+            let std = |d: &[u8]| matches!(d, b"Debug" | b"Clone" | b"Copy" | b"PartialEq" | b"Eq" | b"PartialOrd" | b"Ord" | b"Hash" | b"Default");
+            // (the last segment of each path in the list: `std::fmt::Debug`)
+            if (k + 2..close[k + 1]).any(|j| is_id(j) && !matches!(t(j + 1), b":") && !matches!(t(j), b"std" | b"core") && !std(t(j))) {
+                return None;
+            }
+        }
+    }
+    for at in cands {
+        // (a token there: not in a comment or a literal; not in a macro)
+        let Ok(k) = toks.binary_search_by_key(&at, |x| x.1) else { continue };
+        if t(k) != b"#" || t(k.wrapping_sub(1)) == b"$" || macros.iter().any(|&(a, e)| a < at && at < e) {
+            continue;
+        }
+        let o = k + 1;
+        if t(o) != b"[" || !is_id(o + 1) {
+            continue;
+        }
+        let name = t(o + 1);
+        // (one with nothing after it, `{ #[foo] }`, is rustc's parse error first)
+        if t(o + 2) == b":" || bound.contains(name) || close[o] == usize::MAX || matches!(t(close[o] + 1), b"}" | b"") {
+            continue;
+        }
+        let name = String::from_utf8_lossy(name);
+        if unknown(&name) {
+            let line = src[..at].matches('\n').count() + 1;
+            return Some(format!("{line}:1: cannot find attribute `{name}` in this scope"));
         }
     }
     None
