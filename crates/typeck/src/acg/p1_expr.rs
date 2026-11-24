@@ -3680,6 +3680,16 @@ impl Cx<'_> {
                                 self.bk_direct_pub(a, &mut srcs);
                             }
                         }
+                        // (through a reference to the closure (`r(&a)` with `r = &g`): the closure it points to holds
+                        // them too)
+                        let through = matches!(callee, Expr::Path(None, p) if ident_of(p).and_then(|n| self.bk_local_of(n)).is_some_and(|l| matches!(self.bk.locals[l as usize].ty, Ty::Ref(..))));
+                        if through && !srcs.is_empty() {
+                            if let Expr::Path(None, p) = callee {
+                                if let Some(l) = ident_of(p).and_then(|n| self.bk_local_of(n)) {
+                                    self.bk_ev(borrowck::Ev::HoldThrough(l, srcs.clone()));
+                                }
+                            }
+                        }
                         self.bk_flow_into(callee, &srcs);
                     }
                 }

@@ -3499,6 +3499,10 @@ fn part20_closure_holds_call_args() {
     // calls' arguments borrow is held while the closure is used)
     let d = check("fn main() {\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    g(&a);\n    a = 2;\n    g(&a);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    // (also through a reference to it, which the closure it points to holds them for)
+    let d = check("fn main() {\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    let r = &g;\n    r(&a);\n    a = 2;\n    g(&a);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("because it is borrowed"), "{d:?}");
+    assert_eq!(check("fn main() {\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    let r = &g;\n    r(&a);\n    a = 2;\n    let _ = a;\n}\n"), vec![]);
     // (also called through parentheses: `(g)(&a)`)
     let d = check("fn main() {\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    (g)(&a);\n    a = 2;\n    (g)(&a);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("because it is borrowed"), "{d:?}");
