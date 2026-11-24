@@ -101,7 +101,7 @@ or no). The two meet at the bound check of an instance (`Insts::request`):
 
 Against the union of both baselines: no regressions, and 3 more tests pass.
 
-| kind | main | this branch | merged |
+| kind | main (its ratchet) | this branch | merged |
 |---|---:|---:|---:|
 | run-pass | 1858 | 1868 | 1892 |
 | check-pass | 1525 | 1527 | 1540 |
