@@ -1981,3 +1981,21 @@ fn gated_cfg_names() {
     assert_eq!(first("#![feature(cfg_overflow_checks)]\nfn main() {\n    let _ = cfg!(overflow_checks);\n}\n"), None, "enabled");
     assert_eq!(first("#[cfg(feature = \"version\")]\nfn f() {}\n#[cfg_attr(unix, doc = \"sanitize\")]\nfn main() {}\n"), None, "not gated");
 }
+
+#[test]
+fn integer_literal_where_a_float_is_expected() {
+    // (an unsuffixed integer literal is never a float: E0308 where a float is expected, E0277 for arithmetic with a
+    // float, at the operator; each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    assert_eq!(first("fn main() {\n    let y: f64 = 2;\n    println!(\"{y}\");\n}\n"), e(2, 18, "mismatched types: expected `f64`, found integer"), "let");
+    assert_eq!(first("fn g(x: f32) -> f32 { x }\nfn main() {\n    let z = g(3);\n    println!(\"{z}\");\n}\n"), e(3, 15, "mismatched types: expected `f32`, found integer"), "argument");
+    assert_eq!(first("fn f(x: f32) -> f32 {\n    x + 100\n}\nfn main() {}\n"), e(2, 7, "cannot add `{integer}` to `f32` (E0277)"), "x + 100");
+    assert_eq!(first("fn f(x: f64) -> f64 {\n    100 + x\n}\nfn main() {}\n"), e(2, 9, "cannot add `f64` to `{integer}` (E0277)"), "100 + x");
+    assert_eq!(first("fn g(mut x: f64) -> f64 {\n    x += 1;\n    x\n}\nfn main() {}\n"), e(2, 7, "cannot add-assign `{integer}` to `f64` (E0277)"), "x += 1");
+    // (a float literal, or one with a float suffix, is one)
+    assert_eq!(first("fn main() {\n    let a: f64 = 2.0 + 1e3 + 2f64;\n    let b: f32 = 3.;\n    println!(\"{a} {b}\");\n}\n"), None, "floats");
+}

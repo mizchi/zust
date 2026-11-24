@@ -1980,6 +1980,7 @@ check-pass	consts/issue-37550-1.rs
 run-pass	consts/issue-37550.rs
 run-pass	consts/issue-37991.rs
 check-pass	consts/issue-39161-bogus-error.rs
+compile-fail	consts/issue-39974.rs
 check-pass	consts/issue-47789.rs
 check-pass	consts/issue-54387.rs
 run-pass	consts/issue-54582.rs
@@ -5081,6 +5082,7 @@ run-pass	numbers-arithmetic/numeric-method-autoexport.rs
 run-pass	numbers-arithmetic/shift-various-types.rs
 run-pass	numbers-arithmetic/shift.rs
 run-pass	numbers-arithmetic/signed-shift-const-eval.rs
+compile-fail	numbers-arithmetic/suggest-float-literal.rs
 run-pass	numbers-arithmetic/u32-decr.rs
 run-pass	numbers-arithmetic/u8-incr-decr.rs
 run-pass	numbers-arithmetic/u8-incr.rs
@@ -7162,6 +7164,7 @@ compile-fail	suggestions/assoc-type-in-method-return.rs
 compile-fail	suggestions/assoc_fn_without_self.rs
 compile-fail	suggestions/async-fn-ctor-passed-as-arg-where-it-should-have-been-called.rs
 compile-fail	suggestions/attribute-typos.rs
+compile-fail	suggestions/bad-hex-float-lit.rs
 compile-fail	suggestions/bad-infer-in-trait-impl.rs
 compile-fail	suggestions/bool_typo_err_suggest.rs
 compile-fail	suggestions/borrow-cast-or-binexpr-with-parens.rs

@@ -445,6 +445,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         ret: sig.ret,
         is_main: sig.is_main,
         user_code,
+        int_as_float: 0,
         raw_ref: 0,
         const_hint: None,
         // (a closure's body is checked too: one written inside `unsafe { }` comes wrapped in one, see synth_closure)
@@ -1049,6 +1050,9 @@ pub struct Cx<'p> {
     pub ret: Ty,
     pub is_main: bool,
     pub user_code: bool,
+    /// The text of the last integer literal reported where a float was expected (its address: the operator around
+    /// it reports rustc's E0277 instead)
+    pub int_as_float: usize,
     /// > 0 inside `unsafe { }`, an `unsafe fn`, or code not checked for E0133 (the prelude)
     pub unsafe_ok: u32,
     /// > 0 under `&raw const` / `&raw mut` / `addr_of!` (a raw reference to a `static mut` is safe)
