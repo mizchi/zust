@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795526826673,
+  "lastUpdate": 1795526829040,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -73348,6 +73348,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 109.375,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bd920ebdea550112d844c48f6aa4a90406295b2a",
+          "message": "Region check part 23: placeholders against regions from outside, a placeholder's bound's type arguments, diverging initializers, type aliases with a parameter twice (#126)\n\nRegion check part 23: placeholders against regions from outside, a placeholder's bound's type arguments, diverging initializers, type aliases with a parameter twice",
+          "timestamp": "2026-11-24T22:21:46+09:00",
+          "tree_id": "9d80a5df69a2559ed2294427fcd6b679622cc800",
+          "url": "https://github.com/mizchi/zust/commit/bd920ebdea550112d844c48f6aa4a90406295b2a"
+        },
+        "date": 1795526828691,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.971,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.81,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.698,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.296,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.843,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.135,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.096,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 226.219,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 110.559,
             "unit": "MiB"
           }
         ]
