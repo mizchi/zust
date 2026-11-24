@@ -1,0 +1,1 @@
+7:1: `extern` fn uses type `CString`, which is not FFI-safe

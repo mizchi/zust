@@ -1370,6 +1370,8 @@ impl Session2 {
         let mut deny_unused_lifetimes = (false, false);
         let mut deny_mismatched_lts = false;
         let mut deny_deprecated = false;
+        // (improper_ctypes (an `extern` block's fns), improper_ctypes_definitions (an `extern "C" fn`))
+        let mut deny_ctypes = (false, false);
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
         let lib_attr = {
@@ -1457,6 +1459,18 @@ impl Session2 {
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_mismatched_lts = lint("mismatched_lifetime_syntaxes");
             deny_deprecated = lint("deprecated") || (levels.contains(&"warnings") && !c.contains("#![allow(deprecated"));
+            // (warn by default: the crate attribute naming the lint last sets its level, and `deny(warnings)` makes
+            // it an error while it is left at warn, unless a later attribute sets `warnings` back; `allow(x)` then
+            // `warn(x)` puts it back at warn)
+            let last_level = |names: &[&str]| {
+                ["forbid", "deny", "warn", "allow", "expect"].into_iter().filter_map(|l| last_of(l, names).map(|at| (at, l))).max().map(|(_, l)| l)
+            };
+            let ffi = |n: &str| match last_level(&[n]) {
+                Some("forbid" | "deny") => true,
+                Some("warn") | None => matches!(last_level(&["warnings"]), Some("forbid" | "deny")),
+                _ => false,
+            };
+            deny_ctypes = (ffi("improper_ctypes"), ffi("improper_ctypes_definitions"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             deny_unused_mut = lint("unused_mut") || (!levels.contains(&"unused_mut") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
@@ -1509,6 +1523,12 @@ impl Session2 {
                         return Err(format!("{}:{}: unreachable {what}", it.line + p.line as usize - 1, p.col + 1));
                     }
                 }
+            }
+        }
+        // (improper_ctypes: a C string type of std's, `CStr` / `CString`, in an `extern "C"` block's or fn's signature)
+        if deny_ctypes.0 || deny_ctypes.1 {
+            if let Some(e) = first_cstr_in_extern(&src, &items[..user_src], deny_ctypes) {
+                return Err(e);
             }
         }
         // (deprecated: a path through `std::intrinsics` to what is stable elsewhere (`std::mem::transmute`))
@@ -3885,6 +3905,88 @@ fn std_path_ns(path: &[&[u8]]) -> u8 {
 /// root in edition 2015 (`injected`; a later edition's is hygienic). Only read when the program has a `mod` or an
 /// `extern crate`, or in edition 2015 something that may define `std` / `core`. `src` is the configured text, `externs` the `extern crate` items
 /// the configuring blanked (cfg::strip_noting)
+/// improper_ctypes: the first `CStr` / `CString` in the parameters or result of a fn of an `extern "C" { .. }` block,
+/// or of an `extern "C" fn` (improper_ctypes_definitions), as `line:col: msg`. Behind a pointer too: neither has a C
+/// layout
+/// text names `lint` in an `allow(..)` (`#[allow(a, improper_ctypes)]`, `#![allow(..)]`): that lint, not one it is
+/// a prefix of
+fn allows_lint(text: &str, lint: &str) -> bool {
+    let sq: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    sq.match_indices("allow(").any(|(i, _)| {
+        let rest = &sq[i + 6..];
+        rest[..rest.find(')').unwrap_or(rest.len())].split(',').any(|n| n == lint)
+    })
+}
+
+fn first_cstr_in_extern(src: &str, items: &[SrcItem], (blocks, defs): (bool, bool)) -> Option<String> {
+    for it in items {
+        let text = src.get(it.start..it.end).unwrap_or("");
+        if !text.contains("extern") || !(text.contains("CStr")) {
+            continue;
+        }
+        let b = text.as_bytes();
+        let toks = crate::lexer::tokenize(b);
+        let tk = |k: usize| &text[toks[k].1..toks[k].2];
+        let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tk(k) == c;
+        // (a fn's signature from `fn` to its `;` or body: the first C string type in it)
+        let sig_cstr = |k: usize| -> Option<&str> {
+            let mut j = k;
+            while j < toks.len() && !sym(j, ";") && !sym(j, "{") {
+                if toks[j].0 == 0 && matches!(tk(j), "CStr" | "CString") {
+                    return Some(tk(j));
+                }
+                j += 1;
+            }
+            None
+        };
+        let line_of = |k: usize| it.line as usize + b[..toks[k].1].iter().filter(|&&c| c == b'\n').count();
+        // (the attributes of the item or declaration token k starts: back to the `;` / `{` / `}` before them)
+        let attrs_allow = |k: usize, lint: &str| {
+            let mut a = k;
+            while a > 0 && !(sym(a - 1, ";") || sym(a - 1, "{") || sym(a - 1, "}")) {
+                a -= 1;
+            }
+            let from = if a < toks.len() { toks[a].1 } else { 0 };
+            allows_lint(&text[from..toks[k].1], lint)
+        };
+        let mut k = 0;
+        while k + 2 < toks.len() {
+            if toks[k].0 == 0 && tk(k) == "extern" && toks[k + 1].0 == 2 && tk(k + 1) == "\"C\"" {
+                if sym(k + 2, "{") {
+                    // (`#[allow(improper_ctypes)]` on the block: none of its fns; on one fn: that one)
+                    if !blocks || attrs_allow(k, "improper_ctypes") {
+                        k += 3;
+                        continue;
+                    }
+                    let mut j = k + 3;
+                    let mut d = 1;
+                    while j < toks.len() && d > 0 {
+                        if sym(j, "{") {
+                            d += 1;
+                        } else if sym(j, "}") {
+                            d -= 1;
+                        } else if d == 1 && toks[j].0 == 0 && tk(j) == "fn" && !attrs_allow(j, "improper_ctypes") {
+                            if let Some(t) = sig_cstr(j) {
+                                return Some(format!("{}:1: `extern` block uses type `{t}`, which is not FFI-safe", line_of(j)));
+                            }
+                        }
+                        j += 1;
+                    }
+                    k = j;
+                    continue;
+                }
+                if defs && toks[k + 2].0 == 0 && tk(k + 2) == "fn" && !attrs_allow(k, "improper_ctypes_definitions") {
+                    if let Some(t) = sig_cstr(k + 2) {
+                        return Some(format!("{}:1: `extern` fn uses type `{t}`, which is not FFI-safe", line_of(k)));
+                    }
+                }
+            }
+            k += 1;
+        }
+    }
+    None
+}
+
 fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Option<String> {
     // (a few scans: a program without these has its other duplicates found when its items are collected)
     // (2015's injected `std` meets an item or import of that name: `struct std;`, `use x as std;`, `enum std {`)
