@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795488007206,
+  "lastUpdate": 1795491705881,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -48494,6 +48494,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 38.035,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e58383360c032e74a9a8d13c1d83f8fa184ef5c7",
+          "message": "Region check part 19: closures' calls and requirements, fn items as higher-ranked fn pointers, impl constants' lifetimes (#109)\n\nRegion check part 19: closures' calls and requirements, fn items as higher-ranked fn pointers, impl constants' lifetimes",
+          "timestamp": "2026-11-24T12:36:35+09:00",
+          "tree_id": "418cc2c0f9b8b3728bf893d8bc3a0896b8b75373",
+          "url": "https://github.com/mizchi/zust/commit/e58383360c032e74a9a8d13c1d83f8fa184ef5c7"
+        },
+        "date": 1795491705383,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 123.689,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.704,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.741,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 77.216,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 20.262,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 126.066,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 772.604,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 567.587,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.667,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 66.179,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 383.538,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 53.527,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.55,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 597.13,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3810.959,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.149,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 88.958,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.063,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 52.62,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.704,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 143.625,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 38.081,
             "unit": "ms"
           }
         ]
