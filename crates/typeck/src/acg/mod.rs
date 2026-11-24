@@ -2139,7 +2139,10 @@ impl Cx<'_> {
                         continue;
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);
-                    if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(crate::regions::mentions_static) {
+                    // (or a projection whose associated type's value names lifetimes: `let _: <() as Foo>::Out = &a;`
+                    // with `type Out = &'static u32`)
+                    let proj = |a: &crate::parse::Ty| matches!(a, crate::parse::Ty::Path(Some(_), _)) && !self.prog.assoc_regions.is_empty();
+                    if !self.rg.on && self.rg.eligible && ann_ty.as_ref().is_some_and(|a| crate::regions::mentions_static(a) || proj(a)) {
                         self.rg_late_on();
                     }
                     // (`let _ = Foo;` with Foo a unit struct (or a const) is a value: dropped at once)
@@ -2335,7 +2338,8 @@ impl Cx<'_> {
                     // owns must not have to be 'static. What came before has no trees and adds no constraint)
                     let static_cast = || matches!(strip_paren(init), Expr::Cast(_, t) if crate::regions::mentions_static(t));
                     let ctor_lts = || self.prog.path_lts && self.inline_depth == 0 && crate::regions::writes_path_lts(init);
-                    if !self.rg.on && self.rg.eligible && (static_cast() || ann_ty.as_ref().is_some_and(crate::regions::mentions_static) || ctor_lts()) {
+                    let proj = |a: &crate::parse::Ty| matches!(a, crate::parse::Ty::Path(Some(_), _)) && !self.prog.assoc_regions.is_empty();
+                    if !self.rg.on && self.rg.eligible && (static_cast() || ann_ty.as_ref().is_some_and(|a| crate::regions::mentions_static(a) || proj(a)) || ctor_lts()) {
                         self.rg_late_on();
                     }
                     let let_sp0 = std::mem::replace(&mut self.rg.let_sp, *let_at);

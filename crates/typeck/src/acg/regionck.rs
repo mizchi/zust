@@ -2555,7 +2555,7 @@ impl Cx<'_> {
                 // (an annotation with holes whose regions are the inferred type's (`let f: fn(_) -> _ = foo;`): fresh
                 // ones, which the initializer flows into. A fn pointer type's parts that are no hole keep the regions
                 // they write: `fn(_, &'a T) -> &'static T`)
-                tr.or_else(|| if crate::ast_summary::has_infer(a) { self.rg_fn_ann_holes(a, t).or_else(|| self.rg.fresh(prog, t)) } else { None })
+                tr.or_else(|| self.rg_proj_ann(a, t)).or_else(|| if crate::ast_summary::has_infer(a) { self.rg_fn_ann_holes(a, t).or_else(|| self.rg.fresh(prog, t)) } else { None })
             }
             // (a fn item with no type written (`let g = id;`): the local is of the item's type, whose own regions a
             // call through it takes afresh, its type arguments' are fixed (`let f = id::<&'static u32>;`))
@@ -2688,6 +2688,48 @@ impl Cx<'_> {
         let sol: Vec<Ty> = sol.into_iter().collect::<Option<Vec<Ty>>>()?;
         let targs: Vec<Option<RT>> = sol.iter().map(|&t| self.rg.fresh(prog, t)).collect();
         self.rt_fn_sig(id, &sol, &targs)
+    }
+
+    /// The tree of a projection written as a type (`<&'static () as Foo>::Out`) whose associated type's value names
+    /// lifetimes (Program::assoc_regions): the value's codes, with the impl's lifetimes those its self type writes there
+    /// (fresh where it elides them). Only where one impl's associated type of the name fits the self type
+    pub(crate) fn rg_proj_ann(&mut self, ann: &PTy, t: Ty) -> Option<RT> {
+        let PTy::Path(Some(q), path) = ann else { return None };
+        let prog = self.prog;
+        if prog.assoc_regions.is_empty() {
+            return None;
+        }
+        let name = path.segs.last()?.name.as_str();
+        let qt = self.parse_ty(q).ok()?;
+        let mut found = None;
+        for (i, a) in prog.assocs.iter().enumerate() {
+            if a.name != name || a.ngat != 0 {
+                continue;
+            }
+            let mut sol = vec![None; a.ngen];
+            if prog.match_ty(a.self_ty, qt, &mut sol) && !matches!((a.self_ty, qt), (Ty::Ref(m1, _), Ty::Ref(m2, _)) if m1 != m2) {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(i as u32);
+            }
+        }
+        let (codes, self_slots) = prog.assoc_regions.get(&found?)?.clone();
+        let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+        let mut written = vec![];
+        sl.slots(q, false, &mut written);
+        let n = codes.iter().chain(&self_slots).filter(|&&c| c < R_STATIC).map(|&c| c as usize + 1).max().unwrap_or(0);
+        let mut lts = vec![];
+        for k in 0..n {
+            let at = self_slots.iter().position(|&c| c as usize == k).filter(|_| written.len() == self_slots.len());
+            let v = match at.map(|j| written[j]) {
+                Some(R_STATIC) => STATIC,
+                Some(c) if (c as usize) < self.rg.lts.len() => self.rg.lts[c as usize],
+                _ => self.rg.var(),
+            };
+            lts.push(v);
+        }
+        self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var())
     }
 
     /// The tree of a fn pointer annotation with holes (`fn(_, &'a T) -> &'static T`), part by part: a hole's regions
@@ -3102,7 +3144,7 @@ impl Cx<'_> {
                 self.rg.dyn_infer = true;
                 let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
                 self.rg.dyn_infer = false;
-                tree
+                tree.or_else(|| self.rg_proj_ann(ann, t))
             }
         }
     }

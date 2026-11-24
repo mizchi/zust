@@ -2077,6 +2077,20 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                 generics.push("#gat".to_string());
                 generics.extend(gat);
             }
+            // (a value that names a lifetime, the impl's or 'static: its codes against the impl's lifetimes)
+            // (an impl that names no lifetime (`impl Foo for () { type Out = &'static u32; }`): none to instantiate)
+            if !ow.is_trait && crate::regions::names_lt(t) {
+                let (lts, self_slots) = ow.regions.as_deref().map(|r| (r.lts.clone(), r.self_slots.as_slice())).unwrap_or_default();
+                {
+                    let tps: Vec<&str> = ow.generics.iter().map(|g| g.0.as_str()).collect();
+                    let mut s = crate::regions::Slots { lts, tparams: tps, self_slots, any: false, in_fn: 0 };
+                    let mut v = vec![];
+                    s.slots(t, false, &mut v);
+                    if s.any && !v.contains(&crate::types::R_UNKNOWN) {
+                        sm.assoc_regions.push((sm.assocs.len() as u64, v));
+                    }
+                }
+            }
             sm.assocs.push(AssocSyn {
                 name: n.clone(),
                 self_ty: ow.self_ty.clone(),
