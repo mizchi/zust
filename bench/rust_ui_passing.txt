@@ -1265,6 +1265,7 @@ check-pass	cfg/expanded-cfg.rs
 compile-fail	cfg/nested-cfg-attr-conditional-compilation.rs
 run-pass	cfg/struct-field-empty.rs
 compile-fail	cfg/suggest-any-or-all.rs
+compile-fail	check-cfg/cfg-crate-features.rs
 check-pass	check-cfg/cfg-select.rs
 check-pass	check-cfg/nested-cfg.rs
 check-pass	closure-expected-type/expect-fn-supply-fn-multiple.rs
@@ -2685,7 +2686,17 @@ compile-fail	feature-gates/feature-gate-async-trait-bounds.rs
 compile-fail	feature-gates/feature-gate-auto-traits.rs
 compile-fail	feature-gates/feature-gate-avx10_target_feature.rs
 compile-fail	feature-gates/feature-gate-builtin_syntax.rs
+compile-fail	feature-gates/feature-gate-cfg-contract-checks.rs
+compile-fail	feature-gates/feature-gate-cfg-relocation-model.rs
+compile-fail	feature-gates/feature-gate-cfg-sanitizer_cfi.rs
+compile-fail	feature-gates/feature-gate-cfg-target-compact.rs
+compile-fail	feature-gates/feature-gate-cfg-target-has-atomic.rs
+compile-fail	feature-gates/feature-gate-cfg-target-has-threads.rs
 compile-fail	feature-gates/feature-gate-cfg-version.rs
+compile-fail	feature-gates/feature-gate-cfg_overflow_checks.rs
+compile-fail	feature-gates/feature-gate-cfg_sanitize.rs
+compile-fail	feature-gates/feature-gate-cfg_target_object_format.rs
+compile-fail	feature-gates/feature-gate-cfg_ub_checks.rs
 compile-fail	feature-gates/feature-gate-clflushopt_target_feature.rs
 compile-fail	feature-gates/feature-gate-closure_lifetime_binder.rs
 compile-fail	feature-gates/feature-gate-compiler-builtins.rs

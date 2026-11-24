@@ -1960,3 +1960,24 @@ fn copy_with_a_field_that_is_not() {
     let ok = "#[derive(Clone, Copy)]\nstruct Ok1<T>(T, u8, &'static str, [u16; 3], (u8, char), fn(u8) -> u8, *const u8);\n#[derive(Clone)]\nstruct W<S>(S);\nimpl<S: Copy> Copy for W<S> {}\n#[derive(Clone, Copy)]\nenum E2 { A(u8), B { x: Option<u8> }, C }\n#[derive(Clone, Copy)]\nstruct P(std::marker::PhantomData<String>, std::mem::ManuallyDrop<u8>, std::ops::RangeTo<u8>, core::cmp::Ordering);\n#[derive(Clone)]\nunion U {\n    a: u8,\n}\nimpl Copy for U {}\nfn main() {}\n";
     assert_eq!(first(ok), None, "Copy");
 }
+
+#[test]
+fn gated_cfg_names() {
+    // (E0658: a `cfg` predicate of a name behind a feature gate, at the name, unless the crate enables the feature;
+    // each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, n: &str| Some((l, c, format!("`cfg({n})` is experimental and subject to change (E0658)")));
+    assert_eq!(first("#[cfg(not(sanitize = \"thread\"))]\nfn main() {}\n"), e(1, 11, "sanitize"), "attribute");
+    assert_eq!(first("fn main() {\n    let _ = cfg!(overflow_checks);\n}\n"), e(2, 18, "overflow_checks"), "cfg!");
+    assert_eq!(
+        first("#[cfg_attr(target(os = \"linux\"), allow(unused))]\nfn main() {}\n"),
+        Some((1, 12, "compact `cfg(target(..))` is experimental and subject to change (E0658)".to_string())),
+        "compact target"
+    );
+    // (enabled, a value of a name that is not gated, and an attribute of what a cfg_attr puts on the item)
+    assert_eq!(first("#![feature(cfg_overflow_checks)]\nfn main() {\n    let _ = cfg!(overflow_checks);\n}\n"), None, "enabled");
+    assert_eq!(first("#[cfg(feature = \"version\")]\nfn f() {}\n#[cfg_attr(unix, doc = \"sanitize\")]\nfn main() {}\n"), None, "not gated");
+}
