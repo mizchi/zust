@@ -348,11 +348,6 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     }
     text.push('\n');
     for (name, path_attr) in top {
-        // (a `#` in front: the declaration had `#[macro_use]`, which the appended module keeps)
-        let (name, mu) = match name.strip_prefix('#') {
-            Some(n) => (n.to_string(), "#[macro_use] "),
-            None => (name, ""),
-        };
         // (`#[path = "x.rs"] mod m;`: that file, beside this one; its own modules are beside it too)
         if let Some(pa) = path_attr {
             let here = path.parent().unwrap_or(Path::new("."));
@@ -360,7 +355,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
             map.probes.push(p.clone());
             let disp = join_disp(disp_dir, &pa);
             let sub = p.parent().map(|d| d.to_path_buf()).unwrap_or_default();
-            text.push_str(&format!("{mu}pub mod {name} {{\n"));
+            text.push_str(&format!("pub mod {name} {{\n"));
             let at = start + line_count(&text);
             let body = load_file(p.as_path(), &disp, sub.as_path(), disp_dir, at, map, cfg, open)?;
             text.push_str(&body);
@@ -379,7 +374,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         } else {
             return Err(format!("{display}: file not found for module `{name}`"));
         };
-        text.push_str(&format!("{mu}pub mod {name} {{\n"));
+        text.push_str(&format!("pub mod {name} {{\n"));
         let at = start + line_count(&text);
         let body = load_file(p.as_path(), &disp, sub.as_path(), &sub_disp, at, map, cfg, open)?;
         text.push_str(&body);
@@ -685,10 +680,6 @@ fn blank_mod_decls(src: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, Vec<(
             let name = String::from_utf8_lossy(tok(k + 1)).into_owned();
             inline.push((depth + 1, pa.ok_or(name)));
         } else if toks[k].0 == 0 && tok(k) == b"mod" && k + 2 < toks.len() && toks[k + 1].0 == 0 && is_sym(k + 2, b';') {
-            // (`#[macro_use] mod x;`: the module keeps the attribute where it is appended (macros::expand_cfg takes
-            //  its macros as in scope from the top))
-            let (b_attr, _, _) = attrs_before(src, s, &toks, k);
-            let macro_use = depth == 0 && src[toks[b_attr].1..toks[k].1].contains("macro_use");
             let nested = (depth != 0).then(|| (toks[k + 2].2, inline.iter().map(|m| m.1.clone()).collect::<Vec<_>>()));
             // (前の `pub` / `pub(crate)` と `#[..]` も消す)
             let mut b = k;
@@ -717,7 +708,7 @@ fn blank_mod_decls(src: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, Vec<(
             let at = toks[k].1;
             if !cfg_test && !not_taken.iter().any(|&(a, e)| a <= at && at < e) {
                 let name = String::from_utf8_lossy(tok(k + 1)).into_owned();
-                kids.push((if macro_use { format!("#{name}") } else { name }, path_attr, nested));
+                kids.push((name, path_attr, nested));
             }
             k += 3;
             continue;
@@ -788,9 +779,8 @@ mod circular_tests {
         assert!(!src.contains("mod types;"), "{src}");
         // (`mod nowhere;` belongs to a macro nobody invokes: nothing is read for it)
         assert!(src.contains("mod nowhere;"), "{src}");
-        // (the `#[macro_use]` module keeps its attribute where it is appended, so expansion sees its macros as in
-        //  scope above it)
-        assert!(src.contains("#[macro_use] pub mod macros {"), "{src}");
+        // (the `#[macro_use]` module goes in at its declaration, above the invocation)
+        assert!(src.find("pub mod macros {").is_some_and(|m| src.find("prelude!").is_none_or(|c| m < c)), "{src}");
         let e = crate::macros::expand(&src);
         assert!(e.is_ok(), "{e:?}");
         let _ = std::fs::remove_dir_all(&dir);
