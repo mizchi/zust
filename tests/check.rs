@@ -1316,6 +1316,7 @@ fn review_three_cases() {
         "struct Tail<T: ?Sized>(T);\ntrait Flag {}\nimpl<T> Flag for &T {}\nimpl Flag for &Tail<[u8]> {}\nfn main() {}\n",
         "trait Local {}\nstruct S;\nimpl Local for S where u8: core::fmt::Debug {}\nfn need<X: Local>(_: X) {}\nfn main() { need(S); }\n",
         "trait Parent {}\ntrait Child: Parent {}\nstruct W<T>(T);\nimpl<T: Copy> Parent for W<T> {}\nimpl<T> Child for W<T> where W<T>: Parent {}\nfn main() {}\n",
+        "fn main() { let a = vec![1.0]; let b = vec![1.0f32]; assert_eq!(a, b); }\n",
     ] {
         let d = check(src);
         assert!(d.is_empty(), "{src}\n{d:?}");

@@ -261,11 +261,11 @@ impl Solver<'_> {
         }
     }
 
-    /// 要素の型: 片方がまだ決まっていなければ単一化する (数のリテラルを相手の型にする)
+    /// 要素の型: 片方がまだ決まっていなければ単一化する (整数・浮動小数のリテラルを相手の型にする)
     pub fn elem_hint(&mut self, x: u32, y: u32) {
         let (fx, fy) = (self.find(x), self.find(y));
         // (数のリテラルだけ: 要素の型がまだ決まっていない Vec と文字列の配列は単一化しない)
-        let lit = |s: &Self, v: u32| s.shape[v as usize].is_none() && s.int_lit[v as usize];
+        let lit = |s: &Self, v: u32| s.shape[v as usize].is_none() && (s.int_lit[v as usize] || s.float_lit[v as usize]);
         if lit(self, fx) || lit(self, fy) {
             self.unify(x, y);
         }
