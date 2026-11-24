@@ -1361,11 +1361,19 @@ impl RgSt {
             }
             n
         };
+        let base = |mut t: Ty| {
+            while let Ty::Ref(_, i) = t {
+                t = *i;
+            }
+            t
+        };
         match (from, to) {
             // (a deref coercion (`c: &&'a str` where a `&str` is expected): the reborrow `&**c` it is lives no longer
             // than the references it goes through from the inside out, and a shared one stops that (NLL's reborrow
             // constraints): of `&'1 &'a str` only 'a)
-            (Ty::Ref(..), Ty::Ref(m, b)) if refs(from) > refs(to) => {
+            // (not an unsizing to a trait object (`x: &'a &'static u32` as `&dyn Tr`, with `&u32: Tr`): that keeps the
+            // outer reference, whose region is the object's)
+            (Ty::Ref(..), Ty::Ref(m, b)) if refs(from) > refs(to) && !(matches!(base(to), Ty::Dyn(_)) && !matches!(base(from), Ty::Dyn(_))) => {
                 let mut f = from;
                 let mut crossed: Vec<(u32, bool)> = vec![];
                 while refs(f) >= refs(to) {
@@ -2690,6 +2698,14 @@ impl Cx<'_> {
             return None;
         }
         let prog = self.prog;
+        // (a result that elides a region (`fn(&u32, _) -> &u32`): it is its parameter's, which one binder links; not
+        // taken part by part (the whole is fresh, as before))
+        let mut rs = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
+        let mut rc = vec![];
+        rs.slots(r, false, &mut rc);
+        if rc.contains(&R_BOUND) {
+            return None;
+        }
         let lts = self.rg.lts.clone();
         let mut out = vec![];
         for (p, &pt) in ps.iter().chain(std::iter::once(&**r)).zip(ft.params.iter().chain(std::iter::once(&ft.ret))) {
