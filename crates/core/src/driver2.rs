@@ -1403,6 +1403,7 @@ impl Session2 {
         let mut deny_unreachable_code = false;
         let mut deny_must_use = false;
         let mut deny_unused_alloc = false;
+        let mut deny_bare = false;
         let mut deny_unused_mut = false;
         let mut deny_trivial_casts = (false, false);
         let mut deny_unused_lifetimes = (false, false);
@@ -1509,6 +1510,13 @@ impl Session2 {
                 _ => false,
             };
             deny_ctypes = (ffi("improper_ctypes"), ffi("improper_ctypes_definitions"));
+            // (a trait object without `dyn` before 2021: the lint warns, as rust_2018_idioms does. An item's
+            // `#[deny(bare_trait_objects)]` is taken for the crate: lint levels below it are not followed)
+            deny_bare = c.contains("deny(bare_trait_objects") || c.contains("forbid(bare_trait_objects") || match last_level(&["bare_trait_objects", "rust_2018_idioms"]) {
+                Some("forbid" | "deny") => true,
+                Some("warn") | None => matches!(last_level(&["warnings"]), Some("forbid" | "deny")),
+                _ => false,
+            };
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             deny_unused_mut = lint("unused_mut") || (!levels.contains(&"unused_mut") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
@@ -1628,7 +1636,7 @@ impl Session2 {
             }
         }
         unsafe_impls(&src, &items[..user_src])?;
-        let mut prog = Program::build_with(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user).map_err(|e| name_line(&e, &src, &items))?;
+        let mut prog = Program::build_with_edition(&items, &sums, self.ctx.lib.is_none() && !lib_attr, user, self.opts.edition, deny_bare).map_err(|e| name_line(&e, &src, &items))?;
         tm.lap("program", String::new());
         prog.prelude_from = user as u32;
         if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
@@ -5727,7 +5735,7 @@ impl Session2 {
 fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
     let Some((l, rest)) = e.split_once(":1: ") else { return e.to_string() };
     let Ok(line) = l.parse::<usize>() else { return e.to_string() };
-    let name = ["cannot find type `", "cannot find trait `", "cannot find value `", "cannot find struct `"]
+    let name = ["cannot find type `", "cannot find trait `", "cannot find value `", "cannot find struct `", "trait objects without an explicit `dyn` are deprecated: `dyn "]
         .iter()
         .find_map(|p| rest.strip_prefix(p))
         .and_then(|r| r.split('`').next());

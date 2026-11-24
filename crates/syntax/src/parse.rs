@@ -704,7 +704,9 @@ pub fn rewrite_tokens(s: &str, f: &mut dyn FnMut(usize, &[Tok]) -> Option<String
             _ => t.text.clone(),
         };
         let word = |c: char| c.is_alphanumeric() || c == '_' || c == '\'' || c == '"';
-        if out.ends_with(word) && piece.starts_with(word) {
+        // (two punctuations apart in the text stay apart: `/ *` is no comment, `- >` no arrow)
+        let apart = k > 0 && toks[k - 1].kind == TokKind::Punct && !toks[k - 1].joint && piece.starts_with(|c: char| !word(c) && !c.is_whitespace());
+        if (out.ends_with(word) && piece.starts_with(word)) || apart {
             out.push(' ');
         }
         out.push_str(&piece);

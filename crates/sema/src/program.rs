@@ -488,6 +488,10 @@ pub struct Program {
     pub impl_selfs: FxMap<(u32, String), Vec<(Ty, usize, Vec<(usize, String)>)>>,
     /// the traits the program declares (not the prelude's): a bound of one is checked by its impls
     pub user_traits: FxSet<String>,
+    /// Every trait the program and the prelude declare, known before the structs' fields are resolved (bare_dyn)
+    pub trait_decls: FxSet<String>,
+    /// The `bare_trait_objects` lint is denied: a trait object without `dyn` (bare_dyn) is an error
+    pub deny_bare_trait: bool,
     /// Types whose `Copy` impl names 'static in its self type (`impl Copy for Foo<'static>`): a copy of one requires
     /// what it borrows to be 'static
     pub static_copy: FxSet<u32>,
@@ -1062,6 +1066,13 @@ impl Program {
     /// need_main: false ならライブラリ (main がなくてよい)
     /// `user`: how many of the items are the program's (the rest are the prelude's)
     pub fn build_with(items: &[SrcItem], sums: &[Summary], need_main: bool, user: usize) -> R<Program> {
+        Program::build_with_edition(items, sums, need_main, user, 2021, false)
+    }
+
+    /// build_with in an edition: the types of the signatures and the fields are resolved in it (a trait's name behind
+    /// a pointer is its trait object before 2021, bare_dyn)
+    /// (deny_bare: the `bare_trait_objects` lint is denied, so such an object is an error)
+    pub fn build_with_edition(items: &[SrcItem], sums: &[Summary], need_main: bool, user: usize, edition: u16, deny_bare: bool) -> R<Program> {
         // (the crate's `main`, summed up as an ordinary function because it cannot be the entry (ast_summary): an error
         //  when it would be, so not under `--test`. First, as it was when the summary reported it)
         if need_main && !sums.iter().any(|s| s.fns.iter().any(|(n, _)| n == TEST_ENTRY)) {
@@ -1102,7 +1113,8 @@ impl Program {
             fnptr_impls: Default::default(),
             deny_unreachable: false,
             deny_must_use: false,
-            edition: 2021,
+            edition,
+            deny_bare_trait: deny_bare,
             path_lts: false,
             deny_unused_alloc: false,
             deny_unused_mut: false,
@@ -1144,6 +1156,7 @@ impl Program {
             use_names: FxSet::default(),
             impl_selfs: FxMap::default(),
             user_traits: FxSet::default(),
+            trait_decls: FxSet::default(),
             lower_consts: false,
             const_by_last: FxMap::default(),
             prim_impls: HashSet::default(),
@@ -1356,6 +1369,7 @@ impl Program {
             }
         }
         // 1. struct / enum 名を登録
+        p.trait_decls = sums.iter().filter_map(|sm| sm.trait_decl.clone()).collect();
         let mut sdefs: Vec<(usize, String, AdtShape, Vec<String>)> = vec![];
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             let adts = sm
@@ -3303,12 +3317,14 @@ impl Program {
                 Ty::Array(intern(r(inner)?), n as u32)
             }
             TySyn::Named(n) => {
-                // (the marks of a `dyn` type's text: dyn_canon)
-                if let Some((i, _)) = dyn_param_mark(n) {
-                    return Ok(Ty::Param(i));
-                }
-                if let Some(id) = dyn_struct_mark(n).filter(|&id| (id as usize) < self.structs.len()) {
-                    return Ok(Ty::Struct(id));
+                // (the marks of a `dyn` type's text: dyn_canon. Not a program's own type of the name)
+                if n.starts_with("__") && !self.struct_index.contains_key(n) && !self.aliases.contains_key(n) {
+                    if let Some((i, _)) = dyn_param_mark(n) {
+                        return Ok(Ty::Param(i));
+                    }
+                    if let Some(id) = dyn_struct_mark(n).filter(|&id| (id as usize) < self.structs.len()) {
+                        return Ok(Ty::Struct(id));
+                    }
                 }
                 if let Some(t) = names(n) {
                     return Ok(t);
@@ -4999,14 +5015,36 @@ impl Program {
                 }
             }
             // (`dyn A<T>` against `dyn A<i32>`: their type arguments)
-            // (or the same with its parameters' names: a value coerced to the type with them (dyn_unmarked))
-            (Ty::Dyn(p), Ty::Dyn(a)) if p != a && p.contains("__P") && self.dyn_shown(p, true) == **a => true,
+            // (or the same with its parameters' names, the ones known given: a value coerced to the type with them
+            // (dyn_unmarked), `Fn(i32) -> U` for `Fn(T) -> U` with T = i32)
+            (Ty::Dyn(p), Ty::Dyn(a)) if p != a && p.contains("__P") && self.dyn_named_as(p, a, sol) => true,
             (Ty::Dyn(p), Ty::Dyn(a)) if p != a && p.contains("__P") => match (self.dyn_parts(p), self.dyn_parts(a)) {
                 (Some((n1, x)), Some((n2, y))) => n1 == n2 && x.len() == y.len() && x.iter().zip(&y).all(|(p, q)| p.0 == q.0 && self.match_ty(p.1, q.1, sol)),
                 _ => false,
             },
             (a, b) => a == b,
         }
+    }
+
+    /// Whether a is the `dyn` type's text p with its parameters by their names, those of them known then given (sol):
+    /// a value coerced to it where only some were known (dyn_unmarked). Which were is not kept, so each subset of
+    /// the ones known now is tried
+    fn dyn_named_as(&self, p: &'static String, a: &str, sol: &[Option<Ty>]) -> bool {
+        let mut known: Vec<u8> = dyn_marks(p).filter(|&i| sol.get(i as usize).copied().flatten().is_some()).collect();
+        known.sort_unstable();
+        known.dedup();
+        if known.len() > 6 {
+            return false;
+        }
+        (0u32..1 << known.len()).any(|mask| {
+            let args: Vec<Ty> = (0..sol.len())
+                .map(|i| match known.iter().position(|&k| k as usize == i) {
+                    Some(b) if mask >> b & 1 == 1 => sol[i].unwrap(),
+                    _ => Ty::Param(i as u8),
+                })
+                .collect();
+            matches!(self.dyn_unmarked(self.subst(Ty::Dyn(p), &args)), Ty::Dyn(x) if x == a)
+        })
     }
 
     /// t with each `dyn` type's parameters (dyn_canon's marks) by their names: the type as it was without the marks,
@@ -5077,8 +5115,11 @@ impl Program {
         };
         // (not a module's trait (`m__Bar` flattened), whose privacy is not checked here: a private one named through a
         // glob import is an error)
-        if n.contains("__") || !self.traits.contains_key(n) || self.struct_index.contains_key(n) || self.aliases.contains_key(n) || names(n).is_some() {
+        if n.contains("__") || !(self.traits.contains_key(n) || self.trait_decls.contains(n)) || self.struct_index.contains_key(n) || self.aliases.contains_key(n) || names(n).is_some() {
             return None;
+        }
+        if self.deny_bare_trait {
+            return Some(Err(format!("trait objects without an explicit `dyn` are deprecated: `dyn {n}` (bare_trait_objects)")));
         }
         if args.is_empty() {
             return Some(Ok(Ty::Dyn(intern_str(n))));

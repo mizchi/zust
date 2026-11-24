@@ -4131,3 +4131,19 @@ fn part28_generic_dyn_args() {
     let d = check("trait A<T> {}\nstruct B<'a, T: 'a>(&'a (dyn A<T> + 'a));\ntrait X {}\nimpl<'a, T> X for B<'a, T> {}\nfn f<'a, T: 'static, U>(v: Box<dyn A<T> + 'static>) -> Box<dyn X + 'static> {\n    Box::new(B(&*v)) as Box<dyn X>\n}\nfn g(v: Box<dyn A<i32> + 'static>) -> Box<dyn X + 'static> {\n    Box::new(B(&*v))\n}\nfn main() {}\n");
     assert!(d.len() == 2 && d[0].0 == 6 && d[1].0 == 9 && d.iter().all(|x| x.1.contains("cannot return a reference to a local variable: `*v` is dropped when the function returns")), "{d:?}");
 }
+
+#[test]
+fn part28_review() {
+    // (#154's review: a trait's name behind a pointer in a 2015 edition's signature and struct field is its trait
+    // object (the edition is known when they are resolved); a closure for `Box<dyn Fn(T) -> U>` coerced where T is known
+    // and U not yet; a program's own type named like a mark (`__S0`) is that type)
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2015, ..Options2::default() });
+    let d: Vec<(usize, String)> = s.check("trait X { fn v(&self) -> i32; }\nimpl X for i32 { fn v(&self) -> i32 { *self } }\nstruct H<'a> { x: &'a X }\nfn take(x: &X) -> i32 { x.v() }\nfn main() { let h = H { x: &5 }; println!(\"{} {}\", take(&3), h.x.v()); }\n").into_iter().map(|d| (d.line, d.msg)).collect();
+    assert_eq!(d, vec![], "v1");
+    // (the `bare_trait_objects` lint denied: such an object is an error, at the line that names it)
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let d: Vec<(usize, String)> = s.check("#[deny(bare_trait_objects)]\nfn function(x: &SomeTrait) {\n    let _ = x;\n}\ntrait SomeTrait {}\nfn main() {}\n").into_iter().map(|d| (d.line, d.msg)).collect();
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("trait objects without an explicit `dyn` are deprecated"), "{d:?}");
+    assert_eq!(check("fn f<T, U>(a: T, cb: Box<dyn Fn(T) -> U>, b: U) -> U { let _ = b; cb(a) }\nstruct S2<T, U> { a: T, cb: Box<dyn Fn(T) -> U>, b: U }\nfn main() {\n    println!(\"{}\", f(1i32, Box::new(|x: i32| x), 2i32));\n    let s = S2 { a: 1i32, cb: Box::new(|x: i32| x + 10), b: 2i32 };\n    println!(\"{} {}\", (s.cb)(s.a), s.b);\n}\n"), vec![], "v2");
+    assert_eq!(check("struct A;\n#[allow(non_camel_case_types)]\nstruct __S0(i32);\nfn main() { let x: __S0 = __S0(4); let _a: A = A; println!(\"{}\", x.0); }\n"), vec![], "v3");
+}
