@@ -2046,6 +2046,12 @@ impl Cx<'_> {
                     // (`let (y, _): (&'a u32, u32) = ..;`: the pattern binds from a value of the annotation's type)
                     if let Some(a) = ann_ty {
                         if let Some((t, tr)) = self.rg_let_ann(a, init, Some(place.ty())) {
+                            // (a `ref mut` binding of a place: the place is of the annotation's type, invariantly
+                            // (`let Foo(ref mut y): Foo<fn(&'static str)> = x;` with x: `Foo<fn(&'a str)>` needs
+                            // 'a: 'static))
+                            if pat_binds_ref_mut(pat) {
+                                self.rg_place_is_ann(init, t, &tr);
+                            }
                             if t == place.ty() {
                                 self.rg.scrut = Some((t, tr));
                             }
@@ -3122,6 +3128,17 @@ pub(crate) fn plainly_irrefutable(p: &Pat) -> bool {
         Pat::Ident(_, _, n, sub) => n.starts_with(|c: char| c.is_lowercase() || c == '_') && sub.as_deref().is_none_or(plainly_irrefutable),
         Pat::Tuple(ps) => ps.iter().all(plainly_irrefutable),
         Pat::Ref(_, i) => plainly_irrefutable(i),
+        _ => false,
+    }
+}
+
+/// p binds a name by `ref mut` somewhere
+pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(r, m, _, sub) => (*r && *m) || sub.as_deref().is_some_and(pat_binds_ref_mut),
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps) | Pat::Slice(ps) => ps.iter().any(pat_binds_ref_mut),
+        Pat::Struct(_, fs, _) => fs.iter().any(|f| pat_binds_ref_mut(&f.1)),
+        Pat::Ref(_, x) => pat_binds_ref_mut(x),
         _ => false,
     }
 }

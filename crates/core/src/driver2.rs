@@ -623,6 +623,12 @@ impl Options2 {
     }
 }
 
+/// Whether a line of a crate's source (its own `ol` lines, then its dependencies) is the crate's own: in its lines, or
+/// in an item hoisted out of a fn body written in them (`marks`: prep::hoist_marks)
+fn own_line(marks: &[(usize, usize)], ol: usize, line: usize) -> bool {
+    line <= ol || crate::prep::hoisted_at(marks, line).is_some_and(|w| w <= ol)
+}
+
 /// 複数のクレートのうちの 1 つをコンパイルするときの情報。ソースは「このクレートのコード (1..=own_lines 行)」の後ろに
 /// 依存するクレートを `pub mod name { .. }` として付けたもの。依存するクレートの (総称でない) 関数と static は
 /// そのクレートの .o にあるので、ここではコンパイルせずシンボルで参照する
@@ -1056,7 +1062,8 @@ impl Session2 {
         tm.lap("summaries", {
             if tm.on {
                 let ol = self.ctx.own_lines as usize;
-                let own = items[..user_src].iter().filter(|it| ol == 0 || it.line <= ol).count();
+                let marks = crate::prep::hoist_marks(&src);
+                let own = items[..user_src].iter().filter(|it| ol == 0 || own_line(&marks, ol, it.line)).count();
                 format!("{} items: own {own}, deps {}, prelude {}", items.len(), user - own, items.len() - user)
             } else {
                 String::new()
@@ -1716,7 +1723,10 @@ impl Session2 {
             }
         }
         let ol = self.ctx.own_lines as usize;
-        let ext_items: Vec<bool> = items.iter().enumerate().map(|(i, it)| ol > 0 && i < user && it.line > ol).collect();
+        // (an item past this crate's own lines is a dependency's, but for one hoisted out of a fn body of this crate
+        // (prep::HOIST_MARK): hoisted items come last, and are this crate's when they were written in its lines)
+        let marks = crate::prep::hoist_marks(&src);
+        let ext_items: Vec<bool> = items.iter().enumerate().map(|(i, it)| ol > 0 && i < user && !own_line(&marks, ol, it.line)).collect();
         // (ライブラリ: 自分の総称でない関数は全部外に見せる (使う側のクレートが呼ぶ))
         if self.ctx.lib.is_some() {
             for id in 0..prog.names.len() {
