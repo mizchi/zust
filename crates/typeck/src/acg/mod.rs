@@ -826,6 +826,62 @@ pub fn value_pos(e: &Expr) -> Sp {
     }
 }
 
+/// Where the value of an expression comes from, as rustc blames a mismatch: a `match`'s first arm that does not
+/// diverge (`None => ()` beside `Some(v) => { return v; }`), a block's tail, the expression itself; SP if unknown
+pub fn value_origin(e: &Expr) -> Sp {
+    fn diverges(e: &Expr) -> bool {
+        match e {
+            Expr::Return(_) | Expr::Break(..) | Expr::Continue(..) => true,
+            Expr::Macro(p, _, _) => p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")),
+            Expr::Block(_, _, b) => match b.stmts.last() {
+                Some(Stmt::Expr(x, _)) => diverges(x),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+    match e {
+        Expr::Match(_, arms) if !arms.is_empty() => match arms.iter().find(|a| !diverges(&a.body)) {
+            Some(a) => match value_origin(&a.body) {
+                p if p.line != 0 => p,
+                _ => a.pos,
+            },
+            None => SP,
+        },
+        Expr::Block(_, false, b) => match b.stmts.last() {
+            Some(Stmt::Expr(t, false)) => value_origin(t),
+            _ => SP,
+        },
+        e => expr_start(e),
+    }
+}
+
+/// A `loop`'s value is its `break`s': where the first one without a value is (not one of a loop or closure inside it)
+pub fn loop_break_pos(e: &Expr) -> Sp {
+    fn in_block(b: &crate::parse::Block) -> Sp {
+        b.stmts.iter().map(|s| match s {
+            Stmt::Expr(x, _) => find(x),
+            _ => SP,
+        }).find(|p| p.line != 0).unwrap_or(SP)
+    }
+    fn find(e: &Expr) -> Sp {
+        match e {
+            Expr::Break(None, None, p) => *p,
+            Expr::Block(_, _, b) => in_block(b),
+            Expr::If(_, b, els) => match in_block(b) {
+                p if p.line != 0 => p,
+                _ => els.as_deref().map_or(SP, find),
+            },
+            Expr::Match(_, arms) => arms.iter().map(|a| find(&a.body)).find(|p| p.line != 0).unwrap_or(SP),
+            _ => SP,
+        }
+    }
+    match e {
+        Expr::Loop(None, b) => in_block(b),
+        _ => SP,
+    }
+}
+
 /// [`branch_pos`] of a block
 pub fn block_end_pos(b: &crate::parse::Block) -> Sp {
     match b.stmts.last() {
@@ -1853,14 +1909,26 @@ impl Cx<'_> {
             self.b.ins().trap(TrapCode::unwrap_user(1));
             return Ok(());
         }
-        // (エラーの場所は末尾の式 (なければ関数の先頭))
-        let tail = match f.block.stmts.last() {
-            Some(Stmt::Expr(e, false)) => err_pos(e),
-            _ => SP,
+        // (エラーの場所は末尾の式 (なければ関数の先頭)): its value's position (a block's tail, a `loop`'s `break`), else
+        // where its statement starts (`()`, `unsafe { .. }`)
+        let tail = || {
+            let n = f.block.stmts.len();
+            match f.block.stmts.last() {
+                Some(Stmt::Expr(e, false)) => match if matches!(e, Expr::Match(..)) { value_origin(e) } else { err_pos(e) } {
+                    p if p.line != 0 => p,
+                    _ => match loop_break_pos(e) {
+                        p if p.line != 0 => p,
+                        _ => f.block.spos.get(n - 1).unwrap_or(SP),
+                    },
+                },
+                _ => SP,
+            }
         };
         // (`fn f(x: &&T) -> &T { x }`: the deref coercion)
         let (v, t) = if t != self.ret { self.deref_coerce(v, t, self.ret) } else { (v, t) };
-        self.same(tail, t, self.ret)?;
+        if let Err(m) = self.same(SP, t, self.ret) {
+            return Err(self.at(tail(), m));
+        }
         self.drop_for_exit(0, 0);
         self.emit_return(v);
         Ok(())

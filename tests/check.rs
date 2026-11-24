@@ -1841,3 +1841,18 @@ fn format_string_errors_at_their_char() {
     let d = s.check("fn main() {\n    let _ = format!(\"  \\\n    { \\\n    b\");\n}\n");
     assert_eq!(d.first().map(|d| (d.line, d.msg.clone())), Some((4, "invalid format string: expected `}`, found `b`".to_string())), "continuation");
 }
+
+#[test]
+fn fn_value_mismatch_at_its_origin() {
+    // (a fn body's value that is not of the return type, where rustc points: the tail `()`, a `loop`'s `break`, the
+    // `match` arm that does not diverge, an `unsafe` block; each expected line is rustc 1.100's on the same source)
+    let line = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| d.line)
+    };
+    assert_eq!(line("fn foo() -> usize {\n    ()\n}\nfn main() {}\n"), Some(2), "unit tail");
+    assert_eq!(line("fn f() -> i32 {\n    loop {\n        if false { break; }\n        return 42;\n    }\n}\nfn main() {}\n"), Some(3), "break");
+    assert_eq!(line("fn f(a: Option<u32>) -> u32 {\n    match a {\n        Some(v) => return v,\n        None => (),\n    }\n}\nfn main() {}\n"), Some(4), "arm");
+    assert_eq!(line("fn g() -> u8 { 0 }\nfn main() {\n    match () {\n        () => g()\n    }\n}\n"), Some(4), "arm of main");
+    assert_eq!(line("fn f() -> ! {\n    unsafe {\n        let _x = 1;\n    }\n}\nfn main() {}\n"), Some(2), "unsafe block");
+}
