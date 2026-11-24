@@ -1930,7 +1930,12 @@ impl RgSt {
                         // from outside: the callee's lifetimes in the bound may be it, and what they imply is of them
                         // (`impl FnOnce(&mut &mut &'a i32)` with the function's 'a). With none, it must outlive every
                         // region the bound binds: `take(|_z| x)` with `F: FnMut(&isize) -> &isize`)
-                        let placeholder = |b: u32| sig_ext && !self.externals.contains(&b) && !self.outer_univ.contains(&b) && b != STATIC;
+                        // (and only a placeholder one of them is known to outlive, as the signature's types imply:
+                        // `&'b u32` next to `&'a u32` implies nothing of 'b, so `take(x, |_, _| x)` with
+                        // `F: for<'b> FnOnce(&'b u32, &'a u32) -> &'b u32` returns x for every 'b)
+                        let placeholder = |b: u32| {
+                            sig_ext && !self.externals.contains(&b) && !self.outer_univ.contains(&b) && b != STATIC && ix(b).is_some_and(|bj| self.externals.iter().any(|&e| ix(e).is_some_and(|ei| k[ei][bj])))
+                        };
                         if !k[i][j] && !outside(u, y) && !outside(y, u) && !(self.outer_univ.contains(&u) && placeholder(y)) && !self.soft.contains(&u) && !self.soft.contains(&y) {
                             let other = if j == 0 { "'static".to_string() } else { self.univ[j - 1].1.clone() };
                             // (a region the closure's signature binds flowing into one from outside)
