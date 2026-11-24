@@ -2406,10 +2406,11 @@ impl Cx<'_> {
                     let plain0 = std::mem::replace(&mut self.bk.plain_init, plain);
                     let r = self.expr(init, ann.or(hint));
                     self.bk.plain_init = plain0;
-                    // (`let b: &mut T = a;` with a: `&mut T`: a coercion site, b reborrows `*a` (rustc's `&mut *a`), not
-                    // a copy of a: a use of `*a` while b lives conflicts)
-                    if r.is_ok() && ann_ty.is_some() && matches!(ann, Some(Ty::Ref(true, _))) && matches!(strip_paren(init), Expr::Path(None, _)) {
-                        self.bk_reborrow_let(init);
+                    // (`let b: &mut T = a;` / `let b: &T = s.f;` with a place of a `&mut T`: a coercion site, b reborrows
+                    // what it points to (rustc's `&mut *a` / `&*s.f`), not a copy or a move of it: a use of `*a` while b
+                    // lives conflicts)
+                    if let (true, Some(Ty::Ref(m, _))) = (r.is_ok() && ann_ty.is_some(), ann) {
+                        self.bk_reborrow_let(init, m);
                     }
                     // (`let v: &T = x.borrow().0;` with the field a `&mut T`: a coercion site, v reborrows `*x.borrow().0`
                     // through the temporary guard, which goes away at the end of the statement (E0716 when v is used

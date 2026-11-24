@@ -701,7 +701,7 @@ pub fn is_copy(prog: &Program, t: Ty, depth: u32) -> bool {
     }
     match t {
         Ty::Ref(..) | Ty::Ptr(..) | Ty::Fn(_) | Ty::Never | Ty::Unit | Ty::Param(_) => true,
-        Ty::Array(e, _) => is_copy(prog, *e, depth + 1),
+        Ty::Array(e, _) => part_copy(prog, *e, depth + 1),
         Ty::Slice(_) | Ty::Str | Ty::Dyn(_) | Ty::Box(_) => false,
         Ty::Struct(sid) => {
             let sd = &prog.structs[sid as usize];
@@ -716,15 +716,21 @@ pub fn is_copy(prog: &Program, t: Ty, depth: u32) -> bool {
                 return sd.name.starts_with('<') || bs.iter().any(|b| prog.bound_implies(b, &["Copy"], false, 0));
             }
             if prog.closure_of_struct.contains_key(&prog.base_of(sid)) || prog.is_tuple(sid) {
-                return sd.fields.iter().all(|f| is_copy(prog, f.1, depth + 1));
+                return sd.fields.iter().all(|f| part_copy(prog, f.1, depth + 1));
             }
             // (a derived `Copy` on `Option<T>` needs `T: Copy`: look at the fields of the instance)
             prog.impls.contains(&(prog.base_of(sid), "Copy".to_string()))
-                && sd.fields.iter().all(|f| is_copy(prog, f.1, depth + 1))
-                && sd.variants.iter().all(|v| v.fields.iter().all(|f| is_copy(prog, f.1, depth + 1)))
+                && sd.fields.iter().all(|f| part_copy(prog, f.1, depth + 1))
+                && sd.variants.iter().all(|v| v.fields.iter().all(|f| part_copy(prog, f.1, depth + 1)))
         }
         _ => true,
     }
+}
+
+/// is_copy of a part of a value (a field, an element): a `&mut` there is not `Copy`. Nothing reborrows it where the
+/// value is passed, so the value is moved (`let t2 = t;` with `t: (&mut i32, i32)`)
+fn part_copy(prog: &Program, t: Ty, depth: u32) -> bool {
+    !matches!(t, Ty::Ref(true, _)) && is_copy(prog, t, depth)
 }
 
 /// How t holds references, for a copy of it: 0 none, 1 only in types whose `Copy` impl is for their 'static
@@ -2876,10 +2882,10 @@ impl Cx<'_> {
         }
     }
 
-    /// A `&mut` local passed where a `&mut` is expected is reborrowed (`f(x)` is `f(&mut *x)`): the loan of `*x`, which
-    /// lives as long as the region check finds it must (Rg::forever, Rg::holders), by the argument's address. Only when
-    /// the region check is on: it is what makes such a loan outlive the call
-    pub(crate) fn bk_reborrow_arg(&mut self, a: &Expr) {
+    /// A `&mut` local passed where a `&mut` is expected is reborrowed (`f(x)` is `f(&mut *x)`; where a `&` is, m false,
+    /// `f(&*x)`): the loan of `*x`, which lives as long as the region check finds it must (Rg::forever, Rg::holders), by
+    /// the argument's address
+    pub(crate) fn bk_reborrow_arg(&mut self, a: &Expr, m: bool) -> Option<u32> {
         // (a field of a local too (`v.push(c.raw)`): the reborrow is of `*c.raw`, which a `Drop` c must not outlive
         // (E0713))
         let mut root = strip_paren(a);
@@ -2887,24 +2893,31 @@ impl Cx<'_> {
             root = strip_paren(x);
         }
         if !self.bk_on() || !matches!(root, Expr::Path(..)) {
-            return;
+            return None;
         }
-        let Some((mut p, Some(Ty::Ref(true, _)))) = self.bk_place(a) else { return };
+        let Some((mut p, Some(Ty::Ref(true, _)))) = self.bk_place(a) else { return None };
         // (through a field of a value whose type has a `Drop` impl: only the region check knows how long the loan
         // lives, so it is on from here (and the function is checked again with it from the start))
         if !self.rg.on && !p.proj.is_empty() && self.inline_depth == 0 && self.bk.drop_owners.iter().any(|d| d.0 == p.local) {
             self.rg_late_on();
         }
-        if !self.rg.on {
-            return;
-        }
         p.proj.push(ref_deref(true));
         let sp = err_pos(a);
         let ln = self.bk.loans.len() as u32;
+        // (without the region check: a borrow of `*x` at the call that nothing holds after it. A loan of `*x` still
+        // live there conflicts (`let v = &*x; take(x); use(v)` is E0502))
+        if !self.rg.on {
+            self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false, capture: false });
+            self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+            return Some(ln);
+        }
         self.bk.loan_of.insert(a as *const Expr as usize, ln);
-        self.bk.loans.push(Loan { place: p.clone(), mutable: true, sp, at: sp, quiet: false, capture: false });
-        self.bk.implicit.push(ln);
+        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false, capture: false });
+        if m {
+            self.bk.implicit.push(ln);
+        }
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
+        Some(ln)
     }
 
     /// A hidden local that holds a `U` copied out of what the local x points to (`*r` with `r: &U`): what x holds, with
@@ -3023,8 +3036,8 @@ impl Cx<'_> {
         None
     }
 
-    /// `let b: &mut T = a;` with a `&mut` local a: the loan of `*a` b holds
-    pub(crate) fn bk_reborrow_let(&mut self, a: &Expr) {
+    /// `let b: &mut T = a;` (`&T`, m false) with a place a of a `&mut`: the loan of `*a` b holds
+    pub(crate) fn bk_reborrow_let(&mut self, a: &Expr, m: bool) {
         if !self.bk_on() {
             return;
         }
@@ -3032,7 +3045,7 @@ impl Cx<'_> {
         p.proj.push(ref_deref(true));
         let sp = err_pos(a);
         let ln = self.bk.loans.len() as u32;
-        self.bk.loans.push(Loan { place: p.clone(), mutable: true, sp, at: sp, quiet: false, capture: false });
+        self.bk.loans.push(Loan { place: p.clone(), mutable: m, sp, at: sp, quiet: false, capture: false });
         self.bk_ev(Ev::Acc(p, Acc::Borrow(ln), sp));
         self.bk.src(Src::Loan(ln));
     }

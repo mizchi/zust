@@ -1268,6 +1268,11 @@ impl Cx<'_> {
                 let t = p.ty();
                 self.bk_frame();
                 let r = self.expr(right, Some(t));
+                // (a place of a `&mut` assigned where a reference is: reborrowed, as at a `let` (`x = y;` is `x = &mut
+                // *y`; `*y = 1` while x lives is E0506))
+                if let (true, Ty::Ref(m, _)) = (r.is_ok(), t) {
+                    self.bk_reborrow_let(right, m);
+                }
                 let srcs = self.bk_frame_end();
                 let cur = self.b.live_block();
                 for (b, e) in lhs_evs {
@@ -3136,8 +3141,8 @@ impl Cx<'_> {
             if t == Ty::Never {
                 return Ok((None, Ty::Never));
             }
-            if matches!(pt, Ty::Ref(true, _)) {
-                self.bk_reborrow_arg(a);
+            if let Ty::Ref(m, _) = pt {
+                let _ = self.bk_reborrow_arg(a, m);
             }
             // (`&Box<T>` / `&&T` を `&T` の引数に: deref の強制変換)
             while let (Ty::Ref(_, _), Ty::Ref(m, inner @ (Ty::Ref(..) | Ty::Box(_))), Some(val)) = (pt, t, v) {
