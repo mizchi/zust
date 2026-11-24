@@ -88,7 +88,7 @@ try {
         const names = WebAssembly.Module.exports(wasm).map(x => x.name);
         assert.ok(names.some(n => /(?:^|_)energy$/.test(n)), names.join(", "));
         assert.ok(!names.some(n => /(?:^|_)has_signal$/.test(n)));
-        assert.match(zsc, /\bfn\s+has_signal\([^)]*\)[^{]*\{[^}]*\benergy\s*\(/);
+        assert.match(fnBody(zsc, "has_signal") ?? "", /\benergy\s*\(/);
       });
     }
   }
@@ -98,5 +98,20 @@ try {
   rmSync(dir, { recursive: true, force: true });
 }
 const passed = checks.every(check => check.passed);
+
+// The body of `fn name(..) { .. }`, braces balanced (an `if` / `else` inside it included), or null
+function fnBody(source, name) {
+  const head = new RegExp("\\bfn\\s+" + name + "\\s*\\(").exec(source);
+  if (!head) return null;
+  const open = source.indexOf("{", head.index);
+  if (open < 0) return null;
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}" && --depth === 0) return source.slice(open + 1, i);
+  }
+  return null;
+}
+
 console.log(JSON.stringify({ task, passed, checks }, null, 2));
 process.exitCode = passed ? 0 : 1;

@@ -2,7 +2,9 @@
 import argparse
 import hashlib
 import json
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 here = Path(__file__).resolve().parent
@@ -18,9 +20,20 @@ def read(path):
     return path.read_text() if path.is_file() else None
 
 
+# (seconds for the submission: compiling it and running its checks)
+TIMEOUT = 120
+
+
 def check(source):
     command = ["node", str(here / "verify.mjs"), args.case, source, d / "zsc", d / "zustc"]
-    run = subprocess.run(command, capture_output=True, text=True)
+    # (a submission that never returns, a loop that does not advance: a failed check, and the record is written)
+    # (its temporary files in a directory removed here, also after a timeout kills the verifier)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            run = subprocess.run(command, capture_output=True, text=True, timeout=TIMEOUT, env={**os.environ, "TMPDIR": tmp})
+    except subprocess.TimeoutExpired:
+        return {"task": args.case, "passed": False,
+                "checks": [{"name": "load or run", "passed": False, "message": f"no result within {TIMEOUT} s"}]}
     if run.returncode not in (0, 1) or not run.stdout:
         raise RuntimeError(run.stderr or "verifier stopped without a result")
     return json.loads(run.stdout)
