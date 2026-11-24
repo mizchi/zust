@@ -303,6 +303,7 @@ impl<'a> Runner<'a> {
                 cfgs,
                 env,
                 proc_macro: None,
+                test: false,
             });
         }
         let pk = &self.g.pkgs[n.0].m;
@@ -327,6 +328,7 @@ impl<'a> Runner<'a> {
             cfgs,
             env,
             proc_macro: None,
+            test: false,
         });
         let zd = dir.join("zust");
         let mut opts = Options2 { backend: Some(zustc::clif_backend::compile), ..Options2::default() };

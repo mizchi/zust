@@ -1,0 +1,49 @@
+name: editor
+
+# The zustscript playground (editor/): zsc built to wasm from crates/zustscript's modules, a tree-sitter grammar,
+# and a Vite app. Like the prototype it is outside zust's workspace and CI, and runs only when one of them changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "editor/**"
+      - "crates/zustscript/src/**"
+      - ".github/workflows/editor.yml"
+  pull_request:
+    paths:
+      - "editor/**"
+      - "crates/zustscript/src/**"
+      - ".github/workflows/editor.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: editor-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: editor
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: editor/zsc-wasm -> target
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      # (zsc → public/zsc.wasm; the grammar → public/tree-sitter-zustscript.wasm, with the wasi-sdk tree-sitter fetches)
+      - run: npm run build:wasm
+      # (the examples parse with the grammar, compile, and their main runs)
+      - run: npm test
+      - run: npm run build

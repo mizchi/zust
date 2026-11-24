@@ -18,6 +18,7 @@ zurgo run
 |---|---|
 | `zurgo build` | builds the package of the manifest (every member, for a virtual workspace) and its dependencies |
 | `zurgo run [-- args]` | builds, then runs the binary (`--bin` chooses one when there are several) |
+| `zurgo test [filter] [-- args]` | builds the tests, then runs each one in a process of its own, all at once (below) |
 | `zurgo metadata` | the package graph as `cargo metadata --format-version 1` writes it |
 | `zurgo clean` | removes `target/zust` |
 
@@ -180,11 +181,63 @@ anything is built:
     counts when the feature is on;
 - a function-like macro (`html!(..)`) expands to a `compile_error!` naming #29.
 
+## Tests
+
+`zurgo test` works on nextest's model, not libtest's (mizchi/zust#96). It builds the selected packages' test crates:
+the lib's unit tests, each bin's, and each integration test (`[[test]]`, `tests/*.rs`, `tests/*/main.rs`), with the
+dev-dependencies. It lists the tests of every executable, then runs each test in a process of its own, over the cores
+at once.
+
+```bash
+zurgo test
+```
+
+```bash
+zurgo test --lib parse -- --include-ignored
+```
+
+- Each test crate is built with `zustc --test`. That keeps `#[cfg(test)]` items, collects the `#[test]` functions
+  and adds a harness `main` (the crate's own `main` is not called). The harness only lists its tests and runs the
+  one named:
+  - a panic exits with 101, and a `Result` test that returns `Err` exits with 1;
+  - a `#[should_panic]` test runs in a child process, whose exit code and stderr tell whether it panicked with the
+    `expected` text.
+
+  So the compiled program needs no `catch_unwind`, threads or output capture. The command line is libtest's
+  (`--list --format terse`, `--exact`, `--ignored`, `--include-ignored`, `--skip`, filters), so cargo-nextest can
+  run these executables too. Run directly with no arguments, an executable runs its tests one after another, each in
+  a child, and prints libtest's report.
+- A test passes when its process exits with 0. The runner speaks libtest's command line, so it runs the executables
+  `cargo test --no-run` builds as well. The tests compare the two runs (`crates/zurgo/tests/zurgo.rs`).
+- Tests run in the package's directory, as under cargo. An integration test finds the package's binaries in
+  `CARGO_BIN_EXE_<name>`.
+- Output: one line per test as it finishes (`PASS [ 0.012s] (3/9) pkg (lib) tests::adds`, or `FAIL`, `TIMEOUT`,
+  `SIGNAL`). A failure is followed by its stdout and stderr. A summary comes last. The exit code is 101 when a test
+  failed.
+- The longest tests start first, ordered by their last times in `target/zust/<profile>/test-times`. A long test that
+  starts last would run alone at the end.
+- Options:
+  - `--lib`, `--bin <name>`, `--bins`, `--tests` and `--test <name>` choose the targets;
+  - `--no-run` builds them and lists the executables;
+  - `--fail-fast` stops starting tests after a failure (by default every test runs, and `--no-fail-fast` is
+    accepted).
+- After `--`: `<filter>`, `--exact`, `--skip <s>`, `--ignored`, `--include-ignored`, `--list` and
+  `--test-threads <n>` (the cores by default). `--nocapture` and `--show-output` are accepted: a failure's output is
+  always shown.
+- A test still running after 60s is marked `SLOW`, and one running after 300s is stopped and fails
+  (`ZURGO_TEST_SLOW`, `ZURGO_TEST_TIMEOUT`, in seconds).
+- Not yet:
+  - doc tests and benchmarks;
+  - `#[test]` functions that a `macro_rules!` makes (the build warns about them);
+  - `test = false` on a target;
+  - wasm32;
+  - building only the chosen targets (`--lib` and the others choose what runs; everything is built).
+
 ## Not yet (mizchi/zust#28)
 
 - **Two versions of one library**, and **renamed dependencies**, are errors: zustc's workspace has one name per
   crate.
 - **Other sources:** git dependencies, other registries, source replacement.
-- **No `[patch]`, no resolver of its own, no downloads, no `test` / `doc`.**
+- **No `[patch]`, no resolver of its own, no downloads, no `doc`.**
 - **Editions:** zustc has no edition setting: it accepts what any edition accepts, so a crate's edition is not
   passed on. (rustc, building build scripts, gets each crate's own.)

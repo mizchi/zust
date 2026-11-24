@@ -363,14 +363,13 @@ impl TsFile {
                     if matches!(&toks[j].t, T::Ident(t) if t == "type") {
                         j += 1;
                     }
-                    // (`export { A } from "./other"` re-exports another module's `A`: not the local one)
-                    let close = (j..toks.len()).find(|&x| toks[x].t == T::P('}') || toks[x].t == T::Eof).unwrap_or(j);
-                    let reexport = matches!(toks.get(close + 1).map(|t| &t.t), Some(T::Ident(f)) if f == "from");
-                    if toks[j].t == T::P('{') && reexport {
-                        k = close + 1;
-                        continue;
-                    }
                     if toks[j].t == T::P('{') {
+                        // (`export { A } from "./other"` re-exports another module's `A`: not the local one)
+                        let close = (j..toks.len()).find(|&x| toks[x].t == T::P('}') || toks[x].t == T::Eof).unwrap_or(j);
+                        if matches!(toks.get(close + 1).map(|t| &t.t), Some(T::Ident(f)) if f == "from") {
+                            k = close + 1;
+                            continue;
+                        }
                         j += 1;
                         while j < toks.len() && toks[j].t != T::P('}') {
                             // (a plain name; `A as B` exports another name, not read)

@@ -18,6 +18,7 @@ zurgo run
 |---|---|
 | `zurgo build` | マニフェストのパッケージ (仮想ワークスペースならすべてのメンバー) とその依存をビルドする |
 | `zurgo run [-- 引数]` | ビルドしてから、バイナリを実行する (いくつかあるときは `--bin` で選ぶ) |
+| `zurgo test [フィルタ] [-- 引数]` | テストをビルドし、テストごとに別のプロセスで、すべてを同時に動かす (下で述べる) |
 | `zurgo metadata` | パッケージのグラフを、`cargo metadata --format-version 1` が書く形で出す |
 | `zurgo clean` | `target/zust` を消す |
 
@@ -179,11 +180,60 @@ proc macro を使うと、何もビルドする前にエラーになる:
     は、その feature が有効なら数える;
 - 関数のようなマクロ (`html!(..)`) は、#29 を示す `compile_error!` に展開する。
 
+## テスト
+
+`zurgo test` は libtest ではなく nextest の方式で動く (mizchi/zust#96)。選んだパッケージのテストのクレートをビルドする:
+lib の単体テスト、各 bin の単体テスト、各結合テスト (`[[test]]`、`tests/*.rs`、`tests/*/main.rs`) を、dev-dependencies
+込みで。各実行ファイルのテストを列挙し、テストごとに別のプロセスで、コアに分けて同時に動かす。
+
+```bash
+zurgo test
+```
+
+```bash
+zurgo test --lib parse -- --include-ignored
+```
+
+- テストのクレートはどれも `zustc --test` でビルドする。`#[cfg(test)]` のアイテムを残し、`#[test]` の関数を集め、
+  ハーネスの `main` を足す (クレート自身の `main` は呼ばれない)。ハーネスがするのは、テストの列挙と、名前を
+  指定されたテストを 1 つ動かすことだけ:
+  - panic は 101 で終わり、`Err` を返す `Result` のテストは 1 で終わる。
+  - `#[should_panic]` のテストは子プロセスで動かし、その終了コードと stderr から、`expected` の文字列で panic
+    したかを見る。
+
+  なので、コンパイルしたプログラムに `catch_unwind` もスレッドも出力の捕捉もいらない。コマンドラインは libtest のもの
+  (`--list --format terse`、`--exact`、`--ignored`、`--include-ignored`、`--skip`、フィルタ) なので、cargo-nextest も
+  これらの実行ファイルを動かせる。実行ファイルを引数なしで直接動かすと、テストを 1 つずつ順に、それぞれ子プロセスで
+  動かし、libtest の形で報告する。
+- テストは、プロセスが 0 で終われば通ったものとする。ランナーは libtest のコマンドラインで話すので、
+  `cargo test --no-run` がビルドする実行ファイルも動かせる。テストは 2 つの実行の結果を比べる
+  (`crates/zurgo/tests/zurgo.rs`)。
+- テストは cargo と同じく、パッケージのディレクトリで動く。結合テストは、パッケージのバイナリを
+  `CARGO_BIN_EXE_<name>` で見つける。
+- 出力: テストが終わるたびに 1 行 (`PASS [ 0.012s] (3/9) pkg (lib) tests::adds`、または `FAIL`・`TIMEOUT`・`SIGNAL`)。
+  失敗したものはその後に stdout と stderr を出す。最後にまとめを出す。テストが失敗したら終了コードは 101。
+- 長いテストから始める。順番は `target/zust/<profile>/test-times` に残した前回の時間で決める。長いテストが最後に
+  始まると、終わりにそれだけが残って動くことになる。
+- オプション:
+  - `--lib`、`--bin <name>`、`--bins`、`--tests`、`--test <name>` でターゲットを選ぶ。
+  - `--no-run` はビルドして、実行ファイルを並べるだけ。
+  - `--fail-fast` は、失敗の後に新しいテストを始めない (既定ではすべてのテストを動かす。`--no-fail-fast` も受け付ける)。
+- `--` の後: `<filter>`、`--exact`、`--skip <s>`、`--ignored`、`--include-ignored`、`--list`、`--test-threads <n>`
+  (既定はコアの数)。`--nocapture` と `--show-output` も受け付ける: 失敗したテストの出力は必ず出す。
+- 60 秒たっても動いているテストには `SLOW` と出し、300 秒たっても動いているものは止めて失敗にする
+  (`ZURGO_TEST_SLOW`、`ZURGO_TEST_TIMEOUT`。秒で)。
+- まだのもの:
+  - doc テストとベンチマーク。
+  - `macro_rules!` が作る `#[test]` の関数 (ビルドが警告する)。
+  - ターゲットの `test = false`。
+  - wasm32。
+  - 選んだターゲットだけをビルドすること (`--lib` などは動かすものを選ぶだけで、すべてビルドする)。
+
 ## まだのもの (mizchi/zust#28)
 
 - **1 つのライブラリの 2 つの版**と、**名前を変えた依存**はエラーになる: zustc のワークスペースでは、クレートごとに
   名前が 1 つである。
 - **ほかのソース:** git の依存、ほかのレジストリ、ソースの置き換え。
-- **`[patch]`、自前のリゾルバ、ダウンロード、`test` / `doc` はない。**
+- **`[patch]`、自前のリゾルバ、ダウンロード、`doc` はない。**
 - **edition:** zustc には edition の設定がない: どの edition が受け付けるものも受け付ける。なので、クレートの
   edition は渡さない (ビルドスクリプトをビルドする rustc には、それぞれのクレートの edition を渡す)。

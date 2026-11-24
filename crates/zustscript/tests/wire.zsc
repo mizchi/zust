@@ -30,3 +30,28 @@ type Team = { title: String, people: Array<Person>, scores: Array<Array<f64>>, o
 
 // a parameter named like the generated code's temporaries (`p_v`)
 @wasm pub fn shadow(p: Person, p_v: i32) -> i32 { p.age + p_v }
+
+// enums as bytes too: one holding a string and an array, an enum of names inside a record, and arrays of them
+enum Tag { Named(String), Anon, Pair(i32, Array<f64>) }
+enum Mood { Happy, Sad }
+type Note = { text: String, tag: Tag, mood: Mood }
+
+@wasm pub fn tag_name(t: Tag) -> String {
+  match t {
+    Named(s) => s,
+    Anon => "-",
+    Pair(n, xs) => n.to_string() + "/" + xs.len().to_string(),
+  }
+}
+
+@wasm pub fn retag(n: Note) -> Note {
+  let t = match n.tag {
+    Named(s) => Pair(s.len(), [1.5]),
+    Anon => Named("x"),
+    Pair(_, _) => Anon,
+  };
+  let m = match n.mood { Happy => Sad, Sad => Happy };
+  Note { tag: t, mood: m, ..n }
+}
+
+@wasm pub fn tags(ns: Array<Note>) -> Array<Tag> { ns.map((n) => n.tag) }

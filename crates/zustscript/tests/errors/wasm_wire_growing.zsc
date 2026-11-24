@@ -1,0 +1,3 @@
+// expect: Grow holds itself: a recursive record or enum cannot cross
+enum Grow<T> { End, More(T, Array<Grow<Array<T>>>) }
+@wasm pub fn depth(g: Grow<i32>) -> i32 { match g { End => 0, More(_, _) => 1 } }

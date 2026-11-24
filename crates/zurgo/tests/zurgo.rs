@@ -515,3 +515,134 @@ fn root_package_and_default_members_glob() {
     assert_eq!(out, "a 2\n");
     assert!(!t.join("zust/debug/rootpkg").exists(), "the root package was built");
 }
+
+/// `cargo test`'s outcome of each test: name → "ok", "FAILED" or "ignored" (the fixture's names are unique across
+/// its test binaries)
+fn cargo_outcomes(out: &str) -> std::collections::BTreeMap<String, String> {
+    let mut m = std::collections::BTreeMap::new();
+    for l in out.lines() {
+        let Some(r) = l.strip_prefix("test ") else { continue };
+        let Some((name, res)) = r.split_once(" ... ") else { continue };
+        let name = name.trim_end_matches(" - should panic").to_string();
+        m.insert(name, res.trim().to_string());
+    }
+    m
+}
+
+/// `zurgo test`'s outcome of each test that ran: name → "ok" / "FAILED" (its lines `PASS [..] (k/n) label name`)
+fn zurgo_outcomes(err: &str) -> std::collections::BTreeMap<String, String> {
+    let mut m = std::collections::BTreeMap::new();
+    for l in err.lines() {
+        let t = l.trim_start();
+        let pass = t.starts_with("PASS [");
+        if !(pass || t.starts_with("FAIL (") || t.starts_with("TIMEOUT [") || t.starts_with("SIGNAL [")) || !t.contains("] (") {
+            continue;
+        }
+        let name = t.rsplit(' ').next().unwrap().to_string();
+        m.insert(name, if pass { "ok" } else { "FAILED" }.to_string());
+    }
+    m
+}
+
+/// `zurgo test` runs the same tests as `cargo test`, with the same outcomes: the lib's unit tests (with a
+/// dev-dependency, `#[should_panic]` right and wrong, a `Result` test, two ignored), a bin's, and an integration test
+/// against the lib and the bin (`CARGO_BIN_EXE_`), from the package's directory. A failing test fails the run (101)
+#[test]
+fn test_runs_like_cargo_test() {
+    let m = fixture("test-pkg/Cargo.toml");
+    let (ok, out, _) = cargo(&["test", "--no-fail-fast", "--offline"], &m, &tdir("test-pkg-cargo"));
+    assert!(!ok, "the fixture has failing tests");
+    let want = cargo_outcomes(&out);
+    assert_eq!(want.len(), 13, "{want:?}");
+    let o = Command::new(ZURGO).args(["test", "--manifest-path"]).arg(&m).env("CARGO_TARGET_DIR", tdir("test-pkg")).output().unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(101), "{err}");
+    let got = zurgo_outcomes(&err);
+    let ran: std::collections::BTreeMap<String, String> = want.iter().filter(|(_, v)| *v != "ignored").map(|(k, v)| (k.clone(), v.clone())).collect();
+    assert_eq!(got, ran, "\n{err}");
+    // (the ignored ones are listed as such)
+    let (ok, listed, _) = run(Command::new(ZURGO).args(["test", "--manifest-path"]).arg(&m).args(["--", "--list"]).env("CARGO_TARGET_DIR", tdir("test-pkg")));
+    assert!(ok, "{listed}");
+    for (n, _) in want.iter().filter(|(_, v)| *v == "ignored") {
+        assert!(listed.contains(&format!("tp (lib): {n} (ignored)")), "{n}:\n{listed}");
+    }
+    // (the times, for the next run's order)
+    let times = std::fs::read_to_string(tdir("test-pkg").join("zust/debug/test-times")).unwrap();
+    assert!(times.contains("tp (lib)\ttests::adds\t"), "{times}");
+    // (a filter, and one target)
+    let (ok, _, err) = zurgo(&["test", "--lib", "adds"], &m, &tdir("test-pkg"));
+    assert!(ok, "{err}");
+    assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["tests::adds"], "{err}");
+    // (cargo's `--tests`: the unit tests too)
+    let (_, _, err) = zurgo(&["test", "--tests", "adds"], &m, &tdir("test-pkg"));
+    assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["tests::adds"], "{err}");
+    // (`--bin x`: that bin's unit tests alone)
+    let (ok, _, err) = zurgo(&["test", "--bin", "tp"], &m, &tdir("test-pkg"));
+    assert!(ok, "{err}");
+    assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["greets"], "{err}");
+    let (ok, _, err) = zurgo(&["test", "--bin", "nope"], &m, &tdir("test-pkg"));
+    assert!(!ok && err.contains("no bin target named `nope`"), "{err}");
+    // (`--list --ignored`: the ignored ones alone)
+    let (ok, listed, _) = run(Command::new(ZURGO).args(["test", "--lib", "--manifest-path"]).arg(&m).args(["--", "--list", "--ignored"]).env("CARGO_TARGET_DIR", tdir("test-pkg")));
+    assert!(ok);
+    assert!(listed.lines().all(|l| l.ends_with("(ignored)")) && listed.lines().count() == 3, "{listed}");
+    // (a test target that does not exist is an error, not a run of nothing)
+    let (ok, _, err) = zurgo(&["test", "--test", "nope"], &m, &tdir("test-pkg"));
+    assert!(!ok && err.contains("no test target named `nope`"), "{err}");
+}
+
+/// A test that never ends is stopped at `ZURGO_TEST_TIMEOUT`, and fails
+#[test]
+fn test_timeout() {
+    let m = fixture("test-pkg/Cargo.toml");
+    let o = Command::new(ZURGO)
+        .args(["test", "--lib", "--manifest-path"])
+        .arg(&m)
+        .args(["--", "--ignored", "--exact", "tests::hangs"])
+        .env("CARGO_TARGET_DIR", tdir("test-pkg-timeout"))
+        .env("ZURGO_TEST_TIMEOUT", "1")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(101), "{err}");
+    assert!(err.contains("TIMEOUT [") && err.contains("tests::hangs"), "{err}");
+    // (a test that ends but leaves a process holding its output: it passes, the process is stopped, and the run
+    //  does not wait for it)
+    let t0 = std::time::Instant::now();
+    let o = Command::new(ZURGO)
+        .args(["test", "--lib", "--manifest-path"])
+        .arg(&m)
+        .args(["--", "--ignored", "--exact", "tests::leaves_a_child"])
+        .env("CARGO_TARGET_DIR", tdir("test-pkg-timeout"))
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(o.status.success(), "{err}");
+    assert!(t0.elapsed() < std::time::Duration::from_secs(20), "{err}");
+}
+
+/// The runner speaks libtest's command line: it runs the executables `cargo test` builds as well, with the outcomes
+/// cargo's own run gives (libtest checks `#[should_panic]` itself)
+#[test]
+fn runner_drives_libtest_executables() {
+    let m = fixture("test-pkg/Cargo.toml");
+    let td = tdir("test-pkg-libtest");
+    let (ok, out, err) = cargo(&["test", "--no-run", "--offline", "--message-format=json"], &m, &td);
+    assert!(ok, "{err}");
+    let mut exes: Vec<(String, PathBuf, PathBuf)> = vec![];
+    for l in out.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(l) else { continue };
+        if v["reason"] == "compiler-artifact" && v["profile"]["test"] == true {
+            if let Some(e) = v["executable"].as_str() {
+                exes.push((v["target"]["name"].as_str().unwrap().to_string(), e.into(), fixture("test-pkg")));
+            }
+        }
+    }
+    assert_eq!(exes.len(), 3, "{out}");
+    let s = zurgo::test_runner::run(&exes, &zurgo::test_runner::RunOpts::default(), &td.join("test-times")).unwrap();
+    let got: std::collections::BTreeMap<String, String> = s.results.iter().map(|r| (r.1.clone(), if r.2 { "ok" } else { "FAILED" }.to_string())).collect();
+    let (_, out, _) = cargo(&["test", "--no-fail-fast", "--offline"], &m, &td);
+    let want: std::collections::BTreeMap<String, String> = cargo_outcomes(&out).into_iter().filter(|(_, v)| v != "ignored").collect();
+    assert_eq!(got, want);
+    assert_eq!(s.skipped, 3);
+}

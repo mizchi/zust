@@ -10,7 +10,9 @@ export type Schema =
   | "bool"
   | "str"
   | readonly ["arr", Schema]
-  | readonly ["rec", ReadonlyArray<readonly [string, Schema]>];
+  | readonly ["rec", ReadonlyArray<readonly [string, Schema]>]
+  /** an enum: the variant's index, then its fields; the key holds the tag (null: the value is the tag string) */
+  | readonly ["enum", string | null, ReadonlyArray<readonly [string, ReadonlyArray<readonly [string, Schema]>]>];
 
 /** The bytes of `value`, a value of `schema` */
 export declare function encode(schema: Schema, value: unknown): Uint8Array;
