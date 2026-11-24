@@ -124,6 +124,7 @@ fn exe_moved_between_crates_relinks() {
         exe: Some("one".to_string()),
         cfgs: vec![],
         env: vec![],
+        proc_macro: None,
         test: false,
     };
     let mut s = zustc::driver2::Session2::new(zustc::driver2::Options2::default());

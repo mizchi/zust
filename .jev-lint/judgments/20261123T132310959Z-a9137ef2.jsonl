@@ -1,0 +1,2 @@
+{"schema":"jev-lint-ledger-1","namespace":"jev-lint-documents-judgments-1","written":"2026-11-23T13:23:10.959Z","model":"jev-1.14.0"}
+{"key":"02970c7814340f52ac0b81693ff34feb81bad102f30a5815b2bf3a4787ed109b","at":"2026-11-23T13:23:10.953Z","value":{"judgment":{"choice":"supports","confidence":0.88,"probabilities":{"supports":0.91,"contradicts":0.08,"unrelated":0,"insufficient_context":0.01}},"comparisonId":"docs_zurgo","target":"docs/ja/zurgo.md"}}
