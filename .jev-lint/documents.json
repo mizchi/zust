@@ -17,6 +17,14 @@
       "path": "docs/ja/architecture.md",
       "role": "document"
     },
+    "docs_forecast.en": {
+      "path": "docs/forecast.md",
+      "role": "document"
+    },
+    "docs_forecast.ja": {
+      "path": "docs/ja/forecast.md",
+      "role": "document"
+    },
     "docs_language.en": {
       "path": "docs/language.md",
       "role": "document"
@@ -63,6 +71,17 @@
       },
       "target": {
         "source": "docs_architecture.ja"
+      }
+    },
+    {
+      "id": "docs_forecast",
+      "topic": "The Japanese file docs/ja/forecast.md is a faithful translation of docs/forecast.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_forecast.en"
+      },
+      "target": {
+        "source": "docs_forecast.ja"
       }
     },
     {

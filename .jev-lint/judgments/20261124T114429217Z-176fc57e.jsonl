@@ -1,0 +1,2 @@
+{"schema":"jev-lint-ledger-1","namespace":"jev-lint-documents-judgments-1","written":"2026-11-24T11:44:29.217Z","model":"jev-1.14.0"}
+{"key":"583282de4a9a7eaa188ec5e27408f194b6ba62bb1c01dbddfd28c19841bf679a","at":"2026-11-24T11:44:29.206Z","value":{"judgment":{"choice":"supports","confidence":0.63,"probabilities":{"supports":0.72,"contradicts":0.28,"unrelated":0,"insufficient_context":0}},"comparisonId":"docs_forecast","target":"docs/ja/forecast.md"}}

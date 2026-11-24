@@ -268,6 +268,7 @@ What is planned and what blocks it: [CONTRIBUTING.md](CONTRIBUTING.md#roadmap) a
 - [docs/architecture.md](docs/architecture.md): crate layout, the pipeline, how incremental builds work, value representation
 - [docs/reports/](docs/reports/README.md): work log, as dated reports (benchmark results and what was done at each step)
 - [SUPPORT.md](SUPPORT.md): what is supported, by area, with rustc's tests/ui pass rates
+- [docs/forecast.md](docs/forecast.md): how far 90% of tests/ui is and how long the rest may take (`bench/forecast.py` estimates it again)
 - [PERFORMANCE.md](PERFORMANCE.md): the KPIs, and comparisons with rustc, relax, blaze and rust-analyzer
 - [CONTRIBUTING.md](CONTRIBUTING.md): how to develop (setting up a clone, tests, KPIs, benchmarks, reports) and the roadmap
 

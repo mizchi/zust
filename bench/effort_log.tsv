@@ -1,0 +1,3 @@
+# Tokens and hours a merged PR took, written by hand (from the usage dashboard), for bench/forecast.py:
+# tokens per tests/ui test gained, and what the rest would take. One row per PR: number, tokens, hours
+pr	tokens	hours
