@@ -754,6 +754,28 @@ impl Cx<'_> {
     }
 
     fn expr_at(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (the type arguments a path writes are well formed: `None::<Static<T>>` with `struct Static<T: 'static>(T)`)
+        if self.rg.on && self.inline_depth == 0 {
+            let p = match e {
+                Expr::Path(_, p) => Some(p),
+                Expr::Call(f, ..) => match &**f {
+                    Expr::Path(_, p) => Some(p),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(p) = p.filter(|p| p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, crate::parse::GArg::Ty(_))))) {
+                for seg in &p.segs {
+                    self.rg_targs_wf(&seg.args, super::borrowck::pos(e));
+                }
+            }
+            // (and a method call's: `r.use_ty::<Static<T>>()`)
+            if let Expr::MethodCall(_, _, targs, ..) = e {
+                if targs.iter().any(|a| matches!(a, crate::parse::GArg::Ty(_))) {
+                    self.rg_targs_wf(targs, super::borrowck::pos(e));
+                }
+            }
+        }
         // (the places inside a sub-expression are accesses of their own)
         let pd = std::mem::take(&mut self.bk.place_depth);
         let hint_only = std::mem::take(&mut self.bk.move_mut_hint);
@@ -800,7 +822,8 @@ impl Cx<'_> {
             }
         }
         if let (Some((n, k)), Ok((_, t))) = (mark, &r) {
-            if self.bk.frames.len() == n && *t != Ty::Never && self.bk_on() && !self.bk_ty(*t).1 {
+            // (not a call whose result `impl Trait` captures its arguments' borrows: it holds them, whatever its hidden type)
+            if self.bk.frames.len() == n && *t != Ty::Never && self.bk_on() && !self.bk_ty(*t).1 && !self.bk_opaque_call(e) {
                 if let Some(f) = self.bk.frames.last_mut() {
                     f.truncate(k);
                 }

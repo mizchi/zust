@@ -1,0 +1,58 @@
+{
+  "case": "energy",
+  "hashes_sha256": {
+    "TASK.md": "fecabb9298549520c680f125b9cc301a2215f0d8346eea11f5619048b10a35ad",
+    "CASE.md": "9b0d7ebeae6c65296ca6db701af76cc653bbc9eaf571e2f47ba34fd96bcaac5e",
+    "README.md": "0df862c22e782a79584ad223682b574dc14509776a45b069d2c26c04ed308f20",
+    "zsc": "f9beff151e7fd4cecadecfd60076c22722c0d69406be37095bd0ecc979c05821",
+    "zustc": "ff800802f7534225411a7c54ea7515778a5d95ae924a2a11bdd4c6f4d32394b0"
+  },
+  "attempts": [
+    {
+      "source": "@wasm export fn energy(xs: F32Array) -> f32 {\n  let mut sum: f32 = 0.0;\n  for x in xs {\n    sum += x * x;\n  }\n  sum\n}\n\nexport fn has_signal(xs: F32Array) -> bool {\n  energy(xs) > 0.0\n}\n",
+      "exit_code": "0\n",
+      "compiler_log": "zsc: answer.zsc → out/answer.js, .d.ts (front 0.9 ms; wasm layer via zustc 350.6 ms, 12818 bytes)\n"
+    }
+  ],
+  "answer": "@wasm export fn energy(xs: F32Array) -> f32 {\n  let mut sum: f32 = 0.0;\n  for x in xs {\n    sum += x * x;\n  }\n  sum\n}\n\nexport fn has_signal(xs: F32Array) -> bool {\n  energy(xs) > 0.0\n}\n",
+  "executor_test": "import assert from \"node:assert/strict\";\nimport { energy, has_signal } from \"./out/answer.js\";\n\nfor (const samples of [[], [0, -0], [-3, 4], [0.5, -0.25], [4096, 1, 1]]) {\n  const xs = new Float32Array(samples);\n  const expected = xs.reduce((sum, x) => Math.fround(sum + Math.fround(x * x)), 0);\n  assert.equal(energy(xs), expected);\n  assert.equal(has_signal(xs), expected > 0);\n}\n",
+  "feedback": "## 参考にした節と最初の予想\n\n「文法(現時点の案と決定事項)」で公開関数の属性順、「数値専用の配列」と「数値」で Float32Array に対応する型名と小数リテラルの推論を確認した。最初から `@wasm export fn energy(xs: F32Array) -> f32` と書き、「ローカルな可変性とループ」の `for x in xs` で二乗を足すつもりだった。比較側は `export fn` から `energy(xs) > 0.0` を返した。「@wasm fn」の Node.js の例に従って、生成された JS から両関数を import した。\n\n## 失敗と再試行\n\n実装のコンパイルは初回で成功した。再試行はない。先に書いた動作確認は実装前には生成 JS がなくて失敗し、コンパイル後には同じ確認が通った。空配列、ゼロ、符号の混ざった整数、小数、f32 の加算で丸めが生じる入力を検査した。\n\n## 迷った点と改善案\n\nJS での入力型はすぐ分かったが、途中の和が f64 に推論されないようにする書き方は、「数値」のリテラル推論と「ローカルな可変性とループ」の整数例を組み合わせて判断した。`let mut sum: f32 = 0.0;` はそのまま使えた。「数値専用の配列」の節に、F32Array を走査して f32 の値を返す短い例があると型注釈の位置まで一度に分かる。\n",
+  "verification": {
+    "task": "energy",
+    "passed": true,
+    "checks": [
+      {
+        "name": "compile",
+        "passed": true
+      },
+      {
+        "name": "empty",
+        "passed": true
+      },
+      {
+        "name": "zero",
+        "passed": true
+      },
+      {
+        "name": "mixed signs",
+        "passed": true
+      },
+      {
+        "name": "fractional",
+        "passed": true
+      },
+      {
+        "name": "export spelling",
+        "passed": true
+      },
+      {
+        "name": "typed JS API",
+        "passed": true
+      },
+      {
+        "name": "wasm energy and JS has_signal",
+        "passed": true
+      }
+    ]
+  }
+}

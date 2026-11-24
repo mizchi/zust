@@ -733,7 +733,7 @@ pub fn hdr_regions(g: &Generics, self_ty: Option<&PTy>) -> Option<Box<RImplSyn>>
     if !s.any && outlives.is_empty() && ty_outlives.is_empty() {
         return None;
     }
-    Some(Box::new(RImplSyn { lts: s.lts, self_slots, outlives, ty_outlives, free: vec![], wf_pairs: vec![], wf_vague: vec![] }))
+    Some(Box::new(RImplSyn { lts: s.lts, self_slots, outlives, ty_outlives, free: vec![], wf_pairs: vec![], wf_vague: vec![], trait_lts: vec![] }))
 }
 
 #[cfg(test)]

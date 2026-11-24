@@ -1,0 +1,7 @@
+()
+[0, 2, 3, 0, 5, 6, 9]
+Ok(Alphabet("abcd")) Err(BadAlphabet(3))
+Ok(Alphabet("wxyz"))
+Ok(Target(1))
+Alphabet("pqrs")
+true false
