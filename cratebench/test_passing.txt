@@ -1,0 +1,5 @@
+# cratebench のクレートのうち、zurgo test が cargo test とテストごとに一致するもの (cratebench/test.py --check が守る。--write は足すだけ)
+adler2
+cfg-if
+fnv
+rustc-hash

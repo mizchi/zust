@@ -1353,7 +1353,49 @@ impl RgSt {
             *j += c;
             return true;
         }
+        let refs = |mut t: Ty| {
+            let mut n = 0;
+            while let Ty::Ref(_, i) = t {
+                n += 1;
+                t = *i;
+            }
+            n
+        };
+        let base = |mut t: Ty| {
+            while let Ty::Ref(_, i) = t {
+                t = *i;
+            }
+            t
+        };
         match (from, to) {
+            // (a deref coercion (`c: &&'a str` where a `&str` is expected): the reborrow `&**c` it is lives no longer
+            // than the references it goes through from the inside out, and a shared one stops that (NLL's reborrow
+            // constraints): of `&'1 &'a str` only 'a)
+            // (not an unsizing to a trait object (`x: &'a &'static u32` as `&dyn Tr`, with `&u32: Tr`): that keeps the
+            // outer reference, whose region is the object's)
+            (Ty::Ref(..), Ty::Ref(m, b)) if refs(from) > refs(to) && !(matches!(base(to), Ty::Dyn(_)) && !matches!(base(from), Ty::Dyn(_))) => {
+                let mut f = from;
+                let mut crossed: Vec<(u32, bool)> = vec![];
+                while refs(f) >= refs(to) {
+                    let (Ty::Ref(fm, fi), Some(&x)) = (f, sub.get(*i)) else { return false };
+                    crossed.push((x, fm));
+                    *i += 1;
+                    if refs(f) == refs(to) {
+                        f = *fi;
+                        break;
+                    }
+                    f = *fi;
+                }
+                let Some(&y) = sup.get(*j) else { return false };
+                for &(x, fm) in crossed.iter().rev() {
+                    self.constrain(x, y, v, sp);
+                    if !fm {
+                        break;
+                    }
+                }
+                *j += 1;
+                self.co(prog, f, *b, sub, sup, (i, j), if m { v.then(Var::Inv) } else { v }, sp, depth + 1)
+            }
             (Ty::Ref(_, a), Ty::Ref(m, b)) => {
                 let (Some(&x), Some(&y)) = (sub.get(*i), sup.get(*j)) else { return false };
                 self.constrain(x, y, v, sp);
@@ -1764,6 +1806,9 @@ impl RgSt {
             }
         }
         let mut errs: Vec<(Sp, String)> = vec![];
+        // (a closure's signature with regions from outside it, its environment's and its captures' aside: the
+        // callee's lifetimes)
+        let sig_ext = self.in_closure && self.externals.iter().any(|&e| e != self.env_r && !self.cap_regions.contains(&e));
         for (ui, &(u, ref uname)) in self.univ.iter().enumerate() {
             let i = ui + 1;
             let mut seen = vec![false; n];
@@ -1781,9 +1826,11 @@ impl RgSt {
                         // (not the closure's environment required to be 'static: the closure has it for no longer
                         // than a call (a capture reborrowed into a `&'static mut`))
                         let outside = |a: u32, b: u32| self.externals.contains(&a) && (b == STATIC || self.outer_univ.contains(&b)) && !(self.in_closure && a == self.env_r && b == STATIC);
-                        // (nor one of the function's that must outlive a placeholder: the callee's lifetimes in the
-                        // bound may be it, and what they imply is of them)
-                        let placeholder = |b: u32| self.in_closure && !self.externals.contains(&b) && !self.outer_univ.contains(&b) && b != STATIC;
+                        // (nor one of the function's that must outlive a placeholder, when the signature has regions
+                        // from outside: the callee's lifetimes in the bound may be it, and what they imply is of them
+                        // (`impl FnOnce(&mut &mut &'a i32)` with the function's 'a). With none, it must outlive every
+                        // region the bound binds: `take(|_z| x)` with `F: FnMut(&isize) -> &isize`)
+                        let placeholder = |b: u32| sig_ext && !self.externals.contains(&b) && !self.outer_univ.contains(&b) && b != STATIC;
                         if !k[i][j] && !outside(u, y) && !outside(y, u) && !(self.outer_univ.contains(&u) && placeholder(y)) && !self.soft.contains(&u) && !self.soft.contains(&y) {
                             let other = if j == 0 { "'static".to_string() } else { self.univ[j - 1].1.clone() };
                             // (a region the closure's signature binds flowing into one from outside)
@@ -2506,8 +2553,9 @@ impl Cx<'_> {
                 let tr = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
                 self.rg.dyn_infer = false;
                 // (an annotation with holes whose regions are the inferred type's (`let f: fn(_) -> _ = foo;`): fresh
-                // ones, which the initializer flows into)
-                tr.or_else(|| if crate::ast_summary::has_infer(a) { self.rg.fresh(prog, t) } else { None })
+                // ones, which the initializer flows into. A fn pointer type's parts that are no hole keep the regions
+                // they write: `fn(_, &'a T) -> &'static T`)
+                tr.or_else(|| if crate::ast_summary::has_infer(a) { self.rg_fn_ann_holes(a, t).or_else(|| self.rg.fresh(prog, t)) } else { None })
             }
             // (a fn item with no type written (`let g = id;`): the local is of the item's type, whose own regions a
             // call through it takes afresh, its type arguments' are fixed (`let f = id::<&'static u32>;`))
@@ -2518,6 +2566,15 @@ impl Cx<'_> {
             None => self.rg.fresh(prog, t),
         };
         let Some(tree) = tree else { return };
+        if let Some(a) = ann {
+            self.rg_closure_fnptr(a, init);
+        }
+        // (a generic fn item whose type arguments the annotation gives (`let f: fn(_, &'a T) -> &'static T = foo;`):
+        // its instance's tree, the type arguments' regions fresh)
+        let init_tree = match init_tree {
+            None if fn_item_init && ann.is_some() => self.rt_fn_item_as(init, t),
+            x => x,
+        };
         // (the annotation's type is well formed)
         if ann.is_some() {
             let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
@@ -2526,6 +2583,22 @@ impl Cx<'_> {
         // (the initializer's tree was taken before the binding: `let y = y;` reads the y it shadows)
         if let Some((it, itr)) = init_tree {
             self.rg.flow(prog, it, t, &itr, &tree, super::borrowck::pos(init));
+            // (a fn item coerced to the annotation's fn pointer type: its signature's types are well formed, which
+            // relates its regions (`foo` of `fn foo<'a, 'b, T>(_: &'a &'b (), v: &'b T) -> &'a T` needs 'b: 'a), as
+            // rustc requires where an item is made a fn pointer). Not where the type binds a region (`fn(_, &'a T,
+            // &())`): rustc does not check it there (#25860, implied-bounds-on-nested-references-plus-variance-2.rs)
+            let binds = ann_codes.as_ref().is_some_and(|c| c.contains(&R_BOUND));
+            if let (true, Some(_), Ty::Fn(ft), false) = (fn_item_init, ann, it, binds) {
+                let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
+                let mut k = 0;
+                for &p in ft.params.iter().chain(std::iter::once(&ft.ret)) {
+                    let Some(n) = count(prog, p, 0) else { break };
+                    let Some(seg) = itr.get(k..k + n) else { break };
+                    let seg = seg.to_vec();
+                    self.rg.wf(prog, p, &seg, sp);
+                    k += n;
+                }
+            }
             // (a fn item where the annotation's fn pointer type binds its regions (`let g: for<'cx> fn(&'cx S) ->
             // &'static S = baz;`): it must do for every region the type binds, a placeholder (as for an argument,
             // rg_call). The local keeps its own tree: each call through it takes them afresh)
@@ -2596,6 +2669,58 @@ impl Cx<'_> {
 
     /// A fn item as a value (`f::<&'a i32>`): a fn pointer whose regions are its signature's, with the lifetimes
     /// the type arguments written name; its own lifetimes fresh
+    /// The tree of a generic fn item's instance whose type is want (a fn pointer type it is coerced to): its type
+    /// arguments solved from want, their regions fresh
+    fn rt_fn_item_as(&mut self, e: &Expr, want: Ty) -> Option<(Ty, RT)> {
+        let id = self.fn_item(strip(e))?;
+        let prog = self.prog;
+        let sig = &prog.sigs[id as usize];
+        let Ty::Fn(ft) = want else { return None };
+        if sig.generics.is_empty() || sig.trait_of.is_some() || sig.params.len() != ft.params.len() {
+            return None;
+        }
+        let mut sol = vec![None; sig.generics.len()];
+        for (&p, &q) in sig.params.iter().zip(&ft.params).chain(std::iter::once((&sig.ret, &ft.ret))) {
+            if !prog.match_ty(p, q, &mut sol) {
+                return None;
+            }
+        }
+        let sol: Vec<Ty> = sol.into_iter().collect::<Option<Vec<Ty>>>()?;
+        let targs: Vec<Option<RT>> = sol.iter().map(|&t| self.rg.fresh(prog, t)).collect();
+        self.rt_fn_sig(id, &sol, &targs)
+    }
+
+    /// The tree of a fn pointer annotation with holes (`fn(_, &'a T) -> &'static T`), part by part: a hole's regions
+    /// fresh, the other parts' as written. None where a hole is not a whole part
+    fn rg_fn_ann_holes(&mut self, a: &PTy, t: Ty) -> Option<RT> {
+        let (PTy::Fn(ps, r), Ty::Fn(ft)) = (a, t) else { return None };
+        if ps.len() != ft.params.len() {
+            return None;
+        }
+        let prog = self.prog;
+        // (a result that elides a region (`fn(&u32, _) -> &u32`): it is its parameter's, which one binder links; not
+        // taken part by part (the whole is fresh, as before))
+        let mut rs = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
+        let mut rc = vec![];
+        rs.slots(r, false, &mut rc);
+        if rc.contains(&R_BOUND) {
+            return None;
+        }
+        let lts = self.rg.lts.clone();
+        let mut out = vec![];
+        for (p, &pt) in ps.iter().chain(std::iter::once(&**r)).zip(ft.params.iter().chain(std::iter::once(&ft.ret))) {
+            if matches!(p, PTy::Infer) {
+                out.extend(self.rg.fresh(prog, pt)?);
+                continue;
+            }
+            let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
+            let mut codes = vec![];
+            s.slots(p, false, &mut codes);
+            out.extend(self.rg.instantiate(prog, pt, Some(&codes), &lts, &[], &mut |me| me.var())?);
+        }
+        Some(out)
+    }
+
     pub(crate) fn rt_fn_item(&mut self, e: &Expr) -> Option<(Ty, RT)> {
         let Expr::Path(None, p) = strip(e) else { return None };
         let id = self.fn_item(e)?;
@@ -2917,6 +3042,21 @@ impl Cx<'_> {
 
     /// `let PAT: ann = init;`: init flows into a value of the annotation's type, whose tree is returned (what the
     /// pattern binds from: `let (y, _): (&'a u32, u32) = (&22, 44);` makes y a `&'a u32`)
+    /// A place init that a `ref mut` binding of a `let` annotated with type t (tree tr) borrows: the place's value is
+    /// of that type both ways (a `&mut` is invariant), as well as flowing into it
+    pub(crate) fn rg_place_is_ann(&mut self, init: &Expr, t: Ty, tr: &RT) {
+        if !self.rg_on() || !super::is_place_expr(init) {
+            return;
+        }
+        let Some((it, itr)) = self.rt_expr(init) else { return };
+        if it != t {
+            return;
+        }
+        let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
+        let prog = self.prog;
+        self.rg.flow(prog, t, it, tr, &itr, sp);
+    }
+
     pub(crate) fn rg_let_ann(&mut self, ann: &PTy, init: &Expr, actual: Option<Ty>) -> Option<(Ty, RT)> {
         if !self.rg_on() {
             return None;
@@ -2930,6 +3070,7 @@ impl Cx<'_> {
             None => self.parse_ty(ann).ok()?,
         };
         let tree = self.rg_ann_tree(ann, t)?;
+        self.rg_closure_fnptr(ann, init);
         let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
         self.rg.wf(prog, t, &tree, sp);
         if let Some((it, itr)) = init_tree {
@@ -3142,6 +3283,34 @@ impl Cx<'_> {
         // (the prelude writes no lifetimes: what its results borrow is not known from elision. A closure's call
         // elides as a fn)
         let prelude = prog.item_of.get(id as usize).copied().flatten().is_none_or(|i| i >= prog.prelude_from) && !prog.closures.contains_key(&id);
+        // (a closure passed where a fn pointer type binds the region of a parameter it annotates with one of the
+        // function's lifetimes (`want(|_: &'static u32| {})` with `fn want(f: fn(&u32))`): as in a `let`
+        // (rg_closure_fnptr). Without a summary, every region of the type is one it binds)
+        for (i, &pt) in sig0.params.iter().enumerate() {
+            let Ty::Fn(ft) = pt else { continue };
+            let Some(c) = i.checked_sub(has_recv as usize).and_then(|j| args.get(j)).map(|a| super::strip_paren(a)) else { continue };
+            let Expr::Closure(_, inputs, ..) = c else { continue };
+            if inputs.len() != ft.params.len() || !inputs.iter().any(|(_, x)| x.as_ref().is_some_and(crate::regions::names_lt)) {
+                continue;
+            }
+            let Some(ns) = ft.params.iter().map(|&t| count(prog, t, 0)).collect::<Option<Vec<usize>>>() else { continue };
+            // (the marks of paths written with no lifetime stand for no region where their types have none (`&S`))
+            let all: Vec<u8> = match codes(i).map(|c| c.iter().copied().filter(|&x| x != R_ELIDED_ADT).collect::<Vec<u8>>()) {
+                None => vec![CLO_P; ns.iter().sum()],
+                Some(c) if c.first() == Some(&R_FN) && Some(c.len() - 1) == count(prog, ft.ret, 0).map(|r| r + ns.iter().sum::<usize>()) => {
+                    c[1..].iter().map(|&x| if x == R_BOUND { CLO_P } else { CLO_E }).collect()
+                }
+                Some(_) => continue,
+            };
+            let mut per = vec![];
+            let mut at = 0;
+            for &n in &ns {
+                per.push(all[at..at + n].to_vec());
+                at += n;
+            }
+            let params = ft.params.clone();
+            self.rg_closure_ann_bound(c, &per, &params);
+        }
         // (which parameters a fn item is passed to (`want(baz)`), by the parameter's index)
         let fn_item_args: Vec<bool> = (0..sig0.params.len())
             .map(|i| i.checked_sub(has_recv as usize).and_then(|j| args.get(j)).is_some_and(|a| self.fn_item(super::strip_paren(a)).is_some()))
@@ -3643,6 +3812,10 @@ impl Cx<'_> {
                     }
                     codes.push(v);
                 }
+                // (a parameter annotated with one of the function's lifetimes, or 'static, where the bound binds the
+                // region (`|x: &'x u32|` for `F: FnOnce(&u32)`): the closure must take every region there, so 'x
+                // would be all of them ("lifetime may not live long enough" both ways)
+                self.rg_closure_ann_bound(c, &codes, params);
                 // (the result's elided regions: the one region of the inputs, as fn elision)
                 let mut ins: Vec<u8> = codes.iter().flatten().copied().filter(|&c| c != R_ELIDED && c != R_STATIC).collect();
                 ins.sort();
@@ -3693,6 +3866,72 @@ impl Cx<'_> {
         let mut g = self.insts.lock().unwrap();
         g.closure_rg.insert(cid, Box::new(crate::program::CloRg { codes, caps, known, lts }));
         g.fx_log.push(cid);
+    }
+
+    /// rg_closure_sig: the annotated parameters of a closure whose bound binds a region where the annotation names one
+    /// of the function's lifetimes or 'static: the bound's region is a placeholder, which that lifetime would have to
+    /// be (codes: the bound's, per parameter)
+    /// A closure where a fn pointer type binds the region of a parameter whose annotation names one of the function's
+    /// lifetimes or 'static (`let _: fn(&()) = |_: &'a ()| {};`): as where a bound binds it (rg_closure_ann_bound)
+    pub(crate) fn rg_closure_fnptr(&mut self, ann: &PTy, init: &Expr) {
+        let c = super::strip_paren(init);
+        let (PTy::Fn(ps, _), Expr::Closure(_, inputs, ..)) = (ann, c) else { return };
+        if ps.len() != inputs.len() || !inputs.iter().any(|(_, a)| a.as_ref().is_some_and(crate::regions::names_lt)) {
+            return;
+        }
+        let names = self.rg.lt_names.clone();
+        let mut codes = vec![];
+        let mut params = vec![];
+        for p in ps {
+            let mut s = crate::regions::Slots { lts: names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
+            let mut cs = vec![];
+            s.slots(p, false, &mut cs);
+            let Ok(t) = self.parse_ty(p) else { return };
+            // (a path written with no lifetime is a mark that stands for no region when its type has none (`&S`):
+            // the regions are the codes but those marks, as many as the type has)
+            let cs: Vec<u8> = cs.into_iter().filter(|&x| x != R_ELIDED_ADT).collect();
+            if count(self.prog, t, 0) != Some(cs.len()) {
+                return;
+            }
+            codes.push(cs.iter().map(|&x| if x == R_BOUND { CLO_P } else { CLO_E }).collect::<Vec<u8>>());
+            params.push(t);
+        }
+        self.rg_closure_ann_bound(c, &codes, &params);
+    }
+
+    fn rg_closure_ann_bound(&mut self, c: &Expr, codes: &[Vec<u8>], params: &[Ty]) {
+        let Expr::Closure(_, inputs, _, _, pos) = c else { return };
+        let prog = self.prog;
+        for (i, (_, ann)) in inputs.iter().enumerate() {
+            let (Some(ann), Some(bc), Some(&t)) = (ann, codes.get(i), params.get(i)) else { continue };
+            if !crate::regions::names_lt(ann) {
+                continue;
+            }
+            let outer = self.rg.lt_names.clone();
+            let mut ac = CloCodes { outer_lts: &outer, tparams: &[], named: vec![], np: 0, ne: 0, elided: None };
+            let mut av = vec![];
+            if !ac.of(prog, ann, t, &mut av, 0) || av.len() != bc.len() {
+                continue;
+            }
+            for (&b, &a) in bc.iter().zip(&av) {
+                // (the bound's own region, a placeholder; the annotation's a function's lifetime or 'static)
+                if b >= CLO_E {
+                    continue;
+                }
+                let lt = match a {
+                    R_STATIC => STATIC,
+                    a if (CLO_E..CLO_U).contains(&a) => match ac.named.iter().find(|x| x.1 == a).and_then(|x| outer.iter().position(|n| *n == x.0)) {
+                        Some(k) => self.rg.lts[k],
+                        None => continue,
+                    },
+                    _ => continue,
+                };
+                let u = self.rg.var();
+                self.rg.univ.push((u, "'_".to_string()));
+                self.rg.edge(u, lt, *pos);
+                self.rg.edge(lt, u, *pos);
+            }
+        }
     }
 
     /// The codes of a closure's captures (cid) as trees of this function: its universal regions are CLO_U + i; what
@@ -3893,23 +4132,25 @@ impl Cx<'_> {
         let prog = self.prog;
         // (its regions that are of the function the closure is in: those)
         let codes = self.rg.closure.as_ref().and_then(|c| c.caps.get(i).cloned().flatten());
+        // (a region of a local of the function the closure is in: from outside, related to the others from outside as
+        // the function relates them, not known here; a placeholder of the closure's signature must not flow into it
+        // ("borrowed data escapes outside of closure": `ay = z` with `ay = &y` captured and z of a `&isize` the bound
+        // or the annotation binds))
+        let cap = |rg: &mut RgSt| -> u32 {
+            let v = rg.var();
+            for a in rg.externals.clone() {
+                rg.known.push((a, v));
+                rg.known.push((v, a));
+            }
+            rg.univ.push((v, "'_".to_string()));
+            rg.externals.push(v);
+            rg.cap_regions.push(v);
+            v
+        };
         let tr = match codes {
-            Some(cs) if count(prog, t, 0) == Some(cs.len()) => Some(cs.iter().map(|&c| self.rg.clo_reg(c)).collect()),
-            // (the regions of a local of the function the closure is in: from outside, related to the others from
-            // outside as the function relates them, not known here; a placeholder of the closure's signature must not
-            // flow into them ("borrowed data escapes outside of closure"))
-            _ => self.rg.fresh(prog, t).inspect(|tr| {
-                for &v in tr {
-                    let ex = self.rg.externals.clone();
-                    for a in ex {
-                        self.rg.known.push((a, v));
-                        self.rg.known.push((v, a));
-                    }
-                    self.rg.univ.push((v, "'_".to_string()));
-                    self.rg.externals.push(v);
-                    self.rg.cap_regions.push(v);
-                }
-            }),
+            // (one of the function's universal regions: that; one of its locals' (not universal there): as above)
+            Some(cs) if count(prog, t, 0) == Some(cs.len()) => Some(cs.iter().map(|&c| if c == R_ELIDED { cap(&mut self.rg) } else { self.rg.clo_reg(c) }).collect()),
+            _ => self.rg.fresh(prog, t).map(|tr| tr.iter().map(|_| cap(&mut self.rg)).collect()),
         };
         if let Some(tr) = tr {
             self.rg.locals.insert(loc, tr);

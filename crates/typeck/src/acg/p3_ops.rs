@@ -1912,8 +1912,10 @@ impl Cx<'_> {
             (true, Some(Ty::Array(_, n))) if n < crate::types::CONST_LEN_BASE => n,
             _ => self.array_len(len)?,
         };
+        // (the element's type: of an expected array, or of a slice, as `&[0; N]` where `&[u8]` is expected, behind a
+        // reference that is not promoted to static data (a length that is not a literal))
         let exp = match expected {
-            Some(Ty::Array(t, _)) => Some(*t),
+            Some(Ty::Array(t, _) | Ty::Slice(t)) => Some(*t),
             _ => None,
         };
         let (v, elem) = self.expr(x, exp)?;

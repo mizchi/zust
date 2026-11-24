@@ -1608,6 +1608,11 @@ impl Cx<'_> {
                 if matches!(to, Ty::Fn(_)) && matches!(strip_paren(x), Expr::Closure(..)) {
                     let (v, t) = self.expr(x, Some(to))?;
                     self.same(SP, t, to)?;
+                    // (its annotated parameters against the regions the type binds, as in a `let`: `(|_: &'static u32|
+                    // {}) as fn(&u32)` is "lifetime may not live long enough")
+                    if self.rg_on() {
+                        self.rg_closure_fnptr(ty, x);
+                    }
                     return Ok((v, t));
                 }
                 // (`c as fn(&str)` with c a closure value that captures nothing: its fn-pointer instance)
@@ -2674,6 +2679,11 @@ impl Cx<'_> {
         };
         // (a closure with no captures where a fn pointer is expected: the address of its fn-pointer instance)
         if matches!(expected, Some(Ty::Fn(_))) && cd.captures.is_empty() {
+            // (a parameter annotated with a lifetime, which the type may bind (`let _: fn(&u32) = |_: &'static u32|
+            // {};`): checked from here on (rg_closure_fnptr))
+            if self.user_code && self.bk.level >= 2 && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() && inputs.iter().any(|x| x.1.as_ref().is_some_and(crate::regions::names_lt)) {
+                self.rg_late_on();
+            }
             let (iid, sig) = {
                 let mut g = self.insts.lock().unwrap();
                 let iid = g.request_fnptr(prog, cid, args).or_else(|e| err(SP, e))?;
@@ -2745,7 +2755,10 @@ impl Cx<'_> {
             && !inputs.iter().any(|x| x.1.is_some())
             && regionck::enabled()
             && matches!(c, Expr::Closure(_, _, _, b, _) if crate::regions::writes_lifetime(b));
-        if (ann_static || writes_lt) && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
+        // (or a parameter annotated with a lifetime where a bound gives the signature (`|x: &'static u32|` for
+        // `F: Fn(&u32)`): rg_closure_sig relates the two)
+        let ann_lt = bound.is_some() && self.user_code && self.bk.level >= 2 && !to_prelude && inputs.iter().any(|x| x.1.as_ref().is_some_and(crate::regions::names_lt));
+        if (ann_static || writes_lt || ann_lt) && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() {
             self.rg_late_on();
         }
         // (the region signature its body is checked with: from a bound not the prelude's, else from annotated
@@ -3686,6 +3699,31 @@ impl Cx<'_> {
                 let r = self.call_fn(cid, Some(recv), &args, None, expected, SP);
                 self.rg.shared_clo = None;
                 self.rg_took_call(c);
+                // (those regions are in the closure's type, so they last while it is used: the closure holds what the
+                // arguments passed to such parameters borrow (`g(&a); a = 2; g(&a);` is E0506). A local's closure called
+                // by its name: one in a struct's field may have the field's bound as its signature)
+                let callee = strip_paren(func);
+                if r.is_ok() && self.bk_on() && self.bk.level >= 2 && matches!(callee, Expr::Path(None, p) if p.segs.len() == 1) {
+                    if let Some(ps) = self.hr_lost.iter().find(|h| h.0 == base).map(|h| h.1.clone()) {
+                        let mut srcs = vec![];
+                        for &i in &ps {
+                            if let Some(a) = args.get(i) {
+                                self.bk_direct_pub(a, &mut srcs);
+                            }
+                        }
+                        // (through a reference to the closure (`r(&a)` with `r = &g`): the closure it points to holds
+                        // them too)
+                        let through = matches!(callee, Expr::Path(None, p) if ident_of(p).and_then(|n| self.bk_local_of(n)).is_some_and(|l| matches!(self.bk.locals[l as usize].ty, Ty::Ref(..))));
+                        if through && !srcs.is_empty() {
+                            if let Expr::Path(None, p) = callee {
+                                if let Some(l) = ident_of(p).and_then(|n| self.bk_local_of(n)) {
+                                    self.bk_ev(borrowck::Ev::HoldThrough(l, srcs.clone()));
+                                }
+                            }
+                        }
+                        self.bk_flow_into(callee, &srcs);
+                    }
+                }
                 // (a result that holds references holds what the arguments its body makes it of borrow: `some(&x)`
                 // with `let some = |a| Some(a);`, or `let some = Some;`)
                 if let Ok((_, rt)) = &r {
