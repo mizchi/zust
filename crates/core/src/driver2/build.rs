@@ -246,6 +246,9 @@ impl Session2 {
         rep.items_parsed = a.n_parsed;
         tm.lap("front", format!("{} items, {} parsed", a.items.len(), a.n_parsed));
         let obj = self.compile_object(&a, &mut rep, Some(&mut tm)).map_err(|e| super::unhoist_err(&a, e))?;
+        if let Some(e) = &a.late_err {
+            return Err(super::unhoist_err(&a, e.clone()));
+        }
         tm.lap("object", format!("{} bytes", obj.len()));
         rep.object_bytes = obj.len();
         // (wasm32: the module is the output, nothing to link)

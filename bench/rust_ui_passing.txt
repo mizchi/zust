@@ -2502,6 +2502,7 @@ compile-fail	error-codes/E0433.rs
 compile-fail	error-codes/E0434.rs
 compile-fail	error-codes/E0435.rs
 compile-fail	error-codes/E0449.rs
+compile-fail	error-codes/E0451.rs
 compile-fail	error-codes/E0458.rs
 compile-fail	error-codes/E0478.rs
 compile-fail	error-codes/E0496.rs
@@ -2546,6 +2547,7 @@ compile-fail	error-codes/E0609.rs
 compile-fail	error-codes/E0610.rs
 compile-fail	error-codes/E0614.rs
 compile-fail	error-codes/E0615.rs
+compile-fail	error-codes/E0616.rs
 compile-fail	error-codes/E0617.rs
 compile-fail	error-codes/E0618.rs
 compile-fail	error-codes/E0620.rs
@@ -2919,6 +2921,7 @@ run-pass	function-pointer/function-pointer-comparison-54696.rs
 compile-fail	function-pointer/signature-mismatch.rs
 compile-fail	functional-struct-update/fru-on-enum-variant.rs
 compile-fail	functional-struct-update/functional-struct-update-noncopyable.rs
+compile-fail	functional-struct-update/functional-struct-update-respects-privacy.rs
 run-pass	functions-closures/bare-fn-implements-fn-mut.rs
 run-pass	functions-closures/call-closure-from-overloaded-op.rs
 run-pass	functions-closures/capture-clauses-boxed-closures.rs
@@ -4323,6 +4326,7 @@ run-pass	macros/macro-nested_stmt_macros.rs
 compile-fail	macros/macro-non-lifetime.rs
 check-pass	macros/macro-nt-list.rs
 run-pass	macros/macro-of-higher-order.rs
+compile-fail	macros/macro-paren-span-diagnostic.rs
 check-pass	macros/macro-pat-follow-2018.rs
 run-pass	macros/macro-pat-follow.rs
 run-pass	macros/macro-pat-neg-lit.rs
@@ -5977,7 +5981,10 @@ compile-fail	privacy/private-in-public-ill-formed.rs
 compile-fail	privacy/private-inferred-type-1.rs
 compile-fail	privacy/private-item-simple.rs
 run-pass	privacy/private-method-rpass.rs
+compile-fail	privacy/private-struct-field-ctor.rs
 compile-fail	privacy/private-struct-field-in-module.rs
+compile-fail	privacy/private-struct-field-pattern.rs
+compile-fail	privacy/private-struct-field.rs
 compile-fail	privacy/private-tuple-struct-field-self-arg-issue-81447.rs
 compile-fail	privacy/private-unit-struct-assignment.rs
 run-pass	privacy/pub-extern-privacy.rs
@@ -7883,6 +7890,7 @@ check-pass	typeck/issue-89935.rs
 compile-fail	typeck/issue-90027-async-fn-return-suggestion.rs
 compile-fail	typeck/issue-90101.rs
 compile-fail	typeck/issue-90319.rs
+compile-fail	typeck/issue-90483-inaccessible-field-adjustment.rs
 compile-fail	typeck/issue-91210-ptr-method.rs
 compile-fail	typeck/issue-91328.rs
 compile-fail	typeck/issue-91450-inner-ty-error.rs

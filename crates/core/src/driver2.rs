@@ -50,6 +50,8 @@ struct ChkEnt {
 
 /// 解析の結果
 pub struct Analysis {
+    /// An error the type check precedes: reported only where it finds none (E0451, rustc's privacy pass)
+    pub late_err: Option<String>,
     /// 宣言の指紋: fn アイテムは要約 (シグネチャ・クロージャ)、ほかのアイテムはテキストのハッシュを並べたもの。
     /// fn の本体だけを変えた編集では変わらない (check の記憶 ChkMemo を使ってよいかの印)
     pub iface_fp: u64,
@@ -1029,9 +1031,11 @@ impl Session2 {
             }
         }
         // (E0603: a path through the program's own modules to an item it may not see; resolved after the items parse,
-        // as rustc reports a syntax error first)
+        // as rustc reports a syntax error first. And the fields modules may not read, for the type check's E0616)
+        let mut fpriv: Option<Box<crate::program::FieldPriv>> = None;
+        let mut late_err: Option<String> = None;
         if let Some(toks) = &src0_toks {
-            if let Some(e) = private_path(src0, toks, &externs, self.opts.edition < 2018) {
+            if let Some(e) = private_path(src0, toks, &externs, self.opts.edition < 2018, &mut fpriv, &mut late_err) {
                 return Err(e);
             }
         }
@@ -1595,6 +1599,7 @@ impl Session2 {
         prog.deny_unreachable = deny_unreachable;
         // (the program has modules: read from its source as written, before flattening blanks their headers)
         prog.has_mods = has_mod_word;
+        prog.field_priv = fpriv.take();
         prog.lower_consts = prog.consts.iter().any(|c| !c.name.contains("::") && c.name.trim_start_matches('_').starts_with(|ch: char| ch.is_lowercase()));
         prog.deny_must_use = deny_must_use;
         prog.edition = self.opts.edition;
@@ -1747,7 +1752,7 @@ impl Session2 {
             crefs.push(c);
         }
         tm.lap("refs", String::new());
-        let mut a = Analysis { iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()) };
+        let mut a = Analysis { late_err, iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()) };
         if self.opts.opt && std::env::var_os("ZUSTC_NO_INLINE").is_none() {
             a.inl = inline_bodies(&a);
         }
@@ -4337,7 +4342,16 @@ fn use_leaves(
 /// `a::b`", the path to that segment), or on through an item that is no module (`use m::S::C`, `use m::f::{self}`,
 /// `use m::A::*` of a type alias), where nothing else could bind the name there: no glob import, no `use` or
 /// `extern crate` of it, no item-level macro call or definition, no `extern` block, no module of another file
-fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, String)], injected: bool) -> Option<String> {
+/// `fpriv` gets the fields a module may not read, for the type check's E0616 (`s.x` of a struct of another module);
+/// `late` an error to report only where the type check finds none (E0451)
+fn private_path(
+    src: &str,
+    toks: &[(u8, usize, usize)],
+    externs: &[(usize, String)],
+    injected: bool,
+    fpriv: &mut Option<Box<crate::program::FieldPriv>>,
+    late: &mut Option<String>,
+) -> Option<String> {
     let b = src.as_bytes();
     let n = toks.len();
     let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
@@ -4722,7 +4736,24 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
     };
     // (E0659: read where some module has more than one glob import, and every module is in this text)
     let globs = imps.iter().flatten().filter(|x| x.glob == 2).count();
-    let mut amb = (globs >= 2 && !unknown_mods && !src.contains("ambiguous_glob_imports")).then(|| Ambiguity {
+    let amb_on = globs >= 2 && !unknown_mods && !src.contains("ambiguous_glob_imports");
+    // (E0451: read where a struct or union of a module other than the crate root has a field that is not `pub`; the
+    // names of those)
+    let mut hidden_structs: FxSet<&[u8]> = FxSet::default();
+    if !unknown_mods {
+        for (m, its) in items.iter().enumerate().skip(1) {
+            for it in its {
+                if matches!(it.kind, "struct" | "union") && struct_fields(b, toks, &close, it.at, mods[m].1).iter().any(|f| !matches!(f.1, PVis::Pub)) {
+                    hidden_structs.insert(it.name);
+                }
+            }
+        }
+    }
+    let priv_on = !hidden_structs.is_empty();
+    if priv_on {
+        *fpriv = Some(Box::new(field_priv(b, toks, &close, &mods, &items, injected)));
+    }
+    let mut amb = (amb_on || priv_on).then(|| Ambiguity {
         b,
         toks,
         close: &close,
@@ -4746,9 +4777,13 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
             })
             .collect(),
     });
-    // (the names a glob may bring: the program's items, enum variants and import names)
+    // (the names a glob may bring: the program's items, enum variants and import names; for E0451 alone, the names a
+    // literal's path starts with: those structs' and the modules')
     let mut amb_names: FxSet<&[u8]> = FxSet::default();
-    if let Some(a) = &amb {
+    if !amb_on {
+        amb_names.extend(hidden_structs.iter().copied());
+        amb_names.extend(items.iter().flatten().filter(|x| x.child != usize::MAX).map(|x| x.name));
+    } else if let Some(a) = &amb {
         for (m, its) in items.iter().enumerate() {
             for it in its {
                 amb_names.insert(it.name);
@@ -4762,6 +4797,12 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
     let amb_msg = |k: usize| Some((k, format!("`{}` is ambiguous (E0659)", String::from_utf8_lossy(t(k)))));
     // (each module's own tokens, past its child modules and its item-level macros, for the paths in them)
     let mut found: Option<(usize, String)> = None;
+    let mut found_late: Option<(usize, String)> = None;
+    let mut keep_late = |at: usize, msg: String| {
+        if found_late.as_ref().is_none_or(|f| at < f.0) {
+            found_late = Some((at, msg));
+        }
+    };
     let mut keep = |e: Option<(usize, String)>| {
         if let Some(e) = e {
             if found.as_ref().is_none_or(|f| e.0 < f.0) {
@@ -4774,17 +4815,27 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
         let mut jumps: Vec<(usize, usize)> = skips[m].clone();
         jumps.extend(mods.iter().filter(|x| x.2 == m).map(|x| (x.0, x.1)));
         jumps.sort_unstable();
-        let sc = amb.as_ref().map(|a| a.scope(lo, hi, &jumps, &amb_names));
-        let has_glob = imps[m].iter().any(|x| x.glob == 2);
-        // (whether token k is a name a path may start with here, for E0659: not a binding, a definition, or in a
-        // macro's arguments)
-        let free = |k: usize| {
-            sc.as_ref().is_some_and(|sc| {
+        // (the module's scope facts, read at its first site)
+        let sc: std::cell::OnceCell<AScope> = std::cell::OnceCell::new();
+        let has_glob = amb_on && imps[m].iter().any(|x| x.glob == 2);
+        // (whether token k is a name a path may start with here, for E0659 and E0451: not a binding, a definition, or
+        // in a macro's arguments)
+        macro_rules! free {
+            ($a:expr, $k:expr) => {{
+                let k: usize = $k;
+                let sc = sc.get_or_init(|| $a.scope(lo, hi, &jumps, &amb_names));
                 let name = t(k);
-                !sc.defs.contains(&k)
-                    && !sc.skip.iter().any(|&(a, e)| a < k && k < e)
-                    && !sc.covers.iter().any(|&(nm, a, e)| (nm == name || nm.is_empty()) && a <= k && k <= e)
-            })
+                !sc.defs.contains(&k) && !sc.skip.iter().any(|&(a, e)| a < k && k < e) && !sc.covers.iter().any(|&(nm, a, e)| (nm == name || nm.is_empty()) && a <= k && k <= e)
+            }};
+        }
+        let after_colons = |k: usize| t(k.wrapping_sub(1)) == b":" && t(k.wrapping_sub(2)) == b":";
+        // (whether a path from token k followed by `{` may be a struct literal or pattern: not a definition's name, an
+        // impl's or a fn's return type, nor the expression of an `if` / `while` / `match` / `for`)
+        let literal_at = |k: usize| {
+            let j = if after_colons(k) { k.wrapping_sub(3) } else { k.wrapping_sub(1) };
+            let p = t(j);
+            !(matches!(p, b"struct" | b"enum" | b"union" | b"trait" | b"impl" | b"for" | b"mod" | b"fn" | b"if" | b"while" | b"match" | b"in" | b"dyn" | b"where" | b"type")
+                || p == b">" && t(j.wrapping_sub(1)) == b"-")
         };
         let mut cache: FxMap<&[u8], ADefs> = FxMap::default();
         let mut ji = 0;
@@ -4821,7 +4872,7 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
                     }
                 }
                 // (E0659: an import of the module, resolved without itself)
-                if let (Some(a), Some(&j0)) = (amb.as_mut(), imp_at.get(&k)) {
+                if let (Some(a), Some(&j0), true) = (amb.as_mut(), imp_at.get(&k), amb_on) {
                     for (li, (l, &g)) in leaves.iter().zip(&kinds).enumerate() {
                         if l.is_empty() || imps[m].len() <= j0 + li {
                             continue;
@@ -4856,18 +4907,34 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
                 if reads {
                     keep(check(m, &segs, false, false, 0));
                 }
-                // (E0659: a segment of the path)
-                if let Some(a) = amb.as_mut().filter(|_| free(raw(k))) {
+                // (E0659: a segment of the path; E0451: a struct literal's or pattern's fields, where its last segment
+                // names a struct with such a field; the scope facts last, as they are read only then)
+                let x = j;
+                let lit = priv_on && t(x + 1) == b"{" && hidden_structs.contains(t(x));
+                if amb.is_some() && (amb_on || lit) {
                     let mut all = vec![raw(k)];
-                    let mut x = raw(k);
-                    while t(x + 1) == b":" && t(x + 2) == b":" && is_id(x + 3) {
-                        x = raw(x + 3);
-                        all.push(x);
+                    let mut y = raw(k);
+                    while t(y + 1) == b":" && t(y + 2) == b":" && is_id(y + 3) {
+                        y = raw(y + 3);
+                        all.push(y);
                     }
-                    match a.path(m, &all, false, 3) {
-                        APath::Amb(i) => keep(amb_msg(all[i])),
-                        APath::Defs(d) if ambiguous_in(&d, a.site_ns(raw(k), x)) => keep(amb_msg(x)),
-                        _ => {}
+                    if amb_on && amb.as_ref().is_some_and(|a| free!(a, raw(k))) {
+                        let a = amb.as_mut().unwrap();
+                        match a.path(m, &all, false, 3) {
+                            APath::Amb(i) => keep(amb_msg(all[i])),
+                            APath::Defs(d) if ambiguous_in(&d, a.site_ns(raw(k), x)) => keep(amb_msg(x)),
+                            _ => {}
+                        }
+                    }
+                    if lit && literal_at(raw(k)) {
+                        let r = amb.as_mut().and_then(|a| a.literal_privacy(m, &all, x + 1));
+                        if r.is_some() && amb.as_ref().is_some_and(|a| free!(a, raw(k))) {
+                            match r {
+                                Some((at, msg, true)) => keep_late(at, msg),
+                                Some((at, msg, false)) => keep(Some((at, msg))),
+                                None => {}
+                            }
+                        }
                     }
                 }
                 k = j + 1;
@@ -4884,7 +4951,8 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
                 if injected && segs.len() > 1 {
                     keep(check(m, &segs, true, false, 0));
                 }
-                if let Some(a) = amb.as_mut().filter(|_| injected && free(segs[0])) {
+                if amb.as_ref().is_some_and(|a| amb_on && injected && free!(a, segs[0])) {
+                    let a = amb.as_mut().unwrap();
                     match a.path(m, &segs, true, 3) {
                         APath::Amb(i) => keep(amb_msg(segs[i])),
                         APath::Defs(d) if ambiguous_in(&d, a.site_ns(k, j)) => keep(amb_msg(j)),
@@ -4894,8 +4962,26 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
                 k = j + 1;
                 continue;
             }
+            // (E0451: a struct literal or pattern of one segment, `Foo { x: 1 }`)
+            if priv_on
+                && is_id(k)
+                && t(k + 1) == b"{"
+                && hidden_structs.contains(t(k))
+                && !after_colons(k)
+                && !matches!(t(k.wrapping_sub(1)), b"." | b"$" | b"'" | b"#")
+                && literal_at(k)
+            {
+                let r = amb.as_mut().and_then(|a| a.literal_privacy(m, &[k], k + 1));
+                if r.is_some() && amb.as_ref().is_some_and(|a| free!(a, k)) {
+                    match r {
+                        Some((at, msg, true)) => keep_late(at, msg),
+                        Some((at, msg, false)) => keep(Some((at, msg))),
+                        None => {}
+                    }
+                }
+            }
             // (E0659: a name a glob of the module brings, where a path of one segment names it)
-            if has_glob && is_id(k) && amb_names.contains(t(k)) && free(k) {
+            if has_glob && is_id(k) && amb_names.contains(t(k)) && amb.as_ref().is_some_and(|a| free!(a, k)) {
                 let (p, pp, nx) = (t(k.wrapping_sub(1)), t(k.wrapping_sub(2)), t(k + 1));
                 let defines = matches!(p, b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"union" | b"mod" | b"const" | b"static" | b"crate" | b"macro_rules" | b"macro")
                     || p == b"mut" && pp != b"&"
@@ -4927,13 +5013,137 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
             k += 1;
         }
     }
-    let (at, msg) = found?;
-    let off = toks[at].1;
-    let line = b[..off].iter().filter(|&&c| c == b'\n').count() + 1;
-    let col = off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1;
-    Some(format!("{line}:{col}: {msg}"))
+    let place = |(at, msg): (usize, String)| {
+        let off = toks[at].1;
+        let line = b[..off].iter().filter(|&&c| c == b'\n').count() + 1;
+        let col = off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1;
+        format!("{line}:{col}: {msg}")
+    };
+    *late = found_late.map(place);
+    found.map(place)
 }
 
+
+/// For E0616: the modules by their lines, and the fields of the structs and unions of modules other than the crate
+/// root that are not `pub`, with the module each is visible within. Only a name no other item of the program has: the
+/// type check knows a struct by its name, which the flattening of modules keeps where it is the only one
+fn field_priv(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], mods: &[(usize, usize, usize)], items: &[Vec<PItem>], injected: bool) -> crate::program::FieldPriv {
+    // (the lines of the modules' braces, counted in one pass over the text up to the last)
+    let mut offs: Vec<usize> = mods.iter().skip(1).flat_map(|&(lo, hi, _)| [lo.saturating_sub(1), hi]).map(|k| toks.get(k).map_or(b.len(), |x| x.1)).collect();
+    offs.sort_unstable();
+    offs.dedup();
+    let mut lines: FxMap<usize, u32> = FxMap::default();
+    let (mut at, mut n) = (0usize, 1u32);
+    for &o in &offs {
+        n += b[at..o].iter().filter(|&&c| c == b'\n').count() as u32;
+        at = o;
+        lines.insert(o, n);
+    }
+    let line = |k: usize| -> u32 { lines[&toks.get(k).map_or(b.len(), |x| x.1)] };
+    let mut fp = crate::program::FieldPriv::default();
+    for (m, &(lo, hi, parent)) in mods.iter().enumerate() {
+        fp.mods.push(if m == 0 { (0, u32::MAX, 0) } else { (line(lo.saturating_sub(1)), line(hi), parent as u32) });
+    }
+    let mut count: FxMap<&[u8], u32> = FxMap::default();
+    for it in items.iter().flatten() {
+        *count.entry(it.name).or_insert(0) += 1;
+    }
+    let parent = |m: usize| mods[m].2;
+    for (m, its) in items.iter().enumerate().skip(1) {
+        for it in its {
+            if !matches!(it.kind, "struct" | "union") || count.get(it.name) != Some(&1) {
+                continue;
+            }
+            let mut hidden = vec![];
+            for (f, vis) in struct_fields(b, toks, close, it.at, mods[m].1) {
+                let scope = match vis {
+                    PVis::Pub => continue,
+                    PVis::Priv => m,
+                    PVis::Super => parent(m),
+                    // (`pub(in path)`: the module it names, from the crate root in 2015)
+                    PVis::In(p) => {
+                        let (mut cur, mut s) = match p.first() {
+                            Some(&b"crate") => (0, 1),
+                            Some(&b"self") => (m, 1),
+                            _ if injected => (0, 0),
+                            _ => (m, 0),
+                        };
+                        while p.get(s) == Some(&&b"super"[..]) && cur != 0 {
+                            cur = parent(cur);
+                            s += 1;
+                        }
+                        let found = p[s..].iter().try_fold(cur, |c, seg| items[c].iter().find(|x| x.name == *seg && x.child != usize::MAX).map(|x| x.child));
+                        match found {
+                            Some(x) => x,
+                            None => continue,
+                        }
+                    }
+                };
+                hidden.push((String::from_utf8_lossy(f).into_owned(), scope as u32));
+            }
+            if !hidden.is_empty() {
+                fp.fields.insert(String::from_utf8_lossy(it.name).into_owned(), (if it.kind == "union" { "union" } else { "struct" }, hidden));
+            }
+        }
+    }
+    fp
+}
+
+/// The named fields of the struct or union whose name is token `at`, each with its visibility as written (none for a
+/// tuple or unit struct)
+fn struct_fields<'a>(b: &'a [u8], toks: &[(u8, usize, usize)], close: &[usize], at: usize, hi: usize) -> Vec<(&'a [u8], PVis<'a>)> {
+    let t = |k: usize| -> &'a [u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let mut out = vec![];
+    // (past the generics and a `where` clause, to the body)
+    let mut k = at + 1;
+    let mut d = 0i32;
+    while k < hi {
+        match t(k) {
+            b"<" => d += 1,
+            b">" if t(k - 1) != b"-" => d -= 1,
+            b"{" if d == 0 => break,
+            b"(" | b";" if d == 0 => return out,
+            b"(" | b"[" if close[k] != usize::MAX => k = close[k],
+            _ => {}
+        }
+        k += 1;
+    }
+    let Some(&e) = close.get(k).filter(|&&e| e != usize::MAX && k < hi) else { return out };
+    k += 1;
+    while k < e {
+        while t(k) == b"#" && t(k + 1) == b"[" && close[k + 1] != usize::MAX {
+            k = close[k + 1] + 1;
+        }
+        let mut vis = PVis::Priv;
+        if t(k) == b"pub" {
+            vis = PVis::Pub;
+            k += 1;
+            if t(k) == b"(" && close[k] != usize::MAX {
+                let c = close[k];
+                vis = match t(k + 1) {
+                    b"self" => PVis::Priv,
+                    b"super" => PVis::Super,
+                    b"in" => PVis::In((k + 2..c).filter(|&j| is_id(j)).map(t).collect()),
+                    _ => PVis::Pub,
+                };
+                k = c + 1;
+            }
+        }
+        let s = if t(k) == b"r" && t(k + 1) == b"#" && is_id(k + 2) { k + 2 } else { k };
+        if is_id(s) && t(s + 1) == b":" {
+            out.push((t(s), vis));
+        }
+        while k < e && t(k) != b"," {
+            if matches!(t(k), b"(" | b"[" | b"{") && close[k] != usize::MAX {
+                k = close[k];
+            }
+            k += 1;
+        }
+        k += 1;
+    }
+    out
+}
 
 /// An import of a module, as `private_path` reads it: `use a::b as c;` is (c, [a, b], 0), `use a::*;` (``, [a], 2),
 /// `use a::{self};` (a, [a], 1)
@@ -5292,6 +5502,75 @@ const EXPR_MACROS: &[&[u8]] = &[
 ];
 
 impl<'a, 'b> Ambiguity<'a, 'b> {
+    /// E0451: a struct literal or pattern written in module m, of the path `segs` and the brace at token `open`, that
+    /// names a field it may not see (`a::Foo { x: 1 }`), or takes one by `..base`: "field `x` of struct `Foo` is private"
+    /// (`late`: rustc's privacy pass, after the type check, reports it only where that finds no error). A literal
+    /// that leaves out such a field and has no `..base` cannot be written at all, as the type check says
+    fn literal_privacy(&mut self, m: usize, segs: &[usize], open: usize) -> Option<(usize, String, bool)> {
+        let e = *self.close.get(open).filter(|&&e| e != usize::MAX)?;
+        let APath::Defs(d) = self.path(m, segs, false, 1) else { return None };
+        let types: Vec<ADef> = d.iter().filter(|x| x.0 & 1 != 0).map(|x| x.1).collect();
+        let &[x] = &types[..] else { return None };
+        if x.v != u32::MAX {
+            return None;
+        }
+        let sm = x.m as usize;
+        let it = &self.items[sm][x.i as usize];
+        let what = match it.kind {
+            "struct" => "struct",
+            "union" => "union",
+            _ => return None,
+        };
+        let fields = struct_fields(self.b, self.toks, self.close, it.at, self.mods[sm].1);
+        let hidden: Vec<&[u8]> = fields.iter().filter(|f| !self.visible(sm, &f.1, m)).map(|f| f.0).collect();
+        if hidden.is_empty() {
+            return None;
+        }
+        let msg = |f: &[u8]| format!("field `{}` of {what} `{}` is private (E0451)", String::from_utf8_lossy(f), String::from_utf8_lossy(it.name));
+        let name = it.name;
+        // (a pattern: the brace is followed by `=>` or `=` (one token each of `=` and `>`; not `==`), `|`, a guard's
+        // `if`, `in` or a parameter's `:`)
+        let after = self.t(e + 1);
+        let pattern = matches!(after, b"|" | b"if" | b"in" | b":") || after == b"=" && self.t(e + 2) != b"=";
+        let mut named: Vec<&[u8]> = vec![];
+        let mut first: Option<(usize, String, bool)> = None;
+        let mut rest = false;
+        let mut k = open + 1;
+        while k < e {
+            while self.t(k) == b"#" && self.t(k + 1) == b"[" && self.close[k + 1] != usize::MAX {
+                k = self.close[k + 1] + 1;
+            }
+            let s = if self.t(k) == b"r" && self.t(k + 1) == b"#" && self.is_id(k + 2) { k + 2 } else { k };
+            if self.is_id(s) && (self.t(s + 1) == b":" && self.t(s + 2) != b":" || matches!(self.t(s + 1), b"," | b"}")) {
+                let f = self.t(s);
+                named.push(f);
+                if hidden.contains(&f) && first.is_none() {
+                    first = Some((s, msg(f), true));
+                }
+            } else if self.t(k) == b"." && self.t(k + 1) == b"." {
+                rest = true;
+                // (`..base` of a literal takes the fields not named; a pattern's `..` reads none)
+                if self.t(k + 2) != b"}" && k + 2 < e && first.is_none() {
+                    if let Some(f) = hidden.iter().find(|f| !named.contains(f)) {
+                        first = Some((k + 2, msg(f), true));
+                    }
+                }
+                break;
+            }
+            while k < e && self.t(k) != b"," {
+                if matches!(self.t(k), b"(" | b"[" | b"{") && self.close[k] != usize::MAX {
+                    k = self.close[k];
+                }
+                k += 1;
+            }
+            k += 1;
+        }
+        // (a literal without `..base` that leaves out a field it may not see; not a union's, which names one)
+        if !pattern && !rest && what == "struct" && hidden.iter().any(|f| !named.contains(f)) {
+            return Some((segs[0], format!("cannot construct `{}` with struct literal syntax due to private fields", String::from_utf8_lossy(name)), false));
+        }
+        first
+    }
     fn is_id(&self, k: usize) -> bool {
         self.toks.get(k).is_some_and(|x| x.0 == 0)
     }
@@ -7839,6 +8118,9 @@ impl Session2 {
         }
         tm.lap("check", format!("{n_memo} from the last check, {n_keys} keys, {n_hit} cached, {n_checked} checked"));
         self.const_lines.clear();
+        if errs.is_empty() {
+            errs.extend(a.late_err.clone());
+        }
         let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).collect();
         // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its borrow
         // and region checks' errors are at the lines it was moved from. Not its other errors: typeck does not know all

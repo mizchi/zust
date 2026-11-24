@@ -70,6 +70,44 @@ pub struct VariantDef {
     pub discr: i64,
 }
 
+/// The fields a module of the program may not read (E0616): the inline modules by their lines, and of each struct or
+/// union of a module whose name is the program's only item of that name, its fields that are not `pub`
+#[derive(Default, Debug)]
+pub struct FieldPriv {
+    /// (the line of a module's `{`, of its `}`, its parent); the crate root is module 0, of every line
+    pub mods: Vec<(u32, u32, u32)>,
+    /// the struct's or union's name -> (`struct` / `union`, [(a field, the module it is visible within)])
+    pub fields: FxMap<String, (&'static str, Vec<(String, u32)>)>,
+}
+
+impl FieldPriv {
+    /// the innermost module of a line (None on a line where a module starts or ends, which two modules share)
+    pub fn module_of(&self, line: u32) -> Option<u32> {
+        let mut best = 0u32;
+        for (i, &(a, e, _)) in self.mods.iter().enumerate().skip(1) {
+            if line == a || line == e {
+                return None;
+            }
+            if a < line && line < e {
+                best = i as u32;
+            }
+        }
+        Some(best)
+    }
+    /// whether module `m` is `scope` or inside it
+    pub fn within(&self, mut m: u32, scope: u32) -> bool {
+        loop {
+            if m == scope {
+                return true;
+            }
+            if m == 0 || m as usize >= self.mods.len() {
+                return false;
+            }
+            m = self.mods[m as usize].2;
+        }
+    }
+}
+
 /// struct と enum (名前付きの集約型) の定義。enum も同じ表に入れることで、
 /// コピー・引数渡し・impl・deep hash などの処理を struct と共有する。
 pub struct StructDef {
@@ -380,6 +418,9 @@ pub struct Program {
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
     /// be out of scope where the name is written
     pub has_mods: bool,
+    /// The program's inline modules and the fields of its structs and unions it may not see everywhere, for E0616
+    /// (set by the driver where it reads the modules)
+    pub field_priv: Option<Box<FieldPriv>>,
     /// some trait other than Clone has a fn `clone` (`trait Duplicate { fn clone(&self) -> S { .. } }`), or a blanket
     /// impl one: only then can default_method find a `clone` for a type
     pub trait_clone_fns: bool,
@@ -1037,6 +1078,7 @@ impl Program {
             struct_defaults: FxMap::default(),
             copy_params: FxMap::default(),
             has_mods: false,
+            field_priv: None,
             trait_clone_fns: false,
             multi_trait_methods: FxSet::default(),
             ambiguous_methods: FxMap::default(),

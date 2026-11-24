@@ -1363,6 +1363,44 @@ fn unresolved_imports() {
 }
 
 #[test]
+fn field_privacy() {
+    // (E0451 / E0616: a field a module may not see, in a struct literal or pattern, a `..base`, an access; each
+    // expected line, column and message is rustc 1.100's on the same source, in both editions; None where rustc
+    // accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        let src = "mod a { pub struct Foo { x: isize } }\nfn main() {\n    let _ = a::Foo { x: 1 };\n}\n";
+        assert_eq!(check(edition, src), at(3, 22, "field `x` of struct `Foo` is private (E0451)"), "literal");
+        let src = "mod a { pub struct Foo { x: isize } pub fn make() -> Foo { Foo { x: 3 } } }\nuse a::Foo;\nfn main() {\n    match a::make() {\n        Foo { x: _ } => {}\n    }\n}\n";
+        assert_eq!(check(edition, src), at(5, 15, "field `x` of struct `Foo` is private (E0451)"), "pattern");
+        let src = "mod a { pub struct S { pub a: u8, b: u8 } pub fn mk() -> S { S { a: 1, b: 2 } } }\nfn main() {\n    let s = a::mk();\n    let _ = a::S { a: 3, ..s };\n}\n";
+        assert_eq!(check(edition, src), at(4, 28, "field `b` of struct `S` is private (E0451)"), "base");
+        let src = "mod m { pub struct S { pub v: bool, a: u8 } }\nfn main() {\n    let _ = m::S { v: true };\n}\n";
+        assert_eq!(check(edition, src), at(3, 13, "cannot construct `S` with struct literal syntax due to private fields"), "left_out");
+        let src = "mod a {\n    pub struct Foo { x: u32 }\n    impl Foo { pub fn new() -> Foo { Foo { x: 0 } } }\n}\nfn main() {\n    let f = a::Foo::new();\n    let _ = f.x;\n}\n";
+        assert_eq!(check(edition, src), at(7, 15, "field `x` of struct `Foo` is private (E0616)"), "access");
+        let src = "mod m { pub union U { pub a: u8, c: u8 } }\nfn main() {\n    let _ = m::U { c: 0 };\n}\n";
+        assert_eq!(check(edition, src), at(3, 20, "field `c` of union `U` is private (E0451)"), "union");
+        // (the type check's error first: rustc's privacy pass does not run after it)
+        let src = "mod foo { pub struct Foo { x: u32 } impl Foo { fn method(&self) {} } }\nfn main() {\n    let f = foo::Foo { x: 0 };\n    f.method;\n}\n";
+        assert_eq!(check(edition, src).map(|x| x.0), Some(4), "type_error_first");
+        // (in the module, `pub(super)` from the parent, a child module, `pub` and `pub(crate)`)
+        for src in [
+            "mod a { pub struct Foo { x: u8 } pub fn f() -> u8 { let s = Foo { x: 1 }; s.x } }\nfn main() { let _ = a::f(); }\n",
+            "mod a { pub mod b { pub struct S { pub(super) x: u8 } } pub fn f() -> u8 { let s = b::S { x: 1 }; s.x } }\nfn main() { let _ = a::f(); }\n",
+            "mod a { pub struct S { x: u8 } pub mod c { pub fn g(s: &super::S) -> u8 { s.x } } pub fn mk() -> S { S { x: 1 } } }\nfn main() { let _ = a::c::g(&a::mk()); }\n",
+            "mod a { pub struct S { pub x: u8, pub(crate) y: u8 } }\nfn main() { let s = a::S { x: 1, y: 2 }; let _ = s.x + s.y; }\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
 fn glob_ambiguity() {
     // (E0659: a name two glob imports bring with different definitions, where a path names it; each expected line
     // and column is rustc 1.100's on the same source, in both editions; None where rustc accepts it)

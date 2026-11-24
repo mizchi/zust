@@ -66,6 +66,26 @@ impl Cx<'_> {
     /// lifetime_arity of the program's own structs and enums a signature's type t names (not in fn pointer, `dyn` and
     /// `impl` types, nor a type parameter tps names). Not the prelude's, some of which leave out lifetimes std's have
     /// (`Cow<'a, B>`)
+    /// E0616: a field of a struct or union of another module, not `pub`, where the access is written outside the
+    /// module it is visible within (`s.x` with `mod a { pub struct S { x: u8 } }`). Known for the program's own
+    /// structs by Program::field_priv; a position of no line (a rewrite's) is not read
+    pub(crate) fn field_privacy(&self, sid: u32, fname: &str, at: Sp) -> R<()> {
+        let Some(fp) = self.prog.field_priv.as_deref() else { return Ok(()) };
+        // (the root crate's own code: line_base is the item's line before its first, a dependency's is tagged above
+        // 1 << 20)
+        if !self.user_code || at.line == 0 || self.line_base >= 1 << 20 {
+            return Ok(());
+        }
+        let base = self.prog.structs[sid as usize].base.unwrap_or(sid);
+        let name = &self.prog.structs[base as usize].name;
+        let Some((what, fs)) = fp.fields.get(name.as_str()) else { return Ok(()) };
+        let Some(&(_, scope)) = fs.iter().find(|f| f.0 == fname) else { return Ok(()) };
+        match fp.module_of(self.line_base + at.line) {
+            Some(site) if !fp.within(site, scope) => Err(self.at(at, format!("field `{fname}` of {what} `{name}` is private (E0616)"))),
+            _ => Ok(()),
+        }
+    }
+
     /// The type of a place `let _ = place;` names (a variable and its fields), when known: E0609 for a field its type
     /// does not have (through references and boxes; not through a `Deref` of the program's, which is not followed)
     pub(crate) fn wild_place_ty(&self, e: &Expr) -> R<Option<Ty>> {
@@ -80,7 +100,10 @@ impl Cx<'_> {
                 }
                 let Ty::Struct(sid) = t else { return Ok(None) };
                 match self.prog.field(sid, f) {
-                    Some((ft, _)) => Ok(Some(ft)),
+                    Some((ft, _)) => {
+                        self.field_privacy(sid, f, sp.at)?;
+                        Ok(Some(ft))
+                    }
                     None if self.prog.method(sid, "deref").is_some() || self.prog.is_placeholder(sid) => Ok(None),
                     None => Err(self.at(sp.at, format!("no field `{f}` on type `{}` (E0609)", self.prog.tn(t)))),
                 }
@@ -439,7 +462,7 @@ impl Cx<'_> {
                     },
                 }
             }
-            Expr::Field(base, fname, _) => {
+            Expr::Field(base, fname, fsp) => {
                 // (フィールドがなく Deref を実装した型 (`self.prog` で self: &Inf): `(*self.deref()).prog`)
                 if let Some(Ty::Struct(sid)) = self.peek(base).map(|t| self.strip_refs(t)) {
                     if self.prog.field(sid, fname).is_none() {
@@ -495,7 +518,14 @@ impl Cx<'_> {
                 }
                 let (a, o, sid) = self.struct_base(base)?;
                 match self.prog.field(sid, fname) {
-                    Some((ft, foff)) => Ok(Place::Mem(a, o + foff as i32, ft)),
+                    Some((ft, foff)) => {
+                        // (not a read `..base` makes of the fields a literal leaves out, whose span starts at its
+                        // field: rustc's privacy pass reports that one, E0451)
+                        if fsp.start != fsp.at {
+                            self.field_privacy(sid, fname, fsp.at)?;
+                        }
+                        Ok(Place::Mem(a, o + foff as i32, ft))
+                    }
                     None => err(SP, format!("no field `{fname}` on type `{}`", self.prog.structs[sid as usize].name)),
                 }
             }
@@ -2313,6 +2343,7 @@ impl Cx<'_> {
                 let mut nfields = sfields.clone();
                 for f in all {
                     if !sfields.iter().any(|fv| fv.0 == f) {
+                        // (a span that starts at its field: field_privacy leaves it to the privacy pass's E0451)
                         let at = expr_start(base);
                         nfields.push((f.clone(), Expr::Field(Box::new(base.clone()), f, crate::parse::Span { start: at, at })));
                     }
