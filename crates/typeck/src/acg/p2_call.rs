@@ -761,7 +761,7 @@ impl Cx<'_> {
             let bsig = &self.prog.sigs[bid as usize];
             let bounds = bsig.trait_of.as_deref().or(bsig.impl_trait.as_deref()).and_then(|tr| self.prog.blanket_bounds.get(tr));
             let prog = self.prog;
-            let holds = |t: Ty| bounds.is_none_or(|bs| blanket_bounds_hold(prog, t, bs, &mut vec![], &mut vec![]));
+            let holds = |t: Ty| bounds.is_none_or(|bs| blanket_impls_hold(prog, t, bs, &mut vec![], &mut vec![]));
             let extra = |t: Ty| (prim(t) || matches!(t, Ty::Unit | Ty::Box(_))) && holds(t);
             let to_prim = matches!(pt, Some(Ty::Ref(_, i)) if extra(*i));
             if !own && pt.is_some_and(|t| prim(t) || matches!(t, Ty::Ref(_, Ty::Str)) || (t == Ty::Unit && holds(t))) || (!own && to_prim) {
@@ -1164,6 +1164,15 @@ impl Cx<'_> {
             // (and its impl's method when it has one, chosen here: the receiver is then taken as that method takes it,
             // `(&q).qux()` of ByRef's `qux(&self)` beside ByValue's `qux(self)`)
             if let Some((_, tr)) = self.explicit_trait.as_ref().filter(|(m, _)| *m == name) {
+                // (`Display::fmt(self, f)` in the type's Debug: its Display / Debug methods are `S::<Display>::fmt`)
+                // (of a generic type's instance, the generic impl's: `VecDeque<i32>`'s is `VecDeque::<Debug>::fmt`)
+                if matches!(tr.as_str(), "Display" | "Debug") {
+                    let own = format!("{}::<{tr}>::{name}", self.prog.structs[sid as usize].name);
+                    let generic = format!("{}::<{tr}>::{name}", self.prog.structs[self.prog.base_of(sid) as usize].name);
+                    if let Some(&id) = self.prog.index.get(&own).or_else(|| self.prog.index.get(&generic)) {
+                        break (a, o, sid, id);
+                    }
+                }
                 let key = format!("{}::{name}", self.prog.structs[self.prog.base_of(sid) as usize].name);
                 let user = |d: u32| self.prog.item_of.get(d as usize).copied().flatten().is_some_and(|x| x < self.prog.prelude_from);
                 match self.trait_candidate_where(&key, tr, |i| self.self_fits(i, Ty::Struct(sid))) {
@@ -2344,7 +2353,7 @@ impl Cx<'_> {
                     }
                 }
                 let bounds = self.prog.blanket_bounds.get(tr);
-                bounds.is_none_or(|bs| blanket_bounds_hold(self.prog, args[0], bs, &mut vec![], &mut vec![])).then_some(bid)
+                bounds.is_none_or(|bs| blanket_impls_hold(self.prog, args[0], bs, &mut vec![], &mut vec![])).then_some(bid)
             });
             if imp.is_none() && ambiguous.get() {
                 return err(span, format!("`{}` has no implementation for `{}` that is told apart from the trait's other blanket impls", self.prog.names[id as usize], self.prog.tn(args[0])));
@@ -3773,6 +3782,11 @@ fn hidden_param(n: &str) -> bool {
     n.starts_with("__impl") && n.len() > 6 && n.as_bytes()[6..].iter().all(|c| c.is_ascii_digit())
 }
 
+/// The bounds of some one of a trait's blanket impls (`impl<T: A> Tr<u8> for T`, `impl<T: B> Tr<u16> for T`) hold of t
+fn blanket_impls_hold(prog: &crate::program::Program, t: Ty, impls: &[Vec<String>], path: &mut Vec<String>, seen: &mut Vec<(String, bool)>) -> bool {
+    impls.iter().any(|bs| blanket_bounds_hold(prog, t, bs, path, seen))
+}
+
 /// The bounds of a blanket impl's self type hold of t (`?Sized` and lifetimes aside). A bound that is a trait with a
 /// blanket impl of its own holds when that impl's bounds do (`impl<T: Marker> Other for T`)
 fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], path: &mut Vec<String>, seen: &mut Vec<(String, bool)>) -> bool {
@@ -3782,7 +3796,7 @@ fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], pat
         }
         // (an impl for t itself (`impl Other for ()`), or the blanket impl's bounds. A trait met again on the way
         // (a cycle of blanket impls), or a chain past rustc's recursion limit (128), does not hold: rustc reports
-        // E0275 there. Each trait is decided once (seen): a trait has one blanket impl, so its answer for t is one)
+        // E0275 there. Each trait is decided once (seen): its answer for t is one, over all its blanket impls)
         match prog.blanket_bounds.get(b.as_str()) {
             Some(inner) if prog.blanket_traits.contains(b.as_str()) => {
                 if prog.implements_concrete(t, b) {
@@ -3795,7 +3809,7 @@ fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], pat
                     return false;
                 }
                 path.push(b.clone());
-                let r = blanket_bounds_hold(prog, t, inner, path, seen);
+                let r = blanket_impls_hold(prog, t, inner, path, seen);
                 path.pop();
                 seen.push((b.clone(), r));
                 r

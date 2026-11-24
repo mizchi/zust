@@ -67,3 +67,4 @@ compile-fail	generics/issue-65285-incorrect-explicit-lifetime-name-needed.rs
 compile-fail	privacy/projections.rs
 compile-fail	closure_context/issue-26046-fn-mut.rs
 compile-fail	iterators/rpit-method-chain-no-ice.rs
+compile-fail	span/send-is-not-static-std-sync-2.rs

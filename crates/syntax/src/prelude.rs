@@ -571,10 +571,12 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "Bytes" | "ToCase" | "CharEscape" | "ParseIntError" | "IntErrorKind" | "Rev" | "StepBy" | "Peekable"
                         | "SkipWhile" | "PreludeScan" | "Inspect" | "FlatMap" | "Flatten" | "Cloned" | "Windows" | "Chunks" | "ChunksExact" | "ChunksMut" | "Iter" | "IterMut" | "MaybeUninit"
                         | "HashSet" | "SetIntoIter" | "BTreeMap" | "BTreeSet" | "BtEntry" | "BtIter" | "BtIterMut"
-                        | "BtIntoIter" | "VecDeque" | "DqIter" | "DqIntoIter" | "f64" | "f32" | "ParseFloatError" | "i128" | "u128" | "FromUtf8Error" | "Utf8Error" | "Rc" | "Arc" | "ManuallyDrop" | "Pin" | "NonNull" | "UnsafeCell" | "RefCell" | "Ref" | "RefMut" | "BorrowError" | "BorrowMutError" | "Cell" | "JoinHandle" | "__Sndr" | "__SyncSndr" | "__Rcvr__" | "__RecvIter" | "AtomicUsize" | "AtomicIsize" | "AtomicU8" | "AtomicU16" | "AtomicU32" | "AtomicU64" | "AtomicI8" | "AtomicI16" | "AtomicI32" | "AtomicI64" | "AtomicBool" | "OnceLock" | "Mutex" | "MutexGuard" | "RangeFrom" | "TryFromIntError" | "TryFromSliceError" | "Stdin" | "StdinLock" | "StdinLines" | "Stdout" | "StdoutLock"
+                        | "BtIntoIter" | "VecDeque" | "DqIter" | "DqIntoIter" | "f64" | "f32" | "ParseFloatError" | "i128" | "u128" | "FromUtf8Error" | "Utf8Error" | "Rc" | "Arc" | "ManuallyDrop" | "Pin" | "NonNull" | "UnsafeCell" | "RefCell" | "Ref" | "RefMut" | "BorrowError" | "BorrowMutError" | "Cell" | "JoinHandle" | "__Sndr" | "__SyncSndr" | "__Rcvr__" | "__RecvIter" | "AtomicUsize" | "AtomicIsize" | "AtomicU8" | "AtomicU16" | "AtomicU32" | "AtomicU64" | "AtomicI8" | "AtomicI16" | "AtomicI32" | "AtomicI64" | "AtomicBool" | "OnceLock" | "Mutex" | "MutexGuard" | "RwLock" | "RwLockReadGuard" | "RwLockWriteGuard" | "SystemTime" | "SystemTimeError" | "Bound" | "Arguments" | "RangeFrom" | "TryFromIntError" | "TryFromSliceError" | "Stdin" | "StdinLock" | "StdinLines" | "Stdout" | "StdoutLock"
                         | "BufWriter" | "BufReader" | "Cursor" | "ChunksMut" | "IoError" | "__DynError" | "Args" | "DefaultHasher" | "VarError"
                         | "PathBuf" | "__PathExt" | "__AsPathStr" | "Command" | "__ExitStatus" | "Cow" | "__CowStr"
-                        | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating" => Some(w),
+                        | "Duration" | "AtomicPtr" | "RangeTo" | "RangeToInclusive" | "Fuse" | "Wrapping" | "Saturating"
+                        | "CString" | "CStr" | "NulError" | "__CStrBytes" | "LinkedList"
+                        | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
                         // HashMap のイテレータ (HmIter など) は HashMap を使うときだけ
@@ -613,6 +615,8 @@ const SHADOWABLE: &[&str] = &[
     "AtomicPtr", "TryReserveError", "c_void", "Infallible", "Cycle", "JoinHandle", "Chars", "Poll", "Waker", "Context", "Future",
     "Wrapping", "Saturating", "NonZeroU8", "NonZeroU16", "NonZeroU32", "NonZeroU64", "NonZeroU128", "NonZeroUsize",
     "NonZeroI8", "NonZeroI16", "NonZeroI32", "NonZeroI64", "NonZeroI128", "NonZeroIsize",
+    "FromStr", "CString", "CStr", "NulError", "LinkedList", "Ipv4Addr", "Ipv6Addr", "IpAddr", "SocketAddrV4", "SocketAddrV6",
+    "SocketAddr", "AddrParseError", "RwLock", "SystemTime", "SystemTimeError", "Bound", "Arguments",
 ];
 
 /// The name a struct / enum / trait / union item defines (from its first identifiers: `pub struct Name`)
@@ -711,12 +715,103 @@ pub fn rename_user_collisions(src: &str, user_items: &[SrcItem]) -> Option<Strin
     Some(out)
 }
 
+/// Where a forward scan of the program is: in code, a `//` comment, a `/* */` comment (its depth), a string, or a raw
+/// string (its `#`s). rename_shadowed moves it only to a name that would count, so a program without one is not read
+/// byte by byte
+#[derive(Clone, Copy, PartialEq)]
+enum LexAt {
+    Code,
+    Line,
+    Block(u32),
+    Str,
+    Raw(usize),
+}
+
+/// The scan from (k, st) moved to i: what i is in (out of rename_shadowed's loop over every byte, which it would slow)
+#[cold]
+#[inline(never)]
+fn lex_to(b: &[u8], k: &mut usize, st: &mut LexAt, i: usize) -> LexAt {
+    let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    while *k < i {
+        let c = b[*k];
+        match *st {
+            LexAt::Line => {
+                if c == b'\n' {
+                    *st = LexAt::Code;
+                }
+            }
+            LexAt::Block(d) => {
+                if c == b'*' && b.get(*k + 1) == Some(&b'/') {
+                    *st = if d == 1 { LexAt::Code } else { LexAt::Block(d - 1) };
+                    *k += 1;
+                } else if c == b'/' && b.get(*k + 1) == Some(&b'*') {
+                    *st = LexAt::Block(d + 1);
+                    *k += 1;
+                }
+            }
+            LexAt::Str => {
+                if c == b'\\' {
+                    *k += 1;
+                } else if c == b'"' {
+                    *st = LexAt::Code;
+                }
+            }
+            LexAt::Raw(h) => {
+                if c == b'"' && *k + h < b.len() && b[*k + 1..=*k + h].iter().all(|&x| x == b'#') {
+                    *st = LexAt::Code;
+                    *k += h;
+                }
+            }
+            LexAt::Code => {
+                if c == b'/' && b.get(*k + 1) == Some(&b'/') {
+                    *st = LexAt::Line;
+                } else if c == b'/' && b.get(*k + 1) == Some(&b'*') {
+                    *st = LexAt::Block(1);
+                    *k += 1;
+                } else if c == b'"' {
+                    *st = LexAt::Str;
+                } else if c == b'r'
+                    && (*k == 0
+                        || !is_id(b[*k - 1])
+                        // (`br".."`, `cr#".."#`)
+                        || (matches!(b[*k - 1], b'b' | b'c') && (*k == 1 || !is_id(b[*k - 2]))))
+                    && matches!(b.get(*k + 1), Some(b'"' | b'#'))
+                {
+                    let mut j = *k + 1;
+                    while j < b.len() && b[j] == b'#' {
+                        j += 1;
+                    }
+                    if b.get(j) == Some(&b'"') {
+                        *st = LexAt::Raw(j - *k - 1);
+                        *k = j;
+                    }
+                } else if c == b'\'' {
+                    // (a char literal, `'"'` or escaped `'\"'`, `'\''`: past it; a lifetime's quote stays)
+                    if b.get(*k + 1) == Some(&b'\\') {
+                        let mut j = *k + 3;
+                        while j < b.len() && b[j] != b'\'' {
+                            j += 1;
+                        }
+                        *k = j;
+                    } else if b.get(*k + 2) == Some(&b'\'') {
+                        *k += 2;
+                    }
+                }
+            }
+        }
+        *k += 1;
+    }
+    *st
+}
+
 pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
     // (one pass over the bytes: the name after `struct ` / `enum ` / `trait ` / `type ` / `union `. It replaces a
     // search for each name: those were most of the cost of a no-op build of a large program)
     let mut defined: Vec<&str> = vec![];
     let b = user_src.as_bytes();
     let is_id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    // (the scan that tells comments and strings, moved forward only to a candidate: lex_to)
+    let (mut lk, mut ls) = (0usize, LexAt::Code);
     let mut i = 0;
     while i < b.len() {
         let c = b[i];
@@ -733,7 +828,9 @@ pub fn rename_shadowed(user_src: &str, prelude: String) -> String {
                     e += 1;
                 }
                 let w = &user_src[a..e];
-                if SHADOWABLE.contains(&w) && !defined.contains(&w) {
+                // (not in a comment or a string: a doc comment's `# struct IpAddr;`, `#[doc = " # struct IpAddr;"]`
+                // defines nothing. Looked at only for a name that would count)
+                if SHADOWABLE.contains(&w) && !defined.contains(&w) && lex_to(b, &mut lk, &mut ls, i) == LexAt::Code {
                     defined.push(w);
                 }
                 i = e.max(i + 1);
@@ -1272,7 +1369,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.insert("__exr_char_from_u32_checked");
     }
     if need.contains("parse") {
-        need.extend(["__from_str", "__FromStr"]);
+        need.extend(["from_str", "FromStr"]);
     }
     if need.contains("flat_map") || need.contains("flatten") {
         need.extend(["__flat_prep", "__flat_next", "__Flat", "__flat_mark", "reverse", "pop", "take"]);
@@ -1626,11 +1723,18 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("PathBuf") {
         op_impls.extend(["Deref", "From", "IntoIterator"]);
     }
-    if need.contains("Cow") || need.contains("Mutex") {
+    // (std::net's addresses impl From: `Ipv4Addr::from([a, b, c, d])`, `IpAddr::from(v4)`)
+    if ["Ipv4Addr", "Ipv6Addr", "IpAddr"].iter().any(|n| need.contains(*n)) {
+        op_impls.push("From");
+    }
+    if need.contains("Cow") || need.contains("Mutex") || need.contains("RwLock") {
         op_impls.push("Deref");
     }
     if need.contains("Mutex") {
         need.extend(["MutexGuard", "Deref", "deref", "Result"]);
+    }
+    if need.contains("RwLock") {
+        need.extend(["RwLockReadGuard", "RwLockWriteGuard", "Deref", "deref", "deref_mut", "Drop", "drop", "Result"]);
     }
     // (BinaryHeap の peek_mut もガードを返す)
     if need.contains("BinaryHeap") && need.contains("peek_mut") {
