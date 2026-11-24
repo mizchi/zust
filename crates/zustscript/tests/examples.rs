@@ -20,7 +20,7 @@ fn out_dir(name: &str) -> PathBuf {
     // (the JS side of the helpers, as a package: the glue imports `zustscript-helper`)
     let helper = d.join("node_modules/zustscript-helper");
     std::fs::create_dir_all(&helper).unwrap();
-    for f in ["package.json", "index.js", "index.d.ts"] {
+    for f in ["package.json", "index.js", "index.d.ts", "bytes.js", "bytes.d.ts"] {
         std::fs::copy(root().join("helper/ts").join(f), helper.join(f)).unwrap();
     }
     // (a stand-in for React: renders to a string)
