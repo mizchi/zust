@@ -8517,6 +8517,13 @@ impl Session2 {
 fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
     let Some((l, rest)) = e.split_once(":1: ") else { return e.to_string() };
     let Ok(line) = l.parse::<usize>() else { return e.to_string() };
+    // (`\u{6}part\u{6}msg`: at that part of the method's signature, as sig_part reads it)
+    if let Some((part, m)) = rest.strip_prefix('\u{6}').and_then(|r| r.split_once('\u{6}')) {
+        let at = items.iter().find(|it| it.line == line).and_then(|it| Some(it.start + sig_part(src.get(it.start..it.end.min(src.len()))?, part)?));
+        let Some(at) = at else { return format!("{line}:1: {m}") };
+        let col = at - src[..at].rfind('\n').map_or(0, |p| p + 1) + 1;
+        return format!("{}:{col}: {m}", src[..at].matches('\n').count() + 1);
+    }
     let name = ["cannot find type `", "cannot find trait `", "cannot find value `", "cannot find struct `", "the name `", "enum discriminant overflowed (E0370): `"]
         .iter()
         .find_map(|p| rest.strip_prefix(p))
@@ -8532,6 +8539,68 @@ fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
         Some(i) => format!("{}:1: {rest}", line + text[..i].matches('\n').count()),
         None => e.to_string(),
     }
+}
+
+/// Where a part of a fn's signature starts in its item's text, as rustc points at it: `f` the signature (after the
+/// attributes), `p{i}` the `i`th parameter (a receiver itself, another parameter's type), `r` the result's type
+fn sig_part(text: &str, part: &str) -> Option<usize> {
+    let toks = crate::lexer::tokenize(text.as_bytes());
+    let tk = |k: usize| &text[toks[k].1..toks[k].2];
+    // (the attributes: `#` and its bracketed group)
+    let mut k = 0;
+    while k + 1 < toks.len() && tk(k) == "#" && tk(k + 1) == "[" {
+        let mut d = 0;
+        k += 1;
+        while k < toks.len() {
+            match tk(k) {
+                "[" => d += 1,
+                "]" => d -= 1,
+                _ => {}
+            }
+            k += 1;
+            if d == 0 {
+                break;
+            }
+        }
+    }
+    if part == "f" {
+        return toks.get(k).map(|t| t.1);
+    }
+    let open = (k..toks.len()).find(|&j| tk(j) == "(")?;
+    // (the parameters: split at the commas outside brackets, `->` not closing one)
+    let (mut d, mut start, mut params, mut close) = (0i32, open + 1, vec![], None);
+    let mut j = open;
+    while j < toks.len() {
+        match tk(j) {
+            "(" | "[" | "<" | "{" => d += 1,
+            ">" if j > 0 && tk(j - 1) == "-" && toks[j - 1].2 == toks[j].1 => {}
+            ")" | "]" | ">" | "}" => {
+                d -= 1;
+                if d == 0 {
+                    if start < j {
+                        params.push((start, j));
+                    }
+                    close = Some(j);
+                    break;
+                }
+            }
+            "," if d == 1 => {
+                params.push((start, j));
+                start = j + 1;
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    let close = close?;
+    if part == "r" {
+        let a = (close + 2 < toks.len() && tk(close + 1) == "-" && tk(close + 2) == ">").then_some(close + 3)?;
+        return toks.get(a).map(|t| t.1);
+    }
+    let (a, b) = *params.get(part.strip_prefix('p')?.parse::<usize>().ok()?)?;
+    // (the type after the pattern's `:`, not a path's `::`; a receiver without one (`&self`), itself)
+    let colon = (a..b).find(|&c| tk(c) == ":" && (c + 1 >= b || tk(c + 1) != ":") && (c == a || tk(c - 1) != ":"));
+    Some(toks[colon.filter(|&c| c + 1 < b).map_or(a, |c| c + 1)].1)
 }
 
 /// compile_id と、コード生成が要求した (総称関数の) インスタンス

@@ -1888,3 +1888,22 @@ fn dyn_compatibility() {
     // (a method that requires `Self: Sized`, and a projection of `Self`, keep it dyn compatible)
     assert_eq!(first("trait A {\n    fn new() -> Self where Self: Sized;\n    type T;\n    fn get(&self) -> Self::T;\n}\nfn f(_: &dyn A<T = u8>) {}\nfn main() {}\n"), None, "exempt");
 }
+
+#[test]
+fn method_signature_mismatch() {
+    // (E0053: an impl's method whose parameter, result or `unsafe` is not the trait's, at the part rustc points at;
+    // each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, format!("method `{m}` has an incompatible type for trait `Foo` (E0053)")));
+    let tr = |decl: &str, imp: &str| format!("trait Foo {{\n    {decl}\n}}\nstruct A;\nimpl Foo for A {{\n    #[inline]\n{imp}\n}}\nfn main() {{}}\n");
+    assert_eq!(first(&tr("fn foo(&self, x: u8) -> bool;", "    fn foo(\n        &self,\n        x: i16,\n    ) -> bool { x > 0 }")), e(9, 12, "foo"), "parameter");
+    assert_eq!(first(&tr("fn foo(&self) -> u8;", "    fn foo(&self)\n        -> i8 { 0 }")), e(8, 12, "foo"), "result");
+    assert_eq!(first(&tr("fn foo(&self) -> u8;", "    unsafe fn foo(&self) -> u8 { 0 }")), e(7, 5, "foo"), "unsafe");
+    assert_eq!(first(&tr("fn foo(&self) -> u8;", "    fn foo(self) -> u8 { 0 }")), e(7, 12, "foo"), "receiver");
+    assert_eq!(first(&tr("fn foo(&self) -> u8;", "    fn foo(self: Box<Self>) -> u8 { 0 }")), e(7, 18, "foo"), "receiver's type");
+    // (an `-> impl Trait` or `async fn` declaration: the impl may return a type of its own)
+    assert_eq!(first("use std::fmt::Display;\ntrait Foo {\n    fn bar(&self) -> impl Display;\n}\nimpl Foo for i32 {\n    fn bar(&self) -> i32 { *self }\n}\nfn main() {}\n"), None, "impl Trait");
+}

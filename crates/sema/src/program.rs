@@ -2072,6 +2072,9 @@ impl Program {
                 if let Some(e) = early_mismatch(ds, ms, m) {
                     return Err(format!("{}:1: {e}", items[ii as usize].line));
                 }
+                if let Some(at) = sig_incompatible(&p, ds, ms, tr) {
+                    return Err(format!("{}:1: \u{6}{at}\u{6}method `{m}` has an incompatible type for trait `{tr}` (E0053)", items[ii as usize].line));
+                }
             }
         }
         for (sid, tr) in &p.impls {
@@ -2109,8 +2112,10 @@ impl Program {
                             Ty::Struct(x) if prog.structs[prog.base_of(x) as usize].name == "Pin" => 4,
                             _ => 0,
                         };
-                        if ds.has_self && ms.has_self && kind(&p, ds.params[0]) != kind(&p, ms.params[0]) {
-                            return Err(format!("{line}method `{m}` has an incompatible type for trait `{tr}` (E0053)"));
+                        // (at the receiver, or the part sig_incompatible names)
+                        let at = (ds.has_self && ms.has_self && kind(&p, ds.params[0]) != kind(&p, ms.params[0])).then(|| "p0".to_string());
+                        if let Some(at) = at.or_else(|| sig_incompatible(&p, ds, ms, tr)) {
+                            return Err(format!("{line}\u{6}{at}\u{6}method `{m}` has an incompatible type for trait `{tr}` (E0053)"));
                         }
                         // (E0195: the method's own lifetimes that bounds make early-bound, and how many bounds each has,
                         // are the trait's: `fn bar<'a, 'b: 'a>` in the trait, `fn bar<'a, 'b>` in the impl)
@@ -5600,6 +5605,32 @@ fn early_bound(r: Option<&crate::types::RSigSyn>, g: &[(String, Vec<String>)], o
     };
     let rel = r.outlives.iter().filter_map(|&(a, b)| Some((ord(a)?, ord(b)?))).collect();
     ((r.outer as usize..r.lts.len()).map(|i| idx.contains(&i)).collect(), rel)
+}
+
+/// E0053 beyond the receiver: `unsafe` on one side only, or a parameter's or the result's type other than the
+/// trait's, where both are concrete (no type parameter, `Self` or projection) and neither the trait nor the methods
+/// have parameters of their own. The part rustc points at, for name_line: `f` the signature, `p{i}` the `i`th
+/// parameter's type, `r` the result's
+fn sig_incompatible(p: &Program, ds: &FnSig, ms: &FnSig, tr: &str) -> Option<String> {
+    if ds.has_self != ms.has_self || ds.params.len() != ms.params.len() {
+        return None;
+    }
+    if ds.is_unsafe != ms.is_unsafe {
+        return Some("f".into());
+    }
+    let own = |g: &Vec<(String, Vec<String>)>| g.iter().all(|(n, _)| n == "Self");
+    if !own(&ds.generics) || !own(&ms.generics) || tr.contains('<') {
+        return None;
+    }
+    let concrete = |t: Ty| !p.has_param(t) && !p.tn(t).contains("Self");
+    let differ = |a: Ty, b: Ty| a != b && concrete(a) && concrete(b);
+    let k0 = usize::from(ds.has_self);
+    if let Some(i) = (k0..ds.params.len()).find(|&i| differ(ds.params[i], ms.params[i])) {
+        return Some(format!("p{i}"));
+    }
+    // (the result: not when the declaration's is `-> impl Trait` (kept as `()`, a placeholder) or the declaration is an
+    // `async fn` (kept as its output): the impl may return any type of those bounds, a future for an `async fn`)
+    (ds.ret != Ty::Unit && differ(ds.ret, ms.ret) && !p.implements(ms.ret, "Future")).then(|| "r".into())
 }
 
 /// An impl's method against the trait's declaration: E0195 when they have a different number of early-bound

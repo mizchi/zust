@@ -4644,6 +4644,7 @@ compile-fail	mismatched_types/issue-106182.rs
 compile-fail	mismatched_types/issue-112036.rs
 compile-fail	mismatched_types/issue-118145-unwrap-for-shorthand.rs
 compile-fail	mismatched_types/issue-118510.rs
+compile-fail	mismatched_types/issue-13033.rs
 compile-fail	mismatched_types/issue-1362.rs
 compile-fail	mismatched_types/issue-1448-2.rs
 compile-fail	mismatched_types/issue-19109.rs
@@ -4671,6 +4672,7 @@ compile-fail	mismatched_types/suggest-option-asderef-inference-var.rs
 compile-fail	mismatched_types/suggest-option-asderef-unfixable.rs
 compile-fail	mismatched_types/suggest-option-asderef.rs
 compile-fail	mismatched_types/suggest-removing-tuple-struct-field.rs
+compile-fail	mismatched_types/trait-impl-fn-incompatibility.rs
 compile-fail	mismatched_types/transforming-option-ref-issue-127545.rs
 compile-fail	missing/missing-block-hint.rs
 compile-fail	missing/missing-comma-in-match.rs
@@ -7579,6 +7581,7 @@ check-pass	traits/impl-evaluation-order.rs
 compile-fail	traits/impl-for-module.rs
 run-pass	traits/impl-implicit-trait.rs
 run-pass	traits/impl-inherent-prefer-over-trait.rs
+compile-fail	traits/impl-method-mismatch.rs
 run-pass	traits/impl-object-overlap-issue-23853.rs
 check-pass	traits/impl_trait_as_trait_return_position.rs
 compile-fail	traits/incoherent-impl-ambiguity.rs
@@ -7632,6 +7635,7 @@ run-pass	traits/issue-23825.rs
 check-pass	traits/issue-2611-3.rs
 compile-fail	traits/issue-32963.rs
 check-pass	traits/issue-33187.rs
+compile-fail	traits/issue-35869.rs
 run-pass	traits/issue-3683.rs
 run-pass	traits/issue-38033.rs
 compile-fail	traits/issue-38404.rs
@@ -8220,6 +8224,7 @@ run-pass	unsafe/unsafe-fn-called-from-unsafe-fn.rs
 compile-fail	unsafe/unsafe-fn-called-through-ref.rs
 compile-fail	unsafe/unsafe-fn-deref-ptr.rs
 run-pass	unsafe/unsafe-pointer-assignability.rs
+compile-fail	unsafe/unsafe-trait-impl.rs
 check-pass	unsafe/unsafe_op_in_unsafe_fn/edition_2024_default.rs
 compile-fail	unsafe/unsafe_op_in_unsafe_fn/rfc-2585-unsafe_op_in_unsafe_fn.rs
 compile-fail	unsized-locals/align.rs
