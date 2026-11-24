@@ -262,13 +262,15 @@ fn lit(s: &str) -> String {
 
 /// The source with the harness: `--test`'s crate. Nothing in the source moves: the harness follows the last line
 pub fn apply(src: &str) -> String {
-    apply_with(src, None).0
+    apply_with(src, None, false).0
 }
 
 /// apply, with the tests collected from `expanded` when there is one: the same source with its `macro_rules!`
 /// expanded (crate::macros), so the tests a macro makes are run too. The harness still goes after the source as it
 /// is. Also how many `#[test]` attributes no function was found for (macros, when there is no expansion)
-pub fn apply_with(src: &str, expanded: Option<&str>) -> (String, usize) {
+/// (`wasm`: a wasm32 module, which cannot start a child process: a `#[should_panic]` test runs in the module, and the
+/// runner (zurgo) checks its panic)
+pub fn apply_with(src: &str, expanded: Option<&str>, wasm: bool) -> (String, usize) {
     let c = collect(src);
     let (tests, unlisted) = match expanded {
         Some(e) => (collect(e).tests, 0),
@@ -301,17 +303,17 @@ pub fn apply_with(src: &str, expanded: Option<&str>) -> (String, usize) {
         arms.join(" "),
         table.join(", ")
     ));
+    let mut out = out.replacen("&& CHILD {", if wasm { "&& false {" } else { "&& true {" }, 1);
+    // (on the harness's line: the source's lines stay as they are, and the harness is one more)
+    out.pop();
+    out.push(' ');
+    out.push_str(if wasm { CHILD_FN_WASM } else { CHILD_FN });
+    out.push('\n');
     (out, unlisted)
 }
 
-/// The harness's fixed part (one line: the lines of the source above it stay where they are)
-const HARNESS: &str = concat!(
-    "#[allow(dead_code)] fn __zust_test_matches(n: &str, pats: &Vec<String>, exact: bool) -> bool { ",
-    "for p in pats { if (exact && n == p.as_str()) || (!exact && n.contains(p.as_str())) { return true; } } false } ",
-    "#[allow(dead_code)] fn __zust_test_panic_msg(err: &str) -> Option<String> { ",
-    "let i = err.rfind(\"' panicked at \")?; let r = &err[i..]; let Some(j) = r.find('\\n') else { return Some(String::new()); }; ",
-    "let m = &r[j + 1..]; let m = match m.find(\"\\nnote: run with `RUST_BACKTRACE\") { Some(e) => &m[..e], None => m }; ",
-    "let m = match m.find(\"\\nstack backtrace:\") { Some(e) => &m[..e], None => m }; Some(m.to_string()) } ",
+/// The harness's child process: a test run again in `/proc/self/exe` (the host only)
+const CHILD_FN: &str = concat!(
     "#[allow(dead_code)] fn __zust_test_child(t: &[(&str, u8, &str)], k: usize, ign: bool) -> (bool, String) { ",
     "let mut c = std::process::Command::new(\"/proc/self/exe\"); c.arg(t[k].0); c.arg(\"--exact\"); c.arg(\"--zust-raw\"); if ign { c.arg(\"--include-ignored\"); } ",
     "match c.output() { ",
@@ -321,6 +323,19 @@ const HARNESS: &str = concat!(
     "if !ok && t[k].1 & 2 != 0 { if code == Some(101) { msg.push_str(&format!(\"note: panic did not contain expected string\\n      expected substring: {:?}\\n\", t[k].2)); } else { msg.push_str(\"note: test did not panic as expected\\n\"); } } ",
     "(ok, msg) } ",
     "Err(e) => (false, format!(\"cannot run the test: {}\\n\", e)) } } ",
+);
+
+/// The same for a wasm32 module, which starts no process (zurgo runs each test in a module of its own)
+const CHILD_FN_WASM: &str = "#[allow(dead_code)] fn __zust_test_child(t: &[(&str, u8, &str)], k: usize, ign: bool) -> (bool, String) { let _ = (t, k, ign); (false, String::from(\"a wasm32 module starts no process: run each test with `<module> <name> --exact` (zurgo test does)\\n\")) }";
+
+/// The harness's fixed part (one line: the lines of the source above it stay where they are)
+const HARNESS: &str = concat!(
+    "#[allow(dead_code)] fn __zust_test_matches(n: &str, pats: &Vec<String>, exact: bool) -> bool { ",
+    "for p in pats { if (exact && n == p.as_str()) || (!exact && n.contains(p.as_str())) { return true; } } false } ",
+    "#[allow(dead_code)] fn __zust_test_panic_msg(err: &str) -> Option<String> { ",
+    "let i = err.rfind(\"' panicked at \")?; let r = &err[i..]; let Some(j) = r.find('\\n') else { return Some(String::new()); }; ",
+    "let m = &r[j + 1..]; let m = match m.find(\"\\nnote: run with `RUST_BACKTRACE\") { Some(e) => &m[..e], None => m }; ",
+    "let m = match m.find(\"\\nstack backtrace:\") { Some(e) => &m[..e], None => m }; Some(m.to_string()) } ",
     "#[allow(dead_code)] fn __zust_test_main(t: &[(&str, u8, &str)], a: &Vec<String>) -> i32 { ",
     "let mut list = false; let mut exact = false; let mut ignored = false; let mut include = false; let mut raw = false; let mut fmt = String::new(); ",
     "let mut pats: Vec<String> = Vec::new(); let mut skips: Vec<String> = Vec::new(); let mut i = 1; ",
@@ -341,7 +356,7 @@ const HARNESS: &str = concat!(
     "if exact && sel.len() == 1 { let k = sel[0]; ",
     "if ignored && t[k].1 & 1 == 0 { println!(\"\\nrunning 0 tests\\n\\ntest result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; {} filtered out\\n\", filtered + 1); return 0; } ",
     "if t[k].1 & 1 != 0 && !ignored && !include { println!(\"\\nrunning 1 test\\ntest {} ... ignored\\n\\ntest result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; {} filtered out\\n\", t[k].0, filtered); return 0; } ",
-    "if t[k].1 & 2 != 0 { let (ok, msg) = __zust_test_child(t, k, true); if !ok { eprint!(\"{}\", msg); return 101; } return 0; } ",
+    "if t[k].1 & 2 != 0 && CHILD { let (ok, msg) = __zust_test_child(t, k, true); if !ok { eprint!(\"{}\", msg); return 101; } return 0; } ",
     "println!(\"\\nrunning 1 test\"); __zust_test_run(k); println!(\"test {} ... ok\\n\\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; {} filtered out\\n\", t[k].0, filtered); return 0; } ",
     "println!(\"\\nrunning {} tests\", sel.len()); let mut passed = 0; let mut failed: Vec<(usize, String)> = Vec::new(); let mut ign = 0; ",
     "for &k in &sel { let is_ign = t[k].1 & 1 != 0; if (ignored && !is_ign) || (is_ign && !ignored && !include) { if is_ign { println!(\"test {} ... ignored\", t[k].0); ign += 1; } else { filtered += 1; } continue; } ",
@@ -376,7 +391,7 @@ mod tests {
         let src = "fn main() {}\nmod tests {\n    macro_rules! t { () => { #[test] fn gen() {} } }\n    macro_rules! u { ($a:ident) => { #[$a] fn gen2() {} } }\n}\n";
         assert_eq!(collect(src).unlisted, 2);
         // (with the expansion, the tests it makes are listed)
-        let (out, unlisted) = apply_with(src, Some("fn main() {}\nmod tests {\n    #[test] fn gen() {}\n}\n"));
+        let (out, unlisted) = apply_with(src, Some("fn main() {}\nmod tests {\n    #[test] fn gen() {}\n}\n"), false);
         assert_eq!(unlisted, 0);
         assert!(out.contains("(\"tests::gen\", 0, \"\")"), "{out}");
     }

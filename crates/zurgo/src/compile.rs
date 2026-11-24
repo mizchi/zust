@@ -372,7 +372,8 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
                     let out = out_dir(g, o);
                     for (b, e) in &built_bins {
                         if pk.m.bins.iter().any(|x| &x.name == b) {
-                            env.push((format!("CARGO_BIN_EXE_{b}"), out.join(e).display().to_string()));
+                            let wasm = o.target.as_deref() == Some("wasm32-unknown-unknown");
+                            env.push((format!("CARGO_BIN_EXE_{b}"), if wasm { out.join(format!("{e}.wasm")) } else { out.join(e) }.display().to_string()));
                         }
                     }
                 }
@@ -573,7 +574,7 @@ pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
         .filter_map(|(i, label, harness)| {
             let c = &crates[i];
             let dir = c.env.iter().find(|(k, _)| k == "CARGO_MANIFEST_DIR").map(|(_, v)| PathBuf::from(v)).unwrap_or_else(|| g.ws_dir.clone());
-            c.exe.as_ref().map(|e| crate::test_runner::TestExe { label, exe: out.join(e), dir, harness })
+            c.exe.as_ref().map(|e| crate::test_runner::TestExe { label, exe: if wasm { out.join(format!("{e}.wasm")) } else { out.join(e) }, dir, harness })
         })
         .collect();
     Ok(Built { out_dir: out, bins, tests, crates })

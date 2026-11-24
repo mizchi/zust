@@ -199,9 +199,12 @@ zurgo test --lib parse -- --include-ignored
 - ターゲットの `test = false` は、そのテストを外す。`harness = false` のターゲットはそのままビルドし (自分の `main`、
   `cfg(test)` なし)、ターゲットの名前の 1 つのテストとして動かす: 0 で終われば通る。`zurgo metadata` は結合テストを
   cargo と同じく並べる。
-- まだのもの:
-  - doc テストとベンチマーク。
-  - wasm32。
+- `--target wasm32-unknown-unknown`: テストのクレートはどれも wasm のモジュールになり、各テストを
+  `$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER <module> <name> --exact` で動かす (このリポジトリではランナーは
+  `node tests/wasm/run.mjs`)。モジュールは子プロセスを起こせないので、`#[should_panic]` のテストはモジュールの中で動き、
+  ランナーがその終了コード (101) と panic のメッセージを確かめる。そこでは算術の検査はメッセージなしで trap するので、
+  `expected` はそれに合わない。
+- まだのもの: doc テストとベンチマーク。
 
 ## まだのもの (mizchi/zust#28)
 

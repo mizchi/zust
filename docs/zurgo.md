@@ -202,9 +202,12 @@ zurgo test --lib parse -- --include-ignored
 - `test = false` on a target leaves its tests out. A `harness = false` target is built as it is (its own `main`, no
   `cfg(test)`) and run as one test, named after the target, that passes when it exits with 0. `zurgo metadata` lists
   the integration tests as cargo does.
-- Not yet:
-  - doc tests and benchmarks;
-  - wasm32.
+- `--target wasm32-unknown-unknown`: each test crate is a wasm module, and each test runs as
+  `$CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER <module> <name> --exact` (in this repository the runner is
+  `node tests/wasm/run.mjs`). A module starts no child process, so a `#[should_panic]` test runs in its module and the
+  runner checks its exit code (101) and panic message. An arithmetic check traps there without a message, so
+  `expected` cannot match it.
+- Not yet: doc tests and benchmarks.
 
 ## Not yet (mizchi/zust#28)
 

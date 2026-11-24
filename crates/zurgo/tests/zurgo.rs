@@ -617,3 +617,30 @@ fn test_flags_like_cargo() {
     assert_eq!(zurgo_outcomes(&err).into_keys().collect::<Vec<_>>(), ["uses_lib"], "{err}");
     assert!(!t2.join("zust/debug/custom_test_test.test").exists() && t2.join("zust/debug/normal_test_test.test").exists());
 }
+
+/// `zurgo test --target wasm32-unknown-unknown`: each test in a module of its own, under cargo's runner variable;
+/// `#[should_panic]` is the runner's to check there (a module starts no child process). The outcomes are `cargo test`'s
+/// on the host
+#[test]
+fn test_wasm32_like_cargo_test() {
+    if !Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success()) {
+        eprintln!("note: no node: test_wasm32_like_cargo_test skipped");
+        return;
+    }
+    let m = fixture("test-wasm/Cargo.toml");
+    let (ok, out, _) = cargo(&["test", "--no-fail-fast", "--offline"], &m, &tdir("test-wasm-cargo"));
+    assert!(!ok);
+    let want: std::collections::BTreeMap<String, String> = cargo_outcomes(&out).into_iter().filter(|(_, v)| v != "ignored").collect();
+    assert_eq!(want.len(), 6, "{want:?}");
+    let host = format!("node {}", repo().join("tests/wasm/run.mjs").display());
+    let o = Command::new(ZURGO)
+        .args(["test", "--target", "wasm32-unknown-unknown", "--manifest-path"])
+        .arg(&m)
+        .env("CARGO_TARGET_DIR", tdir("test-wasm"))
+        .env("CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER", host)
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert_eq!(o.status.code(), Some(101), "{err}");
+    assert_eq!(zurgo_outcomes(&err), want, "\n{err}");
+}

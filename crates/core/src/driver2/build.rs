@@ -1076,7 +1076,7 @@ fn with_harness(src: &str, display: &str, cfg: &crate::cfg::CfgSet) -> String {
     // (the tests are collected from the source with its `macro_rules!` expanded, as the build expands them: a test a
     //  macro makes runs too. When the expansion fails here, the build reports it; the harness counts what it saw)
     let expanded = if src.contains("macro_rules!") { crate::macros::expand_cfg(src, Some(cfg)).ok().flatten() } else { None };
-    let (out, unlisted) = crate::test_harness::apply_with(src, expanded.as_deref());
+    let (out, unlisted) = crate::test_harness::apply_with(src, expanded.as_deref(), cfg.wasm);
     if unlisted > 0 {
         eprintln!("warning: {display}: {unlisted} `#[test]` function(s) made by a macro (counting each `#[$attr]` in a macro's body, which may be one) are not run yet (mizchi/zust#96)");
     }

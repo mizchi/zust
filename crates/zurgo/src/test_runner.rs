@@ -78,6 +78,9 @@ struct Job {
     exe: usize,
     name: String,
     ignored: bool,
+    /// `#[should_panic]`'s expected text, for a wasm32 module (where the harness cannot run the test in a child: the
+    /// runner checks the panic)
+    should_panic: Option<String>,
 }
 
 enum Outcome {
@@ -94,9 +97,81 @@ struct Done {
     stderr: Vec<u8>,
 }
 
+/// The command that runs an executable: a wasm32 module (`.wasm`) under cargo's runner variable,
+/// `CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER` (split on white space; a word that names a file from zurgo's directory
+/// is made absolute, as the test runs in its package's directory)
+fn command(exe: &Path) -> Result<Command, String> {
+    if exe.extension().is_none_or(|x| x != "wasm") {
+        return Ok(Command::new(exe));
+    }
+    let var = "CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER";
+    let runner = std::env::var(var).unwrap_or_default();
+    let mut words = runner.split_whitespace().map(|w| {
+        let p = Path::new(w);
+        if p.is_relative() && p.exists() { std::fs::canonicalize(p).map(|a| a.display().to_string()).unwrap_or_else(|_| w.to_string()) } else { w.to_string() }
+    });
+    let Some(prog) = words.next() else { return Err(format!("{} is a wasm32 module: set {var} to a program that runs it (`node tests/wasm/run.mjs` in this repository)", exe.display())) };
+    let mut c = Command::new(prog);
+    c.args(words).arg(exe);
+    Ok(c)
+}
+
+/// A wasm32 module's tests, from zustc's harness (`--list --format zust`): (name, ignored, should_panic's expected)
+fn list_zust(exe: &Path, dir: &Path) -> Result<Vec<(String, bool, Option<String>)>, String> {
+    let mut c = command(exe)?;
+    c.args(["--list", "--format", "zust"]).current_dir(dir).stdin(Stdio::null());
+    let o = c.output().map_err(|e| format!("{}: {e}", exe.display()))?;
+    if !o.status.success() {
+        return Err(format!("{} --list failed ({}):\n{}", exe.display(), o.status, String::from_utf8_lossy(&o.stderr)));
+    }
+    let mut v = vec![];
+    for l in String::from_utf8_lossy(&o.stdout).lines() {
+        let Some((name, rest)) = l.split_once(": test") else { continue };
+        let ignored = rest.starts_with(" ignore");
+        let sp = rest.find(" should_panic ").map(|i| debug_str(rest[i + 14..].trim()));
+        v.push((name.to_string(), ignored, sp));
+    }
+    Ok(v)
+}
+
+/// The value of a string as `{:?}` writes it (`"a\"b"`)
+fn debug_str(s: &str) -> String {
+    let s = s.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(s);
+    let mut out = String::new();
+    let mut it = s.chars();
+    while let Some(c) = it.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match it.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some('r') => out.push('\r'),
+            Some('0') => out.push('\0'),
+            Some('u') => {
+                let h: String = it.by_ref().skip(1).take_while(|c| *c != '}').collect();
+                out.extend(u32::from_str_radix(&h, 16).ok().and_then(char::from_u32));
+            }
+            Some(x) => out.push(x),
+            None => {}
+        }
+    }
+    out
+}
+
+/// A panic's message in a test's stderr: after the last `' panicked at ..:` line, to the `note:` line. None: no panic
+fn panic_msg(err: &str) -> Option<String> {
+    let i = err.rfind("' panicked at ")?;
+    let r = &err[i..];
+    let m = r.find('\n').map(|j| &r[j + 1..]).unwrap_or("");
+    let m = m.find("\nnote: run with `RUST_BACKTRACE").map_or(m, |e| &m[..e]);
+    Some(m.to_string())
+}
+
 /// `<exe> --list --format terse [--ignored]`: the names it prints (`name: test`)
 fn list(exe: &Path, dir: &Path, ignored: bool) -> Result<Vec<String>, String> {
-    let mut c = Command::new(exe);
+    let mut c = command(exe)?;
     c.args(["--list", "--format", "terse"]).current_dir(dir).stdin(Stdio::null());
     if ignored {
         c.arg("--ignored");
@@ -139,8 +214,11 @@ fn write_times(p: &Path, m: &BTreeMap<(String, String), u64>) {
 
 /// Runs one test: its process, its output, its time; stopped at `timeout`. (`harness`: false runs the executable as
 /// it is, the whole of it one test)
-fn run_one(exe: &Path, dir: &Path, name: &str, ignored: bool, harness: bool, o: &RunOpts, slow: &dyn Fn()) -> (Outcome, Vec<u8>, Vec<u8>) {
-    let mut c = Command::new(exe);
+fn run_one(exe: &Path, dir: &Path, name: &str, ignored: bool, harness: bool, should_panic: Option<&str>, o: &RunOpts, slow: &dyn Fn()) -> (Outcome, Vec<u8>, Vec<u8>) {
+    let mut c = match command(exe) {
+        Ok(c) => c,
+        Err(e) => return (Outcome::Fail(None), vec![], format!("{e}\n").into_bytes()),
+    };
     if harness {
         c.arg(name).arg("--exact").arg("--nocapture");
     }
@@ -212,6 +290,19 @@ fn run_one(exe: &Path, dir: &Path, name: &str, ignored: bool, harness: bool, o: 
     if left {
         err.extend_from_slice(b"\n(zurgo: a process the test started kept its output open after it ended: stopped)\n");
     }
+    // (a wasm32 `#[should_panic]` test ran in the module: it passes when it panicked, with the expected text)
+    let outcome = match (should_panic, outcome) {
+        (Some(exp), Outcome::Fail(Some(101))) if panic_msg(&String::from_utf8_lossy(&err)).is_some_and(|m| m.contains(exp)) => Outcome::Pass,
+        (Some(exp), Outcome::Fail(Some(101))) => {
+            err.extend_from_slice(format!("note: panic did not contain expected string\n      expected substring: {exp:?}\n").as_bytes());
+            Outcome::Fail(Some(101))
+        }
+        (Some(_), Outcome::Pass) => {
+            err.extend_from_slice(b"note: test did not panic as expected\n");
+            Outcome::Fail(Some(0))
+        }
+        (_, x) => x,
+    };
     (outcome, out, err)
 }
 
@@ -236,11 +327,21 @@ pub fn run(exes: &[TestExe], o: &RunOpts, times_path: &Path) -> Result<Summary, 
     for (i, x) in exes.iter().enumerate() {
         let (label, exe, dir) = (&x.label, &x.exe, &x.dir);
         // (no harness: one test, named after its target)
-        let (names, ign) = if x.harness {
-            (list(exe, dir, false)?, list(exe, dir, true)?)
-        } else {
+        // (a wasm32 module: zustc's harness says each test's flags at once; its `should_panic` the runner checks)
+        let mut panics: BTreeMap<String, String> = BTreeMap::new();
+        let (names, ign) = if !x.harness {
             let n = label.rsplit_once(' ').map(|(_, n)| n.trim_end_matches(')')).unwrap_or(label).to_string();
             (vec![n], vec![])
+        } else if exe.extension().is_some_and(|e| e == "wasm") {
+            let l = list_zust(exe, dir)?;
+            for (n, _, sp) in &l {
+                if let Some(sp) = sp {
+                    panics.insert(n.clone(), sp.clone());
+                }
+            }
+            (l.iter().map(|t| t.0.clone()).collect(), l.iter().filter(|t| t.1).map(|t| t.0.clone()).collect())
+        } else {
+            (list(exe, dir, false)?, list(exe, dir, true)?)
         };
         for n in names {
             if (!o.filters.is_empty() && !matches(&n, &o.filters, o.exact)) || matches(&n, &o.skip, o.exact) {
@@ -259,7 +360,8 @@ pub fn run(exes: &[TestExe], o: &RunOpts, times_path: &Path) -> Result<Summary, 
                 skipped += 1;
                 continue;
             }
-            jobs.push(Job { exe: i, name: n, ignored });
+            let should_panic = panics.get(&n).cloned();
+            jobs.push(Job { exe: i, name: n, ignored, should_panic });
         }
     }
     if o.list {
@@ -296,7 +398,7 @@ pub fn run(exes: &[TestExe], o: &RunOpts, times_path: &Path) -> Result<Summary, 
                         eprintln!("        SLOW [>{:>8.3}s] {label} {}", o.slow.as_secs_f64(), job.name);
                         slow_said.lock().unwrap().push(j);
                     };
-                    let (outcome, stdout, stderr) = run_one(exe, dir, &job.name, job.ignored, x.harness, o, &slow);
+                    let (outcome, stdout, stderr) = run_one(exe, dir, &job.name, job.ignored, x.harness, job.should_panic.as_deref(), o, &slow);
                     // (fail-fast: no other test starts once one failed, before the result reaches the printer)
                     if o.fail_fast && !matches!(outcome, Outcome::Pass) {
                         stop.store(true, Ordering::Relaxed);

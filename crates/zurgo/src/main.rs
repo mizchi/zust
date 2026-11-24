@@ -151,9 +151,6 @@ fn main() {
             std::process::exit(st.code().unwrap_or(101));
         }
         "test" | "t" => {
-            if o.target.as_deref().is_some_and(|t| t != "x86_64-unknown-linux-gnu") {
-                die("`zurgo test` builds for the host only (x86_64-unknown-linux-gnu)");
-            }
             o.test = true;
             o.test_targets = only.clone();
             let t0 = std::time::Instant::now();
