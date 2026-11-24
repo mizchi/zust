@@ -1213,7 +1213,9 @@ impl Cx<'_> {
                 }
             }
             if let Some(id) = self.prog.method(sid, &name).or_else(|| self.prog.default_method(sid, &name)) {
-                break (a, o, sid, id);
+                // (inherent overloads, in impls for other instances of the type: the one for this receiver's, before its
+                // receiver is borrowed (or not) as that method takes self)
+                break (a, o, sid, self.prog.inherent_overload_for(id, Ty::Struct(sid)));
             }
             let sd = &self.prog.structs[sid as usize];
             let gens = sd.args.clone();
@@ -2507,10 +2509,12 @@ impl Cx<'_> {
         let Some(at) = recv.or_else(|| args.first().and_then(|a| self.peek(a))) else {
             return id;
         };
+        // (an inherent method of an impl for one instance of the type (`impl<T> W<&T>` beside `impl<T> W<&mut T>`):
+        // the receiver's references inside the type arguments are its own too)
         let fits = |c: u32, at: Ty| {
             let sig = &self.prog.sigs[c as usize];
             let mut sol = vec![None; sig.generics.len()];
-            sig.params.first().is_some_and(|&pt| self.prog.match_ty(pt, at, &mut sol))
+            sig.params.first().is_some_and(|&pt| self.prog.match_ty(pt, at, &mut sol) && (sig.impl_trait.is_some() || self.prog.arg_refs_agree(pt, at)))
         };
         // (impls of two traits of one name, `a::M` and `b::M` for u32: the one whose trait is in scope here)
         let base = |c: u32| self.prog.sigs[c as usize].impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
