@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795507214956,
+  "lastUpdate": 1795507217695,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -96881,6 +96881,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/954c1fab0c0d98af459e61facc118009caa79cc4"
         },
         "date": 1795504711819,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 92.857,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 80,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.818,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.103,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 85.714,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.849,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ec3344fdecab387923cf83c3cf56828bab0bf844",
+          "message": "Region check part 20: closures against the regions their bounds bind, boxed closures' signatures, captured locals' regions, what a closure's calls borrow (#111)\n\nRegion check part 20: closures against the regions their bounds bind, boxed closures' signatures, captured locals' regions, what a closure's calls borrow",
+          "timestamp": "2026-11-24T16:48:25+09:00",
+          "tree_id": "d62a3ae119e2c165b25dd7a15a20d60537a33ba4",
+          "url": "https://github.com/mizchi/zust/commit/ec3344fdecab387923cf83c3cf56828bab0bf844"
+        },
+        "date": 1795507217184,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
