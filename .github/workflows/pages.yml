@@ -1,0 +1,88 @@
+name: Pages
+
+# The site on GitHub Pages (served from the gh-pages branch):
+#   /            site/index.html, an introduction to zust
+#   /dashboard/  site/dashboard/, the development retrospective; its data comes from scripts/retro/extract.py
+#   /dev/bench/  written by the Benchmark workflow (github-action-benchmark); left as it is here
+# It runs after each benchmark run, since the tests/ui pass rates on the dashboard come from that run's results.
+on:
+  workflow_run:
+    workflows: [Benchmark]
+    types: [completed]
+    branches: [main]
+  push:
+    branches: [main]
+    paths: [site/**, scripts/retro/**, .github/workflows/pages.yml]
+  workflow_dispatch:
+
+concurrency:
+  group: pages-site
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  # (to read the Pages builds: the site is done when the build of the pushed commit is, not when the push is)
+  pages: read
+
+jobs:
+  site:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Extract the dashboard data
+        run: python3 scripts/retro/extract.py --out out/site/dashboard/data
+      - name: Assemble the site
+        run: cp -R site/. out/site/
+      - name: Render the social cards (og:image) from the same data
+        run: |
+          mkdir -p out/site/dev/bench
+          git show origin/gh-pages:dev/bench/data.js > out/site/dev/bench/data.js
+          python3 -m http.server 8790 -d out/site >/dev/null 2>&1 &
+          npx -y playwright@1.48.2 install --with-deps chromium
+          for page in home dashboard; do
+            npx -y playwright@1.48.2 screenshot --viewport-size "1200, 630" --wait-for-selector "body[data-ready]" \
+              "http://localhost:8790/og/card.html?page=$page" "out/site/og-$page.png"
+          done
+          rm -rf out/site/dev
+      - name: Publish to gh-pages (keeping dev/bench)
+        id: publish
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git worktree add -B gh-pages ../pages origin/gh-pages
+          for i in 1 2 3 4; do
+            (cd ../pages && git reset -q --hard origin/gh-pages)
+            rm -rf ../pages/dashboard ../pages/og
+            cp -R out/site/. ../pages/
+            cd ../pages
+            git add -A index.html style.css nav.js dashboard og og-home.png og-dashboard.png
+            if git diff --cached --quiet; then echo "site unchanged"; exit 0; fi
+            git commit -q -m "site: / and /dashboard/ from ${GITHUB_SHA::7}"
+            if git push -q origin gh-pages; then echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"; exit 0; fi
+            cd - >/dev/null
+            sleep $((i * 5))
+            git fetch -q origin gh-pages
+          done
+          exit 1
+      # (GitHub builds the gh-pages branch on each push. The site is published when a build of that commit, or of a later
+      #  one that contains it (the benchmark may push right after), is done; a superseded build errors and is not it)
+      - name: Wait for the Pages build
+        if: steps.publish.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.publish.outputs.sha }}
+        run: |
+          cd ../pages
+          for i in $(seq 1 60); do
+            read -r state commit < <(gh api "repos/${GITHUB_REPOSITORY}/pages/builds/latest" --jq '"\(.status) \(.commit)"')
+            git fetch -q origin gh-pages
+            if [ "$state" = built ] && git merge-base --is-ancestor "$SHA" "$commit" 2>/dev/null; then
+              echo "Pages built $commit (contains $SHA)"; exit 0
+            fi
+            sleep 10
+          done
+          echo "no Pages build of $SHA after 10 minutes (latest: $state $commit)"; exit 1
