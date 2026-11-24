@@ -370,6 +370,8 @@ pub struct Program {
     pub derived: FxMap<u32, Vec<String>>,
     /// a struct's / enum's const parameters of other types than usize (base ids): (the parameter's place, its type)
     pub const_param_tys: FxMap<u32, Vec<(usize, String)>>,
+    /// The defaults of a struct's type parameters, by place (`struct W<T, F = fn() -> T>`): `W<u8>` is `W<u8, fn() -> u8>`
+    pub struct_defaults: FxMap<u32, Vec<Option<TySyn>>>,
     /// A struct / enum / union of the program's: the places of its type parameters bounded by Copy (`union U<T: Copy>`)
     pub copy_params: FxMap<u32, Vec<usize>>,
     /// the program's source declares modules (`mod m { .. }`), whose scopes are flattened away: a name's item may then
@@ -1019,6 +1021,7 @@ impl Program {
             derived_peq: FxSet::default(),
             derived: FxMap::default(),
             const_param_tys: FxMap::default(),
+            struct_defaults: FxMap::default(),
             copy_params: FxMap::default(),
             has_mods: false,
             trait_clone_fns: false,
@@ -1263,6 +1266,9 @@ impl Program {
                     if let (true, Some(k)) = (bs.iter().any(|b| b == "Copy" || b.ends_with("::Copy")), sm.adt_generics.iter().position(|g| g == pn)) {
                         p.copy_params.entry(sdefs.len() as u32).or_default().push(k);
                     }
+                }
+                if !sm.adt_defaults.is_empty() {
+                    p.struct_defaults.insert(sdefs.len() as u32, sm.adt_defaults.clone());
                 }
                 sdefs.push((ii, name.clone(), shape, sm.adt_generics.clone()));
             }
@@ -1649,7 +1655,9 @@ impl Program {
             .collect();
         // 4. trait の実装 (impl ヘッダの要約から)
         // (traits with an impl for `&T` of a type parameter T)
-        let mut ref_blankets: HashSet<String> = Default::default();
+        // (the traits of `impl<T> Tr for &T` / `&mut T` (whether mut), and of `impl<T> Tr for T`)
+        let mut ref_blankets: HashSet<(String, bool)> = Default::default();
+        let mut bare_blankets: HashSet<String> = Default::default();
         // (impls for Box: (trait, line), checked against blanket impls of the same trait after the loop)
         let mut box_impls: Vec<(String, usize)> = vec![];
         // (unbounded blanket impls (trait, line), and every impl of the program's (trait, line))
@@ -1766,11 +1774,11 @@ impl Program {
                 if !sm.fns.is_empty() || defaults {
                     return Err(format!("{}:1: impls for references to a type parameter (`impl<T> {tr} for &T`) are not supported", it.line));
                 }
-                // (`impl<T> Foo for T` covers `&U` too)
-                if p.blanket_traits.contains(tr) {
-                    return Err(format!("{}:1: conflicting implementations of trait `{tr}` for type `&_` (E0119)", it.line));
+                // (`impl<T> Foo for T` covers `&U` too; `&T` and `&mut T` are two types)
+                let m = matches!(&sm.impl_self_ty, Some(TySyn::Ref(true, _)));
+                if bare_blankets.contains(tr) || !ref_blankets.insert((tr.clone(), m)) {
+                    return Err(format!("{}:1: conflicting implementations of trait `{tr}` for type `&{}_` (E0119)", it.line, if m { "mut " } else { "" }));
                 }
-                ref_blankets.insert(tr.clone());
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
                 continue;
@@ -1780,9 +1788,10 @@ impl Program {
                 if ii < user && sm.impl_generics.iter().any(|g| g.0 == *sn && g.1.is_empty()) && sm.where_types.is_empty() && sm.impl_trait_args.is_empty() {
                     unbounded_blankets.push((tr.clone(), it.line));
                 }
-                if ref_blankets.contains(tr) {
+                if ref_blankets.contains(&(tr.clone(), false)) || ref_blankets.contains(&(tr.clone(), true)) {
                     return Err(format!("{}:1: conflicting implementations of trait `{tr}` for type `&_` (E0119)", it.line));
                 }
+                bare_blankets.insert(tr.clone());
                 p.blanket_selfs.insert(sn.clone());
                 p.blanket_traits.insert(tr.clone());
                 if let Some(g) = sm.impl_generics.iter().find(|g| g.0 == *sn) {
@@ -1990,7 +1999,10 @@ impl Program {
                 let m = m.split('#').next().unwrap_or(m);
                 // (`__ref_foo` is the generated name of an impl for a reference; a method the trait declares with that
                 // name matches as written)
-                let bare = m.strip_prefix("__ref_").unwrap_or(m);
+                let mut bare = m;
+                while let Some(b) = bare.strip_prefix("__ref_") {
+                    bare = b;
+                }
                 let decls = p.traits.get(tr).map(|v| v.as_slice()).unwrap_or(&[]);
                 let declared = |n: &str| decls.iter().any(|&d| p.names[d as usize].rsplit("::").next() == Some(n));
                 if declared(m) || declared(bare) {
@@ -2411,6 +2423,14 @@ impl Program {
         if tr == "Send" || tr == "Sync" {
             return self.auto_trait(t, tr == "Sync", 0);
         }
+        // (the unwind-safety auto traits: structurally, as std's impls say)
+        if tr == "UnwindSafe" || tr == "RefUnwindSafe" {
+            return self.unwind_safe(t, tr == "RefUnwindSafe", 0);
+        }
+        // (Unpin: every type here; nothing is pinned behind the program's back)
+        if tr == "Unpin" {
+            return true;
+        }
         // (`Box<T>` is Clone / PartialEq / Eq / PartialOrd / Ord / Debug / Display / Hash / Default when T is)
         if let Ty::Box(i) = t {
             if matches!(tr, "Clone" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Debug" | "Display" | "Hash" | "Default") {
@@ -2611,6 +2631,47 @@ impl Program {
         })
     }
 
+    /// UnwindSafe (refs: RefUnwindSafe) as std has them: `&mut T` is not UnwindSafe; `&T`, raw pointers, Rc and Arc
+    /// are when T is RefUnwindSafe; interior mutability (UnsafeCell, Cell, RefCell, OnceCell, LazyCell) is not
+    /// RefUnwindSafe, but Mutex, RwLock and the atomics are; AssertUnwindSafe is both; a user's impl counts
+    fn unwind_safe(&self, t: Ty, refs: bool, d: u32) -> bool {
+        if d > 12 {
+            return true;
+        }
+        match t {
+            Ty::Ref(true, i) => refs && self.unwind_safe(*i, true, d + 1),
+            Ty::Ref(false, i) | Ty::Ptr(_, i) => self.unwind_safe(*i, true, d + 1),
+            Ty::Box(i) | Ty::Array(i, _) | Ty::Slice(i) => self.unwind_safe(*i, refs, d + 1),
+            Ty::Struct(sid) => {
+                let b = self.base_of(sid);
+                let name = self.structs[b as usize].name.as_str();
+                if self.impls.contains(&(b, if refs { "RefUnwindSafe" } else { "UnwindSafe" }.to_string())) {
+                    return true;
+                }
+                let sd = &self.structs[sid as usize];
+                let arg = |k: usize, r: bool| sd.args.get(k).is_none_or(|&a| self.unwind_safe(a, r, d + 1));
+                match name {
+                    "AssertUnwindSafe" => return true,
+                    // (std's locks and their writing guards are both whatever they hold: a panic poisons them. A read
+                    // guard does not poison: it is as its contents are RefUnwindSafe)
+                    "Mutex" | "RwLock" | "MutexGuard" | "RwLockWriteGuard" => return true,
+                    "RwLockReadGuard" => return arg(0, true),
+                    n if n.starts_with("Atomic") => return true,
+                    "UnsafeCell" | "Cell" | "RefCell" | "OnceCell" | "LazyCell" => return !refs && arg(0, false),
+                    "Rc" | "Arc" => return arg(0, true),
+                    _ => {}
+                }
+                let prelude = self.struct_item.get(b as usize).is_some_and(|&i| i >= self.prelude_from);
+                if prelude {
+                    return sd.args.iter().all(|&a| self.unwind_safe(a, refs, d + 1));
+                }
+                sd.fields.iter().all(|f| self.unwind_safe(f.1, refs, d + 1))
+                    && sd.variants.iter().all(|v| v.fields.iter().all(|f| self.unwind_safe(f.1, refs, d + 1)))
+            }
+            _ => true,
+        }
+    }
+
     fn auto_trait(&self, t: Ty, sync: bool, d: u32) -> bool {
         if d > 12 {
             return true;
@@ -2627,7 +2688,7 @@ impl Program {
                 }
                 match name {
                     "Rc" => return false,
-                    "Cell" | "RefCell" if sync => return false,
+                    "Cell" | "RefCell" | "LazyCell" if sync => return false,
                     // (the prelude's own types hold raw pointers: what they hold decides)
                     _ => {}
                 }
@@ -2861,6 +2922,10 @@ impl Program {
                 }
                 match self.struct_index.get(n) {
                     Some(&id) if self.structs[id as usize].generics.is_empty() => Ty::Struct(id),
+                    // (every parameter with a default: `W` for `struct W<T = u8>`, as `W<>`)
+                    Some(&id) if self.struct_defaults.get(&id).is_some_and(|ds| ds.iter().all(Option::is_some)) => {
+                        return self.resolve_with(&TySyn::App(n.clone(), vec![]), names);
+                    }
                     Some(_) => return Err(format!("missing generics for `{n}`")),
                     // (`zeros::<K>()` / `Buf<K>`: const の名前は const ジェネリクスの引数)
                     None if self.const_index.contains_key(n) => Ty::Array(intern(Ty::Unit), self.const_usize(n)? as u32),
@@ -2915,6 +2980,21 @@ impl Program {
                 let mut args = args.as_slice();
                 if matches!(n.as_str(), "HashMap" | "HashSet") && args.len() == self.structs[id as usize].generics.len() + 1 {
                     args = &args[..args.len() - 1];
+                }
+                // (the parameters left out take their defaults, written in the earlier ones: `LazyCell<T>` is
+                // `LazyCell<T, fn() -> T>`)
+                let filled;
+                if let Some(ds) = self.struct_defaults.get(&id) {
+                    let ps = &self.structs[id as usize].generics;
+                    if args.len() < ps.len() && ds[args.len()..].iter().all(Option::is_some) {
+                        let mut v: Vec<TySyn> = args.to_vec();
+                        for d in &ds[args.len()..] {
+                            let t = subst_tysyn(d.as_ref().unwrap(), &ps[..v.len()], &v);
+                            v.push(t);
+                        }
+                        filled = v;
+                        args = filled.as_slice();
+                    }
                 }
                 let args = args.iter().map(r).collect::<R<Vec<Ty>>>()?;
                 Ty::Struct(self.instantiate(id, args)?)

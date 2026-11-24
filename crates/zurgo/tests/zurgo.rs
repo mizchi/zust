@@ -9,7 +9,9 @@
 //! - `build_scripts_match_cargo`: build scripts (a build-dependency, `links` metadata as `DEP_*`, code written to
 //!   `OUT_DIR`, `rustc-cfg`, `rustc-env`, cargo's variables) give what they give under cargo, whichever compiler builds
 //!   them, and run again only when what they depend on changes;
-//! - `errors`: what M0 does not do yet is an error that says so.
+//! - `proc_macros_run_like_cargo`: a proc-macro crate (attribute, derive, function-like) is built by rustc and run by
+//!   the toolchain's proc-macro server, and its users print what their cargo builds print;
+//! - `errors`: what M0 does not do yet is an error that says so (proc macros without the server among them).
 //!
 //! The registry tests need cargo and the network (`cargo fetch`), as the rest of zust's tests do.
 
@@ -66,6 +68,11 @@ fn run(cmd: &mut Command) -> (bool, String, String) {
 
 fn zurgo(args: &[&str], manifest: &Path, target_dir: &Path) -> (bool, String, String) {
     run(Command::new(ZURGO).args(args).arg("--manifest-path").arg(manifest).env("CARGO_TARGET_DIR", target_dir))
+}
+
+/// zurgo without the toolchain's proc-macro server (`ZUSTC_PROC_MACRO_SRV` empty): proc-macro crates are stubs
+fn zurgo_no_pm(args: &[&str], manifest: &Path, target_dir: &Path) -> (bool, String, String) {
+    run(Command::new(ZURGO).args(args).arg("--manifest-path").arg(manifest).env("CARGO_TARGET_DIR", target_dir).env("ZUSTC_PROC_MACRO_SRV", ""))
 }
 
 fn cargo(args: &[&str], manifest: &Path, target_dir: &Path) -> (bool, String, String) {
@@ -143,6 +150,40 @@ fn build_scripts_match_cargo() {
 
 /// The same programs built for wasm32 and run under the repository's sandbox host print what their native builds print:
 /// the build scripts run on the host, the crates are one module
+#[test]
+fn proc_macros_run_like_cargo() {
+    // (a proc-macro crate of the workspace: an attribute with arguments, used through a library that re-exports it; a
+    //  derive with a helper attribute, whose output calls that library; function-like macros as an item and in an
+    //  expression; doc comments as `#[doc]`; the expansion's environment; paths from the crate and from the library
+    //  beside `macro_rules!` of their names, and in `stringify!`. rustc builds it, the toolchain's proc-macro server
+    //  runs it)
+    let sc = Scratch::new("proc-macro");
+    copy_dir(&fixture("proc-macro"), &sc.0);
+    let m = sc.0.join("Cargo.toml");
+    let (ok, want, err) = cargo(&["run", "-q", "--offline"], &m, &sc.0.join("cargo-target"));
+    assert!(ok, "cargo run: {err}");
+    let t = sc.0.join("zurgo-target");
+    let (ok, got, err) = zurgo(&["run"], &m, &t);
+    assert!(ok, "zurgo run: {err}");
+    assert_eq!(got, want);
+    // (again: nothing rebuilt, the dylib and the expansions are kept)
+    let (ok, _, err) = zurgo(&["build", "--time"], &m, &t);
+    assert!(ok, "{err}");
+    assert!(err.contains("fresh") && !err.contains("fns compiled"), "a no-op build did work:\n{err}");
+    // (a change to the proc macro: rebuilt, and the crates that use it see its new output)
+    let lib = sc.0.join("pm/src/lib.rs");
+    let src = std::fs::read_to_string(&lib).unwrap();
+    std::fs::write(&lib, src.replace("{n}() * {k}", "{n}() * {k} + 1")).unwrap();
+    let (ok, got, err) = zurgo(&["run"], &m, &t);
+    assert!(ok, "zurgo run: {err}");
+    assert_eq!(got.lines().next(), Some("7 22"), "{got}");
+    // (a file the proc macro includes from outside its package: rustc's dep-info has it)
+    std::fs::write(sc.0.join("shared.txt"), "shared v2\n").unwrap();
+    let (ok, got, err) = zurgo(&["run"], &m, &t);
+    assert!(ok, "zurgo run: {err}");
+    assert_eq!(got.lines().last(), Some("shared v2"), "{got}");
+}
+
 #[test]
 fn wasm32_runs_like_native() {
     if !Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success()) {
@@ -298,8 +339,10 @@ fn errors() {
     assert!(!ok && err.contains("cargo generate-lockfile"), "{err}");
     let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &m, &d.join("t"));
     assert!(ok, "{err}");
-    // (a proc-macro dependency is a stub: unused, the build goes on; so does a use in a file the crate does not reach,
-    //  under a cfg that is off (before or after the attribute), or in a macro_rules! body nothing calls)
+    // (without the toolchain's proc-macro server, a proc-macro dependency is a stub: unused, the build goes on; so does
+    //  a use in a file the crate does not reach, under a cfg that is off (before or after the attribute), or in a
+    //  macro_rules! body nothing calls)
+    let zurgo = zurgo_no_pm;
     let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
     assert!(ok, "{err}");
     sc.write(&[
@@ -326,6 +369,14 @@ fn errors() {
     // (but metadata works)
     let (ok, out, err) = zurgo(&["metadata"], &m, &d.join("t"));
     assert!(ok && out.contains("\"proc-macro\""), "{err}");
+    // (with the server, the proc macros run: `traced` gives the item back, `html!` its input, which is not Rust)
+    let zurgo = self::zurgo;
+    sc.write(&[("p/src/main.rs", "#[pm::traced]\nfn main() {}\n")]);
+    let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
+    assert!(ok, "{err}");
+    sc.write(&[("p/src/main.rs", "fn main() {\n    pm::html!(<p>);\n}\n")]);
+    let (ok, _, err) = zurgo(&["build"], &m, &d.join("t"));
+    assert!(!ok && !err.contains("#29"), "{err}");
     // (a target name that is a path: it would put the executable outside the target directory)
     sc.write(&[
         ("q/Cargo.toml", "[package]\nname = \"q\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[[bin]]\nname = \"../escape\"\npath = \"src/main.rs\"\n"),

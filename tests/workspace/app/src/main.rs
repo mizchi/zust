@@ -10,6 +10,8 @@ fn main() {
     println!("{} {} {}", helper(), geom::helper(), util::pick(&[10, 20, 30], 1));
     let v: Vec<Box<dyn Shape>> = vec![Box::new(Rect { w: 2, h: 3 }), Box::new(Sq(4))];
     println!("{} {}", geom::shape::total(&v), v[1].name());
+    // (`::util::pick`: a path from the extern crate)
+    println!("{}", ::util::pick(&[7, 8], 0));
     println!("calls {}", util::calls());
     // (引数 5 個: 依存するクレートの総称関数の中で範囲外の添字 (場所はそのクレートのファイル))
     if std::env::args().count() == 6 {
