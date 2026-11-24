@@ -6442,6 +6442,12 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         // whose body calls a method a bound's trait declares is not made: its typeck is the cost, its check little)
         let ii = p.item_of[id].unwrap_or(0) as usize;
         let body = a.items.get(ii).and_then(|it| a.src.get(it.start..it.end)).unwrap_or("");
+        // (a signature that names a lifetime or `'static` (`-> Box<dyn X + 'static>`): what its body does with the
+        // associated types of its parameters' bounds may be required of those regions. Not others: checking each
+        // generic fn that calls such a method costs its typeck (+4.9% of the traits KPI))
+        let names_regions = sig.regions.as_deref().is_some_and(|r| {
+            !r.lts.is_empty() || r.slots.iter().flatten().any(|&c| c == crate::types::R_STATIC) || r.ty_outlives.iter().any(|x| x.1 == crate::types::R_STATIC)
+        });
         let calls_bound = sig.generics.iter().flat_map(|(_, bs)| bs.iter()).any(|b| {
             // (`Fn(..)` / `FnMut(..)` / `FnOnce(..)`: a call of the parameter is checked against the bound itself)
             if matches!(b.as_str(), "Copy" | "Sized" | "?Sized" | "Send" | "Sync" | "Unpin") || crate::ast_summary::parse_fn_bound(b).is_some() {
@@ -6458,11 +6464,14 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
             let decls = p.traits.get(tr).or_else(|| p.traits.iter().find(|(k, _)| k.ends_with(&tail)).map(|(_, v)| v));
             // (a trait not known: as calling)
             // (but a method whose declaration names lifetimes (the trait's `'a`, its own): its call says something of
-            // the regions)
+            // the regions. So does one that returns an associated type of its `Self` (`fn into_item(self) ->
+            // Self::Item`): the placeholder's associated type, whose region is a universal one (`Box::new(v.into_item())`
+            // as a `Box<dyn X + 'static>`, regions/regions-close-associated-type-into-object.rs))
             decls.is_none_or(|ds| {
                 ds.iter().any(|&d| {
                     let called = p.names[d as usize].rsplit("::").next().is_some_and(|m| body.contains(&format!(".{m}(")) || body.contains(&format!("::{m}(")));
-                    called && !p.sigs[d as usize].regions.as_deref().is_some_and(|r| !r.lts.is_empty())
+                    let self_assoc = names_regions && matches!(p.sigs[d as usize].ret, Ty::Assoc(x) if matches!(x.base, Ty::Param(_)));
+                    called && !self_assoc && !p.sigs[d as usize].regions.as_deref().is_some_and(|r| !r.lts.is_empty())
                 })
             })
         });

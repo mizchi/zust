@@ -1244,6 +1244,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("ptr::eq") {
         need.insert("__exr_ptr_eq");
     }
+    // (`__core_ptr_swap`, whose definition is looked up as `ptr_swap`)
+    if sc.has("ptr::swap") {
+        need.insert("ptr_swap");
+    }
     for (path, f) in [("Ref::map", "__exr_ref_map"), ("RefMut::map", "__exr_refmut_map"), ("Ref::clone", "__exr_ref_clone")] {
         if sc.has(path) {
             need.extend([f, "__core_forget", "forget"]);
