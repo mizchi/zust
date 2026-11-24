@@ -1315,6 +1315,7 @@ fn review_three_cases() {
         "trait Parent { type A; }\ntrait Child where Self: Parent { fn get(&self) -> <Self as Parent>::A; }\nfn main() {}\n",
         "struct Tail<T: ?Sized>(T);\ntrait Flag {}\nimpl<T> Flag for &T {}\nimpl Flag for &Tail<[u8]> {}\nfn main() {}\n",
         "trait Local {}\nstruct S;\nimpl Local for S where u8: core::fmt::Debug {}\nfn need<X: Local>(_: X) {}\nfn main() { need(S); }\n",
+        "trait Parent {}\ntrait Child: Parent {}\nstruct W<T>(T);\nimpl<T: Copy> Parent for W<T> {}\nimpl<T> Child for W<T> where W<T>: Parent {}\nfn main() {}\n",
     ] {
         let d = check(src);
         assert!(d.is_empty(), "{src}\n{d:?}");

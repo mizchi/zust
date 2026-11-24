@@ -3262,11 +3262,19 @@ impl Cx<'_> {
                 return Ok((None, Ty::Unit));
             }
         }
+        // (a turbofish names the pointee: it must be the argument's (`size_of_val::<u8>(s)` with s: &[u8] is E0308))
+        let tf_ok = |t: Ty, me: &Self| match turbofish {
+            Some(tf) => match tf.first() {
+                Some(GArg::Ty(pt)) => me.parse_ty(pt).is_ok_and(|w| w == t),
+                _ => true,
+            },
+            None => true,
+        };
         // (`drop_in_place(p)` of a pointer to a struct with an unsized tail: no value of it can be read out, the drop
         // glue drops it in place through the pair)
         if self.prog.names[id as usize] == "__core_drop_in_place" && vals.len() == 1 {
             if let Ty::Ptr(_, t) = vals[0].1 {
-                if t.is_dst_struct() {
+                if t.is_dst_struct() && tf_ok(*t, self) {
                     let Some(&g) = self.prog.index.get(crate::prelude::DROP_GLUE) else { return err(span, "internal: no drop glue") };
                     let iid = {
                         let mut ins = self.insts.lock().unwrap();
@@ -3283,7 +3291,7 @@ impl Cx<'_> {
         // (`size_of_val(x)` / `align_of_val(x)` of a pointer to an unsized type: from the pair's second word)
         if matches!(self.prog.names[id as usize].as_str(), "__core_size_of_val" | "__core_align_of_val") && vals.len() == 1 {
             if let Ty::Ref(_, t) | Ty::Ptr(_, t) = vals[0].1 {
-                if t.is_unsized() {
+                if t.is_unsized() && tf_ok(*t, self) {
                     let meta = self.b.ins().load(types::I64, mf(), vals[0].0, 8);
                     let (size, align) = self.unsized_size_align(meta, *t);
                     let v = if self.prog.names[id as usize] == "__core_size_of_val" { size } else { align };

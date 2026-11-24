@@ -1895,7 +1895,24 @@ impl Session2 {
                 let Ok(t) = prog.resolve_g(st, &gn) else { continue };
                 let rigid: Vec<Ty> = sm.impl_generics.iter().enumerate().map(|(k, (n, bs))| Ty::Struct(prog.placeholder(u32::MAX - ii as u32, k as u32, n, bs))).collect();
                 let t = prog.subst(t, &rigid);
+                // (a supertrait the impl's own where clause assumes (`impl<T> Child for W<T> where W<T>: Parent`): given)
+                let assumed: Vec<String> = {
+                    let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
+                    let head = text.split('{').next().unwrap_or("");
+                    where_preds(head)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .flat_map(|(_, bs)| bs)
+                        .map(|b| {
+                            let b = b.trim().split('<').next().unwrap_or("").trim().to_string();
+                            b.rsplit("::").next().unwrap_or(&b).to_string()
+                        })
+                        .collect()
+                };
                 for sup in &supers {
+                    if assumed.contains(sup) {
+                        continue;
+                    }
                     if prog.tdb.holds_rigid(&prog, t, sup) == crate::traits::Ans::No {
                         let n = crate::traits::display_ty(&prog, t);
                         return Err(format!("{}:1: {} (E0277)", items[ii].line, crate::traits::not_held(&n, sup)));
