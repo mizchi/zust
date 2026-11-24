@@ -1093,6 +1093,38 @@ pub fn trait_obls(src: &str, it: &SrcItem) -> Vec<crate::types::WfObl> {
     out
 }
 
+/// An impl's associated type's value against the lifetime bounds its trait's declaration gives it (`type Value:
+/// 'a;`, E0477): a lifetime of the impl's the value names that the header does not make outlive the bound (`impl<'a>
+/// Foo<'static> for &'a i32 { type Value = &'a i32; }`), as (the bound, the value as written). `bounds` are the
+/// declaration's, `'static` or the trait's lifetime parameter by its place (`'0`), which the impl's trait path writes
+pub fn assoc_value_unmet(src: &str, header: &SrcItem, member: &SrcItem, bounds: &[String]) -> Option<(String, String)> {
+    let htext = format!("{}}}", src.get(header.start..header.end)?);
+    let hf = parse_file(&htext).ok()?;
+    let ItemKind::Impl(g, Some((false, tp)), self_ty, _) = &hf.items.first()?.kind else { return None };
+    let mtext = src.get(member.start..member.end)?;
+    let mf = parse_file(mtext).ok()?;
+    let ItemKind::Type(_, _, _, Some(value)) = &mf.items.first()?.kind else { return None };
+    let mut k = crate::wf::Known::default();
+    k.add_generics(g);
+    k.implied(self_ty, 0);
+    let args: Vec<&String> = tp.segs.last()?.args.iter().filter_map(|a| if let crate::parse::GArg::Lifetime(l) = a { Some(l) } else { None }).collect();
+    let mut named = vec![];
+    named_lifetimes_deep(value, &mut named, 0);
+    for b in bounds {
+        let x = if b == "'static" { b.clone() } else { (*args.get(b[1..].parse::<usize>().ok()?)?).clone() };
+        if x == "'_" {
+            continue;
+        }
+        // (the impl's own lifetimes only: one a `for<..>` in the value binds is the value's)
+        for l in named.iter().filter(|l| k.lts.contains(l)) {
+            if !k.vague.contains(l) && !k.outlives(l, &x) {
+                return Some((x, crate::parse::ty_text(value)));
+            }
+        }
+    }
+    None
+}
+
 fn dyn_obls(g: &Generics, tys: &[&PTy], out: &mut Vec<crate::types::WfObl>) {
     let mut k = None;
     for t in tys.iter().filter(|t| has_dyn_syn(t)) {

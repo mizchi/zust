@@ -1175,6 +1175,31 @@ impl Session2 {
                 }
             }
         }
+        // (an impl's associated type's value against the lifetime bounds its trait's declaration gives it (E0477))
+        {
+            let decl: crate::fxhash::FxMap<(&str, &str), Vec<String>> = sums
+                .iter()
+                .flat_map(|sm| sm.assoc_bounds.iter())
+                .filter_map(|(t, n, bs)| {
+                    let lb: Vec<String> = bs.iter().filter(|b| b.starts_with('\'')).cloned().collect();
+                    (!lb.is_empty()).then_some(((t.as_str(), n.as_str()), lb))
+                })
+                .collect();
+            if !decl.is_empty() {
+                for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
+                    let ItemKind::ImplMember(h) = it.kind else { continue };
+                    let Some(tr) = sums.get(h as usize).and_then(|hs| hs.impl_trait.as_deref()) else { continue };
+                    let short = tr.split('<').next().unwrap_or(tr).trim();
+                    let short = short.rsplit("::").next().unwrap_or(short);
+                    for a in &sm.assocs {
+                        let Some(bs) = decl.get(&(short, a.name.as_str())) else { continue };
+                        if let Some((x, v)) = crate::ast_summary::assoc_value_unmet(&src, &items[h as usize], it, bs) {
+                            return Err(format!("{}:1: the type `{v}` does not fulfill the required lifetime (it must outlive `{x}`) (E0477)", it.line));
+                        }
+                    }
+                }
+            }
+        }
         // (struct / enum / union definitions of the program: unused parameters, union fields ..)
         for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
             if let Some(e) = &sm.adt_err {

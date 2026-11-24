@@ -3907,3 +3907,15 @@ fn part25_assoc_placeholder_as_typeck_finds_it() {
     let d = check("trait MyTrait { type Output; }\nfn foo<'a, T>() -> &'a () where T: MyTrait {\n    bar::<T::Output>()\n}\nfn bar<'a, T>() -> &'a () where T: 'a { &() }\nfn main() {}\n");
     assert!(d.len() == 1 && !d[0].1.contains('#'), "{d:?}");
 }
+
+#[test]
+fn part25_assoc_value_trait_bound() {
+    // (an impl's associated type's value outlives what its trait's declaration bounds it by, with the trait's
+    // lifetimes the impl's trait path writes (E0477, regions/regions-assoc-type-*-bound-in-trait-not-met.rs))
+    let d = check("trait Foo<'a> { type Value: 'a; }\nimpl<'a> Foo<'static> for &'a i32 {\n    type Value = &'a i32;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0477"), "{d:?}");
+    let d = check("trait Foo { type Value: 'static; }\nimpl<'a> Foo for &'a i32 {\n    type Value = &'a i32;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0477"), "{d:?}");
+    // (accepted: the same lifetime, one the header makes outlive it, 'static, a lifetime a `for<..>` binds)
+    assert_eq!(check("trait Foo<'a> { type Value: 'a; }\nimpl<'a> Foo<'a> for &'a i16 { type Value = &'a i32; }\nimpl<'a: 'b, 'b> Foo<'b> for &'a i64 { type Value = &'a i32; }\nimpl<'a> Foo<'a> for &'a u8 { type Value = &'static i32; }\nimpl<'a> Foo<'a> for &'a u16 { type Value = for<'x> fn(&'x u8); }\nfn main() {}\n"), vec![]);
+}
