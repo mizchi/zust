@@ -6147,8 +6147,11 @@ compile-fail	range/range-1.rs
 compile-fail	range/range-negative-literal-unsigned-type.rs
 compile-fail	range/range-pattern-out-of-bounds-issue-68972.rs
 compile-fail	range/range-to-iterator-suggestion-issue-147749.rs
+compile-fail	range/range_traits-2.rs
+compile-fail	range/range_traits-3.rs
 check-pass	range/range_traits-4.rs
 check-pass	range/range_traits-5.rs
+compile-fail	range/range_traits-6.rs
 check-pass	range/range_traits-7.rs
 check-pass	raw-ref-op/amp-raw-without-mut-const-is-a-normal-borrow.rs
 compile-fail	raw-ref-op/never-place-isnt-diverging.rs
@@ -6859,6 +6862,7 @@ compile-fail	sized/unsized-binding.rs
 compile-fail	sized/unsized-str-in-return-expr-arg-and-local.rs
 compile-fail	span/E0046.rs
 compile-fail	span/E0072.rs
+compile-fail	span/E0204.rs
 compile-fail	span/E0539.rs
 compile-fail	span/E0805.rs
 compile-fail	span/borrowck-borrow-overloaded-auto-deref-mut.rs
@@ -7287,6 +7291,7 @@ compile-fail	suggestions/method-access-to-range-literal-typo.rs
 compile-fail	suggestions/method-missing-parentheses.rs
 compile-fail	suggestions/mismatched-types-numeric-from.rs
 check-pass	suggestions/missing-assoc-type-bound-restriction.rs
+compile-fail	suggestions/missing-bound-in-manual-copy-impl.rs
 compile-fail	suggestions/missing-impl-trait-block-but-not-ascii.rs
 compile-fail	suggestions/missing-semicolon.rs
 compile-fail	suggestions/multiple_tuples_implement_same_trait_continuous_arities.rs
@@ -7559,6 +7564,7 @@ check-pass	traits/const-traits/static-const-trait-bound.rs
 check-pass	traits/const-traits/trait-method-ptr-in-consts-ice.rs
 compile-fail	traits/constrained-type-params-trait-impl.rs
 compile-fail	traits/copy-guessing.rs
+compile-fail	traits/copy-requires-all-fields-copy.rs
 check-pass	traits/copy-requires-self-wf.rs
 run-pass	traits/copy-trait-implicit-copy.rs
 run-pass	traits/core-marker-name-shadowing-issue-2284.rs
@@ -8190,6 +8196,7 @@ compile-fail	union/union-borrow-move-parent-sibling.rs
 run-pass	union/union-const-codegen.rs
 run-pass	union/union-const-eval-field.rs
 compile-fail	union/union-const-pat.rs
+compile-fail	union/union-copy.rs
 compile-fail	union/union-derive-clone.rs
 compile-fail	union/union-derive.rs
 run-pass	union/union-drop-assign.rs

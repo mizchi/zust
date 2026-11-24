@@ -1940,3 +1940,23 @@ fn unused_variables_where_the_lint_is_denied() {
     // (a group's `forbid` lets a member be allowed)
     assert_eq!(first("#![forbid(unused)]\n#[allow(unused_variables)]\nfn main() {\n    let a: ();\n}\n"), None, "forbid of a group");
 }
+
+#[test]
+fn copy_with_a_field_that_is_not() {
+    // (E0204: `Copy` for a type with a field that is not Copy, at the type's name for a derive and at the self type
+    // for an impl; each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize| Some((l, c, "the trait `Copy` cannot be implemented for this type (E0204)".to_string()));
+    assert_eq!(first("use std::ops::Range;\n#[derive(Copy, Clone)]\nstruct R(Range<usize>);\nfn main() {}\n"), e(3, 8), "derive");
+    assert_eq!(first("struct Foo {\n    foo: Vec<u32>,\n}\nimpl Clone for Foo { fn clone(&self) -> Self { loop {} } }\nimpl Copy for Foo {}\nfn main() {}\n"), e(5, 15), "impl");
+    assert_eq!(first("#[derive(Clone)]\nstruct Wrapper<T>(T);\nimpl<S> Copy for Wrapper<S> {}\nfn main() {}\n"), e(3, 18), "an impl's parameter without a bound");
+    assert_eq!(first("#[derive(Clone, Copy)]\nenum E { A(String), B }\nfn main() {}\n"), e(2, 6), "enum");
+    assert_eq!(first("#[derive(Clone, Copy)]\nstruct M<'a> {\n    r: &'a mut bool,\n}\nfn main() {}\n"), e(2, 8), "&mut");
+    // (a derive bounds the type's parameters; PhantomData is Copy for every type, ManuallyDrop when its type is; a
+    // union with a written `impl Copy` may derive Clone alone)
+    let ok = "#[derive(Clone, Copy)]\nstruct Ok1<T>(T, u8, &'static str, [u16; 3], (u8, char), fn(u8) -> u8, *const u8);\n#[derive(Clone)]\nstruct W<S>(S);\nimpl<S: Copy> Copy for W<S> {}\n#[derive(Clone, Copy)]\nenum E2 { A(u8), B { x: Option<u8> }, C }\n#[derive(Clone, Copy)]\nstruct P(std::marker::PhantomData<String>, std::mem::ManuallyDrop<u8>, std::ops::RangeTo<u8>, core::cmp::Ordering);\n#[derive(Clone)]\nunion U {\n    a: u8,\n}\nimpl Copy for U {}\nfn main() {}\n";
+    assert_eq!(first(ok), None, "Copy");
+}

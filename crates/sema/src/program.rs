@@ -2074,6 +2074,47 @@ impl Program {
                 }
             }
         }
+        // (E0204: `Copy` for a type of the program's with a field that is not: derived, at the type's name; an
+        // `impl Copy for S {}`, at its self type. A field of the type's parameter is Copy where the derive bounds the
+        // parameter, and where the impl's own parameter for it has a bound or a where clause)
+        for (ii, sm) in sums.iter().enumerate().take(user) {
+            let not_copy = |p: &Program, sid: u32, args: Option<&[TySyn]>, own_gen: &[(String, Vec<String>)]| {
+                let s = &p.structs[sid as usize];
+                let fields: Vec<Ty> = if s.is_enum { s.variants.iter().flat_map(|v| v.fields.iter().map(|f| f.1)).collect() } else { s.fields.iter().map(|f| f.1).collect() };
+                // (std's `PhantomData<T>` is Copy for every T, `ManuallyDrop<T>` when T is: the prelude's are not
+                // written so)
+                fn copy(p: &Program, t: Ty) -> bool {
+                    match t {
+                        Ty::Struct(sid) => match p.structs[p.base_of(sid) as usize].name.as_str() {
+                            "PhantomData" => true,
+                            "ManuallyDrop" => p.structs[sid as usize].args.iter().all(|&a| copy(p, a)),
+                            _ => p.implements(t, "Copy"),
+                        },
+                        _ => p.implements(t, "Copy"),
+                    }
+                }
+                fields.into_iter().any(|t| match t {
+                    Ty::Param(k) => args.and_then(|a| a.get(k as usize)).is_some_and(|a| matches!(a, TySyn::Named(n) if own_gen.iter().any(|g| g.0 == *n && g.1.is_empty()))),
+                    t => !p.has_param(t) && !copy(p, t),
+                })
+            };
+            let e = |n: &str| format!("{}:1: \u{5}{}\u{5}the trait `Copy` cannot be implemented for this type (E0204)", items[ii].line, n.rsplit("::").next().unwrap_or(n));
+            for (tn, ds) in &sm.derives {
+                if ds.iter().any(|d| d == "Copy") && p.struct_index.get(tn).is_some_and(|&sid| not_copy(&p, sid, None, &[])) {
+                    return Err(e(tn));
+                }
+            }
+            if let (Some("Copy"), Some(sn)) = (sm.impl_trait.as_deref(), &sm.impl_self) {
+                let args = match &sm.impl_self_ty {
+                    Some(TySyn::App(_, a)) => Some(a.as_slice()),
+                    _ => None,
+                };
+                let own_gen = if sm.where_types.is_empty() { sm.impl_generics.as_slice() } else { &[] };
+                if p.struct_index.get(sn).is_some_and(|&sid| not_copy(&p, sid, args, own_gen)) {
+                    return Err(e(sn));
+                }
+            }
+        }
         // 必須メソッドが実装されているか (derive したものは本体を codegen が作る)
         let derived: HashSet<(u32, String)> = sums
             .iter()

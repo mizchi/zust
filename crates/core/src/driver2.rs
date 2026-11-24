@@ -1239,6 +1239,12 @@ impl Session2 {
         // (struct / enum / union definitions of the program: unused parameters, union fields ..)
         for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
             if let Some(e) = &sm.adt_err {
+                // (a union that derives `Clone` without deriving `Copy` may have an `impl Copy for U {}` of its own)
+                if e.ends_with("a union can derive `Clone` only with `Copy`")
+                    && sm.unions.iter().any(|u| sums[..user_src].iter().any(|s| s.impl_trait.as_deref() == Some("Copy") && s.impl_self.as_deref() == Some(u.as_str())))
+                {
+                    continue;
+                }
                 // (`\u{3}line\u{3}msg`: at that line of the item)
                 if let Some((l, m)) = e.strip_prefix('\u{3}').and_then(|r| r.split_once('\u{3}')) {
                     return Err(format!("{}:1: {m}", it.line + l.parse::<usize>().unwrap_or(1) - 1));
@@ -8571,6 +8577,19 @@ impl Session2 {
 fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
     let Some((l, rest)) = e.split_once(":1: ") else { return e.to_string() };
     let Ok(line) = l.parse::<usize>() else { return e.to_string() };
+    // (`\u{5}word\u{5}msg`: at the first whole word `word` of the item, after its attributes)
+    if let Some((w, m)) = rest.strip_prefix('\u{5}').and_then(|r| r.split_once('\u{5}')) {
+        let at = items.iter().find(|it| it.line == line).and_then(|it| {
+            let text = src.get(it.start..it.end.min(src.len()))?;
+            let from = sig_part(text, "f")?;
+            let b = text.as_bytes();
+            let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+            text[from..].match_indices(w).map(|(i, _)| it.start + from + i).find(|&i| !id(src.as_bytes()[i - 1]) && src.as_bytes().get(i + w.len()).is_none_or(|&c| !id(c))).filter(|_| !b.is_empty())
+        });
+        let Some(at) = at else { return format!("{line}:1: {m}") };
+        let col = at - src[..at].rfind('\n').map_or(0, |p| p + 1) + 1;
+        return format!("{}:{col}: {m}", src[..at].matches('\n').count() + 1);
+    }
     // (`\u{6}part\u{6}msg`: at that part of the method's signature, as sig_part reads it)
     if let Some((part, m)) = rest.strip_prefix('\u{6}').and_then(|r| r.split_once('\u{6}')) {
         let at = items.iter().find(|it| it.line == line).and_then(|it| Some(it.start + sig_part(src.get(it.start..it.end.min(src.len()))?, part)?));
