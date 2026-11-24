@@ -132,6 +132,10 @@ impl Parser {
             } else {
                 T::Int(s.parse().map_err(|_| (pos, format!("integer literal out of range: {s}")))?)
             }
+        } else if c == '`' {
+            // (a template: `primary` reads its text and holes from here)
+            self.bump();
+            T::P("`")
         } else if c == '"' {
             self.bump();
             let mut s = String::new();
@@ -142,6 +146,9 @@ impl Parser {
                 match self.bump() {
                     '"' => break,
                     '\\' => {
+                        if self.i >= self.src.len() {
+                            return Err((pos, "unterminated string".into()));
+                        }
                         let e = self.bump();
                         s.push(match e {
                             'n' => '\n',
@@ -840,6 +847,10 @@ impl Parser {
                 let es = self.args("]")?;
                 self.mk(pos, EK::Array(es))
             }
+            T::P("`") => {
+                let (parts, holes) = self.template(pos)?;
+                self.mk(pos, EK::Interp(parts, holes))
+            }
             T::P("{") => {
                 self.peeked = Some(Tok { t: T::P("{"), pos, start: t.start });
                 self.block()?
@@ -957,6 +968,46 @@ impl Parser {
             }
             o => return Err((pos, format!("expected an expression, found {}", show(&o)))),
         })
+    }
+
+    /// After `` ` ``: the text of a template up to its closing `` ` ``, and the expressions of its `${..}` holes
+    fn template(&mut self, pos: Pos) -> PResult<(Vec<String>, Vec<Expr>)> {
+        let mut parts = vec![String::new()];
+        let mut holes = vec![];
+        loop {
+            if self.i >= self.src.len() {
+                return Err((pos, "unterminated template string".into()));
+            }
+            match self.bump() {
+                '`' => break,
+                '$' if self.at(0) == '{' => {
+                    self.bump();
+                    let hpos = self.here();
+                    if self.is("}")? {
+                        return Err((hpos, "an empty `${}` in a template string".into()));
+                    }
+                    holes.push(self.expr(false)?);
+                    // (the `}` is read as a token: the text goes on right after it)
+                    self.expect("}")?;
+                    parts.push(String::new());
+                }
+                '\\' => {
+                    if self.i >= self.src.len() {
+                        return Err((pos, "unterminated template string".into()));
+                    }
+                    let e = self.bump();
+                    parts.last_mut().unwrap().push(match e {
+                        'n' => '\n',
+                        't' => '\t',
+                        'r' => '\r',
+                        '0' => '\0',
+                        o => o,
+                    })
+                }
+                o => parts.last_mut().unwrap().push(o),
+            }
+        }
+        Ok((parts, holes))
     }
 
     /// After `(`: the parameters of an arrow function `(a, b: i32) => ..`, up to and including `=>`; otherwise

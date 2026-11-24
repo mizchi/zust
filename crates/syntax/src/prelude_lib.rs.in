@@ -17,6 +17,8 @@ pub trait Drop {
 }
 pub fn __core_drop<T>(_x: T) {}
 // `std::hint::black_box(x)`: 値をそのまま返す (最適化はしないので何もしなくてよい)
+// `std::hint::spin_loop()`: a hint to the processor in a busy-wait loop; nothing to do here
+pub fn __core_spin_loop() {}
 pub fn __core_black_box<T>(x: T) -> T {
     x
 }
@@ -1342,6 +1344,14 @@ impl<T> Iterator for ChunksMut<T> {
         let s = unsafe { core::slice::from_raw_parts_mut(self.ptr.add(self.i), k) };
         self.i += k;
         Some(s)
+    }
+}
+
+impl<T> ChunksMut<T> {
+    /// (`chunks_exact_mut(n)`'s elements past the last whole chunk)
+    pub fn into_remainder(self) -> &mut [T] {
+        let k = self.len - self.len % self.n;
+        unsafe { core::slice::from_raw_parts_mut(self.ptr.add(k), self.len - k) }
     }
 }
 
@@ -10856,6 +10866,18 @@ pub trait From {
     fn from(t: Self) -> Self;
 }
 
+/// `TryFrom<T>` / `TryInto<U>` as a crate implements them for its own types (`impl TryFrom<&str> for Alphabet`);
+/// integer conversions (`u8::try_from(x)`, `x.try_into()`) are acg's own
+pub trait TryFrom {
+    type Error;
+    fn try_from(t: Self) -> Result<Self, Self::Error>;
+}
+
+pub trait TryInto {
+    type Error;
+    fn try_into(self) -> Result<Self, Self::Error>;
+}
+
 pub trait Neg {
     type Output;
     fn neg(self) -> Self::Output;
@@ -11370,6 +11392,10 @@ impl<T> AssertUnwindSafe<T> {
 /// `std::marker::PhantomData` (no fields: a zero-sized value of every T)
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct PhantomData<T>;
+
+/// `std::marker::PhantomPinned` (a zero-sized marker; zustc has no `Unpin` to opt out of)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct PhantomPinned;
 
 impl<T> PartialOrd for Reverse<T> {
     fn partial_cmp(&self, o: &Reverse<T>) -> Option<Ordering> {

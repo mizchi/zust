@@ -1200,10 +1200,12 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("Empty") && !sc.has("iter::") {
         need.remove("Empty");
     }
-    // (`a.zip(&v)` / `a.chain([x])`: 引数の Vec / 配列は codegen が `.iter()` / `.into_iter()` にする)
+    // (`a.zip(&v)` / `a.chain([x])`: 引数の Vec / 配列は codegen が `.iter()` / `.into_iter()` にする。`a.zip(dst)` with
+    //  dst: &mut [T] is its `.iter_mut()`)
     if need.contains("zip") || need.contains("chain") {
         need.insert("into_iter");
         need.insert("iter");
+        need.insert("iter_mut");
     }
     // (`arr.into_iter()` on an array variable is `arr.iter().copied()`, which codegen writes without the name)
     if need.contains("into_iter") {

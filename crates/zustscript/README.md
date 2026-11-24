@@ -69,13 +69,34 @@ import type { User, Post } from "./model.ts";
 
 ### TS の型の取り込み: `import type`
 
+取り込めるのはレコード型、文字列リテラルの union、共通のタグで判別できる union です。たとえば、TypeScript で処理の状態を次のように定義します。
+
+```ts
+// model.ts
+export type State = { kind: "idle" } | { kind: "busy"; jobs: number };
+```
+
+```zsc
+import type { State } from "./model.ts";
+
+export fn jobs(state: State) -> f64 {
+  match state {
+    Idle => 0.0,
+    Busy(n) => n,
+  }
+}
+```
+
+JS から `jobs({ kind: "busy", jobs: 3 })` と呼ぶと `3` が返ります。タグだけの `idle` は括弧を付けず `Idle`、値を持つ `busy` は `Busy(n)` と書きます。複数の値を受け取る場合、括弧内の変数はタグを除いたフィールドの **TS での宣言順** に対応します。変数名は自分で付けられます。
+たとえば `{ kind: "rect"; height: number; width: number }` の幅 ÷ 高さは `Rect(h, w) => w / h` です。TS 側を `width, height` の順に変えたら、パターンも `Rect(w, h)` に直します。両方とも `number` なので、元のパターンのままでもコンパイルは通り、計算結果だけが変わります。
+
 ```zsc
 import type { User, Post } from "./model.ts";   // model.ts の interface / type を、レコード型として読む
 
 export fn display(u: User) -> String { u.name + " #" + (u.id as i32).to_string() }
 ```
 
-- まずは**プレーンなレコード型**だけを読む(src/tsimport.rs)。`interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
+- **レコード型** (src/tsimport.rs): `interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
   - フィールドの型: `string` は `String`、`number` は `f64`(JS の number は倍精度。整数にするときは `as i32`)、`boolean` は `bool`、`bigint` は `i64`。配列(`T[]`、`readonly T[]`、`Array<T>`、`ReadonlyArray<T>`)と、同じファイルの別のレコード型
   - 読み込む型が使う型(`Post` の `author: User`)も一緒に読む。export されていない型でもよい
   - ファイルの残り(関数、union、総称型など)は、import しない限り読まない。import した型が部分集合の外なら、TS のファイルのその位置でエラーになる(`` `Opt.name` is optional ``、tests/errors/ts_*.zsc)
@@ -412,6 +433,33 @@ type Person = { name: String, age: i32 }
   - `zs_contains`、`zs_split`(空の区切りは文字ごと)
   - `to_upper` は Rust の `to_uppercase`(どちらも Unicode の既定の大文字化)
 - 分かっている違い: 空の区切りの `split` は、U+FFFF より上の文字を、JS では 2 つの単位に分け、wasm では 1 文字のままにする
+
+テンプレート文字列(文字列の補間):
+
+```zsc
+@wasm pub fn card(p: Person, n: i64) -> String {
+  `${p.name} (${p.age}): ${n * 2}`
+}
+// JS(--all-js):  return `${p.name} (${p.age}): ${BigInt.asIntN(64, n * 2n)}`;
+// Rust:           { let mut __zs_t = String::new(); __zs_t.push_str(&p.name[..]); __zs_t.push_str(" ("); zs_push_int(&mut __zs_t, (p.age) as i64); .. }
+```
+
+- `${..}` に書けるのは、文字列と、`to_string` を持つもの(整数、浮動小数点数、bool、`Num` などの bound つきの型変数)。書き方は `to_string` と同じ
+  - 配列、レコード、enum などは型エラー(何を書くかを選んでから `${..}` に入れる)
+- JS ではテンプレートリテラルのまま出す。`@wasm` では `String` に順に `push_str` していき、穴は借りて渡す
+  - **`format!` は使わない**: `core::fmt` が wasm に入ると、それだけで大きくなる。整数は自前の `zs_push_int` で書く(整数の `to_string` も同じ)
+  - zustc で測った wasm のサイズ(1 つの関数のモジュール):
+
+    | 本体 | `format!` / `to_string` | `push_str` / `zs_push_int` |
+    |---|---:|---:|
+    | `` `hi ${name}!` `` | 24,948 B | 19,505 B |
+    | `` `hi ${name} ${n}` `` | 32,902 B | 23,775 B |
+    | `"hi " + name + " " + n.to_string()` | 34,704 B | 27,316 B |
+    | (比較: `"hi " + name + "!"`) | 21,047 B | 21,047 B |
+
+  - 手書きの `wasm fn`(Rust そのまま)では `format!` も使えるが、同じ費用がかかる
+  - `@wasm` の中の浮動小数点数の穴はエラー(JS と Rust で書き方が違う。`to_string` と同じ扱い)
+- エスケープは文字列リテラルと同じ(`\n` `\t` `\\`)に加えて、`` \` `` と `\$`。`{` だけ、`$` だけは普通の文字
 
 **ここから見えた現実的なライン**:
 

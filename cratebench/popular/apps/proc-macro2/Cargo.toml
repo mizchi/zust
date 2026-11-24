@@ -1,0 +1,11 @@
+[package]
+name = "popular-proc-macro2"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# (not a member of zust's workspace)
+[workspace]
+
+[dependencies]
+proc-macro2 = "=1.0.107"

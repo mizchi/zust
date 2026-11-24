@@ -106,6 +106,8 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-24 | [Trait solving, first step: an impl's bounds as nested goals (#2)](2026-11-24-06-impl-bounds-nested-goals.md) |
 | 2026-11-24 | [Trait solving, step 1: a goal's answer is yes, maybe or no (#2)](2026-11-24-07-goal-certainty.md) |
 | 2026-11-24 | [Region (lifetime) checking, part 22: projections' associated types in annotations and parameters, closures cast from a local](2026-11-24-08-region-check-22.md) |
+| 2026-11-24 | [Region (lifetime) checking, part 23: placeholders against regions from outside, a placeholder's bound's type arguments, diverging initializers, type aliases with a parameter twice](2026-11-24-09-region-check-23.md) |
+| 2026-11-24 | [Region (lifetime) checking, part 24: a struct's 'static bound in a generic fn's types, `mut` bindings under a by-reference default binding mode, the outlives of the impl a projection selects](2026-11-24-10-region-check-24.md) |
 | 2026-11-23 | [A trait solver for the program's traits, modeled and proved in Lean first](2026-11-23-04-trait-solver.md) |
 | 2026-11-23 | [The trait solver, part 2: coherence, supertraits, dyn coercions, impl selection, auto traits](2026-11-23-05-trait-solver-2.md) |
 | 2026-11-23 | [The trait solver, part 3: associated types](2026-11-23-06-trait-solver-3.md) |

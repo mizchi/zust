@@ -171,6 +171,14 @@ impl Cx<'_> {
             }
             return Ok(None);
         };
+        // (the immediate as the last argument, `_mm256_shuffle_epi32(a, 0b_00_11_10_01)`: x86's intrinsics take it so
+        //  too (`#[rustc_legacy_const_generics]`, chacha20 0.10's avx2 backend), as `::<IMM>(a)`)
+        if x86_split(name).is_some() && last.args.is_empty() && cargs.len() == args.len() + 1 {
+            let mut np = p.clone();
+            let seg = np.segs.last_mut().unwrap();
+            seg.args = vec![GArg::Const(cargs[cargs.len() - 1].clone())];
+            return self.simd_call(&np, &cargs[..cargs.len() - 1]);
+        }
         let (pre, rest) = split(name);
         let plan = if let Some(x) = x86_split(name) {
             // (the const argument: a predicate, a lane, a shift, a half)

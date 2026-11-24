@@ -1,0 +1,11 @@
+[package]
+name = "popular-base64"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# (not a member of zust's workspace)
+[workspace]
+
+[dependencies]
+base64 = "=0.23.1"

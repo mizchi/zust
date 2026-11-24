@@ -1363,15 +1363,15 @@ fn ground(p: &Program, t: Ty, depth: u32) -> bool {
     }
 }
 
-/// One-way matching of a pattern (an impl's head, over its parameters) against a ground type: `mtch` of the model.
-/// Exact: references and pointers agree in mutability, arrays in length, other types are equal. A part of the pattern
-/// zustc cannot match exactly (an associated type) matches anything: the head is weakened, never strengthened
 thread_local! {
     /// While a call with a turbofish is resolved (`require::<i32>()`): its types are written, not literals zustc
     /// defaulted, so the solver does not take an i32 / f64 for any integer / float
     pub static EXPLICIT_ARGS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
+/// One-way matching of a pattern (an impl's head, over its parameters) against a ground type: `mtch` of the model.
+/// Exact: references and pointers agree in mutability, arrays in length, other types are equal. A part of the pattern
+/// zustc cannot match exactly (an associated type) matches anything: the head is weakened, never strengthened
 pub fn mtch(p: &Program, pt: Ty, t: Ty, sol: &mut [Option<Ty>], lenient: bool, depth: u32) -> bool {
     if depth > 64 {
         return true;

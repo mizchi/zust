@@ -1,0 +1,2 @@
+// expect: unterminated template string
+export fn f() -> String { `abc
