@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795556984237,
+  "lastUpdate": 1795556987781,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -122942,6 +122942,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui run-pass passing",
             "value": 1862,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.17,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1526,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.96,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4724,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "78e7ed631a53cf69241f471fb3392d32a75de44c",
+          "message": "Merge pull request #135 from mizchi/claude/serde-ref-impls\n\nserde_core: impl<T: Tr> Tr for &T / &mut T that forwards, and fmt::Write per module",
+          "timestamp": "2026-11-25T06:43:50+09:00",
+          "tree_id": "3d52b0a20e84d9ed20fc76410123b3900fd3df59",
+          "url": "https://github.com/mizchi/zust/commit/78e7ed631a53cf69241f471fb3392d32a75de44c"
+        },
+        "date": 1795556987093,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.53,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1863,
             "unit": "tests"
           },
           {
