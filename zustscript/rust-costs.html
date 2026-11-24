@@ -8,6 +8,8 @@
 <meta name="description" content="Rust でスライスを借用する関数も、TypeScript から呼ぶと配列全体のコピーを伴うことがあります。生成した .wasm.rs で分かるのは Wasm 内部の処理です。呼び出し全体のコストを知るには、同じディレクトリの .js にある引数と戻り値の変換も読みます。">
 <link rel="stylesheet" href="../style.css">
 <style>
+  .content.wrap { width: 100%; }
+  @media (max-width: 999px) { .shell .side { display: none; } }
   article { max-width: 48rem; margin: auto; padding-block: clamp(32px, 7vw, 76px); font-size: 16px; line-height: 1.9; }
   article h1 { line-height: 1.35; font-size: clamp(28px, 4.5vw, 42px); margin: 0 0 24px; }
   article h2 { margin-top: 2.4em; margin-bottom: .6em; font-size: 23px; }
@@ -30,8 +32,21 @@
   <a class="brand" href="../"><span>z</span>ust</a>
   <nav aria-label="サイト内"><a href="../">About</a><a href="./" aria-current="location">zustscript</a><a href="https://github.com/mizchi/zust">GitHub</a></nav>
 </div></header>
-<main class="wrap">
-<article>
+<div class="shell">
+  <aside class="side">
+    <a class="brand" href="../"><span>z</span>ust</a>
+    <nav class="pages" aria-label="zustscript の記事">
+      <p class="label">zustscript の記事</p>
+      <a href="index.html">zustscript 入門</a>
+      <a href="rust-costs.html" aria-current="page">Rust から見る変換コスト</a>
+    </nav>
+    <nav aria-label="サイト内">
+      <a href="../">About</a>
+      <a class="ext" href="https://github.com/mizchi/zust">GitHub</a>
+    </nav>
+  </aside>
+  <main class="content wrap">
+    <article>
 <h1>Rust から見る zustscript の変換コスト</h1>
 <p>Rust でスライスを借用する関数も、TypeScript から呼ぶと配列全体のコピーを伴うことがあります。生成した <code>.wasm.rs</code> で分かるのは Wasm 内部の処理です。呼び出し全体のコストを知るには、同じディレクトリの <code>.js</code> にある引数と戻り値の変換も読みます。</p>
 <h2>スライスを借りる前に、JS が配列をコピーする</h2>
@@ -88,7 +103,8 @@
 <span class='function'>rg</span> <span class='constant'>-A12</span> <span class='string'>&#39;function (dot|longer)\(&#39;</span> out/costs/*.js
 </code></pre>
 <p>実行時間を比較するときは、同じ入力で JS から公開関数を呼ぶと転送も測定に入ります。<code>@wasm</code> で書いた元の例は <code>--all-js</code> で JS 版も生成できます。手書きの <code>wasm fn</code> は Rust 本体を Wasm として実行します。<a href="https://github.com/mizchi/zust/blob/main/crates/zustscript/tests/numeric_bench.mjs">数値計算のベンチマーク</a> · <a href="index.html">zustscript 入門に戻る</a></p>
-</article>
-</main>
+    </article>
+  </main>
+</div>
 </body>
 </html>

@@ -8,6 +8,8 @@
 <meta name="description" content="zustscript は、Rust の enum や match と、TypeScript でおなじみのアロー関数や JSX を組み合わせた、フロントエンド向けの静的型付き言語です。TypeScript のアプリに一つのモジュールから組み込めます。">
 <link rel="stylesheet" href="../style.css">
 <style>
+  .content.wrap { width: 100%; }
+  @media (max-width: 999px) { .shell .side { display: none; } }
   article { max-width: 48rem; margin: auto; padding-block: clamp(32px, 7vw, 76px); font-size: 16px; line-height: 1.9; }
   article h1 { line-height: 1.35; font-size: clamp(28px, 4.5vw, 42px); margin: 0 0 24px; }
   article h2 { margin-top: 2.4em; margin-bottom: .6em; font-size: 23px; }
@@ -30,8 +32,21 @@
   <a class="brand" href="../"><span>z</span>ust</a>
   <nav aria-label="サイト内"><a href="../">About</a><a href="./" aria-current="page">zustscript</a><a href="https://github.com/mizchi/zust">GitHub</a></nav>
 </div></header>
-<main class="wrap">
-<article>
+<div class="shell">
+  <aside class="side">
+    <a class="brand" href="../"><span>z</span>ust</a>
+    <nav class="pages" aria-label="zustscript の記事">
+      <p class="label">zustscript の記事</p>
+      <a href="index.html" aria-current="page">zustscript 入門</a>
+      <a href="rust-costs.html">Rust から見る変換コスト</a>
+    </nav>
+    <nav aria-label="サイト内">
+      <a href="../">About</a>
+      <a class="ext" href="https://github.com/mizchi/zust">GitHub</a>
+    </nav>
+  </aside>
+  <main class="content wrap">
+    <article>
 <h1>zustscript 入門 ── JavaScript と WebAssembly のためのフロントエンド言語</h1>
 <p>zustscript は、Rust の <code>enum</code> や <code>match</code> と、TypeScript でおなじみのアロー関数や JSX を組み合わせた、フロントエンド向けの静的型付き言語です。TypeScript のアプリに一つのモジュールから組み込めます。</p>
 <p>TypeScript で「状態を判別 union で表す」「元の配列を変更せず、<code>map</code> や <code>filter</code> で新しい値を作る」といった関数型の書き方をしていれば、その設計を zustscript にも持ち込めます。JS 上ではレコードはオブジェクト、配列は配列のままです。対応する TypeScript の型を <code>import type</code> で読み込めば、既存の値を呼び出し用に詰め直す手間もありません。</p>
@@ -140,7 +155,8 @@
 <li><a href="https://github.com/mizchi/zust/blob/main/crates/zustscript/examples/app.zsc">JSX と Wasm を組み合わせた app.zsc</a></li>
 <li><a href="https://github.com/mizchi/zust/tree/main/crates/zustscript">zustscript の言語仕様と実装状況</a></li>
 </ul>
-</article>
-</main>
+    </article>
+  </main>
+</div>
 </body>
 </html>
