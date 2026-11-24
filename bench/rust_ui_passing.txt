@@ -1523,6 +1523,7 @@ check-pass	coercion/struct-literal-field-type-coercion-to-expected-type.rs
 run-pass	coercion/trait-object-arrays-11205.rs
 compile-fail	coercion/type-errors.rs
 run-pass	coercion/unsafe-coercion.rs
+check-pass	coercion/vec-macro-coercions.rs
 check-pass	coherence/clone-impl-unsized-slice.rs
 compile-fail	coherence/coherence-blanket-conflicts-with-blanket-implemented.rs
 compile-fail	coherence/coherence-blanket-conflicts-with-blanket-unimplemented.rs

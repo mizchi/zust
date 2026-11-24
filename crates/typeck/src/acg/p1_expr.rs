@@ -677,7 +677,28 @@ impl Cx<'_> {
     // --- 式 -------------------------------------------------------------
 
     /// 式を評価し、期待型への暗黙の変換 (`&[T; N]` → `&[T]`) をする
+    /// The deny-by-default lint dangerous_implicit_autorefs, where rustc 1.100 fires it: `(*p).len()` /
+    /// `(*p).is_empty()` and `(*p)[a..b]` with p a raw pointer to a slice or str (an implicit `&*p`)
+    fn implicit_autoref(&self, e: &Expr) -> R<()> {
+        let raw_deref = |r: &Expr| match strip_paren(r) {
+            Expr::Unary(op, x, _) if op == "*" => matches!(self.peek(x), Some(Ty::Ptr(_, Ty::Slice(_) | Ty::Str))),
+            _ => false,
+        };
+        let hit = match e {
+            Expr::MethodCall(recv, m, _, args, _) => args.is_empty() && matches!(m.as_str(), "len" | "is_empty") && raw_deref(recv),
+            Expr::Index(b, k, _) => matches!(&**k, Expr::Range(..)) && raw_deref(b),
+            _ => false,
+        };
+        if hit && !self.prog.allow_implicit_autorefs {
+            return err(expr_start(e), "implicit autoref creates a reference to the dereference of a raw pointer (dangerous_implicit_autorefs)");
+        }
+        Ok(())
+    }
+
     pub(crate) fn expr(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        if self.user_code && matches!(e, Expr::MethodCall(..) | Expr::Index(..)) {
+            self.implicit_autoref(e)?;
+        }
         // (the places inside a sub-expression are accesses of their own)
         let pd = std::mem::take(&mut self.bk.place_depth);
         let hint_only = std::mem::take(&mut self.bk.move_mut_hint);
@@ -3112,6 +3133,21 @@ impl Cx<'_> {
     /// The fn pointer type that expressions es all coerce to when they are two or more distinct closures with no
     /// captures and one signature (rustc's coercion of a match's arms or an array's elements to their least upper
     /// bound). None otherwise, also when they are one closure type
+    /// The element type that `&String` and `&str` elements coerce to together (`vec![&string, "abc"]`: `&str`), when
+    /// both kinds are among them and nothing else
+    pub(crate) fn str_refs_lub(&self, es: &[&Expr]) -> Option<Ty> {
+        let string = self.prog.struct_index.get("String").copied();
+        let (mut strs, mut strings) = (0, 0);
+        for e in es {
+            match self.peek(e)? {
+                Ty::Ref(false, Ty::Str) => strs += 1,
+                Ty::Ref(_, Ty::Struct(s)) if Some(self.prog.base_of(*s)) == string => strings += 1,
+                _ => return None,
+            }
+        }
+        (strs > 0 && strings > 0).then(|| Ty::Ref(false, crate::types::intern(Ty::Str)))
+    }
+
     pub(crate) fn closures_lub(&self, es: &[&Expr]) -> Option<Ty> {
         if es.len() < 2 {
             return None;

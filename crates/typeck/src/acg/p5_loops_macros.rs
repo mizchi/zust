@@ -1185,6 +1185,13 @@ impl Cx<'_> {
         // (elements that are distinct closures with no captures and one signature: their fn pointer, as for an array)
         let is_clo = |t: Option<Ty>| matches!(t, Some(Ty::Struct(s)) if self.prog.closure_of_struct.contains_key(&self.prog.base_of(s)));
         let mut lubbed = false;
+        // (also over the first element's `&String`, which inference may have given)
+        let string_ref = |t: Option<Ty>| matches!(t, Some(Ty::Ref(_, Ty::Struct(s))) if self.prog.struct_index.get("String") == Some(&self.prog.base_of(*s)));
+        if elem.is_none() || string_ref(elem) {
+            if let Some(t) = self.str_refs_lub(&kept) {
+                elem = Some(t);
+            }
+        }
         if elem.is_none() || is_clo(elem) {
             if let Some(f) = self.closures_lub(&kept) {
                 elem = Some(f);

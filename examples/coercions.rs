@@ -26,4 +26,9 @@ fn main() {
     };
     let hs = [foo, |a| a * 3];
     println!("{} {} {}", h(4), hs[0](1), hs[1](1));
+    // (`&String` and `&str` elements: all `&str`)
+    let owned = String::from("own");
+    let words = vec![&owned, "lit"];
+    let more = ["lit", &owned];
+    println!("{:?} {:?}", words, more);
 }

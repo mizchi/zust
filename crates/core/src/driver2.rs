@@ -1474,6 +1474,10 @@ impl Session2 {
             let head = &src[src[..i].rfind('(').map(|k| src[..k].rfind(|c: char| c == '[' || c == ',').map_or(0, |b| b + 1)).unwrap_or(i)..i];
             ["allow(", "warn(", "expect("].iter().any(|a| head.trim_start().starts_with(a)) && !in_text(i)
         });
+        prog.allow_implicit_autorefs = src.match_indices("dangerous_implicit_autorefs").any(|(i, _)| {
+            let head = &src[src[..i].rfind('(').map(|k| src[..k].rfind(|c: char| c == '[' || c == ',').map_or(0, |b| b + 1)).unwrap_or(i)..i];
+            ["allow(", "warn(", "expect("].iter().any(|a| head.trim_start().starts_with(a)) && !in_text(i)
+        });
         prog.deny_trivial_casts = deny_trivial_casts;
         if deny_must_use {
             for it in &items[..user] {
