@@ -2293,6 +2293,24 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         }
         ItemKind::Fn(fs, Some(body)) if owner.is_some() => {
             let ow = owner.unwrap();
+            // (a method of `impl<T> Tr for &T` / `&mut T`: noted for Program, which asks the impl to define each default
+            // method of the trait. Its methods are not called: where T is bounded by the trait itself, a call on `&X`
+            // reaches X's impl through the deref, which is what a method that forwards to T's does. One that does
+            // more is noted too: the driver reports it where the program calls a method of that name. (With another
+            // bound, thiserror's `impl<T: Display> AsDisplay for &T`, X has no impl of its own to reach)
+            if let (false, Some(trn), TySyn::Ref(_, inner)) = (ow.is_trait, ow.impl_trait.as_deref(), &ow.self_ty) {
+                let trn = trn.split('<').next().unwrap_or(trn);
+                if let TySyn::Named(param) = &**inner {
+                    if ow.generics.iter().any(|g| g.0 == *param) {
+                        sm.ref_impl_fns.push(fs.name.clone());
+                        let bounded = ow.generics.iter().any(|g| g.0 == *param && g.1.iter().any(|b| b.split('<').next().unwrap_or(b).trim() == trn));
+                        let mut_ref = matches!(&ow.self_ty, TySyn::Ref(true, _));
+                        if bounded && fs.recv.is_some() && !forwards_to_referent(fs, body, param, trn, mut_ref) {
+                            sm.ref_impl_bad.push(fs.name.clone());
+                        }
+                    }
+                }
+            }
             let mut sig = parse_sig(fs, false, false, Some(ow))?;
             // (E0106: a method with no receiver elides as a free fn; the program's, not the prelude's, which writes no
             // lifetimes: the driver reports it of the program's items)
@@ -3084,6 +3102,66 @@ fn const_param_in_op(t: &PTy, consts: &[&str]) -> bool {
         }
         PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) => const_param_in_op(i, consts),
         PTy::Tuple(v) => v.iter().any(|x| const_param_in_op(x, consts)),
+        _ => false,
+    }
+}
+
+/// A method of `impl<T: Tr> Tr for &T` / `&mut T` that only forwards to T's: `(**self).m(a, b)` / `(*self).m(a, b)`, or
+/// `T::m(&**self, a, b)` / `Tr::m(&mut **self, a, b)` / `Tr::m(*self, a, b)`, passing its own parameters in order (and
+/// a turbofish only of its own generic parameters, in order: `(**self).m::<N>()`). A call on the reference reaches T's
+/// method through the deref, which is what such a body does. Not `(*self).m()` for a `&self` method of an impl for
+/// `&mut T`: `*self` is the `&mut T`, whose method lookup takes the impl's own `m` (through `&&mut T`) before T's, so
+/// it calls itself (mut_ref: the impl is for `&mut T`)
+fn forwards_to_referent(fs: &PSig, body: &Block, param: &str, tr: &str, mut_ref: bool) -> bool {
+    if !matches!(fs.recv.as_deref(), Some("&self" | "&mut self")) {
+        return false;
+    }
+    let [st] = body.stmts.as_slice() else { return false };
+    let e = match st {
+        Stmt::Expr(e, semi) if !*semi || fs.ret.is_none() => e,
+        _ => return false,
+    };
+    fn strip(mut e: &Expr) -> &Expr {
+        while let Expr::Paren(i) = e {
+            e = i;
+        }
+        e
+    }
+    let one = |e: &Expr, n: &str| matches!(strip(e), Expr::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == n && p.segs[0].args.is_empty());
+    let deref1 = |e: &Expr| matches!(strip(e), Expr::Unary(o, j, _) if o == "*" && one(j, "self"));
+    let deref2 = |e: &Expr| matches!(strip(e), Expr::Unary(o, i, _) if o == "*" && deref1(i));
+    let Some(names) = fs.params.iter().map(|(p, _)| if let Pat::Ident(_, false, n, None) = p { Some(n.as_str()) } else { None }).collect::<Option<Vec<&str>>>() else {
+        return false;
+    };
+    let args_ok = |args: &[Expr]| args.len() == names.len() && args.iter().zip(&names).all(|(a, n)| one(a, n));
+    // (a turbofish passes the method's own type and const parameters, in their order, or there is none)
+    let own: Vec<&str> = fs.generics.params.iter().filter_map(|g| match g {
+        GParam::Ty(n, ..) | GParam::Const(n, _) => Some(n.as_str()),
+        GParam::Lifetime(_) => None,
+    }).collect();
+    let targs_ok = |targs: &[crate::parse::GArg]| {
+        targs.is_empty()
+            || (targs.len() == own.len()
+                && targs.iter().zip(&own).all(|(a, n)| match a {
+                    crate::parse::GArg::Ty(PTy::Path(None, p)) => p.segs.len() == 1 && p.segs[0].name == *n && p.segs[0].args.is_empty(),
+                    crate::parse::GArg::Const(e) => one(e, n),
+                    _ => false,
+                }))
+    };
+    // (`(*self).m(..)`: `*self` is the `&T`, whose own method is T's through the deref too; but not the `&mut T` of a
+    // `&self` method, see above)
+    let deref1_recv = !(mut_ref && fs.recv.as_deref() == Some("&self"));
+    match strip(e) {
+        Expr::MethodCall(r, m, targs, args, _) => *m == fs.name && (deref2(r) || (deref1_recv && deref1(r))) && targs_ok(targs) && args_ok(args),
+        Expr::Call(f, args) => {
+            let Expr::Path(None, p) = strip(f) else { return false };
+            p.segs.len() == 2
+                && (p.segs[0].name == param || p.segs[0].name == tr)
+                && p.segs[1].name == fs.name
+                && targs_ok(&p.segs[1].args)
+                && args.first().is_some_and(|a| matches!(strip(a), Expr::Ref(_, i) if deref2(i)) || deref1(a))
+                && args_ok(&args[1..])
+        }
         _ => false,
     }
 }
