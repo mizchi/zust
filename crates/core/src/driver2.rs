@@ -4765,11 +4765,24 @@ fn private_path(
         imps.iter().skip(1).flatten().filter(|x| x.glob != 2 && !x.name.is_empty() && !matches!(x.vis, PVis::Pub | PVis::Crate)).map(|x| x.name).collect()
     };
     let reexp_on = !unknown_mods && mods.len() > 1 && imps.iter().flatten().any(|x| x.glob == 0 && !matches!(x.vis, PVis::Priv));
+    // (E0603 / E0423 / E0532: the tuple structs of modules other than the crate root with a field that is not `pub`,
+    // whose constructor is as visible as that field)
+    let ctor_names: FxSet<&[u8]> = if unknown_mods {
+        FxSet::default()
+    } else {
+        items
+            .iter()
+            .skip(1)
+            .flatten()
+            .filter(|it| it.kind == "tuple struct" && tuple_fields(b, toks, &close, it.at).is_some_and(|v| v.iter().any(|x| !matches!(x, PVis::Pub | PVis::Crate))))
+            .map(|it| it.name)
+            .collect()
+    };
     // (E0432 of an import cycle or a glob of a module into itself: a `pub use` of a path through the program's modules,
     // or a glob of `self` / `super` / `crate`)
     let cycle_on = !unknown_mods && imps.iter().flatten().any(|x| x.glob == 0 && x.segs.len() >= 2 && !matches!(x.vis, PVis::Priv))
         || !unknown_mods && imps.iter().flatten().any(|x| x.glob == 2 && x.segs.first().is_some_and(|&f| matches!(t(f), b"self" | b"super" | b"crate")));
-    let mut amb = (amb_on || priv_on || assoc_on || !imp_priv_names.is_empty() || reexp_on || cycle_on).then(|| Ambiguity {
+    let mut amb = (amb_on || priv_on || assoc_on || !imp_priv_names.is_empty() || reexp_on || cycle_on || !ctor_names.is_empty()).then(|| Ambiguity {
         b,
         toks,
         close: &close,
@@ -4868,6 +4881,35 @@ fn private_path(
         *fpriv = Some(Box::new(fp));
     }
     let amb_msg = |k: usize| Some((k, format!("`{}` is ambiguous (E0659)", String::from_utf8_lossy(t(k)))));
+    // (E0433: a path with more leading `super`s than its module has parents: "too many leading `super` keywords within
+    // `crate::outer::inner`", at the first one past the crate root)
+    let mod_path = |m: usize| -> String {
+        let mut names: Vec<String> = vec![];
+        let mut cur = m;
+        while cur != 0 && cur != usize::MAX {
+            let p = mods[cur].2;
+            match items.get(p).and_then(|its| its.iter().find(|x| x.child == cur)) {
+                Some(it) => names.push(String::from_utf8_lossy(it.name).into_owned()),
+                None => break,
+            }
+            cur = p;
+        }
+        names.push("crate".to_string());
+        names.reverse();
+        names.join("::")
+    };
+    let super_depth = |m: usize, segs: &[usize]| -> Option<(usize, String)> {
+        let mut i = usize::from(segs.first().is_some_and(|&x| t(x) == b"self"));
+        let mut cur = m;
+        while i < segs.len() && t(segs[i]) == b"super" {
+            if cur == 0 {
+                return Some((segs[i], format!("too many leading `super` keywords within `{}` (E0433)", mod_path(m))));
+            }
+            cur = mods[cur].2;
+            i += 1;
+        }
+        None
+    };
     // (each module's own tokens, past its child modules and its item-level macros, for the paths in them)
     let mut found: Option<(usize, String)> = None;
     let mut found_late: Option<(usize, String)> = None;
@@ -4942,6 +4984,7 @@ fn private_path(
                 if !lead || injected {
                     for (l, &g) in leaves.iter().zip(&kinds).filter(|(l, _)| !l.is_empty()) {
                         keep(check(m, l, injected, true, g));
+                        keep(super_depth(m, l));
                     }
                 }
                 // (E0603 of a private import on the path; E0364 / E0365: a re-export wider than what it names)
@@ -5004,12 +5047,14 @@ fn private_path(
                 }
                 if reads {
                     keep(check(m, &segs, false, false, 0));
+                    keep(super_depth(m, &segs));
                 }
                 // (E0659: a segment of the path; E0451: a struct literal's or pattern's fields, where its last segment
                 // names a struct with such a field; the scope facts last, as they are read only then)
                 let x = j;
                 let lit = priv_on && t(x + 1) == b"{" && hidden_structs.contains(t(x));
                 let member = assoc_on && assoc_names.contains(t(x));
+                let ctor = !ctor_names.is_empty() && ctor_names.contains(t(x)) && t(x + 1) == b"(";
                 let via_import = !imp_priv_names.is_empty() && {
                     let mut y = raw(k);
                     let mut any = false;
@@ -5019,7 +5064,7 @@ fn private_path(
                     }
                     any
                 };
-                if amb.is_some() && (amb_on || lit || member || via_import) {
+                if amb.is_some() && (amb_on || lit || member || via_import || ctor) {
                     let mut all = vec![raw(k)];
                     let mut y = raw(k);
                     while t(y + 1) == b":" && t(y + 2) == b":" && is_id(y + 3) {
@@ -5039,6 +5084,13 @@ fn private_path(
                         let a = amb.as_mut().unwrap();
                         let value = !matches!(a.site_ns(raw(k), x), 1);
                         keep(a.import_privacy(m, &all, false, value));
+                    }
+                    // (E0603: `a::S(1)` of a tuple struct with a field the module may not see)
+                    if ctor && amb.as_ref().is_some_and(|a| free!(a, raw(k))) {
+                        let a = amb.as_mut().unwrap();
+                        if let Some(name) = a.ctor_hidden(m, &all) {
+                            keep(Some((x, format!("tuple struct constructor `{}` is private (E0603)", String::from_utf8_lossy(name)))));
+                        }
                     }
                     // (E0624: `a::S::new()`, `Foo::ID`: a private member of the type's inherent impl)
                     if member && all.len() >= 2 {
@@ -5089,6 +5141,25 @@ fn private_path(
                 }
                 k = j + 1;
                 continue;
+            }
+            // (E0423 / E0532: `S(1)` / `S(x) =>` of a tuple struct with a field the module may not see)
+            if !ctor_names.is_empty()
+                && is_id(k)
+                && t(k + 1) == b"("
+                && ctor_names.contains(t(k))
+                && !after_colons(k)
+                && !matches!(t(k.wrapping_sub(1)), b"." | b"$" | b"'" | b"#" | b"fn" | b"struct" | b"enum" | b"union" | b"impl" | b"for" | b"dyn" | b"->" | b"<")
+                && amb.as_ref().is_some_and(|a| free!(a, k))
+            {
+                let a = amb.as_mut().unwrap();
+                if a.ctor_hidden(m, &[k]).is_some() {
+                    // (a pattern: `let S(x) =`, `S(x) =>`, a parameter's `S(x): S`, an or-pattern)
+                    let e = close[k + 1];
+                    let after = t(e.wrapping_add(1));
+                    let pattern = t(k.wrapping_sub(1)) == b"let" || matches!(after, b"|" | b"if" | b"in") || after == b":" && t(e + 2) != b":" || after == b"=" && t(e + 2) != b"=";
+                    let msg = if pattern { "cannot match against a tuple struct which contains private fields (E0532)" } else { "cannot initialize a tuple struct which contains private fields (E0423)" };
+                    keep(Some((k, msg.to_string())));
+                }
             }
             // (E0451: a struct literal or pattern of one segment, `Foo { x: 1 }`)
             if priv_on
@@ -5416,6 +5487,63 @@ fn struct_fields<'a>(b: &'a [u8], toks: &[(u8, usize, usize)], close: &[usize], 
         k += 1;
     }
     out
+}
+
+/// The visibilities of the fields of the tuple struct whose name is token `at` (None for another struct)
+fn tuple_fields<'a>(b: &'a [u8], toks: &[(u8, usize, usize)], close: &[usize], at: usize) -> Option<Vec<PVis<'a>>> {
+    let t = |k: usize| -> &'a [u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let mut k = at + 1;
+    if t(k) == b"<" {
+        let mut d = 0i32;
+        while k < toks.len() {
+            match t(k) {
+                b"<" => d += 1,
+                b">" if t(k - 1) != b"-" => {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+        k += 1;
+    }
+    let e = *close.get(k).filter(|&&e| t(k) == b"(" && e != usize::MAX)?;
+    let mut out = vec![];
+    k += 1;
+    while k < e {
+        while t(k) == b"#" && t(k + 1) == b"[" && close[k + 1] != usize::MAX {
+            k = close[k + 1] + 1;
+        }
+        let mut vis = PVis::Priv;
+        if t(k) == b"pub" {
+            vis = PVis::Pub;
+            if t(k + 1) == b"(" && close[k + 1] != usize::MAX && matches!(t(k + 2), b"crate" | b"self" | b"super" | b"in") {
+                let c = close[k + 1];
+                vis = match t(k + 2) {
+                    b"self" => PVis::Priv,
+                    b"super" => PVis::Super,
+                    b"in" => PVis::In((k + 3..c).filter(|&j| is_id(j)).map(t).collect()),
+                    _ => PVis::Crate,
+                };
+                k = c;
+            }
+        }
+        if k < e {
+            out.push(vis);
+        }
+        while k < e && t(k) != b"," {
+            if matches!(t(k), b"(" | b"[" | b"{") && close[k] != usize::MAX {
+                k = close[k];
+            }
+            k += 1;
+        }
+        k += 1;
+    }
+    Some(out)
 }
 
 /// An import of a module, as `private_path` reads it: `use a::b as c;` is (c, [a, b], 0), `use a::*;` (``, [a], 2),
@@ -5849,6 +5977,19 @@ impl<'a, 'b> Ambiguity<'a, 'b> {
             cur = c;
         }
         None
+    }
+    /// Whether the tuple struct a path of module m names (its value) has a field m may not see: its constructor is as
+    /// visible as that field. Its name, if so
+    fn ctor_hidden(&mut self, m: usize, segs: &[usize]) -> Option<&'a [u8]> {
+        let APath::Defs(d) = self.path(m, segs, false, 2) else { return None };
+        let vals: Vec<ADef> = d.iter().filter(|x| x.0 & 2 != 0 && x.1.v == u32::MAX).map(|x| x.1).collect();
+        let &[x] = &vals[..] else { return None };
+        let it = &self.items[x.m as usize][x.i as usize];
+        if it.kind != "tuple struct" {
+            return None;
+        }
+        let fields = tuple_fields(self.b, self.toks, self.close, it.at)?;
+        fields.iter().any(|v| !self.visible(x.m as usize, v, m)).then_some(it.name)
     }
     /// E0432 of an import of module m (import j) that names itself through other imports and nothing else
     /// (`pub use crate::y::x;` in y, `mod a { pub use crate::b::foo; } mod b { pub use crate::a::foo; }`): its path, as

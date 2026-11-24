@@ -1492,6 +1492,37 @@ fn import_cycles() {
 }
 
 #[test]
+fn tuple_constructors_and_leading_super() {
+    // (a tuple struct with a field a module may not see: its constructor is as private as that field; more leading
+    // `super`s than the module has parents. Each expected line, column and message is rustc 1.100's on the same source,
+    // in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        let src = "mod a { pub struct S(u8); }\nfn main() {\n    let _ = a::S(1);\n}\n";
+        assert_eq!(check(edition, src), at(3, 16, "tuple struct constructor `S` is private (E0603)"), "path");
+        let src = "mod a { pub struct S(pub u8, u8); }\nuse a::S;\nfn main() {\n    let _ = S(1, 2);\n}\n";
+        assert_eq!(check(edition, src), at(4, 13, "cannot initialize a tuple struct which contains private fields (E0423)"), "call");
+        let src = "mod a { pub struct S(u8); }\nuse a::S;\nfn f(s: S) { let S(_) = s; }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(3, 18, "cannot match against a tuple struct which contains private fields (E0532)"), "pattern");
+        let src = "mod outer {\n    mod inner {\n        struct Example(super::super::super::Impl);\n    }\n}\nstruct Impl;\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(3, 38, "too many leading `super` keywords within `crate::outer::inner` (E0433)"), "super");
+        // (a `pub` field, the constructor in its module, the struct as a type, `super` within the crate)
+        for src in [
+            "mod a { pub struct S(pub u8); }\nuse a::S;\nfn main() {\n    let _ = S(1);\n}\n",
+            "mod a { pub struct S(u8); pub fn f() -> S { S(1) } }\nfn main() { let _ = a::f(); }\n",
+            "mod a { pub struct S(u8); pub fn f() -> S { S(1) } }\nfn g(_: a::S) {}\nfn main() { g(a::f()); }\n",
+            "mod a { pub fn f() {} mod b { fn g() { super::f(); } } }\nfn main() {}\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
 fn glob_ambiguity() {
     // (E0659: a name two glob imports bring with different definitions, where a path names it; each expected line
     // and column is rustc 1.100's on the same source, in both editions; None where rustc accepts it)

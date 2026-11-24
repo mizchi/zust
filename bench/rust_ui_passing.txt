@@ -4662,6 +4662,7 @@ run-pass	modules/primitive-type-module-deprecated-paths.rs
 check-pass	modules/pub-use-handling-in-modules-56128.rs
 check-pass	modules/pub-use-module-alias-5950.rs
 run-pass	modules/special_module_name_ignore.rs
+compile-fail	modules/super-at-crate-root.rs
 run-pass	modules/use-statement-duplicate-check-7663.rs
 compile-fail	moves/arc-consumed-in-looped-closure.rs
 compile-fail	moves/borrow-closures-instead-of-move.rs
@@ -5974,6 +5975,8 @@ compile-fail	privacy/issue-13641.rs
 compile-fail	privacy/issue-29161.rs
 compile-fail	privacy/issue-46209-private-enum-variant-reexport.rs
 compile-fail	privacy/issue-75062-fieldless-tuple-struct.rs
+compile-fail	privacy/issue-75906.rs
+compile-fail	privacy/issue-75907.rs
 compile-fail	privacy/issue-79593.rs
 compile-fail	privacy/locally-pub-private-module-access.rs
 compile-fail	privacy/priv-in-bad-locations.rs
@@ -6011,6 +6014,7 @@ compile-fail	privacy/sealed-traits/private-trait.rs
 compile-fail	privacy/sealed-traits/re-exported-trait.rs
 compile-fail	privacy/struct-field-and-impl-expose-10545.rs
 compile-fail	privacy/suggest-box-new.rs
+compile-fail	privacy/suggest-making-field-public.rs
 compile-fail	privacy/suggest-new-projection-ice.rs
 compile-fail	privacy/trait-object-method-error.rs
 check-pass	privacy/trait_more_private_than_item.rs
@@ -6363,6 +6367,7 @@ compile-fail	resolve/issue-109250.rs
 compile-fail	resolve/issue-111312.rs
 compile-fail	resolve/issue-111727.rs
 check-pass	resolve/issue-114433-invalid-unused-qualifications-suggestion.rs
+compile-fail	resolve/issue-117920.rs
 compile-fail	resolve/issue-118295.rs
 compile-fail	resolve/issue-12796.rs
 compile-fail	resolve/issue-14254.rs
@@ -6381,6 +6386,7 @@ compile-fail	resolve/issue-3214.rs
 compile-fail	resolve/issue-33876.rs
 compile-fail	resolve/issue-35675.rs
 compile-fail	resolve/issue-39559-2.rs
+compile-fail	resolve/issue-42944.rs
 compile-fail	resolve/issue-49074.rs
 compile-fail	resolve/issue-5035.rs
 compile-fail	resolve/issue-5099.rs
@@ -6418,6 +6424,7 @@ compile-fail	resolve/nonexistent-macro.rs
 compile-fail	resolve/outer-generic-in-trait-method.rs
 compile-fail	resolve/parse_error.rs
 compile-fail	resolve/privacy-enum-ctor.rs
+compile-fail	resolve/private-constructor-self-issue-147343.rs
 run-pass	resolve/reference-clone-nonclone-11820.rs
 compile-fail	resolve/regression-struct-called-as-function-148919.rs
 compile-fail	resolve/resolve-assoc-suggestions.rs
@@ -6454,6 +6461,7 @@ compile-fail	resolve/suggestions/suggest-path-for-tuple-struct.rs
 compile-fail	resolve/suggestions/suggest-path-instead-of-mod-dot-item.rs
 compile-fail	resolve/suggestions/suggest-vec-not-slice.rs
 compile-fail	resolve/token-error-correct-2.rs
+compile-fail	resolve/too-many-super-issue-158275.rs
 compile-fail	resolve/tool-import.rs
 compile-fail	resolve/trait-impl-cant-capture-env.rs
 compile-fail	resolve/tuple-struct-alias.rs
