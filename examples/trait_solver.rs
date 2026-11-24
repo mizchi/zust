@@ -211,6 +211,22 @@ struct Picked {
     wide: <Pick as Choose<u16>>::Out,
 }
 
+// (an associated type whose definition is a generic struct, named by another struct's field; and `Self::X` in the
+// impl that defines X, where X names a parameter only the trait's argument binds)
+trait Wrap<R> {
+    type W;
+    fn wrap(r: R) -> Self::W;
+}
+struct Boxed<R>(R);
+struct Wrapper;
+impl<R> Wrap<R> for Wrapper {
+    type W = Boxed<R>;
+    fn wrap(r: R) -> Self::W {
+        Boxed(r)
+    }
+}
+struct HoldsWrapped(<Wrapper as Wrap<u16>>::W);
+
 fn main() {
     println!("{} {}", Local.kind(), Tagged.kind());
     println!("{}", show(&Square(3)));
@@ -233,4 +249,6 @@ fn main() {
     println!("{} {} {} {} {}", *w, w.value, call_twice(&k), borrowed(3u8), is_default(()));
     let p = Picked { small: 200, wide: 70000 };
     println!("{} {}", p.small, p.wide);
+    let h = HoldsWrapped(<Wrapper as Wrap<u16>>::wrap(9));
+    println!("{}", (h.0).0);
 }

@@ -340,6 +340,7 @@ compile-fail	associated-types/point-at-type-on-obligation-failure.rs
 run-pass	associated-types/project-defer-unification.rs
 run-pass	associated-types/projection-as-type-alias.rs
 compile-fail	associated-types/recursive-associated-type-overflow-21946.rs
+run-pass	associated-types/recursive-enum-with-assoc-type-selfref.rs
 compile-fail	associated-types/report-unsatisfied-where-bound-error.rs
 compile-fail	associated-types/resolve-method-with-missing-assoc-type.rs
 run-pass	associated-types/ret-associated-type.rs
@@ -1685,6 +1686,7 @@ compile-fail	const-generics/min_const_generics/invalid-patterns.rs
 compile-fail	const-generics/min_const_generics/macro-fail.rs
 compile-fail	const-generics/min_const_generics/self-ty-in-const-1.rs
 run-pass	const-generics/min_const_generics/type_and_const_defaults.rs
+compile-fail	const-generics/mistyped_const_in_pat.rs
 compile-fail	const-generics/not_wf_param_in_rpitit.rs
 compile-fail	const-generics/parent_generics_of_nested_in_default.rs
 compile-fail	const-generics/parser-error-recovery/issue-89013-no-assoc.rs
@@ -4398,6 +4400,7 @@ run-pass	mir/mir_match_arm_guard.rs
 run-pass	mir/mir_match_test.rs
 run-pass	mir/mir_small_agg_arg.rs
 run-pass	mir/mir_static_subtype.rs
+run-pass	mir/mir_struct_with_assoc_ty.rs
 run-pass	mir/mir_temp_promotions.rs
 run-pass	mir/mir_void_return.rs
 run-pass	mir/mir_void_return_2.rs
@@ -7259,6 +7262,7 @@ run-pass	traits/inheritance/static2.rs
 run-pass	traits/inheritance/subst.rs
 run-pass	traits/inheritance/subst2.rs
 check-pass	traits/inheritance/supertrait-operator-issue-18088.rs
+build-pass	traits/issue-103563.rs
 build-pass	traits/issue-104322.rs
 compile-fail	traits/issue-105231.rs
 compile-fail	traits/issue-106072.rs
@@ -7907,6 +7911,7 @@ compile-fail	wf/ice-hir-wf-check-anon-const-issue-122199.rs
 compile-fail	wf/ice-hir-wf-issue-135341.rs
 compile-fail	wf/ice-wf-missing-span-in-error-130012.rs
 compile-fail	wf/issue-110157.rs
+check-pass	wf/issue-48638.rs
 compile-fail	wf/issue-95665.rs
 compile-fail	wf/issue-96810.rs
 compile-fail	wf/let-pat-inferred-non-wf.rs

@@ -550,6 +550,29 @@ pub struct AssocDef {
     pub trait_args: Option<Vec<Ty>>,
 }
 
+/// t with `Self::X` (the impl's self type's X) replaced by the impl's own definition of X (own), recursively
+fn own_assoc_syn(t: &TySyn, self_ty: &TySyn, own: &[(String, TySyn)], depth: u32) -> TySyn {
+    if depth > 8 {
+        return t.clone();
+    }
+    let r = |x: &TySyn| own_assoc_syn(x, self_ty, own, depth + 1);
+    match t {
+        TySyn::Assoc(b, n) if **b == *self_ty => match own.iter().find(|(m, _)| m == n) {
+            Some((_, v)) => own_assoc_syn(v, self_ty, own, depth + 1),
+            None => t.clone(),
+        },
+        TySyn::Ref(m, i) => TySyn::Ref(*m, Box::new(r(i))),
+        TySyn::Ptr(m, i) => TySyn::Ptr(*m, Box::new(r(i))),
+        TySyn::Slice(i) => TySyn::Slice(Box::new(r(i))),
+        TySyn::Array(i, n) => TySyn::Array(Box::new(r(i)), n.clone()),
+        TySyn::App(n, v) => TySyn::App(n.clone(), v.iter().map(r).collect()),
+        TySyn::Tuple(v) => TySyn::Tuple(v.iter().map(r).collect()),
+        TySyn::FnPtr(v) => TySyn::FnPtr(v.iter().map(r).collect()),
+        TySyn::Assoc(b, n) => TySyn::Assoc(Box::new(r(b)), n.clone()),
+        t => t.clone(),
+    }
+}
+
 /// The trait of the impl whose member item ii is (its own name) and the trait's type arguments resolved over the impl's
 /// parameters gn (None when one does not resolve)
 fn impl_trait_of(p: &Program, items: &[SrcItem], sums: &[Summary], ii: usize, gn: &[&str]) -> (String, Option<Vec<Ty>>) {
@@ -1388,6 +1411,27 @@ impl Program {
                 p.layout(id, &sdefs, items, &mut state)?;
             }
         }
+        // (then the associated types whose definitions name a generic struct (`impl<R: D> A<R> for AT { type AS =
+        // As<R>; }`), now that the generic definitions are resolved: before the other structs' fields, which may name
+        // them (`struct S(<AT as A<DT>>::AS)`). One that does not resolve yet is left to the pass below)
+        for (ii, sm) in sums.iter().enumerate() {
+            let of_trait = matches!(items[ii].kind, crate::lexer::ItemKind::ImplMember(h) if sums[h as usize].impl_trait.is_some());
+            if sm.assocs.is_empty() || !of_trait {
+                continue;
+            }
+            for (k, a) in sm.assocs.iter().enumerate() {
+                if early.contains(&(ii, k)) {
+                    continue;
+                }
+                let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
+                if let (Ok(self_ty), Ok(value)) = (p.resolve_g(&a.self_ty, &gn), p.resolve_g(&a.value, &gn)) {
+                    let (ngen, ngat) = gat_split(&gn);
+                    let (trait_name, trait_args) = impl_trait_of(&p, items, sums, ii, &gn);
+                    p.assocs.push(AssocDef { name: a.name.clone(), self_ty, value, ngen, ngat, trait_name, trait_args });
+                    early.push((ii, k));
+                }
+            }
+        }
         for id in 0..sdefs.len() {
             p.layout(id, &sdefs, items, &mut state)?;
         }
@@ -1491,12 +1535,11 @@ impl Program {
             }
         }
         // 関連型 (関数のシグネチャの `Self::Item` を解決するので先に)
-        let mut next_early = 0;
+        let early: FxSet<(usize, usize)> = early.into_iter().collect();
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             for (k, a) in sm.assocs.iter().enumerate() {
-                // (`early` is in the same order as this loop)
-                if early.get(next_early) == Some(&(ii, k)) {
-                    next_early += 1;
+                // (registered above)
+                if early.contains(&(ii, k)) {
                     continue;
                 }
                 let gn: Vec<&str> = a.generics.iter().map(|g| g.as_str()).collect();
@@ -1522,6 +1565,19 @@ impl Program {
         // (the impls of each trait for each type so far: their self types and trait arguments, and parameters)
         let mut self_tys: FxMap<(&str, &str), Vec<usize>> = FxMap::default();
         // 3. 関数
+        // (each trait impl's own associated types, by its header: `Self::X` in its methods' signatures is its own X, with
+        // the impl's parameters as they are, also when X names a parameter only the trait's arguments bind (`impl<E>
+        // Structure<E> for Slice { type FfiPtr = (*const E::FfiUnit, usize); }`, which no lookup by Slice can fill))
+        let mut own_assocs: FxMap<usize, Vec<(String, Vec<String>, TySyn)>> = FxMap::default();
+        for (ii, sm) in sums.iter().enumerate() {
+            if let Some(crate::lexer::ItemKind::ImplMember(h)) = items.get(ii).map(|it| it.kind) {
+                if sums.get(h as usize).is_some_and(|x| x.impl_trait.is_some()) {
+                    for a in &sm.assocs {
+                        own_assocs.entry(h as usize).or_default().push((a.name.clone(), a.generics.clone(), a.value.clone()));
+                    }
+                }
+            }
+        }
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             let first = p.names.len() as u32;
             let cnames: Vec<String> = sm.closures.iter().map(|c| format!("{}::call", c.name)).collect();
@@ -1554,6 +1610,28 @@ impl Program {
                     name.clone()
                 };
                 let gnames: Vec<&str> = ss.generics.iter().map(|g| g.0.as_str()).collect();
+                // (`Self::X` of the impl's own X: see own_assocs)
+                let own: Vec<(String, TySyn)> = match (it.kind, &ss.self_ty) {
+                    (crate::lexer::ItemKind::ImplMember(h), Some(_)) => own_assocs
+                        .get(&(h as usize))
+                        .into_iter()
+                        .flatten()
+                        .filter(|(_, g, _)| g.len() <= gnames.len() && g.iter().zip(&gnames).all(|(a, b)| a == b) && !g.iter().any(|x| x == "#gat"))
+                        .map(|(n, _, v)| (n.clone(), v.clone()))
+                        .collect(),
+                    _ => vec![],
+                };
+                let ss_own;
+                let ss = if own.is_empty() {
+                    ss
+                } else {
+                    let st = ss.self_ty.clone().unwrap();
+                    let mut c = ss.clone();
+                    c.params = c.params.iter().map(|t| own_assoc_syn(t, &st, &own, 0)).collect();
+                    c.ret = own_assoc_syn(&c.ret, &st, &own, 0);
+                    ss_own = c;
+                    &ss_own
+                };
                 let mut params = vec![];
                 for t in &ss.params {
                     params.push(
