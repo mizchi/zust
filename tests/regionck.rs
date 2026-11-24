@@ -3483,3 +3483,12 @@ fn part20_capture_escape() {
     assert!(d[0].1.contains("escapes outside of closure") && d[1].1.contains("escapes outside of closure"), "{d:?}");
     assert_eq!(check("fn main() {\n    let y = 3;\n    let mut ay = &y;\n    let mut f = |z| { ay = z; };\n    f(&4);\n    let _ = ay;\n}\n"), vec![]);
 }
+
+/// A closure's parameter annotated with one of the function's lifetimes where its bound binds the region
+/// (`|x: &'x u32|` for `F: Fn(&u32)`): the closure must take every region there ("lifetime may not live long enough",
+/// closures/closure-expected-type/expect-region-supply-region-2.rs). Not the callee's lifetime (`F: Fn(&'a u32)`)
+#[test]
+fn part20_annotated_param_bound() {
+    let d = check("fn take<F: Fn(&u32)>(_f: F) {}\nfn take2<'a, F: Fn(&'a u32)>(_: &'a u32, _f: F) {}\nfn take3<F: Fn(&u32) -> u32>(_f: F) {}\nfn g1<'x>(y: &'x u32) { take(|x: &'x u32| { let _ = (x, y); }); }\nfn g2<'x>(y: &'x u32) { take2(y, |x: &'x u32| { let _ = x; }); }\nfn g3() { take(|_x: &'static u32| {}); }\nfn g4() { take3(|x: &u32| *x); take(|_x: &'_ u32| {}); }\nfn main() { g1(&1); g2(&1); g3(); g4(); }\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+}

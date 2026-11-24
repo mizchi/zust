@@ -3610,6 +3610,10 @@ impl Cx<'_> {
                     }
                     codes.push(v);
                 }
+                // (a parameter annotated with one of the function's lifetimes, or 'static, where the bound binds the
+                // region (`|x: &'x u32|` for `F: FnOnce(&u32)`): the closure must take every region there, so 'x
+                // would be all of them ("lifetime may not live long enough" both ways)
+                self.rg_closure_ann_bound(c, &codes, params);
                 // (the result's elided regions: the one region of the inputs, as fn elision)
                 let mut ins: Vec<u8> = codes.iter().flatten().copied().filter(|&c| c != R_ELIDED && c != R_STATIC).collect();
                 ins.sort();
@@ -3660,6 +3664,44 @@ impl Cx<'_> {
         let mut g = self.insts.lock().unwrap();
         g.closure_rg.insert(cid, Box::new(crate::program::CloRg { codes, caps, known, lts }));
         g.fx_log.push(cid);
+    }
+
+    /// rg_closure_sig: the annotated parameters of a closure whose bound binds a region where the annotation names one
+    /// of the function's lifetimes or 'static: the bound's region is a placeholder, which that lifetime would have to
+    /// be (codes: the bound's, per parameter)
+    fn rg_closure_ann_bound(&mut self, c: &Expr, codes: &[Vec<u8>], params: &[Ty]) {
+        let Expr::Closure(_, inputs, _, _, pos) = c else { return };
+        let prog = self.prog;
+        for (i, (_, ann)) in inputs.iter().enumerate() {
+            let (Some(ann), Some(bc), Some(&t)) = (ann, codes.get(i), params.get(i)) else { continue };
+            if !crate::regions::names_lt(ann) {
+                continue;
+            }
+            let outer = self.rg.lt_names.clone();
+            let mut ac = CloCodes { outer_lts: &outer, tparams: &[], named: vec![], np: 0, ne: 0, elided: None };
+            let mut av = vec![];
+            if !ac.of(prog, ann, t, &mut av, 0) || av.len() != bc.len() {
+                continue;
+            }
+            for (&b, &a) in bc.iter().zip(&av) {
+                // (the bound's own region, a placeholder; the annotation's a function's lifetime or 'static)
+                if b >= CLO_E {
+                    continue;
+                }
+                let lt = match a {
+                    R_STATIC => STATIC,
+                    a if (CLO_E..CLO_U).contains(&a) => match ac.named.iter().find(|x| x.1 == a).and_then(|x| outer.iter().position(|n| *n == x.0)) {
+                        Some(k) => self.rg.lts[k],
+                        None => continue,
+                    },
+                    _ => continue,
+                };
+                let u = self.rg.var();
+                self.rg.univ.push((u, "'_".to_string()));
+                self.rg.edge(u, lt, *pos);
+                self.rg.edge(lt, u, *pos);
+            }
+        }
     }
 
     /// The codes of a closure's captures (cid) as trees of this function: its universal regions are CLO_U + i; what
