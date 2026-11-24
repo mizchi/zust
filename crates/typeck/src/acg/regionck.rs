@@ -2490,6 +2490,9 @@ impl Cx<'_> {
             None => self.rg.fresh(prog, t),
         };
         let Some(tree) = tree else { return };
+        if let Some(a) = ann {
+            self.rg_closure_fnptr(a, init);
+        }
         // (the annotation's type is well formed)
         if ann.is_some() {
             let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
@@ -2902,6 +2905,7 @@ impl Cx<'_> {
             None => self.parse_ty(ann).ok()?,
         };
         let tree = self.rg_ann_tree(ann, t)?;
+        self.rg_closure_fnptr(ann, init);
         let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
         self.rg.wf(prog, t, &tree, sp);
         if let Some((it, itr)) = init_tree {
@@ -3669,6 +3673,28 @@ impl Cx<'_> {
     /// rg_closure_sig: the annotated parameters of a closure whose bound binds a region where the annotation names one
     /// of the function's lifetimes or 'static: the bound's region is a placeholder, which that lifetime would have to
     /// be (codes: the bound's, per parameter)
+    /// A closure where a fn pointer type binds the region of a parameter whose annotation names one of the function's
+    /// lifetimes or 'static (`let _: fn(&()) = |_: &'a ()| {};`): as where a bound binds it (rg_closure_ann_bound)
+    fn rg_closure_fnptr(&mut self, ann: &PTy, init: &Expr) {
+        let c = super::strip_paren(init);
+        let (PTy::Fn(ps, _), Expr::Closure(_, inputs, ..)) = (ann, c) else { return };
+        if ps.len() != inputs.len() || !inputs.iter().any(|(_, a)| a.as_ref().is_some_and(crate::regions::names_lt)) {
+            return;
+        }
+        let names = self.rg.lt_names.clone();
+        let mut codes = vec![];
+        let mut params = vec![];
+        for p in ps {
+            let mut s = crate::regions::Slots { lts: names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
+            let mut cs = vec![];
+            s.slots(p, false, &mut cs);
+            codes.push(cs.iter().map(|&x| if x == R_BOUND { CLO_P } else { CLO_E }).collect::<Vec<u8>>());
+            let Ok(t) = self.parse_ty(p) else { return };
+            params.push(t);
+        }
+        self.rg_closure_ann_bound(c, &codes, &params);
+    }
+
     fn rg_closure_ann_bound(&mut self, c: &Expr, codes: &[Vec<u8>], params: &[Ty]) {
         let Expr::Closure(_, inputs, _, _, pos) = c else { return };
         let prog = self.prog;

@@ -3507,3 +3507,17 @@ fn part20_closure_holds_call_args() {
     // signature, nor one not used after)
     assert_eq!(check("struct S<F: Fn(&u32)> {\n    f: F,\n}\nfn hold<F: Fn(&u32)>(f: F) -> F {\n    f\n}\nfn main() {\n    let k = |x: &u32| { let _ = x; };\n    let mut d = 1;\n    k(&d);\n    d = 2;\n    k(&d);\n    let s = S { f: |x| { let _ = x; } };\n    let mut b = 1;\n    (s.f)(&b);\n    b = 2;\n    (s.f)(&b);\n    let h = hold(|x| { let _ = x; });\n    let mut c = 1;\n    h(&c);\n    c = 2;\n    h(&c);\n    let g = |x| { let _: &u32 = x; };\n    let mut a = 1;\n    g(&a);\n    a = 2;\n    let _ = a;\n}\n"), vec![]);
 }
+
+#[test]
+fn part20_closure_fnptr_annotated() {
+    // (a closure where a fn pointer type binds the region of a parameter annotated with the function's lifetime or
+    // 'static: that lifetime would have to be every region there)
+    let d = check("fn test<'a>() {\n    let _: fn(&()) = |_: &'a ()| {};\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn main() {\n    let g: fn(&u32) = |_: &'static u32| {};\n    g(&1);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("fn b<'a>(_: &'a ()) {\n    let _: for<'x> fn(&'x ()) = |_: &'static ()| {};\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (not where the type names the lifetime too, nor an annotation that names none)
+    assert_eq!(check("fn a<'a>(_: &'a ()) {\n    let _: fn(&'a ()) = |_: &'a ()| {};\n    let _: fn(&()) = |_: &()| {};\n    let _: fn(&'static ()) = |_: &'static ()| {};\n    let f: fn(&'a (), &()) = |_: &'a (), _| {};\n    f(&(), &());\n}\nfn main() {}\n"), vec![]);
+}

@@ -2624,6 +2624,11 @@ impl Cx<'_> {
         };
         // (a closure with no captures where a fn pointer is expected: the address of its fn-pointer instance)
         if matches!(expected, Some(Ty::Fn(_))) && cd.captures.is_empty() {
+            // (a parameter annotated with a lifetime, which the type may bind (`let _: fn(&u32) = |_: &'static u32|
+            // {};`): checked from here on (rg_closure_fnptr))
+            if self.user_code && self.bk.level >= 2 && !self.rg.on && self.rg.eligible && self.inline_depth == 0 && regionck::enabled() && inputs.iter().any(|x| x.1.as_ref().is_some_and(crate::regions::names_lt)) {
+                self.rg_late_on();
+            }
             let (iid, sig) = {
                 let mut g = self.insts.lock().unwrap();
                 let iid = g.request_fnptr(prog, cid, args).or_else(|e| err(SP, e))?;
