@@ -2803,6 +2803,7 @@ compile-fail	fmt/format-args-non-identifier-diagnostics.rs
 run-pass	fmt/format-enum-with-recursive-variant.rs
 run-pass	fmt/format-macro-no-std.rs
 compile-fail	fmt/format-raw-string-error.rs
+compile-fail	fmt/format-string-error-2.rs
 compile-fail	fmt/format-string-error-3.rs
 compile-fail	fmt/format-string-error.rs
 compile-fail	fmt/format-string-wrong-order.rs
@@ -2811,6 +2812,7 @@ compile-fail	fmt/ifmt-bad-format-args.rs
 compile-fail	fmt/ifmt-unknown-trait.rs
 compile-fail	fmt/incorrect-separator.rs
 compile-fail	fmt/issue-103826.rs
+compile-fail	fmt/issue-104142.rs
 run-pass	fmt/issue-23781.rs
 compile-fail	fmt/issue-75307.rs
 compile-fail	fmt/issue-86085.rs

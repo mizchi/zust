@@ -1819,3 +1819,25 @@ fn goals_have_a_certainty() {
     // (two blanket impls of one trait: the one that holds is taken, whatever the other's goals do)
     ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: B> Tr<u8> for T {}\nimpl<T: A> Tr<u16> for T {}\nimpl<T: Tr<u8>> B for T {}\nimpl A for i32 {}\nfn need<T: Tr<u16>>(_: T) {}\nfn main() { need(1i32); }");
 }
+
+#[test]
+fn format_string_errors_at_their_char() {
+    // (an invalid format string at the char rustc points at, escapes, line continuations and raw strings counted;
+    // each expected line, column and message is rustc 1.100's on the same source)
+    let first = |body: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(&format!("fn main() {{\n    {body}\n}}\n")).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |c: usize, m: &str| Some((2, c, format!("invalid format string: {m}")));
+    assert_eq!(first(r#"let _ = format!("{ x}", x = 1);"#), at(24, "expected `}`, found `x`"), "space before the argument");
+    assert_eq!(first(r#"let _ = format!("{x", x = 1);"#), at(24, "expected `}` but string was terminated"), "unterminated");
+    assert_eq!(first(r#"let _ = format!("ab}");"#), at(24, "unmatched `}` found"), "unmatched");
+    assert_eq!(first(r#"let _ = format!("{\n x}", x = 1);"#), at(26, "expected `}`, found `x`"), "after an escape");
+    assert_eq!(first(r##"let _ = format!(r#"{ \n"#);"##), at(26, "expected `}`, found `\\`"), "raw");
+    assert_eq!(first(r#"let _ = format!("{ }", 1);"#), None, "white space only");
+    assert_eq!(first(r#"let _ = format!("{x }", x = 1);"#), None, "white space after");
+    // (a line continuation: the next line's char)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check("fn main() {\n    let _ = format!(\"  \\\n    { \\\n    b\");\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.msg.clone())), Some((4, "invalid format string: expected `}`, found `b`".to_string())), "continuation");
+}
