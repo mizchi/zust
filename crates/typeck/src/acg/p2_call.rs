@@ -1264,10 +1264,11 @@ impl Cx<'_> {
                         Place::Mem(ptr, 0, *i)
                     }
                     p => {
-                        // (the reference the receiver's place holds, read once: a thin one)
+                        // (the reference the receiver's place holds, read once: a thin one (a `&str` is a pair, which the
+                        // paths below pass))
                         let recv_ref = |this: &mut Self| match p_recv {
-                            Place::Var(v, Ty::Ref(_, i)) if !i.is_fat() => Some(this.b.use_var(v)),
-                            Place::Mem(a, o, Ty::Ref(_, i)) if !i.is_fat() => Some(this.b.ins().load(PTR, mf(), a, o)),
+                            Place::Var(v, t @ Ty::Ref(..)) if !t.is_fat() => Some(this.b.use_var(v)),
+                            Place::Mem(a, o, t @ Ty::Ref(..)) if !t.is_fat() => Some(this.b.ins().load(PTR, mf(), a, o)),
                             _ => None,
                         };
                         if let Some(f) = &ref_call {
