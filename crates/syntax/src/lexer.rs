@@ -2105,13 +2105,23 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     {
         let mut close: Vec<usize> = vec![usize::MAX; toks.len()];
         let mut st: Vec<usize> = vec![];
-        for k in 0..toks.len() {
-            if is_sym(k, b'(') || is_sym(k, b'{') || is_sym(k, b'[') {
-                st.push(k);
-            } else if is_sym(k, b')') || is_sym(k, b'}') || is_sym(k, b']') {
-                if let Some(o) = st.pop() {
-                    close[o] = k;
-                }
+        // (and where the `<`s and the `fn`s are: the loops below start only there)
+        let mut lts: Vec<usize> = vec![];
+        let mut fns: Vec<usize> = vec![];
+        for (k, t) in toks.iter().enumerate() {
+            match t.0 {
+                1 if t.2 == t.1 + 1 => match s[t.1] {
+                    b'(' | b'{' | b'[' => st.push(k),
+                    b')' | b'}' | b']' => {
+                        if let Some(o) = st.pop() {
+                            close[o] = k;
+                        }
+                    }
+                    b'<' => lts.push(k),
+                    _ => {}
+                },
+                0 if t.2 == t.1 + 2 && &s[t.1..t.2] == b"fn" => fns.push(k),
+                _ => {}
             }
         }
         // (and the names of std items under another name: `let release = 1;` beside `use std::mem::drop as release;`
@@ -2151,16 +2161,17 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         // `C::default()`; not `a::C`)
         let local_at = |q: usize| toks[q].0 == 0 && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':'));
         // (an item's generic parameters, in the whole item: `impl<C> X<C> { .. }`, `struct S<C>(C);`)
-        let mut k = if renamed_names.is_empty() { toks.len() } else { 0 };
-        while k + 2 < toks.len() {
-            let g = if is_id(k, b"impl") && is_sym(k + 1, b'<') {
-                k + 1
-            } else if [&b"struct"[..], b"enum", b"union", b"trait", b"type"].iter().any(|w| is_id(k, w)) && toks[k + 1].0 == 0 && is_sym(k + 2, b'<') {
-                k + 2
-            } else {
-                k += 1;
+        // (from each `<`: an item's when `impl` or `struct S` / `enum E` / .. is before it)
+        for &g in lts.iter().filter(|_| !renamed_names.is_empty()) {
+            let k = g;
+            if k == 0 || k + 1 >= toks.len() {
                 continue;
-            };
+            }
+            let item = is_id(k - 1, b"impl")
+                || (k >= 2 && toks[k - 1].0 == 0 && [&b"struct"[..], b"enum", b"union", b"trait", b"type"].iter().any(|w| is_id(k - 2, w)));
+            if !item {
+                continue;
+            }
             let (names, ge) = generics(g);
             if !names.is_empty() {
                 let mut e = ge + 1;
@@ -2177,12 +2188,19 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     }
                 }
             }
-            k = g + 1;
         }
+        // (no name to bind: nothing for a function to make local)
+        let mut fi = if renamed_names.is_empty() { fns.len() } else { 0 };
         let mut k = 0;
-        while k + 2 < toks.len() {
-            if !is_id(k, b"fn") || toks[k + 1].0 != 0 {
-                k += 1;
+        while fi < fns.len() {
+            // (the next `fn` at or after k: one inside a body that was read goes too, as before)
+            if fns[fi] < k {
+                fi += 1;
+                continue;
+            }
+            k = fns[fi];
+            fi += 1;
+            if k + 2 >= toks.len() || toks[k + 1].0 != 0 {
                 continue;
             }
             // (each name and where it is the local: a generic parameter or a parameter in the whole function, a `let`

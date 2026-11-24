@@ -1032,12 +1032,12 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
         let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && b[toks[k].1] == c;
         let mut reps: Vec<(usize, usize, String)> = vec![];
         let mut i = 0;
-        while i + 2 < toks.len() {
-            let is_call = toks[i].0 == 0 && sym(i + 1, b'!') && close[i + 2] != usize::MAX;
-            // (most tokens are no call: on at once, as before)
-            if !is_call {
-                i += 1;
-                continue;
+        let n = toks.len();
+        while i + 2 < n {
+            // (most tokens are no call: on to the next `name!(..)` in one tight loop)
+            match (i..n - 2).find(|&j| toks[j].0 == 0 && toks[j + 1].0 == 1 && b[toks[j + 1].1] == b'!' && close[j + 2] != usize::MAX) {
+                Some(j) => i = j,
+                None => break,
             }
             // (the builtin's: `stringify!`, `std::stringify!`, not a library's macro of that name, `re::stringify!`)
             if tk(i) == b"stringify" && pm_scope.is_some() && (!(i >= 2 && sym(i - 1, b':') && sym(i - 2, b':')) || (i >= 3 && matches!(tk(i - 3), b"std" | b"core"))) {
