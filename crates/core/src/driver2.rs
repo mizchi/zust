@@ -1563,6 +1563,13 @@ impl Session2 {
                 }
             }
         }
+        // (a method of `impl<T: Tr> Tr for &T` that does more than forward to T's (Summary::ref_impl_bad): a call through
+        // a bound would reach T's method through the deref, so it is reported where the program may make one)
+        if sums[..user_src].iter().any(|sm| !sm.ref_impl_bad.is_empty()) {
+            if let Some(e) = first_called_ref_impl_fn(&src, &items[..user_src], &sums[..user_src]) {
+                return Err(e);
+            }
+        }
         // (improper_ctypes: a C string type of std's, `CStr` / `CString`, in an `extern "C"` block's or fn's signature)
         if deny_ctypes.0 || deny_ctypes.1 {
             if let Some(e) = first_cstr_in_extern(&src, &items[..user_src], deny_ctypes) {
@@ -3954,6 +3961,85 @@ fn allows_lint(text: &str, lint: &str) -> bool {
         let rest = &sq[i + 6..];
         rest[..rest.find(')').unwrap_or(rest.len())].split(',').any(|n| n == lint)
     })
+}
+
+/// The first method of `impl<T: Tr> Tr for &T` that does more than forward to T's, which the program may reach through
+/// a generic parameter: it calls a method of that name (`.m(`, `.m::<`, `::m(`) outside the method, and it uses the
+/// trait as a bound (`N: Tr`, `N: crate::Tr`, `N: for<'a> Tr`, `N: (Tr)`, `+ Tr`, `impl Tr`, `dyn Tr`, `<X as Tr>`)
+/// outside the impl's header. A direct call
+/// `s.m()` reaches X's own method, as rustc's probe takes it first; only a call through a bound would run the impl's
+/// (#144), as an error
+#[cold]
+#[inline(never)]
+fn first_called_ref_impl_fn(src: &str, items: &[SrcItem], sums: &[Summary]) -> Option<String> {
+    let toks = crate::lexer::tokenize(src.as_bytes());
+    let tk = |k: usize| &src[toks[k].1..toks[k].2];
+    let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tk(k) == c;
+    for (it, sm) in items.iter().zip(sums) {
+        if sm.ref_impl_bad.is_empty() {
+            continue;
+        }
+        let crate::lexer::ItemKind::ImplMember(h) = it.kind else { continue };
+        let Some(hdr) = items.get(h as usize) else { continue };
+        let Some(tr) = sums[h as usize].impl_trait.as_deref() else { continue };
+        let tr = tr.split('<').next().unwrap_or(tr).trim();
+        // (`impl Tr for X` heading an impl is not a bound: `impl` counts only outside the impl headers)
+        let in_header = |at: usize| items.iter().any(|i| i.kind == crate::lexer::ItemKind::ImplHeader && (i.start..i.end).contains(&at));
+        // (the token before the path the trait's name ends: `N: crate::Tr` is a bound too)
+        let path_start = |mut k: usize| {
+            while k >= 3 && sym(k - 1, ":") && sym(k - 2, ":") && toks[k - 3].0 == 0 {
+                k -= 3;
+            }
+            // (a path from the root, `::Tr`)
+            if k >= 2 && sym(k - 1, ":") && sym(k - 2, ":") {
+                k -= 2;
+            }
+            k
+        };
+        let as_bound = (1..toks.len()).any(|k| {
+            if toks[k].0 != 0 || tk(k) != tr || (hdr.start..hdr.end).contains(&toks[k].1) {
+                return false;
+            }
+            let mut p = path_start(k);
+            // (`N: for<'a> Tr`: the bound after its `for<..>`; `N: (Tr)`: inside its parentheses)
+            if p >= 1 && sym(p - 1, ">") {
+                let mut j = p - 1;
+                while j > 0 && !sym(j, "<") {
+                    j -= 1;
+                }
+                if j >= 1 && tk(j - 1) == "for" {
+                    p = j - 1;
+                }
+            }
+            while p >= 1 && sym(p - 1, "(") {
+                p -= 1;
+            }
+            p >= 1
+                && ((sym(p - 1, ":") && !(p >= 2 && sym(p - 2, ":")))
+                    || sym(p - 1, "+")
+                    || matches!(tk(p - 1), "dyn" | "as")
+                    || (tk(p - 1) == "impl" && !in_header(toks[k].1)))
+        });
+        if !as_bound {
+            continue;
+        }
+        for m in &sm.ref_impl_bad {
+            let called = (1..toks.len()).any(|k| {
+                toks[k].0 == 0
+                    && tk(k) == m
+                    && !(it.start..it.end).contains(&toks[k].1)
+                    && (sym(k - 1, ".") || (k >= 2 && sym(k - 1, ":") && sym(k - 2, ":")))
+                    && (sym(k + 1, "(") || (sym(k + 1, ":") && sym(k + 2, ":")))
+            });
+            if called {
+                return Some(format!(
+                    "{}:1: impls for references to a type parameter (`impl<T: Tr> Tr for &T`) are supported only with methods that forward to T's (`(**self).{m}(..)`), as calls through a bound reach T's through the deref: `{m}` does not",
+                    it.line
+                ));
+            }
+        }
+    }
+    None
 }
 
 fn first_cstr_in_extern(src: &str, items: &[SrcItem], (blocks, defs): (bool, bool)) -> Option<String> {
@@ -6354,6 +6440,12 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         // whose body calls a method a bound's trait declares is not made: its typeck is the cost, its check little)
         let ii = p.item_of[id].unwrap_or(0) as usize;
         let body = a.items.get(ii).and_then(|it| a.src.get(it.start..it.end)).unwrap_or("");
+        // (a signature that names a lifetime or `'static` (`-> Box<dyn X + 'static>`): what its body does with the
+        // associated types of its parameters' bounds may be required of those regions. Not others: checking each
+        // generic fn that calls such a method costs its typeck (+4.9% of the traits KPI))
+        let names_regions = sig.regions.as_deref().is_some_and(|r| {
+            !r.lts.is_empty() || r.slots.iter().flatten().any(|&c| c == crate::types::R_STATIC) || r.ty_outlives.iter().any(|x| x.1 == crate::types::R_STATIC)
+        });
         let calls_bound = sig.generics.iter().flat_map(|(_, bs)| bs.iter()).any(|b| {
             // (`Fn(..)` / `FnMut(..)` / `FnOnce(..)`: a call of the parameter is checked against the bound itself)
             if matches!(b.as_str(), "Copy" | "Sized" | "?Sized" | "Send" | "Sync" | "Unpin") || crate::ast_summary::parse_fn_bound(b).is_some() {
@@ -6370,11 +6462,14 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
             let decls = p.traits.get(tr).or_else(|| p.traits.iter().find(|(k, _)| k.ends_with(&tail)).map(|(_, v)| v));
             // (a trait not known: as calling)
             // (but a method whose declaration names lifetimes (the trait's `'a`, its own): its call says something of
-            // the regions)
+            // the regions. So does one that returns an associated type of its `Self` (`fn into_item(self) ->
+            // Self::Item`): the placeholder's associated type, whose region is a universal one (`Box::new(v.into_item())`
+            // as a `Box<dyn X + 'static>`, regions/regions-close-associated-type-into-object.rs))
             decls.is_none_or(|ds| {
                 ds.iter().any(|&d| {
                     let called = p.names[d as usize].rsplit("::").next().is_some_and(|m| body.contains(&format!(".{m}(")) || body.contains(&format!("::{m}(")));
-                    called && !p.sigs[d as usize].regions.as_deref().is_some_and(|r| !r.lts.is_empty())
+                    let self_assoc = names_regions && matches!(p.sigs[d as usize].ret, Ty::Assoc(x) if matches!(x.base, Ty::Param(_)));
+                    called && !self_assoc && !p.sigs[d as usize].regions.as_deref().is_some_and(|r| !r.lts.is_empty())
                 })
             })
         });

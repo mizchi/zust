@@ -201,12 +201,20 @@
       "path": "docs/ja/reports/2026-11-24-12-region-check-26.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-24-13-projection-goals.en": {
-      "path": "docs/reports/2026-11-24-13-projection-goals.md",
+    "docs_reports_2026-11-24-13-region-check-27.en": {
+      "path": "docs/reports/2026-11-24-13-region-check-27.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-24-13-projection-goals.ja": {
-      "path": "docs/ja/reports/2026-11-24-13-projection-goals.md",
+    "docs_reports_2026-11-24-13-region-check-27.ja": {
+      "path": "docs/ja/reports/2026-11-24-13-region-check-27.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-14-projection-goals.en": {
+      "path": "docs/reports/2026-11-24-14-projection-goals.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-14-projection-goals.ja": {
+      "path": "docs/ja/reports/2026-11-24-14-projection-goals.md",
       "role": "historical"
     }
   },
@@ -487,14 +495,25 @@
       }
     },
     {
-      "id": "docs_reports_2026-11-24-13-projection-goals",
-      "topic": "The Japanese file docs/ja/reports/2026-11-24-13-projection-goals.md is a faithful translation of docs/reports/2026-11-24-13-projection-goals.md",
+      "id": "docs_reports_2026-11-24-13-region-check-27",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-13-region-check-27.md is a faithful translation of docs/reports/2026-11-24-13-region-check-27.md",
       "mode": "translation",
       "reference": {
-        "source": "docs_reports_2026-11-24-13-projection-goals.en"
+        "source": "docs_reports_2026-11-24-13-region-check-27.en"
       },
       "target": {
-        "source": "docs_reports_2026-11-24-13-projection-goals.ja"
+        "source": "docs_reports_2026-11-24-13-region-check-27.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-14-projection-goals",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-14-projection-goals.md is a faithful translation of docs/reports/2026-11-24-14-projection-goals.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-14-projection-goals.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-14-projection-goals.ja"
       }
     }
   ]

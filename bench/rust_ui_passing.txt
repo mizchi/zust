@@ -6097,6 +6097,7 @@ compile-fail	regions/regions-bounded-by-trait-requiring-static.rs
 compile-fail	regions/regions-bounded-method-type-parameters-trait-bound.rs
 compile-fail	regions/regions-bounded-method-type-parameters.rs
 compile-fail	regions/regions-bounds.rs
+compile-fail	regions/regions-close-associated-type-into-object.rs
 compile-fail	regions/regions-close-over-type-parameter-1.rs
 compile-fail	regions/regions-close-over-type-parameter-multiple.rs
 run-pass	regions/regions-close-over-type-parameter-successfully.rs
@@ -7279,6 +7280,7 @@ run-pass	threads-sendsync/sendable-class.rs
 run-pass	threads-sendsync/sendfn-is-a-block.rs
 run-pass	threads-sendsync/sendfn-spawn-with-fn-arg.rs
 run-pass	threads-sendsync/spawn-fn.rs
+run-pass	threads-sendsync/spawn-types.rs
 run-pass	threads-sendsync/spawn.rs
 run-pass	threads-sendsync/spawn2.rs
 check-pass	threads-sendsync/sync-send-atomics.rs
