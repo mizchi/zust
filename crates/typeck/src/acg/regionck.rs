@@ -3640,6 +3640,44 @@ impl Cx<'_> {
         }
     }
 
+    /// A use of an impl's constant whose type names the impl's lifetimes (`<Foo<'a>>::C` with `impl<'a> Foo<'a> {
+    /// const C: &'a u32 = &22; }`): its value is of the regions the path writes on the self type for them, a fresh one
+    /// where it writes none (returned as `&'static u32`: "lifetime may not live long enough")
+    pub(crate) fn rg_const_regions(&mut self, e: &Expr, ci: u32) {
+        let Some((codes, self_slots)) = self.prog.const_regions.get(&ci) else { return };
+        if !self.rg_on() {
+            return;
+        }
+        let prog = self.prog;
+        let seg = match e {
+            Expr::Path(None, p) if p.segs.len() >= 2 => Some(&p.segs[p.segs.len() - 2]),
+            Expr::Path(Some(q), _) => match &**q {
+                PTy::Path(None, qp) => qp.segs.last(),
+                _ => None,
+            },
+            _ => None,
+        };
+        let written: Vec<&String> = seg.map(|s| s.args.iter().filter_map(|a| if let GArg::Lifetime(l) = a { Some(l) } else { None }).collect()).unwrap_or_default();
+        let n = codes.iter().chain(self_slots).filter(|&&c| c < R_STATIC).map(|&c| c as usize + 1).max().unwrap_or(0);
+        let mut lts = vec![];
+        for k in 0..n {
+            let v = match self_slots.iter().position(|&c| c as usize == k).and_then(|j| written.get(j)) {
+                Some(l) if l.as_str() == "'static" => STATIC,
+                Some(l) => match self.rg.lt_names.iter().position(|x| x == *l) {
+                    Some(i) => self.rg.lts[i],
+                    None => self.rg.var(),
+                },
+                None => self.rg.var(),
+            };
+            lts.push(v);
+        }
+        let t = prog.consts[ci as usize].ty;
+        let codes = codes.clone();
+        if let Some(tree) = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var()) {
+            self.rg.calls.insert(e as *const Expr as usize, (t, tree));
+        }
+    }
+
     pub(crate) fn rg_begin_closure(&mut self, params: &[(Loc, Ty)]) {
         let prog = self.prog;
         let Some(clo) = self.rg.closure.clone() else { return };

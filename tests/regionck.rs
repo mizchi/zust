@@ -3417,3 +3417,11 @@ fn part19_closure_requirements() {
     assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 10, 19], "{d:?}");
     assert_eq!(check("struct S<T>(T);\nfn ok<'a>(c: &'a u32) {\n    let _cl = || {\n        let f = S::<&'a u32>;\n        f(c);\n    };\n}\nfn ok2<'a>(c: &'a u32) -> S<&'a u32> {\n    let f = S::<&'a u32>;\n    f(c)\n}\nfn main() { ok(&1); ok2(&2); }\n"), vec![]);
 }
+
+/// An impl's constant whose type names the impl's lifetimes is of the regions its path writes on the self type
+/// (nll/user-annotations/constant-in-expr-inherent-1.rs)
+#[test]
+fn part19_impl_const_regions() {
+    let d = check("struct Foo<'a> { x: &'a u32 }\nimpl<'a> Foo<'a> {\n    const C: &'a u32 = &22;\n}\nfn foo<'a>(_: &'a u32) -> &'static u32 {\n    <Foo<'a>>::C\n}\nfn bar<'a>(_: &'a u32) -> &'static u32 {\n    Foo::<'a>::C\n}\nfn ok<'a>(_: &'a u32) -> &'a u32 {\n    <Foo<'a>>::C\n}\nfn ok2() -> &'static u32 {\n    <Foo<'static>>::C\n}\nfn ok3<'a>(_: &'a u32) -> &'static u32 {\n    Foo::C\n}\nfn main() { let f = Foo { x: &1 }; let _ = f.x; }\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![6, 9] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
+}

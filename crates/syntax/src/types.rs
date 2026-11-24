@@ -449,6 +449,9 @@ pub struct Summary {
     /// The aliases whose definitions name a lifetime that is not their own (`type S = &'static u8;`): TySyn keeps no
     /// lifetimes, so a use of one written without lifetimes cannot be told from an elided one
     pub alias_fixed_lts: Vec<String>,
+    /// An impl's constants whose types name its lifetimes (`impl<'a> Foo<'a> { const C: &'a u32 }`): the region codes of
+    /// the type against the impl's lifetimes (a use instantiates them with those its path writes: `<Foo<'a>>::C`)
+    pub const_regions: Vec<(String, Vec<u8>)>,
     /// The concrete (non-parameter, non-primitive) types bounded in the item's where clauses (`where Local: Any`):
     /// Program checks that they exist
     pub where_types: Vec<String>,
