@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795532097092,
+  "lastUpdate": 1795535104260,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -51515,6 +51515,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 80.867,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4bb6d55888653c444b02056660292ab424677e7e",
+          "message": "Popular crates: a bench of 10 crates.io crates, and the first fixes they need (#110)\n\n* cratebench/popular: run programs that use popular crates with zustc and compare with rustc\n\nhashbrown, syn, getrandom, bitflags, rand_core, rand, base64, libc, quote and\nproc-macro2, each with a small program that prints deterministic output.\nrun.py builds each with rustc (cargo run) and with zustc (zurgo run) and\nreports pass / mismatch / run-fail / build-fail with the crate the first\nerror points into. The Popular crates workflow runs it on compiler changes.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Popular crates: libc, proc-macro2, quote, bitflags and the prelude get further\n\nWhat libc 0.2, getrandom, rand, proc-macro2, quote, syn, bitflags, base64,\nhashbrown (foldhash) and rand_core stopped at first (cratebench/popular):\n\n- srcmap: `mod x;` in the body of a file-level `macro_rules!` is read where\n  the macro is invoked (libc's `prelude!` declares `mod types;`); a `#[path]`\n  module inside a fn body is relative to the file's directory (getrandom);\n  `#[macro_use] mod m;` keeps its attribute on the appended module\n- macros: a `#[macro_use]` module's and a dependency's macros are in scope\n  from the top (`#[macro_use] extern crate cfg_if;`); macros expand to items\n  inside `extern` blocks; `$x:item` takes one item at a time (cfg_if's cfg on\n  each item); a user macro's arguments are its input, not definitions yet\n  (quote's `__quote![ macro_rules! quote { .. } ]`); all attributes go with a\n  definition (bitflags' `#[macro_export] #[doc(hidden)]`); recursion limit 128\n  or the crate's `#![recursion_limit]`\n- `const unsafe fn` (also async / extern) is a fn, not a constant named\n  `unsafe`, in module renaming and in dependency stubs (libc)\n- array lengths may call size_of / align_of on primitives and their aliases\n- elision sees the hidden lifetime of a renamed module's struct\n  (proc-macro2's `fn block_comment(input: Cursor) -> PResult<&str>`)\n- prelude: PhantomPinned, hint::spin_loop, ChunksExactMut::into_remainder,\n  TryFrom / TryInto implemented by a crate for its own types (`x.try_into()`\n  calls the target's try_from); `impl From<S> for S` / `TryFrom<S> for S`\n  are E0119\n\nTests: unit tests in srcmap, macros, lexer and stub; probes\narray_len_size_of, prelude_popular_crates, elided_lifetime_renamed_struct;\ncompile errors from_self, try_from_self. tests/ui: 5 more pass, no regression\n(iterators/issue-58952 crashes on main as well in the emulated container).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* A type parameter in an array length of an ADT is an error again\n\n`size_of::<T>()` is an array length now, so `struct Foo<T, U = [u8;\nsize_of::<T>()]>` no longer failed by accident (tests/ui\ngenerics/param-in-ct-in-ty-param-default.rs, rust-ui in CI): a field's or a\ntype parameter default's array length that names one of the item's type\nparameters is \"generic parameters may not be used in const operations\", as\nin rustc.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Review of #110: fixes from CodeRabbit's comments\n\n- size_of / align_of in array lengths: a reference to a slice, str or trait\n  object is two words; the result is a usize (`size_of::<u64>()\n  .leading_zeros()` counts 64 bits); a program's own fn named size_of is not\n  taken for core's (a path to core keeps it core's); only the call with one\n  type argument is core's\n- macros: `$i:item` does not end at a brace inside generic arguments;\n  `#![recursion_limit]` is read from tokens, not from comments or strings; one\n  more round than the limit checks that nothing is left (a limit of 1 lets a\n  call that needs no more expansion complete)\n- srcmap: a macro-declared module is removed from the macro's body with its\n  visibility (no `pub` left behind); only calls at the module's level (also in\n  other macros' arguments) put it in the file, not calls in fn bodies; calls\n  through other macros (`outer!()` calling `inner!()`) are followed\n- try_into: a receiver's own try_into through a reference is that method;\n  `.try_into().unwrap()` takes the target from the unwrap\n- elision: a name of the program's own with `__` (`Foo__bar`) is not taken\n  for a flattened path\n- cratebench/popular: run.py decodes the output a timeout leaves and keeps a\n  multi-line error on one table row; the syn app rejects `a +` (`a + * b`\n  parses)\n\nTests: unit tests in macros and srcmap; probes array_len_size_of,\narray_len_user_size_of (new), user_trait_named_from (new),\nprelude_popular_crates, elided_lifetime_renamed_struct.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* rand_core runs; rand gets through chacha20's own code\n\nrand_core 0.10.1 now runs with the same output as rustc (the first of the\nten popular crates). rand stops in rand_core's BlockRng::fill_bytes\n(`by_ref()` as an iterator).\n\n- lexer: a const generic parameter (`<W, const N: usize>`) is no item of\n  the module; a module's `const N` elsewhere renamed it (`utils__N`)\n- `Self::Seed::default()`: the path before `default` is a type\n- an array's `as_mut()` is `&mut [T]` (inference, peek and codegen)\n- macros: a braced statement-position call whose expansion has only\n  `#[cfg]` / `#[cfg_attr]` attributes is spliced into the block (cfg-if's\n  `let tokens` seen after it), in both expanders\n- srcmap: a `mod x;` in a `cfg_if!` branch not taken, or under its own\n  false `#[cfg]` there, is not read (chacha20's avx512 backend)\n- x86 intrinsics take the immediate as the last argument too\n  (`_mm256_shuffle_epi32(a, 0b..)`, rustc_legacy_const_generics)\n- `write!(f, concat!(stringify!($Rng), \"..\"))`: a format string made by\n  concat! / stringify!, also nested; `{r#type}` is rustc's error\n- hygiene: a field or method after `.` keeps its name; field names in\n  struct literals, patterns and definitions drop the `__mh` suffix\n- a `&mut T` for a generic `&T` parameter; `size_of_val` / `align_of_val`\n  of a slice or str\n- `zip(dst)` with dst: `&mut [T]` iterates with iter_mut\n- associated types of generic impls are registered before non-generic\n  structs are laid out (`BlockRng<Core<R8>>` with `results: G::Output`)\n\nTests: unit tests in lexer, macros, srcmap; probes rand_core_patterns,\nconcat_format_string, hygiene_field_named_like_let,\ngeneric_ref_from_mut_slice, assoc_of_generic_impl_in_field; tests/simd\nlegacy_imm.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* srcmap: #[macro_use] modules go in at their declaration, as main does now\n\nmain (#107) puts a `#[macro_use] mod m;` file in place of the declaration;\nthis branch's own way (appending it with the attribute kept) is dropped.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* A path-qualified impl self type is not a reflexive From\n\n`impl From<TokenStream> for proc_macro::TokenStream` (proc-macro2) was\ntaken for `impl From<T> for T` (E0119): the summary names the self type by\nits last segment. A self type written with a path is another type.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* A result impl Trait holds the borrows it captures\n\n`let a = display_len(&x); x.push(1); println!(\"{a}\")` with\n`fn display_len<T>(x: &Vec<T>) -> impl Display` is E0502 from edition 2024:\nthe result captures every lifetime of the arguments (2021: those its bounds\nname; `use<..>` lists them). zustc took the result for one that borrows\nnothing, and as a `usize` (its hidden type) it dropped the loan.\n\n- SigSyn::opaque_from: the arguments a result `impl Trait` may borrow\n  from, by 2024's and 2021's rules; bk_ret_from picks by the edition\n- a call of such a fn keeps its arguments' loans in its value and in the\n  local it initializes, whatever the hidden type\n\ntests/ui impl-trait/precise-capturing/migration-note.rs passes again, now\nfor its own errors (it had passed through a false type mismatch of\n`&mut` for `&T`, which the rand_core commit removed).\n\nTests: compile_errors/impl_trait_holds_borrow; tests/ui compile-fail and\ncheck-pass: 0 regressions, 6 newly passing.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Pack a result impl Trait's captures into ret_from\n\nThe new SigSyn field made every signature's encoding larger: the size\nbudget's cache_bytes went over (float_fuzz 38123 > 37854, options\n35375 > 35325). The two masks (edition 2024's, 2021's) now go in\nret_from's free bits, marked by bit 62 (OPAQUE_FROM), for at most 31\narguments.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Early associated types of generic impls note their regions, as main's do\n\nmain (#124) records each associated type's regions and item as it is\npushed (note_assoc_regions, assoc_items); the earlier pass for generic\nimpls' (rand_core's BlockRng) left them out, so tests/regionck's\npart22_projection_review missed `<W<&'static u32> as Foo>::Out`.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>",
+          "timestamp": "2026-11-25T00:39:51+09:00",
+          "tree_id": "7aaf9c473992fa9c204fec323c5d83b28ba472f5",
+          "url": "https://github.com/mizchi/zust/commit/4bb6d55888653c444b02056660292ab424677e7e"
+        },
+        "date": 1795535104016,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 124.94,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.692,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 17.907,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 39.729,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 20.715,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.21,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.555,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 130.184,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 780.265,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 566.642,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.65,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 65.876,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 179.532,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 53.945,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.835,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.555,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 610.77,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3845.433,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 54.09,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 91.311,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 42.709,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 55.522,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 95.688,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 149.617,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 38.161,
             "unit": "ms"
           }
         ]
