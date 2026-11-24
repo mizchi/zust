@@ -79,6 +79,10 @@ pub struct Analysis {
     pub sig_keys: Mutex<Vec<Key>>,
     /// 依存するクレートのテキストの範囲と、そこから見えるクレート (CrateCtx::dep_ranges)
     pub dep_ranges: Vec<(u32, u32, Vec<usize>, u32)>,
+    /// The definitions of the program's associated types (not the prelude's), for the functions' cache keys: all of
+    /// them, and those of each dependency crate (by dep_ranges' index). A function's types and region check read an
+    /// associated type's value (`<() as Foo>::Out`, its lifetimes too), which its body and signatures do not show
+    pub assoc_keys: (Key, Vec<Key>),
 }
 
 /// クレートの印 (panic の場所の行の上位ビット。ライブラリの panic の表の 8 byte 目): 1..=4000
@@ -445,6 +449,27 @@ impl Analysis {
         let k = h.finish() | 1;
         ks[id as usize] = k;
         k
+    }
+
+    /// Analysis::assoc_keys: of each associated type the program defines, its impl member's text (which holds its
+    /// impl's header's), combined independently of their order
+    fn assoc_keys(&self) -> (Key, Vec<Key>) {
+        let mut all: Key = 0;
+        let mut per = vec![0; self.dep_ranges.len()];
+        for (i, &ii) in self.prog.assoc_items.iter().enumerate() {
+            if ii >= self.prog.prelude_from {
+                continue;
+            }
+            let mut h = KeyHasher::new();
+            h.add(&self.prog.assocs[i].name);
+            h.add(&self.items[ii as usize].hash);
+            let k = h.finish();
+            all ^= k;
+            if let Some(c) = self.crate_of_item(ii as usize) {
+                per[c] ^= k;
+            }
+        }
+        (all, per)
     }
 
     pub fn crate_of_item(&self, ii: usize) -> Option<usize> {
@@ -1355,6 +1380,8 @@ impl Session2 {
         let mut deny_unused_lifetimes = (false, false);
         let mut deny_mismatched_lts = false;
         let mut deny_deprecated = false;
+        // (improper_ctypes (an `extern` block's fns), improper_ctypes_definitions (an `extern "C" fn`))
+        let mut deny_ctypes = (false, false);
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
         let lib_attr = {
@@ -1442,6 +1469,18 @@ impl Session2 {
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_mismatched_lts = lint("mismatched_lifetime_syntaxes");
             deny_deprecated = lint("deprecated") || (levels.contains(&"warnings") && !c.contains("#![allow(deprecated"));
+            // (warn by default: the crate attribute naming the lint last sets its level, and `deny(warnings)` makes
+            // it an error while it is left at warn, unless a later attribute sets `warnings` back; `allow(x)` then
+            // `warn(x)` puts it back at warn)
+            let last_level = |names: &[&str]| {
+                ["forbid", "deny", "warn", "allow", "expect"].into_iter().filter_map(|l| last_of(l, names).map(|at| (at, l))).max().map(|(_, l)| l)
+            };
+            let ffi = |n: &str| match last_level(&[n]) {
+                Some("forbid" | "deny") => true,
+                Some("warn") | None => matches!(last_level(&["warnings"]), Some("forbid" | "deny")),
+                _ => false,
+            };
+            deny_ctypes = (ffi("improper_ctypes"), ffi("improper_ctypes_definitions"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             deny_unused_mut = lint("unused_mut") || (!levels.contains(&"unused_mut") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
@@ -1494,6 +1533,12 @@ impl Session2 {
                         return Err(format!("{}:{}: unreachable {what}", it.line + p.line as usize - 1, p.col + 1));
                     }
                 }
+            }
+        }
+        // (improper_ctypes: a C string type of std's, `CStr` / `CString`, in an `extern "C"` block's or fn's signature)
+        if deny_ctypes.0 || deny_ctypes.1 {
+            if let Some(e) = first_cstr_in_extern(&src, &items[..user_src], deny_ctypes) {
+                return Err(e);
             }
         }
         // (deprecated: a path through `std::intrinsics` to what is stable elsewhere (`std::mem::transmute`))
@@ -1746,7 +1791,8 @@ impl Session2 {
             crefs.push(c);
         }
         tm.lap("refs", String::new());
-        let mut a = Analysis { iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()) };
+        let mut a = Analysis { iface_fp, src, items, prog, refs, srefs, crefs, n_parsed, ext_items, inl: acg::Inline::default(), cl: self.opts.backend, prelude_line0, dep_ranges: self.ctx.dep_ranges.clone(), asts: Mutex::new(FxMap::default()), encl: Mutex::new(FxMap::default()), sig_keys: Mutex::new(Vec::new()), assoc_keys: (0, vec![]) };
+        a.assoc_keys = a.assoc_keys();
         if self.opts.opt && std::env::var_os("ZUSTC_NO_INLINE").is_none() {
             a.inl = inline_bodies(&a);
         }
@@ -4024,6 +4070,88 @@ fn std_path_ns(path: &[&[u8]]) -> u8 {
 /// root in edition 2015 (`injected`; a later edition's is hygienic). Only read when the program has a `mod` or an
 /// `extern crate`, or in edition 2015 something that may define `std` / `core`. `src` is the configured text, `externs` the `extern crate` items
 /// the configuring blanked (cfg::strip_noting)
+/// improper_ctypes: the first `CStr` / `CString` in the parameters or result of a fn of an `extern "C" { .. }` block,
+/// or of an `extern "C" fn` (improper_ctypes_definitions), as `line:col: msg`. Behind a pointer too: neither has a C
+/// layout
+/// text names `lint` in an `allow(..)` (`#[allow(a, improper_ctypes)]`, `#![allow(..)]`): that lint, not one it is
+/// a prefix of
+fn allows_lint(text: &str, lint: &str) -> bool {
+    let sq: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    sq.match_indices("allow(").any(|(i, _)| {
+        let rest = &sq[i + 6..];
+        rest[..rest.find(')').unwrap_or(rest.len())].split(',').any(|n| n == lint)
+    })
+}
+
+fn first_cstr_in_extern(src: &str, items: &[SrcItem], (blocks, defs): (bool, bool)) -> Option<String> {
+    for it in items {
+        let text = src.get(it.start..it.end).unwrap_or("");
+        if !text.contains("extern") || !(text.contains("CStr")) {
+            continue;
+        }
+        let b = text.as_bytes();
+        let toks = crate::lexer::tokenize(b);
+        let tk = |k: usize| &text[toks[k].1..toks[k].2];
+        let sym = |k: usize, c: &str| k < toks.len() && toks[k].0 == 1 && tk(k) == c;
+        // (a fn's signature from `fn` to its `;` or body: the first C string type in it)
+        let sig_cstr = |k: usize| -> Option<&str> {
+            let mut j = k;
+            while j < toks.len() && !sym(j, ";") && !sym(j, "{") {
+                if toks[j].0 == 0 && matches!(tk(j), "CStr" | "CString") {
+                    return Some(tk(j));
+                }
+                j += 1;
+            }
+            None
+        };
+        let line_of = |k: usize| it.line as usize + b[..toks[k].1].iter().filter(|&&c| c == b'\n').count();
+        // (the attributes of the item or declaration token k starts: back to the `;` / `{` / `}` before them)
+        let attrs_allow = |k: usize, lint: &str| {
+            let mut a = k;
+            while a > 0 && !(sym(a - 1, ";") || sym(a - 1, "{") || sym(a - 1, "}")) {
+                a -= 1;
+            }
+            let from = if a < toks.len() { toks[a].1 } else { 0 };
+            allows_lint(&text[from..toks[k].1], lint)
+        };
+        let mut k = 0;
+        while k + 2 < toks.len() {
+            if toks[k].0 == 0 && tk(k) == "extern" && toks[k + 1].0 == 2 && tk(k + 1) == "\"C\"" {
+                if sym(k + 2, "{") {
+                    // (`#[allow(improper_ctypes)]` on the block: none of its fns; on one fn: that one)
+                    if !blocks || attrs_allow(k, "improper_ctypes") {
+                        k += 3;
+                        continue;
+                    }
+                    let mut j = k + 3;
+                    let mut d = 1;
+                    while j < toks.len() && d > 0 {
+                        if sym(j, "{") {
+                            d += 1;
+                        } else if sym(j, "}") {
+                            d -= 1;
+                        } else if d == 1 && toks[j].0 == 0 && tk(j) == "fn" && !attrs_allow(j, "improper_ctypes") {
+                            if let Some(t) = sig_cstr(j) {
+                                return Some(format!("{}:1: `extern` block uses type `{t}`, which is not FFI-safe", line_of(j)));
+                            }
+                        }
+                        j += 1;
+                    }
+                    k = j;
+                    continue;
+                }
+                if defs && toks[k + 2].0 == 0 && tk(k + 2) == "fn" && !attrs_allow(k, "improper_ctypes_definitions") {
+                    if let Some(t) = sig_cstr(k + 2) {
+                        return Some(format!("{}:1: `extern` fn uses type `{t}`, which is not FFI-safe", line_of(k)));
+                    }
+                }
+            }
+            k += 1;
+        }
+    }
+    None
+}
+
 fn duplicate_name(src: &str, externs: &[(usize, String)], injected: bool) -> Option<String> {
     // (a few scans: a program without these has its other duplicates found when its items are collected)
     // (2015's injected `std` meets an item or import of that name: `struct std;`, `use x as std;`, `enum std {`)
@@ -5517,6 +5645,14 @@ impl Session2 {
             if !a.crefs[id].is_empty() {
                 h.add(&aliases());
             }
+            // (the associated types of the crates it sees)
+            let mut ak: Key = 0;
+            for (c, &seen) in u.iter().enumerate() {
+                if seen {
+                    ak ^= a.assoc_keys.1.get(c).copied().unwrap_or(0);
+                }
+            }
+            h.add(&ak);
             match a.prog.panic_handler {
                 Some(p) => h.add(&a.prog.names[p as usize]),
                 None => h.add(&0u8),
@@ -5599,6 +5735,9 @@ impl Session2 {
         }
         // (and a cast in the body's own constants: `::<{ 257u32 as Lane }>`)
         h.add(&aliases());
+        // (and the program's associated types: `type Out = u32;` changed to `u64`, or `&'a u32` to `&'static u32`,
+        // changes what `<() as Foo>::Out` is with the body the same)
+        h.add(&a.assoc_keys.0);
         h.finish()
     }
 
