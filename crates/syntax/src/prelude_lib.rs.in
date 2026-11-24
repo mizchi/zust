@@ -13290,6 +13290,11 @@ unsafe fn __exr_vec_from_raw_parts<T>(ptr: *mut T, len: usize, cap: usize) -> Ve
     Vec { ptr: ptr, cap: cap, len: len }
 }
 
+// (`String::from_utf8_unchecked(bytes)`: bytes the caller knows are UTF-8)
+unsafe fn __exr_string_from_utf8_unchecked<G>(v: Vec<u8>) -> String {
+    String { vec: v }
+}
+
 unsafe fn __exr_char_from_u32_unchecked<G>(u: u32) -> char {
     unsafe { __exr_char_from_u32(u) }
 }

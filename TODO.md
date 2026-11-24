@@ -163,15 +163,17 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   `<T as Tr>::null()` that is no `ptr::null()`, impls for references to generic structs as bounds,
   `<Box<[u8]>>::from_abi` among Box's impls, `<T as Tr>::Abi` of a parameter once it is known, a macro's `let`
   names beside a field or method of the name and in a struct literal's shorthand, `Vec::from_raw_parts`,
-  `char::from_u32_unchecked` (tests/probe/w1_items3.rs). It stops on:
-  - `convert/slices.rs:509`: a generic method called right in a `match`, `match js.try_decode() { Ok(d) => d, .. }`
-    with its `T` known from the arms' type only: "cannot infer type parameter `T`" (`let r = js.try_decode();
-    match r { .. }` infers it).
+  `char::from_u32_unchecked` (tests/probe/w1_items3.rs); a generic method called right in a `match` (its type
+  parameter from the arms' type), `impl<T: Tr + ?Sized> Tr for &T`'s functions without `self` (`<&u8 as
+  WasmDescribe>::describe()`), a blanket impl's `self`-by-value method on a number, on a reference and through a
+  qualified path (`<&Box<str> as MaybeIntoWasmAbi>::none()`), a reference's or a number's own impl before a blanket
+  one, `T::none()` of T's bound's trait beside another trait's `none`, `String::from_utf8_unchecked`
+  (tests/probe/w1_items4.rs). It stops on:
+  - `externref.rs:130`: "expected a function".
   - `LocalKey<T>` is a type with `with`, but a `thread_local!` is not one of them yet (each has a key type of its
     own), so a `&'static LocalKey<T>` cannot point at one.
-  - a method call on a `Box<[T]>` with the program's `impl Tr for Box<[T]>` derefs to `[T]` and misses it.
-  - `<&J as Tr>::m()` where Tr's impl for `&J` is a blanket one (`impl<T: OptionIntoWasmAbi> MaybeIntoWasmAbi for
-    T`): "cannot find value (unsupported path)".
+  - a method call on a `Box<[T]>` with the program's `impl Tr for Box<[T]>` derefs to `[T]` and misses it; a
+    `Box<str>` cannot be made (`into_boxed_str`, `"x".into()`).
   - the items a macro's `const _: () = { .. };` moves out are visible outside it (rustc scopes its fns to the
     block); the hand-written one in wasm-bindgen's lib.rs (`__wbindgen_skip_interpret_calls`) is not compiled.
 - Found while building memchr, not fixed:

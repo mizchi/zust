@@ -1274,6 +1274,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("from_raw_parts") && sc.has("Vec") {
         need.insert("__exr_vec_from_raw_parts");
     }
+    if sc.has("from_utf8_unchecked") && sc.has("String") {
+        need.insert("__exr_string_from_utf8_unchecked");
+    }
     if need.contains("parse") {
         need.extend(["__from_str", "__FromStr"]);
     }

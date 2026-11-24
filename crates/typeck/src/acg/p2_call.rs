@@ -745,10 +745,14 @@ impl Cx<'_> {
         if let Some(&bid) = self.prog.blanket.get(method) {
             let pt = self.peek(recv);
             let prim = |t: Ty| t.is_int() || t.is_float() || matches!(t, Ty::Bool | Ty::Char);
+            // (or the reference's own impl, `impl Tr for &u8` (`u8::__ref_m`): rustc's probe takes the receiver's type
+            // as it is first)
             let own = match pt.map(|t| self.strip_refs(t)) {
                 Some(Ty::Struct(sid)) => self.prog.method(sid, method).is_some(),
                 _ => false,
-            };
+            } || matches!(pt, Some(Ty::Ref(_, i)) if (prim(*i) || *i == Ty::Str) && self.prog.index.contains_key(&format!("{}::__ref_{method}", self.prog.tn(*i))))
+                // (and a number's own impl, `impl MaybeIntoWasmAbi for u32` beside `impl<T: OptionIntoWasmAbi> .. for T`)
+                || pt.is_some_and(|t| prim(t) && self.prog.index.get(&format!("{}::{method}", self.prog.tn(t))).is_some_and(|&i| i != bid));
             // (`()`, and what is behind a reference (a `Box` too: Self is the box, before the deref to what it
             // holds), when the impl's bounds hold of it: `impl<T: ?Sized> FutureExt for T where T: Future` is not
             // `()`'s)
@@ -758,7 +762,8 @@ impl Cx<'_> {
             let holds = |t: Ty| bounds.is_none_or(|bs| blanket_bounds_hold(prog, t, bs, &mut vec![], &mut vec![]));
             let extra = |t: Ty| (prim(t) || matches!(t, Ty::Unit | Ty::Box(_))) && holds(t);
             let to_prim = matches!(pt, Some(Ty::Ref(_, i)) if extra(*i));
-            if !own && pt.is_some_and(|t| prim(t) || matches!(t, Ty::Ref(_, Ty::Str)) || (t == Ty::Unit && holds(t))) || (!own && to_prim) {
+            // (a number's only when the blanket impl's bounds hold of it)
+            if !own && pt.is_some_and(|t| (prim(t) && holds(t)) || matches!(t, Ty::Ref(_, Ty::Str)) || (t == Ty::Unit && holds(t))) || (!own && to_prim) {
                 // (an `unsafe fn` of the trait: E0133 outside `unsafe`, as for any method)
                 self.check_unsafe_call(bid, msp.start)?;
                 let (v, t) = self.expr(recv, None)?;
@@ -798,6 +803,12 @@ impl Cx<'_> {
                         return r;
                     }
                 }
+                // (`self` by value, `fn into_maybe_abi(self)`: the value itself, Self the number)
+                if !matches!(self.prog.sigs[bid as usize].params.first(), Some(Ty::Ref(..))) && t != Ty::Unit {
+                    if let Some(v) = v {
+                        return self.call_fn(bid, Some((v, t)), &args, tf, expected, SP);
+                    }
+                }
                 // (&self に渡すのは値のアドレス。&str は fat pointer の置き場所のアドレスがそのまま &&str; `()` は
                 // 1 バイトの置き場所)
                 let addr = match v {
@@ -814,6 +825,20 @@ impl Cx<'_> {
                     None => return Ok((None, Ty::Never)),
                 };
                 return self.call_fn(bid, Some((addr, Ty::Ref(false, intern(t)))), &args, tf, expected, SP);
+            }
+            // (`self` by value on a reference to a struct the blanket impl covers as it is, `(&s).into_maybe_abi()` of
+            // `impl<T: OptionIntoWasmAbi> MaybeIntoWasmAbi for T` with `&S: OptionIntoWasmAbi`: Self is the reference,
+            // as rustc's probe takes the receiver's type first; no move out of it)
+            let by_value = !matches!(self.prog.sigs[bid as usize].params.first(), Some(Ty::Ref(..)));
+            if let Some(rt @ Ty::Ref(_, Ty::Struct(sid))) = pt {
+                let ref_own = self.prog.method(*sid, &format!("__ref_{method}")).is_some();
+                if by_value && !ref_own && bounds.is_some() && holds(rt) {
+                    self.check_unsafe_call(bid, msp.start)?;
+                    let (v, t) = self.expr(recv, None)?;
+                    let Some(v) = v else { return Ok((None, Ty::Never)) };
+                    let args: Vec<&Expr> = margs.iter().collect();
+                    return self.call_fn(bid, Some((v, t)), &args, tf, expected, SP);
+                }
             }
         }
         // `b.as_ref()` / `b.as_mut()` (b: Box<T> / &Box<T>): 中身への参照 (Box と参照は同じ表現)
@@ -1157,6 +1182,25 @@ impl Cx<'_> {
         // (the first type reached through whose `Deref` has no `DerefMut` (`Rc`): what follows is shared)
         let mut shared_deref: Option<String> = None;
         let mut derefs = 0;
+        // (the receiver's type before the derefs: `(*self).into_abi()` of a `&str` that type inference did not record
+        // reaches `str`; `impl Tr for &str`'s `str::__ref_into_abi` is its method)
+        let p0_ty = p.ty();
+        // (or `&Box<str>`'s, `Box::__ref_into_abi` among the impls for references to Boxes: the one whose self type
+        // is the receiver's)
+        let ref_impl = |t: Ty| -> Option<String> {
+            let Ty::Ref(_, it) = t else { return None };
+            let base = match *it {
+                Ty::Box(_) => "Box".to_string(),
+                it if it.is_int() || it.is_float() || matches!(it, Ty::Bool | Ty::Char | Ty::Str) => self.prog.tn(it),
+                _ => return None,
+            };
+            let f = format!("{base}::__ref_{method}");
+            let &first = self.prog.index.get(&f)?;
+            let fits = |c: u32| self.prog.sigs[c as usize].self_ty.is_none_or(|st| self.prog.match_ty_exact(st, t, &mut vec![None; self.prog.sigs[c as usize].generics.len()]));
+            let c = std::iter::once(first).chain(self.prog.overloads.get(&f).into_iter().flatten().copied()).find(|&c| fits(c))?;
+            Some(self.prog.names[c as usize].clone())
+        };
+        let ref_call = ref_impl(p0_ty).filter(|_| is_place_expr(recv));
         let (a, o, sid, id) = loop {
             let (a, o, sid) = loop {
                 p = match p {
@@ -1176,6 +1220,33 @@ impl Cx<'_> {
                         Place::Mem(ptr, 0, *i)
                     }
                     p => {
+                        if let Some(f) = &ref_call {
+                            let mut args = vec![recv.clone()];
+                            args.extend(margs.iter().cloned());
+                            let id = self.prog.index.get(f.split('#').next().unwrap_or(f)).copied();
+                            let c = self.keep_expr(Expr::Call(Box::new(with_targs(f.split('#').next().unwrap_or(f), gargs)), args));
+                            // (the overload chosen: the call of its name resolves to it)
+                            let chosen = self.prog.names.iter().position(|n| n == f).map(|i| i as u32);
+                            if chosen != id {
+                                self.keep_overload.set(chosen);
+                            }
+                            let r = self.expr(c, expected);
+                            self.keep_overload.set(None);
+                            return r;
+                        }
+                        // (a blanket impl's `self`-by-value method for the reference as it is, `(*self).into_maybe_abi()`
+                        // of a `&Box<str>` with `impl<T: OptionIntoWasmAbi> MaybeIntoWasmAbi for T`)
+                        if let Some(&bid) = self.prog.blanket.get(method).filter(|_| matches!(p0_ty, Ty::Ref(..)) && is_place_expr(recv)) {
+                            let bsig = &self.prog.sigs[bid as usize];
+                            let by_value = !matches!(bsig.params.first(), Some(Ty::Ref(..)));
+                            let bounds = bsig.trait_of.as_deref().or(bsig.impl_trait.as_deref()).and_then(|tr| self.prog.blanket_bounds.get(tr));
+                            if by_value && bounds.is_some_and(|bs| blanket_bounds_hold(self.prog, p0_ty, bs, &mut vec![], &mut vec![])) {
+                                let (v, t) = self.expr(recv, None)?;
+                                let Some(v) = v else { return Ok((None, Ty::Never)) };
+                                let args: Vec<&Expr> = margs.iter().collect();
+                                return self.call_fn(bid, Some((v, t)), &args, tf, expected, SP);
+                            }
+                        }
                         let t = self.prog.tn(p.ty());
                         return err(SP, format!("no method `{}` on type `{t}`", method));
                     }
@@ -3871,7 +3942,7 @@ fn hidden_param(n: &str) -> bool {
 
 /// The bounds of a blanket impl's self type hold of t (`?Sized` and lifetimes aside). A bound that is a trait with a
 /// blanket impl of its own holds when that impl's bounds do (`impl<T: Marker> Other for T`)
-fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], path: &mut Vec<String>, seen: &mut Vec<(String, bool)>) -> bool {
+pub(crate) fn blanket_bounds_hold(prog: &crate::program::Program, t: Ty, bs: &[String], path: &mut Vec<String>, seen: &mut Vec<(String, bool)>) -> bool {
     bs.iter().all(|b| {
         if b.starts_with('?') || b.starts_with('\'') {
             return true;

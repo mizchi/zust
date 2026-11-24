@@ -1868,6 +1868,10 @@ impl Program {
                 }
                 if let Some(t) = sm.impl_self_ty.as_ref().and_then(|t| p.resolve_g(t, &[]).ok()) {
                     p.prim_impls.insert((t, tr.clone()));
+                    // (`impl Tr for &Box<str>`: the reference implements Tr, as other references' impls say)
+                    if matches!(t, Ty::Ref(..)) {
+                        p.ref_impls.insert((t, tr.clone()));
+                    }
                 }
                 continue;
             }
@@ -5805,6 +5809,7 @@ impl Program {
                 ("RefMut", "map") if !self.index.contains_key("RefMut::map") => Some("__exr_refmut_map"),
                 ("Ref", "clone") if !self.index.contains_key("Ref::clone") => Some("__exr_ref_clone"),
                 ("Vec", "from_raw_parts") if !self.index.contains_key("Vec::from_raw_parts") => Some("__exr_vec_from_raw_parts"),
+                ("String", "from_utf8_unchecked") if !self.index.contains_key("String::from_utf8_unchecked") => Some("__exr_string_from_utf8_unchecked"),
                 _ => None,
             };
             if let Some(c) = core {
