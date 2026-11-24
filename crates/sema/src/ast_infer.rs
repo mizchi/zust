@@ -331,6 +331,7 @@ pub fn infer_ctx_margs(
     let tail = s.block(body);
     let ret = s.ret;
     s.unify(tail, ret);
+    s.finish_unsize();
     s.finish_late_bounds();
     s.finish_collects();
     s.finish_assocs();

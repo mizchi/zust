@@ -161,12 +161,12 @@ impl AdtTable {
         g.len() as u32 - 1
     }
     fn get_mut(&mut self, i: usize) -> &mut StructDef {
-        &mut self.v.get_mut().unwrap()[i]
+        &mut self.v.get_mut().unwrap()[i & !(DST_TAG as usize)]
     }
     /// 先に番号だけ取ったインスタンスの中身を入れる (まだ誰にも公開していない番号だけに使う)
     fn replace(&self, i: u32, d: StructDef) {
         let mut g = self.v.lock().unwrap();
-        *g[i as usize] = d;
+        *g[(i & !DST_TAG) as usize] = d;
     }
 }
 
@@ -174,7 +174,7 @@ impl std::ops::Index<usize> for AdtTable {
     type Output = StructDef;
     fn index(&self, i: usize) -> &StructDef {
         let g = self.v.lock().unwrap();
-        let p: *const StructDef = &*g[i];
+        let p: *const StructDef = &*g[i & !(DST_TAG as usize)];
         drop(g);
         // SAFETY: 要素は Box に入っていて削除されない (Vec の再確保で動くのは Box のポインタだけ)。
         // 公開後の要素を変更するのは &mut self を取る get_mut (build 中) だけ
@@ -4141,12 +4141,15 @@ impl Program {
         if let Some(&id) = g.get(&key) {
             return Ok(id);
         }
+        // 最後のフィールドが unsized (`[T]` / `str` / そういう struct) なら番号に印を付ける (`&S<[T]>` は fat pointer)
+        // (from the definition's last field: a symbolic instance (`Fat<[T]>`) has no laid-out fields)
+        let dst = !d.is_enum && self.structs[base as usize].fields.last().is_some_and(|f| self.tail_unsized(f.1, &d.args, 0));
         let id = match placeholder {
             Some(pid) => {
                 self.structs.replace(pid, d);
                 pid
             }
-            None => self.structs.push(d),
+            None => self.structs.push(d) | if dst { DST_TAG } else { 0 },
         };
         g.insert(key, id);
         Ok(id)
@@ -4172,6 +4175,30 @@ impl Program {
             cut -= 1;
         }
         format!("{}…#{:016x}>", &full[..cut], h.finish())
+    }
+
+    /// Whether t, a definition's last field type with args for its parameters, is unsized (`[T]`, `str`, a struct
+    /// with such a tail). Read from the definitions without instantiating (a recursive type's instance is not in the
+    /// cache yet when this is asked)
+    fn tail_unsized(&self, t: Ty, args: &[Ty], depth: u32) -> bool {
+        match t {
+            Ty::Slice(_) | Ty::Str => true,
+            Ty::Param(i) => args.get(i as usize).is_some_and(|&a| matches!(a, Ty::Slice(_) | Ty::Str) || a.is_dst_struct()),
+            Ty::Struct(_) if t.is_dst_struct() => true,
+            Ty::Struct(s) if depth < 8 => {
+                let sd = &self.structs[s as usize];
+                let Some(b) = sd.base else { return false };
+                let bd = &self.structs[b as usize];
+                if bd.is_enum {
+                    return false;
+                }
+                match bd.fields.last() {
+                    Some(&(_, Ty::Param(j), _)) => sd.args.get(j as usize).is_some_and(|&a| self.tail_unsized(a, args, depth + 1)),
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
     }
 
     fn instantiate_inner(&self, base: u32, args: Vec<Ty>) -> R<StructDef> {
@@ -4858,7 +4885,9 @@ impl Program {
                 (s.wrapping_mul(n), a)
             }
             t if t.is_fat() => (16, 8),
-            Ty::Unit | Ty::Never | Ty::Slice(_) | Ty::Str | Ty::Dyn(_) | Ty::Param(_) => (0, 1),
+            // (unsized な末尾は大きさ 0、揃えは要素のもの: `S<[T]>` の末尾の位置は `S<[T; N]>` と同じ)
+            Ty::Slice(e) => (0, self.size_align(*e).1),
+            Ty::Unit | Ty::Never | Ty::Str | Ty::Dyn(_) | Ty::Param(_) => (0, 1),
             t => (t.bits() / 8, t.bits() / 8),
         }
     }

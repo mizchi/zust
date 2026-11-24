@@ -1524,6 +1524,50 @@ impl Cx<'_> {
 
     // --- タプル・配列・スライス ------------------------------------------
 
+    /// `S<[T; N]>` を `S<[T]>` (最後のフィールドが unsized な struct) に強制変換できるなら、末尾の要素数 N
+    /// (want may be generic (`&Fat<[T]>` for a parameter): it is matched into sol)
+    pub(crate) fn unsize_tail_len(&self, want: Ty, got: Ty) -> Option<i64> {
+        let mut sol = vec![None; 64];
+        self.unsize_tail_sol(want, got, &mut sol).map(|x| x.0)
+    }
+
+    /// (N, the unsized type of got (`S<[T]>`)) if got (`S<[T; N]>`) unsizes to want
+    pub(crate) fn unsize_tail_sol(&self, want: Ty, got: Ty, sol: &mut [Option<Ty>]) -> Option<(i64, Ty)> {
+        if !want.is_dst_struct() {
+            return None;
+        }
+        let (n, u) = self.unsized_of(got)?;
+        let ok = if self.prog.has_param(want) { self.prog.match_ty(want, u, sol) } else { want == u };
+        ok.then_some((n, u))
+    }
+
+    /// `S<[T; N]>` → (N, `S<[T]>`): the struct whose tail (through nested structs) is an array, as a slice
+    fn unsized_of(&self, got: Ty) -> Option<(i64, Ty)> {
+        let Ty::Struct(y) = got else { return None };
+        if got.is_dst_struct() || self.prog.structs[y as usize].is_enum {
+            return None;
+        }
+        let d = &self.prog.structs[y as usize];
+        let base = d.base?;
+        let (_, tail, _) = *d.fields.last()?;
+        let (n, ut) = match tail {
+            Ty::Array(e, n) => (n as i64, Ty::Slice(e)),
+            t => self.unsized_of(t)?,
+        };
+        let args: Vec<Ty> = d.args.iter().map(|&a| if a == tail { ut } else { a }).collect();
+        if args == d.args {
+            return None;
+        }
+        let id = self.prog.instantiate(base, args).ok()?;
+        let u = Ty::Struct(id);
+        // (only the tail may change: a parameter the tail mentions is not to be used by another field
+        // (`struct Foo<T: ?Sized>(Box<T>, T)`, E0308 in rustc))
+        let uf = &self.prog.structs[id as usize].fields;
+        let k = d.fields.len() - 1;
+        let same = uf.len() == d.fields.len() && uf[..k].iter().zip(&d.fields[..k]).all(|(a, b)| a.1 == b.1 && a.2 == b.2);
+        (u.is_dst_struct() && same && uf[k].1 == ut).then_some((n, u))
+    }
+
     pub(crate) fn make_fat(&mut self, ptr: Value, len: i64) -> Value {
         let l = self.b.ins().iconst(types::I64, len);
         self.make_fat_v(ptr, l)

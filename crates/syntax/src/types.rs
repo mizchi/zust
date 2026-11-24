@@ -89,11 +89,19 @@ impl Ty {
     #[inline]
     pub fn is_fat(self) -> bool {
         match self {
-            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) => matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)),
+            Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Box(i) => matches!(i, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) || i.is_dst_struct(),
             _ => false,
         }
     }
+    /// 最後のフィールドが unsized な struct のインスタンス (`Foo<[u8]>`): 番号に `DST_TAG` が付いている
+    #[inline]
+    pub fn is_dst_struct(self) -> bool {
+        matches!(self, Ty::Struct(s) if s & DST_TAG != 0)
+    }
 }
+
+/// 最後のフィールドが unsized な struct のインスタンスの番号に付ける印 (`&Foo<[u8]>` も fat pointer になる)
+pub const DST_TAG: u32 = 1 << 31;
 
 /// 文字列の intern 表 (`dyn` の trait 境界)
 /// (`Ty` を 16 byte に保つため、fat な `&str` ではなく `&String` を持つ)

@@ -531,3 +531,13 @@ fn clone_of_box_keeps_its_literal_open() {
     let d = s.check(src);
     assert!(d.is_empty(), "{d:?}");
 }
+
+/// A struct with an unsized tail (`Foo<[u8]>`): `&Foo<[u8; 3]>` coerces to it (through a let, a generic call, a
+/// box), the literal's elements take the slice's element type, and a pattern on the pointee checks
+#[test]
+fn dst_struct_tail_coercions_check() {
+    let src = "struct Foo<T: ?Sized> { a: i32, inner: T }\nfn g<T: Copy>(x: &Foo<[T]>) -> T { x.inner[0] }\nfn main() {\n    let f: &Foo<[u8]> = &Foo { a: 32, inner: [1, 2, 3] };\n    let Foo { a, inner } = f;\n    let _ = (a, inner.len(), g(f));\n    let b: Box<Foo<[u8; 2]>> = Box::new(Foo { a: 1, inner: [4, 5] });\n    let b: Box<Foo<[u8]>> = b;\n    let _ = b.inner.len();\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert!(d.is_empty(), "{d:?}");
+}

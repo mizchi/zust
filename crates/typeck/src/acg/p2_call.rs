@@ -2698,6 +2698,14 @@ impl Cx<'_> {
                     }
                 }
             }
+            if let (Ty::Ref(pm, wi @ Ty::Struct(_)), Ty::Ref(am, gi), Some(val)) = (pt, t, v) {
+                if am || !pm {
+                    if let Some((n, u)) = self.unsize_tail_sol(*wi, *gi, &mut sol) {
+                        v = Some(self.make_fat(val, n));
+                        t = Ty::Ref(pm, intern(u));
+                    }
+                }
+            }
             if let (Ty::Ref(pm, Ty::Slice(_)), Ty::Ref(am, Ty::Array(e, n)), Some(val)) = (pt, t, v) {
                 if am || !pm {
                     v = Some(self.make_fat(val, *n as i64));

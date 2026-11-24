@@ -75,6 +75,9 @@ pub struct Solver<'p> {
     pub late: Vec<(u32, Vec<Option<u32>>)>,
     /// the callee's type parameters a turbofish gives (index, variable), for the next apply_self (`tr::<u16>()`)
     pub pre_pv: Vec<(usize, u32)>,
+    /// (a type argument of `S<..>` passed where `S<[T]>` is expected (a coercion), the `T`): the argument may be
+    /// any `[T; N]`, so only its element is unified, once the argument is known to be an array (finish_unsize)
+    pub unsize_later: Vec<(u32, u32)>,
 }
 
 impl<'p> Solver<'p> {
@@ -107,6 +110,7 @@ impl<'p> Solver<'p> {
             clo_info: Default::default(),
             late: vec![],
             pre_pv: vec![],
+            unsize_later: vec![],
         }
     }
 }
@@ -360,7 +364,8 @@ impl Solver<'_> {
                             matches!(s.shape[r as usize], Some(Shape::Known(Ty::Struct(sid)))
                                 if s.prog.structs[sid as usize].base.is_none() && s.prog.structs[sid as usize].name == "String")
                         };
-                        let coerce = (slc(self, x) && seqish(self, y))
+                        let coerce = self.unsize_pair(x, y)
+                            || (slc(self, x) && seqish(self, y))
                             || (slc(self, y) && seqish(self, x))
                             || (is_str(self, x) && is_string(self, y))
                             || (is_str(self, y) && is_string(self, x));
@@ -400,11 +405,18 @@ impl Solver<'_> {
             (Some(Shape::Slc(x)), Some(Shape::Slc(y)))
             | (Some(Shape::Bx(x)), Some(Shape::Bx(y)))
             | (Some(Shape::Ptr(_, x)), Some(Shape::Ptr(_, y))) => {
-                self.link(a, b);
+                // (`Box<S<[T; N]>>` to `Box<S<[T]>>`: a coercion, not one type)
+                if !self.unsize_pair(x, y) {
+                    self.link(a, b);
+                }
                 self.unify(x, y);
             }
             (Some(Shape::Adt(x, s1, l1)), Some(Shape::Adt(y, s2, l2))) if x == y => {
-                self.link(a, b);
+                // (`S<[T; N]>` passed as `S<[T]>` (a coercion, a struct with an unsized tail): not one type, only
+                // the arguments are unified (an array's element with the slice's))
+                if !self.unsize_pair(a, b) {
+                    self.link(a, b);
+                }
                 for (p, q) in self
                     .adt_vars_of(s1, l1)
                     .into_iter()
@@ -424,9 +436,18 @@ impl Solver<'_> {
                     } else {
                         (b, a)
                     };
-                self.link(adt_root, known_root);
+                // (`&S<[T; N]>` を `&S<[T]>` に渡す (強制変換): 同じ型ではないので引数だけ単一化する)
+                if !Ty::Struct(i).is_dst_struct() {
+                    self.link(adt_root, known_root);
+                }
+                let dst = Ty::Struct(i).is_dst_struct();
                 let args = self.prog.structs[i as usize].args.clone();
                 for (p, t) in self.adt_vars_of(st, l).into_iter().zip(args) {
+                    if let (true, Ty::Slice(e)) = (dst, t) {
+                        let k = self.known(*e);
+                        self.unsize_elem(p, k);
+                        continue;
+                    }
                     let k = self.known(t);
                     self.unify(p, k);
                 }
@@ -967,6 +988,64 @@ impl Solver<'_> {
             Ty::Ref(_, i) => elem_of(*i).map(|e| Ty::Ref(false, intern(e))),
             Ty::Array(e, _) => Some(Ty::Ref(false, e)),
             t => elem_of(t).or_else(|| self.prog.assoc_of(t, "Item")),
+        }
+    }
+
+    /// x and y are a struct with an array tail and the same struct with a slice tail (`S<[T; N]>` and `S<[T]>`,
+    /// in either order): what a reference or a box to one coerces to one to the other
+    pub fn unsize_pair(&mut self, x: u32, y: u32) -> bool {
+        let (x, y) = (self.find(x), self.find(y));
+        let base = |s: &Self, v: u32| match s.shape[v as usize] {
+            Some(Shape::Adt(b, ..)) => Some((b, false)),
+            Some(Shape::Known(t @ Ty::Struct(i))) => Some((s.prog.base_of(i), t.is_dst_struct())),
+            _ => None,
+        };
+        match (base(self, x), base(self, y)) {
+            (Some((b1, d1)), Some((b2, d2))) if b1 == b2 => {
+                if d1 != d2 {
+                    return true;
+                }
+                // (two generic shapes: an argument that is an array on one side and a slice on the other)
+                let args = |s: &mut Self, v: u32| -> Vec<u32> {
+                    match s.shape[v as usize] {
+                        Some(Shape::Adt(_, st, l)) => s.adt_vars_of(st, l),
+                        _ => vec![],
+                    }
+                };
+                let (p, q) = (args(self, x), args(self, y));
+                p.into_iter().zip(q).any(|(p, q)| {
+                    let (p, q) = (self.find(p), self.find(q));
+                    matches!(
+                        (&self.shape[p as usize], &self.shape[q as usize]),
+                        (Some(Shape::Slc(_)), Some(Shape::Arr(..))) | (Some(Shape::Arr(..)), Some(Shape::Slc(_)))
+                    ) || self.unsize_pair(p, q)
+                })
+            }
+            _ => false,
+        }
+    }
+
+    /// the element of an array argument where a slice one is expected (`S<[u8; 3]>` to `S<[u8]>`); later, if the
+    /// argument is not known yet
+    fn unsize_elem(&mut self, p: u32, k: u32) {
+        let r = self.find(p);
+        match self.shape[r as usize] {
+            Some(Shape::Arr(x, _) | Shape::Slc(x)) => self.unify(x, k),
+            Some(Shape::Known(Ty::Array(e, _) | Ty::Slice(e))) => {
+                let x = self.known(*e);
+                self.unify(x, k)
+            }
+            None => self.unsize_later.push((p, k)),
+            _ => {}
+        }
+    }
+
+    pub fn finish_unsize(&mut self) {
+        for _ in 0..2 {
+            let ls = std::mem::take(&mut self.unsize_later);
+            for (p, k) in ls {
+                self.unsize_elem(p, k);
+            }
         }
     }
 

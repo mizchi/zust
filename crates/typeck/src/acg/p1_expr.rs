@@ -495,6 +495,18 @@ impl Cx<'_> {
                 }
                 let (a, o, sid) = self.struct_base(base)?;
                 match self.prog.field(sid, fname) {
+                    // (a struct with an unsized tail is a place of its (data, length) pair: a field is at the data
+                    // address, the tail is a pair of its own (its address, the same length))
+                    Some((ft, foff)) if Ty::Struct(sid).is_dst_struct() => {
+                        let data = self.b.ins().load(PTR, mf(), a, o);
+                        if matches!(ft, Ty::Slice(_) | Ty::Str) || ft.is_dst_struct() {
+                            let len = self.b.ins().load(types::I64, mf(), a, o + 8);
+                            let p = self.b.ins().iadd_imm(data, foff as i64);
+                            Ok(Place::Mem(self.make_fat_v(p, len), 0, ft))
+                        } else {
+                            Ok(Place::Mem(data, foff as i32, ft))
+                        }
+                    }
                     Some((ft, foff)) => Ok(Place::Mem(a, o + foff as i32, ft)),
                     None => err(SP, format!("no field `{fname}` on type `{}`", self.prog.structs[sid as usize].name)),
                 }
@@ -513,11 +525,13 @@ impl Cx<'_> {
                     // patterns on it bind by value)
                     // (a fat pointer's value is the address of its two words, which is what a slice place holds)
                     (Some(fat), Ty::Ref(_, Ty::Slice(e)) | Ty::Box(Ty::Slice(e))) => Ok(Place::Mem(fat, 0, Ty::Slice(e))),
+                    (Some(fat), Ty::Ref(_, i) | Ty::Box(i)) if i.is_dst_struct() => Ok(Place::Mem(fat, 0, *i)),
                     (Some(_), Ty::Ptr(..)) if self.unsafe_ok == 0 && sp.start.line != 0 => {
                         err(sp.start, "dereference of raw pointer is unsafe and requires unsafe block (E0133)")
                     }
                     // (a fat raw pointer is the address of its two words, as a fat reference is)
                     (Some(fat), Ty::Ptr(_, Ty::Slice(e))) => Ok(Place::Mem(fat, 0, Ty::Slice(e))),
+                    (Some(fat), Ty::Ptr(_, i)) if i.is_dst_struct() => Ok(Place::Mem(fat, 0, *i)),
                     (Some(fat), Ty::Ptr(_, i @ (Ty::Str | Ty::Dyn(_)))) => Ok(Place::Mem(fat, 0, *i)),
                     (Some(_), t) if t.is_fat() => err(SP, "dereferencing a slice is not supported (index it instead)"),
                     (Some(_), Ty::Ptr(..)) if self.unsafe_ok == 0 && sp.start.line != 0 => {
@@ -659,6 +673,9 @@ impl Cx<'_> {
         loop {
             p = match p {
                 Place::Mem(a, o, Ty::Struct(sid)) => return Ok((a, o, sid)),
+                // (a reference to a struct with an unsized tail: its two words are the place's (data, length) pair)
+                Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i) | Ty::Ptr(_, i)) if i.is_dst_struct() => Place::Mem(self.addr_plus(a, o), 0, *i),
+                Place::Var(v, Ty::Ref(_, i) | Ty::Box(i) | Ty::Ptr(_, i)) if i.is_dst_struct() => Place::Mem(self.b.use_var(v), 0, *i),
                 Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i)) => {
                     let ptr = self.b.ins().load(PTR, mf(), a, o);
                     Place::Mem(ptr, 0, *i)
@@ -696,6 +713,8 @@ impl Cx<'_> {
     }
 
     pub(crate) fn expr(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (no value has an unsized type: `&S { .. }` where `&S<[T]>` is expected makes an `S<[T; N]>`, then coerced)
+        let expected = expected.filter(|t| !t.is_dst_struct());
         if self.user_code && matches!(e, Expr::MethodCall(..) | Expr::Index(..)) {
             self.implicit_autoref(e)?;
         }
@@ -767,6 +786,21 @@ impl Cx<'_> {
         if let (Some(want @ Ty::Ref(m2, Ty::Slice(we))), Some(v), Ty::Ref(m1, Ty::Array(ge, n))) = (expected, v, t) {
             if we == ge && (m1 || !m2) {
                 let fat = self.make_fat(v, *n as i64);
+                return Ok((Some(fat), want));
+            }
+        }
+        // `&S<[T; N]>` → `&S<[T]>` (and to `*const S<[T]>`, `Box<S<[T; N]>>` → `Box<S<[T]>>`): the address and N
+        if let (Some(want @ (Ty::Ref(m2, wi) | Ty::Ptr(m2, wi))), Some(v), Ty::Ref(m1, gi) | Ty::Ptr(m1, gi)) = (expected, v, t) {
+            if (m1 || !m2) && !(matches!(want, Ty::Ref(..)) && matches!(t, Ty::Ptr(..))) {
+                if let Some(n) = self.unsize_tail_len(*wi, *gi) {
+                    let fat = self.make_fat(v, n);
+                    return Ok((Some(fat), want));
+                }
+            }
+        }
+        if let (Some(want @ Ty::Box(wi)), Some(v), Ty::Box(gi)) = (expected, v, t) {
+            if let Some(n) = self.unsize_tail_len(*wi, *gi) {
+                let fat = self.make_fat(v, n);
                 return Ok((Some(fat), want));
             }
         }

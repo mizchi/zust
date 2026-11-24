@@ -575,6 +575,9 @@ impl Cx<'_> {
     pub(crate) fn pat_deref(&mut self, mut p: Place, mut mode: BindMode) -> (Place, BindMode) {
         loop {
             let (ptr, m, inner) = match p {
+                // (a reference to a struct with an unsized tail: the place of its pair is the struct's)
+                Place::Var(v, Ty::Ref(m, i)) if i.is_dst_struct() => (self.b.use_var(v), m, *i),
+                Place::Mem(a, o, Ty::Ref(m, i)) if i.is_dst_struct() => (self.addr_plus(a, o), m, *i),
                 Place::Var(v, Ty::Ref(m, i)) => (self.b.use_var(v), m, *i),
                 Place::Mem(a, o, Ty::Ref(m, i)) => (self.b.ins().load(PTR, mf(), a, o), m, *i),
                 _ => return (p, mode),
@@ -589,8 +592,19 @@ impl Cx<'_> {
 
     /// 構造体・列挙・タプルの値 p のフィールド (オフセット off、型 fty) の場所。p がメモリにない (パターンが値の型に
     /// 合わない: `let Ok(0) = 42u8;`) なら型の不一致のエラー
-    pub(crate) fn field_place(p: Place, fty: Ty, off: u32) -> R<Place> {
+    pub(crate) fn field_place(&mut self, p: Place, fty: Ty, off: u32) -> R<Place> {
         match p {
+            // (a struct with an unsized tail is a place of its (data, length) pair, as in Expr::Field)
+            Place::Mem(a, o, t) if t.is_dst_struct() => {
+                let data = self.b.ins().load(PTR, mf(), a, o);
+                if matches!(fty, Ty::Slice(_) | Ty::Str) || fty.is_dst_struct() {
+                    let len = self.b.ins().load(types::I64, mf(), a, o + 8);
+                    let p = self.b.ins().iadd_imm(data, off as i64);
+                    Ok(Place::Mem(self.make_fat_v(p, len), 0, fty))
+                } else {
+                    Ok(Place::Mem(data, off as i32, fty))
+                }
+            }
             Place::Mem(a, o, _) => Ok(Place::Mem(a, o + off as i32, fty)),
             _ => err(SP, "mismatched types: this pattern does not match the type of the value"),
         }
@@ -1107,7 +1121,8 @@ impl Cx<'_> {
                         };
                         for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP).map_err(|m| self.at(path.pos, m))? {
                             let (_, fty, off) = fields[fi];
-                            self.pat_test(sub, Self::field_place(p, fty, off)?, fail)?;
+                            let fp = self.field_place(p, fty, off)?;
+                            self.pat_test(sub, fp, fail)?;
                         }
                         Ok(())
                     }
@@ -1115,7 +1130,8 @@ impl Cx<'_> {
                         let fields = self.tuple_pat_fields(p, elems.len(), SP)?;
                         for (fi, sub) in Self::tuple_fields(elems.iter(), fields.len(), SP)? {
                             let (_, fty, off) = fields[fi];
-                            self.pat_test(sub, Self::field_place(p, fty, off)?, fail)?;
+                            let fp = self.field_place(p, fty, off)?;
+                            self.pat_test(sub, fp, fail)?;
                         }
                         Ok(())
                     }
@@ -1208,7 +1224,7 @@ impl Cx<'_> {
             let Some(&(_, fty, off)) = fields.iter().find(|f| f.0 == *fid) else {
                 return err(SP, format!("no field `{fid}`"));
             };
-            out.push((fpat, Self::field_place(p, fty, off)?));
+            out.push((fpat, self.field_place(p, fty, off)?));
         }
         if !*has_rest && out.len() != fields.len() {
             return err(SP, "pattern does not mention all fields (add `..`)");
@@ -1469,7 +1485,8 @@ impl Cx<'_> {
                     let (fname, fty, off) = fields[fi].clone();
                     let saved = self.bk_pat_field(deref, vname.as_deref(), &fname);
                     let rs = self.rg_pat_field(p.ty(), rvi, fi);
-                    let r = self.pat_bind(sub, Self::field_place(p, fty, off)?, mode);
+                    let fp = self.field_place(p, fty, off)?;
+                    let r = self.pat_bind(sub, fp, mode);
                     self.rg.pat = rs.0;
                     self.rg.pat_ref = rs.1;
                     self.bk.pat_path = saved;
@@ -1486,7 +1503,8 @@ impl Cx<'_> {
                     let (fname, fty, off) = fields[fi].clone();
                     let saved = self.bk_pat_field(deref, None, &fname);
                     let rs = self.rg_pat_field(p.ty(), None, fi);
-                    let r = self.pat_bind(sub, Self::field_place(p, fty, off)?, mode);
+                    let fp = self.field_place(p, fty, off)?;
+                    let r = self.pat_bind(sub, fp, mode);
                     self.rg.pat = rs.0;
                     self.rg.pat_ref = rs.1;
                     self.bk.pat_path = saved;
