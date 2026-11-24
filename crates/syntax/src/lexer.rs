@@ -982,17 +982,23 @@ pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
     // (and the qualified fns, impls and traits the scan below moves too: `unsafe fn`, `async fn`, `unsafe impl`)
-    const KWS: [&str; 25] = [
-        "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "unsafe fn ",
-        "unsafe impl", "unsafe trait ", "async fn ", "pub fn ", "pub struct ", "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ",
-        "pub(crate) ",
-    ];
+    // (by the first letter: most lines start with none of them, and a line is tried against that letter's only)
+    let kws: fn(u8) -> &'static [&'static str] = |c| match c {
+        b'f' => &["fn "],
+        b's' => &["struct ", "static "],
+        b'e' => &["enum ", "extern "],
+        b'u' => &["use ", "union ", "unsafe extern ", "unsafe fn ", "unsafe impl", "unsafe trait "],
+        b'c' => &["const "],
+        b'm' => &["mod "],
+        b't' => &["trait ", "type "],
+        b'i' => &["impl"],
+        b'p' => &["pub fn ", "pub struct ", "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) "],
+        b'a' => &["async fn "],
+        _ => &[],
+    };
     let indented = src.split('\n').any(|l| {
         let t = l.trim_start();
-        // (the keywords' first letters first: most lines start with none of them)
-        t.len() < l.len()
-            && matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p' | b'a'))
-            && KWS.iter().any(|k| t.starts_with(k))
+        t.len() < l.len() && t.as_bytes().first().is_some_and(|&c| kws(c).iter().any(|k| t.starts_with(k)))
     });
     // (a proc macro's output is one line, marked (PM_MARK): the items in its bodies, `{#[link(..)] extern "C" {..}`,
     // are not at a line's start. Looked for only once this process expanded one)
@@ -1073,7 +1079,7 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 } else {
                     k
                 }
-            } else if let Some(f) = qual_fn(k) {
+            } else if let Some(f) = matches!(t, b"unsafe" | b"async" | b"extern").then(|| qual_fn(k)).flatten() {
                 f
             } else if t == b"unsafe" && k + 1 < toks.len() && matches!(tok(k + 1), b"impl" | b"trait") {
                 // (`unsafe impl Tr for S { .. }` / `unsafe trait Tr { .. }`)

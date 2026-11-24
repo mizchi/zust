@@ -86,8 +86,21 @@ struct Bx;
 impl<T: BxMarker> BxFlag for T { fn flag(&self) -> u8 { 1 } }
 impl BxFlag for &Box<Bx> { fn flag(&self) -> u8 { 2 } }
 
+// (a qualified call of a reference impl's method: its override, the trait's default where it has none)
+struct Rw<T>(T);
+struct Rv(u8);
+trait RTr { fn m(&self) -> u8 { 1 } fn n() -> u8 { 10 } }
+impl<T> RTr for &Rw<T> { fn m(&self) -> u8 { 2 } }
+impl RTr for &Rv { fn n() -> u8 { 30 } }
+
 fn main() {
     println!("{}", closure_param!());
+
+    let rw = Rw(5u8);
+    let rr = &rw;
+    let rv = Rv(1);
+    let rvr = &rv;
+    println!("{} {} {} {}", <&Rw<u8> as RTr>::m(&rr), <&Rw<u8> as RTr>::n(), <&Rv as RTr>::m(&rvr), <&Rv as RTr>::n());
 
     let s = Pk;
     let r = &s;
