@@ -3242,3 +3242,121 @@ fn part17_review4() {
     let d = check("use std::ops::{Deref, DerefMut};\nstruct W(Vec<usize>);\nimpl Deref for W { type Target = Vec<usize>; fn deref(&self) -> &Vec<usize> { &self.0 } }\nimpl DerefMut for W { fn deref_mut(&mut self) -> &mut Vec<usize> { &mut self.0 } }\nfn main() {\n    let mut x = W(vec![1]);\n    let w = &mut x;\n    w.push({ *w = W(vec![]); 2 });\n    println!(\"{}\", x.0.len());\n}\n");
     assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("cannot assign to `*w`"), "{d:?}");
 }
+
+/// A `let` extends a `&` of a temporary within its initializer's extending expressions: a tuple struct's or a
+/// variant's constructor's arguments, a tuple's, an array's or a struct literal's fields (`let x = Some(&[name]);`,
+/// `let e = X(&temp());`, rustc since 1.79). They were a false E0716. A call of a fn, a method's receiver, are not
+/// extended. A call through a fn pointer holds what its arguments borrow when its result holds references
+#[test]
+fn part18_let_extension_in_constructors() {
+    assert_eq!(check("fn temp() -> String { String::from(\"x\") }\n#[derive(Debug)]\nstruct X<'a>(&'a String);\nfn main() {\n    let name = \"Foo\";\n    let a = Some(&[name]);\n    let b = Some(&temp());\n    let e = X(&temp());\n    let t = (&temp(), [&temp()]);\n    let o = Some(X(&temp()));\n    println!(\"{:?} {:?} {:?} {:?} {:?}\", a, b, e, t, o);\n}\n"), vec![]);
+    temp_error("fn temp() -> String { String::from(\"x\") }\nfn main() {\n    let h = Some(temp().as_str());\n    println!(\"{:?}\", h);\n}\n", 3);
+    temp_error("fn temp() -> String { String::from(\"x\") }\nfn id<T>(t: T) -> T { t }\nfn main() {\n    let f = id::<&String>;\n    let g = f(&temp());\n    println!(\"{:?}\", g);\n}\n", 5);
+}
+
+/// A capture of a closure reborrowed where a longer `&mut` is expected is reborrowed through the closure's
+/// environment, which the closure has for no longer than a call: `|| doit(data)` with `data: &'static mut ()` and
+/// `doit(&'static mut ())` is "lifetime may not live long enough" (nll/issue-42574-diagnostic-in-nested-closure.rs),
+/// also for a `move` closure (FnMut). Moved out first (`let d = data; doit(d)`), or a shared reference copied, or a
+/// callee that takes any lifetime, is fine
+#[test]
+fn part18_closure_capture_reborrows() {
+    for c in ["|| doit(data)", "move || doit(data)", "|| doit(&mut *data)"] {
+        let d = check(&format!("fn doit(_: &'static mut ()) {{}}\nfn f(data: &'static mut ()) {{\n    let mut c = {c};\n    c();\n}}\nfn main() {{}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("must outlive `'static`"), "{c}: {d:?}");
+    }
+    assert_eq!(check("fn doit(_: &'static mut ()) {}\nfn f(data: &'static mut ()) {\n    let c = || { let d = data; doit(d) };\n    c();\n}\nfn keep<'a>(_: &'a mut ()) {}\nfn g<'a>(data: &'a mut ()) {\n    let mut c = || keep(data);\n    c();\n}\nfn keep2(_: &'static ()) {}\nfn h(data: &'static ()) {\n    let c = || keep2(data);\n    c();\n}\nfn main() {}\n"), vec![]);
+}
+
+/// A `let` annotation with holes in a fn pointer type (`let f: fn(_) -> _ = foo;`) is the inferred instance: it was
+/// "mismatched types: expected `fn(_) -> _`". Its regions are fresh ones the initializer flows into, so a result of
+/// `foo<'a>(&'a u32) -> &'a u32` through it is still bounded by the argument (nll/mir_check_cast_reify.rs)
+#[test]
+fn part18_fn_pointer_annotation_holes() {
+    assert_eq!(check("fn foo(x: u32) -> u32 { x + 1 }\nfn bar(x: &u32) -> &u32 { x }\nfn main() {\n    let f: fn(_) -> _ = foo;\n    let g: fn(_) -> _ = bar;\n    let h: fn(u32) -> _ = foo;\n    println!(\"{} {} {}\", f(1), g(&2), h(3));\n}\n"), vec![]);
+    let d = check("fn foo<'a>(x: &'a u32) -> &'a u32 where 'a: 'a { x }\nfn bar<'a>(x: &'a u32) -> &'static u32 {\n    let f: fn(_) -> _ = foo;\n    f(x)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("must outlive `'static`"), "{d:?}");
+}
+
+/// The constructor of a tuple struct whose field has no size known (`struct Test([i32]);`), used as a value: no
+/// fn value takes such a parameter (E0277), also where an annotation `fn(_) -> Test` with a hole types it
+#[test]
+fn part18_unsized_ctor_value() {
+    for src in ["struct Test([i32]);\nfn main() {\n    let _x = Test;\n}\n", "struct Test([i32]);\nfn main() {\n    let _x: fn(_) -> Test = Test;\n}\n"] {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0277"), "{src}\n{d:?}");
+    }
+    assert_eq!(check("struct Test(i32);\nfn main() {\n    let f: fn(_) -> Test = Test;\n    let _ = f(1);\n}\n"), vec![]);
+}
+
+/// A scrutinee whose drop uses what it borrows, with an arm that takes the whole value (`x if flag => drop(x)`): that
+/// arm moves it, the others keep it to the end of the statement (E0499 of `_ => heap.push(1)`)
+#[test]
+fn part18_scrutinee_drop_per_arm() {
+    let d = check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap = BinaryHeap::from(vec![1, 2]);\n    let flag = std::env::args().count() > 5;\n    match heap.peek_mut() {\n        x if flag => drop(x),\n        _ => heap.push(1),\n    };\n    println!(\"{}\", heap.len());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+    let d = check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap = BinaryHeap::from(vec![1, 2]);\n    match heap.peek_mut() {\n        Some(_) => heap.push(1),\n        x => drop(x),\n    };\n    println!(\"{}\", heap.len());\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+    assert_eq!(check("use std::collections::BinaryHeap;\nfn main() {\n    let mut heap = BinaryHeap::from(vec![1, 2]);\n    let flag = std::env::args().count() > 5;\n    match heap.peek_mut() {\n        x if flag => drop(x),\n        x => drop(x),\n    }\n    heap.push(3);\n    let n = match heap.peek_mut() {\n        x if flag => { drop(x); 1 }\n        _ => 2,\n    };\n    heap.push(n);\n    println!(\"{}\", heap.len());\n}\n"), vec![]);
+}
+
+/// A `&mut` read by value out of a place where a `let` with no type written is initialized from it: moved, not
+/// reborrowed (no coercion site). Out of an array (E0508), through a raw pointer or a reference (E0507). Where a
+/// `&mut` is expected (an argument, `let c: &mut i32 = a[0];`), it is reborrowed as before
+#[test]
+fn part18_mut_refs_moved_by_value() {
+    let d = check("fn main() {\n    let mut x = 1;\n    let a = [&mut x];\n    let b = a[0];\n    *b = 2;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("cannot move out of"), "{d:?}");
+    let d = check("fn main() {\n    let mut x = 1;\n    let mut r = &mut x;\n    let p: *const &mut i32 = &r;\n    let y = unsafe { *p };\n    *y = 2;\n    let _ = &mut r;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0507"), "{d:?}");
+    let d = check("fn main() {\n    let mut z = 5;\n    let mut q = &mut z;\n    let qq = &mut q;\n    let u = *qq;\n    *u = 3;\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot move out of `*qq`"), "{d:?}");
+    assert_eq!(check("fn take(r: &mut i32) { *r += 1; }\nfn main() {\n    let mut x = 1;\n    let mut y = 2;\n    let mut a = [&mut x, &mut y];\n    take(a[0]);\n    *a[1] = 5;\n    let c: &mut i32 = a[0];\n    *c = 3;\n    let v = &mut a;\n    take(v[1]);\n    println!(\"{}\", a.len());\n}\n"), vec![]);
+}
+
+/// A trait object's drop is not known: it may use what it borrows (rustc's "when `f` is dropped and runs the
+/// destructor for type `Box<dyn FnMut()>`"). A `&dyn` is no owner
+#[test]
+fn part18_dyn_drops() {
+    let d = check("fn main() {\n    let mut v = 1;\n    let mut f: Box<dyn FnMut()> = Box::new(|| v += 1);\n    f();\n    println!(\"{}\", v);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+    let d = check("trait Foo { }\nimpl<'a> Foo for &'a isize { }\nfn main() {\n    let blah;\n    {\n        let x: isize = 1;\n        blah = Box::new(&x) as Box<dyn Foo>;\n    }\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("`x` does not live long enough"), "{d:?}");
+    let d = check("trait Foo { fn get(&self) -> isize; }\nimpl<'a> Foo for &'a isize { fn get(&self) -> isize { **self } }\nfn main() {\n    let mut x: isize = 1;\n    let b: Box<dyn Foo> = Box::new(&x);\n    println!(\"{}\", b.get());\n    x = 2;\n    println!(\"{}\", x);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+    assert_eq!(check("trait Foo { }\nimpl<'a> Foo for &'a isize { }\nfn main() {\n    let x: isize = 1;\n    let b = Box::new(&x) as Box<dyn Foo>;\n    drop(b);\n    let mut v = vec![1];\n    let r: &dyn std::fmt::Debug = &v[0];\n    println!(\"{:?}\", r);\n    v.push(2);\n}\n"), vec![]);
+}
+
+#[test]
+fn part18_review() {
+    // (edition 2024: a block's tail is a statement of its own; a constructor's `&` argument there is a call's, not a
+    // `let`'s to extend)
+    let d = check_ed("fn temp() -> String { String::from(\"x\") }\nfn consume<T: std::fmt::Debug>(t: T) { println!(\"{:?}\", t); }\nfn main() {\n    consume({ (Some(&temp()),) });\n}\n", 2024);
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("E0716"), "{d:?}");
+    // (a local fn pointer named in upper case is no constructor: its arguments are not extended)
+    let d = check("fn temp() -> String { String::from(\"x\") }\nfn id(s: &String) -> &String { s }\n#[allow(non_snake_case)]\nfn main() {\n    let F: fn(&String) -> &String = id;\n    let r = F(&temp());\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("E0716"), "{d:?}");
+    // (an or-pattern whose alternatives each take the whole value moves it)
+    assert_eq!(check("struct G<'a>(&'a mut i32);\nimpl Drop for G<'_> { fn drop(&mut self) { *self.0 += 1; } }\nfn mk(n: &mut i32) -> Option<G<'_>> { Some(G(n)) }\nfn main() {\n    let mut n = 0;\n    match mk(&mut n) {\n        x @ Some(_) | x @ None => { drop(x); n = 1; }\n    };\n    println!(\"{}\", n);\n}\n"), vec![]);
+    // (a lowercase constant in a pattern is compared with, not bound: the arm keeps the scrutinee's drop)
+    let d = check("#![allow(non_upper_case_globals)]\n#[derive(PartialEq, Eq)]\nstruct W<'a>(Option<&'a i32>);\nimpl Drop for W<'_> { fn drop(&mut self) {} }\nconst none: Option<W<'static>> = None;\nfn mk(n: &i32) -> Option<W<'_>> { Some(W(Some(n))) }\nfn main() {\n    let mut n = 0;\n    match mk(&n) {\n        none => { n = 1; }\n        _ => {}\n    };\n    println!(\"{}\", n);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 10, "{d:?}");
+    // (a fn pointer whose result is `'static`: it holds nothing of its arguments; an elided one does)
+    assert_eq!(check("fn fixed(_: &i32) -> &'static i32 { &42 }\nfn main() {\n    let f: fn(&i32) -> &'static i32 = fixed;\n    let r;\n    {\n        let x = 1;\n        r = f(&x);\n    }\n    println!(\"{}\", r);\n}\n"), vec![]);
+    let d = check("fn fixed(x: &i32) -> &i32 { x }\nfn main() {\n    let f: fn(&i32) -> &i32 = fixed;\n    let r;\n    {\n        let x = 1;\n        r = f(&x);\n    }\n    println!(\"{}\", r);\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
+}
+
+#[test]
+fn part18_review2() {
+    // (a `&*` of a method's result in a `let`'s constructor argument or tuple field: the method's receiver is the
+    // statement's, as for the `let`'s own `&`)
+    let h = "struct H(String);\nimpl H { fn get(&self) -> &String { &self.0 } }\nfn temp() -> H { H(String::from(\"x\")) }\n";
+    for init in ["Some(&*temp().get())", "(&*temp().get(),)", "Some(Some(&*temp().get()))"] {
+        let d = check(&format!("{h}fn main() {{\n    let r = {init};\n    println!(\"{{:?}}\", r);\n}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0716"), "{init}: {d:?}");
+    }
+    assert_eq!(check(&format!("{h}fn t2() -> String {{ String::from(\"y\") }}\nfn main() {{\n    let a = Some(&temp().get().len());\n    let b = Some((&t2(), Some(&t2())));\n    let c = Some(&temp().0);\n    println!(\"{{:?}} {{:?}} {{:?}}\", a, b, c);\n}}\n")), vec![]);
+    // (a binding named as another module's static binds the whole value)
+    assert_eq!(check("mod m {\n    #[allow(non_upper_case_globals)]\n    pub static val: i32 = 1;\n}\nstruct G<'a>(&'a mut i32);\nimpl Drop for G<'_> { fn drop(&mut self) { *self.0 += 1; } }\nfn mk(n: &mut i32) -> Option<G<'_>> { Some(G(n)) }\nfn main() {\n    let mut n = 0;\n    match mk(&mut n) {\n        val => { drop(val); n = 1; }\n    };\n    println!(\"{} {}\", n, m::val);\n}\n"), vec![]);
+}
