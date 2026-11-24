@@ -35,13 +35,44 @@ TypeScript の `switch (event.kind)` に相当するのが `match event` です�
 
 配列の `fold(初期値, 関数)` は TypeScript の `reduce(関数, 初期値)` に対応します。ここでは合計だけを更新し、呼び出し側の配列には書き込みません。TypeScript の `number` フィールドは zustscript で `f64` として読めるので、集計の初期値も浮動小数点の `0.0` にしています。
 
-## 生成したモジュールをアプリから呼ぶ
+## 生成された JavaScript と型定義を読む
 
 リポジトリのルートで次を実行します。通常の `export fn` からは JavaScript と型定義が生成されます。補助関数の `delta` はこのモジュール内だけで使えます。
 
 ```bash
 cargo run --manifest-path crates/zustscript/Cargo.toml -- stock.zsc -o out/stock
 ```
+
+*out/stock/stock.js の抜粋*
+
+```javascript
+import { $fold } from "./zsc-runtime.js";
+function delta(event) {
+  if (event.kind === "received") {
+    const n = event.units;
+    return n;
+  } else {
+    const n$1 = event.units;
+    return -n$1;
+  }
+}
+
+export function stock_change(events) {
+  return $fold(events, 0.0, (total, event) => total + delta(event));
+}
+```
+
+`match` は `event.kind` を調べる `if` に変わります。どちらの分岐も元のオブジェクトの `units` を直接読みます。`events.fold(...)` の呼び出し先は、生成されたランタイムから読み込む `$fold` です。
+
+*out/stock/stock.d.ts の抜粋*
+
+```typescript
+export declare function stock_change(events: readonly StockEvent[]): f64;
+```
+
+`StockEvent` は元の `warehouse.ts` から取り込んだ型です。公開シグネチャでは `Array<StockEvent>` が `readonly StockEvent[]` になるため、アプリが持っている読み取り専用配列をそのまま渡せます。
+
+## TypeScript アプリから呼ぶ
 
 *同じディレクトリに置く try-stock.ts*
 
@@ -58,6 +89,6 @@ console.log(stock_change(events));
 console.log(stock_change([]));
 ```
 
-Node.js 24 で `node try-stock.ts` を実行すると、順に `7` と `0` が表示されます。`out/stock/stock.d.ts` の引数は `readonly StockEvent[]` で、元の TypeScript の型を参照しています。生成された JS は渡されたオブジェクトの `kind` と `units` を直接読みます。
+Node.js 24 で `node try-stock.ts` を実行すると、順に `7` と `0` が表示されます。
 
 画面の状態やイベントはこのように JS のモジュールで扱えます。配列の計算などを Wasm で試したくなったら、対応する関数に `@wasm` を付けます。座標を渡す例で、TypeScript 側の呼び出し方と Wasm に渡る値を確認できます。[zustscript 入門](introduction.md) · [Rust から見る変換コスト](rust-costs.md)
