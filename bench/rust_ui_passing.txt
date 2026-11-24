@@ -526,6 +526,7 @@ compile-fail	async-await/unsized-across-await.rs
 compile-fail	async-await/unused-lifetime.rs
 compile-fail	attributes/attr-bad-crate-attr.rs
 compile-fail	attributes/attr-order-must-use.rs
+compile-fail	attributes/attrs-on-params.rs
 compile-fail	attributes/attrs-with-no-formal-in-generics-3.rs
 check-pass	attributes/builtin-attr-macro-value-issue-145922.rs
 check-pass	attributes/cfg-attr-feature-gate-and-rustc-dummy.rs
@@ -539,6 +540,7 @@ check-pass	attributes/decl_macro_ty_in_attr_macro.rs
 compile-fail	attributes/expected-word.rs
 compile-fail	attributes/export/crate-type.rs
 check-pass	attributes/fn-align-nameres-ambiguity-143834.rs
+compile-fail	attributes/inline-attribute-enum-variant-error.rs
 run-pass	attributes/inline-main.rs
 compile-fail	attributes/inline/attr-usage-inline.rs
 compile-fail	attributes/inline/invalid-inline.rs
@@ -3846,6 +3848,7 @@ build-pass	limits/limit-huge-struct-derive-debug.rs
 compile-fail	link-native-libs/issue-43926.rs
 compile-fail	link-native-libs/link-attr-validation-early.rs
 compile-fail	linkage-attr/linkage4.rs
+compile-fail	linkage-attr/raw-dylib/windows/link-ordinal-not-foreign-fn.rs
 build-pass	linkage-attr/unreferenced-used-static-issue-127052.rs
 check-pass	lint/ambiguous_wide_pointer_comparisons_suggestions.rs
 check-pass	lint/break-with-label-and-unsafe-block.rs
@@ -4132,6 +4135,7 @@ check-pass	lint/use-redundant/use-redundant-not-parent.rs
 check-pass	lint/use-redundant/use-redundant-prelude-rust-2015.rs
 check-pass	lint/use-redundant/use-redundant-prelude-rust-2021.rs
 check-pass	lint/use-redundant/use-redundant.rs
+compile-fail	lint/warn-unused-inline-on-fn-prototypes.rs
 check-pass	lint/wide_pointer_comparisons-no_std.rs
 run-pass	liveness/liveness-assign-imm-local-after-ret.rs
 compile-fail	liveness/liveness-assign/liveness-assign-imm-local-in-loop.rs
@@ -6244,11 +6248,13 @@ compile-fail	repeat-expr/typo-in-repeat-expr-issue-80173.rs
 run-pass	repr/align-with-extern-c-fn.rs
 run-pass	repr/aligned_enum_cast.rs
 compile-fail	repr/explicit-rust-repr-conflicts.rs
+compile-fail	repr/invalid-repr-on-structs-74082.rs
 compile-fail	repr/invalid_repr_list_help.rs
 compile-fail	repr/issue-83505-repr-simd.rs
 run-pass	repr/packed-struct-with-enum-53728.rs
 compile-fail	repr/repr-align-assign.rs
 compile-fail	repr/repr-align.rs
+compile-fail	repr/repr-disallow-on-variant.rs
 check-pass	repr/repr-transparent-issue-87496.rs
 compile-fail	repr/repr-transparent-other-items.rs
 compile-fail	repr/repr.rs
@@ -6579,6 +6585,7 @@ compile-fail	rust-2024/unsafe-env-suggestion.rs
 compile-fail	rust-2024/unsafe-extern-blocks/safe-impl-trait.rs
 compile-fail	rust-2024/unsafe-extern-blocks/safe-trait.rs
 compile-fail	rustdoc/cfg-rustdoc.rs
+compile-fail	rustdoc/check-doc-alias-attr-location.rs
 check-pass	rustdoc/doc-alias-use-item-list-stem.rs
 check-pass	rustdoc/doc-test-attr-pass.rs
 check-pass	rustdoc/hidden-doc-associated-item.rs

@@ -3695,9 +3695,35 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             }
         }
     }
+    // (whether the source has an attribute at all: the scans of attributes inside items and anywhere are not run
+    // otherwise)
+    let any_attr = has_byte(src0.as_bytes(), b'#');
     for it in items {
         let text = &split[it.start..it.end];
+        // (an attribute inside the item: a variant's, a parameter's; reported after the item's own)
+        // (read where it can be: an enum's body, by its first words, and a fn's signature with a `#` in it, not the fn's
+        // body)
+        let nested = any_attr.then(|| {
+            let word = |k: usize| it.idents.get(k).map_or("", |&(a, e)| split.get(a as usize..e as usize).unwrap_or(""));
+            if (0..3).any(|k| word(k) == "enum") {
+                return text.contains("#[").then(|| nested_attr_misuse(text, &unknown, unused_attributes_denied)).flatten();
+            }
+            let (mut sig_end, mut hash) = (text.len(), false);
+            for (i, &c) in text.as_bytes().iter().enumerate() {
+                if c == b'{' {
+                    sig_end = i;
+                    break;
+                }
+                hash |= c == b'#';
+            }
+            hash.then(|| nested_attr_misuse(&text[..sig_end], &unknown, unused_attributes_denied)).flatten()
+        });
+        let nested = nested.flatten();
+        let nested = nested.map(|(at, msg)| format!("{}:1: {msg}", it.line + text[..at].matches('\n').count()));
         if !text.trim_start().starts_with("#[") {
+            if nested.is_some() {
+                return nested;
+            }
             continue;
         }
         let attrs = leading(text);
@@ -3760,7 +3786,12 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             }
             r
         });
-        let Some(after) = after else { continue };
+        let Some(after) = after else {
+            if nested.is_some() {
+                return nested;
+            }
+            continue;
+        };
         let mut ws = after.split_whitespace().filter(|w| !matches!(*w, "pub" | "unsafe" | "async" | "const" | "extern" | "default") && !w.starts_with("pub(") && !w.starts_with('"'));
         let Some(kw) = ws.next() else { continue };
         let kw = if after.starts_with("const ") && !after.starts_with("const fn") { "const" } else { kw };
@@ -3777,7 +3808,12 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             "type" => "type aliases",
             "use" => "use statements",
             "macro_rules!" => "macro defs",
-            _ => continue,
+            _ => {
+                if nested.is_some() {
+                    return nested;
+                }
+                continue;
+            }
         };
         for &(at, name, input) in &attrs {
             // (a proc macro: a fn of a `proc-macro` crate)
@@ -3792,10 +3828,19 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             let line = || it.line + text[..at].matches('\n').count();
             // (`repr(packed)` is a struct's or a union's; rustc names a repr by its hint)
             let hint = input.trim().strip_prefix('(').and_then(|r| r.strip_suffix(')')).map(str::trim).unwrap_or("");
-            let shown = if name == "repr" && !hint.is_empty() && !hint.contains(',') { format!("repr({hint})") } else { name.to_string() };
+            // (an integer repr, `repr(u8)`, also one of a list, `repr(C, u8)`: an enum's only)
+            let int_hint = (name == "repr").then(|| attr_entries(hint).into_iter().find(|h| int_repr(h))).flatten();
+            let shown = match int_hint {
+                Some(h) => format!("repr({h})"),
+                None if name == "repr" && !hint.is_empty() && !hint.contains(',') => format!("repr({hint})"),
+                None => name.to_string(),
+            };
             // (an error wherever it is: the attributes rustc rejects on an item of another kind)
             let ok = match name {
                 "inline" | "track_caller" | "target_feature" => kw == "fn",
+                // (a foreign fn's or static's only: no item here is one)
+                "link_ordinal" => false,
+                "repr" if int_hint.is_some() => kw == "enum",
                 "repr" if hint.starts_with("packed") => matches!(kw, "struct" | "union"),
                 "repr" => matches!(kw, "struct" | "enum" | "union"),
                 "non_exhaustive" => matches!(kw, "struct" | "enum"),
@@ -3805,6 +3850,10 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             };
             if !ok {
                 return Some(format!("{}:1: the `{shown}` attribute cannot be used on {kind}", line()));
+            }
+            // (`#[inline]` on a trait's fn without a body: `unused_attributes`, an error where the crate denies it)
+            if name == "inline" && kw == "fn" && matches!(it.kind, ItemKind::TraitMember(_)) && text.trim_end().ends_with(';') && unused_attributes_denied {
+                return Some(format!("{}:1: the `inline` attribute cannot be used on required trait methods", line()));
             }
             // (`no_mangle` on a const: the deny-by-default `no_mangle_const_items`)
             if name == "no_mangle" && kw == "const" {
@@ -3821,8 +3870,132 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
                 return Some(format!("{}:1: the `{name}` attribute cannot be used on {kind}", line()));
             }
         }
+        if nested.is_some() {
+            return nested;
+        }
     }
-    if standalone { unknown_attr_anywhere(src0, &unknown) } else { None }
+    if standalone && any_attr { unknown_attr_anywhere(src0, &unknown) } else { None }
+}
+
+/// Whether a byte is in a text: 32 bytes at a time, as four words whose bytes are compared at once (a zero byte of
+/// `w ^ x..x`); for a text without the byte, a pass at a fraction of `memchr`'s cost per byte
+fn has_byte(b: &[u8], x: u8) -> bool {
+    const LO: u64 = 0x0101_0101_0101_0101;
+    const HI: u64 = 0x8080_8080_8080_8080;
+    let pat = LO * x as u64;
+    let zero = |w: u64| {
+        let v = w ^ pat;
+        v.wrapping_sub(LO) & !v & HI
+    };
+    let mut chunks = b.chunks_exact(32);
+    for c in &mut chunks {
+        let w = |i: usize| u64::from_le_bytes([c[i], c[i + 1], c[i + 2], c[i + 3], c[i + 4], c[i + 5], c[i + 6], c[i + 7]]);
+        if zero(w(0)) | zero(w(8)) | zero(w(16)) | zero(w(24)) != 0 {
+            return true;
+        }
+    }
+    chunks.remainder().contains(&x)
+}
+
+/// An integer type a `repr` may name: an enum's
+fn int_repr(h: &str) -> bool {
+    matches!(h, "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize")
+}
+
+/// An attribute inside an item that rustc rejects where it is (at its offset in the text, with rustc's message): on an
+/// enum's variant, one of a fn's (`the `inline` attribute cannot be used on enum variants`; one only `unused_attributes`
+/// warns of, where the crate denies it), or a built-in attribute on a fn's parameter other than the lint attributes
+/// and `cfg` / `cfg_attr`
+fn nested_attr_misuse(text: &str, unknown: &dyn Fn(&str) -> bool, unused_denied: bool) -> Option<(usize, String)> {
+    let b = text.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let n = toks.len();
+    let t = |k: usize| -> &[u8] { toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e]) };
+    let is_id = |k: usize| toks.get(k).is_some_and(|x| x.0 == 0);
+    let matching = |o: usize| -> Option<usize> {
+        let mut d = 0i32;
+        for k in o..n {
+            match t(k) {
+                b"(" | b"[" | b"{" => d += 1,
+                b")" | b"]" | b"}" => {
+                    d -= 1;
+                    if d == 0 {
+                        return Some(k);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    };
+    // (past the item's own attributes)
+    let mut k = 0;
+    while t(k) == b"#" && t(k + 1) == b"[" {
+        k = matching(k + 1)? + 1;
+    }
+    // (the keyword: `enum` or `fn`, past visibility and qualifiers)
+    let kw = loop {
+        match t(k) {
+            b"pub" if t(k + 1) == b"(" => k = matching(k + 1)? + 1,
+            b"pub" | b"const" | b"async" | b"unsafe" | b"default" | b"safe" => k += 1,
+            b"extern" if toks.get(k + 1).is_some_and(|x| x.0 == 2) => k += 2,
+            b"extern" => k += 1,
+            b"enum" | b"fn" if is_id(k + 1) => break t(k),
+            _ => return None,
+        }
+    };
+    // (the body of an enum, the parameters of a fn: past the name and the generics)
+    let open = if kw == b"enum" { b"{".as_slice() } else { b"(".as_slice() };
+    let mut j = k + 2;
+    let mut angle = 0i32;
+    while j < n {
+        match t(j) {
+            b"<" => angle += 1,
+            b">" if t(j - 1) != b"-" => angle -= 1,
+            x if angle == 0 && x == open => break,
+            b"(" | b"[" | b"{" => j = matching(j)?,
+            b";" => return None,
+            _ => {}
+        }
+        j += 1;
+    }
+    let close = matching(j)?;
+    // (the attributes at the group's own level)
+    let mut k = j + 1;
+    while k < close {
+        if matches!(t(k), b"(" | b"[" | b"{") {
+            k = matching(k)? + 1;
+            continue;
+        }
+        if t(k) == b"#" && t(k + 1) == b"[" && is_id(k + 2) && t(k + 3) != b":" {
+            let e = matching(k + 1)?;
+            let name = String::from_utf8_lossy(t(k + 2)).into_owned();
+            let at = toks[k].1;
+            if kw == b"enum" {
+                let hint = (name == "repr" && t(k + 3) == b"(").then(|| matching(k + 3)).flatten();
+                let hint = hint.map(|c| (k + 4..c).map(|x| String::from_utf8_lossy(t(x)).into_owned()).collect::<String>());
+                let shown = match &hint {
+                    Some(h) => match attr_entries(h).into_iter().find(|h| int_repr(h)) {
+                        Some(i) => format!("repr({i})"),
+                        None => format!("repr({})", h.replace(',', ", ")),
+                    },
+                    None => name.clone(),
+                };
+                let error = matches!(name.as_str(), "inline" | "track_caller" | "target_feature" | "repr" | "used" | "link_ordinal" | "debugger_visualizer");
+                let warned = matches!(name.as_str(), "cold" | "no_mangle" | "macro_use" | "export_name" | "link_section" | "must_use");
+                if error || warned && unused_denied {
+                    return Some((at, format!("the `{shown}` attribute cannot be used on enum variants")));
+                }
+            // (not a `rustc_*` one: its feature gate first, `#[rustc_splat]`)
+            } else if !unknown(&name) && !name.starts_with("rustc_") && !matches!(name.as_str(), "allow" | "cfg" | "cfg_attr" | "deny" | "expect" | "forbid" | "warn") {
+                return Some((at, "allow, cfg, cfg_attr, deny, expect, forbid, and warn are the only allowed built-in attributes in function parameters".to_string()));
+            }
+            k = e + 1;
+            continue;
+        }
+        k += 1;
+    }
+    None
 }
 
 /// "cannot find attribute `x` in this scope" of an attribute anywhere in the code, not only on an item: on a field,

@@ -1253,6 +1253,41 @@ fn review106_third_round() {
 }
 
 #[test]
+fn attributes_on_variants_params_and_prototypes() {
+    // (each expected line and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    let params = "allow, cfg, cfg_attr, deny, expect, forbid, and warn are the only allowed built-in attributes in function parameters";
+    for (src, line, msg) in [
+        ("enum Foo {\n    #[inline]\n    Variant,\n}\nfn main() {}\n", 2, "the `inline` attribute cannot be used on enum variants"),
+        ("enum Foo {\n    #[repr(u8)]\n    Variant,\n}\nfn main() {}\n", 2, "the `repr(u8)` attribute cannot be used on enum variants"),
+        ("fn f(#[inline] p: u32) {}\nfn main() {}\n", 1, params),
+        ("fn f(#[allow(unused)] a: u8, #[doc = \"x\"] b: u8) {}\nfn main() {}\n", 1, params),
+        ("struct S;\nimpl S {\n    fn g(&self, #[inline] a: u8) {}\n}\nfn main() {}\n", 3, params),
+        ("#[link_ordinal(123)]\nstruct Foo {}\nfn main() {}\n", 1, "the `link_ordinal` attribute cannot be used on structs"),
+        ("#[repr(i128)]\nstruct Foo;\nfn main() {}\n", 1, "the `repr(i128)` attribute cannot be used on structs"),
+        ("#[repr(C, u8)]\nstruct S;\nfn main() {}\n", 1, "the `repr(u8)` attribute cannot be used on structs"),
+        ("#![deny(unused_attributes)]\ntrait Trait {\n    #[inline]\n    fn foo();\n}\nfn main() {}\n", 3, "the `inline` attribute cannot be used on required trait methods"),
+    ] {
+        assert_eq!(check(src), at(line, msg), "{src}");
+    }
+    // (accepted, or only warned of: a lint attribute or `cfg` on a parameter, `non_exhaustive` / `cold` on a variant,
+    // `inline` on a required trait method where `unused_attributes` only warns, an enum's integer repr)
+    for src in [
+        "fn f(#[allow(unused)] a: u8, #[cfg(all())] b: u8) {}\nfn main() {}\n",
+        "enum E {\n    #[cold]\n    A,\n    #[non_exhaustive]\n    B,\n}\nfn main() {}\n",
+        "trait T {\n    #[inline]\n    fn f();\n}\nfn main() {}\n",
+        "#[repr(u8)]\nenum E { A }\nfn main() {}\n",
+        "fn f<F: Fn(u8) -> u8>(#[allow(unused)] g: F) {}\nfn main() {}\n",
+    ] {
+        assert_eq!(check(src), None, "{src}");
+    }
+}
+
+#[test]
 fn unknown_attributes_anywhere() {
     // (each expected line is rustc 1.100's "cannot find attribute" on the same source; None where rustc accepts it)
     let check = |src: &str| {
