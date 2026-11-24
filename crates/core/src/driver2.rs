@@ -949,7 +949,7 @@ impl Session2 {
                     if unsafe { c_pipe(fds.as_mut_ptr()) } != 0 {
                         continue;
                     }
-                    let pid = unsafe { c_fork() };
+                    let pid = fork_counted();
                     if pid == 0 {
                         unsafe { c_close(fds[0]) };
                         let mut buf = vec![];
@@ -5521,6 +5521,21 @@ pub(crate) fn single_threaded() -> bool {
         == Some(1)
 }
 
+/// How many times this process has forked for parallel work (summaries, checks, builds): tests read it to see that a
+/// threaded host did not fork
+static FORKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn forks() -> usize {
+    FORKS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// fork, counted (FORKS)
+pub(crate) fn fork_counted() -> i32 {
+    FORKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // SAFETY: the callers' children only work and write, then _exit
+    unsafe { c_fork() }
+}
+
 /// Waits for a child, again when a signal interrupts the wait
 fn wait_child(pid: i32) {
     let mut st = 0i32;
@@ -5587,7 +5602,7 @@ impl Session2 {
                 continue;
             }
             // SAFETY: 子は検査して書くだけで _exit する
-            let pid = unsafe { c_fork() };
+            let pid = fork_counted();
             if pid < 0 {
                 unsafe { c_close(fds[0]) };
                 unsafe { c_close(fds[1]) };

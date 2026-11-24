@@ -77,9 +77,20 @@ fn forked_check_gives_the_same_diagnostics() {
 fn threaded_host_checks_in_process() {
     let src = program();
     let one = zustc::Session2::new(zustc::Options2 { jobs: 1, no_cache: true, ..zustc::Options2::default() }).check(&src);
-    let busy = std::thread::spawn(|| (0..2_000_000u64).fold(0u64, |a, x| a.wrapping_add(x * x)));
+    // (a thread that lives through the check: it waits until the check is done)
+    let (done, wait) = std::sync::mpsc::channel::<()>();
+    let (up, started) = std::sync::mpsc::channel::<()>();
+    let other = std::thread::spawn(move || {
+        up.send(()).unwrap();
+        let _ = wait.recv();
+    });
+    started.recv().unwrap();
+    let f0 = zustc::driver2::forks();
     let many = zustc::Session2::new(zustc::Options2 { jobs: 4, no_cache: true, ..zustc::Options2::default() }).check(&src);
-    let _ = busy.join();
+    let f1 = zustc::driver2::forks();
+    done.send(()).unwrap();
+    other.join().unwrap();
+    assert_eq!(f1, f0, "a threaded host forked");
     assert!(one.len() >= 4, "{one:?}");
     assert_eq!(one, many);
 }
