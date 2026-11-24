@@ -5326,6 +5326,9 @@ impl Program {
             match (a, b) {
                 (Ty::Ref(m, x), Ty::Ref(n, y)) | (Ty::Ptr(m, x), Ty::Ptr(n, y)) => m == n && deep(p, *x, *y, depth + 1),
                 (Ty::Ref(..), _) => false,
+                // (a raw pointer's self type is not a reference's: `W<*const i32>` is not `W<&i32>`'s, which match_ty lets
+                // through as a coercion)
+                (Ty::Ptr(..), _) => false,
                 // (and beneath arrays, slices and boxes: `W<[&i32; 1]>` is not `W<[&mut i32; 1]>`)
                 (Ty::Array(x, _), Ty::Array(y, _)) | (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) => deep(p, *x, *y, depth + 1),
                 (Ty::Struct(x), Ty::Struct(y)) if x != y => {
