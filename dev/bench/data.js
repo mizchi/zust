@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795549430036,
+  "lastUpdate": 1795549432471,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -122190,6 +122190,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/64e1919b015fd2b2595e2c22fcf08f552950042f"
         },
         "date": 1795544943862,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1861,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.11,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1525,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.96,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4724,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "360012a57cac8338a7088f23906645672eee384c",
+          "message": "Retrospective dashboard and an intro page on GitHub Pages (#99)\n\n* Retrospective dashboard and an intro page on GitHub Pages\n\n- scripts/retro/extract.py writes the development history as data (commits,\n  tests/ui pass rates from the benchmark history, the KPI log, code size\n  without zustscript, agent sessions) with a manifest that declares every\n  column (repo-retrospective/v1 data contract); milestones.json holds the\n  hand-picked decision points\n- site/dashboard/ draws only from that data, so it can be rewritten freely\n- site/index.html introduces zust with the latest CI numbers\n- .github/workflows/pages.yml rebuilds both after each benchmark run and\n  publishes them to gh-pages next to dev/bench/, which it leaves alone\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Pages: social cards (og:image) rendered from the same data\n\nsite/og/card.html draws a 1200x630 card for / and /dashboard/ from the\nretrospective data and the benchmark history; pages.yml screenshots it with\nthe Playwright CLI on every publish, so the card's numbers follow the data.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Pages: a sidebar to switch pages and jump to a section\n\nOn wide screens the sidebar sits beside the content: the pages (About,\nRetrospective, Benchmarks, GitHub) and this page's sections, the one in view\nmarked. On narrow screens a Menu button opens it as a drawer (Escape or the\nbackdrop closes it).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Review of #99: fixes from CodeRabbit's comments\n\n- pages.yml waits for the Pages build of the pushed commit (or of a later\n  one that contains it): a push is not a deployment. GitHub does build\n  gh-pages pushes made with GITHUB_TOKEN here (the benchmark's are built);\n  the step makes the run fail when the build does not come\n- extract.py: the hourly series spans all commits' times (git's order is\n  not author-time order); each LOC bucket keeps its last commit, so the\n  requested revision is the closing sample\n- the dashboard and the og:image cards take each kind's first and last\n  measured rates (a row's rate may be null) and show — for a kind with\n  none; the sparkline leaves out null rates\n- the drawer: the rest of the page is inert while it is open, focus goes\n  back to the menu button when it closes, and widening to the desktop\n  layout closes it (no scrim left over)\n- scripts/retro/README: `mkdir -p out/site/dev/bench` before writing into it\n\nChecked in a browser (Playwright): the dashboard with a null first\nrun-pass rate renders without errors; 40 Shift+Tab stay in the open\ndrawer; Escape returns focus to Menu; widening hides the scrim; both\ncards reach data-ready.\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n* Review of #99 (2): the requested revision is the last LOC row\n\nA bucket a later commit updates moves to the end, so with a later commit\nof an earlier author date the requested revision still closes the series\n(daily() reads the last row).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n\n---------\n\nCo-authored-by: Claude Opus 5.5 <noreply@anthropic.com>",
+          "timestamp": "2026-11-25T04:39:31+09:00",
+          "tree_id": "a36ce06bc7c0af2f3c5537601ef788d8513c2518",
+          "url": "https://github.com/mizchi/zust/commit/360012a57cac8338a7088f23906645672eee384c"
+        },
+        "date": 1795549432001,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
