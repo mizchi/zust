@@ -1491,7 +1491,18 @@ impl Program {
                         // (the same foreign fn declared in two `extern` blocks: one more name for the same symbol)
                         format!("{name}#extern{}", p.names.len())
                     } else {
-                        if ss.impl_trait.is_none() && p.sigs[prev as usize].impl_trait.is_none() {
+                        // (inherent methods with `self` in impls for two instances of one type (either's
+                        // `impl<L, R> Either<&L, &R> { fn cloned(self) }` and `.. Either<&mut L, &mut R>`, or `impl W<i32>` and
+                        // `impl W<u8>`): overloads, told apart by the receiver as trait impls' are. The same self type twice is
+                        // E0592 still, as is a function without `self`, which a receiver does not choose)
+                        let other_self = ss.has_self && p.sigs[prev as usize].has_self && {
+                            let gn: Vec<&str> = ss.generics.iter().map(|g| g.0.as_str()).collect();
+                            let mine = ss.self_ty.as_ref().and_then(|t| p.resolve_g(t, &gn).ok());
+                            let theirs = p.sigs[prev as usize].self_ty;
+                            let blocks = matches!((p.item_of.get(prev as usize).copied().flatten().map(|k| items[k as usize].kind), it.kind), (Some(crate::lexer::ItemKind::ImplMember(a)), crate::lexer::ItemKind::ImplMember(b)) if a != b);
+                            blocks && mine.is_some() && theirs.is_some() && mine != theirs
+                        };
+                        if ss.impl_trait.is_none() && p.sigs[prev as usize].impl_trait.is_none() && !other_self {
                             // (in two impl blocks, E0592 is reported at the first definition)
                             let line = match p.item_of.get(prev as usize).copied().flatten().map(|k| &items[k as usize]) {
                                 Some(pit) if matches!((pit.kind, it.kind), (crate::lexer::ItemKind::ImplMember(a), crate::lexer::ItemKind::ImplMember(b)) if a != b) => pit.line,
@@ -4750,6 +4761,39 @@ impl Program {
     }
 
     /// struct `sid` のメソッド `name`
+    /// Whether the references in two types' struct arguments agree, `&` and `&mut` apart (match_ty does not tell them
+    /// apart), past any references around the two: `Either<&L, &R>` is not `Either<&mut i32, &mut u8>`'s self type, and
+    /// `&W<&T>` (a `&self` receiver) is not `W<&mut i32>`'s
+    pub fn arg_refs_agree(&self, a: Ty, b: Ty) -> bool {
+        fn strip(mut t: Ty) -> Ty {
+            while let Ty::Ref(_, i) = t {
+                t = *i;
+            }
+            t
+        }
+        fn deep(p: &Program, a: Ty, b: Ty, depth: u32) -> bool {
+            if depth > 16 {
+                return true;
+            }
+            match (a, b) {
+                (Ty::Ref(m, x), Ty::Ref(n, y)) => m == n && deep(p, *x, *y, depth + 1),
+                (Ty::Ref(..), _) => false,
+                (Ty::Struct(x), Ty::Struct(y)) if x != y => {
+                    let (xa, ya) = (&p.structs[x as usize].args, &p.structs[y as usize].args);
+                    xa.len() != ya.len() || xa.iter().zip(ya).all(|(&u, &v)| deep(p, u, v, depth + 1))
+                }
+                _ => true,
+            }
+        }
+        match (strip(a), strip(b)) {
+            (Ty::Struct(x), Ty::Struct(y)) if x != y => {
+                let (xa, ya) = (&self.structs[x as usize].args, &self.structs[y as usize].args);
+                xa.len() != ya.len() || xa.iter().zip(ya).all(|(&u, &v)| deep(self, u, v, 0))
+            }
+            _ => true,
+        }
+    }
+
     pub fn method(&self, sid: u32, name: &str) -> Option<u32> {
         self.index
             .get(&format!(
