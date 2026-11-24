@@ -124,8 +124,7 @@ fn main() {
     assert_eq!(check(ok), vec![]);
     // (a borrow of a temporary that must be 'static)
     let d = check("fn bar<'a>() -> &'a mut u32 {\n    &mut 4\n}\nfn main() {}\n");
-    // (the second `&mut *x` reads `*x` first, which is where zustc reports the conflict with the first, at 2:11)
-    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("`*x` because it was mutably borrowed (at 2:11)"), "{d:?}");
+    assert!(d.len() == 1 && d[0].0 == 2, "{d:?}");
 }
 
 /// What the review of the first version found (#19): code rustc accepts that must stay accepted, and errors that must
@@ -3419,7 +3418,8 @@ fn polonius_alpha() {
     err("fn f<'a>(x: &'a mut i32) -> Option<(&'a mut i32, &'a i32)> {\n    Some((&mut *x, &*x))\n}\nfn main() {}\n");
     // (the two reborrows are E0499 where rustc reports it, at the second)
     let d = check_ed("fn f<'a>(x: &'a mut i32) -> (&'a mut i32, &'a mut i32) {\n    (&mut *x, &mut *x)\n}\nfn main() {}\n", 2021);
-    assert!(d.len() == 1 && d[0].0 == 2, "{d:?}");
+    // (the second `&mut *x` reads `*x` first, which is where zustc reports the conflict with the first, at 2:11)
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("`*x` because it was mutably borrowed (at 2:11)"), "{d:?}");
     // (accepted by Alpha: the returned reborrow made in a loop, which goes on with a new borrow when it does not return)
     ok("fn f<'a>(x: &'a mut i32, n: i32) -> &'a mut i32 {\n    let mut i = 0;\n    loop {\n        let b = &mut *x;\n        if i == n {\n            return b;\n        }\n        i += 1;\n    }\n}\nfn main() {}\n");
 }
