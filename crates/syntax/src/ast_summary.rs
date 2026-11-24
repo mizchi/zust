@@ -1143,10 +1143,22 @@ pub fn assoc_value_unmet(src: &str, header: &SrcItem, member: &SrcItem, bounds: 
     let ItemKind::Impl(g, Some((false, tp)), self_ty, _) = &hf.items.first()?.kind else { return None };
     let mtext = src.get(member.start..member.end)?;
     let mf = parse_file(mtext).ok()?;
-    let ItemKind::Type(_, _, _, Some(value)) = &mf.items.first()?.kind else { return None };
+    let ItemKind::Type(_, mg, _, Some(value)) = &mf.items.first()?.kind else { return None };
+    // (a where clause of the value (`type Value = &'a i32 where Self: 'b;`) may give what the bound needs: not read)
+    if !mg.preds.is_empty() {
+        return None;
+    }
     let mut k = crate::wf::Known::default();
     k.add_generics(g);
+    // (what the header's types imply: the self type's and the trait's type arguments' (`Foo<'a, &'a &'b ()>`, 'b: 'a))
     k.implied(self_ty, 0);
+    for s in &tp.segs {
+        for a in &s.args {
+            if let crate::parse::GArg::Ty(t) = a {
+                k.implied(t, 0);
+            }
+        }
+    }
     let args: Vec<&String> = tp.segs.last()?.args.iter().filter_map(|a| if let crate::parse::GArg::Lifetime(l) = a { Some(l) } else { None }).collect();
     if path_names(value, 0).iter().any(|n| is_alias(n)) {
         return None;

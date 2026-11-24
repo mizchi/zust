@@ -3934,3 +3934,18 @@ fn part25_review() {
     let d = check("trait Foo { type Value: 'static; }\nfn main() {\n    let _x = 1;\n    impl<'a> Foo for &'a i32 {\n        type Value = &'a i32;\n    }\n}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0477"), "{d:?}");
 }
+
+#[test]
+fn part25_review_2() {
+    // (two where clauses on the same type with the same trait, other arguments: which one meets a callee's bound is
+    // not known from the trees, so neither is taken; one that fits alone still is)
+    assert_eq!(check("trait Get<T> {}\nfn need8<X: Get<u8>>() {}\nfn need16<X: Get<u16>>() {}\nfn caller<'a, 'b, G: 'a + 'b>()\nwhere\n    &'a G: Get<u8>,\n    &'b G: Get<u16>,\n{\n    need8::<&'a G>();\n    need16::<&'b G>();\n}\nfn main() {}\n"), vec![]);
+    let d = check("trait Get<T> {}\nfn need8<X: Get<u8>>() {}\nfn caller<'a, 'b: 'a, G: 'b>()\nwhere\n    &'b G: Get<u8>,\n{\n    need8::<&'a G>();\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 7 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (E0477: what the trait's type arguments in the impl's header imply is known (`&'a &'b ()`: 'b: 'a))
+    assert_eq!(check("trait Foo<'a, T> { type Value: 'a; }\nimpl<'a, 'b> Foo<'a, &'a &'b ()> for () { type Value = &'b i32; }\nfn main() {}\n"), vec![]);
+    let d = check("trait Foo<'a, T> { type Value: 'a; }\nimpl<'a, 'b> Foo<'a, &'b ()> for () { type Value = &'b i32; }\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("E0477"), "{d:?}");
+    // (a value with a where clause of its own (`where Self: 'b`) is not checked: the clause is not read)
+    assert_eq!(check("trait Foo<'a> { type Value: 'a where Self: 'a; }\nimpl<'a, 'b> Foo<'b> for &'a i32 { type Value = &'a i32 where Self: 'b; }\nfn main() {}\n"), vec![]);
+}

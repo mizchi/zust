@@ -4162,7 +4162,10 @@ impl Cx<'_> {
                 for b in bs {
                     let tr = b.split('<').next().unwrap_or(b).trim();
                     let tr = tr.rsplit("::").next().unwrap_or(tr);
-                    let Some((_, wt, _)) = rg.where_trees.iter().find(|(wty, _, trs)| *wty == t && trs.iter().any(|x| x == tr)) else { continue };
+                    // (only where one clause fits: the trees keep no trait arguments, and with `&'a G: Get<u8>, &'b G:
+                    // Get<u16>` which clause meets the bound is not known here)
+                    let mut fits = rg.where_trees.iter().filter(|(wty, _, trs)| *wty == t && trs.iter().any(|x| x == tr));
+                    let (Some((_, wt, _)), None) = (fits.next(), fits.next()) else { continue };
                     if wt.len() != at.len() || prog.implements(t, tr) {
                         continue;
                     }
