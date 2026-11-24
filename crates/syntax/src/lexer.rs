@@ -586,6 +586,17 @@ fn string_lit(s: &[u8], mut i: usize) -> Option<usize> {
 mod tests {
     use super::*;
 
+    /// has_inline_item: an item on the same line after `{` / `;` / `}`, also after attributes; an attribute with a
+    /// string or brackets in it (`#[doc = "]"]`) is taken as followed by an item (the full preparation decides)
+    #[test]
+    fn inline_item_after_attributes() {
+        assert!(has_inline_item("fn outer() { fn inner() {} }"));
+        assert!(has_inline_item("fn outer() { #[inline] fn inner() {} }"));
+        assert!(has_inline_item("fn outer() { #[doc = \"]\"] fn inner() {} inner() }"));
+        assert!(!has_inline_item("fn outer() { #[allow(unused)] let x = 1; }"));
+        assert!(!has_inline_item("fn outer() {\n    let x = 1;\n}"));
+    }
+
     /// Edition 2021's reserved prefixes: an identifier right before `#` / `"` / `'`, and what only looks like one
     #[test]
     fn reserved_prefixes() {
