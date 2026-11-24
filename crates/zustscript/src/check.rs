@@ -1540,7 +1540,12 @@ impl Checker {
             match sig.map(|s| (s.args.clone(), s.ret.clone(), s.generics.is_empty())) {
                 Some((args, ret, true)) if args.len() <= 1 && ret == Ty::Jsx => {
                     let fields = match args.first() {
-                        Some(Ty::Named(n, _)) if self.info.records.contains_key(n) => self.info.records[n].fields.clone(),
+                        // (a generic record of props: its fields at the component's type arguments)
+                        Some(Ty::Named(n, targs)) if self.info.records.contains_key(n) => {
+                            let r = &self.info.records[n];
+                            let m: HashMap<String, Ty> = r.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                            r.fields.iter().map(|(f, t)| (f.clone(), Self::subst_params(t, &m))).collect()
+                        }
                         None => vec![],
                         _ => {
                             self.err(j.pos, format!("component `{}` must take one record of props", j.tag));

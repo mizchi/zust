@@ -16,15 +16,22 @@ use crate::ast::{Item, Pos, TsFrom, TyS};
 use crate::tsimport::TsError;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 /// Replaces each `import { .. } from "./x.zsc"` (and `import type` from one) by what it names. `stack`: the files
 /// being read, to report a cycle.
 pub fn expand(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>) -> Result<Vec<Item>, Vec<TsError>> {
+    expand_in(items, base, stack, &mut HashMap::new())
+}
+
+/// (`modules`: every module read in this compilation, by canonical path: one reached through two importers is
+/// read and checked once)
+fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &mut HashMap<PathBuf, Rc<Module>>) -> Result<Vec<Item>, Vec<TsError>> {
     let mut out = vec![];
     let mut errs = vec![];
-    let mut modules: HashMap<PathBuf, Module> = HashMap::new();
-    // (a type brought in once, even when two imports need it)
+    // (a type brought in once, even when two imports need it: by the file that defines it and its name)
     let mut done: BTreeSet<(PathBuf, String)> = BTreeSet::new();
+    let here = std::fs::canonicalize(base).unwrap_or(base.to_path_buf());
     for it in items {
         let Item::ImportType { names, from, values, pos } = &it else {
             out.push(it);
@@ -45,9 +52,9 @@ pub fn expand(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>) -> Result
             continue;
         }
         if !modules.contains_key(&key) {
-            match Module::read(&path, &key, stack) {
+            match Module::read(&path, &key, stack, modules) {
                 Ok(m) => {
-                    modules.insert(key.clone(), m);
+                    modules.insert(key.clone(), Rc::new(m));
                 }
                 Err(mut e) => {
                     if e.is_empty() {
@@ -64,7 +71,7 @@ pub fn expand(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>) -> Result
                 }
             }
         }
-        let m = &modules[&key];
+        let m = modules[&key].clone();
         let spec = format!("{}.js", from.strip_suffix(".zsc").unwrap());
         let mut types: Vec<String> = vec![];
         for (n, npos) in names {
@@ -96,30 +103,42 @@ pub fn expand(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>) -> Result
                 _ => errs.push(TsError { file: None, pos: *npos, msg: format!("`{from}` declares no type or function `{n}`") }),
             }
         }
-        // the types, and the types they use (a record's fields, an enum's variants)
+        // the types, and the types they use (a record's fields, an enum's variants), whatever their names look
+        // like: the module's declarations say which names are types
         while let Some(n) = types.pop() {
-            if !done.insert((key.clone(), n.clone())) {
-                continue;
-            }
             let Some(it) = m.find(&n) else { continue };
             let mut it = it.clone();
-            match &mut it {
-                Item::Record { params, fields, from: f, .. } => {
-                    for (_, t) in fields.iter() {
+            let (Item::Record { from: f, .. } | Item::Enum { from: f, .. }) = &mut it else { continue };
+            // where the type is defined: this module, or the module or TS file it came from
+            let defined = match f {
+                Some(TsFrom { zsc: Some(z), .. }) => z.clone(),
+                Some(t) => t.path.clone(),
+                None => key.clone(),
+            };
+            if !done.insert((defined.clone(), n.clone())) {
+                continue;
+            }
+            match f {
+                // (a TS file's type stays that file's: its path is canonical)
+                Some(TsFrom { zsc: None, .. }) => {}
+                // (a zustscript module's: its JS from here, which differs from the specifier the importing module
+                // wrote when that module is in another directory)
+                _ => *f = Some(from_module(&here, &defined)),
+            }
+            match &it {
+                Item::Record { params, fields, .. } => {
+                    for (_, t) in fields {
                         uses(t, params, &mut types);
                     }
-                    // (a record the other module read from TS stays that TS file's)
-                    f.get_or_insert_with(|| from_module(&spec));
                 }
-                Item::Enum { params, variants, from: f, .. } => {
-                    for (_, ts, r) in variants.iter() {
+                Item::Enum { params, variants, .. } => {
+                    for (_, ts, r) in variants {
                         for t in ts.iter().chain(r.iter()) {
                             uses(t, params, &mut types);
                         }
                     }
-                    f.get_or_insert_with(|| from_module(&spec));
                 }
-                _ => continue,
+                _ => {}
             }
             out.push(it);
         }
@@ -127,17 +146,25 @@ pub fn expand(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>) -> Result
     if errs.is_empty() { Ok(out) } else { Err(errs) }
 }
 
-/// The mark of a type from another zustscript module: exported there (every type is, in its `.d.ts`), in that
-/// module's JS shape (`repr: None`). The path is the specifier itself (relative, not a TS file's canonical path).
-fn from_module(spec: &str) -> TsFrom {
-    TsFrom { path: PathBuf::from(spec), exported: true, members: vec![], text: String::new(), repr: None }
+/// The mark of a type of the zustscript module `file`, used from the directory `here`: exported there (every type
+/// is, in its `.d.ts`), in that module's JS shape (`repr: None`), and imported from its JS by a relative specifier
+fn from_module(here: &Path, file: &Path) -> TsFrom {
+    let a: Vec<_> = here.components().collect();
+    let b: Vec<_> = file.components().collect();
+    let common = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let mut parts: Vec<String> = vec!["..".into(); a.len() - common];
+    parts.extend(b[common..].iter().map(|c| c.as_os_str().to_string_lossy().to_string()));
+    let rel = parts.join("/");
+    let rel = if rel.starts_with("../") { rel } else { format!("./{rel}") };
+    let spec = format!("{}.js", rel.strip_suffix(".zsc").unwrap_or(&rel));
+    TsFrom { path: PathBuf::from(spec), exported: true, members: vec![], text: String::new(), repr: None, zsc: Some(file.to_path_buf()) }
 }
 
 /// The named types `t` uses (not its generic parameters, not the built-in ones)
 fn uses(t: &TyS, params: &[String], out: &mut Vec<String>) {
     match t {
         TyS::Name(n, args, _) => {
-            if !params.contains(n) && n.chars().next().is_some_and(|c| c.is_uppercase()) {
+            if !params.contains(n) {
                 out.push(n.clone());
             }
             for a in args {
@@ -160,14 +187,14 @@ struct Module {
 
 impl Module {
     /// Reads, expands and checks another module: an error in it is reported in its own file
-    fn read(path: &Path, key: &Path, stack: &mut Vec<PathBuf>) -> Result<Module, Vec<TsError>> {
+    fn read(path: &Path, key: &Path, stack: &mut Vec<PathBuf>, modules: &mut HashMap<PathBuf, Rc<Module>>) -> Result<Module, Vec<TsError>> {
         let src = std::fs::read_to_string(path).map_err(|e| vec![TsError { file: None, pos: Pos { line: 1, col: 0 }, msg: format!("{}: {e}", path.display()) }])?;
         let file = path.display().to_string();
         let at = |pos: Pos, msg: String| TsError { file: Some((file.clone(), src.clone())), pos, msg };
         let items = crate::parse::Parser::new(&src).file().map_err(|(p, m)| vec![at(p, m)])?;
         let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
         stack.push(key.to_path_buf());
-        let items = expand(items, &dir, stack);
+        let items = expand_in(items, &dir, stack, modules);
         stack.pop();
         let items = items.map_err(|es| es.into_iter().map(|e| if e.file.is_some() { e } else { at(e.pos, e.msg) }).collect::<Vec<_>>())?;
         let items = crate::tsimport::expand(items, &dir).map_err(|es| es.into_iter().map(|e| if e.file.is_some() { e } else { at(e.pos, e.msg) }).collect::<Vec<_>>())?;

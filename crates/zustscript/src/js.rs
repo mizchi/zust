@@ -1327,7 +1327,11 @@ impl<'a> Js<'a> {
         } else if j.tag.chars().next().is_some_and(|c| c.is_uppercase()) {
             // (a component imported from another module is imported in the JS)
             self.note_extern(&j.tag);
-            ident(&j.tag)
+            match self.info.externs.get(&j.tag) {
+                // (an extern's JS may be another name, `UI.Badge`)
+                Some((_, _, js)) => js.clone(),
+                None => ident(&j.tag),
+            }
         } else {
             js_str(&j.tag)
         };

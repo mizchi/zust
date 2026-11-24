@@ -504,6 +504,31 @@ fn modules_import_types_and_functions() {
     assert!(o.status.success(), "tsc:\n{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
 }
 
+/// tests/modules: a type two modules import comes in once (by the file that defines it), a type of a module in
+/// another directory is imported from that module's JS as seen from the importer, a lowercase type comes in with the
+/// function that uses it, an imported component takes a generic record of props, and a component whose JS has
+/// another name is written by that name
+#[test]
+fn modules_diamond_and_directories() {
+    let d = out_dir("modules_diamond");
+    let m = root().join("tests/modules");
+    for (f, o) in [("common.zsc", "."), ("left.zsc", "."), ("lib/leaf.zsc", "lib"), ("lib/mid.zsc", "lib"), ("diamond.zsc", ".")] {
+        let o = zsc(&m.join(f), &d.join(o), &[]);
+        assert!(o.status.success(), "{f}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+    let dts = std::fs::read_to_string(d.join("diamond.d.ts")).unwrap();
+    assert!(dts.contains("import type { Leaf } from \"./lib/leaf.js\";"), "{dts}");
+    let out = node(&d, "const m = await import('./diamond.js'); const { render } = await import('react/jsx-runtime'); console.log(m.both(), JSON.stringify(m.leaf(7)), render(m.view()));");
+    assert_eq!(out, "6 {\"v\":7} <b>hi</b>\n");
+
+    let src = d.join("named.zsc");
+    std::fs::write(&src, "type P = { label: String }\nextern \"react\" fn Fancy(props: P) -> Jsx = \"UI.Badge\";\nexport fn v() -> Jsx { <Fancy label=\"x\" /> }\n").unwrap();
+    let o = zsc(&src, &d.join("named"), &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let js = std::fs::read_to_string(d.join("named/named.js")).unwrap();
+    assert!(js.contains("import { UI } from \"react\";") && js.contains("_jsx(UI.Badge, { label: \"x\" })"), "{js}");
+}
+
 /// tests/js_inplace.zsc: the JS layer appends in place only onto a local array no one else can see, so every
 /// result is what the copying push gives
 #[test]

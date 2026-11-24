@@ -242,6 +242,9 @@ pub struct TsFrom {
     pub text: String,
     /// an enum's values in JS: TS's, not zustscript's `{ TAG, _0 }`
     pub repr: Option<TsEnum>,
+    /// a type of another zustscript module: that module's file (canonical). `path` is then the specifier of its JS
+    /// from the module that uses the type (`./lib/leaf.js`), written again at each import
+    pub zsc: Option<std::path::PathBuf>,
 }
 
 /// How the values of an enum read from a TS union look in JS (they are TS's own)

@@ -767,12 +767,12 @@ pub fn expand(items: Vec<Item>, base: &Path) -> Result<Vec<Item>, Vec<TsError>> 
             match f.decl(&n) {
                 Ok((Read::Record(fields, members), uses)) => {
                     todo.extend(uses.into_iter().map(|(u, up)| (u, up, false)));
-                    recs.push(Item::Record { name: n, params: vec![], fields, pos: at, from: Some(TsFrom { path: abs.clone(), exported, members, text: String::new(), repr: None }) });
+                    recs.push(Item::Record { name: n, params: vec![], fields, pos: at, from: Some(TsFrom { path: abs.clone(), exported, members, text: String::new(), repr: None, zsc: None }) });
                 }
                 Ok((Read::Enum(variants, repr, text), uses)) => {
                     todo.extend(uses.into_iter().map(|(u, up)| (u, up, false)));
                     let variants = variants.into_iter().map(|(v, ts)| (v, ts, None)).collect();
-                    recs.push(Item::Enum { name: n, params: vec![], variants, pos: at, from: Some(TsFrom { path: abs.clone(), exported, members: vec![], text, repr: Some(repr) }) });
+                    recs.push(Item::Enum { name: n, params: vec![], variants, pos: at, from: Some(TsFrom { path: abs.clone(), exported, members: vec![], text, repr: Some(repr), zsc: None }) });
                 }
                 Err(e) => errs.push(e),
             }
