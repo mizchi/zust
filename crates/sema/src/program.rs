@@ -2644,8 +2644,10 @@ impl Program {
                 let arg = |k: usize, r: bool| sd.args.get(k).is_none_or(|&a| self.unwind_safe(a, r, d + 1));
                 match name {
                     "AssertUnwindSafe" => return true,
-                    // (std's locks and their guards are both whatever they hold: a panic poisons them)
-                    "Mutex" | "RwLock" | "MutexGuard" | "RwLockReadGuard" | "RwLockWriteGuard" => return true,
+                    // (std's locks and their writing guards are both whatever they hold: a panic poisons them. A read
+                    // guard does not poison: it is as its contents are RefUnwindSafe)
+                    "Mutex" | "RwLock" | "MutexGuard" | "RwLockWriteGuard" => return true,
+                    "RwLockReadGuard" => return arg(0, true),
                     n if n.starts_with("Atomic") => return true,
                     "UnsafeCell" | "Cell" | "RefCell" | "OnceCell" | "LazyCell" => return !refs && arg(0, false),
                     "Rc" | "Arc" => return arg(0, true),

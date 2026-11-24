@@ -453,14 +453,32 @@ pub(crate) fn outer_docs_start(s: &[u8], p: usize) -> usize {
             continue;
         }
         // (a block doc comment over several lines, `/** ..\n .. */`: back to its `/**`, at a line's start. The
-        // comment this `*/` closes opens at the nearest `/*` before it: not a `/**` further back, in a string)
+        // comment this `*/` closes opens at the `/*` that matches it, comments nesting: not a `/**` in it or further
+        // back, in a string)
         if text.ends_with(b"*/") {
-            if let Some(o) = s[..prev_end].windows(2).rposition(|w| w == b"/*").filter(|&o| s[o..].starts_with(b"/**")) {
+            let mut d = 0usize;
+            let mut i = pls + lead + text.len();
+            let mut opener = None;
+            while i >= 2 {
+                match &s[i - 2..i] {
+                    b"*/" => {
+                        d += 1;
+                        i -= 2;
+                    }
+                    b"/*" => {
+                        d -= 1;
+                        i -= 2;
+                        if d == 0 {
+                            opener = Some(i);
+                            break;
+                        }
+                    }
+                    _ => i -= 1,
+                }
+            }
+            if let Some(o) = opener.filter(|&o| s[o..].starts_with(b"/**") && !s[o..].starts_with(b"/***") && !s[o..].starts_with(b"/**/")) {
                 let ols = s[..o].iter().rposition(|&c| c == b'\n').map_or(0, |k| k + 1);
-                let opens_doc = !s[o..].starts_with(b"/***") && s[ols..o].iter().all(|c| c.is_ascii_whitespace());
-                // (nothing closes a comment between its `/**` and this line's `*/`)
-                let one = o + 3 <= pls && !s[o + 3..pls].windows(2).any(|w| w == b"*/");
-                if opens_doc && one {
+                if o < pls && s[ols..o].iter().all(|c| c.is_ascii_whitespace()) {
                     start = o;
                     continue;
                 }
@@ -643,6 +661,11 @@ mod tests {
         assert_eq!(start("fn a() {}\n/**\n * doc\n */  \n#[x]\nfn f() {}"), "/**\n * doc\n */  \n");
         assert_eq!(start("fn a() {}\r\n/**\r\n * doc\r\n */\r\n/// more\r\n#[x]\r\nfn f() {}"), "/**\r\n * doc\r\n */\r\n/// more\r\n");
         // (a `/**` in a string is no comment's: the `*/` closes the `/*` nearest before it)
+        // (comments nest: this `*/ */` closes `/* outer`)
+        let nested = "fn a() {}\n/* outer\n/**\n*/ */\n#[cfg(any())]\nfn gone() {}\nfn main() {}\n";
+        assert_eq!(start(nested), "");
+        let o = strip(nested, &CfgSet::default()).unwrap();
+        assert!(o.contains("/* outer") && o.contains("*/ */") && o.contains("fn main() {}") && !o.contains("gone"), "{o}");
         let src = "const K: &str = r#\"\n/**\n\"#;\nfn main() {}\n/* ordinary comment\n*/\n#[cfg(any())]\nfn removed() {}\n";
         assert_eq!(start(src), "");
         let o = strip(src, &CfgSet::default()).unwrap();

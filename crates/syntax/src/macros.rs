@@ -997,8 +997,13 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
     let env: &[(String, String)] = cfg.map_or(&[], |c| &c.env[..]);
     // (the outermost attribute uses before the definitions are read: an attribute macro gets its item whole, a
     // `macro_rules!` in it too. Those in its output are read with the others)
+    // (each pass runs the outermost of an item's attributes: again while one runs, `#[a] #[pm::rules] fn ..`)
     if !pms.is_empty() {
-        pm_items(&mut text, pms, env, cfg, &mut first)?;
+        for _ in 0..64 {
+            if !pm_items(&mut text, pms, env, cfg, &mut first)? {
+                break;
+            }
+        }
     }
     collect_defs(&mut text, &mut macros, Some(&mut first))?;
     if macros.is_empty() && pms.is_empty() {

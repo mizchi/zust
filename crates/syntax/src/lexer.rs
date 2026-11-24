@@ -2137,7 +2137,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                     if d == 0 {
                         return (names, q);
                     }
-                } else if (is_sym(q, b'(') || is_sym(q, b'[')) && close[q] != usize::MAX {
+                } else if (is_sym(q, b'(') || is_sym(q, b'[') || is_sym(q, b'{')) && close[q] != usize::MAX {
+                    // (`const B: bool = { 2 > 1 }`: its `>` is no end)
                     q = close[q];
                 } else if d == 1 && toks[q].0 == 0 && (is_sym(q - 1, b'<') || is_sym(q - 1, b',') || is_id(q - 1, b"const")) && renamed_names.contains(&tok(q)) {
                     names.push(tok(q));
@@ -2146,12 +2147,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             }
             (names, toks.len() - 1)
         };
-        // (a name in its scope, where it is no path's segment: `C`, `x: C`, `C: Tr`, not `C::new` / `a::C`)
-        let local_at = |q: usize| {
-            toks[q].0 == 0
-                && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':'))
-                && !(q + 2 < toks.len() && is_sym(q + 1, b':') && is_sym(q + 2, b':'))
-        };
+        // (a generic parameter in its scope, where it is no later path segment: `C`, `x: C`, `C: Tr`, and a path's root,
+        // `C::default()`; not `a::C`)
+        let local_at = |q: usize| toks[q].0 == 0 && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':'));
         // (an item's generic parameters, in the whole item: `impl<C> X<C> { .. }`, `struct S<C>(C);`)
         let mut k = if renamed_names.is_empty() { toks.len() } else { 0 };
         while k + 2 < toks.len() {
@@ -2190,12 +2188,14 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // (each name and where it is the local: a generic parameter or a parameter in the whole function, a `let`
             // after its statement to the end of its block)
             let mut bound: Vec<(&[u8], usize, usize)> = vec![];
-            // (the parameters: `(`, after the generics)
+            // (the parameters: `(`, after the generics; a generic parameter is a path's root too, `C::default()`)
             let mut p = k + 2;
+            let mut generic_names: Vec<&[u8]> = vec![];
             if is_sym(p, b'<') {
                 let (names, ge) = generics(p);
                 for n in names {
                     bound.push((n, p + 1, usize::MAX));
+                    generic_names.push(n);
                 }
                 p = ge + 1;
             }
@@ -2238,14 +2238,17 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                                 d -= 1;
                             }
                         }
-                        // (the name itself, then after its statement: `let release = release(1);` calls the item)
+                        // (the name itself, then after its statement: `let release = release(1);` calls the item. An
+                        // `if let` / `while let` binds in its body only: from its `{`, not in its scrutinee)
+                        let cond = q > b + 1 && (is_id(q - 1, b"if") || is_id(q - 1, b"while") || is_sym(q - 1, b'&'));
                         let mut j = n + 1;
-                        while j < be && !is_sym(j, b';') {
-                            if (is_sym(j, b'(') || is_sym(j, b'[') || is_sym(j, b'{')) && close[j] != usize::MAX {
+                        while j < be && !is_sym(j, b';') && !(cond && is_sym(j, b'{')) {
+                            if (is_sym(j, b'(') || is_sym(j, b'[') || (!cond && is_sym(j, b'{'))) && close[j] != usize::MAX {
                                 j = close[j];
                             }
                             j += 1;
                         }
+                        let until = if cond && j < be && is_sym(j, b'{') && close[j] != usize::MAX { close[j] } else { until };
                         bound.push((tok(n), n, n));
                         bound.push((tok(n), j, until));
                     }
@@ -2254,7 +2257,10 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             if !bound.is_empty() {
                 let is_bound = |q: usize| bound.iter().any(|&(nm, from, until)| nm == tok(q) && q >= from && q <= until);
                 for q in k + 2..be {
-                    if toks[q].0 == 0 && is_bound(q) && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':')) && !is_sym(q + 1, b':') || (toks[q].0 == 0 && is_bound(q) && q + 2 <= be && is_sym(q + 1, b':') && !is_sym(q + 2, b':')) {
+                    if toks[q].0 == 0 && is_bound(q) && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':')) && !is_sym(q + 1, b':')
+                        || (toks[q].0 == 0 && is_bound(q) && q + 2 <= be && is_sym(q + 1, b':') && !is_sym(q + 2, b':'))
+                        || (generic_names.contains(&tok(q)) && is_bound(q) && local_at(q))
+                    {
                         local_tok[q] = true;
                     }
                 }

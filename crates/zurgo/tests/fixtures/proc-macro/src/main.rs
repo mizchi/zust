@@ -67,6 +67,18 @@ fn inner() -> u32 {
     one!() + 1
 }
 
+// (and under another attribute: each gets the item whole)
+#[pm::identity]
+#[pm::rules]
+fn stacked() -> u32 {
+    macro_rules! two {
+        () => {
+            2
+        };
+    }
+    two!() + 1
+}
+
 fn main() {
     println!("{} {}", seven(), seven_scaled());
     let p = Point { x: 1, y: 2, z: 3 };
@@ -79,6 +91,6 @@ fn main() {
     println!("{} {} {} {}", DOCS_MULTI, NINE, answer(), via_alias!(1, 2, 3));
     let _ = Multi;
     println!("{} {} {} {} {}", re::plus!(1, 2, 3), plus!(1, 2), more!(4, 5), add!(1), stringify!(pm::add!(1, 2)));
-    println!("{} {}", RULES_INNER, inner());
+    println!("{} {} {} {}", RULES_INNER, inner(), RULES_STACKED, stacked());
     println!("{}", pm::shared!());
 }

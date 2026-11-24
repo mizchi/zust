@@ -30,7 +30,14 @@ pub fn scaled(attr: TokenStream, item: TokenStream) -> TokenStream {
 pub fn rules(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let n = item.to_string().matches("macro_rules").count();
     // (and a `macro_rules!` no one calls, whose body calls `boom!`: it never runs)
-    format!("{item} const RULES_{}: usize = {n}; macro_rules! never_called {{ () => {{ pm::boom!() }}; }}", item_name(&item).to_uppercase()).parse().unwrap()
+    let name = item_name(&item);
+    format!("{item} const RULES_{}: usize = {n}; macro_rules! never_called_{name} {{ () => {{ pm::boom!() }}; }}", name.to_uppercase()).parse().unwrap()
+}
+
+/// `#[identity] item`: the item as it is
+#[proc_macro_attribute]
+pub fn identity(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    item
 }
 
 /// `boom!()`: fails the build where it runs

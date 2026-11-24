@@ -11,6 +11,11 @@ fn id<C>(x: C) -> C {
     x
 }
 struct Wrap<C>(C);
+// (a generic parameter as a path's root, and after a const parameter's braced default)
+fn made<C: Default>() -> C {
+    C::default()
+}
+struct Flag<const B: bool = { 2 > 1 }, C = u8>(C);
 impl<C: Copy> Wrap<C> {
     fn get(&self) -> C {
         self.0
@@ -74,6 +79,13 @@ fn main() {
         println!("{:?}", release);
     }
     println!("{}", whole_of!(7));
+    // (an `if let` binds in its body)
+    if let release = 3 {
+        let r: i32 = release;
+        println!("{}", r + 1);
+    }
+    let f = Flag::<true, u8>(9);
+    println!("{} {}", made::<u8>(), f.0);
     let c = C::new(3);
     println!("{} {} {}", id(5), Wrap(6).get(), c.get());
     release(v);
