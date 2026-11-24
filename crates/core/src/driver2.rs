@@ -4258,6 +4258,8 @@ fn extern_names(externs: &[(usize, String)]) -> impl Iterator<Item = &str> {
 #[derive(Clone)]
 enum PVis<'a> {
     Pub,
+    /// `pub(crate)`: as `pub` to a module of the crate; narrower for a re-export (E0364)
+    Crate,
     Priv,
     Super,
     In(Vec<&'a [u8]>),
@@ -4426,6 +4428,7 @@ fn private_path(
                         b"self" => PVis::Priv,
                         b"super" => PVis::Super,
                         b"in" => PVis::In((k + 2..e).filter(|&j| is_id(j)).map(t).collect()),
+                        b"crate" => PVis::Crate,
                         _ => PVis::Pub,
                     };
                     k = e + 1;
@@ -4596,7 +4599,7 @@ fn private_path(
         Some(cur)
     };
     let visible = |def: usize, vis: &PVis, from: usize| match vis {
-        PVis::Pub => true,
+        PVis::Pub | PVis::Crate => true,
         PVis::Priv => within(from, def),
         PVis::Super => match parent(def) {
             usize::MAX => within(from, def),
@@ -4743,7 +4746,7 @@ fn private_path(
     if !unknown_mods {
         for (m, its) in items.iter().enumerate().skip(1) {
             for it in its {
-                if matches!(it.kind, "struct" | "union") && struct_fields(b, toks, &close, it.at, mods[m].1).iter().any(|f| !matches!(f.1, PVis::Pub)) {
+                if matches!(it.kind, "struct" | "union") && struct_fields(b, toks, &close, it.at, mods[m].1).iter().any(|f| !matches!(f.1, PVis::Pub | PVis::Crate)) {
                     hidden_structs.insert(it.name);
                 }
             }
@@ -4753,8 +4756,16 @@ fn private_path(
     // (E0624: the inherent impls of modules other than the crate root that have a member that is not `pub`; the names
     // trait fns have, whose calls may be the trait's)
     let (impls, trait_fns) = if mods.len() > 1 && !unknown_mods && src.contains("impl") { impl_members(b, toks, &close, &mods) } else { (vec![], FxSet::default()) };
-    let assoc_on = impls.iter().any(|r| r.m != 0 && r.members.iter().any(|x| !matches!(x.2, PVis::Pub)));
-    let mut amb = (amb_on || priv_on || assoc_on).then(|| Ambiguity {
+    let assoc_on = impls.iter().any(|r| r.m != 0 && r.members.iter().any(|x| !matches!(x.2, PVis::Pub | PVis::Crate)));
+    // (E0603 of an import: the names imports of modules other than the crate root bind that are not seen everywhere in
+    // the crate; E0364 / E0365: whether any import re-exports)
+    let imp_priv_names: FxSet<&[u8]> = if unknown_mods {
+        FxSet::default()
+    } else {
+        imps.iter().skip(1).flatten().filter(|x| x.glob != 2 && !x.name.is_empty() && !matches!(x.vis, PVis::Pub | PVis::Crate)).map(|x| x.name).collect()
+    };
+    let reexp_on = !unknown_mods && mods.len() > 1 && imps.iter().flatten().any(|x| x.glob == 0 && !matches!(x.vis, PVis::Priv));
+    let mut amb = (amb_on || priv_on || assoc_on || !imp_priv_names.is_empty() || reexp_on).then(|| Ambiguity {
         b,
         toks,
         close: &close,
@@ -4818,7 +4829,7 @@ fn private_path(
             }
             for &(nt, kind, ref vis) in &r.members {
                 let scope = match vis {
-                    PVis::Pub => None,
+                    PVis::Pub | PVis::Crate => None,
                     PVis::Priv => Some(r.m),
                     PVis::Super => Some(if r.m == 0 { 0 } else { mods[r.m].2 }),
                     PVis::In(p) => a.module_at(p, if injected { 0 } else { r.m }),
@@ -4927,6 +4938,23 @@ fn private_path(
                         keep(check(m, l, injected, true, g));
                     }
                 }
+                // (E0603 of a private import on the path; E0364 / E0365: a re-export wider than what it names)
+                if let (Some(a), Some(&j0)) = (amb.as_mut(), imp_at.get(&k)) {
+                    for (li, (l, &g)) in leaves.iter().zip(&kinds).enumerate() {
+                        let Some(imp) = imps[m].get(j0 + li) else { continue };
+                        if l.is_empty() {
+                            continue;
+                        }
+                        a.busy_imp.push((m, j0 + li));
+                        if l.iter().any(|&x| imp_priv_names.contains(t(x))) {
+                            keep(a.import_privacy(m, l, imp.root, false));
+                        }
+                        if reexp_on && g == 0 && !matches!(imp.vis, PVis::Priv) {
+                            keep(a.reexport(m, l, imp.root, &imp.vis));
+                        }
+                        a.busy_imp.pop();
+                    }
+                }
                 // (E0659: an import of the module, resolved without itself)
                 if let (Some(a), Some(&j0), true) = (amb.as_mut(), imp_at.get(&k), amb_on) {
                     for (li, (l, &g)) in leaves.iter().zip(&kinds).enumerate() {
@@ -4968,7 +4996,16 @@ fn private_path(
                 let x = j;
                 let lit = priv_on && t(x + 1) == b"{" && hidden_structs.contains(t(x));
                 let member = assoc_on && assoc_names.contains(t(x));
-                if amb.is_some() && (amb_on || lit || member) {
+                let via_import = !imp_priv_names.is_empty() && {
+                    let mut y = raw(k);
+                    let mut any = false;
+                    while t(y + 1) == b":" && t(y + 2) == b":" && is_id(y + 3) {
+                        y = raw(y + 3);
+                        any |= imp_priv_names.contains(t(y));
+                    }
+                    any
+                };
+                if amb.is_some() && (amb_on || lit || member || via_import) {
                     let mut all = vec![raw(k)];
                     let mut y = raw(k);
                     while t(y + 1) == b":" && t(y + 2) == b":" && is_id(y + 3) {
@@ -4982,6 +5019,12 @@ fn private_path(
                             APath::Defs(d) if ambiguous_in(&d, a.site_ns(raw(k), x)) => keep(amb_msg(x)),
                             _ => {}
                         }
+                    }
+                    // (E0603: a private import on the path, `a::b::S` with `use x::S;` in b)
+                    if via_import && amb.as_ref().is_some_and(|a| free!(a, raw(k))) {
+                        let a = amb.as_mut().unwrap();
+                        let value = !matches!(a.site_ns(raw(k), x), 1);
+                        keep(a.import_privacy(m, &all, false, value));
                     }
                     // (E0624: `a::S::new()`, `Foo::ID`: a private member of the type's inherent impl)
                     if member && all.len() >= 2 {
@@ -5194,7 +5237,8 @@ fn impl_members<'a>(b: &'a [u8], toks: &[(u8, usize, usize)], close: &[usize], m
                             b"self" => PVis::Priv,
                             b"super" => PVis::Super,
                             b"in" => PVis::In((x + 2..c).filter(|&q| is_id(q)).map(t).collect()),
-                            _ => PVis::Pub,
+                            b"crate" => PVis::Crate,
+                        _ => PVis::Pub,
                         };
                         x = c + 1;
                     }
@@ -5271,7 +5315,7 @@ fn field_priv(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], mods: &[(u
             let mut hidden = vec![];
             for (f, vis) in struct_fields(b, toks, close, it.at, mods[m].1) {
                 let scope = match vis {
-                    PVis::Pub => continue,
+                    PVis::Pub | PVis::Crate => continue,
                     PVis::Priv => m,
                     PVis::Super => parent(m),
                     // (`pub(in path)`: the module it names, from the crate root in 2015)
@@ -5339,7 +5383,8 @@ fn struct_fields<'a>(b: &'a [u8], toks: &[(u8, usize, usize)], close: &[usize], 
                     b"self" => PVis::Priv,
                     b"super" => PVis::Super,
                     b"in" => PVis::In((k + 2..c).filter(|&j| is_id(j)).map(t).collect()),
-                    _ => PVis::Pub,
+                    b"crate" => PVis::Crate,
+                        _ => PVis::Pub,
                 };
                 k = c + 1;
             }
@@ -5461,7 +5506,7 @@ impl<'a, 'b> Ambiguity<'a, 'b> {
     }
     fn visible(&self, def: usize, vis: &PVis, from: usize) -> bool {
         match vis {
-            PVis::Pub => true,
+            PVis::Pub | PVis::Crate => true,
             PVis::Priv => self.within(from, def),
             PVis::Super => match self.parent(def) {
                 usize::MAX => self.within(from, def),
@@ -5715,7 +5760,164 @@ const EXPR_MACROS: &[&[u8]] = &[
     b"unreachable", b"todo", b"unimplemented",
 ];
 
+/// rustc's word for what an import names, in "struct import `S` is private" (`value`: where a path takes a value, a
+/// unit struct is one)
+fn import_word(kind: &str, variant: bool, value: bool) -> &'static str {
+    match kind {
+        _ if variant => "variant",
+        "unit struct" if value => "unit struct",
+        "module" => "module",
+        "struct" | "unit struct" | "tuple struct" => "struct",
+        "enum" => "enum",
+        "trait" => "trait",
+        "type alias" => "type alias",
+        "union" => "union",
+        "function" => "function",
+        "constant" => "constant",
+        "static" => "static",
+        _ => "item",
+    }
+}
+
 impl<'a, 'b> Ambiguity<'a, 'b> {
+    /// E0603: a path written in module m that reaches a name through an import of another module it may not see
+    /// (`use crate::b::One;` with a private `use crate::a::One;` in b): "struct import `One` is private", at that
+    /// segment. An item the path reaches it may not see is the E0603 check's of items (private_path)
+    fn import_privacy(&mut self, m: usize, segs: &[usize], root: bool, value: bool) -> Option<(usize, String)> {
+        let first = self.t(segs[0]);
+        let (mut cur, mut s) = match first {
+            b"crate" => (0, 1),
+            b"self" => (m, 1),
+            b"super" => (m, 0),
+            _ if root => (0, 0),
+            _ => (m, 0),
+        };
+        while s < segs.len() && self.t(segs[s]) == b"super" {
+            cur = self.parent(cur);
+            if cur == usize::MAX {
+                return None;
+            }
+            s += 1;
+        }
+        for i in s..segs.len() {
+            let name = self.t(segs[i]);
+            if matches!(name, b"self" | b"super" | b"crate") {
+                return None;
+            }
+            let own = self.named[cur].contains_key(name);
+            let js: Vec<usize> = (0..self.imps[cur].len()).filter(|&j| self.imps[cur][j].glob != 2 && self.imps[cur][j].name == name).collect();
+            if !own && !js.is_empty() && !js.iter().any(|&j| self.visible(cur, &self.imps[cur][j].vis, m)) {
+                let j = js[0];
+                if self.busy_imp.contains(&(cur, j)) {
+                    return None;
+                }
+                let defs = self.resolve_import(cur, j)?;
+                let d = defs.iter().find(|x| x.0 & 1 != 0).or(defs.first())?.1;
+                let word = import_word(self.items[d.m as usize][d.i as usize].kind, d.v != u32::MAX, value && i + 1 == segs.len());
+                return Some((segs[i], format!("{word} import `{}` is private (E0603)", String::from_utf8_lossy(name))));
+            }
+            if i + 1 == segs.len() {
+                return None;
+            }
+            // (on through the one module the name is here)
+            let defs = self.lookup(cur, name, m, 1)?;
+            let mods: Vec<usize> = defs.iter().filter(|x| x.1.v == u32::MAX).map(|x| self.items[x.1.m as usize][x.1.i as usize].child).filter(|&c| c != usize::MAX).collect();
+            let &[c] = &mods[..] else { return None };
+            cur = c;
+        }
+        None
+    }
+    /// E0364 / E0365: an import of module m that re-exports (vis wider than private) what it names, the module's own
+    /// item (or an enum's variant), where every item of that name is seen in less than the import makes it:
+    /// "`f` is only public within the crate, and cannot be re-exported outside" (the item is the crate's), or "`f` is
+    /// private, and cannot be re-exported"
+    fn reexport(&mut self, m: usize, segs: &[usize], root: bool, vis: &PVis) -> Option<(usize, String)> {
+        let last = *segs.last()?;
+        let name = self.t(last);
+        if matches!(name, b"self" | b"super" | b"crate") {
+            return None;
+        }
+        // (the module of the item, or the enum of the variant)
+        let prefix = &segs[..segs.len() - 1];
+        let (owner, enum_item) = if segs.len() == 1 {
+            (if root { 0 } else { m }, None)
+        } else if prefix.iter().all(|&x| matches!(self.t(x), b"crate" | b"self" | b"super")) {
+            // (`crate::f`, `super::f`, `self::f`: the module those name)
+            let mut cur = if self.t(prefix[0]) == b"crate" { 0 } else { m };
+            for &x in prefix {
+                match self.t(x) {
+                    b"super" => {
+                        cur = self.parent(cur);
+                        if cur == usize::MAX {
+                            return None;
+                        }
+                    }
+                    b"crate" if x != prefix[0] => return None,
+                    _ => {}
+                }
+            }
+            (cur, None)
+        } else {
+            let APath::Defs(d) = self.path(m, &segs[..segs.len() - 1], root, 1) else { return None };
+            let types: Vec<ADef> = d.iter().filter(|x| x.0 & 1 != 0 && x.1.v == u32::MAX).map(|x| x.1).collect();
+            let &[x] = &types[..] else { return None };
+            let it = &self.items[x.m as usize][x.i as usize];
+            if it.child != usize::MAX {
+                (it.child, None)
+            } else if it.kind == "enum" {
+                (x.m as usize, Some(x.i as usize))
+            } else {
+                return None;
+            }
+        };
+        // (the modules each is seen within: None for everywhere, the crate root for the crate)
+        let scope = |v: &PVis, at: usize| -> Option<Option<usize>> {
+            Some(match v {
+                PVis::Pub => None,
+                PVis::Crate => Some(0),
+                PVis::Priv => Some(at),
+                PVis::Super => Some(if at == 0 { 0 } else { self.parent(at) }),
+                PVis::In(p) => Some(self.module_at(p, if self.injected { 0 } else { at })?),
+            })
+        };
+        let imp = scope(vis, m)?;
+        let mut defs: Vec<(Option<usize>, bool)> = vec![];
+        match enum_item {
+            Some(ei) => {
+                if !self.variants_at(self.items[owner][ei].at, self.mods[owner].1).into_iter().any(|k| self.t(k) == name) {
+                    return None;
+                }
+                defs.push((scope(&self.items[owner][ei].vis, owner)?, false));
+            }
+            None => {
+                for &i in self.named[owner].get(name)? {
+                    let it = &self.items[owner][i as usize];
+                    defs.push((scope(&it.vis, owner)?, it.child != usize::MAX));
+                }
+            }
+        }
+        // (an item seen where the import is: within an import's module, as wide as it)
+        let wide_enough = |d: Option<usize>| match (d, imp) {
+            (None, _) => true,
+            (Some(_), None) => false,
+            (Some(b), Some(a)) => self.within(a, b),
+        };
+        if defs.is_empty() || defs.iter().any(|d| wide_enough(d.0)) {
+            return None;
+        }
+        let code = if defs.iter().all(|d| d.1) { "E0365" } else { "E0364" };
+        let n = String::from_utf8_lossy(name);
+        // (at the leaf's own use tree, as rustc: `crate::f` of `pub use crate::f;`, `V` of `pub use E::{V};`)
+        let mut at = last;
+        while self.t(at.wrapping_sub(1)) == b":" && self.t(at.wrapping_sub(2)) == b":" && self.is_id(at.wrapping_sub(3)) {
+            at -= 3;
+        }
+        Some((at, if defs.iter().all(|d| d.0 == Some(0)) {
+            format!("`{n}` is only public within the crate, and cannot be re-exported outside ({code})")
+        } else {
+            format!("`{n}` is private, and cannot be re-exported ({code})")
+        }))
+    }
     /// E0451: a struct literal or pattern written in module m, of the path `segs` and the brace at token `open`, that
     /// names a field it may not see (`a::Foo { x: 1 }`), or takes one by `..base`: "field `x` of struct `Foo` is private"
     /// (`late`: rustc's privacy pass, after the type check, reports it only where that finds no error). A literal

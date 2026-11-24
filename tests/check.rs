@@ -1433,6 +1433,40 @@ fn method_privacy() {
 }
 
 #[test]
+fn import_privacy_and_reexports() {
+    // (E0603 through a private import; E0364 / E0365: a re-export wider than what it names. Each expected line,
+    // column and message is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    for edition in [2015, 2021] {
+        let src = "mod public { pub struct Hi; }\nmod testing { use super::public::Hi; }\nuse testing::Hi;\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(3, 14, "struct import `Hi` is private (E0603)"), "use");
+        let src = "mod a { pub struct S; }\nmod b { use crate::a::S; }\nfn main() {\n    let _ = b::S;\n}\n";
+        assert_eq!(check(edition, src), at(4, 16, "unit struct import `S` is private (E0603)"), "value");
+        let src = "fn f() {}\nmod m { pub use crate::f; }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(2, 17, "`f` is only public within the crate, and cannot be re-exported outside (E0364)"), "crate_item");
+        let src = "mod a { fn foo() {} pub mod b { pub use super::foo; } }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(1, 41, "`foo` is private, and cannot be re-exported (E0364)"), "private_item");
+        let src = "mod a { mod inner {} pub mod b { pub use super::inner; } }\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(1, 42, "`inner` is private, and cannot be re-exported (E0365)"), "module");
+        // (a `pub` item, a `pub(crate)` or `pub(super)` re-export as narrow as the item, a `pub use` re-exported, a
+        // private import used in its module)
+        for src in [
+            "pub fn f() {}\nmod m { pub use crate::f; }\nfn main() {}\n",
+            "fn f() {}\nmod m { pub(crate) use crate::f; }\nfn main() {}\n",
+            "mod a { fn foo() {} pub mod b { pub(super) use super::foo; } }\nfn main() {}\n",
+            "mod a { pub struct S; }\nmod b { pub use crate::a::S; }\nuse b::S;\nfn main() { let _ = S; }\n",
+            "mod a { pub struct S; }\nmod b { use crate::a::S; pub fn f() -> S { S } }\nfn main() { let _ = b::f(); }\n",
+        ] {
+            assert_eq!(check(edition, src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
 fn glob_ambiguity() {
     // (E0659: a name two glob imports bring with different definitions, where a path names it; each expected line
     // and column is rustc 1.100's on the same source, in both editions; None where rustc accepts it)

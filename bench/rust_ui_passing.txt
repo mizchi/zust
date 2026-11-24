@@ -3495,7 +3495,10 @@ check-pass	imports/overwrite-different-warn-ambiguity.rs
 check-pass	imports/overwrite-vis-unused.rs
 check-pass	imports/overwritten-extern-flag-ambig.rs
 check-pass	imports/overwritten-glob-ambig.rs
+compile-fail	imports/private-import-nested-suggestion-156060.rs
+compile-fail	imports/private-import-suggestion-relative.rs
 run-pass	imports/reexport-star.rs
+compile-fail	imports/reexports.rs
 compile-fail	imports/resolve_self_super_hint.rs
 compile-fail	imports/rfc-1560-warning-cycle.rs
 compile-fail	imports/show-private-items-issue-138626.rs
@@ -5964,6 +5967,7 @@ compile-fail	privacy/inaccessible-private-fields-76077.rs
 compile-fail	privacy/inaccessible-private-fields-trailing-comma-149787.rs
 compile-fail	privacy/issue-13641.rs
 compile-fail	privacy/issue-29161.rs
+compile-fail	privacy/issue-46209-private-enum-variant-reexport.rs
 compile-fail	privacy/issue-75062-fieldless-tuple-struct.rs
 compile-fail	privacy/issue-79593.rs
 compile-fail	privacy/locally-pub-private-module-access.rs
@@ -5992,6 +5996,7 @@ compile-fail	privacy/private-struct-field-pattern.rs
 compile-fail	privacy/private-struct-field.rs
 compile-fail	privacy/private-tuple-struct-field-self-arg-issue-81447.rs
 compile-fail	privacy/private-unit-struct-assignment.rs
+compile-fail	privacy/private-variant-reexport.rs
 run-pass	privacy/pub-extern-privacy.rs
 run-pass	privacy/pub-priv-dep/std-pub.rs
 run-pass	privacy/pub-restricted-path-usage-55376.rs
@@ -6711,6 +6716,7 @@ run-pass	self/uniq-self-in-mut-slot.rs
 check-pass	shadowed/primitive-type-shadowing.rs
 compile-fail	shadowed/shadowed-lifetime.rs
 compile-fail	shadowed/shadowed-trait-methods.rs
+compile-fail	shadowed/shadowed-use-visibility.rs
 compile-fail	shadowed/shadowing-in-the-same-pattern.rs
 run-pass	shadowed/use-shadows-reexport.rs
 compile-fail	share-trait/share-trait-no-feature.rs
