@@ -1394,6 +1394,10 @@ impl Session2 {
         if let Some(e) = first_env_capture(&src, src0, &items[..user_src]) {
             return Err(e);
         }
+        // (E0276: an impl's method whose own type parameter has a bound the trait's does not give)
+        if let Some(e) = stricter_impl_bound(&src, &items[..user_src]) {
+            return Err(e);
+        }
         // (E0119: two blanket impls of one trait for a bare parameter, `impl<T: A> Tr for T` and `impl<T: B> Tr for T`,
         // overlap whatever their bounds say. Only the program's own traits declared once (modules flatten names),
         // without trait arguments, and not under the features that allow overlapping impls)
@@ -9369,6 +9373,157 @@ fn allow_variant_bindings(src: &str, errs: &mut Vec<String>) {
     if allowed {
         errs.retain(|e| !e.ends_with("(E0170)"));
     }
+}
+
+/// E0276 "impl has stricter requirements than trait", at the bound: a method of an impl of a trait of the program's
+/// whose own type parameter (by its place) has a trait bound, inline or in the method's where clause, that the trait's
+/// method's parameter does not have, nor one of the bounds it has as a supertrait (`T: Ord` where the trait says
+/// `T: Eq`; `T: Eq` where it says `T: Ord` is fine). Bounds are told by their trait's name, not its arguments; not
+/// lifetimes, nor the impl's own parameters. Only read for a program with a trait with a generic method
+fn stricter_impl_bound(src: &str, items: &[SrcItem]) -> Option<String> {
+    let text = |it: &SrcItem| src.get(it.start..it.end).unwrap_or("");
+    // (a trait member with type parameters of its own: `fn f<T` before its `(`)
+    let generic_fn = |t: &str| t.find('(').is_some_and(|p| t[..p].contains('<') && t[..p].contains("fn "));
+    if !items.iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::TraitMember(_)) && generic_fn(text(it))) {
+        return None;
+    }
+    let (line, col) = stricter_impl_bound_in(src, items)?;
+    Some(format!("{line}:{col}: impl has stricter requirements than trait (E0276)"))
+}
+
+#[cold]
+#[inline(never)]
+fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize)> {
+    use crate::lexer::ItemKind as K;
+    let text = |it: &SrcItem| src.get(it.start..it.end).unwrap_or("");
+    let generic_fn = |t: &str| t.find('(').is_some_and(|p| t[..p].contains('<') && t[..p].contains("fn "));
+    use crate::parse::{Bound, GParam, Ty as PTy};
+    // (a header's name after its keyword, and the names after a `:` before its `{` / `where`: `trait B: A + Sized {`)
+    let words = |t: &str| -> Vec<String> { crate::lexer::tokenize(t.as_bytes()).iter().filter(|x| x.0 == 0).map(|x| t[x.1..x.2].to_string()).collect() };
+    let mut supers: crate::fxhash::FxMap<String, Vec<String>> = Default::default();
+    let mut trait_of: crate::fxhash::FxMap<u32, String> = Default::default();
+    for (i, it) in items.iter().enumerate() {
+        if it.kind != K::TraitHeader {
+            continue;
+        }
+        let t = text(it);
+        let head = &t[..t.find('{').unwrap_or(t.len())];
+        let w = words(head);
+        let Some(k) = w.iter().position(|x| x == "trait") else { continue };
+        let Some(name) = w.get(k + 1) else { continue };
+        let sup: Vec<String> = match head.find(':') {
+            Some(c) => {
+                let r = &head[c + 1..];
+                let r = &r[..r.find("where").unwrap_or(r.len())];
+                words(r).into_iter().filter(|x| x.starts_with(|c: char| c.is_ascii_uppercase())).collect()
+            }
+            None => vec![],
+        };
+        supers.insert(name.clone(), sup);
+        trait_of.insert(i as u32, name.clone());
+    }
+    // (std's supertraits)
+    let std_supers = |n: &str| -> &'static [&'static str] {
+        match n {
+            "Eq" => &["PartialEq"],
+            "Ord" => &["Eq", "PartialOrd", "PartialEq"],
+            "PartialOrd" => &["PartialEq"],
+            "Copy" => &["Clone"],
+            "Error" => &["Debug", "Display"],
+            "DoubleEndedIterator" | "ExactSizeIterator" => &["Iterator"],
+            "Fn" => &["FnMut", "FnOnce"],
+            "FnMut" => &["FnOnce"],
+            _ => &[],
+        }
+    };
+    let close = |ns: Vec<String>| -> Vec<String> {
+        let mut out = ns;
+        let mut k = 0;
+        while k < out.len() {
+            let n = out[k].clone();
+            for s in std_supers(&n) {
+                if !out.iter().any(|o| o == s) {
+                    out.push(s.to_string());
+                }
+            }
+            if let Some(ss) = supers.get(&n) {
+                for s in ss {
+                    if !out.contains(s) {
+                        out.push(s.clone());
+                    }
+                }
+            }
+            k += 1;
+        }
+        out
+    };
+    // (a method's own type parameters with their bounds: inline, and its where clause's `T: B`)
+    let params = |g: &crate::parse::Generics| -> Vec<Vec<(String, crate::parse::Pos)>> {
+        g.params
+            .iter()
+            .filter_map(|q| match q {
+                GParam::Ty(n, bs, _) => {
+                    let mut v: Vec<(String, crate::parse::Pos)> = vec![];
+                    let mut add = |bs: &[Bound]| {
+                        for b in bs {
+                            if let Bound::Trait(false, p) = b {
+                                if let Some(s) = p.segs.last() {
+                                    v.push((s.name.clone(), p.pos));
+                                }
+                            }
+                        }
+                    };
+                    add(bs);
+                    for (t, pbs) in &g.preds {
+                        if matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == *n && p.segs[0].args.is_empty()) {
+                            add(pbs);
+                        }
+                    }
+                    Some(v)
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    let sig = |t: &str| -> Option<crate::parse::FnSig> {
+        match crate::parse::parse_file(t).ok()?.items.into_iter().next()?.kind {
+            crate::parse::ItemKind::Fn(s, _) => Some(s),
+            _ => None,
+        }
+    };
+    for (h, it) in items.iter().enumerate() {
+        if it.kind != K::ImplHeader {
+            continue;
+        }
+        // (`impl<..> Tr<..> for X {`: the trait's name before `for`)
+        let t = text(it);
+        let head = &t[..t.find('{').unwrap_or(t.len())];
+        let Some(f) = head.find(" for ") else { continue };
+        let before = &head[..f];
+        let before = before[..before.find('<').filter(|&l| before[l..].contains('>') && !before[..l].ends_with("impl")).unwrap_or(before.len())].trim_end();
+        let tw = words(before);
+        let Some(tr) = tw.last() else { continue };
+        let Some((&th, _)) = trait_of.iter().find(|(_, n)| *n == tr) else { continue };
+        for m in items.iter().filter(|m| m.kind == K::ImplMember(h as u32) && generic_fn(text(m))) {
+            let Some(ms) = sig(text(m)) else { continue };
+            let Some(d) = items.iter().find(|d| d.kind == K::TraitMember(th) && sig(text(d)).is_some_and(|ds| ds.name == ms.name)) else { continue };
+            let Some(ds) = sig(text(d)) else { continue };
+            let (mp, dp) = (params(&ms.generics), params(&ds.generics));
+            if mp.len() != dp.len() {
+                continue;
+            }
+            for (mb, db) in mp.iter().zip(&dp) {
+                let allowed = close(db.iter().map(|x| x.0.clone()).collect());
+                if let Some((_, pos)) = mb.iter().find(|(n, _)| n != "Sized" && !allowed.contains(n)) {
+                    // (the position in the member's text: its first line starts where the member does)
+                    let line = m.line + pos.line as usize - 1;
+                    let col = if pos.line == 1 { m.start - src[..m.start].rfind('\n').map_or(0, |k| k + 1) + pos.col as usize + 1 } else { pos.col as usize + 1 };
+                    return Some((line, col));
+                }
+            }
+        }
+    }
+    None
 }
 
 /// A merge's diff marker in the source (`<<<<<<<` at a line's start, outside strings and comments) in place of the

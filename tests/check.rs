@@ -2196,3 +2196,23 @@ fn unnamed_imports_atomic_orderings_and_variant_bindings() {
     assert_eq!(first("#![allow(bindings_with_variant_name)]\nenum E { A, B }\nfn f(e: E) -> u8 {\n    match e {\n        A => 1,\n    }\n}\nfn main() {}\n"), None, "allowed");
     assert_eq!(first("mod m {\n    pub enum E { A, B }\n}\nuse m::E::*;\nfn f(e: m::E) -> u8 {\n    match e {\n        A => 1,\n        B => 2,\n    }\n}\nfn main() {}\n"), None, "imported");
 }
+
+#[test]
+fn stricter_bounds_than_the_trait() {
+    // (E0276: an impl's method whose own type parameter has a bound the trait's method does not give; each expected
+    // line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize| Some((l, c, "impl has stricter requirements than trait (E0276)".to_string()));
+    assert_eq!(first("trait Foo {\n    fn foo<T>(x: T);\n}\nimpl Foo for bool {\n    fn foo<T>(x: T) where T: Copy {}\n}\nfn main() {}\n"), e(5, 30), "a where clause");
+    assert_eq!(
+        first("trait A {}\ntrait B: A {}\ntrait Foo {\n    fn f<T: A>(&self);\n    fn g<T: Eq>(&self);\n}\nimpl Foo for u8 {\n    fn f<T: A>(&self) {}\n    fn g<T: Ord>(&self) {}\n}\nfn main() {}\n"),
+        e(9, 13),
+        "Ord where the trait says Eq"
+    );
+    // (the trait's bounds' supertraits, and fewer bounds than the trait's)
+    assert_eq!(first("trait Foo {\n    fn f<T: Ord + Copy>(&self);\n}\nimpl Foo for u8 {\n    fn f<T: Eq + Clone + PartialOrd>(&self) {}\n}\nfn main() {}\n"), None, "supertraits");
+    assert_eq!(first("trait A {}\ntrait B: A {}\ntrait Foo {\n    fn f<T: B>(&self);\n}\nimpl Foo for u8 {\n    fn f<T: A>(&self) {}\n}\nfn main() {}\n"), None, "a supertrait of the program's");
+}

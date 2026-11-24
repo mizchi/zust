@@ -338,6 +338,7 @@ compile-fail	associated-types/param-env-shadowing-suggestion-no-ice-on-missing-a
 run-pass	associated-types/project-defer-unification.rs
 run-pass	associated-types/projection-as-type-alias.rs
 compile-fail	associated-types/recursive-associated-type-overflow-21946.rs
+compile-fail	associated-types/remove-invalid-type-bound-suggest-issue-127555.rs
 compile-fail	associated-types/report-unsatisfied-where-bound-error.rs
 compile-fail	associated-types/resolve-method-with-missing-assoc-type.rs
 run-pass	associated-types/ret-associated-type.rs
@@ -1602,6 +1603,8 @@ run-pass	collections/hashset-connected-border-12860.rs
 run-pass	collections/vecdeque-append-operation-54477.rs
 compile-fail	compare-method/bad-self-type.rs
 compile-fail	compare-method/region-extra-2.rs
+compile-fail	compare-method/trait-bound-on-type-parameter.rs
+compile-fail	compare-method/traits-misc-mismatch-1.rs
 check-pass	compiletest-self-test/dir.with.dots/test.rs
 compile-fail	conditional-compilation/cfg-attr-invalid-predicate.rs
 check-pass	conditional-compilation/cfg-attr-multi-false.rs
@@ -2511,6 +2514,7 @@ compile-fail	error-codes/E0262.rs
 compile-fail	error-codes/E0263.rs
 compile-fail	error-codes/E0267.rs
 compile-fail	error-codes/E0268.rs
+compile-fail	error-codes/E0276.rs
 compile-fail	error-codes/E0277-2.rs
 compile-fail	error-codes/E0277-3.rs
 compile-fail	error-codes/E0277-4.rs
@@ -3307,6 +3311,7 @@ compile-fail	impl-trait/in-trait/ensure-rpitits-are-created-before-freezing.rs
 check-pass	impl-trait/in-trait/expeced-refree-to-map-to-reearlybound-ice-108580.rs
 check-pass	impl-trait/in-trait/issue-102301.rs
 check-pass	impl-trait/in-trait/lifetime-in-associated-trait-bound.rs
+compile-fail	impl-trait/in-trait/mismatched-where-clauses.rs
 compile-fail	impl-trait/in-trait/missing-lt-outlives-in-rpitit-114274.rs
 check-pass	impl-trait/in-trait/nested-rpitit.rs
 compile-fail	impl-trait/in-trait/not-inferred-generic.rs
@@ -3314,6 +3319,7 @@ compile-fail	impl-trait/in-trait/opaque-and-lifetime-mismatch.rs
 compile-fail	impl-trait/in-trait/opaque-in-impl-is-opaque.rs
 check-pass	impl-trait/in-trait/outlives-in-nested-rpit.rs
 compile-fail	impl-trait/in-trait/refine-resolution-errors.rs
+compile-fail	impl-trait/in-trait/return-dont-satisfy-bounds.rs
 check-pass	impl-trait/in-trait/reveal.rs
 check-pass	impl-trait/in-trait/rpitit-cycle-in-generics-of.rs
 compile-fail	impl-trait/in-trait/rpitit-duplicate-associated-fn-with-nested.rs
@@ -7870,6 +7876,7 @@ compile-fail	traits/suggest-fully-qualified-path-without-adjustment.rs
 run-pass	traits/superdefault-generics.rs
 compile-fail	traits/test-2.rs
 compile-fail	traits/test.rs
+compile-fail	traits/trait-bound-mismatch-14853.rs
 compile-fail	traits/trait-impl-missing-method.rs
 compile-fail	traits/trait-impl-overflow-with-where-clause-20413.rs
 run-pass	traits/trait-implementation-for-primitive-type-5280.rs
