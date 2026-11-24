@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795521981095,
+  "lastUpdate": 1795521983365,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -72892,6 +72892,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 92.566,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "625915162dd770d4866090d6c4595d427083a2e2",
+          "message": "Region check part 22: projections' associated types in annotations and parameters, closures cast from a local (#124)\n\nRegion check part 22: projections' associated types in annotations and parameters, closures cast from a local",
+          "timestamp": "2026-11-24T21:01:23+09:00",
+          "tree_id": "e7e45d845f3490f617e2398426619492aca9b4d1",
+          "url": "https://github.com/mizchi/zust/commit/625915162dd770d4866090d6c4595d427083a2e2"
+        },
+        "date": 1795521983122,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.771,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.612,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.383,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 4.596,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.79,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 0.875,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 1.67,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 204.568,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 109.527,
             "unit": "MiB"
           }
         ]
