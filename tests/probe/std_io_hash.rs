@@ -7,7 +7,9 @@ fn parse(s: &str) -> Res<i32> {
     s.parse::<i32>().map_err(|e| format!("bad {}: {}", s, e))
 }
 fn main() {
-    let path = "/tmp/zustc_probe_std_io_hash.txt";
+    // (a file of this build's own, beside the executable: the tests that build and run the probes at the same time
+    // (driver2, driver2_inline, driver2_cranelift) each have their own, where a fixed /tmp path was shared)
+    let path = &format!("{}.txt", std::env::args().next().unwrap());
     fs::write(path, "alpha\nbeta\n").unwrap();
     let s = fs::read_to_string(path).unwrap();
     println!("{:?} {}", s, fs::read(path).unwrap().len());
@@ -34,5 +36,5 @@ fn main() {
     let w = b"pub fn";
     println!("{} {}", matches!(&w[..3], b"pub" | b"fn"), &w[4..] == b"fn");
     println!("{}", String::from_utf8_lossy(&[104, 105, 0xff, 33]));
-    let _ = fs::write(path, "");
+    let _ = fs::remove_file(path);
 }
