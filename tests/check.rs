@@ -2056,3 +2056,25 @@ fn attribute_paths_that_resolve_to_nothing() {
     // (a tool's attribute)
     assert_eq!(first("#[rustfmt::skip]\n#[allow(clippy::all)]\n#[diagnostic::on_unimplemented(message = \"x\")]\ntrait T {}\nfn main() {}\n"), None, "tools");
 }
+
+#[test]
+fn local_where_a_constant_goes() {
+    // (E0435: a local of a fn in a value a constant holds, or in an array's length; each expected line and column is
+    // rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize| Some((l, c, "attempt to use a non-constant value in a constant (E0435)".to_string()));
+    assert_eq!(first("fn main() {\n    let foo = 42u32;\n    const FOO: u32 = foo;\n}\n"), e(3, 22), "a const in a fn");
+    assert_eq!(first("fn f(x: isize) {\n    static CHILD: isize = x + 1;\n}\nfn main() {}\n"), e(2, 27), "a static, a parameter");
+    assert_eq!(first("struct P { v: u8 }\nimpl P {\n    fn get(&self) -> u8 {\n        static V: u8 = self.v;\n        V\n    }\n}\nfn main() {}\n"), e(4, 24), "self");
+    assert_eq!(first("fn main() {\n    let n: usize = 0;\n    struct Foo;\n    impl Foo {\n        const N: usize = n;\n    }\n}\n"), e(5, 26), "an associated const");
+    assert_eq!(first("fn main() {\n    let foo: isize = 100;\n    enum Stuff {\n        Bar = foo,\n    }\n}\n"), e(4, 15), "a discriminant");
+    assert_eq!(first("fn main() {\n    let n = 3;\n    let _a = [0u8; n];\n}\n"), e(3, 20), "a repeat's length");
+    assert_eq!(first("fn main() {\n    let n = 3;\n    let _a: [u8; n];\n}\n"), e(3, 18), "an array type's length");
+    assert_eq!(first("const fn test_me<T>(a: usize) -> usize {\n    const { a }\n}\nfn main() {}\n"), e(2, 13), "an inline const in a generic fn");
+    // (an item of the name, a `let` of the value's own, a `let` in a block already closed)
+    assert_eq!(first("const FOO: u32 = 1;\nfn main() {\n    let x = 2;\n    const BAR: u32 = FOO + 1;\n    static Z: u32 = { let x = 3; x };\n    let _ = (x, BAR, Z);\n}\n"), None, "items and the value's own let");
+    assert_eq!(first("fn main() {\n    {\n        let a = 1;\n        let _ = a;\n    }\n    const A: i32 = 2;\n    let _ = A;\n}\n"), None, "a closed block's let");
+}

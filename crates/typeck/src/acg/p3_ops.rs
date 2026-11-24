@@ -1918,6 +1918,10 @@ impl Cx<'_> {
                 i.base10_digits().parse::<u32>().or_else(|er| err(SP, er))
             }
             Expr::Path(..) if self.const_generic(e).is_some() => Ok(self.const_generic(e).unwrap()),
+            // (E0435: a local where a constant goes, `let n = 3; [0; n]`, at its name)
+            Expr::Path(None, p) if self.user_code && self.const_of(e).is_none() && ident_of(p).is_some_and(|n| self.lookup(n).is_some()) => {
+                Err(self.at(p.pos, "attempt to use a non-constant value in a constant (E0435)".to_string()))
+            }
             Expr::Path(_, p) if ident_of(p).is_some() || self.const_of(e).is_some() => {
                 // (関連定数 `S::N` は const の名前 `S::N` で引く)
                 let name = match self.const_of(e) {

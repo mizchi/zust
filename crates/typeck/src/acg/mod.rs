@@ -102,6 +102,10 @@ pub fn borrow_error(e: &str) -> bool {
 /// out (no projection `T::Item` / `<T as Tr>::X`, no `impl` / `dyn` type, no hole, no lifetime), as `x` of
 /// `impl Debug` returned as a String (a placeholder is `T#`)
 pub fn placeholder_mismatch(e: &str, bound_eqs: &[&str], free: &[String]) -> bool {
+    // (a local where a constant goes (E0435): holds whatever the parameters are)
+    if e.ends_with("attempt to use a non-constant value in a constant (E0435)") {
+        return true;
+    }
     // (an operator a type parameter's bounds do not give, p3_ops: holds whatever the parameter is)
     if (e.ends_with("(E0369)") || e.ends_with("(E0368)"))
         && ["cannot add `", "cannot subtract `", "cannot multiply `", "cannot divide `", "cannot calculate the remainder of `", "binary assignment operation `"].iter().any(|v| e.contains(v))
@@ -1458,7 +1462,34 @@ impl Cx<'_> {
     /// 書かれた型 (`Self` と型パラメータは env から)
     pub fn parse_ty(&self, t: &crate::parse::Ty) -> R<Ty> {
         let ts = crate::ast_types::tysyn(t, Some(&crate::types::TySyn::Named("Self".into())))?;
-        self.prog.resolve_env(&ts, &self.env)
+        self.prog.resolve_env(&ts, &self.env).map_err(|e| self.local_len_err(t, e))
+    }
+
+    /// E0435 of an array type whose length names a local, `let n = 3; let a: [u8; n];`, at the name (the program's
+    /// "cannot find constant `n`" otherwise)
+    #[cold]
+    #[inline(never)]
+    fn local_len_err(&self, t: &crate::parse::Ty, e: String) -> String {
+        use crate::parse::Ty as T;
+        let Some(n) = e.strip_prefix("cannot find constant `").and_then(|r| r.strip_suffix('`')) else { return e };
+        if !self.user_code || self.lookup(n).is_none() {
+            return e;
+        }
+        fn find(t: &T, n: &str) -> Option<Sp> {
+            match t {
+                T::Array(el, len) => match strip_paren(len) {
+                    Expr::Path(None, p) if ident_of(p) == Some(n) => Some(p.pos),
+                    _ => find(el, n),
+                },
+                T::Ref(_, _, x) | T::Ptr(_, x) | T::Slice(x) => find(x, n),
+                T::Tuple(ts) => ts.iter().find_map(|x| find(x, n)),
+                _ => None,
+            }
+        }
+        match find(t, n) {
+            Some(sp) => self.at(sp, "attempt to use a non-constant value in a constant (E0435)".to_string()),
+            None => e,
+        }
     }
 
     /// マクロの引数。型推論が読んだものがあればその構文木 (型の記録がある)、なければ読み直す

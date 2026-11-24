@@ -2139,7 +2139,9 @@ fn relocate(e: String, it: &SrcItem) -> String {
 }
 
 /// E0434: a fn item written inside another fn (hoisted out of it) that uses a local of a fn it is in, or its `self`:
-/// `fn foo() { let y = 5; fn bar() -> u32 { y } }`. A name the program also has an item of is that item
+/// `fn foo() { let y = 5; fn bar() -> u32 { y } }`. A name the program also has an item of is that item.
+/// E0435 the same way for a value a constant holds: a `const` / `static` item's, an enum's discriminant, an impl's
+/// associated const, written in a fn (`let n = 1; static Y: usize = n + 1;`)
 fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String> {
     use crate::parse::Expr;
     // (hoisted items come last, each piece's first line starting with a mark: none when the last item's isn't)
@@ -2162,7 +2164,12 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
         let a = crate::prep::hoisted_at(&marks, it.line).unwrap_or(it.line);
         (a, a + text_of(it).matches('\n').count())
     };
-    let hoisted: Vec<usize> = (0..items.len()).filter(|&i| crate::prep::hoisted_at(&marks, items[i].line).is_some() && text_of(&items[i]).contains("fn ")).collect();
+    let hoisted: Vec<usize> = (0..items.len())
+        .filter(|&i| {
+            let t = text_of(&items[i]);
+            crate::prep::hoisted_at(&marks, items[i].line).is_some() && (t.contains("fn ") || t.contains("const ") || t.contains("static ") || (t.contains("enum ") && t.contains('=')))
+        })
+        .collect();
     if hoisted.is_empty() {
         return None;
     }
@@ -2301,9 +2308,27 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
         }
         Some(open.into_iter().flatten().collect())
     };
+    // (the values a constant item holds: a const's or static's, an enum's discriminants, or (an impl's member) an
+    // associated const's)
+    let const_values = |it: &SrcItem| -> Vec<Expr> {
+        let Ok(file) = crate::parse::parse_file(text_of(it)) else { return vec![] };
+        let Some(item) = file.items.into_iter().next() else { return vec![] };
+        match item.kind {
+            crate::parse::ItemKind::Const(_, _, Some(e)) | crate::parse::ItemKind::Static(_, _, _, e) => vec![e],
+            crate::parse::ItemKind::Enum(_, _, vs) => vs.into_iter().filter_map(|(_, _, d)| d).collect(),
+            _ => vec![],
+        }
+    };
     for &h in &hoisted {
         let it = &items[h];
-        let Ok(Some(f)) = parse_fn(src, it) else { continue };
+        let f = match parse_fn(src, it) {
+            Ok(Some(f)) => Some(f),
+            _ => None,
+        };
+        let values = if f.is_none() { const_values(it) } else { vec![] };
+        if f.is_none() && values.is_empty() {
+            continue;
+        }
         // (the locals of the fns it is written in)
         let line = range(it).0;
         let mut outer: Vec<String> = vec![];
@@ -2338,7 +2363,19 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
         if outer.is_empty() {
             continue;
         }
-        let Some((fname, name, at)) = capture(&f.sig, &f.block, &outer, &item_names) else { continue };
+        // (a constant's value: the first local it names, with `self` (which the walk does not give) where it is written)
+        let in_const = f.is_none();
+        let found_use = match &f {
+            Some(f) => capture(&f.sig, &f.block, &outer, &item_names),
+            None => values.iter().find_map(|e| {
+                let mut used = crate::ast_closure::used_vars_at(e);
+                if format!("{e:?}").contains("\"self\"") && !used.iter().any(|(n, _)| n == "self") {
+                    used.push(("self".to_string(), Default::default()));
+                }
+                used.into_iter().find(|(n, _)| !item_names.contains(n.as_str()) && outer.contains(n)).map(|(n, at)| (String::new(), n, at))
+            }),
+        };
+        let Some((fname, name, at)) = found_use else { continue };
         let text = text_of(it);
         // (rustc points at the use: the free one the walk found, at its line (from 1) and column (in characters, from
         // 0) in the item's text)
@@ -2366,8 +2403,9 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
                 let t = crate::lexer::tokenize(b);
                 let w = |k: usize| if k < t.len() && t[k].0 == 0 { &text[t[k].1..t[k].2] } else { "" };
                 let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && b[t[k].1] == c;
+                // (in a fn's body; in a constant, after its `=`)
                 let from = (1..t.len()).find(|&k| w(k) == fname && w(k - 1) == "fn").unwrap_or(0);
-                let open = (from..t.len()).find(|&k| sym(k, b'{'))?;
+                let open = if in_const { (0..t.len()).find(|&k| sym(k, b'=') && !sym(k + 1, b'='))? } else { (from..t.len()).find(|&k| sym(k, b'{'))? };
                 let Some(k) = (open..t.len()).find(|&k| w(k) == name && !(k > 0 && (sym(k - 1, b'.') || sym(k - 1, b':'))) && !sym(k + 1, b':') && !sym(k + 1, b'!')) else {
                     continue;
                 };
@@ -2375,6 +2413,9 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
             }
         };
         let (line, col) = item_pos(src, orig, &marks, it, off);
+        if in_const {
+            return Some(format!("{line}:{col}: attempt to use a non-constant value in a constant (E0435)"));
+        }
         return Some(format!("{line}:{col}: can't capture dynamic environment in a fn item (E0434)"));
     }
     None

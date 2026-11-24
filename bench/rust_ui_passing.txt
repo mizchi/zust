@@ -1980,6 +1980,7 @@ run-pass	consts/issue-29927-1.rs
 run-pass	consts/issue-29927.rs
 run-pass	consts/issue-33537.rs
 check-pass	consts/issue-33903.rs
+compile-fail	consts/issue-3521.rs
 run-pass	consts/issue-37222.rs
 check-pass	consts/issue-37550-1.rs
 run-pass	consts/issue-37550.rs
@@ -2010,6 +2011,7 @@ check-pass	consts/issue-94371.rs
 run-pass	consts/issue-broken-mir.rs
 check-pass	consts/let-irrefutable-pattern-ice-120337.rs
 run-pass	consts/load-preserves-partial-init.rs
+compile-fail	consts/local-var-in-associated-const.rs
 compile-fail	consts/long-constant-evaluation-cause-ice-in-sty.rs
 check-pass	consts/manually_drop_structural_eq.rs
 run-pass	consts/match-const-fn-structs.rs
@@ -2027,6 +2029,7 @@ run-pass	consts/module-const-array-size-13763.rs
 compile-fail	consts/nested_erroneous_ctfe.rs
 compile-fail	consts/non-const-value-in-const-pat-binding.rs
 compile-fail	consts/non-const-value-in-const.rs
+compile-fail	consts/non-constant-value-in-nested-const.rs
 run-pass	consts/non-scalar-cast.rs
 run-pass	consts/oncecell-const-init-57781.rs
 run-pass	consts/packed_pattern.rs
@@ -3678,6 +3681,7 @@ compile-fail	inline-const/in-pat-recovery.rs
 check-pass	inline-const/instance-doesnt-depend-on-type.rs
 check-pass	inline-const/interpolated.rs
 compile-fail	inline-const/promotion.rs
+compile-fail	inline-const/referencing-local-variables.rs
 compile-fail	inline-const/uninit-local.rs
 compile-fail	intrinsics/incorrect-read_via_copy-defn.rs
 compile-fail	intrinsics/incorrect-transmute.rs
@@ -6998,9 +7002,12 @@ compile-fail	statics/missing_lifetime.rs
 build-pass	statics/nested-allocations-dont-inherit-codegen-attrs.rs
 check-pass	statics/nested_struct.rs
 check-pass	statics/recursive_interior_mut.rs
+compile-fail	statics/static-cannot-use-local-variable.rs
 run-pass	statics/static-function-pointer.rs
 compile-fail	statics/static-generic-param-soundness.rs
 run-pass	statics/static-impl.rs
+compile-fail	statics/static-in-fn-cannot-use-param.rs
+compile-fail	statics/static-in-method-cannot-use-self.rs
 run-pass	statics/static-method-in-trait-with-tps-intracrate.rs
 run-pass	statics/static-methods-in-traits.rs
 run-pass	statics/static-methods-in-traits2.rs
@@ -7975,6 +7982,7 @@ compile-fail	type/type-check/issue-67273-assignment-match-prior-arm-bool-expecte
 compile-fail	type/type-check/missing_trait_impl.rs
 compile-fail	type/type-check/point-at-inference-3.rs
 compile-fail	type/type-check/unknown_type_for_closure.rs
+compile-fail	type/type-dependent-def-issue-49241.rs
 compile-fail	type/type-error-break-tail.rs
 compile-fail	type/type-mismatch-multiple.rs
 compile-fail	type/type-mismatch.rs
