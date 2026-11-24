@@ -1,0 +1,58 @@
+{
+  "case": "energy",
+  "hashes_sha256": {
+    "TASK.md": "fecabb9298549520c680f125b9cc301a2215f0d8346eea11f5619048b10a35ad",
+    "CASE.md": "9b0d7ebeae6c65296ca6db701af76cc653bbc9eaf571e2f47ba34fd96bcaac5e",
+    "README.md": "c17c83238c812655f679735be2224cfb2d1a32cac8c890420a6d944434982e54",
+    "zsc": "f9beff151e7fd4cecadecfd60076c22722c0d69406be37095bd0ecc979c05821",
+    "zustc": "ff800802f7534225411a7c54ea7515778a5d95ae924a2a11bdd4c6f4d32394b0"
+  },
+  "attempts": [
+    {
+      "source": "@wasm export fn energy(xs: F32Array) -> f32 {\n  let mut total: f32 = 0.0;\n  for x in xs {\n    total += x * x;\n  }\n  total\n}\n\nexport fn has_signal(xs: F32Array) -> bool {\n  energy(xs) > 0.0\n}\n",
+      "exit_code": "0\n",
+      "compiler_log": "zsc: answer.zsc → out/answer.js, .d.ts (front 0.9 ms; wasm layer via zustc 351.7 ms, 12818 bytes)\n"
+    }
+  ],
+  "answer": "@wasm export fn energy(xs: F32Array) -> f32 {\n  let mut total: f32 = 0.0;\n  for x in xs {\n    total += x * x;\n  }\n  total\n}\n\nexport fn has_signal(xs: F32Array) -> bool {\n  energy(xs) > 0.0\n}\n",
+  "executor_test": "import assert from 'node:assert/strict';\nimport * as api from './out/answer.js';\n\nfor (const [values, expected] of [[[], 0], [[0, -0], 0], [[0.5, -2, 3], 13.25], [[4096, 1, 1], 16777216]]) {\n  const xs = new Float32Array(values);\n  assert.equal(api.energy(xs), expected);\n  assert.equal(api.has_signal(xs), expected > 0);\n}\n",
+  "feedback": "「文法(現時点の案と決定事項)」の冒頭で、公開関数は export fn、属性を付けるときは @wasm export fn の順だと分かった。「数値専用の配列」と「ローカルな可変性とループ」を参照し、最初から F32Array を for x in xs で走査して明示的に f32 とした変数へ足していく形を予想した。「数値」の小数リテラルの規則から、判定では energy(xs) > 0.0 と書いた。\n\n実装前の動作確認は生成モジュールがまだないため失敗した。実装後は最初のコンパイルで成功し、構文や型エラーによる再試行は 0 回。生成された JS を Node で直接 import でき、空配列、ゼロ、正負の混在、f32 で各加算を丸めた場合だけ期待値に一致する入力がすべて通った。\n\n迷ったのは JS 側で wasm の初期化が必要かどうか。README の「@wasm fn」には関数の定義例はあるが、生成物を使う側の最小例を見つけられなかった。実際には通常の ESM import で動いた。この節の dot の直後に、JS から dot を import して呼ぶ 2 行があると、初期化方法を推測せず動作を確認できる。\n",
+  "verification": {
+    "task": "energy",
+    "passed": true,
+    "checks": [
+      {
+        "name": "compile",
+        "passed": true
+      },
+      {
+        "name": "empty",
+        "passed": true
+      },
+      {
+        "name": "zero",
+        "passed": true
+      },
+      {
+        "name": "mixed signs",
+        "passed": true
+      },
+      {
+        "name": "fractional",
+        "passed": true
+      },
+      {
+        "name": "export spelling",
+        "passed": true
+      },
+      {
+        "name": "typed JS API",
+        "passed": true
+      },
+      {
+        "name": "wasm energy and JS has_signal",
+        "passed": true
+      }
+    ]
+  }
+}

@@ -148,6 +148,7 @@ crate::enc_struct!(Summary {
     adt_defaults,
     impl_generics,
     impl_self_ty,
+    impl_self_path,
     consts,
     statics,
     closures,

@@ -1,0 +1,36 @@
+--- a/README.md
++++ b/README.md
+@@ -72,7 +72,9 @@
+ export fn display(u: User) -> String { u.name + " #" + (u.id as i32).to_string() }
+ ```
+ 
+-- まずは**プレーンなレコード型**だけを読む(src/tsimport.rs)。`interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
++取り込めるのはプレーンなレコード型、文字列リテラルの union、判別キーつきの union です。
++
++- **レコード型** (src/tsimport.rs): `interface X { .. }` か `type X = { .. }` で、型引数、`extends`、任意のフィールド(`?`)がないもの
+   - フィールドの型: `string` は `String`、`number` は `f64`(JS の number は倍精度。整数にするときは `as i32`)、`boolean` は `bool`、`bigint` は `i64`。配列(`T[]`、`readonly T[]`、`Array<T>`、`ReadonlyArray<T>`)と、同じファイルの別のレコード型
+   - 読み込む型が使う型(`Post` の `author: User`)も一緒に読む。export されていない型でもよい
+   - ファイルの残り(関数、union、総称型など)は、import しない限り読まない。import した型が部分集合の外なら、TS のファイルのその位置でエラーになる(`` `Opt.name` is optional ``、tests/errors/ts_*.zsc)
+@@ -80,6 +82,7 @@
+ - **union は enum として読む**(JS では TS の値そのまま)
+   - 文字列リテラルの union `type Status = "draft" | "published"`: データのない enum。バリアントはタグの先頭を大文字にした名前(`Draft`、`Published`)で、JS の値は TS の文字列そのもの(`"draft"`)
+   - 判別キーつきの union `type Shape = { kind: "circle"; r: number } | { kind: "rect"; w: number; h: number }`: 全メンバーが同じ文字列リテラルのフィールド(タグ)を持つもの。メンバーはファイルの別のオブジェクト型の名前でもよい(`Square | { kind: "empty" }`)。バリアントは `Circle(f64)`、`Rect(f64, f64)` で、フィールドは TS のメンバーの順。パターン `Circle(r)` は `s.kind === "circle"` と `s.r` になり、`Circle(2.0)` は `{ kind: "circle", r: 2.0 }` を作る。`==` もタグとメンバー名で比べる
++  - タグだけのメンバーを照合するときは空の括弧を付けません。たとえば `{ kind: "idle" } | { kind: "busy"; jobs: number }` は `match state { Idle => 0.0, Busy(n) => n }` と書けます。
+   - 読まないもの(エラー): 文字列とオブジェクトが混ざった union、共通のタグがない union、名前にならないタグ(`"in-progress"`)、大文字にすると同じになるタグ
+   - TS から読んだ union も `@wasm` との境界を越える(下の「バイト列で越える値」、TS の形のまま)
+ - 読み込んだ型は、zustscript のレコードと同じに使える(フィールドの読み出し、`{ ..u }` の更新、`==`、`@wasm` との境界)
+@@ -244,6 +247,14 @@
+ - テストで確かめていること: 借用・所有の両方とも、呼び出しの後で JS 側の表は空になる
+ 
+ ### `@wasm fn`: 同じ zustscript を JS でも wasm でも実行する(方向 A の合流)
++
++Node.js から呼ぶ入口は生成された ES モジュールです。たとえば `scale.zsc` に `@wasm export fn twice(x: f64) -> f64 { x + x }` を書いて `out/` にコンパイルすると、呼び出し側は次のようになります。モジュールの読み込み時に生成 JS が隣の `scale.wasm` を初期化するので、関数は import の後にそのまま呼べます。
++
++```js
++// demo.mjs
++import { twice } from "./out/scale.js";
++console.log(twice(1.5)); // 3
++```
+ 
+ ```zsc
+ @wasm export fn dot(a: Array<f64>, b: Array<f64>) -> f64 {

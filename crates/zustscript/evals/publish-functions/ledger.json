@@ -1,0 +1,106 @@
+{
+  "date": "2026-11-24",
+  "harness": "Codex subagents; fork_turns=none; procedural read boundary",
+  "model": null,
+  "reasoning_effort": null,
+  "node": "v24.22.2",
+  "zsc_source_commit": "2ff5500ac8f1d7501d3cff646ee5c7b5cc24c4f1",
+  "zustc_source_commit": "e2bdf5dbf4c2011bcbe6d76336dc834a5c4bd3d5",
+  "conditions": {
+    "01": "language README at zsc_source_commit",
+    "02": "same guide with guide.patch applied"
+  },
+  "judge_input_fields": [
+    "case",
+    "attempts",
+    "answer",
+    "verification"
+  ],
+  "score_order": [
+    "functionality",
+    "public_boundary",
+    "usage_path"
+  ],
+  "trials": [
+    {
+      "record": "rounds/01/energy-1.json",
+      "judge_id": "T4",
+      "scores": [
+        2,
+        2,
+        2
+      ],
+      "evidence": "T4.json の5行目の energy は F32Array を受けて f32 の sum を 0.0 から x * x ずつ加算し、has_signal は energy(xs) > 0.0 を返す。20–33行の empty、zero、mixed signs、fractional がすべて成功。36–45行で両関数の公開名、JS の型、energy の Wasm 実行と has_signal の JS 実行も確認済み。 3–10行の提出記録は1回で終了コード0。初回ソースと最終回答は一致する。"
+    },
+    {
+      "record": "rounds/01/energy-2.json",
+      "judge_id": "T7",
+      "scores": [
+        2,
+        2,
+        2
+      ],
+      "evidence": "T7.json の5行目の energy は F32Array を受けて f32 の total を 0.0 から x * x ずつ加算し、has_signal は energy(xs) > 0.0 を返す。20–33行の empty、zero、mixed signs、fractional がすべて成功。36–45行で両関数の公開名、JS の型、energy の Wasm 実行と has_signal の JS 実行も確認済み。 3–10行の提出記録は1回で終了コード0。初回ソースと最終回答は一致する。"
+    },
+    {
+      "record": "rounds/01/status-1.json",
+      "judge_id": "T6",
+      "scores": [
+        2,
+        2,
+        2
+      ],
+      "evidence": "T6.json の5行目の label は ./model.ts の Shipment を受け、Waiting で「準備中」、Shipped で非公開の format_code を使って「便 」と code を連結する。20–33行の waiting、shipped、empty code、Unicode code がすべて成功。36–45行で export 名、helper の非公開性、元の TS 型も確認済み。 3–10行の提出記録は1回で終了コード0。初回ソースと最終回答は一致する。"
+    },
+    {
+      "record": "rounds/01/status-2.json",
+      "judge_id": "T5",
+      "scores": [
+        2,
+        2,
+        2
+      ],
+      "evidence": "T5.json の5行目の label は ./model.ts の Shipment を受け、Waiting で「準備中」、Shipped で非公開の format_code を使って「便 」と code を連結する。20–33行の waiting、shipped、empty code、Unicode code がすべて成功。36–45行で export 名、helper の非公開性、元の TS 型も確認済み。 3–10行の提出記録は1回で終了コード0。初回ソースと最終回答は一致する。"
+    },
+    {
+      "record": "rounds/02/energy-1.json",
+      "judge_id": "T2",
+      "scores": [
+        2,
+        2,
+        2
+      ],
+      "evidence": "T2.json の5行目の energy は F32Array を受けて f32 の sum を 0.0 から x * x ずつ加算し、has_signal は energy(xs) > 0.0 を返す。20–33行の empty、zero、mixed signs、fractional がすべて成功。36–45行で両関数の公開名、JS の型、energy の Wasm 実行と has_signal の JS 実行も確認済み。 3–10行の提出記録は1回で終了コード0。初回ソースと最終回答は一致する。"
+    },
+    {
+      "record": "rounds/02/energy-2.json",
+      "judge_id": "T3",
+      "scores": [
+        2,
+        2,
+        2
+      ],
+      "evidence": "T3.json の5行目の energy は F32Array を受けて f32 の sum を 0.0 から x * x ずつ加算し、has_signal は energy(xs) > 0.0 を返す。20–33行の empty、zero、mixed signs、fractional がすべて成功。36–45行で両関数の公開名、JS の型、energy の Wasm 実行と has_signal の JS 実行も確認済み。 3–10行の提出記録は1回で終了コード0。初回ソースと最終回答は一致する。"
+    },
+    {
+      "record": "rounds/02/status-1.json",
+      "judge_id": "T8",
+      "scores": [
+        2,
+        2,
+        2
+      ],
+      "evidence": "T8.json の5行目の label は ./model.ts の Shipment を受け、Waiting で「準備中」、Shipped で非公開の format_code を使って「便 」と code を連結する。20–33行の waiting、shipped、empty code、Unicode code がすべて成功。36–45行で export 名、helper の非公開性、元の TS 型も確認済み。 3–10行の提出記録は1回で終了コード0。初回ソースと最終回答は一致する。"
+    },
+    {
+      "record": "rounds/02/status-2.json",
+      "judge_id": "T1",
+      "scores": [
+        2,
+        2,
+        2
+      ],
+      "evidence": "T1.json の5行目の label は ./model.ts の Shipment を受け、Waiting で「準備中」、Shipped で非公開の format_code を使って「便 」と code を連結する。20–33行の waiting、shipped、empty code、Unicode code がすべて成功。36–45行で export 名、helper の非公開性、元の TS 型も確認済み。 3–10行の提出記録は1回で終了コード0。初回ソースと最終回答は一致する。"
+    }
+  ]
+}

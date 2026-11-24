@@ -1,0 +1,58 @@
+{
+  "case": "energy",
+  "hashes_sha256": {
+    "TASK.md": "fecabb9298549520c680f125b9cc301a2215f0d8346eea11f5619048b10a35ad",
+    "CASE.md": "9b0d7ebeae6c65296ca6db701af76cc653bbc9eaf571e2f47ba34fd96bcaac5e",
+    "README.md": "c17c83238c812655f679735be2224cfb2d1a32cac8c890420a6d944434982e54",
+    "zsc": "f9beff151e7fd4cecadecfd60076c22722c0d69406be37095bd0ecc979c05821",
+    "zustc": "ff800802f7534225411a7c54ea7515778a5d95ae924a2a11bdd4c6f4d32394b0"
+  },
+  "attempts": [
+    {
+      "source": "@wasm export fn energy(xs: F32Array) -> f32 {\n  let mut sum: f32 = 0.0;\n  for x in xs {\n    sum += x * x;\n  }\n  sum\n}\n\nexport fn has_signal(xs: F32Array) -> bool {\n  energy(xs) > 0.0\n}\n",
+      "exit_code": "0\n",
+      "compiler_log": "zsc: answer.zsc → out/answer.js, .d.ts (front 0.7 ms; wasm layer via zustc 694.2 ms, 12818 bytes)\n"
+    }
+  ],
+  "answer": "@wasm export fn energy(xs: F32Array) -> f32 {\n  let mut sum: f32 = 0.0;\n  for x in xs {\n    sum += x * x;\n  }\n  sum\n}\n\nexport fn has_signal(xs: F32Array) -> bool {\n  energy(xs) > 0.0\n}\n",
+  "executor_test": "import assert from \"node:assert/strict\";\nimport { energy, has_signal } from \"./out/answer.js\";\nfor (const values of [[], [0, -0], [3, -4], [0.1, 0.2, 0.3], [4096, 1, 1], [NaN]]) {\n  const xs = new Float32Array(values);\n  const expected = xs.reduce((s, x) => Math.fround(s + Math.fround(x * x)), 0);\n  assert.equal(energy(xs), expected);\n  assert.equal(has_signal(xs), expected > 0);\n}\n",
+  "feedback": "## 参考にした節と最初の予想\n\nREADME の「文法(現時点の案と決定事項)」に属性と公開指定の順序が明記されていたため、最初から `@wasm export fn energy` と `export fn has_signal` を選んだ。「数値専用の配列」の型対応と「ローカルな可変性とループ」の例を組み合わせて、`F32Array` の要素を順に読み、`let mut sum: f32 = 0.0` に加算できると予想した。「数値」節から、比較にも小数リテラル `0.0` を使った。\n\n## 結果と再試行\n\nコンパイルは初回で成功した。生成された JS を Node から普通に import して、空配列、すべてゼロ、負数を含む配列、小数、加算のたびに f32 丸めが現れる配列、NaN の 6 ケースで両関数の結果を確認できた。コンパイルや実装の失敗、再コンパイルはなかった。実装前のテストでは予定どおり生成 JS がなく import に失敗した。\n\n## 迷った点と改善案\n\nソースの公開記法は冒頭で見つかった。呼び出し側で Wasm の非同期初期化が要るかは探しづらく、生成 JS のトップレベルで初期化してくれると実行後に分かった。「@wasm fn」の節に、生成 JS から公開関数を import して Float32Array を渡す Node の最小例があると、初期化を誰が行うかも一目で判断できる。\n",
+  "verification": {
+    "task": "energy",
+    "passed": true,
+    "checks": [
+      {
+        "name": "compile",
+        "passed": true
+      },
+      {
+        "name": "empty",
+        "passed": true
+      },
+      {
+        "name": "zero",
+        "passed": true
+      },
+      {
+        "name": "mixed signs",
+        "passed": true
+      },
+      {
+        "name": "fractional",
+        "passed": true
+      },
+      {
+        "name": "export spelling",
+        "passed": true
+      },
+      {
+        "name": "typed JS API",
+        "passed": true
+      },
+      {
+        "name": "wasm energy and JS has_signal",
+        "passed": true
+      }
+    ]
+  }
+}

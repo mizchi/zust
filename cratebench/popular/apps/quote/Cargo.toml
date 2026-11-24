@@ -1,0 +1,12 @@
+[package]
+name = "popular-quote"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# (not a member of zust's workspace)
+[workspace]
+
+[dependencies]
+quote = "=1.0.47"
+proc-macro2 = "=1.0.107"
