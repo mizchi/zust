@@ -230,6 +230,10 @@ impl Cx<'_> {
         let scrut_drop = self.bk.scrut_drop.take();
         // (E0004: the arms must cover the scrutinee's type; user code only)
         if self.user_code {
+            // (first E0170: such a binding is a catch-all arm in rustc, which zustc reads as the variant)
+            if let Some(e) = self.variant_binding(arms, place.ty()) {
+                return Err(e);
+            }
             if let Some(w) = self.non_exhaustive(arms, place.ty()) {
                 // (no arms at all: rustc names the type, `match () {}`)
                 if arms.is_empty() {
@@ -724,6 +728,40 @@ impl Cx<'_> {
             }
             _ => push(out, place),
         }
+    }
+
+    /// bindings_with_variant_name (E0170, deny by default): an arm whose pattern is only a binding by value (behind `&`s)
+    /// of a name the scrutinee's enum has a unit variant of, `Nil => ..` where `Stack::Nil` is not in scope, at the
+    /// arm (rustc 1.100's message)
+    #[cold]
+    #[inline(never)]
+    fn variant_binding(&self, arms: &[crate::parse::Arm], t: Ty) -> Option<String> {
+        let Ty::Struct(sid) = self.strip_refs(t) else { return None };
+        let sd = &self.prog.structs[sid as usize];
+        let base = self.prog.base_of(sid);
+        let name = &self.prog.structs[base as usize].name;
+        // (the program's own enums, whose variants no `use` may bring into scope: zustc resolves a variant's name
+        // alone as the variant, as if it were imported)
+        let prelude = self.prog.struct_item.get(base as usize).is_none_or(|&ii| ii >= self.prog.prelude_from);
+        if !sd.is_enum || prelude || self.prog.use_prefixes.iter().any(|u| u == name) {
+            return None;
+        }
+        for arm in arms {
+            let mut p = &arm.pat;
+            while let Pat::Ref(_, q) = p {
+                p = q;
+            }
+            let Pat::Ident(false, false, n, None) = p else { continue };
+            if !sd.variants.iter().any(|v| v.name == *n && v.kind == crate::types::VariantKind::Unit) {
+                continue;
+            }
+            // (a constant of the name is no binding)
+            if self.prog.const_index.contains_key(n.as_str()) {
+                continue;
+            }
+            return Some(self.at(arm.pos, format!("pattern binding `{n}` is named the same as one of the variants of the type `{name}` (E0170)")));
+        }
+        None
     }
 
     /// A tuple struct pattern (`V(..)`) of a unit variant (E0532) or a struct variant (E0164; E0532 by its name alone),

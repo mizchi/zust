@@ -456,6 +456,9 @@ pub struct Program {
     pub deny_unused_mut: bool,
     /// the source allows (or warns of) `overflowing_literals`, at the crate or an item: no "literal out of range"
     pub allow_overflowing_literals: bool,
+    /// The names a `use` of the program's has a path through (`E` of `use E::*;` / `use m::E::{A, B};`): an enum of
+    /// one of these names may have its variants in scope, so a binding of a variant's name may be the variant
+    pub use_prefixes: Vec<String>,
     /// `#![deny(trivial_casts)]` / `#![deny(trivial_numeric_casts)]`: a cast a coercion or nothing would do
     pub deny_trivial_casts: (bool, bool),
     /// the program's `#[must_use]` fns (by name), for unused_must_use
@@ -1154,6 +1157,7 @@ impl Program {
             deny_unused_alloc: false,
             deny_unused_mut: false,
             allow_overflowing_literals: false,
+            use_prefixes: Vec::new(),
             deny_trivial_casts: (false, false),
             must_use_fns: vec![],
             prim_mut_methods: HashSet::default(),

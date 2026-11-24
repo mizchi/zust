@@ -102,8 +102,8 @@ pub fn borrow_error(e: &str) -> bool {
 /// out (no projection `T::Item` / `<T as Tr>::X`, no `impl` / `dyn` type, no hole, no lifetime), as `x` of
 /// `impl Debug` returned as a String (a placeholder is `T#`)
 pub fn placeholder_mismatch(e: &str, bound_eqs: &[&str], free: &[String]) -> bool {
-    // (a local where a constant goes (E0435): holds whatever the parameters are)
-    if e.ends_with("attempt to use a non-constant value in a constant (E0435)") {
+    // (a local where a constant goes (E0435), a binding of a variant's name (E0170): hold whatever the parameters are)
+    if e.ends_with("attempt to use a non-constant value in a constant (E0435)") || (e.ends_with("(E0170)") && e.contains("pattern binding `")) {
         return true;
     }
     // (an operator a type parameter's bounds do not give, p3_ops: holds whatever the parameter is)

@@ -1849,6 +1849,26 @@ impl Session2 {
             ["allow(", "warn(", "expect("].iter().any(|a| head.trim_start().starts_with(a)) && !in_text(i)
         });
         prog.deny_trivial_casts = deny_trivial_casts;
+        // (bindings_with_variant_name (E0170): the names the program's `use`s go through, for which a variant of the
+        // name may be in scope)
+        for it in &items[..user] {
+            if !matches!(src.as_bytes().get(it.start), Some(b'u' | b'p')) {
+                continue;
+            }
+            let t = src.get(it.start..it.end).unwrap_or("");
+            let t = t.strip_prefix("pub ").unwrap_or(t).trim_start();
+            let Some(rest) = t.strip_prefix("use ") else { continue };
+            let b = rest.as_bytes();
+            let mut k = 0;
+            while let Some(d) = rest[k..].find("::") {
+                let end = k + d;
+                let start = rest[..end].rfind(|c: char| !(c.is_alphanumeric() || c == '_')).map_or(0, |i| i + 1);
+                if start < end && b[start].is_ascii_uppercase() {
+                    prog.use_prefixes.push(rest[start..end].to_string());
+                }
+                k = end + 2;
+            }
+        }
         if deny_must_use {
             for it in &items[..user] {
                 let text = src.get(it.start..it.end).unwrap_or("");
@@ -9336,6 +9356,21 @@ fn hoisted_check_err_holds(msg: &str) -> bool {
     HOLDS.iter().any(|h| msg.starts_with(h)) && !msg.contains("Self") && !msg.contains("__h") && !msg.contains("unsupported")
 }
 
+/// E0170 (bindings_with_variant_name) taken out of errs where an attribute of an item's (its leading ones) or of the
+/// crate's names the lint (an `allow`, read for all of the program)
+#[cold]
+#[inline(never)]
+fn allow_variant_bindings(src: &str, errs: &mut Vec<String>) {
+    let Ok(items) = crate::lexer::split(src) else { return };
+    // (the crate's own, `#![allow(..)]`, is an item of its own)
+    let allowed = items.iter().any(|it| {
+        src.get(it.start..it.end).is_some_and(|t| t.starts_with('#') && if t.starts_with("#!") { t } else { leading_attrs(t) }.contains("bindings_with_variant_name"))
+    });
+    if allowed {
+        errs.retain(|e| !e.ends_with("(E0170)"));
+    }
+}
+
 /// A merge's diff marker in the source (`<<<<<<<` at a line's start, outside strings and comments) in place of the
 /// analysis's error e: rustc's parser stops at it ("encountered diff marker", at its first column), after the lexer's
 /// errors of delimiters only
@@ -9614,6 +9649,10 @@ impl Session2 {
         self.const_lines.clear();
         if errs.is_empty() {
             errs.extend(a.late_err.clone());
+        }
+        // (E0170 is a lint: not where an attribute an item starts with allows it, read only when there is one)
+        if errs.iter().any(|e| e.ends_with("(E0170)")) {
+            allow_variant_bindings(src, &mut errs);
         }
         let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).collect();
         // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its borrow

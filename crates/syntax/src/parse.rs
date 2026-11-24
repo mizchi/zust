@@ -3062,7 +3062,32 @@ impl Parser {
                 self.i += 1;
                 let mut s = String::new();
                 let mut prev_word = false;
+                // (the path before each open `{`, and since it: an import of `self` of the crate root, `self` or `super`
+                // has no name (E0431, rustc 1.100's message, at the `self`))
+                let (mut prefixes, mut path): (Vec<String>, String) = (vec![], String::new());
                 while !self.is_punct(";") {
+                    let t = self.tok(0).ok_or_else(|| self.err("unterminated use"))?;
+                    let leaf = t.kind == TokKind::Ident && t.text == "self" && path.is_empty() && (self.peek_is(1, "}") || self.peek_is(1, ",") || self.peek_is(1, ";"));
+                    if leaf {
+                        // (`use self;`, `use {self};`, `use crate::{self};`, `use super::{self};`; not `use ::{self};`, which is
+                        // another error, nor a module's `self`)
+                        let outer = prefixes.last().map_or("", String::as_str);
+                        if !outer.starts_with("::") && outer.trim_end_matches("::").split("::").all(|w| matches!(w, "" | "crate" | "self" | "super")) {
+                            return Err(self.err_plain("imports need to be explicitly named"));
+                        }
+                    }
+                    match t.text.as_str() {
+                        "{" => {
+                            prefixes.push(format!("{}{}", prefixes.last().map_or("", String::as_str), path));
+                            path.clear();
+                        }
+                        "}" => {
+                            prefixes.pop();
+                            path.clear();
+                        }
+                        "," => path.clear(),
+                        _ => path.push_str(&t.text),
+                    }
                     let t = self.tok(0).ok_or_else(|| self.err("unterminated use"))?;
                     // (名前・`}` の後ろにすぐ名前は来ない: `use a::{b} struct X` は `;` がない)
                     let word = t.kind == TokKind::Ident || (t.kind == TokKind::Close);

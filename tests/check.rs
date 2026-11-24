@@ -2157,3 +2157,42 @@ fn diff_markers_and_mismatched_delimiters() {
     // (an unclosed one at the end is the lexer's other error, before a diff marker)
     assert_eq!(first("mod tests {\n<<<<<<< HEAD\n    fn a() {\n=======\n    fn b() {\n>>>>>>> x\n    }\n}\n").map(|d| d.2), Some("this file contains an unclosed delimiter".to_string()), "unclosed");
 }
+
+#[test]
+fn unnamed_imports_atomic_orderings_and_variant_bindings() {
+    // (E0431, invalid_atomic_ordering and bindings_with_variant_name (E0170); each expected line and column is
+    // rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let unnamed = |l: usize, c: usize| Some((l, c, "imports need to be explicitly named".to_string()));
+    assert_eq!(first("use {self};\nfn main() {}\n"), unnamed(1, 6), "use {{self}}");
+    assert_eq!(first("use self;\nfn main() {}\n"), unnamed(1, 5), "use self");
+    assert_eq!(first("use crate::{self};\nfn main() {}\n"), unnamed(1, 13), "crate");
+    // (a module's `self`, one with a name, `use ::{self}` (another error))
+    assert_eq!(first("use std::fmt::{self, Write};\nuse crate::{self as y};\nfn main() {}\n"), None, "named");
+    assert_eq!(
+        first("use std::sync::atomic::{AtomicUsize, Ordering};\nfn main() {\n    let x = AtomicUsize::new(0);\n    x.store(1, Ordering::Acquire);\n}\n"),
+        Some((4, 16, "atomic stores cannot have `Acquire` or `AcqRel` ordering".to_string())),
+        "store"
+    );
+    assert_eq!(
+        first("use std::sync::atomic::{AtomicI32, Ordering};\nfn main() {\n    let x = AtomicI32::new(0);\n    let _ = x.compare_exchange(0, 1, Ordering::SeqCst, Ordering::AcqRel);\n}\n"),
+        Some((4, 56, "`compare_exchange`'s failure ordering may not be `Release` or `AcqRel`, since a failed `compare_exchange` does not result in a write".to_string())),
+        "compare_exchange"
+    );
+    assert_eq!(
+        first("use std::sync::atomic::{AtomicBool, Ordering};\nfn main() {\n    let x = AtomicBool::new(true);\n    let _ = x.load(Ordering::Acquire);\n    x.store(false, Ordering::Release);\n}\n"),
+        None,
+        "orderings it can have"
+    );
+    assert_eq!(
+        first("enum E { A, B }\nfn f(e: E) -> u8 {\n    match e {\n        A => 1,\n    }\n}\nfn main() {}\n"),
+        Some((4, 9, "pattern binding `A` is named the same as one of the variants of the type `E` (E0170)".to_string())),
+        "a variant's name"
+    );
+    // (allowed by the crate, or the variants in scope by a `use`)
+    assert_eq!(first("#![allow(bindings_with_variant_name)]\nenum E { A, B }\nfn f(e: E) -> u8 {\n    match e {\n        A => 1,\n    }\n}\nfn main() {}\n"), None, "allowed");
+    assert_eq!(first("mod m {\n    pub enum E { A, B }\n}\nuse m::E::*;\nfn f(e: m::E) -> u8 {\n    match e {\n        A => 1,\n        B => 2,\n    }\n}\nfn main() {}\n"), None, "imported");
+}

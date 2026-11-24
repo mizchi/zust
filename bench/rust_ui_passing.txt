@@ -2542,6 +2542,7 @@ compile-fail	error-codes/E0426.rs
 compile-fail	error-codes/E0428.rs
 check-pass	error-codes/E0429.rs
 compile-fail	error-codes/E0430.rs
+compile-fail	error-codes/E0431.rs
 compile-fail	error-codes/E0432.rs
 compile-fail	error-codes/E0433.rs
 compile-fail	error-codes/E0434.rs
@@ -3537,6 +3538,7 @@ compile-fail	imports/issue-45829/issue-45829.rs
 compile-fail	imports/issue-45829/rename-use-with-tabs.rs
 compile-fail	imports/issue-45829/rename-with-path.rs
 compile-fail	imports/issue-45829/rename.rs
+compile-fail	imports/issue-47623.rs
 run-pass	imports/issue-4865-1.rs
 run-pass	imports/issue-4865-2.rs
 run-pass	imports/issue-4865-3.rs
@@ -4074,6 +4076,7 @@ check-pass	lint/issue-121070-let-range.rs
 check-pass	lint/issue-14837.rs
 build-pass	lint/issue-1866.rs
 check-pass	lint/issue-19102.rs
+compile-fail	lint/issue-30302.rs
 compile-fail	lint/issue-35075.rs
 check-pass	lint/issue-47775-nested-macro-unnecessary-parens-arg.rs
 run-pass	lint/issue-49588-non-shorthand-field-patterns-in-pattern-macro.rs
@@ -4096,7 +4099,14 @@ check-pass	lint/lint-double-negations.rs
 run-pass	lint/lint-expr-stmt-attrs-for-early-lints.rs
 check-pass	lint/lint-ffi-safety-all-phantom.rs
 compile-fail	lint/lint-group-nonstandard-style.rs
+compile-fail	lint/lint-invalid-atomic-ordering-bool.rs
+compile-fail	lint/lint-invalid-atomic-ordering-exchange-weak.rs
+compile-fail	lint/lint-invalid-atomic-ordering-exchange.rs
 check-pass	lint/lint-invalid-atomic-ordering-false-positive.rs
+compile-fail	lint/lint-invalid-atomic-ordering-int.rs
+compile-fail	lint/lint-invalid-atomic-ordering-ptr.rs
+compile-fail	lint/lint-invalid-atomic-ordering-uint.rs
+compile-fail	lint/lint-invalid-atomic-ordering-update.rs
 check-pass	lint/lint-level-macro-def-mod.rs
 check-pass	lint/lint-level-macro-def.rs
 compile-fail	lint/lint-malformed.rs
@@ -5959,6 +5969,7 @@ compile-fail	pattern/issue-115599.rs
 run-pass	pattern/issue-11577.rs
 check-pass	pattern/issue-117626.rs
 run-pass	pattern/issue-12582.rs
+compile-fail	pattern/issue-14221.rs
 run-pass	pattern/issue-15080.rs
 compile-fail	pattern/issue-17718-patterns.rs
 run-pass	pattern/issue-27320.rs
@@ -5966,6 +5977,7 @@ compile-fail	pattern/issue-28992-empty.rs
 run-pass	pattern/issue-6449.rs
 compile-fail	pattern/issue-66270-pat-struct-parser-recovery.rs
 compile-fail	pattern/issue-67037-pat-tup-scrut-ty-diff-less-fields.rs
+compile-fail	pattern/issue-67776-match-same-name-enum-variant-refs.rs
 compile-fail	pattern/issue-72574-1.rs
 compile-fail	pattern/issue-72574-2.rs
 compile-fail	pattern/issue-74539.rs
@@ -8375,9 +8387,11 @@ compile-fail	use/use-after-move-based-on-type.rs
 compile-fail	use/use-after-move-self-based-on-type.rs
 compile-fail	use/use-after-move-self.rs
 compile-fail	use/use-associated-const.rs
+compile-fail	use/use-crate-self.rs
 compile-fail	use/use-from-trait.rs
 check-pass	use/use-keyword.rs
 compile-fail	use/use-meta-mismatch.rs
+compile-fail	use/use-mod/use-mod-2.rs
 compile-fail	use/use-mod/use-mod-3.rs
 check-pass	use/use-mod/use-mod-5.rs
 check-pass	use/use-mod/use-mod-6.rs

@@ -90,6 +90,17 @@ impl Cx<'_> {
     }
 
     pub(crate) fn method_call(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (invalid_atomic_ordering, deny by default: an atomic's load / store / failure ordering it cannot have)
+        if let Expr::MethodCall(r, m, _, args, _) = e {
+            if self.user_code
+                && matches!(m.as_bytes().first(), Some(b'l' | b's' | b'c' | b'f'))
+                && matches!(m.as_str(), "load" | "store" | "compare_exchange" | "compare_exchange_weak" | "fetch_update")
+            {
+                if let Some(er) = self.atomic_ordering(r, m, args) {
+                    return Err(er);
+                }
+            }
+        }
         // (a call that named its trait: set while this call is resolved, and the outer call's back after)
         let forced = match e {
             Expr::MethodCall(_, m, ..) => self.explicit_traits.get(&(e as *const Expr as usize)).map(|t| (m.clone(), t.clone())),
@@ -168,6 +179,32 @@ impl Cx<'_> {
         self.caller_locs.truncate(n);
         self.explicit_trait = prev;
         r
+    }
+
+    /// invalid_atomic_ordering (rustc 1.100's messages, at the ordering): a std atomic's `load` with `Release` /
+    /// `AcqRel`, `store` with `Acquire` / `AcqRel`, `compare_exchange(_weak)` / `fetch_update` with a failure ordering
+    /// of `Release` / `AcqRel`, written as `Ordering::X` or `X`
+    #[cold]
+    #[inline(never)]
+    fn atomic_ordering(&self, r: &Expr, m: &str, args: &[Expr]) -> Option<String> {
+        let Ty::Struct(sid) = self.strip_refs(self.peek(r)?) else { return None };
+        if !self.prog.structs[self.prog.base_of(sid) as usize].name.starts_with("Atomic") {
+            return None;
+        }
+        let (k, bad, msg) = match m {
+            "load" => (0, ["Release", "AcqRel"], "atomic loads cannot have `Release` or `AcqRel` ordering".to_string()),
+            "store" => (1, ["Acquire", "AcqRel"], "atomic stores cannot have `Acquire` or `AcqRel` ordering".to_string()),
+            _ => (
+                if m == "fetch_update" { 1 } else { 3 },
+                ["Release", "AcqRel"],
+                format!("`{m}`'s failure ordering may not be `Release` or `AcqRel`, since a failed `{m}` does not result in a write"),
+            ),
+        };
+        let Expr::Path(None, p) = strip_paren(args.get(k)?) else { return None };
+        let n = p.segs.last()?.name.as_str();
+        // (std's `atomic::Ordering` is the prelude's `__AtOrd_`)
+        let ordering = p.segs.len() == 1 || matches!(p.segs[p.segs.len() - 2].name.as_str(), "Ordering" | "__AtOrd_");
+        (ordering && bad.contains(&n)).then(|| self.at(p.pos, msg))
     }
 
     /// An impl's method i is for t: its impl's self type (its parameters solved) is t (`impl A for W<u8>`'s is not
