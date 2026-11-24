@@ -3463,3 +3463,12 @@ fn part20_closure_result_placeholder() {
     assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 7] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
     assert_eq!(check("fn take<F: FnMut(&isize) -> &isize>(_f: F) {}\nfn t<'x>(_x: &'x isize) {\n    take(|z| z);\n}\npub fn f<'a>(_: &'a i32, _: impl FnOnce(&mut &mut &'a i32)) {}\npub fn h<'a>(p: &'a i32) {\n    f(p, |x: &mut &mut &'a i32| {\n        let _: &mut &mut &'a i32 = x;\n    })\n}\nfn main() {}\n"), vec![]);
 }
+
+/// A closure boxed where a `Box<dyn Fn(..)>` is expected (a `let` annotation, a turbofish): the trait object is its
+/// signature, as for `&|x| ..` where a `&dyn Fn(..)` is (lifetimes/closure-lifetime-bounds-10291.rs)
+#[test]
+fn part20_boxed_closure_signature() {
+    let d = check("fn t1<'x>(x: &'x isize) {\n    let _f: Box<dyn for<'z> FnMut(&'z isize) -> &'z isize> = Box::new(|_z| x);\n}\nfn t2<'x>(x: &'x isize) {\n    drop::<Box<dyn for<'z> FnMut(&'z isize) -> &'z isize>>(Box::new(|_z| {\n        x\n    }));\n}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![2, 6], "{d:?}");
+    assert_eq!(check("fn t<'x>(_x: &'x isize) {\n    let mut f: Box<dyn FnMut(&isize) -> isize> = Box::new(|z| *z + 1);\n    let g: Box<dyn Fn(&str) -> &str> = Box::new(|s| s.trim());\n    println!(\"{} {}\", f(&1), g(\" a \"));\n}\nfn main() { t(&1); }\n"), vec![]);
+}
