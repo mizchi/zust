@@ -611,6 +611,104 @@ mod tests {
         split(src).unwrap().iter().map(|i| i.hash).collect()
     }
 
+    /// A path through glob re-exports names the item they reach: in a dependency crate, `crate::uid_t` with the
+    /// root's `pub use unix::*;`, and `mylibc::passwd` from outside through two globs (`pub use self::linux::*;` in
+    /// unix). libc 0.2: `crate::gid_t` in `unix/linux_like` was "cannot find type"
+    #[test]
+    fn paths_through_glob_reexports() {
+        let src = "mod mylibc {\n    pub mod unix {\n        pub type uid_t = u32;\n        pub mod linux {\n            pub struct passwd { pub pw_uid: crate::uid_t }\n            pub fn uid(p: &passwd) -> crate::uid_t { p.pw_uid }\n        }\n        pub use self::linux::*;\n    }\n    pub use unix::*;\n}\nfn main() {\n    let p = mylibc::passwd { pw_uid: 1 };\n    let _u: mylibc::uid_t = mylibc::uid(&p);\n}\n";
+        let out = rename_module_collisions_in(src, &["mylibc".to_string()]).unwrap();
+        assert!(!out.contains("crate::uid_t") && !out.contains("crate :: uid_t"), "{out}");
+        assert!(out.contains("pw_uid: mylibc__unix__uid_t"), "{out}");
+        assert!(out.contains("let p = mylibc__unix__linux__passwd {"), "{out}");
+        assert!(out.contains("let _u: mylibc__unix__uid_t = mylibc__unix__linux__uid(&p);"), "{out}");
+    }
+
+    /// A bare name a module's globs pass on from several levels down: libc's unix uses `time_t`, which
+    /// `linux_like/linux/gnu/b64` defines, through `pub use self::linux_like::*;` and the globs below it
+    #[test]
+    fn bare_name_through_nested_globs() {
+        let src = "mod mylibc {\n    pub mod unix {\n        pub mod linux {\n            pub mod b64 {\n                pub type time_t = i64;\n            }\n            pub use self::b64::*;\n        }\n        pub use self::linux::*;\n        pub struct timeval { pub tv_sec: time_t }\n    }\n    pub use unix::*;\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["mylibc".to_string()]).unwrap();
+        assert!(out.contains("tv_sec: mylibc__unix__linux__b64__time_t"), "{out}");
+    }
+
+    /// A named import of what a glob re-exports: libc's prelude has `pub(crate) use crate::{size_t, ..};` with
+    /// size_t from the root's `pub use unix::*;`, and `use crate::prelude::*;` in unix/linux_like
+    #[test]
+    fn named_import_of_a_glob_reexport() {
+        let src = "mod mylibc {\n    mod prelude {\n        pub(crate) use crate::{size_t};\n    }\n    pub mod unix {\n        pub type size_t = usize;\n        pub mod linux_like {\n            use crate::prelude::*;\n            pub struct iovec { pub iov_len: size_t }\n        }\n        pub use self::linux_like::*;\n    }\n    pub use unix::*;\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["mylibc".to_string()]).unwrap();
+        assert!(out.contains("iov_len: mylibc__unix__size_t"), "{out}");
+    }
+
+    /// A `use` path whose first module came by a glob: libc's new/mod.rs has `pub(crate) use linux_uapi::*;` and then
+    /// `pub use linux::types::*;`, linux being linux_uapi's (`crate::__s64` in unix/linux_like)
+    #[test]
+    fn use_path_through_a_globbed_module() {
+        let src = "mod mylibc {\n    mod new {\n        mod linux_uapi {\n            pub(crate) mod linux {\n                pub(crate) mod types {\n                    pub type __s64 = i64;\n                }\n            }\n        }\n        pub(crate) use linux_uapi::*;\n        pub use linux::types::*;\n    }\n    pub use new::*;\n    pub struct statx_timestamp { pub tv_sec: crate::__s64 }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["mylibc".to_string()]).unwrap();
+        assert!(out.contains("tv_sec: mylibc__new__linux_uapi__linux__types____s64"), "{out}");
+    }
+
+    /// A glob of a path through modules that globs bring in, written before those globs: libc's can/bcm.rs has
+    /// `pub use crate::linux::can::*;`, linux coming by the root's `pub use new::*;` and new's
+    /// `pub(crate) use linux_uapi::*;`
+    #[test]
+    fn glob_path_through_later_globs() {
+        let src = "mod mylibc {\n    pub mod bcm {\n        pub use crate::linux::can::*;\n        pub struct frame { pub id: canid_t }\n    }\n    mod new {\n        mod linux_uapi {\n            pub(crate) mod linux {\n                pub(crate) mod can {\n                    pub type canid_t = u32;\n                }\n            }\n        }\n        pub(crate) use linux_uapi::*;\n    }\n    pub use new::*;\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["mylibc".to_string()]).unwrap();
+        assert!(out.contains("id: mylibc__new__linux_uapi__linux__can__canid_t"), "{out}");
+    }
+
+    /// Types and fns are apart: in libc's unix, `fn stat(path: *const c_char, buf: *mut stat)` beside the `struct stat`
+    /// a glob brings in from linux_like. The `stat` of `*mut stat` is the struct, not the fn's renamed name
+    #[test]
+    fn a_type_position_does_not_take_a_fn_of_the_name() {
+        let src = "mod mylibc {\n    pub mod unix {\n        pub mod linux {\n            pub struct stat { pub st_size: i64 }\n        }\n        pub use self::linux::*;\n        extern \"C\" {\n            pub fn stat(path: *const u8, buf: *mut stat) -> i32;\n        }\n        pub fn size(s: &stat) -> i64 { s.st_size }\n    }\n    pub use unix::*;\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["mylibc".to_string()]).unwrap();
+        assert!(out.contains("buf: *mut mylibc__unix__linux__stat"), "{out}");
+        assert!(out.contains("s: &mylibc__unix__linux__stat"), "{out}");
+        assert!(out.contains("pub fn mylibc__unix__stat("), "{out}");
+    }
+
+    /// A parameter named as its type, `fn mktime(tm: *mut tm)` (libc's unix, the struct tm from linux_like by a glob):
+    /// the type is renamed, the parameter's name is not
+    #[test]
+    fn parameter_named_as_its_type() {
+        let src = "mod mylibc {\n    pub mod unix {\n        pub mod linux_like {\n            pub struct tm { pub tm_sec: i32 }\n        }\n        pub use self::linux_like::*;\n        extern \"C\" {\n            pub fn mktime(tm: *mut tm) -> i64;\n            pub fn gmtime(t: *const i64) -> *mut tm;\n        }\n    }\n    pub use unix::*;\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["mylibc".to_string()]).unwrap();
+        assert!(out.contains("mktime(tm: *mut mylibc__unix__linux_like__tm)"), "{out}");
+        assert!(out.contains("-> *mut mylibc__unix__linux_like__tm"), "{out}");
+    }
+
+    /// A path through a module imported by name: glibc's `bits` has `pub(crate) use super::sysdeps::bits::{types};`
+    /// and signal.rs `pub use crate::new::glibc::bits::types::siginfo_t::*;` (libc's `crate::siginfo_t`)
+    #[test]
+    fn glob_path_through_a_module_imported_by_name() {
+        let src = "mod mylibc {\n    pub mod glibc {\n        mod sysdeps {\n            pub(crate) mod bits {\n                pub(crate) mod types {\n                    pub(crate) mod siginfo_t {\n                        pub struct siginfo_t { pub si_signo: i32 }\n                    }\n                }\n            }\n        }\n        mod bits {\n            pub(crate) use super::sysdeps::bits::{types};\n        }\n        pub(crate) mod signal {\n            pub use crate::glibc::bits::types::siginfo_t::*;\n        }\n        pub use signal::*;\n    }\n    pub use glibc::*;\n    pub fn signo(i: *const crate::siginfo_t) -> i32 { 0 }\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["mylibc".to_string()]).unwrap();
+        assert!(out.contains("i: *const mylibc__glibc__sysdeps__bits__types__siginfo_t__siginfo_t"), "{out}");
+    }
+
+    /// A path in a type's place does not take a fn of the name either: `fn sysinfo(info: *mut crate::sysinfo)` in
+    /// libc's linux_l4re_shared, the struct sysinfo coming by another glob
+    #[test]
+    fn a_type_path_does_not_take_a_fn_of_the_name() {
+        let src = "mod mylibc {\n    pub mod unix {\n        pub mod shared {\n            extern \"C\" {\n                pub fn sysinfo(info: *mut crate::sysinfo) -> i32;\n            }\n        }\n        pub mod gnu {\n            pub struct sysinfo { pub uptime: i64 }\n        }\n        pub use self::shared::*;\n        pub use self::gnu::*;\n    }\n    pub use unix::*;\n}\nfn main() {}\n";
+        let out = rename_module_collisions_in(src, &["mylibc".to_string()]).unwrap();
+        assert!(out.contains("info: *mut mylibc__unix__gnu__sysinfo"), "{out}");
+    }
+
+    /// A fn's generic parameter after `->` stays the parameter beside an import of its name (`use std::cell::Cell as C;`
+    /// and `fn id<C>(x: C) -> C`), while a value parameter there does not hide a type (`fn mktime(tm: *mut tm)`)
+    #[test]
+    fn generic_parameter_after_arrow_stays_the_parameter() {
+        let src = "use std::cell::Cell as C;\nfn id<C>(x: C) -> C {\n    x\n}\nfn main() {\n    let c = C::new(1);\n    let _ = id(c);\n}\n";
+        let out = rename_module_collisions_in(src, &[]).unwrap();
+        assert!(out.contains("fn id<C>(x: C) -> C {"), "{out}");
+    }
+
     /// A const generic parameter (`fn read_words<W, const N: usize>`, `impl<const N: usize>`) is no item of the
     /// module: a module's `const N` elsewhere does not make it collide, and it keeps its name (rand_core 0.10's
     /// utils.rs became `rand_core__utils__N`, "cannot find constant")
@@ -2155,6 +2253,95 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
     // (a name a `use` in a block (a fn body) imports, seen in that block only: (its `{`, its `}`, the name used, the new
     // name). The innermost block's wins over the module's items and imports)
     let mut block_imports: Vec<(usize, usize, Vec<u8>, Vec<u8>, usize)> = vec![];
+    // (the module of a `use` path, also through modules that globs bring in: in libc, `pub use new::*;` at the root,
+    //  `pub(crate) use linux_uapi::*;` in new, and then `pub use crate::linux::can::*;` and, in new,
+    //  `pub use linux::types::*;`. Segment by segment: a child module, or a child of a module the globs reach)
+    let child_of = |m: usize, seg: &[u8]| -> Option<usize> {
+        let mut p: Vec<Vec<u8>> = if m == usize::MAX { vec![] } else { mods[m].0.clone() };
+        p.push(seg.to_vec());
+        // (or a module the module imports by name: glibc's `bits` has `pub(crate) use super::sysdeps::..::{types};`)
+        mod_of_path.get(&p).copied().or_else(|| mod_alias.get(&(m, seg.to_vec())).copied())
+    };
+    let walk = |m: usize, segs: &[Vec<u8>], globs: &[(usize, usize)]| -> Option<usize> {
+        let mut cur = m;
+        for seg in segs {
+            let next = child_of(cur, seg).or_else(|| {
+                let mut seen = vec![cur];
+                let mut at = 0;
+                while at < seen.len() && seen.len() < 64 {
+                    let here = seen[at];
+                    at += 1;
+                    for g in globs.iter().filter(|g| g.0 == here) {
+                        if let Some(c) = child_of(g.1, seg) {
+                            return Some(c);
+                        }
+                        if !seen.contains(&g.1) {
+                            seen.push(g.1);
+                        }
+                    }
+                }
+                None
+            })?;
+            cur = next;
+        }
+        Some(cur)
+    };
+    let resolve_path = |sc: usize, path: &[Vec<u8>], at: usize, globs: &[(usize, usize)]| -> Option<usize> {
+        if let Some(m) = resolve_mod(sc, path, at) {
+            return Some(m);
+        }
+        // (the longest prefix that names a module, then the rest through globs; from the scope itself when none does)
+        for cut in (0..path.len()).rev() {
+            let start = if cut == 0 { if sc == usize::MAX { continue } else { Some(sc) } } else { resolve_mod(sc, &path[..cut], at) };
+            if let Some(st) = start.filter(|&m| m != usize::MAX || cut == 0) {
+                if let Some(m) = walk(st, &path[cut..], globs) {
+                    return Some(m);
+                }
+            }
+        }
+        None
+    };
+    // (the globs first, to a fixed point: a `use` may name a module that a later glob brings in)
+    let mut glob_uses: Vec<(usize, usize, Vec<Vec<u8>>)> = vec![];
+    {
+        let mut k = 0;
+        while k < toks.len() {
+            if is_id(k, b"use") {
+                let mut e = k;
+                while e < toks.len() && !is_sym(e, b';') {
+                    e += 1;
+                }
+                let mut items = vec![];
+                use_walk(&toks, s, k + 1, e, vec![], &mut items);
+                for (path, local) in items {
+                    if local.as_slice() == b"*" {
+                        glob_uses.push((scope_of(k), k, path));
+                    }
+                }
+                k = e;
+            }
+            k += 1;
+        }
+    }
+    let mut done = vec![false; glob_uses.len()];
+    for _ in 0..8 {
+        let mut progress = false;
+        for (i, (sc, at, path)) in glob_uses.iter().enumerate() {
+            if done[i] {
+                continue;
+            }
+            if let Some(m) = resolve_path(*sc, path, *at, &globs) {
+                done[i] = true;
+                if !globs.contains(&(*sc, m)) {
+                    globs.push((*sc, m));
+                    progress = true;
+                }
+            }
+        }
+        if !progress {
+            break;
+        }
+    }
     let mut k = 0;
     while k < toks.len() {
         if !is_id(k, b"use") {
@@ -2177,9 +2364,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         };
         for (path, local) in items {
             if local.as_slice() == b"*" {
-                if let Some(m) = resolve_mod(sc, &path, k) {
-                    globs.push((sc, m));
-                }
+                // (resolved before this loop, to a fixed point)
                 continue;
             }
             if path.len() < 2 {
@@ -2198,7 +2383,7 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                 add(local, full);
                 continue;
             }
-            if let Some(m) = resolve_mod(sc, mpath, k) {
+            if let Some(m) = resolve_path(sc, mpath, k, &globs) {
                 if let Some(nn) = renamed_in(m, &name[0]) {
                     add(local, nn);
                 } else if !def_set.contains(&(m, name[0].clone())) {
@@ -2217,7 +2402,42 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         let mut progress = false;
         let mut rest = vec![];
         for p in std::mem::take(&mut pending) {
-            let found = imports.iter().find(|i| i.0 == p.2 && i.1 == p.3).map(|i| i.2.clone());
+            // (or what the module's globs pass on, globs of globs too: libc's prelude `use crate::{size_t};` with
+            //  the root's `pub use unix::*;`)
+            let via_globs = || {
+                let mut seen = vec![p.2];
+                let mut at = 0;
+                while at < seen.len() && seen.len() < 64 {
+                    let here = seen[at];
+                    at += 1;
+                    let mut found: Option<Vec<u8>> = None;
+                    for g in globs.iter().filter(|g| g.0 == here) {
+                        let own = renamed_in(g.1, &p.3);
+                        // (an item of the glob's module that keeps its name: the import is that, left as it is)
+                        if own.is_none() && def_set.contains(&(g.1, p.3.clone())) {
+                            return None;
+                        }
+                        let hit = own.or_else(|| imports.iter().find(|i| i.0 == g.1 && i.1 == p.3).map(|i| i.2.clone()));
+                        if let Some(h) = hit {
+                            // (two globs giving different items: ambiguous, not taken)
+                            if found.as_ref().is_some_and(|f| *f != h) {
+                                return None;
+                            }
+                            found = Some(h);
+                        }
+                    }
+                    if found.is_some() {
+                        return found;
+                    }
+                    for g in globs.iter().filter(|g| g.0 == here) {
+                        if !seen.contains(&g.1) {
+                            seen.push(g.1);
+                        }
+                    }
+                }
+                None
+            };
+            let found = imports.iter().find(|i| i.0 == p.2 && i.1 == p.3).map(|i| i.2.clone()).or_else(via_globs);
             match found {
                 Some(nn) => {
                     match p.4 {
@@ -2496,7 +2716,17 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             }
             if !bound.is_empty() {
                 let is_bound = |q: usize| bound.iter().any(|&(nm, from, until)| nm == tok(q) && q >= from && q <= until);
+                // (only a type comes after `*mut` / `*const` and `->`: `fn mktime(tm: *mut tm)` names the struct tm there,
+                //  not the parameter)
+                let type_only = |q: usize| {
+                    q >= 2 && (is_id(q - 1, b"mut") || is_id(q - 1, b"const")) && is_sym(q - 2, b'*')
+                        || q >= 2 && is_sym(q - 1, b'>') && is_sym(q - 2, b'-')
+                };
                 for q in k + 2..be {
+                    // (a generic parameter is a type: it stays the fn's there too, `fn id<C>(x: C) -> C`)
+                    if type_only(q) && !generic_names.contains(&tok(q)) {
+                        continue;
+                    }
                     if toks[q].0 == 0 && is_bound(q) && !(q >= 2 && is_sym(q - 1, b':') && is_sym(q - 2, b':')) && !is_sym(q + 1, b':')
                         || (toks[q].0 == 0 && is_bound(q) && q + 2 <= be && is_sym(q + 1, b':') && !is_sym(q + 2, b':'))
                         || (generic_names.contains(&tok(q)) && is_bound(q) && local_at(q))
@@ -2557,6 +2787,34 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         out
     };
     let mut repl: Vec<(usize, usize, Vec<u8>)> = vec![]; // (開始トークン, 終了トークン (含む), 新しいテキスト)
+    // (a name a module's glob re-exports pass on, globs of globs too (breadth first, the nearest first): what the module
+    //  at the end defines (renamed) or imports by name)
+    // (the (scope, name) whose only definitions there are fns: a name in a type's place is not theirs, as types and
+    //  values are apart (libc's unix: `fn stat(.., buf: *mut stat)` beside the `struct stat` a glob brings in))
+    let mut fn_only: LSet<(usize, Vec<u8>)> = LSet::default();
+    {
+        let mut other: LSet<(usize, Vec<u8>)> = LSet::default();
+        for d in &defs {
+            let key = (d.1, d.0.clone());
+            if d.2 >= 1 && is_id(d.2 - 1, b"fn") {
+                fn_only.insert(key);
+            } else {
+                other.insert(key);
+            }
+        }
+        fn_only.retain(|x| !other.contains(x));
+    }
+    let through_globs_t = |m: usize, n: &[u8], want_type: bool| -> Option<Vec<u8>> {
+        // (a module's own item shadows what its globs bring: one that is not renamed keeps the name as written)
+        if def_set.contains(&(m, n.to_vec())) && !(want_type && fn_only.contains(&(m, n.to_vec()))) {
+            return None;
+        }
+        let ctx = GlobCtx { globs: &globs, renamed: &renamed_map, imports: &imp_map, defs: &def_set, fn_only: &fn_only, want_type };
+        match glob_item(&ctx, m, n, &mut vec![m]) {
+            GlobHit::Item(nn) => Some(nn),
+            _ => None,
+        }
+    };
     // (the items each scope defines, for the glob imports they shadow: built only when there is a glob)
     let own_defs: LSet<(usize, &[u8])> =
         if globs.is_empty() { Default::default() } else { defs.iter().map(|d| (d.1, d.0.as_slice())).collect() };
@@ -2603,6 +2861,17 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             segs.push(tok(jj).to_vec());
         }
         let sc = scope_of(k);
+        // (a type's place: after `*mut` / `*const`, `&` / `&mut`, `->`, a single `:`, `<` or `as`. A fn of the name
+        //  there is not the type: the type is looked for through the globs, past the scope's fn)
+        let type_pos = k >= 1 && {
+            let p = k - 1;
+            (is_id(p, b"mut") || is_id(p, b"const")) && p >= 1 && (is_sym(p - 1, b'*') || is_sym(p - 1, b'&'))
+                || is_sym(p, b'&')
+                || is_sym(p, b'<')
+                || is_id(p, b"as")
+                || (is_sym(p, b'>') && p >= 1 && is_sym(p - 1, b'-'))
+                || (is_sym(p, b':') && !(p >= 1 && is_sym(p - 1, b':')) && !(p + 1 < toks.len() && is_sym(p + 1, b':')))
+        };
         if segs.len() >= 2 {
             // 接頭辞のいちばん長いモジュールから見る
             let mut done = false;
@@ -2612,7 +2881,12 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
                         continue;
                     }
                     let re = || imported(m, &segs[cut]);
-                    if let Some(nn) = renamed_in(m, &segs[cut]).or_else(re) {
+                    // (or through the module's glob re-exports, globs of globs too: libc's root `pub use unix::*;`
+                    //  then unix's `pub use self::linux::*;` give `crate::gid_t` / `libc::passwd`)
+                    let via_globs = || through_globs_t(m, &segs[cut], type_pos);
+                    // (`*mut crate::sysinfo` beside `fn sysinfo`: the module's fn is not the type)
+                    let fn_there = type_pos && fn_only.contains(&(m, segs[cut].clone()));
+                    if let Some(nn) = (if fn_there { None } else { renamed_in(m, &segs[cut]) }).or_else(re).or_else(via_globs) {
                         // segs[..=cut] を新しい名前にする (`::re::label`: the leading `::` too, as the name is the item's)
                         repl.push((if leading { k - 2 } else { k }, k + 3 * cut, nn));
                         done = true;
@@ -2663,12 +2937,15 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             let own = || own_defs.contains(&(sc, n));
             // (a block's own import first: `fn f() { use b::g; g() }` beside a module-level `g`)
             let in_block = || if is_def { None } else { block_imports.iter().filter(|b| b.0 < k && k < b.1 && b.2 == n && b.4 == sc).max_by_key(|b| b.0).map(|b| b.3.clone()) };
+            let fn_here = !is_def && type_pos && fn_only.contains(&(sc, n.to_vec()));
             let nn = in_block()
-                .or_else(|| renamed_in(sc, n))
+                .or_else(|| if fn_here { None } else { renamed_in(sc, n) })
                 .or_else(|| imported(sc, n))
-                .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| renamed_in(g.1, n)) })
+                .or_else(|| if own() && !fn_here { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| if type_pos && fn_only.contains(&(g.1, n.to_vec())) { None } else { renamed_in(g.1, n) }) })
                 // (`use super::*;` は親が use で取り込んだ名前も見える)
-                .or_else(|| if own() { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| imported(g.1, n)) });
+                .or_else(|| if own() && !fn_here { None } else { globs.iter().filter(|g| g.0 == sc).find_map(|g| imported(g.1, n)) })
+                // (and what those modules' own globs pass on: libc's unix sees `time_t` of linux_like/linux/gnu/b64)
+                .or_else(|| if own() && !fn_here { None } else { through_globs_t(sc, n, type_pos) });
             // (not a macro's name: `use core::panic as p;` then `p!()` stays as it is written)
             let std_path = |nn: &[u8]| [&b"std::"[..], b"core::", b"alloc::"].iter().any(|p| nn.starts_with(p));
             // (a name before a `:` only when it is no field: the walk back to a `where` is for a name that is renamed)
@@ -3064,4 +3341,57 @@ fn dangling_docs(s: &[u8], docs: Vec<(usize, usize)>) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// What a name is through a module's globs (rename_module_collisions): an item renamed (its new name), an item that
+/// keeps its name (the module that defines it), nothing, or more than one (ambiguous, E0659: rustc reports it)
+#[derive(Clone, PartialEq)]
+enum GlobHit {
+    None,
+    Item(Vec<u8>),
+    Own(usize),
+    Ambiguous,
+}
+
+struct GlobCtx<'a> {
+    globs: &'a [(usize, usize)],
+    renamed: &'a LMap<(usize, Vec<u8>), Vec<u8>>,
+    imports: &'a LMap<(usize, Vec<u8>), Vec<u8>>,
+    defs: &'a LSet<(usize, Vec<u8>)>,
+    fn_only: &'a LSet<(usize, Vec<u8>)>,
+    /// a type's place: a module's fn of the name is not it
+    want_type: bool,
+}
+
+/// The name n through m's globs, each followed to the end (globs of globs; `stack` stops a cycle): the items they
+/// give, one of them or ambiguous
+fn glob_item(c: &GlobCtx, m: usize, n: &[u8], stack: &mut Vec<usize>) -> GlobHit {
+    let mut found = GlobHit::None;
+    for g in c.globs.iter().filter(|g| g.0 == m) {
+        let t = g.1;
+        let key = (t, n.to_vec());
+        let fn_skip = c.want_type && c.fn_only.contains(&key);
+        let r = if let (false, Some(nn)) = (fn_skip, c.renamed.get(&key)) {
+            GlobHit::Item(nn.clone())
+        } else if !fn_skip && c.defs.contains(&key) {
+            GlobHit::Own(t)
+        } else if let Some(nn) = c.imports.get(&key) {
+            GlobHit::Item(nn.clone())
+        } else if stack.contains(&t) || stack.len() > 32 {
+            GlobHit::None
+        } else {
+            stack.push(t);
+            let r = glob_item(c, t, n, stack);
+            stack.pop();
+            r
+        };
+        match (&found, r) {
+            (_, GlobHit::None) => {}
+            (_, GlobHit::Ambiguous) => return GlobHit::Ambiguous,
+            (GlobHit::None, r) => found = r,
+            (f, r) if *f == r => {}
+            _ => return GlobHit::Ambiguous,
+        }
+    }
+    found
 }
