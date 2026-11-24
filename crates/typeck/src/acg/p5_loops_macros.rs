@@ -1976,6 +1976,9 @@ impl Cx<'_> {
             }
             let inner = match expected {
                 Some(Ty::Box(t)) if !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) => Some(*t),
+                // (a closure boxed where a `Box<dyn Fn(..)>` is expected: the trait object is its signature, as for
+                // `&|x| ..` where a `&dyn Fn(..)` is (its parameters' types, the bound its body is checked with))
+                Some(Ty::Box(t @ Ty::Dyn(_))) if matches!(crate::acg::strip_paren(&cargs[0]), Expr::Closure(..)) => Some(*t),
                 _ => None,
             };
             // (`Box::<[bool; 0]>::new([])`: the turbofish names the content)

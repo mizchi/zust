@@ -81,4 +81,4 @@ rg -n 'zs_evens_squared|zs_longer|to_vec' out/costs/*.wasm.rs
 rg -A12 'function (dot|longer)\(' out/costs/*.js
 ```
 
-実行時間を比較するときは、同じ入力で JS から公開関数を呼ぶと転送も測定に入ります。`@wasm` で書いた元の例は `--all-js` で JS 版も生成できます。手書きの `wasm fn` は Rust 本体を Wasm として実行します。[数値計算のベンチマーク](https://github.com/mizchi/zust/blob/main/crates/zustscript/tests/numeric_bench.mjs) · [zustscript 入門に戻る](introduction.md)
+実行時間を比較するときは、同じ入力で JS から公開関数を呼ぶと転送も測定に入ります。同じ本体を JS で計測するには、比較用のソースで `@wasm` を外し、`--all-js` を指定します。手書きの `wasm fn` は Rust 本体を Wasm として実行します。[数値計算のベンチマーク](https://github.com/mizchi/zust/blob/main/crates/zustscript/tests/numeric_bench.mjs) · [zustscript 入門に戻る](introduction.md)

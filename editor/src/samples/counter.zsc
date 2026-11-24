@@ -4,8 +4,8 @@ extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
 type Item = { label: String, done: bool }
 type RowProps = { item: Item, onToggle: fn(String) -> () }
 
-// a @wasm fn: compiled to wasm by `zsc`, run as JS here (`--all-js`)
-@wasm export fn score(xs: Array<i32>) -> i32 {
+// A plain numeric function runs as JS here; zsc --emit-rust can lower it to Rust.
+export fn score(xs: Array<i32>) -> i32 {
   let mut s = 0;
   for x in xs { s += x * x; }
   s

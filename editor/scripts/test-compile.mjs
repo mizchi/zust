@@ -20,7 +20,12 @@ const check = (ok, what) => {
 };
 for (const d of ["src/samples", "../crates/zustscript/examples"]) {
   for (const f of readdirSync(d).filter((f) => f.endsWith(".zsc")).sort()) {
-    const r = compile(readFileSync(`${d}/${f}`, "utf8"));
+    const src = readFileSync(`${d}/${f}`, "utf8");
+    const r = compile(src);
+    if (d !== "src/samples" && /^@wasm\s/m.test(src)) {
+      check(!r.ok && r.diagnostics.some((e) => e.message.includes("requires the Rust backend")), `${f}: Rust target required`);
+      continue;
+    }
     check(r.ok && r.js.length > 0 && r.dts.length > 0, `${d}/${f} compiles${r.ok ? "" : ": " + JSON.stringify(r.diagnostics)}`);
     if (!r.ok || r.js.includes('from "react')) continue;
     const m = await import("data:text/javascript;base64," + Buffer.from(r.js).toString("base64"));

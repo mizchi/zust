@@ -112,4 +112,15 @@ console.log(peak([]).TAG);
 
 Node.js 24 で `node try-peak.ts` を実行すると、順に `-2` と `Empty` が表示されます。
 
-同じ関数を JS で試すには、`zsc` に `--all-js` を渡します。所有権やバッファ確保を自分で指定したい関数は、`export wasm fn` で、zustc が扱える Rust のサブセットを本体に書けます。生成コードと手書きのループを比べる例は次の記事にあります。[Rust から見る変換コスト](rust-costs.md) · [zustscript 入門](introduction.md)
+## 通常の関数を Rust モジュールとして使う
+
+`@wasm` は通常のビルドで Rust 経由の Wasm 実行を必須にする属性です。Rust ソースだけ欲しい場合は、普通の `export fn` にも `--emit-rust` が使えます。たとえば `peak.zsc` の `@wasm export fn peak` を `export fn peak` に変えて、次を実行します。
+
+```bash
+cargo run --manifest-path crates/zustscript/Cargo.toml -- peak.zsc --emit-rust -o out/native
+rustc --edition=2024 --crate-type lib out/native/peak.rs -o out/native/libpeak.rlib
+```
+
+`out/native/peak.rs` には `pub fn zs_peak(xs: &[i32]) -> ZsPeak` と `pub enum ZsPeak` が生成されます。Rust から直接呼ぶ場合はスライスをそのまま渡せます。この出力ではモジュール内の関数を Rust に変換するため、JS の extern 呼び出しや JSX などの非対応構文はソース位置付きのエラーになります。
+
+同じ本体を JS で実行するときは属性のない `export fn` を使います。`@wasm` を残したまま `--all-js` を指定すると、対象の関数名と位置が報告されます。所有権やバッファ確保を自分で指定したい関数は、`export wasm fn` で、zustc が扱える Rust のサブセットを本体に書けます。生成コードと手書きのループを比べる例は次の記事にあります。[Rust から見る変換コスト](rust-costs.md) · [zustscript 入門](introduction.md)

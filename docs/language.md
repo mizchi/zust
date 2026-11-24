@@ -206,6 +206,7 @@ for building programs that already pass rustc quickly, not a replacement for rus
   - Items written inside functions (`fn` / `struct` / `enum` / `const` / `use`; moved lexically to the end of the file)
   - Long paths such as `std::collections::HashMap::new()`, `VecDeque::from(vec)`, slice `split_at` / `split_at_mut`, `Chars::as_str`
   - Standard I/O: `read_line` / `lines()` / `read_to_string` / `lock()` on `io::stdin()`, `io::stdout()` / `lock()` / `flush()`, `BufWriter::new(..)`, `write!` / `writeln!` to any type with `write_str` (uses libc stdio, so the order does not get mixed up with `print!`)
+  - `io::Read` on `&[u8]` and `Cursor`, `io::BufRead` on `&[u8]`, and `BufReader::new(r)` / `with_capacity` over any `Read` (`fill_buf` / `consume` / `read`; `&mut B` is `BufRead` when `B` is)
   - `std::process::exit`, `dbg!`, `for i in 0..` (unbounded range), `rev()` on `char_indices()` / `bytes()`
   - Closures that return types containing closures (`flat_map(|i| (0..i).map(move |j| (i, j)))`, `|a| move |b| a + b`): type inference solves down to the closure's struct type (the parent's type arguments, captures, parameters, return value)
   - `Iterator::cycle`, `as_ref()` / `as_mut()` on `Box<T>`
