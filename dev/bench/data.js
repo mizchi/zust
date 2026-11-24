@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795541072886,
+  "lastUpdate": 1795541075681,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -121117,6 +121117,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 4712,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1d612db16bfd91e496d92f1b6191d349ef5b030d",
+          "message": "Region check part 25: placeholders' associated types, a path's type arguments referring to a placeholder, a callee's bound met by the caller's where clause, E0477 (#132)\n\nRegion check part 25: placeholders' associated types, a path's type arguments referring to a placeholder, a callee's bound met by the caller's where clause, E0477",
+          "timestamp": "2026-11-25T02:19:16+09:00",
+          "tree_id": "85c4d2c1a1dfb04b05406ab537d2d998dba8d3b7",
+          "url": "https://github.com/mizchi/zust/commit/1d612db16bfd91e496d92f1b6191d349ef5b030d"
+        },
+        "date": 1795541075204,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1861,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.11,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1525,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.93,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4722,
             "unit": "tests"
           }
         ]
