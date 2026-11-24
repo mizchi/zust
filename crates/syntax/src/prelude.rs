@@ -1193,6 +1193,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     // (Duration is not in std's prelude: without `time` written (`use std::time::Duration` / `time::Duration`),
     // `Duration` is the program's own or an error)
+    // (`c"..."`: codegen makes it a call of __exr_cstr_lit, a `&'static CStr`)
+    if sc.has("c\"") {
+        need.insert("__exr_cstr_lit");
+        need.insert("CStr");
+    }
     if need.contains("Duration") && !sc.has("time") {
         need.remove("Duration");
     }
