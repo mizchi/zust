@@ -578,7 +578,9 @@ impl TraitDb {
         let (sa, sb) = (a.self_ty?, b.self_ty?);
         let (aa, ba) = (a.args.as_ref()?, b.args.as_ref()?);
         let n = a.n + b.n;
-        if aa.len() != ba.len() || n >= FREE as usize {
+        // (the markers FREE + i stay below HOLE and the other reserved parameters: more parameters than that are
+        // not checked (no conflict is reported))
+        if aa.len() != ba.len() || n >= FREE as usize || FREE as usize + n > crate::program::HOLE as usize {
             return None;
         }
         // (b's parameters after a's: one namespace)
@@ -619,6 +621,17 @@ impl TraitDb {
                 let mut cx = Cx { db: self, p, stack: vec![], steps: 0, strict: true, rigid_env: false, norm_depth: 0 };
                 if cx.solve(FUEL, t, &w.tr, &w.raw, args.as_deref()) != Ans::Yes {
                     return None;
+                }
+                // (the bound's bindings too (`T: Select<Item = u8>` with u8's `Item = u16`: not for u8): each must
+                // normalize to what it is bound to; one not read or not known is no witness of a conflict)
+                if !w.eqs_read {
+                    return None;
+                }
+                for (name, want) in &w.eqs {
+                    let want = p.subst(*want, sub);
+                    if self.normalize(p, t, name, Some(&w.tr)) != Some(want) {
+                        return None;
+                    }
                 }
             }
         }
@@ -739,13 +752,24 @@ fn unify(p: &Program, a: Ty, b: Ty, sol: &mut [Option<Ty>], depth: u32) -> Optio
     if a == b {
         return Some(true);
     }
-    // (a parameter's binding, followed through the others bound so far: for the occurs check)
-    fn deep(p: &Program, t: Ty, sol: &[Option<Ty>], depth: u32) -> Ty {
-        if depth > 32 {
-            return t;
+    // (the occurs check: x in t, through the bindings of the parameters t mentions, each binding visited once)
+    fn occurs(p: &Program, t: Ty, x: u8, sol: &[Option<Ty>]) -> bool {
+        let mut seen = vec![false; sol.len()];
+        let mut todo = vec![t];
+        while let Some(t) = todo.pop() {
+            if mentions(p, t, x, 0) {
+                return true;
+            }
+            for (j, b) in sol.iter().enumerate() {
+                if let Some(b) = b {
+                    if !seen[j] && mentions(p, t, j as u8, 0) {
+                        seen[j] = true;
+                        todo.push(*b);
+                    }
+                }
+            }
         }
-        let args: Vec<Ty> = (0..sol.len()).map(|i| sol[i].map_or(Ty::Param(i as u8), |u| deep(p, u, sol, depth + 1))).collect();
-        p.subst(t, &args)
+        false
     }
     let all = |xs: &[Ty], ys: &[Ty], sol: &mut [Option<Ty>]| -> Option<bool> {
         let mut r = Some(true);
@@ -766,7 +790,7 @@ fn unify(p: &Program, a: Ty, b: Ty, sol: &mut [Option<Ty>], depth: u32) -> Optio
             if (x as usize) >= sol.len() || matches!(t, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
                 return None;
             }
-            if mentions(p, deep(p, t, sol, 0), x, 0) {
+            if occurs(p, t, x, sol) {
                 return Some(false);
             }
             sol[x as usize] = Some(t);
@@ -990,7 +1014,7 @@ impl Cx<'_> {
     /// One impl as a candidate for the goal (`candidate` of the model)
     fn candidate(&mut self, fuel: u32, c: &Clause, t: Ty, args: Option<&[Ty]>) -> Ans {
         let mut sol: Vec<Option<Ty>> = vec![None; c.n];
-        let lenient = !self.strict;
+        let lenient = !self.strict && !EXPLICIT_ARGS.with(|e| e.get());
         if let Some(st) = c.self_ty {
             if !mtch(self.p, st, t, &mut sol, lenient, 0) {
                 return Ans::No;
@@ -1342,6 +1366,12 @@ fn ground(p: &Program, t: Ty, depth: u32) -> bool {
 /// One-way matching of a pattern (an impl's head, over its parameters) against a ground type: `mtch` of the model.
 /// Exact: references and pointers agree in mutability, arrays in length, other types are equal. A part of the pattern
 /// zustc cannot match exactly (an associated type) matches anything: the head is weakened, never strengthened
+thread_local! {
+    /// While a call with a turbofish is resolved (`require::<i32>()`): its types are written, not literals zustc
+    /// defaulted, so the solver does not take an i32 / f64 for any integer / float
+    pub static EXPLICIT_ARGS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 pub fn mtch(p: &Program, pt: Ty, t: Ty, sol: &mut [Option<Ty>], lenient: bool, depth: u32) -> bool {
     if depth > 64 {
         return true;
@@ -1349,7 +1379,9 @@ pub fn mtch(p: &Program, pt: Ty, t: Ty, sol: &mut [Option<Ty>], lenient: bool, d
     match (pt, t) {
         (Ty::Assoc(_), _) => true,
         (Ty::Param(i), _) => match sol.get(i as usize).copied() {
-            Some(Some(prev)) => prev == t,
+            // (a const argument zustc could not infer is `()` (`foo(Const)` with `impl<const N: usize> Foo<N> for
+            // Const<N>`): it may be any const, the goal weakened as for a defaulted literal)
+            Some(Some(prev)) => prev == t || (lenient && matches!((prev, t), (Ty::Unit, Ty::Array(Ty::Unit, _)) | (Ty::Array(Ty::Unit, _), Ty::Unit))),
             Some(None) => {
                 sol[i as usize] = Some(t);
                 true

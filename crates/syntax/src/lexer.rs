@@ -948,6 +948,17 @@ pub fn hoist_nested_items(src: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// An item keyword right after a brace or a `;` on a line (`f({ fn inner() {} })`): whether hoist_nested_items moves
+/// such an item depends on the rest of the source (its quick check looks for indented items only), so the incremental
+/// preprocessing, which hoists a chunk alone, cannot reuse chunks of a source that has one
+pub fn has_inline_item(src: &str) -> bool {
+    const KWS: [&str; 10] = ["fn ", "struct ", "enum ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union "];
+    src.match_indices(['{', ';', '}']).any(|(i, _)| {
+        let t = src[i + 1..].trim_start_matches([' ', '\t']);
+        matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'c' | b'm' | b't' | b'i' | b'u')) && KWS.iter().any(|k| t.starts_with(k))
+    })
+}
+
 /// hoist_nested_items を、(元の場所を空白にした本文 (長さと改行は入力と同じ。名前を変えたときは改行だけ同じ),
 /// 移したアイテム (本文での開始位置, テキスト) の列) で返す。末尾に `\n` + テキストを順に並べ、最後に `\n` を付けたものが
 /// hoist_nested_items の結果 (列が空なら本文だけ)

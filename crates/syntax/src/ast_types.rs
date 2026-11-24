@@ -293,16 +293,18 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
             // (`<S as Trait<usize>>::Assoc`: the trait's type arguments choose the impl, as the trait solver's matching
             // of heads does. The associated type `#targs:Trait#Assoc` of the tuple (S, usize), as for a generic
             // associated type; Program::resolve takes it apart)
-            let targs: Vec<&PTy> = p.segs.len().checked_sub(2).map(|i| &p.segs[i]).map_or(vec![], |sg| {
-                sg.args.iter().filter_map(|a| match a {
-                    crate::parse::GArg::Ty(t) => Some(t),
-                    _ => None,
-                }).collect()
+            // (const arguments too, as impl headers keep them: `<S as Tr<2>>::Item`)
+            let targs: Vec<&crate::parse::GArg> = p.segs.len().checked_sub(2).map(|i| &p.segs[i]).map_or(vec![], |sg| {
+                sg.args.iter().filter(|a| matches!(a, crate::parse::GArg::Ty(_) | crate::parse::GArg::Const(_))).collect()
             });
             if let (Some(tr), false, false) = (tr, targs.is_empty(), std_tr) {
                 let mut parts = vec![tysyn(q, self_ty)?];
-                for t in targs {
-                    parts.push(tysyn(t, self_ty)?);
+                for a in targs {
+                    match a {
+                        crate::parse::GArg::Ty(t) => parts.push(tysyn(t, self_ty)?),
+                        crate::parse::GArg::Const(e) => parts.push(const_arg_syn(e)?),
+                        _ => {}
+                    }
                 }
                 return Ok(TySyn::Assoc(Box::new(TySyn::Tuple(parts)), format!("{TARGS_PREFIX}{tr}#{name}")));
             }

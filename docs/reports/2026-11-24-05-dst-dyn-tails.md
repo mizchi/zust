@@ -108,6 +108,47 @@ Against the union of both baselines: no regressions, and 3 more tests pass.
 | build-pass | 102 | 104 | 104 |
 | compile-fail | 4640 | 4559 | 4750 |
 
+## Review fixes (#128)
+
+From the review of the pull request, each checked against rustc with a program of its own first:
+
+- Wrong results, now right:
+  - a dyn call took the impl of another self type (`impl Conv<u8> for W<u16>` for a `W<u8>`);
+  - `A::f(&s)` took `B::f` when the expected type was `B::f`'s result (now E0308, as rustc).
+- False errors, now gone:
+  - `where Self: Child` with `trait Child: Parent` for `<Self as Parent>::A`;
+  - E0119 for an impl whose bound binds an associated type that does not match
+    (`impl<T: Select<Item = u8>> Mark for T` and `impl Mark for u8` with u8's `Item = u16`);
+  - `foo(Const)` against `impl<const N: usize> Foo<N> for Const<N>`.
+- A missed error main reported, back: `require::<i32>()` with only `impl Mark for u8`. The solver takes a goal's
+  i32 for any integer, for a literal zustc defaulted early; a call with a turbofish has its types written, and is
+  checked strictly.
+- Layout: `[c, c]` with one closure local stays an array of the closure (size 0), not of fn pointers.
+- Unsized tails:
+  - a method receiver `&Wrap<[u8]>` (through a box too) keeps its pair;
+  - an explicit `&Wrap { .. }` pattern;
+  - a recursive struct's instance tagged before a recursive request returns its id;
+  - a tail nested through struct applications (`Outer<T>(u32, Middle<T>)`, `Middle<T>(u16, Inner<T>)`);
+  - a struct's own `impl Drop` runs (with the pair as `&mut self`) before its fields when its box is dropped;
+  - `Box::new(W { .. })` where `Box<W<[u8]>>` is expected builds the value at its array type;
+  - vtable literals hold sizes up to 1 GiB, and a larger type is an error, not a size of 0;
+  - an argument nothing else gives a type takes the slice at the end of inference.
+- Missed errors: const arguments kept in bounds and in qualified projections (`S: Tr<2>`, `<S as Tr<2>>::Item`);
+  a where clause after `W: Fn() -> u8` is read (the `>` of `->` closed nothing).
+- Turbofish slots count const arguments (`f::<3, u8>`); `() == &()` is not folded to `true`.
+- Robustness: E0119's free-parameter markers stay below the reserved ones; the occurs check visits each binding
+  once (it was exponential in the bound parameters); the unsizing walk does not revisit a pair.
+- The check memo's key has the `dangerous_implicit_autorefs` level.
+- `formal/run.sh lean` rejects any axiom but propext, Classical.choice and Quot.sound, and a `sorry` anywhere in the
+  library. The overview of `Solver.lean` states `solve_complete`'s hypotheses.
+- `tests/prep_inc.rs` found an older mismatch once `examples/dst_review.rs` joined the examples it edits: the hoisting
+  of nested items checks only for indented items, so an item after a brace on a line (`f({ fn inner() {} })`) is
+  moved or not depending on the rest of the source, and a chunk preprocessed alone differed. Incremental
+  preprocessing now leaves such a source to the full one.
+
+Still open (TODO.md): unsizing boxed literals inside `vec!`, arrays and arms; the lint's scope; and the missed errors
+listed there, which main has too.
+
 ## Not done
 
 - A user `impl Drop` for a struct with an unsized tail is not called when its box is dropped (the fields are).

@@ -56,9 +56,19 @@ obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-
 - Most of std's traits are still judged by `Program::implements` at calls (with known exceptions); the prelude's
   impls as solver clauses would make both directions exact (measured in part 5: few tests depend on it).
 - Structs with an unsized tail ([slices](docs/reports/2026-11-24-04-dst-struct-tails.md),
-  [`dyn`, boxes, `size_of_val`](docs/reports/2026-11-24-05-dst-dyn-tails.md)): a user `impl Drop` on such a struct
-  is not called when its box is dropped.
-- dangerous_implicit_autorefs: the range-index form (`(*p)[..2]`) is not caught.
+  [`dyn`, boxes, `size_of_val`](docs/reports/2026-11-24-05-dst-dyn-tails.md)): a boxed literal unsized inside
+  `vec![..]`, an array literal or `if` / `match` arms (`vec![Box::new(W { t: [1, 2] })]` as `Vec<Box<W<[u8]>>>`)
+  is a false "mismatched types"; each element should be coerced to the expected type.
+- dangerous_implicit_autorefs: the range-index form (`(*p)[..2]`) is not caught, and an `#[allow]` anywhere turns
+  the lint off for the whole crate (as `overflowing_literals` already does): never a false error, a missed one.
+- Missed errors (zustc accepts; main did too), from the review of #128: a supertrait's arguments (`trait Sub:
+  Base<u8>` with only `impl Base<u16>`); `<S as Tr<u8>>::Item` falling back to another impl's definition; a
+  binding checked against the trait's arguments (`T: Tr<u8, Item = u8>`); an explicit `unsafe impl Send for W<u8>`
+  taken for every `W<T>`; `<S as Other>::Item` in a method of `impl Own for S` rewritten as `Own`'s.
+- `<S as Tr<2>>::get()` with impls of `Tr<1>` and `Tr<2>`: the call takes `Tr<1>`'s method (now a compile error,
+  as the annotation `<S as Tr<2>>::Item` resolves to the right type; main printed the wrong value).
+- A local named like an intrinsic (`let size_of = || 7u8; size_of()`) is a false error (main too).
+- `impl Tr for [u8; 3]` then a dyn call: "no implementation" (main too).
 
 ## Security: CVEs whose API zustc does not have (`expect: unsupported`)
 

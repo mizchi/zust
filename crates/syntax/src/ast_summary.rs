@@ -1438,7 +1438,8 @@ pub fn bound_args(s: &str) -> Option<(String, Vec<TySyn>)> {
     for a in &last.args {
         match a {
             crate::parse::GArg::Ty(t) => args.push(tysyn(t, None).ok()?),
-            crate::parse::GArg::Bind(..) => {}
+            // (a const argument as impl headers keep it (`Tr<2>`): not left out, or `Tr<1>`'s impl would answer)
+            crate::parse::GArg::Const(e) => args.push(crate::ast_types::const_arg_syn(e).ok()?),
             _ => {}
         }
     }

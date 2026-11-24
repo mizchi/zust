@@ -18,9 +18,12 @@ zustc cannot tell). The theorems:
 
 * `solve_yes_sound`: `yes` only when the goal holds;
 * `solve_no_sound`: `no` only when it does not. So an error reported on `no` is never a false one, and `overflow`
-  must be treated as "maybe" (zustc accepts);
-* `solve_complete`: with enough fuel, a goal that holds gets `yes` (`overflow` is not an answer for a goal that holds and has a
-  proof shallower than the fuel).
+  must be treated as "maybe": it does not justify an error by this solver alone (zustc may still reject the goal on
+  another check's no, `Program::evaluate`'s, for a goal the solver ran out of fuel on);
+* `solve_complete`: for a ground goal, in a program whose clauses are all `Clause.WF` (every parameter of a body is
+  bound by its head), with enough fuel a goal that holds gets `yes` (`overflow` is not an answer for such a goal
+  that has a proof shallower than the fuel). Without WF, `A :- B(?0)` with the fact `B(Unit)` holds but `candidate`
+  cannot bind `?0` from the head: `overflow` at every fuel.
 -/
 
 namespace TraitSolver

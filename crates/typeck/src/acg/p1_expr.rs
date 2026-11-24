@@ -3173,9 +3173,11 @@ impl Cx<'_> {
         // (then the size and the alignment: a struct with this type as its unsized tail places the tail by them,
         // size_of_val reads them)
         let (size, align) = self.prog.size_align(t);
-        let lit = |n: u32| if n < 1 << 20 { VT_LIT | n } else { u32::MAX };
-        fns.push(lit(size));
-        fns.push(lit(align));
+        if size > VT_LIT_MAX {
+            return err(span, format!("`{}` is too large for a trait object ({size} bytes)", self.prog.tn(t)));
+        }
+        fns.push(VT_LIT | size);
+        fns.push(VT_LIT | align);
         let k = match self.vtables.iter().position(|x| *x == fns) {
             Some(k) => k,
             None => {
@@ -3500,6 +3502,7 @@ impl Cx<'_> {
         let mut sig: Option<(Vec<Ty>, Ty)> = None;
         let mut open_arity: Vec<usize> = vec![];
         let mut kinds: Vec<Option<Ty>> = vec![];
+        let mut fn_items: Vec<u32> = vec![];
         let mut members = 0;
         let mut any_closure = false;
         let mut agree = |sig: &mut Option<(Vec<Ty>, Ty)>, s: (Vec<Ty>, Ty)| -> bool {
@@ -3575,6 +3578,7 @@ impl Cx<'_> {
                         Some(fid) if self.prog.sigs[fid as usize].generics.is_empty() => {
                             let fs = &self.prog.sigs[fid as usize];
                             kinds.push(Some(Ty::Param(crate::program::HOLE)));
+                            fn_items.push(fid);
                             (fs.params.clone(), fs.ret)
                         }
                         Some(_) => return None,
@@ -3597,8 +3601,22 @@ impl Cx<'_> {
         if members < 2 || open_arity.iter().any(|&n| n != params.len()) {
             return None;
         }
-        // (one closure type alone is no coercion: `[|x| x; 2]`-like arms of the same closure stay it)
-        let distinct_closures = kinds.iter().filter(|k| k.is_none()).count() >= 2 || kinds.iter().any(|k| k.is_some());
+        // (one closure type alone is no coercion: `[|x| x; 2]`-like arms of the same closure, or one closure local
+        // used twice (`[c, c]`), stay it. The types: each closure written is one of its own; a local's, a fn item's
+        // (by the item) and a fn pointer's are as many as they are different)
+        let mut types: Vec<String> = vec![];
+        let mut items = fn_items.iter();
+        for (i, k) in kinds.iter().enumerate() {
+            let key = match k {
+                None => format!("literal#{i}"),
+                Some(Ty::Param(crate::program::HOLE)) => format!("item#{}", items.next().copied().unwrap_or(u32::MAX)),
+                Some(t) => format!("{t:?}"),
+            };
+            if !types.contains(&key) {
+                types.push(key);
+            }
+        }
+        let distinct_closures = types.len() >= 2;
         if !any_closure && !kinds.iter().any(|k| matches!(k, Some(Ty::Param(_)))) {
             return None;
         }

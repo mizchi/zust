@@ -1103,6 +1103,7 @@ fn trait_solver_no_in_uncalled_generic_fn() {
     let d = s.check(src);
     assert_eq!(d.len(), 1, "{d:?}");
     assert_eq!(d[0].line, 6, "{d:?}");
+    assert!(d[0].msg.contains("Vec<u8>: Foo") && d[0].msg.contains("not satisfied"), "{d:?}");
     // (with `impl Bar for u8` the goal holds)
     let ok = src.replace("trait Bar {}\n", "trait Bar {}\nimpl Bar for u8 {}\n");
     assert!(s.check(&ok).is_empty());
@@ -1251,7 +1252,9 @@ fn trait_solver_opaque_std_traits_like_rustc() {
         let src = format!("fn f() -> impl {tr} {{ {v} }}\nfn main() {{ let _ = f(); }}\n");
         let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
         let d = s.check(&src);
-        if d.is_empty() != ok {
+        // (a no is the bound's own error, naming the trait: not another error of the program)
+        let names_bound = |m: &str| m.contains(tr.rsplit("::").next().unwrap_or(tr)) && (m.contains("not satisfied") || m.contains("E0277"));
+        if d.is_empty() != ok || (!ok && !d.iter().any(|x| names_bound(&x.msg))) {
             bad.push(format!("{v}: {tr}: rustc {ok}, zustc {d:?}"));
         }
     }
@@ -1284,7 +1287,7 @@ fn clone_of_box_keeps_its_literal_open() {
 /// box), the literal's elements take the slice's element type, and a pattern on the pointee checks
 #[test]
 fn dst_struct_tail_coercions_check() {
-    let src = "struct Foo<T: ?Sized> { a: i32, inner: T }\nfn g<T: Copy>(x: &Foo<[T]>) -> T { x.inner[0] }\nfn main() {\n    let f: &Foo<[u8]> = &Foo { a: 32, inner: [1, 2, 3] };\n    let Foo { a, inner } = f;\n    let _ = (a, inner.len(), g(f));\n    let b: Box<Foo<[u8; 2]>> = Box::new(Foo { a: 1, inner: [4, 5] });\n    let b: Box<Foo<[u8]>> = b;\n    let _ = b.inner.len();\n}\n";
+    let src = "struct Foo<T: ?Sized> { a: i32, inner: T }\nfn g<T: Copy>(x: &Foo<[T]>) -> T { x.inner[0] }\nfn main() {\n    let f: &Foo<[u8]> = &Foo { a: 32, inner: [1, 2, 3] };\n    let Foo { a, inner } = f;\n    let _ = (a, inner.len(), g(f));\n    let _: u8 = g(&Foo { a: 0, inner: [1u8, 2] });\n    let b: Box<Foo<[u8; 2]>> = Box::new(Foo { a: 1, inner: [4, 5] });\n    let b: Box<Foo<[u8]>> = b;\n    let _ = b.inner.len();\n}\n";
     let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
     let d = s.check(src);
     assert!(d.is_empty(), "{d:?}");

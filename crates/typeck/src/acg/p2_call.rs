@@ -1137,6 +1137,15 @@ impl Cx<'_> {
                         let fat = self.addr_plus(a, o);
                         return self.dyn_method_call_on(fat, tr, e, Some(Ty::Ref(true, intern(t))));
                     }
+                    // (a reference to a struct with an unsized tail: the place of its pair, as struct_base takes it)
+                    Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i)) if i.is_dst_struct() => {
+                        through_ref |= matches!(p.ty(), Ty::Ref(..));
+                        Place::Mem(self.addr_plus(a, o), 0, *i)
+                    }
+                    Place::Var(v, Ty::Ref(_, i) | Ty::Box(i)) if i.is_dst_struct() => {
+                        through_ref |= matches!(p.ty(), Ty::Ref(..));
+                        Place::Mem(self.b.use_var(v), 0, *i)
+                    }
                     Place::Mem(a, o, Ty::Ref(_, i) | Ty::Box(i)) => {
                         through_ref |= matches!(p.ty(), Ty::Ref(..));
                         let ptr = self.b.ins().load(PTR, mf(), a, o);
@@ -2383,7 +2392,8 @@ impl Cx<'_> {
                 }
                 let fit: Vec<u32> = group.iter().copied().filter(|&c| {
                     let cs = &self.prog.sigs[c as usize];
-                    !cs.is_generic() && cs.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim()) == tr0 && cs.ret == want_ret && cs.params.len() == want_params.len()
+                    // (an impl for the call's Self itself: `impl Conv<u8> for W<u16>` is not one for `W<u8>`)
+                    !cs.is_generic() && cs.self_ty == args.first().copied() && cs.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim()) == tr0 && cs.ret == want_ret && cs.params.len() == want_params.len()
                         && cs.params.iter().zip(&want_params).skip(1).all(|(a, b)| a == b)
                 }).collect();
                 if fit.len() == 1 { fit[0] } else { imp }
@@ -2493,8 +2503,15 @@ impl Cx<'_> {
             while let Ty::Ref(_, i) = bare {
                 bare = *i;
             }
-            let fit: Vec<u32> = cands.iter().copied().filter(|&c| self.prog.sigs[c as usize].impl_trait.is_some() && (fits(c, at) || self.prog.sigs[c as usize].self_ty == Some(bare))).collect();
-            if fit.len() > 1 {
+            let mut fit: Vec<u32> = cands.iter().copied().filter(|&c| self.prog.sigs[c as usize].impl_trait.is_some() && (fits(c, at) || self.prog.sigs[c as usize].self_ty == Some(bare))).collect();
+            // (only impls of one trait are told apart this way: of the trait the call names (`A::f(&s)`), or the one
+            // trait all candidates are of; two traits' methods of one name are not chosen by their results)
+            if let Some((_, tr)) = &self.explicit_trait {
+                let tr = tr.rsplit("::").next().unwrap_or(tr);
+                fit.retain(|&c| base(c).map(|b| b.rsplit("::").next().unwrap_or(b)) == Some(tr));
+            }
+            let one_trait = fit.windows(2).all(|w| base(w[0]) == base(w[1]));
+            if fit.len() > 1 && one_trait {
                 let by_ret: Vec<u32> = fit.iter().copied().filter(|&c| self.prog.sigs[c as usize].ret == want).collect();
                 if by_ret.len() == 1 {
                     return by_ret[0];
@@ -3175,7 +3192,11 @@ impl Cx<'_> {
             }
         }
         let sol_rg = if self.rg_on() { Some(sol0.clone()) } else { None };
-        let (target, sig) = self.resolve_call(id, &arg_tys, sol0, expected, span)?;
+        let explicit = turbofish.is_some_and(|t| t.iter().any(|a| matches!(a, GArg::Ty(_))));
+        let prev = crate::traits::EXPLICIT_ARGS.with(|e| e.replace(explicit));
+        let r = self.resolve_call(id, &arg_tys, sol0, expected, span);
+        crate::traits::EXPLICIT_ARGS.with(|e| e.set(prev));
+        let (target, sig) = r?;
         if let Some(sol) = sol_rg {
             self.rg_call(id, &sol, turbofish, args, &sig.params, sig.ret, rg_recv, skip == 1, if span.line == 0 { rg_sp } else { span });
         }

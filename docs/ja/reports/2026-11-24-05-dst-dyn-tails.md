@@ -108,6 +108,48 @@ yes・maybe・no で返す) があった。2 つが出会うのはインスタ�
 | build-pass | 102 | 104 | 104 |
 | compile-fail | 4640 | 4559 | 4750 |
 
+## レビューでの修正 (#128)
+
+プルリクエストのレビューで指摘されたもの。どれも先にそれぞれのプログラムを書き、rustc と比べてから直した:
+
+- 誤った結果だったもの (正しくなった):
+  - dyn 呼び出しが別の self 型の impl を選んでいた (`W<u8>` に対して `impl Conv<u8> for W<u16>`)。
+  - 期待型が `B::f` の戻り値の型だと、`A::f(&s)` が `B::f` を選んでいた (今は rustc と同じ E0308)。
+- 誤ったエラーだったもの (出なくなった):
+  - `<Self as Parent>::A` に対する `where Self: Child` (`trait Child: Parent`)。
+  - 境界で縛った関連型が一致しない impl への E0119 (`impl<T: Select<Item = u8>> Mark for T` と `impl Mark for u8`、
+    u8 の `Item = u16`)。
+  - `impl<const N: usize> Foo<N> for Const<N>` に対する `foo(Const)`。
+- main が報告していて見逃すようになっていたエラーを戻した: `impl Mark for u8` だけがあるときの `require::<i32>()`。
+  solver はゴールの i32 を、zustc が早く既定の型にしたリテラルかもしれないので任意の整数として扱う。turbofish の
+  ある呼び出しでは型が書かれているので、厳密に確かめる。
+- レイアウト: クロージャのローカル 1 つを並べた `[c, c]` は、fn ポインタの配列でなくクロージャの配列 (大きさ 0) の
+  ままにする。
+- unsized な末尾:
+  - メソッドの受け手 `&Wrap<[u8]>` (Box 越しも) が組を保つ。
+  - 明示的な `&Wrap { .. }` パターン。
+  - 再帰する struct のインスタンスは、再帰した要求に番号を返す前に印を付ける。
+  - struct の適用を通した入れ子の末尾 (`Outer<T>(u32, Middle<T>)`、`Middle<T>(u16, Inner<T>)`)。
+  - Box を drop するとき、struct 自身の `impl Drop` を (組を `&mut self` として) フィールドより先に呼ぶ。
+  - `Box<W<[u8]>>` が期待される `Box::new(W { .. })` は、値を配列の型で作る。
+  - vtable の数の欄は 1 GiB までの大きさを持ち、それより大きい型は大きさ 0 でなくエラーにする。
+  - ほかに型が決まらない引数は、推論の最後にスライスにする。
+- 見逃していたエラー: 境界と修飾付きの射影で const 引数を保つ (`S: Tr<2>`、`<S as Tr<2>>::Item`)。`W: Fn() -> u8`
+  の後ろの where 節も読む (`->` の `>` は何も閉じていなかった)。
+- turbofish の位置は const 引数も数える (`f::<3, u8>`)。`() == &()` を `true` に畳まない。
+- 頑丈さ: E0119 の自由なパラメータの印は予約された印より下に収める。occurs check は束縛をそれぞれ 1 度だけ訪れる
+  (束縛されたパラメータの数に対して指数的だった)。unsizing をたどる処理は同じ組を 2 度訪れない。
+- check のメモのキーに `dangerous_implicit_autorefs` の水準を入れた。
+- `formal/run.sh lean` は propext・Classical.choice・Quot.sound 以外の公理と、ライブラリのどこかの `sorry` を
+  失敗にする。`Solver.lean` の概要に `solve_complete` の前提を書いた。
+- `examples/dst_review.rs` が編集対象の例に加わると、`tests/prep_inc.rs` が古い食い違いを見つけた: 入れ子のアイテム
+  の持ち上げは字下げしたアイテムしか確かめないので、行の途中の波括弧の後ろのアイテム (`f({ fn inner() {} })`) を
+  動かすかどうかがソースの残りで変わり、単独で前処理したチャンクが食い違っていた。そういうソースは差分の前処理を
+  使わず、全体の前処理に任せる。
+
+残っているもの (TODO.md): `vec!`・配列・腕の中の Box のリテラルの unsizing、リントの範囲、そこに挙げた見逃し
+(main にもある)。
+
 ## やっていないこと
 
 - 末尾が unsized な struct に利用者の `impl Drop` があっても、その Box を drop するときに呼ばれない (フィールドは

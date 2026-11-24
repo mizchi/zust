@@ -37,8 +37,16 @@ if [ "${1:-all}" = all ]; then
     (cd .. && cargo test --quiet -p zust-typeck --lib props) || fail=1
 fi
 if [ "${1:-all}" = all ] || [ "${1:-all}" = lean ]; then
-    # (every theorem proved, on Lean's standard axioms only: a `sorry` would show as the axiom sorryAx)
-    if (cd lean && lake build > "$log" 2>&1 && lake env lean Axioms.lean > "$log.ax" 2>&1) && ! grep -q sorryAx "$log.ax"; then
+    # (every theorem proved, on Lean's standard axioms only: the main theorems' axioms are propext, Classical.choice
+    # and Quot.sound at most (a `sorry` would show as sorryAx, an axiom of the model's own by its name), and no
+    # declaration of the library uses `sorry` (a lemma no main theorem uses only warns in the build))
+    std_axioms() {
+        grep -o "depends on axioms: \[[^]]*\]" "$1" | sed 's/.*\[//; s/\]//' | tr ',' '\n' | sed 's/^ *//; s/ *$//' | grep -v '^$' \
+            | grep -vxE 'propext|Classical\.choice|Quot\.sound' | head -1 | grep -q . && return 1
+        return 0
+    }
+    if (cd lean && lake build > "$log" 2>&1 && lake env lean Axioms.lean > "$log.ax" 2>&1) \
+        && ! grep -q "declaration uses 'sorry'" "$log" && std_axioms "$log.ax"; then
         echo "ok   lean TraitSolver ($(grep -c "depends on axioms" "$log.ax") theorems)"
     else
         echo "FAIL lean TraitSolver"; cat "$log" "$log.ax" 2>/dev/null | tail -30; fail=1

@@ -4538,6 +4538,10 @@ impl Program {
         if INSTANTIATING.with(|v| v.borrow().len()) > 64 {
             return Err(format!("reached the recursion limit while instantiating `{}`", self.structs[base as usize].name));
         }
+        // (known from the definitions before the instance exists: a placeholder handed out to a recursive request
+        // carries the tag too)
+        let dst = self.instance_unsized(base, &args);
+        let tag = if dst { DST_TAG } else { 0 };
         let pending = INSTANTIATING.with(|v| {
             let mut v = v.borrow_mut();
             match v.iter_mut().find(|e| e.0 == key) {
@@ -4547,7 +4551,7 @@ impl Program {
                     d.base = Some(base);
                     d.args = args.clone();
                     d.symbolic = args.iter().any(|&t| self.has_param(t));
-                    self.structs.push(d)
+                    self.structs.push(d) | tag
                 })),
                 None => {
                     v.push((key.clone(), None));
@@ -4567,13 +4571,12 @@ impl Program {
         }
         // 最後のフィールドが unsized (`[T]` / `str` / そういう struct) なら番号に印を付ける (`&S<[T]>` は fat pointer)
         // (from the definition's last field: a symbolic instance (`Fat<[T]>`) has no laid-out fields)
-        let dst = !d.is_enum && self.structs[base as usize].fields.last().is_some_and(|f| self.tail_unsized(base, f.1, &d.args, 0));
         let id = match placeholder {
             Some(pid) => {
                 self.structs.replace(pid, d);
                 pid
             }
-            None => self.structs.push(d) | if dst { DST_TAG } else { 0 },
+            None => self.structs.push(d) | tag,
         };
         g.insert(key, id);
         Ok(id)
@@ -4604,14 +4607,16 @@ impl Program {
     /// Whether t, a definition's last field type with args for its parameters, is unsized (`[T]`, `str`, a struct
     /// with such a tail). Read from the definitions without instantiating (a recursive type's instance is not in the
     /// cache yet when this is asked)
-    fn tail_unsized(&self, base: u32, t: Ty, args: &[Ty], depth: u32) -> bool {
+    fn tail_unsized(&self, base: u32, t: Ty, param_unsized: &dyn Fn(u8) -> bool, depth: u32) -> bool {
         // (a parameter not declared `?Sized` is not unsized: `Bar<dyn Debug>` with `struct Bar<T>(T)` is an error
         // (E0277), not a struct with an unsized tail)
         let may = |b: u32, i: u8| self.unsized_params.get(&b).is_some_and(|v| v.contains(&(i as usize)));
         match t {
             Ty::Slice(_) | Ty::Str | Ty::Dyn(_) => true,
-            Ty::Param(i) => may(base, i) && args.get(i as usize).is_some_and(|&a| a.is_unsized()),
+            Ty::Param(i) => may(base, i) && param_unsized(i),
             Ty::Struct(_) if t.is_dst_struct() => true,
+            // (a struct application as the tail (`Middle<T>` ending in `Inner<T>`): its definition's tail, with its
+            // parameters unsized when its arguments are; an indirection (`Box<Inner<T>>`) is not a struct here)
             Ty::Struct(s) if depth < 8 => {
                 let sd = &self.structs[s as usize];
                 let Some(b) = sd.base else { return false };
@@ -4619,13 +4624,18 @@ impl Program {
                 if bd.is_enum {
                     return false;
                 }
-                match bd.fields.last() {
-                    Some(&(_, Ty::Param(j), _)) if may(b, j) => sd.args.get(j as usize).is_some_and(|&a| self.tail_unsized(base, a, args, depth + 1)),
-                    _ => false,
-                }
+                let Some(&(_, lt, _)) = bd.fields.last() else { return false };
+                let args = &sd.args;
+                self.tail_unsized(b, lt, &|j| args.get(j as usize).is_some_and(|&a| self.tail_unsized(base, a, param_unsized, depth + 1)), depth + 1)
             }
             _ => false,
         }
+    }
+
+    /// Whether the instance of base with args has an unsized tail (its id carries DST_TAG)
+    fn instance_unsized(&self, base: u32, args: &[Ty]) -> bool {
+        let b = &self.structs[base as usize];
+        !b.is_enum && b.fields.last().is_some_and(|f| self.tail_unsized(base, f.1, &|i| args.get(i as usize).is_some_and(|a| a.is_unsized()), 0))
     }
 
     fn instantiate_inner(&self, base: u32, args: Vec<Ty>) -> R<StructDef> {

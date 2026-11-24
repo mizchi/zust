@@ -681,10 +681,29 @@ impl Cx<'_> {
 
     /// Drops the fields of the struct t with an unsized tail, at data, with meta its pair's second word (the
     /// contents of a `Box<Foo<[T]>>` / `Box<Foo<dyn Tr>>`)
-    fn drop_dst_struct(&mut self, data: Value, meta: Value, t: Ty) {
-        let Ty::Struct(s) = t else { return };
+    fn drop_dst_struct(&mut self, data: Value, meta: Value, t: Ty) -> R<()> {
+        let Ty::Struct(s) = t else { return Ok(()) };
+        // (first its own `impl Drop`, with `&mut self` the (data, metadata) pair, then its fields)
+        if self.prog.drop_impls.contains(&self.prog.base_of(s)) {
+            if let Some(m) = self.prog.method(s, "drop") {
+                let recv = [Ty::Ref(true, intern(t))];
+                let mut fid = m;
+                let ms = &self.prog.sigs[m as usize];
+                if ms.is_generic() {
+                    let mut sol = vec![None; ms.generics.len()];
+                    if let Some(st) = ms.self_ty {
+                        self.prog.match_ty(st, t, &mut sol);
+                    }
+                    fid = self.resolve_call(m, &recv, sol, None, SP)?.0;
+                }
+                let fs = self.insts.lock().unwrap().sig(self.prog, fid).clone();
+                let f = self.fref(fid, &fs);
+                let pair = self.make_fat_v(data, meta);
+                self.b.ins().call(f, &[pair]);
+            }
+        }
         let fs = self.prog.structs[s as usize].fields.clone();
-        let Some(((_, tt, toff), prefix)) = fs.split_last() else { return };
+        let Some(((_, tt, toff), prefix)) = fs.split_last() else { return Ok(()) };
         for &(_, ft, off) in prefix {
             if self.needs_drop(ft) {
                 let a = self.b.ins().iadd_imm(data, off as i64);
@@ -695,9 +714,10 @@ impl Cx<'_> {
         match *tt {
             Ty::Slice(e) if self.needs_drop(*e) => self.drop_elems(tail, meta, *e),
             Ty::Dyn(tr) => self.vtable_drop_call(meta, tr.as_str(), tail),
-            t if t.is_dst_struct() => self.drop_dst_struct(tail, meta, t),
+            t if t.is_dst_struct() => self.drop_dst_struct(tail, meta, t)?,
             _ => {}
         }
+        Ok(())
     }
 
     /// Calls the drop entry of the vtable vt (trait tr) on data, if it has one
@@ -1353,8 +1373,9 @@ impl Cx<'_> {
     pub(crate) fn pat_deref_once(&mut self, p: Place) -> (Place, bool) {
         match p {
             Place::Var(v, Ty::Ref(m, i)) => (Place::Mem(self.b.use_var(v), 0, *i), m),
-            // (a `&[T]` / `&str` in memory is the (pointer, length) pair itself: the slice place is that pair)
-            Place::Mem(a, o, Ty::Ref(m, i @ (Ty::Slice(_) | Ty::Str))) => (Place::Mem(a, o, *i), m),
+            // (a `&[T]` / `&str` / `&Foo<[T]>` in memory is the (pointer, length) pair itself: the place of the
+            // unsized value is that pair)
+            Place::Mem(a, o, Ty::Ref(m, i)) if i.is_unsized() => (Place::Mem(a, o, *i), m),
             Place::Mem(a, o, Ty::Ref(m, i)) => (Place::Mem(self.b.ins().load(PTR, mf(), a, o), 0, *i), m),
             p => (p, false),
         }
@@ -2546,7 +2567,7 @@ impl Cx<'_> {
                 self.b.ins().brif(ptr, live, &[], out, &[]);
                 self.b.switch_to_block(live);
                 let meta = self.b.ins().load(types::I64, mf(), p, 8);
-                self.drop_dst_struct(ptr, meta, *inner);
+                self.drop_dst_struct(ptr, meta, *inner)?;
                 self.free(ptr);
                 self.b.ins().jump(out, &[]);
                 self.b.switch_to_block(out);

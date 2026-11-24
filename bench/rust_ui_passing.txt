@@ -2313,6 +2313,7 @@ compile-fail	dst/dst-bad-coerce3.rs
 compile-fail	dst/dst-bad-coerce4.rs
 compile-fail	dst/dst-bad-coercions.rs
 run-pass	dst/dst-coercions.rs
+run-pass	dst/dst-field-align.rs
 run-pass	dst/dst-irrefutable-bind.rs
 compile-fail	dst/dst-rvalue.rs
 run-pass	dst/dst-struct-sole.rs

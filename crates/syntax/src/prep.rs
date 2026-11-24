@@ -956,7 +956,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
     }
     let log = std::env::var_os("ZUSTC_PREP_LOG").is_some();
     let (starts, balanced) = chunk_starts(src, &mut memo.chunks);
-    if !balanced {
+    if !balanced || lexer::has_inline_item(src) {
         return Ok(None);
     }
     if log {

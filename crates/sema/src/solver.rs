@@ -1042,7 +1042,15 @@ impl Solver<'_> {
     /// x and y are a struct with an array tail and the same struct with a slice tail (`S<[T; N]>` and `S<[T]>`,
     /// in either order): what a reference or a box to one coerces to one to the other
     pub fn unsize_pair(&mut self, x: u32, y: u32) -> bool {
+        self.unsize_pair_d(x, y, 0)
+    }
+
+    fn unsize_pair_d(&mut self, x: u32, y: u32, depth: u32) -> bool {
         let (x, y) = (self.find(x), self.find(y));
+        // (one type is no coercion; and the walk is bounded (shared children are not visited twice per level))
+        if x == y || depth > 16 {
+            return false;
+        }
         let base = |s: &Self, v: u32| match s.shape[v as usize] {
             Some(Shape::Adt(b, ..)) => Some((b, false)),
             Some(Shape::Known(t @ Ty::Struct(i))) => Some((s.prog.base_of(i), t.is_dst_struct())),
@@ -1050,6 +1058,7 @@ impl Solver<'_> {
         };
         match (base(self, x), base(self, y)) {
             (Some((b1, d1)), Some((b2, d2))) if b1 == b2 => {
+                let may_unsize = self.prog.unsized_params.contains_key(&b1);
                 if d1 != d2 {
                     return true;
                 }
@@ -1061,12 +1070,20 @@ impl Solver<'_> {
                     }
                 };
                 let (p, q) = (args(self, x), args(self, y));
+                let mut seen: Vec<(u32, u32)> = vec![];
                 p.into_iter().zip(q).any(|(p, q)| {
                     let (p, q) = (self.find(p), self.find(q));
+                    if p == q || seen.contains(&(p, q)) {
+                        return false;
+                    }
+                    seen.push((p, q));
+                    // (two array tails of different lengths (`vec![Box::new(W { t: [1, 2] }), Box::new(W { t: [3] })]`
+                    // as `Vec<Box<W<[u8]>>>`): both coerce to the slice tail)
                     matches!(
                         (&self.shape[p as usize], &self.shape[q as usize]),
                         (Some(Shape::Slc(_)), Some(Shape::Arr(..))) | (Some(Shape::Arr(..)), Some(Shape::Slc(_)))
-                    ) || self.unsize_pair(p, q)
+                    ) || (may_unsize && matches!((&self.shape[p as usize], &self.shape[q as usize]), (Some(Shape::Arr(_, n)), Some(Shape::Arr(_, m))) if n != m))
+                        || self.unsize_pair_d(p, q, depth + 1)
                 })
             }
             _ => false,
@@ -1093,6 +1110,14 @@ impl Solver<'_> {
             let ls = std::mem::take(&mut self.unsize_later);
             for (p, k) in ls {
                 self.unsize_elem(p, k);
+            }
+        }
+        // (an argument nothing else told: the slice itself (`&Wrap<[u8]>` passed where `&Wrap<T>` is taken))
+        for (p, k) in std::mem::take(&mut self.unsize_later) {
+            let r = self.find(p);
+            if self.shape[r as usize].is_none() {
+                let s = self.with(Shape::Slc(k));
+                self.unify(p, s);
             }
         }
     }

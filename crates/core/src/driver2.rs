@@ -1893,13 +1893,33 @@ impl Session2 {
                     if !prog.tdb.user.contains(&n) || supers.contains(&n) {
                         continue;
                     }
-                    // (the method's own where clause: `where Self: Tr`)
-                    let given = head.split("where").nth(1).is_some_and(|w| {
-                        w.split(',').any(|p| {
+                    // (the method's own where clause: `where Self: Tr`, or a trait of it whose supertraits (all the
+                    // way up) have Tr: `where Self: Child` with `trait Child: Parent`)
+                    let mut own_bounds: Vec<String> = vec![];
+                    if let Some(w) = head.split("where").nth(1) {
+                        for p in w.split(',') {
                             let mut sp = p.splitn(2, ':');
-                            sp.next().map(str::trim) == Some("Self") && sp.next().is_some_and(|b| b.split('+').any(|x| x.trim().split('<').next().map(str::trim) == Some(n.as_str())))
-                        })
-                    });
+                            if sp.next().map(str::trim) == Some("Self") {
+                                for x in sp.next().unwrap_or("").split('+') {
+                                    let b = x.trim().split('<').next().unwrap_or("").trim();
+                                    own_bounds.push(b.rsplit("::").next().unwrap_or(b).to_string());
+                                }
+                            }
+                        }
+                    }
+                    let mut k = 0;
+                    while k < own_bounds.len() {
+                        let t = own_bounds[k].clone();
+                        for sup in prog.trait_supers.get(&t).into_iter().flatten() {
+                            let b = sup.split('<').next().unwrap_or(sup).trim();
+                            let b = b.rsplit("::").next().unwrap_or(b).to_string();
+                            if !b.starts_with('#') && !own_bounds.contains(&b) {
+                                own_bounds.push(b);
+                            }
+                        }
+                        k += 1;
+                    }
+                    let given = own_bounds.contains(&n);
                     if !given {
                         return Err(format!("{}:1: the trait bound `Self: {n}` is not satisfied (E0277)", it.line));
                     }
@@ -6640,8 +6660,13 @@ fn where_preds(head: &str) -> Option<Vec<(String, Vec<String>)>> {
     let split = |s: &str, sep: char| -> Vec<String> {
         let mut depth = 0i32;
         let mut out = vec![String::new()];
+        let mut prev = ' ';
         for c in s.chars() {
+            // (the `>` of `->` (`W: Fn() -> u8`) closes nothing)
+            let arrow = c == '>' && prev == '-';
+            prev = c;
             match c {
+                '>' if arrow => {}
                 '<' | '(' | '[' => depth += 1,
                 '>' | ')' | ']' => depth -= 1,
                 c if c == sep && depth == 0 => {
@@ -6664,6 +6689,7 @@ fn where_preds(head: &str) -> Option<Vec<(String, Vec<String>)>> {
         let mut at = None;
         for i in 0..b.len() {
             match b[i] {
+                b'>' if i > 0 && b[i - 1] == b'-' => {}
                 b'<' | b'(' | b'[' => depth += 1,
                 b'>' | b')' | b']' => depth -= 1,
                 b':' if depth == 0 && b.get(i + 1) != Some(&b':') && (i == 0 || b[i - 1] != b':') => {
@@ -7144,6 +7170,7 @@ fn lint_bits(p: &Program) -> u16 {
         | ((p.edition >= 2021) as u8) << 6
         | (p.allow_overflowing_literals as u8) << 7) as u16
         | (p.deny_unused_mut as u16) << 8
+        | (p.allow_implicit_autorefs as u16) << 9
 }
 
 /// The attributes behind a feature gate, and the feature

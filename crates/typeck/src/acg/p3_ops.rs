@@ -182,7 +182,8 @@ impl Cx<'_> {
                 }
                 Some(t)
             };
-            if strip(self.peek(left)) == Some(Ty::Unit) && strip(self.peek(right)) == Some(Ty::Unit) {
+            // (the same type on both sides: `() == &()` is E0308, as any comparison of a value with a reference)
+            if strip(self.peek(left)) == Some(Ty::Unit) && strip(self.peek(right)) == Some(Ty::Unit) && self.peek(left) == self.peek(right) {
                 self.expr(left, None)?;
                 self.expr(right, None)?;
                 let v = matches!(op, "==" | "<=" | ">=") as i64;
@@ -1470,7 +1471,8 @@ impl Cx<'_> {
             Some(base)
         } else {
             match expected {
-                Some(Ty::Struct(e)) if self.prog.base_of(e) == self.prog.base_of(base) && !self.prog.has_param(Ty::Struct(e)) => Some(e),
+                // (an unsized instance (`Wrap<[u8]>`) is no value's type: the fields decide, and the value is coerced)
+                Some(Ty::Struct(e)) if self.prog.base_of(e) == self.prog.base_of(base) && !self.prog.has_param(Ty::Struct(e)) && !Ty::Struct(e).is_dst_struct() => Some(e),
                 _ => None,
             }
         };

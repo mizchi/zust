@@ -1991,14 +1991,26 @@ impl Inf<'_> {
         // (`tr::<u16>()`: the turbofish gives the callee's own type parameters, as the code generator reads them: a free
         // fn's in order, a member's the last ones; an `impl Trait` argument's hidden parameter is not named)
         if let (Some(id), Expr::Path(None, p)) = (callee, f) {
-            let tys: Vec<&PTy> = p.segs.last().map_or(vec![], |s| s.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t) } else { None }).collect());
-            if !tys.is_empty() {
+            // (every argument but a lifetime has its slot: a const one (`f::<3, u8>`) is skipped but counted, also a
+            // `true` / `false` written as a type)
+            let tys: Vec<Option<&PTy>> = p.segs.last().map_or(vec![], |s| {
+                s.args
+                    .iter()
+                    .filter(|a| !matches!(a, GArg::Lifetime(_) | GArg::Bind(..)))
+                    .map(|a| match a {
+                        GArg::Ty(t) if crate::ast_types::bool_arg(t).is_none() => Some(t),
+                        _ => None,
+                    })
+                    .collect()
+            });
+            if tys.iter().any(|t| t.is_some()) {
                 let sig = &self.prog.sigs[id as usize];
                 let named: Vec<usize> = (0..sig.generics.len()).filter(|&k| !sig.generics[k].0.starts_with("__impl")).collect();
                 let member = sig.self_ty.is_some() || sig.impl_of.is_some();
                 let start = if member { named.len().saturating_sub(tys.len()) } else { sig.trait_of.is_some() as usize };
                 let mut pre = vec![];
                 for (i, t) in tys.into_iter().enumerate() {
+                    let Some(t) = t else { continue };
                     if let Some(&k) = named.get(start + i) {
                         let v = self.ty_var(t);
                         pre.push((k, v));

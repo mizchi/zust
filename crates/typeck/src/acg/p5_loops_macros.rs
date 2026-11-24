@@ -2008,7 +2008,8 @@ impl Cx<'_> {
                 }
             }
             let inner = match expected {
-                Some(Ty::Box(t)) if !matches!(t, Ty::Dyn(_) | Ty::Slice(_) | Ty::Str) => Some(*t),
+                // (not an unsized struct (`Box<Wrap<[u8]>>`): the value is built at its sized type and the box coerced)
+                Some(Ty::Box(t)) if !t.is_unsized() => Some(*t),
                 // (a closure boxed where a `Box<dyn Fn(..)>` is expected: the trait object is its signature, as for
                 // `&|x| ..` where a `&dyn Fn(..)` is (its parameters' types, the bound its body is checked with))
                 Some(Ty::Box(t @ Ty::Dyn(_))) if matches!(crate::acg::strip_paren(&cargs[0]), Expr::Closure(..)) => Some(*t),

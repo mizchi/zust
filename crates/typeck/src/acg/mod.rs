@@ -67,8 +67,10 @@ pub type R<T> = Result<T, String>;
 /// ポインタ型 (x86-64 前提)
 pub const PTR: Type = types::I64;
 /// A vtable entry that is a number, not a function (the concrete type's size and alignment, after the drop entry):
-/// `VT_LIT | n`, n below 2^20 (a larger size is written as the null entry)
-pub const VT_LIT: u32 = 0xFFF0_0000;
+/// `VT_LIT | n` with n at most VT_LIT_MAX (function ids stay far below VT_LIT; `u32::MAX`, the null entry, is above
+/// every literal)
+pub const VT_LIT: u32 = 0xC000_0000;
+pub const VT_LIT_MAX: u32 = 0x3FFF_FFFE;
 /// The second word of the pair of a struct with an unsized tail made by a coercion: the tail's length, or the
 /// vtable of the tail's type (`S<T>` to `S<dyn Tr>`)
 #[derive(Clone, Copy)]
