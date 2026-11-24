@@ -1217,3 +1217,37 @@ fn private_paths() {
     let src = "mod foo { mod bar { struct B; } }\nstruct Foo {\n    a: foo:A,\n    b: foo::bar::B,\n}\nfn main() {}\n";
     assert!(check(2021, src).is_some_and(|(l, _, m)| l == 3 && !m.contains("E0603")), "syntax_error_first");
 }
+
+#[test]
+fn review106_third_round() {
+    // (each expected line and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    // (a comment in an attribute's input is whitespace)
+    assert_eq!(check(2021, "#![windows_subsystem = /* reason */ \"console\"]\nfn main() {}\n"), None, "comment_in_inner_input");
+    assert_eq!(check(2021, "#[deprecated(note = /* why */ \"old\")]\npub fn f() {}\nfn main() {}\n"), None, "comment_in_item_input");
+    // (a Unicode escape's digits may have `_` between them)
+    assert_eq!(check(2021, "#![windows_subsystem = \"\\u{6_3}onsole\"]\nfn main() {}\n"), None, "unicode_escape_underscore");
+    // (`macro_rules !` with a space; one in a comment defines nothing)
+    // (zustc reads no `macro_rules !` with a space yet: only no cfg error is asked of it)
+    assert!(check(2021, "macro_rules ! eat { (cfg!(not())) => {}; }\nfn main() {}\n").is_none_or(|(_, m)| !m.contains("cfg")), "spaced_macro_rules");
+    assert_eq!(check(2021, "// macro_rules! x {\nfn main() { let _ = cfg!(not()); }\n"), at(2, "malformed `cfg` macro input"), "macro_rules_in_a_comment");
+    // (what a false `cfg` takes away is not read: an item, a statement or a block of one, an attribute after one)
+    for src in [
+        "#[cfg(any())]\nfn f() { let _ = cfg!(not()); }\nfn main() {}\n",
+        "#[cfg(any())]\n#[cfg(not())]\nfn f() {}\nfn main() {}\n",
+        "#[cfg(any())]\nmod m {\n    #[cfg(not())]\n    fn f() {}\n}\nfn main() {}\n",
+        "fn main() {\n    #[cfg(any())]\n    let _ = cfg!(not());\n    #[cfg(any())]\n    {\n        let _ = cfg!(not());\n    }\n}\n",
+    ] {
+        assert_eq!(check(2021, src), None, "{src}");
+    }
+    assert_eq!(check(2021, "#[cfg(not())]\n#[cfg(any())]\nfn f() {}\nfn main() {}\n"), at(1, "malformed `cfg` attribute input"), "malformed_first");
+    assert_eq!(check(2021, "#[cfg(all())]\n#[cfg(not())]\nfn f() {}\nfn main() {}\n"), at(2, "malformed `cfg` attribute input"), "after_a_true_cfg");
+    assert_eq!(check(2021, "fn main() { let _ = cfg!(not()); }\n"), at(1, "malformed `cfg` macro input"), "kept_macro");
+    // (a char escape the text ends in: no crash)
+    let _ = check(2021, "fn main() { let _ = cfg!(x '\\");
+    let _ = check(2021, "#[cfg(a = '\\");
+}

@@ -4739,6 +4739,7 @@ compile-fail	nll/issue-40510-1.rs
 check-pass	nll/issue-40510-2.rs
 compile-fail	nll/issue-40510-3.rs
 check-pass	nll/issue-40510-4.rs
+compile-fail	nll/issue-42574-diagnostic-in-nested-closure.rs
 check-pass	nll/issue-43058.rs
 compile-fail	nll/issue-45157.rs
 run-pass	nll/issue-45696-long-live-borrows-in-boxes.rs
@@ -4831,6 +4832,8 @@ check-pass	nll/maybe-initialized-drop-uninitialized.rs
 compile-fail	nll/maybe-initialized-drop-with-fragment.rs
 compile-fail	nll/maybe-initialized-drop-with-uninitialized-fragments.rs
 compile-fail	nll/maybe-initialized-drop.rs
+compile-fail	nll/mir_check_cast_reify.rs
+compile-fail	nll/mir_check_cast_unsafe_fn.rs
 compile-fail	nll/mir_check_cast_unsize.rs
 compile-fail	nll/move-errors.rs
 compile-fail	nll/move-subpaths-moves-root.rs
@@ -6078,6 +6081,7 @@ compile-fail	regions/regions-bounded-method-type-parameters.rs
 compile-fail	regions/regions-bounds.rs
 compile-fail	regions/regions-close-over-type-parameter-1.rs
 compile-fail	regions/regions-close-over-type-parameter-multiple.rs
+run-pass	regions/regions-close-over-type-parameter-successfully.rs
 compile-fail	regions/regions-close-param-into-object.rs
 run-pass	regions/regions-copy-closure.rs
 compile-fail	regions/regions-creating-enums.rs
@@ -6702,8 +6706,10 @@ compile-fail	span/mutability-suggestion-fullwidth-ampersand.rs
 compile-fail	span/pub-struct-field.rs
 compile-fail	span/range-2.rs
 compile-fail	span/regionck-unboxed-closure-lifetimes.rs
+compile-fail	span/regions-close-over-borrowed-ref-in-obj.rs
 compile-fail	span/regions-close-over-type-parameter-2.rs
 compile-fail	span/regions-escape-loop-via-variable.rs
+compile-fail	span/regions-escape-loop-via-vec.rs
 compile-fail	span/regions-infer-borrow-scope-within-loop.rs
 compile-fail	span/send-is-not-static-ensures-scoping.rs
 compile-fail	span/send-is-not-static-std-sync-2.rs

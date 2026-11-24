@@ -674,8 +674,9 @@ pub fn lit_end(b: &[u8], i: usize) -> Option<usize> {
             }
             Some(b.len())
         }
+        // (an escape, to its closing quote; one the text ends in, to the end)
         b'\'' if b.get(i + 1) == Some(&b'\\') => {
-            let n = b[i + 3..].iter().position(|&c| c == b'\'').map_or(b.len(), |n| i + 3 + n + 1);
+            let n = b.get(i + 3..).and_then(|r| r.iter().position(|&c| c == b'\'')).map_or(b.len(), |n| i + 3 + n + 1);
             Some(n.min(b.len()))
         }
         b'\'' => {
@@ -763,8 +764,9 @@ pub fn str_value(v: &str) -> Option<String> {
                 let h: String = cs.by_ref().take(2).collect();
                 out.push(char::from(u8::from_str_radix(&h, 16).ok()?));
             }
+            // (`\u{1F600}`, `\u{1_F600}`: digits that may have `_` between them)
             'u' => {
-                let rest: String = cs.by_ref().take_while(|&c| c != '}').collect();
+                let rest: String = cs.by_ref().take_while(|&c| c != '}').filter(|&c| c != '_').collect();
                 out.push(char::from_u32(u32::from_str_radix(rest.strip_prefix('{')?, 16).ok()?)?);
             }
             // (a line continuation: the newline and the next line's leading whitespace)
@@ -842,6 +844,13 @@ pub fn not_a_literal(found: &str) -> String {
     format!("expected a literal (`1u8`, `1.0f32`, `\"string\"`, etc.) here, found {found}")
 }
 
+/// Whether a predicate holds in a configuration: `unix`, `all(..)`, `not(feature = "x")`
+pub fn cfg_holds(p: &str, c: &CfgSet) -> bool {
+    let b = p.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    eval(b, &toks, 0, c).0
+}
+
 /// Whether rustc can read a `cfg` predicate: Ok, or Err with its own message ("" for "malformed `cfg` .. input")
 pub fn cfg_check(p: &str) -> Result<(), String> {
     let p = p.trim();
@@ -879,8 +888,10 @@ pub fn cfg_check(p: &str) -> Result<(), String> {
 }
 
 /// The first `#[cfg(..)]`, `#[cfg_attr(..)]` or `cfg!(..)` of a source whose predicate rustc cannot read (E0539 /
-/// E0565 / E0805): not one in a comment or a string on its line, nor in a macro's pattern (`$`)
-pub fn malformed_cfg(src: &str) -> Option<String> {
+/// E0565 / E0805): not one in a comment or a string on its line, nor in a macro's pattern (`$`). `kept` is the text
+/// configured by `c` (cfg::strip, in place): rustc reads none of what a false `cfg` takes away, so one in an item,
+/// statement or block it removes is not reported, nor an attribute after a false `cfg` of the same item
+pub fn malformed_cfg(src: &str, kept: Option<&str>, c: &CfgSet) -> Option<String> {
     if !src.contains("cfg") {
         return None;
     }
@@ -889,8 +900,10 @@ pub fn malformed_cfg(src: &str) -> Option<String> {
     // (how far the source is read as code, and the block comments open there: a candidate in a comment, a string or
     // a char literal is skipped, `/* #[cfg(not())] */`)
     let (mut cur, mut depth) = (0usize, 0u32);
+    // (the open brackets of the code read so far: the innermost one around a candidate)
+    let mut open: Vec<usize> = vec![];
     let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
-    let mut in_code = |i: usize| -> bool {
+    let mut in_code = |i: usize| -> (bool, Option<usize>) {
         while cur < i {
             if depth > 0 {
                 if b[cur..].starts_with(b"/*") {
@@ -930,10 +943,59 @@ pub fn malformed_cfg(src: &str) -> Option<String> {
                 // (a char literal, not a lifetime)
                 b'\'' if b.get(cur + 1) == Some(&b'\\') => cur += 2 + b[cur + 2..].iter().position(|&c| c == b'\'').map_or(b.len() - cur - 2, |n| n + 1),
                 b'\'' if b.get(cur + 2) == Some(&b'\'') => cur += 3,
+                b'{' | b'(' | b'[' => {
+                    open.push(cur);
+                    cur += 1;
+                }
+                b'}' | b')' | b']' => {
+                    open.pop();
+                    cur += 1;
+                }
                 _ => cur += 1,
             }
         }
-        depth == 0 && cur == i
+        (depth == 0 && cur == i, open.last().copied())
+    };
+    // (what the configuring took away: a blank in the configured text where the source has code)
+    let kept = kept.filter(|k| k.len() == src.len()).map(str::as_bytes);
+    let gone = |i: usize| kept.is_some_and(|k| k[i].is_ascii_whitespace() && !b[i].is_ascii_whitespace());
+    // (an attribute after a `cfg` of the same item that does not hold: `#[cfg(any())] #[cfg(not())] fn f() {}`)
+    let after_false = |start: usize| -> bool {
+        let mut p = start;
+        loop {
+            let q = src[..p].trim_end().len();
+            if q == 0 || b[q - 1] != b']' {
+                return false;
+            }
+            let (mut d, mut j, mut o) = (0i32, q - 1, None);
+            loop {
+                match b[j] {
+                    b']' => d += 1,
+                    b'[' => {
+                        d -= 1;
+                        if d == 0 {
+                            o = Some(j);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                if j == 0 {
+                    break;
+                }
+                j -= 1;
+            }
+            let Some(o) = o else { return false };
+            if o == 0 || b[o - 1] != b'#' {
+                return false;
+            }
+            let body = src[o + 1..q - 1].trim();
+            let pred = body.strip_prefix("cfg").map(str::trim_start).and_then(|r| r.strip_prefix('(')).and_then(|r| r.strip_suffix(')'));
+            if pred.is_some_and(|p| cfg_check(p).is_ok() && !cfg_holds(p, c)) {
+                return true;
+            }
+            p = o - 1;
+        }
     };
     // (the `macro_rules!` bodies, found once and only when a candidate is in code: each from its delimiter to the
     // matching one, a nested definition inside the one before it)
@@ -941,8 +1003,17 @@ pub fn malformed_cfg(src: &str) -> Option<String> {
     let mut in_macro_def = |i: usize| -> bool {
         let defs = macro_defs.get_or_insert_with(|| {
             let mut defs: Vec<(usize, usize)> = vec![];
-            for (m, _) in src.match_indices("macro_rules!") {
-                if defs.last().is_some_and(|&(_, e)| m < e) || m > 0 && ident(b[m - 1]) {
+            // (`macro_rules!` / `macro_rules !` in code: not in a comment or a literal)
+            let mut m = 0;
+            while m < b.len() {
+                if let Some(e) = lit_end(b, m) {
+                    m = e;
+                    continue;
+                }
+                let word = b[m..].starts_with(b"macro_rules") && !(m > 0 && ident(b[m - 1])) && !b.get(m + 11).is_some_and(|&c| ident(c));
+                let bang = word && b[m + 11..].iter().find(|c| !c.is_ascii_whitespace()) == Some(&b'!');
+                if !bang {
+                    m += 1;
                     continue;
                 }
                 let Some(o) = b[m..].iter().position(|&c| matches!(c, b'{' | b'(' | b'[')).map(|n| m + n) else { break };
@@ -965,6 +1036,8 @@ pub fn malformed_cfg(src: &str) -> Option<String> {
                     k += 1;
                 }
                 defs.push((o, k));
+                // (past the body: a definition inside it is inside this one)
+                m = k + 1;
             }
             defs
         });
@@ -990,7 +1063,12 @@ pub fn malformed_cfg(src: &str) -> Option<String> {
         }
         // (where the attribute or the macro starts)
         let start = if macro_call { i } else { src[..i].rfind('#').unwrap_or(i) };
-        if !in_code(start) {
+        let (code, around) = in_code(start);
+        if !code {
+            continue;
+        }
+        // (in what the configuring takes away: an item, a statement or a block of a false `cfg`, or after one)
+        if around.is_some_and(gone) || macro_call && gone(start) || !macro_call && kept.is_some() && after_false(start) {
             continue;
         }
         // (not one in a `macro_rules!` body: a pattern's tokens, `(cfg!(not())) => {}`, are checked when expanded)

@@ -829,13 +829,17 @@ impl Session2 {
         let mut externs = std::mem::take(&mut self.externs);
         // (a `cfg` predicate rustc cannot read, in the source as written: `#[cfg(..)]`, `#[cfg_attr(..)]` and `cfg!(..)`
         // are taken away before the items are read; reported where the attributes are, after a parse error)
-        let mut cfg_err = self.cfg_err.take().or_else(|| if self.ctx.map.inputs.is_empty() { malformed_cfg(src0) } else { None });
+        let mut cfg_err = self.cfg_err.take();
         // (ファイルから読んだもの (load_crate) は読むときに cfg を評価してある)
         let stripped;
         let src0 = if self.ctx.map.inputs.is_empty() {
             let cfg = self.opts.cfg_with(&self.opts.features);
             let mut ext = vec![];
-            match crate::cfg::strip_noting(src0, &cfg, &mut None, &mut ext) {
+            let configured = crate::cfg::strip_noting(src0, &cfg, &mut None, &mut ext);
+            if cfg_err.is_none() {
+                cfg_err = malformed_cfg(src0, configured.as_deref(), &cfg);
+            }
+            match configured {
                 Some(t) => {
                     // (the `extern crate` items it blanked, for the names they define)
                     if externs.is_empty() {
@@ -3449,6 +3453,8 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
     };
     // (an attribute's name and its input: None = a word, Some('(') = a list, Some('=') = `= value`)
     fn check(name: &str, input: &str) -> bool {
+        // (comments are whitespace: `#![windows_subsystem = /* why */ "console"]`)
+        let input = crate::cfg::blank_comments(input);
         let input = input.trim();
         let (form, inner) = if input.is_empty() {
             (' ', "")
@@ -3631,7 +3637,7 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
     const UNSAFE: &[&str] = &["no_mangle", "export_name", "link_section", "naked", "ffi_pure", "ffi_const", "force_target_feature"];
     let inner: Vec<(&str, &str)> = inner_at.iter().map(|&(_, n, inp)| (n, inp)).collect();
     // (`#![crate_type = "proc-macro"]`)
-    let proc_macro_crate = inner.iter().any(|&(n, inp)| n == "crate_type" && inp.trim().strip_prefix('=').and_then(str_value).is_some_and(|v| v == "proc-macro"));
+    let proc_macro_crate = inner.iter().any(|&(n, inp)| n == "crate_type" && crate::cfg::blank_comments(inp).trim().strip_prefix('=').and_then(str_value).is_some_and(|v| v == "proc-macro"));
     // (a lint's level at the crate: the last of its inner attributes that names it, or a group of it)
     let crate_level = |names: &[&str]| -> Option<&str> {
         let mut level = None;
