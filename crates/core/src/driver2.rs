@@ -6191,6 +6191,11 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
             if matches!(b.as_str(), "Copy" | "Sized" | "?Sized" | "Send" | "Sync" | "Unpin") || crate::ast_summary::parse_fn_bound(b).is_some() {
                 return false;
             }
+            // (nor where the bound's arguments name lifetimes (`F: FnLike<&'a isize, &'a isize>`): the call's types are
+            // of them)
+            if b.contains('\'') {
+                return false;
+            }
             let tr = b.split('<').next().unwrap_or(b).trim();
             let tail = format!("::{tr}");
             let decls = p.traits.get(tr).or_else(|| p.traits.iter().find(|(k, _)| k.ends_with(&tail)).map(|(_, v)| v));

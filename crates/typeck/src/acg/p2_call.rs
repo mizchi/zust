@@ -1609,6 +1609,29 @@ impl Cx<'_> {
         })
     }
 
+    /// The type arguments the bound of placeholder sid on trait tr writes (`FnLike<&'a isize, u8>`: `&isize`, `u8`),
+    /// each None where it is not a type this function knows
+    pub(crate) fn placeholder_bound_targs(&self, sid: u32, tr: &str) -> Option<Vec<Option<Ty>>> {
+        let bs = self.prog.structs[sid as usize].placeholder.as_ref()?;
+        let short = tr.split('<').next().unwrap_or(tr).trim();
+        let short = short.rsplit("::").next().unwrap_or(short);
+        let b = bs.iter().find(|b| {
+            let n = b.split('<').next().unwrap_or(b).trim();
+            n == short || n.rsplit("::").next() == Some(short)
+        })?;
+        if !b.contains('<') {
+            return None;
+        }
+        let f = crate::parse::parse_file(&format!("type __B = dyn {b};")).ok()?;
+        let Some(crate::parse::ItemKind::Type(_, _, _, Some(crate::parse::Ty::Dyn(dbs)))) = f.items.first().map(|i| &i.kind) else { return None };
+        let Some(crate::parse::Bound::Trait(_, p)) = dbs.first() else { return None };
+        let seg = p.segs.last()?;
+        Some(seg.args.iter().filter_map(|a| match a {
+            crate::parse::GArg::Ty(t) => Some(self.parse_ty(t).ok()),
+            _ => None,
+        }).collect())
+    }
+
     fn check_spawn_closure(&self, c: &Expr) -> R<()> {
         let Expr::Closure(mv, _, _, _, cpos) = strip_paren(c) else { return Ok(()) };
         for n in crate::ast_closure::free_vars(strip_paren(c)) {
@@ -2236,6 +2259,20 @@ impl Cx<'_> {
                             if let Some(x @ None) = sol.get_mut(1 + i) {
                                 *x = Some(t);
                             }
+                        }
+                    }
+                }
+            }
+        }
+        // (a method of a placeholder's bound's trait (zustc check of a generic fn nothing calls): the trait's parameters
+        // the arguments did not give are the bound's arguments (`F: FnLike<&'a isize, &'a isize>` gives `R` of
+        // `fn call(&self, arg: A) -> R`))
+        if let (Some(tr), Some(Some(Ty::Struct(ps)))) = (sig.trait_of.as_deref(), sol.first().copied()) {
+            if self.prog.is_placeholder(ps) && sol.iter().skip(1).any(|x| x.is_none()) {
+                if let Some(targs) = self.placeholder_bound_targs(ps, tr) {
+                    for (i, t) in targs.into_iter().enumerate() {
+                        if let (Some(x @ None), Some(t)) = (sol.get_mut(1 + i), t) {
+                            *x = Some(t);
                         }
                     }
                 }

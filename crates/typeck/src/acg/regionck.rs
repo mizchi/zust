@@ -548,6 +548,44 @@ fn proj_split(prog: &Program, pat: Ty, t: Ty, tree: &[u32], at: &mut usize, ss: 
     Some(())
 }
 
+/// The type arguments the bound of placeholder sid on trait tr writes (`FnLike<&'a isize, u8>`), and the lifetimes
+/// they name
+fn bound_targ_ptys(prog: &Program, sid: u32, tr: &str) -> Option<(Vec<PTy>, Vec<String>)> {
+    let bs = prog.structs[sid as usize].placeholder.as_ref()?;
+    let short = tr.split('<').next().unwrap_or(tr).trim();
+    let short = short.rsplit("::").next().unwrap_or(short);
+    let b = bs.iter().find(|b| {
+        let n = b.split('<').next().unwrap_or(b).trim();
+        n == short || n.rsplit("::").next() == Some(short)
+    })?;
+    if !b.contains('\'') {
+        return None;
+    }
+    let f = crate::parse::parse_file(&format!("type __B = dyn {b};")).ok()?;
+    let Some(crate::parse::ItemKind::Type(_, _, _, Some(PTy::Dyn(dbs)))) = f.items.first().map(|i| &i.kind) else { return None };
+    let Some(crate::parse::Bound::Trait(_, p)) = dbs.first() else { return None };
+    let args: Vec<PTy> = p.segs.last()?.args.iter().filter_map(|a| if let GArg::Ty(t) = a { Some(t.clone()) } else { None }).collect();
+    let mut lts: Vec<String> = vec![];
+    let cs: Vec<char> = b.chars().collect();
+    let mut i = 0;
+    while i < cs.len() {
+        if cs[i] == '\'' {
+            let mut j = i + 1;
+            while j < cs.len() && (cs[j].is_alphanumeric() || cs[j] == '_') {
+                j += 1;
+            }
+            let l: String = cs[i..j].iter().collect();
+            if l.len() > 1 && l != "'static" && l != "'_" && !lts.contains(&l) {
+                lts.push(l);
+            }
+            i = j;
+        } else {
+            i += 1;
+        }
+    }
+    Some((args, lts))
+}
+
 /// A closure's captures: their types (among its type arguments: a capture by reference is a pointer to it) and
 /// whether each is held by value
 fn captures(prog: &Program, sid: u32) -> Option<(&[Ty], &[bool])> {
@@ -3574,6 +3612,38 @@ impl Cx<'_> {
             sol
         };
         let mut targs: Vec<Option<RT>> = sol.iter().map(|t| t.and_then(|t| rg.fresh(prog, t))).collect();
+        // (a method of a placeholder's bound's trait: the trait's type arguments as the bound writes them, with their
+        // regions (`F: FnLike<&'a isize, &'a isize>`: the function's 'a, both). A lifetime the function does not name is
+        // the bound's own (`for<'a> FnLike<..>`): one fresh region for the call, which its arguments share)
+        if ph_self {
+            if let (Some(tr), Some(&Some(Ty::Struct(s)))) = (sig0.trait_of.as_deref(), sol.first()) {
+                if let Some((args, own)) = bound_targ_ptys(prog, s, tr) {
+                    let mut names = rg.lt_names.clone();
+                    let mut flts = rg.lts.clone();
+                    for l in own {
+                        if names.contains(&l) {
+                            continue;
+                        }
+                        names.push(l);
+                        let v = rg.var();
+                        flts.push(v);
+                    }
+                    for (i, pt) in args.iter().enumerate() {
+                        let Some(Some(t)) = sol.get(1 + i).copied() else { continue };
+                        if !crate::regions::names_lt(pt) {
+                            continue;
+                        }
+                        let mut sl = crate::regions::Slots { lts: names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                        let mut codes = vec![];
+                        sl.slots(pt, false, &mut codes);
+                        let tr = rg.instantiate(prog, t, Some(&codes), &flts, &[], &mut |me| me.var());
+                        if let (Some(tr), Some(slot)) = (tr.filter(|tr| count(prog, t, 0) == Some(tr.len())), targs.get_mut(1 + i)) {
+                            *slot = Some(tr);
+                        }
+                    }
+                }
+            }
+        }
         // (type arguments written (`f::<&'a u8>()`): with the regions they name)
         if let Some(tf) = turbofish {
             let first = sig0.trait_of.is_some() as usize;
