@@ -47,6 +47,64 @@
    - 002: `Ty::Rec`、`{` の 2 トークンの判定、struct 名を形から作る lower
    - 003: prelude、`?` の脱糖(型検査の後の AST の書き換え)、境界での `undefined` の変換
 
+## 実用に向けて: 足りない機能の棚卸し(2026-11)
+
+zsc に小さなコードを通して確かめた(機能ごとに 1 つの `.zsc` を `--all-js` でコンパイル)。
+
+**結論: 1 ファイルで完結する小さな React の画面や数値カーネルは書けるが、実アプリにはまだ足りない。**
+足りないのは主に、複数ファイル、非同期、`Option` / `Result`、JS の値の型、標準ライブラリの量。
+
+今あるもの:
+
+- レコード、enum、`match`、bound つきの総称関数・総称のレコード、クロージャ、`|>`、JSX
+- 数値の型(i32 / u32 / i64 / f32 / f64 と typed array)
+- 代数的エフェクト
+- `@wasm` / `@simd`、`--emit-rust`
+- `import type` での TS の型の読み込み、`extern fn`
+- 文字列の補間
+- ブラウザのプレイグラウンド(editor/)
+
+### P0: 実アプリを書く前に要るもの
+
+1. **`.zsc` どうしのモジュール**
+   - 今は 1 ファイルだけで、`import { f } from "./other.zsc"` はできない
+   - 公開は `export` で書けるので、読む側の解決(パスとシンボル表)、`.d.ts` と JS の import の出力、`@wasm` の関数が別ファイルにあるときの扱いが要る
+2. **非同期**
+   - `async fn` / `await` と `Promise<T>` の型がない。`fetch` も、イベントの後の処理も書けない
+   - 段階 3 の「async の effect」を待たず、まず `extern` で受けた `Promise<T>` を `await` できる最小の形を入れる(JS ではそのまま `async` / `await`。`@wasm` では使えない、とする)
+3. **`Option` / `Result` と `?`**(提案 003)
+   - 自前の enum なら書けるが、標準の型(prelude)、`?`、`if let`、任意のフィールド `x?: T` がない
+   - `import type` で TS の任意のフィールドを読むのも、これが前提
+4. **JS の値の型**
+   - `extern type Element;` のような中身の見えない型がない。`extern` は関数だけで、DOM、`Date`、`Response` などを型として持てない
+   - JS のオブジェクトのメソッドやプロパティを呼ぶ方法もない(今は `extern fn` を 1 つずつ書く)
+   - 上の「ターゲットと JS 相互運用」の `@js` の DOM ラッパー([docs/target-spec.md](docs/target-spec.md))と重なるので、一緒に設計する
+5. **標準ライブラリ**: 今あるのは、配列の `len` `map` `filter` `fold` `any` `all` `push` `concat` `join`、文字列の `len` `to_upper` `trim` `contains` `split`、数値の `to_string` `floor` `round` `sqrt` `abs` `max` `min` だけ
+   - 配列: `sort`(比較関数つき)、`find` / `find_index` / `index_of`、`slice`、`reverse`、`flat_map`、`includes`、`enumerate` 相当
+   - 文字列: `slice`、`starts_with` / `ends_with`、`replace`、`to_lower`、`index_of`、文字の取り出し、数値への `parse`(失敗は `Option` で。3 が前提)
+   - 数値: 三角関数、`pow`、`exp` / `ln`、乱数(`@wasm` では JS と同じ結果にできないものは JS 層だけ)
+   - キーつきの集まり(`Map` / `Set`)と JSON
+   - いずれも JS と `@wasm` で同じ意味にする(文字列の長さと順序は UTF-16 の単位。README の「文字列と `==`」と同じ方針)
+6. **パターン**: or パターン(`A | B =>`)とガード(`n if n > 1 =>`)(提案 004)
+7. **例外**: 例外を投げる JS の関数(`JSON.parse`、`fetch`)を受ける手段がない。`extern` を `-> Result<T, String>` で受ける(003 の未決事項)のが候補
+
+### P1: 使い心地
+
+- メソッド(`impl`)とインターフェース(`trait`)を入れるかどうか。今は関数と `|>` だけ
+- トップレベルの定数(`const N: i32 = 3;`)、関数の中の関数
+- 可変のローカル変数をクロージャが捕まえられないこと(`let mut s = 0; xs.map((x) => { s += x; .. })` は型エラー)。イベントハンドラでは React の state を使うので困りにくいが、ガイドに書く
+- 道具
+  - LSP(診断、hover、定義へ移動)、フォーマッタ、source map(段階 2)
+  - テストの書き方(`#[test]` 相当か、TS のテストから呼ぶか)
+- プレイグラウンド: 複数ファイルと、`import type` で読む TS ファイルのタブ
+
+### P2: 残りの細部
+
+- `@wasm` の中の浮動小数点数の `to_string` と補間の穴
+- typed array をバイト列の形式に載せる
+- zustscript-helper を npm に公開する
+- enum の JS での表現を選べるようにする(`@tag`。下の「あとで決めること」)
+
 ## あとで決めること
 
 ### enum の JS での表現(`@tag`)
