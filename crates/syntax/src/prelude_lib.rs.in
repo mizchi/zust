@@ -5634,6 +5634,54 @@ impl Read for Cursor<&[u8]> {
     }
 }
 
+// std::io::SeekFrom and Seek: an offset from the start, the end or the current position
+pub enum SeekFrom {
+    Start(u64),
+    End(i64),
+    Current(i64),
+}
+
+pub trait Seek {
+    fn seek(&mut self, pos: SeekFrom) -> Result<u64, IoError>;
+    fn rewind(&mut self) -> Result<(), IoError> {
+        self.seek(SeekFrom::Start(0))?;
+        Ok(())
+    }
+    fn stream_position(&mut self) -> Result<u64, IoError> {
+        self.seek(SeekFrom::Current(0))
+    }
+}
+
+// (a cursor's new position: before the start is an error (InvalidInput), past the end is allowed, as std's)
+fn __exr_cursor_seek(len: usize, pos: &mut u64, to: SeekFrom) -> Result<u64, IoError> {
+    let (base, off) = match to {
+        SeekFrom::Start(n) => {
+            *pos = n;
+            return Ok(n);
+        }
+        SeekFrom::End(n) => (len as i64, n),
+        SeekFrom::Current(n) => (*pos as i64, n),
+    };
+    let at = base + off;
+    if at < 0 {
+        return Err(IoError { code: 22 });
+    }
+    *pos = at as u64;
+    Ok(at as u64)
+}
+
+impl Seek for Cursor<Vec<u8>> {
+    fn seek(&mut self, pos: SeekFrom) -> Result<u64, IoError> {
+        __exr_cursor_seek(self.inner.len(), &mut self.pos, pos)
+    }
+}
+
+impl Seek for Cursor<&[u8]> {
+    fn seek(&mut self, pos: SeekFrom) -> Result<u64, IoError> {
+        __exr_cursor_seek(self.inner.len(), &mut self.pos, pos)
+    }
+}
+
 impl Write for Cursor<Vec<u8>> {
     fn write(&mut self, buf: &[u8]) -> Result<usize, IoError> {
         let at = self.pos as usize;

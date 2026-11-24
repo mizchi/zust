@@ -2079,6 +2079,25 @@ impl Inf<'_> {
         let Some(group) = p.overloads.get(&p.names[id as usize]) else { return Some(id) };
         let inh: Vec<u32> = group.iter().copied().filter(|&c| p.sigs[c as usize].has_self && p.sigs[c as usize].impl_trait.is_none() && p.sigs[c as usize].self_ty.is_some()).collect();
         if inh.len() < 2 || !inh.contains(&id) {
+            // (impls of one trait for instances of the type (the prelude's `impl Read for Cursor<Vec<u8>>` and `.. for
+            // Cursor<&[u8]>`): the one the receiver is, once it is known; else the first, as before)
+            let of_trait: Vec<u32> = group.iter().copied().filter(|&c| p.sigs[c as usize].has_self && p.sigs[c as usize].impl_trait.is_some() && p.sigs[c as usize].self_ty.is_some()).collect();
+            if of_trait.len() >= 2 && of_trait.contains(&id) {
+                if let Some(t) = self.resolve(rv) {
+                    let fit: Vec<u32> = of_trait
+                        .iter()
+                        .copied()
+                        .filter(|&c| {
+                            let sig = &p.sigs[c as usize];
+                            let mut sol = vec![None; sig.generics.len()];
+                            sig.self_ty.is_some_and(|st| p.match_ty(st, t, &mut sol) && p.arg_refs_agree(st, t))
+                        })
+                        .collect();
+                    if let [c] = fit.as_slice() {
+                        return Some(*c);
+                    }
+                }
+            }
             return Some(id);
         }
         let Some(t) = self.resolve(rv) else { return None };
