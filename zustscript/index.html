@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>zustscript 入門 ── TypeScript の座標を WebAssembly に渡す</title>
-<meta name="description" content="クリック位置と点の距離を求める例で、zustscript が生成する JavaScript、TypeScript の型定義、WebAssembly の呼び出しコードを読み解きます。">
+<title>zustscript 入門 ── JavaScript と WebAssembly のためのフロントエンド言語</title>
+<meta name="description" content="zustscript は TypeScript のアプリに組み込める静的型付き言語です。enum と match による状態の表現、JSX、関数単位で選べる WebAssembly を紹介します。">
 <link rel="stylesheet" href="../style.css">
 <style>
   article { max-width: 48rem; margin: auto; padding-block: clamp(32px, 7vw, 76px); font-size: 16px; line-height: 1.9; }
@@ -33,12 +33,24 @@
 <article>
 <!-- Code samples may be edited as plain escaped HTML inside code.language-*;
      regenerate the Tree-sitter spans with: just --justfile zustscript/_tools/justfile highlight -->
-<h1>zustscript 入門<br>TypeScript の座標を WebAssembly に渡す</h1>
-<p>地図上の点をクリックしたとき、中心から半径 5 ピクセル以内なら選択できるようにします。画面にはすでに TypeScript の座標型があります。距離の計算だけを WebAssembly に移したら、クリックを処理する側のコードはどこまで変わるでしょうか。</p>
-<p>zustscript は、JavaScript と一緒に使うために開発中のフロントエンド向け言語です。コンパイラの <code>zsc</code> は、普通の関数を JavaScript の ES モジュールに変換し、公開関数には TypeScript の型定義も生成します。関数に <code>@wasm</code> を付けると、その本体を Rust に変換し、zust のコンパイラ <code>zustc</code> で WebAssembly（Wasm）にコンパイルします。</p>
+<h1>zustscript 入門<br>JavaScript と WebAssembly のためのフロントエンド言語</h1>
+<p>zustscript は、TypeScript のアプリに組み込める静的型付き言語の試作です。画面を組み立てる JSX も、整数の幅や浮動小数点の精度を指定した計算も、同じ言語で書けます。ふつうの関数は読みやすい JavaScript にコンパイルされ、選んだ関数だけを WebAssembly（Wasm）で動かせます。</p>
+<p>TypeScript のコードとは型定義を通じてつながります。たとえば、既存のアプリで使っている座標の型を zustscript に取り込めます。逆に、zustscript で書いた関数を公開すると、コンパイラの <code>zsc</code> が ES モジュールと <code>.d.ts</code> を生成するので、TypeScript 側でも引数と戻り値の型が分かります。</p>
 
-<h2>画面で使う Point を読み込む</h2>
-<p>クリック位置も地図上の点も、画面上のピクセル座標で表します。型を定義するファイルは TypeScript 側に一つ置きます。</p>
+<h2>状態を enum で表し、match で読み出す</h2>
+<p>zustscript の <code>enum</code> では、状態ごとに異なるデータを持たせられます。たとえば地図で地点を選ぶ画面なら、選択中のときだけ地点名が必要です。</p>
+<figure><figcaption>選択状態から表示用の文字列を返す関数</figcaption><pre><code class="language-zustscript"><span class='keyword'>enum</span> <span class='type'><span class='type'>Selection</span></span> <span class='punctuation bracket'>{</span> <span class='constructor'><span class='constructor'>Empty</span></span><span class='punctuation delimiter'>,</span> <span class='constructor'><span class='constructor'>Selected</span></span><span class='punctuation bracket'>(</span><span class='type builtin'>String</span><span class='punctuation bracket'>)</span> <span class='punctuation bracket'>}</span>
+
+<span class='keyword'>pub</span> <span class='keyword'>fn</span> <span class='function'>label</span><span class='punctuation bracket'>(</span><span class='variable'>s</span><span class='punctuation delimiter'>:</span> <span class='type'><span class='type'>Selection</span></span><span class='punctuation bracket'>)</span> <span class='operator'>-&gt;</span> <span class='type builtin'>String</span> <span class='punctuation bracket'>{</span>
+  <span class='keyword'>match</span> <span class='variable'>s</span> <span class='punctuation bracket'>{</span>
+    <span class='constructor'><span class='constructor'>Empty</span></span> <span class='operator'>=&gt;</span> <span class='string'>&quot;地点を選んでください&quot;</span><span class='punctuation delimiter'>,</span>
+    <span class='constructor'><span class='constructor'>Selected</span></span><span class='punctuation bracket'>(</span><span class='variable'>name</span><span class='punctuation bracket'>)</span> <span class='operator'>=&gt;</span> <span class='variable'>name</span><span class='punctuation delimiter'>,</span>
+  <span class='punctuation bracket'>}</span>
+<span class='punctuation bracket'>}</span></code></pre></figure>
+<p><code>Selected(name)</code> の分岐では、<code>name</code> に選んだ地点の名前が入ります。たとえば後から「検索中」を表す <code>Searching</code> を <code>Selection</code> に加えると、<code>zsc</code> はこの <code>match</code> に分岐が足りないことをコンパイル時に指摘します。</p>
+
+<h2>関数ごとに WebAssembly を選ぶ</h2>
+<p>同じ地図で、クリックした位置が地点の中心から 5 ピクセル以内なら、その地点を選択できるとします。画面側は TypeScript の <code>Point</code> をそのまま使い、距離を計算する関数にだけ <code>@wasm</code> を付けます。この印が付いた関数を <code>zsc</code> が Rust に変換し、zust のコンパイラ <code>zustc</code> が Wasm にします。</p>
 <figure><figcaption>model.ts</figcaption><pre><code class="language-typescript"><span class='keyword'>export</span> <span class='keyword'>type</span> <span class='type'>Point</span> <span class='operator'>=</span> <span class='punctuation bracket'>{</span> <span class='property'>x</span>: <span class='type builtin'>number</span><span class='punctuation delimiter'>;</span> <span class='property'>y</span>: <span class='type builtin'>number</span> <span class='punctuation bracket'>}</span><span class='punctuation delimiter'>;</span></code></pre></figure>
 <p>同じディレクトリに <code>pick.zsc</code> を置きます。<code>import type</code> で読み込んだ <code>Point</code> の各フィールドは、zustscript では倍精度浮動小数点数の <code>f64</code> になります。</p>
 <figure><figcaption>pick.zsc</figcaption><pre><code class="language-zustscript"><span class='keyword'>import</span> <span class='keyword'>type</span> <span class='punctuation bracket'>{</span> <span class='type'><span class='type'>Point</span></span> <span class='punctuation bracket'>}</span> <span class='keyword'>from</span> <span class='string'>&quot;./model.ts&quot;</span><span class='punctuation delimiter'>;</span>
