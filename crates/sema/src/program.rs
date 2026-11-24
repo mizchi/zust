@@ -2159,9 +2159,20 @@ impl Program {
                 if p.has_param(t) || p.tn(t).contains("dyn ") {
                     continue;
                 }
+                // (nor a Box, an array or a slice: implements does not know the program's impls for them)
+                let opaque = matches!(t, Ty::Box(_) | Ty::Array(..) | Ty::Slice(_));
                 for s in sup {
                     let name = s.split('<').next().unwrap_or(s).trim();
                     if s.contains('<') || !user_traits.contains(name) || p.implements(t, name) {
+                        continue;
+                    }
+                    // (an impl of the supertrait for exactly this type, written out: `impl A for [u8; 1]`)
+                    let written = sums[..user].iter().any(|o| {
+                        o.impl_generics.is_empty()
+                            && o.impl_trait.as_deref().is_some_and(|x| x.split('<').next().unwrap_or(x).trim() == name)
+                            && o.impl_self_ty.as_ref().and_then(|x| p.resolve_g(x, &[]).ok()) == Some(t)
+                    });
+                    if written || opaque {
                         continue;
                     }
                     return Err(format!("{}:1: the trait bound `{}: {name}` is not satisfied (E0277)", items[ii].line, p.tn(t)));
@@ -2566,8 +2577,12 @@ impl Program {
         #[derive(Default)]
         struct Goals {
             stack: Vec<(Ty, String)>,
-            done: FxMap<(Ty, String), Certainty>,
+            /// A goal's answer, and how many goals deep its proof went below it: reused only where the same proof
+            /// would stay within 64 (with fewer goals left above it, the proof could have met the overflow)
+            done: FxMap<(Ty, String), (Certainty, usize)>,
             guesses: u64,
+            /// The deepest the stack went in the proof being made
+            peak: usize,
         }
         thread_local! {
             static GOALS: std::cell::RefCell<Goals> = std::cell::RefCell::new(Goals::default());
@@ -2575,11 +2590,13 @@ impl Program {
         let key = (t, tr.to_string());
         let before = GOALS.with(|g| {
             let mut g = g.borrow_mut();
-            if g.stack.is_empty() {
+            let d = g.stack.len();
+            if d == 0 {
                 g.done.clear();
+                g.peak = 0;
             }
             // (the overflow first: a goal past 64 deep is a guess, whatever an earlier, shallower proof of it found)
-            if g.stack.len() >= 64 {
+            if d >= 64 {
                 g.guesses += 1;
                 return Err(Certainty::Maybe(MaybeCause::Overflow));
             }
@@ -2587,23 +2604,29 @@ impl Program {
                 g.guesses += 1;
                 return Err(Certainty::Maybe(MaybeCause::Cycle));
             }
-            if let Some(&r) = g.done.get(&key) {
-                return Err(r);
+            if let Some(&(r, h)) = g.done.get(&key) {
+                if d + h < 64 {
+                    g.peak = g.peak.max(d + h);
+                    return Err(r);
+                }
             }
             g.stack.push(key.clone());
-            Ok(g.guesses)
+            let peak = std::mem::replace(&mut g.peak, d + 1);
+            Ok((g.guesses, d, peak))
         });
-        let before = match before {
-            Ok(n) => n,
+        let (before, d, outer_peak) = match before {
+            Ok(x) => x,
             Err(r) => return r,
         };
         let r = self.evaluate(t, tr);
         GOALS.with(|g| {
             let mut g = g.borrow_mut();
             g.stack.pop();
+            let h = g.peak - d;
             if g.guesses == before {
-                g.done.insert(key, r);
+                g.done.insert(key, (r, h));
             }
+            g.peak = g.peak.max(outer_peak);
         });
         r
     }
@@ -2650,6 +2673,9 @@ impl Program {
             // (match_ty lets a raw pointer pattern take a reference, as a call coerces it; a self type does not)
             (Ty::Ptr(..), Ty::Ref(..)) | (Ty::Ref(..), Ty::Ptr(..)) => false,
             (Ty::Array(x, _), Ty::Array(y, _)) | (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) => self.refs_agree(*x, *y, depth + 1),
+            (Ty::Fn(f), Ty::Fn(g)) if f != g && depth < 16 => {
+                f.params.len() == g.params.len() && f.params.iter().zip(&g.params).chain([(&f.ret, &g.ret)]).all(|(&p, &q)| self.refs_agree(p, q, depth + 1))
+            }
             (Ty::Struct(x), Ty::Struct(y)) if x != y && depth < 16 => {
                 self.structs[x as usize].args.iter().zip(&self.structs[y as usize].args).all(|(&p, &q)| self.refs_agree(p, q, depth + 1))
             }

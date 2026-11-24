@@ -30,12 +30,12 @@ impl Foo for W<i32> {}                // need(W(1u8))
 - **入れ子の goal**: それぞれの境界を `goal_holds` で証明する。`goal_holds` は証明中の goal のスタックを持つ。
   - すでにスタックにある goal（循環: `impl<T: Q> P for T` と `impl<T: P> Q for T`）は成り立つとみなす。
   - 64 段より深い goal（オーバーフロー）も同じ。
-  - どちらにも当たらずに証明した goal は、いちばん外の goal が終わるまで覚えておく。`impl<X: T1 + T0> T2 for X`、`impl<X: T2 + T1> T3 for X`、… のような連なりで、goal を 2^n 回ではなく一度ずつ証明する（`T35` で、以前は 4.2 秒、今は 6 ミリ秒）。循環やオーバーフローに当たった goal は推測に頼っているので、覚えない。
+  - どちらにも当たらずに証明した goal は、いちばん外の goal が終わるまで覚えておく。`impl<X: T1 + T0> T2 for X`、`impl<X: T2 + T1> T3 for X`、… のような連なりで、goal を 2^n 回ではなく一度ずつ証明する（`T35` で、以前は 4.2 秒、今は 6 ミリ秒）。循環やオーバーフローに当たった goal は推測に頼っているので、覚えない。覚えた答えには、その証明がどれだけ深くまで goal をたどったかも添え、その証明が 64 段に収まるところでだけ使う。
   - どちらも、rustc が出さないかもしれないエラーではなく、以前の答えを返す。新しい solver はこれらを「不明」にし、auto trait を通る循環は余帰納的に扱う。
 - **impl ごと**: ブランケット impl はそれぞれ自分の境界を持ち、境界がすべて成り立つものが一つあればよい。`impl<T: A> Tr<u8> for T` と `impl<T: B> Tr<u16> for T` があるとき、`i32: Tr<u8>` に `A` と `B` の両方を求めない。
-- **生ポインタ**: impl の自己型は、可変性が同じときだけ一致する。参照はもともとそうで、生ポインタもそうした。`impl Foo for W<*const i32>` は `W<*mut i32>` への impl でも `W<&i32>` への impl でもない。
+- **生ポインタ**: impl の自己型は、可変性が同じときだけ一致する。参照はもともとそうで、生ポインタもそうした。`impl Foo for W<*const i32>` は `W<*mut i32>` への impl でも `W<&i32>` への impl でもない。関数ポインタの引数と戻り値の中でも同じ。
 - **プログラム自身の trait だけ**: `impl_applies` がしていたのと同じく、std の trait の境界は成り立つとみなす。zustc の std の trait への答えは場合ごとに書かれていて（`implements_std`）、そこでのエラーは誤ったエラーになる。
-- **supertrait**: `trait B: A` の impl は、自己型が `A` を実装していることを必要とする（`privacy/sealed-traits/false-sealed-traits-note.rs`）。これは、型パラメータのない impl について、プログラム自身の supertrait に対して確かめる。自己型に trait オブジェクトを含むものは確かめない。zustc は `&dyn T2` と `&(dyn T2 + 'static)` を文字列で区別するが、rustc はライフタイムだけが違う一つの型として見る。
+- **supertrait**: `trait B: A` の impl は、自己型が `A` を実装していることを必要とする（`privacy/sealed-traits/false-sealed-traits-note.rs`）。これは、型パラメータのない impl について、プログラム自身の supertrait に対して確かめる。自己型に trait オブジェクトを含むものは確かめない。zustc は `&dyn T2` と `&(dyn T2 + 'static)` を文字列で区別するが、rustc はライフタイムだけが違う一つの型として見る。自己型そのものに対して書かれた supertrait の impl は数える。`Box`、配列、スライスはそれ以上確かめない。`implements` がそれらへのプログラムの impl を見ないから。
 - **参照への impl**: `impl Tr for &mut i32` は `i32` への impl としても記録されていた。そのため `fn f<T: Tr>` に対する `f(1i32)` が受理されていた（`suggestions/issue-84973-2.rs`）。
   - そういう記録には印を付けた（`Program::prim_ref_only`）。プリミティブへの境界はそれを数えない（`prim_has`）。
   - メソッドの検索はこれまでどおり見つける。`impl First for &&u32` での `First::m(&rr)` がそれに頼っているから（`tests/probe/ref_impl_layers.rs`）。

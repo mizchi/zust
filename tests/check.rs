@@ -1036,6 +1036,10 @@ fn impl_bounds_are_nested_goals() {
     // (supertraits)
     bad("trait A {}\ntrait B: A {}\nstruct C;\nimpl B for C {}\nfn main() {}");
     ok("trait A {}\ntrait B: A {}\nstruct C;\nimpl A for C {}\nimpl B for C {}\nfn main() {}");
+    // (an impl of the supertrait for exactly the self type, of a type implements does not see the program's impls of)
+    for t in ["[u8; 1]", "[u8]", "Box<u8>"] {
+        ok(&format!("trait A {{}}\ntrait B: A {{}}\nimpl A for {t} {{}}\nimpl B for {t} {{}}\nfn main() {{}}"));
+    }
     // (two blanket impls of one trait each have their own bounds: one that holds is enough)
     ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: A> Tr<u8> for T {}\nimpl<T: B> Tr<u16> for T {}\nimpl A for i32 {}\nfn need2<T: Tr<u8>>(_: T) {}\nfn main() { need2(1i32); }");
     // (tuples: the impl's self type and bounds, as for a struct)
@@ -1048,6 +1052,9 @@ fn impl_bounds_are_nested_goals() {
     bad("impl Foo for W<*const i32> {}\nfn main() { let mut x = 1; need(W(&mut x as *mut i32)); }");
     ok("impl Foo for W<*const i32> {}\nfn main() { let x = 1; need(W(&x as *const i32)); }");
     bad("impl Foo for W<*const i32> {}\nfn main() { let x = 1; need(W(&x)); }");
+    // (and inside a fn pointer's parameters)
+    bad("impl Foo for (fn(*const i32),) {}\nfn f(_: *mut i32) {}\nfn main() { need((f as fn(*mut i32),)); }");
+    ok("impl Foo for (fn(*const i32),) {}\nfn f(_: *const i32) {}\nfn main() { need((f as fn(*const i32),)); }");
     // (an impl for `&mut i32` is not for i32)
     bad("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { f(1i32); }");
     ok("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { let mut x = 1i32; f(&mut x); }");

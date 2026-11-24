@@ -40,19 +40,23 @@ lookup of trait bounds did not call it. It was used only by one path of method c
   - So is one more than 64 goals deep (overflow).
   - A goal proved without meeting either is kept until the outermost goal is done, so a chain like
     `impl<X: T1 + T0> T2 for X`, `impl<X: T2 + T1> T3 for X`, ... proves each goal once, not 2^n times
-    (`T35`: 4.2 s before, 6 ms now). One that met a cycle or the overflow leaned on a guess and is not kept.
+    (`T35`: 4.2 s before, 6 ms now). One that met a cycle or the overflow leaned on a guess and is not kept. A kept
+    answer also keeps how many goals deep its proof went, and is reused only where that proof would stay within 64.
   - Both give the old answer, not an error rustc may not give. The new solver makes these "maybe", and treats cycles
     through auto traits as coinductive.
 - **One impl at a time**: each blanket impl keeps its own bounds, and one whose bounds all hold is enough.
   `impl<T: A> Tr<u8> for T` with `impl<T: B> Tr<u16> for T` does not ask `i32: Tr<u8>` for both `A` and `B`.
 - **Raw pointers**: an impl's self type matches only with the same mutability, of references as before and now of raw
-  pointers: `impl Foo for W<*const i32>` is not for `W<*mut i32>`, nor for `W<&i32>`.
+  pointers: `impl Foo for W<*const i32>` is not for `W<*mut i32>`, nor for `W<&i32>`, also inside a fn pointer's
+  parameters and result.
 - **Only the program's traits**: as `impl_applies` did, a bound of a std trait is taken to hold. zustc's answers for
   std traits are written case by case (`implements_std`), and an error there would be a false one.
 - **Supertraits**: an impl of `trait B: A` needs its self type to implement `A`
   (`privacy/sealed-traits/false-sealed-traits-note.rs`). This is checked for impls with no parameters, for supertraits
   of the program's. It is not checked for self types with a trait object in them: `&dyn T2` and
-  `&(dyn T2 + 'static)` are told apart by their text here, where rustc sees one type with two lifetimes.
+  `&(dyn T2 + 'static)` are told apart by their text here, where rustc sees one type with two lifetimes. An impl of
+  the supertrait written for exactly the self type counts, and a `Box`, an array or a slice is not checked further:
+  `implements` does not see the program's impls for them.
 - **Impls for references**: `impl Tr for &mut i32` was also recorded as an impl for `i32`, so `f(1i32)` with
   `fn f<T: Tr>` was accepted (`suggestions/issue-84973-2.rs`).
   - Such entries are now marked (`Program::prim_ref_only`), and a bound on the primitive does not count them
