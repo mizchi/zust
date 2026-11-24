@@ -399,7 +399,7 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
                     exe: Some(format!("{exe}.test")),
                     cfgs,
                     env,
-                    // (`harness = false`: its own `main`, no `cfg(test)`)
+                    // (`harness = false`: its own `main`; `cfg(test)` comes from `cfgs` above)
                     test: t.harness,
                 });
                 labels.push((crates.len() - 1, label, t.harness, t.name.clone()));

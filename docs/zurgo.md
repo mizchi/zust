@@ -167,7 +167,7 @@ zurgo test
 zurgo test --lib parse -- --include-ignored
 ```
 
-- Each test crate is built with `zustc --test`. That keeps `#[cfg(test)]` items, collects the `#[test]` functions (those a `macro_rules!` makes too: they are
+- Each test crate (but a `harness = false` one, below) is built with `zustc --test`. That keeps `#[cfg(test)]` items, collects the `#[test]` functions (those a `macro_rules!` makes too: they are
   collected from the expanded source)
   and adds a harness `main` (the crate's own `main` is not called). The harness only lists its tests and runs the
   one named:
