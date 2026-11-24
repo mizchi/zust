@@ -150,6 +150,8 @@ main {
 .hl-comment { color: var(--hl-comment); font-style: italic; }
 .hl-keyword { color: var(--hl-keyword); }
 .hl-string { color: var(--hl-string); }
+.hl-string-escape { color: var(--hl-number); }
+.hl-punctuation-special { color: var(--hl-keyword); }
 .hl-number, .hl-constant-builtin { color: var(--hl-number); }
 .hl-type, .hl-type-builtin { color: var(--hl-type); }
 .hl-constructor { color: var(--hl-constructor); }

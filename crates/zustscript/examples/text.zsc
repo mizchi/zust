@@ -67,3 +67,22 @@ enum Tag { Named(String), Anon }
 }
 
 @wasm export fn conflict_report(n: i32) -> String { conflicts(n) }
+
+// template strings: a hole is a string, an integer or a bool (`format!` in Rust; a float is formatted differently
+// there, so it stays in the JS layer)
+@wasm export fn card(p: Person, n: i64) -> String {
+  `${p.name} (${p.age}): ${n * 2} {not a hole} \${nor this} ${p.age > 18}`
+}
+
+// a hole whose type a later argument decides, and a multi-line template inside a block that becomes a function in JS
+fn apply<T>(f: fn(T) -> String, x: T) -> String { f(x) }
+export fn later_hole() -> String {
+  apply((x) => `<${x}>`, 1) + "|" + { let n = 2; `a
+b${n}` }
+}
+
+// parentheses inside templates (and templates inside holes) are text, not structure: `.len()` applies to the sum
+fn id(s: String) -> String { s }
+export fn paren_text() -> i32 {
+  (id(`${`(`}`) + id(`${`)`}`)).len()
+}
