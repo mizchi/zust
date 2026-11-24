@@ -1345,8 +1345,8 @@ impl Session2 {
         let mut deny_unused_lifetimes = (false, false);
         let mut deny_mismatched_lts = false;
         let mut deny_deprecated = false;
-        // (improper_ctypes / improper_ctypes_definitions)
-        let mut deny_ctypes = false;
+        // (improper_ctypes (an `extern` block's fns), improper_ctypes_definitions (an `extern "C" fn`))
+        let mut deny_ctypes = (false, false);
         // (non_snake_case, non_camel_case_types, non_upper_case_globals)
         let mut deny_style = [false; 3];
         let lib_attr = {
@@ -1434,7 +1434,7 @@ impl Session2 {
             deny_unused_lifetimes = (lint("unused_lifetimes"), lint("single_use_lifetimes"));
             deny_mismatched_lts = lint("mismatched_lifetime_syntaxes");
             deny_deprecated = lint("deprecated") || (levels.contains(&"warnings") && !c.contains("#![allow(deprecated"));
-            deny_ctypes = lint("improper_ctypes") || lint("improper_ctypes_definitions");
+            deny_ctypes = (lint("improper_ctypes"), lint("improper_ctypes_definitions"));
             deny_unused_alloc = lint("unused_allocation")
                 || (!levels.contains(&"unused_allocation") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
             deny_unused_mut = lint("unused_mut") || (!levels.contains(&"unused_mut") && levels.iter().any(|l| matches!(*l, "unused" | "warnings")) && !c.contains("#![allow(unused"));
@@ -1490,8 +1490,8 @@ impl Session2 {
             }
         }
         // (improper_ctypes: a C string type of std's, `CStr` / `CString`, in an `extern "C"` block's or fn's signature)
-        if deny_ctypes {
-            if let Some(e) = first_cstr_in_extern(&src, &items[..user_src]) {
+        if deny_ctypes.0 || deny_ctypes.1 {
+            if let Some(e) = first_cstr_in_extern(&src, &items[..user_src], deny_ctypes) {
                 return Err(e);
             }
         }
@@ -3871,12 +3871,16 @@ fn std_path_ns(path: &[&[u8]]) -> u8 {
 /// improper_ctypes: the first `CStr` / `CString` in the parameters or result of a fn of an `extern "C" { .. }` block,
 /// or of an `extern "C" fn` (improper_ctypes_definitions), as `line:col: msg`. Behind a pointer too: neither has a C
 /// layout
-fn first_cstr_in_extern(src: &str, items: &[SrcItem]) -> Option<String> {
+fn first_cstr_in_extern(src: &str, items: &[SrcItem], (blocks, defs): (bool, bool)) -> Option<String> {
     for it in items {
         let text = src.get(it.start..it.end).unwrap_or("");
         if !text.contains("extern") || !(text.contains("CStr")) {
             continue;
         }
+        // (an item that allows the lint for itself: `#[allow(improper_ctypes)] extern "C" { .. }`)
+        let squeezed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        let blocks = blocks && !squeezed.contains("allow(improper_ctypes)") && !squeezed.contains("allow(improper_ctypes,");
+        let defs = defs && !squeezed.contains("allow(improper_ctypes_definitions");
         let b = text.as_bytes();
         let toks = crate::lexer::tokenize(b);
         let tk = |k: usize| &text[toks[k].1..toks[k].2];
@@ -3897,6 +3901,10 @@ fn first_cstr_in_extern(src: &str, items: &[SrcItem]) -> Option<String> {
         while k + 2 < toks.len() {
             if toks[k].0 == 0 && tk(k) == "extern" && toks[k + 1].0 == 2 && tk(k + 1) == "\"C\"" {
                 if sym(k + 2, "{") {
+                    if !blocks {
+                        k += 3;
+                        continue;
+                    }
                     let mut j = k + 3;
                     let mut d = 1;
                     while j < toks.len() && d > 0 {
@@ -3914,7 +3922,7 @@ fn first_cstr_in_extern(src: &str, items: &[SrcItem]) -> Option<String> {
                     k = j;
                     continue;
                 }
-                if toks[k + 2].0 == 0 && tk(k + 2) == "fn" {
+                if defs && toks[k + 2].0 == 0 && tk(k + 2) == "fn" {
                     if let Some(t) = sig_cstr(k + 2) {
                         return Some(format!("{}:1: `extern` fn uses type `{t}`, which is not FFI-safe", line_of(k)));
                     }

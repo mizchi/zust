@@ -68,6 +68,16 @@ fn main() {
     l.push_front(1);
     println!("{} {:?} {:?} {:?}", l.len(), l.front(), l.back(), l.iter().collect::<Vec<_>>());
     println!("{:?} {:?}", l.pop_front(), l);
+    // (a clone has a buffer of its own: both are dropped)
+    let mut names = LinkedList::new();
+    names.push_back(String::from("a"));
+    let mut copy = names.clone();
+    copy.push_back(String::from("b"));
+    names.pop_front();
+    let dq: std::collections::VecDeque<String> = copy.iter().cloned().collect();
+    let dq2 = dq.clone();
+    drop(dq);
+    println!("{:?} {:?} {:?}", names, copy, dq2);
     // RwLock
     let lock = RwLock::new(vec![1, 2]);
     {

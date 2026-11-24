@@ -6416,6 +6416,10 @@ fn __exr_parse_v6<G>(s: &str) -> Option<[u8; 16]> {
         } else {
             head.push(v as u16);
         }
+        // (no address has a 9th group: stopped here, not after reading the rest)
+        if head.len() + tail.len() > 8 {
+            return None;
+        }
         if i == b.len() {
             break;
         }
@@ -10527,7 +10531,10 @@ impl<T> RwLock<T> {
     }
     pub fn read(&self) -> Result<RwLockReadGuard<T>, ()> {
         let w = &self.writer as *const bool;
-        __exr_green_wait(|| unsafe { !*w });
+        // (no other thread to wait for, and a writer holds it: std's would deadlock)
+        if !__exr_green_wait(|| unsafe { !*w }) {
+            panic!("rwlock read lock would result in deadlock");
+        }
         let r = &self.readers as *const usize as *mut usize;
         unsafe {
             *r += 1;
@@ -10537,7 +10544,9 @@ impl<T> RwLock<T> {
     pub fn write(&self) -> Result<RwLockWriteGuard<T>, ()> {
         let w = &self.writer as *const bool as *mut bool;
         let r = &self.readers as *const usize;
-        __exr_green_wait(|| unsafe { !*w && *r == 0 });
+        if !__exr_green_wait(|| unsafe { !*w && *r == 0 }) {
+            panic!("rwlock write lock would result in deadlock");
+        }
         unsafe {
             *w = true;
         }
@@ -12825,6 +12834,19 @@ impl<T> VecDeque<T> {
             }
             i += 1;
         }
+    }
+}
+
+// (a clone of its own buffer, each element cloned: a copy of the fields would share the buffer, and both would free it)
+impl<T: Clone> VecDeque<T> {
+    pub fn clone(&self) -> VecDeque<T> {
+        let mut d = VecDeque::new();
+        let mut i = 0;
+        while i < self.len {
+            d.push_back(unsafe { (*self.dq_at(i)).clone() });
+            i += 1;
+        }
+        d
     }
 }
 

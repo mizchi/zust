@@ -770,7 +770,13 @@ fn lex_to(b: &[u8], k: &mut usize, st: &mut LexAt, i: usize) -> LexAt {
                     *k += 1;
                 } else if c == b'"' {
                     *st = LexAt::Str;
-                } else if c == b'r' && (*k == 0 || !is_id(b[*k - 1])) && matches!(b.get(*k + 1), Some(b'"' | b'#')) {
+                } else if c == b'r'
+                    && (*k == 0
+                        || !is_id(b[*k - 1])
+                        // (`br".."`, `cr#".."#`)
+                        || (matches!(b[*k - 1], b'b' | b'c') && (*k == 1 || !is_id(b[*k - 2]))))
+                    && matches!(b.get(*k + 1), Some(b'"' | b'#'))
+                {
                     let mut j = *k + 1;
                     while j < b.len() && b[j] == b'#' {
                         j += 1;
