@@ -535,6 +535,13 @@ fn proj_split(prog: &Program, pat: Ty, t: Ty, tree: &[u32], at: &mut usize, ss: 
             }
         }
         (Ty::Dyn(a), Ty::Dyn(b)) if a == b => region(at, si, lts)?,
+        // (a fn pointer: its parameters' regions, then its result's (`impl<'a> Foo for fn(&'a ())`))
+        (Ty::Fn(pf), Ty::Fn(tf)) if pf.params.len() == tf.params.len() => {
+            for (&pp, &tp) in pf.params.iter().zip(&tf.params) {
+                proj_split(prog, pp, tp, tree, at, ss, si, lts, targs, depth + 1)?;
+            }
+            proj_split(prog, pf.ret, tf.ret, tree, at, ss, si, lts, targs, depth + 1)?;
+        }
         _ if pat == t && count(prog, t, depth + 1) == Some(0) => {}
         _ => return None,
     }
@@ -2825,8 +2832,10 @@ impl Cx<'_> {
         if let Some(qtree) = qtree.filter(|q| count(prog, qt, 0) == Some(q.len())) {
             // (the marks of a path's elided lifetimes left out where the codes then match the impl's self type's
             // regions)
+            // (and the marks a fn pointer type's codes begin with, R_FN, which stand for no region)
             let want = count(prog, a.self_ty, 0);
-            let ss: Vec<u8> = if want == Some(self_slots.len()) { self_slots.clone() } else { self_slots.iter().copied().filter(|&c| c != R_ELIDED_ADT).collect() };
+            let ss: Vec<u8> = self_slots.iter().copied().filter(|&c| c != R_FN).collect();
+            let ss: Vec<u8> = if want == Some(ss.len()) { ss } else { ss.into_iter().filter(|&c| c != R_ELIDED_ADT).collect() };
             if want == Some(ss.len()) {
                 let (mut at, mut si) = (0, 0);
                 if proj_split(prog, a.self_ty, qt, &qtree, &mut at, &ss, &mut si, &mut found_l, &mut found_t, 0).is_none() {

@@ -3677,6 +3677,10 @@ fn part22_projection_review() {
     // (an impl's lifetime next to a type argument with regions: matched where the self type has it)
     let d = check("trait Foo { type Out; }\nstruct W<'a, T>(&'a u8, T);\nimpl<'a, T> Foo for W<'a, T> { type Out = &'a u32; }\nfn f(r: &u32) {\n    let _: <W<'static, &'static u32> as Foo>::Out = r;\n}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (an impl's lifetime in a fn pointer self type)
+    let d = check("trait Foo { type Out; }\nimpl<'a> Foo for fn(&'a ()) { type Out = &'a u32; }\nfn f(r: &u32) {\n    let _: <fn(&'static ()) as Foo>::Out = r;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    assert_eq!(check("trait Foo { type Out; }\nimpl<'a> Foo for fn(&'a ()) { type Out = &'a u32; }\nstatic S: u32 = 1;\nfn f<'b>(r: &'b u32) -> &'b u32 {\n    let _: <fn(&'static ()) as Foo>::Out = &S;\n    let x: <fn(&'b ()) as Foo>::Out = r;\n    x\n}\nfn main() {}\n"), vec![]);
     assert_eq!(check("trait Foo { type Out; }\nstruct W<T>(T);\nimpl<T> Foo for W<T> { type Out = (&'static u32, T); }\nstruct V<'a, T>(&'a u8, T);\nimpl<'a, T> Foo for V<'a, T> { type Out = &'a u32; }\nstatic S: u32 = 3;\nfn f<'b>(anchor: &'static u32, r: &'b u32) -> &'b u32 {\n    let _: <W<&'static u32> as Foo>::Out = (anchor, anchor);\n    let _: <W<&'b u32> as Foo>::Out = (anchor, r);\n    let _: <V<'static, &'b u32> as Foo>::Out = &S;\n    let x: <V<'b, &'static u32> as Foo>::Out = r;\n    x\n}\nfn main() {}\n"), vec![]);
 }
 
