@@ -1363,6 +1363,45 @@ fn unresolved_imports() {
 }
 
 #[test]
+fn glob_ambiguity() {
+    // (E0659: a name two glob imports bring with different definitions, where a path names it; each expected line
+    // and column is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let two = "mod a { pub struct S; }\nmod b { pub struct S; }\nuse a::*;\nuse b::*;\n";
+    let fns = "mod a { pub fn f() {} }\nmod b { pub fn f() {} }\nuse a::*;\nuse b::*;\n";
+    let at = |l: usize, c: usize, n: &str| Some((l, c, format!("`{n}` is ambiguous (E0659)")));
+    for edition in [2015, 2021] {
+        // (a type, a call, an enum's variants, a path through a module's globs, an import)
+        assert_eq!(check(edition, &format!("{two}fn f(_: S) {{}}\nfn main() {{}}\n")), at(5, 9, "S"), "type");
+        assert_eq!(check(edition, &format!("{fns}fn main() {{\n    f();\n}}\n")), at(6, 5, "f"), "call");
+        assert_eq!(check(edition, "use self::A::*;\nuse self::B::*;\nenum A { V }\nenum B { V }\nfn main() { let _ = V; }\n"), at(5, 21, "V"), "variants");
+        let src = "mod a {\n    mod c { pub struct E; }\n    mod d { pub struct E; }\n    pub use self::c::*;\n    pub use self::d::*;\n}\nfn main() { let _ = a::E; }\n";
+        assert_eq!(check(edition, src), at(7, 24, "E"), "through_module");
+        let src = "mod a { pub struct S; }\nmod b { pub struct S; }\nmod m { pub use crate::a::*; pub use crate::b::*; }\nuse m::S;\nfn main() {}\n";
+        assert_eq!(check(edition, src), at(4, 8, "S"), "import");
+        // (one definition both globs bring, an item or an import of the module that takes the name, a private item a
+        // glob does not bring, no use of the name, a generic parameter, a `mut` binding, a field and a method, ..)
+        for src in [
+            "mod a { pub struct S; }\nmod b { pub use crate::a::S; }\nuse a::*;\nuse b::*;\nfn main() { let _ = S; }\n".to_string(),
+            format!("{two}struct S;\nfn main() {{ let _ = S; }}\n"),
+            format!("{two}use a::S;\nfn main() {{ let _ = S; }}\n"),
+            "mod a { pub struct S; }\nmod b { struct S; }\nuse a::*;\nuse b::*;\nfn main() { let _ = S; }\n".to_string(),
+            format!("{two}fn main() {{}}\n"),
+            format!("{two}fn f<S>(_: S) {{}}\nfn main() {{}}\n"),
+            format!("{fns}fn main() {{ let mut f = 1; f += 1; let _ = f; }}\n"),
+            format!("{fns}struct P {{ f: u8 }}\nimpl P {{ fn f(&self) -> u8 {{ self.f }} }}\nfn main() {{ let p = P {{ f: 1 }}; let _ = p.f(); }}\n"),
+            // (an enum of a block: its variant's name as defined)
+            format!("{two}fn main() {{ enum E {{ S }} let _ = E::S; }}\n"),
+        ] {
+            assert_eq!(check(edition, &src), None, "{edition} {src}");
+        }
+    }
+}
+
+#[test]
 fn fn_qualifier_order() {
     // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
     let check = |src: &str| {

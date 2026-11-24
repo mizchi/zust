@@ -602,6 +602,7 @@ compile-fail	autoref-autoderef/deref-ambiguity-becomes-nonambiguous.rs
 run-pass	autoref-autoderef/deref-chain-method-calls-13264.rs
 check-pass	autoref-autoderef/deref-into-array.rs
 check-pass	autoref-autoderef/reborrow-mut-self-to-ref-self-method.rs
+compile-fail	binding/ambiguity-item.rs
 run-pass	binding/bind-field-short-with-modifiers.rs
 run-pass	binding/borrowed-ptr-pattern-2.rs
 run-pass	binding/borrowed-ptr-pattern-3.rs
@@ -3357,9 +3358,15 @@ check-pass	implied-bounds/normalization.rs
 compile-fail	implied-bounds/references-err.rs
 check-pass	implied-bounds/trait-where-clause-implied.rs
 compile-fail	imports/ambiguous-1.rs
+compile-fail	imports/ambiguous-10.rs
+compile-fail	imports/ambiguous-13.rs
 compile-fail	imports/ambiguous-14.rs
+compile-fail	imports/ambiguous-15.rs
+compile-fail	imports/ambiguous-16.rs
 compile-fail	imports/ambiguous-3.rs
+compile-fail	imports/ambiguous-5.rs
 compile-fail	imports/ambiguous-6.rs
+compile-fail	imports/ambiguous-7.rs
 compile-fail	imports/ambiguous-9.rs
 check-pass	imports/ambiguous-import-visibility-globglob-priv-pass.rs
 check-pass	imports/ambiguous-import-visibility-globglob-reexport.rs
@@ -3436,6 +3443,7 @@ check-pass	imports/issue-24883.rs
 compile-fail	imports/issue-25396.rs
 compile-fail	imports/issue-26886.rs
 check-pass	imports/issue-26930.rs
+compile-fail	imports/issue-28134.rs
 compile-fail	imports/issue-28388-1.rs
 compile-fail	imports/issue-2937.rs
 check-pass	imports/issue-32119.rs
@@ -3472,6 +3480,7 @@ check-pass	imports/no-ambiguous-trait-lint-on-redundant-import.rs
 check-pass	imports/no-pub-reexports-but-used.rs
 compile-fail	imports/no-std-inject.rs
 check-pass	imports/overwrite-deep-glob.rs
+compile-fail	imports/overwrite-different-ambig-2.rs
 check-pass	imports/overwrite-different-ambig.rs
 check-pass	imports/overwrite-different-vis-2.rs
 check-pass	imports/overwrite-different-vis-3.rs
@@ -3482,10 +3491,12 @@ check-pass	imports/overwritten-extern-flag-ambig.rs
 check-pass	imports/overwritten-glob-ambig.rs
 run-pass	imports/reexport-star.rs
 compile-fail	imports/resolve_self_super_hint.rs
+compile-fail	imports/rfc-1560-warning-cycle.rs
 compile-fail	imports/show-private-items-issue-138626.rs
 compile-fail	imports/tool-mod-child.rs
 compile-fail	imports/underscore-imports/shadow.rs
 compile-fail	imports/underscore-imports/unused-2018.rs
+compile-fail	imports/unresolved-seg-after-ambiguous.rs
 check-pass	imports/unused-import-in-macro-expansion-rustfix.rs
 check-pass	imports/unused-import-issue-157420.rs
 compile-fail	imports/unused-import-issue-87973.rs
@@ -6320,6 +6331,8 @@ compile-fail	resolve/issue-10200.rs
 compile-fail	resolve/issue-103202.rs
 compile-fail	resolve/issue-103474.rs
 compile-fail	resolve/issue-104700-inner_scope.rs
+compile-fail	resolve/issue-105069.rs
+compile-fail	resolve/issue-107563-ambiguous-glob-reexports.rs
 compile-fail	resolve/issue-109250.rs
 compile-fail	resolve/issue-111312.rs
 compile-fail	resolve/issue-111727.rs

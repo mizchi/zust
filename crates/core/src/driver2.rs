@@ -897,9 +897,9 @@ impl Session2 {
                 }
             }
         }
-        // (the configured text's tokens, for the scans of its modules (E0428, E0603, E0432): read once, where it has a
-        // module, or a `use` of 2015, whose paths start at the crate root: `use main::bar;`)
-        let modules = src0.contains("mod ") || self.opts.edition < 2018 && src0.contains("use ");
+        // (the configured text's tokens, for the scans of its modules (E0428, E0603, E0432, E0659): read once, where it
+        // has a module, a `use` of 2015, whose paths start at the crate root (`use main::bar;`), or a glob import)
+        let modules = src0.contains("mod ") || self.opts.edition < 2018 && src0.contains("use ") || src0.contains("::*");
         let src0_toks = (self.ctx.map.inputs.is_empty() && modules && src0.contains("::")).then(|| crate::lexer::tokenize(src0.as_bytes()));
         // (E0432: a top-level `use` of a path whose first segment names nothing; the `use` items come from the item
         // split, the names they could mean from the original text)
@@ -4260,6 +4260,8 @@ struct PItem<'a> {
     vis: PVis<'a>,
     /// the module it is, for a `mod m { .. }`
     child: usize,
+    /// the token of its name
+    at: usize,
 }
 
 /// The paths of a `use` tree that starts at token `k`, each as the tokens of its segments (`use a::{b, c::d}`: [a, b],
@@ -4361,6 +4363,11 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
     // could define a name there: a glob import, an item-level macro, an `extern` block, a `macro`)
     let mut binds: Vec<FxSet<&[u8]>> = vec![];
     let mut open_ended: Vec<bool> = vec![];
+    // (for E0659: each module's imports, whether a macro or an `extern` block may define names in it, and where a
+    // module-level `use` item's imports start in its module's list: by the `use` token)
+    let mut imps: Vec<Vec<PImport>> = vec![];
+    let mut opaque: Vec<bool> = vec![];
+    let mut imp_at: FxMap<usize, usize> = FxMap::default();
     // (a module of another file, `mod m;`, or a macro exported to the crate root: E0432 is not reported)
     let unknown_mods = (0..n.saturating_sub(2)).any(|k| t(k) == b"mod" && is_id(k + 1) && t(k + 2) == b";" && !matches!(t(k.wrapping_sub(1)), b"." | b"$"))
         || src.contains("macro_export");
@@ -4375,6 +4382,7 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
         let (lo, hi, _) = mods[m];
         let (mut its, mut sk): (Vec<PItem>, Vec<(usize, usize)>) = (vec![], vec![]);
         let (mut bn, mut ended): (FxSet<&[u8]>, bool) = (FxSet::default(), false);
+        let (mut im, mut opq): (Vec<PImport>, bool) = (vec![], false);
         // (the crate root of 2015 has the injected `std` / `core`; the `extern crate` items the configuring blanked
         // bind their names, here taken as bound in every module)
         if m == 0 && injected {
@@ -4415,7 +4423,7 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
             let mut item: Option<(usize, &'static str)> = None;
             match t(k) {
                 b"mod" if is_id(k + 1) && t(k + 2) == b"{" && close[k + 2] < hi => {
-                    its.push(PItem { name: t(raw(k + 1)), kind: "module", vis: vis.clone(), child: mods.len() });
+                    its.push(PItem { name: t(raw(k + 1)), kind: "module", vis: vis.clone(), child: mods.len(), at: raw(k + 1) });
                     mods.push((k + 3, close[k + 2], m));
                 }
                 b"struct" if is_id(k + 1) => {
@@ -4453,7 +4461,14 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
                         j += 2;
                     }
                     let end = use_leaves(b, &toks, &close, j, &mut prefix, &mut leaves, &mut kinds);
+                    imp_at.insert(k, im.len());
                     for (l, &g) in leaves.iter().zip(&kinds) {
+                        let name = match (g, l.last()) {
+                            (2, _) | (_, None) => &b""[..],
+                            (_, Some(&x)) if t(x + 1) == b"as" => t(raw(x + 2)),
+                            (_, Some(&x)) => t(x),
+                        };
+                        im.push(PImport { name, segs: l.clone(), glob: g, vis: vis.clone(), root: injected || j != k + 1 });
                         if let Some(&last) = l.last() {
                             bound.insert(t(last));
                             if g != 2 {
@@ -4477,11 +4492,18 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
                     }
                 }
                 // (an `extern` block's items, a `macro`: not read)
-                b"extern" if t(k + 1) == b"{" || toks.get(k + 1).is_some_and(|x| x.0 == 2) && t(k + 2) == b"{" => ended = true,
-                b"macro" if is_id(k + 1) => ended = true,
+                b"extern" if t(k + 1) == b"{" || toks.get(k + 1).is_some_and(|x| x.0 == 2) && t(k + 2) == b"{" => {
+                    ended = true;
+                    opq = true;
+                }
+                b"macro" if is_id(k + 1) => {
+                    ended = true;
+                    opq = true;
+                }
                 // (`macro_rules! m { .. }` / `m! { .. }` / `m!(..);`: not read)
                 _ if is_id(k) && t(k + 1) == b"!" => {
                     let o = if is_id(k + 2) { k + 3 } else { k + 2 };
+                    opq |= t(k) != b"macro_rules";
                     if close.get(o).is_some_and(|&e| e != usize::MAX) {
                         sk.push((k, close[o]));
                     }
@@ -4490,7 +4512,7 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
                 _ => {}
             }
             if let Some((at, kind)) = item {
-                its.push(PItem { name: t(raw(at)), kind, vis: vis.clone(), child: usize::MAX });
+                its.push(PItem { name: t(raw(at)), kind, vis: vis.clone(), child: usize::MAX, at: raw(at) });
             }
             vis = PVis::Priv;
             // to the item's end: a `;` or a body `{ .. }`
@@ -4521,6 +4543,8 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
         skips.push(sk);
         binds.push(bn);
         open_ended.push(ended);
+        imps.push(im);
+        opaque.push(opq);
     }
     let parent = |m: usize| mods[m].2;
     let within = |mut a: usize, b: usize| loop {
@@ -4690,6 +4714,46 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
         }
         None
     };
+    // (E0659: read where some module has more than one glob import, and every module is in this text)
+    let globs = imps.iter().flatten().filter(|x| x.glob == 2).count();
+    let mut amb = (globs >= 2 && !unknown_mods && !src.contains("ambiguous_glob_imports")).then(|| Ambiguity {
+        b,
+        toks,
+        close: &close,
+        mods: &mods,
+        items: &items,
+        imps: &imps,
+        opaque: &opaque,
+        injected,
+        busy: vec![],
+        busy_imp: vec![],
+        steps: 0,
+        targets: FxMap::default(),
+        named: items
+            .iter()
+            .map(|its| {
+                let mut ix: FxMap<&[u8], Vec<u32>> = FxMap::default();
+                for (i, it) in its.iter().enumerate() {
+                    ix.entry(it.name).or_default().push(i as u32);
+                }
+                ix
+            })
+            .collect(),
+    });
+    // (the names a glob may bring: the program's items, enum variants and import names)
+    let mut amb_names: FxSet<&[u8]> = FxSet::default();
+    if let Some(a) = &amb {
+        for (m, its) in items.iter().enumerate() {
+            for it in its {
+                amb_names.insert(it.name);
+                if it.kind == "enum" {
+                    amb_names.extend(a.variants_at(it.at, mods[m].1).into_iter().map(|k| t(k)));
+                }
+            }
+        }
+        amb_names.extend(imps.iter().flatten().map(|x| x.name).filter(|x| !x.is_empty()));
+    }
+    let amb_msg = |k: usize| Some((k, format!("`{}` is ambiguous (E0659)", String::from_utf8_lossy(t(k)))));
     // (each module's own tokens, past its child modules and its item-level macros, for the paths in them)
     let mut found: Option<(usize, String)> = None;
     let mut keep = |e: Option<(usize, String)>| {
@@ -4704,6 +4768,19 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
         let mut jumps: Vec<(usize, usize)> = skips[m].clone();
         jumps.extend(mods.iter().filter(|x| x.2 == m).map(|x| (x.0, x.1)));
         jumps.sort_unstable();
+        let sc = amb.as_ref().map(|a| a.scope(lo, hi, &jumps, &amb_names));
+        let has_glob = imps[m].iter().any(|x| x.glob == 2);
+        // (whether token k is a name a path may start with here, for E0659: not a binding, a definition, or in a
+        // macro's arguments)
+        let free = |k: usize| {
+            sc.as_ref().is_some_and(|sc| {
+                let name = t(k);
+                !sc.defs.contains(&k)
+                    && !sc.skip.iter().any(|&(a, e)| a < k && k < e)
+                    && !sc.covers.iter().any(|&(nm, a, e)| (nm == name || nm.is_empty()) && a <= k && k <= e)
+            })
+        };
+        let mut cache: FxMap<&[u8], ADefs> = FxMap::default();
         let mut ji = 0;
         let mut k = lo;
         while k < hi {
@@ -4737,6 +4814,22 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
                         keep(check(m, l, injected, true, g));
                     }
                 }
+                // (E0659: an import of the module, resolved without itself)
+                if let (Some(a), Some(&j0)) = (amb.as_mut(), imp_at.get(&k)) {
+                    for (li, (l, &g)) in leaves.iter().zip(&kinds).enumerate() {
+                        if l.is_empty() || imps[m].len() <= j0 + li {
+                            continue;
+                        }
+                        a.busy_imp.push((m, j0 + li));
+                        let r = a.path(m, l, imps[m][j0 + li].root, if g == 0 { 3 } else { 1 });
+                        a.busy_imp.pop();
+                        match r {
+                            APath::Amb(i) => keep(amb_msg(l[i])),
+                            APath::Defs(d) if ambiguous_in(&d, if g == 0 { 0 } else { 1 }) => keep(amb_msg(*l.last().unwrap())),
+                            _ => {}
+                        }
+                    }
+                }
                 k = end.max(k + 1);
                 continue;
             }
@@ -4757,6 +4850,20 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
                 if reads {
                     keep(check(m, &segs, false, false, 0));
                 }
+                // (E0659: a segment of the path)
+                if let Some(a) = amb.as_mut().filter(|_| free(raw(k))) {
+                    let mut all = vec![raw(k)];
+                    let mut x = raw(k);
+                    while t(x + 1) == b":" && t(x + 2) == b":" && is_id(x + 3) {
+                        x = raw(x + 3);
+                        all.push(x);
+                    }
+                    match a.path(m, &all, false, 3) {
+                        APath::Amb(i) => keep(amb_msg(all[i])),
+                        APath::Defs(d) if ambiguous_in(&d, a.site_ns(raw(k), x)) => keep(amb_msg(x)),
+                        _ => {}
+                    }
+                }
                 k = j + 1;
                 continue;
             }
@@ -4771,8 +4878,45 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
                 if injected && segs.len() > 1 {
                     keep(check(m, &segs, true, false, 0));
                 }
+                if let Some(a) = amb.as_mut().filter(|_| injected && free(segs[0])) {
+                    match a.path(m, &segs, true, 3) {
+                        APath::Amb(i) => keep(amb_msg(segs[i])),
+                        APath::Defs(d) if ambiguous_in(&d, a.site_ns(k, j)) => keep(amb_msg(j)),
+                        _ => {}
+                    }
+                }
                 k = j + 1;
                 continue;
+            }
+            // (E0659: a name a glob of the module brings, where a path of one segment names it)
+            if has_glob && is_id(k) && amb_names.contains(t(k)) && free(k) {
+                let (p, pp, nx) = (t(k.wrapping_sub(1)), t(k.wrapping_sub(2)), t(k + 1));
+                let defines = matches!(p, b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"union" | b"mod" | b"const" | b"static" | b"crate" | b"macro_rules" | b"macro")
+                    || p == b"mut" && pp != b"&"
+                    || p == b"ref"
+                    || p == b"!" && pp == b"macro_rules";
+                // (nor a field's name, a macro's named argument (`format!("{x}", x = 1)`))
+                let not_path = matches!(p, b"." | b"$" | b"'" | b"#")
+                    || after_colons(k)
+                    || matches!(nx, b"!" | b"@")
+                    || nx == b":" && t(k + 2) != b":"
+                    || p == b"," && nx == b"=" && !matches!(t(k + 2), b"=" | b">");
+                if !defines && !not_path {
+                    if let Some(a) = amb.as_mut() {
+                        let name = t(k);
+                        let d = match cache.get(name) {
+                            Some(d) => d.clone(),
+                            None => {
+                                let d = a.lookup(m, name, m, 3);
+                                cache.insert(name, d.clone());
+                                d
+                            }
+                        };
+                        if d.is_some_and(|d| ambiguous_in(&d, a.site_ns(k, k))) {
+                            keep(amb_msg(k));
+                        }
+                    }
+                }
             }
             k += 1;
         }
@@ -4784,6 +4928,579 @@ fn private_path(src: &str, toks: &[(u8, usize, usize)], externs: &[(usize, Strin
     Some(format!("{line}:{col}: {msg}"))
 }
 
+
+/// An import of a module, as `private_path` reads it: `use a::b as c;` is (c, [a, b], 0), `use a::*;` (``, [a], 2),
+/// `use a::{self};` (a, [a], 1)
+struct PImport<'a> {
+    name: &'a [u8],
+    segs: Vec<usize>,
+    glob: u8,
+    vis: PVis<'a>,
+    /// whether the path starts at the crate root (edition 2015, or a leading `::`)
+    root: bool,
+}
+
+/// What a name means: the item of a module (`v` u32::MAX), or a variant of an enum item
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ADef {
+    m: u32,
+    i: u32,
+    v: u32,
+}
+
+/// The definitions a name has in a module, each with its namespaces (1 types, 2 values); None: what it means is not
+/// known (an import of another crate, a module a macro may add items to)
+type ADefs = Option<Vec<(u8, ADef)>>;
+
+/// What a path names: its last segment's definitions, or the segment that is ambiguous (E0659), or nothing known
+enum APath {
+    Defs(Vec<(u8, ADef)>),
+    Amb(usize),
+    Unknown,
+}
+
+/// E0659 for `private_path`: a name two glob imports of a module bring with different definitions (`use a::*; use
+/// b::*;` of two `struct S`), where a path names it. A module's own items and its other imports take the name before
+/// a glob does; the definitions are followed through imports and globs of the program's own modules and enums, and a
+/// name of another crate or of a module with macro-made items is left alone
+struct Ambiguity<'a, 'b> {
+    b: &'a [u8],
+    toks: &'b [(u8, usize, usize)],
+    close: &'b [usize],
+    mods: &'b [(usize, usize, usize)],
+    items: &'b [Vec<PItem<'a>>],
+    imps: &'b [Vec<PImport<'a>>],
+    /// (a module with an item-level macro call, an `extern` block or a `macro`: its names are not all known)
+    opaque: &'b [bool],
+    injected: bool,
+    /// (the lookups and imports being resolved: a cycle of globs finds nothing more)
+    busy: Vec<(usize, &'a [u8], usize)>,
+    busy_imp: Vec<(usize, usize)>,
+    steps: u32,
+    /// (what each glob import reads, once found)
+    targets: FxMap<(usize, usize), Option<(usize, Option<usize>)>>,
+    /// (each module's items by name)
+    named: Vec<FxMap<&'a [u8], Vec<u32>>>,
+}
+
+/// what the namespaces of an item `private_path` reads are (1 types, 2 values)
+fn kind_ns(kind: &str) -> u8 {
+    match kind {
+        "unit struct" | "tuple struct" => 3,
+        "function" | "constant" | "static" => 2,
+        _ => 1,
+    }
+}
+
+impl<'a, 'b> Ambiguity<'a, 'b> {
+    fn t(&self, k: usize) -> &'a [u8] {
+        let b: &'a [u8] = self.b;
+        self.toks.get(k).map_or(&b""[..], |&(_, a, e)| &b[a..e])
+    }
+    fn parent(&self, m: usize) -> usize {
+        self.mods[m].2
+    }
+    fn within(&self, mut a: usize, b: usize) -> bool {
+        loop {
+            if a == b {
+                return true;
+            }
+            if a == usize::MAX || a == 0 {
+                return false;
+            }
+            a = self.parent(a);
+        }
+    }
+    fn module_at(&self, segs: &[&[u8]], from: usize) -> Option<usize> {
+        let (mut cur, mut s) = match segs.first() {
+            Some(&b"crate") => (0, 1),
+            Some(&b"self") => (from, 1),
+            _ => (from, 0),
+        };
+        while segs.get(s) == Some(&&b"super"[..]) {
+            cur = self.parent(cur);
+            if cur == usize::MAX {
+                return None;
+            }
+            s += 1;
+        }
+        for seg in &segs[s..] {
+            cur = self.items[cur].iter().find(|x| x.name == *seg && x.child != usize::MAX)?.child;
+        }
+        Some(cur)
+    }
+    fn visible(&self, def: usize, vis: &PVis, from: usize) -> bool {
+        match vis {
+            PVis::Pub => true,
+            PVis::Priv => self.within(from, def),
+            PVis::Super => match self.parent(def) {
+                usize::MAX => self.within(from, def),
+                p => self.within(from, p),
+            },
+            PVis::In(p) => match self.module_at(p, if self.injected { 0 } else { def }) {
+                Some(x) => self.within(from, x),
+                None => true,
+            },
+        }
+    }
+    /// (a definition's own visibility: an item's, an enum's for its variants)
+    fn def_visible(&self, d: ADef, from: usize) -> bool {
+        self.visible(d.m as usize, &self.items[d.m as usize][d.i as usize].vis, from)
+    }
+    /// the definitions of `name` in module `cur` that module `viewer` may see, in the namespaces `want` (1 types, 2
+    /// values)
+    fn lookup(&mut self, cur: usize, name: &'a [u8], viewer: usize, want: u8) -> ADefs {
+        self.steps += 1;
+        if self.steps > 20_000 {
+            return None;
+        }
+        if self.busy.contains(&(cur, name, viewer)) {
+            return Some(vec![]);
+        }
+        let mut out: Vec<(u8, ADef)> = vec![];
+        // (the namespaces not looked for count as taken)
+        let mut shadow = !want & 3;
+        let own: &[u32] = self.named[cur].get(name).map_or(&[], |v| &v[..]);
+        for &i in own {
+            let it = &self.items[cur][i as usize];
+            if kind_ns(it.kind) & want != 0 {
+                let ns = kind_ns(it.kind) & want;
+                shadow |= ns;
+                if self.visible(cur, &it.vis, viewer) {
+                    out.push((ns, ADef { m: cur as u32, i, v: u32::MAX }));
+                }
+            }
+        }
+        if shadow == 3 {
+            return Some(out);
+        }
+        self.busy.push((cur, name, viewer));
+        let r = self.lookup_imports(cur, name, viewer, shadow, &mut out);
+        self.busy.pop();
+        r?;
+        let mut merged: Vec<(u8, ADef)> = vec![];
+        for (ns, d) in out {
+            match merged.iter_mut().find(|x| x.1 == d) {
+                Some(x) => x.0 |= ns,
+                None => merged.push((ns, d)),
+            }
+        }
+        Some(merged)
+    }
+    fn lookup_imports(&mut self, cur: usize, name: &'a [u8], viewer: usize, mut shadow: u8, out: &mut Vec<(u8, ADef)>) -> Option<()> {
+        // (an import of the name: it takes the name before a glob does, in the namespaces it binds)
+        let mut bound = 0u8;
+        for j in 0..self.imps[cur].len() {
+            if self.imps[cur][j].glob == 2 || self.imps[cur][j].name != name || self.busy_imp.contains(&(cur, j)) {
+                continue;
+            }
+            let seen = self.visible(cur, &self.imps[cur][j].vis, viewer);
+            for (ns, d) in self.resolve_import(cur, j)? {
+                let ns = ns & !shadow;
+                bound |= ns;
+                if ns != 0 && seen {
+                    out.push((ns, d));
+                }
+            }
+        }
+        shadow |= bound;
+        // (a module a macro or an `extern` block may define names in: what its globs bring may be its own)
+        if shadow == 3 {
+            return Some(());
+        }
+        if self.opaque[cur] {
+            return None;
+        }
+        for j in 0..self.imps[cur].len() {
+            if self.imps[cur][j].glob != 2 || !self.visible(cur, &self.imps[cur][j].vis, viewer) || self.busy_imp.contains(&(cur, j)) {
+                continue;
+            }
+            let target = match self.targets.get(&(cur, j)) {
+                Some(&t) => t,
+                None => {
+                    self.busy_imp.push((cur, j));
+                    let t = self.glob_target(cur, j);
+                    self.busy_imp.pop();
+                    self.targets.insert((cur, j), t);
+                    t
+                }
+            };
+            match target {
+                Some((m, None)) => {
+                    let Some(defs) = self.lookup(m, name, cur, 3 & !shadow) else { continue };
+                    for (ns, d) in defs {
+                        let ns = ns & !shadow;
+                        if ns != 0 && self.def_visible(d, viewer) {
+                            out.push((ns, d));
+                        }
+                    }
+                }
+                Some((m, Some(i))) => {
+                    let hi = self.mods[m].1;
+                    for (v, k) in self.variants_at(self.items[m][i].at, hi).into_iter().enumerate() {
+                        if self.t(k) == name && 3 & !shadow != 0 {
+                            out.push((3 & !shadow, ADef { m: m as u32, i: i as u32, v: v as u32 }));
+                        }
+                    }
+                }
+                None => {}
+            }
+        }
+        Some(())
+    }
+    /// what import j of module `cur` binds its name to
+    fn resolve_import(&mut self, cur: usize, j: usize) -> ADefs {
+        self.busy_imp.push((cur, j));
+        let segs = self.imps[cur][j].segs.clone();
+        let (root, glob) = (self.imps[cur][j].root, self.imps[cur][j].glob);
+        let r = self.path(cur, &segs, root, if glob == 1 { 1 } else { 3 });
+        self.busy_imp.pop();
+        match r {
+            APath::Defs(d) if glob == 1 => Some(d.into_iter().filter(|x| self.items[x.1.m as usize][x.1.i as usize].child != usize::MAX && x.1.v == u32::MAX).map(|x| (1, x.1)).collect()),
+            APath::Defs(d) => Some(d),
+            _ => None,
+        }
+    }
+    /// the module (or the enum, as its module and item) a glob import of module `cur` reads
+    fn glob_target(&mut self, cur: usize, j: usize) -> Option<(usize, Option<usize>)> {
+        let segs = self.imps[cur][j].segs.clone();
+        let root = self.imps[cur][j].root;
+        if segs.is_empty() {
+            return root.then_some((0, None));
+        }
+        if segs.len() == 1 {
+            match self.t(segs[0]) {
+                b"crate" => return Some((0, None)),
+                b"self" => return Some((cur, None)),
+                b"super" => return (self.parent(cur) != usize::MAX).then(|| (self.parent(cur), None)),
+                _ => {}
+            }
+        }
+        if self.t(*segs.last()?) == b"super" || self.t(*segs.last()?) == b"self" {
+            return None;
+        }
+        let APath::Defs(d) = self.path(cur, &segs, root, 1) else { return None };
+        let types: Vec<ADef> = d.iter().filter(|x| x.0 & 1 != 0).map(|x| x.1).collect();
+        let &[x] = &types[..] else { return None };
+        let it = &self.items[x.m as usize][x.i as usize];
+        if x.v != u32::MAX {
+            return None;
+        }
+        if it.child != usize::MAX {
+            Some((it.child, None))
+        } else if it.kind == "enum" {
+            Some((x.m as usize, Some(x.i as usize)))
+        } else {
+            None
+        }
+    }
+    /// what the path of segment tokens `segs` written in module `cur` names (`root`: from the crate root), its last
+    /// segment in the namespaces `want`
+    fn path(&mut self, cur: usize, segs: &[usize], root: bool, want: u8) -> APath {
+        let first = self.t(segs[0]);
+        let (mut m, mut s) = match first {
+            b"crate" => (0, 1),
+            b"self" => (cur, 1),
+            b"super" => (cur, 0),
+            _ if root => (0, 0),
+            _ => (cur, 0),
+        };
+        while s < segs.len() && self.t(segs[s]) == b"super" {
+            m = self.parent(m);
+            if m == usize::MAX {
+                return APath::Unknown;
+            }
+            s += 1;
+        }
+        if s >= segs.len() {
+            return APath::Unknown;
+        }
+        let mut i = s;
+        loop {
+            let name = self.t(segs[i]);
+            if matches!(name, b"self" | b"super" | b"crate") {
+                return APath::Unknown;
+            }
+            let Some(defs) = self.lookup(m, name, cur, if i + 1 == segs.len() { want } else { 1 }) else { return APath::Unknown };
+            if i + 1 == segs.len() {
+                return APath::Defs(defs);
+            }
+            let types: Vec<ADef> = defs.iter().filter(|x| x.0 & 1 != 0).map(|x| x.1).collect();
+            match &types[..] {
+                [] => return APath::Unknown,
+                [x] => {
+                    let it = &self.items[x.m as usize][x.i as usize];
+                    if x.v != u32::MAX {
+                        return APath::Unknown;
+                    }
+                    if it.child != usize::MAX {
+                        m = it.child;
+                        i += 1;
+                        continue;
+                    }
+                    // (an enum's variant ends the path)
+                    if it.kind == "enum" && i + 2 == segs.len() {
+                        let last = self.t(segs[i + 1]);
+                        let (em, ei) = (x.m as usize, x.i as usize);
+                        return match self.variants_at(self.items[em][ei].at, self.mods[em].1).into_iter().position(|k| self.t(k) == last) {
+                            Some(v) => APath::Defs(vec![(3, ADef { m: em as u32, i: ei as u32, v: v as u32 })]),
+                            None => APath::Unknown,
+                        };
+                    }
+                    return APath::Unknown;
+                }
+                _ => return APath::Amb(i),
+            }
+        }
+    }
+}
+
+/// (of the definitions of a name: whether those of namespace `ns` are more than one, for E0659; `ns` 3: where the
+/// path does not tell, each namespace that has one has more than one; 0: any, as an import binds each)
+fn ambiguous_in(defs: &[(u8, ADef)], ns: u8) -> bool {
+    let count = |bit: u8| defs.iter().filter(|x| x.0 & bit != 0).count();
+    let (ty, val) = (count(1), count(2));
+    match ns {
+        0 => ty > 1 || val > 1,
+        1 => ty > 1,
+        2 => val > 1,
+        _ => (ty > 1 || val > 1) && (ty != 1 && val != 1),
+    }
+}
+
+/// What the tokens of a module's own text bind, for its E0659 sites: (a name, the tokens where it means something of
+/// a block or a binding: an item or a `use` of a block (an empty name: a glob, any name), a generic parameter, a `mut`
+/// / `ref` / `@` binding), the tokens that are no path (the variants an enum defines), and the ranges not read (the
+/// arguments of a macro other than std's)
+struct AScope<'a> {
+    covers: Vec<(&'a [u8], usize, usize)>,
+    defs: FxSet<usize>,
+    skip: Vec<(usize, usize)>,
+}
+
+/// std's macros whose arguments are expressions (or patterns) of the caller
+const EXPR_MACROS: &[&[u8]] = &[
+    b"println", b"print", b"eprintln", b"eprint", b"format", b"format_args", b"write", b"writeln", b"panic", b"assert",
+    b"assert_eq", b"assert_ne", b"debug_assert", b"debug_assert_eq", b"debug_assert_ne", b"vec", b"dbg", b"matches",
+    b"unreachable", b"todo", b"unimplemented",
+];
+
+impl<'a, 'b> Ambiguity<'a, 'b> {
+    fn is_id(&self, k: usize) -> bool {
+        self.toks.get(k).is_some_and(|x| x.0 == 0)
+    }
+    /// the tokens of the variant names of the enum whose name is token `at`
+    fn variants_at(&self, at: usize, hi: usize) -> Vec<usize> {
+        let mut out = vec![];
+        let mut k = at + 1;
+        while k < hi && self.t(k) != b"{" {
+            if matches!(self.t(k), b"(" | b"[" | b";") {
+                return out;
+            }
+            k += 1;
+        }
+        let Some(&e) = self.close.get(k).filter(|&&e| e != usize::MAX) else { return out };
+        k += 1;
+        while k < e {
+            while self.t(k) == b"#" && self.t(k + 1) == b"[" && self.close[k + 1] != usize::MAX {
+                k = self.close[k + 1] + 1;
+            }
+            if self.is_id(k) {
+                out.push(k);
+            }
+            while k < e && self.t(k) != b"," {
+                if matches!(self.t(k), b"(" | b"[" | b"{") && self.close[k] != usize::MAX {
+                    k = self.close[k];
+                }
+                k += 1;
+            }
+            k += 1;
+        }
+        out
+    }
+    /// the end of the item whose generics open at token `lt`: its body's `}` or its `;`
+    fn item_end(&self, lt: usize, hi: usize) -> usize {
+        let mut d = 0i32;
+        let mut k = lt;
+        while k < hi {
+            match self.t(k) {
+                b"<" => d += 1,
+                b">" if self.t(k.wrapping_sub(1)) != b"-" => {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                b"(" | b"[" if self.close[k] != usize::MAX => k = self.close[k],
+                _ => {}
+            }
+            k += 1;
+        }
+        while k < hi {
+            match self.t(k) {
+                b"{" => return if self.close[k] == usize::MAX { hi } else { self.close[k] },
+                b";" => return k,
+                b"(" | b"[" if self.close[k] != usize::MAX => k = self.close[k],
+                _ => {}
+            }
+            k += 1;
+        }
+        hi
+    }
+    /// the scope facts of module m's own tokens lo..hi, past `jumps` (its child modules and item-level macros)
+    fn scope(&self, lo: usize, hi: usize, jumps: &[(usize, usize)], names: &FxSet<&[u8]>) -> AScope<'a> {
+        let mut sc = AScope { covers: vec![], defs: FxSet::default(), skip: vec![] };
+        let mut braces: Vec<usize> = vec![];
+        let mut ji = 0;
+        let mut k = lo;
+        while k < hi {
+            while ji < jumps.len() && jumps[ji].1 < k {
+                ji += 1;
+            }
+            if ji < jumps.len() && jumps[ji].0 <= k {
+                k = jumps[ji].1 + 1;
+                continue;
+            }
+            let block_end = |braces: &Vec<usize>| braces.last().map_or(hi, |&o| self.close[o].min(hi));
+            let tk = self.t(k);
+            match tk {
+                b"#" if self.t(k + 1) == b"[" || self.t(k + 1) == b"!" && self.t(k + 2) == b"[" => {
+                    let o = if self.t(k + 1) == b"[" { k + 1 } else { k + 2 };
+                    k = self.close[o].saturating_add(1);
+                    continue;
+                }
+                b"{" => braces.push(k),
+                b"}" => {
+                    braces.pop();
+                }
+                b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"union" | b"const" | b"static" | b"mod" if !braces.is_empty() => {
+                    let at = if self.t(k + 1) == b"mut" { k + 2 } else { k + 1 };
+                    if self.is_id(at) && names.contains(self.t(at)) {
+                        let o = *braces.last().unwrap();
+                        sc.covers.push((self.t(at), o, block_end(&braces)));
+                    }
+                    if tk == b"enum" && self.is_id(at) {
+                        sc.defs.extend(self.variants_at(at, hi));
+                    }
+                }
+                b"use" if !braces.is_empty() && !matches!(self.t(k.wrapping_sub(1)), b":" | b".") => {
+                    let o = *braces.last().unwrap();
+                    let (mut prefix, mut leaves, mut kinds) = (vec![], vec![], vec![]);
+                    let j = if self.t(k + 1) == b":" && self.t(k + 2) == b":" { k + 3 } else { k + 1 };
+                    use_leaves(self.b, self.toks, self.close, j, &mut prefix, &mut leaves, &mut kinds);
+                    for (l, &g) in leaves.iter().zip(&kinds) {
+                        let name = match (g, l.last()) {
+                            (2, _) => &b""[..],
+                            (_, Some(&x)) if self.t(x + 1) == b"as" => self.t(x + 2),
+                            (_, Some(&x)) => self.t(x),
+                            _ => continue,
+                        };
+                        sc.covers.push((name, o, block_end(&braces)));
+                    }
+                }
+                b"mut" | b"ref" if self.is_id(k + 1) && !matches!(self.t(k.wrapping_sub(1)), b"&" | b"*") => {
+                    let at = if self.t(k + 1) == b"mut" { k + 2 } else { k + 1 };
+                    if names.contains(self.t(at)) {
+                        sc.covers.push((self.t(at), k, block_end(&braces)));
+                    }
+                }
+                b"@" if self.is_id(k.wrapping_sub(1)) && names.contains(self.t(k - 1)) => {
+                    sc.covers.push((self.t(k - 1), k - 1, block_end(&braces)));
+                }
+                b"<" if self.t(k.wrapping_sub(1)) == b"impl"
+                    || self.is_id(k.wrapping_sub(1)) && matches!(self.t(k.wrapping_sub(2)), b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"union") =>
+                {
+                    let end = self.item_end(k, hi);
+                    let mut j = k + 1;
+                    let mut d = 0i32;
+                    let mut start = true;
+                    while j < hi {
+                        match self.t(j) {
+                            b"<" | b"(" | b"[" => d += 1,
+                            b">" if self.t(j - 1) != b"-" => {
+                                if d == 0 {
+                                    break;
+                                }
+                                d -= 1;
+                            }
+                            b")" | b"]" => d -= 1,
+                            b"," if d == 0 => {
+                                start = true;
+                                j += 1;
+                                continue;
+                            }
+                            b"const" if start => {
+                                j += 1;
+                                continue;
+                            }
+                            x if start && self.is_id(j) && names.contains(x) => sc.covers.push((x, k, end)),
+                            _ => {}
+                        }
+                        start = false;
+                        j += 1;
+                    }
+                }
+                b"enum" if self.is_id(k + 1) => sc.defs.extend(self.variants_at(k + 1, hi)),
+                _ if self.is_id(k) && self.t(k + 1) == b"!" && !EXPR_MACROS.contains(&tk) => {
+                    let o = if self.is_id(k + 2) { k + 3 } else { k + 2 };
+                    if self.close.get(o).is_some_and(|&e| e != usize::MAX) {
+                        sc.skip.push((o, self.close[o]));
+                        k = self.close[o] + 1;
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+        sc
+    }
+    /// the namespaces the path whose first token is `first` and last `last` is read in where it is written (1 types,
+    /// 2 values, 3 where this does not tell)
+    fn site_ns(&self, first: usize, last: usize) -> u8 {
+        let after = self.t(last + 1);
+        let upper = self.t(last).first().is_some_and(u8::is_ascii_uppercase);
+        if after == b"(" {
+            return 2;
+        }
+        if after == b"{" && upper || after == b"<" && upper {
+            return 1;
+        }
+        let mut j = first.wrapping_sub(1);
+        if self.t(j) == b":" && self.t(j.wrapping_sub(1)) == b":" {
+            j = j.wrapping_sub(2);
+        }
+        let p = self.t(j);
+        let pp = self.t(j.wrapping_sub(1));
+        match p {
+            b"dyn" | b"impl" | b"as" => 1,
+            b">" if pp == b"-" => 1,
+            b"<" if upper => 1,
+            b"for" if self.t(last + 1) != b"in" => 1,
+            b":" if pp != b":" => {
+                // (a struct literal's field takes a value: the brace that holds it follows a path, not a definition's
+                // name)
+                let mut d = 0i32;
+                let mut o = j;
+                while o != usize::MAX {
+                    match self.t(o) {
+                        b")" | b"]" | b"}" => d += 1,
+                        b"(" | b"[" | b"{" if d == 0 => break,
+                        b"(" | b"[" | b"{" => d -= 1,
+                        _ => {}
+                    }
+                    o = o.wrapping_sub(1);
+                }
+                if o != usize::MAX && self.t(o) == b"{" && self.is_id(o.wrapping_sub(1)) && !matches!(self.t(o.wrapping_sub(2)), b"struct" | b"union" | b"enum" | b"{" | b",") {
+                    2
+                } else {
+                    1
+                }
+            }
+            _ => 3,
+        }
+    }
+}
 
 /// A name a module defines, for duplicate_name
 struct DupDef<'a> {
@@ -5376,7 +6093,29 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
     if src.contains("macro_rules!") && firsts.iter().any(|(_, f)| !defined.contains(f)) && src.contains("$") {
         return None;
     }
-    if let Some((line, f)) = firsts.into_iter().find(|(_, f)| !defined.contains(f)) {
+    // (a top-level glob import may bring the name, an enum's variant for one (`use self::A::*; use V;`): a name the
+    // text has elsewhere too is left to the module resolution)
+    // (a glob of a path that starts at a name the program has: not one of the unresolved names)
+    let globbed = items.iter().any(|it| matches!(it.kind, ItemKind::Normal) && {
+        let t = split[it.start..it.end].trim();
+        let t = t.strip_prefix("pub ").unwrap_or(t);
+        t.trim_end_matches(';').trim_end().ends_with('*') && t.strip_prefix("use ").is_some_and(|r| {
+            let r = r.trim_start().trim_start_matches("::");
+            let first: String = r.chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
+            matches!(first.as_str(), "crate" | "self" | "super") || defined.contains(&first) || defines(&first)
+        })
+    });
+    // (the name as a word outside `//` comments, more than once: in the `use` and elsewhere)
+    let elsewhere = |f: &str| {
+        src.match_indices(f)
+            .filter(|&(i, _)| {
+                let ls = src[..i].rfind('\n').map_or(0, |k| k + 1);
+                (i == 0 || !is_id(b[i - 1])) && b.get(i + f.len()).is_none_or(|&c| !is_id(c)) && !src[ls..i].contains("//")
+            })
+            .nth(1)
+            .is_some()
+    };
+    if let Some((line, f)) = firsts.into_iter().find(|(_, f)| !defined.contains(f) && !(globbed && elsewhere(f))) {
         return Some(format!("{line}:1: unresolved import `{f}` (E0432)"));
     }
     // (`use m::f` with an inline `mod m { .. }` that defines no `f`)
