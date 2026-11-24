@@ -667,6 +667,17 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             }
         }
     }
+    // (E0277: a returned value needs a size too, a `str` or `[T]` (a `dyn Trait` is E0746, checked elsewhere); a
+    // trait's declaration without a body does not)
+    if let Some(r) = sig.ret.as_ref().filter(|_| !owner.is_some_and(|o| o.is_trait) && !is_extern) {
+        if let Some(u) = unsized_value(r).filter(|u| !u.starts_with("dyn")) {
+            let m = format!("the size for values of type `{u}` cannot be known at compilation time (E0277)");
+            return Err(match crate::wf::pos_of(r) {
+                Some(p) => format!("{}:{}: {m}", p.line, p.col + 1),
+                None => m,
+            });
+        }
+    }
     for (_, t) in &sig.params {
         // (E0277: a parameter's value needs a size; a trait's declaration without a body does not)
         if !owner.is_some_and(|o| o.is_trait) && !is_extern {

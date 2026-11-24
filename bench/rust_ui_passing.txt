@@ -2013,6 +2013,7 @@ compile-fail	consts/missing_assoc_const_type.rs
 compile-fail	consts/missing_assoc_const_type2.rs
 run-pass	consts/module-const-array-size-13763.rs
 compile-fail	consts/nested_erroneous_ctfe.rs
+compile-fail	consts/non-const-value-in-const-pat-binding.rs
 compile-fail	consts/non-const-value-in-const.rs
 run-pass	consts/non-scalar-cast.rs
 run-pass	consts/oncecell-const-init-57781.rs
@@ -2449,6 +2450,7 @@ compile-fail	error-codes/E0061.rs
 compile-fail	error-codes/E0062.rs
 compile-fail	error-codes/E0063.rs
 compile-fail	error-codes/E0067.rs
+compile-fail	error-codes/E0069.rs
 compile-fail	error-codes/E0070.rs
 compile-fail	error-codes/E0071.rs
 compile-fail	error-codes/E0081.rs
@@ -2760,6 +2762,7 @@ compile-fail	feature-gates/feature-gate-trace_macros.rs
 compile-fail	feature-gates/feature-gate-trait-alias.rs
 compile-fail	feature-gates/feature-gate-transparent_unions.rs
 run-pass	feature-gates/feature-gate-trivial_bounds-lint.rs
+compile-fail	feature-gates/feature-gate-trivial_bounds.rs
 compile-fail	feature-gates/feature-gate-try_blocks.rs
 compile-fail	feature-gates/feature-gate-try_blocks_heterogeneous.rs
 compile-fail	feature-gates/feature-gate-type_alias_impl_trait.rs
@@ -2891,6 +2894,7 @@ run-pass	for-loop-while/foreach-simple-outer-slot.rs
 run-pass	for-loop-while/issue-1257.rs
 run-pass	for-loop-while/issue-2216.rs
 run-pass	for-loop-while/issue-69841.rs
+compile-fail	for-loop-while/iter-from-mac-call.rs
 run-pass	for-loop-while/label_break_value.rs
 compile-fail	for-loop-while/label_break_value_invalid.rs
 run-pass	for-loop-while/labeled-break.rs
@@ -3626,6 +3630,7 @@ compile-fail	inline-const/cross-const-control-flow-125846.rs
 check-pass	inline-const/elided-lifetime-being-infer-vars.rs
 compile-fail	inline-const/expr-unsafe-err.rs
 check-pass	inline-const/expr-unsafe.rs
+compile-fail	inline-const/expr-with-block-err.rs
 check-pass	inline-const/expr-with-block.rs
 compile-fail	inline-const/in-pat-recovery.rs
 check-pass	inline-const/instance-doesnt-depend-on-type.rs
@@ -3654,6 +3659,7 @@ run-pass	iterators/iter-range.rs
 compile-fail	iterators/iterator-does-not-need-into-iter.rs
 compile-fail	iterators/iterator-scope-collect-suggestion-81584.rs
 run-pass	iterators/iterator-type-inference-sum-15673.rs
+compile-fail	iterators/ranges.rs
 compile-fail	iterators/string.rs
 compile-fail	iterators/vec-on-unimplemented.rs
 compile-fail	keyword/extern/keyword-extern-as-identifier-expr.rs
@@ -5926,6 +5932,7 @@ run-pass	pattern/struct-wildcard-pattern-14308.rs
 compile-fail	pattern/struct_pattern_on_tuple_enum.rs
 compile-fail	pattern/suggest-adding-appropriate-missing-pattern-excluding-comments.rs
 run-pass	pattern/tuple-enum-match-15129.rs
+compile-fail	pattern/type-alias-as-variant-pattern.rs
 compile-fail	pattern/type_mismatch.rs
 compile-fail	pattern/uninit-trivial.rs
 run-pass	pattern/unit-pattern-matching-in-function-argument-7519.rs
@@ -5946,6 +5953,7 @@ compile-fail	pattern/usefulness/issue-15129.rs
 compile-fail	pattern/usefulness/issue-2111.rs
 compile-fail	pattern/usefulness/issue-30240-b.rs
 compile-fail	pattern/usefulness/issue-30240.rs
+compile-fail	pattern/usefulness/issue-3096-1.rs
 compile-fail	pattern/usefulness/issue-3096-2.rs
 compile-fail	pattern/usefulness/issue-31221.rs
 compile-fail	pattern/usefulness/issue-31561.rs
@@ -6040,6 +6048,7 @@ compile-fail	privacy/suggest-making-field-public.rs
 compile-fail	privacy/suggest-new-projection-ice.rs
 compile-fail	privacy/trait-object-method-error.rs
 check-pass	privacy/trait_more_private_than_item.rs
+compile-fail	privacy/union-field-privacy-1.rs
 compile-fail	privacy/unreachable-issue-121455.rs
 compile-fail	privacy/unresolved-trait-impl-item.rs
 check-pass	privacy/use-in-impl-scope-12729.rs
@@ -6519,6 +6528,8 @@ run-pass	return/return-nil.rs
 compile-fail	return/return-struct.rs
 compile-fail	return/return-ty-mismatch-note.rs
 compile-fail	return/return-type.rs
+compile-fail	return/return-unit-from-diverging.rs
+compile-fail	return/suggest-a-value.rs
 compile-fail	return/tail-expr-as-potential-return.rs
 compile-fail	rfcs/rfc-0000-never_patterns/ICE-119271-never-arm-attr-in-guard.rs
 run-pass	rfcs/rfc-0107-bind-by-move-pattern-guards/bind-by-move-no-guards.rs
@@ -7840,6 +7851,7 @@ compile-fail	type/type-check/cannot_infer_local_or_vec_in_tuples.rs
 compile-fail	type/type-check/coerce-result-return-value-2.rs
 compile-fail	type/type-check/coerce-result-return-value.rs
 compile-fail	type/type-check/issue-116967-cannot-coerce-returned-result.rs
+compile-fail	type/type-check/issue-22897.rs
 compile-fail	type/type-check/issue-41314.rs
 compile-fail	type/type-check/issue-67273-assignment-match-prior-arm-bool-expected-unit.rs
 compile-fail	type/type-check/missing_trait_impl.rs
@@ -7982,6 +7994,7 @@ compile-fail	typeck/qualified-path-params.rs
 compile-fail	typeck/quiet-type-err-let-binding.rs
 compile-fail	typeck/remove-extra-argument.rs
 compile-fail	typeck/remove-semi-but-confused-char.rs
+compile-fail	typeck/return-expression-invalid-callee.rs
 compile-fail	typeck/return-unsized-coercion.rs
 compile-fail	typeck/return_type_containing_closure.rs
 compile-fail	typeck/self-constructor-type-error-56199.rs
@@ -8015,6 +8028,7 @@ compile-fail	typeck/typeck_type_placeholder_mismatch.rs
 run-pass	typeck/ufcs-type-params.rs
 compile-fail	typeck/unconstrained-impl-extra-parameter.rs
 run-pass	typeck/unify-return-ty.rs
+compile-fail	typeck/while-loop-block-cond.rs
 compile-fail	typeck/while-type-error.rs
 compile-fail	typeck/wrong-ret-type.rs
 compile-fail	ufcs/ufcs-explicit-self-bad.rs
@@ -8115,6 +8129,7 @@ run-pass	union/union-inherent-method.rs
 compile-fail	union/union-lint-dead-code.rs
 run-pass	union/union-macro.rs
 run-pass	union/union-manuallydrop-rpass.rs
+run-pass	union/union-modification.rs
 compile-fail	union/union-move.rs
 compile-fail	union/union-no-derive-suggestion.rs
 run-pass	union/union-nodrop.rs
@@ -8131,6 +8146,7 @@ compile-fail	union/union-unsized.rs
 compile-fail	union/union-with-drop-fields.rs
 compile-fail	union/union.rs
 check-pass	union/union_access_through_block.rs
+run-pass	union/union_destructure.rs
 check-pass	union/union_wild_or_wild.rs
 compile-fail	union/unresolved-field-isnt-copy.rs
 compile-fail	unop/unop-neg-bool.rs

@@ -1691,3 +1691,27 @@ fn item_errors_at_their_part() {
     let src = "fn f() {\n    #[repr(i8)]\n    enum A {\n        Ok = i8::MAX - 1,\n        Ok2,\n        OhNo,\n    }\n    let _ = A::Ok;\n}\nfn main() {}\n";
     assert_eq!(line(src).map(|d| d.0), Some(6), "E0370 in a fn body");
 }
+
+#[test]
+fn errors_at_their_statement() {
+    // (an error whose expression has no position of its own, at the statement's line, and the checks that come with
+    // it; each expected line and message is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("fn main() {\n    let x = 1;\n    [];\n}\n"), at(3, "type annotations needed for an empty array"), "empty array");
+    assert_eq!(first("fn main() {\n    let x = 1;\n    match () {}\n}\n"), at(3, "non-exhaustive patterns: type `()` is non-empty (E0004)"), "match without arms");
+    assert_eq!(first("fn f() -> u8 {\n    let x = 1;\n    return;\n}\nfn main() {}\n"), at(3, "`return;` in a function whose return type is not `()` (E0069)"), "E0069");
+    assert_eq!(first("fn main() {\n    for _ in ..10 {}\n}\n"), at(2, "`RangeTo<{integer}>` is not an iterator (E0277)"), "RangeTo");
+    assert_eq!(first("fn f(x: &mut i32) {\n    for _ in *x {}\n}\nfn main() {}\n"), at(2, "`i32` is not an iterator (E0277)"), "i32 iterated");
+    assert_eq!(first("fn main() {\n    const { 2 } - const { 1 };\n}\n"), at(2, "mismatched types: expected `()`, found `i32`"), "block-like statement");
+    assert_eq!(first("fn f() {\n    if let Some(v) = Some(1) {\n        const { v }\n    }\n}\nfn main() {}\n"), at(3, "attempt to use a non-constant value in a constant (E0435)"), "E0435");
+    assert_eq!(first("fn f() -> str {\n    loop {}\n}\nfn main() {}\n"), at(1, "the size for values of type `str` cannot be known at compilation time (E0277)"), "unsized return");
+    // (union patterns: one field, reading it is unsafe, `_` reads nothing)
+    let u = "union U { a: u8, b: u16 }\n";
+    assert_eq!(first(&format!("{u}fn f(U {{ a }}: U) -> u8 {{\n    a\n}}\nfn main() {{}}\n")), at(2, "access to union field is unsafe and requires unsafe function or block (E0133)"), "union parameter");
+    assert_eq!(first(&format!("{u}fn f(u: U) {{\n    let U {{ a, b }} = u;\n}}\nfn main() {{}}\n")), at(3, "union patterns should have exactly one field"), "two fields");
+    assert_eq!(first(&format!("{u}fn f(u: U) {{\n    let U {{ a: _ }} = u;\n    unsafe {{ let U {{ b }} = u; }}\n}}\nfn main() {{}}\n")), None, "wildcard and unsafe");
+}

@@ -843,6 +843,11 @@ pub fn expr_start(e: &Expr) -> Sp {
     }
 }
 
+/// A message of what zustc does not support (not an error rustc reports)
+pub fn unsupported(m: &str) -> bool {
+    m.contains("not supported") || m.contains("unsupported") || m.starts_with("array length must be a literal or a const")
+}
+
 /// メッセージが `行:桁: ` で始まるか
 pub fn has_loc(m: &str) -> bool {
     // (数字の並び `:` 数字の並び `:` で始まる)
@@ -1957,6 +1962,12 @@ impl Cx<'_> {
                     Some(Stmt::Expr(e, _)) => expr_start(e),
                     _ => SP,
                 };
+                // (`[];`, `match () {}`, a block's tail `()`: where the parser saw the statement start. Not what zustc
+                // does not support, which is no error of the program's at any line of it)
+                let sp = match blk.spos.get(self.stmt_i) {
+                    Some(p) if sp.line == 0 && !unsupported(&m) => p,
+                    _ => sp,
+                };
                 // (none here either: the block's own statement in the block around it decides)
                 self.stmt_i = saved;
                 Err(self.at(sp, m))
@@ -1981,7 +1992,7 @@ impl Cx<'_> {
                     st => stmts.push(st.clone()),
                 }
             }
-            let nb: &'static crate::parse::Block = Box::leak(Box::new(crate::parse::Block { stmts }));
+            let nb: &'static crate::parse::Block = Box::leak(Box::new(crate::parse::Block { stmts, spos: Default::default() }));
             return self.block_stmts(nb, expected);
         }
         self.scopes.push(vec![]);
@@ -2581,8 +2592,10 @@ impl Cx<'_> {
                         result = r;
                         self.drop_tail_temps(t0, result);
                     } else {
+                        // (a block-like statement, `if .. {}` / `const { 2 }` without `;`, has the type `()`: rustc's
+                        // E0308)
                         if !*semi && !matches!(r.1, Ty::Unit | Ty::Never) {
-                            return err(SP, "expected `;` after non-unit expression");
+                            return err(SP, format!("mismatched types: expected `()`, found `{}`", self.prog.tn(r.1).replace('#', "")));
                         }
                         // (unused_must_use: a `Result` dropped by its statement)
                         if self.prog.deny_must_use && self.user_code {

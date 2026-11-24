@@ -7874,9 +7874,13 @@ pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
         }
         let name = format!("__exr_arg{k}");
         let pat = std::mem::replace(p, Pat::Ident(false, false, name.clone(), None));
-        lets.push(Stmt::Let(pat, None, Some(acg::path_expr(&name)), None, Default::default()));
+        let at = crate::parse::pat_pos(&pat);
+        lets.push(Stmt::Let(pat, None, Some(acg::path_expr(&name)), None, at));
     }
     if !lets.is_empty() {
+        // (the statements' starts with them: each let at its pattern)
+        // (the body's statements move by the lets; a let has its own position)
+        block.spos = block.spos.shifted(0, lets.len() as isize);
         lets.append(&mut block.stmts);
         block.stmts = lets;
     }
@@ -7896,17 +7900,23 @@ pub fn synth_closure(c: &Expr, in_unsafe: bool) -> ItemFn {
             p.clone()
         } else {
             let id = format!("__p{i}");
-            stmts.push(Stmt::Let(p.clone(), None, Some(acg::path_expr(&id)), None, Default::default()));
+            stmts.push(Stmt::Let(p.clone(), None, Some(acg::path_expr(&id)), None, crate::parse::pat_pos(p)));
             Pat::Ident(false, false, id, None)
         };
         params.push((pin, unit.clone()));
     }
+    // (the body's statements' starts, after the parameters' lets, each at its pattern)
+    let mut spos = crate::parse::Spos::default();
     match &**body {
-        Expr::Block(None, false, b) => stmts.extend(b.stmts.iter().cloned()),
+        Expr::Block(None, false, b) => {
+            spos = b.spos.shifted(0, stmts.len() as isize);
+            stmts.extend(b.stmts.iter().cloned());
+        }
         e => stmts.push(Stmt::Expr(e.clone(), false)),
     }
     if in_unsafe {
-        stmts = vec![Stmt::Expr(Expr::Block(None, true, Block { stmts }), false)];
+        stmts = vec![Stmt::Expr(Expr::Block(None, true, Block { stmts, spos }), false)];
+        spos = crate::parse::Spos::default();
     }
     let sig = crate::parse::FnSig {
         name: "call".into(),
@@ -7917,7 +7927,7 @@ pub fn synth_closure(c: &Expr, in_unsafe: bool) -> ItemFn {
         ret: None,
         quals: vec![],
     };
-    ItemFn { attrs: vec![], sig, block: Block { stmts } }
+    ItemFn { attrs: vec![], sig, block: Block { stmts, spos } }
 }
 
 /// The text of an item after its attributes and comments, and the number of lines skipped to get there

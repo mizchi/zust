@@ -72,7 +72,7 @@ pub(crate) fn vec_of(es: &[Expr]) -> Expr {
         return m;
     }
     lets.push(Stmt::Expr(m, false));
-    Expr::Block(None, false, PBlock { stmts: lets })
+    Expr::Block(None, false, PBlock { stmts: lets, spos: Default::default() })
 }
 
 impl Cx<'_> {
@@ -625,7 +625,7 @@ impl Cx<'_> {
                             let hs = Expr::Ref(true, Box::new(Expr::Unary("*".into(), Box::new(path_expr("__hs")), crate::parse::Span::default())));
                             stmts.push(Stmt::Expr(mcall(f, "hash", vec![hs]), true));
                         }
-                        let e = Expr::Block(None, false, PBlock { stmts });
+                        let e = Expr::Block(None, false, PBlock { stmts, spos: Default::default() });
                         return self.expr(&e, expected);
                     }
                     if self.prog.structs[self.prog.base_of(sid) as usize].name == "Option" {

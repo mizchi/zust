@@ -42,7 +42,7 @@ pub(crate) fn closure_synth(c: &Expr) -> ItemFn {
             ret: None,
             quals: vec![],
         },
-        block: Block { stmts },
+        block: Block { stmts, spos: Default::default() },
     }
 }
 
@@ -1503,7 +1503,10 @@ impl Cx<'_> {
                         v
                     }
                     None => {
-                        self.same(SP, Ty::Unit, ret)?;
+                        // (E0069: `return;` in a fn of another return type, `!` too)
+                        if self.same(SP, Ty::Unit, ret).is_err() {
+                            return err(SP, "`return;` in a function whose return type is not `()` (E0069)");
+                        }
                         None
                     }
                 };
@@ -1894,7 +1897,13 @@ impl Cx<'_> {
             }
             Expr::Try(_) => self.try_(e),
             // `const { .. }` (an inline const): its value, computed where it is (the same value as at compile time)
-            Expr::Const(b) => self.block(b, expected),
+            Expr::Const(b) => {
+                // (E0435: an inline const reads no local of the code around it: `if let Some(v) = .. { const { v } }`)
+                if let Some(at) = self.const_reads_local(e) {
+                    return Err(self.at(at, "attempt to use a non-constant value in a constant (E0435)".into()));
+                }
+                self.block(b, expected)
+            }
             e => {
                 let k = format!("{e:?}");
                 let k = k.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("").to_string();
@@ -2391,7 +2400,7 @@ impl Cx<'_> {
                     }
                 }
                 stmts.push(crate::parse::Stmt::Expr(Expr::Struct(path.clone(), nfields, Some(base.clone())), false));
-                let ne: &Expr = self.keep_expr(Expr::Block(None, false, crate::parse::Block { stmts }));
+                let ne: &Expr = self.keep_expr(Expr::Block(None, false, crate::parse::Block { stmts, spos: Default::default() }));
                 return self.expr(ne, expected);
             }
         }
@@ -4328,5 +4337,33 @@ fn diverging_tail(e: &Expr) -> bool {
         Expr::Return(_) => true,
         Expr::Macro(p, _, _) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")) => has_unit_return(e),
         _ => false,
+    }
+}
+
+impl Cx<'_> {
+    /// Where an inline const `const { .. }` names a local of the code around it (None if it does not, or if it binds
+    /// names of its own with a `let` or a closure, which this does not follow)
+    pub(crate) fn const_reads_local(&self, c: &Expr) -> Option<Sp> {
+        fn walk(e: &Expr, out: &mut Vec<(String, Sp)>, own: &mut bool) {
+            match e {
+                Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => out.push((p.segs[0].name.clone(), p.pos)),
+                Expr::Closure(..) | Expr::Let(..) | Expr::Match(..) | Expr::For(..) | Expr::Macro(..) => *own = true,
+                Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => {
+                    for st in &b.stmts {
+                        match st {
+                            Stmt::Expr(x, _) => walk(x, out, own),
+                            _ => *own = true,
+                        }
+                    }
+                }
+                e => crate::ast_closure::each_child_pub(e, &mut |x| walk(x, out, own)),
+            }
+        }
+        let (mut names, mut own) = (vec![], false);
+        walk(c, &mut names, &mut own);
+        if own {
+            return None;
+        }
+        names.into_iter().find(|(n, p)| p.line != 0 && self.lookup(n).is_some()).map(|(_, p)| p)
     }
 }

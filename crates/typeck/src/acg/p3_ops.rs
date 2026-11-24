@@ -1304,7 +1304,7 @@ impl Cx<'_> {
                             let ne: &Expr = self.keep_expr(nested);
                             return self.expr(ne, expected).map_err(|m| self.at(at, m));
                         }
-                        body = crate::parse::Block { stmts: vec![Stmt::Expr(nested, false)] };
+                        body = crate::parse::Block { stmts: vec![Stmt::Expr(nested, false)], spos: Default::default() };
                     }
                 }
             }

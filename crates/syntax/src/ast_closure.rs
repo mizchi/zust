@@ -1323,7 +1323,7 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
                 let mut ns = vec![];
                 names(p, &mut ns);
                 if ns.iter().any(|n| reportable(n)) {
-                    let rest = Expr::Block(None, false, Block { stmts: b.stmts[i + 1..].to_vec() });
+                    let rest = Expr::Block(None, false, Block { stmts: b.stmts[i + 1..].to_vec(), spos: b.spos.shifted(i + 1, -(i as isize + 1)) });
                     let fv = used_vars(&rest);
                     for n in ns.iter().filter(|n| reportable(n)) {
                         if !fv.contains(n) {
