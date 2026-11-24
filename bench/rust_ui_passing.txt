@@ -1724,6 +1724,7 @@ compile-fail	const-generics/min_const_generics/invalid-patterns.rs
 compile-fail	const-generics/min_const_generics/macro-fail.rs
 compile-fail	const-generics/min_const_generics/self-ty-in-const-1.rs
 run-pass	const-generics/min_const_generics/type_and_const_defaults.rs
+compile-fail	const-generics/mistyped_const_in_pat.rs
 compile-fail	const-generics/not_wf_param_in_rpitit.rs
 compile-fail	const-generics/parent_generics_of_nested_in_default.rs
 compile-fail	const-generics/parser-error-recovery/issue-89013-no-assoc.rs
@@ -1734,6 +1735,7 @@ compile-fail	const-generics/projection-as-arg-const.rs
 run-pass	const-generics/promotion.rs
 compile-fail	const-generics/sneaky-array-repeat-expr.rs
 check-pass	const-generics/trait-const-args.rs
+compile-fail	const-generics/try-from-with-const-genericsrs-98299.rs
 run-pass	const-generics/type-after-const-ok.rs
 run-pass	const-generics/type-dependent/issue-61936.rs
 run-pass	const-generics/type-dependent/issue-63695.rs
@@ -2248,6 +2250,7 @@ run-pass	drop/drop-trait-generic.rs
 run-pass	drop/drop-trait.rs
 run-pass	drop/drop-uninhabited-enum.rs
 run-pass	drop/drop-value-by-method.rs
+run-pass	drop/drop-with-trait-bound-calls-method-on-self.rs
 run-pass	drop/drop-with-type-ascription-1.rs
 run-pass	drop/drop-with-type-ascription-2.rs
 compile-fail	drop/drop_elaboration_with_errors2.rs
@@ -4622,6 +4625,7 @@ run-pass	mir/mir_match_arm_guard.rs
 run-pass	mir/mir_match_test.rs
 run-pass	mir/mir_small_agg_arg.rs
 run-pass	mir/mir_static_subtype.rs
+run-pass	mir/mir_struct_with_assoc_ty.rs
 run-pass	mir/mir_temp_promotions.rs
 run-pass	mir/mir_void_return.rs
 run-pass	mir/mir_void_return_2.rs
@@ -4964,6 +4968,7 @@ compile-fail	nll/move-subpaths-moves-root.rs
 run-pass	nll/mutating_references.rs
 compile-fail	nll/nested-bodies-in-dead-code.rs
 compile-fail	nll/nll-anon-to-static.rs
+compile-fail	nll/normalization-bounds-error.rs
 check-pass	nll/normalization-bounds.rs
 compile-fail	nll/outlives-suggestion-more.rs
 compile-fail	nll/outlives-suggestion-simple.rs
@@ -5933,6 +5938,8 @@ check-pass	pattern/move-ref-patterns/by-move-sub-pat-unreachable.rs
 check-pass	pattern/move-ref-patterns/issue-53840.rs
 compile-fail	pattern/move-ref-patterns/move-ref-patterns-closure-captures-inside.rs
 check-pass	pattern/move-ref-patterns/move-ref-patterns-closure-captures-pass.rs
+compile-fail	pattern/move-ref-patterns/move-ref-patterns-default-binding-modes-fixable.rs
+compile-fail	pattern/move-ref-patterns/move-ref-patterns-default-binding-modes.rs
 compile-fail	pattern/move-ref-patterns/pattern-ref-bindings-reassignment.rs
 compile-fail	pattern/multiple-bindings-on-var.rs
 compile-fail	pattern/mut-pattern-of-immutable-borrow.rs
@@ -6361,6 +6368,7 @@ compile-fail	regions/regions-wf-trait-object.rs
 check-pass	regions/relate-bound-region-ref-type-param.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429-2.rs
 check-pass	regions/type-param-outlives-reempty-issue-74429.rs
+compile-fail	regions/wf-bound-region-in-local-issue-115175.rs
 run-pass	regions/wf-bound-region-in-object-type.rs
 check-pass	repeat-expr/can-have-side-effects-consider-element.rs
 compile-fail	repeat-expr/copy-check-const-element-uninferred-count.rs
@@ -6614,6 +6622,8 @@ run-pass	rfcs/rfc-2005-default-binding-mode/enum-ok.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/enum.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/explicit-mut.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/for-ok.rs
+compile-fail	rfcs/rfc-2005-default-binding-mode/for.rs
+run-pass	rfcs/rfc-2005-default-binding-mode/general.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/lit-ok.rs
 compile-fail	rfcs/rfc-2005-default-binding-mode/no-double-error.rs
 run-pass	rfcs/rfc-2005-default-binding-mode/range.rs
@@ -8313,6 +8323,7 @@ check-pass	variance/variance-use-covariant-struct-2.rs
 compile-fail	variance/variance-use-invariant-struct-1.rs
 compile-fail	variants/variant-result-noresult-used-as-type.rs
 compile-fail	variants/variant-used-as-type.rs
+compile-fail	wf/conflicting-impls.rs
 compile-fail	wf/ice-hir-wf-check-anon-const-issue-122199.rs
 compile-fail	wf/ice-hir-wf-issue-135341.rs
 compile-fail	wf/ice-wf-missing-span-in-error-130012.rs
