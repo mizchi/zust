@@ -284,7 +284,7 @@ export default grammar({
     // `hi ${name}`: text, escapes and `${..}` holes
     template_string: ($) =>
       seq('`', repeat(choice(alias($._template_chars, $.string_fragment), $.escape_sequence, $.template_substitution)), '`'),
-    _template_chars: (_) => token.immediate(/([^`\\$]|\$[^{`\\])+|\$/),
+    _template_chars: (_) => token.immediate(/([^`\\$]|\$[^{`\\$])+|\$/),
     escape_sequence: (_) => token.immediate(/\\./),
     template_substitution: ($) => seq(token.immediate('${'), $._expression, '}'),
 

@@ -146,6 +146,9 @@ impl Parser {
                 match self.bump() {
                     '"' => break,
                     '\\' => {
+                        if self.i >= self.src.len() {
+                            return Err((pos, "unterminated string".into()));
+                        }
                         let e = self.bump();
                         s.push(match e {
                             'n' => '\n',
@@ -989,6 +992,9 @@ impl Parser {
                     parts.push(String::new());
                 }
                 '\\' => {
+                    if self.i >= self.src.len() {
+                        return Err((pos, "unterminated template string".into()));
+                    }
                     let e = self.bump();
                     parts.last_mut().unwrap().push(match e {
                         'n' => '\n',

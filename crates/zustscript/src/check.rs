@@ -801,6 +801,7 @@ impl Checker {
                     }
                     ok
                 }
+                "hole" => r == Ty::Str || r == Ty::Bool || self.numeric(&r),
                 "child" => match &r {
                     Ty::Jsx | Ty::Str => true,
                     t if self.numeric(t) => true,
@@ -817,6 +818,7 @@ impl Checker {
                     "num" | "div" => format!("expected a number (i32, u32, i64, f64), found {s}"),
                     "add" => format!("`+` takes numbers or String, found {s}"),
                     "ord" => format!("cannot compare {s} with `<`"),
+                    "hole" => format!("a `${{..}}` of a template string takes a String, a number or a bool, not {s}"),
                     "eq" => format!("`==` compares values (numbers, strings, bools, and arrays, records, enums and tuples of them, by content), not {s}"),
                     _ => format!("a JSX child is Jsx, String, a number or an Array of Jsx / String, found {s}"),
                 };
@@ -1483,20 +1485,12 @@ impl Checker {
                 Ty::Array(Box::new(et))
             }
             EK::Tuple(xs) => Ty::Tuple(xs.iter().map(|x| self.infer(x, None)).collect()),
-            // (a hole is a string, or what has `to_string`: a number or a bool, written as `to_string` writes it)
+            // (a hole is a string, or what has `to_string`: a number or a bool, written as `to_string` writes it.
+            // Checked when the function's types are known: a closure's parameter may be decided by a later argument)
             EK::Interp(_, holes) => {
                 for h in holes {
                     let t = self.infer(h, None);
-                    let ok = match self.resolve(&t) {
-                        Ty::Str | Ty::I32 | Ty::U32 | Ty::I64 | Ty::F32 | Ty::F64 | Ty::Bool => true,
-                        Ty::Param(p) => self.bounds.contains_key(&p),
-                        Ty::Var(v) => self.intv.contains(&v) || self.floatv.contains(&v),
-                        _ => false,
-                    };
-                    if !ok {
-                        let shown = self.show(&t);
-                        self.err(h.pos, format!("a `${{..}}` of a template string takes a String, a number or a bool, not {shown}"));
-                    }
+                    self.deferred.push((h.pos, h.id, "hole", t));
                 }
                 Ty::Str
             }

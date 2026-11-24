@@ -130,6 +130,9 @@ fn template_text(s: &str) -> String {
             '`' => o.push_str("\\`"),
             '\\' => o.push_str("\\\\"),
             '$' if cs.get(i + 1) == Some(&'{') => o.push_str("\\$"),
+            // (a line break is escaped too: the output is re-indented in places (`Js::iife`), which would add to
+            // a literal one)
+            '\n' => o.push_str("\\n"),
             '\r' => o.push_str("\\r"),
             // (`\0` before a digit would be an octal escape, an error in a template)
             '\0' => o.push_str("\\x00"),
