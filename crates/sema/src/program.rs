@@ -3873,9 +3873,12 @@ impl Program {
                 let seg = p.segs.last().unwrap();
                 let crate::parse::GArg::Ty(t) = &seg.args[0] else { return Err("size_of needs a type".into()) };
                 // (a pointer to a slice, a str or a trait object is two words; its alignment is one word's)
+                // (and to a struct with an unsized tail (`*const Tail<[u8]>`), by its resolved type)
                 let fat = |i: &crate::parse::Ty| {
                     matches!(i, crate::parse::Ty::Slice(_) | crate::parse::Ty::Dyn(_))
                         || matches!(i, crate::parse::Ty::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == "str")
+                        || (matches!(i, crate::parse::Ty::Path(None, _))
+                            && crate::ast_types::tysyn(i, None).ok().and_then(|syn| self.resolve_g(&syn, &[]).ok()).is_some_and(|t| t.is_unsized()))
                 };
                 let size = match t {
                     crate::parse::Ty::Ptr(_, i) | crate::parse::Ty::Ref(_, _, i) if fat(i) => Some(if seg.name == "align_of" { 8 } else { 16 }),
@@ -5200,6 +5203,7 @@ impl Program {
                 let (sx, sy) = (&self.structs[x as usize], &self.structs[y as usize]);
                 sx.base.is_some() && sx.base == sy.base && sx.args.len() == sy.args.len() && sx.args.iter().zip(&sy.args).all(|(&a, &b)| go(a, b))
             }
+            (Ty::Fn(a), Ty::Fn(b)) => a.params.len() == b.params.len() && a.params.iter().zip(&b.params).chain([(&a.ret, &b.ret)]).all(|(&p, &q)| go(p, q)),
             _ => false,
         }
     }
@@ -5212,6 +5216,7 @@ impl Program {
             Ty::Param(HOLE) => true,
             Ty::Ref(_, i) | Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => self.uses_hole(*i, depth + 1),
             Ty::Struct(s) => self.structs[s as usize].args.iter().any(|&a| self.uses_hole(a, depth + 1)),
+            Ty::Fn(f) => f.params.iter().any(|&p| self.uses_hole(p, depth + 1)) || self.uses_hole(f.ret, depth + 1),
             _ => false,
         }
     }

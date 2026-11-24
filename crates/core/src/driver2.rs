@@ -1704,11 +1704,11 @@ impl Session2 {
         };
         prog.allow_overflowing_literals = src.match_indices("overflowing_literals").any(|(i, _)| {
             let head = &src[src[..i].rfind('(').map(|k| src[..k].rfind(|c: char| c == '[' || c == ',').map_or(0, |b| b + 1)).unwrap_or(i)..i];
-            ["allow(", "warn(", "expect("].iter().any(|a| head.trim_start().starts_with(a)) && !in_text(i)
+            ["allow", "warn", "expect"].iter().any(|a| head.trim_start().strip_prefix(a).is_some_and(|rest| rest.trim_start().starts_with('('))) && !in_text(i)
         });
         prog.allow_implicit_autorefs = src.match_indices("dangerous_implicit_autorefs").any(|(i, _)| {
             let head = &src[src[..i].rfind('(').map(|k| src[..k].rfind(|c: char| c == '[' || c == ',').map_or(0, |b| b + 1)).unwrap_or(i)..i];
-            ["allow(", "warn(", "expect("].iter().any(|a| head.trim_start().starts_with(a)) && !in_text(i)
+            ["allow", "warn", "expect"].iter().any(|a| head.trim_start().strip_prefix(a).is_some_and(|rest| rest.trim_start().starts_with('('))) && !in_text(i)
         });
         prog.deny_trivial_casts = deny_trivial_casts;
         if deny_must_use {
@@ -1912,6 +1912,22 @@ impl Session2 {
                 let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
                 let head = text.split('{').next().unwrap_or("").split(';').next().unwrap_or("");
                 let mut supers: Vec<String> = vec![own.clone()];
+                // (the trait's own `where Self: Parent`, a supertrait as `trait Child: Parent` is)
+                if let Some(hi) = items.get(h as usize) {
+                    let htext = blank_comments(src.get(hi.start..hi.end).unwrap_or(""));
+                    let hhead = htext.split('{').next().unwrap_or("");
+                    for (subj, bs) in where_preds(hhead).unwrap_or_default() {
+                        if subj == "Self" {
+                            for b in bs {
+                                let b = b.trim().split('<').next().unwrap_or("").trim();
+                                let b = b.rsplit("::").next().unwrap_or(b).to_string();
+                                if !supers.contains(&b) {
+                                    supers.push(b);
+                                }
+                            }
+                        }
+                    }
+                }
                 let mut k = 0;
                 while k < supers.len() {
                     let t = supers[k].clone();
@@ -2231,6 +2247,44 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
 /// The first `-> impl Tr` of the program's non-generic fns whose type from the body is surely not Tr: the trait solver's
 /// `No` (`solve_no_sound`), for each bound written (`impl Tr + Send`, `impl Tr<Assoc = X>`). A generic fn's type is
 /// each instance's, and a nested `impl` (`Option<impl Tr>`) is not followed
+/// The values of an `if` / `match`'s arms as the paths they name (`S`, `S { .. }`, `S(..)`), into out; false when an
+/// arm's value is another expression (its type is not read here)
+fn arm_heads(e: &crate::parse::Expr, out: &mut Vec<String>, depth: u32) -> bool {
+    use crate::parse::{Expr, Stmt};
+    if depth > 16 {
+        return false;
+    }
+    let path = |p: &crate::parse::Path| p.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
+    fn block_tail(b: &crate::parse::Block) -> Option<&Expr> {
+        match b.stmts.last() {
+            Some(Stmt::Expr(t, false)) => Some(t),
+            _ => None,
+        }
+    }
+    match e {
+        Expr::If(_, then, els) => {
+            let Some(t) = block_tail(then) else { return false };
+            let Some(els) = els else { return false };
+            arm_heads(t, out, depth + 1) && arm_heads(els, out, depth + 1)
+        }
+        Expr::Match(_, arms) => !arms.is_empty() && arms.iter().all(|a| arm_heads(&a.body, out, depth + 1)),
+        Expr::Block(_, _, b) => block_tail(b).is_some_and(|t| arm_heads(t, out, depth + 1)),
+        Expr::Paren(x) => arm_heads(x, out, depth + 1),
+        Expr::Path(None, p) | Expr::Struct(p, _, _) => {
+            out.push(path(p));
+            true
+        }
+        Expr::Call(f, _) => match &**f {
+            Expr::Path(None, p) => {
+                out.push(path(p));
+                true
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 fn opaque_bound_error(prog: &Program, src: &str, items: &[SrcItem]) -> R<Option<String>> {
     // (a bound as a goal the solver may answer: the program's traits, the auto traits, and std's for the types
     // `implements` judges exactly (the solver believes its no only there); a std bound whose arguments are all
@@ -2267,9 +2321,13 @@ fn opaque_bound_error(prog: &Program, src: &str, items: &[SrcItem]) -> R<Option<
         let Some(crate::parse::Ty::Impl(bs)) = &f.sig.ret else { continue };
         let Ok(names) = crate::ast_summary::bound_names(bs) else { continue };
         // (a tail `if` / `match`: the type recorded is its first arm's; arms of other types are the arms' error
-        // (E0308, "`if` and `else` have incompatible types"), reported by the body's check)
-        if matches!(f.block.stmts.last(), Some(crate::parse::Stmt::Expr(crate::parse::Expr::If(..) | crate::parse::Expr::Match(..), false))) {
-            continue;
+        // (E0308, "`if` and `else` have incompatible types"), reported by the body's check. Arms whose values all
+        // name one type (`if b { S } else { S }`) are checked as one value)
+        if let Some(crate::parse::Stmt::Expr(tail @ (crate::parse::Expr::If(..) | crate::parse::Expr::Match(..)), false)) = f.block.stmts.last() {
+            let mut heads = vec![];
+            if !arm_heads(tail, &mut heads, 0) || heads.windows(2).any(|w| w[0] != w[1]) {
+                continue;
+            }
         }
         for b in &names {
             if let Some(e) = check(t, b, items[ii].line) {

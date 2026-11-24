@@ -1085,6 +1085,11 @@ impl Cx<'_> {
                 // (`&mut T` read where no reference type is expected is moved, not reborrowed: `{src}` / `let b = a;`)
                 let exp_none = self.bk.exp_none;
                 let p = self.place(e)?;
+                // (a field of an unsized type read as a value (`let t = r.tail;` with r: `&S<[u8]>`): its size is not
+                // known, as for `*slice`; a borrow of it (`&r.tail`) is a place, not here)
+                if p.ty().is_unsized() {
+                    return err(expr_start(e), format!("the size for values of type `{}` cannot be known at compilation time (E0277)", self.prog.tn(p.ty())));
+                }
                 let r = self.read(p);
                 if self.bk_on() && (!self.bk_ty(r.1).0 || exp_none && matches!(r.1, Ty::Ref(true, _))) {
                     if !self.bk_ty(r.1).0 {
@@ -3588,7 +3593,14 @@ impl Cx<'_> {
                             if !self.prog.structs[sid as usize].fields.is_empty() {
                                 return None;
                             }
-                            if !agree(&mut sig, self.closure_sig(t)?) {
+                            // (a parameter or result with a reference: its lifetime (`|x: &'static u32|`) is not in the
+                            // fn pointer type, and the region check of an explicit cast (rg_closure_fnptr) would not run;
+                            // not coerced, as before)
+                            let cs = self.closure_sig(t)?;
+                            if cs.0.iter().chain([&cs.1]).any(|&p| has_ref(p, 0)) {
+                                return None;
+                            }
+                            if !agree(&mut sig, cs) {
                                 return None;
                             }
                             any_closure = true;
@@ -4575,6 +4587,19 @@ fn diverging_tail(e: &Expr) -> bool {
         Expr::Loop(..) => !has_break(tail(e)),
         Expr::Return(_) => true,
         Expr::Macro(p, _, _) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")) => has_unit_return(e),
+        _ => false,
+    }
+}
+
+/// t holds a reference (in a fn pointer's parameters, a struct's arguments ..)
+fn has_ref(t: Ty, depth: u32) -> bool {
+    if depth > 16 {
+        return true;
+    }
+    match t {
+        Ty::Ref(..) => true,
+        Ty::Ptr(_, i) | Ty::Array(i, _) | Ty::Slice(i) | Ty::Box(i) => has_ref(*i, depth + 1),
+        Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&x| has_ref(x, depth + 1)),
         _ => false,
     }
 }

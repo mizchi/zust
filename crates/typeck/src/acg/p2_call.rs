@@ -2601,6 +2601,9 @@ impl Cx<'_> {
             while let Ty::Ref(_, i) = bare {
                 bare = *i;
             }
+            // (an inherent method that fits comes first, whatever the result: `s.f()` with `impl S { fn f() }`)
+            let inherent = self.explicit_trait.is_none()
+                && cands.iter().any(|&c| self.prog.sigs[c as usize].impl_trait.is_none() && (fits(c, at) || self.prog.sigs[c as usize].self_ty == Some(bare)));
             let mut fit: Vec<u32> = cands.iter().copied().filter(|&c| self.prog.sigs[c as usize].impl_trait.is_some() && (fits(c, at) || self.prog.sigs[c as usize].self_ty == Some(bare))).collect();
             // (only impls of one trait are told apart this way: of the trait the call names (`A::f(&s)`), or the one
             // trait all candidates are of; two traits' methods of one name are not chosen by their results)
@@ -2609,7 +2612,7 @@ impl Cx<'_> {
                 fit.retain(|&c| base(c).map(|b| b.rsplit("::").next().unwrap_or(b)) == Some(tr));
             }
             let one_trait = fit.windows(2).all(|w| base(w[0]) == base(w[1]));
-            if fit.len() > 1 && one_trait {
+            if fit.len() > 1 && one_trait && !inherent {
                 let by_ret: Vec<u32> = fit.iter().copied().filter(|&c| self.prog.sigs[c as usize].ret == want).collect();
                 if by_ret.len() == 1 {
                     return by_ret[0];

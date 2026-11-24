@@ -70,7 +70,15 @@ obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-
   per-impl record of the trait's arguments is needed.
 - `<S as Tr<2>>::get()` with impls of `Tr<1>` and `Tr<2>`: the call takes `Tr<1>`'s method (now a compile error,
   as the annotation `<S as Tr<2>>::Item` resolves to the right type; main printed the wrong value).
-- A local named like an intrinsic (`let size_of = || 7u8; size_of()`) is a false error (main too).
+- A local named like an intrinsic (`let size_of = || 7u8; size_of()`) is a false error, and a program's own
+  `mem::size_of_val` is typed as the intrinsic (main too).
+- From the third review of #128 (main too unless noted):
+  - a non-generic struct with an unsized tail (`struct Tail(u8, [u32])`) is not tagged: `*const Tail` is thin;
+  - `size_of::<*const Tail<[u8]>>()` as an array length is 8: the syntax-level rewrite of `size_of` takes every
+    pointer to a path as thin, before types are known;
+  - `where` found inside an attribute's string (`#[doc = "where"]`) hides the impl's where clause;
+  - an impl header's trait argument that resolves only later (`impl Pick<<Seed as Key>::Arg> for S` before `Seed`'s
+    impl) is kept unread.
 - `impl Tr for [u8; 3]` then a dyn call: "no implementation" (main too).
 
 ## Security: CVEs whose API zustc does not have (`expect: unsupported`)

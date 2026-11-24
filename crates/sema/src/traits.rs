@@ -787,7 +787,7 @@ fn unify(p: &Program, a: Ty, b: Ty, sol: &mut [Option<Ty>], depth: u32) -> Optio
         (Ty::Param(x), t) | (t, Ty::Param(x)) => {
             // (an impl's parameter is Sized unless it says `?Sized`, which the summaries do not keep: one bound to an
             // unsized type cannot be told)
-            if (x as usize) >= sol.len() || matches!(t, Ty::Slice(_) | Ty::Str | Ty::Dyn(_)) {
+            if (x as usize) >= sol.len() || t.is_unsized() {
                 return None;
             }
             if occurs(p, t, x, sol) {
@@ -1334,6 +1334,12 @@ impl Cx<'_> {
             || matches!(t, Ty::Struct(x) if self.p.structs[x as usize].base.is_none() && self.p.structs[x as usize].generics.is_empty() && self.p.structs[x as usize].placeholder.is_none());
         let exact = judged && !raw.contains('<') && !raw.contains('(')
             && (self.db.prelude.contains(tr) || matches!(tr, "Copy" | "Clone" | "Sized" | "Send" | "Sync" | "Debug" | "Default" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash"));
+        // (the trait as `implements` knows it: `core::fmt::Debug` is `Debug`, its arguments kept)
+        let raw_n = match raw.find('<') {
+            Some(lt) => format!("{}{}", raw[..lt].rsplit("::").next().unwrap_or(&raw[..lt]).trim(), &raw[lt..]),
+            None => raw.rsplit("::").next().unwrap_or(raw).trim().to_string(),
+        };
+        let raw = raw_n.as_str();
         if self.p.implements(t, raw) {
             // (`implements` may say yes of what it does not judge exactly)
             return if self.strict && !exact { Ans::Overflow } else { Ans::Yes };

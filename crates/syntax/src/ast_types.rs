@@ -329,15 +329,19 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
             let targs: Vec<&crate::parse::GArg> = p.segs.len().checked_sub(2).map(|i| &p.segs[i]).map_or(vec![], |sg| {
                 sg.args.iter().filter(|a| matches!(a, crate::parse::GArg::Ty(_) | crate::parse::GArg::Const(_))).collect()
             });
-            if let (Some(tr), false, false) = (tr, targs.is_empty(), std_tr) {
+            // (a const argument that cannot be lowered (`{ match .. }`): the projection without the trait's arguments,
+            // as before they were kept; the lookup by self type then decides, or fails, as it did)
+            let lowered: Option<Vec<TySyn>> = targs
+                .iter()
+                .map(|a| match a {
+                    crate::parse::GArg::Ty(t) => tysyn(t, self_ty).ok(),
+                    crate::parse::GArg::Const(e) => const_arg_syn(e).ok(),
+                    _ => None,
+                })
+                .collect();
+            if let (Some(tr), false, false, Some(lowered)) = (tr, targs.is_empty(), std_tr, lowered) {
                 let mut parts = vec![tysyn(q, self_ty)?];
-                for a in targs {
-                    match a {
-                        crate::parse::GArg::Ty(t) => parts.push(tysyn(t, self_ty)?),
-                        crate::parse::GArg::Const(e) => parts.push(const_arg_syn(e)?),
-                        _ => {}
-                    }
-                }
+                parts.extend(lowered);
                 return Ok(TySyn::Assoc(Box::new(TySyn::Tuple(parts)), format!("{TARGS_PREFIX}{tr}#{name}")));
             }
             TySyn::Assoc(Box::new(tysyn(q, self_ty)?), name)
