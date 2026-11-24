@@ -861,11 +861,11 @@ pub fn std_renames(src: &str) -> Option<String> {
             })
         });
         let bare = imported && !other && !defined;
-        // (imported from that module in one module and from another in a second (a crate's files, loaded as
-        // `mod name { .. }`): each module's own `use`s decide for it)
-        // (also when the scan above may have missed a module's `use`: it reads only statements that start with one,
-        // not a `use` right after `mod name {`)
-        let scoped = (!defined && (other || !imported) && src.contains("mod ") && imports_from(src, m, name)).then(|| use_scopes(src, m, name));
+        // (when some `use` imports the name from that module, each block's own `use`s decide for it: a fn's
+        // `use std::fmt::Write;` is that fn's, and a module's are that module's (a crate's files, loaded as
+        // `mod name { .. }`). The scan above is the answer only without one: it reads every statement that starts with
+        // `use` alike, wherever it is, and misses one right after `mod name {`)
+        let scoped = (!defined && imports_from(src, m, name)).then(|| use_scopes(src, m, name));
         let cur = std::mem::take(&mut out);
         let cb = cur.as_bytes();
         let mut i = 0;

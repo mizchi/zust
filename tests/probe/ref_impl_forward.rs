@@ -108,6 +108,19 @@ mod net {
         let _ = w.write(b"io");
     }
 }
+// (a fn's `use` after a statement: still that fn's)
+mod late {
+    use std::io::*;
+    pub fn render() -> String {
+        let mut s = String::new();
+        use std::fmt::Write;
+        write!(s, "late").unwrap();
+        s
+    }
+    pub fn send<W: Write>(w: &mut W) {
+        let _ = w.write(b"!");
+    }
+}
 mod tree {
     use std::{fmt, io::Write};
     pub fn send<W: Write>(w: &mut W) -> fmt::Result {
@@ -201,4 +214,7 @@ fn main() {
     let mut x: Vec<u8> = vec![];
     aliased::send(&mut x);
     println!("{} {} {:?}", c.0, d.0, x);
+    let mut y: Vec<u8> = vec![];
+    late::send(&mut y);
+    println!("{} {:?}", late::render(), y);
 }
