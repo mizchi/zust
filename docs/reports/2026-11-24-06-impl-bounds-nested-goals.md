@@ -104,7 +104,7 @@ main too in this environment.
   impl is taken for every `T`. Checking them needs the clause's type with the impl's parameters put in.
 - A cycle (`impl<T: Q> P for T` with `impl<T: P> Q for T`) is taken to hold, where an obligation through it
   (`fn req<T: P>`, `req(1u8)`) is E0275 in rustc. The next step gives it E0275
-  ([2026-11-24-06](2026-11-24-06-goal-certainty.md)).
+  ([2026-11-24-07](2026-11-24-07-goal-certainty.md)).
 - A blanket impl's trait arguments are not matched against the goal's: with `impl<T: A> Tr<u8> for T` and
   `impl<T: B> Tr<u16> for T`, `i32: Tr<u16>` holds by `i32: A`. A false accept, as before; the goal's arguments
   reach `implements` as text, and comparing them as text would give false errors through type aliases.

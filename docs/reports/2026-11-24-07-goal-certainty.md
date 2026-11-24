@@ -4,7 +4,7 @@ Date: 2026-11-24
 
 [#2](https://github.com/mizchi/zust/issues/2#issuecomment-7110129011) plans six steps toward the design of rustc's
 next trait solver. Its step 1 is goals as data with a certainty: the answer to `T: Trait` is yes, maybe (ambiguous or
-overflow) or no, not `bool`. The previous step ([2026-11-24-05](2026-11-24-05-impl-bounds-nested-goals.md)) made an
+overflow) or no, not `bool`. The previous step ([2026-11-24-06](2026-11-24-06-impl-bounds-nested-goals.md)) made an
 impl's bounds nested goals, with a cycle or an overflow taken to hold. This step gives those two their own answer,
 and uses it once: a bound whose goal needs itself is E0275, as in rustc.
 
@@ -52,9 +52,9 @@ Cycles that are not errors stay accepted, each checked against rustc 1.97 (`test
 
 ## Measured
 
-`bench/rust_ui.py --check`, on main (d6202b6) merged in:
+`bench/rust_ui.py --check`, on main (235dae8) merged in:
 
-- compile-fail 4628 → 4636 (+8) against main. Four are this step's:
+- compile-fail 4631 → 4639 (+8) against main. Four are this step's:
   - `traits/inductive-overflow/simultaneous.rs`
   - `traits/inductive-overflow/supertrait.rs`
   - `traits/inductive-overflow/two-traits.rs`

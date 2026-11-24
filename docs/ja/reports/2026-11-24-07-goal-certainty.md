@@ -2,7 +2,7 @@
 
 日付: 2026-11-24
 
-[#2](https://github.com/mizchi/zust/issues/2#issuecomment-7110129011) は、rustc の次世代 trait solver の設計に向けた 6 段階を計画している。その段階 1 は、確実さを持つデータとしての goal だ。`T: Trait` への答えを `bool` ではなく、「はい」「不明」（曖昧かオーバーフロー）「いいえ」にする。前の段階（[2026-11-24-05](2026-11-24-05-impl-bounds-nested-goals.md)）は impl の境界を入れ子の goal にし、循環とオーバーフローを成り立つとみなした。この段階ではその二つに独自の答えを与え、それを一か所で使う。goal が自分自身を必要とする境界は、rustc と同じく E0275 にする。
+[#2](https://github.com/mizchi/zust/issues/2#issuecomment-7110129011) は、rustc の次世代 trait solver の設計に向けた 6 段階を計画している。その段階 1 は、確実さを持つデータとしての goal だ。`T: Trait` への答えを `bool` ではなく、「はい」「不明」（曖昧かオーバーフロー）「いいえ」にする。前の段階（[2026-11-24-06](2026-11-24-06-impl-bounds-nested-goals.md)）は impl の境界を入れ子の goal にし、循環とオーバーフローを成り立つとみなした。この段階ではその二つに独自の答えを与え、それを一か所で使う。goal が自分自身を必要とする境界は、rustc と同じく E0275 にする。
 
 ## 変えたこと
 
@@ -34,9 +34,9 @@ fn main() { need(1u8); } // E0275: overflow evaluating the requirement `u8: P`
 
 ## 測った結果
 
-main（d6202b6）をマージした上での `bench/rust_ui.py --check`:
+main（235dae8）をマージした上での `bench/rust_ui.py --check`:
 
-- compile-fail は main に対して 4628 → 4636（+8）。うち 4 件がこの段階のもの:
+- compile-fail は main に対して 4631 → 4639（+8）。うち 4 件がこの段階のもの:
   - `traits/inductive-overflow/simultaneous.rs`
   - `traits/inductive-overflow/supertrait.rs`
   - `traits/inductive-overflow/two-traits.rs`

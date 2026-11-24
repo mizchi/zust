@@ -137,20 +137,28 @@
       "path": "docs/ja/reports/2026-11-24-04-region-check-20.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-24-05-impl-bounds-nested-goals.en": {
-      "path": "docs/reports/2026-11-24-05-impl-bounds-nested-goals.md",
+    "docs_reports_2026-11-24-05-region-check-21.en": {
+      "path": "docs/reports/2026-11-24-05-region-check-21.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-24-05-impl-bounds-nested-goals.ja": {
-      "path": "docs/ja/reports/2026-11-24-05-impl-bounds-nested-goals.md",
+    "docs_reports_2026-11-24-05-region-check-21.ja": {
+      "path": "docs/ja/reports/2026-11-24-05-region-check-21.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-24-06-goal-certainty.en": {
-      "path": "docs/reports/2026-11-24-06-goal-certainty.md",
+    "docs_reports_2026-11-24-06-impl-bounds-nested-goals.en": {
+      "path": "docs/reports/2026-11-24-06-impl-bounds-nested-goals.md",
       "role": "historical"
     },
-    "docs_reports_2026-11-24-06-goal-certainty.ja": {
-      "path": "docs/ja/reports/2026-11-24-06-goal-certainty.md",
+    "docs_reports_2026-11-24-06-impl-bounds-nested-goals.ja": {
+      "path": "docs/ja/reports/2026-11-24-06-impl-bounds-nested-goals.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-07-goal-certainty.en": {
+      "path": "docs/reports/2026-11-24-07-goal-certainty.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-07-goal-certainty.ja": {
+      "path": "docs/ja/reports/2026-11-24-07-goal-certainty.md",
       "role": "historical"
     }
   },
@@ -343,25 +351,36 @@
       }
     },
     {
-      "id": "docs_reports_2026-11-24-05-impl-bounds-nested-goals",
-      "topic": "The Japanese file docs/ja/reports/2026-11-24-05-impl-bounds-nested-goals.md is a faithful translation of docs/reports/2026-11-24-05-impl-bounds-nested-goals.md",
+      "id": "docs_reports_2026-11-24-05-region-check-21",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-05-region-check-21.md is a faithful translation of docs/reports/2026-11-24-05-region-check-21.md",
       "mode": "translation",
       "reference": {
-        "source": "docs_reports_2026-11-24-05-impl-bounds-nested-goals.en"
+        "source": "docs_reports_2026-11-24-05-region-check-21.en"
       },
       "target": {
-        "source": "docs_reports_2026-11-24-05-impl-bounds-nested-goals.ja"
+        "source": "docs_reports_2026-11-24-05-region-check-21.ja"
       }
     },
     {
-      "id": "docs_reports_2026-11-24-06-goal-certainty",
-      "topic": "The Japanese file docs/ja/reports/2026-11-24-06-goal-certainty.md is a faithful translation of docs/reports/2026-11-24-06-goal-certainty.md",
+      "id": "docs_reports_2026-11-24-06-impl-bounds-nested-goals",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-06-impl-bounds-nested-goals.md is a faithful translation of docs/reports/2026-11-24-06-impl-bounds-nested-goals.md",
       "mode": "translation",
       "reference": {
-        "source": "docs_reports_2026-11-24-06-goal-certainty.en"
+        "source": "docs_reports_2026-11-24-06-impl-bounds-nested-goals.en"
       },
       "target": {
-        "source": "docs_reports_2026-11-24-06-goal-certainty.ja"
+        "source": "docs_reports_2026-11-24-06-impl-bounds-nested-goals.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-07-goal-certainty",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-07-goal-certainty.md is a faithful translation of docs/reports/2026-11-24-07-goal-certainty.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-07-goal-certainty.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-07-goal-certainty.ja"
       }
     }
   ]

@@ -3605,3 +3605,49 @@ fn polonius_alpha() {
     // (accepted by Alpha: the returned reborrow made in a loop, which goes on with a new borrow when it does not return)
     ok("fn f<'a>(x: &'a mut i32, n: i32) -> &'a mut i32 {\n    let mut i = 0;\n    loop {\n        let b = &mut *x;\n        if i == n {\n            return b;\n        }\n        i += 1;\n    }\n}\nfn main() {}\n");
 }
+
+#[test]
+fn part21_fn_item_coerced_wf() {
+    // (a fn item coerced to an annotation's fn pointer type: its signature's types are well formed (`&'a &'b ()` needs
+    // 'b: 'a), a generic item's type arguments solved from the annotation, a hole's regions fresh and the other parts'
+    // as written)
+    for src in ["static UNIT: &'static &'static () = &&();\nfn foo<'a, 'b>(_: &'a &'b (), v: &'b u32) -> &'a u32 { v }\nfn bad<'a>(x: &'a u32) -> &'static u32 {\n    let f: fn(_, &'a u32) -> &'static u32 = foo;\n    f(UNIT, x)\n}\nfn main() {}\n", "static UNIT: &'static &'static () = &&();\nfn foo<'a, 'b, T>(_: &'a &'b (), v: &'b T) -> &'a T { v }\nfn bad<'a, T>(x: &'a T) -> &'static T {\n    let f: fn(&'static &'static (), &'a T) -> &'static T = foo;\n    f(UNIT, x)\n}\nfn main() {}\n"] {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{src}: {d:?}");
+    }
+    assert_eq!(check("static UNIT: &'static &'static () = &&();\nfn foo<'a, 'b, T>(_: &'a &'b (), v: &'b T) -> &'a T { v }\nfn id<T>(x: &T) -> &T { x }\nfn pair<T, U>(t: T, _u: U) -> T { t }\nfn ok1<'a, T>(x: &'a T) -> &'a T {\n    let f: fn(_, &'a T) -> &'a T = foo;\n    f(UNIT, x)\n}\nfn ok2<'a>(x: &'a u32) -> &'a u32 {\n    let f: fn(&u32) -> &u32 = id;\n    let g: for<'z> fn(&'z u32) -> &'z u32 = id;\n    let h: fn(&'a u32, u8) -> &'a u32 = pair;\n    let _ = g(x);\n    let _ = h(x, 1);\n    f(x)\n}\nfn ok3(x: &'static u32) -> &'static u32 {\n    let f: fn(&'static &'static (), &'static u32) -> &'static u32 = foo;\n    f(UNIT, x)\n}\nfn main() {\n    let x = 1;\n    ok1(&x);\n    ok2(&x);\n    ok3(&5);\n}\n"), vec![]);
+    // (an annotation with holes whose result elides its region keeps the result its parameter's, as one binder: the
+    // whole is fresh then, as before)
+    let d = check("fn first<T>(x: &u32, _y: T) -> &u32 {\n    x\n}\nfn bad<'a>(x: &'a u32) -> &'static u32 {\n    let f: fn(&u32, _) -> &u32 = first::<u8>;\n    f(x, 0)\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (not where the fn pointer type binds a region: rustc accepts it (#25860,
+    // implied-bounds-on-nested-references-plus-variance-2.rs))
+    assert_eq!(check("static UNIT: &'static &'static () = &&();\nfn foo<'a, 'b, T>(_: &'a &'b (), v: &'b T, _: &()) -> &'a T { v }\nfn bad<'a, T>(x: &'a T) -> &'static T {\n    let f: fn(_, &'a T, &()) -> &'static T = foo;\n    f(UNIT, x, &())\n}\nfn main() {}\n"), vec![]);
+}
+
+#[test]
+fn part21_deref_coercion_copies_inner() {
+    // (a deref coercion of `c: &'1 &'a U` to a `&U` is the reborrow `&**c`: through the shared `&'a U` only, so it
+    // holds what `*c` holds, not the loan c is (rustc accepts these; main had false E0515 / "lifetime may not live
+    // long enough"))
+    assert_eq!(check("fn first<'a>(s: &'a String) -> Option<&'a str> {\n    let parts: Vec<&'a str> = s.split('|').collect();\n    if let [commit, ..] = &parts[..] { Some(commit) } else { None }\n}\nfn second<'a>(s: &'a String) -> &'a str {\n    let parts: Vec<&'a str> = s.split('|').collect();\n    let c: &&'a str = &parts[0];\n    c\n}\nfn main() {\n    let s = String::from(\"a|b\");\n    let _ = first(&s);\n    let _ = second(&s);\n}\n"), vec![]);
+    assert_eq!(check("fn f<'a>(x: &'a mut &'static u32) -> &'static u32 { x }\nfn h<'a, 'b>(x: &'a &'b u32) -> &'b u32 { x }\nfn main() {}\n"), vec![]);
+    // (not an unsizing to a trait object, which keeps the outer reference: `&'a &'static u32` as `&'static dyn Tr` needs
+    // 'a: 'static)
+    let d = check("trait Tr {}\nimpl<'x> Tr for &'x u32 {}\nfn bad<'a>(x: &'a &'static u32) -> &'static dyn Tr {\n    x\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 4 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    // (an owned value behind the inner reference is still the local's: E0515)
+    let d = check("fn bad1<'a>(s: &'a String) -> &'a String {\n    let v: Vec<String> = vec![s.clone()];\n    let c: &String = &v[0];\n    let d: &&String = &c;\n    d\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 5, "{d:?}");
+}
+
+#[test]
+fn part21_ref_mut_let_invariant() {
+    // (a `ref mut` binding of a place in a `let` with a type written: the place is of that type both ways, a `&mut`
+    // being invariant (mir/field-projection-mutating-context2.rs); `(x.0)(&string)` is a deref coercion, no borrow of
+    // string kept)
+    let d = check("struct Foo<T>(T);\nfn foo<'a>(mut x: Foo<fn(&'a str)>, string: &'a str) {\n    let Foo(ref mut y): Foo<fn(&'static str)> = x;\n    *y = |_s| {};\n    (x.0)(&string);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+    let d = check("struct Foo<T>(T);\nfn ok1<'a>(mut x: Foo<fn(&'a str)>) {\n    let Foo(ref mut y): Foo<fn(&'a str)> = x;\n    let _ = y;\n    let mut t = (1u32, 2u32);\n    let (ref mut a, _b): (u32, u32) = t;\n    *a = 3;\n    let s: &'static u32 = &5;\n    let (ref mut r,): (&'a u32,) = (s,);\n    let _ = r;\n    let _ = &mut x;\n}\nfn bad2<'a, 'b: 'a>(mut x: Foo<&'b u32>) {\n    let Foo(ref mut y): Foo<&'a u32> = x;\n    let _ = y;\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].0 == 14 && d[0].1.contains("lifetime may not live long enough"), "{d:?}");
+}
