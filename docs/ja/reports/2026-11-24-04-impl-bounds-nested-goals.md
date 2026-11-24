@@ -33,7 +33,7 @@ impl Foo for W<i32> {}                // need(W(1u8))
   - どちらにも当たらずに証明した goal は、いちばん外の goal が終わるまで覚えておく。`impl<X: T1 + T0> T2 for X`、`impl<X: T2 + T1> T3 for X`、… のような連なりで、goal を 2^n 回ではなく一度ずつ証明する（`T35` で、以前は 4.2 秒、今は 6 ミリ秒）。循環やオーバーフローに当たった goal は推測に頼っているので、覚えない。
   - どちらも、rustc が出さないかもしれないエラーではなく、以前の答えを返す。新しい solver はこれらを「不明」にし、auto trait を通る循環は余帰納的に扱う。
 - **impl ごと**: ブランケット impl はそれぞれ自分の境界を持ち、境界がすべて成り立つものが一つあればよい。`impl<T: A> Tr<u8> for T` と `impl<T: B> Tr<u16> for T` があるとき、`i32: Tr<u8>` に `A` と `B` の両方を求めない。
-- **生ポインタ**: impl の自己型は、可変性が同じときだけ一致する。参照はもともとそうで、生ポインタもそうした。`impl Foo for W<*const i32>` は `W<*mut i32>` への impl ではない。
+- **生ポインタ**: impl の自己型は、可変性が同じときだけ一致する。参照はもともとそうで、生ポインタもそうした。`impl Foo for W<*const i32>` は `W<*mut i32>` への impl でも `W<&i32>` への impl でもない。
 - **プログラム自身の trait だけ**: `impl_applies` がしていたのと同じく、std の trait の境界は成り立つとみなす。zustc の std の trait への答えは場合ごとに書かれていて（`implements_std`）、そこでのエラーは誤ったエラーになる。
 - **supertrait**: `trait B: A` の impl は、自己型が `A` を実装していることを必要とする（`privacy/sealed-traits/false-sealed-traits-note.rs`）。これは、型パラメータのない impl について、プログラム自身の supertrait に対して確かめる。自己型に trait オブジェクトを含むものは確かめない。zustc は `&dyn T2` と `&(dyn T2 + 'static)` を文字列で区別するが、rustc はライフタイムだけが違う一つの型として見る。
 - **参照への impl**: `impl Tr for &mut i32` は `i32` への impl としても記録されていた。そのため `fn f<T: Tr>` に対する `f(1i32)` が受理されていた（`suggestions/issue-84973-2.rs`）。
@@ -69,5 +69,6 @@ tests/ui での伸びが小さいことは、穴がどこにあるかを示し�
 - std の trait を goal にすること。誤ったエラーを出さないほど答えが正確になってから。
 - パラメータ以外への where 句（`impl<T> Foo for T where W<T>: Bar`）は、以前と同じく確かめない。impl はどの `T` にも使われる。確かめるには、句の型に impl のパラメータを入れる必要がある。
 - 循環（`impl<T: Q> P for T` と `impl<T: P> Q for T`）は成り立つとみなす。rustc では、それを通る要求（`fn req<T: P>` への `req(1u8)`）は E0275 になる。誤ったエラーではなく誤った受理で、「不明」が入るところ。
+- ブランケット impl の trait の引数を goal の引数と突き合わせていない。`impl<T: A> Tr<u8> for T` と `impl<T: B> Tr<u16> for T` があると、`i32: Tr<u16>` が `i32: A` で成り立ってしまう。以前と同じ誤った受理。goal の引数は `implements` に文字列で届き、文字列で比べると型エイリアスを通して誤ったエラーになる。
 - ジェネリックな impl の supertrait（`impl<T: A> B for W<T>` は、impl 自身の境界から `W<T>: A` を必要とする）。
 - ジェネリックな本体: 何も失敗する型でインスタンス化しないジェネリック関数の、プレースホルダでだけ失敗する境界は報告されない。プレースホルダでの検査は、境界のメソッドを呼ぶ本体を飛ばす。

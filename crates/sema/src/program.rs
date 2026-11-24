@@ -2484,12 +2484,14 @@ impl Program {
             if g.stack.is_empty() {
                 g.done.clear();
             }
-            if let Some(&r) = g.done.get(&key) {
-                return Err(r);
-            }
+            // (the overflow first: a goal past 64 deep is a guess, as it was before the cache, whatever an earlier,
+            // shallower proof of it found)
             if g.stack.len() >= 64 || g.stack.contains(&key) {
                 g.guesses += 1;
                 return Err(true);
+            }
+            if let Some(&r) = g.done.get(&key) {
+                return Err(r);
             }
             g.stack.push(key.clone());
             Ok(g.guesses)
@@ -2527,10 +2529,12 @@ impl Program {
     }
 
     /// The references and raw pointers in a and b (a pattern with `Param`s, a type) agree in mutability, as match_ty
-    /// does not check: `W<&mut i32>` is not `W<&i32>`, nor `W<*mut i32>` `W<*const i32>`
+    /// does not check: `W<&mut i32>` is not `W<&i32>`, nor `W<*mut i32>` `W<*const i32>`, nor `W<&i32>` `W<*const i32>`
     pub fn refs_agree(&self, a: Ty, b: Ty, depth: u32) -> bool {
         match (a, b) {
             (Ty::Ref(m, x), Ty::Ref(n, y)) | (Ty::Ptr(m, x), Ty::Ptr(n, y)) => m == n && self.refs_agree(*x, *y, depth + 1),
+            // (match_ty lets a raw pointer pattern take a reference, as a call coerces it; a self type does not)
+            (Ty::Ptr(..), Ty::Ref(..)) | (Ty::Ref(..), Ty::Ptr(..)) => false,
             (Ty::Array(x, _), Ty::Array(y, _)) | (Ty::Slice(x), Ty::Slice(y)) | (Ty::Box(x), Ty::Box(y)) => self.refs_agree(*x, *y, depth + 1),
             (Ty::Struct(x), Ty::Struct(y)) if x != y && depth < 16 => {
                 self.structs[x as usize].args.iter().zip(&self.structs[y as usize].args).all(|(&p, &q)| self.refs_agree(p, q, depth + 1))

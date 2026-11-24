@@ -1047,6 +1047,7 @@ fn impl_bounds_are_nested_goals() {
     // (a raw pointer's mutability is part of the impl's self type)
     bad("impl Foo for W<*const i32> {}\nfn main() { let mut x = 1; need(W(&mut x as *mut i32)); }");
     ok("impl Foo for W<*const i32> {}\nfn main() { let x = 1; need(W(&x as *const i32)); }");
+    bad("impl Foo for W<*const i32> {}\nfn main() { let x = 1; need(W(&x)); }");
     // (an impl for `&mut i32` is not for i32)
     bad("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { f(1i32); }");
     ok("trait Tr {}\nimpl Tr for &mut i32 {}\nfn f<T: Tr>(_: T) {}\nfn main() { let mut x = 1i32; f(&mut x); }");

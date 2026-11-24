@@ -46,7 +46,7 @@ lookup of trait bounds did not call it. It was used only by one path of method c
 - **One impl at a time**: each blanket impl keeps its own bounds, and one whose bounds all hold is enough.
   `impl<T: A> Tr<u8> for T` with `impl<T: B> Tr<u16> for T` does not ask `i32: Tr<u8>` for both `A` and `B`.
 - **Raw pointers**: an impl's self type matches only with the same mutability, of references as before and now of raw
-  pointers: `impl Foo for W<*const i32>` is not for `W<*mut i32>`.
+  pointers: `impl Foo for W<*const i32>` is not for `W<*mut i32>`, nor for `W<&i32>`.
 - **Only the program's traits**: as `impl_applies` did, a bound of a std trait is taken to hold. zustc's answers for
   std traits are written case by case (`implements_std`), and an error there would be a false one.
 - **Supertraits**: an impl of `trait B: A` needs its self type to implement `A`
@@ -101,6 +101,9 @@ main too in this environment.
 - A cycle (`impl<T: Q> P for T` with `impl<T: P> Q for T`) is taken to hold, where an obligation through it
   (`fn req<T: P>`, `req(1u8)`) is E0275 in rustc. That is a false accept, not a false error, and is where "maybe"
   goes.
+- A blanket impl's trait arguments are not matched against the goal's: with `impl<T: A> Tr<u8> for T` and
+  `impl<T: B> Tr<u16> for T`, `i32: Tr<u16>` holds by `i32: A`. A false accept, as before; the goal's arguments
+  reach `implements` as text, and comparing them as text would give false errors through type aliases.
 - Supertraits of generic impls (`impl<T: A> B for W<T>` needs `W<T>: A` from the impl's own bounds).
 - Generic bodies: a bound that fails only for the placeholder of a generic fn nothing instantiates with a failing
   type is not reported. Placeholder checks skip bodies that call their bounds' methods.
