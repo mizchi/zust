@@ -635,26 +635,170 @@ fn expr_macro(n: &[u8]) -> bool {
 
 /// A string literal as an attribute takes it: `"a"`, `r"a"`, `r#"a"#` (not `b"a"`)
 pub fn str_lit(v: &str) -> bool {
-    let r = v.strip_prefix('r').map(|r| r.trim_start_matches('#')).unwrap_or(v);
-    r.starts_with('"') && v.ends_with('"') && r.len() >= 2
+    match v.strip_prefix('r') {
+        // (a raw string ends with its quote and as many `#` as it opens with: `r#"reason"#`)
+        Some(r) => {
+            let h = r.len() - r.trim_start_matches('#').len();
+            let body = &r[h..];
+            body.len() >= 2 + h && body.starts_with('"') && body.ends_with(&format!("\"{}", "#".repeat(h)))
+        }
+        None => v.len() >= 2 && v.starts_with('"') && v.ends_with('"'),
+    }
 }
 
-/// The entries of an attribute's list: split at the commas outside brackets and string literals, trimmed, without
+/// Where a string literal, a char literal or a comment that starts at `i` ends (one past it), or None if none
+/// starts there: `"a\\"b"`, `r#"a"b"#`, `br"a"`, `'c'`, `'\\''`, `'é'`, `// ..`, `/* /* .. */ */` (not a lifetime,
+/// `'a`, nor an identifier ending in r, `for"`)
+pub fn lit_end(b: &[u8], i: usize) -> Option<usize> {
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    match b[i] {
+        b'"' => {
+            let mut k = i + 1;
+            while k < b.len() && b[k] != b'"' {
+                k += if b[k] == b'\\' { 2 } else { 1 };
+            }
+            Some((k + 1).min(b.len()))
+        }
+        b'r' if !(i > 0 && ident(b[i - 1]) && b[i - 1] != b'b') => {
+            let h = b[i + 1..].iter().take_while(|&&c| c == b'#').count();
+            if b.get(i + 1 + h) != Some(&b'"') {
+                return None;
+            }
+            let from = i + 2 + h;
+            let mut k = from;
+            while k < b.len() {
+                if b[k] == b'"' && b.len() >= k + 1 + h && b[k + 1..k + 1 + h].iter().all(|&c| c == b'#') {
+                    return Some(k + 1 + h);
+                }
+                k += 1;
+            }
+            Some(b.len())
+        }
+        b'\'' if b.get(i + 1) == Some(&b'\\') => {
+            let n = b[i + 3..].iter().position(|&c| c == b'\'').map_or(b.len(), |n| i + 3 + n + 1);
+            Some(n.min(b.len()))
+        }
+        b'\'' => {
+            // (one char, of 1 to 4 bytes, then the closing quote)
+            let c = *b.get(i + 1)?;
+            let w = if c < 0x80 { 1 } else if c < 0xE0 { 2 } else if c < 0xF0 { 3 } else { 4 };
+            (b.get(i + 1 + w) == Some(&b'\'')).then_some(i + 2 + w)
+        }
+        b'/' if b.get(i + 1) == Some(&b'/') => Some(b[i..].iter().position(|&c| c == b'\n').map_or(b.len(), |n| i + n)),
+        b'/' if b.get(i + 1) == Some(&b'*') => {
+            let (mut k, mut d) = (i + 2, 1u32);
+            while k < b.len() && d > 0 {
+                if b[k..].starts_with(b"/*") {
+                    d += 1;
+                    k += 2;
+                } else if b[k..].starts_with(b"*/") {
+                    d -= 1;
+                    k += 2;
+                } else {
+                    k += 1;
+                }
+            }
+            Some(k.min(b.len()))
+        }
+        _ => None,
+    }
+}
+
+/// A text with its comments as spaces (comments are whitespace, `all(/* note */)`); literals are kept as written
+pub fn blank_comments(v: &str) -> std::borrow::Cow<'_, str> {
+    if !v.contains("//") && !v.contains("/*") {
+        return std::borrow::Cow::Borrowed(v);
+    }
+    let b = v.as_bytes();
+    let (mut out, mut i) = (Vec::with_capacity(b.len()), 0);
+    while i < b.len() {
+        match lit_end(b, i) {
+            Some(e) if b[i] == b'/' => {
+                out.extend(std::iter::repeat_n(b' ', e - i));
+                i = e;
+            }
+            Some(e) => {
+                out.extend_from_slice(&b[i..e]);
+                i = e;
+            }
+            None => {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+    }
+    std::borrow::Cow::Owned(String::from_utf8(out).unwrap_or_else(|_| v.to_string()))
+}
+
+/// The value of a string literal as an attribute takes it (see `str_lit`), with a plain string's escapes decoded:
+/// `"console"`, `r"console"` and `r#"console"#` are all `console`
+pub fn str_value(v: &str) -> Option<String> {
+    let v = v.trim();
+    if !str_lit(v) {
+        return None;
+    }
+    if let Some(r) = v.strip_prefix('r') {
+        let h = r.len() - r.trim_start_matches('#').len();
+        return Some(r[h + 1..r.len() - 1 - h].to_string());
+    }
+    let body = &v[1..v.len() - 1];
+    if !body.contains('\\') {
+        return Some(body.to_string());
+    }
+    let (mut out, mut cs) = (String::new(), body.chars());
+    while let Some(c) = cs.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match cs.next()? {
+            'n' => out.push('\n'),
+            't' => out.push('\t'),
+            'r' => out.push('\r'),
+            '0' => out.push('\0'),
+            '\\' => out.push('\\'),
+            '"' => out.push('"'),
+            '\'' => out.push('\''),
+            'x' => {
+                let h: String = cs.by_ref().take(2).collect();
+                out.push(char::from(u8::from_str_radix(&h, 16).ok()?));
+            }
+            'u' => {
+                let rest: String = cs.by_ref().take_while(|&c| c != '}').collect();
+                out.push(char::from_u32(u32::from_str_radix(rest.strip_prefix('{')?, 16).ok()?)?);
+            }
+            // (a line continuation: the newline and the next line's leading whitespace)
+            '\n' => {
+                let rest: String = cs.clone().collect();
+                let t = rest.trim_start();
+                cs = body[body.len() - t.len()..].chars();
+            }
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
+/// The entries of an attribute's list: split at the commas outside brackets, literals and comments, trimmed, without
 /// the empty one a trailing comma leaves
 pub fn attr_entries(v: &str) -> Vec<&str> {
-    let (mut out, mut d, mut in_str, mut from) = (vec![], 0i32, false, 0);
+    let (mut out, mut d, mut from, mut i) = (vec![], 0i32, 0, 0);
     let b = v.as_bytes();
-    for (i, &c) in b.iter().enumerate() {
-        match c {
-            b'"' if !(in_str && i > 0 && b[i - 1] == b'\\') => in_str = !in_str,
-            b'(' | b'[' | b'{' if !in_str => d += 1,
-            b')' | b']' | b'}' if !in_str => d -= 1,
-            b',' if !in_str && d == 0 => {
+    while i < b.len() {
+        if let Some(e) = lit_end(b, i) {
+            i = e;
+            continue;
+        }
+        match b[i] {
+            b'(' | b'[' | b'{' => d += 1,
+            b')' | b']' | b'}' => d -= 1,
+            b',' if d == 0 => {
                 out.push(v[from..i].trim());
                 from = i + 1;
             }
             _ => {}
         }
+        i += 1;
     }
     out.push(v[from..].trim());
     if out.last().is_some_and(|x| x.is_empty()) {
@@ -742,10 +886,93 @@ pub fn malformed_cfg(src: &str) -> Option<String> {
     }
     let b = src.as_bytes();
     let mut at = 0;
+    // (how far the source is read as code, and the block comments open there: a candidate in a comment, a string or
+    // a char literal is skipped, `/* #[cfg(not())] */`)
+    let (mut cur, mut depth) = (0usize, 0u32);
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut in_code = |i: usize| -> bool {
+        while cur < i {
+            if depth > 0 {
+                if b[cur..].starts_with(b"/*") {
+                    depth += 1;
+                    cur += 2;
+                } else if b[cur..].starts_with(b"*/") {
+                    depth -= 1;
+                    cur += 2;
+                } else {
+                    cur += 1;
+                }
+                continue;
+            }
+            match b[cur] {
+                b'/' if b.get(cur + 1) == Some(&b'/') => cur += b[cur..].iter().position(|&c| c == b'\n').unwrap_or(b.len() - cur),
+                b'/' if b.get(cur + 1) == Some(&b'*') => {
+                    depth = 1;
+                    cur += 2;
+                }
+                b'"' => {
+                    cur += 1;
+                    while cur < b.len() && b[cur] != b'"' {
+                        cur += if b[cur] == b'\\' { 2 } else { 1 };
+                    }
+                    cur += 1;
+                }
+                // (a raw string, `r#".."#` / `br".."`, not an identifier ending in r)
+                b'r' if !(cur > 0 && ident(b[cur - 1]) && b[cur - 1] != b'b') && {
+                    let h = b[cur + 1..].iter().take_while(|&&c| c == b'#').count();
+                    b.get(cur + 1 + h) == Some(&b'"')
+                } => {
+                    let h = b[cur + 1..].iter().take_while(|&&c| c == b'#').count();
+                    let close = [b"\"".as_slice(), &vec![b'#'; h]].concat();
+                    let from = cur + 2 + h;
+                    cur = b[from..].windows(close.len()).position(|w| w == close.as_slice()).map_or(b.len(), |n| from + n + close.len());
+                }
+                // (a char literal, not a lifetime)
+                b'\'' if b.get(cur + 1) == Some(&b'\\') => cur += 2 + b[cur + 2..].iter().position(|&c| c == b'\'').map_or(b.len() - cur - 2, |n| n + 1),
+                b'\'' if b.get(cur + 2) == Some(&b'\'') => cur += 3,
+                _ => cur += 1,
+            }
+        }
+        depth == 0 && cur == i
+    };
+    // (the `macro_rules!` bodies, found once and only when a candidate is in code: each from its delimiter to the
+    // matching one, a nested definition inside the one before it)
+    let mut macro_defs: Option<Vec<(usize, usize)>> = None;
+    let mut in_macro_def = |i: usize| -> bool {
+        let defs = macro_defs.get_or_insert_with(|| {
+            let mut defs: Vec<(usize, usize)> = vec![];
+            for (m, _) in src.match_indices("macro_rules!") {
+                if defs.last().is_some_and(|&(_, e)| m < e) || m > 0 && ident(b[m - 1]) {
+                    continue;
+                }
+                let Some(o) = b[m..].iter().position(|&c| matches!(c, b'{' | b'(' | b'[')).map(|n| m + n) else { break };
+                let (mut d, mut k) = (0i32, o);
+                while k < b.len() {
+                    if let Some(e) = lit_end(b, k) {
+                        k = e;
+                        continue;
+                    }
+                    match b[k] {
+                        b'{' | b'(' | b'[' => d += 1,
+                        b'}' | b')' | b']' => {
+                            d -= 1;
+                            if d == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    k += 1;
+                }
+                defs.push((o, k));
+            }
+            defs
+        });
+        defs.iter().any(|&(o, e)| o < i && i < e)
+    };
     while let Some(f) = src[at..].find("cfg") {
         let i = at + f;
         at = i + 3;
-        let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
         if i > 0 && ident(b[i - 1]) {
             continue;
         }
@@ -761,18 +988,25 @@ pub fn malformed_cfg(src: &str) -> Option<String> {
         if b.get(open) != Some(&b'(') {
             continue;
         }
-        let line_start = src[..i].rfind('\n').map_or(0, |n| n + 1);
-        let pre = &src[line_start..i];
-        if pre.contains("//") || pre.bytes().filter(|&c| c == b'"').count() % 2 == 1 {
+        // (where the attribute or the macro starts)
+        let start = if macro_call { i } else { src[..i].rfind('#').unwrap_or(i) };
+        if !in_code(start) {
             continue;
         }
-        // (the matching `)`, past strings)
-        let (mut d, mut in_str, mut close) = (0i32, false, None);
-        for (k, &c) in b.iter().enumerate().skip(open) {
-            match c {
-                b'"' if !(in_str && b[k - 1] == b'\\') => in_str = !in_str,
-                b'(' if !in_str => d += 1,
-                b')' if !in_str => {
+        // (not one in a `macro_rules!` body: a pattern's tokens, `(cfg!(not())) => {}`, are checked when expanded)
+        if in_macro_def(start) {
+            continue;
+        }
+        // (the matching `)`, past literals and comments)
+        let (mut d, mut k, mut close) = (0i32, open, None);
+        while k < b.len() {
+            if let Some(e) = lit_end(b, k) {
+                k = e;
+                continue;
+            }
+            match b[k] {
+                b'(' => d += 1,
+                b')' => {
                     d -= 1;
                     if d == 0 {
                         close = Some(k);
@@ -781,17 +1015,21 @@ pub fn malformed_cfg(src: &str) -> Option<String> {
                 }
                 _ => {}
             }
+            k += 1;
         }
         let Some(close) = close else { continue };
         let inner = &src[open + 1..close];
         if inner.contains('$') {
             continue;
         }
-        let entries = attr_entries(inner);
+        // (comments in the predicate are whitespace: `all(/* note */)`)
+        let inner = blank_comments(inner);
+        let entries = attr_entries(&inner);
         let checked = match (name, entries.first()) {
             ("cfg_attr", Some(p)) => cfg_check(p),
             ("cfg_attr", None) => Err(String::new()),
-            _ if entries.len() == 1 => cfg_check(inner),
+            // (one pattern, with or without a trailing comma: `cfg!(unix,)`)
+            _ if entries.len() == 1 => cfg_check(entries[0]),
             _ => Err(String::new()),
         };
         if let Err(own) = checked {

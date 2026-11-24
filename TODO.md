@@ -118,7 +118,8 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   build scripts and gives their cfgs, `rustc-env` and `OUT_DIR` to the crates (M1). thiserror 2's library builds.
   Builds for wasm32 too (one module per bin, run with cargo's runner variable). Left: two versions of one crate and
   renamed dependencies (zustc's workspace has one name per crate), a crate's own edition, link instructions of build
-  scripts, `zurgo test`.
+  scripts. `zurgo test` runs each test in a process of its own ([#96](https://github.com/mizchi/zust/issues/96));
+  left there: doc tests, `test = false`, building only the chosen targets.
   - What the caches do not see yet:
     - the process environment that an `env!($k)` made by a macro reads (the crate's own environment is in its
       fingerprint, the values zustc falls back to are not);

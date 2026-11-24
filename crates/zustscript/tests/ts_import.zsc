@@ -58,3 +58,9 @@ pub fn par(p: Par) -> Par { match p { P => Q, Q => P } }
 pub fn loc(l: Loc) -> i32 { match l { L1 => 1, L2 => 2 } }
 pub fn sur(s: Sur) -> i32 { match s { Bc => 2, _ => 1 } }
 pub fn sur_first() -> Sur { 𝒜a }
+
+// unions read from TS cross to wasm as bytes, in TS's own shape (a union of strings, one with a tag field, a
+// record holding both)
+@wasm pub fn area_w(s: Shape) -> f64 { match s { Circle(r) => 3.0 * r * r, Rect(w, h) => w * h } }
+@wasm pub fn label_w(s: Status) -> String { match s { Draft => "draft!", Published => "live" } }
+@wasm pub fn publish_w(d: Doc) -> Doc { Doc { status: Published, shapes: d.shapes.map((s) => match s { Circle(r) => Circle(r * 2.0), Rect(w, h) => Rect(h, w) }), ..d } }

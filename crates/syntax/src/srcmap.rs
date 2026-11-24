@@ -48,6 +48,17 @@ impl SrcMap {
         (name, line - best.1 + best.2)
     }
 
+    /// A line of the root file → the line of the combined source (locate's inverse for the root file)
+    pub fn root_to_combined(&self, line: u32) -> u32 {
+        let mut best = None;
+        for &(s, f, first) in &self.segs {
+            if f == 0 && first <= line {
+                best = Some((s, first));
+            }
+        }
+        best.map_or(line, |(s, first)| s + (line - first))
+    }
+
     /// 結合したソースの (行, 桁) の桁を、名前を変える前の桁にする
     pub fn fix_col(&self, line: u32, col: u32) -> u32 {
         let mut d = 0;

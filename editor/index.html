@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>zustscript playground</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <header>
+      <strong class="brand">zustscript</strong><span class="sub">playground</span>
+      <label class="sample">example
+        <select id="sample"></select>
+      </label>
+      <span class="spacer"></span>
+      <label class="toggle"><input type="checkbox" id="autorun" checked /> auto-run</label>
+      <button id="share" title="copy a link with this source">share</button>
+      <button id="run" class="primary" title="Ctrl/⌘ + Enter">▶ run</button>
+    </header>
+    <main>
+      <section class="pane editor-pane">
+        <div class="editor" id="editor">
+          <div class="gutter" id="gutter" aria-hidden="true"></div>
+          <div class="code">
+            <pre class="highlight" id="highlight" aria-hidden="true"></pre>
+            <textarea id="source" spellcheck="false" autocomplete="off" autocapitalize="off" aria-label="zustscript source" aria-describedby="editor-keys"></textarea>
+            <span class="visually-hidden" id="editor-keys">Tab indents. Press Escape, then Tab, to leave the editor. Control or Command plus Enter runs.</span>
+          </div>
+        </div>
+        <div class="status" id="status">loading the compiler…</div>
+        <ul class="diagnostics" id="diagnostics"></ul>
+      </section>
+      <section class="pane output-pane">
+        <nav class="tabs" role="tablist">
+          <button role="tab" data-tab="run" aria-selected="true">preview</button>
+          <button role="tab" data-tab="js">JS</button>
+          <button role="tab" data-tab="dts">.d.ts</button>
+        </nav>
+        <div class="tab" data-panel="run">
+          <div class="frame" id="frame"></div>
+          <div class="console-head">console</div>
+          <pre class="console" id="console"></pre>
+        </div>
+        <pre class="tab output" data-panel="js" id="out-js" hidden></pre>
+        <pre class="tab output" data-panel="dts" id="out-dts" hidden></pre>
+      </section>
+    </main>
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>

@@ -1118,3 +1118,59 @@ fn attributes_at_crate_level_and_misplaced() {
     // (a warned one is an error where `unused_attributes` is denied)
     assert_eq!(first("#![deny(unused_attributes)]\n#[cold]\nstruct S;\nfn main() {}\n"), at(2, "the `cold` attribute cannot be used on structs"), "denied");
 }
+
+#[test]
+fn review106_attribute_scans() {
+    // (each expected line and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    // (cfg: a candidate in a block comment or a string is not an attribute; `cfg!` takes a trailing comma)
+    assert_eq!(check(2021, "/* #[cfg(not())] */\nfn main() {}\n"), None, "block_comment");
+    assert_eq!(check(2021, "fn main() { let _ = \"#[cfg(not())]\"; let _ = r#\"#[cfg(not())]\"#; }\n"), None, "strings");
+    assert_eq!(check(2021, "fn main() { let _ = cfg!(unix,); }\n"), None, "trailing_comma");
+    assert_eq!(check(2021, "/* a */ #[cfg(not())]\nfn g() {}\nfn main() {}\n"), at(1, "malformed `cfg` attribute input"), "after_a_comment");
+    // (a hashed raw string is a string literal)
+    assert_eq!(check(2021, "#[deprecated(note = r#\"reason\"#)]\npub fn f() {}\nfn main() {}\n"), None, "raw_note");
+    assert_eq!(check(2021, "#[cfg(feature = r#\"x\"#)]\nfn g() {}\nfn main() {}\n"), None, "raw_cfg_value");
+    // (a lint's level is the last inner attribute that names it, not any `deny`)
+    let f = "#[no_mangle]\npub fn f() {}\nfn main() { f(); }\n";
+    assert_eq!(check(2021, &format!("#![deny(dead_code)]\n#![warn(unsafe_attr_outside_unsafe)]\n{f}")), None, "other_lint_denied");
+    assert_eq!(check(2021, &format!("#![deny(unsafe_attr_outside_unsafe)]\n{f}")), at(2, "unsafe attribute used without unsafe"), "named_lint_denied");
+    // (a comment that names the crate type does not make the crate a proc-macro one)
+    assert_eq!(check(2021, "// crate_type = \"proc-macro\"\n#[proc_macro]\npub fn m(a: u8) -> u8 { a }\nfn main() {}\n"), at(2, "the `proc_macro` attribute is only usable with crates of the `proc-macro` crate type"), "comment_crate_type");
+}
+
+#[test]
+fn review106_second_round() {
+    // (each expected line and message is rustc 1.100's on the same source; None where rustc accepts it)
+    let check = |edition: u16, src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |l: usize, m: &str| Some((l, m.to_string()));
+    let crate_type = "the `proc_macro` attribute is only usable with crates of the `proc-macro` crate type";
+    // (a value is compared as text: a raw string is the same string)
+    let src = "#![windows_subsystem = r\"console\"]\n#[link(name = \"m\", kind = r\"static\")]\nextern \"C\" {}\nfn main() {}\n";
+    assert_eq!(check(2021, src), None, "raw_values");
+    assert_eq!(check(2021, "#![windows_subsystem = \"con\\x73ole\"]\nfn main() {}\n"), None, "escaped_value");
+    assert_eq!(check(2021, "#![windows_subsystem = r\"gui\"]\nfn main() {}\n"), at(1, "malformed `windows_subsystem` attribute input"), "raw_unknown_value");
+    // (an inner attribute may span lines; one in a block comment is no attribute)
+    let src = "#![crate_type =\n    \"proc-macro\"]\nextern crate proc_macro;\n#[proc_macro]\npub fn m(a: proc_macro::TokenStream) -> proc_macro::TokenStream { a }\n";
+    assert!(check(2021, src).is_none_or(|(_, m)| m != crate_type), "multiline_crate_type");
+    let src = "#[proc_macro]\npub fn m(a: u8) -> u8 { a }\nfn main() {}\n\n/*\n#![crate_type = \"proc-macro\"]\n*/\n";
+    assert_eq!(check(2021, src), at(1, crate_type), "block_comment_crate_type");
+    // (an escaped backslash ends no string: the entries after it are split)
+    assert_eq!(check(2021, "#[deprecated(note = \"\\\\\", since = \"1.0\",)]\npub fn f() {}\nfn main() {}\n"), None, "escaped_backslash");
+    // (comments in a cfg predicate are whitespace)
+    assert_eq!(check(2021, "#[cfg(all(/* note */))]\nfn f() {}\nfn main() {}\n"), None, "comment_in_predicate");
+    assert_eq!(check(2021, "#[cfg(not(/* a */ unix, windows))]\nfn f() {}\nfn main() {}\n"), at(1, "malformed `cfg` attribute input"), "comment_and_two_patterns");
+    // (a macro's pattern is tokens, checked only when expanded)
+    assert_eq!(check(2021, "macro_rules! eat { (cfg!(not())) => {}; }\nfn main() {}\n"), None, "macro_pattern");
+    assert_eq!(check(2021, "macro_rules! eat { () => {}; }\nfn main() { let _ = cfg!(not()); }\n"), at(2, "malformed `cfg` macro input"), "after_a_macro");
+    // (an item's `allow` among other lints lowers the level again)
+    let src = "#![deny(unsafe_attr_outside_unsafe)]\n\n#[allow(dead_code, unsafe_attr_outside_unsafe)]\n#[no_mangle]\npub fn f() {}\n\nfn main() { f(); }\n";
+    assert_eq!(check(2021, src), None, "allow_in_a_list");
+}

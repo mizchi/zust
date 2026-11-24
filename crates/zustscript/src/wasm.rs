@@ -13,7 +13,7 @@
 //! | `String` / `Vec<f64>` / `Vec<i32>` (result) | String / Array | the wrapper leaks it and writes (ptr, len, cap); the glue copies it out and frees it |
 //! | `&dyn Fn(A) -> R` | `(A) => R` | a borrowed callback: registered for the call, released when the call returns |
 //! | `Box<dyn Fn(A) -> R>` | `(A) => R` | an owned callback: released when the Rust side drops the Box |
-//! | a record holding strings or arrays, an array of records / strings / arrays (`@wasm fn` only) | the same | as bytes in the format of the helpers: `encode` (npm `zustscript-helper`) and `from_bytes` (crate `zustscript_helper`, embedded), and back |
+//! | a record holding strings or arrays, an enum that does not fit the slots (or read from TS), an array of records / strings / arrays (`@wasm fn` only) | the same | as bytes in the format of the helpers: `encode` (npm `zustscript-helper`) and `from_bytes` (crate `zustscript_helper`, embedded), and back |
 //!
 //! Pointers and `usize` are 64-bit in zustc's wasm output (x86-64 layouts), so they cross as BigInt.
 
@@ -32,18 +32,73 @@ fn ws_js(w: &WS) -> String {
         WS::Str => "\"str\"".into(),
         WS::Arr(e) => format!("[\"arr\", {}]", ws_js(e)),
         WS::Rec(_, fs) => format!("[\"rec\", [{}]]", fs.iter().map(|(f, t)| format!("[{f:?}, {}]", ws_js(t))).collect::<Vec<_>>().join(", ")),
+        WS::Enum { key, variants, .. } => {
+            let k = key.as_ref().map_or_else(|| "null".to_string(), |k| format!("{k:?}"));
+            let vs: Vec<String> = variants
+                .iter()
+                .map(|(_, tag, fs)| format!("[{tag:?}, [{}]]", fs.iter().map(|(f, t)| format!("[{f:?}, {}]", ws_js(t))).collect::<Vec<_>>().join(", ")))
+                .collect();
+            format!("[\"enum\", {k}, [{}]]", vs.join(", "))
+        }
     }
 }
 
-/// The records of a schema (each needs a `Wire` impl), by Rust type
-fn ws_records<'w>(w: &'w WS, out: &mut BTreeMap<String, &'w [(String, WS)]>) {
+/// The records and enums of a schema (each needs a `Wire` impl), by Rust type
+fn ws_records<'w>(w: &'w WS, out: &mut BTreeMap<String, &'w WS>) {
     match w {
         WS::Arr(e) => ws_records(e, out),
         WS::Rec(rt, fs) => {
-            out.insert(rt.clone(), fs);
+            out.insert(rt.clone(), w);
             for (_, t) in fs {
                 ws_records(t, out);
             }
+        }
+        WS::Enum { rt, variants, .. } => {
+            out.insert(rt.clone(), w);
+            for (_, _, fs) in variants {
+                for (_, t) in fs {
+                    ws_records(t, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The `Wire` impl of a record or enum of a schema
+fn wire_impl(w: &WS, out: &mut String) {
+    match w {
+        WS::Rec(rt, fs) => {
+            let puts: Vec<String> = fs.iter().map(|(f, _)| format!("        zustscript_helper::Wire::put(&self.{}, out);", crate::lower::local(f))).collect();
+            let gets: Vec<String> = fs.iter().map(|(f, _)| format!("{}: zustscript_helper::Wire::get(r)", crate::lower::local(f))).collect();
+            let _ = writeln!(
+                out,
+                "impl zustscript_helper::Wire for {rt} {{\n    fn put(&self, out: &mut Vec<u8>) {{\n{}\n    }}\n    fn get(r: &mut zustscript_helper::Reader) -> {rt} {{\n        {} {{ {} }}\n    }}\n}}\n",
+                puts.join("\n"),
+                base(rt),
+                gets.join(", ")
+            );
+        }
+        // (the variant's index, then its fields)
+        WS::Enum { rt, variants, .. } => {
+            let b = base(rt);
+            let mut puts = String::new();
+            let mut gets = String::new();
+            for (k, (v, _, fs)) in variants.iter().enumerate() {
+                let binds: Vec<String> = (0..fs.len()).map(|i| format!("__f{i}")).collect();
+                let pat = if fs.is_empty() { format!("{b}::{v}") } else { format!("{b}::{v}({})", binds.join(", ")) };
+                let _ = write!(puts, "            {pat} => {{\n                zustscript_helper::Wire::put(&{k}u32, out);\n");
+                for x in &binds {
+                    let _ = writeln!(puts, "                zustscript_helper::Wire::put({x}, out);");
+                }
+                puts.push_str("            }\n");
+                let build = if fs.is_empty() { format!("{b}::{v}") } else { format!("{b}::{v}({})", vec!["zustscript_helper::Wire::get(r)"; fs.len()].join(", ")) };
+                let _ = writeln!(gets, "            {k} => {build},");
+            }
+            let _ = writeln!(
+                out,
+                "impl zustscript_helper::Wire for {rt} {{\n    fn put(&self, out: &mut Vec<u8>) {{\n        match self {{\n{puts}        }}\n    }}\n    fn get(r: &mut zustscript_helper::Reader) -> {rt} {{\n        match <u32 as zustscript_helper::Wire>::get(r) {{\n{gets}            _ => panic!(\"zustscript: not a variant\"),\n        }}\n    }}\n}}\n"
+            );
         }
         _ => {}
     }
@@ -160,10 +215,10 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
     rs.push_str("#[no_mangle]\npub extern \"C\" fn __zsc_alloc(n: usize) -> *mut u8 {\n    unsafe { malloc(if n == 0 { 1 } else { n }) }\n}\n#[no_mangle]\npub extern \"C\" fn __zsc_free(p: *mut u8) {\n    unsafe { free(p) }\n}\n\n");
     // values that cross as bytes: their schemas (one JS constant each) and the records' Wire impls
     let mut schemas: Vec<String> = vec![];
-    let mut wire_recs: BTreeMap<String, &[(String, WS)]> = BTreeMap::new();
+    let mut wire_recs: BTreeMap<String, &WS> = BTreeMap::new();
     for (_, args, ret, _, _) in &fns {
         for w in args.iter().map(|(_, w)| w).chain(std::iter::once(*ret)) {
-            if let WTy::Wire(ws, _) = w {
+            if let WTy::Wire(ws, _, _) = w {
                 ws_records(ws, &mut wire_recs);
                 let j = ws_js(ws);
                 if !schemas.contains(&j) {
@@ -181,16 +236,8 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
             rs.push('\n');
         }
         rs.push_str("}\n\n");
-        for (rt, fs) in &wire_recs {
-            let puts: Vec<String> = fs.iter().map(|(f, _)| format!("        zustscript_helper::Wire::put(&self.{}, out);", crate::lower::local(f))).collect();
-            let gets: Vec<String> = fs.iter().map(|(f, _)| format!("{}: zustscript_helper::Wire::get(r)", crate::lower::local(f))).collect();
-            let _ = writeln!(
-                rs,
-                "impl zustscript_helper::Wire for {rt} {{\n    fn put(&self, out: &mut Vec<u8>) {{\n{}\n    }}\n    fn get(r: &mut zustscript_helper::Reader) -> {rt} {{\n        {} {{ {} }}\n    }}\n}}\n",
-                puts.join("\n"),
-                base(rt),
-                gets.join(", ")
-            );
+        for w in wire_recs.values() {
+            wire_impl(w, &mut rs);
         }
     }
     let mut glue = String::new();
@@ -203,6 +250,7 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
         let mut ps = vec![]; // the wrapper's parameters
         let mut pre = vec![]; // Rust statements before the call
         let mut call = vec![]; // the call's arguments
+        let mut jenc = vec![]; // JS that encodes an argument (first: it can throw)
         let mut jpre = vec![]; // JS before the call
         let mut jargs = vec![]; // the wrapper's arguments in JS
         let mut jpost = vec![]; // JS after the call (frees, releases)
@@ -251,19 +299,24 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
                 WTy::Str => {
                     ps.push(format!("{a}_p: *const u8, {a}_n: usize"));
                     call.push(format!("unsafe {{ std::str::from_utf8_unchecked(std::slice::from_raw_parts({a}_p, {a}_n)) }}"));
-                    jpre.push(format!("const {a}$b = $enc.encode({a});"));
+                    jenc.push(format!("const {a}$b = $enc.encode({a});"));
                     jpre.push(format!("const {a}$p = $w.__zsc_alloc(BigInt({a}$b.length));"));
                     jpre.push(format!("new Uint8Array($w.memory.buffer, Number({a}$p), {a}$b.length).set({a}$b);"));
                     jargs.push(format!("{a}$p, BigInt({a}$b.length)"));
                     jpost.push(format!("$w.__zsc_free({a}$p);"));
                 }
-                WTy::Wire(ws, rt) => {
+                WTy::Wire(ws, rt, by_ref) => {
                     // as bytes: encoded by zustscript-helper, decoded by zustscript_helper, handed by reference
                     ps.push(format!("{a}_p: *const u8, {a}_n: usize"));
                     // (`__zsc_` names are the generated code's: a parameter cannot take one)
                     pre.push(format!("let __zsc_{a}: {rt} = zustscript_helper::from_bytes(unsafe {{ std::slice::from_raw_parts({a}_p, {a}_n) }});"));
-                    call.push(if matches!(**ws, WS::Arr(_)) { format!("&__zsc_{a}[..]") } else { format!("&__zsc_{a}") });
-                    jpre.push(format!("const {a}$b = $zsEncode({}, {a});", schema_of(ws)));
+                    call.push(match (&**ws, by_ref) {
+                        (WS::Arr(_), _) => format!("&__zsc_{a}[..]"),
+                        (_, true) => format!("&__zsc_{a}"),
+                        // (a Copy enum, a union of strings: by value)
+                        (_, false) => format!("__zsc_{a}"),
+                    });
+                    jenc.push(format!("const {a}$b = $zsEncode({}, {a});", schema_of(ws)));
                     jpre.push(format!("const {a}$p = $w.__zsc_alloc(BigInt({a}$b.length));"));
                     jpre.push(format!("new Uint8Array($w.memory.buffer, Number({a}$p), {a}$b.length).set({a}$b);"));
                     jargs.push(format!("{a}$p, BigInt({a}$b.length)"));
@@ -327,7 +380,9 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
         // the glue
         let jps: Vec<String> = args.iter().map(|(a, _)| a.clone()).collect();
         let _ = writeln!(glue, "{}function {name}({}) {{", if public.contains(name) { "export " } else { "" }, jps.join(", "));
-        for l in &jpre {
+        // (every argument is encoded, which can throw, before anything is allocated in wasm or registered: a
+        // rejected value leaves nothing behind)
+        for l in jenc.iter().chain(&jpre) {
             let _ = writeln!(glue, "  {l}");
         }
         let callw = format!("$w.__zsc_w_{wname}({})", jargs.join(", "));
@@ -354,7 +409,7 @@ pub fn generate(items: &[Item], lowered: Vec<WFn>, raw: &str, wasm_file: &str) -
             }
             WTy::String | WTy::Vec(_) | WTy::TVec(_) | WTy::Wire(..) => {
                 let read = match ret {
-                    WTy::Wire(ws, _) => format!("$zsDecode({}, new Uint8Array($w.memory.buffer, Number(p), Number(l)))", schema_of(ws)),
+                    WTy::Wire(ws, _, _) => format!("$zsDecode({}, new Uint8Array($w.memory.buffer, Number(p), Number(l)))", schema_of(ws)),
                     WTy::TVec(el) => format!("new {}($w.memory.buffer, Number(p), Number(l)).slice()", el.info().1),
                     WTy::Vec(el) => format!("$wToArray(new {}($w.memory.buffer, Number(p), Number(l)))", el.info().1),
                     _ => "$dec.decode(new Uint8Array($w.memory.buffer, Number(p), Number(l)))".to_string(),

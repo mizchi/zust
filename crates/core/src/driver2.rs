@@ -3,7 +3,7 @@
 //! driver.rs と同じ手順を、外部クレートに依存しないモジュールだけで行う (zustc 自身でもコンパイルできる)。
 //! キャッシュと並列化はまだない。
 
-use crate::cfg::{attr_entries, cfg_pred, malformed_cfg, str_lit};
+use crate::cfg::{attr_entries, cfg_pred, lit_end, malformed_cfg, str_lit, str_value};
 use std::sync::Mutex;
 
 use crate::acg::{self, Blob, ItemFn};
@@ -579,6 +579,10 @@ pub struct Options2 {
     /// The edition (`--edition`, 2021 by default). Only what differs between 2015 and later reads it: the crate root's
     /// own `extern crate std` holds the name `std` in 2015 alone
     pub edition: u16,
+    /// `--cfg name` / `--cfg name="value"`: more cfgs of the crate (`--test` adds `test`)
+    pub cfgs: Vec<(String, Option<String>)>,
+    /// `--test`: build the crate's `#[test]` functions with a harness for its `main` (crate::test_harness)
+    pub test: bool,
 }
 
 /// Writes the output from the functions and data build.rs lays out (in place of the ELF object)
@@ -586,7 +590,7 @@ pub type ModuleWriter = fn(&[(String, Vec<u8>, Vec<crate::ir::Reloc>, bool)], &[
 
 impl Default for Options2 {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021 }
+        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021, cfgs: vec![], test: false }
     }
 }
 
@@ -612,7 +616,7 @@ impl Options2 {
             features: features.to_vec(),
             debug_assertions: !self.opt,
             wasm: self.module_writer.is_some(),
-            cfgs: cfgs.to_vec(),
+            cfgs: self.cfgs.iter().chain(cfgs).cloned().chain(self.test.then(|| ("test".to_string(), None))).collect(),
             env: env.to_vec(),
         }
     }
@@ -3471,11 +3475,14 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             // (each hint a name, or a name with its list: `repr(C, align(8))`, not `repr("C")`)
             "repr" => form == '(' && !inner.is_empty() && !inner.contains('=') && attr_entries(inner).iter().all(|e| e.starts_with(|c: char| c.is_alphabetic() || c == '_')),
             "deprecated" => form == ' ' || (form == '=' && str_lit(inner)) || (form == '(' && keyed(inner, &["since", "note", "suggestion"], &|_, x| str_lit(x))),
-            "windows_subsystem" => form == '=' && matches!(inner, "\"console\"" | "\"windows\""),
+            // (the value's text, not its spelling: `r"console"` is `"console"`)
+            "windows_subsystem" => form == '=' && str_value(inner).is_some_and(|v| matches!(v.as_str(), "console" | "windows")),
             // (`link(name = "m", kind = "static")`: a kind rustc knows)
             "link" => {
                 form == '(' && !inner.is_empty() && !inner.contains("cfg()") && attr_entries(inner).iter().all(|e| match e.split_once('=') {
-                    Some((k, x)) if k.trim() == "kind" => matches!(x.trim(), "\"static\"" | "\"dylib\"" | "\"framework\"" | "\"raw-dylib\"" | "\"link-arg\""),
+                    Some((k, x)) if k.trim() == "kind" => {
+                        str_value(x).is_some_and(|v| matches!(v.as_str(), "static" | "dylib" | "framework" | "raw-dylib" | "link-arg"))
+                    }
                     _ => true,
                 })
             }
@@ -3555,38 +3562,96 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
         head_end -= 1;
     }
     let head = &src0[..head_end];
-    // (comments between them: line by line, skipping `//` lines)
-    let mut off = 0;
-    for line in head.split_inclusive('\n') {
-        let t = line.trim_start();
-        if t.starts_with("#![") {
-            for (at, name, input) in leading(line) {
-                // (the attribute macros an item takes, not a crate: `#![derive(Debug)]`)
-                if matches!(name, "derive" | "test" | "test_case" | "bench" | "global_allocator") && line[at..].starts_with("#![") {
-                    let n = head[..off + at].matches('\n').count() + 1;
-                    return Some(format!("{n}:1: `{name}` attribute cannot be used at crate level"));
-                }
-                if !check(name, input) {
-                    return Some(report(head, 1, off + at, name, input));
-                }
-            }
-        } else if !(t.is_empty() || t.starts_with("//")) && !t.starts_with("#[") {
-            break;
+    // (the file's inner attributes, in order, with their offsets: past whitespace, comments and a shebang, each to its
+    // matching `]` across lines (`#![crate_type =\n "proc-macro"]`), up to the first item; not one in a comment)
+    let inner_at: Vec<(usize, &str, &str)> = {
+        let (hb, mut i, mut out) = (head.as_bytes(), 0, vec![]);
+        if head.starts_with("#!") && !head.starts_with("#![") {
+            i = head.find('\n').unwrap_or(head.len());
         }
-        off += line.len();
+        loop {
+            while i < hb.len() && hb[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if hb[i..].starts_with(b"//") || hb[i..].starts_with(b"/*") {
+                i = lit_end(hb, i).unwrap_or(hb.len());
+                continue;
+            }
+            if !hb[i..].starts_with(b"#![") {
+                break;
+            }
+            let (mut d, mut k, mut end) = (0i32, i + 2, None);
+            while k < hb.len() {
+                if let Some(e) = lit_end(hb, k) {
+                    k = e;
+                    continue;
+                }
+                match hb[k] {
+                    b'[' | b'(' | b'{' => d += 1,
+                    b']' | b')' | b'}' => {
+                        d -= 1;
+                        if d == 0 {
+                            end = Some(k);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                k += 1;
+            }
+            let Some(e) = end else { break };
+            let body = &head[i + 3..e];
+            let n_end = body.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(body.len());
+            out.push((i, &body[..n_end], &body[n_end..]));
+            i = e + 1;
+        }
+        out
+    };
+    for &(at, name, input) in &inner_at {
+        // (the attribute macros an item takes, not a crate: `#![derive(Debug)]`)
+        if matches!(name, "derive" | "test" | "test_case" | "bench" | "global_allocator") {
+            let n = head[..at].matches('\n').count() + 1;
+            return Some(format!("{n}:1: `{name}` attribute cannot be used at crate level"));
+        }
+        if !check(name, input) {
+            return Some(report(head, 1, at, name, input));
+        }
     }
     // (the unsafe attributes, which `#[unsafe(..)]` may wrap; `naked` needs it in every edition, the others in 2024, or
     // where `unsafe_attr_outside_unsafe` is denied)
     const UNSAFE: &[&str] = &["no_mangle", "export_name", "link_section", "naked", "ffi_pure", "ffi_const", "force_target_feature"];
-    // (`unused_attributes` denied at the crate, by itself or a group)
-    let unused_attributes_denied = (head.contains("#![deny(") || head.contains("#![forbid(")) && ["unused_attributes", "unused)", "unused,", "warnings"].iter().any(|n| head.contains(n));
-    // (`#![crate_type = "proc-macro"]`, not a comment that names the crate type)
-    let proc_macro_crate = head.match_indices("crate_type").any(|(i, _)| head[i + 10..].trim_start().strip_prefix('=').is_some_and(|r| r.trim_start().starts_with("\"proc-macro\"")));
+    let inner: Vec<(&str, &str)> = inner_at.iter().map(|&(_, n, inp)| (n, inp)).collect();
+    // (`#![crate_type = "proc-macro"]`)
+    let proc_macro_crate = inner.iter().any(|&(n, inp)| n == "crate_type" && inp.trim().strip_prefix('=').and_then(str_value).is_some_and(|v| v == "proc-macro"));
+    // (a lint's level at the crate: the last of its inner attributes that names it, or a group of it)
+    let crate_level = |names: &[&str]| -> Option<&str> {
+        let mut level = None;
+        for &(n, inp) in &inner {
+            if matches!(n, "deny" | "forbid" | "warn" | "allow" | "expect") {
+                let list = inp.trim().strip_prefix('(').and_then(|r| r.strip_suffix(')')).unwrap_or("");
+                if attr_entries(list).iter().any(|e| names.contains(&e.trim())) {
+                    level = Some(n);
+                }
+            }
+        }
+        level
+    };
     // (before 2024 a lint: denied at the crate, and not allowed again on an item, `#[allow(unsafe_attr_outside_unsafe)]
     // mod generated { .. }`)
-    let lowered = || ["allow(", "expect("].iter().any(|l| ["unsafe_attr_outside_unsafe", "rust_2024_compatibility"].iter().any(|n| src0.contains(&format!("{l}{n}"))));
-    let outside_unsafe_denied = edition >= 2024
-        || (head.contains("deny(") || head.contains("forbid(")) && (head.contains("unsafe_attr_outside_unsafe") || head.contains("rust_2024_compatibility")) && !lowered();
+    // (any `allow(..)` / `expect(..)` list that names it, among other lints or not: `allow(dead_code,
+    // unsafe_attr_outside_unsafe)`)
+    let lowered = || {
+        ["allow(", "expect("].iter().any(|l| {
+            src0.match_indices(l).any(|(i, _)| {
+                let list = &src0[i + l.len()..];
+                let list = &list[..list.find(')').unwrap_or(list.len())];
+                attr_entries(list).iter().any(|e| matches!(*e, "unsafe_attr_outside_unsafe" | "rust_2024_compatibility"))
+            })
+        })
+    };
+    let outside_unsafe_denied = edition >= 2024 || matches!(crate_level(&["unsafe_attr_outside_unsafe", "rust_2024_compatibility"]), Some("deny" | "forbid")) && !lowered();
+    // (`unused_attributes` denied at the crate, by itself or a group)
+    let unused_attributes_denied = matches!(crate_level(&["unused_attributes", "unused", "warnings"]), Some("deny" | "forbid"));
     // (a `macro_rules!`'s attributes, read from the file as written: expansion takes the definition out of the items.
     // Those `unused_attributes` reports there, where the crate denies it)
     if unused_attributes_denied && src0.contains("macro_rules!") {
