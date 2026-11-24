@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795526829040,
+  "lastUpdate": 1795526831286,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -98778,6 +98778,85 @@ window.BENCHMARK_DATA = {
           {
             "name": "parity 一致の平均",
             "value": 90.467,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bd920ebdea550112d844c48f6aa4a90406295b2a",
+          "message": "Region check part 23: placeholders against regions from outside, a placeholder's bound's type arguments, diverging initializers, type aliases with a parameter twice (#126)\n\nRegion check part 23: placeholders against regions from outside, a placeholder's bound's type arguments, diverging initializers, type aliases with a parameter twice",
+          "timestamp": "2026-11-24T22:21:46+09:00",
+          "tree_id": "9d80a5df69a2559ed2294427fcd6b679622cc800",
+          "url": "https://github.com/mizchi/zust/commit/bd920ebdea550112d844c48f6aa4a90406295b2a"
+        },
+        "date": 1795526830937,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 70,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 89.655,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 92,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.444,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 95,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 69.231,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.633,
             "unit": "%"
           }
         ]
