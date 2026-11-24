@@ -2289,6 +2289,10 @@ impl Cx<'_> {
                         let (mut v, mut t) = self.expr(init, exp)?;
                         if t == Ty::Never {
                             diverged = true;
+                            // (the annotation's type is well formed all the same: `let _: &'a S<'b> = loop {};`)
+                            if let Some(at) = ann_ty.as_ref() {
+                                self.rg_let_uninit(None, at, *let_at);
+                            }
                             continue;
                         }
                         if let Some(a) = full.filter(|&a| a != t) {
@@ -2494,10 +2498,23 @@ impl Cx<'_> {
                                 } else {
                                     clif_ty(a).map(|ct| if ct == types::I128 { self.int_const(Ty::I128, 0) } else if ct.is_float() { if ct == types::F64 { self.b.ins().f64const(0.0) } else { self.b.ins().f32const(0.0) } } else { self.b.ins().iconst(ct, 0) })
                                 };
-                                self.bind(name, a, v);
+                                self.bind(name.clone(), a, v);
+                                // (and the annotation's type is well formed, as with any initializer:
+                                // `let _: &'a S<'b> = loop {};` needs 'b: 'a)
+                                if let Some(at) = ann_ty.as_ref() {
+                                    self.rg_let_uninit(Some(&name), at, *let_at);
+                                }
                             }
-                            None => self.bind(name, Ty::Never, None),
+                            None => {
+                                // (the annotation's type is well formed here too, a type that needs Drop
+                                // (`let x: Box<&'a S<'b>> = loop {};`): its tree is not the binding's, which has none)
+                                if let Some(at) = ann_ty.as_ref() {
+                                    self.rg_let_uninit(None, at, *let_at);
+                                }
+                                self.bind(name, Ty::Never, None)
+                            }
                         }
+                        self.rg.let_sp = let_sp0;
                         continue;
                     }
                     // (an annotation with holes, of another struct than the value's: `let x: Foo<_> = Bar::<usize>(..)`. No

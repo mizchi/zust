@@ -3158,6 +3158,7 @@ run-pass	higher-ranked/trait-bounds/hrtb-closure-lifetime-infer.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-debruijn-in-receiver.rs
 run-pass	higher-ranked/trait-bounds/hrtb-debruijn-object-types-in-closures.rs
 run-pass	higher-ranked/trait-bounds/hrtb-fn-like-trait.rs
+compile-fail	higher-ranked/trait-bounds/hrtb-identity-fn-borrows.rs
 compile-fail	higher-ranked/trait-bounds/hrtb-malformed-lifetime-generics.rs
 run-pass	higher-ranked/trait-bounds/hrtb-opt-in-copy.rs
 run-pass	higher-ranked/trait-bounds/hrtb-parse.rs
@@ -4951,6 +4952,7 @@ run-pass	nll/rc-loop.rs
 compile-fail	nll/ref-suggestion.rs
 compile-fail	nll/reference-carried-through-struct-field.rs
 check-pass	nll/relate_tys/issue-48071.rs
+compile-fail	nll/relate_tys/var-appears-twice.rs
 compile-fail	nll/return-ref-mut-issue-46557.rs
 check-pass	nll/self-assign-ref-mut.rs
 compile-fail	nll/sugg-mut-for-binding-issue-137486.rs
@@ -6195,6 +6197,7 @@ run-pass	regions/regions-addr-of-ret.rs
 compile-fail	regions/regions-addr-of-self.rs
 compile-fail	regions/regions-addr-of-upvar-self.rs
 compile-fail	regions/regions-adjusted-lvalue-op.rs
+compile-fail	regions/regions-assoc-type-in-supertrait-outlives-container.rs
 run-pass	regions/regions-assoc-type-region-bound.rs
 run-pass	regions/regions-assoc-type-static-bound.rs
 run-pass	regions/regions-borrow-at.rs
@@ -6286,6 +6289,8 @@ run-pass	regions/regions-no-bound-in-argument-cleanup.rs
 check-pass	regions/regions-no-variance-from-fn-generics.rs
 run-pass	regions/regions-nullary-variant.rs
 check-pass	regions/regions-outlives-nominal-type.rs
+compile-fail	regions/regions-outlives-projection-container-hrtb.rs
+compile-fail	regions/regions-outlives-projection-container-wc.rs
 check-pass	regions/regions-outlives-projection-hrtype.rs
 check-pass	regions/regions-outlives-projection-trait-def.rs
 check-pass	regions/regions-outlives-scalar.rs
