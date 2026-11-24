@@ -97,3 +97,4 @@ zustc / zust-analyzer の作業の記録 (日付順)。数値はそれぞれの�
 | 2026-11-23 | [リージョン (ライフタイム) 検査、その 17: 生ポインタ、`DerefMut` の受け手、scrutinee とループの一時値、そして添字・ディスパッチ・turbofish の推論の誤ったエラー](2026-11-23-06-region-check-17.md) |
 | 2026-11-23 | [調査: Rust コンパイラの最前線（2026 年 11 月）と、zustc がそこから取り入れるもの](2026-11-23-07-rust-frontier-survey.md) |
 | 2026-11-24 | [`check` を fork した子プロセスで分ける (#101)](2026-11-24-01-parallel-check.md) |
+| 2026-11-24 | [borrow check を Polonius Alpha に寄せる (#1)](2026-11-24-02-polonius-alpha.md) |

@@ -3268,8 +3268,13 @@ fn polonius_alpha() {
     ok(&format!("{list}fn f<T>(mut list: (&mut List<T>,)) -> Vec<&mut T> {{\n    let mut result = vec![];\n    loop {{\n        result.push(&mut list.0.value);\n        if let Some(n) = list.0.next.as_mut() {{\n            list.0 = n;\n        }} else {{\n            return result;\n        }}\n    }}\n}}\nfn main() {{}}\n"));
     ok(&format!("{list}fn f<'a>(mut list: &'a mut List<i32>, out: &mut Vec<&'a mut i32>) {{\n    loop {{\n        out.push(&mut list.value);\n        let n = list.next.as_mut().unwrap();\n        list = n;\n    }}\n}}\nfn main() {{}}\n"));
     ok("fn g(list: &mut [u8]) -> &mut u8 { &mut list[0] }\nfn main() {\n    let mut l = [1u8];\n    let v = g(&mut l);\n    assert_eq!(v as *mut u8 as usize, l.as_ptr() as usize);\n}\n");
+    // (a returned borrow is not held by `self`, whose type names the region it is returned for: the loop takes a new
+    // borrow of `self.b` each turn)
+    ok(&"struct D { b: B }\nstruct B;\nimpl B {\n    fn fill(&mut self) -> &[u8] { &[] }\n}\nfn dec(_: &[u8]) -> Option<&str> { None }\nimpl D {\n    fn next<'a>(&'a mut self) -> &'a str {\n        loop {\n            let buf = self.b.fill();\n            if let Some(s) = dec(buf) {\n%s                return s;\n            }\n        }\n    }\n}\nfn main() {}\n".replace("%s", ""));
     // (rejected by both)
     err("fn f<'a>(a: &'a mut i32) -> &'a mut i32 {\n    let b = &mut *a;\n    *a += 1;\n    b\n}\nfn main() {}\n");
+    err(&"struct D { b: B }\nstruct B;\nimpl B {\n    fn fill(&mut self) -> &[u8] { &[] }\n}\nfn dec(_: &[u8]) -> Option<&str> { None }\nimpl D {\n    fn next<'a>(&'a mut self) -> &'a str {\n        loop {\n            let buf = self.b.fill();\n            if let Some(s) = dec(buf) {\n%s                return s;\n            }\n        }\n    }\n}\nfn main() {}\n".replace("%s", "                self.b.fill();\n"));
+    err("struct D<'a> { r: Option<&'a i32>, v: i32 }\nimpl<'a> D<'a> {\n    fn f(&'a mut self) -> &'a i32 {\n        let x = &self.v;\n        self.r = Some(x);\n        self.v = 1;\n        x\n    }\n}\nfn main() {}\n");
     err("fn f<'a>(a: &'a mut i32) -> &'a mut i32 {\n    let b = &mut *a;\n    let c = b;\n    *a += 1;\n    c\n}\nfn main() {}\n");
     err("fn f<'a>(v: &'a mut Vec<i32>) -> &'a i32 {\n    let r = &v[0];\n    v.push(1);\n    r\n}\nfn main() {}\n");
     err("fn id<T>(t: T) -> T { t }\nfn f<'a>(a: &'a mut i32) -> &'a mut i32 {\n    let r = id(&mut *a);\n    *a += 1;\n    r\n}\nfn main() {}\n");

@@ -104,6 +104,14 @@
     "docs_reports_2026-11-24-01-parallel-check.ja": {
       "path": "docs/ja/reports/2026-11-24-01-parallel-check.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-24-02-polonius-alpha.en": {
+      "path": "docs/reports/2026-11-24-02-polonius-alpha.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-24-02-polonius-alpha.ja": {
+      "path": "docs/ja/reports/2026-11-24-02-polonius-alpha.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -248,6 +256,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-24-01-parallel-check.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-24-02-polonius-alpha",
+      "topic": "The Japanese file docs/ja/reports/2026-11-24-02-polonius-alpha.md is a faithful translation of docs/reports/2026-11-24-02-polonius-alpha.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-24-02-polonius-alpha.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-24-02-polonius-alpha.ja"
       }
     }
   ]

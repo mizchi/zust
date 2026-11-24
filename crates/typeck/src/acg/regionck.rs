@@ -1392,12 +1392,7 @@ impl RgSt {
             return vec![];
         }
         let n = self.n as usize + 1;
-        let mut keep = vec![true; self.edges.len()];
-        if !super::no_polonius() {
-            for &(a, b) in &self.ret_edges {
-                keep[a..b].iter_mut().for_each(|k| *k = false);
-            }
-        }
+        let keep = self.kept_edges();
         // (what outlives each variable, as one array (CSR): no allocation per variable)
         let mut start = vec![0u32; n + 1];
         for (i, &(a, b, _)) in self.edges.iter().enumerate() {
@@ -1435,6 +1430,17 @@ impl RgSt {
     /// The locals whose types' regions the reborrows (and borrows of receivers) must outlive, by the reborrow's
     /// address: as NLL, such a borrow is live while the local is (`foo.insert()` with `fn insert(&'a mut self)` in
     /// `impl<'a> Foo<'a>` borrows foo for as long as foo is used)
+    /// The edges forever and holders follow: all but the returned values' (ret_edges), unless ZUSTC_NO_POLONIUS
+    fn kept_edges(&self) -> Vec<bool> {
+        let mut keep = vec![true; self.edges.len()];
+        if !super::no_polonius() {
+            for &(a, b) in &self.ret_edges {
+                keep[a..b].iter_mut().for_each(|k| *k = false);
+            }
+        }
+        keep
+    }
+
     pub fn holders(&self) -> Vec<(usize, Vec<Loc>)> {
         if (self.reborrows.is_empty() && self.owned_borrows.is_empty()) || self.locals.is_empty() {
             return vec![];
@@ -1450,10 +1456,13 @@ impl RgSt {
                 }
             }
         }
+        // (not through a returned value's constraints, which hold at the return (Rg::forever): a reborrow returned is
+        // not held by a parameter whose type names the region it is returned for)
+        let keep = self.kept_edges();
         // (what each variable outlives, as one array (CSR))
         let mut start = vec![0u32; n + 1];
-        for &(a, b, _) in &self.edges {
-            if (a as usize) < n && (b as usize) < n {
+        for (i, &(a, b, _)) in self.edges.iter().enumerate() {
+            if (a as usize) < n && (b as usize) < n && keep[i] {
                 start[a as usize + 1] += 1;
             }
         }
@@ -1462,8 +1471,8 @@ impl RgSt {
         }
         let mut fill = start.clone();
         let mut adj = vec![0u32; start[n] as usize];
-        for &(a, b, _) in &self.edges {
-            if (a as usize) < n && (b as usize) < n {
+        for (i, &(a, b, _)) in self.edges.iter().enumerate() {
+            if (a as usize) < n && (b as usize) < n && keep[i] {
                 adj[fill[a as usize] as usize] = b;
                 fill[a as usize] += 1;
             }

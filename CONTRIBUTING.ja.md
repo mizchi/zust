@@ -364,6 +364,7 @@ Markdown を変えたコミットでは、フックが `scripts/docs_check.sh --
 | `ZUSTC_CLIF_VERIFY=1` / `ZUSTC_CLIF_DUMP=1` | Cranelift の IR を検証する / 出す |
 | `ZUSTC_PREP_VERIFY=1` | 前処理の差分の結果を、全部やり直した結果と比べる |
 | `ZUSTC_CHECK_FORK_MIN=N` | `check` が関数の wave を子プロセスに分けるのは、子 1 つあたり N 個以上あるときだけ (既定 32)。`1` にするとほぼすべての wave で fork し、診断が `-j 1` と同じかを試せる |
+| `ZUSTC_NO_POLONIUS=1` | Polonius Alpha と違うところで borrow check を NLL の規則にする (#1): 返される reborrow は関数の終わりまで生き、ローカルの一部への代入は借用を kill しない |
 | `ZUSTC_DUMP_PRE=FILE` | 前処理 (macro_rules! の展開・`mod x;` の結合) の後のソースを FILE に書く |
 | `ZUSTC_LOG_COMPILED=1` | コンパイルした関数の名前を出す (キャッシュから読めなかったものはその理由も) |
 | `ZUSTC_PROF=1` | 段ごとの時間を細かく出す |
