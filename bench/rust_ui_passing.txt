@@ -392,6 +392,7 @@ compile-fail	async-await/await-keyword/incorrect-syntax-suggestions.rs
 check-pass	async-await/await-unsize.rs
 check-pass	async-await/bound-normalization.rs
 compile-fail	async-await/clone-suggestion.rs
+compile-fail	async-await/const-async-fn-in-main.rs
 run-pass	async-await/context-is-sorta-unwindsafe.rs
 compile-fail	async-await/coroutine-desc.rs
 build-pass	async-await/default-struct-update.rs
@@ -2029,6 +2030,7 @@ run-pass	consts/transmute-const.rs
 check-pass	consts/unnormalized-param-env.rs
 check-pass	consts/unsafe_cell_in_const.rs
 check-pass	consts/unwind-abort.rs
+compile-fail	contracts/internal_machinery/internal-feature-gating.rs
 compile-fail	coroutine/coroutine-in-orphaned-anon-const.rs
 check-pass	coroutine/issue-53548-1.rs
 check-pass	coroutine/issue-62506-two_awaits.rs
@@ -5174,6 +5176,7 @@ compile-fail	parser/fn-defined-using-fun.rs
 compile-fail	parser/fn-defined-using-func.rs
 compile-fail	parser/fn-defined-using-function.rs
 compile-fail	parser/fn-field-parse-error-ice.rs
+compile-fail	parser/fn-header-semantic-fail.rs
 check-pass	parser/fn-header-syntactic-pass.rs
 check-pass	parser/fn-returns-fn-pointer.rs
 check-pass	parser/foreign-static-syntactic-pass.rs
@@ -5593,6 +5596,7 @@ compile-fail	parser/recover/recover-ampersand-less-ref-ty.rs
 compile-fail	parser/recover/recover-colon-instead-of-eq-in-local.rs
 compile-fail	parser/recover/recover-const-async-fn-ptr.rs
 compile-fail	parser/recover/recover-enum-with-bad-where.rs
+compile-fail	parser/recover/recover-enum.rs
 compile-fail	parser/recover/recover-field-extra-angle-brackets-in-struct-with-a-field.rs
 compile-fail	parser/recover/recover-field-extra-angle-brackets.rs
 compile-fail	parser/recover/recover-field-semi.rs
@@ -5612,6 +5616,7 @@ compile-fail	parser/recover/recover-pat-ranges.rs
 compile-fail	parser/recover/recover-pat-wildcards.rs
 compile-fail	parser/recover/recover-quantified-closure.rs
 compile-fail	parser/recover/recover-ref-dyn-mut.rs
+compile-fail	parser/recover/recover-struct.rs
 compile-fail	parser/recover/recover-tuple-pat.rs
 compile-fail	parser/recover/recover-tuple.rs
 compile-fail	parser/recover/recover-unticked-labels.rs
