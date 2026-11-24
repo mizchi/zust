@@ -3792,3 +3792,16 @@ fn part24_mut_binding_resets_ref_mode() {
     assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 8] && d.iter().all(|x| x.1.contains("E0507")), "{d:?}");
     assert_eq!(check_ed("struct Foo {}\nfn c() {\n    let tup = (Foo {}, Foo {});\n    let (_n, _m) = &tup;\n}\nfn d() {\n    let tup = (1u8, 2u8);\n    let (_n, mut m) = &tup;\n    m += 1;\n    let _ = m;\n}\nfn main() {}\n", 2021), vec![]);
 }
+
+#[test]
+fn part24_projection_impl_header_outlives() {
+    // (a projection requires what the header of the impl it selects declares of the impl's lifetimes: `'d: 'a` of
+    // `<&'a () as Visitor<'d>>`, as the result's type, a `let`'s and a parameter's (nll/normalization-bounds-error.rs))
+    let src = "trait Visitor<'d> { type Value; }\nimpl<'a, 'd: 'a> Visitor<'d> for &'a () { type Value = (); }\nfn visit_seq<'d, 'a: 'd>() -> <&'a () as Visitor<'d>>::Value {}\nfn visit_let<'d, 'a: 'd>() { let _: <&'a () as Visitor<'d>>::Value = (); }\nfn visit_arg<'d, 'a: 'd>(_x: <&'a () as Visitor<'d>>::Value) {}\nfn main() {}\n";
+    let d = check(src);
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![3, 4, 5] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
+    // (the impl's where clause, and 'static in the trait path; what the function knows, or a lifetime the path
+    // elides, meets it)
+    let d = check("trait Visitor<'d> { type Value; }\nimpl<'a, 'd> Visitor<'d> for &'a () where 'd: 'a { type Value = (); }\nfn a1<'d: 'a, 'a>() -> <&'a () as Visitor<'d>>::Value {}\nfn a2<'d, 'a>() { let x: <&'a () as Visitor<'d>>::Value = (); let _ = x; }\nfn a3<'a>() { let _: <&'a () as Visitor<'_>>::Value = (); }\nfn a5<'a>() -> <&'a () as Visitor<'static>>::Value {}\nfn a6<'a>() -> <&'static () as Visitor<'a>>::Value {}\nfn main() {}\n");
+    assert!(d.iter().map(|x| x.0).collect::<Vec<_>>() == vec![4, 7] && d.iter().all(|x| x.1.contains("lifetime may not live long enough")), "{d:?}");
+}

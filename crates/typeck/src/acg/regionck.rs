@@ -2748,6 +2748,8 @@ impl Cx<'_> {
                 // (an annotation with holes whose regions are the inferred type's (`let f: fn(_) -> _ = foo;`): fresh
                 // ones, which the initializer flows into. A fn pointer type's parts that are no hole keep the regions
                 // they write: `fn(_, &'a T) -> &'static T`)
+                let sp = crate::wf::pos_of(a).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
+                self.rg_proj_wf(a, sp);
                 tr.or_else(|| self.rg_proj_ann(a, t)).or_else(|| if crate::ast_summary::has_infer(a) { self.rg_alias_ann(a, t).or_else(|| self.rg_fn_ann_holes(a, t)).or_else(|| self.rg.fresh(prog, t)) } else { None })
             }
             // (a fn item with no type written (`let g = id;`): the local is of the item's type, whose own regions a
@@ -2887,6 +2889,22 @@ impl Cx<'_> {
     /// lifetimes (Program::assoc_regions): the value's codes, with the impl's lifetimes those its self type writes there
     /// (fresh where it elides them). Only where one impl's associated type of the name fits the self type
     pub(crate) fn rg_proj_ann(&mut self, ann: &PTy, t: Ty) -> Option<RT> {
+        let (ai, lts, targs) = self.proj_impl(ann)?;
+        let prog = self.prog;
+        let codes = prog.assoc_regions.get(&ai)?.0.clone();
+        let value = prog.assocs[ai as usize].value;
+        let tr = self.rg.instantiate(prog, value, Some(&codes), &lts, &targs, &mut |me| me.var())?;
+        (count(prog, t, 0) == Some(tr.len())).then_some(tr)
+    }
+
+    /// The impl a projection written in the function selects (`<&'a () as Visitor<'d>>::Value`), where one impl's
+    /// associated type of the name fits and the summaries keep its regions: its index in assocs, its lifetimes, and
+    /// its type parameters' trees. Its lifetimes and type arguments are the parts of the self type as written where
+    /// the impl's self type has them (`<W<'static, &'static u32> as Foo>::Out` with `impl<'a, T> Foo for W<'a, T>`
+    /// gives 'a 'static and T `&'static u32`; a blanket impl's `T` is all of it: `<&'a u8 as Tr>::Ty` with
+    /// `impl<T> Tr for T`), and the lifetimes the trait path writes where the impl's trait path has them (`'d` of
+    /// `Visitor<'d>`). What is not found is fresh
+    fn proj_impl(&mut self, ann: &PTy) -> Option<(u32, Vec<u32>, Vec<Option<RT>>)> {
         let PTy::Path(Some(q), path) = ann else { return None };
         let prog = self.prog;
         if prog.assoc_regions.is_empty() {
@@ -2908,18 +2926,22 @@ impl Cx<'_> {
             }
         }
         let (ai, sol) = found?;
-        let (codes, self_slots) = prog.assoc_regions.get(&ai)?.clone();
+        let (codes, self_slots, outlives, trait_lts) = prog.assoc_regions.get(&ai)?.clone();
         let a = &prog.assocs[ai as usize];
         let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
         let mut written = vec![];
         sl.slots(q, false, &mut written);
-        // (the self type as written, its tree; the impl's lifetimes and type arguments are its parts where the impl's
-        // self type has them: `<W<'static, &'static u32> as Foo>::Out` with `impl<'a, T> Foo for W<'a, T>` gives 'a
-        // 'static and T `&'static u32`, and a blanket impl's `T` is all of it (`<&'a u8 as Tr>::Ty` with
-        // `impl<T> Tr for T`). What is not found is fresh)
         let fl = self.rg.lts.clone();
         let qtree = self.rg.instantiate(prog, qt, Some(&written), &fl, &[], &mut |me| me.var());
-        let n = codes.iter().chain(&self_slots).filter(|&&c| c < R_STATIC).map(|&c| c as usize + 1).max().unwrap_or(0);
+        let n = codes
+            .iter()
+            .chain(&self_slots)
+            .chain(&trait_lts)
+            .chain(outlives.iter().flat_map(|(x, y)| [x, y]))
+            .filter(|&&c| c < R_STATIC)
+            .map(|&c| c as usize + 1)
+            .max()
+            .unwrap_or(0);
         let mut found_l: Vec<Option<u32>> = vec![None; n];
         let mut found_t: Vec<Option<RT>> = vec![None; sol.len()];
         if let Some(qtree) = qtree.filter(|q| count(prog, qt, 0) == Some(q.len())) {
@@ -2937,6 +2959,19 @@ impl Cx<'_> {
                 }
             }
         }
+        // (the trait path's lifetime arguments: `<&'a () as Visitor<'d>>`'s 'd where the impl's trait path writes its
+        // 'd)
+        if let Some(tseg) = path.segs.len().checked_sub(2).and_then(|k| path.segs.get(k)) {
+            let wl: Vec<&str> = tseg.args.iter().filter_map(|g| if let GArg::Lifetime(l) = g { Some(l.as_str()) } else { None }).collect();
+            if wl.len() == trait_lts.len() {
+                for (&c, l) in trait_lts.iter().zip(wl) {
+                    let r = if l == "'static" { Some(STATIC) } else { self.rg.lt_names.iter().position(|x| x == l).and_then(|p| self.rg.lts.get(p).copied()) };
+                    if let (Some(slot), Some(r)) = (found_l.get_mut(c as usize).filter(|x| x.is_none()), r) {
+                        *slot = Some(r);
+                    }
+                }
+            }
+        }
         let mut targs: Vec<Option<RT>> = vec![];
         for (k, s0) in sol.iter().enumerate() {
             let Some(st) = *s0 else { return None };
@@ -2946,17 +2981,25 @@ impl Cx<'_> {
             };
             targs.push(tr);
         }
-        let mut lts = vec![];
-        for k in 0..n {
-            let v = match found_l[k] {
-                Some(v) => v,
-                None => self.rg.var(),
-            };
-            lts.push(v);
+        let lts: Vec<u32> = found_l.into_iter().map(|v| v.unwrap_or_else(|| self.rg.var())).collect();
+        Some((ai, lts, targs))
+    }
+
+    /// A projection written in the function (a `let`'s type, a parameter's, the result's) requires what the header of
+    /// the impl it selects declares of its lifetimes: `<&'a () as Visitor<'d>>::Value` with `impl<'a, 'd: 'a> Visitor<'d>
+    /// for &'a ()` requires `'d: 'a` (nll/normalization-bounds-error.rs)
+    pub(crate) fn rg_proj_wf(&mut self, ann: &PTy, sp: Sp) {
+        if !matches!(ann, PTy::Path(Some(_), _)) || self.prog.assoc_regions.is_empty() {
+            return;
         }
-        let value = a.value;
-        let tr = self.rg.instantiate(prog, value, Some(&codes), &lts, &targs, &mut |me| me.var())?;
-        (count(prog, t, 0) == Some(tr.len())).then_some(tr)
+        let Some((ai, lts, _)) = self.proj_impl(ann) else { return };
+        let Some(outlives) = self.prog.assoc_regions.get(&ai).map(|r| r.2.clone()) else { return };
+        let r = |c: u8| if c == R_STATIC { Some(STATIC) } else { lts.get(c as usize).copied() };
+        for (a, b) in outlives {
+            if let (Some(x), Some(y)) = (r(a), r(b)) {
+                self.rg.edge(x, y, sp);
+            }
+        }
     }
 
     /// The tree of an annotation that is a generic type alias with holes among its arguments (`DoubleCell<_>` with
@@ -3378,6 +3421,9 @@ impl Cx<'_> {
             Some(t) => t,
             None => self.parse_ty(ann).ok()?,
         };
+        if let Some(sp) = crate::wf::pos_of(ann).filter(|s| s.line != 0) {
+            self.rg_proj_wf(ann, sp);
+        }
         let tree = self.rg_ann_tree(ann, t)?;
         self.rg_closure_fnptr(ann, init);
         let sp = Some(super::borrowck::pos(init)).filter(|s| s.line != 0).unwrap_or(self.rg.let_sp);
@@ -3465,6 +3511,9 @@ impl Cx<'_> {
         let tree = self.rg.instantiate(prog, t, Some(&codes), &lts, &[], &mut |me| me.var());
         self.rg.dyn_infer = false;
         let tree = if proj { self.rg_proj_ann(ann, t).or(tree) } else { tree };
+        if proj {
+            self.rg_proj_wf(ann, sp);
+        }
         let Some(tree) = tree else { return };
         self.rg.wf(prog, t, &tree, sp);
         if let Some((loc, _)) = name.and_then(|n| self.lookup(n)) {

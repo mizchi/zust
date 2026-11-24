@@ -1772,6 +1772,13 @@ impl Cx<'_> {
                 // impl's associated type's value, with the regions its self type writes; what it implies is known
                 // (implied-bounds/assoc-ty-wf-used-to-get-assoc-ty.rs))
                 if self.rg.on && !self.prog.assoc_regions.is_empty() {
+                    // (and a projection a parameter's type or the result's is requires what its impl's header declares
+                    // of the impl's lifetimes, reported at the type)
+                    for pty in f.sig.params.iter().map(|x| &x.1).chain(f.sig.ret.as_ref()) {
+                        if let Some(sp) = crate::wf::pos_of(pty) {
+                            self.rg_proj_wf(pty, sp);
+                        }
+                    }
                     for (k, (p, pty)) in f.sig.params.iter().enumerate() {
                         let (crate::parse::Ty::Path(Some(_), _), Some(&(loc, t))) = (pty, ps.get(k + f.sig.recv.is_some() as usize)) else { continue };
                         let _ = p;

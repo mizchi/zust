@@ -2079,14 +2079,17 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             }
             // (a value that names a lifetime, the impl's or 'static: its codes against the impl's lifetimes)
             // (an impl that names no lifetime (`impl Foo for () { type Out = &'static u32; }`): none to instantiate)
-            if !ow.is_trait && crate::regions::names_lt(t) {
+            // (or an impl whose header requires `'d: 'a` of its lifetimes: a projection that selects it requires it of
+            // the lifetimes its self type and trait write (nll/normalization-bounds-error.rs), whatever its value)
+            let hdr_outlives = ow.regions.as_deref().is_some_and(|r| !r.outlives.is_empty());
+            if !ow.is_trait && (crate::regions::names_lt(t) || hdr_outlives) {
                 let (lts, self_slots) = ow.regions.as_deref().map(|r| (r.lts.clone(), r.self_slots.as_slice())).unwrap_or_default();
                 {
                     let tps: Vec<&str> = ow.generics.iter().map(|g| g.0.as_str()).collect();
                     let mut s = crate::regions::Slots { lts, tparams: tps, self_slots, any: false, in_fn: 0 };
                     let mut v = vec![];
                     s.slots(t, false, &mut v);
-                    if s.any && !v.contains(&crate::types::R_UNKNOWN) {
+                    if (s.any || hdr_outlives) && !v.contains(&crate::types::R_UNKNOWN) {
                         sm.assoc_regions.push((sm.assocs.len() as u64, v));
                     }
                 }
@@ -2256,6 +2259,12 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
         }
         ItemKind::Impl(g, tr, self_ty, _) => {
             sm.hdr_regions = crate::regions::hdr_regions(g, Some(self_ty));
+            // (the lifetimes the trait path writes as its arguments, as codes of the header's)
+            if let (Some(r), Some((_, p))) = (sm.hdr_regions.as_mut(), tr.as_ref()) {
+                let code = |l: &str| if l == "'static" { crate::types::R_STATIC } else { r.lts.iter().position(|x| x == l).map_or(crate::types::R_UNKNOWN, |i| i as u8) };
+                let lts: Vec<u8> = p.segs.last().map(|s| s.args.iter().filter_map(|a| if let crate::parse::GArg::Lifetime(l) = a { Some(code(l)) } else { None }).collect()).unwrap_or_default();
+                r.trait_lts = lts;
+            }
             sm.impl_trait_lts = tr.as_ref().is_some_and(|(_, p)| crate::regions::path_names_lt(p));
             // (E0261: the header names only the lifetimes it declares; E0207: a lifetime parameter an associated type
             // names must be constrained by the self type or the trait)
