@@ -2,7 +2,7 @@
 
 zust を土台にした、フロントエンド向け言語の試作。目標は、表面は TS 風の高水準な言語で、必要な箇所だけ Rust と同じ低レベルで書け、境界(コールバックの寿命を含む)をコンパイラが面倒を見ること。
 
-[日本語の入門記事](docs/introduction.md) · [Rust から見る変換コスト](docs/rust-costs.md) · [GitHub Pages で読む](https://mizchi.github.io/zust/zustscript/)
+[日本語の入門記事](docs/introduction.md) · [Rust プログラマー向け](docs/for-rust-programmers.md) · [TypeScript プログラマー向け](docs/for-typescript-programmers.md) · [Rust から見る変換コスト](docs/rust-costs.md) · [GitHub Pages で読む](https://mizchi.github.io/zust/zustscript/)
 
 - `zsc x.zsc -o out/` は次を書き出す
   - `x.js`: 読める ES module。JS 層の本体と、wasm 層のグルー
