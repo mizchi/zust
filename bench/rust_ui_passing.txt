@@ -7161,6 +7161,7 @@ compile-fail	suggestions/return-cycle.rs
 compile-fail	suggestions/return-elided-lifetime.rs
 compile-fail	suggestions/return-without-lifetime.rs
 compile-fail	suggestions/semi-suggestion-when-stmt-and-expr-span-equal.rs
+compile-fail	suggestions/shadowed-lplace-method-2.rs
 compile-fail	suggestions/silenced-binding-typo.rs
 compile-fail	suggestions/slice-issue-87994.rs
 compile-fail	suggestions/struct-field-type-including-single-colon.rs
