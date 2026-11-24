@@ -3247,11 +3247,12 @@ impl Program {
         let r = |t: &TySyn| self.resolve_with(t, names);
         Ok(match t {
             TySyn::Prim(t) => *t,
-            TySyn::Ref(m, inner) => Ty::Ref(*m, intern(r(inner)?)),
-            TySyn::Ptr(m, inner) => Ty::Ptr(*m, intern(r(inner)?)),
+            TySyn::Ref(m, inner) => Ty::Ref(*m, intern(self.bare_dyn(inner, names).unwrap_or_else(|| r(inner))?)),
+            TySyn::Ptr(m, inner) => Ty::Ptr(*m, intern(self.bare_dyn(inner, names).unwrap_or_else(|| r(inner))?)),
             TySyn::Slice(inner) => Ty::Slice(intern(r(inner)?)),
             TySyn::Str => Ty::Str,
-            TySyn::Dyn(s) => Ty::Dyn(intern_str(s)),
+            // (its type parameters marked, the types it names as written: see dyn_canon)
+            TySyn::Dyn(s) => Ty::Dyn(intern_str(self.dyn_canon(s, names).as_deref().unwrap_or(s))),
             TySyn::Infer => Ty::Param(HOLE),
             // (`M::S<u8>` of a module M reads as a generic associated type `#gat:S` of `(M, u8)`: when M is no type,
             // it is the type S<u8> as before)
@@ -3302,6 +3303,13 @@ impl Program {
                 Ty::Array(intern(r(inner)?), n as u32)
             }
             TySyn::Named(n) => {
+                // (the marks of a `dyn` type's text: dyn_canon)
+                if let Some((i, _)) = dyn_param_mark(n) {
+                    return Ok(Ty::Param(i));
+                }
+                if let Some(id) = dyn_struct_mark(n).filter(|&id| (id as usize) < self.structs.len()) {
+                    return Ok(Ty::Struct(id));
+                }
                 if let Some(t) = names(n) {
                     return Ok(t);
                 }
@@ -3351,7 +3359,7 @@ impl Program {
                 }
             }
             TySyn::App(n, args) if n == "Box" && args.len() == 1 && !self.struct_index.contains_key(n) => {
-                Ty::Box(intern(r(&args[0])?))
+                Ty::Box(intern(self.bare_dyn(&args[0], names).unwrap_or_else(|| r(&args[0]))?))
             }
             // 型パラメータを持つ別名 (`type R<T> = Result<T, String>;`)
             TySyn::App(n, args) if self.aliases.get(n).is_some_and(|a| a.0.len() == args.len()) => {
@@ -4731,6 +4739,8 @@ impl Program {
             Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&a| self.has_param(a)),
             // 関連型は具体型ではない (型パラメータを含むときだけ現れる)
             Ty::Assoc(_) => true,
+            // (`dyn A<T>`: its marks, dyn_canon)
+            Ty::Dyn(s) => s.contains("__P"),
             _ => false,
         }
     }
@@ -4871,6 +4881,7 @@ impl Program {
             Ty::Struct(sid) => self.structs[sid as usize].args.iter().any(|&a| self.uses_params_from(a, from)),
             Ty::Assoc(a) => self.uses_params_from(a.base, from),
             Ty::Fn(f) => f.params.iter().chain([&f.ret]).any(|&p| self.uses_params_from(p, from)),
+            Ty::Dyn(s) => s.contains("__P") && dyn_marks(s).any(|i| i >= from),
             _ => false,
         }
     }
@@ -4906,6 +4917,19 @@ impl Program {
                 params: f.params.iter().map(|&p| self.subst(p, args)).collect(),
                 ret: self.subst(f.ret, args),
             })),
+            // (`dyn A<T>`: each parameter's mark becomes its argument's text, or the parameter's name where the
+            // program cannot write it, as before the marks)
+            Ty::Dyn(s) if s.contains("__P") => {
+                let r = crate::parse::rewrite_tokens(s, &mut |k, toks| {
+                    let (i, n) = dyn_param_mark(&toks[k].text)?;
+                    Some(match *args.get(i as usize)? {
+                        Ty::Param(HOLE) => "_".to_string(),
+                        Ty::Param(j) if j == i => return None,
+                        a => self.dyn_src(a, n).unwrap_or_else(|| n.to_string()),
+                    })
+                });
+                r.map_or(t, |r| Ty::Dyn(intern_str(&r)))
+            }
             Ty::Struct(sid) if self.has_param(t) => {
                 let sd = &self.structs[sid as usize];
                 let na: Vec<Ty> = sd.args.iter().map(|&a| self.subst(a, args)).collect();
@@ -4974,8 +4998,168 @@ impl Program {
                     _ => false,
                 }
             }
+            // (`dyn A<T>` against `dyn A<i32>`: their type arguments)
+            // (or the same with its parameters' names: a value coerced to the type with them (dyn_unmarked))
+            (Ty::Dyn(p), Ty::Dyn(a)) if p != a && p.contains("__P") && self.dyn_shown(p, true) == **a => true,
+            (Ty::Dyn(p), Ty::Dyn(a)) if p != a && p.contains("__P") => match (self.dyn_parts(p), self.dyn_parts(a)) {
+                (Some((n1, x)), Some((n2, y))) => n1 == n2 && x.len() == y.len() && x.iter().zip(&y).all(|(p, q)| p.0 == q.0 && self.match_ty(p.1, q.1, sol)),
+                _ => false,
+            },
             (a, b) => a == b,
         }
+    }
+
+    /// t with each `dyn` type's parameters (dyn_canon's marks) by their names: the type as it was without the marks,
+    /// for a value of a type parameter not known yet to be coerced to (a closure passed for `Box<dyn Fn(T) -> T>`)
+    pub fn dyn_unmarked(&self, t: Ty) -> Ty {
+        if !self.has_param(t) {
+            return t;
+        }
+        match t {
+            Ty::Dyn(s) => Ty::Dyn(intern_str(&self.dyn_shown(s, true))),
+            Ty::Ref(m, i) => Ty::Ref(m, intern(self.dyn_unmarked(*i))),
+            Ty::Ptr(m, i) => Ty::Ptr(m, intern(self.dyn_unmarked(*i))),
+            Ty::Box(i) => Ty::Box(intern(self.dyn_unmarked(*i))),
+            Ty::Slice(i) => Ty::Slice(intern(self.dyn_unmarked(*i))),
+            Ty::Array(i, n) => Ty::Array(intern(self.dyn_unmarked(*i)), n),
+            Ty::Fn(f) => Ty::Fn(intern_fn(FnTy { params: f.params.iter().map(|&p| self.dyn_unmarked(p)).collect(), ret: self.dyn_unmarked(f.ret) })),
+            Ty::Struct(sid) => match self.structs[sid as usize].base {
+                Some(b) => {
+                    let args: Vec<Ty> = self.structs[sid as usize].args.iter().map(|&a| self.dyn_unmarked(a)).collect();
+                    self.instantiate(b, args).map_or(t, Ty::Struct)
+                }
+                None => t,
+            },
+            t => t,
+        }
+    }
+
+    /// A `dyn` type's text read: its trait's name, and its type arguments (a closure trait's parameters and result,
+    /// as `Fn(A) -> R`'s), each with the name of the associated type it binds, if it does
+    fn dyn_parts(&self, s: &str) -> Option<(String, Vec<(Option<String>, Ty)>)> {
+        use crate::parse::{Bound, GArg, ItemKind, Ty as PTy};
+        let f = crate::parse::parse_file(&format!("type __B = dyn {s};")).ok()?;
+        let ItemKind::Type(_, _, _, Some(PTy::Dyn(bs))) = &f.items.first()?.kind else { return None };
+        let Some(Bound::Trait(_, p)) = bs.first() else { return None };
+        let seg = p.segs.last()?;
+        let ty = |t: &PTy| self.resolve_with(&crate::ast_types::tysyn(t, None).ok()?, &|_| None).ok();
+        let mut out = vec![];
+        if let Some((ps, r)) = &seg.fn_args {
+            for t in ps {
+                out.push((None, ty(t)?));
+            }
+            out.push((None, match r {
+                Some(r) => ty(r)?,
+                None => Ty::Unit,
+            }));
+        }
+        for a in &seg.args {
+            match a {
+                GArg::Ty(t) => out.push((None, ty(t)?)),
+                GArg::Bind(n, t) => out.push((Some(n.clone()), ty(t)?)),
+                GArg::Lifetime(_) => {}
+                GArg::Const(_) => return None,
+            }
+        }
+        Some((seg.name.clone(), out))
+    }
+
+    /// A trait's name written as a type behind a pointer before the 2021 edition (`Box<X>`, `&A<T>`): its trait object,
+    /// as `dyn X` / `dyn A<T>`. None for any other type
+    fn bare_dyn(&self, t: &TySyn, names: &dyn Fn(&str) -> Option<Ty>) -> Option<R<Ty>> {
+        if self.edition >= 2021 {
+            return None;
+        }
+        let (n, args): (&String, &[TySyn]) = match t {
+            TySyn::Named(n) => (n, &[]),
+            TySyn::App(n, a) => (n, a),
+            _ => return None,
+        };
+        // (not a module's trait (`m__Bar` flattened), whose privacy is not checked here: a private one named through a
+        // glob import is an error)
+        if n.contains("__") || !self.traits.contains_key(n) || self.struct_index.contains_key(n) || self.aliases.contains_key(n) || names(n).is_some() {
+            return None;
+        }
+        if args.is_empty() {
+            return Some(Ok(Ty::Dyn(intern_str(n))));
+        }
+        let mut src = vec![];
+        for a in args {
+            let t = match self.resolve_with(a, names) {
+                Ok(t) => t,
+                Err(e) => return Some(Err(e)),
+            };
+            src.push(self.dyn_src(t, if let TySyn::Named(x) = a { x } else { "" })?);
+        }
+        Some(Ok(Ty::Dyn(intern_str(&crate::parse::norm_tokens(&format!("{n}<{}>", src.join(", ")))?))))
+    }
+
+    /// The text of a `dyn` type written with names (a type parameter's, or `Self`), each of them that names gives
+    /// a type replaced: a type parameter by its mark `__P{i}_{name}`, another type by its text (dyn_src). So the
+    /// type is the same where it is written in a generic fn's or type's declaration and where it is used, its
+    /// parameters given (Program::subst) or named in the env of an instance. None where nothing is replaced
+    fn dyn_canon(&self, s: &str, names: &dyn Fn(&str) -> Option<Ty>) -> Option<String> {
+        if !s.contains(['<', '(']) {
+            return None;
+        }
+        crate::parse::rewrite_tokens(s, &mut |k, toks| {
+            let t = &toks[k];
+            // (not the trait's name, a path's segment, an associated type's binding nor a keyword)
+            if k == 0 || toks[k - 1].text == ":" || toks.get(k + 1).is_some_and(|n| n.text == ":" || n.text == "=") {
+                return None;
+            }
+            if matches!(t.text.as_str(), "dyn" | "mut" | "const" | "fn" | "for" | "impl" | "as" | "where" | "unsafe" | "extern") || dyn_param_mark(&t.text).is_some() {
+                return None;
+            }
+            match names(&t.text)? {
+                Ty::Param(HOLE) => None,
+                Ty::Param(i) => Some(format!("__P{i}_{}", t.text)),
+                ty => self.dyn_src(ty, &t.text),
+            }
+        })
+    }
+
+    /// t as text that resolves to t again, in a `dyn` type's text: a type parameter as its mark (named `name`, or
+    /// `T{i}` where empty), a struct the program cannot name (a placeholder) as `__S{id}`. None for an associated type
+    fn dyn_src(&self, t: Ty, name: &str) -> Option<String> {
+        let r = |t: Ty| self.dyn_src(t, "");
+        Some(match t {
+            Ty::Param(HOLE) => "_".into(),
+            Ty::Param(i) if name.is_empty() => format!("__P{i}_T{i}"),
+            Ty::Param(i) => format!("__P{i}_{name}"),
+            Ty::Ref(m, i) => format!("&{}{}", if m { "mut " } else { "" }, r(*i)?),
+            Ty::Ptr(m, i) => format!("*{} {}", if m { "mut" } else { "const" }, r(*i)?),
+            Ty::Slice(i) => format!("[{}]", r(*i)?),
+            Ty::Array(i, n) if n < CONST_LEN_BASE => format!("[{}; {n}]", r(*i)?),
+            Ty::Array(..) | Ty::Assoc(_) => return None,
+            Ty::Str => "str".into(),
+            Ty::Unit => "()".into(),
+            Ty::Never => "!".into(),
+            Ty::Box(i) => format!("Box<{}>", r(*i)?),
+            Ty::Dyn(s) => format!("dyn {s}"),
+            Ty::Fn(f) => {
+                let ps: Vec<String> = f.params.iter().map(|&p| r(p)).collect::<Option<_>>()?;
+                match f.ret {
+                    Ty::Unit => format!("fn({})", ps.join(", ")),
+                    rt => format!("fn({}) -> {}", ps.join(", "), r(rt)?),
+                }
+            }
+            Ty::Struct(sid) => {
+                let sd = &self.structs[sid as usize];
+                let named = |b: u32| Some(&self.structs[b as usize].name).filter(|n| self.struct_index.get(*n) == Some(&b));
+                let args = || sd.args.iter().map(|&a| r(a)).collect::<Option<Vec<String>>>();
+                let text = match sd.base {
+                    Some(b) if self.is_tuple(b) => args().map(|a| if a.len() == 1 { format!("({},)", a[0]) } else { format!("({})", a.join(", ")) }),
+                    Some(b) => named(b).and_then(|n| Some(format!("{n}<{}>", args()?.join(", ")))),
+                    None => named(sid).cloned(),
+                };
+                text.unwrap_or_else(|| format!("__S{sid}"))
+            }
+            t => {
+                let n = self.tn(t);
+                n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_').then_some(n)?
+            }
+        })
     }
 
     /// Ty → TySyn (キャッシュにインスタンスを名前で書くため)
@@ -4986,7 +5170,8 @@ impl Program {
             Ty::Slice(i) => TySyn::Slice(Box::new(self.ty_syn(*i))),
             Ty::Array(i, n) => TySyn::Array(Box::new(self.ty_syn(*i)), ArrLen::Lit(n as u64)),
             Ty::Str => TySyn::Str,
-            Ty::Dyn(s) => TySyn::Dyn(s.to_string()),
+            // (a struct's mark names it: a placeholder, which no cache keeps)
+            Ty::Dyn(s) => TySyn::Dyn(self.dyn_shown(s, false)),
             Ty::Box(i) => TySyn::App("Box".into(), vec![self.ty_syn(*i)]),
             Ty::Assoc(a) => TySyn::Assoc(Box::new(self.ty_syn(a.base)), a.name.clone()),
             Ty::Fn(f) => TySyn::FnPtr(
@@ -5416,6 +5601,22 @@ impl Program {
     }
 
     /// エラーメッセージ用の型名
+    /// A `dyn` type's text with its marks (dyn_canon) as the program writes them: a struct's by its name, and (params)
+    /// a type parameter's by the parameter's name
+    fn dyn_shown(&self, s: &str, params: bool) -> String {
+        if !s.contains("__") {
+            return s.to_string();
+        }
+        crate::parse::rewrite_tokens(s, &mut |k, toks| {
+            let w = &toks[k].text;
+            if let Some(id) = dyn_struct_mark(w).filter(|&id| (id as usize) < self.structs.len()) {
+                return Some(self.tn(Ty::Struct(id)));
+            }
+            Some(dyn_param_mark(w).filter(|_| params)?.1.to_string())
+        })
+        .unwrap_or_else(|| s.to_string())
+    }
+
     pub fn tn(&self, t: Ty) -> String {
         match t {
             Ty::Ref(false, i) => format!("&{}", self.tn(*i)),
@@ -5433,7 +5634,7 @@ impl Program {
             Ty::Array(i, n) => format!("[{}; {n}]", self.tn(*i)),
             Ty::Slice(i) => format!("[{}]", self.tn(*i)),
             Ty::Str => "str".into(),
-            Ty::Dyn(s) => format!("dyn {}", s.replace(" (", "(").replace("( ", "(").replace(" )", ")")),
+            Ty::Dyn(s) => format!("dyn {}", self.dyn_shown(s, true).replace(" (", "(").replace("( ", "(").replace(" )", ")")),
             Ty::Box(i) => format!("Box<{}>", self.tn(*i)),
             Ty::Assoc(a) => format!("<{}>::{}", self.tn(a.base), a.name),
             Ty::Fn(f) => {
@@ -5834,6 +6035,22 @@ fn syn_unify(a: &TySyn, ga: &[String], b: &TySyn, gb: &[String], sub: &mut Vec<(
         }
     }
     go(a, false, b, true, [ga, gb], sub, 0)
+}
+
+/// A type parameter's mark in a `dyn` type's text (Program::dyn_canon): `__P{i}_{name}`, the parameter i written name
+fn dyn_param_mark(n: &str) -> Option<(u8, &str)> {
+    let (i, name) = n.strip_prefix("__P")?.split_once('_')?;
+    Some((i.parse().ok()?, name))
+}
+
+/// A struct's mark in a `dyn` type's text (Program::dyn_src): `__S{id}`, struct id
+fn dyn_struct_mark(n: &str) -> Option<u32> {
+    n.strip_prefix("__S")?.parse().ok()
+}
+
+/// The type parameters a `dyn` type's text marks
+fn dyn_marks(s: &str) -> impl Iterator<Item = u8> + '_ {
+    s.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter_map(|w| dyn_param_mark(w).map(|x| x.0))
 }
 
 /// t names a generic type (`Vec<u8>`) or an alias (one may stand for one)

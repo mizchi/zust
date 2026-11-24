@@ -2856,7 +2856,8 @@ impl Cx<'_> {
             }
         }
         for (i, (a, &pt)) in args.iter().zip(&sig0.params[skip..]).enumerate() {
-            let mut exp = Some(self.prog.partial_subst(pt, &sol)).filter(|&t| !self.prog.has_param(t));
+            // (a `dyn` type's parameters not known yet: by their names, as written (`Box<dyn Fn(T) -> T>`))
+            let mut exp = Some(self.prog.dyn_unmarked(self.prog.partial_subst(pt, &sol))).filter(|&t| !self.prog.has_param(t));
             // (an argument for a type parameter not known yet (`fn g<T>(x: T)`): no coercion site, so a `&mut` local
             // passed is moved, not reborrowed (E0382 when it is used after))
             let to_param = exp.is_none() && matches!(pt, Ty::Param(_));
@@ -3237,7 +3238,10 @@ impl Cx<'_> {
         } else {
             None
         };
-        for ((v, t, sp), &pt) in vals.into_iter().zip(&sig.params) {
+        for (k, ((v, t, sp), &pt)) in vals.into_iter().zip(&sig.params).enumerate() {
+            // (a value coerced to a `dyn` type with the names of the parameters not known then (dyn_unmarked): the
+            // instance's type, as the parameters only name the trait's arguments)
+            let t = if t != pt && sig0.params.get(k).is_some_and(|&g| self.prog.has_param(g) && self.prog.dyn_unmarked(g) == t) { pt } else { t };
             let (v, t) = if matches!(pt, Ty::Ref(false, Ty::Str)) {
                 let (v2, t2) = self.deref_coerce(Some(v), t, pt);
                 (v2.unwrap_or(v), t2)
