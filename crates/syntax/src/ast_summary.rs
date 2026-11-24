@@ -756,7 +756,6 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         export: false,
         panic_handler: false,
         ret_from: ret_from(sig),
-        opaque_from: opaque_from(sig),
         regions: {
             let otp: Vec<&str> = owner.map(|o| o.generics.iter().map(|g| g.0.as_str()).collect()).unwrap_or_default();
             crate::regions::sig_regions(sig, owner.and_then(|o| o.regions.as_deref()), &otp)
@@ -1388,7 +1387,7 @@ fn ret_from(sig: &PSig) -> u64 {
     let (mut rl, mut relided, mut opaque) = (vec![], false, false);
     lifetimes(ret, &mut rl, &mut relided, &mut opaque);
     if opaque {
-        return 0;
+        return opaque_from(sig);
     }
     // (a lifetime declared to outlive one of the result's may be the result's too: `fn f<'a, 'b: 'a>(x: &'b T) -> &'a T`)
     // (and so may one a parameter's projection implies to: `<&'a &'b () as Tr>::Type`)
@@ -1433,19 +1432,18 @@ fn ret_from(sig: &PSig) -> u64 {
     KNOWN | mask
 }
 
-/// SigSyn::opaque_from: the arguments a result `impl Trait` may borrow from. Edition 2024 captures every lifetime in
-/// scope (the arguments' elided ones too) unless `use<..>` lists them; 2021 only those its bounds name
-/// (`impl Display + 'a`). [2024, 2021], each as ret_from (bit 63: known)
-fn opaque_from(sig: &PSig) -> (u64, u64) {
-    const KNOWN: u64 = 1 << 63;
-    let Some(PTy::Impl(bs)) = &sig.ret else { return (0, 0) };
+/// SigSyn::ret_from of a result `impl Trait` (OPAQUE_FROM): the arguments it may borrow from. Edition 2024 captures
+/// every lifetime in scope (the arguments' elided ones too) unless `use<..>` lists them; 2021 only those its bounds
+/// name (`impl Display + 'a`). 0 (not known) for another opaque result, or more than 31 arguments
+fn opaque_from(sig: &PSig) -> u64 {
+    let Some(PTy::Impl(bs)) = &sig.ret else { return 0 };
     let mut inputs: Vec<&PTy> = vec![];
     if let Some(r) = &sig.recv_ty {
         inputs.push(r);
     }
     inputs.extend(sig.params.iter().map(|p| &p.1));
-    if inputs.len() > 62 {
-        return (0, 0);
+    if inputs.len() > 31 {
+        return 0;
     }
     // (`use<'a, T>`: parsed as a bound named `use`)
     let used: Option<Vec<String>> = bs.iter().find_map(|b| match b {
@@ -1466,7 +1464,7 @@ fn opaque_from(sig: &PSig) -> (u64, u64) {
         }
     }
     let mask = |pick: &dyn Fn(&[String], bool) -> bool| {
-        let mut m = KNOWN;
+        let mut m = 0u64;
         for (i, t) in inputs.iter().enumerate() {
             let (mut l, mut e, mut o) = (vec![], false, false);
             lifetimes(t, &mut l, &mut e, &mut o);
@@ -1477,13 +1475,14 @@ fn opaque_from(sig: &PSig) -> (u64, u64) {
         }
         m
     };
-    match &used {
+    let (m24, m21) = match &used {
         Some(u) => {
             let m = mask(&|l: &[String], _: bool| l.iter().any(|x| u.contains(x)));
             (m, m)
         }
         None => (mask(&|l: &[String], e: bool| e || !l.is_empty()), mask(&|l: &[String], _: bool| l.iter().any(|x| named.contains(x)))),
-    }
+    };
+    crate::types::OPAQUE_FROM | m24 | m21 << 31
 }
 
 /// `Fn(A, B) -> R` 形式の境界なら (種類, 引数, 戻り値)

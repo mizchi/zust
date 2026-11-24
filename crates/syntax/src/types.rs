@@ -283,12 +283,10 @@ pub struct SigSyn {
     /// `unsafe fn`, or a fn of an `extern` block (calling it needs `unsafe`, E0133)
     pub is_unsafe: bool,
     /// Which reference arguments the return value may borrow from (borrow checking): bit i for argument i (self
-    /// first), bit 63 set when known. 0: not known (any of them)
+    /// first), bit 63 set when known. 0: not known (any of them). With bit 62 instead (OPAQUE_FROM), a result
+    /// `impl Trait`: bits 0..31 the arguments it may borrow from by edition 2024's rules (every lifetime of the
+    /// arguments, or those of its `use<..>`), bits 31..62 by 2021's (the lifetimes its bounds name)
     pub ret_from: u64,
-    /// For a result `impl Trait`: the arguments it may borrow from, as ret_from, by edition 2024's rules (every
-    /// lifetime of the arguments, or those of its `use<..>`) and by 2021's (the lifetimes its bounds name). 0 for
-    /// another result
-    pub opaque_from: (u64, u64),
     /// The regions of the signature (None: it writes no reference and no lifetime, so every region in it is elided)
     pub regions: Option<Box<RSigSyn>>,
 }
@@ -541,6 +539,8 @@ pub const CONST_LEN_BASE: u32 = 0xFFFF_FF00;
 /// 戻り値位置の `impl Trait` の仮の型名
 pub const IMPL_RET: &str = "impl Trait";
 /// クロージャでない `impl Trait` の戻り値 (`-> impl Iterator<Item = u32>`): 本体の型推論で決める
+/// SigSyn::ret_from's mark for a result `impl Trait`
+pub const OPAQUE_FROM: u64 = 1 << 62;
 pub const OPAQUE_RET: &str = "impl Trait (opaque)";
 /// `-> Option<impl Debug>`: `App(OPAQUE_NESTED, [the declared type with each impl Trait as _])`. The whole type comes
 /// from the body, as for OPAQUE_RET; the declared type is resolved only for the names it does not find

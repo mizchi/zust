@@ -42,8 +42,6 @@ pub struct FnSig {
     pub is_unsafe: bool,
     /// SigSyn::ret_from (which reference arguments the return value may borrow from)
     pub ret_from: u64,
-    /// SigSyn::opaque_from
-    pub opaque_from: (u64, u64),
     /// SigSyn::regions
     pub regions: Option<std::sync::Arc<crate::types::RSigSyn>>,
 }
@@ -813,7 +811,6 @@ impl Insts {
             export: false,
             panic_handler: false,
             ret_from: b.ret_from,
-            opaque_from: b.opaque_from,
             is_unsafe: b.is_unsafe,
             // (of the generic signature: its slots leave out the type parameters' own)
             regions: b.regions.clone(),
@@ -1711,7 +1708,6 @@ impl Program {
                     export: ss.export,
                     panic_handler: ss.panic_handler,
                     ret_from: ss.ret_from,
-                    opaque_from: ss.opaque_from,
                     is_unsafe: ss.is_unsafe,
                     regions: ss.regions.as_deref().map(|r| std::sync::Arc::new(r.clone())),
                 });

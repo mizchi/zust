@@ -3367,16 +3367,21 @@ impl Cx<'_> {
     }
 
 /// Whether the result of calling id may borrow from its argument i (self is 0)
-    /// init is a call of a fn whose result `impl Trait` may borrow from some argument (SigSyn::opaque_from, by the
+    /// init is a call of a fn whose result `impl Trait` may borrow from some argument (SigSyn::ret_from with OPAQUE_FROM, by the
     /// edition)
     pub(crate) fn bk_opaque_call(&self, init: &Expr) -> bool {
         let Expr::Call(f, _) = strip_paren(init) else { return false };
         let Some((_, sig)) = self.callee(f) else { return false };
-        let m = match sig.opaque_from {
-            (a, _) if a != 0 && self.prog.edition >= 2024 => a,
-            (_, b) => b,
-        };
-        m & !(1 << 63) != 0
+        self.bk_opaque_mask(sig.ret_from).is_some_and(|m| m & !(1 << 63) != 0)
+    }
+
+    /// A result `impl Trait`'s ret_from (SigSyn::ret_from, OPAQUE_FROM) by the edition's rules, as a known ret_from
+    fn bk_opaque_mask(&self, rf: u64) -> Option<u64> {
+        if rf >> 63 & 1 == 1 || rf & crate::types::OPAQUE_FROM == 0 {
+            return None;
+        }
+        let m = if self.prog.edition >= 2024 { rf & ((1 << 31) - 1) } else { rf >> 31 & ((1 << 31) - 1) };
+        Some(1 << 63 | m)
     }
 
     pub(crate) fn bk_ret_from(&self, id: u32, i: usize) -> bool {
@@ -3426,11 +3431,7 @@ impl Cx<'_> {
         }
         // (a result `impl Trait`: what it captures, by the edition's rules (`fn f(x: &Vec<T>) -> impl Display` holds
         //  the borrow of x from 2024))
-        let m = match sig.opaque_from {
-            (a, _) if a != 0 && self.prog.edition >= 2024 => a,
-            (_, b) if b != 0 => b,
-            _ => sig.ret_from,
-        };
+        let m = self.bk_opaque_mask(sig.ret_from).unwrap_or(sig.ret_from);
         // (not known: say no, so that a borrow is never kept alive by a guess)
         m != 0 && i < 63 && m >> i & 1 == 1
     }
