@@ -381,10 +381,15 @@ fn direct_temps_in(prog: &Program, e: &Expr, in_let: bool, out: &mut Vec<usize>)
         // `consume({ (Some(&temp()),) })`) its arguments are a call's)
         Expr::Call(f, a) if in_let && is_ctor_path(prog, f) => {
             for x in a {
-                if !matches!(strip(x), Expr::Ref(..)) {
-                    direct_temps_in(prog, x, in_let, out);
-                }
+                direct_temps_in(prog, x, in_let, out);
             }
+            return;
+        }
+        // (a `&` there (a constructor's argument, a tuple's field): what it borrows is extended, not the receiver of a
+        // method it is made from, as for the `let`'s own `&` (direct_ref_recv): `let r = Some(&*temp().get());` used
+        // after is E0716)
+        Expr::Ref(..) if in_let => {
+            direct_ref_recv(prog, e, out);
             return;
         }
         Expr::Call(_, a) => a,
@@ -2126,7 +2131,14 @@ impl Cx<'_> {
     pub(crate) fn takes_whole(&self, q: &Pat) -> bool {
         match q {
             Pat::Or(ps) => !ps.is_empty() && ps.iter().all(|p| self.takes_whole(p)),
-            Pat::Ident(_, _, n, sub) => pat_takes_whole(q) && !(sub.is_none() && self.prog.const_index.contains_key(n.as_str())),
+            // (not a constant's name, nor a unit variant's in scope (`none` of `use G::*;`): the pattern compares with
+            // it. A static's is a binding (no pattern names a static))
+            Pat::Ident(_, _, n, sub) => {
+                pat_takes_whole(q)
+                    && !(sub.is_none()
+                        && (self.prog.const_index.get(n.as_str()).is_some_and(|&ci| self.prog.consts[ci as usize].stat.is_none())
+                            || super::unit_variant_ident(self.prog, q).is_some()))
+            }
             _ => false,
         }
     }

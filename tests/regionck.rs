@@ -3346,3 +3346,17 @@ fn part18_review() {
     let d = check("fn fixed(x: &i32) -> &i32 { x }\nfn main() {\n    let f: fn(&i32) -> &i32 = fixed;\n    let r;\n    {\n        let x = 1;\n        r = f(&x);\n    }\n    println!(\"{}\", r);\n}\n");
     assert!(d.len() == 1 && d[0].0 == 7, "{d:?}");
 }
+
+#[test]
+fn part18_review2() {
+    // (a `&*` of a method's result in a `let`'s constructor argument or tuple field: the method's receiver is the
+    // statement's, as for the `let`'s own `&`)
+    let h = "struct H(String);\nimpl H { fn get(&self) -> &String { &self.0 } }\nfn temp() -> H { H(String::from(\"x\")) }\n";
+    for init in ["Some(&*temp().get())", "(&*temp().get(),)", "Some(Some(&*temp().get()))"] {
+        let d = check(&format!("{h}fn main() {{\n    let r = {init};\n    println!(\"{{:?}}\", r);\n}}\n"));
+        assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("E0716"), "{init}: {d:?}");
+    }
+    assert_eq!(check(&format!("{h}fn t2() -> String {{ String::from(\"y\") }}\nfn main() {{\n    let a = Some(&temp().get().len());\n    let b = Some((&t2(), Some(&t2())));\n    let c = Some(&temp().0);\n    println!(\"{{:?}} {{:?}} {{:?}}\", a, b, c);\n}}\n")), vec![]);
+    // (a binding named as another module's static binds the whole value)
+    assert_eq!(check("mod m {\n    #[allow(non_upper_case_globals)]\n    pub static val: i32 = 1;\n}\nstruct G<'a>(&'a mut i32);\nimpl Drop for G<'_> { fn drop(&mut self) { *self.0 += 1; } }\nfn mk(n: &mut i32) -> Option<G<'_>> { Some(G(n)) }\nfn main() {\n    let mut n = 0;\n    match mk(&mut n) {\n        val => { drop(val); n = 1; }\n    };\n    println!(\"{} {}\", n, m::val);\n}\n"), vec![]);
+}
