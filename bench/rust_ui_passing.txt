@@ -5918,6 +5918,8 @@ run-pass	privacy/pub-priv-dep/std-pub.rs
 run-pass	privacy/pub-restricted-path-usage-55376.rs
 run-pass	privacy/required-pub-in-blocks.rs
 check-pass	privacy/restricted/private-in-public.rs
+compile-fail	privacy/sealed-traits/false-sealed-traits-note.rs
+compile-fail	privacy/sealed-traits/sealed-trait-local.rs
 compile-fail	privacy/suggest-box-new.rs
 compile-fail	privacy/suggest-new-projection-ice.rs
 compile-fail	privacy/trait-object-method-error.rs
@@ -7037,6 +7039,7 @@ compile-fail	suggestions/issue-82566-2.rs
 compile-fail	suggestions/issue-83943.rs
 compile-fail	suggestions/issue-84592.rs
 compile-fail	suggestions/issue-84700.rs
+compile-fail	suggestions/issue-84973-2.rs
 compile-fail	suggestions/issue-84973-negative.rs
 compile-fail	suggestions/issue-84973.rs
 compile-fail	suggestions/issue-85347.rs
@@ -7284,6 +7287,7 @@ check-pass	trait-bounds/issue-94999.rs
 compile-fail	trait-bounds/negative-bound-not-supported-58857.rs
 compile-fail	trait-bounds/ownership-mismatch-on-arg.rs
 compile-fail	trait-bounds/sort-missing-ord-bound.rs
+compile-fail	trait-bounds/super-assoc-mismatch.rs
 compile-fail	trait-bounds/trait-bound-adt-issue-145611.rs
 compile-fail	trait-bounds/trait-selection-overflow-prevention-72839.rs
 compile-fail	traits/alias/generic-default-in-dyn.rs
@@ -7388,6 +7392,9 @@ run-pass	traits/impl-inherent-prefer-over-trait.rs
 run-pass	traits/impl-object-overlap-issue-23853.rs
 check-pass	traits/impl_trait_as_trait_return_position.rs
 compile-fail	traits/incoherent-impl-ambiguity.rs
+compile-fail	traits/inductive-overflow/simultaneous.rs
+compile-fail	traits/inductive-overflow/supertrait.rs
+compile-fail	traits/inductive-overflow/two-traits.rs
 run-pass	traits/infer-from-object-issue-26952.rs
 run-pass	traits/inheritance/auto.rs
 run-pass	traits/inheritance/basic.rs
@@ -7420,6 +7427,7 @@ build-pass	traits/issue-104322.rs
 compile-fail	traits/issue-105231.rs
 compile-fail	traits/issue-106072.rs
 run-pass	traits/issue-15155.rs
+compile-fail	traits/issue-18400.rs
 run-pass	traits/issue-18412.rs
 compile-fail	traits/issue-21837.rs
 run-pass	traits/issue-22019.rs
