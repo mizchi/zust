@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795499273520,
+  "lastUpdate": 1795499275684,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -113657,6 +113657,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/e180023dc571235afed5b8ee258e26c8c6ddf6e5"
         },
         "date": 1795497644160,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.4,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1846,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.06,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1519,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 63.47,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4670,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "1061d587bc0188afc5edaf18a49588703266ca1e",
+          "message": "Merge pull request #113 from mizchi/docs/zustscript-markdown-page\n\nGenerate the zustscript introduction from Markdown",
+          "timestamp": "2026-11-24T14:37:33+09:00",
+          "tree_id": "ae6b729d7a459db8f53e2bc7d1849919bd5ec928",
+          "url": "https://github.com/mizchi/zust/commit/1061d587bc0188afc5edaf18a49588703266ca1e"
+        },
+        "date": 1795499275447,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
