@@ -2649,8 +2649,8 @@ impl Program {
                 ) {
                     self.structs[sid as usize].fields.iter().all(|f| self.implements(f.1, tr))
                 } else {
-                    // ユーザの `impl<A, B> Tr for (A, B)`
-                    self.impls.contains(&(self.base_of(sid), tr.to_string()))
+                    // ユーザの `impl<A, B> Tr for (A, B)`: its self type matches t, and its bounds hold (as a struct's)
+                    self.impls.contains(&(self.base_of(sid), tr.to_string())) && self.impl_applies(t, tr)
                 }
             }
             // prelude のコレクションと Option は Default (空 / None。中身が 0 のビット列)

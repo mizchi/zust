@@ -30,7 +30,7 @@ lookup of trait bounds did not call it. It was used only by one path of method c
 
 ## What changed
 
-- **Struct impls**: `implements_concrete` requires `impl_applies` too. The impl's self type must match, and its bounds
+- **Struct and tuple impls**: `implements_concrete` requires `impl_applies` too (`impl Foo for (i32,)` is not for `(u8,)`). The impl's self type must match, and its bounds
   must hold: those of its parameters and of its where clauses on them, which the summaries already merge.
 - **Blanket impls**: `implements` takes a blanket impl of `tr` only when `t` meets its bounds (`blanket_holds`).
   A trait object is exempt: `dyn Trait` implements `Trait`'s supertraits by itself, whatever a blanket impl of one

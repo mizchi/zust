@@ -1038,6 +1038,12 @@ fn impl_bounds_are_nested_goals() {
     ok("trait A {}\ntrait B: A {}\nstruct C;\nimpl A for C {}\nimpl B for C {}\nfn main() {}");
     // (two blanket impls of one trait each have their own bounds: one that holds is enough)
     ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: A> Tr<u8> for T {}\nimpl<T: B> Tr<u16> for T {}\nimpl A for i32 {}\nfn need2<T: Tr<u8>>(_: T) {}\nfn main() { need2(1i32); }");
+    // (tuples: the impl's self type and bounds, as for a struct)
+    bad("impl Foo for (i32,) {}\nfn main() { need((1u8,)); }");
+    ok("impl Foo for (i32,) {}\nfn main() { need((1i32,)); }");
+    bad("impl<T: Bar> Foo for (T,) {}\nfn main() { need((1u8,)); }");
+    ok("impl<T: Bar> Foo for (T,) {}\nfn main() { need((1i32,)); }");
+    ok("impl Foo for (i32, u8) {}\nimpl Foo for (u8, i32) {}\nfn main() { need((1u8, 2i32)); }");
     // (a raw pointer's mutability is part of the impl's self type)
     bad("impl Foo for W<*const i32> {}\nfn main() { let mut x = 1; need(W(&mut x as *mut i32)); }");
     ok("impl Foo for W<*const i32> {}\nfn main() { let x = 1; need(W(&x as *const i32)); }");

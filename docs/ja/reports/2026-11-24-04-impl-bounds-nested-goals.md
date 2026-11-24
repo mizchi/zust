@@ -25,7 +25,7 @@ impl Foo for W<i32> {}                // need(W(1u8))
 
 ## 変えたこと
 
-- **構造体への impl**: `implements_concrete` は `impl_applies` も求める。impl の自己型が一致し、境界が成り立たなければならない。境界は、型パラメータの境界と、それらに対する where 句の境界で、要約がもともと一つにまとめている。
+- **構造体とタプルへの impl**: `implements_concrete` は `impl_applies` も求める（`impl Foo for (i32,)` は `(u8,)` への impl ではない）。impl の自己型が一致し、境界が成り立たなければならない。境界は、型パラメータの境界と、それらに対する where 句の境界で、要約がもともと一つにまとめている。
 - **ブランケット impl**: `implements` が `tr` のブランケット impl を使うのは、`t` がその境界を満たすときだけ（`blanket_holds`）。trait オブジェクトは例外にした。`dyn Trait` は `Trait` の supertrait を自分で実装するので、ブランケット impl が何を求めても関係ない（`traits/stack-error-order-dependence.rs`）。
 - **入れ子の goal**: それぞれの境界を `goal_holds` で証明する。`goal_holds` は証明中の goal のスタックを持つ。
   - すでにスタックにある goal（循環: `impl<T: Q> P for T` と `impl<T: P> Q for T`）は成り立つとみなす。
