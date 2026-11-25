@@ -778,8 +778,8 @@ pub struct Session {
     const_lines: Vec<usize>,
     /// their fns' names' prefix (CONST_CHECK_FN, or another when the program writes that)
     const_fn: String,
-    /// In a check_workspace: each crate's errors, as `file:line:col: message` (and no objects are written)
-    ws_diags: Option<Vec<(String, Vec<String>)>>,
+    /// In a check_workspace: each crate's result (and no objects are written)
+    ws_diags: Option<Vec<CrateCheck>>,
 }
 
 impl Session {

@@ -13,7 +13,7 @@ use crate::platform::Target;
 use crate::resolve::{self, Graph, Mode, Node, Opts};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use zustc::session::{CrateSpec, Options, Session};
+use zustc::session::{CrateCheck, CrateSpec, Options, Session};
 
 type R<T> = Result<T, String>;
 
@@ -584,9 +584,9 @@ fn session_opts(o: &BuildOpts) -> R<Options> {
 }
 
 /// `zurgo check`: the crates a build would compile (build scripts and proc macros run as for a build), each one
-/// checked (Session::check_workspace) and none compiled to an object. Each crate's errors, in dependency order:
-/// (crate, `file:line:col: message`). A crate's errors do not stop the check of the crates after it
-pub fn check(g: &Graph, o: &BuildOpts) -> R<Vec<(String, Vec<String>)>> {
+/// checked (Session::check_workspace) and none compiled to an object. Each crate's errors (`file:line:col:
+/// message`), in dependency order. A crate's errors do not stop the check of the crates after it
+pub fn check(g: &Graph, o: &BuildOpts) -> R<Vec<CrateCheck>> {
     let out = out_dir(g, o);
     std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
     let _lock = build_script::lock_file(&out.join(".zurgo-lock"))?;

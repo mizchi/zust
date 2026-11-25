@@ -339,7 +339,12 @@ fn check_reports_every_error() {
     let sc = Scratch::new("check");
     let d = sc.0.clone();
     sc.write(&[
-        ("app/Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[dependencies]\nutil = { path = \"../util\" }\n"),
+        (
+            "app/Cargo.toml",
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[dependencies]\nutil = { path = \"../util\" }\nother = { path = \"../other\" }\n",
+        ),
+        ("other/Cargo.toml", "[package]\nname = \"other\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        ("other/src/lib.rs", "pub fn three() -> u32 {\n    3\n}\n"),
         ("app/src/main.rs", "fn main() {\n    println!(\"{}\", util::one() + util::two());\n    let s: String = 5;\n}\n"),
         ("util/Cargo.toml", "[package]\nname = \"util\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
         ("util/src/lib.rs", "pub fn one() -> u32 {\n    1\n}\npub fn bad_a() -> u32 {\n    \"a\"\n}\npub fn two() -> u32 {\n    2\n}\npub fn bad_b(x: u8) -> bool {\n    x + 1\n}\n"),
@@ -370,14 +375,41 @@ fn check_reports_every_error() {
     ]);
     let _ = std::fs::remove_dir_all(&t);
     let (ok, _, err) = zurgo(&["check"], &m, &t);
-    assert!(ok && err.contains("Finished checking 2 crates"), "{err}");
+    assert!(ok && err.contains("Finished checking 3 crates"), "{err}");
     assert!(files_with(&t, ".o").is_empty(), "a check wrote objects: {:?}", files_with(&t, ".o"));
     let (ok, out, err) = zurgo(&["run"], &m, &t);
     assert!(ok && out == "3\n", "{out}{err}");
-    // (a check after a build: the crates are checked again, not taken as fresh from their objects)
+    // (a check right after the build, nothing edited: the crates are checked again, not taken as fresh from their
+    // objects, which stay as they are)
+    let stamps = |t: &Path| -> Vec<(PathBuf, std::time::SystemTime)> {
+        let mut v: Vec<_> = files_with(t, ".o").into_iter().map(|p| (p.clone(), std::fs::metadata(&p).unwrap().modified().unwrap())).collect();
+        v.sort();
+        v
+    };
+    let before = stamps(&t);
+    assert!(!before.is_empty());
+    let (ok, _, err) = zurgo(&["check", "--time"], &m, &t);
+    assert!(ok && err.contains("Finished checking 3 crates") && !err.contains(" fresh"), "{err}");
+    assert_eq!(stamps(&t), before, "a check wrote objects");
+    // (and an error after the build is found)
     sc.write(&[("util/src/lib.rs", "pub fn one() -> u32 {\n    1\n}\npub fn two() -> u32 {\n    2\n}\nfn unused() -> u8 {\n    'c'\n}\n")]);
     let (ok, _, err) = zurgo(&["check"], &m, &t);
     assert!(!ok && err.contains(&format!("{lib}:8:5: mismatched types")) && err.contains("1 error in 1 crate"), "{err}");
+    // (a crate that cannot be expanded: its error, and the crates that use it are not checked; the others are)
+    sc.write(&[
+        ("util/src/lib.rs", "macro_rules! m {\n    () => {};\n}\nm!(x);\npub fn one() -> u32 {\n    1\n}\npub fn two() -> u32 {\n    2\n}\n"),
+        ("other/src/lib.rs", "pub fn three() -> u32 {\n    true\n}\n"),
+    ]);
+    let (ok, _, err) = zurgo(&["check"], &m, &t);
+    let other = d.join("other/src/lib.rs").display().to_string();
+    for want in [
+        format!("error: crate `util`: {lib}:4:1: no rules of `m!` matched this call"),
+        format!("error: crate `other`: {other}:2:5: mismatched types: expected `u32`, found `bool`"),
+        "warning: crate `app` not checked: its dependency `util` could not be read or expanded".to_string(),
+        "error: 2 errors in 2 crates".to_string(),
+    ] {
+        assert!(!ok && err.contains(&want), "missing `{want}`:\n{err}");
+    }
 }
 
 #[test]

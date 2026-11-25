@@ -122,20 +122,22 @@ fn main() {
         }
         "check" | "c" => {
             let t0 = std::time::Instant::now();
-            let diags = compile::check(&g, &o).unwrap_or_else(|e| die(&e));
-            let n: usize = diags.iter().map(|(_, d)| d.len()).sum();
-            for (krate, ds) in &diags {
-                for d in ds {
-                    // (a program's type renamed against the prelude's: its own name, as zustc shows it)
-                    eprintln!("error: crate `{krate}`: {}", d.replace("__u_", ""));
+            let checks = compile::check(&g, &o).unwrap_or_else(|e| die(&e));
+            let n: usize = checks.iter().map(|c| c.errors.len()).sum();
+            for c in &checks {
+                for d in &c.errors {
+                    eprintln!("error: crate `{}`: {d}", c.name);
+                }
+                if let Some(dep) = &c.blocked_by {
+                    eprintln!("warning: crate `{}` not checked: its dependency `{dep}` could not be read or expanded", c.name);
                 }
             }
             if n > 0 {
-                let bad = diags.iter().filter(|(_, d)| !d.is_empty()).count();
+                let bad = checks.iter().filter(|c| !c.errors.is_empty()).count();
                 eprintln!("error: {n} error{} in {bad} crate{}", if n == 1 { "" } else { "s" }, if bad == 1 { "" } else { "s" });
                 std::process::exit(1);
             }
-            eprintln!("    Finished checking {} crate{} in {:.2}s (zustc)", diags.len(), if diags.len() == 1 { "" } else { "s" }, t0.elapsed().as_secs_f64());
+            eprintln!("    Finished checking {} crate{} in {:.2}s (zustc)", checks.len(), if checks.len() == 1 { "" } else { "s" }, t0.elapsed().as_secs_f64());
         }
         "run" | "r" => {
             // (without `--bin`: the `default-run` of the selected package, as cargo chooses)

@@ -857,6 +857,16 @@ fn trap_table_ci(prog: &Program) -> u32 {
     prog.const_index.get("__EXR_TRAP_TABLE").copied().unwrap_or(0)
 }
 
+/// A crate's result in a check of a workspace (Session::check_workspace)
+#[derive(Clone, Debug, Default)]
+pub struct CrateCheck {
+    pub name: String,
+    /// its errors, as `file:line:col: message`
+    pub errors: Vec<String>,
+    /// not checked: the dependency whose source could not be read or expanded (that one's error is in its errors)
+    pub blocked_by: Option<String>,
+}
+
 /// One crate of a workspace
 #[derive(Clone, Debug)]
 pub struct CrateSpec {
@@ -1240,7 +1250,9 @@ impl Session {
         }
         let src = self.ws_source(crates, loaded, dep_loaded, prune, i, deps);
         let diags = self.check(&src);
-        let out = diags.iter().map(|d| self.ctx.map.relocate_err(&format!("{}:{}: {}", d.line, d.col, d.msg))).collect();
+        // (a program's type renamed against the prelude's: its own name, as zustc shows it; in the message only, not
+        // in the file's path)
+        let out = diags.iter().map(|d| self.ctx.map.relocate_err(&format!("{}:{}: {}", d.line, d.col, d.msg.replace("__u_", "")))).collect();
         self.ctx = CrateCtx::default();
         out
     }
@@ -1389,8 +1401,10 @@ impl Session {
 
     /// Checks a workspace (`zurgo check`): every crate, in dependency order, as build_workspace prepares it, and
     /// each one's errors instead of its object (Session::check). A crate's errors do not stop the others: a crate
-    /// uses its dependencies' sources, not their objects. Writes no objects nor fingerprints
-    pub fn check_workspace(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path) -> R<Vec<(String, Vec<String>)>> {
+    /// uses its dependencies' sources, not their objects. A crate whose source cannot be read or expanded has that
+    /// error, and the crates that use it are not checked (they have no interface of it to use). Writes no objects
+    /// nor fingerprints
+    pub fn check_workspace(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path) -> R<Vec<CrateCheck>> {
         self.ws_diags = Some(vec![]);
         let r = self.build_workspace(crates, out_dir);
         let d = self.ws_diags.take().unwrap_or_default();
@@ -1418,6 +1432,10 @@ impl Session {
         };
         let order = topo(crates)?;
         mkdir_all(out_dir)?;
+        // (a check (check_workspace): a crate whose source cannot be read, or expanded, has that error, and the
+        // crates that use it are not checked; the others are)
+        let checking = self.ws_diags.is_some();
+        let mut prep_err: Vec<Option<String>> = vec![None; crates.len()];
         // (the sources of the crates read: name → (the text made into `pub mod name { .. }`, the file map))
         let mut loaded: Vec<Option<(String, crate::srcmap::SrcMap)>> = vec![None; crates.len()];
         for &i in &order {
@@ -1425,7 +1443,14 @@ impl Session {
             // (a workspace's crates have no edition of their own here (zurgo gives each package's to rustc only): the
             // edition-dependent token checks stay off, as an edition 2018 package may write `m!(foo#bar)`)
             let cfg = crate::cfg::CfgSet { edition: 0, ..self.opts.cfg_of(&c.features, &c.cfgs, &c.env) };
-            let (text, map) = crate::srcmap::load_crate(c.root.as_path(), &c.display, &cfg)?;
+            let (text, map) = match crate::srcmap::load_crate(c.root.as_path(), &c.display, &cfg) {
+                Ok(v) => v,
+                Err(e) if checking => {
+                    prep_err[i] = Some(e);
+                    Default::default()
+                }
+                Err(e) => return Err(e),
+            };
             let text = if c.test { with_harness(&text, &c.display, &self.opts.cfg_of(&c.features, &c.cfgs, &c.env)) } else { text };
             let text = if c.lib { format!("pub mod {} {{ {text}\n}}\n", c.name) } else { text };
             loaded[i] = Some((text, map));
@@ -1550,18 +1575,32 @@ impl Session {
                 .map(|i| if need[i] { crate::macros::macro_defs(&loaded[i].as_ref().unwrap().0) } else { String::new() })
                 .collect();
             for &i in &order {
-                if !need[i] {
+                if !need[i] || (checking && (prep_err[i].is_some() || all_deps(i).iter().any(|&j| prep_err[j].is_some()))) {
                     continue;
                 }
                 let (text, map) = loaded[i].clone().unwrap();
                 let mut dd = String::new();
                 // (the proc-macro crates it reaches: directly, or through the libraries that re-export their macros)
                 let mut pms: Vec<crate::pm::Lib> = vec![];
+                let mut pm_err = None;
                 for j in all_deps(i) {
                     dd.push_str(&defs[j]);
                     if let Some(p) = &crates[j].proc_macro {
-                        pms.push(crate::pm::load(&crates[j].name, p).map_err(|e| format!("crate `{}`: the proc-macro crate `{}`: {e}", crates[i].name, crates[j].name))?);
+                        match crate::pm::load(&crates[j].name, p) {
+                            Ok(l) => pms.push(l),
+                            Err(e) => {
+                                pm_err = Some(format!("the proc-macro crate `{}`: {e}", crates[j].name));
+                                break;
+                            }
+                        }
                     }
+                }
+                if let Some(e) = pm_err {
+                    if !checking {
+                        return Err(format!("crate `{}`: {e}", crates[i].name));
+                    }
+                    prep_err[i] = Some(e);
+                    continue;
                 }
                 // (which of their macros the libraries re-export, and under what names: `re::answer!()`. From their
                 // expanded text, prepared before this crate's: a `pub use` a macro of theirs gives counts too)
@@ -1623,12 +1662,17 @@ impl Session {
                     full.push_str(marker);
                     full.push_str(&dd);
                     let cfg = self.opts.cfg_of(&crates[i].features, &crates[i].cfgs, &crates[i].env);
-                    match crate::macros::expand_with(&full, Some(&cfg), &pms).map_err(|e| format!("crate `{}`: {}", crates[i].name, map.relocate_err(&e)))? {
-                        Some(t) => match t.find(marker) {
+                    match crate::macros::expand_with(&full, Some(&cfg), &pms) {
+                        Ok(Some(t)) => match t.find(marker) {
                             Some(k) => t[..k].to_string(),
                             None => t,
                         },
-                        None => text.clone(),
+                        Ok(None) => text.clone(),
+                        Err(e) if checking => {
+                            prep_err[i] = Some(map.relocate_err(&e));
+                            continue;
+                        }
+                        Err(e) => return Err(format!("crate `{}`: {}", crates[i].name, map.relocate_err(&e))),
                     }
                 };
                 let stub = crate::stub::interface_text(&exp);
@@ -1641,6 +1685,9 @@ impl Session {
             }
             if self.opts.time {
                 eprintln!("  {:<12} {:>8.2} ms", "(prepare)", (now_ns() - t2) as f64 / 1e6);
+            }
+            if checking {
+                stale.retain(|&(i, _)| prep_err[i].is_none() && all_deps(i).iter().all(|&j| prep_err[j].is_none()));
             }
             // The precise fingerprint: own (expanded) source, and the items of the dependency crates' interfaces reachable by name from it.
             // If it is the same as last time, do not rebuild (only unused parts of the dependency crates changed: since the bodies are removed, the signatures of the fns of
@@ -1680,13 +1727,28 @@ impl Session {
         // (crates use only each other's sources (not the .o), so the stale ones are forked and compiled concurrently)
         // (a check (check_workspace): here, one after another, each crate's errors kept)
         // (an error in a dependency's lines that an earlier crate reported, as it is: once)
-        if self.ws_diags.is_some() {
+        if checking {
             let mut seen: FxSet<String> = FxSet::default();
-            for (i, _) in std::mem::take(&mut stale) {
-                let mut d = self.check_one(crates, &own_v, &dep_v, (&dep_items_all, match &reach_of[i] { Some(v) => Some(v.as_slice()), None => None }), i, &all_deps(i), out_dir);
-                d.retain(|e| seen.insert(e.clone()));
+            let mut is_stale = vec![false; crates.len()];
+            for &(i, _) in &stale {
+                is_stale[i] = true;
+            }
+            let failed: Vec<bool> = prep_err.iter().map(Option::is_some).collect();
+            for &i in &order {
+                let name = crates[i].name.clone();
+                let r = if let Some(e) = prep_err[i].take() {
+                    CrateCheck { name, errors: vec![e], blocked_by: None }
+                } else if let Some(j) = all_deps(i).into_iter().find(|&j| failed[j]) {
+                    CrateCheck { name, errors: vec![], blocked_by: Some(crates[j].name.clone()) }
+                } else if is_stale[i] {
+                    let mut d = self.check_one(crates, &own_v, &dep_v, (&dep_items_all, match &reach_of[i] { Some(v) => Some(v.as_slice()), None => None }), i, &all_deps(i), out_dir);
+                    d.retain(|e| seen.insert(e.clone()));
+                    CrateCheck { name, errors: d, blocked_by: None }
+                } else {
+                    continue;
+                };
                 if let Some(w) = self.ws_diags.as_mut() {
-                    w.push((crates[i].name.clone(), d));
+                    w.push(r);
                 }
             }
             return Ok(rep);

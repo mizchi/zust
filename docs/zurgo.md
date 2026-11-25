@@ -201,6 +201,10 @@ error: 3 errors in 2 crates
   dependency's file, once, under the first crate that found it.
 - An error of the analysis before the bodies (a name that does not resolve in an item's signature, a malformed
   item) is still the crate's only one, as with `zustc check`.
+- A crate whose source cannot be read or expanded (a `macro_rules!` call no rule matches, a proc macro that cannot
+  be loaded) has that error. The crates that use it are not checked: there is no interface of it to check them
+  with. zurgo says so (`warning: crate `app` not checked: its dependency `util` could not be read or expanded`),
+  and checks the other crates.
 - It writes no objects and no fingerprints, and every crate is checked, even one a build would take as fresh. The
   crates are checked one after another (a build compiles stale crates at once).
 
