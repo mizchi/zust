@@ -1394,10 +1394,10 @@ pub fn binds_by_value(p: &Pat) -> bool {
     }
 }
 
-/// `#![deny(unused_variables)]`: the first `let` binding (or parameter) that nothing after it reads, with the
-/// position of its `let` (None for a parameter). Names starting with `_` and the compiler's own `__exr_` ones are
-/// not reported
-pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<Pos>, String)> {
+/// `#![deny(unused_variables)]`: the bindings (and parameters) that nothing after them reads, parameters first and
+/// then in order, with the position of each one's `let` (None for a parameter). Names starting with `_` and the
+/// compiler's own `__exr_` ones are not reported
+pub fn unused_bindings(params: &[&Pat], body: &Block) -> Vec<(Option<Pos>, String)> {
     fn names(p: &Pat, out: &mut Vec<String>) {
         match p {
             Pat::Ident(_, _, n, sub) => {
@@ -1433,7 +1433,7 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
                 let mut ns = vec![];
                 names(p, &mut ns);
                 if ns.iter().any(|n| reportable(n)) {
-                    let rest = Expr::Block(None, false, Block { stmts: b.stmts[i + 1..].to_vec() });
+                    let rest = Expr::Block(None, false, Block { stmts: b.stmts[i + 1..].to_vec(), spos: b.spos.shifted(i + 1, -(i as isize + 1)) });
                     let fv = used_vars(&rest);
                     for n in ns.iter().filter(|n| reportable(n)) {
                         if !fv.contains(n) {
@@ -1452,10 +1452,40 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
             }
         }
     }
+    // (the `let`s of a condition: `if let p = x && let q = y`)
+    fn let_parts<'a>(c: &'a Expr, out: &mut Vec<(&'a Pat, &'a Expr)>) {
+        match c {
+            Expr::Let(p, x) => out.push((p, x)),
+            Expr::Binary(op, l, r, _) if op == "&&" => {
+                let_parts(l, out);
+                let_parts(r, out);
+            }
+            _ => {}
+        }
+    }
+    // (an `if let` / `while let` / guard's bindings that neither its condition nor `body` reads, at the scrutinee)
+    fn cond_lets(c: &Expr, body: &dyn Fn() -> Vec<String>, found: &mut Vec<(Pos, String)>) {
+        let mut ls = vec![];
+        let_parts(c, &mut ls);
+        if ls.is_empty() {
+            return;
+        }
+        let mut fv = body();
+        fv.extend(used_vars(c));
+        for (p, x) in ls {
+            let mut ns = vec![];
+            names(p, &mut ns);
+            let at = Some(crate::parse::pat_pos(p)).filter(|q| q.line > 0).unwrap_or_else(|| expr_pos(x));
+            if at.line > 0 {
+                found.extend(ns.into_iter().filter(|n| reportable(n) && !fv.contains(n)).map(|n| (at, n)));
+            }
+        }
+    }
     fn expr(e: &Expr, found: &mut Vec<(Pos, String)>) {
         match e {
             Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => block(b, found),
             Expr::If(c, t, els) => {
+                cond_lets(c, &|| used_vars(&Expr::Block(None, false, t.clone())), found);
                 expr(c, found);
                 block(t, found);
                 if let Some(x) = els {
@@ -1463,6 +1493,7 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
                 }
             }
             Expr::While(_, c, b) => {
+                cond_lets(c, &|| used_vars(&Expr::Block(None, false, b.clone())), found);
                 expr(c, found);
                 block(b, found);
             }
@@ -1492,6 +1523,7 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
                         found.extend(ns.into_iter().filter(|n| reportable(n) && !fv.contains(n)).map(|n| (a.pos, n)));
                     }
                     if let Some(g) = &a.guard {
+                        cond_lets(g, &|| used_vars(&a.body), found);
                         expr(g, found);
                     }
                     expr(&a.body, found);
@@ -1514,9 +1546,10 @@ pub fn first_unused_binding(params: &[String], body: &Block) -> Option<(Option<P
     let mut found = vec![];
     block(body, &mut found);
     let fv = used_vars(&Expr::Block(None, false, body.clone()));
-    let param = params.iter().find(|n| reportable(n) && !fv.contains(*n)).map(|n| (None, n.clone()));
+    let mut ps = vec![];
+    params.iter().for_each(|p| names(p, &mut ps));
     found.sort_by_key(|(p, _)| (p.line, p.col));
-    param.or_else(|| found.into_iter().next().map(|(p, n)| (Some(p), n)))
+    ps.into_iter().filter(|n| reportable(n) && !fv.contains(n)).map(|n| (None, n)).chain(found.into_iter().map(|(p, n)| (Some(p), n))).collect()
 }
 
 /// Every `let` binding of a body (nested blocks too) with its `let`'s position, in order (the naming lint)

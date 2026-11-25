@@ -206,7 +206,7 @@ Rc など) は、zustc が持つ組み込みの prelude (`crates/syntax/src/prel
   - 関数の中に書いたアイテム（`fn` / `struct` / `enum` / `const` / `use`。字句レベルでファイルの末尾に移す）
   - `std::collections::HashMap::new()` のような長いパス、`VecDeque::from(vec)`、スライスの `split_at` / `split_at_mut`、`Chars::as_str`
   - 標準入出力：`io::stdin()` の `read_line` / `lines()` / `read_to_string` / `lock()`、`io::stdout()` / `lock()` / `flush()`、`BufWriter::new(..)`、`write!` / `writeln!` を `write_str` を持つ任意の型に（libc の stdio を使うので `print!` と順序が混ざらない）
-  - `&[u8]` と `Cursor` の `io::Read`、`&[u8]` の `io::BufRead`、任意の `Read` の上の `BufReader::new(r)` / `with_capacity`（`fill_buf` / `consume` / `read`。`B` が `BufRead` なら `&mut B` も）
+  - `&[u8]` と `Cursor` の `io::Read`、`&[u8]` の `io::BufRead`、任意の `Read` の上の `BufReader::new(r)` / `with_capacity`（`fill_buf` / `consume` / `read`。`B` が `BufRead` なら `&mut B` も）、`Cursor` の `io::Seek` / `SeekFrom`
   - `std::process::exit`、`dbg!`、`for i in 0..`（終わりのない範囲）、`char_indices()` / `bytes()` の `rev()`
   - クロージャを含む型を返すクロージャ（`flat_map(|i| (0..i).map(move |j| (i, j)))`、`|a| move |b| a + b`）: 型推論がクロージャの struct 型（親の型引数・キャプチャ・引数・戻り値）まで解く
   - `Iterator::cycle`、`Box<T>` の `as_ref()` / `as_mut()`

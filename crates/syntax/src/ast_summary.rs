@@ -52,6 +52,22 @@ fn derive_names(attrs: &[String]) -> Vec<String> {
     out
 }
 
+/// The std crate a derive's path names `name` right under, `#[derive(core::name)]` / `#[derive(::std::name)]`
+#[cold]
+fn derive_root_of(attrs: &[String], name: &str) -> Option<&'static str> {
+    for a in attrs {
+        let c = compact(a);
+        let Some(inner) = c.find("derive(").and_then(|i| c[i + 7..].strip_suffix(")]")) else { continue };
+        for part in inner.split(',') {
+            let p = part.strip_prefix("::").unwrap_or(part);
+            if let Some(k) = ["core", "std", "alloc"].into_iter().find(|k| p.strip_prefix(k).and_then(|r| r.strip_prefix("::")) == Some(name)) {
+                return Some(k);
+            }
+        }
+    }
+    None
+}
+
 /// The integer type of `#[repr(u8)]` / `#[repr(C, i16)]`
 fn int_repr(attrs: &[String]) -> Option<String> {
     for a in attrs {
@@ -578,6 +594,9 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
     if is_main && !generics.is_empty() {
         return err("`main` cannot be generic");
     }
+    if is_main && !sig.generics.preds.is_empty() {
+        return err("`main` function is not allowed to have a `where` clause (E0646)");
+    }
     let self_ty = owner.map(|o| &o.self_ty);
     let mut params = Vec::new();
     let mut has_self = false;
@@ -692,6 +711,17 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
                     }
                 }
             }
+        }
+    }
+    // (E0277: a returned value needs a size too, a `str` or `[T]` (a `dyn Trait` is E0746, checked elsewhere); a
+    // trait's declaration without a body does not)
+    if let Some(r) = sig.ret.as_ref().filter(|_| !owner.is_some_and(|o| o.is_trait) && !is_extern) {
+        if let Some(u) = unsized_value(r).filter(|u| !u.starts_with("dyn")) {
+            let m = format!("the size for values of type `{u}` cannot be known at compilation time (E0277)");
+            return Err(match crate::wf::pos_of(r) {
+                Some(p) => format!("{}:{}: {m}", p.line, p.col + 1),
+                None => m,
+            });
         }
     }
     let mut lifted_params: Vec<(usize, PTy)> = vec![];
@@ -1591,7 +1621,12 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
     let derives = derive_names(attrs);
     for d in &derives {
         if !matches!(d.as_str(), "Clone" | "Copy" | "Debug" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Default") {
-            return Err(format!("cannot find derive macro `{d}` in this scope"));
+            // (`\u{5}word\u{5}msg`: at the word in the item's text, the derive's name)
+            // (`#[derive(core::RustcDecodable)]`: a name std's root does not have)
+            if let Some(k) = derive_root_of(attrs, d) {
+                return Err(format!("\u{5}{d}\u{5}cannot find `{d}` in `{k}`"));
+            }
+            return Err(format!("\u{5}{d}\u{5}cannot find derive macro `{d}` in this scope"));
         }
     }
     if union {
@@ -1599,7 +1634,7 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
             return err("unions cannot have zero fields");
         }
         if let Some(d) = derives.iter().find(|d| !matches!(d.as_str(), "Clone" | "Copy")) {
-            return Err(format!("this trait cannot be derived for unions: `{d}`"));
+            return Err(format!("\u{5}{d}\u{5}this trait cannot be derived for unions: `{d}`"));
         }
         if derives.iter().any(|d| d == "Clone") && !derives.iter().any(|d| d == "Copy") {
             return err("the trait bound `Copy` is not satisfied: a union can derive `Clone` only with `Copy`");
@@ -1612,7 +1647,12 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
                 _ => false,
             };
             if owning {
-                return err("field must implement `Copy` or be wrapped in `ManuallyDrop<...>` to be used in a union");
+                // (at the field's type, as rustc)
+                let m = "field must implement `Copy` or be wrapped in `ManuallyDrop<...>` to be used in a union";
+                return Err(match crate::wf::pos_of(t) {
+                    Some(p) => format!("\u{3}{}\u{3}{m}", p.line),
+                    None => m.to_string(),
+                });
             }
         }
     }
@@ -3118,9 +3158,11 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             let mut sig = parse_sig(fs, false, (named_main && !generic) || entry, None)?;
             let result_ret = matches!(&sig.ret, TySyn::App(n, _) if n == "Result");
             let bad_main = named_main && (generic || !sig.params.is_empty() || (sig.ret != TySyn::Prim(Ty::Unit) && !result_ret));
-            if bad_main {
+            // (an `async fn main` cannot be the entry either (E0752): its symbol tells it from the others)
+            let async_main = named_main && fs.quals.iter().any(|q| q == "async");
+            if bad_main || async_main {
                 sig.is_main = false;
-                sig.symbol = format!("_x{name}");
+                sig.symbol = if async_main { "_xmain.async".to_string() } else { format!("_x{name}") };
             }
             if entry && (!sig.params.is_empty() || sig.ret != TySyn::Prim(Ty::Unit)) {
                 return err("`main` must be `fn main()`");
@@ -3171,6 +3213,19 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.statics.push((n.clone(), tysyn(t, None)?, item.init_text.clone(), *m));
         }
         ItemKind::Extern(items) => {
+            // (E0428: two foreign items of one name in the value namespace, at the second's start, its `pub` included)
+            let mut names: Vec<&str> = vec![];
+            for fi in items {
+                let n = match &fi.kind {
+                    ItemKind::Fn(fs, _) => fs.name.as_str(),
+                    ItemKind::Static(_, n, ..) => n.as_str(),
+                    _ => continue,
+                };
+                if names.contains(&n) {
+                    return Err(format!("{}:1: the name `{n}` is defined multiple times (E0428)", fi.line));
+                }
+                names.push(n);
+            }
             for fi in items {
                 // (`static X: T;`: the symbol X (or its link_name) of what the program links with)
                 if let ItemKind::Static(m, n, t, _) = &fi.kind {
@@ -3195,6 +3250,10 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     continue;
                 }
                 let ItemKind::Fn(fs, None) = &fi.kind else {
+                    // (a fn with a body: what a foreign fn may not have)
+                    if matches!(fi.kind, ItemKind::Fn(_, Some(_))) {
+                        return Err(format!("{}:1: incorrect function inside `extern` block", fi.line));
+                    }
                     return err("only fns and statics are supported in extern blocks");
                 };
                 if link_name(&fi.attrs).unwrap_or_else(|| fs.name.clone()).starts_with("__enzyme_") {
