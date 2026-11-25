@@ -1320,7 +1320,9 @@ impl Cx<'_> {
                         Some(f) => self.clear_flag(f),
                         None => self.mark_moved(recv),
                     }
-                    let r = self.call_fn(id, Some((bv, p0t)), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
+                    // (the receiver is the Box: of its type also where p0 is what a temporary Box points to,
+                    // `Box::new(S).f()`)
+                    let r = self.call_fn(id, Some((bv, Ty::Box(bi))), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
                     // (the call takes the receiver after its arguments: what the holder holds ends there, not
                     // before them (`D(&x).consume({ x = 2; })` is E0506))
                     if let Some(h) = recv_holder {
