@@ -3893,6 +3893,7 @@ compile-fail	iterators/fold-iterator-error-23966.rs
 compile-fail	iterators/integral.rs
 run-pass	iterators/into-iterator-type-inference-shift.rs
 compile-fail	iterators/into_iter-when-iter-was-intended.rs
+compile-fail	iterators/invalid-iterator-chain-with-int-infer.rs
 compile-fail	iterators/issue-28098.rs
 build-pass	iterators/issue-58952-filter-type-length.rs
 run-pass	iterators/iter-cloned-type-inference.rs
@@ -4583,6 +4584,7 @@ run-pass	macros/issue-5060.rs
 run-pass	macros/issue-52169.rs
 compile-fail	macros/issue-61033-1.rs
 compile-fail	macros/issue-6596-1.rs
+compile-fail	macros/issue-6596-2.rs
 check-pass	macros/issue-68058.rs
 compile-fail	macros/issue-68060.rs
 check-pass	macros/issue-69838-mods-relative-to-included-path.rs
