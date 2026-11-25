@@ -44,6 +44,7 @@
       <a href="#tiles">Summary</a>
       <a href="#commits">Commits</a>
       <a href="#ui">tests/ui pass rate</a>
+      <a href="#progress">Open PRs and 90%</a>
       <a href="#kpi">Speed KPIs</a>
       <a href="#code">Code size</a>
       <a href="#sessions">Agent sessions</a>
@@ -91,6 +92,27 @@
     <div class="grid4" id="ui-grid"></div>
   </section>
 
+  <section class="sec" id="progress">
+    <h2>Open pull requests, and the way to 90%</h2>
+    <p class="note">What each open pull request adds to bench/rust_ui_ratchet.txt (the passing tests a branch may not
+      lose), against the base it was opened on: a PR stacked on another counts only its own part. Two PRs to main
+      that pass the same test count it twice. The days to 90% are at the pace of the CI runs on main in the two days
+      before the latest one: the same number of tests a day (linear), or the same share of the remaining tests a day
+      (geometric, which slows down as the easier tests are taken). Open pull requests as of <span id="pend-asof">—</span>.</p>
+    <div class="tiles small" id="fc-tiles"></div>
+    <div class="tablewrap"><table class="table" id="t-fc">
+      <thead><tr><th class="l">Kind</th><th>Applicable</th><th>Passing</th><th>Open PRs</th><th>With them</th><th>Needed for 90%</th><th>Tests a day</th><th>Days (linear)</th><th>Days (geometric)</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <details class="fold" open>
+      <summary>Open pull requests that raise the ratchet</summary>
+      <div class="tablewrap"><table class="table" id="t-pend">
+        <thead><tr><th class="l">PR</th><th class="l">Title</th><th class="l">Base</th><th>run-pass</th><th>check-pass</th><th>build-pass</th><th>compile-fail</th></tr></thead>
+        <tbody></tbody>
+      </table></div>
+    </details>
+  </section>
+
   <section class="sec" id="kpi">
     <h2>Speed KPIs against the first measurement</h2>
     <p class="note">bench/kpi_log.tsv, one row per change, in instructions executed (lower is faster). The no-op build is
@@ -133,6 +155,9 @@
         benchmark history on the gh-pages branch. The Pages workflow reruns it after each benchmark run.</li>
       <li>Commits: <code>git log --no-merges</code> without github-actions[bot]. Days and hours are cut in UTC.</li>
       <li>KPI noise: the same binary measured again moves by about 0.01% (builds) and 0.1% (LSP).</li>
+      <li>Open pull requests: the Pages workflow lists them with the GitHub API when it builds the site; a PR's gain is
+        its head's bench/rust_ui_ratchet.txt less the one at its merge base with its base branch, by kind (0 for a kind
+        it has fewer of). The applicable tests are the last CI run's passing tests over its rate.</li>
       <li>Code size is counted on one first-parent commit every 3 hours. The peak on 11-16 is when the old and the new
         driver both existed.</li>
     </ul>
@@ -146,7 +171,7 @@
 
 <script>
 (() => {
-  const NAMES = ['hourly', 'ui', 'kpi', 'loc', 'daily', 'sessions', 'milestones'];
+  const NAMES = ['hourly', 'ui', 'kpi', 'loc', 'daily', 'sessions', 'milestones', 'pending', 'forecast'];
   const KINDS = [['run_pass', 'run-pass', 'builds, runs, same output'], ['check_pass', 'check-pass', 'accepted by zustc check'],
                  ['build_pass', 'build-pass', 'builds'], ['compile_fail', 'compile-fail', 'rejected at an annotated line']];
   const KPIS = [['edit_build_M', 'gen5000 edit one fn'], ['check_M', 'gen5000 check'], ['traits_check_M', 'traits check'],
@@ -172,6 +197,11 @@
     tip.style.left = Math.max(window.scrollX + 8, x) + 'px'; tip.style.top = (ev.pageY + 12) + 'px';
   }
   const hideTip = () => { tip.hidden = true; };
+  const tile = (label, big, sub, cls) => {
+    const d = el('div', {className: 'tile'});
+    d.append(el('span', {className: 'tl'}, label), el('span', {className: 'big ' + (cls || '')}, big), el('span', {className: 'sub'}, sub));
+    return d;
+  };
 
   function measure(svg, texts) {
     const g = svg.append('g'); let w = 0;
@@ -225,11 +255,6 @@
     document.getElementById('noop-a').textContent = na.toFixed(1); document.getElementById('noop-b').textContent = nb.toFixed(1);
     document.getElementById('zs').textContent = fmt(S.l1.zustscript_lines);
 
-    const tile = (label, big, sub, cls) => {
-      const d = el('div', {className: 'tile'});
-      d.append(el('span', {className: 'tl'}, label), el('span', {className: 'big ' + (cls || '')}, big), el('span', {className: 'sub'}, sub));
-      return d;
-    };
     const good = (v) => (Math.abs(v) < 0.05 ? '' : v < 0 ? 'good' : 'bad');
     const e = S.drift('edit_build_M');
     document.getElementById('tiles').replaceChildren(
@@ -448,6 +473,46 @@
     });
   }
 
+  // ---- open pull requests and the forecast ----
+  function renderProgress(D, man) {
+    const all = D.forecast.find((r) => r.kind === 'all');
+    // (reached when nothing is needed; a rounded estimate of 0 with tests left is under a tenth of a day)
+    const days = (v, need) => (need === 0 ? 'reached' : v == null ? '—' : v < 0.1 ? 'less than 0.1 days' : `${v.toFixed(1)} days`);
+    const raised = D.pending.filter((r) => KINDS.some(([k]) => r[k + '_gain'] > 0));
+    document.getElementById('pend-asof').textContent = man.generated_at ? tfmt(new Date(man.generated_at)) : '—';
+    if (all) {
+      document.getElementById('fc-tiles').replaceChildren(
+        tile('All kinds on main', `${all.rate.toFixed(1)}%`, `${fmt(all.passing)} of ${fmt(all.applicable)} tests, CI run ${all.commit}`),
+        tile('With the open PRs', `${all.rate_with_pending.toFixed(1)}%`, `+${fmt(all.pending)} tests in ${raised.length} PRs`, all.pending > 0 ? 'good' : ''),
+        tile('Needed for 90%', fmt(all.needed), 'tests after the open PRs'),
+        tile('At the recent pace', days(all.days_linear, all.needed), `${all.pace_per_day == null ? '—' : fmt(all.pace_per_day)} tests a day; geometric ${days(all.days_geometric, all.needed)}`),
+      );
+    }
+    const name = (k) => (k === 'all' ? 'all kinds' : k);
+    document.querySelector('#t-fc tbody').replaceChildren(...D.forecast.map((r) => {
+      const tr = el('tr');
+      tr.append(el('td', {className: 'l mono'}, name(r.kind)), el('td', {}, fmt(r.applicable)), el('td', {}, `${fmt(r.passing)} (${r.rate.toFixed(1)}%)`),
+        el('td', {}, r.pending ? `+${fmt(r.pending)}` : '0'), el('td', {}, `${r.rate_with_pending.toFixed(1)}%`), el('td', {}, fmt(r.needed)),
+        el('td', {}, r.pace_per_day == null ? '—' : fmt(r.pace_per_day)), el('td', {}, days(r.days_linear, r.needed)), el('td', {}, days(r.days_geometric, r.needed)));
+      if (r.kind === 'all') tr.className = 'total';
+      return tr;
+    }));
+    const tb = document.querySelector('#t-pend tbody');
+    if (!D.pending.length) {
+      const tr = el('tr'); tr.append(el('td', {className: 'l', colSpan: 7}, 'No list of open pull requests in this build of the data.'));
+      tb.replaceChildren(tr);
+      return;
+    }
+    tb.replaceChildren(...raised.map((r) => {
+      const tr = el('tr');
+      const td = el('td', {className: 'l mono'}); td.append(el('a', {href: `https://github.com/mizchi/zust/pull/${r.pr}`}, `#${r.pr}`));
+      const base = el('td', {className: 'l mono'}, r.base === 'main' ? 'main' : (D.pending.find((q) => q.head === r.base) ? `#${D.pending.find((q) => q.head === r.base).pr}` : r.base));
+      tr.append(td, el('td', {className: 'l wrap'}, r.title + (r.draft ? ' (draft)' : '')), base,
+        ...KINDS.map(([k]) => el('td', {}, r[k + '_gain'] ? `+${fmt(r[k + '_gain'])}` : '')));
+      return tr;
+    }));
+  }
+
   function renderDaily(D) {
     document.querySelector('#t-daily tbody').replaceChildren(...D.daily.map((r) => {
       const tr = el('tr');
@@ -458,11 +523,11 @@
     }));
   }
 
-  let D = null;
+  let D = null, M = null;
   function render() {
     if (!D) return;
     const S = summarize(D);
-    renderText(D, S); renderCommits(D); renderUI(D); renderKPI(D); renderCode(D); renderSessions(D); renderDaily(D);
+    renderText(D, S); renderCommits(D); renderUI(D); renderProgress(D, M); renderKPI(D); renderCode(D); renderSessions(D); renderDaily(D);
   }
   // The data directory follows the repo-retrospective/v1 contract: read the manifest, then the files it names.
   const getJSON = (f) => fetch(`data/${f}`).then((r) => { if (!r.ok) throw new Error(`${f}: ${r.status}`); return r.json(); });
@@ -471,6 +536,7 @@
       if (man.contract !== 'repo-retrospective/v1') throw new Error(`unsupported contract ${man.contract}`);
       const missing = NAMES.filter((n) => !man.datasets[n]);
       if (missing.length) throw new Error(`manifest lacks ${missing.join(', ')}`);
+      M = man;
       return Promise.all(NAMES.map((n) => getJSON(man.datasets[n].file)));
     })
     .then((arr) => { D = Object.fromEntries(NAMES.map((n, i) => [n, arr[i]])); render(); })

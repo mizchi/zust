@@ -1534,7 +1534,16 @@ impl Cx<'_> {
     /// 書かれた型 (`Self` と型パラメータは env から)
     pub fn parse_ty(&self, t: &crate::parse::Ty) -> R<Ty> {
         let ts = crate::ast_types::tysyn(t, Some(&crate::types::TySyn::Named("Self".into())))?;
-        self.prog.resolve_env(&ts, &self.env).map_err(|e| self.local_len_err(t, e))
+        let r = self.prog.resolve_env(&ts, &self.env).map_err(|e| self.local_len_err(t, e))?;
+        // (E0277: a type written in the program's code that puts a maybe-unsized type where only a sized one may be:
+        // `Foo<T>` of a `T: ?Sized` with `struct Foo<T>`, `Vec<str>`, `[[u8]; 2]`)
+        if self.user_code && self.inline_depth == 0 {
+            if let Some(bad) = self.prog.sized_wf(r, 0) {
+                let n = crate::traits::display_ty(self.prog, bad);
+                return Err(format!("the size for values of type `{n}` cannot be known at compilation time {}", crate::traits::SOLVED_NO));
+            }
+        }
+        Ok(r)
     }
 
     /// E0435 of an array type whose length names a local, `let n = 3; let a: [u8; n];`, at the name (the program's
@@ -2326,7 +2335,12 @@ impl Cx<'_> {
                         }
                         return err(SP, "`let` without initializer is not supported");
                     };
-                    let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t).ok());
+                    // (a Sized error of the annotation stands: `let (a, b): (Vec<str>, u8) = loop {};`)
+                    let ann = match ann_ty.as_ref().map(|t| self.parse_ty(t)) {
+                        Some(Ok(a)) => Some(a),
+                        Some(Err(e)) if e.contains(crate::traits::SOLVED_NO) => return Err(e),
+                        _ => None,
+                    };
                     // (`let Some(n): &mut Option<i32> = &mut &Some(5) else { .. }`: E0596, as for a plain `let`)
                     if let (Some(a), true) = (ann, self.bk_on()) {
                         if self.peek(init).is_some_and(|t| mut_through_shared(t, a)) {
@@ -2474,6 +2488,8 @@ impl Cx<'_> {
                     let ann = match ann_ty.as_ref().map(|t| (t, self.parse_ty(t))) {
                         Some((_, Ok(a))) => Some(a),
                         Some((t, Err(e))) if e.contains("cannot find type") && !names_std_path(t) => return Err(e),
+                        // (and a Sized error, whatever the initializer: `let _: Vec<str> = loop {};`)
+                        Some((_, Err(e))) if e.contains(crate::traits::SOLVED_NO) => return Err(e),
                         _ => None,
                     };
                     let full = ann.filter(|&a| !has_hole(self.prog, a) && !self.prog.has_param(a));

@@ -23,6 +23,8 @@ permissions:
   contents: write
   # (to read the Pages builds: the site is done when the build of the pushed commit is, not when the push is)
   pages: read
+  # (the open pull requests, whose tests/ui gains the dashboard shows)
+  pull-requests: read
 
 jobs:
   site:
@@ -34,7 +36,13 @@ jobs:
           ref: main
           fetch-depth: 0
       - name: Extract the dashboard data
-        run: python3 scripts/retro/extract.py --out out/site/dashboard/data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p out
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" \
+            --jq '.[] | {number, title, head: .head.ref, base: .base.ref, draft} | tojson' > out/pulls.jsonl
+          python3 scripts/retro/extract.py --out out/site/dashboard/data --pulls out/pulls.jsonl
       - name: Assemble the site
         run: cp -R site/. out/site/
       - name: Render the social cards (og:image) from the same data

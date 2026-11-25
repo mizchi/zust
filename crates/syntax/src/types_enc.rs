@@ -127,6 +127,7 @@ crate::enc_struct!(SigSyn {
     is_unsafe,
     regions,
     preds,
+    own_unsized,
 });
 crate::enc_struct!(RSigSyn { lts, slots, outlives, ty_outlives, outer, self_slots, derived, derived_ty });
 crate::enc_struct!(RImplSyn { lts, self_slots, outlives, ty_outlives, free, wf_pairs, wf_vague, trait_lts, self_paths });
