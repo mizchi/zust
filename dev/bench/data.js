@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795639585786,
+  "lastUpdate": 1795639589002,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -134804,6 +134804,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a61fb67713e4c94091cb4fdb294032a9ed4ea39e"
         },
         "date": 1795638322668,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1913,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.82,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1556,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.87,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5382,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c8d7b59df5f4f39a01d0e08afe68dd419d8ae816",
+          "message": "lexer: E0758 for a block comment the file ends in, also after the last item (#181) (#223)\n\n`fn main() {}\\n/*x` was accepted by `zustc check` and `zustc build`; rustc\n1.100 reports \"unterminated block comment\" (E0758) at 2:1. The lexer's E0758\ncheck (`unterminated_literal`) runs only when the items do not split, and a\ncomment after the last item leaves none unsplit.\n\nThe item splitter now asks unterminated_literal when a block comment runs to\nthe end of the file. It scans from the start, so an unterminated literal\nbefore the comment is reported instead, as rustc's lexer does\n(`const S: &str = \"abc /* x` is E0765 at the string).\n\nA doc comment (`/**`, `/*!`; not `/***` or `/**/`) is \"unterminated block\ndoc-comment\", as rustc names it, also inside an item.\n\nTests: tests/check.rs `literals_and_comments_a_file_ends_in`, with rustc's\nline and column for each: after the last item, with a non-ASCII character,\nnested, `/**` and `/*!` and `/***`, a doc comment in a body, a string before\nit, and two closed comments after the last item (no error).\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T05:40:53+09:00",
+          "tree_id": "4cd5ce1e601d943fc47c7e88397f7c00239e18e6",
+          "url": "https://github.com/mizchi/zust/commit/c8d7b59df5f4f39a01d0e08afe68dd419d8ae816"
+        },
+        "date": 1795639588456,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
