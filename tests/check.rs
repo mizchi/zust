@@ -2712,6 +2712,9 @@ fn items_of_one_name_in_two_blocks_of_a_fn() {
     // (an `unsafe fn` in a body is moved out too: it was left there, "nested items are not supported")
     let src = "fn main() {\n    unsafe fn g(x: u8) -> u8 {\n        x + 1\n    }\n    let _ = unsafe { g(1) };\n}\n";
     assert_eq!(s.check(src).first().map(|d| (d.line, d.msg.clone())), None, "an unsafe fn in a body");
+    // (and one with other qualifiers: `async fn`, `const fn`, `extern "C" fn`)
+    let src = "fn main() {\n    async fn a() {}\n    const fn c(x: u8) -> u8 {\n        x + 1\n    }\n    extern \"C\" fn e(x: u8) -> u8 {\n        x\n    }\n    const K: u8 = c(1);\n    let _ = (a(), K, e(2));\n}\n";
+    assert_eq!(s.check(src).first().map(|d| (d.line, d.msg.clone())), None, "fns with qualifiers in a body");
 }
 
 #[test]

@@ -1174,8 +1174,8 @@ pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
-    const KWS: [&str; 22] = [
-        "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "unsafe fn ", "pub fn ", "pub struct ",
+    const KWS: [&str; 23] = [
+        "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "unsafe fn ", "async ", "pub fn ", "pub struct ",
         "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) ",
     ];
     let indented = src.split('\n').any(|l| {
@@ -1260,6 +1260,19 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             } else if t == b"unsafe" && k + 1 < toks.len() && matches!(tok(k + 1), b"extern" | b"fn") {
                 // (`unsafe extern "C" { .. }`, `unsafe fn f() { .. }`)
                 k + 1
+            } else if matches!(t, b"async" | b"const" | b"unsafe" | b"safe" | b"extern") && {
+                // (a fn's qualifiers, `async fn`, `const unsafe fn`, `extern "C" fn`: the item is the fn)
+                let mut j = k;
+                while j < toks.len() && (matches!(tok(j), b"async" | b"const" | b"unsafe" | b"safe" | b"extern") || (toks[j].0 == 2 && j > k && tok(j - 1) == b"extern")) {
+                    j += 1;
+                }
+                j < toks.len() && j > k && tok(j) == b"fn"
+            } {
+                let mut j = k;
+                while tok(j) != b"fn" {
+                    j += 1;
+                }
+                j
             } else {
                 k
             };

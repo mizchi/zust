@@ -364,6 +364,7 @@ check-pass	associated-types/unioned-keys-with-associated-type-23442.rs
 compile-fail	associated-types/unspecified-assoc-type-in-trait-object.rs
 check-pass	associated-types/wf-cycle-2.rs
 check-pass	associated-types/wf-cycle.rs
+check-pass	async-await/async-assoc-fn-anon-lifetimes.rs
 compile-fail	async-await/async-block-control-flow-static-semantics.rs
 compile-fail	async-await/async-borrowck-escaping-closure-error.rs
 build-pass	async-await/async-closure-matches-expr.rs
@@ -523,6 +524,7 @@ run-pass	async-await/multiple-lifetimes/partial-relation.rs
 run-pass	async-await/multiple-lifetimes/ret-impl-trait-fg.rs
 compile-fail	async-await/multiple-lifetimes/ret-ref.rs
 run-pass	async-await/multiple-lifetimes/variance.rs
+check-pass	async-await/nested-in-impl.rs
 check-pass	async-await/no-params-non-move-async-closure.rs
 check-pass	async-await/no-std.rs
 compile-fail	async-await/no-unsafe-async.rs
@@ -531,6 +533,8 @@ compile-fail	async-await/pin-needed-to-poll.rs
 compile-fail	async-await/proper-span-for-type-error.rs
 check-pass	async-await/recursive-async-auto-trait-overflow-only-parent-args.rs
 check-pass	async-await/recursive-async-auto-trait-overflow.rs
+check-pass	async-await/return-ty-raw-ptr-coercion.rs
+check-pass	async-await/return-ty-unsize-coercion.rs
 compile-fail	async-await/spurious-static-bound-issue-115376.rs
 compile-fail	async-await/suggest-switching-edition-on-await.rs
 check-pass	async-await/track-caller/issue-105134.rs
@@ -1192,6 +1196,7 @@ run-pass	box/self-assignment.rs
 compile-fail	box/suggest-box-for-expr-field-issue-139631.rs
 run-pass	box/unit/expr-block-generic-unique1.rs
 run-pass	box/unit/expr-block-generic-unique2.rs
+run-pass	box/unit/unique-ffi-symbols.rs
 run-pass	box/unit/unique-generic-assign.rs
 run-pass	box/unit/unique-in-tag.rs
 run-pass	box/unit/unique-in-vec-copy.rs
@@ -2078,6 +2083,7 @@ run-pass	consts/non-scalar-cast.rs
 run-pass	consts/oncecell-const-init-57781.rs
 run-pass	consts/packed_pattern.rs
 run-pass	consts/packed_pattern2.rs
+compile-fail	consts/promote-not.rs
 run-pass	consts/promote_borrowed_field.rs
 compile-fail	consts/promote_const_let.rs
 compile-fail	consts/promoted-type-error-issue-133968.rs
