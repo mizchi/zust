@@ -4217,6 +4217,22 @@ fn b3() { let mut v = vec![1, 2]; match D(&*v).0.len() { n => { v.push(n as i32)
 fn b4() { let mut v = vec![1, 2]; if let Some(_) = D(&*v).0.first() { v.push(1); } }
 fn main() { b1(); b2(); b3(); b4(); }
 "#, &[(3, r#"cannot borrow `v` as mutable because it is also borrowed as immutable"#), (5, r#"`v` does not live long enough"#), (6, r#"`v` does not live long enough"#)], "dr4");
+    // (the scopes that end such temporaries, where rustc ends them: a statement, a block's tail, the condition of an
+    // `if` / `while`, a guard, a loop that is a statement or a tail; none of these is an error in rustc 1.97)
+    errors_at(r#"struct D<'a>(&'a [i32]);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+impl D<'_> { fn iter(&self) -> std::slice::Iter<'_, i32> { self.0.iter() } }
+fn t1() { let mut v = vec![1]; for x in D(&*v).iter() { let _ = x; } v.push(1); }
+fn t2() -> usize { let mut v = vec![1]; let n = { for x in D(&*v).iter() { let _ = x; } 1 }; v.push(1); n }
+fn t3() { let v = vec![1]; while let Some(_) = D(&*v).0.first() { break; } }
+fn t4() { let v = vec![1]; while D(&*v).0.len() > 5 { } }
+fn t5() { let v = vec![1]; if D(&*v).0.len() > 5 { } }
+fn t6() { let v = vec![1]; loop { if D(&*v).0.len() > 0 { break; } } }
+fn t7() { let v = vec![1]; for x in D(&*v).iter() { let _ = x; } }
+fn t8() { let v = vec![1]; match 1 { n if D(&*v).0.len() > n => {} _ => {} } }
+fn t9() -> usize { let v = vec![1]; if D(&*v).0.len() > 5 { 1 } else { 2 } }
+fn main() { t1(); t2(); t3(); t4(); t5(); t6(); t7(); t8(); t9(); }
+"#, &[], "ts");
     errors_at(r#"struct D<'a>(&'a [i32]);
 impl Drop for D<'_> { fn drop(&mut self) {} }
 fn c1() { let v = vec![1, 2]; for x in D(&*v).0.iter() { let _ = x; } }
