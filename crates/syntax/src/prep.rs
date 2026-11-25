@@ -95,7 +95,8 @@ pub fn prep_full(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, c
     };
     // (a `mod` moved out of a function body is flattened like the others)
     let reflat = match &hoisted {
-        Some(t) if moved.is_some() && t[s3.len().min(t.len())..].contains("mod ") => lexer::flatten_modules_fix(t, crates, fix),
+        // (by bytes: when names were changed the text is not as long as s3, and s3.len() may fall inside a character)
+        Some(t) if moved.is_some() && t.as_bytes()[s3.len().min(t.len())..].windows(4).any(|w| w == b"mod ") => lexer::flatten_modules_fix(t, crates, fix),
         _ => None,
     };
     let hoisted = reflat.or(hoisted);

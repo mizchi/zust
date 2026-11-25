@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 autoexamples = false
 
 [workspace]
-members = ["crates/ir", "crates/minclif", "crates/base", "crates/syntax", "crates/sema", "crates/typeck", "crates/codegen", "crates/core", "crates/clif", "crates/wasm", "crates/ide", "crates/analyzer", "crates/zurgo"]
+members = ["crates/ir", "crates/minclif", "crates/base", "crates/syntax", "crates/sema", "crates/typeck", "crates/codegen", "crates/core", "crates/clif", "crates/wasm", "crates/ide", "crates/analyzer", "crates/zurgo", "crates/fuzz"]
 
 [features]
 # (以前は driver2 を有効にする feature。今は常に入っている: テストの cfg のために残す)

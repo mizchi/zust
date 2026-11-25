@@ -1829,7 +1829,8 @@ pub fn expand_thread_local(src: &str) -> Option<String> {
     let s = src.as_bytes();
     let toks = tokenize(s);
     let is_sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && s[toks[k].1] == c && toks[k].2 == toks[k].1 + 1;
-    let text = |a: usize, b: usize| -> String { String::from_utf8_lossy(&s[toks[a].1..toks[b - 1].2]).into_owned() };
+    // (the tokens a..b; none when b <= a: `thread_local! { static X: ]` has no type before its end)
+    let text = |a: usize, b: usize| -> String { if b <= a { String::new() } else { String::from_utf8_lossy(&s[toks[a].1..toks[b - 1].2]).into_owned() } };
     let mut out = String::new();
     let mut last = 0;
     let mut k = 0;
