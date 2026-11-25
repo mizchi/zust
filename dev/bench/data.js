@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795637016884,
+  "lastUpdate": 1795637019213,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -133320,6 +133320,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/d838a6e02be4382e23935c48a394996145cd781f"
         },
         "date": 1795636286247,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1913,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.82,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1556,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.87,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5382,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "72e35d186ad1822627ce9919619eca2c071d31ff",
+          "message": "Merge pull request #215 from mizchi/claude/fix-187-int128-methods\n\ntypeck: i128 / u128 wrapping_div, wrapping_rem, overflowing_div, overflowing_rem, isqrt and reverse_bits (#187)",
+          "timestamp": "2026-11-26T04:57:30+09:00",
+          "tree_id": "7ec5c70b5ae455137423e93d0dc34aa99485e27e",
+          "url": "https://github.com/mizchi/zust/commit/72e35d186ad1822627ce9919619eca2c071d31ff"
+        },
+        "date": 1795637018851,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
