@@ -1860,7 +1860,7 @@ impl Cx<'_> {
                             continue;
                         }
                         let Ok(t) = self.parse_ty(subj) else { continue };
-                        let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                        let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
                         let mut codes = vec![];
                         sl.slots(subj, false, &mut codes);
                         let lts = self.rg.lts.clone();
@@ -2931,6 +2931,31 @@ impl Cx<'_> {
                         Ty::Array(e, _) => return Some(*e),
                         Ty::Ref(_, Ty::Slice(e)) => return Some(**e),
                         Ty::Ref(_, i) => t = *i,
+                        // (a type's own `Index`: what its `index` returns a reference to, so a field read through its
+                        // `Deref` is found (`v[0].f` with `Output = MyPtr<Foo>`))
+                        // (of the program's own types: the prelude's (`Vec`) are read where they are lowered)
+                        Ty::Struct(sid) if self.prog.struct_item.get(self.prog.base_of(sid) as usize).is_some_and(|&i| i < self.prog.prelude_from) => {
+                            let id = self.prog.method(sid, "index")?;
+                            // (not where it has several (`Index<usize>` and `Index<&str>`): which one the index takes is
+                            // not known here)
+                            let gname = &self.prog.names[id as usize];
+                            if self.prog.overloads.get(gname.split('#').next().unwrap_or(gname)).is_some_and(|c| c.len() > 1) {
+                                return None;
+                            }
+                            let sig = &self.prog.sigs[id as usize];
+                            let mut sol = vec![None; sig.generics.len()];
+                            if sig.trait_of.is_some() {
+                                if let Some(s0) = sol.first_mut() {
+                                    *s0 = Some(Ty::Struct(sid));
+                                }
+                            } else if let Some(st) = sig.self_ty {
+                                self.prog.match_ty(st, Ty::Struct(sid), &mut sol);
+                            }
+                            return match self.prog.partial_subst(sig.ret, &sol) {
+                                Ty::Ref(_, i) if !self.prog.has_param(*i) => Some(*i),
+                                _ => None,
+                            };
+                        }
                         _ => return None,
                     }
                 }

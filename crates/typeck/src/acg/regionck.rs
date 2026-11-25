@@ -2559,7 +2559,7 @@ impl Cx<'_> {
                     return Some((to, tree));
                 }
                 let names = self.rg.lt_names.clone();
-                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
                 let mut codes = vec![];
                 s.slots(ty, false, &mut codes);
                 let lts = self.rg.lts.clone();
@@ -2877,7 +2877,7 @@ impl Cx<'_> {
         let tree = match ann {
             Some(a) => {
                 let names = self.rg.lt_names.clone();
-                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
                 let mut codes = vec![];
                 s.slots(a, false, &mut codes);
                 ann_codes = Some(codes.clone());
@@ -2991,7 +2991,7 @@ impl Cx<'_> {
                 continue;
             }
             let Ok(t) = self.parse_ty(p) else { continue };
-            let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
+            let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 1, derived: None };
             let mut codes = vec![];
             sl.slots(p, false, &mut codes);
             let lts = self.rg.lts.clone();
@@ -3068,7 +3068,7 @@ impl Cx<'_> {
         let (ai, sol) = found?;
         let (codes, self_slots, outlives, trait_lts) = prog.assoc_regions.get(&ai)?.clone();
         let a = &prog.assocs[ai as usize];
-        let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+        let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
         let mut written = vec![];
         sl.slots(q, false, &mut written);
         let fl = self.rg.lts.clone();
@@ -3198,7 +3198,7 @@ impl Cx<'_> {
             let tr = if crate::ast_summary::has_infer(pa) {
                 self.rg.fresh(prog, st)
             } else {
-                let mut sl = crate::regions::Slots { lts: names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut sl = crate::regions::Slots { lts: names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
                 let mut codes = vec![];
                 sl.slots(pa, false, &mut codes);
                 self.rg.instantiate(prog, st, Some(&codes), &lts, &[], &mut |me| me.var())
@@ -3219,7 +3219,7 @@ impl Cx<'_> {
         let prog = self.prog;
         // (a result that elides a region (`fn(&u32, _) -> &u32`): it is its parameter's, which one binder links; not
         // taken part by part (the whole is fresh, as before))
-        let mut rs = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
+        let mut rs = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 1, derived: None };
         let mut rc = vec![];
         rs.slots(r, false, &mut rc);
         if rc.contains(&R_BOUND) {
@@ -3232,7 +3232,7 @@ impl Cx<'_> {
                 out.extend(self.rg.fresh(prog, pt)?);
                 continue;
             }
-            let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
+            let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 1, derived: None };
             let mut codes = vec![];
             s.slots(p, false, &mut codes);
             out.extend(self.rg.instantiate(prog, pt, Some(&codes), &lts, &[], &mut |me| me.var())?);
@@ -3254,7 +3254,7 @@ impl Cx<'_> {
         let mut targs = vec![];
         for pt in &tf {
             let t = self.parse_ty(pt).ok()?;
-            let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+            let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
             let mut codes = vec![];
             sl.slots(pt, false, &mut codes);
             let lts = self.rg.lts.clone();
@@ -3451,7 +3451,7 @@ impl Cx<'_> {
                     t
                 }
             };
-            let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+            let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
             let mut codes = vec![];
             sl.slots(pt, false, &mut codes);
             if !sl.any {
@@ -3617,7 +3617,7 @@ impl Cx<'_> {
             }
             _ => {
                 let names = self.rg.lt_names.clone();
-                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
                 let mut codes = vec![];
                 s.slots(ann, false, &mut codes);
                 let lts = self.rg.lts.clone();
@@ -3647,7 +3647,7 @@ impl Cx<'_> {
             if !has_static_bound_adt(prog, t, 0) && (self.rg.implied_partial || !refs_placeholder(prog, t, false, 0)) {
                 continue;
             }
-            let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+            let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
             let mut codes = vec![];
             s.slots(pt, false, &mut codes);
             let lts = self.rg.lts.clone();
@@ -3671,7 +3671,7 @@ impl Cx<'_> {
         let Ok(t) = self.parse_ty(ann) else { return };
         let prog = self.prog;
         let names = self.rg.lt_names.clone();
-        let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+        let mut s = crate::regions::Slots { lts: names, tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
         let mut codes = vec![];
         s.slots(ann, false, &mut codes);
         let lts = self.rg.lts.clone();
@@ -3966,7 +3966,7 @@ impl Cx<'_> {
                         if !crate::regions::names_lt(pt) {
                             continue;
                         }
-                        let mut sl = crate::regions::Slots { lts: names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                        let mut sl = crate::regions::Slots { lts: names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
                         let mut codes = vec![];
                         sl.slots(pt, false, &mut codes);
                         let tr = rg.instantiate(prog, t, Some(&codes), &flts, &[], &mut |me| me.var());
@@ -3985,7 +3985,7 @@ impl Cx<'_> {
                 if !crate::regions::names_lt(pt) {
                     continue;
                 }
-                let mut s = crate::regions::Slots { lts: rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut s = crate::regions::Slots { lts: rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
                 let mut codes = vec![];
                 s.slots(pt, false, &mut codes);
                 let flts = rg.lts.clone();
@@ -4504,7 +4504,7 @@ impl Cx<'_> {
         let mut tgts = vec![];
         let mut params = vec![];
         for p in ps {
-            let mut s = crate::regions::Slots { lts: names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 1 };
+            let mut s = crate::regions::Slots { lts: names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 1, derived: None };
             let mut cs = vec![];
             s.slots(p, false, &mut cs);
             let Ok(t) = self.parse_ty(p) else { return };
@@ -4632,7 +4632,7 @@ impl Cx<'_> {
         let written: Vec<u8> = match seg {
             Some(sg) => {
                 let t = PTy::Path(None, crate::parse::Path { global: false, segs: vec![sg.clone()], pos: Default::default() });
-                let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
                 let mut v = vec![];
                 sl.slots(&t, false, &mut v);
                 v
@@ -5042,7 +5042,7 @@ impl Cx<'_> {
         let mut seg = seg.clone();
         seg.name = prog.structs[prog.base_of(sid) as usize].name.clone();
         let pt = PTy::Path(None, crate::parse::Path { global: false, segs: vec![seg], pos: path.pos });
-        let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+        let mut s = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], self_paths: &[], any: false, in_fn: 0, derived: None };
         let mut codes = vec![];
         s.slots(&pt, false, &mut codes);
         let lts = self.rg.lts.clone();

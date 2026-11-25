@@ -1816,7 +1816,27 @@ impl Program {
                     panic_handler: ss.panic_handler,
                     ret_from: ss.ret_from,
                     is_unsafe: ss.is_unsafe,
-                    regions: ss.regions.as_deref().map(|r| std::sync::Arc::new(r.clone())),
+                    regions: ss.regions.as_deref().map(|r| {
+                        let mut r = r.clone();
+                        // (what bounds on types imply of their parts, where no path the part is in is a type alias
+                        // (`Erased<'a>: 'static` with `type Erased<'a> = ();` says nothing of 'a))
+                        if !r.derived.is_empty() || !r.derived_ty.is_empty() {
+                            // (a path names only types with lifetime arguments, so never a type parameter, even one
+                            // that shadows a type alias's name)
+                            let alias = |paths: &str| paths.split(',').any(|n| p.aliases.contains_key(n));
+                            for (paths, a, c) in std::mem::take(&mut r.derived) {
+                                if !alias(&paths) && !r.outlives.contains(&(a, c)) {
+                                    r.outlives.push((a, c));
+                                }
+                            }
+                            for (paths, t, c) in std::mem::take(&mut r.derived_ty) {
+                                if !alias(&paths) && !r.ty_outlives.contains(&(t.clone(), c)) {
+                                    r.ty_outlives.push((t, c));
+                                }
+                            }
+                        }
+                        std::sync::Arc::new(r)
+                    }),
                 });
                 if ss.panic_handler {
                     p.panic_handler = Some(p.names.len() as u32 - 1);
