@@ -1891,8 +1891,9 @@ impl Program {
                         k: k as u32,
                         sid,
                         captures: c.fields.iter().map(|f| f.0.clone()).collect(),
-                        by_move: c.by_move,
-                        moved: c.moved.clone(),
+                        // (from edition 2021, a shared reference used only through a deref is held by value)
+                        by_move: c.by_move || (p.edition >= 2021 && !c.moved.is_empty() && c.moved.iter().zip(&c.deref).all(|(m, d)| *m || *d)),
+                        moved: if p.edition >= 2021 { c.moved.iter().zip(c.deref.iter().chain(std::iter::repeat(&false))).map(|(m, d)| *m || *d).collect() } else { c.moved.clone() },
                         n_parent: c.n_parent as usize,
                         ret_ann,
                         fake_reads: c.fake_reads.clone(),
