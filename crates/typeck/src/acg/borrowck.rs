@@ -295,6 +295,9 @@ pub struct Bk {
     /// through boxes and fields (`Box<Scribble>`: `*`; `Wrapper(Scribble)`: `.0`): its `drop` may use what a `&mut`
     /// field points to, so a borrow through it must not outlive the local (E0713)
     pub drop_owners: Vec<(u32, Vec<Proj>)>,
+    /// The locals whose drop at the end of their scope may see what they borrow (dropck): a loan of itself one holds
+    /// there is in use while it is dropped
+    pub dropck_locals: Vec<u32>,
     /// A `*x` through an overloaded `Deref` with no `DerefMut` (`Rc`, `Arc`, a `Ref` guard, the program's): (the
     /// local, the place of its `Shr` in the projection) → the type's name, for the errors of writing through it
     /// (bk_place records them: it reads `self` only)
@@ -1785,7 +1788,25 @@ impl Bk {
                     // (what it holds stays: a value read from it before it went away may flow into a local after
                     // (`let a = match y { (ref mut a, _) => a };`). A local not live holds no live loan)
                 }
-                Ev::Acc(_, Acc::Drop, _) => {}
+                Ev::Acc(p, Acc::Drop, _) => {
+                    // (a value whose drop may see what it borrows, holding a loan of itself (`d.0.set(Some(&d))` with
+                    // D: Drop): the loan is in use while d is dropped, E0597 at the borrow)
+                    // (only a local dropped at its scope's end with such a drop: not `let _ = d;`, a fake read. A move
+                    // of it on another path does not take the loan away: one that held a loan of itself cannot be
+                    // moved, rustc's E0505)
+                    if let (Some(errs), true, true) = (errs.as_deref_mut(), loans_on, p.proj.is_empty() && self.dropck_locals.contains(&p.local)) {
+                        let own = st.held(p.local).iter().copied().find(|&ln| {
+                            let lo = &self.loans[ln as usize];
+                            lo.place.local == p.local && lo.place.owned_len() == lo.place.proj.len()
+                        });
+                        if let Some(ln) = own {
+                            let name = path_str(&self.locals, &BPlace { local: p.local, proj: vec![] });
+                            if name != TEMP {
+                                errs.push(BkError { sp: self.loans[ln as usize].sp, msg: format!("`{name}` does not live long enough (dropped while still borrowed)") });
+                            }
+                        }
+                    }
+                }
                 Ev::Acc(p, a, sp) => {
                     if let Some(errs) = errs.as_deref_mut() {
                         if *a == Acc::Write && p.proj.is_empty() {
@@ -2906,6 +2927,9 @@ impl Cx<'_> {
             // (drop check: a value whose `Drop` may see what it borrows is used when it is dropped)
             if self.bk.locals[id as usize].refs && self.bk.level >= 2 && self.dropck(t, 0) {
                 self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Drop, sp));
+                if !self.bk.dropck_locals.contains(&id) {
+                    self.bk.dropck_locals.push(id);
+                }
             }
             self.bk_ev(Ev::Dead(id, sp));
         }
@@ -2932,6 +2956,9 @@ impl Cx<'_> {
         for (id, t) in ids {
             if self.bk.locals[id as usize].refs && self.bk.level >= 2 && self.dropck(t, 0) {
                 self.bk_ev(Ev::Acc(BPlace { local: id, proj: vec![] }, Acc::Drop, sp));
+                if !self.bk.dropck_locals.contains(&id) {
+                    self.bk.dropck_locals.push(id);
+                }
             }
             self.bk_ev(Ev::Dead(id, sp));
         }
@@ -2961,7 +2988,9 @@ impl Cx<'_> {
                 if prelude || prog.closure_of_struct.contains_key(&base) {
                     return sd.args.iter().any(|&a| self.dropck(a, depth + 1));
                 }
-                prog.impls.contains(&(base, "Drop".to_string()))
+                // (a `Drop` of a type that holds no reference sees no loan: `Token` in `(Cell<Option<&i32>>, Token)`,
+                // whose drop needs nothing the cell borrows alive, as rustc's drop check requires only its parameters)
+                (prog.impls.contains(&(base, "Drop".to_string())) && has_refs(prog, t, 0))
                     || sd.fields.iter().any(|f| self.dropck(f.1, depth + 1))
                     || sd.variants.iter().any(|v| v.fields.iter().any(|f| self.dropck(f.1, depth + 1)))
             }
@@ -3092,12 +3121,20 @@ impl Cx<'_> {
                 p.proj.push(Proj::Index);
                 let et = match t {
                     Ty::Array(e, _) | Ty::Slice(e) => Some(*e),
+                    // (the prelude's Vec, whose `Index` gives an element: `c.v[0].cell` is a place in c)
+                    Ty::Struct(sid) if self.prelude_vec(sid) => self.prog.structs[sid as usize].args.first().copied(),
                     _ => None,
                 };
                 Some((p, et))
             }
             _ => None,
         }
+    }
+
+    /// sid is the prelude's Vec
+    fn prelude_vec(&self, sid: u32) -> bool {
+        let b = self.prog.base_of(sid);
+        self.prog.structs[b as usize].name == "Vec" && self.prog.struct_item.get(b as usize).is_some_and(|&i| i >= self.prog.prelude_from)
     }
 
     /// Record an access of the place e
@@ -5073,7 +5110,14 @@ impl Cx<'_> {
                     self.bk_direct_part(x, et(i), out);
                 }
             }
-            Expr::Repeat(x, _) => self.bk_direct(x, out),
+            // (an element coerced as the Array arm's: `[&x; 1]` of x a reference)
+            Expr::Repeat(x, _) => {
+                let want = match self.peek(e) {
+                    Some(Ty::Array(t, _)) => Some(*t),
+                    _ => None,
+                };
+                self.bk_direct_part(x, want, out);
+            }
             Expr::Struct(_, fs, base) => {
                 let sid = match self.peek(e) {
                     Some(Ty::Struct(sid)) => Some(sid),

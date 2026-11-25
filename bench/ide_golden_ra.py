@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""ide のゴールデン (crates/ide/tests/golden/navigation.txt) を rust-analyzer と比べる。
-fixture のワークスペース (crates/ide/tests/fixture/ws) をコピーして rust-analyzer に開かせ、ゴールデンの各識別子の位置で
-definition / references (定義を含む) / hover を聞く。
+"""Compares ide's golden file (crates/ide/tests/golden/navigation.txt) with rust-analyzer.
+Copies the fixture workspace (crates/ide/tests/fixture/ws), has rust-analyzer open it, and at the position of each identifier in the golden file
+asks for definition / references (including the definition) / hover.
 
-比べるもの:
-- definition: rust-analyzer の行き先がワークスペースの中のとき、(ファイル, 行, 桁) が同じか
-- references: 数が同じか (std の定義のものも、ワークスペースの中の参照の数で比べられる)
-- hover: rust-analyzer が返した所で返したか
+What is compared:
+- definition: when rust-analyzer's destination is inside the workspace, whether the (file, line, column) is the same
+- references: whether the count is the same (those of std definitions can also be compared by the number of references inside the workspace)
+- hover: whether it returned one where rust-analyzer did
 usage: python3 bench/ide_golden_ra.py [--detail]
 """
 
@@ -21,7 +21,7 @@ KEYWORDS = set("as async await break const continue crate dyn else enum extern f
 
 
 def golden():
-    """ws の各識別子: (ファイル, 行, 桁, 名前, 定義の (ファイル, 行, 桁) か None, 参照の数, hover があるか)"""
+    """Each identifier of ws: (file, line, column, name, the definition's (file, line, column) or None, number of references, whether there is a hover)"""
     out = []
     for l in open(GOLDEN):
         m = re.match(r"^ws/(\S+):(\d+):(\d+) (\S+) -> (\S+)(?: \S+)* \| refs (\d+)/\d+.*\| (.*)$", l.rstrip("\n"))

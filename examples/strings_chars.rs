@@ -1,6 +1,6 @@
-// 文字列・char のメソッドと演算子のオーバーロードのサンプル: to_uppercase / replace / repeat / split("..") /
-// split_once / strip_prefix / char_indices / bytes / parse (ParseIntError の Display / Debug)、
-// String の insert / remove / pop / retain / + / +=、&s[a..b]、char の is_alphabetic / to_digit / from_digit、
+// A sample of string / char methods and operator overloading: to_uppercase / replace / repeat / split("..") /
+// split_once / strip_prefix / char_indices / bytes / parse (Display / Debug of ParseIntError),
+// String's insert / remove / pop / retain / + / +=, &s[a..b], char's is_alphabetic / to_digit / from_digit,
 // impl Add / Sub / Neg / AddAssign / Mul<i32>
 use std::ops::{Add, AddAssign, Mul, Neg, Sub};
 
@@ -71,7 +71,7 @@ fn main() {
     }
     let nums: Vec<i64> = "1 2 3 40".split_whitespace().map(|w| w.parse().unwrap()).collect();
     println!("{:?} {}", nums, nums.iter().sum::<i64>());
-    // String の編集
+    // Editing a String
     let mut t = String::from("hllo");
     t.insert(1, 'e');
     t.insert_str(0, ">> ");
@@ -113,7 +113,7 @@ fn main() {
     println!("{} {:?} {} {}", char::from(65u8), char::from_u32(0x263A), 'é'.len_utf8(), 'x'.is_digit(36));
     let up: String = "shout".chars().map(|c| c.to_ascii_uppercase()).collect();
     println!("{}", up);
-    // 演算子
+    // Operators
     let a = V2 { x: 1, y: 2 };
     let b = V2 { x: 10, y: 20 };
     let mut c = a + b - V2 { x: 1, y: 1 };

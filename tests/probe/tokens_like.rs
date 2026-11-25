@@ -1,6 +1,6 @@
-// macros.rs のセルフホストで足したもの: struct と同じ名前のバリアント、&struct の ==、
-// PartialEq<str> と PartialEq の両方の impl、Option::flatten、HashMap の clone、
-// String::replace_range / into_bytes、大文字の名前のパターンを含むクロージャ
+// What was added for self-hosting macros.rs: a variant with the same name as a struct, == on &struct,
+// both PartialEq<str> and PartialEq impls, Option::flatten, clone of a HashMap,
+// String::replace_range / into_bytes, a closure containing a pattern with an uppercase name
 use std::collections::HashMap;
 
 #[derive(Clone, Debug)]

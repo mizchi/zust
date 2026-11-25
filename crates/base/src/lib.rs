@@ -1,7 +1,7 @@
-//! zustc の全体で使う小さな部品 (外部クレートに依存しない。zustc 自身でもコンパイルできる)。
-//! - fxhash: 名前表などの FxHasher / FxMap / FxSet
-//! - key: キャッシュのキー (Key / KeyHasher)
-//! - prof: 段ごとの時間の計測
+//! Small building blocks used throughout zustc (no external crates; zustc itself can compile them).
+//! - fxhash: FxHasher / FxMap / FxSet for name tables etc.
+//! - key: cache keys (Key / KeyHasher)
+//! - prof: per-stage timing
 //! - par: the front end's thread parallelism (an ordered parallel map on scoped threads; not self-hosted)
 
 pub mod fxhash;

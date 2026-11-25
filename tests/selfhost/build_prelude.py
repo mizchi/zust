@@ -1,9 +1,9 @@
-"""zustc 自身の crates/syntax/src/prelude.rs (prelude の項目を名前で選ぶ) を、lexer.rs・fxhash.rs・key.rs の KeyHasher と一緒に
-1 ファイルのプログラムにまとめる。
+"""Combines zustc's own crates/syntax/src/prelude.rs (picks prelude entries by name) together with lexer.rs, fxhash.rs and key.rs's KeyHasher
+into a one-file program.
 usage: python3 tests/selfhost/build_prelude.py > out/selfhost/prelude_main.rs
-main は引数のファイルごとに、ユーザのソースとして prelude::select を呼び、選ばれた prelude の長さ・行数・ハッシュを出す。
-(include_str! は out/selfhost/ から見た crates/syntax/src/prelude_lib.rs.in を指すように書き換え、build.rs の生成する
- PRELUDE_ITEMS の表 (target/release/build/zust-core-*/out/prelude_items.rs の新しいもの) はそのまま埋め込む)"""
+For each argument file, main calls prelude::select with it as the user source and prints the selected prelude's length, line count and hash.
+(include_str! is rewritten to point at crates/syntax/src/prelude_lib.rs.in as seen from out/selfhost/, and the table that build.rs generates,
+ PRELUDE_ITEMS (the newest target/release/build/zust-core-*/out/prelude_items.rs), is embedded as is)"""
 import glob, os
 
 lexer = open("crates/syntax/src/lexer.rs").read()
@@ -47,5 +47,5 @@ fn main() {
     }
 }
 """)
-# (lexer は crate::key を使う: cache と同じもの)
+# (lexer uses crate::key: the same as cache)
 print("mod key {\n    pub use crate::cache::*;\n}")

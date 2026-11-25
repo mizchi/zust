@@ -1,12 +1,12 @@
-//! 条件付きコンパイル: `#[cfg(..)]` の付いたもの (アイテム・フィールド・バリアント・match の腕・文・式) を
-//! 述語が偽なら空白にする。`#[cfg_attr(p, a)]` は p が真なら `#[a]`、偽なら消す。`cfg!(p)` は `true` / `false` にする。
-//! ついでに `extern crate x;` (std / core / alloc と、ワークスペースの依存) も消す。
-//! バイト位置と行は変えない (空白で塗る) ので、エラーと panic の場所はそのまま。
+//! Conditional compilation: blanks out things with `#[cfg(..)]` (items, fields, variants, match arms, statements, expressions)
+//! when the predicate is false. `#[cfg_attr(p, a)]` becomes `#[a]` if p is true and is removed if false. `cfg!(p)` becomes `true` / `false`.
+//! It also removes `extern crate x;` (std / core / alloc, and workspace dependencies).
+//! Byte positions and lines are not changed (painted over with whitespace), so error and panic locations stay as they are.
 //!
-//! 述語: `feature = ".."` (クレートごとの集合)・`debug_assertions` (-O でなければ真)・`unix` / `target_os = "linux"` など
-//! x86-64 Linux の値・`test` / `doc` / `miri` は偽・`not` / `all` / `any`。知らない名前は偽
+//! Predicates: `feature = ".."` (a set per crate), `debug_assertions` (true unless -O), `unix` / `target_os = "linux"` and other
+//! x86-64 Linux values, `test` / `doc` / `miri` are false, `not` / `all` / `any`. Unknown names are false
 
-/// cfg の述語を評価するための設定
+/// Settings for evaluating cfg predicates
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CfgSet {
     pub features: Vec<String>,
@@ -72,10 +72,10 @@ impl CfgSet {
     }
 }
 
-/// 字句: (種類, 開始, 終了)。種類 0 = 識別子, 1 = 記号 1 文字, 2 = リテラル
+/// Token: (kind, start, end). Kind 0 = identifier, 1 = one-character symbol, 2 = literal
 type Tok = (u8, usize, usize);
 
-/// 述語 toks[i..] を評価し、(値, 次の位置)
+/// Evaluates the predicate toks[i..]: (value, next position)
 fn eval(s: &[u8], toks: &[Tok], mut i: usize, c: &CfgSet) -> (bool, usize) {
     let t = |k: usize| -> &[u8] {
         match toks.get(k) {
@@ -115,48 +115,11 @@ fn eval(s: &[u8], toks: &[Tok], mut i: usize, c: &CfgSet) -> (bool, usize) {
     }
     let name = String::from_utf8_lossy(name).into_owned();
     if t(i) == b"=" && toks.get(i + 1).is_some_and(|x| x.0 == 2) {
-        let lit = t(i + 1);
-        let mut val = String::from_utf8_lossy(&lit[1..lit.len() - 1]).into_owned();
-        // (`label = "a\"b"`: the literal's value, as a build script's `rustc-cfg` gives it)
-        if val.contains('\\') {
-            val = unescape(&val);
-        }
+        // (`label = "a\"b"`, `label = "\u{6_1}"`: the literal's value, as a build script's `rustc-cfg` gives it)
+        let val = str_value(&String::from_utf8_lossy(t(i + 1))).unwrap_or_default();
         return (c.kv(&name, &val), i + 2);
     }
     (c.flag(&name), i)
-}
-
-/// The value of a string literal's text between its quotes (`\"`, `\\`, `\n`, `\t`, `\r`, `\0`, `\xNN`, `\u{..}`)
-fn unescape(v: &str) -> String {
-    let mut out = String::with_capacity(v.len());
-    let mut it = v.chars();
-    while let Some(ch) = it.next() {
-        if ch != '\\' {
-            out.push(ch);
-            continue;
-        }
-        match it.next() {
-            Some('n') => out.push('\n'),
-            Some('t') => out.push('\t'),
-            Some('r') => out.push('\r'),
-            Some('0') => out.push('\0'),
-            Some('x') => {
-                let hex: String = it.by_ref().take(2).collect();
-                if let Some(c) = u8::from_str_radix(&hex, 16).ok().filter(|b| b.is_ascii()) {
-                    out.push(c as char);
-                }
-            }
-            Some('u') => {
-                let hex: String = it.by_ref().skip_while(|&c| c == '{').take_while(|&c| c != '}').collect();
-                if let Some(c) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
-                    out.push(c);
-                }
-            }
-            Some(x) => out.push(x),
-            None => {}
-        }
-    }
-    out
 }
 
 fn is_open(b: &[u8]) -> bool {
@@ -167,7 +130,7 @@ fn is_close(b: &[u8]) -> bool {
     b == b")" || b == b"]" || b == b"}"
 }
 
-/// 対応する閉じ括弧の位置
+/// The position of the matching closing bracket
 fn matching(s: &[u8], toks: &[Tok], i: usize) -> usize {
     let mut d = 0i32;
     let mut k = i;
@@ -194,7 +157,7 @@ fn blank(out: &mut [u8], a: usize, b: usize) {
     }
 }
 
-/// 属性の後ろの「もの」の終わり (その最後の字句の位置)。i は対象の最初の字句
+/// The end of the "thing" after an attribute (the position of its last token). i is the first token of the target
 fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
     let t = |k: usize| -> &[u8] {
         match toks.get(k) {
@@ -202,11 +165,11 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
             None => b"",
         }
     };
-    // (ほかの属性を飛ばす)
+    // (Skip other attributes)
     while t(i) == b"#" && t(i + 1) == b"[" {
         i = matching(s, toks, i + 1) + 1;
     }
-    // (`;` まで続くもの: `const X: T = S { .. };`・`use a::{b, c};`・`let`・`type`・`static`)
+    // (Things that run up to `;`: `const X: T = S { .. };`, `use a::{b, c};`, `let`, `type`, `static`)
     let mut j = i;
     while matches!(t(j), b"pub" | b"unsafe" | b"async" | b"extern") || t(j).first() == Some(&b'"') {
         if t(j) == b"pub" && t(j + 1) == b"(" {
@@ -221,7 +184,7 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
     while k < toks.len() {
         let b = t(k);
         if toks[k].0 == 1 && is_close(b) {
-            // (包んでいるものの終わり: その手前まで)
+            // (The end of what encloses it: up to just before that)
             return k - 1;
         }
         if toks[k].0 == 1 && (b == b";" || (b == b"," && !keyword_item)) {
@@ -235,7 +198,7 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
                 continue;
             }
             if b == b"{" && !semi_item {
-                // (ブロックで終わるもの。後ろの `,` も消す: バリアント・match の腕)
+                // (Things that end with a block. A following `,` is removed too: variants, match arms)
                 return if t(m + 1) == b"," { m + 1 } else { m };
             }
             k = m + 1;
@@ -347,7 +310,7 @@ pub(crate) fn cfg_if_not_taken(src: &str, c: &CfgSet) -> Vec<(usize, usize)> {
     out
 }
 
-/// src の cfg を評価する。変わらなければ None
+/// Evaluates the cfgs in src. None if nothing changes
 /// `cfg_select! { pred => { .. } _ => { .. } }`: the tokens of the first arm whose predicate holds, in place of the
 /// whole call (the rest blanked, newlines kept, so lines and columns stay). Nested calls in the chosen arm are
 /// expanded too; not inside `macro_rules!` (a predicate there may be a metavariable, expanded first)
@@ -574,7 +537,7 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs:
     let mut i = 0;
     while i < toks.len() {
         // `cfg!(p)` → `true` / `false`
-        if t(i) == b"cfg" && t(i + 1) == b"!" && t(i + 2) == b"(" {
+        if t(i) == b"cfg" && t(i + 1) == b"!" && is_open(t(i + 2)) {
             let close = matching(s, &toks, i + 2);
             // (`cfg!(version(..))` is unstable: left for acg, which says so (E0658))
             if (i + 3..close).any(|k| t(k) == b"version" && t(k + 1) == b"(") {
@@ -592,8 +555,8 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs:
             i = close + 1;
             continue;
         }
-        // マクロの呼び出しと macro_rules! の中は見ない (展開してから評価する: cfg_if! の `if #[cfg(..)] { .. }`)。
-        // std の書式のマクロ (`println!("{}", cfg!(unix))`) は後で展開されないので、中も評価する
+        // The insides of macro calls and macro_rules! are not looked at (evaluated after expansion: cfg_if!'s `if #[cfg(..)] { .. }`).
+        // std's formatting macros (`println!("{}", cfg!(unix))`) are not expanded later, so their insides are evaluated too
         if toks[i].0 == 0 && t(i) != b"cfg" && t(i + 1) == b"!" && !format_like(t(i)) {
             *env |= matches!(t(i), b"env" | b"option_env");
             let g = if t(i + 2) == b"(" || t(i + 2) == b"[" || t(i + 2) == b"{" {
@@ -685,7 +648,7 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs:
                 continue;
             }
             if inner {
-                // (`#![cfg(..)]` が偽ならファイル全体。今は属性だけ消す)
+                // (If `#![cfg(..)]` is false, the whole file. For now only the attribute is removed)
                 blank(&mut out, toks[i].1, toks[rb].2);
                 if !v {
                     blank(&mut out, 0, s.len());
@@ -816,4 +779,875 @@ fn expr_macro(n: &[u8]) -> bool {
             | b"assert_ne" | b"debug_assert" | b"debug_assert_eq" | b"debug_assert_ne" | b"vec" | b"dbg" | b"todo" | b"unreachable"
             | b"unimplemented" | b"format_args"
     )
+}
+
+/// A string literal as an attribute takes it: `"a"`, `r"a"`, `r#"a"#` (not `b"a"`)
+pub fn str_lit(v: &str) -> bool {
+    let b = v.as_bytes();
+    match v.strip_prefix('r') {
+        // (a raw string ends with its quote and as many `#` as it opens with: `r#"reason"#`; it is the whole value,
+        // not `r"a" + "b"`)
+        Some(r) => {
+            let h = r.len() - r.trim_start_matches('#').len();
+            let body = &r[h..];
+            body.len() >= 2 + h && body.starts_with('"') && body.ends_with(&format!("\"{}", "#".repeat(h))) && lit_end(b, 0) == Some(b.len())
+        }
+        // (its closing quote ends the value: `"a\"b"`, not `"a" + "b"` nor `"a\"`)
+        None => {
+            if b.len() < 2 || b[0] != b'"' {
+                return false;
+            }
+            let mut k = 1;
+            while k < b.len() && b[k] != b'"' {
+                k += if b[k] == b'\\' { 2 } else { 1 };
+            }
+            k == b.len() - 1
+        }
+    }
+}
+
+/// Where a string literal, a char literal or a comment that starts at `i` ends (one past it), or None if none
+/// starts there: `"a\\"b"`, `r#"a"b"#`, `br"a"`, `'c'`, `'\\''`, `'é'`, `// ..`, `/* /* .. */ */` (not a lifetime,
+/// `'a`, nor an identifier ending in r, `for"`)
+pub fn lit_end(b: &[u8], i: usize) -> Option<usize> {
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    match b[i] {
+        b'"' => {
+            let mut k = i + 1;
+            while k < b.len() && b[k] != b'"' {
+                k += if b[k] == b'\\' { 2 } else { 1 };
+            }
+            Some((k + 1).min(b.len()))
+        }
+        // (`r".."`, `br".."`, `cr".."`)
+        b'r' if !(i > 0 && ident(b[i - 1]) && b[i - 1] != b'b' && b[i - 1] != b'c') => {
+            let h = b[i + 1..].iter().take_while(|&&c| c == b'#').count();
+            if b.get(i + 1 + h) != Some(&b'"') {
+                return None;
+            }
+            let from = i + 2 + h;
+            let mut k = from;
+            while k < b.len() {
+                if b[k] == b'"' && b.len() >= k + 1 + h && b[k + 1..k + 1 + h].iter().all(|&c| c == b'#') {
+                    return Some(k + 1 + h);
+                }
+                k += 1;
+            }
+            Some(b.len())
+        }
+        // (an escape, to its closing quote; one the text ends in, to the end)
+        b'\'' if b.get(i + 1) == Some(&b'\\') => {
+            let n = b.get(i + 3..).and_then(|r| r.iter().position(|&c| c == b'\'')).map_or(b.len(), |n| i + 3 + n + 1);
+            Some(n.min(b.len()))
+        }
+        b'\'' => {
+            // (one char, of 1 to 4 bytes, then the closing quote)
+            let c = *b.get(i + 1)?;
+            let w = if c < 0x80 { 1 } else if c < 0xE0 { 2 } else if c < 0xF0 { 3 } else { 4 };
+            (b.get(i + 1 + w) == Some(&b'\'')).then_some(i + 2 + w)
+        }
+        b'/' if b.get(i + 1) == Some(&b'/') => Some(b[i..].iter().position(|&c| c == b'\n').map_or(b.len(), |n| i + n)),
+        b'/' if b.get(i + 1) == Some(&b'*') => {
+            let (mut k, mut d) = (i + 2, 1u32);
+            while k < b.len() && d > 0 {
+                if b[k..].starts_with(b"/*") {
+                    d += 1;
+                    k += 2;
+                } else if b[k..].starts_with(b"*/") {
+                    d -= 1;
+                    k += 2;
+                } else {
+                    k += 1;
+                }
+            }
+            Some(k.min(b.len()))
+        }
+        _ => None,
+    }
+}
+
+/// A text with its comments as spaces (comments are whitespace, `all(/* note */)`); literals are kept as written
+pub fn blank_comments(v: &str) -> std::borrow::Cow<'_, str> {
+    if !v.contains("//") && !v.contains("/*") {
+        return std::borrow::Cow::Borrowed(v);
+    }
+    let b = v.as_bytes();
+    let (mut out, mut i) = (Vec::with_capacity(b.len()), 0);
+    while i < b.len() {
+        match lit_end(b, i) {
+            Some(e) if b[i] == b'/' => {
+                out.extend(std::iter::repeat_n(b' ', e - i));
+                i = e;
+            }
+            Some(e) => {
+                out.extend_from_slice(&b[i..e]);
+                i = e;
+            }
+            None => {
+                out.push(b[i]);
+                i += 1;
+            }
+        }
+    }
+    std::borrow::Cow::Owned(String::from_utf8(out).unwrap_or_else(|_| v.to_string()))
+}
+
+/// The value of a string literal as an attribute takes it (see `str_lit`), with a plain string's escapes decoded:
+/// `"console"`, `r"console"` and `r#"console"#` are all `console`
+pub fn str_value(v: &str) -> Option<String> {
+    let v = v.trim();
+    if !str_lit(v) {
+        return None;
+    }
+    if let Some(r) = v.strip_prefix('r') {
+        let h = r.len() - r.trim_start_matches('#').len();
+        return Some(r[h + 1..r.len() - 1 - h].to_string());
+    }
+    let body = &v[1..v.len() - 1];
+    if !body.contains('\\') {
+        return Some(body.to_string());
+    }
+    let (mut out, mut cs) = (String::new(), body.chars());
+    while let Some(c) = cs.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match cs.next()? {
+            'n' => out.push('\n'),
+            't' => out.push('\t'),
+            'r' => out.push('\r'),
+            '0' => out.push('\0'),
+            '\\' => out.push('\\'),
+            '"' => out.push('"'),
+            '\'' => out.push('\''),
+            // (`\x61`: two hex digits, up to `\x7F`)
+            'x' => {
+                let h: String = cs.by_ref().take(2).collect();
+                let v = u8::from_str_radix(&h, 16).ok().filter(|v| v.is_ascii() && h.bytes().all(|c| c.is_ascii_hexdigit()))?;
+                out.push(char::from(v));
+            }
+            // (`\u{1F600}`, `\u{1_F600}`: hex digits that may have `_` between them, not before the first, to the
+            // closing brace, which must be there: not `\u{_61}` nor `\u{61`)
+            'u' => {
+                if cs.next()? != '{' {
+                    return None;
+                }
+                let mut hex = String::new();
+                loop {
+                    match cs.next()? {
+                        '}' => break,
+                        '_' if !hex.is_empty() => {}
+                        d if d.is_ascii_hexdigit() => hex.push(d),
+                        _ => return None,
+                    }
+                }
+                out.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
+            }
+            // (a line continuation: the newline and the next line's leading whitespace)
+            '\n' => {
+                let rest: String = cs.clone().collect();
+                let t = rest.trim_start();
+                cs = body[body.len() - t.len()..].chars();
+            }
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
+/// The entries of an attribute's list: split at the commas outside brackets, literals and comments, trimmed, without
+/// the empty one a trailing comma leaves
+pub fn attr_entries(v: &str) -> Vec<&str> {
+    let (mut out, mut d, mut from, mut i) = (vec![], 0i32, 0, 0);
+    let b = v.as_bytes();
+    while i < b.len() {
+        if let Some(e) = lit_end(b, i) {
+            i = e;
+            continue;
+        }
+        match b[i] {
+            b'(' | b'[' | b'{' => d += 1,
+            b')' | b']' | b'}' => d -= 1,
+            b',' if d == 0 => {
+                out.push(v[from..i].trim());
+                from = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out.push(v[from..].trim());
+    if out.last().is_some_and(|x| x.is_empty()) {
+        out.pop();
+    }
+    out
+}
+
+/// A `cfg` predicate rustc can read: a name (`unix`, `r#true`), `name = "value"`, `all(..)` / `any(..)` of any
+/// number, `not(..)` of one; `version(..)` and `target(..)` are left to their feature gates. Not a path, a literal or
+/// another `name(..)`
+pub fn cfg_pred(p: &str) -> bool {
+    cfg_check(p).is_ok()
+}
+
+/// What an attribute's `name = value` holds: Ok(true) a string literal, Ok(false) another literal (`1`, `b"a"`,
+/// `'c'`, `true`), Err(what rustc says it found) anything else: a macro call, a lone symbol (`` `%` ``), an expression
+pub fn attr_value(v: &str) -> Result<bool, String> {
+    let v = v.trim();
+    if str_lit(v) {
+        return Ok(true);
+    }
+    let lit = v.starts_with("b\"") || v.starts_with("b'") || v.starts_with('\'')
+        || v.starts_with(|c: char| c.is_ascii_digit()) && v.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        || v == "true" || v == "false";
+    if lit {
+        return Ok(false);
+    }
+    let n = v.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(v.len());
+    if n > 0 && v[n..].starts_with('!') && v[n + 1..].trim_start().starts_with(['(', '[', '{']) {
+        return Err("macro call".to_string());
+    }
+    if v.chars().count() == 1 && !v.starts_with(|c: char| c.is_alphanumeric() || c == '_') {
+        return Err(format!("`{v}`"));
+    }
+    Err("expression".to_string())
+}
+
+/// The message rustc gives for an attribute value that is not a literal
+pub fn not_a_literal(found: &str) -> String {
+    format!("expected a literal (`1u8`, `1.0f32`, `\"string\"`, etc.) here, found {found}")
+}
+
+/// The first fn qualifier out of rustc's order `const` `async` `unsafe`/`safe` `extern "abi"` before a `fn` (of an
+/// item, an associated fn or a fn pointer type), as rustc's parser reports it at that keyword: `unsafe async fn`
+/// "expected one of `extern` or `fn`, found keyword `async`". The parser reads every item, a configured-away one
+/// too, so this reads the source as written; not a macro's definition or input, a comment or a literal, and only a
+/// run of qualifiers that ends at `fn`
+pub fn fn_qualifier_order(src: &str) -> Option<String> {
+    if !src.contains("fn") {
+        return None;
+    }
+    let b = src.as_bytes();
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let ws = |mut k: usize| {
+        while k < b.len() && b[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        k
+    };
+    let word = |k: usize| &b[k..k + b[k..].iter().take_while(|&&c| ident(c)).count()];
+    // (the rank of a qualifier: rustc's order)
+    let rank = |w: &[u8]| match w {
+        b"const" => Some(0),
+        b"async" => Some(1),
+        b"unsafe" | b"safe" => Some(2),
+        b"extern" => Some(3),
+        _ => None,
+    };
+    // (first a cheap look: a qualifier whose next word is one that may not follow it; the text is read in order only
+    // where there is one)
+    let next_word = |k: usize| {
+        let a = ws(k);
+        if a < b.len() && ident(b[a]) { word(a) } else { &b""[..] }
+    };
+    // (`const` is left out: only another `const` may not follow it, and `const const fn` is read as no item first)
+    let suspect = ["async", "unsafe", "extern"].iter().any(|q| {
+        src.match_indices(q).any(|(m, _)| {
+            let e = m + q.len();
+            if m > 0 && ident(b[m - 1]) || b.get(e).is_some_and(|&c| ident(c)) {
+                return false;
+            }
+            let mut k = e;
+            if *q == "extern" {
+                let a = ws(k);
+                if b.get(a) == Some(&b'"') {
+                    k = lit_end(b, a).unwrap_or(b.len());
+                }
+            }
+            let n = next_word(k);
+            n != b"safe" && rank(n).is_some_and(|r| r <= rank(q.as_bytes()).unwrap_or(0))
+        })
+    });
+    if !suspect {
+        return None;
+    }
+    let mut i = 0;
+    while i < b.len() {
+        if let Some(e) = lit_end(b, i) {
+            i = e;
+            continue;
+        }
+        if !ident(b[i]) || i > 0 && ident(b[i - 1]) {
+            i += 1;
+            continue;
+        }
+        let w = word(i);
+        let after = ws(i + w.len());
+        // (a macro's definition or call: its group is not read, `m! { .. }`, `macro_rules! m { .. }`)
+        if b.get(after) == Some(&b'!') && b.get(after + 1) != Some(&b'=') {
+            let mut k = ws(after + 1);
+            if k < b.len() && ident(b[k]) {
+                k = ws(k + word(k).len());
+            }
+            if matches!(b.get(k), Some(b'{' | b'(' | b'[')) {
+                let mut d = 0i32;
+                while k < b.len() {
+                    if let Some(e) = lit_end(b, k) {
+                        k = e;
+                        continue;
+                    }
+                    match b[k] {
+                        b'{' | b'(' | b'[' => d += 1,
+                        b'}' | b')' | b']' => {
+                            d -= 1;
+                            if d == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    k += 1;
+                }
+            }
+            i = k.max(i + 1);
+            continue;
+        }
+        // (a run of qualifiers from here; `*const` is a pointer's)
+        let pointer = src[..i].trim_end().ends_with('*');
+        if rank(w).is_none() || pointer {
+            i += w.len();
+            continue;
+        }
+        let (mut k, mut last, mut bad): (usize, i32, Option<(usize, &[u8], i32)>) = (i, -1, None);
+        let ends_at_fn = loop {
+            k = ws(k);
+            if k >= b.len() || !ident(b[k]) {
+                break false;
+            }
+            let q = word(k);
+            if q == b"fn" {
+                break true;
+            }
+            let Some(r) = rank(q) else { break false };
+            if bad.is_none() && r <= last && q != b"safe" {
+                bad = Some((k, q, last));
+            }
+            last = last.max(r);
+            k += q.len();
+            // (`extern "C"`: its ABI)
+            if q == b"extern" {
+                let a = ws(k);
+                if b.get(a) == Some(&b'"') {
+                    k = lit_end(b, a).unwrap_or(b.len());
+                }
+            }
+        };
+        if let (true, Some((at, q, prev))) = (ends_at_fn, bad) {
+            let expected = match prev {
+                0 => "one of `async`, `extern`, `fn`, `safe`, or `unsafe`",
+                1 => "one of `extern`, `fn`, `safe`, or `unsafe`",
+                2 => "one of `extern` or `fn`",
+                _ => "`fn`",
+            };
+            let line = b[..at].iter().filter(|&&c| c == b'\n').count() + 1;
+            let col = at - src[..at].rfind('\n').map_or(0, |p| p + 1) + 1;
+            return Some(format!("{line}:{col}: expected {expected}, found keyword `{}`", String::from_utf8_lossy(q)));
+        }
+        i = k.max(i + 1);
+    }
+    None
+}
+
+/// Whether a predicate holds in a configuration: `unix`, `all(..)`, `not(feature = "x")`
+pub fn cfg_holds(p: &str, c: &CfgSet) -> bool {
+    let b = p.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    eval(b, &toks, 0, c).0
+}
+
+/// Whether rustc can read a `cfg` predicate: Ok, or Err with its own message ("" for "malformed `cfg` .. input")
+pub fn cfg_check(p: &str) -> Result<(), String> {
+    let p = p.trim();
+    let raw = p.strip_prefix("r#").unwrap_or(p);
+    let n = raw.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(raw.len());
+    let (name, rest) = (&raw[..n], raw[n..].trim());
+    if name.is_empty() || name.starts_with(|c: char| c.is_ascii_digit()) {
+        return Err(String::new());
+    }
+    if rest.is_empty() {
+        return Ok(());
+    }
+    if let Some(v) = rest.strip_prefix('=') {
+        // (a string literal with more after it, `"a" + "b"`: not one value)
+        let t = v.trim();
+        if t.starts_with(['"', 'r']) && lit_end(t.as_bytes(), 0).is_some_and(|e| e < t.len()) {
+            return Err(String::new());
+        }
+        return match attr_value(v) {
+            // (its escapes must decode: not `"\u{61"`)
+            Ok(true) if str_value(v).is_some() => Ok(()),
+            Ok(true) => Err(String::new()),
+            Ok(false) => Err(String::new()),
+            Err(found) => Err(not_a_literal(&found)),
+        };
+    }
+    // (`target-os = ..`, `target_os?`: not a predicate's next token)
+    if !rest.starts_with(['(', ',']) && !rest.starts_with("::") {
+        let c = rest.chars().next().unwrap_or(' ');
+        return Err(format!("expected one of `(`, `,`, `::`, or `=`, found `{c}`"));
+    }
+    let Some(inner) = rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')) else { return Err(String::new()) };
+    match name {
+        "all" | "any" => attr_entries(inner).iter().try_for_each(|x| cfg_check(x)),
+        "not" => {
+            let e = attr_entries(inner);
+            if e.len() == 1 { cfg_check(e[0]) } else { Err(String::new()) }
+        }
+        "version" | "target" => Ok(()),
+        _ => Err(String::new()),
+    }
+}
+
+/// Past the whitespace and comments at `k` (comments are whitespace: `cfg /* note */ !(unix)`)
+fn skip_trivia(b: &[u8], mut k: usize) -> usize {
+    while k < b.len() {
+        if b[k].is_ascii_whitespace() {
+            k += 1;
+        } else if b[k] == b'/' && matches!(b.get(k + 1), Some(b'/' | b'*')) {
+            k = lit_end(b, k).unwrap_or(b.len());
+        } else {
+            break;
+        }
+    }
+    k
+}
+
+/// A text past its leading whitespace and comments: ` /* safety */ no_mangle` is `no_mangle`
+pub fn trim_trivia(v: &str) -> &str {
+    &v[skip_trivia(v.as_bytes(), 0)..]
+}
+
+/// The first predicate rustc cannot read in a `cfg_attr`'s entries: its own, then, when that holds, one of a `cfg(..)`
+/// or a nested `cfg_attr(..)` among the attributes it puts on the item (`cfg_attr(all(), cfg(not()))`), as the
+/// attribute's name, rustc's own message ("" for malformed input) and the nested entry (None: the `cfg_attr` itself)
+fn cfg_attr_check<'a>(entries: &[&'a str], c: &CfgSet) -> Result<(), (&'static str, String, Option<&'a str>)> {
+    let Some(p) = entries.first() else { return Err(("cfg_attr", String::new(), None)) };
+    cfg_check(p).map_err(|e| ("cfg_attr", e, None))?;
+    if !cfg_holds(p, c) {
+        return Ok(());
+    }
+    for &a in &entries[1..] {
+        let (n, rest) = match a.strip_prefix("cfg_attr") {
+            Some(r) => ("cfg_attr", r),
+            None => match a.strip_prefix("cfg") {
+                Some(r) => ("cfg", r),
+                None => continue,
+            },
+        };
+        let Some(inner) = rest.trim_start().strip_prefix('(').and_then(|r| r.strip_suffix(')')) else { continue };
+        let e = attr_entries(inner);
+        match n {
+            "cfg_attr" => cfg_attr_check(&e, c).map_err(|(n, m, at)| (n, m, at.or(Some(a))))?,
+            _ if e.len() == 1 => cfg_check(e[0]).map_err(|m| ("cfg", m, Some(a)))?,
+            _ => return Err(("cfg", String::new(), Some(a))),
+        }
+    }
+    Ok(())
+}
+
+/// Where a false `#![cfg(..)]` among a crate's leading inner attributes ends: rustc reads none of the crate after it
+/// (`#![cfg(any())]`)
+fn crate_cfg_off(src: &str, c: &CfgSet) -> Option<usize> {
+    let b = src.as_bytes();
+    let mut i = 0;
+    // (a shebang line, `#!/usr/bin/env ..`, not an inner attribute)
+    if src.starts_with("#!") && !trim_trivia(&src[2..]).starts_with('[') {
+        i = src.find('\n').unwrap_or(b.len());
+    }
+    loop {
+        i = skip_trivia(b, i);
+        if !b[i..].starts_with(b"#!") {
+            return None;
+        }
+        let o = skip_trivia(b, i + 2);
+        if b.get(o) != Some(&b'[') {
+            return None;
+        }
+        // (the matching `]`, past literals and comments)
+        let (mut d, mut k, mut close) = (0i32, o, None);
+        while k < b.len() {
+            if let Some(e) = lit_end(b, k) {
+                k = e;
+                continue;
+            }
+            match b[k] {
+                b'(' | b'[' | b'{' => d += 1,
+                b')' | b']' | b'}' => {
+                    d -= 1;
+                    if d == 0 {
+                        close = Some(k);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+        let close = close?;
+        let body = blank_comments(&src[o + 1..close]);
+        let pred = body.trim().strip_prefix("cfg").map(str::trim_start).and_then(|r| r.strip_prefix('(')).and_then(|r| r.strip_suffix(')'));
+        if pred.is_some_and(|p| cfg_check(p).is_ok() && !cfg_holds(p, c)) {
+            return Some(close + 1);
+        }
+        i = close + 1;
+    }
+}
+
+/// The names of `cfg` predicates behind a feature gate (rustc 1.100's GATED_CFGS), with the feature
+const GATED_CFGS: &[(&str, &str)] = &[
+    ("overflow_checks", "cfg_overflow_checks"),
+    ("ub_checks", "cfg_ub_checks"),
+    ("contract_checks", "cfg_contract_checks"),
+    ("target_thread_local", "cfg_target_thread_local"),
+    ("target_has_atomic_equal_alignment", "cfg_target_has_atomic_equal_alignment"),
+    ("target_has_atomic_load_store", "cfg_target_has_atomic"),
+    ("sanitize", "cfg_sanitize"),
+    ("version", "cfg_version"),
+    ("relocation_model", "cfg_relocation_model"),
+    ("sanitizer_cfi_generalize_pointers", "cfg_sanitizer_cfi"),
+    ("sanitizer_cfi_normalize_integers", "cfg_sanitizer_cfi"),
+    ("fmt_debug", "fmt_debug"),
+    ("emscripten_wasm_eh", "cfg_emscripten_wasm_eh"),
+    ("target_has_reliable_f16", "cfg_target_has_reliable_f16_f128"),
+    ("target_has_reliable_f16_math", "cfg_target_has_reliable_f16_f128"),
+    ("target_has_reliable_f128", "cfg_target_has_reliable_f16_f128"),
+    ("target_has_reliable_f128_math", "cfg_target_has_reliable_f16_f128"),
+    ("target_object_format", "cfg_target_object_format"),
+    ("target_has_threads", "cfg_target_has_threads"),
+];
+
+/// The first name of a predicate behind a feature gate the crate does not enable (`#![feature(..)]` in `src`): its
+/// offset in `p` and rustc's message. `target(..)` is the compact form, `cfg_target_compact`'s
+fn gated_cfg(p: &str, src: &str) -> Option<(usize, String)> {
+    let b = p.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let tk = |k: usize| &p[toks[k].1..toks[k].2];
+    let enabled = |f: &str| {
+        src.match_indices("#![feature(").any(|(k, _)| src[k + 11..].split(')').next().is_some_and(|l| l.split(',').any(|x| x.trim() == f)))
+    };
+    for k in 0..toks.len() {
+        if toks[k].0 != 0 || (k > 0 && tk(k - 1) == "=") {
+            continue;
+        }
+        let name = tk(k);
+        let call = k + 1 < toks.len() && tk(k + 1) == "(";
+        if name == "target" && call && !enabled("cfg_target_compact") {
+            return Some((toks[k].1, "compact `cfg(target(..))` is experimental and subject to change".into()));
+        }
+        if let Some((_, f)) = GATED_CFGS.iter().find(|g| g.0 == name) {
+            if !enabled(f) {
+                return Some((toks[k].1, format!("`cfg({name})` is experimental and subject to change")));
+            }
+        }
+    }
+    None
+}
+
+/// The first `#[cfg(..)]`, `#[cfg_attr(..)]` or `cfg!(..)` of a source whose predicate rustc cannot read (E0539 /
+/// E0565 / E0805): not one in a comment or a string on its line, nor in a macro's pattern (`$`). `kept` is the text
+/// configured by `c` (cfg::strip, in place): rustc reads none of what a false `cfg` takes away, so one in an item,
+/// statement or block it removes is not reported, nor an attribute after a false `cfg` of the same item, nor what a
+/// false `#![cfg(..)]` of the crate takes away; nor a `cfg!` that `stringify!` only quotes
+pub fn malformed_cfg(src: &str, kept: Option<&str>, c: &CfgSet) -> Option<String> {
+    if !src.contains("cfg") {
+        return None;
+    }
+    let b = src.as_bytes();
+    let mut at = 0;
+    let crate_off = if src.contains("#!") { crate_cfg_off(src, c) } else { None };
+    // (how far the source is read as code, and the block comments open there: a candidate in a comment, a string or
+    // a char literal is skipped, `/* #[cfg(not())] */`)
+    let (mut cur, mut depth) = (0usize, 0u32);
+    // (the open brackets of the code read so far: the innermost one around a candidate; and whether each opens a
+    // `stringify!`, whose tokens are text, `stringify!(cfg!(not()))`, with how many of those are open)
+    let mut open: Vec<(usize, bool)> = vec![];
+    let mut quoting = 0u32;
+    let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut in_code = |i: usize| -> (bool, Option<usize>, bool) {
+        while cur < i {
+            if depth > 0 {
+                if b[cur..].starts_with(b"/*") {
+                    depth += 1;
+                    cur += 2;
+                } else if b[cur..].starts_with(b"*/") {
+                    depth -= 1;
+                    cur += 2;
+                } else {
+                    cur += 1;
+                }
+                continue;
+            }
+            match b[cur] {
+                b'/' if b.get(cur + 1) == Some(&b'/') => cur += b[cur..].iter().position(|&c| c == b'\n').unwrap_or(b.len() - cur),
+                b'/' if b.get(cur + 1) == Some(&b'*') => {
+                    depth = 1;
+                    cur += 2;
+                }
+                b'"' => {
+                    cur += 1;
+                    while cur < b.len() && b[cur] != b'"' {
+                        cur += if b[cur] == b'\\' { 2 } else { 1 };
+                    }
+                    cur += 1;
+                }
+                // (a raw string, `r#".."#` / `br".."` / `cr".."`, not an identifier ending in r)
+                b'r' if !(cur > 0 && ident(b[cur - 1]) && b[cur - 1] != b'b' && b[cur - 1] != b'c') && {
+                    let h = b[cur + 1..].iter().take_while(|&&c| c == b'#').count();
+                    b.get(cur + 1 + h) == Some(&b'"')
+                } => {
+                    let h = b[cur + 1..].iter().take_while(|&&c| c == b'#').count();
+                    let close = [b"\"".as_slice(), &vec![b'#'; h]].concat();
+                    let from = cur + 2 + h;
+                    cur = b[from..].windows(close.len()).position(|w| w == close.as_slice()).map_or(b.len(), |n| from + n + close.len());
+                }
+                // (a char literal, not a lifetime)
+                b'\'' if b.get(cur + 1) == Some(&b'\\') => cur += 2 + b[cur + 2..].iter().position(|&c| c == b'\'').map_or(b.len() - cur - 2, |n| n + 1),
+                b'\'' if b.get(cur + 2) == Some(&b'\'') => cur += 3,
+                b'{' | b'(' | b'[' => {
+                    let q = src[..cur].trim_end().strip_suffix('!').map(str::trim_end).and_then(|t| t.strip_suffix("stringify"));
+                    let q = q.is_some_and(|t| !t.ends_with(|c: char| c.is_alphanumeric() || c == '_'));
+                    quoting += q as u32;
+                    open.push((cur, q));
+                    cur += 1;
+                }
+                b'}' | b')' | b']' => {
+                    if let Some((_, true)) = open.pop() {
+                        quoting -= 1;
+                    }
+                    cur += 1;
+                }
+                _ => cur += 1,
+            }
+        }
+        (depth == 0 && cur == i, open.last().map(|o| o.0), quoting > 0)
+    };
+    // (what the configuring took away: a blank in the configured text where the source has code)
+    let kept = kept.filter(|k| k.len() == src.len()).map(str::as_bytes);
+    let gone = |i: usize| kept.is_some_and(|k| k[i].is_ascii_whitespace() && !b[i].is_ascii_whitespace());
+    // (an attribute after a `cfg` of the same item that does not hold: `#[cfg(any())] #[cfg(not())] fn f() {}`, read
+    // with comments as whitespace, `#[cfg(any())] /* note */ #[cfg(not())]`, doc comments too, which are attributes of
+    // the same item)
+    let mut blanked: Option<std::borrow::Cow<'_, str>> = None;
+    let mut after_false = |start: usize| -> bool {
+        let src = &**blanked.get_or_insert_with(|| blank_comments(src));
+        let b = src.as_bytes();
+        let mut p = start;
+        loop {
+            let q = src[..p].trim_end().len();
+            if q == 0 || b[q - 1] != b']' {
+                return false;
+            }
+            let (mut d, mut j, mut o) = (0i32, q - 1, None);
+            loop {
+                match b[j] {
+                    b']' => d += 1,
+                    b'[' => {
+                        d -= 1;
+                        if d == 0 {
+                            o = Some(j);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                if j == 0 {
+                    break;
+                }
+                j -= 1;
+            }
+            let Some(o) = o else { return false };
+            // (`#[..]`, or an inner `#![..]` before it)
+            let hash = match o.checked_sub(1).map(|h| b[h]) {
+                Some(b'#') => o - 1,
+                Some(b'!') if o >= 2 && b[o - 2] == b'#' => o - 2,
+                _ => return false,
+            };
+            let body = src[o + 1..q - 1].trim();
+            let pred = body.strip_prefix("cfg").map(str::trim_start).and_then(|r| r.strip_prefix('(')).and_then(|r| r.strip_suffix(')'));
+            if pred.is_some_and(|p| cfg_check(p).is_ok() && !cfg_holds(p, c)) {
+                return true;
+            }
+            p = hash;
+        }
+    };
+    // (the `macro_rules!` bodies, found once and only when a candidate is in code: each from its delimiter to the
+    // matching one, a nested definition inside the one before it)
+    let mut macro_defs: Option<Vec<(usize, usize)>> = None;
+    let mut in_macro_def = |i: usize| -> bool {
+        let defs = macro_defs.get_or_insert_with(|| {
+            let mut defs: Vec<(usize, usize)> = vec![];
+            // (`macro_rules!` / `macro_rules !` in code: not in a comment or a literal)
+            let mut m = 0;
+            while m < b.len() {
+                if let Some(e) = lit_end(b, m) {
+                    m = e;
+                    continue;
+                }
+                let word = b[m..].starts_with(b"macro_rules") && !(m > 0 && ident(b[m - 1])) && !b.get(m + 11).is_some_and(|&c| ident(c));
+                let bang = word && b[m + 11..].iter().find(|c| !c.is_ascii_whitespace()) == Some(&b'!');
+                if !bang {
+                    m += 1;
+                    continue;
+                }
+                // (its delimiter, past the name and comments: `macro_rules! m /* {} */ { .. }`)
+                let mut o = m + 11;
+                while o < b.len() && !matches!(b[o], b'{' | b'(' | b'[') {
+                    o = match lit_end(b, o) {
+                        Some(e) if b[o] == b'/' => e,
+                        _ => o + 1,
+                    };
+                }
+                if o >= b.len() {
+                    break;
+                }
+                let (mut d, mut k) = (0i32, o);
+                while k < b.len() {
+                    if let Some(e) = lit_end(b, k) {
+                        k = e;
+                        continue;
+                    }
+                    match b[k] {
+                        b'{' | b'(' | b'[' => d += 1,
+                        b'}' | b')' | b']' => {
+                            d -= 1;
+                            if d == 0 {
+                                break;
+                            }
+                        }
+                        _ => {}
+                    }
+                    k += 1;
+                }
+                defs.push((o, k));
+                // (past the body: a definition inside it is inside this one)
+                m = k + 1;
+            }
+            defs
+        });
+        defs.iter().any(|&(o, e)| o < i && i < e)
+    };
+    while let Some(f) = src[at..].find("cfg") {
+        let i = at + f;
+        at = i + 3;
+        if i > 0 && ident(b[i - 1]) {
+            continue;
+        }
+        // (`#[cfg(` / `#![cfg_attr(` / `cfg!(`, `cfg ! [`, `cfg!{`: tokens, with whitespace and comments between)
+        let name = if src[i..].starts_with("cfg_attr") { "cfg_attr" } else { "cfg" };
+        let after = skip_trivia(b, i + name.len());
+        let macro_open = (name == "cfg" && b.get(after) == Some(&b'!')).then(|| skip_trivia(b, after + 1));
+        let macro_open = macro_open.filter(|&k| matches!(b.get(k), Some(b'(' | b'[' | b'{')));
+        let macro_call = macro_open.is_some();
+        let attr = !macro_call && (src[..i].ends_with("#[") || src[..i].ends_with("#!["));
+        if !attr && !macro_call {
+            continue;
+        }
+        let open = macro_open.unwrap_or(after);
+        if !macro_call && b.get(open) != Some(&b'(') {
+            continue;
+        }
+        // (where the attribute or the macro starts)
+        let start = if macro_call { i } else { src[..i].rfind('#').unwrap_or(i) };
+        // (what a false `#![cfg(..)]` of the crate takes away)
+        if crate_off.is_some_and(|e| start >= e) {
+            break;
+        }
+        let (code, around, quoted) = in_code(start);
+        if !code || quoted {
+            continue;
+        }
+        // (in what the configuring takes away: an item, a statement or a block of a false `cfg`, or after one)
+        if around.is_some_and(gone) || macro_call && gone(start) || !macro_call && kept.is_some() && after_false(start) {
+            continue;
+        }
+        // (not one in a `macro_rules!` body: a pattern's tokens, `(cfg!(not())) => {}`, are checked when expanded)
+        if in_macro_def(start) {
+            continue;
+        }
+        // (the matching delimiter, past literals and comments)
+        let (mut d, mut k, mut close) = (0i32, open, None);
+        while k < b.len() {
+            if let Some(e) = lit_end(b, k) {
+                k = e;
+                continue;
+            }
+            match b[k] {
+                b'(' | b'[' | b'{' => d += 1,
+                b')' | b']' | b'}' => {
+                    d -= 1;
+                    if d == 0 {
+                        close = Some(k);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+        let Some(close) = close else { continue };
+        // (comments in the predicate are whitespace: `all(/* note */)`)
+        let inner = blank_comments(&src[open + 1..close]);
+        // (a macro's metavariable, `cfg!($p)`, is checked when expanded: a `$` in the code, not one in a literal or a
+        // comment, `feature = "$"`)
+        if inner.contains('$') && {
+            let ib = inner.as_bytes();
+            let mut k = 0;
+            loop {
+                if k >= ib.len() {
+                    break false;
+                }
+                match lit_end(ib, k) {
+                    Some(e) => k = e,
+                    None if ib[k] == b'$' => break true,
+                    None => k += 1,
+                }
+            }
+        } {
+            continue;
+        }
+        let entries = attr_entries(&inner);
+        // (E0658: a predicate of a name behind a feature gate, `cfg(overflow_checks)`, at the name; read where rustc
+        // reads the predicate, the first entry: a `cfg_attr`'s attributes are not predicates)
+        if let Some(&p) = entries.first().filter(|_| cfg_check(entries[0]).is_ok()) {
+            if let Some((off, msg)) = gated_cfg(p, src) {
+                let pos = open + 1 + (p.as_ptr() as usize - inner.as_ptr() as usize) + off;
+                let line = src[..pos].matches('\n').count() + 1;
+                let col = pos - src[..pos].rfind('\n').map_or(0, |n| n + 1) + 1;
+                return Some(format!("{line}:{col}: {msg} (E0658)"));
+            }
+        }
+        let checked = match name {
+            "cfg_attr" => cfg_attr_check(&entries, c),
+            // (one pattern, with or without a trailing comma: `cfg!(unix,)`)
+            _ if entries.len() == 1 => cfg_check(entries[0]).map_err(|e| ("cfg", e, None)),
+            _ => Err(("cfg", String::new(), None)),
+        };
+        if let Err((name, own, nested)) = checked {
+            // (the line of the `cfg` / `cfg_attr`, or of the nested one at fault)
+            let pos = nested.map_or(i, |a| open + 1 + (a.as_ptr() as usize - inner.as_ptr() as usize));
+            let line = src[..pos].matches('\n').count() + 1;
+            if !own.is_empty() {
+                return Some(format!("{line}:1: {own}"));
+            }
+            let what = match (macro_call, entries.len()) {
+                (true, 0) => "macro requires a cfg-pattern as an argument".to_string(),
+                (true, 1) => "malformed `cfg` macro input".to_string(),
+                (true, _) => "expected 1 cfg-pattern".to_string(),
+                _ => format!("malformed `{name}` attribute input"),
+            };
+            return Some(format!("{line}:1: {what}"));
+        }
+    }
+    None
 }

@@ -1,0 +1,4 @@
+// expect: `?` cannot be used inside `handle` yet
+enum Ask { Get() -> i32 }
+fn a() -> Result<i32, String> { Ok(1) }
+fn b() -> Result<i32, String> { let v = handle { a()? + perform Get() } { Get(), k => k(1) }; Ok(v) }

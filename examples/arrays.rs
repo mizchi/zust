@@ -1,4 +1,4 @@
-// タプル・配列・スライス・for のサンプル (rustc でもそのままコンパイルできる)
+// A sample of tuples, arrays, slices and for (compiles with rustc as it is too)
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }

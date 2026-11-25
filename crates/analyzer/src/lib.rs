@@ -1,14 +1,14 @@
-//! 最小の LSP サーバ (stdio)。対応: initialize / didOpen / didChange (全文同期) / didClose /
+//! A minimal LSP server (stdio). Supported: initialize / didOpen / didChange (full sync) / didClose /
 //! shutdown / exit / textDocument/documentSymbol / workspace/symbol / textDocument/definition / textDocument/references /
-//! textDocument/hover / textDocument/completion。
-//! 開く・変更するたびに [`Session2::check`] を走らせて publishDiagnostics を返す。
+//! textDocument/hover / textDocument/completion.
+//! Runs [`Session::check`] on every open / change and returns publishDiagnostics.
 //!
-//! ドキュメントごとに Session2 を 1 つ持ち、キャッシュはメモリ上だけに置く。
-//! 変わっていない関数は「検査済み」の印で飛ばすので、応答時間は変更量に比例する。
-//! シンボルは zust_ide::symbols で字句の列から読む (構文が壊れていても読める所まで)。workspace/symbol・定義・参照は
-//! 開いているドキュメントと、ワークスペースの根の下の .rs ファイル (更新時刻と大きさで覚える) の索引
-//! (zust_ide::navigate::FileIndex) から引く。ワークスペースの本文と字句の列は `ZUST_ANALYZER_MEM_MB` (既定 4) MB の分だけ
-//! 持ち、超えた分のファイルは定義と名前の集合だけにする (参照・hover で要るときに読み直し、同じだけの大きさの LRU で覚える)。
+//! Holds one Session per document and keeps the cache in memory only.
+//! Unchanged fns are skipped by their "checked" mark, so the response time is proportional to the amount of change.
+//! Symbols are read from the token stream by zust_ide::symbols (as far as can be read even when the syntax is broken). workspace/symbol, definitions and references are
+//! looked up in the index of the open documents and of the .rs files under the workspace root (remembered by modification time and size)
+//! (zust_ide::navigate::FileIndex). The text and token streams of the workspace are kept only up to `ZUST_ANALYZER_MEM_MB` (default 4) MB,
+//! and the files beyond that keep only their definitions and set of names (re-read when references / hover need them, and remembered in an LRU of the same size).
 
 use std::cell::RefCell;
 // (Fx hashing: deterministic and cheaper than the std map's random-seeded SipHash)
@@ -19,22 +19,22 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use zust_core::driver2::{Options2, Session2};
+use zust_core::session::{Options, Session};
 use zust_ide::navigate::{self, FileIndex, Loc};
 use zust_ide::symbols::{self, LineIndex, Symbol};
 
-/// 開いているドキュメント
+/// An open document
 struct Doc {
-    s: Session2,
-    /// 本文と、それに対する診断・シンボル (シンボルは求められたときに作る)
+    s: Session,
+    /// The text, and the diagnostics / symbols for it (the symbols are built when asked for)
     text: String,
     diags: Vec<Value>,
     syms: Option<Vec<Symbol>>,
-    /// 定義・参照・workspace/symbol の索引 (求められたときに作る)
+    /// The index for definitions / references / workspace/symbol (built when asked for)
     idx: Option<FileIndex>,
 }
 
-/// ワークスペースのファイル (開いていないもの) の索引と、作ったときの (更新時刻, 大きさ)
+/// The index of a workspace file (one that is not open), and (modification time, size) when it was built
 struct WsFile {
     stamp: (u64, u64),
     idx: FileIndex,
@@ -42,22 +42,22 @@ struct WsFile {
 
 pub struct Server {
     docs: HashMap<String, Doc>,
-    /// ワークスペースの根 (initialize の rootUri / rootPath / workspaceFolders)
+    /// The workspace root (initialize's rootUri / rootPath / workspaceFolders)
     root: Option<PathBuf>,
-    /// ワークスペースのファイル (開いていないもの) のシンボル
+    /// The symbols of the workspace files (those that are not open)
     files: HashMap<PathBuf, WsFile>,
-    /// std / core / alloc の定義 (initialize の後にスレッドで作る。定義・参照で使う)
+    /// The definitions of std / core / alloc (built on a thread after initialize; used by definition / references)
     lib_job: Option<std::thread::JoinHandle<Vec<(String, FileIndex)>>>,
     lib: Vec<(String, FileIndex)>,
-    /// ワークスペースのファイルの並び (パス, モジュール, クレート, 本体か)。ドキュメントの変更・ファイルの変更で作り直す
+    /// The list of workspace files (path, module, crate, whether main). Rebuilt on document changes / file changes
     layout: Option<Vec<(PathBuf, Vec<String>, u32, bool)>>,
-    /// クレートの番号 → 有効な feature (Cargo.toml の default から)。cfg で外れたアイテムを除くのに使う
+    /// Crate number → enabled features (from Cargo.toml's default). Used to drop items excluded by cfg
     feats: HashMap<u32, Vec<String>>,
-    /// 本文を持つワークスペースのファイルの大きさの上限 (byte)。超えた分は slim にする
+    /// The size limit (bytes) of the workspace files that keep their text. Those beyond it are made slim
     budget: usize,
-    /// slim なファイルを読み直したもの (uri, 索引)。新しいものが後ろ。本文の合計が budget を超えたら古いものから捨てる
+    /// Slim files that were re-read (uri, index). Newer ones at the back. When the total text exceeds budget, the oldest are dropped first
     cache: RefCell<Vec<(String, Rc<FileIndex>)>>,
-    /// クレートの名前 (workspace/symbol に出す): ワークスペースのパッケージと std のクレート (uri は本体の根のファイル)
+    /// Crate names (shown in workspace/symbol): the workspace packages and the std crates (uri is the root file of the main crate)
     crates: Vec<(String, String)>,
     pub exit: bool,
     shutdown: bool,
@@ -96,12 +96,12 @@ impl Server {
         }
     }
 
-    /// 本文を持つワークスペースのファイルの大きさの上限 (byte。既定は `ZUST_ANALYZER_MEM_MB`、なければ 4 MB)
+    /// The size limit of the workspace files that keep their text (bytes; the default is `ZUST_ANALYZER_MEM_MB`, else 4 MB)
     pub fn set_mem_budget(&mut self, bytes: usize) {
         self.budget = bytes;
     }
 
-    /// 1 メッセージを処理し、送り返すメッセージ (JSON 文字列) を返す
+    /// Handles 1 message and returns the messages to send back (JSON strings)
     pub fn handle(&mut self, msg: &str) -> Vec<String> {
         let Ok(v) = serde_json::from_str::<Value>(msg) else {
             return vec![json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "parse error"}}).to_string()];
@@ -159,7 +159,7 @@ impl Server {
                 let r = if method == "textDocument/hover" { self.hover(&uri, line, ch) } else { self.complete(&uri, line, ch) };
                 vec![reply(r)]
             }
-            // (調べるための拡張: その位置のトークンで終わる式の型)
+            // (an extension for investigation: the type of the expression that ends at the token at that position)
             "zustc/typeAt" => {
                 let uri = p["textDocument"]["uri"].as_str().unwrap_or("").to_string();
                 let (line, ch) = (p["position"]["line"].as_u64().unwrap_or(0) as u32, p["position"]["character"].as_u64().unwrap_or(0) as u32);
@@ -177,7 +177,7 @@ impl Server {
                 };
                 vec![match r {
                     Ok(v) => reply(v),
-                    // (RequestFailed: 理由をエディタに出す)
+                    // (RequestFailed: show the reason in the editor)
                     Err(m) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32803, "message": m}}).to_string(),
                 }]
             }
@@ -196,7 +196,7 @@ impl Server {
             }
             "textDocument/didChange" => {
                 let uri = p["textDocument"]["uri"].as_str().unwrap_or("").to_string();
-                // 全文同期 (textDocumentSync = 1) なので最後の変更が全文
+                // Full sync (textDocumentSync = 1), so the last change is the full text
                 let Some(text) = p["contentChanges"]
                     .as_array()
                     .and_then(|a| a.last())
@@ -218,7 +218,7 @@ impl Server {
                 })
                 .to_string(),
             ],
-            _ => vec![], // 未対応の通知は無視
+            _ => vec![], // Ignore unsupported notifications
         }
     }
 
@@ -226,8 +226,8 @@ impl Server {
         let doc = self
             .docs
             .entry(uri.clone())
-            .or_insert_with(|| Doc { s: Session2::new(Options2 { jobs: check_jobs(), par: Some(zust_core::par::Mode::Threads), ..Default::default() }), text: String::new(), diags: vec![], syms: None, idx: None });
-        // 本文が同じ (保存しただけ等) なら前回の診断をそのまま返す。比較は memcmp なのでハッシュより安い
+            .or_insert_with(|| Doc { s: Session::new(Options { jobs: check_jobs(), par: Some(zust_core::par::Mode::Threads), ..Default::default() }), text: String::new(), diags: vec![], syms: None, idx: None });
+        // If the text is the same (just saved, etc.), return the previous diagnostics as they are. The comparison is a memcmp, so cheaper than a hash
         if !doc.text.is_empty() && doc.text == text {
             return publish(&uri, version, doc.diags.clone());
         }
@@ -254,7 +254,7 @@ impl Server {
         publish(&uri, version, diags)
     }
 
-    /// textDocument/documentSymbol: シンボルの木 (DocumentSymbol)。開いていなければファイルを読む
+    /// textDocument/documentSymbol: the symbol tree (DocumentSymbol). Reads the file if it is not open
     fn document_symbols(&mut self, uri: &str) -> Value {
         let (text, syms) = match self.docs.get_mut(uri) {
             Some(d) => {
@@ -293,13 +293,13 @@ impl Server {
         json!(conv(&syms, &text, &li))
     }
 
-    /// ドキュメントとワークスペースのファイルの索引を新しくし、(uri, 索引) の列を返す (開いているものが先)
+    /// Refreshes the indexes of the documents and workspace files and returns the list of (uri, index) (open ones first)
     fn workspace(&mut self, with_lib: bool) -> Vec<(String, &FileIndex)> {
         self.refresh(with_lib);
         self.view(with_lib)
     }
 
-    /// 開いているドキュメント → ワークスペースのファイル (パスの順) → (with_lib なら) std の索引
+    /// Open documents → workspace files (in path order) → (with with_lib) the std index
     fn view(&self, with_lib: bool) -> Vec<(String, &FileIndex)> {
         let mut out: Vec<(String, &FileIndex)> = vec![];
         for (uri, d) in &self.docs {
@@ -317,7 +317,7 @@ impl Server {
                 out.push((u.clone(), f));
             }
         }
-        // (クレートの名前 → 根のファイル: `std::..` / `fixture::..` のパスの先頭の名前の定義と参照)
+        // (crate name → root file: the definition and references of the first name of a `std::..` / `fixture::..` path)
         let mut roots: Vec<(String, usize)> = vec![];
         for (i, (u, _)) in out.iter().enumerate() {
             if let Some(n) = lib_crate_root(u) {
@@ -336,7 +336,7 @@ impl Server {
         out
     }
 
-    /// ws[i] が slim なら本文から作り直す (LRU で覚える)
+    /// If ws[i] is slim, rebuild it from the text (remembered in the LRU)
     fn load(&self, ws: &[(String, &FileIndex)], i: usize) -> Option<Rc<FileIndex>> {
         let uri = &ws.get(i)?.0;
         let mut c = self.cache.borrow_mut();
@@ -347,7 +347,7 @@ impl Server {
             return Some(r);
         }
         let text = std::fs::read_to_string(uri_path(uri)?).ok()?;
-        // (ライブラリのファイルは本文だけ: 参照を探す対象ではなく、hover / signatureHelp がシグネチャを読むだけなので)
+        // (library files get only the text: they are not searched for references, and hover / signatureHelp only read signatures from them)
         let r = Rc::new(if ws[i].1.lib { ws[i].1.text_only(text) } else { ws[i].1.reload(text) });
         c.push((uri.clone(), r.clone()));
         let mut total: usize = c.iter().map(|x| x.1.text_len()).sum();
@@ -371,12 +371,12 @@ impl Server {
                 None => vec![],
             }
         };
-        // (Cargo のワークスペースならそのモジュールの木のファイル、なければ根の下の .rs 全部)
+        // (for a Cargo workspace, the files of its module tree; otherwise all .rs under the root)
         if self.layout.is_none() {
             self.layout = Some(match root.as_ref().map(|r| (r, cargo_files(r))) {
                 Some((_, Some((v, feats, names)))) => {
                     self.feats = feats;
-                    // (クレートの名前: パッケージと、std のクレート (場所は最初のパッケージの根: rust-analyzer と同じ))
+                    // (crate names: the packages, and the std crates (located at the root of the first package: same as rust-analyzer))
                     self.crates = names.iter().map(|(n, p)| (n.clone(), path_uri(p))).collect();
                     if let Some((_, p)) = names.first() {
                         for n in ["core", "alloc", "std", "test", "proc_macro"] {
@@ -416,7 +416,7 @@ impl Server {
         if root.is_some() {
             let paths = layout.clone();
             let mut changed = false;
-            // (本文を持つファイルの大きさの合計: budget を超えたら、そこからのファイルは slim)
+            // (the total size of the files that keep their text: once it exceeds budget, the files from there on are slim)
             let mut full: usize = self.files.values().filter(|f| !f.idx.slim).map(|f| f.idx.text_len()).sum();
             let mut keep: HashMap<PathBuf, WsFile> = HashMap::default();
             for (p, pm, kr, main) in paths {
@@ -429,7 +429,7 @@ impl Server {
                 let f = match self.files.remove(&p) {
                     Some(f) if f.stamp == stamp => f,
                     _ => {
-                        // (変わったファイル: mod の宣言も変わったかもしれないので、次は並びを作り直す)
+                        // (a changed file: its mod declarations may have changed too, so rebuild the list next time)
                         if self.files.contains_key(&p) || !self.files.is_empty() {
                             changed = true;
                         }
@@ -445,7 +445,7 @@ impl Server {
                         } else {
                             full += ix.text_len();
                         }
-                        // (前に読み直したものは古い)
+                        // (what was re-read before is stale)
                         let u = path_uri(&p);
                         self.cache.get_mut().retain(|x| x.0 != u);
                         WsFile { stamp, idx: ix }
@@ -460,15 +460,15 @@ impl Server {
         }
     }
 
-    /// workspace/symbol: 名前が問い合わせに合うシンボル (SymbolInformation)。合い方の良い順に 256 個まで
-    /// workspace/symbol: rust-analyzer と同じ決まりで
-    /// - 問い合わせの文字が順に (間を空けてよい) 名前に出てくるもの。大文字を含む問い合わせは大文字と小文字を区別する
-    /// - まず型 (struct / enum / union / trait / type と、クレートの名前) だけ。なければ全部 (フィールド・impl と、
-    ///   trait の impl の中のメンバは除く)
-    /// - use の別名 (`use a::B as C` の C) と再エクスポート (`pub use a::B`) も入れる
-    /// - 名前 (小文字にしたもの) の順に 128 個まで
+    /// workspace/symbol: the symbols whose names match the query (SymbolInformation). Up to 256, best matches first
+    /// workspace/symbol: by the same rules as rust-analyzer
+    /// - those whose names contain the query's characters in order (gaps allowed). A query with uppercase letters is case-sensitive
+    /// - types only first (struct / enum / union / trait / type, and crate names). If there are none, everything (except fields, impls, and
+    ///   members inside trait impls)
+    /// - also include use aliases (the C of `use a::B as C`) and re-exports (`pub use a::B`)
+    /// - up to 128, in order of name (lowercased)
     fn workspace_symbols(&mut self, q: &str) -> Value {
-        // (std は入れない: rust-analyzer の既定と同じくワークスペースだけ)
+        // (std is not included: only the workspace, same as rust-analyzer's default)
         let ws = self.workspace(false);
         let case = q.chars().any(|c| c.is_uppercase());
         let matches = |name: &str| -> bool {
@@ -476,9 +476,9 @@ impl Server {
             q.chars().all(|c| it.any(|x| if case { x == c } else { x.to_lowercase().eq(c.to_lowercase()) }))
         };
         let is_type = |k: u32| matches!(k, 23 | 10 | 11 | 26 | 4);
-        // (候補: (名前, 種類, uri, 範囲, 囲むもの))
+        // (candidates: (name, kind, uri, range, container))
         let mut hits: Vec<(String, u32, String, [u32; 4], String)> = vec![];
-        // (名前 → 種類: use の別名・再エクスポートの種類に)
+        // (name → kind: for the kind of use aliases / re-exports)
         let mut kind_of: HashMap<&str, u32> = HashMap::default();
         for (_, f) in &ws {
             for d in &f.defs {
@@ -529,11 +529,11 @@ impl Server {
             .collect::<Vec<_>>())
     }
 
-    /// uri の (line, ch) で f を呼ぶ: (サーバ, ws, 索引の列, ファイルの番号, byte の位置)
+    /// Calls f at (line, ch) of uri: (server, ws, list of indexes, file number, byte position)
     fn at<R>(&mut self, uri: &str, line: u32, ch: u32, f: impl FnOnce(&Self, &[(String, &FileIndex)], &[&FileIndex], usize, usize) -> R) -> Option<R> {
         self.refresh(true);
         let ws = self.view(true);
-        // (開いているドキュメントか、ワークスペースのファイル。uri の書き方の違いはパスで比べる)
+        // (an open document or a workspace file; differences in how the uri is written are compared by path)
         let want = uri_path(uri);
         let fi = ws.iter().position(|(u, _)| u == uri || (want.is_some() && uri_path(u) == want))?;
         let held = if ws[fi].1.slim { Some(self.load(&ws, fi)?) } else { None };
@@ -545,7 +545,7 @@ impl Server {
         Some(f(self, &ws, &idx, fi, off))
     }
 
-    /// textDocument/definition (refs = false) と textDocument/references (refs = true)
+    /// textDocument/definition (refs = false) and textDocument/references (refs = true)
     fn navigate(&mut self, uri: &str, line: u32, ch: u32, refs: bool, decl: bool) -> Value {
         self.at(uri, line, ch, |srv, ws, idx, fi, off| {
             let load = |i: usize| srv.load(ws, i);
@@ -556,7 +556,7 @@ impl Server {
         .unwrap_or(Value::Null)
     }
 
-    /// 位置の列 → (uri, LSP の範囲)。slim なファイルの中の位置は、読み直した本文で行と桁にする (定義の名前の位置は索引が覚えている)
+    /// List of locations → (uri, LSP range). Positions inside a slim file are turned into line and column with the re-read text (the positions of definition names are remembered by the index)
     fn ranges(&self, ws: &[(String, &FileIndex)], idx: &[&FileIndex], locs: &[Loc]) -> Vec<(String, Value)> {
         let mut lis: HashMap<usize, Option<LineIndex>> = HashMap::default();
         let mut held: HashMap<usize, Rc<FileIndex>> = HashMap::default();
@@ -579,7 +579,7 @@ impl Server {
             .collect()
     }
 
-    /// textDocument/documentHighlight: 同じファイルの中の参照
+    /// textDocument/documentHighlight: the references within the same file
     fn highlight(&mut self, uri: &str, line: u32, ch: u32) -> Value {
         self.at(uri, line, ch, |srv, ws, idx, fi, off| {
             let load = |i: usize| srv.load(ws, i);
@@ -589,7 +589,7 @@ impl Server {
         .unwrap_or(Value::Null)
     }
 
-    /// textDocument/prepareRename (Err は理由)
+    /// textDocument/prepareRename (Err is the reason)
     fn prepare_rename(&mut self, uri: &str, line: u32, ch: u32) -> Result<Value, String> {
         self.at(uri, line, ch, |srv, ws, idx, fi, off| {
             let l = navigate::prepare_rename(idx, fi, off)?;
@@ -599,7 +599,7 @@ impl Server {
         .unwrap_or(Err("ファイルが分からない".into()))
     }
 
-    /// textDocument/rename → WorkspaceEdit (Err は理由)
+    /// textDocument/rename → WorkspaceEdit (Err is the reason)
     fn rename(&mut self, uri: &str, line: u32, ch: u32, new: &str) -> Result<Value, String> {
         self.at(uri, line, ch, |srv, ws, idx, fi, off| {
             let load = |i: usize| srv.load(ws, i);
@@ -619,7 +619,7 @@ impl Server {
         self.at(uri, line, ch, |srv, ws, idx, fi, off| {
             let load = |i: usize| srv.load(ws, i);
             let Some((sig, params, active, doc)) = navigate::signature_help(idx, fi, off, &load) else { return Value::Null };
-            // (引数の範囲は UTF-16 の桁で)
+            // (the parameter ranges are in UTF-16 columns)
             let u16 = |b: usize| sig[..b].encode_utf16().count();
             let ps: Vec<Value> = params.iter().map(|&(a, e)| json!({ "label": [u16(a), u16(e)] })).collect();
             let mut sg = json!({ "label": sig, "parameters": ps, "activeParameter": active });
@@ -631,7 +631,7 @@ impl Server {
         .unwrap_or(Value::Null)
     }
 
-    /// textDocument/hover: 定義のシグネチャ (markdown)
+    /// textDocument/hover: the signature of the definition (markdown)
     fn hover(&mut self, uri: &str, line: u32, ch: u32) -> Value {
         self.at(uri, line, ch, |srv, ws, idx, fi, off| {
             let load = |i: usize| srv.load(ws, i);
@@ -669,7 +669,7 @@ impl Server {
     }
 }
 
-/// シンボルの種類 → LSP の CompletionItemKind
+/// Symbol kind → LSP CompletionItemKind
 fn completion_kind(k: symbols::SymKind) -> u32 {
     use symbols::SymKind as K;
     match k {
@@ -687,7 +687,7 @@ fn completion_kind(k: symbols::SymKind) -> u32 {
     }
 }
 
-/// p がクレートの src の下か (build.rs・tests・examples・benches は外)
+/// Whether p is under the crate's src (build.rs / tests / examples / benches are outside)
 fn in_src(root: Option<&Path>, p: &Path) -> bool {
     let rel = match root.and_then(|r| p.strip_prefix(r).ok()) {
         Some(r) => r,
@@ -696,7 +696,7 @@ fn in_src(root: Option<&Path>, p: &Path) -> bool {
     rel.components().any(|c| c.as_os_str() == "src")
 }
 
-/// std / core / alloc の定義の索引 (rustc --print sysroot の rust-src。なければ空)
+/// The index of the definitions of std / core / alloc (the rust-src of rustc --print sysroot; empty if there is none)
 fn index_std() -> Vec<(String, FileIndex)> {
     let sysroot = std::env::var("ZUST_ANALYZER_SYSROOT").ok().or_else(|| {
         let o = std::process::Command::new("rustc").args(["--print", "sysroot"]).output().ok()?;
@@ -711,16 +711,16 @@ fn index_std() -> Vec<(String, FileIndex)> {
         rs_files(&dir, &mut paths, 0);
         for p in paths {
             let rel = p.strip_prefix(&lib).map(|r| r.to_string_lossy().into_owned()).unwrap_or_default();
-            // (内部の実装 (sys)・テスト・ほかの OS 向けのものは入れない: 定義の 4 割)
+            // (internal implementation (sys), tests, and things for other OSes are left out: 40% of the definitions)
             if skip_lib(&rel) {
                 continue;
             }
             let Ok(text) = std::fs::read_to_string(&p) else { continue };
-            // (索引の作り方の不具合で 1 つのファイルが落ちても、std の索引全体を失わない: そのファイルだけ飛ばす)
+            // (even if one file crashes due to a bug in how the index is built, the whole std index is not lost: only that file is skipped)
             let m = navigate::module_of(&rel);
             match std::panic::catch_unwind(move || FileIndex::library(text, m)) {
                 Ok(mut ix) => {
-                    // (ライブラリのクレートごとの番号: `mod x;` のファイルを同じクレートの中で探すため)
+                    // (a number per library crate: to look for the file of `mod x;` within the same crate)
                     ix.krate = navigate::LIB_KRATE_BASE + ki as u32;
                     out.push((path_uri(&p), ix))
                 }
@@ -731,7 +731,7 @@ fn index_std() -> Vec<(String, FileIndex)> {
     out
 }
 
-/// ライブラリのクレートの根のファイル (`…/library/std/src/lib.rs`、`…/registry/src/…/serde_json-1.0.0/src/lib.rs`) ならその名前
+/// If uri is the root file of a library crate (`…/library/std/src/lib.rs`, `…/registry/src/…/serde_json-1.0.0/src/lib.rs`), its name
 fn lib_crate_root(uri: &str) -> Option<String> {
     let dir = uri.strip_suffix("/src/lib.rs")?;
     let last = dir.rsplit('/').next()?;
@@ -745,12 +745,12 @@ fn lib_crate_root(uri: &str) -> Option<String> {
     None
 }
 
-/// 依存クレート (ワークスペースのパッケージの `[dependencies]` / `[dev-dependencies]` / `[build-dependencies]` のうち、
-/// path でないもの) のソース: cargo の registry (`$CARGO_HOME/registry/src/*/名前-版`) の src の下。版は Cargo.lock から。
-/// std と同じくライブラリの索引 (定義と pub use だけ) にする
+/// The sources of the dependency crates (those among the workspace packages' `[dependencies]` / `[dev-dependencies]` / `[build-dependencies]`
+/// that are not path ones): under src in cargo's registry (`$CARGO_HOME/registry/src/*/name-version`). The version comes from Cargo.lock.
+/// Made into a library index (definitions and pub use only), like std
 fn index_deps(root: &Path) -> Vec<(String, FileIndex)> {
     let Ok(top) = std::fs::read_to_string(root.join("Cargo.toml")) else { return vec![] };
-    // (パッケージの Cargo.toml: 根と members)
+    // (the packages' Cargo.toml: the root and members)
     let mut tomls = vec![top.clone()];
     if let Some(i) = top.find("members") {
         if let (Some(a), Some(b)) = (top[i..].find('['), top[i..].find(']')) {
@@ -777,7 +777,7 @@ fn index_deps(root: &Path) -> Vec<(String, FileIndex)> {
                 continue;
             }
             if let Some((k, v)) = l.split_once('=') {
-                // (`foo = { package = "bar", .. }` は bar)
+                // (`foo = { package = "bar", .. }` is bar)
                 let name = v.split("package").nth(1).and_then(|r| r.split('"').nth(1)).unwrap_or(k.trim()).trim().to_string();
                 if !name.is_empty() && !names.contains(&name) {
                     names.push(name);
@@ -820,13 +820,13 @@ fn index_deps(root: &Path) -> Vec<(String, FileIndex)> {
     out
 }
 
-/// std の索引に入れないファイル (library からの相対パス)
+/// Files left out of the std index (paths relative to library)
 fn skip_lib(rel: &str) -> bool {
     let parts: Vec<&str> = rel.split('/').collect();
     if parts.iter().any(|p| matches!(*p, "tests" | "benches" | "sys" | "sys_common")) {
         return true;
     }
-    // std/src/os/<os>/: 使う OS (unix / linux) と共通のものだけ
+    // std/src/os/<os>/: only the OS in use (unix / linux) and the common ones
     if parts.len() > 4 && parts[0] == "std" && parts[2] == "os" {
         let keep = if cfg!(target_os = "linux") { ["unix", "linux", "fd", "raw", "net"] } else { ["unix", "fd", "raw", "net", "windows"] };
         return !keep.contains(&parts[3]);
@@ -834,7 +834,7 @@ fn skip_lib(rel: &str) -> bool {
     false
 }
 
-/// (行, UTF-16 の桁) → byte 位置
+/// (line, UTF-16 column) → byte position
 fn offset(text: &str, line: u32, ch: u32) -> Option<usize> {
     let mut at = 0usize;
     for _ in 0..line {
@@ -850,7 +850,7 @@ fn offset(text: &str, line: u32, ch: u32) -> Option<usize> {
     Some(text.len())
 }
 
-/// f の a..b の両端の (行, UTF-16 の桁)。ライブラリのファイルは本文を持たないので、索引が先に計算したもの
+/// The (line, UTF-16 column) of both ends of a..b in f. Library files keep no text, so these are what the index computed beforehand
 fn ends(f: &FileIndex, li: &mut Option<LineIndex>, a: usize, b: usize) -> ((u32, u32), (u32, u32)) {
     if f.slim {
         return (f.lib_pos(a).unwrap_or((0, 0)), f.lib_pos(b).unwrap_or((0, 0)));
@@ -898,7 +898,7 @@ fn path_uri(p: &Path) -> String {
     s
 }
 
-/// dir の下の .rs ファイル (隠しディレクトリ・target・out・node_modules は見ない。合わせて 20000 個まで)
+/// The .rs files under dir (hidden directories, target, out and node_modules are not looked at; up to 20000 in total)
 fn rs_files(dir: &Path, out: &mut Vec<PathBuf>, depth: u32) {
     if depth > 16 || out.len() >= 20000 {
         return;
@@ -927,7 +927,7 @@ fn publish(uri: &str, version: Value, diags: Vec<Value>) -> String {
         .to_string()
 }
 
-/// `Content-Length: N\r\n\r\n<body>` を 1 つ読む。EOF なら None
+/// Reads one `Content-Length: N\r\n\r\n<body>`. None at EOF
 pub fn read_msg<R: BufRead>(r: &mut R) -> io::Result<Option<String>> {
     let mut len = None;
     loop {
@@ -953,7 +953,7 @@ pub fn read_msg<R: BufRead>(r: &mut R) -> io::Result<Option<String>> {
 }
 
 pub fn write_msg<W: Write>(w: &mut W, body: &str) -> io::Result<()> {
-    // (ヘッダと本文を 1 回で書く: stdout は行ごとに flush するので、分けると書き込みが 3 回になる)
+    // (write the header and the body in one go: stdout flushes per line, so splitting them makes 3 writes)
     let mut m = Vec::with_capacity(body.len() + 32);
     write!(m, "Content-Length: {}\r\n\r\n", body.len())?;
     m.extend_from_slice(body.as_bytes());
@@ -974,11 +974,11 @@ pub fn run<R: BufRead, W: Write>(mut r: R, mut w: W) -> io::Result<()> {
     Ok(())
 }
 
-/// Cargo のワークスペースのファイル: (パス, モジュールのパス, ターゲットのクレートの番号, 本体のクレートか)。
-/// ルートの Cargo.toml の members (と [package]) のパッケージの、ターゲットの根 (src/lib.rs・src/main.rs・src/bin・
-/// tests・benches・examples (autoexamples = false でなければ)・build.rs・[[bin]] などの path) から `mod x;` をたどる。
-/// Cargo.toml がなければ None
-/// Cargo.toml の `[features]` の default から有効になる feature (default が含むものもたどる。`dep:` は除く)
+/// The files of a Cargo workspace: (path, module path, number of the target's crate, whether it is the main crate).
+/// Follows `mod x;` from the target roots of the packages of the root Cargo.toml's members (and [package]) (src/lib.rs, src/main.rs, src/bin,
+/// tests, benches, examples (unless autoexamples = false), build.rs, the path of [[bin]] etc.).
+/// None if there is no Cargo.toml
+/// The features enabled from the default of Cargo.toml's `[features]` (also follows what default contains; `dep:` is excluded)
 fn default_features(toml: &str) -> Vec<String> {
     let mut table: HashMap<String, Vec<String>> = HashMap::default();
     let mut in_feat = false;
@@ -1049,7 +1049,7 @@ fn cargo_files(root: &Path) -> Option<(Vec<(PathBuf, Vec<String>, u32, bool)>, H
                 names.push((n, r));
             }
         }
-        // (ターゲットの根: (ファイル, 本体か))
+        // (target roots: (file, whether main))
         let mut roots: Vec<(PathBuf, bool)> = vec![];
         for f in ["src/lib.rs", "src/main.rs"] {
             roots.push((pkg.join(f), true));
@@ -1086,7 +1086,7 @@ fn cargo_files(root: &Path) -> Option<(Vec<(PathBuf, Vec<String>, u32, bool)>, H
             if !r.exists() || seen.contains(&r) {
                 continue;
             }
-            // (クレートの名前: bin・tests・benches・examples はファイルの名前、build.rs は build_script_build)
+            // (crate name: the file name for bin / tests / benches / examples, build_script_build for build.rs)
             if !r.ends_with("src/lib.rs") && !r.ends_with("src/main.rs") {
                 let n = if r.ends_with("build.rs") { "build_script_build".to_string() } else { r.file_stem().map(|s| s.to_string_lossy().replace('-', "_")).unwrap_or_default() };
                 if !n.is_empty() && !names.iter().any(|x| x.0 == n) {
@@ -1101,7 +1101,7 @@ fn cargo_files(root: &Path) -> Option<(Vec<(PathBuf, Vec<String>, u32, bool)>, H
                     continue;
                 }
                 let text = std::fs::read_to_string(&f).unwrap_or_default();
-                // (子のファイルの場所: 根と mod.rs は同じディレクトリ、a.rs は a/ の下)
+                // (where child files are: the same directory for the root and mod.rs, under a/ for a.rs)
                 let dir = if is_root || f.file_name().is_some_and(|n| n == "mod.rs") {
                     f.parent().map(|p| p.to_path_buf()).unwrap_or_default()
                 } else {
@@ -1116,7 +1116,7 @@ fn cargo_files(root: &Path) -> Option<(Vec<(PathBuf, Vec<String>, u32, bool)>, H
                         d = d.join(x);
                     }
                     let cand = match path {
-                        // (`#[path]` はファイルのあるディレクトリから。inline の mod の中ならその下から)
+                        // (`#[path]` is relative to the directory of the file; inside an inline mod, relative to the directory under that)
                         Some(p) if inline.is_empty() => vec![f.parent().map(|x| x.join(&p)).unwrap_or_default()],
                         Some(p) => vec![d.join(p)],
                         None => vec![d.join(format!("{name}.rs")), d.join(&name).join("mod.rs")],
@@ -1125,8 +1125,8 @@ fn cargo_files(root: &Path) -> Option<(Vec<(PathBuf, Vec<String>, u32, bool)>, H
                         stack.push((c, cm, false));
                     }
                 }
-                // (`include!("x.rs")` / `include!(concat!(env!("OUT_DIR"), "/x.rs"))`: 同じモジュールの続き。OUT_DIR は
-                // target の下のビルドスクリプトの出力 (いちばん新しいもの))
+                // (`include!("x.rs")` / `include!(concat!(env!("OUT_DIR"), "/x.rs"))`: a continuation of the same module. OUT_DIR is
+                // the build script's output under target (the newest one))
                 for (out_dir, rel) in includes(&text) {
                     let c = if out_dir { out_dir_file(root, &pkg_name(&toml), &rel) } else { f.parent().map(|p| p.join(&rel)).filter(|c| c.exists()) };
                     if let Some(c) = c {
@@ -1137,7 +1137,7 @@ fn cargo_files(root: &Path) -> Option<(Vec<(PathBuf, Vec<String>, u32, bool)>, H
             }
         }
     }
-    // (依存のクレート: Cargo.lock の package。場所は最初のパッケージの根 (rust-analyzer と同じ))
+    // (dependency crates: the packages of Cargo.lock; located at the root of the first package (same as rust-analyzer))
     if let (Ok(lock), Some(first)) = (std::fs::read_to_string(root.join("Cargo.lock")), names.first().map(|x| x.1.clone())) {
         for l in lock.lines() {
             if let Some(n) = l.strip_prefix("name = ") {
@@ -1151,7 +1151,7 @@ fn cargo_files(root: &Path) -> Option<(Vec<(PathBuf, Vec<String>, u32, bool)>, H
     Some((out, feats, names))
 }
 
-/// ファイルの中の `include!("x")` と `include!(concat!(env!("OUT_DIR"), "/x"))`: (OUT_DIR の下か, パス)
+/// The `include!("x")` and `include!(concat!(env!("OUT_DIR"), "/x"))` in a file: (whether under OUT_DIR, path)
 fn includes(text: &str) -> Vec<(bool, String)> {
     let mut out = vec![];
     for (i, _) in text.match_indices("include!(") {
@@ -1173,7 +1173,7 @@ fn includes(text: &str) -> Vec<(bool, String)> {
     out
 }
 
-/// Cargo.toml の [package] の name
+/// The name of Cargo.toml's [package]
 fn pkg_name(toml: &str) -> String {
     let mut in_pkg = false;
     for l in toml.lines() {
@@ -1189,8 +1189,8 @@ fn pkg_name(toml: &str) -> String {
     String::new()
 }
 
-/// パッケージ pkg のビルドスクリプトの OUT_DIR の中のファイル rel (target/<profile>/build/<pkg>/<hash>/out/ か
-/// target/<profile>/build/<pkg>-<hash>/out/ の、いちばん新しいもの)
+/// The file rel in the OUT_DIR of package pkg's build script (the newest one of target/<profile>/build/<pkg>/<hash>/out/ or
+/// target/<profile>/build/<pkg>-<hash>/out/)
 fn out_dir_file(root: &Path, pkg: &str, rel: &str) -> Option<PathBuf> {
     if pkg.is_empty() {
         return None;
@@ -1220,14 +1220,14 @@ fn out_dir_file(root: &Path, pkg: &str, rel: &str) -> Option<PathBuf> {
     best.map(|b| b.1)
 }
 
-/// ファイルの中の `mod x;` (囲む `mod a { .. }` の名前の列, 名前, `#[path = ".."]`)
+/// The `mod x;` in a file (the names of the enclosing `mod a { .. }`, name, `#[path = ".."]`)
 fn mod_decls(text: &str) -> Vec<(Vec<String>, String, Option<String>)> {
     let s = text.as_bytes();
     let t = zust_core::lexer::tokenize(s);
     let tk = |k: usize| -> &str { &text[t[k].1..t[k].2] };
     let sym = |k: usize, c: u8| k < t.len() && t[k].0 == 1 && s[t[k].1] == c;
     let mut out = vec![];
-    // (inline の mod: (名前, 開いた深さ))
+    // (inline mods: (name, depth at which it opened))
     let mut inl: Vec<(String, i32)> = vec![];
     let mut depth = 0i32;
     let mut k = 0;
@@ -1242,7 +1242,7 @@ fn mod_decls(text: &str) -> Vec<(Vec<String>, String, Option<String>)> {
         } else if t[k].0 == 0 && tk(k) == "mod" && k + 2 < t.len() && t[k + 1].0 == 0 {
             let name = tk(k + 1).to_string();
             if sym(k + 2, b';') {
-                // (`#[path = "x.rs"]`: mod の前の属性)
+                // (`#[path = "x.rs"]`: an attribute before the mod)
                 let mut path = None;
                 let mut j = k;
                 while j >= 1 && (t[j - 1].0 == 0 && matches!(tk(j - 1), "pub" | "crate" | "in" | "super") || sym(j - 1, b')') || sym(j - 1, b'(')) {

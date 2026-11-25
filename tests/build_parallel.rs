@@ -1,4 +1,4 @@
-//! A parallel build (forked children, or worker threads: ZUSTC_PAR=threads, #165) writes the same .o as `-j 1`.
+//! A parallel build (forked children, or worker threads: ZUSTC_PAR=threads, #165) writes the same .o as `-j 1` (#192).
 //!
 //! The case that once differed: a fn compiled in a child that coerces a closure with no captures to a fn pointer
 //! (examples/coercions.rs). Its Blob named the closure's fn-pointer instance (request_fnptr), which the encoding writes

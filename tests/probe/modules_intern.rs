@@ -1,6 +1,6 @@
-// モジュールごとの名前空間 (同じ名前の型・関数・const を別のモジュールに)、use の別名、
-// Mutex / OnceLock / Box::leak による intern、ptr::eq、再帰する型 (参照を通す) の ==、
-// &String と &str の比較・受け渡し、Vec<u8> とバイト列の比較、ガードつきの腕の中の match、後で代入する let
+// Per-module namespaces (types / fns / consts with the same name in different modules), use aliases,
+// interning with Mutex / OnceLock / Box::leak, ptr::eq, == on recursive types (through references),
+// comparing / passing &String and &str, comparing Vec<u8> with byte strings, match inside a guarded arm, let assigned later
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 

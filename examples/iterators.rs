@@ -1,6 +1,6 @@
-// Iterator のサンプル: 自前の impl Iterator (関連型 Item)、アダプタ (map / filter / enumerate / zip /
-// take / skip / chain / copied / filter_map / take_while)、消費 (collect / sum / count / fold / max / min / any /
-// all / find / position / last)、範囲・Vec・配列・&str のイテレータ、for で回す
+// An Iterator sample: our own impl Iterator (associated type Item), adapters (map / filter / enumerate / zip /
+// take / skip / chain / copied / filter_map / take_while), consumers (collect / sum / count / fold / max / min / any /
+// all / find / position / last), iterators of ranges / Vec / arrays / &str, looping with for
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }
@@ -86,7 +86,7 @@ fn main() {
     let evens = v.iter().filter(|x| **x % 2 == 0).copied().collect::<Vec<_>>();
     line(evens.len() as i64);
     line(evens[0] + evens[1]);
-    // 消費するメソッド
+    // Consuming methods
     let s: i64 = v.iter().sum();
     line(s);
     line(v.iter().count() as i64);
@@ -98,7 +98,7 @@ fn main() {
     line(*v.iter().find(|x| **x > 5).unwrap());
     line(v.iter().position(|x| *x == 1).unwrap() as i64);
     line(*v.iter().last().unwrap());
-    // 範囲
+    // Ranges
     let r: i64 = (1..=10).filter(|x| x % 3 == 0).sum();
     line(r);
     line(total(squares(4).into_iter()));
@@ -119,7 +119,7 @@ fn main() {
     line(small.len() as i64);
     let halves: Vec<i64> = v.iter().filter_map(|x| if x % 2 == 0 { Some(x / 2) } else { None }).collect();
     line(halves[0] * 10 + halves[1]);
-    // 自前のイテレータ
+    // Our own iterator
     let c = Counter { n: 0, limit: 5 };
     let cs: u32 = c.map(|x| x * x).sum();
     line(cs as i64);
@@ -130,18 +130,18 @@ fn main() {
     let fibs: Vec<u64> = Fib { a: 0, b: 1 }.take(10).collect();
     line(fibs[9] as i64);
     line(Fib { a: 0, b: 1 }.skip(20).next().unwrap() as i64);
-    // 文字列
+    // Strings
     let word = String::from("héllo wörld");
     line(word.chars().count() as i64);
     let upper: String = "abc".chars().map(|c| ((c as u8) - 32) as char).collect();
     puts(upper.as_str());
     let vowels = word.chars().filter(|c| *c == 'o' || *c == 'é' || *c == 'ö').count();
     line(vowels as i64);
-    // 所有するイテレータ (要素を取り出す)
+    // An owning iterator (takes the elements out)
     let strings = vec![String::from("x"), String::from("yy"), String::from("zzz")];
     let lens: Vec<usize> = strings.into_iter().map(|s| s.len()).collect();
     line(lens[0] as i64 + lens[1] as i64 + lens[2] as i64);
-    // 配列
+    // Arrays
     let arr = [4i64, 5, 6];
     line(arr.iter().map(|x| x * x).sum::<i64>());
 }

@@ -25,12 +25,15 @@ pub struct SrcMap {
     pub externs: Vec<(usize, String)>,
     /// Whether the loading keeps `externs`
     pub keep_externs: bool,
+    /// The root file's first `cfg` predicate rustc cannot read (cfg::malformed_cfg), found before the configuring
+    /// takes the attributes away; kept with `externs`
+    pub cfg_err: Option<String>,
 }
 
 impl SrcMap {
     /// 1 ファイルだけ (区間 1 つ)
     pub fn single(name: &str) -> SrcMap {
-        SrcMap { segs: vec![(1, 0, 1)], files: vec![name.to_string()], inputs: vec![], probes: vec![], volatile: false, colfix: vec![], externs: vec![], keep_externs: false }
+        SrcMap { segs: vec![(1, 0, 1)], files: vec![name.to_string()], inputs: vec![], probes: vec![], volatile: false, colfix: vec![], externs: vec![], keep_externs: false, cfg_err: None }
     }
 
     /// 結合したソースの行 → (ファイルの名前, ファイルの中の行)
@@ -43,6 +46,17 @@ impl SrcMap {
         }
         let name = self.files.get(best.0 as usize).map(|s| s.as_str()).unwrap_or("src/main.rs");
         (name, line - best.1 + best.2)
+    }
+
+    /// A line of the root file → the line of the combined source (locate's inverse for the root file)
+    pub fn root_to_combined(&self, line: u32) -> u32 {
+        let mut best = None;
+        for &(s, f, first) in &self.segs {
+            if f == 0 && first <= line {
+                best = Some((s, first));
+            }
+        }
+        best.map_or(line, |(s, first)| s + (line - first))
     }
 
     /// 結合したソースの (行, 桁) の桁を、名前を変える前の桁にする
@@ -218,7 +232,12 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
     // (and whether it may call `env!` / `option_env!`, seen by the same tokens)
     let mut env = None;
     let mut externs = vec![];
-    let src = match crate::cfg::strip_noting(&src, cfg, &mut env, &mut externs) {
+    let stripped = crate::cfg::strip_noting(&src, cfg, &mut env, &mut externs);
+    if map.inputs.is_empty() && map.keep_externs {
+        // (a fn's qualifiers out of order, a parse error, before a malformed `cfg`)
+        map.cfg_err = crate::cfg::fn_qualifier_order(&src).or_else(|| crate::cfg::malformed_cfg(&src, stripped.as_deref(), cfg));
+    }
+    let src = match stripped {
         Some(t) => {
             // (the root file's `extern crate` items, for a caller that asked)
             if map.inputs.is_empty() && map.keep_externs {
@@ -332,7 +351,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
                         (d, join_disp(&pdisp, &format!("{name}/mod.rs")), hdir.join(&name), join_disp(&pdisp, &name))
                     }
                 } else {
-                    return Err(format!("{display}: file not found for module `{name}`"));
+                    return Err(mod_not_found(display, &src, &name));
                 }
             }
         };
@@ -374,7 +393,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         } else if b.exists() {
             (b, join_disp(disp_dir, &format!("{name}/mod.rs")), mod_dir.join(name.as_str()), join_disp(disp_dir, &name))
         } else {
-            return Err(format!("{display}: file not found for module `{name}`"));
+            return Err(mod_not_found(display, &src, &name));
         };
         text.push_str(&format!("{vis} mod {name} {{\n"));
         let at = start + line_count(&text);
@@ -410,6 +429,11 @@ fn hoist_macro_mods(text: String, path: &Path, mod_dir: &Path, disp_dir: &str, s
     let mut calls: Vec<(String, Vec<String>)> = vec![];
     let mut k = 0;
     while k + 3 < toks.len() {
+        // (a token that is no identifier of `macro_rules`'s length: one test passes it)
+        if toks[k].0 != 0 || toks[k].2 - toks[k].1 != 11 {
+            k += 1;
+            continue;
+        }
         if toks[k].0 == 0 && tk(k) == b"macro_rules" && is_sym(k + 1, b'!') && toks[k + 2].0 == 0 && opens(k + 3) {
             let name = String::from_utf8_lossy(tk(k + 2)).into_owned();
             let (mut d, mut j) = (0i32, k + 3);
@@ -639,6 +663,13 @@ fn blank_mod_decls(src: &str, cfg: &crate::cfg::CfgSet) -> Result<(String, Vec<(
     let mut inline: Vec<(i32, Result<String, String>)> = vec![];
     let mut k = 0;
     while k < toks.len() {
+        // (most tokens are none of `{`, `}`, `mod` and `macro_rules`, which the branches below look for: one test of
+        //  the kind and the length passes them)
+        let (kind, a, e) = toks[k];
+        if !(kind == 1 && e == a + 1 && (s[a] == b'{' || s[a] == b'}')) && !(kind == 0 && (e - a == 3 || e - a == 11)) {
+            k += 1;
+            continue;
+        }
         // (the body of `macro_rules! name { .. }` (or `( .. );` / `[ .. ];`) defined at the file's own level is tokens,
         //  not items: a `mod x;` there is declared where the macro is invoked (hoist_macro_mods). A macro inside an
         //  inline module is invoked there too, as far as zustc follows: its `mod x;` is read in that module, as before)
@@ -935,6 +966,58 @@ mod circular_tests {
         let r = super::load_crate(&dir.join("lib.rs"), "src/lib.rs", &cfg);
         assert!(r.is_ok(), "{:?}", r.err());
         assert!(r.unwrap().0.contains("pub const YES: bool = true;"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// E0583: `mod name;` with no file, at the declaration's line (the first `mod name` of the text followed by `;`)
+#[cold]
+fn mod_not_found(display: &str, src: &str, name: &str) -> String {
+    let pat = format!("mod {name}");
+    // (a declaration at a line's start, past `pub` / `unsafe` only: not one in a block, which rustc reports
+    // otherwise, nor `extern "C" mod x;`)
+    let line = src.match_indices(&pat).find_map(|(i, _)| {
+        let ls = src[..i].rfind('\n').map_or(0, |k| k + 1);
+        let prefix = &src[ls..i];
+        let prefix_ok = prefix.split_whitespace().all(|w| w == "unsafe" || w.starts_with("pub")) && !prefix.starts_with(char::is_whitespace);
+        let after = src[i + pat.len()..].trim_start();
+        (prefix_ok && after.starts_with(';')).then(|| 1 + src[..i].matches('\n').count())
+    });
+    // (`extern "C" mod foo;`: rustc's parse error at the `mod`, an ABI is followed by `{` or `fn`)
+    let ext = src.match_indices(&pat).find(|&(i, _)| {
+        let ls = src[..i].rfind('\n').map_or(0, |k| k + 1);
+        src[ls..i].trim_start().starts_with("extern ") && src[i + pat.len()..].trim_start().starts_with(';')
+    });
+    if let Some((i, _)) = ext {
+        let ls = src[..i].rfind('\n').map_or(0, |k| k + 1);
+        return format!("{display}:{}:{}: expected `{{`, found keyword `mod`", 1 + src[..i].matches('\n').count(), src[ls..i].chars().count() + 1);
+    }
+    match line {
+        Some(l) => format!("{display}:{l}:1: file not found for module `{name}` (E0583)"),
+        None => format!("{display}: file not found for module `{name}`"),
+    }
+}
+
+#[cfg(test)]
+mod missing_mod_tests {
+    /// E0583: a `mod x;` with no file is reported at the declaration's line (tests/ui error-codes/E0583.rs)
+    #[test]
+    fn file_not_found_at_the_declaration() {
+        let dir = std::env::temp_dir().join(format!("srcmap_missing_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("main.rs"), "// a comment\nfn main() {}\n\nmod nowhere;\n").unwrap();
+        let cfg = crate::cfg::CfgSet::default();
+        let e = super::load_crate(&dir.join("main.rs"), "src/main.rs", &cfg).unwrap_err();
+        assert_eq!(e, "src/main.rs:4:1: file not found for module `nowhere` (E0583)");
+        // (in a fn's block: rustc's error there is another one, so no line is claimed)
+        std::fs::write(dir.join("main.rs"), "fn main() {\n    mod nowhere;\n}\n").unwrap();
+        let e = super::load_crate(&dir.join("main.rs"), "src/main.rs", &cfg).unwrap_err();
+        assert_eq!(e, "src/main.rs: file not found for module `nowhere`");
+        // (after an ABI: rustc's parse error at the `mod`)
+        std::fs::write(dir.join("main.rs"), "fn main() {}\nextern \"C\" mod nowhere;\n").unwrap();
+        let e = super::load_crate(&dir.join("main.rs"), "src/main.rs", &cfg).unwrap_err();
+        assert_eq!(e, "src/main.rs:2:12: expected `{`, found keyword `mod`");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1,4 +1,4 @@
-// let-else の同名の束縛・一時値のフィールドのムーブ・Deref 越しのフィールド・Option::iter・クロージャで split・`&&T`
+// let-else bindings of the same name, moving fields out of temporaries, fields through Deref, Option::iter, split with a closure, `&&T`
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
@@ -40,7 +40,7 @@ impl Outer {
 }
 
 fn main() {
-    // let-else で外の変数を同じ名前で隠す
+    // let-else shadows an outer variable with the same name
     let v: Vec<Option<String>> = vec![Some("self".into()), None, Some("abcd".into())];
     let mut out: Vec<(String, u32)> = vec![];
     for (name, k) in v.into_iter().zip([1u32, 2, 3]) {
@@ -48,12 +48,12 @@ fn main() {
         out.push((name, k));
     }
     println!("{out:?}");
-    // 一時値のタプル / struct からフィールドをムーブ
+    // Moves fields out of a temporary tuple / struct
     let m = table().0;
     let s = table().1;
     let w = table().2;
     println!("{:?} {s:?} {w:?}", m.get(&1));
-    // Deref / DerefMut 越しのフィールド
+    // Fields through Deref / DerefMut
     let mut o = Outer { inner: Inner { a: 1, names: vec![] }, extra: 10 };
     println!("{} {} {}", o.bump("x"), o.bump("y"), o.a);
     // Option::iter / into_iter
@@ -61,11 +61,11 @@ fn main() {
     let b: Option<u32> = None;
     let xs: Vec<u32> = a.iter().chain(b.iter()).copied().chain(Some(9u32)).collect();
     println!("{xs:?} {}", b.iter().count());
-    // クロージャで split
+    // split with a closure
     let line = String::from("a1b22c,d");
     let parts: Vec<&str> = line.split(|c: char| c.is_ascii_digit() || c == ',').collect();
     println!("{parts:?}");
-    // `&&str` の注釈
+    // An `&&str` annotation
     let words = vec!["apple", "bob", "kayak"];
     let pal: Vec<&&str> = words.iter().filter(|w| w.chars().eq(w.chars().rev())).collect();
     println!("{pal:?}");

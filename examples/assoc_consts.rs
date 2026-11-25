@@ -1,5 +1,5 @@
-// 関連定数のサンプル: impl の const (`S::N` / `Self::N`)、trait の const (既定値あり・なし)、
-// ジェネリック関数の中の `T::K`、const を配列の長さや別の const に使う
+// A sample of associated consts: impl consts (`S::N` / `Self::N`), trait consts (with and without defaults),
+// `T::K` inside a generic fn, using consts for array lengths and in other consts
 struct Buf;
 
 impl Buf {

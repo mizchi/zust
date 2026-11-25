@@ -1,4 +1,4 @@
-// minclif がスタックの struct のフィールドをレジスタに置く (値渡し・返り値・フィールドの更新・f64 と u32 の混在)
+// minclif keeps the fields of a struct on the stack in registers (pass by value, return values, field updates, mixed f64 and u32)
 #[derive(Clone, Copy)]
 struct P { x: f64, y: f64, n: u32 }
 fn step(p: P, d: f64) -> P { P { x: p.x + d * p.y, y: p.y - d * p.x, n: p.n + 1 } }

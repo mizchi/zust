@@ -1,6 +1,6 @@
-//! アイテムの要約 (front.rs の `summarize` / `parse_sig` / `lift_closures` / `parse_and_summarize`) を
-//! 自前の構文木 (src/parse.rs) の上で行う。tests/ast_summary.rs が全ファイルで syn 版と同じ要約になることを確かめる。
-//! 外部クレートに依存しない (parse / types / ast_types / ast_closure / lexer だけ) ので zustc 自身でもコンパイルできる。
+//! Item summaries (front.rs's `summarize` / `parse_sig` / `lift_closures` / `parse_and_summarize`)
+//! done on our own syntax tree (src/parse.rs). tests/ast_summary.rs checks that every file gets the same summaries as the syn version.
+//! It depends on no external crates (only parse / types / ast_types / ast_closure / lexer), so zustc itself can compile it too.
 
 use crate::ast_closure;
 use crate::ast_types::tysyn;
@@ -16,12 +16,12 @@ fn err<T>(msg: &str) -> R<T> {
     Err(msg.to_string())
 }
 
-/// 空白を除いた属性のテキスト (`#[derive(Debug,Clone)]`)
+/// Attribute text with whitespace removed (`#[derive(Debug,Clone)]`)
 fn compact(s: &str) -> String {
     s.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
-/// `#[name]` か `#[unsafe(name)]` が付いているか
+/// Whether `#[name]` or `#[unsafe(name)]` is present
 fn has_attr(attrs: &[String], name: &str) -> bool {
     attrs.iter().any(|a| {
         let c = compact(a);
@@ -29,7 +29,7 @@ fn has_attr(attrs: &[String], name: &str) -> bool {
     })
 }
 
-/// `#[derive(A, B)]` の名前 (1 つの識別子のものだけ)
+/// The names in `#[derive(A, B)]` (only single-identifier ones)
 /// (also as std's prelude writes it, `#[::core::prelude::v1::derive(::core::clone::Clone, ::core::marker::Copy)]`, as
 /// libc 0.2's `s!` does: a std trait by its path is its name)
 fn derive_names(attrs: &[String]) -> Vec<String> {
@@ -50,6 +50,22 @@ fn derive_names(attrs: &[String]) -> Vec<String> {
         }
     }
     out
+}
+
+/// The std crate a derive's path names `name` right under, `#[derive(core::name)]` / `#[derive(::std::name)]`
+#[cold]
+fn derive_root_of(attrs: &[String], name: &str) -> Option<&'static str> {
+    for a in attrs {
+        let c = compact(a);
+        let Some(inner) = c.find("derive(").and_then(|i| c[i + 7..].strip_suffix(")]")) else { continue };
+        for part in inner.split(',') {
+            let p = part.strip_prefix("::").unwrap_or(part);
+            if let Some(k) = ["core", "std", "alloc"].into_iter().find(|k| p.strip_prefix(k).and_then(|r| r.strip_prefix("::")) == Some(name)) {
+                return Some(k);
+            }
+        }
+    }
+    None
 }
 
 /// The integer type of `#[repr(u8)]` / `#[repr(C, i16)]`
@@ -108,7 +124,7 @@ fn layout_reprs(attrs: &[String]) -> R<Vec<String>> {
     Ok(v)
 }
 
-/// `#[link_name = "malloc"]` の名前
+/// The name in `#[link_name = "malloc"]`
 fn link_name(attrs: &[String]) -> Option<String> {
     for a in attrs {
         let c = compact(a);
@@ -181,16 +197,16 @@ pub fn const_int(e: &Expr) -> R<i64> {
     }
 }
 
-/// 境界の名前 (front.rs の bound_names と同じ規則)
+/// Bound names (the same rules as front.rs's bound_names)
 pub fn bound_names(bs: &[Bound]) -> R<Vec<String>> {
     let mut v = Vec::new();
     for b in bs {
         match b {
-            // `?Sized` は制約を緩めるだけなので数えない
+            // `?Sized` only relaxes a constraint, so it is not counted
             Bound::Trait(true, _) => {}
             Bound::Trait(false, p) => {
                 let last = p.segs.last().ok_or("empty bound")?;
-                // (`iter::FromIterator<char>` はモジュールの部分を飛ばす)
+                // (`iter::FromIterator<char>` skips the module part)
                 if last.fn_args.is_some() || !last.args.is_empty() {
                     v.push(last.text.clone());
                 } else {
@@ -265,12 +281,12 @@ fn collect_generics(g: &Generics, out: &mut Vec<(String, Vec<String>)>) -> R<()>
         }
     }
     for (t, bs) in &g.preds {
-        // (型パラメータ以外への境界は読み飛ばす)
+        // (Bounds on anything other than type parameters are skipped)
         let PTy::Path(None, p) = t else { continue };
         if p.global || p.segs.len() != 1 || !p.segs[0].args.is_empty() || p.segs[0].fn_args.is_some() {
             continue;
         }
-        // (ライフタイムの述語 `'a: 'b`)
+        // (Lifetime predicates `'a: 'b`)
         if p.segs[0].name.starts_with('\'') {
             continue;
         }
@@ -461,7 +477,7 @@ fn ty_names(t: &PTy, out: &mut Vec<String>) {
     }
 }
 
-/// 型の空白なしのテキスト (syn のトークン列から空白を除いたものと同じ: `PartialEq<[U;N]>` の比較用)
+/// The text of a type without whitespace (same as syn's token sequence with whitespace removed: for comparing `PartialEq<[U;N]>`)
 fn ty_compact(t: &PTy) -> String {
     match t {
         PTy::Path(None, p) => path_compact(p),
@@ -502,7 +518,7 @@ fn expr_compact(e: &Expr) -> String {
     }
 }
 
-/// 関数のシグネチャ (front.rs の parse_sig)
+/// A fn signature (front.rs's parse_sig)
 /// `-> impl Trait + use<..>`: the precise capture list names the function's own parameters
 fn check_impl_ret(sig: &PSig, owner: Option<&Owner>) -> R<()> {
     let Some(PTy::Impl(bs)) = &sig.ret else { return Ok(()) };
@@ -569,12 +585,17 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         return err("missing lifetime specifier (E0106)");
     }
     let mut generics = owner.map(|o| o.generics.clone()).unwrap_or_default();
+    // (the lifetime bounds of the parameters' `impl Trait`s, by the type parameters they are lifted to: regions)
+    let mut impl_lts: Vec<(String, String)> = vec![];
     collect_generics(&sig.generics, &mut generics)?;
     if is_extern && !generics.is_empty() {
         return err("extern fns cannot be generic");
     }
     if is_main && !generics.is_empty() {
         return err("`main` cannot be generic");
+    }
+    if is_main && !sig.generics.preds.is_empty() {
+        return err("`main` function is not allowed to have a `where` clause (E0646)");
     }
     let self_ty = owner.map(|o| &o.self_ty);
     let mut params = Vec::new();
@@ -692,20 +713,33 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             }
         }
     }
-    for (_, t) in &sig.params {
+    // (E0277: a returned value needs a size too, a `str` or `[T]` (a `dyn Trait` is E0746, checked elsewhere); a
+    // trait's declaration without a body does not)
+    if let Some(r) = sig.ret.as_ref().filter(|_| !owner.is_some_and(|o| o.is_trait) && !is_extern) {
+        if let Some(u) = unsized_value(r).filter(|u| !u.starts_with("dyn")) {
+            let m = format!("the size for values of type `{u}` cannot be known at compilation time (E0277)");
+            return Err(match crate::wf::pos_of(r) {
+                Some(p) => format!("{}:{}: {m}", p.line, p.col + 1),
+                None => m,
+            });
+        }
+    }
+    let mut lifted_params: Vec<(usize, PTy)> = vec![];
+    for (k, (_, t)) in sig.params.iter().enumerate() {
         // (E0277: a parameter's value needs a size; a trait's declaration without a body does not)
         if !owner.is_some_and(|o| o.is_trait) && !is_extern {
             if let Some(u) = unsized_value(t) {
                 return Err(format!("the size for values of type `{u}` cannot be known at compilation time (E0277)"));
             }
         }
-        // 引数位置の `impl Trait` は名前のない型パラメータ
+        // An `impl Trait` in argument position is an unnamed type parameter
         let (inner, rf) = match t {
             PTy::Ref(_, m, i) => (&**i, Some(*m)),
             t => (t, None),
         };
         if let PTy::Impl(bs) = inner {
             let g = fresh_impl_name(&generics);
+            impl_lts.extend(bs.iter().filter_map(|b| if let Bound::Lifetime(l) = b { Some((g.clone(), l.clone())) } else { None }));
             generics.push((g.clone(), bound_names(bs)?));
             let n = TySyn::Named(g);
             params.push(match rf {
@@ -714,12 +748,30 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             });
         } else if nested_impl(t) {
             // (`Option<&[impl AsRef<str>]>`: each `impl Trait` inside is a type parameter without a name, too)
-            let lifted = lift_impls(t, &mut generics)?;
+            let lifted = lift_impls(t, &mut generics, &mut impl_lts)?;
             params.push(tysyn(&lifted, self_ty)?);
+            lifted_params.push((k, lifted));
         } else {
             params.push(tysyn(t, self_ty)?);
         }
     }
+    // (the regions of a parameter with an `impl Trait` inside are those of the type it is lifted to, with the hidden
+    // type parameter in place of the `impl`: `Option<impl Copy + 'static>` holds what its `__impl0` does, which the
+    // bound requires to be 'static at the call (`take(Some(&x))`, E0597))
+    let lifted_sig = (!lifted_params.is_empty()).then(|| {
+        let mut rs = sig.clone();
+        for (k, t) in std::mem::take(&mut lifted_params) {
+            rs.params[k].1 = t;
+        }
+        // (with their lifetime bounds, which the lifted type no longer writes: the signature names a lifetime)
+        for (g, _) in generics.iter().filter(|g| g.0.starts_with("__impl")) {
+            if !rs.generics.params.iter().any(|p| matches!(p, GParam::Ty(n, ..) if n == g)) {
+                let bs = impl_lts.iter().filter(|(n, _)| n == g).map(|(_, l)| Bound::Lifetime(l.clone())).collect();
+                rs.generics.params.push(GParam::Ty(g.clone(), bs, None));
+            }
+        }
+        rs
+    });
     let ret = match &sig.ret {
         None => TySyn::Prim(Ty::Unit),
         // (`-> impl ?Sized` with no other trait: a return value must have a size)
@@ -787,10 +839,11 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         ret_from: ret_from(sig),
         regions: {
             let otp: Vec<&str> = owner.map(|o| o.generics.iter().map(|g| g.0.as_str()).collect()).unwrap_or_default();
-            crate::regions::sig_regions(sig, owner.and_then(|o| o.regions.as_deref()), &otp)
+            crate::regions::sig_regions(lifted_sig.as_ref().unwrap_or(sig), owner.and_then(|o| o.regions.as_deref()), &otp, &impl_lts)
         },
         is_unsafe: sig.quals.iter().any(|q| q == "unsafe") || (is_extern && !sig.quals.iter().any(|q| q == "safe")),
         preds: preds,
+        own_unsized: adt_unsized(&sig.generics),
     })
 }
 
@@ -1052,6 +1105,87 @@ fn unsized_elem(t: &PTy) -> Option<String> {
         }),
         _ => None,
     }
+}
+
+/// A struct's, an enum's or a union's field whose type passes a type parameter of the item to a struct or enum of the
+/// program that bounds that parameter by 'static (`bar: Bar<U>` with `struct Bar<T: 'static>`). Unlike `T: 'a`,
+/// rustc does not infer `U: 'static` from the fields: the item must declare it (E0310). statics: the short names of
+/// such structs and enums, and the indexes of their type and const parameters that must be 'static. (line, col, msg)
+pub fn static_field_unmet(src: &str, it: &SrcItem, statics: &crate::fxhash::FxMap<&str, Vec<usize>>) -> Option<(usize, usize, String)> {
+    let text = src.get(it.start..it.end)?;
+    let f = parse_file(text).ok()?;
+    let item = f.items.first()?;
+    let (g, tys): (&Generics, Vec<&PTy>) = match &item.kind {
+        ItemKind::Struct(_, g, fields) | ItemKind::Union(_, g, fields) => (g, match fields {
+            Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
+            Fields::Tuple(v) => v.iter().collect(),
+            Fields::Unit => vec![],
+        }),
+        ItemKind::Enum(_, g, vs) => (g, vs.iter().flat_map(|v| match &v.1 {
+            Fields::Named(f) => f.iter().map(|x| &x.1).collect::<Vec<_>>(),
+            Fields::Tuple(f) => f.iter().collect(),
+            Fields::Unit => vec![],
+        }).collect()),
+        _ => return None,
+    };
+    let mut k = crate::wf::Known::default();
+    k.add_generics(g);
+    if k.tparams.is_empty() {
+        return None;
+    }
+    fn walk(t: &PTy, k: &crate::wf::Known, statics: &crate::fxhash::FxMap<&str, Vec<usize>>, depth: u32) -> Option<(crate::parse::Pos, String)> {
+        if depth > 16 {
+            return None;
+        }
+        match t {
+            PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => walk(i, k, statics, depth + 1),
+            PTy::Tuple(ts) => ts.iter().find_map(|t| walk(t, k, statics, depth + 1)),
+            PTy::Fn(ps, r) => ps.iter().chain(std::iter::once(&**r)).find_map(|t| walk(t, k, statics, depth + 1)),
+            PTy::Path(None, p) => {
+                let s = p.segs.last()?;
+                // (one of the program's by its name alone: not a parameter of the item's of that name)
+                let req = (p.segs.len() == 1 && s.fn_args.is_none() && !k.tparams.contains(&s.name)).then(|| statics.get(s.name.as_str())).flatten();
+                let args: Vec<Option<&PTy>> = s
+                    .args
+                    .iter()
+                    .filter_map(|a| match a {
+                        crate::parse::GArg::Ty(t) => Some(Some(t)),
+                        crate::parse::GArg::Const(_) => Some(None),
+                        _ => None,
+                    })
+                    .collect();
+                if let Some(req) = req {
+                    for &i in req {
+                        let Some(Some(a)) = args.get(i) else { continue };
+                        // (the item's type parameters the argument holds, each declared to outlive 'static or not)
+                        let Some(sub) = k.sub_of(a) else { continue };
+                        if let Some(n) = sub.iter().find(|n| k.tparams.contains(n) && !k.vague.contains(n) && !k.outlives(n, "'static")) {
+                            return Some((p.pos, format!("the parameter type `{n}` may not live long enough (it must outlive `'static`, which the type `{}` requires) (E0310)", s.name)));
+                        }
+                    }
+                }
+                args.iter().flatten().find_map(|t| walk(t, k, statics, depth + 1)).or_else(|| {
+                    s.args.iter().find_map(|a| match a {
+                        crate::parse::GArg::Bind(_, t) => walk(t, k, statics, depth + 1),
+                        _ => None,
+                    })
+                })
+            }
+            PTy::Dyn(bs) | PTy::Impl(bs) => bs.iter().find_map(|b| match b {
+                Bound::Trait(_, p) => p.segs.iter().find_map(|s| {
+                    s.args.iter().find_map(|a| match a {
+                        crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) => walk(t, k, statics, depth + 1),
+                        _ => None,
+                    })
+                    .or_else(|| s.fn_args.as_ref().and_then(|(ps, r)| ps.iter().chain(r.as_deref()).find_map(|t| walk(t, k, statics, depth + 1))))
+                }),
+                Bound::Lifetime(_) => None,
+            }),
+            _ => None,
+        }
+    }
+    let (p, m) = tys.iter().find_map(|t| walk(t, &k, statics, 0))?;
+    Some((it.line + p.line.max(1) as usize - 1, p.col as usize + 1, m))
 }
 
 /// What an item's types require of traits' `Self: 'x` bounds (the driver checks them against the traits, which
@@ -1412,7 +1546,12 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
     let derives = derive_names(attrs);
     for d in &derives {
         if !matches!(d.as_str(), "Clone" | "Copy" | "Debug" | "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Hash" | "Default") {
-            return Err(format!("cannot find derive macro `{d}` in this scope"));
+            // (`\u{5}word\u{5}msg`: at the word in the item's text, the derive's name)
+            // (`#[derive(core::RustcDecodable)]`: a name std's root does not have)
+            if let Some(k) = derive_root_of(attrs, d) {
+                return Err(format!("\u{5}{d}\u{5}cannot find `{d}` in `{k}`"));
+            }
+            return Err(format!("\u{5}{d}\u{5}cannot find derive macro `{d}` in this scope"));
         }
     }
     if union {
@@ -1420,7 +1559,7 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
             return err("unions cannot have zero fields");
         }
         if let Some(d) = derives.iter().find(|d| !matches!(d.as_str(), "Clone" | "Copy")) {
-            return Err(format!("this trait cannot be derived for unions: `{d}`"));
+            return Err(format!("\u{5}{d}\u{5}this trait cannot be derived for unions: `{d}`"));
         }
         if derives.iter().any(|d| d == "Clone") && !derives.iter().any(|d| d == "Copy") {
             return err("the trait bound `Copy` is not satisfied: a union can derive `Clone` only with `Copy`");
@@ -1433,7 +1572,12 @@ fn adt_checks(attrs: &[String], g: &Generics, tys: &[&PTy], union: bool, nfields
                 _ => false,
             };
             if owning {
-                return err("field must implement `Copy` or be wrapped in `ManuallyDrop<...>` to be used in a union");
+                // (at the field's type, as rustc)
+                let m = "field must implement `Copy` or be wrapped in `ManuallyDrop<...>` to be used in a union";
+                return Err(match crate::wf::pos_of(t) {
+                    Some(p) => format!("\u{3}{}\u{3}{m}", p.line),
+                    None => m.to_string(),
+                });
             }
         }
     }
@@ -1632,7 +1776,7 @@ fn opaque_from(sig: &PSig) -> u64 {
     crate::types::OPAQUE_FROM | m24 | m21 << 31
 }
 
-/// `Fn(A, B) -> R` 形式の境界なら (種類, 引数, 戻り値)
+/// (kind, arguments, return value) if it is a bound of the form `Fn(A, B) -> R`
 pub fn parse_fn_bound(s: &str) -> Option<(String, Vec<TySyn>, TySyn)> {
     let kind = ["FnOnce", "FnMut", "Fn"].into_iter().find(|k| s.starts_with(k) && s[k.len()..].trim_start().starts_with('('))?;
     let f = parse_file(&format!("type __B = dyn {s};")).ok()?;
@@ -1737,7 +1881,7 @@ pub fn fn_bound_ret_from(s: &str) -> Vec<usize> {
         .collect()
 }
 
-/// 境界 `Iterator<Item = T>` の関連型の束縛 (名前, 型)
+/// The associated type bindings (name, type) of a bound `Iterator<Item = T>`
 pub fn assoc_bindings(s: &str) -> Vec<(String, TySyn)> {
     let mut out = Vec::new();
     let Ok(f) = parse_file(&format!("type __B = dyn {s};")) else { return out };
@@ -1755,9 +1899,9 @@ pub fn assoc_bindings(s: &str) -> Vec<(String, TySyn)> {
     out
 }
 
-// ---------------------------------------------------------------- クロージャの持ち上げ
+// ---------------------------------------------------------------- Closure lifting
 
-/// パターンの中のすべてのパターン (束縛の名前を集める)
+/// All the patterns within patterns (collects the bound names)
 fn pats_in_block(b: &Block, out: &mut Vec<String>) {
     for s in &b.stmts {
         match s {
@@ -1826,7 +1970,7 @@ fn pats_in_expr(e: &Expr, out: &mut Vec<String>) {
     }
 }
 
-/// 関数 (入れ子のクロージャを含む) のどこかで束縛される名前
+/// Names bound anywhere in a fn (including nested closures)
 fn bound_in_fn(sig: &PSig, body: &Block) -> Vec<String> {
     let mut v = Vec::new();
     if sig.recv_ty.is_some() {
@@ -1839,7 +1983,7 @@ fn bound_in_fn(sig: &PSig, body: &Block) -> Vec<String> {
     v
 }
 
-/// 本体の `let n = ..` から、返すクロージャがキャプチャした変数の型 (注釈か初期化式のリテラル)
+/// From `let n = ..` in the body, the type of a variable captured by the returned closure (an annotation or the literal of the initializer)
 fn local_ty_syn(b: &Block, n: &str, int_hint: Option<Ty>) -> Option<TySyn> {
     let mut found = None;
     for st in &b.stmts {
@@ -1865,7 +2009,7 @@ fn local_ty_syn(b: &Block, n: &str, int_hint: Option<Ty>) -> Option<TySyn> {
     found
 }
 
-/// リテラルのテキストから型 (整数は接尾辞 → 文脈 → i32)
+/// A type from literal text (integers: suffix → context → i32)
 fn lit_ty(t: &str, int_hint: Option<Ty>) -> Option<TySyn> {
     if t == "true" || t == "false" {
         return Some(TySyn::Prim(Ty::Bool));
@@ -1880,7 +2024,7 @@ fn lit_ty(t: &str, int_hint: Option<Ty>) -> Option<TySyn> {
         return None;
     }
     let hex = t.starts_with("0x") || t.starts_with("0b") || t.starts_with("0o");
-    // 接尾辞: 数字・`_`・(16 進なら a-f) の後ろの英字
+    // Suffix: the letters after the digits / `_` / (a-f if hex)
     let body = if hex { &t[2..] } else { t };
     let suf_at = body
         .char_indices()
@@ -1904,12 +2048,14 @@ fn fresh_impl_name(generics: &[(String, Vec<String>)]) -> String {
     format!("__impl{k}")
 }
 
-/// t with each `impl Trait` in it replaced by a new type parameter `__implN` (added to generics with its bounds)
-fn lift_impls(t: &PTy, generics: &mut Vec<(String, Vec<String>)>) -> R<PTy> {
+/// t with each `impl Trait` in it replaced by a new type parameter `__implN` (added to generics with its bounds; its
+/// lifetime bounds to lts, `impl Debug + 'static`: (`__implN`, `'static`))
+fn lift_impls(t: &PTy, generics: &mut Vec<(String, Vec<String>)>, lts: &mut Vec<(String, String)>) -> R<PTy> {
     use crate::parse::{GArg, Seg};
     Ok(match t {
         PTy::Impl(bs) => {
             let g = fresh_impl_name(generics);
+            lts.extend(bs.iter().filter_map(|b| if let Bound::Lifetime(l) = b { Some((g.clone(), l.clone())) } else { None }));
             generics.push((g.clone(), bound_names(bs)?));
             PTy::Path(None, Path { global: false, segs: vec![Seg { name: g.clone(), args: vec![], fn_args: None, text: g }], pos: Default::default() })
         }
@@ -1918,17 +2064,17 @@ fn lift_impls(t: &PTy, generics: &mut Vec<(String, Vec<String>)>) -> R<PTy> {
             for s in &mut p.segs {
                 for a in &mut s.args {
                     if let GArg::Ty(x) | GArg::Bind(_, x) = a {
-                        *x = lift_impls(x, generics)?;
+                        *x = lift_impls(x, generics, lts)?;
                     }
                 }
             }
             PTy::Path(q.clone(), p)
         }
-        PTy::Ref(l, m, i) => PTy::Ref(l.clone(), *m, Box::new(lift_impls(i, generics)?)),
-        PTy::Ptr(m, i) => PTy::Ptr(*m, Box::new(lift_impls(i, generics)?)),
-        PTy::Slice(i) => PTy::Slice(Box::new(lift_impls(i, generics)?)),
-        PTy::Array(i, n) => PTy::Array(Box::new(lift_impls(i, generics)?), n.clone()),
-        PTy::Tuple(v) => PTy::Tuple(v.iter().map(|x| lift_impls(x, generics)).collect::<R<Vec<_>>>()?),
+        PTy::Ref(l, m, i) => PTy::Ref(l.clone(), *m, Box::new(lift_impls(i, generics, lts)?)),
+        PTy::Ptr(m, i) => PTy::Ptr(*m, Box::new(lift_impls(i, generics, lts)?)),
+        PTy::Slice(i) => PTy::Slice(Box::new(lift_impls(i, generics, lts)?)),
+        PTy::Array(i, n) => PTy::Array(Box::new(lift_impls(i, generics, lts)?), n.clone()),
+        PTy::Tuple(v) => PTy::Tuple(v.iter().map(|x| lift_impls(x, generics, lts)).collect::<R<Vec<_>>>()?),
         t => t.clone(),
     })
 }
@@ -2005,7 +2151,7 @@ fn impl_as_infer(t: &PTy) -> PTy {
     }
 }
 
-/// 引数の名前 (識別子のパターンなら)
+/// A parameter's name (if it is an identifier pattern)
 fn pat_name(p: &Pat) -> Option<&str> {
     match p {
         Pat::Ident(_, _, n, None) => Some(n),
@@ -2098,7 +2244,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
             deref,
         });
     }
-    // `-> impl Fn(A) -> B { move |x| .. }`: 型は末尾のクロージャの struct
+    // `-> impl Fn(A) -> B { move |x| .. }`: the type is the struct of the trailing closure
     if sig.ret == TySyn::Named(IMPL_RET.into()) {
         let mut tail = match body.stmts.last() {
             Some(Stmt::Expr(e, false)) => Some(e),
@@ -2158,7 +2304,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
     Ok(())
 }
 
-// ---------------------------------------------------------------- 要約
+// ---------------------------------------------------------------- Summary
 
 /// E0106 in a fn pointer type or an `Fn(..) -> R` bound: its return type elides a lifetime, and its parameters do not
 /// have exactly one lifetime to take it from
@@ -2448,7 +2594,7 @@ fn tail_borrows_own_local(b: &Block) -> Option<(u32, String, bool)> {
     Some((p.pos.line, seg.name.clone(), init.is_some()))
 }
 
-/// 1 つのアイテムの要約 (front.rs の summarize)
+/// The summary of one item (front.rs's summarize)
 pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
     if item_elision_err(item) {
         return err("missing lifetime specifier (E0106)");
@@ -2574,7 +2720,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             lift_closures(fs, body, &name, &mut sig, Some(&ow.self_ty), &mut sm)?;
             sm.fns.push((name, sig));
         }
-        // 型の別名 (`type Key = u128;`)
+        // Type alias (`type Key = u128;`)
         ItemKind::Type(n, g, _, Some(t)) => {
             let mut gs = Vec::new();
             collect_generics(g, &mut gs)?;
@@ -2784,7 +2930,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     })
                     .collect();
                 sm.impl_trait_args = args.unwrap_or_default();
-                // `impl PartialEq<[U; N]> for Vec<T>`: 右辺の型が self 型と違う比較は trait 名に型引数を残す
+                // `impl PartialEq<[U; N]> for Vec<T>`: a comparison whose right-hand type differs from the self type keeps the type arguments in the trait name
                 if (last.name == "PartialEq" || last.name == "PartialOrd") && !last.args.is_empty() {
                     let rhs = compact(&last.text[last.name.len()..]);
                     let selfs = ty_compact(self_ty);
@@ -2830,7 +2976,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     }
                 }
             }
-            // `impl Add for &M`: M のメソッド `__ref_add` (self は &M) として持つ
+            // `impl Add for &M`: held as M's method `__ref_add` (self is &M)
             // (`impl Tr for &&str`: every reference off, the methods `str::__ref___ref_m`, one `__ref_` a level)
             let mut self_path = self_ty;
             while let (PTy::Ref(_, _, i), true) = (self_path, tr.is_some()) {
@@ -2937,9 +3083,11 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             let mut sig = parse_sig(fs, false, (named_main && !generic) || entry, None)?;
             let result_ret = matches!(&sig.ret, TySyn::App(n, _) if n == "Result");
             let bad_main = named_main && (generic || !sig.params.is_empty() || (sig.ret != TySyn::Prim(Ty::Unit) && !result_ret));
-            if bad_main {
+            // (an `async fn main` cannot be the entry either (E0752): its symbol tells it from the others)
+            let async_main = named_main && fs.quals.iter().any(|q| q == "async");
+            if bad_main || async_main {
                 sig.is_main = false;
-                sig.symbol = format!("_x{name}");
+                sig.symbol = if async_main { "_xmain.async".to_string() } else { format!("_x{name}") };
             }
             if entry && (!sig.params.is_empty() || sig.ret != TySyn::Prim(Ty::Unit)) {
                 return err("`main` must be `fn main()`");
@@ -2990,6 +3138,19 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.statics.push((n.clone(), tysyn(t, None)?, item.init_text.clone(), *m));
         }
         ItemKind::Extern(items) => {
+            // (E0428: two foreign items of one name in the value namespace, at the second's start, its `pub` included)
+            let mut names: Vec<&str> = vec![];
+            for fi in items {
+                let n = match &fi.kind {
+                    ItemKind::Fn(fs, _) => fs.name.as_str(),
+                    ItemKind::Static(_, n, ..) => n.as_str(),
+                    _ => continue,
+                };
+                if names.contains(&n) {
+                    return Err(format!("{}:1: the name `{n}` is defined multiple times (E0428)", fi.line));
+                }
+                names.push(n);
+            }
             for fi in items {
                 // (`static X: T;`: the symbol X (or its link_name) of what the program links with)
                 if let ItemKind::Static(m, n, t, _) = &fi.kind {
@@ -3014,6 +3175,10 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     continue;
                 }
                 let ItemKind::Fn(fs, None) = &fi.kind else {
+                    // (a fn with a body: what a foreign fn may not have)
+                    if matches!(fi.kind, ItemKind::Fn(_, Some(_))) {
+                        return Err(format!("{}:1: incorrect function inside `extern` block", fi.line));
+                    }
                     return err("only fns and statics are supported in extern blocks");
                 };
                 if link_name(&fi.attrs).unwrap_or_else(|| fs.name.clone()).starts_with("__enzyme_") {
@@ -3204,7 +3369,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
     Ok(sm)
 }
 
-/// 字句解析のアイテム (lexer) 1 つを構文解析して要約する (front.rs の parse_and_summarize)
+/// Parses and summarizes one lexer item (front.rs's parse_and_summarize)
 pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<Summary> {
     let text = &src[it.start..it.end];
     if let LexKind::InnerAttr = it.kind {
@@ -3237,7 +3402,7 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
     if let LexKind::TraitMember(_) = it.kind {
         let ow = owner.ok_or("trait member without trait")?;
         match &item.kind {
-            // `type Item: Clone;` (関連型の宣言): its bounds (a binding `dyn Tr<Item = T>` must meet them)
+            // `type Item: Clone;` (an associated type declaration): its bounds (a binding `dyn Tr<Item = T>` must meet them)
             // (one without bounds too: a `dyn Tr` must bind every associated type the trait leaves without a
             // default (E0191))
             ItemKind::Type(n, _, bs, None) => {
@@ -3259,7 +3424,7 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
                 return Ok(sm);
             }
             ItemKind::Type(..) => return Ok(Summary::default()),
-            // `const K: i32 = 3;` (既定値があれば `Trait::K` という const)
+            // `const K: i32 = 3;` (with a default, a const named `Trait::K`)
             ItemKind::Const(n, t, e) => {
                 let mut sm = Summary::default();
                 if let (Some(t), Some(_)) = (t, e) {
@@ -3292,7 +3457,7 @@ pub fn parse_and_summarize(src: &str, it: &SrcItem, owner: Option<&Owner>) -> R<
     Ok(sm)
 }
 
-/// impl / trait のヘッダの要約からメンバの所有者を作る (driver.rs と同じ)
+/// Makes the members' owner from the summary of an impl / trait header (same as driver.rs)
 pub fn owner_of(it: &SrcItem, sums: &[Summary]) -> Option<Owner> {
     match it.kind {
         LexKind::ImplMember(h) => {

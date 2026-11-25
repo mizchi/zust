@@ -1,4 +1,4 @@
-// ast_codegen v0: 整数・制御構文・関数呼び出し・extern "C"
+// ast_codegen v0: integers, control flow, fn calls, extern "C"
 #![no_std]
 #![no_main]
 

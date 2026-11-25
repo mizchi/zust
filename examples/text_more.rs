@@ -1,5 +1,5 @@
-// format! の細かい指定 (精度・#x・b・o・f.pad・{x} の取り込み)、HashMap の or_insert_with(Vec::new) / and_modify /
-// get_mut / iter_mut / into_iter、&str の lines / trim / starts_with(char) / split_whitespace
+// Detailed format! specs (precision, #x, b, o, f.pad, capturing {x}), HashMap's or_insert_with(Vec::new) / and_modify /
+// get_mut / iter_mut / into_iter, &str's lines / trim / starts_with(char) / split_whitespace
 use std::collections::HashMap;
 use std::fmt;
 struct Name<'a>(&'a str);

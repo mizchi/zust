@@ -3,14 +3,14 @@ name = "zustc"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-# examples/ は zustc でコンパイルする入力 (Cargo の example ではない。no_std のものもある)
+# examples/ holds inputs to compile with zustc (not Cargo examples; some are no_std)
 autoexamples = false
 
 [workspace]
 members = ["crates/ir", "crates/minclif", "crates/base", "crates/syntax", "crates/sema", "crates/typeck", "crates/codegen", "crates/core", "crates/clif", "crates/wasm", "crates/ide", "crates/analyzer", "crates/zurgo"]
 
 [features]
-# (以前は driver2 を有効にする feature。今は常に入っている: テストの cfg のために残す)
+# (formerly the feature that enabled the second driver (now the session); it is always in now: kept for the tests' cfg)
 default = ["acg"]
 acg = []
 
@@ -21,10 +21,10 @@ zust-wasm = { path = "crates/wasm" }
 minclif = { path = "crates/minclif" }
 
 [dev-dependencies]
-# (ベンチの lsp/* が LSP サーバを in-process で動かす。zustc 本体は LSP に依存しない)
+# (the benches' lsp/* run the LSP server in-process; zustc itself does not depend on the LSP)
 zust-analyzer = { path = "crates/analyzer" }
 serde_json = "1"
-# (テストが syn 版と比べるのに使う)
+# (used by the tests to compare with the syn version)
 syn = { version = "2", default-features = false, features = ["full", "parsing", "printing", "visit", "clone-impls"] }
 proc-macro2 = { version = "1", default-features = false, features = ["span-locations"] }
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
@@ -36,7 +36,7 @@ harness = false
 [profile.release]
 debug = false
 
-# cargo-mutants の変異ごとのビルド (.cargo/mutants.toml)。release と同じ最適化で、増分ビルドを使う
+# The per-mutant build of cargo-mutants (.cargo/mutants.toml). The same optimization as release, with incremental builds
 [profile.mutants]
 inherits = "release"
 incremental = true

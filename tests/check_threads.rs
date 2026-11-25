@@ -29,15 +29,15 @@ fn threads_give_the_same_diagnostics() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A host with threads of its own asks for 4 jobs on threads (`Options2::par`): the summaries and the check run on worker
+/// A host with threads of its own asks for 4 jobs on threads (`Options::par`): the summaries and the check run on worker
 /// threads (no fork), and the answer is that of one job
 #[test]
 fn threaded_host_checks_on_threads() {
     let src = program::program();
-    let one = zustc::Session2::new(zustc::Options2 { jobs: 1, no_cache: true, par: Some(zustc::par::Mode::Threads), ..zustc::Options2::default() }).check(&src);
-    let (f0, s0) = (zustc::driver2::forks(), zustc::par::spawned());
-    let many = zustc::Session2::new(zustc::Options2 { jobs: 4, no_cache: true, par: Some(zustc::par::Mode::Threads), ..zustc::Options2::default() }).check(&src);
-    let (f1, s1) = (zustc::driver2::forks(), zustc::par::spawned());
+    let one = zustc::Session::new(zustc::Options { jobs: 1, no_cache: true, par: Some(zustc::par::Mode::Threads), ..zustc::Options::default() }).check(&src);
+    let (f0, s0) = (zustc::session::forks(), zustc::par::spawned());
+    let many = zustc::Session::new(zustc::Options { jobs: 4, no_cache: true, par: Some(zustc::par::Mode::Threads), ..zustc::Options::default() }).check(&src);
+    let (f1, s1) = (zustc::session::forks(), zustc::par::spawned());
     assert_eq!(f1, f0, "forked");
     assert!(s1 > s0, "no worker thread started");
     assert!(one.len() >= 4, "{one:?}");

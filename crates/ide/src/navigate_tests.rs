@@ -1,4 +1,4 @@
-//! navigate の小さな部品の単体テスト (変異テストで見つからなかった変異を潰すためのもの)
+//! Unit tests of navigate's small parts (to kill the mutants that mutation testing did not catch)
 
 use super::*;
 
@@ -6,12 +6,12 @@ fn s(v: &[&str]) -> Vec<String> {
     v.iter().map(|x| x.to_string()).collect()
 }
 
-/// src の中の pat の nth 番目の位置
+/// The position of the nth pat in src
 fn at(src: &str, pat: &str, nth: usize) -> usize {
     src.match_indices(pat).nth(nth).unwrap_or_else(|| panic!("no {pat:?} #{nth}")).0
 }
 
-/// 一つのファイルで、off の定義の名前の始め
+/// In a single file, the start of the name of off's definition
 fn def1(f: &FileIndex, off: usize) -> Option<usize> {
     definition(&[f], 0, off).first().map(|l| l.start)
 }
@@ -36,7 +36,7 @@ fn generic_names_of_items() {
     assert_eq!(generic_names(t, 10), s(&["T", "N", "U"]));
     assert_eq!(generic_names("struct A { x: u8 }", 8), Vec::<String>::new());
     assert_eq!(generic_names("enum E <K>", 6), s(&["K"]));
-    // (`>` の後は見ない)
+    // (nothing after the `>` is looked at)
     assert_eq!(generic_names("struct B<X> where Y: Z<W> {}", 8), s(&["X"]));
     assert_eq!(generic_names("struct C<X: Iterator<Item = u8>, Y>;", 8), s(&["X", "Y"]));
     assert_eq!(generic_names("x", 5), Vec::<String>::new());
@@ -182,15 +182,15 @@ fn cfg_predicates() {
     if cfg!(windows) {
         want.push("windows_");
     }
-    // (`miri` は成り立つ: rust-analyzer の `cargo.cfgs` の既定)
+    // (`miri` holds: the default of rust-analyzer's `cargo.cfgs`)
     want.push("miri_");
-    // (設定されていない cfg `whatever` / `foo = "x"` は成り立たない: rustc と同じ)
+    // (cfgs that are not set, `whatever` / `foo = "x"`, do not hold: same as rustc)
     want.extend(["other_fn", "m", "inner"]);
     assert_eq!(names, want);
     assert!(f.derives.is_empty());
     assert!(f.in_inactive(at(src, "any_bc", 0)));
     assert!(!f.in_inactive(at(src, "any_ab", 0)));
-    // (feature なし)
+    // (no features)
     let mut g = FileIndex::new(src.to_string(), vec![]);
     g.apply_cfg(vec![]);
     assert!(g.defs.iter().any(|d| d.name == "not_a"));
@@ -304,15 +304,15 @@ fn f<T: Clone>(a: u8, mut b: (u8, u8), c: &[u8], (d1, d2): (u8, u8)) -> u8 {
     chk("mv(1)", 0, "mv =", 0);
     chk("w\n}", 0, "w = x", 0);
     chk("cl(z", 0, "cl =", 0);
-    // (束縛の名前そのもの: 自分に)
+    // (the name of the binding itself: to itself)
     chk("g }", 0, "g }", 0);
     chk("m, 0", 0, "m, 0", 0);
     chk("x, y", 0, "x, y", 0);
-    // フィールドの名前 `S { f: g }` の f はフィールド
+    // The field name: the f of `S { f: g }` is the field
     assert_eq!(def1(f, at(src, "f: g", 0)), Some(at(src, "f: u8", 0)));
-    // T は型引数
+    // T is a type parameter
     assert_eq!(def1(f, at(src, "T: Clone", 0)), Some(at(src, "T: Clone", 0)));
-    // 参照の数 (定義を含む)
+    // The number of references (including the definition)
     let refs = |p: &str, n: usize| references(&[f], 0, at(src, p, n), true, &no).len();
     assert_eq!(refs("w = x", 0), 3);
     assert_eq!(refs("inner = 1", 0), 1);
@@ -454,7 +454,7 @@ fn t(d: D, h: &mut H) {
     assert!(fi.in_derive(fi.tok_at(at(src, "Serialize", 0)).unwrap()));
     assert!(!fi.in_derive(fi.tok_at(at(src, "allow", 0)).unwrap()));
     assert!(!fi.in_derive(fi.tok_at(at(src, "x)", 0)).unwrap()));
-    // (ライブラリのファイルの derive は見ない)
+    // (derives in library files are not looked at)
     let mut lib = FileIndex::new(src.to_string(), vec![]);
     lib.lib = true;
     assert_eq!(derive_method(&[&lib], 0, &s(&["D"]), "clone"), None);
@@ -517,7 +517,7 @@ fn module_scopes() {
     assert_eq!(fi.enclosing_fn(at(src, "{} }", 0) + 1).map(|d| d.name.as_str()), Some("f"));
     assert_eq!(fi.enclosing_fn(at(src, "{}\n", 0) + 1).map(|d| d.name.as_str()), Some("h"));
     assert!(fi.enclosing_fn(0).is_none());
-    // tok_at: 識別子の両端と、その外
+    // tok_at: both ends of an identifier, and outside it
     assert_eq!(fi.tok_at(at(src, "h()", 0)).map(|k| fi.tok(k)), Some("h"));
     assert_eq!(fi.tok_at(at(src, "h()", 0) + 1).map(|k| fi.tok(k)), Some("h"));
     assert_eq!(fi.tok_at(at(src, "()", 2) + 1), None);
@@ -558,7 +558,7 @@ fn derive_across_files() {
     let mut fb = FileIndex::new(b.to_string(), vec![]);
     let at_clone = at(a, "Clone", 0);
     let want = Some(Loc { file: 0, start: at_clone, end: at_clone + 5 });
-    // (src のファイル・同じクレートのファイルの derive は見える。ほかのクレートの tests の中のものは見えない)
+    // (derives in src files and in files of the same crate are visible; those inside another crate's tests are not)
     assert_eq!(derive_method(&[&fa, &fb], 1, &s(&["D"]), "clone"), want);
     let mut fa2 = FileIndex::new(a.to_string(), vec![]);
     fa2.in_src = false;
@@ -580,14 +580,14 @@ fn boundaries() {
     assert!(!fi.in_macro_body(b));
     assert!(!fi.in_macro_body(at(src, "m {", 0)));
     assert!(fi.in_macro_body(a - 1));
-    // 取り込み `{x}` の両端
+    // Both ends of the capture `{x}`
     let xa = at(src, "x}", 0);
     assert!(fi.capture_at(xa).is_some());
     assert!(fi.capture_at(xa + 1).is_some());
     assert!(fi.capture_at(xa - 1).is_none());
     assert!(fi.capture_at(xa + 2).is_none());
     assert!(fi.capture_at(at(src, "\"{x", 0)).is_none());
-    // mod の範囲の端
+    // The edges of a mod's range
     let ma = fi.defs.iter().find(|d| d.name == "a").unwrap();
     assert_eq!(fi.module_at(ma.item_start), s(&["a"]));
     assert_eq!(fi.module_at(ma.item_end - 1), s(&["a"]));
@@ -596,7 +596,7 @@ fn boundaries() {
     assert_eq!(fi.enclosing_fn(ff.item_start).map(|d| d.name.as_str()), Some("f"));
     assert!(fi.enclosing_fn(ff.item_end).is_none());
     assert_eq!(fi.enclosing_fn(ff.item_end - 1).map(|d| d.name.as_str()), Some("f"));
-    // tok_at: 識別子の終わりの位置もその識別子
+    // tok_at: the position at the end of an identifier is that identifier too
     let g = at(src, "g()", 0);
     assert_eq!(fi.tok_at(g + 1).map(|k| fi.tok(k)), Some("g"));
     assert_eq!(fi.tok_at(g - 1).map(|k| fi.tok(k)), Some("fn"));
@@ -610,7 +610,7 @@ fn nested_uses() {
     assert_eq!(u, s(&["c=a::b::c", "e=a::b::d::e", "f=a::f", "h=g::h", "j=i::j", "n=l::n"]));
 }
 
-/// 書き換えを当てた本文
+/// The text with the edits applied
 fn apply(src: &str, mut e: Vec<(Loc, String)>) -> String {
     e.sort_by_key(|x| std::cmp::Reverse(x.0.start));
     let mut s = src.to_string();
@@ -626,26 +626,26 @@ fn rename_items_locals_and_shorthand() {
                fn f(x: u8) -> P { let p = P { x }; let P { x } = p.clone(); println!(\"{x}\"); P { x: x + p.get() } }\n";
     let fi = FileIndex::new(src.to_string(), vec![]);
     let ws = [&fi];
-    // 型
+    // A type
     let r = apply(src, rename(&ws, 0, at(src, "P {", 0), "Q", &no).unwrap());
     assert_eq!(r.matches("Q").count(), 6);
     assert!(!r.contains(" P"));
-    // フィールド: 省略形は `y: x` に
+    // A field: the shorthand becomes `y: x`
     let r = apply(src, rename(&ws, 0, at(src, "x: u8 }", 0), "y", &no).unwrap());
     assert!(r.contains("struct P { y: u8 }"), "{r}");
     assert!(r.contains("self.y"), "{r}");
     assert!(r.contains("P { y: x }; let P { y: x } = "), "{r}");
     assert!(r.contains("P { y: x + p.get() }"), "{r}");
-    // 引数 x: 省略形は `x: z` に、書式の中も
+    // The parameter x: the shorthand becomes `x: z`, and inside format strings too
     let r = apply(src, rename(&ws, 0, at(src, "x: u8) ->", 0), "z", &no).unwrap());
     assert!(r.contains("fn f(z: u8)"), "{r}");
     assert!(r.contains("P { x: z };"), "{r}");
-    // (let P { x } の x は別の束縛)
+    // (the x of let P { x } is a different binding)
     assert!(r.contains("let P { x } = "), "{r}");
-    // メソッド
+    // A method
     let r = apply(src, rename(&ws, 0, at(src, "get()", 0), "fetch", &no).unwrap());
     assert!(r.contains("fn fetch(&self)") && r.contains("p.fetch()"), "{r}");
-    // 名前にできないもの・変えられないもの
+    // What cannot be a name, and what cannot be changed
     assert!(rename(&ws, 0, at(src, "x: u8)", 0), "fn", &no).is_err());
     assert!(rename(&ws, 0, at(src, "x: u8)", 0), "1a", &no).is_err());
     assert!(rename(&ws, 0, at(src, "x: u8)", 0), "r#fn", &no).is_ok());
@@ -664,11 +664,11 @@ fn rename_refuses_library_and_file_modules() {
     let fi = FileIndex::new(src.to_string(), vec![]);
     let ws = [&lib, &m, &fi];
     assert!(prepare_rename(&ws, 2, at(src, "Vec", 0)).is_err());
-    // (use したライブラリのもの: 別名を付ける)
+    // (a library item brought in by use: give it an alias)
     let r = apply(src, rename(&ws, 2, at(src, "Mutex;", 0), "M", &no).unwrap());
     assert_eq!(r, "mod m;\nuse std::sync::Mutex as M;\nfn f(v: Vec, x: M) -> M { m::g(); x }\n");
     assert!(prepare_rename(&ws, 2, at(src, "Mutex)", 0)).is_err());
-    // (ワークスペースのものも、use の名前の上なら別名に)
+    // (a workspace item too, when on the name in the use: an alias)
     let src2 = "use crate::m::g;\nfn h() { g(); crate::m::g(); }\n";
     let f2 = FileIndex::new(src2.to_string(), vec![]);
     let ws2 = [&lib, &m, &f2];
@@ -692,7 +692,7 @@ fn signature_help_calls() {
     assert_eq!(ps, s(&["a: u8", "b: impl Fn(u8) -> u8"]));
     assert_eq!(a, 0);
     assert_eq!(sh("|x| x)", 0).unwrap().2, 1);
-    // (入れ子の呼び出しの中は内側、閉じた括弧の後は外側)
+    // (inside a nested call: the inner one; after the closing parenthesis: the outer one)
     let (sig, ps, a) = sh("(1, 2)]", 0).unwrap();
     assert!(sig.starts_with("fn g<T: Into<u8>>"), "{sig}");
     assert_eq!(ps, s(&["t: T", "v: Vec<(u8, u8)>"]));
@@ -706,7 +706,7 @@ fn signature_help_calls() {
     assert!(sh("p: P) {", 0).is_none());
 }
 
-/// cfg で外れたアイテムの中: rust-analyzer と同じく、外側のスコープから見えるアイテムへのパスだけ解決する
+/// Inside an item disabled by cfg: as in rust-analyzer, only paths to items visible from the outer scope are resolved
 #[test]
 fn inactive_code_paths_only() {
     let src = "pub struct P { pub x: u8 }
@@ -731,7 +731,7 @@ pub fn caller() { used(); }
     fi.apply_cfg(vec![]);
     let f = &fi;
     let d = |p: &str, n: usize| def1(f, at(src, p, n));
-    // パス: 外側のスコープで
+    // Paths: in the outer scope
     assert_eq!(d("used(); deep", 0), Some(at(src, "used()", 0)));
     assert_eq!(d("deep(); sub", 0), Some(at(src, "deep()", 0)));
     assert_eq!(d("deep(); P", 0), Some(at(src, "deep()", 0)));
@@ -740,22 +740,22 @@ pub fn caller() { used(); }
     assert_eq!(d("P { x: loc", 0), Some(at(src, "P {", 0)));
     assert_eq!(d("P::get", 0), Some(at(src, "P {", 0)));
     assert_eq!(d("used(); } }", 0), Some(at(src, "used()", 0)));
-    // ローカル・メソッド・フィールド・関連アイテム・外れたアイテムの名前は答えない
+    // No answer for the names of locals, methods, fields, associated items or disabled items
     for (p, n) in [("loc =", 0), ("loc + ", 0), ("get();", 0), ("get(&p)", 0), ("x: loc", 0), ("s.x", 0), ("p.get", 0), ("inact", 0), ("caller() {}", 0), ("used() {} fn k", 0)] {
         assert_eq!(d(p, n), None, "{p}");
     }
-    // 参照: used は定義・外れた inact の中・外れた gone の中・caller の中 (gone の中の `fn used` の名前は数えない)
+    // References: for used, the definition, inside the disabled inact, inside the disabled gone, and inside caller (the name of the `fn used` inside gone is not counted)
     let r = references(&[f], 0, at(src, "used()", 0), true, &no);
     assert_eq!(r.iter().map(|l| l.start).collect::<Vec<_>>(), vec![at(src, "used()", 0), at(src, "used(); deep", 0), at(src, "used(); } }", 0), at(src, "used(); }\n", 0)]);
-    // P: 定義・impl・外れた inact の中の 3 つ・gone の中の crate::P
+    // P: the definition, the impl, the 3 inside the disabled inact, and the crate::P inside gone
     assert_eq!(references(&[f], 0, at(src, "P {", 0), true, &no).len(), 6);
-    // フィールド x: 定義と self.x (外れた中の `x: loc` / `s.x` は数えない)
+    // The field x: the definition and self.x (`x: loc` / `s.x` inside the disabled code are not counted)
     assert_eq!(references(&[f], 0, at(src, "x: u8", 0), true, &no).len(), 2);
-    // hover も答える
+    // hover answers too
     assert!(hover(&[f], 0, at(src, "used(); deep", 0), &no).is_some_and(|h| h.contains("pub fn used()")));
 }
 
-/// trait の impl のメソッドの rename: ワークスペースの trait なら宣言と全部の impl、ライブラリの trait なら断る
+/// rename of a method of a trait impl: for a workspace trait, the declaration and all impls; for a library trait, refuse
 #[test]
 fn rename_trait_impl_methods() {
     let lib = FileIndex::library("pub trait Default { fn default() -> Self; }\n".to_string(), s(&["default"]));
@@ -765,14 +765,14 @@ fn rename_trait_impl_methods() {
                fn f(a: A, b: B) -> u8 { a.area() + b.area() }\nfn g() -> A { A::default() }\n";
     let fi = FileIndex::new(src.to_string(), vec![]);
     let ws = [&lib, &fi];
-    // impl A の area から: trait の宣言・impl B の area・両方の呼び出しも
+    // From the area of impl A: the trait's declaration, the area of impl B, and both calls too
     let r = apply(src, rename(&ws, 1, at(src, "area(&self) -> u8 { 1", 0), "size", &no).unwrap());
     assert_eq!(r.matches("size").count(), 5, "{r}");
     assert!(!r.contains("area"), "{r}");
-    // 呼び出しの上からも同じ
+    // The same when starting on a call
     let r2 = apply(src, rename(&ws, 1, at(src, "area() + b", 0), "size", &no).unwrap());
     assert_eq!(r, r2);
-    // ライブラリの trait の impl のメソッドは断る (宣言の上でも、呼び出しの上でも)
+    // A method of an impl of a library trait is refused (on the declaration and on a call alike)
     let e = prepare_rename(&ws, 1, at(src, "default() -> Self { A", 0)).unwrap_err();
     assert!(e.contains("Default"), "{e}");
     assert!(rename(&ws, 1, at(src, "default() }", 0), "make", &no).is_err());
@@ -785,18 +785,18 @@ fn rename_edges() {
     let fi = FileIndex::new(src.to_string(), vec![]);
     {
         let ws = [&lib, &fi];
-        // (キーワードの Self は型に解決されても変えない)
+        // (the keyword Self is not changed even though it resolves to the type)
         assert!(prepare_rename(&ws, 1, at(src, "Self {", 0)).is_err());
-        // (別名で取り込んだライブラリのもの: 別名の付いた use の上でも変えない)
+        // (a library item imported under an alias: not changed even on the aliased use)
         assert!(prepare_rename(&ws, 1, at(src, "Mutex as", 0)).is_err());
         assert!(rename(&ws, 1, at(src, "x: u8)", 0), "_", &no).is_err());
-        // 省略形 `P { x, y }`: カンマの前の x も
+        // The shorthand `P { x, y }`: the x before the comma too
         let r = apply(src, rename(&ws, 1, at(src, "x: u8)", 0), "z", &no).unwrap());
         assert!(r.ends_with("P { x: z, y } }\n"), "{r}");
         let r = apply(src, rename(&ws, 1, at(src, "y: u8 }", 0), "w", &no).unwrap());
         assert!(r.contains("Self { x: 1, w: 2 }") && r.ends_with("P { x, w: y } }\n"), "{r}");
     }
-    // メモリから外したファイル (slim) の中の参照も、読み直して書き換える
+    // References in a file dropped from memory (slim) are also reread and rewritten
     let other = "fn g() -> u8 { let p = P::new(); p.x }\n";
     let mut fo = FileIndex::new(other.to_string(), vec![]);
     fo.make_slim();
@@ -824,7 +824,7 @@ fn signature_help_edges() {
     let fi = FileIndex::new(src.to_string(), vec![]);
     let ws = [&fi];
     let sh = |p: &str, d: usize| signature_help(&ws, 0, at(src, p, 0) + d, &no).map(|(s, ps, a, _)| (ps.iter().map(|&(x, y)| s[x..y].to_string()).collect::<Vec<_>>(), a));
-    // (パスで呼ぶ `P::m(&p, ..)` は self も引数)
+    // (a call by path `P::m(&p, ..)` has self as a parameter too)
     assert_eq!(sh("1); p.n", 0), Some((s(&["&self", "a: u8"]), 1)));
     assert_eq!(sh("1); p.o", 0), Some((s(&["a: u8"]), 0)));
     assert_eq!(sh("1); p.q", 0), Some((s(&["a: u8"]), 0)));
@@ -832,9 +832,9 @@ fn signature_help_edges() {
     assert_eq!(sh("2); z", 0), Some((s(&["f: F", "g: u8"]), 1)));
     assert_eq!(sh("); y(", 0), Some((vec![], 0)));
     assert_eq!(sh("1); k", 0), Some((s(&["a: u8"]), 0)));
-    // (`[0; 3]` の `;` は文の終わりではない)
+    // (the `;` of `[0; 3]` is not the end of a statement)
     assert_eq!(sh("1); h(|x| {", 0), Some((s(&["a: [u8; 3]", "b: u8"]), 1)));
-    // (引数の中のブロックの中は答えない)
+    // (no answer inside a block inside an argument)
     assert_eq!(sh("x }, 1", 0), None);
 }
 
@@ -870,10 +870,10 @@ fn signature_help_closures_and_docs() {
     assert_eq!((sig.as_str(), ps), ("impl Fn(a) -> u8", s(&["a"])));
     let (sig, ps, _, _) = sh("); dbl").unwrap();
     assert_eq!((sig.as_str(), ps), ("impl Fn() -> u8", vec![]));
-    // doc コメントも
+    // The doc comment too
     let (sig, _, _, doc) = sh("v);").unwrap();
     assert_eq!((sig.as_str(), doc.as_str()), ("fn dbl(x: u8) -> u8", "二倍にする"));
-    // (クロージャでないローカルの呼び出しには答えない)
+    // (no answer for a call of a local that is not a closure)
     let src2 = "fn f(p: u8) { let q = p; q(1); }\n";
     let f2 = FileIndex::new(src2.to_string(), vec![]);
     assert!(signature_help(&[&f2], 0, at(src2, "1)", 0), &no).is_none());
@@ -888,13 +888,13 @@ fn literal_types() {
     for (p, want) in [("a =", "a: &str"), ("b =", "b: char"), ("c =", "c: &[u8]"), ("d =", "d: u8"), ("e =", "e: u8"), ("i =", "i: bool"), ("j =", "j: f32"), ("k =", "k: usize"), ("m =", "m: &str")] {
         assert!(ty(p).contains(want), "{p}: {}", ty(p));
     }
-    // 接尾辞のない数 (使い方で決まる)・タプルの添字・式の途中のリテラルは型にしない
+    // Numbers without a suffix (decided by their use), tuple indices and literals in the middle of an expression get no type
     for p in ["g =", "h =", "l =", "n =", "o =", "q ="] {
         assert!(!ty(p).contains(':'), "{p}: {}", ty(p));
     }
 }
 
-/// ライブラリのファイルの `pub use` (再エクスポート): 補完 `use std::sync::Mu|` と、パスの解決
+/// `pub use` (re-exports) in library files: the completion `use std::sync::Mu|`, and path resolution
 #[test]
 fn library_reexports() {
     let lib = FileIndex::library("#[stable]\npub use self::poison::{\n    Mutex, MutexGuard,\n};\nuse self::private::Hidden;\npub mod poison;\n".to_string(), s(&["sync"]));
@@ -907,7 +907,7 @@ fn library_reexports() {
     let (it, _) = complete(&ws, 3, at(src, "Mu;", 0) + 2);
     let labels: Vec<&str> = it.iter().map(|x| x.label.as_str()).collect();
     assert!(labels.contains(&"Mutex") && labels.contains(&"MutexGuard") && !labels.contains(&"Hidden"), "{labels:?}");
-    // (Mutex は再エクスポートをたどって sync::poison の方: nonpoison ではない)
+    // (Mutex follows the re-export to the sync::poison one, not nonpoison)
     assert_eq!(definition(&ws, 3, at(src, "Mutex)", 0)).first().map(|l| l.file), Some(1));
 }
 
@@ -923,13 +923,13 @@ fn literal_hovers() {
     assert!(h("xy", 0).unwrap().contains("&'static [u8; 2]"));
     assert!(h("z'", 0).unwrap().contains("char"));
     assert!(h("q'", 0).unwrap().contains("u8"));
-    // (書式の取り込み `{x}` の上はローカルの hover)
+    // (on a format capture `{x}`: the local's hover)
     assert!(h("x}", 0).unwrap().contains("x: u8"));
-    // (識別子の上はふつうの hover)
+    // (on an identifier: the ordinary hover)
     assert!(h("a =", 0).unwrap().contains("a: &str"));
 }
 
-/// クロージャの引数の型: 受け手の要素の型 (補完・hover・定義に効く)
+/// The types of closure parameters: the element type of the receiver (used by completion, hover and definition)
 #[test]
 fn closure_params_from_receivers() {
     let src = "struct D { a: u8 }\nimpl D { fn get(&self) -> u8 { self.a } }\n\
@@ -943,7 +943,7 @@ fn closure_params_from_receivers() {
     let fi = FileIndex::new(src.to_string(), vec![]);
     let ws = [&fi, &lib];
     let ty = |p: &str| hover(&ws, 0, at(src, p, 0), &no).unwrap();
-    // (`iter()` の要素は &D、filter の引数はその参照: rust-analyzer と同じ)
+    // (the element of `iter()` is &D, and filter's parameter is a reference to it: same as rust-analyzer)
     assert!(ty("d| d.a").contains("d: &&D"), "{}", ty("d| d.a"));
     assert!(ty("e| e").contains("e: &D"), "{}", ty("e| e"));
     assert!(ty("g| {").contains("g: D"), "{}", ty("g| {"));
@@ -951,31 +951,31 @@ fn closure_params_from_receivers() {
     assert!(ty("s| s").contains("s: String"), "{}", ty("s| s"));
     assert!(ty("h| acc").contains("h: &D"), "{}", ty("h| acc"));
     assert!(!ty("acc, h").contains(':'), "{}", ty("acc, h"));
-    // d.a のフィールド・e.get() のメソッドの定義
+    // The definitions of the field of d.a and the method of e.get()
     assert_eq!(definition(&ws, 0, at(src, "a > 0", 0)).first().map(|l| l.start), Some(at(src, "a: u8", 0)));
     assert_eq!(definition(&ws, 0, at(src, "get());", 0)).first().map(|l| l.start), Some(at(src, "get(&self)", 0)));
-    // 補完 `d.|`
+    // Completion `d.|`
     let (it, _) = complete(&ws, 0, at(src, "a > 0", 0));
     assert!(it.iter().any(|x| x.label == "a") && it.iter().any(|x| x.label == "get"), "{:?}", it.iter().map(|x| &x.label).collect::<Vec<_>>());
 }
 
-/// アイテムのキーワードの上 (`fn f` の fn): その名前の定義と参照
+/// On an item's keyword (the fn of `fn f`): the definition and references of its name
 #[test]
 fn keyword_of_item() {
     let src = "fn f() {}\nstruct S;\nfn g() { f(); let _ = S; }\n";
     let fi = FileIndex::new(src.to_string(), vec![]);
     let ws = [&fi];
     assert_eq!(def1(&fi, 0), Some(3));
-    // (`fn` の上の参照は関数の出口: rust-analyzer と同じ。`fn f() {}` は fn だけ)
+    // (references on `fn` are the fn's exit points: same as rust-analyzer; `fn f() {}` has only fn)
     assert_eq!(references(&ws, 0, 0, true, &no).len(), 1);
     assert_eq!(references(&ws, 0, at(src, "f()", 0), true, &no).len(), 2);
     assert_eq!(def1(&fi, at(src, "struct", 0)), Some(at(src, "S;", 0)));
     assert_eq!(highlights(&ws, 0, at(src, "struct", 0), &no).len(), 2);
-    // (キーワードでない所はそのまま)
+    // (places that are not keywords are unchanged)
     assert_eq!(def1(&fi, at(src, "let", 0)), None);
 }
 
-/// `fn` のキーワードの上: 関数の出口 (fn・return・?・最後の式)
+/// On the `fn` keyword: the fn's exit points (fn, return, ?, the last expression)
 #[test]
 fn exit_points_of_fn() {
     let src = "fn f(x: Option<u8>) -> Option<u8> {\n    let y = x?;\n    if y > 3 {\n        return None;\n    }\n    fn inner() -> Option<u8> { None? }\n    Some(y + 1)\n}\nfn g() { h(); }\nfn k() -> u8 { if true { 1 } else { 2 } }\n";
@@ -984,7 +984,7 @@ fn exit_points_of_fn() {
     let ex = |p: &str| highlights(&ws, 0, at(src, p, 0), &no).iter().map(|l| src[l.start..l.end].to_string()).collect::<Vec<_>>();
     assert_eq!(ex("fn f"), s(&["fn", "?", "return", "Some(y + 1)"]));
     assert_eq!(ex("fn g"), s(&["fn"]));
-    // (最後の式が if / match なら、その中の各ブロック・各腕の最後の式: rust-analyzer と同じ)
+    // (when the last expression is an if / match, the last expression of each block / each arm in it: same as rust-analyzer)
     assert_eq!(ex("fn k"), s(&["fn", "1", "2"]));
     let src2 = "fn m(x: u8) -> u8 {\n    match x {\n        0 => 1,\n        1 => { let y = 2; y }\n        _ => match x { 2 => 3, _ => 4 },\n    }\n}\n";
     let f2 = FileIndex::new(src2.to_string(), vec![]);
@@ -993,7 +993,7 @@ fn exit_points_of_fn() {
     assert_eq!(got, s(&["fn", "1", "y", "3", "4"]));
 }
 
-/// `thread_local! { static X: .. }` の static
+/// The statics of `thread_local! { static X: .. }`
 #[test]
 fn thread_local_statics() {
     let src = "thread_local! {\n    /// 覚え\n    static MEMO: RefCell<u8> = RefCell::new(0);\n    pub static OTHER: u8 = 1;\n}\nfn f() { MEMO.with(|m| m); OTHER.with(|o| o); }\n";
@@ -1014,18 +1014,18 @@ fn fn_bounds_of_signatures() {
     assert_eq!(b("pub fn map<U, F>(self, f: F) -> Option<U> where F: FnOnce(T) -> U"), s(&["0:F:U"]));
     assert_eq!(b("fn map<B, F>(self, f: F) -> Map<Self, F> where Self: Sized, F: FnMut(Self::Item) -> B,"), s(&["0:F:B"]));
     assert_eq!(b("pub const fn and_then<U, F: [const] FnOnce(T) -> Option<U> + [const] Destruct>(self, f: F) -> Option<U>"), s(&["0:F:Option<U>"]));
-    // (`init: B` は型引数そのものの引数: 印は "=")
+    // (`init: B` is a parameter whose type is the type parameter itself: the mark is "=")
     assert_eq!(b("fn fold<B, F>(mut self, init: B, f: F) -> B where F: FnMut(B, Self::Item) -> B"), s(&["0:B:=", "1:F:B"]));
     assert_eq!(b("fn for_each<F: FnMut(Self::Item)>(self, f: F)"), s(&["0:F:()"]));
     assert_eq!(b("pub fn unwrap_or_else(self, op: impl FnOnce(E) -> T) -> T"), s(&["0::T"]));
     assert_eq!(b("fn find<P>(&mut self, predicate: P) -> Option<Self::Item> where P: FnMut(&Self::Item) -> bool"), s(&["0:P:bool"]));
     assert_eq!(b("fn len(&self) -> usize"), Vec::<String>::new());
-    // (長いシグネチャを途中で切ったもの: 落ちない)
+    // (a long signature cut off midway: does not crash)
     assert_eq!(b("fn g<F: FnMut(u8, …"), Vec::<String>::new());
     assert_eq!(b("fn h<F>(f: F) where F: Fn(&[u8; 4], …"), s(&["0:F:="]));
 }
 
-/// 繰り返しの要素の型・射影の置き換え・タプル
+/// Iterator element types, projection substitution, tuples
 #[test]
 fn iterator_items_and_projections() {
     assert_eq!(iter_item("Iter<'_, D>").as_deref(), Some("&D"));
@@ -1048,7 +1048,7 @@ fn iterator_items_and_projections() {
     assert_eq!(b, vec![("U".to_string(), "char".to_string())]);
 }
 
-/// タプルの添字の後の添字・メソッド (`u.1[0].as_str()`) とクロージャの戻り値からの型引数 (`a.map(|u| ..)`)
+/// Indexing / methods after a tuple index (`u.1[0].as_str()`) and type arguments from a closure's return value (`a.map(|u| ..)`)
 #[test]
 fn tuple_index_and_closure_returns() {
     let lib = FileIndex::library("pub struct String;\nimpl String { pub fn as_str(&self) -> &str { todo!() } }\npub enum Option<T> { Some(T), None }\nimpl<T> Option<T> { pub fn map<U, F>(self, f: F) -> Option<U> where F: FnOnce(T) -> U { todo!() } }\n".to_string(), s(&["x"]));
@@ -1061,7 +1061,7 @@ fn tuple_index_and_closure_returns() {
     }
 }
 
-/// HashMap の繰り返しとタプルのパターン・タプルの式 (`m.iter().map(|(k, x)| (k.len(), x.len())).next()`)
+/// HashMap iteration and tuple patterns / tuple expressions (`m.iter().map(|(k, x)| (k.len(), x.len())).next()`)
 #[test]
 fn map_iteration_and_tuples() {
     let lib = FileIndex::library("pub struct HashMap<K, V> { k: K, v: V }\nimpl<K, V> HashMap<K, V> { pub fn iter(&self) -> Iter<'_, K, V> { todo!() } }\npub struct Iter<'a, K, V> { k: &'a K, v: V }\npub struct Map<I, F> { i: I, f: F }\npub trait Iterator { type Item; fn map<B, F>(self, f: F) -> Map<Self, F> where F: FnMut(Self::Item) -> B { todo!() } fn next(&mut self) -> Option<Self::Item>; }\npub struct String;\nimpl String { pub fn len(&self) -> usize { 0 } }\n".to_string(), s(&["x"]));
@@ -1074,7 +1074,7 @@ fn map_iteration_and_tuples() {
     }
 }
 
-/// シグネチャの束縛からのクロージャの引数の型 (`KEY.with(|m| ..)` の m: &T)、関数を入れたローカルの signatureHelp
+/// Closure parameter types from a signature's bounds (the m: &T of `KEY.with(|m| ..)`), and signatureHelp for a local holding a fn
 #[test]
 fn closure_params_from_signatures() {
     let lib = FileIndex::library("pub struct LocalKey<T> { t: T }\nimpl<T: 'static> LocalKey<T> { pub fn with<F, R>(&'static self, f: F) -> R where F: FnOnce(&T) -> R { todo!() } }\npub struct Cell<T> { t: T }\nimpl<T> Cell<T> { pub fn get(&self) -> T { todo!() } }\n".to_string(), s(&["x"]));
@@ -1088,7 +1088,7 @@ fn closure_params_from_signatures() {
     assert_eq!((sig.as_str(), ps.len(), a), ("fn rank(d: &u8, e: u16) -> usize", 2, 1));
 }
 
-/// 配列の式の型
+/// Types of array expressions
 #[test]
 fn array_literal_types() {
     let src = "struct K;\nfn f() {\n    let a = [K, K];\n    let b = [0u8; 4];\n    let c = [\"x\", \"y\", \"z\",];\n    let d = a[0];\n}\n";
@@ -1100,7 +1100,7 @@ fn array_literal_types() {
     }
 }
 
-/// 型引数の束縛の trait のメソッド (`impl<T: Clone>` の `x.clone()`、`where T: Show`)
+/// Methods of the traits in a type parameter's bounds (the `x.clone()` of `impl<T: Clone>`, `where T: Show`)
 #[test]
 fn methods_of_bounded_type_params() {
     let src = "trait Show { fn show(&self) -> u8; }\ntrait Dup { fn dup(&self) -> Self; }\nstruct W<T> { inner: T }\n\
@@ -1112,7 +1112,7 @@ fn methods_of_bounded_type_params() {
     assert_eq!(fi.param_bounds(at(src, "u.show", 0), "U"), s(&["Show", "Sized"]));
 }
 
-/// match / if / ブロックの式の型
+/// Types of match / if / block expressions
 #[test]
 fn match_and_if_expression_types() {
     let src = "struct A;\nstruct B;\nfn g() -> A { A }\nfn f(o: Option<A>, c: bool) {\n    let a = match o { Some(v) if c => v, _ => { let z = 1; g() } };\n    let b = if c { B } else { B };\n    let d = if c { 1u8 } else if !c { 2 } else { 3 };\n    let e = { let y = 2u16; y };\n    let h = match o { None => panic!(), Some(_) => g() };\n}\n";
@@ -1124,7 +1124,7 @@ fn match_and_if_expression_types() {
     }
 }
 
-/// ローカルのクロージャの呼び出しの型と、`for (i, x) in ..` のタプルのパターン
+/// Types of calls of local closures, and the tuple pattern of `for (i, x) in ..`
 #[test]
 fn local_closure_calls_and_for_tuples() {
     let lib = FileIndex::library("pub struct Vec<T> { b: T }\nimpl<T> Vec<T> { pub fn iter(&self) -> Iter<'_, T> { todo!() } }\npub struct Iter<'a, T> { r: &'a T }\npub struct Enumerate<I> { i: I }\npub trait Iterator { type Item; fn enumerate(self) -> Enumerate<Self> { todo!() } }\n".to_string(), s(&["x"]));
@@ -1138,7 +1138,7 @@ fn local_closure_calls_and_for_tuples() {
     assert_eq!(definition(&ws, 0, at(src, "n; }", 0)).first().map(|l| l.start), Some(at(src, "n: u8", 0)));
 }
 
-/// 引数の多い関数のシグネチャも切らない (戻り値の型を取れるように)
+/// The signatures of fns with many parameters are not cut off either (so that the return type can be taken)
 #[test]
 fn long_signatures_keep_return_type() {
     let src = "fn long_one(aaaaaaaaaa: &[(String, Vec<String>)], bbbbbbbbbb: &[String], cccccccccc: &str, dddddddddd: &[(usize, u8)], eeeeeeeeee: u32) -> Option<Vec<u8>> { None }\nfn f() { let z = long_one(&[], &[], \"\", &[], 0); }\n";
@@ -1147,7 +1147,7 @@ fn long_signatures_keep_return_type() {
     assert!(hover(&ws, 0, at(src, "z =", 0), &no).unwrap().contains("z: Option<Vec<u8>>"));
 }
 
-/// `let (a, b) = ..;` のタプルのパターン
+/// The tuple pattern of `let (a, b) = ..;`
 #[test]
 fn let_tuple_patterns() {
     let src = "struct A;\nfn g() -> (A, u8) { todo!() }\nfn f() {\n    let (a, n) = g();\n    let (x, (y, z)): (u8, (A, u16)) = todo!();\n    let (p, q) = (1u8, A);\n}\n";
@@ -1159,7 +1159,7 @@ fn let_tuple_patterns() {
     }
 }
 
-/// `Some((a, b))` / `Ok(x)` / `Err(e)` のパターンの束縛
+/// The bindings of the patterns `Some((a, b))` / `Ok(x)` / `Err(e)`
 #[test]
 fn wrapped_tuple_patterns() {
     let src = "struct P;\nfn g() -> Option<(P, u8)> { None }\nfn h() -> Result<u16, P> { todo!() }\nfn f() {\n    while let Some((a, n)) = g() {}\n    if let Ok(x) = h() {}\n    let Err(e) = h() else { return };\n}\n";
@@ -1171,7 +1171,7 @@ fn wrapped_tuple_patterns() {
     }
 }
 
-/// パターンの入れ子 (match の腕・let・if let・for のタプル・バリアント・構造体・スライス)
+/// Nested patterns (tuples / variants / structs / slices in match arms, let, if let and for)
 #[test]
 fn nested_pattern_types() {
     let src = "struct A;\nstruct S { f: u8, g: A }\nenum E { V(u16, A), W { x: char } }\nstruct P(u32, S);\n\
@@ -1192,7 +1192,7 @@ fn nested_pattern_types() {
     }
 }
 
-/// このファイルの macro_rules の呼び出しの型 (本体のブロックの最後の式)
+/// Types of calls of this file's macro_rules (the last expression of the body block)
 #[test]
 fn macro_call_types() {
     let src = "struct V;\nfn f(xs: Vec<u8>) {\n    macro_rules! vs {\n        ($xs:expr) => {{\n            let mut out: Vec<V> = vec![];\n            for x in $xs.iter() {}\n            out\n        }};\n    }\n    let a = vs!(xs);\n}\n";
@@ -1201,7 +1201,7 @@ fn macro_call_types() {
     assert!(hover(&ws, 0, at(src, "a =", 0), &no).unwrap().contains("a: Vec<V>"), "{:?}", hover(&ws, 0, at(src, "a =", 0), &no));
 }
 
-/// `if let PAT = EXPR` の右の名前は、パターンの束縛ではなく外の束縛
+/// A name on the right of `if let PAT = EXPR` is the outer binding, not the pattern's binding
 #[test]
 fn if_let_rhs_scope() {
     let src = "fn f(req: Option<u8>) {\n    if let (Some(req), Some(bh)) = (req, Some(1u8)) { req; }\n    for x in x_of(x) {}\n}\n";
@@ -1211,7 +1211,7 @@ fn if_let_rhs_scope() {
     assert_eq!(def1(&fi, at(src, "x) {}", 0)), None);
 }
 
-/// 腕の頭の束縛 (`s if .. =>`) と、要素の分からない Vec の後の使い方
+/// Bindings in an arm's head (`s if .. =>`), and the later uses of a Vec whose element type is unknown
 #[test]
 fn arm_bindings_and_refined_vecs() {
     let src = "struct A;\nfn g() -> Vec<A> { vec![] }\nfn f(x: Option<u8>) {\n    match x { s if s.is_some() => {}, _ => {} }\n    let mut v = vec![];\n    v.push(A);\n    let mut w = Vec::new();\n    w = g();\n}\n";
@@ -1297,9 +1297,9 @@ fn prefix_ops_ranges_cfg_names_and_macro_calls() {
     for (p, want) in [("a =", "a: &B"), ("b =", "b: &B"), ("k in", "k: usize"), ("j in", "j: i32")] {
         assert!(ty(p).contains(want), "{p}: {}", ty(p));
     }
-    // (`vec!()` はマクロ (mod vec ではない))
+    // (`vec!()` is the macro (not mod vec))
     let d = definition(&ws, 0, at(src, "vec!()", 0));
     assert_eq!(d.first().map(|l| l.start), Some(at(src, "vec { ()", 0)));
-    // (`#[cfg(test)]` の test は fn test を指さない)
+    // (the test of `#[cfg(test)]` does not point to fn test)
     assert!(definition(&ws, 0, at(src, "test)]", 0)).is_empty());
 }

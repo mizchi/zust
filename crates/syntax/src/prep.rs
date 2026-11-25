@@ -1,25 +1,25 @@
-//! 前処理 (thread_local! の展開・マクロの展開・`mod` を平らにする・入れ子のアイテムの移動・コンストラクタの書き換え) を、
-//! 編集をまたいでチャンクごとに覚えて差分で作る (LSP の didChange で、変わっていない所を作り直さない)。
+//! Preprocessing (expanding thread_local!, expanding macros, flattening `mod`, moving nested items, rewriting constructors), done incrementally
+//! by remembering it per chunk across edits (on LSP didChange, the parts that did not change are not rebuilt).
 //!
-//! - チャンク: アイテムの境界 (`mod` / `impl` / `trait` の中も) で切った行の範囲。境界は、`}` / `;` / 開き `{` の後で、
-//!   空白だけの行頭から始まるトークンの前。
-//! - 前処理はどれも、ファイル全体から集めたもの (マクロの定義・タプル struct とバリアントの要素数・モジュールの木と `use`・
-//!   入れ子のアイテムの名前) を使ってトークンごとに書き換え、行の数を変えない (移したアイテムは末尾に足す)。
-//!   集めるものはアイテムの宣言にしか依らないので、関数の本体の中の式を空白にした「骨組み」(入れ子のアイテム・`use`・
-//!   `macro_rules!`・ユーザのマクロの呼び出しと、括弧と `;` は残す。行の数は同じ) から同じものが集まる。
-//! - 骨組みの全体が前回と同じなら、変わっていないチャンクの結果は前回のものを使い、変わったチャンクだけを、ほかを骨組みに
-//!   したソースで前処理して行で切り出す。骨組みが変わったら (宣言を変えた) 全体を前処理し直す。
-//! - `ZUSTC_PREP_VERIFY=1` で毎回全体の前処理と比べる。`ZUSTC_NO_PREP_INC=1` で差分を使わない。
+//! - Chunk: a range of lines cut at item boundaries (inside `mod` / `impl` / `trait` too). A boundary is after `}` / `;` / an opening `{`,
+//!   before a token that begins a line (with only whitespace before it).
+//! - Every preprocessing step rewrites token by token using what is collected from the whole file (macro definitions, element counts of tuple structs and variants, the module tree and `use`s,
+//!   names of nested items), and does not change the number of lines (moved items are appended at the end).
+//!   What is collected depends only on item declarations, so the same things are collected from a "skeleton" with the expressions inside fn bodies blanked out (nested items, `use`s,
+//!   `macro_rules!`, calls of user macros, and brackets and `;` are kept; the number of lines is the same).
+//! - If the whole skeleton is the same as last time, unchanged chunks use the previous results, and only the changed chunks are preprocessed in a source where the rest is turned into
+//!   skeleton, and cut out by lines. If the skeleton changed (a declaration changed), the whole is preprocessed again.
+//! - `ZUSTC_PREP_VERIFY=1` compares with a full preprocessing every time. `ZUSTC_NO_PREP_INC=1` does not use the incremental path.
 
 use crate::fxhash::FxMap;
 use crate::lexer;
 
 pub type R<T> = Result<T, String>;
 
-/// 前処理の結果
+/// The result of preprocessing
 pub struct Prep {
     pub text: String,
-    /// 入れ子のアイテムを末尾に移したとき: 移したアイテムの (入力での開始行 (0 始まり), 改行の数)
+    /// When nested items were moved to the end: (start line in the input (0-based), number of newlines) of each moved item
     pub moved: Option<Vec<(usize, usize)>>,
 }
 
@@ -48,7 +48,7 @@ fn mix(h: u64, x: u64) -> u64 {
     h ^ (h >> 29)
 }
 
-/// 全体を前処理する (with_prelude_in のもともとの順)
+/// Preprocesses the whole (in with_prelude_in's original order)
 pub fn prep_full(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: Option<&crate::cfg::CfgSet>) -> R<Prep> {
     // (ZUSTC_PROF: the time of each of its stages, under `prep`)
     let mut tm = crate::prof::Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: crate::prof::now_ns(), start: 0 };
@@ -79,7 +79,7 @@ pub fn prep_full(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, c
             if parts.is_empty() {
                 Some(body)
             } else {
-                // (移したものの開始行: 本文は入力と同じ行の並び)
+                // (Start lines of the moved ones: the body has the same sequence of lines as the input)
                 let bb = body.as_bytes();
                 let mut info = vec![];
                 let mut out = body.clone().into_bytes();
@@ -156,8 +156,8 @@ fn file_start(src: &str) -> Option<String> {
     Some(out)
 }
 
-/// チャンクの結果: 本文の行 (改行込み)、末尾に移したアイテム (チャンクの中の行, テキスト)、桁のずれ (行はチャンクの先頭からの
-/// 0 始まり)
+/// The result of a chunk: lines of the body (with newlines), items moved to the end (line within the chunk, text), column shifts (lines are counted from the start of the chunk,
+/// 0-based)
 struct ChunkOut {
     text: String,
     pieces: Vec<(usize, String)>,
@@ -257,41 +257,41 @@ pub fn hoisted_line(text: &str, line: usize) -> Option<usize> {
 
 #[derive(Default)]
 pub struct PrepMemo {
-    /// 呼ばれた回数 (1 回目は全体を前処理するだけ: 1 度しか前処理しないビルドでチャンクの記録を作らない)
+    /// Number of calls (the first one only preprocesses the whole: a build that preprocesses only once does not record chunks)
     calls: u32,
-    /// crates と cfg
+    /// crates and cfg
     key: u64,
-    /// 骨組みの全体のハッシュ
+    /// Hash of the whole skeleton
     fp: u64,
-    /// チャンクのハッシュ → その中で定義したマクロの名前
+    /// Chunk hash → names of the macros defined in it
     names: FxMap<u64, Vec<String>>,
-    /// (チャンクのハッシュ, マクロの名前の集合のハッシュ) → (骨組み, そのハッシュ)
+    /// (chunk hash, hash of the set of macro names) → (skeleton, its hash)
     skel: FxMap<(u64, u64), (String, u64)>,
-    /// 前回の入力とチャンクの開始位置 (位置, 囲むもののハッシュ, 階層)
+    /// The previous input and the chunk start positions (position, hash of what encloses it, levels)
     chunks: Option<(String, Vec<(usize, u64, Levels)>, bool)>,
-    /// (チャンクのハッシュ, 囲むもの (mod / impl / trait) のハッシュ, 同じものの何番目か) → 結果
+    /// (chunk hash, hash of what encloses it (mod / impl / trait), index among identical ones) → result
     out: FxMap<(u64, u64, u32), ChunkOut>,
 }
 
-/// チャンクの開始位置 (byte) と、囲むもの (mod の名前の列・impl / trait) のハッシュ
+/// Chunk start position (byte), and the hash of what encloses it (the sequence of mod names / impl / trait)
 type Levels = Vec<(i32, u64)>;
 
-/// src[from..to] (from はチャンクの境界、levels はそこでの階層) のチャンクの開始位置 (from を含む) と、終わりの階層。
-/// 終わりがアイテムの間でなければ (と、コメント・文字列が開いたままかもしれなければ) 終わりの階層は None
+/// The chunk start positions (including from) of src[from..to] (from is a chunk boundary, levels the levels there), and the levels at the end.
+/// If the end is not between items (or a comment / string may still be open), the levels at the end are None
 fn chunk_range(src: &str, from: usize, to: usize, init: Levels) -> (Vec<(usize, u64, Levels)>, Option<Levels>) {
     let s = &src.as_bytes()[..to];
     let toks0 = lexer::tokenize(&s[from..]);
     let toks: Vec<(u8, usize, usize)> = toks0.iter().map(|t| (t.0, t.1 + from, t.2 + from)).collect();
-    // (階層: (中の波括弧の深さ, 囲むもののハッシュ))
+    // (Levels: (depth of the braces inside, hash of what encloses))
     let mut levels: Levels = init;
     let first_ctx = levels[levels.len() - 1].1;
     let mut out: Vec<(usize, u64, Levels)> = vec![(from, first_ctx, levels.clone())];
     let mut depth = levels[levels.len() - 1].0;
     let mut pd = 0i32;
-    // アイテムの間にいるか、直前のトークンが `}` / `;` / 階層を開く `{` か
+    // Whether we are between items, whether the previous token is `}` / `;` / a `{` that opens a level
     let mut at_b = true;
     let mut prev_ok = true;
-    // アイテムの先頭の語 (pub / unsafe / async を除く)、mod の名前、fn を見たか
+    // The first word of the item (excluding pub / unsafe / async), the mod's name, whether fn was seen
     let mut head: Vec<u8> = vec![];
     let mut mod_name: Vec<u8> = vec![];
     let mut want_name = false;
@@ -301,7 +301,7 @@ fn chunk_range(src: &str, from: usize, to: usize, init: Levels) -> (Vec<(usize, 
         let (kind, a, b) = toks[k];
         let lvl = levels[levels.len() - 1];
         if at_b && prev_ok && pd == 0 && depth == lvl.0 && k > 0 {
-            // (行頭からこのトークンまで空白だけなら、行頭が境界)
+            // (If only whitespace lies from the line start to this token, the line start is a boundary)
             let mut ls = a;
             while ls > 0 && s[ls - 1] != b'\n' {
                 ls -= 1;
@@ -401,7 +401,7 @@ fn chunk_range(src: &str, from: usize, to: usize, init: Levels) -> (Vec<(usize, 
         None => from,
     };
     let mut clean = at_b && prev_ok && pd == 0 && depth == lvl.0;
-    // (最後のトークンの後ろは空白と `//` のコメントだけ)
+    // (After the last token, only whitespace and `//` comments)
     let g = &s[last_end..];
     let mut i = 0;
     while i < g.len() && clean {
@@ -418,8 +418,8 @@ fn chunk_range(src: &str, from: usize, to: usize, init: Levels) -> (Vec<(usize, 
     (out, if clean { Some(levels) } else { None })
 }
 
-/// チャンクの開始位置と、囲むもののハッシュ (前回の結果があれば、変わった所の周りだけ切り直す)
-/// 2 つ目は、全体の括弧が釣り合っているか (釣り合っていないソースでは差分を使わない)
+/// Chunk start positions and the hashes of what encloses them (with a previous result, only re-cuts around the changed part)
+/// The second is whether the brackets of the whole balance (the incremental path is not used for unbalanced sources)
 fn chunk_starts(src: &str, memo: &mut Option<(String, Vec<(usize, u64, Levels)>, bool)>) -> (Vec<(usize, u64)>, bool) {
     let r = match memo.as_ref() {
         Some((old, st, bal)) => chunk_diff(old, st, src).map(|v| (v, *bal)),
@@ -452,13 +452,13 @@ fn chunk_diff(old: &str, st: &[(usize, u64, Levels)], new: &str) -> Option<Vec<(
     while suf < lim - pre && p[p.len() - 1 - suf] == n[n.len() - 1 - suf] {
         suf += 1;
     }
-    // 前: 次の境界が変わった所より前のチャンク
+    // Front: the chunks whose next boundary is before the changed part
     let mut j = 0;
     while j + 1 < st.len() && st[j + 1].0 <= pre {
         j += 1;
     }
     let a = st[j].0;
-    // 後ろ: 変わった所より後から始まる最初の境界
+    // Back: the first boundary that starts after the changed part
     let chg_end = p.len() - suf;
     let m = st.iter().position(|x| x.0 > chg_end && x.0 > a);
     let (b_old, tail) = match m {
@@ -471,7 +471,7 @@ fn chunk_diff(old: &str, st: &[(usize, u64, Levels)], new: &str) -> Option<Vec<(
     }
     let (mid, end) = chunk_range(new, a, b_new, st[j].2.clone());
     if tail < st.len() {
-        // (切り直した所の終わりが、後ろの最初のチャンクの始まりと同じ階層でなければ使わない)
+        // (Not used unless the end of the re-cut part is at the same levels as the start of the first chunk behind it)
         if end.as_ref() != Some(&st[tail].2) {
             return None;
         }
@@ -485,7 +485,7 @@ fn chunk_diff(old: &str, st: &[(usize, u64, Levels)], new: &str) -> Option<Vec<(
     Some(out)
 }
 
-/// チャンクの中で定義したマクロの名前
+/// Names of the macros defined in a chunk
 fn macro_names(t: &str) -> Vec<String> {
     let mut v = vec![];
     if !t.contains("macro_rules") {
@@ -503,8 +503,8 @@ fn macro_names(t: &str) -> Vec<String> {
     v
 }
 
-/// 骨組み: 関数の本体の中の、アイテム・ユーザのマクロ (と thread_local!) の呼び出し・括弧・`;` でないトークンを消す。
-/// 改行の数は同じ (消したトークンや空白の中の改行は残す)
+/// Skeleton: within fn bodies, removes the tokens that are not items / calls of user macros (and thread_local!) / brackets / `;`.
+/// The number of newlines stays the same (newlines inside removed tokens and whitespace are kept)
 fn skeleton(t: &str, names: &[String]) -> String {
     let s = t.as_bytes();
     let toks = lexer::tokenize(s);
@@ -514,10 +514,10 @@ fn skeleton(t: &str, names: &[String]) -> String {
     let mut depth = 0i32;
     let mut pending_fn = false;
     let mut bodies: Vec<i32> = vec![];
-    // (アイテムやマクロの呼び出しの終わりのトークン)
+    // (The last token of an item or a macro call)
     let end_of = |k: usize, mac: bool| -> usize {
         if mac {
-            // (k + 2 が開き括弧)
+            // (k + 2 is the opening bracket)
             let mut d = 0i32;
             let mut j = k + 2;
             while j < n {
@@ -568,10 +568,10 @@ fn skeleton(t: &str, names: &[String]) -> String {
         }
         n - 1
     };
-    // (本体ごとの (開きのトークン, 閉じのトークン, 残すものがあるか))
+    // ((opening token, closing token, whether something is kept) per body)
     let mut spans: Vec<(usize, usize, bool)> = vec![];
     let mut open_at: Vec<usize> = vec![];
-    // const / static の初期化式 (`=` から `;` まで): ユーザのマクロの呼び出しのほかは消す
+    // Initializer expressions of const / static (from `=` to `;`): removed except for calls of user macros
     let mut init_start: usize = 0;
     let mut init_end: usize = 0;
     let mut k = 0;
@@ -594,7 +594,7 @@ fn skeleton(t: &str, names: &[String]) -> String {
                 && (is_sym(k + 2, b'(') || is_sym(k + 2, b'[') || is_sym(k + 2, b'{'))
                 && (w == b"thread_local" || names.iter().any(|x| x.as_bytes() == w));
             if (stmt_start && item_kw) || mac {
-                // (残す。中の波括弧は釣り合っているので深さは変わらない)
+                // (Kept. The braces inside balance, so the depth does not change)
                 if let Some(sp) = spans.last_mut() {
                     if in_body {
                         sp.2 = true;
@@ -615,7 +615,7 @@ fn skeleton(t: &str, names: &[String]) -> String {
                 blank[k] = true;
             }
         } else if toks[k].0 == 0 && depth == 0 && k >= init_end {
-            // (チャンクのいちばん外の const / static の初期化式: `=` の次から `;` の前まで)
+            // (The initializer of a const / static at the outermost level of the chunk: from after `=` to before `;`)
             let w = &s[toks[k].1..toks[k].2];
             let is_fn = k + 1 < n && toks[k + 1].0 == 0 && &s[toks[k + 1].1..toks[k + 1].2] == b"fn";
             if (w == b"const" || w == b"static") && !is_fn {
@@ -690,7 +690,7 @@ fn skeleton(t: &str, names: &[String]) -> String {
         }
         k += 1;
     }
-    // (残すもののない本体は、括弧も含めて中を全部消す)
+    // (For a body with nothing to keep, remove everything inside, brackets included)
     for &(o, c, has) in &spans {
         if !has && c < n {
             let mut m = o + 1;
@@ -742,8 +742,8 @@ fn skeleton(t: &str, names: &[String]) -> String {
     String::from_utf8(out).unwrap_or_else(|_| t.to_string())
 }
 
-/// 前処理の結果をチャンク (lines: 各チャンクの開始行 (0 始まり)、最後は全体の行数) ごとに分ける。
-/// 行の数が入力と合わなければ None
+/// Splits the result of preprocessing per chunk (lines: each chunk's start line (0-based), the last is the total line count).
+/// None if the number of lines does not match the input
 fn split_out(p: &Prep, lines: &[usize], fix: &[(u32, u32, i32)], want: &[bool]) -> Option<Vec<Option<ChunkOut>>> {
     let total = lines[lines.len() - 1];
     let b = p.text.as_bytes();
@@ -753,7 +753,7 @@ fn split_out(p: &Prep, lines: &[usize], fix: &[(u32, u32, i32)], want: &[bool]) 
             nls.push(i);
         }
     }
-    // (本文: 入力の行の数だけ。移したものがあれば、その次の改行から後ろ)
+    // (Body: as many lines as the input. If things were moved, they come after the newline that follows it)
     let (body_end, tail) = match &p.moved {
         Some(info) => {
             let sep = *nls.get(total - 1)?;
@@ -762,7 +762,7 @@ fn split_out(p: &Prep, lines: &[usize], fix: &[(u32, u32, i32)], want: &[bool]) 
             let mut at = 0usize;
             let tb = t.as_bytes();
             for &(line, nl) in info {
-                // (nl 個の改行を含む部分と、続く区切りの改行)
+                // (The part containing nl newlines, and the separating newline that follows)
                 let mut e = at;
                 let mut seen = 0;
                 while e < tb.len() && !(tb[e] == b'\n' && seen == nl) {
@@ -799,7 +799,7 @@ fn split_out(p: &Prep, lines: &[usize], fix: &[(u32, u32, i32)], want: &[bool]) 
         let mut c = ChunkOut { text: p.text[a..e].to_string(), pieces: vec![], fix: vec![] };
         for (line, t) in &tail {
             if *line >= l0 && *line < l1 {
-                // (移したものがチャンクの外まで続くなら使わない)
+                // (Not used if a moved item runs past the end of the chunk)
                 if *line + count_nl(t.as_bytes()) >= l1 {
                     return None;
                 }
@@ -1142,7 +1142,7 @@ pub fn moved_lines(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet
     prep_full(src, crates, &mut vec![], cfg).ok()?.moved
 }
 
-/// 前処理 (差分)。fix には桁のずれを足す
+/// Preprocessing (incremental). Column shifts are added to fix
 pub fn prep(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: Option<&crate::cfg::CfgSet>, memo: &mut PrepMemo) -> R<String> {
     memo.calls += 1;
     let start = file_start(src);
@@ -1181,7 +1181,7 @@ pub fn prep(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: O
     Ok(text)
 }
 
-/// 差分の前処理: (本文, 桁のずれ)。前処理が失敗したら Err、使えなければ Ok(None) (呼ぶ側が全体を前処理する)
+/// Incremental preprocessing: (body, column shifts). Err if preprocessing fails, Ok(None) if it cannot be used (the caller preprocesses the whole)
 fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo: &mut PrepMemo) -> R<Option<(String, Vec<(u32, u32, i32)>)>> {
     let mut key = FNV0;
     for c in crates {
@@ -1205,7 +1205,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
         eprintln!("prep: {} chunks", starts.len());
     }
     let sb = src.as_bytes();
-    // (チャンクの開始行と、全体の行数)
+    // (Chunk start lines, and the total line count)
     let mut lines: Vec<usize> = Vec::with_capacity(starts.len() + 1);
     let mut line = 0usize;
     let mut at = 0usize;
@@ -1224,7 +1224,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
     for j in 0..nchunk {
         hs.push(fnv(FNV0, text_of(j).as_bytes()));
     }
-    // マクロの名前
+    // Macro names
     let mut names: Vec<String> = vec![];
     let mut new_names: FxMap<u64, Vec<String>> = FxMap::default();
     for j in 0..nchunk {
@@ -1245,7 +1245,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
     for x in &names {
         nh = fnv(mix(nh, 3), x.as_bytes());
     }
-    // 骨組みと、その全体のハッシュ
+    // Skeletons, and the hash of the whole
     let mut fp = mix(key, nh);
     let mut new_skel: FxMap<(u64, u64), (String, u64)> = FxMap::default();
     for j in 0..nchunk {
@@ -1268,7 +1268,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
     if log {
         eprintln!("prep: same fp: {}", memo.fp == fp);
     }
-    // (チャンクの結果のキー)
+    // (Keys of chunk results)
     let mut occ: FxMap<(u64, u64), u32> = FxMap::default();
     let mut keys: Vec<(u64, u64, u32)> = Vec::with_capacity(nchunk);
     for j in 0..nchunk {
@@ -1290,7 +1290,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
             }
         }
         if any {
-            // 変わったチャンクだけそのまま、ほかは骨組みにしたソースを前処理して、変わったチャンクの行を切り出す
+            // Preprocess a source where only the changed chunks stay as they are and the rest is skeleton, and cut out the changed chunks' lines
             let mut red = String::with_capacity(src.len() / 2);
             for j in 0..nchunk {
                 if missing[j] {
@@ -1326,7 +1326,7 @@ fn prep_inc(src: &str, crates: &[String], cfg: Option<&crate::cfg::CfgSet>, memo
         outs = got;
         memo.fp = fp;
     }
-    // 組み立てる
+    // Assemble
     let mut text = String::with_capacity(src.len() + 64);
     let mut pieces: Vec<(usize, &str)> = vec![];
     let mut fx: Vec<(u32, u32, i32)> = vec![];

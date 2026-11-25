@@ -1,4 +1,4 @@
-// Option / Result / ? / ジェネリックな struct・enum のサンプル (rustc でもそのままコンパイルできる)
+// Sample of Option / Result / ? / generic structs and enums (also compiles as is with rustc)
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }
@@ -118,7 +118,7 @@ fn main() {
         Ok(v) => println_i64(v),
         Err(e) => println_i64(code(e)), // -8
     }
-    println_i64(first_positive(0, 5, 6).unwrap_or(0)); // 0 (? で None)
+    println_i64(first_positive(0, 5, 6).unwrap_or(0)); // 0 (None via ?)
     println_i64(first_positive(-50, 5, 6).unwrap_or(0)); // 5
     println_i64(first_positive(-50, -1, -1).unwrap_or(-3)); // -3
 

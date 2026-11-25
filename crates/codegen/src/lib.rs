@@ -1,5 +1,5 @@
-//! zustc のバックエンド側。lower は acg が記録した命令の列 (zust_ir::Recorder) を minclif に組み立て直して
-//! 機械語にする (Cranelift なら zust-clif に渡す)。link はリンカの呼び出し
+//! zustc's backend side. lower reassembles the instruction sequence that acg recorded (zust_ir::Recorder) into minclif and
+//! turns it into machine code (for Cranelift, it is passed to zust-clif). link is the linker invocation
 
 pub use zust_typeck::*;
 pub use minclif;

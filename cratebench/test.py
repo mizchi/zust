@@ -1,16 +1,16 @@
-"""cratebench のクレート (vendor/ の上流のリポジトリ) のテストを、`cargo test` と `zurgo test` で走らせて、テストごとに比べる。
+"""Runs the tests of the cratebench crates (the upstream repositories in vendor/) with `cargo test` and `zurgo test`, and compares them test by test.
 
-usage: python3 cratebench/test.py [名前 ..] [--check] [--write]   (リポジトリの根で。事前に cargo build --release -p zurgo と
+usage: python3 cratebench/test.py [NAME ..] [--check] [--write]   (at the repository root, after cargo build --release -p zurgo and
        git submodule update --init cratebench/vendor)
-  名前: vendor/ の名前。省くとすべて (--check では test_passing.txt にあるもの)
-  --check: test_passing.txt のクレートが一つでも cargo と食い違えば 1 で終わる (CI はこれ)
-  --write: 結果の表を test_result.md に書き (走らせなかったクレートの行は残す)、cargo と一致したクレートを test_passing.txt に足す (減らさない)
+  NAME: a name in vendor/. All when omitted (with --check, those in test_passing.txt)
+  --check: exits with 1 if even one crate in test_passing.txt disagrees with cargo (CI uses this)
+  --write: writes the result table to test_result.md (the rows of crates not run are kept) and adds the crates that matched cargo to test_passing.txt (never removes any)
 
-どちらも同じものを走らせる: lib・bin・tests/ のテスト (`--lib --bins --tests`。doc テストとベンチは #96 の範囲外)。
-クレートは out/cratebench-test/<名前>/ に写し、locks/<名前>.lock を Cargo.lock として置く (`--locked`。cargo と zurgo が
-同じ版を使う。locks/ にないものは cargo が作ったものを locks/ に残す)。比べるのは (ターゲット, テスト名) ごとの結果で、
-ok / FAILED / ignored。写しの Cargo.toml には `[workspace]` を足す (out/ は zust のワークスペースの中なので)。ターゲットは `cargo metadata` の src_path から引く (cargo の `Running <path>` の行)。
-zurgo が走らせないテスト (#[ignore]) は `zurgo test -- --list` の `(ignored)` で数える。
+Both run the same things: the tests of lib, bin and tests/ (`--lib --bins --tests`; doc tests and benches are outside the scope of #96).
+The crates are copied to out/cratebench-test/<NAME>/, with locks/<NAME>.lock put in as Cargo.lock (`--locked`; cargo and zurgo
+use the same versions; for those not in locks/, the one cargo made is kept in locks/). What is compared is the result per (target, test name):
+ok / FAILED / ignored. `[workspace]` is added to the copy's Cargo.toml (since out/ is inside the zust workspace). Targets are looked up from the src_path of `cargo metadata` (cargo's `Running <path>` lines).
+Tests that zurgo does not run (#[ignore]) are counted by the `(ignored)` of `zurgo test -- --list`.
 """
 import json
 import os

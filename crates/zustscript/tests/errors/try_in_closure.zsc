@@ -1,0 +1,3 @@
+// expect: a `?` here returns from the closure, so the closure returns `Result<
+fn a(s: String) -> Result<String, String> { Ok(s) }
+fn b(xs: Array<String>) -> Result<Array<String>, String> { Ok(xs.map((x) => a(x)?)) }

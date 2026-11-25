@@ -1,4 +1,4 @@
-// HashMap への挿入と検索 (u64 のキー、entry)
+// Insertion into and lookup in a HashMap (u64 keys, entry)
 use std::collections::HashMap;
 fn main() {
     let mut m: HashMap<u64, u64> = HashMap::new();

@@ -11,14 +11,14 @@
 | `crates/syntax` (`zust-syntax`) | front (前処理 → アイテムへの分割 (差分) → prelude を付ける、の流れと編集をまたぐ記憶 FrontMemo) / lexer / parse (自前の構文木) / cfg / macros / ctors / prep (前処理の差分) / srcmap / stub / types (要約の型)・types_enc / enc (直列化) / ast_types / ast_closure / ast_summary (アイテムの要約) / prelude (選択と prelude_lib.rs.in、build.rs) | base、proc-macro2 |
 | `crates/sema` (`zust-sema`) | program (名前・型・トレイト・impl の表、インスタンス) / solver / ast_infer (型推論) / ast_consteval | syntax |
 | `crates/ir` (`zust-ir`) | 命令の列の型 (Type / Value / Block / Op …) と、命令を記録するだけの Recorder (値の型を覚える) | なし |
-| `crates/typeck` (`zust-typeck`) | acg (構文木 → 命令の列の記録。型の検査はここで出る) / cache2 (Blob の直列化) | sema、ir、proc-macro2 |
+| `crates/typeck` (`zust-typeck`) | acg (構文木 → 命令の列の記録。型の検査はここで出る) / build_cache (Blob の直列化) | sema、ir、proc-macro2 |
 | `crates/codegen` (`zust-codegen`) | lower (記録を minclif に組み立て直して機械語にする。Cranelift なら zust-clif に渡す) / link | typeck、minclif |
-| `crates/core` (`zust-core`) | driver2 (Session2: 解析・check・キャッシュ) と、feature `build` (既定) の driver2/build.rs (機械語・fork の並列化・オブジェクト・リンク・ワークスペース)。下の層を公開し直す | typeck、(build なら) codegen |
+| `crates/core` (`zust-core`) | session (`Session`: 解析・check・キャッシュ) と、feature `build` (既定) の session/build.rs (機械語・fork の並列化・オブジェクト・リンク・ワークスペース)。下の層を公開し直す | typeck、(build なら) codegen |
 | `crates/ide` (`zust-ide`) | エディタ向けの解析: symbols (documentSymbol / workspace/symbol のシンボル) / navigate (定義・参照・hover・補完。字句の列と定義の表からの軽い型の推定)。コンパイラ本体からは使わない | syntax |
-| `crates/analyzer` (`zust-analyzer`) | LSP サーバ (バイナリ `zust-analyzer`)。診断は driver2 の check、それ以外は ide。ワークスペースの本文はメモリの上限まで | core (build なし)、ide、serde_json |
+| `crates/analyzer` (`zust-analyzer`) | LSP サーバ (バイナリ `zust-analyzer`)。診断は session の check、それ以外は ide。ワークスペースの本文はメモリの上限まで | core (build なし)、ide、serde_json |
 | `crates/zurgo` (`zurgo`) | Cargo と互換のドライバ (バイナリ `zurgo`、[zurgo.md](zurgo.md)): 自前の TOML のパーサ、Cargo.toml / Cargo.lock、ソース (メンバー、path、`$CARGO_HOME/registry/src`、index のキャッシュ)、cargo と同じ feature の有効にし方 (ビルドには feature のリゾルバ、`metadata` には依存のリゾルバ)、同じプロセスでビルドする zustc のワークスペース (`CrateSpec`) | `zustc` (根のクレート) |
 | `crates/minclif` | Cranelift に似た API の小さな x86-64 バックエンド (レジスタ割り当て・スタックの struct のフィールドの変数化・ELF の .o)。`from_recording` で記録を組み立て直す | ir |
-| `crates/clif` (`zust-clif`) | driver2 の Cranelift バックエンド: minclif が組み立てた命令の列を Cranelift の IR にしてコンパイルする | minclif、cranelift |
+| `crates/clif` (`zust-clif`) | session の Cranelift バックエンド: minclif が組み立てた命令の列を Cranelift の IR にしてコンパイルする | minclif、cranelift |
 | `.` (`zustc`) | CLI と、上のものの再輸出 (テスト・ベンチ)。ide と lsp には依存しない (ベンチの lsp/* だけが dev-dependency で使う) | 上のもの (ide・lsp を除く) |
 
 各 crate の lib.rs は下の層のモジュールを公開し直す (`pub use zust_syntax::*;` など)。ファイルの中は `crate::lexer` の
@@ -29,13 +29,14 @@ minclif と同じ決め方で覚える)。check はそこで止め、ビルド�
 組み立て直してから機械語にする (minclif は命令の中で値やスロットを作るので番号は組み立て直す側で振り直す。
 `ZUSTC_IR_VERIFY=1` で値の型が記録と同じかを確かめる)。出力の機械語は分ける前とバイト単位で同じ。
 
-経路は **driver2** だけ (`zustc x.rs` は Cranelift、`--backend=minclif` で minclif)。build / check / LSP のすべてが driver2 を使う。
+経路は **session** (`crates/core/src/session.rs`) だけ (`zustc x.rs` は Cranelift、`--backend=minclif` で minclif)。build / check / LSP のすべてがこれを使う。
+2026-11-25 までは 2 つ目のドライバとして driver2 と呼んでいた。それより前のレポートはその名前で書いている。
 最初のドライバ (syn + Cranelift、`crates/legacy`) は 2026-11-16 に削除した (git の履歴にある)。
 セルフホスト (tests/selfhost*.sh) は base / syntax / sema / ir / typeck / codegen / core と minclif のソースを 1 ファイルにまとめて zustc でコンパイルする。
 
-## 処理の流れ (driver2)
+## 処理の流れ (session)
 
-今の主経路 (driver2):
+今の主経路 (session):
 
 ```
 src.rs ──srcmap (mod x; のファイル)──▶ macros (macro_rules!) ──▶ モジュールを平らに ──▶ lexer: アイテム + ハッシュ
@@ -52,11 +53,11 @@ src.rs ──srcmap (mod x; のファイル)──▶ macros (macro_rules!) ─�
 | `crates/syntax/src/parse.rs` / `ast_*.rs` | 自前の構文木・要約・型推論・クロージャ解析・定数評価 |
 | `crates/sema/src/program.rs` | 全体の表 (シグネチャ・レイアウト・trait 実装・インスタンス) |
 | `crates/typeck/src/acg/` | 構文木から命令の列 (zust_ir::Recorder) への 1 パスの lowering と型検査。-O で小さい関数をインライン展開 |
-| `crates/core/src/driver2.rs` / `cache2.rs` | `Session2`：キャッシュ (ディスク + メモリ)、build / check / ワークスペース、fork の並列化、.o の書き出し |
+| `crates/core/src/session.rs` / `build_cache.rs` | `Session`：キャッシュ (ディスク + メモリ)、build / check / ワークスペース、fork の並列化、.o の書き出し |
 | `crates/codegen/src/link.rs` | `cc -###` からリンク行を取り出して保存し、リンカを直接起動する |
 | `crates/minclif` | 命令の記録・レジスタ割り当て・x86-64 の機械語・ELF の .o |
 | `crates/clif` | 記録した命令の列 → Cranelift の IR → 機械語 |
-| `crates/analyzer/src/lib.rs` | LSP サーバ (ドキュメントごとに `Session2` を持ち `check` の診断を返す。ワークスペースと std の索引) |
+| `crates/analyzer/src/lib.rs` | LSP サーバ (ドキュメントごとに `Session` を持ち `check` の診断を返す。ワークスペースと std の索引) |
 | `crates/ide/src/navigate.rs` / `symbols.rs` | 定義・参照・hover・補完の名前解決と、シンボルの一覧 |
 | `src/main.rs` | CLI (build / check / ワークスペースの build) |
 

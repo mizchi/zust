@@ -1,5 +1,5 @@
-// clone のサンプル: #[derive(Clone)] の struct / enum / ジェネリック / Box を持つ型、タプル・配列・Option・Result の clone、
-// Vec<String> の clone / cloned / to_vec、手書きの impl Clone。clone した方を変えても元が変わらず、二重解放もしない (valgrind)
+// A sample of clone: #[derive(Clone)] structs / enums / generics / types holding a Box, clone of tuples, arrays, Option and Result,
+// clone / cloned / to_vec of Vec<String>, a handwritten impl Clone. Changing the clone does not change the original, and there is no double free (valgrind)
 #[derive(Debug, Clone, PartialEq)]
 struct Person {
     name: String,

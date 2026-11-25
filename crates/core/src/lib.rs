@@ -1,13 +1,13 @@
-//! zustc のドライバ。driver2 (Session2) が解析・check (LSP の診断)・キャッシュと、feature `build` (既定) のときは
-//! ワークスペースのビルド (並列化・機械語・リンク) をまとめる。
-//! 層: base → syntax → sema → typeck (型の検査・命令の記録) → codegen (機械語・リンク: build のときだけ) → core (ここ)。
-//! LSP は zust-analyzer (build なしで使う)、Cranelift のバックエンドは zust-clif。下の層のモジュールはここからも
-//! `zust_core::lexer` のように引ける
+//! The zustc driver. session (Session) brings together analysis, check (LSP diagnostics) and the cache, and with feature `build` (the default),
+//! workspace builds (parallelization, machine code, linking).
+//! Layers: base → syntax → sema → typeck (type checking, recording instructions) → codegen (machine code, linking: only with build) → core (here).
+//! The LSP is zust-analyzer (uses this without build), the Cranelift backend is zust-clif. The modules of the lower layers can also be reached from here,
+//! as in `zust_core::lexer`
 
 pub use zust_typeck::*;
 #[cfg(feature = "build")]
 pub use zust_codegen::{link, lower, minclif};
 
-pub mod driver2;
+pub mod session;
 #[doc(hidden)]
 pub mod testgen;

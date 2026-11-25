@@ -1,12 +1,12 @@
-//! syn を使わない Rust の構文解析 (zustc が扱うサブセット + その周辺)。
+//! Rust parsing without syn (the subset zustc handles + what is around it).
 //!
-//! syn から離れるための土台: このモジュールは外部クレートに依存せず、zustc 自身でもコンパイルできる
-//! 書き方 (enum + Box + Vec + String、トレイトは最小限) にしてある。
-//! - 字句: 記号は 1 文字ずつ (Joint / Alone) にして、`>>` などは構文解析の側で組み立てる (ジェネリクスの `>` と両立する)
-//! - 式の優先順位は Rust と同じ。`if` / `while` / `match` / `for` の頭では struct リテラルを取らない
-//! - 属性・マクロの呼び出しはトークン列のテキストとして持つ
+//! The groundwork for leaving syn: this module depends on no external crate and is written in a style that zustc itself can compile too
+//! (enum + Box + Vec + String, a minimum of traits).
+//! - Lexing: punctuation is one character at a time (Joint / Alone), and `>>` etc. are assembled on the parser's side (compatible with the `>` of generics)
+//! - Expression precedence is the same as Rust's. The heads of `if` / `while` / `match` / `for` take no struct literals
+//! - Attributes and macro calls are kept as the text of their token sequences
 
-// ---------------------------------------------------------------- 字句
+// ---------------------------------------------------------------- Lexing
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokKind {
@@ -22,7 +22,7 @@ pub enum TokKind {
 pub struct Tok {
     pub kind: TokKind,
     pub text: String,
-    /// 記号の直後に別の記号が続くか (`>>` / `::` / `->` の組み立て用)
+    /// Whether another punctuation character immediately follows (for assembling `>>` / `::` / `->`)
     pub joint: bool,
     pub line: u32,
     pub col: u32,
@@ -91,7 +91,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
             continue;
         }
         let start = i;
-        // (桁は行頭からの文字数: 前のトークンの位置から数え足す (長い行で 2 乗にならないように))
+        // (the column is the number of chars from the line start: counted on from the previous token's position (so that long lines do not go quadratic))
         if cline_start != line_start {
             cline_start = line_start;
             cpos = line_start;
@@ -105,7 +105,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
         }
         let col = ccol;
         let tline = line;
-        // (ASCII はバイトのまま。文字にするのは ASCII でないときだけ)
+        // (ASCII stays a byte; it is made a char only when it is not ASCII)
         let ch = if c < 0x80 { c as char } else { src[i..].chars().next().unwrap() };
         let kind;
         if c == b'"' || ((c == b'b' || c == b'c') && b.get(i + 1) == Some(&b'"')) {
@@ -156,7 +156,7 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
             i = skip_suffix(src, i);
             kind = TokKind::Lit;
         } else if c == b'\'' || (c == b'b' && b.get(i + 1) == Some(&b'\'')) {
-            // 文字 'x' / '\n' / b'x' か、ライフタイム 'a
+            // A char 'x' / '\n' / b'x', or a lifetime 'a
             let q = if c == b'b' { i + 1 } else { i };
             let mut it = src[q + 1..].chars();
             let c1 = it.next();
@@ -220,6 +220,10 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
         } else if is_ident_start(ch) {
             if c == b'r' && b.get(i + 1) == Some(&b'#') {
                 i += 2;
+                // (`r#self` / `r#_`: a name no raw identifier can be)
+                if let Some(w) = reserved_raw(src, i) {
+                    return Err(format!("{tline}:{}: `{w}` cannot be a raw identifier", col + 1));
+                }
             }
             while i < b.len() {
                 let d0 = b[i];
@@ -260,12 +264,22 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
     Ok(out)
 }
 
-/// A raw lifetime `'r#a` (src[start..end]) as the token `'a`
+/// The name after `r#` at src[i..] when it is one no raw identifier can be, `r#self` / `r#_`
+#[cold]
+#[inline(never)]
+fn reserved_raw(src: &str, i: usize) -> Option<&str> {
+    let n = src[i..].bytes().take_while(|c| c.is_ascii_alphanumeric() || *c == b'_').count();
+    let w = &src[i..i + n];
+    matches!(w, "self" | "super" | "crate" | "Self" | "_").then_some(w)
+}
+
+/// A raw lifetime `'r#a` (src[start..end]) as the token `'a`, marked `joint` (which a lifetime has no other use for):
+/// `'r#break` is a name where a label goes, `'break` a keyword
 #[cold]
 #[inline(never)]
 fn raw_lifetime(out: &mut Vec<Tok>, src: &str, start: usize, end: usize, line: u32, col: u32) {
     let text = format!("'{}", &src[start + 3..end]);
-    out.push(Tok { kind: TokKind::Lifetime, text, joint: false, line, col, lo: start as u32 });
+    out.push(Tok { kind: TokKind::Lifetime, text, joint: true, line, col, lo: start as u32 });
 }
 
 /// Rust's white space characters other than ASCII (and the vertical tab / form feed)
@@ -275,7 +289,7 @@ fn other_white_space(ch: char) -> bool {
     matches!(ch, '\u{b}' | '\u{c}' | '\u{85}' | '\u{200e}' | '\u{200f}' | '\u{2028}' | '\u{2029}')
 }
 
-/// 記号の文字 (`+-*/%^!&|=<>@.,;:#$?~\`) か
+/// Whether it is a punctuation character (`+-*/%^!&|=<>@.,;:#$?~\`)
 fn is_punct_byte(c: u8) -> bool {
     matches!(c, b'+' | b'-' | b'*' | b'/' | b'%' | b'^' | b'!' | b'&' | b'|' | b'=' | b'<' | b'>' | b'@' | b'.' | b',' | b';' | b':' | b'#' | b'$' | b'?' | b'~' | b'\\')
 }
@@ -297,9 +311,9 @@ fn skip_suffix(src: &str, mut i: usize) -> usize {
     i
 }
 
-// ---------------------------------------------------------------- 構文木
+// ---------------------------------------------------------------- Syntax tree
 
-/// ソース上の位置 (行は 1 始まり、桁は 0 始まりの文字数: proc_macro2 と同じ)
+/// A position in the source (lines are 1-based, columns are 0-based char counts: same as proc_macro2)
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Pos {
     pub line: u32,
@@ -312,7 +326,7 @@ impl std::fmt::Debug for Pos {
     }
 }
 
-/// 式の位置: start は式の先頭 (syn の `e.span()`)、at は式ごとの位置 (メソッド名・`[`・演算子・マクロの引数の開き括弧)
+/// An expression's position: start is the start of the expression (syn's `e.span()`), at is a per-expression position (the method name, `[`, the operator, the opening bracket of a macro's arguments)
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct Span {
     pub start: Pos,
@@ -329,7 +343,7 @@ impl std::fmt::Debug for Span {
 pub struct Path {
     pub global: bool,
     pub segs: Vec<Seg>,
-    /// パスの先頭のソース上の位置 (エラーの場所)
+    /// The source position of the start of the path (for error locations)
     pub pos: Pos,
 }
 
@@ -337,9 +351,9 @@ pub struct Path {
 pub struct Seg {
     pub name: String,
     pub args: Vec<GArg>,
-    /// `Fn(A, B) -> C` の形の引数
+    /// Arguments of the form `Fn(A, B) -> C`
     pub fn_args: Option<(Vec<Ty>, Option<Box<Ty>>)>,
-    /// このセグメントのトークン列のテキスト (proc_macro2 の表示と同じ空け方: `Iterator < Item = u32 >`)
+    /// The text of this segment's tokens (spaced the same as proc_macro2's display: `Iterator < Item = u32 >`)
     pub text: String,
 }
 
@@ -449,9 +463,44 @@ pub struct Arm {
     pub body: Expr,
 }
 
+/// Where a pattern starts, when it has a path or holds one (else no position)
+pub fn pat_pos(p: &Pat) -> Pos {
+    match p {
+        Pat::Path(pa) | Pat::TupleStruct(pa, _) | Pat::Struct(pa, _, _) => pa.pos,
+        Pat::Ref(_, i) => pat_pos(i),
+        Pat::Tuple(ps) | Pat::Or(ps) | Pat::Slice(ps) => ps.iter().map(pat_pos).find(|q| q.line != 0).unwrap_or_default(),
+        _ => Pos::default(),
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Block {
     pub stmts: Vec<Stmt>,
+    /// where each statement starts, as parsed (one per statement; empty for a block made by the compiler): for an
+    /// error with no position of its own, that of its statement
+    pub spos: Spos,
+}
+
+/// The starts of those statements of a block whose expressions have no position of their own, by the statement's
+/// index: one pointer (a `Vec` in Block made every `Expr` larger), nothing allocated for a block without one
+#[derive(Clone, Debug, Default)]
+pub struct Spos(Option<Box<Vec<(u32, Pos)>>>);
+
+impl Spos {
+    pub fn of(v: Vec<(u32, Pos)>) -> Spos {
+        Spos(if v.is_empty() { None } else { Some(Box::new(v)) })
+    }
+    pub fn entries(&self) -> &[(u32, Pos)] {
+        self.0.as_deref().map_or(&[], |v| v.as_slice())
+    }
+    /// The start of statement i, if kept
+    pub fn get(&self, i: usize) -> Option<Pos> {
+        self.entries().iter().find(|e| e.0 as usize == i).map(|e| e.1)
+    }
+    /// The same starts for the statements moved by `by` (`from` and on: the ones before are dropped)
+    pub fn shifted(&self, from: usize, by: isize) -> Spos {
+        Spos::of(self.entries().iter().filter(|e| e.0 as usize >= from).map(|&(i, p)| ((i as isize + by) as u32, p)).collect())
+    }
 }
 
 /// The suffix of a number literal that is not a numeric type (`123X1a3`: `X1a3`; `0XYZ`: `XYZ`, an uppercase base
@@ -536,7 +585,7 @@ fn destructure_assign(l: &Expr, r: &Expr, at: Pos) -> Option<Expr> {
         let v = Expr::Path(None, Path { global: false, segs: vec![Seg { name: t.clone(), args: Vec::new(), fn_args: None, text: t }], pos: at });
         stmts.push(Stmt::Expr(Expr::Assign(Box::new(place), Box::new(v)), true));
     }
-    Some(Expr::Block(None, false, Block { stmts }))
+    Some(Expr::Block(None, false, Block { stmts, spos: Default::default() }))
 }
 
 #[derive(Clone, Debug)]
@@ -564,9 +613,9 @@ pub enum GParam {
 pub struct FnSig {
     pub name: String,
     pub generics: Generics,
-    /// self の受け方 ("self" / "&self" / "&mut self" / "mut self")
+    /// How self is taken ("self" / "&self" / "&mut self" / "mut self")
     pub recv: Option<String>,
-    /// self の型 (`&self` → `&Self`、`self: Box<Self>` → `Box<Self>`)
+    /// The type of self (`&self` → `&Self`, `self: Box<Self>` → `Box<Self>`)
     pub recv_ty: Option<Ty>,
     pub params: Vec<(Pat, Ty)>,
     pub ret: Option<Ty>,
@@ -586,7 +635,7 @@ pub struct Item {
     pub vis: bool,
     pub kind: ItemKind,
     pub line: u32,
-    /// const / static の初期値の式のトークン列のテキスト (proc_macro2 の表示と同じ空け方)
+    /// The token text of a const / static's initializer expression (spaced the same as proc_macro2's display)
     pub init_text: String,
 }
 
@@ -615,13 +664,13 @@ pub struct File {
     pub items: Vec<Item>,
 }
 
-// ---------------------------------------------------------------- 構文解析
+// ---------------------------------------------------------------- Parsing
 
 pub struct Parser {
     toks: Vec<Tok>,
     i: usize,
     init_text: String,
-    /// 位置の基準 (マクロの引数を読み直すとき、そのテキストの先頭の位置。0 行目ならずらさない)
+    /// The base of positions (when re-reading a macro's arguments, the position of the start of that text; at line 0, no shift)
     base: Pos,
     /// Check that `.await` is inside an `async` fn / block (when reading a whole file; a re-read macro argument
     /// does not know where it was)
@@ -630,6 +679,15 @@ pub struct Parser {
     in_async: bool,
     /// Inside an `extern "C" { .. }` block: a `static X: T;` without a value is allowed there only
     in_extern: bool,
+    /// A validation error rustc reports after parsing (a binder's bounds or type parameter, `for<'a: 'b>`): returned by
+    /// parse_file, marked `\u{7}`, when nothing fails to parse
+    deferred: Option<String>,
+    /// The parameters the last generics() read with a default: (the index, the parameter's first token, its name's
+    /// token, whether it is a const one)
+    gdefaults: Vec<(u32, u32, u32, bool)>,
+    /// Inside a value that must be a constant (a const's or static's value, a discriminant, an array's length) and
+    /// not in a fn or closure body in it: `return` there is E0572
+    in_const: bool,
     /// E0416 is checked where a pattern is parsed; off while a fn parameter may still turn out to be a 2015 anonymous
     /// one (`fn f((u8, u8));`, a type)
     no_dup_check: bool,
@@ -661,7 +719,7 @@ pub fn join_tokens(toks: &[Tok], after: Option<&Tok>) -> String {
     let mut prev_open = false;
     for (k, t) in toks.iter().enumerate() {
         if t.kind == TokKind::Close {
-            // (`{ .. }` は中身の両側に空白: proc_macro2 と同じ)
+            // (`{ .. }` has a space on both sides of the contents: same as proc_macro2)
             if t.text == "}" && !prev_open {
                 s.push(' ');
             }
@@ -678,7 +736,7 @@ pub fn join_tokens(toks: &[Tok], after: Option<&Tok>) -> String {
         }
         s.push_str(&t.text);
         prev_open = t.kind == TokKind::Open;
-        // (記号の Joint は次も記号のとき (`,` は続けない)。ライフタイムは 1 つのトークン)
+        // (a punctuation is Joint when the next token is punctuation too (`,` is not joined); a lifetime is one token)
         prev_joint = t.kind == TokKind::Punct
             && t.joint
             && toks.get(k + 1).or(if k + 1 == toks.len() { after } else { None }).is_some_and(|n| n.kind == TokKind::Punct && n.text != ",");
@@ -720,7 +778,7 @@ pub fn rewrite_tokens(s: &str, f: &mut dyn FnMut(usize, &[Tok]) -> Option<String
 
 pub fn parse_file(src: &str) -> R<File> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false, in_extern: false, no_dup_check: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false, in_extern: false, deferred: None, in_const: false, no_dup_check: false, gdefaults: Vec::new() };
     let mut attrs = Vec::new();
     while p.is_punct("#") && p.peek_is(1, "!") {
         attrs.push(p.attr()?);
@@ -729,10 +787,13 @@ pub fn parse_file(src: &str) -> R<File> {
     while p.i < p.toks.len() {
         items.push(p.item()?);
     }
+    if let Some(d) = p.deferred {
+        return Err(format!("\u{7}{d}"));
+    }
     Ok(File { attrs: attrs, items: items })
 }
 
-/// text (base の位置から始まる) の中の byte の位置 off のソース上の位置
+/// The source position of byte offset off in text (which starts at position base)
 pub fn pos_at(text: &str, off: usize, base: Pos) -> Pos {
     let before = &text[..off.min(text.len())];
     let nl = before.bytes().filter(|&c| c == b'\n').count() as u32;
@@ -750,10 +811,10 @@ pub fn parse_expr(src: &str) -> R<Expr> {
     parse_expr_at(src, Pos::default())
 }
 
-/// 式を読む。位置は base (src の先頭のソース上の位置) からの位置にする
+/// Parses an expression. Positions are made relative to base (the source position of the start of src)
 pub fn parse_expr_at(src: &str, base: Pos) -> R<Expr> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, no_dup_check: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, deferred: None, in_const: false, no_dup_check: false, gdefaults: Vec::new() };
     let e = p.expr(true)?;
     if p.i < p.toks.len() {
         return Err(p.err("unexpected token after expression"));
@@ -761,14 +822,14 @@ pub fn parse_expr_at(src: &str, base: Pos) -> R<Expr> {
     Ok(e)
 }
 
-/// `pat` / `pat if guard` (matches! の 2 つ目の引数)
+/// `pat` / `pat if guard` (the second argument of matches!)
 pub fn parse_pat_guard(src: &str) -> Option<(Pat, Option<Expr>)> {
     parse_pat_guard_at(src, Pos::default())
 }
 
 pub fn parse_pat_guard_at(src: &str, base: Pos) -> Option<(Pat, Option<Expr>)> {
     let toks = tokenize(src).ok()?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, no_dup_check: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, deferred: None, in_const: false, no_dup_check: false, gdefaults: Vec::new() };
     let pat = p.pat().ok()?;
     let guard = if p.eat_ident("if") { Some(p.expr(true).ok()?) } else { None };
     p.eat_punct(",");
@@ -868,9 +929,9 @@ impl Parser {
     fn peek_is(&self, k: usize, s: &str) -> bool {
         self.tok(k).is_some_and(|t| t.text == s)
     }
-    /// 位置 k から複数文字の記号 s (`::` / `->` / `>>=` など) が続くか
+    /// Whether the multi-character punctuation s (`::` / `->` / `>>=` etc.) follows from position k
     fn punct_at(&self, k: usize, s: &str) -> bool {
-        // (記号は ASCII: バイトで比べる。演算子の優先順位ごとに何度も呼ばれる)
+        // (punctuation is ASCII: compare bytes; this is called many times, once per operator precedence level)
         let sb = s.as_bytes();
         let n = sb.len();
         let mut j = 0;
@@ -969,7 +1030,7 @@ impl Parser {
             _ => Err(self.err("expected an identifier")),
         }
     }
-    /// 今のトークンの位置 (行・桁は base の分ずらす: マクロの引数を読み直すとき)
+    /// The position of the current token (line / column shifted by base: when re-reading a macro's arguments)
     fn pos(&self) -> Pos {
         match self.tok(0).or_else(|| self.toks.last()) {
             Some(t) => self.shift(t.line, t.col),
@@ -984,8 +1045,8 @@ impl Parser {
         Pos { line: self.base.line + line - 1, col: if line == 1 { self.base.col + col } else { col } }
     }
 
-    /// 括弧の組 (開きの位置にいる) を、元の行・桁の配置のままテキストにして飛ばす (式のマクロ用)。
-    /// 開き括弧が先頭: 読み直すとき、位置を開き括弧の位置からずらせば元の位置になる
+    /// Turns a bracket pair (we are at the opening one) into text keeping the original line / column layout, and skips it (for expression macros).
+    /// The opening bracket comes first: when re-reading, shifting positions from the opening bracket's position gives the original positions
     fn group_text_laid_out(&mut self) -> R<String> {
         let mut depth = 0;
         let mut s = String::new();
@@ -1007,16 +1068,16 @@ impl Parser {
                         s.push('\n');
                     }
                     line = t.line;
-                    // (2 行目からは元の桁そのもの: 先頭の行だけ開き括弧からの桁)
+                    // (from the second line on, the original column itself; only the first line has columns from the opening bracket)
                     for _ in 0..t.col {
                         s.push(' ');
                     }
                     col = t.col;
                 } else {
-                    // (同じ行: 元の桁まで空白で埋める。先頭の行は開き括弧からの差)
+                    // (the same line: pad with spaces up to the original column; on the first line, the difference from the opening bracket)
                     let want = t.col;
                     let mut c = col;
-                    // (元の桁がもう過ぎている (タブなど) なら、くっつかないよう 1 つ空ける)
+                    // (if the original column is already passed (tabs etc.), leave one space so they do not stick together)
                     if c > want {
                         s.push(' ');
                         c += 1;
@@ -1030,7 +1091,7 @@ impl Parser {
             }
             first = false;
             s.push_str(&t.text);
-            // (複数行のトークン (文字列) の後の行・桁)
+            // (the line / column after a multi-line token (a string))
             let nl = t.text.bytes().filter(|&c| c == b'\n').count() as u32;
             if nl > 0 {
                 line += nl;
@@ -1066,8 +1127,8 @@ impl Parser {
             }
         }
     }
-    /// トークン a..b のテキスト (proc_macro2 の Display と同じ: トークンの間に空白 1 つ、Joint の記号の後ろは詰める、
-    /// 括弧は中身を詰めて囲む)
+    /// The text of tokens a..b (same as proc_macro2's Display: one space between tokens, none after a Joint punctuation,
+    /// brackets enclose their contents tightly)
     fn tokens_text(&self, a: usize, b: usize) -> String {
         join_tokens(&self.toks[a..b.min(self.toks.len())], self.toks.get(b))
     }
@@ -1089,7 +1150,7 @@ impl Parser {
         Ok(v)
     }
 
-    // ------------------------------------------------ パス・型
+    // ------------------------------------------------ Paths, types
 
     fn lifetime(&mut self) -> Option<String> {
         match self.tok(0) {
@@ -1102,7 +1163,7 @@ impl Parser {
         }
     }
 
-    /// `<..>` の中身 (開きの `<` の後ろから。閉じの `>` まで食べる)
+    /// The contents of `<..>` (from after the opening `<`; eats up to the closing `>`)
     fn generic_args(&mut self) -> R<Vec<GArg>> {
         let mut v = Vec::new();
         loop {
@@ -1180,7 +1241,7 @@ impl Parser {
         false
     }
 
-    /// `>` を 1 つ食べる (`>>` / `>=` / `>>=` の先頭の `>` も)
+    /// Eats one `>` (also the leading `>` of `>>` / `>=` / `>>=`)
     fn eat_close_angle(&mut self) -> bool {
         match self.toks.get(self.i) {
             Some(t) if t.kind == TokKind::Punct && t.text == ">" => {
@@ -1191,7 +1252,7 @@ impl Parser {
         }
     }
 
-    /// 式の中のパス (`a::b::<T>::c`)。型の中では `::` なしの `<..>` も取る
+    /// A path in an expression (`a::b::<T>::c`). Inside a type, `<..>` without `::` is taken too
     fn path(&mut self, in_ty: bool) -> R<Path> {
         let pos = self.pos();
         // (`::name::..` names the extern crate `name` (2018 and later): the crate's items are reached as `name::..`
@@ -1203,7 +1264,7 @@ impl Parser {
             let st = self.i;
             let name = self.ident()?;
             let mut seg = Seg { name: name, args: Vec::new(), fn_args: None, text: String::new() };
-            // (型の中の `<<` は `<` と、修飾されたパスの `<`: `Either<<&L as IntoIterator>::IntoIter, ..>`)
+            // (a `<<` in a type is a `<` and the `<` of a qualified path: `Either<<&L as IntoIterator>::IntoIter, ..>`)
             if in_ty && self.is_punct("<") && !self.punct_at(0, "<=") {
                 self.i += 1;
                 seg.args = self.generic_args()?;
@@ -1226,11 +1287,27 @@ impl Parser {
             seg.text = self.tokens_text(st, self.i);
             segs.push(seg);
             if self.punct_at(0, "::") && self.tok(2).is_some_and(|t| t.kind == TokKind::Ident) {
+                if !segs[segs.len() - 1].args.is_empty() {
+                    self.module_args(&segs, st)?;
+                }
                 self.i += 2;
                 continue;
             }
             return Ok(Path { global: global, segs: segs, pos });
         }
+    }
+
+    /// E0109: `std::marker<i32>::Copy`, generic arguments on a module of std (a path of lowercase names from
+    /// `std` / `core` / `alloc` that goes on). st: the segment's first token
+    #[cold]
+    fn module_args(&self, segs: &[Seg], st: usize) -> R<()> {
+        let last = &segs[segs.len() - 1];
+        if matches!(segs[0].name.as_str(), "std" | "core" | "alloc") && segs.iter().all(|s| s.name.starts_with(|c: char| c.is_ascii_lowercase())) {
+            let kind = if last.args.iter().any(|a| matches!(a, GArg::Ty(_) | GArg::Const(_))) { "type" } else { "lifetime" };
+            let t = &self.toks[st];
+            return Err(format!("{}:{}: {kind} arguments are not allowed on module `{}` (E0109)", t.line, t.col + 1, last.name));
+        }
+        Ok(())
     }
 
     fn bounds(&mut self) -> R<Vec<Bound>> {
@@ -1298,9 +1375,26 @@ impl Parser {
         // (a higher-ranked type `for<'a> fn(&'a u8)` / `for<'a> Fn(&'a T)`: the binder is dropped)
         if self.is_ident("for") && self.punct_at(1, "<") {
             self.i += 2;
+            // (what rustc's parser takes there: `'a`, `'a:`, `'a: 'b + 'c`, a type parameter (rejected later); `,` alone
+            // is a parse error)
             while !self.eat_close_angle() {
-                if self.lifetime().is_none() {
-                    return Err(self.err("expected a lifetime"));
+                if self.lifetime().is_some() {
+                    if self.eat_punct(":") {
+                        let at = self.i;
+                        while self.lifetime().is_some() {
+                            if !self.eat_punct("+") {
+                                break;
+                            }
+                        }
+                        if self.i > at {
+                            self.defer(at, "bounds cannot be used in this context");
+                        }
+                    }
+                } else if self.tok(0).is_some_and(|t| t.kind == TokKind::Ident) {
+                    self.defer(self.i, "only lifetime parameters can be used in this context");
+                    self.i += 1;
+                } else {
+                    return Err(self.err_plain("expected one of `#`, `>`, `const`, identifier, or lifetime"));
                 }
                 if !self.eat_punct(",") && !self.punct_at(0, ">") {
                     return Err(self.err("expected one of `,`, `:`, or `>`"));
@@ -1312,9 +1406,9 @@ impl Parser {
             return self.ty_inner(plus);
         }
         if self.is_punct("&") {
-            // `&&T` は & を 2 つ
+            // `&&T` is two &s
             if self.punct_at(0, "&&") {
-                // (1 つ目の & を読み、2 つ目の & からを内側の参照型として読む)
+                // (read the first &, and read from the second & on as the inner reference type)
                 self.i += 1;
                 self.toks[self.i].joint = false;
                 let inner = self.ty_inner(plus)?;
@@ -1326,9 +1420,11 @@ impl Parser {
         if self.eat_punct("*") {
             let m = if self.eat_ident("mut") {
                 true
-            } else {
-                self.eat_ident("const");
+            } else if self.eat_ident("const") {
                 false
+            } else {
+                // (`*T`, `**const T`: a raw pointer type says `const` or `mut`, rustc's error at the `*`)
+                return Err(self.bare_pointer_err());
             };
             return Ok(Ty::Ptr(m, Box::new(self.ty_no_bounds()?)));
         }
@@ -1336,7 +1432,7 @@ impl Parser {
             self.i += 1;
             let t = self.ty()?;
             if self.eat_punct(";") {
-                let n = self.expr(true)?;
+                let n = self.const_expr()?;
                 self.expect_close("]")?;
                 return Ok(Ty::Array(Box::new(t), Box::new(n)));
             }
@@ -1459,7 +1555,9 @@ impl Parser {
             let q = self.ty()?;
             let mut path = Path { global: false, segs: Vec::new(), pos: self.pos() };
             if self.eat_ident("as") {
+                let st = self.i;
                 path = self.path(true)?;
+                constraint_check(&self.toks, &path, st)?;
             }
             if !self.eat_close_angle() {
                 return Err(self.err("expected `>`"));
@@ -1499,7 +1597,7 @@ impl Parser {
         Ok(Ty::Ref(l, m, Box::new(self.ty_no_bounds()?)))
     }
 
-    // ------------------------------------------------ パターン
+    // ------------------------------------------------ Patterns
 
     fn pat(&mut self) -> R<Pat> {
         self.eat_punct("|");
@@ -1534,7 +1632,7 @@ impl Parser {
         Ok(())
     }
 
-    /// クロージャの引数 (`|` を区切りに使うので or パターンは取らない)
+    /// A closure parameter (`|` is used as the delimiter, so no or-patterns are taken)
     fn pat_no_or(&mut self) -> R<Pat> {
         self.pat_one()
     }
@@ -1596,7 +1694,7 @@ impl Parser {
 
     fn pat_one(&mut self) -> R<Pat> {
         let p = self.pat_atom()?;
-        // 範囲 `a..=b` / `a..`
+        // Ranges `a..=b` / `a..`
         if self.punct_at(0, "..=") || self.punct_at(0, "...") {
             let lo = match p {
                 Pat::Lit(e) => e,
@@ -1606,6 +1704,9 @@ impl Parser {
             };
             self.i += 3;
             let hi = self.pat_range_end()?;
+            if hi.is_none() {
+                return Err(no_end_err(&self.toks, self.i - 3));
+            }
             return self.range_pat(Some(lo), hi, true);
         }
         if self.punct_at(0, "..") && !self.punct_at(0, "...") {
@@ -1644,7 +1745,7 @@ impl Parser {
             if self.punct_at(0, "&&") {
                 self.i += 1;
                 self.toks[self.i].joint = false;
-                // (2 つ目の `&` から読む: `&&x` は Ref(Ref(x)))
+                // (read from the second `&`: `&&x` is Ref(Ref(x)))
                 let inner = self.pat_atom()?;
                 return Ok(Pat::Ref(false, Box::new(inner)));
             }
@@ -1687,7 +1788,7 @@ impl Parser {
         if self.is_punct("<") && !self.punct_at(0, "<<") {
             return Ok(Pat::Lit(Box::new(self.primary_expr(false)?)));
         }
-        // (`true` / `false` はリテラルのパターン)
+        // (`true` / `false` are literal patterns)
         if (self.is_ident("true") || self.is_ident("false")) && !self.punct_at(1, "::") {
             let lp = self.pos();
             let t = self.toks[self.i].text.clone();
@@ -1764,9 +1865,9 @@ impl Parser {
         Ok(Pat::Ref(m, Box::new(self.pat_atom()?)))
     }
 
-    // ------------------------------------------------ 式
+    // ------------------------------------------------ Expressions
 
-    /// ss: struct リテラルを取ってよいか (`if x {` の x では取らない)
+    /// ss: whether struct literals may be taken (not in the x of `if x {`)
     pub fn expr(&mut self, ss: bool) -> R<Expr> {
         self.assign_expr(ss)
     }
@@ -1819,6 +1920,9 @@ impl Parser {
             let incl = self.punct_at(0, "..=");
             self.i += if incl { 3 } else { 2 };
             let hi = if self.range_end_follows() && !(self.is_open("{") && !ss) { Some(Box::new(self.bin_expr(0, ss)?)) } else { None };
+            if incl && hi.is_none() {
+                return Err(no_end_err(&self.toks, self.i - 3));
+            }
             return Ok(Expr::Range(None, hi, incl));
         }
         let l = self.bin_expr(0, ss)?;
@@ -1826,22 +1930,25 @@ impl Parser {
             let incl = self.punct_at(0, "..=");
             self.i += if incl { 3 } else { 2 };
             let ok = self.range_end_follows() && !(self.is_open("{") && !ss);
+            if incl && !ok {
+                return Err(no_end_err(&self.toks, self.i - 3));
+            }
             let hi = if ok { Some(Box::new(self.bin_expr(0, ss)?)) } else { None };
             return Ok(Expr::Range(Some(Box::new(l)), hi, incl));
         }
         Ok(l)
     }
 
-    /// 今の位置の二項演算子 (無ければ None)
+    /// The binary operator at the current position (None if there is none)
     fn bin_op(&self) -> Option<String> {
-        // (記号でなければ演算子でない: 式の後ろはたいてい `)` / `,` / `;` / 識別子)
+        // (not punctuation means not an operator: what follows an expression is usually `)` / `,` / `;` / an identifier)
         let t0 = self.tok(0)?;
         if t0.kind != TokKind::Punct {
             return None;
         }
         for op in ["||", "&&", "==", "!=", "<=", ">=", "<<", ">>"] {
             if self.punct_at(0, op) {
-                // (`<<=` / `>>=` は代入)
+                // (`<<=` / `>>=` are assignments)
                 if (op == "<<" || op == ">>") && self.punct_at(0, &format!("{op}=")) {
                     return None;
                 }
@@ -1856,7 +1963,7 @@ impl Parser {
         if !matches!(c, "+" | "-" | "*" | "/" | "%" | "^" | "&" | "|" | "<" | ">") {
             return None;
         }
-        // (`+=` などは代入)
+        // (`+=` etc. are assignments)
         if t.joint && self.punct_at(1, "=") {
             return None;
         }
@@ -1926,7 +2033,7 @@ impl Parser {
         }
         if self.is_punct("&") {
             if self.punct_at(0, "&&") {
-                // `&&x` は & を 2 つ
+                // `&&x` is two &s
                 self.i += 1;
                 self.toks[self.i].joint = false;
                 let inner = self.unary_expr(ss)?;
@@ -1987,14 +2094,16 @@ impl Parser {
                 self.i += 1;
                 if self.eat_ident("await") {
                     if self.async_on && !self.in_async {
-                        return Err(self.err("`await` is only allowed inside `async` functions and blocks"));
+                        // (at the `await`, as rustc: not the token after it)
+                        let t = &self.toks[self.i - 1];
+                        return Err(format!("{}:{}: `await` is only allowed inside `async` functions and blocks (E0728)", t.line, t.col + 1));
                     }
                     continue;
                 }
                 let t = self.tok(0).ok_or_else(|| self.err("expected a field"))?.clone();
                 let fpos = self.pos();
                 if t.kind == TokKind::Lit {
-                    // `x.0` / `x.0.1` (字句では 0.1 が 1 つの数)
+                    // `x.0` / `x.0.1` (the lexer makes 0.1 a single number)
                     self.i += 1;
                     for part in t.text.split('.') {
                         // (`t.0. 0`: the literal `0.` ends with the next field's dot)
@@ -2039,6 +2148,13 @@ impl Parser {
         Ok(e)
     }
 
+    /// rustc's `eat_label`: a lifetime where a label goes (`'static: loop`, `break '_`) whose name is a keyword, at it
+    fn keyword_label(&self) -> Option<String> {
+        let t = self.tok(0).filter(|t| t.kind == TokKind::Lifetime && !t.joint)?;
+        let n = &t.text[1..];
+        (n == "_" || reserved_kw(n, true) || unused_kw(n)).then(|| format!("{}:{}: labels cannot use keyword names", t.line, t.col + 1))
+    }
+
     fn label(&mut self) -> Option<String> {
         if self.tok(0).is_some_and(|t| t.kind == TokKind::Lifetime) && self.punct_at(1, ":") && !self.punct_at(1, "::") {
             let l = self.toks[self.i].text.clone();
@@ -2048,9 +2164,9 @@ impl Parser {
         None
     }
 
-    /// `if` / `while` の条件 (`let p = e` と `&&` のつながりも)
+    /// The condition of `if` / `while` (including `let p = e` and chains with `&&`)
     fn cond(&mut self) -> R<Expr> {
-        // (`let p = e` は primary_expr が && より強いところまで取る)
+        // (for `let p = e`, primary_expr takes up to what binds tighter than &&)
         self.expr(false)
     }
 
@@ -2102,9 +2218,29 @@ impl Parser {
         // (an async closure's body may `.await`; a plain closure's may not, even inside an async block)
         let is_async = self.eat_ident("async");
         let saved = std::mem::replace(&mut self.in_async, is_async);
+        let saved_c = std::mem::replace(&mut self.in_const, false);
         let r = self.closure_inner();
         self.in_async = saved;
+        self.in_const = saved_c;
         r
+    }
+
+    /// Keep the first validation error, at token `at` (see `deferred`)
+    #[cold]
+    fn defer(&mut self, at: usize, msg: &str) {
+        if self.deferred.is_none() {
+            if let Some(t) = self.toks.get(at) {
+                self.deferred = Some(format!("{}:{}: {msg}", t.line, t.col + 1));
+            }
+        }
+    }
+
+    /// An expression that must be a constant (E0572 for a `return` in it)
+    fn const_expr(&mut self) -> R<Expr> {
+        let o = std::mem::replace(&mut self.in_const, true);
+        let e = self.expr(true);
+        self.in_const = o;
+        e
     }
 
     fn closure_inner(&mut self) -> R<Expr> {
@@ -2183,6 +2319,9 @@ impl Parser {
                 return Ok(Expr::Lit(t.text, lp));
             }
             TokKind::Lifetime => {
+                if let Some(e) = self.keyword_label() {
+                    return Err(e);
+                }
                 let l = self.label();
                 if self.eat_ident("loop") {
                     return Ok(Expr::Loop(l, self.block()?));
@@ -2229,7 +2368,7 @@ impl Parser {
                     }
                     let first = self.expr(true)?;
                     if self.eat_punct(";") {
-                        let n = self.expr(true)?;
+                        let n = self.const_expr()?;
                         self.expect_close("]")?;
                         return Ok(Expr::Repeat(Box::new(first), Box::new(n)));
                     }
@@ -2256,7 +2395,9 @@ impl Parser {
                     let mut path = Path { global: false, segs: Vec::new(), pos: self.pos() };
                     let mut had_as = None;
                     if self.eat_ident("as") {
+                        let st = self.i;
                         path = self.path(true)?;
+                        constraint_check(&self.toks, &path, st)?;
                         had_as = Some(());
                     }
                     if !self.eat_close_angle() {
@@ -2353,6 +2494,9 @@ impl Parser {
                 return self.closure();
             }
             "return" => {
+                if self.in_const {
+                    return Err(self.err_plain("return statement outside of function body (E0572)"));
+                }
                 self.i += 1;
                 let v = if self.expr_follows() { Some(Box::new(self.expr(ss)?)) } else { None };
                 return Ok(Expr::Return(v));
@@ -2360,6 +2504,9 @@ impl Parser {
             "break" => {
                 let kw = self.pos();
                 self.i += 1;
+                if let Some(e) = self.keyword_label() {
+                    return Err(e);
+                }
                 let lp = self.pos();
                 let l = self.lifetime();
                 let pos = if l.is_some() { lp } else { kw };
@@ -2369,6 +2516,9 @@ impl Parser {
             "continue" => {
                 let kw = self.pos();
                 self.i += 1;
+                if let Some(e) = self.keyword_label() {
+                    return Err(e);
+                }
                 let lp = self.pos();
                 let l = self.lifetime();
                 return Ok(Expr::Continue(l.clone(), if l.is_some() { lp } else { kw }));
@@ -2462,7 +2612,7 @@ impl Parser {
         Ok(Expr::Path(None, p))
     }
 
-    /// `Path {` の後ろが struct リテラルらしいか (`{}` / `{ x` + `:` `,` `}` / `{ ..`)
+    /// Whether what follows `Path {` looks like a struct literal (`{}` / `{ x` + `:` `,` `}` / `{ ..`)
     fn struct_lit_follows(&self) -> bool {
         match self.tok(1) {
             Some(t) if t.kind == TokKind::Close => true,
@@ -2474,11 +2624,15 @@ impl Parser {
         }
     }
 
-    // ------------------------------------------------ 文・ブロック
+    // ------------------------------------------------ Statements, blocks
 
     pub fn block(&mut self) -> R<Block> {
         self.expect_open("{")?;
         let mut stmts = Vec::new();
+        // (the statements' starts, kept only for a block with a statement whose expression has no position of its own:
+        // `loop` / `unsafe` / `const` / `async` blocks, a block, `return;`, `[]`, `()`, `match () {}`. Most blocks have
+        // none, and allocate nothing)
+        let mut spos: Vec<(u32, Pos)> = Vec::new();
         while !self.is_close() {
             if self.at_end() {
                 return Err(self.err("unclosed block"));
@@ -2493,6 +2647,26 @@ impl Parser {
             }
             // (`let (a, mut b);` / `let (a, b): (T, U);`: a `let` for each name, without a value yet. Only a `let (`
             // is looked at: moving every statement once more costs a copy of it)
+            let need = match self.tok(0) {
+                Some(t) if t.kind == TokKind::Ident => match t.text.as_str() {
+                    "loop" | "unsafe" | "const" | "async" => true,
+                    "return" => self.peek_is(1, ";") || self.tok(1).is_some_and(|t| t.kind == TokKind::Close),
+                    "match" => self.peek_is(1, "(") && self.tok(2).is_some_and(|t| t.kind == TokKind::Close),
+                    // (`for _ in ..10`, `for x in mac!(..)`: an iterable that may have none either; `while {} {}`)
+                    "for" => true,
+                    "while" | "if" => self.peek_is(1, "{"),
+                    _ => false,
+                },
+                // (`{ .. }`, `[]`, `()`, `(return)(..)`)
+                Some(t) if t.kind == TokKind::Open => {
+                    t.text == "{"
+                        || self.tok(1).is_some_and(|t| t.kind == TokKind::Close || (t.kind == TokKind::Ident && matches!(t.text.as_str(), "return" | "loop" | "break" | "match" | "unsafe")))
+                }
+                _ => false,
+            };
+            if need {
+                spos.push((stmts.len() as u32, self.pos()));
+            }
             if !(self.is_ident("let") && self.peek_is(1, "(")) {
                 stmts.push(self.stmt()?);
                 continue;
@@ -2518,7 +2692,7 @@ impl Parser {
             stmts.push(st);
         }
         self.expect_close("}")?;
-        Ok(Block { stmts: stmts })
+        Ok(Block { stmts, spos: Spos::of(spos) })
     }
 
     fn item_follows(&self) -> bool {
@@ -2545,7 +2719,7 @@ impl Parser {
         }
     }
 
-    /// ブロックの形の式で始まるか (文・match の腕ではそこで終わる)
+    /// Whether it starts with a block-like expression (a statement / match arm ends there)
     fn blocky_start(&self) -> bool {
         self.is_open("{")
             || self.tok(0).is_some_and(|t| t.kind == TokKind::Lifetime)
@@ -2582,7 +2756,7 @@ impl Parser {
             self.expect_punct(";")?;
             return Ok(Stmt::Let(p, t, init, els, spos));
         }
-        // (`if .. {}` / `match .. {}` / `{ .. }` などで始まる文はそこで終わる: 次の `*p = 1;` を掛け算にしない)
+        // (a statement starting with `if .. {}` / `match .. {}` / `{ .. }` etc. ends there: the next `*p = 1;` is not made a multiplication)
         if self.blocky_start() {
             let start = self.pos();
             let e = self.primary_expr(true)?;
@@ -2608,7 +2782,9 @@ impl Parser {
         if blocky || mac_brace || self.is_close() {
             return Ok(Stmt::Expr(e, false));
         }
-        Err(self.err("expected `;`"))
+        // (where expect_punct puts a missing `;`: right after the expression when the next token is on a later line)
+        self.expect_punct(";")?;
+        Ok(Stmt::Expr(e, true))
     }
 
     /// An assignment to a place that starts with a block, `{ x }.a = 1` / `{ t }.0 += 1` (e when none follows)
@@ -2627,14 +2803,16 @@ impl Parser {
         Ok(e)
     }
 
-    // ------------------------------------------------ アイテム
+    // ------------------------------------------------ Items
 
     fn generics(&mut self) -> R<Generics> {
         let mut g = Generics { params: Vec::new(), preds: Vec::new() };
+        self.gdefaults.clear();
         if !self.is_punct("<") {
             return Ok(g);
         }
         self.i += 1;
+        let mut defaults = Vec::new();
         loop {
             if self.eat_close_angle() {
                 break;
@@ -2647,17 +2825,28 @@ impl Parser {
                 }
                 g.params.push(GParam::Lifetime(l));
             } else if self.eat_ident("const") {
+                let (kw, nt) = (self.i - 1, self.i);
                 let n = self.ident()?;
                 self.expect_punct(":")?;
                 let t = self.ty()?;
                 if self.eat_punct("=") {
                     let _ = self.unary_expr(true)?;
+                    self.gdefaults.push((g.params.len() as u32, kw as u32, nt as u32, true));
                 }
                 g.params.push(GParam::Const(n, t));
             } else {
+                let nt = self.i;
                 let n = self.ident()?;
                 let bs = if self.eat_punct(":") { self.bounds()? } else { Vec::new() };
-                let d = if self.eat_punct("=") { Some(self.ty()?) } else { None };
+                let d = if self.eat_punct("=") {
+                    let s = self.i;
+                    let t = self.ty()?;
+                    defaults.push((g.params.len(), s, self.i));
+                    self.gdefaults.push((g.params.len() as u32, nt as u32, nt as u32, false));
+                    Some(t)
+                } else {
+                    None
+                };
                 g.params.push(GParam::Ty(n, bs, d));
             }
             if !self.eat_punct(",") {
@@ -2667,7 +2856,69 @@ impl Parser {
                 break;
             }
         }
+        if !defaults.is_empty() {
+            self.forward_default(&g, &defaults)?;
+        }
         Ok(g)
+    }
+
+    /// A generic parameter's default where rustc rejects it (after parsing, as rustc's checks of the items' generics):
+    /// `defs` a type's or a trait's parameters, where one without a default may not follow one with ("generic parameters
+    /// with a default must be trailing", at its name); else a fn's or an impl's, where a const parameter's default is
+    /// "defaults for generic parameters are not allowed here", at the parameter (a type parameter's is the lint
+    /// invalid_type_param_default, which a crate may allow)
+    #[cold]
+    fn misplaced_default(&mut self, g: &Generics, defs: bool) {
+        let ds = std::mem::take(&mut self.gdefaults);
+        if defs {
+            let d = ds[0];
+            let has = |j: usize| ds.iter().any(|e| e.0 as usize == j);
+            if g.params.iter().enumerate().skip(d.0 as usize + 1).any(|(j, p)| !matches!(p, GParam::Lifetime(_)) && !has(j)) {
+                self.defer(d.2 as usize, "generic parameters with a default must be trailing");
+            }
+        } else if let Some(d) = ds.iter().find(|d| d.3) {
+            self.defer(d.1 as usize, "defaults for generic parameters are not allowed here");
+        }
+    }
+
+    /// A raw pointer type without its keyword, at its `*` (out of the type parser's hot path)
+    #[cold]
+    #[inline(never)]
+    fn bare_pointer_err(&self) -> String {
+        let t = &self.toks[self.i - 1];
+        format!("{}:{}: expected `mut` or `const` keyword in raw pointer type", t.line, t.col + 1)
+    }
+
+    /// "missing type for `const` item" (or `static`), right after the name or its colon (the token before the current
+    /// one, or the current `:`); the parse goes on as if the type were `_`
+    #[cold]
+    fn missing_item_type(&mut self, kw: &str) {
+        let (k, len) = if self.is_punct(":") { (self.i, 1) } else { (self.i - 1, self.toks[self.i - 1].text.chars().count()) };
+        if self.deferred.is_none() {
+            let t = &self.toks[k];
+            self.deferred = Some(format!("{}:{}: missing type for `{kw}` item", t.line, t.col as usize + len + 1));
+        }
+        if self.is_punct(":") {
+            self.i += 1;
+        }
+    }
+
+    /// E0128: the default of a type parameter names that parameter or one declared after it (`<T = U, U>`). The
+    /// defaults: (the parameter's index, the tokens of its default)
+    #[cold]
+    fn forward_default(&self, g: &Generics, defaults: &[(usize, usize, usize)]) -> R<()> {
+        for &(pi, s, e) in defaults {
+            for k in s..e {
+                let t = &self.toks[k];
+                if t.kind == TokKind::Ident
+                    && !(k > 0 && self.toks[k - 1].text == ":")
+                    && g.params[pi..].iter().any(|p| matches!(p, GParam::Ty(n, ..) | GParam::Const(n, _) if *n == t.text))
+                {
+                    return Err(format!("{}:{}: generic parameter defaults cannot reference parameters before they are declared (E0128)", t.line, t.col + 1));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn where_clause(&mut self, g: &mut Generics) -> R<()> {
@@ -2689,7 +2940,11 @@ impl Parser {
                     binder = self.generic_args()?;
                 }
                 // (`dyn A + 'static: B`: a trait object type takes its bounds)
+                let st = self.i;
                 let t = if self.is_ident("dyn") { self.ty()? } else { self.ty_no_bounds()? };
+                if let Ty::Path(None, p) = &t {
+                    constraint_check(&self.toks, p, st)?;
+                }
                 self.expect_punct(":")?;
                 let at = self.i;
                 let mut bs = self.bounds()?;
@@ -2750,6 +3005,14 @@ impl Parser {
                 }
                 v.push((n, ft));
                 if !self.eat_punct(",") {
+                    // (no `,` before another field: rustc's error is right after the field, where the comma goes)
+                    if !self.is_close() && self.i > 0 {
+                        if let Some(nt) = self.tok(0) {
+                            let found = if nt.kind == TokKind::Ident && reserved_kw(&nt.text, true) { format!("keyword `{}`", nt.text) } else { format!("`{}`", nt.text) };
+                            let pt = &self.toks[self.i - 1];
+                            return Err(format!("{}:{}: expected `,`, or `}}`, found {found}", pt.line, pt.col as usize + pt.text.chars().count() + 1));
+                        }
+                    }
                     break;
                 }
             }
@@ -2773,6 +3036,9 @@ impl Parser {
     fn fn_sig(&mut self, quals: Vec<String>) -> R<FnSig> {
         let name = self.decl_ident()?;
         let mut g = self.generics()?;
+        if !self.gdefaults.is_empty() {
+            self.misplaced_default(&g, false);
+        }
         self.expect_open("(")?;
         let mut recv = None;
         let mut recv_ty: Option<Ty> = None;
@@ -2781,7 +3047,7 @@ impl Parser {
         while !self.is_close() {
             self.attrs()?;
             if first {
-                // self の受け方
+                // How self is taken
                 let save = self.i;
                 let mut r = String::new();
                 let mut by_ref: Option<Option<String>> = None;
@@ -2858,6 +3124,11 @@ impl Parser {
                     }
                 }
             };
+            // (E0130: a foreign fn's parameters are names, `_` or plain)
+            if self.in_extern && !matches!(&p, Pat::Wild | Pat::Ident(false, false, _, None)) && !matches!(&p, Pat::Path(q) if q.segs.len() == 1) {
+                let t = &self.toks[save];
+                return Err(format!("{}:{}: patterns aren't allowed in foreign function declarations (E0130)", t.line, t.col + 1));
+            }
             self.expect_punct(":")?;
             let t = if self.punct_at(0, "...") {
                 self.i += 3;
@@ -2961,8 +3232,10 @@ impl Parser {
                 }
                 let st = self.i;
                 let saved = std::mem::replace(&mut self.in_async, sig.quals.iter().any(|q| q == "async"));
+                let saved_c = std::mem::replace(&mut self.in_const, false);
                 let b = self.block();
                 self.in_async = saved;
+                self.in_const = saved_c;
                 let b = b?;
                 // (a `const fn`'s body text: constants may call it)
                 if sig.quals.iter().any(|q| q == "const") {
@@ -2974,6 +3247,9 @@ impl Parser {
                 self.i += 1;
                 let n = self.decl_ident()?;
                 let mut g = self.generics()?;
+                if !self.gdefaults.is_empty() {
+                    self.misplaced_default(&g, true);
+                }
                 self.where_clause(&mut g)?;
                 let f = self.fields()?;
                 self.where_clause(&mut g)?;
@@ -2987,14 +3263,23 @@ impl Parser {
                 self.i += 1;
                 let n = self.decl_ident()?;
                 let mut g = self.generics()?;
+                if !self.gdefaults.is_empty() {
+                    self.misplaced_default(&g, true);
+                }
                 self.where_clause(&mut g)?;
                 self.expect_open("{")?;
                 let mut vs = Vec::new();
                 while !self.is_close() {
                     self.attrs()?;
+                    let vat = self.i;
                     let vn = self.decl_ident()?;
+                    // (E0428: two variants of one name)
+                    if vs.iter().any(|v: &(String, Fields, Option<Expr>)| v.0 == vn) {
+                        let t = &self.toks[vat];
+                        return Err(format!("{}:{}: the name `{vn}` is defined multiple times (E0428)", t.line, t.col + 1));
+                    }
                     let f = self.fields()?;
-                    let d = if self.eat_punct("=") { Some(self.expr(true)?) } else { None };
+                    let d = if self.eat_punct("=") { Some(self.const_expr()?) } else { None };
                     vs.push((vn, f, d));
                     if !self.eat_punct(",") {
                         break;
@@ -3006,6 +3291,9 @@ impl Parser {
             "impl" => {
                 self.i += 1;
                 let mut g = if self.is_punct("<") && !self.punct_at(1, ">") { self.generics()? } else { Generics { params: Vec::new(), preds: Vec::new() } };
+                if !self.gdefaults.is_empty() {
+                    self.misplaced_default(&g, false);
+                }
                 // (`impl<> T<> for S<>`: empty generics)
                 if self.punct_at(0, "<>") {
                     self.i += 2;
@@ -3030,6 +3318,9 @@ impl Parser {
                 self.i += 1;
                 let n = self.decl_ident()?;
                 let mut g = self.generics()?;
+                if !self.gdefaults.is_empty() {
+                    self.misplaced_default(&g, true);
+                }
                 let sup = if self.eat_punct(":") { self.bounds()? } else { Vec::new() };
                 self.where_clause(&mut g)?;
                 let items = self.items_in_braces()?;
@@ -3039,10 +3330,39 @@ impl Parser {
                 self.i += 1;
                 let mut s = String::new();
                 let mut prev_word = false;
+                // (the path before each open `{`, and since it: an import of `self` of the crate root, `self` or `super`
+                // has no name (E0431, rustc 1.100's message, at the `self`))
+                let (mut prefixes, mut path): (Vec<String>, String) = (vec![], String::new());
                 while !self.is_punct(";") {
                     let t = self.tok(0).ok_or_else(|| self.err("unterminated use"))?;
-                    // (名前・`}` の後ろにすぐ名前は来ない: `use a::{b} struct X` は `;` がない)
+                    let leaf = t.kind == TokKind::Ident && t.text == "self" && path.is_empty() && (self.peek_is(1, "}") || self.peek_is(1, ",") || self.peek_is(1, ";"));
+                    if leaf {
+                        // (`use self;`, `use {self};`, `use crate::{self};`, `use super::{self};`; not `use ::{self};`, which is
+                        // another error, nor a module's `self`)
+                        let outer = prefixes.last().map_or("", String::as_str);
+                        if !outer.starts_with("::") && outer.trim_end_matches("::").split("::").all(|w| matches!(w, "" | "crate" | "self" | "super")) {
+                            return Err(self.err_plain("imports need to be explicitly named"));
+                        }
+                    }
+                    match t.text.as_str() {
+                        "{" => {
+                            prefixes.push(format!("{}{}", prefixes.last().map_or("", String::as_str), path));
+                            path.clear();
+                        }
+                        "}" => {
+                            prefixes.pop();
+                            path.clear();
+                        }
+                        "," => path.clear(),
+                        _ => path.push_str(&t.text),
+                    }
+                    let t = self.tok(0).ok_or_else(|| self.err("unterminated use"))?;
+                    // (a name does not come right after a name / `}`: `use a::{b} struct X` is missing a `;`)
                     let word = t.kind == TokKind::Ident || (t.kind == TokKind::Close);
+                    // (`use foo::{bar} as baz;` / `use foo::* as baz;`: a group or a glob has no name to rename)
+                    if t.text == "as" && prefixes.is_empty() && (s.ends_with('}') || s.ends_with('*')) {
+                        return Err(self.err_plain("expected `;`, found keyword `as`"));
+                    }
                     if prev_word && t.kind == TokKind::Ident && t.text != "as" && !s.ends_with("as") {
                         return Err(self.err("expected `;`"));
                     }
@@ -3056,13 +3376,18 @@ impl Parser {
             "const" => {
                 self.i += 1;
                 let n = if self.eat_ident("_") { "_".to_string() } else { self.ident()? };
+                // (no type before the value, `const FOO = 1;` / `const FOO: = 1;`: rustc's error after the name or the
+                // colon, reported after the parse as its type check reports it)
+                if self.is_punct("=") || (self.is_punct(":") && self.punct_at(1, "=")) {
+                    self.missing_item_type("const");
+                }
                 let t = if self.eat_punct(":") { Some(self.ty()?) } else { None };
                 if t.as_ref().is_some_and(ty_has_infer) {
                     return Err(self.err_plain("the placeholder `_` is not allowed within types on item signatures for constants (E0121)"));
                 }
                 let e = if self.eat_punct("=") {
                     let st = self.i;
-                    let e = self.expr(true)?;
+                    let e = self.const_expr()?;
                     self.init_text = self.tokens_text(st, self.i);
                     Some(e)
                 } else {
@@ -3075,9 +3400,15 @@ impl Parser {
                 self.i += 1;
                 let m = self.eat_ident("mut");
                 let n = self.decl_ident()?;
-                self.expect_punct(":")?;
-                let t = self.ty()?;
-                if ty_has_infer(&t) {
+                let missing = self.is_punct("=") || (self.is_punct(":") && self.punct_at(1, "="));
+                let t = if missing {
+                    self.missing_item_type("static");
+                    Ty::Infer
+                } else {
+                    self.expect_punct(":")?;
+                    self.ty()?
+                };
+                if !missing && ty_has_infer(&t) {
                     return Err(self.err_plain("the placeholder `_` is not allowed within types on item signatures for statics (E0121)"));
                 }
                 // (`static X: T;` in an extern block: a symbol of the program it links with, no initializer)
@@ -3091,7 +3422,7 @@ impl Parser {
                 }
                 self.expect_punct("=")?;
                 let st = self.i;
-                let e = self.expr(true)?;
+                let e = self.const_expr()?;
                 self.init_text = self.tokens_text(st, self.i);
                 self.expect_punct(";")?;
                 Ok(ItemKind::Static(m, n, t, e))
@@ -3150,7 +3481,7 @@ impl Parser {
                 if quals.iter().any(|q| q == "unsafe") && self.is_open("{") {
                     return Err(self.err("expected an item"));
                 }
-                // `name!(..);` (アイテムの位置のマクロ)
+                // `name!(..);` (a macro in item position)
                 let p = self.path(false)?;
                 if !self.eat_punct("!") {
                     return Err(self.err("expected an item"));
@@ -3163,7 +3494,33 @@ impl Parser {
     }
 }
 
-// ---------------------------------------------------------------- 表示 (確かめる用)
+// ---------------------------------------------------------------- Display (for checking)
+
+/// E0586: `1..=` / `0..= =` / `X...`, an inclusive range with no end. at: the `..=`'s first token
+#[cold]
+fn no_end_err(toks: &[Tok], at: usize) -> String {
+    match toks.get(at) {
+        Some(t) => format!("{}:{}: inclusive range with no end (E0586)", t.line, t.col + 1),
+        None => "inclusive range with no end (E0586)".to_string(),
+    }
+}
+
+/// E0229: `<I as Foo<A = Bar>>::A`, `where T<Bogus = Foo>: A`, an associated item's constraint where a path names a
+/// type, or a trait it is not a bound of. st: the path's first token
+fn constraint_check(toks: &[Tok], p: &Path, st: usize) -> R<()> {
+    if p.segs.iter().any(|s| s.args.iter().any(|a| matches!(a, GArg::Bind(..)))) {
+        return Err(constraint_err(toks, st));
+    }
+    Ok(())
+}
+
+#[cold]
+fn constraint_err(toks: &[Tok], st: usize) -> String {
+    match toks.get(st) {
+        Some(t) => format!("{}:{}: associated item constraints are not allowed here (E0229)", t.line, t.col + 1),
+        None => "associated item constraints are not allowed here (E0229)".to_string(),
+    }
+}
 
 pub fn path_text(p: &Path) -> String {
     let mut s = String::new();
@@ -3236,7 +3593,7 @@ pub fn ty_text(t: &Ty) -> String {
     }
 }
 
-/// 構文木の節の数 (種類ごと)。syn で数えたものと比べて確かめる
+/// The number of syntax tree nodes (per kind). Checked against the counts made with syn
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct Counts {
     pub fns: u32,
@@ -3348,7 +3705,7 @@ impl Counts {
                 self.expr(l);
                 self.expr(r);
             }
-            // (syn 2 は `a += b` も Binary)
+            // (syn 2 makes `a += b` a Binary too)
             Expr::AssignOp(_, l, r, _) => {
                 self.binaries += 1;
                 self.expr(l);

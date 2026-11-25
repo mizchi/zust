@@ -1,7 +1,7 @@
-//! Cranelift の FunctionBuilder / InstBuilder と同じ形の API を、命令を記録するだけの zust_ir::Recorder の上に作る薄い層
-//! (機械語にするのはバックエンド: codegen の lower が記録を minclif / Cranelift で組み立て直す)。
-//! codegen.rs (Cranelift 版) のコードをほぼそのまま移せるようにするためのもの。
-//! 型による命令の振り分け (i128 / 浮動小数点) もここでする。
+//! A thin layer that builds an API of the same shape as Cranelift's FunctionBuilder / InstBuilder on top of zust_ir::Recorder, which only records instructions
+//! (making machine code is the backend's job: codegen's lower rebuilds the recording with minclif / Cranelift).
+//! It is there so the code of codegen.rs (the Cranelift version) can be moved over almost as is.
+//! Dispatching instructions by type (i128 / floating point) is also done here.
 
 pub use crate::ir::{Block, FloatCC, IntCC, StackSlot, Type, Value, Variable};
 use crate::ir::{FuncRef as MFuncRef, Recorder as M};
@@ -18,7 +18,7 @@ pub mod types {
     pub const V128: Type = Type::Vec(crate::ir::VBits::B128);
 }
 
-/// メモリアクセスの印 (minclif では意味を持たない)
+/// Memory access flags (meaningless in minclif)
 #[derive(Clone, Copy, Default)]
 pub struct MemFlagsData;
 impl MemFlagsData {
@@ -76,13 +76,13 @@ pub struct FunctionBuilder {
     sigs: Vec<Vec<Type>>,
     results: Vec<Vec<Value>>,
     gvs: Vec<String>,
-    /// iconst で作った値とその定数
+    /// Values made by iconst and their constants
     consts: crate::fxhash::FxMap<u32, i64>,
-    /// ブロックの間のジャンプ (借用検査の CFG)
+    /// Jumps between blocks (the borrow checker's CFG)
     pub edges: Vec<(Block, Block)>,
-    /// 今のブロックは終端命令を置いた (この後の命令には届かない)
+    /// The current block has had a terminator placed (instructions after this are unreachable)
     pub dead: bool,
-    /// 終端命令のないまま離れたブロック → 切り替え先 (戻ってこなければそこへ落ちる)
+    /// A block left without a terminator → the block switched to (falls through to it unless we come back)
     pub falls: Vec<(Block, Block)>,
 }
 
@@ -124,11 +124,11 @@ impl FunctionBuilder {
         self.dead = false;
         self.m.switch_to_block(b)
     }
-    /// 借用検査の記録先のブロック (終端命令の後なら None)
+    /// The block the borrow checker records into (None after a terminator)
     pub fn live_block(&self) -> Option<Block> {
         if self.dead { None } else { self.m.current_block() }
     }
-    /// CFG の辺 (落ちるものを含む)
+    /// CFG edges (including fallthroughs)
     pub fn cfg_edges(&self) -> Vec<(Block, Block)> {
         let mut e = self.edges.clone();
         e.extend_from_slice(&self.falls);
@@ -147,17 +147,17 @@ impl FunctionBuilder {
         self.m.declare_var(t)
     }
     pub fn def_var(&mut self, var: Variable, v: Value) {
-        // (i128 の変数は 16 byte: minclif の変数は 8 byte なので値をそのまま使う)
+        // (An i128 variable is 16 bytes: minclif's variables are 8 bytes, so the value is used as is)
         self.m.def_var(var, v)
     }
     pub fn use_var(&mut self, var: Variable) -> Value {
         self.m.use_var(var)
     }
-    /// (サイズ, アラインメント)
+    /// (size, alignment)
     pub fn create_stack_slot(&mut self, size: u32, align: u32) -> StackSlot {
         self.m.create_stack_slot(size, align)
     }
-    /// 名前と戻り値の型で関数を登録する
+    /// Registers a fn by name and return types
     pub fn import_function(&mut self, name: &str, rets: Vec<Type>) -> FuncRef {
         if let Some(i) = self.funcs.iter().position(|f| f.1 == name && f.2 == rets) {
             return FuncRef(i as u32);
@@ -177,7 +177,7 @@ impl FunctionBuilder {
         self.gvs.push(name.to_string());
         GlobalValue(self.gvs.len() as u32 - 1)
     }
-    /// 値が iconst の結果ならその定数
+    /// The constant, if the value is the result of an iconst
     pub fn iconst_value(&self, v: Value) -> Option<i64> {
         self.consts.get(&v.0).copied()
     }
@@ -193,7 +193,7 @@ impl FunctionBuilder {
     }
 }
 
-/// 1 命令分の組み立て (Cranelift と同じく、使うたびに `b.ins()` で作る)
+/// Assembling one instruction (as in Cranelift, made with `b.ins()` on each use)
 pub struct Ins<'a>(&'a mut FunctionBuilder);
 
 fn is128(b: &M, v: Value) -> bool {
@@ -219,7 +219,7 @@ impl Ins<'_> {
             let hi = m.iconst(Type::I64, 0);
             return m.iconcat(lo, hi);
         }
-        // (幅で切る: 0 拡張で持つ)
+        // (Truncate to the width: kept zero-extended)
         let x = match t {
             Type::I8 => x as u8 as i64,
             Type::I16 => x as u16 as i64,
@@ -304,7 +304,7 @@ impl Ins<'_> {
         self.0.m.symbol_addr(&n)
     }
 
-    // --- 整数 ---------------------------------------------------------
+    // --- Integers ---------------------------------------------------------
     pub fn iadd(self, a: Value, b: Value) -> Value {
         let m = &mut self.0.m;
         if is128(m, a) { m.iadd128(a, b) } else if m.value_type(a).is_float() { m.fadd(a, b) } else { m.iadd(a, b) }
@@ -433,7 +433,7 @@ impl Ins<'_> {
     pub fn icmp_imm(self, cc: IntCC, a: Value, x: i64) -> Value {
         let m = &mut self.0.m;
         if is128(m, a) {
-            // (64 bit の即値を符号拡張して比べる)
+            // (Sign-extend the 64-bit immediate and compare)
             let lo = m.iconst(Type::I64, x);
             let hi = m.iconst(Type::I64, if x < 0 { -1 } else { 0 });
             let k = m.iconcat(lo, hi);
@@ -549,7 +549,7 @@ impl Ins<'_> {
         if !is128(m, a) {
             return m.clz(a);
         }
-        // (上位が 0 なら 64 + 下位の clz)
+        // (If the upper half is 0, 64 + clz of the lower half)
         let (lo, hi) = m.isplit(a);
         let zh = m.icmp_imm(IntCC::Equal, hi, 0);
         let cl = m.clz(lo);
@@ -622,7 +622,7 @@ impl Ins<'_> {
     pub fn iabs(self, a: Value) -> Value {
         let m = &mut self.0.m;
         if is128(m, a) {
-            // (負なら 0 - a)
+            // (If negative, 0 - a)
             let lo = m.iconst(Type::I64, 0);
             let z = m.iconcat(lo, lo);
             let neg = m.icmp128(IntCC::SignedLessThan, a, z);
@@ -632,7 +632,7 @@ impl Ins<'_> {
         m.iabs(a)
     }
 
-    // --- 浮動小数点 ----------------------------------------------------
+    // --- Floating point ----------------------------------------------------
     pub fn fadd(mut self, a: Value, b: Value) -> Value {
         self.m().fadd(a, b)
     }

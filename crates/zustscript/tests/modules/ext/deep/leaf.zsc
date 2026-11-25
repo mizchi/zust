@@ -1,0 +1,4 @@
+// (tests/examples.rs options_and_try) an extern type of a module next to this file, used through two importers
+extern "./tok.js" type Token { text: String }
+extern "./tok.js" fn make_token(s: String) -> Token = "make";
+export fn token(s: String) -> Token { make_token(s) }

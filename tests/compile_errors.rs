@@ -1,5 +1,5 @@
-//! コンパイルエラーの場所とメッセージ (`行:桁: メッセージ`) が tests/compile_errors/<名前>.err と同じか。
-//! tests/compile_errors/*.rs はどれも 1 つ型のエラーがある (期待値は最初の syn 版のドライバで作ったもの)
+//! Whether the location and message of compile errors (`line:col: message`) are the same as tests/compile_errors/<name>.err.
+//! Each of tests/compile_errors/*.rs has one type error (the expected values were made with the first, syn-based driver)
 #[test]
 fn compile_errors_match_expected() {
     let dir = std::env::temp_dir().join(format!("cerr_{}", std::process::id()));
@@ -10,7 +10,7 @@ fn compile_errors_match_expected() {
     for p in &files {
         let src = std::fs::read_to_string(p).unwrap();
         let want = std::fs::read_to_string(p.with_extension("err")).unwrap();
-        let got = zustc::driver2::build(&src, &dir.join("x"), false, None).err().unwrap_or_default();
+        let got = zustc::session::build(&src, &dir.join("x"), false, None).err().unwrap_or_default();
         if got.trim() != want.trim() {
             bad.push(format!("{}: got {got:?}, want {:?}", p.display(), want.trim()));
         }

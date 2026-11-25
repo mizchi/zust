@@ -349,6 +349,12 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                 parts.extend(lowered);
                 return Ok(TySyn::Assoc(Box::new(TySyn::Tuple(parts)), format!("{TARGS_PREFIX}{tr}#{name}")));
             }
+            // (the trait too, when its arguments did not take the path above: `<&J as BitAnd<&J>>::Output` beside `impl Not
+            // for &J`, that trait's impl gives it)
+            let name = match tr {
+                Some(t) if !t.is_empty() && !t.contains(':') => format!("{TRAIT_ASSOC}{t}:{name}"),
+                _ => name,
+            };
             TySyn::Assoc(Box::new(tysyn(q, self_ty)?), name)
         }
         PTy::Path(None, p) => path_ty(p, self_ty)?,
@@ -367,6 +373,18 @@ pub const GAT_PREFIX: &str = "#gat:";
 /// The mark of an associated type a qualified path names of a trait other than std's operators (`<i32 as
 /// Local>::Output`): std's impls for the numbers do not give it
 pub const NO_STD_ASSOC: &str = "#impl:";
+
+/// The mark of an associated type a qualified path names with its trait, `#tr:BitAnd:Output` of `<&J as
+/// BitAnd<&J>>::Output`: the impl of that trait gives it, before another trait's of the same name for the type
+pub const TRAIT_ASSOC: &str = "#tr:";
+
+/// An associated type's name without the trait a qualified path gave it, and that trait
+pub fn split_trait_assoc(n: &str) -> (&str, Option<&str>) {
+    match n.strip_prefix(TRAIT_ASSOC).and_then(|r| r.split_once(':')) {
+        Some((t, rest)) => (rest, Some(t)),
+        None => (n, None),
+    }
+}
 
 fn gat_app(base: TySyn, seg: &crate::parse::Seg, self_ty: Option<&TySyn>) -> R<TySyn> {
     let mut parts = vec![base];
@@ -441,6 +459,9 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
     if last.fn_args.is_some() {
         return Err("unsupported type path".to_string());
     }
+    if !last.args.is_empty() && (n == 1 || p.segs[n - 2].name == "primitive") && (Ty::prim(&last.name).is_some() || last.name == "str") {
+        return Err(builtin_args_err(last));
+    }
     let s = last.name.clone();
     let mut generic_args = Vec::new();
     for a in &last.args {
@@ -488,4 +509,11 @@ fn self_name(a: &str, self_ty: Option<&TySyn>) -> String {
         }
         _ => a.to_string(),
     }
+}
+
+/// E0109: `u32<i32>` / `str<'static>`, generic arguments on a builtin type
+#[cold]
+fn builtin_args_err(last: &crate::parse::Seg) -> String {
+    let kind = if last.args.iter().any(|a| matches!(a, GArg::Ty(_) | GArg::Const(_))) { "type" } else { "lifetime" };
+    format!("{kind} arguments are not allowed on builtin type `{}` (E0109)", last.name)
 }

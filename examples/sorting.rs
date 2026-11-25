@@ -1,5 +1,5 @@
-// sort (マージソート) / binary_search / clamp のサンプル: 大きな Vec の sort、安定性、Drop を持つ要素、
-// 配列・スライスの sort と binary_search、重複のある binary_search、clamp (整数・Ord な struct)
+// A sample of sort (merge sort) / binary_search / clamp: sorting a big Vec, stability, elements with Drop,
+// sort and binary_search on arrays / slices, binary_search with duplicates, clamp (integers / an Ord struct)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Ver(u32, u32);
 
@@ -20,7 +20,7 @@ fn is_sorted(v: &[i64]) -> bool {
 }
 
 fn main() {
-    // 大きな Vec (マージが何段も走る)
+    // A big Vec (the merge runs over many levels)
     let mut seed = 42u64;
     let mut big: Vec<i64> = Vec::new();
     for _ in 0..5000 {
@@ -29,7 +29,7 @@ fn main() {
     big.sort();
     let s: i64 = big.iter().sum();
     println!("{} {} {} {} {}", is_sorted(&big), big[0], big[2500], big[4999], s);
-    // 安定性: キーが同じなら元の順
+    // Stability: equal keys keep their original order
     let mut pairs: Vec<(u32, usize)> = Vec::new();
     for i in 0..100 {
         pairs.push(((lcg(&mut seed) % 5) as u32, i));
@@ -44,7 +44,7 @@ fn main() {
         i += 1;
     }
     println!("{} {:?} {:?}", stable, pairs[0], pairs[99]);
-    // Drop を持つ要素
+    // Elements with Drop
     let mut words: Vec<String> = Vec::new();
     for i in 0..40 {
         words.push(format!("w{}", (i * 7919) % 97));
@@ -53,7 +53,7 @@ fn main() {
     println!("{} {} {}", words[0], words[20], words[39]);
     words.sort_unstable();
     println!("{:?}", &words[..5]);
-    // binary_search (重複あり・なし)
+    // binary_search (with and without duplicates)
     let v = vec![1, 3, 3, 3, 5, 8, 13];
     println!("{:?} {:?} {:?} {:?} {:?}", v.binary_search(&5), v.binary_search(&3), v.binary_search(&4), v.binary_search(&0), v.binary_search(&99));
     let dup = vec![2, 2, 2, 2, 2, 2, 2, 2, 2];
@@ -67,7 +67,7 @@ fn main() {
     let r = pairs.binary_search_by(|p| p.0.cmp(&3).then(std::cmp::Ordering::Greater));
     let k = pairs.binary_search_by_key(&4, |p| p.0);
     println!("{:?} {}", r, k.is_ok());
-    // 配列・スライス
+    // Arrays / slices
     let mut arr = [9, 4, 7, 1, 8, 2];
     arr.sort();
     println!("{:?} {:?}", arr, arr.binary_search(&7));

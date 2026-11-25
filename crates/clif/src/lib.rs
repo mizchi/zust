@@ -1,9 +1,9 @@
-//! driver2 の Cranelift バックエンド: minclif の FunctionBuilder が記録した命令の列 (acg が呼んだ順) を、
-//! Cranelift の IR に組み立て直してコンパイルする。acg・キャッシュ・.o の書き出しは minclif と同じものを使うので、
-//! 「同じフロントエンド・同じ命令の列」でバックエンドだけを比べられる (minclif と Cranelift)。
+//! session's Cranelift backend: rebuilds the instruction sequence recorded by minclif's FunctionBuilder (in the order acg called it)
+//! as Cranelift IR and compiles it. acg, the cache and .o writing are the same ones minclif uses, so
+//! the backends alone can be compared with "the same frontend, the same instruction sequence" (minclif and Cranelift).
 //!
-//! 返すのは minclif と同じ形: (機械語, 再配置 (名前・ELF の種類), trap の場所と番号)。
-//! zustc 自身ではコンパイルできない (cranelift を使う) ので、セルフホストには入れない。
+//! It returns the same shape as minclif: (machine code, relocations (name, ELF kind), trap locations and numbers).
+//! zustc itself cannot compile it (it uses cranelift), so it is not part of the self-host.
 
 use minclif::{FMap, FSet};
 
@@ -22,7 +22,7 @@ use minclif::{FloatCC, FunctionBuilder, IntCC, Op, Reloc, StackSlot, Type};
 mod simd;
 use simd::{PART, nparts};
 
-/// Cranelift の ISA (opt: -O なら speed、fast_ra: single_pass のレジスタ割り当て)
+/// Cranelift ISA (opt: speed if -O, fast_ra: single_pass register allocation)
 pub fn make_isa(opt: bool, fast_ra: bool) -> OwnedTargetIsa {
     let mut f = settings::builder();
     f.set("opt_level", if opt { "speed" } else { "none" }).unwrap();
@@ -30,7 +30,7 @@ pub fn make_isa(opt: bool, fast_ra: bool) -> OwnedTargetIsa {
     f.set("is_pic", "true").unwrap();
     f.set("unwind_info", "false").unwrap();
     f.set("enable_llvm_abi_extensions", "true").unwrap();
-    // (IR の検査はコンパイルの 18% を占めていた: 既定では切る。ZUSTC_CLIF_VERIFY=1 で入れる)
+    // (IR verification took 18% of compilation: off by default. ZUSTC_CLIF_VERIFY=1 turns it on)
     f.set("enable_verifier", if std::env::var_os("ZUSTC_CLIF_VERIFY").is_some() { "true" } else { "false" }).unwrap();
     let mut ib = cranelift_native::builder().unwrap();
     // (no AVX-512: no 512-bit registers are used, and with it Cranelift picks EVEX forms for some 128-bit
@@ -95,7 +95,7 @@ fn fcc(c: FloatCC) -> CFloatCC {
     }
 }
 
-/// minclif の記録から機械語を作る。zero: 入口で 0 にするスロット
+/// Makes machine code from a minclif recording. zero: slots zeroed at the entry
 pub fn compile(fb: &FunctionBuilder, zero: &[StackSlot], opt: bool) -> Result<(Vec<u8>, Vec<Reloc>, Vec<(u32, u8)>), String> {
     let fast_ra = std::env::var_os("ZUSTC_CLIF_FAST_RA").is_some();
     ISA.with(|cell| {
@@ -123,10 +123,10 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
     // (FMA instructions: the target's (cranelift_native's) flag)
     let has_fma = isa.isa_flags().iter().any(|f| f.name == "has_fma" && f.as_bool() == Some(true));
     let mut func = ir::Function::with_name_signature(UserFuncName::user(0, 0), sig);
-    // (Context と FunctionBuilderContext は関数の間で使い回す: 中の Vec を毎回作り直さない)
+    // (Context and FunctionBuilderContext are reused across fns: the Vecs inside are not rebuilt each time)
     let (mut ctx, mut fctx) = CTXS.with(|c| c.borrow_mut().take()).unwrap_or_else(|| (Context::new(), FunctionBuilderContext::new()));
     let mut b = CBuilder::new(&mut func, &mut fctx);
-    // (名前の表: 再配置の番号 → 名前)
+    // (Name table: relocation number → name)
     let mut names: Vec<String> = vec![];
     let mut vals: FMap<u32, ir::Value> = FMap::default();
     // (a vector held in several parts: its parts after the first, which is in vals; its variables)
@@ -136,11 +136,11 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
     let mut blocks: FMap<u32, ir::Block> = FMap::default();
     let mut vars: FMap<u32, Variable> = FMap::default();
     let mut slots: FMap<u32, ir::StackSlot> = FMap::default();
-    // (minclif の関数の番号 → 名前。呼ぶときのシグネチャごとに Cranelift の FuncRef を作る)
+    // (minclif fn number → name. A Cranelift FuncRef is made per signature used at a call)
     let mut fnames: FMap<u32, String> = FMap::default();
     let mut frefs: FMap<(String, Vec<ir::Type>, Vec<ir::Type>), ir::FuncRef> = FMap::default();
     let mut gvs: FMap<String, ir::GlobalValue> = FMap::default();
-    // 入口: 引数の値 (minclif の値 0..) と、0 にするスロット。最初のブロックへ飛ぶ
+    // Entry: the argument values (minclif values 0..) and the slots to zero. Jumps to the first block
     let entry = b.create_block();
     b.append_block_params_for_function_params(entry);
     b.switch_to_block(entry);
@@ -154,10 +154,10 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
         }
         at += n;
     }
-    // 定義と別の区間 (ブロックを続けて書いた範囲) で使う値は Variable にする: acg は値を支配していないブロックで
-    // 使うことがある (minclif は値をスロットに置くので困らない)。SSA は cranelift_frontend が組み立てる
+    // Values used in a different segment (a range where a block was written contiguously) from their definition become Variables: acg sometimes uses values in blocks
+    // they do not dominate (minclif keeps values in slots, so this is no problem). cranelift_frontend builds the SSA
     let mut gvars: FMap<u32, Variable> = FMap::default();
-    // スロットのアドレスは使う所で作り直す (長く生きる値・区間をまたぐ Variable にしない: レジスタ割り当てが軽くなる)
+    // Slot addresses are rebuilt where they are used (not made long-lived values / Variables across segments: register allocation gets lighter)
     let remat = std::env::var_os("ZUSTC_CLIF_NO_REMAT").is_none();
     let fold_br = std::env::var_os("ZUSTC_CLIF_NO_FOLD_BR").is_none();
     let mut saddr: FMap<u32, (u32, i32)> = FMap::default();
@@ -212,8 +212,8 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
             gvars.insert(id, var);
         }
     }
-    // スタックのスロットのフィールドを Variable にする (SROA: minclif と同じ判定。アドレスが load / store にしか
-    // 使われないスロット)。Cranelift はスタックのスロットを SSA にしないので、struct の値がメモリを往復しなくなる
+    // Turn stack slot fields into Variables (SROA: the same decision as minclif; slots whose address is used only by load /
+    // store). Cranelift does not make stack slots SSA, so struct values no longer round-trip through memory
     let mut facc: FMap<u32, Variable> = FMap::default();
     if let (Some(tr), true) = (fb.track(), std::env::var_os("ZUSTC_CLIF_NO_SROA").is_none()) {
         let zs: Vec<u32> = zero.iter().map(|z| z.0).collect();
@@ -223,7 +223,7 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
                 .iter()
                 .map(|&t| {
                     let var = b.declare_var(ty(t));
-                    // (入口で 0: 読む前に書かない経路も決まった値にする)
+                    // (0 at the entry: paths that read before writing also get a definite value)
                     let z = match t {
                         Type::F64 => b.ins().f64const(0.0),
                         Type::F32 => b.ins().f32const(0.0),
@@ -242,12 +242,12 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
             }
         }
     }
-    // (ブロックの引数: Variable にしたものはブロックの始まりで def_var する)
+    // (Block params: those made Variables are def_var'd at the start of the block)
     let mut bparams: FMap<u32, Vec<u32>> = FMap::default();
     let mut started: FSet<u32> = FSet::default();
     let mut in_entry = true;
-    // 前のブロックの数 (まだ書いていない飛び込む命令の数)。0 になったブロックはすぐ閉じる (seal): 変数の値を前のブロックから
-    // その場で決められるので、ブロックの引数の仮置きが減り、定数の条件の分岐を畳める
+    // The number of predecessor blocks (jumps into it not yet written). A block that reaches 0 is sealed at once: a variable's value can be decided from the predecessors
+    // on the spot, so fewer block params are placed provisionally, and branches on constant conditions can be folded
     let early_seal = std::env::var_os("ZUSTC_CLIF_LATE_SEAL").is_none();
     let mut rem: FMap<u32, u32> = FMap::default();
     if early_seal {
@@ -261,7 +261,7 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
                     *rem.entry(f.0).or_default() += 1;
                 }
                 Op::SwitchToBlock(bk) if first => {
-                    // (入口からの jump)
+                    // (The jump from the entry)
                     *rem.entry(bk.0).or_default() += 1;
                     first = false;
                 }
@@ -331,7 +331,7 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
     };
     for (i, op) in fb.ops.iter().enumerate() {
         let res = &fb.res[i];
-        // (値を作る命令: Variable にした値はここで def_var)
+        // (Instructions that make values: values made Variables are def_var'd here)
         let makes_values = !matches!(
             op,
             Op::CreateBlock | Op::AppendBlockParam(..) | Op::SwitchToBlock(_) | Op::DeclareVar(_) | Op::CreateStackSlot(..) | Op::ImportFunction(_)
@@ -614,7 +614,7 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
                 let cv = v!(c);
                 let ta: Vec<ir::BlockArg> = vsf!(ta).into_iter().map(|x| x.into()).collect();
                 let ea: Vec<ir::BlockArg> = vsf!(ea).into_iter().map(|x| x.into()).collect();
-                // (条件が定数 (ムーブした後の drop フラグなど) なら、行く方へ jump する: 行かない方は到達しなくなって消える)
+                // (If the condition is a constant (a drop flag after a move, etc.), jump to the side taken: the other side becomes unreachable and disappears)
                 let k = match b.func.dfg.value_def(b.func.dfg.resolve_aliases(cv)) {
                     ir::ValueDef::Result(inst, _) => match b.func.dfg.insts[inst] {
                         ir::InstructionData::UnaryImm { opcode: ir::Opcode::Iconst, imm } if fold_br => Some(imm.bits() != 0),
@@ -872,7 +872,7 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
                 vals.insert(res[1], hi);
             }
             Op::Udiv128(x, y) | Op::Sdiv128(x, y) | Op::Urem128(x, y) | Op::Srem128(x, y) => {
-                // (i128 の割り算は libgcc: minclif と同じ)
+                // (i128 division is libgcc: same as minclif)
                 let n = match op {
                     Op::Udiv128(..) => "__udivti3",
                     Op::Sdiv128(..) => "__divti3",
@@ -989,7 +989,7 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
     }
     b.seal_all_blocks();
     b.finalize(isa.frontend_config());
-    // (入口で 0 にするスロット (drop フラグ): 途中で作られるので、組み立てた後で入口の先頭に書く)
+    // (Slots zeroed at the entry (drop flags): they are created midway, so they are written at the head of the entry after assembling)
     if !zero.is_empty() {
         use cranelift_codegen::cursor::{Cursor, FuncCursor};
         let mut pos = FuncCursor::new(&mut func).at_first_insertion_point(entry);
@@ -1000,7 +1000,7 @@ fn build(fb: &FunctionBuilder, zero: &[StackSlot], isa: &dyn cranelift_codegen::
             }
         }
     }
-    // (ZUSTC_CLIF_STATS=1: 命令の種類ごとの数を出す。ZUSTC_CLIF_DUMP=1: IR を出す)
+    // (ZUSTC_CLIF_STATS=1: prints counts per instruction kind. ZUSTC_CLIF_DUMP=1: prints the IR)
     if std::env::var_os("ZUSTC_CLIF_STATS").is_some() {
         let mut n = 0;
         for bl in func.layout.blocks() {

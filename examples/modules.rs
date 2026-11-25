@@ -1,5 +1,5 @@
-// モジュールのサンプル (1 ファイル): 入れ子の mod、pub / pub(crate)、use (self:: / super:: / crate::)、
-// mod の中の struct / enum / impl / trait / const、パスでの呼び出し、#[cfg(test)] mod tests (コンパイルしない)
+// Modules sample (one file): nested mods, pub / pub(crate), use (self:: / super:: / crate::),
+// struct / enum / impl / trait / const inside a mod, calls by path, #[cfg(test)] mod tests (not compiled)
 mod geometry {
     pub const UNIT: i32 = 1;
 

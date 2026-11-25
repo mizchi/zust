@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# 英語の文書と日本語訳が食い違っていないかを jev-lint docs で確かめる。
+# Checks with jev-lint docs that the English documents and their Japanese translations do not disagree.
 #
-#   scripts/docs_check.sh           記録 (台帳 .jev-lint/judgments/) から今の文書の判定を読む (オフライン、API キー不要。CI)
-#   scripts/docs_check.sh --update  台帳に答えのない比較 (文書が変わった組) だけ、モデルに判定させて台帳に足す
-#                                   (TYPESAFE_API_KEY か TYPESAFEAI_API_KEY が要る。コミットフック)
+#   scripts/docs_check.sh           reads the current documents' verdicts from the records (the ledger .jev-lint/judgments/) (offline, no API key needed; CI)
+#   scripts/docs_check.sh --update  has the model judge only the comparisons with no answer in the ledger (pairs whose documents changed) and adds them to the ledger
+#                                   (needs TYPESAFE_API_KEY or TYPESAFEAI_API_KEY; commit hook)
 #
-# 台帳は jev-lint 0.10 の judgment ledger: 追記だけのファイルのディレクトリで、答えは比較の内容 (抜粋の中身、問い、
-# モデル) で引く。全マニフェストで 1 つを共有する。ブランチ同士はファイルの和集合としてそのままマージできる。
+# The ledger is jev-lint 0.10's judgment ledger: a directory of append-only files, where answers are looked up by the content of the comparison (the excerpts' contents, the question,
+# the model). One is shared by all manifests. Branches can be merged as they are, as the union of the files.
 #
-# API キーがないとき (TYPESAFE_API_KEY / TYPESAFEAI_API_KEY が空) は、答えのない比較があるマニフェストを判定できないので
-# 飛ばす (警告を出して失敗にしない)。組がそろっているか・マニフェストが最新か・記録のある組が食い違っていないかは
-# キーがなくても確かめる。DOCS_CHECK_STRICT=1 なら飛ばさず、古い記録を失敗 (3) にする。
+# Without an API key (TYPESAFE_API_KEY / TYPESAFEAI_API_KEY empty), manifests with unanswered comparisons cannot be judged, so they are
+# skipped (with a warning, not as a failure). Whether the pairs are complete, whether the manifests are up to date and whether the pairs with records disagree are
+# checked even without a key. With DOCS_CHECK_STRICT=1, nothing is skipped and stale records are a failure (3).
 #
-# 終了コード: 0 一致 (キーがなく飛ばしたものを含む)、1 食い違い (どの組かを出す)、3 答えのない比較がある (--update で足す)、
-# 2 そのほかのエラー
+# Exit codes: 0 agreement (including what was skipped for lack of a key), 1 disagreement (says which pair), 3 there are unanswered comparisons (add them with --update),
+# 2 other errors
 set -uo pipefail
 cd "$(dirname "$0")/.."
 JEV="npx -y jev-lint@0.10.0"
@@ -32,11 +32,11 @@ status=0
 for m in .jev-lint/documents*.json; do
   $JEV docs --document-manifest "$m" --ledger "$LEDGER" --replay >/tmp/jev-docs.$$ 2>&1
   rc=$?
-  # (3 は台帳に答えのない比較があるとき (「a/b comparisons answered」で a < b) と、答えが insufficient_context など
-  # で決まらないとき。--update で判定するのは前者だけ)
+  # (3 is when the ledger has comparisons with no answer ("a/b comparisons answered" with a < b) and when an answer is insufficient_context or the like
+  # and so undecided. --update judges only the former)
   stale=0
   [ $rc -eq 3 ] && python3 -c 'import re,sys; m=re.search(r"(\d+)/(\d+) comparisons answered", open(sys.argv[1]).read()); sys.exit(0 if m and int(m[1]) < int(m[2]) else 1)' /tmp/jev-docs.$$ && stale=1
-  # (答えのない比較があり、判定するキーもない: 飛ばす)
+  # (there are unanswered comparisons and no key to judge them: skip)
   if [ $rc -eq 3 ] && [ $stale -eq 1 ] && [ $have_key -eq 0 ] && [ $strict -eq 0 ]; then
     msg="docs: $m に台帳の答えがない比較があるが、TYPESAFE_API_KEY がないので判定を飛ばした (キーを設定して scripts/docs_check.sh --update で記録する)"
     echo "$msg" >&2

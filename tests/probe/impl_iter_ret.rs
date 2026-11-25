@@ -1,4 +1,4 @@
-// (未対応: `-> impl Iterator` の戻り値)
+// (unsupported: a `-> impl Iterator` return value)
 fn evens(n: u32) -> impl Iterator<Item = u32> { (0..n).filter(|x| x % 2 == 0) }
 struct Grid { w: usize, h: usize }
 impl Grid { fn cells(&self) -> impl Iterator<Item = (usize, usize)> + '_ { (0..self.h).flat_map(move |y| (0..self.w).map(move |x| (x, y))) } }

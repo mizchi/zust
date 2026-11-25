@@ -1,0 +1,2 @@
+// expect: an extern's `Result` catches what JS throws: its error is a `String` (the message) or an extern type (the value thrown), not i32
+extern fn parse(s: String) -> Result<i32, i32> = "JSON.parse";

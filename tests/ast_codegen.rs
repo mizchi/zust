@@ -1,4 +1,4 @@
-//! syn・Cranelift を使わない経路 (driver2 + acg + minclif) で tests/acg/*.rs をビルドし、rustc でビルドしたものと出力を比べる。
+//! Builds tests/acg/*.rs with the session (acg + minclif) and compares the output with the rustc build.
 #![cfg(feature = "acg")]
 
 /// A new directory only this user can enter, made where nothing was: a directory that is there already (another
@@ -48,14 +48,14 @@ fn acg_like_rustc() {
     let dir = private_dir("acg");
     let mut files: Vec<std::path::PathBuf> = std::fs::read_dir("tests/acg").unwrap().map(|e| e.unwrap().path()).collect();
     files.sort();
-    // (ACG_FILE=path で 1 ファイルだけ試す)
+    // (ACG_FILE=path tries just one file)
     if let Ok(f) = std::env::var("ACG_FILE") {
         files = vec![std::path::PathBuf::from(f)];
     }
     let bad: Vec<String> = par::par_map(&files, |p| -> Result<(), String> {
         let name = p.file_stem().unwrap().to_string_lossy().to_string();
         let src = std::fs::read_to_string(p).unwrap();
-        let obj = match zustc::driver2::build_object(&src, false) {
+        let obj = match zustc::session::build_object(&src, false) {
             Ok(o) => o,
             Err(e) => return Err(format!("{name}: {e}")),
         };

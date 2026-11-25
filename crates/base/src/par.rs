@@ -1,5 +1,5 @@
 //! Thread parallelism for the front end (prototype, docs/parallel-frontend.md): an ordered parallel map on scoped
-//! threads. What the forked children of driver2 do (item summaries, check_many), in one process: the work is handed
+//! threads. What the forked children of the session do (item summaries, check_many), in one process: the work is handed
 //! out from a shared counter, and the results come back in the order of the indices, so the caller merges them as it
 //! does one process's.
 //!
@@ -8,7 +8,7 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// How the front end runs its parallel parts (`ZUSTC_PAR`, or `Options2::par`): `fork` (forked children, the default;
+/// How the front end runs its parallel parts (`ZUSTC_PAR`, or `Options::par`): `fork` (forked children, the default;
 /// only in a process of one thread), `threads` (scoped threads, in any process), `off` (one thread)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
@@ -18,7 +18,7 @@ pub enum Mode {
 }
 
 /// The mode `ZUSTC_PAR` asks for (read once). A host that runs the driver in process chooses per session instead
-/// (driver2's `Options2::par`)
+/// (the session's `Options::par`)
 pub fn mode() -> Mode {
     static M: std::sync::OnceLock<Mode> = std::sync::OnceLock::new();
     *M.get_or_init(|| match std::env::var("ZUSTC_PAR").as_deref() {
@@ -32,7 +32,7 @@ pub fn mode() -> Mode {
 /// a spawned thread's default is 2 MiB). Only the pages it touches are resident
 const STACK: usize = 8 << 20;
 
-/// How many workers started, over the process (tests read it, as driver2::forks)
+/// How many workers started, over the process (tests read it, as session::forks)
 static SPAWNED: AtomicUsize = AtomicUsize::new(0);
 
 pub fn spawned() -> usize {

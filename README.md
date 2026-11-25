@@ -74,7 +74,7 @@ zustc hello.rs -o hello
 
 - **Output path:** without `-o`, the output goes next to the input with the extension removed (`hello`).
 - **Files next to the output:**
-  - `hello.crcache2`: the cache
+  - `hello.cache`: the cache
   - `hello.o`: the object file
   - `hello.link`: the saved link line
 - **Rebuilds:** only the functions that changed are recompiled. If nothing changed, zustc does not even link.
@@ -221,7 +221,7 @@ Known differences from rust-analyzer are listed in [CONTRIBUTING.md](CONTRIBUTIN
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-25, d9e104a<!-- /measured --> by CI on each push to main. Details:
+Numbers measured <!-- measured -->2026-11-25, 18b4beb<!-- /measured --> by CI on each push to main. Details:
 [SUPPORT.md](SUPPORT.md) (what is supported) and [PERFORMANCE.md](PERFORMANCE.md) (speed, size, memory, and
 comparisons with rustc and others).
 
@@ -233,10 +233,10 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 <!-- auto:ui -->
 | kind | applicable | pass |
 |---|---:|---:|
-| run-pass (builds, runs, same output) | 2403 | 1905 (79.3%) |
-| check-pass (accepted by `zustc check`) | 1813 | 1549 (85.4%) |
+| run-pass (builds, runs, same output) | 2403 | 1913 (79.6%) |
+| check-pass (accepted by `zustc check`) | 1813 | 1555 (85.8%) |
 | build-pass | 135 | 104 (77.0%) |
-| compile-fail (rejected at an annotated line) | 7386 | 4832 (65.4%) |
+| compile-fail (rejected at an annotated line) | 7386 | 5381 (72.9%) |
 <!-- /auto:ui -->
 
 [SUPPORT.md](SUPPORT.md) breaks this down by area: the language, the checks, the runtime and std, and what is left.
@@ -249,10 +249,10 @@ table, with instruction counts, cache and binary sizes and memory, is in [PERFOR
 <!-- auto:kpi-summary -->
 | | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 132 ms | 577 ms |
-| no-op build | 0.7 ms | 0.7 ms |
-| build after editing one function | 18.9 ms | 68.1 ms |
-| `check` | 41 ms | 188 ms |
+| cold build | 166 ms | 738 ms |
+| no-op build | 1.3 ms | 1.1 ms |
+| build after editing one function | 26.3 ms | 91.7 ms |
+| `check` | 69 ms | 315 ms |
 <!-- /auto:kpi-summary -->
 
 Against `rustc -C incremental` on gen1000 (a snapshot measured by hand): about 6x faster cold, 15x faster after an

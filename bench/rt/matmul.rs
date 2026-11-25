@@ -1,4 +1,4 @@
-// 行列の積 (Vec<Vec<f64>>、二重の添字)
+// Matrix multiplication (Vec<Vec<f64>>, double indexing)
 fn main() {
     let n = 200;
     let a: Vec<Vec<f64>> = (0..n).map(|i| (0..n).map(|j| ((i * j) % 7) as f64 + 0.5).collect()).collect();

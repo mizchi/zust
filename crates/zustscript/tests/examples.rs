@@ -770,3 +770,107 @@ fn wasm_requires_rust_even_for_unused_functions() {
         assert!(String::from_utf8_lossy(&bad.stderr).contains("calling `host`"));
     }
 }
+
+/// tests/options.zsc: the prelude's `Option` / `Result` (not declared), `?` (in a call's arguments after one
+/// evaluated first, in a branch, a loop, a closure), `if let`, and the methods. The `.d.ts` declares the prelude's
+/// types the exports use
+#[test]
+fn options_and_try() {
+    let d = out_dir("options");
+    let o = zsc(&root().join("tests/options.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(&d, "globalThis.note = (s) => console.log('note', s); const m = await import('./options.js'); console.log(m.run()); console.log(JSON.stringify([m.lookup([{ id: 1, title: 'a' }], 1), m.lookup([], 1), m.parse_draft({ title: '', body: '' })]));");
+    assert_eq!(
+        out,
+        "note eval left\nnote eval left\nok 3 write; title is empty; title is longer than 8; left:one+two; none; <ONE|two>; none; 3; item is empty; true,false; 2; title is empty; three,one; none; one (computed) true true MISSING [title is empty] true true; two\n\
+         [{\"TAG\":\"Some\",\"_0\":{\"id\":1,\"title\":\"a\"}},{\"TAG\":\"None\"},{\"TAG\":\"Err\",\"_0\":{\"TAG\":\"Empty\",\"_0\":\"title\"}}]\n"
+    );
+    // (the callee before the arguments; a local read before a later operand assigns it; an operand that only looks
+    // like a string literal; a receiver written once; a range's bounds in order)
+    let out = node(&d, "const log = []; globalThis.note = (s) => log.push(s); const m = await import('./options.js'); console.log(m.orders()); console.log(log.join(' ')); console.log(JSON.stringify([await m.async_tail({ TAG: 'Ok', _0: 2 }), await m.async_tail({ TAG: 'Ok', _0: -1 }), await m.async_tail({ TAG: 'Err', _0: 'early' })]));");
+    assert_eq!(
+        out,
+        "2 1,3 <cat>1 1 3 3 3 true 1 4 6 | none | none\n\
+         eval cat arg arg arg callee arg eval cat arg arg arg callee eval cat arg\n\
+         [{\"TAG\":\"Ok\",\"_0\":4},{\"TAG\":\"Err\",\"_0\":\"not positive\"},{\"TAG\":\"Err\",\"_0\":\"early\"}]\n"
+    );
+    let out = node(&d, "const log = []; globalThis.note = (s) => log.push(s); const m = await import('./options.js'); console.log(JSON.stringify([m.ranged(true), m.ranged(false)]), log.join(' '));");
+    assert_eq!(out, "[{\"TAG\":\"Some\",\"_0\":\"0,3,6\"},{\"TAG\":\"None\"}] bound 0 bound 3 mapper bound 0 bound 3 mapper\n");
+    let js = std::fs::read_to_string(d.join("options.js")).unwrap();
+    // (`?` is statements before the one it is in; an argument before it is kept in a temporary first)
+    assert!(js.contains("  const $t1 = non_empty(\"title\", d.title);\n  if ($t1.TAG === \"Err\") return $t1;\n  const t = $t1._0;\n"), "{js}");
+    assert!(js.contains("  const $t1 = logged(\"left\");\n  const $t2 = find(todos, a);\n  if ($t2.TAG === \"None\") return $t2;\n"), "{js}");
+    let dts = std::fs::read_to_string(d.join("options.d.ts")).unwrap();
+    assert!(dts.contains("export type Option<T> = { readonly TAG: \"None\" } | { readonly TAG: \"Some\"; readonly _0: T };"), "{dts}");
+    assert!(dts.contains("export type Result<T, E> = { readonly TAG: \"Ok\"; readonly _0: T } | { readonly TAG: \"Err\"; readonly _0: E };"), "{dts}");
+    assert!(dts.contains("export declare function parse_draft(d: Draft): Result<Todo, FormError>;"), "{dts}");
+    // (an imported module's Option is that module's value: not converted as a JS function's result is)
+    for f in ["optlib", "optmain"] {
+        let o = zsc(&root().join(format!("tests/modules/{f}.zsc")), &d, &[]);
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    }
+    assert_eq!(node(&d, "const m = await import('./optmain.js'); console.log(m.run());"), "2 -1 true hi,-,- 1 -1 2 3\n");
+    let js = std::fs::read_to_string(d.join("optmain.js")).unwrap();
+    assert!(js.contains("  } else {\n    const $t1 = half(n);\n    if ($t1.TAG === \"None\") return $t1;\n    if ($t1._0 > 2) {"), "{js}");
+    // (an extern type reached through two modules is one type; its relative module is rebased to the importer)
+    // (ext/deep/leaf.zsc's `./tok.js` reaches extmain.zsc through ext/a.zsc: rebased at each step)
+    let e = d.join("ext");
+    for f in ["deep/leaf", "a", "b"] {
+        let o = zsc(&root().join(format!("tests/modules/ext/{f}.zsc")), &e.join(f).parent().unwrap().to_path_buf(), &[]);
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    }
+    std::fs::copy(root().join("tests/modules/ext/deep/tok.js"), e.join("deep/tok.js")).unwrap();
+    let o = zsc(&root().join("tests/modules/extmain.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(node(&d, "const m = await import('./extmain.js'); console.log(m.both('x').text);"), "b:a:x\n");
+    let dts = std::fs::read_to_string(d.join("extmain.d.ts")).unwrap();
+    assert!(dts.contains("import type { Token } from \"./ext/deep/tok.js\";"), "{dts}");
+    let dts = std::fs::read_to_string(e.join("a.d.ts")).unwrap();
+    assert!(dts.contains("import type { Token } from \"./deep/tok.js\";"), "{dts}");
+}
+
+/// tests/options_wasm.zsc: `?` and `if let` on the prelude's types in `@wasm fn`s, as wasm and as JS
+#[test]
+fn options_same_in_js_and_wasm() {
+    let src = root().join("tests/options_wasm.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("options-wasm", &[][..]), ("options-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(d.join("options_wasm.wasm").exists(), flags.is_empty());
+        outs.push(node(&d, "const m = await import('./options_wasm.js'); console.log(JSON.stringify([m.ratio(12, 3, 2), m.ratio(1, 0, 1), m.quarter(8), m.quarter(6), m.quarter(3), m.code(4, 0), m.code(8, 2), m.chosen(1), m.chosen(0)]));"));
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], "[{\"TAG\":\"Ok\",\"_0\":2},{\"TAG\":\"Err\",\"_0\":\"ByZero\"},{\"TAG\":\"Some\",\"_0\":2},{\"TAG\":\"None\"},{\"TAG\":\"None\"},-1,4,2,-1]\n");
+}
+
+/// tests/js_values.zsc: extern types (properties, methods, a setter, a constructor, a module's), `null` from JS as
+/// `None` and `None` to JS as `undefined`, and what JS throws (or a Promise rejects with) as an `Err`
+#[test]
+fn js_values_and_exceptions() {
+    let d = out_dir("js_values");
+    let o = zsc(&root().join("tests/js_values.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let r = Command::new("node").arg(root().join("tests/js_values_driver.mjs")).arg(d.join("js_values.js")).output().unwrap();
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&r.stdout),
+        "example.com /a/b true https://example.com/a/b?x=1 | bad: Invalid URL | v | none\n\
+         [{\"TAG\":\"Ok\",\"_0\":\"{\\\"a\\\":[1,2]}\"},\"Err\",\"string\"]\n\
+         3 - x 0 7\n\
+         [{\"TAG\":\"Ok\",\"_0\":\"body of ok\"},{\"TAG\":\"Err\",\"_0\":\"status 404\"},{\"TAG\":\"Err\",\"_0\":\"fetch failed\"},{\"TAG\":\"Ok\",\"_0\":\"{\\\"url\\\":\\\"j\\\"}\"},{\"TAG\":\"Err\",\"_0\":\"Unexpected token\"}]\n\
+         10 | RangeError: negative -1 | one,? | hello hi ann\n\
+         c.txt .txt y.md\n\
+         [{\"TAG\":\"Ok\",\"_0\":\"[1]\"},\"Err\"] h.example | (a thrown value that has no string form) | 16\n\
+         [{\"TAG\":\"Ok\",\"_0\":\"v\"},{\"TAG\":\"Err\",\"_0\":\"no value\"}]\n"
+    );
+    let js = std::fs::read_to_string(d.join("js_values.js")).unwrap();
+    assert!(js.contains("import { parse } from \"node:path\";"), "{js}");
+    assert!(js.contains("const $t1 = $catch(() => new URL(s), true);") && js.contains("$nullable(u.searchParams.get(k))"), "{js}");
+    assert!(js.contains("(await $catchP(() => globalThis.fakeFetch(url), true))") && js.contains("(c.label = \"x\", undefined);"), "{js}");
+    assert!(js.contains("c.reset(undefined);") && js.contains("c.reset(7);"), "{js}");
+    let dts = std::fs::read_to_string(d.join("js_values.d.ts")).unwrap();
+    assert!(dts.contains("import type { ParsedPath } from \"node:path\";") && dts.contains("export declare function path_base(p: string): ParsedPath;"), "{dts}");
+    assert!(dts.contains("export declare function load(url: string): Promise<Result<string, string>>;"), "{dts}");
+}

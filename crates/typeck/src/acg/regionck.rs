@@ -2293,7 +2293,16 @@ impl Cx<'_> {
             for (k, &t) in rg.inst_args.clone().iter().enumerate() {
                 let (Ty::Struct(sid), Some(Some(tr))) = (t, targs.get(k)) else { continue };
                 let (Some(&v), true) = (tr.first(), prog.is_placeholder(sid)) else { continue };
-                rg.univ.push((v, prog.structs[sid as usize].name.clone()));
+                // (an `impl Trait` argument's parameter shown as written: `impl Debug`, not `__impl0`)
+                let sd = &prog.structs[sid as usize];
+                let shown = match (sd.name.strip_suffix('#'), &sd.placeholder) {
+                    (Some(b), Some(bs)) if super::p2_call::hidden_param(b) => {
+                        let bs: Vec<String> = bs.iter().map(|b| b.replace(" <", "<").replace("< ", "<").replace(" >", ">").replace(" ,", ",")).collect();
+                        format!("impl {}#", bs.join(" + "))
+                    }
+                    _ => sd.name.clone(),
+                };
+                rg.univ.push((v, shown));
                 rg.ph.push((sid, v));
                 let pname = gsig.generics.get(k).map(|g| g.0.as_str()).unwrap_or("");
                 // (and what its bounds' traits require of their `Self` (`trait Tr<'a>: 'a`, `T: Tr<'x>`: T: 'x),

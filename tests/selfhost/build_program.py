@@ -1,10 +1,10 @@
-"""zustc 自身の crates/sema/src/program.rs (全体の表: 関数シグネチャ・struct / enum のレイアウト・trait 実装) を、要約までの
-モジュール (lexer / prelude / types / parse / ast_types / ast_closure / ast_summary) と一緒に 1 ファイルのプログラムにまとめる。
+"""Bundles zustc's own crates/sema/src/program.rs (the global tables: fn signatures, struct / enum layouts, trait impls), together with the modules
+up to summaries (lexer / prelude / types / parse / ast_types / ast_closure / ast_summary), into a single-file program.
 usage: python3 tests/selfhost/build_program.py > out/selfhost/program_main.rs
-main は引数のファイルごとに、driver と同じ手順 (モジュールを平らに・入れ子のアイテムを外へ・prelude を後ろに付ける) で
-アイテムを作り、全部を要約して Program::build し、関数・型 (サイズ・配置・フィールドのオフセット)・trait 実装・const
-(と crates/sema/src/ast_consteval.rs で評価した初期値のデータ) を出す。
-(macro_rules! の展開はしない: マクロを使うファイルは展開前のまま扱う)"""
+For each file in its arguments, main builds the items by the same steps as the driver (flatten modules, move nested items out, append the prelude),
+summarizes them all and runs Program::build, and prints the fns, types (size, alignment, field offsets), trait impls and consts
+(and the data of the initial values evaluated by crates/sema/src/ast_consteval.rs).
+(no macro_rules! expansion: files that use macros are handled as they are before expansion)"""
 import glob, os
 
 def body(p):

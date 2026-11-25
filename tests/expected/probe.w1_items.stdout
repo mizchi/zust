@@ -1,0 +1,13 @@
+2 3 Some(5) Some(7)
+3 1+2 false -3
+2 4 4 6
+8 16 32 12
+1 [97, 98, 99, 100, 101]
+5 6 7 8 9 5 1 700
+3 3.5 4 3
+Ok(5) Err("bad 500") 7
+Some(3) Some(4) Some(-3)
+true
+Ok(V(5)) Ok(V(-1)) Err(V(7))
+1 2 1 2
+true false true false true

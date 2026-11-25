@@ -1,9 +1,9 @@
-//! リンク。
+//! Linking.
 //!
-//! `cc` ドライバ経由だと毎回 gcc driver → collect2 → ld と 3 段プロセスが立ち上がる。
-//! 初回だけ `cc -###` でドライバが組み立てる ld のコマンドラインを取得して
-//! `<out>.link` に保存し、以後はリンカ (wild / ld.lld / ld) を直接 exec する。
-//! (1000 関数の例で cc+lld 21ms → wild 直接 5ms)
+//! Going through the `cc` driver starts 3 levels of processes every time: gcc driver → collect2 → ld.
+//! Only the first time, `cc -###` is used to get the ld command line the driver builds, which is
+//! saved to `<out>.link`, and after that the linker (wild / ld.lld / ld) is exec'd directly.
+//! (In a 1000-fn example, cc+lld 21ms → wild directly 5ms)
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -18,7 +18,7 @@ pub fn which(name: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// 使うリンカの実行ファイル。既定は wild > mold > ld.lld > ld。
+/// The linker executable to use. The default is wild > mold > ld.lld > ld.
 pub fn pick(requested: Option<&str>) -> Result<PathBuf, String> {
     let cands: Vec<&str> = match requested {
         Some("lld") => vec!["ld.lld"],
@@ -32,10 +32,10 @@ pub fn pick(requested: Option<&str>) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("linker not found: {cands:?}"))
 }
 
-// (libm は浮動小数点の関数を使うときだけ要る: --as-needed で使わなければリンクしない)
+// (libm is needed only when floating-point fns are used: with --as-needed it is not linked if unused)
 const DRIVER_FLAGS: &[&str] = &["-no-pie", "-s", "-Wl,--gc-sections", "-Wl,--build-id=none", "-Wl,--as-needed", "-lm"];
 
-/// `cc -###` の出力から collect2 の引数を取り出し、プラグイン関連を除いたものを返す。
+/// Extracts collect2's arguments from the output of `cc -###` and returns them with the plugin-related ones removed.
 fn driver_args(objs: &[&Path], out: &Path) -> Result<Vec<String>, String> {
     let o = Command::new("cc")
         .arg("-###")
@@ -68,7 +68,7 @@ fn driver_args(objs: &[&Path], out: &Path) -> Result<Vec<String>, String> {
     Ok(args)
 }
 
-/// `cc -###` の出力は `"..."` で囲まれた引数と裸の引数が混ざっている。
+/// The output of `cc -###` mixes arguments enclosed in `"..."` and bare arguments.
 fn shell_split(s: &str) -> Vec<String> {
     let mut out = vec![];
     let mut cur = String::new();
@@ -105,13 +105,13 @@ pub fn link(requested: Option<&str>, obj: &Path, out: &Path) -> Result<String, S
     link_many(requested, &[obj], out)
 }
 
-/// 複数の .o を 1 つの実行ファイルにする
+/// Makes several .o files into one executable
 pub fn link_many(requested: Option<&str>, objs: &[&Path], out: &Path) -> Result<String, String> {
     let linker = pick(requested)?;
     let mut lpath = out.as_os_str().to_owned();
     lpath.push(".link");
     let lpath = PathBuf::from(lpath);
-    // 保存したリンク行は (obj, out) のパスにだけ依存する
+    // The saved link line depends only on the (obj, out) paths
     let mut header = String::new();
     for o in objs {
         header.push_str(&format!("{}\n", o.display()));
@@ -125,7 +125,7 @@ pub fn link_many(requested: Option<&str>, objs: &[&Path], out: &Path) -> Result<
             a
         }
     };
-    // (プロファイル用: ZUSTC_NO_STRIP があればシンボルを残す)
+    // (For profiling: if ZUSTC_NO_STRIP is set, keep the symbols)
     let args: Vec<String> = if std::env::var_os("ZUSTC_NO_STRIP").is_some() {
         args.into_iter().filter(|a| a != "-s").collect()
     } else {

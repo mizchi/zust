@@ -1,6 +1,6 @@
-// proc_macro2 の代わり (src/macros.rs が使う分だけ): 文字列を字句解析してトークン木にする。
-// 位置 (byte_range / 行・列) は与えた文字列の中の位置。コメントは飛ばす (doc コメントも)。
-// rustc 版と zustc 版の両方がこれを使うので、本物の proc_macro2 と細部が違っても出力は比べられる。
+// A stand-in for proc_macro2 (only the part src/macros.rs uses): lexes a string into a token tree.
+// Positions (byte_range / line, column) are positions within the given string. Comments are skipped (doc comments too).
+// Both the rustc version and the zustc version use this, so their outputs can be compared even where details differ from the real proc_macro2.
 pub mod proc_macro2 {
     use std::fmt;
 
@@ -185,7 +185,7 @@ pub mod proc_macro2 {
         }
     }
 
-    /// 記号の文字 (`+-*/%^!&|=<>@.,;:#$?~'\`)
+    /// Punctuation characters (`+-*/%^!&|=<>@.,;:#$?~'\`)
     fn is_punct(c: u8) -> bool {
         matches!(c, b'+' | b'-' | b'*' | b'/' | b'%' | b'^' | b'!' | b'&' | b'|' | b'=' | b'<' | b'>' | b'@' | b'.' | b',' | b';' | b':' | b'#' | b'$' | b'?' | b'~' | b'\'' | b'\\')
     }
@@ -196,7 +196,7 @@ pub mod proc_macro2 {
         i: usize,
         line: usize,
         line_start: usize,
-        /// 桁を数え足すための (行頭, 数えた位置, そこまでの文字数)
+        /// (line start, counted position, number of chars up to there) for counting columns incrementally
         cc: (usize, usize, usize),
     }
 
@@ -205,7 +205,7 @@ pub mod proc_macro2 {
             Span { lo: lo, hi: self.i, line: line, column: col }
         }
         fn col(&mut self, at: usize) -> usize {
-            // (UTF-8 の続きのバイトを数えない: chars().count() と同じ。前に数えた所から数え足す)
+            // (UTF-8 continuation bytes are not counted: same as chars().count(); counts on from where it counted before)
             if self.cc.0 != self.line_start || at < self.cc.1 {
                 self.cc = (self.line_start, self.line_start, 0);
             }
@@ -273,7 +273,7 @@ pub mod proc_macro2 {
             self.s[self.i..].chars().next().unwrap()
         }
         fn ident_end(&self, from: usize) -> usize {
-            // (ASCII はバイトで見る)
+            // (ASCII is looked at as bytes)
             let mut j = from;
             while j < self.b.len() {
                 let c = self.b[j];
@@ -299,7 +299,7 @@ pub mod proc_macro2 {
                 self.bump();
             }
         }
-        // 文字列 ("..")。i は開きの `"`
+        // A string (".."). i is at the opening `"`
         fn quoted(&mut self, q: u8) -> Result<(), LexError> {
             self.bump();
             loop {
@@ -320,7 +320,7 @@ pub mod proc_macro2 {
                 }
             }
         }
-        // 生文字列 r#".."#。i は `r` の後ろ
+        // A raw string r#".."#. i is after the `r`
         fn raw(&mut self) -> Result<(), LexError> {
             let mut h = 0;
             while self.i < self.b.len() && self.b[self.i] == b'#' {
@@ -387,7 +387,7 @@ pub mod proc_macro2 {
                         toks.push(self.lit(lo, line, col));
                     }
                     b'\'' => {
-                        // 文字 'x' / '\n' か、ライフタイム 'a
+                        // A char 'x' / '\n', or a lifetime 'a
                         let rest = &self.s[self.i + 1..];
                         let mut it = rest.chars();
                         let c1 = it.next();
@@ -405,7 +405,7 @@ pub mod proc_macro2 {
                         while self.i < self.b.len() {
                             let d = self.b[self.i];
                             if d.is_ascii_alphanumeric() || d == b'_' {
-                                // (指数 `1e-5`)
+                                // (an exponent `1e-5`)
                                 let e = (d == b'e' || d == b'E') && !self.s[lo..self.i].starts_with("0x");
                                 self.bump();
                                 if e && self.i < self.b.len() && (self.b[self.i] == b'-' || self.b[self.i] == b'+') {
@@ -420,7 +420,7 @@ pub mod proc_macro2 {
                                 && !self.s[lo..self.i].contains('.')
                                 && !self.b.get(self.i + 1).is_some_and(|n| *n == b'.' || n.is_ascii_alphabetic() || *n == b'_')
                             {
-                                // (`1.` も浮動小数点)
+                                // (`1.` is a float too)
                                 self.bump();
                                 break;
                             } else {
@@ -452,7 +452,7 @@ pub mod proc_macro2 {
                         toks.push(self.lit(lo, line, col));
                     }
                     _ if c.is_ascii_alphabetic() || c == b'_' || (c >= 0x80 && Lexer::is_ident_start(self.cur())) => {
-                        // (生識別子 r#match)
+                        // (a raw identifier r#match)
                         let start = if self.s[self.i..].starts_with("r#") { self.i + 2 } else { self.i };
                         let j = self.ident_end(start);
                         self.advance_to(j);

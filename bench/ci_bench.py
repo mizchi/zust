@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""継続的なベンチマーク (CI のダッシュボード用)。github-action-benchmark の `customSmallerIsBetter` /
-`customBiggerIsBetter` の形の JSON を書く。
+"""Continuous benchmarks (for the CI dashboard). Writes JSON in github-action-benchmark's `customSmallerIsBetter` /
+`customBiggerIsBetter` format.
 
 usage: python3 bench/ci_bench.py [--out-dir out/ci] [--reps 5] [--no-lsp] [--no-valgrind]
-(リポジトリの根で。事前に cargo build --release --workspace)
+(at the repository root, after cargo build --release --workspace)
 
-書くもの:
-- zustc.json (小さいほどよい): 生成した N 関数のプログラム (bench/gen.py) の cold / no-op / 1 関数編集のビルド時間と
-  ピーク RSS、check の時間、出力とキャッシュの大きさ、bench/rt の実行時間 (-O)。valgrind があれば命令数も
-  (共有のランナーでは時間が揺れるので、こちらの方が差を見やすい)
-- analyzer.json (小さいほどよい): bench/lsp_parity.py の zust-analyzer の各問い合わせの p50、起動から索引ができるまで、RSS
-- parity.json (大きいほどよい): rust-analyzer と同じ答えを返した割合 (rust-analyzer が PATH にあるときだけ)
+What it writes:
+- zustc.json (smaller is better): the cold / no-op / one-fn-edit build times of a generated program of N fns (bench/gen.py) and
+  peak RSS, the check time, the sizes of the output and the cache, the run times of bench/rt (-O). With valgrind, instruction counts too
+  (times fluctuate on shared runners, so differences are easier to see with these)
+- analyzer.json (smaller is better): the p50 of each zust-analyzer query of bench/lsp_parity.py, the time from startup until the index is built, RSS
+- parity.json (bigger is better): the fraction of answers that were the same as rust-analyzer's (only when rust-analyzer is on PATH)
 """
 import argparse, json, os, resource, shutil, statistics, subprocess, sys, time
 
@@ -19,7 +19,7 @@ ZUSTC = os.path.join(ROOT, "target/release/zustc")
 
 
 def run_measured(cmd, cwd=ROOT):
-    """1 つのコマンドの (時間 ms, ピーク RSS MiB)。子プロセスを 1 段挟んで RUSAGE_CHILDREN を取る"""
+    """(time ms, peak RSS MiB) of one command. Takes RUSAGE_CHILDREN through one intermediate child process"""
     code = ("import resource,subprocess,sys,time;t=time.perf_counter();"
             "subprocess.run(sys.argv[1:],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);"
             "print((time.perf_counter()-t)*1e3, resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)")
@@ -29,7 +29,7 @@ def run_measured(cmd, cwd=ROOT):
 
 
 def instructions(cmd, cwd=ROOT, env=None):
-    """valgrind (cachegrind、キャッシュの模擬なし) で数えた命令数 (百万)。子プロセス (リンカ) は数えない"""
+    """The instruction count (millions) counted with valgrind (cachegrind, no cache simulation). Child processes (the linker) are not counted"""
     r = subprocess.run(["valgrind", "--tool=cachegrind", "--cache-sim=no", "--cachegrind-out-file=/dev/null", *cmd],
                        capture_output=True, text=True, cwd=cwd, env=None if env is None else {**os.environ, **env})
     # (valgrind exits with the program's status: a count of a failed build or check is not a measurement)
@@ -51,7 +51,7 @@ def du(path):
 
 
 def bench_build(n, reps, work, vg, out):
-    """N 関数のプログラム: cold (キャッシュなし) / noop / edit のビルドと check"""
+    """A program of N fns: cold (no cache) / noop / edit builds, and check"""
     d = os.path.join(work, f"gen{n}")
     shutil.rmtree(d, ignore_errors=True)
     os.makedirs(d)
@@ -82,7 +82,7 @@ def bench_build(n, reps, work, vg, out):
         (f"{name} check", statistics.median(checks), "ms"),
         (f"{name} build cold peak RSS", statistics.median(rss), "MiB"),
         (f"{name} binary", du(exe) / 1024, "KiB"),
-        (f"{name} cache", du(exe + ".crcache2") / 1024, "KiB"),
+        (f"{name} cache", du(exe + ".cache") / 1024, "KiB"),
     ]
     if vg:
         out.append((f"{name} build noop instructions", instructions(build), "M instr"))
@@ -94,7 +94,7 @@ def bench_build(n, reps, work, vg, out):
 
 
 def bench_runtime(reps, work, out):
-    """bench/rt のプログラムを -O でビルドして実行した時間"""
+    """The run times of the bench/rt programs built with -O"""
     rt = os.path.join(ROOT, "bench/rt")
     for f in sorted(os.listdir(rt)):
         if not f.endswith(".rs"):
@@ -108,7 +108,7 @@ def bench_runtime(reps, work, out):
 
 
 def bench_lsp(work, out_small, out_big):
-    """bench/lsp_parity.py (zustc 自身のソースが対象) の zust-analyzer の数字"""
+    """The zust-analyzer numbers of bench/lsp_parity.py (on zustc's own source)"""
     servers = "zustc,rust-analyzer" if shutil.which("rust-analyzer") else "zustc"
     j = os.path.join(work, "lsp_parity.json")
     subprocess.run([sys.executable, os.path.join(ROOT, "bench/lsp_parity.py"), "--servers", servers, "--targets", "zustc",
