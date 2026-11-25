@@ -1465,7 +1465,7 @@ impl Cx<'_> {
         for &(fi, e) in args {
             let exp = match inst {
                 Some(i) => Some(fields_of(self, i)[fi].1),
-                None => Some(self.prog.partial_subst(gen_fields[fi].1, &sol)).filter(|&t| !self.prog.has_param(t)),
+                None => Some(self.prog.dyn_unmarked(self.prog.partial_subst(gen_fields[fi].1, &sol))).filter(|&t| !self.prog.has_param(t)),
             };
             let (v, vt) = self.expr(e, exp)?;
             if vt == Ty::Never {

@@ -4464,6 +4464,7 @@ compile-fail	methods/option-cloned-copied-non-ref.rs
 check-pass	methods/overflow-if-subtyping.rs
 compile-fail	methods/probe-for-diagnostic-doesnt-do-extra-work.rs
 check-pass	methods/probe-overflow-due-to-sized-predicate-ordering.rs
+check-pass	methods/self-type-is-sup-no-eq.rs
 compile-fail	methods/suggest-convert-ptr-to-ref.rs
 compile-fail	methods/suggest-method-on-call-for-ambig-receiver.rs
 compile-fail	methods/suggest-method-on-call-with-macro-rcvr.rs
@@ -5469,7 +5470,6 @@ compile-fail	parser/macro/break-in-unlabeled-block-in-macro.rs
 compile-fail	parser/macro/do-not-suggest-semicolon-between-macro-without-exclamation-mark-and-array.rs
 check-pass	parser/macro/extern-abi-from-mac-literal-frag.rs
 compile-fail	parser/macro/issue-33569.rs
-compile-fail	parser/macro/kw-in-const-item-pos-recovery-149692.rs
 compile-fail	parser/macro/kw-in-item-pos-recovery-149692.rs
 compile-fail	parser/macro/macro-bad-delimiter-ident.rs
 check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
@@ -5909,7 +5909,6 @@ compile-fail	pattern/usefulness/tuple-struct-nonexhaustive.rs
 compile-fail	pattern/usefulness/type_polymorphic_byte_str_literals.rs
 compile-fail	pin-ergonomics/raw-ident.rs
 compile-fail	pin-macro/lifetime_errors_on_promotion_misusage.rs
-compile-fail	pin-macro/pin_move.rs
 compile-fail	pin/pin-deref-target-partial-eq-67039.rs
 run-pass	privacy/fn-returns-unnameable-type.rs
 check-pass	privacy/generic_struct_field_projection.rs
@@ -6093,6 +6092,11 @@ compile-fail	regions/regions-bounded-method-type-parameters-trait-bound.rs
 compile-fail	regions/regions-bounded-method-type-parameters.rs
 compile-fail	regions/regions-bounds.rs
 compile-fail	regions/regions-close-associated-type-into-object.rs
+compile-fail	regions/regions-close-object-into-object-1.rs
+compile-fail	regions/regions-close-object-into-object-2.rs
+compile-fail	regions/regions-close-object-into-object-3.rs
+compile-fail	regions/regions-close-object-into-object-4.rs
+compile-fail	regions/regions-close-object-into-object-5.rs
 compile-fail	regions/regions-close-over-type-parameter-1.rs
 compile-fail	regions/regions-close-over-type-parameter-multiple.rs
 run-pass	regions/regions-close-over-type-parameter-successfully.rs
@@ -7323,6 +7327,7 @@ compile-fail	trait-bounds/super-assoc-mismatch.rs
 compile-fail	trait-bounds/trait-bound-adt-issue-145611.rs
 compile-fail	trait-bounds/trait-selection-overflow-prevention-72839.rs
 compile-fail	traits/alias/generic-default-in-dyn.rs
+run-pass	traits/alignment-gep-tup-like-1.rs
 run-pass	traits/anon-static-method.rs
 compile-fail	traits/as-struct-constructor.rs
 run-pass	traits/assoc-type-in-supertrait.rs
@@ -7934,6 +7939,7 @@ compile-fail	unboxed-closures/unboxed-closures-failed-recursive-fn-1.rs
 compile-fail	unboxed-closures/unboxed-closures-failed-recursive-fn-2.rs
 run-pass	unboxed-closures/unboxed-closures-generic.rs
 run-pass	unboxed-closures/unboxed-closures-infer-arg-types-from-expected-bound.rs
+run-pass	unboxed-closures/unboxed-closures-infer-arg-types-from-expected-object-type.rs
 run-pass	unboxed-closures/unboxed-closures-infer-arg-types-w-bound-regs-from-expected-bound.rs
 compile-fail	unboxed-closures/unboxed-closures-infer-fn-once-move-from-projection.rs
 compile-fail	unboxed-closures/unboxed-closures-infer-fnmut-calling-fnmut-no-mut.rs
