@@ -335,6 +335,12 @@ pub struct RSigSyn {
     /// An impl's method: the region slots of the impl's self type (it is well formed: implied in the body, required
     /// of a call)
     pub self_slots: Vec<u8>,
+    /// The outlives that a bound on a type implies of its parts (`D<'a>: 'b`: 'a: 'b), with the names of the paths
+    /// the part is in (`D`, comma-separated): the program adds them where none of those is a type alias, whose
+    /// lifetimes may not be in what it stands for (`type Erased<'a> = ();`)
+    pub derived: Vec<(String, u8, u8)>,
+    /// The same for type parameters (`E<'a, T>: 'b`: T: 'b): (paths, parameter, code)
+    pub derived_ty: Vec<(String, String, u8)>,
 }
 
 /// The regions of a struct / enum definition
@@ -366,6 +372,10 @@ pub struct RImplSyn {
     /// The codes of the lifetimes an impl's trait path writes as its arguments (`impl<'a, 'd: 'a> Visitor<'d> for
     /// &'a ()`: 'd's), in order: a projection that selects the impl gives them those it writes there
     pub trait_lts: Vec<u8>,
+    /// For each region of the self type, the names of the types around it (comma separated, outermost first):
+    /// `Self: 'b` in a method implies what `'a: 'b` it may only where none of them is a type alias, which may drop
+    /// the lifetime (`impl<'a> Tr for Erased<'a>` with `type Erased<'a> = ();`)
+    pub self_paths: Vec<(String, u8)>,
 }
 
 /// enum のバリアント (要約に保存する形)

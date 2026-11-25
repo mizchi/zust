@@ -1145,10 +1145,17 @@ impl Session2 {
         }
         // (what the program's types require of traits' `Self: 'x` bounds (E0478, E0310): the traits are known now)
         {
-            let so: crate::fxhash::FxMap<&str, &[String]> = sums
+            let mut so: crate::fxhash::FxMap<&str, &[String]> = sums
                 .iter()
                 .filter_map(|sm| Some((sm.trait_decl.as_deref()?, sm.trait_generics.iter().find(|g| g.0 == crate::types::SELF_OUTLIVES)?.1.as_slice())))
                 .collect();
+            // (std's `Any` is `trait Any: 'static`: `dyn Any + 'a` needs 'a: 'static, unless the program has a trait of
+            // that name. Only where the program names it: otherwise the items need not be read again)
+            let any_req = ["static".to_string()];
+            let user_end = items[..user_src].last().map_or(0, |it| it.end);
+            if !so.contains_key("Any") && src.get(..user_end).is_some_and(|t| t.contains("Any")) && !sums.iter().any(|sm| sm.trait_decl.as_deref() == Some("Any")) {
+                so.insert("Any", &any_req);
+            }
             if !so.is_empty() {
                 for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
                     // (an impl of such a trait, or a type whose fields write `dyn`: read again)

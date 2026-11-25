@@ -871,6 +871,7 @@ compile-fail	borrowck/borrowck-move-from-unsafe-ptr.rs
 compile-fail	borrowck/borrowck-move-in-irrefut-pat.rs
 compile-fail	borrowck/borrowck-move-moved-value-into-closure.rs
 compile-fail	borrowck/borrowck-move-mut-base-ptr.rs
+compile-fail	borrowck/borrowck-move-out-from-array-match.rs
 check-pass	borrowck/borrowck-move-out-from-array-no-overlap-match.rs
 check-pass	borrowck/borrowck-move-out-from-array-no-overlap.rs
 compile-fail	borrowck/borrowck-move-out-from-array-use-match.rs
@@ -897,6 +898,7 @@ compile-fail	borrowck/borrowck-mutate-in-guard.rs
 compile-fail	borrowck/borrowck-no-cycle-in-exchange-heap.rs
 compile-fail	borrowck/borrowck-object-lifetime.rs
 compile-fail	borrowck/borrowck-or-init.rs
+compile-fail	borrowck/borrowck-overloaded-index-and-overloaded-deref.rs
 compile-fail	borrowck/borrowck-overloaded-index-autoderef.rs
 compile-fail	borrowck/borrowck-overloaded-index-move-from-vec.rs
 compile-fail	borrowck/borrowck-overloaded-index-move-index.rs
@@ -6063,6 +6065,7 @@ compile-fail	regions/better-blame-constraint-for-outlives-static.rs
 check-pass	regions/closure-prop-issue-104477-case1.rs
 check-pass	regions/closure-prop-issue-104477-case2.rs
 compile-fail	regions/do-not-suggest-adding-bound-to-opaque-type.rs
+compile-fail	regions/explicit-static-bound-on-trait.rs
 check-pass	regions/forall-wf-reflexive.rs
 run-pass	regions/init-res-into-things.rs
 compile-fail	regions/issue-102374.rs
@@ -6654,6 +6657,7 @@ check-pass	self/elision/struct-async.rs
 check-pass	self/elision/struct.rs
 run-pass	self/explicit-self-generic.rs
 run-pass	self/explicit-self-objects-uniq.rs
+run-pass	self/explicit-self.rs
 compile-fail	self/invalid-self-argument.rs
 compile-fail	self/issue-61882-2.rs
 compile-fail	self/lot-of-references-self.rs
