@@ -4,7 +4,8 @@ The type check of each fn body, and what is checked on its result.
 
 `acg` walks a fn's AST together with its inferred types, checks it, and records the fn's instructions into a
 `zust_ir::Recorder`. `zustc check` and the LSP stop there and drop the recording; a build hands it to
-zust-codegen, which replays it into a backend. One walk does both, so check and build cannot disagree.
+zust-codegen, which replays it into a backend. One walk does both, so check and build type-check alike; a backend
+can still reject what it does not lower (minclif has no SIMD: such a fn checks, and builds with Cranelift only).
 
 | module | what |
 |---|---|

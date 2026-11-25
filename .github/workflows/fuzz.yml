@@ -50,9 +50,11 @@ jobs:
           target/release/zust-fuzz fuzz --target ${{ matrix.targets }} --time "$secs" --seed ${{ github.run_id }} \
             --corpus examples --corpus tests/probe --corpus tests/fuzz --corpus out/rust-tests/tests/ui \
             --out out/fuzz-${{ matrix.name }}
+      # (also when the run passes: a mismatch of the two expanders is saved without failing it)
       - name: Upload the findings
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-findings-${{ matrix.name }}
           path: out/fuzz-${{ matrix.name }}/findings/
+          if-no-files-found: ignore

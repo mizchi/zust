@@ -19,7 +19,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use zust_fuzz::targets::{self, Target};
@@ -130,21 +130,76 @@ fn load_corpus(dirs: &[PathBuf]) -> Vec<String> {
     out
 }
 
-fn save_finding(out: &Path, f: &Failure, src: &str, min: Option<&str>, edition: u16) -> PathBuf {
+/// Saves a finding: its input, the minimized input when there is one, and what was found. The input's path, or the
+/// error that kept a file from being written
+fn save_finding(out: &Path, f: &Failure, src: &str, min: Option<&str>, edition: u16) -> std::io::Result<PathBuf> {
     let dir = out.join("findings");
-    let _ = std::fs::create_dir_all(&dir);
+    std::fs::create_dir_all(&dir)?;
     let name = format!("{}-{:016x}", f.kind, hash(&f.place));
     let p = dir.join(format!("{name}.rs"));
-    let _ = std::fs::write(&p, src);
+    std::fs::write(&p, src)?;
     if let Some(m) = min {
-        let _ = std::fs::write(dir.join(format!("{name}.min.rs")), m);
+        std::fs::write(dir.join(format!("{name}.min.rs")), m)?;
     }
-    let _ = std::fs::write(dir.join(format!("{name}.txt")), format!("{} at {} (edition {edition}; replay with --edition {edition})\n{}\n", f.kind, f.place, f.detail));
-    p
+    std::fs::write(dir.join(format!("{name}.txt")), format!("{} at {} (edition {edition}; replay with --edition {edition})\n{}\n", f.kind, f.place, f.detail))?;
+    Ok(p)
 }
 
-fn minimize_failure(t: Target, src: &str, f: &Failure, edition: u16) -> String {
-    mutate::minimize(src, 3000, &mut |cand| run_one(t, cand, edition).err().is_some_and(|g| g.kind == f.kind && g.place == f.place))
+/// Prints where a finding was saved, or that it could not be
+fn report(what: &str, saved: std::io::Result<PathBuf>) {
+    match saved {
+        Ok(p) => eprintln!("zust-fuzz: {what}: {}", p.display()),
+        Err(e) => eprintln!("zust-fuzz: {what}: the finding could not be saved: {e}"),
+    }
+}
+
+/// The input that runs, as the watchdog and the supervisor see it: its text and edition (also in `current.rs` and
+/// `current.edition`, for the supervisor after a crash) and when it started (0: none runs)
+struct Active {
+    started: Arc<AtomicU64>,
+    input: Arc<Mutex<String>>,
+    edition: Arc<AtomicU16>,
+    current: PathBuf,
+}
+
+impl Active {
+    fn set(&self, src: &str, edition: u16) {
+        let _ = std::fs::write(&self.current, src);
+        let _ = std::fs::write(self.current.with_extension("edition"), edition.to_string());
+        if let Ok(mut s) = self.input.lock() {
+            s.clear();
+            s.push_str(src);
+        }
+        self.edition.store(edition, Ordering::Relaxed);
+    }
+
+    /// Runs one target on the input set last, under the watchdog
+    fn run(&self, t: Target, src: &str, edition: u16) -> Result<String, Failure> {
+        self.started.store(now_ms(), Ordering::Relaxed);
+        let r = run_one(t, src, edition);
+        self.started.store(0, Ordering::Relaxed);
+        r
+    }
+}
+
+/// In a worker each candidate runs as an input does, under the watchdog: one that hangs or crashes ends the worker as
+/// an input would, after the finding was saved. `minimize` on the command line runs them directly
+fn minimize_failure(active: Option<&Active>, t: Target, src: &str, f: &Failure, edition: u16) -> String {
+    mutate::minimize(src, 3000, &mut |cand| {
+        let r = match active {
+            Some(a) => {
+                a.set(cand, edition);
+                a.run(t, cand, edition)
+            }
+            None => run_one(t, cand, edition),
+        };
+        r.err().is_some_and(|g| g.kind == f.kind && g.place == f.place)
+    })
+}
+
+/// The edition of the input a worker ran last (`current.edition`), 2021 when it is not known
+fn current_edition(out: &Path) -> u16 {
+    std::fs::read_to_string(out.join("current.edition")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(2021)
 }
 
 /// The worker: mutates and runs inputs until the deadline. Exits 0 at the deadline, 3 after saving a hang.
@@ -153,13 +208,16 @@ fn worker(a: &Args, deadline: u64) -> ! {
     let mut corpus = load_corpus(&a.corpus);
     let n0 = corpus.len();
     let mut rng = rng::Rng::new(a.seed);
-    let current = a.out.join("current.rs");
-    let started = Arc::new(AtomicU64::new(0));
-    let input = Arc::new(Mutex::new(String::new()));
+    let active = Active {
+        started: Arc::new(AtomicU64::new(0)),
+        input: Arc::new(Mutex::new(String::new())),
+        edition: Arc::new(AtomicU16::new(2021)),
+        current: a.out.join("current.rs"),
+    };
     {
         // (the watchdog: an input running past the timeout is saved as a hang, and the worker ends; the supervisor
         // starts another)
-        let (started, input, out, timeout) = (started.clone(), input.clone(), a.out.clone(), a.timeout_ms);
+        let (started, input, edition, out, timeout) = (active.started.clone(), active.input.clone(), active.edition.clone(), a.out.clone(), a.timeout_ms);
         std::thread::spawn(move || {
             loop {
                 std::thread::sleep(Duration::from_millis(100));
@@ -167,8 +225,7 @@ fn worker(a: &Args, deadline: u64) -> ! {
                 if s != 0 && now_ms().saturating_sub(s) > timeout {
                     let src = input.lock().map(|s| s.clone()).unwrap_or_default();
                     let f = Failure { kind: "hang", place: format!("{:016x}", hash(&src)), detail: format!("over {timeout} ms") };
-                    let p = save_finding(&out, &f, &src, None, 0);
-                    eprintln!("zust-fuzz: hang: {}", p.display());
+                    report("hang", save_finding(&out, &f, &src, None, edition.load(Ordering::Relaxed)));
                     std::process::exit(3);
                 }
             }
@@ -183,14 +240,9 @@ fn worker(a: &Args, deadline: u64) -> ! {
         let j = rng.below(corpus.len());
         let src = mutate::mutate(&mut rng, &corpus[i], &corpus[j], a.max_len);
         let edition = *rng.pick(&[2015u16, 2018, 2021, 2021, 2024]);
-        let _ = std::fs::write(&current, &src);
-        if let Ok(mut s) = input.lock() {
-            s.clone_from(&src);
-        }
+        active.set(&src, edition);
         for &t in &a.targets {
-            started.store(now_ms(), Ordering::Relaxed);
-            let r = run_one(t, &src, edition);
-            started.store(0, Ordering::Relaxed);
+            let r = active.run(t, &src, edition);
             runs += 1;
             match r {
                 Ok(feat) => {
@@ -200,9 +252,15 @@ fn worker(a: &Args, deadline: u64) -> ! {
                     }
                 }
                 Err(f) if seen.insert((f.kind, f.place.clone())) => {
-                    let min = minimize_failure(t, &src, &f, edition);
-                    let p = save_finding(&a.out, &f, &src, Some(&min), edition);
-                    eprintln!("zust-fuzz: {} at {} ({}): {}", f.kind, f.place, f.detail.lines().next().unwrap_or(""), p.display());
+                    let what = format!("{} at {} ({})", f.kind, f.place, f.detail.lines().next().unwrap_or(""));
+                    // (saved before it is minimized, which a candidate that hangs or crashes ends)
+                    report(&what, save_finding(&a.out, &f, &src, None, edition));
+                    let min = minimize_failure(Some(&active), t, &src, &f, edition);
+                    if let Err(e) = save_finding(&a.out, &f, &src, Some(&min), edition) {
+                        eprintln!("zust-fuzz: {what}: the minimized input could not be saved: {e}");
+                    }
+                    // (the input the next targets run on)
+                    active.set(&src, edition);
                 }
                 Err(_) => {}
             }
@@ -246,8 +304,7 @@ fn supervise(a: &Args, raw: &[String]) -> i32 {
                 found = true;
                 let src = std::fs::read_to_string(a.out.join("current.rs")).unwrap_or_default();
                 let f = Failure { kind: "crash", place: format!("{:016x}", hash(&src)), detail: format!("worker exit {code:?}") };
-                let p = save_finding(&a.out, &f, &src, None, 0);
-                eprintln!("zust-fuzz: crash ({code:?}): {}", p.display());
+                report(&format!("crash ({code:?})"), save_finding(&a.out, &f, &src, None, current_edition(&a.out)));
             }
             Err(e) => {
                 eprintln!("zust-fuzz: cannot start the worker: {e}");
@@ -257,6 +314,7 @@ fn supervise(a: &Args, raw: &[String]) -> i32 {
         seed = seed.wrapping_add(1);
     }
     let _ = std::fs::remove_file(a.out.join("current.rs"));
+    let _ = std::fs::remove_file(a.out.join("current.edition"));
     if found {
         eprintln!("zust-fuzz: findings in {}", a.out.join("findings").display());
         1
@@ -307,7 +365,7 @@ fn main() {
                             bad += 1;
                             println!("{}: {}: {} at {}: {}", p.display(), t.name(), f.kind, f.place, f.detail);
                             if cmd == "minimize" {
-                                println!("{}", minimize_failure(t, &src, &f, a.edition));
+                                println!("{}", minimize_failure(None, t, &src, &f, a.edition));
                             }
                         }
                     }

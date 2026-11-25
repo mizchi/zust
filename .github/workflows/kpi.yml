@@ -46,23 +46,25 @@ jobs:
         run: |
           command -v wild || cargo install --locked wild-linker@0.11.0
           sudo apt-get update && sudo apt-get install -y valgrind
-      # (the key of a commit's KPIs: the trees they are measured from, without the KPI log that main's commits append
-      # to, and the tools whose versions move the counts. A commit that changes only documents keeps its parent's key)
+      # (the key of a commit's KPIs: the files they are measured from (not the documents, nor the KPI log that main's
+      # commits append to; submodules by their commits), and what moves the counts besides them: the toolchain,
+      # valgrind, the runner's image and its C library (cachegrind counts its instructions too). A commit that changes
+      # only documents keeps its parent's key)
       - name: Find the merge base and the cache keys
         id: keys
         run: |
           kpi_key() {
-            { rustc -V; valgrind --version
-              git ls-tree "$1" -- crates src cratebench Cargo.toml Cargo.lock build.rs .cargo
-              git ls-tree -r "$1" -- bench | grep -v 'bench/kpi_log\.'
+            { rustc -V; valgrind --version; echo "${ImageOS:-} ${ImageVersion:-}"; ldd --version 2>&1 | sed -n 1p
+              git ls-tree -r "$1" -- crates src cratebench Cargo.toml Cargo.lock build.rs .cargo bench \
+                | grep -v -e '\.md$' -e 'bench/kpi_log\.'
             } | sha256sum | cut -c1-24
           }
           if [ "${{ github.event_name }}" = pull_request ]; then
             base=$(git merge-base HEAD ${{ github.event.pull_request.base.sha }})
             echo "base_sha=$base" >> "$GITHUB_OUTPUT"
-            echo "base=kpi-v1-$(kpi_key "$base")" >> "$GITHUB_OUTPUT"
+            echo "base=kpi-v2-$(kpi_key "$base")" >> "$GITHUB_OUTPUT"
           fi
-          echo "head=kpi-v1-$(kpi_key HEAD)" >> "$GITHUB_OUTPUT"
+          echo "head=kpi-v2-$(kpi_key HEAD)" >> "$GITHUB_OUTPUT"
           mkdir -p ~/kpi
       - name: Restore the base's KPIs
         if: github.event_name == 'pull_request'
