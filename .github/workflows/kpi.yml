@@ -1,16 +1,23 @@
 name: KPI
 
 # Every push to a pull request: the KPIs of bench/kpi_track.py (instruction counts of zustc on generated programs,
-# generic traits and cratebench's crates; one zust-analyzer session; build cache size) for the merge base and for the head, measured one after
-# the other on the same runner, and one comment on the PR that shows the change and keeps the result of every push
-# (bench/kpi_pr.py). A change past +1% is a ::warning::; the job does not fail.
+# generic traits and cratebench's crates; one zust-analyzer session; build cache size) for the merge base and for the
+# head, measured on the same runner image, and one comment on the PR that shows the change and keeps the result of
+# every push (bench/kpi_pr.py). A change past +1% is a ::warning::; the job does not fail.
+#
+# The base's numbers are cached by what they depend on (the trees of the code and the benchmarks at the base, the
+# toolchain and valgrind's versions), so a push whose merge base was measured before builds and measures the head
+# only. Every push to main measures main and keeps it there, for the pull requests whose merge base it is (a cache
+# saved on main is read by every pull request; one saved by a pull request only by that one).
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
 
 # (a new push replaces the run of the one before)
 concurrency:
-  group: kpi-${{ github.event.pull_request.number }}
+  group: kpi-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -24,10 +31,15 @@ jobs:
   kpi:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    # (bash with pipefail: a measurement that fails fails its step, not hidden by its `| tee`, so no empty result is
+    # saved as a commit's KPIs)
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           submodules: true
       - uses: dtolnay/rust-toolchain@stable
@@ -39,27 +51,73 @@ jobs:
         run: |
           command -v wild || cargo install --locked wild-linker@0.11.0
           sudo apt-get update && sudo apt-get install -y valgrind
-      - name: Find the merge base
-        id: base
-        run: echo "sha=$(git merge-base HEAD ${{ github.event.pull_request.base.sha }})" >> "$GITHUB_OUTPUT"
-      # (the base in a worktree beside the head; its own target directory)
-      - name: Measure the base
+      # (the key of a commit's KPIs: the files they are measured from (not the documents, nor the KPI log that main's
+      # commits append to; submodules by their commits), and what moves the counts besides them: the toolchain,
+      # valgrind, the runner's image and its C library (cachegrind counts its instructions too). A commit that changes
+      # only documents keeps its parent's key)
+      - name: Find the merge base and the cache keys
+        id: keys
         run: |
-          git worktree add ../base ${{ steps.base.outputs.sha }}
+          kpi_key() {
+            { rustc -V; valgrind --version; echo "${ImageOS:-} ${ImageVersion:-}"; ldd --version 2>&1 | sed -n 1p
+              git ls-tree -r "$1" -- crates src cratebench Cargo.toml Cargo.lock build.rs .cargo bench \
+                | grep -v -e '\.md$' -e 'bench/kpi_log\.'
+            } | sha256sum | cut -c1-24
+          }
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            base=$(git merge-base HEAD ${{ github.event.pull_request.base.sha }})
+            echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+            echo "base=kpi-v2-$(kpi_key "$base")" >> "$GITHUB_OUTPUT"
+          fi
+          echo "head=kpi-v2-$(kpi_key HEAD)" >> "$GITHUB_OUTPUT"
+          mkdir -p ~/kpi
+      - name: Restore the base's KPIs
+        if: github.event_name == 'pull_request'
+        id: base_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/kpi/base.txt
+          key: ${{ steps.keys.outputs.base }}
+      # (the base in a worktree beside the head, with its own target directory and its own bench/kpi_track.py)
+      - name: Measure the base
+        if: github.event_name == 'pull_request' && steps.base_cache.outputs.cache-hit != 'true'
+        run: |
+          git worktree add ../base ${{ steps.keys.outputs.base_sha }}
           cd ../base
           git submodule update --init --depth 1 cratebench/vendor
           cargo build --release --workspace
-          python3 bench/kpi_track.py base --lsp --dry-run | tee "$RUNNER_TEMP/kpi_base.txt"
+          jobs=""
+          if grep -q -- '"--jobs"' bench/kpi_track.py; then jobs="--jobs 4"; fi
+          python3 bench/kpi_track.py base --lsp --dry-run $jobs | tee ~/kpi/base.txt
+      - name: Keep the base's KPIs
+        if: github.event_name == 'pull_request' && steps.base_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/kpi/base.txt
+          key: ${{ steps.keys.outputs.base }}
+      # (the sections side by side: --jobs 4. An instruction count does not depend on the load; the LSP session runs
+      # alone after them)
       - name: Measure the head
         run: |
           cargo build --release --workspace
-          python3 bench/kpi_track.py head --lsp --dry-run | tee "$RUNNER_TEMP/kpi_head.txt"
+          python3 bench/kpi_track.py ${{ github.event_name == 'push' && 'base' || 'head' }} --lsp --dry-run --jobs 4 | tee ~/kpi/head.txt
+      - name: Keep main's KPIs for the pull requests based on it
+        if: github.event_name == 'push'
+        run: cp ~/kpi/head.txt ~/kpi/base.txt
+      - name: Save main's KPIs
+        if: github.event_name == 'push'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/kpi/base.txt
+          key: ${{ steps.keys.outputs.head }}
       - name: Update the KPI comment on the PR
+        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python3 bench/kpi_pr.py --base "$RUNNER_TEMP/kpi_base.txt" --head "$RUNNER_TEMP/kpi_head.txt" \
-            --base-sha ${{ steps.base.outputs.sha }} --head-sha ${{ github.event.pull_request.head.sha }} \
+          echo "base: ${{ steps.base_cache.outputs.cache-hit == 'true' && 'from the cache' || 'measured in this run' }} (${{ steps.keys.outputs.base }})"
+          python3 bench/kpi_pr.py --base ~/kpi/base.txt --head ~/kpi/head.txt \
+            --base-sha ${{ steps.keys.outputs.base_sha }} --head-sha ${{ github.event.pull_request.head.sha }} \
             --pr ${{ github.event.pull_request.number }} --repo ${{ github.repository }} \
             --out "$RUNNER_TEMP/kpi.md"
           cat "$RUNNER_TEMP/kpi.md" >> "$GITHUB_STEP_SUMMARY"
