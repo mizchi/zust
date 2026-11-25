@@ -1141,8 +1141,10 @@ impl<'a> Js<'a> {
                     Some(B::Fold) => {
                         // (a counting loop: Array.prototype.reduce is several times slower in V8)
                         self.helpers.insert("$fold");
-                        let f = self.callback(&args[1], 2);
-                        format!("$fold({recv}, {}, {f})", arg(self, 0))
+                        // (the initial value, then the function, in order)
+                        let v = self.seq(&[&args[0], &args[1]]);
+                        let f = self.adapt(&args[1], v[1].clone(), 2);
+                        format!("$fold({recv}, {}, {f})", v[0])
                     }
                     // (in place onto a local array no one else sees, at its last use: amortized O(1), not a copy)
                     Some(B::Push) if self.inplace.contains(&e.id) => format!("({recv}.push({}), {recv})", arg(self, 0)),

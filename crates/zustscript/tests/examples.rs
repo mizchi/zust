@@ -790,7 +790,7 @@ fn options_and_try() {
     let out = node(&d, "const log = []; globalThis.note = (s) => log.push(s); const m = await import('./options.js'); console.log(m.orders()); console.log(log.join(' ')); console.log(JSON.stringify([await m.async_tail({ TAG: 'Ok', _0: 2 }), await m.async_tail({ TAG: 'Ok', _0: -1 }), await m.async_tail({ TAG: 'Err', _0: 'early' })]));");
     assert_eq!(
         out,
-        "2 1,3 <cat>1 1 3 3 3 true | none | none\n\
+        "2 1,3 <cat>1 1 3 3 3 true 1 | none | none\n\
          eval cat arg arg arg callee arg eval cat arg arg arg callee eval cat arg\n\
          [{\"TAG\":\"Ok\",\"_0\":4},{\"TAG\":\"Err\",\"_0\":\"not positive\"},{\"TAG\":\"Err\",\"_0\":\"early\"}]\n"
     );

@@ -148,7 +148,10 @@ fn order(f: bool, a: bool) -> Option<String> {
   let y = x + ({ x = 3; Some(1) }?);
   let mut t = "ab";
   let k = t.contains({ t = "zz"; Some("a") }?);
-  Some(`${some_fn(f)?(some_arg(a)?)} ${p} ${s} ${n} ${r} ${x} ${y} ${k}`)
+  let mut w = 1;
+  let none: Array<i32> = [];
+  let fw = none.fold(w, { w = 2; Some(add2) }?);
+  Some(`${some_fn(f)?(some_arg(a)?)} ${p} ${s} ${n} ${r} ${x} ${y} ${k} ${fw}`)
 }
 
 export fn orders() -> String {
@@ -175,3 +178,5 @@ export fn ranged(ok: bool) -> Option<String> {
   let xs = range(bound(0), bound(3)).map(mapper(ok)?);
   Some(xs.map((x) => x.to_string()).join(","))
 }
+
+fn add2(a: i32, b: i32) -> i32 { a + b }
