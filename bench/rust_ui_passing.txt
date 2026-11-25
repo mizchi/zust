@@ -552,6 +552,7 @@ compile-fail	attributes/check-cfg_attr-ice.rs
 compile-fail	attributes/cold-attribute-application-54044.rs
 compile-fail	attributes/crate-type-delimited.rs
 compile-fail	attributes/crate-type-empty.rs
+compile-fail	attributes/crate-type-macro-empty.rs
 compile-fail	attributes/crate-type-macro-not-crate.rs
 compile-fail	attributes/crate-type-non-crate.rs
 compile-fail	attributes/custom_attr_multisegment_error.rs
@@ -2834,6 +2835,8 @@ compile-fail	feature-gates/feature-gate-link-enzyme-intrinsics-no-gate.rs
 compile-fail	feature-gates/feature-gate-linkage.rs
 compile-fail	feature-gates/feature-gate-log_syntax.rs
 compile-fail	feature-gates/feature-gate-log_syntax2.rs
+compile-fail	feature-gates/feature-gate-macro-attr.rs
+compile-fail	feature-gates/feature-gate-macro-derive.rs
 compile-fail	feature-gates/feature-gate-macro-guard-matcher.rs
 compile-fail	feature-gates/feature-gate-marker_trait_attr.rs
 compile-fail	feature-gates/feature-gate-may-dangle.rs
@@ -4452,6 +4455,7 @@ compile-fail	macros/format-empty-block-unit-tuple-suggestion-130170.rs
 compile-fail	macros/format-parse-errors.rs
 compile-fail	macros/global-asm.rs
 compile-fail	macros/invalid-fragment-specifier.rs
+compile-fail	macros/invalid-macro-matcher.rs
 compile-fail	macros/issue-102878.rs
 compile-fail	macros/issue-105011.rs
 compile-fail	macros/issue-10536.rs
@@ -5660,6 +5664,7 @@ compile-fail	parser/issues/issue-76437-const.rs
 compile-fail	parser/issues/issue-76437-pub-crate-unsafe.rs
 compile-fail	parser/issues/issue-76437-unsafe.rs
 compile-fail	parser/issues/issue-76597.rs
+compile-fail	parser/issues/issue-7970b.rs
 compile-fail	parser/issues/issue-81804.rs
 compile-fail	parser/issues/issue-81806.rs
 compile-fail	parser/issues/issue-81827.rs
@@ -5762,6 +5767,7 @@ compile-fail	parser/lifetime-semicolon.rs
 compile-fail	parser/lifetime_starts_expressions.rs
 compile-fail	parser/macro-rules-paren-name-issue-150899.rs
 compile-fail	parser/macro/bad-macro-argument.rs
+compile-fail	parser/macro/bad-macro-definition.rs
 compile-fail	parser/macro/break-in-unlabeled-block-in-macro.rs
 compile-fail	parser/macro/do-not-suggest-semicolon-between-macro-without-exclamation-mark-and-array.rs
 compile-fail	parser/macro/expr-in-attribute.rs
@@ -5773,6 +5779,7 @@ check-pass	parser/macro/macro-bare-trait-object-maybe-trait-bound.rs
 compile-fail	parser/macro/macro-in-attribute.rs
 compile-fail	parser/macro/macro-keyword.rs
 compile-fail	parser/macro/macro-missing-right-paren.rs
+compile-fail	parser/macro/macros-no-semicolon-items.rs
 compile-fail	parser/macro/macros-no-semicolon.rs
 compile-fail	parser/macro/misspelled-macro-rules.rs
 compile-fail	parser/macro/pub-method-macro.rs

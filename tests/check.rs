@@ -2685,3 +2685,20 @@ fn async_main_and_test_attributes_where_rustc_rejects_them() {
     assert_eq!(first("fn main() {\n    #[test]\n    struct A5(u32, u8);\n}\n").map(|d| (d.0, d.2)), t(2, 5).map(|d| (d.0, d.2)), "an item in a fn body, at its line");
     assert_eq!(first("#[test]\nfn t() {}\n#[test]\npub(crate) unsafe extern \"C\" fn u() {}\nmacro_rules! m { () => {} }\nfn main() {}\n"), None, "free fns");
 }
+
+#[test]
+fn macro_definitions_rustc_rejects_and_rules_with_doc_comments() {
+    // (rustc 1.100 reads each `macro_rules!` definition, used or not: no rule, a matcher outside delimiters, a rule cut
+    // short; a rule's doc comment is a warning, and the rule after it is read)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("fn main() {}\n\nmacro_rules! test {}\n"), e(3, "macros must contain at least one rule"), "no rule");
+    assert_eq!(first("macro_rules! foo()\nfn main() {}\n"), e(1, "macros that expand to items must be delimited with braces or followed by a semicolon"), "parentheses, no `;`");
+    assert_eq!(first("macro_rules! b {\n    0 => {}\n}\nfn main() {}\n"), e(2, "invalid macro matcher; matchers must be contained in balanced delimiters"), "a bare matcher");
+    assert_eq!(first("macro_rules! a { {} => }\nfn main() {}\n"), e(1, "macro definition ended unexpectedly"), "no body");
+    assert_eq!(first("macro_rules! e {\n    {}\n}\nfn main() {}\n"), e(2, "expected `=>`, found end of macro arguments"), "no `=>`");
+    assert_eq!(first("macro_rules! m {\n    /// the empty one\n    () => { 1 };\n    /// a value\n    ($x:expr) => { $x };\n}\nfn main() { let _ = m!() + m!(2); }\n"), None, "doc comments on rules");
+}

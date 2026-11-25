@@ -43,6 +43,88 @@ thread_local! {
 }
 
 thread_local! {
+    /// Whether a `macro_rules!` definition was read that rustc rejects (no rule, a matcher outside delimiters, a rule
+    /// cut short): macro_def_err finds it in the source then
+    pub static BAD_DEF: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// rustc's error for the first `macro_rules!` definition of src it rejects when it reads the definitions, used or not:
+/// one delimited by parentheses or brackets with no `;` after it, one with no rule, a matcher that is no delimited
+/// group, a rule without its `=>` or its body
+#[cold]
+pub fn macro_def_err(src: &str) -> Option<String> {
+    let b = src.as_bytes();
+    let toks = crate::lexer::tokenize(b);
+    let (close, _) = brackets(b, &toks);
+    let sym = |k: usize, c: u8| k < toks.len() && toks[k].0 == 1 && b[toks[k].1] == c;
+    let open = |k: usize| (sym(k, b'(') || sym(k, b'[') || sym(k, b'{')) && close[k] != usize::MAX;
+    let err = |k: usize, m: &str| {
+        let off = toks[k].1;
+        let line = 1 + b[..off].iter().filter(|&&c| c == b'\n').count();
+        let col = src[..off].chars().rev().take_while(|&c| c != '\n').count() + 1;
+        Some(format!("{line}:{col}: {m}"))
+    };
+    let mut i = 0;
+    while i + 3 < toks.len() {
+        if !(toks[i].0 == 0 && &b[toks[i].1..toks[i].2] == b"macro_rules" && sym(i + 1, b'!') && toks[i + 2].0 == 0 && open(i + 3)) {
+            i += 1;
+            continue;
+        }
+        let (o, c) = (i + 3, close[i + 3]);
+        if !sym(o, b'{') && !sym(c + 1, b';') {
+            return err(o, "macros that expand to items must be delimited with braces or followed by a semicolon");
+        }
+        if o + 1 == c {
+            return err(i, "macros must contain at least one rule");
+        }
+        let mut j = o + 1;
+        while j < c {
+            // (a rule's attribute, `#[doc = ".."]`)
+            if sym(j, b'#') && sym(j + 1, b'[') && open(j + 1) {
+                j = close[j + 1] + 1;
+                continue;
+            }
+            // (an attribute's or a derive's rule, `attr(args) (input) => ..`: E0658 without its feature, at the
+            // definition; with it, its matcher follows the arguments)
+            let w = &b[toks[j].1..toks[j].2];
+            if toks[j].0 == 0 && (w == b"attr" || w == b"derive") && open(j + 1) {
+                let (feat, what) = if w == b"attr" { ("macro_attr", "attributes") } else { ("macro_derive", "derives") };
+                if !src.contains(feat) {
+                    return err(i, &format!("`macro_rules!` {what} are unstable (E0658)"));
+                }
+                j = close[j + 1] + 1;
+            }
+            if !open(j) {
+                return err(j, "invalid macro matcher; matchers must be contained in balanced delimiters");
+            }
+            let m = close[j];
+            j = m + 1;
+            if j >= c {
+                return err(m, "expected `=>`, found end of macro arguments");
+            }
+            if !(sym(j, b'=') && sym(j + 1, b'>') && toks[j].2 == toks[j + 1].1) {
+                return None;
+            }
+            j += 2;
+            if j >= c {
+                return err(j - 1, "macro definition ended unexpectedly");
+            }
+            if !open(j) {
+                return None;
+            }
+            j = close[j] + 1;
+            if sym(j, b';') {
+                j += 1;
+            } else if j < c {
+                return None;
+            }
+        }
+        i = c + 1;
+    }
+    None
+}
+
+thread_local! {
     /// The name of a `#[macro_export]` macro defined twice (E0428), met while the definitions are read
     pub static DUP_EXPORT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
 }
@@ -838,11 +920,27 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
 fn parse_rules(inner: &str) -> Result<Vec<Rule>, String> {
     let ts = TokenStream::from_str(inner).map_err(|e| format!("1:1: {e}"))?;
     let body: Vec<TokenTree> = ts.into_iter().collect();
+    // (no rule, or one rustc rejects: noted, for the driver to read where it is)
+    if body.is_empty() {
+        BAD_DEF.with(|c| c.set(true));
+    }
     let mut rules = vec![];
     let mut j = 0;
     while j < body.len() {
-        let TokenTree::Group(m) = &body[j] else { j += 1; continue };
-        let Some(TokenTree::Group(t)) = body.get(j + 3) else { break };
+        // (a rule's doc comment or attribute, `/// doc` before its matcher: rustc's unused_doc_comments warns of it)
+        if matches!(&body[j], TokenTree::Punct(p) if p.as_char() == '#') && matches!(body.get(j + 1), Some(TokenTree::Group(g)) if g.delimiter() == proc_macro2::Delimiter::Bracket) {
+            j += 2;
+            continue;
+        }
+        let TokenTree::Group(m) = &body[j] else {
+            BAD_DEF.with(|c| c.set(true));
+            j += 1;
+            continue;
+        };
+        let Some(TokenTree::Group(t)) = body.get(j + 3) else {
+            BAD_DEF.with(|c| c.set(true));
+            break;
+        };
         rules.push(Rule { pat: parse_pt(m.stream(), true), body: parse_pt(t.stream(), false) });
         j += 4;
         if let Some(TokenTree::Punct(p)) = body.get(j) {
