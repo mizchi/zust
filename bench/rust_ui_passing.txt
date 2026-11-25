@@ -229,6 +229,7 @@ run-pass	associated-types/associated-types-duplicate-binding-in-env-hrtb.rs
 run-pass	associated-types/associated-types-duplicate-binding-in-env.rs
 compile-fail	associated-types/associated-types-eq-3.rs
 compile-fail	associated-types/associated-types-eq-expr-path.rs
+compile-fail	associated-types/associated-types-eq-hr.rs
 run-pass	associated-types/associated-types-eq-obj.rs
 compile-fail	associated-types/associated-types-for-unimpl-trait.rs
 run-pass	associated-types/associated-types-from-supertrait.rs
@@ -7100,6 +7101,7 @@ compile-fail	suggestions/format-borrow.rs
 compile-fail	suggestions/ice-unwrap-probe-many-result-125876.rs
 compile-fail	suggestions/if-let-typo.rs
 compile-fail	suggestions/if-then-neeing-semi.rs
+compile-fail	suggestions/imm-ref-trait-object-literal-bound-regions.rs
 compile-fail	suggestions/imm-ref-trait-object-literal.rs
 compile-fail	suggestions/imm-ref-trait-object.rs
 compile-fail	suggestions/impl-trait-return-trailing-semicolon.rs
@@ -8256,6 +8258,7 @@ compile-fail	where-clauses/where-clause-constraints-are-local-for-inherent-impl.
 compile-fail	where-clauses/where-clause-constraints-are-local-for-trait-impl.rs
 run-pass	where-clauses/where-clause-early-bound-lifetimes.rs
 run-pass	where-clauses/where-clause-method-substituion-rpass.rs
+compile-fail	where-clauses/where-clause-method-substituion.rs
 check-pass	where-clauses/where-clause-on-struct-definitions.rs
 check-pass	where-clauses/where-clause-placement-assoc-type-in-impl.rs
 run-pass	where-clauses/where-clause-region-outlives.rs
@@ -8263,6 +8266,7 @@ run-pass	where-clauses/where-clauses-lifetimes.rs
 run-pass	where-clauses/where-clauses-method.rs
 run-pass	where-clauses/where-clauses-unboxed-closures.rs
 run-pass	where-clauses/where-clauses.rs
+compile-fail	where-clauses/where-for-self-2.rs
 run-pass	whitespace/ascii_whitespace_excludes_vertical_tab.rs
 run-pass	whitespace/vertical_tab_lexer.rs
 run-pass	windows-subsystem/console.rs
