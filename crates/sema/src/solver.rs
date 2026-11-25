@@ -502,7 +502,13 @@ impl Solver<'_> {
                     .iter()
                     .map(|t| self.prog.resolve_env(t, self.env).ok())
                     .collect::<Option<Vec<Ty>>>()?;
-                Some((ps, self.prog.resolve_env(&r, self.env).ok()?))
+                let r = self.prog.resolve_env(&r, self.env).ok()?;
+                // (a callee's `dyn Fn(T) -> T` whose T is not given: its parameter's mark (Program::dyn_canon) is
+                // the callee's, not a type here)
+                if ps.iter().chain([&r]).any(|&t| self.prog.has_param(t)) {
+                    return None;
+                }
+                Some((ps, r))
             }
             _ => None,
         }

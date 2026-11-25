@@ -317,6 +317,11 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
             // (`<i32 as Local>::Output` of a trait other than std's operators / Deref: an impl must give it, not std's
             // impls for the numbers, which Program answers `<i32 as Add>::Output` with)
             let tr = p.segs.len().checked_sub(2).map(|i| p.segs[i].name.as_str());
+            // (`<dyn Trait<i32>>::Ty`: an associated type of a trait object named without its trait, E0223 as in
+            // rustc; a type parameter's (`<T>::Item`) is its bound's)
+            if tr.is_none() && matches!(&**q, PTy::Dyn(_)) {
+                return Err(format!("ambiguous associated type `{name}`: use fully-qualified syntax, `<dyn .. as Trait>::{name}` (E0223)"));
+            }
             let std_tr = matches!(
                 tr,
                 Some("Add" | "Sub" | "Mul" | "Div" | "Rem" | "Neg" | "Not" | "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr" | "Deref" | "DerefMut")
