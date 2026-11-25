@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795637413477,
+  "lastUpdate": 1795637415916,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -111003,6 +111003,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/72e35d186ad1822627ce9919619eca2c071d31ff"
         },
         "date": 1795637016500,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.552,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.818,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 71.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.537,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "12c872983f4a7ee16d08b3bfdac2dfda9943893f",
+          "message": "Merge pull request #219 from mizchi/claude/fix-178-zurgo-pkg-source\n\nzurgo: the duplicate-library error names each package's source (#178)",
+          "timestamp": "2026-11-26T04:57:34+09:00",
+          "tree_id": "b8b08cc80795c841c3f53eeebda5869c8ae8f086",
+          "url": "https://github.com/mizchi/zust/commit/12c872983f4a7ee16d08b3bfdac2dfda9943893f"
+        },
+        "date": 1795637415639,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
