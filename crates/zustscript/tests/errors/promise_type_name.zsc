@@ -1,0 +1,2 @@
+// expect: `Promise` is the built-in type of `async` / `await`
+type Promise<T> = { value: T }

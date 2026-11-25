@@ -1327,7 +1327,10 @@ impl Session2 {
                 }
                 // (`\u{3}line\u{3}msg`: at that line of the item)
                 if let Some((l, m)) = e.strip_prefix('\u{3}').and_then(|r| r.split_once('\u{3}')) {
-                    return Err(format!("{}:1: {m}", it.line + l.parse::<usize>().unwrap_or(1) - 1));
+                    // (an item hoisted out of a fn body: at the line it was written on)
+                    let line = it.line + l.parse::<usize>().unwrap_or(1) - 1;
+                    let line = crate::prep::hoisted_at(&crate::prep::hoist_marks(&src), line).unwrap_or(line);
+                    return Err(format!("{line}:1: {m}"));
                 }
                 // (`\u{5}word\u{5}msg`: at the line of the first whole word `word` of the item's text)
                 if let Some((w, m)) = e.strip_prefix('\u{5}').and_then(|r| r.split_once('\u{5}')) {
@@ -9470,7 +9473,24 @@ fn compile_id_req(a: &Analysis, insts: &Mutex<Insts>, id: u32) -> R<(Blob, Vec<u
     };
     let l0 = insts.lock().unwrap().fx_log.len();
     let (c, req) = acg::compile(&a.prog, insts, id, f, lb, &a.inl)
-        .map_err(|e| if acg::has_loc(&e) { untag_lines(&e, shift) } else { format!("{}:1: in `{}`: {e}", it.line, a.prog.names[body as usize]) })?;
+        .map_err(|e| {
+            if acg::has_loc(&e) {
+                return untag_lines(&e, shift);
+            }
+            // (an error with no position of its own in a closure's body (its parameters' patterns): at the closure,
+            // as rustc reports it, not at the line of the item it is in)
+            let at = a.prog.closures.get(&body).and_then(|cd| {
+                let encl = a.encl.lock().unwrap();
+                match encl.get(&(ii as u32)).and_then(|cs| cs.get(cd.k as usize)).map(|c| &c.0) {
+                    Some(Expr::Closure(.., p)) if p.line != 0 => Some((lb + p.line, p.col + 1)),
+                    _ => None,
+                }
+            });
+            match at {
+                Some((l, c)) => format!("{l}:{c}: in `{}`: {e}", a.prog.names[body as usize]),
+                None => format!("{}:1: in `{}`: {e}", it.line, a.prog.names[body as usize]),
+            }
+        })?;
     // (what it told the closures it makes goes with its Blob: one read back (a cache, another process) tells them too)
     let clo_facts = insts.lock().unwrap().facts_since(l0);
     // (check は機械語にしない。ビルドは記録をバックエンドで機械語にする)
