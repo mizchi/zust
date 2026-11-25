@@ -556,6 +556,12 @@ impl Checker {
         self.record_types = rust_output || items.iter().any(|it| matches!(it, Item::Fn { wasm: true, .. } | Item::Fn { simd: true, .. }));
         // types first (records and enums may refer to each other)
         for it in items {
+            // (`Promise` is the built-in type of `async` / `await`: no record or enum takes its name)
+            if let Item::Record { name, pos, .. } | Item::Enum { name, pos, .. } = it {
+                if name == "Promise" {
+                    self.err(*pos, "`Promise` is the built-in type of `async` / `await`: name this type otherwise");
+                }
+            }
             match it {
                 Item::Record { name, params, pos, .. } => {
                     if self.info.records.contains_key(name) || self.info.enums.contains_key(name) {
@@ -614,7 +620,11 @@ impl Checker {
                     }
                     let a = args.iter().map(|(_, t)| self.ty_of(t, generics)).collect();
                     let r = ret.as_ref().map(|t| self.ty_of(t, generics)).unwrap_or(Ty::Unit);
-                    // (an `async fn`'s callers get a Promise of its result)
+                    // (an `async fn`'s callers get a Promise of its result; JS adopts a Promise its body gives, so
+                    // the result is written as the value)
+                    if *is_async && promised(&r).is_some() {
+                        self.err(*pos, format!("`{name}` is async: write its result as the value (`-> T`), callers get `Promise<T>`"));
+                    }
                     let r = if *is_async { promise(r) } else { r };
                     let bounds = bounds.iter().cloned().collect();
                     self.info.fns.insert(name.clone(), FnSig { generics: generics.clone(), bounds, args: a, ret: r });
@@ -1317,6 +1327,8 @@ impl Checker {
                     Some(t) => t.clone(),
                     None => self.fresh(),
                 };
+                // (a handler's body and arms run on generators or plain functions in JS: not async)
+                let was_async = std::mem::replace(&mut self.in_async, false);
                 let bt = self.infer(body, Some(&out));
                 self.unify(body.pos, &bt, &out);
                 let mut covered: HashMap<String, Vec<String>> = HashMap::new();
@@ -1354,6 +1366,7 @@ impl Checker {
                         self.err(pos, format!("this handler handles `{en}` but not `{}` (a handler takes all of an effect's operations)", missing.join("`, `")));
                     }
                 }
+                self.in_async = was_async;
                 out
             }
             EK::If(c, th, el) => {
@@ -1485,13 +1498,22 @@ impl Checker {
             }
             EK::Async(c) => {
                 // (the closure inside is checked against the expected function with the Promise taken off its result)
+                // (the parameters' types are kept even while the expected result is still unknown)
                 let inner = match expect.map(|t| self.resolve(t)) {
-                    Some(Ty::Fn(a, r)) => promised(&self.resolve(&r)).map(|r| Ty::Fn(a, Box::new(r))),
+                    Some(Ty::Fn(a, r)) => {
+                        let r = promised(&self.resolve(&r)).unwrap_or_else(|| self.fresh());
+                        Some(Ty::Fn(a, Box::new(r)))
+                    }
                     _ => None,
                 };
                 self.next_closure_async = true;
                 match self.infer(c, inner.as_ref()) {
-                    Ty::Fn(a, r) => Ty::Fn(a, Box::new(promise(*r))),
+                    // (a body that gives a Promise: JS adopts it, so the closure gives that Promise, not one of it)
+                    Ty::Fn(a, r) => {
+                        let r = self.resolve(&r);
+                        let r = if promised(&r).is_some() { r } else { promise(r) };
+                        Ty::Fn(a, Box::new(r))
+                    }
                     o => o,
                 }
             }

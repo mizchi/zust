@@ -846,7 +846,16 @@ impl<'a> Js<'a> {
         }
         let save = (std::mem::take(&mut self.out), self.ind, std::mem::replace(&mut self.arm_tail, false));
         self.ind = 1;
-        self.stmt_expr(e, &Dest::Return);
+        let boxed = !self.gen_ && awaits(e);
+        if boxed {
+            // (assigned, then returned in a box: see below)
+            let v = self.fresh();
+            self.line(&format!("let {v};"));
+            self.stmt_expr(e, &Dest::Assign(v.clone()));
+            self.line(&format!("return [{v}];"));
+        } else {
+            self.stmt_expr(e, &Dest::Return);
+        }
         let body = std::mem::replace(&mut self.out, save.0);
         self.ind = save.1;
         self.arm_tail = save.2;
@@ -854,9 +863,10 @@ impl<'a> Js<'a> {
         let body: String = body.lines().map(|l| format!("{pad}{l}\n")).collect();
         if self.gen_ {
             format!("(yield* (function* () {{\n{body}{pad}}})())")
-        } else if awaits(e) {
-            // (an `await` inside: the function is async, and its Promise is awaited where it stands)
-            format!("(await (async () => {{\n{body}{pad}}})())")
+        } else if boxed {
+            // (an `await` inside: the function is async, and its Promise is awaited where it stands. The value is
+            // boxed: a Promise the expression gives would be adopted by the async function and come out awaited)
+            format!("(await (async () => {{\n{body}{pad}}})())[0]")
         } else {
             format!("(() => {{\n{body}{pad}}})()")
         }

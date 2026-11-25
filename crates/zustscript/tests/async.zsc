@@ -41,3 +41,20 @@ export async fn run() -> String {
 export async fn picked(n: i32) -> String {
   "<" + (match n { 0 => "zero", _ => { let t = await fetch_title(n); t } }) + ">"
 }
+
+// an async closure where the expected result is still unknown keeps its parameter's type
+export fn lens(xs: Array<String>) -> Array<Promise<i32>> {
+  xs.map(async (s) => s.len())
+}
+
+// an async closure whose body gives a Promise gives that Promise (JS adopts it), not a Promise of it
+export fn passthrough() -> fn() -> Promise<String> {
+  async () => fetch_title(9)
+}
+
+// a match whose value is a Promise, with an `await` in an arm: the Promise comes out as itself
+extern fn is_promise(p: Promise<String>) -> bool = "globalThis.isPromise";
+export async fn kept(n: i32) -> String {
+  let p = "" + (if is_promise(match n { 0 => fetch_title(0), _ => { let t = await fetch_title(n); delay(1, t + "!") } }) { "promise" } else { "value" });
+  `${p} ${await (passthrough())()} ${(await lens(["ab", "c"])[0]).to_string()}`
+}
