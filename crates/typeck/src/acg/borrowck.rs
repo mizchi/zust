@@ -1635,7 +1635,14 @@ impl Bk {
                     if let (Acc::Move, Some(errs), false) = (a, errs.as_deref_mut(), self.locals[p.local as usize].via_ref) {
                         if p.owned_len() < p.proj.len() || p.proj.contains(&Proj::Index) {
                             let what = if p.owned_len() < p.proj.len() { "which is behind a reference" } else { "an indexed place" };
-                            errs.push(BkError { sp: *sp, msg: format!("cannot move out of `{}`, {what}", path_str(&self.locals, p)) });
+                            // (of a temporary's part (a match on `(a, b)`): of the reference, as rustc says it)
+                            let msg = if self.locals[p.local as usize].name == TEMP && p.owned_len() < p.proj.len() {
+                                let m = matches!(p.proj.get(p.owned_len()), Some(Proj::Deref(true)));
+                                format!("cannot move out of a {} reference", if m { "mutable" } else { "shared" })
+                            } else {
+                                format!("cannot move out of `{}`, {what}", path_str(&self.locals, p))
+                            };
+                            errs.push(BkError { sp: *sp, msg });
                         }
                     }
                     match a {
@@ -2531,6 +2538,19 @@ impl Cx<'_> {
         }
         self.rg.scrut = if self.rg_on() { self.rt_expr(e) } else { None };
         self.bk.scrut_place = self.bk_place(e).map(|p| (p.0, err_pos(e)));
+        // (a temporary matched by a `&` pattern that binds by value (`match (l1, l2) { (_, &[hd, ..]) => .. }`): a
+        // place of its own, so that what the binding moves out through the reference is an error at the scrutinee,
+        // as it is of a local (E0507 / E0508). Not with `ref` bindings, whose loans of a temporary are made above)
+        let by_value_deref = |p: &Pat| pat_any(p, &|q| matches!(q, Pat::Ref(_, inner) if pat_any(inner, &|r| matches!(r, Pat::Ident(false, ..)))));
+        if self.bk.scrut_place.is_none() && self.bk.level >= 1 && pats.iter().any(|p| by_value_deref(p)) && !pats.iter().any(|p| pat_binds_ref(p)) {
+            if let Ok(Some(pl)) = &r {
+                let id = self.bk.locals.len() as u32;
+                self.bk.locals.push(Local { name: TEMP.to_string(), ty: pl.ty(), copy: false, refs: false, mutable: Some(true), decl: super::SP, via_ref: false });
+                self.bk_ev(Ev::Bind(id, true));
+                self.bk.stmt_temps.push(id);
+                self.bk.scrut_place = Some((BPlace { local: id, proj: vec![] }, err_pos(e)));
+            }
+        }
         if let (Ok(Some(p)), true) = (&r, self.bk.level >= 1) {
             let t = p.ty();
             // (`match d.f { Some(x) => .. }` with d's type implementing `Drop`: what the pattern moves is d's)
