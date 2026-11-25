@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795603189208,
+  "lastUpdate": 1795603191705,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -127755,6 +127755,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/54460146e61471d2ecebfb6b7d9c15200871d3bc"
         },
         "date": 1795601625309,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1905,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1549,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 65.52,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4839,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fe60aef486a9eb23c0688fe56554b22adc7cafdb",
+          "message": "Merge pull request #162 from mizchi/claude/tender-sagan-iatvun\n\neither: std::io::Seek and SeekFrom, and Read through a Cursor<&[u8]>",
+          "timestamp": "2026-11-25T19:36:01+09:00",
+          "tree_id": "908c67fe3f83f4aa17622f877420bedec92848b6",
+          "url": "https://github.com/mizchi/zust/commit/fe60aef486a9eb23c0688fe56554b22adc7cafdb"
+        },
+        "date": 1795603191159,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
