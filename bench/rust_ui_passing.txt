@@ -4707,6 +4707,7 @@ compile-fail	macros/non-function-call-in-macro.rs
 check-pass	macros/none-delim-lookahead.rs
 check-pass	macros/out-of-scope-macro-calls-lint-registered.rs
 check-pass	macros/panic-temporaries.rs
+compile-fail	macros/paren-or-brace-expected.rs
 check-pass	macros/pub-item-inside-macro.rs
 check-pass	macros/pub-method-inside-macro.rs
 compile-fail	macros/recovery-allowed.rs
@@ -5526,6 +5527,7 @@ compile-fail	parser/bad-value-ident-true.rs
 compile-fail	parser/bare-type-in-impl-parameter.rs
 check-pass	parser/bastion-of-the-turbofish.rs
 compile-fail	parser/better-expected.rs
+compile-fail	parser/bind-struct-early-modifiers.rs
 run-pass	parser/block-expr-statement-vs-expr.rs
 compile-fail	parser/bound-single-question-mark.rs
 compile-fail	parser/bounds-lifetime-1.rs

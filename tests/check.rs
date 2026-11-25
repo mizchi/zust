@@ -3239,3 +3239,16 @@ fn use_paths_with_a_lone_colon_or_a_bad_token_in_a_list() {
     assert_eq!(first("pub mod x {\n    pub struct A;\n    pub struct B;\n}\nuse x::{A. B};\nfn main() {}\n"), Some((5, 10, "expected one of `,`, `::`, `as`, or `}`, found `.`".to_string())));
     assert_eq!(first("pub mod x {\n    pub mod y { pub struct A; }\n}\nuse x::{y::A, y::{self}};\nuse std::fmt::{self, Write as _};\nfn main() {}\n"), None);
 }
+
+#[test]
+fn a_binding_mode_shorthand_with_a_pattern_and_a_dollar_bracket_in_a_macro_body() {
+    // (rustc 1.100, at its line and column: `Foo { ref x: ref x }` is "expected `,`" at the `:`; `$[count($i)]` in a
+    // rule's body "expected `(` or `{`, found `[`" at the `[`, used or not)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("struct Foo { x: isize }\nfn main() {\n    match (Foo { x: 10 }) {\n        Foo { ref x: ref x } => {},\n    }\n}\n"), Some((4, 20, "expected `,`".to_string())));
+    assert_eq!(first("macro_rules! foo {\n    ( $( $i:ident ),* ) => {\n        $[count($i)]\n    };\n}\nfn main() {}\n"), Some((3, 10, "expected `(` or `{`, found `[`".to_string())));
+    assert_eq!(first("struct Foo { x: isize }\nfn main() {\n    let Foo { ref x } = Foo { x: 1 };\n    let _ = x;\n}\n"), None);
+}

@@ -1827,6 +1827,11 @@ impl Parser {
                 let r = self.eat_ident("ref");
                 let m = self.eat_ident("mut");
                 let n = self.decl_ident()?;
+                // (`Foo { ref x: pat }`: a binding mode is the shorthand's, so no `:` follows it, rustc's "expected `,`"
+                // at the `:`)
+                if (r || m) && self.is_punct(":") && !self.punct_at(1, ":") {
+                    return Err(self.err_plain("expected `,`"));
+                }
                 if self.eat_punct(":") {
                     fs.push((field_name(n), self.pat()?));
                 } else {

@@ -177,6 +177,11 @@ pub fn macro_def_err(src: &str) -> Option<String> {
             if !open(j) {
                 return None;
             }
+            // (the body: `$[..]` is no meta-variable expression (those are `${..}`), rustc's "expected `(` or `{`,
+            // found `[`" at the `[`)
+            if let Some(q) = (j + 1..close[j]).find(|&q| sym(q, b'$') && tx(q + 1) == b"[" && toks[q].2 == toks[q + 1].1) {
+                return err(q + 1, "expected `(` or `{`, found `[`");
+            }
             j = close[j] + 1;
             if sym(j, b';') {
                 j += 1;
@@ -1259,6 +1264,16 @@ fn bad_matcher<'a>(pat: &'a [Pt], seen: &mut Vec<&'a str>) -> bool {
 }
 
 /// 規則の並び `(matcher) => {transcriber}; ..` (macro_rules! の `{ .. }` の中身のテキスト)
+/// Whether a rule's body has a `$` right before a `[..]` group, in its groups too
+fn dollar_bracket(ts: TokenStream) -> bool {
+    let toks: Vec<TokenTree> = ts.into_iter().collect();
+    toks.iter().enumerate().any(|(k, t)| match t {
+        TokenTree::Punct(p) => p.as_char() == '$' && matches!(toks.get(k + 1), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Bracket),
+        TokenTree::Group(g) => dollar_bracket(g.stream()),
+        _ => false,
+    })
+}
+
 fn parse_rules(inner: &str) -> Result<Vec<Rule>, String> {
     let ts = TokenStream::from_str(inner).map_err(|e| format!("1:1: {e}"))?;
     let body: Vec<TokenTree> = ts.into_iter().collect();
@@ -1291,6 +1306,10 @@ fn parse_rules(inner: &str) -> Result<Vec<Rule>, String> {
         // (`($e:expr +)`: a token after a fragment that rustc does not allow there)
         if let Err(e) = check_follow(&pat, &[], PAT_WITH_OR.with(|c| c.get())) {
             bad_follow(e);
+        }
+        // (`$[..]` in the body: macro_def_err places rustc's error)
+        if dollar_bracket(t.stream()) {
+            BAD_DEF.with(|c| c.set(true));
         }
         rules.push(Rule { pat, body: parse_pt(t.stream(), false) });
         j += 4;
