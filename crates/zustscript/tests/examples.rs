@@ -785,6 +785,15 @@ fn options_and_try() {
         "note eval left\nnote eval left\nok 3 write; title is empty; title is longer than 8; left:one+two; none; <ONE|two>; none; 3; item is empty; true,false; 2; title is empty; three,one; none; one (computed) true true MISSING [title is empty] true true; two\n\
          [{\"TAG\":\"Some\",\"_0\":{\"id\":1,\"title\":\"a\"}},{\"TAG\":\"None\"},{\"TAG\":\"Err\",\"_0\":{\"TAG\":\"Empty\",\"_0\":\"title\"}}]\n"
     );
+    // (the callee before the arguments; a local read before a later operand assigns it; an operand that only looks
+    // like a string literal; a receiver written once; a range's bounds in order)
+    let out = node(&d, "const log = []; globalThis.note = (s) => log.push(s); const m = await import('./options.js'); console.log(m.orders()); console.log(log.join(' ')); console.log(JSON.stringify([await m.async_tail({ TAG: 'Ok', _0: 2 }), await m.async_tail({ TAG: 'Ok', _0: -1 }), await m.async_tail({ TAG: 'Err', _0: 'early' })]));");
+    assert_eq!(
+        out,
+        "2 1,3 <cat>1 1 3 2 | none | none\n\
+         eval cat arg arg arg callee arg eval cat arg arg arg callee eval cat arg\n\
+         [{\"TAG\":\"Ok\",\"_0\":4},{\"TAG\":\"Err\",\"_0\":\"not positive\"},{\"TAG\":\"Err\",\"_0\":\"early\"}]\n"
+    );
     let js = std::fs::read_to_string(d.join("options.js")).unwrap();
     // (`?` is statements before the one it is in; an argument before it is kept in a temporary first)
     assert!(js.contains("  const $t1 = non_empty(\"title\", d.title);\n  if ($t1.TAG === \"Err\") return $t1;\n  const t = $t1._0;\n"), "{js}");
@@ -801,6 +810,18 @@ fn options_and_try() {
     assert_eq!(node(&d, "const m = await import('./optmain.js'); console.log(m.run());"), "2 -1 true hi,-,- 1 -1 2 3\n");
     let js = std::fs::read_to_string(d.join("optmain.js")).unwrap();
     assert!(js.contains("  } else {\n    const $t1 = half(n);\n    if ($t1.TAG === \"None\") return $t1;\n    if ($t1._0 > 2) {"), "{js}");
+    // (an extern type reached through two modules is one type; its relative module is rebased to the importer)
+    let e = d.join("ext");
+    for f in ["leaf", "a", "b"] {
+        let o = zsc(&root().join(format!("tests/modules/ext/{f}.zsc")), &e, &[]);
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    }
+    std::fs::copy(root().join("tests/modules/ext/tok.js"), e.join("tok.js")).unwrap();
+    let o = zsc(&root().join("tests/modules/extmain.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(node(&d, "const m = await import('./extmain.js'); console.log(m.both('x').text);"), "b:a:x\n");
+    let dts = std::fs::read_to_string(d.join("extmain.d.ts")).unwrap();
+    assert!(dts.contains("import type { Token } from \"./ext/tok.js\";"), "{dts}");
 }
 
 /// tests/options_wasm.zsc: `?` and `if let` on the prelude's types in `@wasm fn`s, as wasm and as JS
@@ -813,10 +834,10 @@ fn options_same_in_js_and_wasm() {
         let o = compare_build(&src, &d, flags);
         assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
         assert_eq!(d.join("options_wasm.wasm").exists(), flags.is_empty());
-        outs.push(node(&d, "const m = await import('./options_wasm.js'); console.log(JSON.stringify([m.ratio(12, 3, 2), m.ratio(1, 0, 1), m.quarter(8), m.quarter(6), m.quarter(3), m.code(4, 0), m.code(8, 2)]));"));
+        outs.push(node(&d, "const m = await import('./options_wasm.js'); console.log(JSON.stringify([m.ratio(12, 3, 2), m.ratio(1, 0, 1), m.quarter(8), m.quarter(6), m.quarter(3), m.code(4, 0), m.code(8, 2), m.chosen(1), m.chosen(0)]));"));
     }
     assert_eq!(outs[0], outs[1], "wasm and JS differ");
-    assert_eq!(outs[0], "[{\"TAG\":\"Ok\",\"_0\":2},{\"TAG\":\"Err\",\"_0\":\"ByZero\"},{\"TAG\":\"Some\",\"_0\":2},{\"TAG\":\"None\"},{\"TAG\":\"None\"},-1,4]\n");
+    assert_eq!(outs[0], "[{\"TAG\":\"Ok\",\"_0\":2},{\"TAG\":\"Err\",\"_0\":\"ByZero\"},{\"TAG\":\"Some\",\"_0\":2},{\"TAG\":\"None\"},{\"TAG\":\"None\"},-1,4,2,-1]\n");
 }
 
 /// tests/js_values.zsc: extern types (properties, methods, a setter, a constructor, a module's), `null` from JS as
@@ -835,7 +856,8 @@ fn js_values_and_exceptions() {
          3 - x 0 7\n\
          [{\"TAG\":\"Ok\",\"_0\":\"body of ok\"},{\"TAG\":\"Err\",\"_0\":\"status 404\"},{\"TAG\":\"Err\",\"_0\":\"fetch failed\"},{\"TAG\":\"Ok\",\"_0\":\"{\\\"url\\\":\\\"j\\\"}\"},{\"TAG\":\"Err\",\"_0\":\"Unexpected token\"}]\n\
          10 | RangeError: negative -1 | one,? | hello hi ann\n\
-         c.txt .txt y.md\n"
+         c.txt .txt y.md\n\
+         [{\"TAG\":\"Ok\",\"_0\":\"[1]\"},\"Err\"] h.example | (a thrown value that has no string form) | 16\n"
     );
     let js = std::fs::read_to_string(d.join("js_values.js")).unwrap();
     assert!(js.contains("import { parse } from \"node:path\";"), "{js}");

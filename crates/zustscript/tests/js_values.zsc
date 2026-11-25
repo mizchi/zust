@@ -101,3 +101,21 @@ export fn base_of(p: String) -> String {
   let x = parse_path(p);
   `${x.base} ${x.ext}`
 }
+
+// (review of mizchi/zust#164) an `await` in the argument of a call that catches; a constructor as a value; a thrown
+// value with no string form; a JS name that is not an identifier
+extern fn odd(n: i32) -> Result<i32, String> = "globalThis.throwOdd";
+extern type Squares { fn square(n: i32) -> i32 = "²"; }
+extern fn squares() -> Squares = "globalThis.squares";
+
+export async fn parse_later(p: Promise<String>) -> Result<String, String> {
+  let j = parse_json(await p)?;
+  Ok(stringify(j))
+}
+
+export fn reviewed() -> String {
+  let mk = parse_url;
+  let h = match mk("https://h.example/") { Ok(u) => u.host, Err(m) => m };
+  let o = match odd(3) { Ok(n) => n.to_string(), Err(m) => m };
+  `${h} | ${o} | ${squares().square(4)}`
+}

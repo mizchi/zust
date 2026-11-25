@@ -116,15 +116,27 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
                 continue;
             }
             // (an extern type is JS's: the same declaration here, and the types its members use)
-            if let Item::ExternType { params, members, .. } = it {
-                if done.insert((key.clone(), n.clone())) {
+            if let Item::ExternType { params, members, origin, .. } = it {
+                let defined = origin.clone().unwrap_or(key.clone());
+                if done.insert((defined.clone(), n.clone())) {
                     for m in members {
                         match m {
                             Member::Prop { ty, .. } => uses(ty, params, &mut types),
                             Member::Method { args, ret, .. } => args.iter().chain([ret]).for_each(|t| uses(t, params, &mut types)),
                         }
                     }
-                    out.push(it.clone());
+                    let mut it = it.clone();
+                    if let Item::ExternType { module: Some(spec), .. } = &mut it
+                        && (spec.starts_with("./") || spec.starts_with("../"))
+                    {
+                        // (a relative module is the declaring file's: from here, another path)
+                        let dir = defined.parent().unwrap_or(Path::new("/"));
+                        *spec = relative(&here, &normalize(&dir.join(&*spec)));
+                    }
+                    if let Item::ExternType { origin, .. } = &mut it {
+                        *origin = Some(defined);
+                    }
+                    out.push(it);
                 }
                 continue;
             }
@@ -170,15 +182,35 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
 /// The mark of a type of the zustscript module `file`, used from the directory `here`: exported there (every type
 /// is, in its `.d.ts`), in that module's JS shape (`repr: None`), and imported from its JS by a relative specifier
 fn from_module(here: &Path, file: &Path) -> TsFrom {
+    let rel = relative(here, file);
+    let spec = format!("{}.js", rel.strip_suffix(".zsc").unwrap_or(&rel));
+    TsFrom { path: PathBuf::from(spec), exported: true, members: vec![], text: String::new(), repr: None, zsc: Some(file.to_path_buf()) }
+}
+
+/// The specifier of `file` from the directory `here` (`./lib/x.zsc`, `../y.js`)
+fn relative(here: &Path, file: &Path) -> String {
     let a: Vec<_> = here.components().collect();
     let b: Vec<_> = file.components().collect();
     let common = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
     let mut parts: Vec<String> = vec!["..".into(); a.len() - common];
     parts.extend(b[common..].iter().map(|c| c.as_os_str().to_string_lossy().to_string()));
     let rel = parts.join("/");
-    let rel = if rel.starts_with("../") { rel } else { format!("./{rel}") };
-    let spec = format!("{}.js", rel.strip_suffix(".zsc").unwrap_or(&rel));
-    TsFrom { path: PathBuf::from(spec), exported: true, members: vec![], text: String::new(), repr: None, zsc: Some(file.to_path_buf()) }
+    if rel.starts_with("../") { rel } else { format!("./{rel}") }
+}
+
+/// `a/./b/../c` → `a/c` (a path that need not exist)
+fn normalize(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// The named types `t` uses (not its generic parameters, not the built-in ones)

@@ -766,6 +766,10 @@ impl<'a> Lower<'a> {
                 self.vars.insert(a.clone(), k);
             }
         }
+        // (a `?` returns its `Err` / `None`, which is owned: so is every result then)
+        if !self.copy(&ret) && crate::js::has_try(body) {
+            self.modes.owned_result.insert(rs.clone());
+        }
         let ret_ref = !self.copy(&ret) && !self.modes.owned_result.contains(&rs);
         let b = if self.copy(&ret) {
             self.expr(body)?

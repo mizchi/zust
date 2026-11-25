@@ -1661,12 +1661,15 @@ impl Checker {
                 let loops = std::mem::take(&mut self.loops);
                 // (a closure is not async unless it is written `async (..) =>`: `await` does not reach into it)
                 let was_async = std::mem::replace(&mut self.in_async, std::mem::take(&mut self.next_closure_async));
+                let is_async = self.in_async;
                 // (a `?` inside returns from the closure: from a plain function in JS, wherever the closure is)
                 let saved = (std::mem::replace(&mut self.in_handle, false), self.try_ban.take(), std::mem::replace(&mut self.closure_try, false));
                 let rv = self.fresh();
                 self.rets.push((rv.clone(), rexp.clone()));
                 self.scopes.push(sc);
                 let rt = self.infer(body, rexp.as_ref());
+                // (an async closure's body may give a Promise, which JS adopts: its value is the result)
+                let rt = if is_async { promised(&self.resolve(&rt)).unwrap_or(rt) } else { rt };
                 if !self.unify_inner(&rt, &rv) {
                     let (g, w) = (self.show(&rt), self.show(&rv));
                     if self.closure_try {
@@ -1839,14 +1842,14 @@ impl Checker {
                 self.unify(pos, &want, &rv);
                 self.closure_try = true;
             }
-            Some(Ty::Named(n, a)) if *n == kind && n == "Result" => {
+            Some(Ty::Named(n, a)) if *n == kind && n == "Result" && a.len() == 2 => {
                 let Ty::Named(_, ta) = &t else { unreachable!() };
                 if !self.unify_inner(&ta[1], &a[1]) {
                     let (e, w) = (self.show(&ta[1]), self.show(&Ty::Named(n.clone(), a.clone())));
                     self.err(pos, format!("`?` passes on a `{e}`, but {whose} returns `{w}` (no conversion is done: convert it first, e.g. `.map_err((e) => ..)?`)"));
                 }
             }
-            Some(Ty::Named(n, _)) if *n == kind => {}
+            Some(Ty::Named(n, a)) if *n == kind && a.len() == if n == "Result" { 2 } else { 1 } => {}
             Some(Ty::Named(n, a)) if n == "Result" && a.len() == 2 => {
                 self.err(pos, format!("`?` on an `Option` in {whose}, which returns `Result`: turn it into a `Result` with `.ok_or(e)?`"));
             }

@@ -360,6 +360,8 @@ export async fn load(url: String) -> Result<String, String> {
   - 引数の `Option<T>`: `None` は `undefined`
   - 結果の `Result<T, String>`: JS が throw したら `Err(メッセージ)`。エラーの型を extern type にすると、throw された値そのもの(`extern type JsError = "Error" { message: String }`)。ほかのエラーの型はエラー
   - 結果の `Promise<Result<T, E>>`: reject も `Err` になる
+  - 変換は、宣言に書いた型で決まる。型引数(`extern type Box<T> { value: T }` の `T`)に `Option` が入っても変換しない。JS の側は zustscript の値をそのまま持つため(`Box<Option<i32>>` に入れた `Some(1)` は `{ TAG: "Some", _0: 1 }` のまま返る)
+  - 例外を受ける呼び出しでは、引数は呼び出しの外で先に評価する(引数の `await` は囲む async 関数のもの)
 - `--check-externs` は、メンバーも TS の型と照合する(`Option` の結果は `T | null | undefined`、`Result` の結果は `T` として)
 - まだないもの: `@wasm` での extern type、`==`(同じ値かどうか)、型引数を持つメソッド、TS の `.d.ts` からの自動の取り込み
 

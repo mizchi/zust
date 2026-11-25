@@ -7,6 +7,8 @@ globalThis.fakeFetch = async (url) => {
 globalThis.risky = (n) => { if (n < 0) throw new RangeError("negative " + n); return n * 10; };
 globalThis.findName = (id) => (id === 1 ? "one" : null);
 globalThis.greet = (n) => (n === undefined ? "hello" : "hi " + n);
+globalThis.throwOdd = () => { throw Object.create(null); };
+globalThis.squares = () => ({ "²": (n) => n * n });
 const m = await import(process.argv[2]);
 console.log(m.urls());
 // (the message of JSON.parse's SyntaxError differs between node versions)
@@ -16,3 +18,4 @@ console.log(m.counting());
 console.log(JSON.stringify([await m.load("ok"), await m.load("missing"), await m.load("down"), await m.load_json("j"), await m.load_json("bad")]));
 console.log(m.thrown());
 console.log(m.base_of("/a/b/c.txt"), m.path_base("/x/y.md").base);
+console.log(JSON.stringify([await m.parse_later(Promise.resolve("[1]")), (await m.parse_later(Promise.resolve("{"))).TAG]), m.reviewed());

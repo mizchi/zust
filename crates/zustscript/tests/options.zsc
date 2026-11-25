@@ -127,3 +127,33 @@ export fn lookup(todos: Array<Todo>, id: i32) -> Option<Todo> {
 export fn parse_draft(d: Draft) -> Result<Todo, FormError> {
   validate(d, 1)
 }
+
+// (review of mizchi/zust#164) the order of evaluation around a `?`
+fn some_fn(ok: bool) -> Option<fn(i32) -> i32> {
+  note("callee");
+  if ok { Some((x) => x + 1) } else { None }
+}
+fn some_arg(ok: bool) -> Option<i32> {
+  note("arg");
+  if ok { Some(1) } else { None }
+}
+fn pair(a: i32, b: i32) -> String { `${a},${b}` }
+fn order(f: bool, a: bool) -> Option<String> {
+  let mut x = 1;
+  let p = pair(x, { x = 2; Some(3) }?);
+  let s = "<" + logged("cat") + ">" + (some_arg(a)?).to_string();
+  let n = ((some_arg(a)?) as f64).max(0.5);
+  let r = range(0, (some_arg(a)?) + 2).map((i) => i * 10).len();
+  Some(`${some_fn(f)?(some_arg(a)?)} ${p} ${s} ${n} ${r} ${x}`)
+}
+
+export fn orders() -> String {
+  `${order(true, true).unwrap_or("none")} | ${order(false, true).unwrap_or("none")} | ${order(true, false).unwrap_or("none")}`
+}
+
+// an async closure whose `?` makes it a Result, and whose tail is a Promise of one (JS adopts it)
+async fn later(n: i32) -> Result<i32, String> { if n > 0 { Ok(n * 2) } else { Err("not positive") } }
+export async fn async_tail(r: Result<i32, String>) -> Result<i32, String> {
+  let f = async () => { let x = r?; later(x) };
+  await f()
+}

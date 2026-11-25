@@ -468,7 +468,7 @@ impl Parser {
         };
         let mut members = vec![];
         if self.eat(";")? {
-            return Ok(Item::ExternType { name, module, params, ts, members, pos });
+            return Ok(Item::ExternType { name, module, params, ts, members, pos, origin: None });
         }
         self.expect("{")?;
         let js_name = |p: &mut Parser, default: &str| -> PResult<String> {
@@ -510,7 +510,7 @@ impl Parser {
                 members.push(Member::Prop { name: n, ty, js, pos: npos });
             }
         }
-        Ok(Item::ExternType { name, module, params, ts, members, pos })
+        Ok(Item::ExternType { name, module, params, ts, members, pos, origin: None })
     }
 
     /// A boundary type, spelled as in Rust: the tokens up to one of `ends` at depth 0

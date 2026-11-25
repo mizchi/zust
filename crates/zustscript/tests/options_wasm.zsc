@@ -22,3 +22,10 @@ fn half(a: i32) -> Option<i32> {
 @wasm export fn code(a: i32, b: i32) -> i32 {
   match ratio(a, b, 1) { Ok(v) => v, Err(e) => match e { ByZero => -1, Overflow => -2 } }
 }
+
+// (review of mizchi/zust#164) a `?` makes the Rust result owned: its `None` is a value of its own, not a borrow
+fn choose(x: Option<i32>, fallback: Option<String>) -> Option<String> { let _ = x?; fallback }
+
+@wasm export fn chosen(a: i32) -> i32 {
+  match choose(if a > 0 { Some(a) } else { None }, Some("hi")) { Some(s) => s.len(), None => -1 }
+}

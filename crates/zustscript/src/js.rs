@@ -196,8 +196,10 @@ const HELPERS: &[(&str, &str)] = &[
     // as the value thrown; a `Promise` of one, its rejection too. And an `Option` handed to JS: `undefined` for `None`)
     ("$nullable", "function $nullable(x) {\n  return x == null ? { TAG: \"None\" } : { TAG: \"Some\", _0: x };\n}"),
     ("$undef", "function $undef(o) {\n  return o.TAG === \"Some\" ? o._0 : undefined;\n}"),
-    ("$catch", "function $catch(f, message) {\n  try {\n    return { TAG: \"Ok\", _0: f() };\n  } catch (e) {\n    return { TAG: \"Err\", _0: message ? (e instanceof Error ? e.message : String(e)) : e };\n  }\n}"),
-    ("$catchP", "async function $catchP(f, message) {\n  try {\n    return { TAG: \"Ok\", _0: await f() };\n  } catch (e) {\n    return { TAG: \"Err\", _0: message ? (e instanceof Error ? e.message : String(e)) : e };\n  }\n}"),
+    // (the message of a value that cannot be made a string, `Object.create(null)`, is fixed: still an `Err`)
+    ("$message", "function $message(e) {\n  try {\n    return e instanceof Error ? String(e.message) : String(e);\n  } catch {\n    return \"(a thrown value that has no string form)\";\n  }\n}"),
+    ("$catch", "function $catch(f, message) {\n  try {\n    return { TAG: \"Ok\", _0: f() };\n  } catch (e) {\n    return { TAG: \"Err\", _0: message ? $message(e) : e };\n  }\n}"),
+    ("$catchP", "async function $catchP(f, message) {\n  try {\n    return { TAG: \"Ok\", _0: await f() };\n  } catch (e) {\n    return { TAG: \"Err\", _0: message ? $message(e) : e };\n  }\n}"),
     // (`xs.try_map(f)`: one array, built once; the first `Err` / `None` is the result)
     ("$try_map_r", "function $try_map_r(xs, f) {\n  const out = [];\n  for (let i = 0; i < xs.length; i++) {\n    const r = f(xs[i]);\n    if (r.TAG === \"Err\") return r;\n    out.push(r._0);\n  }\n  return { TAG: \"Ok\", _0: out };\n}"),
     ("$try_map_o", "function $try_map_o(xs, f) {\n  const out = [];\n  for (let i = 0; i < xs.length; i++) {\n    const r = f(xs[i]);\n    if (r.TAG === \"None\") return r;\n    out.push(r._0);\n  }\n  return { TAG: \"Some\", _0: out };\n}"),
@@ -446,6 +448,9 @@ impl<'a> Js<'a> {
         if need.contains("$handle") {
             need.extend(["$resume", "$tail", "$drive", "$run"]);
         }
+        if need.contains("$catch") || need.contains("$catchP") {
+            need.insert("$message");
+        }
         if need.contains("$perform") {
             need.insert("$handleD");
         }
@@ -500,7 +505,7 @@ impl<'a> Js<'a> {
     /// `s` kept in a temporary first, when a later operand returns early with `?`: the `?` is written as statements
     /// before the expression, so an operand before it is evaluated before them too (left to right, as written)
     fn pin(&mut self, s: String, later: bool) -> String {
-        if !later || s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') || s.starts_with('"') && s.ends_with('"') && balanced(&s) {
+        if !later || s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
             return s;
         }
         let t = self.fresh();
@@ -510,10 +515,20 @@ impl<'a> Js<'a> {
 
     /// The operands `xs`, in order (each kept in a temporary before a later one's `?`)
     fn seq(&mut self, xs: &[&Expr]) -> Vec<String> {
+        // (the operands before the last one with a `?`; a literal needs no temporary)
+        let last = xs.iter().rposition(|y| has_try(y));
+        // (a later operand that assigns a local: a name read before it is kept as it was too)
+        let assigns = last.is_some_and(|l| xs[1..=l].iter().any(|y| assigns_local(y)));
         let mut out = vec![];
         for (k, x) in xs.iter().enumerate() {
             let s = self.expr(x);
-            let later = xs[k + 1..].iter().any(|y| has_try(y));
+            let later = last.is_some_and(|l| k < l) && !matches!(x.kind, EK::Lit(_));
+            if later && assigns && matches!(x.kind, EK::Var(_)) {
+                let t = self.fresh();
+                self.line(&format!("const {t} = {s};"));
+                out.push(t);
+                continue;
+            }
             out.push(self.pin(s, later));
         }
         out
@@ -987,13 +1002,17 @@ impl<'a> Js<'a> {
                     // (as a value: a function that converts as a call does)
                     let (sig, _, _) = &self.info.externs[n];
                     let (args, ret) = (sig.args.clone(), sig.ret.clone());
-                    if self.info.zsc_externs.contains(n) || (!args.iter().any(is_option) && !needs_js_result(&ret)) {
+                    // (a constructor is called with `new`: a function of its own)
+                    let ctor = js.starts_with("new ");
+                    let zsc = self.info.zsc_externs.contains(n);
+                    if !ctor && (zsc || (!args.iter().any(is_option) && !needs_js_result(&ret))) {
                         return js;
                     }
                     let ps: Vec<String> = (0..args.len()).map(|k| format!("$a{k}")).collect();
-                    let a: Vec<String> = ps.iter().zip(&args).map(|(p, t)| self.js_arg(p.clone(), t)).collect();
+                    let a: Vec<String> = if zsc { ps.clone() } else { ps.iter().zip(&args).map(|(p, t)| self.js_arg(p.clone(), t)).collect() };
                     let call = format!("{js}({})", a.join(", "));
-                    format!("({}) => {}", ps.join(", "), self.js_result(call, &ret))
+                    let body = if zsc { call } else { self.js_result(call, &ret) };
+                    format!("({}) => {body}", ps.join(", "))
                 }
                 Some(Callee::Fn) => self.fn_name(e.id, n),
                 Some(Callee::Range) => {
@@ -1014,6 +1033,13 @@ impl<'a> Js<'a> {
                         _ => (if one { "1" } else { "0" }).into(),
                     };
                 }
+                // (a computed callee is evaluated before the arguments, as JS does)
+                let callee = if matches!(f.kind, EK::Var(_) | EK::Path(..)) {
+                    None
+                } else {
+                    let c = self.expr(f);
+                    Some(self.pin(c, args.iter().any(has_try)))
+                };
                 let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
                 if let Some(Callee::TypedCtor(el, c)) = self.info.callee.get(&f.id).cloned() {
                     let ctor = typed_js(&el);
@@ -1042,12 +1068,12 @@ impl<'a> Js<'a> {
                             let (sig, _, _) = &self.info.externs[n];
                             let (args, ret) = (sig.args.clone(), sig.ret.clone());
                             let a: Vec<String> = a.into_iter().zip(&args).map(|(v, t)| self.js_arg(v, t)).collect();
-                            return self.js_result(format!("{js}({})", a.join(", ")), &ret);
+                            return self.extern_call(a, &ret, |a| format!("{js}({})", a.join(", ")));
                         }
                         _ => {}
                     }
                 }
-                let f = self.expr(f);
+                let f = callee.unwrap_or_else(|| self.expr(f));
                 format!("{}({})", self.wrap_callee(&f), a.join(", "))
             }
             EK::Method(r, m, args) => {
@@ -1057,11 +1083,17 @@ impl<'a> Js<'a> {
                     && matches!(self.info.callee.get(&f.id), Some(Callee::Range))
                     && matches!(b, Some(Builtin::Fold | Builtin::Map))
                 {
-                    let (lo, hi) = (self.expr(&ra[0]), self.expr(&ra[1]));
+                    // (the bounds, then a fold's initial value, in order)
+                    let mut ops = vec![&ra[0], &ra[1]];
+                    if b == Some(Builtin::Fold) {
+                        ops.push(&args[0]);
+                    }
+                    let v = self.seq(&ops);
+                    let (lo, hi) = (v[0].clone(), v[1].clone());
                     return if b == Some(Builtin::Fold) {
                         self.helpers.insert("$rangeFold");
                         let f = self.callback(&args[1], 2);
-                        let init = self.expr(&args[0]);
+                        let init = v[2].clone();
                         format!("$rangeFold({lo}, {hi}, {init}, {f})")
                     } else if let Some(el) = self.info.typed_lit.get(&e.id).cloned() {
                         // (into a typed array, as the type says)
@@ -1084,7 +1116,8 @@ impl<'a> Js<'a> {
                     if let Some(p) = js.strip_suffix('=') {
                         return format!("({}{} = {}, undefined)", recv, member(p), a[0]);
                     }
-                    return self.js_result(format!("{recv}{}({})", member(&js), a.join(", ")), &ret);
+                    let vals: Vec<String> = [recv].into_iter().chain(a).collect();
+                    return self.extern_call(vals, &ret, |v| format!("{}{}({})", v[0], member(&js), v[1..].join(", ")));
                 }
                 let arg = |js: &mut Js, k: usize| js.expr(&args[k]);
                 use Builtin as B;
@@ -1113,17 +1146,17 @@ impl<'a> Js<'a> {
                     Some(B::Trim) => format!("{recv}.trim()"),
                     Some(B::Contains) => format!("{recv}.includes({})", arg(self, 0)),
                     Some(B::Split) => format!("{recv}.split({})", arg(self, 0)),
-                    Some(B::ToString) => format!("String({})", self.expr(r)),
-                    Some(B::Floor) => format!("Math.floor({})", self.expr(r)),
-                    Some(B::Sqrt) if self.num(e.id) == Ty::F32 => format!("Math.fround(Math.sqrt({}))", self.expr(r)),
-                    Some(B::Sqrt) => format!("Math.sqrt({})", self.expr(r)),
-                    Some(B::Max) => format!("Math.max({}, {})", self.expr(r), arg(self, 0)),
-                    Some(B::Min) => format!("Math.min({}, {})", self.expr(r), arg(self, 0)),
+                    Some(B::ToString) => format!("String({})", unparen(&recv)),
+                    Some(B::Floor) => format!("Math.floor({})", unparen(&recv)),
+                    Some(B::Sqrt) if self.num(e.id) == Ty::F32 => format!("Math.fround(Math.sqrt({}))", unparen(&recv)),
+                    Some(B::Sqrt) => format!("Math.sqrt({})", unparen(&recv)),
+                    Some(B::Max) => format!("Math.max({}, {})", unparen(&recv), arg(self, 0)),
+                    Some(B::Min) => format!("Math.min({}, {})", unparen(&recv), arg(self, 0)),
                     Some(B::ToArray) => format!("Array.from({recv})"),
-                    Some(B::Abs) => format!("Math.abs({})", self.expr(r)),
+                    Some(B::Abs) => format!("Math.abs({})", unparen(&recv)),
                     Some(B::Round) => {
                         self.helpers.insert("$round");
-                        format!("$round({})", self.expr(r))
+                        format!("$round({})", unparen(&recv))
                     }
                     Some(B::Opt(m @ ("is_some" | "is_none" | "is_ok" | "is_err"))) => {
                         let tag = match m {
@@ -1459,6 +1492,24 @@ impl<'a> Js<'a> {
         }
     }
 
+    /// A call of JS (`make` writes it from the values of its receiver and arguments), its result converted. When the
+    /// result catches what the call throws, the values are evaluated before, where the call stands (an `await` or a
+    /// `yield` in one stays in the function being written): `(($v0) => $catch(() => f($v0), true))(await p)`
+    fn extern_call(&mut self, vals: Vec<String>, ret: &Ty, make: impl Fn(&[String]) -> String) -> String {
+        let catches = match ret {
+            Ty::Named(n, a) if n == "Result" && a.len() == 2 => true,
+            Ty::Named(n, a) if n == "Promise" && a.len() == 1 => matches!(&a[0], Ty::Named(m, b) if m == "Result" && b.len() == 2),
+            _ => false,
+        };
+        let plain = |s: &String| s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.') || (s.len() >= 2 && s.starts_with('"') && s.ends_with('"') && !s[1..s.len() - 1].contains('"'));
+        if !catches || vals.iter().all(plain) {
+            return self.js_result(make(&vals), ret);
+        }
+        let ps: Vec<String> = (0..vals.len()).map(|k| format!("$v{k}")).collect();
+        let inner = self.js_result(make(&ps), ret);
+        format!("(({}) => {inner})({})", ps.join(", "), vals.join(", "))
+    }
+
     /// A value handed to JS (an extern's argument): `None` is `undefined`
     fn js_arg(&mut self, v: String, t: &Ty) -> String {
         if is_option(t) {
@@ -1643,6 +1694,14 @@ fn js_root(js: &str) -> &str {
     js.split('.').next().unwrap_or(js)
 }
 
+/// `(x)` → `x` (an operand written inside a call's parentheses needs none of its own)
+fn unparen(s: &str) -> &str {
+    match s.strip_prefix('(').and_then(|x| x.strip_suffix(')')) {
+        Some(x) if balanced(x) => x,
+        _ => s,
+    }
+}
+
 fn is_option(t: &Ty) -> bool {
     matches!(t, Ty::Named(n, a) if n == "Option" && a.len() == 1)
 }
@@ -1658,7 +1717,16 @@ fn needs_js_result(t: &Ty) -> bool {
 
 /// `.name` (or `["data-x"]` for a JS name that is not an identifier)
 fn member(js: &str) -> String {
-    if !js.is_empty() && js.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') && !js.starts_with(|c: char| c.is_ascii_digit()) { format!(".{js}") } else { format!("[{}]", js_str(js)) }
+    if !js.is_empty() && js.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$') && !js.starts_with(|c: char| c.is_ascii_digit()) { format!(".{js}") } else { format!("[{}]", js_str(js)) }
+}
+
+/// An assignment of a local in `e` (not in a closure: one cannot assign a local outside it)
+fn assigns_local(e: &Expr) -> bool {
+    match &e.kind {
+        EK::Assign(..) => true,
+        EK::Closure(..) | EK::Async(_) => false,
+        _ => crate::check::subexprs(e).into_iter().any(assigns_local),
+    }
 }
 
 /// A `?` in `e` that is not inside a closure of its own (it returns from the function `e` is in)
@@ -1854,7 +1922,11 @@ fn ts_plain(t: &Ty, named: &mut BTreeSet<String>) -> String {
 /// undefined` for an argument), `T` for a `Result` (what does not throw), and so in a `Promise`
 fn ts_js_side(t: &Ty, named: &mut BTreeSet<String>, ret: bool) -> String {
     match t {
-        Ty::Named(n, a) if n == "Option" && a.len() == 1 => format!("{} | {}undefined", ts_plain(&a[0], named), if ret { "null | " } else { "" }),
+        Ty::Named(n, a) if n == "Option" && a.len() == 1 => {
+            let t = ts_plain(&a[0], named);
+            let t = if matches!(a[0], Ty::Fn(..)) { format!("({t})") } else { t };
+            format!("{t} | {}undefined", if ret { "null | " } else { "" })
+        }
         Ty::Named(n, a) if ret && n == "Result" && a.len() == 2 => ts_js_side(&a[0], named, ret),
         Ty::Named(n, a) if ret && n == "Promise" && a.len() == 1 => format!("Promise<{}>", ts_js_side(&a[0], named, ret)),
         t => ts_plain(t, named),

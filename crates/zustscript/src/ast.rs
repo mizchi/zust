@@ -298,7 +298,9 @@ pub enum Item {
     /// `extern type Response;` / `extern "react" type RefObject<T>;` / `extern type El = "HTMLElement" { .. }`: a JS
     /// value zustscript does not look inside, with the properties and methods declared for it. `ts`: its name in
     /// TS (and in JS, for a module's: the name imported)
-    ExternType { name: String, module: Option<String>, params: Vec<String>, ts: String, members: Vec<Member>, pos: Pos },
+    /// (`origin`: the .zsc file that declares it, when it came from another module: one declaration reached through
+    /// two imports is the same type)
+    ExternType { name: String, module: Option<String>, params: Vec<String>, ts: String, members: Vec<Member>, pos: Pos, origin: Option<std::path::PathBuf> },
     /// `wasm fn` (the text is the whole Rust function, handed to zustc)
     WasmFn { name: String, public: bool, args: Vec<(String, WTy)>, ret: WTy, text: String, pos: Pos },
     /// `wasm { .. }`: Rust items for the wasm side only (helpers, structs)
