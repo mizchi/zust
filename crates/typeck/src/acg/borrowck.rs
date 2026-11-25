@@ -3929,8 +3929,12 @@ impl Cx<'_> {
             b.proj.push(Proj::Field(name));
             b
         };
+        // (a unit struct (`Unit`, a pattern that names it): nothing to test, nothing captured)
+        let unit = |n: &str| matches!(t, Some(Ty::Struct(sid)) if { let sd = &self.prog.structs[sid as usize]; !sd.is_enum && sd.fields.is_empty() && sd.name == n });
         match pat {
             Pat::Wild | Pat::Rest => {}
+            Pat::Ident(false, false, n, None) if unit(n) => {}
+            Pat::Path(p) if p.segs.last().is_some_and(|s| unit(&s.name)) => {}
             Pat::Ident(by_ref, m, _, None) => {
                 let mode = match (by_ref, m) {
                     (true, true) => CapMode::RefMut,
@@ -3991,6 +3995,44 @@ impl Cx<'_> {
                     out.extend(sub);
                 }
             }
+            // (a struct's fields, or those of an enum's variant, by name: `SStruct { b, .. }` captures `x.b` only)
+            Pat::Struct(path, fps, _) => {
+                let Some(Ty::Struct(sid)) = t else {
+                    out.push((base.clone(), t, CapMode::Use, sp));
+                    return;
+                };
+                let sd = &self.prog.structs[sid as usize];
+                let vname = path.segs.last().map(|s| s.name.as_str()).unwrap_or("");
+                let (fields, prefix) = if !sd.is_enum {
+                    (sd.fields.clone(), None)
+                } else {
+                    match sd.variants.iter().find(|v| v.name == vname) {
+                        Some(v) => (v.fields.clone(), Some(v.name.clone())),
+                        None => {
+                            out.push((base.clone(), t, CapMode::Use, sp));
+                            return;
+                        }
+                    }
+                };
+                let mut sub = vec![];
+                for (fname, p) in fps {
+                    let Some(f) = fields.iter().find(|f| f.0 == *fname) else {
+                        out.push((base.clone(), t, CapMode::Use, sp));
+                        return;
+                    };
+                    let name = match &prefix {
+                        Some(v) => format!("{v}::{}", f.0),
+                        None => f.0.clone(),
+                    };
+                    self.bk_pat_cap(p, &field(base, name), Some(f.1), sp, &mut sub);
+                }
+                if sd.is_enum && sd.variants.len() > 1 {
+                    let mode = sub.iter().map(|x| x.2).max().unwrap_or(CapMode::Ref).max(CapMode::Ref);
+                    out.push((base.clone(), t, mode, sp));
+                } else {
+                    out.extend(sub);
+                }
+            }
             Pat::Slice(ps) if ps.iter().all(|p| matches!(p, Pat::Wild | Pat::Rest)) => {}
             Pat::Slice(ps) => {
                 // (the whole array, as strongly as its elements are bound)
@@ -4006,6 +4048,9 @@ impl Cx<'_> {
                 out.push((base.clone(), t, mode, sp));
             }
             Pat::Ident(true, m, _, Some(_)) => out.push((base.clone(), t, if *m { CapMode::RefMut } else { CapMode::Ref }, sp)),
+            // (the unit variant of an enum of one variant: nothing to test, so nothing read (edition 2021 captures
+            // nothing for `match sv { SingleVariant::A => .. }`))
+            Pat::Path(_) if matches!(t, Some(Ty::Struct(sid)) if { let sd = &self.prog.structs[sid as usize]; sd.is_enum && sd.variants.len() == 1 }) => {}
             Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) => out.push((base.clone(), t, CapMode::Ref, sp)),
             // (a pattern not followed into: borrowed mutably if it binds a part by `ref mut`, else as the body uses it)
             _ if crate::ast_closure::binds_ref_mut(pat) => out.push((base.clone(), t, CapMode::RefMut, sp)),

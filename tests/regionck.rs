@@ -1840,7 +1840,8 @@ fn part10_review_2() {
     let d = check("#[derive(Clone)]\nstruct Foo<T>(T);\nimpl Copy for Foo<&'static u32> {}\nfn main() {\n    let local = 2;\n    let f = Foo(&local);\n    let g = f;\n    let h = f;\n    drop((g, h));\n}\n");
     assert!(d.len() == 1 && d[0].0 == 6 && d[0].1.contains("does not live long enough"), "{d:?}");
     let d = check("struct S { value: u32 }\nfn main() {\n    let mut p = (0u32, S { value: 1 });\n    let r = &p.1.value;\n    let mut c = || {\n        let (ref mut x, S { value: ref mut y }) = p;\n        *x += 1;\n        *y += 1;\n    };\n    c();\n    println!(\"{}\", r);\n}\n");
-    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot borrow `p.1` as mutable"), "{d:?}");
+    // (the struct pattern's field is followed (part 32): `p.1.value`, as rustc 1.97 says in edition 2021)
+    assert!(d.len() == 1 && d[0].0 == 5 && d[0].1.contains("cannot borrow `p.1.value` as mutable"), "{d:?}");
     let d = check("fn main() {\n    match Some(String::from(\"arm\")) {\n        Some(foo) if { let c = move || { drop(foo.len()); false }; c() } => (),\n        _ => (),\n    }\n}\n");
     assert!(d.len() == 1 && d[0].0 == 3 && d[0].1.contains("E0507"), "{d:?}");
 }
@@ -4680,4 +4681,21 @@ const B: usize = { let v = [1, 2]; v.len() };
 const C: &'static i32 = &{ let q = 5; q };
 fn main() { println!("{:?} {} {}", A, B, C); }
 "#, &[(1, "`s` does not live long enough")], "cn");
+}
+
+#[test]
+fn part32_closure_pattern_captures() {
+    // (edition 2021: a closure's pattern that tests nothing captures nothing: the unit variant of an enum of one
+    // variant (5), a unit struct (6); a struct pattern captures the fields it names (7). An enum of two variants is
+    // read (8: E0505, as in rustc 1.97))
+    errors_at(r#"enum SingleVariant { A }
+enum Two { A, B }
+struct Unit;
+struct SStruct { a: u32, b: u32 }
+fn a() { let sv = SingleVariant::A; let c = || { match sv { SingleVariant::A => () } }; let _m = sv; c(); }
+fn b(mut x: (Unit, u32)) { let r = &mut x.0; let _ = || { let (Unit, a) = x; a }; let _ = *r; }
+fn c(mut x: SStruct) { let r = &mut x.a; let _ = || { let SStruct { b, .. } = x; b }; let _ = *r; }
+fn d() { let t = Two::A; let c = || { match t { Two::A => (), Two::B => () } }; let _m = t; c(); }
+fn main() { a(); }
+"#, &[(8, "cannot move out of `t` because it is borrowed")], "pc");
 }
