@@ -3769,8 +3769,10 @@ impl Cx<'_> {
             self.bk.fnonce_sure.push(ca);
         }
         for (p, pt, mode, _) in &mut paths {
-            // (stop at an index, and a move closure at a deref: it captures the reference)
-            let cut = p.proj.iter().position(|x| *x == Proj::Index || move_kw && matches!(x, Proj::Deref(_) | Proj::Shr));
+            // (stop at an index, and a move closure at a deref: it captures the reference. So does a shared reference held by
+            // value (edition 2021's capture of `*h` used through a deref, ClosureSyn::deref): a copy of the reference)
+            let shared_copy = by_move && matches!(t, Ty::Ref(false, _));
+            let cut = p.proj.iter().position(|x| *x == Proj::Index || (move_kw || shared_copy) && matches!(x, Proj::Deref(_) | Proj::Shr));
             if let Some(i) = cut {
                 p.proj.truncate(i);
                 *pt = None;

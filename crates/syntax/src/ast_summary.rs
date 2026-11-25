@@ -2010,8 +2010,20 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
         };
         let assigns = ast_closure::assigns_capture(c, &caps);
         let mut moved: Vec<bool> = Vec::new();
+        let mut deref: Vec<bool> = Vec::new();
         for n in &caps {
             moved.push(*mv || (ast_closure::moves_capture(c, &[n.clone()]) && !assigns));
+            // (a parameter that is a shared reference (`h: &T`, `&self`), used only through a deref of it: edition 2021
+            // captures `*h` by reference, the same as a copy of h, which the closure may then hold past the fn. Not
+            // where the fn's body binds the name again)
+            // (`&self` / `&'a self`, not `&mut self`)
+            let shared_ref = (n == "self" && sig_ast.recv.as_deref().is_some_and(|r| r.starts_with('&') && !r.contains("mut ") && r.ends_with("self")))
+                || sig_ast.params.iter().any(|(p, t)| pat_name(p) == Some(n.as_str()) && matches!(t, PTy::Ref(_, false, _)));
+            deref.push(!*mv && shared_ref && ast_closure::deref_uses_only(c, n) && !body.stmts.iter().any(|s| match s {
+                Stmt::Let(p, _, init, _, ..) => ast_closure::pat_binds_name_pub(p, n) || init.as_ref().is_some_and(|x| ast_closure::binds_name(x, n, 0)),
+                Stmt::Expr(x, _) => ast_closure::binds_name(x, n, 0),
+                _ => false,
+            }));
         }
         let by_move = *mv || (!moved.is_empty() && moved.iter().all(|&m| m));
         out.push(ClosureSyn {
@@ -2024,6 +2036,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
             ret_ann: ret_ann,
             n_parent: n_parent,
             fake_reads: ast_closure::fake_reads(c).into_iter().filter(|n| bound.contains(n)).collect(),
+            deref,
         });
     }
     // `-> impl Fn(A) -> B { move |x| .. }`: 型は末尾のクロージャの struct

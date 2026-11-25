@@ -4618,3 +4618,31 @@ fn main() { println!("{} {}", OK, BAD); }
 fn main() {}
 "#, &[(1, "cannot move out of a mutable reference")], "mr");
 }
+
+#[test]
+fn part32_shared_ref_captures_by_deref() {
+    // (edition 2021: a closure that uses a shared reference it captures (`h: &T`, `&self`) only through a deref of it
+    // (`h.mk()`, `self.n()`, `o.name.cmp(..)`) captures `*h` by reference, the same as a copy of h: collected from a
+    // `filter_map` or boxed, it may outlive the fn (no E0373), as in rustc 1.97. A local String it borrows (10) is
+    // E0373; using `h` itself (`let x = h`, 11) is rustc's E0373 too, not reported yet)
+    errors_at(r#"struct H<'a>(&'a str);
+impl<'a> H<'a> {
+    fn mk(&self) -> Option<&str> { Some(self.0) }
+    fn n(&self) -> usize { self.0.len() }
+    fn all<'s>(&'s self, v: &[u8]) -> Vec<&'s str> { v.iter().filter_map(|_| self.mk()).collect() }
+    fn boxed<'s>(&'s self) -> Box<dyn Fn() -> usize + 's> { Box::new(|| self.n()) }
+}
+fn f4<'r>(h: &'r H<'r>, v: Vec<u8>) -> Vec<&'r str> { v.iter().filter_map(|_| h.mk()).collect() }
+fn f5<'r>(h: &'r H<'r>) -> Box<dyn Fn() -> usize + 'r> { Box::new(|| h.n()) }
+fn f6<'r>(h: &'r H<'r>) -> Box<dyn Fn() -> usize + 'r> { let s = String::new(); Box::new(|| s.len() + h.n()) }
+fn f7<'r>(h: &'r H<'r>) -> Box<dyn Fn() -> &'r H<'r> + 'r> { Box::new(|| { let x = h; x }) }
+fn main() { let h = H("ab"); println!("{:?} {} {:?} {} {}", h.all(&[1, 2]), h.boxed()(), f4(&h, vec![1]), f5(&h)(), f7(&h)().0); let _ = f6(&h); }
+"#, &[(10, "closure may outlive")], "dr");
+    errors_at(r#"use std::cmp::Ordering;
+struct Task { pri: u32, name: String }
+fn c1(s: &Task, o: &Task) -> Ordering { s.pri.cmp(&o.pri).then_with(|| o.name.cmp(&s.name)) }
+fn c2(s: &Task, o: &Task) -> bool { let f = || o.name.len() > s.name.len(); f() }
+fn c3(s: &Task) -> usize { let f = || s.name.len(); f() }
+fn main() { let t = Task { pri: 1, name: "a".into() }; println!("{:?} {} {}", c1(&t, &t), c2(&t, &t), c3(&t)); }
+"#, &[], "dc");
+}
