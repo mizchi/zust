@@ -3359,3 +3359,17 @@ fn sized_review_cases() {
         assert!(d.is_empty(), "{src}\n{d:?}");
     }
 }
+
+#[test]
+fn macro_rules_with_whitespace_before_the_bang() {
+    // (rustc 1.100 accepts `macro_rules ! m { .. }`, also with a line break before the `!`; the lines after it keep
+    // their numbers)
+    let first = |src: &str| {
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("macro_rules ! m { () => { 1 } }\nfn main() { let _x: i32 = m!(); }\n"), None);
+    assert_eq!(first("macro_rules\n  ! m { () => { 1 } }\nfn main() { let _x: u8 = m!(); let _y: i32 = \"a\"; }\n"), Some((3, "mismatched types: expected `i32`, found `&str`".to_string())));
+    // (a name that only starts with it is no definition)
+    assert_eq!(first("macro_rules! m { () => { 1 } }\nfn main() { let my_macro_rules = 1; let _x = my_macro_rules != m!(); }\n"), None);
+}

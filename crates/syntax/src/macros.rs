@@ -1960,6 +1960,50 @@ fn pm_items(text: &mut String, pms: &[crate::pm::Lib], env: &[(String, String)],
 /// expand_cfg with the proc macros of pms too (crate::pm): at the start of each round the outermost attribute and
 /// derive uses, and a function-like call where a `macro_rules!` call would be (a name no `macro_rules!` has)
 pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::Lib]) -> Result<Option<String>, String> {
+    // (one scan, as before, for a source with no macro at all)
+    if pms.is_empty() && !src.contains("macro_rules") {
+        return Ok(None);
+    }
+    match join_macro_rules_bang(src) {
+        Some(t) => Ok(Some(expand_joined(&t, cfg, pms)?.unwrap_or(t))),
+        None => expand_joined(src, cfg, pms),
+    }
+}
+
+/// `macro_rules !` with whitespace before the `!`, which rustc accepts, written `macro_rules!` with that whitespace
+/// after the `!`: the text keeps its length and lines, and every position past the `!`. None when there is none
+pub fn join_macro_rules_bang(src: &str) -> Option<String> {
+    let b = src.as_bytes();
+    // (the text's candidates first; the tokens, only when there is one, keep a string's or a comment's text as is)
+    let mut cands: Vec<(usize, usize)> = vec![];
+    for (k, _) in src.match_indices("macro_rules") {
+        let a = k + "macro_rules".len();
+        let mut e = a;
+        while e < b.len() && b[e].is_ascii_whitespace() {
+            e += 1;
+        }
+        if e > a && e < b.len() && b[e] == b'!' {
+            cands.push((k, e));
+        }
+    }
+    if cands.is_empty() {
+        return None;
+    }
+    let toks = crate::lexer::tokenize(b);
+    let mut out: Option<Vec<u8>> = None;
+    for w in toks.windows(2) {
+        let ((k0, a, _), (k1, e, _)) = (w[0], w[1]);
+        if k0 == 0 && k1 == 1 && b[e] == b'!' && &b[a..e.min(a + 11)] == b"macro_rules" && cands.iter().any(|&(k, ce)| k == a && ce == e) {
+            let a = a + "macro_rules".len();
+            let o = out.get_or_insert_with(|| b.to_vec());
+            o[a] = b'!';
+            o[a + 1..=e].copy_from_slice(&b[a..e]);
+        }
+    }
+    out.map(|o| String::from_utf8(o).unwrap_or_else(|_| src.to_string()))
+}
+
+fn expand_joined(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm::Lib]) -> Result<Option<String>, String> {
     if !src.contains("macro_rules!") && pms.is_empty() {
         return Ok(None);
     }
