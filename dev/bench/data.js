@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795634975026,
+  "lastUpdate": 1795634978073,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -132207,6 +132207,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/18b4beb05c908165c9064ebdb8626f25728bb23c"
         },
         "date": 1795632594000,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1913,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.77,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1555,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5381,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "948c52262f4bbe88cfc18921e7fc2134da520d4a",
+          "message": "Merge pull request #213 from mizchi/claude/fix-203-cursor-seek\n\nprelude: a Cursor seek applies a signed offset to the u64 position (#203)",
+          "timestamp": "2026-11-26T04:23:43+09:00",
+          "tree_id": "8f8e6c0b95e9932629a96eed9c2eb5724a574bf6",
+          "url": "https://github.com/mizchi/zust/commit/948c52262f4bbe88cfc18921e7fc2134da520d4a"
+        },
+        "date": 1795634977534,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
