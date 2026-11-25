@@ -1221,7 +1221,10 @@ impl Session2 {
             if let Some(e) = &sm.adt_err {
                 // (`\u{3}line\u{3}msg`: at that line of the item)
                 if let Some((l, m)) = e.strip_prefix('\u{3}').and_then(|r| r.split_once('\u{3}')) {
-                    return Err(format!("{}:1: {m}", it.line + l.parse::<usize>().unwrap_or(1) - 1));
+                    // (an item hoisted out of a fn body: at the line it was written on)
+                    let line = it.line + l.parse::<usize>().unwrap_or(1) - 1;
+                    let line = crate::prep::hoisted_at(&crate::prep::hoist_marks(&src), line).unwrap_or(line);
+                    return Err(format!("{line}:1: {m}"));
                 }
                 // (`\u{1}field\u{1}msg`: at the line of the field `field:`)
                 if let Some((f, m)) = e.strip_prefix('\u{1}').and_then(|r| r.split_once('\u{1}')) {

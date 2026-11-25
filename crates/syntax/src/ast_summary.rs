@@ -2218,6 +2218,37 @@ fn anon_bound_err(item: &Item) -> Option<String> {
     g.preds.iter().find_map(|(_, bs)| bs_err(bs))
 }
 
+/// E0597: the initializer of a const or a static, a block that ends in a borrow of one of its own `let` locals
+/// (`const Z: &isize = { let p = 3; &p };`, also of a field or an element of it): the value lives for 'static, the
+/// local only to the end of the block (`\u{3}line\u{3}msg`, at the local's line)
+fn const_local_borrow_err(item: &Item) -> Option<String> {
+    let (e, what) = match &item.kind {
+        ItemKind::Const(_, _, Some(e)) => (e, "constant"),
+        ItemKind::Static(_, _, _, e) => (e, "static"),
+        _ => return None,
+    };
+    let Expr::Block(_, _, b) = e else { return None };
+    let Some(Stmt::Expr(tail, false)) = b.stmts.last() else { return None };
+    let mut x = tail;
+    while let Expr::Paren(i) = x {
+        x = i;
+    }
+    let Expr::Ref(_, inner) = x else { return None };
+    let mut r = &**inner;
+    loop {
+        match r {
+            Expr::Field(b, _, _) | Expr::Index(b, _, _) | Expr::Paren(b) => r = b,
+            _ => break,
+        }
+    }
+    let Expr::Path(None, p) = r else { return None };
+    let [seg] = p.segs.as_slice() else { return None };
+    if p.pos.line == 0 || !b.stmts.iter().any(|st| matches!(st, Stmt::Let(Pat::Ident(_, _, n, _), ..) if *n == seg.name)) {
+        return None;
+    }
+    Some(format!("\u{3}{}\u{3}`{}` does not live long enough (borrowed value must outlive the {what}) (E0597)", p.pos.line, seg.name))
+}
+
 /// 1 つのアイテムの要約 (front.rs の summarize)
 pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
     if item_elision_err(item) {
@@ -2232,7 +2263,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
     }
     // (the program's items: the prelude writes no lifetimes in its bounds, `Iterator<Item = &T>`; the driver
     // reports it)
-    sm.adt_err = anon_bound_err(item);
+    sm.adt_err = anon_bound_err(item).or_else(|| const_local_borrow_err(item));
     match &item.kind {
         ItemKind::Type(n, g, _, Some(t)) if owner.is_some() => {
             let ow = owner.unwrap();

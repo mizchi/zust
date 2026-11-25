@@ -4535,3 +4535,13 @@ fn part31_closure_error_position() {
     // pattern) is at the closure, on rustc 1.97's line, not at the line of the fn it is in)
     errors_at("use std::collections::HashMap;\n\nfn main() {\n    let _ = HashMap::<String, i32>::new().iter().filter(|&(&_k, &_v)| { true });\n}\n", &[(4, "cannot move out of")], "cp");
 }
+
+#[test]
+fn part31_const_local_borrow() {
+    // (a const's or a static's initializer block that ends in a borrow of one of its own locals is E0597, the value
+    // being 'static: at rustc 1.97's line, also for one written inside a fn body (hoisted); a borrow of a literal is
+    // promoted and is not)
+    errors_at("const Z: &'static isize = {\n    let p = 3;\n    &p\n};\nfn main() { println!(\"{}\", Z); }\n", &[(3, "`p` does not live long enough")], "c1");
+    errors_at("fn main() {\n    static Y: &'static isize = { let q = 4; &q };\n    println!(\"{}\", Y);\n}\n", &[(2, "`q` does not live long enough")], "c2");
+    errors_at("const OK: &'static i32 = { let _p = 3; &5 };\nfn main() { println!(\"{}\", OK); }\n", &[], "c3");
+}
