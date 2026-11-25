@@ -1776,6 +1776,13 @@ impl Session2 {
         if let Some(e) = cross_kind_duplicate(&prog, &src, &items, &sums, user) {
             return Err(e);
         }
+        // (E0405 / E0404: a fn's trait bound that names no trait in scope; a single file's, whose names are all its own
+        // or std's)
+        if self.ctx.map.inputs.is_empty() && self.ctx.deps.is_empty() {
+            if let Some(e) = unknown_trait_bound(&prog, &src, src0, &items, user) {
+                return Err(e);
+            }
+        }
         // (E0191 at a `dyn Tr` in a type that leaves one of the trait's associated types without a value; before
         // E0038, as rustc)
         // (one look at the program's own text for `dyn`, for this and E0038's check)
@@ -9571,6 +9578,102 @@ fn duplicate_impl_item(src: &str, items: &[SrcItem]) -> Option<String> {
             } else {
                 format!("{}:{col}: duplicate definitions with name `{name}` (E0592)", it.line)
             });
+        }
+    }
+    None
+}
+
+/// std's traits (zustc's prelude has others, by `__` names); the ones std's prelude does not bring into scope are
+/// NON_PRELUDE_TRAITS
+const STD_TRAITS: &[&str] = &[
+    "Sized", "Send", "Sync", "Unpin", "Copy", "Clone", "Fn", "FnMut", "FnOnce", "Drop", "Iterator", "IntoIterator", "DoubleEndedIterator",
+    "ExactSizeIterator", "Extend", "FromIterator", "PartialEq", "Eq", "PartialOrd", "Ord", "Default", "AsRef", "AsMut", "Into", "From", "TryFrom",
+    "TryInto", "ToOwned", "ToString", "Future", "IntoFuture",
+];
+const NON_PRELUDE_TRAITS: &[&str] = &[
+    "Debug", "Display", "Hash", "Hasher", "BuildHasher", "Error", "FromStr", "Read", "Write", "BufRead", "Seek", "Deref", "DerefMut", "Add", "Sub",
+    "Mul", "Div", "Rem", "Neg", "Not", "BitAnd", "BitOr", "BitXor", "Shl", "Shr", "AddAssign", "SubAssign", "MulAssign", "DivAssign", "RemAssign",
+    "BitAndAssign", "BitOrAssign", "BitXorAssign", "ShlAssign", "ShrAssign", "Index", "IndexMut", "Borrow", "BorrowMut", "FusedIterator", "Any",
+    "Sum", "Product", "Pointer", "LowerHex", "UpperHex", "Binary", "Octal", "LowerExp", "UpperExp", "RangeBounds", "Termination", "Step",
+    "UnwindSafe", "RefUnwindSafe", "Unsize", "CoerceUnsized", "DispatchFromDyn", "Tuple",
+];
+
+/// A trait bound of a fn of the program's (its own type parameters', inline or in its where clause, and its `impl Tr`
+/// parameters') that names no trait in scope: "cannot find trait `Nope` in this scope", at the name (rustc 1.100's
+/// E0405; E0404 for `Debug` and `Hash`, std's derive macros of those names being in scope). Not a trait the program
+/// declares nor one of std's, which zustc may not have loaded; std's traits outside its prelude (`Debug`, `Display`,
+/// `Hash`, ..) only where the bound writes the name alone, no `use` of the program's writes it, and none is a glob
+#[cold]
+#[inline(never)]
+fn unknown_trait_bound(prog: &Program, src: &str, src0: &str, items: &[SrcItem], user: usize) -> Option<String> {
+    // (the names the `use`s of the source as written write, read once at the first std trait outside the prelude:
+    // the preprocessing takes std's `use`s away; and whether one is a glob)
+    let mut used: Option<(bool, crate::fxhash::FxSet<&str>)> = None;
+    let mut imported = |n: &str| {
+        let (globs, names) = used.get_or_insert_with(|| {
+            let mut names: crate::fxhash::FxSet<&str> = Default::default();
+            let mut globs = false;
+            // (each `use ` that starts a declaration (after its line's indentation and a `pub`), to its `;`)
+            for (k, _) in src0.match_indices("use ") {
+                let ls = src0[..k].rfind('\n').map_or(0, |i| i + 1);
+                let before = src0[ls..k].trim();
+                if !(before.is_empty() || before.starts_with("pub")) {
+                    continue;
+                }
+                let r = &src0[k + 4..src0[k..].find(';').map_or(src0.len(), |e| k + e)];
+                globs |= r.contains('*');
+                names.extend(r.split(|c: char| !(c == '_' || c.is_ascii_alphanumeric())).filter(|w| !w.is_empty()));
+            }
+            (globs, names)
+        });
+        *globs || names.contains(n)
+    };
+    for (i, sg) in prog.sigs.iter().enumerate() {
+        let Some(ii) = prog.item_of[i].filter(|&ii| (ii as usize) < user) else { continue };
+        for (_, bs) in &sg.generics {
+            for b in bs {
+                let name = b.split('<').next().unwrap_or("").trim();
+                // (not a lifetime, `?Sized`, a path or a higher-ranked bound, nor `use<..>` (precise capturing))
+                if name.is_empty() || name.starts_with('\'') || name.starts_with('?') || name.contains(' ') || name.contains("__") || matches!(name, "use" | "for" | "const" | "async") {
+                    continue;
+                }
+                let known = prog.traits.contains_key(name) || prog.user_traits.contains(name) || STD_TRAITS.contains(&name);
+                let std_outside = NON_PRELUDE_TRAITS.contains(&name);
+                if known && !std_outside {
+                    continue;
+                }
+                // (a name a `use` brings, std's that zustc does not know too (`use std::marker::ConstParamTy_;`))
+                if prog.use_names.contains(name) || prog.user_traits.contains(name) {
+                    continue;
+                }
+                // (where the item writes the name alone, not as a path's last segment (`fmt::Debug`); a std trait as
+                // a bound (after `:`, `+`, `impl`, `dyn`), not a derive's expansion's)
+                let it = &items[ii as usize];
+                let text = src.get(it.start..it.end).unwrap_or("");
+                let tb = text.as_bytes();
+                let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+                let bound_at = |k: usize| {
+                    let before = text[..k].trim_end();
+                    !std_outside || before.ends_with([':', '+']) || before.ends_with("impl") || before.ends_with("dyn")
+                };
+                let Some(at) = text.match_indices(name).map(|(k, _)| k).find(|&k| {
+                    (k == 0 || !id(tb[k - 1])) && tb.get(k + name.len()).is_none_or(|&c| !id(c)) && !text[..k].ends_with("::") && !text[k + name.len()..].starts_with("::")
+                        && !text[k + name.len()..].trim_start().starts_with('!')
+                        && bound_at(k)
+                }) else {
+                    continue;
+                };
+                // (a name a `use` brings, std's that zustc does not know too (`use std::marker::ConstParamTy_;`); read
+                // last, as it reads the whole source)
+                if imported(name) {
+                    continue;
+                }
+                let off = it.start + at;
+                let line = src[..off].matches('\n').count() + 1;
+                let col = off - src[..off].rfind('\n').map_or(0, |k| k + 1) + 1;
+                let code = if matches!(name, "Debug" | "Hash") { "E0404" } else { "E0405" };
+                return Some(format!("{line}:{col}: cannot find trait `{name}` in this scope ({code})"));
+            }
         }
     }
     None

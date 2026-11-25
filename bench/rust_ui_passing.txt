@@ -3419,6 +3419,7 @@ run-pass	impl-trait/universal_hrtb_named.rs
 run-pass	impl-trait/universal_in_adt_in_parameters.rs
 run-pass	impl-trait/universal_in_trait_defn_parameters.rs
 run-pass	impl-trait/universal_multiple_bounds.rs
+compile-fail	impl-trait/universal_wrong_bounds.rs
 check-pass	impl-trait/wf-eval-order.rs
 compile-fail	impl-trait/where-allowed-2.rs
 check-pass	implied-bounds/gluon_salsa.rs
@@ -7513,6 +7514,7 @@ compile-fail	suggestions/unsized-function-parameter.rs
 compile-fail	suggestions/unused-closure-argument.rs
 check-pass	suggestions/unused-imports.rs
 compile-fail	suggestions/use-parentheses-to-call-closure-issue-145404.rs
+compile-fail	suggestions/use-placement-resolve.rs
 compile-fail	suggestions/use-type-argument-instead-of-assoc-type.rs
 compile-fail	suggestions/while-let-typo.rs
 compile-fail	suggestions/wrap-function-local-constructors.rs

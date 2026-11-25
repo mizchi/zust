@@ -2243,3 +2243,22 @@ fn duplicate_items_in_an_impl() {
     // (a `const fn` is a fn; items of other names)
     assert_eq!(first("struct S;\nimpl S {\n    const fn f() {}\n    const F: u8 = 0;\n}\nimpl S {\n    fn g() {}\n}\nfn main() {}\n"), None, "no duplicate");
 }
+
+#[test]
+fn trait_bounds_that_name_no_trait_in_scope() {
+    // (E0405 / E0404 at a fn's bound; each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, n: &str, code: &str| Some((l, c, format!("cannot find trait `{n}` in this scope ({code})")));
+    assert_eq!(first("fn f<T: Nope>(_x: T) {}\nfn main() {}\n"), e(1, 9, "Nope", "E0405"), "inline");
+    assert_eq!(first("fn f<T>(_x: T) where T: Nope {}\nfn main() {}\n"), e(1, 25, "Nope", "E0405"), "where clause");
+    assert_eq!(first("fn f(_x: impl Nope) {}\nfn main() {}\n"), e(1, 15, "Nope", "E0405"), "impl Trait");
+    // (std's traits outside its prelude, not imported: E0404 for the ones with a derive macro of the name)
+    assert_eq!(first("fn foobar<T: Debug>(_x: T) {}\nfn main() {}\n"), e(1, 14, "Debug", "E0404"), "Debug");
+    assert_eq!(first("fn g(_x: impl Display) {}\nfn main() {}\n"), e(1, 15, "Display", "E0405"), "Display");
+    // (imported, by a path, a derive)
+    assert_eq!(first("use std::fmt::Debug;\nfn f<T: Debug>(_x: T) {}\nfn main() {}\n"), None, "imported");
+    assert_eq!(first("use std::fmt;\nfn f<T: fmt::Debug + Clone>(_x: T) {}\n#[derive(Debug)]\nstruct S;\nfn main() {}\n"), None, "a path and a derive");
+}
