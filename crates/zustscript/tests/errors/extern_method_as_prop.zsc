@@ -1,0 +1,3 @@
+// expect: `focus` is a method of `El`: call it with `.focus(..)`
+extern type El { fn focus() -> (); }
+fn f(e: El) -> () { e.focus }

@@ -1,0 +1,2 @@
+// expect: `set_id` assigns `id`: it takes one argument and gives `()`
+extern type El { fn set_id(a: String, b: String) = "id="; }

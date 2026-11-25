@@ -232,8 +232,9 @@ impl Cx<'_> {
             // (`match (0, 0) { (usize::MIN, usize::MAX) => .. }`: unsuffixed literals take their type from a pattern)
             e if lit_scrutinee(e) => pats.iter().find_map(|p| self.pat_ty(p).filter(|t| !self.prog.has_param(*t))),
             // (`match get() { x if x.method() => .., &S => .. }` with `fn get<T>() -> T`: the type inference read the
-            // arms' patterns and guards, which the call's own arguments do not give)
-            e @ Expr::Call(..) if self.lets.contains_key(&(e as *const Expr as usize)) => {
+            // arms' patterns and guards, which the call's own arguments do not give; a method's too, `match
+            // js.try_decode() { Ok(d) => d, .. }` with `fn try_decode<T>(self) -> Result<Box<[T]>, &str>`)
+            e @ (Expr::Call(..) | Expr::MethodCall(..)) if self.lets.contains_key(&(e as *const Expr as usize)) => {
                 let t = self.lets[&(e as *const Expr as usize)];
                 (!self.prog.has_param(t) && !has_hole(self.prog, t)).then_some(t)
             }
@@ -632,6 +633,12 @@ impl Cx<'_> {
         let next = self.b.create_block();
         self.b.ins().brif(cond, next, &[], fail, &[]);
         self.b.switch_to_block(next);
+    }
+
+    /// Where an error of a `x @ sub` pattern is reported: at the arm, at the `let`'s pattern, or at the scrutinee (the
+    /// pattern has no position of its own)
+    pub(crate) fn at_pat_pos(&self) -> Sp {
+        self.at_pat_at.or(self.bk.arm_at).or(self.bk.scrut_place.as_ref().map(|x| x.1)).filter(|s| s.line != 0).unwrap_or(SP)
     }
 
     /// A `ref mut` binding where the default binding mode is by shared reference (`if let Some(ref mut v) = o` with
@@ -1600,9 +1607,17 @@ impl Cx<'_> {
                 Ok(())
             }
             Pat::Ident(by_ref, mutable, name, subpat) => {
-                if let Some(sub) = subpat {
-                    self.pat_bind(sub, p, mode)?;
-                }
+                // (`x @ sub`: sub binds first, and what it binds is checked against x below (at_conflict))
+                let inner = match subpat {
+                    Some(sub) => {
+                        self.at_binds.push(vec![]);
+                        let r = self.pat_bind(sub, p, mode);
+                        let inner = self.at_binds.pop().unwrap_or_default();
+                        r?;
+                        Some(inner)
+                    }
+                    None => None,
+                };
                 let name = name.clone();
                 // (`mut x` where the default binding mode is by reference: by value again, before edition 2024
                 // (`for (n, mut m) in &tups` moves out of the shared reference, E0507; `let (_, mut m) = &(1u8, 2u8);`
@@ -1624,6 +1639,25 @@ impl Cx<'_> {
                     }
                     m => m,
                 };
+                if inner.is_some() || !self.at_binds.is_empty() {
+                    let kind = match mode {
+                        BindMode::Move if borrowck::is_copy(self.prog, p.ty(), 0) && !holds_mut_ref(self.prog, p.ty(), 0) => AtBind::Copy,
+                        BindMode::Move => AtBind::Move,
+                        BindMode::Ref(m) => AtBind::Ref(m),
+                    };
+                    if let Some(inner) = &inner {
+                        let whole = matches!(subpat.as_deref(), Some(Pat::Ident(..)));
+                        // (the moves are the borrow check's (E0382), which code after a `return;` is not given to:
+                        // rustc's check of the pattern holds there too)
+                        if let Some(m) = at_conflict(&name, kind, inner, whole).filter(|m| !(self.dead_stmt && m.ends_with("(E0382)"))) {
+                            return Err(self.at(self.at_pat_pos(), m));
+                        }
+                    }
+                    if let Some(top) = self.at_binds.last_mut() {
+                        top.extend(inner.unwrap_or_default());
+                        top.push((kind, name.clone()));
+                    }
+                }
                 match mode {
                     BindMode::Move => {
                         let (v, t) = self.read(p);
@@ -1820,6 +1854,20 @@ impl Cx<'_> {
                         _ => None,
                     };
                     self.bind(rname.clone(), Ty::Ref(m, intern(Ty::Slice(intern(elem)))), Some(fat));
+                    // (in an `x @ sub`, how it binds, as pat_bind notes the other bindings (at_conflict): `ref mut a @
+                    // [ref b @ ..]`)
+                    if let Some(top) = self.at_binds.last_mut() {
+                        // (`mut rest @ ..` where the default binding mode is by reference: by value again before
+                        // edition 2024, as an identifier's binding is)
+                        let kind = if *by_ref || (matches!(mode, BindMode::Ref(_)) && !(*mutable && self.prog.edition < 2024)) {
+                            AtBind::Ref(m)
+                        } else if borrowck::is_copy(self.prog, elem, 0) && !holds_mut_ref(self.prog, elem, 0) {
+                            AtBind::Copy
+                        } else {
+                            AtBind::Move
+                        };
+                        top.push((kind, rname.clone()));
+                    }
                     if let Some((path, srcs)) = held {
                         self.bk.bind_srcs = srcs;
                         self.bk.pat_path = path;
@@ -3141,6 +3189,42 @@ impl Cx<'_> {
 
 /// t is a `&mut`, or holds one in an array, a tuple, a struct's field or an enum's variant (`Option<&mut T>`, whose
 /// derived Copy is_copy takes to hold, as it takes every reference for Copy)
+/// rustc's check of `x @ sub` (its THIR's, before the borrow check), with kind how x binds and inner what sub binds:
+/// x moved and sub borrowing ("borrow of moved value"); `ref x` and sub moving ("cannot move out of value because it
+/// is borrowed"), or borrowing mutably where either is `ref mut`. Then the borrow check's E0382: x moved after sub moved
+/// a part of it (`a @ Some(b)` of an `Option<String>`), or all of it (`a @ b`, whole)
+pub(crate) fn at_conflict(name: &str, kind: AtBind, inner: &[(AtBind, String)], whole: bool) -> Option<String> {
+    let first = |f: &dyn Fn(AtBind) -> bool| inner.iter().find(|(k, _)| f(*k)).map(|(_, n)| n.as_str());
+    match kind {
+        AtBind::Copy => None,
+        AtBind::Move => {
+            if let Some(b) = first(&|k| matches!(k, AtBind::Ref(_))) {
+                return Some(format!("borrow of moved value: the value is moved into `{name}`, and `{b}` borrows it after the move"));
+            }
+            first(&|k| k == AtBind::Move).map(|b| {
+                if whole {
+                    format!("use of moved value: `{name}` (the value was moved into `{b}`) (E0382)")
+                } else {
+                    format!("use of partially moved value: `{name}` (a part of it was moved into `{b}`) (E0382)")
+                }
+            })
+        }
+        AtBind::Ref(outer_mut) => {
+            if let Some(b) = first(&|k| outer_mut && k == AtBind::Ref(true)) {
+                return Some(format!("cannot borrow value as mutable more than once at a time: `{name}` and `{b}`"));
+            }
+            if let Some(b) = first(&|k| matches!(k, AtBind::Ref(m) if m != outer_mut)) {
+                return Some(if outer_mut {
+                    format!("cannot borrow value as immutable because it is also borrowed as mutable: `{name}` and `{b}`")
+                } else {
+                    format!("cannot borrow value as mutable because it is also borrowed as immutable: `{name}` and `{b}`")
+                });
+            }
+            first(&|k| k == AtBind::Move).map(|b| format!("cannot move out of value because it is borrowed: `{name}` borrows it, and `{b}` moves out of it"))
+        }
+    }
+}
+
 pub(crate) fn holds_mut_ref(prog: &crate::program::Program, t: Ty, depth: u32) -> bool {
     if depth > 16 {
         return false;

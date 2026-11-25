@@ -1,0 +1,3 @@
+// expect: `Option` is the prelude's type
+enum Option<T> { Nothing, Just(T) }
+fn b() -> i32 { 1 }

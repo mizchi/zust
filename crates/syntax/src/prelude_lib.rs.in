@@ -14830,6 +14830,29 @@ fn __exr_char_from_u8<G>(b: u8) -> char {
     unsafe { __exr_char_from_u32(b as u32) }
 }
 
+// (`Vec::from_raw_parts(ptr, len, cap)`: a buffer of `cap` elements the allocator gave, its first `len` initialized,
+// that the Vec owns. A dangling pointer, `NonNull::dangling()` (the type's alignment as an address, also one of 4096 or
+// more; or another address below the first page, which no allocation has), is no buffer: the Vec's empty one, a null
+// pointer that drop does not free. A buffer this prelude's Vec allocated stays the Vec's, also of zero-sized elements
+// (reserve gives them one byte))
+unsafe fn __exr_vec_from_raw_parts<T>(ptr: *mut T, len: usize, cap: usize) -> Vec<T> {
+    // (cap 0 of a sized element is no buffer whatever the pointer, any aligned one: this prelude's Vec of cap 0 has none)
+    if (cap == 0 && core::mem::size_of::<T>() != 0) || (ptr as usize) < 4096 || (ptr as usize) == core::mem::align_of::<T>() {
+        let c = if core::mem::size_of::<T>() == 0 { len } else { 0 };
+        return Vec { ptr: core::ptr::null_mut(), cap: c, len: len };
+    }
+    Vec { ptr: ptr, cap: cap, len: len }
+}
+
+// (`String::from_utf8_unchecked(bytes)`: bytes the caller knows are UTF-8)
+unsafe fn __exr_string_from_utf8_unchecked<G>(v: Vec<u8>) -> String {
+    String { vec: v }
+}
+
+unsafe fn __exr_char_from_u32_unchecked<G>(u: u32) -> char {
+    unsafe { __exr_char_from_u32(u) }
+}
+
 fn __exr_char_from_u32_checked<G>(u: u32) -> Option<char> {
     if u > 0x10FFFF || (u >= 0xD800 && u <= 0xDFFF) {
         None

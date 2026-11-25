@@ -1420,11 +1420,23 @@ pub fn hoist_nested_items(src: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-/// What an item that hoist_parts_at may move starts with
-const HOIST_KWS: [&str; 23] = [
-    "fn ", "struct ", "enum ", "use ", "const ", "static ", "mod ", "trait ", "impl", "type ", "union ", "extern ", "unsafe extern ", "unsafe fn ", "async ", "pub fn ", "pub struct ",
-    "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) ",
-];
+/// What an item that hoist_parts_at may move starts with, by its first letter: the qualified fns, impls and traits
+/// too (`unsafe fn`, `async fn` / `async unsafe fn`, `unsafe impl`)
+fn hoist_kws(c: u8) -> &'static [&'static str] {
+    match c {
+        b'f' => &["fn "],
+        b's' => &["struct ", "static "],
+        b'e' => &["enum ", "extern "],
+        b'u' => &["use ", "union ", "unsafe extern ", "unsafe fn ", "unsafe impl", "unsafe trait "],
+        b'c' => &["const "],
+        b'm' => &["mod "],
+        b't' => &["trait ", "type "],
+        b'i' => &["impl"],
+        b'p' => &["pub fn ", "pub struct ", "pub enum ", "pub const ", "pub static ", "pub trait ", "pub type ", "pub(crate) "],
+        b'a' => &["async "],
+        _ => &[],
+    }
+}
 
 /// An item keyword right after a brace or a `;` on a line (`f({ fn inner() {} })`): whether hoist_nested_items moves
 /// such an item depends on the rest of the source (its quick check looks for indented items only), so the incremental
@@ -1443,7 +1455,7 @@ pub fn has_inline_item(src: &str) -> bool {
             }
             t = rest[end + 1..].trim_start_matches([' ', '\t']);
         }
-        matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p' | b'a')) && HOIST_KWS.iter().any(|k| t.starts_with(k))
+        t.as_bytes().first().is_some_and(|&c| hoist_kws(c).iter().any(|k| t.starts_with(k)))
     })
 }
 
@@ -1454,20 +1466,184 @@ pub fn hoist_nested_items_parts(src: &str) -> Option<(String, Vec<(usize, String
     hoist_parts_at(src, 0)
 }
 
+/// Where a moved item's text begins: its first doc comment (`/// ..` / `/** .. */`) between the token before it (lo)
+/// and its first token (from), or that token. Between two tokens there are only whitespace and comments
+#[inline(never)]
+fn doc_start(s: &[u8], lo: usize, from: usize) -> usize {
+    let mut i = lo;
+    let mut first_doc = None;
+    while i < from {
+        if s[i..].starts_with(b"//") {
+            if s[i..].starts_with(b"///") && !s[i..].starts_with(b"////") {
+                first_doc.get_or_insert(i);
+            }
+            while i < from && s[i] != b'\n' {
+                i += 1;
+            }
+        } else if s[i..].starts_with(b"/*") {
+            if s[i..].starts_with(b"/**") && !s[i..].starts_with(b"/**/") {
+                first_doc.get_or_insert(i);
+            }
+            let mut d = 0i32;
+            while i + 1 < from {
+                if s[i] == b'/' && s[i + 1] == b'*' {
+                    d += 1;
+                    i += 2;
+                } else if s[i] == b'*' && s[i + 1] == b'/' {
+                    d -= 1;
+                    i += 2;
+                    if d == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    first_doc.unwrap_or(from)
+}
+
+/// Whether the `{` at token k, after a `=`, opens an anonymous const's body: `const _: () = {` (looked for at the
+/// `{`, which are few, not at each `const`). Its type is a few tokens: not past a `;` or a brace
+#[inline(never)]
+fn anon_const_head(s: &[u8], toks: &[(u8, usize, usize)], k: usize) -> bool {
+    let is_sym = |j: usize, c: u8| toks[j].0 == 1 && s[toks[j].1] == c;
+    let ident = |j: usize, w: &[u8]| toks[j].0 == 0 && &s[toks[j].1..toks[j].2] == w;
+    let mut j = k - 2;
+    while j >= 1 && k - j < 16 {
+        if is_sym(j, b';') || is_sym(j, b'{') || is_sym(j, b'}') {
+            return false;
+        }
+        if ident(j, b"_") && ident(j - 1, b"const") && is_sym(j + 1, b':') {
+            return true;
+        }
+        j -= 1;
+    }
+    false
+}
+
+/// The body of an anonymous const that opens at token k (`const _: () = {`), when it is on one line (a macro wrote
+/// it): the names of the types it defines at its top level, which stay in it. None when it is not on one line (read
+/// where it is, as before); Some(None) when it is skipped whole, as before this branch: an item that would go out names
+/// a type, const or static that stays (`const _: () = { type Local = u32; fn helper(_: Local) {} };` would lose `Local`)
+#[inline(never)]
+fn anon_body_types<'a>(s: &'a [u8], toks: &[(u8, usize, usize)], k: usize) -> Option<Option<Vec<&'a [u8]>>> {
+    let tok = |k: usize| -> &'a [u8] { &s[toks[k].1..toks[k].2] };
+    let is_sym = |k: usize, c: u8| toks[k].0 == 1 && s[toks[k].1] == c;
+    let ident = |k: usize| toks[k].0 == 0;
+    // (an item's first word: after the body's `{`, a `;`, a `}`, an attribute's `]` or `pub`; not a const generic
+    // parameter, `fn invoke<R, const UNWIND_SAFE: bool>`, whose `<` is no bracket here)
+    let item_start = |j: usize| j == k + 1 || is_sym(j - 1, b';') || is_sym(j - 1, b'}') || is_sym(j - 1, b']') || is_sym(j - 1, b')') || (ident(j - 1) && tok(j - 1) == b"pub");
+    let mut names: Vec<&[u8]> = vec![];
+    // (and the consts and statics, which stay too)
+    let mut values: Vec<&[u8]> = vec![];
+    let mut d = 0i32;
+    let mut j = k + 1;
+    while j < toks.len() {
+        if is_sym(j, b'{') || is_sym(j, b'(') || is_sym(j, b'[') {
+            d += 1;
+        } else if is_sym(j, b'}') || is_sym(j, b')') || is_sym(j, b']') {
+            if d == 0 {
+                break;
+            }
+            d -= 1;
+        } else if d == 0 && ident(j) && matches!(tok(j), b"struct" | b"enum" | b"union" | b"type") && j + 1 < toks.len() && ident(j + 1) && item_start(j) {
+            names.push(tok(j + 1));
+        } else if d == 0 && ident(j) && matches!(tok(j), b"const" | b"static") && j + 2 < toks.len() && item_start(j) {
+            let n = if tok(j + 1) == b"mut" { j + 2 } else { j + 1 };
+            if ident(n) && tok(n) != b"_" && is_sym(n + 1, b':') {
+                values.push(tok(n));
+            }
+        }
+        j += 1;
+    }
+    if j >= toks.len() || s[toks[k].1..toks[j].1].contains(&b'\n') {
+        return None;
+    }
+    if names.is_empty() && values.is_empty() {
+        return Some(Some(names));
+    }
+    // (its items at the top level, from their first word to their `;` or closing brace: one that goes out (a fn,
+    // `use`, trait, extern block, or an impl for none of its types) must not name what stays)
+    let mut i = k + 1;
+    while i < j {
+        if is_sym(i, b'#') || is_sym(i, b';') {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut kind: Option<&[u8]> = None;
+        let mut d = 0i32;
+        let mut end = i;
+        while end < j {
+            if is_sym(end, b'{') || is_sym(end, b'(') || is_sym(end, b'[') {
+                d += 1;
+            } else if is_sym(end, b'}') || is_sym(end, b')') || is_sym(end, b']') {
+                d -= 1;
+                if d == 0 && is_sym(end, b'}') && kind.is_some_and(|k| k != b"const" && k != b"static" && k != b"type") {
+                    break;
+                }
+            } else if d == 0 && is_sym(end, b';') {
+                break;
+            } else if d == 0 && kind.is_none() && ident(end) {
+                let w = tok(end);
+                kind = match w {
+                    // (`const fn`, `unsafe extern "C" fn`: the fn)
+                    b"const" | b"unsafe" | b"extern" | b"async" if end + 1 < j && (ident(end + 1) && tok(end + 1) != b"_" && !is_sym(end + 2, b':') || toks[end + 1].0 == 2) && w != b"const" || (w == b"const" && end + 1 < j && matches!(tok(end + 1), b"fn" | b"unsafe" | b"async" | b"extern")) => None,
+                    b"fn" | b"use" | b"trait" | b"impl" | b"mod" | b"struct" | b"enum" | b"union" | b"type" | b"const" | b"static" | b"extern" => Some(w),
+                    _ => None,
+                };
+            }
+            end += 1;
+        }
+        let local_impl = kind == Some(b"impl") && {
+            let mut h = start;
+            while h < end && !is_sym(h, b'{') {
+                h += 1;
+            }
+            (start..h).any(|q| ident(q) && names.contains(&tok(q)))
+        };
+        let goes_out = matches!(kind, Some(b"fn" | b"use" | b"trait" | b"impl" | b"mod" | b"extern")) && !local_impl;
+        if goes_out && (start..end.min(j)).any(|q| ident(q) && (names.contains(&tok(q)) || values.contains(&tok(q)))) {
+            return Some(None);
+        }
+        i = end + 1;
+    }
+    Some(Some(names))
+}
+
+/// The token of the `}` that closes the `{` at token k (the last token when it is not closed)
+fn brace_close(s: &[u8], toks: &[(u8, usize, usize)], k: usize) -> usize {
+    let mut d = 0i32;
+    for j in k..toks.len() {
+        if toks[j].0 == 1 && s[toks[j].1] == b'{' {
+            d += 1;
+        } else if toks[j].0 == 1 && s[toks[j].1] == b'}' {
+            d -= 1;
+            if d == 0 {
+                return j;
+            }
+        }
+    }
+    toks.len().saturating_sub(1)
+}
+
 /// depth: 名前を変えてやり直した回数 (壊れたソースで名前の変更が止まらないときは 8 回で止める)
 fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)> {
     // (速く飛ばす: 字下げした行頭の `fn ` などがなければ入れ子のアイテムはない)
-    const KWS: [&str; 23] = HOIST_KWS;
+    // (by the first letter: most lines start with none of them, and a line is tried against that letter's only)
+    let kws = hoist_kws;
     let indented = src.split('\n').any(|l| {
         let t = l.trim_start();
-        // (the keywords' first letters first: most lines start with none of them)
-        t.len() < l.len()
-            && matches!(t.as_bytes().first(), Some(b'f' | b's' | b'e' | b'u' | b'c' | b'm' | b't' | b'i' | b'p' | b'a'))
-            && KWS.iter().any(|k| t.starts_with(k))
+        t.len() < l.len() && t.as_bytes().first().is_some_and(|&c| kws(c).iter().any(|k| t.starts_with(k)))
     });
     // (a proc macro's output is one line, marked (PM_MARK): the items in its bodies, `{#[link(..)] extern "C" {..}`,
     // are not at a line's start. Looked for only once this process expanded one)
-    if !indented && !(PM_EXPANDED.load(std::sync::atomic::Ordering::Relaxed) && src.contains(PM_MARK)) {
+    // (nor an anonymous const a `macro_rules!` expansion wrote on one line, `const _: () = { impl Tr for u8 {..} };`)
+    if !indented && !(PM_EXPANDED.load(std::sync::atomic::Ordering::Relaxed) && src.contains(PM_MARK)) && !src.contains("const _") {
         return None;
     }
     let s = src.as_bytes();
@@ -1479,6 +1655,15 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     let mut depth = 0i32;
     let mut fn_bodies: Vec<(i32, usize)> = vec![];
     let mut pending_fn = false;
+    // (the bodies of `const _: () = { .. };`, what derives and `#[wasm_bindgen]` wrap impls in: their items but their
+    // consts and statics go out, as a fn body's do. Each one's `{` (token), and the types it defines, which stay in it:
+    // an impl for one stays too)
+    let mut anons: Vec<(usize, Vec<&[u8]>)> = vec![];
+    // (a top-level `const` / `static` whose initializer is a block, `const F: fn() = { fn broken() {..} broken };`: the
+    // block's items are hoisted as a fn body's are. Set at the item's keyword, until its `;`)
+    let mut init_item = false;
+    // (the nesting of `(` / `[`: a `;` in them (`[u8; 4]`, `[(); 1]`) ends no item)
+    let mut nest = 0i32;
     let mut moves: Vec<(usize, usize)> = vec![];
     // 入れ子のアイテムの名前と、それを含む関数の本体 (開き括弧のトークン位置)。閉じた本体の (開き, 閉じ)
     let mut nested_names: Vec<(Vec<u8>, usize)> = vec![];
@@ -1507,6 +1692,9 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     while k < toks.len() {
         let t = tok(k);
         if toks[k].0 == 0 {
+            if depth == 0 && matches!(t, b"const" | b"static") && k + 1 < toks.len() && !matches!(tok(k + 1), b"fn" | b"unsafe" | b"extern" | b"async") {
+                init_item = true;
+            }
             if depth == 0 && matches!(t, b"fn" | b"struct" | b"enum" | b"const" | b"static" | b"union" | b"trait" | b"type") && k + 1 < toks.len() {
                 let nk = if t == b"static" && tok(k + 1) == b"mut" { k + 2 } else { k + 1 };
                 if nk < toks.len() && toks[nk].0 == 0 {
@@ -1524,6 +1712,18 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 k += 1;
                 continue;
             }
+            // (`unsafe fn` / `extern "C" fn` / `unsafe extern "C" fn` / `async fn`: the `fn`)
+            let qual_fn = |mut j: usize| -> Option<usize> {
+                let mut any = false;
+                while j < toks.len() && toks[j].0 == 0 && matches!(tok(j), b"unsafe" | b"async" | b"extern") {
+                    if tok(j) == b"extern" && j + 1 < toks.len() && toks[j + 1].0 == 2 {
+                        j += 1;
+                    }
+                    j += 1;
+                    any = true;
+                }
+                (any && j + 1 < toks.len() && toks[j].0 == 0 && tok(j) == b"fn" && toks[j + 1].0 == 0).then_some(j)
+            };
             let ik = if t == b"pub" && k + 1 < toks.len() {
                 let mut j = k + 1;
                 if is_sym(j, b"(") {
@@ -1534,9 +1734,16 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 }
                 if j < toks.len() && toks[j].0 == 0 && matches!(tok(j), b"fn" | b"struct" | b"enum" | b"const" | b"use" | b"static" | b"mod" | b"trait" | b"type" | b"union") {
                     j
+                } else if let Some(f) = qual_fn(j) {
+                    f
                 } else {
                     k
                 }
+            } else if let Some(f) = matches!(t, b"unsafe" | b"async" | b"extern").then(|| qual_fn(k)).flatten() {
+                f
+            } else if t == b"unsafe" && k + 1 < toks.len() && matches!(tok(k + 1), b"impl" | b"trait") {
+                // (`unsafe impl Tr for S { .. }` / `unsafe trait Tr { .. }`)
+                k + 1
             } else if t == b"unsafe" && k + 1 < toks.len() && matches!(tok(k + 1), b"extern" | b"fn") {
                 // (`unsafe extern "C" { .. }`, `unsafe fn f() { .. }`)
                 k + 1
@@ -1569,8 +1776,60 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 || (t == b"union" && ik + 1 < toks.len() && toks[ik + 1].0 == 0)
                 || extern_block;
             let impl_like = t == b"impl";
+            // (in an anonymous const's body, only its impls, `use`s, fns, traits and extern blocks go out: its consts,
+            // statics and types stay, what the const checks at compile time (`struct _Section([u8; _CHUNK_1_LEN])` of
+            // `#[wasm_bindgen]`'s custom section, beside the const it names))
+            let in_anon = fn_bodies.last().is_some_and(|&(_, open)| anons.last().is_some_and(|a| a.0 == open));
+            let local_impl = || {
+                let names = anons.last().map(|a| a.1.as_slice()).unwrap_or(&[]);
+                let mut j = ik + 1;
+                while j < toks.len() && !is_sym(j, b"{") && !is_sym(j, b";") {
+                    if toks[j].0 == 0 && names.contains(&tok(j)) {
+                        return true;
+                    }
+                    j += 1;
+                }
+                false
+            };
+            let anon_keeps = in_anon && !extern_block && (!matches!(t, b"impl" | b"use" | b"fn" | b"trait") || (t == b"impl" && local_impl()));
+            // (an anonymous const that stays, in another one's body: its own body is one too)
+            // (its `{` is found as any anonymous const's is)
+            if anon_keeps && t == b"const" && ik + 1 < toks.len() && tok(ik + 1) == b"_" {
+            } else if anon_keeps && item_kw && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<"))) {
+                // (another item that stays, `impl Section { fn len(&self) .. }`, `impl<T> Local<T> { .. }`: past its end,
+                // whose fns are its own)
+                let semi_only = matches!(t, b"const" | b"static" | b"type" | b"use");
+                let mut j = ik + 1;
+                let mut d = 0i32;
+                while j < toks.len() {
+                    if is_sym(j, b"(") || is_sym(j, b"[") || (semi_only && is_sym(j, b"{")) {
+                        d += 1;
+                    } else if is_sym(j, b")") || is_sym(j, b"]") || (semi_only && is_sym(j, b"}")) {
+                        d -= 1;
+                    } else if d == 0 && is_sym(j, b";") {
+                        break;
+                    } else if d == 0 && is_sym(j, b"{") {
+                        let mut e = 0i32;
+                        while j < toks.len() {
+                            if is_sym(j, b"{") {
+                                e += 1;
+                            } else if is_sym(j, b"}") {
+                                e -= 1;
+                                if e == 0 {
+                                    break;
+                                }
+                            }
+                            j += 1;
+                        }
+                        break;
+                    }
+                    j += 1;
+                }
+                k = j + 1;
+                continue;
+            }
             // (`const` の後ろに `fn` や `|` (const クロージャ) が来るものは別扱い: `const fn` は fn で見る)
-            if in_body && stmt_start && item_kw && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<")) || extern_block) {
+            if in_body && stmt_start && item_kw && !anon_keeps && ik + 1 < toks.len() && (toks[ik + 1].0 == 0 || (impl_like && is_sym(ik + 1, b"<")) || extern_block) {
                 // アイテムの終わり: `{ .. }` (fn / struct / enum) か `;`
                 let mut j = ik + 1;
                 let mut d = 0i32;
@@ -1640,7 +1899,10 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                         break;
                     }
                 }
-                moves.push((toks[st].1, toks[e].2));
+                // (and its doc comments before those, `/// ..` / `/** .. */`: left behind they would document nothing,
+                // E0585. Between two tokens there are only whitespace and comments)
+                let from = doc_start(s, if st > 0 { toks[st - 1].2 } else { 0 }, toks[st].1);
+                moves.push((from, toks[e].2));
                 let nk = if matches!(t, b"static") && tok(ik + 1) == b"mut" { ik + 2 } else { ik + 1 };
                 if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" && !extern_block {
                     nested_names.push((tok(nk).to_vec(), block_of(k)));
@@ -1668,6 +1930,30 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                     if pending_fn {
                         fn_bodies.push((depth, k));
                         pending_fn = false;
+                    } else {
+                        // (an anonymous const a macro wrote on one line (a proc macro's output, a `macro_rules!`
+                        // expansion): its own rules, anon_body_types)
+                        let anon = if k >= 5 && is_sym(k - 1, b"=") && anon_const_head(s, &toks, k) { anon_body_types(s, &toks, k) } else { None };
+                        match anon {
+                            Some(Some(names)) => {
+                                fn_bodies.push((depth, k));
+                                anons.push((k, names));
+                            }
+                            // (one skipped whole: past its closing brace, so that its items are not moved out of a
+                            // body around it either, `const _: () = { const _: () = { type Local = u32; fn helper(_:
+                            // Local) {} }; };`)
+                            Some(None) => {
+                                k = brace_close(s, &toks, k) + 1;
+                                continue;
+                            }
+                            // (another top-level const's or static's initializer block, `const F: fn() = { fn broken()
+                            // {..} broken };`, a hand-written anonymous const's too: its items go out as a fn body's do)
+                            None => {
+                                if init_item && depth == 0 && k >= 1 && is_sym(k - 1, b"=") {
+                                    fn_bodies.push((depth, k));
+                                }
+                            }
+                        }
                     }
                     depth += 1;
                 }
@@ -1675,11 +1961,21 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                     depth -= 1;
                     if fn_bodies.last().is_some_and(|&(d, _)| d == depth) {
                         let (_, open) = fn_bodies.pop().unwrap();
+                        if anons.last().is_some_and(|a| a.0 == open) {
+                            anons.pop();
+                        }
                         bodies.push((open, k));
                     }
                 }
+                b"(" | b"[" => nest += 1,
+                b")" | b"]" => nest = (nest - 1).max(0),
                 // `fn f();` (宣言だけ) は本体なし
-                b";" => pending_fn = false,
+                b";" if nest == 0 => {
+                    pending_fn = false;
+                    if depth == 0 {
+                        init_item = false;
+                    }
+                }
                 _ => {}
             }
         }
@@ -2419,7 +2715,9 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             // (`*const T` の const / `&'static` の static は定義でない)
             let after_star = k >= 1 && is_sym(k - 1, b'*');
             let after_tick = toks[k].1 >= 1 && s[toks[k].1 - 1] == b'\'';
-            if matches!(kw, b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"const" | b"static" | b"union") && k + 1 < toks.len() && !after_star && !after_tick {
+            // (nor a const generic parameter, `fn f<const N: usize, const M: usize>`: an item is never after `<` / `,`)
+            let generic = kw == b"const" && k >= 1 && (is_sym(k - 1, b'<') || is_sym(k - 1, b','));
+            if matches!(kw, b"fn" | b"struct" | b"enum" | b"trait" | b"type" | b"const" | b"static" | b"union") && k + 1 < toks.len() && !after_star && !after_tick && !generic {
                 let nk = if kw == b"static" && is_id(k + 1, b"mut") { k + 2 } else { k + 1 };
                 // (`const fn f` は fn で数える。`const unsafe fn` / `const async fn` / `const extern "C" fn` も)
                 let const_fn = kw == b"const" && (is_id(nk, b"fn") || is_id(nk, b"unsafe") || is_id(nk, b"async") || is_id(nk, b"extern"));
@@ -3267,7 +3565,8 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
             k += 1;
             continue;
         }
-        let prev_dot = k >= 1 && is_sym(k - 1, b'.');
+        // (a field or method after `.`; not a range's end, `a..name()`)
+        let prev_dot = k >= 1 && is_sym(k - 1, b'.') && !(k >= 2 && is_sym(k - 2, b'.'));
         // (`::name` at a path's start, `::re::label` / `<T as ::re::Tr>`, is a path from the extern crate `name`: read as
         // `re::label` is)
         let leading = k >= 2

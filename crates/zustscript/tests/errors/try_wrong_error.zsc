@@ -1,0 +1,3 @@
+// expect: `?` passes on a `String`, but this function returns `Result<i32, i32>`
+fn a() -> Result<i32, String> { Err("x") }
+fn b() -> Result<i32, i32> { let v = a()?; Ok(v) }

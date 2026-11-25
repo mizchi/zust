@@ -1,0 +1,2 @@
+// expect: `Result` takes 2 type argument(s), found 1
+fn f(x: Result<i32, String>) -> Result<i32> { Ok(x?) }

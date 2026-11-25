@@ -76,6 +76,10 @@ pub enum Builtin {
     Max,
     Min,
     ToArray,
+    /// a method of `Option` / `Result` (`map`, `and_then`, `unwrap_or`, ..; see [`Checker::method_sig`])
+    Opt(&'static str),
+    /// `xs.try_map(f)`: `f`'s `Result` (true) / `Option` (false), stopping at the first `Err` / `None`
+    TryMap(bool),
 }
 
 pub struct RecordDef {
@@ -100,6 +104,15 @@ impl EnumDef {
     pub fn unit_only(&self) -> bool {
         self.variants.iter().all(|v| v.1.is_empty())
     }
+}
+
+/// An `extern type`: a JS value, its TS name, and the members declared for it
+pub struct ExtType {
+    pub params: Vec<String>,
+    /// (name, type, JS name)
+    pub props: Vec<(String, Ty, String)>,
+    /// (name, arguments, result, JS name)
+    pub methods: Vec<(String, Vec<Ty>, Ty, String)>,
 }
 
 pub struct FnSig {
@@ -129,6 +142,11 @@ pub struct Info {
     /// variant name → enum name (variant names are unique in a file)
     pub variant_of: HashMap<String, String>,
     pub fns: HashMap<String, FnSig>,
+    pub ext_types: HashMap<String, ExtType>,
+    /// the externs that are another zustscript module's functions (no conversion at the call)
+    pub zsc_externs: HashSet<String>,
+    /// each property read and method call of an extern type: (the type, the member)
+    pub member: HashMap<Id, (String, String)>,
     pub externs: HashMap<String, (FnSig, Option<String>, String)>,
     pub wasm: HashMap<String, (Vec<(String, WTy)>, WTy)>,
     /// effects whose handlers all resume in tail position (see [`direct_effects`]): in JS they are plain calls to the
@@ -136,6 +154,8 @@ pub struct Info {
     pub direct: BTreeSet<String>,
     /// Expression types for Rust lowering, including ordinary helpers reached from Wasm.
     pub ty: HashMap<Id, Ty>,
+    /// each `?`: the enum of its value (`Option` / `Result`)
+    pub tries: HashMap<Id, String>,
     /// `==` / `!=` that compare values with parts (arrays, records, enums with data, tuples): by content, in JS with
     /// `$eq`, in Rust with `derive(PartialEq)`. Values are immutable, so equal contents are equal values
     pub deep_eq: HashMap<Id, Ty>,
@@ -189,6 +209,16 @@ pub struct Checker {
     closure_bases: Vec<usize>,
     /// how many loops enclose the expression (in the current closure)
     loops: u32,
+    /// the result type of each enclosing function and closure, innermost last: what a `?` returns from
+    /// (and the result the context expects, which is not yet the result: an async closure's body may give the
+    /// Promise itself)
+    rets: Vec<(Ty, Option<Ty>)>,
+    /// (in a `handle`'s body or arm, not in a closure there: a `?` would return from a generator of its own)
+    in_handle: bool,
+    /// (where a `?` cannot be written: the right of `&&` / `||`, a `while` condition. The error)
+    try_ban: Option<&'static str>,
+    /// (a `?` decided the result of the closure being checked)
+    closure_try: bool,
 }
 
 pub const BOUNDS: &[&str] = &["Num", "Integer", "Float"];
@@ -342,11 +372,37 @@ impl Checker {
             muts: HashSet::new(),
             closure_bases: vec![],
             loops: 0,
+            rets: vec![],
+            in_handle: false,
+            try_ban: None,
+            closure_try: false,
         }
     }
 
     fn err(&mut self, pos: Pos, m: impl Into<String>) {
         self.errors.push((pos, m.into()));
+    }
+
+    /// What JS gives back, as an extern's result: a `Result` catches what it throws, as a `String` (the message) or
+    /// a value of an extern type (the thrown value); a `Promise` of a `Result` catches its rejection too
+    fn extern_result(&mut self, t: &Ty, pos: Pos) {
+        let t = promised(t).unwrap_or(t.clone());
+        if let Ty::Named(n, a) = &t
+            && n == "Result"
+            && a.len() == 2
+            && !matches!(&a[1], Ty::Str)
+            && !matches!(&a[1], Ty::Named(e, _) if self.info.ext_types.contains_key(e))
+        {
+            let s = self.show(&a[1]);
+            self.err(pos, format!("an extern's `Result` catches what JS throws: its error is a `String` (the message) or an extern type (the value thrown), not {s}"));
+        }
+    }
+
+    /// A function cannot be named like a variant of the prelude (`Ok(x)` would call it, wherever it is written)
+    fn prelude_name(&mut self, name: &str, pos: Pos) {
+        if let Some(p) = PRELUDE.iter().find(|p| p.2.iter().any(|v| v.0 == name)) {
+            self.err(pos, format!("`{name}` is a variant of the prelude's `{}`: a function cannot have this name", p.0));
+        }
     }
 
     fn fresh(&mut self) -> Ty {
@@ -522,6 +578,12 @@ impl Checker {
                             r.params.len()
                         } else if let Some(e) = self.info.enums.get(n) {
                             e.params.len()
+                        } else if let Some(x) = self.info.ext_types.get(n) {
+                            x.params.len()
+                        } else if let Some((_, _, vs)) = PRELUDE.iter().find(|p| p.0 == n) {
+                            let vs: Vec<&str> = vs.iter().map(|v| v.0).collect();
+                            self.err(*pos, format!("unknown type `{n}`: the prelude's `{n}` is left out of this file, because another enum has a variant named like one of its own ({}). Rename that variant", vs.join(", ")));
+                            return Ty::Unit;
                         } else {
                             self.err(*pos, format!("unknown type `{n}`"));
                             return Ty::Unit;
@@ -562,18 +624,34 @@ impl Checker {
                     self.err(*pos, "`Promise` is the built-in type of `async` / `await`: name this type otherwise");
                 }
             }
+            // (`Option` / `Result` are the prelude's: a file written before the prelude may declare them the same way)
+            match it {
+                Item::Record { name, pos, .. } if PRELUDE.iter().any(|p| p.0 == name) => {
+                    self.err(*pos, format!("`{name}` is the prelude's type: remove this declaration, or name the type otherwise"));
+                }
+                Item::Enum { name, params, variants, pos, .. } if PRELUDE.iter().any(|p| p.0 == name) && !prelude_shaped(name, params, variants) => {
+                    self.err(*pos, format!("`{name}` is the prelude's type: remove this declaration, or name the type otherwise"));
+                }
+                _ => {}
+            }
             match it {
                 Item::Record { name, params, pos, .. } => {
-                    if self.info.records.contains_key(name) || self.info.enums.contains_key(name) {
+                    if self.info.records.contains_key(name) || self.info.enums.contains_key(name) || self.info.ext_types.contains_key(name) {
                         self.err(*pos, format!("the type `{name}` is defined twice"));
                     }
                     self.info.records.insert(name.clone(), RecordDef { params: params.clone(), fields: vec![] });
                 }
                 Item::Enum { name, params, pos, .. } => {
-                    if self.info.records.contains_key(name) || self.info.enums.contains_key(name) {
+                    if self.info.records.contains_key(name) || self.info.enums.contains_key(name) || self.info.ext_types.contains_key(name) {
                         self.err(*pos, format!("the type `{name}` is defined twice"));
                     }
                     self.info.enums.insert(name.clone(), EnumDef { params: params.clone(), variants: vec![], ops: HashMap::new(), ts: None });
+                }
+                Item::ExternType { name, params, pos, .. } => {
+                    if self.info.records.contains_key(name) || self.info.enums.contains_key(name) || self.info.ext_types.contains_key(name) || PRELUDE.iter().any(|p| p.0 == name) || name == "Promise" {
+                        self.err(*pos, format!("the type `{name}` is defined twice"));
+                    }
+                    self.info.ext_types.insert(name.clone(), ExtType { params: params.clone(), props: vec![], methods: vec![] });
                 }
                 _ => {}
             }
@@ -613,6 +691,7 @@ impl Checker {
                     if let Some(p) = names.insert(name.clone(), *pos) {
                         self.err(*pos, format!("`{name}` is already defined at {p}"));
                     }
+                    self.prelude_name(name, *pos);
                     for (_, b) in bounds {
                         if !BOUNDS.contains(&b.as_str()) {
                             self.err(*pos, format!("unknown bound `{b}` (the numeric bounds are Num, Integer, Float)"));
@@ -629,12 +708,18 @@ impl Checker {
                     let bounds = bounds.iter().cloned().collect();
                     self.info.fns.insert(name.clone(), FnSig { generics: generics.clone(), bounds, args: a, ret: r });
                 }
-                Item::Extern { name, module, generics, args, ret, js, pos } => {
+                Item::Extern { name, module, generics, args, ret, js, pos, zsc } => {
                     if let Some(p) = names.insert(name.clone(), *pos) {
                         self.err(*pos, format!("`{name}` is already defined at {p}"));
                     }
+                    self.prelude_name(name, *pos);
                     let a = args.iter().map(|t| self.ty_of(t, generics)).collect();
                     let r = self.ty_of(ret, generics);
+                    if *zsc {
+                        self.info.zsc_externs.insert(name.clone());
+                    } else {
+                        self.extern_result(&r, *pos);
+                    }
                     self.info.externs.insert(name.clone(), (FnSig { generics: generics.clone(), bounds: HashMap::new(), args: a, ret: r }, module.clone(), js.clone()));
                 }
                 Item::WasmFn { name, args, ret, pos, .. } => {
@@ -642,6 +727,33 @@ impl Checker {
                         self.err(*pos, format!("`{name}` is already defined at {p}"));
                     }
                     self.info.wasm.insert(name.clone(), (args.clone(), ret.clone()));
+                }
+                Item::ExternType { name, params, members, .. } => {
+                    let (mut props, mut methods) = (vec![], vec![]);
+                    for m in members {
+                        match m {
+                            Member::Prop { name: n, ty, js, pos } => {
+                                let t = self.ty_of(ty, params);
+                                if props.iter().any(|p: &(String, Ty, String)| p.0 == *n) || methods.iter().any(|p: &(String, Vec<Ty>, Ty, String)| p.0 == *n) {
+                                    self.err(*pos, format!("`{name}` declares `{n}` twice"));
+                                }
+                                self.extern_result(&t, *pos);
+                                props.push((n.clone(), t, js.clone()));
+                            }
+                            Member::Method { name: n, args, ret, js, pos } => {
+                                let a: Vec<Ty> = args.iter().map(|t| self.ty_of(t, params)).collect();
+                                let r = self.ty_of(ret, params);
+                                if props.iter().any(|p| p.0 == *n) || methods.iter().any(|p| p.0 == *n) {
+                                    self.err(*pos, format!("`{name}` declares `{n}` twice"));
+                                }
+                                self.extern_result(&r, *pos);
+                                methods.push((n.clone(), a, r, js.clone()));
+                            }
+                        }
+                    }
+                    let x = self.info.ext_types.get_mut(name).unwrap();
+                    x.props = props;
+                    x.methods = methods;
                 }
                 Item::WasmRaw(_) | Item::ImportType { .. } => {}
             }
@@ -673,6 +785,9 @@ impl Checker {
                 for ((a, _), t) in args.iter().zip(at) {
                     self.scopes[0].insert(a.clone(), t);
                 }
+                self.rets = vec![(ret.clone(), None)];
+                self.in_handle = false;
+                self.try_ban = None;
                 let got = self.infer(body, Some(&ret));
                 self.unify(body_pos(body, *pos), &got, &ret);
                 self.finish_fn();
@@ -1115,6 +1230,30 @@ impl Checker {
                     self.unify(pos, &rt, &Ty::F64);
                     rt = Ty::F64;
                 }
+                // a method of an extern type: JS's own
+                if let Ty::Named(n, targs) = &rt
+                    && let Some(x) = self.info.ext_types.get(n)
+                {
+                    let m: HashMap<String, Ty> = x.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                    let Some((_, params, ret, _)) = x.methods.iter().find(|m| m.0 == *name) else {
+                        let what = if x.props.iter().any(|p| p.0 == *name) { format!("`{name}` is a property of `{n}`: read it with `.{name}`") } else { format!("`{n}` has no method `{name}` (declare it: `extern type {n} {{ fn {name}(..) -> R; }}`)") };
+                        self.err(pos, what);
+                        for a in args {
+                            self.infer(a, None);
+                        }
+                        return self.fresh();
+                    };
+                    let (params, ret): (Vec<Ty>, Ty) = (params.iter().map(|t| Self::subst_params(t, &m)).collect(), Self::subst_params(ret, &m));
+                    self.info.member.insert(e.id, (n.clone(), name.clone()));
+                    if params.len() != args.len() {
+                        self.err(pos, format!("`.{name}()` takes {} argument(s), found {}", params.len(), args.len()));
+                    }
+                    for (a, p) in args.iter().zip(&params) {
+                        let t = self.infer(a, Some(p));
+                        self.unify(a.pos, &t, p);
+                    }
+                    return ret;
+                }
                 // `props.onPick(x)`: a call of a record's function-typed field
                 if let Ty::Named(n, targs) = &rt
                     && let Some(r) = self.info.records.get(n)
@@ -1164,9 +1303,32 @@ impl Checker {
                     self.typed_lits.push((e.id, (*el).clone()));
                     ret = Ty::Typed(el);
                 }
+                // (the expected type decides type arguments the arguments do not: `ok_or(NotFound { .. })?` in a
+                // function that returns `Result<_, FormError>`)
+                if let (Builtin::Opt(_), Some(x)) = (b, expect) {
+                    let x = x.clone();
+                    self.unify_inner(&ret, &x);
+                }
                 for (a, p) in args.iter().zip(&params) {
                     let t = self.infer(a, Some(p));
                     self.unify(a.pos, &t, p);
+                }
+                if let (Builtin::TryMap(_), Some(Ty::Fn(_, r))) = (b, params.first()) {
+                    match self.resolve(r) {
+                        Ty::Named(n, a) if n == "Result" && a.len() == 2 => {
+                            let want = Ty::Named(n, vec![Ty::Array(Box::new(a[0].clone())), a[1].clone()]);
+                            self.unify(pos, &ret, &want);
+                        }
+                        Ty::Named(n, a) if n == "Option" && a.len() == 1 => {
+                            self.info.builtin.insert(e.id, Builtin::TryMap(false));
+                            let want = Ty::Named(n, vec![Ty::Array(Box::new(a[0].clone()))]);
+                            self.unify(pos, &ret, &want);
+                        }
+                        o => {
+                            let s = self.show(&o);
+                            self.err(pos, format!("`.try_map(f)` takes a function that gives a `Result` or an `Option`, found one that gives {s}"));
+                        }
+                    }
                 }
                 ret
             }
@@ -1182,6 +1344,18 @@ impl Checker {
                         let m = r.params.iter().cloned().zip(targs).collect();
                         Self::subst_params(ft, &m)
                     }
+                    Ty::Named(n, targs) if self.info.ext_types.contains_key(&n) => {
+                        let x = &self.info.ext_types[&n];
+                        let Some((_, t, _)) = x.props.iter().find(|p| p.0 == *f) else {
+                            let what = if x.methods.iter().any(|p| p.0 == *f) { format!("`{f}` is a method of `{n}`: call it with `.{f}(..)`") } else { format!("`{n}` has no property `{f}` (declare it: `extern type {n} {{ {f}: T }}`)") };
+                            self.err(pos, what);
+                            return self.fresh();
+                        };
+                        let m: HashMap<String, Ty> = x.params.iter().cloned().zip(targs).collect();
+                        let t = Self::subst_params(t, &m);
+                        self.info.member.insert(e.id, (n.clone(), f.clone()));
+                        t
+                    }
                     Ty::Tuple(ts) if f.parse::<usize>().is_ok_and(|k| k < ts.len()) => ts[f.parse::<usize>().unwrap()].clone(),
                     Ty::Var(_) => {
                         self.err(pos, format!("cannot infer the type of the value of `.{f}`; add an annotation"));
@@ -1196,7 +1370,12 @@ impl Checker {
             }
             EK::Bin(op, l, r) => {
                 let lt = self.infer(l, None);
+                let saved = self.try_ban;
+                if matches!(*op, "&&" | "||") {
+                    self.try_ban = Some("`?` cannot be used on the right of `&&` / `||` (it may not run): write it as an `if` (`if ok { check(d)? } else { false }`)");
+                }
                 let rt = self.infer(r, Some(&lt));
+                self.try_ban = saved;
                 match *op {
                     "&&" | "||" => {
                         self.unify(l.pos, &lt, &Ty::Bool);
@@ -1245,7 +1424,9 @@ impl Checker {
                 Ty::Unit
             }
             EK::While(c, body) => {
+                let saved = self.try_ban.replace("`?` cannot be used in a `while` condition (it runs again each time): test it in the body (`while true { if !more()? { break; } .. }`)");
                 let ct = self.infer(c, None);
+                self.try_ban = saved;
                 self.unify(c.pos, &ct, &Ty::Bool);
                 self.loops += 1;
                 let bt = self.infer(body, Some(&Ty::Unit));
@@ -1329,6 +1510,7 @@ impl Checker {
                 };
                 // (a handler's body and arms run on generators or plain functions in JS: not async)
                 let was_async = std::mem::replace(&mut self.in_async, false);
+                let was_handle = std::mem::replace(&mut self.in_handle, true);
                 let bt = self.infer(body, Some(&out));
                 self.unify(body.pos, &bt, &out);
                 let mut covered: HashMap<String, Vec<String>> = HashMap::new();
@@ -1367,6 +1549,7 @@ impl Checker {
                     }
                 }
                 self.in_async = was_async;
+                self.in_handle = was_handle;
                 out
             }
             EK::If(c, th, el) => {
@@ -1478,14 +1661,34 @@ impl Checker {
                 let loops = std::mem::take(&mut self.loops);
                 // (a closure is not async unless it is written `async (..) =>`: `await` does not reach into it)
                 let was_async = std::mem::replace(&mut self.in_async, std::mem::take(&mut self.next_closure_async));
+                let is_async = self.in_async;
+                // (a `?` inside returns from the closure: from a plain function in JS, wherever the closure is)
+                let saved = (std::mem::replace(&mut self.in_handle, false), self.try_ban.take(), std::mem::replace(&mut self.closure_try, false));
+                let rv = self.fresh();
+                self.rets.push((rv.clone(), rexp.clone()));
                 self.scopes.push(sc);
                 let rt = self.infer(body, rexp.as_ref());
+                // (an async closure's body may give a Promise, which JS adopts: its value is the result)
+                let rt = if is_async { promised(&self.resolve(&rt)).unwrap_or(rt) } else { rt };
+                if !self.unify_inner(&rt, &rv) {
+                    let (g, w) = (self.show(&rt), self.show(&rv));
+                    if self.closure_try {
+                        // (`Result<_, String>`: the part no one decided)
+                        let w = w.split('?').enumerate().map(|(k, p)| if k == 0 { p.to_string() } else { format!("_{}", p.trim_start_matches(|c: char| c.is_ascii_digit())) }).collect::<String>();
+                        self.err(body_pos(body, body.pos), format!("a `?` here returns from the closure, so the closure returns `{w}`, but its body gives {g} (to stop at the first error of an array's elements, use `.try_map((x) => ..)`)"));
+                    } else {
+                        self.err(body_pos(body, body.pos), format!("type mismatch: expected {w}, found {g}"));
+                    }
+                }
                 self.pop_scope();
+                self.rets.pop();
+                (self.in_handle, self.try_ban, self.closure_try) = saved;
                 self.in_async = was_async;
                 self.loops = loops;
                 self.closure_bases.pop();
-                Ty::Fn(pts, Box::new(rt))
+                Ty::Fn(pts, Box::new(rv))
             }
+            EK::Try(x) => self.try_(e.id, pos, x),
             EK::Await(x) => {
                 if !self.in_async {
                     self.err(pos, "`await` is only allowed in an `async fn` or an `async (..) =>` closure");
@@ -1587,6 +1790,80 @@ impl Checker {
                 Ty::Jsx
             }
         }
+    }
+
+    /// `x?`: the value inside the `Result` / `Option` `x`; its `Err` / `None` is returned as it is, so the
+    /// function's result must be a `Result` with the same error type (no conversion), or an `Option`
+    fn try_(&mut self, id: Id, pos: Pos, x: &Expr) -> Ty {
+        if self.in_handle {
+            self.err(pos, "`?` cannot be used inside `handle` yet (the body and the arms are functions of their own in JS): bind the result with `let r = handle ..;` and use `r?` after it, or move the body into a function that returns `Result`");
+        }
+        if let Some(m) = self.try_ban {
+            self.err(pos, m);
+        }
+        let r = self.rets.last().cloned().map(|(t, x)| {
+            let t = self.resolve(&t);
+            match (&t, x.map(|x| self.resolve(&x))) {
+                (Ty::Var(_), Some(x @ Ty::Named(..))) => x,
+                _ => t,
+            }
+        });
+        // (what `x` is expected to be: the result's kind, with its error type)
+        let shape = match &r {
+            Some(Ty::Named(n, a)) if n == "Result" && a.len() == 2 => Some(Ty::Named(n.clone(), vec![self.fresh(), a[1].clone()])),
+            Some(Ty::Named(n, a)) if n == "Option" && a.len() == 1 => Some(Ty::Named(n.clone(), vec![self.fresh()])),
+            _ => None,
+        };
+        let t = self.infer(x, shape.as_ref());
+        let t = self.resolve(&t);
+        let (kind, inner) = match &t {
+            Ty::Named(n, a) if (n == "Result" && a.len() == 2) || (n == "Option" && a.len() == 1) => (n.clone(), a[0].clone()),
+            Ty::Var(_) => {
+                self.err(pos, "the value before `?` must be known to be an `Option` or a `Result` here: add an annotation");
+                return self.fresh();
+            }
+            o => {
+                let s = self.show(o);
+                self.err(pos, format!("`?` takes an `Option` or a `Result`, found {s}"));
+                return self.fresh();
+            }
+        };
+        self.info.tries.insert(id, kind.clone());
+        let closure = !self.closure_bases.is_empty();
+        let whose = if closure { "the closure (a `?` in a closure returns from it, not from the function around it)" } else { "this function" };
+        match &r {
+            // (a closure whose result is not known yet: the `?` makes it this kind)
+            Some(rv @ Ty::Var(_)) => {
+                let want = match &t {
+                    Ty::Named(_, a) if kind == "Result" => Ty::Named(kind.clone(), vec![self.fresh(), a[1].clone()]),
+                    _ => Ty::Named(kind.clone(), vec![self.fresh()]),
+                };
+                let rv = rv.clone();
+                self.unify(pos, &want, &rv);
+                self.closure_try = true;
+            }
+            Some(Ty::Named(n, a)) if *n == kind && n == "Result" && a.len() == 2 => {
+                let Ty::Named(_, ta) = &t else { unreachable!() };
+                if !self.unify_inner(&ta[1], &a[1]) {
+                    let (e, w) = (self.show(&ta[1]), self.show(&Ty::Named(n.clone(), a.clone())));
+                    self.err(pos, format!("`?` passes on a `{e}`, but {whose} returns `{w}` (no conversion is done: convert it first, e.g. `.map_err((e) => ..)?`)"));
+                }
+            }
+            Some(Ty::Named(n, a)) if *n == kind && a.len() == if n == "Result" { 2 } else { 1 } => {}
+            Some(Ty::Named(n, a)) if n == "Result" && a.len() == 2 => {
+                self.err(pos, format!("`?` on an `Option` in {whose}, which returns `Result`: turn it into a `Result` with `.ok_or(e)?`"));
+            }
+            Some(Ty::Named(n, a)) if n == "Option" && a.len() == 1 => {
+                self.err(pos, format!("`?` on a `Result` in {whose}, which returns `Option`: drop the error with `.ok()?`"));
+            }
+            Some(o) => {
+                let s = self.show(o);
+                let hint = if closure { " (to stop at the first error of an array's elements, use `.try_map((x) => ..)`)" } else { "" };
+                self.err(pos, format!("`?` can be used only where the result is an `Option` or a `Result`: {whose} returns {s}{hint}"));
+            }
+            None => self.err(pos, "`?` outside a function"),
+        }
+        inner
     }
 
     fn lit_ty(&mut self, l: &Lit) -> Ty {
@@ -1727,6 +2004,46 @@ impl Checker {
             // (JS's Math.max / Math.min: NaN if either is NaN, and +0 above -0)
             (Ty::F32 | Ty::F64, "max") => (vec![recv.clone()], recv.clone(), B::Max),
             (Ty::F32 | Ty::F64, "min") => (vec![recv.clone()], recv.clone(), B::Min),
+            // (the prelude's, named as Rust names them)
+            (Ty::Named(n, a), m) if n == "Option" && a.len() == 1 => {
+                let t = a[0].clone();
+                let opt = |t: Ty| Ty::Named("Option".into(), vec![t]);
+                let res = |t: Ty, e: Ty| Ty::Named("Result".into(), vec![t, e]);
+                let (u, e) = (self.fresh(), self.fresh());
+                match m {
+                    "map" => (vec![f(vec![t], u.clone())], opt(u), B::Opt("map")),
+                    "and_then" => (vec![f(vec![t], opt(u.clone()))], opt(u), B::Opt("and_then")),
+                    "filter" => (vec![f(vec![t.clone()], Ty::Bool)], opt(t), B::Opt("filter")),
+                    "unwrap_or" => (vec![t.clone()], t, B::Opt("unwrap_or")),
+                    "unwrap_or_else" => (vec![f(vec![], t.clone())], t, B::Opt("unwrap_or_else")),
+                    "ok_or" => (vec![e.clone()], res(t, e), B::Opt("ok_or")),
+                    "ok_or_else" => (vec![f(vec![], e.clone())], res(t, e), B::Opt("ok_or_else")),
+                    "is_some" => (vec![], Ty::Bool, B::Opt("is_some")),
+                    "is_none" => (vec![], Ty::Bool, B::Opt("is_none")),
+                    _ => return None,
+                }
+            }
+            (Ty::Named(n, a), m) if n == "Result" && a.len() == 2 => {
+                let (t, e) = (a[0].clone(), a[1].clone());
+                let res = |t: Ty, e: Ty| Ty::Named("Result".into(), vec![t, e]);
+                let u = self.fresh();
+                match m {
+                    "map" => (vec![f(vec![t], u.clone())], res(u, e), B::Opt("map")),
+                    "and_then" => (vec![f(vec![t], res(u.clone(), e.clone()))], res(u, e), B::Opt("and_then")),
+                    "map_err" => (vec![f(vec![e], u.clone())], res(t, u), B::Opt("map_err")),
+                    "unwrap_or" => (vec![t.clone()], t, B::Opt("unwrap_or")),
+                    "unwrap_or_else" => (vec![f(vec![e], t.clone())], t, B::Opt("unwrap_or_else")),
+                    "ok" => (vec![], Ty::Named("Option".into(), vec![t]), B::Opt("ok")),
+                    "is_ok" => (vec![], Ty::Bool, B::Opt("is_ok")),
+                    "is_err" => (vec![], Ty::Bool, B::Opt("is_err")),
+                    _ => return None,
+                }
+            }
+            // (whether it is a Result's or an Option's is decided by `f`'s result, after the arguments)
+            (Ty::Array(t), "try_map") => {
+                let r = self.fresh();
+                (vec![f(vec![(**t).clone()], r)], self.fresh(), B::TryMap(true))
+            }
             _ => return None,
         })
     }
@@ -1805,7 +2122,7 @@ impl EffWalk<'_> {
     fn expr(&mut self, e: &Expr) -> BTreeSet<String> {
         let mut out = BTreeSet::new();
         match &e.kind {
-            EK::Await(x) | EK::Async(x) => out.extend(self.expr(x)),
+            EK::Await(x) | EK::Async(x) | EK::Try(x) => out.extend(self.expr(x)),
             EK::Perform(_, v, args) => {
                 if let Some(en) = self.info.variant_of.get(v) {
                     out.insert(en.clone());
@@ -2024,7 +2341,7 @@ pub fn subexprs(e: &Expr) -> Vec<&Expr> {
     let mut v: Vec<&Expr> = vec![];
     match &e.kind {
         EK::Lit(_) | EK::Var(_) | EK::Path(..) | EK::Break | EK::Continue => {}
-        EK::Await(x) | EK::Async(x) => v.push(x),
+        EK::Await(x) | EK::Async(x) | EK::Try(x) => v.push(x),
         EK::Call(f, args) => {
             v.push(f);
             v.extend(args);

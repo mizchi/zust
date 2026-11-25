@@ -885,11 +885,16 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
             // (not a tt-muncher's marker, `closures!(@closure ..)` in a body with `let closure`: the marker is matched
             // against a rule's `@closure`, as rustc matches it by name. A binding's `@`, `whole @ x`, has a name
             // before it: its `x` is the body's own)
+            // (nor a field or method of the name, `vector.len()` / `js.len` beside `let len`. A field's name in a struct
+            // literal, `WasmSlice { len: n }`, is renamed as well: the parser drops the suffix of field names)
             Pt::Tok(TokenTree::Ident(i))
                 if lets.iter().any(|l| *i == l.as_str())
                     && !(k > 0
                         && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '@')
-                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Ident(_)) | Pt::Var(..)))) =>
+                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Ident(_)) | Pt::Var(..))))
+                    && !(k > 0
+                        && matches!(&body[k - 1], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.')
+                        && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Punct(q)) if q.as_char() == '.'))) =>
             {
                 out.push_str(&i.to_string());
                 out.push_str("__mh ");
@@ -903,7 +908,47 @@ fn transcribe(body: &[Pt], binds: &Binds, out: &mut String, lets: &[String]) -> 
                     Delimiter::None => ("", ""),
                 };
                 out.push_str(o);
-                transcribe(inner, binds, out, if is_mod_body(body, k) { &[] } else { lets })?;
+                // (a module's body in the expansion is no block: its names are items, not the body's `let`s)
+                let inner_lets: &[String] = if is_mod_body(body, k) { &[] } else { lets };
+                // (a struct literal's shorthand fields of the body's own names, `MutSlice { contents, js }`: the field
+                // keeps its name, the value is the renamed local, `contents: contents__mh`. A type's name before the
+                // braces, and a `,` among them: a block does not have that shape. Nor an item's body, `enum E { value,
+                // other }`: its names are variants)
+                let shorthand = *d == Delimiter::Brace
+                    && k > 0
+                    && matches!(&body[k - 1], Pt::Tok(TokenTree::Ident(n)) if n.to_string().starts_with(|c: char| c.is_ascii_uppercase()))
+                    && !(k > 1 && matches!(&body[k - 2], Pt::Tok(TokenTree::Ident(kw)) if matches!(kw.to_string().as_str(), "enum" | "struct" | "union" | "trait" | "impl" | "mod")))
+                    && inner.iter().any(|p| matches!(p, Pt::Tok(TokenTree::Punct(q)) if q.as_char() == ','));
+                if shorthand && !inner_lets.is_empty() {
+                    let mut fixed: Vec<Pt> = Vec::with_capacity(inner.len());
+                    let sep = |p: Option<&Pt>| p.is_none_or(|p| matches!(p, Pt::Tok(TokenTree::Punct(q)) if q.as_char() == ','));
+                    let mut parts: Vec<(usize, String)> = vec![];
+                    for (j, p) in inner.iter().enumerate() {
+                        if let Pt::Tok(TokenTree::Ident(n)) = p {
+                            let n = n.to_string();
+                            if inner_lets.iter().any(|l| *l == n) && (j == 0 || sep(inner.get(j - 1))) && sep(inner.get(j + 1)) {
+                                parts.push((j, n));
+                            }
+                        }
+                    }
+                    if parts.is_empty() {
+                        transcribe(inner, binds, out, inner_lets)?;
+                    } else {
+                        let mut last = 0;
+                        for (j, n) in &parts {
+                            fixed.clear();
+                            fixed.extend_from_slice(&inner[last..*j]);
+                            transcribe(&fixed, binds, out, inner_lets)?;
+                            out.push_str(&format!("{n}: {n}__mh "));
+                            last = j + 1;
+                        }
+                        fixed.clear();
+                        fixed.extend_from_slice(&inner[last..]);
+                        transcribe(&fixed, binds, out, inner_lets)?;
+                    }
+                } else {
+                    transcribe(inner, binds, out, inner_lets)?;
+                }
                 out.push_str(c);
                 out.push(' ');
             }
@@ -1257,12 +1302,31 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
         k -= 1;
         n += 1;
         let t = tk(k);
+        // (a braced const argument inside the head's `<..>`, `impl C<{ m!() * 3 }> {`: stepped over, back to its `{`)
+        if toks[k].0 == 1 && t == b"}" && angle > 0 {
+            let mut d = 0i32;
+            while k > 0 {
+                if toks[k].0 == 1 && tk(k) == b"}" {
+                    d += 1;
+                } else if toks[k].0 == 1 && tk(k) == b"{" {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                k -= 1;
+            }
+            continue;
+        }
         if toks[k].0 == 1 && (t == b";" || t == b"{" || t == b"}") {
             return false;
         }
         // (`extern "C" { .. }`: foreign items. `extern "C" fn f() {` meets `fn` first, going back)
-        if toks[k].0 == 0 && (t == b"mod" || t == b"impl" || t == b"trait" || t == b"extern") {
-            return true;
+        // (an `impl` that starts an item: not `impl Trait` in a type, `fn f() -> impl Display { m!() * 3 }`)
+        let impl_head = || k == 0 || (toks[k - 1].0 == 1 && matches!(tk(k - 1), b";" | b"{" | b"}" | b"]")) || (toks[k - 1].0 == 0 && matches!(tk(k - 1), b"unsafe" | b"default"));
+        // (a brace inside the head's `<..>` is a const argument, an expression: `impl S<{ m!() * 3 }> {}`)
+        if toks[k].0 == 0 && (t == b"mod" || (t == b"impl" && impl_head()) || t == b"trait" || t == b"extern") {
+            return angle >= 0;
         }
         if toks[k].0 == 0 && (t == b"fn" || t == b"struct" || t == b"enum" || t == b"union" || t == b"let") {
             return false;
@@ -2327,7 +2391,37 @@ fn find_calls(
             let inner = if r.start <= r.end && r.end <= text.len() { &text[r.start..r.end] } else { "" };
             if inner.is_empty() || macros.keys().any(|m| inner.contains(m.as_str())) {
                 let brace = g.delimiter() == proc_macro2::Delimiter::Brace;
-                let module = brace && i >= 2 && matches!(&toks[i - 2], TokenTree::Ident(m) if m == "mod");
+                // (a place of items, as expand_cfg's item_scope reads it: the body of a `mod`, `impl`, `trait` or
+                // `extern` block, going back over its head to the item before it; not a fn's or a struct's body)
+                let module = brace && {
+                    let mut k = i;
+                    let mut found = false;
+                    // (a brace inside the head's `<..>` is a const argument, an expression: `impl S<{ m!() * 3 }> {}`)
+                    let mut angle = 0i32;
+                    while k > 0 {
+                        k -= 1;
+                        match &toks[k] {
+                            TokenTree::Punct(q) if q.as_char() == '>' && !(k > 0 && matches!(&toks[k - 1], TokenTree::Punct(a) if matches!(a.as_char(), '-' | '=') && a.spacing() == proc_macro2::Spacing::Joint)) => angle += 1,
+                            TokenTree::Punct(q) if q.as_char() == '<' => angle -= 1,
+                            TokenTree::Punct(q) if q.as_char() == ';' => break,
+                            // (a braced const argument inside the head's `<..>`: stepped over)
+                            TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace && angle > 0 => {}
+                            TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace => break,
+                            TokenTree::Ident(w) if matches!(w.to_string().as_str(), "fn" | "struct" | "enum" | "union" | "let") => break,
+                            // (an `impl` that starts an item, as item_scope: not `-> impl Display`)
+                            TokenTree::Ident(w) if w == "impl" && !(k == 0
+                                || matches!(&toks[k - 1], TokenTree::Punct(q) if q.as_char() == ';')
+                                || matches!(&toks[k - 1], TokenTree::Group(pg) if matches!(pg.delimiter(), proc_macro2::Delimiter::Brace | proc_macro2::Delimiter::Bracket))
+                                || matches!(&toks[k - 1], TokenTree::Ident(u) if u == "unsafe" || u == "default")) => {}
+                            TokenTree::Ident(w) if matches!(w.to_string().as_str(), "mod" | "impl" | "trait" | "extern") => {
+                                found = angle >= 0;
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                    found
+                };
                 find_calls(g.stream(), macros, text, depth + 1, brace, module, out)?;
             }
         }

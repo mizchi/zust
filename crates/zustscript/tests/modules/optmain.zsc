@@ -1,0 +1,17 @@
+// `?` after `|>`, in an `else if` condition, and on imported functions
+import { half, check } from "./optlib.zsc";
+fn trimmed(s: String) -> Option<String> { if s.trim().len() == 0 { None } else { Some(s.trim()) } }
+fn shorter(s: String, n: i32) -> Option<String> { if s.len() < n { Some(s) } else { None } }
+fn piped(s: String) -> Option<String> { s |> trimmed()? |> shorter(5) }
+fn pick(a: bool, n: i32) -> Option<i32> {
+  let mut log = 0;
+  if a { log = 1; } else if half(n)? > 2 { log = 2; } else { log = 3; }
+  Some(log)
+}
+export fn run() -> String {
+  let a = [half(4), half(3)].map((o) => o.unwrap_or(-1));
+  let b = check(-1).is_err();
+  let c = [piped("  hi "), piped("   "), piped("too long")].map((o) => o.unwrap_or("-")).join(",");
+  let d = [pick(true, 3), pick(false, 3), pick(false, 8), pick(false, 2)].map((o) => o.unwrap_or(-1));
+  `${a[0]} ${a[1]} ${b} ${c} ${d[0]} ${d[1]} ${d[2]} ${d[3]}`
+}
