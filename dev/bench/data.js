@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795628272167,
+  "lastUpdate": 1795629059212,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -55967,6 +55967,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 37.871,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "6c36b05619ef47653c33b0a81631635eacc314a3",
+          "message": "W1 of #38: wasm-bindgen 0.2.130 type-checks through convert/ (#139)\n\nwasm-bindgen 0.2.130, built for wasm32 with zurgo, now type-checks through nullable.rs, rt/, closure.rs and all of convert/, and stops at externref.rs:130 (\"expected a function\"); it stopped at nullable.rs:256 before.\n\n- Names through chains of glob re-exports (main's resolver since #147), `__rt`, const generic parameters in modules.\n- Items in bodies: qualified fns, `unsafe impl` / `unsafe trait`, and the items of a one-line anonymous const a macro writes, with its consts, statics and types kept inside; doc comments move with an item, and a moved item's syntax error is at its own line.\n- Impls and traits: inherent impls for disjoint instances, numbers' TryFrom / From, E0119 for std's blanket impls, each impl's own associated types, overloads told apart by bounds, arguments and qualified self types, impls for references and trait objects, blanket by-value methods.\n- Calls and operators: qualified paths on references and associated types, operators' impls for references, a generic method's parameter from a match's arms.\n- Macros: `let` hygiene in field names and struct shorthand.\n- Prelude: Vec::from_raw_parts, String::from_utf8_unchecked, char::from_u32_unchecked.\n- #128's supertrait and associated type bound checks skip impls with a where clause on another type (wasm-bindgen's `impl<T> IntoWasmAbi for Vec<T> where Box<[T]>: ..`).\n- srcmap's two token loops pass the tokens they do not look at with one test (\"crates no-op\" KPI).\n\nTests: cargo test --release --workspace 679 passed; tests/ui 0 regressions; every KPI within +1%. Known limits are in TODO.md (W1 of #38).\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01JroQ9hDiRLf4kwKxcyPQ7u",
+          "timestamp": "2026-11-26T02:45:52+09:00",
+          "tree_id": "7281f876a22eb8dc7df756ede4a40ec0b4f387eb",
+          "url": "https://github.com/mizchi/zust/commit/6c36b05619ef47653c33b0a81631635eacc314a3"
+        },
+        "date": 1795629058589,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 132.88,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.909,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 22.036,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 52.015,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 22.156,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 132.645,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 798.336,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 571.372,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.86,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 73.375,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 234.003,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.367,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.552,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 629.545,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3930.7,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 63.413,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 97.841,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 38.015,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 67.263,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 77.867,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 176.659,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 62.302,
             "unit": "ms"
           }
         ]
