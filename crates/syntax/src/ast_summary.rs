@@ -2275,7 +2275,11 @@ fn const_local_borrow_err(item: &Item) -> Option<String> {
         _ => return None,
     };
     // (the initializer's own block, or one in it whose value it uses: `mem::transmute({ .. { let s = [0; 10]; &s } })`)
-    let (line, name) = block_borrowing_own_local(e, 0)?;
+    let (line, name, inited) = block_borrowing_own_local(e, 0)?;
+    // (a local with no value (`let x; &x`): the borrow of what is not initialized, E0381 there)
+    if !inited {
+        return Some(format!("\u{3}{line}\u{3}used binding `{name}` isn't initialized (E0381)"));
+    }
     // (of a raw pointer's type (`const FOO: *const u32 = { let x = 42; &x };`): no borrow check error, as a pointer
     // has no lifetime, but rustc's evaluation of the constant finds the pointer dangling, at the item)
     if matches!(ty, Some(PTy::Ptr(..))) {
@@ -2284,8 +2288,9 @@ fn const_local_borrow_err(item: &Item) -> Option<String> {
     Some(format!("\u{3}{line}\u{3}`{name}` does not live long enough (borrowed value must outlive the {what}) (E0597)"))
 }
 
-/// A block in e (not in a closure's body) whose tail borrows one of its own locals: that local's line and name
-fn block_borrowing_own_local(e: &Expr, d: u32) -> Option<(u32, String)> {
+/// A block in e (not in a closure's body) whose tail borrows one of its own locals: that local's line and name, and
+/// whether its `let` gives it a value
+fn block_borrowing_own_local(e: &Expr, d: u32) -> Option<(u32, String, bool)> {
     if d > 32 {
         return None;
     }
@@ -2310,8 +2315,9 @@ fn block_borrowing_own_local(e: &Expr, d: u32) -> Option<(u32, String)> {
     }
 }
 
-/// The block's tail borrows one of its own locals (`{ let p = 3; &p }`, `&p.0` of a local tuple): its line and name
-fn tail_borrows_own_local(b: &Block) -> Option<(u32, String)> {
+/// The block's tail borrows one of its own locals (`{ let p = 3; &p }`, `&p.0` of a local tuple): its line and name,
+/// and whether its `let` gives it a value
+fn tail_borrows_own_local(b: &Block) -> Option<(u32, String, bool)> {
     let Some(Stmt::Expr(tail, false)) = b.stmts.last() else { return None };
     let mut x = tail;
     while let Expr::Paren(i) = x {
@@ -2361,7 +2367,7 @@ fn tail_borrows_own_local(b: &Block) -> Option<(u32, String)> {
     if p.pos.line == 0 {
         return None;
     }
-    Some((p.pos.line, seg.name.clone()))
+    Some((p.pos.line, seg.name.clone(), init.is_some()))
 }
 
 /// 1 つのアイテムの要約 (front.rs の summarize)

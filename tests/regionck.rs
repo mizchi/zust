@@ -4676,6 +4676,8 @@ fn part32_const_nested_block_borrow() {
     // block: E0597 (1), as in rustc 1.97; a block whose value copies its local out is not (2, 3))
     // (of a raw pointer's type, a borrow of the block's own local is no E0597 but a dangling pointer, at the item)
     errors_at("const FOO: *const u32 = { let x = 42; &x };\nfn main() {}\n", &[(1, "encountered dangling pointer")], "dp");
+    // (a local with no value: E0381 at the borrow, whatever the const's type (consts/issue-78655.rs))
+    errors_at("const FOO: *const u32 = {\n    let x;\n    &x\n};\nfn main() {}\n", &[(3, "E0381")], "ui");
     errors_at(r#"const A: &'static [i32; 3] = unsafe { std::mem::transmute({ let _ = 1; { let s = [0i32; 3]; &s } }) };
 const B: usize = { let v = [1, 2]; v.len() };
 const C: &'static i32 = &{ let q = 5; q };

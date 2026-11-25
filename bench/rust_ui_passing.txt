@@ -821,6 +821,7 @@ compile-fail	borrowck/borrowck-escaping-closure-error-2.rs
 run-pass	borrowck/borrowck-field-sensitivity-rpass.rs
 compile-fail	borrowck/borrowck-field-sensitivity.rs
 run-pass	borrowck/borrowck-fixed-length-vecs.rs
+compile-fail	borrowck/borrowck-for-loop-correct-cmt-for-pattern.rs
 compile-fail	borrowck/borrowck-for-loop-head-linkage.rs
 compile-fail	borrowck/borrowck-for-loop-uninitialized-binding.rs
 run-pass	borrowck/borrowck-freeze-frozen-mut.rs
@@ -965,6 +966,7 @@ compile-fail	borrowck/clone-on-ref.rs
 compile-fail	borrowck/clone-span-on-try-operator.rs
 compile-fail	borrowck/cloning-in-async-block-121547.rs
 compile-fail	borrowck/closure-borrow-conflict-11192.rs
+compile-fail	borrowck/const-fn-ptr-borrow-annotation.rs
 compile-fail	borrowck/copy-suggestion-region-vid.rs
 compile-fail	borrowck/dbg-issue-120327.rs
 compile-fail	borrowck/deref-and-mut-borrow-conflict.rs
@@ -1291,6 +1293,7 @@ run-pass	closures/2229_closure_analysis/match/issue-87097.rs
 run-pass	closures/2229_closure_analysis/match/issue-87426.rs
 run-pass	closures/2229_closure_analysis/match/issue-87988.rs
 run-pass	closures/2229_closure_analysis/match/match-edge-cases_1.rs
+compile-fail	closures/2229_closure_analysis/match/match-edge-cases_2.rs
 compile-fail	closures/2229_closure_analysis/match/pattern-matching-should-fail.rs
 check-pass	closures/2229_closure_analysis/migrations/issue-86753.rs
 check-pass	closures/2229_closure_analysis/migrations/issue-90024-adt-correct-subst.rs
@@ -1919,6 +1922,7 @@ check-pass	consts/control-flow/exhaustive-c-like-enum-match.rs
 run-pass	consts/control-flow/short-circuit-let.rs
 run-pass	consts/control-flow/short-circuit.rs
 check-pass	consts/control-flow/single_variant_match_ice.rs
+compile-fail	consts/dangling_raw_ptr.rs
 run-pass	consts/deref_in_pattern.rs
 compile-fail	consts/do-not-ice-on-field-access-of-err-type.rs
 compile-fail	consts/dont-ctfe-unsized-initializer.rs
@@ -3648,6 +3652,8 @@ compile-fail	let-else/accidental-if.rs
 run-pass	let-else/const-fn.rs
 check-pass	let-else/detect-invisible-delimiter.rs
 compile-fail	let-else/issue-94176.rs
+compile-fail	let-else/let-else-binding-explicit-mut-annotated.rs
+compile-fail	let-else/let-else-binding-explicit-mut-borrow.rs
 check-pass	let-else/let-else-binding-explicit-mut-pass.rs
 compile-fail	let-else/let-else-binding-explicit-mut.rs
 compile-fail	let-else/let-else-binding-immutable.rs
