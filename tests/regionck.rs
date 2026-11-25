@@ -4456,3 +4456,21 @@ struct T<'a> { v: &'a (dyn MyAny + 'a) }
 fn main() { let x = 1; let s = S { v: &x }; let _ = s.v; }
 "#, &[(4, r#"lifetime bound not satisfied"#)], "any4");
 }
+
+#[test]
+fn part30_review() {
+    // (a bound on a type alias implies nothing of the parts written in it, which what it stands for may not have:
+    // `Erased<'a>: 'static` with `type Erased<'a> = ();` is no `'a: 'static` (2), where `W<'a>: 'static` of a struct
+    // is, and its caller must meet it (5). Lines as rustc 1.97's)
+    errors_at(r#"type Erased<'a> = ();
+fn f<'a>(x: &'a i32) -> &'static i32 where Erased<'a>: 'static { x }
+struct W<'a>(&'a i32);
+fn g<'a>(x: &'a i32) -> &'static i32 where W<'a>: 'static { x }
+fn main() { let v = 1; let _ = (f(&v), g(&v)); }
+"#, &[(2, "lifetime may not live long enough"), (5, "does not live long enough")], "a1");
+    // (an `unsafe fn` with `self: Box<Self>` called on a temporary Box outside `unsafe` is E0133; inside it is not)
+    errors_at(r#"struct S;
+impl S { unsafe fn f(self: Box<Self>) -> i32 { 1 } }
+fn main() { let a = unsafe { Box::new(S).f() }; let b = Box::new(S).f(); println!("{} {}", a, b); }
+"#, &[(3, "call to unsafe function")], "u1");
+}

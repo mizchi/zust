@@ -1787,7 +1787,7 @@ impl Cx<'_> {
                             continue;
                         }
                         let Ok(t) = self.parse_ty(subj) else { continue };
-                        let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0 };
+                        let mut sl = crate::regions::Slots { lts: self.rg.lt_names.clone(), tparams: vec![], self_slots: &[], any: false, in_fn: 0, derived: None };
                         let mut codes = vec![];
                         sl.slots(subj, false, &mut codes);
                         let lts = self.rg.lts.clone();

@@ -1321,7 +1321,8 @@ impl Cx<'_> {
                         None => self.mark_moved(recv),
                     }
                     // (the receiver is the Box: of its type also where p0 is what a temporary Box points to,
-                    // `Box::new(S).f()`)
+                    // `Box::new(S).f()`; an `unsafe fn` is so here too, E0133 outside `unsafe`)
+                    self.check_unsafe_call(id, msp.start)?;
                     let r = self.call_fn(id, Some((bv, Ty::Box(bi))), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
                     // (the call takes the receiver after its arguments: what the holder holds ends there, not
                     // before them (`D(&x).consume({ x = 2; })` is E0506))

@@ -469,6 +469,9 @@ pub struct Slots<'a> {
     pub any: bool,
     /// Inside a fn pointer's type: its elided regions and the lifetimes it binds are its own (R_BOUND)
     pub in_fn: u32,
+    /// A fn signature's bounds: what a bound on a type implies of its parts goes here (RSigSyn::derived); None for
+    /// the others, which keep the mark only
+    pub derived: Option<(Vec<(String, u8, u8)>, Vec<(String, String, u8)>)>,
 }
 
 impl<'a> Slots<'a> {
@@ -482,7 +485,7 @@ impl<'a> Slots<'a> {
                 GParam::Const(..) => {}
             }
         }
-        Slots { any: !lts.is_empty(), lts, tparams, self_slots: outer.map(|o| o.self_slots.as_slice()).unwrap_or(&[]), in_fn: 0 }
+        Slots { any: !lts.is_empty(), lts, tparams, self_slots: outer.map(|o| o.self_slots.as_slice()).unwrap_or(&[]), in_fn: 0, derived: None }
     }
 
     /// The outlives relations the well-formedness of the self types of projections in t implies
@@ -653,21 +656,24 @@ impl<'a> Slots<'a> {
             let plain = matches!(lhs, PTy::Path(None, p) if matches!(p.segs.as_slice(), [s] if s.args.is_empty() || s.name.starts_with('\'')));
             if !plain {
                 let (mut lts, mut tys) = (vec![], vec![]);
-                ty_parts(lhs, &mut lts, &mut tys);
+                if me.derived.is_some() {
+                    ty_parts(lhs, "", &mut lts, &mut tys);
+                }
                 for b in bs {
                     if let Bound::Lifetime(l) = b {
                         let c = me.code(Some(l));
                         ty_outlives.push(("#?".to_string(), c));
-                        for a in &lts {
+                        let mut found = vec![];
+                        for (paths, a) in &lts {
                             let a = me.code(Some(a));
-                            if a < R_STATIC && c <= R_STATIC && a != c && !outlives.contains(&(a, c)) {
-                                outlives.push((a, c));
+                            if a < R_STATIC && c <= R_STATIC && a != c {
+                                found.push((paths.clone(), a, c));
                             }
                         }
-                        for t in tys.iter().filter(|t| me.tparams.contains(&t.as_str())) {
-                            if !ty_outlives.contains(&(t.clone(), c)) {
-                                ty_outlives.push((t.clone(), c));
-                            }
+                        let found_ty: Vec<(String, String, u8)> = tys.iter().filter(|t| me.tparams.contains(&t.1.as_str())).map(|(paths, t)| (paths.clone(), t.clone(), c)).collect();
+                        if let Some((d, dt)) = me.derived.as_mut() {
+                            d.extend(found);
+                            dt.extend(found_ty);
                         }
                     }
                 }
@@ -713,40 +719,43 @@ impl<'a> Slots<'a> {
 }
 
 /// The lifetimes and the plain type names (a parameter's, maybe) that a type is made of, for the outlives its bound
-/// implies. Not through a projection (`<T as Tr>::X: 'b` says nothing of T) or a trait object's bounds
-fn ty_parts(t: &PTy, lts: &mut Vec<String>, tys: &mut Vec<String>) {
+/// implies, each with the names of the paths it is in (comma-separated: one of them may be a type alias, which the
+/// program knows). Not through a projection (`<T as Tr>::X: 'b` says nothing of T) or a trait object's bounds
+fn ty_parts(t: &PTy, paths: &str, lts: &mut Vec<(String, String)>, tys: &mut Vec<(String, String)>) {
     match t {
         PTy::Path(None, p) => {
             if let [s] = p.segs.as_slice() {
                 if s.args.is_empty() && s.fn_args.is_none() && !s.name.starts_with('\'') {
-                    tys.push(s.name.clone());
+                    tys.push((paths.to_string(), s.name.clone()));
                 }
             }
+            let Some(last) = p.segs.last() else { return };
+            let inner = if paths.is_empty() { last.name.clone() } else { format!("{paths},{}", last.name) };
             for s in &p.segs {
                 for a in &s.args {
                     match a {
-                        GArg::Lifetime(l) if l != "'_" && l != "'static" => lts.push(l.clone()),
-                        GArg::Ty(t) | GArg::Bind(_, t) => ty_parts(t, lts, tys),
+                        GArg::Lifetime(l) if l != "'_" && l != "'static" => lts.push((inner.clone(), l.clone())),
+                        GArg::Ty(t) | GArg::Bind(_, t) => ty_parts(t, &inner, lts, tys),
                         _ => {}
                     }
                 }
                 if let Some((ps, r)) = &s.fn_args {
                     for t in ps.iter().chain(r.as_deref()) {
-                        ty_parts(t, lts, tys);
+                        ty_parts(t, &inner, lts, tys);
                     }
                 }
             }
         }
         PTy::Ref(l, _, t) => {
             if let Some(l) = l.as_ref().filter(|l| *l != "'_" && *l != "'static") {
-                lts.push(l.clone());
+                lts.push((paths.to_string(), l.clone()));
             }
-            ty_parts(t, lts, tys);
+            ty_parts(t, paths, lts, tys);
         }
-        PTy::Ptr(_, t) | PTy::Slice(t) | PTy::Array(t, _) => ty_parts(t, lts, tys),
+        PTy::Ptr(_, t) | PTy::Slice(t) | PTy::Array(t, _) => ty_parts(t, paths, lts, tys),
         PTy::Tuple(ts) => {
             for t in ts {
-                ty_parts(t, lts, tys);
+                ty_parts(t, paths, lts, tys);
             }
         }
         _ => {}
@@ -776,7 +785,9 @@ pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str])
     }
     slots.push(v);
     let (mut outlives, mut ty_outlives) = (outer.map(|o| o.outlives.clone()).unwrap_or_default(), outer.map(|o| o.ty_outlives.clone()).unwrap_or_default());
+    s.derived = Some((vec![], vec![]));
     s.bounds(&sig.generics, &mut outlives, &mut ty_outlives);
+    let (derived, derived_ty) = s.derived.take().unwrap_or_default();
     // (a parameter's type that is a projection (`<&'a &'b () as Tr>::Type`) is normalized away, and with it what its
     // well-formedness implies ('b: 'a): kept as declared bounds)
     for (_, t) in &sig.params {
@@ -784,12 +795,12 @@ pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str])
     }
     // (or a self type that writes 'static: `impl A<&'static u8>`)
     let self_static = outer.is_some_and(|o| o.self_slots.contains(&R_STATIC));
-    if !s.any && outlives.is_empty() && ty_outlives.is_empty() && !self_static {
+    if !s.any && outlives.is_empty() && ty_outlives.is_empty() && !self_static && derived.is_empty() && derived_ty.is_empty() {
         return None;
     }
     let self_slots = outer.map(|o| o.self_slots.clone()).filter(|v| v.iter().any(|&c| c <= R_STATIC)).unwrap_or_default();
     let outer = outer.map_or(0, |o| o.lts.len().min(u8::MAX as usize) as u8);
-    Some(Box::new(RSigSyn { lts: s.lts, slots, outlives, ty_outlives, outer, self_slots }))
+    Some(Box::new(RSigSyn { lts: s.lts, slots, outlives, ty_outlives, outer, self_slots, derived, derived_ty }))
 }
 
 /// The regions of a struct / enum definition with fields of types tys (all variants' in order)

@@ -335,6 +335,12 @@ pub struct RSigSyn {
     /// An impl's method: the region slots of the impl's self type (it is well formed: implied in the body, required
     /// of a call)
     pub self_slots: Vec<u8>,
+    /// The outlives that a bound on a type implies of its parts (`D<'a>: 'b`: 'a: 'b), with the names of the paths
+    /// the part is in (`D`, comma-separated): the program adds them where none of those is a type alias, whose
+    /// lifetimes may not be in what it stands for (`type Erased<'a> = ();`)
+    pub derived: Vec<(String, u8, u8)>,
+    /// The same for type parameters (`E<'a, T>: 'b`: T: 'b): (paths, parameter, code)
+    pub derived_ty: Vec<(String, String, u8)>,
 }
 
 /// The regions of a struct / enum definition
