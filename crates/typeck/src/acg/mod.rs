@@ -66,6 +66,22 @@ pub type R<T> = Result<T, String>;
 
 /// ポインタ型 (x86-64 前提)
 pub const PTR: Type = types::I64;
+/// A vtable entry that is a number, not a function (the concrete type's size and alignment, after the drop entry):
+/// `VT_LIT | n` with n at most VT_LIT_MAX (function ids stay far below VT_LIT; `u32::MAX`, the null entry, is above
+/// every literal)
+pub const VT_LIT: u32 = 0xC000_0000;
+pub const VT_LIT_MAX: u32 = 0x3FFF_FFFE;
+/// The second word of the pair of a struct with an unsized tail made by a coercion: the tail's length, or the
+/// vtable of the tail's type (`S<T>` to `S<dyn Tr>`)
+#[derive(Clone, Copy)]
+pub(crate) enum TailMeta {
+    Len(i64),
+    Dyn(Ty, &'static String),
+}
+
+pub fn vt_lit(f: u32) -> Option<u64> {
+    (f != u32::MAX && f >= VT_LIT).then_some((f & !VT_LIT) as u64)
+}
 
 /// エラーの場所 (今は使わない)
 /// ソース上の位置 (アイテムの中の行・桁)。分からないところは SP (0 行目)
@@ -485,6 +501,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
         closure_bound: None,
         closure_prelude: false,
         closure_fn_only: false,
+        lub_fnptr: 0,
         hr_lost: vec![],
         clo_ann: vec![],
         clo_ret_param: vec![],
@@ -624,7 +641,9 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
             || prog.use_names.contains(n);
         !n.is_empty() && n.chars().all(|c| c.is_alphanumeric() || c == '_') && !e.contains("(unsupported path)") && !item
     };
-    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free) && !undeclared(e)) {
+    // (nor what the trait solver proved of a type with no placeholder in it: crate::traits::SOLVED_NO)
+    let solved = |e: &str| e.contains(crate::traits::SOLVED_NO) || e.contains(&crate::traits::SOLVED_NO.replace("E0277", "E0271"));
+    if placeholder && r.as_ref().is_err_and(|e| !borrow_error(e) && !placeholder_mismatch(e, &bound_eqs, &free) && !undeclared(e) && !solved(e)) {
         if regionck::debug() {
             eprintln!("regionck: placeholder instance not checked: {}", r.as_ref().err().map(|e| e.as_str()).unwrap_or(""));
         }
@@ -633,6 +652,7 @@ fn compile_once(prog: &Program, insts: &Mutex<Insts>, id: u32, f: &ItemFn, line_
     }
     // (a placeholder's type by its parameter's name: `T`, not `T#`)
     let r = if placeholder { r.map_err(|e| e.replace("#`", "`").replace("#>", ">").replace("#,", ",").replace("#:", ":")) } else { r };
+    let r = r.map_err(|e| if solved(&e) { e.replace(crate::traits::SOLVED_NO, "(E0277)").replace(&crate::traits::SOLVED_NO.replace("E0277", "E0271"), "(E0271)") } else { e });
     r?;
     cx.bk_check()?;
     let rerun = cx.rg.rerun && !force_rg;
@@ -1132,6 +1152,9 @@ pub struct Cx<'p> {
     pub closure_prelude: bool,
     /// The closure being lowered is passed where a bound wants `Fn`: it may not mutate what it captures
     pub closure_fn_only: bool,
+    /// >0 while lowering match arms / array or vec! elements whose fn-pointer type came from closures_lub: a closure
+    /// local there is coerced to its fn pointer (nowhere else: calling a closure local must not become a fn pointer)
+    pub lub_fnptr: u32,
     /// Closures made where nothing was expected (their kind, signature: from the body), by their definition: the
     /// parameters with no type written that are references (one region each, not higher-ranked)
     pub hr_lost: Vec<(u32, Vec<usize>)>,
@@ -2445,7 +2468,7 @@ impl Cx<'_> {
                             .lets
                             .get(&crate::ast_infer::stmt_key(st))
                             .copied()
-                            .filter(|t| !matches!(t, Ty::Slice(_) | Ty::Str | Ty::Dyn(_))),
+                            .filter(|t| !t.is_unsized()),
                     };
                     // (assert_eq! の展開: 右の値の型は左と同じ)
                     let hintable = |e: &Expr| {
