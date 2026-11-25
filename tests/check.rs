@@ -2523,6 +2523,8 @@ fn macro_fragments_and_unit_patterns() {
         "known fragments, and the transcriber's text"
     );
     assert_eq!(first("fn main() {\n    macro_rules! m {\n        ($x:guard) => {};\n    }\n}\n"), e(3, "`guard` fragments in macro are unstable (E0658)"), "a gated fragment");
+    assert_eq!(first("pub mod break {\n}\nfn main() {}\n"), e(1, "expected identifier, found keyword `break`"), "a keyword for a module's name");
+    assert_eq!(first("mod breaks {\n    pub fn f() {}\n}\nfn main() { breaks::f(); }\n"), None, "a name a keyword starts");
     assert_eq!(
         first("enum E {\n    T(i32),\n    S { s: i32 },\n}\nfn f(e: E) -> u8 {\n    match e {\n        E::T => 0,\n        _ => 1,\n    }\n}\nfn main() {}\n"),
         e(7, "expected unit struct, unit variant or constant, found tuple variant `E::T` (E0533)"),

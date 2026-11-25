@@ -5728,6 +5728,7 @@ compile-fail	parser/keyword-unsafe-as-identifier.rs
 compile-fail	parser/keyword-use-as-identifier.rs
 compile-fail	parser/keyword-where-as-identifier.rs
 compile-fail	parser/keyword-while-as-identifier.rs
+compile-fail	parser/keyword.rs
 compile-fail	parser/keywords-followed-by-double-colon.rs
 compile-fail	parser/kw-in-trait-bounds.rs
 compile-fail	parser/label-after-block-like.rs

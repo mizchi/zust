@@ -7379,6 +7379,17 @@ fn first_cstr_in_extern(src: &str, items: &[SrcItem], (blocks, defs): (bool, boo
     None
 }
 
+/// A reserved word, which no item may be named (`mod break`, `struct for`)
+fn reserved_word(w: &[u8]) -> bool {
+    matches!(
+        w,
+        b"as" | b"break" | b"const" | b"continue" | b"crate" | b"else" | b"enum" | b"extern" | b"false" | b"fn" | b"for" | b"if" | b"impl" | b"in"
+            | b"let" | b"loop" | b"match" | b"mod" | b"move" | b"mut" | b"pub" | b"ref" | b"return" | b"self" | b"Self" | b"static" | b"struct"
+            | b"super" | b"trait" | b"true" | b"type" | b"unsafe" | b"use" | b"where" | b"while" | b"abstract" | b"become" | b"box" | b"do"
+            | b"final" | b"macro" | b"override" | b"priv" | b"typeof" | b"unsized" | b"virtual" | b"yield"
+    )
+}
+
 fn duplicate_name(src: &str, src_toks: Option<&[(u8, usize, usize)]>, externs: &[(usize, String)], injected: bool) -> Option<String> {
     // (a few scans: a program without these has its other duplicates found when its items are collected)
     // (2015's injected `std` meets an item or import of that name: `struct std;`, `use x as std;`, `enum std {`)
@@ -7500,6 +7511,10 @@ fn duplicate_name(src: &str, src_toks: Option<&[(u8, usize, usize)]>, externs: &
                 // (an inline module; a `mod m;` file may be configured away by its own `#![cfg(..)]`)
                 // (nor one whose body starts with an inner `#![cfg(..)]`, nor an empty one over several lines: a file module
                 // the loader brought in, configured away by its own `#![cfg(..)]`)
+                // (`mod break {`: a keyword where the module's name goes, rustc's parse error)
+                b"mod" if is_id(k + 1) && reserved_word(t(k + 1)) => {
+                    return Some(format!("{}:{}: expected identifier, found keyword `{}`", line_of(k + 1), toks[k + 1].1 - b[..toks[k + 1].1].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1) + 1, String::from_utf8_lossy(t(k + 1))));
+                }
                 b"mod" if is_id(k + 1)
                     && t(k + 2) == b"{"
                     && !(t(k + 3) == b"#" && t(k + 4) == b"!" && t(k + 5) == b"[" && t(k + 6).starts_with(b"cfg"))
