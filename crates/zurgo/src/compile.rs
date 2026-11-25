@@ -207,8 +207,10 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
             // (two proc-macro packages of one library name: one stub cannot stand for both)
             if let Some(&other) = lib_of.get(&lib.name) {
                 return Err(format!(
-                    "two packages give the library `{}`: `{} v{}` and `{} v{}`. Two versions of one crate are not supported yet (mizchi/zust#28)",
-                    lib.name, g.pkgs[other].m.name, g.pkgs[other].m.version, pk.name, pk.version
+                    "two packages give the library `{}`: `{}` and `{}`. Two versions of one crate are not supported yet (mizchi/zust#28)",
+                    lib.name,
+                    g.pkgs[other].display(),
+                    g.pkgs[p].display()
                 ));
             }
             let src = std::fs::read_to_string(&lib.path).map_err(|e| format!("{}: {e}", lib.path.display()))?;
@@ -259,8 +261,10 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
         let Some(lib) = &pk.m.lib else { continue };
         if let Some(&other) = lib_of.get(&lib.name) {
             return Err(format!(
-                "two packages give the library `{}`: `{} v{}` and `{} v{}`. Two versions of one crate are not supported yet (mizchi/zust#28)",
-                lib.name, g.pkgs[other].m.name, g.pkgs[other].m.version, pk.m.name, pk.m.version
+                "two packages give the library `{}`: `{}` and `{}`. Two versions of one crate are not supported yet (mizchi/zust#28)",
+                lib.name,
+                g.pkgs[other].display(),
+                pk.display()
             ));
         }
         lib_of.insert(lib.name.clone(), n.0);
