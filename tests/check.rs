@@ -3010,6 +3010,17 @@ fn literals_and_comments_a_file_ends_in() {
     assert_eq!(first("fn main() {\n    let s = r##\"abc\"#;\n}\n"), e(2, 13, "unterminated raw string (E0748)"), "a raw string");
     assert_eq!(first("fn main() {\n    let s = b\"abc;\n}\n"), e(2, 13, "unterminated double quote byte string (E0766)"), "a byte string");
     assert_eq!(first("fn main() {\n    /* a /* b */\n}\n"), e(2, 5, "unterminated block comment (E0758)"), "a block comment");
+    // (#181: after the last item, where every item splits; with a non-ASCII character, nested; doc comments, as rustc
+    // names them; and a literal before it, which is the error)
+    assert_eq!(first("fn main() {}\n/*x"), e(2, 1, "unterminated block comment (E0758)"), "a block comment after the last item");
+    assert_eq!(first("fn main() {}\n/*é\n"), e(2, 1, "unterminated block comment (E0758)"), "with a non-ASCII character");
+    assert_eq!(first("fn main() {}\n  /* a /* b */ c\n"), e(2, 3, "unterminated block comment (E0758)"), "nested");
+    assert_eq!(first("fn main() {}\n/** doc\n"), e(2, 1, "unterminated block doc-comment (E0758)"), "a doc comment");
+    assert_eq!(first("/*! inner\n"), e(1, 1, "unterminated block doc-comment (E0758)"), "an inner doc comment");
+    assert_eq!(first("fn main() {\n    /** a\n}\n"), e(2, 5, "unterminated block doc-comment (E0758)"), "a doc comment in a body");
+    assert_eq!(first("fn main() {}\n/*** x\n"), e(2, 1, "unterminated block comment (E0758)"), "`/***` is no doc comment");
+    assert_eq!(first("fn main() {}\nconst S: &str = \"abc /* x\n"), e(2, 17, "unterminated double quote string (E0765)"), "a string before it");
+    assert_eq!(first("fn main() {}\n/* a */ /* b */\n").map(|d| d.2), None, "closed comments after the last item");
     assert_eq!(first("fn main() {\n    let c = '\"'; let l: &'static str = \"}\"; let r = r#\"\"\"#;\n").map(|d| d.2), Some("this file contains an unclosed delimiter".to_string()), "closed literals: the delimiter's error");
 }
 
