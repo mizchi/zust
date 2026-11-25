@@ -4294,6 +4294,26 @@ fn __exr_ilog10<G>(n: u128) -> u32 {
     k
 }
 
+// (the same for u128, and for i128 after its sign is checked)
+fn __exr_isqrt128<G>(n: u128) -> u128 {
+    let mut x = n;
+    let mut r: u128 = 0;
+    let mut b: u128 = 1 << 126;
+    while b > x {
+        b >>= 2;
+    }
+    while b != 0 {
+        if x >= r + b {
+            x -= r + b;
+            r = (r >> 1) + b;
+        } else {
+            r >>= 1;
+        }
+        b >>= 2;
+    }
+    r
+}
+
 fn __exr_isqrt<G>(n: u64) -> u64 {
     let mut x = n;
     let mut r: u64 = 0;

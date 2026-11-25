@@ -795,6 +795,11 @@ impl Cx<'_> {
         if !known.contains(&name.as_str()) {
             return Ok(None);
         }
+        // (the names that exist only for signed or only for unsigned types: on the others they are no built-in
+        // method, checked before the receiver is lowered, so the lookup that follows sees it unlowered)
+        if matches!((name.as_str(), t.signed()), ("saturating_abs" | "saturating_neg", false) | ("next_multiple_of", true)) {
+            return Ok(None);
+        }
         // if the receiver is `&u64` / `&mut u64`, the pointee's value (auto-deref)
         let (a, a_ty) = if matches!(self.peek(&*mc_recv), Some(Ty::Ref(..))) {
             self.expr(&*mc_recv, None)?
@@ -1147,22 +1152,32 @@ impl Cx<'_> {
                 }
             }
             // bit order reversed: swap neighbouring bits, pairs, nibbles, then the bytes
-            "reverse_bits" if t.bits() <= 64 => {
-                let mut x = a;
-                for (sh, m) in [(1, 0x5555_5555_5555_5555u64), (2, 0x3333_3333_3333_3333), (4, 0x0f0f_0f0f_0f0f_0f0f)] {
-                    let mk = self.iconst_t(ct, m as i64);
-                    let shc = self.iconst_t(ct, sh);
-                    let hi = self.b.ins().ushr(x, shc);
-                    let hi = self.b.ins().band(hi, mk);
-                    let lo = self.b.ins().band(x, mk);
-                    let lo = self.b.ins().ishl(lo, shc);
-                    x = self.b.ins().bor(hi, lo);
-                }
-                let x = if t.bits() == 8 { x } else { self.b.ins().bswap(x) };
+            // (128 bits: each 64-bit half reversed, and the halves swapped)
+            "reverse_bits" => {
+                let rev = |this: &mut Self, mut x: Value, ct: Type, bits: u32| -> Value {
+                    for (sh, m) in [(1, 0x5555_5555_5555_5555u64), (2, 0x3333_3333_3333_3333), (4, 0x0f0f_0f0f_0f0f_0f0f)] {
+                        let mk = this.iconst_t(ct, m as i64);
+                        let shc = this.iconst_t(ct, sh);
+                        let hi = this.b.ins().ushr(x, shc);
+                        let hi = this.b.ins().band(hi, mk);
+                        let lo = this.b.ins().band(x, mk);
+                        let lo = this.b.ins().ishl(lo, shc);
+                        x = this.b.ins().bor(hi, lo);
+                    }
+                    if bits == 8 { x } else { this.b.ins().bswap(x) }
+                };
+                let x = if t.bits() == 128 {
+                    let (lo, hi) = self.b.ins().isplit(a);
+                    let (lo, hi) = (rev(self, lo, types::I64, 64), rev(self, hi, types::I64, 64));
+                    self.b.ins().iconcat(hi, lo)
+                } else {
+                    rev(self, a, ct, t.bits())
+                };
                 (Some(x), t)
             }
-            // (`MIN / -1` overflows: (MIN, true) / (0, true); a zero divisor panics as `/` does)
-            "overflowing_div" | "overflowing_rem" | "wrapping_div" | "wrapping_rem" if t.bits() <= 64 => {
+            // (`MIN / -1` overflows: (MIN, true) / (0, true); a zero divisor panics as `/` does. 128 bits divide in
+            // the prelude, as `/` does)
+            "overflowing_div" | "overflowing_rem" | "wrapping_div" | "wrapping_rem" => {
                 let b = arg(self, 0, t)?;
                 let zero = self.b.ins().icmp_imm_u(IntCC::Equal, b, 0);
                 let rem = name.ends_with("rem");
@@ -1179,6 +1194,7 @@ impl Cx<'_> {
                 let one = self.iconst_t(ct, 1);
                 let sb = self.b.ins().select(of, one, b);
                 let v = match (rem, s) {
+                    _ if t.bits() == 128 => self.div128(a, sb, t, rem, SP)?,
                     (false, true) => self.b.ins().sdiv(a, sb),
                     (false, false) => self.b.ins().udiv(a, sb),
                     (true, true) => self.b.ins().srem(a, sb),
@@ -1256,11 +1272,27 @@ impl Cx<'_> {
                 let (v, _) = self.call_named("__exr_ilog10", vec![Ty::Unit], &[(w, Ty::U128)], SP)?;
                 (v, Ty::U32)
             }
-            "isqrt" if t.bits() <= 64 => {
-                let w = if ct == types::I64 { a } else { self.b.ins().uextend(types::I64, a) };
-                let (v, _) = self.call_named("__exr_isqrt", vec![Ty::Unit], &[(w, Ty::U64)], SP)?;
-                let v = v.unwrap();
-                let v = if ct == types::I64 { v } else { self.b.ins().ireduce(ct, v) };
+            // (a negative value panics, as std's does; 128 bits go through the prelude's u128 version)
+            "isqrt" => {
+                if s {
+                    let z = self.int_const(t, 0);
+                    let neg = self.b.ins().icmp(IntCC::SignedLessThan, a, z);
+                    // (at the method's name, as std's #[track_caller] gives it)
+                    let at = match mc {
+                        Expr::MethodCall(_, _, _, _, sp) if sp.at.line != 0 => sp.at,
+                        _ => expr_start(mc),
+                    };
+                    self.msg_panic(neg, "argument of integer square root cannot be negative", at);
+                }
+                let v = if t.bits() == 128 {
+                    let (v, _) = self.call_named("__exr_isqrt128", vec![Ty::Unit], &[(a, Ty::U128)], SP)?;
+                    v.unwrap()
+                } else {
+                    let w = if ct == types::I64 { a } else { self.b.ins().uextend(types::I64, a) };
+                    let (v, _) = self.call_named("__exr_isqrt", vec![Ty::Unit], &[(w, Ty::U64)], SP)?;
+                    let v = v.unwrap();
+                    if ct == types::I64 { v } else { self.b.ins().ireduce(ct, v) }
+                };
                 (Some(v), t)
             }
             "try_into" => {

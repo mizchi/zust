@@ -1614,8 +1614,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has(".into()") {
         need.insert("from");
     }
+    // (it divides a u128, so the 128-bit division with it, also for a u32 receiver)
     if sc.has("ilog10") {
-        need.insert("__exr_ilog10");
+        need.extend(["__exr_ilog10", "__exr_udiv128"]);
     }
     if sc.has("isqrt") {
         need.insert("__exr_isqrt");
@@ -1623,6 +1624,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     // 128 bit 整数: 除算と書式化
     if need.contains("i128") || need.contains("u128") {
         need.extend(["__exr_udiv128", "__exr_sdiv128", "__exr_fmt_int128", "__exr_u128_to_f", "__exr_f_to_u128"]);
+        // (`x.isqrt()` on a 128-bit integer. Only here: the u128 in its signature would bring in u128 code without
+        // the division above)
+        if sc.has("isqrt") {
+            need.insert("__exr_isqrt128");
+        }
     }
     // 浮動小数点: 書式化・powi・libm の宣言 (f64 / f32 の名前か、`1.5` のようなリテラルがあるとき)
     // (`fn f64(..)` のような関数の名前は数えない: 型の位置 (`: f64` / `as f64` / `f64::` など) だけ)
