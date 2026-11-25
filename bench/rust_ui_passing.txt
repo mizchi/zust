@@ -229,6 +229,7 @@ run-pass	associated-types/associated-types-duplicate-binding-in-env-hrtb.rs
 run-pass	associated-types/associated-types-duplicate-binding-in-env.rs
 compile-fail	associated-types/associated-types-eq-3.rs
 compile-fail	associated-types/associated-types-eq-expr-path.rs
+compile-fail	associated-types/associated-types-eq-hr.rs
 run-pass	associated-types/associated-types-eq-obj.rs
 run-pass	associated-types/associated-types-from-supertrait.rs
 run-pass	associated-types/associated-types-impl-redirect.rs
@@ -319,6 +320,7 @@ run-pass	associated-types/issue-55846.rs
 compile-fail	associated-types/issue-64855.rs
 check-pass	associated-types/issue-91069.rs
 run-pass	associated-types/method-on-impl-with-assoc-type-projection.rs
+compile-fail	associated-types/mismatch-two-relevant-impls.rs
 compile-fail	associated-types/mismatched-types-in-associated-type-87490.rs
 compile-fail	associated-types/missing-associated-types.rs
 compile-fail	associated-types/nested-assoc-type-projection-ice-109864.rs
@@ -334,6 +336,7 @@ check-pass	associated-types/param-env-normalize-cycle.rs
 compile-fail	associated-types/param-env-shadowing-false-positive.rs
 compile-fail	associated-types/param-env-shadowing-gat.rs
 compile-fail	associated-types/param-env-shadowing-suggestion-no-ice-on-missing-assoc-value.rs
+compile-fail	associated-types/point-at-type-on-obligation-failure-2.rs
 run-pass	associated-types/project-defer-unification.rs
 run-pass	associated-types/projection-as-type-alias.rs
 compile-fail	associated-types/recursive-associated-type-overflow-21946.rs
@@ -2466,6 +2469,7 @@ compile-fail	error-codes/E0262.rs
 compile-fail	error-codes/E0263.rs
 compile-fail	error-codes/E0267.rs
 compile-fail	error-codes/E0268.rs
+compile-fail	error-codes/E0271.rs
 compile-fail	error-codes/E0277-2.rs
 compile-fail	error-codes/E0277-3.rs
 compile-fail	error-codes/E0277-4.rs
@@ -3230,6 +3234,7 @@ check-pass	impl-trait/in-trait/default-method-binder-shifting.rs
 check-pass	impl-trait/in-trait/default-method-constraint.rs
 compile-fail	impl-trait/in-trait/dont-consider-unconstrained-rpitits.rs
 compile-fail	impl-trait/in-trait/dont-probe-missing-item-name-3.rs
+compile-fail	impl-trait/in-trait/dont-probe-missing-item-name-4.rs
 check-pass	impl-trait/in-trait/early.rs
 compile-fail	impl-trait/in-trait/ensure-rpitits-are-created-before-freezing.rs
 check-pass	impl-trait/in-trait/expeced-refree-to-map-to-reearlybound-ice-108580.rs
@@ -7055,6 +7060,7 @@ compile-fail	suggestions/format-borrow.rs
 compile-fail	suggestions/ice-unwrap-probe-many-result-125876.rs
 compile-fail	suggestions/if-let-typo.rs
 compile-fail	suggestions/if-then-neeing-semi.rs
+compile-fail	suggestions/imm-ref-trait-object-literal-bound-regions.rs
 compile-fail	suggestions/imm-ref-trait-object-literal.rs
 compile-fail	suggestions/imm-ref-trait-object.rs
 compile-fail	suggestions/import-trait-for-method-call.rs
@@ -8182,6 +8188,7 @@ run-pass	where-clauses/obligation-error-propagation.rs
 check-pass	where-clauses/where-clause-bounds-inconsistency.rs
 run-pass	where-clauses/where-clause-early-bound-lifetimes.rs
 run-pass	where-clauses/where-clause-method-substituion-rpass.rs
+compile-fail	where-clauses/where-clause-method-substituion.rs
 check-pass	where-clauses/where-clause-on-struct-definitions.rs
 check-pass	where-clauses/where-clause-placement-assoc-type-in-impl.rs
 run-pass	where-clauses/where-clause-region-outlives.rs
@@ -8189,6 +8196,7 @@ run-pass	where-clauses/where-clauses-lifetimes.rs
 run-pass	where-clauses/where-clauses-method.rs
 run-pass	where-clauses/where-clauses-unboxed-closures.rs
 run-pass	where-clauses/where-clauses.rs
+compile-fail	where-clauses/where-for-self-2.rs
 run-pass	whitespace/ascii_whitespace_excludes_vertical_tab.rs
 run-pass	whitespace/vertical_tab_lexer.rs
 run-pass	windows-subsystem/console.rs
