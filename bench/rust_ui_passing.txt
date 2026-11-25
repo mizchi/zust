@@ -2760,6 +2760,7 @@ build-pass	extern/issue-10763.rs
 run-pass	extern/issue-10764-rpass.rs
 build-pass	extern/issue-1251.rs
 compile-fail	extern/issue-18819.rs
+compile-fail	extern/issue-28324.rs
 compile-fail	extern/issue-36122-accessing-externed-dst.rs
 compile-fail	extern/issue-47725.rs
 compile-fail	extern/issue-95829.rs
@@ -7208,6 +7209,8 @@ run-pass	static/static-struct-initialization-5688.rs
 check-pass	static/static-struct-with-option-8578.rs
 run-pass	statics/conditional-static-declaration-16010.rs
 build-pass	statics/enum-with-static-str-variant-13214.rs
+compile-fail	statics/extern-static-in-static-ice-143174.rs
+compile-fail	statics/issue-14227.rs
 build-pass	statics/issue-15261.rs
 run-pass	statics/issue-17233.rs
 run-pass	statics/issue-17718-static-unsafe-interior.rs

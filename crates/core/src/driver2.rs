@@ -1865,6 +1865,12 @@ impl Session2 {
             let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
             return Err(format!("{line}:1: `{tn}` cannot be shared between threads safely: the type of a `static` must be Sync (E0277)"));
         }
+        // (E0080: a const's or a static's value that reads an extern static, `static X: u32 = symbol;`, which constant
+        // evaluation cannot; rustc's E0133 is on the same line)
+        if let Some((ci, n)) = extern_static_in_value(&prog) {
+            let line = items.get(prog.consts[ci].item as usize).map_or(0, |it| it.line);
+            return Err(format!("{line}:1: cannot access extern static `{n}` (E0080)"));
+        }
         // (traits of one name in two modules: which one a method call means depends on where it is. Read from the
         // crate's source (its files joined, as the items' lines count); a build with dependency crates keeps the earlier
         // choice, the first impl)
@@ -12060,6 +12066,40 @@ fn attr_gate(name: &str, args: &[&str]) -> Option<(&'static str, String)> {
         }
         _ => None,
     }
+}
+
+/// A const or a static of the program's whose value names an extern block's static: (its index, the static's name).
+/// Read only for a program with an extern static
+fn extern_static_in_value(prog: &crate::program::Program) -> Option<(usize, String)> {
+    let ext: Vec<&str> = prog.consts.iter().filter(|c| c.expr.starts_with(crate::parse::EXTERN_STATIC_SYM)).map(|c| c.name.as_str()).collect();
+    if ext.is_empty() {
+        return None;
+    }
+    prog.consts.iter().enumerate().find_map(|(ci, c)| {
+        if c.item >= prog.prelude_from || c.expr.starts_with(crate::parse::EXTERN_STATIC_SYM) {
+            return None;
+        }
+        let b = c.expr.as_bytes();
+        let toks = lexer::tokenize(b);
+        let tx = |k: usize| &b[toks[k].1..toks[k].2];
+        // (a read of it: not its address, `&X`, `&mut X`, `&raw const X`, `addr_of!(X)`, unless the address is read
+        // again, `*&X`)
+        let read = |k: usize| {
+            let mut j = k;
+            if j >= 1 && matches!(tx(j - 1), b"mut" | b"const") {
+                j -= 1;
+            }
+            if j >= 1 && tx(j - 1) == b"raw" {
+                j -= 1;
+            }
+            if j >= 1 && tx(j - 1) == b"&" {
+                return j >= 2 && tx(j - 2) == b"*";
+            }
+            !(k >= 3 && tx(k - 1) == b"(" && tx(k - 2) == b"!" && matches!(tx(k - 3), b"addr_of" | b"addr_of_mut"))
+        };
+        let n = ext.iter().find(|n| (0..toks.len()).any(|k| toks[k].0 == 0 && tx(k) == n.as_bytes() && read(k)))?;
+        Some((ci, n.to_string()))
+    })
 }
 
 /// The ABIs rustc 1.100 knows, stable or behind a feature (`extern "rust-intrinsic"` is no longer one)

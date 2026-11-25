@@ -2781,3 +2781,17 @@ fn abis_no_one_has_and_raw_pointers_without_their_keyword() {
     assert_eq!(first("fn foo(_: *()) {}\nfn main() {}\n"), p(1, 11), "a bare pointer");
     assert_eq!(first("fn main() {\n    let x = 5u8;\n    let p: *const u8 = &x;\n    let _d: **const u8 = &p;\n}\n"), p(4, 13), "a pointer to a pointer");
 }
+
+#[test]
+fn extern_statics_in_a_static_value() {
+    // (rustc 1.100's E0080 for the value, at its line; a fn reads one in `unsafe`)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("extern \"C\" {\n    pub static symbol: u32;\n}\nstatic CRASH: u32 = symbol;\nfn main() {}\n"), Some((4, "cannot access extern static `symbol` (E0080)".to_string())));
+    assert_eq!(first("extern \"C\" {\n    static symbol: u32;\n}\nstatic OK: u32 = 1;\nfn main() {\n    let _ = unsafe { symbol };\n}\n"), None);
+    // (its address is no read; a read through it is, `*&X`)
+    assert_eq!(first("extern \"C\" {\n    static Q: [u8; 0];\n}\nstatic R: &'static [u8; 0] = unsafe { &Q };\nfn main() {}\n"), None, "its address");
+    assert_eq!(first("extern \"C\" {\n    static Q: u32;\n}\npub static B: u32 = *&Q;\nfn main() {}\n").map(|d| d.0), Some(4), "a read through its address");
+}
