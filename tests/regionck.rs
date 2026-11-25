@@ -4528,3 +4528,10 @@ impl S { unsafe fn f(self: Box<Self>) -> i32 { 1 } }
 fn main() { let a = unsafe { Box::new(S).f() }; let b = Box::new(S).f(); println!("{} {}", a, b); }
 "#, &[(3, "call to unsafe function")], "u1");
 }
+
+#[test]
+fn part31_closure_error_position() {
+    // (an error with no position of its own in a closure's body (a move out of a reference by its parameter's
+    // pattern) is at the closure, on rustc 1.97's line, not at the line of the fn it is in)
+    errors_at("use std::collections::HashMap;\n\nfn main() {\n    let _ = HashMap::<String, i32>::new().iter().filter(|&(&_k, &_v)| { true });\n}\n", &[(4, "cannot move out of")], "cp");
+}
