@@ -2269,15 +2269,43 @@ fn const_local_borrow_err(item: &Item) -> Option<String> {
     }
     let Expr::Ref(_, inner) = x else { return None };
     let mut r = &**inner;
+    let mut through = false;
     loop {
         match r {
-            Expr::Field(b, _, _) | Expr::Index(b, _, _) | Expr::Paren(b) => r = b,
+            Expr::Field(b, _, _) | Expr::Index(b, _, _) => {
+                through = true;
+                r = b;
+            }
+            Expr::Paren(b) => r = b,
             _ => break,
         }
     }
     let Expr::Path(None, p) = r else { return None };
     let [seg] = p.segs.as_slice() else { return None };
-    if p.pos.line == 0 || !b.stmts.iter().any(|st| matches!(st, Stmt::Let(Pat::Ident(_, _, n, _), ..) if *n == seg.name)) {
+    // (the local's `let`, the last one before the tail)
+    let Some((ann, init)) = b.stmts.iter().rev().find_map(|st| match st {
+        Stmt::Let(Pat::Ident(_, _, n, _), ann, init, ..) if *n == seg.name => Some((ann, init)),
+        _ => None,
+    }) else {
+        return None;
+    };
+    // (a field or an element of the local is its own storage only where the local holds the aggregate, not a
+    // reference the access derefs (`let p = &DATA; &p.0` borrows DATA): a written type that is no reference, or a
+    // value built there (a literal, a tuple, an array, a struct))
+    if through {
+        let mut i = init.as_ref();
+        while let Some(Expr::Paren(x)) = i {
+            i = Some(x);
+        }
+        let owned = match ann {
+            Some(t) => !matches!(t, PTy::Ref(..) | PTy::Ptr(..)),
+            None => matches!(i, Some(Expr::Lit(..) | Expr::Tuple(_) | Expr::Array(_) | Expr::Repeat(..) | Expr::Struct(..))),
+        };
+        if !owned {
+            return None;
+        }
+    }
+    if p.pos.line == 0 {
         return None;
     }
     Some(format!("\u{3}{}\u{3}`{}` does not live long enough (borrowed value must outlive the {what}) (E0597)", p.pos.line, seg.name))

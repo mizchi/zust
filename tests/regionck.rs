@@ -4582,3 +4582,26 @@ fn b(v: Vec<String>, w: Vec<&str>) {
 fn main() {}
 "#, &[(1, "use of moved value"), (7, "use of moved value")], "mv");
 }
+
+#[test]
+fn part31_review() {
+    // (a `collect` in parentheses yields the iterator's items at its `let` too: no false E0515)
+    errors_at(r#"fn e2<'a>(s: &'a String) -> &'a str { let parts: Vec<_> = (s.split('|').collect()); let c = &parts[0]; c }
+fn main() { let s = "1|2".to_string(); println!("{}", e2(&s)); }
+"#, &[], "pc");
+    // (a `&&&u8` passed as a `&&u8` keeps its type: `***c` is a `u8`)
+    errors_at(r#"fn take(_: &&u8) {}
+fn main() { let x = 1u8; let c = &&&x; take(c); let y: u8 = ***c; println!("{}", y); }
+"#, &[], "dd");
+    // (a const's block that borrows through a local reference (`let p = &DATA; &p.0`) borrows DATA: no E0597 (2);
+    // of a local tuple's field it is E0597 (3), as in rustc 1.97)
+    errors_at(r#"static DATA: (i32,) = (3,);
+const OK: &'static i32 = { let p = &DATA; &p.0 };
+const BAD: &'static i32 = { let p = (3,); &p.0 };
+fn main() { println!("{} {}", OK, BAD); }
+"#, &[(3, "does not live long enough")], "cr");
+    // (a move out through a `&mut` pattern of a temporary scrutinee is out of a mutable reference)
+    errors_at(r#"fn f(a: &mut Option<String>) { match (1, a) { (_, &mut Some(s)) => { drop(s); } _ => {} } }
+fn main() {}
+"#, &[(1, "cannot move out of a mutable reference")], "mr");
+}

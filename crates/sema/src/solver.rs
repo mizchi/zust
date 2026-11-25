@@ -382,26 +382,30 @@ impl Solver<'_> {
                             self.unify(x, i);
                             return;
                         }
-                        // (`&&T` を `&T` に (deref の強制変換): 参照どうしはつながず、内側の T どうしを単一化する。
-                        //  つなぐと、`let c = &v[0]; c` (v: Vec<&str>、`&str` を返す) の c が `&str` になる)
-                        let rf = |s: &mut Self, v: u32| {
-                            let r = s.find(v);
-                            match s.shape[r as usize] {
-                                Some(Shape::Ref(_, i)) => Some(Some(i)),
-                                Some(_) => Some(None),
-                                None => None,
+                        // (`&&T` を `&T` に、`&&&u8` を `&&u8` に (deref の強制変換): 参照の深さが違えば参照どうしは
+                        //  つながず、最も内側の T どうしを単一化する。つなぐと、`let c = &v[0]; c` (v: Vec<&str>、
+                        //  `&str` を返す) の c が `&str` になる。深さは、参照でない分かった形で終わるときだけ数える)
+                        let depth = |s: &mut Self, v: u32| -> Option<(u32, u32)> {
+                            let (mut v, mut d) = (v, 0u32);
+                            loop {
+                                let r = s.find(v);
+                                match s.shape[r as usize] {
+                                    Some(Shape::Ref(_, i)) if d < 16 => {
+                                        v = i;
+                                        d += 1;
+                                    }
+                                    Some(Shape::Ref(..)) | None => return None,
+                                    Some(_) => return Some((d, v)),
+                                }
                             }
                         };
-                        match (rf(self, x), rf(self, y)) {
-                            (Some(Some(i)), Some(None)) if !coerce => {
-                                self.unify(i, y);
-                                return;
+                        if !coerce {
+                            if let (Some((dx, ix)), Some((dy, iy))) = (depth(self, x), depth(self, y)) {
+                                if dx != dy {
+                                    self.unify(ix, iy);
+                                    return;
+                                }
                             }
-                            (Some(None), Some(Some(i))) if !coerce => {
-                                self.unify(x, i);
-                                return;
-                            }
-                            _ => {}
                         }
                         // (`&mut T` を `&T` に渡すのも強制変換: つなぐと、`let x = &mut v; f(x);` (f が `&T` を取る) の
                         //  x が `&T` になり、後の `*x = ..` を `&` 越しの書き込みとしてしまう)

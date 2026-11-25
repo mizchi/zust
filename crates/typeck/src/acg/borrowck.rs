@@ -1791,7 +1791,8 @@ impl Bk {
                             let what = if p.owned_len() < p.proj.len() { "which is behind a reference" } else { "an indexed place" };
                             // (of a temporary's part (a match on `(a, b)`): of the reference, as rustc says it)
                             let msg = if self.locals[p.local as usize].name == TEMP && p.owned_len() < p.proj.len() {
-                                let m = matches!(p.proj.get(p.owned_len()), Some(Proj::Deref(true)));
+                                // (a `&mut`'s deref is `Deref(false)`, a `&`'s `Shr`, ref_deref)
+                                let m = matches!(p.proj.get(p.owned_len()), Some(Proj::Deref(false)));
                                 format!("cannot move out of a {} reference", if m { "mutable" } else { "shared" })
                             } else {
                                 format!("cannot move out of `{}`, {what}", path_str(&self.locals, p))
