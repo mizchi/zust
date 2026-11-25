@@ -1547,11 +1547,15 @@ impl Cx<'_> {
                 // moves a.x); the region check does not)
                 let vname = self.variant_on(spath, p.ty()).map(|(sid, vi)| self.prog.structs[sid as usize].variants[vi].name.clone());
                 let deref = matches!(mode, BindMode::Ref(_));
+                // (a union's field is marked, as an expression's is (borrowck::UNION_FIELD): a loan of `u.a` by
+                // `U { a: ref x }` overlaps a write to `u.a` or `u.b`)
+                let union = matches!(p.ty(), Ty::Struct(sid) if self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name));
                 let rs = self.rg.pat.take();
                 let r = (|| {
                     let parts = self.struct_pat_fields(pat, p, None)?;
                     for ((fname, _), (sub, fp)) in fps.iter().zip(parts) {
-                        let saved = self.bk_pat_field(deref, vname.as_deref(), fname);
+                        let uname = format!("{}{fname}", borrowck::UNION_FIELD);
+                        let saved = self.bk_pat_field(deref, vname.as_deref(), if union { &uname } else { fname });
                         let r = self.pat_bind(sub, fp, mode);
                         self.bk.pat_path = saved;
                         r?;

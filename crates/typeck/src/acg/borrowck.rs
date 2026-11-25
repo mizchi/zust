@@ -1098,7 +1098,7 @@ fn union_overlap(a: &[Proj], b: &[Proj]) -> bool {
 }
 
 /// The mark of a union's field in a place (Proj::Field)
-const UNION_FIELD: char = '\u{1}';
+pub(crate) const UNION_FIELD: char = '\u{1}';
 
 /// The two places overlap (one contains the other)
 fn overlap(a: &BPlace, b: &BPlace) -> bool {
@@ -4033,8 +4033,10 @@ impl Cx<'_> {
                     };
                     self.bk_pat_cap(p, &field(base, name), Some(f.1), sp, &mut sub);
                 }
-                // (a union's capture is of the union, not of a field (the fields overlap: `u.b` is `u.a`))
-                if sd.is_enum && sd.variants.len() > 1 || self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name) {
+                // (a union's capture is of the union, not of a field (the fields overlap: `u.b` is `u.a`); none where
+                // the pattern captures nothing (`U { a: _ }`))
+                let union = self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name);
+                if sd.is_enum && sd.variants.len() > 1 || union && !sub.is_empty() {
                     let mode = sub.iter().map(|x| x.2).max().unwrap_or(CapMode::Ref).max(CapMode::Ref);
                     out.push((base.clone(), t, mode, sp));
                 } else {
@@ -4057,12 +4059,20 @@ impl Cx<'_> {
             }
             Pat::Ident(true, m, _, Some(_)) => out.push((base.clone(), t, if *m { CapMode::RefMut } else { CapMode::Ref }, sp)),
             // (the unit variant of an enum of one variant: nothing to test, so nothing read (edition 2021 captures
-            // nothing for `match sv { SingleVariant::A => .. }`). Not a constant of the enum (`E::ZERO`), which
-            // compares the value)
+            // nothing for `match sv { SingleVariant::A => .. }`). Not a constant, which compares the value: of the
+            // enum (`E::ZERO`), of another type with the variant's name (`Other::V`), or in scope by itself)
             Pat::Path(p)
                 if matches!(t, Some(Ty::Struct(sid)) if {
                     let sd = &self.prog.structs[sid as usize];
-                    sd.is_enum && sd.variants.len() == 1 && sd.variants[0].fields.is_empty() && p.segs.last().is_some_and(|s| s.name == sd.variants[0].name)
+                    let ename = &self.prog.structs[self.prog.base_of(sid) as usize].name;
+                    let ename = ename.rsplit("::").next().unwrap_or(ename);
+                    let n = p.segs.len();
+                    let qual = match n {
+                        0 => false,
+                        1 => self.prog.const_index.get(p.segs[0].name.as_str()).is_none(),
+                        _ => p.segs[n - 2].name == ename || p.segs[n - 2].name == "Self",
+                    };
+                    sd.is_enum && sd.variants.len() == 1 && sd.variants[0].fields.is_empty() && qual && p.segs.last().is_some_and(|s| s.name == sd.variants[0].name)
                 }) => {}
             Pat::Lit(_) | Pat::Range(..) | Pat::Path(_) => out.push((base.clone(), t, CapMode::Ref, sp)),
             // (a pattern not followed into: borrowed mutably if it binds a part by `ref mut`, else as the body uses it)

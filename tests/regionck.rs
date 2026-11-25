@@ -4755,4 +4755,54 @@ fn g() {
 fn h() -> u32 { let u = U { a: 1 }; unsafe { let U { b } = u; b } }
 fn main() {}
 "#, &[(8, "cannot assign to `e` because it is borrowed"), (14, "cannot assign to `u.b` because it is borrowed")], "rc");
+    // (second review: a union's pattern borrows the union's memory, so a write to the field it binds or to another one
+    // is E0506 while the binding lives (6, 14); a pattern that binds nothing of the union (`U { a: _ }`) captures
+    // nothing (21: no error))
+    errors_at(r#"union U { a: u32, b: u32 }
+fn f() {
+    let mut u = U { a: 1 };
+    unsafe {
+        let U { a: ref x } = u;
+        u.b = 2;
+        println!("{}", x);
+    }
+}
+fn g() {
+    let mut u = U { a: 1 };
+    unsafe {
+        let U { a: ref x } = u;
+        u.a = 2;
+        println!("{}", x);
+    }
+}
+fn h() {
+    let mut u = U { a: 1 };
+    let c = || { let U { a: _ } = u; };
+    u.b = 2;
+    c();
+}
+fn main() {}
+"#, &[(6, "cannot assign to `u.b` because it is borrowed"), (14, "cannot assign to `u.a` because it is borrowed")], "ru");
+    // (a constant of another type with the variant's name (`Other::V`) compares the value: it is read (10: E0506); the
+    // variant itself (`E::V`) is not (16: no error))
+    errors_at(r#"#[derive(PartialEq, Eq)]
+enum E { V }
+struct Other;
+impl Other {
+    const V: E = E::V;
+}
+fn f() {
+    let mut e = E::V;
+    let c = || match e { Other::V => 1, _ => 0 };
+    e = E::V;
+    c();
+}
+fn g() {
+    let mut e = E::V;
+    let c = || match e { E::V => 1 };
+    e = E::V;
+    c();
+}
+fn main() {}
+"#, &[(10, "cannot assign to `e` because it is borrowed")], "ro");
 }
