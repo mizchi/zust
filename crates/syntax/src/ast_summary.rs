@@ -569,6 +569,8 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         return err("missing lifetime specifier (E0106)");
     }
     let mut generics = owner.map(|o| o.generics.clone()).unwrap_or_default();
+    // (the lifetime bounds of the parameters' `impl Trait`s, by the type parameters they are lifted to: regions)
+    let mut impl_lts: Vec<(String, String)> = vec![];
     collect_generics(&sig.generics, &mut generics)?;
     if is_extern && !generics.is_empty() {
         return err("extern fns cannot be generic");
@@ -703,7 +705,8 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             });
         }
     }
-    for (_, t) in &sig.params {
+    let mut lifted_params: Vec<(usize, PTy)> = vec![];
+    for (k, (_, t)) in sig.params.iter().enumerate() {
         // (E0277: a parameter's value needs a size; a trait's declaration without a body does not)
         if !owner.is_some_and(|o| o.is_trait) && !is_extern {
             if let Some(u) = unsized_value(t) {
@@ -717,6 +720,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         };
         if let PTy::Impl(bs) = inner {
             let g = fresh_impl_name(&generics);
+            impl_lts.extend(bs.iter().filter_map(|b| if let Bound::Lifetime(l) = b { Some((g.clone(), l.clone())) } else { None }));
             generics.push((g.clone(), bound_names(bs)?));
             let n = TySyn::Named(g);
             params.push(match rf {
@@ -725,12 +729,30 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
             });
         } else if nested_impl(t) {
             // (`Option<&[impl AsRef<str>]>`: each `impl Trait` inside is a type parameter without a name, too)
-            let lifted = lift_impls(t, &mut generics)?;
+            let lifted = lift_impls(t, &mut generics, &mut impl_lts)?;
             params.push(tysyn(&lifted, self_ty)?);
+            lifted_params.push((k, lifted));
         } else {
             params.push(tysyn(t, self_ty)?);
         }
     }
+    // (the regions of a parameter with an `impl Trait` inside are those of the type it is lifted to, with the hidden
+    // type parameter in place of the `impl`: `Option<impl Copy + 'static>` holds what its `__impl0` does, which the
+    // bound requires to be 'static at the call (`take(Some(&x))`, E0597))
+    let lifted_sig = (!lifted_params.is_empty()).then(|| {
+        let mut rs = sig.clone();
+        for (k, t) in std::mem::take(&mut lifted_params) {
+            rs.params[k].1 = t;
+        }
+        // (with their lifetime bounds, which the lifted type no longer writes: the signature names a lifetime)
+        for (g, _) in generics.iter().filter(|g| g.0.starts_with("__impl")) {
+            if !rs.generics.params.iter().any(|p| matches!(p, GParam::Ty(n, ..) if n == g)) {
+                let bs = impl_lts.iter().filter(|(n, _)| n == g).map(|(_, l)| Bound::Lifetime(l.clone())).collect();
+                rs.generics.params.push(GParam::Ty(g.clone(), bs, None));
+            }
+        }
+        rs
+    });
     let ret = match &sig.ret {
         None => TySyn::Prim(Ty::Unit),
         // (`-> impl ?Sized` with no other trait: a return value must have a size)
@@ -798,7 +820,7 @@ fn parse_sig(sig: &PSig, is_extern: bool, is_main: bool, owner: Option<&Owner>) 
         ret_from: ret_from(sig),
         regions: {
             let otp: Vec<&str> = owner.map(|o| o.generics.iter().map(|g| g.0.as_str()).collect()).unwrap_or_default();
-            crate::regions::sig_regions(sig, owner.and_then(|o| o.regions.as_deref()), &otp)
+            crate::regions::sig_regions(lifted_sig.as_ref().unwrap_or(sig), owner.and_then(|o| o.regions.as_deref()), &otp, &impl_lts)
         },
         is_unsafe: sig.quals.iter().any(|q| q == "unsafe") || (is_extern && !sig.quals.iter().any(|q| q == "safe")),
         preds: preds,
@@ -1063,6 +1085,87 @@ fn unsized_elem(t: &PTy) -> Option<String> {
         }),
         _ => None,
     }
+}
+
+/// A struct's, an enum's or a union's field whose type passes a type parameter of the item to a struct or enum of the
+/// program that bounds that parameter by 'static (`bar: Bar<U>` with `struct Bar<T: 'static>`). Unlike `T: 'a`,
+/// rustc does not infer `U: 'static` from the fields: the item must declare it (E0310). statics: the short names of
+/// such structs and enums, and the indexes of their type and const parameters that must be 'static. (line, col, msg)
+pub fn static_field_unmet(src: &str, it: &SrcItem, statics: &crate::fxhash::FxMap<&str, Vec<usize>>) -> Option<(usize, usize, String)> {
+    let text = src.get(it.start..it.end)?;
+    let f = parse_file(text).ok()?;
+    let item = f.items.first()?;
+    let (g, tys): (&Generics, Vec<&PTy>) = match &item.kind {
+        ItemKind::Struct(_, g, fields) | ItemKind::Union(_, g, fields) => (g, match fields {
+            Fields::Named(v) => v.iter().map(|x| &x.1).collect(),
+            Fields::Tuple(v) => v.iter().collect(),
+            Fields::Unit => vec![],
+        }),
+        ItemKind::Enum(_, g, vs) => (g, vs.iter().flat_map(|v| match &v.1 {
+            Fields::Named(f) => f.iter().map(|x| &x.1).collect::<Vec<_>>(),
+            Fields::Tuple(f) => f.iter().collect(),
+            Fields::Unit => vec![],
+        }).collect()),
+        _ => return None,
+    };
+    let mut k = crate::wf::Known::default();
+    k.add_generics(g);
+    if k.tparams.is_empty() {
+        return None;
+    }
+    fn walk(t: &PTy, k: &crate::wf::Known, statics: &crate::fxhash::FxMap<&str, Vec<usize>>, depth: u32) -> Option<(crate::parse::Pos, String)> {
+        if depth > 16 {
+            return None;
+        }
+        match t {
+            PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => walk(i, k, statics, depth + 1),
+            PTy::Tuple(ts) => ts.iter().find_map(|t| walk(t, k, statics, depth + 1)),
+            PTy::Fn(ps, r) => ps.iter().chain(std::iter::once(&**r)).find_map(|t| walk(t, k, statics, depth + 1)),
+            PTy::Path(None, p) => {
+                let s = p.segs.last()?;
+                // (one of the program's by its name alone: not a parameter of the item's of that name)
+                let req = (p.segs.len() == 1 && s.fn_args.is_none() && !k.tparams.contains(&s.name)).then(|| statics.get(s.name.as_str())).flatten();
+                let args: Vec<Option<&PTy>> = s
+                    .args
+                    .iter()
+                    .filter_map(|a| match a {
+                        crate::parse::GArg::Ty(t) => Some(Some(t)),
+                        crate::parse::GArg::Const(_) => Some(None),
+                        _ => None,
+                    })
+                    .collect();
+                if let Some(req) = req {
+                    for &i in req {
+                        let Some(Some(a)) = args.get(i) else { continue };
+                        // (the item's type parameters the argument holds, each declared to outlive 'static or not)
+                        let Some(sub) = k.sub_of(a) else { continue };
+                        if let Some(n) = sub.iter().find(|n| k.tparams.contains(n) && !k.vague.contains(n) && !k.outlives(n, "'static")) {
+                            return Some((p.pos, format!("the parameter type `{n}` may not live long enough (it must outlive `'static`, which the type `{}` requires) (E0310)", s.name)));
+                        }
+                    }
+                }
+                args.iter().flatten().find_map(|t| walk(t, k, statics, depth + 1)).or_else(|| {
+                    s.args.iter().find_map(|a| match a {
+                        crate::parse::GArg::Bind(_, t) => walk(t, k, statics, depth + 1),
+                        _ => None,
+                    })
+                })
+            }
+            PTy::Dyn(bs) | PTy::Impl(bs) => bs.iter().find_map(|b| match b {
+                Bound::Trait(_, p) => p.segs.iter().find_map(|s| {
+                    s.args.iter().find_map(|a| match a {
+                        crate::parse::GArg::Ty(t) | crate::parse::GArg::Bind(_, t) => walk(t, k, statics, depth + 1),
+                        _ => None,
+                    })
+                    .or_else(|| s.fn_args.as_ref().and_then(|(ps, r)| ps.iter().chain(r.as_deref()).find_map(|t| walk(t, k, statics, depth + 1))))
+                }),
+                Bound::Lifetime(_) => None,
+            }),
+            _ => None,
+        }
+    }
+    let (p, m) = tys.iter().find_map(|t| walk(t, &k, statics, 0))?;
+    Some((it.line + p.line.max(1) as usize - 1, p.col as usize + 1, m))
 }
 
 /// What an item's types require of traits' `Self: 'x` bounds (the driver checks them against the traits, which
@@ -1921,12 +2024,14 @@ fn fresh_impl_name(generics: &[(String, Vec<String>)]) -> String {
     format!("__impl{k}")
 }
 
-/// t with each `impl Trait` in it replaced by a new type parameter `__implN` (added to generics with its bounds)
-fn lift_impls(t: &PTy, generics: &mut Vec<(String, Vec<String>)>) -> R<PTy> {
+/// t with each `impl Trait` in it replaced by a new type parameter `__implN` (added to generics with its bounds; its
+/// lifetime bounds to lts, `impl Debug + 'static`: (`__implN`, `'static`))
+fn lift_impls(t: &PTy, generics: &mut Vec<(String, Vec<String>)>, lts: &mut Vec<(String, String)>) -> R<PTy> {
     use crate::parse::{GArg, Seg};
     Ok(match t {
         PTy::Impl(bs) => {
             let g = fresh_impl_name(generics);
+            lts.extend(bs.iter().filter_map(|b| if let Bound::Lifetime(l) = b { Some((g.clone(), l.clone())) } else { None }));
             generics.push((g.clone(), bound_names(bs)?));
             PTy::Path(None, Path { global: false, segs: vec![Seg { name: g.clone(), args: vec![], fn_args: None, text: g }], pos: Default::default() })
         }
@@ -1935,17 +2040,17 @@ fn lift_impls(t: &PTy, generics: &mut Vec<(String, Vec<String>)>) -> R<PTy> {
             for s in &mut p.segs {
                 for a in &mut s.args {
                     if let GArg::Ty(x) | GArg::Bind(_, x) = a {
-                        *x = lift_impls(x, generics)?;
+                        *x = lift_impls(x, generics, lts)?;
                     }
                 }
             }
             PTy::Path(q.clone(), p)
         }
-        PTy::Ref(l, m, i) => PTy::Ref(l.clone(), *m, Box::new(lift_impls(i, generics)?)),
-        PTy::Ptr(m, i) => PTy::Ptr(*m, Box::new(lift_impls(i, generics)?)),
-        PTy::Slice(i) => PTy::Slice(Box::new(lift_impls(i, generics)?)),
-        PTy::Array(i, n) => PTy::Array(Box::new(lift_impls(i, generics)?), n.clone()),
-        PTy::Tuple(v) => PTy::Tuple(v.iter().map(|x| lift_impls(x, generics)).collect::<R<Vec<_>>>()?),
+        PTy::Ref(l, m, i) => PTy::Ref(l.clone(), *m, Box::new(lift_impls(i, generics, lts)?)),
+        PTy::Ptr(m, i) => PTy::Ptr(*m, Box::new(lift_impls(i, generics, lts)?)),
+        PTy::Slice(i) => PTy::Slice(Box::new(lift_impls(i, generics, lts)?)),
+        PTy::Array(i, n) => PTy::Array(Box::new(lift_impls(i, generics, lts)?), n.clone()),
+        PTy::Tuple(v) => PTy::Tuple(v.iter().map(|x| lift_impls(x, generics, lts)).collect::<R<Vec<_>>>()?),
         t => t.clone(),
     })
 }
