@@ -2438,6 +2438,7 @@ run-pass	dst/match-dst-struct.rs
 check-pass	dst/tuple-with-unsized-tail-field.rs
 run-pass	dst/unsized-str-mutability.rs
 check-pass	dst/unsized-tuple-trait-tail.rs
+compile-fail	duplicate/duplicate-check-macro-exports.rs
 compile-fail	duplicate/duplicate-parameter.rs
 compile-fail	duplicate/duplicate-type-parameter.rs
 check-pass	duplicate/inherent-impls-overlap-check/disjoint-ref-mut-method.rs

@@ -899,6 +899,7 @@ impl Session2 {
         crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take());
         crate::macros::BAD_DEF.with(|c| c.set(false));
         crate::macros::BAD_FOLLOW.with(|c| c.borrow_mut().take());
+        crate::macros::EXPORTED.with(|c| c.borrow_mut().clear());
         crate::macros::PAT_WITH_OR.with(|c| c.set(self.opts.edition >= 2021));
         crate::macros::UNBOUND.with(|c| c.borrow_mut().take());
         crate::macros::DUP_EXPORT.with(|c| c.borrow_mut().take());
@@ -981,6 +982,14 @@ impl Session2 {
             // (a doc comment the source ends in, read from its end as written)
             if let Some(e) = crate::lexer::doc_at_end(src0) {
                 return Err(e);
+            }
+            // (E0255: a `#[macro_export]` macro of a name a `pub use` of std's at the crate root brings into the
+            // macro namespace too (`pub use std::panic;`), at the macro)
+            let exported = crate::macros::EXPORTED.with(|c| std::mem::take(&mut *c.borrow_mut()));
+            if !exported.is_empty() {
+                if let Some(e) = export_beside_std_reexport(src0, &exported) {
+                    return Err(e);
+                }
             }
             // (E0428: two `#[macro_export]` macros of one name, at the second)
             if let Some(n) = crate::macros::DUP_EXPORT.with(|c| c.borrow_mut().take()) {
@@ -11317,6 +11326,50 @@ const NON_PRELUDE_TRAITS: &[&str] = &[
     "Sum", "Product", "Pointer", "LowerHex", "UpperHex", "Binary", "Octal", "LowerExp", "UpperExp", "RangeBounds", "Termination", "Step",
     "UnwindSafe", "RefUnwindSafe", "Unsize", "CoerceUnsized", "DispatchFromDyn", "Tuple",
 ];
+
+/// A `#[macro_export]` macro whose name a crate-root `pub use` of std's (or core's, alloc's) also brings as a macro:
+/// `pub use std::panic;` re-exports the module and the macro `panic!`, so `#[macro_export] macro_rules! panic` is
+/// "the name `panic` is defined multiple times" (E0255), at the macro. Only std's macros of that name count (a
+/// module or fn of the name is in another namespace)
+#[cold]
+#[inline(never)]
+fn export_beside_std_reexport(src0: &str, exported: &[String]) -> Option<String> {
+    const STD_MACROS: &[&str] = &[
+        "panic", "assert", "assert_eq", "assert_ne", "debug_assert", "debug_assert_eq", "debug_assert_ne", "vec", "format", "print", "println", "eprint",
+        "eprintln", "write", "writeln", "todo", "unimplemented", "unreachable", "matches", "dbg", "concat", "stringify", "line", "file", "column", "env",
+        "include", "include_str", "include_bytes", "compile_error", "format_args", "thread_local",
+    ];
+    // (the crate root's `pub use std::..::name;` / `pub use core::..::name as other;`: at a line's start)
+    let mut names: Vec<&str> = vec![];
+    for line in src0.lines() {
+        let Some(r) = line.strip_prefix("pub use ") else { continue };
+        let r = r.trim_end().trim_end_matches(';').trim();
+        let r = r.strip_prefix("::").unwrap_or(r);
+        if !(r.starts_with("std::") || r.starts_with("core::") || r.starts_with("alloc::")) || r.contains(['{', '*']) {
+            continue;
+        }
+        let (path, alias) = match r.split_once(" as ") {
+            Some((p, a)) => (p.trim(), Some(a.trim())),
+            None => (r, None),
+        };
+        let last = path.rsplit("::").next().unwrap_or("");
+        if STD_MACROS.contains(&last) {
+            names.push(alias.unwrap_or(last));
+        }
+    }
+    if names.is_empty() {
+        return None;
+    }
+    // (the exported macros the expansion read, at their `macro_rules!` in the source as written)
+    let name = exported.iter().find(|n| names.contains(&n.as_str()))?;
+    let at = src0.match_indices("macro_rules!").map(|(k, _)| k).find(|&k| {
+        let r = src0[k + 12..].trim_start();
+        r.starts_with(name.as_str()) && r[name.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+    })?;
+    let line = 1 + src0[..at].matches('\n').count();
+    let col = at - src0[..at].rfind('\n').map_or(0, |p| p + 1) + 1;
+    Some(format!("{line}:{col}: the name `{name}` is defined multiple times (E0255)"))
+}
 
 /// A type an impl's header names that nothing declares (`impl A<B> {}`): "cannot find type `B` in this scope" (rustc
 /// 1.100's E0412), at the name. Read from the header's tokens: a capitalized name in the self type or in the trait's

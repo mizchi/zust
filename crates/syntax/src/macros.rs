@@ -246,6 +246,8 @@ pub fn unbound_err(expanded: &str, src: &str, name: &str, rep: bool) -> Option<S
 thread_local! {
     /// The name of a `#[macro_export]` macro defined twice (E0428), met while the definitions are read
     pub static DUP_EXPORT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+    /// The names of the `#[macro_export]` macros the definitions read had (the driver resets it before an expansion)
+    pub static EXPORTED: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 #[cold]
@@ -1593,6 +1595,7 @@ fn collect_defs(text: &mut String, macros: &mut HashMap<String, Vec<Rule>>, mut 
                 if exported_here.contains(&name) {
                     dup_export(&name);
                 }
+                EXPORTED.with(|c| c.borrow_mut().push(name.clone()));
                 exported_here.push(name.clone());
             }
             if let Some(f) = first.as_deref_mut() {

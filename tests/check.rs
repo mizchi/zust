@@ -3214,3 +3214,15 @@ fn unreachable_slice_patterns() {
     assert_eq!(first("#![deny(unreachable_patterns)]\nfn f(s: &[u8]) {\n    match *s {\n        [] => {}\n        [_, ..] => {}\n        _ => {}\n    }\n}\nfn main() { f(&[]); }\n"), un(6));
     assert_eq!(first("#![deny(unreachable_patterns)]\nfn f(s: &[u8]) {\n    match s {\n        [1, ..] => {}\n        [.., 2] => {}\n        [_, _] => {}\n        _ => {}\n    }\n}\nfn main() { f(&[]); }\n"), None);
 }
+
+#[test]
+fn a_macro_export_beside_a_reexport_of_std_s_macro() {
+    // (rustc 1.100: `pub use std::panic;` brings the macro `panic!` too, so a `#[macro_export] macro_rules! panic` is
+    // E0255 at the macro; a re-export of a fn or a module of another name is no conflict)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("pub use std::panic;\n\n#[macro_export]\nmacro_rules! panic { () => {} }\n\nfn main() {}\n"), Some((4, 1, "the name `panic` is defined multiple times (E0255)".to_string())));
+    assert_eq!(first("pub use std::mem::swap;\n#[macro_export]\nmacro_rules! swap { () => {} }\nfn main() {}\n"), None);
+}
