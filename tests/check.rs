@@ -1330,6 +1330,267 @@ fn goals_have_a_certainty() {
     ok("trait A {}\ntrait B {}\ntrait Tr<X> {}\nimpl<T: B> Tr<u8> for T {}\nimpl<T: A> Tr<u16> for T {}\nimpl<T: Tr<u8>> B for T {}\nimpl A for i32 {}\nfn need<T: Tr<u16>>(_: T) {}\nfn main() { need(1i32); }");
 }
 
+/// The trait solver's `No` of a goal with no type parameter in it (`Vec<u8>: Foo` with `impl<T: Bar> Foo for Vec<T>`
+/// and no `u8: Bar`) is reported from a generic fn nothing calls: it holds whatever the fn's parameters are
+#[test]
+fn trait_solver_no_in_uncalled_generic_fn() {
+    let src = "trait Foo {}\ntrait Bar {}\nimpl<T: Bar> Foo for Vec<T> {}\nfn needs_foo<T: Foo>(_: T) {}\nfn hello<T>(_: T) {\n    needs_foo(Vec::<u8>::new());\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].line, 6, "{d:?}");
+    assert!(d[0].msg.contains("Vec<u8>: Foo") && d[0].msg.contains("not satisfied"), "{d:?}");
+    // (with `impl Bar for u8` the goal holds)
+    let ok = src.replace("trait Bar {}\n", "trait Bar {}\nimpl Bar for u8 {}\n");
+    assert!(s.check(&ok).is_empty());
+}
+
+/// An auto trait of a type parameter holds only by its bounds (also through a supertrait of the program's), and a
+/// struct is Send when its fields are, also when it contains itself (coinductive)
+#[test]
+fn trait_solver_auto_traits_of_type_parameters() {
+    let src = "fn is_send<T: Send>(_: T) {}\ntrait Shared: Send {}\nstruct List<T> { v: T, next: Option<Box<List<T>>> }\nfn by_sync<S: Sync>(s: S) {\n    is_send(s);\n}\nfn by_super<S: Shared>(s: S) {\n    is_send(s);\n}\nfn by_list<S: Send>(s: List<S>) {\n    is_send(s);\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].line, 5, "{d:?}");
+    assert!(d[0].msg.contains("cannot be sent between threads safely"), "{d:?}");
+}
+
+/// `-> impl Tr` of a scalar or `()` for std's traits the solver believes `implements` about: zustc accepts exactly
+/// what rustc accepts (the expected column is rustc 1.100.0's answer for each)
+#[test]
+fn trait_solver_opaque_std_traits_like_rustc() {
+    let cases: &[(&str, &str, bool)] = &[
+        ("1u8", "Copy", true),
+        ("1u8", "Clone", true),
+        ("1u8", "std::fmt::Debug", true),
+        ("1u8", "std::fmt::Display", true),
+        ("1u8", "Default", true),
+        ("1u8", "PartialEq", true),
+        ("1u8", "Eq", true),
+        ("1u8", "PartialOrd", true),
+        ("1u8", "Ord", true),
+        ("1u8", "std::hash::Hash", true),
+        ("1u8", "Send", true),
+        ("1u8", "Sync", true),
+        ("1i32", "Copy", true),
+        ("1i32", "Clone", true),
+        ("1i32", "std::fmt::Debug", true),
+        ("1i32", "std::fmt::Display", true),
+        ("1i32", "Default", true),
+        ("1i32", "PartialEq", true),
+        ("1i32", "Eq", true),
+        ("1i32", "PartialOrd", true),
+        ("1i32", "Ord", true),
+        ("1i32", "std::hash::Hash", true),
+        ("1i32", "Send", true),
+        ("1i32", "Sync", true),
+        ("1u64", "Copy", true),
+        ("1u64", "Clone", true),
+        ("1u64", "std::fmt::Debug", true),
+        ("1u64", "std::fmt::Display", true),
+        ("1u64", "Default", true),
+        ("1u64", "PartialEq", true),
+        ("1u64", "Eq", true),
+        ("1u64", "PartialOrd", true),
+        ("1u64", "Ord", true),
+        ("1u64", "std::hash::Hash", true),
+        ("1u64", "Send", true),
+        ("1u64", "Sync", true),
+        ("1.0f64", "Copy", true),
+        ("1.0f64", "Clone", true),
+        ("1.0f64", "std::fmt::Debug", true),
+        ("1.0f64", "std::fmt::Display", true),
+        ("1.0f64", "Default", true),
+        ("1.0f64", "PartialEq", true),
+        ("1.0f64", "Eq", false),
+        ("1.0f64", "PartialOrd", true),
+        ("1.0f64", "Ord", false),
+        ("1.0f64", "std::hash::Hash", false),
+        ("1.0f64", "Send", true),
+        ("1.0f64", "Sync", true),
+        ("true", "Copy", true),
+        ("true", "Clone", true),
+        ("true", "std::fmt::Debug", true),
+        ("true", "std::fmt::Display", true),
+        ("true", "Default", true),
+        ("true", "PartialEq", true),
+        ("true", "Eq", true),
+        ("true", "PartialOrd", true),
+        ("true", "Ord", true),
+        ("true", "std::hash::Hash", true),
+        ("true", "Send", true),
+        ("true", "Sync", true),
+        ("'a'", "Copy", true),
+        ("'a'", "Clone", true),
+        ("'a'", "std::fmt::Debug", true),
+        ("'a'", "std::fmt::Display", true),
+        ("'a'", "Default", true),
+        ("'a'", "PartialEq", true),
+        ("'a'", "Eq", true),
+        ("'a'", "PartialOrd", true),
+        ("'a'", "Ord", true),
+        ("'a'", "std::hash::Hash", true),
+        ("'a'", "Send", true),
+        ("'a'", "Sync", true),
+        ("()", "Copy", true),
+        ("()", "Clone", true),
+        ("()", "std::fmt::Debug", true),
+        ("()", "std::fmt::Display", false),
+        ("()", "Default", true),
+        ("()", "PartialEq", true),
+        ("()", "Eq", true),
+        ("()", "PartialOrd", true),
+        ("()", "Ord", true),
+        ("()", "std::hash::Hash", true),
+        ("()", "Send", true),
+        ("()", "Sync", true),
+        ("1usize", "Copy", true),
+        ("1usize", "Clone", true),
+        ("1usize", "std::fmt::Debug", true),
+        ("1usize", "std::fmt::Display", true),
+        ("1usize", "Default", true),
+        ("1usize", "PartialEq", true),
+        ("1usize", "Eq", true),
+        ("1usize", "PartialOrd", true),
+        ("1usize", "Ord", true),
+        ("1usize", "std::hash::Hash", true),
+        ("1usize", "Send", true),
+        ("1usize", "Sync", true),
+        ("1i128", "Copy", true),
+        ("1i128", "Clone", true),
+        ("1i128", "std::fmt::Debug", true),
+        ("1i128", "std::fmt::Display", true),
+        ("1i128", "Default", true),
+        ("1i128", "PartialEq", true),
+        ("1i128", "Eq", true),
+        ("1i128", "PartialOrd", true),
+        ("1i128", "Ord", true),
+        ("1i128", "std::hash::Hash", true),
+        ("1i128", "Send", true),
+        ("1i128", "Sync", true),
+        ("1.0f32", "Copy", true),
+        ("1.0f32", "Clone", true),
+        ("1.0f32", "std::fmt::Debug", true),
+        ("1.0f32", "std::fmt::Display", true),
+        ("1.0f32", "Default", true),
+        ("1.0f32", "PartialEq", true),
+        ("1.0f32", "Eq", false),
+        ("1.0f32", "PartialOrd", true),
+        ("1.0f32", "Ord", false),
+        ("1.0f32", "std::hash::Hash", false),
+        ("1.0f32", "Send", true),
+        ("1.0f32", "Sync", true),
+    ];
+    let mut bad = vec![];
+    for &(v, tr, ok) in cases {
+        let src = format!("fn f() -> impl {tr} {{ {v} }}\nfn main() {{ let _ = f(); }}\n");
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        let d = s.check(&src);
+        // (a no is the bound's own error, naming the trait: not another error of the program)
+        let names_bound = |m: &str| m.contains(tr.rsplit("::").next().unwrap_or(tr)) && (m.contains("not satisfied") || m.contains("E0277"));
+        if d.is_empty() != ok || (!ok && !d.iter().any(|x| names_bound(&x.msg))) {
+            bad.push(format!("{v}: {tr}: rustc {ok}, zustc {d:?}"));
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// A type parameter is Copy only by its bounds (a method's own where clause among them): a call needing it from a
+/// method without one is E0277, reported from the generic method nothing calls
+#[test]
+fn trait_solver_placeholder_lacks_copy() {
+    let src = "fn require_copy<T: Copy>(_x: T) {}\nstruct Bar<T> {\n    x: T,\n}\nimpl<T> Bar<T> {\n    fn needs_copy(self) where T: Copy {\n        require_copy(self.x);\n    }\n    fn fails_copy(self) {\n        require_copy(self.x);\n    }\n}\nfn main() {}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert_eq!(d[0].line, 10, "{d:?}");
+    assert!(d[0].msg.contains("`T: Copy` is not satisfied"), "{d:?}");
+}
+
+/// `b.clone()` of a Box whose integer literal is not settled yet keeps it open for what the clone must be
+/// (`Box<isize>`), and a clone coerced to a trait object does not make the receiver one
+#[test]
+fn clone_of_box_keeps_its_literal_open() {
+    let src = "#[derive(Clone)]\nstruct B1;\ntrait A {}\nimpl A for B1 {}\nstruct Holder { a: Box<isize> }\nfn main() {\n    let k = Box::new(22);\n    let h = Holder { a: k.clone() };\n    let v: Box<_> = Box::new(B1);\n    let _c: Box<dyn A> = v.clone();\n    let _ = (h.a, k, v);\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert!(d.is_empty(), "{d:?}");
+}
+
+/// A struct with an unsized tail (`Foo<[u8]>`): `&Foo<[u8; 3]>` coerces to it (through a let, a generic call, a
+/// box), the literal's elements take the slice's element type, and a pattern on the pointee checks
+#[test]
+fn dst_struct_tail_coercions_check() {
+    let src = "struct Foo<T: ?Sized> { a: i32, inner: T }\nfn g<T: Copy>(x: &Foo<[T]>) -> T { x.inner[0] }\nfn main() {\n    let f: &Foo<[u8]> = &Foo { a: 32, inner: [1, 2, 3] };\n    let Foo { a, inner } = f;\n    let _ = (a, inner.len(), g(f));\n    let _: u8 = g(&Foo { a: 0, inner: [1u8, 2] });\n    let b: Box<Foo<[u8; 2]>> = Box::new(Foo { a: 1, inner: [4, 5] });\n    let b: Box<Foo<[u8]>> = b;\n    let _ = b.inner.len();\n}\n";
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check(src);
+    assert!(d.is_empty(), "{d:?}");
+}
+
+/// A method's own `where Self: Pair<u8, u16> + Parent` (nested commas) gives `Self: Parent`; an uninferred const
+/// argument takes the value a bound meets, so the impl's where clause on it is checked with that value
+#[test]
+fn review_where_self_nested_and_const_refined() {
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let src = "trait Parent { type X; }\ntrait Pair<A, B> {}\ntrait Child {\n    fn get(&self) -> <Self as Parent>::X where Self: Pair<u8, u16> + Parent;\n}\nfn main() {}\n";
+    assert!(s.check(src).is_empty(), "{:?}", s.check(src));
+    let src = "struct Const<const N: usize>;\ntrait Bar<const N: usize> {}\nimpl Bar<3> for () {}\ntrait Foo<const N: usize> {}\nimpl<const N: usize> Foo<N> for Const<N> where (): Bar<N> {}\nfn f(_: impl Foo<3>) {}\nfn main() { f(Const); }\n";
+    assert!(s.check(src).is_empty(), "{:?}", s.check(src));
+}
+
+/// Third review of #128, each checked against rustc: a trait's own `where Self: Parent` is a supertrait for
+/// `<Self as Parent>::A`; `&T` (T: Sized) and `&Tail<[u8]>` do not overlap; a std trait written as a path
+/// (`core::fmt::Debug`) is that trait; an impl's `-> impl Tr` whose arms all name one type is checked; an unsized
+/// field read by value is E0277
+#[test]
+fn review_three_cases() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    for src in [
+        "trait Parent { type A; }\ntrait Child where Self: Parent { fn get(&self) -> <Self as Parent>::A; }\nfn main() {}\n",
+        "struct Tail<T: ?Sized>(T);\ntrait Flag {}\nimpl<T> Flag for &T {}\nimpl Flag for &Tail<[u8]> {}\nfn main() {}\n",
+        "trait Local {}\nstruct S;\nimpl Local for S where u8: core::fmt::Debug {}\nfn need<X: Local>(_: X) {}\nfn main() { need(S); }\n",
+        "trait Parent {}\ntrait Child: Parent {}\nstruct W<T>(T);\nimpl<T: Copy> Parent for W<T> {}\nimpl<T> Child for W<T> where W<T>: Parent {}\nfn main() {}\n",
+        "fn main() { let a = vec![1.0]; let b = vec![1.0f32]; assert_eq!(a, b); }\n",
+    ] {
+        let d = check(src);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    }
+    // (a predicate on another subject gives nothing about the self type: `T: Parent` is not `W<T>: Parent`)
+    let d = check("trait Parent {}\ntrait Child: Parent {}\nstruct W<T>(T);\nimpl<T: Copy> Parent for W<T> {}\nimpl<T> Child for W<T> where T: Parent {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("Parent"), "{d:?}");
+    let d = check("trait Local {}\nstruct S;\nfn f(b: bool) -> impl Local { if b { S } else { S } }\nfn main() { let _ = f(true); }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("S: Local"), "{d:?}");
+    let d = check("struct S<T: ?Sized> { a: u8, tail: T }\nfn main() { let r: &S<[u8]> = &S { a: 1, tail: [1, 2] }; let _m = r.tail; let _ = r.a; }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("cannot be known at compilation time"), "{d:?}");
+}
+
+/// Fourth review of #128, each checked against rustc: `size_of_val` of a raw pointer and `drop_in_place` of a
+/// `*const` are E0308; a tail `if` whose arms are `S` and a call returning `S` is checked as one `S`; a qualified
+/// projection whose const argument zustc cannot evaluate takes the one impl that fits, and is not the first impl by
+/// self type when several do
+#[test]
+fn review_four_cases() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let d = check("fn main() { let a = [1u8, 2, 3]; let p: *const [u8] = &a; let _ = std::mem::size_of_val(p); }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("mismatched types"), "{d:?}");
+    let d = check("struct Tail<T: ?Sized>(u8, T);\nfn main() { let b: Box<Tail<[u8]>> = Box::new(Tail(1, [1, 2])); let p: *const Tail<[u8]> = &*b; unsafe { std::ptr::drop_in_place(p); } }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("mismatched types"), "{d:?}");
+    let d = check("trait Local {}\nstruct S;\nfn make_s() -> S { S }\nfn f(b: bool) -> impl Local { if b { S } else { make_s() } }\nfn main() { let _ = f(true); }\n");
+    assert!(d.len() == 1 && d[0].msg.contains("S: Local"), "{d:?}");
+    let one = "trait Pick<const N: usize> { type Out; }\nstruct S;\nimpl Pick<2> for S { type Out = u8; }\nfn main() { let _x: <S as Pick<{ match true { true => 2, false => 3 } }>>::Out = 0u8; }\n";
+    let d = check(one);
+    assert!(d.is_empty(), "{d:?}");
+    let two = "trait Pick<const N: usize> { type Out; }\nstruct S;\nimpl Pick<3> for S { type Out = u64; }\nimpl Pick<2> for S { type Out = u8; }\nfn main() { let _x: <S as Pick<{ match true { true => 2, false => 3 } }>>::Out = 0; }\n";
+    let d = check(two);
+    assert!(d.len() == 1 && d[0].msg.contains("cannot be evaluated"), "{d:?}");
+    // (an impl whose trait argument is not resolved (`{ <u8 as K>::N }`, 2) may be the one: not the other impl)
+    let unres = "trait K { const N: usize; }\nimpl K for u8 { const N: usize = 2; }\ntrait Pick<const N: usize> { type Out; }\nstruct S;\nimpl Pick<3> for S { type Out = u64; }\nimpl Pick<{ <u8 as K>::N }> for S { type Out = u8; }\nfn main() { let _x: <S as Pick<{ match true { true => 2, false => 3 } }>>::Out = 0; }\n";
+    let d = check(unres);
+    assert!(d.len() == 1 && d[0].msg.contains("cannot be evaluated"), "{d:?}");
+}
+
 /// Projections as normalizes-to goals (issue #2 step 3), each checked against rustc 1.97:
 /// - a bound's bindings (`T: Tr<A = u32>`): `<t as Tr>::A`, by Tr's impls, must be the bound type (E0271);
 /// - where clauses on a projection (`where T::A: Bar`, `where <T as Tr>::A: Bar`) or another type (`where W<T>:

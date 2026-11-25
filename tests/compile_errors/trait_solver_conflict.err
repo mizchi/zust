@@ -1,0 +1,1 @@
+ 6:1: conflicting implementations of trait `MyTrait` for type `MyType` (E0119)
