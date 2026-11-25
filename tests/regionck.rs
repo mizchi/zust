@@ -4346,3 +4346,95 @@ fn part29_review() {
     // as zustc does)
     errors_at("fn f() -> &'static str {\n    let mut r = String::new().as_str();\n    println!(\"{}\", r);\n    r = \"ok\";\n    r\n}\nfn main() { println!(\"{}\", f()); }\n", &[(5, "cannot return value referencing temporary value (E0515)")], "r2");
 }
+
+#[test]
+fn part30_pattern_moves() {
+    // (a by-value binding's move out of what the scrutinee owns is at its arm, where rustc 1.97 reports a use after
+    // it (8, 20); a move through a reference, which cannot be made, stays at the scrutinee (E0507, 12))
+    errors_at(r#"fn array() -> [(String, String); 3] { Default::default() }
+fn f() {
+    let a = array();
+    match a {
+        [_, _, _x] => {}
+    }
+    match a {
+        [.., _y] => {}
+    }
+}
+fn g(x: &Option<String>) {
+    match *x {
+        Some(_s) => {}
+        None => {}
+    }
+}
+fn h() {
+    let t = (String::new(), 1);
+    let s = match t { (s, _) => s };
+    let _u = t.0;
+    let _ = s;
+}
+fn main() { f(); g(&None); h(); }
+"#, &[(8, r#"use of moved value"#), (12, r#"cannot move out of"#), (20, r#"use of moved value"#)], "pm");
+}
+
+#[test]
+fn part30_outlives_bounds() {
+    // (an outlives bound on a type implies its parts': `Self: 'b` in an impl's method, `D<'a>: 'b`, `E<'a, T>: 'b`
+    // and `&'a T: 'b` give 'a: 'b, so returning a `&'a` for a `&'b` is no error; without the bound it is (8). A caller
+    // must meet it (4, 6). Lines as rustc 1.97's)
+    errors_at(r#"struct D<'a>(&'a i32);
+impl<'a> D<'a> {
+    fn keep<'b>(self) -> &'b i32 where Self: 'b { self.0 }
+}
+struct E<'a, T>(&'a T);
+fn f<'a, 'b>(x: D<'a>) -> &'b i32 where D<'a>: 'b { x.0 }
+fn g<'a, 'b, T>(x: E<'a, T>) -> &'b T where E<'a, T>: 'b { x.0 }
+fn h<'a, 'b>(x: D<'a>) -> &'b i32 { x.0 }
+fn main() { let v = 1; let d = D(&v); println!("{}", d.keep()); println!("{} {} {}", f(D(&v)), g(E(&v)), h(D(&v))); }
+"#, &[(8, r#"lifetime may not live long enough"#)], "w1");
+    errors_at(r#"struct D<'a>(&'a i32);
+fn f<'a, 'b>(x: D<'a>) -> &'b i32 where D<'a>: 'b { x.0 }
+fn k<'a, 'b, T>(x: &'a T) -> &'b T where &'a T: 'b { x }
+fn caller<'x>(d: D<'x>) -> &'static i32 { f(d) }
+fn caller2<'x>(d: D<'x>) -> &'x i32 { f(d) }
+fn caller3<'x>(v: &'x i32) -> &'static i32 { k(v) }
+fn main() { let v = 1; println!("{} {}", caller2(D(&v)), k(&v)); }
+"#, &[(4, r#"lifetime may not live long enough"#), (6, r#"lifetime may not live long enough"#)], "w2");
+}
+
+#[test]
+fn part30_index_deref_and_box_self() {
+    // (a field read through a type's own Index and then its Deref (`v[0].f` with `Output = MyPtr<Foo>`) type-checks,
+    // and its borrow is checked: E0506 for the assignment of `v` while `&v[0].f` lives, at rustc 1.97's line. A
+    // `self: Box<Self>` method called on a temporary Box (`Box::new(S).f()`, `mk().f()`) type-checks)
+    errors_at(r#"use std::ops::{Deref, Index};
+struct MyVec<T> { x: T }
+impl<T> Index<usize> for MyVec<T> { type Output = T; fn index(&self, _: usize) -> &T { &self.x } }
+struct MyPtr<T> { x: T }
+impl<T> Deref for MyPtr<T> { type Target = T; fn deref(&self) -> &T { &self.x } }
+struct Foo { f: usize }
+fn ok() -> usize {
+    let v = MyVec { x: MyPtr { x: Foo { f: 22 } } };
+    let i = &v[0].f;
+    *i + v[0].f
+}
+fn bad() {
+    let mut v = MyVec { x: MyPtr { x: Foo { f: 22 } } };
+    let i = &v[0].f;
+    v = MyVec { x: MyPtr { x: Foo { f: 23 } } };
+    let _ = *i;
+    let _ = v;
+}
+fn main() { println!("{}", ok()); bad(); }
+"#, &[(15, r#"cannot assign to `v` because it is borrowed"#)], "ix");
+    errors_at(r#"struct S;
+impl S { fn f(self: Box<Self>) -> i32 { 1 } fn g(self: Box<Self>, k: i32) -> i32 { k } }
+struct D<'a>(&'a i32);
+impl D<'_> { fn get(self: Box<Self>) -> i32 { *self.0 } }
+fn mk() -> Box<S> { Box::new(S) }
+fn main() {
+    let x = 5;
+    println!("{} {} {} {}", Box::new(S).f(), mk().f(), Box::new(S).g(2), Box::new(D(&x)).get());
+}
+"#, &[], "bxall");
+}
