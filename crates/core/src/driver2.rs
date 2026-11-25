@@ -12343,6 +12343,23 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
                         return Some(format!("{}:1: {}", items[ii].line, size_msg(b, &gens)));
                     }
                 }
+                // (a trait argument that may be unsized for a parameter of the program's trait not declared `?Sized`:
+                // `impl<T: ?Sized> Tr<T> for ()` with `trait Tr<T> {}`)
+                let tr = sm.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+                let tr = tr.map(|t| t.rsplit("::").next().unwrap_or(t));
+                if let Some((di, d)) = tr.and_then(|tr| sums[..user.min(sums.len())].iter().enumerate().find(|(_, s)| s.trait_decl.as_deref() == Some(tr))) {
+                    let tparams: Vec<&String> = d.trait_generics.iter().map(|g| &g.0).filter(|g| !g.starts_with('#') && *g != "Self").collect();
+                    if tparams.len() == sm.impl_trait_args.len() {
+                        let dtext = blank_comments(src.get(items[di].start..items[di].end).unwrap_or(""));
+                        let dhead = dtext.split('{').next().unwrap_or("").to_string();
+                        for (k, a) in sm.impl_trait_args.iter().enumerate() {
+                            let Ok(a) = prog.resolve_g(a, &gn) else { continue };
+                            if may(a) && !maybe_unsized(&dhead, tparams[k]) {
+                                return Some(format!("{}:1: {}", items[ii].line, size_msg(a, &gens)));
+                            }
+                        }
+                    }
+                }
             }
             continue;
         }

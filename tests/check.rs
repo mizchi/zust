@@ -3151,8 +3151,12 @@ fn sized_review_cases() {
     let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
     let d = check("struct W<T: ?Sized>(T);\nfn bad<T: ?Sized>(_: W<T>) {}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
+    // (a `?Sized` parameter as a trait argument for the trait's parameter not declared `?Sized`)
+    let d = check("trait Tr<T> {}\nimpl<T: ?Sized> Tr<T> for () {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
     for src in [
         "struct W<T: ?Sized>(T);\nfn good<T: ?Sized>(_: &W<T>) {}\nfn main() {}\n",
+        "trait Tr<T: ?Sized> {}\nimpl<T: ?Sized> Tr<T> for () {}\nfn main() {}\n",
         "trait Dup: Clone {}\nfn f<T: Dup + ?Sized>(_: &T) { let _v: Vec<T> = Vec::new(); }\nfn main() {}\n",
         "use std::fmt::Display;\nfn f<T: ?Sized + Display>(x: &T) -> String { let c = |y: &T| format!(\"{y}\"); c(x) }\nfn main() { println!(\"{}\", f(\"abc\")); }\n",
     ] {

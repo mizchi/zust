@@ -2426,6 +2426,7 @@ run-pass	dst/dst-coercions.rs
 run-pass	dst/dst-field-align.rs
 run-pass	dst/dst-irrefutable-bind.rs
 compile-fail	dst/dst-rvalue.rs
+compile-fail	dst/dst-sized-trait-param.rs
 run-pass	dst/dst-struct-sole.rs
 run-pass	dst/dst-struct.rs
 run-pass	dst/dst-trait.rs
