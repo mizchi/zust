@@ -415,6 +415,61 @@ fn parse_all(xs: Array<String>) -> Option<Array<i32>> { xs.try_map((x) => x.trim
 - 分かっている違い: サロゲートペアの途中で切る文字列の `slice` は、JS では孤立したサロゲート、wasm では U+FFFD になる
 - まだないもの: 乱数、`enumerate`
 
+### パターン: `|`、ガード、レコード
+
+```zsc
+fn kind(t: Tok) -> i32 {
+  match t {
+    Plus | Minus => 1,
+    Num(n) if n < 0 => -1,          // ガード: パターンの名前が使える
+    Num(_) => 2,
+    _ => 0,
+  }
+}
+fn x_of(e: Ev) -> i32 { match e { Click(x, _) | Move(_, x, _) => x, Key(_) => -1 } }
+fn quadrant(p: Point) -> i32 {
+  match p { Point { x: 0, y: 0 } => 0, Point { x, y } if x > 0 && y > 0 => 1, _ => 2 }
+}
+fn greet(u: User) -> String { let User { name, .. } = u; name }
+```
+
+- `A | B` は入れ子にも書ける(`Some(Circle(_) | Square(_))`)。どの選択肢も同じ名前を同じ型で束縛する
+- ガード `pat if cond =>` は、パターンの名前を使える(`?` も書ける)。ガードのある腕は網羅性の検査では数えない
+- レコードのパターン `Point { x, y: py, .. }` は `match` / `if let` / `let` に書ける。書かないフィールドがあれば `..` で終える
+- JS
+  - `|` は 1 つの条件(`e.TAG === "A" || e.TAG === "B"`)。束縛は、合った選択肢でのその位置
+  - ガードのある match はラベル付きのブロックで、腕ごとの `if` が合えばそこから抜ける
+  - `let` の分解は JS の分割代入(`const { name, age } = u;`)
+- Rust では Rust の `|`、ガード、構造体のパターン(`@wasm` での `let` の分解はまだない)
+- まだないもの: バリアントの `..`(`Rect(..)`)、クロージャの引数と `for` の分解
+
+### `impl`: メソッドと関連関数
+
+```zsc
+type V2 = { x: f64, y: f64 }
+impl V2 {
+  fn new(x: f64, y: f64) -> Self { Self { x, y } }       // V2::new(1.0, 2.0)
+  fn add(self, o: V2) -> V2 { V2 { x: self.x + o.x, y: self.y + o.y } }
+  fn len(self) -> f64 { (self.x * self.x + self.y * self.y).sqrt() }
+}
+impl<T> Stack<T> {
+  fn push(self, x: T) -> Stack<T> { Stack { items: self.items.push(x) } }
+}
+impl<T: Eq> Stack<T> {
+  fn has(self, x: T) -> bool { self.items.includes(x) }
+}
+
+fn demo() -> f64 { V2::new(3.0, 4.0).add(V2::new(0.0, 0.0)).len() }   // JS: V2$len(V2$add(V2$new(3, 4), ..))
+```
+
+- レコードにも enum にも書ける。最初の引数が `self`(型は書かない)の関数はメソッド `v.len()`、それ以外は `V2::new()` で呼ぶ。`V2::len(v)` や `vs.map(V2::len)` のように関数としても使える
+- `Self` はその型(型、`Self { .. }`、`Self::new()`、パターン)
+- 中身はトップレベルの関数 `V2$len`(引数の最初が受け手)で、JS でも Rust でも普通の呼び出しになる。`impl<T>` の型引数は関数の型引数になる(bound も)
+- まだできないこと
+  - `export`(TS から呼ぶ名前を決めていない: 呼び出す関数を `export` する)
+  - effect を perform するメソッドのメソッド呼び出し(`P::f(x)` と関数として呼ぶ)
+  - 他のモジュールから取り込んだ型のメソッド、トレイト
+
 ### 総称関数の bound: `Eq` / `Ord` / `Hash`
 
 ```zsc

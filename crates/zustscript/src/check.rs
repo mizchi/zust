@@ -150,11 +150,18 @@ pub struct Info {
     pub num: HashMap<Id, Ty>,
     /// the type `json_encode` / `json_decode` converts, at its callee's id
     pub json: HashMap<Id, Ty>,
+    /// the functions of an `impl` whose first parameter is `self` (`Point$len`): called as methods
+    pub self_methods: HashSet<String>,
+    /// a method call's function and its instantiated type (`p.len()` is `Point$len(p)`)
+    pub method_fn: HashMap<Id, (String, Ty)>,
     pub cast: HashMap<Id, (Ty, Ty)>,
     /// the effects each function performs and does not handle (empty: an ordinary function)
     pub effects: HashMap<String, BTreeSet<String>>,
     /// the type arguments at each use of a monomorphized (numeric-bound) function, in its generics' order
     pub inst: HashMap<Id, Vec<Ty>>,
+    /// every generic function's instantiation at a call (the Rust output writes an instance for each, bounded or
+    /// not; the JS one only for a bound)
+    pub rust_inst: HashMap<Id, Vec<Ty>>,
     /// array literals that build a typed array (the element type): `let w: F32Array = [..]`
     pub typed_lit: HashMap<Id, Ty>,
     pub records: HashMap<String, RecordDef>,
@@ -210,6 +217,8 @@ pub struct Checker {
     /// (id, type) to resolve into `Info::num` when the function is done
     nums: Vec<(Id, Ty)>,
     jsons: Vec<(Id, Ty)>,
+    method_fns: Vec<(Id, String, Ty)>,
+    rust_insts: Vec<(Id, Vec<Ty>)>,
     casts: Vec<(Id, Pos, Ty, Ty)>,
     /// the numeric bounds of the function being checked
     bounds: HashMap<String, String>,
@@ -396,6 +405,8 @@ impl Checker {
             intv: HashSet::new(),
             nums: vec![],
             jsons: vec![],
+            method_fns: vec![],
+            rust_insts: vec![],
             casts: vec![],
             bounds: HashMap::new(),
             insts: vec![],
@@ -726,6 +737,9 @@ impl Checker {
                     e.ts = from.as_ref().and_then(|f| f.repr.clone());
                 }
                 Item::Fn { name, generics, bounds, args, ret, pos, is_async, wasm, simd, public, .. } => {
+                    if name.contains('$') && args.first().is_some_and(|a| a.0 == "self") {
+                        self.info.self_methods.insert(name.clone());
+                    }
                     // (a public generic function is written for every type its bounds admit: the numeric ones are
                     // few, the others are not)
                     if *public && let Some((g, b)) = bounds.iter().find(|(_, b)| !num_bound(b)) {
@@ -960,6 +974,14 @@ impl Checker {
         for (id, t) in std::mem::take(&mut self.jsons) {
             let r = self.resolve(&t);
             self.info.json.insert(id, r);
+        }
+        for (id, ts) in std::mem::take(&mut self.rust_insts) {
+            let r = ts.iter().map(|t| self.resolve(t)).collect();
+            self.info.rust_inst.insert(id, r);
+        }
+        for (id, f, t) in std::mem::take(&mut self.method_fns) {
+            let r = self.resolve(&t);
+            self.info.method_fn.insert(id, (f, r));
         }
         for (id, t) in std::mem::take(&mut self.tys) {
             let r = self.resolve(&t);
@@ -1348,25 +1370,8 @@ impl Checker {
                     self.info.callee.insert(e.id, Callee::Local);
                     return t;
                 }
-                if let Some(s) = self.info.fns.get(n) {
-                    let (g, mut ts, bounds) = (s.generics.clone(), s.args.clone(), s.bounds.clone());
-                    ts.push(s.ret.clone());
-                    // (the generic parameters themselves go last, to learn what they were instantiated to)
-                    let nts = ts.len();
-                    ts.extend(g.iter().map(|p| Ty::Param(p.clone())));
-                    let mut inst = self.instantiate(&g, &ts);
-                    let targs = inst.split_off(nts);
-                    let r = inst.pop().unwrap();
-                    if !bounds.is_empty() {
-                        for (p, t) in g.iter().zip(&targs) {
-                            if let Some(b) = bounds.get(p) {
-                                self.bound_checks.push((pos, t.clone(), b.clone()));
-                            }
-                        }
-                        self.insts.push((e.id, targs));
-                    }
-                    self.info.callee.insert(e.id, Callee::Fn);
-                    return Ty::Fn(inst, Box::new(r));
+                if self.info.fns.contains_key(n) {
+                    return self.fn_value(e.id, pos, n);
                 }
                 if let Some((s, _, js)) = self.info.externs.get(n) {
                     let (g, mut ts, js) = (s.generics.clone(), s.args.clone(), js.clone());
@@ -1403,6 +1408,8 @@ impl Checker {
                 self.err(pos, format!("unknown name `{n}`"));
                 self.fresh()
             }
+            // `Point::origin()`: a function of an `impl` (one without `self`, or one with it, called as a function)
+            EK::Path(tn, c) if self.info.fns.contains_key(&format!("{tn}${c}")) => self.fn_value(e.id, pos, &format!("{tn}${c}")),
             EK::Path(tn, c) if c == "zero" || c == "one" => {
                 // `T::zero()` / `i64::one()` (num-traits' constants)
                 let t = match tn.as_str() {
@@ -1515,6 +1522,28 @@ impl Checker {
                         self.unify(a.pos, &t, p);
                     }
                     return ret;
+                }
+                // `p.len()`: a method of an `impl` of the receiver's type (its `self` is the receiver). Called as the
+                // function `Point$len(p)` once checked (ast::desugar_methods)
+                if let Ty::Named(n, _) = &rt
+                    && let fname = format!("{n}${name}")
+                    && self.info.self_methods.contains(&fname)
+                {
+                    if self.info.effects.get(&fname).is_some_and(|e| !e.is_empty()) {
+                        self.err(pos, format!("`{name}` performs effects: a method cannot yet (call it as `{n}::{name}(x, ..)`)"));
+                    }
+                    let ft = self.fn_value(e.id, pos, &fname);
+                    let Ty::Fn(params, ret) = ft.clone() else { unreachable!() };
+                    self.unify(recv.pos, &rt, &params[0]);
+                    if params.len() != args.len() + 1 {
+                        self.err(pos, format!("`.{name}()` takes {} argument(s), found {}", params.len() - 1, args.len()));
+                    }
+                    for (a, p) in args.iter().zip(&params[1..]) {
+                        let t = self.infer(a, Some(p));
+                        self.unify(a.pos, &t, p);
+                    }
+                    self.method_fns.push((e.id, fname, ft));
+                    return *ret;
                 }
                 // `props.onPick(x)`: a call of a record's function-typed field
                 if let Ty::Named(n, targs) = &rt
@@ -2107,6 +2136,32 @@ impl Checker {
 
     /// `x?`: the value inside the `Result` / `Option` `x`; its `Err` / `None` is returned as it is, so the
     /// function's result must be a `Result` with the same error type (no conversion), or an `Option`
+    /// A top-level function as a value at `id`: its type, instantiated (the numeric and other bounds checked)
+    fn fn_value(&mut self, id: Id, pos: Pos, n: &str) -> Ty {
+        let s = &self.info.fns[n];
+        let (g, mut ts, bounds) = (s.generics.clone(), s.args.clone(), s.bounds.clone());
+        ts.push(s.ret.clone());
+        // (the generic parameters themselves go last, to learn what they were instantiated to)
+        let nts = ts.len();
+        ts.extend(g.iter().map(|p| Ty::Param(p.clone())));
+        let mut inst = self.instantiate(&g, &ts);
+        let targs = inst.split_off(nts);
+        let r = inst.pop().unwrap();
+        if !g.is_empty() && self.record_types {
+            self.rust_insts.push((id, targs.clone()));
+        }
+        if !bounds.is_empty() {
+            for (p, t) in g.iter().zip(&targs) {
+                if let Some(b) = bounds.get(p) {
+                    self.bound_checks.push((pos, t.clone(), b.clone()));
+                }
+            }
+            self.insts.push((id, targs));
+        }
+        self.info.callee.insert(id, Callee::Fn);
+        Ty::Fn(inst, Box::new(r))
+    }
+
     fn try_(&mut self, id: Id, pos: Pos, x: &Expr) -> Ty {
         if self.in_handle {
             self.err(pos, "`?` cannot be used inside `handle` yet (the body and the arms are functions of their own in JS): bind the result with `let r = handle ..;` and use `r?` after it, or move the body into a function that returns `Result`");

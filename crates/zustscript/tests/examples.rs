@@ -1035,6 +1035,24 @@ fn patterns_in_js() {
     assert!(js.contains("    const x = (e.TAG === \"Click\") ? e._0 : e._1;\n"), "{js}");
 }
 
+/// tests/methods.zsc: `impl` blocks give the same results lowered to Rust and run as wasm, and run as JS; a method is
+/// the top-level function `V2$len`, called with the receiver first
+#[test]
+fn methods_same_in_js_and_wasm() {
+    let src = root().join("tests/methods.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("methods-wasm", &[][..]), ("methods-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        outs.push(node(&d, "const m = await import('./methods.js'); console.log(JSON.stringify(m.run()), m.js_run(), m.as_value([{ x: 3, y: 4 }]));"));
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], "[10,6,3,2,2,1] 2 b true 3 3 5\n");
+    let js = std::fs::read_to_string(root().join("target/test-out/methods-js/methods.js")).unwrap();
+    assert!(js.contains("const st = Stack$push(Stack$push(Stack$empty(), \"a\"), \"b\");"), "{js}");
+}
+
 /// tests/js_values.zsc: extern types (properties, methods, a setter, a constructor, a module's), `null` from JS as
 /// `None` and `None` to JS as `undefined`, and what JS throws (or a Promise rejects with) as an `Err`
 #[test]

@@ -99,19 +99,22 @@ zsc に小さなコードを通して確かめた(機能ごとに 1 つの `.zsc
      - 乱数(JS 層だけ)、`enumerate` 相当(`for (i, x) in ..` と一緒に)、数値の定数(`f64::PI` など)
      - 型つき配列(`F64Array` など)の新しいメソッド
      - zustc の制限への回避: [#207](https://github.com/mizchi/zust/issues/207)(`Wire::get` が `Vec::get` を隠す: helper の名前を `decode` にした)、[#208](https://github.com/mizchi/zust/issues/208)(`vec![..]` の中のクロージャ: `includes` / `index_of` はクロージャなしの補助関数)、[#209](https://github.com/mizchi/zust/issues/209)(`parse::<f64>` が `strtod` を要る: `to_f64` はグルーの JS で読む)、[#214](https://github.com/mizchi/zust/issues/214)(`match` の結果を `[..]` で切ると型を見失う: 型を付けて束縛する)
-6. **パターン**: or パターン(`A | B =>`)とガード(`n if n > 1 =>`)(提案 004)
+6. **済: パターン**(README の「パターン」)。or パターン(`A | B =>`、入れ子も)、ガード(`n if n > 1 =>`)、レコードのパターン(`Point { x, .. }`。`match` / `if let` / `let`)
+   - 残り: バリアントの `..`(`Rect(..)`)、クロージャの引数と `for` の分解(`((a, b)) =>`、`for (i, x) in ..`)、`@wasm` での `let` の分解、`while let`
 7. **済: 例外**(README の「JS の値」)。`extern` の結果を `Result<T, String>`(メッセージ)か `Result<T, E>`(E は extern type: 投げた値)にすると、throw を `Err` で受ける。`Promise<Result<T, E>>` は reject も
    - 残り: zustscript の側で投げる手段(`panic` 相当)、境界の `pub fn` の `Result` を TS の例外にするか(下の 003 の未決事項)
 8. **済: `return` と `loop`**(README の「ローカルな可変性とループ」)。JS では式の中の `return` を `?` と同じく文として前に書き出す。Rust でも `return` / `loop`
    - 残り: `break value`、ラベルつきの `break`、`handle` の中の `return`、`@wasm` のクロージャの中の `return`
 9. **プログラムを書いて見つかったもの**(電卓、Todo アプリ、CSV の集計、ライフゲーム、粒子のシミュレーション、3 モジュールの非同期アプリ)。上の 5 / 6 以外で
-   - 型: 型の別名(`type Env = Array<(String, f64)>`)、`impl` のメソッド、enum のレコード形のバリアント(`Eq` / `Ord` の bound は済)
-   - パターン: `let P { x, y } = p`、クロージャの引数の `((a, b)) =>`、`for (i, x) in ..`、`while let`。網羅性で漏れたときのメッセージ(タプルや入れ子では「`_` を足す」としか言わない)
+   - 型: 型の別名(`type Env = Array<(String, f64)>`)、enum のレコード形のバリアント(`Eq` / `Ord` の bound と `impl` は済)
+   - パターン: クロージャの引数の `((a, b)) =>`、`for (i, x) in ..`、`while let`(`let P { x, y } = p` は済)。網羅性で漏れたときのメッセージ(タプルや入れ子では「`_` を足す」としか言わない)
    - 文法: トップレベルの `const`、入れ子の `fn` と自分を呼ぶクロージャ、ビット演算子(`& | ^ << >>`)、`unwrap` / `panic`
    - JSX: 子の `Option<Jsx>`、`{...props}`、`cond && <x />`
    - `@wasm`: タプル、`Option` / `Result` の関数を取るメソッド(`map` など。`unwrap_or` `is_some` `ok` `ok_or` は済)
    - ツール: `zsc` が取り込む `.zsc` を一緒にコンパイルしない(ファイルごとに実行する)。`@wasm` の出力は `--inline-runtime` でも `zustscript-helper` パッケージを要する
    - 境界: DOM のイベントの型(`extern type` を手で書く)。JSON を型どおりに読むのは済(`json_decode`)
+10. **済: `impl`**(README の「`impl`」)。メソッド(`self`)と関連関数(`V2::new`)、`Self`、総称の `impl<T>`(bound も)
+   - 残り: `export`、effect を perform するメソッド、取り込んだ型のメソッド、トレイト
 
 ### P1: 使い心地
 

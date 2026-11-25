@@ -374,3 +374,108 @@ pub fn with_prelude(items: Vec<Item>) -> Vec<Item> {
     out.extend(items);
     out
 }
+
+/// Each expression in `e`, children first, mutably
+pub fn each_expr_mut(e: &mut Expr, f: &mut dyn FnMut(&mut Expr)) {
+    match &mut e.kind {
+        EK::Lit(_) | EK::Var(_) | EK::Path(..) | EK::Break | EK::Continue | EK::Return(None) => {}
+        EK::Call(c, args) => {
+            each_expr_mut(c, f);
+            args.iter_mut().for_each(|a| each_expr_mut(a, f));
+        }
+        EK::Method(r, _, args) => {
+            each_expr_mut(r, f);
+            args.iter_mut().for_each(|a| each_expr_mut(a, f));
+        }
+        EK::Field(x, _) | EK::Un(_, x) | EK::Cast(x, _) | EK::Assign(_, x) | EK::Loop(x) | EK::Return(Some(x)) | EK::Await(x) | EK::Async(x) | EK::Try(x) => each_expr_mut(x, f),
+        EK::Bin(_, a, b) | EK::While(a, b) | EK::For(_, a, b) | EK::Index(a, b) => {
+            each_expr_mut(a, f);
+            each_expr_mut(b, f);
+        }
+        EK::If(c, t, el) => {
+            each_expr_mut(c, f);
+            each_expr_mut(t, f);
+            if let Some(x) = el {
+                each_expr_mut(x, f);
+            }
+        }
+        EK::Match(s, arms) => {
+            each_expr_mut(s, f);
+            for a in arms {
+                if let Some(g) = &mut a.guard {
+                    each_expr_mut(g, f);
+                }
+                each_expr_mut(&mut a.body, f);
+            }
+        }
+        EK::Block(stmts, tail) => {
+            for s in stmts {
+                match s {
+                    Stmt::Let(_, _, x) | Stmt::LetMut(_, _, x) | Stmt::Expr(x) => each_expr_mut(x, f),
+                }
+            }
+            if let Some(t) = tail {
+                each_expr_mut(t, f);
+            }
+        }
+        EK::Closure(_, b) => each_expr_mut(b, f),
+        EK::Record(_, fs, base) => {
+            fs.iter_mut().for_each(|x| each_expr_mut(&mut x.1, f));
+            if let Some(b) = base {
+                each_expr_mut(b, f);
+            }
+        }
+        EK::Array(xs) | EK::Tuple(xs) | EK::Interp(_, xs) | EK::Perform(_, _, xs) => xs.iter_mut().for_each(|x| each_expr_mut(x, f)),
+        EK::Jsx(j) => jsx_mut(j, f),
+        EK::Handle(b, arms) => {
+            each_expr_mut(b, f);
+            arms.iter_mut().for_each(|a| each_expr_mut(&mut a.body, f));
+        }
+    }
+    f(e);
+}
+
+fn jsx_mut(j: &mut Jsx, f: &mut dyn FnMut(&mut Expr)) {
+    j.attrs.iter_mut().for_each(|a| each_expr_mut(&mut a.1, f));
+    for c in &mut j.children {
+        if let JsxChild::Expr(x) = c {
+            each_expr_mut(x, f);
+        }
+    }
+}
+
+/// After checking: a method call of an `impl`'s function, `p.len()`, becomes the call `Point$len(p)`, and
+/// `Point::origin` the name `Point$origin`, so the JS and the Rust write them as any call
+pub fn desugar_methods(items: &mut [Item], info: &mut crate::check::Info) {
+    let mut next = 0;
+    for it in items.iter_mut() {
+        if let Item::Fn { body, .. } = it {
+            each_expr_mut(body, &mut |e| next = next.max(e.id + 1));
+        }
+    }
+    for it in items.iter_mut() {
+        let Item::Fn { body, .. } = it else { continue };
+        each_expr_mut(body, &mut |e| {
+            if let Some((fname, ft)) = info.method_fn.remove(&e.id) {
+                let EK::Method(recv, _, args) = std::mem::replace(&mut e.kind, EK::Break) else { unreachable!() };
+                let id = next;
+                next += 1;
+                info.callee.insert(id, crate::check::Callee::Fn);
+                info.callee.remove(&e.id);
+                if let Some(t) = info.inst.remove(&e.id) {
+                    info.inst.insert(id, t);
+                }
+                if let Some(t) = info.rust_inst.remove(&e.id) {
+                    info.rust_inst.insert(id, t);
+                }
+                info.ty.insert(id, ft);
+                let callee = Expr { id, pos: e.pos, kind: EK::Var(fname) };
+                e.kind = EK::Call(Box::new(callee), std::iter::once(*recv).chain(args).collect());
+            } else if let EK::Path(tn, c) = &e.kind
+                && matches!(info.callee.get(&e.id), Some(crate::check::Callee::Fn))
+            {
+                e.kind = EK::Var(format!("{tn}${c}"));
+            }
+        });
+    }
+}

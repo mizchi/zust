@@ -1,7 +1,7 @@
 /**
  * tree-sitter grammar for zustscript (crates/zustscript), for the playground's highlighting.
  *
- * It follows src/parse.rs: items (`type`, `enum`, `fn`, `extern`, `import type`, `wasm { .. }`, `wasm fn`), blocks,
+ * It follows src/parse.rs: items (`type`, `enum`, `fn`, `impl`, `extern`, `import type`, `wasm { .. }`, `wasm fn`), blocks,
  * patterns, expressions with `|>`, arrow closures and JSX. The Rust of `wasm { .. }` / `wasm fn` bodies is read as
  * tokens in balanced brackets (enough to color it).
  */
@@ -22,6 +22,8 @@ export default grammar({
     [$._expression, $.closure_expression],
     [$.constructor, $.record_expression],
     [$.closure_parameter, $._expression],
+    // (`A if () => ..`: the guard `()` and an arm, or a closure)
+    [$.unit, $.closure_parameters],
   ],
 
   rules: {
@@ -37,7 +39,11 @@ export default grammar({
         $.import_item,
         $.wasm_block,
         $.wasm_function_item,
+        $.impl_item,
       ),
+
+    impl_item: ($) =>
+      seq('impl', optional($.type_parameters), field('type', $._type), '{', repeat($.function_item), '}'),
 
     attribute: ($) => seq('@', field('name', alias(choice('wasm', 'simd'), $.attribute_name)), optional(seq('(', $.identifier, ')'))),
     visibility: (_) => choice('export', 'pub'),
@@ -66,7 +72,8 @@ export default grammar({
         field('body', $.block),
       ),
     type_parameters: ($) => seq('<', commaSep(seq($.type_identifier, optional(seq(':', $.type_identifier)))), '>'),
-    parameters: ($) => seq('(', commaSep($.parameter), ')'),
+    parameters: ($) => seq('(', commaSep(choice($.self_parameter, $.parameter)), ')'),
+    self_parameter: (_) => 'self',
     parameter: ($) => seq(field('name', $.identifier), ':', field('type', $._type)),
 
     extern_item: ($) =>
@@ -176,8 +183,11 @@ export default grammar({
     _block_like: ($) => choice($.if_expression, $.match_expression, $.while_expression, $.loop_expression, $.for_expression, $.block, $.handle_expression),
 
     // ---- patterns
-    pattern: ($) =>
+    pattern: ($) => choice($._pattern_one, $.or_pattern),
+    or_pattern: ($) => prec.left(seq($._pattern_one, repeat1(seq('|', $._pattern_one)))),
+    _pattern_one: ($) =>
       choice(
+        $.record_pattern,
         $.wildcard,
         $.identifier,
         $.boolean,
@@ -188,6 +198,9 @@ export default grammar({
         $.variant_pattern,
       ),
     wildcard: (_) => '_',
+    record_pattern: ($) =>
+      seq(field('type', alias($._upper, $.type_identifier)), '{', commaSep(choice($.field_pattern, '..')), '}'),
+    field_pattern: ($) => seq(field('name', $.field_identifier), optional(seq(':', $.pattern))),
     tuple_pattern: ($) => seq('(', commaSep($.pattern), ')'),
     variant_pattern: ($) =>
       prec.right(seq(optional(seq(alias($._upper, $.type_identifier), '::')), field('name', $.variant_identifier), optional(seq('(', commaSep($.pattern), ')')))),
@@ -288,7 +301,7 @@ export default grammar({
     loop_expression: ($) => seq('loop', field('body', $.block)),
     for_expression: ($) => seq('for', field('binding', $.identifier), 'in', field('iterable', $._expression), field('body', $.block)),
     match_expression: ($) => seq('match', field('value', $._expression), '{', commaSep($.match_arm), '}'),
-    match_arm: ($) => seq(field('pattern', $.pattern), '=>', field('body', $._expression)),
+    match_arm: ($) => seq(field('pattern', $.pattern), optional(seq('if', field('guard', $._expression))), '=>', field('body', $._expression)),
     handle_expression: ($) => seq('handle', field('body', $._expression), '{', commaSep($.handler_arm), '}'),
     handler_arm: ($) =>
       seq(field('operation', $._any_variant), optional(seq('(', commaSep($.pattern), ')')), ',', field('continuation', $.identifier), '=>', field('body', $._expression)),

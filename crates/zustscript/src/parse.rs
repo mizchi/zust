@@ -28,6 +28,8 @@ pub struct Parser {
     col: u32,
     peeked: Option<Tok>,
     next_id: Id,
+    /// in an `impl Point<T> { .. }`: the type `Self` names (and its name, for `Self { .. }` / `Self::f()`)
+    self_ty: Option<(String, TyS)>,
 }
 
 pub type PResult<X> = Result<X, (Pos, String)>;
@@ -39,7 +41,7 @@ const PUNCTS: &[&str] = &[
 
 impl Parser {
     pub fn new(src: &str) -> Parser {
-        Parser { src: src.chars().collect(), i: 0, line: 1, col: 0, peeked: None, next_id: 0 }
+        Parser { src: src.chars().collect(), i: 0, line: 1, col: 0, peeked: None, next_id: 0, self_ty: None }
     }
 
     fn here(&self) -> Pos {
@@ -267,9 +269,57 @@ impl Parser {
     pub fn file(&mut self) -> PResult<Vec<Item>> {
         let mut items = vec![];
         while self.peek()?.t != T::Eof {
-            items.push(self.item()?);
+            if self.is_kw("impl")? {
+                items.extend(self.impl_block()?);
+            } else {
+                items.push(self.item()?);
+            }
         }
         Ok(items)
+    }
+
+    /// `impl<T> Stack<T> { fn push(self, x: T) -> Stack<T> { .. } fn new() -> Self { .. } }`: each function is the
+    /// top-level `Stack$push` (with the impl's generic parameters first); one whose first parameter is `self` is
+    /// called as a method, `s.push(x)`, the others as `Stack::new()`
+    fn impl_block(&mut self) -> PResult<Vec<Item>> {
+        let ipos = self.next()?.pos;
+        let (generics, bounds) = self.generics_bounds()?;
+        let (name, npos) = self.ident()?;
+        let mut args = vec![];
+        if self.eat("<")? {
+            while !self.eat(">")? {
+                args.push(self.ty()?);
+                self.eat(",")?;
+            }
+        }
+        if args.is_empty() && !generics.is_empty() {
+            args = generics.iter().map(|g| TyS::Name(g.clone(), vec![], npos)).collect();
+        }
+        self.expect("{")?;
+        let saved = self.self_ty.replace((name.clone(), TyS::Name(name.clone(), args, npos)));
+        let mut out = vec![];
+        while !self.eat("}")? {
+            let it = self.item()?;
+            match it {
+                Item::Fn { name: m, public, pos, .. } if public => {
+                    self.self_ty = saved;
+                    return Err((pos, format!("`{m}` in an `impl` cannot be exported yet: export a function that calls it")));
+                }
+                Item::Fn { name: m, public, wasm, simd, relaxed, is_async, generics: g, bounds: b, args, ret, body, pos } => {
+                    let mut gs = generics.clone();
+                    gs.extend(g);
+                    let mut bs = bounds.clone();
+                    bs.extend(b);
+                    out.push(Item::Fn { name: format!("{name}${m}"), public, wasm, simd, relaxed, is_async, generics: gs, bounds: bs, args, ret, body, pos });
+                }
+                _ => {
+                    self.self_ty = saved;
+                    return Err((ipos, "an `impl` holds functions only".into()));
+                }
+            }
+        }
+        self.self_ty = saved;
+        Ok(out)
     }
 
     fn generics(&mut self) -> PResult<Vec<String>> {
@@ -375,7 +425,16 @@ impl Parser {
                 self.expect("(")?;
                 let mut args = vec![];
                 while !self.eat(")")? {
-                    let (a, _) = self.ident()?;
+                    let (a, apos) = self.ident()?;
+                    // (`self`: the impl's type, first)
+                    if a == "self" && args.is_empty() && !self.is(":")? {
+                        let Some((_, t)) = self.self_ty.clone() else {
+                            return Err((apos, "`self` is a parameter of a function in an `impl`".into()));
+                        };
+                        args.push((a, t));
+                        self.eat(",")?;
+                        continue;
+                    }
                     self.expect(":")?;
                     args.push((a, self.ty()?));
                     self.eat(",")?;
@@ -671,6 +730,11 @@ impl Parser {
             return Ok(TyS::Fn(ts, Box::new(r)));
         }
         let (n, pos) = self.ident()?;
+        if n == "Self"
+            && let Some((_, t)) = &self.self_ty
+        {
+            return Ok(t.clone());
+        }
         let mut args = vec![];
         if self.eat("<")? {
             while !self.eat(">")? {
@@ -749,6 +813,14 @@ impl Parser {
         Ok(self.mk(pos, EK::Block(stmts, tail)))
     }
 
+    /// `Self` in an `impl`: the type's name (`Self { x }`, `Self::new()`, a `Self { .. }` pattern)
+    fn self_name(&self, n: String) -> String {
+        match &self.self_ty {
+            Some((name, _)) if n == "Self" => name.clone(),
+            _ => n,
+        }
+    }
+
     /// A pattern, or several separated by `|`
     fn pat(&mut self) -> PResult<Pat> {
         let first = self.pat_one()?;
@@ -784,6 +856,7 @@ impl Parser {
             T::Ident(n) if n == "_" => Pat::Wild,
             T::Ident(n) if n == "true" || n == "false" => Pat::Lit(Lit::Bool(n == "true")),
             T::Ident(n) => {
+                let n = self.self_name(n);
                 let (en, vn) = if self.eat("::")? { (Some(n), self.ident()?.0) } else { (None, n) };
                 let upper = vn.chars().next().is_some_and(|c| c.is_uppercase());
                 if !upper && en.is_none() {
@@ -1139,6 +1212,7 @@ impl Parser {
                 self.mk(pos, EK::Match(Box::new(s), arms))
             }
             T::Ident(n) => {
+                let n = self.self_name(n);
                 if self.eat("::")? {
                     let (v, _) = self.ident()?;
                     return Ok(self.mk(pos, EK::Path(n, v)));

@@ -824,9 +824,11 @@ impl<'a> Lower<'a> {
         if !self.info.effects[name].is_empty() {
             return Err((*pos, format!("a function lowered to Rust cannot perform effects ({:?})", self.info.effects[name])));
         }
+        // (an instance for each use: a function called from JS is written for the types its bounds admit, so a
+        // parameter without one has none)
         for g in generics {
-            if !bounds.iter().any(|b| b.0 == *g) {
-                return Err((*pos, format!("the generic parameter `{g}` of a function lowered to Rust needs a numeric bound (`{g}: Num`)")));
+            if *public && !bounds.iter().any(|b| b.0 == *g) || targs.len() != generics.len() {
+                return Err((*pos, format!("the generic parameter `{g}` of a function exported from Rust needs a numeric bound (`{g}: Num`)")));
             }
         }
         self.subst = generics.iter().cloned().zip(targs.iter().cloned()).collect();
@@ -1364,7 +1366,7 @@ impl<'a> Lower<'a> {
                 }
                 match self.info.callee.get(&f.id) {
                     Some(Callee::Fn) if self.fns.contains_key(n.as_str()) => {
-                        let targs: Vec<Ty> = self.info.inst.get(&f.id).map(|t| t.iter().map(|t| subst_ty(t, &self.subst)).collect()).unwrap_or_default();
+                        let targs: Vec<Ty> = self.info.inst.get(&f.id).or_else(|| self.info.rust_inst.get(&f.id)).map(|t| t.iter().map(|t| subst_ty(t, &self.subst)).collect()).unwrap_or_default();
                         let Item::Fn { generics, .. } = self.fns[n.as_str()] else { unreachable!() };
                         let m: HashMap<String, Ty> = generics.iter().cloned().zip(targs.iter().cloned()).collect();
                         let ptys: Vec<Ty> = self.info.fns[n].args.iter().map(|t| subst_ty(t, &m)).collect();
