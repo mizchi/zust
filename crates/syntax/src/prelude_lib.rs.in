@@ -411,6 +411,15 @@ impl<T: Clone> Option<&T> {
     }
 }
 
+impl<T> Option<Option<T>> {
+    pub fn flatten(self) -> Option<T> {
+        match self {
+            Some(inner) => inner,
+            None => None,
+        }
+    }
+}
+
 // `x.clone()` (derive(Clone) / タプル / 配列 / 整数など): 本体は型ごとに codegen が作る (フィールドごとに clone)
 fn __exr_clone<T>(x: &T) -> T {
     unsafe { (x as *const T).read() }
@@ -5672,15 +5681,19 @@ fn __exr_cursor_seek(len: usize, pos: &mut u64, to: SeekFrom) -> Result<u64, IoE
             *pos = n;
             return Ok(n);
         }
-        SeekFrom::End(n) => (len as i64, n),
-        SeekFrom::Current(n) => (*pos as i64, n),
+        SeekFrom::End(n) => (len as u64, n),
+        SeekFrom::Current(n) => (*pos, n),
     };
-    let at = base + off;
-    if at < 0 {
-        return Err(IoError { code: 22 });
+    // (std's checked_add_signed on the u64 position: InvalidInput only below 0 or past u64::MAX, and the position
+    // stays where it was then)
+    let at = if off >= 0 { base.checked_add(off as u64) } else { base.checked_sub((off as u64).wrapping_neg()) };
+    match at {
+        Some(n) => {
+            *pos = n;
+            Ok(n)
+        }
+        None => Err(IoError { code: 22 }),
     }
-    *pos = at as u64;
-    Ok(at as u64)
 }
 
 impl Seek for Cursor<Vec<u8>> {
