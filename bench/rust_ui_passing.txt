@@ -1801,6 +1801,7 @@ check-pass	const-generics/min_const_generics/default_trait_param.rs
 compile-fail	const-generics/min_const_generics/forbid-non-static-lifetimes.rs
 run-pass	const-generics/min_const_generics/inferred_const.rs
 compile-fail	const-generics/min_const_generics/invalid-patterns.rs
+compile-fail	const-generics/min_const_generics/macro-fail-const.rs
 compile-fail	const-generics/min_const_generics/macro-fail.rs
 compile-fail	const-generics/min_const_generics/self-ty-in-const-1.rs
 run-pass	const-generics/min_const_generics/type_and_const_defaults.rs
