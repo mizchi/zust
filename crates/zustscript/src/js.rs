@@ -192,6 +192,28 @@ const HELPERS: &[(&str, &str)] = &[
     ("$o_ok_or", "function $o_ok_or(o, e) {\n  return o.TAG === \"Some\" ? { TAG: \"Ok\", _0: o._0 } : { TAG: \"Err\", _0: e };\n}"),
     ("$o_ok_or_else", "function $o_ok_or_else(o, f) {\n  return o.TAG === \"Some\" ? { TAG: \"Ok\", _0: o._0 } : { TAG: \"Err\", _0: f() };\n}"),
     ("$o_ok", "function $o_ok(r) {\n  return r.TAG === \"Ok\" ? { TAG: \"Some\", _0: r._0 } : { TAG: \"None\" };\n}"),
+    // (the standard library: arrays, strings, numbers. Each as the `@wasm` layer's Rust means it: see lower.rs)
+    ("$get", "function $get(xs, i) {\n  return i >= 0 && i < xs.length ? { TAG: \"Some\", _0: xs[i] } : { TAG: \"None\" };\n}"),
+    ("$last", "function $last(xs) {\n  return xs.length > 0 ? { TAG: \"Some\", _0: xs[xs.length - 1] } : { TAG: \"None\" };\n}"),
+    // (by `==`: `eq` compares by content, otherwise `===`, so NaN is never found, as in Rust)
+    ("$index_of", "function $index_of(xs, x, eq) {\n  for (let i = 0; i < xs.length; i++) if (eq ? eq(xs[i], x) : xs[i] === x) return { TAG: \"Some\", _0: i };\n  return { TAG: \"None\" };\n}"),
+    ("$includes", "function $includes(xs, x, eq) {\n  for (let i = 0; i < xs.length; i++) if (eq ? eq(xs[i], x) : xs[i] === x) return true;\n  return false;\n}"),
+    ("$find", "function $find(xs, f) {\n  for (let i = 0; i < xs.length; i++) if (f(xs[i])) return { TAG: \"Some\", _0: xs[i] };\n  return { TAG: \"None\" };\n}"),
+    ("$find_index", "function $find_index(xs, f) {\n  for (let i = 0; i < xs.length; i++) if (f(xs[i])) return { TAG: \"Some\", _0: i };\n  return { TAG: \"None\" };\n}"),
+    ("$cmp", "function $cmp(a, b) {\n  return a < b ? -1 : a > b ? 1 : 0;\n}"),
+    ("$s_index_of", "function $s_index_of(s, t) {\n  const i = s.indexOf(t);\n  return i < 0 ? { TAG: \"None\" } : { TAG: \"Some\", _0: i };\n}"),
+    // (Rust's `str::replace`: every match; an empty pattern matches at each character's boundary)
+    ("$replace", "function $replace(s, a, b) {\n  return a === \"\" ? b + Array.from(s, (c) => c + b).join(\"\") : s.split(a).join(b);\n}"),
+    // (Rust's `parse`: a sign and digits only (no white space, no `0x`), in range; for a float also `.5`, `1e3`,
+    // `inf`, `NaN`)
+    ("$to_i32", "function $to_i32(s) {\n  if (!/^[+-]?[0-9]+$/.test(s)) return { TAG: \"None\" };\n  const n = Number(s);\n  return n >= -2147483648 && n <= 2147483647 ? { TAG: \"Some\", _0: n | 0 } : { TAG: \"None\" };\n}"),
+    ("$to_f64", "function $to_f64(s) {\n  if (!/^[+-]?(?:inf|infinity|nan|(?:[0-9]+\\.?[0-9]*|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?)$/i.test(s)) return { TAG: \"None\" };\n  const t = s.replace(/^[+-]/, \"\").toLowerCase();\n  const v = t === \"nan\" ? NaN : t.startsWith(\"inf\") ? Infinity : Number(t);\n  return { TAG: \"Some\", _0: s.startsWith(\"-\") ? -v : v };\n}"),
+    // (Rust's `wrapping_pow`; a negative exponent is an error)
+    ("$pow_i32", "function $pow_i32(a, e) {\n  if (e < 0) throw new RangeError(\"a negative exponent\");\n  let r = 1;\n  while (e > 0) {\n    if (e & 1) r = Math.imul(r, a);\n    a = Math.imul(a, a);\n    e >>>= 1;\n  }\n  return r;\n}"),
+    ("$pow_i64", "function $pow_i64(a, e) {\n  if (e < 0) throw new RangeError(\"a negative exponent\");\n  let r = 1n;\n  while (e > 0) {\n    if (e & 1) r = BigInt.asIntN(64, r * a);\n    a = BigInt.asIntN(64, a * a);\n    e >>>= 1;\n  }\n  return r;\n}"),
+    ("$abs_i64", "function $abs_i64(a) {\n  return a < 0n ? BigInt.asIntN(64, -a) : a;\n}"),
+    ("$min_big", "function $min_big(a, b) {\n  return a < b ? a : b;\n}"),
+    ("$max_big", "function $max_big(a, b) {\n  return a > b ? a : b;\n}"),
     // (what JS gives an extern: `null` / `undefined` is `None`; a `Result` catches what it throws, as its message or
     // as the value thrown; a `Promise` of one, its rejection too. And an `Option` handed to JS: `undefined` for `None`)
     ("$nullable", "function $nullable(x) {\n  return x == null ? { TAG: \"None\" } : { TAG: \"Some\", _0: x };\n}"),
@@ -973,6 +995,73 @@ impl<'a> Js<'a> {
         }
     }
 
+    /// A method of the standard library (beyond the first ones): `recv` is the receiver's JS, the arguments are
+    /// evaluated after it, in order
+    fn std_method(&mut self, e: &Expr, on: crate::check::On, m: &str, recv: String, args: &[Expr]) -> String {
+        use crate::check::On;
+        let h = |js: &mut Js, name: &'static str| {
+            js.helpers.insert(name);
+            name
+        };
+        let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
+        let t = self.num(e.id);
+        let fround = |s: String| if t == Ty::F32 { format!("Math.fround({s})") } else { s };
+        match (on, m) {
+            (On::Array, "get") => format!("{}({recv}, {})", h(self, "$get"), a[0]),
+            (On::Array, "first") => format!("{}({recv}, 0)", h(self, "$get")),
+            (On::Array, "last") => format!("{}({recv})", h(self, "$last")),
+            (On::Array | On::Str, "is_empty") => format!("({recv}.length === 0)"),
+            (On::Array | On::Str, "slice") => format!("{recv}.slice({}, {})", a[0], a[1]),
+            (On::Array, "reverse") => format!("[...{recv}].reverse()"),
+            (On::Array, "includes" | "index_of") => {
+                let name = h(self, if m == "includes" { "$includes" } else { "$index_of" });
+                let el = self.info.deep_eq.get(&e.id).cloned().map(|t| subst_ty(&t, &self.subst));
+                match el.and_then(|t| self.eq_fn(&t)) {
+                    Some(f) => format!("{name}({recv}, {}, {f})", a[0]),
+                    None => format!("{name}({recv}, {})", a[0]),
+                }
+            }
+            (On::Array, "find" | "find_index") => {
+                let name = h(self, if m == "find" { "$find" } else { "$find_index" });
+                let f = self.adapt(&args[0], a[0].clone(), 1);
+                format!("{name}({recv}, {f})")
+            }
+            (On::Array, "flat_map") => format!("{recv}.flatMap({})", self.adapt(&args[0], a[0].clone(), 1)),
+            (On::Array, "sort") => format!("[...{recv}].sort({})", h(self, "$cmp")),
+            (On::Array, _) => format!("[...{recv}].sort({})", self.adapt(&args[0], a[0].clone(), 2)),
+            (On::Str, "to_lower") => format!("{recv}.toLowerCase()"),
+            (On::Str, "starts_with") => format!("{recv}.startsWith({})", a[0]),
+            (On::Str, "ends_with") => format!("{recv}.endsWith({})", a[0]),
+            (On::Str, "index_of") => format!("{}({recv}, {})", h(self, "$s_index_of"), a[0]),
+            (On::Str, "replace") => format!("{}({recv}, {}, {})", h(self, "$replace"), a[0], a[1]),
+            (On::Str, "repeat") => format!("{recv}.repeat({})", a[0]),
+            (On::Str, "trim_start") => format!("{recv}.trimStart()"),
+            (On::Str, "trim_end") => format!("{recv}.trimEnd()"),
+            (On::Str, "chars") => format!("Array.from({recv})"),
+            (On::Str, "to_i32") => format!("{}({recv})", h(self, "$to_i32")),
+            (On::Str, _) => format!("{}({recv})", h(self, "$to_f64")),
+            (On::Float, "ceil") => format!("Math.ceil({})", unparen(&recv)),
+            (On::Float, "trunc") => format!("Math.trunc({})", unparen(&recv)),
+            (On::Float, "is_nan") => format!("Number.isNaN({})", unparen(&recv)),
+            (On::Float, "pow") => fround(format!("Math.pow({}, {})", unparen(&recv), a[0])),
+            (On::Float, "atan2") => fround(format!("Math.atan2({}, {})", unparen(&recv), a[0])),
+            (On::Float, _) => {
+                let f = if m == "ln" { "log" } else { m };
+                fround(format!("Math.{f}({})", unparen(&recv)))
+            }
+            (On::Int, "abs") if t == Ty::I64 => format!("{}({recv})", h(self, "$abs_i64")),
+            (On::Int, "abs") => format!("(Math.abs({}) | 0)", unparen(&recv)),
+            (On::Int, "min" | "max") if t == Ty::I64 => format!("{}({recv}, {})", h(self, if m == "min" { "$min_big" } else { "$max_big" }), a[0]),
+            (On::Int, "min") => format!("Math.min({}, {})", unparen(&recv), a[0]),
+            (On::Int, "max") => format!("Math.max({}, {})", unparen(&recv), a[0]),
+            (On::Int, _) => match t {
+                Ty::I64 => format!("{}({recv}, {})", h(self, "$pow_i64"), a[0]),
+                Ty::U32 => format!("({}({recv}, {}) >>> 0)", h(self, "$pow_i32"), a[0]),
+                _ => format!("{}({recv}, {})", h(self, "$pow_i32"), a[0]),
+            },
+        }
+    }
+
     fn num(&self, id: Id) -> Ty {
         subst_ty(&self.info.num.get(&id).cloned().unwrap_or(Ty::F64), &self.subst)
     }
@@ -1232,6 +1321,7 @@ impl<'a> Js<'a> {
                         self.helpers.insert(h);
                         format!("{h}({recv}, {})", self.callback(&args[0], 1))
                     }
+                    Some(B::Std(on, m)) => self.std_method(e, on, m, recv, args),
                     None => {
                         let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
                         format!("{recv}.{m}({})", a.join(", "))
@@ -2122,6 +2212,11 @@ pub fn extern_check(items: &[Item], info: &Info) -> Option<(String, Vec<(usize, 
 }
 
 /// The name of the shared runtime module (`zsc-runtime.js` and `.d.ts`, written next to the modules)
+/// The JS of the helper `name` (the wasm glue shares some: `$to_f64`)
+pub fn helper_code(name: &str) -> &'static str {
+    HELPERS.iter().find(|h| h.0 == name).map_or("", |h| h.1)
+}
+
 pub const RUNTIME: &str = "zsc-runtime";
 /// The first line of the shared runtime file: how zsc tells it from a module of the same name.
 pub const RUNTIME_HEADER: &str = "// generated by zsc: the runtime the modules share (helpers, and the constructors of the numeric brands)\n";

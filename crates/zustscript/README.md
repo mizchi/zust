@@ -389,6 +389,32 @@ export async fn load(url: String) -> Result<String, String> {
 - `--check-externs` は、メンバーも TS の型と照合する(`Option` の結果は `T | null | undefined`、`Result` の結果は `T` として)
 - まだないもの: `@wasm` での extern type、`==`(同じ値かどうか)、型引数を持つメソッド、TS の `.d.ts` からの自動の取り込み
 
+### 標準ライブラリ: 配列・文字列・数値のメソッド
+
+名前と意味は Rust に合わせ、JS と `@wasm` で同じ結果にします。文字列の位置と長さは JS と同じ UTF-16 の単位です(`tests/stdlib.zsc` で JS と wasm の結果を比べている)。
+
+| 対象 | メソッド |
+| --- | --- |
+| 配列 | `len` `map` `filter` `fold` `any` `all` `push` `concat` `join` `try_map`、`get(i)` / `first()` / `last()`(`Option`)、`is_empty`、`slice(a, b)`、`reverse`、`includes(x)` / `index_of(x)`(`==` と同じく中身で比べる)、`find(f)` / `find_index(f)`、`flat_map(f)`、`sort()`(数値か文字列)、`sort_by((a, b) => ..)`(負・0・正の i32 を返す。安定) |
+| 文字列 | `len` `to_upper` `to_lower` `trim` `trim_start` `trim_end` `contains` `starts_with` `ends_with` `split`、`index_of(s)`(`Option<i32>`)、`slice(a, b)`、`replace(from, to)`(すべて置き換える)、`repeat(n)`、`chars()`(コードポイントごとの `Array<String>`)、`is_empty`、`to_i32()` / `to_f64()`(`Option`) |
+| f32 / f64 | `floor` `ceil` `round` `trunc` `sqrt` `abs` `max` `min`、`pow(y)`、`exp` `ln` `log10` `log2`、`sin` `cos` `tan` `asin` `acos` `atan` `atan2(x)`、`is_nan` |
+| i32 / u32 / i64 | `abs`(u32 以外)、`min(y)` `max(y)`、`pow(e)`(`e: i32`。桁あふれは折り返し、負の `e` はエラー) |
+
+```zsc
+fn top(names: Array<String>) -> String {
+  let sorted = names.filter((n) => !n.is_empty()).sort();
+  match sorted.first() { Some(n) => n.to_lower(), None => "-" }
+}
+fn parse_all(xs: Array<String>) -> Option<Array<i32>> { xs.try_map((x) => x.trim().to_i32()) }
+```
+
+- `slice(a, b)` は JS の `slice` と同じ: 負の位置は末尾から数え、範囲は長さに切り詰める
+- `to_i32` / `to_f64` は Rust の `parse` と同じ: 符号と数字だけ(空白や `0x` は `None`)。小数は `.5`、`1e3`、`inf`、`NaN` も読む
+- `sort()` の NaN は、どの数とも等しい扱い(JS の比較と同じ)。NaN を含む配列の並びは決まらない
+- `@wasm` の数学関数(`pow` `sin` など)は、グルーが JS の `Math` を zustc に渡すので、JS 層とビット単位で同じ。`--emit-rust` では Rust の std(libm)の結果になり、最後の桁が違うことがある
+- 分かっている違い: サロゲートペアの途中で切る文字列の `slice` は、JS では孤立したサロゲート、wasm では U+FFFD になる
+- まだないもの: `Map` / `Set`、JSON、乱数、`enumerate`
+
 ### 代数的エフェクト(enum で宣言する)
 
 ```rust
@@ -477,9 +503,9 @@ wasm { fn sq(x: f64) -> f64 { x * x } }                              // wasm 側
     - 配列と、配列を含むレコード / enum は Copy にならない。借用、move、clone は zsc が推論する(次の「所有権の推論」)
     - JS との境界を越えられるのは、数値の配列、スカラーだけのレコード / enum、そして文字列や配列を含むレコードと、レコード・文字列・配列の配列(次の「バイト列で越える値」)
   - 構文: `let` / `let mut` と代入、`while` / `for` / `break` / `continue`、`if`、`match`(数値、bool、enum のバリアント、入れ子のパターン)、レコードの生成・フィールド・`..base` での更新、`as`、`T::zero()` / `T::one()`
-  - 配列の操作: `len` `map` `filter` `fold` `any` `all` `push` `concat`、添字、`range(a, b)`(Rust では配列を作らずイテレータ `a..b` になる)
+  - 配列の操作: `len` `map` `filter` `fold` `any` `all` `push` `concat`、添字、`range(a, b)`(Rust では配列を作らずイテレータ `a..b` になる)、上の「標準ライブラリ」のメソッド
   - 呼び出し: Rust に変換可能な通常の補助関数、他の `@wasm` 関数、`wasm fn`、再帰
-  - 文字列: 引数は `&str`、戻り値は `String`。`+`、`==` と大小比較、`len` `to_upper` `trim` `contains` `split`、配列の `join`、整数と bool の `to_string`(次の「文字列と `==`」)
+  - 文字列: 引数は `&str`、戻り値は `String`。`+`、`==` と大小比較、`len` `to_upper` `trim` `contains` `split` と上の「標準ライブラリ」のメソッド、配列の `join`、整数と bool の `to_string`(次の「文字列と `==`」)
   - 使えないもの: タプル、effect、値としての関数、文字列のパターン、浮動小数点数の `to_string`(JS と Rust で書式が違う)
 - `T: Num` の関数は、wasm でもインスタンスごとに単相化する(`zs_total__f64`、`zs_total__i64` など)
   - JS から呼ばれるインスタンスだけに wrapper とグルーを付ける

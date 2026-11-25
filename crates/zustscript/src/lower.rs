@@ -39,7 +39,7 @@
 //! zustc's borrow checker checks the Rust again, so a mistake here is a compile error, never unsafety.
 
 use crate::ast::*;
-use crate::check::{Builtin, Callee, Info, Ty};
+use crate::check::{Builtin, Callee, Info, On, Ty};
 use crate::js::inst_name;
 use crate::own::{self, Live};
 use crate::wasm::WFn;
@@ -149,6 +149,50 @@ const STR_HELPERS: &[(&str, &[&str], &str)] = &[
         "zs_split",
         &[],
         "/// JS's `split`: an empty separator splits into characters\nfn zs_split(s: &str, sep: &str) -> Vec<String> {\n    if sep.is_empty() {\n        return s.chars().map(|c| c.to_string()).collect::<Vec<_>>();\n    }\n    s.split(sep).map(|x| x.to_string()).collect::<Vec<_>>()\n}",
+    ),
+];
+
+/// The standard library's string helpers (JS's meaning: UTF-16 indices, JS's white space); see [`STR_HELPERS`]
+const STD_STR_HELPERS: &[(&str, &[&str], &str)] = &[
+    (
+        "zs_trim_start",
+        &["zs_ws"],
+        "fn zs_trim_start(s: &str) -> &str {\n    for (i, c) in s.char_indices() {\n        if !zs_ws(c) {\n            return &s[i..];\n        }\n    }\n    &s[s.len()..]\n}",
+    ),
+    (
+        "zs_trim_end",
+        &["zs_ws"],
+        "fn zs_trim_end(s: &str) -> &str {\n    let mut end = 0usize;\n    for (i, c) in s.char_indices() {\n        if !zs_ws(c) {\n            end = i + c.len_utf8();\n        }\n    }\n    &s[..end]\n}",
+    ),
+    (
+        "zs_index_of16",
+        &[],
+        "/// JS's `indexOf`: the first match's index in UTF-16 code units, or -1\nfn zs_index_of16(a: &str, b: &str) -> i32 {\n    let (x, y) = (a.as_bytes(), b.as_bytes());\n    let mut i = 0usize;\n    while i + y.len() <= x.len() {\n        let mut j = 0usize;\n        while j < y.len() && x[i + j] == y[j] {\n            j += 1;\n        }\n        if j == y.len() {\n            let mut n = 0i32;\n            for c in a[..i].chars() {\n                n += if (c as u32) > 0xffff { 2 } else { 1 };\n            }\n            return n;\n        }\n        i += 1;\n    }\n    -1\n}",
+    ),
+    (
+        "zs_to_f64",
+        &[],
+        "unsafe extern \"C\" {\n    fn zs_host_to_f64(p: *const u8, n: usize, out: *mut f64) -> i32;\n}\n\n/// A float read as the JS layer reads it (by the same function: the glue's): zustc's `parse::<f64>` needs `strtod`\nfn zs_to_f64(s: &str, out: &mut f64) -> bool {\n    unsafe { zs_host_to_f64(s.as_ptr(), s.len(), out as *mut f64) != 0 }\n}",
+    ),
+    (
+        "zs_sort_by",
+        &[],
+        "/// A sort by a comparator that gives a negative, zero or positive i32, as JS's does (both are stable)\nfn zs_sort_by<T, F: Fn(&T, &T) -> i32>(v: &mut Vec<T>, f: F) {\n    v.sort_by(|a, b| f(a, b).cmp(&0));\n}",
+    ),
+    (
+        "zs_position",
+        &[],
+        "/// The index of the first element `==` to `x` (by content), or -1\nfn zs_position<T: PartialEq>(xs: &[T], x: &T) -> i32 {\n    let mut i = 0usize;\n    while i < xs.len() {\n        if xs[i] == *x {\n            return i as i32;\n        }\n        i += 1;\n    }\n    -1\n}",
+    ),
+    (
+        "zs_range",
+        &[],
+        "/// JS's `slice` bounds: a negative one counts from the end; both are clamped to the length\nfn zs_range(len: i32, a: i32, b: i32) -> (usize, usize) {\n    let f = |x: i32| if x < 0 { if len + x < 0 { 0 } else { len + x } } else if x > len { len } else { x };\n    let (a, b) = (f(a), f(b));\n    (a as usize, if b < a { a as usize } else { b as usize })\n}",
+    ),
+    (
+        "zs_slice16",
+        &["zs_range", "zs_len16"],
+        "/// JS's `slice` of a string, in UTF-16 code units (half of a surrogate pair at either end is U+FFFD here)\nfn zs_slice16(s: &str, a: i32, b: i32) -> String {\n    let (a, b) = zs_range(zs_len16(s), a, b);\n    let mut out = String::new();\n    let mut k = 0usize;\n    for c in s.chars() {\n        let w = if (c as u32) > 0xffff { 2 } else { 1 };\n        if k >= a && k + w <= b {\n            out.push(c);\n        } else if k + w > a && k < b {\n            out.push('\\u{fffd}');\n        }\n        k += w;\n    }\n    out\n}",
     ),
 ];
 
@@ -423,8 +467,18 @@ impl Lower<'_> {
                 "fn {h}(a: {t}, b: {t}) -> {t} {{\n    if a.is_nan() || b.is_nan() {{ {t}::NAN }} else if a == b {{ if {zero} {{ a }} else {{ b }} }} else if {pick} {{ a }} else {{ b }}\n}}\n\n"
             );
         }
-        for (name, _, text) in STR_HELPERS {
-            if self.str_helpers.contains(name) {
+        // (with the helpers they call)
+        let all = || STR_HELPERS.iter().chain(STD_STR_HELPERS);
+        let mut need = self.str_helpers.clone();
+        loop {
+            let more: Vec<&'static str> = all().filter(|h| need.contains(h.0)).flat_map(|h| h.1.iter().copied()).filter(|d| !need.contains(*d)).collect();
+            if more.is_empty() {
+                break;
+            }
+            need.extend(more);
+        }
+        for (name, _, text) in all() {
+            if need.contains(name) {
                 defs.push_str(text);
                 defs.push_str("\n\n");
             }
@@ -1620,6 +1674,43 @@ impl<'a> Lower<'a> {
                     self.str_helpers.insert(h);
                     val(format!("{h}({sb}, {o})"))
                 }
+                B::Std(_, m) => {
+                    let o: Vec<String> = args.iter().map(|a| self.borrowed(a).map(|x| x.0)).collect::<LResult<_>>()?;
+                    let (opt, oty) = self.option_type(&match m {
+                        "to_f64" => Ty::F64,
+                        _ => Ty::I32,
+                    });
+                    match m {
+                        "is_empty" => val(format!("{sb}.is_empty()")),
+                        "to_lower" => val(format!("{recv}.to_lowercase()")),
+                        "starts_with" | "ends_with" => val(format!("{sb}.{m}({})", o[0])),
+                        "index_of" => {
+                            self.str_helpers.insert("zs_index_of16");
+                            val(format!("{{ let zs_i = zs_index_of16({sb}, {}); let zs_o: {oty} = if zs_i >= 0 {{ {opt}::Some(zs_i) }} else {{ {opt}::None }}; zs_o }}", o[0]))
+                        }
+                        "slice" => {
+                            self.str_helpers.insert("zs_slice16");
+                            val(format!("zs_slice16({sb}, {}, {})", o[0], o[1]))
+                        }
+                        "replace" => val(format!("{sb}.replace({}, {})", o[0], o[1])),
+                        "repeat" => val(format!("{sb}.repeat(({}) as usize)", o[0])),
+                        // (a part of the string: a borrow of what the string borrows from)
+                        "trim_start" | "trim_end" => {
+                            let h = if m == "trim_start" { "zs_trim_start" } else { "zs_trim_end" };
+                            self.str_helpers.insert(h);
+                            Ok((format!("{h}({sb})"), Form::Brw { is_ref: true, roots: sroots, param: None }))
+                        }
+                        "chars" => val(format!("{sb}.chars().map(|zs_c| zs_c.to_string()).collect::<Vec<String>>()")),
+                        "to_f64" if matches!(self.target, Target::Wasm { .. }) => {
+                            self.str_helpers.insert("zs_to_f64");
+                            val(format!("{{ let mut zs_f = 0.0f64; let zs_o: {oty} = if zs_to_f64({sb}, &mut zs_f) {{ {opt}::Some(zs_f) }} else {{ {opt}::None }}; zs_o }}"))
+                        }
+                        _ => {
+                            let t = if m == "to_i32" { "i32" } else { "f64" };
+                            val(format!("{{ let zs_o: {oty} = match {sb}.parse::<{t}>() {{ Ok(zs_v) => {opt}::Some(zs_v), Err(_) => {opt}::None }}; zs_o }}"))
+                        }
+                    }
+                }
                 _ => not_in_subset(pos, "this method on a string"),
             };
         }
@@ -1684,8 +1775,93 @@ impl<'a> Lower<'a> {
             B::ToArray => val(self.owned(recv, &rf, &rt)),
             B::Floor => val(format!("{recv}.floor()")),
             B::Round => val(format!("{recv}.round()")),
+            B::Std(On::Float, m) => {
+                let a: Vec<String> = args.iter().map(|a| self.expr(a)).collect::<LResult<_>>()?;
+                val(match m {
+                    "pow" => format!("{recv}.powf({})", a[0]),
+                    "atan2" => format!("{recv}.atan2({})", a[0]),
+                    _ => format!("{recv}.{m}()"),
+                })
+            }
+            B::Std(On::Int, m) => {
+                let a: Vec<String> = args.iter().map(|a| self.expr(a)).collect::<LResult<_>>()?;
+                val(match m {
+                    "abs" => format!("{recv}.wrapping_abs()"),
+                    "min" | "max" => format!("{recv}.{m}({})", a[0]),
+                    // (the receiver first, then the exponent; a negative one is an error, as in JS)
+                    _ => format!("{{ let zs_a = {recv}; let zs_e: i32 = {}; if zs_e < 0 {{ panic!(\"a negative exponent\") }} zs_a.wrapping_pow(zs_e as u32) }}", a[0]),
+                })
+            }
+            B::Std(_, m) => {
+                let (opt, oty) = self.option_type(&if matches!(m, "index_of" | "find_index") { Ty::I32 } else { el.clone() });
+                let cloned = if self.copy(&el) { ".copied()" } else { ".cloned()" };
+                let some = |s: String| format!("{{ let zs_o: {oty} = match {s} {{ Some(zs_x) => {opt}::Some(zs_x), None => {opt}::None }}; zs_o }}");
+                match m {
+                    // (by index: a slice index is the same in every Rust)
+                    "get" => {
+                        let i = self.expr(&args[0])?;
+                        let x = if self.copy(&el) { "zs_r[zs_i]" } else { "zs_r[zs_i].clone()" };
+                        val(format!("{{ let zs_r = &{recv}; let zs_i = ({i}) as usize; let zs_o: {oty} = if zs_i < zs_r.len() {{ {opt}::Some({x}) }} else {{ {opt}::None }}; zs_o }}"))
+                    }
+                    "first" | "last" => val(some(format!("{recv}.{m}(){cloned}"))),
+                    "is_empty" => val(format!("{recv}.is_empty()")),
+                    "slice" => {
+                        self.str_helpers.insert("zs_range");
+                        let (a, b) = (self.expr(&args[0])?, self.expr(&args[1])?);
+                        val(format!("{{ let zs_r = &{recv}; let (zs_a, zs_b) = zs_range(zs_r.len() as i32, {a}, {b}); zs_r[zs_a..zs_b].to_vec() }}"))
+                    }
+                    "reverse" | "sort" | "sort_by" => {
+                        let v = self.owned(recv, &rf, &rt);
+                        let how = match m {
+                            "reverse" => "zs_v.reverse();".to_string(),
+                            "sort" => match &el {
+                                Ty::Str => {
+                                    self.str_helpers.insert("zs_cmp16");
+                                    "zs_v.sort_by(|a, b| zs_cmp16(a, b).cmp(&0));".to_string()
+                                }
+                                // (NaN is equal to every number here, as in JS's comparison)
+                                Ty::F32 | Ty::F64 => "zs_v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));".to_string(),
+                                _ => "zs_v.sort();".to_string(),
+                            },
+                            _ => {
+                                let p = if self.copy(&el) { (None, "&") } else { (Some(None), "") };
+                                let f = self.closure(&args[0], &[p.clone(), p])?;
+                                self.str_helpers.insert("zs_sort_by");
+                                format!("zs_sort_by(&mut zs_v, {f});")
+                            }
+                        };
+                        val(format!("{{ let mut zs_v = {v}; {how} zs_v }}"))
+                    }
+                    "includes" | "index_of" => {
+                        let (x, xf) = self.ex(&args[0])?;
+                        let x = if self.copy(&el) { x } else { self.owned(x, &xf, &el) };
+                        self.str_helpers.insert("zs_position");
+                        let pos = format!("zs_position(&{recv}, &{x})");
+                        val(if m == "includes" {
+                            format!("({pos} >= 0)")
+                        } else {
+                            format!("{{ let zs_i = {pos}; let zs_o: {oty} = if zs_i >= 0 {{ {opt}::Some(zs_i) }} else {{ {opt}::None }}; zs_o }}")
+                        })
+                    }
+                    "find" => {
+                        let param = if elems.is_none() && range.is_none() && !self.copy(&el) { (Some(None), "") } else { k("&") };
+                        let f = self.closure(&args[0], &[param])?;
+                        val(some(if by_ref { format!("{it}.find({f}).cloned()") } else { format!("{it}.find({f})") }))
+                    }
+                    "find_index" => val(some(format!("{it}.position({}).map(|zs_i| zs_i as i32)", self.closure(&args[0], &[k("")])?))),
+                    _ => val(format!("{it}.flat_map({}).collect::<Vec<_>>()", self.closure(&args[0], &[k("")])?)),
+                }
+            }
             _ => not_in_subset(pos, "this method (strings are not in it)"),
         }
+    }
+
+    /// The Rust type of the prelude's `Option` of `t`, marked used (its definition is written once), with its type
+    /// argument written out (zustc does not infer it from a `None` branch)
+    fn option_type(&mut self, t: &Ty) -> (String, String) {
+        self.used.insert("Option".into());
+        let a = self.rty(t, Pos::default(), None).unwrap_or_default();
+        (rs_type("Option"), format!("{}<{a}>", rs_type("Option")))
     }
 
     /// `range(a, b)`: its bounds in Rust

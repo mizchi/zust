@@ -35,7 +35,7 @@ impl<'a> Reader<'a> {
 /// A value in the format
 pub trait Wire: Sized {
     fn put(&self, out: &mut Vec<u8>);
-    fn get(r: &mut Reader) -> Self;
+    fn decode(r: &mut Reader) -> Self;
 }
 
 fn put_le(out: &mut Vec<u8>, x: u64, n: usize) {
@@ -61,7 +61,7 @@ impl Wire for i32 {
     fn put(&self, out: &mut Vec<u8>) {
         put_le(out, *self as u32 as u64, 4);
     }
-    fn get(r: &mut Reader) -> i32 {
+    fn decode(r: &mut Reader) -> i32 {
         get_le(r, 4) as u32 as i32
     }
 }
@@ -70,7 +70,7 @@ impl Wire for u32 {
     fn put(&self, out: &mut Vec<u8>) {
         put_le(out, *self as u64, 4);
     }
-    fn get(r: &mut Reader) -> u32 {
+    fn decode(r: &mut Reader) -> u32 {
         get_le(r, 4) as u32
     }
 }
@@ -79,7 +79,7 @@ impl Wire for i64 {
     fn put(&self, out: &mut Vec<u8>) {
         put_le(out, *self as u64, 8);
     }
-    fn get(r: &mut Reader) -> i64 {
+    fn decode(r: &mut Reader) -> i64 {
         get_le(r, 8) as i64
     }
 }
@@ -88,7 +88,7 @@ impl Wire for f32 {
     fn put(&self, out: &mut Vec<u8>) {
         put_le(out, self.to_bits() as u64, 4);
     }
-    fn get(r: &mut Reader) -> f32 {
+    fn decode(r: &mut Reader) -> f32 {
         f32::from_bits(get_le(r, 4) as u32)
     }
 }
@@ -97,7 +97,7 @@ impl Wire for f64 {
     fn put(&self, out: &mut Vec<u8>) {
         put_le(out, self.to_bits(), 8);
     }
-    fn get(r: &mut Reader) -> f64 {
+    fn decode(r: &mut Reader) -> f64 {
         f64::from_bits(get_le(r, 8))
     }
 }
@@ -106,7 +106,7 @@ impl Wire for bool {
     fn put(&self, out: &mut Vec<u8>) {
         out.push(if *self { 1 } else { 0 });
     }
-    fn get(r: &mut Reader) -> bool {
+    fn decode(r: &mut Reader) -> bool {
         r.take(1)[0] != 0
     }
 }
@@ -116,8 +116,8 @@ impl Wire for String {
         (self.len() as u32).put(out);
         out.extend_from_slice(self.as_bytes());
     }
-    fn get(r: &mut Reader) -> String {
-        let n = u32::get(r) as usize;
+    fn decode(r: &mut Reader) -> String {
+        let n = u32::decode(r) as usize;
         String::from_utf8(r.take(n).to_vec()).unwrap()
     }
 }
@@ -129,12 +129,12 @@ impl<T: Wire> Wire for Vec<T> {
             x.put(out);
         }
     }
-    fn get(r: &mut Reader) -> Vec<T> {
-        let n = u32::get(r) as usize;
+    fn decode(r: &mut Reader) -> Vec<T> {
+        let n = u32::decode(r) as usize;
         let mut v = Vec::with_capacity(n);
         let mut k = 0;
         while k < n {
-            v.push(T::get(r));
+            v.push(T::decode(r));
             k += 1;
         }
         v
@@ -150,7 +150,7 @@ pub fn to_bytes<T: Wire>(v: &T) -> Vec<u8> {
 
 /// The value `b` holds
 pub fn from_bytes<T: Wire>(b: &[u8]) -> T {
-    T::get(&mut Reader::new(b))
+    T::decode(&mut Reader::new(b))
 }
 
 #[cfg(test)]

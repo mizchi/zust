@@ -898,6 +898,45 @@ fn control_flow_in_js() {
     assert!(js.contains("return xs.map((x) => {\n    if (x < 0) {\n      return 0;\n    }\n    return Math.imul(x, 10);\n  });"), "{js}");
 }
 
+/// tests/stdlib.zsc: the standard library's methods give the same results lowered to Rust and run as wasm (zustc;
+/// the math functions are JS's Math, handed to it by the glue) and run as JS; and as standard Rust (--emit-rust)
+#[test]
+fn stdlib_same_in_js_and_wasm() {
+    let src = root().join("tests/stdlib.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("stdlib-wasm", &[][..]), ("stdlib-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(d.join("stdlib.wasm").exists(), flags.is_empty());
+        let r = Command::new("node").arg(root().join("tests/stdlib_driver.mjs")).arg(d.join("stdlib.js")).output().unwrap();
+        assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+        outs.push(String::from_utf8_lossy(&r.stdout).to_string());
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], std::fs::read_to_string(root().join("tests/stdlib_expected.json")).unwrap());
+    // (standard Rust: the same functions, called from a Rust program)
+    let d = out_dir("stdlib-rust");
+    let plain = d.join("stdlib.zsc");
+    let source = std::fs::read_to_string(&src).unwrap();
+    std::fs::write(&plain, source.lines().map(|l| l.strip_prefix("@wasm ").unwrap_or(l)).collect::<Vec<_>>().join("\n")).unwrap();
+    let o = zsc(&plain, &d, &["--emit-rust", "--zustc", "unused-zustc"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let driver = d.join("driver.rs");
+    std::fs::write(
+        &driver,
+        "mod stdlib;\nfn main() {\n    assert_eq!(stdlib::zs_ints(-7), vec![7, -7, 3, -343, i32::MIN, i32::MIN]);\n    assert_eq!(stdlib::zs_bigs(-9), vec![9, -9, 2, -2611284305020221001]);\n    \
+         assert_eq!(stdlib::zs_arrays(vec![5, 3, 8, 1])[..10], [3, -1, -1, 5, 1, 0, 3, 8, 8, 1]);\n    \
+         assert_eq!(stdlib::zs_strings(\"  Hello, World  \")[4..10], [\" Hell\", \"d  \", \"\", \"  HeLLo, WorLd  \", \"-a-b-\", \"ababab\"]);\n    \
+         assert_eq!(stdlib::zs_parsef(&[\"-2e3\".to_string(), \" 1\".into()]), vec![-2000.0, -12345.0]);\n}\n",
+    )
+    .unwrap();
+    let binary = d.join("run");
+    let build = Command::new("rustc").arg("--edition=2024").arg(&driver).arg("-o").arg(&binary).output().unwrap();
+    assert!(build.status.success(), "{}", String::from_utf8_lossy(&build.stderr));
+    assert!(Command::new(binary).status().unwrap().success());
+}
+
 /// tests/js_values.zsc: extern types (properties, methods, a setter, a constructor, a module's), `null` from JS as
 /// `None` and `None` to JS as `undefined`, and what JS throws (or a Promise rejects with) as an `Err`
 #[test]

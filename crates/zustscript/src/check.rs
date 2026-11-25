@@ -80,6 +80,18 @@ pub enum Builtin {
     Opt(&'static str),
     /// `xs.try_map(f)`: `f`'s `Result` (true) / `Option` (false), stopping at the first `Err` / `None`
     TryMap(bool),
+    /// the rest of the standard library, by name (`get`, `sort_by`, `starts_with`, `pow`, ..; see
+    /// [`Checker::std_sig`]). The receiver's type tells an array's from a string's or a number's
+    Std(On, &'static str),
+}
+
+/// What a [`Builtin::Std`] method is on
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum On {
+    Array,
+    Str,
+    Float,
+    Int,
 }
 
 pub struct RecordDef {
@@ -1335,6 +1347,14 @@ impl Checker {
                 if matches!(b, Builtin::Sqrt | Builtin::Max | Builtin::Min | Builtin::Abs | Builtin::Floor | Builtin::Round) {
                     self.nums.push((e.id, rt.clone()));
                 }
+                match (b, self.resolve(&rt)) {
+                    // (a number's: its JS depends on the number's type)
+                    (Builtin::Std(On::Int | On::Float, _), t @ (Ty::I32 | Ty::U32 | Ty::I64 | Ty::F32 | Ty::F64 | Ty::Var(_))) => self.nums.push((e.id, t)),
+                    // (by `==`, as the operator compares: by content)
+                    (Builtin::Std(On::Array, "includes" | "index_of"), Ty::Array(t)) => self.deferred.push((pos, e.id, "eq", *t)),
+                    (Builtin::Std(On::Array, "sort"), Ty::Array(t)) => self.deferred.push((pos, e.id, "ord", *t)),
+                    _ => {}
+                }
                 if params.len() != args.len() {
                     self.err(pos, format!("`.{name}()` takes {} argument(s), found {}", params.len(), args.len()));
                 }
@@ -2129,8 +2149,88 @@ impl Checker {
                 let r = self.fresh();
                 (vec![f(vec![(**t).clone()], r)], self.fresh(), B::TryMap(true))
             }
-            _ => return None,
+            _ => return self.std_sig(recv, name),
         })
+    }
+
+    /// The standard library's methods beyond the first ones: arrays, strings, numbers. Each means the same in JS
+    /// and in `@wasm` (indices and lengths of strings in UTF-16 code units, as JS's)
+    fn std_sig(&mut self, recv: &Ty, name: &str) -> Option<(Vec<Ty>, Ty, Builtin)> {
+        use Builtin as B;
+        let f = |a: Vec<Ty>, r: Ty| Ty::Fn(a, Box::new(r));
+        let opt = |t: Ty| Ty::Named("Option".into(), vec![t]);
+        let intv = matches!(recv, Ty::Var(v) if self.intv.contains(v));
+        let floatv = matches!(recv, Ty::Var(v) if self.floatv.contains(v));
+        let r = recv.clone();
+        const ARRAY: &[&str] = &["get", "first", "last", "is_empty", "slice", "reverse", "includes", "index_of", "find", "find_index", "flat_map", "sort", "sort_by"];
+        const STRING: &[&str] = &["is_empty", "to_lower", "starts_with", "ends_with", "index_of", "slice", "replace", "repeat", "trim_start", "trim_end", "chars", "to_i32", "to_f64"];
+        const FLOAT: &[&str] = &["ceil", "trunc", "pow", "exp", "ln", "log10", "log2", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "is_nan"];
+        const INT: &[&str] = &["abs", "min", "max", "pow"];
+        let (on, name, sig) = match recv {
+            Ty::Array(t) => {
+                let name = *ARRAY.iter().find(|n| **n == name)?;
+                let t = (**t).clone();
+                let sig = match name {
+                    "get" => (vec![Ty::I32], opt(t)),
+                    "first" | "last" => (vec![], opt(t)),
+                    "is_empty" => (vec![], Ty::Bool),
+                    "slice" => (vec![Ty::I32, Ty::I32], r),
+                    "reverse" | "sort" => (vec![], r),
+                    "includes" => (vec![t], Ty::Bool),
+                    "index_of" => (vec![t], opt(Ty::I32)),
+                    "find" => (vec![f(vec![t.clone()], Ty::Bool)], opt(t)),
+                    "find_index" => (vec![f(vec![t], Ty::Bool)], opt(Ty::I32)),
+                    "flat_map" => {
+                        let u = Ty::Array(Box::new(self.fresh()));
+                        (vec![f(vec![t], u.clone())], u)
+                    }
+                    _ => (vec![f(vec![t.clone(), t], Ty::I32)], r),
+                };
+                (On::Array, name, sig)
+            }
+            Ty::Str => {
+                let name = *STRING.iter().find(|n| **n == name)?;
+                let sig = match name {
+                    "is_empty" => (vec![], Ty::Bool),
+                    "starts_with" | "ends_with" => (vec![Ty::Str], Ty::Bool),
+                    "index_of" => (vec![Ty::Str], opt(Ty::I32)),
+                    "slice" => (vec![Ty::I32, Ty::I32], Ty::Str),
+                    "replace" => (vec![Ty::Str, Ty::Str], Ty::Str),
+                    "repeat" => (vec![Ty::I32], Ty::Str),
+                    "chars" => (vec![], Ty::Array(Box::new(Ty::Str))),
+                    "to_i32" => (vec![], opt(Ty::I32)),
+                    "to_f64" => (vec![], opt(Ty::F64)),
+                    _ => (vec![], Ty::Str),
+                };
+                (On::Str, name, sig)
+            }
+            Ty::F32 | Ty::F64 => {
+                let name = *FLOAT.iter().find(|n| **n == name)?;
+                let sig = match name {
+                    "pow" | "atan2" => (vec![r.clone()], r),
+                    "is_nan" => (vec![], Ty::Bool),
+                    _ => (vec![], r),
+                };
+                (On::Float, name, sig)
+            }
+            _ if floatv => {
+                let name = *FLOAT.iter().find(|n| **n == name)?;
+                (On::Float, name, if name == "is_nan" { (vec![], Ty::Bool) } else if name == "pow" || name == "atan2" { (vec![r.clone()], r) } else { (vec![], r) })
+            }
+            Ty::I32 | Ty::U32 | Ty::I64 => {
+                let name = *INT.iter().find(|n| **n == name)?;
+                if name == "abs" && *recv == Ty::U32 {
+                    return None;
+                }
+                (On::Int, name, if name == "pow" { (vec![Ty::I32], r) } else if name == "abs" { (vec![], r) } else { (vec![r.clone()], r) })
+            }
+            _ if intv => {
+                let name = *INT.iter().find(|n| **n == name)?;
+                (On::Int, name, if name == "pow" { (vec![Ty::I32], r) } else if name == "abs" { (vec![], r) } else { (vec![r.clone()], r) })
+            }
+            _ => return None,
+        };
+        Some((sig.0, sig.1, B::Std(on, name)))
     }
 }
 
