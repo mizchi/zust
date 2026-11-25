@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795637411105,
+  "lastUpdate": 1795637413477,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -82468,6 +82468,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 100.121,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "12c872983f4a7ee16d08b3bfdac2dfda9943893f",
+          "message": "Merge pull request #219 from mizchi/claude/fix-178-zurgo-pkg-source\n\nzurgo: the duplicate-library error names each package's source (#178)",
+          "timestamp": "2026-11-26T04:57:34+09:00",
+          "tree_id": "b8b08cc80795c841c3f53eeebda5869c8ae8f086",
+          "url": "https://github.com/mizchi/zust/commit/12c872983f4a7ee16d08b3bfdac2dfda9943893f"
+        },
+        "date": 1795637413205,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.906,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.75,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.814,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 10.825,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.473,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.203,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.472,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 279.361,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 100.141,
             "unit": "MiB"
           }
         ]
