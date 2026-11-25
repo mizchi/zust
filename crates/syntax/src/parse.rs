@@ -665,6 +665,9 @@ pub struct Parser {
     in_async: bool,
     /// Inside an `extern "C" { .. }` block: a `static X: T;` without a value is allowed there only
     in_extern: bool,
+    /// A validation error rustc reports after parsing (a binder's bounds or type parameter, `for<'a: 'b>`): returned by
+    /// parse_file, marked `\u{7}`, when nothing fails to parse
+    deferred: Option<String>,
     /// Inside a value that must be a constant (a const's or static's value, a discriminant, an array's length) and
     /// not in a fn or closure body in it: `return` there is E0572
     in_const: bool,
@@ -758,7 +761,7 @@ pub fn rewrite_tokens(s: &str, f: &mut dyn FnMut(usize, &[Tok]) -> Option<String
 
 pub fn parse_file(src: &str) -> R<File> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false, in_extern: false, in_const: false, no_dup_check: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false, in_extern: false, deferred: None, in_const: false, no_dup_check: false };
     let mut attrs = Vec::new();
     while p.is_punct("#") && p.peek_is(1, "!") {
         attrs.push(p.attr()?);
@@ -766,6 +769,9 @@ pub fn parse_file(src: &str) -> R<File> {
     let mut items = Vec::new();
     while p.i < p.toks.len() {
         items.push(p.item()?);
+    }
+    if let Some(d) = p.deferred {
+        return Err(format!("\u{7}{d}"));
     }
     Ok(File { attrs: attrs, items: items })
 }
@@ -791,7 +797,7 @@ pub fn parse_expr(src: &str) -> R<Expr> {
 /// 式を読む。位置は base (src の先頭のソース上の位置) からの位置にする
 pub fn parse_expr_at(src: &str, base: Pos) -> R<Expr> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, in_const: false, no_dup_check: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, deferred: None, in_const: false, no_dup_check: false };
     let e = p.expr(true)?;
     if p.i < p.toks.len() {
         return Err(p.err("unexpected token after expression"));
@@ -806,7 +812,7 @@ pub fn parse_pat_guard(src: &str) -> Option<(Pat, Option<Expr>)> {
 
 pub fn parse_pat_guard_at(src: &str, base: Pos) -> Option<(Pat, Option<Expr>)> {
     let toks = tokenize(src).ok()?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, in_const: false, no_dup_check: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, deferred: None, in_const: false, no_dup_check: false };
     let pat = p.pat().ok()?;
     let guard = if p.eat_ident("if") { Some(p.expr(true).ok()?) } else { None };
     p.eat_punct(",");
@@ -1352,9 +1358,26 @@ impl Parser {
         // (a higher-ranked type `for<'a> fn(&'a u8)` / `for<'a> Fn(&'a T)`: the binder is dropped)
         if self.is_ident("for") && self.punct_at(1, "<") {
             self.i += 2;
+            // (what rustc's parser takes there: `'a`, `'a:`, `'a: 'b + 'c`, a type parameter (rejected later); `,` alone
+            // is a parse error)
             while !self.eat_close_angle() {
-                if self.lifetime().is_none() {
-                    return Err(self.err("expected a lifetime"));
+                if self.lifetime().is_some() {
+                    if self.eat_punct(":") {
+                        let at = self.i;
+                        while self.lifetime().is_some() {
+                            if !self.eat_punct("+") {
+                                break;
+                            }
+                        }
+                        if self.i > at {
+                            self.defer(at, "bounds cannot be used in this context");
+                        }
+                    }
+                } else if self.tok(0).is_some_and(|t| t.kind == TokKind::Ident) {
+                    self.defer(self.i, "only lifetime parameters can be used in this context");
+                    self.i += 1;
+                } else {
+                    return Err(self.err_plain("expected one of `#`, `>`, `const`, identifier, or lifetime"));
                 }
                 if !self.eat_punct(",") && !self.punct_at(0, ">") {
                     return Err(self.err("expected one of `,`, `:`, or `>`"));
@@ -2052,7 +2075,9 @@ impl Parser {
                 self.i += 1;
                 if self.eat_ident("await") {
                     if self.async_on && !self.in_async {
-                        return Err(self.err("`await` is only allowed inside `async` functions and blocks"));
+                        // (at the `await`, as rustc: not the token after it)
+                        let t = &self.toks[self.i - 1];
+                        return Err(format!("{}:{}: `await` is only allowed inside `async` functions and blocks (E0728)", t.line, t.col + 1));
                     }
                     continue;
                 }
@@ -2172,6 +2197,16 @@ impl Parser {
         self.in_async = saved;
         self.in_const = saved_c;
         r
+    }
+
+    /// Keep the first validation error, at token `at` (see `deferred`)
+    #[cold]
+    fn defer(&mut self, at: usize, msg: &str) {
+        if self.deferred.is_none() {
+            if let Some(t) = self.toks.get(at) {
+                self.deferred = Some(format!("{}:{}: {msg}", t.line, t.col + 1));
+            }
+        }
     }
 
     /// An expression that must be a constant (E0572 for a `return` in it)

@@ -393,6 +393,7 @@ compile-fail	async-await/async-fn/edition-2015.rs
 compile-fail	async-await/async-fn/impl-header.rs
 compile-fail	async-await/async-fn/macro-async-trait-bound-theoretical-regression.rs
 compile-fail	async-await/async-fn/method-call-pos.rs
+compile-fail	async-await/async-outside-of-await-issue-121096.rs
 check-pass	async-await/async-trait-fn.rs
 compile-fail	async-await/async-unsafe-fn-call-in-safe.rs
 compile-fail	async-await/await-keyword/await-macro-rustfix.rs
@@ -5358,6 +5359,7 @@ compile-fail	parser/bounds-lifetime-1.rs
 compile-fail	parser/bounds-lifetime-2.rs
 compile-fail	parser/bounds-lifetime-where-1.rs
 compile-fail	parser/bounds-lifetime-where.rs
+compile-fail	parser/bounds-lifetime.rs
 check-pass	parser/bounds-obj-parens.rs
 compile-fail	parser/brace-in-let-chain.rs
 compile-fail	parser/break-in-unlabeled-block-parenthesized.rs

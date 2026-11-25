@@ -2487,3 +2487,23 @@ fn item_errors_at_the_part_rustc_points_at() {
     );
     assert_eq!(first("fn foo() {\n    static symbol: [u32];\n}\nfn main() {}\n").map(|d| d.0), Some(2), "a static without a body in a fn");
 }
+
+#[test]
+fn awaits_and_binders_where_rustc_points() {
+    // (E0728 at the `await`; a `for<..>` binder as rustc's parser reads it)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(
+        first("fn main() {\n    async {\n        let _ = 1;\n    }.await\n}\n"),
+        Some((4, "`await` is only allowed inside `async` functions and blocks (E0728)".to_string())),
+        "the `await`'s line, not the next token's"
+    );
+    assert_eq!(first("type A = for<'a:> fn();\ntype B = for<'a, 'b> fn();\nfn main() {}\n"), None, "a binder's lifetimes, an empty bound");
+    assert_eq!(first("type A = for<,> fn();\nfn main() {}\n").map(|d| d.0), Some(1), "a comma alone");
+    // (rustc rejects a binder's bounds and type parameters after parsing: a later syntax error comes first)
+    assert_eq!(first("type A = for<'b, 'a: 'b> fn();\nfn main() {}\n"), Some((1, "bounds cannot be used in this context".to_string())), "a binder's bounds");
+    assert_eq!(first("type D = for<'a, T> fn();\nfn main() {}\n"), Some((1, "only lifetime parameters can be used in this context".to_string())), "a binder's type parameter");
+    assert_eq!(first("type A = for<'a: 'b> fn();\ntype B = for<,> fn();\nfn main() {}\n").map(|d| d.0), Some(2), "the later syntax error first");
+}

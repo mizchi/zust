@@ -1066,6 +1066,10 @@ impl Session2 {
                     None => {
                         let ow = if pass == 1 { crate::ast_summary::owner_of(it, &sums) } else { None };
                         crate::ast_summary::parse_and_summarize(&src, it, ow.as_ref()).map_err(|e| {
+                            // (a validation error rustc reports after parsing: a later item's syntax error first)
+                            if let Some(d) = e.strip_prefix('\u{7}') {
+                                return deferred_after_parse(relocate(d.to_string(), it), &src, &items[i + 1..user_src]);
+                            }
                             let e = match (e.strip_prefix('\u{2}'), it.kind) {
                                 // (`\u{2}msg`: an impl member's error that is at its impl's header)
                                 (Some(m), ItemKind::ImplMember(h)) => format!("{}:1: {m}", items[h as usize].line),
@@ -2200,6 +2204,29 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
 }
 
 /// アイテムの中の `行:桁:` のエラーを、ファイルの中の行にする (driver.rs の relocate_err と同じ)。位置がなければアイテムの先頭の行
+/// A validation error the parser deferred (`for<'a: 'b>`), unless a later item does not parse: rustc stops at that
+/// one first
+#[cold]
+fn deferred_after_parse(e: String, src: &str, later: &[SrcItem]) -> String {
+    use crate::lexer::ItemKind as K;
+    for it in later {
+        if matches!(it.kind, K::InnerAttr) {
+            continue;
+        }
+        let text = src.get(it.start..it.end).unwrap_or("");
+        let text = match it.kind {
+            K::ImplHeader | K::TraitHeader => format!("{text}}}"),
+            _ => text.to_string(),
+        };
+        if let Err(e2) = crate::parse::parse_file(&text) {
+            if !e2.starts_with('\u{7}') {
+                return relocate(e2, it);
+            }
+        }
+    }
+    e
+}
+
 /// E0746 at the fn's return type (rustc's span), not its first line: `fn f() ->\n    dyn Tr`
 #[cold]
 fn ret_type_err(e: String, src: &str, it: &SrcItem) -> String {
