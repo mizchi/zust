@@ -12276,6 +12276,16 @@ fn sized_error(sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> O
     None
 }
 
+/// An item's header: its text before the first `{` token (not one in a string or a comment: `#[doc = "{"]`)
+fn header_text(text: &str) -> &str {
+    let b = text.as_bytes();
+    let t = crate::lexer::tokenize(b);
+    match t.iter().find(|x| x.0 == 1 && b[x.1] == b'{') {
+        Some(x) => &text[..x.1],
+        None => text,
+    }
+}
+
 /// E0277, Sized: the program's definitions and signatures that put a maybe-unsized type where only a sized one may be
 fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> Option<String> {
     let user_sm = |ii: usize| ii < user;
@@ -12329,7 +12339,7 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
     }
     for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
         let text = blank_comments(src.get(items[ii].start..items[ii].end).unwrap_or(""));
-        let head = text.split('{').next().unwrap_or("").to_string();
+        let head = header_text(&text).to_string();
         // (an impl's self type and trait arguments: `impl Foo for Option<[u8]>`)
         if let Some(st) = &sm.impl_self_ty {
             if matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) {
@@ -12349,9 +12359,10 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
                 let tr = tr.map(|t| t.rsplit("::").next().unwrap_or(t));
                 if let Some((di, d)) = tr.and_then(|tr| sums[..user.min(sums.len())].iter().enumerate().find(|(_, s)| s.trait_decl.as_deref() == Some(tr))) {
                     let tparams: Vec<&String> = d.trait_generics.iter().map(|g| &g.0).filter(|g| !g.starts_with('#') && *g != "Self").collect();
-                    if tparams.len() == sm.impl_trait_args.len() {
+                    // (the arguments written fill the leading parameters: the rest have defaults, `trait Tr<T, U = ()>`)
+                    if sm.impl_trait_args.len() <= tparams.len() {
                         let dtext = blank_comments(src.get(items[di].start..items[di].end).unwrap_or(""));
-                        let dhead = dtext.split('{').next().unwrap_or("").to_string();
+                        let dhead = header_text(&dtext).to_string();
                         for (k, a) in sm.impl_trait_args.iter().enumerate() {
                             let Ok(a) = prog.resolve_g(a, &gn) else { continue };
                             if may(a) && !maybe_unsized(&dhead, tparams[k]) {
