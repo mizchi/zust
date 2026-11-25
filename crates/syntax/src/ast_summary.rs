@@ -30,14 +30,22 @@ fn has_attr(attrs: &[String], name: &str) -> bool {
 }
 
 /// `#[derive(A, B)]` の名前 (1 つの識別子のものだけ)
+/// (also as std's prelude writes it, `#[::core::prelude::v1::derive(::core::clone::Clone, ::core::marker::Copy)]`, as
+/// libc 0.2's `s!` does: a std trait by its path is its name)
 fn derive_names(attrs: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     for a in attrs {
         let c = compact(a);
-        let Some(inner) = c.strip_prefix("#[derive(").and_then(|x| x.strip_suffix(")]")) else { continue };
+        let Some(rest) = c.strip_prefix("#[") else { continue };
+        let rest = rest.strip_prefix("::").unwrap_or(rest);
+        let rest = ["core::prelude::v1::", "std::prelude::v1::"].iter().find_map(|p| rest.strip_prefix(p)).unwrap_or(rest);
+        let Some(inner) = rest.strip_prefix("derive(").and_then(|x| x.strip_suffix(")]")) else { continue };
         for part in inner.split(',') {
-            if !part.is_empty() && part.chars().all(|ch| ch == '_' || ch.is_alphanumeric()) {
-                out.push(part.to_string());
+            let p = part.strip_prefix("::").unwrap_or(part);
+            let std_path = ["core::", "std::", "alloc::"].iter().any(|r| p.starts_with(r));
+            let name = if std_path { p.rsplit("::").next().unwrap_or(p) } else { p };
+            if !name.is_empty() && name.chars().all(|ch| ch == '_' || ch.is_alphanumeric()) {
+                out.push(name.to_string());
             }
         }
     }

@@ -4018,7 +4018,14 @@ impl Program {
                     crate::parse::Ty::Ptr(..) | crate::parse::Ty::Ref(..) => Some(8),
                     crate::parse::Ty::Tuple(v) if v.is_empty() => Some(0),
                     crate::parse::Ty::Path(None, tp) if tp.segs.len() == 1 && tp.segs[0].args.is_empty() => {
-                        match self.prim_of_name(&tp.segs[0].name).as_str() {
+                        // (C's types of core::ffi, `c_int`: their primitive, as in a signature (libc 0.2's
+                        //  `4 * size_of::<c_int>()` in glibc's `__PTHREAD_MUTEX_INITIALIZER`))
+                        let prim = self.prim_of_name(&tp.segs[0].name);
+                        let prim = match crate::ast_types::ffi_alias(&prim) {
+                            Some(t) if !self.struct_index.contains_key(prim.as_str()) => format!("{t:?}").to_lowercase(),
+                            _ => prim,
+                        };
+                        match prim.as_str() {
                             "u8" | "i8" | "bool" => Some(1),
                             "u16" | "i16" => Some(2),
                             "u32" | "i32" | "f32" | "char" => Some(4),
@@ -4033,7 +4040,7 @@ impl Program {
                 let v = match size {
                     Some(0) if seg.name == "align_of" => 1,
                     Some(n) => n,
-                    None => return Err(format!("cannot evaluate `{}` of this type in a constant", seg.name)),
+                    None => return Err(format!("cannot evaluate `{}::<{}>()` in a constant", seg.name, crate::parse::ty_text(t))),
                 };
                 // (both return a usize: `size_of::<u64>().leading_zeros()` counts 64 bits)
                 Ok((v, It::of_name("usize")))
