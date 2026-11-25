@@ -1,0 +1,1 @@
+6:1: conflicting implementations of trait `Flag` for type `&Box<_>` (E0119)

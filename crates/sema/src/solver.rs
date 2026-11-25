@@ -615,8 +615,10 @@ impl Solver<'_> {
             }
             Some(Shape::Adt(b, st, l)) => {
                 let prog = self.prog;
+                let (name, tr) = crate::ast_types::split_trait_assoc(name);
                 let def = prog.assocs.iter().find(|a| {
                     a.name == name
+                        && tr.is_none_or(|tr| a.trait_name.is_empty() || a.trait_name == tr)
                         && matches!(a.self_ty, Ty::Struct(sid) if prog.base_of(sid) == b)
                 })?;
                 let Ty::Struct(ssid) = def.self_ty else { return None };

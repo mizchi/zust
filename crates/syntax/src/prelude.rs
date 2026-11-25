@@ -1397,6 +1397,16 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("from_u32") {
         need.insert("__exr_char_from_u32_checked");
     }
+    if need.contains("from_u32_unchecked") {
+        need.insert("__exr_char_from_u32_unchecked");
+    }
+    // (the program's own `Vec::from_raw_parts`: the prelude's code names the slice's)
+    if sc.has("from_raw_parts") && sc.has("Vec") {
+        need.insert("__exr_vec_from_raw_parts");
+    }
+    if sc.has("from_utf8_unchecked") && sc.has("String") {
+        need.insert("__exr_string_from_utf8_unchecked");
+    }
     if need.contains("parse") {
         need.extend(["from_str", "FromStr"]);
     }
