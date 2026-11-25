@@ -2395,3 +2395,32 @@ fn returns_ranges_and_receivers_rustc_rejects() {
     assert_eq!(first(&format!("{tr}impl Foo for Bar {{\n    fn foo(&self) {{}}\n    fn bar(&self) {{}}\n}}\nfn main() {{}}\n")), e(7, "method `foo` has a `&self` declaration in the impl, but not in the trait (E0185)"), "a receiver in the impl only");
     assert_eq!(first(&format!("{tr}impl Foo for Bar {{\n    fn foo() {{}}\n    fn bar() {{}}\n}}\nfn main() {{}}\n")), e(8, "method `bar` has a `&self` declaration in the trait, but not in the impl (E0186)"), "a receiver in the trait only");
 }
+
+#[test]
+fn link_names_and_members_rustc_rejects() {
+    // (E0454, E0459, E0648, E0437, E0438, at the lines rustc 1.100 reports them)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("#[export_name = \"\\0foo\"]\npub fn bar() {}\nfn main() {}\n"), e(1, "`export_name` may not contain null characters (E0648)"), "an export name's NUL");
+    assert_eq!(first("#[export_name = \"\"]\npub fn bar() {}\nfn main() {}\n"), e(1, "`export_name` may not be empty"), "an empty export name");
+    assert_eq!(first("#[link(name = \"\")]\nextern \"C\" {}\nfn main() {}\n"), e(1, "link name must not be empty (E0454)"), "an empty link name");
+    assert_eq!(first("#[link(name = \"a\\0\")]\nextern \"C\" {}\nfn main() {}\n"), e(1, "link name may not contain null characters (E0648)"), "a link name's NUL");
+    assert_eq!(first("extern \"C\" {\n    #[link_name = \"\"]\n    fn f();\n}\nfn main() {}\n"), e(2, "link name must not be empty (E0454)"), "an empty link_name");
+    assert_eq!(first("#[link(kind = \"dylib\")]\nextern \"C\" {}\nfn main() {}\n"), e(1, "`#[link]` attribute requires a `name = \"string\"` argument (E0459)"), "a link with no name");
+    assert_eq!(first("#[link(name = \"  \")]\nextern \"C\" {}\n#[export_name = \"  \"]\npub fn bar() {}\nfn main() {}\n"), None, "names of spaces");
+    assert_eq!(first("trait Foo {}\nimpl Foo for i32 {\n    type Bar = bool;\n}\nfn main() {}\n"), e(3, "type `Bar` is not a member of trait `Foo` (E0437)"), "a type the trait does not declare");
+    assert_eq!(first("trait Bar {}\nimpl Bar for i32 {\n    const BAR: bool = true;\n}\nfn main() {}\n"), e(3, "const `BAR` is not a member of trait `Bar` (E0438)"), "a const the trait does not declare");
+    assert_eq!(first("trait Tr {\n    type A;\n    const C: u8;\n}\nimpl Tr for i32 {\n    type A = u8;\n    const C: u8 = 1;\n}\nimpl Iterator for Box<u8> {\n    type Item = u8;\n    fn next(&mut self) -> Option<u8> { None }\n}\nfn main() {}\n").map(|d| d.1.contains("not a member")), None, "declared members, a std trait");
+    assert_eq!(first("trait Sealed {\n    #[doc(hidden)]\n    type Buffer: Copy;\n}\nimpl Sealed for u8 {\n    type Buffer = u8;\n}\nfn main() {}\n"), None, "a member with an attribute");
+    assert_eq!(first("#[link(kind = \"wonderful_unicorn\")]\nextern \"C\" {}\nfn main() {}\n"), e(1, "malformed `link` attribute input"), "a kind rustc does not know, before the name");
+    // (E0197, E0084, E0777, E0184)
+    assert_eq!(first("struct Foo;\nunsafe impl Foo {}\nfn main() {}\n"), e(2, "inherent impls cannot be unsafe (E0197)"), "an unsafe inherent impl");
+    assert_eq!(first("unsafe trait U {}\nstruct Foo;\nunsafe impl U for Foo {}\nfn main() {}\n"), None, "an unsafe trait's impl");
+    assert_eq!(first("#[repr(i32)]\nenum Foo {}\nfn main() {}\n"), e(1, "unsupported representation for zero-variant enum (E0084)"), "a zero-variant enum's repr");
+    assert_eq!(first("#[repr(i32)]\nenum Foo { A }\nenum Bar {}\nfn main() {}\n"), None, "an enum with a variant, one with no repr");
+    assert_eq!(first("#[derive(\"Clone\")]\nstruct Foo;\nfn main() {}\n"), e(1, "expected path to a trait, found literal (E0777)"), "a literal in a derive");
+    assert_eq!(first("#[derive(Copy, Clone)]\nstruct Foo;\nimpl Drop for Foo {\n    fn drop(&mut self) {}\n}\nfn main() {}\n"), e(2, "the trait `Copy` cannot be implemented for this type; the type has a destructor (E0184)"), "Copy and Drop");
+}

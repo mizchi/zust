@@ -3753,6 +3753,46 @@ fn first_unreachable(b: &crate::parse::Block, user_process: bool) -> Option<(cra
 
 /// "malformed `X` attribute input" (E0539 / E0565): a built-in attribute of a fixed shape written in another one.
 /// Read are the file's inner attributes (its head) and the attributes in front of the items (no full-text scan)
+/// E0454 / E0459 / E0648: the error of a link's or an export's name (`#[link(name = "")]`, `#[link_name = "a\0"]`,
+/// `#[export_name = ""]`), of an attribute's name and input
+#[cold]
+fn attr_name_msg(name: &str, input: &str) -> Option<String> {
+    match (name, input.strip_prefix('='), input.strip_prefix('(').and_then(|r| r.strip_suffix(')'))) {
+        ("link", _, Some(list)) if link_kinds_ok(list) => link_name_msg(list),
+        ("derive", _, Some(_)) => Some("expected path to a trait, found literal (E0777)".to_string()),
+        ("link_name" | "export_name", Some(v), _) => match str_value(v.trim()) {
+            Some(v) if v.is_empty() && name == "link_name" => Some("link name must not be empty (E0454)".to_string()),
+            Some(v) if v.is_empty() => Some("`export_name` may not be empty".to_string()),
+            Some(v) if v.contains('\0') && name == "link_name" => Some("link name may not contain null characters (E0648)".to_string()),
+            Some(v) if v.contains('\0') => Some("`export_name` may not contain null characters (E0648)".to_string()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether each `kind` of a `#[link(..)]` (its list's text) is one rustc knows
+fn link_kinds_ok(list: &str) -> bool {
+    attr_entries(list).iter().all(|e| match e.split_once('=') {
+        Some((k, x)) if k.trim() == "kind" => str_value(x).is_some_and(|v| matches!(v.as_str(), "static" | "dylib" | "framework" | "raw-dylib" | "link-arg")),
+        _ => true,
+    })
+}
+
+/// The error of a `#[link(..)]`'s name (its list's text): none (E0459, unless it names a wasm import module), empty
+/// (E0454), or with a NUL (E0648)
+fn link_name_msg(list: &str) -> Option<String> {
+    let entries = attr_entries(list);
+    let name = entries.iter().find_map(|e| e.split_once('=').filter(|(k, _)| k.trim() == "name").map(|(_, v)| v.trim()));
+    match name.map(str_value) {
+        None if entries.iter().any(|e| e.split_once('=').is_some_and(|(k, _)| k.trim() == "wasm_import_module")) => None,
+        None => Some("`#[link]` attribute requires a `name = \"string\"` argument (E0459)".to_string()),
+        Some(Some(v)) if v.is_empty() => Some("link name must not be empty (E0454)".to_string()),
+        Some(Some(v)) if v.contains('\0') => Some("link name may not contain null characters (E0648)".to_string()),
+        _ => None,
+    }
+}
+
 fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, edition: u16) -> Option<String> {
     // (a crate with no dependency (so no proc macro) knows only the built-in attributes and its tools' paths)
     // (both looked up only when such an attribute is there: not a search of every file)
@@ -3818,7 +3858,8 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
         match name {
             "crate_type" | "recursion_limit" | "type_length_limit" | "crate_name" => form == '=' && str_lit(inner),
             // (`link_name = "x"`, `export_name = "x"`, `link_section = ".x"`; `link_ordinal(N)`, an integer)
-            "link_name" | "export_name" | "link_section" => form == '=' && str_lit(inner),
+            // (E0454 / E0648: a link name or export name that is empty or has a NUL)
+            "link_name" | "export_name" | "link_section" => form == '=' && str_lit(inner) && (name == "link_section" || str_value(inner).is_none_or(|v| !v.is_empty() && !v.contains('\0'))),
             "link_ordinal" => form == '(' && inner.trim().starts_with(|c: char| c.is_ascii_digit()) && inner.trim().chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
             "inline" => form == ' ' || (form == '(' && matches!(inner, "always" | "never")),
             "must_use" => form == ' ' || (form == '=' && str_lit(inner)),
@@ -3829,15 +3870,10 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             // (the value's text, not its spelling: `r"console"` is `"console"`)
             "windows_subsystem" => form == '=' && str_value(inner).is_some_and(|v| matches!(v.as_str(), "console" | "windows")),
             // (`link(name = "m", kind = "static")`: a kind rustc knows)
-            "link" => {
-                form == '(' && !inner.is_empty() && !inner.contains("cfg()") && attr_entries(inner).iter().all(|e| match e.split_once('=') {
-                    Some((k, x)) if k.trim() == "kind" => {
-                        str_value(x).is_some_and(|v| matches!(v.as_str(), "static" | "dylib" | "framework" | "raw-dylib" | "link-arg"))
-                    }
-                    _ => true,
-                })
-            }
+            "link" => form == '(' && !inner.is_empty() && !inner.contains("cfg()") && link_kinds_ok(inner) && link_name_msg(inner).is_none(),
             "allow" | "warn" | "deny" | "forbid" | "expect" => form == '(',
+            // (E0777: `derive("Clone")`, a literal for a trait)
+            "derive" => form != '(' || !attr_entries(inner).iter().any(|e| e.trim_start().starts_with(['"', '\'']) || e.trim_start().starts_with(|c: char| c.is_ascii_digit())),
             "macro_use" => form == ' ' || (form == '(' && idents(inner)),
             "cfg" => form == '(' && attr_entries(inner).len() == 1 && cfg_pred(inner),
             "cfg_attr" => form == '(' && inner.contains(',') && attr_entries(inner).first().is_some_and(|p| cfg_pred(p)),
@@ -3901,6 +3937,10 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
                 attr_entries(list).iter().find_map(|e| e.split_once('=').and_then(|(_, v)| crate::cfg::attr_value(v).err()))
             }
         });
+        // (E0454 / E0459 / E0648: a link's or an export's name)
+        if let Some(m) = attr_name_msg(name, input) {
+            return format!("{line}:1: {m}");
+        }
         match found.flatten() {
             Some(f) => format!("{line}:1: {}", crate::cfg::not_a_literal(&f)),
             // (`#[inline = ".."]`: the deny-by-default `ill_formed_attribute_input`, with the forms it takes)
@@ -4043,7 +4083,8 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
                     let mut k = b + 1;
                     loop {
                         if let Some(&(at, name, _)) = leading(&text[k..]).iter().find(|&&(_, n, inp)| matches!(n, "link_name" | "link_ordinal") && !check(n, inp)) {
-                            return Some((k + at, format!("malformed `{name}` attribute input")));
+                            let inp = leading(&text[k..]).iter().find(|&&(a, _, _)| a == at).map_or("", |x| x.2);
+                            return Some((k + at, attr_name_msg(name, inp.trim()).unwrap_or_else(|| format!("malformed `{name}` attribute input"))));
                         }
                         if let Some(&(at, _, _)) = leading(&text[k..]).iter().find(|&&(_, n, _)| n == "derive") {
                             return Some((k + at, "`derive` may only be applied to `struct`s, `enum`s and `union`s (E0774)".to_string()));
@@ -9625,42 +9666,82 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize)
             })
             .collect()
     };
+    // (a member's signature alone, as a declaration: its body is not parsed)
     let sig = |t: &str| -> Option<crate::parse::FnSig> {
-        match crate::parse::parse_file(t).ok()?.items.into_iter().next()?.kind {
+        let decl = match fn_body_start(t) {
+            Some(b) => std::borrow::Cow::Owned(format!("{};", &t[..b])),
+            None => std::borrow::Cow::Borrowed(t),
+        };
+        match crate::parse::parse_file(&decl).ok()?.items.into_iter().next()?.kind {
             crate::parse::ItemKind::Fn(s, _) => Some(s),
             _ => None,
         }
     };
-    for (h, it) in items.iter().enumerate() {
-        if it.kind != K::ImplHeader {
-            continue;
-        }
-        // (`impl<..> Tr<..> for X {`: the trait's name before `for`)
-        let t = text(it);
-        let head = &t[..t.find('{').unwrap_or(t.len())];
-        let Some(f) = head.find(" for ") else { continue };
-        let before = &head[..f];
-        let before = before[..before.find('<').filter(|&l| before[l..].contains('>') && !before[..l].ends_with("impl")).unwrap_or(before.len())].trim_end();
-        let tw = words(before);
-        let Some(tr) = tw.last() else { continue };
-        let Some((&th, _)) = trait_of.iter().find(|(_, n)| *n == tr) else { continue };
-        for m in items.iter().filter(|m| m.kind == K::ImplMember(h as u32) && generic_fn(text(m))) {
-            let Some(ms) = sig(text(m)) else { continue };
-            let Some(d) = items.iter().find(|d| d.kind == K::TraitMember(th) && sig(text(d)).is_some_and(|ds| ds.name == ms.name)) else { continue };
-            let Some(ds) = sig(text(d)) else { continue };
-            let (mp, dp) = (params(&ms.generics), params(&ds.generics));
-            if mp.len() != dp.len() {
-                continue;
-            }
-            for (mb, db) in mp.iter().zip(&dp) {
-                let allowed = close(db.iter().map(|x| x.0.clone()).collect());
-                if let Some((_, pos)) = mb.iter().find(|(n, _)| n != "Sized" && !allowed.contains(n)) {
-                    // (the position in the member's text: its first line starts where the member does)
-                    let line = m.line + pos.line as usize - 1;
-                    let col = if pos.line == 1 { m.start - src[..m.start].rfind('\n').map_or(0, |k| k + 1) + pos.col as usize + 1 } else { pos.col as usize + 1 };
-                    return Some((line, col));
+    // (a member's fn name: `fn name<..>(`)
+    fn fn_name(t: &str) -> Option<&str> {
+        let k = t.find("fn ")? + 3;
+        let r = t[k..].trim_start();
+        Some(&r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len())])
+    }
+    // (the generic methods of the program's traits, by trait and name; their signatures parsed once each)
+    let mut decls: crate::fxhash::FxMap<(u32, &str), &SrcItem> = Default::default();
+    for d in items {
+        if let K::TraitMember(th) = d.kind {
+            if generic_fn(text(d)) {
+                if let Some(n) = fn_name(text(d)) {
+                    decls.insert((th, n), d);
                 }
             }
+        }
+    }
+    let mut decl_sigs: crate::fxhash::FxMap<(u32, &str), Option<crate::parse::FnSig>> = Default::default();
+    // (each impl header's trait of the program's, read once)
+    let mut impl_trait: crate::fxhash::FxMap<u32, Option<u32>> = Default::default();
+    let mut by_text: crate::fxhash::FxMap<&str, Option<u32>> = Default::default();
+    let mut verdicts: crate::fxhash::FxMap<(u32, &str), Option<crate::parse::Pos>> = Default::default();
+    for m in items {
+        let K::ImplMember(h) = m.kind else { continue };
+        if !generic_fn(text(m)) {
+            continue;
+        }
+        let th = *impl_trait.entry(h).or_insert_with(|| {
+            // (`impl<..> Tr<..> for X {`: the trait's name before `for`, by the text before it (the same for each impl
+            // a macro writes: `impl FromHex for [u8; N]`))
+            let t = text(items.get(h as usize)?);
+            let head = &t[..t.find('{').unwrap_or(t.len())];
+            let f = head.find(" for ")?;
+            let before = &head[..f];
+            let before = before[..before.find('<').filter(|&l| before[l..].contains('>') && !before[..l].ends_with("impl")).unwrap_or(before.len())].trim_end();
+            *by_text.entry(before).or_insert_with(|| {
+                let tw = words(before);
+                let tr = tw.last()?;
+                trait_of.iter().find(|(_, n)| *n == tr).map(|(&th, _)| th)
+            })
+        });
+        let Some(th) = th else { continue };
+        let Some(name) = fn_name(text(m)) else { continue };
+        let Some(&d) = decls.get(&(th, name)) else { continue };
+        // (the verdict by the member's signature text, the same for each impl a macro writes: where in it a bound is
+        // stricter, if one is)
+        let mt = text(m);
+        let key = &mt[..fn_body_start(mt).unwrap_or(mt.len())];
+        let at = *verdicts.entry((th, key)).or_insert_with(|| {
+            let ms = sig(mt)?;
+            let ds = decl_sigs.entry((th, name)).or_insert_with(|| sig(text(d))).clone()?;
+            let (mp, dp) = (params(&ms.generics), params(&ds.generics));
+            if mp.len() != dp.len() {
+                return None;
+            }
+            mp.iter().zip(&dp).find_map(|(mb, db)| {
+                let allowed = close(db.iter().map(|x| x.0.clone()).collect());
+                mb.iter().find(|(n, _)| n != "Sized" && !allowed.contains(n)).map(|x| x.1)
+            })
+        });
+        if let Some(pos) = at {
+            // (the position in the member's text: its first line starts where the member does)
+            let line = m.line + pos.line as usize - 1;
+            let col = if pos.line == 1 { m.start - src[..m.start].rfind('\n').map_or(0, |k| k + 1) + pos.col as usize + 1 } else { pos.col as usize + 1 };
+            return Some((line, col));
         }
     }
     None
@@ -9674,6 +9755,106 @@ const STD_ADTS: &[&str] = &[
     "Arc", "BTreeMap", "BTreeSet", "BinaryHeap", "Box", "Cell", "Cow", "Duration", "HashMap", "HashSet", "LinkedList", "Mutex", "NonNull",
     "Option", "PhantomData", "Pin", "Rc", "RefCell", "Result", "RwLock", "String", "Vec", "VecDeque", "Weak",
 ];
+
+/// Where a fn item's body starts in its text: the first `{` outside its generics, parameters and brackets (None for
+/// a declaration, `fn f();`)
+fn fn_body_start(t: &str) -> Option<usize> {
+    let b = t.as_bytes();
+    let mut d = 0i32;
+    for (i, &c) in b.iter().enumerate() {
+        match c {
+            b'<' | b'(' | b'[' => d += 1,
+            b'>' if i > 0 && b[i - 1] == b'-' => {}
+            b'>' | b')' | b']' => d -= 1,
+            b'{' if d <= 0 => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// E0084: `#[repr(i32)] enum Foo {}`, an integer or `C` representation of an enum without variants, at the `repr`.
+/// text: the item's, t: past its attributes and visibility
+#[cold]
+fn zero_variant_repr(it: &SrcItem, text: &str, t: &str) -> Option<String> {
+    let body = t[t.find('{')? + 1..].trim_start();
+    if !body.starts_with('}') {
+        return None;
+    }
+    let attrs = &text[..text.len() - t.len()];
+    let at = attrs.find("repr(")?;
+    let list = &attrs[at + 5..at + 5 + attrs[at + 5..].find(')')?];
+    const INTS: &[&str] = &["C", "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize"];
+    if !list.split(',').any(|h| INTS.contains(&h.trim())) {
+        return None;
+    }
+    let line = it.line + attrs[..at].matches('\n').count();
+    Some(format!("{line}:1: unsupported representation for zero-variant enum (E0084)"))
+}
+
+/// The keyword of an impl member (past its visibility and qualifiers): `fn`, `type` or `const`
+fn x_kind<'a>(mut w: impl Iterator<Item = &'a str>) -> &'a str {
+    let mut prev = "";
+    for x in w.by_ref().take(8) {
+        match x {
+            "fn" | "type" => return x,
+            "pub" | "crate" | "self" | "super" | "in" | "unsafe" | "async" | "extern" | "default" => {}
+            "const" => prev = "const",
+            _ if prev == "const" => return "const",
+            _ => return "",
+        }
+    }
+    prev
+}
+
+/// E0437 / E0438: member `name` (a type when `ty`) of the trait impl whose header is item `h`, when the impl is of a
+/// trait of the program's (one of that name) that declares no type or const of that name
+#[cold]
+fn not_a_member<'a>(src: &'a str, items: &[SrcItem], it: &SrcItem, h: u32, ty: bool, name: &str, traits: &mut Option<FxMap<&'a str, Option<u32>>>) -> Option<String> {
+    use crate::lexer::ItemKind as K;
+    let hi = items.get(h as usize)?;
+    let head = src.get(hi.start..hi.end)?;
+    let head = item_text(head).strip_prefix("unsafe ").map_or(item_text(head), |r| r.trim_start());
+    let rest = head.strip_prefix("impl")?;
+    if !hi.idents.iter().any(|&(a, b)| src.get(a as usize..b as usize) == Some("for")) {
+        return None;
+    }
+    let tr = impl_self_name(rest);
+    let map = traits.get_or_insert_with(|| {
+        let mut m: FxMap<&str, Option<u32>> = FxMap::default();
+        for (i, t) in items.iter().enumerate() {
+            if t.kind != K::TraitHeader {
+                continue;
+            }
+            let mut w = t.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or(""));
+            if w.find(|&x| x == "trait").is_some() {
+                if let Some(n) = w.next() {
+                    m.entry(n).and_modify(|e| *e = None).or_insert(Some(i as u32));
+                }
+            }
+        }
+        m
+    });
+    let th = (*map.get(tr)?)?;
+    // (a trait's member by its text, past its attributes and visibility: `#[doc(hidden)] type Buffer: 'static;`)
+    let kw = if ty { "type" } else { "const" };
+    let declared = items.iter().any(|m| {
+        m.kind == K::TraitMember(th)
+            && src.get(m.start..m.end).and_then(|t| item_text(t).strip_prefix(kw)).is_some_and(|r| {
+                let r = r.trim_start();
+                r.strip_prefix(name).is_some_and(|after| !after.starts_with(|c: char| c.is_alphanumeric() || c == '_'))
+            })
+    });
+    if declared {
+        return None;
+    }
+    let col = it.start - src[..it.start].rfind('\n').map_or(0, |k| k + 1) + 1;
+    Some(if ty {
+        format!("{}:{col}: type `{name}` is not a member of trait `{tr}` (E0437)", it.line)
+    } else {
+        format!("{}:{col}: const `{name}` is not a member of trait `{tr}` (E0438)", it.line)
+    })
+}
 
 /// Errors of an item's declaration, read from its text: an inherent impl of a type of std (E0116: `impl Vec<u8> {}`,
 /// named or through a type alias of the crate, which only std can have; `foreign`: when the crate has no
@@ -9690,13 +9871,24 @@ fn item_decl_err(src: &str, items: &[SrcItem], foreign: bool) -> Option<String> 
         }
         // (by the first byte: an attribute, a visibility, `impl` or `type`; `pub fn` and the like by the fifth)
         let b = &sb[it.start.min(sb.len())..it.end.min(sb.len())];
-        if !matches!(b.first(), Some(b'i' | b't' | b'p' | b'#')) || b.get(3) == Some(&b' ') && b.get(4) != Some(&b't') && b[0] == b'p' {
+        if !matches!(b.first(), Some(b'i' | b't' | b'p' | b'#' | b'u')) || b.get(3) == Some(&b' ') && b.get(4) != Some(&b't') && b[0] == b'p' {
             continue;
         }
         let text = src.get(it.start..it.end).unwrap_or("");
         let t = item_text(text);
         if let Some(rest) = t.strip_prefix("impl") {
             if let Some(e) = inherent_impl_err(src, items, it, rest, foreign, &mut aliases) {
+                return Some(e);
+            }
+        } else if let Some(rest) = t.strip_prefix("unsafe").and_then(|r| r.trim_start().strip_prefix("impl")) {
+            // (E0197: `unsafe impl S {}`, an inherent impl)
+            let head_end = it.end - rest.len() + rest.find('{').unwrap_or(rest.len());
+            if !it.idents.iter().take_while(|&&(a, _)| (a as usize) < head_end).any(|&(a, b)| src.get(a as usize..b as usize) == Some("for")) {
+                let line = it.line + text[..text.len() - t.len()].matches('\n').count();
+                return Some(format!("{line}:1: inherent impls cannot be unsafe (E0197)"));
+            }
+        } else if b[0] == b'#' && it.kind == K::Normal && t.starts_with("enum") {
+            if let Some(e) = zero_variant_repr(it, text, t) {
                 return Some(e);
             }
         } else if it.kind == K::Normal && t.starts_with("type") {
@@ -9923,6 +10115,8 @@ fn unused_alias_param_in(src: &str, items: &[SrcItem], it: &SrcItem, lt: usize) 
 fn duplicate_impl_item(src: &str, items: &[SrcItem]) -> Option<String> {
     use crate::lexer::ItemKind as K;
     let mut seen: crate::fxhash::FxSet<(u32, bool, &str)> = Default::default();
+    // (the program's traits by name, read once: their header's index, or None for a name two traits have)
+    let mut traits: Option<FxMap<&str, Option<u32>>> = None;
     for it in items {
         let K::ImplMember(h) = it.kind else { continue };
         let ids = || it.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or(""));
@@ -9946,6 +10140,12 @@ fn duplicate_impl_item(src: &str, items: &[SrcItem]) -> Option<String> {
         let Some((ty, name)) = found else { continue };
         if name == "_" {
             continue;
+        }
+        // (E0437 / E0438: an associated type or const of a trait impl that the program's trait does not declare)
+        if x_kind(ids()) != "fn" {
+            if let Some(e) = not_a_member(src, items, it, h, ty, name, &mut traits) {
+                return Some(e);
+            }
         }
         if !seen.insert((h, ty, name)) {
             let head = items.get(h as usize).map_or("", |hi| src.get(hi.start..hi.end).unwrap_or(""));

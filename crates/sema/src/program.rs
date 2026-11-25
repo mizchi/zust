@@ -2180,9 +2180,15 @@ impl Program {
                 })
             };
             let e = |n: &str| format!("{}:1: \u{5}{}\u{5}the trait `Copy` cannot be implemented for this type (E0204)", items[ii].line, n.rsplit("::").next().unwrap_or(n));
+            // (E0184: `Copy` for a type with a Drop impl)
+            let dtor = |p: &Program, n: &str| p.struct_index.get(n).is_some_and(|&sid| p.impls.contains(&(sid, "Drop".to_string())));
+            let e184 = |n: &str| format!("{}:1: \u{5}{}\u{5}the trait `Copy` cannot be implemented for this type; the type has a destructor (E0184)", items[ii].line, n.rsplit("::").next().unwrap_or(n));
             for (tn, ds) in &sm.derives {
                 if ds.iter().any(|d| d == "Copy") && p.struct_index.get(tn).is_some_and(|&sid| not_copy(&p, sid, None, &[])) {
                     return Err(e(tn));
+                }
+                if ds.iter().any(|d| d == "Copy") && dtor(&p, tn) {
+                    return Err(e184(tn));
                 }
             }
             if let (Some("Copy"), Some(sn)) = (sm.impl_trait.as_deref(), &sm.impl_self) {
@@ -2193,6 +2199,9 @@ impl Program {
                 let own_gen = if sm.where_types.is_empty() { sm.impl_generics.as_slice() } else { &[] };
                 if p.struct_index.get(sn).is_some_and(|&sid| not_copy(&p, sid, args, own_gen)) {
                     return Err(e(sn));
+                }
+                if dtor(&p, sn) {
+                    return Err(e184(sn));
                 }
             }
         }

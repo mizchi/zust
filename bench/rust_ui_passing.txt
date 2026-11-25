@@ -560,6 +560,8 @@ compile-fail	attributes/inline/attr-usage-inline.rs
 compile-fail	attributes/inline/invalid-inline.rs
 check-pass	attributes/inner-attr-metavar.rs
 compile-fail	attributes/invalid-debugger-visualizer-target.rs
+compile-fail	attributes/invalid-export-name.rs
+compile-fail	attributes/invalid-link-name.rs
 compile-fail	attributes/invalid-macro-use.rs
 compile-fail	attributes/invalid-repr.rs
 compile-fail	attributes/invalid-reprs.rs
@@ -2112,6 +2114,7 @@ compile-fail	derived-errors/issue-31997-1.rs
 compile-fail	derived-errors/issue-31997.rs
 compile-fail	derived-errors/no-spurious-unconstrained-param.rs
 check-pass	derives/clone-copy/clone-ref-to-dst.rs
+compile-fail	derives/clone-copy/copy-drop-mutually-exclusive.rs
 run-pass	derives/clone-copy/derive-clone-basic.rs
 compile-fail	derives/clone-copy/derive-copy-clone-non-copy-field-diagnostic.rs
 compile-fail	derives/clone-copy/derives-span-Clone.rs
@@ -2499,6 +2502,7 @@ compile-fail	error-codes/E0069.rs
 compile-fail	error-codes/E0070.rs
 compile-fail	error-codes/E0071.rs
 compile-fail	error-codes/E0081.rs
+compile-fail	error-codes/E0084.rs
 compile-fail	error-codes/E0091.rs
 compile-fail	error-codes/E0106.rs
 compile-fail	error-codes/E0107.rs
@@ -2517,10 +2521,12 @@ compile-fail	error-codes/E0131.rs
 compile-fail	error-codes/E0133.rs
 compile-fail	error-codes/E0161.rs
 compile-fail	error-codes/E0164.rs
+compile-fail	error-codes/E0184.rs
 compile-fail	error-codes/E0185.rs
 compile-fail	error-codes/E0186.rs
 compile-fail	error-codes/E0191.rs
 compile-fail	error-codes/E0195.rs
+compile-fail	error-codes/E0197.rs
 compile-fail	error-codes/E0200.rs
 compile-fail	error-codes/E0201.rs
 compile-fail	error-codes/E0207.rs
@@ -2574,9 +2580,13 @@ compile-fail	error-codes/E0432.rs
 compile-fail	error-codes/E0433.rs
 compile-fail	error-codes/E0434.rs
 compile-fail	error-codes/E0435.rs
+compile-fail	error-codes/E0437.rs
+compile-fail	error-codes/E0438.rs
 compile-fail	error-codes/E0449.rs
 compile-fail	error-codes/E0451.rs
+compile-fail	error-codes/E0454.rs
 compile-fail	error-codes/E0458.rs
+compile-fail	error-codes/E0459.rs
 compile-fail	error-codes/E0478.rs
 compile-fail	error-codes/E0496.rs
 compile-fail	error-codes/E0499.rs
@@ -2630,10 +2640,12 @@ compile-fail	error-codes/E0621-does-not-trigger-for-closures.rs
 compile-fail	error-codes/E0624.rs
 compile-fail	error-codes/E0637.rs
 compile-fail	error-codes/E0646.rs
+compile-fail	error-codes/E0648.rs
 compile-fail	error-codes/E0658.rs
 compile-fail	error-codes/E0659.rs
 compile-fail	error-codes/E0746.rs
 compile-fail	error-codes/E0767.rs
+compile-fail	error-codes/E0777.rs
 compile-fail	error-codes/E0790.rs
 compile-fail	error-codes/E0799.rs
 compile-fail	error-codes/E0800.rs
@@ -4007,6 +4019,7 @@ compile-fail	lifetimes/unnamed-closure-doesnt-life-long-enough-issue-67634.rs
 check-pass	lifetimes/unsafe-transmute-in-find-11740.rs
 compile-fail	lifetimes/unusual-rib-combinations.rs
 build-pass	limits/limit-huge-struct-derive-debug.rs
+compile-fail	link-native-libs/issue-109144.rs
 compile-fail	link-native-libs/issue-43926.rs
 compile-fail	link-native-libs/link-attr-validation-early.rs
 compile-fail	linkage-attr/linkage4.rs
@@ -7718,6 +7731,7 @@ compile-fail	traits/const-traits/ice-120503-async-const-method.rs
 compile-fail	traits/const-traits/macro-const-trait-bound-theoretical-regression.rs
 check-pass	traits/const-traits/static-const-trait-bound.rs
 check-pass	traits/const-traits/trait-method-ptr-in-consts-ice.rs
+compile-fail	traits/const-traits/trivial-const-ice-149278.rs
 compile-fail	traits/constrained-type-params-trait-impl.rs
 compile-fail	traits/copy-guessing.rs
 compile-fail	traits/copy-requires-all-fields-copy.rs
@@ -7918,6 +7932,7 @@ compile-fail	traits/rc-not-send.rs
 run-pass	traits/region-pointer-simple.rs
 compile-fail	traits/resolve-impl-before-constrain-check.rs
 compile-fail	traits/safety-fn-body.rs
+compile-fail	traits/safety-inherent-impl.rs
 run-pass	traits/safety-ok.rs
 compile-fail	traits/safety-trait-impl.rs
 check-pass	traits/self-not-send-in-default-method-8171.rs
@@ -7946,6 +7961,7 @@ compile-fail	traits/test.rs
 compile-fail	traits/trait-bound-mismatch-14853.rs
 compile-fail	traits/trait-impl-missing-method.rs
 compile-fail	traits/trait-impl-overflow-with-where-clause-20413.rs
+compile-fail	traits/trait-implementation-ambiguity-69602.rs
 run-pass	traits/trait-implementation-for-primitive-type-5280.rs
 run-pass	traits/trait-implementation-for-usize-5321.rs
 check-pass	traits/trait-implementation-generic-access-6898.rs
