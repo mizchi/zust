@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795586473243,
+  "lastUpdate": 1795586476206,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -103942,6 +103942,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/37362486e6431e2fb2c3d850a3af6ef9c8f45df7"
         },
         "date": 1795584469324,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.552,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 75,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.25,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 96.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.754,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f85b65a6e7960ac42e69187d777ae2e174d2ac5d",
+          "message": "Merge pull request #157 from mizchi/claude/gracious-brahmagupta-16jxdl\n\nzustscript: async fn, await and async closures (Promise<T>)",
+          "timestamp": "2026-11-25T14:55:30+09:00",
+          "tree_id": "e0b349c67c7e7da5285128abf17278eab538506b",
+          "url": "https://github.com/mizchi/zust/commit/f85b65a6e7960ac42e69187d777ae2e174d2ac5d"
+        },
+        "date": 1795586475522,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
