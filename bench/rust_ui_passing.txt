@@ -417,6 +417,7 @@ compile-fail	async-await/await-keyword/incorrect-syntax-suggestions.rs
 check-pass	async-await/await-unsize.rs
 check-pass	async-await/bound-normalization.rs
 compile-fail	async-await/clone-suggestion.rs
+compile-fail	async-await/const-async-fn-in-main.rs
 run-pass	async-await/context-is-sorta-unwindsafe.rs
 compile-fail	async-await/coroutine-desc.rs
 build-pass	async-await/default-struct-update.rs
@@ -1641,6 +1642,7 @@ compile-fail	coherence/coherence-overlap-unnormalizable-projection-1.rs
 compile-fail	coherence/coherence-projection-conflict-ty-param.rs
 check-pass	coherence/coherence-projection-ok-orphan.rs
 check-pass	coherence/coherence-projection-ok.rs
+run-pass	coherence/coherence-rfc447-constrained.rs
 check-pass	coherence/coherence-subtyping.rs
 compile-fail	coherence/coherence-tuple-conflict.rs
 run-pass	coherence/coherence-where-clause.rs
@@ -2153,6 +2155,7 @@ compile-fail	consts/transmute-size-mismatch-before-typeck.rs
 check-pass	consts/unnormalized-param-env.rs
 check-pass	consts/unsafe_cell_in_const.rs
 check-pass	consts/unwind-abort.rs
+compile-fail	contracts/internal_machinery/internal-feature-gating.rs
 compile-fail	coroutine/coroutine-in-orphaned-anon-const.rs
 check-pass	coroutine/issue-53548-1.rs
 check-pass	coroutine/issue-62506-two_awaits.rs
@@ -4850,6 +4853,7 @@ compile-fail	methods/method-self-arg-1.rs
 compile-fail	methods/method-self-arg-2.rs
 run-pass	methods/method-self-arg.rs
 compile-fail	methods/method-suggestion-trait-with-extra-generics-no-ice.rs
+run-pass	methods/method-two-traits-distinguished-via-where-clause.rs
 compile-fail	methods/method-value-without-call.rs
 run-pass	methods/method-where-clause.rs
 check-pass	methods/nested-fn-call-shadowed-assoc-fn-variable.rs
@@ -5612,6 +5616,7 @@ compile-fail	parser/fn-defined-using-fun.rs
 compile-fail	parser/fn-defined-using-func.rs
 compile-fail	parser/fn-defined-using-function.rs
 compile-fail	parser/fn-field-parse-error-ice.rs
+compile-fail	parser/fn-header-semantic-fail.rs
 check-pass	parser/fn-header-syntactic-pass.rs
 check-pass	parser/fn-returns-fn-pointer.rs
 check-pass	parser/foreign-static-syntactic-pass.rs
@@ -6071,6 +6076,7 @@ compile-fail	parser/recover/recover-ampersand-less-ref-ty.rs
 compile-fail	parser/recover/recover-colon-instead-of-eq-in-local.rs
 compile-fail	parser/recover/recover-const-async-fn-ptr.rs
 compile-fail	parser/recover/recover-enum-with-bad-where.rs
+compile-fail	parser/recover/recover-enum.rs
 compile-fail	parser/recover/recover-enum2.rs
 compile-fail	parser/recover/recover-field-extra-angle-brackets-in-struct-with-a-field.rs
 compile-fail	parser/recover/recover-field-extra-angle-brackets.rs
@@ -7143,6 +7149,7 @@ compile-fail	self/arbitrary_self_types_pin_lifetime_impl_trait.rs
 compile-fail	self/arbitrary_self_types_pin_lifetime_mismatch-async.rs
 compile-fail	self/arbitrary_self_types_pin_lifetime_mismatch.rs
 compile-fail	self/arbitrary_self_types_pin_needing_borrow.rs
+run-pass	self/builtin-superkinds-self-type.rs
 run-pass	self/by-value-self-in-mut-slot.rs
 compile-fail	self/class-missing-self.rs
 check-pass	self/dispatch-from-dyn-layout-2.rs
@@ -7763,6 +7770,7 @@ compile-fail	suggestions/return-cycle.rs
 compile-fail	suggestions/return-elided-lifetime.rs
 compile-fail	suggestions/return-without-lifetime.rs
 compile-fail	suggestions/semi-suggestion-when-stmt-and-expr-span-equal.rs
+compile-fail	suggestions/shadowed-lplace-method-2.rs
 compile-fail	suggestions/silenced-binding-typo.rs
 compile-fail	suggestions/slice-issue-87994.rs
 compile-fail	suggestions/struct-field-type-including-single-colon.rs
