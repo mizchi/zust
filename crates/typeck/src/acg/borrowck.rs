@@ -878,6 +878,121 @@ fn at(lb: u32, sp: Sp) -> String {
     format!("{}:{}", lb + sp.line, sp.col + 1)
 }
 
+/// Each block's position in the reverse postorder rustc's MIR borrow check visits blocks in, as far as the blocks
+/// show it: of a loop's test, the way out comes before the body (the successor that leads back to the test is explored
+/// first, so it comes after); of an `if`, the `else` before the `then` (the first successor is explored first).
+/// Unreachable blocks: last
+fn rustc_rpo<'s>(n: usize, succ: &dyn Fn(usize) -> &'s [usize]) -> Vec<usize> {
+    let reaches = |from: usize, to: usize| -> bool {
+        let (mut seen, mut q) = (vec![false; n], vec![from]);
+        while let Some(b) = q.pop() {
+            if b == to {
+                return true;
+            }
+            if b >= n || seen[b] {
+                continue;
+            }
+            seen[b] = true;
+            q.extend(succ(b).iter().copied());
+        }
+        false
+    };
+    let order = |b: usize| -> Vec<usize> {
+        let mut s = succ(b).to_vec();
+        if s.len() == 2 && reaches(s[1], b) && !reaches(s[0], b) {
+            s.swap(0, 1);
+        }
+        s
+    };
+    let mut post = Vec::with_capacity(n);
+    let (mut seen, mut stack) = (vec![false; n], vec![]);
+    if n > 0 {
+        seen[0] = true;
+        stack.push((0usize, order(0), 0usize));
+    }
+    while let Some((b, s, k)) = stack.last_mut() {
+        if let Some(&x) = s.get(*k) {
+            *k += 1;
+            if x < n && !seen[x] {
+                seen[x] = true;
+                let o = order(x);
+                stack.push((x, o, 0));
+            }
+        } else {
+            post.push(*b);
+            stack.pop();
+        }
+    }
+    let mut pos = vec![usize::MAX; n];
+    for (i, &b) in post.iter().rev().enumerate() {
+        pos[b] = i;
+    }
+    pos
+}
+
+/// The natural loops of the blocks (one per header: the header and what reaches an edge back to it without passing it),
+/// each as the blocks it holds
+fn natural_loops<'s>(n: usize, succ: &dyn Fn(usize) -> &'s [usize]) -> Vec<Vec<bool>> {
+    let mut preds: Vec<Vec<usize>> = vec![vec![]; n];
+    for b in 0..n {
+        for &s in succ(b) {
+            if s < n {
+                preds[s].push(b);
+            }
+        }
+    }
+    // (the edges back to a block on the DFS stack)
+    let mut back: Vec<(usize, usize)> = vec![];
+    let (mut state, mut stack) = (vec![0u8; n], vec![(0usize, 0usize)]);
+    if n == 0 {
+        return vec![];
+    }
+    state[0] = 1;
+    while let Some(&mut (b, ref mut k)) = stack.last_mut() {
+        match succ(b).get(*k) {
+            Some(&s) => {
+                *k += 1;
+                if s < n {
+                    match state[s] {
+                        0 => {
+                            state[s] = 1;
+                            stack.push((s, 0));
+                        }
+                        1 => back.push((b, s)),
+                        _ => {}
+                    }
+                }
+            }
+            None => {
+                state[b] = 2;
+                stack.pop();
+            }
+        }
+    }
+    let mut out: Vec<(usize, Vec<bool>)> = vec![];
+    for (t, h) in back {
+        let i = match out.iter().position(|x| x.0 == h) {
+            Some(i) => i,
+            None => {
+                let mut m = vec![false; n];
+                m[h] = true;
+                out.push((h, m));
+                out.len() - 1
+            }
+        };
+        let body = &mut out[i].1;
+        let mut q = vec![t];
+        while let Some(x) = q.pop() {
+            if body[x] {
+                continue;
+            }
+            body[x] = true;
+            q.extend(preds[x].iter().copied());
+        }
+    }
+    out.into_iter().map(|x| x.1).collect()
+}
+
 fn path_str(locals: &[Local], p: &BPlace) -> String {
     let mut s = locals[p.local as usize].name.clone();
     // (a closure's capture held by reference is shown as the variable: `this.x`, not `*this.x`)
@@ -1449,9 +1564,12 @@ impl Bk {
         // ---- report (on the fixpoint)
         let mut live_at = vec![];
         *self.ret_temps.borrow_mut() = (vec![], vec![], vec![]);
+        // (the block each error is found in, for the order rustc reports them in: the ones before, none)
+        let mut err_block: Vec<usize> = vec![usize::MAX; errs.len()];
         for b in 0..n {
             let Some(mut st) = st_in[b].take() else { continue };
             self.run_block(&evs[b], &mut st, Some(&mut errs), &live_out[row(b)], loans_on, &mut live_at);
+            err_block.resize(errs.len(), b);
             // (the function ends here (return / panic): a loan stored behind a parameter must not be of a local)
             if succ(b).is_empty() {
                 for &ln in &st.escaped {
@@ -1477,6 +1595,42 @@ impl Bk {
                     *e = BkError { sp, msg: "cannot return value referencing temporary value (E0515)".to_string() };
                 }
             }
+        }
+        err_block.resize(errs.len(), usize::MAX);
+        // (rustc reports one use of a value a move moved, the first in its reverse postorder: of a use after a loop
+        // and one in the loop's next iteration, the one after it (moves/nested-loop-moved-value-wrong-continue.rs))
+        let moved_key = |m: &str| -> Option<(String, String)> {
+            let i = m.find(" moved value: `").or_else(|| m.find(" partially moved value: `"))?;
+            let rest = &m[i..];
+            let path = rest.split('`').nth(1)?.to_string();
+            let at = rest.split("(moved at ").nth(1)?.to_string();
+            Some((path, at))
+        };
+        let keys: Vec<Option<(String, String)>> = errs.iter().map(|e| moved_key(&e.msg)).collect();
+        let dup = keys.iter().enumerate().any(|(i, k)| k.is_some() && keys[..i].contains(k));
+        if dup {
+            // (the loops a block is in: a use in fewer of the loops the move is in comes first, as rustc's MIR has the
+            // way out of a loop before its body, where zustc's loops over a range test at their end)
+            let pos = rustc_rpo(n, &succ);
+            let loops = natural_loops(n, &succ);
+            let lb = self.line_base;
+            let move_block = |at: &str| (0..n).find(|&b| evs[b].iter().any(|e| matches!(e, Ev::Acc(_, Acc::Move, sp) if self::at(lb, *sp) == at)));
+            let mblock: Vec<Option<usize>> = keys.iter().map(|k| k.as_ref().and_then(|k| move_block(k.1.trim_end_matches(')')))).collect();
+            let rank = |i: usize| {
+                let b = err_block.get(i).copied().filter(|&b| b < n);
+                let depth = match (b, mblock[i]) {
+                    (Some(b), Some(m)) => loops.iter().filter(|l| l[b] && l[m]).count(),
+                    _ => 0,
+                };
+                (depth, b.and_then(|b| pos.get(b).copied()).unwrap_or(0), i)
+            };
+            let mut keep = vec![true; errs.len()];
+            for i in 0..errs.len() {
+                let Some(k) = &keys[i] else { continue };
+                keep[i] = !(0..errs.len()).any(|j| j != i && keys[j].as_ref() == Some(k) && rank(j) < rank(i));
+            }
+            let mut it = keep.iter();
+            errs.retain(|_| *it.next().unwrap_or(&true));
         }
         if self.lint_mut {
             used.extend(self.mut_flow.borrow().1.iter().copied());
