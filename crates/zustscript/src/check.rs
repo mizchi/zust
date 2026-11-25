@@ -1065,6 +1065,11 @@ impl Checker {
         if pats.iter().any(|p| irrefutable(p)) {
             return;
         }
+        // (nested patterns: `A(Some(n))` and `A(None)` cover `A`, `(None, _)` and `(_, None)` the rest of a tuple's)
+        let rows: Vec<Vec<&Pat>> = pats.iter().map(|p| vec![*p]).collect();
+        if !self.uncovered(std::slice::from_ref(t), &rows) {
+            return;
+        }
         match self.resolve(t) {
             Ty::Named(n, _) if self.info.enums.contains_key(&n) => {
                 let missing: Vec<String> = self.info.enums[&n]
@@ -1089,6 +1094,46 @@ impl Checker {
             Ty::Tuple(_) if pats.iter().any(|p| matches!(p, Pat::Tuple(ps) if ps.iter().all(irrefutable))) => {}
             _ => self.err(pos, "non-exhaustive match: add a `_` arm"),
         }
+    }
+
+    /// Whether some value of the types `tys` matches none of the rows (each a pattern per type): the usefulness
+    /// of a row of wildcards, splitting on the constructors of the first column (enum variants, `true` / `false`,
+    /// a tuple). Numbers and strings have no finite set of them: only the rows with a wildcard there cover them.
+    fn uncovered(&self, tys: &[Ty], rows: &[Vec<&Pat>]) -> bool {
+        let Some((t, rest)) = tys.split_first() else { return rows.is_empty() };
+        let wild = |p: &Pat| matches!(p, Pat::Wild | Pat::Bind(_));
+        // (each constructor: its name and the types of its fields)
+        let ctors: Option<Vec<(Option<String>, Vec<Ty>)>> = match self.resolve(t) {
+            Ty::Named(n, targs) if self.info.enums.contains_key(&n) => {
+                let def = &self.info.enums[&n];
+                let m: HashMap<String, Ty> = def.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                Some(def.variants.iter().map(|(v, fs)| (Some(v.clone()), fs.iter().map(|f| Self::subst_params(f, &m)).collect())).collect())
+            }
+            Ty::Bool => Some(vec![(Some("true".into()), vec![]), (Some("false".into()), vec![])]),
+            Ty::Tuple(ts) => Some(vec![(None, ts)]),
+            _ => None,
+        };
+        let Some(ctors) = ctors else {
+            let rows: Vec<Vec<&Pat>> = rows.iter().filter(|r| wild(r[0])).map(|r| r[1..].to_vec()).collect();
+            return self.uncovered(rest, &rows);
+        };
+        ctors.iter().any(|(c, fields)| {
+            let rows: Vec<Vec<&Pat>> = rows
+                .iter()
+                .filter_map(|r| {
+                    let subs: Vec<&Pat> = match (r[0], c) {
+                        (p, _) if wild(p) => vec![&Pat::Wild; fields.len()],
+                        (Pat::Variant(_, v, subs, _), Some(c)) if v == c && subs.len() == fields.len() => subs.iter().collect(),
+                        (Pat::Lit(Lit::Bool(b)), Some(c)) if b.to_string() == *c => vec![],
+                        (Pat::Tuple(ps), None) if ps.len() == fields.len() => ps.iter().collect(),
+                        _ => return None,
+                    };
+                    Some(subs.into_iter().chain(r[1..].iter().copied()).collect())
+                })
+                .collect();
+            let tys: Vec<Ty> = fields.iter().cloned().chain(rest.iter().cloned()).collect();
+            self.uncovered(&tys, &rows)
+        })
     }
 
     // ------------------------------------------------------------ expressions

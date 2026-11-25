@@ -508,6 +508,21 @@ fn modules_import_types_and_functions() {
 /// another directory is imported from that module's JS as seen from the importer, a lowercase type comes in with the
 /// function that uses it, an imported component takes a generic record of props, and a component whose JS has
 /// another name is written by that name
+/// an imported `async fn` gives its callers a Promise; a match whose nested patterns cover every value needs no `_`;
+/// `\u{..}` in strings and templates
+#[test]
+fn modules_async_patterns_escapes() {
+    let d = out_dir("modules_async");
+    for f in ["asynclib", "asyncmain"] {
+        let o = zsc(&root().join(format!("tests/modules/{f}.zsc")), &d, &[]);
+        assert!(o.status.success(), "{f}: {}", String::from_utf8_lossy(&o.stderr));
+    }
+    let out = node(&d, "const m = await import('./asyncmain.js'); console.log(JSON.stringify(await m.run()));");
+    assert_eq!(out, "{\"TAG\":\"Ok\",\"_0\":\"6 not positive 4,-1,0,3,-1,-2 tff_ \u{1F600}\u{e9}\"}\n");
+    let dts = std::fs::read_to_string(d.join("asyncmain.d.ts")).unwrap();
+    assert!(dts.contains("export declare function run(): Promise<Result<string, string>>;"), "{dts}");
+}
+
 #[test]
 fn modules_diamond_and_directories() {
     let d = out_dir("modules_diamond");

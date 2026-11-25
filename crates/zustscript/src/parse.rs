@@ -46,6 +46,36 @@ impl Parser {
         Pos { line: self.line, col: self.col }
     }
 
+    /// After a `\\` in a string: the character it stands for (`\\n`, `\\u{1F600}`, a quote, ...)
+    fn escape(&mut self) -> PResult<char> {
+        let pos = self.here();
+        Ok(match self.bump() {
+            'n' => '\n',
+            't' => '\t',
+            'r' => '\r',
+            '0' => '\0',
+            'u' => {
+                if self.i >= self.src.len() || self.bump() != '{' {
+                    return Err((pos, "expected `\\u{..}` with hex digits".into()));
+                }
+                let mut hex = String::new();
+                while self.i < self.src.len() && self.src[self.i] != '}' && hex.len() <= 6 {
+                    hex.push(self.bump());
+                }
+                if self.i >= self.src.len() || hex.is_empty() || hex.len() > 6 {
+                    return Err((pos, "expected `\\u{..}` with 1 to 6 hex digits".into()));
+                }
+                self.bump();
+                match u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                    Some(c) => c,
+                    None => return Err((pos, format!("`\\u{{{hex}}}` is not a Unicode scalar value"))),
+                }
+            }
+            o @ ('\\' | '"' | '\'' | '`' | '$' | '{' | '}') => o,
+            o => return Err((pos, format!("unknown escape `\\{o}`"))),
+        })
+    }
+
     fn bump(&mut self) -> char {
         let c = self.src[self.i];
         self.i += 1;
@@ -149,14 +179,8 @@ impl Parser {
                         if self.i >= self.src.len() {
                             return Err((pos, "unterminated string".into()));
                         }
-                        let e = self.bump();
-                        s.push(match e {
-                            'n' => '\n',
-                            't' => '\t',
-                            'r' => '\r',
-                            '0' => '\0',
-                            o => o,
-                        })
+                        let c = self.escape()?;
+                        s.push(c)
                     }
                     o => s.push(o),
                 }
@@ -1124,14 +1148,8 @@ impl Parser {
                     if self.i >= self.src.len() {
                         return Err((pos, "unterminated template string".into()));
                     }
-                    let e = self.bump();
-                    parts.last_mut().unwrap().push(match e {
-                        'n' => '\n',
-                        't' => '\t',
-                        'r' => '\r',
-                        '0' => '\0',
-                        o => o,
-                    })
+                    let c = self.escape()?;
+                    parts.last_mut().unwrap().push(c)
                 }
                 o => parts.last_mut().unwrap().push(o),
             }
