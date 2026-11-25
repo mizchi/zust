@@ -459,6 +459,7 @@ check-pass	async-await/issue-64391.rs
 compile-fail	async-await/issue-66387-if-without-else.rs
 compile-fail	async-await/issue-67651.rs
 compile-fail	async-await/issue-67765-async-diagnostic.rs
+compile-fail	async-await/issue-68523.rs
 compile-fail	async-await/issue-69446-fnmut-capture.rs
 compile-fail	async-await/issue-70594.rs
 compile-fail	async-await/issue-72590-type-error-sized.rs
@@ -2417,6 +2418,7 @@ compile-fail	dyn-keyword/suggest-struct-or-union-add-generic-impl-trait.rs
 compile-fail	dyn-keyword/unresolved-associated-item.rs
 compile-fail	editions/dyn-trait-sugg-2021.rs
 run-pass	editions/edition-specific-identifier-shadowing-53333.rs
+compile-fail	entry-point/async-main.rs
 build-pass	entry-point/hello-world.rs
 compile-fail	entry-point/imported_main_conflict.rs
 check-pass	entry-point/imported_main_conflict_lib.rs
@@ -7660,12 +7662,15 @@ compile-fail	target-feature/gate.rs
 build-pass	target-feature/implied-features.rs
 run-pass	target-feature/target-feature-detection.rs
 compile-fail	test-attrs/inaccessible-test-modules.rs
+compile-fail	test-attrs/issue-109816.rs
 run-pass	test-attrs/issue-16597-empty.rs
 run-pass	test-attrs/issue-16597.rs
 run-pass	test-attrs/issue-20823.rs
 run-pass	test-attrs/issue-36768.rs
 run-pass	test-attrs/issue-52557.rs
+compile-fail	test-attrs/test-attr-non-associated-functions.rs
 run-pass	test-attrs/test-main-not-dead.rs
+compile-fail	test-attrs/test-on-not-fn.rs
 run-pass	test-attrs/test-runner-hides-main.rs
 run-pass	test-attrs/test-should-fail-good-message.rs
 run-pass	test-attrs/test-vs-cfg-test.rs

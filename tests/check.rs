@@ -2668,3 +2668,20 @@ fn projections_are_goals() {
     bad("trait Bar {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}", "`u16: Bar`");
     ok("trait Bar {}\nimpl Bar for u16 {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}");
 }
+
+#[test]
+fn async_main_and_test_attributes_where_rustc_rejects_them() {
+    // (rustc 1.100: E0752 at the fn; the test macro's error at the `#[test]` on what is no free fn, `--test` or not)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("async fn main() {}\n"), Some((1, 1, "`main` function is not allowed to be `async` (E0752)".to_string())), "async main");
+    assert_eq!(first("#![crate_type = \"lib\"]\npub async fn main() {}\n"), None, "a library's async fn named main");
+    let t = |l: usize, c: usize| Some((l, c, "the `test` attribute may only be used on a free function".to_string()));
+    assert_eq!(first("struct S;\nimpl S {\n    #[test]\n    fn new() {}\n}\nfn main() {}\n"), t(3, 5), "a method");
+    assert_eq!(first("#[test]\nstruct A;\nfn main() {}\n"), t(1, 1), "a struct");
+    assert_eq!(first("#[derive(Clone)]\n#[test]\nconst X: u8 = 1;\nfn main() {}\n"), t(2, 1), "a const, after another attribute");
+    assert_eq!(first("fn main() {\n    #[test]\n    struct A5(u32, u8);\n}\n").map(|d| (d.0, d.2)), t(2, 5).map(|d| (d.0, d.2)), "an item in a fn body, at its line");
+    assert_eq!(first("#[test]\nfn t() {}\n#[test]\npub(crate) unsafe extern \"C\" fn u() {}\nmacro_rules! m { () => {} }\nfn main() {}\n"), None, "free fns");
+}

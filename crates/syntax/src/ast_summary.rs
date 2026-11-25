@@ -2761,9 +2761,11 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             let mut sig = parse_sig(fs, false, (named_main && !generic) || entry, None)?;
             let result_ret = matches!(&sig.ret, TySyn::App(n, _) if n == "Result");
             let bad_main = named_main && (generic || !sig.params.is_empty() || (sig.ret != TySyn::Prim(Ty::Unit) && !result_ret));
-            if bad_main {
+            // (an `async fn main` cannot be the entry either (E0752): its symbol tells it from the others)
+            let async_main = named_main && fs.quals.iter().any(|q| q == "async");
+            if bad_main || async_main {
                 sig.is_main = false;
-                sig.symbol = format!("_x{name}");
+                sig.symbol = if async_main { "_xmain.async".to_string() } else { format!("_x{name}") };
             }
             if entry && (!sig.params.is_empty() || sig.ret != TySyn::Prim(Ty::Unit)) {
                 return err("`main` must be `fn main()`");

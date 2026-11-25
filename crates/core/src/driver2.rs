@@ -4319,6 +4319,15 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
         let attrs = leading(text);
         for &(at, name, input) in &attrs {
             let line = || it.line + text[..at].matches('\n').count();
+            // (`#[test]` on what is no free fn, `--test` or not, at the attribute: rustc's test macro; a macro call's is
+            // a warning)
+            if name == "test" && input.trim().is_empty() && !test_target(text, it.kind) {
+                let col = match text[..at].rfind('\n') {
+                    Some(p) => at - p,
+                    None => it.start - split[..it.start].rfind('\n').map_or(0, |p| p + 1) + at + 1,
+                };
+                return Some(format!("{}:{col}: the `test` attribute may only be used on a free function", line()));
+            }
             // (`#[unsafe(name ..)]`: the attribute inside it, which must be an unsafe one)
             let (name, input) = match input.trim().strip_prefix('(').filter(|_| name == "unsafe") {
                 Some(r) => {
@@ -9732,6 +9741,8 @@ fn hoisted_err_holds(msg: &str) -> bool {
         "enum discriminant overflowed (E0370)", "field must implement `Copy`", "this trait cannot be derived for unions", "cannot find derive macro `",
         // (an item's own syntax: `struct Test { Very\n Bad }` in a fn body)
         "expected `:` (found `", "expected `,` (found `", "free static item without body",
+        // (`#[test]` on an item in a fn body)
+        "the `test` attribute may only be used on a free function",
         // (an item's written types: an unsized type where a Sized one is needed, sized_error)
         "the size for values of type `"];
     let unused = msg.starts_with("function `") && msg.contains("is never used") || msg.starts_with("type parameter `") && msg.ends_with("is never used (E0091)")
@@ -10400,6 +10411,28 @@ fn impl_param_self(rest: &str, name: &str) -> bool {
     // (the self type is that name alone, not a path through it (`T::Assoc`) nor a type it is an argument of)
     let t = r[i.min(r.len())..].trim_start();
     found && t.starts_with(name) && t[name.len()..].trim_start().starts_with(['{', 'w'])
+}
+
+/// Whether `#[test]` may be on an item: a free fn (`async`, `const`, `unsafe` or `extern "C"` too), or a macro call
+/// (a warning); not an associated fn, nor another kind of item
+fn test_target(text: &str, kind: crate::lexer::ItemKind) -> bool {
+    if kind != crate::lexer::ItemKind::Normal {
+        return false;
+    }
+    let mut t = item_text(text);
+    loop {
+        let r = ["async ", "const ", "unsafe ", "safe "].iter().find_map(|q| t.strip_prefix(q));
+        let r = r.or_else(|| t.strip_prefix("extern ").map(|r| r.trim_start().strip_prefix('"').and_then(|r| Some(&r[r.find('"')? + 1..])).unwrap_or(r)));
+        match r {
+            Some(r) => t = r.trim_start(),
+            None => break,
+        }
+    }
+    if t.starts_with("fn ") {
+        return true;
+    }
+    let w = &t[..t.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(t.len())];
+    !w.is_empty() && w != "macro_rules" && t[w.len()..].trim_start().starts_with('!')
 }
 
 /// An item's text past its attributes and visibility (`#[cfg(x)] pub(crate) type A = u8;` -> `type A = u8;`)

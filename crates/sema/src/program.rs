@@ -1191,8 +1191,14 @@ impl Program {
         //  when it would be, so not under `--test`. First, as it was when the summary reported it)
         if need_main && !sums.iter().any(|s| s.fns.iter().any(|(n, _)| n == TEST_ENTRY)) {
             for (i, s) in sums[..user.min(sums.len())].iter().enumerate() {
-                if let Some((_, sig)) = s.fns.iter().find(|(n, sig)| n == "main" && !sig.is_main && !sig.export && !sig.is_extern && sig.symbol == "_xmain") {
-                    let msg = if sig.generics.is_empty() { "`main` must be `fn main()`" } else { "`main` cannot be generic" };
+                if let Some((_, sig)) = s.fns.iter().find(|(n, sig)| n == "main" && !sig.is_main && !sig.export && !sig.is_extern && sig.symbol.starts_with("_xmain")) {
+                    let msg = if sig.symbol.ends_with(".async") {
+                        "`main` function is not allowed to be `async` (E0752)"
+                    } else if sig.generics.is_empty() {
+                        "`main` must be `fn main()`"
+                    } else {
+                        "`main` cannot be generic"
+                    };
                     return Err(format!("{}:1: {msg}", items.get(i).map_or(1, |it| it.line)));
                 }
             }
