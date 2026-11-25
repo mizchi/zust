@@ -1,2 +1,2 @@
-import { token, Token } from "./leaf.zsc";
+import { token, Token } from "./deep/leaf.zsc";
 export fn from_b(s: String) -> Token { token(`b:${s}`) }

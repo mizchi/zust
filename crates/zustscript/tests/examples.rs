@@ -794,6 +794,8 @@ fn options_and_try() {
          eval cat arg arg arg callee arg eval cat arg arg arg callee eval cat arg\n\
          [{\"TAG\":\"Ok\",\"_0\":4},{\"TAG\":\"Err\",\"_0\":\"not positive\"},{\"TAG\":\"Err\",\"_0\":\"early\"}]\n"
     );
+    let out = node(&d, "const log = []; globalThis.note = (s) => log.push(s); const m = await import('./options.js'); console.log(JSON.stringify([m.ranged(true), m.ranged(false)]), log.join(' '));");
+    assert_eq!(out, "[{\"TAG\":\"Some\",\"_0\":\"0,3,6\"},{\"TAG\":\"None\"}] bound 0 bound 3 mapper bound 0 bound 3 mapper\n");
     let js = std::fs::read_to_string(d.join("options.js")).unwrap();
     // (`?` is statements before the one it is in; an argument before it is kept in a temporary first)
     assert!(js.contains("  const $t1 = non_empty(\"title\", d.title);\n  if ($t1.TAG === \"Err\") return $t1;\n  const t = $t1._0;\n"), "{js}");
@@ -811,17 +813,20 @@ fn options_and_try() {
     let js = std::fs::read_to_string(d.join("optmain.js")).unwrap();
     assert!(js.contains("  } else {\n    const $t1 = half(n);\n    if ($t1.TAG === \"None\") return $t1;\n    if ($t1._0 > 2) {"), "{js}");
     // (an extern type reached through two modules is one type; its relative module is rebased to the importer)
+    // (ext/deep/leaf.zsc's `./tok.js` reaches extmain.zsc through ext/a.zsc: rebased at each step)
     let e = d.join("ext");
-    for f in ["leaf", "a", "b"] {
-        let o = zsc(&root().join(format!("tests/modules/ext/{f}.zsc")), &e, &[]);
+    for f in ["deep/leaf", "a", "b"] {
+        let o = zsc(&root().join(format!("tests/modules/ext/{f}.zsc")), &e.join(f).parent().unwrap().to_path_buf(), &[]);
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     }
-    std::fs::copy(root().join("tests/modules/ext/tok.js"), e.join("tok.js")).unwrap();
+    std::fs::copy(root().join("tests/modules/ext/deep/tok.js"), e.join("deep/tok.js")).unwrap();
     let o = zsc(&root().join("tests/modules/extmain.zsc"), &d, &[]);
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     assert_eq!(node(&d, "const m = await import('./extmain.js'); console.log(m.both('x').text);"), "b:a:x\n");
     let dts = std::fs::read_to_string(d.join("extmain.d.ts")).unwrap();
-    assert!(dts.contains("import type { Token } from \"./ext/tok.js\";"), "{dts}");
+    assert!(dts.contains("import type { Token } from \"./ext/deep/tok.js\";"), "{dts}");
+    let dts = std::fs::read_to_string(e.join("a.d.ts")).unwrap();
+    assert!(dts.contains("import type { Token } from \"./deep/tok.js\";"), "{dts}");
 }
 
 /// tests/options_wasm.zsc: `?` and `if let` on the prelude's types in `@wasm fn`s, as wasm and as JS

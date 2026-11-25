@@ -961,6 +961,11 @@ impl<'a> Js<'a> {
     /// literal as is, anything else wrapped so it receives exactly its own arguments
     fn callback(&mut self, f: &Expr, arity: usize) -> String {
         let s = self.expr(f);
+        self.adapt(f, s, arity)
+    }
+
+    /// The JS `s` of the function value `f`, made to take exactly `arity` arguments (see [`Js::callback`])
+    fn adapt(&mut self, f: &Expr, s: String, arity: usize) -> String {
         // (a closure, or an extern's converting function, takes the arguments it names and no more)
         if matches!(f.kind, EK::Closure(..)) || matches!(self.info.callee.get(&f.id), Some(Callee::Extern(_))) && s.starts_with("($a") {
             return s;
@@ -1083,26 +1088,24 @@ impl<'a> Js<'a> {
                     && matches!(self.info.callee.get(&f.id), Some(Callee::Range))
                     && matches!(b, Some(Builtin::Fold | Builtin::Map))
                 {
-                    // (the bounds, then a fold's initial value, in order)
+                    // (the bounds, a fold's initial value, then the function, in order)
+                    let fold = b == Some(Builtin::Fold);
                     let mut ops = vec![&ra[0], &ra[1]];
-                    if b == Some(Builtin::Fold) {
-                        ops.push(&args[0]);
-                    }
+                    ops.extend(args.iter());
                     let v = self.seq(&ops);
                     let (lo, hi) = (v[0].clone(), v[1].clone());
-                    return if b == Some(Builtin::Fold) {
+                    let fe = &args[if fold { 1 } else { 0 }];
+                    let f = self.adapt(fe, v[v.len() - 1].clone(), if fold { 2 } else { 1 });
+                    return if fold {
                         self.helpers.insert("$rangeFold");
-                        let f = self.callback(&args[1], 2);
                         let init = v[2].clone();
                         format!("$rangeFold({lo}, {hi}, {init}, {f})")
                     } else if let Some(el) = self.info.typed_lit.get(&e.id).cloned() {
                         // (into a typed array, as the type says)
                         self.helpers.insert("$rangeMapTo");
-                        let f = self.callback(&args[0], 1);
                         format!("$rangeMapTo({}, {lo}, {hi}, {f})", typed_js(&el))
                     } else {
                         self.helpers.insert("$rangeMap");
-                        let f = self.callback(&args[0], 1);
                         format!("$rangeMap({lo}, {hi}, {f})")
                     };
                 }
@@ -1501,7 +1504,8 @@ impl<'a> Js<'a> {
             Ty::Named(n, a) if n == "Promise" && a.len() == 1 => matches!(&a[0], Ty::Named(m, b) if m == "Result" && b.len() == 2),
             _ => false,
         };
-        let plain = |s: &String| s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$' || c == '.') || (s.len() >= 2 && s.starts_with('"') && s.ends_with('"') && !s[1..s.len() - 1].contains('"'));
+        // (a property read may run a getter that throws: it is evaluated outside the catch too)
+        let plain = |s: &String| s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') || (s.len() >= 2 && s.starts_with('"') && s.ends_with('"') && !s[1..s.len() - 1].contains('"'));
         if !catches || vals.iter().all(plain) {
             return self.js_result(make(&vals), ret);
         }

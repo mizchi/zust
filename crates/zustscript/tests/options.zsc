@@ -157,3 +157,17 @@ export async fn async_tail(r: Result<i32, String>) -> Result<i32, String> {
   let f = async () => { let x = r?; later(x) };
   await f()
 }
+
+// the function of a range's map is evaluated after the bounds, as written
+fn mapper(ok: bool) -> Option<fn(i32) -> i32> {
+  note("mapper");
+  if ok { Some((i) => i * 3) } else { None }
+}
+fn bound(n: i32) -> i32 {
+  note(`bound ${n}`);
+  n
+}
+export fn ranged(ok: bool) -> Option<String> {
+  let xs = range(bound(0), bound(3)).map(mapper(ok)?);
+  Some(xs.map((x) => x.to_string()).join(","))
+}

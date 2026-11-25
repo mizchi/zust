@@ -130,7 +130,8 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
                         && (spec.starts_with("./") || spec.starts_with("../"))
                     {
                         // (a relative module is the declaring file's: from here, another path)
-                        let dir = defined.parent().unwrap_or(Path::new("/"));
+                        // (its specifier is the module's that holds it: the declaring one, or one that imported it)
+                        let dir = key.parent().unwrap_or(Path::new("/"));
                         *spec = relative(&here, &normalize(&dir.join(&*spec)));
                     }
                     if let Item::ExternType { origin, .. } = &mut it {
