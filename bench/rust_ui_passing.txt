@@ -733,6 +733,7 @@ run-pass	binding/pattern-bound-var-in-for-each.rs
 run-pass	binding/pattern-in-closure.rs
 run-pass	binding/range-inclusive-pattern-precedence.rs
 build-pass	binding/ref-in-let-lhs-in-field.rs
+run-pass	binding/ref-pattern-drop-behavior-8860.rs
 run-pass	binding/shadow.rs
 run-pass	binding/simple-generic-match.rs
 compile-fail	binding/struct-destructuring-repeated-bindings-9725.rs
@@ -875,6 +876,8 @@ compile-fail	borrowck/borrowck-escaping-closure-error-2.rs
 run-pass	borrowck/borrowck-field-sensitivity-rpass.rs
 compile-fail	borrowck/borrowck-field-sensitivity.rs
 run-pass	borrowck/borrowck-fixed-length-vecs.rs
+compile-fail	borrowck/borrowck-fn-in-const-a.rs
+compile-fail	borrowck/borrowck-fn-in-const-c.rs
 compile-fail	borrowck/borrowck-for-loop-correct-cmt-for-pattern.rs
 compile-fail	borrowck/borrowck-for-loop-head-linkage.rs
 compile-fail	borrowck/borrowck-for-loop-uninitialized-binding.rs
@@ -1964,6 +1967,7 @@ compile-fail	consts/const-int-wrapping.rs
 compile-fail	consts/const-item-no-type/dont-suggest-type-error.rs
 compile-fail	consts/const-item-no-type/empty-array.rs
 compile-fail	consts/const-item-no-type/with-colon.rs
+run-pass	consts/const-item-with-block-body/static.rs
 run-pass	consts/const-labeled-break.rs
 compile-fail	consts/const-len-underflow-subspans.rs
 check-pass	consts/const-match-pattern-arm.rs
@@ -2502,6 +2506,7 @@ run-pass	enum-discriminant/issue-104519.rs
 run-pass	enum-discriminant/issue-61696.rs
 compile-fail	enum-discriminant/issue-72554.rs
 run-pass	enum-discriminant/issue-90038.rs
+run-pass	enum-discriminant/niche.rs
 compile-fail	enum-discriminant/non-int-discriminant-promoted-ice-138660.rs
 run-pass	enum-discriminant/repr-u64-enum-discriminant-cast.rs
 compile-fail	enum/assoc-fn-call-on-variant.rs
@@ -3230,6 +3235,7 @@ check-pass	generic-associated-types/issue-93262.rs
 check-pass	generic-associated-types/issue-93341.rs
 check-pass	generic-associated-types/issue-93342.rs
 check-pass	generic-associated-types/issue-93874.rs
+compile-fail	generic-associated-types/mismatched-where-clause-regions.rs
 compile-fail	generic-associated-types/missing-bounds.rs
 compile-fail	generic-associated-types/missing_lifetime_args.rs
 compile-fail	generic-associated-types/missing_lifetime_const.rs
@@ -5045,6 +5051,7 @@ compile-fail	moves/moves-based-on-type-cyclic-types-issue-4821.rs
 compile-fail	moves/moves-based-on-type-distribute-copy-over-paren.rs
 compile-fail	moves/moves-based-on-type-exprs.rs
 compile-fail	moves/moves-based-on-type-match-bindings.rs
+compile-fail	moves/moves-based-on-type-no-recursive-stack-closure.rs
 compile-fail	moves/moves-based-on-type-tuple.rs
 compile-fail	moves/moves-sru-moved-field.rs
 compile-fail	moves/needs-clone-through-deref.rs
@@ -5426,6 +5433,7 @@ run-pass	or-patterns/for-loop.rs
 run-pass	or-patterns/if-let-while-let.rs
 compile-fail	or-patterns/inconsistent-modes.rs
 check-pass	or-patterns/issue-67514-irrefutable-param.rs
+check-pass	or-patterns/issue-68785-irrefutable-param-with-at.rs
 compile-fail	or-patterns/issue-69875-should-have-been-expanded-earlier-non-exhaustive.rs
 check-pass	or-patterns/issue-69875-should-have-been-expanded-earlier.rs
 run-pass	or-patterns/issue-70413-no-unreachable-pat-and-guard.rs
@@ -6067,6 +6075,7 @@ compile-fail	parser/recover/recover-ampersand-less-ref-ty.rs
 compile-fail	parser/recover/recover-colon-instead-of-eq-in-local.rs
 compile-fail	parser/recover/recover-const-async-fn-ptr.rs
 compile-fail	parser/recover/recover-enum-with-bad-where.rs
+compile-fail	parser/recover/recover-enum2.rs
 compile-fail	parser/recover/recover-field-extra-angle-brackets-in-struct-with-a-field.rs
 compile-fail	parser/recover/recover-field-extra-angle-brackets.rs
 compile-fail	parser/recover/recover-field-semi.rs
@@ -6216,7 +6225,14 @@ run-pass	pattern/bindings-after-at/bind-by-copy-or-pat.rs
 run-pass	pattern/bindings-after-at/bind-by-copy.rs
 compile-fail	pattern/bindings-after-at/bind-by-move-neither-can-live-while-the-other-survives-1.rs
 compile-fail	pattern/bindings-after-at/bind-by-move-no-subbindings-fun-param.rs
+compile-fail	pattern/bindings-after-at/borrowck-move-and-move.rs
+compile-fail	pattern/bindings-after-at/borrowck-pat-by-move-and-ref-inverse-promotion.rs
+compile-fail	pattern/bindings-after-at/borrowck-pat-by-move-and-ref-inverse.rs
+compile-fail	pattern/bindings-after-at/borrowck-pat-by-move-and-ref.rs
 check-pass	pattern/bindings-after-at/borrowck-pat-ref-both-sides.rs
+compile-fail	pattern/bindings-after-at/borrowck-pat-ref-mut-twice.rs
+compile-fail	pattern/bindings-after-at/copy-and-move-mixed.rs
+compile-fail	pattern/bindings-after-at/default-binding-modes-both-sides-independent.rs
 check-pass	pattern/bindings-after-at/nested-binding-mode-lint.rs
 compile-fail	pattern/bindings-after-at/nested-binding-modes-mut.rs
 compile-fail	pattern/bindings-after-at/nested-binding-modes-ref.rs
@@ -7244,6 +7260,7 @@ compile-fail	span/E0805.rs
 compile-fail	span/borrowck-borrow-overloaded-auto-deref-mut.rs
 compile-fail	span/borrowck-borrow-overloaded-deref-mut.rs
 compile-fail	span/borrowck-call-method-from-mut-aliasable.rs
+compile-fail	span/borrowck-fn-in-const-b.rs
 compile-fail	span/borrowck-let-suggestion-suffixes.rs
 compile-fail	span/borrowck-object-mutability.rs
 compile-fail	span/borrowck-ref-into-rvalue.rs
@@ -7734,6 +7751,7 @@ compile-fail	suggestions/recover-invalid-float-invalid.rs
 compile-fail	suggestions/recover-invalid-float.rs
 compile-fail	suggestions/recover-missing-turbofish-surrounding-angle-braket.rs
 compile-fail	suggestions/redundant-shared-reference-issue-133685.rs
+compile-fail	suggestions/ref-pattern-binding.rs
 compile-fail	suggestions/remove-question-symbol-with-paren.rs
 compile-fail	suggestions/restrict-type-argument.rs
 compile-fail	suggestions/restrict-type-not-param.rs
@@ -7835,6 +7853,7 @@ compile-fail	suggestions/use-parentheses-to-call-closure-issue-145404.rs
 compile-fail	suggestions/use-placement-resolve.rs
 compile-fail	suggestions/use-type-argument-instead-of-assoc-type.rs
 compile-fail	suggestions/while-let-typo.rs
+compile-fail	suggestions/wrap-dyn-in-suggestion-issue-120223.rs
 compile-fail	suggestions/wrap-function-local-constructors.rs
 run-pass	supertrait-shadowing/trivially-false-subtrait.rs
 build-pass	symbol-names/issue-53912.rs
@@ -7917,6 +7936,7 @@ check-pass	trait-bounds/anonymous-parameters-13775.rs
 compile-fail	trait-bounds/argument-with-unnecessary-method-call.rs
 compile-fail	trait-bounds/deep-level-send-bound-check-issue-40827.rs
 compile-fail	trait-bounds/false-span-in-trait-bound-label.rs
+compile-fail	trait-bounds/impl-missing-where-clause-lifetimes-from-trait.rs
 compile-fail	trait-bounds/issue-119530-sugg-from-fn.rs
 check-pass	trait-bounds/issue-75961.rs
 compile-fail	trait-bounds/issue-82038.rs
@@ -8452,6 +8472,7 @@ compile-fail	typeck/issue-13853.rs
 compile-fail	typeck/issue-16338.rs
 compile-fail	typeck/issue-1871.rs
 run-pass	typeck/issue-18937-1.rs
+compile-fail	typeck/issue-18937.rs
 check-pass	typeck/issue-2063-resource.rs
 run-pass	typeck/issue-2063.rs
 check-pass	typeck/issue-22375.rs
