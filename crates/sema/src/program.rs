@@ -5021,7 +5021,8 @@ impl Program {
             // (dyn_unmarked), `Fn(i32) -> U` for `Fn(T) -> U` with T = i32)
             (Ty::Dyn(p), Ty::Dyn(a)) if p != a && p.contains(PMARK) && self.dyn_named_as(p, a, sol) => true,
             (Ty::Dyn(p), Ty::Dyn(a)) if p != a && p.contains(PMARK) => match (self.dyn_parts(p), self.dyn_parts(a)) {
-                (Some((n1, x)), Some((n2, y))) => n1 == n2 && x.len() == y.len() && x.iter().zip(&y).all(|(p, q)| p.0 == q.0 && self.match_ty(p.1, q.1, sol)),
+                // (a trait object's arguments are no coercion site: their references' mutabilities agree)
+                (Some((n1, x)), Some((n2, y))) => n1 == n2 && x.len() == y.len() && x.iter().zip(&y).all(|(p, q)| p.0 == q.0 && self.refs_agree(p.1, q.1, 0) && self.match_ty(p.1, q.1, sol)),
                 _ => false,
             },
             (a, b) => a == b,

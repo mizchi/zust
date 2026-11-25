@@ -4154,4 +4154,10 @@ fn part28_review() {
     let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
     let d: Vec<(usize, String)> = s.check("#![deny(bare_trait_objects)]\n#![allow(bare_trait_objects)]\ntrait X {}\nimpl X for i32 {}\nfn take(_x: &X) {}\nfn main() { take(&1); }\n").into_iter().map(|d| (d.line, d.msg)).collect();
     assert_eq!(d, vec![], "v5");
+    // (an item's deny of the lint with others before it; a trait object's argument `&mut i32` is no `&T`)
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let d: Vec<(usize, String)> = s.check("#[deny(unused, bare_trait_objects)]\nfn function(x: &SomeTrait) {\n    let _ = x;\n}\ntrait SomeTrait {}\nfn main() {}\n").into_iter().map(|d| (d.line, d.msg)).collect();
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("trait objects without an explicit `dyn` are deprecated"), "{d:?}");
+    let d = check("trait A<T> { fn get(&self) -> i32; }\nimpl<'a> A<&'a mut i32> for u8 { fn get(&self) -> i32 { 1 } }\nfn f<T>(x: &dyn A<&T>) -> i32 { x.get() }\nfn main() {\n    let b: &dyn A<&mut i32> = &1u8;\n    println!(\"{}\", f(b));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
 }
