@@ -4438,3 +4438,21 @@ fn main() {
 }
 "#, &[], "bxall");
 }
+
+#[test]
+fn part30_trait_object_lifetime_bounds() {
+    // (std's `Any` is `trait Any: 'static`: a field `Box<dyn Any + 'a>` is E0478, as for a trait of the program's with
+    // a `'static` bound. An elided object lifetime defaults to the trait's own bound, which it then meets: `&'a dyn
+    // MyAny` is no error, `&'a (dyn MyAny + 'a)` is (line 4). Lines as rustc 1.97's)
+    errors_at(r#"struct H<'a> { v: Box<dyn std::any::Any + 'a> }
+struct G { v: Box<dyn std::any::Any> }
+struct K<'a> { v: &'a (dyn std::any::Any + 'static) }
+fn main() {}
+"#, &[(1, r#"lifetime bound not satisfied"#)], "any2");
+    errors_at(r#"trait MyAny: 'static {}
+impl MyAny for i32 {}
+struct S<'a> { v: &'a dyn MyAny }
+struct T<'a> { v: &'a (dyn MyAny + 'a) }
+fn main() { let x = 1; let s = S { v: &x }; let _ = s.v; }
+"#, &[(4, r#"lifetime bound not satisfied"#)], "any4");
+}
