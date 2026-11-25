@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795637418279,
+  "lastUpdate": 1795637954561,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -57557,6 +57557,165 @@ window.BENCHMARK_DATA = {
           {
             "name": "rt/strings run (-O)",
             "value": 37.809,
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ce9b7b6a5f09bb904309b619c83536fd19886ac3",
+          "message": "CI: kache keeps what rustc makes in the test and rust-ui jobs; rust-cache keeps the registry and the tools (#220)\n\nkache (kunobi-ninja/kache-action, kache 2.3.1) wraps rustc and keeps each compiler run's output in the GitHub\nActions cache, by its inputs with the checkout's paths left out, so a crate compiled as in an earlier run is copied,\nthe test binaries too (cache-executables). rust-cache no longer keeps target/ (cache-targets: false), so the two do\nnot store the same outputs twice in the repository's 10 GB.\n\nLocally, kache's warm rebuild of zust-syntax and zust-base took 0.1 s where the cold one took 19.9 s.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T05:13:19+09:00",
+          "tree_id": "3d8fd9b2f3159d960e33f0581dc9e79ed7b9d131",
+          "url": "https://github.com/mizchi/zust/commit/ce9b7b6a5f09bb904309b619c83536fd19886ac3"
+        },
+        "date": 1795637953533,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "gen1000 build cold",
+            "value": 171.79,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build noop",
+            "value": 0.955,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build edit 1 fn",
+            "value": 25.299,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 check",
+            "value": 67.18,
+            "unit": "ms"
+          },
+          {
+            "name": "gen1000 build cold peak RSS",
+            "value": 21.949,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen1000 binary",
+            "value": 323.977,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 cache",
+            "value": 387.216,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen1000 build noop instructions",
+            "value": 0.554,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 build edit 1 fn instructions",
+            "value": 133.107,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen1000 check instructions",
+            "value": 800.125,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build cold",
+            "value": 740.694,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build noop",
+            "value": 0.922,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build edit 1 fn",
+            "value": 89.537,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 check",
+            "value": 316.299,
+            "unit": "ms"
+          },
+          {
+            "name": "gen5000 build cold peak RSS",
+            "value": 55.199,
+            "unit": "MiB"
+          },
+          {
+            "name": "gen5000 binary",
+            "value": 1558.336,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 cache",
+            "value": 1902.841,
+            "unit": "KiB"
+          },
+          {
+            "name": "gen5000 build noop instructions",
+            "value": 0.554,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 build edit 1 fn instructions",
+            "value": 630.74,
+            "unit": "M instr"
+          },
+          {
+            "name": "gen5000 check instructions",
+            "value": 3938.578,
+            "unit": "M instr"
+          },
+          {
+            "name": "rt/fib run (-O)",
+            "value": 72.452,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/hashmap run (-O)",
+            "value": 109.227,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/matmul run (-O)",
+            "value": 48.751,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/nbody run (-O)",
+            "value": 91.741,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sieve run (-O)",
+            "value": 92.221,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/sort run (-O)",
+            "value": 229.619,
+            "unit": "ms"
+          },
+          {
+            "name": "rt/strings run (-O)",
+            "value": 80.207,
             "unit": "ms"
           }
         ]
