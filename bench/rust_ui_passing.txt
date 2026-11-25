@@ -3929,6 +3929,7 @@ compile-fail	keyword/keyword-true-as-identifier.rs
 compile-fail	keyword/meta-is-not-reserved.rs
 run-pass	keyword/raw-identifier-for-function-57198.rs
 compile-fail	keyword/reserved-become.rs
+check-pass	keyword/soup.rs
 compile-fail	label/continue-pointing-to-block-ice-121623.rs
 compile-fail	label/keyword-as-label-name.rs
 check-pass	label/label-beginning-with-underscore.rs
@@ -8451,6 +8452,7 @@ compile-fail	type/type-params-in-different-spaces-3.rs
 compile-fail	type/type-path-err-node-types.rs
 compile-fail	type/type-recursive-box-shadowed.rs
 compile-fail	type/type-recursive.rs
+compile-fail	type/type-shadow.rs
 run-pass	type/unit-type-basic-usages.rs
 compile-fail	type/usize-no-generic-arguments.rs
 compile-fail	type/verbose-suggestion-for-missing-fn-args.rs
