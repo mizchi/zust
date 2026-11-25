@@ -1059,6 +1059,7 @@ compile-fail	borrowck/issue-81365-7.rs
 compile-fail	borrowck/issue-81365-8.rs
 compile-fail	borrowck/issue-81365-9.rs
 compile-fail	borrowck/issue-82126-mismatched-subst-and-hir.rs
+compile-fail	borrowck/issue-82462.rs
 compile-fail	borrowck/issue-83309-ice-immut-in-for-loop.rs
 compile-fail	borrowck/issue-83760.rs
 compile-fail	borrowck/issue-83924.rs
