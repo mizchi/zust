@@ -2027,8 +2027,20 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
         };
         let assigns = ast_closure::assigns_capture(c, &caps);
         let mut moved: Vec<bool> = Vec::new();
+        let mut deref: Vec<bool> = Vec::new();
         for n in &caps {
             moved.push(*mv || (ast_closure::moves_capture(c, &[n.clone()]) && !assigns));
+            // (a parameter that is a shared reference (`h: &T`, `&self`), used only through a deref of it: edition 2021
+            // captures `*h` by reference, the same as a copy of h, which the closure may then hold past the fn. Not
+            // where the fn's body binds the name again)
+            // (`&self` / `&'a self`, not `&mut self`)
+            let shared_ref = (n == "self" && sig_ast.recv.as_deref().is_some_and(|r| r.starts_with('&') && !r.contains("mut ") && r.ends_with("self")))
+                || sig_ast.params.iter().any(|(p, t)| pat_name(p) == Some(n.as_str()) && matches!(t, PTy::Ref(_, false, _)));
+            deref.push(!*mv && shared_ref && ast_closure::deref_uses_only(c, n) && !body.stmts.iter().any(|s| match s {
+                Stmt::Let(p, _, init, _, ..) => ast_closure::pat_binds_name_pub(p, n) || init.as_ref().is_some_and(|x| ast_closure::binds_name(x, n, 0)),
+                Stmt::Expr(x, _) => ast_closure::binds_name(x, n, 0),
+                _ => false,
+            }));
         }
         let by_move = *mv || (!moved.is_empty() && moved.iter().all(|&m| m));
         out.push(ClosureSyn {
@@ -2041,6 +2053,7 @@ fn lift_closures(sig_ast: &PSig, body: &Block, fname: &str, sig: &mut SigSyn, se
             ret_ann: ret_ann,
             n_parent: n_parent,
             fake_reads: ast_closure::fake_reads(c).into_iter().filter(|n| bound.contains(n)).collect(),
+            deref,
         });
     }
     // `-> impl Fn(A) -> B { move |x| .. }`: 型は末尾のクロージャの struct
@@ -2273,12 +2286,74 @@ fn anon_bound_err(item: &Item) -> Option<String> {
 /// (`const Z: &isize = { let p = 3; &p };`, also of a field or an element of it): the value lives for 'static, the
 /// local only to the end of the block (`\u{3}line\u{3}msg`, at the local's line)
 fn const_local_borrow_err(item: &Item) -> Option<String> {
-    let (e, what) = match &item.kind {
-        ItemKind::Const(_, _, Some(e)) => (e, "constant"),
-        ItemKind::Static(_, _, _, e) => (e, "static"),
+    let (e, what, ty) = match &item.kind {
+        ItemKind::Const(_, t, Some(e)) => (e, "constant", t.as_ref()),
+        ItemKind::Static(_, _, t, e) => (e, "static", Some(t)),
         _ => return None,
     };
-    let Expr::Block(_, _, b) = e else { return None };
+    // (the initializer's own block, or one in it whose value it uses: `mem::transmute({ .. { let s = [0; 10]; &s } })`)
+    let (line, name, inited) = block_borrowing_own_local(e, 0)?;
+    // (a local with no value (`let x; &x`): the borrow of what is not initialized, E0381 there)
+    if !inited {
+        return Some(format!("\u{3}{line}\u{3}used binding `{name}` isn't initialized (E0381)"));
+    }
+    // (of a raw pointer's type (`const FOO: *const u32 = { let x = 42; &x };`): no borrow check error, as a pointer
+    // has no lifetime, but rustc's evaluation of the constant finds the pointer dangling, at the item)
+    if matches!(ty, Some(PTy::Ptr(..))) {
+        return Some(format!("\u{3}1\u{3}encountered dangling pointer in final value of {what}"));
+    }
+    Some(format!("\u{3}{line}\u{3}`{name}` does not live long enough (borrowed value must outlive the {what}) (E0597)"))
+}
+
+/// A block in e (not in a closure's body) whose tail borrows one of its own locals: that local's line and name, and
+/// whether its `let` gives it a value
+fn block_borrowing_own_local(e: &Expr, d: u32) -> Option<(u32, String, bool)> {
+    if d > 32 {
+        return None;
+    }
+    match e {
+        Expr::Closure(..) => None,
+        Expr::Block(_, _, b) | Expr::Const(b) => tail_borrows_own_local(b).or_else(|| {
+            b.stmts.iter().find_map(|st| match st {
+                Stmt::Expr(x, _) => block_borrowing_own_local(x, d + 1),
+                // (a `let` of a raw pointer's type coerces its block's tail before the block ends: `let _: *const
+                // u32 = { let x = 42; &x };` borrows x no longer than the block. Its statements are looked at)
+                Stmt::Let(_, Some(PTy::Ptr(..)), Some(x), ..) => {
+                    let mut x = x;
+                    while let Expr::Paren(i) = x {
+                        x = i;
+                    }
+                    match x {
+                        Expr::Block(_, _, ib) | Expr::Const(ib) => {
+                            let n = ib.stmts.len() - matches!(ib.stmts.last(), Some(Stmt::Expr(_, false))) as usize;
+                            ib.stmts[..n].iter().find_map(|st| match st {
+                                Stmt::Expr(y, _) => block_borrowing_own_local(y, d + 2),
+                                Stmt::Let(_, _, Some(y), ..) => block_borrowing_own_local(y, d + 2),
+                                _ => None,
+                            })
+                        }
+                        x => block_borrowing_own_local(x, d + 1),
+                    }
+                }
+                Stmt::Let(_, _, Some(x), ..) => block_borrowing_own_local(x, d + 1),
+                _ => None,
+            })
+        }),
+        _ => {
+            let mut found = None;
+            ast_closure::each_child_pub(e, &mut |c| {
+                if found.is_none() {
+                    found = block_borrowing_own_local(c, d + 1);
+                }
+            });
+            found
+        }
+    }
+}
+
+/// The block's tail borrows one of its own locals (`{ let p = 3; &p }`, `&p.0` of a local tuple): its line and name,
+/// and whether its `let` gives it a value
+fn tail_borrows_own_local(b: &Block) -> Option<(u32, String, bool)> {
     let Some(Stmt::Expr(tail, false)) = b.stmts.last() else { return None };
     let mut x = tail;
     while let Expr::Paren(i) = x {
@@ -2328,7 +2403,7 @@ fn const_local_borrow_err(item: &Item) -> Option<String> {
     if p.pos.line == 0 {
         return None;
     }
-    Some(format!("\u{3}{}\u{3}`{}` does not live long enough (borrowed value must outlive the {what}) (E0597)", p.pos.line, seg.name))
+    Some((p.pos.line, seg.name.clone(), init.is_some()))
 }
 
 /// 1 つのアイテムの要約 (front.rs の summarize)
