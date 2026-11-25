@@ -940,6 +940,16 @@ impl Inf<'_> {
                         Some(t) => {
                             let k = self.known(t);
                             self.unify(v, k);
+                            // (`let v: Vec<_> = it.collect();`: what the collect yields is known before the statements
+                            // after it, as rustc selects the `FromIterator` impl there. Not from how they use it:
+                            // `&v[0]` returned as a `&str` is a `&&str` coerced, not an element of type `str`)
+                            let mut call = init.as_ref();
+                            while let Some(Expr::Paren(x)) = call {
+                                call = Some(x);
+                            }
+                            if !self.s.collects.is_empty() && matches!(call, Some(Expr::MethodCall(_, m, _, _, _)) if m == "collect") {
+                                self.s.ready_collects();
+                            }
                             if self.prog.has_param(t) { v } else { k }
                         }
                         None => v,
