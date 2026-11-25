@@ -464,11 +464,16 @@ pub struct Slots<'a> {
     pub tparams: Vec<&'a str>,
     /// The slots of `Self`
     pub self_slots: &'a [u8],
+    /// The names of the types around each region of `Self` (RImplSyn::self_paths)
+    pub self_paths: &'a [(String, u8)],
     /// A named lifetime (or `'static`) was seen: without one every region is elided, and the slots follow from the
     /// type alone, so the summary leaves them out
     pub any: bool,
     /// Inside a fn pointer's type: its elided regions and the lifetimes it binds are its own (R_BOUND)
     pub in_fn: u32,
+    /// A fn signature's bounds: what a bound on a type implies of its parts goes here (RSigSyn::derived); None for
+    /// the others, which keep the mark only
+    pub derived: Option<(Vec<(String, u8, u8)>, Vec<(String, String, u8)>)>,
 }
 
 impl<'a> Slots<'a> {
@@ -482,7 +487,7 @@ impl<'a> Slots<'a> {
                 GParam::Const(..) => {}
             }
         }
-        Slots { any: !lts.is_empty(), lts, tparams, self_slots: outer.map(|o| o.self_slots.as_slice()).unwrap_or(&[]), in_fn: 0 }
+        Slots { any: !lts.is_empty(), lts, tparams, self_slots: outer.map(|o| o.self_slots.as_slice()).unwrap_or(&[]), self_paths: outer.map(|o| o.self_paths.as_slice()).unwrap_or(&[]), in_fn: 0, derived: None }
     }
 
     /// The outlives relations the well-formedness of the self types of projections in t implies
@@ -648,13 +653,31 @@ impl<'a> Slots<'a> {
                 return;
             }
             // (another type bounded by a lifetime (`StrategyFor<A>: 'static` of a type alias): the mark `#?`, as what
-            // the function may assume is not all read)
+            // the function may assume is not all read. Its parts outlive the bound too, as rustc's outlives components
+            // do: `D<'a>: 'b` gives `'a: 'b`, `E<'a, T>: 'b` also `T: 'b`)
             let plain = matches!(lhs, PTy::Path(None, p) if matches!(p.segs.as_slice(), [s] if s.args.is_empty() || s.name.starts_with('\'')));
             if !plain {
+                let (mut lts, mut tys) = (vec![], vec![]);
+                if me.derived.is_some() {
+                    let tps = me.tparams.clone();
+                    ty_parts(lhs, "", &tps, &mut lts, &mut tys);
+                }
                 for b in bs {
                     if let Bound::Lifetime(l) = b {
                         let c = me.code(Some(l));
                         ty_outlives.push(("#?".to_string(), c));
+                        let mut found = vec![];
+                        for (paths, a) in &lts {
+                            let a = me.code(Some(a));
+                            if a < R_STATIC && c <= R_STATIC && a != c {
+                                found.push((paths.clone(), a, c));
+                            }
+                        }
+                        let found_ty: Vec<(String, String, u8)> = tys.iter().filter(|t| me.tparams.contains(&t.1.as_str())).map(|(paths, t)| (paths.clone(), t.clone(), c)).collect();
+                        if let Some((d, dt)) = me.derived.as_mut() {
+                            d.extend(found);
+                            dt.extend(found_ty);
+                        }
                     }
                 }
                 return;
@@ -664,6 +687,33 @@ impl<'a> Slots<'a> {
             for b in bs {
                 let Bound::Lifetime(l) = b else { continue };
                 let c = me.code(Some(l));
+                // (`Self: 'b` in an impl's method: the lifetimes of the impl's self type outlive 'b. Kept apart, with the
+                // names of the types around each (self_paths): the program adds those where none is a type alias,
+                // which may drop the lifetime (`impl<'a> Tr for Erased<'a>` with `type Erased<'a> = ();`). The impl's
+                // type parameters are not among them: no type parameter has lifetime arguments)
+                if s.name == "Self" && c <= R_STATIC && me.derived.is_some() {
+                    let ss = me.self_slots;
+                    let mut found = vec![];
+                    let mut i = 0;
+                    while i < ss.len() {
+                        let (from, to) = if ss[i] == R_DYN_ARGS { (i + 2, (i + 2 + ss.get(i + 1).copied().unwrap_or(0) as usize).min(ss.len())) } else { (i, i + 1) };
+                        for &a in &ss[from..to] {
+                            if a < R_STATIC && a != c {
+                                // (a named region the paths do not record (a type nested past lt_paths' depth):
+                                // nothing, as what is around it is not known)
+                                for (paths, _) in me.self_paths.iter().filter(|x| x.1 == a) {
+                                    if !found.contains(&(paths.clone(), a, c)) {
+                                        found.push((paths.clone(), a, c));
+                                    }
+                                }
+                            }
+                        }
+                        i = to.max(i + 1);
+                    }
+                    if let Some((d, _)) = me.derived.as_mut() {
+                        d.extend(found);
+                    }
+                }
                 if s.name.starts_with('\'') {
                     let a = me.code(Some(&s.name));
                     outlives.push((a, c));
@@ -681,6 +731,116 @@ impl<'a> Slots<'a> {
         for (t, bs) in &g.preds {
             add(self, t, bs);
         }
+    }
+}
+
+/// The lifetimes and the plain type names (a parameter's, maybe) that a type is made of, for the outlives its bound
+/// implies, each with the names of the paths it is in (comma-separated: one of them may be a type alias, which the
+/// program knows). Not through a projection (`<T as Tr>::X: 'b` says nothing of T, nor `T::A<'a>: 'b` of 'a: it is one
+/// component of its own) or a trait object's bounds
+/// The named lifetimes of a type, each with the names of the types around it (`D<'a, Erased<'b>>`: ("D", 'a),
+/// ("D,Erased", 'b)), also those of a trait object (its bounds and its traits' arguments)
+fn lt_paths(t: &PTy, paths: &str, out: &mut Vec<(String, String)>, d: u32) {
+    if d > 32 {
+        return;
+    }
+    let seg_args = |segs: &[crate::parse::Seg], inner: &str, out: &mut Vec<(String, String)>| {
+        for s in segs {
+            for a in &s.args {
+                match a {
+                    GArg::Lifetime(l) => out.push((inner.to_string(), l.clone())),
+                    GArg::Ty(t) | GArg::Bind(_, t) => lt_paths(t, inner, out, d + 1),
+                    _ => {}
+                }
+            }
+            if let Some((ps, r)) = &s.fn_args {
+                for t in ps.iter().chain(r.as_deref()) {
+                    lt_paths(t, inner, out, d + 1);
+                }
+            }
+        }
+    };
+    match t {
+        PTy::Path(q, p) => {
+            if let Some(q) = q {
+                lt_paths(q, paths, out, d + 1);
+            }
+            let Some(last) = p.segs.last() else { return };
+            let inner = if paths.is_empty() { last.name.clone() } else { format!("{paths},{}", last.name) };
+            seg_args(&p.segs, &inner, out);
+        }
+        PTy::Ref(l, _, t) => {
+            if let Some(l) = l {
+                out.push((paths.to_string(), l.clone()));
+            }
+            lt_paths(t, paths, out, d + 1);
+        }
+        PTy::Ptr(_, t) | PTy::Slice(t) | PTy::Array(t, _) => lt_paths(t, paths, out, d + 1),
+        PTy::Tuple(ts) => {
+            for t in ts {
+                lt_paths(t, paths, out, d + 1);
+            }
+        }
+        PTy::Dyn(bs) | PTy::Impl(bs) => {
+            for b in bs {
+                match b {
+                    Bound::Lifetime(l) => out.push((paths.to_string(), l.clone())),
+                    Bound::Trait(_, p) => {
+                        let Some(last) = p.segs.last() else { continue };
+                        let inner = if paths.is_empty() { last.name.clone() } else { format!("{paths},{}", last.name) };
+                        seg_args(&p.segs, &inner, out);
+                    }
+                }
+            }
+        }
+        PTy::Fn(ps, r) => {
+            for t in ps.iter().chain(std::iter::once(&**r)) {
+                lt_paths(t, paths, out, d + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn ty_parts(t: &PTy, paths: &str, tps: &[&str], lts: &mut Vec<(String, String)>, tys: &mut Vec<(String, String)>) {
+    match t {
+        PTy::Path(None, p) if p.segs.len() > 1 && (p.segs[0].name == "Self" || tps.contains(&p.segs[0].name.as_str())) => {}
+        PTy::Path(None, p) => {
+            if let [s] = p.segs.as_slice() {
+                if s.args.is_empty() && s.fn_args.is_none() && !s.name.starts_with('\'') {
+                    tys.push((paths.to_string(), s.name.clone()));
+                }
+            }
+            let Some(last) = p.segs.last() else { return };
+            let inner = if paths.is_empty() { last.name.clone() } else { format!("{paths},{}", last.name) };
+            for s in &p.segs {
+                for a in &s.args {
+                    match a {
+                        GArg::Lifetime(l) if l != "'_" && l != "'static" => lts.push((inner.clone(), l.clone())),
+                        GArg::Ty(t) | GArg::Bind(_, t) => ty_parts(t, &inner, tps, lts, tys),
+                        _ => {}
+                    }
+                }
+                if let Some((ps, r)) = &s.fn_args {
+                    for t in ps.iter().chain(r.as_deref()) {
+                        ty_parts(t, &inner, tps, lts, tys);
+                    }
+                }
+            }
+        }
+        PTy::Ref(l, _, t) => {
+            if let Some(l) = l.as_ref().filter(|l| *l != "'_" && *l != "'static") {
+                lts.push((paths.to_string(), l.clone()));
+            }
+            ty_parts(t, paths, tps, lts, tys);
+        }
+        PTy::Ptr(_, t) | PTy::Slice(t) | PTy::Array(t, _) => ty_parts(t, paths, tps, lts, tys),
+        PTy::Tuple(ts) => {
+            for t in ts {
+                ty_parts(t, paths, tps, lts, tys);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -707,7 +867,9 @@ pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str])
     }
     slots.push(v);
     let (mut outlives, mut ty_outlives) = (outer.map(|o| o.outlives.clone()).unwrap_or_default(), outer.map(|o| o.ty_outlives.clone()).unwrap_or_default());
+    s.derived = Some((vec![], vec![]));
     s.bounds(&sig.generics, &mut outlives, &mut ty_outlives);
+    let (derived, derived_ty) = s.derived.take().unwrap_or_default();
     // (a parameter's type that is a projection (`<&'a &'b () as Tr>::Type`) is normalized away, and with it what its
     // well-formedness implies ('b: 'a): kept as declared bounds)
     for (_, t) in &sig.params {
@@ -715,12 +877,12 @@ pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str])
     }
     // (or a self type that writes 'static: `impl A<&'static u8>`)
     let self_static = outer.is_some_and(|o| o.self_slots.contains(&R_STATIC));
-    if !s.any && outlives.is_empty() && ty_outlives.is_empty() && !self_static {
+    if !s.any && outlives.is_empty() && ty_outlives.is_empty() && !self_static && derived.is_empty() && derived_ty.is_empty() {
         return None;
     }
     let self_slots = outer.map(|o| o.self_slots.clone()).filter(|v| v.iter().any(|&c| c <= R_STATIC)).unwrap_or_default();
     let outer = outer.map_or(0, |o| o.lts.len().min(u8::MAX as usize) as u8);
-    Some(Box::new(RSigSyn { lts: s.lts, slots, outlives, ty_outlives, outer, self_slots }))
+    Some(Box::new(RSigSyn { lts: s.lts, slots, outlives, ty_outlives, outer, self_slots, derived, derived_ty }))
 }
 
 /// The regions of a struct / enum definition with fields of types tys (all variants' in order)
@@ -767,7 +929,18 @@ pub fn hdr_regions(g: &Generics, self_ty: Option<&PTy>) -> Option<Box<RImplSyn>>
     if !s.any && outlives.is_empty() && ty_outlives.is_empty() {
         return None;
     }
-    Some(Box::new(RImplSyn { lts: s.lts, self_slots, outlives, ty_outlives, free: vec![], wf_pairs: vec![], wf_vague: vec![], trait_lts: vec![] }))
+    let mut self_paths = vec![];
+    if let Some(t) = self_ty {
+        let mut named = vec![];
+        lt_paths(t, "", &mut named, 0);
+        for (paths, l) in named {
+            let c = s.code(Some(&l));
+            if c < R_STATIC && !self_paths.contains(&(paths.clone(), c)) {
+                self_paths.push((paths, c));
+            }
+        }
+    }
+    Some(Box::new(RImplSyn { lts: s.lts, self_slots, outlives, ty_outlives, free: vec![], wf_pairs: vec![], wf_vague: vec![], trait_lts: vec![], self_paths }))
 }
 
 #[cfg(test)]

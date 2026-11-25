@@ -41,7 +41,7 @@ impl Tr2 for u8 { type A = u16; }          // E0277、u16: Bar
 
 ## 測った結果
 
-main（3aee792）をマージした上での `bench/rust_ui.py --check`:
+main（85eadb7）をマージした上での `bench/rust_ui.py --check`:
 
 - compile-fail は main のベースラインに対して +8 件、回帰は 0 件:
   - `error-codes/E0271.rs`
@@ -52,7 +52,7 @@ main（3aee792）をマージした上での `bench/rust_ui.py --check`:
   - `suggestions/imm-ref-trait-object-literal-bound-regions.rs`（`where for<'b> &'b X: Trait`）
   - `where-clauses/where-clause-method-substituion.rs`（`where X: Foo<U>`、具体型への where 句）
   - `where-clauses/where-for-self-2.rs`（`where for<'a> &'a T: Bar`。rustc は「not general enough」と言う。型にライフタイムを持たない zustc は、同じ行で境界が成り立たないと言う）
-- run-pass、check-pass、build-pass は変わらず。ベースラインとラチェットを書き直した（compile-fail のラチェットは 4673 → 4681）。
+- run-pass、check-pass、build-pass は変わらず。ベースラインとラチェットを書き直した（compile-fail のラチェットは 4676 → 4684）。
 
 `zustc check -j 1` の命令数（cachegrind）、main（b376a37）とこの変更:
 
