@@ -34,7 +34,7 @@ pub type PResult<X> = Result<X, (Pos, String)>;
 
 const PUNCTS: &[&str] = &[
     "|>", "..", "::", "->", "=>", "+=", "-=", "*=", "/=", "%=", "==", "!=", "<=", ">=", "&&", "||", "+", "-", "*", "/", "%", "=", "<", ">", "!", "(", ")",
-    "{", "}", "[", "]", ",", ";", ":", ".", "|", "&", "#", "@",
+    "{", "}", "[", "]", ",", ";", ":", ".", "|", "&", "#", "@", "?",
 ];
 
 impl Parser {
@@ -745,17 +745,19 @@ impl Parser {
         Ok(l)
     }
 
-    /// `x |> f(a)` is `f(x, a)`, `x |> f` is `f(x)`, `x |> .m(a)` is `x.m(a)` (the left side becomes the first argument)
+    /// `x |> f(a)` is `f(x, a)`, `x |> f` is `f(x)`, `x |> .m(a)` is `x.m(a)` (the left side becomes the first argument).
+    /// A postfix after it belongs to the call made: `x |> f(a)?` is `f(x, a)?`, `x |> .m()[0]` is `x.m()[0]`
     fn pipe(&mut self, l: Expr, no_rec: bool) -> PResult<Expr> {
         if self.is(".")? {
             self.next()?;
             let (name, pos) = self.ident()?;
             self.expect("(")?;
             let args = self.args(")")?;
-            return Ok(self.mk(pos, EK::Method(Box::new(l), name, args)));
+            let m = self.mk(pos, EK::Method(Box::new(l), name, args));
+            return self.postfix_tail(m, true);
         }
-        let r = self.postfix(no_rec)?;
-        Ok(match r.kind {
+        let r = self.postfix_inner(no_rec, false)?;
+        let call = match r.kind {
             EK::Call(f, mut args) => {
                 args.insert(0, l);
                 self.mk(r.pos, EK::Call(f, args))
@@ -768,7 +770,8 @@ impl Parser {
                 let pos = r.pos;
                 self.mk(pos, EK::Call(Box::new(r), vec![l]))
             }
-        })
+        };
+        self.postfix_tail(call, true)
     }
 
     fn unary(&mut self, no_rec: bool) -> PResult<Expr> {
@@ -788,7 +791,16 @@ impl Parser {
     }
 
     fn postfix(&mut self, no_rec: bool) -> PResult<Expr> {
-        let mut e = self.primary(no_rec)?;
+        self.postfix_inner(no_rec, true)
+    }
+
+    /// (`try_`: read a `?` too; the right side of `|>` stops before one, which belongs to the call `|>` makes)
+    fn postfix_inner(&mut self, no_rec: bool, try_: bool) -> PResult<Expr> {
+        let e = self.primary(no_rec)?;
+        self.postfix_tail(e, try_)
+    }
+
+    fn postfix_tail(&mut self, mut e: Expr, try_: bool) -> PResult<Expr> {
         loop {
             if self.is("(")? {
                 let pos = self.next()?.pos;
@@ -799,6 +811,19 @@ impl Parser {
                 let i = self.expr(false)?;
                 self.expect("]")?;
                 e = self.mk(pos, EK::Index(Box::new(e), Box::new(i)));
+            } else if try_ && self.is("?")? {
+                let pos = self.next()?.pos;
+                // (reserved, whatever the space between: `?.` reads as "then `.f`" to some and as optional chaining
+                // to others; `??` as two `?` or as TS's default)
+                let t = self.peek()?.clone();
+                match &t.t {
+                    T::P(".") => return Err((t.pos, "`?.` is reserved: write `(e?).f` to return early, or `e.map((x) => x.f)` for a value that may be absent".into())),
+                    T::P("?") => return Err((t.pos, "`??` is reserved: write `e.unwrap_or(d)` (or `e.unwrap_or_else(() => d)`), or `(e?)?` for two `?`".into())),
+                    T::Ident(k) if k != "as" && k != "else" => return Err((pos, "there is no `? :` operator: write `if a { b } else { c }`".into())),
+                    T::Int(_) | T::Float(_) | T::Str(_) => return Err((pos, "there is no `? :` operator: write `if a { b } else { c }`".into())),
+                    _ => {}
+                }
+                e = self.mk(pos, EK::Try(Box::new(e)));
             } else if self.is(".")? {
                 self.next()?;
                 let t = self.next()?;
@@ -887,6 +912,22 @@ impl Parser {
                     return Err((pos, "`async` goes on a closure: `async (x) => ..`".into()));
                 }
                 self.mk(pos, EK::Async(Box::new(c)))
+            }
+            // `if let P = e { a } else { b }`: `match e { P => a, _ => b }`
+            T::Ident(k) if k == "if" && self.is_kw("let")? => {
+                self.next()?;
+                let p = self.pat()?;
+                self.expect("=")?;
+                let s = self.expr(true)?;
+                let th = self.block()?;
+                let el = if self.is_kw("else")? {
+                    self.next()?;
+                    if self.is_kw("if")? { self.primary(no_rec)? } else { self.block()? }
+                } else {
+                    let at = th.pos;
+                    self.mk(at, EK::Block(vec![], None))
+                };
+                self.mk(pos, EK::Match(Box::new(s), vec![(p, th), (Pat::Wild, el)]))
             }
             T::Ident(k) if k == "if" => {
                 let c = self.expr(true)?;

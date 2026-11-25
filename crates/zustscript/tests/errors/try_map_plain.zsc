@@ -1,0 +1,2 @@
+// expect: `.try_map(f)` takes a function that gives a `Result` or an `Option`
+fn b(xs: Array<i32>) -> i32 { let r = xs.try_map((x) => x + 1); 1 }

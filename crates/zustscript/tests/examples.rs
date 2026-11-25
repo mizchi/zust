@@ -770,3 +770,43 @@ fn wasm_requires_rust_even_for_unused_functions() {
         assert!(String::from_utf8_lossy(&bad.stderr).contains("calling `host`"));
     }
 }
+
+/// tests/options.zsc: the prelude's `Option` / `Result` (not declared), `?` (in a call's arguments after one
+/// evaluated first, in a branch, a loop, a closure), `if let`, and the methods. The `.d.ts` declares the prelude's
+/// types the exports use
+#[test]
+fn options_and_try() {
+    let d = out_dir("options");
+    let o = zsc(&root().join("tests/options.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let out = node(&d, "globalThis.note = (s) => console.log('note', s); const m = await import('./options.js'); console.log(m.run()); console.log(JSON.stringify([m.lookup([{ id: 1, title: 'a' }], 1), m.lookup([], 1), m.parse_draft({ title: '', body: '' })]));");
+    assert_eq!(
+        out,
+        "note eval left\nnote eval left\nok 3 write; title is empty; title is longer than 8; left:one+two; none; <ONE|two>; none; 3; item is empty; true,false; 2; title is empty; three,one; none; one (computed) true true MISSING [title is empty] true true; two\n\
+         [{\"TAG\":\"Some\",\"_0\":{\"id\":1,\"title\":\"a\"}},{\"TAG\":\"None\"},{\"TAG\":\"Err\",\"_0\":{\"TAG\":\"Empty\",\"_0\":\"title\"}}]\n"
+    );
+    let js = std::fs::read_to_string(d.join("options.js")).unwrap();
+    // (`?` is statements before the one it is in; an argument before it is kept in a temporary first)
+    assert!(js.contains("  const $t1 = non_empty(\"title\", d.title);\n  if ($t1.TAG === \"Err\") return $t1;\n  const t = $t1._0;\n"), "{js}");
+    assert!(js.contains("  const $t1 = logged(\"left\");\n  const $t2 = find(todos, a);\n  if ($t2.TAG === \"None\") return $t2;\n"), "{js}");
+    let dts = std::fs::read_to_string(d.join("options.d.ts")).unwrap();
+    assert!(dts.contains("export type Option<T> = { readonly TAG: \"None\" } | { readonly TAG: \"Some\"; readonly _0: T };"), "{dts}");
+    assert!(dts.contains("export type Result<T, E> = { readonly TAG: \"Ok\"; readonly _0: T } | { readonly TAG: \"Err\"; readonly _0: E };"), "{dts}");
+    assert!(dts.contains("export declare function parse_draft(d: Draft): Result<Todo, FormError>;"), "{dts}");
+}
+
+/// tests/options_wasm.zsc: `?` and `if let` on the prelude's types in `@wasm fn`s, as wasm and as JS
+#[test]
+fn options_same_in_js_and_wasm() {
+    let src = root().join("tests/options_wasm.zsc");
+    let mut outs = vec![];
+    for (name, flags) in [("options-wasm", &[][..]), ("options-js", &["--all-js"][..])] {
+        let d = out_dir(name);
+        let o = compare_build(&src, &d, flags);
+        assert!(o.status.success(), "zsc failed:\n{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(d.join("options_wasm.wasm").exists(), flags.is_empty());
+        outs.push(node(&d, "const m = await import('./options_wasm.js'); console.log(JSON.stringify([m.ratio(12, 3, 2), m.ratio(1, 0, 1), m.quarter(8), m.quarter(6), m.quarter(3), m.code(4, 0), m.code(8, 2)]));"));
+    }
+    assert_eq!(outs[0], outs[1], "wasm and JS differ");
+    assert_eq!(outs[0], "[{\"TAG\":\"Ok\",\"_0\":2},{\"TAG\":\"Err\",\"_0\":\"ByZero\"},{\"TAG\":\"Some\",\"_0\":2},{\"TAG\":\"None\"},{\"TAG\":\"None\"},-1,4]\n");
+}

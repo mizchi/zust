@@ -182,6 +182,19 @@ const HELPERS: &[(&str, &str)] = &[
     ("$arity1", "function $arity1(f) {\n  return (a) => f(a);\n}"),
     ("$arity2", "function $arity2(f) {\n  return (a, b) => f(a, b);\n}"),
     ("$round", "function $round(x) {\n  return x < 0 ? -Math.round(-x) : Math.round(x);\n}"),
+    // (the methods of the prelude's `Option` / `Result`: `None` / `Err` passes through as it is)
+    ("$o_map", "function $o_map(o, f) {\n  return o.TAG === \"None\" || o.TAG === \"Err\" ? o : { TAG: o.TAG, _0: f(o._0) };\n}"),
+    ("$o_then", "function $o_then(o, f) {\n  return o.TAG === \"None\" || o.TAG === \"Err\" ? o : f(o._0);\n}"),
+    ("$o_filter", "function $o_filter(o, f) {\n  return o.TAG === \"Some\" && !f(o._0) ? { TAG: \"None\" } : o;\n}"),
+    ("$o_map_err", "function $o_map_err(r, f) {\n  return r.TAG === \"Err\" ? { TAG: \"Err\", _0: f(r._0) } : r;\n}"),
+    ("$o_unwrap_or", "function $o_unwrap_or(o, d) {\n  return o.TAG === \"None\" || o.TAG === \"Err\" ? d : o._0;\n}"),
+    ("$o_unwrap_or_else", "function $o_unwrap_or_else(o, f) {\n  return o.TAG === \"None\" ? f() : o.TAG === \"Err\" ? f(o._0) : o._0;\n}"),
+    ("$o_ok_or", "function $o_ok_or(o, e) {\n  return o.TAG === \"Some\" ? { TAG: \"Ok\", _0: o._0 } : { TAG: \"Err\", _0: e };\n}"),
+    ("$o_ok_or_else", "function $o_ok_or_else(o, f) {\n  return o.TAG === \"Some\" ? { TAG: \"Ok\", _0: o._0 } : { TAG: \"Err\", _0: f() };\n}"),
+    ("$o_ok", "function $o_ok(r) {\n  return r.TAG === \"Ok\" ? { TAG: \"Some\", _0: r._0 } : { TAG: \"None\" };\n}"),
+    // (`xs.try_map(f)`: one array, built once; the first `Err` / `None` is the result)
+    ("$try_map_r", "function $try_map_r(xs, f) {\n  const out = [];\n  for (let i = 0; i < xs.length; i++) {\n    const r = f(xs[i]);\n    if (r.TAG === \"Err\") return r;\n    out.push(r._0);\n  }\n  return { TAG: \"Ok\", _0: out };\n}"),
+    ("$try_map_o", "function $try_map_o(xs, f) {\n  const out = [];\n  for (let i = 0; i < xs.length; i++) {\n    const r = f(xs[i]);\n    if (r.TAG === \"None\") return r;\n    out.push(r._0);\n  }\n  return { TAG: \"Some\", _0: out };\n}"),
     (
         "$handle",
         "// Deep handlers on generators (one-shot continuations), run by one loop that keeps the frames on a heap stack:\n// operations and resumptions do not grow the JS stack. A generator yields an operation (a variant) or an\n// instruction to the loop (`$i`): run a handled body, resume a continuation, or resume it as the arm's last act\nfunction $handle(body, ops, arm) {\n  return { $i: 1, body, ops, arm };\n}\n\nfunction $resume(k, v) {\n  return { $i: 2, k, v };\n}\n\nfunction $tail(k, v) {\n  return { $i: 3, k, v };\n}\n\n// The loop over the frames `st` (a frame: a generator, and for a handled body its operations and arm; a\n// continuation: the frames it cut off). An operation no frame handles is yielded to whoever drives the loop (a TS\n// caller of an exported function, or an outer loop), and its answer is sent back to the frame that performed it\nfunction* $drive(st) {\n  let v, e, thrown = false;\n  for (;;) {\n    const f = st[st.length - 1];\n    let r;\n    try {\n      r = thrown ? f.g.throw(e) : f.g.next(v);\n    } catch (x) {\n      st.pop();\n      if (st.length === 0) throw x;\n      thrown = true;\n      e = x;\n      continue;\n    }\n    thrown = false;\n    v = undefined;\n    if (r.done) {\n      st.pop();\n      if (st.length === 0) return r.value;\n      v = r.value;\n      continue;\n    }\n    const y = r.value;\n    if (y.$i === 1) {\n      st.push({ g: y.body(), ops: y.ops, arm: y.arm });\n    } else if (y.$i !== undefined) {\n      const seg = y.k.seg;\n      if (seg === null) {\n        thrown = true;\n        e = new Error(\"zustscript: a continuation was resumed twice\");\n        continue;\n      }\n      y.k.seg = null;\n      // (as the arm's last act, the arm's value is the continuation's: its frame goes)\n      if (y.$i === 3) st.pop();\n      for (let i = 0; i < seg.length; i++) st.push(seg[i]);\n      v = y.v;\n    } else {\n      // (the nearest handler of the operation: the frames from it up are the continuation, and its arm runs in\n      // their place, under the handlers outside it)\n      let i = st.length - 1;\n      while (i >= 0 && (st[i].ops === undefined || !st[i].ops.includes(y.TAG))) i--;\n      if (i < 0) {\n        try {\n          v = yield y;\n        } catch (x) {\n          thrown = true;\n          e = x;\n        }\n        continue;\n      }\n      const h = st[i];\n      const k = { seg: st.splice(i) };\n      st.push({ g: h.arm(y, k) });\n    }\n  }\n}\n\n// A `handle` outside any generator: nothing outside it can answer an operation it does not handle\nfunction $run(body, ops, arm) {\n  const r = $drive([{ g: body(), ops, arm }]).next();\n  if (!r.done) throw new Error(\"zustscript: unhandled effect \" + r.value.TAG);\n  return r.value;\n}",
@@ -472,9 +485,32 @@ impl<'a> Js<'a> {
         match &e.kind {
             EK::Block(s, t) => !s.is_empty() || t.as_ref().is_some_and(|t| Self::complex(t)),
             EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Break | EK::Continue => true,
-            EK::If(_, t, el) => Self::complex(t) || el.as_ref().is_none_or(|x| Self::complex(x)),
+            // (a `?` in a branch runs only on that branch: not a `? :` whose operands were written before it)
+            EK::If(_, t, el) => Self::complex(t) || el.as_ref().is_none_or(|x| Self::complex(x)) || has_try(t) || el.as_deref().is_some_and(has_try),
             _ => false,
         }
+    }
+
+    /// `s` kept in a temporary first, when a later operand returns early with `?`: the `?` is written as statements
+    /// before the expression, so an operand before it is evaluated before them too (left to right, as written)
+    fn pin(&mut self, s: String, later: bool) -> String {
+        if !later || s.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') || s.starts_with('"') && s.ends_with('"') && balanced(&s) {
+            return s;
+        }
+        let t = self.fresh();
+        self.line(&format!("const {t} = {s};"));
+        t
+    }
+
+    /// The operands `xs`, in order (each kept in a temporary before a later one's `?`)
+    fn seq(&mut self, xs: &[&Expr]) -> Vec<String> {
+        let mut out = vec![];
+        for (k, x) in xs.iter().enumerate() {
+            let s = self.expr(x);
+            let later = xs[k + 1..].iter().any(|y| has_try(y));
+            out.push(self.pin(s, later));
+        }
+        out
     }
 
     /// A loop's body: its statements, the value dropped
@@ -841,6 +877,14 @@ impl<'a> Js<'a> {
     }
 
     fn iife(&mut self, e: &Expr) -> String {
+        // (a `?` inside returns from the function being written: the expression is written as statements before
+        // the one it is in, into a temporary, not as a function of its own)
+        if has_try(e) {
+            let v = self.fresh();
+            self.line(&format!("let {v};"));
+            self.stmt_expr(e, &Dest::Assign(v.clone()));
+            return v;
+        }
         if let Some(pos) = loop_exit(e) {
             self.errors.push((pos, "`break` / `continue` here would have to leave a function in the JS output: move this `if` / `match` into a statement of its own (`let v = if ..;`)".into()));
         }
@@ -951,7 +995,7 @@ impl<'a> Js<'a> {
                         _ => (if one { "1" } else { "0" }).into(),
                     };
                 }
-                let a: Vec<String> = args.iter().map(|x| self.expr(x)).collect();
+                let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
                 if let Some(Callee::TypedCtor(el, c)) = self.info.callee.get(&f.id).cloned() {
                     let ctor = typed_js(&el);
                     return if c == "zeros" { format!("new {ctor}({})", a[0]) } else { format!("{ctor}.from({})", a[0]) };
@@ -1006,6 +1050,7 @@ impl<'a> Js<'a> {
                     };
                 }
                 let recv = self.operand(r);
+                let recv = self.pin(recv, args.iter().any(has_try));
                 let arg = |js: &mut Js, k: usize| js.expr(&args[k]);
                 use Builtin as B;
                 match b {
@@ -1045,15 +1090,49 @@ impl<'a> Js<'a> {
                         self.helpers.insert("$round");
                         format!("$round({})", self.expr(r))
                     }
+                    Some(B::Opt(m @ ("is_some" | "is_none" | "is_ok" | "is_err"))) => {
+                        let tag = match m {
+                            "is_some" => "Some",
+                            "is_none" => "None",
+                            "is_ok" => "Ok",
+                            _ => "Err",
+                        };
+                        format!("({recv}.TAG === {})", js_str(tag))
+                    }
+                    Some(B::Opt(m)) => {
+                        let h = match m {
+                            "map" => "$o_map",
+                            "and_then" => "$o_then",
+                            "filter" => "$o_filter",
+                            "map_err" => "$o_map_err",
+                            "unwrap_or" => "$o_unwrap_or",
+                            "unwrap_or_else" => "$o_unwrap_or_else",
+                            "ok_or" => "$o_ok_or",
+                            "ok_or_else" => "$o_ok_or_else",
+                            _ => "$o_ok",
+                        };
+                        self.helpers.insert(h);
+                        let a: Vec<String> = match m {
+                            "map" | "and_then" | "filter" | "map_err" => vec![self.callback(&args[0], 1)],
+                            _ => args.iter().map(|x| self.expr(x)).collect(),
+                        };
+                        format!("{h}({})", [recv].into_iter().chain(a).collect::<Vec<_>>().join(", "))
+                    }
+                    Some(B::TryMap(res)) => {
+                        let h = if res { "$try_map_r" } else { "$try_map_o" };
+                        self.helpers.insert(h);
+                        format!("{h}({recv}, {})", self.callback(&args[0], 1))
+                    }
                     None => {
-                        let a: Vec<String> = args.iter().map(|x| self.expr(x)).collect();
+                        let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
                         format!("{recv}.{m}({})", a.join(", "))
                     }
                 }
             }
             EK::Index(x, i) => {
                 self.helpers.insert("$at");
-                format!("$at({}, {})", self.expr(x), self.expr(i))
+                let v = self.seq(&[x, i]);
+                format!("$at({}, {})", v[0], v[1])
             }
             EK::Field(x, f) => {
                 let s = self.operand(x);
@@ -1090,7 +1169,7 @@ impl<'a> Js<'a> {
                 self.gen_ = false;
                 let mark = self.locals.len();
                 let ps: Vec<String> = ps.iter().map(|p| self.bind(&p.0)).collect();
-                let b = if Self::complex(body) {
+                let b = if Self::complex(body) || has_try(body) {
                     let save = (std::mem::take(&mut self.out), self.ind);
                     self.ind += 1;
                     self.stmt_expr(body, &Dest::Return);
@@ -1108,28 +1187,43 @@ impl<'a> Js<'a> {
             EK::Record(_, fs, base) => {
                 let mut parts = vec![];
                 if let Some(b) = base {
-                    parts.push(format!("...{}", self.operand(b)));
+                    let v = self.operand(b);
+                    let v = self.pin(v, fs.iter().any(|f| has_try(&f.1)));
+                    parts.push(format!("...{v}"));
                 }
-                for (f, x) in fs {
-                    let v = self.expr(x);
+                let vs = self.seq(&fs.iter().map(|f| &f.1).collect::<Vec<_>>());
+                for ((f, _), v) in fs.iter().zip(vs) {
                     parts.push(if v == *f { f.clone() } else { format!("{f}: {v}") });
                 }
                 format!("{{ {} }}", parts.join(", "))
             }
             EK::Array(xs) if self.info.typed_lit.contains_key(&e.id) => {
                 let ctor = typed_js(&self.info.typed_lit[&e.id].clone());
-                format!("new {ctor}([{}])", xs.iter().map(|x| self.expr(x)).collect::<Vec<_>>().join(", "))
+                format!("new {ctor}([{}])", self.seq(&xs.iter().collect::<Vec<_>>()).join(", "))
             }
-            EK::Array(xs) | EK::Tuple(xs) => format!("[{}]", xs.iter().map(|x| self.expr(x)).collect::<Vec<_>>().join(", ")),
+            EK::Array(xs) | EK::Tuple(xs) => format!("[{}]", self.seq(&xs.iter().collect::<Vec<_>>()).join(", ")),
             EK::Await(x) => format!("(await {})", self.bin_operand(x, 14, true)),
+            // (statements before the one it is in: the value in a temporary, returned as it is when it is the
+            // `Err` / `None`, whose shape does not depend on the other type argument)
+            EK::Try(x) => {
+                let v = self.expr(x);
+                let t = self.fresh();
+                self.line(&format!("const {t} = {v};"));
+                let en = self.info.tries[&e.id].clone();
+                let bad = if en == "Result" { "Err" } else { "None" };
+                let tag = self.tag_key(&en);
+                self.line(&format!("if ({t}.{tag} === {}) return {t};", self.tag_js(&en, bad)));
+                format!("{t}.{}", self.field_key(&en, if en == "Result" { "Ok" } else { "Some" }, 0))
+            }
             EK::Async(c) => format!("async {}", self.expr(c)),
             // (a template literal: a hole writes its value as `String(..)` does, which is `to_string`'s JS)
             EK::Interp(parts, holes) => {
+                let hs = self.seq(&holes.iter().collect::<Vec<_>>());
                 let mut o = String::from("`");
                 for (k, p) in parts.iter().enumerate() {
                     o.push_str(&template_text(p));
-                    if let Some(h) = holes.get(k) {
-                        let _ = write!(o, "${{{}}}", self.expr(h));
+                    if let Some(h) = hs.get(k) {
+                        let _ = write!(o, "${{{h}}}");
                     }
                 }
                 o.push('`');
@@ -1162,7 +1256,7 @@ impl<'a> Js<'a> {
                 }
             }
             EK::Perform(_, v, args) => {
-                let a: Vec<String> = args.iter().map(|x| self.expr(x)).collect();
+                let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
                 let en = self.info.variant_of[v].clone();
                 if self.info.direct.contains(&en) {
                     self.helpers.insert("$perform");
@@ -1302,7 +1396,9 @@ impl<'a> Js<'a> {
         if let Some(t) = self.info.deep_eq.get(&id).cloned() {
             let t = subst_ty(&t, &self.subst);
             if let Some(f) = self.eq_fn(&t) {
-                let (a, b) = (self.expr(l), self.expr(r));
+                let a = self.expr(l);
+                let a = self.pin(a, has_try(r));
+                let b = self.expr(r);
                 return if op == "==" { format!("{f}({a}, {b})") } else { format!("!{f}({a}, {b})") };
             }
         }
@@ -1313,7 +1409,9 @@ impl<'a> Js<'a> {
             (Ty::F32, "+" | "-" | "*" | "/" | "%") => bin_prec(op),
             _ => bin_prec(op),
         };
-        let (a, b) = (self.bin_operand(l, p, false), self.bin_operand(r, p, true));
+        let a = self.bin_operand(l, p, false);
+        let a = self.pin(a, has_try(r));
+        let b = self.bin_operand(r, p, true);
         match op {
             "==" => return format!("{a} === {b}"),
             "!=" => return format!("{a} !== {b}"),
@@ -1353,8 +1451,15 @@ impl<'a> Js<'a> {
         };
         let mut props = vec![];
         let mut key = None;
-        for (a, x) in &j.attrs {
-            let v = self.expr(x);
+        // (the attributes, then the children, in order)
+        let mut all: Vec<&Expr> = j.attrs.iter().map(|a| &a.1).collect();
+        all.extend(j.children.iter().filter_map(|c| match c {
+            JsxChild::Expr(x) => Some(x),
+            JsxChild::Text(_) => None,
+        }));
+        let mut vals = self.seq(&all).into_iter();
+        for (a, _) in &j.attrs {
+            let v = vals.next().unwrap();
             if a == "key" {
                 key = Some(v);
                 continue;
@@ -1367,7 +1472,7 @@ impl<'a> Js<'a> {
             .iter()
             .map(|c| match c {
                 JsxChild::Text(t) => js_str(t),
-                JsxChild::Expr(x) => self.expr(x),
+                JsxChild::Expr(_) => vals.next().unwrap(),
             })
             .collect();
         let f = if kids.len() > 1 { "_jsxs" } else { "_jsx" };
@@ -1439,6 +1544,15 @@ fn single_call(s: &str) -> bool {
     false
 }
 
+/// A `?` in `e` that is not inside a closure of its own (it returns from the function `e` is in)
+pub fn has_try(e: &Expr) -> bool {
+    match &e.kind {
+        EK::Try(_) => true,
+        EK::Closure(..) | EK::Async(_) => false,
+        _ => crate::check::subexprs(e).into_iter().any(has_try),
+    }
+}
+
 /// An `await` in `e` that is not inside a closure of its own (it belongs to the function `e` is in)
 fn awaits(e: &Expr) -> bool {
     match &e.kind {
@@ -1462,7 +1576,7 @@ fn loop_exit(e: &Expr) -> Option<Pos> {
                 .or_else(|| tail.as_deref().and_then(walk)),
             EK::If(c, t, el) => walk(c).or_else(|| walk(t)).or_else(|| el.as_deref().and_then(walk)),
             EK::Match(s, arms) => walk(s).or_else(|| arms.iter().find_map(|a| walk(&a.1))),
-            EK::Assign(_, x) | EK::Un(_, x) | EK::Field(x, _) | EK::Cast(x, _) => walk(x),
+            EK::Assign(_, x) | EK::Un(_, x) | EK::Field(x, _) | EK::Cast(x, _) | EK::Try(x) | EK::Await(x) => walk(x),
             EK::Bin(_, a, b) | EK::Index(a, b) => walk(a).or_else(|| walk(b)),
             EK::Call(f, a) => walk(f).or_else(|| a.iter().find_map(walk)),
             EK::Method(r, _, a) => walk(r).or_else(|| a.iter().find_map(walk)),
@@ -1774,6 +1888,29 @@ pub fn brand_runtime(used: &[&str]) -> String {
     o
 }
 
+/// An enum's type in the `.d.ts`: a union of string literals, or of `{ TAG, _0, .. }` objects
+fn enum_dts(name: &str, params: &[String], info: &Info) -> String {
+    let e = &info.enums[name];
+    let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
+    let alts: Vec<String> = e
+        .variants
+        .iter()
+        .map(|(v, fs)| {
+            if e.unit_only() && !e.is_effect() {
+                js_str(v)
+            } else {
+                let mut s = format!("{{ readonly TAG: {}", js_str(v));
+                for (k, t) in fs.iter().enumerate() {
+                    let _ = write!(s, "; readonly _{k}: {}", ts(t));
+                }
+                s.push_str(" }");
+                s
+            }
+        })
+        .collect();
+    format!("export type {name}{g} = {};\n\n", alts.join(" | "))
+}
+
 /// The `.d.ts`, and the numeric brands it uses
 /// (`spec`: the module specifier of a TS file a record was read from, from the `.d.ts`'s directory)
 pub fn dts(items: &[Item], info: &Info, shared_runtime: bool, spec: &dyn Fn(&std::path::Path) -> String) -> (String, Vec<&'static str>) {
@@ -1808,27 +1945,9 @@ pub fn dts(items: &[Item], info: &Info, shared_runtime: bool, spec: &dyn Fn(&std
                 }
                 o.push_str("}\n\n");
             }
-            Item::Enum { name, params, .. } => {
-                let e = &info.enums[name];
-                let g = if params.is_empty() { String::new() } else { format!("<{}>", params.join(", ")) };
-                let alts: Vec<String> = e
-                    .variants
-                    .iter()
-                    .map(|(v, fs)| {
-                        if e.unit_only() && !e.is_effect() {
-                            js_str(v)
-                        } else {
-                            let mut s = format!("{{ readonly TAG: {}", js_str(v));
-                            for (k, t) in fs.iter().enumerate() {
-                                let _ = write!(s, "; readonly _{k}: {}", ts(t));
-                            }
-                            s.push_str(" }");
-                            s
-                        }
-                    })
-                    .collect();
-                let _ = writeln!(o, "export type {name}{g} = {};\n", alts.join(" | "));
-            }
+            // (the prelude's: declared below, when the declarations use it)
+            Item::Enum { pos, .. } if crate::ast::is_prelude(*pos) => {}
+            Item::Enum { name, params, .. } => o.push_str(&enum_dts(name, params, info)),
             Item::Fn { name, public: true, generics, bounds, args, .. } if !bounds.is_empty() => {
                 let s = &info.fns[name];
                 for targs in all_instances(generics, bounds) {
@@ -1856,6 +1975,15 @@ pub fn dts(items: &[Item], info: &Info, shared_runtime: bool, spec: &dyn Fn(&std
                 let _ = writeln!(o, "/** compiled to wasm */\nexport declare function {}({}): {};", ident(name), ps.join(", "), ts(&crate::check::wty_to_ty(ret)));
             }
             _ => {}
+        }
+    }
+    // (`Result<T, E>` may hold an `Option`: the prelude's types that are used, the last first)
+    for it in items.iter().rev() {
+        if let Item::Enum { name, params, pos, .. } = it
+            && crate::ast::is_prelude(*pos)
+            && uses_word(&o, name)
+        {
+            o = enum_dts(name, params, info) + &o;
         }
     }
     let used: Vec<&'static str> = BRANDS.iter().map(|b| b.0).filter(|n| uses_word(&o, n)).collect();

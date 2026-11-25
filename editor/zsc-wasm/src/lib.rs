@@ -87,6 +87,7 @@ fn compile(src: &str) -> Result<(String, String, Vec<Diag>), Vec<Diag>> {
             .map(|e| (e.pos, if e.file.is_some() { e.msg } else { format!("{} (the playground has one file: no modules or TS files to import)", e.msg) }))
             .collect::<Vec<_>>()
     })?;
+    let items = ast::with_prelude(items);
     let errors = check::js_target_errors(&items);
     if !errors.is_empty() { return Err(errors); }
     let mut ck = check::Checker::new();

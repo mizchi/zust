@@ -109,6 +109,12 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
         // like: the module's declarations say which names are types
         while let Some(n) = types.pop() {
             let Some(it) = m.find(&n) else { continue };
+            // (the prelude's `Option` / `Result`: the importing module has its own, the same type)
+            if let Item::Enum { pos, .. } = it
+                && crate::ast::is_prelude(*pos)
+            {
+                continue;
+            }
             let mut it = it.clone();
             let (Item::Record { from: f, .. } | Item::Enum { from: f, .. }) = &mut it else { continue };
             // where the type is defined: this module, or the module or TS file it came from
@@ -200,6 +206,7 @@ impl Module {
         stack.pop();
         let items = items.map_err(|es| es.into_iter().map(|e| if e.file.is_some() { e } else { at(e.pos, e.msg) }).collect::<Vec<_>>())?;
         let items = crate::tsimport::expand(items, &dir).map_err(|es| es.into_iter().map(|e| if e.file.is_some() { e } else { at(e.pos, e.msg) }).collect::<Vec<_>>())?;
+        let items = crate::ast::with_prelude(items);
         let mut ck = crate::check::Checker::new();
         ck.check_file(&items, false);
         if !ck.errors.is_empty() {
