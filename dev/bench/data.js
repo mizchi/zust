@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795637011667,
+  "lastUpdate": 1795637014416,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -82240,6 +82240,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 99.688,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "72e35d186ad1822627ce9919619eca2c071d31ff",
+          "message": "Merge pull request #215 from mizchi/claude/fix-187-int128-methods\n\ntypeck: i128 / u128 wrapping_div, wrapping_rem, overflowing_div, overflowing_rem, isqrt and reverse_bits (#187)",
+          "timestamp": "2026-11-26T04:57:30+09:00",
+          "tree_id": "7ec5c70b5ae455137423e93d0dc34aa99485e27e",
+          "url": "https://github.com/mizchi/zust/commit/72e35d186ad1822627ce9919619eca2c071d31ff"
+        },
+        "date": 1795637014023,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.27,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.971,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.958,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 12.702,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.409,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.228,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.673,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 337.304,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 100.121,
             "unit": "MiB"
           }
         ]
