@@ -1071,6 +1071,7 @@ impl Session2 {
                                 (Some(m), ItemKind::ImplMember(h)) => format!("{}:1: {m}", items[h as usize].line),
                                 _ => relocate(e.trim_start_matches('\u{2}').to_string(), it),
                             };
+                            let e = ret_type_line(e, &src, it);
                             // (an item moved out of a fn body that cannot see a name of the items around it: rustc's
                             // E0401, where that is what it names)
                             let line_start = src[..it.start.min(src.len())].rfind('\n').map_or(0, |p| p + 1);
@@ -2199,6 +2200,24 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
 }
 
 /// アイテムの中の `行:桁:` のエラーを、ファイルの中の行にする (driver.rs の relocate_err と同じ)。位置がなければアイテムの先頭の行
+/// E0746 at the fn's return type (rustc's span), not its first line: `fn f() ->\n    dyn Tr`
+#[cold]
+fn ret_type_err(e: String, src: &str, it: &SrcItem) -> String {
+    let text = src.get(it.start..it.end).unwrap_or("");
+    let Some(at) = sig_part(text, "r") else { return e };
+    let Some((_, msg)) = e.split_once(":1: ") else { return e };
+    let line = it.line + text[..at].matches('\n').count();
+    let col = at - text[..at].rfind('\n').map_or(0, |k| k + 1) + 1;
+    format!("{line}:{col}: {msg}")
+}
+
+fn ret_type_line(e: String, src: &str, it: &SrcItem) -> String {
+    if e.ends_with("return type cannot be a trait object without pointer indirection (E0746)") {
+        return ret_type_err(e, src, it);
+    }
+    e
+}
+
 fn relocate(e: String, it: &SrcItem) -> String {
     if let Some((l, rest)) = e.split_once(':') {
         if let Ok(l) = l.parse::<usize>() {
@@ -8953,11 +8972,15 @@ impl Session2 {
 fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
     let Some((l, rest)) = e.split_once(":1: ") else { return e.to_string() };
     let Ok(line) = l.parse::<usize>() else { return e.to_string() };
-    // (`\u{5}word\u{5}msg`: at the first whole word `word` of the item, after its attributes)
+    // (`\u{5}word\u{5}msg`: at the first whole word `word` of the item, after its attributes; an empty word: at the item's
+    // first token after them)
     if let Some((w, m)) = rest.strip_prefix('\u{5}').and_then(|r| r.split_once('\u{5}')) {
         let at = items.iter().find(|it| it.line == line).and_then(|it| {
             let text = src.get(it.start..it.end.min(src.len()))?;
             let from = sig_part(text, "f")?;
+            if w.is_empty() {
+                return Some(it.start + from);
+            }
             let b = text.as_bytes();
             let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
             text[from..].match_indices(w).map(|(i, _)| it.start + from + i).find(|&i| !id(src.as_bytes()[i - 1]) && src.as_bytes().get(i + w.len()).is_none_or(|&c| !id(c))).filter(|_| !b.is_empty())
@@ -9513,7 +9536,7 @@ fn hoisted_err_holds(msg: &str) -> bool {
         // (an item's own definition: a discriminant past its repr, a union's fields and derives)
         "enum discriminant overflowed (E0370)", "field must implement `Copy`", "this trait cannot be derived for unions", "cannot find derive macro `",
         // (an item's own syntax: `struct Test { Very\n Bad }` in a fn body)
-        "expected `:` (found `", "expected `,` (found `",
+        "expected `:` (found `", "expected `,` (found `", "free static item without body",
         // (an item's written types: an unsized type where a Sized one is needed, sized_error)
         "the size for values of type `"];
     let unused = msg.starts_with("function `") && msg.contains("is never used") || msg.starts_with("type parameter `") && msg.ends_with("is never used (E0091)");

@@ -5383,7 +5383,8 @@ impl Program {
         match state[id] {
             2 => return Ok(()),
             1 => {
-                return Err(format!("{}:1: recursive type `{}` has infinite size", items[sdefs[id].0].line, sdefs[id].1));
+                // (at the item's first token past its attributes, as rustc: name_line reads the mark)
+                return Err(format!("{}:1: \u{5}\u{5}recursive type `{}` has infinite size", items[sdefs[id].0].line, sdefs[id].1));
             }
             _ => {}
         }

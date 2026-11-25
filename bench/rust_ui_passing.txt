@@ -2420,6 +2420,7 @@ run-pass	enum-discriminant/enum-discriminant-const-eval-truncation-9837.rs
 run-pass	enum-discriminant/get_discr.rs
 run-pass	enum-discriminant/issue-104519.rs
 run-pass	enum-discriminant/issue-61696.rs
+compile-fail	enum-discriminant/issue-72554.rs
 run-pass	enum-discriminant/issue-90038.rs
 compile-fail	enum-discriminant/non-int-discriminant-promoted-ice-138660.rs
 run-pass	enum-discriminant/repr-u64-enum-discriminant-cast.rs
@@ -3328,6 +3329,7 @@ run-pass	impl-header-lifetime-elision/path-underscore.rs
 run-pass	impl-header-lifetime-elision/ref-underscore.rs
 compile-fail	impl-header-lifetime-elision/trait-elided.rs
 run-pass	impl-header-lifetime-elision/trait-underscore.rs
+compile-fail	impl-trait/bare-trait-object-return.rs
 run-pass	impl-trait/basic-trait-impl.rs
 check-pass	impl-trait/bivariant-lifetime-liveness.rs
 run-pass	impl-trait/bounds_regression.rs
@@ -7157,6 +7159,7 @@ build-pass	statics/static-mut-with-assoc-type-field.rs
 run-pass	statics/static-promotion.rs
 run-pass	statics/static-recursive.rs
 compile-fail	statics/uninhabited-static.rs
+compile-fail	statics/unsized-static-without-body-index-141804.rs
 compile-fail	statics/unsizing-wfcheck-issue-127299.rs
 run-pass	std/issue-3563-3.rs
 run-pass	std/thread-sleep-ms.rs

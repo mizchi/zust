@@ -2470,3 +2470,20 @@ fn type_parameter_counts_against_the_trait() {
         "a const parameter for a type parameter: another error"
     );
 }
+
+#[test]
+fn item_errors_at_the_part_rustc_points_at() {
+    // (E0072 at the type's name, E0746 at the return type, a fn's `static X: T;` at its line)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("#[derive(Hash)]\npub enum Elem {\n    A(Elem),\n}\nfn main() {}\n"), e(2, "recursive type `Elem` has infinite size"), "past the derive");
+    assert_eq!(
+        first("pub trait R {}\nfn create(_: &()) ->\n    dyn R\n{\n    unimplemented!()\n}\nfn main() {}\n"),
+        e(3, "return type cannot be a trait object without pointer indirection (E0746)"),
+        "the return type's line"
+    );
+    assert_eq!(first("fn foo() {\n    static symbol: [u32];\n}\nfn main() {}\n").map(|d| d.0), Some(2), "a static without a body in a fn");
+}
