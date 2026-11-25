@@ -699,16 +699,12 @@ impl<'a> Slots<'a> {
                         let (from, to) = if ss[i] == R_DYN_ARGS { (i + 2, (i + 2 + ss.get(i + 1).copied().unwrap_or(0) as usize).min(ss.len())) } else { (i, i + 1) };
                         for &a in &ss[from..to] {
                             if a < R_STATIC && a != c {
-                                let mut any = false;
+                                // (a named region the paths do not record (a type nested past lt_paths' depth):
+                                // nothing, as what is around it is not known)
                                 for (paths, _) in me.self_paths.iter().filter(|x| x.1 == a) {
-                                    any = true;
                                     if !found.contains(&(paths.clone(), a, c)) {
                                         found.push((paths.clone(), a, c));
                                     }
-                                }
-                                // (a region the paths do not name (an elided one): of no type alias)
-                                if !any && !found.contains(&(String::new(), a, c)) {
-                                    found.push((String::new(), a, c));
                                 }
                             }
                         }
