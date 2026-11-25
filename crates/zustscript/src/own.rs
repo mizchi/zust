@@ -279,6 +279,8 @@ fn children(e: &Expr) -> Vec<&Expr> {
         EK::Array(xs) | EK::Tuple(xs) | EK::Perform(_, _, xs) | EK::Interp(_, xs) => xs.iter().collect(),
         EK::If(c, t, el) => std::iter::once(&**c).chain(std::iter::once(&**t)).chain(el.as_deref()).collect(),
         EK::While(c, b) => vec![c, b],
+        EK::Loop(b) => vec![b],
+        EK::Return(x) => x.as_deref().into_iter().collect(),
         EK::Assign(_, x) => vec![x],
         EK::Match(sc, arms) => std::iter::once(&**sc).chain(arms.iter().map(|a| &a.1)).collect(),
         EK::For(_, it, b) => vec![it, b],
@@ -406,6 +408,27 @@ impl Lv<'_> {
                     live.remove(b);
                 }
                 self.expr(x, live);
+            }
+            // (nothing after it runs: only the value is live)
+            EK::Return(x) => {
+                live.clear();
+                if let Some(x) = x {
+                    self.expr(x, live);
+                }
+            }
+            EK::Loop(body) => {
+                // (left only by a `break`, which finds `after` live)
+                let after = live.clone();
+                let head = self.fixpoint(&after, |lv, h| {
+                    let mut l = h.clone();
+                    lv.expr(body, &mut l);
+                    l
+                });
+                self.loops.push((head.clone(), after));
+                let mut l = head;
+                self.expr(body, &mut l);
+                self.loops.pop();
+                *live = l;
             }
             EK::Break => {
                 if let Some((_, after)) = self.loops.last() {

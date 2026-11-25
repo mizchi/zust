@@ -244,6 +244,8 @@ pub struct Lower<'a> {
     type_pos: HashMap<String, Pos>,
     /// the helper functions used (`zs_max_f32` ..)
     helpers: BTreeSet<String>,
+    /// the result type of the function being lowered (None inside a closure: a `return` there is not lowered)
+    ret: Option<Ty>,
     /// the string helpers used ([`STR_HELPERS`])
     str_helpers: BTreeSet<&'static str>,
 }
@@ -308,6 +310,7 @@ pub fn lower(items: &[Item], info: &Info, wanted: &[(String, Vec<Ty>)], target: 
         used: Default::default(),
         type_pos,
         helpers: Default::default(),
+        ret: None,
         str_helpers: Default::default(),
     };
     // Even a private @wasm definition that has no callers must be valid Rust.
@@ -771,6 +774,7 @@ impl<'a> Lower<'a> {
             self.modes.owned_result.insert(rs.clone());
         }
         let ret_ref = !self.copy(&ret) && !self.modes.owned_result.contains(&rs);
+        self.ret = Some(ret.clone());
         let b = if self.copy(&ret) {
             self.expr(body)?
         } else if ret_ref {
@@ -1002,7 +1006,8 @@ impl<'a> Lower<'a> {
         let EK::Closure(ps, body) = &f.kind else {
             return not_in_subset(f.pos, "a function value (pass a closure `(x) => ..` here)");
         };
-        self.scoped(|l| {
+        let ret = self.ret.take();
+        let r = self.scoped(|l| {
             let mut pre = String::new();
             let mut names = vec![];
             let Ty::Fn(pts, _) = l.ty(f.id) else { unreachable!() };
@@ -1023,7 +1028,9 @@ impl<'a> Lower<'a> {
             }
             let b = l.expr(body)?;
             Ok(if pre.is_empty() { format!("|{}| {b}", names.join(", ")) } else { format!("|{}| {{\n{pre}{b}\n}}", names.join(", ")) })
-        })
+        });
+        self.ret = ret;
+        r
     }
 
     fn match_(&mut self, m: &Expr, sc: &Expr, arms: &[(Pat, Expr)]) -> LResult<(String, Form)> {
@@ -1445,6 +1452,21 @@ impl<'a> Lower<'a> {
                     let b = if pre.is_empty() { b } else { format!("{{\n{pre}{b}\n}}") };
                     val(format!("for {} in {iter} {b}", local(x)))
                 })
+            }
+            EK::Loop(body) => val(format!("loop {}", self.block(body)?)),
+            // (owned, as the function's result is when it has a `return`)
+            EK::Return(x) => {
+                let Some(ret) = self.ret.clone() else {
+                    return not_in_subset(pos, "`return` in a closure");
+                };
+                match x {
+                    None => val("return".into()),
+                    Some(x) if self.copy(&ret) => val(format!("return {}", self.expr(x)?)),
+                    Some(x) => {
+                        let (s, f) = self.ex(x)?;
+                        val(format!("return {}", self.owned(s, &f, &ret)))
+                    }
+                }
             }
             EK::Break => val("break".into()),
             EK::Continue => val("continue".into()),

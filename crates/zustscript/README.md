@@ -37,7 +37,7 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
 - effect 多相は入れず、簡単な制約で済ませる(将来の拡張の余地は残す)
 - 配列は TS の `readonly T[]` そのもの。JS の配列をコピーも変換もなしに渡せるので、コードサイズとブリッジの両面で有利。不変として扱い、`push` は新しい配列を作る
 - 可変性はローカル変数に限る(Koka の `var` に近い)
-  - `let mut` の変数への代入と `+=` などの複合代入、`while`、`for x in xs` / `for i in range(a, b)`、`break` / `continue` を書ける
+  - `let mut` の変数への代入と `+=` などの複合代入、`while`、`for x in xs` / `for i in range(a, b)`、`loop`、`break` / `continue`、`return` を書ける
   - レコードと配列は不変のまま。可変のローカル変数はクロージャから捕捉できない
   - そのため関数は外から見て純粋なまま。JS ではただの `let` と `for` になり、Rust では `let mut` になるので、借用の問題も起きない
 - `.d.ts` の数値は branded type にする
@@ -209,6 +209,30 @@ export fn primes_below(n: i32) -> i32 {
 
 - `let mut` でない変数への代入、可変のローカル変数をクロージャが捕捉すること、ループの外の `break` はエラーになる
 - ループの本体は `()` を返す
+- `loop { .. }` は `break` か `return` で抜ける。`break` で抜けるループは `()`、`break` のないループは値を持たない(どの型としても使える)。`break value` はまだない
+
+`return` は、いちばん内側の関数かクロージャから値を返します(Rust と同じ)。
+
+```zsc
+fn find_pos(xs: Array<i32>, v: i32) -> i32 {
+  let mut i = 0;
+  loop {
+    if i >= xs.len() { return -1; }
+    if xs[i] == v { return i; }
+    i += 1;
+  }
+}
+
+fn doubled(o: Option<i32>) -> i32 {
+  let n = match o { Some(n) => n, None => return 0 };   // JS: if (o.TAG === "Some") { n = o._0; } else { return 0; }
+  n * 2
+}
+```
+
+- `return;` は `()` を返す。値の型は関数(クロージャ)の結果の型と同じでなければならない
+- `{ ..; return x; }` のように `return`(か `break` / `continue`、`break` のない `loop`)で終わるブロックは、値を持たない。`if` の片方の枝や `match` の腕に書ける
+- 式の中の `return` は、`?` と同じく、その式の前の文として書き出す(`f(g(), match o { .., None => return 0 })` は `g()` を先に評価してから返る)
+- 書けない所: `handle` の中(本体と腕は JS では別の関数)、`&&` / `||` の右辺と `while` の条件(`?` と同じ)、`@wasm` / `--emit-rust` のクロージャの中
 
 ### ガイドライン: 数値の型と、どの層で書くか
 

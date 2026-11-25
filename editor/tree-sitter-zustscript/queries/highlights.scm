@@ -15,7 +15,7 @@
 (wildcard) @variable.builtin
 
 [
-  "type" "enum" "fn" "extern" "import" "from" "wasm" "let" "mut" "if" "else" "match" "while" "for" "in"
+  "type" "enum" "fn" "extern" "import" "from" "wasm" "let" "mut" "if" "else" "match" "while" "loop" "for" "in"
   "as" "perform" "handle" "return" "async" "await"
 ] @keyword
 (visibility) @keyword

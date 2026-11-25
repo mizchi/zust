@@ -1496,6 +1496,42 @@ impl Checker {
                 self.unify(body.pos, &bt, &Ty::Unit);
                 Ty::Unit
             }
+            EK::Loop(body) => {
+                self.loops += 1;
+                let bt = self.infer(body, Some(&Ty::Unit));
+                self.loops -= 1;
+                self.unify(body.pos, &bt, &Ty::Unit);
+                // (left only by a `break`: without one it gives no value, like a `return`)
+                if breaks(body) { Ty::Unit } else { self.fresh() }
+            }
+            EK::Return(x) => {
+                if self.in_handle {
+                    self.err(pos, "`return` cannot be used inside `handle` yet (the body and the arms are functions of their own in JS): bind the result with `let r = handle ..;` and decide after it, or move the body into a function");
+                } else if self.try_ban.is_some() {
+                    self.err(pos, "`return` cannot be used on the right of `&&` / `||` or in a `while` condition: write it as an `if` in a statement of its own");
+                }
+                match self.rets.last().cloned() {
+                    Some((want, hint)) => {
+                        // (the closure's expected result, if any, guides the value; its result is what it unifies with)
+                        let hint = match (self.resolve(&want), hint) {
+                            (Ty::Var(_), Some(h)) => h,
+                            _ => want.clone(),
+                        };
+                        let (vt, vpos) = match x {
+                            Some(x) => (self.infer(x, Some(&hint)), x.pos),
+                            None => (Ty::Unit, pos),
+                        };
+                        if !self.unify_inner(&vt, &want) {
+                            let (g, w) = (self.show(&vt), self.show(&want));
+                            let whose = if self.closure_bases.is_empty() { "this function" } else { "the closure (a `return` in a closure returns from it)" };
+                            self.err(vpos, format!("`return` gives {g}, but {whose} returns {w}"));
+                        }
+                    }
+                    None => self.err(pos, "`return` outside a function"),
+                }
+                // (it does not continue: any type)
+                self.fresh()
+            }
             EK::Break | EK::Continue => {
                 if self.loops == 0 {
                     self.err(pos, "`break` / `continue` outside a loop");
@@ -1675,6 +1711,8 @@ impl Checker {
                 }
                 let t = match tail {
                     Some(x) => self.infer(x, expect),
+                    // (`{ ..; return x; }` does not end: any type, as a `return` is)
+                    None if stmts.last().is_some_and(|s| matches!(s, Stmt::Expr(x) if diverges(x))) => self.fresh(),
                     None => Ty::Unit,
                 };
                 self.pop_scope();
@@ -2233,8 +2271,8 @@ impl EffWalk<'_> {
                 out.extend(self.expr(x));
                 out.extend(self.expr(i));
             }
-            EK::Assign(_, x) => out.extend(self.expr(x)),
-            EK::Break | EK::Continue => {}
+            EK::Assign(_, x) | EK::Loop(x) | EK::Return(Some(x)) => out.extend(self.expr(x)),
+            EK::Break | EK::Continue | EK::Return(None) => {}
             EK::Bin(_, l, r) => {
                 out.extend(self.expr(l));
                 out.extend(self.expr(r));
@@ -2381,12 +2419,36 @@ fn mentions(e: &Expr, k: &str) -> bool {
     matches!(&e.kind, EK::Var(n) if n == k) || subexprs(e).into_iter().any(|c| mentions(c, k))
 }
 
+/// `e` never gives a value: it always leaves by `return`, `break` or `continue`, or loops for ever
+pub fn diverges(e: &Expr) -> bool {
+    match &e.kind {
+        EK::Return(_) | EK::Break | EK::Continue => true,
+        EK::Loop(b) => !breaks(b),
+        EK::Block(stmts, tail) => match tail {
+            Some(t) => diverges(t),
+            None => stmts.last().is_some_and(|s| matches!(s, Stmt::Expr(x) if diverges(x))),
+        },
+        EK::If(_, t, Some(el)) => diverges(t) && diverges(el),
+        EK::Match(_, arms) => !arms.is_empty() && arms.iter().all(|a| diverges(&a.1)),
+        _ => false,
+    }
+}
+
+/// A `break` in `body` that leaves the loop `body` belongs to (not one of its own loops, not in a closure)
+pub fn breaks(body: &Expr) -> bool {
+    match &body.kind {
+        EK::Break => true,
+        EK::While(..) | EK::For(..) | EK::Loop(_) | EK::Closure(..) | EK::Async(_) => false,
+        _ => subexprs(body).into_iter().any(breaks),
+    }
+}
+
 /// The direct sub-expressions of `e`
 pub fn subexprs(e: &Expr) -> Vec<&Expr> {
     let mut v: Vec<&Expr> = vec![];
     match &e.kind {
-        EK::Lit(_) | EK::Var(_) | EK::Path(..) | EK::Break | EK::Continue => {}
-        EK::Await(x) | EK::Async(x) | EK::Try(x) => v.push(x),
+        EK::Lit(_) | EK::Var(_) | EK::Path(..) | EK::Break | EK::Continue | EK::Return(None) => {}
+        EK::Await(x) | EK::Async(x) | EK::Try(x) | EK::Loop(x) | EK::Return(Some(x)) => v.push(x),
         EK::Call(f, args) => {
             v.push(f);
             v.extend(args);

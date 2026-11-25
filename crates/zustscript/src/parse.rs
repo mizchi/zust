@@ -739,7 +739,7 @@ impl Parser {
                 self.next()?;
                 tail = Some(Box::new(e));
                 break;
-            } else if matches!(e.kind, EK::If(..) | EK::Match(..) | EK::Block(..) | EK::While(..) | EK::For(..)) {
+            } else if matches!(e.kind, EK::If(..) | EK::Match(..) | EK::Block(..) | EK::While(..) | EK::For(..) | EK::Loop(..)) {
                 stmts.push(Stmt::Expr(e));
             } else {
                 let t = self.peek()?.clone();
@@ -1040,6 +1040,16 @@ impl Parser {
                 let it = self.expr(true)?;
                 let body = self.block()?;
                 self.mk(pos, EK::For(x, Box::new(it), Box::new(body)))
+            }
+            T::Ident(k) if k == "loop" && self.is("{")? => {
+                let body = self.block()?;
+                self.mk(pos, EK::Loop(Box::new(body)))
+            }
+            T::Ident(k) if k == "return" => {
+                // (no value before what ends an expression: `return;`, `{ return }`, `Err(e) => return,`)
+                let bare = matches!(self.peek()?.t, T::P(";" | "}" | "," | ")" | "]"));
+                let x = if bare { None } else { Some(Box::new(self.expr(false)?)) };
+                self.mk(pos, EK::Return(x))
             }
             T::Ident(k) if k == "break" => self.mk(pos, EK::Break),
             T::Ident(k) if k == "continue" => self.mk(pos, EK::Continue),

@@ -495,7 +495,7 @@ impl<'a> Js<'a> {
     fn complex(e: &Expr) -> bool {
         match &e.kind {
             EK::Block(s, t) => !s.is_empty() || t.as_ref().is_some_and(|t| Self::complex(t)),
-            EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Break | EK::Continue => true,
+            EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Loop(_) | EK::Break | EK::Continue | EK::Return(_) => true,
             // (a `?` in a branch runs only on that branch: not a `? :` whose operands were written before it)
             EK::If(_, t, el) => Self::complex(t) || el.as_ref().is_none_or(|x| Self::complex(x)) || has_try(t) || el.as_deref().is_some_and(has_try),
             _ => false,
@@ -612,6 +612,30 @@ impl<'a> Js<'a> {
                 self.loop_body(body);
                 self.locals.truncate(mark);
                 unit(self);
+                return;
+            }
+            EK::Loop(body) => {
+                self.line("for (;;) {");
+                self.loop_body(body);
+                unit(self);
+                return;
+            }
+            // (from the function being written: an expression around it is written as statements before it, as for `?`)
+            EK::Return(x) => {
+                match x {
+                    None => self.line("return;"),
+                    Some(x) if Self::complex(x) => {
+                        // (assigned first: a statement with no value still gives `()`, which is `undefined`)
+                        let t = self.fresh();
+                        self.line(&format!("let {t};"));
+                        self.stmt_expr(x, &Dest::Assign(t.clone()));
+                        self.line(&format!("return {t};"));
+                    }
+                    Some(x) => {
+                        let v = self.expr(x);
+                        self.line(&format!("return {v};"));
+                    }
+                }
                 return;
             }
             EK::Break => return self.line("break;"),
@@ -1255,7 +1279,7 @@ impl<'a> Js<'a> {
             }
             EK::Block(_, Some(t)) => self.expr(t),
             EK::Block(_, None) => "undefined".into(),
-            EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Break | EK::Continue => unreachable!(),
+            EK::Match(..) | EK::Assign(..) | EK::While(..) | EK::For(..) | EK::Loop(_) | EK::Break | EK::Continue | EK::Return(_) => unreachable!(),
             EK::Closure(ps, body) => {
                 let saved = (self.gen_, std::mem::take(&mut self.conts), std::mem::take(&mut self.dconts), std::mem::replace(&mut self.arm_tail, false));
                 self.gen_ = false;
@@ -1748,10 +1772,10 @@ fn assigns_local(e: &Expr) -> bool {
     }
 }
 
-/// A `?` in `e` that is not inside a closure of its own (it returns from the function `e` is in)
+/// A `?` or a `return` in `e` that is not inside a closure of its own (it returns from the function `e` is in)
 pub fn has_try(e: &Expr) -> bool {
     match &e.kind {
-        EK::Try(_) => true,
+        EK::Try(_) | EK::Return(_) => true,
         EK::Closure(..) | EK::Async(_) => false,
         _ => crate::check::subexprs(e).into_iter().any(has_try),
     }
@@ -1771,7 +1795,8 @@ fn loop_exit(e: &Expr) -> Option<Pos> {
     fn walk(e: &Expr) -> Option<Pos> {
         match &e.kind {
             EK::Break | EK::Continue => Some(e.pos),
-            EK::While(..) | EK::For(..) | EK::Closure(..) => None,
+            EK::While(..) | EK::For(..) | EK::Loop(_) | EK::Closure(..) => None,
+            EK::Return(Some(x)) => walk(x),
             EK::Block(stmts, tail) => stmts
                 .iter()
                 .find_map(|s| match s {

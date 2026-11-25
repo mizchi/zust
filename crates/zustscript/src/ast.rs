@@ -79,8 +79,12 @@ pub enum EK {
     While(Box<Expr>, Box<Expr>),
     /// `for x in xs { .. }` / `for i in range(a, b) { .. }`
     For(String, Box<Expr>, Box<Expr>),
+    /// `loop { .. }`: until a `break` (without one, it gives no value: it has any type)
+    Loop(Box<Expr>),
     Break,
     Continue,
+    /// `return e` / `return`: from the innermost function or closure (its result; `()` without a value)
+    Return(Option<Box<Expr>>),
     /// `xs[i]` (i32 index; out of range is an error, in JS as in wasm)
     Index(Box<Expr>, Box<Expr>),
     /// `x as f64` (numeric conversions only: there is no implicit one)

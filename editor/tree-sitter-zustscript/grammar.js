@@ -173,7 +173,7 @@ export default grammar({
     assignment_statement: ($) =>
       seq(field('left', $._expression), field('operator', choice('=', '+=', '-=', '*=', '/=', '%=')), field('right', $._expression), ';'),
     expression_statement: ($) => choice(seq($._expression, ';'), prec(1, $._block_like)),
-    _block_like: ($) => choice($.if_expression, $.match_expression, $.while_expression, $.for_expression, $.block, $.handle_expression),
+    _block_like: ($) => choice($.if_expression, $.match_expression, $.while_expression, $.loop_expression, $.for_expression, $.block, $.handle_expression),
 
     // ---- patterns
     pattern: ($) =>
@@ -285,6 +285,7 @@ export default grammar({
     // `if let Some(x) = e { .. }`
     let_condition: ($) => seq('let', field('pattern', $.pattern), '=', field('value', $._expression)),
     while_expression: ($) => seq('while', field('condition', $._expression), field('body', $.block)),
+    loop_expression: ($) => seq('loop', field('body', $.block)),
     for_expression: ($) => seq('for', field('binding', $.identifier), 'in', field('iterable', $._expression), field('body', $.block)),
     match_expression: ($) => seq('match', field('value', $._expression), '{', commaSep($.match_arm), '}'),
     match_arm: ($) => seq(field('pattern', $.pattern), '=>', field('body', $._expression)),
