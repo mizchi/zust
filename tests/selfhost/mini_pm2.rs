@@ -177,6 +177,59 @@ pub mod proc_macro2 {
         }
     }
 
+    // (printed as proc_macro2 prints them: tokens a space apart, but none after a joint punct; macros.rs reads a
+    // token's text with to_string)
+    impl fmt::Display for Punct {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", self.ch)
+        }
+    }
+
+    impl fmt::Display for Group {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            if self.stream.toks.is_empty() {
+                if let Delimiter::Brace = self.delim {
+                    return write!(f, "{{ }}");
+                }
+            }
+            let (open, close) = match self.delim {
+                Delimiter::Parenthesis => ("(", ")"),
+                Delimiter::Bracket => ("[", "]"),
+                Delimiter::Brace => ("{ ", " }"),
+                Delimiter::None => ("", ""),
+            };
+            write!(f, "{}{}{}", open, self.stream, close)
+        }
+    }
+
+    impl fmt::Display for TokenTree {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            match self {
+                TokenTree::Group(g) => write!(f, "{}", g),
+                TokenTree::Ident(i) => write!(f, "{}", i),
+                TokenTree::Punct(p) => write!(f, "{}", p),
+                TokenTree::Literal(l) => write!(f, "{}", l),
+            }
+        }
+    }
+
+    impl fmt::Display for TokenStream {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            let mut joint = true;
+            for t in &self.toks {
+                if !joint {
+                    write!(f, " ")?;
+                }
+                write!(f, "{}", t)?;
+                joint = false;
+                if let TokenTree::Punct(p) = t {
+                    joint = p.spacing == Spacing::Joint;
+                }
+            }
+            Ok(())
+        }
+    }
+
     impl IntoIterator for TokenStream {
         type Item = TokenTree;
         type IntoIter = std::vec::IntoIter<TokenTree>;
