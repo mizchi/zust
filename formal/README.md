@@ -18,6 +18,7 @@ Nothing here is part of the zust workspace or of the zustc build.
 | `tla-check/` | the runner: parses a `.tla` / `.cfg` with idealis (pinned by git rev) and model-checks it | |
 | `tla/HashMapModel.tla` | what a HashMap does (insert / remove / get / len over 5 keys), as the model `connect/` tests the prelude's HashMap against | idealis |
 | `connect/` | the implementation against the models, in the way of Quint Connect: with idealis-connect: a spec's state graph becomes an idealis `FiniteModel`, action sequences are generated from it (a failure is shrunk), and each runs on the model and on a driver | idealis |
+| `lean/` | the trait solver (`crates/sema/src/traits.rs`): `Holds` (inductive) and the algorithm `solve`, with proofs that its `yes` and `no` are sound, that it is complete with enough fuel, that leaving out what zustc cannot read keeps `no` sound, and that overlap of linear impl heads is decided exactly ([lean/README.md](lean/README.md)) | Lean 4 |
 
 ```bash
 formal/run.sh tla
@@ -33,6 +34,10 @@ cargo install --locked kani-verifier && cargo kani setup
 
 ```bash
 formal/run.sh kani
+```
+
+```bash
+formal/run.sh lean
 ```
 
 `run.sh` checks every result against what is expected. Configurations that model a design zustc does not use (or
