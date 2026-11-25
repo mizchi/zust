@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795597710356,
+  "lastUpdate": 1795597712444,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -104863,6 +104863,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/e7a483c9979d452b5046689c7458276130e21dae"
         },
         "date": 1795594681492,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 82.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 80.645,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 89.474,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 91.667,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 94.429,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "217788eeff52e190e984bdd0544f3b8aadadfc3d",
+          "message": "Region check part 33: ref mut through a &, moves out of what a reference gives, a guard's bindings, Box and Pin receivers, a closure returned from a local, borrows held in returned aggregates (#160)\n\nRegion check part 33: ref mut through a &, moves out of what a reference gives, a guard's bindings, Box and Pin receivers, a closure returned from a local, borrows held in returned aggregates",
+          "timestamp": "2026-11-25T18:03:19+09:00",
+          "tree_id": "2e8376417815a0a08955f193cb121e37b3a4205d",
+          "url": "https://github.com/mizchi/zust/commit/217788eeff52e190e984bdd0544f3b8aadadfc3d"
+        },
+        "date": 1795597712165,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
