@@ -1506,7 +1506,7 @@ impl Cx<'_> {
                 // (a `Copy` aggregate read out of a place that what the function drops may own (`return v[0];`):
                 // copied out before the drops)
                 let v = match v {
-                    Some(x) if ret.is_agg() && !self.fresh.contains_key(&x.0) && (!self.temps.is_empty() || !self.owned.is_empty()) => {
+                    Some(x) if ret.is_agg() && !self.fresh.contains_key(&x.0) && !self.b.is_stack_addr(x) && (!self.temps.is_empty() || !self.owned.is_empty()) => {
                         let a = self.temp(ret);
                         self.copy(a, x, ret);
                         Some(a)

@@ -572,6 +572,15 @@ impl Recorder {
     pub fn n_values(&self) -> usize {
         self.vt.len()
     }
+    /// v is the address of a stack slot (`stack_addr`), found among the last ops (false where not found there)
+    pub fn is_stack_addr(&self, v: Value) -> bool {
+        for (op, res) in self.ops.iter().zip(&self.res).rev().take(256) {
+            if res.contains(&v.0) {
+                return matches!(op, Op::StackAddr(..));
+            }
+        }
+        false
+    }
     /// 入口で 0 にするスロットを覚える
     pub fn set_zero(&mut self, z: &[StackSlot]) {
         self.zero = z.iter().map(|s| s.0).collect();

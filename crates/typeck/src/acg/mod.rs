@@ -2011,8 +2011,9 @@ impl Cx<'_> {
             Some(w @ Ty::Ref(..)) if r.1 != w && matches!(r.1, Ty::Ref(_, Ty::Ref(..))) => self.deref_coerce(r.0, r.1, w),
             _ => r,
         };
+        // (not a stack slot's address (a local's, a match's result): no drop frees it)
         if let Some(v) = v {
-            if t.is_agg() && !self.fresh.contains_key(&v.0) {
+            if t.is_agg() && !self.fresh.contains_key(&v.0) && !self.b.is_stack_addr(v) {
                 let a = self.temp_fresh(t);
                 self.copy(a, v, t);
                 return (Some(a), t);
