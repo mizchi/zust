@@ -4656,4 +4656,15 @@ fn main() { let t = Task { pri: 1, name: "a".into() }; println!("{:?} {} {}", c1
     for s in y.iter() { println!("{}", s); }
 }
 "#, &[(3, "cannot move out of a shared reference")], "fo");
+    // (a `&mut T` wanted of a `&mut &T`: the deref coercion borrows mutably through a `&`, E0596 where the value is
+    // coerced (2; rustc also reports the `let .. else` at 6, zustc a fn's first error); not of a `&mut &mut T` (4))
+    errors_at(r#"fn main() {
+    let a: &mut Option<i32> = &mut &Some(5i32);
+    let mut o = Some(1);
+    let b: &mut Option<i32> = &mut &mut o;
+    let _ = (a, b);
+    let Some(n): &mut Option<i32> = &mut &Some(5i32) else { return };
+    *n += 1;
+}
+"#, &[(2, "E0596")], "ms");
 }
