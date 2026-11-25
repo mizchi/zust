@@ -2982,7 +2982,10 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
     // name, the local, and where the fn's text uses it free (line 0 when not known))
     fn capture(sig: &crate::parse::FnSig, body: &crate::parse::Block, outer: &[String], items: &crate::fxhash::FxSet<&str>) -> Option<(String, String, crate::parse::Pos)> {
         let mut used = crate::ast_closure::used_vars_at(&Expr::Block(None, false, body.clone()));
-        if sig.recv.is_none() && format!("{body:?}").contains("\"self\"") && !used.iter().any(|(n, _)| n == "self") {
+        // (`self` in its own statements, not in an item inside it: serde's `deserialize` with an `impl Visitor for
+        // KindVisitor` whose methods take `self`)
+        let names_self = body.stmts.iter().any(|st| !matches!(st, crate::parse::Stmt::Item(_)) && format!("{st:?}").contains("\"self\""));
+        if sig.recv.is_none() && names_self && !used.iter().any(|(n, _)| n == "self") {
             used.push(("self".to_string(), Default::default()));
         }
         // (its own parameters are in its signature, not its body)
@@ -2994,6 +2997,10 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
             own.push("self".to_string());
         }
         used.retain(|(n, _)| !own.contains(n));
+        // (a capitalized name its own `let` binds is its local: `let T0 = ..; (T0, T1)` in serde's tuple impls, with
+        // `#[allow(non_snake_case)]`. The free-variable walk reads a bare capitalized name in a pattern as a path)
+        let upper_lets: Vec<String> = crate::ast_closure::let_bindings(body).into_iter().map(|(_, n)| n).filter(|n| n.starts_with(|c: char| c.is_ascii_uppercase())).collect();
+        used.retain(|(n, _)| !upper_lets.contains(n));
         if let Some((n, at)) = used.iter().find(|(n, _)| !items.contains(n.as_str()) && outer.contains(n)) {
             return Some((sig.name.clone(), n.clone(), *at));
         }
