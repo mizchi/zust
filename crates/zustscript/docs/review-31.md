@@ -3,7 +3,7 @@
 [mizchi/zust#31](https://github.com/mizchi/zust/pull/31) に CodeRabbit が出した指摘 90 件の扱い。
 
 - **直したもの(14 件 + 再レビューの 5 件)**: よく使う形で壊れた JS や誤った結果になるもの。248aa0d と 45d22c5 で修正し、examples/regress.zsc と tests/errors/ に回帰テストを足した
-  - 番号: #3, #66, #68, #69, #72, #73, #74, #75, #76, #77, #80, #81, #82, #84
+  - 番号: #3, #66, #68, #69, #72, #73, #74, #75, #76, #77, #80, #81, #82, #84, #24, #27
 - **残り 76 件**: 248aa0d の時点で、1 件ずつ小さな .zsc の再現を zsc と Node 26 で実行して確かめた(下の表)。番号は CodeRabbit の指摘の通し番号、行番号は古いので内容で探す
 - 修正は、このファイルを見ながら少しずつ進める(追跡用の issue にリンク)
 
@@ -54,10 +54,8 @@ File paths are relative to `crates/zustscript/`.
 | 21 | src/parse.rs | Minor | Parse callback argument lists by delimiter depth | valid | `&dyn Fn(i32,)` も `&dyn Fn(())` も境界の型として拒否される |
 | 22 | src/parse.rs | Minor | Allow chained tuple projection | valid | `t.1.0` が「expected a field or method name, found `1.0`」になる |
 | 23 | src/parse.rs | Minor | Reject a second record update base | valid | `R { ..first(), ..second() }` が `{ ...second() }` と出力され、first() が消える |
-| 24 | src/parse.rs | Minor | Reject unterminated block comments | valid | 末尾が閉じていない `/*` でもビルドが成功する |
 | 25 | src/parse.rs | Minor | Report EOF after a string escape | valid | 文字列の中の末尾の `\` で、parse.rs:50 の index out of bounds の panic になる |
 | 26 | src/parse.rs | Minor | Recognize `>` as a delimiter in type/JSX contexts | valid | `let xs: Array<i32>=[1];` が「expected a name, found `>=`」になる |
-| 27 | src/parse.rs | Minor | Diagnostic for truncated Rust literals | valid | wasm ブロックの中の閉じていない文字列や `'\` で、raw_braces が panic する |
 | 28 | src/parse.rs | Minor | Scan Rust raw strings with full delimiter | valid | `r#"" }"#` で raw_braces が panic する |
 | 29 | src/parse.rs | Minor | Leave `<` for comparison after a cast | valid | `x as i32 < 10` が「expected a name, found `10`」になる |
 | 30 | src/parse.rs | Minor | Accept the signed i64 minimum | valid | `-9223372036854775808` が「integer literal out of range」になる |
@@ -91,7 +89,7 @@ File paths are relative to `crates/zustscript/`.
 
 ## まとめ
 
-76 件のうち、**valid 72 件、partly 3 件(#4、#11、#64)、invalid 1 件(#49、すでに直っている)**。
+74 件のうち、**valid 70 件、partly 3 件(#4、#11、#64)、invalid 1 件(#49、すでに直っている)**。
 
 次に直すべきもの 5 件(どれもエラーにならず、黙って誤った結果やメモリ破壊になる):
 
@@ -101,4 +99,4 @@ File paths are relative to `crates/zustscript/`.
 4. **#18**: アリーナが再入に弱い。入力を読む途中で別のカーネルが動くと、最初の入力が上書きされる。
 5. **#70**: i64 と f32 のリテラルパターンが、検査した型の表現で出力されず、誤った arm に一致する。
 
-zsc 自体が panic、無限ループ、stack overflow になるもの(#25、#27、#28、#9、#31、#37、#63、#71、#87)も、まとめて診断を返す形に直す価値が高い。
+zsc 自体が panic、無限ループ、stack overflow になるもの(#25、#28、#9、#31、#37、#63、#71、#87)も、まとめて診断を返す形に直す価値が高い。
