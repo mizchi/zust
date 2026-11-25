@@ -992,6 +992,24 @@ pub fn is_ident(p: &Path, n: &str) -> bool {
     ident_of(p) == Some(n)
 }
 
+/// A `&mut T` wanted of a reference to a reference with a shared one on the way (`&mut &T`, `&&mut T`): the deref
+/// coercion would borrow mutably through a `&`, rustc's E0596 where the value is coerced
+pub(crate) fn mut_through_shared(t: Ty, want: Ty) -> bool {
+    let Ty::Ref(true, w) = want else { return false };
+    let (mut cur, mut shared) = (t, false);
+    for depth in 0..8 {
+        let Ty::Ref(m, inner) = cur else { return false };
+        shared |= !m;
+        if depth >= 1 && *inner == *w {
+            return shared;
+        }
+        cur = *inner;
+    }
+    false
+}
+
+pub(crate) const MUT_THROUGH_SHARED: &str = "cannot borrow data in a `&` reference as mutable (E0596)";
+
 /// 名前だけのパス
 pub fn path_of(n: &str) -> Path {
     Path { global: false, segs: vec![crate::parse::Seg { name: n.to_string(), args: vec![], fn_args: None, text: n.to_string() }], pos: Default::default() }
@@ -2254,6 +2272,12 @@ impl Cx<'_> {
                         return err(SP, "`let` without initializer is not supported");
                     };
                     let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t).ok());
+                    // (`let Some(n): &mut Option<i32> = &mut &Some(5) else { .. }`: E0596, as for a plain `let`)
+                    if let (Some(a), true) = (ann, self.bk_on()) {
+                        if self.peek(init).is_some_and(|t| mut_through_shared(t, a)) {
+                            return Err(self.at(expr_start(init), MUT_THROUGH_SHARED.to_string()));
+                        }
+                    }
                     // (an annotation that writes `'static`: checked from here on, as a `let x: &'static T`, from
                     // its initializer, whose calls are lowered with the check on)
                     if let Some(a) = ann_ty {
@@ -2417,6 +2441,9 @@ impl Cx<'_> {
                             continue;
                         }
                         if let Some(a) = full.filter(|&a| a != t) {
+                            if self.bk_on() && mut_through_shared(t, a) {
+                                return Err(self.at(expr_start(init), MUT_THROUGH_SHARED.to_string()));
+                            }
                             let (v2, t2) = self.deref_coerce(v, t, a);
                             if t2 == a {
                                 v = v2;
@@ -2653,6 +2680,9 @@ impl Cx<'_> {
                     let mut ann = ann.filter(|&a| !has_hole(self.prog, a));
                     // (型推論の結果 (注釈なし) と違う: `&&str` → `&str` は deref の強制変換、それでも違えば実際の型)
                     if let Some(a) = ann.filter(|&a| a != t) {
+                        if self.bk_on() && mut_through_shared(t, a) {
+                            return Err(self.at(expr_start(init), MUT_THROUGH_SHARED.to_string()));
+                        }
                         let (v2, t2) = self.deref_coerce(v, t, a);
                         if t2 == a {
                             v = v2;

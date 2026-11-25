@@ -520,7 +520,14 @@ impl Cx<'_> {
                             _ => Expr::Paren(Box::new(recv.clone())),
                         };
                         let some = Pat::TupleStruct(path_of(ctor), vec![Pat::Ident(false, false, "__exr_ox".into(), None)]);
-                        let mut stmts = vec![Stmt::Let((**fpat).clone(), None, Some(path_expr("__exr_ox")), None, Default::default())];
+                        // (the loop's pattern binds the item where the iterable is written, as rustc reports a move out
+                        // of it: `for &a in x.iter()` with `x: Option<Box<_>>` is E0507 at `x.iter()`)
+                        let at = expr_start(fexpr);
+                        let mut item = path_expr("__exr_ox");
+                        if let Expr::Path(_, p) = &mut item {
+                            p.pos = at;
+                        }
+                        let mut stmts = vec![Stmt::Let((**fpat).clone(), None, Some(item), None, at)];
                         stmts.extend(fbody.stmts.iter().cloned());
                         let iflet = Expr::If(Box::new(Expr::Let(Box::new(some), Box::new(scrut))), crate::parse::Block { stmts, spos: Default::default() }, None);
                         // (with no `break` / `continue` in the body, no loop: a value moved in is not moved in a loop)
