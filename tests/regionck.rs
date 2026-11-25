@@ -4149,6 +4149,7 @@ fn part28_review() {
     // (a generic parameter named like a mark is that parameter; a name like a struct's mark that names nothing is
     // no type; a crate's `allow` after its `deny` of bare_trait_objects allows them)
     assert_eq!(check("#[allow(non_camel_case_types)]\nfn f<T: Copy, __zp0_U>(_a: T, x: __zp0_U) -> __zp0_U { x }\nfn main() { let y: u8 = f(1i32, 7u8); println!(\"{}\", y); }\n"), vec![], "v4");
+    assert_eq!(check("#[allow(non_camel_case_types)]\ntrait A<X> { fn get(&self) -> X; }\nimpl A<u8> for u8 { fn get(&self) -> u8 { *self } }\n#[allow(non_camel_case_types)]\nfn f<T, __zp0_U>(_t: T, x: &dyn A<__zp0_U>) -> __zp0_U { x.get() }\nfn main() { let y: u8 = f(1i32, &7u8 as &dyn A<u8>); println!(\"{}\", y); }\n"), vec![], "v4b");
     let d = check("fn main() { let _x: __zs0 = todo!(); }\n");
     assert!(d.len() == 1 && d[0].1.contains("cannot find type `__zs0`"), "{d:?}");
     let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });

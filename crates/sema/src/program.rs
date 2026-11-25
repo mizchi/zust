@@ -5152,9 +5152,11 @@ impl Program {
             if k == 0 || toks[k - 1].text == ":" || toks.get(k + 1).is_some_and(|n| n.text == ":" || n.text == "=") {
                 return None;
             }
-            if matches!(t.text.as_str(), "dyn" | "mut" | "const" | "fn" | "for" | "impl" | "as" | "where" | "unsafe" | "extern") || dyn_param_mark(&t.text).is_some() {
+            if matches!(t.text.as_str(), "dyn" | "mut" | "const" | "fn" | "for" | "impl" | "as" | "where" | "unsafe" | "extern") {
                 return None;
             }
+            // (a name the env gives, before a mark: a generic parameter named like one is that parameter; a mark that
+            // names nothing here stays as it is)
             match names(&t.text)? {
                 Ty::Param(HOLE) => None,
                 Ty::Param(i) => Some(format!("{PMARK}{i}_{}", t.text)),
