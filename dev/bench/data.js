@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795634968541,
+  "lastUpdate": 1795634971932,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -81556,6 +81556,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 99.531,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "948c52262f4bbe88cfc18921e7fc2134da520d4a",
+          "message": "Merge pull request #213 from mizchi/claude/fix-203-cursor-seek\n\nprelude: a Cursor seek applies a signed offset to the u64 position (#203)",
+          "timestamp": "2026-11-26T04:23:43+09:00",
+          "tree_id": "8f8e6c0b95e9932629a96eed9c2eb5724a574bf6",
+          "url": "https://github.com/mizchi/zust/commit/948c52262f4bbe88cfc18921e7fc2134da520d4a"
+        },
+        "date": 1795634971390,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.968,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.757,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.739,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 11.052,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.445,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.143,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.386,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 282.566,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 99.93,
             "unit": "MiB"
           }
         ]
