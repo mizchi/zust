@@ -5474,3 +5474,27 @@ fn main() {}
 }
 "#, &[], "rv9");
 }
+
+#[test]
+fn part36_third_review_of_182() {
+    // (#182's review of 68c598c, checked with rustc 1.97: a `'static` implies a type parameter's bound only in the
+    // type of a parameter or of the result that names both: `x: T, s: &'static str` does not, so `T: 'static` is
+    // stricter (rv10); `x: W<'static, T>` with `struct W<'a, T: 'a>` may, and is accepted, as in rustc (rv11))
+    errors_at(r#"trait Tr {
+    fn f<T>(x: T, s: &'static str);
+}
+impl Tr for () {
+    fn f<T: 'static>(x: T, s: &'static str) {}
+}
+fn main() {}
+"#, &[(5, "impl has stricter requirements than trait")], "rv10");
+    errors_at(r#"struct W<'a, T: 'a>(&'a T);
+trait Tr {
+    fn f<T>(x: W<'static, T>);
+}
+impl Tr for () {
+    fn f<T: 'static>(x: W<'static, T>) {}
+}
+fn main() {}
+"#, &[], "rv11");
+}

@@ -10338,6 +10338,53 @@ fn allow_variant_bindings(src: &str, errs: &mut Vec<String>) {
     }
 }
 
+/// A fn's text: its parameters' types (with their patterns) and its result's, each a piece, past its generics
+/// (`fn f<F: Fn(u8)>(x: F, s: &'static str) -> u8 where ..`: `x: F`, `s: &'static str`, `u8`)
+fn sig_type_pieces(t: &str) -> Vec<&str> {
+    let Some(k) = t.find("fn ") else { return vec![] };
+    let b = t.as_bytes();
+    let mut i = k + 3;
+    // (the name, then its generics, to the parameters' `(`)
+    let mut angle = 0i32;
+    while i < b.len() {
+        match b[i] {
+            b'<' => angle += 1,
+            b'>' if i > 0 && b[i - 1] != b'-' => angle -= 1,
+            b'(' if angle == 0 => break,
+            _ => {}
+        }
+        i += 1;
+    }
+    let mut pieces = vec![];
+    let mut d = 0i32;
+    let mut start = i + 1;
+    let mut j = i + 1;
+    while j < b.len() {
+        match b[j] {
+            b'(' | b'[' | b'<' => d += 1,
+            b'>' if b[j - 1] == b'-' => {}
+            b')' if d == 0 => {
+                pieces.push(t[start..j].trim());
+                break;
+            }
+            b')' | b']' | b'>' => d -= 1,
+            b',' if d == 0 => {
+                pieces.push(t[start..j].trim());
+                start = j + 1;
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    // (the result: after `->`, to its where clause, body or `;`)
+    if let Some(r) = t.get(j + 1..).and_then(|r| r.trim_start().strip_prefix("->")) {
+        let end = [r.find(" where"), r.find("\nwhere"), r.find('{'), r.find(';')].into_iter().flatten().min().unwrap_or(r.len());
+        pieces.push(r[..end].trim());
+    }
+    pieces.retain(|p| !p.is_empty());
+    pieces
+}
+
 /// E0276 "impl has stricter requirements than trait", at the bound: a method of an impl of a trait of the program's
 /// whose own type parameter (by its place) has a trait bound, inline or in the method's where clause, that the trait's
 /// method's parameter does not have, nor one of the bounds it has as a supertrait (`T: Ord` where the trait says
@@ -10578,22 +10625,20 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
             // or the trait's parameters and result name `'static` and that type parameter, which may imply it (`x:
             // &'static T`; not `x: &'static u8`). At the first `'static` of the member's signature)
             let (ms_st, ds_st) = (static_params(&ms.generics), static_params(&ds.generics));
-            let dt = text(d);
-            let tail = dt.find('(').map_or("", |k| {
-                let r = &dt[k..];
-                &r[..[r.find(" where"), r.find("\nwhere"), r.find('{'), r.find(';')].into_iter().flatten().min().unwrap_or(r.len())]
-            });
-            let word = |n: &str| {
-                tail.match_indices(n).any(|(i, _)| {
+            // (each of the trait's parameters' types and its result's: one that names `'static` and the type
+            // parameter may imply the bound (`x: &'static T`, `x: W<'static, T>`); `x: T, s: &'static str` does not)
+            let pieces = sig_type_pieces(text(d));
+            let word = |p: &str, n: &str| {
+                p.match_indices(n).any(|(i, _)| {
                     let id = |c: char| c.is_alphanumeric() || c == '_';
-                    !tail[..i].ends_with(id) && !tail[i + n.len()..].starts_with(id)
+                    !p[..i].ends_with(id) && !p[i + n.len()..].starts_with(id)
                 })
             };
             let names: Vec<&str> = ds.generics.params.iter().filter_map(|q| match q {
                 GParam::Ty(n, ..) => Some(n.as_str()),
                 _ => None,
             }).collect();
-            let implied = |n: &str| tail.contains("'static") && word(n);
+            let implied = |n: &str| pieces.iter().any(|p| p.contains("'static") && word(p, n));
             if ms_st.iter().zip(&ds_st).zip(&names).any(|((m, d), n)| *m && !*d && !implied(n)) && !header_static {
                 let off = key.find("'static")?;
                 let line = key[..off].matches('\n').count() + 1;
