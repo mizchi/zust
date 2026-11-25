@@ -68,6 +68,12 @@ pub mod proc_macro2 {
         }
     }
 
+    impl PartialEq<&str> for Ident {
+        fn eq(&self, o: &&str) -> bool {
+            self.name == *o
+        }
+    }
+
     impl fmt::Display for Ident {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             write!(f, "{}", self.name)
@@ -82,6 +88,9 @@ pub mod proc_macro2 {
     }
 
     impl Punct {
+        pub fn new(ch: char, spacing: Spacing) -> Punct {
+            Punct { ch: ch, spacing: spacing, span: Span::call_site() }
+        }
         pub fn as_char(&self) -> char {
             self.ch
         }

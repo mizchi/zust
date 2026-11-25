@@ -131,8 +131,9 @@ impl Rg {
 
 /// The state of a function whose check wrote nothing (never written)
 fn empty_st() -> &'static RgSt {
-    static E: std::sync::LazyLock<RgSt> = std::sync::LazyLock::new(RgSt::default);
-    &E
+    // (a OnceLock, not a LazyLock: zustc's std has no LazyLock, and this file is self-hosted)
+    static E: std::sync::OnceLock<RgSt> = std::sync::OnceLock::new();
+    E.get_or_init(RgSt::default)
 }
 
 /// What the region check of a function tracks (Rg::st)

@@ -37,6 +37,8 @@ acg = re.sub(r"^#!\[allow\([^)]*\)\]\n", "", acg, flags=re.M)
 ir = body("crates/ir/src/lib.rs")
 # driver2: ビルドの部分 (driver2/build.rs) を中に入れ、feature `build` の条件を外す (セルフホストはビルドもする)
 driver2 = body("crates/core/src/driver2.rs").replace("mod build;\n", "mod build {\n" + body("crates/core/src/driver2/build.rs") + "\n}\n")
+# (driver2/dead.rs も中に入れる。`//!` は中では書けないので外す)
+driver2 = driver2.replace("mod dead;\n", "mod dead {\n" + re.sub(r"^//!.*\n", "", body("crates/core/src/driver2/dead.rs"), flags=re.M) + "\n}\n")
 driver2 = re.sub(r'^[ \t]*#\[cfg\(not\(feature = "build"\)\)\]\n.*\n', "", driver2, flags=re.M)
 driver2 = re.sub(r'^[ \t]*#\[cfg\(feature = "build"\)\]\n', "", driver2, flags=re.M)
 driver2 = driver2.replace('#[cfg(feature = "build")] ', "")
@@ -47,7 +49,7 @@ parts = [("key", body("crates/base/src/key.rs")), ("fxhash", body("crates/base/s
          ("ast_summary", body("crates/syntax/src/ast_summary.rs")), ("regions", body("crates/syntax/src/regions.rs")), ("wf", body("crates/syntax/src/wf.rs")), ("program", body("crates/sema/src/program.rs")),
          ("ast_consteval", body("crates/sema/src/ast_consteval.rs")), ("solver", body("crates/sema/src/solver.rs")), ("traits", body("crates/sema/src/traits.rs")), ("ctors", body("crates/syntax/src/ctors.rs")),
          ("ast_infer", body("crates/sema/src/ast_infer.rs")), ("simd_sig", body("crates/sema/src/simd_sig.rs")), ("ir", ir), ("minclif", body("crates/minclif/src/lib.rs").replace("zust_ir::", "crate::ir::")), ("lower", body("crates/codegen/src/lower.rs")), ("link", body("crates/codegen/src/link.rs")),
-         ("macros", body("crates/syntax/src/macros.rs") + "\nuse crate::proc_macro2;\n"), ("acg", acg), ("enc", body("crates/syntax/src/enc.rs")), ("types_enc", expand_enc_struct(body("crates/syntax/src/types_enc.rs"))), ("cache2", body("crates/typeck/src/cache2.rs")), ("cfg", body("crates/syntax/src/cfg.rs")), ("stub", body("crates/syntax/src/stub.rs")), ("srcmap", body("crates/syntax/src/srcmap.rs")), ("prep", body("crates/syntax/src/prep.rs")), ("prof", body("crates/base/src/prof.rs")), ("front", body("crates/syntax/src/front.rs")), ("driver2", driver2)]
+         ("macros", body("crates/syntax/src/macros.rs") + "\nuse crate::proc_macro2;\n"), ("acg", acg), ("enc", body("crates/syntax/src/enc.rs")), ("types_enc", expand_enc_struct(body("crates/syntax/src/types_enc.rs"))), ("cache2", body("crates/typeck/src/cache2.rs")), ("cfg", body("crates/syntax/src/cfg.rs")), ("stub", body("crates/syntax/src/stub.rs")), ("srcmap", body("crates/syntax/src/srcmap.rs")), ("prep", body("crates/syntax/src/prep.rs")), ("prof", body("crates/base/src/prof.rs")), ("par", body("tests/selfhost/par_seq.rs")), ("pm", body("tests/selfhost/pm_stub.rs")), ("test_harness", body("crates/syntax/src/test_harness.rs")), ("front", body("crates/syntax/src/front.rs")), ("driver2", driver2)]
 out = ["// 自動生成: tests/selfhost/build_compiler.py (zustc の src/*.rs をそのまま含む)",
        "mod cache {\n    pub use crate::key::*;\n}\n", body("tests/selfhost/mini_pm2.rs")]
 for name, src in parts:
