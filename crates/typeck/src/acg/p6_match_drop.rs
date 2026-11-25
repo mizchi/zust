@@ -387,8 +387,15 @@ impl Cx<'_> {
                         r?;
                         continue;
                     }
+                    // (a guard is a terminating scope: its temporaries go away before the arm or the next one runs, also
+                    // their drops: `_ if D(&x).ok() => { x = 2; }` drops the D before the arm, seeing x = 1)
+                    let (t0, bk0) = (self.temps.len(), self.bk.stmt_temps.len());
                     let (c, ct) = self.expr(c, Some(Ty::Bool))?;
                     self.same(SP, ct, Ty::Bool)?;
+                    if c.is_some() {
+                        self.drop_temps(t0);
+                    }
+                    self.bk_temps_end(bk0);
                     if let Some(c) = c {
                         self.require(c, next);
                     }
@@ -553,6 +560,9 @@ impl Cx<'_> {
         self.bk.stmt_temps.truncate(bk_t0);
         self.bk.stmt_temps.extend(last);
         self.b.switch_to_block(exit);
+        // (the loop is a terminating scope: those of the last test go away with it, before the locals of a block
+        // whose tail it is)
+        self.bk_temps_end(bk_t0);
         self.drop_temps(t0);
         Ok((None, Ty::Unit))
     }
