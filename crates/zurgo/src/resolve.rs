@@ -32,6 +32,19 @@ pub struct Pkg {
     pub missing: bool,
 }
 
+impl Pkg {
+    /// The package as cargo names it in messages: `name vX` from crates.io, `name vX (/dir)` for a path package, and
+    /// the source after the version otherwise (two packages of one name and version differ only there)
+    pub fn display(&self) -> String {
+        let nv = format!("{} v{}", self.m.name, self.m.version);
+        match self.source.as_deref() {
+            None => format!("{nv} ({})", self.m.dir.display()),
+            Some(s) if lock::is_registry(s) => nv,
+            Some(s) => format!("{nv} ({s})"),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Edge {
     /// the declaration in the dependent's manifest (`Package::deps`)
@@ -615,6 +628,21 @@ mod tests {
             std::fs::create_dir_all(f.parent().unwrap()).unwrap();
             std::fs::write(f, text).unwrap();
         }
+    }
+
+    /// The duplicate-library error names each package: two of one name and version differ only by their source
+    #[test]
+    fn pkg_display_names_the_source() {
+        let pkg = |source: Option<&str>, dir: &str| {
+            let mut m = Package::placeholder("itoa", "1.0.19");
+            m.dir = PathBuf::from(dir);
+            Pkg { id: String::new(), source: source.map(str::to_string), checksum: None, m, member: false, missing: false }
+        };
+        assert_eq!(pkg(None, "/w/cratebench/vendor/itoa").display(), "itoa v1.0.19 (/w/cratebench/vendor/itoa)");
+        assert_eq!(pkg(Some(lock::CRATES_IO), "/home/u/.cargo/registry/src/x/itoa-1.0.19").display(), "itoa v1.0.19");
+        assert_eq!(pkg(Some("sparse+https://index.crates.io/"), "").display(), "itoa v1.0.19");
+        let git = "git+https://github.com/dtolnay/itoa#8f2e4c1";
+        assert_eq!(pkg(Some(git), "").display(), format!("itoa v1.0.19 ({git})"));
     }
 
     /// A workspace of path packages: features through `dep:`, `x/f`, `x?/f`, implicit features, default-features,
