@@ -1,0 +1,2 @@
+// expect: cannot be both async and @wasm
+@wasm export async fn f(x: i32) -> i32 { x }
