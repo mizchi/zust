@@ -10054,14 +10054,17 @@ fn x_kind<'a>(mut w: impl Iterator<Item = &'a str>) -> &'a str {
 /// trait of the program's (one of that name) that declares no type or const of that name
 #[cold]
 fn not_a_member<'a>(src: &'a str, items: &[SrcItem], it: &SrcItem, h: u32, ty: bool, name: &str, traits: &mut Option<TraitMembers<'a>>) -> Option<String> {
-    let TraitMembers { traits: tmap, decl, by_header } = traits.get_or_insert_with(|| TraitMembers::new(src, items));
-    let th = (*by_header.entry(h).or_insert_with(|| {
-        let tr = impl_trait_name(src, items.get(h as usize)?)?;
-        (*tmap.get(tr)?)
-    }))?;
-    if decl.contains(&(th, ty, name)) {
+    let TraitMembers { traits: tmap, names, by_header } = traits.get_or_insert_with(|| TraitMembers::new(src, items));
+    // (a name a trait of the program declares is taken as one of its impl's trait, without reading the impl's header: an
+    // impl of another trait of the program that names it is missed)
+    if names.contains(&(ty, name)) {
         return None;
     }
+    // (else no trait of the program declares it: an error in an impl of one)
+    (*by_header.entry(h).or_insert_with(|| {
+        let tr = impl_trait_name(src, items.get(h as usize)?)?;
+        *tmap.get(tr)?
+    }))?;
     let tr = impl_trait_name(src, items.get(h as usize)?)?;
     let col = it.start - src[..it.start].rfind('\n').map_or(0, |k| k + 1) + 1;
     Some(if ty {
@@ -10086,7 +10089,8 @@ fn impl_trait_name<'a>(src: &'a str, hi: &SrcItem) -> Option<&'a str> {
 /// (trait, a type?, name) of their associated types and consts, and each impl header's trait
 struct TraitMembers<'a> {
     traits: FxMap<&'a str, Option<u32>>,
-    decl: FxSet<(u32, bool, &'a str)>,
+    /// (a type?, name) of their associated types and consts
+    names: FxSet<(bool, &'a str)>,
     by_header: FxMap<u32, Option<u32>>,
 }
 
@@ -10095,7 +10099,7 @@ impl<'a> TraitMembers<'a> {
     fn new(src: &'a str, items: &[SrcItem]) -> Self {
         use crate::lexer::ItemKind as K;
         let mut traits: FxMap<&str, Option<u32>> = FxMap::default();
-        let mut decl = FxSet::default();
+        let mut names = FxSet::default();
         for (i, t) in items.iter().enumerate() {
             match t.kind {
                 K::TraitHeader => {
@@ -10108,7 +10112,12 @@ impl<'a> TraitMembers<'a> {
                 }
                 // (a member by its text, past its attributes and visibility: `#[doc(hidden)] type Buffer: 'static;`)
                 K::TraitMember(th) => {
-                    let text = item_text(src.get(t.start..t.end).unwrap_or(""));
+                    let raw = src.get(t.start..t.end).unwrap_or("");
+                    // (a fn by its first byte, before reading past attributes)
+                    if !matches!(raw.as_bytes().first(), Some(b't' | b'c' | b'#' | b'p')) {
+                        continue;
+                    }
+                    let text = item_text(raw);
                     let (is_ty, r) = match (text.strip_prefix("type"), text.strip_prefix("const")) {
                         (Some(r), _) => (true, r),
                         (_, Some(r)) => (false, r),
@@ -10120,13 +10129,13 @@ impl<'a> TraitMembers<'a> {
                     let r = r.trim_start();
                     let n = &r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len())];
                     if !n.is_empty() && n != "fn" {
-                        decl.insert((th, is_ty, n));
+                        names.insert((is_ty, n));
                     }
                 }
                 _ => {}
             }
         }
-        TraitMembers { traits, decl, by_header: FxMap::default() }
+        TraitMembers { traits, names, by_header: FxMap::default() }
     }
 }
 
@@ -10211,7 +10220,12 @@ fn lt_names<'a>(src: &'a str, items: &[SrcItem]) -> crate::fxhash::FxSet<&'a str
         if !matches!(it.kind, K::Normal | K::TraitHeader) {
             continue;
         }
-        let t = item_text(src.get(it.start..it.end).unwrap_or(""));
+        let raw = src.get(it.start..it.end).unwrap_or("");
+        // (by the first byte before reading past attributes and visibility: a fn or an impl is none of them)
+        if !matches!(raw.as_bytes().first(), Some(b's' | b'e' | b'u' | b't' | b'#' | b'p')) || !raw.as_bytes()[..raw.len().min(256)].contains(&b'\'') {
+            continue;
+        }
+        let t = item_text(raw);
         let t = t.strip_prefix("unsafe ").unwrap_or(t);
         if !matches!(t.as_bytes().first(), Some(b's' | b'e' | b'u' | b't')) {
             continue;
