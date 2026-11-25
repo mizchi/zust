@@ -1142,11 +1142,19 @@ impl Cx<'_> {
     /// Panics if cond is set, for an arithmetic check (kind: 0 add, 1 sub, 2 mul, 3 div by zero, 4 rem by zero,
     /// 5 (unused), 6 negation, 7 shift left, 8 shift right, 9 division overflow, 10 remainder overflow)
     pub(crate) fn ovf_panic(&mut self, cond: Value, kind: u8, span: Sp) {
-        let _ = (kind, span);
+        self.cond_panic(cond, kind, span, None);
+    }
+
+    /// A panic with std's message for a check that is not an overflow (`(-4i32).isqrt()`), at span when cond holds
+    pub(crate) fn msg_panic(&mut self, cond: Value, msg: &str, span: Sp) {
+        self.cond_panic(cond, 12, span, Some(msg.to_string()));
+    }
+
+    fn cond_panic(&mut self, cond: Value, kind: u8, span: Sp, msg: Option<String>) {
         // A std program: a conditional trap (the handler main registers ends it as a panic, with 101).
         // It adds no branch or block, so a check costs one instruction to compile
         if self.prog.panic_handler.is_none() {
-            let code = self.trap_site(kind, span, None);
+            let code = self.trap_site(kind, span, msg);
             self.b.ins().trapnz(cond, code);
             return;
         }

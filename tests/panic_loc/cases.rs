@@ -11,6 +11,7 @@ fn pick(k: usize) -> i32 {
         3 => o.unwrap(),
         4 => { assert!(k == 0, "k was {}", k); 0 }
         5 => { let d = k as i32 - 5; 10 / d }
+        6 => (k as i32 - 10).isqrt(),
         _ => { let s = format!("{}", v.iter().map(|q| q * 2).sum::<i32>()); s.parse::<i32>().expect("num") + o.expect("none") }
     }
 }

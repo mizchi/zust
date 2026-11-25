@@ -1614,15 +1614,25 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has(".into()") {
         need.insert("from");
     }
+    // (it divides a u128, so the 128-bit division with it, also for a u32 receiver)
     if sc.has("ilog10") {
-        need.insert("__exr_ilog10");
+        need.extend(["__exr_ilog10", "__exr_udiv128"]);
     }
     if sc.has("isqrt") {
         need.insert("__exr_isqrt");
     }
-    // 128-bit integers: division and formatting
-    if need.contains("i128") || need.contains("u128") {
+    // 128-bit integers: division and formatting (and `x.isqrt()` on one). Also in the loop below, for a 128-bit type
+    // that another prelude item brings in (`NonZeroU128::get`, `impl FromStr for u128`) rather than the program's text
+    let isqrt = sc.has("isqrt");
+    let wide = |need: &mut crate::fxhash::FxSet<&'static str>| {
         need.extend(["__exr_udiv128", "__exr_sdiv128", "__exr_fmt_int128", "__exr_u128_to_f", "__exr_f_to_u128"]);
+        if isqrt {
+            need.insert("__exr_isqrt128");
+        }
+    };
+    let mut wide_ops = need.contains("i128") || need.contains("u128");
+    if wide_ops {
+        wide(&mut need);
     }
     // Floats: formatting, powi and the libm declarations (with f64 / f32 named, or a literal such as `1.5`)
     // (not a function name such as `fn f64(..)`: only a type position, such as `: f64` / `as f64` / `f64::`)
@@ -1878,6 +1888,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let mut dur_ops = false;
     loop {
         let mut changed = false;
+        if !wide_ops && (need.contains("i128") || need.contains("u128")) {
+            wide_ops = true;
+            changed = true;
+            wide(&mut need);
+        }
         // (the prelude's Duration impls + - * / and += -=; Duration is also chosen as the argument of `thread::sleep`,
         // so this is checked inside the loop)
         if !dur_ops && need.contains("Duration") {
