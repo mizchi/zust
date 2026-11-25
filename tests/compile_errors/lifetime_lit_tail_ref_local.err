@@ -1,1 +1,1 @@
-2:85: cannot return a reference to a local variable: `x` is dropped when the function returns
+2:85: cannot return a reference to a local variable: `x` is dropped when the function returns (E0515)

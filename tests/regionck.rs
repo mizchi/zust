@@ -4806,3 +4806,236 @@ fn g() {
 fn main() {}
 "#, &[(10, "cannot assign to `e` because it is borrowed")], "ro");
 }
+
+#[test]
+fn part33_pattern_moves_and_guards() {
+    // (each case checked with rustc 1.97: zustc reports each fn's first error on rustc's line)
+    // (a `ref mut` binding where the default binding mode is by shared reference: E0596 at the binding (2, 5); an
+    // explicit `&` pattern's binding through a `&` is the borrow check's (8); through a `&mut`, accepted (11))
+    errors_at(r#"enum Foo { Bar(i32) }
+fn a(arr: Vec<Foo>) { if let (Some(Foo::Bar(ref mut val)), _) = (&arr.get(0), 0) { *val = 1; } }
+fn b(o: &Option<i32>) {
+    match o {
+        Some(ref mut v) => *v = 1,
+        None => {}
+    }
+}
+fn c(o: &(i32, i32)) { let &(ref mut x, _) = o; *x = 1; }
+fn d(o: &mut Option<(i32, String)>) { if let Some((ref mut x, ref mut s)) = o { *x = 1; s.push('x'); } }
+fn main() {}
+"#, &[(2, "cannot borrow data in a `&` reference as mutable"), (5, "cannot borrow data in a `&` reference as mutable"), (9, "as mutable")], "rm");
+    // (a pattern that moves a field reached through an overloaded deref: E0507 at the scrutinee, also where the
+    // binding needs no drop (6, 9); a Copy field and a `ref` binding are accepted (12, 15); a `Box`'s field moves (18))
+    errors_at(r#"use std::ops::Deref;
+struct Wrap<T>(T);
+struct NonCopy(());
+struct St { field: Option<NonCopy>, n: Option<i32>, s: Option<String> }
+impl<T> Deref for Wrap<T> { type Target = T; fn deref(&self) -> &T { &self.0 } }
+fn a(w: Wrap<St>) -> usize { if let Some(_v) = w.field { 1 } else { 0 } }
+fn b(w: Wrap<St>) -> usize {
+    match w.s {
+        Some(v) => v.len(),
+        None => 0,
+    }
+}
+fn c(w: Wrap<St>) -> i32 { if let Some(n) = w.n { n } else { 0 } }
+fn d(w: Wrap<St>) -> usize {
+    match w.s { Some(ref v) => v.len(), None => 0 }
+}
+fn e(w: Box<St>) -> usize {
+    match w.s { Some(v) => v.len(), None => 0 }
+}
+fn main() {}
+"#, &[(6, "cannot move out of dereference of `Wrap<St>`"), (8, "cannot move out of dereference of `Wrap<St>`")], "od");
+    // (a move out of what a reference that is no place points to: E0507 (2, 3, 5); a borrow of it, a Copy part, a
+    // method call through it are accepted (6))
+    errors_at(r#"struct A(String);
+fn a(x: A) { let _y = *&x; }
+fn b(v: Vec<String>) -> String { *v.first().unwrap() }
+fn id<T>(x: &T) -> &T { x }
+fn c(v: String) -> String { *id(&v) }
+fn d(v: Vec<String>) -> usize { let r = &*v.first().unwrap(); let n = (*v.first().unwrap()).len(); r.len() + n }
+fn main() {}
+"#, &[(2, "cannot move out of a shared reference"), (3, "cannot move out of a shared reference"), (5, "cannot move out of a shared reference")], "nr");
+    // (in a match guard the arm's bindings are seen by shared reference: a move (3), an assignment (9), a mutable
+    // borrow (14), one through a `&mut` binding (19) are E0507 / E0594 / E0596; reads, clones and the arm's own uses
+    // are accepted (23))
+    errors_at(r#"fn a(x: Option<String>) -> usize {
+    match x {
+        Some(v) if { drop(v); false } => 1,
+        _ => 0,
+    }
+}
+fn b(x: Option<i32>) -> usize {
+    match x {
+        Some(mut y) if { y += 1; false } => 1,
+        _ => 0,
+    }
+}
+fn c(x: Option<Vec<i32>>) -> usize {
+    match x { Some(v) if { v.push(1); true } => 1, _ => 0 }
+}
+fn d(o: Option<&mut Vec<i32>>) -> usize {
+    match o {
+        Some(r) if r.len() > 1 => { r.push(1); r.len() }
+        Some(r) if { r.push(1); true } => 0,
+        _ => 0,
+    }
+}
+fn e(x: Option<String>) -> usize {
+    match x { Some(v) if { let w = v.clone(); w.len() > 1 } => v.len(), Some(mut v) => { v.push('a'); v.len() }, None => 0 }
+}
+fn main() {}
+"#, &[(3, "cannot move out of `v` in pattern guard"), (9, "cannot assign to `y`, as it is immutable for the pattern guard"), (14, "cannot borrow `v` as mutable, as it is immutable for the pattern guard"), (19, "cannot borrow `*r` as mutable, as it is immutable for the pattern guard")], "pg");
+}
+
+#[test]
+fn part33_receivers_returned_closures_and_aggregates() {
+    // (each case checked with rustc 1.97: zustc reports each fn's first error on rustc's line)
+    // (a `self: Box<Self>` or `self: Pin<&mut Self>` receiver moves into the call: a use after is E0382 (10, 16))
+    errors_at(r#"use std::pin::Pin;
+struct Foo(i32);
+impl Foo {
+    fn bar(self: Box<Self>) {}
+    fn baz(self: Pin<&mut Self>) {}
+}
+fn a() {
+    let b = Box::new(Foo(1));
+    b.bar();
+    b.bar();
+}
+fn c() {
+    let mut f = Foo(1);
+    let p = Pin::new(&mut f);
+    p.baz();
+    p.baz();
+}
+fn main() {}
+"#, &[(10, "use of moved value: `b`"), (16, "use of moved value: `p`")], "rv");
+    // (a closure that borrows a local, held in a local returned as an `impl Trait`: rustc's E0597 at the use in its
+    // body of what it captures (7, the `p` that `println!` names, not `p.x`); returned itself or in a `Box<dyn ..>`,
+    // E0373 at the closure (13))
+    errors_at(r#"#[derive(Debug)]
+struct Point { x: i32, y: i32 }
+fn foo() -> impl FnMut() {
+    let mut p = Point { x: 1, y: 2 };
+    let c = || {
+        p.x += 5;
+        println!("{:?}", p);
+    };
+    c
+}
+fn bar() -> Box<dyn Fn() -> i32> {
+    let p = Point { x: 1, y: 2 };
+    let d = || p.x;
+    Box::new(d)
+}
+fn main() {}
+"#, &[(7, "`p` does not live long enough"), (13, "closure may outlive the current function")], "rc");
+    // (a tuple, an array or a struct's literal returned holds what its parts borrow: E0515 also where the signature
+    // has one region (1, 2, 3))
+    errors_at(r#"fn a(x: &str) -> (&str, &&str) { (x, &x) }
+fn b(x: &i32) -> [&i32; 1] { let y = *x; [&y] }
+struct W<'a> { r: &'a i32 }
+fn c(x: &i32) -> W<'_> { let y = *x; W { r: &y } }
+fn d(x: &i32) -> (&i32, u8) { (x, 1) }
+fn main() {}
+"#, &[(1, "cannot return"), (2, "cannot return"), (4, "cannot return")], "ag");
+}
+
+#[test]
+fn part33_review_of_159() {
+    // (the minor findings of #159's third review, each checked with rustc 1.97: a variant written through a type alias
+    // of the enum (`A::V`) captures nothing (5: no error); a guard's write to another field of a union the pattern
+    // tests is E0510 (13), as one to the field itself (21))
+    errors_at(r#"enum E { V }
+type A = E;
+fn f() {
+    let mut e = E::V;
+    let c = || match e { A::V => 1 };
+    e = E::V;
+    c();
+}
+union U { a: u32, b: u32 }
+fn g(mut u: U) {
+    unsafe {
+        match u {
+            U { a: 0 } if { u.b = 1; true } => (),
+            _ => (),
+        }
+    }
+}
+fn h(mut u: U) {
+    unsafe {
+        match u {
+            U { a: 0 } if { u.a = 1; true } => (),
+            _ => (),
+        }
+    }
+}
+fn main() {}
+"#, &[(13, "cannot assign `u.b` in match guard"), (21, "cannot assign `u.a` in match guard")], "r3");
+}
+
+#[test]
+fn part33_review_of_160() {
+    // (#160's review, each checked with rustc 1.97: a unit struct's name in a `let` binds and moves nothing, through a
+    // Deref too (no error); a struct update whose base gives only fields that hold no reference keeps none of the
+    // base's loans (no E0515 at 13), one whose base gives a reference field does (E0515 at 19))
+    errors_at(r#"use std::ops::Deref;
+#[derive(Debug)]
+struct Unit;
+struct W(Unit);
+impl Deref for W { type Target = Unit; fn deref(&self) -> &Unit { &self.0 } }
+fn a() { let w = W(Unit); let Unit = *w; }
+fn b() { let u = Unit; let Unit = u; println!("{:?}", u); }
+struct S<'a> { r: &'a i32, n: usize }
+fn c<'a>(x: &'a i32) -> S<'a> {
+    let y = 5;
+    let s = S { r: &y, n: 1 };
+    let _ = s.r;
+    S { r: x, ..s }
+}
+struct V<'a> { r: &'a i32, q: &'a i32 }
+fn d<'a>(x: &'a i32) -> V<'a> {
+    let y = 5;
+    let s = V { r: &y, q: x };
+    V { r: x, ..s }
+}
+fn main() { a(); b(); let z = 3; c(&z); d(&z); }
+"#, &[(19, "`y` is dropped when the function returns")], "rv1");
+    // (where a written field may hold a reference too, the base's loan may be in its region only: kept for a struct
+    // of one lifetime that a given field has (E0515 at 6), not for one of two (2), a field of 'static (4) or type
+    // parameters (8))
+    errors_at(r#"struct V<'a, 'b> { r: &'a i32, q: &'b i32 }
+fn d<'a, 'b>(x: &'a i32, z: &'b i32) -> V<'a, 'b> { let y = 5; let s = V { r: &y, q: z }; V { r: x, ..s } }
+struct S<'a> { st: &'static str, r: &'a i32 }
+fn a<'a>(x: &'a i32) -> S<'a> { let y = 5; let s = S { st: "x", r: &y }; S { r: x, ..s } }
+struct T2<'a> { r: &'a i32, v: Vec<&'a i32> }
+fn b<'a>(x: &'a i32) -> T2<'a> { let y = 5; let s = T2 { r: &y, v: vec![] }; T2 { r: x, ..s } }
+struct G<A, B> { a: A, b: B }
+fn c<'a>(x: &'a i32) -> G<&'a i32, &'static i32> { let y = 5; let s = G { a: &y, b: &3 }; G { a: x, ..s } }
+fn main() { let z = 3; d(&z, &z); a(&z); b(&z); c(&z); }
+"#, &[(6, "`y` is dropped when the function returns")], "rv3");
+    // (in a guard, a closure that borrows an arm's binding mutably (E0596 at 4), and a write to an outer arm's binding
+    // in a guard nested in its guard (E0594 at 12))
+    errors_at(r#"fn e() {
+    let x = Some(3);
+    match x {
+        Some(mut y) if { let mut c = || { y += 1; }; c(); true } => { let _ = y; }
+        _ => {}
+    }
+}
+fn f() {
+    let x = Some(3);
+    match x {
+        Some(mut y) if match 0 {
+            _ if { y += 1; true } => true,
+            _ => false,
+        } => { let _ = y; }
+        _ => {}
+    }
+}
+fn main() { e(); f(); }
+"#, &[(4, "cannot borrow `y` as mutable, as it is immutable for the pattern guard"), (12, "cannot assign to `y`, as it is immutable for the pattern guard")], "rv2");
+}
