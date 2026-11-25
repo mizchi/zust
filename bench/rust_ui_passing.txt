@@ -2021,6 +2021,7 @@ compile-fail	consts/issue-76064.rs
 check-pass	consts/issue-79152-const-array-index.rs
 check-pass	consts/issue-88071.rs
 check-pass	consts/issue-88649.rs
+compile-fail	consts/issue-90878-2.rs
 compile-fail	consts/issue-90878-3.rs
 compile-fail	consts/issue-90878.rs
 compile-fail	consts/issue-91434.rs
@@ -6268,6 +6269,7 @@ check-pass	privacy/where-pub-type-impls-priv-trait.rs
 check-pass	proc-macro/derive-multiple-with-packed.rs
 check-pass	proc-macro/extern-prelude-extern-crate-proc-macro.rs
 compile-fail	proc-macro/illegal-proc-macro-derive-use.rs
+compile-fail	proc-macro/issue-118455-skip-err-builtin.rs
 compile-fail	proc-macro/issue-89566-suggest-fix-invalid-top-level-macro-attr.rs
 compile-fail	proc-macro/macro-namespace-reserved-2.rs
 compile-fail	proc-macro/macros-in-extern-derive.rs

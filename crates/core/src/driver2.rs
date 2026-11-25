@@ -4166,6 +4166,12 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
         if !check(name, input) {
             return Some(report(head, 1, at, name, input));
         }
+        // (an inner attribute rustc does not know, `#![some_nonexistent_attribute]`; the crate-level ones of rustc's
+        // that the list of item attributes leaves out are known)
+        if standalone && unknown(name) && !matches!(name, "move_size_limit" | "pattern_complexity_limit" | "crate_id" | "no_start") {
+            let n = head[..at].matches('\n').count() + 1;
+            return Some(format!("{n}:1: cannot find attribute `{name}` in this scope"));
+        }
     }
     // (the unsafe attributes, which `#[unsafe(..)]` may wrap; `naked` needs it in every edition, the others in 2024, or
     // where `unsafe_attr_outside_unsafe` is denied)
