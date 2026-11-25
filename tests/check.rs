@@ -3152,8 +3152,15 @@ fn sized_review_cases() {
     let d = check("struct W<T: ?Sized>(T);\nfn bad<T: ?Sized>(_: W<T>) {}\nfn main() {}\n");
     assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
     // (at the argument's type in a signature over lines, as rustc; a let's annotation whatever its initializer)
-    let d = check("fn bad<T: ?Sized>(\n    x: T,\n) {}\nfn main() {}\n");
-    assert!(d.len() == 1 && (d[0].line, d[0].col) == (2, 8), "{d:?}");
+    for src in [
+        "fn bad<T: ?Sized>(\n    x: T,\n) {}\nfn main() {}\n",
+        // (a generic bound's `Fn()` and a `pub(crate)` are not the parameters' parentheses)
+        "fn bad<F: Fn(), T: ?Sized>(\n    x: T,\n) {}\nfn main() {}\n",
+        "pub(crate) fn bad<T: ?Sized>(\n    x: T,\n) {}\nfn main() {}\n",
+    ] {
+        let d = check(src);
+        assert!(d.len() == 1 && (d[0].line, d[0].col) == (2, 8), "{src}\n{d:?}");
+    }
     for src in ["fn main() { let _: Vec<str> = loop {}; }\n", "fn main() { let (_a, _b): (Vec<str>, u8) = loop {}; }\n"] {
         let d = check(src);
         assert!(d.len() == 1 && d[0].msg.contains("`str` cannot be known"), "{src}\n{d:?}");

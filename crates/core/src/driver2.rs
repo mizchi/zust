@@ -9940,7 +9940,20 @@ fn sig_part(text: &str, part: &str) -> Option<usize> {
     if part == "f" {
         return toks.get(k).map(|t| t.1);
     }
-    let open = (k..toks.len()).find(|&j| tk(j) == "(")?;
+    // (the parameters' `(`: after `fn` (not `pub(crate)`'s) and outside the generics' `<..>` (not a bound's `Fn()`))
+    let from = (k..toks.len()).find(|&j| tk(j) == "fn").map_or(k, |j| j + 1);
+    let open = {
+        let mut angle = 0i32;
+        (from..toks.len()).find(|&j| {
+            match tk(j) {
+                "<" => angle += 1,
+                ">" if !(j > 0 && tk(j - 1) == "-" && toks[j - 1].2 == toks[j].1) => angle -= 1,
+                "(" if angle <= 0 => return true,
+                _ => {}
+            }
+            false
+        })?
+    };
     // (the parameters: split at the commas outside brackets, `->` not closing one)
     let (mut d, mut start, mut params, mut close) = (0i32, open + 1, vec![], None);
     let mut j = open;
