@@ -143,6 +143,8 @@ pub struct Info {
     pub variant_of: HashMap<String, String>,
     pub fns: HashMap<String, FnSig>,
     pub ext_types: HashMap<String, ExtType>,
+    /// the externs that are another zustscript module's functions (no conversion at the call)
+    pub zsc_externs: HashSet<String>,
     /// each property read and method call of an extern type: (the type, the member)
     pub member: HashMap<Id, (String, String)>,
     pub externs: HashMap<String, (FnSig, Option<String>, String)>,
@@ -706,14 +708,18 @@ impl Checker {
                     let bounds = bounds.iter().cloned().collect();
                     self.info.fns.insert(name.clone(), FnSig { generics: generics.clone(), bounds, args: a, ret: r });
                 }
-                Item::Extern { name, module, generics, args, ret, js, pos } => {
+                Item::Extern { name, module, generics, args, ret, js, pos, zsc } => {
                     if let Some(p) = names.insert(name.clone(), *pos) {
                         self.err(*pos, format!("`{name}` is already defined at {p}"));
                     }
                     self.prelude_name(name, *pos);
                     let a = args.iter().map(|t| self.ty_of(t, generics)).collect();
                     let r = self.ty_of(ret, generics);
-                    self.extern_result(&r, *pos);
+                    if *zsc {
+                        self.info.zsc_externs.insert(name.clone());
+                    } else {
+                        self.extern_result(&r, *pos);
+                    }
                     self.info.externs.insert(name.clone(), (FnSig { generics: generics.clone(), bounds: HashMap::new(), args: a, ret: r }, module.clone(), js.clone()));
                 }
                 Item::WasmFn { name, args, ret, pos, .. } => {
@@ -1418,7 +1424,7 @@ impl Checker {
                 Ty::Unit
             }
             EK::While(c, body) => {
-                let saved = std::mem::replace(&mut self.try_ban, Some("`?` cannot be used in a `while` condition (it runs again each time): test it in the body (`while true { if !more()? { break; } .. }`)"));
+                let saved = self.try_ban.replace("`?` cannot be used in a `while` condition (it runs again each time): test it in the body (`while true { if !more()? { break; } .. }`)");
                 let ct = self.infer(c, None);
                 self.try_ban = saved;
                 self.unify(c.pos, &ct, &Ty::Bool);
@@ -1820,7 +1826,7 @@ impl Checker {
             }
         };
         self.info.tries.insert(id, kind.clone());
-        let closure = self.closure_bases.len() > 0;
+        let closure = !self.closure_bases.is_empty();
         let whose = if closure { "the closure (a `?` in a closure returns from it, not from the function around it)" } else { "this function" };
         match &r {
             // (a closure whose result is not known yet: the `?` makes it this kind)

@@ -97,7 +97,7 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
                     for t in args.iter().chain([&ret]) {
                         uses(t, generics, &mut types);
                     }
-                    out.push(Item::Extern { name: name.clone(), module: Some(spec.clone()), generics: generics.clone(), args, ret, js: crate::js::ident(name), pos: *npos });
+                    out.push(Item::Extern { name: name.clone(), module: Some(spec.clone()), generics: generics.clone(), args, ret, js: crate::js::ident(name), pos: *npos, zsc: true });
                 }
                 Some(Item::WasmFn { .. }) => {
                     errs.push(TsError { file: None, pos: *npos, msg: format!("`{n}` is a Rust `wasm fn`: it cannot be imported yet (an `@wasm fn` can)") });

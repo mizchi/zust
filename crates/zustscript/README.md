@@ -46,7 +46,8 @@ zust を土台にした、フロントエンド向け言語の試作。目標は
 // データ: レコード、enum (代数的データ型)。class はなく、振る舞いは関数と match で書く
 type Todo = { id: i32, title: String, done: bool }
 enum Filter { All, Active, Done }          // データなし → "All" | "Active" | "Done"
-enum Option<T> { None, Some(T) }           // データあり → { TAG: "Some", _0: x } (TS の判別共用体)
+enum Shape { Circle(f64), Square(f64) }    // データあり → { TAG: "Circle", _0: r } (TS の判別共用体)
+// Option<T> / Result<T, E> は宣言せずに使える (下の「Option / Result と `?`」)
 
 // 関数: トップレベルのシグネチャは注釈必須、本体は推論。let は不変
 export fn visible(todos: Array<Todo>, f: Filter) -> Array<Todo> {
@@ -62,6 +63,8 @@ export fn Row(props: RowProps) -> Jsx { <li onClick={() => props.onPick(props.sa
 
 // JS の関数を手書きで宣言して取り込む (関数の型の自動取り込みはまだない)
 extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";
+// JS の値の型と、そのプロパティ・メソッド (下の「JS の値」)
+extern type Url = "URL" { host: String, fn href() -> String = "toString"; }
 
 // TS のファイルのレコード型を、その型定義のとおりに読み込む (下の「TS の型の取り込み」)
 import type { User, Post } from "./model.ts";
@@ -263,7 +266,102 @@ export fn App() -> Jsx {
 - まだできないこと
   - `@wasm` / `@simd` / `--emit-rust`(Promise は JS のもの)
   - effect を perform する async fn(effect は generator で動く)。effect は async でない関数の中で handle する
-  - `Promise.all` などの組み合わせ(`extern` で受ける)、`try` / `catch`(TODO の P0 の 7)
+  - `Promise.all` などの組み合わせ(`extern` で受ける)
+- reject される Promise は、`extern` の結果を `Promise<Result<T, String>>` と宣言して `Err` で受ける(下の「JS の値」)
+
+### Option / Result と `?`
+
+`Option` と `Result` は宣言せずに使えます(prelude)。
+
+```zsc
+enum FormError { Empty(String), TooLong(String, i32) }
+
+fn non_empty(field: String, s: String) -> Result<String, FormError> {
+  if s.trim().len() == 0 { Err(Empty(field)) } else { Ok(s.trim()) }
+}
+
+fn validate(d: Draft, id: i32) -> Result<Todo, FormError> {
+  let title = non_empty("title", d.title)?;     // Err なら、その Err を validate の結果として返す
+  Ok(Todo { id, title })
+}
+
+fn title_of(todos: Array<Todo>, id: i32) -> String {
+  find(todos, id) |> .map((t) => t.title) |> .unwrap_or("(none)")
+}
+
+fn first(todos: Array<Todo>) -> String {
+  if let Some(t) = find(todos, 1) { t.title } else { "-" }
+}
+```
+
+- prelude: `enum Option<T> { None, Some(T) }` と `enum Result<T, E> { Ok(T), Err(E) }`。ふつうの enum と同じに扱う(JS は `{ TAG: "Some", _0: x }`、`.d.ts` は使うときだけ宣言する)
+  - 同じ形の宣言はそのまま通る(prelude より前に書いたファイルのため)。違う形の `Option` / `Result` はエラー
+  - 別の enum が `None` / `Some` / `Ok` / `Err` という名前のバリアントを持つファイルでは、その prelude の型は入らない(バリアント名はファイルの中で一意)
+  - `None` / `Some` / `Ok` / `Err` という名前の関数はエラー
+- `e?`
+  - `Ok(x)` / `Some(x)` なら `x`
+  - `Err` / `None` なら、それをいちばん内側の関数(クロージャの中ならクロージャ)の結果として返す
+  - 型の規則
+    - 関数の結果は、`Result` なら同じエラーの型の `Result`、`Option` なら `Option`。エラーの型の変換はしない(`.map_err(f)?` で揃える)
+    - `Option` を返す関数で `Result` に付けるときは `.ok()?`、その逆は `.ok_or(e)?`
+  - 書けない場所(エラー)
+    - `&&` / `||` の右辺、`while` の条件
+    - `handle` の本体と arm(クロージャの中は書ける)
+  - 後置の演算子で、呼び出しや `.f` と同じ強さ
+    - `x |> f(a)?` は `f(x, a)?`
+    - `await f()?` は `await (f()?)` なので、Promise の結果には `(await f())?` と書く
+  - 予約: `?.`(`(e?).f` か `e.map((x) => x.f)` と書く)、`??`(`.unwrap_or(d)`)、三項演算子 `a ? b : c`(`if`)
+  - JS の出力は、文の前に書く `const $t = e; if ($t.TAG === "Err") return $t;`。`?` より左の被演算子は先に一時変数に置き、評価の順は書いたとおり
+  - `@wasm` では Rust の match(`Err` / `None` を返す)
+- `if let P = e { a } else { b }` は `match e { P => a, _ => b }`
+- メソッド(名前は Rust と同じ)
+  - `Option`: `map` `and_then` `filter` `unwrap_or` `unwrap_or_else` `ok_or` `ok_or_else` `is_some` `is_none`
+  - `Result`: `map` `and_then` `map_err` `unwrap_or` `unwrap_or_else` `ok` `is_ok` `is_err`
+  - 配列の `try_map(f)`: `f` が `Result` を返すなら `Result<Array<U>, E>`、`Option` なら `Option<Array<U>>`。最初の `Err` / `None` で止まる
+  - JS では小さなヘルパー(`$o_map` など)。`@wasm` ではまだ使えない
+- まだないもの: `unwrap()` / `expect()`、任意のフィールド `x?: T`(提案 003 の C)、`zsc-prelude.d.ts`(今は `.d.ts` ごとに `Option` / `Result` を宣言する)
+
+### JS の値: `extern type`、`null`、例外
+
+JS の値を、中を見ない型として宣言します。プロパティとメソッドも宣言できます。
+
+```zsc
+extern type Response {
+  ok: bool,
+  status: i32,
+  fn text() -> Promise<String>;
+}
+extern fn fetch(url: String) -> Promise<Result<Response, String>> = "fetch";   // reject は Err(メッセージ)
+
+extern type Params = "URLSearchParams" { fn get(name: String) -> Option<String>; }   // null は None
+extern type Url = "URL" { host: String, params: Params = "searchParams" }
+extern fn parse_url(s: String) -> Result<Url, String> = "new URL";              // throw は Err(メッセージ)
+
+extern type Json = "unknown";
+extern fn parse_json(s: String) -> Result<Json, String> = "JSON.parse";
+
+export async fn load(url: String) -> Result<String, String> {
+  let r = (await fetch(url))?;
+  if r.ok { Ok(await r.text()) } else { Err(`status ${r.status}`) }
+}
+```
+
+- `extern type Name;`: JS の値の型
+  - `= "TsName"` で TS での名前を付ける(既定は同じ名前)。`.d.ts` ではその名前を使う
+  - `extern "module" type Name;` は、そのモジュールの型(`.d.ts` は `import type`)
+  - TS に型のない値は `= "unknown"` にする
+- メンバー
+  - プロパティ: `host: String`(JS の名前が違うなら `path: String = "pathname"`)。`u.host` で読む
+  - メソッド: `fn get(name: String) -> Option<String>;`(`= "jsName"` も同じ)。`p.get("k")` で呼ぶ
+  - 代入: `fn set_label(s: String) = "label=";`(JS の名前が `=` で終わる)
+- `extern fn` の JS の名前が `new X` なら、コンストラクタの呼び出し
+- `extern` の関数とメンバーの境界での変換
+  - 結果の `Option<T>`: `null` / `undefined` は `None`、ほかは `Some`
+  - 引数の `Option<T>`: `None` は `undefined`
+  - 結果の `Result<T, String>`: JS が throw したら `Err(メッセージ)`。エラーの型を extern type にすると、throw された値そのもの(`extern type JsError = "Error" { message: String }`)。ほかのエラーの型はエラー
+  - 結果の `Promise<Result<T, E>>`: reject も `Err` になる
+- `--check-externs` は、メンバーも TS の型と照合する(`Option` の結果は `T | null | undefined`、`Result` の結果は `T` として)
+- まだないもの: `@wasm` での extern type、`==`(同じ値かどうか)、型引数を持つメソッド、TS の `.d.ts` からの自動の取り込み
 
 ### 代数的エフェクト(enum で宣言する)
 

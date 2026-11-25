@@ -634,7 +634,10 @@ impl<'a> Js<'a> {
                 self.ind -= 1;
                 let mut el = el.as_deref();
                 while let Some(x) = el {
-                    if let EK::If(c2, t2, el2) = &x.kind {
+                    // (a condition with a `?` is written before its `if`: inside the `else`)
+                    if let EK::If(c2, t2, el2) = &x.kind
+                        && !has_try(c2)
+                    {
                         let c2 = self.expr(c2);
                         self.line(&format!("}} else if ({c2}) {{"));
                         self.ind += 1;
@@ -984,13 +987,13 @@ impl<'a> Js<'a> {
                     // (as a value: a function that converts as a call does)
                     let (sig, _, _) = &self.info.externs[n];
                     let (args, ret) = (sig.args.clone(), sig.ret.clone());
-                    if !args.iter().any(is_option) && !needs_from_js(&ret) {
+                    if self.info.zsc_externs.contains(n) || (!args.iter().any(is_option) && !needs_js_result(&ret)) {
                         return js;
                     }
                     let ps: Vec<String> = (0..args.len()).map(|k| format!("$a{k}")).collect();
-                    let a: Vec<String> = ps.iter().zip(&args).map(|(p, t)| self.to_js(p.clone(), t)).collect();
+                    let a: Vec<String> = ps.iter().zip(&args).map(|(p, t)| self.js_arg(p.clone(), t)).collect();
                     let call = format!("{js}({})", a.join(", "));
-                    format!("({}) => {}", ps.join(", "), self.from_js(call, &ret))
+                    format!("({}) => {}", ps.join(", "), self.js_result(call, &ret))
                 }
                 Some(Callee::Fn) => self.fn_name(e.id, n),
                 Some(Callee::Range) => {
@@ -1033,10 +1036,13 @@ impl<'a> Js<'a> {
                         }
                         Some(Callee::Extern(js)) => {
                             self.note_extern(n);
+                            if self.info.zsc_externs.contains(n) {
+                                return format!("{js}({})", a.join(", "));
+                            }
                             let (sig, _, _) = &self.info.externs[n];
                             let (args, ret) = (sig.args.clone(), sig.ret.clone());
-                            let a: Vec<String> = a.into_iter().zip(&args).map(|(v, t)| self.to_js(v, t)).collect();
-                            return self.from_js(format!("{js}({})", a.join(", ")), &ret);
+                            let a: Vec<String> = a.into_iter().zip(&args).map(|(v, t)| self.js_arg(v, t)).collect();
+                            return self.js_result(format!("{js}({})", a.join(", ")), &ret);
                         }
                         _ => {}
                     }
@@ -1074,11 +1080,11 @@ impl<'a> Js<'a> {
                 if let Some((tn, mn)) = self.info.member.get(&e.id).cloned() {
                     let (_, ps, ret, js) = self.info.ext_types[&tn].methods.iter().find(|m| m.0 == mn).cloned().unwrap();
                     let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
-                    let a: Vec<String> = a.into_iter().zip(&ps).map(|(v, t)| self.to_js(v, t)).collect();
+                    let a: Vec<String> = a.into_iter().zip(&ps).map(|(v, t)| self.js_arg(v, t)).collect();
                     if let Some(p) = js.strip_suffix('=') {
                         return format!("({}{} = {}, undefined)", recv, member(p), a[0]);
                     }
-                    return self.from_js(format!("{recv}{}({})", member(&js), a.join(", ")), &ret);
+                    return self.js_result(format!("{recv}{}({})", member(&js), a.join(", ")), &ret);
                 }
                 let arg = |js: &mut Js, k: usize| js.expr(&args[k]);
                 use Builtin as B;
@@ -1167,7 +1173,7 @@ impl<'a> Js<'a> {
                 let (tn, pn) = self.info.member[&e.id].clone();
                 let (_, t, js) = self.info.ext_types[&tn].props.iter().find(|p| p.0 == pn).cloned().unwrap();
                 let s = self.operand(x);
-                self.from_js(format!("{s}{}", member(&js)), &t)
+                self.js_result(format!("{s}{}", member(&js)), &t)
             }
             EK::Field(x, f) => {
                 let s = self.operand(x);
@@ -1420,7 +1426,7 @@ impl<'a> Js<'a> {
 
     /// A value JS gave (an extern's result, a property of an extern type), as zustscript's: `null` / `undefined`
     /// is `None`, and a `Result` catches what the call throws (`call` is evaluated inside the catch)
-    fn from_js(&mut self, call: String, r: &Ty) -> String {
+    fn js_result(&mut self, call: String, r: &Ty) -> String {
         let message = |e: &Ty| if matches!(e, Ty::Str) { "true" } else { "false" };
         match r {
             Ty::Named(n, a) if n == "Option" && a.len() == 1 => {
@@ -1428,7 +1434,7 @@ impl<'a> Js<'a> {
                 format!("$nullable({call})")
             }
             Ty::Named(n, a) if n == "Result" && a.len() == 2 => {
-                let inner = self.from_js(call, &a[0]);
+                let inner = self.js_result(call, &a[0]);
                 self.helpers.insert("$catch");
                 format!("$catch(() => {inner}, {})", message(&a[1]))
             }
@@ -1454,7 +1460,7 @@ impl<'a> Js<'a> {
     }
 
     /// A value handed to JS (an extern's argument): `None` is `undefined`
-    fn to_js(&mut self, v: String, t: &Ty) -> String {
+    fn js_arg(&mut self, v: String, t: &Ty) -> String {
         if is_option(t) {
             // (a literal: its JS value as it is)
             if v == "{ TAG: \"None\" }" {
@@ -1641,11 +1647,11 @@ fn is_option(t: &Ty) -> bool {
     matches!(t, Ty::Named(n, a) if n == "Option" && a.len() == 1)
 }
 
-/// Does a value of `t` from JS need converting ([`Js::from_js`])
-fn needs_from_js(t: &Ty) -> bool {
+/// Does a value of `t` from JS need converting ([`Js::js_result`])
+fn needs_js_result(t: &Ty) -> bool {
     match t {
         Ty::Named(n, a) if (n == "Option" && a.len() == 1) || (n == "Result" && a.len() == 2) => true,
-        Ty::Named(n, a) if n == "Promise" && a.len() == 1 => needs_from_js(&a[0]),
+        Ty::Named(n, a) if n == "Promise" && a.len() == 1 => needs_js_result(&a[0]),
         _ => false,
     }
 }
@@ -1909,8 +1915,9 @@ pub fn extern_check(items: &[Item], info: &Info) -> Option<(String, Vec<(usize, 
         if let Item::Extern { name, module, pos, .. } = it {
             let (sig, _, js) = &info.externs[name];
             let g = if sig.generics.is_empty() { String::new() } else { format!("<{}>", sig.generics.join(", ")) };
-            let ps: Vec<String> = sig.args.iter().enumerate().map(|(k, t)| format!("a{k}: {}", ts_js_side(t, &mut named, false))).collect();
-            let want = format!("{g}({}) => {}", ps.join(", "), ts_js_side(&sig.ret, &mut named, true));
+            let side = |t: &Ty, named: &mut BTreeSet<String>, ret: bool| if info.zsc_externs.contains(name) { ts_plain(t, named) } else { ts_js_side(t, named, ret) };
+            let ps: Vec<String> = sig.args.iter().enumerate().map(|(k, t)| format!("a{k}: {}", side(t, &mut named, false))).collect();
+            let want = format!("{g}({}) => {}", ps.join(", "), side(&sig.ret, &mut named, true));
             let k = checks.len();
             let value = match module {
                 // (a constructor: called with `new`, its parameters the class's)

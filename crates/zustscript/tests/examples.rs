@@ -793,6 +793,14 @@ fn options_and_try() {
     assert!(dts.contains("export type Option<T> = { readonly TAG: \"None\" } | { readonly TAG: \"Some\"; readonly _0: T };"), "{dts}");
     assert!(dts.contains("export type Result<T, E> = { readonly TAG: \"Ok\"; readonly _0: T } | { readonly TAG: \"Err\"; readonly _0: E };"), "{dts}");
     assert!(dts.contains("export declare function parse_draft(d: Draft): Result<Todo, FormError>;"), "{dts}");
+    // (an imported module's Option is that module's value: not converted as a JS function's result is)
+    for f in ["optlib", "optmain"] {
+        let o = zsc(&root().join(format!("tests/modules/{f}.zsc")), &d, &[]);
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    }
+    assert_eq!(node(&d, "const m = await import('./optmain.js'); console.log(m.run());"), "2 -1 true hi,-,- 1 -1 2 3\n");
+    let js = std::fs::read_to_string(d.join("optmain.js")).unwrap();
+    assert!(js.contains("  } else {\n    const $t1 = half(n);\n    if ($t1.TAG === \"None\") return $t1;\n    if ($t1._0 > 2) {"), "{js}");
 }
 
 /// tests/options_wasm.zsc: `?` and `if let` on the prelude's types in `@wasm fn`s, as wasm and as JS

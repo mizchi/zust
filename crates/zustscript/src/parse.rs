@@ -422,7 +422,7 @@ impl Parser {
                     name.clone()
                 };
                 self.expect(";")?;
-                Ok(Item::Extern { name, module, generics, args, ret, js, pos })
+                Ok(Item::Extern { name, module, generics, args, ret, js, pos, zsc: false })
             }
             "wasm" => {
                 if self.is("{")? {

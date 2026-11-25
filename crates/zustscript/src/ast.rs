@@ -292,7 +292,9 @@ pub enum Item {
     /// (`is_async`: written `async fn`: its callers get a `Promise<T>` of its result `T`, and its body may `await`)
     Fn { name: String, public: bool, wasm: bool, simd: bool, relaxed: bool, is_async: bool, generics: Vec<String>, bounds: Vec<(String, String)>, args: Vec<(String, TyS)>, ret: Option<TyS>, body: Expr, pos: Pos },
     /// `extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";`
-    Extern { name: String, module: Option<String>, generics: Vec<String>, args: Vec<TyS>, ret: TyS, js: String, pos: Pos },
+    /// (`zsc`: an `export fn` of another zustscript module (zscimport.rs): its values are zustscript's, not converted
+    /// as JS's are)
+    Extern { name: String, module: Option<String>, generics: Vec<String>, args: Vec<TyS>, ret: TyS, js: String, pos: Pos, zsc: bool },
     /// `extern type Response;` / `extern "react" type RefObject<T>;` / `extern type El = "HTMLElement" { .. }`: a JS
     /// value zustscript does not look inside, with the properties and methods declared for it. `ts`: its name in
     /// TS (and in JS, for a module's: the name imported)
@@ -305,7 +307,9 @@ pub enum Item {
 
 /// The prelude's types, which a file uses without declaring them: `enum Option<T> { None, Some(T) }` and
 /// `enum Result<T, E> { Ok(T), Err(E) }` (ordinary enums otherwise: the same JS, `.d.ts` and Rust as if declared)
-pub const PRELUDE: &[(&str, &[&str], &[(&str, &[&str])])] = &[("Option", &["T"], &[("None", &[]), ("Some", &["T"])]), ("Result", &["T", "E"], &[("Ok", &["T"]), ("Err", &["E"])])];
+/// (name, type parameters, variants with their fields' types)
+pub type PreludeType = (&'static str, &'static [&'static str], &'static [(&'static str, &'static [&'static str])]);
+pub const PRELUDE: &[PreludeType] = &[("Option", &["T"], &[("None", &[]), ("Some", &["T"])]), ("Result", &["T", "E"], &[("Ok", &["T"]), ("Err", &["E"])])];
 
 /// A prelude type is at line 0 (no source line is)
 pub fn is_prelude(pos: Pos) -> bool {
