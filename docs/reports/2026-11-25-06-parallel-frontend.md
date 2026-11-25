@@ -110,8 +110,8 @@ refs (3 ms) come to about 52 ms of about 260 ms.
   - With `jobs` 1 it is a plain loop on the calling thread.
   - Stacks are 8 MiB.
 
-  The mode comes from `ZUSTC_PAR=fork|threads|off` (default `fork`), or from `par::set_mode` for a host that runs
-  the driver in process.
+  The mode comes from `ZUSTC_PAR=fork|threads|off` (default `fork`), or per session from `Options2::par` for a
+  host that runs the driver in process.
 - **Item summaries on threads.** The summaries come back as values, not encoded.
 - **`check_many` on threads.**
   - The child's per-function work moved into `send_checked`, which the forked children and the threads now share.
@@ -233,7 +233,7 @@ uncontended mutex is cheap, so rustc's `DynSync` / `Lock` mode machinery is not 
 
 The default should follow the host:
 
-- **in a process with threads:** threads. This covers zust-analyzer, which should also use `par::set_mode`, and with
+- **in a process with threads:** threads. This covers zust-analyzer, which should set `Options2::par`, and with
   2 jobs, rustc's choice for memory and for the editor's own threads;
 - **in a single-threaded process:** fork, until threads match it on memory.
 

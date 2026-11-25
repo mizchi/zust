@@ -215,6 +215,7 @@ Documents are synced in full: didChange receives the whole text.
 | `ZUST_ANALYZER_NO_STD` | do not index std |
 | `ZUST_ANALYZER_NO_DEPS` | do not index dependency crates |
 | `ZUST_ANALYZER_SYSROOT` | sysroot to look for the std sources in (default: `rustc --print sysroot`) |
+| `ZUST_ANALYZER_JOBS` | how many threads a document's check may use (default 2): the first check of a large document runs its parallel parts on worker threads |
 
 Known differences from rust-analyzer are listed in [CONTRIBUTING.md](CONTRIBUTING.md#zust-analyzer-remaining-differences-from-rust-analyzer).
 

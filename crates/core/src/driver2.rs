@@ -611,6 +611,9 @@ pub struct Options2 {
     pub cfgs: Vec<(String, Option<String>)>,
     /// `--test`: build the crate's `#[test]` functions with a harness for its `main` (crate::test_harness)
     pub test: bool,
+    /// How the parallel parts run (crate::par): None is what `ZUSTC_PAR` says (fork by default). A host with threads
+    /// of its own, where forking is not done, asks for threads (zust-analyzer)
+    pub par: Option<crate::par::Mode>,
 }
 
 /// Writes the output from the functions and data build.rs lays out (in place of the ELF object)
@@ -618,7 +621,7 @@ pub type ModuleWriter = fn(&[(String, Vec<u8>, Vec<crate::ir::Reloc>, bool)], &[
 
 impl Default for Options2 {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021, cfgs: vec![], test: false }
+        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021, cfgs: vec![], test: false, par: None }
     }
 }
 
@@ -977,7 +980,7 @@ impl Session2 {
             // (not in a process of more threads than this one: single_threaded)
             // (ZUSTC_PAR=threads: on worker threads of this process instead (crate::par), in any process; the
             // summaries come back as they are, not encoded)
-            let par = crate::par::mode();
+            let par = self.opts.par.unwrap_or_else(crate::par::mode);
             let jobs = match par {
                 crate::par::Mode::Threads => self.opts.jobs.min(miss.len() / par_min("ZUSTC_SUMMARY_PAR_MIN", 32)).max(1),
                 crate::par::Mode::Fork if single_threaded() => self.opts.jobs.min(miss.len() / 32).max(1),
@@ -987,15 +990,13 @@ impl Session2 {
             if jobs > 1 && par == crate::par::Mode::Threads {
                 let tls = WorkerTls::take();
                 let (items, sums, src) = (&items, &sums, &src);
-                got = crate::par::map(jobs, miss.len(), 4, &|| tls.set(), &|j| {
+                // (失敗したものは返さない: 親が作り直してエラーを出す. Nothing after the first that fails is started:
+                // the loop below returns at it, as the serial one does, so the rest would be work for nothing)
+                got = crate::par::map_until(jobs, miss.len(), 4, &|| tls.set(), &|_, j| {
                     let it = &items[miss[j].0];
                     let ow = if pass == 1 { crate::ast_summary::owner_of(it, sums) } else { None };
-                    // (失敗したものは返さない: 親が作り直してエラーを出す)
                     crate::ast_summary::parse_and_summarize(src, it, ow.as_ref()).ok()
-                })
-                .into_iter()
-                .map(Option::flatten)
-                .collect();
+                });
             } else if jobs > 1 {
                 let mut kids: Vec<(i32, i32)> = vec![];
                 for kk in 0..jobs {
@@ -6446,7 +6447,7 @@ impl Session2 {
             Ok((req, Some(e)))
         };
         // (ZUSTC_PAR=threads: on worker threads (crate::par) instead of forked children, in any process)
-        let par = crate::par::mode();
+        let par = self.opts.par.unwrap_or_else(crate::par::mode);
         let threads = par == crate::par::Mode::Threads;
         let per_job = par_min("ZUSTC_CHECK_FORK_MIN", 32);
         let jobs = if check_only && par != crate::par::Mode::Off { self.opts.jobs.min(ids.len() / per_job).max(1) } else { 1 };

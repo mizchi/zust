@@ -69,6 +69,15 @@ impl Default for Server {
     }
 }
 
+/// How many threads a document's check may use (`ZUST_ANALYZER_JOBS`, default 2, as rustc's parallel front end: the
+/// first check of a large document gets most of its gain for less memory than more threads take). The server has
+/// threads of its own, where the driver does not fork, so the check's parallel parts run on worker threads
+/// (zust_core::par, issue #165)
+fn check_jobs() -> usize {
+    static J: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *J.get_or_init(|| std::env::var("ZUST_ANALYZER_JOBS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(2).max(1))
+}
+
 impl Server {
     pub fn new() -> Server {
         Server {
@@ -217,7 +226,7 @@ impl Server {
         let doc = self
             .docs
             .entry(uri.clone())
-            .or_insert_with(|| Doc { s: Session2::new(Options2 { jobs: 1, ..Default::default() }), text: String::new(), diags: vec![], syms: None, idx: None });
+            .or_insert_with(|| Doc { s: Session2::new(Options2 { jobs: check_jobs(), par: Some(zust_core::par::Mode::Threads), ..Default::default() }), text: String::new(), diags: vec![], syms: None, idx: None });
         // 本文が同じ (保存しただけ等) なら前回の診断をそのまま返す。比較は memcmp なのでハッシュより安い
         if !doc.text.is_empty() && doc.text == text {
             return publish(&uri, version, doc.diags.clone());
