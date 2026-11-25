@@ -3220,14 +3220,16 @@ impl Cx<'_> {
     }
 
     /// A temporary of type t that holds what srcs borrow and whose drop may use it: a hidden local of the statement,
-    /// dropped at its end (bk_temps_end), so the loans live until then
-    pub(crate) fn bk_drop_temp(&mut self, t: Ty, srcs: Vec<Src>) {
+    /// dropped at its end (bk_temps_end), so the loans live until then. Returns the local (a call that takes the
+    /// temporary by value ends what it holds there)
+    pub(crate) fn bk_drop_temp(&mut self, t: Ty, srcs: Vec<Src>) -> u32 {
         let id = self.bk.locals.len() as u32;
         self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP, via_ref: false });
         self.bk_ev(Ev::Bind(id, true));
         self.bk_ev(Ev::Def(id, srcs));
         self.bk.stmt_temps.push(id);
         self.bk.drop_temps.push(id);
+        id
     }
 
     pub(crate) fn bk_drop_held(&mut self, ts: &[u32], sp: Sp) {

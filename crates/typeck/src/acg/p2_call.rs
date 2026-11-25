@@ -1100,6 +1100,9 @@ impl Cx<'_> {
             }
         }
         let mut recv_temp = None;
+        // (the hidden local that holds a temporary receiver's loans for its drop (bk_drop_temp): a `self` by value
+        // takes it, so its loans end at the call, `D(&x).consume()`)
+        let mut recv_holder: Option<u32> = None;
         // (whether the receiver was reached through a reference: a `self` by value there moves out of it)
         let mut through_ref = false;
         // (a Box value that is not a place: `Box::new(s).m()`, for `self: Box<Self>`)
@@ -1117,7 +1120,7 @@ impl Cx<'_> {
             let srcs = if watch { self.bk_frame_end() } else { vec![] };
             let r = r?;
             if !srcs.is_empty() && self.dropck(r.1, 0) {
-                self.bk_drop_temp(r.1, srcs);
+                recv_holder = Some(self.bk_drop_temp(r.1, srcs));
             }
             // 一時値の受け手は文の終わりまで所有する (値で受けるメソッドならムーブ)
             if let (Some(v), t) = r {
@@ -1317,6 +1320,9 @@ impl Cx<'_> {
                         Some(f) => self.clear_flag(f),
                         None => self.mark_moved(recv),
                     }
+                    if let Some(h) = recv_holder {
+                        self.bk_ev(borrowck::Ev::Def(h, vec![]));
+                    }
                     return self.call_fn(id, Some((bv, p0t)), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
                 }
             }
@@ -1495,6 +1501,9 @@ impl Cx<'_> {
             match recv_temp {
                 Some(f) => self.clear_flag(f),
                 None => self.mark_moved(recv),
+            }
+            if let Some(h) = recv_holder.filter(|_| !through_ref) {
+                self.bk_ev(borrowck::Ev::Def(h, vec![]));
             }
         }
         let args: Vec<&Expr> = margs.iter().collect();

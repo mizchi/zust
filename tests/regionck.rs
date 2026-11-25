@@ -4331,3 +4331,15 @@ fn k4() { let mut s = String::new(); let r = &*s; s.push('a'); let _ = r; }
 fn main() {}
 "#, &[(1, r#"cannot assign to `*b` because it is borrowed (at 1:45)"#), (2, r#"cannot borrow `v` as mutable because it is also borrowed as immutable (at 2:41)"#), (3, r#"cannot borrow `v` as mutable because it is also borrowed as immutable (at 3:42)"#), (4, r#"cannot borrow `s` as mutable because it is also borrowed as immutable (at 4:48)"#)], "pos2");
 }
+
+#[test]
+fn part29_review() {
+    // (a temporary receiver that a method takes by value (`consume(self)`) holds nothing of what it borrowed after
+    // the call: no E0506 for the assignment after it. One borrowed (`peek(&self)`) holds it to the end of the
+    // statement, E0506 as in rustc 1.97)
+    errors_at("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) {} }\nimpl D<'_> { fn consume(self) -> i32 { *self.0 } }\nfn main() {\n    let mut x = 1;\n    let t = (D(&x).consume(), { x = 2; });\n    let _ = t;\n    println!(\"{}\", x);\n}\n", &[], "r3");
+    errors_at("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) {} }\nimpl D<'_> { fn peek(&self) -> i32 { *self.0 } }\nfn main() {\n    let mut x = 1;\n    let t = (D(&x).peek(), { x = 2; });\n    let _ = t;\n}\n", &[(6, "cannot assign to `x` because it is borrowed")], "r4");
+    // (a returned local assigned after the use of a temporary it borrowed: rustc 1.97 reports E0515 at the return,
+    // as zustc does)
+    errors_at("fn f() -> &'static str {\n    let mut r = String::new().as_str();\n    println!(\"{}\", r);\n    r = \"ok\";\n    r\n}\nfn main() { println!(\"{}\", f()); }\n", &[(5, "cannot return value referencing temporary value (E0515)")], "r2");
+}

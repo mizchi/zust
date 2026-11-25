@@ -674,7 +674,7 @@ impl Cx<'_> {
             let srcs = if watch { self.bk_frame_end() } else { vec![] };
             let r = r?;
             if !srcs.is_empty() && self.dropck(r.1, 0) {
-                self.bk_drop_temp(r.1, srcs);
+                let _ = self.bk_drop_temp(r.1, srcs);
             }
             if let (Some(v), t) = r {
                 self.own_temp(v, t);
