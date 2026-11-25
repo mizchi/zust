@@ -1587,8 +1587,18 @@ impl Session2 {
                         })
                 });
                 if let Some(d) = decl {
-                    if !word(src.get(d.start..d.end).unwrap_or(""), "where") {
+                    let dt = src.get(d.start..d.end).unwrap_or("");
+                    if !word(dt, "where") {
                         return Err(format!("{}:1: impl has stricter requirements than trait (E0276)", it.line));
+                    }
+                    // (both with a `where`: an outlives between the GAT's own lifetimes that the declaration's do not
+                    // imply, by their places (`where 'b2: 'a2` for the trait's `where 'a1: 'b1`), at the impl's)
+                    let t_full = src.get(it.start..it.end).unwrap_or("");
+                    if let Some(off) = gat_stricter_outlives(dt, t_full) {
+                        let abs = it.start + off;
+                        let line = it.line + t_full[..off].matches('\n').count();
+                        let col = abs - src[..abs].rfind('\n').map_or(0, |k| k + 1) + 1;
+                        return Err(format!("{line}:{col}: impl has stricter requirements than trait (E0276)"));
                     }
                 }
             }
@@ -9184,7 +9194,8 @@ pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
     let crate::parse::ItemKind::Fn(mut sig, Some(mut block)) = item.kind else { return Ok(None) };
     let mut lets = vec![];
     for (k, (p, _)) in sig.params.iter_mut().enumerate() {
-        if matches!(p, Pat::Ident(..) | Pat::Wild) {
+        // (a binding by reference or with a subpattern (`ref a @ b: U`) binds through a `let` too)
+        if matches!(p, Pat::Ident(false, _, _, None) | Pat::Wild) {
             continue;
         }
         let name = format!("__exr_arg{k}");
@@ -10277,6 +10288,8 @@ fn hoisted_err_holds(msg: &str) -> bool {
         "enum discriminant overflowed (E0370)", "field must implement `Copy`", "this trait cannot be derived for unions", "cannot find derive macro `",
         // (an item's own syntax: `struct Test { Very\n Bad }` in a fn body)
         "expected `:` (found `", "expected `,` (found `", "free static item without body",
+        // (a type's syntax in a fn's signature: `Box<dyn X< : 32 >>` in a `const _: () = { .. }`'s block)
+        "expected a type (found `", "expected `,` or `>` (found `",
         // (`#[test]` on an item in a fn body)
         "the `test` attribute may only be used on a free function",
         // (`const FOO = 1;` in a fn body)
@@ -10323,6 +10336,53 @@ fn allow_variant_bindings(src: &str, errs: &mut Vec<String>) {
     if allowed {
         errs.retain(|e| !e.ends_with("(E0170)"));
     }
+}
+
+/// A fn's text: its parameters' types (with their patterns) and its result's, each a piece, past its generics
+/// (`fn f<F: Fn(u8)>(x: F, s: &'static str) -> u8 where ..`: `x: F`, `s: &'static str`, `u8`)
+fn sig_type_pieces(t: &str) -> Vec<&str> {
+    let Some(k) = t.find("fn ") else { return vec![] };
+    let b = t.as_bytes();
+    let mut i = k + 3;
+    // (the name, then its generics, to the parameters' `(`)
+    let mut angle = 0i32;
+    while i < b.len() {
+        match b[i] {
+            b'<' => angle += 1,
+            b'>' if i > 0 && b[i - 1] != b'-' => angle -= 1,
+            b'(' if angle == 0 => break,
+            _ => {}
+        }
+        i += 1;
+    }
+    let mut pieces = vec![];
+    let mut d = 0i32;
+    let mut start = i + 1;
+    let mut j = i + 1;
+    while j < b.len() {
+        match b[j] {
+            b'(' | b'[' | b'<' => d += 1,
+            b'>' if b[j - 1] == b'-' => {}
+            b')' if d == 0 => {
+                pieces.push(t[start..j].trim());
+                break;
+            }
+            b')' | b']' | b'>' => d -= 1,
+            b',' if d == 0 => {
+                pieces.push(t[start..j].trim());
+                start = j + 1;
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    // (the result: after `->`, to its where clause, body or `;`)
+    if let Some(r) = t.get(j + 1..).and_then(|r| r.trim_start().strip_prefix("->")) {
+        let end = [r.find(" where"), r.find("\nwhere"), r.find('{'), r.find(';')].into_iter().flatten().min().unwrap_or(r.len());
+        pieces.push(r[..end].trim());
+    }
+    pieces.retain(|p| !p.is_empty());
+    pieces
 }
 
 /// E0276 "impl has stricter requirements than trait", at the bound: a method of an impl of a trait of the program's
@@ -10435,6 +10495,19 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
             })
             .collect()
     };
+    // (whether each of a method's own type parameters is bounded by `'static`: inline, or in its where clause)
+    let static_params = |g: &crate::parse::Generics| -> Vec<bool> {
+        let st = |bs: &[Bound]| bs.iter().any(|b| matches!(b, Bound::Lifetime(l) if l == "'static"));
+        g.params
+            .iter()
+            .filter_map(|q| match q {
+                GParam::Ty(n, bs, _) => Some(
+                    st(bs) || g.preds.iter().any(|(t, pbs)| matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == *n && p.segs[0].args.is_empty()) && st(pbs)),
+                ),
+                _ => None,
+            })
+            .collect()
+    };
     // (a member's signature alone, as a declaration: its body is not parsed)
     let sig = |t: &str| -> Option<crate::parse::FnSig> {
         let decl = match fn_body_start(t) {
@@ -10468,7 +10541,7 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
     let mut impl_trait: crate::fxhash::FxMap<u32, Option<u32>> = Default::default();
     let mut by_text: crate::fxhash::FxMap<&str, Option<u32>> = Default::default();
     // (a member's verdict: E0276 at a bound, or E0049 with (its own, the trait's) type parameter counts)
-    let mut verdicts: crate::fxhash::FxMap<(u32, &str), Option<Result<crate::parse::Pos, (usize, usize, bool)>>> = Default::default();
+    let mut verdicts: crate::fxhash::FxMap<(u32, &str, bool), Option<Result<crate::parse::Pos, (usize, usize, bool)>>> = Default::default();
     for m in items {
         let K::ImplMember(h) = m.kind else { continue };
         // (a fn of the impl: a generic one for E0276, any for E0049 against a generic method of the trait)
@@ -10482,7 +10555,29 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
             let head = &t[..t.find('{').unwrap_or(t.len())];
             let f = head.find(" for ")?;
             let before = &head[..f];
-            let before = before[..before.find('<').filter(|&l| before[l..].contains('>') && !before[..l].ends_with("impl")).unwrap_or(before.len())].trim_end();
+            // (the trait's path: after `impl` and its generics, before the trait's own arguments (`impl<'a> A<'a>`))
+            let path = match before.find("impl") {
+                Some(k) => {
+                    let r = before[k + 4..].trim_start();
+                    match r.strip_prefix('<') {
+                        Some(g) => {
+                            let mut d = 1;
+                            let end = g.char_indices().find(|&(_, c)| {
+                                d += match c {
+                                    '<' => 1,
+                                    '>' => -1,
+                                    _ => 0,
+                                };
+                                d == 0
+                            });
+                            end.map_or(r, |(e, _)| &g[e + 1..])
+                        }
+                        None => r,
+                    }
+                }
+                None => before,
+            };
+            let before = path[..path.find('<').unwrap_or(path.len())].trim();
             *by_text.entry(before).or_insert_with(|| {
                 let tw = words(before);
                 let tr = tw.last()?;
@@ -10496,7 +10591,10 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
         // stricter, if one is)
         let mt = text(m);
         let key = &mt[..fn_body_start(mt).unwrap_or(mt.len())];
-        let at = verdicts.entry((th, key)).or_insert_with(|| {
+        // (whether the impl's header gives the trait `'static`: part of the verdict, with the signature)
+        let header = items.get(h as usize).map(|it| text(it)).unwrap_or("");
+        let header_static = header[..header.find('{').unwrap_or(header.len())].contains("'static");
+        let at = verdicts.entry((th, key, header_static)).or_insert_with(|| {
             let ms = sig(mt)?;
             let ds = decl_sigs.entry((th, name)).or_insert_with(|| sig(text(d))).clone()?;
             let (mp, dp) = (params(&ms.generics), params(&ds.generics));
@@ -10515,10 +10613,39 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
                 }
                 return Some(Err((mp.len(), dp.len(), ms.recv.is_some())));
             }
-            mp.iter().zip(&dp).find_map(|(mb, db)| {
+            let by_trait = mp.iter().zip(&dp).find_map(|(mb, db)| {
                 let allowed = close(db.iter().map(|x| x.0.clone()).collect());
                 mb.iter().find(|(n, _)| n != "Sized" && !allowed.contains(n)).map(|x| Ok(x.1))
-            })
+            });
+            if by_trait.is_some() {
+                return by_trait;
+            }
+            // (a type parameter of the impl's method bounded by `'static` where the trait's is not (`F: Debug +
+            // 'static` for the trait's `F: Debug + 'a`): stricter, unless the impl's header gives the trait `'static`,
+            // or the trait's parameters and result name `'static` and that type parameter, which may imply it (`x:
+            // &'static T`; not `x: &'static u8`). At the first `'static` of the member's signature)
+            let (ms_st, ds_st) = (static_params(&ms.generics), static_params(&ds.generics));
+            // (each of the trait's parameters' types and its result's: one that names `'static` and the type
+            // parameter may imply the bound (`x: &'static T`, `x: W<'static, T>`); `x: T, s: &'static str` does not)
+            let pieces = sig_type_pieces(text(d));
+            let word = |p: &str, n: &str| {
+                p.match_indices(n).any(|(i, _)| {
+                    let id = |c: char| c.is_alphanumeric() || c == '_';
+                    !p[..i].ends_with(id) && !p[i + n.len()..].starts_with(id)
+                })
+            };
+            let names: Vec<&str> = ds.generics.params.iter().filter_map(|q| match q {
+                GParam::Ty(n, ..) => Some(n.as_str()),
+                _ => None,
+            }).collect();
+            let implied = |n: &str| pieces.iter().any(|p| p.contains("'static") && word(p, n));
+            if ms_st.iter().zip(&ds_st).zip(&names).any(|((m, d), n)| *m && !*d && !implied(n)) && !header_static {
+                let off = key.find("'static")?;
+                let line = key[..off].matches('\n').count() + 1;
+                let col = off - key[..off].rfind('\n').map_or(0, |k| k + 1);
+                return Some(Ok(crate::parse::Pos { line: line as u32, col: col as u32 }));
+            }
+            None
         });
         match *at {
             Some(Ok(pos)) => {
@@ -11743,6 +11870,113 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         }
     }
     std::mem::take(&mut g.pending)
+}
+
+/// A generic associated type's lifetimes and the outlives among them its text writes, inline (`<'a: 'b>`) or in its
+/// where clause (`where 'a: 'b + 'c`): (lifetime names in order, (from, to, offset in the text) with `'static` as -1,
+/// whether one names a lifetime not its own (the trait's, the impl's), which is left out)
+fn gat_outlives(t: &str) -> (Vec<String>, Vec<(i32, i32, usize)>, bool) {
+    let mut names = vec![];
+    let mut raw: Vec<(String, String, usize)> = vec![];
+    let Some(lt) = t.find('<') else { return (names, vec![], false) };
+    let mut depth = 0i32;
+    let mut gt = None;
+    for (i, c) in t[lt..].char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    gt = Some(lt + i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(gt) = gt else { return (names, vec![], false) };
+    // (a predicate `'a: 'b + 'c` at offset base of the text: its pairs)
+    let mut preds = |s: &str, base: usize, raw: &mut Vec<(String, String, usize)>| {
+        let mut start = 0;
+        let mut d = 0i32;
+        let bytes = s.as_bytes();
+        for i in 0..=s.len() {
+            let c = bytes.get(i).copied();
+            match c {
+                Some(b'<' | b'(' | b'[') => d += 1,
+                Some(b'>' | b')' | b']') => d -= 1,
+                _ => {}
+            }
+            if c.is_none() || (c == Some(b',') && d == 0) {
+                let part = &s[start..i];
+                // (at the bound, as rustc points: `'a2` of `'b2: 'a2`)
+                if let Some(c) = part.find(':') {
+                    let l = part[..c].trim();
+                    if l.starts_with('\'') {
+                        let mut at = c + 1;
+                        for b in part[c + 1..].split('+') {
+                            let lead = b.len() - b.trim_start().len();
+                            if b.trim().starts_with('\'') {
+                                raw.push((l.to_string(), b.trim().to_string(), base + start + at + lead));
+                            }
+                            at += b.len() + 1;
+                        }
+                    }
+                }
+                start = i + 1;
+            }
+        }
+    };
+    let gens = &t[lt + 1..gt];
+    for g in gens.split(',') {
+        let g = g.trim();
+        if g.starts_with('\'') {
+            names.push(g.split(':').next().unwrap_or(g).trim().to_string());
+        }
+    }
+    preds(gens, lt + 1, &mut raw);
+    // (the where clause: its last `where`, to the `;`)
+    let rest = &t[gt..];
+    if let Some(w) = rest.rfind("where") {
+        let ws = gt + w + 5;
+        let we = t[ws..].find(';').map_or(t.len(), |k| ws + k);
+        preds(&t[ws..we], ws, &mut raw);
+    }
+    let idx = |n: &str| if n == "'static" { Some(-1) } else { names.iter().position(|x| x == n).map(|k| k as i32) };
+    let rel: Vec<(i32, i32, usize)> = raw.iter().filter_map(|(a, b, o)| Some((idx(a)?, idx(b)?, *o))).collect();
+    let outer = rel.len() < raw.len();
+    (names, rel, outer)
+}
+
+/// E0276 for a generic associated type: the offset in the impl's text of an outlives between its own lifetimes that
+/// the trait's declaration does not imply (by the lifetimes' places; the same number of them)
+fn gat_stricter_outlives(decl: &str, imp: &str) -> Option<usize> {
+    let (dn, drel, d_outer) = gat_outlives(&blank_comments(decl));
+    let (mn, mrel, _) = gat_outlives(&blank_comments(imp));
+    // (a declaration's outlives through a lifetime not its own (`'a: 't, 't: 'b` with the trait's 't) may imply one
+    // of the impl's (`'a: 'b`): the header's arguments that relate them are not read, so it is not compared)
+    if dn.len() != mn.len() || d_outer {
+        return None;
+    }
+    let implied = |a: i32, b: i32| {
+        if a == b || a == -1 {
+            return true;
+        }
+        let (mut seen, mut work) = (vec![a], vec![a]);
+        while let Some(x) = work.pop() {
+            for &(p, q, _) in &drel {
+                if p == x && !seen.contains(&q) {
+                    if q == b || q == -1 {
+                        return true;
+                    }
+                    seen.push(q);
+                    work.push(q);
+                }
+            }
+        }
+        false
+    };
+    mrel.iter().find(|&&(a, b, _)| !implied(a, b)).map(|x| x.2)
 }
 
 /// The where clause of an item's header text: (subject, bounds) of each predicate, split at depth 0 (None: no where)
