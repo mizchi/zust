@@ -1142,11 +1142,19 @@ impl Cx<'_> {
     /// cond が立っていれば、算術の検査の panic (kind: 0 足し算 1 引き算 2 掛け算 3 0 除算 4 0 の剰余
     /// 5 (未使用) 6 符号反転 7 左シフト 8 右シフト 9 割り算のあふれ 10 剰余のあふれ)
     pub(crate) fn ovf_panic(&mut self, cond: Value, kind: u8, span: Sp) {
-        let _ = (kind, span);
+        self.cond_panic(cond, kind, span, None);
+    }
+
+    /// A panic with std's message for a check that is not an overflow (`(-4i32).isqrt()`), at span when cond holds
+    pub(crate) fn msg_panic(&mut self, cond: Value, msg: &str, span: Sp) {
+        self.cond_panic(cond, 12, span, Some(msg.to_string()));
+    }
+
+    fn cond_panic(&mut self, cond: Value, kind: u8, span: Sp, msg: Option<String>) {
         // std のプログラム: 条件つき trap (main が登録したハンドラが panic として 101 で終わらせる)。
         // 分岐とブロックを増やさないので、検査のコンパイルの重さは命令 1 つ分
         if self.prog.panic_handler.is_none() {
-            let code = self.trap_site(kind, span, None);
+            let code = self.trap_site(kind, span, msg);
             self.b.ins().trapnz(cond, code);
             return;
         }
