@@ -4114,3 +4114,55 @@ fn part27_assoc_type_into_dyn() {
     assert!(d.len() == 1 && d[0].0 == 8 && d[0].1.contains("the associated type `<T as Iter>::Item` may not live long enough (it must outlive `'static`) (E0310)"), "{d:?}");
     assert_eq!(check("trait X {}\ntrait Iter {\n    type Item: X;\n    fn into_item(self) -> Self::Item;\n}\nfn ok1<'a, T: Iter>(v: T) -> Box<dyn X + 'a>\n    where T::Item: 'a\n{\n    let item = v.into_item();\n    Box::new(item)\n}\nfn ok2<T: Iter>(v: T) -> Box<dyn X + 'static>\n    where T::Item: 'static\n{\n    Box::new(v.into_item())\n}\nfn main() {}\n"), vec![], "t3");
 }
+
+#[test]
+fn part28_generic_dyn_args() {
+    // (a trait object's type arguments that name a type parameter: in a generic type's field (`Box<dyn Fn(U) -> U>`,
+    // `&dyn A<T>`), a generic fn's parameter and result. They are given as the type's or fn's arguments are; the
+    // parameters' names were looked up where the type was used ("cannot find type `U`"), and nothing inferred them)
+    assert_eq!(check("struct S<U> { f: Box<dyn Fn(U) -> U> }\nfn mk() -> S<i32> { S { f: Box::new(|x| x + 1) } }\nfn app<T>(s: &S<T>, x: T) -> T { (s.f)(x) }\nfn app2(s: &S<i32>, x: i32) -> i32 { (s.f)(x) * 2 }\nfn main() {\n    let s = mk();\n    println!(\"{} {}\", app(&s, 3), app2(&s, 3));\n}\n"), vec![], "u1");
+    assert_eq!(check("trait A<T> { fn get(&self) -> T; }\nstruct B<'a, T: 'a>(&'a (dyn A<T> + 'a));\nimpl A<i32> for i32 { fn get(&self) -> i32 { *self } }\nfn f(v: &dyn A<i32>) -> i32 {\n    let b = B(v);\n    b.0.get()\n}\nfn g<'a>(v: &'a dyn A<i32>) -> B<'a, i32> { B(v) }\nfn main() { println!(\"{} {}\", f(&3), g(&4).0.get()); }\n"), vec![], "u2");
+    assert_eq!(check("fn bar<'a, T: Clone + 'a>(t: T) -> Box<dyn FnMut() -> T + 'a> { Box::new(move || t.clone()) }\nfn main() {\n    let mut f = bar(42_u32);\n    assert_eq!(f(), 42);\n    let mut g = bar(\"forty-two\");\n    assert_eq!(g(), \"forty-two\");\n}\n"), vec![], "u3");
+    assert_eq!(check("trait Clam<A> { fn chowder(&self, y: A); }\nstruct Foo<A> { x: A }\nimpl<A> Clam<A> for Foo<A> { fn chowder(&self, _y: A) {} }\nfn f<A>(x: Box<dyn Clam<A>>, a: A) { x.chowder(a); }\nfn main() {\n    let c = Foo { x: 42isize };\n    let d: Box<dyn Clam<isize>> = Box::new(c) as Box<dyn Clam<isize>>;\n    f(d, 3);\n}\n"), vec![], "u4");
+    // (a closure where the parameter is not known yet: coerced to the trait object as written, as before)
+    assert_eq!(check("fn apply<T>(f: Box<dyn Fn(T) -> T>, x: T) -> T { f(x) }\nfn twice<T: Copy>(f: &dyn Fn(T) -> T, x: T) -> T { f(f(x)) }\nfn each<T>(v: Vec<T>, f: &mut dyn FnMut(T)) { for x in v { f(x); } }\nfn main() {\n    let typed: Box<dyn Fn(i64) -> i64> = Box::new(|x| x * 3);\n    let mut s = 0;\n    each(vec![1, 2, 3], &mut |x| s += x);\n    println!(\"{} {} {} {}\", apply(Box::new(|x| x + 1), 3), apply(typed, 5), twice(&|x| x * 2, 3), s);\n}\n"), vec![], "u5");
+    // (the region check of a generic type's trait object that refers to a local, which a type annotation error
+    // hid: regions/regions-close-object-into-object-1.rs)
+    let d = check("trait A<T> {}\nstruct B<'a, T: 'a>(&'a (dyn A<T> + 'a));\ntrait X {}\nimpl<'a, T> X for B<'a, T> {}\nfn f<'a, T: 'static, U>(v: Box<dyn A<T> + 'static>) -> Box<dyn X + 'static> {\n    Box::new(B(&*v)) as Box<dyn X>\n}\nfn g(v: Box<dyn A<i32> + 'static>) -> Box<dyn X + 'static> {\n    Box::new(B(&*v))\n}\nfn main() {}\n");
+    assert!(d.len() == 2 && d[0].0 == 6 && d[1].0 == 9 && d.iter().all(|x| x.1.contains("cannot return a reference to a local variable: `*v` is dropped when the function returns")), "{d:?}");
+}
+
+#[test]
+fn part28_review() {
+    // (#154's review: a trait's name behind a pointer in a 2015 edition's signature and struct field is its trait
+    // object (the edition is known when they are resolved); a closure for `Box<dyn Fn(T) -> U>` coerced where T is known
+    // and U not yet; a program's own type named like a mark (`__S0`) is that type)
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2015, ..Options2::default() });
+    let d: Vec<(usize, String)> = s.check("trait X { fn v(&self) -> i32; }\nimpl X for i32 { fn v(&self) -> i32 { *self } }\nstruct H<'a> { x: &'a X }\nfn take(x: &X) -> i32 { x.v() }\nfn main() { let h = H { x: &5 }; println!(\"{} {}\", take(&3), h.x.v()); }\n").into_iter().map(|d| (d.line, d.msg)).collect();
+    assert_eq!(d, vec![], "v1");
+    // (the `bare_trait_objects` lint denied: such an object is an error, at the line that names it)
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let d: Vec<(usize, String)> = s.check("#[deny(bare_trait_objects)]\nfn function(x: &SomeTrait) {\n    let _ = x;\n}\ntrait SomeTrait {}\nfn main() {}\n").into_iter().map(|d| (d.line, d.msg)).collect();
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("trait objects without an explicit `dyn` are deprecated"), "{d:?}");
+    assert_eq!(check("fn f<T, U>(a: T, cb: Box<dyn Fn(T) -> U>, b: U) -> U { let _ = b; cb(a) }\nstruct S2<T, U> { a: T, cb: Box<dyn Fn(T) -> U>, b: U }\nfn main() {\n    println!(\"{}\", f(1i32, Box::new(|x: i32| x), 2i32));\n    let s = S2 { a: 1i32, cb: Box::new(|x: i32| x + 10), b: 2i32 };\n    println!(\"{} {}\", (s.cb)(s.a), s.b);\n}\n"), vec![], "v2");
+    assert_eq!(check("struct A;\n#[allow(non_camel_case_types)]\nstruct __S0(i32);\nfn main() { let x: __S0 = __S0(4); let _a: A = A; println!(\"{}\", x.0); }\n"), vec![], "v3");
+    // (a generic parameter named like a mark is that parameter; a name like a struct's mark that names nothing is
+    // no type; a crate's `allow` after its `deny` of bare_trait_objects allows them)
+    assert_eq!(check("#[allow(non_camel_case_types)]\nfn f<T: Copy, __zp0_U>(_a: T, x: __zp0_U) -> __zp0_U { x }\nfn main() { let y: u8 = f(1i32, 7u8); println!(\"{}\", y); }\n"), vec![], "v4");
+    assert_eq!(check("#[allow(non_camel_case_types)]\ntrait A<X> { fn get(&self) -> X; }\nimpl A<u8> for u8 { fn get(&self) -> u8 { *self } }\n#[allow(non_camel_case_types)]\nfn f<T, __zp0_U>(_t: T, x: &dyn A<__zp0_U>) -> __zp0_U { x.get() }\nfn main() { let y: u8 = f(1i32, &7u8 as &dyn A<u8>); println!(\"{}\", y); }\n"), vec![], "v4b");
+    let d = check("fn main() { let _x: __zs0 = todo!(); }\n");
+    assert!(d.len() == 1 && d[0].1.contains("cannot find type `__zs0`"), "{d:?}");
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let d: Vec<(usize, String)> = s.check("#![deny(bare_trait_objects)]\n#![allow(bare_trait_objects)]\ntrait X {}\nimpl X for i32 {}\nfn take(_x: &X) {}\nfn main() { take(&1); }\n").into_iter().map(|d| (d.line, d.msg)).collect();
+    assert_eq!(d, vec![], "v5");
+    // (an item's deny of the lint with others before it; a trait object's argument `&mut i32` is no `&T`)
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let d: Vec<(usize, String)> = s.check("#[deny(unused, bare_trait_objects)]\nfn function(x: &SomeTrait) {\n    let _ = x;\n}\ntrait SomeTrait {}\nfn main() {}\n").into_iter().map(|d| (d.line, d.msg)).collect();
+    assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("trait objects without an explicit `dyn` are deprecated"), "{d:?}");
+    // (such an attribute inside a string or a comment is none)
+    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let d: Vec<(usize, String)> = s.check("const NOTE: &str = r\"#[deny(unused, bare_trait_objects)]\";\n// #[deny(bare_trait_objects)]\ntrait X {}\nimpl X for i32 {}\nfn take(_x: &X) {}\nfn main() { take(&1); println!(\"{}\", NOTE.len()); }\n").into_iter().map(|d| (d.line, d.msg)).collect();
+    assert_eq!(d, vec![], "v6");
+    let d = check("trait A<T> { fn get(&self) -> i32; }\nimpl<'a> A<&'a mut i32> for u8 { fn get(&self) -> i32 { 1 } }\nfn f<T>(x: &dyn A<&T>) -> i32 { x.get() }\nfn main() {\n    let b: &dyn A<&mut i32> = &1u8;\n    println!(\"{}\", f(b));\n}\n");
+    assert!(d.len() == 1 && d[0].0 == 6, "{d:?}");
+}
