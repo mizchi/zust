@@ -12,7 +12,7 @@
 //! error already). The specifier is the file's with `.zsc` replaced by `.js`: the modules are compiled into one
 //! directory tree that mirrors the sources.
 
-use crate::ast::{Item, Pos, TsFrom, TyS};
+use crate::ast::{Item, Member, Pos, TsFrom, TyS};
 use crate::tsimport::TsError;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -78,7 +78,7 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
         let mut types: Vec<String> = vec![];
         for (n, npos) in names {
             match m.find(n) {
-                Some(Item::Record { .. }) | Some(Item::Enum { .. }) => types.push(n.clone()),
+                Some(Item::Record { .. }) | Some(Item::Enum { .. }) | Some(Item::ExternType { .. }) => types.push(n.clone()),
                 Some(Item::Fn { public: false, .. }) | Some(Item::WasmFn { public: false, .. }) => {
                     errs.push(TsError { file: None, pos: *npos, msg: format!("`{from}` does not export `{n}` (write `export fn {n}` there)") });
                 }
@@ -113,6 +113,19 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
             if let Item::Enum { pos, .. } = it
                 && crate::ast::is_prelude(*pos)
             {
+                continue;
+            }
+            // (an extern type is JS's: the same declaration here, and the types its members use)
+            if let Item::ExternType { params, members, .. } = it {
+                if done.insert((key.clone(), n.clone())) {
+                    for m in members {
+                        match m {
+                            Member::Prop { ty, .. } => uses(ty, params, &mut types),
+                            Member::Method { args, ret, .. } => args.iter().chain([ret]).for_each(|t| uses(t, params, &mut types)),
+                        }
+                    }
+                    out.push(it.clone());
+                }
                 continue;
             }
             let mut it = it.clone();
@@ -220,7 +233,7 @@ impl Module {
 
     fn find(&self, n: &str) -> Option<&Item> {
         self.items.iter().find(|it| match it {
-            Item::Record { name, .. } | Item::Enum { name, .. } | Item::Fn { name, .. } | Item::WasmFn { name, .. } => name == n,
+            Item::Record { name, .. } | Item::Enum { name, .. } | Item::Fn { name, .. } | Item::WasmFn { name, .. } | Item::ExternType { name, .. } => name == n,
             _ => false,
         })
     }

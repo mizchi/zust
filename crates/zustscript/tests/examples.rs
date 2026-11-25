@@ -810,3 +810,31 @@ fn options_same_in_js_and_wasm() {
     assert_eq!(outs[0], outs[1], "wasm and JS differ");
     assert_eq!(outs[0], "[{\"TAG\":\"Ok\",\"_0\":2},{\"TAG\":\"Err\",\"_0\":\"ByZero\"},{\"TAG\":\"Some\",\"_0\":2},{\"TAG\":\"None\"},{\"TAG\":\"None\"},-1,4]\n");
 }
+
+/// tests/js_values.zsc: extern types (properties, methods, a setter, a constructor, a module's), `null` from JS as
+/// `None` and `None` to JS as `undefined`, and what JS throws (or a Promise rejects with) as an `Err`
+#[test]
+fn js_values_and_exceptions() {
+    let d = out_dir("js_values");
+    let o = zsc(&root().join("tests/js_values.zsc"), &d, &[]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let r = Command::new("node").arg(root().join("tests/js_values_driver.mjs")).arg(d.join("js_values.js")).output().unwrap();
+    assert!(r.status.success(), "{}", String::from_utf8_lossy(&r.stderr));
+    assert_eq!(
+        String::from_utf8_lossy(&r.stdout),
+        "example.com /a/b true https://example.com/a/b?x=1 | bad: Invalid URL | v | none\n\
+         [{\"TAG\":\"Ok\",\"_0\":\"{\\\"a\\\":[1,2]}\"},\"Err\",\"string\"]\n\
+         3 - x 0 7\n\
+         [{\"TAG\":\"Ok\",\"_0\":\"body of ok\"},{\"TAG\":\"Err\",\"_0\":\"status 404\"},{\"TAG\":\"Err\",\"_0\":\"fetch failed\"},{\"TAG\":\"Ok\",\"_0\":\"{\\\"url\\\":\\\"j\\\"}\"},{\"TAG\":\"Err\",\"_0\":\"Unexpected token\"}]\n\
+         10 | RangeError: negative -1 | one,? | hello hi ann\n\
+         c.txt .txt y.md\n"
+    );
+    let js = std::fs::read_to_string(d.join("js_values.js")).unwrap();
+    assert!(js.contains("import { parse } from \"node:path\";"), "{js}");
+    assert!(js.contains("const $t1 = $catch(() => new URL(s), true);") && js.contains("$nullable(u.searchParams.get(k))"), "{js}");
+    assert!(js.contains("(await $catchP(() => globalThis.fakeFetch(url), true))") && js.contains("(c.label = \"x\", undefined);"), "{js}");
+    assert!(js.contains("c.reset(undefined);") && js.contains("c.reset(7);"), "{js}");
+    let dts = std::fs::read_to_string(d.join("js_values.d.ts")).unwrap();
+    assert!(dts.contains("import type { ParsedPath } from \"node:path\";") && dts.contains("export declare function path_base(p: string): ParsedPath;"), "{dts}");
+    assert!(dts.contains("export declare function load(url: string): Promise<Result<string, string>>;"), "{dts}");
+}

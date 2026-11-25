@@ -236,6 +236,16 @@ impl Elem {
     }
 }
 
+/// A property or a method of an `extern type`, and its name in JS
+#[derive(Clone, Debug)]
+pub enum Member {
+    /// `status: i32` / `text: String = "textContent"`: read with `x.status`
+    Prop { name: String, ty: TyS, js: String, pos: Pos },
+    /// `fn json() -> Promise<Json>;` / `fn set(k: String, v: String) = "setItem";`: called with `x.json()`. A JS name
+    /// that ends with `=` (`"textContent="`) assigns that property to the one argument
+    Method { name: String, args: Vec<TyS>, ret: TyS, js: String, pos: Pos },
+}
+
 /// Where a record read from TS comes from
 #[derive(Clone, Debug)]
 pub struct TsFrom {
@@ -283,6 +293,10 @@ pub enum Item {
     Fn { name: String, public: bool, wasm: bool, simd: bool, relaxed: bool, is_async: bool, generics: Vec<String>, bounds: Vec<(String, String)>, args: Vec<(String, TyS)>, ret: Option<TyS>, body: Expr, pos: Pos },
     /// `extern "react" fn useState<T>(init: T) -> (T, fn(T) -> ()) = "useState";`
     Extern { name: String, module: Option<String>, generics: Vec<String>, args: Vec<TyS>, ret: TyS, js: String, pos: Pos },
+    /// `extern type Response;` / `extern "react" type RefObject<T>;` / `extern type El = "HTMLElement" { .. }`: a JS
+    /// value zustscript does not look inside, with the properties and methods declared for it. `ts`: its name in
+    /// TS (and in JS, for a module's: the name imported)
+    ExternType { name: String, module: Option<String>, params: Vec<String>, ts: String, members: Vec<Member>, pos: Pos },
     /// `wasm fn` (the text is the whole Rust function, handed to zustc)
     WasmFn { name: String, public: bool, args: Vec<(String, WTy)>, ret: WTy, text: String, pos: Pos },
     /// `wasm { .. }`: Rust items for the wasm side only (helpers, structs)

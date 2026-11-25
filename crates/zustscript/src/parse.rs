@@ -396,8 +396,11 @@ impl Parser {
                     _ => None,
                 };
                 let (f, fpos) = self.ident()?;
+                if f == "type" {
+                    return self.extern_type(module, pos);
+                }
                 if f != "fn" {
-                    return Err((fpos, "expected `fn` after `extern`".into()));
+                    return Err((fpos, "expected `fn` or `type` after `extern`".into()));
                 }
                 let (name, _) = self.ident()?;
                 let generics = self.generics()?;
@@ -449,6 +452,65 @@ impl Parser {
             }
             _ => Err((pos, format!("expected an item (`type`, `enum`, `fn`, `extern`, `wasm`), found `{kw}`"))),
         }
+    }
+
+    /// After `extern "m" type`: `Name<T> = "TsName" { members }` (the name in TS, and the members, may be left out)
+    fn extern_type(&mut self, module: Option<String>, pos: Pos) -> PResult<Item> {
+        let (name, _) = self.ident()?;
+        let params = self.generics()?;
+        let ts = if self.eat("=")? {
+            match self.next()? {
+                Tok { t: T::Str(s), .. } => s,
+                t => return Err((t.pos, "expected the TS name as a string (`extern type El = \"HTMLElement\";`)".into())),
+            }
+        } else {
+            name.clone()
+        };
+        let mut members = vec![];
+        if self.eat(";")? {
+            return Ok(Item::ExternType { name, module, params, ts, members, pos });
+        }
+        self.expect("{")?;
+        let js_name = |p: &mut Parser, default: &str| -> PResult<String> {
+            if p.eat("=")? {
+                match p.next()? {
+                    Tok { t: T::Str(s), .. } => Ok(s),
+                    t => Err((t.pos, "expected the JS name as a string".into())),
+                }
+            } else {
+                Ok(default.to_string())
+            }
+        };
+        while !self.eat("}")? {
+            let (n, npos) = self.ident()?;
+            if n == "fn" {
+                let (m, mpos) = self.ident()?;
+                self.expect("(")?;
+                let mut args = vec![];
+                while !self.eat(")")? {
+                    self.ident()?;
+                    self.expect(":")?;
+                    args.push(self.ty()?);
+                    self.eat(",")?;
+                }
+                let ret = if self.eat("->")? { self.ty()? } else { TyS::Unit };
+                let js = js_name(self, &m)?;
+                if js.ends_with('=') && (args.len() != 1 || !matches!(ret, TyS::Unit)) {
+                    return Err((mpos, format!("`{m}` assigns `{}`: it takes one argument and gives `()`", &js[..js.len() - 1])));
+                }
+                self.eat(";")?;
+                self.eat(",")?;
+                members.push(Member::Method { name: m, args, ret, js, pos: mpos });
+            } else {
+                self.expect(":")?;
+                let ty = self.ty()?;
+                let js = js_name(self, &n)?;
+                self.eat(",")?;
+                self.eat(";")?;
+                members.push(Member::Prop { name: n, ty, js, pos: npos });
+            }
+        }
+        Ok(Item::ExternType { name, module, params, ts, members, pos })
     }
 
     /// A boundary type, spelled as in Rust: the tokens up to one of `ends` at depth 0

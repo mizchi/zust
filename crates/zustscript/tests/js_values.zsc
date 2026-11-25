@@ -1,0 +1,103 @@
+// JS values: extern types with their properties and methods; `null` as `None`; what JS throws as an `Err`
+
+extern type Url = "URL" {
+  host: String,
+  path: String = "pathname",
+  params: Params = "searchParams",
+  fn href() -> String = "toString";
+}
+
+extern type Params = "URLSearchParams" {
+  fn get(name: String) -> Option<String>;
+  fn has(name: String) -> bool;
+}
+
+// (a constructor that throws on a bad URL: the message is the `Err`)
+extern fn parse_url(s: String) -> Result<Url, String> = "new URL";
+
+extern type Json = "unknown";
+extern fn parse_json(s: String) -> Result<Json, String> = "JSON.parse";
+extern fn stringify(j: Json) -> String = "JSON.stringify";
+
+extern type Counter {
+  count: i32,
+  fn bump(by: i32) -> i32;
+  fn reset(to: Option<i32>) -> ();
+  fn label() -> Option<String> = "getLabel";
+  fn set_label(s: String) = "label=";
+}
+extern fn new_counter(n: i32) -> Counter = "new globalThis.Counter";
+
+extern type Response {
+  ok: bool,
+  status: i32,
+  fn text() -> Promise<String>;
+  fn json() -> Promise<Result<Json, String>>;
+}
+extern fn fetch(url: String) -> Promise<Result<Response, String>> = "globalThis.fakeFetch";
+
+// (the value thrown, as it is)
+extern type JsError = "Error" { message: String, name: String }
+extern fn risky(n: i32) -> Result<i32, JsError> = "globalThis.risky";
+extern fn find_name(id: i32) -> Option<String> = "globalThis.findName";
+extern fn greet(name: Option<String>) -> String = "globalThis.greet";
+
+// a module's: `import { parse } from "node:path"`, and its type in the .d.ts
+extern "node:path" type ParsedPath { base: String, ext: String }
+extern "node:path" fn parse_path(p: String) -> ParsedPath = "parse";
+
+fn query(s: String, k: String) -> Result<Option<String>, String> {
+  let u = parse_url(s)?;
+  Ok(u.params.get(k))
+}
+
+export fn urls() -> String {
+  let a = match parse_url("https://example.com/a/b?x=1") { Ok(u) => `${u.host} ${u.path} ${u.params.has("x")} ${u.href()}`, Err(m) => m };
+  let b = match parse_url("not a url") { Ok(u) => u.host, Err(m) => `bad: ${m}` };
+  let c = match query("https://e.com/?k=v", "k") { Ok(v) => v.unwrap_or("none"), Err(m) => m };
+  let d = match query("https://e.com/", "k") { Ok(v) => v.unwrap_or("none"), Err(m) => m };
+  `${a} | ${b} | ${c} | ${d}`
+}
+
+export fn roundtrip(s: String) -> Result<String, String> {
+  let j = parse_json(s)?;
+  Ok(stringify(j))
+}
+
+export fn counting() -> String {
+  let c = new_counter(1);
+  let a = c.bump(2);
+  let l0 = c.label().unwrap_or("-");
+  c.set_label("x");
+  let l = c.label().unwrap_or("-");
+  c.reset(None);
+  let b = c.count;
+  c.reset(Some(7));
+  `${a} ${l0} ${l} ${b} ${c.count}`
+}
+
+export async fn load(url: String) -> Result<String, String> {
+  let r = (await fetch(url))?;
+  if r.ok { Ok(await r.text()) } else { Err(`status ${r.status}`) }
+}
+
+export async fn load_json(url: String) -> Result<String, String> {
+  let r = (await fetch(url))?;
+  let j = (await r.json())?;
+  Ok(stringify(j))
+}
+
+export fn thrown() -> String {
+  let show = (r: Result<i32, JsError>) => match r { Ok(n) => n.to_string(), Err(e) => `${e.name}: ${e.message}` };
+  let names = [1, 2].map(find_name).map((n) => n.unwrap_or("?")).join(",");
+  `${show(risky(1))} | ${show(risky(-1))} | ${names} | ${greet(None)} ${greet(Some("ann"))}`
+}
+
+export fn path_base(p: String) -> ParsedPath {
+  parse_path(p)
+}
+
+export fn base_of(p: String) -> String {
+  let x = parse_path(p);
+  `${x.base} ${x.ext}`
+}

@@ -106,6 +106,15 @@ impl EnumDef {
     }
 }
 
+/// An `extern type`: a JS value, its TS name, and the members declared for it
+pub struct ExtType {
+    pub params: Vec<String>,
+    /// (name, type, JS name)
+    pub props: Vec<(String, Ty, String)>,
+    /// (name, arguments, result, JS name)
+    pub methods: Vec<(String, Vec<Ty>, Ty, String)>,
+}
+
 pub struct FnSig {
     pub generics: Vec<String>,
     /// numeric bounds of generic parameters (`T: Num`): the function is monomorphized
@@ -133,6 +142,9 @@ pub struct Info {
     /// variant name → enum name (variant names are unique in a file)
     pub variant_of: HashMap<String, String>,
     pub fns: HashMap<String, FnSig>,
+    pub ext_types: HashMap<String, ExtType>,
+    /// each property read and method call of an extern type: (the type, the member)
+    pub member: HashMap<Id, (String, String)>,
     pub externs: HashMap<String, (FnSig, Option<String>, String)>,
     pub wasm: HashMap<String, (Vec<(String, WTy)>, WTy)>,
     /// effects whose handlers all resume in tail position (see [`direct_effects`]): in JS they are plain calls to the
@@ -369,6 +381,21 @@ impl Checker {
         self.errors.push((pos, m.into()));
     }
 
+    /// What JS gives back, as an extern's result: a `Result` catches what it throws, as a `String` (the message) or
+    /// a value of an extern type (the thrown value); a `Promise` of a `Result` catches its rejection too
+    fn extern_result(&mut self, t: &Ty, pos: Pos) {
+        let t = promised(t).unwrap_or(t.clone());
+        if let Ty::Named(n, a) = &t
+            && n == "Result"
+            && a.len() == 2
+            && !matches!(&a[1], Ty::Str)
+            && !matches!(&a[1], Ty::Named(e, _) if self.info.ext_types.contains_key(e))
+        {
+            let s = self.show(&a[1]);
+            self.err(pos, format!("an extern's `Result` catches what JS throws: its error is a `String` (the message) or an extern type (the value thrown), not {s}"));
+        }
+    }
+
     /// A function cannot be named like a variant of the prelude (`Ok(x)` would call it, wherever it is written)
     fn prelude_name(&mut self, name: &str, pos: Pos) {
         if let Some(p) = PRELUDE.iter().find(|p| p.2.iter().any(|v| v.0 == name)) {
@@ -549,6 +576,8 @@ impl Checker {
                             r.params.len()
                         } else if let Some(e) = self.info.enums.get(n) {
                             e.params.len()
+                        } else if let Some(x) = self.info.ext_types.get(n) {
+                            x.params.len()
                         } else if let Some((_, _, vs)) = PRELUDE.iter().find(|p| p.0 == n) {
                             let vs: Vec<&str> = vs.iter().map(|v| v.0).collect();
                             self.err(*pos, format!("unknown type `{n}`: the prelude's `{n}` is left out of this file, because another enum has a variant named like one of its own ({}). Rename that variant", vs.join(", ")));
@@ -605,16 +634,22 @@ impl Checker {
             }
             match it {
                 Item::Record { name, params, pos, .. } => {
-                    if self.info.records.contains_key(name) || self.info.enums.contains_key(name) {
+                    if self.info.records.contains_key(name) || self.info.enums.contains_key(name) || self.info.ext_types.contains_key(name) {
                         self.err(*pos, format!("the type `{name}` is defined twice"));
                     }
                     self.info.records.insert(name.clone(), RecordDef { params: params.clone(), fields: vec![] });
                 }
                 Item::Enum { name, params, pos, .. } => {
-                    if self.info.records.contains_key(name) || self.info.enums.contains_key(name) {
+                    if self.info.records.contains_key(name) || self.info.enums.contains_key(name) || self.info.ext_types.contains_key(name) {
                         self.err(*pos, format!("the type `{name}` is defined twice"));
                     }
                     self.info.enums.insert(name.clone(), EnumDef { params: params.clone(), variants: vec![], ops: HashMap::new(), ts: None });
+                }
+                Item::ExternType { name, params, pos, .. } => {
+                    if self.info.records.contains_key(name) || self.info.enums.contains_key(name) || self.info.ext_types.contains_key(name) || PRELUDE.iter().any(|p| p.0 == name) || name == "Promise" {
+                        self.err(*pos, format!("the type `{name}` is defined twice"));
+                    }
+                    self.info.ext_types.insert(name.clone(), ExtType { params: params.clone(), props: vec![], methods: vec![] });
                 }
                 _ => {}
             }
@@ -678,6 +713,7 @@ impl Checker {
                     self.prelude_name(name, *pos);
                     let a = args.iter().map(|t| self.ty_of(t, generics)).collect();
                     let r = self.ty_of(ret, generics);
+                    self.extern_result(&r, *pos);
                     self.info.externs.insert(name.clone(), (FnSig { generics: generics.clone(), bounds: HashMap::new(), args: a, ret: r }, module.clone(), js.clone()));
                 }
                 Item::WasmFn { name, args, ret, pos, .. } => {
@@ -685,6 +721,33 @@ impl Checker {
                         self.err(*pos, format!("`{name}` is already defined at {p}"));
                     }
                     self.info.wasm.insert(name.clone(), (args.clone(), ret.clone()));
+                }
+                Item::ExternType { name, params, members, .. } => {
+                    let (mut props, mut methods) = (vec![], vec![]);
+                    for m in members {
+                        match m {
+                            Member::Prop { name: n, ty, js, pos } => {
+                                let t = self.ty_of(ty, params);
+                                if props.iter().any(|p: &(String, Ty, String)| p.0 == *n) || methods.iter().any(|p: &(String, Vec<Ty>, Ty, String)| p.0 == *n) {
+                                    self.err(*pos, format!("`{name}` declares `{n}` twice"));
+                                }
+                                self.extern_result(&t, *pos);
+                                props.push((n.clone(), t, js.clone()));
+                            }
+                            Member::Method { name: n, args, ret, js, pos } => {
+                                let a: Vec<Ty> = args.iter().map(|t| self.ty_of(t, params)).collect();
+                                let r = self.ty_of(ret, params);
+                                if props.iter().any(|p| p.0 == *n) || methods.iter().any(|p| p.0 == *n) {
+                                    self.err(*pos, format!("`{name}` declares `{n}` twice"));
+                                }
+                                self.extern_result(&r, *pos);
+                                methods.push((n.clone(), a, r, js.clone()));
+                            }
+                        }
+                    }
+                    let x = self.info.ext_types.get_mut(name).unwrap();
+                    x.props = props;
+                    x.methods = methods;
                 }
                 Item::WasmRaw(_) | Item::ImportType { .. } => {}
             }
@@ -1161,6 +1224,30 @@ impl Checker {
                     self.unify(pos, &rt, &Ty::F64);
                     rt = Ty::F64;
                 }
+                // a method of an extern type: JS's own
+                if let Ty::Named(n, targs) = &rt
+                    && let Some(x) = self.info.ext_types.get(n)
+                {
+                    let m: HashMap<String, Ty> = x.params.iter().cloned().zip(targs.iter().cloned()).collect();
+                    let Some((_, params, ret, _)) = x.methods.iter().find(|m| m.0 == *name) else {
+                        let what = if x.props.iter().any(|p| p.0 == *name) { format!("`{name}` is a property of `{n}`: read it with `.{name}`") } else { format!("`{n}` has no method `{name}` (declare it: `extern type {n} {{ fn {name}(..) -> R; }}`)") };
+                        self.err(pos, what);
+                        for a in args {
+                            self.infer(a, None);
+                        }
+                        return self.fresh();
+                    };
+                    let (params, ret): (Vec<Ty>, Ty) = (params.iter().map(|t| Self::subst_params(t, &m)).collect(), Self::subst_params(ret, &m));
+                    self.info.member.insert(e.id, (n.clone(), name.clone()));
+                    if params.len() != args.len() {
+                        self.err(pos, format!("`.{name}()` takes {} argument(s), found {}", params.len(), args.len()));
+                    }
+                    for (a, p) in args.iter().zip(&params) {
+                        let t = self.infer(a, Some(p));
+                        self.unify(a.pos, &t, p);
+                    }
+                    return ret;
+                }
                 // `props.onPick(x)`: a call of a record's function-typed field
                 if let Ty::Named(n, targs) = &rt
                     && let Some(r) = self.info.records.get(n)
@@ -1250,6 +1337,18 @@ impl Checker {
                         };
                         let m = r.params.iter().cloned().zip(targs).collect();
                         Self::subst_params(ft, &m)
+                    }
+                    Ty::Named(n, targs) if self.info.ext_types.contains_key(&n) => {
+                        let x = &self.info.ext_types[&n];
+                        let Some((_, t, _)) = x.props.iter().find(|p| p.0 == *f) else {
+                            let what = if x.methods.iter().any(|p| p.0 == *f) { format!("`{f}` is a method of `{n}`: call it with `.{f}(..)`") } else { format!("`{n}` has no property `{f}` (declare it: `extern type {n} {{ {f}: T }}`)") };
+                            self.err(pos, what);
+                            return self.fresh();
+                        };
+                        let m: HashMap<String, Ty> = x.params.iter().cloned().zip(targs).collect();
+                        let t = Self::subst_params(t, &m);
+                        self.info.member.insert(e.id, (n.clone(), f.clone()));
+                        t
                     }
                     Ty::Tuple(ts) if f.parse::<usize>().is_ok_and(|k| k < ts.len()) => ts[f.parse::<usize>().unwrap()].clone(),
                     Ty::Var(_) => {
