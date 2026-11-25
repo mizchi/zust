@@ -4545,3 +4545,40 @@ fn part31_const_local_borrow() {
     errors_at("fn main() {\n    static Y: &'static isize = { let q = 4; &q };\n    println!(\"{}\", Y);\n}\n", &[(2, "`q` does not live long enough")], "c2");
     errors_at("const OK: &'static i32 = { let _p = 3; &5 };\nfn main() { println!(\"{}\", OK); }\n", &[], "c3");
 }
+
+#[test]
+fn part31_collect_and_temporary_scrutinee() {
+    // (a `collect` into a written `Vec<_>` yields the iterator's items (`&str`), as rustc selects `FromIterator` at the
+    // `let`: `&parts[0]` returned as a `&'a str` is a `&&str` coerced, no E0515 (borrowck/
+    // cannot-return-ref-to-fn-param-in-filter-map.rs's make_entry). Returning `&parts[0]` itself is E0515 (6))
+    errors_at(r#"fn e1<'a>(s: &'a String) -> Option<&'a str> {
+    let parts: Vec<_> = s.split('|').collect();
+    if let [commit, ..] = &parts[..] { Some(commit) } else { None }
+}
+fn e2<'a>(s: &'a String) -> &'a str { let parts: Vec<_> = s.split('|').collect(); let c = &parts[0]; c }
+fn bad<'a>(s: &'a String) -> &'a &'a str { let parts: Vec<_> = s.split('|').collect(); &parts[0] }
+fn main() { let s = "1|2".to_string(); let _ = (e1(&s), e2(&s), bad(&s)); }
+"#, &[(6, "cannot return")], "cl");
+    // (a temporary scrutinee matched by a `&` pattern that binds by value moves out through the reference: E0508 /
+    // E0507 at the scrutinee (2, 3, 4), as of a local; not by `ref` (1), nor a `Copy` binding (5). Lines as rustc 1.97's)
+    errors_at(r#"fn f1(l1: &[String], l2: &[String]) { match (l1, l2) { (&[], &[ref hd, ..]) => { let _ = hd; } _ => {} } }
+fn f2(l1: &[String], l2: &[String]) { match (l1, l2) { (&[], &[hd, ..]) => { drop(hd); } _ => {} } }
+fn f3(a: &String, b: &String) { match (a, b) { (_, &s) => { drop(s); } } }
+fn f4(a: &Option<String>) { match (1, a) { (_, &Some(s)) => { drop(s); } _ => {} } }
+fn f5(a: &Option<u32>) -> u32 { match (1, a) { (_, &Some(n)) => n, _ => 0 } }
+fn main() {}
+"#, &[(2, "cannot move out of"), (3, "cannot move out of"), (4, "cannot move out of")], "ts");
+    // (of the uses of what one move moved, the one rustc reports: after the loop the move is in, before its next
+    // iteration's, also of a loop over a range and of nested loops)
+    errors_at(r#"fn a(n: usize) { let s = String::new(); for _ in 0..n { if s.len() > 0 { drop(s); continue; } } drop(s); }
+fn b(v: Vec<String>, w: Vec<&str>) {
+    for foo in v { for bar in &w { if foo == *bar {
+        drop(foo);
+        continue;
+    } }
+    drop(foo);
+    }
+}
+fn main() {}
+"#, &[(1, "use of moved value"), (7, "use of moved value")], "mv");
+}
