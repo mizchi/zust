@@ -1,7 +1,7 @@
 // Items written in blocks of one fn: same-named fns (and structs) in sibling blocks, which call each other, an
 // item in a block that shadows one of its fn's body or a top-level one, same-named items in two fns, and a fn beside
 // a braced struct of its name in a block (a value and a type: each use takes the one of its namespace)
-#![allow(non_camel_case_types)]
+#![allow(non_camel_case_types, dead_code)]
 fn f() -> u8 {
     9
 }
@@ -82,5 +82,33 @@ fn main() {
         }
         let a = t { v: 12 };
         println!("{} {}", t(), a.v);
+    }
+    // (a type's path and return type, `u::mk()` / `-> u`, beside a fn of its name in a block)
+    struct u {
+        v: u8,
+    }
+    impl u {
+        fn mk() -> u {
+            u { v: 13 }
+        }
+    }
+    {
+        fn u() -> u8 {
+            14
+        }
+        println!("{} {}", u::mk().v, u());
+    }
+    // (a braced struct with a `where` clause whose bound has parentheses)
+    fn q() -> u8 {
+        15
+    }
+    {
+        struct q<F>
+        where
+            F: Fn(u8) -> u8,
+        {
+            f: F,
+        }
+        println!("{}", q());
     }
 }

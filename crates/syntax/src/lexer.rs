@@ -1920,8 +1920,11 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                         b"struct" => {
                             let mut d = 0i32;
                             let mut ns = HOIST_NS_BOTH;
+                            // (a `(` in a `where` clause, `where F: Fn(u8) {`, is a bound's, not a tuple struct's)
+                            let mut in_where = false;
                             for q in nk + 1..e.min(toks.len()) {
                                 if toks[q].0 != 1 {
+                                    in_where |= d <= 0 && tok(q) == b"where";
                                     continue;
                                 }
                                 match tok(q) {
@@ -1931,7 +1934,8 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                                         ns = HOIST_NS_TYPE;
                                         break;
                                     }
-                                    b"(" | b";" if d <= 0 => break,
+                                    b"(" if d <= 0 && !in_where => break,
+                                    b";" if d <= 0 => break,
                                     _ => {}
                                 }
                             }
@@ -2075,7 +2079,11 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             let next = if k + 1 < toks.len() { tok(k + 1) } else { b"" };
             if matches!(prev, b"fn" | b"static" | b"const") {
                 HOIST_NS_VALUE
-            } else if matches!(prev, b"struct" | b"enum" | b"union" | b"trait" | b"type" | b"mod" | b"->") || next == b"::" {
+            } else if matches!(prev, b"struct" | b"enum" | b"union" | b"trait" | b"type" | b"mod")
+                // (`-> m` and `m::`: a symbol is a token of one byte)
+                || (k >= 2 && prev == b">" && tok(k - 2) == b"-")
+                || (k + 2 < toks.len() && next == b":" && tok(k + 2) == b":")
+            {
                 HOIST_NS_TYPE
             } else if next == b"(" {
                 HOIST_NS_VALUE
@@ -2093,8 +2101,14 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             let (a, b) = (tok_ns(k), rename_ns[ri]);
             a == HOIST_NS_BOTH || b == HOIST_NS_BOTH || a == b
         };
-        let all = at.clone();
-        at.retain(|&(k, ri)| fits(k, ri) || !all.iter().any(|&(k2, r2)| k2 == k && fits(k, r2)));
+        // (a candidate of the other namespace stays only where none fits)
+        let mut has_fit = vec![false; toks.len()];
+        for &(k, ri) in &at {
+            if fits(k, ri) {
+                has_fit[k] = true;
+            }
+        }
+        at.retain(|&(k, ri)| fits(k, ri) || !has_fit[k]);
         at.sort_by(|x, y| x.0.cmp(&y.0).then(renames[y.1].0.cmp(&renames[x.1].0)));
         at.dedup_by_key(|x| x.0);
         // (a foreign function's declaration, `fn abs(x: i32) -> i32;` with no body, renamed: it keeps its symbol, a
