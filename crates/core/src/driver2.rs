@@ -2120,6 +2120,9 @@ impl Session2 {
         // the others (`where T::Assoc: Foo`, `where (): Array<Element = &()>`) are read here and added to its clause.
         // read_all: every where clause of the impl was read)
         let mut where_all: FxMap<usize, bool> = FxMap::default();
+        // (the impls with a where clause on another type than a parameter, `where Box<[T]>: IntoWasmAbi`: the
+        // supertrait check below does not assume it)
+        let mut where_other: FxSet<usize> = FxSet::default();
         for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
             if sm.impl_self_ty.is_none() || !matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) {
                 continue;
@@ -2149,6 +2152,9 @@ impl Session2 {
                     all = false;
                 }
                 extra.extend(ps);
+            }
+            if !extra.is_empty() || !all {
+                where_other.insert(ii);
             }
             prog.tdb.add_where(ii, extra, all);
             where_all.insert(ii, all);
@@ -2257,6 +2263,13 @@ impl Session2 {
                     if assumed.contains(sup) {
                         continue;
                     }
+                    // (an impl whose where clause is on another type, `impl<T> IntoWasmAbi for Vec<T> where Box<[T]>:
+                    // IntoWasmAbi`: `Vec<T>: WasmDescribe` may hold through that clause (`impl<T> WasmDescribe for Vec<T>
+                    // where Box<[T]>: WasmDescribe`, a supertrait of IntoWasmAbi), which holds_rigid does not assume: not
+                    // reported)
+                    if where_other.contains(&ii) {
+                        continue;
+                    }
                     if prog.tdb.holds_rigid(&prog, t, sup) == crate::traits::Ans::No {
                         let n = crate::traits::display_ty(&prog, t);
                         return Err(format!("{}:1: {} (E0277)", items[ii].line, crate::traits::not_held(&n, sup)));
@@ -2363,7 +2376,10 @@ impl Session2 {
                 let tr = tr.split('<').next().unwrap_or(tr).trim();
                 let tr = tr.rsplit("::").next().unwrap_or(tr).to_string();
                 let Some(bounds) = prog.assoc_bounds.get(&(tr.clone(), n.clone())).cloned() else { continue };
-                if !read_all(ii) {
+                // (nor an impl whose where clause is on another type: the definition may hold its bounds through it,
+                // as the one wasm-bindgen's `#[wasm_bindgen]` writes, `impl<T> IntoJsGeneric for JsOption<T> where
+                // JsOption<T>: JsGeneric { type JsCanon = JsOption<T>; }`, which the placeholders do not assume)
+                if !read_all(ii) || where_other.contains(&ii) {
                     continue;
                 }
                 let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
@@ -3130,11 +3146,12 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
             }
             // (on the line a fn starts or ends on, its columns say whether it is around: `fn a(x: u8) {} fn b() {
             // fn c() {} }` on one line)
+            // (when the text as written does not have them, a macro's expansion on one line, `closures! { .. }` with
+            // its `const _: () = { fn invoke() .. }`, it is not known to be around: no E0434)
             if line == a || line == b {
-                if let (Some(x), Some(y)) = (orig_at(gi), orig_at(it)) {
-                    if !encloses(x, y) {
-                        continue;
-                    }
+                match (orig_at(gi), orig_at(it)) {
+                    (Some(x), Some(y)) if encloses(x, y) => {}
+                    _ => continue,
                 }
             }
             let Ok(Some(gf)) = parse_fn(src, gi) else { continue };
@@ -10293,10 +10310,11 @@ fn hoisted_err_holds(msg: &str) -> bool {
     let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword",
         // (an item's own definition: a discriminant past its repr, a union's fields and derives)
         "enum discriminant overflowed (E0370)", "field must implement `Copy`", "this trait cannot be derived for unions", "cannot find derive macro `",
-        // (an item's own syntax: `struct Test { Very\n Bad }` in a fn body)
-        "expected `:` (found `", "expected `,` (found `", "free static item without body",
+        // (an item's own syntax: `struct Test { Very\n Bad }` in a fn body; any `expected ..` of its text, which is
+        // moved as written: `expected `,` or `>` (found `=`)`)
+        "expected `", "free static item without body",
         // (a type's syntax in a fn's signature: `Box<dyn X< : 32 >>` in a `const _: () = { .. }`'s block)
-        "expected a type (found `", "expected `,` or `>` (found `",
+        "expected a type (found `",
         // (`#[test]` on an item in a fn body)
         "the `test` attribute may only be used on a free function",
         // (`const FOO = 1;` in a fn body)

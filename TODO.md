@@ -190,13 +190,62 @@ error of each failing crate. Details and the order of the work: [docs/reports/20
   macro calls in an item's expression, doc comments on a cfg'd-out item, `pub extern crate`, `::dep::path`, an
   `extern` block in a function body, a type bound in a `where` clause, `AssertUnwindSafe`, `LocalKey` and
   `LazyCell` (as types of the prelude), the unwind-safety auto traits, default type parameters (`LazyCell<T, F =
-  fn() -> T>` used as `LazyCell<T>`), std items imported under another name (`use core::cell::LazyCell as Lazy;`).
-  It stops on:
-  - inherent impls for two instances with one method name, `impl<T: Copy> Nullable<&T> { fn copied }` beside
-    `impl<T: Copy> Nullable<&mut T> { fn copied }` (`nullable.rs:256`, as std's `Option<&T>::copied`): a duplicate
-    definition.
+  fn() -> T>` used as `LazyCell<T>`), std items imported under another name (`use core::cell::LazyCell as Lazy;`),
+  inherent impls for two disjoint instances with one method name (`Nullable<&T>::copied` / `Nullable<&mut T>::copied`),
+  a module named `__rt`, const generic parameters inside a module, a nested `unsafe extern "C" fn`, names a glob
+  re-export brings in through chains of globs (`use crate::{convert::*}` with `pub use self::traits::*;`, also in
+  paths `crate::convert::WasmRet`), the program's `impl TryFrom<X> for T` / `impl From<J> for f64`, two impls of
+  one trait for one type with their own associated types (`TryFrom<JsValue>` / `TryFrom<&JsValue>` for f64), impls
+  told apart by a parameter's bound (`Result<T: Into<JsValue>, E>` beside `Result<(), E>`), `<J as
+  PartialEq<str>>::eq(..)`, operators' impls for references (`-&v`, `&a << &b`, `BitAnd::bitand(&a, b)`) and
+  `<&'static J as BitAnd<&'static J>>::Output` beside another trait's `Output` (tests/probe/w1_items.rs);
+  qualified paths whose self type is a reference or an associated type, an impl for a type itself before a blanket
+  one, associated types naming another impl's, `&[T]`'s impl beside `&mut [u8]`'s, a renamed fn at a range's end
+  (tests/probe/w1_items2.rs); items in a `const _: () = { .. };` a macro writes on one line (what `#[wasm_bindgen]`,
+  `closures!` and derives wrap impls in; one written by hand is still skipped),
+  `<T as Tr>::null()` that is no `ptr::null()`, impls for references to generic structs as bounds,
+  `<Box<[u8]>>::from_abi` among Box's impls, `<T as Tr>::Abi` of a parameter once it is known, a macro's `let`
+  names beside a field or method of the name and in a struct literal's shorthand, `Vec::from_raw_parts`,
+  `char::from_u32_unchecked` (tests/probe/w1_items3.rs); a generic method called right in a `match` (its type
+  parameter from the arms' type), `impl<T: Tr + ?Sized> Tr for &T`'s functions without `self` (`<&u8 as
+  WasmDescribe>::describe()`), a blanket impl's `self`-by-value method on a number, on a reference and through a
+  qualified path (`<&Box<str> as MaybeIntoWasmAbi>::none()`), a reference's or a number's own impl before a blanket
+  one, `T::none()` of T's bound's trait beside another trait's `none`, `String::from_utf8_unchecked`
+  (tests/probe/w1_items4.rs); the cases of #139's review: an inherent method before a blanket or trait one at the same
+  receiver, overloads of one self type told apart by the argument, an impl's own `ne`, a shift's `Output`, a
+  zero-capacity `Vec::from_raw_parts`, a renamed name through two globs under `use .. as`, a generic impl kept in an
+  anonymous const, impls for two instances of a trait object, and E0119 / E0277 / E0592 / E0201 through aliases,
+  `&Box<S>`, `From`'s bounds, const generic lengths (tests/probe/w1_items5.rs, tests/compile_errors/w1_*). It stops on:
+  - `externref.rs:130`: "expected a function".
   - `LocalKey<T>` is a type with `with`, but a `thread_local!` is not one of them yet (each has a key type of its
     own), so a `&'static LocalKey<T>` cannot point at one.
+  - a method call on a `Box<[T]>` with the program's `impl Tr for Box<[T]>` derefs to `[T]` and misses it; a
+    `Box<str>` cannot be made (`into_boxed_str`, `"x".into()`).
+  - the items a macro's `const _: () = { .. };` moves out are visible outside it (rustc scopes its fns to the
+    block); the hand-written one in wasm-bindgen's lib.rs (`__wbindgen_skip_interpret_calls`) is not compiled. One
+    whose fn, `use`, trait or impl that would go out names a const, static or type that stays in it (`const N` or
+    `struct Local<T>` beside an `impl Tr for u8` that names it) is skipped whole, as before this branch.
+  - a trait object's auto traits are not in zustc's types (`dyn Obj + Send` is `dyn Obj`, ast_types::tysyn): an impl
+    for `dyn Obj + Send` is one for `dyn Obj` too, where rustc reports E0277.
+  - a blanket impl's `self`-by-value method on a `&Box<u8>` (`impl<T: Marker> Tr for T` with `impl Marker for
+    &Box<u8>`) asks the bound of the Box's content ("`u8: Marker` is not satisfied").
+  - impls for trait objects with parameters (`impl<R> Tr for dyn Fn() -> R`) are matched by the object's trait's name;
+    two impls for instances of one object (`dyn Obj<u8>` / `dyn Obj<u16>`) that override one method call the first
+    one's. Equal associated consts of `dyn Fn(..)` impls of each arity are kept once.
+- Found in the review of #139, also so before it (`<S as Tr<u8>>::Out` beside `<S as Tr<u16>>::Out` is #128's now: the
+  trait's arguments pick the impl):
+  - a struct field of `<W as B>::Out` whose value is `<u8 as B>::Out`, with `impl B for u8` written after W's: the
+    field takes the value before that impl is read.
+  - `m::f()` finds an `f` that only a fn body in `m` glob-imports (`fn helper() { use crate::a::*; .. }`): accepted
+    where rustc reports E0425.
+  - `a != b` calls `!a.eq(b)`, not the impl's own `ne` (a qualified `<S as PartialEq<R>>::ne` calls it).
+  - `Vec::<u32>::from_raw_parts(NonNull::dangling().as_ptr(), 0, 0)`: "cannot infer type parameter `T`" (with
+    `let p: *mut u32 = ..` it compiles).
+  - `Vec::from_raw_parts` of zero-sized elements takes a pointer that is not dangling (not below 4096, not the
+    alignment) for the prelude's one-byte buffer, which drop frees: the prelude's `reserve` allocates for zero-sized
+    elements, where std's Vec never does.
+  - a cycle of associated types through blanket impls (`impl<T> A for T { type Out = <T as B>::Out; }` and B's
+    back) is no error while nothing names it, and not E0275 where something does.
 - Found while building memchr, not fixed:
   - a generic struct literal whose field is a `<v128 as Tr>::f(..)` call (`Pair { v1: <v128 as Vector>::splat(b) }`)
     does not infer `V = v128` ("expected `T0`, found `v128`"); an annotation or an intrinsic's value does;
