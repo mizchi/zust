@@ -2493,6 +2493,7 @@ compile-fail	error-codes/E0033.rs
 compile-fail	error-codes/E0038.rs
 compile-fail	error-codes/E0040.rs
 compile-fail	error-codes/E0044.rs
+compile-fail	error-codes/E0049.rs
 compile-fail	error-codes/E0050.rs
 compile-fail	error-codes/E0054.rs
 compile-fail	error-codes/E0057.rs
@@ -2617,6 +2618,7 @@ compile-fail	error-codes/E0565-1.rs
 compile-fail	error-codes/E0565.rs
 compile-fail	error-codes/E0572.rs
 compile-fail	error-codes/E0582.rs
+compile-fail	error-codes/E0583.rs
 compile-fail	error-codes/E0585.rs
 compile-fail	error-codes/E0586.rs
 compile-fail	error-codes/E0594.rs
@@ -3394,6 +3396,7 @@ check-pass	impl-trait/in-trait/sized-rpits-dont-need-pointer-like.rs
 compile-fail	impl-trait/in-trait/span-bug-issue-121457.rs
 check-pass	impl-trait/in-trait/success.rs
 compile-fail	impl-trait/in-trait/suggest-missing-item.rs
+compile-fail	impl-trait/in-trait/trait-more-generics-than-impl.rs
 check-pass	impl-trait/in-trait/variances-of-gat.rs
 check-pass	impl-trait/in-trait/where-clause.rs
 check-pass	impl-trait/inside-item-nested-in-anon-const.rs
@@ -5792,6 +5795,7 @@ compile-fail	parser/misspelled-keywords/use.rs
 compile-fail	parser/misspelled-keywords/where-clause.rs
 compile-fail	parser/misspelled-keywords/while-loop.rs
 compile-fail	parser/misspelled-keywords/while-without-identifiers.rs
+compile-fail	parser/mod_file_not_exist.rs
 compile-fail	parser/multibyte-char-use-seperator-issue-80134.rs
 compile-fail	parser/multiline-comment-line-tracking.rs
 run-pass	parser/multiline-comments-basic.rs
@@ -6000,6 +6004,7 @@ compile-fail	parser/unmatched-langle-2.rs
 compile-fail	parser/unnecessary-let.rs
 compile-fail	parser/unsafe-foreign-mod-2.rs
 check-pass	parser/unsafe-foreign-mod.rs
+compile-fail	parser/unsafe-mod.rs
 compile-fail	parser/unsized.rs
 compile-fail	parser/unsized2.rs
 compile-fail	parser/use-as-where-use-ends-with-mod-sep.rs
@@ -6847,6 +6852,7 @@ check-pass	rfcs/rfc-2396-target_feature-11/issue-108655-inline-always-closure.rs
 check-pass	rfcs/rfc-2396-target_feature-11/issue-99876.rs
 run-pass	rfcs/rfc-2396-target_feature-11/return-fn-ptr.rs
 run-pass	rfcs/rfc-2421-unreserve-pure-offsetof-sizeof-alignof/offsetof-alignof-sizeof-pure-can-be-used-as-idents.rs
+compile-fail	rfcs/rfc-2457-non-ascii-idents/mod_file_nonascii_forbidden.rs
 check-pass	rfcs/rfc-2457-non-ascii-idents/mod_file_nonascii_with_path_allowed.rs
 check-pass	rfcs/rfc-2457-non-ascii-idents/mod_inline_nonascii_allowed.rs
 check-pass	rfcs/rfc-2457-non-ascii-idents/utf8_idents.rs

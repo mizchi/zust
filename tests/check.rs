@@ -2444,3 +2444,29 @@ fn elided_lifetimes_and_foreign_bodies() {
     );
     assert_eq!(first("extern \"C\" {\n    fn foo() -> i32 {\n        0\n    }\n}\nfn main() {}\n"), e(2, "incorrect function inside `extern` block"), "a foreign fn with a body");
 }
+
+#[test]
+fn type_parameter_counts_against_the_trait() {
+    // (E0049, at the impl's method as rustc 1.100)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(
+        first("trait Foo {\n    fn foo<T: Default>(x: T) -> Self;\n}\nstruct Bar;\nimpl Foo for Bar {\n    fn foo(x: bool) -> Self { Bar }\n}\nfn main() {}\n"),
+        e(6, "associated function `foo` has 0 type parameters but its trait declaration has 1 type parameter (E0049)"),
+        "fewer"
+    );
+    assert_eq!(
+        first("trait Fuzz {\n    fn fuzz<A: Default, B>(&self, x: A, y: B);\n}\nstruct Baz;\nimpl Fuzz for Baz {\n    fn fuzz(&self, x: bool, y: bool) {}\n}\nfn main() {}\n"),
+        e(6, "method `fuzz` has 0 type parameters but its trait declaration has 2 type parameters (E0049)"),
+        "a method"
+    );
+    assert_eq!(first("trait Foo {\n    fn foo<T: Default>(x: T) -> T;\n}\nstruct Bar;\nimpl Foo for Bar {\n    fn foo<U: Default>(x: U) -> U { x }\n}\nfn main() {}\n"), None, "the same count");
+    assert_eq!(
+        first("trait Foo {\n    fn foo<T>();\n}\nstruct Bar;\nimpl Foo for Bar {\n    fn foo<const N: u8>() {}\n}\nfn main() {}\n").map(|d| d.1.contains("E0049")),
+        None,
+        "a const parameter for a type parameter: another error"
+    );
+}

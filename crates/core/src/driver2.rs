@@ -9568,13 +9568,13 @@ fn stricter_impl_bound(src: &str, items: &[SrcItem]) -> Option<String> {
     if !items.iter().any(|it| matches!(it.kind, crate::lexer::ItemKind::TraitMember(_)) && generic_fn(text(it))) {
         return None;
     }
-    let (line, col) = stricter_impl_bound_in(src, items)?;
-    Some(format!("{line}:{col}: impl has stricter requirements than trait (E0276)"))
+    let (line, col, m) = stricter_impl_bound_in(src, items)?;
+    Some(format!("{line}:{col}: {m}"))
 }
 
 #[cold]
 #[inline(never)]
-fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize)> {
+fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize, String)> {
     use crate::lexer::ItemKind as K;
     let text = |it: &SrcItem| src.get(it.start..it.end).unwrap_or("");
     let generic_fn = |t: &str| t.find('(').is_some_and(|p| t[..p].contains('<') && t[..p].contains("fn "));
@@ -9698,10 +9698,12 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize)
     // (each impl header's trait of the program's, read once)
     let mut impl_trait: crate::fxhash::FxMap<u32, Option<u32>> = Default::default();
     let mut by_text: crate::fxhash::FxMap<&str, Option<u32>> = Default::default();
-    let mut verdicts: crate::fxhash::FxMap<(u32, &str), Option<crate::parse::Pos>> = Default::default();
+    // (a member's verdict: E0276 at a bound, or E0049 with (its own, the trait's) type parameter counts)
+    let mut verdicts: crate::fxhash::FxMap<(u32, &str), Option<Result<crate::parse::Pos, (usize, usize, bool)>>> = Default::default();
     for m in items {
         let K::ImplMember(h) = m.kind else { continue };
-        if !generic_fn(text(m)) {
+        // (a fn of the impl: a generic one for E0276, any for E0049 against a generic method of the trait)
+        if !text(m).contains("fn ") {
             continue;
         }
         let th = *impl_trait.entry(h).or_insert_with(|| {
@@ -9725,23 +9727,44 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize)
         // stricter, if one is)
         let mt = text(m);
         let key = &mt[..fn_body_start(mt).unwrap_or(mt.len())];
-        let at = *verdicts.entry((th, key)).or_insert_with(|| {
+        let at = verdicts.entry((th, key)).or_insert_with(|| {
             let ms = sig(mt)?;
             let ds = decl_sigs.entry((th, name)).or_insert_with(|| sig(text(d))).clone()?;
             let (mp, dp) = (params(&ms.generics), params(&ds.generics));
-            if mp.len() != dp.len() {
+            // (not when the counts of type and const parameters together agree: a kind that differs is rustc's
+            // "incompatible generic parameter" (E0053))
+            let all = |g: &crate::parse::Generics| g.params.iter().filter(|q| !matches!(q, GParam::Lifetime(_))).count();
+            if mp.len() != dp.len() && all(&ms.generics) == all(&ds.generics) {
                 return None;
+            }
+            if mp.len() != dp.len() {
+                // (not with an `impl Trait` parameter on either side, which rustc reports otherwise (E0643))
+                let dt = text(d);
+                let apit = |t: &str| [": impl ", ": &impl ", ": &mut impl "].iter().any(|p| t.contains(p));
+                if apit(key) || apit(&dt[..fn_body_start(dt).unwrap_or(dt.len())]) {
+                    return None;
+                }
+                return Some(Err((mp.len(), dp.len(), ms.recv.is_some())));
             }
             mp.iter().zip(&dp).find_map(|(mb, db)| {
                 let allowed = close(db.iter().map(|x| x.0.clone()).collect());
-                mb.iter().find(|(n, _)| n != "Sized" && !allowed.contains(n)).map(|x| x.1)
+                mb.iter().find(|(n, _)| n != "Sized" && !allowed.contains(n)).map(|x| Ok(x.1))
             })
         });
-        if let Some(pos) = at {
-            // (the position in the member's text: its first line starts where the member does)
-            let line = m.line + pos.line as usize - 1;
-            let col = if pos.line == 1 { m.start - src[..m.start].rfind('\n').map_or(0, |k| k + 1) + pos.col as usize + 1 } else { pos.col as usize + 1 };
-            return Some((line, col));
+        match *at {
+            Some(Ok(pos)) => {
+                // (the position in the member's text: its first line starts where the member does)
+                let line = m.line + pos.line as usize - 1;
+                let col = if pos.line == 1 { m.start - src[..m.start].rfind('\n').map_or(0, |k| k + 1) + pos.col as usize + 1 } else { pos.col as usize + 1 };
+                return Some((line, col, "impl has stricter requirements than trait (E0276)".to_string()));
+            }
+            // (E0049: `fn foo(x: bool)` for the trait's `fn foo<T: Default>(x: T)`)
+            Some(Err((mc, dc, method))) => {
+                let kind = if method { "method" } else { "associated function" };
+                let n = |c: usize| if c == 1 { "1 type parameter".to_string() } else { format!("{c} type parameters") };
+                return Some((m.line, 1, format!("{kind} `{name}` has {} but its trait declaration has {} (E0049)", n(mc), n(dc))));
+            }
+            None => {}
         }
     }
     None

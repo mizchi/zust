@@ -350,7 +350,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
                         (d, join_disp(&pdisp, &format!("{name}/mod.rs")), hdir.join(&name), join_disp(&pdisp, &name))
                     }
                 } else {
-                    return Err(format!("{display}: file not found for module `{name}`"));
+                    return Err(mod_not_found(display, &src, &name));
                 }
             }
         };
@@ -391,7 +391,7 @@ fn load_file_in(path: &Path, display: &str, mod_dir: &Path, disp_dir: &str, star
         } else if b.exists() {
             (b, join_disp(disp_dir, &format!("{name}/mod.rs")), mod_dir.join(name.as_str()), join_disp(disp_dir, &name))
         } else {
-            return Err(format!("{display}: file not found for module `{name}`"));
+            return Err(mod_not_found(display, &src, &name));
         };
         text.push_str(&format!("pub mod {name} {{\n"));
         let at = start + line_count(&text);
@@ -936,6 +936,45 @@ mod circular_tests {
         let r = super::load_crate(&dir.join("lib.rs"), "src/lib.rs", &cfg);
         assert!(r.is_ok(), "{:?}", r.err());
         assert!(r.unwrap().0.contains("pub const YES: bool = true;"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+/// E0583: `mod name;` with no file, at the declaration's line (the first `mod name` of the text followed by `;`)
+#[cold]
+fn mod_not_found(display: &str, src: &str, name: &str) -> String {
+    let pat = format!("mod {name}");
+    // (a declaration at a line's start, past `pub` / `unsafe` only: not one in a block, which rustc reports
+    // otherwise, nor `extern "C" mod x;`)
+    let line = src.match_indices(&pat).find_map(|(i, _)| {
+        let ls = src[..i].rfind('\n').map_or(0, |k| k + 1);
+        let prefix = &src[ls..i];
+        let prefix_ok = prefix.split_whitespace().all(|w| w == "unsafe" || w.starts_with("pub")) && !prefix.starts_with(char::is_whitespace);
+        let after = src[i + pat.len()..].trim_start();
+        (prefix_ok && after.starts_with(';')).then(|| 1 + src[..i].matches('\n').count())
+    });
+    match line {
+        Some(l) => format!("{display}:{l}:1: file not found for module `{name}` (E0583)"),
+        None => format!("{display}: file not found for module `{name}`"),
+    }
+}
+
+#[cfg(test)]
+mod missing_mod_tests {
+    /// E0583: a `mod x;` with no file is reported at the declaration's line (tests/ui error-codes/E0583.rs)
+    #[test]
+    fn file_not_found_at_the_declaration() {
+        let dir = std::env::temp_dir().join(format!("srcmap_missing_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("main.rs"), "// a comment\nfn main() {}\n\nmod nowhere;\n").unwrap();
+        let cfg = crate::cfg::CfgSet::default();
+        let e = super::load_crate(&dir.join("main.rs"), "src/main.rs", &cfg).unwrap_err();
+        assert_eq!(e, "src/main.rs:4:1: file not found for module `nowhere` (E0583)");
+        // (in a fn's block: rustc's error there is another one, so no line is claimed)
+        std::fs::write(dir.join("main.rs"), "fn main() {\n    mod nowhere;\n}\n").unwrap();
+        let e = super::load_crate(&dir.join("main.rs"), "src/main.rs", &cfg).unwrap_err();
+        assert_eq!(e, "src/main.rs: file not found for module `nowhere`");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
