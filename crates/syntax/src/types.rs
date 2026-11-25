@@ -307,6 +307,9 @@ pub struct SigSyn {
     /// W<T>: Bar`): the type, the trait of a qualified path (`Tr`; empty otherwise), the bounds. The trait solver
     /// proves them as goals once the parameters are known (issue #2)
     pub preds: Vec<(TySyn, String, Vec<String>)>,
+    /// The fn's own type parameters (not its impl's or trait's) declared `?Sized`; its other own ones must be sized at
+    /// a call (E0277, Program::fn_sized_gens)
+    pub own_unsized: Vec<String>,
 }
 
 // ---- regions of signatures (region checking; `Ty` itself carries none) ----

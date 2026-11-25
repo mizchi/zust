@@ -2114,6 +2114,9 @@ impl Session2 {
         if let Some(e) = sized_error(&sums, &src, &items, user) {
             return Err(e);
         }
+        if let Some(e) = sized_wf_error(&prog, &sums, &src, &items, user) {
+            return Err(e);
+        }
         // (E0119: two impls of a trait of the program's that both apply to one goal, by the trait solver: their heads
         // unify and both impls' where clauses hold there (crate::traits::TraitDb::conflict))
         // (an impl's where clauses, from its header's text: the summary keeps those on one of its parameters (`T: Tr`);
@@ -9954,7 +9957,20 @@ fn sig_part(text: &str, part: &str) -> Option<usize> {
     if part == "f" {
         return toks.get(k).map(|t| t.1);
     }
-    let open = (k..toks.len()).find(|&j| tk(j) == "(")?;
+    // (the parameters' `(`: after `fn` (not `pub(crate)`'s) and outside the generics' `<..>` (not a bound's `Fn()`))
+    let from = (k..toks.len()).find(|&j| tk(j) == "fn").map_or(k, |j| j + 1);
+    let open = {
+        let mut angle = 0i32;
+        (from..toks.len()).find(|&j| {
+            match tk(j) {
+                "<" => angle += 1,
+                ">" if !(j > 0 && tk(j - 1) == "-" && toks[j - 1].2 == toks[j].1) => angle -= 1,
+                "(" if angle <= 0 => return true,
+                _ => {}
+            }
+            false
+        })?
+    };
     // (the parameters: split at the commas outside brackets, `->` not closing one)
     let (mut d, mut start, mut params, mut close) = (0i32, open + 1, vec![], None);
     let mut j = open;
@@ -12285,6 +12301,139 @@ fn sized_error(sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> O
             if let Some((outer, x)) = find(t, &needs_sized) {
                 let pos = outer.map_or_else(|| format!("{}:1", it.line), |o| at(o));
                 return Some(format!("{pos}: {}", msg(x)));
+            }
+        }
+    }
+    None
+}
+
+/// An item's header: its text before the first `{` token (not one in a string or a comment: `#[doc = "{"]`)
+fn header_text(text: &str) -> &str {
+    let b = text.as_bytes();
+    let t = crate::lexer::tokenize(b);
+    match t.iter().find(|x| x.0 == 1 && b[x.1] == b'{') {
+        Some(x) => &text[..x.1],
+        None => text,
+    }
+}
+
+/// E0277, Sized: the program's definitions and signatures that put a maybe-unsized type where only a sized one may be
+fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> Option<String> {
+    let user_sm = |ii: usize| ii < user;
+    // (a parameter declared `?Sized` whose other bounds imply Sized is sized: `T: Clone + ?Sized`)
+    let implies_sized = |bs: &[String]| bs.iter().any(|b| {
+        let tr = b.split('<').next().unwrap_or(b).trim();
+        let tr = tr.rsplit("::").next().unwrap_or(tr);
+        matches!(tr, "Sized" | "Clone" | "Copy" | "Default" | "From" | "Into" | "TryFrom" | "TryInto" | "FromStr" | "FromIterator")
+            || prog.bound_implies(b, &["Sized", "Clone", "Copy", "Default"], false, 0)
+    });
+    let maybe_unsized = param_maybe_unsized;
+    // (E0277, Sized: a type parameter declared `?Sized`, or an unsized type, where only a sized type may be: a struct's
+    // field other than the last, an enum's or a union's field, an argument for a parameter not declared `?Sized`, a
+    // tuple's element other than the last, a slice's or array's element, a free fn's argument or result)
+    let size_msg = |t: Ty, gens: &[String]| {
+        // (a struct unsized by a parameter in its tail is named by that parameter, as rustc does)
+        let t = match t {
+            Ty::Struct(s) => prog.structs[s as usize].args.iter().rev().copied().find(|a| matches!(a, Ty::Param(_))).unwrap_or(t),
+            t => t,
+        };
+        let n = match t {
+            Ty::Param(i) => gens.get(i as usize).cloned().unwrap_or_default(),
+            t => crate::traits::display_ty(prog, t),
+        };
+        format!("the size for values of type `{n}` cannot be known at compilation time (E0277)")
+    };
+    let mut sids: Vec<u32> = (0..prog.structs.len() as u32).filter(|&s| prog.structs[s as usize].base.is_none() && prog.struct_item.get(s as usize).is_some_and(|&ii| user_sm(ii as usize))).collect();
+    sids.sort_by_key(|&s| prog.struct_item[s as usize]);
+    for sid in sids {
+        let sd = &prog.structs[sid as usize];
+        if prog.is_closure(sid) || prog.is_tuple(sid) || sd.placeholder.is_some() {
+            continue;
+        }
+        let ii = prog.struct_item[sid as usize] as usize;
+        let (Some(it), Some(sm)) = (items.get(ii), sums.get(ii)) else { continue };
+        let union = sm.unions.iter().any(|u| *u == sd.name || sd.name.ends_with(&format!("::{u}")));
+        let adt_b = |g: &str| sm.adt_bounds.iter().find(|(p, _)| p == g).map(|(_, b)| b.clone()).unwrap_or_default();
+        let param_may = |t: Ty| matches!(t, Ty::Param(i) if sm.adt_generics.get(i as usize).is_some_and(|g| sm.adt_unsized.contains(g) && !implies_sized(&adt_b(g))));
+        let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
+        let fields: Vec<&[(String, Ty, u32)]> = if sd.is_enum { sd.variants.iter().map(|v| v.fields.as_slice()).collect() } else { vec![sd.fields.as_slice()] };
+        for (vi, fs) in fields.iter().enumerate() {
+            for (fi, (_, ft, _)) in fs.iter().enumerate() {
+                let bad = if (sd.is_enum || union || fi + 1 < fs.len()) && may(*ft) { Some(*ft) } else { prog.sized_wf_with(*ft, &may, 0) };
+                if let Some(b) = bad {
+                    let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
+                    let (l, c) = field_pos(&text, sd.is_enum, vi, fi).unwrap_or((0, 0));
+                    return Some(format!("{}:{}: {}", it.line + l, c + 1, size_msg(b, &sm.adt_generics)));
+                }
+            }
+        }
+    }
+    for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
+        // (an impl's self type and trait arguments: `impl Foo for Option<[u8]>`)
+        if let Some(st) = &sm.impl_self_ty {
+            if matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) {
+                let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
+                // (the header's text only where the item writes `?Sized`: most impls do not, and reading every item's
+                // tokens costs the check of a large program)
+                let raw = src.get(items[ii].start..items[ii].end).unwrap_or("");
+                let head = if raw.contains("?Sized") { header_text(&blank_comments(raw)).to_string() } else { String::new() };
+                let param_may = |t: Ty| matches!(t, Ty::Param(i) if gens.get(i as usize).is_some_and(|n| maybe_unsized(&head, n)) && !implies_sized(&sm.impl_generics[i as usize].1));
+                let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
+                for t in std::iter::once(st).chain(sm.impl_trait_args.iter()) {
+                    let Ok(t) = prog.resolve_g(t, &gn) else { continue };
+                    if let Some(b) = prog.sized_wf_with(t, &may, 0) {
+                        return Some(format!("{}:1: {}", items[ii].line, size_msg(b, &gens)));
+                    }
+                }
+                // (a trait argument that may be unsized for a parameter of the program's trait not declared `?Sized`:
+                // `impl<T: ?Sized> Tr<T> for ()` with `trait Tr<T> {}`)
+                let tr = sm.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+                let tr = tr.map(|t| t.rsplit("::").next().unwrap_or(t));
+                if let Some((di, d)) = tr.and_then(|tr| sums[..user.min(sums.len())].iter().enumerate().find(|(_, s)| s.trait_decl.as_deref() == Some(tr))) {
+                    let tparams: Vec<&String> = d.trait_generics.iter().map(|g| &g.0).filter(|g| !g.starts_with('#') && *g != "Self").collect();
+                    // (the arguments written fill the leading parameters: the rest have defaults, `trait Tr<T, U = ()>`)
+                    if sm.impl_trait_args.len() <= tparams.len() {
+                        let dhead = || header_text(&blank_comments(src.get(items[di].start..items[di].end).unwrap_or(""))).to_string();
+                        for (k, a) in sm.impl_trait_args.iter().enumerate() {
+                            let Ok(a) = prog.resolve_g(a, &gn) else { continue };
+                            if may(a) && !maybe_unsized(&dhead(), tparams[k]) {
+                                return Some(format!("{}:1: {}", items[ii].line, size_msg(a, &gens)));
+                            }
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+        if sm.trait_decl.is_some() || !matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplMember(_)) {
+            continue;
+        }
+        // (a fn's signature, free or of an impl: `fn iceman(c: Vec<[i32]>)`, `fn g1<X: ?Sized>(x: X)`, `-> [u8]`. An
+        // impl's parameters are taken as sized: their `?Sized` is not known here)
+        for (_, sig) in &sm.fns {
+            if sig.trait_of.is_some() || sig.is_extern || !sig.has_body {
+                continue;
+            }
+            let gn: Vec<&str> = sig.generics.iter().map(|g| g.0.as_str()).collect();
+            let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
+            let param_may = |t: Ty| matches!(t, Ty::Param(i) if gens.get(i as usize).is_some_and(|n| sig.own_unsized.contains(n)) && !implies_sized(&sig.generics[i as usize].1));
+            let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
+            for (k, t) in sig.params.iter().chain([&sig.ret]).enumerate() {
+                let Ok(t) = prog.resolve_g(t, &gn) else { continue };
+                // (a value of the type itself: an argument, or the result)
+                let by_value = may(t) && !(k == sig.params.len() && matches!(t, Ty::Dyn(_)));
+                if let Some(b) = if by_value { Some(t) } else { prog.sized_wf_with(t, &may, 0) } {
+                    // (at the argument's type or the result's, as rustc: a signature may span lines)
+                    let part = if k == sig.params.len() { "r".to_string() } else { format!("p{k}") };
+                    let it = &items[ii];
+                    let at = src.get(it.start..it.end.min(src.len())).and_then(|t| sig_part(t, &part)).map(|o| it.start + o);
+                    let pos = match at {
+                        Some(at) => format!("{}:{}", src[..at].matches('\n').count() + 1, at - src[..at].rfind('\n').map_or(0, |p| p + 1) + 1),
+                        None => format!("{}:1", it.line),
+                    };
+                    return Some(format!("{pos}: {}", size_msg(b, &gens)));
+                }
             }
         }
     }
