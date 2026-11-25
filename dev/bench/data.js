@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795601623343,
+  "lastUpdate": 1795601625590,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -127424,6 +127424,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 4832,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "54460146e61471d2ecebfb6b7d9c15200871d3bc",
+          "message": "Region check part 34: impl Trait + 'static arguments, 'static bounds of fields' types, what a Cell stores, a value's drop that sees a loan of itself (#161)\n\nRegion check part 34: impl Trait + 'static arguments, 'static bounds of fields' types, what a Cell stores, a value's drop that sees a loan of itself",
+          "timestamp": "2026-11-25T19:08:15+09:00",
+          "tree_id": "0206767d2443c3a4fd2f7bd884d386dcdcb45ce3",
+          "url": "https://github.com/mizchi/zust/commit/54460146e61471d2ecebfb6b7d9c15200871d3bc"
+        },
+        "date": 1795601625309,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.28,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1905,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.44,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1549,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 65.52,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4839,
             "unit": "tests"
           }
         ]
