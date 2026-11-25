@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795637957677,
+  "lastUpdate": 1795637960692,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -111310,6 +111310,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/12c872983f4a7ee16d08b3bfdac2dfda9943893f"
         },
         "date": 1795637415639,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.552,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.818,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 71.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.537,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ce9b7b6a5f09bb904309b619c83536fd19886ac3",
+          "message": "CI: kache keeps what rustc makes in the test and rust-ui jobs; rust-cache keeps the registry and the tools (#220)\n\nkache (kunobi-ninja/kache-action, kache 2.3.1) wraps rustc and keeps each compiler run's output in the GitHub\nActions cache, by its inputs with the checkout's paths left out, so a crate compiled as in an earlier run is copied,\nthe test binaries too (cache-executables). rust-cache no longer keeps target/ (cache-targets: false), so the two do\nnot store the same outputs twice in the repository's 10 GB.\n\nLocally, kache's warm rebuild of zust-syntax and zust-base took 0.1 s where the cold one took 19.9 s.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T05:13:19+09:00",
+          "tree_id": "3d8fd9b2f3159d960e33f0581dc9e79ed7b9d131",
+          "url": "https://github.com/mizchi/zust/commit/ce9b7b6a5f09bb904309b619c83536fd19886ac3"
+        },
+        "date": 1795637959995,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
