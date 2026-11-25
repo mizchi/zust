@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795588726668,
+  "lastUpdate": 1795588728973,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -77452,6 +77452,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 112.941,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4139c8bd8fb4a3efc0049dbf6f3777aac0434c61",
+          "message": "Region check part 31: errors in closures at the closure, a const's block that borrows its own local, moves out of a temporary scrutinee, the use rustc reports of a moved value, a block's value read before its drops (#158)\n\nRegion check part 31: errors in closures at the closure, a const's block that borrows its own local, moves out of a temporary scrutinee, the use rustc reports of a moved value, a block's value read before its drops",
+          "timestamp": "2026-11-25T15:33:14+09:00",
+          "tree_id": "17957259b461580f5e1d0bea08de6852d493bc57",
+          "url": "https://github.com/mizchi/zust/commit/4139c8bd8fb4a3efc0049dbf6f3777aac0434c61"
+        },
+        "date": 1795588728615,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 0.969,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.779,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.744,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 5.592,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 0.952,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.264,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.312,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 232.165,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 113.188,
             "unit": "MiB"
           }
         ]
