@@ -2567,3 +2567,21 @@ fn keyword_labels_and_limit_values() {
     assert_eq!(first("#![recursion_limit = \"99999999999999999999999\"]\nfn main() {}\n"), lim(1), "one too large");
     assert_eq!(first("#![recursion_limit = \"256\"]\nfn main() {}\n"), None, "a limit");
 }
+
+#[test]
+fn generic_parameter_defaults_where_rustc_rejects_them() {
+    // (rustc 1.100: a const parameter's default on a fn or an impl; a default before a parameter without one)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let here = |l: usize, c: usize| Some((l, c, "defaults for generic parameters are not allowed here".to_string()));
+    let trail = |l: usize, c: usize| Some((l, c, "generic parameters with a default must be trailing".to_string()));
+    assert_eq!(first("fn foo<const N: usize = 5>() {}\nfn main() {}\n"), here(1, 8), "a fn's, at the `const`");
+    assert_eq!(first("struct Foo<const N: usize>;\nimpl<const N: usize = 1> Foo<N> {}\nfn main() {}\n"), here(2, 6), "an impl's");
+    assert_eq!(first("struct S;\nimpl S {\n    fn f<const N: u8 = 1>() {}\n}\nfn main() {}\n"), here(3, 10), "a method's");
+    assert_eq!(first("struct A<T = u32, const N: usize> {\n    arg: T,\n}\nfn main() {}\n"), trail(1, 10), "a type parameter's");
+    assert_eq!(first("struct Foo<const N: u8 = 3, T>(T);\nfn main() {}\n"), trail(1, 18), "a const parameter's, at its name");
+    assert_eq!(first("trait Tr<T = u8, U> { fn f(&self, u: U) -> T; }\nfn main() {}\n"), trail(1, 10), "a trait's");
+    assert_eq!(first("struct P<'a, T = u8, const N: usize = 2>(&'a T);\nenum E<T, U = T> { A(T, U) }\nfn main() {}\n"), None, "trailing defaults");
+}

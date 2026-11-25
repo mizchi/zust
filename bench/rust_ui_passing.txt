@@ -1670,6 +1670,8 @@ check-pass	const-generics/const-param-in-async.rs
 compile-fail	const-generics/const-param-type-depends-on-type-param-ungated.rs
 check-pass	const-generics/const_eval_unchecked_doesnt_fire_patterns.rs
 compile-fail	const-generics/default-ty-closure.rs
+compile-fail	const-generics/defaults/const-param-default-body-param-env-ice.rs
+compile-fail	const-generics/defaults/default-on-impl.rs
 compile-fail	const-generics/defaults/doesnt_infer.rs
 compile-fail	const-generics/defaults/intermixed-lifetime.rs
 compile-fail	const-generics/defaults/mismatch.rs
@@ -1679,6 +1681,7 @@ compile-fail	const-generics/defaults/self-referential.rs
 run-pass	const-generics/defaults/simple-defaults.rs
 compile-fail	const-generics/defaults/trait_objects_fail.rs
 compile-fail	const-generics/defaults/wfness.rs
+compile-fail	const-generics/defaults/wrong-order.rs
 check-pass	const-generics/deref-into-array-generic.rs
 compile-fail	const-generics/early/closing-args-token.rs
 compile-fail	const-generics/early/const-expression-parameter.rs
@@ -1742,6 +1745,8 @@ check-pass	const-generics/min_const_generics/assoc_const.rs
 compile-fail	const-generics/min_const_generics/complex-types.rs
 compile-fail	const-generics/min_const_generics/const-expression-suggest-missing-braces-without-turbofish.rs
 compile-fail	const-generics/min_const_generics/const-expression-suggest-missing-braces.rs
+compile-fail	const-generics/min_const_generics/const_default_first.rs
+compile-fail	const-generics/min_const_generics/default_function_param.rs
 check-pass	const-generics/min_const_generics/default_trait_param.rs
 compile-fail	const-generics/min_const_generics/forbid-non-static-lifetimes.rs
 run-pass	const-generics/min_const_generics/inferred_const.rs

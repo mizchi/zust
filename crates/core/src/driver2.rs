@@ -1085,12 +1085,12 @@ impl Session2 {
                         crate::ast_summary::parse_and_summarize(&src, it, ow.as_ref()).map_err(|e| {
                             // (a validation error rustc reports after parsing: a later item's syntax error first)
                             if let Some(d) = e.strip_prefix('\u{7}') {
-                                return deferred_after_parse(relocate(d.to_string(), it), &src, &items[i + 1..user_src]);
+                                return deferred_after_parse(relocate(d.to_string(), it, &src), &src, &items[i + 1..user_src]);
                             }
                             let e = match (e.strip_prefix('\u{2}'), it.kind) {
                                 // (`\u{2}msg`: an impl member's error that is at its impl's header)
                                 (Some(m), ItemKind::ImplMember(h)) => format!("{}:1: {m}", items[h as usize].line),
-                                _ => relocate(e.trim_start_matches('\u{2}').to_string(), it),
+                                _ => relocate(e.trim_start_matches('\u{2}').to_string(), it, &src),
                             };
                             let e = ret_type_line(e, &src, it);
                             // (an item moved out of a fn body that cannot see a name of the items around it: rustc's
@@ -2347,7 +2347,7 @@ fn deferred_after_parse(e: String, src: &str, later: &[SrcItem]) -> String {
         };
         if let Err(e2) = crate::parse::parse_file(&text) {
             if !e2.starts_with('\u{7}') {
-                return relocate(e2, it);
+                return relocate(e2, it, src);
             }
         }
     }
@@ -2372,9 +2372,21 @@ fn ret_type_line(e: String, src: &str, it: &SrcItem) -> String {
     e
 }
 
-fn relocate(e: String, it: &SrcItem) -> String {
+/// An error of an item's own text at its place in src: its line, and on its first line its column too (an impl's member
+/// starts after its indentation)
+fn relocate(e: String, it: &SrcItem, src: &str) -> String {
     if let Some((l, rest)) = e.split_once(':') {
         if let Ok(l) = l.parse::<usize>() {
+            if l == 1 {
+                let head = &src[..it.start.min(src.len())];
+                let indent = head.len() - head.rfind('\n').map_or(0, |p| p + 1);
+                if let Some((c, msg)) = rest.split_once(':').filter(|_| indent > 0) {
+                    if let Ok(c) = c.parse::<usize>() {
+                        let indent = head[head.len() - indent..].chars().count();
+                        return format!("{}:{}:{msg}", it.line, c + indent);
+                    }
+                }
+            }
             return format!("{}:{rest}", l + it.line - 1);
         }
     }
@@ -8639,7 +8651,7 @@ fn elidable_use(t: &crate::parse::Ty, l: &str) -> bool {
 
 pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
     let text = &src[it.start..it.end];
-    let f = crate::parse::parse_file(text).map_err(|e| relocate(e, it))?;
+    let f = crate::parse::parse_file(text).map_err(|e| relocate(e, it, src))?;
     let Some(item) = f.items.into_iter().next() else { return Ok(None) };
     let crate::parse::ItemKind::Fn(mut sig, Some(mut block)) = item.kind else { return Ok(None) };
     let mut lets = vec![];

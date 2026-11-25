@@ -669,6 +669,9 @@ pub struct Parser {
     /// A validation error rustc reports after parsing (a binder's bounds or type parameter, `for<'a: 'b>`): returned by
     /// parse_file, marked `\u{7}`, when nothing fails to parse
     deferred: Option<String>,
+    /// The parameters the last generics() read with a default: (the index, the parameter's first token, its name's
+    /// token, whether it is a const one)
+    gdefaults: Vec<(u32, u32, u32, bool)>,
     /// Inside a value that must be a constant (a const's or static's value, a discriminant, an array's length) and
     /// not in a fn or closure body in it: `return` there is E0572
     in_const: bool,
@@ -762,7 +765,7 @@ pub fn rewrite_tokens(s: &str, f: &mut dyn FnMut(usize, &[Tok]) -> Option<String
 
 pub fn parse_file(src: &str) -> R<File> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false, in_extern: false, deferred: None, in_const: false, no_dup_check: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base: Pos::default(), async_on: true, in_async: false, in_extern: false, deferred: None, in_const: false, no_dup_check: false, gdefaults: Vec::new() };
     let mut attrs = Vec::new();
     while p.is_punct("#") && p.peek_is(1, "!") {
         attrs.push(p.attr()?);
@@ -798,7 +801,7 @@ pub fn parse_expr(src: &str) -> R<Expr> {
 /// 式を読む。位置は base (src の先頭のソース上の位置) からの位置にする
 pub fn parse_expr_at(src: &str, base: Pos) -> R<Expr> {
     let toks = tokenize(src)?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, deferred: None, in_const: false, no_dup_check: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, deferred: None, in_const: false, no_dup_check: false, gdefaults: Vec::new() };
     let e = p.expr(true)?;
     if p.i < p.toks.len() {
         return Err(p.err("unexpected token after expression"));
@@ -813,7 +816,7 @@ pub fn parse_pat_guard(src: &str) -> Option<(Pat, Option<Expr>)> {
 
 pub fn parse_pat_guard_at(src: &str, base: Pos) -> Option<(Pat, Option<Expr>)> {
     let toks = tokenize(src).ok()?;
-    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, deferred: None, in_const: false, no_dup_check: false };
+    let mut p = Parser { toks: toks, i: 0, init_text: String::new(), base, async_on: false, in_async: false, in_extern: false, deferred: None, in_const: false, no_dup_check: false, gdefaults: Vec::new() };
     let pat = p.pat().ok()?;
     let guard = if p.eat_ident("if") { Some(p.expr(true).ok()?) } else { None };
     p.eat_punct(",");
@@ -2789,6 +2792,7 @@ impl Parser {
 
     fn generics(&mut self) -> R<Generics> {
         let mut g = Generics { params: Vec::new(), preds: Vec::new() };
+        self.gdefaults.clear();
         if !self.is_punct("<") {
             return Ok(g);
         }
@@ -2806,20 +2810,24 @@ impl Parser {
                 }
                 g.params.push(GParam::Lifetime(l));
             } else if self.eat_ident("const") {
+                let (kw, nt) = (self.i - 1, self.i);
                 let n = self.ident()?;
                 self.expect_punct(":")?;
                 let t = self.ty()?;
                 if self.eat_punct("=") {
                     let _ = self.unary_expr(true)?;
+                    self.gdefaults.push((g.params.len() as u32, kw as u32, nt as u32, true));
                 }
                 g.params.push(GParam::Const(n, t));
             } else {
+                let nt = self.i;
                 let n = self.ident()?;
                 let bs = if self.eat_punct(":") { self.bounds()? } else { Vec::new() };
                 let d = if self.eat_punct("=") {
                     let s = self.i;
                     let t = self.ty()?;
                     defaults.push((g.params.len(), s, self.i));
+                    self.gdefaults.push((g.params.len() as u32, nt as u32, nt as u32, false));
                     Some(t)
                 } else {
                     None
@@ -2837,6 +2845,25 @@ impl Parser {
             self.forward_default(&g, &defaults)?;
         }
         Ok(g)
+    }
+
+    /// A generic parameter's default where rustc rejects it (after parsing, as rustc's checks of the items' generics):
+    /// `defs` a type's or a trait's parameters, where one without a default may not follow one with ("generic parameters
+    /// with a default must be trailing", at its name); else a fn's or an impl's, where a const parameter's default is
+    /// "defaults for generic parameters are not allowed here", at the parameter (a type parameter's is the lint
+    /// invalid_type_param_default, which a crate may allow)
+    #[cold]
+    fn misplaced_default(&mut self, g: &Generics, defs: bool) {
+        let ds = std::mem::take(&mut self.gdefaults);
+        if defs {
+            let d = ds[0];
+            let has = |j: usize| ds.iter().any(|e| e.0 as usize == j);
+            if g.params.iter().enumerate().skip(d.0 as usize + 1).any(|(j, p)| !matches!(p, GParam::Lifetime(_)) && !has(j)) {
+                self.defer(d.2 as usize, "generic parameters with a default must be trailing");
+            }
+        } else if let Some(d) = ds.iter().find(|d| d.3) {
+            self.defer(d.1 as usize, "defaults for generic parameters are not allowed here");
+        }
     }
 
     /// E0128: the default of a type parameter names that parameter or one declared after it (`<T = U, U>`). The
@@ -2964,6 +2991,9 @@ impl Parser {
     fn fn_sig(&mut self, quals: Vec<String>) -> R<FnSig> {
         let name = self.decl_ident()?;
         let mut g = self.generics()?;
+        if !self.gdefaults.is_empty() {
+            self.misplaced_default(&g, false);
+        }
         self.expect_open("(")?;
         let mut recv = None;
         let mut recv_ty: Option<Ty> = None;
@@ -3172,6 +3202,9 @@ impl Parser {
                 self.i += 1;
                 let n = self.decl_ident()?;
                 let mut g = self.generics()?;
+                if !self.gdefaults.is_empty() {
+                    self.misplaced_default(&g, true);
+                }
                 self.where_clause(&mut g)?;
                 let f = self.fields()?;
                 self.where_clause(&mut g)?;
@@ -3185,6 +3218,9 @@ impl Parser {
                 self.i += 1;
                 let n = self.decl_ident()?;
                 let mut g = self.generics()?;
+                if !self.gdefaults.is_empty() {
+                    self.misplaced_default(&g, true);
+                }
                 self.where_clause(&mut g)?;
                 self.expect_open("{")?;
                 let mut vs = Vec::new();
@@ -3210,6 +3246,9 @@ impl Parser {
             "impl" => {
                 self.i += 1;
                 let mut g = if self.is_punct("<") && !self.punct_at(1, ">") { self.generics()? } else { Generics { params: Vec::new(), preds: Vec::new() } };
+                if !self.gdefaults.is_empty() {
+                    self.misplaced_default(&g, false);
+                }
                 // (`impl<> T<> for S<>`: empty generics)
                 if self.punct_at(0, "<>") {
                     self.i += 2;
@@ -3234,6 +3273,9 @@ impl Parser {
                 self.i += 1;
                 let n = self.decl_ident()?;
                 let mut g = self.generics()?;
+                if !self.gdefaults.is_empty() {
+                    self.misplaced_default(&g, true);
+                }
                 let sup = if self.eat_punct(":") { self.bounds()? } else { Vec::new() };
                 self.where_clause(&mut g)?;
                 let items = self.items_in_braces()?;
