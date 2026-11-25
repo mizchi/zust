@@ -364,7 +364,10 @@ impl Known {
             }
             PTy::Dyn(bs) => {
                 let Some(p) = bs.iter().find_map(|b| if let Bound::Trait(false, p) = b { Some(p) } else { None }) else { return };
-                let obj = bs.iter().find_map(|b| if let Bound::Lifetime(l) = b { Some(l.as_str()) } else { None }).or(parent).unwrap_or("'static");
+                // (only an object lifetime written out: an elided one defaults to the trait's own lifetime bound, which
+                // it then meets (`&'a dyn Any` is `&'a (dyn Any + 'static)`, as `Any: 'static`))
+                let _ = parent;
+                let Some(obj) = bs.iter().find_map(|b| if let Bound::Lifetime(l) = b { Some(l.as_str()) } else { None }) else { return };
                 if obj == "'_" || obj == "'static" || self.vague.iter().any(|v| v == obj) {
                     return;
                 }

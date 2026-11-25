@@ -4346,3 +4346,185 @@ fn part29_review() {
     // as zustc does)
     errors_at("fn f() -> &'static str {\n    let mut r = String::new().as_str();\n    println!(\"{}\", r);\n    r = \"ok\";\n    r\n}\nfn main() { println!(\"{}\", f()); }\n", &[(5, "cannot return value referencing temporary value (E0515)")], "r2");
 }
+
+#[test]
+fn part30_pattern_moves() {
+    // (a by-value binding's move out of what the scrutinee owns is at its arm, where rustc 1.97 reports a use after
+    // it (8, 20); a move through a reference, which cannot be made, stays at the scrutinee (E0507, 12))
+    errors_at(r#"fn array() -> [(String, String); 3] { Default::default() }
+fn f() {
+    let a = array();
+    match a {
+        [_, _, _x] => {}
+    }
+    match a {
+        [.., _y] => {}
+    }
+}
+fn g(x: &Option<String>) {
+    match *x {
+        Some(_s) => {}
+        None => {}
+    }
+}
+fn h() {
+    let t = (String::new(), 1);
+    let s = match t { (s, _) => s };
+    let _u = t.0;
+    let _ = s;
+}
+fn main() { f(); g(&None); h(); }
+"#, &[(8, r#"use of moved value"#), (12, r#"cannot move out of"#), (20, r#"use of moved value"#)], "pm");
+}
+
+#[test]
+fn part30_outlives_bounds() {
+    // (an outlives bound on a type implies its parts': `Self: 'b` in an impl's method, `D<'a>: 'b`, `E<'a, T>: 'b`
+    // and `&'a T: 'b` give 'a: 'b, so returning a `&'a` for a `&'b` is no error; without the bound it is (8). A caller
+    // must meet it (4, 6). Lines as rustc 1.97's)
+    errors_at(r#"struct D<'a>(&'a i32);
+impl<'a> D<'a> {
+    fn keep<'b>(self) -> &'b i32 where Self: 'b { self.0 }
+}
+struct E<'a, T>(&'a T);
+fn f<'a, 'b>(x: D<'a>) -> &'b i32 where D<'a>: 'b { x.0 }
+fn g<'a, 'b, T>(x: E<'a, T>) -> &'b T where E<'a, T>: 'b { x.0 }
+fn h<'a, 'b>(x: D<'a>) -> &'b i32 { x.0 }
+fn main() { let v = 1; let d = D(&v); println!("{}", d.keep()); println!("{} {} {}", f(D(&v)), g(E(&v)), h(D(&v))); }
+"#, &[(8, r#"lifetime may not live long enough"#)], "w1");
+    errors_at(r#"struct D<'a>(&'a i32);
+fn f<'a, 'b>(x: D<'a>) -> &'b i32 where D<'a>: 'b { x.0 }
+fn k<'a, 'b, T>(x: &'a T) -> &'b T where &'a T: 'b { x }
+fn caller<'x>(d: D<'x>) -> &'static i32 { f(d) }
+fn caller2<'x>(d: D<'x>) -> &'x i32 { f(d) }
+fn caller3<'x>(v: &'x i32) -> &'static i32 { k(v) }
+fn main() { let v = 1; println!("{} {}", caller2(D(&v)), k(&v)); }
+"#, &[(4, r#"lifetime may not live long enough"#), (6, r#"lifetime may not live long enough"#)], "w2");
+}
+
+#[test]
+fn part30_index_deref_and_box_self() {
+    // (a field read through a type's own Index and then its Deref (`v[0].f` with `Output = MyPtr<Foo>`) type-checks,
+    // and its borrow is checked: E0506 for the assignment of `v` while `&v[0].f` lives, at rustc 1.97's line. A
+    // `self: Box<Self>` method called on a temporary Box (`Box::new(S).f()`, `mk().f()`) type-checks)
+    errors_at(r#"use std::ops::{Deref, Index};
+struct MyVec<T> { x: T }
+impl<T> Index<usize> for MyVec<T> { type Output = T; fn index(&self, _: usize) -> &T { &self.x } }
+struct MyPtr<T> { x: T }
+impl<T> Deref for MyPtr<T> { type Target = T; fn deref(&self) -> &T { &self.x } }
+struct Foo { f: usize }
+fn ok() -> usize {
+    let v = MyVec { x: MyPtr { x: Foo { f: 22 } } };
+    let i = &v[0].f;
+    *i + v[0].f
+}
+fn bad() {
+    let mut v = MyVec { x: MyPtr { x: Foo { f: 22 } } };
+    let i = &v[0].f;
+    v = MyVec { x: MyPtr { x: Foo { f: 23 } } };
+    let _ = *i;
+    let _ = v;
+}
+fn main() { println!("{}", ok()); bad(); }
+"#, &[(15, r#"cannot assign to `v` because it is borrowed"#)], "ix");
+    errors_at(r#"struct S;
+impl S { fn f(self: Box<Self>) -> i32 { 1 } fn g(self: Box<Self>, k: i32) -> i32 { k } }
+struct D<'a>(&'a i32);
+impl D<'_> { fn get(self: Box<Self>) -> i32 { *self.0 } }
+fn mk() -> Box<S> { Box::new(S) }
+fn main() {
+    let x = 5;
+    println!("{} {} {} {}", Box::new(S).f(), mk().f(), Box::new(S).g(2), Box::new(D(&x)).get());
+}
+"#, &[], "bxall");
+}
+
+#[test]
+fn part30_trait_object_lifetime_bounds() {
+    // (std's `Any` is `trait Any: 'static`: a field `Box<dyn Any + 'a>` is E0478, as for a trait of the program's with
+    // a `'static` bound. An elided object lifetime defaults to the trait's own bound, which it then meets: `&'a dyn
+    // MyAny` is no error, `&'a (dyn MyAny + 'a)` is (line 4). Lines as rustc 1.97's)
+    errors_at(r#"struct H<'a> { v: Box<dyn std::any::Any + 'a> }
+struct G { v: Box<dyn std::any::Any> }
+struct K<'a> { v: &'a (dyn std::any::Any + 'static) }
+fn main() {}
+"#, &[(1, r#"lifetime bound not satisfied"#)], "any2");
+    errors_at(r#"trait MyAny: 'static {}
+impl MyAny for i32 {}
+struct S<'a> { v: &'a dyn MyAny }
+struct T<'a> { v: &'a (dyn MyAny + 'a) }
+fn main() { let x = 1; let s = S { v: &x }; let _ = s.v; }
+"#, &[(4, r#"lifetime bound not satisfied"#)], "any4");
+}
+
+#[test]
+fn part30_review() {
+    // (a bound on a type alias implies nothing of the parts written in it, which what it stands for may not have:
+    // `Erased<'a>: 'static` with `type Erased<'a> = ();` is no `'a: 'static` (2), where `W<'a>: 'static` of a struct
+    // is, and its caller must meet it (5). Lines as rustc 1.97's)
+    errors_at(r#"type Erased<'a> = ();
+fn f<'a>(x: &'a i32) -> &'static i32 where Erased<'a>: 'static { x }
+struct W<'a>(&'a i32);
+fn g<'a>(x: &'a i32) -> &'static i32 where W<'a>: 'static { x }
+fn main() { let v = 1; let _ = (f(&v), g(&v)); }
+"#, &[(2, "lifetime may not live long enough"), (5, "does not live long enough")], "a1");
+    // (an `unsafe fn` with `self: Box<Self>` called on a temporary Box outside `unsafe` is E0133; inside it is not)
+    // (a `self: Box<Self>` method's result that borrows through the Box's value is tied to what it borrows, on a
+    // Box local and on a temporary one: E0515 at each return, as in rustc 1.97)
+    errors_at(r#"struct S<'a>(&'a i32);
+impl<'a> S<'a> { fn get(self) -> &'a i32 { self.0 } fn getb(self: Box<Self>) -> &'a i32 { self.0 } }
+fn f<'x>() -> &'x i32 { let x = 5; S(&x).get() }
+fn g<'x>() -> &'x i32 { let x = 5; let b = Box::new(S(&x)); b.getb() }
+fn h<'x>() -> &'x i32 { let x = 5; Box::new(S(&x)).getb() }
+fn main() { let _ = (f(), g(), h()); }
+"#, &[(3, "E0515"), (4, "E0515"), (5, "E0515")], "b2");
+    // (`Self: 'static` of an impl whose self type is a type alias that drops its lifetime (`Erased<'a>` with
+    // `type Erased<'a> = ();`) implies nothing of 'a; of a struct's (`D<'a>`) it implies 'a: 'b)
+    errors_at(r#"type Erased<'a> = ();
+trait Leak<'a> { fn leak(x: &'a i32) -> &'static i32 where Self: 'static; }
+impl<'a> Leak<'a> for Erased<'a> { fn leak(x: &'a i32) -> &'static i32 where Self: 'static { x } }
+struct D<'a>(&'a i32);
+impl<'a> D<'a> { fn keep<'b>(self) -> &'b i32 where Self: 'b { self.0 } }
+fn main() {}
+"#, &[(3, "lifetime may not live long enough")], "sa");
+    // (what `Self: 'b` implies of the self type's lifetimes is dropped only for those inside a type alias's arguments:
+    // not for an impl's type parameter `T` that shadows a `type T`, nor `D<'a, T>` naming the alias `T` beside 'a,
+    // nor 'a also written outside `Erased<'a>`, nor a trait object's lifetime; `W<Erased<'a>>` is an error (9))
+    errors_at(r#"type T = ();
+struct D<'a, X>(&'a i32, X);
+impl<'a, T> D<'a, T> { fn keep<'b>(&self, x: &'a i32) -> &'b i32 where Self: 'b { x } }
+fn f<'a, 'b, T>(x: E<'a, T>) -> &'b i32 where E<'a, T>: 'b { x.0 }
+struct E<'a, X>(&'a i32, X);
+fn g<'a, 'b>(x: &'a i32) -> &'b i32 where D<'a, T>: 'b { x }
+fn main() { let n = 1; let d = D(&n, ()); println!("{} {} {}", d.keep(&n), f(E(&n, 0u8)), g(&n)); let _: T = (); }
+"#, &[], "sh");
+    errors_at(r#"type T = ();
+type Erased<'a> = ();
+struct D<'a, X>(&'a i32, X);
+impl<'a> D<'a, T> { fn k1<'b>(&self, x: &'a i32) -> &'b i32 where Self: 'b { x } }
+impl<'a> D<'a, Erased<'a>> { fn k2<'b>(&self, x: &'a i32) -> &'b i32 where Self: 'b { x } }
+trait Tr {}
+impl<'a> dyn Tr + 'a { fn k3<'b>(&self, x: &'a i32) -> &'b i32 where Self: 'b { x } }
+struct W<X>(X);
+impl<'a> W<Erased<'a>> { fn k4<'b>(&self, x: &'a i32) -> &'b i32 where Self: 'b { x } }
+fn main() {}
+"#, &[(9, "lifetime may not live long enough")], "sh2");
+    // (a bound on a generic associated type with lifetime arguments (`T::A<'a>: 'static`) is one component of its
+    // own: it implies nothing of 'a)
+    errors_at(r#"trait Tr { type A<'x>; }
+fn bad<'a, T: Tr>(x: &'a i32) -> &'static i32 where T::A<'a>: 'static { x }
+fn main() {}
+"#, &[(2, "lifetime may not live long enough")], "g1");
+    // (an inherent `unsafe fn` with `self: Box<Self>` is chosen before a trait's method of the name, as in rustc:
+    // E0133 outside `unsafe`)
+    errors_at(r#"struct S;
+impl S { unsafe fn f(self: Box<Self>) -> i32 { 1 } }
+trait T { fn f(self: Box<Self>) -> i32; }
+impl T for S { fn f(self: Box<Self>) -> i32 { 2 } }
+fn main() { println!("{}", Box::new(S).f()); }
+"#, &[(5, "call to unsafe function")], "un2");
+    errors_at(r#"struct S;
+impl S { unsafe fn f(self: Box<Self>) -> i32 { 1 } }
+fn main() { let a = unsafe { Box::new(S).f() }; let b = Box::new(S).f(); println!("{} {}", a, b); }
+"#, &[(3, "call to unsafe function")], "u1");
+}
