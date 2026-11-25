@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795639582415,
+  "lastUpdate": 1795639585786,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -111924,6 +111924,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/a61fb67713e4c94091cb4fdb294032a9ed4ea39e"
         },
         "date": 1795638319750,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.552,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.818,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 71.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.537,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c8d7b59df5f4f39a01d0e08afe68dd419d8ae816",
+          "message": "lexer: E0758 for a block comment the file ends in, also after the last item (#181) (#223)\n\n`fn main() {}\\n/*x` was accepted by `zustc check` and `zustc build`; rustc\n1.100 reports \"unterminated block comment\" (E0758) at 2:1. The lexer's E0758\ncheck (`unterminated_literal`) runs only when the items do not split, and a\ncomment after the last item leaves none unsplit.\n\nThe item splitter now asks unterminated_literal when a block comment runs to\nthe end of the file. It scans from the start, so an unterminated literal\nbefore the comment is reported instead, as rustc's lexer does\n(`const S: &str = \"abc /* x` is E0765 at the string).\n\nA doc comment (`/**`, `/*!`; not `/***` or `/**/`) is \"unterminated block\ndoc-comment\", as rustc names it, also inside an item.\n\nTests: tests/check.rs `literals_and_comments_a_file_ends_in`, with rustc's\nline and column for each: after the last item, with a non-ASCII character,\nnested, `/**` and `/*!` and `/***`, a doc comment in a body, a string before\nit, and two closed comments after the last item (no error).\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T05:40:53+09:00",
+          "tree_id": "4cd5ce1e601d943fc47c7e88397f7c00239e18e6",
+          "url": "https://github.com/mizchi/zust/commit/c8d7b59df5f4f39a01d0e08afe68dd419d8ae816"
+        },
+        "date": 1795639585263,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
