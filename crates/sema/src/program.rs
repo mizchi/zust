@@ -5145,6 +5145,10 @@ impl Program {
             if name.starts_with(crate::ast_types::GAT_PREFIX) {
                 return None;
             }
+            // (a qualified path's trait is marked in the name, `#tr:Tr:A` of `<X as Tr>::A` (tysyn): the name without
+            // it, and that trait when the caller has none)
+            let (name, mtr) = crate::ast_types::split_trait_assoc(name);
+            let qtr = if qtr.is_empty() { mtr.unwrap_or("") } else { qtr };
             // (`<i32 as Local>::Output` is marked as not std's: normalize asks the impls of the trait it names anyway)
             let name = name.strip_prefix(crate::ast_types::NO_STD_ASSOC).unwrap_or(name);
             let bt = self.resolve_g(bsyn, names).ok()?;
