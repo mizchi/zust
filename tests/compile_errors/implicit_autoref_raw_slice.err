@@ -1,0 +1,1 @@
+ 6:22: implicit autoref creates a reference to the dereference of a raw pointer (dangerous_implicit_autorefs)

@@ -67,6 +67,10 @@ compile-fail	coercion/unsize-lifetime-shrinking.rs
 compile-fail	generics/issue-65285-incorrect-explicit-lifetime-name-needed.rs
 compile-fail	privacy/projections.rs
 compile-fail	closure_context/issue-26046-fn-mut.rs
+compile-fail	implied-bounds/implied-bounds-on-nested-references-plus-variance-unnormalized.rs
+compile-fail	cast/cast-rfc0401-fail.rs
+compile-fail	dst/dst-bad-deep.rs
+compile-fail	dst/dst-bad-deep-2.rs
 compile-fail	iterators/rpit-method-chain-no-ice.rs
 compile-fail	span/send-is-not-static-std-sync-2.rs
 compile-fail	pin-macro/pin_move.rs

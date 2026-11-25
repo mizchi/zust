@@ -30,14 +30,22 @@ fn has_attr(attrs: &[String], name: &str) -> bool {
 }
 
 /// `#[derive(A, B)]` の名前 (1 つの識別子のものだけ)
+/// (also as std's prelude writes it, `#[::core::prelude::v1::derive(::core::clone::Clone, ::core::marker::Copy)]`, as
+/// libc 0.2's `s!` does: a std trait by its path is its name)
 fn derive_names(attrs: &[String]) -> Vec<String> {
     let mut out = Vec::new();
     for a in attrs {
         let c = compact(a);
-        let Some(inner) = c.strip_prefix("#[derive(").and_then(|x| x.strip_suffix(")]")) else { continue };
+        let Some(rest) = c.strip_prefix("#[") else { continue };
+        let rest = rest.strip_prefix("::").unwrap_or(rest);
+        let rest = ["core::prelude::v1::", "std::prelude::v1::"].iter().find_map(|p| rest.strip_prefix(p)).unwrap_or(rest);
+        let Some(inner) = rest.strip_prefix("derive(").and_then(|x| x.strip_suffix(")]")) else { continue };
         for part in inner.split(',') {
-            if !part.is_empty() && part.chars().all(|ch| ch == '_' || ch.is_alphanumeric()) {
-                out.push(part.to_string());
+            let p = part.strip_prefix("::").unwrap_or(part);
+            let std_path = ["core::", "std::", "alloc::"].iter().any(|r| p.starts_with(r));
+            let name = if std_path { p.rsplit("::").next().unwrap_or(p) } else { p };
+            if !name.is_empty() && name.chars().all(|ch| ch == '_' || ch.is_alphanumeric()) {
+                out.push(name.to_string());
             }
         }
     }
@@ -303,6 +311,23 @@ fn where_types(item: &Item, owner: Option<&Owner>, out: &mut Vec<String>) {
 }
 
 /// The plain trait bounds (one-segment paths without arguments, not `?Sized`) on a struct / enum's parameters
+/// The type parameters declared `?Sized` (in the parameter list or a where clause)
+fn adt_unsized(g: &Generics) -> Vec<String> {
+    let maybe = |bs: &[Bound]| bs.iter().any(|b| matches!(b, Bound::Trait(true, p) if p.segs.last().is_some_and(|s| s.name == "Sized")));
+    let mut v: Vec<String> = g.params.iter().filter_map(|p| match p {
+        GParam::Ty(n, bs, _) if maybe(bs) => Some(n.clone()),
+        _ => None,
+    }).collect();
+    for (t, bs) in &g.preds {
+        if let PTy::Path(None, tp) = t {
+            if tp.segs.len() == 1 && maybe(bs) && !v.contains(&tp.segs[0].name) {
+                v.push(tp.segs[0].name.clone());
+            }
+        }
+    }
+    v
+}
+
 fn adt_bounds(g: &Generics) -> Vec<(String, Vec<String>)> {
     let mut v = Vec::new();
     for p in &g.params {
@@ -1709,6 +1734,40 @@ pub fn parse_fn_bound(s: &str) -> Option<(String, Vec<TySyn>, TySyn)> {
     Some((kind.to_string(), args, ret))
 }
 
+/// A bound `a::Tr<A, B>` (or `Tr<A, Item = X>`) as its trait's name and its type arguments, without its
+/// associated-type bindings: None when a type argument cannot be read (a lifetime is left out)
+pub fn bound_args(s: &str) -> Option<(String, Vec<TySyn>)> {
+    let Some(lt) = s.find('<') else {
+        let n = s.trim();
+        return Some((n.rsplit("::").next().unwrap_or(n).to_string(), vec![]));
+    };
+    let f = parse_file(&format!("type __B = dyn {s};")).ok()?;
+    let ItemKind::Type(_, _, _, Some(PTy::Dyn(bs))) = &f.items.first()?.kind else { return None };
+    let Some(Bound::Trait(_, p)) = bs.first() else { return None };
+    let last = p.segs.last()?;
+    if last.fn_args.is_some() {
+        return None;
+    }
+    let mut args = Vec::new();
+    for a in &last.args {
+        match a {
+            crate::parse::GArg::Ty(t) => args.push(tysyn(t, None).ok()?),
+            // (a const argument as impl headers keep it (`Tr<2>`): not left out, or `Tr<1>`'s impl would answer)
+            crate::parse::GArg::Const(e) => args.push(crate::ast_types::const_arg_syn(e).ok()?),
+            _ => {}
+        }
+    }
+    let n = s[..lt].trim();
+    Some((n.rsplit("::").next().unwrap_or(n).to_string(), args))
+}
+
+/// A type written as text (`<T as Tr>::Assoc`, `W<u8>`, `()`), as a TySyn; self_ty: what `Self` is
+pub fn ty_of_text(s: &str, self_ty: Option<&TySyn>) -> Option<TySyn> {
+    let f = parse_file(&format!("type __W = {s};")).ok()?;
+    let ItemKind::Type(_, _, _, Some(t)) = &f.items.first()?.kind else { return None };
+    tysyn(t, self_ty).ok()
+}
+
 /// The arguments a call through a closure bound (`Fn(&T) -> &T`) returns a borrow of, by its lifetimes: those whose
 /// types name a lifetime its result names (`for<'a> Fn(&'a T, &u8) -> &'a T`: the first), or the only one with a
 /// reference when the result's is elided (`Fn(&T) -> &T`). Not a `'static` result's. Empty when it returns none
@@ -3087,6 +3146,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.adt_generics = adt_params(g)?;
             sm.adt_defaults = adt_defaults(g, &sm.adt_generics)?;
             sm.adt_bounds = adt_bounds(g);
+            sm.adt_unsized = adt_unsized(g);
             {
                 let tys: Vec<&PTy> = vars.iter().flat_map(|(_, f, _)| match f {
                     Fields::Unit => vec![],
@@ -3195,6 +3255,7 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
             sm.adt_generics = adt_params(g)?;
             sm.adt_defaults = adt_defaults(g, &sm.adt_generics)?;
             sm.adt_bounds = adt_bounds(g);
+            sm.adt_unsized = adt_unsized(g);
             {
                 let tys: Vec<&PTy> = match fields {
                     Fields::Named(v) => v.iter().map(|x| &x.1).collect(),

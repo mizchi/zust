@@ -268,7 +268,19 @@ pub fn items(src: &str) -> Vec<StubItem> {
             q += 1;
         }
         let mut names: Vec<String> = vec![];
-        let mut q = j;
+        // (an `extern` block declares many: each fn's and static's name names the block, `libc::getpid()` reaches it)
+        let open = (j..e).find(|&q| sym(q, b'{'));
+        if let Some(o) = open.filter(|&o| (j..o).any(|q| id(q, b"extern")) && !(j..o).any(|q| id(q, b"fn") || id(q, b"impl") || id(q, b"mod"))) {
+            let mut q = o;
+            while q + 1 < e {
+                if (id(q, b"fn") || id(q, b"static")) && toks[q + 1].0 == 0 {
+                    let nm = if id(q, b"static") && id(q + 1, b"mut") { q + 2 } else { q + 1 };
+                    names.push(String::from_utf8_lossy(t(nm)).into_owned());
+                }
+                q += 1;
+            }
+        }
+        let mut q = if names.is_empty() { j } else { e };
         while q < e {
             let w = t(q);
             if toks[q].0 == 0 && matches!(w, b"fn" | b"struct" | b"enum" | b"union" | b"trait" | b"type" | b"const" | b"static") && toks.get(q + 1).is_some_and(|x| x.0 == 0) {
@@ -388,6 +400,18 @@ mod tests {
 
     /// `const unsafe fn` (also `const async fn`, `const extern "C" fn`) is a fn: it ends at its body and is named
     /// by its fn name, not taken for a constant named `unsafe` that runs to the next `;` (libc 0.2)
+    /// An `extern` block is one item named by every fn and static it declares: a use of the second, `libc::getpid()`,
+    /// reaches it (libc 0.2's unix declares many in one block)
+    #[test]
+    fn extern_block_is_named_by_all_its_fns() {
+        let src = "extern \"C\" {\n    pub fn abs(i: i32) -> i32;\n    pub fn getpid() -> i32;\n    pub static mut environ: *const u8;\n}\n";
+        let its = super::items(src);
+        assert_eq!(its.len(), 1);
+        for n in ["abs", "getpid", "environ"] {
+            assert!(its[0].names.iter().any(|x| x == n), "{:?}", its[0].names);
+        }
+    }
+
     #[test]
     fn const_unsafe_fn_is_one_fn_item() {
         let src = "pub const unsafe fn f() -> u8 { 1 }\npub const extern \"C\" fn e() {}\npub fn g() {}\npub const N: u8 = 1;\n";
