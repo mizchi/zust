@@ -78,7 +78,7 @@ fn bump(n: &mut u32) {
     *n += 1;
 }
 
-// A struct passed by value is a copy made on the caller's side, so changing it does not affect the caller
+// Vec2 is `Copy`, so passing it by value hands over a copy: changing it does not affect the caller
 fn consume(mut v: Vec2) -> i64 {
     v.x = 1000;
     v.x + v.y
