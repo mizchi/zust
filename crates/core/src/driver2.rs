@@ -1827,6 +1827,9 @@ impl Session2 {
         // the others (`where T::Assoc: Foo`, `where (): Array<Element = &()>`) are read here and added to its clause.
         // read_all: every where clause of the impl was read)
         let mut where_all: FxMap<usize, bool> = FxMap::default();
+        // (the impls with a where clause on another type than a parameter, `where Box<[T]>: IntoWasmAbi`: the
+        // supertrait check below does not assume it)
+        let mut where_other: FxSet<usize> = FxSet::default();
         for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
             if sm.impl_self_ty.is_none() || !matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) {
                 continue;
@@ -1856,6 +1859,9 @@ impl Session2 {
                     all = false;
                 }
                 extra.extend(ps);
+            }
+            if !extra.is_empty() || !all {
+                where_other.insert(ii);
             }
             prog.tdb.add_where(ii, extra, all);
             where_all.insert(ii, all);
@@ -1964,6 +1970,13 @@ impl Session2 {
                     if assumed.contains(sup) {
                         continue;
                     }
+                    // (an impl whose where clause is on another type, `impl<T> IntoWasmAbi for Vec<T> where Box<[T]>:
+                    // IntoWasmAbi`: `Vec<T>: WasmDescribe` may hold through that clause (`impl<T> WasmDescribe for Vec<T>
+                    // where Box<[T]>: WasmDescribe`, a supertrait of IntoWasmAbi), which holds_rigid does not assume: not
+                    // reported)
+                    if where_other.contains(&ii) {
+                        continue;
+                    }
                     if prog.tdb.holds_rigid(&prog, t, sup) == crate::traits::Ans::No {
                         let n = crate::traits::display_ty(&prog, t);
                         return Err(format!("{}:1: {} (E0277)", items[ii].line, crate::traits::not_held(&n, sup)));
@@ -2070,7 +2083,10 @@ impl Session2 {
                 let tr = tr.split('<').next().unwrap_or(tr).trim();
                 let tr = tr.rsplit("::").next().unwrap_or(tr).to_string();
                 let Some(bounds) = prog.assoc_bounds.get(&(tr.clone(), n.clone())).cloned() else { continue };
-                if !read_all(ii) {
+                // (nor an impl whose where clause is on another type: the definition may hold its bounds through it,
+                // as the one wasm-bindgen's `#[wasm_bindgen]` writes, `impl<T> IntoJsGeneric for JsOption<T> where
+                // JsOption<T>: JsGeneric { type JsCanon = JsOption<T>; }`, which the placeholders do not assume)
+                if !read_all(ii) || where_other.contains(&ii) {
                     continue;
                 }
                 let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
