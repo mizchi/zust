@@ -1696,8 +1696,17 @@ impl Cx<'_> {
         // (also a `&self` one whose self type is invariant in a lifetime an argument is borrowed for, or outlives:
         // `c.push(&mut y)` of `fn push(&self, r: &'c mut i32)` in `impl<'c> C<'c>` with C holding a
         // `RefCell<Vec<&'c mut i32>>`: the argument's borrow lasts as long as c's 'c)
-        let stores = if self.bk_on() && !via_deref && matches!(recv_ty, Ty::Ref(false, _)) && self.bk_ty(st).1 { self.shared_recv_stores(id) } else { vec![] };
-        let into_recv = self.bk_on() && !via_deref && self.bk_ty(st).1 && (matches!(recv_ty, Ty::Ref(true, _)) || !stores.is_empty());
+        let shared_holder = self.bk_on() && !via_deref && matches!(recv_ty, Ty::Ref(false, _)) && self.bk_ty(st).1;
+        let mut stores = if shared_holder { self.shared_recv_stores(id) } else { vec![] };
+        // (and the prelude's cells that store their argument through `&self` (`c.set(Some(&x))`, `c.replace(v)`): what
+        // it borrows, the cell holds, as rustc's `Cell<T>` is invariant in T)
+        // (also one reached through a deref (`c.set(Some(&x))` with c: `Rc<Cell<..>>`): the local the receiver is
+        // rooted at holds it)
+        let cell_deref = self.bk_on() && via_deref && matches!(recv_ty, Ty::Ref(false, _)) && self.bk_ty(st).1 && self.cell_store(id, st);
+        if (shared_holder && stores.is_empty() && self.cell_store(id, st)) || cell_deref {
+            stores = vec![1];
+        }
+        let into_recv = self.bk_on() && (!via_deref || cell_deref) && self.bk_ty(st).1 && (matches!(recv_ty, Ty::Ref(true, _)) || !stores.is_empty());
         // (the arguments stored: their loans flow out of the call, as a result's that borrows them)
         let stores0 = std::mem::replace(&mut self.bk.store_args, stores);
         if into_recv {
@@ -4377,7 +4386,7 @@ pub fn static_not_sync(prog: &Program) -> Option<(usize, String)> {
 
 /// `__impl0`: the parameter the summary makes of an `impl Trait` argument (its index after the name), not a user's
 /// `__implT`
-fn hidden_param(n: &str) -> bool {
+pub(crate) fn hidden_param(n: &str) -> bool {
     n.starts_with("__impl") && n.len() > 6 && n.as_bytes()[6..].iter().all(|c| c.is_ascii_digit())
 }
 
@@ -4474,6 +4483,18 @@ impl Cx<'_> {
     /// A `&self` method whose self type is invariant in a lifetime another parameter's type names, or one that
     /// outlives such a lifetime (`'f: 'c`): what that argument borrows is held by the receiver (rustc: its region is
     /// the receiver's, which lives as long as the receiver is used)
+    /// id is `set` or `replace` of the prelude's Cell, RefCell or OnceCell, whose value of type st it stores its
+    /// argument in
+    fn cell_store(&self, id: u32, st: Ty) -> bool {
+        let Ty::Struct(sid) = st else { return false };
+        let b = self.prog.base_of(sid);
+        let prelude = self.prog.struct_item.get(b as usize).is_some_and(|&i| i >= self.prog.prelude_from);
+        let m = self.prog.names[id as usize].rsplit("::").next().unwrap_or("").split('#').next().unwrap_or("");
+        // (the prelude's own method, not a program's trait method of the name)
+        let own = self.prog.item_of.get(id as usize).copied().flatten().is_some_and(|i| i >= self.prog.prelude_from);
+        prelude && own && matches!(self.prog.structs[b as usize].name.as_str(), "Cell" | "RefCell" | "OnceCell") && matches!(m, "set" | "replace")
+    }
+
     pub(crate) fn shared_recv_stores(&mut self, id: u32) -> Vec<usize> {
         let prog = self.prog;
         let sig = &prog.sigs[id as usize];

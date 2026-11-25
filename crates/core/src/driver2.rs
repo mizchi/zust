@@ -1133,6 +1133,57 @@ impl Session2 {
                 }
             }
         }
+        // (E0310: the program's fields that pass a type parameter to a struct or enum of the program that bounds it by
+        // 'static, where the item does not declare it so: the definitions are known now. Only the items whose fields
+        // name one are read again)
+        {
+            let short = |n: &str| n.rsplit("::").next().unwrap_or(n).to_string();
+            let mut statics: crate::fxhash::FxMap<String, Vec<usize>> = Default::default();
+            for sm in &sums[..user_src] {
+                let Some(r) = sm.adt_regions.as_deref().filter(|r| r.ty_outlives.iter().any(|t| t.1 == crate::types::R_STATIC)) else { continue };
+                let idx: Vec<usize> = sm.adt_generics.iter().enumerate().filter(|(_, n)| r.ty_outlives.iter().any(|(t, c)| t == *n && *c == crate::types::R_STATIC)).map(|(i, _)| i).collect();
+                if idx.is_empty() {
+                    continue;
+                }
+                for n in sm.structs.iter().map(|s| s.0.as_str()).chain(sm.enums.iter().map(|e| e.0.as_str())) {
+                    statics.insert(short(n), idx.clone());
+                }
+            }
+            if !statics.is_empty() {
+                // (a name two of the program's types have is not followed: which one a field means is not known here)
+                let mut seen: crate::fxhash::FxMap<String, u32> = Default::default();
+                for sm in &sums[..user_src] {
+                    for n in sm.structs.iter().map(|s| s.0.as_str()).chain(sm.enums.iter().map(|e| e.0.as_str())) {
+                        *seen.entry(short(n)).or_default() += 1;
+                    }
+                }
+                let statics: crate::fxhash::FxMap<&str, Vec<usize>> = statics.iter().filter(|(n, _)| seen.get(*n) == Some(&1)).map(|(n, v)| (n.as_str(), v.clone())).collect();
+                fn names(t: &crate::types::TySyn, st: &crate::fxhash::FxMap<&str, Vec<usize>>) -> bool {
+                    use crate::types::TySyn as T;
+                    match t {
+                        T::Named(n) => st.contains_key(n.as_str()),
+                        T::App(n, a) => st.contains_key(n.as_str()) || a.iter().any(|t| names(t, st)),
+                        T::Ref(_, i) | T::Ptr(_, i) | T::Slice(i) | T::Array(i, _) => names(i, st),
+                        T::Tuple(a) | T::FnPtr(a) => a.iter().any(|t| names(t, st)),
+                        T::Dyn(b) => st.keys().any(|k| b.contains(k)),
+                        _ => false,
+                    }
+                }
+                for (it, sm) in items[..user_src].iter().zip(&sums[..user_src]) {
+                    if sm.adt_generics.is_empty() {
+                        continue;
+                    }
+                    let named = sm.structs.iter().any(|s| s.1.iter().any(|f| names(&f.1, &statics))) || sm.enums.iter().any(|e| e.1.iter().any(|v| v.fields.iter().any(|f| names(&f.1, &statics))));
+                    if !named {
+                        continue;
+                    }
+                    if let Some((line, col, m)) = crate::ast_summary::static_field_unmet(&src, it, &statics) {
+                        let line = crate::prep::hoisted_at(&crate::prep::hoist_marks(&src), line).unwrap_or(line);
+                        return Err(format!("{line}:{col}: {m}"));
+                    }
+                }
+            }
+        }
         // (what the program's types require of traits' `Self: 'x` bounds (E0478, E0310): the traits are known now)
         {
             let mut so: crate::fxhash::FxMap<&str, &[String]> = sums
