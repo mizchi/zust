@@ -19,6 +19,7 @@ export default grammar({
   extras: ($) => [/\s/, $.line_comment, $.block_comment],
 
   conflicts: ($) => [
+    [$._expression, $.closure_expression],
     [$.constructor, $.record_expression],
     [$.closure_parameter, $._expression],
   ],
@@ -55,6 +56,7 @@ export default grammar({
       seq(
         optional($.attribute),
         optional($.visibility),
+        optional('async'),
         'fn',
         field('name', $.function_identifier),
         optional($.type_parameters),
@@ -185,6 +187,9 @@ export default grammar({
         $.field_expression,
         $.index_expression,
         $.unary_expression,
+        $.await_expression,
+        // (`async` is a name too, unless a closure follows: `async - async_`)
+        alias('async', $.identifier),
         $.binary_expression,
         $.pipe_expression,
         $.cast_expression,
@@ -216,6 +221,7 @@ export default grammar({
       prec(PREC.postfix, seq(field('value', $._expression), '.', field('field', choice(alias($.identifier, $.field_identifier), $.number)))),
     index_expression: ($) => prec(PREC.postfix, seq($._expression, '[', $._expression, ']')),
     unary_expression: ($) => prec(PREC.unary, seq(field('operator', choice('-', '!', '*', '&')), $._expression)),
+    await_expression: ($) => prec(PREC.unary, seq('await', $._expression)),
     cast_expression: ($) => prec.left(PREC.cast, seq($._expression, 'as', choice($.primitive_type, $.type_identifier))),
     binary_expression: ($) =>
       choice(
@@ -236,7 +242,7 @@ export default grammar({
           field('right', choice(seq('.', field('method', alias($.identifier, $.method_identifier)), $.arguments), $._expression)),
         ),
       ),
-    closure_expression: ($) => prec.right(PREC.closure, seq($.closure_parameters, '=>', field('body', $._expression))),
+    closure_expression: ($) => prec.right(PREC.closure, seq(optional('async'), $.closure_parameters, '=>', field('body', $._expression))),
     closure_parameters: ($) => seq('(', commaSep($.closure_parameter), ')'),
     closure_parameter: ($) => seq($.identifier, optional(seq(':', $._type))),
 
