@@ -42,7 +42,7 @@ pub(crate) fn closure_synth(c: &Expr) -> ItemFn {
             ret: None,
             quals: vec![],
         },
-        block: Block { stmts },
+        block: Block { stmts, spos: Default::default() },
     }
 }
 
@@ -66,6 +66,42 @@ impl Cx<'_> {
     /// lifetime_arity of the program's own structs and enums a signature's type t names (not in fn pointer, `dyn` and
     /// `impl` types, nor a type parameter tps names). Not the prelude's, some of which leave out lifetimes std's have
     /// (`Cow<'a, B>`)
+    /// E0616: a field of a struct or union of another module, not `pub`, where the access is written outside the
+    /// module it is visible within (`s.x` with `mod a { pub struct S { x: u8 } }`). Known for the program's own
+    /// structs by Program::field_priv; a position of no line (a rewrite's) is not read
+    pub(crate) fn field_privacy(&self, sid: u32, fname: &str, at: Sp) -> R<()> {
+        let Some(fp) = self.prog.field_priv.as_deref() else { return Ok(()) };
+        // (the root crate's own code: line_base is the item's line before its first, a dependency's is tagged above
+        // 1 << 20)
+        if !self.user_code || at.line == 0 || self.line_base >= 1 << 20 {
+            return Ok(());
+        }
+        let base = self.prog.structs[sid as usize].base.unwrap_or(sid);
+        let name = &self.prog.structs[base as usize].name;
+        let Some((what, fs)) = fp.fields.get(name.as_str()) else { return Ok(()) };
+        let Some(&(_, scope)) = fs.iter().find(|f| f.0 == fname) else { return Ok(()) };
+        match fp.module_of(self.line_base + at.line) {
+            Some(site) if !fp.within(site, scope) => Err(self.at(at, format!("field `{fname}` of {what} `{name}` is private (E0616)"))),
+            _ => Ok(()),
+        }
+    }
+
+    /// E0624: a method call `x.f()` of a fn of an inherent impl of another module, not `pub`, written outside the
+    /// module it is visible within (Program::field_priv)
+    pub(crate) fn method_privacy(&self, sid: u32, mname: &str, at: Sp) -> R<()> {
+        let Some(fp) = self.prog.field_priv.as_deref() else { return Ok(()) };
+        if !self.user_code || at.line == 0 || self.line_base >= 1 << 20 {
+            return Ok(());
+        }
+        let base = self.prog.structs[sid as usize].base.unwrap_or(sid);
+        let Some(ms) = fp.methods.get(self.prog.structs[base as usize].name.as_str()) else { return Ok(()) };
+        let Some(&(_, scope)) = ms.iter().find(|f| f.0 == mname) else { return Ok(()) };
+        match fp.module_of(self.line_base + at.line) {
+            Some(site) if !fp.within(site, scope) => Err(self.at(at, format!("method `{mname}` is private (E0624)"))),
+            _ => Ok(()),
+        }
+    }
+
     /// The type of a place `let _ = place;` names (a variable and its fields), when known: E0609 for a field its type
     /// does not have (through references and boxes; not through a `Deref` of the program's, which is not followed)
     pub(crate) fn wild_place_ty(&self, e: &Expr) -> R<Option<Ty>> {
@@ -80,7 +116,10 @@ impl Cx<'_> {
                 }
                 let Ty::Struct(sid) = t else { return Ok(None) };
                 match self.prog.field(sid, f) {
-                    Some((ft, _)) => Ok(Some(ft)),
+                    Some((ft, _)) => {
+                        self.field_privacy(sid, f, sp.at)?;
+                        Ok(Some(ft))
+                    }
                     None if self.prog.method(sid, "deref").is_some() || self.prog.is_placeholder(sid) => Ok(None),
                     None => Err(self.at(sp.at, format!("no field `{f}` on type `{}` (E0609)", self.prog.tn(t)))),
                 }
@@ -439,7 +478,7 @@ impl Cx<'_> {
                     },
                 }
             }
-            Expr::Field(base, fname, _) => {
+            Expr::Field(base, fname, fsp) => {
                 // (フィールドがなく Deref を実装した型 (`self.prog` で self: &Inf): `(*self.deref()).prog`)
                 if let Some(Ty::Struct(sid)) = self.peek(base).map(|t| self.strip_refs(t)) {
                     if self.prog.field(sid, fname).is_none() {
@@ -495,10 +534,20 @@ impl Cx<'_> {
                 }
                 let (a, o, sid) = self.struct_base(base)?;
                 match self.prog.field(sid, fname) {
-                    // (a struct with an unsized tail is a place of its (data, length) pair: a field is at the data
-                    // address, the tail is a pair of its own (its address, the same length))
-                    Some((ft, foff)) if Ty::Struct(sid).is_dst_struct() => Ok(self.dst_field(a, o, ft, foff)),
-                    Some((ft, foff)) => Ok(Place::Mem(a, o + foff as i32, ft)),
+                    Some((ft, foff)) => {
+                        // (not a read `..base` makes of the fields a literal leaves out, whose span starts at its
+                        // field: rustc's privacy pass reports that one, E0451)
+                        if fsp.start != fsp.at {
+                            self.field_privacy(sid, fname, fsp.at)?;
+                        }
+                        // (a struct with an unsized tail is a place of its (data, length) pair: a field is at the data
+                        // address, the tail is a pair of its own (its address, the same length))
+                        if Ty::Struct(sid).is_dst_struct() {
+                            Ok(self.dst_field(a, o, ft, foff))
+                        } else {
+                            Ok(Place::Mem(a, o + foff as i32, ft))
+                        }
+                    }
                     None => err(SP, format!("no field `{fname}` on type `{}`", self.prog.structs[sid as usize].name)),
                 }
             }
@@ -1586,7 +1635,10 @@ impl Cx<'_> {
                         v
                     }
                     None => {
-                        self.same(SP, Ty::Unit, ret)?;
+                        // (E0069: `return;` in a fn of another return type, `!` too)
+                        if self.same(SP, Ty::Unit, ret).is_err() {
+                            return err(SP, "`return;` in a function whose return type is not `()` (E0069)");
+                        }
                         None
                     }
                 };
@@ -2008,7 +2060,13 @@ impl Cx<'_> {
             }
             Expr::Try(_) => self.try_(e),
             // `const { .. }` (an inline const): its value, computed where it is (the same value as at compile time)
-            Expr::Const(b) => self.block(b, expected),
+            Expr::Const(b) => {
+                // (E0435: an inline const reads no local of the code around it: `if let Some(v) = .. { const { v } }`)
+                if let Some(at) = self.const_reads_local(e) {
+                    return Err(self.at(at, "attempt to use a non-constant value in a constant (E0435)".into()));
+                }
+                self.block(b, expected)
+            }
             e => {
                 let k = format!("{e:?}");
                 let k = k.split(|c: char| !c.is_alphanumeric()).next().unwrap_or("").to_string();
@@ -2402,11 +2460,12 @@ impl Cx<'_> {
                 if fid.parse::<u32>().is_ok() {
                     return err(SP, "expected a field name");
                 }
+                // (at the field, as rustc: its value's position, on its line)
                 let Some(fi) = v.fields.iter().position(|f| f.0 == *fid) else {
-                    return err(SP, format!("variant `{}` has no field named `{fid}`", v.name));
+                    return Err(self.at(err_pos(fe), format!("variant `{}` has no field named `{fid}`", v.name)));
                 };
                 if args.iter().any(|&(i, _)| i == fi) {
-                    return err(SP, format!("field `{fid}` specified more than once"));
+                    return Err(self.at(err_pos(fe), format!("field `{fid}` specified more than once")));
                 }
                 args.push((fi, fe));
             }
@@ -2478,6 +2537,7 @@ impl Cx<'_> {
                 let mut nfields = sfields.clone();
                 for f in all {
                     if !sfields.iter().any(|fv| fv.0 == f) {
+                        // (a span that starts at its field: field_privacy leaves it to the privacy pass's E0451)
                         let at = expr_start(base);
                         nfields.push((f.clone(), Expr::Field(Box::new(base.clone()), f, crate::parse::Span { start: at, at })));
                     }
@@ -2503,7 +2563,7 @@ impl Cx<'_> {
                     }
                 }
                 stmts.push(crate::parse::Stmt::Expr(Expr::Struct(path.clone(), nfields, Some(base.clone())), false));
-                let ne: &Expr = self.keep_expr(Expr::Block(None, false, crate::parse::Block { stmts }));
+                let ne: &Expr = self.keep_expr(Expr::Block(None, false, crate::parse::Block { stmts, spos: Default::default() }));
                 return self.expr(ne, expected);
             }
         }
@@ -2570,13 +2630,20 @@ impl Cx<'_> {
             return Ok(r);
         }
         let fields = self.prog.structs[sid as usize].fields.clone();
+        // (`Result { .. }`: an enum's name where a struct goes, E0574, at the literal)
+        if self.prog.structs[self.prog.base_of(sid) as usize].is_enum {
+            let n = self.prog.tn(Ty::Struct(self.prog.base_of(sid)));
+            let n = n.split('<').next().unwrap_or(&n).to_string();
+            return err(SP, format!("expected struct, variant or union type, found enum `{n}` (E0574)"));
+        }
         let mut args = vec![];
         for (name, fe) in sfields {
+            // (at the field, as rustc: its value's position, on its line)
             let Some(fi) = fields.iter().position(|f| f.0 == *name) else {
-                return err(SP, format!("struct `{}` has no field named `{name}`", self.prog.structs[sid as usize].name));
+                return Err(self.at(err_pos(fe), format!("struct `{}` has no field named `{name}`", self.prog.structs[sid as usize].name)));
             };
             if args.iter().any(|&(i, _)| i == fi) {
-                return err(SP, format!("field `{name}` specified more than once"));
+                return Err(self.at(err_pos(fe), format!("field `{name}` specified more than once")));
             }
             args.push((fi, fe));
         }
@@ -4185,6 +4252,12 @@ impl Cx<'_> {
 
     fn call_inner(&mut self, c: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::Call(func, cargs) = c else { return err(SP, "internal: expected a call") };
+        // (E0040: `Drop::drop(&mut x)`, `<S as Drop>::drop(..)`)
+        if let (true, Expr::Path(_, p)) = (self.user_code, &**func) {
+            if p.segs.len() >= 2 && p.segs[p.segs.len() - 1].name == "drop" && p.segs[p.segs.len() - 2].name == "Drop" {
+                return Err(self.at(p.pos, "explicit use of destructor method (E0040)".to_string()));
+            }
+        }
         // (`f1(x)` after `let f1 = f;` (f generic): `f(x)`)
         if let (false, Expr::Path(None, p)) = (self.fn_aliases.is_empty(), strip_paren(func)) {
             if let Some(&(_, target)) = ident_of(p).and_then(|n| self.fn_aliases.iter().rev().find(|a| a.0 == n)) {
@@ -4737,6 +4810,34 @@ fn diverging_tail(e: &Expr) -> bool {
         Expr::Return(_) => true,
         Expr::Macro(p, _, _) if p.segs.last().is_some_and(|s| matches!(s.name.as_str(), "panic" | "unreachable" | "todo" | "unimplemented")) => has_unit_return(e),
         _ => false,
+    }
+}
+
+impl Cx<'_> {
+    /// Where an inline const `const { .. }` names a local of the code around it (None if it does not, or if it binds
+    /// names of its own with a `let` or a closure, which this does not follow)
+    pub(crate) fn const_reads_local(&self, c: &Expr) -> Option<Sp> {
+        fn walk(e: &Expr, out: &mut Vec<(String, Sp)>, own: &mut bool) {
+            match e {
+                Expr::Path(None, p) if !p.global && p.segs.len() == 1 && p.segs[0].args.is_empty() => out.push((p.segs[0].name.clone(), p.pos)),
+                Expr::Closure(..) | Expr::Let(..) | Expr::Match(..) | Expr::For(..) | Expr::Macro(..) => *own = true,
+                Expr::Block(_, _, b) | Expr::Const(b) | Expr::Loop(_, b) => {
+                    for st in &b.stmts {
+                        match st {
+                            Stmt::Expr(x, _) => walk(x, out, own),
+                            _ => *own = true,
+                        }
+                    }
+                }
+                e => crate::ast_closure::each_child_pub(e, &mut |x| walk(x, out, own)),
+            }
+        }
+        let (mut names, mut own) = (vec![], false);
+        walk(c, &mut names, &mut own);
+        if own {
+            return None;
+        }
+        names.into_iter().find(|(n, p)| p.line != 0 && self.lookup(n).is_some()).map(|(_, p)| p)
     }
 }
 

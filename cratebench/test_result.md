@@ -6,7 +6,7 @@
 |---|---|---:|---|
 | adler2 | match | 6 / 0 / 0 | テスト 6 個 |
 | cfg-if | match | 3 / 0 / 0 | テスト 3 個 |
-| either | zurgo-fails | 8 / 0 / 0 | error: crate `either`: src/lib.rs:1507:1: cannot find type `SeekFrom` |
+| either | zurgo-fails | 8 / 0 / 0 | error: crate `either`: src/lib.rs:1944:1: duplicate definition of `check_ref__h11` |
 | fnv | match | 1 / 0 / 0 | テスト 1 個 |
 | hex | zurgo-fails | 16 / 0 / 0 | error: two packages give the library `bitflags`: `bitflags v1.3.2` and `bitflags v2.13.2`. Two versions of one crate are not supported yet (mizchi/zust#28) |
 | itoa | zurgo-fails | 11 / 0 / 0 | error: two packages give the library `itoa`: `itoa v1.0.19` and `itoa v1.0.19`. Two versions of one crate are not supported yet (mizchi/zust#28) |
