@@ -1848,11 +1848,18 @@ impl Cx<'_> {
             }
         }
         let mut vals = vec![];
+        // (an element type the context gives: each element is coerced to it by deref, as at a coercion site
+        // (`[&x]` with x: `&[u8]` where `[&[u8]; 1]` is expected))
+        let given = !soft && matches!(elem, Some(Ty::Ref(..)));
         for e in elems {
             let (v, t) = self.expr(e, elem)?;
             if t == Ty::Never {
                 return Ok((None, Ty::Never));
             }
+            let (v, t) = match elem {
+                Some(et) if given && t != et && matches!(t, Ty::Ref(_, Ty::Ref(..))) => self.deref_coerce(v, t, et),
+                _ => (v, t),
+            };
             match elem {
                 Some(et) if soft && t != et => elem = Some(t),
                 Some(et) => self.same(SP, t, et)?,
@@ -1929,6 +1936,11 @@ impl Cx<'_> {
         if elem == Ty::Never {
             return Ok((None, Ty::Never));
         }
+        // (coerced to the expected element type by deref, as array_lit's elements)
+        let (v, elem) = match exp {
+            Some(et @ Ty::Ref(..)) if elem != et && matches!(elem, Ty::Ref(_, Ty::Ref(..))) => self.deref_coerce(v, elem, et),
+            _ => (v, elem),
+        };
         // (E0277: two or more copies of a value need it to be Copy; a constant (`[C; 4]`, `[const { .. }; 4]`) is
         // evaluated for each)
         let constant = match strip_paren(x) {

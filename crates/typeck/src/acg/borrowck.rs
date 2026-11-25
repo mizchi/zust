@@ -5073,7 +5073,14 @@ impl Cx<'_> {
                     self.bk_direct_part(x, et(i), out);
                 }
             }
-            Expr::Repeat(x, _) => self.bk_direct(x, out),
+            // (an element coerced as the Array arm's: `[&x; 1]` of x a reference)
+            Expr::Repeat(x, _) => {
+                let want = match self.peek(e) {
+                    Some(Ty::Array(t, _)) => Some(*t),
+                    _ => None,
+                };
+                self.bk_direct_part(x, want, out);
+            }
             Expr::Struct(_, fs, base) => {
                 let sid = match self.peek(e) {
                     Some(Ty::Struct(sid)) => Some(sid),

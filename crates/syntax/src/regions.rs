@@ -845,7 +845,9 @@ fn ty_parts(t: &PTy, paths: &str, tps: &[&str], lts: &mut Vec<(String, String)>,
 }
 
 /// The regions of a fn signature (None when it names no lifetime: then every region in it is elided)
-pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str]) -> Option<Box<RSigSyn>> {
+/// impl_lts: the lifetime bounds of the parameters' `impl Trait`s, by the type parameters they are lifted to
+/// (`impl Debug + 'static`: (`__implN`, `'static`)), which a caller must meet (E0310)
+pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str], impl_lts: &[(String, String)]) -> Option<Box<RSigSyn>> {
     if outer.is_none() && !sig_names_lt(sig) {
         return None;
     }
@@ -869,6 +871,10 @@ pub fn sig_regions(sig: &PSig, outer: Option<&RImplSyn>, outer_tparams: &[&str])
     let (mut outlives, mut ty_outlives) = (outer.map(|o| o.outlives.clone()).unwrap_or_default(), outer.map(|o| o.ty_outlives.clone()).unwrap_or_default());
     s.derived = Some((vec![], vec![]));
     s.bounds(&sig.generics, &mut outlives, &mut ty_outlives);
+    for (g, l) in impl_lts {
+        let c = s.code(Some(l));
+        ty_outlives.push((g.clone(), c));
+    }
     let (derived, derived_ty) = s.derived.take().unwrap_or_default();
     // (a parameter's type that is a projection (`<&'a &'b () as Tr>::Type`) is normalized away, and with it what its
     // well-formedness implies ('b: 'a): kept as declared bounds)
@@ -957,12 +963,12 @@ mod tests {
         let mut hdr = None;
         for it in &f.items {
             match &it.kind {
-                ItemKind::Fn(fs, _) => return sig_regions(fs, hdr.as_deref(), &[]),
+                ItemKind::Fn(fs, _) => return sig_regions(fs, hdr.as_deref(), &[], &[]),
                 ItemKind::Impl(g, _, t, items) => {
                     hdr = hdr_regions(g, Some(t));
                     for m in items {
                         if let ItemKind::Fn(fs, _) = &m.kind {
-                            return sig_regions(fs, hdr.as_deref(), &[]);
+                            return sig_regions(fs, hdr.as_deref(), &[], &[]);
                         }
                     }
                 }
