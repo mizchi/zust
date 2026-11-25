@@ -4976,3 +4976,66 @@ fn h(mut u: U) {
 fn main() {}
 "#, &[(13, "cannot assign `u.b` in match guard"), (21, "cannot assign `u.a` in match guard")], "r3");
 }
+
+#[test]
+fn part33_review_of_160() {
+    // (#160's review, each checked with rustc 1.97: a unit struct's name in a `let` binds and moves nothing, through a
+    // Deref too (no error); a struct update whose base gives only fields that hold no reference keeps none of the
+    // base's loans (no E0515 at 13), one whose base gives a reference field does (E0515 at 19))
+    errors_at(r#"use std::ops::Deref;
+#[derive(Debug)]
+struct Unit;
+struct W(Unit);
+impl Deref for W { type Target = Unit; fn deref(&self) -> &Unit { &self.0 } }
+fn a() { let w = W(Unit); let Unit = *w; }
+fn b() { let u = Unit; let Unit = u; println!("{:?}", u); }
+struct S<'a> { r: &'a i32, n: usize }
+fn c<'a>(x: &'a i32) -> S<'a> {
+    let y = 5;
+    let s = S { r: &y, n: 1 };
+    let _ = s.r;
+    S { r: x, ..s }
+}
+struct V<'a> { r: &'a i32, q: &'a i32 }
+fn d<'a>(x: &'a i32) -> V<'a> {
+    let y = 5;
+    let s = V { r: &y, q: x };
+    V { r: x, ..s }
+}
+fn main() { a(); b(); let z = 3; c(&z); d(&z); }
+"#, &[(19, "`y` is dropped when the function returns")], "rv1");
+    // (where a written field may hold a reference too, the base's loan may be in its region only: kept for a struct
+    // of one lifetime that a given field has (E0515 at 6), not for one of two (2), a field of 'static (4) or type
+    // parameters (8))
+    errors_at(r#"struct V<'a, 'b> { r: &'a i32, q: &'b i32 }
+fn d<'a, 'b>(x: &'a i32, z: &'b i32) -> V<'a, 'b> { let y = 5; let s = V { r: &y, q: z }; V { r: x, ..s } }
+struct S<'a> { st: &'static str, r: &'a i32 }
+fn a<'a>(x: &'a i32) -> S<'a> { let y = 5; let s = S { st: "x", r: &y }; S { r: x, ..s } }
+struct T2<'a> { r: &'a i32, v: Vec<&'a i32> }
+fn b<'a>(x: &'a i32) -> T2<'a> { let y = 5; let s = T2 { r: &y, v: vec![] }; T2 { r: x, ..s } }
+struct G<A, B> { a: A, b: B }
+fn c<'a>(x: &'a i32) -> G<&'a i32, &'static i32> { let y = 5; let s = G { a: &y, b: &3 }; G { a: x, ..s } }
+fn main() { let z = 3; d(&z, &z); a(&z); b(&z); c(&z); }
+"#, &[(6, "`y` is dropped when the function returns")], "rv3");
+    // (in a guard, a closure that borrows an arm's binding mutably (E0596 at 4), and a write to an outer arm's binding
+    // in a guard nested in its guard (E0594 at 12))
+    errors_at(r#"fn e() {
+    let x = Some(3);
+    match x {
+        Some(mut y) if { let mut c = || { y += 1; }; c(); true } => { let _ = y; }
+        _ => {}
+    }
+}
+fn f() {
+    let x = Some(3);
+    match x {
+        Some(mut y) if match 0 {
+            _ if { y += 1; true } => true,
+            _ => false,
+        } => { let _ = y; }
+        _ => {}
+    }
+}
+fn main() { e(); f(); }
+"#, &[(4, "cannot borrow `y` as mutable, as it is immutable for the pattern guard"), (12, "cannot assign to `y`, as it is immutable for the pattern guard")], "rv2");
+}

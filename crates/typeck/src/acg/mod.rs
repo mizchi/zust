@@ -1233,7 +1233,9 @@ impl Cx<'_> {
             return self.prog.consts[ci as usize].stat.is_none();
         }
         let Expr::Path(None, path) = path_expr(n) else { return false };
-        self.prog.variant_by_p(&PPath::of(&path), self.self_sid).is_some()
+        let pp = PPath::of(&path);
+        // (or a unit struct: `let Unit = u;` binds nothing, nor moves u)
+        self.prog.variant_by_p(&pp, self.self_sid).is_some() || self.prog.struct_by_p(&pp, self.self_sid).is_some_and(|s| self.unit_struct_pat(n, Ty::Struct(s)))
     }
 }
 

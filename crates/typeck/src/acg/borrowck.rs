@@ -235,9 +235,11 @@ pub struct Bk {
     /// Bindings by value of what is not Copy, made so far (where no drop needs the binding too: the check of a move
     /// out of an overloaded deref, deref_move_check, after a pattern that moved)
     pub pat_moves: u32,
-    /// Evaluating a match guard: the locals the arm's pattern bound (ids lo..hi), which the guard sees by shared
-    /// reference, and the first access of one that this makes an error (E0507 / E0594 / E0596)
-    pub guard_binds: Option<(u32, u32)>,
+    /// Evaluating match guards: the locals each one's arm's pattern bound (ids lo..hi), innermost last, which the
+    /// guard sees by shared reference, and the first access of one that this makes an error (E0507 / E0594 / E0596)
+    pub guard_binds: Vec<(u32, u32)>,
+    /// A closure's captures made in a guard: only a mutable borrow of a binding is checked (bk_ev)
+    pub guard_cap: bool,
     pub guard_err: Option<(Sp, String)>,
     /// The place being lowered is written or borrowed mutably (`*x = ..`, `&mut *x`): a `deref_mut` acg makes
     /// for it is a mutable borrow
@@ -2514,12 +2516,16 @@ impl Cx<'_> {
         // borrowing it mutably is rustc's E0507 / E0594 / E0596 (`A(v) if { drop(v); false }`). Assigning and
         // borrowing mutably through a `&mut` too (`Some(ref mut y) if let Some(ref mut z) = *y`); not through a `&`,
         // which the borrow check reports)
-        if let (Some((lo, hi)), Ev::Acc(p, a, sp), None) = (self.bk.guard_binds, &e, &self.bk.guard_err) {
-            if (lo..hi).contains(&p.local) && !p.proj.contains(&Proj::Shr) {
+        // (each enclosing guard's: an outer arm's bindings stay so in a guard nested in its guard)
+        // (a closure's captures (guard_cap): only a mutable borrow, `|| { y += 1; }`; guard_closure_move and
+        // guard_mut_use see the rest, by what the body does with them (`let &mut n = foo;` moves nothing))
+        if let (false, Ev::Acc(p, a, sp), None) = (self.bk.guard_binds.is_empty(), &e, &self.bk.guard_err) {
+            if self.bk.guard_binds.iter().any(|&(lo, hi)| (lo..hi).contains(&p.local)) && !p.proj.contains(&Proj::Shr) {
                 let path = path_str(&self.bk.locals, p);
+                let cap = self.bk.guard_cap;
                 let msg = match a {
-                    Acc::Move if p.owned_len() == p.proj.len() => Some(format!("cannot move out of `{path}` in pattern guard (E0507)")),
-                    Acc::Write | Acc::Modify => Some(format!("cannot assign to `{path}`, as it is immutable for the pattern guard (E0594)")),
+                    Acc::Move if !cap && p.owned_len() == p.proj.len() => Some(format!("cannot move out of `{path}` in pattern guard (E0507)")),
+                    Acc::Write | Acc::Modify if !cap => Some(format!("cannot assign to `{path}`, as it is immutable for the pattern guard (E0594)")),
                     Acc::Borrow(ln) if self.bk.loans[*ln as usize].mutable => {
                         Some(format!("cannot borrow `{path}` as mutable, as it is immutable for the pattern guard (E0596)"))
                     }
@@ -2788,19 +2794,20 @@ impl Cx<'_> {
         if !self.bk_on() {
             return;
         }
+        // (a unit struct pattern `S` binds nothing: no move (`let Unit = *w;` through a Deref))
+        if let Ty::Struct(sid) = t {
+            if self.prog.structs[self.prog.base_of(sid) as usize].name == name {
+                return;
+            }
+        }
         if !self.bk_ty(t).0 || matches!(t, Ty::Ref(true, _)) {
             self.bk.pat_moves += 1;
         }
         let Some(p) = self.bk.pat_path.clone() else { return };
         // (a binding of the whole scrutinee (`match c { c2 => .. }`) is not tracked (rustc accepts assigning to c's
-        // fields in the arm); a unit struct pattern `S` binds nothing)
+        // fields in the arm))
         if self.bk.scrut_place.as_ref().is_some_and(|s| s.0 == p) {
             return;
-        }
-        if let Ty::Struct(sid) = t {
-            if self.prog.structs[self.prog.base_of(sid) as usize].name == name {
-                return;
-            }
         }
         // (a `&mut` bound by value is moved out too: a pattern does not reborrow it (`if let Some(mut x) = opt` in a
         // loop, with opt: `Option<&mut T>`, is E0382 the second time))
@@ -5075,8 +5082,33 @@ impl Cx<'_> {
                 for (f, x) in fs {
                     self.bk_direct_part(x, sid.and_then(|s| self.prog.field(s, f)).map(|f| f.0), out);
                 }
+                // (the base gives the fields the literal does not write: what it holds is kept where one of them may
+                // hold a reference (`W { r: x, ..s }` takes `n: usize` of s, not the loan in `s.r`). Where a written
+                // field may hold one too, the base's loan may be in that field's region only: followed where the
+                // struct has one lifetime, no type parameter, and a field the base gives has that lifetime
+                // (`V { r: x, ..s }` of `V<'a>`, not of `V<'a, 'b>`: rustc relates s's regions to the result's by
+                // the fields it gives))
                 if let Some(b) = base {
-                    self.bk_direct(b, out);
+                    let kept = sid.is_none_or(|s| {
+                        let sd = &self.prog.structs[s as usize];
+                        let (mut given, mut written) = (vec![], false);
+                        for (i, f) in sd.fields.iter().enumerate() {
+                            if has_refs(self.prog, f.1, 0) {
+                                if fs.iter().any(|(n, _)| *n == f.0) {
+                                    written = true;
+                                } else {
+                                    given.push(i);
+                                }
+                            }
+                        }
+                        !given.is_empty()
+                            && (!written
+                                || sd.args.is_empty()
+                                    && self.prog.adt_regions.get(&self.prog.base_of(s)).is_some_and(|r| r.lts.len() == 1 && given.iter().any(|&i| r.fields.get(i).is_some_and(|v| v.contains(&0)))))
+                    });
+                    if kept {
+                        self.bk_direct(b, out);
+                    }
                 }
             }
             _ => {}

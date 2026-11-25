@@ -352,9 +352,12 @@ impl Cx<'_> {
                 }
             }
             // (the locals the arm's pattern bound, which the guard sees by shared reference: see bk_ev)
+            // (pushed on those of the guards it is in: theirs are seen so in it too)
             let guard_saved = if arm.guard.is_some() && self.bk_on() {
                 let hi = self.bk.locals.len() as u32;
-                Some(std::mem::replace(&mut self.bk.guard_binds, Some((bk_l0, hi))))
+                let n = self.bk.guard_binds.len();
+                self.bk.guard_binds.push((bk_l0, hi));
+                Some(n)
             } else {
                 None
             };
@@ -402,8 +405,8 @@ impl Cx<'_> {
                     }
                 }
             }
-            if let Some(prev) = guard_saved {
-                self.bk.guard_binds = prev;
+            if let Some(n) = guard_saved {
+                self.bk.guard_binds.truncate(n);
                 if let Some((sp, m)) = self.bk.guard_err.take() {
                     return Err(self.at(sp, m));
                 }
@@ -1280,6 +1283,13 @@ impl Cx<'_> {
         Ok(out)
     }
 
+    /// n names the unit struct t is (no fields, no variants)
+    pub(crate) fn unit_struct_pat(&self, n: &str, t: Ty) -> bool {
+        let Ty::Struct(sid) = t else { return false };
+        let sd = &self.prog.structs[self.prog.base_of(sid) as usize];
+        sd.name == n && sd.fields.is_empty() && sd.variants.is_empty() && !self.prog.is_tuple(sid)
+    }
+
     /// 判定に通った後で、パターン中の名前を束縛する
     pub(crate) fn pat_bind(&mut self, pat: &Pat, p: Place, mode: BindMode) -> R<()> {
         match pat {
@@ -1296,6 +1306,9 @@ impl Cx<'_> {
             Pat::Ident(..) if unit_variant_ident(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if const_lit_pat(self.prog, pat).is_some() => Ok(()),
             Pat::Ident(..) if self.const_pat_ok(pat, p.ty()) => Ok(()),
+            // (a unit struct's name, of the value's type: a pattern that binds and moves nothing (`let Unit = *w;`
+            // through a Deref, `let Unit = u;` before a use of u))
+            Pat::Ident(false, false, n, None) if self.unit_struct_pat(n, p.ty()) => Ok(()),
             // (an aggregate constant, tested by pat_test: not a new name, so a nested match still compares with it)
             Pat::Ident(_, _, n, None)
                 if self.user_code
