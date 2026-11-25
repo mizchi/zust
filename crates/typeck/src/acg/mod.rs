@@ -2206,13 +2206,16 @@ impl Cx<'_> {
                     self.bk.scrut_place = scrut_saved.1;
                     self.rg.scrut = scrut_saved.2;
                     let ob = self.owned_binds;
+                    let pm = self.bk.pat_moves;
                     let pre = if is_place_expr(init) { self.moved_flag(init) } else { None };
                     self.bk_bind_begin();
                     let r = self.pat_bind(pat, place, BindMode::Move);
                     self.bk_bind_end();
                     r?;
-                    if self.owned_binds > ob {
+                    if self.owned_binds > ob || self.bk.pat_moves > pm {
                         self.deref_move_check(init)?;
+                    }
+                    if self.owned_binds > ob {
                         match pre {
                             Some(f) => self.clear_flag(f),
                             None => {

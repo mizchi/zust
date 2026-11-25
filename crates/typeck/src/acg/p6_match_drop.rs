@@ -272,6 +272,8 @@ impl Cx<'_> {
             self.pat_test(&arm.pat, place, next).map_err(|m| self.at(arm.pos, m))?;
             self.scopes.push(vec![]);
             let ob = self.owned_binds;
+            let pm = self.bk.pat_moves;
+            let bk_l0 = self.bk.locals.len() as u32;
             self.bk.scrut = bk_ss.clone();
             self.bk.scrut_place = bk_sp.clone();
             self.rg.scrut = rg_ss.clone();
@@ -285,6 +287,8 @@ impl Cx<'_> {
             r?;
             if self.owned_binds > ob {
                 self.release_outer(scrut, sflag)?;
+            } else if self.bk.pat_moves > pm {
+                self.deref_move_check(scrut)?;
             }
             // (a guard must not change what the match tests: rustc's fake borrows (E0510). The places the patterns
             // test (`.0` of `(None, _)`; `match x { y if .. }` and `S { .. }` test nothing), and the deref prefixes of
@@ -347,6 +351,13 @@ impl Cx<'_> {
                     return Err(self.at(at, msg));
                 }
             }
+            // (the locals the arm's pattern bound, which the guard sees by shared reference: see bk_ev)
+            let guard_saved = if arm.guard.is_some() && self.bk_on() {
+                let hi = self.bk.locals.len() as u32;
+                Some(std::mem::replace(&mut self.bk.guard_binds, Some((bk_l0, hi))))
+            } else {
+                None
+            };
             if let Some(g) = &arm.guard {
                 // (`P if let Q = e && c => ..`: each `let` of the guard tests and binds in the arm's scope, each other
                 // condition must hold; a failure goes to the next arm)
@@ -389,6 +400,12 @@ impl Cx<'_> {
                     if let Some(c) = c {
                         self.require(c, next);
                     }
+                }
+            }
+            if let Some(prev) = guard_saved {
+                self.bk.guard_binds = prev;
+                if let Some((sp, m)) = self.bk.guard_err.take() {
+                    return Err(self.at(sp, m));
                 }
             }
             if guard_place.is_some() {
@@ -444,12 +461,15 @@ impl Cx<'_> {
         self.pat_test(lpat, place, else_blk)?;
         self.scopes.push(vec![]);
         let ob = self.owned_binds;
+        let pm = self.bk.pat_moves;
         self.bk_bind_begin();
         let r = self.pat_bind(lpat, place, BindMode::Move);
         self.bk_bind_end();
         r?;
         if self.owned_binds > ob {
             self.release_outer(lexpr, sflag)?;
+        } else if self.bk.pat_moves > pm {
+            self.deref_move_check(lexpr)?;
         }
         let (tv, tt) = self.block(then_branch, expected)?;
         // (the pattern's bindings first: one may borrow from a temporary, a guard of a cell the temporary owns)
@@ -514,12 +534,15 @@ impl Cx<'_> {
         self.pat_test(pat, place, exit)?;
         self.scopes.push(vec![]);
         let ob = self.owned_binds;
+        let pm = self.bk.pat_moves;
         self.bk_bind_begin();
         let r = self.pat_bind(pat, place, BindMode::Move);
         self.bk_bind_end();
         r?;
         if self.owned_binds > ob {
             self.release_outer(e, sflag)?;
+        } else if self.bk.pat_moves > pm {
+            self.deref_move_check(e)?;
         }
         self.loops.push(Loop {
             cont: header,
@@ -581,6 +604,14 @@ impl Cx<'_> {
         let next = self.b.create_block();
         self.b.ins().brif(cond, next, &[], fail, &[]);
         self.b.switch_to_block(next);
+    }
+
+    /// A `ref mut` binding where the default binding mode is by shared reference (`if let Some(ref mut v) = o` with
+    /// o: `&Option<i32>`): a mutable borrow through the `&`, rustc's E0596 at the binding (edition 2024 also rejects
+    /// the `ref mut` written there). At the arm, or at the scrutinee
+    pub(crate) fn ref_mut_through_shared(&mut self) -> String {
+        let at = self.bk.arm_at.or(self.bk.scrut_place.as_ref().map(|x| x.1)).filter(|s| s.line != 0).unwrap_or(SP);
+        self.at(at, "cannot borrow data in a `&` reference as mutable (E0596)".to_string())
     }
 
     /// 参照に対して参照でないパターンを当てるときは自動で deref し、束縛モードを Ref にする
@@ -1278,6 +1309,9 @@ impl Cx<'_> {
                 // (`mut x` where the default binding mode is by reference: by value again, before edition 2024
                 // (`for (n, mut m) in &tups` moves out of the shared reference, E0507; `let (_, mut m) = &(1u8, 2u8);`
                 // makes m a u8))
+                if *by_ref && *mutable && matches!(mode, BindMode::Ref(false)) {
+                    return Err(self.ref_mut_through_shared());
+                }
                 let mode = match mode {
                     _ if *by_ref => BindMode::Ref(*mutable),
                     BindMode::Ref(m) if *mutable && self.prog.edition < 2024 => {
@@ -1463,6 +1497,9 @@ impl Cx<'_> {
                 }
                 // `rest @ ..`: 残りの部分スライス (`&[T]`)
                 if let Some(Pat::Ident(by_ref, mutable, rname, _)) = rest {
+                    if *by_ref && *mutable && matches!(mode, BindMode::Ref(false)) {
+                        return Err(self.ref_mut_through_shared());
+                    }
                     let (es, _) = self.prog.size_align(elem);
                     let start = self.b.ins().iadd_imm_s(base, pre.len() as i64 * es as i64);
                     let len_v = self.b.ins().iadd_imm_s(len, -((pre.len() + post.len()) as i64));
@@ -1931,12 +1968,23 @@ impl Cx<'_> {
             if fname.is_none() && matches!(self.peek(b), Some(Ty::Ptr(..))) {
                 return err(expr_start(e), format!("cannot move out of `{}`, which is behind a raw pointer (E0507)", raw_place_text(e)));
             }
+            // (out of what a reference that is no place points to (`*&x`, `*v.first().unwrap()`, `*id(&s)`): the
+            // reference is a temporary, E0507 as rustc says it. A place's is the borrow check's)
+            if fname.is_none() && !is_place_expr(b) {
+                if let Some(Ty::Ref(m, _)) = self.peek(b) {
+                    return err(expr_start(e), format!("cannot move out of a {} reference (E0507)", if m { "mutable" } else { "shared" }));
+                }
+            }
             // (through references too: `r.value` with r: `&Rc<S>`)
             if let Some(Ty::Struct(sid)) = self.peek(b).map(|t| self.strip_refs(t)) {
                 let through = fname.is_none_or(|f| self.prog.field(sid, f).is_none());
                 if through && self.user_deref_sid(b, sid).is_some() {
                     let n = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
-                    let msg = if matches!(n.as_str(), "Rc" | "Arc") { format!("cannot move out of an `{n}` (E0507)") } else { format!("cannot move out of dereference of `{n}` (E0507)") };
+                    let msg = if matches!(n.as_str(), "Rc" | "Arc") {
+                        format!("cannot move out of an `{n}` (E0507)")
+                    } else {
+                        format!("cannot move out of dereference of `{}` (E0507)", self.prog.tn(Ty::Struct(sid)))
+                    };
                     return err(expr_start(e), msg);
                 }
             }
@@ -2070,20 +2118,34 @@ impl Cx<'_> {
 
     /// a pattern moved a value out of `*rc` (an Rc / a Deref type of the program's): E0507, as `let x = *rc;`
     pub(crate) fn deref_move_check(&mut self, e: &Expr) -> R<()> {
-        if let Expr::Unary(op, x, _) = strip_paren(e) {
+        if !self.bk_on() || self.bk.level == 0 {
+            return Ok(());
+        }
+        // (`*x`, and a field reached through an overloaded deref (`if let Some(v) = wrap.field` with wrap: W: Deref),
+        // also deeper (`w.a.b`): what the pattern moves is behind the reference `deref` returns, E0507)
+        let mut cur = strip_paren(e);
+        loop {
+            let (x, fname) = match cur {
+                Expr::Field(b, f, _) => (strip_paren(b), Some(f)),
+                Expr::Unary(op, b, _) if op == "*" => (strip_paren(b), None),
+                _ => break,
+            };
             // (a pattern that moves out of what a raw pointer points to: `let (a, s) = *x;`)
-            if op == "*" && self.bk_on() && self.bk.level >= 1 && matches!(self.peek(x), Some(Ty::Ptr(..))) {
+            if fname.is_none() && matches!(self.peek(x), Some(Ty::Ptr(..))) {
                 return err(expr_start(e), format!("cannot move out of `{}`, which is behind a raw pointer (E0507)", raw_place_text(e)));
             }
-            if op == "*" && self.bk_on() && self.bk.level >= 1 {
-                if let Some(Ty::Struct(sid)) = self.peek(x).map(|t| self.strip_refs(t)) {
-                    if self.user_deref_sid(x, sid).is_some() {
-                        let n = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
-                        let what = if matches!(n.as_str(), "Rc" | "Arc") { format!("an `{n}`") } else { format!("dereference of `{}`", self.prog.tn(Ty::Struct(sid))) };
-                        return err(expr_start(e), format!("cannot move out of {what} (E0507)"));
-                    }
+            if let Some(Ty::Struct(sid)) = self.peek(x).map(|t| self.strip_refs(t)) {
+                let through = fname.is_none_or(|f| self.prog.field(sid, f).is_none());
+                if through && self.user_deref_sid(x, sid).is_some() {
+                    let n = self.prog.structs[self.prog.base_of(sid) as usize].name.clone();
+                    let what = if matches!(n.as_str(), "Rc" | "Arc") { format!("an `{n}`") } else { format!("dereference of `{}`", self.prog.tn(Ty::Struct(sid))) };
+                    return err(expr_start(e), format!("cannot move out of {what} (E0507)"));
                 }
             }
+            if fname.is_none() {
+                break;
+            }
+            cur = x;
         }
         Ok(())
     }

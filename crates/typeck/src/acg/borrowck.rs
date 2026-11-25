@@ -232,6 +232,13 @@ pub struct Bk {
     /// The arm whose pattern is bound (its position: a `ref` binding's loan is reported there, as rustc reports it at
     /// the binding; a pattern has no position of its own)
     pub arm_at: Option<Sp>,
+    /// Bindings by value of what is not Copy, made so far (where no drop needs the binding too: the check of a move
+    /// out of an overloaded deref, deref_move_check, after a pattern that moved)
+    pub pat_moves: u32,
+    /// Evaluating a match guard: the locals the arm's pattern bound (ids lo..hi), which the guard sees by shared
+    /// reference, and the first access of one that this makes an error (E0507 / E0594 / E0596)
+    pub guard_binds: Option<(u32, u32)>,
+    pub guard_err: Option<(Sp, String)>,
     /// The place being lowered is written or borrowed mutably (`*x = ..`, `&mut *x`): a `deref_mut` acg makes
     /// for it is a mutable borrow
     pub place_mut: bool,
@@ -1007,7 +1014,9 @@ fn path_str(locals: &[Local], p: &BPlace) -> String {
                     s.push_str("[..]");
                     continue;
                 }
-                s.push_str(f.trim_start_matches(UNION_FIELD));
+                // (an enum variant's field is written without the variant: `y.0` of `Some(..)`, as rustc does)
+                let f = f.trim_start_matches(UNION_FIELD);
+                s.push_str(f.rsplit("::").next().unwrap_or(f));
             }
             Proj::Deref(_) | Proj::Shr => {
                 // (auto-deref before a field is not written)
@@ -2417,6 +2426,17 @@ pub(crate) fn pat_binds_ref(p: &Pat) -> bool {
     pat_any(p, &|q| matches!(q, Pat::Ident(true, ..)))
 }
 
+/// p binds by `ref` somewhere not under a `&` pattern: a loan of the scrutinee itself, not of what a reference in it
+/// points to (`(&Some(ref c), _)` borrows `*s.0`)
+fn pat_binds_ref_outside_ref(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(r, _, _, sub) => *r || sub.as_deref().is_some_and(pat_binds_ref_outside_ref),
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Or(ps) | Pat::Slice(ps) => ps.iter().any(pat_binds_ref_outside_ref),
+        Pat::Struct(_, fs, _) => fs.iter().any(|(_, q)| pat_binds_ref_outside_ref(q)),
+        _ => false,
+    }
+}
+
 pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
     pat_any(p, &|q| matches!(q, Pat::Ident(true, true, ..)))
 }
@@ -2470,6 +2490,26 @@ impl Cx<'_> {
 
     pub(crate) fn bk_ev(&mut self, e: Ev) {
         let b = self.b.live_block();
+        // (in a match guard, the arm's bindings are seen by shared reference: moving one out, assigning to it or
+        // borrowing it mutably is rustc's E0507 / E0594 / E0596 (`A(v) if { drop(v); false }`). Assigning and
+        // borrowing mutably through a `&mut` too (`Some(ref mut y) if let Some(ref mut z) = *y`); not through a `&`,
+        // which the borrow check reports)
+        if let (Some((lo, hi)), Ev::Acc(p, a, sp), None) = (self.bk.guard_binds, &e, &self.bk.guard_err) {
+            if (lo..hi).contains(&p.local) && !p.proj.contains(&Proj::Shr) {
+                let path = path_str(&self.bk.locals, p);
+                let msg = match a {
+                    Acc::Move if p.owned_len() == p.proj.len() => Some(format!("cannot move out of `{path}` in pattern guard (E0507)")),
+                    Acc::Write | Acc::Modify => Some(format!("cannot assign to `{path}`, as it is immutable for the pattern guard (E0594)")),
+                    Acc::Borrow(ln) if self.bk.loans[*ln as usize].mutable => {
+                        Some(format!("cannot borrow `{path}` as mutable, as it is immutable for the pattern guard (E0596)"))
+                    }
+                    _ => None,
+                };
+                if let Some(m) = msg {
+                    self.bk.guard_err = Some((*sp, m));
+                }
+            }
+        }
         // (in a returned position: the loans made here, and the locals read here (Ev::RetHold))
         if self.bk.in_ret > 0 {
             if let Ev::Acc(p, a, _) = &e {
@@ -2700,9 +2740,10 @@ impl Cx<'_> {
         self.bk.scrut_place = self.bk_place(e).map(|p| (p.0, err_pos(e)));
         // (a temporary matched by a `&` pattern that binds by value (`match (l1, l2) { (_, &[hd, ..]) => .. }`): a
         // place of its own, so that what the binding moves out through the reference is an error at the scrutinee,
-        // as it is of a local (E0507 / E0508). Not with `ref` bindings, whose loans of a temporary are made above)
+        // as it is of a local (E0507 / E0508). Not with `ref` bindings of the temporary itself, whose loans are made
+        // above; one under a `&` pattern borrows what a reference in it points to)
         let by_value_deref = |p: &Pat| pat_any(p, &|q| matches!(q, Pat::Ref(_, inner) if pat_any(inner, &|r| matches!(r, Pat::Ident(false, ..)))));
-        if self.bk.scrut_place.is_none() && self.bk.level >= 1 && pats.iter().any(|p| by_value_deref(p)) && !pats.iter().any(|p| pat_binds_ref(p)) {
+        if self.bk.scrut_place.is_none() && self.bk.level >= 1 && pats.iter().any(|p| by_value_deref(p)) && !pats.iter().any(|p| pat_binds_ref_outside_ref(p)) {
             if let Ok(Some(pl)) = &r {
                 let id = self.bk.locals.len() as u32;
                 self.bk.locals.push(Local { name: TEMP.to_string(), ty: pl.ty(), copy: false, refs: false, mutable: Some(true), decl: super::SP, via_ref: false });
@@ -2726,6 +2767,9 @@ impl Cx<'_> {
     pub(crate) fn bk_pat_move(&mut self, t: Ty, name: &str) {
         if !self.bk_on() {
             return;
+        }
+        if !self.bk_ty(t).0 || matches!(t, Ty::Ref(true, _)) {
+            self.bk.pat_moves += 1;
         }
         let Some(p) = self.bk.pat_path.clone() else { return };
         // (a binding of the whole scrutinee (`match c { c2 => .. }`) is not tracked (rustc accepts assigning to c's

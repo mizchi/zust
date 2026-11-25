@@ -1142,8 +1142,9 @@ impl Cx<'_> {
                 // reborrowed)
                 let mut_moved = self.bk.plain_init == e as *const Expr as usize && self.bk.level >= 2 && matches!(p.ty(), Ty::Ref(true, _));
                 if self.bk_on() && (!self.bk_ty(p.ty()).0 || mut_moved) {
-                    // (`*x` with x a raw pointer: what it points to is not owned, E0507)
-                    if matches!(self.peek(x), Some(Ty::Ptr(..))) && self.bk.level >= 1 {
+                    // (`*x` with x a raw pointer: what it points to is not owned, E0507; also with x a reference that
+                    // is no place (`*&x`, `*v.first().unwrap()`))
+                    if self.bk.level >= 1 && (matches!(self.peek(x), Some(Ty::Ptr(..))) || !is_place_expr(x)) {
                         self.drop_move_check(e)?;
                     }
                     // (`*rc` with rc an Rc / a Deref type of the program's: its deref gives a reference, which cannot
