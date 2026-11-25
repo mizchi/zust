@@ -1513,12 +1513,18 @@ impl Session2 {
             // (a trait object without `dyn` before 2021: the lint warns, as rust_2018_idioms does. The crate's level
             // is its attributes' last one; an item's `#[deny(bare_trait_objects)]` is taken for the crate, as lint
             // levels below it are not followed)
-            let item_deny = ["#[deny(", "#[forbid("].iter().any(|open| {
-                c.match_indices(open).any(|(i, _)| {
-                    let rest = &c[i + open.len()..];
-                    rest[..rest.find(')').unwrap_or(rest.len())].split(',').any(|x| x.trim() == "bare_trait_objects")
+            // (read from the tokens, so a string or a comment that holds such an attribute is not one; only when the
+            // head names the lint at all)
+            let item_deny = c.contains("bare_trait_objects") && {
+                let h = &src.as_bytes()[..end];
+                let t = crate::lexer::tokenize(h);
+                let tx = |k: usize| t.get(k).map(|&(_, a, b)| &h[a..b]);
+                (0..t.len()).any(|k| {
+                    tx(k) == Some(b"#") && tx(k + 1) == Some(b"[") && matches!(tx(k + 2), Some(b"deny" | b"forbid")) && tx(k + 3) == Some(b"(") && {
+                        (k + 4..t.len()).take_while(|&j| tx(j) != Some(b")")).any(|j| t[j].0 == 0 && tx(j) == Some(b"bare_trait_objects"))
+                    }
                 })
-            });
+            };
             deny_bare = item_deny || match last_level(&["bare_trait_objects", "rust_2018_idioms"]) {
                 Some("forbid" | "deny") => true,
                 Some("warn") | None => matches!(last_level(&["warnings"]), Some("forbid" | "deny")),
