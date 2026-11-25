@@ -103,7 +103,10 @@ fn main() {
         fn u() -> u8 {
             14
         }
-        println!("{} {}", u::mk().v, u());
+        fn mk2() -> u {
+            u { v: 17 }
+        }
+        println!("{} {} {}", u::mk().v, u(), mk2().v);
     }
     // (a braced struct with a `where` clause whose bound has parentheses)
     fn q() -> u8 {
@@ -128,4 +131,23 @@ fn main() {
         }
         println!("{}", r());
     }
+    // (a turbofish: `p::<u8>()` calls the fn, `p::<u8>::mk(..)` names the struct)
+    fn p<T>() -> u8 {
+        18
+    }
+    struct p<T> {
+        v: T,
+    }
+    impl<T> p<T> {
+        fn mk(v: T) -> p<T> {
+            p { v }
+        }
+    }
+    {
+        fn p() -> u8 {
+            19
+        }
+        println!("{}", p());
+    }
+    println!("{} {}", p::<u8>(), p::<u8>::mk(20).v);
 }

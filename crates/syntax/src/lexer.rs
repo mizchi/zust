@@ -2078,9 +2078,39 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
         let tok_ns = |k: usize| -> u8 {
             let prev = if k >= 1 { tok(k - 1) } else { b"" };
             let next = if k + 1 < toks.len() { tok(k + 1) } else { b"" };
+            // (a turbofish, `m::<u8>`: a call after it, `m::<u8>()`, is a fn's; a path on, `m::<u8>::mk()`, a type's)
+            let turbofish = k + 3 < toks.len() && next == b":" && tok(k + 2) == b":" && tok(k + 3) == b"<";
+            let after_turbofish = || -> &[u8] {
+                let mut d = 0i32;
+                for q in k + 3..toks.len() {
+                    if toks[q].0 != 1 {
+                        continue;
+                    }
+                    match tok(q) {
+                        b"<" => d += 1,
+                        b">" if !(toks[q - 1].0 == 1 && tok(q - 1) == b"-") => {
+                            d -= 1;
+                            if d == 0 {
+                                return if q + 1 < toks.len() { tok(q + 1) } else { b"" };
+                            }
+                        }
+                        b";" | b"{" | b"}" => break,
+                        _ => {}
+                    }
+                }
+                b""
+            };
             if matches!(prev, b"fn" | b"static" | b"const") {
                 HOIST_NS_VALUE
-            } else if matches!(prev, b"struct" | b"enum" | b"union" | b"trait" | b"type" | b"mod")
+            } else if turbofish {
+                match after_turbofish() {
+                    b"(" => HOIST_NS_VALUE,
+                    b":" => HOIST_NS_TYPE,
+                    _ => HOIST_NS_BOTH,
+                }
+            } else if matches!(prev, b"struct" | b"enum" | b"union" | b"trait" | b"type" | b"mod" | b"impl" | b"dyn")
+                // (`m<T>`, generic arguments: a fn's name is not compared)
+                || next == b"<"
                 // (`-> m` and `m::`: a symbol is a token of one byte)
                 || (k >= 2 && prev == b">" && tok(k - 2) == b"-")
                 || (k + 2 < toks.len() && next == b":" && tok(k + 2) == b":")
@@ -2097,10 +2127,12 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             } else if next == b"(" {
                 HOIST_NS_VALUE
             } else if next == b"{"
-                && (matches!(prev, b"(" | b",")
-                    || prev == b"=" && !(k >= 2 && toks[k - 2].0 == 1 && b"=!<>+-*/%&|^".contains(&s[toks[k - 2].1])))
+                && (matches!(prev, b"(" | b"," | b"{" | b";" | b"}" | b"return")
+                    || prev == b"=" && !(k >= 2 && toks[k - 2].0 == 1 && b"=!<>+-*/%&|^".contains(&s[toks[k - 2].1]))
+                    || prev == b">" && k >= 2 && tok(k - 2) == b"=")
             {
-                // (a struct literal, `let a = m { .. }`: not `x == m {`, where `{` opens a block)
+                // (a struct literal, `let a = m { .. }` / `{ m { .. } }` / `=> m { .. }`: not `x == m {` or
+                // `if m {`, where `{` opens a block)
                 HOIST_NS_TYPE
             } else {
                 HOIST_NS_BOTH
