@@ -4645,4 +4645,15 @@ fn c2(s: &Task, o: &Task) -> bool { let f = || o.name.len() > s.name.len(); f() 
 fn c3(s: &Task) -> usize { let f = || s.name.len(); f() }
 fn main() { let t = Task { pri: 1, name: "a".into() }; println!("{:?} {} {}", c1(&t, &t), c2(&t, &t), c3(&t)); }
 "#, &[], "dc");
+    // (a `for` over an Option's `iter()` binds its pattern at the iterable: a move out through `&a` is E0507 at
+    // `x.iter()` (3), as in rustc 1.97, not at the fn's line)
+    errors_at(r#"fn main() {
+    let x: Option<Box<i32>> = Some(Box::new(1));
+    for &a in x.iter() {
+        let _ = a;
+    }
+    let y = Some(String::new());
+    for s in y.iter() { println!("{}", s); }
+}
+"#, &[(3, "cannot move out of a shared reference")], "fo");
 }

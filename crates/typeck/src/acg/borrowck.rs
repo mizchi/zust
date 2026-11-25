@@ -1789,8 +1789,10 @@ impl Bk {
                     if let (Acc::Move, Some(errs), false) = (a, errs.as_deref_mut(), self.locals[p.local as usize].via_ref) {
                         if p.owned_len() < p.proj.len() || p.proj.contains(&Proj::Index) {
                             let what = if p.owned_len() < p.proj.len() { "which is behind a reference" } else { "an indexed place" };
-                            // (of a temporary's part (a match on `(a, b)`): of the reference, as rustc says it)
-                            let msg = if self.locals[p.local as usize].name == TEMP && p.owned_len() < p.proj.len() {
+                            // (of a temporary's part (a match on `(a, b)`), or of a local the lowering made (a `for` over an
+                            // Option's `__exr_ox`): of the reference, as rustc says it)
+                            let lname = &self.locals[p.local as usize].name;
+                            let msg = if (lname == TEMP || lname.starts_with("__exr")) && p.owned_len() < p.proj.len() {
                                 // (a `&mut`'s deref is `Deref(false)`, a `&`'s `Shr`, ref_deref)
                                 let m = matches!(p.proj.get(p.owned_len()), Some(Proj::Deref(false)));
                                 format!("cannot move out of a {} reference", if m { "mutable" } else { "shared" })
