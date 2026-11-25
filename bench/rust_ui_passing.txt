@@ -392,6 +392,7 @@ compile-fail	async-await/async-closures/without-precise-captures-we-are-powerles
 compile-fail	async-await/async-closures/wrong-fn-kind.rs
 compile-fail	async-await/async-error-span.rs
 check-pass	async-await/async-fn-elided-impl-lifetime-parameter.rs
+compile-fail	async-await/async-fn-path-elision.rs
 compile-fail	async-await/async-fn/closure-arg-type-mismatch.rs
 compile-fail	async-await/async-fn/dyn-in-return-type.rs
 check-pass	async-await/async-fn/edition-2015-not-async-bound.rs
@@ -1602,6 +1603,7 @@ compile-fail	coherence/impl-coherence-error-for-undefined-type-18058.rs
 check-pass	coherence/inherent-impls-with-same-fn-ptr-return.rs
 compile-fail	coherence/normalize-for-errors.rs
 compile-fail	coherence/orphan-check-error-reporting-ty-var.rs
+compile-fail	coherence/skip-reporting-if-references-err.rs
 check-pass	coherence/super-traits/super-trait-knowable-1.rs
 check-pass	coherence/super-traits/super-trait-knowable-2.rs
 check-pass	coherence/super-traits/super-trait-knowable-3.rs
@@ -3231,8 +3233,10 @@ compile-fail	impl-header-lifetime-elision/assoc-type.rs
 run-pass	impl-header-lifetime-elision/bare_type.rs
 check-pass	impl-header-lifetime-elision/constant-used-as-arraylen.rs
 run-pass	impl-header-lifetime-elision/explicit-and-elided-same-header.rs
+compile-fail	impl-header-lifetime-elision/path-elided.rs
 run-pass	impl-header-lifetime-elision/path-underscore.rs
 run-pass	impl-header-lifetime-elision/ref-underscore.rs
+compile-fail	impl-header-lifetime-elision/trait-elided.rs
 run-pass	impl-header-lifetime-elision/trait-underscore.rs
 run-pass	impl-trait/basic-trait-impl.rs
 check-pass	impl-trait/bivariant-lifetime-liveness.rs
@@ -3809,6 +3813,7 @@ build-pass	lifetimes/issue-36744-without-calls.rs
 check-pass	lifetimes/issue-54378.rs
 compile-fail	lifetimes/issue-64173-unused-lifetimes.rs
 check-pass	lifetimes/issue-67498.rs
+compile-fail	lifetimes/issue-69314.rs
 check-pass	lifetimes/issue-76168-hr-outlives-2.rs
 check-pass	lifetimes/issue-77175.rs
 compile-fail	lifetimes/issue-79187-2.rs
@@ -8300,6 +8305,7 @@ compile-fail	wf/wf-impl-associated-type-region.rs
 compile-fail	wf/wf-in-fn-type-arg.rs
 compile-fail	wf/wf-in-fn-type-ret.rs
 compile-fail	wf/wf-in-fn-type-static.rs
+compile-fail	wf/wf-in-foreign-fn-decls-issue-80468.rs
 compile-fail	wf/wf-in-obj-type-static.rs
 compile-fail	wf/wf-static-method.rs
 compile-fail	wf/wf-where-clauses-pre-normalization.rs
