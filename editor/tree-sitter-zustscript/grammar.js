@@ -33,6 +33,7 @@ export default grammar({
         $.enum_item,
         $.function_item,
         $.extern_item,
+        $.extern_type_item,
         $.import_item,
         $.wasm_block,
         $.wasm_function_item,
@@ -79,6 +80,29 @@ export default grammar({
         optional(seq('->', field('result', $._type))),
         optional(seq('=', field('js', $.string))),
         ';',
+      ),
+
+    // `extern type Url = "URL" { host: String, fn get(k: String) -> Option<String> = "get"; }`
+    extern_type_item: ($) =>
+      seq(
+        'extern',
+        optional(field('module', $.string)),
+        'type',
+        field('name', $.type_identifier),
+        optional($.type_parameters),
+        optional(seq('=', field('ts', $.string))),
+        choice(';', seq('{', repeat(choice($.extern_property, $.extern_method)), '}')),
+      ),
+    extern_property: ($) =>
+      seq(field('name', alias($.identifier, $.field_identifier)), ':', field('type', $._type), optional(seq('=', field('js', $.string))), optional(choice(',', ';'))),
+    extern_method: ($) =>
+      seq(
+        'fn',
+        field('name', $.function_identifier),
+        $.parameters,
+        optional(seq('->', field('result', $._type))),
+        optional(seq('=', field('js', $.string))),
+        optional(choice(';', ',')),
       ),
 
     import_item: ($) =>
@@ -188,6 +212,7 @@ export default grammar({
         $.index_expression,
         $.unary_expression,
         $.await_expression,
+        $.try_expression,
         // (`async` is a name too, unless a closure follows: `async - async_`)
         alias('async', $.identifier),
         $.binary_expression,
@@ -222,6 +247,8 @@ export default grammar({
     index_expression: ($) => prec(PREC.postfix, seq($._expression, '[', $._expression, ']')),
     unary_expression: ($) => prec(PREC.unary, seq(field('operator', choice('-', '!', '*', '&')), $._expression)),
     await_expression: ($) => prec(PREC.unary, seq('await', $._expression)),
+    // `e?`
+    try_expression: ($) => prec(PREC.postfix, seq($._expression, '?')),
     cast_expression: ($) => prec.left(PREC.cast, seq($._expression, 'as', choice($.primitive_type, $.type_identifier))),
     binary_expression: ($) =>
       choice(
@@ -247,7 +274,16 @@ export default grammar({
     closure_parameter: ($) => seq($.identifier, optional(seq(':', $._type))),
 
     if_expression: ($) =>
-      prec.right(seq('if', field('condition', $._expression), field('consequence', $.block), optional(seq('else', field('alternative', choice($.block, $.if_expression)))))),
+      prec.right(
+        seq(
+          'if',
+          field('condition', choice($._expression, $.let_condition)),
+          field('consequence', $.block),
+          optional(seq('else', field('alternative', choice($.block, $.if_expression)))),
+        ),
+      ),
+    // `if let Some(x) = e { .. }`
+    let_condition: ($) => seq('let', field('pattern', $.pattern), '=', field('value', $._expression)),
     while_expression: ($) => seq('while', field('condition', $._expression), field('body', $.block)),
     for_expression: ($) => seq('for', field('binding', $.identifier), 'in', field('iterable', $._expression), field('body', $.block)),
     match_expression: ($) => seq('match', field('value', $._expression), '{', commaSep($.match_arm), '}'),

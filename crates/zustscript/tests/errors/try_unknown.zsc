@@ -1,0 +1,2 @@
+// expect: the value before `?` must be known to be an `Option` or a `Result` here
+fn b() -> Option<i32> { let f = (x) => x?; Some(1) }

@@ -34,6 +34,10 @@
 
 (function_item name: (function_identifier) @function)
 (extern_item name: (function_identifier) @function)
+(extern_type_item name: (type_identifier) @type)
+(extern_method name: (function_identifier) @function.method)
+(extern_property name: (field_identifier) @property)
+"?" @operator
 (wasm_function_item name: (function_identifier) @function)
 (call_expression function: (identifier) @function.call)
 (call_expression function: (field_expression field: (field_identifier) @function.method))

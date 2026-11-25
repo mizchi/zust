@@ -1,0 +1,4 @@
+// expect: `?.` is reserved
+type P = { x: i32 }
+fn a() -> Option<P> { None }
+fn b() -> Option<i32> { Some(a()? .x) }

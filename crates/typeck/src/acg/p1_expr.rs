@@ -3202,16 +3202,24 @@ impl Cx<'_> {
                 Ty::Struct(sid) => self.prog.closure_of_struct.get(&self.prog.base_of(sid)).copied(),
                 _ => None,
             };
-            let Some(cid) = cid else {
-                return err(span, format!("`{}` is not a closure", self.prog.tn(t)));
-            };
-            let Ty::Struct(sid) = t else { unreachable!() };
-            let args = self.prog.structs[sid as usize].args.clone();
-            let mut g = self.insts.lock().unwrap();
-            let iid = g.request(self.prog, cid, args).or_else(|e| err(span, e))?;
-            drop(g);
-            self.requested.push(iid);
-            fns.push(iid);
+            // (a placeholder bounded by `Fn(..)` / `FnMut(..)` / `FnOnce(..)` (zustc check of a generic fn nothing
+            // calls, `Box::new(f)` as a `Box<dyn FnMut(bool)>`): it has no body for the vtable's call to point at, and
+            // the instance is only checked, never run. Its entry is left empty, as a method dyn cannot call is)
+            let fn_placeholder = matches!(t, Ty::Struct(sid) if self.prog.is_placeholder(sid)
+                && self.prog.structs[sid as usize].placeholder.as_ref().is_some_and(|bs| bs.iter().any(|b| crate::ast_summary::parse_fn_bound(b).is_some())));
+            match cid {
+                Some(cid) => {
+                    let Ty::Struct(sid) = t else { unreachable!() };
+                    let args = self.prog.structs[sid as usize].args.clone();
+                    let mut g = self.insts.lock().unwrap();
+                    let iid = g.request(self.prog, cid, args).or_else(|e| err(span, e))?;
+                    drop(g);
+                    self.requested.push(iid);
+                    fns.push(iid);
+                }
+                None if fn_placeholder => fns.push(u32::MAX),
+                None => return err(span, format!("`{}` is not a closure", self.prog.tn(t))),
+            }
         } else {
             // (`dyn Foo<isize>`: the trait's own parameters are the arguments written)
             let tr0 = tr;

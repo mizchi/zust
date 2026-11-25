@@ -1,0 +1,3 @@
+// expect: `El` has no property `width` (declare it: `extern type El { width: T }`)
+extern type El { id: String }
+fn f(e: El) -> String { e.width }
