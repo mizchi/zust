@@ -5498,3 +5498,120 @@ impl Tr for () {
 fn main() {}
 "#, &[], "rv11");
 }
+
+#[test]
+fn part37_impl_where_clauses_through_the_header() {
+    // (an impl's method's where clause against the trait's, read through the impl header's trait arguments, each
+    // checked with rustc 1.97: the trait's `T: 'a` is the impl's `U: 'a`, so `V: 'a` is stricter (E0276 at the bound,
+    // 5:23, compare-method/region-unrelated.rs), as is `'a: 'b` that nothing gives (5:24, region-extra.rs). What the
+    // trait's and the impl's headers give, what follows from the trait's outlives, and what a signature's or the
+    // header's type implies (`x: &'a T`, `for &'a u8`) are accepted; so are a `'static` the trait's signature implies
+    // by its type (`W<'static, T>`, `&'static T` beside `[u8; 1]`))
+    errors_at(r#"trait Master<'a, T, U> { fn foo() where T: 'a; }
+impl<'a, U, V> Master<'a, U, V> for () { fn foo() where U: 'a {} }
+trait Tr2<'a, 'b: 'a> { fn foo(); }
+impl<'a, 'b: 'a> Tr2<'a, 'b> for () { fn foo() where 'b: 'a {} }
+trait Tr3<'a, T> { fn foo(x: &'a T); }
+impl<'a, T> Tr3<'a, T> for () { fn foo(x: &'a T) where T: 'a {} }
+trait Tr4<'a> { fn foo() where Self: 'a; }
+impl<'a, T> Tr4<'a> for Vec<T> { fn foo() where Vec<T>: 'a {} }
+trait Tr5<'a, T> { fn foo(); }
+impl<'a, T: 'a> Tr5<'a, T> for () { fn foo() where T: 'a {} }
+trait Tr7<'a, 'b, 'c> { fn foo() where 'a: 'b, 'b: 'c; }
+impl<'x, 'y, 'z> Tr7<'x, 'y, 'z> for () { fn foo() where 'x: 'z {} }
+trait Tr8<'a> { fn foo(); }
+impl<'a> Tr8<'a> for &'a u8 { fn foo() where 'a: 'a {} }
+trait Tr11<'a, 'b> { fn foo(x: &'b &'a u8); }
+impl<'a, 'b> Tr11<'a, 'b> for () { fn foo(x: &'b &'a u8) where 'a: 'b {} }
+trait S4 { fn f<T>(x: W<'static, T>); }
+struct W<'a, T: 'a>(&'a T);
+impl S4 for () { fn f<T: 'static>(x: W<'static, T>) {} }
+trait S5 { fn f<T>(a: [u8; 1], x: &'static T); }
+impl S5 for () { fn f<T: 'static>(a: [u8; 1], x: &'static T) {} }
+fn main() {}
+"#, &[], "iw1");
+    errors_at(r#"trait Master<'a, T: ?Sized, U> {
+    fn foo() where T: 'a;
+}
+impl<'a, U, V> Master<'a, U, V> for () {
+    fn foo() where V: 'a { }
+}
+fn main() {}
+"#, &[(5, "impl has stricter requirements than trait")], "iw2");
+    errors_at(r#"trait Master<'a, 'b> {
+    fn foo();
+}
+impl<'a, 'b> Master<'a, 'b> for () {
+    fn foo() where 'a: 'b { }
+}
+fn main() {}
+"#, &[(5, "impl has stricter requirements than trait")], "iw3");
+    // (#182's last finding: `(T, &'static str)` implies nothing of T, so `T: 'static` is stricter, 5:13)
+    errors_at(r#"trait Tr {
+    fn f<T>(x: (T, &'static str));
+}
+impl Tr for () {
+    fn f<T: 'static>(x: (T, &'static str)) {}
+}
+fn main() {}
+"#, &[(5, "impl has stricter requirements than trait")], "iw4");
+}
+
+#[test]
+fn part37_closures_by_reference_and_moved_fields() {
+    // (checked with rustc 1.97: `&func` is an `Fn` only where func is, so an `FnMut` closure passed by reference where
+    // `Fn` is wanted is E0525 at the closure (5:20, closures/fnmut-shared-reference-requires-fn.rs); `&mut func` where
+    // `FnMut` is wanted and `&g` of an `Fn` closure are accepted, as is a move closure that moves a field of what it
+    // captures out (`let t = s.1;`), which was "not supported")
+    errors_at(r#"fn requires_fn<F: Fn()>(_: F) {}
+fn requires_fnmut<F: FnMut()>(_: F) {}
+fn a() {
+    let mut value = 0;
+    let mut func = || value += 1;
+    requires_fn(&func);
+}
+fn b() {
+    let mut value = 0;
+    let mut func = || value += 1;
+    requires_fnmut(&mut func);
+    requires_fnmut(&mut func);
+}
+fn c() {
+    let s = String::new();
+    let g = || drop(&s);
+    requires_fn(&g);
+}
+struct S(String, String);
+fn d() {
+    let s = S(String::new(), String::new());
+    let c = move || {
+        let t = s.1;
+        drop(t);
+    };
+    c();
+}
+fn main() { a(); b(); c(); d(); }
+"#, &[(5, "expected a closure that implements the `Fn` trait, but this closure only implements `FnMut`")], "cl1");
+}
+
+#[test]
+fn part37_mut_rest_bindings_by_value() {
+    // (before edition 2024, `mut rest @ ..` where the default binding mode is by reference binds by value: an array
+    // of the elements between (`let [mut b @ ..] = &[1u8];` makes b a `[u8; 1]`), as rustc 1.97 does; a `ref` rest
+    // stays a slice)
+    errors_at(r#"fn main() {
+    let [mut b @ ..] = &[1u8];
+    let _: [u8; 1] = b;
+    let [x, mut rest @ .., y] = &[1u8, 2, 3, 4];
+    rest[0] = 9;
+    println!("{} {:?} {}", x, rest, y);
+    let arr = [10u32, 20, 30];
+    if let [_, ref tail @ ..] = arr {
+        println!("{:?}", tail);
+    }
+    let r = &[5i32, 6];
+    let [ref a @ ..] = r;
+    println!("{:?}", a);
+}
+"#, &[], "rb1");
+}

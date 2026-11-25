@@ -1517,6 +1517,11 @@ impl Session {
         if let Some(e) = stricter_impl_bound(&src, &items[..user_src]) {
             return Err(e);
         }
+        // (E0276: an impl's method whose where clause bounds the impl's lifetimes or types by a lifetime the trait's,
+        // read through the impl header's trait arguments, does not imply)
+        if let Some(e) = stricter_impl_where(&src, &items[..user_src]) {
+            return Err(e);
+        }
         // (E0119: two blanket impls of one trait for a bare parameter, `impl<T: A> Tr for T` and `impl<T: B> Tr for T`,
         // overlap whatever their bounds say. Only the program's own traits declared once (modules flatten names),
         // without trait arguments, and not under the features that allow overlapping impls)
@@ -10382,6 +10387,288 @@ fn allow_variant_bindings(src: &str, errs: &mut Vec<String>) {
     }
 }
 
+/// The items of a `<..>` list starting at the `<` at byte k of t, split at its top-level commas, and the byte after
+/// its `>` (None: no list there)
+fn angle_items(t: &str, k: usize) -> Option<(Vec<&str>, usize)> {
+    let b = t.as_bytes();
+    if b.get(k) != Some(&b'<') {
+        return None;
+    }
+    let mut d = 0i32;
+    let mut start = k + 1;
+    let mut out = vec![];
+    for i in k..b.len() {
+        match b[i] {
+            b'>' if i > 0 && b[i - 1] == b'-' => {}
+            b'<' | b'(' | b'[' => d += 1,
+            b'>' | b')' | b']' => {
+                d -= 1;
+                if d == 0 {
+                    let piece = t[start..i].trim();
+                    if !piece.is_empty() {
+                        out.push(piece);
+                    }
+                    return Some((out, i + 1));
+                }
+            }
+            b',' if d == 1 => {
+                out.push(t[start..i].trim());
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The text with each identifier or lifetime that names a key of map replaced by its value, and its whitespace one
+/// space where it parts two names (`&'a T`, `Vec<T>`)
+fn subst_names(t: &str, map: &[(String, String)]) -> String {
+    let mut out = String::new();
+    let cs: Vec<char> = t.chars().collect();
+    let mut i = 0;
+    let id = |c: char| c.is_alphanumeric() || c == '_';
+    while i < cs.len() {
+        let c = cs[i];
+        if id(c) || (c == '\'' && cs.get(i + 1).is_some_and(|&n| id(n))) {
+            let mut j = i + 1;
+            while j < cs.len() && id(cs[j]) {
+                j += 1;
+            }
+            let w: String = cs[i..j].iter().collect();
+            let v = map.iter().find(|(k, _)| *k == w).map_or(w.as_str(), |(_, v)| v.as_str());
+            if out.ends_with(id) && v.starts_with(|c: char| id(c) || c == '\'') {
+                out.push(' ');
+            }
+            out.push_str(v);
+            i = j;
+            continue;
+        }
+        if !c.is_whitespace() {
+            out.push(c);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// E0276 "impl has stricter requirements than trait" for an impl's method whose where clause bounds by a lifetime
+/// what the trait's method does not: a lifetime of the impl outliving another (`where 'a: 'b`), or a type outliving a
+/// lifetime (`where V: 'a`), read through the impl header's trait arguments (`impl<'a, U, V> Master<'a, U, V>` for
+/// `trait Master<'a, T, U>`: the trait's `where T: 'a` is the impl's `U: 'a`), with the trait's and the impl's own
+/// header bounds. Not compared where a type of the signatures or of the impl's header names both (`x: &'a V` implies
+/// `V: 'a`), nor for the method's own parameters (stricter_impl_bound, early_mismatch). At the bound
+fn stricter_impl_where(src: &str, items: &[SrcItem]) -> Option<String> {
+    use crate::lexer::ItemKind as K;
+    let text = |it: &SrcItem| src.get(it.start..it.end).unwrap_or("");
+    let member_head = |t: &str| -> usize { fn_body_start(t).or_else(|| t.find(';')).unwrap_or(t.len()) };
+    if !items.iter().any(|it| matches!(it.kind, K::ImplMember(_)) && {
+        let t = text(it);
+        let h = &t[..member_head(t)];
+        h.contains("where") && h.contains('\'') && h.contains("fn ")
+    }) {
+        return None;
+    }
+    let word_in = |p: &str, n: &str| {
+        p.match_indices(n).any(|(i, _)| {
+            let id = |c: char| c.is_alphanumeric() || c == '_';
+            !p[..i].ends_with(id) && !p[i + n.len()..].starts_with(id)
+        })
+    };
+    // (a generic list's names, and the lifetime bounds its items write: `'b: 'a`, `T: 'a + Clone`)
+    let names_and_bounds = |its: &[&str]| -> (Vec<String>, Vec<(String, String)>) {
+        let mut names = vec![];
+        let mut bounds = vec![];
+        for it in its {
+            let it = it.trim().strip_prefix("const ").unwrap_or(it.trim());
+            let (n, rest) = match it.find(':') {
+                Some(c) => (it[..c].trim(), &it[c + 1..]),
+                None => (it.split('=').next().unwrap_or(it).trim(), ""),
+            };
+            for b in rest.split('+') {
+                let b = b.trim();
+                if b.starts_with('\'') {
+                    bounds.push((n.to_string(), b.to_string()));
+                }
+            }
+            names.push(n.to_string());
+        }
+        (names, bounds)
+    };
+    let where_bounds = |head: &str| -> Vec<(String, String)> {
+        where_preds(head).unwrap_or_default().into_iter().flat_map(|(s, bs)| bs.into_iter().filter(|b| b.starts_with('\'')).map(move |b| (s.clone(), b))).collect()
+    };
+    // (the program's traits: name, header item, parameters, header bounds)
+    let mut traits: Vec<(String, u32, Vec<String>, Vec<(String, String)>)> = vec![];
+    for (i, it) in items.iter().enumerate() {
+        if it.kind != K::TraitHeader {
+            continue;
+        }
+        let t = text(it);
+        let head = &t[..t.find('{').unwrap_or(t.len())];
+        let Some(k) = head.find("trait ") else { continue };
+        let r = &head[k + 6..];
+        let n_end = r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len());
+        let name = r[..n_end].to_string();
+        let (params, mut bounds) = match angle_items(head, k + 6 + n_end) {
+            Some((its, _)) => names_and_bounds(&its),
+            None => (vec![], vec![]),
+        };
+        bounds.extend(where_bounds(head));
+        traits.push((name, i as u32, params, bounds));
+    }
+    if traits.is_empty() {
+        return None;
+    }
+    for m in items {
+        let K::ImplMember(h) = m.kind else { continue };
+        let mt = text(m);
+        let mh = &mt[..member_head(mt)];
+        if !(mh.contains("where") && mh.contains('\'')) {
+            continue;
+        }
+        let Some(fk) = mh.find("fn ") else { continue };
+        let r = mh[fk + 3..].trim_start();
+        let name = &r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len())];
+        // (the method's own generics: not compared here)
+        let own: Vec<String> = mh.find(name).and_then(|k| angle_items(mh, k + name.len())).map(|(its, _)| names_and_bounds(&its).0).unwrap_or_default();
+        // (the impl's header: its generics, the trait and its arguments, the self type)
+        let Some(hi) = items.get(h as usize) else { continue };
+        let ht = text(hi);
+        let head = &ht[..ht.find('{').unwrap_or(ht.len())];
+        let Some(ik) = head.find("impl") else { continue };
+        let (impl_bounds, after) = match angle_items(head, ik + 4 + head[ik + 4..].len() - head[ik + 4..].trim_start().len()) {
+            Some((its, e)) => (names_and_bounds(&its).1, e),
+            None => (vec![], ik + 4),
+        };
+        let Some(f) = head[after..].find(" for ") else { continue };
+        let trait_part = head[after..after + f].trim();
+        let self_ty = head[after + f + 5..].split(" where").next().unwrap_or("").trim();
+        let tn_end = trait_part.find('<').unwrap_or(trait_part.len());
+        let tname = trait_part[..tn_end].rsplit("::").next().unwrap_or("").trim();
+        let Some((_, th, tparams, tbounds)) = traits.iter().find(|t| t.0 == tname) else { continue };
+        let targs: Vec<&str> = if tn_end < trait_part.len() { angle_items(trait_part, tn_end).map(|x| x.0).unwrap_or_default() } else { vec![] };
+        if targs.len() != tparams.len() {
+            continue;
+        }
+        let mut map: Vec<(String, String)> = tparams.iter().cloned().zip(targs.iter().map(|a| subst_names(a, &[]))).collect();
+        map.push(("Self".to_string(), subst_names(self_ty, &[])));
+        // (the trait's method of that name)
+        let Some(d) = items.iter().find(|d| d.kind == K::TraitMember(*th) && {
+            let dt = text(d);
+            dt.find("fn ").is_some_and(|k| {
+                let r = dt[k + 3..].trim_start();
+                r.starts_with(name) && !r[name.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+            })
+        }) else {
+            continue;
+        };
+        let dt = text(d);
+        let dh = &dt[..member_head(dt)];
+        // (what holds: the trait's method's and header's bounds through the arguments, the impl header's)
+        let mut facts: Vec<(String, String)> = where_bounds(dh).into_iter().chain(tbounds.iter().cloned()).map(|(a, b)| (subst_names(&a, &map), subst_names(&b, &map))).collect();
+        facts.extend(impl_bounds.iter().map(|(a, b)| (subst_names(a, &[]), b.clone())));
+        facts.extend(where_bounds(head).into_iter().map(|(a, b)| (subst_names(&a, &[]), b)));
+        // (types that may imply a bound of what they name: the signatures', the trait arguments, the self type)
+        let mut pieces: Vec<String> = sig_type_pieces(dh).iter().map(|p| subst_names(p, &map)).collect();
+        pieces.extend(sig_type_pieces(mh).iter().map(|p| subst_names(p, &[])));
+        pieces.extend(targs.iter().map(|a| subst_names(a, &[])));
+        pieces.push(subst_names(self_ty, &[]));
+        let outlives = |x: &str, y: &str| -> bool {
+            if x == y || x == "'static" {
+                return true;
+            }
+            let (mut seen, mut work) = (vec![x.to_string()], vec![x.to_string()]);
+            while let Some(z) = work.pop() {
+                for (a, b) in &facts {
+                    if *a == z && !seen.contains(b) {
+                        if b == y || b == "'static" {
+                            return true;
+                        }
+                        seen.push(b.clone());
+                        work.push(b.clone());
+                    }
+                }
+            }
+            false
+        };
+        for (subj, bound) in where_bounds(mh) {
+            let subj = subst_names(&subj, &[]);
+            let mentions_own = own.iter().any(|o| word_in(&subj, o) || word_in(&bound, o));
+            if mentions_own || pieces.iter().any(|p| word_in(p, &subj) && word_in(p, &bound)) {
+                continue;
+            }
+            let held = if subj.starts_with('\'') {
+                outlives(&subj, &bound)
+            } else {
+                facts.iter().any(|(a, b)| *a == subj && outlives(b, &bound))
+            };
+            if held {
+                continue;
+            }
+            // (at the bound: the first `bound` after `subj:` in the where clause)
+            let w = mh.rfind("where").unwrap_or(0);
+            let off = mh[w..].find(&*bound).map(|o| w + o)?;
+            let line = m.line + mt[..off].matches('\n').count();
+            let abs = m.start + off;
+            let col = abs - src[..abs].rfind('\n').map_or(0, |k| k + 1) + 1;
+            return Some(format!("{line}:{col}: impl has stricter requirements than trait (E0276)"));
+        }
+    }
+    None
+}
+
+/// Whether a type names the type parameter n
+fn ty_names(t: &crate::parse::Ty, n: &str) -> bool {
+    use crate::parse::{Bound, GArg, Ty as PTy};
+    let path = |p: &crate::parse::Path| {
+        p.segs.iter().any(|s| {
+            s.name == n
+                || s.args.iter().any(|a| match a {
+                    GArg::Ty(t) | GArg::Bind(_, t) => ty_names(t, n),
+                    _ => false,
+                })
+                || s.fn_args.as_ref().is_some_and(|(ps, r)| ps.iter().any(|t| ty_names(t, n)) || r.as_deref().is_some_and(|t| ty_names(t, n)))
+        })
+    };
+    let bounds = |bs: &[Bound]| bs.iter().any(|b| matches!(b, Bound::Trait(_, p) if path(p)));
+    match t {
+        PTy::Path(q, p) => q.as_deref().is_some_and(|q| ty_names(q, n)) || path(p),
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => ty_names(i, n),
+        PTy::Tuple(ts) => ts.iter().any(|t| ty_names(t, n)),
+        PTy::Fn(ps, r) => ps.iter().any(|t| ty_names(t, n)) || ty_names(r, n),
+        PTy::Impl(bs) | PTy::Dyn(bs) => bounds(bs),
+        _ => false,
+    }
+}
+
+/// Whether a type of a signature may imply `n: 'static`: n behind a `&'static`, or a path with a `'static` argument
+/// and an argument that names n (`W<'static, T>`, whose definition may bound T by its lifetime), or a trait object or
+/// `impl Trait` bounded by `'static` that names n. Not two parts of a tuple, a fn pointer's parameters or an array's
+/// element beside a `'static` elsewhere (`(T, &'static str)`)
+fn static_implies(t: &crate::parse::Ty, n: &str) -> bool {
+    use crate::parse::{Bound, GArg, Ty as PTy};
+    match t {
+        PTy::Ref(Some(l), _, i) if l == "'static" && ty_names(i, n) => true,
+        PTy::Ref(_, _, i) | PTy::Ptr(_, i) | PTy::Slice(i) | PTy::Array(i, _) => static_implies(i, n),
+        PTy::Tuple(ts) => ts.iter().any(|t| static_implies(t, n)),
+        PTy::Fn(ps, r) => ps.iter().any(|t| static_implies(t, n)) || static_implies(r, n),
+        PTy::Path(q, p) => {
+            q.as_deref().is_some_and(|q| static_implies(q, n))
+                || p.segs.iter().any(|s| {
+                    let st = s.args.iter().any(|a| matches!(a, GArg::Lifetime(l) if l == "'static"));
+                    let names = s.args.iter().any(|a| matches!(a, GArg::Ty(t) | GArg::Bind(_, t) if ty_names(t, n)));
+                    (st && names) || s.args.iter().any(|a| matches!(a, GArg::Ty(t) | GArg::Bind(_, t) if static_implies(t, n)))
+                })
+        }
+        PTy::Impl(bs) | PTy::Dyn(bs) => {
+            let st = bs.iter().any(|b| matches!(b, Bound::Lifetime(l) if l == "'static"));
+            st && ty_names(t, n)
+        }
+        _ => false,
+    }
+}
+
 /// A fn's text: its parameters' types (with their patterns) and its result's, each a piece, past its generics
 /// (`fn f<F: Fn(u8)>(x: F, s: &'static str) -> u8 where ..`: `x: F`, `s: &'static str`, `u8`)
 fn sig_type_pieces(t: &str) -> Vec<&str> {
@@ -10669,20 +10956,13 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
             // or the trait's parameters and result name `'static` and that type parameter, which may imply it (`x:
             // &'static T`; not `x: &'static u8`). At the first `'static` of the member's signature)
             let (ms_st, ds_st) = (static_params(&ms.generics), static_params(&ds.generics));
-            // (each of the trait's parameters' types and its result's: one that names `'static` and the type
-            // parameter may imply the bound (`x: &'static T`, `x: W<'static, T>`); `x: T, s: &'static str` does not)
-            let pieces = sig_type_pieces(text(d));
-            let word = |p: &str, n: &str| {
-                p.match_indices(n).any(|(i, _)| {
-                    let id = |c: char| c.is_alphanumeric() || c == '_';
-                    !p[..i].ends_with(id) && !p[i + n.len()..].starts_with(id)
-                })
-            };
+            // (the trait's parameters' types and its result's, by their structure: `x: &'static T` and `x:
+            // W<'static, T>` may imply the bound; `x: T, s: &'static str` and `x: (T, &'static str)` do not)
             let names: Vec<&str> = ds.generics.params.iter().filter_map(|q| match q {
                 GParam::Ty(n, ..) => Some(n.as_str()),
                 _ => None,
             }).collect();
-            let implied = |n: &str| pieces.iter().any(|p| p.contains("'static") && word(p, n));
+            let implied = |n: &str| ds.params.iter().map(|p| &p.1).chain(ds.ret.as_ref()).any(|t| static_implies(t, n));
             if ms_st.iter().zip(&ds_st).zip(&names).any(|((m, d), n)| *m && !*d && !implied(n)) && !header_static {
                 let off = key.find("'static")?;
                 let line = key[..off].matches('\n').count() + 1;

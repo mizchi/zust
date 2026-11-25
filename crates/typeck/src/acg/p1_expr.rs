@@ -1171,7 +1171,9 @@ impl Cx<'_> {
                             if let Some(c) = self.caps.iter().find(|c| c.0 == id) {
                                 // 値で持ったキャプチャ (FnOnce) から出す: 退避して環境の側を「空」(0) にする
                                 // (環境はそのまま drop されるが、0 の Vec / String / Box は何も解放しない)
-                                if let (false, Expr::Path(..), Place::Mem(a, o, t), Some(v)) = (c.2, strip_paren(e), p, r.0) {
+                                // (also a field of it (`let t = s.1;`, the 2021 edition's capture of `s.1` by value):
+                                // that field is emptied, and dropping the rest of the capture frees nothing of it)
+                                if let (false, Expr::Path(..) | Expr::Field(..), Place::Mem(a, o, t), Some(v)) = (c.2, strip_paren(e), p, r.0) {
                                     if self.zeroable(t) {
                                         let v = if t.is_agg() {
                                             let tmp = self.temp(t);
