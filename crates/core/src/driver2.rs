@@ -978,6 +978,10 @@ impl Session2 {
             }
             // (a `macro_rules!` matcher's fragment specifier rustc does not know, used or not: the expansion notes one when
             // it reads the definitions; its place is read from the text then)
+            // (a doc comment the source ends in, read from its end as written)
+            if let Some(e) = crate::lexer::doc_at_end(src0) {
+                return Err(e);
+            }
             // (E0428: two `#[macro_export]` macros of one name, at the second)
             if let Some(n) = crate::macros::DUP_EXPORT.with(|c| c.borrow_mut().take()) {
                 let pat = format!("macro_rules! {n}");

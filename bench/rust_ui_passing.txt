@@ -4574,6 +4574,8 @@ check-pass	macros/issue-33185.rs
 compile-fail	macros/issue-35450.rs
 run-pass	macros/issue-37175.rs
 compile-fail	macros/issue-38715.rs
+compile-fail	macros/issue-39388.rs
+compile-fail	macros/issue-39404.rs
 check-pass	macros/issue-39467.rs
 check-pass	macros/issue-40469.rs
 check-pass	macros/issue-40770.rs
@@ -4641,6 +4643,7 @@ run-pass	macros/macro-literal.rs
 compile-fail	macros/macro-match-nonterminal.rs
 check-pass	macros/macro-meta-items-modern.rs
 run-pass	macros/macro-method-issue-4621.rs
+compile-fail	macros/macro-missing-fragment.rs
 check-pass	macros/macro-multiple-items.rs
 compile-fail	macros/macro-multiple-matcher-bindings.rs
 compile-fail	macros/macro-name-typo.rs
@@ -4698,6 +4701,7 @@ check-pass	macros/pub-item-inside-macro.rs
 check-pass	macros/pub-method-inside-macro.rs
 compile-fail	macros/recovery-allowed.rs
 check-pass	macros/recovery-forbidden.rs
+compile-fail	macros/repetition-matches-empty-token-tree.rs
 check-pass	macros/semi-after-macro-ty.rs
 check-pass	macros/std-2024-macros.rs
 run-pass	macros/stmt_expr_attr_macro_parse.rs
@@ -5554,6 +5558,7 @@ compile-fail	parser/do-not-suggest-semicolon-before-array.rs
 compile-fail	parser/doc-after-struct-field.rs
 compile-fail	parser/doc-before-attr.rs
 compile-fail	parser/doc-before-bad-variant.rs
+compile-fail	parser/doc-before-eof.rs
 compile-fail	parser/doc-before-extern-rbrace.rs
 compile-fail	parser/doc-before-fn-rbrace.rs
 compile-fail	parser/doc-before-rbrace.rs

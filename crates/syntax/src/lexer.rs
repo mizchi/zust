@@ -3731,6 +3731,37 @@ fn in_macro_args(s: &[u8], p: usize) -> bool {
     false
 }
 
+/// An outer doc comment the source ends in, with only whitespace and plain comments after it: rustc's "expected item
+/// after doc comment", at the last doc comment (`///`, not `////`; or a `/** .. */`). Read from the source as written,
+/// from its end: the expansion takes `macro_rules!` definitions out of the text, which leaves their doc comments last
+pub fn doc_at_end(src: &str) -> Option<String> {
+    let mut rest = src.trim_end();
+    loop {
+        let ls = rest.rfind('\n').map_or(0, |k| k + 1);
+        let line = rest[ls..].trim_start();
+        let at = rest.len() - line.len();
+        let pos = |at: usize| {
+            let l = 1 + src[..at].matches('\n').count();
+            let c = at - src[..at].rfind('\n').map_or(0, |k| k + 1) + 1;
+            format!("{l}:{c}: expected item after doc comment")
+        };
+        if line.starts_with("///") && !line.starts_with("////") {
+            return Some(pos(at));
+        }
+        if line.starts_with("//") && !line.starts_with("//!") {
+            rest = rest[..ls].trim_end();
+            continue;
+        }
+        if rest.ends_with("*/") {
+            let b = rest.rfind("/*")?;
+            let c = &rest[b..];
+            let doc = c.starts_with("/**") && !c.starts_with("/***") && c != "/**/";
+            return doc.then(|| pos(b));
+        }
+        return None;
+    }
+}
+
 /// E0585: an outer doc comment right before `}` / `;` / `,` (outside a macro's arguments) documents nothing
 #[inline(never)]
 fn dangling_docs(s: &[u8], docs: Vec<(usize, usize)>) -> Result<(), String> {

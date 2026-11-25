@@ -3122,3 +3122,38 @@ fn macro_matchers_rustc_rejects_what_follows_a_fragment_in_and_names_bound_twice
     assert_eq!(first("macro_rules! m {\n    ($a:ident, $($a:ident),*) => {};\n}\nfn main() {}\n", 2021), e(2, "duplicate matcher binding"));
     assert_eq!(first("macro_rules! m {\n    ($a:ident) => {};\n    ($a:path) => {};\n}\nfn main() {}\n", 2021), None);
 }
+
+#[test]
+fn macro_matchers_with_no_fragment_no_repetition_operator_or_an_empty_repetition() {
+    // (rustc 1.100, at its line and column: a `$name` with no fragment specifier, at the `$`; a `$( .. )` with no `*` /
+    // `+` / `?` (a closing delimiter after it is no separator), and a repetition with no separator that can match
+    // nothing, at the `(` of `$(`. `$crate` and a separator before the operator are fine)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
+    assert_eq!(first("macro_rules! m {\n    ($a) => {};\n}\nfn main() {}\n"), e(2, 6, "missing fragment specifier"));
+    assert_eq!(first("macro_rules! m {\n    (($($b:tt))*) => {};\n}\nfn main() {}\n"), e(2, 8, "expected one of: `*`, `+`, or `?`"));
+    assert_eq!(first("macro_rules! m {\n    ($()*) => {};\n}\nfn main() {}\n"), e(2, 7, "repetition matches empty token tree"));
+    assert_eq!(first("macro_rules! m {\n    ($($v:vis)*) => {};\n}\nfn main() {}\n"), e(2, 7, "repetition matches empty token tree"));
+    assert_eq!(first("macro_rules! m {\n    ($($a:ident),* $crate) => {};\n    ($($x:tt);* ) => {};\n}\nfn main() {}\n"), None);
+}
+
+#[test]
+fn a_doc_comment_the_source_ends_in() {
+    // (rustc 1.100: "expected item after doc comment" at the comment; one before an item documents it)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize| Some((l, c, "expected item after doc comment".to_string()));
+    assert_eq!(first("fn main() {}\n/// hi\n"), e(2, 1));
+    // (the last of several, past plain comments; a block doc comment at its start)
+    assert_eq!(first("fn main() {}\n/// a\n/// b\n// plain\n"), e(3, 1));
+    assert_eq!(first("fn main() {}\n/** a */\n"), e(2, 1));
+    assert_eq!(first("fn main() {}\n//// four slashes are a plain comment\n"), None);
+    assert_eq!(first("fn main() {}\n/// hi\nfn f() {}\n"), None);
+    // (the doc comment of a `macro_rules!` the source ends in, which the expansion takes out of the text: cfg-if's)
+    assert_eq!(first("fn main() {}\n/// The macro.\n#[macro_export]\nmacro_rules! m { () => {} }\n"), None);
+}

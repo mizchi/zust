@@ -106,14 +106,61 @@ pub fn macro_def_err(src: &str) -> Option<String> {
                 return err(j, "invalid macro matcher; matchers must be contained in balanced delimiters");
             }
             let m = close[j];
-            let mut seen: Vec<&[u8]> = vec![];
-            for q in j + 1..m.saturating_sub(2) {
-                if sym(q, b'$') && toks[q + 1].0 == 0 && sym(q + 2, b':') {
-                    let n = &b[toks[q + 1].1..toks[q + 1].2];
-                    if seen.contains(&n) {
-                        return err(q, "duplicate matcher binding");
+            // (the matcher's `$name:kind` / `$( .. ) sep op`, as bad_matcher reads them)
+            let kleene = |k: usize| sym(k, b'*') || sym(k, b'+') || sym(k, b'?');
+            let tx = |k: usize| if k < toks.len() { &b[toks[k].1..toks[k].2] } else { &b[0..0] };
+            let kind_at = |k: usize| k + 1 < toks.len() && sym(k, b':') && toks[k + 1].0 == 0;
+            let empty_inner = |mut k: usize, to: usize| {
+                while k < to {
+                    if sym(k, b'$') && k + 1 < toks.len() && toks[k + 1].0 == 0 && kind_at(k + 2) && tx(k + 3) == b"vis" {
+                        k += 4;
+                        continue;
                     }
-                    seen.push(n);
+                    if !(sym(k, b'$') && open(k + 1)) {
+                        return false;
+                    }
+                    let e = close[k + 1];
+                    let o = if kleene(e + 1) { e + 1 } else { e + 2 };
+                    if !(sym(o, b'*') || sym(o, b'?')) {
+                        return false;
+                    }
+                    k = o + 1;
+                }
+                true
+            };
+            let mut seen: Vec<&[u8]> = vec![];
+            for q in j + 1..m {
+                if !sym(q, b'$') || q + 1 >= toks.len() {
+                    continue;
+                }
+                if toks[q + 1].0 == 0 {
+                    let n = tx(q + 1);
+                    if kind_at(q + 2) {
+                        if seen.contains(&n) {
+                            return err(q, "duplicate matcher binding");
+                        }
+                        seen.push(n);
+                    } else if n != b"crate" {
+                        return err(q, "missing fragment specifier");
+                    }
+                } else if sym(q + 1, b'(') && open(q + 1) {
+                    let e = close[q + 1];
+                    // (a delimiter is no separator: in `($($b:tt))*` the `)` closes the outer group, and the `*` is
+                    // not the repetition's)
+                    let delim = |k: usize| [b'(', b')', b'[', b']', b'{', b'}'].iter().any(|&c| sym(k, c));
+                    let o = if kleene(e + 1) {
+                        e + 1
+                    } else if kleene(e + 2) && !delim(e + 1) {
+                        e + 2
+                    } else if sym(e + 1, b':') && sym(e + 2, b':') && kleene(e + 3) {
+                        e + 3
+                    } else {
+                        // (at the `(` of `$(`, as rustc)
+                        return err(q + 1, "expected one of: `*`, `+`, or `?`");
+                    };
+                    if o == e + 1 && empty_inner(q + 2, e) {
+                        return err(q + 1, "repetition matches empty token tree");
+                    }
                 }
             }
             j = m + 1;
@@ -259,7 +306,7 @@ fn parse_pt(ts: TokenStream, is_pat: bool) -> Vec<Pt> {
                     // `$( .. ) sep op` / `$( .. ) op`
                     let mut j = i + 2;
                     let mut sep = None;
-                    let mut op = '*';
+                    let mut op = '\0';
                     if let Some(TokenTree::Punct(p)) = toks.get(j) {
                         if matches!(p.as_char(), '*' | '+' | '?') {
                             op = p.as_char();
@@ -288,6 +335,13 @@ fn parse_pt(ts: TokenStream, is_pat: bool) -> Vec<Pt> {
                             op = q.as_char();
                             j += 1;
                         }
+                    }
+                    // (`$($b:tt)` with no `*` / `+` / `?` after it: rustc's error in a matcher, as `*` here)
+                    if !matches!(op, '*' | '+' | '?') {
+                        if is_pat {
+                            BAD_DEF.with(|c| c.set(true));
+                        }
+                        op = '*';
                     }
                     out.push(Pt::Rep(inner, sep, op));
                     i = j;
@@ -1147,14 +1201,17 @@ pub fn follow_err(src: &str, frag: &str, msg: &str) -> Option<String> {
     Some(format!("{line}:{col}: {msg}"))
 }
 
-/// Whether a matcher binds a name twice, in its repetitions too (seen: the names bound before)
-fn dup_binder<'a>(pat: &'a [Pt], seen: &mut Vec<&'a str>) -> bool {
+/// Whether a matcher is one rustc rejects as it reads it: a name bound twice (seen: the names bound before), a
+/// `$name` with no fragment specifier, a repetition with no separator that can match nothing (`$()*`, `$($v:vis)*`)
+fn bad_matcher<'a>(pat: &'a [Pt], seen: &mut Vec<&'a str>) -> bool {
     pat.iter().any(|p| match p {
-        Pt::Var(n, k) if !k.is_empty() => seen.contains(&n.as_str()) || {
+        Pt::Var(n, k) if k.is_empty() => n != "crate",
+        Pt::Var(n, _) => seen.contains(&n.as_str()) || {
             seen.push(n);
             false
         },
-        Pt::Group(_, inner) | Pt::Rep(inner, ..) => dup_binder(inner, seen),
+        Pt::Rep(inner, None, _) if inner.iter().all(|p| matches!(p, Pt::Var(_, k) if k == "vis") || matches!(p, Pt::Rep(_, _, '*' | '?'))) => true,
+        Pt::Group(_, inner) | Pt::Rep(inner, ..) => bad_matcher(inner, seen),
         _ => false,
     })
 }
@@ -1185,8 +1242,8 @@ fn parse_rules(inner: &str) -> Result<Vec<Rule>, String> {
             break;
         };
         let pat = parse_pt(m.stream(), true);
-        // (`($a:ident, $a:ident)`: a name bound twice, rustc's "duplicate matcher binding")
-        if dup_binder(&pat, &mut vec![]) {
+        // (`($a:ident, $a:ident)`: a name bound twice, rustc's "duplicate matcher binding"; `($i)`, `$()*`)
+        if bad_matcher(&pat, &mut vec![]) {
             BAD_DEF.with(|c| c.set(true));
         }
         // (`($e:expr +)`: a token after a fragment that rustc does not allow there)
