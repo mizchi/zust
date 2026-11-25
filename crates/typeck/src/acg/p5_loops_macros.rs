@@ -451,7 +451,11 @@ impl Cx<'_> {
         }
         // (an entry for every loop, empty for one over a value: its items hold nothing of an enclosing loop's)
         self.bk.for_items.push(items.unwrap_or_default());
+        let st0 = self.bk.stmt_temps.len();
         let r = self.for_inner(f);
+        // (the temporaries of the iterator's expression go away with the loop, a terminating scope: after it, before
+        // the locals of a block whose tail it is)
+        self.bk_temps_end(st0);
         self.bk.for_items.pop();
         if let Some(t0) = temp {
             self.bk_call_temps_end(t0);

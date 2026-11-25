@@ -1721,7 +1721,9 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         || ["split", "split_whitespace", "lines"].iter().any(|n| need.contains(n))
         || need.contains("chars")
         || chain
-        || (producer && need.contains("next"));
+        || (producer && need.contains("next"))
+        // (a slice iterator's type named: `xs: &mut std::slice::Iter<'a, T>`, iterated with no `iter()` of its own)
+        || ["Iter", "IterMut"].iter().any(|n| need.contains(n));
     // 大小比較: `<` は識別子として現れないので、比較を使いそうな名前 (Ord / sort / cmp など) で glue を付ける
     // (イテレータの max / min も中で `>=` を使う)
     const ORD_NAMES: &[&str] = &[

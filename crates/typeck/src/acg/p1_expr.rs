@@ -663,7 +663,19 @@ impl Cx<'_> {
         let mut p = if is_place_expr(base) && !const_tmp {
             self.place(base)?
         } else {
-            let r = self.expr(base, None)?;
+            // (a temporary whose drop may use what it borrows (`D(&*v).0` with `impl Drop for D`): it holds its loans
+            // until it is dropped, at the end of the statement (a loop's: after the loop, a `while let`'s scrutinee's:
+            // with the iteration), E0502 for `for x in D(&*v).0.iter() { v.push(*x); }`)
+            let watch = self.bk_on() && self.bk.level >= 2 && self.user_code;
+            if watch {
+                self.bk_frame();
+            }
+            let r = self.expr(base, None);
+            let srcs = if watch { self.bk_frame_end() } else { vec![] };
+            let r = r?;
+            if !srcs.is_empty() && self.dropck(r.1, 0) {
+                let _ = self.bk_drop_temp(r.1, srcs);
+            }
             if let (Some(v), t) = r {
                 self.own_temp(v, t);
             }
@@ -1321,6 +1333,7 @@ impl Cx<'_> {
                 if label.is_some() {
                     self.loops.push(Loop { cont: header, brk: exit, breaks: 0, label: label.clone(), val: None, is_block: true, depth: self.scopes.len(), temps: t0, no_value: Some("while") });
                 }
+                let bk0 = self.bk.stmt_temps.len();
                 let (c, ct) = self.expr(cond, Some(Ty::Bool))?;
                 if label.is_some() {
                     self.loops.pop();
@@ -1329,6 +1342,7 @@ impl Cx<'_> {
                 // (the condition's temporaries are dropped before the body: `while borrow().ok() { .. }`)
                 if c.is_some() {
                     self.drop_temps(t0);
+                    self.bk_temps_end(bk0);
                 }
                 match c {
                     Some(c) => {

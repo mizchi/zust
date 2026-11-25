@@ -1166,6 +1166,9 @@ impl Cx<'_> {
             }
         }
         let mut recv_temp = None;
+        // (the hidden local that holds a temporary receiver's loans for its drop (bk_drop_temp): a `self` by value
+        // takes it, so its loans end at the call, `D(&x).consume()`)
+        let mut recv_holder: Option<u32> = None;
         // (whether the receiver was reached through a reference: a `self` by value there moves out of it)
         let mut through_ref = false;
         // (a Box value that is not a place: `Box::new(s).m()`, for `self: Box<Self>`)
@@ -1173,7 +1176,18 @@ impl Cx<'_> {
         let mut p = if is_place_expr(recv) {
             self.place(recv)?
         } else {
-            let r = self.expr(recv, None)?;
+            // (a temporary receiver whose drop may use what it borrows (`D(&*v).iter()` with `impl Drop for D`): it
+            // holds its loans until the end of the statement, as a field's base does (struct_base))
+            let watch = self.bk_on() && self.bk.level >= 2 && self.user_code;
+            if watch {
+                self.bk_frame();
+            }
+            let r = self.expr(recv, None);
+            let srcs = if watch { self.bk_frame_end() } else { vec![] };
+            let r = r?;
+            if !srcs.is_empty() && self.dropck(r.1, 0) {
+                recv_holder = Some(self.bk_drop_temp(r.1, srcs));
+            }
             // 一時値の受け手は文の終わりまで所有する (値で受けるメソッドならムーブ)
             if let (Some(v), t) = r {
                 if t != Ty::Never {
@@ -1449,7 +1463,14 @@ impl Cx<'_> {
                         Some(f) => self.clear_flag(f),
                         None => self.mark_moved(recv),
                     }
-                    return self.call_fn(id, Some((bv, p0t)), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
+                    let r = self.call_fn(id, Some((bv, p0t)), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
+                    // (the call takes the receiver after its arguments: what the holder holds ends there, not
+                    // before them (`D(&x).consume({ x = 2; })` is E0506))
+                    if let Some(h) = recv_holder {
+                        self.bk_drop_held(&[h], SP);
+                        self.bk_ev(borrowck::Ev::Def(h, vec![]));
+                    }
+                    return r;
                 }
             }
         }
@@ -1623,11 +1644,14 @@ impl Cx<'_> {
             }
         }
         // `self` を値で受ける: 受け手からムーブ
+        // (a temporary receiver's holder ends after the call, which takes it after the arguments)
+        let mut consumed_holder = None;
         if !matches!(recv_ty, Ty::Ref(..)) && self.needs_drop(st) {
             match recv_temp {
                 Some(f) => self.clear_flag(f),
                 None => self.mark_moved(recv),
             }
+            consumed_holder = recv_holder.filter(|_| !through_ref);
         }
         let args: Vec<&Expr> = margs.iter().collect();
         // (a `&mut self` method of a value that holds references stores what its arguments borrow:
@@ -1669,6 +1693,11 @@ impl Cx<'_> {
             self.bk.activate = bk_act;
         }
         let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
+        // (used there, by the callee's drop of it, so its loans are live while the arguments are made)
+        if let Some(h) = consumed_holder {
+            self.bk_drop_held(&[h], SP);
+            self.bk_ev(borrowck::Ev::Def(h, vec![]));
+        }
         self.bk.store_args = stores0;
         self.rg_took_call(e);
         if into_recv {
