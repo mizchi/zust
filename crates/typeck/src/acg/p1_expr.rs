@@ -1503,6 +1503,16 @@ impl Cx<'_> {
                         None
                     }
                 };
+                // (a `Copy` aggregate read out of a place that what the function drops may own (`return v[0];`):
+                // copied out before the drops)
+                let v = match v {
+                    Some(x) if ret.is_agg() && !self.fresh.contains_key(&x.0) && (!self.temps.is_empty() || !self.owned.is_empty()) => {
+                        let a = self.temp(ret);
+                        self.copy(a, x, ret);
+                        Some(a)
+                    }
+                    v => v,
+                };
                 // (a closure's exit: what its captures held by value hold escapes it)
                 self.bk_cap_escape();
                 self.drop_for_exit(0, 0);

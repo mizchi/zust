@@ -1999,6 +1999,28 @@ impl Cx<'_> {
         (None, Ty::Never)
     }
 
+    /// A block's value that is a `Copy` aggregate read out of a place that what the block drops may own (`v[0]` of a
+    /// Vec local, `b.0` of a Box): copied out first, as rustc evaluates the tail before the drops. So is the deref
+    /// coercion to the type expected of it (`let c = &v[0]; c` returned as a `&str`): what it reads is read before
+    fn detach_tail(&mut self, r: V, t0: usize, want: Option<Ty>) -> V {
+        let depth = self.scopes.len() - 1;
+        if r.0.is_none() || !(self.temps.len() > t0 || self.owned.iter().any(|o| o.depth >= depth)) {
+            return r;
+        }
+        let (v, t) = match want {
+            Some(w @ Ty::Ref(..)) if r.1 != w && matches!(r.1, Ty::Ref(_, Ty::Ref(..))) => self.deref_coerce(r.0, r.1, w),
+            _ => r,
+        };
+        if let Some(v) = v {
+            if t.is_agg() && !self.fresh.contains_key(&v.0) {
+                let a = self.temp_fresh(t);
+                self.copy(a, v, t);
+                return (Some(a), t);
+            }
+        }
+        (v, t)
+    }
+
     pub fn block(&mut self, blk: &crate::parse::Block, expected: Option<Ty>) -> R<V> {
         let saved = self.stmt_i;
         let r = self.block_stmts(blk, expected);
@@ -2522,7 +2544,7 @@ impl Cx<'_> {
                         diverged = true;
                     }
                     if last && !*semi {
-                        result = r;
+                        result = self.detach_tail(r, t0, None);
                         self.drop_tail_temps(t0, result);
                     } else {
                         self.drop_temps(t0);
@@ -2660,7 +2682,7 @@ impl Cx<'_> {
                         diverged = true;
                     }
                     if last && !*semi {
-                        result = r;
+                        result = self.detach_tail(r, t0, exp);
                         self.drop_tail_temps(t0, result);
                     } else {
                         if !*semi && !matches!(r.1, Ty::Unit | Ty::Never) {

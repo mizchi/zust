@@ -382,6 +382,27 @@ impl Solver<'_> {
                             self.unify(x, i);
                             return;
                         }
+                        // (`&&T` を `&T` に (deref の強制変換): 参照どうしはつながず、内側の T どうしを単一化する。
+                        //  つなぐと、`let c = &v[0]; c` (v: Vec<&str>、`&str` を返す) の c が `&str` になる)
+                        let rf = |s: &mut Self, v: u32| {
+                            let r = s.find(v);
+                            match s.shape[r as usize] {
+                                Some(Shape::Ref(_, i)) => Some(Some(i)),
+                                Some(_) => Some(None),
+                                None => None,
+                            }
+                        };
+                        match (rf(self, x), rf(self, y)) {
+                            (Some(Some(i)), Some(None)) if !coerce => {
+                                self.unify(i, y);
+                                return;
+                            }
+                            (Some(None), Some(Some(i))) if !coerce => {
+                                self.unify(x, i);
+                                return;
+                            }
+                            _ => {}
+                        }
                         // (`&mut T` を `&T` に渡すのも強制変換: つなぐと、`let x = &mut v; f(x);` (f が `&T` を取る) の
                         //  x が `&T` になり、後の `*x = ..` を `&` 越しの書き込みとしてしまう)
                         if !coerce && ma == mb {
@@ -1010,43 +1031,63 @@ impl Solver<'_> {
     pub fn finish_collects(&mut self) {
         let cs = std::mem::take(&mut self.collects);
         for (recv, r) in cs {
-            let Some(item) = self.assoc_var(recv, "Item") else { continue };
+            self.collect_into(recv, r);
+        }
+    }
+
+    /// The `collect`s whose iterator's item and result's type are known now (a `let` with `Vec<_>` written): their
+    /// elements are taken from the item, as rustc selects the `FromIterator` impl before the statements after it.
+    /// The others wait for finish_collects
+    pub fn ready_collects(&mut self) {
+        let cs = std::mem::take(&mut self.collects);
+        for (recv, r) in cs {
             let root = self.find(r);
-            let (b, vars) = match self.shape[root as usize] {
-                Some(Shape::Adt(b, st, l)) => (b, self.adt_vars_of(st, l)),
-                Some(Shape::Known(Ty::Struct(sid))) => {
-                    let args = self.prog.structs[sid as usize].args.clone();
-                    (self.prog.base_of(sid), args.into_iter().map(|a| self.known(a)).collect())
-                }
-                _ => continue,
-            };
-            let name = self.prog.structs[b as usize].name.clone();
-            if matches!(name.as_str(), "Vec" | "BinaryHeap") && vars.len() == 1 {
-                self.unify(item, vars[0]);
-            } else if matches!(name.as_str(), "Option" | "Result") && !vars.is_empty() {
-                // `Option<Vec<T>>` / `Result<Vec<T>, E>`: 要素は Option<T> / Result<T, E>
-                let r0 = self.find(vars[0]);
-                let inner = match self.shape[r0 as usize] {
-                    Some(Shape::Adt(ib, st, l)) if self.prog.structs[ib as usize].name == "Vec" => {
-                        self.adt_vars_of(st, l).first().copied()
-                    }
-                    Some(Shape::Known(Ty::Struct(s))) if self.prog.structs[self.prog.base_of(s) as usize].name == "Vec" => {
-                        self.prog.structs[s as usize].args.first().copied().map(|a| self.known(a))
-                    }
-                    _ => None,
-                };
-                if let Some(t) = inner {
-                    let mut a = vec![t];
-                    a.extend(vars[1..].iter().copied());
-                    let it = self.adt(b, a);
-                    self.unify(item, it);
-                }
-            } else if name == "HashMap" && vars.len() == 2 {
-                let tb = self.prog.tuple_base(2);
-                let t = self.adt(tb, vec![vars[0], vars[1]]);
-                self.unify(item, t);
+            let known = matches!(self.shape[root as usize], Some(Shape::Adt(..) | Shape::Known(Ty::Struct(_))));
+            let rr = self.find(recv);
+            if !known || self.shape[rr as usize].is_none() || !self.collect_into(recv, r) {
+                self.collects.push((recv, r));
             }
         }
+    }
+
+    /// A `collect`'s elements from its iterator's item (false: not known yet)
+    fn collect_into(&mut self, recv: u32, r: u32) -> bool {
+        let Some(item) = self.assoc_var(recv, "Item") else { return false };
+        let root = self.find(r);
+        let (b, vars) = match self.shape[root as usize] {
+            Some(Shape::Adt(b, st, l)) => (b, self.adt_vars_of(st, l)),
+            Some(Shape::Known(Ty::Struct(sid))) => {
+                let args = self.prog.structs[sid as usize].args.clone();
+                (self.prog.base_of(sid), args.into_iter().map(|a| self.known(a)).collect())
+            }
+            _ => return false,
+        };
+        let name = self.prog.structs[b as usize].name.clone();
+        if matches!(name.as_str(), "Vec" | "BinaryHeap") && vars.len() == 1 {
+            self.unify(item, vars[0]);
+        } else if matches!(name.as_str(), "Option" | "Result") && !vars.is_empty() {
+            // `Option<Vec<T>>` / `Result<Vec<T>, E>`: 要素は Option<T> / Result<T, E>
+            let r0 = self.find(vars[0]);
+            let inner = match self.shape[r0 as usize] {
+                Some(Shape::Adt(ib, st, l)) if self.prog.structs[ib as usize].name == "Vec" => {
+                    self.adt_vars_of(st, l).first().copied()
+                }
+                Some(Shape::Known(Ty::Struct(s))) if self.prog.structs[self.prog.base_of(s) as usize].name == "Vec" => {
+                    self.prog.structs[s as usize].args.first().copied().map(|a| self.known(a))
+                }
+                _ => None,
+            };
+            let Some(t) = inner else { return false };
+            let mut a = vec![t];
+            a.extend(vars[1..].iter().copied());
+            let it = self.adt(b, a);
+            self.unify(item, it);
+        } else if name == "HashMap" && vars.len() == 2 {
+            let tb = self.prog.tuple_base(2);
+            let t = self.adt(tb, vec![vars[0], vars[1]]);
+            self.unify(item, t);
+        }
+        true
     }
 
     /// 算術・比較の被演算子: 整数 (か未知) への参照なら中身
