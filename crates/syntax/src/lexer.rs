@@ -2099,6 +2099,21 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             while q < toks.len() {
                 if toks[q].0 == 1 {
                     match tok(q) {
+                        // (a block in it that declares an item of the name: the item's there, `{ fn n() .. n() }`)
+                        b"{" if nested_names.iter().any(|(nm, b, _)| *b == q && nm.as_slice() == tok(nk)) => {
+                            let mut e = 0i32;
+                            while q < toks.len() {
+                                if toks[q].0 == 1 && tok(q) == b"{" {
+                                    e += 1;
+                                } else if toks[q].0 == 1 && tok(q) == b"}" {
+                                    e -= 1;
+                                    if e == 0 {
+                                        break;
+                                    }
+                                }
+                                q += 1;
+                            }
+                        }
                         b"{" => d += 1,
                         b"}" => {
                             if d == 0 {
@@ -2118,7 +2133,7 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
         for (ri, r) in renames.iter().enumerate() {
             let mut k = r.0 + 1;
             while k < r.1 {
-                if toks[k].0 == 0 && !local_toks[k] && &s[toks[k].1..toks[k].2] == r.2.as_slice() {
+                if toks[k].0 == 0 && &s[toks[k].1..toks[k].2] == r.2.as_slice() {
                     at.push((k, ri));
                 }
                 k += 1;
@@ -2196,6 +2211,11 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
             let (a, b) = (tok_ns(k), rename_ns[ri]);
             a == HOIST_NS_BOTH || b == HOIST_NS_BOTH || a == b
         };
+        // (a local's tokens keep the name, but for a type's use, `let _: n = n {};`: a `let` shadows no type. Not
+        // `n <`, which is a comparison of the local, `if n < 3`, unless an annotation's, `x: n<u8>`)
+        at.retain(|&(k, _)| {
+            !local_toks[k] || (tok_ns(k) == HOIST_NS_TYPE && !(k + 1 < toks.len() && tok(k + 1) == b"<" && !(k >= 1 && tok(k - 1) == b":")))
+        });
         // (a candidate of the other namespace stays only where none fits)
         let mut has_fit = vec![false; toks.len()];
         for &(k, ri) in &at {

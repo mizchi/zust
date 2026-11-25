@@ -85,6 +85,26 @@ fn main() {
         n += 1;
         println!("{}", n);
     }
+    // (the local's type namesake is still renamed, `let _: n = n {}`; `n < 3` compares the local)
+    {
+        struct n {}
+        let n = 1u8;
+        let _: n = n {};
+        if n < 3 {
+            println!("lt {}", n);
+        }
+    }
+    // (a block in the local's scope that declares a fn of its name: the fn there)
+    {
+        let n = || 24u8;
+        {
+            fn n() -> u8 {
+                25
+            }
+            println!("{}", n());
+        }
+        println!("{}", n());
+    }
     struct t {
         v: u8,
     }
