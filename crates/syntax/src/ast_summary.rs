@@ -2290,16 +2290,19 @@ fn const_local_borrow_err(item: &Item) -> Option<String> {
         return None;
     };
     // (a field or an element of the local is its own storage only where the local holds the aggregate, not a
-    // reference the access derefs (`let p = &DATA; &p.0` borrows DATA): a written type that is no reference, or a
-    // value built there (a literal, a tuple, an array, a struct))
+    // reference the access derefs (`let p = &DATA; &p.0` borrows DATA): a written tuple or array type, or a value
+    // built there (a literal, a tuple, an array, a struct). A written path may name an alias of a reference
+    // (`type Alias = &'static (i32,);`), which the summary does not know: its value decides)
     if through {
         let mut i = init.as_ref();
         while let Some(Expr::Paren(x)) = i {
             i = Some(x);
         }
+        let built = matches!(i, Some(Expr::Lit(..) | Expr::Tuple(_) | Expr::Array(_) | Expr::Repeat(..) | Expr::Struct(..)));
         let owned = match ann {
-            Some(t) => !matches!(t, PTy::Ref(..) | PTy::Ptr(..)),
-            None => matches!(i, Some(Expr::Lit(..) | Expr::Tuple(_) | Expr::Array(_) | Expr::Repeat(..) | Expr::Struct(..))),
+            Some(PTy::Tuple(_) | PTy::Array(..)) => true,
+            Some(PTy::Ref(..) | PTy::Ptr(..)) => false,
+            _ => built,
         };
         if !owned {
             return None;

@@ -4570,7 +4570,11 @@ fn main() {}
 "#, &[(2, "cannot move out of"), (3, "cannot move out of"), (4, "cannot move out of")], "ts");
     // (of the uses of what one move moved, the one rustc reports: after the loop the move is in, before its next
     // iteration's, also of a loop over a range and of nested loops)
-    errors_at(r#"fn a(n: usize) { let s = String::new(); for _ in 0..n { if s.len() > 0 { drop(s); continue; } } drop(s); }
+    errors_at(r#"fn a(n: usize) {
+    let s = String::new();
+    for _ in 0..n { if s.len() > 0 { drop(s); continue; } }
+    drop(s);
+}
 fn b(v: Vec<String>, w: Vec<&str>) {
     for foo in v { for bar in &w { if foo == *bar {
         drop(foo);
@@ -4580,7 +4584,7 @@ fn b(v: Vec<String>, w: Vec<&str>) {
     }
 }
 fn main() {}
-"#, &[(1, "use of moved value"), (7, "use of moved value")], "mv");
+"#, &[(4, "use of moved value"), (11, "use of moved value")], "mv");
 }
 
 #[test]
@@ -4600,6 +4604,15 @@ const OK: &'static i32 = { let p = &DATA; &p.0 };
 const BAD: &'static i32 = { let p = (3,); &p.0 };
 fn main() { println!("{} {}", OK, BAD); }
 "#, &[(3, "does not live long enough")], "cr");
+    // (nor through a local whose written type is an alias of a reference (3): the summary does not know aliases, so a
+    // written path counts as the local's own storage only where its value is built there (5))
+    errors_at(r#"static DATA: (i32,) = (3,);
+type Alias = &'static (i32,);
+const OK: &'static i32 = { let p: Alias = &DATA; &p.0 };
+type Pair = (i32,);
+const BAD: &'static i32 = { let p: Pair = (4,); &p.0 };
+fn main() { println!("{} {}", OK, BAD); }
+"#, &[(5, "does not live long enough")], "ca");
     // (a move out through a `&mut` pattern of a temporary scrutinee is out of a mutable reference)
     errors_at(r#"fn f(a: &mut Option<String>) { match (1, a) { (_, &mut Some(s)) => { drop(s); } _ => {} } }
 fn main() {}
