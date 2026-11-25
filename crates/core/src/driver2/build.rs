@@ -7,6 +7,13 @@ use crate::minclif::{DataDef, Reloc};
 // (Fx hashing: deterministic and cheaper than the std map's random-seeded SipHash)
 type HashMap<K, V> = crate::fxhash::FxMap<K, V>;
 
+/// The fns (and instances) a Blob refers to: its calls and address-takings, and its vtables' slots
+fn blob_fns(b: &Blob) -> Vec<u32> {
+    let mut v: Vec<u32> = b.relocs.iter().filter_map(|r| match r.target { Target::Func(i) => Some(i), _ => None }).collect();
+    v.extend(b.vtables.iter().flatten().copied());
+    v
+}
+
 /// 記録を機械語にして Blob を作る
 pub(super) fn lower_blob(a: &Analysis, c: acg::Compiled, req: Vec<u32>) -> R<(Blob, Vec<u32>)> {
     let (code, relocs, traps) = crate::lower::lower(&c.rec, &c.late, a.prog.opt, a.cl)?;
@@ -29,8 +36,11 @@ pub fn build(src: &str, output: &std::path::Path, opt: bool, linker: Option<&str
 
 impl Session2 {
     /// ids をコンパイルする (jobs > 1 で数が多ければ fork した子プロセスで分けて)。結果は ids と同じ順
+    /// (ZUSTC_PAR=threads: on worker threads (crate::par), each on its own copy of the instances as a forked child
+    /// has; their Blobs come back by name and are read back below in the order of ids, as a child's are (#165 P2))
     fn compile_many(&self, a: &Analysis, insts: &Mutex<Insts>, ids: &[u32]) -> R<Vec<Blob>> {
-        let jobs = self.opts.jobs.min(ids.len() / 16).max(1);
+        let par = self.opts.par.unwrap_or_else(crate::par::mode);
+        let jobs = if par == crate::par::Mode::Off { 1 } else { self.opts.jobs.min(ids.len() / par_min("ZUSTC_BUILD_PAR_MIN", 16)).max(1) };
         if jobs <= 1 {
             let mut out = vec![];
             for &id in ids {
@@ -38,6 +48,33 @@ impl Session2 {
             }
             return Ok(out);
         }
+        let mut res: Vec<Option<Result<Vec<u8>, String>>> = (0..ids.len()).map(|_| None).collect();
+        if par == crate::par::Mode::Threads {
+            let base = insts.lock().unwrap();
+            let base: &Insts = &base;
+            let tls = WorkerTls::take();
+            let init = || {
+                tls.set();
+                Mutex::new(base.clone())
+            };
+            res = crate::par::map_with(jobs, ids.len(), 2, &init, &|mine, i| {
+                let b = match compile_id(a, mine, ids[i]) {
+                    Ok(b) => b,
+                    Err(m) => return Some(Err(m)),
+                };
+                let g = mine.lock().unwrap();
+                // (what cannot be sent is compiled again here, below)
+                if !sendable(a, &*g, &blob_fns(&b)) {
+                    return None;
+                }
+                let mut e = vec![];
+                crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+                Some(Ok(e))
+            })
+            .into_iter()
+            .map(Option::flatten)
+            .collect();
+        } else {
         // 子プロセス k は ids[i] (i % jobs == k) をコンパイルし、(番号, 失敗か, 中身) の並びを pipe に書く
         let mut kids = vec![];
         for k in 0..jobs {
@@ -56,12 +93,22 @@ impl Session2 {
                 let mut buf = vec![];
                 let mut i = k;
                 while i < ids.len() {
+                    let at = buf.len();
                     crate::cache2::put_uv(&mut buf, i as u64);
                     match compile_id(a, insts, ids[i]) {
                         Ok(b) => {
                             let mut e = vec![];
                             {
                                 let g = insts.lock().unwrap();
+                                // (a Blob that names an instance the encoding cannot write is not sent: the parent
+                                // compiles that fn again. A closure's fn-pointer instance (request_fnptr) is written as
+                                // the closure's own, so the parent's code called the closure through a fn pointer
+                                // with its environment's parameter, and got the arguments wrong (#165 P2))
+                                if !sendable(a, &*g, &blob_fns(&b)) {
+                                    buf.truncate(at);
+                                    i += jobs;
+                                    continue;
+                                }
                                 crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
                             }
                             buf.push(0);
@@ -83,7 +130,6 @@ impl Session2 {
             unsafe { c_close(fds[1]) };
             kids.push((pid, fds[0]));
         }
-        let mut res: Vec<Option<Result<Vec<u8>, String>>> = (0..ids.len()).map(|_| None).collect();
         for &(pid, fd) in &kids {
             let d = read_all(fd);
             unsafe { c_close(fd) };
@@ -98,6 +144,7 @@ impl Session2 {
                     *slot = Some(v);
                 }
             }
+        }
         }
         // (順に読み戻す: 子が要求したインスタンスはここで要求し直す。失敗は ids の順で最初のもの)
         let mut out = vec![];
