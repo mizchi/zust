@@ -1,14 +1,14 @@
-//! 組み込みの prelude。core の代わりに、よく使う型をこのコンパイラが扱えるサブセットで書いたもの。
-//! ユーザのソースの後ろに付けて一緒にコンパイルする (使われたものだけがコード生成される)。
+//! The built-in prelude: in place of core, common types written in the subset this compiler handles.
+//! It is appended to the user's source and compiled with it (only what is used is code-generated).
 
-/// `Box::new` が呼ぶアロケータ (libc の malloc)
+/// The allocator `Box::new` calls (libc's malloc)
 pub const BOX_ALLOC: &str = "__exr_malloc";
-/// Box の drop が呼ぶ解放関数 (libc の free)
+/// The deallocation function Box's drop calls (libc's free)
 pub const BOX_FREE: &str = "__exr_free";
-/// drop glue: `__exr_drop_in_place::<T>` の本体は codegen が型ごとに作る
+/// drop glue: codegen builds the body of `__exr_drop_in_place::<T>` for each type
 pub const DROP_GLUE: &str = "__exr_drop_in_place";
 
-/// prelude の本体 (Rust で書いた core / alloc の代わり)。build.rs がアイテムの分割を前もって済ませる
+/// The prelude's text (in place of core / alloc, written in Rust). build.rs splits it into items ahead of time
 pub const PRELUDE: &str = include_str!("prelude_lib.rs.in");
 
 include!(concat!(env!("OUT_DIR"), "/prelude_items.rs"));
@@ -18,11 +18,11 @@ use std::sync::OnceLock;
 
 use crate::lexer::{ItemKind, SrcItem};
 
-/// prelude のアイテム (一度だけ字句解析する)。(アイテム, 定義する名前, core:: 経由でしか使えないか)
+/// The prelude's items (lexed only once): (item, the name it defines, whether it is usable only through core::)
 fn items() -> &'static [(SrcItem, Option<String>, bool)] {
     static ITEMS: OnceLock<Vec<(SrcItem, Option<String>, bool)>> = OnceLock::new();
     ITEMS.get_or_init(|| {
-        // (分割は build.rs が済ませてある)
+        // (build.rs has already done the splitting)
         PRELUDE_ITEMS
             .iter()
             .map(|&(start, end, line, k, a, idents)| SrcItem {
@@ -52,8 +52,8 @@ fn items() -> &'static [(SrcItem, Option<String>, bool)] {
     })
 }
 
-/// イテレータを作る呼び出し (`.iter()` / `.into_iter()` / `(a..b)`) の後ろに、for が直接扱える
-/// `rev` / `enumerate` / `copied` / `cloned` 以外のメソッドが続くか (`v.iter().map(..)` など)
+/// Whether a call that makes an iterator (`.iter()` / `.into_iter()` / `(a..b)`) is followed by a method
+/// other than `rev` / `enumerate` / `copied` / `cloned` (which `for` handles directly), as in `v.iter().map(..)`
 fn iter_chain(src: &str) -> bool {
     let b = src.as_bytes();
     let starts = ["iter()", "iter_mut()", "into_iter()"];
@@ -65,7 +65,7 @@ fn iter_chain(src: &str) -> bool {
             i += k + s.len();
         }
     }
-    // `(a..b).` の `)` の後ろ
+    // After the `)` of `(a..b).`
     let mut i = 0;
     while let Some(k) = src[i..].find("..") {
         let mut j = i + k + 2;
@@ -86,7 +86,7 @@ fn iter_chain(src: &str) -> bool {
         i += k + 2;
     }
     for mut j in found {
-        // `.name(..)` の列を辿る
+        // Walk the chain of `.name(..)`
         loop {
             while j < b.len() && b[j].is_ascii_whitespace() {
                 j += 1;
@@ -103,7 +103,7 @@ fn iter_chain(src: &str) -> bool {
             if !matches!(name, "rev" | "enumerate" | "copied" | "cloned") {
                 return !name.is_empty();
             }
-            // 引数の括弧を飛ばす
+            // Skip the argument parentheses
             j = e;
             if j < b.len() && b[j] == b'(' {
                 let mut d = 0;
@@ -127,7 +127,7 @@ fn iter_chain(src: &str) -> bool {
     false
 }
 
-/// src[a..b] の識別子がメソッド呼び出し (`.name(` / `.name::<`) の位置にあるか (フィールド `.next` は除く)
+/// Whether the identifier src[a..b] is at a method call (`.name(` / `.name::<`), not a field (`.next`)
 fn method_call_at(src: &[u8], a: usize, b: usize) -> bool {
     if a > 0 && src[a - 1] == b'.' && b < src.len() && (src[b] == b'(' || src[b] == b':') {
         return true;
@@ -144,7 +144,7 @@ fn method_call_at(src: &[u8], a: usize, b: usize) -> bool {
     (i < a || j > b) && i > 0 && src[i - 1] == b'.' && (i < 2 || src[i - 2] != b'.') && j < src.len() && (src[j] == b'(' || src[j] == b':')
 }
 
-/// Iterator の trait / impl (と IntoIter の Drop) のヘッダか
+/// Whether h is the header of the Iterator trait or an Iterator impl (or IntoIter's Drop)
 fn is_iterator_trait(h: usize) -> bool {
     // (computed once per item: the selection asks for each impl member on every build)
     static T: OnceLock<Vec<bool>> = OnceLock::new();
@@ -160,7 +160,7 @@ fn is_iterator_trait(h: usize) -> bool {
     })[h]
 }
 
-/// `__exr_str_<m>` / `__exr_char_<m>` の helper: メソッド名 m → helper の名前
+/// The `__exr_str_<m>` / `__exr_char_<m>` helpers: method name m → helper names
 fn helper_suffixes() -> &'static HashMap<&'static str, Vec<&'static str>> {
     static H: OnceLock<HashMap<&'static str, Vec<&'static str>>> = OnceLock::new();
     H.get_or_init(|| {
@@ -170,7 +170,7 @@ fn helper_suffixes() -> &'static HashMap<&'static str, Vec<&'static str>> {
             for pre in ["__exr_str_", "__exr_char_"] {
                 if let Some(suf) = n.strip_prefix(pre) {
                     if !suf.is_empty() {
-                        // (`trim_matches_fn` はクロージャのパターン版: メソッド名 `trim_matches` で引く)
+                        // (`trim_matches_fn` is the version taking a closure pattern: looked up by the method name `trim_matches`)
                         let suf = suf.strip_suffix("_fn").unwrap_or(suf);
                         m.entry(suf).or_default().push(n);
                     }
@@ -181,8 +181,8 @@ fn helper_suffixes() -> &'static HashMap<&'static str, Vec<&'static str>> {
     })
 }
 
-/// 比較の trait (PartialEq / Eq / PartialOrd / Ord) の宣言か
-/// selection の `wanted` が名前のほかの条件でも真になりうる item か (それ以外は名前が要るときだけ選ばれる)
+/// Whether h declares a comparison trait (PartialEq / Eq / PartialOrd / Ord)
+/// Whether the selection's `wanted` can be true for item i by more than its name (others only when named)
 fn by_more_than_name(i: usize) -> bool {
     static T: OnceLock<Vec<bool>> = OnceLock::new();
     T.get_or_init(|| {
@@ -203,7 +203,7 @@ fn by_more_than_name(i: usize) -> bool {
     })[i]
 }
 
-/// `impl Drop for ..` の header か (item ごとに 1 回だけ計算する)
+/// Whether h is an `impl Drop for ..` header (computed once per item)
 fn is_drop_impl(h: usize) -> bool {
     static T: OnceLock<Vec<bool>> = OnceLock::new();
     T.get_or_init(|| {
@@ -230,7 +230,7 @@ fn is_cmp_trait(h: usize) -> bool {
     })[h]
 }
 
-/// 演算子の trait (宣言はユーザが手で impl するときだけ付ける)
+/// The operator traits (their declarations are added only when the user impls one by hand)
 const OP_TRAITS: &[&str] = &[
     "Add", "Sub", "Mul", "Div", "Rem", "Neg", "Not", "BitAnd", "BitOr", "BitXor", "AddAssign", "SubAssign",
     "MulAssign", "DivAssign", "RemAssign", "BitAndAssign", "BitOrAssign", "BitXorAssign", "ShlAssign", "ShrAssign",
@@ -238,7 +238,7 @@ const OP_TRAITS: &[&str] = &[
     "FromIterator",
 ];
 
-/// 演算子の trait の宣言なら、その trait の名前 (item ごとに 1 回だけ計算する)
+/// The trait's name, when h declares an operator trait (computed once per item)
 fn op_trait_name(h: usize) -> Option<&'static str> {
     static T: OnceLock<Vec<Option<&'static str>>> = OnceLock::new();
     T.get_or_init(|| {
@@ -254,7 +254,7 @@ fn op_trait_name(h: usize) -> Option<&'static str> {
     })[h]
 }
 
-/// 名前が要るときだけ付ける trait の宣言 (メンバの名前が `write` / `hash` などよくある名前のもの)
+/// Trait declarations added only when the name is needed (members with common names like `write` / `hash`)
 fn gated_trait(h: usize) -> Option<&'static str> {
     // (computed once per item)
     static T: OnceLock<Vec<Option<&'static str>>> = OnceLock::new();
@@ -273,7 +273,7 @@ fn gated_trait(h: usize) -> Option<&'static str> {
     })[h]
 }
 
-/// 名前が要るときだけ付ける trait の実装 (`impl Read for &[u8]`)
+/// A trait impl added only when the trait's name is needed (`impl Read for &[u8]`)
 fn gated_impl(h: usize) -> Option<&'static str> {
     // (computed once per item, as is_iterator_trait)
     static T: OnceLock<Vec<Option<&'static str>>> = OnceLock::new();
@@ -296,7 +296,7 @@ fn gated_impl(h: usize) -> Option<&'static str> {
     })[h]
 }
 
-/// ユーザが手で impl している (`impl Ord for S` / `impl<T> Add for W<T>`) trait の名前 (最後のセグメント)
+/// Names (last segment) of the traits the user impls by hand (`impl Ord for S` / `impl<T> Add for W<T>`)
 fn user_impl_traits(src: &str) -> Vec<&str> {
     let mut out = vec![];
     let b = src.as_bytes();
@@ -333,7 +333,7 @@ fn user_impl_traits(src: &str) -> Vec<&str> {
             j += 1;
         }
         let name = src[start..j].rsplit("::").next().unwrap_or("");
-        // (`impl Mul<i32> for V` の型引数は飛ばす; a macro's expansion spaces them out, `Mul  < i32 > for V`)
+        // (skip the type arguments of `impl Mul<i32> for V`; a macro's expansion spaces them out, `Mul  < i32 > for V`)
         skip_ws(&mut j);
         if j < b.len() && b[j] == b'<' {
             let mut depth = 0;
@@ -360,7 +360,7 @@ fn user_impl_traits(src: &str) -> Vec<&str> {
     out
 }
 
-/// ユーザが比較の trait を手で実装しているか (`impl Ord for S` / `impl<T> PartialEq for W<T>`)
+/// Whether the user implements a comparison trait by hand (`impl Ord for S` / `impl<T> PartialEq for W<T>`)
 #[allow(dead_code)]
 fn impls_cmp_trait(src: &str) -> bool {
     let b = src.as_bytes();
@@ -407,9 +407,9 @@ fn impls_cmp_trait(src: &str) -> bool {
     false
 }
 
-/// `(1..)` のような終わりのない範囲を値として使っていそうか (`..)` があるか)
+/// Whether the source seems to use an unbounded range such as `(1..)` as a value (whether `..)` appears)
 fn open_range(src: &str) -> bool {
-    // `(1..)` / `(start..)`: `(` と `..)` の間が識別子か数字だけ
+    // `(1..)` / `(start..)`: only an identifier or digits between `(` and `..)`
     let b = src.as_bytes();
     src.match_indices("..)").any(|(i, _)| {
         let mut k = i;
@@ -420,7 +420,7 @@ fn open_range(src: &str) -> bool {
     })
 }
 
-/// 書式に `{:e}` / `{:.2E}` のような指数表記の指定があるか
+/// Whether a format string has an exponent spec such as `{:e}` / `{:.2E}`
 fn fmt_uses_exp(src: &str) -> bool {
     let b = src.as_bytes();
     let mut i = 0;
@@ -443,7 +443,7 @@ fn fmt_uses_exp(src: &str) -> bool {
     false
 }
 
-/// `vec![x; n]` の x がリテラルでないものがあるか
+/// Whether some `vec![x; n]` has an x that is not a literal
 fn vec_repeat_nonliteral(src: &str) -> bool {
     let b = src.as_bytes();
     let mut i = 0;
@@ -476,7 +476,7 @@ fn vec_repeat_nonliteral(src: &str) -> bool {
     false
 }
 
-/// 書式化で使う prelude の名前
+/// The prelude names that formatting uses
 const FMT_NAMES: &[&str] = &[
     "String", "new", "Formatter", "Display", "Debug", "__exr_formatter", "__exr_fmt_spec",
     "__exr_fmt_lit", "__exr_fmt_int", "__exr_fmt_str", "__exr_fmt_bool", "__exr_fmt_char",
@@ -485,7 +485,7 @@ const FMT_NAMES: &[&str] = &[
     "__exr_debug", "__exr_fmt_ok", "fmt", "__FmtError", "__exr_string_cap",
 ];
 
-/// 書式の引数つきの panic 系マクロ (`panic!("bad {}", x)` など) があるか
+/// Whether a panic-like macro has format arguments (`panic!("bad {}", x)` and so on)
 const PANIC_MACROS: [&str; 7] = ["panic!(", "unreachable!(", "todo!(", "unimplemented!(", "assert!(", "assert_eq!(", "assert_ne!("];
 
 fn panic_with_args(src: &str) -> bool {
@@ -498,7 +498,7 @@ fn panic_with_args(src: &str) -> bool {
     })
 }
 
-/// 文字列リテラル以外への `.to_string()` があるか (`5.to_string()` は書式化を使う)
+/// Whether `.to_string()` is called on something other than a string literal (`5.to_string()` uses formatting)
 fn nonliteral_to_string(src: &str) -> bool {
     let b = src.as_bytes();
     let mut i = 0;
@@ -512,7 +512,7 @@ fn nonliteral_to_string(src: &str) -> bool {
     false
 }
 
-/// これらの名前が現れたら Iterator を使っているとみなす
+/// When these names appear, the program is taken to use Iterator
 const ITER_NAMES: &[&str] = &[
     "Iterator", "next", "map", "filter", "filter_map", "collect", "sum", "product", "count",
     "fold", "for_each", "any", "all", "find", "position", "rposition", "partition", "cycle", "nth", "zip", "chain", "take", "skip",
@@ -520,7 +520,7 @@ const ITER_NAMES: &[&str] = &[
     "inspect", "find_map", "unzip",
 ];
 
-/// prelude のアイテムの識別子を need に足す (Iterator のメソッド名はメソッド呼び出しの位置だけ)
+/// Adds a prelude item's identifiers to need (Iterator method names only in a method call's position)
 fn add_idents(need: &mut crate::fxhash::FxSet<&'static str>, it: &SrcItem) {
     let bytes = PRELUDE.as_bytes();
     for &(a, b) in &it.idents {
@@ -531,7 +531,7 @@ fn add_idents(need: &mut crate::fxhash::FxSet<&'static str>, it: &SrcItem) {
         if matches!(w, "width" | "precision" | "fill" | "sign_plus") && !method_call_at(bytes, a as usize, b as usize) {
             continue;
         }
-        // (`__core_replace` は `replace` として定義を引く)
+        // (`__core_replace`, whose definition is looked up as `replace`)
         need.insert(w.strip_prefix("__core_").unwrap_or(w));
     }
 }
@@ -540,7 +540,7 @@ fn bucket(first: u8, len: usize) -> usize {
     first as usize * 32 + len.min(31)
 }
 
-/// `impl<T, U ..> PartialEq<..> for [T..]` (配列・スライスどうしの型の違う比較) の impl ヘッダか
+/// Whether h heads an `impl<T, U ..> PartialEq<..> for [T..]` (arrays / slices compared across types)
 fn is_seq_eq_impl(h: usize) -> bool {
     let it = &items()[h].0;
     matches!(it.kind, ItemKind::ImplHeader)
@@ -548,7 +548,7 @@ fn is_seq_eq_impl(h: usize) -> bool {
         && PRELUDE[it.start..it.end].contains("PartialEq<")
 }
 
-/// Vec / String の impl ヘッダなら、その型名
+/// The type's name, when h is the header of an impl for Vec / String
 fn owner(h: usize) -> Option<&'static str> {
     static OWNERS: OnceLock<Vec<Option<&'static str>>> = OnceLock::new();
     OWNERS.get_or_init(|| {
@@ -558,10 +558,10 @@ fn owner(h: usize) -> Option<&'static str> {
                 if !matches!(it.kind, ItemKind::ImplHeader) {
                     return None;
                 }
-                // (`impl From<String> for PathBuf` は PathBuf のもの: `for` があればその後ろの型で見る)
+                // (`impl From<String> for PathBuf` belongs to PathBuf: with a `for`, look at the type after it)
                 let ws: Vec<&'static str> = it.idents.iter().map(|&(a, b)| &PRELUDE[a as usize..b as usize]).collect();
                 let from = ws.iter().position(|w| *w == "for").map(|i| i + 1).unwrap_or(0);
-                // (`impl __PathExt for str` のように後ろの型が持ち主でなければ、trait の名前で)
+                // (when the type after it is no owner, as in `impl __PathExt for str`, by the trait's name)
                 ws[from..]
                     .iter()
                     .chain(ws[..from].iter())
@@ -579,7 +579,7 @@ fn owner(h: usize) -> Option<&'static str> {
                         | "Ipv4Addr" | "Ipv6Addr" | "IpAddr" | "SocketAddrV4" | "SocketAddrV6" | "SocketAddr" | "AddrParseError" => Some(w),
                         // (std::num's NonZero types: their impls only with them)
                         w if w.starts_with("NonZero") => Some(w),
-                        // HashMap のイテレータ (HmIter など) は HashMap を使うときだけ
+                        // HashMap's iterators (HmIter and so on) only when HashMap is used
                         w if w.starts_with("Hm") => Some("HashMap"),
                         _ => None,
                     })
@@ -588,13 +588,13 @@ fn owner(h: usize) -> Option<&'static str> {
     })[h]
 }
 
-/// `fn x` / `struct X` / `enum X` の名前 (`__core_x` は x として引かれる)
+/// The name of `fn x` / `struct X` / `enum X` (`__core_x` is looked up as x)
 fn defined_name(src: &str, it: &SrcItem) -> Option<String> {
-    // (起動時に prelude の全アイテムで呼ぶので、Vec を作らずに辿る)
+    // (called for every prelude item at startup, so it walks the identifiers without building a Vec)
     let mut ids = it.idents.iter().map(|&(a, b)| &src[a as usize..b as usize]);
-    // (型の別名 `pub type Path = str;` も。impl の中の関連型 `type Item` は除く)
+    // (a type alias `pub type Path = str;` too, but not an associated type `type Item` in an impl)
     let alias = matches!(it.kind, ItemKind::Normal);
-    // (関連定数 `const ZERO: Duration` も。`const fn` は fn の名前)
+    // (an associated const `const ZERO: Duration` too; for a `const fn`, the fn's name)
     ids.find(|w| matches!(*w, "fn" | "struct" | "enum" | "static" | "const") || (alias && *w == "type"))?;
     let mut n = ids.next()?;
     // (`const fn f`: f; `static mut X`: X, not `mut`, which almost every program names)
@@ -604,8 +604,8 @@ fn defined_name(src: &str, it: &SrcItem) -> Option<String> {
     Some(n.strip_prefix("__core_").unwrap_or(n).to_string())
 }
 
-/// ユーザのコードから (識別子を辿って) 使われうる prelude のアイテムだけを、ソースとして返す。
-/// Option を使わないプログラムには何も足さないので、キャッシュも大きくならない
+/// Returns, as source, only the prelude items the user's code may use (found by following identifiers).
+/// A program that does not use Option gets nothing added, so the cache does not grow either
 /// Prelude types a program may define for itself (no part of the compiler names them): when the program does, the
 /// prelude's own is renamed `__p_<name>` in the prelude text, so the two do not collide
 const SHADOWABLE: &[&str] = &[
@@ -950,23 +950,23 @@ pub fn select(user_src: &str, user_items: &[SrcItem]) -> String {
     select_with(user_src, user_items, &mut SelectCache::default())
 }
 
-/// アイテムごとの「当たった名前」と「イテレータの列があるか」の記憶 (アイテムのハッシュ → 結果)。
-/// LSP / インクリメンタルビルドでは変わっていないアイテムを走査し直さない
+/// What each item gave: the names it matched and whether it has an iterator chain (item hash → result).
+/// An LSP / incremental build does not rescan the items that did not change
 #[derive(Default)]
 pub struct SelectCache {
     map: crate::fxhash::FxMap<crate::key::Key, (Vec<&'static str>, bool)>,
-    /// (アイテムのハッシュ, 調べ方のハッシュ) → アイテムの本文に当たるか (PreludeScan)
+    /// (item hash, hash of the check) → whether the check holds on the item's text (PreludeScan)
     scan: crate::fxhash::FxMap<(crate::key::Key, u64), bool>,
-    /// 直前の選択でのユーザのアイテムの数 (これより後ろのアイテムは prelude)
+    /// The number of user items in the last selection (the items after them are the prelude's)
     pub user_items: usize,
 }
 
-/// ユーザのソースの全体を調べる (`contains` など) 代わりに、アイテムごとに調べて結果をアイテムのハッシュで覚える。
-/// アイテムの外 (ファイルの先頭の `#![no_std]` など) はそのまま調べる。LSP で変わっていないアイテムを読み直さない
+/// Checks each item instead of the whole user source (`contains` and so on), keeping results by item hash.
+/// Text outside the items (such as a leading `#![no_std]`) is checked directly. LSP skips unchanged items
 struct PreludeScan<'a> {
     src: &'a str,
     spans: Vec<(usize, usize, crate::key::Key)>,
-    /// アイテムの外の本文 (改行でつなぐ)
+    /// The text outside the items (joined with newlines)
     gaps: String,
     memo: &'a mut crate::fxhash::FxMap<(crate::key::Key, u64), bool>,
     /// where each byte that is not white space is (built at the first `has` of a large source)
@@ -1038,7 +1038,7 @@ impl<'a> PreludeScan<'a> {
         if at < src.len() {
             gaps.push_str(&src[at..]);
         }
-        // (古い記録が溜まりすぎたら捨てる)
+        // (drop the old records when too many pile up)
         if memo.len() > 1 << 20 {
             memo.clear();
         }
@@ -1054,7 +1054,7 @@ impl<'a> PreludeScan<'a> {
         self.any(key, f)
     }
 
-    /// どこかのアイテム (かアイテムの外) で f が真か。key は f の名前 (結果を覚えるキー)
+    /// Whether f is true on some item (or outside the items). key is f's name (the key the results are kept by)
     fn any(&mut self, key: &str, f: &dyn Fn(&str) -> bool) -> bool {
         // (one look at the whole source, as `has` does: running f on every item was 12% of a no-op build of a
         // large program, and the memo only helps an LSP edit)
@@ -1120,13 +1120,13 @@ fn has_cstr_literal(src: &str) -> bool {
 
 pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCache) -> String {
     let all = items();
-    // ユーザの識別子のうち、prelude が定義する名前 (と関係する名前) に当たるものだけを集める。
-    // 全識別子の集合を作ると大きなプログラムで毎回 ms 単位かかるので、小さい集合に対して引く
-    // 先頭の 1 文字ごとの候補 (数個) と直接比べる。ハッシュしないので大きなプログラムでも速い
+    // Collect only the user's identifiers that match a name the prelude defines (or a related name).
+    // Building a set of every identifier costs ms per build on a large program, so look up in a small set
+    // Compare directly with the few candidates per first character: no hashing, so large programs stay fast
     static NAMES: OnceLock<Vec<Vec<&'static str>>> = OnceLock::new();
     let by_first = NAMES.get_or_init(|| {
         let mut h: Vec<&'static str> = all.iter().filter_map(|x| x.1.as_deref()).collect();
-        // `s.to_uppercase()` / `c.is_alphabetic()` は `__exr_str_*` / `__exr_char_*` の helper の名前で引く
+        // `s.to_uppercase()` / `c.is_alphabetic()` are looked up by the `__exr_str_*` / `__exr_char_*` helper names
         h.extend(helper_suffixes().keys().copied());
         h.extend([
             "Some", "None", "Ok", "Err", "core", "std", "Box", "dyn", "Drop", "vec", "to_string",
@@ -1138,7 +1138,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             "clamp", "from_u32", "char", "join", "concat", "drain", "default", "f64", "f32", "i128", "u128", "Iterator", "into", "split_at_mut",
             "copy_from_slice", "clone_from_slice", "BufRead", "Read", "Seek", "SeekFrom", "Write", "__FWr", "Cursor", "ExactSizeIterator", "BuildHasher", "split_first_chunk", "first_chunk", "chunks_exact", "chunks_mut", "chunks_exact_mut", "is_sorted", "is_sorted_by", "is_sorted_by_key",
         ]);
-        // (先頭の 1 byte, 長さ) ごとの候補。prelude の名前が増えても 1 識別子あたりの比較は 0〜1 回
+        // Candidates per (first byte, length): however many prelude names there are, 0 or 1 comparisons per identifier
         let mut t: Vec<Vec<&'static str>> = vec![vec![]; 256 * 32];
         for n in h {
             let k = bucket(n.as_bytes()[0], n.len());
@@ -1168,18 +1168,18 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             }
             let w = &user_src[a as usize..b as usize];
             if let Some(n) = cands.iter().find(|n| **n == w) {
-                // Iterator のメソッド名は、メソッド呼び出しの位置 (`.count()`) でだけ数える
-                // (ローカル変数の `count` や `sum` で Iterator を付けない)
-                // (`mem::take(..)` のようなパスの最後は数える)
+                // An Iterator method name counts only in a method call's position (`.count()`)
+                // (a local variable `count` or `sum` does not add Iterator)
+                // (the last segment of a path such as `mem::take(..)` counts)
                 let after_path = a >= 2 && &bytes[a as usize - 2..a as usize] == b"::";
-                // (Formatter の `width()` などもメソッド呼び出しの位置だけ: フィールドや変数の `width` で付けない)
+                // (Formatter's `width()` and so on, too, only as a method call: a field or variable `width` adds nothing)
                 if matches!(*n, "width" | "precision" | "fill" | "sign_plus") && !method_call_at(bytes, a as usize, b as usize) {
                     continue;
                 }
                 if *n != "Iterator" && ITER_NAMES.contains(n) && !method_call_at(bytes, a as usize, b as usize) && !after_path {
                     continue;
                 }
-                // 書式化のマクロは `name!(` のときだけ (`p.write(..)` のメソッドは別物)
+                // A formatting macro only as `name!(` (the method `p.write(..)` is something else)
                 if matches!(*n, "format" | "print" | "println" | "eprint" | "eprintln" | "write" | "writeln")
                     && bytes[b as usize..].iter().find(|c| !c.is_ascii_whitespace()) != Some(&b'!')
                 {
@@ -1188,7 +1188,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                 if *n == "cmp" && bytes.get(b as usize) == Some(&b':') {
                     continue;
                 }
-                // (自分の関数 `clamp(v, lo, hi)` では付けない)
+                // (the program's own function `clamp(v, lo, hi)` does not add it)
                 if *n == "clamp" && !method_call_at(bytes, a as usize, b as usize) {
                     continue;
                 }
@@ -1197,7 +1197,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                 }
             }
         }
-        // イテレータの列はアイテムの中にしか現れない
+        // An iterator chain appears only inside an item
         let c = !names.is_empty() && iter_chain(&user_src[it.start..it.end]);
         need.extend(names.iter().copied());
         chain |= c;
@@ -1210,7 +1210,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.insert("__exr_cstr_lit");
         need.insert("CStr");
     }
-    // (std のプログラムは panic のハンドラを必ず使うので、何も使わなくても prelude を付ける)
+    // (a std program always uses the panic handler, so it gets the prelude even when it uses nothing)
     if need.is_empty() && sc.has("no_std") {
         return String::new();
     }
@@ -1223,7 +1223,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("Empty") && !sc.has("iter::") {
         need.remove("Empty");
     }
-    // (`a.zip(&v)` / `a.chain([x])`: 引数の Vec / 配列は codegen が `.iter()` / `.into_iter()` にする。`a.zip(dst)` with
+    // (`a.zip(&v)` / `a.chain([x])`: codegen makes Vec / array arguments `.iter()` / `.into_iter()`; `a.zip(dst)` with
     //  dst: &mut [T] is its `.iter_mut()`)
     if need.contains("zip") || need.contains("chain") {
         need.insert("into_iter");
@@ -1234,13 +1234,13 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("into_iter") {
         need.insert("copied");
     }
-    // 書式化のマクロ: Formatter と書き出しの関数一式 (codegen が名前を書かずに呼ぶ)
+    // Formatting macros: Formatter and the output functions (codegen calls them; the source never names them)
     if ["format", "print", "println", "eprint", "eprintln", "write", "writeln", "fmt", "Formatter"]
         .iter()
         .any(|n| need.contains(n))
         || sc.any_pre("nonliteral_to_string", &[".to_string()"], &nonliteral_to_string)
         || sc.any_pre("panic_with_args", &PANIC_MACROS, &panic_with_args)
-        // (assert_eq! / assert_ne! は失敗したとき left / right を {:?} で出す。no_std は panic_handler を呼ぶだけ)
+        // (a failing assert_eq! / assert_ne! prints left / right with {:?}; no_std only calls the panic_handler)
         || ((sc.has("assert_eq!(") || sc.has("assert_ne!(")) && !sc.has("no_std"))
     {
         need.extend(FMT_NAMES.iter().copied());
@@ -1252,17 +1252,17 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             need.insert("__exr_fmt_ptr");
         }
     }
-    // `vec![..]` は Vec::with_capacity + push に、`"..".to_string()` は String::from になる
+    // `vec![..]` becomes Vec::with_capacity + push, and `"..".to_string()` becomes String::from
     if need.contains("vec") {
         need.extend(["Vec", "with_capacity", "push", "__exr_memset"]);
     }
     if need.contains("to_string") || need.contains("to_owned") {
         need.extend(["String", "from"]);
     }
-    // Iterator (アダプタ・消費するメソッド) を使うときだけ、イテレータの部品を付ける。
-    // `for x in v.iter()` だけなら codegen が直接回すので要らない
-    // (イテレータの列は必ず作るもの (iter / into_iter / chars / 範囲 / 自前の impl Iterator) から始まる。
-    //  Option::map や自分の型の fold だけでは付けない)
+    // Add the iterator parts only when Iterator (an adapter or a consuming method) is used.
+    // A bare `for x in v.iter()` needs none: codegen loops over it directly
+    // (iterator chains always start with a producer (iter / into_iter / chars / a range / a user impl Iterator).
+    //  Option::map or a fold on the program's own type alone does not add them)
     let producer = ["iter", "iter_mut", "into_iter"].iter().any(|n| need.contains(n));
     if sc.has("ptr::eq") {
         need.insert("__exr_ptr_eq");
@@ -1299,7 +1299,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             "IntoIterator", "extend_from_slice", "file_stem", "set_extension", "__exr_c_path", "__exr_cstr",
         ]);
     }
-    // &str の split / lines などは prelude の関数 (イテレータを返すものはイテレータの部品も要る)
+    // The &str split / lines and so on are prelude functions (ones returning an iterator need its parts too)
     for (m, f) in [
         ("split", "__exr_str_split"),
         ("split_whitespace", "__exr_str_split_ws"),
@@ -1333,14 +1333,14 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("BTreeMap") {
         need.insert("index");
     }
-    // `s + "x"` / `s += "x"`: String の add / add_assign (演算子は識別子として現れない)
+    // `s + "x"` / `s += "x"`: String's add / add_assign (operators do not appear as identifiers)
     if need.contains("String") || need.contains("to_string") || need.contains("format") {
         need.extend(["add", "add_assign"]);
     }
-    // &str / String / char の helper (`s.replace(..)` → __exr_str_replace)
+    // The &str / String / char helpers (`s.replace(..)` → __exr_str_replace)
     let hs = helper_suffixes();
-    // (整数・Option・イテレータにも同じ名前のメソッドがあるものは、文字列を使っていそうなときだけ:
-    //  String が現れるか、文字列リテラルが受け手 (`"ab".repeat(3)`))
+    // (for a method name that integers, Option or iterators share, only when the program seems to use strings:
+    //  String appears, or a string literal is the receiver (`"ab".repeat(3)`))
     // (or a `&str` / `&'static str` written: `NAME.to_ascii_lowercase()` with `static NAME: &'static str`)
     let mut str_evidence = |n: &str| -> bool {
         need.contains("String") || sc.has(&format!("\".{n}("))
@@ -1355,14 +1355,14 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         .flatten()
         .copied()
         .collect();
-    // (chars で回す helper とイテレータを返す helper はイテレータの部品も要る)
+    // (helpers that loop over chars and helpers that return an iterator also need the iterator parts)
     let iter_helper = found.iter().any(|f| {
         matches!(
             *f,
             "__exr_str_char_indices" | "__exr_str_bytes" | "__exr_char_to_uppercase" | "__exr_char_to_lowercase" | "__exr_char_escape_unicode" | "__exr_char_escape_default"
         )
     });
-    // (helper の &str の引数に char を渡すと codegen が UTF-8 にする)
+    // (codegen turns a char passed for a helper's &str argument into UTF-8)
     if found.iter().any(|f| f.starts_with("__exr_str_")) {
         need.insert("__exr_char_utf8");
     }
@@ -1374,7 +1374,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if iter_helper {
         need.extend(["chars", "Iterator", "next"]);
     }
-    // `s.split("ab")` (char 以外の区切り)
+    // `s.split("ab")` (a separator that is not a char)
     if need.contains("split")
         && sc.any_pre("split_str", &[".split("], &|user_src: &str| user_src.match_indices(".split(").any(|(i, m)| user_src.as_bytes().get(i + m.len()) != Some(&b'\'')))
     {
@@ -1384,7 +1384,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("split_ascii_whitespace") {
         need.extend(["Iterator", "next"]);
     }
-    // `s.rsplit("::")` (後ろから区切るイテレータ)
+    // `s.rsplit("::")` (an iterator that splits from the end)
     if need.contains("rsplit") {
         need.extend(["__exr_str_rsplit", "Iterator", "next"]);
     }
@@ -1413,7 +1413,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("flat_map") || need.contains("flatten") {
         need.extend(["__flat_prep", "__flat_next", "__Flat", "__flat_mark", "reverse", "pop", "take"]);
     }
-    // (参照の列の flatten は `flat_map(|x| x.iter())` にする)
+    // (flatten over a sequence of references becomes `flat_map(|x| x.iter())`)
     if need.contains("flatten") {
         need.extend(["__exr_flatten_ref", "FlattenRef", "__exr_slice_iter", "Iter"]);
     }
@@ -1421,8 +1421,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if ["default", "Default", "unwrap_or_default", "take"].iter().any(|n| need.contains(n)) {
         need.insert("__exr_default");
     }
-    // `x.clone()` を codegen が __exr_clone::<T> にする (prelude の Vec::clone / cloned / to_vec の中も)
-    // (drop の要らない型と、自分の clone を持つ型 (String / Vec) には要らない)
+    // Codegen turns `x.clone()` into __exr_clone::<T> (also inside the prelude's Vec::clone / cloned / to_vec)
+    // (not needed for types without drop, or for types with their own clone (String / Vec))
     if ["clone", "cloned", "to_vec", "resize"].iter().any(|n| need.contains(n)) {
         need.insert("__exr_clone");
     }
@@ -1435,7 +1435,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("drain") {
         need.insert("__drain");
     }
-    // 配列・スライスの contains (要素が整数などでなければ PartialEq で比べる prelude の関数)
+    // contains on arrays / slices (a prelude function that compares by PartialEq unless the elements are integers)
     if need.contains("contains") {
         need.insert("__exr_slice_contains");
     }
@@ -1460,11 +1460,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             need.extend([f, "Iterator", "next"]);
         }
     }
-    // checked_* は Option を返す
+    // checked_* return Option
     if sc.has("checked_") || sc.has("overflowing_") {
         need.insert("Option");
     }
-    // `vec![x; n]` で x が Copy でなさそうなら (リテラルでない) resize で並べる
+    // In `vec![x; n]` with an x that seems not to be Copy (not a literal), fill with resize
     if need.contains("vec") && sc.any_pre("vec_repeat_nonliteral", &["vec!["], &vec_repeat_nonliteral) {
         need.extend(["resize", "new", "__exr_clone"]);
     }
@@ -1472,15 +1472,15 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("String") && (sc.has("&*") || sc.has("[..]")) {
         need.insert("as_str");
     }
-    // String への collect は要素が &str / String なら push_str を使う
+    // A collect into String uses push_str when the elements are &str / String
     if need.contains("collect") && need.contains("String") {
         need.extend(["push_str", "as_str"]);
     }
-    // Rc は deref の先のメソッドを呼ぶ
+    // Rc calls the methods of its deref target
     if need.contains("Rc") {
         need.insert("deref");
     }
-    // `char::is_ascii_digit` を関数の値として
+    // `char::is_ascii_digit` as a function value
     if sc.has("char::is_ascii") || sc.has("char::to_ascii") {
         for (_, name, _) in items() {
             if let Some(n) = name.as_deref() {
@@ -1492,7 +1492,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             }
         }
     }
-    // Box を通した再帰型の `==` は glue 関数で (その場で展開すると止まらない)
+    // `==` on a type recursive through Box goes through a glue function (expanding it in place never stops)
     if (need.contains("Box") || sc.has("&'")) && sc.has("PartialEq") {
         need.insert("__exr_eq");
     }
@@ -1508,11 +1508,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has(".or_default()") {
         need.extend(["or_default", "__exr_default"]);
     }
-    // (Formatter のビルダーの entries はイテレータを受け取る)
+    // (the entries of Formatter's builders take an iterator)
     if sc.has(".entries(") {
         need.extend(["Iterator", "iter", "next", "into_iter"]);
     }
-    // `HashMap::from([..])` は vec![..] にする
+    // `HashMap::from([..])` becomes vec![..]
     if sc.has("::from([") {
         need.extend(["from", "vec", "reverse", "pop", "insert"]);
     }
@@ -1525,17 +1525,17 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("cycle") {
         need.extend(["Cycle", "__exr_clone"]);
     }
-    // 算術の検査の panic (no_std で panic_handler を持つプログラムは使わない)
+    // The panic of the arithmetic checks (a no_std program with a panic_handler does not use it)
     if !sc.has("no_std") {
         need.extend(["__exr_err_str", "__exr_fflush", "__exr_write", "__exr_exit"]);
         need.extend(["__exr_rt_init", "__exr_on_trap", "__exr_sigaction", "__EXR_TRAP_TABLE", "__EXR_KIND_MSG", "__EXR_KIND_OFF", "__EXR_SA", "__exr_err_num", "__exr_panic_index", "__exr_tab_uv", "__EXR_CALLER", "__exr_tab_file", "__exr_panic_head_at", "__exr_trap_search"]);
 
     }
-    // (Duration の as_millis / as_micros / as_nanos は u128 を返す)
+    // (Duration's as_millis / as_micros / as_nanos return u128)
     if need.contains("Duration") && (need.contains("as_millis") || need.contains("as_micros") || need.contains("as_nanos")) {
         need.insert("u128");
     }
-    // (`42u128` の接尾辞は識別子として現れない)
+    // (the suffix of `42u128` does not appear as an identifier)
     for t in ["u128", "i128"] {
         if sc.has(t) {
             need.insert(t);
@@ -1572,7 +1572,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         need.extend(["__exr_dyn_display", "__exr_dyn_debug"]);
     }
     // (ManuallyDrop is used through Deref: `m.0`, `*m`)
-    // (`io::Error` / `io::Result<T>` は prelude の IoError: 名前が現れないので)
+    // (`io::Error` / `io::Result<T>` are the prelude's IoError, whose name does not appear)
     // (one scan of the source when `io::` is not written; the two below only after it)
     if sc.has("io::") && (sc.has("io::Error") || sc.has("io::Result")) {
         need.extend(["IoError", "Result"]);
@@ -1592,7 +1592,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("mpsc") {
         need.extend(["__core_channel", "__core_sync_channel", "__Sndr", "__SyncSndr", "__Rcvr__", "__RecvIter", "Rc", "RefCell", "VecDeque", "borrow_mut", "push_back", "pop_front", "clone", "Option", "Result", "Iterator", "next", "Deref", "deref", "new"]);
     }
-    // 標準入出力
+    // Standard input and output
     if sc.has("stdin") {
         need.extend(["Stdin", "StdinLock", "StdinLines", "__core_stdin", "IoError", "Result", "Option", "next"]);
     }
@@ -1606,11 +1606,11 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.any_pre("open_range", &["..)"], &open_range) {
         need.insert("RangeFrom");
     }
-    // `{:e}` / `{:.3E}`: 指数表記
+    // `{:e}` / `{:.3E}`: exponent notation
     if sc.any_pre("fmt_uses_exp", &["e}", "E}"], &fmt_uses_exp) {
         need.extend(["__exr_fmt_exp", "__exr_fmt_exp_int", "__exr_udiv128", "__exr_fmt_float"]);
     }
-    // `x.into()` は期待型の from を呼ぶ
+    // `x.into()` calls the expected type's from
     if sc.has(".into()") {
         need.insert("from");
     }
@@ -1621,8 +1621,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if sc.has("isqrt") {
         need.insert("__exr_isqrt");
     }
-    // 128 bit 整数: 除算と書式化 (and `x.isqrt()` on one). Also in the loop below, for a 128-bit type that another
-    // prelude item brings in (`NonZeroU128::get`, `impl FromStr for u128`) rather than the program's text
+    // 128-bit integers: division and formatting (and `x.isqrt()` on one). Also in the loop below, for a 128-bit type
+    // that another prelude item brings in (`NonZeroU128::get`, `impl FromStr for u128`) rather than the program's text
     let isqrt = sc.has("isqrt");
     let wide = |need: &mut crate::fxhash::FxSet<&'static str>| {
         need.extend(["__exr_udiv128", "__exr_sdiv128", "__exr_fmt_int128", "__exr_u128_to_f", "__exr_f_to_u128"]);
@@ -1634,8 +1634,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if wide_ops {
         wide(&mut need);
     }
-    // 浮動小数点: 書式化・powi・libm の宣言 (f64 / f32 の名前か、`1.5` のようなリテラルがあるとき)
-    // (`fn f64(..)` のような関数の名前は数えない: 型の位置 (`: f64` / `as f64` / `f64::` など) だけ)
+    // Floats: formatting, powi and the libm declarations (with f64 / f32 named, or a literal such as `1.5`)
+    // (not a function name such as `fn f64(..)`: only a type position, such as `: f64` / `as f64` / `f64::`)
     let float_named = (need.contains("f64") || need.contains("f32")) && sc.any_pre("float_named", &["f64", "f32"], &|user_src: &str| {
         let b = user_src.as_bytes();
         ["f64", "f32"].iter().any(|w| {
@@ -1676,7 +1676,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     });
     let float_lit = !float_named && sc.any("float_lit", &|user_src: &str| {
         let b = user_src.as_bytes();
-        // (文字列リテラルの中 (`"{:8.3}"` など) は数えない)
+        // (not inside a string literal (`"{:8.3}"` and so on))
         let mut in_str = false;
         let mut found = false;
         for i in 1..b.len().saturating_sub(1) {
@@ -1695,7 +1695,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     let float_dur = need.contains("Duration") && (sc.has("_f64") || sc.has("_f32"));
     if float_named || float_lit || float_dur {
         need.extend(["__exr_fmt_float", "__exr_powi", "__exr_powif", "__exr_ordering"]);
-        // (`f64::max` などのパス: 名前の後ろが一致する wrapper)
+        // (paths such as `f64::max`: the wrapper whose name ends with the same name)
         for (a, bb) in [("f64", "__exr_f64_"), ("f32", "__exr_f32_")] {
             if sc.has(&format!("{a}::")) {
                 for (_, name, _) in items() {
@@ -1721,15 +1721,15 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             }
         }
     }
-    // `x.extend(arg)`: codegen が arg を into_iter / iter にし、要素が参照なら __extend_ref を呼ぶ
+    // `x.extend(arg)`: codegen makes arg into_iter / iter, and calls __extend_ref when the elements are references
     if need.contains("extend") {
         need.extend(["__extend_ref", "into_iter", "iter", "Iterator"]);
     }
-    // (アダプタの列があれば、その元 (Range など) の next も要る)
+    // (with an adapter chain, the next of its source (Range and so on) is needed too)
     if chain {
         need.insert("next");
     }
-    // `Box<dyn Error>` と `impl Error for E {}`、`fn main() -> Result<..>`
+    // `Box<dyn Error>` and `impl Error for E {}`, `fn main() -> Result<..>`
     if sc.has("dyn Error") || sc.has("error::Error") || sc.has("Error for") {
         need.extend(["__DynError", "__exr_dyn_error", "__err_mark", "String", "format", "Display", "Debug"]);
         need.extend(FMT_NAMES.iter().copied());
@@ -1742,7 +1742,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if (need.contains("HashMap") || need.contains("BTreeMap")) && sc.has("[") {
         need.extend(["get", "unwrap", "Option"]);
     }
-    // (`impl IntoIterator for &Coll` の into_iter はイテレータを返す)
+    // (the into_iter of `impl IntoIterator for &Coll` returns an iterator)
     if sc.has("IntoIterator for") {
         need.extend(["__into_iter_mark", "Iterator", "next", "iter"]);
     }
@@ -1757,20 +1757,20 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         || (producer && need.contains("next"))
         // (a slice iterator's type named: `xs: &mut std::slice::Iter<'a, T>`, iterated with no `iter()` of its own)
         || ["Iter", "IterMut"].iter().any(|n| need.contains(n));
-    // 大小比較: `<` は識別子として現れないので、比較を使いそうな名前 (Ord / sort / cmp など) で glue を付ける
-    // (イテレータの max / min も中で `>=` を使う)
+    // Ordering: `<` is no identifier, so names that suggest comparison (Ord / sort / cmp and so on) add the glue
+    // (an iterator's max / min use `>=` inside too)
     const ORD_NAMES: &[&str] = &[
         "Ord", "PartialOrd", "Ordering", "cmp", "partial_cmp", "sort", "sort_by", "sort_by_key",
         "sort_unstable", "sort_unstable_by", "sort_unstable_by_key", "max_by_key", "min_by_key",
         "max_by", "min_by", "Reverse", "clamp", "binary_search", "binary_search_by",
         "binary_search_by_key", "BinaryHeap", "sort_by_cached_key",
     ];
-    // (prelude の Reverse も PartialOrd / Ord を impl する)
+    // (the prelude's Reverse impls PartialOrd / Ord too)
     let user_impls = user_impl_traits(user_src);
     let cmp_impl = user_impls.iter().any(|t| matches!(*t, "PartialEq" | "Eq" | "PartialOrd" | "Ord" | "Clone" | "Copy" | "Default"))
         || need.contains("Reverse");
     let mut op_impls: Vec<&str> = user_impls.iter().copied().filter(|t| OP_TRAITS.contains(t)).collect();
-    // (prelude の PathBuf は Deref と From を impl する)
+    // (the prelude's PathBuf impls Deref and From)
     if need.contains("PathBuf") {
         op_impls.extend(["Deref", "From", "IntoIterator"]);
     }
@@ -1787,32 +1787,32 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     if need.contains("RwLock") {
         need.extend(["RwLockReadGuard", "RwLockWriteGuard", "Deref", "deref", "deref_mut", "Drop", "drop", "Result"]);
     }
-    // (BinaryHeap の peek_mut もガードを返す)
+    // (BinaryHeap's peek_mut returns a guard too)
     if need.contains("BinaryHeap") && need.contains("peek_mut") {
         need.extend(["PeekMut", "deref", "deref_mut", "Drop", "drop"]);
     }
-    // (RefCell の borrow / borrow_mut はガードを返す: その型と deref / drop)
+    // (RefCell's borrow / borrow_mut return guards: their types and deref / drop)
     if need.contains("RefCell") {
         need.extend(["Ref", "RefMut", "deref", "deref_mut", "Drop", "drop"]);
     }
     if op_impls.contains(&"IntoIterator") {
         need.extend(["__into_iter_mark", "Iterator", "next", "iter"]);
     }
-    // (再帰する型は Box / Vec を通るので、そのときは glue を付ける。それ以外の型の比較は codegen が直接展開する)
+    // (recursive types go through Box / Vec, so those add the glue; codegen expands other comparisons inline)
     if ["Box", "Vec", "vec", "String"].iter().any(|n| need.contains(n)) {
         need.insert("__exr_cmp");
     }
     if cmp_impl {
         need.extend(["eq", "cmp", "partial_cmp", "__exr_eq_marker", "Ordering", "__exr_copy_marker"]);
     }
-    // (trait の名前は prelude の名前の候補にないので、derive(Ord) はソースの文字列で見る)
+    // (trait names are not among the prelude name candidates, so derive(Ord) is found in the source text)
     if ORD_NAMES.iter().any(|n| need.contains(n))
         || (iter_lib && (need.contains("max") || need.contains("min")))
         || (sc.has("Ord)") || sc.has("Ord,") || sc.has("Ord for"))
             && (need.contains("max") || need.contains("min") || need.contains("clamp"))
     {
         need.insert("__exr_cmp");
-        // (手書きの impl を glue が呼ぶときに Ordering を i32 にする)
+        // (turns Ordering into i32 when the glue calls a hand-written impl)
         if cmp_impl || need.contains("Ordering") {
             need.extend(["__exr_ord_i32", "__exr_pord_i32"]);
         }
@@ -1831,7 +1831,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         if need.contains("clamp") {
             need.insert("__exr_clamp");
         }
-        // 配列・スライスのメソッドとして呼ぶとき用 (Vec のメソッドは名前から付く)
+        // For calls as array / slice methods (Vec's methods come with their names)
         for (m, f) in [
             ("sort", "__exr_slice_sort"),
             ("sort_unstable", "__exr_slice_sort"),
@@ -1874,14 +1874,14 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
         }
     }
     let mut chosen = vec![false; all.len()];
-    // (配列・スライスと Vec の型の違う比較: `v == [1, 2]`)
+    // (cross-type comparisons of arrays / slices and Vec: `v == [1, 2]`)
     if !sc.has("no_std")
         && sc.has("[")
         && (sc.has("==") || sc.has("!=") || sc.has("assert_eq!") || sc.has("assert_ne!"))
     {
         need.insert("__exr_seq_eq");
     }
-    // (書式つきの panic は書式化を使うプログラムだけ: String と Vec を引き込むため)
+    // (a formatted panic only for programs that use formatting, as it pulls in String and Vec)
     if !sc.has("no_std") && need.contains("__exr_formatter") {
         need.insert("__exr_panic_fmt");
     }
@@ -1893,8 +1893,8 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             changed = true;
             wide(&mut need);
         }
-        // (prelude の Duration は + - * / と += -= を impl する: Duration は `thread::sleep` の引数としても
-        // 選ばれるので、ループの中で見る)
+        // (the prelude's Duration impls + - * / and += -=; Duration is also chosen as the argument of `thread::sleep`,
+        // so this is checked inside the loop)
         if !dur_ops && need.contains("Duration") {
             dur_ops = true;
             op_impls.extend(["Add", "Sub", "Mul", "Div", "AddAssign", "SubAssign"]);
@@ -1908,12 +1908,12 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             if !by_more_than_name(i) && !name.as_deref().is_some_and(|n| need.contains(n)) {
                 continue;
             }
-            // Iterator の (デフォルト) メソッドは Iterator を使うときだけ (`a.max(b)` の max では引かない)
+            // Iterator's (default) methods only when Iterator is used (the max of `a.max(b)` does not look them up)
             if let ItemKind::TraitMember(h) = it.kind {
                 if !iter_lib && is_iterator_trait(h as usize) {
                     continue;
                 }
-                // 比較の trait の宣言は、ユーザが手で impl するときだけ (derive と境界は宣言なしで扱う)
+                // Comparison trait declarations only when the user impls one by hand (derives and bounds need no declaration)
                 if !cmp_impl && is_cmp_trait(h as usize) {
                     continue;
                 }
@@ -1923,14 +1923,14 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                 {
                     continue;
                 }
-                // (Hash / Hasher などの宣言は、その trait の名前が要るときだけ: `fn write` などの名前では引かない)
+                // (declarations of Hash / Hasher and so on only when the trait's name is needed: not by names like `fn write`)
                 if let Some(tn) = gated_trait(h as usize) {
                     if !need.contains(tn) {
                         continue;
                     }
                 }
             }
-            // (`impl Read for &[u8]` などの実装も、その trait の名前が要るときだけ)
+            // (impls such as `impl Read for &[u8]` also only when the trait's name is needed)
             if let ItemKind::ImplMember(h) = it.kind {
                 if let Some(tn) = gated_impl(h as usize) {
                     if !need.contains(tn) {
@@ -1938,7 +1938,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                     }
                 }
             }
-            // `impl Iterator for X` のメソッドと、イテレータを作るメソッドも同じ
+            // The same for the methods of `impl Iterator for X` and the methods that make iterators
             if let ItemKind::ImplMember(h) = it.kind {
                 if !iter_lib
                     && (is_iterator_trait(h as usize)
@@ -1947,7 +1947,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                     continue;
                 }
             }
-            // 配列・スライスの型の違う比較 (`impl PartialEq<[U]> for [T; N]` など) は、比較と配列があるときだけ
+            // Cross-type array / slice comparisons (like `impl PartialEq<[U]> for [T; N]`) only with comparisons and arrays
             if let ItemKind::ImplMember(h) = it.kind {
                 if is_seq_eq_impl(h as usize) {
                     if need.contains("__exr_seq_eq") && owner(h as usize).is_none_or(|o| need.contains(o)) {
@@ -1962,20 +1962,20 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                     continue;
                 }
             }
-            // Vec / String のメソッドは、その型の名前が要るときだけ (`push` だけでは引かない)。
-            // `impl Drop for Vec<T>` の drop は、Vec が要るなら名前が現れなくても要る
+            // Vec / String methods only when the type's name is needed (`push` alone does not look them up).
+            // The drop of `impl Drop for Vec<T>` is needed whenever Vec is, even though its name does not appear
             let mut drop_member = false;
             if let ItemKind::ImplMember(h) = it.kind {
                 if let Some(o) = owner(h as usize) {
                     if !need.contains(o) {
                         continue;
                     }
-                    // (`==` は識別子として現れないので eq も)
+                    // (eq too, as `==` does not appear as an identifier)
                     drop_member = name.as_deref() == Some("eq") || is_drop_impl(h as usize);
                 }
             }
-            // core::cmp::max などは `core` / `std` という識別子 (パスか use) がなければ使えない
-            // (`drop(x)` は prelude の関数として使える)
+            // core::cmp::max and the like are usable only with a `core` / `std` identifier (in a path or a use)
+            // (`drop(x)` is usable as a prelude function)
             if *core_only
                 && !(need.contains("core") || need.contains("std"))
                 && name.as_deref() != Some("drop")
@@ -1991,7 +1991,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                     ItemKind::TraitMember(_) => true,
                     _ => false,
                 };
-            // バリアント名 (Some など) で enum が要る
+            // A variant name (Some and so on) needs its enum
             let wanted = err_impl || drop_member || match name {
                 Some(n) => need.contains(n.as_str()),
                 None => false,
@@ -2000,10 +2000,10 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
                 || (name.as_deref() == Some("Result")
                     && (need.contains("Ok") || need.contains("Err")))
                 || (name.as_deref() == Some(BOX_ALLOC) && need.contains("Box"))
-                // 文字列の < (sort / max など)
+                // String < (sort / max and so on)
                 || (name.as_deref() == Some("__exr_str_cmp")
                     && (need.contains("sort") || need.contains("String") || need.contains("max") || need.contains("min")))
-                // 範囲を値として使うかもしれない (`(0..n).map(..)`)
+                // A range may be used as a value (`(0..n).map(..)`)
                 || (matches!(name.as_deref(), Some("Range") | Some("RangeInclusive"))
                     && need.contains("Iterator"))
                 || (matches!(name.as_deref(), Some(BOX_FREE) | Some(DROP_GLUE))
@@ -2029,7 +2029,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
     }
     let mut out = String::new();
     let mut open_impl = false;
-    // (アイテムは prelude の元の行に置く (間は改行): panic の場所の行が選び方によらず、機械語をクレートの間で使い回せる)
+    // (items keep their prelude lines, newline-padded: panic lines never vary, so crates can share machine code)
     let mut cur_line = 1usize;
     for (i, (it, _, _)) in all.iter().enumerate() {
         let in_impl = matches!(it.kind, ItemKind::ImplMember(_) | ItemKind::TraitMember(_));
@@ -2038,7 +2038,7 @@ pub fn select_with(user_src: &str, user_items: &[SrcItem], cache: &mut SelectCac
             cur_line += 1;
             open_impl = false;
         }
-        // impl の関連型 (`type Item = &T;`) は、その impl が付くなら必ず付ける
+        // An impl's associated type (`type Item = &T;`) always comes with its impl
         // (and a trait's `type Item;`, whenever the trait is: E0191 needs it for `dyn Iterator`)
         let assoc_member = matches!(it.kind, ItemKind::ImplMember(h) | ItemKind::TraitMember(h) if chosen[h as usize])
             && it
