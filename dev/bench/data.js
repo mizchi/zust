@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795636281860,
+  "lastUpdate": 1795636284180,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -110389,6 +110389,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/528c96d2183fc7e16298256bdf66075191de2244"
         },
         "date": 1795635382994,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.552,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.818,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 71.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.537,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "d838a6e02be4382e23935c48a394996145cd781f",
+          "message": "Merge pull request #217 from mizchi/claude/fix-142-option-flatten\n\nprelude: Option<Option<T>>::flatten as a method of its own (#142)",
+          "timestamp": "2026-11-26T04:45:47+09:00",
+          "tree_id": "874979e06eff32aac44753e14b0546ba1f2f7cc2",
+          "url": "https://github.com/mizchi/zust/commit/d838a6e02be4382e23935c48a394996145cd781f"
+        },
+        "date": 1795636283919,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
