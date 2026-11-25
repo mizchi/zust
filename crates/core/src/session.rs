@@ -1,7 +1,10 @@
-//! syn と Cranelift を使わないドライバ: ソース → (lexer / macros / prelude) → ast_summary → Program →
-//! acg (自前の構文木のコード生成) → minclif の ELF の .o → リンク。
-//! driver.rs と同じ手順を、外部クレートに依存しないモジュールだけで行う (zustc 自身でもコンパイルできる)。
-//! キャッシュと並列化はまだない。
+//! コンパイルのセッション ([`Session`]): ソース → (lexer / macros / prelude) → ast_summary → Program →
+//! acg (自前の構文木のコード生成) → 機械語 (Cranelift か minclif) → ELF の .o → リンク。
+//! セッションはキャッシュ (メモリと、ディスクの `<出力>.cache`) と、編集をまたいで覚えるもの (前処理の差分・check の記録) を
+//! 持ち、同じセッションで何度でも build / check できる (zust-analyzer はドキュメントごとに 1 つ持つ)。数の多い部分 (アイテムの
+//! 要約、check と機械語の wave) は fork した子に分ける。解析と check はここ、機械語・オブジェクト・リンク・ワークスペースは
+//! feature `build` の session/build.rs。外部クレートに依存しないモジュールだけで書く (zustc 自身でもコンパイルできる)。
+//! (2026-11-25 までの名前は driver2: 2 つ目のドライバだったため。それより前のレポートはその名前で書いている)
 
 use crate::cfg::{attr_entries, cfg_pred, lit_end, malformed_cfg, str_lit, str_value};
 use std::sync::Mutex;
@@ -580,7 +583,7 @@ impl Analysis {
 }
 
 pub fn analyze(src0: &str, opt: bool) -> R<Analysis> {
-    Session2::new(Options2 { opt, no_cache: true, jobs: 1, ..Default::default() }).analyze(src0)
+    Session::new(Options { opt, no_cache: true, jobs: 1, ..Default::default() }).analyze(src0)
 }
 
 /// 機械語にするバックエンド (Cranelift: zust-clif の compile)。feature `build` なしでは使わない
@@ -591,7 +594,7 @@ pub type Backend = fn();
 
 /// ドライバの設定
 #[derive(Clone, Debug)]
-pub struct Options2 {
+pub struct Options {
     pub opt: bool,
     /// 関数のコンパイルに使うプロセスの数 (fork する)
     pub jobs: usize,
@@ -620,13 +623,13 @@ pub struct Options2 {
 /// Writes the output from the functions and data build.rs lays out (in place of the ELF object)
 pub type ModuleWriter = fn(&[(String, Vec<u8>, Vec<crate::ir::Reloc>, bool)], &[(String, Vec<u8>, Vec<(u32, String, i64)>, bool)]) -> Result<Vec<u8>, String>;
 
-impl Default for Options2 {
+impl Default for Options {
     fn default() -> Self {
-        Options2 { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021, cfgs: vec![], test: false }
+        Options { opt: false, jobs: cpu_count(), linker: None, lib_dirs: vec![], no_cache: false, time: false, backend: None, features: vec![], module_writer: None, edition: 2021, cfgs: vec![], test: false }
     }
 }
 
-impl Options2 {
+impl Options {
     /// キャッシュのキーに入れるバックエンドの印 (Cranelift なら 1)
     pub fn backend_id(&self) -> u8 {
         // (wasm: the address checks are part of the code, so a build without them (ZUSTC_WASM_NO_ADDR_CHECK, for
@@ -674,7 +677,7 @@ pub struct CrateCtx {
     pub map: crate::srcmap::SrcMap,
     /// 依存するクレート (推移的に全部。実行ファイルの panic の表がそれらの表を指す)
     pub deps: Vec<String>,
-    /// このクレートの feature (ワークスペース。None なら Options2 の features)
+    /// このクレートの feature (ワークスペース。None なら Options の features)
     pub features: Option<Vec<String>>,
     /// このクレートの cfg と `env!` の環境 (ワークスペース: CrateSpec の cfgs / env)
     pub cfgs: Vec<(String, Option<String>)>,
@@ -685,7 +688,7 @@ pub struct CrateCtx {
 
 /// ビルドの結果
 #[derive(Clone, Debug, Default)]
-pub struct Report2 {
+pub struct BuildReport {
     pub items_parsed: usize,
     pub fns_compiled: usize,
     pub fns_hit: usize,
@@ -734,7 +737,7 @@ fn compiler_id() -> Key {
     // SAFETY: "/proc/self/exe" は NUL で終わる。buf は struct stat (144 byte) より大きい
     let r = unsafe { c_stat(b"/proc/self/exe\0".as_ptr(), buf.as_mut_ptr()) };
     let mut h = KeyHasher::new();
-    h.add("driver2-1");
+    h.add("session-1");
     if r == 0 {
         // (x86-64: st_size は 48、st_mtim は 88 / 96)
         h.add(&buf[48..56]);
@@ -745,11 +748,11 @@ fn compiler_id() -> Key {
 
 /// 時間の計測 (-time)
 
-/// キャッシュを持つドライバ (driver.rs の Session と同じ使い方)
-pub struct Session2 {
-    pub opts: Options2,
+/// コンパイルのセッション: キャッシュと、編集をまたいで覚えるものを持ち、build / check / analyze を何度でも呼べる
+pub struct Session {
+    pub opts: Options,
     cid: Key,
-    disk: crate::cache2::Cache2,
+    disk: crate::build_cache::BuildCache,
     mem: FxMap<Key, Vec<u8>>,
     used: FxSet<Key>,
     /// put したキー (ワークスペースの子プロセスが、作ったエントリを親に返す)
@@ -777,14 +780,14 @@ pub struct Session2 {
     const_fn: String,
 }
 
-impl Session2 {
-    pub fn new(opts: Options2) -> Session2 {
-        Session2 { opts, cid: compiler_id(), disk: crate::cache2::Cache2::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new() }
+impl Session {
+    pub fn new(opts: Options) -> Session {
+        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new() }
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
         if !self.opts.no_cache {
-            self.disk = crate::cache2::Cache2::open(path);
+            self.disk = crate::build_cache::BuildCache::open(path);
         }
     }
 
@@ -802,7 +805,7 @@ impl Session2 {
         }
         let n = self.save_cache_keep(path)?;
         self.mem.retain(|k, _| used.contains(k));
-        self.disk = crate::cache2::Cache2::empty();
+        self.disk = crate::build_cache::BuildCache::empty();
         Ok(n)
     }
 
@@ -825,7 +828,7 @@ impl Session2 {
             entries.push((k, v));
         }
         let refs: Vec<(Key, &[u8])> = entries.iter().map(|(k, v)| (*k, &v[..])).collect();
-        let n = crate::cache2::Cache2::save(path, &refs)?;
+        let n = crate::build_cache::BuildCache::save(path, &refs)?;
         self.used.clear();
         Ok(n)
     }
@@ -1068,8 +1071,8 @@ impl Session2 {
                             if let Ok(sm) = crate::ast_summary::parse_and_summarize(&src, it, ow.as_ref()) {
                                 let mut e = vec![];
                                 sm.encode(&mut e);
-                                crate::cache2::put_uv(&mut buf, j as u64);
-                                crate::cache2::put_uv(&mut buf, e.len() as u64);
+                                crate::build_cache::put_uv(&mut buf, j as u64);
+                                crate::build_cache::put_uv(&mut buf, e.len() as u64);
                                 buf.extend_from_slice(&e);
                             }
                             j += jobs;
@@ -1090,7 +1093,7 @@ impl Session2 {
                     unsafe { c_close(fd) };
                     let mut st = 0i32;
                     unsafe { c_waitpid(pid, &mut st, 0) };
-                    let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+                    let mut r = crate::build_cache::Rd { d: &d, pos: 0 };
                     while r.pos < d.len() {
                         let (Some(j), Some(n)) = (r.uv(), r.uv()) else { break };
                         let Some(body) = r.take(n as usize) else { break };
@@ -1587,8 +1590,18 @@ impl Session2 {
                         })
                 });
                 if let Some(d) = decl {
-                    if !word(src.get(d.start..d.end).unwrap_or(""), "where") {
+                    let dt = src.get(d.start..d.end).unwrap_or("");
+                    if !word(dt, "where") {
                         return Err(format!("{}:1: impl has stricter requirements than trait (E0276)", it.line));
+                    }
+                    // (both with a `where`: an outlives between the GAT's own lifetimes that the declaration's do not
+                    // imply, by their places (`where 'b2: 'a2` for the trait's `where 'a1: 'b1`), at the impl's)
+                    let t_full = src.get(it.start..it.end).unwrap_or("");
+                    if let Some(off) = gat_stricter_outlives(dt, t_full) {
+                        let abs = it.start + off;
+                        let line = it.line + t_full[..off].matches('\n').count();
+                        let col = abs - src[..abs].rfind('\n').map_or(0, |k| k + 1) + 1;
+                        return Err(format!("{line}:{col}: impl has stricter requirements than trait (E0276)"));
                     }
                 }
             }
@@ -2104,12 +2117,18 @@ impl Session2 {
         if let Some(e) = sized_error(&sums, &src, &items, user) {
             return Err(e);
         }
+        if let Some(e) = sized_wf_error(&prog, &sums, &src, &items, user) {
+            return Err(e);
+        }
         // (E0119: two impls of a trait of the program's that both apply to one goal, by the trait solver: their heads
         // unify and both impls' where clauses hold there (crate::traits::TraitDb::conflict))
         // (an impl's where clauses, from its header's text: the summary keeps those on one of its parameters (`T: Tr`);
         // the others (`where T::Assoc: Foo`, `where (): Array<Element = &()>`) are read here and added to its clause.
         // read_all: every where clause of the impl was read)
         let mut where_all: FxMap<usize, bool> = FxMap::default();
+        // (the impls with a where clause on another type than a parameter, `where Box<[T]>: IntoWasmAbi`: the
+        // supertrait check below does not assume it)
+        let mut where_other: FxSet<usize> = FxSet::default();
         for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
             if sm.impl_self_ty.is_none() || !matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) {
                 continue;
@@ -2139,6 +2158,9 @@ impl Session2 {
                     all = false;
                 }
                 extra.extend(ps);
+            }
+            if !extra.is_empty() || !all {
+                where_other.insert(ii);
             }
             prog.tdb.add_where(ii, extra, all);
             where_all.insert(ii, all);
@@ -2247,6 +2269,13 @@ impl Session2 {
                     if assumed.contains(sup) {
                         continue;
                     }
+                    // (an impl whose where clause is on another type, `impl<T> IntoWasmAbi for Vec<T> where Box<[T]>:
+                    // IntoWasmAbi`: `Vec<T>: WasmDescribe` may hold through that clause (`impl<T> WasmDescribe for Vec<T>
+                    // where Box<[T]>: WasmDescribe`, a supertrait of IntoWasmAbi), which holds_rigid does not assume: not
+                    // reported)
+                    if where_other.contains(&ii) {
+                        continue;
+                    }
                     if prog.tdb.holds_rigid(&prog, t, sup) == crate::traits::Ans::No {
                         let n = crate::traits::display_ty(&prog, t);
                         return Err(format!("{}:1: {} (E0277)", items[ii].line, crate::traits::not_held(&n, sup)));
@@ -2353,7 +2382,10 @@ impl Session2 {
                 let tr = tr.split('<').next().unwrap_or(tr).trim();
                 let tr = tr.rsplit("::").next().unwrap_or(tr).to_string();
                 let Some(bounds) = prog.assoc_bounds.get(&(tr.clone(), n.clone())).cloned() else { continue };
-                if !read_all(ii) {
+                // (nor an impl whose where clause is on another type: the definition may hold its bounds through it,
+                // as the one wasm-bindgen's `#[wasm_bindgen]` writes, `impl<T> IntoJsGeneric for JsOption<T> where
+                // JsOption<T>: JsGeneric { type JsCanon = JsOption<T>; }`, which the placeholders do not assume)
+                if !read_all(ii) || where_other.contains(&ii) {
                     continue;
                 }
                 let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
@@ -2972,7 +3004,10 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
     // name, the local, and where the fn's text uses it free (line 0 when not known))
     fn capture(sig: &crate::parse::FnSig, body: &crate::parse::Block, outer: &[String], items: &crate::fxhash::FxSet<&str>) -> Option<(String, String, crate::parse::Pos)> {
         let mut used = crate::ast_closure::used_vars_at(&Expr::Block(None, false, body.clone()));
-        if sig.recv.is_none() && format!("{body:?}").contains("\"self\"") && !used.iter().any(|(n, _)| n == "self") {
+        // (`self` in its own statements, not in an item inside it: serde's `deserialize` with an `impl Visitor for
+        // KindVisitor` whose methods take `self`)
+        let names_self = body.stmts.iter().any(|st| !matches!(st, crate::parse::Stmt::Item(_)) && format!("{st:?}").contains("\"self\""));
+        if sig.recv.is_none() && names_self && !used.iter().any(|(n, _)| n == "self") {
             used.push(("self".to_string(), Default::default()));
         }
         // (its own parameters are in its signature, not its body)
@@ -2984,6 +3019,10 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
             own.push("self".to_string());
         }
         used.retain(|(n, _)| !own.contains(n));
+        // (a capitalized name its own `let` binds is its local: `let T0 = ..; (T0, T1)` in serde's tuple impls, with
+        // `#[allow(non_snake_case)]`. The free-variable walk reads a bare capitalized name in a pattern as a path)
+        let upper_lets: Vec<String> = crate::ast_closure::let_bindings(body).into_iter().map(|(_, n)| n).filter(|n| n.starts_with(|c: char| c.is_ascii_uppercase())).collect();
+        used.retain(|(n, _)| !upper_lets.contains(n));
         if let Some((n, at)) = used.iter().find(|(n, _)| !items.contains(n.as_str()) && outer.contains(n)) {
             return Some((sig.name.clone(), n.clone(), *at));
         }
@@ -3113,11 +3152,12 @@ fn first_env_capture(src: &str, orig: &str, items: &[SrcItem]) -> Option<String>
             }
             // (on the line a fn starts or ends on, its columns say whether it is around: `fn a(x: u8) {} fn b() {
             // fn c() {} }` on one line)
+            // (when the text as written does not have them, a macro's expansion on one line, `closures! { .. }` with
+            // its `const _: () = { fn invoke() .. }`, it is not known to be around: no E0434)
             if line == a || line == b {
-                if let (Some(x), Some(y)) = (orig_at(gi), orig_at(it)) {
-                    if !encloses(x, y) {
-                        continue;
-                    }
+                match (orig_at(gi), orig_at(it)) {
+                    (Some(x), Some(y)) if encloses(x, y) => {}
+                    _ => continue,
                 }
             }
             let Ok(Some(gf)) = parse_fn(src, gi) else { continue };
@@ -9184,7 +9224,8 @@ pub fn parse_fn(src: &str, it: &SrcItem) -> R<Option<ItemFn>> {
     let crate::parse::ItemKind::Fn(mut sig, Some(mut block)) = item.kind else { return Ok(None) };
     let mut lets = vec![];
     for (k, (p, _)) in sig.params.iter_mut().enumerate() {
-        if matches!(p, Pat::Ident(..) | Pat::Wild) {
+        // (a binding by reference or with a subpattern (`ref a @ b: U`) binds through a `let` too)
+        if matches!(p, Pat::Ident(false, _, _, None) | Pat::Wild) {
             continue;
         }
         let name = format!("__exr_arg{k}");
@@ -9515,7 +9556,7 @@ fn write_all(fd: i32, mut d: &[u8]) {
     }
 }
 
-impl Session2 {
+impl Session {
     /// 関数 id のキャッシュのキー: 本体のハッシュ + 自分と参照先のシグネチャ + 名前で現れる struct (レイアウトごと) + const
 
     /// closed: prelude の関数で、ユーザの関数を呼びえないもの (総称でないか、型引数が prelude の型だけ)。参照の
@@ -9919,7 +9960,20 @@ fn sig_part(text: &str, part: &str) -> Option<usize> {
     if part == "f" {
         return toks.get(k).map(|t| t.1);
     }
-    let open = (k..toks.len()).find(|&j| tk(j) == "(")?;
+    // (the parameters' `(`: after `fn` (not `pub(crate)`'s) and outside the generics' `<..>` (not a bound's `Fn()`))
+    let from = (k..toks.len()).find(|&j| tk(j) == "fn").map_or(k, |j| j + 1);
+    let open = {
+        let mut angle = 0i32;
+        (from..toks.len()).find(|&j| {
+            match tk(j) {
+                "<" => angle += 1,
+                ">" if !(j > 0 && tk(j - 1) == "-" && toks[j - 1].2 == toks[j].1) => angle -= 1,
+                "(" if angle <= 0 => return true,
+                _ => {}
+            }
+            false
+        })?
+    };
     // (the parameters: split at the commas outside brackets, `->` not closing one)
     let (mut d, mut start, mut params, mut close) = (0i32, open + 1, vec![], None);
     let mut j = open;
@@ -10023,7 +10077,7 @@ fn sendable(a: &Analysis, g: &Insts, ids: &[u32]) -> bool {
 }
 
 /// Whether this process has one thread: a fork copies only the calling thread, and a lock another thread holds (an
-/// interner's) would stay held in the child. A host that runs Session2 beside other threads checks in process
+/// interner's) would stay held in the child. A host that runs Session beside other threads checks in process
 pub(crate) fn single_threaded() -> bool {
     std::fs::read_to_string("/proc/self/status")
         .ok()
@@ -10080,7 +10134,7 @@ fn syn_sendable(t: &crate::types::TySyn) -> bool {
 /// A checked fn: the instances it requested and its Blob as the cache keeps it (None when nothing needs it), or its error
 type Checked = R<(Vec<u32>, Option<Vec<u8>>)>;
 
-impl Session2 {
+impl Session {
     /// Checks ids, in forked children when there are many (#101): child k checks ids[i] with i % jobs == k and sends
     /// back each one's Blob (encoded by name, as a parallel build's children do) or its error. The parent reads them
     /// back in the order of ids, which requests again the instances each one requested, so what follows (the
@@ -10095,7 +10149,7 @@ impl Session2 {
             let mut e = vec![];
             {
                 let g = insts.lock().unwrap();
-                crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+                crate::build_cache::encode_blob(&b, &a.prog, &*g, &mut e);
             }
             Ok((req, Some(e)))
         };
@@ -10124,7 +10178,7 @@ impl Session2 {
                 let mut buf = vec![];
                 let mut i = k;
                 while i < ids.len() {
-                    crate::cache2::put_uv(&mut buf, i as u64);
+                    crate::build_cache::put_uv(&mut buf, i as u64);
                     let (p0, l0) = {
                         let g = insts.lock().unwrap();
                         (g.pending.len(), g.fx_log.len())
@@ -10140,18 +10194,18 @@ impl Session2 {
                                 let mut all: Vec<u32> = g.pending[p0..].to_vec();
                                 all.extend(req.iter().filter(|i| !all.contains(i)).copied().collect::<Vec<u32>>());
                                 if sendable(a, &*g, &all) {
-                                    crate::cache2::encode_blob(&check_blob(b, &all), &a.prog, &*g, &mut e);
+                                    crate::build_cache::encode_blob(&check_blob(b, &all), &a.prog, &*g, &mut e);
                                 }
                             }
                             // (what cannot be sent is checked again by the parent)
                             if e.is_empty() {
                                 buf.push(2);
-                                crate::cache2::put_uv(&mut buf, 0);
+                                crate::build_cache::put_uv(&mut buf, 0);
                                 i += jobs;
                                 continue;
                             }
                             buf.push(0);
-                            crate::cache2::put_uv(&mut buf, e.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, e.len() as u64);
                             buf.extend_from_slice(&e);
                         }
                         Err(m) => {
@@ -10163,19 +10217,19 @@ impl Session2 {
                                 let made = g.pending[p0..].to_vec();
                                 if sendable(a, &*g, &made) {
                                     let b = Blob { clo_facts: g.facts_since(l0), ..acg::Compiled::empty_blob() };
-                                    crate::cache2::encode_blob(&check_blob(b, &made), &a.prog, &*g, &mut e);
+                                    crate::build_cache::encode_blob(&check_blob(b, &made), &a.prog, &*g, &mut e);
                                 }
                             }
                             if e.is_empty() {
                                 buf.push(2);
-                                crate::cache2::put_uv(&mut buf, 0);
+                                crate::build_cache::put_uv(&mut buf, 0);
                                 i += jobs;
                                 continue;
                             }
                             buf.push(1);
-                            crate::cache2::put_uv(&mut buf, m.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, m.len() as u64);
                             buf.extend_from_slice(m.as_bytes());
-                            crate::cache2::put_uv(&mut buf, e.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, e.len() as u64);
                             buf.extend_from_slice(&e);
                         }
                     }
@@ -10193,7 +10247,7 @@ impl Session2 {
             let d = read_all(fd);
             unsafe { c_close(fd) };
             wait_child(pid);
-            let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+            let mut r = crate::build_cache::Rd { d: &d, pos: 0 };
             while r.pos < d.len() {
                 let (Some(i), Some(fail), Some(n)) = (r.uv(), r.u8(), r.uv()) else { break };
                 let Some(body) = r.take(n as usize) else { break };
@@ -10217,7 +10271,7 @@ impl Session2 {
         got.into_iter()
             .zip(ids)
             .map(|(g, &id)| match g {
-                Some(Ok(d)) => match crate::cache2::decode_blob(&d, &a.prog, insts) {
+                Some(Ok(d)) => match crate::build_cache::decode_blob(&d, &a.prog, insts) {
                     Some(b) => {
                         let req = b.relocs.iter().filter_map(|r| match r.target { acg::Target::Func(i) => Some(i), _ => None }).collect();
                         Ok((req, if self.opts.no_cache { None } else { Some(d) }))
@@ -10227,7 +10281,7 @@ impl Session2 {
                 // (what the failed fn left behind, read back; when it cannot be (a name only the child knows), the fn is
                 // checked here, which leaves it as the serial check does: requests are made once, so what the reading
                 // requested before it failed is not requested twice)
-                Some(Err((m, made))) => match crate::cache2::decode_blob(&made, &a.prog, insts) {
+                Some(Err((m, made))) => match crate::build_cache::decode_blob(&made, &a.prog, insts) {
                     Some(_) => Err(m),
                     None => one(id),
                 },
@@ -10241,7 +10295,7 @@ impl Session2 {
 #[cfg(not(feature = "build"))]
 fn lower_blob(_: &Analysis, _: acg::Compiled, _: Vec<u32>) -> R<(Blob, Vec<u32>)> { Err("internal: zust-core was built without the backend (feature `build`)".into()) }
 
-impl Session2 {
+impl Session {
     /// An error of the analysis at a line past the program's own (an item hoisted out of a fn body, prep::HOIST_MARK):
     /// at the line it was written on. The text is preprocessed again for it, only when there is such an error
     #[cold]
@@ -10275,8 +10329,11 @@ fn hoisted_err_holds(msg: &str) -> bool {
     let named = ["cannot find type `", "cannot find value `", "`Self` is only available in impls", "`self` is only allowed in impls", "unresolved import `", "the placeholder `_` is not allowed", "expected identifier, found keyword",
         // (an item's own definition: a discriminant past its repr, a union's fields and derives)
         "enum discriminant overflowed (E0370)", "field must implement `Copy`", "this trait cannot be derived for unions", "cannot find derive macro `",
-        // (an item's own syntax: `struct Test { Very\n Bad }` in a fn body)
-        "expected `:` (found `", "expected `,` (found `", "free static item without body",
+        // (an item's own syntax: `struct Test { Very\n Bad }` in a fn body; any `expected ..` of its text, which is
+        // moved as written: `expected `,` or `>` (found `=`)`)
+        "expected `", "free static item without body",
+        // (a type's syntax in a fn's signature: `Box<dyn X< : 32 >>` in a `const _: () = { .. }`'s block)
+        "expected a type (found `",
         // (`#[test]` on an item in a fn body)
         "the `test` attribute may only be used on a free function",
         // (`const FOO = 1;` in a fn body)
@@ -10323,6 +10380,53 @@ fn allow_variant_bindings(src: &str, errs: &mut Vec<String>) {
     if allowed {
         errs.retain(|e| !e.ends_with("(E0170)"));
     }
+}
+
+/// A fn's text: its parameters' types (with their patterns) and its result's, each a piece, past its generics
+/// (`fn f<F: Fn(u8)>(x: F, s: &'static str) -> u8 where ..`: `x: F`, `s: &'static str`, `u8`)
+fn sig_type_pieces(t: &str) -> Vec<&str> {
+    let Some(k) = t.find("fn ") else { return vec![] };
+    let b = t.as_bytes();
+    let mut i = k + 3;
+    // (the name, then its generics, to the parameters' `(`)
+    let mut angle = 0i32;
+    while i < b.len() {
+        match b[i] {
+            b'<' => angle += 1,
+            b'>' if i > 0 && b[i - 1] != b'-' => angle -= 1,
+            b'(' if angle == 0 => break,
+            _ => {}
+        }
+        i += 1;
+    }
+    let mut pieces = vec![];
+    let mut d = 0i32;
+    let mut start = i + 1;
+    let mut j = i + 1;
+    while j < b.len() {
+        match b[j] {
+            b'(' | b'[' | b'<' => d += 1,
+            b'>' if b[j - 1] == b'-' => {}
+            b')' if d == 0 => {
+                pieces.push(t[start..j].trim());
+                break;
+            }
+            b')' | b']' | b'>' => d -= 1,
+            b',' if d == 0 => {
+                pieces.push(t[start..j].trim());
+                start = j + 1;
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    // (the result: after `->`, to its where clause, body or `;`)
+    if let Some(r) = t.get(j + 1..).and_then(|r| r.trim_start().strip_prefix("->")) {
+        let end = [r.find(" where"), r.find("\nwhere"), r.find('{'), r.find(';')].into_iter().flatten().min().unwrap_or(r.len());
+        pieces.push(r[..end].trim());
+    }
+    pieces.retain(|p| !p.is_empty());
+    pieces
 }
 
 /// E0276 "impl has stricter requirements than trait", at the bound: a method of an impl of a trait of the program's
@@ -10435,6 +10539,19 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
             })
             .collect()
     };
+    // (whether each of a method's own type parameters is bounded by `'static`: inline, or in its where clause)
+    let static_params = |g: &crate::parse::Generics| -> Vec<bool> {
+        let st = |bs: &[Bound]| bs.iter().any(|b| matches!(b, Bound::Lifetime(l) if l == "'static"));
+        g.params
+            .iter()
+            .filter_map(|q| match q {
+                GParam::Ty(n, bs, _) => Some(
+                    st(bs) || g.preds.iter().any(|(t, pbs)| matches!(t, PTy::Path(None, p) if p.segs.len() == 1 && p.segs[0].name == *n && p.segs[0].args.is_empty()) && st(pbs)),
+                ),
+                _ => None,
+            })
+            .collect()
+    };
     // (a member's signature alone, as a declaration: its body is not parsed)
     let sig = |t: &str| -> Option<crate::parse::FnSig> {
         let decl = match fn_body_start(t) {
@@ -10468,7 +10585,7 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
     let mut impl_trait: crate::fxhash::FxMap<u32, Option<u32>> = Default::default();
     let mut by_text: crate::fxhash::FxMap<&str, Option<u32>> = Default::default();
     // (a member's verdict: E0276 at a bound, or E0049 with (its own, the trait's) type parameter counts)
-    let mut verdicts: crate::fxhash::FxMap<(u32, &str), Option<Result<crate::parse::Pos, (usize, usize, bool)>>> = Default::default();
+    let mut verdicts: crate::fxhash::FxMap<(u32, &str, bool), Option<Result<crate::parse::Pos, (usize, usize, bool)>>> = Default::default();
     for m in items {
         let K::ImplMember(h) = m.kind else { continue };
         // (a fn of the impl: a generic one for E0276, any for E0049 against a generic method of the trait)
@@ -10482,7 +10599,29 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
             let head = &t[..t.find('{').unwrap_or(t.len())];
             let f = head.find(" for ")?;
             let before = &head[..f];
-            let before = before[..before.find('<').filter(|&l| before[l..].contains('>') && !before[..l].ends_with("impl")).unwrap_or(before.len())].trim_end();
+            // (the trait's path: after `impl` and its generics, before the trait's own arguments (`impl<'a> A<'a>`))
+            let path = match before.find("impl") {
+                Some(k) => {
+                    let r = before[k + 4..].trim_start();
+                    match r.strip_prefix('<') {
+                        Some(g) => {
+                            let mut d = 1;
+                            let end = g.char_indices().find(|&(_, c)| {
+                                d += match c {
+                                    '<' => 1,
+                                    '>' => -1,
+                                    _ => 0,
+                                };
+                                d == 0
+                            });
+                            end.map_or(r, |(e, _)| &g[e + 1..])
+                        }
+                        None => r,
+                    }
+                }
+                None => before,
+            };
+            let before = path[..path.find('<').unwrap_or(path.len())].trim();
             *by_text.entry(before).or_insert_with(|| {
                 let tw = words(before);
                 let tr = tw.last()?;
@@ -10496,7 +10635,10 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
         // stricter, if one is)
         let mt = text(m);
         let key = &mt[..fn_body_start(mt).unwrap_or(mt.len())];
-        let at = verdicts.entry((th, key)).or_insert_with(|| {
+        // (whether the impl's header gives the trait `'static`: part of the verdict, with the signature)
+        let header = items.get(h as usize).map(|it| text(it)).unwrap_or("");
+        let header_static = header[..header.find('{').unwrap_or(header.len())].contains("'static");
+        let at = verdicts.entry((th, key, header_static)).or_insert_with(|| {
             let ms = sig(mt)?;
             let ds = decl_sigs.entry((th, name)).or_insert_with(|| sig(text(d))).clone()?;
             let (mp, dp) = (params(&ms.generics), params(&ds.generics));
@@ -10515,10 +10657,39 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
                 }
                 return Some(Err((mp.len(), dp.len(), ms.recv.is_some())));
             }
-            mp.iter().zip(&dp).find_map(|(mb, db)| {
+            let by_trait = mp.iter().zip(&dp).find_map(|(mb, db)| {
                 let allowed = close(db.iter().map(|x| x.0.clone()).collect());
                 mb.iter().find(|(n, _)| n != "Sized" && !allowed.contains(n)).map(|x| Ok(x.1))
-            })
+            });
+            if by_trait.is_some() {
+                return by_trait;
+            }
+            // (a type parameter of the impl's method bounded by `'static` where the trait's is not (`F: Debug +
+            // 'static` for the trait's `F: Debug + 'a`): stricter, unless the impl's header gives the trait `'static`,
+            // or the trait's parameters and result name `'static` and that type parameter, which may imply it (`x:
+            // &'static T`; not `x: &'static u8`). At the first `'static` of the member's signature)
+            let (ms_st, ds_st) = (static_params(&ms.generics), static_params(&ds.generics));
+            // (each of the trait's parameters' types and its result's: one that names `'static` and the type
+            // parameter may imply the bound (`x: &'static T`, `x: W<'static, T>`); `x: T, s: &'static str` does not)
+            let pieces = sig_type_pieces(text(d));
+            let word = |p: &str, n: &str| {
+                p.match_indices(n).any(|(i, _)| {
+                    let id = |c: char| c.is_alphanumeric() || c == '_';
+                    !p[..i].ends_with(id) && !p[i + n.len()..].starts_with(id)
+                })
+            };
+            let names: Vec<&str> = ds.generics.params.iter().filter_map(|q| match q {
+                GParam::Ty(n, ..) => Some(n.as_str()),
+                _ => None,
+            }).collect();
+            let implied = |n: &str| pieces.iter().any(|p| p.contains("'static") && word(p, n));
+            if ms_st.iter().zip(&ds_st).zip(&names).any(|((m, d), n)| *m && !*d && !implied(n)) && !header_static {
+                let off = key.find("'static")?;
+                let line = key[..off].matches('\n').count() + 1;
+                let col = off - key[..off].rfind('\n').map_or(0, |k| k + 1);
+                return Some(Ok(crate::parse::Pos { line: line as u32, col: col as u32 }));
+            }
+            None
         });
         match *at {
             Some(Ok(pos)) => {
@@ -11308,7 +11479,7 @@ impl Diagnostic {
     }
 }
 
-impl Session2 {
+impl Session {
     /// 型検査だけを行い、全診断を返す (`zustc check` と LSP)。到達しない関数も、総称関数は要求されたインスタンスごとに
     /// 検査する (コード生成までしてエラーを集め、結果はキャッシュに入れる: 次の検査・ビルドはそれを使う)。prelude の中の診断は出さない
     pub fn check(&mut self, src: &str) -> Vec<Diagnostic> {
@@ -11397,7 +11568,7 @@ impl Session2 {
                                         memo.ents.insert(c, ce.clone());
                                     } else {
                                         // (本体が変わったインスタンス: 要求し直して検査する)
-                                        let _ = crate::cache2::decode_blob(&ce.me, &a.prog, &insts);
+                                        let _ = crate::build_cache::decode_blob(&ce.me, &a.prog, &insts);
                                     }
                                 }
                                 continue;
@@ -11408,9 +11579,9 @@ impl Session2 {
                     let kc = k ^ CHECK_SALT;
                     n_keys += 1;
                     // (キャッシュにあれば検査済み: 読み戻すと要求していたインスタンスも要求し直す)
-                    let hit = match self.get(k).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)) {
+                    let hit = match self.get(k).and_then(|d| crate::build_cache::decode_blob(&d, &a.prog, &insts)) {
                         Some(b) => Some(b),
-                        None if check_only => self.get(kc).and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)),
+                        None if check_only => self.get(kc).and_then(|d| crate::build_cache::decode_blob(&d, &a.prog, &insts)),
                         None => None,
                     };
                     match hit {
@@ -11484,7 +11655,7 @@ impl Session2 {
                             let bo = g.body_of(id);
                             let clo_facts = if g.kind_free.contains(&bo) || g.closure_rg.contains_key(&bo) { g.facts_of(bo) } else { vec![] };
                             let b = Blob { align: 1, code: vec![], relocs: vec![acg::BlobReloc { offset: 0, kind: 4, addend: 0, target: acg::Target::Func(id) }], datas: vec![], vtables: vec![], traps: vec![], line_base: None, code_ref: None, clo_facts };
-                            crate::cache2::encode_blob(&b, &a.prog, &*g, &mut me);
+                            crate::build_cache::encode_blob(&b, &a.prog, &*g, &mut me);
                         }
                         memo.ents.insert(name, ChkEnt { body, body_hash: bh, children, me, ok });
                     }
@@ -11743,6 +11914,113 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
         }
     }
     std::mem::take(&mut g.pending)
+}
+
+/// A generic associated type's lifetimes and the outlives among them its text writes, inline (`<'a: 'b>`) or in its
+/// where clause (`where 'a: 'b + 'c`): (lifetime names in order, (from, to, offset in the text) with `'static` as -1,
+/// whether one names a lifetime not its own (the trait's, the impl's), which is left out)
+fn gat_outlives(t: &str) -> (Vec<String>, Vec<(i32, i32, usize)>, bool) {
+    let mut names = vec![];
+    let mut raw: Vec<(String, String, usize)> = vec![];
+    let Some(lt) = t.find('<') else { return (names, vec![], false) };
+    let mut depth = 0i32;
+    let mut gt = None;
+    for (i, c) in t[lt..].char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => {
+                depth -= 1;
+                if depth == 0 {
+                    gt = Some(lt + i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(gt) = gt else { return (names, vec![], false) };
+    // (a predicate `'a: 'b + 'c` at offset base of the text: its pairs)
+    let mut preds = |s: &str, base: usize, raw: &mut Vec<(String, String, usize)>| {
+        let mut start = 0;
+        let mut d = 0i32;
+        let bytes = s.as_bytes();
+        for i in 0..=s.len() {
+            let c = bytes.get(i).copied();
+            match c {
+                Some(b'<' | b'(' | b'[') => d += 1,
+                Some(b'>' | b')' | b']') => d -= 1,
+                _ => {}
+            }
+            if c.is_none() || (c == Some(b',') && d == 0) {
+                let part = &s[start..i];
+                // (at the bound, as rustc points: `'a2` of `'b2: 'a2`)
+                if let Some(c) = part.find(':') {
+                    let l = part[..c].trim();
+                    if l.starts_with('\'') {
+                        let mut at = c + 1;
+                        for b in part[c + 1..].split('+') {
+                            let lead = b.len() - b.trim_start().len();
+                            if b.trim().starts_with('\'') {
+                                raw.push((l.to_string(), b.trim().to_string(), base + start + at + lead));
+                            }
+                            at += b.len() + 1;
+                        }
+                    }
+                }
+                start = i + 1;
+            }
+        }
+    };
+    let gens = &t[lt + 1..gt];
+    for g in gens.split(',') {
+        let g = g.trim();
+        if g.starts_with('\'') {
+            names.push(g.split(':').next().unwrap_or(g).trim().to_string());
+        }
+    }
+    preds(gens, lt + 1, &mut raw);
+    // (the where clause: its last `where`, to the `;`)
+    let rest = &t[gt..];
+    if let Some(w) = rest.rfind("where") {
+        let ws = gt + w + 5;
+        let we = t[ws..].find(';').map_or(t.len(), |k| ws + k);
+        preds(&t[ws..we], ws, &mut raw);
+    }
+    let idx = |n: &str| if n == "'static" { Some(-1) } else { names.iter().position(|x| x == n).map(|k| k as i32) };
+    let rel: Vec<(i32, i32, usize)> = raw.iter().filter_map(|(a, b, o)| Some((idx(a)?, idx(b)?, *o))).collect();
+    let outer = rel.len() < raw.len();
+    (names, rel, outer)
+}
+
+/// E0276 for a generic associated type: the offset in the impl's text of an outlives between its own lifetimes that
+/// the trait's declaration does not imply (by the lifetimes' places; the same number of them)
+fn gat_stricter_outlives(decl: &str, imp: &str) -> Option<usize> {
+    let (dn, drel, d_outer) = gat_outlives(&blank_comments(decl));
+    let (mn, mrel, _) = gat_outlives(&blank_comments(imp));
+    // (a declaration's outlives through a lifetime not its own (`'a: 't, 't: 'b` with the trait's 't) may imply one
+    // of the impl's (`'a: 'b`): the header's arguments that relate them are not read, so it is not compared)
+    if dn.len() != mn.len() || d_outer {
+        return None;
+    }
+    let implied = |a: i32, b: i32| {
+        if a == b || a == -1 {
+            return true;
+        }
+        let (mut seen, mut work) = (vec![a], vec![a]);
+        while let Some(x) = work.pop() {
+            for &(p, q, _) in &drel {
+                if p == x && !seen.contains(&q) {
+                    if q == b || q == -1 {
+                        return true;
+                    }
+                    seen.push(q);
+                    work.push(q);
+                }
+            }
+        }
+        false
+    };
+    mrel.iter().find(|&&(a, b, _)| !implied(a, b)).map(|x| x.2)
 }
 
 /// The where clause of an item's header text: (subject, bounds) of each predicate, split at depth 0 (None: no where)
@@ -12026,6 +12304,139 @@ fn sized_error(sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> O
             if let Some((outer, x)) = find(t, &needs_sized) {
                 let pos = outer.map_or_else(|| format!("{}:1", it.line), |o| at(o));
                 return Some(format!("{pos}: {}", msg(x)));
+            }
+        }
+    }
+    None
+}
+
+/// An item's header: its text before the first `{` token (not one in a string or a comment: `#[doc = "{"]`)
+fn header_text(text: &str) -> &str {
+    let b = text.as_bytes();
+    let t = crate::lexer::tokenize(b);
+    match t.iter().find(|x| x.0 == 1 && b[x.1] == b'{') {
+        Some(x) => &text[..x.1],
+        None => text,
+    }
+}
+
+/// E0277, Sized: the program's definitions and signatures that put a maybe-unsized type where only a sized one may be
+fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem], user: usize) -> Option<String> {
+    let user_sm = |ii: usize| ii < user;
+    // (a parameter declared `?Sized` whose other bounds imply Sized is sized: `T: Clone + ?Sized`)
+    let implies_sized = |bs: &[String]| bs.iter().any(|b| {
+        let tr = b.split('<').next().unwrap_or(b).trim();
+        let tr = tr.rsplit("::").next().unwrap_or(tr);
+        matches!(tr, "Sized" | "Clone" | "Copy" | "Default" | "From" | "Into" | "TryFrom" | "TryInto" | "FromStr" | "FromIterator")
+            || prog.bound_implies(b, &["Sized", "Clone", "Copy", "Default"], false, 0)
+    });
+    let maybe_unsized = param_maybe_unsized;
+    // (E0277, Sized: a type parameter declared `?Sized`, or an unsized type, where only a sized type may be: a struct's
+    // field other than the last, an enum's or a union's field, an argument for a parameter not declared `?Sized`, a
+    // tuple's element other than the last, a slice's or array's element, a free fn's argument or result)
+    let size_msg = |t: Ty, gens: &[String]| {
+        // (a struct unsized by a parameter in its tail is named by that parameter, as rustc does)
+        let t = match t {
+            Ty::Struct(s) => prog.structs[s as usize].args.iter().rev().copied().find(|a| matches!(a, Ty::Param(_))).unwrap_or(t),
+            t => t,
+        };
+        let n = match t {
+            Ty::Param(i) => gens.get(i as usize).cloned().unwrap_or_default(),
+            t => crate::traits::display_ty(prog, t),
+        };
+        format!("the size for values of type `{n}` cannot be known at compilation time (E0277)")
+    };
+    let mut sids: Vec<u32> = (0..prog.structs.len() as u32).filter(|&s| prog.structs[s as usize].base.is_none() && prog.struct_item.get(s as usize).is_some_and(|&ii| user_sm(ii as usize))).collect();
+    sids.sort_by_key(|&s| prog.struct_item[s as usize]);
+    for sid in sids {
+        let sd = &prog.structs[sid as usize];
+        if prog.is_closure(sid) || prog.is_tuple(sid) || sd.placeholder.is_some() {
+            continue;
+        }
+        let ii = prog.struct_item[sid as usize] as usize;
+        let (Some(it), Some(sm)) = (items.get(ii), sums.get(ii)) else { continue };
+        let union = sm.unions.iter().any(|u| *u == sd.name || sd.name.ends_with(&format!("::{u}")));
+        let adt_b = |g: &str| sm.adt_bounds.iter().find(|(p, _)| p == g).map(|(_, b)| b.clone()).unwrap_or_default();
+        let param_may = |t: Ty| matches!(t, Ty::Param(i) if sm.adt_generics.get(i as usize).is_some_and(|g| sm.adt_unsized.contains(g) && !implies_sized(&adt_b(g))));
+        let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
+        let fields: Vec<&[(String, Ty, u32)]> = if sd.is_enum { sd.variants.iter().map(|v| v.fields.as_slice()).collect() } else { vec![sd.fields.as_slice()] };
+        for (vi, fs) in fields.iter().enumerate() {
+            for (fi, (_, ft, _)) in fs.iter().enumerate() {
+                let bad = if (sd.is_enum || union || fi + 1 < fs.len()) && may(*ft) { Some(*ft) } else { prog.sized_wf_with(*ft, &may, 0) };
+                if let Some(b) = bad {
+                    let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
+                    let (l, c) = field_pos(&text, sd.is_enum, vi, fi).unwrap_or((0, 0));
+                    return Some(format!("{}:{}: {}", it.line + l, c + 1, size_msg(b, &sm.adt_generics)));
+                }
+            }
+        }
+    }
+    for (ii, sm) in sums.iter().enumerate().take(user.min(items.len())) {
+        // (an impl's self type and trait arguments: `impl Foo for Option<[u8]>`)
+        if let Some(st) = &sm.impl_self_ty {
+            if matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) {
+                let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
+                let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
+                // (the header's text only where the item writes `?Sized`: most impls do not, and reading every item's
+                // tokens costs the check of a large program)
+                let raw = src.get(items[ii].start..items[ii].end).unwrap_or("");
+                let head = if raw.contains("?Sized") { header_text(&blank_comments(raw)).to_string() } else { String::new() };
+                let param_may = |t: Ty| matches!(t, Ty::Param(i) if gens.get(i as usize).is_some_and(|n| maybe_unsized(&head, n)) && !implies_sized(&sm.impl_generics[i as usize].1));
+                let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
+                for t in std::iter::once(st).chain(sm.impl_trait_args.iter()) {
+                    let Ok(t) = prog.resolve_g(t, &gn) else { continue };
+                    if let Some(b) = prog.sized_wf_with(t, &may, 0) {
+                        return Some(format!("{}:1: {}", items[ii].line, size_msg(b, &gens)));
+                    }
+                }
+                // (a trait argument that may be unsized for a parameter of the program's trait not declared `?Sized`:
+                // `impl<T: ?Sized> Tr<T> for ()` with `trait Tr<T> {}`)
+                let tr = sm.impl_trait.as_deref().map(|t| t.split('<').next().unwrap_or(t).trim());
+                let tr = tr.map(|t| t.rsplit("::").next().unwrap_or(t));
+                if let Some((di, d)) = tr.and_then(|tr| sums[..user.min(sums.len())].iter().enumerate().find(|(_, s)| s.trait_decl.as_deref() == Some(tr))) {
+                    let tparams: Vec<&String> = d.trait_generics.iter().map(|g| &g.0).filter(|g| !g.starts_with('#') && *g != "Self").collect();
+                    // (the arguments written fill the leading parameters: the rest have defaults, `trait Tr<T, U = ()>`)
+                    if sm.impl_trait_args.len() <= tparams.len() {
+                        let dhead = || header_text(&blank_comments(src.get(items[di].start..items[di].end).unwrap_or(""))).to_string();
+                        for (k, a) in sm.impl_trait_args.iter().enumerate() {
+                            let Ok(a) = prog.resolve_g(a, &gn) else { continue };
+                            if may(a) && !maybe_unsized(&dhead(), tparams[k]) {
+                                return Some(format!("{}:1: {}", items[ii].line, size_msg(a, &gens)));
+                            }
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+        if sm.trait_decl.is_some() || !matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplMember(_)) {
+            continue;
+        }
+        // (a fn's signature, free or of an impl: `fn iceman(c: Vec<[i32]>)`, `fn g1<X: ?Sized>(x: X)`, `-> [u8]`. An
+        // impl's parameters are taken as sized: their `?Sized` is not known here)
+        for (_, sig) in &sm.fns {
+            if sig.trait_of.is_some() || sig.is_extern || !sig.has_body {
+                continue;
+            }
+            let gn: Vec<&str> = sig.generics.iter().map(|g| g.0.as_str()).collect();
+            let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
+            let param_may = |t: Ty| matches!(t, Ty::Param(i) if gens.get(i as usize).is_some_and(|n| sig.own_unsized.contains(n)) && !implies_sized(&sig.generics[i as usize].1));
+            let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
+            for (k, t) in sig.params.iter().chain([&sig.ret]).enumerate() {
+                let Ok(t) = prog.resolve_g(t, &gn) else { continue };
+                // (a value of the type itself: an argument, or the result)
+                let by_value = may(t) && !(k == sig.params.len() && matches!(t, Ty::Dyn(_)));
+                if let Some(b) = if by_value { Some(t) } else { prog.sized_wf_with(t, &may, 0) } {
+                    // (at the argument's type or the result's, as rustc: a signature may span lines)
+                    let part = if k == sig.params.len() { "r".to_string() } else { format!("p{k}") };
+                    let it = &items[ii];
+                    let at = src.get(it.start..it.end.min(src.len())).and_then(|t| sig_part(t, &part)).map(|o| it.start + o);
+                    let pos = match at {
+                        Some(at) => format!("{}:{}", src[..at].matches('\n').count() + 1, at - src[..at].rfind('\n').map_or(0, |p| p + 1) + 1),
+                        None => format!("{}:1", it.line),
+                    };
+                    return Some(format!("{pos}: {}", size_msg(b, &gens)));
+                }
             }
         }
     }

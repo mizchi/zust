@@ -1,16 +1,16 @@
-//! zustc: インクリメンタル開発ビルド特化の小さな Rust (サブセット) コンパイラ。
-//! 中身は crates/ の crate に分かれている (このクレートは CLI と、それらの再輸出):
-//! - `zust-base`: 部品 (FxHash の表・キャッシュのキー・直列化)
-//! - `zust-syntax`: 字句・構文木・前処理 (cfg / マクロ / `mod` / 入れ子のアイテム)・アイテムの要約・prelude の選択
-//! - `zust-sema`: Program (名前・型・トレイトの表)・型推論
-//! - `zust-codegen`: acg (コード生成と型の検査)・Blob の直列化・リンク
-//! - `zust-core`: driver2 (キャッシュ・並列化・ワークスペース・check)。下の層を公開し直す
-//! - `minclif`: Cranelift に似た API の小さな x86-64 バックエンド (外部 crate なし)
-//! - `zust-clif`: driver2 の Cranelift バックエンド (既定)
-//! (base から core までは syn・Cranelift に依存せず、zustc 自身でもコンパイルできる)
-//! LSP サーバ (zust-analyzer、エディタ向けの解析 zust-ide を使う) は別のバイナリで、このクレートは依存しない
+//! zustc: a small Rust (subset) compiler specialized for incremental development builds.
+//! The contents are split into the crates in crates/ (this crate is the CLI plus re-exports of them):
+//! - `zust-base`: building blocks (FxHash tables, cache keys, serialization)
+//! - `zust-syntax`: lexing, syntax trees, preprocessing (cfg / macros / `mod` / nested items), item summaries, prelude selection
+//! - `zust-sema`: Program (the tables of names, types and traits), type inference
+//! - `zust-codegen`: acg (code generation and type checking), Blob serialization, linking
+//! - `zust-core`: session (cache, parallelization, workspaces, check). Re-exports the layers below
+//! - `minclif`: a small x86-64 backend with a Cranelift-like API (no external crates)
+//! - `zust-clif`: session's Cranelift backend (the default)
+//! (base through core do not depend on syn / Cranelift, and zustc itself can compile them)
+//! The LSP server (zust-analyzer, which uses the editor-oriented analysis zust-ide) is a separate binary, and this crate does not depend on it
 
 pub use zust_core::*;
 pub use zust_clif as clif_backend;
 pub use zust_wasm as wasm_backend;
-pub use zust_core::driver2::{Diagnostic, Options2, Report2, Session2};
+pub use zust_core::session::{Diagnostic, Options, BuildReport, Session};

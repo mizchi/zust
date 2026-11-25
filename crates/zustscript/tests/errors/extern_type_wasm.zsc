@@ -1,0 +1,3 @@
+// expect: the type El is not supported by Rust lowering
+extern type El { id: String }
+@wasm fn f(e: El) -> i32 { 1 }

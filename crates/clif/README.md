@@ -11,4 +11,4 @@ Not part of the self-host build (it depends on cranelift-codegen, cranelift-fron
 It is zustc's default backend (`--backend=cranelift`; `--backend=minclif` or `ZUSTC_BACKEND=minclif` selects
 minclif).
 
-Depends on: minclif. Tests: `tests/driver2_cranelift.rs`.
+Depends on: minclif. Tests: `tests/cranelift_backend.rs`.

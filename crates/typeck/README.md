@@ -16,7 +16,7 @@ can still reject what it does not lower (minclif has no SIMD: such a fn checks, 
 | `acg/borrowck.rs` | the borrow check on the CFG that acg emits (moves and loans: E0502, E0507, E0596, E0597, E0716, ...) |
 | `acg/regionck.rs` | the region check against signatures (#1): NLL's check of universal regions |
 | `acg/simd.rs` | `core::arch::wasm32` SIMD (#30) |
-| `cache2` | the per-fn result cache (`Blob`) and its serialization, with no external crate |
+| `build_cache` | the per-fn result cache (`Blob`) and its serialization, with no external crate |
 
 Depends on: zust-sema, zust-ir. Used by: zust-codegen, zust-core.
 

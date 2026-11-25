@@ -1,5 +1,5 @@
-"""zustc と rustc (incremental) のビルド時間・ピークメモリ・ディスク消費・バイナリサイズを比べる。
-usage: python3 bench/run.py [N ...]   (このディレクトリで実行。事前に cargo build --release)"""
+"""Compares the build time, peak memory, disk usage and binary size of zustc and rustc (incremental).
+usage: python3 bench/run.py [N ...]   (run in this directory, after cargo build --release)"""
 import os, resource, shutil, subprocess, sys, time
 
 EXR = os.path.abspath("target/release/zustc")
@@ -7,7 +7,7 @@ W = os.path.abspath("out/bench")
 
 
 def measure(cmd):
-    # 子プロセスを 1 段挟み、そのプロセスの RUSAGE_CHILDREN で単一コマンドの maxrss を取る
+    # Put one intermediate child process in between and take the single command's maxrss from that process's RUSAGE_CHILDREN
     code = ("import resource,subprocess,sys,time;t=time.perf_counter();"
             "subprocess.run(sys.argv[1:],check=True,stdout=subprocess.DEVNULL);"
             "print((time.perf_counter()-t)*1e3, resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)")
@@ -41,23 +41,23 @@ def bench(n):
         gen(n, 1, src)
         edit = measure(build)
         r1 = subprocess.run([out], capture_output=True, text=True).stdout.strip()
-        # (zustc のキャッシュは機械語を .o から引くので、.o も足して数える)
-        extra = du(out + ".o") if store.endswith(".crcache2") else 0
+        # (zustc's cache takes the machine code from the .o, so the .o is counted too)
+        extra = du(out + ".o") if store.endswith(".cache") else 0
         rows.append((tool, cold, noop, edit, os.path.getsize(out), du(store) + extra, r1))
 
     exe = os.path.join(d, "exr")
-    scenario("zustc (auto)", [EXR, src, "-o", exe], exe, exe + ".crcache2")
+    scenario("zustc (auto)", [EXR, src, "-o", exe], exe, exe + ".cache")
     for lk in ["bfd", "lld", "wild"]:
         if lk == "wild" and not shutil.which("wild"):
             continue
         exe2 = os.path.join(d, "exr-" + lk)
-        scenario(f"zustc (--linker={lk})", [EXR, src, "-o", exe2, f"--linker={lk}"], exe2, exe2 + ".crcache2")
+        scenario(f"zustc (--linker={lk})", [EXR, src, "-o", exe2, f"--linker={lk}"], exe2, exe2 + ".cache")
     for name, flags in [("rustc -Cincremental dbg=0", ["-Cdebuginfo=0"]),
                         ("rustc -Cincremental dbg=2", ["-Cdebuginfo=2"])][: 1 if n > 1000 else 2]:
         inc = os.path.join(d, "inc-" + flags[0][-1])
         rexe = os.path.join(d, "r-" + flags[0][-1])
         scenario(name, ["rustc", "-Awarnings", "-Cincremental=" + inc, *flags, src, "-o", rexe], rexe, inc)
-    if n > 1000:  # rustc -O は関数数に対して超線形に遅くなるので省略
+    if n > 1000:  # rustc -O gets superlinearly slower in the number of fns, so it is skipped
         return print_rows(n, rows)
     rexe = os.path.join(d, "r-O")
     gen(n, 1, src)

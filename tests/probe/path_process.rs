@@ -1,5 +1,5 @@
-// std::path (Path / PathBuf / OsString) と std::process::Command、env::var_os / split_paths、
-// 同じ型への複数の From impl、書式文字列の中の名前をキャプチャするクロージャ
+// std::path (Path / PathBuf / OsString) and std::process::Command, env::var_os / split_paths,
+// multiple From impls into the same type, closures that capture names inside format strings
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

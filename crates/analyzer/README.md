@@ -3,7 +3,7 @@
 The LSP server (stdio). It supports initialize, didOpen / didChange (full sync) / didClose, shutdown / exit,
 documentSymbol, workspace/symbol, definition, references, hover and completion.
 
-- Each open document has its own `Session2` with an in-memory cache. Every open and change runs `Session2::check`
+- Each open document has its own `Session` with an in-memory cache. Every open and change runs `Session::check`
   and publishes diagnostics. Unchanged fns are skipped by their "checked" mark, so the response time follows the size
   of the change.
 - Symbols, definitions and references come from zust-ide's index of the open documents and the workspace's `.rs`

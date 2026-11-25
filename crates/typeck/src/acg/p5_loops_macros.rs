@@ -2117,7 +2117,9 @@ impl Cx<'_> {
             return Ok(Some((Some(v), Ty::U64)));
         }
         // `core::slice::from_raw_parts(p, n)` / `_mut` と `core::str::from_utf8_unchecked(b)`
-        if matches!(name.as_str(), "from_raw_parts" | "from_raw_parts_mut" | "from_utf8_unchecked") && !(p.segs.len() == 1 && self.prog.index.contains_key(&name)) {
+        // (not `Vec::from_raw_parts(ptr, len, cap)` / `String::from_raw_parts`: the prelude's)
+        let owner = p.segs.len() >= 2 && matches!(p.segs[p.segs.len() - 2].name.as_str(), "Vec" | "String");
+        if matches!(name.as_str(), "from_raw_parts" | "from_raw_parts_mut" | "from_utf8_unchecked") && !owner && !(p.segs.len() == 1 && self.prog.index.contains_key(&name)) {
             self.check_unsafe_op(&name, p.pos)?;
             if name == "from_utf8_unchecked" {
                 let u8s = Ty::Ref(false, intern(Ty::Slice(intern(Ty::U8))));
@@ -2145,6 +2147,10 @@ impl Cx<'_> {
         if p.segs.len() == 1 && self.prog.index.contains_key(&name) {
             return Ok(None);
         }
+        // (nor a trait's or a type's fn of the name, `<JsValue as NullableIntoWasmAbi>::null()` / `S::null()`)
+        if matches!(&**func, Expr::Path(Some(_), _)) || (p.segs.len() >= 2 && self.prog.fn_by_p(&PPath::of(p), self.self_sid).is_some()) {
+            return Ok(None);
+        }
         let targ = match last.args.first() {
             Some(GArg::Ty(t)) => Some(self.parse_ty(t)?),
             _ => None,
@@ -2154,6 +2160,12 @@ impl Cx<'_> {
                 let Some(t) = targ else {
                     return err(SP, format!("`{name}` needs a type: `{name}::<T>()`"));
                 };
+                // (E0277: `size_of::<str>()`, `size_of::<T>()` of a `T: ?Sized`; the prelude's own uses are of its
+                // instances, `size_of_val`'s T among them)
+                if self.user_code && self.prog.maybe_unsized(t) {
+                    let n = crate::traits::display_ty(self.prog, t);
+                    return err(SP, format!("the size for values of type `{n}` cannot be known at compilation time {}", crate::traits::SOLVED_NO));
+                }
                 let (sz, al) = self.prog.size_align(t);
                 let v = if name == "size_of" { sz } else { al };
                 (Some(self.b.ins().iconst(types::I64, v as i64)), Ty::Usize)

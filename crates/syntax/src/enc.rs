@@ -1,10 +1,10 @@
-//! キャッシュ用の小さなバイナリ符号化。要約 (Summary) は全アイテム分がメモリとディスクに載るので、
-//! 空のフィールドは書かない (先頭のビットマスクで有無を表す) ようにして小さく保つ。
+//! A small binary encoding for the cache. Summaries (Summary) for all items sit in memory and on disk, so
+//! they are kept small by not writing empty fields (a leading bitmask tells which are present).
 
 pub trait Enc: Sized {
     fn enc(&self, out: &mut Vec<u8>);
     fn dec(r: &mut Rd) -> Option<Self>;
-    /// 空 (= 書かなくてよい) か
+    /// Whether it is empty (= need not be written)
     fn is_empty_val(&self) -> bool {
         false
     }
@@ -188,7 +188,7 @@ impl<A: Enc, B: Enc, C: Enc> Enc for (A, B, C) {
     }
 }
 
-/// struct の Enc を「空でないフィールドのビットマスク + そのフィールドだけ」で実装する
+/// Implements a struct's Enc as "a bitmask of the non-empty fields + only those fields"
 #[macro_export]
 macro_rules! enc_struct {
     ($t:ty { $($f:ident),* $(,)? }) => {

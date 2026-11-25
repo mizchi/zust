@@ -1,0 +1,2 @@
+// expect: there is no `? :` operator
+fn b(c: bool) -> i32 { c ? 1 : 2 }

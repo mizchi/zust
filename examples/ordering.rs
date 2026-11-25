@@ -1,5 +1,5 @@
-// 大小比較のサンプル: タプルの < / sort、#[derive(PartialOrd, Ord)] (struct / enum)、手書きの impl Ord、
-// cmp / partial_cmp / Ordering のメソッド、sort_by / sort_by_key / Reverse / max_by_key、Option / 配列 / String / Vec の比較
+// A comparison sample: < / sort of tuples, #[derive(PartialOrd, Ord)] (struct / enum), a hand-written impl Ord,
+// cmp / partial_cmp / methods of Ordering, sort_by / sort_by_key / Reverse / max_by_key, comparisons of Option / arrays / String / Vec
 use std::cmp::Ordering;
 use std::cmp::Reverse;
 
@@ -46,7 +46,7 @@ fn largest<T: PartialOrd + Copy>(xs: &[T]) -> T {
 }
 
 fn main() {
-    // タプル
+    // Tuples
     let mut v: Vec<(u32, i32)> = vec![(3, 1), (1, 9), (3, -2), (2, 5), (1, 2)];
     v.sort();
     println!("{:?}", v);
@@ -63,7 +63,7 @@ fn main() {
     println!("{:?}", ps);
     println!("{}", Prio::Mid(200) < Prio::High { boost: -100 });
     println!("{:?}", largest(&[Ver { major: 0, minor: 9, patch: 9 }, a, b]));
-    // 手書きの Ord
+    // A hand-written Ord
     let mut people = vec![
         Person { name: String::from("bob"), age: 30 },
         Person { name: String::from("alice"), age: 30 },
@@ -97,7 +97,7 @@ fn main() {
         Ordering::Equal => println!("eq"),
         Ordering::Greater => println!("gt"),
     }
-    // Option / 配列 / String / Vec
+    // Option / arrays / String / Vec
     println!("{} {} {}", Some(3) > None, Some(1) < Some(2), [1, 2, 3] < [1, 3, 0]);
     println!("{} {}", String::from("abc") < String::from("abd"), vec![1, 2] < vec![1, 2, 0]);
     let mut names = vec![String::from("zed"), String::from("amy"), String::from("bo")];

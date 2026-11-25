@@ -1,14 +1,14 @@
-//! check (LSP の診断) はエラーがあっても止まらず、全関数の診断を返す
-use zustc::{Options2, Session2};
+//! check (LSP diagnostics) does not stop on errors and returns the diagnostics of all fns
+use zustc::{Options, Session};
 
 #[test]
 fn reports_all_errors_and_recovers() {
     let src = "enum E { A(i64), B }\nfn f(e: E) -> i64 {\n    match e {\n        E::A(x, y) => x,\n        E::B => 0,\n    }\n}\nfn g() -> bool { 1 }\nfn h() -> u8 { 2 }\nfn main() {}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(src);
     assert_eq!(d.len(), 2, "{d:?}");
     assert_eq!((d[0].line, d[1].line), (4, 8));
-    // 直した後は診断が消え、変わっていない関数は検査済みの印で飛ばされる
+    // After the fix the diagnostics disappear, and unchanged fns are skipped by their checked marks
     let fixed = src
         .replace("E::A(x, y)", "E::A(x)")
         .replace("-> bool { 1 }", "-> bool { true }");
@@ -16,13 +16,13 @@ fn reports_all_errors_and_recovers() {
     assert!(s.check(&fixed).is_empty());
 }
 
-/// 呼び出し元が「検査済み」でキャッシュに当たっても、ジェネリック関数の本体の型エラーは報告される
-/// (検査済みの印に、その関数が要求したインスタンスを保存して要求し直すため)
+/// Even if a caller hits the cache as "checked", type errors in a generic fn's body are reported
+/// (because the checked mark stores the instances that fn requested, and they are requested again)
 #[test]
 fn generic_body_errors_with_cached_callers() {
     let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/traits.rs"))
         .unwrap();
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     assert!(s.check(&src).is_empty());
     let bad = src.replace(
         "    a.area() + b.area()\n",
@@ -35,13 +35,13 @@ fn generic_body_errors_with_cached_callers() {
     assert!(s.check(&src).is_empty());
 }
 
-/// クロージャの本体のエラーは (呼ばれていなくても) 正しい行で報告され、直せば消える。
-/// 検査済みの印が付いた後も、編集したクロージャの本体だけが検査し直される
+/// Errors in a closure's body are reported on the right line (even if it is not called), and disappear once fixed.
+/// Even after the checked mark is set, only the edited closure body is checked again
 #[test]
 fn closure_and_dyn_errors() {
     let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/closures.rs"))
         .unwrap();
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     assert!(s.check(&src).is_empty());
     let bad = src.replace("let add_k = |x| x + k;", "let add_k = |x| x + k + nope;");
     assert_ne!(bad, src);
@@ -61,8 +61,8 @@ fn closure_and_dyn_errors() {
     assert!(d[0].msg.contains("not implemented for `u32`"), "{d:?}");
 }
 
-/// 編集をまたいだ check の記録 (ChkMemo) を使っても、毎回新しい Session2 で検査したものと診断が同じ。
-/// examples の関数の本体 (総称関数も) に、型エラーになる文・ならない文を足したり消したりを続ける
+/// Using the check record across edits (ChkMemo) gives the same diagnostics as checking with a new Session each time.
+/// Keeps adding and removing statements that do / do not cause type errors in the bodies of the examples' fns (generic fns too)
 #[test]
 fn check_memo_matches_fresh_check() {
     let root = env!("CARGO_MANIFEST_DIR");
@@ -79,15 +79,15 @@ fn check_memo_matches_fresh_check() {
     let mut compared = 0;
     for p in ps.iter().filter(|p| p.extension().is_some_and(|e| e == "rs")).take(20) {
         let src = std::fs::read_to_string(p).unwrap();
-        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
         let mut cur = src.clone();
         for _ in 0..8 {
             let d1 = s.check(&cur);
-            let d2 = Session2::new(Options2 { jobs: 1, ..Options2::default() }).check(&cur);
+            let d2 = Session::new(Options { jobs: 1, ..Options::default() }).check(&cur);
             let f = |d: &[zustc::Diagnostic]| d.iter().map(|x| (x.line, x.col, x.msg.clone())).collect::<Vec<_>>();
             assert_eq!(f(&d1), f(&d2), "{}", p.display());
             compared += 1;
-            // (関数の本体の先頭 (`{\n` の後ろ) に文を足すか、足したものを消す)
+            // (Add a statement at the start of a fn body (after `{\n`), or remove one that was added)
             let at: Vec<usize> = cur.match_indices(") {\n").map(|(i, _)| i + 4).collect();
             if at.is_empty() {
                 break;
@@ -108,7 +108,7 @@ fn check_memo_matches_fresh_check() {
 #[test]
 fn constants_checked_where_defined() {
     let src = "const LIMIT: u8 = 300u16;\nconst SIZES: [u8; 3] = [1, 2];\nstatic NAME: &[u8] = \"abc\";\nconst FINE: u32 = { let mut b = 1; b += 1; b };\nconst LABEL: &str = \"ok\";\nfn main() {}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(src);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![1, 2, 3], "{d:?}");
     assert!(d.iter().all(|d| d.msg.starts_with("mismatched types")), "{d:?}");
@@ -121,7 +121,7 @@ fn constants_checked_where_defined() {
 #[test]
 fn discriminants_and_nested_constants() {
     let src = "enum Level {\n    Low = 1i64,\n    High = 2,\n}\nfn f() {\n    #[repr(u8)]\n    enum Small {\n        A = 1,\n        B = 2i8,\n    }\n    const LIMIT: u8 = 300u16;\n    let _ = Small::A;\n}\nfn main() {\n    let _ = Level::Low;\n    f();\n}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(src);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2, 9, 11], "{d:?}");
 }
@@ -131,7 +131,7 @@ fn discriminants_and_nested_constants() {
 #[test]
 fn uncalled_generic_fns() {
     let src = "use std::fmt::Debug;\nfn shown(x: impl Debug) -> String {\n    x\n}\nfn total<T>(a: T, b: T) -> T {\n    a + b\n}\ntrait Layout { type Unit; }\nfn unit<L: Layout<Unit = U>, U>(u: U) -> U { u }\nfn add_refs<T>(a: &T, b: &T) -> T where for<'x> &'x T: std::ops::Add<&'x T, Output = T> {\n    a + b\n}\nfn main() {}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(src);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![3, 6], "{d:?}");
     assert!(d[1].msg.contains("cannot add `T` to `T`"), "{d:?}");
@@ -141,7 +141,7 @@ fn uncalled_generic_fns() {
 #[test]
 fn constant_cycles() {
     let src = "const A: i32 = B;\nconst B: i32 = A;\nconst SELF_SIZE: usize = SELF_SIZE;\nfn main() {}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(src);
     assert!(d.iter().all(|d| d.msg.contains("(E0391)")), "{d:?}");
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![1, 2, 3], "{d:?}");
@@ -152,7 +152,7 @@ fn constant_cycles() {
 #[test]
 fn dyn_incompatible_in_signature() {
     let bad = "trait Shape {\n    fn new() -> Self;\n    fn area(&self) -> f64;\n}\n#[inline]\nfn total(shapes: &[Box<dyn Shape>]) -> f64 {\n    shapes.iter().map(|s| s.area()).sum()\n}\nfn main() {}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(bad);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![6], "{d:?}");
     assert!(d[0].msg.contains("(E0038)"), "{d:?}");
@@ -164,14 +164,14 @@ fn dyn_incompatible_in_signature() {
 fn errors_of_items_in_fn_bodies_at_their_lines() {
     // an item in a fn body is checked after the text, and its error is reported where it is written
     let bad = "fn outer<T>(x: T) {\n    fn inner(y: T) {}\n}\nfn main() {}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(bad);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2], "{d:?}");
     // (rustc's E0401: the inner fn cannot name the outer one's parameter)
     assert!(d[0].msg.contains("can't use generic parameters from outer item (E0401)"), "{d:?}");
     let dir = std::env::temp_dir().join(format!("zust-unhoist-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let e = Session2::new(Options2 { jobs: 1, ..Options2::default() }).build(bad, &dir.join("a")).unwrap_err();
+    let e = Session::new(Options { jobs: 1, ..Options::default() }).build(bad, &dir.join("a")).unwrap_err();
     assert!(e.starts_with("2:"), "{e}");
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -181,7 +181,7 @@ fn errors_of_items_in_fn_bodies_at_their_lines() {
 #[test]
 fn discriminants_past_raw_strings_and_probe_names_of_the_program() {
     let src = "#[repr(u8)]\nenum E {\n    #[doc = r#\"\"{\"#]\n    A = 1,\n    B = 2i8,\n}\nfn main() {\n    let _ = E::A;\n}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(src);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![5], "{d:?}");
     let named = "fn __zust_const_0() {}\nconst BAD: u8 = 300u16;\nfn main() {\n    __zust_const_0();\n}\n";
@@ -194,8 +194,8 @@ fn discriminants_past_raw_strings_and_probe_names_of_the_program() {
 /// `repr(`, a doc's bracket; a mismatch with a raw pointer to an expected type that is none; a repeat of `Self::C`
 #[test]
 fn discriminants_and_constants_past_literals() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
-    let lines = |s: &mut Session2, src: &str| s.check(src).iter().map(|d| d.line).collect::<Vec<_>>();
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
+    let lines = |s: &mut Session, src: &str| s.check(src).iter().map(|d| d.line).collect::<Vec<_>>();
     let quote = "#[repr(u8)]\nenum E {\n    A = b'\"',\n    /* } */\n    B = 2i8,\n}\nfn main() {\n    let _ = E::A;\n}\n";
     assert_eq!(lines(&mut s, quote), vec![5]);
     let doc = "#[doc = \"repr(u8)\"]\nenum E {\n    A = 1isize,\n}\nfn main() {\n    let _ = E::A;\n}\n";
@@ -213,7 +213,7 @@ fn discriminants_and_constants_past_literals() {
 #[test]
 fn scrutinee_types_from_unit_struct_and_reference_patterns() {
     let src = "struct S;\nimpl S {\n    fn method(&self) -> bool {\n        true\n    }\n}\nfn get<T>() -> T {\n    unimplemented!()\n}\nfn opt<T>() -> Option<T> {\n    None\n}\nfn main() {\n    match opt() {\n        Some(S) => {}\n        None => {}\n    }\n    let w = opt();\n    if let Some(S) = w {}\n    match get() {\n        x if x.method() => {}\n        &S => {}\n    }\n}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(src);
     assert!(d.is_empty(), "{d:?}");
 }
@@ -224,7 +224,7 @@ fn scrutinee_types_from_unit_struct_and_reference_patterns() {
 #[test]
 fn uncalled_generic_fns_with_supertraits_and_equations() {
     let ok = "trait Sum: std::ops::Add<Output = Self> + Sized {}\nfn f<T: Sum>(a: T, b: T) -> T {\n    a + b\n}\nfn g<T: std::ops::Deref<Target = i32>>(x: &T) -> &i32 {\n    x\n}\nfn h<T>(x: &T) -> &i32\nwhere\n    T: std::ops::Deref<Target = i32>,\n{\n    x\n}\nfn main() {}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     assert!(s.check(ok).is_empty(), "{:?}", s.check(ok));
     let fnptr = "trait Bad {\n    fn make() -> Self;\n}\nfn unused<T>(_: fn(&dyn Bad)) {}\nfn main() {}\n";
     let d = s.check(fnptr);
@@ -245,7 +245,7 @@ fn uncalled_generic_fns_with_supertraits_and_equations() {
 /// `#![allow(overflowing_literals)]` out leaves the declarations as they were, and the check memo is not reused then
 #[test]
 fn overflowing_literals_in_constants_and_after_allow_removed() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let unused = "fn main() {}\n\nconst BAD: i8 = -129;\n";
     let d = s.check(unused);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![3], "{d:?}");
@@ -263,7 +263,7 @@ fn overflowing_literals_in_constants_and_after_allow_removed() {
 /// clause relates are not
 #[test]
 fn free_parameters_mismatch_and_reference_operators() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let src = "fn f<X, Y>(x: X, y: Y) -> X {\n    y\n}\ntrait Tr: Sized {\n    fn test<X>(u: X) -> Self {\n        u\n    }\n}\nfn ok<T>(x: &T) -> &T {\n    x.clone()\n}\nfn add_ref<T: Copy>(a: T) {\n    let _ = &a + a;\n}\nfn main() {}\n";
     let d = s.check(src);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2, 6, 13], "{d:?}");
@@ -276,7 +276,7 @@ fn free_parameters_mismatch_and_reference_operators() {
 /// its supertraits (`trait Num: Copy`, `trait Dup: Clone`) makes the parameter Copy / Clone there
 #[test]
 fn repeat_needs_copy_and_marker_supertraits() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let src = "trait Num: Copy {}\nfn ok<T: Num>(x: T) -> [T; 3] { [x; 3] }\nfn ok2<T: Copy, const N: usize>(x: T) -> [T; N] { [x; N] }\nfn g<T, const N: usize>(x: T) -> [T; N] {\n    [x; N]\n}\nfn h<T>(x: T) -> [T; 3] {\n    [x; 3]\n}\nfn main() {}\ntrait Dup: Clone {}\nfn dup<T: Dup>(x: &T) -> T { x.clone() }\ntrait Cp: Copy {}\nfn dup2<T: Cp>(x: &T) -> T { x.clone() }\n";
     let d = s.check(src);
     assert_eq!(d.iter().map(|d| d.line).collect::<Vec<_>>(), vec![8], "{d:?}");
@@ -288,7 +288,7 @@ fn repeat_needs_copy_and_marker_supertraits() {
 /// equation is not free; a variant pattern may leave defaulted arguments out
 #[test]
 fn review68_supertraits_equations_defaults() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let long = "trait A9 {}\ntrait A8: A9 {}\ntrait A7: A8 {}\ntrait A6: A7 {}\ntrait A5: A6 {}\ntrait A4: A5 {}\ntrait A3: A4 {}\ntrait A2: A3 {}\ntrait A1: A2 {}\ntrait A0: A1 {}\nfn rep<T: A0>(x: T) -> [T; 3] {\n    [x; 3]\n}\nfn main() {}\n";
     assert_eq!(s.check(long).iter().map(|d| d.line).collect::<Vec<_>>(), vec![12], "{:?}", s.check(long));
     for ok in ["trait A8<U>: std::ops::Deref<Target = U> {}\ntrait A7<U>: A8<U> {}\ntrait A6<U>: A7<U> {}\ntrait A5<U>: A6<U> {}\ntrait A4<U>: A5<U> {}\ntrait A3<U>: A4<U> {}\ntrait A2<U>: A3<U> {}\ntrait A1<U>: A2<U> {}\ntrait A0<U>: A1<U> {}\nfn project<T: A0<U>, U>(x: &T) -> &U {\n    x\n}\nfn main() {}\n", "trait View<U> where Self: std::ops::Deref<Target = U> {}\nfn project<T: View<U>, U>(x: &T) -> &U {\n    x\n}\nfn main() {}\n", "trait Num where Self: Copy {}\nfn repeat<T: Num>(x: T) -> [T; 3] {\n    [x; 3]\n}\nfn main() {}\n", "trait View<U>: std::ops::Deref<Target = U> {}\nfn project<T: View<U>, U>(x: &T) -> &U {\n    x\n}\nfn main() {}\n", "enum E<T, U = ()> {\n    V(T, U),\n}\nfn main() {\n    let e = E::<u8, ()>::V(1, ());\n    match e {\n        E::<u8>::V(..) => {}\n    }\n}\n"] {
@@ -301,7 +301,7 @@ fn review68_supertraits_equations_defaults() {
 /// argument, or a parameter's implicit `Sized`, and then nothing is reported
 #[test]
 fn wf_bounds_held_by_bounds_where_clauses_and_supertraits() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let src = "trait Tr {}\ntrait Sub: Tr {}\nstruct S<T: Tr>(T);\nstruct A<K: Tr> {\n    s: S<K>,\n}\nstruct B<K>\nwhere\n    K: Tr,\n{\n    s: S<K>,\n}\nstruct C<K: Sub> {\n    s: S<K>,\n}\nstruct D<K: Tr + Clone> {\n    s: Vec<S<K>>,\n}\nimpl<K: Tr> S<K> {\n    fn get(&self) -> &K {\n        &self.0\n    }\n}\nimpl Tr for u8 {}\nstruct E {\n    s: S<u8>,\n}\ntrait G<X> {}\nstruct H<T: G<u8>>(T);\nstruct I<K: G<u8>> {\n    h: H<K>,\n}\nstruct Sz<T: Sized>(T);\nstruct J<K> {\n    s: Sz<K>,\n}\nimpl<K> Clone for A<K>\nwhere\n    K: Tr + Clone,\n{\n    fn clone(&self) -> Self {\n        A { s: S(self.s.get().clone()) }\n    }\n}\nfn main() {}\n";
     assert!(s.check(src).is_empty(), "{:?}", s.check(src));
 }
@@ -311,7 +311,7 @@ fn wf_bounds_held_by_bounds_where_clauses_and_supertraits() {
 /// same item still does, and a `?Sized` in a string declares nothing
 #[test]
 fn wf_maybe_unsized_parameter_does_not_hold_sized() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let bad = "struct Sz<T: Sized>(T);\nstruct J<K: ?Sized> {\n    s: Box<Sz<K>>,\n}\nfn main() {}\n";
     let ds = s.check(bad);
     assert_eq!(ds.iter().map(|d| d.line).collect::<Vec<_>>(), vec![3], "{ds:?}");
@@ -338,7 +338,7 @@ fn wf_maybe_unsized_parameter_does_not_hold_sized() {
 /// placeholder instance in zustc, so the name is not looked up in it)
 #[test]
 fn undeclared_names_in_uncalled_generic_fns() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let src = "fn f() -> i32 {\n    foo + 1\n}\nfn g<T: Copy>() {\n    foo == 2;\n}\ntrait B<A> {\n    fn a() -> A {\n        this.a\n    }\n}\nfn main() { f(); }\n";
     let ds = s.check(src);
     assert_eq!(ds.iter().map(|d| d.line).collect::<Vec<_>>(), vec![2, 5, 9], "{ds:?}");
@@ -361,7 +361,7 @@ fn undeclared_names_in_uncalled_generic_fns() {
 /// impl header, a union field something writes and a tuple struct's `()` field are used
 #[test]
 fn dead_code_fields_variants_members_aliases() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
     let field = "#![allow(unused_variables)]\n#![deny(dead_code)]\n#[derive(Debug, Clone)]\nstruct A {\n    x: u8,\n    f: u8,\n}\nfn main() {\n    let a = A { x: 1, f: 2 };\n    let _ = a.x;\n}\n";
     assert_eq!(first(field), Some((6, "field `f` is never read".to_string())));
@@ -382,7 +382,7 @@ fn dead_code_fields_variants_members_aliases() {
 /// `if`/`else` whose branches both diverge; not the right of `||`, which may not run
 #[test]
 fn unreachable_code_in_expressions() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
     let arg = "#![deny(unreachable_code)]\nfn foo(x: u8, y: usize) {}\nfn a() {\n    foo(return, 22);\n}\nfn main() {}\n";
     assert_eq!(first(arg), Some((4, "unreachable expression".to_string())));
@@ -402,7 +402,7 @@ fn unreachable_code_in_expressions() {
 /// names once), a closure's parameter its body never reads, a `for` loop's binding the body never reads
 #[test]
 fn unused_variables_in_arms_closures_and_loops() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
     let arm = "#![deny(unused_variables)]\nfn main() {\n    let v = match 0u8 {\n        a => 0,\n    };\n    let _ = v;\n}\n";
     assert_eq!(first(arm), Some((4, "unused variable: `a`".to_string())));
@@ -421,7 +421,7 @@ fn unused_variables_in_arms_closures_and_loops() {
 /// comments nest in a `use`; `Iterator<Item = u8> + ?Sized` is still `?Sized`
 #[test]
 fn review72_dead_code_and_sized() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let flag = true;\n    let _e = match flag { true => E::A, false => E::B };\n}\n";
     assert!(s.check(src).is_empty(), "arms_ok: {:?}", s.check(src));
     let src = "#![deny(dead_code)]\nenum E { A, B }\nfn main() {\n    let flag = true;\n    let _e = match flag {\n        true => { E::A }\n        false => E::B,\n    };\n}\n";
@@ -456,7 +456,7 @@ fn review72_dead_code_and_sized() {
 /// struct's field
 #[test]
 fn review72_second_round() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
     let src = "#![forbid(warnings)]\n#![allow(dead_code)]\nfn unused() {}\nfn main() {}\n";
     assert_eq!(first(src), None, "forbid_warnings_allow_ok");
@@ -540,7 +540,7 @@ fn review72_second_round() {
 /// value, the name of a shorthand field)
 #[test]
 fn mismatch_at_the_branch_rustc_points_at() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut line = |src: &str| s.check(src).first().map(|d| d.line);
     let if_else = "fn main() {\n    let _ = if true {\n        1i32\n    } else {\n        2u32\n    };\n}\n";
     assert_eq!(line(if_else), Some(5));
@@ -560,7 +560,7 @@ fn mismatch_at_the_branch_rustc_points_at() {
 /// A condition (or iterator) that took the block meant to follow it: rustc's error at the `if` / `for`
 #[test]
 fn swallowed_block_at_the_keyword() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
     let bare = "fn a() {\n    if {}\n}\nfn main() {}\n";
     assert_eq!(first(bare), Some((2, "missing condition for `if` expression".to_string())));
@@ -577,7 +577,7 @@ fn swallowed_block_at_the_keyword() {
 /// when the source enables it
 #[test]
 fn feature_gated_attributes_and_abis() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
     let cases = [
         ("#[lang = \"foo\"]\nfn f() {}\nfn main() {}\n", 1, "lang items are subject to change", "lang_items"),
@@ -602,7 +602,7 @@ fn feature_gated_attributes_and_abis() {
 /// a `cfg` that is false strips it, an allow of the lint leaves it alone
 #[test]
 fn unused_import_after_attributes() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
     let src = "#![deny(unused_imports)]\n#[deprecated]\n#[cfg(not(FALSE))]\nuse std::fs;\nfn main() {}\n";
     assert_eq!(first(src), Some((4, "unused import: `std::fs`".to_string())));
@@ -614,7 +614,7 @@ fn unused_import_after_attributes() {
 fn trait_arity_at_impls() {
     // (E0107 at an impl of the program's trait with the wrong number of generic arguments; messages, lines and
     // columns as rustc 1.100 gives them. Lifetimes and defaulted parameters are counted as rustc does)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
     let src = "trait Seq {}\nimpl Seq<bool> for u32 {}\nfn main() {}\n";
     assert_eq!(first(src), Some((2, 6, "trait takes 0 generic arguments but 1 generic argument was supplied (E0107)".to_string())), "too_many");
@@ -641,7 +641,7 @@ fn trait_arity_at_impls() {
 #[test]
 fn review91_attributes_imports_unreachable() {
     // (review of #91, each checked with rustc 1.100)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
     // (unused_imports: a `]` in an attribute's string; `expect(unused_must_use)` is another lint; a name another
     // `use` starts with is used)
@@ -728,7 +728,7 @@ fn review91_attributes_imports_unreachable() {
 fn fn_item_cannot_capture() {
     // (E0434 at the use, at rustc 1.100's line and column; a nested fn's own parameters, the program's items and
     // closures are left alone)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
     let e = |l: usize, c: usize| Some((l, c, "can't capture dynamic environment in a fn item (E0434)".to_string()));
     assert_eq!(first("fn foo() {\n    let y = 5;\n    fn bar() -> u32 {\n        y\n    }\n}\nfn main() {}\n"), e(4, 9), "let");
@@ -742,7 +742,7 @@ fn fn_item_cannot_capture() {
 #[test]
 fn visibility_where_it_means_nothing() {
     // (E0449 at the `pub`, at rustc 1.100's line and column; a visibility where it means something is left alone)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
     let e = |l: usize, c: usize| Some((l, c, "visibility qualifiers are not permitted here (E0449)".to_string()));
     assert_eq!(first("struct B;\npub impl B {}\nfn main() {}\n"), e(2, 1), "impl");
@@ -759,7 +759,7 @@ fn visibility_where_it_means_nothing() {
 fn dyn_without_associated_types() {
     // (E0191 at a trait object written in a type that leaves an associated type of its trait, or of a supertrait,
     // without a value, as rustc 1.100 reports it)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
     let e = |line: usize, col: usize, what: &str| Some((line, col, format!("the value of the associated {what} must be specified (E0191)")));
     let src = "trait Trait {\n    type Bar;\n}\ntype Foo = dyn Trait;\nfn main() {}\n";
@@ -823,7 +823,7 @@ fn dyn_without_associated_types() {
 #[test]
 fn review100_capture_visibility_dyn_gat() {
     // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
     let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
     // (E0449: past a nested comment; `pub(crate)` and `unsafe` before `extern`; not an item in a discriminant)
@@ -897,7 +897,7 @@ fn review100_capture_visibility_dyn_gat() {
 fn malformed_attribute_input() {
     // (a built-in attribute in a shape rustc cannot read, as rustc 1.100 reports it; a `cfg` predicate is read from
     // the source as written, as the configuring takes the attributes away)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
     let lit = |found: &str| format!("expected a literal (`1u8`, `1.0f32`, `\"string\"`, etc.) here, found {found}");
     let cases: &[(&str, Option<String>)] = &[
@@ -946,7 +946,7 @@ fn malformed_attribute_input() {
 fn gat_arity_at_uses() {
     // (E0107 at a use of a generic associated type without its arguments or with the wrong number of lifetimes,
     // as rustc 1.100 reports them; valid uses, bindings with arguments and other traits' names are left alone)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
     let src = "trait StreamingIterator {\n    type Item<'a>;\n    fn next(&mut self) -> Option<Self::Item>;\n}\nfn main() {}\n";
     assert_eq!(first(src), Some((3, 40, "missing generics for associated type `StreamingIterator::Item` (E0107)".to_string())), "self_path");
@@ -963,7 +963,7 @@ fn unsafe_attributes() {
     // (`#[unsafe(..)]` around an attribute that is not an unsafe one, the keyword where a path goes, and an unsafe
     // attribute without `unsafe` where that is an error, as rustc 1.100 reports them)
     let check = |edition: u16, src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let at = |l: usize, m: &str| Some((l, m.to_string()));
@@ -988,7 +988,7 @@ fn unsafe_attributes() {
 fn proc_macro_attributes_outside_a_proc_macro_crate() {
     // (a proc macro's attribute in a crate that is not `proc-macro`, as rustc 1.100 reports it: on a fn, the crate
     // type; on another item, the item's kind. A comment that names the crate type does not make the crate one)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
     let at = |l: usize, m: &str| Some((l, m.to_string()));
     for a in ["proc_macro", "proc_macro_derive", "proc_macro_attribute"] {
@@ -1003,7 +1003,7 @@ fn proc_macro_attributes_outside_a_proc_macro_crate() {
 #[test]
 fn review100_second_round() {
     // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
     let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
     let item = |what: &str| format!("the value of the associated {what} must be specified (E0191)");
@@ -1039,7 +1039,7 @@ fn review100_second_round() {
 #[test]
 fn review100_third_round() {
     // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
     let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
     let cap = "can't capture dynamic environment in a fn item (E0434)";
@@ -1064,7 +1064,7 @@ fn review100_third_round() {
 #[test]
 fn review100_fourth_round() {
     // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()));
     let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
     let cap = "can't capture dynamic environment in a fn item (E0434)";
@@ -1086,7 +1086,7 @@ fn review100_fourth_round() {
 fn attributes_at_crate_level_and_misplaced() {
     // (as rustc 1.100 reports them: an attribute macro an item takes, written at the crate; an attribute on an item
     // of a kind it does not apply to, an error or, for those rustc only warns about, an error where the lint is denied)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let mut first = |src: &str| s.check(src).first().map(|d| (d.line, d.msg.clone()));
     let at = |l: usize, m: &str| Some((l, m.to_string()));
     for a in ["derive(Debug)", "test", "test_case", "bench", "global_allocator"] {
@@ -1124,7 +1124,7 @@ fn attributes_at_crate_level_and_misplaced() {
 fn review106_attribute_scans() {
     // (each expected line and message is rustc 1.100's on the same source; None where rustc accepts it)
     let check = |edition: u16, src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let at = |l: usize, m: &str| Some((l, m.to_string()));
@@ -1148,7 +1148,7 @@ fn review106_attribute_scans() {
 fn review106_second_round() {
     // (each expected line and message is rustc 1.100's on the same source; None where rustc accepts it)
     let check = |edition: u16, src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let at = |l: usize, m: &str| Some((l, m.to_string()));
@@ -1180,7 +1180,7 @@ fn review106_second_round() {
 fn private_paths() {
     // (E0603: each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
     let check = |edition: u16, src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let at = |l: usize, c: usize, m: &str| Some((l, c, format!("{m} (E0603)")));
@@ -1223,7 +1223,7 @@ fn private_paths() {
 fn review106_third_round() {
     // (each expected line and message is rustc 1.100's on the same source; None where rustc accepts it)
     let check = |edition: u16, src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let at = |l: usize, m: &str| Some((l, m.to_string()));
@@ -1257,7 +1257,7 @@ fn review106_third_round() {
 fn attributes_on_variants_params_and_prototypes() {
     // (each expected line and message is rustc 1.100's on the same source; None where rustc accepts it)
     let check = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let at = |l: usize, m: &str| Some((l, m.to_string()));
@@ -1292,7 +1292,7 @@ fn attributes_on_variants_params_and_prototypes() {
 fn unknown_attributes_anywhere() {
     // (each expected line is rustc 1.100's "cannot find attribute" on the same source; None where rustc accepts it)
     let check = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let at = |l: usize, n: &str| Some((l, format!("cannot find attribute `{n}` in this scope")));
@@ -1327,7 +1327,7 @@ fn unresolved_imports() {
     // (each expected line, column and message is rustc 1.100's on the same source, in both editions unless one is
     // given; None where rustc accepts it)
     let check = |edition: u16, src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let at = |l: usize, m: &str| Some((l, m.to_string()));
@@ -1369,7 +1369,7 @@ fn field_privacy() {
     // expected line, column and message is rustc 1.100's on the same source, in both editions; None where rustc
     // accepts it)
     let check = |edition: u16, src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
@@ -1406,7 +1406,7 @@ fn method_privacy() {
     // (E0624: a fn or const of an inherent impl, not `pub`, used outside the module of the impl; each expected line,
     // column and message is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
     let check = |edition: u16, src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
@@ -1438,7 +1438,7 @@ fn import_privacy_and_reexports() {
     // (E0603 through a private import; E0364 / E0365: a re-export wider than what it names. Each expected line,
     // column and message is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
     let check = |edition: u16, src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
@@ -1472,7 +1472,7 @@ fn import_cycles() {
     // (E0432: an import that names only itself through other imports, a glob of a module into itself; each expected
     // line, column and message is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
     let check = |edition: u16, src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
@@ -1498,7 +1498,7 @@ fn tuple_constructors_and_leading_super() {
     // `super`s than the module has parents. Each expected line, column and message is rustc 1.100's on the same source,
     // in both editions; None where rustc accepts it)
     let check = |edition: u16, src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
@@ -1528,7 +1528,7 @@ fn generic_parameters_from_outer_item() {
     // (E0401: an item in a fn body that names a generic parameter or `Self` of an item around it; each expected line,
     // column and message is rustc 1.100's on the same source; None where rustc accepts it)
     let check = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let at = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
@@ -1557,7 +1557,7 @@ fn glob_ambiguity() {
     // (E0659: a name two glob imports bring with different definitions, where a path names it; each expected line
     // and column is rustc 1.100's on the same source, in both editions; None where rustc accepts it)
     let check = |edition: u16, src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let two = "mod a { pub struct S; }\nmod b { pub struct S; }\nuse a::*;\nuse b::*;\n";
@@ -1595,7 +1595,7 @@ fn glob_ambiguity() {
 fn fn_qualifier_order() {
     // (each expected line, column and message is rustc 1.100's on the same source; None where rustc accepts it)
     let check = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     for (q, col, msg) in [
@@ -1621,7 +1621,7 @@ fn review106_fourth_round() {
     // (each expected line and message is rustc 1.100's on the same source, or the error it reports there; None where
     // rustc accepts it)
     let check = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let at = |l: usize, m: &str| Some((l, m.to_string()));
@@ -1677,7 +1677,7 @@ fn item_errors_at_their_part() {
     // a union cannot have or that is unknown, the variant whose implicit discriminant overflows, also in a fn body;
     // each expected line is rustc 1.100's on the same source)
     let line = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let src = "union U {\n    a: u8,\n    b: String,\n}\nfn main() {}\n";
@@ -1697,7 +1697,7 @@ fn errors_at_their_statement() {
     // (an error whose expression has no position of its own, at the statement's line, and the checks that come with
     // it; each expected line and message is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let at = |l: usize, m: &str| Some((l, m.to_string()));
@@ -1721,7 +1721,7 @@ fn errors_at_their_statement() {
 /// reference is not for the type it refers to. Each was checked against rustc 1.97
 #[test]
 fn impl_bounds_are_nested_goals() {
-    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let check = |src: &str| Session::new(Options { jobs: 1, no_cache: true, ..Options::default() }).check(src);
     let pre = "trait Bar {}\ntrait Foo { fn foo(&self) {} }\nstruct W<T>(T);\nimpl Bar for i32 {}\nfn need<F: Foo>(_: F) {}\n";
     let bad = |body: &str| {
         let src = format!("{pre}{body}\n");
@@ -1791,7 +1791,7 @@ fn impl_bounds_are_nested_goals() {
 /// error. Each was checked against rustc 1.97
 #[test]
 fn goals_have_a_certainty() {
-    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let check = |src: &str| Session::new(Options { jobs: 1, no_cache: true, ..Options::default() }).check(src);
     let e0275 = |src: &str, at: &str| {
         let d = check(src);
         assert!(d.len() == 1 && d[0].msg.contains("overflow evaluating the requirement") && d[0].msg.contains(at), "{src}\n{d:?}");
@@ -1825,7 +1825,7 @@ fn format_string_errors_at_their_char() {
     // (an invalid format string at the char rustc points at, escapes, line continuations and raw strings counted;
     // each expected line, column and message is rustc 1.100's on the same source)
     let first = |body: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
         s.check(&format!("fn main() {{\n    {body}\n}}\n")).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let at = |c: usize, m: &str| Some((2, c, format!("invalid format string: {m}")));
@@ -1837,7 +1837,7 @@ fn format_string_errors_at_their_char() {
     assert_eq!(first(r#"let _ = format!("{ }", 1);"#), None, "white space only");
     assert_eq!(first(r#"let _ = format!("{x }", x = 1);"#), None, "white space after");
     // (a line continuation: the next line's char)
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check("fn main() {\n    let _ = format!(\"  \\\n    { \\\n    b\");\n}\n");
     assert_eq!(d.first().map(|d| (d.line, d.msg.clone())), Some((4, "invalid format string: expected `}`, found `b`".to_string())), "continuation");
 }
@@ -1847,7 +1847,7 @@ fn fn_value_mismatch_at_its_origin() {
     // (a fn body's value that is not of the return type, where rustc points: the tail `()`, a `loop`'s `break`, the
     // `match` arm that does not diverge, an `unsafe` block; each expected line is rustc 1.100's on the same source)
     let line = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
         s.check(src).first().map(|d| d.line)
     };
     assert_eq!(line("fn foo() -> usize {\n    ()\n}\nfn main() {}\n"), Some(2), "unit tail");
@@ -1862,7 +1862,7 @@ fn parse_errors_where_rustc_points() {
     // (a missing `;` before a token on a later line: right after the expression; a struct field's missing `:` in a
     // fn body's struct: at its line, not past the file. Each expected line and column is rustc 1.100's)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col))
     };
     assert_eq!(first("fn f() -> f32 {\n    3\n    5.0\n}\nfn main() {}\n"), Some((2, 6)), "missing semicolon");
@@ -1874,7 +1874,7 @@ fn dyn_compatibility() {
     // (E0038: a `dyn` of a trait that is not dyn compatible, at the `dyn`, naming the trait whose own definition
     // makes it so; each expected line, column and message is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize, t: &str| Some((l, c, format!("the trait `{t}` is not dyn compatible (E0038)")));
@@ -1894,7 +1894,7 @@ fn method_signature_mismatch() {
     // (E0053: an impl's method whose parameter, result or `unsafe` is not the trait's, at the part rustc points at;
     // each expected line and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize, m: &str| Some((l, c, format!("method `{m}` has an incompatible type for trait `Foo` (E0053)")));
@@ -1913,7 +1913,7 @@ fn unused_variables_where_the_lint_is_denied() {
     // (unused_variables at the levels its attributes give: the crate's, the fn's, a statement's or an arm's; each
     // expected line and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2024, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2024, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize, n: &str| Some((l, c, format!("unused variable: `{n}`")));
@@ -1946,7 +1946,7 @@ fn copy_with_a_field_that_is_not() {
     // (E0204: `Copy` for a type with a field that is not Copy, at the type's name for a derive and at the self type
     // for an impl; each expected line and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize| Some((l, c, "the trait `Copy` cannot be implemented for this type (E0204)".to_string()));
@@ -1966,7 +1966,7 @@ fn gated_cfg_names() {
     // (E0658: a `cfg` predicate of a name behind a feature gate, at the name, unless the crate enables the feature;
     // each expected line and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize, n: &str| Some((l, c, format!("`cfg({n})` is experimental and subject to change (E0658)")));
@@ -1987,7 +1987,7 @@ fn integer_literal_where_a_float_is_expected() {
     // (an unsuffixed integer literal is never a float: E0308 where a float is expected, E0277 for arithmetic with a
     // float, at the operator; each expected line and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
@@ -2006,7 +2006,7 @@ fn unsized_where_sized_is_needed() {
     // program's whose parameter does not say `?Sized`, an enum variant's field, a struct's field before the last; each
     // expected line and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize, t: &str| Some((l, c, format!("the size for values of type `{t}` cannot be known at compilation time (E0277)")));
@@ -2025,7 +2025,7 @@ fn method_of_an_unbounded_type_parameter() {
     // (E0599: a method of a type parameter with no bounds but markers, in a fn nothing instantiates; each expected line
     // and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize, m: &str| Some((l, c, format!("no method named `{m}` found for type parameter `T` in the current scope (E0599)")));
@@ -2046,7 +2046,7 @@ fn attribute_paths_that_resolve_to_nothing() {
     // (E0433: an attribute written as a path whose first segment is no tool and no module, or a module's that has no
     // such attribute; each expected line and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize, m: &str| Some((l, c, format!("{m} (E0433)")));
@@ -2062,7 +2062,7 @@ fn local_where_a_constant_goes() {
     // (E0435: a local of a fn in a value a constant holds, or in an array's length; each expected line and column is
     // rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize| Some((l, c, "attempt to use a non-constant value in a constant (E0435)".to_string()));
@@ -2084,7 +2084,7 @@ fn errors_in_a_fn_written_in_another() {
     // (a fn written inside another one is checked hoisted out of it: the type errors that hold wherever it is are
     // reported where it was written; each expected line (and column, where given) is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let at = |src: &str| first(src).map(|d| (d.0, d.1));
@@ -2131,7 +2131,7 @@ fn diff_markers_and_mismatched_delimiters() {
     // (rustc 1.100's lexer and parser errors on the same source: a merge's diff marker at its line's first column; a
     // closing delimiter that does not close the innermost open one at its line, where rustc labels it)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let marker = |l: usize| Some((l, 1, "encountered diff marker".to_string()));
@@ -2163,7 +2163,7 @@ fn unnamed_imports_atomic_orderings_and_variant_bindings() {
     // (E0431, invalid_atomic_ordering and bindings_with_variant_name (E0170); each expected line and column is
     // rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let unnamed = |l: usize, c: usize| Some((l, c, "imports need to be explicitly named".to_string()));
@@ -2202,7 +2202,7 @@ fn stricter_bounds_than_the_trait() {
     // (E0276: an impl's method whose own type parameter has a bound the trait's method does not give; each expected
     // line and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize| Some((l, c, "impl has stricter requirements than trait (E0276)".to_string()));
@@ -2222,7 +2222,7 @@ fn duplicate_items_in_an_impl() {
     // (E0201 in a trait's impl, E0592 in an inherent one: the second item of a name in one namespace, at its start;
     // each expected line and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     assert_eq!(
@@ -2248,7 +2248,7 @@ fn duplicate_items_in_an_impl() {
 fn trait_bounds_that_name_no_trait_in_scope() {
     // (E0405 / E0404 at a fn's bound; each expected line and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize, n: &str, code: &str| Some((l, c, format!("cannot find trait `{n}` in this scope ({code})")));
@@ -2267,7 +2267,7 @@ fn trait_bounds_that_name_no_trait_in_scope() {
 fn unstable_items_of_std() {
     // (E0658 of a `use` of an unstable item of std's; each expected line and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize, f: &str| Some((l, c, format!("use of unstable library feature `{f}` (E0658)")));
@@ -2290,7 +2290,7 @@ fn calls_of_the_fn_traits_methods() {
     // (E0658: `call` / `call_mut` / `call_once` of a closure or an `F: Fn..` parameter need `fn_traits`; each expected
     // line and column is rustc 1.100's on the same source)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize| Some((l, c, "use of unstable library feature `fn_traits` (E0658)".to_string()));
@@ -2308,7 +2308,7 @@ fn calls_of_the_fn_traits_methods() {
 fn malformed_link_attributes() {
     // (`link_name` takes `= "name"`, `link_ordinal` an integer: E0539, at the attribute's line as rustc 1.100)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     assert_eq!(first("#[link_name]\nextern \"C\" {\n    fn bar() -> u32;\n}\nfn main() {}\n"), Some((1, "malformed `link_name` attribute input".to_string())), "link_name");
@@ -2320,7 +2320,7 @@ fn malformed_link_attributes() {
 fn derive_on_an_item_of_another_kind() {
     // (E0774: a derive is a struct's, an enum's or a union's; at the attribute's line as rustc 1.100)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let e = |l: usize| Some((l, "`derive` may only be applied to `struct`s, `enum`s and `union`s (E0774)".to_string()));
@@ -2335,7 +2335,7 @@ fn item_declarations_rustc_rejects() {
     // (E0646, E0128, E0109, E0116, E0091, E0130, E0118, E0229, E0040: errors of an item's own declaration or a call, at the lines rustc 1.100
     // reports them)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let e = |l: usize, m: &str| Some((l, m.to_string()));
@@ -2376,7 +2376,7 @@ fn item_declarations_rustc_rejects() {
 fn returns_ranges_and_receivers_rustc_rejects() {
     // (E0572, E0586, E0185 / E0186, at the lines rustc 1.100 reports them)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let e = |l: usize, m: &str| Some((l, m.to_string()));
@@ -2400,7 +2400,7 @@ fn returns_ranges_and_receivers_rustc_rejects() {
 fn link_names_and_members_rustc_rejects() {
     // (E0454, E0459, E0648, E0437, E0438, at the lines rustc 1.100 reports them)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let e = |l: usize, m: &str| Some((l, m.to_string()));
@@ -2429,7 +2429,7 @@ fn link_names_and_members_rustc_rejects() {
 fn elided_lifetimes_and_foreign_bodies() {
     // (E0726, and a fn with a body in an extern block, at the lines rustc 1.100 reports them)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let e = |l: usize, m: &str| Some((l, m.to_string()));
@@ -2449,7 +2449,7 @@ fn elided_lifetimes_and_foreign_bodies() {
 fn type_parameter_counts_against_the_trait() {
     // (E0049, at the impl's method as rustc 1.100)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let e = |l: usize, m: &str| Some((l, m.to_string()));
@@ -2475,7 +2475,7 @@ fn type_parameter_counts_against_the_trait() {
 fn item_errors_at_the_part_rustc_points_at() {
     // (E0072 at the type's name, E0746 at the return type, a fn's `static X: T;` at its line)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let e = |l: usize, m: &str| Some((l, m.to_string()));
@@ -2492,7 +2492,7 @@ fn item_errors_at_the_part_rustc_points_at() {
 fn awaits_and_binders_where_rustc_points() {
     // (E0728 at the `await`; a `for<..>` binder as rustc's parser reads it)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     assert_eq!(
@@ -2512,7 +2512,7 @@ fn awaits_and_binders_where_rustc_points() {
 fn macro_fragments_and_unit_patterns() {
     // (a matcher's fragment specifier rustc does not know, E0533, at the lines rustc 1.100 reports them)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let e = |l: usize, m: &str| Some((l, m.to_string()));
@@ -2538,7 +2538,7 @@ fn macro_fragments_and_unit_patterns() {
 fn names_defined_twice_in_one_item_or_by_macro_export() {
     // (E0428 of two variants, two foreign items, two `#[macro_export]` macros, as rustc 1.100)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let e = |l: usize, n: &str| Some((l, format!("the name `{n}` is defined multiple times (E0428)")));
@@ -2553,7 +2553,7 @@ fn names_defined_twice_in_one_item_or_by_macro_export() {
 fn keyword_labels_and_limit_values() {
     // (rustc 1.100's `eat_label` and limit attributes, at their place)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let kw = |l: usize, c: usize| Some((l, c, "labels cannot use keyword names".to_string()));
@@ -2572,7 +2572,7 @@ fn keyword_labels_and_limit_values() {
 fn generic_parameter_defaults_where_rustc_rejects_them() {
     // (rustc 1.100: a const parameter's default on a fn or an impl; a default before a parameter without one)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let here = |l: usize, c: usize| Some((l, c, "defaults for generic parameters are not allowed here".to_string()));
@@ -2591,7 +2591,7 @@ fn generic_parameter_defaults_where_rustc_rejects_them() {
 #[test]
 fn trait_solver_no_in_uncalled_generic_fn() {
     let src = "trait Foo {}\ntrait Bar {}\nimpl<T: Bar> Foo for Vec<T> {}\nfn needs_foo<T: Foo>(_: T) {}\nfn hello<T>(_: T) {\n    needs_foo(Vec::<u8>::new());\n}\nfn main() {}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(src);
     assert_eq!(d.len(), 1, "{d:?}");
     assert_eq!(d[0].line, 6, "{d:?}");
@@ -2606,7 +2606,7 @@ fn trait_solver_no_in_uncalled_generic_fn() {
 #[test]
 fn trait_solver_auto_traits_of_type_parameters() {
     let src = "fn is_send<T: Send>(_: T) {}\ntrait Shared: Send {}\nstruct List<T> { v: T, next: Option<Box<List<T>>> }\nfn by_sync<S: Sync>(s: S) {\n    is_send(s);\n}\nfn by_super<S: Shared>(s: S) {\n    is_send(s);\n}\nfn by_list<S: Send>(s: List<S>) {\n    is_send(s);\n}\nfn main() {}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(src);
     assert_eq!(d.len(), 1, "{d:?}");
     assert_eq!(d[0].line, 5, "{d:?}");
@@ -2742,7 +2742,7 @@ fn trait_solver_opaque_std_traits_like_rustc() {
     let mut bad = vec![];
     for &(v, tr, ok) in cases {
         let src = format!("fn f() -> impl {tr} {{ {v} }}\nfn main() {{ let _ = f(); }}\n");
-        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, ..Options::default() });
         let d = s.check(&src);
         // (a no is the bound's own error, naming the trait: not another error of the program)
         let names_bound = |m: &str| m.contains(tr.rsplit("::").next().unwrap_or(tr)) && (m.contains("not satisfied") || m.contains("E0277"));
@@ -2758,7 +2758,7 @@ fn trait_solver_opaque_std_traits_like_rustc() {
 #[test]
 fn trait_solver_placeholder_lacks_copy() {
     let src = "fn require_copy<T: Copy>(_x: T) {}\nstruct Bar<T> {\n    x: T,\n}\nimpl<T> Bar<T> {\n    fn needs_copy(self) where T: Copy {\n        require_copy(self.x);\n    }\n    fn fails_copy(self) {\n        require_copy(self.x);\n    }\n}\nfn main() {}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(src);
     assert_eq!(d.len(), 1, "{d:?}");
     assert_eq!(d[0].line, 10, "{d:?}");
@@ -2770,7 +2770,7 @@ fn trait_solver_placeholder_lacks_copy() {
 #[test]
 fn clone_of_box_keeps_its_literal_open() {
     let src = "#[derive(Clone)]\nstruct B1;\ntrait A {}\nimpl A for B1 {}\nstruct Holder { a: Box<isize> }\nfn main() {\n    let k = Box::new(22);\n    let h = Holder { a: k.clone() };\n    let v: Box<_> = Box::new(B1);\n    let _c: Box<dyn A> = v.clone();\n    let _ = (h.a, k, v);\n}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(src);
     assert!(d.is_empty(), "{d:?}");
 }
@@ -2780,7 +2780,7 @@ fn clone_of_box_keeps_its_literal_open() {
 #[test]
 fn dst_struct_tail_coercions_check() {
     let src = "struct Foo<T: ?Sized> { a: i32, inner: T }\nfn g<T: Copy>(x: &Foo<[T]>) -> T { x.inner[0] }\nfn main() {\n    let f: &Foo<[u8]> = &Foo { a: 32, inner: [1, 2, 3] };\n    let Foo { a, inner } = f;\n    let _ = (a, inner.len(), g(f));\n    let _: u8 = g(&Foo { a: 0, inner: [1u8, 2] });\n    let b: Box<Foo<[u8; 2]>> = Box::new(Foo { a: 1, inner: [4, 5] });\n    let b: Box<Foo<[u8]>> = b;\n    let _ = b.inner.len();\n}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let d = s.check(src);
     assert!(d.is_empty(), "{d:?}");
 }
@@ -2789,7 +2789,7 @@ fn dst_struct_tail_coercions_check() {
 /// argument takes the value a bound meets, so the impl's where clause on it is checked with that value
 #[test]
 fn review_where_self_nested_and_const_refined() {
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     let src = "trait Parent { type X; }\ntrait Pair<A, B> {}\ntrait Child {\n    fn get(&self) -> <Self as Parent>::X where Self: Pair<u8, u16> + Parent;\n}\nfn main() {}\n";
     assert!(s.check(src).is_empty(), "{:?}", s.check(src));
     let src = "struct Const<const N: usize>;\ntrait Bar<const N: usize> {}\nimpl Bar<3> for () {}\ntrait Foo<const N: usize> {}\nimpl<const N: usize> Foo<N> for Const<N> where (): Bar<N> {}\nfn f(_: impl Foo<3>) {}\nfn main() { f(Const); }\n";
@@ -2802,7 +2802,7 @@ fn review_where_self_nested_and_const_refined() {
 /// field read by value is E0277
 #[test]
 fn review_three_cases() {
-    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let check = |src: &str| Session::new(Options { jobs: 1, no_cache: true, ..Options::default() }).check(src);
     for src in [
         "trait Parent { type A; }\ntrait Child where Self: Parent { fn get(&self) -> <Self as Parent>::A; }\nfn main() {}\n",
         "struct Tail<T: ?Sized>(T);\ntrait Flag {}\nimpl<T> Flag for &T {}\nimpl Flag for &Tail<[u8]> {}\nfn main() {}\n",
@@ -2828,7 +2828,7 @@ fn review_three_cases() {
 /// self type when several do
 #[test]
 fn review_four_cases() {
-    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let check = |src: &str| Session::new(Options { jobs: 1, no_cache: true, ..Options::default() }).check(src);
     let d = check("fn main() { let a = [1u8, 2, 3]; let p: *const [u8] = &a; let _ = std::mem::size_of_val(p); }\n");
     assert!(d.len() == 1 && d[0].msg.contains("mismatched types"), "{d:?}");
     let d = check("struct Tail<T: ?Sized>(u8, T);\nfn main() { let b: Box<Tail<[u8]>> = Box::new(Tail(1, [1, 2])); let p: *const Tail<[u8]> = &*b; unsafe { std::ptr::drop_in_place(p); } }\n");
@@ -2854,7 +2854,7 @@ fn review_four_cases() {
 /// - an impl's associated type meets the bounds its trait declares for it (`type A: Bar;`).
 #[test]
 fn projections_are_goals() {
-    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let check = |src: &str| Session::new(Options { jobs: 1, no_cache: true, ..Options::default() }).check(src);
     let bad = |src: &str, want: &str| {
         let d = check(src);
         assert!(d.len() == 1 && d[0].msg.contains(want), "{src}\n{d:?}");
@@ -2930,11 +2930,31 @@ fn projections_are_goals() {
     ok("trait Bar {}\nimpl Bar for u16 {}\ntrait Tr { type A: Bar; }\nimpl Tr for u8 { type A = u16; }\nfn main() {}");
 }
 
+/// Sized (E0277) is not asked where rustc does not ask it: a `?Sized` parameter given `str` or a struct with an unsized
+/// tail, `Box<X>` of a `X: ?Sized`, `T: Clone + ?Sized` in a slice (Clone implies Sized), an unsized last tuple
+/// element behind a reference, `size_of_val` of a str (checked against rustc)
+#[test]
+fn sized_accepts() {
+    let d = Session::new(Options { jobs: 1, no_cache: true, ..Options::default() }).check("trait Tr { fn n(&self) -> u8 { 1 } }\nimpl Tr for u8 {}\nstruct W<T: ?Sized>(u8, T);\nfn relaxed<X: ?Sized>(_: &X) {}\nfn boxed<X: ?Sized + Tr>(x: Box<X>) -> u8 { x.n() }\nfn cloned<T: Clone + ?Sized>(x: &[T]) -> usize { x.to_vec().len() }\nfn main() {\n    relaxed(\"abc\");\n    let w: &W<[u8]> = &W(1, [2u8, 3]);\n    relaxed(w);\n    let t: Option<&(u8, [u8])> = None;\n    let b: Box<dyn Tr> = Box::new(3u8);\n    println!(\"{} {} {} {}\", t.is_none(), boxed(b), std::mem::size_of_val(\"abcd\"), w.0 + cloned(&[1u8]) as u8);\n}\n");
+    assert!(d.is_empty(), "{d:?}");
+}
+
+/// A `?Sized` parameter passed on to one that must be sized, in a generic fn nothing calls (`zustc check` checks it
+/// with placeholders): E0277, as rustc
+#[test]
+fn sized_rejects_maybe_unsized_param() {
+    let check = |src: &str| Session::new(Options { jobs: 1, no_cache: true, ..Options::default() }).check(src);
+    let d = check("fn sized<X>(_: &X) {}\nfn relaxed<X: ?Sized>(x: &X) {\n    sized::<X>(x);\n}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`X` cannot be known"), "{d:?}");
+    let d = check("struct Foo<T>(T);\nfn not_sized<T: ?Sized>() {}\nfn f<T: ?Sized>() { not_sized::<Foo<T>>() }\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
+}
+
 #[test]
 fn async_main_and_test_attributes_where_rustc_rejects_them() {
     // (rustc 1.100: E0752 at the fn; the test macro's error at the `#[test]` on what is no free fn, `--test` or not)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     assert_eq!(first("async fn main() {}\n"), Some((1, 1, "`main` function is not allowed to be `async` (E0752)".to_string())), "async main");
@@ -2952,7 +2972,7 @@ fn macro_definitions_rustc_rejects_and_rules_with_doc_comments() {
     // (rustc 1.100 reads each `macro_rules!` definition, used or not: no rule, a matcher outside delimiters, a rule cut
     // short; a rule's doc comment is a warning, and the rule after it is read)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let e = |l: usize, m: &str| Some((l, m.to_string()));
@@ -2967,7 +2987,7 @@ fn macro_definitions_rustc_rejects_and_rules_with_doc_comments() {
 #[test]
 fn items_of_one_name_in_two_blocks_of_a_fn() {
     // (each block's item is its own: moved out of the fn, they are named apart)
-    let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
     let src = "fn main() {\n    {\n        struct Bar { x: u8 }\n        let _ = Bar { x: 1 };\n    }\n    {\n        struct Bar { y: u16 }\n        let b = Bar { y: 2 };\n        let _ = b.y;\n    }\n    if true {\n        enum E { A }\n        let _ = E::A;\n    } else {\n        enum E { B }\n        let _ = E::B;\n    }\n}\n";
     assert_eq!(s.check(src).first().map(|d| (d.line, d.msg.clone())), None);
     // (an `unsafe fn` in a body is moved out too: it was left there, "nested items are not supported")
@@ -2982,7 +3002,7 @@ fn items_of_one_name_in_two_blocks_of_a_fn() {
 fn literals_and_comments_a_file_ends_in() {
     // (rustc 1.100's lexer errors at the literal's or the comment's start, before the delimiters it leaves open)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize, m: &str| Some((l, c, m.to_string()));
@@ -2997,7 +3017,7 @@ fn literals_and_comments_a_file_ends_in() {
 fn a_struct_field_without_its_comma() {
     // (rustc 1.100: right after the field, where the comma goes)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     assert_eq!(first("pub struct S {\n    pub foo: u32\n    pub bar: u32\n}\nfn main() {}\n"), Some((2, 17, "expected `,`, or `}`, found keyword `pub`".to_string())));
@@ -3010,7 +3030,7 @@ fn a_struct_field_without_its_comma() {
 fn const_and_static_items_without_a_type() {
     // (rustc 1.100: right after the name, or after its colon)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let e = |l: usize, c: usize, kw: &str| Some((l, c, format!("missing type for `{kw}` item")));
@@ -3025,7 +3045,7 @@ fn const_and_static_items_without_a_type() {
 fn attributes_with_no_item_after_them_in_an_impl() {
     // (rustc 1.100: "expected item after attributes", at the first)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     assert_eq!(first("struct Foo;\nimpl Foo {\n    fn foo() {}\n    #[inline]\n    #[allow(dead_code)]\n}\nfn main() {}\n"), Some((4, 5, "expected item after attributes".to_string())));
@@ -3036,7 +3056,7 @@ fn attributes_with_no_item_after_them_in_an_impl() {
 fn abis_no_one_has_and_raw_pointers_without_their_keyword() {
     // (rustc 1.100: E0703 at the ABI's string; a raw pointer type's `const` or `mut`, at the `*`)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     assert_eq!(first("pub extern \"fictional\" fn lol() {}\nfn main() {}\n"), Some((1, 12, "invalid ABI: found `fictional` (E0703)".to_string())));
@@ -3050,7 +3070,7 @@ fn abis_no_one_has_and_raw_pointers_without_their_keyword() {
 fn extern_statics_in_a_static_value() {
     // (rustc 1.100's E0080 for the value, at its line; a fn reads one in `unsafe`)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     assert_eq!(first("extern \"C\" {\n    pub static symbol: u32;\n}\nstatic CRASH: u32 = symbol;\nfn main() {}\n"), Some((4, "cannot access extern static `symbol` (E0080)".to_string())));
@@ -3064,7 +3084,7 @@ fn extern_statics_in_a_static_value() {
 fn macro_parameters_no_matcher_binds() {
     // (rustc 1.100, where the rule is used: at the `$name` in its body; an inner `macro_rules!`'s own `$x` is fine)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     assert_eq!(first("macro_rules! m {\n    (begin $ard:ident end) => {\n        [$arg]\n    };\n}\nfn main() {\n    let x = 1;\n    let _ = m![begin x end];\n}\n"), Some((3, "cannot find macro parameter `$arg` in this scope".to_string())), "a typo");
@@ -3076,7 +3096,7 @@ fn macro_parameters_no_matcher_binds() {
 fn a_for_loop_over_a_struct_with_its_own_next() {
     // (rustc 1.100: E0277 at the expression; an Iterator impl's `next` is fine)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let s = "struct M { x: isize }\nimpl M {\n    fn next(&mut self) -> Option<isize> { Some(self.x) }\n}\nfn main() {\n    let bogus = M { x: 1 };\n    for x in bogus {\n        let _ = x;\n    }\n}\n";
@@ -3090,7 +3110,7 @@ fn renamed_groups_and_derives_by_std_paths() {
     // (rustc 1.100: a group or a glob has no name to rename; a derive of a name std's root does not have. `extern "C"
     // mod foo;` is srcmap's, missing_mod_tests)
     let first = |src: &str| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition: 2021, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
     };
     let m = "mod foo {\n    pub fn bar() {}\n}\nfn main() {}\n";
@@ -3107,7 +3127,7 @@ fn macro_matchers_rustc_rejects_what_follows_a_fragment_in_and_names_bound_twice
     // (rustc 1.100's check_matcher: `expr` is followed by `=>` `,` `;` only, `ty` / `path` by a few more, `pat` by
     // `|` before edition 2021 only; a name bound twice in one matcher)
     let first = |src: &str, edition: u16| {
-        let mut s = Session2::new(Options2 { jobs: 1, edition, ..Options2::default() });
+        let mut s = Session::new(Options { jobs: 1, edition, ..Options::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     let e = |l: usize, m: &str| Some((l, m.to_string()));
@@ -3121,4 +3141,44 @@ fn macro_matchers_rustc_rejects_what_follows_a_fragment_in_and_names_bound_twice
     assert_eq!(first(ok, 2021), None);
     assert_eq!(first("macro_rules! m {\n    ($a:ident, $($a:ident),*) => {};\n}\nfn main() {}\n", 2021), e(2, "duplicate matcher binding"));
     assert_eq!(first("macro_rules! m {\n    ($a:ident) => {};\n    ($a:path) => {};\n}\nfn main() {}\n", 2021), None);
+}
+
+/// Review of #180, each checked against rustc: a struct whose tail is a `?Sized` parameter is unsized by value in a
+/// signature (E0277); a program trait whose supertrait is Clone makes a `?Sized` parameter sized; a closure does not
+/// make its parent's `?Sized` parameter sized
+#[test]
+fn sized_review_cases() {
+    let check = |src: &str| Session::new(Options { jobs: 1, no_cache: true, ..Options::default() }).check(src);
+    let d = check("struct W<T: ?Sized>(T);\nfn bad<T: ?Sized>(_: W<T>) {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
+    // (at the argument's type in a signature over lines, as rustc; a let's annotation whatever its initializer)
+    for src in [
+        "fn bad<T: ?Sized>(\n    x: T,\n) {}\nfn main() {}\n",
+        // (a generic bound's `Fn()` and a `pub(crate)` are not the parameters' parentheses)
+        "fn bad<F: Fn(), T: ?Sized>(\n    x: T,\n) {}\nfn main() {}\n",
+        "pub(crate) fn bad<T: ?Sized>(\n    x: T,\n) {}\nfn main() {}\n",
+    ] {
+        let d = check(src);
+        assert!(d.len() == 1 && (d[0].line, d[0].col) == (2, 8), "{src}\n{d:?}");
+    }
+    for src in ["fn main() { let _: Vec<str> = loop {}; }\n", "fn main() { let (_a, _b): (Vec<str>, u8) = loop {}; }\n"] {
+        let d = check(src);
+        assert!(d.len() == 1 && d[0].msg.contains("`str` cannot be known"), "{src}\n{d:?}");
+    }
+    // (a `?Sized` parameter as a trait argument for the trait's parameter not declared `?Sized`)
+    let d = check("trait Tr<T> {}\nimpl<T: ?Sized> Tr<T> for () {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
+    // (with a defaulted parameter the impl does not write)
+    let d = check("trait Tr<T, U = ()> {}\nimpl<T: ?Sized> Tr<T> for () {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
+    for src in [
+        "struct W<T: ?Sized>(T);\nfn good<T: ?Sized>(_: &W<T>) {}\nfn main() {}\n",
+        "trait Tr<T: ?Sized> {}\nimpl<T: ?Sized> Tr<T> for () {}\nfn main() {}\n",
+        "#[doc = \"{\"]\ntrait Tr<T: ?Sized> {}\nimpl<T: ?Sized> Tr<T> for () {}\nfn main() {}\n",
+        "trait Dup: Clone {}\nfn f<T: Dup + ?Sized>(_: &T) { let _v: Vec<T> = Vec::new(); }\nfn main() {}\n",
+        "use std::fmt::Display;\nfn f<T: ?Sized + Display>(x: &T) -> String { let c = |y: &T| format!(\"{y}\"); c(x) }\nfn main() { println!(\"{}\", f(\"abc\")); }\n",
+    ] {
+        let d = check(src);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    }
 }

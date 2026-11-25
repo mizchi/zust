@@ -1,15 +1,15 @@
-//! 依存するクレートのソースを、使う側のクレートに渡す形 (インターフェース) にする。
+//! Turns a dependency crate's source into the form passed to the crates that use it (the interface).
 //!
-//! ワークスペースでは、使う側のクレートは依存するクレートのソースも一緒に解析する (型・シグネチャ・総称関数の本体が要る)。
-//! 総称でない関数の本体は依存するクレート自身がコンパイルして .o に入れるので、使う側では要らない: `{ loop {} }` にする
-//! (改行は残して行の対応を保つ)。マクロの展開・モジュールを平らにする・字句解析・要約・Program が、依存の本体の分だけ軽くなる。
+//! In a workspace, a user crate also analyzes the source of its dependency crates together with its own (it needs the types, signatures and bodies of generic fns).
+//! The bodies of non-generic fns are compiled by the dependency crate itself into its .o, so the user does not need them: they become `{ loop {} }`
+//! (the newlines are kept to preserve the line correspondence). Macro expansion, flattening of modules, lexing, summaries and Program get lighter by the dependencies' bodies.
 //!
-//! 本体を残すもの: 総称関数 (`fn f<T>` / 引数の `impl Trait` / `where`)、総称な impl (`impl<T> ..`) と trait の中
-//! (既定のメソッドは使う側の型で単相化する)、`const fn`、戻り値が `impl Trait` のもの (本体から型を決める)、`async fn`
+//! What keeps its body: generic fns (`fn f<T>` / `impl Trait` in parameters / `where`), generic impls (`impl<T> ..`) and the inside of traits
+//! (default methods are monomorphized with the user's types), `const fn`, those returning `impl Trait` (the type is decided from the body), `async fn`
 
 type Tok = (u8, usize, usize);
 
-/// 括弧の対応 (開き → 閉じ)。対応しないものは usize::MAX
+/// Bracket matching (open → close). Unmatched ones are usize::MAX
 fn matching(s: &[u8], toks: &[Tok]) -> Vec<usize> {
     let mut close = vec![usize::MAX; toks.len()];
     let mut st: Vec<usize> = vec![];
@@ -30,7 +30,7 @@ fn matching(s: &[u8], toks: &[Tok]) -> Vec<usize> {
     close
 }
 
-/// 本体を `{ loop {} }` にしたソース。変えるものがなければ元のまま
+/// The source with bodies made `{ loop {} }`. Unchanged if there is nothing to change
 pub fn interface_text(src: &str) -> String {
     let s = src.as_bytes();
     let toks = crate::lexer::tokenize(s);
@@ -45,14 +45,14 @@ pub fn interface_text(src: &str) -> String {
     };
     let id = |k: usize, w: &[u8]| k < n && toks[k].0 == 0 && t(k) == w;
     let sym = |k: usize, c: u8| k < n && toks[k].0 == 1 && s[toks[k].1] == c;
-    // (本体を消す範囲: `{` の後ろから `}` の前まで)
+    // (the ranges of bodies to remove: from after the `{` to before the `}`)
     let mut cut: Vec<(usize, usize)> = vec![];
-    // 開いている中括弧ごとの文脈: 0 = モジュール (トップレベル)、1 = 総称でない impl、2 = そのほか (中は見ない)
+    // The context of each open brace: 0 = module (top level), 1 = non-generic impl, 2 = other (the inside is not looked at)
     let mut ctx: Vec<(usize, u8)> = vec![];
     let mut pending: u8 = 2;
     let mut k = 0;
     while k < n {
-        // (閉じた文脈を外す)
+        // (pop the closed contexts)
         while let Some(&(e, _)) = ctx.last() {
             if k > e {
                 ctx.pop();
@@ -69,7 +69,7 @@ pub fn interface_text(src: &str) -> String {
             let c = pending;
             pending = 2;
             if c == 2 {
-                // (中は見ない: struct の本体・総称な impl・trait・関数の本体など)
+                // (the inside is not looked at: struct bodies, generic impls, traits, fn bodies, etc.)
                 k = e + 1;
                 continue;
             }
@@ -87,13 +87,13 @@ pub fn interface_text(src: &str) -> String {
             continue;
         }
         if id(k, b"impl") && cur == 0 {
-            // (`impl<..>` は総称: 中は見ない)
+            // (`impl<..>` is generic: the inside is not looked at)
             pending = if sym(k + 1, b'<') { 2 } else { 1 };
             k += 1;
             continue;
         }
         if id(k, b"fn") && toks.get(k + 1).is_some_and(|x| x.0 == 0) {
-            // (前の修飾子: const fn / async fn は残す)
+            // (the preceding qualifiers: const fn / async fn are kept)
             let mut j = k;
             let mut keep = false;
             while j > 0 {
@@ -111,7 +111,7 @@ pub fn interface_text(src: &str) -> String {
             if sym(i, b'<') {
                 keep = true;
             }
-            // (引数の並び)
+            // (the parameter list)
             while i < n && !sym(i, b'(') && !sym(i, b'{') && !sym(i, b';') {
                 i += 1;
             }
@@ -123,7 +123,7 @@ pub fn interface_text(src: &str) -> String {
             if (i..pe).any(|q| id(q, b"impl")) {
                 keep = true;
             }
-            // (戻り値と where: 本体の `{` か宣言の `;` まで)
+            // (the return type and where: up to the body's `{` or the declaration's `;`)
             let mut q = pe + 1;
             while q < n && !sym(q, b'{') && !sym(q, b';') {
                 if id(q, b"impl") || id(q, b"where") {
@@ -169,22 +169,22 @@ pub fn interface_text(src: &str) -> String {
     out
 }
 
-/// モジュールの中のアイテム (依存するクレートのインターフェースを、使う側が名前でたどるため)
+/// An item in a module (so that users can follow a dependency crate's interface by name)
 pub struct StubItem {
-    /// 定義する名前 (impl はヘッダの名前すべて: 型か trait が届けば impl も届く)
+    /// The names defined (for an impl, all the names in its header: if the type or the trait is reached, the impl is reached too)
     pub names: Vec<String>,
-    /// アイテムのテキストのハッシュ
+    /// The hash of the item's text
     pub hash: crate::key::Key,
-    /// 中の識別子すべて
+    /// All the identifiers inside
     pub idents: Vec<String>,
-    /// テキストの範囲 (バイト)
+    /// The range of the text (bytes)
     pub start: usize,
     pub end: usize,
-    /// `use` (名前の解決に要るので、届かなくても消さない)
+    /// `use` (needed for name resolution, so not removed even when unreached)
     pub is_use: bool,
 }
 
-/// src (クレートのテキスト) のアイテム。`mod m { .. }` の中も (mod 自体はアイテムにしない)
+/// The items of src (a crate's text). Inside `mod m { .. }` too (the mod itself is not made an item)
 pub fn items(src: &str) -> Vec<StubItem> {
     let s = src.as_bytes();
     let toks = crate::lexer::tokenize(s);
@@ -202,12 +202,12 @@ pub fn items(src: &str) -> Vec<StubItem> {
     let mut out: Vec<StubItem> = vec![];
     let mut k = 0;
     while k < n {
-        // (モジュールの閉じ括弧)
+        // (a module's closing brace)
         if sym(k, b'}') || sym(k, b';') {
             k += 1;
             continue;
         }
-        // `[pub] mod m {`: 中を見る
+        // `[pub] mod m {`: look inside
         let mut j = k;
         while sym(j, b'#') && sym(j + 1, b'[') && close[j + 1] != usize::MAX {
             j = close[j + 1] + 1;
@@ -222,11 +222,11 @@ pub fn items(src: &str) -> Vec<StubItem> {
             k = j + 3;
             continue;
         }
-        // アイテムの終わり: `;` か、本体の `}` (const / static / use / type は `;` まで)
+        // The end of an item: `;` or the body's `}` (const / static / use / type go up to the `;`)
         // (`const fn` / `const unsafe fn` / `const async fn` / `const extern "C" fn` are fns)
         let const_fn = |q: usize| id(q, b"const") && (id(q + 1, b"fn") || id(q + 1, b"unsafe") || id(q + 1, b"async") || id(q + 1, b"extern"));
         let semi_kind = (j..n.min(j + 4)).any(|q| id(q, b"const") && !const_fn(q) || id(q, b"static") || id(q, b"use") || id(q, b"type"));
-        // (`#![..]` (内側の属性) はそれだけで 1 つ)
+        // (`#![..]` (an inner attribute) is one by itself)
         if sym(k, b'#') && sym(k + 1, b'!') && sym(k + 2, b'[') && close[k + 2] != usize::MAX {
             k = close[k + 2] + 1;
             continue;
@@ -236,7 +236,7 @@ pub fn items(src: &str) -> Vec<StubItem> {
             if sym(e, b';') {
                 break;
             }
-            // (囲んでいるモジュールの閉じ括弧: その手前で終わる)
+            // (the closing brace of the enclosing module: end just before it)
             if sym(e, b'}') {
                 e = if e > k { e - 1 } else { k };
                 break;
@@ -291,7 +291,7 @@ pub fn items(src: &str) -> Vec<StubItem> {
                 }
             }
             if toks[q].0 == 0 && w == b"use" {
-                // (use は全体の名前)
+                // (a use: all the names in it)
                 let mut r = q + 1;
                 while r <= e {
                     if toks[r].0 == 0 {
@@ -302,8 +302,8 @@ pub fn items(src: &str) -> Vec<StubItem> {
                 break;
             }
             if toks[q].0 == 0 && w == b"impl" {
-                // (impl はヘッダの trait と型の名前。`impl<..>` の中・`where` から後ろ・プリミティブ型・キーワードは
-                //  数えない: `impl FromHex for [u8; 4]` が、`u8` と書いたクレートすべてから届かないように)
+                // (an impl: the names of the trait and type in its header. Inside `impl<..>`, from `where` on, primitive types and keywords are
+                //  not counted: so that `impl FromHex for [u8; 4]` is not reached from every crate that writes `u8`)
                 let mut r = q + 1;
                 if sym(r, b'<') {
                     let mut d = 0i32;
@@ -320,7 +320,7 @@ pub fn items(src: &str) -> Vec<StubItem> {
                         r += 1;
                     }
                 }
-                // (trait の実装で、対象が std の型 (`Vec<u8>` / `[u8; 4]` など) なら trait の名前だけ)
+                // (for a trait impl whose target is a std type (`Vec<u8>` / `[u8; 4]` etc.), only the trait's name)
                 let has_for = (r..e).take_while(|&x| !sym(x, b'{')).any(|x| id(x, b"for"));
                 let mut after_for = false;
                 let mut tr_names: Vec<String> = vec![];
@@ -369,7 +369,7 @@ pub fn items(src: &str) -> Vec<StubItem> {
     out
 }
 
-/// src のアイテムのうち keep[k] が偽のもの (と `use` でないもの) を空白にする (改行は残す)
+/// Blanks out the items of src whose keep[k] is false (and that are not `use`) (newlines are kept)
 pub fn prune(src: &str, its: &[StubItem], keep: &[bool]) -> String {
     let b = src.as_bytes();
     let mut out = String::with_capacity(src.len());

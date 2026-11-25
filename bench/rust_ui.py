@@ -198,7 +198,7 @@ def run_one(path, kind, tmp):
     except subprocess.TimeoutExpired:
         return "timeout"
     finally:
-        for suf in ("", ".o", ".crcache2", ".link"):
+        for suf in ("", ".o", ".cache", ".link"):
             try:
                 os.remove(exe + suf)
             except OSError:

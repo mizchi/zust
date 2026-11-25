@@ -1,15 +1,15 @@
 //! Region checking against signatures (crates/typeck/src/acg/regionck.rs): "lifetime may not live long enough" where
 //! the constraints that are known require it, and nothing on code rustc accepts
-use zustc::{Options2, Session2};
+use zustc::{Options, Session};
 
 fn check(src: &str) -> Vec<(usize, String)> {
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, ..Options::default() });
     s.check(src).into_iter().map(|d| (d.line, d.msg)).collect()
 }
 
 /// check in an edition
 fn check_ed(src: &str, edition: u16) -> Vec<(usize, String)> {
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition, ..Options::default() });
     s.check(src).into_iter().map(|d| (d.line, d.msg)).collect()
 }
 
@@ -90,7 +90,7 @@ fn main() {
 fn lifetime_only_change_rechecks_callers() {
     let v1 = "fn pick<'a>(x: &'a u32, _y: &u32) -> &'a u32 { x }\nfn g<'a, 'b>(x: &'a u32, y: &'b u32) -> &'a u32 {\n    pick(x, y)\n}\nfn main() {}\n";
     let v2 = v1.replace("fn pick<'a>(x: &'a u32, _y: &u32)", "fn pick<'a>(_y: &u32, x: &'a u32)");
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     assert!(s.check(v1).is_empty());
     let d = s.check(&v2);
     assert!(d.len() == 1 && d[0].line == 3 && d[0].msg.contains("lifetime may not live long enough"), "{d:?}");
@@ -2105,7 +2105,7 @@ fn part11_review_3() {
     assert_eq!(check("trait T {\n    fn get(&self) -> u8;\n    fn set(&mut self, v: u8);\n}\nfn f(x: &mut dyn T) {\n    x.set(x.get());\n}\nfn main() {}\n"), vec![]);
     let src = "struct D<T>(T);\nimpl<T> Drop for D<T> {\n    fn drop(&mut self) {}\n}\nimpl<T> D<T> {\n    fn end(&self) {}\n}\nfn f() {\n    let t = D(Box::new(1));\n    D(&t).end()\n}\nfn main() {\n    f();\n}\n";
     // (a successful check under 2024 is not reused under 2021)
-    let mut s = Session2::new(Options2 { jobs: 1, edition: 2024, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, edition: 2024, ..Options::default() });
     assert!(s.check(src).is_empty());
     s.opts.edition = 2021;
     assert_eq!(s.check(src).len(), 1);
@@ -2223,7 +2223,7 @@ fn reference_clone_of_an_unbounded_param() {
 #[test]
 fn part12_review() {
     let src = "fn main() {\n    let mut x: Vec<()> = Vec::new();\n    || {\n        || {\n            x.push(())\n        }\n    };\n}\n";
-    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, ..Options::default() });
     assert_eq!(s.check(src).len(), 1);
     assert_eq!(s.check(&format!("{src}fn other() {{}}\n")).len(), 1);
     assert_eq!(s.check(&format!("{src}fn other() {{\n    let _ = 1;\n}}\n")).len(), 1);
@@ -2531,7 +2531,7 @@ fn part14_rpit_captures_no_lifetime() {
     assert_eq!(check("use std::fmt::Display;\nfn a(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.to_vec().into_iter()\n}\nfn b(x: &str) -> impl Display {\n    x.to_string()\n}\nfn c(x: &u8) -> impl Display {\n    *x\n}\nfn d(x: &[u8]) -> impl Iterator<Item = u8> + '_ {\n    x.iter().copied()\n}\nfn e<'a>(x: &'a [u8]) -> impl Iterator<Item = &'a u8> {\n    x.iter()\n}\nfn f(x: &[u8]) -> impl Fn() -> usize {\n    let n: usize = x.len();\n    move || n\n}\nfn main() {\n    println!(\"{} {} {} {} {} {}\", a(&[1]).count(), b(\"x\"), c(&1), d(&[2]).count(), e(&[3]).count(), f(&[4])());\n}\n"), vec![]);
     // (a parameter whose regions are 'static: `x: &'static u8`, `'a: 'static`)
     assert_eq!(check("use std::fmt::Display;\nfn a(x: &'static u8) -> impl Display {\n    x\n}\nfn b<'a: 'static>(x: &'a [u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn c(_y: &u8, x: &'static str) -> impl Display {\n    x\n}\nfn main() {}\n"), vec![]);
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2024, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition: 2024, ..Options::default() });
     assert!(s.check("use std::fmt::Display;\nfn s(x: &[u8]) -> impl Iterator<Item = u8> {\n    x.iter().copied()\n}\nfn t(x: &u8) -> impl Display {\n    x\n}\nfn main() {}\n").is_empty());
 }
 
@@ -4138,11 +4138,11 @@ fn part28_review() {
     // (#154's review: a trait's name behind a pointer in a 2015 edition's signature and struct field is its trait
     // object (the edition is known when they are resolved); a closure for `Box<dyn Fn(T) -> U>` coerced where T is known
     // and U not yet; a program's own type named like a mark (`__S0`) is that type)
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2015, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition: 2015, ..Options::default() });
     let d: Vec<(usize, String)> = s.check("trait X { fn v(&self) -> i32; }\nimpl X for i32 { fn v(&self) -> i32 { *self } }\nstruct H<'a> { x: &'a X }\nfn take(x: &X) -> i32 { x.v() }\nfn main() { let h = H { x: &5 }; println!(\"{} {}\", take(&3), h.x.v()); }\n").into_iter().map(|d| (d.line, d.msg)).collect();
     assert_eq!(d, vec![], "v1");
     // (the `bare_trait_objects` lint denied: such an object is an error, at the line that names it)
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition: 2018, ..Options::default() });
     let d: Vec<(usize, String)> = s.check("#[deny(bare_trait_objects)]\nfn function(x: &SomeTrait) {\n    let _ = x;\n}\ntrait SomeTrait {}\nfn main() {}\n").into_iter().map(|d| (d.line, d.msg)).collect();
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("trait objects without an explicit `dyn` are deprecated"), "{d:?}");
     assert_eq!(check("fn f<T, U>(a: T, cb: Box<dyn Fn(T) -> U>, b: U) -> U { let _ = b; cb(a) }\nstruct S2<T, U> { a: T, cb: Box<dyn Fn(T) -> U>, b: U }\nfn main() {\n    println!(\"{}\", f(1i32, Box::new(|x: i32| x), 2i32));\n    let s = S2 { a: 1i32, cb: Box::new(|x: i32| x + 10), b: 2i32 };\n    println!(\"{} {}\", (s.cb)(s.a), s.b);\n}\n"), vec![], "v2");
@@ -4153,15 +4153,15 @@ fn part28_review() {
     assert_eq!(check("#[allow(non_camel_case_types)]\ntrait A<X> { fn get(&self) -> X; }\nimpl A<u8> for u8 { fn get(&self) -> u8 { *self } }\n#[allow(non_camel_case_types)]\nfn f<T, __zp0_U>(_t: T, x: &dyn A<__zp0_U>) -> __zp0_U { x.get() }\nfn main() { let y: u8 = f(1i32, &7u8 as &dyn A<u8>); println!(\"{}\", y); }\n"), vec![], "v4b");
     let d = check("fn main() { let _x: __zs0 = todo!(); }\n");
     assert!(d.len() == 1 && d[0].1.contains("cannot find type `__zs0`"), "{d:?}");
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition: 2018, ..Options::default() });
     let d: Vec<(usize, String)> = s.check("#![deny(bare_trait_objects)]\n#![allow(bare_trait_objects)]\ntrait X {}\nimpl X for i32 {}\nfn take(_x: &X) {}\nfn main() { take(&1); }\n").into_iter().map(|d| (d.line, d.msg)).collect();
     assert_eq!(d, vec![], "v5");
     // (an item's deny of the lint with others before it; a trait object's argument `&mut i32` is no `&T`)
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition: 2018, ..Options::default() });
     let d: Vec<(usize, String)> = s.check("#[deny(unused, bare_trait_objects)]\nfn function(x: &SomeTrait) {\n    let _ = x;\n}\ntrait SomeTrait {}\nfn main() {}\n").into_iter().map(|d| (d.line, d.msg)).collect();
     assert!(d.len() == 1 && d[0].0 == 2 && d[0].1.contains("trait objects without an explicit `dyn` are deprecated"), "{d:?}");
     // (such an attribute inside a string or a comment is none)
-    let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition: 2018, ..Options2::default() });
+    let mut s = Session::new(Options { jobs: 1, no_cache: true, edition: 2018, ..Options::default() });
     let d: Vec<(usize, String)> = s.check("const NOTE: &str = r\"#[deny(unused, bare_trait_objects)]\";\n// #[deny(bare_trait_objects)]\ntrait X {}\nimpl X for i32 {}\nfn take(_x: &X) {}\nfn main() { take(&1); println!(\"{}\", NOTE.len()); }\n").into_iter().map(|d| (d.line, d.msg)).collect();
     assert_eq!(d, vec![], "v6");
     let d = check("trait A<T> { fn get(&self) -> i32; }\nimpl<'a> A<&'a mut i32> for u8 { fn get(&self) -> i32 { 1 } }\nfn f<T>(x: &dyn A<&T>) -> i32 { x.get() }\nfn main() {\n    let b: &dyn A<&mut i32> = &1u8;\n    println!(\"{}\", f(b));\n}\n");
@@ -5223,4 +5223,278 @@ fn c() {
 }
 fn main() { a(); b(); c(); }
 "#, &[(21, "`x` does not live long enough")], "dk1");
+}
+
+#[test]
+fn part36_fn_bounded_parameters_boxed_as_trait_objects() {
+    // (zustc check of a generic fn nothing calls boxes a placeholder bounded by `FnMut(..)` into a `Box<dyn FnMut(..)>`:
+    // it was "not a closure", so the fn went unchecked. Each was checked with rustc 1.97: f is moved (E0382 at 3), F
+    // must outlive `'static` for a `Box<dyn FnMut(bool)>` (E0310 at 6), and the body's other errors are found (E0382
+    // at 11); d and e are accepted)
+    errors_at(r#"fn a<F: FnMut(bool)>(f: F) {
+    let b: Box<dyn FnMut(bool)> = Box::new(f);
+    drop(f);
+}
+fn b<F: FnMut(bool)>(f: F) -> Box<dyn FnMut(bool)> {
+    Box::new(f)
+}
+fn c<F: FnMut(bool) + 'static>(f: F) -> Box<dyn FnMut(bool)> {
+    let s = String::new();
+    drop(s);
+    drop(s);
+    Box::new(f)
+}
+fn d<F: Fn() + 'static>(f: F) -> Box<dyn Fn()> {
+    Box::new(f)
+}
+fn e<'a, F: FnOnce() -> u8 + 'a>(f: F) -> Box<dyn FnOnce() -> u8 + 'a> {
+    Box::new(f)
+}
+fn main() {}
+"#, &[(3, "use of moved value: `f`"), (6, "the parameter type `F` may not live long enough"), (11, "use of moved value: `s`")], "fb1");
+}
+
+#[test]
+fn part36_items_in_const_and_static_initializers() {
+    // (a fn written in a `const` / `static` initializer's block is hoisted as one in a fn body is, so it is checked:
+    // E0507 at 3 and E0596 at 9, as in rustc 1.97 (borrowck/borrowck-fn-in-const-a.rs, span/borrowck-fn-in-const-b.rs);
+    // the two `broken` are two fns)
+    errors_at(r#"const MOVE: fn(&String) -> String = {
+    fn broken(x: &String) -> String {
+        return *x
+    }
+    broken
+};
+static MUTATE: fn(&Vec<String>) = {
+    fn broken(x: &Vec<String>) {
+        x.push(String::new());
+    }
+    broken
+};
+const OK: fn() -> i32 = {
+    fn fine() -> i32 { 1 }
+    fine
+};
+fn main() { let _ = OK(); }
+"#, &[(3, "cannot move out of `*x`"), (9, "cannot borrow `*x` as mutable")], "ci1");
+}
+
+#[test]
+fn part36_bindings_after_at() {
+    // (rustc's check of `x @ sub` patterns, and the moves of their bindings, each checked with rustc 1.97 at the same
+    // position (the parameter's, at its fn): a by-move x with a `ref` in sub (5, 12), a `ref` x with a move in sub
+    // (6, 13), `ref mut` with `ref` (7, 9) and with `ref mut` (8), and x moved after sub moved a part of it (10) or all
+    // of it (11). Copy parts, two `ref`s, `ref x @ copy` and default binding modes are accepted, as is `ref x` as a
+    // parameter)
+    errors_at(r#"struct U;
+#[derive(Clone, Copy)]
+struct C;
+struct NC<A, B>(A, B);
+fn a() { let a @ ref b = U; }
+fn b() { let ref a @ b = U; }
+fn c() { let ref mut a @ ref b = U; }
+fn d() { let ref mut a @ ref mut b = U; }
+fn e() { let ref a @ ref mut b = U; }
+fn f() { let a @ NC(b, c @ NC(d, e)) = NC(C, NC(C, C)); }
+fn g() { let a @ b = U; }
+fn h(x: Option<String>) { match x { s @ Some(ref t) => {} None => {} } }
+fn i(ref a @ b: U) {}
+fn ok() {
+    let a @ NC(b, c) = NC(C, C);
+    let ref a @ ref b = U;
+    let ref a @ b = C;
+    match &Some(U) { a @ Some(b) => {} None => {} }
+}
+fn ok2(ref x: U) -> usize { let _ = x; 0 }
+fn main() { ok(); ok2(U); }
+"#, &[
+        (5, "borrow of moved value"),
+        (6, "cannot move out of value because it is borrowed"),
+        (7, "cannot borrow value as immutable because it is also borrowed as mutable"),
+        (8, "cannot borrow value as mutable more than once at a time"),
+        (9, "cannot borrow value as mutable because it is also borrowed as immutable"),
+        (10, "use of partially moved value: `a`"),
+        (11, "use of moved value: `a`"),
+        (12, "borrow of moved value"),
+        (13, "cannot move out of value because it is borrowed"),
+    ], "at1");
+}
+
+#[test]
+fn part36_lifetime_bounds_of_impl_methods() {
+    // (checked with rustc 1.97: a trait method's lifetime that a where clause bounds a type by (`where T: 'a`) is
+    // early-bound, so the impl's, which nothing bounds, does not match it (E0195 at 9); a type parameter of an impl's
+    // method bounded by `'static` where the trait's is bounded by its `'a` is stricter (E0276 at 7), not where the
+    // impl gives the trait `'static` (C); a GAT's `where 'b2: 'a2` for the trait's `where 'a1: 'b1` is stricter (E0276
+    // at 7, the bound), its `'a2: 'b2` is not)
+    errors_at(r#"use std::fmt::Debug;
+struct State;
+trait Foo<T> {
+    fn foo<'a>(&self, state: &'a State) -> &'a T
+    where
+        T: 'a;
+}
+impl<T> Foo<T> for Vec<T> {
+    fn foo<'a>(&self, state: &'a State) -> &'a T {
+        &self[0]
+    }
+}
+fn main() {}
+"#, &[(9, "lifetime parameters or bounds on method `foo` do not match the trait declaration")], "lb1");
+    errors_at(r#"use std::fmt::Debug;
+trait A<'a> {
+    fn put<F>(&mut self, f: F) where F: Debug + 'a;
+}
+struct B;
+impl<'a> A<'a> for B {
+    fn put<F>(&mut self, f: F) where F: Debug + 'static {}
+}
+struct C;
+impl A<'static> for C {
+    fn put<F>(&mut self, f: F) where F: Debug + 'static {}
+}
+fn main() {}
+"#, &[(7, "impl has stricter requirements than trait")], "lb2");
+    errors_at(r#"trait G {
+    type T<'a1, 'b1>
+    where
+        'a1: 'b1;
+}
+impl G for () {
+    type T<'a2, 'b2> = () where 'b2: 'a2;
+}
+impl G for u8 {
+    type T<'a2, 'b2> = () where 'a2: 'b2;
+}
+fn main() {}
+"#, &[(7, "impl has stricter requirements than trait")], "lb3");
+}
+
+#[test]
+fn part36_moves_of_at_patterns_after_a_return() {
+    // (by-move-sub-pat-unreachable.rs: the moves of `a @ (b, c)` are the borrow check's, which rustc does not give the
+    // code after `return;`; its check of the pattern itself still holds there (a by-move `a @ ref b`))
+    errors_at(r#"fn f() {
+    return;
+    struct S;
+    let a @ (b, c) = (S, S);
+}
+fn g() {
+    return;
+    struct S;
+    let a @ ref b = S;
+}
+fn main() { f(); g(); }
+"#, &[(9, "borrow of moved value")], "at2");
+}
+
+#[test]
+fn part36_review_of_182() {
+    // (#182's review, each checked with rustc 1.97: a `'static` bound the trait's signature implies (`x: &'static T`)
+    // is not stricter (rv1); a GAT's outlives that follows through the trait's own lifetime (`'a: 't, 't: 'b`) is not
+    // compared (rv2); a comment in a bound is no bound (rv3); a `;` in an array type ends no item, so the fn in a
+    // `const _: [(); 1]` block is checked (rv4) and one in a fn with an array parameter is hoisted (rv7); a `rest @ ..`
+    // is one of the bindings of an `x @ sub` (rv5); the verdict of a method's bounds is by its impl's header too (rv6))
+    errors_at(r#"trait Tr {
+    fn f<T>(x: &'static T);
+}
+impl Tr for () {
+    fn f<T: 'static>(x: &'static T) {}
+}
+fn main() {}
+"#, &[], "rv1");
+    errors_at(r#"trait Tr<'t> {
+    type A<'a, 'b> where 'a: 't, 't: 'b;
+}
+impl<'t> Tr<'t> for () {
+    type A<'a, 'b> = () where 'a: 't, 't: 'b, 'a: 'b;
+}
+fn main() {}
+"#, &[], "rv2");
+    errors_at(r#"trait G {
+    type T<'a1, 'b1>
+    where
+        'a1: /* c */ 'b1;
+}
+impl G for () {
+    type T<'a2, 'b2> = () where 'a2: 'b2;
+}
+fn main() {}
+"#, &[], "rv3");
+    errors_at(r#"const _: [(); 1] = {
+    fn bad<'a>(x: &'a u8) -> &'static u8 { x }
+    [()]
+};
+fn main() {}
+"#, &[(2, "lifetime may not live long enough")], "rv4");
+    errors_at(r#"fn f() {
+    return;
+    let ref mut a @ [ref b @ ..] = [1u8];
+}
+fn g() {
+    let ref mut a @ [ref b @ ..] = [1u8];
+}
+fn h() {
+    let ref a @ [ref b @ ..] = [1u8];
+}
+fn main() { f(); g(); h(); }
+"#, &[(3, "cannot borrow value as immutable because it is also borrowed as mutable"), (6, "cannot borrow value as immutable because it is also borrowed as mutable")], "rv5");
+    errors_at(r#"trait Tr<'a> { fn f<T: 'a>(); }
+struct A;
+struct B;
+impl Tr<'static> for A { fn f<T: 'static>() {} }
+impl<'a> Tr<'a> for B { fn f<T: 'static>() {} }
+fn main() {}
+"#, &[(5, "impl has stricter requirements than trait")], "rv6");
+    errors_at(r#"fn foo(a: [u8; 4]) -> u8 {
+    fn inner() -> u8 { 1 }
+    inner() + a[0]
+}
+fn main() { println!("{}", foo([1, 2, 3, 4])); }
+"#, &[], "rv7");
+}
+
+#[test]
+fn part36_second_review_of_182() {
+    // (#182's second review, checked with rustc 1.97: a `'static` in the trait's signature implies nothing of a type
+    // parameter it does not name (`x: &'static u8`), so the impl's `T: 'static` is stricter (rv8); `mut b @ ..` where
+    // the default binding mode is by reference binds by value before edition 2024, so it borrows nothing beside the
+    // `ref mut a` around it (rv9))
+    errors_at(r#"trait Tr {
+    fn f<T>(x: &'static u8);
+}
+impl Tr for () {
+    fn f<T: 'static>(x: &'static u8) {}
+}
+fn main() {}
+"#, &[(5, "impl has stricter requirements than trait")], "rv8");
+    errors_at(r#"fn main() {
+    let ref mut a @ [mut b @ ..] = &[1u8];
+    let _ = (a, b);
+}
+"#, &[], "rv9");
+}
+
+#[test]
+fn part36_third_review_of_182() {
+    // (#182's review of 68c598c, checked with rustc 1.97: a `'static` implies a type parameter's bound only in the
+    // type of a parameter or of the result that names both: `x: T, s: &'static str` does not, so `T: 'static` is
+    // stricter (rv10); `x: W<'static, T>` with `struct W<'a, T: 'a>` may, and is accepted, as in rustc (rv11))
+    errors_at(r#"trait Tr {
+    fn f<T>(x: T, s: &'static str);
+}
+impl Tr for () {
+    fn f<T: 'static>(x: T, s: &'static str) {}
+}
+fn main() {}
+"#, &[(5, "impl has stricter requirements than trait")], "rv10");
+    errors_at(r#"struct W<'a, T: 'a>(&'a T);
+trait Tr {
+    fn f<T>(x: W<'static, T>);
+}
+impl Tr for () {
+    fn f<T: 'static>(x: W<'static, T>) {}
+}
+fn main() {}
+"#, &[], "rv11");
 }

@@ -1,8 +1,8 @@
-//! エディタ向けの解析 (zust-analyzer が使う。コンパイラ (zustc) はこのクレートに依存しない)。
-//! 構文木も型検査も使わず、zust-syntax の字句の列から読む: 編集の途中で壊れたソースでも読める所まで答える。
+//! Analysis for editors (used by zust-analyzer; the compiler (zustc) does not depend on this crate).
+//! It uses neither the syntax tree nor type checking and reads from zust-syntax's token sequence: even for a source broken mid-edit it answers as far as it can read.
 //!
-//! - `symbols`: documentSymbol / workspace/symbol のシンボル (アイテムとメンバ)
-//! - `navigate`: ファイルごとの索引 (FileIndex) と、definition / references / hover / completion
+//! - `symbols`: symbols for documentSymbol / workspace/symbol (items and members)
+//! - `navigate`: the per-file index (FileIndex), and definition / references / hover / completion
 
 pub mod navigate;
 pub mod symbols;

@@ -1,8 +1,8 @@
 ---------------------------- MODULE CacheSave ----------------------------
 (* Two zustc processes save the build cache at the same time.
-   Code: crates/typeck/src/cache2.rs `Cache2::save` (write a tmp file, then rename it over `<path>`; src/stamp.rs
+   Code: crates/typeck/src/build_cache.rs `BuildCache::save` (write a tmp file, then rename it over `<path>`; src/stamp.rs
    saves the stamps the same way) and
-   `Cache2::open` (accepts a file whose header and lengths are in bounds; there is no checksum).
+   `BuildCache::open` (accepts a file whose header and lengths are in bounds; there is no checksum).
 
    A file is a sequence of cells. Writer w writes the cells <<w, 1>> .. <<w, Size[w]>>; cell 1 is the header, which
    says how long the file is. One write step writes one cell, at the writer's own offset (POSIX: a read may see a
@@ -74,7 +74,7 @@ Rename(w) ==
     /\ pc' = [pc EXCEPT ![w] = "done"]
     /\ UNCHANGED <<fd, off, data, nextIno, seen>>
 
-(* Cache2::open on `path` (the file as it is at this moment) *)
+(* BuildCache::open on `path` (the file as it is at this moment) *)
 Read ==
     /\ names["path"] # NoIno
     /\ LET c == data[names["path"]] IN

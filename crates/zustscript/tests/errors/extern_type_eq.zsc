@@ -1,0 +1,3 @@
+// expect: `==` compares values (numbers, strings, bools, and arrays, records, enums and tuples of them, by content), not El
+extern type El { id: String }
+fn f(a: El, b: El) -> bool { a == b }

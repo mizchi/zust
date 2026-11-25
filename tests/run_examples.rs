@@ -1,7 +1,7 @@
-//! tests/probe・examples・tests/acg を driver2 (minclif) でビルドして動かし、出力 (stdout・stderr・終了コード) が
-//! tests/expected/<ディレクトリ>.<名前>.{stdout,stderr,code} と同じか。期待値は最初の syn + Cranelift のドライバで作ったもの
-//! (そのドライバは消した)。Cranelift のバックエンドは tests/driver2_cranelift.rs が minclif と比べる。
-//! DRIVER2_FILE=path で 1 ファイルだけ。
+//! Builds and runs tests/probe, examples and tests/acg with session (minclif), and checks whether the output (stdout, stderr, exit code) is
+//! the same as tests/expected/<directory>.<name>.{stdout,stderr,code}. The expected values were made with the first syn + Cranelift driver
+//! (that driver was removed). The Cranelift backend is compared with minclif by tests/cranelift_backend.rs.
+//! DRIVER2_FILE=path for just 1 file.
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 
@@ -48,7 +48,7 @@ fn private_dir(prefix: &str) -> PrivateDir {
 }
 
 #[test]
-fn driver2_matches_expected() {
+fn outputs_match_expected() {
     let dir = private_dir("drv2");
     let mut files: Vec<PathBuf> = vec![];
     for d in ["tests/probe", "examples", "tests/acg"] {
@@ -74,7 +74,7 @@ fn driver2_matches_expected() {
         // (a directory of its own for each source directory: two of them have a file of the same name)
         let exe = dir.join(&d).join(&name);
         std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
-        if let Err(e) = zustc::driver2::build(&src, &exe, false, None) {
+        if let Err(e) = zustc::session::build(&src, &exe, false, None) {
             return Err(format!("{name}: {}", e.lines().next().unwrap_or("")));
         }
         let a = std::process::Command::new(&exe).current_dir("tests/expected").stdin(std::process::Stdio::null()).output().unwrap();

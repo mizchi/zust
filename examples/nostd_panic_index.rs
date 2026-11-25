@@ -1,4 +1,4 @@
-// no_std: panic すると #[panic_handler] が呼ばれる (index)
+// no_std: a panic calls the #[panic_handler] (index)
 #![no_std]
 #![no_main]
 
@@ -47,7 +47,7 @@ pub extern "C" fn main() -> i32 {
     let _ = pick(&xs, 2);
     let _ = find(&xs, 4).unwrap();
     puts(b"ok so far\n");
-    // n = 14: 範囲外
+    // n = 14: out of bounds
     let v = pick(&xs, n);
     puts(b"unreachable\n");
     v as i32

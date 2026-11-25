@@ -1,6 +1,6 @@
-//! driver2 の `-O` (小さい関数のインライン展開 + minclif の読み直しの省略) で tests/probe・examples・tests/acg を
-//! ビルドし、`-O` なしと出力 (stdout・stderr・終了コード) が同じか。
-//! (`-O` はオーバーフローの検査をしないので、オーバーフローで panic するもの (名前に overflow を含む) は除く)
+//! Builds tests/probe, examples and tests/acg with session's `-O` (inline expansion of small fns + skipping minclif's re-reads) and checks
+//! that the output (stdout, stderr, exit code) is the same as without `-O`.
+//! (`-O` does not check for overflow, so the ones that panic on overflow (those with overflow in their names) are excluded)
 #![cfg(feature = "acg")]
 use std::path::PathBuf;
 
@@ -28,10 +28,10 @@ fn inline_keeps_behavior() {
         let sub = dir.join(p.parent().unwrap().file_name().unwrap());
         std::fs::create_dir_all(&sub).unwrap();
         let (a, b) = (sub.join(format!("{name}.0")), sub.join(format!("{name}.1")));
-        if zustc::driver2::build(&src, &a, false, None).is_err() {
+        if zustc::session::build(&src, &a, false, None).is_err() {
             return None;
         }
-        if let Err(e) = zustc::driver2::build(&src, &b, true, None) {
+        if let Err(e) = zustc::session::build(&src, &b, true, None) {
             return Some(Err(format!("{name}: -O build failed: {}", e.lines().next().unwrap_or(""))));
         }
         let run = |e: &PathBuf| std::process::Command::new(e).stdin(std::process::Stdio::null()).output().unwrap();

@@ -6,7 +6,7 @@ use the front end and the type checker without the code generator.
 ```
                          zustc (src/: CLI)        zurgo (Cargo-compatible driver)
                                    \                 /
-  zust-analyzer (LSP) ──────────── zust-core (driver2: Session2, cache, build)
+  zust-analyzer (LSP) ──────────── zust-core (session: Session, cache, build)
         │                            │            │
      zust-ide                   zust-typeck   zust-codegen ── zust-clif (Cranelift)
         │                            │            │           zust-wasm  (wasm32)
@@ -28,7 +28,7 @@ use the front end and the type checker without the code generator.
 | zust-codegen | [codegen](codegen/README.md) | replays the recorded instructions into a backend; invokes the linker |
 | zust-clif | [clif](clif/README.md) | the Cranelift backend (same recorded stream, another code generator) |
 | zust-wasm | [wasm](wasm/README.md) | the wasm32-unknown-unknown backend |
-| zust-core | [core](core/README.md) | the driver: `Session2` (check, analysis, caches) and the build (parallel compile, objects, link, workspaces) |
+| zust-core | [core](core/README.md) | the driver: `Session` (check, analysis, caches) and the build (parallel compile, objects, link, workspaces) |
 | zust-ide | [ide](ide/README.md) | editor analyses from tokens alone: symbols, definitions, references, hover, completion |
 | zust-analyzer | [analyzer](analyzer/README.md) | the LSP server (stdio) |
 | zust-fuzz | [fuzz](fuzz/README.md) | mutation-based fuzzing of the front end and the checker: panics, hangs, crashes, the two macro expanders against each other |

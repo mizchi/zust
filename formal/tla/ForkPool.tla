@@ -1,6 +1,6 @@
 ----------------------------- MODULE ForkPool -----------------------------
-(* The fork/pipe worker pool of zustc's driver (crates/core/src/driver2.rs, item summaries;
-   crates/core/src/driver2/build.rs, functions and crates).
+(* The fork/pipe worker pool of zustc's driver (crates/core/src/session.rs, item summaries;
+   crates/core/src/session/build.rs, functions and crates).
 
    The parent makes pipe k and forks child k, which computes items j with j % Jobs = k - 1 and writes one record
    per item to the pipe. The parent then reads pipe 1 to EOF, waits for child 1, reads pipe 2, ... and finally

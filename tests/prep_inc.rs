@@ -1,7 +1,7 @@
-//! 差分の前処理 (prep::prep) が、毎回全体を前処理したもの (prep::prep_full) と同じになるか。
-//! 実際のソース (examples/*.rs と、crates/syntax/src のファイルを `mod x { .. }` で束ねたもの) に乱数で編集を続けて加え、
-//! 各段で本文・桁のずれ・成否を比べる。編集は関数の本体の中 (骨組みが変わらない: 差分の経路) と、どこでも (骨組みが
-//! 変わる: 全体の経路) の両方
+//! Whether incremental preprocessing (prep::prep) is the same as preprocessing the whole every time (prep::prep_full).
+//! To real sources (examples/*.rs, and the files of crates/syntax/src bundled with `mod x { .. }`), keeps applying random edits,
+//! comparing the text, the column shifts and success / failure at each step. The edits are both inside fn bodies (the skeleton does not change: the incremental path) and anywhere (the skeleton
+//! changes: the full path)
 
 use zustc::prep::{PrepMemo, marked, prep, prep_full};
 
@@ -27,7 +27,7 @@ fn char_floor(s: &str, mut i: usize) -> usize {
 }
 
 fn edit(s: &str, r: &mut Rng) -> String {
-    // (半分は `let` の行の直後 (関数の本体の中) に、半分はどこでも)
+    // (half right after a `let` line (inside a fn body), half anywhere)
     let at = if r.below(2) == 0 {
         let lets: Vec<usize> = s.match_indices("let ").map(|(i, _)| i).collect();
         if lets.is_empty() { char_floor(s, r.below(s.len() + 1)) } else { lets[r.below(lets.len())] }
@@ -59,7 +59,7 @@ fn sources() -> Vec<String> {
     for p in ps.iter().filter(|p| p.extension().is_some_and(|e| e == "rs")).take(25) {
         v.push(std::fs::read_to_string(p).unwrap());
     }
-    // (モジュールに束ねたもの: 名前のぶつかりの書き換え・use・入れ子のアイテム・マクロ)
+    // (the files bundled into modules: rewriting of name collisions, use, nested items, macros)
     let mut bundle = String::from("fn main() {}\n");
     for m in ["ctors", "cfg", "stub", "macros"] {
         let t = std::fs::read_to_string(format!("{root}/crates/syntax/src/{m}.rs")).unwrap();

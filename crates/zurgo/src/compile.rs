@@ -1,5 +1,5 @@
 //! `zurgo build`: the packages the selected members need on the target side, as one zustc workspace
-//! (`Session2::build_workspace`): a library per package in dependency order, then the members' binaries.
+//! (`Session::build_workspace`): a library per package in dependency order, then the members' binaries.
 //!
 //! Build scripts run first (build_script.rs); their cfgs and environment, and cargo's `CARGO_PKG_*`, go to each
 //! crate. A proc-macro dependency is a stub library (proc_macro_stub.rs): using one of its macros is an error
@@ -13,7 +13,7 @@ use crate::platform::Target;
 use crate::resolve::{self, Graph, Mode, Node, Opts};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use zustc::driver2::{CrateSpec, Options2, Session2};
+use zustc::session::{CrateSpec, Options, Session};
 
 type R<T> = Result<T, String>;
 
@@ -545,7 +545,7 @@ fn ws_text_in(crates: &[CrateSpec], redact: bool) -> String {
             Some(e) if *e != c.name => format!(" exe={e}"),
             _ => String::new(),
         };
-        let esc = zustc::driver2::ws_escape;
+        let esc = zustc::session::ws_escape;
         for (k, v) in &c.cfgs {
             match v {
                 Some(v) => e.push_str(&format!(" cfg={}={}", esc(k), esc(v))),
@@ -580,7 +580,7 @@ pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
         eprint!("{}", ws_text_in(&crates, true));
         eprintln!("(written to {}, with the environment's values)", p.display());
     }
-    let mut opts = Options2 { opt: o.release, time: o.time, no_cache: o.no_cache, ..Options2::default() };
+    let mut opts = Options { opt: o.release, time: o.time, no_cache: o.no_cache, ..Options::default() };
     if let Some(j) = o.jobs {
         opts.jobs = j;
     }
@@ -593,7 +593,7 @@ pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
         Some(t) => return Err(format!("unknown target `{t}`")),
     }
     let wasm = opts.module_writer.is_some();
-    Session2::new(opts).build_workspace(&crates, &out)?;
+    Session::new(opts).build_workspace(&crates, &out)?;
     // (wasm32: a bin is the module `<name>.wasm`)
     let is_test: Vec<usize> = labels.iter().map(|l| l.0).collect();
     let bins = crates

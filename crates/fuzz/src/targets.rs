@@ -1,7 +1,7 @@
 //! What a fuzz input is run through. Every target must return (an answer or an error) for any input: a panic, a
 //! hang or a crash is a finding. `expand-diff` also compares the fast `macro_rules!` expander with the reference one.
 
-use zust_core::driver2::{Options2, Session2};
+use zust_core::session::{Options, Session};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Target {
@@ -93,7 +93,7 @@ pub fn run(t: Target, src: &str, edition: u16) -> Outcome {
             Err(e) => feature(&e),
         }),
         Target::Check => {
-            let mut s = Session2::new(Options2 { jobs: 1, no_cache: true, edition, ..Options2::default() });
+            let mut s = Session::new(Options { jobs: 1, no_cache: true, edition, ..Options::default() });
             let d = s.check(src);
             Outcome::Done(d.first().map_or_else(|| "clean".to_string(), |d| feature(&d.msg)))
         }

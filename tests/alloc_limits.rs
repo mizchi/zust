@@ -6,7 +6,7 @@ fn run(src: &str, name: &str) -> std::process::Output {
     let dir = std::env::temp_dir().join(format!("alloc_limits_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let exe = dir.join(name);
-    zustc::driver2::build(src, &exe, false, None).unwrap();
+    zustc::session::build(src, &exe, false, None).unwrap();
     std::process::Command::new(&exe).output().unwrap()
 }
 

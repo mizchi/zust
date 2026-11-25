@@ -65,7 +65,7 @@ def build_kpis():
     # (the least of 3 runs, as for the no-op build: one run moves by ~0.06%. At -j 1: valgrind does not count the
     # children a parallel check forks, #101)
     check = min(instructions([ZUSTC, "check", "-j", "1", src]) for _ in range(3))
-    cache = os.path.getsize(exe + ".crcache2") / 1024
+    cache = os.path.getsize(exe + ".cache") / 1024
     return noop, edit, check, cache
 
 

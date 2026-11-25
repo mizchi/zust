@@ -1,4 +1,4 @@
-//! リテラルのトークン (自前の構文木では文字列のまま) を syn::Lit と同じ形で見るためのもの。
+//! For viewing literal tokens (kept as strings in our own syntax tree) in the same shape as syn::Lit.
 
 #[derive(Clone, Debug)]
 pub struct LitInt {
@@ -41,13 +41,13 @@ pub enum Lit {
     Bool(bool),
     Byte(u8),
     Char(char),
-    /// 文字列 (中身)
+    /// A string (its contents)
     Str(String),
     ByteStr(Vec<u8>),
     CStr(Vec<u8>),
 }
 
-/// リテラルのトークンのテキストを分類する
+/// Classifies the text of a literal token
 pub fn lit(t: &str) -> Option<Lit> {
     if t == "true" {
         return Some(Lit::Bool(true));
@@ -87,7 +87,7 @@ pub fn lit(t: &str) -> Option<Lit> {
     };
     let digits: &str = &body[..body.bytes().take_while(|&c| (c as char).is_digit(radix)).count()];
     let rest = &body[digits.len()..];
-    // 浮動小数点 (`1.5` / `1e3` / `2.` / `1f64`)
+    // Floating point (`1.5` / `1e3` / `2.` / `1f64`)
     if radix == 10 && (rest.starts_with('.') || rest.starts_with('e') || rest.starts_with('E') || rest == "f32" || rest == "f64") {
         let mut n = digits.len();
         let b = body.as_bytes();
@@ -108,7 +108,7 @@ pub fn lit(t: &str) -> Option<Lit> {
         }
         let suffix = body[n..].to_string();
         if (rest == "f32" || rest == "f64") && suffix == rest {
-            // (`1f64` は syn では整数リテラル + 接尾辞 f64)
+            // (`1f64` is an integer literal + suffix f64 in syn)
             return Some(Lit::Int(LitInt { digits: digits.to_string(), suffix }));
         }
         return Some(Lit::Float(LitFloat { digits: body[..n].to_string(), suffix }));

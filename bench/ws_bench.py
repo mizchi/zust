@@ -1,14 +1,14 @@
-"""複数クレートのワークスペースのビルドの時間 (zustc build と rustc の比較)。
+"""Build times of a multi-crate workspace (zustc build compared with rustc).
 
 usage: python3 bench/ws_bench.py [--crates K] [--files F] [--fns N] [--reps R] [--rustc]
 
-場面:
-  cold      何もない状態から全部
-  noop      何も変えずにもう一度
-  leaf-body いちばん下のクレート (c0) の関数の本体を 1 つ変える (全部のクレートが c0 を使う)
-  leaf-sig  c0 の関数のシグネチャ (と本体) を変える
-  app-body  bin の main を変える
-rustc は rlib を作ってリンクする (cargo と同じく、依存が変われば使う側もコンパイルし直す)。-C incremental を付ける
+Scenarios:
+  cold      everything from an empty state
+  noop      again with nothing changed
+  leaf-body change the body of one fn of the bottom crate (c0) (every crate uses c0)
+  leaf-sig  change the signature (and body) of a fn of c0
+  app-body  change the bin's main
+rustc makes rlibs and links them (like cargo, when a dependency changes, its users are recompiled too). -C incremental is added
 """
 import os
 import shutil
@@ -64,7 +64,7 @@ def main():
         res = {}
         for rep in range(opt["--reps"]):
             clean()
-            # (毎回同じソースから)
+            # (from the same source every time)
             subprocess.run([sys.executable, os.path.join(ROOT, "bench/ws_gen.py"), d, "--crates", str(opt["--crates"]),
                             "--files", str(opt["--files"]), "--fns", str(opt["--fns"])], check=True)
             steps = [

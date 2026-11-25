@@ -1,4 +1,4 @@
-//! `zust-analyzer` を実際に起動し、stdio 越しに診断が返ることを確かめる。
+//! Actually starts `zust-analyzer` and checks that diagnostics come back over stdio.
 
 use std::io::{BufReader, Write};
 use std::process::{Command, Stdio};
@@ -24,7 +24,7 @@ fn diagnostics_roundtrip() {
     assert_eq!(r["result"]["capabilities"]["textDocumentSync"], 1);
     send(json!({"jsonrpc": "2.0", "method": "initialized", "params": {}}));
 
-    // 型エラーのある版を開く
+    // Open a version with a type error
     let bad = "fn f() -> u8 {\n    1i64\n}\nfn main() {}\n";
     send(json!({"jsonrpc": "2.0", "method": "textDocument/didOpen",
         "params": {"textDocument": {"uri": uri, "languageId": "rust", "version": 1, "text": bad}}}));
@@ -40,7 +40,7 @@ fn diagnostics_roundtrip() {
             .contains("mismatched types")
     );
 
-    // 直すと診断が消える
+    // Fixing it makes the diagnostic go away
     let good = "fn f() -> u8 {\n    1\n}\nfn main() {}\n";
     send(json!({"jsonrpc": "2.0", "method": "textDocument/didChange",
         "params": {"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": good}]}}));
@@ -57,7 +57,7 @@ fn diagnostics_roundtrip() {
     assert!(child.wait().unwrap().success());
 }
 
-/// documentSymbol (開いたドキュメントの木) と workspace/symbol (開いたドキュメントとワークスペースの .rs から名前で探す)
+/// documentSymbol (the tree of an open document) and workspace/symbol (search by name in the open documents and the workspace's .rs files)
 #[test]
 fn symbols() {
     use zust_analyzer::Server;
@@ -66,7 +66,7 @@ fn symbols() {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::create_dir_all(root.join("target")).unwrap();
     std::fs::write(root.join("src/geom.rs"), "pub struct Point { pub x: f64, pub y: f64 }\nimpl Point {\n    pub fn norm(&self) -> f64 { 0.0 }\n}\n").unwrap();
-    // (target の下は見ない)
+    // (nothing under target is looked at)
     std::fs::write(root.join("target/junk.rs"), "fn point_junk() {}\n").unwrap();
     let uri_root = format!("file://{}", root.display());
     let mut srv = Server::new();
@@ -80,7 +80,7 @@ fn symbols() {
     srv.handle(&json!({"jsonrpc": "2.0", "method": "textDocument/didOpen",
         "params": {"textDocument": {"uri": uri, "languageId": "rust", "version": 1, "text": text}}}).to_string());
 
-    // documentSymbol: 木と位置 (行・桁は 0 始まり)
+    // documentSymbol: the tree and positions (lines and columns are 0-based)
     let r = srv.handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "textDocument/documentSymbol", "params": {"textDocument": {"uri": uri}}}).to_string());
     let r: Value = serde_json::from_str(&r[0]).unwrap();
     let syms = r["result"].as_array().unwrap();
@@ -93,8 +93,8 @@ fn symbols() {
     assert_eq!(vars, ["Circle", "Rect"]);
     assert_eq!(syms[1]["children"][1]["children"][0]["name"], "w");
 
-    // workspace/symbol (rust-analyzer と同じ決まり): 開いたドキュメントと、開いていない src/geom.rs から。
-    // 型に当たれば型だけ (`point` → struct Point。関数 point_dist や impl は出さない)
+    // workspace/symbol (same rules as rust-analyzer): from the open document and from src/geom.rs, which is not open.
+    // When a type matches, only types (`point` → struct Point; the fn point_dist and impls are not shown)
     let ask = |srv: &mut Server, id: u32, q: &str| -> Value {
         let r = srv.handle(&json!({"jsonrpc": "2.0", "id": id, "method": "workspace/symbol", "params": {"query": q}}).to_string());
         serde_json::from_str(&r[0]).unwrap()
@@ -104,16 +104,16 @@ fn symbols() {
         .map(|s| (s["name"].as_str().unwrap().to_string(), s["location"]["uri"].as_str().unwrap().rsplit('/').next().unwrap().to_string()))
         .collect();
     assert_eq!(hits, vec![("Point".to_string(), "geom.rs".to_string())], "{hits:?}");
-    // 型に当たらなければ全部から (フィールドは出さない)
+    // When no type matches, from everything (fields are not shown)
     let r = ask(&mut srv, 31, "point_d");
     let pd = r["result"].as_array().unwrap().iter().find(|s| s["name"] == "point_dist").unwrap();
     assert_eq!(pd["containerName"], "util");
     assert_eq!(pd["kind"], 12);
     assert!(!r["result"].as_array().unwrap().iter().any(|h| h["name"] == "point_junk"), "{r}");
-    // 大文字を含む問い合わせは大文字と小文字を区別する
+    // A query containing uppercase letters is case-sensitive
     assert_eq!(ask(&mut srv, 32, "POint")["result"].as_array().unwrap().len(), 0);
 
-    // 文字の順に含むもの (`nrm` → norm。impl のメンバの containerName は持ち主の型) と、ファイルを書き換えたら読み直す
+    // Those containing the characters in order (`nrm` → norm; the containerName of an impl member is the owning type), and rereading after the file is rewritten
     let r = ask(&mut srv, 4, "nrm");
     assert_eq!(r["result"][0]["name"], "norm");
     assert_eq!(r["result"][0]["containerName"], "Point");
@@ -122,7 +122,7 @@ fn symbols() {
     let r: Value = serde_json::from_str(&r[0]).unwrap();
     assert_eq!(r["result"].as_array().unwrap().len(), 0, "{r}");
 
-    // 編集した本文のシンボル
+    // The symbols of the edited text
     let text2 = "fn renamed_fn() {}\n";
     srv.handle(&json!({"jsonrpc": "2.0", "method": "textDocument/didChange",
         "params": {"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": text2}]}}).to_string());
@@ -131,13 +131,13 @@ fn symbols() {
     assert_eq!(r["result"][0]["name"], "renamed_fn");
 }
 
-/// definition / references: ローカル・メソッド (受け手の型から)・`use` したアイテム・ファイルをまたぐ参照
+/// definition / references: locals, methods (from the receiver's type), `use`d items, references across files
 #[test]
 fn definition_and_references() {
     nav(usize::MAX, "lsp_nav");
 }
 
-/// 同じことを、ワークスペースのファイルを全部 slim にして (本文を捨て、参照のときに読み直す)
+/// The same, with all the workspace's files made slim (the text thrown away and reread for references)
 #[test]
 fn definition_and_references_slim() {
     nav(0, "lsp_nav_slim");
@@ -178,23 +178,23 @@ fn nav(budget: usize, dir: &str) {
         out
     };
     let at = |f: &str, l: u64, c: u64| (f.to_string(), l, c);
-    // `Point::new()` の Point → geom.rs の struct、new → impl のメソッド
+    // The Point of `Point::new()` → the struct in geom.rs, new → the impl's method
     assert_eq!(ask("textDocument/definition", 3, 12), [at("geom.rs", 0, 11)]);
     assert_eq!(ask("textDocument/definition", 3, 19), [at("geom.rs", 2, 11)]);
-    // `p.norm()`: p の型 (Point) のメソッド。同じ名前の関数 geom::norm ではない
+    // `p.norm()`: the method of p's type (Point), not the fn of the same name geom::norm
     assert_eq!(ask("textDocument/definition", 4, 14), [at("geom.rs", 3, 11)]);
-    // ローカル
+    // Locals
     assert_eq!(ask("textDocument/definition", 5, 11), [at("main.rs", 4, 8)]);
     assert_eq!(ask("textDocument/definition", 7, 28), [at("main.rs", 7, 10)]);
-    // 参照: helper は宣言と呼び出し、Point はファイルをまたいで (use・パス・impl・戻り値の型・構造体の式)
+    // References: helper is the declaration and the call; Point across files (use, path, impl, return type, struct expression)
     assert_eq!(ask("textDocument/references", 7, 4), [at("main.rs", 5, 4), at("main.rs", 7, 3)]);
     let refs = ask("textDocument/references", 0, 12);
-    assert!(refs.is_empty(), "{refs:?}"); // (`mod geom` の geom はモジュール: 参照は返さない)
+    assert!(refs.is_empty(), "{refs:?}"); // (the geom of `mod geom` is a module: no references are returned)
     let refs = ask("textDocument/references", 1, 11);
     assert_eq!(refs, [at("geom.rs", 0, 11), at("geom.rs", 1, 5), at("geom.rs", 2, 20), at("geom.rs", 2, 28), at("main.rs", 1, 10), at("main.rs", 3, 12)]);
 }
 
-/// hover と completion: シグネチャ・doc コメント・ローカルの型、`x.|` (受け手の型のメンバ)、`Q::|`、名前の途中
+/// hover and completion: signatures, doc comments, local types, `x.|` (members of the receiver's type), `Q::|`, the middle of a name
 #[test]
 fn hover_and_completion() {
     use zust_analyzer::Server;
@@ -222,32 +222,32 @@ fn hover_and_completion() {
     };
     let hover = |v: Value| v["contents"]["value"].as_str().unwrap_or("").to_string();
     let labels = |v: Value| -> Vec<String> { v["items"].as_array().unwrap().iter().map(|x| x["label"].as_str().unwrap().to_string()).collect() };
-    // 定義のシグネチャと doc コメント
+    // The definition's signature and doc comment
     let h = hover(ask("textDocument/hover", 3, 20));
     assert!(h.contains("pub fn origin() -> Point") && h.contains("原点") && h.contains("impl Point"), "{h}");
     let h = hover(ask("textDocument/hover", 1, 11));
     assert!(h.contains("pub struct Point") && h.contains("平面の点"), "{h}");
-    // ローカルの型: Option<Point>::unwrap → Point
+    // A local's type: Option<Point>::unwrap → Point
     assert!(hover(ask("textDocument/hover", 4, 8)).contains("q: Point"));
     assert!(hover(ask("textDocument/hover", 5, 8)).contains("n: f64"));
-    // q.norm() は Point::norm
+    // q.norm() is Point::norm
     assert!(hover(ask("textDocument/hover", 5, 15)).contains("pub fn norm(&self) -> f64"));
-    // `p.|`: Point のメンバ、`v.|`: Vec (とスライス) のメソッド
+    // `p.|`: Point's members; `v.|`: methods of Vec (and slices)
     let c = labels(ask("textDocument/completion", 4, 14));
     assert!(c.contains(&"shifted".to_string()) && c.contains(&"x".to_string()) && !c.contains(&"push".to_string()), "{c:?}");
     let c = labels(ask("textDocument/completion", 7, 6));
     if std::env::var_os("ZUST_ANALYZER_NO_STD").is_none() && c.iter().any(|x| x == "len") {
         assert!(c.contains(&"push".to_string()) && c.contains(&"iter".to_string()), "{c:?}");
     }
-    // `Point::|`: 関連関数とフィールドでないもの
+    // `Point::|`: associated fns and what is not a field
     let c = labels(ask("textDocument/completion", 8, 11));
     assert!(c.contains(&"origin".to_string()), "{c:?}");
-    // 名前の途中 `no|`: ローカルの n ではなく、n で始まる / 含むもの (norm は Point のメンバなので出ない)
+    // The middle of a name `no|`: not the local n, but those starting with / containing n (norm is a member of Point, so it does not appear)
     let c = labels(ask("textDocument/completion", 9, 6));
     assert!(!c.is_empty() && c.iter().all(|x| x.to_lowercase().contains('n')), "{c:?}");
 }
 
-/// rename (prepareRename・ほかのファイルも書き換える・理由付きの断り)、signatureHelp、documentHighlight
+/// rename (prepareRename, rewriting other files too, refusals with a reason), signatureHelp, documentHighlight
 #[test]
 fn rename_signature_highlight() {
     use zust_analyzer::Server;
@@ -277,23 +277,23 @@ fn rename_signature_highlight() {
         let r = srv.handle(&json!({"jsonrpc": "2.0", "id": id, "method": method, "params": p}).to_string());
         serde_json::from_str(&r[0]).unwrap()
     };
-    // prepareRename: 名前の範囲と今の名前
+    // prepareRename: the name's range and the current name
     let r = ask("textDocument/prepareRename", 4, 15, json!({}));
     assert_eq!(r["result"]["placeholder"], "scale", "{r}");
     assert_eq!(r["result"]["range"]["start"]["character"], 14);
-    // フィールド x: geom.rs の定義・self.x と、main.rs の `Point { x: .. }`・`p.x`
+    // The field x: the definition and self.x in geom.rs, and `Point { x: .. }` and `p.x` in main.rs
     let r = ask("textDocument/rename", 4, 27, json!({"newName": "px"}));
     let ch = &r["result"]["changes"];
     let geom = ch.as_object().unwrap().iter().find(|(k, _)| k.ends_with("geom.rs")).map(|(_, v)| v.as_array().unwrap().len());
     assert_eq!(geom, Some(2), "{r}");
     assert_eq!(ch[&uri].as_array().unwrap().len(), 2, "{r}");
     assert!(ch[&uri].as_array().unwrap().iter().all(|e| e["newText"] == "px"));
-    // 断るとき: 理由付きのエラー
+    // When refusing: an error with a reason
     let r = ask("textDocument/rename", 4, 27, json!({"newName": "fn"}));
     assert_eq!(r["error"]["code"], -32803, "{r}");
     let r = ask("textDocument/prepareRename", 3, 22, json!({}));
     assert!(r["error"]["message"].as_str().is_some_and(|m| !m.is_empty()), "{r}");
-    // signatureHelp: `p.scale(2.0, |p.x)` は 2 番目 (self は数えない)
+    // signatureHelp: `p.scale(2.0, |p.x)` is the second (self is not counted)
     let r = ask("textDocument/signatureHelp", 4, 25, json!({}));
     let sg = &r["result"]["signatures"][0];
     assert_eq!(sg["label"], "pub fn scale(&self, k: f64, d: f64) -> f64", "{r}");
@@ -303,13 +303,13 @@ fn rename_signature_highlight() {
     let p0 = &sg["parameters"][0]["label"];
     assert_eq!(&l[p0[0].as_u64().unwrap() as usize..p0[1].as_u64().unwrap() as usize], "k: f64");
     assert!(ask("textDocument/signatureHelp", 3, 10, json!({}))["result"].is_null());
-    // documentHighlight: このファイルの中の p (定義と 2 つの使い所)
+    // documentHighlight: p in this file (the definition and the 2 uses)
     let r = ask("textDocument/documentHighlight", 3, 8, json!({}));
     assert_eq!(r["result"].as_array().unwrap().len(), 3, "{r}");
 }
 
-/// 型推論 (hover の型) を rust-analyzer の答えと比べる: 繰り返しの要素・クロージャの戻り値からの型引数・関連型の射影・
-/// タプル・ターボフィッシュ・数の型のメソッド (core のマクロの中)。std が要るので、見つからなければ何もしない
+/// Compares type inference (the types in hover) with rust-analyzer's answers: iterator elements, type arguments from closure return values, associated type projections,
+/// tuples, turbofish, methods of number types (inside core's macros). Needs std, so does nothing if it is not found
 #[test]
 fn type_inference_like_rust_analyzer() {
     use zust_analyzer::Server;
@@ -327,7 +327,7 @@ fn type_inference_like_rust_analyzer() {
     srv.handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"rootUri": uri_root}}).to_string());
     let uri = format!("{uri_root}/src/lib.rs");
     srv.handle(&json!({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {"uri": uri, "languageId": "rust", "version": 1, "text": text}}}).to_string());
-    // (rust-analyzer の hover の型)
+    // (rust-analyzer's hover types)
     let want: &[(&str, &str)] = &[
         ("a", "Option<&(String, Vec<String>)>"),
         ("b", "Option<&str>"),

@@ -349,6 +349,12 @@ pub fn tysyn(t: &PTy, self_ty: Option<&TySyn>) -> R<TySyn> {
                 parts.extend(lowered);
                 return Ok(TySyn::Assoc(Box::new(TySyn::Tuple(parts)), format!("{TARGS_PREFIX}{tr}#{name}")));
             }
+            // (the trait too, when its arguments did not take the path above: `<&J as BitAnd<&J>>::Output` beside `impl Not
+            // for &J`, that trait's impl gives it)
+            let name = match tr {
+                Some(t) if !t.is_empty() && !t.contains(':') => format!("{TRAIT_ASSOC}{t}:{name}"),
+                _ => name,
+            };
             TySyn::Assoc(Box::new(tysyn(q, self_ty)?), name)
         }
         PTy::Path(None, p) => path_ty(p, self_ty)?,
@@ -367,6 +373,18 @@ pub const GAT_PREFIX: &str = "#gat:";
 /// The mark of an associated type a qualified path names of a trait other than std's operators (`<i32 as
 /// Local>::Output`): std's impls for the numbers do not give it
 pub const NO_STD_ASSOC: &str = "#impl:";
+
+/// The mark of an associated type a qualified path names with its trait, `#tr:BitAnd:Output` of `<&J as
+/// BitAnd<&J>>::Output`: the impl of that trait gives it, before another trait's of the same name for the type
+pub const TRAIT_ASSOC: &str = "#tr:";
+
+/// An associated type's name without the trait a qualified path gave it, and that trait
+pub fn split_trait_assoc(n: &str) -> (&str, Option<&str>) {
+    match n.strip_prefix(TRAIT_ASSOC).and_then(|r| r.split_once(':')) {
+        Some((t, rest)) => (rest, Some(t)),
+        None => (n, None),
+    }
+}
 
 fn gat_app(base: TySyn, seg: &crate::parse::Seg, self_ty: Option<&TySyn>) -> R<TySyn> {
     let mut parts = vec![base];

@@ -1,5 +1,5 @@
-// マクロの引数の中のクロージャ: println! / format! / assert! / assert_eq! / vec! の中の map / filter など。
-// assert_eq! / assert_ne! は == / != として比べる (Option / Vec / String と &str も)
+// Closures inside macro arguments: map / filter etc. inside println! / format! / assert! / assert_eq! / vec!.
+// assert_eq! / assert_ne! compare as == / != (also Option / Vec / String with &str)
 fn main() {
     let v = vec![1, 2, 3, 4];
     let k = 10;
