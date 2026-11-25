@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795597712444,
+  "lastUpdate": 1795597714951,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -126311,6 +126311,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 4760,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "217788eeff52e190e984bdd0544f3b8aadadfc3d",
+          "message": "Region check part 33: ref mut through a &, moves out of what a reference gives, a guard's bindings, Box and Pin receivers, a closure returned from a local, borrows held in returned aggregates (#160)\n\nRegion check part 33: ref mut through a &, moves out of what a reference gives, a guard's bindings, Box and Pin receivers, a closure returned from a local, borrows held in returned aggregates",
+          "timestamp": "2026-11-25T18:03:19+09:00",
+          "tree_id": "2e8376417815a0a08955f193cb121e37b3a4205d",
+          "url": "https://github.com/mizchi/zust/commit/217788eeff52e190e984bdd0544f3b8aadadfc3d"
+        },
+        "date": 1795597714676,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.74,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1868,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.23,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1527,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 64.6,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4771,
             "unit": "tests"
           }
         ]
