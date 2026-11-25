@@ -2839,7 +2839,8 @@ impl Cx<'_> {
                         Ty::Ref(_, i) => t = *i,
                         // (a type's own `Index`: what its `index` returns a reference to, so a field read through its
                         // `Deref` is found (`v[0].f` with `Output = MyPtr<Foo>`))
-                        Ty::Struct(sid) => {
+                        // (of the program's own types: the prelude's (`Vec`) are read where they are lowered)
+                        Ty::Struct(sid) if self.prog.struct_item.get(self.prog.base_of(sid) as usize).is_some_and(|&i| i < self.prog.prelude_from) => {
                             let id = self.prog.method(sid, "index")?;
                             let sig = &self.prog.sigs[id as usize];
                             let mut sol = vec![None; sig.generics.len()];
