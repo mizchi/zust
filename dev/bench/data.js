@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795588731398,
+  "lastUpdate": 1795588733691,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -125569,6 +125569,70 @@ window.BENCHMARK_DATA = {
           {
             "name": "tests/ui compile-fail passing",
             "value": 4743,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4139c8bd8fb4a3efc0049dbf6f3777aac0434c61",
+          "message": "Region check part 31: errors in closures at the closure, a const's block that borrows its own local, moves out of a temporary scrutinee, the use rustc reports of a moved value, a block's value read before its drops (#158)\n\nRegion check part 31: errors in closures at the closure, a const's block that borrows its own local, moves out of a temporary scrutinee, the use rustc reports of a moved value, a block's value read before its drops",
+          "timestamp": "2026-11-25T15:33:14+09:00",
+          "tree_id": "17957259b461580f5e1d0bea08de6852d493bc57",
+          "url": "https://github.com/mizchi/zust/commit/4139c8bd8fb4a3efc0049dbf6f3777aac0434c61"
+        },
+        "date": 1795588733332,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 77.65,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1866,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 84.23,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1527,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 75.56,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 102,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 64.37,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 4754,
             "unit": "tests"
           }
         ]
