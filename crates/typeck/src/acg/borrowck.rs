@@ -2988,7 +2988,9 @@ impl Cx<'_> {
                 if prelude || prog.closure_of_struct.contains_key(&base) {
                     return sd.args.iter().any(|&a| self.dropck(a, depth + 1));
                 }
-                prog.impls.contains(&(base, "Drop".to_string()))
+                // (a `Drop` of a type that holds no reference sees no loan: `Token` in `(Cell<Option<&i32>>, Token)`,
+                // whose drop needs nothing the cell borrows alive, as rustc's drop check requires only its parameters)
+                (prog.impls.contains(&(base, "Drop".to_string())) && has_refs(prog, t, 0))
                     || sd.fields.iter().any(|f| self.dropck(f.1, depth + 1))
                     || sd.variants.iter().any(|v| v.fields.iter().any(|f| self.dropck(f.1, depth + 1)))
             }
