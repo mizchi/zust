@@ -2819,6 +2819,7 @@ compile-fail	feature-gates/feature-gate-link-enzyme-intrinsics-no-gate.rs
 compile-fail	feature-gates/feature-gate-linkage.rs
 compile-fail	feature-gates/feature-gate-log_syntax.rs
 compile-fail	feature-gates/feature-gate-log_syntax2.rs
+compile-fail	feature-gates/feature-gate-macro-guard-matcher.rs
 compile-fail	feature-gates/feature-gate-marker_trait_attr.rs
 compile-fail	feature-gates/feature-gate-may-dangle.rs
 compile-fail	feature-gates/feature-gate-more-qualified-paths.rs
@@ -4328,6 +4329,7 @@ check-pass	lint/unused/unused-attr-repr-packed-c-order.rs
 check-pass	lint/unused/unused-braces-attrs-issue-141549.rs
 compile-fail	lint/unused/unused-doc-comments-edge-cases.rs
 check-pass	lint/unused/unused-field-in-pat-field.rs
+compile-fail	lint/unused/unused-macro-with-bad-frag-spec.rs
 compile-fail	lint/unused/unused-mut-warning-captured-var.rs
 check-pass	lint/unused/unused-never-binding-issue-158783.rs
 check-pass	lint/unused/unused-parens-issue-106413.rs
@@ -4430,6 +4432,7 @@ check-pass	macros/format-args-temporaries.rs
 compile-fail	macros/format-empty-block-unit-tuple-suggestion-130170.rs
 compile-fail	macros/format-parse-errors.rs
 compile-fail	macros/global-asm.rs
+compile-fail	macros/invalid-fragment-specifier.rs
 compile-fail	macros/issue-102878.rs
 compile-fail	macros/issue-105011.rs
 compile-fail	macros/issue-10536.rs
@@ -4438,6 +4441,7 @@ check-pass	macros/issue-112342-2.rs
 compile-fail	macros/issue-11692-1.rs
 compile-fail	macros/issue-11692-2.rs
 compile-fail	macros/issue-118048.rs
+compile-fail	macros/issue-21356.rs
 check-pass	macros/issue-22463.rs
 run-pass	macros/issue-25274.rs
 compile-fail	macros/issue-26094.rs
@@ -4645,6 +4649,7 @@ compile-fail	match/single-line.rs
 run-pass	match/struct-reference-patterns-12285.rs
 run-pass	match/tuple-usize-pattern-14393.rs
 compile-fail	match/uninhabited-granular-moves.rs
+compile-fail	match/unit-pattern-error-on-tuple-and-struct-variants-63983.rs
 compile-fail	match/validate-range-endpoints.rs
 compile-fail	methods/ambig-method-call-in-trait-impl.rs
 compile-fail	methods/assc-func-issue-149038.rs
@@ -8063,6 +8068,7 @@ compile-fail	tuple/wrong_argument_ice-4.rs
 compile-fail	tuple/wrong_argument_ice.rs
 compile-fail	type-alias-enum-variants/enum-variant-generic-args.rs
 compile-fail	type-alias-enum-variants/enum-variant-priority-higher-than-other-inherent.rs
+compile-fail	type-alias-enum-variants/incorrect-variant-form-through-Self-issue-58006.rs
 compile-fail	type-alias-enum-variants/incorrect-variant-form-through-alias-caught.rs
 check-pass	type-alias-enum-variants/issue-57866.rs
 check-pass	type-alias-enum-variants/issue-63151-dead-code-lint-fields-in-patterns.rs

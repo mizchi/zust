@@ -33,6 +33,24 @@ struct Rule {
     body: Vec<Pt>,
 }
 
+/// rustc's fragment specifiers
+const FRAGS: &[&str] = &["block", "expr", "expr_2021", "ident", "item", "lifetime", "literal", "meta", "pat", "pat_param", "path", "stmt", "tt", "ty", "vis"];
+
+thread_local! {
+    /// The first fragment specifier of a `macro_rules!` matcher that is none of rustc's (`$x:id`), met while the
+    /// definitions are read: the driver reports it, "invalid fragment specifier"
+    pub static BAD_FRAGMENT: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cold]
+fn bad_fragment(k: &str) {
+    BAD_FRAGMENT.with(|c| {
+        if c.borrow().is_none() {
+            *c.borrow_mut() = Some(k.to_string());
+        }
+    });
+}
+
 fn parse_pt(ts: TokenStream, is_pat: bool) -> Vec<Pt> {
     let toks: Vec<TokenTree> = ts.into_iter().collect();
     let mut out = vec![];
@@ -56,7 +74,11 @@ fn parse_pt(ts: TokenStream, is_pat: bool) -> Vec<Pt> {
                         && matches!(&toks[i + 2], TokenTree::Punct(c) if c.as_char() == ':')
                     {
                         if let TokenTree::Ident(k) = &toks[i + 3] {
-                            out.push(Pt::Var(id.to_string(), k.to_string()));
+                            let k = k.to_string();
+                            if !FRAGS.contains(&k.as_str()) {
+                                bad_fragment(&k);
+                            }
+                            out.push(Pt::Var(id.to_string(), k));
                             i += 4;
                             continue;
                         }

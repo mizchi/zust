@@ -774,6 +774,14 @@ impl Cx<'_> {
         None
     }
 
+    /// E0533: a path pattern of a tuple or struct variant, at the path
+    #[cold]
+    fn unit_pat_err(&self, path: &crate::parse::Path, k: crate::types::VariantKind) -> String {
+        let name = path.segs.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join("::");
+        let kind = if k == crate::types::VariantKind::Tuple { "tuple variant" } else { "struct variant" };
+        self.at(path.pos, format!("expected unit struct, unit variant or constant, found {kind} `{name}` (E0533)"))
+    }
+
     /// A tuple struct pattern (`V(..)`) of a unit variant (E0532) or a struct variant (E0164; E0532 by its name alone),
     /// at its path, with rustc 1.100's message
     fn tuple_pat_of_variant(&self, path: &crate::parse::Path, sid: u32, vi: usize) -> R<()> {
@@ -1167,6 +1175,13 @@ impl Cx<'_> {
                         let Some((sid, vi)) = self.variant_on(path, t) else {
                             return err(SP, self.no_variant_msg(path));
                         };
+                        // (E0533: `E::V` of a tuple or struct variant, which a path pattern cannot be)
+                        if self.user_code {
+                            let kind = self.prog.structs[sid as usize].variants.get(vi).map(|v| v.kind);
+                            if let Some(k @ (crate::types::VariantKind::Tuple | crate::types::VariantKind::Struct)) = kind {
+                                return Err(self.unit_pat_err(path, k));
+                            }
+                        }
                         self.variant_turbofish(path, sid)?;
                         self.test_variant(p, sid, vi, SP, fail)
                     }

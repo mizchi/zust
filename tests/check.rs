@@ -2507,3 +2507,25 @@ fn awaits_and_binders_where_rustc_points() {
     assert_eq!(first("type D = for<'a, T> fn();\nfn main() {}\n"), Some((1, "only lifetime parameters can be used in this context".to_string())), "a binder's type parameter");
     assert_eq!(first("type A = for<'a: 'b> fn();\ntype B = for<,> fn();\nfn main() {}\n").map(|d| d.0), Some(2), "the later syntax error first");
 }
+
+#[test]
+fn macro_fragments_and_unit_patterns() {
+    // (a matcher's fragment specifier rustc does not know, E0533, at the lines rustc 1.100 reports them)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    assert_eq!(first("macro_rules! test {\n    ($wrong:id) => {};\n}\nfn main() {}\n"), e(2, "invalid fragment specifier `id`"), "an unknown fragment");
+    assert_eq!(
+        first("macro_rules! m {\n    ($($x:expr),* ; $t:ty, $p:pat_param, $l:lifetime) => { $x:id };\n}\nfn main() {}\n"),
+        None,
+        "known fragments, and the transcriber's text"
+    );
+    assert_eq!(first("fn main() {\n    macro_rules! m {\n        ($x:guard) => {};\n    }\n}\n"), e(3, "`guard` fragments in macro are unstable (E0658)"), "a gated fragment");
+    assert_eq!(
+        first("enum E {\n    T(i32),\n    S { s: i32 },\n}\nfn f(e: E) -> u8 {\n    match e {\n        E::T => 0,\n        _ => 1,\n    }\n}\nfn main() {}\n"),
+        e(7, "expected unit struct, unit variant or constant, found tuple variant `E::T` (E0533)"),
+        "a tuple variant as a path pattern"
+    );
+}

@@ -896,6 +896,7 @@ impl Session2 {
         crates.extend(self.ctx.lib.iter().cloned());
         let mut fix = vec![];
         let cfg = self.opts.cfg_of(self.ctx.features.as_ref().unwrap_or(&self.opts.features), &self.ctx.cfgs, &self.ctx.env);
+        crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take());
         let (mut src, mut items, mut user, prelude_line0) = with_prelude_in(src0, &crates, &mut fix, Some(&cfg), &mut self.sel)?;
         self.ctx.map.colfix = fix;
         // (`zustc check`: each constant of the program is checked where it is defined, used or not, as rustc does: a
@@ -969,6 +970,13 @@ impl Session2 {
             dyn_err = dyncompat::check(&src, &items[..user_src]);
             if let Some(e) = cfg_err.take().or_else(|| malformed_attr(src0, &src, &items[..user_src], self.ctx.deps.is_empty() && self.ctx.lib.is_none(), self.opts.edition)) {
                 return Err(e);
+            }
+            // (a `macro_rules!` matcher's fragment specifier rustc does not know, used or not: the expansion notes one when
+            // it reads the definitions; its place is read from the text then)
+            if crate::macros::BAD_FRAGMENT.with(|c| c.borrow_mut().take()).is_some() {
+                if let Some(e) = bad_fragment(src0) {
+                    return Err(e);
+                }
             }
         }
         let mut tm = Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: now_ns(), start: now_ns() };
@@ -2204,6 +2212,109 @@ fn resolve_opaque(prog: &mut Program, src: &str, items: &[SrcItem]) -> R<()> {
 }
 
 /// アイテムの中の `行:桁:` のエラーを、ファイルの中の行にする (driver.rs の relocate_err と同じ)。位置がなければアイテムの先頭の行
+/// rustc's fragment specifiers
+const FRAGS: &[&str] = &["block", "expr", "expr_2021", "ident", "item", "lifetime", "literal", "meta", "pat", "pat_param", "path", "stmt", "tt", "ty", "vis"];
+
+/// "invalid fragment specifier `id`": a `$x:id` in a `macro_rules!` matcher (not its transcriber) whose fragment is
+/// none of rustc's, at the fragment
+#[cold]
+fn bad_fragment(src0: &str) -> Option<String> {
+    let b = src0.as_bytes();
+    for (at, _) in src0.match_indices("macro_rules!") {
+        // (a definition at a line's start, past `#[..]` / whitespace: not one in a comment or a string)
+        let ls = src0[..at].rfind('\n').map_or(0, |k| k + 1);
+        if !src0[ls..at].trim().is_empty() && !src0[ls..at].trim_start().starts_with("#[") {
+            continue;
+        }
+        // (the body: the bracket after the name, to its match, past strings and comments)
+        let Some(open) = src0[at..].find(['{', '(', '[']).map(|k| at + k) else { continue };
+        let (mut d, mut k, mut end) = (0i32, open, None);
+        while k < b.len() {
+            if let Some(e) = lit_end(b, k) {
+                k = e;
+                continue;
+            }
+            match b[k] {
+                b'{' | b'(' | b'[' => d += 1,
+                b'}' | b')' | b']' => {
+                    d -= 1;
+                    if d == 0 {
+                        end = Some(k);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            k += 1;
+        }
+        let Some(end) = end else { continue };
+        let body = &src0[open + 1..end];
+        let toks = crate::lexer::tokenize(body.as_bytes());
+        let tk = |j: usize| &body[toks[j].1..toks[j].2];
+        // (the rules: a matcher group at depth 0, `=>`, a transcriber group, `;`)
+        let mut j = 0;
+        while j < toks.len() {
+            if !matches!(tk(j), "(" | "[" | "{") {
+                j += 1;
+                continue;
+            }
+            // (the matcher: to its close)
+            let (mut dd, mut m) = (0i32, j);
+            while m < toks.len() {
+                match tk(m) {
+                    "(" | "[" | "{" => dd += 1,
+                    ")" | "]" | "}" => {
+                        dd -= 1;
+                        if dd == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                m += 1;
+            }
+            for q in j..m.min(toks.len()) {
+                if tk(q) == "$" && q + 3 <= m && toks[q + 1].0 == 0 && tk(q + 2) == ":" && toks.get(q + 3).is_some_and(|t| t.0 == 0) {
+                    let f = tk(q + 3);
+                    // (`guard`: a fragment behind `macro_guard_matcher`)
+                    if f == "guard" && !src0.contains("macro_guard_matcher") {
+                        let pos = open + 1 + toks[q + 3].1;
+                        let line = 1 + src0[..pos].matches('\n').count();
+                        return Some(format!("{line}:1: `guard` fragments in macro are unstable (E0658)"));
+                    }
+                    if !FRAGS.contains(&f) && f != "guard" {
+                        let pos = open + 1 + toks[q + 3].1;
+                        let line = 1 + src0[..pos].matches('\n').count();
+                        let col = pos - src0[..pos].rfind('\n').map_or(0, |x| x + 1) + 1;
+                        return Some(format!("{line}:{col}: invalid fragment specifier `{f}`"));
+                    }
+                }
+            }
+            // (past the transcriber: `=>` then its group)
+            let mut t = m + 1;
+            while t < toks.len() && !matches!(tk(t), "(" | "[" | "{") {
+                t += 1;
+            }
+            let (mut dd, mut u) = (0i32, t);
+            while u < toks.len() {
+                match tk(u) {
+                    "(" | "[" | "{" => dd += 1,
+                    ")" | "]" | "}" => {
+                        dd -= 1;
+                        if dd == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                u += 1;
+            }
+            j = u + 1;
+        }
+    }
+    None
+}
+
 /// A validation error the parser deferred (`for<'a: 'b>`), unless a later item does not parse: rustc stops at that
 /// one first
 #[cold]
