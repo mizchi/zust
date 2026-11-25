@@ -5923,12 +5923,15 @@ fn fn_ast(a: &Analysis, body: u32) -> R<ItemFn> {
     let ii = a.prog.item_of[body as usize].ok_or("internal: no item")?;
     let it = &a.items[ii as usize];
     if let Some(cd) = a.prog.closures.get(&body) {
-        let mut encl = a.encl.lock().unwrap();
-        if !encl.contains_key(&ii) {
+        // (the enclosing fn is parsed outside the table's lock: worker threads share it (#165 P5); two that parse one
+        // at once keep the first)
+        if !a.encl.lock().unwrap().contains_key(&ii) {
             let f = parse_fn(&a.src, it)?.ok_or_else(|| format!("`{}` has no body", a.prog.names[body as usize]))?;
             let u = crate::ast_closure::closures_in_unsafe(&f.block);
-            encl.insert(ii, crate::ast_closure::closures_of(&f.block).into_iter().zip(u).collect());
+            let cs: Vec<(Expr, bool)> = crate::ast_closure::closures_of(&f.block).into_iter().zip(u).collect();
+            a.encl.lock().unwrap().entry(ii).or_insert(cs);
         }
+        let encl = a.encl.lock().unwrap();
         let cs = encl.get(&ii).unwrap();
         let (c, in_unsafe) = cs.get(cd.k as usize).ok_or("internal: closure not found")?;
         // (a closure written in `unsafe { }` or in an `unsafe fn` may do what its surroundings may)

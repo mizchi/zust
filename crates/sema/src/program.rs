@@ -133,7 +133,8 @@ thread_local! {
 /// struct / enum の表。後からインスタンス (`Option<i64>` など) を足せる (並列のコード生成中にも)。
 /// 要素は Box で持ち、決して削除・移動しないので、`&self` から要素への参照を返せる
 pub struct AdtTable {
-    v: Mutex<Vec<Box<StructDef>>>,
+    /// (an RwLock: every `prog.structs[i]` reads it, from all of a parallel check's worker threads at once (#165 P5))
+    v: std::sync::RwLock<Vec<Box<StructDef>>>,
     inst: Mutex<HashMap<(u32, Vec<Ty>), u32>>,
     tuples: Mutex<HashMap<usize, u32>>,
     /// The placeholders made, by (fn, type parameter)
@@ -148,7 +149,7 @@ pub struct AdtTable {
 impl AdtTable {
     fn new() -> Self {
         AdtTable {
-            v: Mutex::new(vec![]),
+            v: std::sync::RwLock::new(vec![]),
             inst: Mutex::new(HashMap::default()),
             tuples: Mutex::new(HashMap::default()),
             placeholders: Mutex::new(HashMap::default()),
@@ -157,13 +158,13 @@ impl AdtTable {
         }
     }
     pub fn len(&self) -> usize {
-        self.v.lock().unwrap().len()
+        self.v.read().unwrap().len()
     }
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
     fn push(&self, d: StructDef) -> u32 {
-        let mut g = self.v.lock().unwrap();
+        let mut g = self.v.write().unwrap();
         g.push(Box::new(d));
         g.len() as u32 - 1
     }
@@ -172,7 +173,7 @@ impl AdtTable {
     }
     /// 先に番号だけ取ったインスタンスの中身を入れる (まだ誰にも公開していない番号だけに使う)
     fn replace(&self, i: u32, d: StructDef) {
-        let mut g = self.v.lock().unwrap();
+        let mut g = self.v.write().unwrap();
         *g[(i & !DST_TAG) as usize] = d;
     }
 }
@@ -180,7 +181,7 @@ impl AdtTable {
 impl std::ops::Index<usize> for AdtTable {
     type Output = StructDef;
     fn index(&self, i: usize) -> &StructDef {
-        let g = self.v.lock().unwrap();
+        let g = self.v.read().unwrap();
         let p: *const StructDef = &*g[i & !(DST_TAG as usize)];
         drop(g);
         // SAFETY: 要素は Box に入っていて削除されない (Vec の再確保で動くのは Box のポインタだけ)。
