@@ -73,6 +73,18 @@ fn main() {
         let _x: n = n {};
         println!("{}", n());
     }
+    // (a local binding of the name, beside the braced struct: it shadows the fn, as in rustc)
+    {
+        struct n {}
+        let n = || 23u8;
+        println!("{}", n());
+    }
+    {
+        struct n {}
+        let mut n = n() + 20;
+        n += 1;
+        println!("{}", n);
+    }
     struct t {
         v: u8,
     }

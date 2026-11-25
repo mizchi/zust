@@ -2060,11 +2060,65 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     }
     if !renames.is_empty() {
         // (名前を変えるトークン: その関数の本体の中だけを見る。外側の本体が先に来るので、内側のものが後で上書きする)
+        // (a local binding of a renamed name, `let m = || 7;`: it and its uses, from the end of its statement to the
+        // end of its block, are the local's and keep the name. Its initializer still sees the item)
+        let mut local_toks = vec![false; toks.len()];
+        for k in 0..toks.len() {
+            if !(toks[k].0 == 0 && tok(k) == b"let") {
+                continue;
+            }
+            let nk = if k + 1 < toks.len() && tok(k + 1) == b"mut" { k + 2 } else { k + 1 };
+            if nk >= toks.len() || toks[nk].0 != 0 || !renames.iter().any(|r| r.2.as_slice() == tok(nk)) {
+                continue;
+            }
+            local_toks[nk] = true;
+            // (the statement's `;`, then the block's `}`)
+            let mut d = 0i32;
+            let mut j = nk + 1;
+            while j < toks.len() {
+                if toks[j].0 == 1 {
+                    match tok(j) {
+                        b"(" | b"[" | b"{" => d += 1,
+                        b")" | b"]" | b"}" => {
+                            if d == 0 {
+                                break;
+                            }
+                            d -= 1;
+                        }
+                        b";" if d == 0 => break,
+                        _ => {}
+                    }
+                }
+                j += 1;
+            }
+            if j >= toks.len() || tok(j) != b";" {
+                continue;
+            }
+            let mut d = 0i32;
+            let mut q = j + 1;
+            while q < toks.len() {
+                if toks[q].0 == 1 {
+                    match tok(q) {
+                        b"{" => d += 1,
+                        b"}" => {
+                            if d == 0 {
+                                break;
+                            }
+                            d -= 1;
+                        }
+                        _ => {}
+                    }
+                } else if toks[q].0 == 0 && tok(q) == tok(nk) {
+                    local_toks[q] = true;
+                }
+                q += 1;
+            }
+        }
         let mut at: Vec<(usize, usize)> = vec![]; // (トークン, renames の番号)
         for (ri, r) in renames.iter().enumerate() {
             let mut k = r.0 + 1;
             while k < r.1 {
-                if toks[k].0 == 0 && &s[toks[k].1..toks[k].2] == r.2.as_slice() {
+                if toks[k].0 == 0 && !local_toks[k] && &s[toks[k].1..toks[k].2] == r.2.as_slice() {
                     at.push((k, ri));
                 }
                 k += 1;
