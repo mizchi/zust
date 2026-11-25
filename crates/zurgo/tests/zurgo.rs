@@ -413,6 +413,53 @@ fn check_reports_every_error() {
 }
 
 #[test]
+fn check_goes_on_past_a_crate_the_plan_cannot_take() {
+    // (without the proc-macro server: a crate that uses a stub's attribute, or whose module tree the stubs' check
+    // cannot read, is that crate's error, as one that cannot be expanded is; the crates that use it are not checked,
+    // the others are)
+    let sc = Scratch::new("check-plan");
+    let d = sc.0.clone();
+    sc.write(&[
+        (
+            "app/Cargo.toml",
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[dependencies]\nutil = { path = \"../util\" }\nother = { path = \"../other\" }\n",
+        ),
+        ("app/src/main.rs", "fn main() {\n    println!(\"{}\", util::one() + other::three());\n}\n"),
+        ("util/Cargo.toml", "[package]\nname = \"util\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[dependencies]\npm = { path = \"../pm\" }\n"),
+        ("util/src/lib.rs", "#[pm::traced]\npub fn one() -> u32 {\n    1\n}\n"),
+        ("other/Cargo.toml", "[package]\nname = \"other\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        ("other/src/lib.rs", "pub fn three() -> u32 {\n    true\n}\n"),
+        ("pm/Cargo.toml", "[package]\nname = \"pm\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[lib]\nproc-macro = true\n"),
+        ("pm/src/lib.rs", "extern crate proc_macro;\nuse proc_macro::TokenStream;\n#[proc_macro_attribute]\npub fn traced(_a: TokenStream, i: TokenStream) -> TokenStream {\n    i\n}\n"),
+    ]);
+    let m = d.join("app/Cargo.toml");
+    let t = d.join("t");
+    let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &m, &t);
+    assert!(ok, "{err}");
+    let other = d.join("other/src/lib.rs").display().to_string();
+    let rest = [
+        format!("error: crate `other`: {other}:2:5: mismatched types: expected `u32`, found `bool`"),
+        "warning: crate `app` not checked: its dependency `util` could not be read or expanded".to_string(),
+        "error: 2 errors in 2 crates".to_string(),
+    ];
+    // (a build stops at the plan, as before)
+    let (ok, _, err) = zurgo_no_pm(&["build"], &m, &t);
+    assert!(!ok && err.contains("`util` uses the attribute `#[traced]` of the proc-macro crate `pm v0.1.0`") && !err.contains("mismatched"), "{err}");
+    let (ok, _, err) = zurgo_no_pm(&["check"], &m, &t);
+    assert!(!ok && err.contains("error: crate `util`: uses the attribute `#[traced]` of the proc-macro crate `pm v0.1.0`"), "{err}");
+    for want in &rest {
+        assert!(err.contains(want.as_str()), "missing `{want}`:\n{err}");
+    }
+    // (a module file that is not there)
+    sc.write(&[("util/src/lib.rs", "mod missing;\npub fn one() -> u32 {\n    1\n}\n")]);
+    let (ok, _, err) = zurgo_no_pm(&["check"], &m, &t);
+    assert!(!ok && err.contains("error: crate `util`: ") && err.contains("missing"), "{err}");
+    for want in &rest {
+        assert!(err.contains(want.as_str()), "missing `{want}`:\n{err}");
+    }
+}
+
+#[test]
 fn errors() {
     let sc = Scratch::new("errors");
     let d = sc.0.clone();

@@ -1402,10 +1402,10 @@ impl Session {
     /// Checks a workspace (`zurgo check`): every crate, in dependency order, as build_workspace prepares it, and
     /// each one's errors instead of its object (Session::check). A crate's errors do not stop the others: a crate
     /// uses its dependencies' sources, not their objects. A crate whose source cannot be read or expanded has that
-    /// error, and the crates that use it are not checked (they have no interface of it to use). Writes no objects
-    /// nor fingerprints
-    pub fn check_workspace(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path) -> R<Vec<CrateCheck>> {
-        self.ws_diags = Some(vec![]);
+    /// error, and the crates that use it are not checked (they have no interface of it to use). `failed`: the crates
+    /// the caller already found so, with their errors (zurgo's plan). Writes no objects nor fingerprints
+    pub fn check_workspace(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path, failed: Vec<(String, String)>) -> R<Vec<CrateCheck>> {
+        self.ws_diags = Some(failed.into_iter().map(|(name, e)| CrateCheck { name, errors: vec![e], blocked_by: None }).collect());
         let r = self.build_workspace(crates, out_dir);
         let d = self.ws_diags.take().unwrap_or_default();
         r.map(|_| d)
@@ -1436,6 +1436,12 @@ impl Session {
         // crates that use it are not checked; the others are)
         let checking = self.ws_diags.is_some();
         let mut prep_err: Vec<Option<String>> = vec![None; crates.len()];
+        // (the crates check_workspace was given as failed)
+        for c in self.ws_diags.as_mut().map(std::mem::take).unwrap_or_default() {
+            if let Some(i) = crates.iter().position(|x| x.name == c.name) {
+                prep_err[i] = c.errors.into_iter().next();
+            }
+        }
         // (the sources of the crates read: name → (the text made into `pub mod name { .. }`, the file map))
         let mut loaded: Vec<Option<(String, crate::srcmap::SrcMap)>> = vec![None; crates.len()];
         for &i in &order {
@@ -1446,7 +1452,7 @@ impl Session {
             let (text, map) = match crate::srcmap::load_crate(c.root.as_path(), &c.display, &cfg) {
                 Ok(v) => v,
                 Err(e) if checking => {
-                    prep_err[i] = Some(e);
+                    prep_err[i].get_or_insert(e);
                     Default::default()
                 }
                 Err(e) => return Err(e),

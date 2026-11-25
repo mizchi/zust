@@ -779,12 +779,13 @@ pub struct Session {
     /// their fns' names' prefix (CONST_CHECK_FN, or another when the program writes that)
     const_fn: String,
     /// In a check_workspace: each crate's result (and no objects are written)
+    #[cfg(feature = "build")]
     ws_diags: Option<Vec<CrateCheck>>,
 }
 
 impl Session {
     pub fn new(opts: Options) -> Session {
-        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), ws_diags: None }
+        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), #[cfg(feature = "build")] ws_diags: None }
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {

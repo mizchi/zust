@@ -85,6 +85,12 @@ pub fn plan(g: &Graph, o: &BuildOpts) -> R<Vec<CrateSpec>> {
 /// plan, and each test crate: its index in the crates, its label (`pkg (lib)`, `pkg (bin x)`, `pkg (test x)`), and
 /// whether it has the harness (`harness = false`: no)
 pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, String, bool, String)>)> {
+    plan_keeping(g, o, None)
+}
+
+/// plan_labeled; with `errs` (a check), a crate the proc-macro stubs' check cannot read, or that uses a stub's
+/// macro, is not an error of the plan but the crate's own: (crate, error) in errs
+fn plan_keeping(g: &Graph, o: &BuildOpts, mut errs: Option<&mut Vec<(String, String)>>) -> R<(Vec<CrateSpec>, Vec<(usize, String, bool, String)>)> {
     let host = Target::host();
     let target = match &o.target {
         Some(t) => Target::by_triple(t).ok_or_else(|| format!("unknown target `{t}` (x86_64-unknown-linux-gnu, wasm32-unknown-unknown)"))?,
@@ -457,12 +463,28 @@ pub fn plan_labeled(g: &Graph, o: &BuildOpts) -> R<(Vec<CrateSpec>, Vec<(usize, 
                 cfgs.push(("test".to_string(), None));
             }
             let cfg = zustc::cfg::CfgSet { features: c.features.clone(), debug_assertions: !o.release, wasm, cfgs, env: c.env.clone(), ..Default::default() };
-            let (text, _) = zustc::srcmap::load_crate(&c.root, &c.display, &cfg)?;
+            let text = match zustc::srcmap::load_crate(&c.root, &c.display, &cfg) {
+                Ok((t, _)) => t,
+                Err(e) => match errs.as_mut() {
+                    Some(v) => {
+                        v.push((c.name.clone(), e));
+                        continue;
+                    }
+                    None => return Err(e),
+                },
+            };
             let u = proc_macro_stub::uses_in(&text);
             for (p, m) in pm_macros.iter().filter(|(p, _)| pm_deps.contains(p)) {
                 if let Some(h) = u.hit(m) {
                     let pk = &g.pkgs[*p].m;
-                    return Err(format!("`{}` uses {h} of the proc-macro crate `{} v{}`: proc macros cannot run yet (mizchi/zust#29)", c.name, pk.name, pk.version));
+                    let why = format!("uses {h} of the proc-macro crate `{} v{}`: proc macros cannot run yet (mizchi/zust#29)", pk.name, pk.version);
+                    match errs.as_mut() {
+                        Some(v) => {
+                            v.push((c.name.clone(), why));
+                            break;
+                        }
+                        None => return Err(format!("`{}` {why}", c.name)),
+                    }
                 }
             }
         }
@@ -590,8 +612,9 @@ pub fn check(g: &Graph, o: &BuildOpts) -> R<Vec<CrateCheck>> {
     let out = out_dir(g, o);
     std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
     let _lock = build_script::lock_file(&out.join(".zurgo-lock"))?;
-    let (crates, _) = plan_labeled(g, o)?;
-    Session::new(session_opts(o)?).check_workspace(&crates, &out)
+    let mut errs = vec![];
+    let (crates, _) = plan_keeping(g, o, Some(&mut errs))?;
+    Session::new(session_opts(o)?).check_workspace(&crates, &out, errs)
 }
 
 pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {

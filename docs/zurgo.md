@@ -204,7 +204,8 @@ error: 3 errors in 2 crates
 - A crate whose source cannot be read or expanded (a `macro_rules!` call no rule matches, a proc macro that cannot
   be loaded) has that error. The crates that use it are not checked: there is no interface of it to check them
   with. zurgo says so (``warning: crate `app` not checked: its dependency `util` could not be read or expanded``),
-  and checks the other crates.
+  and checks the other crates. Without the proc-macro server, a crate that uses a stub's macro is such a crate too.
+- A build script that fails still stops the check, as it stops a build.
 - It writes no objects and no fingerprints, and every crate is checked, even one a build would take as fresh. The
   crates are checked one after another (a build compiles stale crates at once).
 
