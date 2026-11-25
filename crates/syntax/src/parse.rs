@@ -260,12 +260,13 @@ pub fn tokenize(src: &str) -> Result<Vec<Tok>, String> {
     Ok(out)
 }
 
-/// A raw lifetime `'r#a` (src[start..end]) as the token `'a`
+/// A raw lifetime `'r#a` (src[start..end]) as the token `'a`, marked `joint` (which a lifetime has no other use for):
+/// `'r#break` is a name where a label goes, `'break` a keyword
 #[cold]
 #[inline(never)]
 fn raw_lifetime(out: &mut Vec<Tok>, src: &str, start: usize, end: usize, line: u32, col: u32) {
     let text = format!("'{}", &src[start + 3..end]);
-    out.push(Tok { kind: TokKind::Lifetime, text, joint: false, line, col, lo: start as u32 });
+    out.push(Tok { kind: TokKind::Lifetime, text, joint: true, line, col, lo: start as u32 });
 }
 
 /// Rust's white space characters other than ASCII (and the vertical tab / form feed)
@@ -2129,6 +2130,13 @@ impl Parser {
         Ok(e)
     }
 
+    /// rustc's `eat_label`: a lifetime where a label goes (`'static: loop`, `break '_`) whose name is a keyword, at it
+    fn keyword_label(&self) -> Option<String> {
+        let t = self.tok(0).filter(|t| t.kind == TokKind::Lifetime && !t.joint)?;
+        let n = &t.text[1..];
+        (n == "_" || reserved_kw(n, true) || unused_kw(n)).then(|| format!("{}:{}: labels cannot use keyword names", t.line, t.col + 1))
+    }
+
     fn label(&mut self) -> Option<String> {
         if self.tok(0).is_some_and(|t| t.kind == TokKind::Lifetime) && self.punct_at(1, ":") && !self.punct_at(1, "::") {
             let l = self.toks[self.i].text.clone();
@@ -2293,6 +2301,9 @@ impl Parser {
                 return Ok(Expr::Lit(t.text, lp));
             }
             TokKind::Lifetime => {
+                if let Some(e) = self.keyword_label() {
+                    return Err(e);
+                }
                 let l = self.label();
                 if self.eat_ident("loop") {
                     return Ok(Expr::Loop(l, self.block()?));
@@ -2475,6 +2486,9 @@ impl Parser {
             "break" => {
                 let kw = self.pos();
                 self.i += 1;
+                if let Some(e) = self.keyword_label() {
+                    return Err(e);
+                }
                 let lp = self.pos();
                 let l = self.lifetime();
                 let pos = if l.is_some() { lp } else { kw };
@@ -2484,6 +2498,9 @@ impl Parser {
             "continue" => {
                 let kw = self.pos();
                 self.i += 1;
+                if let Some(e) = self.keyword_label() {
+                    return Err(e);
+                }
                 let lp = self.pos();
                 let l = self.lifetime();
                 return Ok(Expr::Continue(l.clone(), if l.is_some() { lp } else { kw }));

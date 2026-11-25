@@ -1425,6 +1425,7 @@ check-pass	closures/issue-41366.rs
 check-pass	closures/issue-48109.rs
 compile-fail	closures/issue-5239-1.rs
 run-pass	closures/issue-5239-2.rs
+compile-fail	closures/issue-52437.rs
 compile-fail	closures/issue-67123.rs
 compile-fail	closures/issue-6801.rs
 check-pass	closures/issue-68025.rs
@@ -3806,8 +3807,11 @@ compile-fail	keyword/meta-is-not-reserved.rs
 run-pass	keyword/raw-identifier-for-function-57198.rs
 compile-fail	keyword/reserved-become.rs
 compile-fail	label/continue-pointing-to-block-ice-121623.rs
+compile-fail	label/keyword-as-label-name.rs
 check-pass	label/label-beginning-with-underscore.rs
 run-pass	label/label-in-closure-no-self-shadow.rs
+compile-fail	label/label-static.rs
+compile-fail	label/label-underscore.rs
 compile-fail	label/label_break_value_continue.rs
 compile-fail	label/label_break_value_illegal_uses.rs
 compile-fail	label/label_break_value_unlabeled_break.rs
@@ -6353,8 +6357,11 @@ compile-fail	recursion/issue-23302-3.rs
 build-pass	recursion/issue-86784.rs
 run-pass	recursion/recursion-tail-call-no-arg-leak.rs
 run-pass	recursion/recursion-tail-cps.rs
+compile-fail	recursion/recursion_limit/empty.rs
+compile-fail	recursion/recursion_limit/invalid_digit.rs
 compile-fail	recursion/recursion_limit/invalid_digit_type.rs
 compile-fail	recursion/recursion_limit/no-value.rs
+compile-fail	recursion/recursion_limit/overflow.rs
 run-pass	recursion/recursive-enum-box.rs
 compile-fail	recursion/recursive-enum.rs
 run-pass	recursion/recursive-struct-with-raw-pointer-field.rs

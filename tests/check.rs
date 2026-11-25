@@ -2548,3 +2548,22 @@ fn names_defined_twice_in_one_item_or_by_macro_export() {
     assert_eq!(first("#[macro_export]\nmacro_rules! foo { () => {} }\n#[macro_export]\nmacro_rules! foo { () => {} }\nfn main() {}\n"), e(4, "foo"), "two exported macros");
     assert_eq!(first("macro_rules! foo { () => {} }\nmacro_rules! foo { () => {} }\nfn main() { foo!(); }\n"), None, "a macro shadowing one, neither exported");
 }
+
+#[test]
+fn keyword_labels_and_limit_values() {
+    // (rustc 1.100's `eat_label` and limit attributes, at their place)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let kw = |l: usize, c: usize| Some((l, c, "labels cannot use keyword names".to_string()));
+    assert_eq!(first("fn main() {\n    'static: loop {}\n}\n"), kw(2, 5), "a label definition");
+    assert_eq!(first("fn main() {\n    'a: loop {\n        break '_;\n    }\n}\n"), kw(3, 15), "at the `break`");
+    assert_eq!(first("fn main() {\n    'a: loop {\n        continue 'while;\n    }\n}\n"), kw(3, 18), "at the `continue`");
+    assert_eq!(first("fn main() {\n    'r#break: loop {\n        break 'r#break;\n    }\n    'a: while false { continue 'a; }\n}\n"), None, "a raw name, and an ordinary one");
+    let lim = |l: usize| Some((l, 1, "`limit` must be a non-negative integer".to_string()));
+    assert_eq!(first("#![recursion_limit = \"-1\"]\nfn main() {}\n"), lim(1), "a negative limit");
+    assert_eq!(first("// a limit\n#![type_length_limit = \"\"]\nfn main() {}\n"), lim(2), "an empty one");
+    assert_eq!(first("#![recursion_limit = \"99999999999999999999999\"]\nfn main() {}\n"), lim(1), "one too large");
+    assert_eq!(first("#![recursion_limit = \"256\"]\nfn main() {}\n"), None, "a limit");
+}
