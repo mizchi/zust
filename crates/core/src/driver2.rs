@@ -10494,7 +10494,7 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
     let mut impl_trait: crate::fxhash::FxMap<u32, Option<u32>> = Default::default();
     let mut by_text: crate::fxhash::FxMap<&str, Option<u32>> = Default::default();
     // (a member's verdict: E0276 at a bound, or E0049 with (its own, the trait's) type parameter counts)
-    let mut verdicts: crate::fxhash::FxMap<(u32, &str), Option<Result<crate::parse::Pos, (usize, usize, bool)>>> = Default::default();
+    let mut verdicts: crate::fxhash::FxMap<(u32, &str, bool), Option<Result<crate::parse::Pos, (usize, usize, bool)>>> = Default::default();
     for m in items {
         let K::ImplMember(h) = m.kind else { continue };
         // (a fn of the impl: a generic one for E0276, any for E0049 against a generic method of the trait)
@@ -10544,7 +10544,10 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
         // stricter, if one is)
         let mt = text(m);
         let key = &mt[..fn_body_start(mt).unwrap_or(mt.len())];
-        let at = verdicts.entry((th, key)).or_insert_with(|| {
+        // (whether the impl's header gives the trait `'static`: part of the verdict, with the signature)
+        let header = items.get(h as usize).map(|it| text(it)).unwrap_or("");
+        let header_static = header[..header.find('{').unwrap_or(header.len())].contains("'static");
+        let at = verdicts.entry((th, key, header_static)).or_insert_with(|| {
             let ms = sig(mt)?;
             let ds = decl_sigs.entry((th, name)).or_insert_with(|| sig(text(d))).clone()?;
             let (mp, dp) = (params(&ms.generics), params(&ds.generics));
@@ -10571,12 +10574,13 @@ fn stricter_impl_bound_in(src: &str, items: &[SrcItem]) -> Option<(usize, usize,
                 return by_trait;
             }
             // (a type parameter of the impl's method bounded by `'static` where the trait's is not (`F: Debug +
-            // 'static` for the trait's `F: Debug + 'a`): stricter, unless the impl's header gives the trait `'static`.
-            // At the first `'static` of the member's signature)
+            // 'static` for the trait's `F: Debug + 'a`): stricter, unless the impl's header gives the trait `'static`,
+            // or the trait's signature names `'static` past its generics, which may imply it (`x: &'static T`). At
+            // the first `'static` of the member's signature)
             let (ms_st, ds_st) = (static_params(&ms.generics), static_params(&ds.generics));
-            let header = items.get(h as usize).map(|it| text(it)).unwrap_or("");
-            let header = &header[..header.find('{').unwrap_or(header.len())];
-            if ms_st.iter().zip(&ds_st).any(|(m, d)| *m && !*d) && !header.contains("'static") {
+            let dt = text(d);
+            let decl_static = dt.find('(').is_some_and(|k| dt[k..].contains("'static"));
+            if ms_st.iter().zip(&ds_st).any(|(m, d)| *m && !*d) && !header_static && !decl_static {
                 let off = key.find("'static")?;
                 let line = key[..off].matches('\n').count() + 1;
                 let col = off - key[..off].rfind('\n').map_or(0, |k| k + 1);
@@ -11810,12 +11814,12 @@ fn placeholder_wave(a: &Analysis, insts: &Mutex<Insts>) -> Vec<u32> {
 }
 
 /// A generic associated type's lifetimes and the outlives among them its text writes, inline (`<'a: 'b>`) or in its
-/// where clause (`where 'a: 'b + 'c`): (lifetime names in order, (from, to, offset in the text) with `'static` as -1;
-/// a lifetime not its own (the trait's, the impl's) is left out)
-fn gat_outlives(t: &str) -> (Vec<String>, Vec<(i32, i32, usize)>) {
+/// where clause (`where 'a: 'b + 'c`): (lifetime names in order, (from, to, offset in the text) with `'static` as -1,
+/// whether one names a lifetime not its own (the trait's, the impl's), which is left out)
+fn gat_outlives(t: &str) -> (Vec<String>, Vec<(i32, i32, usize)>, bool) {
     let mut names = vec![];
     let mut raw: Vec<(String, String, usize)> = vec![];
-    let Some(lt) = t.find('<') else { return (names, vec![]) };
+    let Some(lt) = t.find('<') else { return (names, vec![], false) };
     let mut depth = 0i32;
     let mut gt = None;
     for (i, c) in t[lt..].char_indices() {
@@ -11831,7 +11835,7 @@ fn gat_outlives(t: &str) -> (Vec<String>, Vec<(i32, i32, usize)>) {
             _ => {}
         }
     }
-    let Some(gt) = gt else { return (names, vec![]) };
+    let Some(gt) = gt else { return (names, vec![], false) };
     // (a predicate `'a: 'b + 'c` at offset base of the text: its pairs)
     let mut preds = |s: &str, base: usize, raw: &mut Vec<(String, String, usize)>| {
         let mut start = 0;
@@ -11880,16 +11884,19 @@ fn gat_outlives(t: &str) -> (Vec<String>, Vec<(i32, i32, usize)>) {
         preds(&t[ws..we], ws, &mut raw);
     }
     let idx = |n: &str| if n == "'static" { Some(-1) } else { names.iter().position(|x| x == n).map(|k| k as i32) };
-    let rel = raw.iter().filter_map(|(a, b, o)| Some((idx(a)?, idx(b)?, *o))).collect();
-    (names, rel)
+    let rel: Vec<(i32, i32, usize)> = raw.iter().filter_map(|(a, b, o)| Some((idx(a)?, idx(b)?, *o))).collect();
+    let outer = rel.len() < raw.len();
+    (names, rel, outer)
 }
 
 /// E0276 for a generic associated type: the offset in the impl's text of an outlives between its own lifetimes that
 /// the trait's declaration does not imply (by the lifetimes' places; the same number of them)
 fn gat_stricter_outlives(decl: &str, imp: &str) -> Option<usize> {
-    let (dn, drel) = gat_outlives(decl);
-    let (mn, mrel) = gat_outlives(imp);
-    if dn.len() != mn.len() {
+    let (dn, drel, d_outer) = gat_outlives(&blank_comments(decl));
+    let (mn, mrel, _) = gat_outlives(&blank_comments(imp));
+    // (a declaration's outlives through a lifetime not its own (`'a: 't, 't: 'b` with the trait's 't) may imply one
+    // of the impl's (`'a: 'b`): the header's arguments that relate them are not read, so it is not compared)
+    if dn.len() != mn.len() || d_outer {
         return None;
     }
     let implied = |a: i32, b: i32| {

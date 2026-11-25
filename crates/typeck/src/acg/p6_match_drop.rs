@@ -1853,6 +1853,18 @@ impl Cx<'_> {
                         _ => None,
                     };
                     self.bind(rname.clone(), Ty::Ref(m, intern(Ty::Slice(intern(elem)))), Some(fat));
+                    // (in an `x @ sub`, how it binds, as pat_bind notes the other bindings (at_conflict): `ref mut a @
+                    // [ref b @ ..]`)
+                    if let Some(top) = self.at_binds.last_mut() {
+                        let kind = if *by_ref || matches!(mode, BindMode::Ref(_)) {
+                            AtBind::Ref(m)
+                        } else if borrowck::is_copy(self.prog, elem, 0) && !holds_mut_ref(self.prog, elem, 0) {
+                            AtBind::Copy
+                        } else {
+                            AtBind::Move
+                        };
+                        top.push((kind, rname.clone()));
+                    }
                     if let Some((path, srcs)) = held {
                         self.bk.bind_srcs = srcs;
                         self.bk.pat_path = path;

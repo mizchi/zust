@@ -1482,6 +1482,8 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     // (a top-level `const` / `static` whose initializer is a block, `const F: fn() = { fn broken() {..} broken };`: the
     // block's items are hoisted as a fn body's are. Set at the item's keyword, until its `;`)
     let mut init_item = false;
+    // (the nesting of `(` / `[`: a `;` in them (`[u8; 4]`, `[(); 1]`) ends no item)
+    let mut nest = 0i32;
     let mut moves: Vec<(usize, usize)> = vec![];
     // 入れ子のアイテムの名前と、それを含む関数の本体 (開き括弧のトークン位置)。閉じた本体の (開き, 閉じ)
     let mut nested_names: Vec<(Vec<u8>, usize)> = vec![];
@@ -1686,8 +1688,10 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                         bodies.push((open, k));
                     }
                 }
+                b"(" | b"[" => nest += 1,
+                b")" | b"]" => nest = (nest - 1).max(0),
                 // `fn f();` (宣言だけ) は本体なし
-                b";" => {
+                b";" if nest == 0 => {
                     pending_fn = false;
                     if depth == 0 {
                         init_item = false;

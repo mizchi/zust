@@ -5387,3 +5387,69 @@ fn g() {
 fn main() { f(); g(); }
 "#, &[(9, "borrow of moved value")], "at2");
 }
+
+#[test]
+fn part36_review_of_182() {
+    // (#182's review, each checked with rustc 1.97: a `'static` bound the trait's signature implies (`x: &'static T`)
+    // is not stricter (rv1); a GAT's outlives that follows through the trait's own lifetime (`'a: 't, 't: 'b`) is not
+    // compared (rv2); a comment in a bound is no bound (rv3); a `;` in an array type ends no item, so the fn in a
+    // `const _: [(); 1]` block is checked (rv4) and one in a fn with an array parameter is hoisted (rv7); a `rest @ ..`
+    // is one of the bindings of an `x @ sub` (rv5); the verdict of a method's bounds is by its impl's header too (rv6))
+    errors_at(r#"trait Tr {
+    fn f<T>(x: &'static T);
+}
+impl Tr for () {
+    fn f<T: 'static>(x: &'static T) {}
+}
+fn main() {}
+"#, &[], "rv1");
+    errors_at(r#"trait Tr<'t> {
+    type A<'a, 'b> where 'a: 't, 't: 'b;
+}
+impl<'t> Tr<'t> for () {
+    type A<'a, 'b> = () where 'a: 't, 't: 'b, 'a: 'b;
+}
+fn main() {}
+"#, &[], "rv2");
+    errors_at(r#"trait G {
+    type T<'a1, 'b1>
+    where
+        'a1: /* c */ 'b1;
+}
+impl G for () {
+    type T<'a2, 'b2> = () where 'a2: 'b2;
+}
+fn main() {}
+"#, &[], "rv3");
+    errors_at(r#"const _: [(); 1] = {
+    fn bad<'a>(x: &'a u8) -> &'static u8 { x }
+    [()]
+};
+fn main() {}
+"#, &[(2, "lifetime may not live long enough")], "rv4");
+    errors_at(r#"fn f() {
+    return;
+    let ref mut a @ [ref b @ ..] = [1u8];
+}
+fn g() {
+    let ref mut a @ [ref b @ ..] = [1u8];
+}
+fn h() {
+    let ref a @ [ref b @ ..] = [1u8];
+}
+fn main() { f(); g(); h(); }
+"#, &[(3, "cannot borrow value as immutable because it is also borrowed as mutable"), (6, "cannot borrow value as immutable because it is also borrowed as mutable")], "rv5");
+    errors_at(r#"trait Tr<'a> { fn f<T: 'a>(); }
+struct A;
+struct B;
+impl Tr<'static> for A { fn f<T: 'static>() {} }
+impl<'a> Tr<'a> for B { fn f<T: 'static>() {} }
+fn main() {}
+"#, &[(5, "impl has stricter requirements than trait")], "rv6");
+    errors_at(r#"fn foo(a: [u8; 4]) -> u8 {
+    fn inner() -> u8 { 1 }
+    inner() + a[0]
+}
+fn main() { println!("{}", foo([1, 2, 3, 4])); }
+"#, &[], "rv7");
+}
