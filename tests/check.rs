@@ -3192,3 +3192,11 @@ fn literal_patterns_wrap_to_the_scrutinee_type() {
     let d = s.check("#![allow(overflowing_literals)]\n#![deny(unreachable_patterns)]\nfn t(v: u8) {\n    match v {\n        256 => {}\n        512 => {}\n        _ => {}\n    }\n}\nfn main() { t(1); }\n");
     assert_eq!(d.first().map(|d| (d.line, d.msg.as_str())), Some((6, "unreachable pattern")), "{d:?}");
 }
+
+#[test]
+fn no_rules_expected_at_the_furthest_token_a_rule_reaches() {
+    // (rustc 1.100: "no rules expected `!`" at the `//!` a `(#[$m:meta])` rule cannot take, not at the call)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check("macro_rules! outer {\n    (#[$outer:meta]) => ()\n}\nouter! {\n    //! Inner\n}\nfn main() {}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.msg.as_str())), Some((5, "no rules expected `!`")), "{d:?}");
+}

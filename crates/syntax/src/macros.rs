@@ -674,6 +674,46 @@ fn take_frag(toks: &[TokenTree], kind: &str, stop: Option<&TokenTree>) -> Option
 }
 
 /// パターン pat を toks 全体に合わせる
+/// How far a rule's leading literal tokens reach into a call's tokens: its tokens and delimited groups (not looked
+/// into), `$x:tt`; it stops at a fragment of another kind or a repetition, whose length it does not know
+fn literal_reach(pat: &[Pt], toks: &[TokenTree]) -> usize {
+    let mut i = 0;
+    for p in pat {
+        match (p, toks.get(i)) {
+            (Pt::Tok(t), Some(x)) if same_tok(t, x) => i += 1,
+            (Pt::Group(d, _), Some(TokenTree::Group(g))) if g.delimiter() == *d => i += 1,
+            (Pt::Var(_, k), Some(_)) if k == "tt" => i += 1,
+            _ => break,
+        }
+    }
+    i
+}
+
+/// "no rules expected `X`" at the token of a call's arguments (text[a..b]) past the furthest any rule's literal
+/// tokens reach, when one reaches past the first: None when none does, or the arguments do not tokenize
+#[cold]
+#[inline(never)]
+fn no_rules_expected(text: &str, a: usize, b: usize, rules: Option<&Vec<Rule>>) -> Option<String> {
+    let args: Vec<TokenTree> = TokenStream::from_str(text.get(a..b)?).ok()?.into_iter().collect();
+    let best = rules?.iter().map(|r| literal_reach(&r.pat, &args)).max()?;
+    let t = args.get(best).filter(|_| best > 0)?;
+    let what = match t {
+        TokenTree::Group(g) => match g.delimiter() {
+            Delimiter::Parenthesis => "(".to_string(),
+            Delimiter::Bracket => "[".to_string(),
+            Delimiter::Brace => "{".to_string(),
+            Delimiter::None => return None,
+        },
+        x => x.to_string(),
+    };
+    let lc = t.span().start();
+    let base_line = text[..a].matches('\n').count() + 1;
+    let base_col = a - text[..a].rfind('\n').map_or(0, |k| k + 1);
+    let line = base_line + lc.line - 1;
+    let col = if lc.line == 1 { base_col + lc.column } else { lc.column };
+    Some(format!("{line}:{}: no rules expected `{what}`", col + 1))
+}
+
 fn match_pat(pat: &[Pt], toks: &[TokenTree], binds: &mut HashMap<String, Bind>) -> bool {
     match match_prefix(pat, toks, binds, None) {
         Some(n) => n == toks.len(),
@@ -2016,6 +2056,11 @@ pub fn expand_with(src: &str, cfg: Option<&crate::cfg::CfgSet>, pms: &[crate::pm
                 }
             };
             let Some(body) = body else {
+                // (rustc's "no rules expected `!`", at the furthest token a rule's leading literal tokens reach: the
+                // `//!` a `(#[$m:meta])` rule cannot take)
+                if let Some(e) = no_rules_expected(&text, toks[i + 2].2, toks[ge].1, macros.get(std::str::from_utf8(tk(i)).unwrap_or(""))) {
+                    return Err(e);
+                }
                 let (line, col) = pos();
                 return Err(format!("{line}:{}: no rules of `{}!` matched this call", col + 1, String::from_utf8_lossy(tk(i))));
             };
