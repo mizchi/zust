@@ -11526,6 +11526,51 @@ pub(crate) fn unhoist_err(a: &Analysis, e: String) -> String {
     }
 }
 
+/// When (line, col) of src is a macro call (`name!(..)`), the place of the name n as a word in its arguments
+#[cold]
+#[inline(never)]
+fn macro_arg_at(src: &str, line: usize, col: usize, n: &str) -> Option<(usize, usize)> {
+    let ls = if line <= 1 { 0 } else { src.match_indices('\n').nth(line - 2)?.0 + 1 };
+    let at = ls + col.checked_sub(1)?;
+    let b = src.as_bytes();
+    let id = |c: u8| c == b'_' || c.is_ascii_alphanumeric();
+    let mut k = at;
+    while k < b.len() && id(b[k]) {
+        k += 1;
+    }
+    if k == at || b.get(k) != Some(&b'!') {
+        return None;
+    }
+    k += 1;
+    while k < b.len() && b[k].is_ascii_whitespace() {
+        k += 1;
+    }
+    let (open, close) = match b.get(k)? {
+        b'(' => (b'(', b')'),
+        b'[' => (b'[', b']'),
+        b'{' => (b'{', b'}'),
+        _ => return None,
+    };
+    let mut d = 0i32;
+    let mut e = k;
+    while e < b.len() {
+        if b[e] == open {
+            d += 1;
+        } else if b[e] == close {
+            d -= 1;
+            if d == 0 {
+                break;
+            }
+        }
+        e += 1;
+    }
+    let args = src.get(k + 1..e)?;
+    let ab = args.as_bytes();
+    let i = args.match_indices(n).map(|(i, _)| i).find(|&i| (i == 0 || !id(ab[i - 1])) && ab.get(i + n.len()).is_none_or(|&c| !id(c)))?;
+    let off = k + 1 + i;
+    Some((src[..off].matches('\n').count() + 1, off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1))
+}
+
 /// 位置付きのエラー (行・桁は 1 始まり)。check / LSP が返す
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostic {
@@ -11777,6 +11822,16 @@ impl Session2 {
             allow_variant_bindings(src, &mut errs);
         }
         let mut d: Vec<Diagnostic> = errs.iter().map(|e| Diagnostic::parse(e)).collect();
+        // (a name a macro call's argument writes, reported at the call (`foo!(\n    x\n)` of `($id:ident) => { $id }`):
+        // at the argument, as rustc)
+        for x in d.iter_mut() {
+            if let Some(n) = x.msg.strip_prefix("cannot find value `").and_then(|r| r.split('`').next()) {
+                if let Some((l, c)) = macro_arg_at(src, x.line, x.col, n) {
+                    x.line = l;
+                    x.col = c;
+                }
+            }
+        }
         // (an item moved out of a fn body (`fn main() { fn helper() { .. } }`) is past the source's last line: its borrow
         // and region checks' errors are at the lines it was moved from, and the type errors that hold wherever it is
         // (hoisted_check_err_holds). Not its other errors: typeck does not know all such an item may name where it was

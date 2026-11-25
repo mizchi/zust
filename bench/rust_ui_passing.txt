@@ -4660,6 +4660,7 @@ run-pass	macros/macro-nested_stmt_macros.rs
 compile-fail	macros/macro-non-lifetime.rs
 check-pass	macros/macro-nt-list.rs
 run-pass	macros/macro-of-higher-order.rs
+compile-fail	macros/macro-parameter-span.rs
 compile-fail	macros/macro-paren-span-diagnostic.rs
 check-pass	macros/macro-pat-follow-2018.rs
 run-pass	macros/macro-pat-follow.rs

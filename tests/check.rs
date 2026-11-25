@@ -3175,3 +3175,11 @@ fn types_that_nothing_declares_in_impl_headers_and_type_aliases() {
               impl<'a, F: Fn(&'a i32) -> &'a i32> Tr for Option<F> {}\nimpl<'a, A> Tr for &'a (dyn for<'x> Fn(&'x A) + 'a) {}\nfn main() {}\n";
     assert_eq!(first(ok), None);
 }
+
+#[test]
+fn a_name_a_macro_argument_writes_is_reported_at_the_argument() {
+    // (rustc 1.100: "cannot find value `x` in this scope" at the `x` the call passes, not at the call)
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check("macro_rules! foo {\n    ($id: ident) => {\n        $id\n    }\n}\nfn main() {\n    foo!(\n        x\n    );\n}\n");
+    assert_eq!(d.first().map(|d| (d.line, d.col)), Some((8, 9)), "{d:?}");
+}
