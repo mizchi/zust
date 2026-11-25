@@ -3256,14 +3256,16 @@ fn a_binding_mode_shorthand_with_a_pattern_and_a_dollar_bracket_in_a_macro_body(
 #[test]
 fn a_mismatch_at_the_use_of_a_value_made_with_another_type_argument() {
     // (rustc 1.100, at its line: `let foo = Foo(1u8); takes_foo(foo);` with `fn takes_foo(_: Foo<i32>)` is at the
-    // call, not at the `let` (the value keeps the type it was made with); so is `Option<Vec<u8>>` for
-    // `Option<&[u8]>`. A closure's first `return` gives its type: `Foo(())` after `return Foo(0)` is the mismatch)
+    // call, not at the `let` (the value keeps the type it was made with); so is `Option<u8>` for
+    // `Option<i32>`. A closure's first `return` gives its type: `Foo(())` after `return Foo(0)` is the mismatch)
     let first = |src: &str| {
         let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
         s.check(src).first().map(|d| (d.line, d.msg.clone()))
     };
     assert_eq!(first("struct Foo<T>(T);\nfn takes_foo(_: Foo<i32>) {}\nfn main() {\n    let foo = Foo(1u8);\n    takes_foo(foo);\n}\n"), Some((5, "mismatched types: expected `Foo<i32>`, found `Foo<u8>`".to_string())));
-    assert_eq!(first("fn main() {\n    let some = Some(vec![1u8]);\n    let Some(a): Option<&[u8]> = some else { return };\n    let _ = a;\n}\n"), Some((3, "mismatched types: expected `Option<&[u8]>`, found `Option<Vec<u8>>`".to_string())));
+    assert_eq!(first("fn main() {\n    let some = Some(1u8);\n    let Some(a): Option<i32> = some else { return };\n    let _ = a;\n}\n"), Some((3, "mismatched types: expected `Option<i32>`, found `Option<u8>`".to_string())));
+    // (a turbofish writes the type: the field is the mismatch)
+    assert_eq!(first("struct Foo<T> { value: T }\nfn main() {\n    let f = Foo::<u8> { value: 300u16 };\n    let _ = f.value;\n}\n").map(|x| x.1), Some("mismatched types: expected `u8`, found `u16`".to_string()));
     assert_eq!(first("struct Foo<T>(T);\nfn main() {\n    let _ = || {\n        if false {\n            return Foo(0);\n        }\n        Foo(())\n    };\n}\n").map(|x| x.0), Some(7));
     // (an unsuffixed literal takes its type from the use)
     assert_eq!(first("struct Foo<T>(T);\nfn takes_foo(_: Foo<u8>) {}\nfn main() {\n    let foo = Foo(1);\n    takes_foo(foo);\n}\n"), None);
@@ -3292,4 +3294,8 @@ fn where_a_value_that_is_not_the_type_its_place_wants_is() {
     assert_eq!(first("fn main() {\n    match 3 {\n        4 => 1,\n        3 => {\n            foo()\n        }\n        _ => 2\n    }\n    let _ = ();\n}\nfn foo() -> i32 { 42 }\n"), Some(5));
     assert_eq!(first("fn main() {\n    let _: i32 =\n        'a:\n        loop { break };\n}\n"), Some(4));
     assert_eq!(first("fn main() {}\nfn f() -> bool {\n    &\n    mut\n    if true { true } else { false }\n}\n"), Some(3));
+    // (an `if let` guard's pattern of another type: at the pattern; a float assigned to an integer literal's local: at
+    // the assignment)
+    assert_eq!(first("fn ok() -> Result<Option<bool>, ()> { Ok(Some(true)) }\nfn main() {\n    match ok() {\n        Ok(x) if let Err(_) = x => {},\n        _ => {}\n    }\n}\n"), Some(4));
+    assert_eq!(first("fn main() {\n    let mut x\n        =\n        2;\n    x = 5.0;\n    let _ = x;\n}\n"), Some(5));
 }

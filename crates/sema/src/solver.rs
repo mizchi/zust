@@ -57,6 +57,8 @@ pub struct Solver<'p> {
     rver: u64,
     /// 呼び出しの引数を推論している深さと、本体の推論を後回しにしたクロージャ (式, 引数, 戻り値)
     pub defer: u32,
+    /// Unifying with a type the program writes (a turbofish): it is the type, whatever the value's arguments say
+    pub written: u32,
     /// 囲んでいるループ / ラベル付きブロック: (ラベル, 値の型, ブロックか, break があったか)
     pub brk: Vec<(Option<String>, u32, bool, bool)>,
     /// 後で解く関連型 (基になる型の変数, 名前, 結果の変数)
@@ -101,6 +103,7 @@ impl<'p> Solver<'p> {
             rcache_ver: 0,
             rver: 0,
             defer: 0,
+            written: 0,
             brk: vec![],
             assoc_later: vec![],
             no_record: 0,
@@ -312,6 +315,9 @@ impl Solver<'_> {
         match (self.shape[a as usize], self.shape[b as usize]) {
             (Some(Shape::Known(Ty::Never)), _) | (_, Some(Shape::Known(Ty::Never))) => {}
             // (出現検査: `f = Box::new(f)` の f を `Box<f>` にはしない (無限の型)。決まらないまま残す)
+            // (an integer literal's type and a float literal's: no one type, `let mut x = 2; x = 5.0;` is a mismatch
+            // at the assignment)
+            (None, None) if (self.int_lit[a as usize] && self.float_lit[b as usize]) || (self.float_lit[a as usize] && self.int_lit[b as usize]) => {}
             (None, _) => {
                 if !self.occurs(a, b, 0) {
                     self.link(a, b)
@@ -453,6 +459,7 @@ impl Solver<'_> {
             // where rustc reports it)
             (Some(Shape::Adt(x, s1, l1)), Some(Shape::Adt(y, s2, l2)))
                 if x == y
+                    && self.written == 0
                     && (0..l1.min(l2)).any(|j| {
                         let (p, q) = (self.find(self.adt_args[(s1 + j) as usize]), self.find(self.adt_args[(s2 + j) as usize]));
                         if self.prog.unsized_params.contains_key(&x) { self.clash(p, q) } else { self.arg_clash((self.shape[p as usize], self.int_lit[p as usize]), (self.shape[q as usize], self.int_lit[q as usize])) }
@@ -478,7 +485,7 @@ impl Solver<'_> {
                 // (an argument already known to be another type (`let foo = Foo(1u8); takes_foo(foo);` with
                 // `fn takes_foo(_: Foo<i32>)`): no one type. The value keeps the type it was made with, and the
                 // mismatch is the use's, where rustc reports it)
-                if !Ty::Struct(i).is_dst_struct() {
+                if !Ty::Struct(i).is_dst_struct() && self.written == 0 {
                     let prog = self.prog;
                     for (j, &t) in prog.structs[i as usize].args.iter().enumerate().take(l as usize) {
                         let r = self.find(self.adt_args[st as usize + j]);
@@ -1088,36 +1095,29 @@ impl Solver<'_> {
         }
     }
 
-    /// Two type arguments of one generic type that are certainly not one type: there no coercion applies, so a
-    /// struct, a reference, an array, a slice and a scalar are each another kind of type (`Option<Vec<u8>>` and
-    /// `Option<&[u8]>`), as are two structs of other definitions and two scalars; and an integer literal's type is an
-    /// integer (`Foo<{integer}>` and `Foo<()>`). Each is a representative's shape and whether it is an integer
-    /// literal's
+    /// Two type arguments of one generic type that are certainly not one type: two scalars (`Foo<u8>` and
+    /// `Foo<i32>`), a scalar and a struct, structs of two definitions, an integer literal's and a scalar that is no
+    /// integer or a struct (`Foo<{integer}>` and `Foo<()>`). Not a reference, a box or a pointer and another type:
+    /// inference guesses those (`v.clone()` of a `&Vec<T>` that is not Clone is the reference, `(*p).clone()` of a
+    /// `Box<i32>` the box), and a later use corrects the guess. Each is a representative's shape and whether it is
+    /// an integer literal's
     fn arg_clash(&self, (x, xi): (Option<Shape>, bool), (y, yi): (Option<Shape>, bool)) -> bool {
-        // (an integer literal's type not known yet, and a type that is no integer: neither unknown, nor an integer, a
-        // type parameter or `!`)
-        let no_int = |s: Option<Shape>| match s {
-            None => false,
-            Some(Shape::Known(t)) => !(t.is_int() || matches!(t, Ty::Param(_) | Ty::Assoc(_) | Ty::Never)),
-            Some(_) => true,
+        let base = |s: Option<Shape>| match s {
+            Some(Shape::Known(Ty::Struct(i))) => Some(self.prog.base_of(i)),
+            Some(Shape::Adt(b, ..)) => Some(b),
+            _ => None,
         };
+        let scalar = |s: Option<Shape>| matches!(s, Some(Shape::Known(t)) if t != Ty::Never && scalar_ty(t));
+        // (an integer literal's type not known yet, and a scalar that is no integer or a struct)
+        let no_int = |s: Option<Shape>| base(s).is_some() || matches!(s, Some(Shape::Known(t)) if t != Ty::Never && scalar_ty(t) && !t.is_int());
         if (xi && x.is_none()) || (yi && y.is_none()) {
             return (xi && x.is_none() && no_int(y)) || (yi && y.is_none() && no_int(x));
         }
-        let kind = |s: Option<Shape>| match s {
-            Some(Shape::Known(Ty::Struct(i))) => (1, Some(self.prog.base_of(i))),
-            Some(Shape::Adt(b, ..)) => (1, Some(b)),
-            Some(Shape::Known(Ty::Ref(..)) | Shape::Ref(..)) => (2, None),
-            Some(Shape::Known(Ty::Array(..)) | Shape::Arr(..)) => (3, None),
-            Some(Shape::Known(Ty::Slice(_)) | Shape::Slc(_)) => (4, None),
-            Some(Shape::Known(t)) if t != Ty::Never && scalar_ty(t) => (5, None),
-            _ => (0, None),
-        };
-        match (kind(x), kind(y)) {
-            ((0, _), _) | (_, (0, _)) => false,
-            ((5, _), (5, _)) => !matches!((x, y), (Some(Shape::Known(a)), Some(Shape::Known(b))) if a == b),
-            ((1, a), (1, b)) => a != b,
-            ((a, _), (b, _)) => a != b,
+        match (x, y) {
+            (Some(Shape::Known(a)), Some(Shape::Known(b))) if a == b => false,
+            _ if scalar(x) && scalar(y) => true,
+            _ if (scalar(x) && base(y).is_some()) || (base(x).is_some() && scalar(y)) => true,
+            _ => matches!((base(x), base(y)), (Some(a), Some(b)) if a != b),
         }
     }
 
