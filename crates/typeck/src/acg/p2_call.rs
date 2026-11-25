@@ -3808,6 +3808,17 @@ impl Cx<'_> {
                 let a = self.data_addr(bytes);
                 Ok((Some(a), Ty::Ref(false, intern(Ty::Array(intern(Ty::U8), n)))))
             }
+            // (`c"hello"`: the prelude's `&'static CStr` of its bytes and their 0)
+            Lit::CStr(bs) => {
+                let mut text = String::from("b\"");
+                for &c in bs.iter().chain(std::iter::once(&0u8)) {
+                    text.push_str(&format!("\\x{c:02x}"));
+                }
+                text.push('"');
+                let call = Expr::Call(Box::new(path_expr("__exr_cstr_lit")), vec![Expr::Lit(text, crate::parse::Pos::default())]);
+                let e: &Expr = self.keep_expr(call);
+                self.expr(e, expected)
+            }
             _ => err(SP, "unsupported literal"),
         }
     }

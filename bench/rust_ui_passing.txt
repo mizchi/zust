@@ -1,6 +1,7 @@
 # tests/ui tests zustc passes (rust-lang/rust 1.100.0, 0ef1bc386); bench/rust_ui.py --write-baseline
 run-pass	abi/anon-extern-mod.rs
 run-pass	abi/c-stack-as-value.rs
+run-pass	abi/c-stack-returning-int64.rs
 run-pass	abi/cabi-int-widening.rs
 check-pass	abi/explicit_repr_rust.rs
 build-pass	abi/extern-c-two-doubles-x86_64-5754.rs
@@ -596,6 +597,7 @@ compile-fail	autoref-autoderef/deref-ambiguity-becomes-nonambiguous.rs
 run-pass	autoref-autoderef/deref-chain-method-calls-13264.rs
 check-pass	autoref-autoderef/deref-into-array.rs
 check-pass	autoref-autoderef/reborrow-mut-self-to-ref-self-method.rs
+compile-fail	binding/ambiguity-item.rs
 run-pass	binding/bind-field-short-with-modifiers.rs
 run-pass	binding/borrowed-ptr-pattern-2.rs
 run-pass	binding/borrowed-ptr-pattern-3.rs
@@ -2723,6 +2725,8 @@ compile-fail	feature-gates/feature-gate-pin_ergonomics.rs
 compile-fail	feature-gates/feature-gate-postfix_match.rs
 compile-fail	feature-gates/feature-gate-prelude_import.rs
 compile-fail	feature-gates/feature-gate-profiler-runtime.rs
+compile-fail	feature-gates/feature-gate-reborrow-coerce-shared.rs
+compile-fail	feature-gates/feature-gate-reborrow.rs
 compile-fail	feature-gates/feature-gate-register_tool.rs
 compile-fail	feature-gates/feature-gate-repr-simd.rs
 compile-fail	feature-gates/feature-gate-rust-preserve-none-cc.rs
@@ -2901,6 +2905,7 @@ run-pass	for-loop-while/while-loop-constraints-2.rs
 run-pass	for-loop-while/while-prelude-drop.rs
 run-pass	for-loop-while/while-with-break.rs
 run-pass	for-loop-while/while.rs
+run-pass	foreign/foreign-fn-linkname.rs
 compile-fail	foreign/foreign-fn-return-lifetime.rs
 run-pass	foreign/foreign-fn-with-more-than-8-byte-arg-size.rs
 run-pass	foreign/foreign-int-types.rs
@@ -3363,8 +3368,14 @@ check-pass	implied-bounds/normalization.rs
 compile-fail	implied-bounds/references-err.rs
 check-pass	implied-bounds/trait-where-clause-implied.rs
 compile-fail	imports/ambiguous-1.rs
+compile-fail	imports/ambiguous-10.rs
+compile-fail	imports/ambiguous-12.rs
+compile-fail	imports/ambiguous-13.rs
 compile-fail	imports/ambiguous-14.rs
+compile-fail	imports/ambiguous-17.rs
 compile-fail	imports/ambiguous-3.rs
+compile-fail	imports/ambiguous-4-extern.rs
+compile-fail	imports/ambiguous-5.rs
 compile-fail	imports/ambiguous-6.rs
 compile-fail	imports/ambiguous-9.rs
 check-pass	imports/ambiguous-import-visibility-globglob-priv-pass.rs
@@ -3449,6 +3460,8 @@ check-pass	imports/issue-32222.rs
 compile-fail	imports/issue-32354-suggest-import-rename.rs
 compile-fail	imports/issue-33464.rs
 compile-fail	imports/issue-37887.rs
+compile-fail	imports/issue-4366-2.rs
+compile-fail	imports/issue-4366.rs
 compile-fail	imports/issue-45799-bad-extern-crate-rename-suggestion-formatting.rs
 compile-fail	imports/issue-45829/import-self.rs
 compile-fail	imports/issue-45829/import-twice.rs
@@ -3477,6 +3490,7 @@ check-pass	imports/no-ambiguous-trait-lint-on-redundant-import.rs
 check-pass	imports/no-pub-reexports-but-used.rs
 compile-fail	imports/no-std-inject.rs
 check-pass	imports/overwrite-deep-glob.rs
+compile-fail	imports/overwrite-different-ambig-2.rs
 check-pass	imports/overwrite-different-ambig.rs
 check-pass	imports/overwrite-different-vis-2.rs
 check-pass	imports/overwrite-different-vis-3.rs
@@ -3505,6 +3519,7 @@ compile-fail	indexing/index-with-wrong-type.rs
 compile-fail	indexing/index_message.rs
 compile-fail	indexing/indexing-integral-types.rs
 compile-fail	indexing/indexing-requires-a-uint.rs
+compile-fail	indexing/point-at-index-for-obligation-failure.rs
 run-pass	indexing/ref-array-indexing.rs
 compile-fail	inference/ambiguity-errors-single-diagnostic.rs
 compile-fail	inference/ambiguous_type_parameter.rs
@@ -3870,8 +3885,8 @@ check-pass	lint/clashing-extern-fn-wasm.rs
 check-pass	lint/const-item-interior-mutations-const-atomics.rs
 check-pass	lint/const-item-interior-mutations-const-deref.rs
 check-pass	lint/dangling-pointers-from-locals.rs
-compile-fail	lint/dangling-pointers-from-temporaries/calls.rs
-compile-fail	lint/dangling-pointers-from-temporaries/cstring-as-ptr.rs
+check-pass	lint/dangling-pointers-from-temporaries/cstring-as-param.rs
+check-pass	lint/dangling-pointers-from-temporaries/emacs.rs
 compile-fail	lint/dangling-pointers-from-temporaries/example-from-issue123613.rs
 compile-fail	lint/dangling-pointers-from-temporaries/ext.rs
 compile-fail	lint/dead-code-pub-in-binary/allow-lint.rs
@@ -4018,7 +4033,6 @@ compile-fail	lint/lint-nonstandard-style-unicode-2.rs
 compile-fail	lint/lint-nonstandard-style-unicode-3.rs
 compile-fail	lint/lint-overflowing-int-136675.rs
 check-pass	lint/lint-pub-unreachable-for-nested-glob.rs
-compile-fail	lint/lint-qualification.rs
 compile-fail	lint/lint-range-endpoint-overflow.rs
 check-pass	lint/lint-raw-borrows-via-references.rs
 compile-fail	lint/lint-type-overflow.rs
@@ -4342,6 +4356,7 @@ run-pass	macros/macro-with-attrs2.rs
 run-pass	macros/macro-with-braces-in-expr-position.rs
 compile-fail	macros/macro_undefined.rs
 compile-fail	macros/macros-in-trait-positions-issue-40845.rs
+compile-fail	macros/meta-item-absolute-path.rs
 run-pass	macros/meta-variable-misuse.rs
 compile-fail	macros/missing-bang-in-decl.rs
 compile-fail	macros/missing-comma.rs
@@ -4364,6 +4379,7 @@ run-pass	macros/stmt_expr_attr_macro_parse.rs
 compile-fail	macros/suggest-enclosing-format-string.rs
 compile-fail	macros/tokenstream-ice-issue-149954.rs
 check-pass	macros/trait-bound-not-parsed-as-matcher.rs
+check-pass	macros/type-macros-simple.rs
 run-pass	macros/typeck-macro-interaction-issue-8852.rs
 compile-fail	macros/undefined-macro-in-impl.rs
 check-pass	macros/user-defined-macro-rules.rs

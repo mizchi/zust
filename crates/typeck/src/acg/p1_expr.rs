@@ -3918,6 +3918,23 @@ impl Cx<'_> {
                 return self.expr(ne, expected);
             }
         }
+        // (`core::mem::MaybeUninit::<S>::uninit()` / `std::vec::Vec::<u8>::new()`: std's modules before a type of the
+        //  prelude with type arguments are left out, as without them (libc 0.2's offset_of!))
+        if let Expr::Path(None, p) = strip_paren(func) {
+            let n = p.segs.len();
+            if n >= 4 && matches!(p.segs[0].name.as_str(), "std" | "core" | "alloc") {
+                let k = (1..n - 1).find(|&k| !p.segs[k].args.is_empty());
+                if let Some(k) = k.filter(|&k| {
+                    k >= 2
+                        && p.segs[1..k].iter().all(|s| s.args.is_empty() && s.name.starts_with(|c: char| c.is_ascii_lowercase()))
+                        && self.prog.struct_index.contains_key(p.segs[k].name.as_str())
+                }) {
+                    let np = crate::parse::Path { global: false, segs: p.segs[k..].to_vec(), pos: p.pos };
+                    let ne: &Expr = self.keep_expr(Expr::Call(Box::new(Expr::Path(None, np)), cargs.clone()));
+                    return self.expr(ne, expected);
+                }
+            }
+        }
         // `(*f)(x)` with f: `Box<dyn Fn ..>` / `&dyn Fn ..` / a closure behind a reference: `f(x)`
         if let Expr::Unary(op, inner, _) = strip_paren(func) {
             if op == "*" && matches!(self.peek(inner), Some(Ty::Box(_) | Ty::Ref(..))) {
