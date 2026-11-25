@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795638317664,
+  "lastUpdate": 1795638320309,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -111617,6 +111617,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/ce9b7b6a5f09bb904309b619c83536fd19886ac3"
         },
         "date": 1795637959995,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.552,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.818,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 71.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.537,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a61fb67713e4c94091cb4fdb294032a9ed4ea39e",
+          "message": "macros: a macro_rules! call inside stringify!(..) stays text (#199) (#222)\n\n`stringify!(m!())` printed `({ 1 + 2 })`; rustc prints `m!()`: stringify's\ninput is tokens, not code to expand. Both expanders expanded it, so\ntests/macros_expand.rs, which compares them, could not catch it.\n\n- expand_with (the fast one): the builtin `stringify!` (unqualified, or\n  `std::` / `core::`) marks its arguments inert for every program, not only\n  when proc macros are in scope, and a `macro_rules!` call inside them is\n  left as written.\n- expand_reference: find_calls does not go into the arguments of a\n  `stringify!(..)`.\n\nA crate's own `macro_rules! stringify` still expands as before.\n`concat!` and the other builtins still expand their arguments.\n\ntests/probe/stringify_macro_call.rs, checked against rustc: `( )`, `[ ]`\nand `{ }` calls, `std::stringify!`, `stringify! { .. }`, and a call of m\nbeside it that expands.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9heL113jdaf9AgpKuz\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T05:16:04+09:00",
+          "tree_id": "b91cfa6573ae23620aaa776c80551ea9889c2851",
+          "url": "https://github.com/mizchi/zust/commit/a61fb67713e4c94091cb4fdb294032a9ed4ea39e"
+        },
+        "date": 1795638319750,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
