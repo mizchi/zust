@@ -31,6 +31,7 @@ import math
 import os
 import re
 import subprocess
+import sys
 
 ROOT = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=True).stdout.strip()
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -164,12 +165,14 @@ def pending(prs):
     if subprocess.run(["git", "-C", ROOT, "fetch", "-q", "origin", *refs], capture_output=True).returncode != 0:
         # (one ref that is gone (a base branch deleted) fails the fetch: each on its own then)
         for r in refs:
-            git("fetch", "-q", "origin", r)
+            if subprocess.run(["git", "-C", ROOT, "fetch", "-q", "origin", r], capture_output=True).returncode != 0:
+                print(f"pending: could not fetch {r}", file=sys.stderr)
     rows = []
     for p in sorted(prs, key=lambda p: p["number"]):
         head, base = f"refs/retro/pull/{p['number']}", f"refs/retro/base/{p['base']}"
         mb = git("merge-base", head, base).strip()
         if not mb:
+            print(f"pending: skipping #{p['number']}: no merge base with {p['base']}", file=sys.stderr)
             continue
         new, old = ratchet_at(head), ratchet_at(mb)
         row = dict(pr=p["number"], title=p["title"], head=p["head"], base=p["base"], draft=p["draft"],
