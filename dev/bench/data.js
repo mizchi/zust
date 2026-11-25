@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795603186528,
+  "lastUpdate": 1795603189208,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -106091,6 +106091,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/54460146e61471d2ecebfb6b7d9c15200871d3bc"
         },
         "date": 1795601623112,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.774,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 69.231,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 94.444,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 88.235,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 90.476,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 92.39,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fe60aef486a9eb23c0688fe56554b22adc7cafdb",
+          "message": "Merge pull request #162 from mizchi/claude/tender-sagan-iatvun\n\neither: std::io::Seek and SeekFrom, and Read through a Cursor<&[u8]>",
+          "timestamp": "2026-11-25T19:36:01+09:00",
+          "tree_id": "908c67fe3f83f4aa17622f877420bedec92848b6",
+          "url": "https://github.com/mizchi/zust/commit/fe60aef486a9eb23c0688fe56554b22adc7cafdb"
+        },
+        "date": 1795603188656,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
