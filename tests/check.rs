@@ -2303,3 +2303,15 @@ fn calls_of_the_fn_traits_methods() {
     assert_eq!(first("trait Call { fn call(&self, _x: ()) {} }\nimpl Call for u8 {}\nfn main() {\n    1u8.call(());\n}\n"), None, "the program's");
     assert_eq!(first("trait FnLike { fn call(&self); }\nfn c<F: FnLike>(f: F) {\n    f.call();\n}\nfn main() {}\n"), None, "a trait of the program's named Fn..");
 }
+
+#[test]
+fn malformed_link_attributes() {
+    // (`link_name` takes `= "name"`, `link_ordinal` an integer: E0539, at the attribute's line as rustc 1.100)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    assert_eq!(first("#[link_name]\nextern \"C\" {\n    fn bar() -> u32;\n}\nfn main() {}\n"), Some((1, "malformed `link_name` attribute input".to_string())), "link_name");
+    assert_eq!(first("extern \"C\" {\n    #[link_ordinal(\"x\")]\n    fn foo();\n}\nfn main() {}\n"), Some((2, "malformed `link_ordinal` attribute input".to_string())), "link_ordinal");
+    assert_eq!(first("extern \"C\" {\n    #[link_name = \"foo\"]\n    fn bar();\n}\n#[export_name = \"x\"]\npub fn f() {}\nfn main() {}\n"), None, "well formed");
+}

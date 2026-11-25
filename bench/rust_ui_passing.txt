@@ -2690,6 +2690,7 @@ run-pass	extern/issue-10764-rpass.rs
 build-pass	extern/issue-1251.rs
 compile-fail	extern/issue-18819.rs
 compile-fail	extern/issue-36122-accessing-externed-dst.rs
+compile-fail	extern/issue-47725.rs
 run-pass	extern/lgamma-linkage.rs
 compile-fail	extern/not-in-block.rs
 run-pass	extern/windows-tcb-trash-13259.rs
@@ -3977,7 +3978,10 @@ build-pass	limits/limit-huge-struct-derive-debug.rs
 compile-fail	link-native-libs/issue-43926.rs
 compile-fail	link-native-libs/link-attr-validation-early.rs
 compile-fail	linkage-attr/linkage4.rs
+compile-fail	linkage-attr/raw-dylib/windows/link-ordinal-invalid-format.rs
+compile-fail	linkage-attr/raw-dylib/windows/link-ordinal-missing-argument.rs
 compile-fail	linkage-attr/raw-dylib/windows/link-ordinal-not-foreign-fn.rs
+compile-fail	linkage-attr/raw-dylib/windows/link-ordinal-too-many-arguments.rs
 build-pass	linkage-attr/unreferenced-used-static-issue-127052.rs
 check-pass	lint/ambiguous_wide_pointer_comparisons_suggestions.rs
 check-pass	lint/break-with-label-and-unsafe-block.rs

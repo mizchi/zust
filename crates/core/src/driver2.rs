@@ -3792,6 +3792,9 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
         };
         match name {
             "crate_type" | "recursion_limit" | "type_length_limit" | "crate_name" => form == '=' && str_lit(inner),
+            // (`link_name = "x"`, `export_name = "x"`, `link_section = ".x"`; `link_ordinal(N)`, an integer)
+            "link_name" | "export_name" | "link_section" => form == '=' && str_lit(inner),
+            "link_ordinal" => form == '(' && inner.trim().starts_with(|c: char| c.is_ascii_digit()) && inner.trim().chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
             "inline" => form == ' ' || (form == '(' && matches!(inner, "always" | "never")),
             "must_use" => form == ' ' || (form == '=' && str_lit(inner)),
             "cold" | "track_caller" | "non_exhaustive" | "no_mangle" | "automatically_derived" | "no_implicit_prelude" => form == ' ',
@@ -4009,6 +4012,21 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
         // body)
         let nested = any_attr.then(|| {
             let word = |k: usize| it.idents.get(k).map_or("", |&(a, e)| split.get(a as usize..e as usize).unwrap_or(""));
+            // (an extern block's items' attributes, `extern "C" { #[link_ordinal(1)] fn f(); }`: those at each item's start)
+            if (0..6).any(|k| word(k) == "extern") && text.contains("#[") {
+                if let Some(b) = text.find('{') {
+                    let mut k = b + 1;
+                    loop {
+                        if let Some(&(at, name, _)) = leading(&text[k..]).iter().find(|&&(_, n, inp)| matches!(n, "link_name" | "link_ordinal") && !check(n, inp)) {
+                            return Some((k + at, format!("malformed `{name}` attribute input")));
+                        }
+                        match text[k..].find(';') {
+                            Some(e) => k += e + 1,
+                            None => break,
+                        }
+                    }
+                }
+            }
             if (0..3).any(|k| word(k) == "enum") {
                 return text.contains("#[").then(|| nested_attr_misuse(text, &unknown, unused_attributes_denied)).flatten();
             }
