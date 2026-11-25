@@ -1263,8 +1263,9 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
         // (`extern "C" { .. }`: foreign items. `extern "C" fn f() {` meets `fn` first, going back)
         // (an `impl` that starts an item: not `impl Trait` in a type, `fn f() -> impl Display { m!() * 3 }`)
         let impl_head = || k == 0 || (toks[k - 1].0 == 1 && matches!(tk(k - 1), b";" | b"{" | b"}" | b"]")) || (toks[k - 1].0 == 0 && matches!(tk(k - 1), b"unsafe" | b"default"));
+        // (a brace inside the head's `<..>` is a const argument, an expression: `impl S<{ m!() * 3 }> {}`)
         if toks[k].0 == 0 && (t == b"mod" || (t == b"impl" && impl_head()) || t == b"trait" || t == b"extern") {
-            return true;
+            return angle >= 0;
         }
         if toks[k].0 == 0 && (t == b"fn" || t == b"struct" || t == b"enum" || t == b"union" || t == b"let") {
             return false;
@@ -2334,9 +2335,13 @@ fn find_calls(
                 let module = brace && {
                     let mut k = i;
                     let mut found = false;
+                    // (a brace inside the head's `<..>` is a const argument, an expression: `impl S<{ m!() * 3 }> {}`)
+                    let mut angle = 0i32;
                     while k > 0 {
                         k -= 1;
                         match &toks[k] {
+                            TokenTree::Punct(q) if q.as_char() == '>' && !(k > 0 && matches!(&toks[k - 1], TokenTree::Punct(a) if matches!(a.as_char(), '-' | '=') && a.spacing() == proc_macro2::Spacing::Joint)) => angle += 1,
+                            TokenTree::Punct(q) if q.as_char() == '<' => angle -= 1,
                             TokenTree::Punct(q) if q.as_char() == ';' => break,
                             TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace => break,
                             TokenTree::Ident(w) if matches!(w.to_string().as_str(), "fn" | "struct" | "enum" | "union" | "let") => break,
@@ -2346,7 +2351,7 @@ fn find_calls(
                                 || matches!(&toks[k - 1], TokenTree::Group(pg) if matches!(pg.delimiter(), proc_macro2::Delimiter::Brace | proc_macro2::Delimiter::Bracket))
                                 || matches!(&toks[k - 1], TokenTree::Ident(u) if u == "unsafe" || u == "default")) => {}
                             TokenTree::Ident(w) if matches!(w.to_string().as_str(), "mod" | "impl" | "trait" | "extern") => {
-                                found = true;
+                                found = angle >= 0;
                                 break;
                             }
                             _ => {}
