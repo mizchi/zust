@@ -2106,7 +2106,7 @@ impl Bk {
                                     } else if lo.capture {
                                         BkError { sp: lo.sp, msg: format!("closure may outlive the current function, but it borrows `{name}`, which is owned by the current function (E0373)") }
                                     } else {
-                                        BkError { sp: *sp, msg: format!("cannot return a reference to {what}: `{name}` is dropped when the function returns") }
+                                        BkError { sp: *sp, msg: format!("cannot return a reference to {what}: `{name}` is dropped when the function returns (E0515)") }
                                     });
                                     break;
                                 }
@@ -5047,14 +5047,23 @@ impl Cx<'_> {
             // (a tuple, an array, a struct's literal: they hold what their parts do (`(x, &x)` returned, E0515 also
             // where no region check runs))
             Expr::Tuple(es) | Expr::Array(es) => {
-                for x in es {
-                    self.bk_direct(x, out);
+                let et = |i: usize| match self.peek(e) {
+                    Some(Ty::Array(t, _)) => Some(*t),
+                    Some(Ty::Struct(sid)) if self.prog.is_tuple(sid) => self.prog.structs[sid as usize].fields.get(i).map(|f| f.1),
+                    _ => None,
+                };
+                for (i, x) in es.iter().enumerate() {
+                    self.bk_direct_part(x, et(i), out);
                 }
             }
             Expr::Repeat(x, _) => self.bk_direct(x, out),
             Expr::Struct(_, fs, base) => {
-                for (_, x) in fs {
-                    self.bk_direct(x, out);
+                let sid = match self.peek(e) {
+                    Some(Ty::Struct(sid)) => Some(sid),
+                    _ => None,
+                };
+                for (f, x) in fs {
+                    self.bk_direct_part(x, sid.and_then(|s| self.prog.field(s, f)).map(|f| f.0), out);
                 }
                 if let Some(b) = base {
                     self.bk_direct(b, out);
@@ -5062,6 +5071,21 @@ impl Cx<'_> {
             }
             _ => {}
         }
+    }
+
+    /// A part of an aggregate whose type is want (bk_direct): `&x` of x a reference, where want is not a reference to
+    /// x's type, is a deref coercion (`W { slice: &self }` with self: `&[T]`), which copies `*x`'s reference: it holds
+    /// what x does, not a loan of x
+    fn bk_direct_part(&self, x: &Expr, want: Option<Ty>, out: &mut Vec<Src>) {
+        if let (Expr::Ref(_, inner), Some(w)) = (strip_paren(x), want) {
+            if let Some(it @ Ty::Ref(..)) = self.peek(inner) {
+                if !matches!(w, Ty::Ref(_, i) if *i == it) {
+                    self.bk_direct(inner, out);
+                    return;
+                }
+            }
+        }
+        self.bk_direct(x, out);
     }
 
     /// Run the checker on the lowered body

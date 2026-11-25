@@ -2589,7 +2589,11 @@ impl Cx<'_> {
             let ct = if by_move { t } else { Ty::Ptr(true, intern(t)) };
             sol[cd.n_parent + i] = Some(ct);
             caps.push((loc, t));
+            // (a guard's checks of the arm's bindings (bk_ev) are not of a closure's captures: guard_closure_move and
+            // guard_mut_use see those, by what the body does with them (`let &mut n = foo;` moves nothing))
+            let gb = self.bk.guard_binds.take();
             copy_caps.push(self.bk_capture(c, n, loc, t, by_move));
+            self.bk.guard_binds = gb;
         }
         // (a capture held by value (a `move` closure's) of a local not declared `mut`, which the body assigns or borrows
         // mutably: E0594 / E0596 at the mutation; one held by reference is a `&mut` loan the borrow check reports)
