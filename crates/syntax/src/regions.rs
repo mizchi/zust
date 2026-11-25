@@ -648,13 +648,27 @@ impl<'a> Slots<'a> {
                 return;
             }
             // (another type bounded by a lifetime (`StrategyFor<A>: 'static` of a type alias): the mark `#?`, as what
-            // the function may assume is not all read)
+            // the function may assume is not all read. Its parts outlive the bound too, as rustc's outlives components
+            // do: `D<'a>: 'b` gives `'a: 'b`, `E<'a, T>: 'b` also `T: 'b`)
             let plain = matches!(lhs, PTy::Path(None, p) if matches!(p.segs.as_slice(), [s] if s.args.is_empty() || s.name.starts_with('\'')));
             if !plain {
+                let (mut lts, mut tys) = (vec![], vec![]);
+                ty_parts(lhs, &mut lts, &mut tys);
                 for b in bs {
                     if let Bound::Lifetime(l) = b {
                         let c = me.code(Some(l));
                         ty_outlives.push(("#?".to_string(), c));
+                        for a in &lts {
+                            let a = me.code(Some(a));
+                            if a < R_STATIC && c <= R_STATIC && a != c && !outlives.contains(&(a, c)) {
+                                outlives.push((a, c));
+                            }
+                        }
+                        for t in tys.iter().filter(|t| me.tparams.contains(&t.as_str())) {
+                            if !ty_outlives.contains(&(t.clone(), c)) {
+                                ty_outlives.push((t.clone(), c));
+                            }
+                        }
                     }
                 }
                 return;
@@ -664,6 +678,20 @@ impl<'a> Slots<'a> {
             for b in bs {
                 let Bound::Lifetime(l) = b else { continue };
                 let c = me.code(Some(l));
+                // (`Self: 'b` in an impl's method: the lifetimes of the impl's self type outlive 'b)
+                if s.name == "Self" && c <= R_STATIC {
+                    let ss = me.self_slots;
+                    let mut i = 0;
+                    while i < ss.len() {
+                        let (from, to) = if ss[i] == R_DYN_ARGS { (i + 2, (i + 2 + ss.get(i + 1).copied().unwrap_or(0) as usize).min(ss.len())) } else { (i, i + 1) };
+                        for &a in &ss[from..to] {
+                            if a < R_STATIC && a != c && !outlives.contains(&(a, c)) {
+                                outlives.push((a, c));
+                            }
+                        }
+                        i = to.max(i + 1);
+                    }
+                }
                 if s.name.starts_with('\'') {
                     let a = me.code(Some(&s.name));
                     outlives.push((a, c));
@@ -681,6 +709,47 @@ impl<'a> Slots<'a> {
         for (t, bs) in &g.preds {
             add(self, t, bs);
         }
+    }
+}
+
+/// The lifetimes and the plain type names (a parameter's, maybe) that a type is made of, for the outlives its bound
+/// implies. Not through a projection (`<T as Tr>::X: 'b` says nothing of T) or a trait object's bounds
+fn ty_parts(t: &PTy, lts: &mut Vec<String>, tys: &mut Vec<String>) {
+    match t {
+        PTy::Path(None, p) => {
+            if let [s] = p.segs.as_slice() {
+                if s.args.is_empty() && s.fn_args.is_none() && !s.name.starts_with('\'') {
+                    tys.push(s.name.clone());
+                }
+            }
+            for s in &p.segs {
+                for a in &s.args {
+                    match a {
+                        GArg::Lifetime(l) if l != "'_" && l != "'static" => lts.push(l.clone()),
+                        GArg::Ty(t) | GArg::Bind(_, t) => ty_parts(t, lts, tys),
+                        _ => {}
+                    }
+                }
+                if let Some((ps, r)) = &s.fn_args {
+                    for t in ps.iter().chain(r.as_deref()) {
+                        ty_parts(t, lts, tys);
+                    }
+                }
+            }
+        }
+        PTy::Ref(l, _, t) => {
+            if let Some(l) = l.as_ref().filter(|l| *l != "'_" && *l != "'static") {
+                lts.push(l.clone());
+            }
+            ty_parts(t, lts, tys);
+        }
+        PTy::Ptr(_, t) | PTy::Slice(t) | PTy::Array(t, _) => ty_parts(t, lts, tys),
+        PTy::Tuple(ts) => {
+            for t in ts {
+                ty_parts(t, lts, tys);
+            }
+        }
+        _ => {}
     }
 }
 
