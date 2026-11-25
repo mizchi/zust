@@ -6143,6 +6143,7 @@ check-pass	parser/shebang/shebang-space.rs
 compile-fail	parser/shebang/shebang-split.rs
 check-pass	parser/shebang/sneaky-attrib.rs
 check-pass	parser/shebang/valid-shebang.rs
+compile-fail	parser/similar-tokens.rs
 run-pass	parser/slowparse-bstring.rs
 run-pass	parser/slowparse-string.rs
 check-pass	parser/stripped-nested-outline-mod-pass.rs
@@ -6211,6 +6212,7 @@ compile-fail	parser/unsafe-mod.rs
 compile-fail	parser/unsized.rs
 compile-fail	parser/unsized2.rs
 compile-fail	parser/use-as-where-use-ends-with-mod-sep.rs
+compile-fail	parser/use-colon-as-mod-sep.rs
 compile-fail	parser/use-ends-with-mod-sep.rs
 compile-fail	parser/use-unclosed-brace.rs
 compile-fail	parser/utf16-be-without-bom.rs

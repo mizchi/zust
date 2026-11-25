@@ -3366,6 +3366,17 @@ impl Parser {
                     if prev_word && t.kind == TokKind::Ident && t.text != "as" && !s.ends_with("as") {
                         return Err(self.err("expected `;`"));
                     }
+                    // (a lone `:` for `::`, `use std:fs::File;`; and in a braced list a token that cannot follow a
+                    // name, `use x::{A. B};`: rustc's messages, at the token)
+                    if t.kind == TokKind::Punct && prev_word {
+                        let pair = t.text == ":" && t.joint && self.punct_at(1, ":");
+                        if t.text == ":" && !pair {
+                            return Err(self.err_plain("expected `::`, found `:`"));
+                        }
+                        if !prefixes.is_empty() && !pair && !matches!(t.text.as_str(), "," | "}" | "{" | "*" | ":") {
+                            return Err(self.err_plain(&format!("expected one of `,`, `::`, `as`, or `}}`, found `{}`", t.text)));
+                        }
+                    }
                     prev_word = word;
                     s.push_str(&t.text);
                     self.i += 1;

@@ -3226,3 +3226,16 @@ fn a_macro_export_beside_a_reexport_of_std_s_macro() {
     assert_eq!(first("pub use std::panic;\n\n#[macro_export]\nmacro_rules! panic { () => {} }\n\nfn main() {}\n"), Some((4, 1, "the name `panic` is defined multiple times (E0255)".to_string())));
     assert_eq!(first("pub use std::mem::swap;\n#[macro_export]\nmacro_rules! swap { () => {} }\nfn main() {}\n"), None);
 }
+
+#[test]
+fn use_paths_with_a_lone_colon_or_a_bad_token_in_a_list() {
+    // (rustc 1.100, at its line and column: `use std:fs::File;` is "expected `::`, found `:`" at the `:`, and
+    // `use x::{A. B};` "expected one of `,`, `::`, `as`, or `}`, found `.`" at the `.`)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("use std:fs::File;\nfn main() {}\n"), Some((1, 8, "expected `::`, found `:`".to_string())));
+    assert_eq!(first("pub mod x {\n    pub struct A;\n    pub struct B;\n}\nuse x::{A. B};\nfn main() {}\n"), Some((5, 10, "expected one of `,`, `::`, `as`, or `}`, found `.`".to_string())));
+    assert_eq!(first("pub mod x {\n    pub mod y { pub struct A; }\n}\nuse x::{y::A, y::{self}};\nuse std::fmt::{self, Write as _};\nfn main() {}\n"), None);
+}
