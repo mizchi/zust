@@ -515,23 +515,31 @@ impl<'a> Js<'a> {
 
     /// The operands `xs`, in order (each kept in a temporary before a later one's `?`)
     fn seq(&mut self, xs: &[&Expr]) -> Vec<String> {
-        // (the operands before the last one with a `?`; a literal needs no temporary)
         let last = xs.iter().rposition(|y| has_try(y));
-        // (a later operand that assigns a local: a name read before it is kept as it was too)
-        let assigns = last.is_some_and(|l| xs[1..=l].iter().any(|y| assigns_local(y)));
         let mut out = vec![];
         for (k, x) in xs.iter().enumerate() {
             let s = self.expr(x);
-            let later = last.is_some_and(|l| k < l) && !matches!(x.kind, EK::Lit(_));
-            if later && assigns && matches!(x.kind, EK::Var(_)) {
-                let t = self.fresh();
-                self.line(&format!("const {t} = {s};"));
-                out.push(t);
-                continue;
-            }
-            out.push(self.pin(s, later));
+            let later: &[&Expr] = match last {
+                Some(l) if k < l => &xs[k + 1..=l],
+                _ => &[],
+            };
+            out.push(self.pin_before(x, s, later));
         }
         out
+    }
+
+    /// The JS `s` of the operand `x`, kept in a temporary when one of the operands after it (`later`) has a `?`. A
+    /// literal needs none; a local's name needs one only when a later operand assigns a local
+    fn pin_before(&mut self, x: &Expr, s: String, later: &[&Expr]) -> String {
+        if !later.iter().any(|y| has_try(y)) || matches!(x.kind, EK::Lit(_)) {
+            return s;
+        }
+        if matches!(x.kind, EK::Var(_)) && later.iter().any(|y| assigns_local(y)) {
+            let t = self.fresh();
+            self.line(&format!("const {t} = {s};"));
+            return t;
+        }
+        self.pin(s, true)
     }
 
     /// A loop's body: its statements, the value dropped
@@ -1043,7 +1051,7 @@ impl<'a> Js<'a> {
                     None
                 } else {
                     let c = self.expr(f);
-                    Some(self.pin(c, args.iter().any(has_try)))
+                    Some(self.pin_before(f, c, &args.iter().collect::<Vec<_>>()))
                 };
                 let a: Vec<String> = self.seq(&args.iter().collect::<Vec<_>>());
                 if let Some(Callee::TypedCtor(el, c)) = self.info.callee.get(&f.id).cloned() {
@@ -1110,7 +1118,7 @@ impl<'a> Js<'a> {
                     };
                 }
                 let recv = self.operand(r);
-                let recv = self.pin(recv, args.iter().any(has_try));
+                let recv = self.pin_before(r, recv, &args.iter().collect::<Vec<_>>());
                 // (a method of an extern type: called as JS's, its arguments and result converted)
                 if let Some((tn, mn)) = self.info.member.get(&e.id).cloned() {
                     let (_, ps, ret, js) = self.info.ext_types[&tn].methods.iter().find(|m| m.0 == mn).cloned().unwrap();
@@ -1265,7 +1273,7 @@ impl<'a> Js<'a> {
                 let mut parts = vec![];
                 if let Some(b) = base {
                     let v = self.operand(b);
-                    let v = self.pin(v, fs.iter().any(|f| has_try(&f.1)));
+                    let v = self.pin_before(b, v, &fs.iter().map(|f| &f.1).collect::<Vec<_>>());
                     parts.push(format!("...{v}"));
                 }
                 let vs = self.seq(&fs.iter().map(|f| &f.1).collect::<Vec<_>>());
@@ -1545,7 +1553,7 @@ impl<'a> Js<'a> {
             let t = subst_ty(&t, &self.subst);
             if let Some(f) = self.eq_fn(&t) {
                 let a = self.expr(l);
-                let a = self.pin(a, has_try(r));
+                let a = self.pin_before(l, a, &[r]);
                 let b = self.expr(r);
                 return if op == "==" { format!("{f}({a}, {b})") } else { format!("!{f}({a}, {b})") };
             }
@@ -1558,7 +1566,7 @@ impl<'a> Js<'a> {
             _ => bin_prec(op),
         };
         let a = self.bin_operand(l, p, false);
-        let a = self.pin(a, has_try(r));
+        let a = self.pin_before(l, a, &[r]);
         let b = self.bin_operand(r, p, true);
         match op {
             "==" => return format!("{a} === {b}"),

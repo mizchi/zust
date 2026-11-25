@@ -144,7 +144,11 @@ fn order(f: bool, a: bool) -> Option<String> {
   let s = "<" + logged("cat") + ">" + (some_arg(a)?).to_string();
   let n = ((some_arg(a)?) as f64).max(0.5);
   let r = range(0, (some_arg(a)?) + 2).map((i) => i * 10).len();
-  Some(`${some_fn(f)?(some_arg(a)?)} ${p} ${s} ${n} ${r} ${x}`)
+  // (a local read before an operand that assigns it: an operator's left side, a method's receiver)
+  let y = x + ({ x = 3; Some(1) }?);
+  let mut t = "ab";
+  let k = t.contains({ t = "zz"; Some("a") }?);
+  Some(`${some_fn(f)?(some_arg(a)?)} ${p} ${s} ${n} ${r} ${x} ${y} ${k}`)
 }
 
 export fn orders() -> String {
