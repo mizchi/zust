@@ -5615,3 +5615,31 @@ fn part37_mut_rest_bindings_by_value() {
 }
 "#, &[], "rb1");
 }
+
+#[test]
+fn part37_where_clauses_with_the_parts_of_a_type() {
+    // (the first cycle's regression, traits/elaborate-type-region.rs (run-pass): the trait's `T: 'a` is the impl's
+    // `[U]: 'a`, `&'b U: 'a`, `Bar<'b, T>: 'a` or `fn(T): 'a`, which give what their parts outlive (RFC 1214); a
+    // projection's (`U::Item: 'a`) gives nothing of U. And the impl's `Self` is its self type. Each as rustc 1.97)
+    errors_at(r#"trait Master<'a, T: ?Sized> {
+    fn foo() where T: 'a;
+}
+impl<'a, U> Master<'a, [U]> for () {
+    fn foo() where U: 'a { }
+}
+impl<'a, 'b, U> Master<'a, &'b U> for () {
+    fn foo() where 'b: 'a, U: 'a { }
+}
+struct Bar<'a, T: 'a> { x: &'a T }
+impl<'a, 'b, T> Master<'a, Bar<'b, T>> for () {
+    fn foo() where 'b: 'a, T: 'a { }
+}
+impl<'a, T> Master<'a, fn(T)> for () {
+    fn foo() where T: 'a { }
+}
+trait Leak<'a> { fn leak() where Self: 'a; }
+struct D<'a>(&'a i32);
+impl<'a, 'b> Leak<'a> for D<'b> { fn leak() where Self: 'a {} }
+fn main() {}
+"#, &[], "ep1");
+}

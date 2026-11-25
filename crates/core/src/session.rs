@@ -10537,9 +10537,12 @@ fn stricter_impl_where(src: &str, items: &[SrcItem]) -> Option<String> {
         let ht = text(hi);
         let head = &ht[..ht.find('{').unwrap_or(ht.len())];
         let Some(ik) = head.find("impl") else { continue };
-        let (impl_bounds, after) = match angle_items(head, ik + 4 + head[ik + 4..].len() - head[ik + 4..].trim_start().len()) {
-            Some((its, e)) => (names_and_bounds(&its).1, e),
-            None => (vec![], ik + 4),
+        let (impl_names, impl_bounds, after) = match angle_items(head, ik + 4 + head[ik + 4..].len() - head[ik + 4..].trim_start().len()) {
+            Some((its, e)) => {
+                let (n, b) = names_and_bounds(&its);
+                (n, b, e)
+            }
+            None => (vec![], vec![], ik + 4),
         };
         let Some(f) = head[after..].find(" for ") else { continue };
         let trait_part = head[after..after + f].trim();
@@ -10566,9 +10569,38 @@ fn stricter_impl_where(src: &str, items: &[SrcItem]) -> Option<String> {
         let dt = text(d);
         let dh = &dt[..member_head(dt)];
         // (what holds: the trait's method's and header's bounds through the arguments, the impl header's)
+        // (the impl's `Self` is its self type)
+        let self_map = [("Self".to_string(), subst_names(self_ty, &[]))];
         let mut facts: Vec<(String, String)> = where_bounds(dh).into_iter().chain(tbounds.iter().cloned()).map(|(a, b)| (subst_names(&a, &map), subst_names(&b, &map))).collect();
-        facts.extend(impl_bounds.iter().map(|(a, b)| (subst_names(a, &[]), b.clone())));
-        facts.extend(where_bounds(head).into_iter().map(|(a, b)| (subst_names(&a, &[]), b)));
+        facts.extend(impl_bounds.iter().map(|(a, b)| (subst_names(a, &self_map), b.clone())));
+        facts.extend(where_bounds(head).into_iter().map(|(a, b)| (subst_names(&a, &self_map), b)));
+        // (a type outlives a lifetime where each of its parts does (RFC 1214): `[U]: 'a`, `&'b U: 'a`, `Bar<'b, T>:
+        // 'a` give `U: 'a`, `'b: 'a`, `T: 'a`. Not a projection's (`U::Item: 'a` says nothing of U))
+        let mut parts: Vec<(String, String)> = vec![];
+        for (a, b) in &facts {
+            if a.starts_with('\'') || a.contains("::") {
+                continue;
+            }
+            let cs: Vec<char> = a.chars().collect();
+            let mut i = 0;
+            while i < cs.len() {
+                let lt = cs[i] == '\'';
+                if lt || cs[i].is_alphabetic() || cs[i] == '_' {
+                    let mut j = i + 1;
+                    while j < cs.len() && (cs[j].is_alphanumeric() || cs[j] == '_') {
+                        j += 1;
+                    }
+                    let w: String = cs[i..j].iter().collect();
+                    if (lt && w.len() > 1) || impl_names.contains(&w) {
+                        parts.push((w, b.clone()));
+                    }
+                    i = j;
+                } else {
+                    i += 1;
+                }
+            }
+        }
+        facts.extend(parts);
         // (types that may imply a bound of what they name: the signatures', the trait arguments, the self type)
         let mut pieces: Vec<String> = sig_type_pieces(dh).iter().map(|p| subst_names(p, &map)).collect();
         pieces.extend(sig_type_pieces(mh).iter().map(|p| subst_names(p, &[])));
@@ -10593,7 +10625,7 @@ fn stricter_impl_where(src: &str, items: &[SrcItem]) -> Option<String> {
             false
         };
         for (subj, bound) in where_bounds(mh) {
-            let subj = subst_names(&subj, &[]);
+            let subj = subst_names(&subj, &self_map);
             let mentions_own = own.iter().any(|o| word_in(&subj, o) || word_in(&bound, o));
             if mentions_own || pieces.iter().any(|p| word_in(p, &subj) && word_in(p, &bound)) {
                 continue;
