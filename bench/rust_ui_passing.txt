@@ -3058,6 +3058,7 @@ run-pass	fn/nested-function-names-issue-8587.rs
 compile-fail	fn/param-mismatch-foreign.rs
 compile-fail	fn/suggest-return-closure.rs
 compile-fail	fn/suggest-return-future.rs
+compile-fail	fn/trait-fn-generic-mismatch.rs
 run-pass	for-loop-while/auto-loop.rs
 compile-fail	for-loop-while/break-continue-in-loop-while-condition.rs
 compile-fail	for-loop-while/break-outside-loop.rs
@@ -4976,6 +4977,7 @@ compile-fail	missing/missing-items/missing-type-parameter2.rs
 compile-fail	missing/missing-let.rs
 compile-fail	missing/missing-main.rs
 compile-fail	missing/missing-return.rs
+compile-fail	missing/undeclared-generic-parameter.rs
 check-pass	modules/circular-module-imports-32797.rs
 run-pass	modules/impl-cross-module.rs
 check-pass	modules/issue-56411-aux.rs
@@ -8394,6 +8396,7 @@ run-pass	type/unit-type-basic-usages.rs
 compile-fail	type/usize-no-generic-arguments.rs
 compile-fail	type/verbose-suggestion-for-missing-fn-args.rs
 compile-fail	type/wrong-call-return-type-due-to-generic-arg.rs
+compile-fail	typeck/apit-with-error-type-in-sig.rs
 compile-fail	typeck/assign-non-lval-derefmut.rs
 compile-fail	typeck/assign-non-lval-mut-ref.rs
 compile-fail	typeck/assign-non-lval-needs-deref.rs

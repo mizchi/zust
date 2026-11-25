@@ -3157,3 +3157,21 @@ fn a_doc_comment_the_source_ends_in() {
     // (the doc comment of a `macro_rules!` the source ends in, which the expansion takes out of the text: cfg-if's)
     assert_eq!(first("fn main() {}\n/// The macro.\n#[macro_export]\nmacro_rules! m { () => {} }\n"), None);
 }
+
+#[test]
+fn types_that_nothing_declares_in_impl_headers_and_type_aliases() {
+    // (rustc 1.100's E0412 "cannot find type `B` in this scope": at the impl header (not a member that uses it), at a
+    // type alias's right-hand side (not the fn that names the alias), and in an impl with no members)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let at = |src: &str| first(src).map(|e| e.0);
+    assert_eq!(at("struct Core<T>(T);\nimpl Core<XXX> {\n    pub fn spawn(self) {}\n}\nfn main() {}\n"), Some(2));
+    assert_eq!(at("type Foo = Bar;\nfn check(f: impl FnOnce(Foo), val: Foo) {\n    f(val);\n}\nfn main() {}\n"), Some(1));
+    assert_eq!(first("struct A;\nimpl A<B> {}\nfn main() {}\n"), Some((2, "cannot find type `B` in this scope (E0412)".to_string())));
+    // (not a const generic argument's const, std's types and traits, an impl's own parameters, or `->` in a bound)
+    let ok = "struct V<const N: usize>;\nconst L: usize = 2;\ntrait Tr {}\nimpl Tr for V<L> {}\nimpl<T> Tr for Box<T> {}\n\
+              impl<'a, F: Fn(&'a i32) -> &'a i32> Tr for Option<F> {}\nimpl<'a, A> Tr for &'a (dyn for<'x> Fn(&'x A) + 'a) {}\nfn main() {}\n";
+    assert_eq!(first(ok), None);
+}

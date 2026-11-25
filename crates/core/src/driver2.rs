@@ -1918,6 +1918,9 @@ impl Session2 {
             if let Some(e) = unknown_trait_bound(&prog, &src, src0, &items, user) {
                 return Err(e);
             }
+            if let Some(e) = unknown_impl_type(&prog, &src, src0, &items, user) {
+                return Err(e);
+            }
         }
         // (E0191 at a `dyn Tr` in a type that leaves one of the trait's associated types without a value; before
         // E0038, as rustc)
@@ -9728,14 +9731,32 @@ fn name_line(e: &str, src: &str, items: &[SrcItem]) -> String {
         .find_map(|p| rest.strip_prefix(p))
         .and_then(|r| r.split('`').next());
     let (Some(name), Some(it)) = (name, items.iter().find(|it| it.line == line)) else { return e.to_string() };
-    let text = &src[it.start..it.end.min(src.len())];
-    let word = |i: usize| {
-        let before = text[..i].chars().next_back().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
-        let after = text[i + name.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
-        before && after
+    // (the line of the name as a word in an item's text)
+    let found = |it: &SrcItem| {
+        let text = src.get(it.start..it.end.min(src.len()))?;
+        let word = |i: usize| {
+            let before = text[..i].chars().next_back().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+            let after = text[i + name.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_'));
+            before && after
+        };
+        text.match_indices(name).map(|(i, _)| i).find(|&i| word(i)).map(|i| it.line + text[..i].matches('\n').count())
     };
-    match text.match_indices(name).map(|(i, _)| i).find(|&i| word(i)) {
-        Some(i) => format!("{}:1: {rest}", line + text[..i].matches('\n').count()),
+    // (a type the item does not write itself, for "cannot find type": the self type of the impl a member is in
+    // (`impl Core<XXX> { fn spawn(self) }`), or a type alias's right-hand side that the item names through the alias
+    // (`type Foo = Bar;`): rustc reports it there)
+    let elsewhere = || {
+        if !rest.starts_with("cannot find type `") {
+            return None;
+        }
+        if let crate::lexer::ItemKind::ImplMember(hi) = it.kind {
+            if let Some(l) = items.get(hi as usize).and_then(|h| found(h)) {
+                return Some(l);
+            }
+        }
+        items.iter().filter(|j| src.get(j.start..j.end).is_some_and(|t| t.trim_start().starts_with("type ") || t.trim_start().starts_with("pub type "))).find_map(|j| found(j))
+    };
+    match found(it).or_else(elsewhere) {
+        Some(l) => format!("{l}:1: {rest}"),
         None => e.to_string(),
     }
 }
@@ -11162,6 +11183,107 @@ const NON_PRELUDE_TRAITS: &[&str] = &[
     "Sum", "Product", "Pointer", "LowerHex", "UpperHex", "Binary", "Octal", "LowerExp", "UpperExp", "RangeBounds", "Termination", "Step",
     "UnwindSafe", "RefUnwindSafe", "Unsize", "CoerceUnsized", "DispatchFromDyn", "Tuple",
 ];
+
+/// A type an impl's header names that nothing declares (`impl A<B> {}`): "cannot find type `B` in this scope" (rustc
+/// 1.100's E0412), at the name. Read from the header's tokens: a capitalized name in the self type or in the trait's
+/// arguments, not the trait itself, not a path's segment (`T::A`, `E::V`), an associated type's name (`Item = ..`), a
+/// bound (after `dyn`, `impl`, `:`, `+`), a macro, `Self` or one of the impl's parameters. A single file's, with no
+/// glob `use` (a glob may bring any name); a name the program, its prelude or a `use` gives is no error
+#[cold]
+#[inline(never)]
+fn unknown_impl_type(prog: &Program, src: &str, src0: &str, items: &[SrcItem], user: usize) -> Option<String> {
+    let mut globs: Option<bool> = None;
+    let known = |n: &str| {
+        prog.struct_index.contains_key(n) || prog.aliases.contains_key(n) || prog.traits.contains_key(n) || prog.user_traits.contains(n) || prog.use_names.contains(n)
+            || matches!(n, "Box" | "Vec" | "String" | "Option" | "Result" | "Self")
+            // (std's traits: a bound past a binder, `dyn for<'x> Fn(&'x A)`)
+            || STD_TRAITS.contains(&n)
+            || prog.consts.iter().any(|c| c.name == n)
+    };
+    for it in items[..user.min(items.len())].iter().filter(|it| matches!(it.kind, crate::lexer::ItemKind::ImplHeader)) {
+        // (the header's identifiers first: one whose capitalized names are all known is not tokenized)
+        if !it.idents.iter().any(|&(a, b)| src.get(a as usize..b as usize).is_some_and(|n| n.starts_with(|c: char| c.is_ascii_uppercase()) && !known(n))) {
+            continue;
+        }
+        let text = src.get(it.start..it.end)?;
+        let tb = text.as_bytes();
+        let toks = crate::lexer::tokenize(tb);
+        let tk = |k: usize| toks.get(k).map_or("", |t| &text[t.1..t.2]);
+        let sym = |k: usize, c: u8| toks.get(k).is_some_and(|t| t.0 == 1 && t.2 == t.1 + 1 && tb[t.1] == c);
+        // (a `>` that closes an angle: not the `>` of `->` (`F: Fn(&i32) -> &i32`))
+        let close = |k: usize| sym(k, b'>') && !(k >= 1 && sym(k - 1, b'-') && toks[k - 1].2 == toks[k].1);
+        let Some(imp) = (0..toks.len()).find(|&k| toks[k].0 == 0 && tk(k) == "impl") else { continue };
+        // (the impl's own parameters: a name after `<` or `,` at depth 1, past `const`)
+        let mut params: Vec<&str> = vec![];
+        let mut k = imp + 1;
+        if sym(k, b'<') {
+            let mut d = 0i32;
+            while k < toks.len() {
+                if sym(k, b'<') {
+                    d += 1;
+                } else if close(k) {
+                    d -= 1;
+                    if d == 0 {
+                        k += 1;
+                        break;
+                    }
+                } else if d == 1 && (sym(k - 1, b'<') || sym(k - 1, b',')) && toks[k].0 == 0 {
+                    let n = if tk(k) == "const" { tk(k + 1) } else { tk(k) };
+                    params.push(n);
+                }
+                k += 1;
+            }
+        }
+        // (the trait: the first name before a `for` at depth 0)
+        let mut d = 0i32;
+        let has_for = (k..toks.len()).any(|j| {
+            if sym(j, b'<') || sym(j, b'(') || sym(j, b'[') {
+                d += 1;
+            } else if close(j) || sym(j, b')') || sym(j, b']') {
+                d -= 1;
+            }
+            d == 0 && toks[j].0 == 0 && tk(j) == "for" && !sym(j + 1, b'<')
+        });
+        let trait_at = if has_for { Some(k) } else { None };
+        while k < toks.len() && !sym(k, b'{') && tk(k) != "where" {
+            let n = tk(k);
+            let named = toks[k].0 == 0 && n.starts_with(|c: char| c.is_ascii_uppercase());
+            let skip = !named
+                || Some(k) == trait_at
+                || n == "Self"
+                || params.contains(&n)
+                || (sym(k + 1, b':') && sym(k + 2, b':'))
+                || (k >= 2 && sym(k - 1, b':') && sym(k - 2, b':'))
+                || sym(k + 1, b'!')
+                || sym(k + 1, b'=')
+                || (k >= 1 && (sym(k - 1, b':') || sym(k - 1, b'+') || matches!(tk(k - 1), "dyn" | "impl")));
+            if !skip && !known(n) {
+                // (read once: whether a `use` of the source as written is a glob)
+                if *globs.get_or_insert_with(|| src0.contains("::*") || src0.contains("::{*")) {
+                    return None;
+                }
+                // (an item of the name anywhere in the source as written: a const generic argument's const
+                // (`Print<L>`), an item in a block or a macro's; read only for a name nothing else gives)
+                let declared = ["const ", "static ", "struct ", "enum ", "union ", "type ", "trait ", "fn ", "mod "].iter().any(|kw| {
+                    src0.match_indices(kw).any(|(i, _)| {
+                        let r = &src0[i + kw.len()..];
+                        r.starts_with(n) && r[n.len()..].chars().next().is_none_or(|c| !(c.is_alphanumeric() || c == '_'))
+                    })
+                });
+                if declared {
+                    k += 1;
+                    continue;
+                }
+                let off = it.start + toks[k].1;
+                let line = src[..off].matches('\n').count() + 1;
+                let col = off - src[..off].rfind('\n').map_or(0, |p| p + 1) + 1;
+                return Some(format!("{line}:{col}: cannot find type `{n}` in this scope (E0412)"));
+            }
+            k += 1;
+        }
+    }
+    None
+}
 
 /// A trait bound of a fn of the program's (its own type parameters', inline or in its where clause, and its `impl Tr`
 /// parameters') that names no trait in scope: "cannot find trait `Nope` in this scope", at the name (rustc 1.100's
