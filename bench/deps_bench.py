@@ -1,19 +1,19 @@
-"""依存の多い複数クレートのワークスペースのビルド時間 (zustc build と cargo の比較)。
+"""Build times of a multi-crate workspace with many dependencies (zustc build compared with cargo).
 
 usage: python3 bench/deps_bench.py [--mids N] [--fns F] [--deps K] [--reps R] [--no-cargo]
 
-構成 (out/depsbench に生成する):
-  葉   : cratebench/vendor の実在のクレート (fnv / adler2 / hex / itoa / rustc-hash / cfg-if)
-  中間 : 生成したクレート m0..m{N-1}。それぞれ実在のクレート 2〜3 個と、前の中間クレート最大 K 個に依存する (DAG)。
-         F 個の関数・struct とメソッド・総称関数・trait の実装を持ち、依存するクレートの関数を呼ぶ
-  app  : どこからも使われていない中間クレートすべてに依存する bin
-場面:
-  cold      何もない状態から全部
-  noop      何も変えずにもう一度
-  low-body  いちばん下の中間クレート m0 (ほぼ全部が推移的に依存する) の関数の本体を 1 つ変える
-  low-sig   m0 の pub 関数のシグネチャを変える (使う側も直す)
-  app-body  app の main を変える
-cargo は path 依存のワークスペース (dev プロファイル: incremental あり、クレートは並列に)。zustc は既定 (Cranelift、-O なし)
+Layout (generated in out/depsbench):
+  leaf : real crates from cratebench/vendor (fnv / adler2 / hex / itoa / rustc-hash / cfg-if)
+  mid  : generated crates m0..m{N-1}. Each depends on 2 to 3 real crates and on up to K earlier mid crates (a DAG).
+         Each has F fns, structs and methods, generic fns, and trait impls, and calls the fns of the crates it depends on
+  app  : a bin that depends on all the mid crates that nothing else uses
+Scenarios:
+  cold      everything from nothing
+  noop      once more without changing anything
+  low-body  changes one fn body of the lowest mid crate m0 (which almost everything depends on transitively)
+  low-sig   changes the signature of a pub fn of m0 (the users are fixed too)
+  app-body  changes app's main
+cargo is a workspace of path dependencies (dev profile: incremental on, crates in parallel). zustc is the default (Cranelift, no -O)
 """
 import os
 import random
@@ -28,8 +28,8 @@ VENDOR = os.path.join(ROOT, "cratebench/vendor")
 
 
 def copy_crate_src(src, dst):
-    """vendor の submodule (上流のリポジトリそのまま) から、クレートのソースを dst/src/ にコピーする。
-    lib.rs がリポジトリの直下にあるもの (fnv) も src/lib.rs にそろえる"""
+    """Copies the crate's sources from the vendor submodule (the upstream repository as is) to dst/src/.
+    One whose lib.rs is at the top of the repository (fnv) is also put at src/lib.rs"""
     os.makedirs(dst, exist_ok=True)
     if os.path.isdir(os.path.join(src, "src")):
         shutil.copytree(os.path.join(src, "src"), os.path.join(dst, "src"))
@@ -38,11 +38,11 @@ def copy_crate_src(src, dst):
         shutil.copy(os.path.join(src, "lib.rs"), os.path.join(dst, "src/lib.rs"))
     else:
         raise RuntimeError(f"{src} にクレートのソースがない (git submodule update --init cratebench/vendor)")
-# (名前, edition, feature, クレート名)
+# (name, edition, features, crate name)
 REAL = [("fnv", "2015", ["std"], "fnv"), ("adler2", "2021", ["std"], "adler2"), ("hex", "2018", ["std", "alloc"], "hex"),
         ("itoa", "2021", [], "itoa"), ("rustc-hash", "2021", ["std"], "rustc_hash"), ("cfg-if", "2018", [], "cfg_if")]
 
-# 実在のクレートを使う式 (x: u64 から u64)
+# An expression that uses the real crate (u64 from x: u64)
 USES = {
     "fnv": "{ let mut h = fnv::FnvHasher::default(); h.write(&x.to_le_bytes()); h.finish() }",
     "rustc_hash": "{ let mut h = rustc_hash::FxHasher::with_seed(7); h.write_u64(x); h.finish() }",
@@ -98,7 +98,7 @@ def gen(d, mids, fns, k):
                 body.append(f"    if x % 3 == 0 {{ s = s.wrapping_mul(f{i}_{j - 1}(x / 3) | 1); }}")
             body += ["    s", "}", ""]
             src += body
-        # (外から使う入口: 依存する中間クレートの struct / trait も使う)
+        # (the entry point used from outside: also uses the structs / traits of the mid crates it depends on)
         src += [f"pub fn run{i}(n: u64) -> u64 {{", f"    let mut a = Acc{i}::new();", "    let mut k = 0;", "    while k < n {",
                 f"        a.push(f{i}_{fns - 1}(k));", "        k += 1;", "    }", "    let mut s = a.score();"]
         for p in prev:
@@ -176,7 +176,7 @@ def main():
                 "cold": None,
                 "noop": None,
                 "low-body": lambda r=rep: edit(m0, "let mut s = x.wrapping_add(3);", f"let mut s = x.wrapping_add({1003 + r});"),
-                # (m0 の最後の関数に引数を足し、m0 の中と使う側の呼び出しを直す)
+                # (add a parameter to m0's last fn, and fix the calls inside m0 and on the user side)
                 "low-sig": lambda: sig_edit(d, opt["--mids"], fns),
                 "app-body": lambda r=rep: edit(main_rs, "let mut s = std::env::args().count() as u64;",
                                                f"let mut s = std::env::args().count() as u64 + {r + 1};"),
@@ -201,7 +201,7 @@ def main():
 
 
 def sig_edit(d, mids, fns):
-    """m0 の f0_{fns-1} に引数を足す (呼んでいる所: m0 の run0 と、m0 に依存する中間クレートの f*_{fns-1})"""
+    """Adds a parameter to m0's f0_{fns-1} (the callers: m0's run0, and the f*_{fns-1} of the mid crates that depend on m0)"""
     j = fns - 1
     for i in range(mids):
         p = os.path.join(d, f"m{i}/src/lib.rs")

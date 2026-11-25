@@ -1,4 +1,4 @@
-// trait とジェネリクス (単相化) のサンプル (rustc でもそのままコンパイルできる)
+// A sample of traits and generics (monomorphization) (compiles with rustc as it is too)
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }
@@ -29,7 +29,7 @@ fn println_i64(n: i64) {
 trait Shape {
     fn area(&self) -> i64;
     fn perimeter(&self) -> i64;
-    // デフォルトメソッド: 実装する型ごとに単相化される
+    // Default method: monomorphized for each implementing type
     fn score(&self) -> i64 {
         self.area() * 10 + self.perimeter()
     }
@@ -75,7 +75,7 @@ impl Shape for Rect {
     fn perimeter(&self) -> i64 {
         2 * (self.w + self.h)
     }
-    // デフォルトを上書き
+    // Overrides the default
     fn score(&self) -> i64 {
         -1
     }
@@ -114,7 +114,7 @@ impl Rect {
     }
 }
 
-// ジェネリック関数: T ごとにインスタンスが作られる
+// Generic fn: an instance is made for each T
 fn total_area<T: Shape>(a: &T, b: &T) -> i64 {
     a.area() + b.area()
 }
@@ -131,7 +131,7 @@ fn larger<T: Shape + Copy>(a: T, b: T) -> T {
 }
 
 fn twice<T: Shape>(x: &T) -> i64 {
-    // ジェネリック関数から別のジェネリック関数を呼ぶ (インスタンスが連鎖する)
+    // Calls another generic fn from a generic fn (instances chain)
     total_area(x, x)
 }
 
@@ -147,7 +147,7 @@ fn main() {
 
     println_i64(s.area()); // 9
     println_i64(s.score()); // 90 + 12 = 102
-    println_i64(r.score()); // -1 (上書き)
+    println_i64(r.score()); // -1 (overridden)
     println_i64(t.score()); // 60 + 11 = 71
     println_i64(e.perimeter()); // 30
     println_i64(if s.bigger_than(8) { 1 } else { 0 }); // 1

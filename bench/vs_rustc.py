@@ -1,15 +1,15 @@
-"""zustc と本物の rustc を同じプログラム・同じ手順で比べ、表 (Markdown) にする。
-usage: python3 bench/vs_rustc.py [NAME ...]   (このディレクトリで実行。事前に cargo build --release)
-  NAME は gen1000 (bench/gen.py の 1000 関数) か bench/rt/NAME.rs。省略するとすべて。
+"""Compares zustc and the real rustc on the same programs with the same steps, and makes a table (Markdown).
+usage: python3 bench/vs_rustc.py [NAME ...]   (run in this directory; cargo build --release beforehand)
+  NAME is gen1000 (the 1000 fns of bench/gen.py) or bench/rt/NAME.rs. All of them if omitted.
 
-各プログラムで次を測る (時間は 3 回の中央値):
-  cold    キャッシュも incremental ディレクトリもない状態からのビルド
-  no-op   何も変えずにもう一度ビルド
-  edit    1 か所変えてビルド (gen1000 は f500 の本体、bench/rt は末尾に足した関数の定数)
-  disk    ビルドが残すもの (zustc: キャッシュ + .o、rustc: incremental ディレクトリ)
-  binary  出力の大きさ (strip 後)、run 実行時間 (出力は rustc -O と一致するか確かめる)
-比べる設定: zustc (debug, 既定のリンカ。wild が PATH にあれば wild)、zustc -O、
-rustc -Cincremental (debug)、rustc -O (非 incremental)"""
+For each program, measures the following (times are the median of 3 runs):
+  cold    a build from a state with neither a cache nor an incremental directory
+  no-op   build again without changing anything
+  edit    build after changing one spot (the body of f500 for gen1000, a constant in the fn appended at the end for bench/rt)
+  disk    what the build leaves behind (zustc: cache + .o, rustc: the incremental directory)
+  binary  the size of the output (after strip); run: the run time (the output is checked to match rustc -O)
+Configurations compared: zustc (debug, the default linker; wild if wild is on PATH), zustc -O,
+rustc -Cincremental (debug), rustc -O (non-incremental)"""
 import os, shutil, statistics, subprocess, sys, time
 
 ZUSTC = os.path.abspath("target/release/zustc")
@@ -40,7 +40,7 @@ def source(name, variant):
         return subprocess.run([sys.executable, "bench/gen.py", str(n), str(variant)],
                               capture_output=True, text=True, check=True).stdout
     src = open(f"bench/rt/{name}.rs").read()
-    # (編集: 末尾の、どこからも呼ばれない関数の定数を変える)
+    # (edit: change the constant of the fn at the end that nothing calls)
     return src + f"\n#[allow(dead_code)]\nfn __bench_edit() -> u64 {{ {variant} }}\n"
 
 
@@ -80,7 +80,7 @@ def bench(name):
         run(build)
         r = statistics.median(run([exe])[0] for _ in range(3))
         out = run([exe])[1]
-        # (zustc の出力はシンボルを持たない。rustc の出力は std のシンボルとデバッグ情報を含むので strip した大きさで比べる)
+        # (zustc's output has no symbols; rustc's output includes std's symbols and debug info, so compare the stripped sizes)
         subprocess.run(["strip", "-o", exe + ".strip", exe], check=True)
         rows.append((label, c, noop, e, du(*store), os.path.getsize(exe + ".strip"), r, out))
 

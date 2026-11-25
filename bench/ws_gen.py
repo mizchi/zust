@@ -1,11 +1,11 @@
-"""複数クレート・複数ファイルのワークスペースを作る (session の `zustc build` と rustc の比較用)。
+"""Generates a multi-crate, multi-file workspace (for comparing session's `zustc build` with rustc).
 
 usage: python3 bench/ws_gen.py <dir> [--crates K] [--files F] [--fns N]
 
-- lib c0..c{K-1}: c{i} は c{i-1} と c0 に依存する。各クレートは lib.rs + F 個のモジュールのファイル (m{j}.rs)、
-  ファイルごとに N 個の関数・struct・総称関数・trait の impl
-- bin app: 全部のクレートに依存し、各クレートの run を呼んで合計を出す
-- workspace.txt (zustc build 用) と build_rustc.sh (rustc で同じものを rlib + リンクで作る)
+- lib c0..c{K-1}: c{i} depends on c{i-1} and c0. Each crate is lib.rs + F module files (m{j}.rs),
+  with N fns, structs, generic fns and trait impls per file
+- bin app: depends on all the crates, calls each crate's run and prints the sum
+- workspace.txt (for zustc build) and build_rustc.sh (makes the same thing with rustc as rlibs + linking)
 """
 import os
 import sys

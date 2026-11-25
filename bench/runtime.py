@@ -1,12 +1,12 @@
-"""zustc と rustc で、実行時間・ビルド時間・バイナリサイズを比べる (bench/rt/*.rs)。
-usage: python3 bench/runtime.py [NAME ...]   (このディレクトリで実行。事前に cargo build --release)
-各設定でビルド 3 回・実行 3 回の中央値。出力が rustc -O と一致するかも確かめる。"""
+"""Compares run time, build time and binary size between zustc and rustc (bench/rt/*.rs).
+usage: python3 bench/runtime.py [NAME ...]   (run in this directory; cargo build --release beforehand)
+The median of 3 builds / 3 runs for each configuration. Also checks that the output matches rustc -O."""
 import os, shutil, statistics, subprocess, sys, time
 
 ZUSTC = os.path.abspath("target/release/zustc")
 W = os.path.abspath("out/runtime")
-# (既定は session (自前のフロントエンド) + Cranelift。--backend=minclif で minclif。
-#  MINCLIF_NO_REGALLOC は minclif のレジスタ割り当てなし)
+# (the default is session (our own frontend) + Cranelift; minclif with --backend=minclif;
+#  MINCLIF_NO_REGALLOC is minclif without register allocation)
 CONFIGS = [
     ("minclif -O (割り当てなし)", lambda s, o: ["env", "MINCLIF_NO_REGALLOC=1", ZUSTC, s, "-o", o, "--backend=minclif", "-O", "--no-cache"]),
     ("minclif -O", lambda s, o: [ZUSTC, s, "-o", o, "--backend=minclif", "-O", "--no-cache"]),
@@ -26,7 +26,7 @@ def timed(cmd, out=subprocess.DEVNULL):
 def bench(name):
     src = os.path.abspath(f"bench/rt/{name}.rs")
     rows, want = [], None
-    for label, mk in reversed(CONFIGS):  # rustc -O の出力を正解にする
+    for label, mk in reversed(CONFIGS):  # take rustc -O's output as the correct one
         exe = os.path.join(W, f"{name}-{abs(hash(label)) % 10**8}")
         builds = [timed(mk(src, exe))[0] for _ in range(3)]
         runs, out = [], None
@@ -35,7 +35,7 @@ def bench(name):
             runs.append(ms)
         if want is None:
             want = out
-        # (rustc のバイナリは std のデバッグ情報とシンボルを含むので、strip した大きさも出す)
+        # (rustc's binaries include std's debug info and symbols, so the stripped size is shown too)
         subprocess.run(["strip", "-o", exe + ".s", exe], check=True)
         rows.append((label, statistics.median(builds), os.path.getsize(exe), os.path.getsize(exe + ".s"),
                      statistics.median(runs), out == want))

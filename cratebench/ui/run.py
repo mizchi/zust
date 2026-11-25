@@ -1,19 +1,19 @@
-"""Rust の UI フレームワーク (dioxus / leptos) を、wasm32 向けに依存するクレートの葉から順に zustc でビルドする。
+"""Builds Rust UI frameworks (dioxus / leptos) for wasm32 with zustc, in order from the leaves of the crates they depend on.
 
-usage: python3 cratebench/ui/run.py [APP ...] [--rustc]   (リポジトリの根で。事前に cargo build --release --workspace)
-  APP: apps/ の名前 (dioxus / leptos)。省くとすべて
-  --rustc: 先に cargo build --target wasm32-unknown-unknown で、rustc ならビルドできることを確かめる
+usage: python3 cratebench/ui/run.py [APP ...] [--rustc]   (at the repository root; cargo build --release --workspace beforehand)
+  APP: a name in apps/ (dioxus / leptos). All of them if omitted
+  --rustc: first checks with cargo build --target wasm32-unknown-unknown that rustc can build it
 
-クレートの一覧は `zurgo metadata --filter-platform wasm32-unknown-unknown` (Cargo.lock の版、解決された feature。
-`cargo metadata` と同じもの)。cargo はソースを取ってくる (`cargo fetch`) のにだけ使う。
-wasm に入るクレート (proc-macro を通らずに app から届くもの) だけをビルドする。proc-macro とそれが使うクレートは
-ホストで動くもので、zustc には proc-macro を動かす仕組みがないので数えるだけ。
-各クレートは、推移的な依存 (lib) と自分のワークスペース (ws.txt) にして `zustc build` する。依存のどれかが
-通らなければ、そのクレートはビルドせず blocked とする。`--target wasm32-unknown-unknown` でビルドする (cfg も
-wasm32 のもの。bin はモジュール `<名前>.wasm`)。`env!` には cargo の変数 (`CARGO_PKG_*` など) を渡す。
-ビルドスクリプトは、build-dependencies のないものだけ rustc でホスト向けにビルドして cargo と同じ変数で動かし、
-出力の `rustc-cfg` / `rustc-env` と OUT_DIR をそのクレートに渡す (out/cratebench-ui/<APP>/build/)。
-結果は out/cratebench-ui/<APP>/ (クレートごとの ws.txt と err.txt、results.json)。
+The crate list is `zurgo metadata --filter-platform wasm32-unknown-unknown` (Cargo.lock versions, resolved features;
+the same as `cargo metadata`). cargo is used only to fetch sources (`cargo fetch`).
+Only the crates that go into the wasm (those reached from the app without passing through a proc-macro) are built. proc-macros and the crates they use
+run on the host, and zustc has no way to run proc-macros, so they are only counted.
+Each crate is made into its transitive dependencies (lib) and its own workspace (ws.txt) and built with `zustc build`. If any of its dependencies
+fails, that crate is not built and is marked blocked. It is built with `--target wasm32-unknown-unknown` (cfg is also
+wasm32's; a bin is the module `<name>.wasm`). `env!` gets cargo's variables (`CARGO_PKG_*`, etc.).
+Build scripts: only those without build-dependencies are built with rustc for the host and run with the same variables as cargo, and
+their output `rustc-cfg` / `rustc-env` and OUT_DIR are passed to that crate (out/cratebench-ui/<APP>/build/).
+Results are in out/cratebench-ui/<APP>/ (ws.txt and err.txt per crate, results.json).
 """
 import json
 import os
@@ -170,7 +170,7 @@ def ws_escape(s):
 
 
 def graph(meta):
-    """クレート (id → 情報) と、wasm に入るもの (依存の順、app が最後) と、ホストで動くもの"""
+    """Crates (id → info), the ones that go into the wasm (in dependency order, app last), and the ones that run on the host"""
     pk = {p["id"]: p for p in meta["packages"]}
     nodes = {n["id"]: n for n in meta["resolve"]["nodes"]}
     root = meta["resolve"]["root"]
@@ -232,7 +232,7 @@ def sweep(app):
         res[i] = r
         if bad:
             continue
-        # (2 つの版のあるクレートは、ワークスペースでは名前が 1 つなので、依存の順で後のもの (近いもの) を使う)
+        # (For a crate with 2 versions, the workspace has only one name, so use the later one in dependency order (the closer one))
         ws = {}
         script_fail = None
         for j in deps + [i]:
@@ -271,7 +271,7 @@ def sweep(app):
         r["first"] = next((l for l in err.splitlines() if l.startswith("error")), err.splitlines()[0] if err else "")
     with open(os.path.join(out, "results.json"), "w") as h:
         json.dump(res, h, indent=1)
-    # (通らないクレートの上にある (それに推移的に依存する) クレートの数: 直す順の目安)
+    # (The number of crates above a failing crate (that depend on it transitively): a guide for the order of fixes)
     above = {i: 0 for i in order}
     for i in order:
         for j in closure(C, i, tset):

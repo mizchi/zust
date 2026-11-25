@@ -1,17 +1,17 @@
-//! 定義へのジャンプと参照 (LSP の textDocument/definition / references)。
-//! 構文木と型推論を使わず、字句の列とシンボルの一覧 (symbols) から引く: 速く、編集の途中の壊れたソースでも動く。
-//! 一つに決まらないときは答えない (違う所へ飛ぶより、飛ばない方がよい)。
+//! Go to definition and references (LSP textDocument/definition / references).
+//! Looked up from the token list and the list of symbols (symbols) without the syntax tree or type inference: fast, and works even on source broken in the middle of an edit.
+//! No answer when it does not come down to one (better not to jump than to jump to the wrong place).
 //!
-//! カーソルの識別子が何を指すか:
-//! - 定義の名前の上なら、その定義
-//! - ローカル (関数の中の let / 引数 / クロージャの引数 / for / if let / while let / match の腕のパターン): ブロックの
-//!   有効範囲をたどって、カーソルより前でいちばん近い束縛
-//! - パス `A::b`: A を型 (struct / enum / trait / type)・モジュール・`Self` として、そのメンバ (バリアント・impl の中・
-//!   モジュールの中のアイテム) の b
-//! - メソッド・フィールド `x.b`: x が `self` なら囲む impl の型、ローカルなら束縛の型注釈・`T::..` / `T { .. }` の初期化・
-//!   引数の型から型を決め、その型のメンバの b。型が分からなければ、ワークスペースで一つだけのとき
-//! - そのほかの名前: 同じモジュール → `use` で取り込んだもの → ワークスペースで一つだけ
-//! 参照は、同じ名前の識別子のうち、同じ定義に解決されるもの
+//! What the identifier at the cursor refers to:
+//! - on the name of a definition: that definition
+//! - a local (let / parameter / closure parameter / for / if let / while let / match arm pattern in a fn): following the
+//!   scopes of the blocks, the nearest binding before the cursor
+//! - a path `A::b`: with A as a type (struct / enum / trait / type), a module or `Self`, the b among its members (variants, the inside of impls,
+//!   items in the module)
+//! - a method / field `x.b`: if x is `self`, the type of the enclosing impl; for a local, the type is decided from the binding's type annotation, the `T::..` / `T { .. }` initializer
+//!   or the parameter's type, then the b among that type's members. If the type is unknown, when it is the only one in the workspace
+//! - other names: the same module → what `use` brought in → the only one in the workspace
+//! References are the identifiers of the same name that resolve to the same definition
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -20,81 +20,81 @@ use zust_syntax::fxhash::{FxMap, FxSet};
 use zust_syntax::lexer::tokenize;
 use crate::symbols::{SymKind, Symbol, document_symbols};
 
-/// 定義 (シンボルを平らにして、持ち主とモジュールを付けたもの)
+/// A definition (a symbol flattened, with its owner and module attached)
 #[derive(Clone, Debug)]
 pub struct Def {
     pub name: String,
     pub kind: SymKind,
-    /// メンバの持ち主の型・trait の名前 (impl なら self 型、enum のバリアントなら enum)。トップレベルのアイテムは空
+    /// The name of the type / trait owning the member (the self type for an impl, the enum for an enum variant). Empty for top-level items
     pub owner: String,
-    /// 囲むもの (表示用: `impl Point` / モジュール / struct の名前)
+    /// The enclosing thing (for display: `impl Point` / a module / a struct name)
     pub container: Arc<str>,
-    /// 囲むモジュール (ファイルのモジュールのパスの後ろに、ファイルの中の `mod x { .. }`)
+    /// The enclosing module (the file's module path followed by the `mod x { .. }` in the file)
     pub module: Arc<[String]>,
-    /// 名前と、アイテム全体の byte 範囲
+    /// The byte ranges of the name and of the whole item
     pub start: usize,
     pub end: usize,
     pub item_start: usize,
     pub item_end: usize,
-    /// 型の頭の名前: フィールド・const・static はその型、関数・メソッドは戻り値の型、型の別名は右の型 (`&mut Vec<T>` → Vec)
+    /// The head name of the type: the type for a field / const / static, the return type for a fn / method, the right-hand type for a type alias (`&mut Vec<T>` → Vec)
     pub ty: String,
-    /// 型の別名の型引数の名前 (`type R<T> = Result<T, E>` → [T])
+    /// The names of a type alias's type parameters (`type R<T> = Result<T, E>` → [T])
     pub params: Vec<String>,
-    /// 関数・メソッドの引数のうちクロージャを取るもの: (引数の番号 (self を除く), 型引数の名前 (`F`、`impl Fn` なら空),
-    /// クロージャの戻り値の形 (`U` / `Option<B>`), クロージャの引数の形 (`T` / `&Self::Item` / `B, Self::Item`))。
+    /// The parameters of a fn / method that take a closure: (parameter index (excluding self), type parameter name (`F`, empty for `impl Fn`),
+    /// the closure's return shape (`U` / `Option<B>`), the closure's parameter shape (`T` / `&Self::Item` / `B, Self::Item`)).
     /// `fn map<U, F: FnOnce(T) -> U>(self, f: F) -> Option<U>` → [(0, F, U, T)]
     pub fnret: Vec<(u8, String, String, String)>,
-    /// メソッドが self を取るか (`.` の後の補完に出すもの)
+    /// Whether the method takes self (the ones offered in completion after `.`)
     pub has_self: bool,
-    /// slim のとき (本文を捨てたとき): 名前の両端の (行, UTF-16 の桁)
+    /// When slim (the text was dropped): (line, UTF-16 column) of both ends of the name
     pub pos: [u32; 4],
 }
 
-/// ファイル 1 つ分の索引
+/// The index of one file
 pub struct FileIndex {
     pub text: String,
-    /// ライブラリ (std / core / alloc) のファイル: 定義だけを持つ (字句の列は持たない)。ワークスペースに候補がないときだけ使う
+    /// A library (std / core / alloc) file: holds only definitions (no token list). Used only when the workspace has no candidate
     pub lib: bool,
-    /// パッケージの本体のクレート (src の lib / main / bin) のファイルか。tests・examples・benches・build.rs のクレートの
-    /// アイテムは、同じクレート (krate) の中からしか見えない
+    /// Whether it is a file of the package's main crate (lib / main / bin in src). Items of the tests / examples / benches / build.rs crates
+    /// are visible only from inside the same crate (krate)
     pub in_src: bool,
-    /// ターゲットのクレートの番号 (同じ番号のファイルどうしは見える)
+    /// The number of the target crate (files with the same number see each other)
     pub krate: u32,
-    /// ファイルのモジュールのパス (ワークスペースの中で: `src/a/b.rs` → [a, b])
+    /// The file's module path (within the workspace: `src/a/b.rs` → [a, b])
     pub module: Vec<String>,
     pub defs: Vec<Def>,
-    /// (種類, 始め, 終わり)。u32 で持つ (ワークスペースの全ファイルの分を持つので小さく)
+    /// (kind, start, end). Held as u32 (small, since it is held for every file in the workspace)
     toks: Vec<(u8, u32, u32)>,
-    /// 名前 → その識別子のトークンの番号
+    /// Name → the indices of the tokens of that identifier
     idents: FxMap<String, Vec<u32>>,
-    /// `use` で取り込んだもの: (このファイルでの名前 (glob なら "*"), パス)
+    /// What `use` brought in: (the name in this file ("*" for a glob), path)
     uses: Vec<(String, Vec<String>)>,
-    /// uses のそれぞれの、パスの最後の名前の byte 位置 (glob は usize::MAX)
+    /// For each of uses, the byte position of the last name of the path (usize::MAX for a glob)
     use_at: Vec<usize>,
-    /// `macro_rules!` の本体の byte 範囲 (関数の中のものも)
+    /// The byte ranges of `macro_rules!` bodies (including the ones in fns)
     macros: Vec<(usize, usize)>,
-    /// 定義の名前のハッシュと defs の番号 (ハッシュの順): 名前で定義を引くのに二分探索で
+    /// The hashes of definition names and the defs indices (in hash order): for looking up definitions by name with a binary search
     name_ix: Vec<(u64, u32)>,
-    /// 持ち主の名前のハッシュと defs の番号 (ハッシュの順): `.` の後の補完で持ち主ごとに引く
+    /// The hashes of owner names and the defs indices (in hash order): looked up per owner for completion after `.`
     owner_ix: Vec<(u64, u32)>,
-    /// workspace/symbol に出す use: 別名 `use a::B as C` (C) と再エクスポート `pub use a::B` (B)。
-    /// (名前, 行, UTF-16 の桁, 名前の長さ (UTF-16)) (slim にしても残す)
+    /// The uses shown in workspace/symbol: aliases `use a::B as C` (C) and re-exports `pub use a::B` (B).
+    /// (name, line, UTF-16 column, name length (UTF-16)) (kept even when made slim)
     pub use_syms: Vec<(String, u32, u32, u32)>,
-    /// 本文と字句の列を捨てたもの (ライブラリと、メモリから外したワークスペースのファイル)。定義と use と名前の集合だけ
+    /// The text and the token list were dropped (libraries, and workspace files taken out of memory). Only definitions, uses and the set of names
     pub slim: bool,
-    /// (self 型の頭, trait の頭): `impl Tr for S` と `#[derive(Tr)] struct S`
+    /// (head of the self type, head of the trait): `impl Tr for S` and `#[derive(Tr)] struct S`
     pub impls: Vec<(String, String)>,
-    /// `#[derive(Tr)] struct S` の (S, Tr, Tr の名前の byte 位置)
+    /// (S, Tr, byte position of Tr's name) of `#[derive(Tr)] struct S`
     pub derives: Vec<(String, String, u32)>,
-    /// cfg で外れたアイテムの byte 範囲 (apply_cfg で決める。中の定義は defs から除く)
+    /// The byte ranges of items excluded by cfg (decided in apply_cfg; the definitions inside are removed from defs)
     inactive: Vec<(usize, usize)>,
-    /// apply_cfg に渡した有効な feature (読み直したときにもう一度当てる)
+    /// The enabled features passed to apply_cfg (applied again when reloaded)
     features: Option<Vec<String>>,
-    /// slim のとき: 出てくる識別子の名前のハッシュ (整列済み。参照を探すときに読み直すファイルを選ぶ)
+    /// When slim: the hashes of the names of the identifiers that occur (sorted; for choosing the files to reload when searching references)
     names: Vec<u64>,
 }
 
-/// ファイルの中の位置 (ws の番号, 名前の byte 範囲)
+/// A position in a file (ws index, byte range of the name)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Loc {
     pub file: usize,
@@ -102,7 +102,7 @@ pub struct Loc {
     pub end: usize,
 }
 
-/// 文字列のリテラルの中の `{name}` / `{name:..}` (書式の引数の取り込み) の (リテラルの中の byte 位置, 名前)
+/// (byte position in the literal, name) of each `{name}` / `{name:..}` (captured format argument) in a string literal
 fn captures(lit: &str) -> Vec<(usize, &str)> {
     let b = lit.as_bytes();
     let mut out = vec![];
@@ -129,7 +129,7 @@ fn captures(lit: &str) -> Vec<(usize, &str)> {
     out
 }
 
-/// 名前の後 (byte at から) の型引数の宣言 `<'a, T: X, const N: usize>` の型の引数の名前 ([T, N])
+/// The names of the type parameters ([T, N]) of the generics declaration `<'a, T: X, const N: usize>` after a name (from byte at)
 fn generic_names(text: &str, at: usize) -> Vec<String> {
     let rest = text.get(at..).unwrap_or("");
     let r = rest.trim_start();
@@ -159,10 +159,10 @@ fn generic_names(text: &str, at: usize) -> Vec<String> {
         .collect()
 }
 
-/// 関数のシグネチャ `fn m<B, F: FnMut(T) -> B>(self, x: u8, f: F) -> R where F: ..` の、クロージャを取る引数
-/// (引数の番号 (self を除く), 型引数の名前, クロージャの戻り値の形)
+/// The parameters that take a closure in a fn signature `fn m<B, F: FnMut(T) -> B>(self, x: u8, f: F) -> R where F: ..`
+/// (parameter index (excluding self), type parameter name, the closure's return shape)
 fn fn_bounds(sig: &str) -> Vec<(u8, String, String, String)> {
-    // (型引数 `<..>` と where の中の `X: Fn*(..) -> R` / `X: Fn*(..)`: (X, 戻り値, 引数))
+    // (`X: Fn*(..) -> R` / `X: Fn*(..)` in the type parameters `<..>` and in where: (X, return, parameters))
     let mut bounds: Vec<(String, String, String)> = vec![];
     let fn_ret = |b: &str| -> Option<(String, String)> {
         let b = b.trim().trim_start_matches("[const]").trim_start_matches("~const").trim();
@@ -171,7 +171,7 @@ fn fn_bounds(sig: &str) -> Vec<(u8, String, String, String)> {
         if !rest.starts_with('(') {
             return None;
         }
-        // (対応する `)` の後の `-> R`)
+        // (the `-> R` after the matching `)`)
         let mut d = 0;
         let mut e = None;
         for (i, c) in rest.char_indices() {
@@ -188,13 +188,13 @@ fn fn_bounds(sig: &str) -> Vec<(u8, String, String, String)> {
                 _ => {}
             }
         }
-        // (閉じていない (長いシグネチャを `…` で切ったもの) なら分からない)
+        // (unknown if not closed (a long signature cut off with `…`))
         let e = e?;
         let args = rest.get(1..e - 1)?.trim().to_string();
         let after = rest[e..].trim_start();
         Some((args, match after.strip_prefix("->") {
             Some(r) => {
-                // (戻り値の型は次の `+` / `,` (深さ 0) まで)
+                // (the return type runs up to the next `+` / `,` (at depth 0))
                 let r = r.trim();
                 let mut d = 0;
                 let mut end = r.len();
@@ -257,7 +257,7 @@ fn fn_bounds(sig: &str) -> Vec<(u8, String, String, String)> {
                 }
             }
         }
-        // (`>` の後の `(`)
+        // (the `(` after `>`)
         let mut d = 0;
         let mut cut = rest.len();
         for (i, c) in rest.char_indices() {
@@ -286,7 +286,7 @@ fn fn_bounds(sig: &str) -> Vec<(u8, String, String, String)> {
             }
         }
     }
-    // (引数の並び)
+    // (the parameter list)
     let Some(inner) = rest.strip_prefix('(') else { return vec![] };
     let mut d = 0;
     let mut e = inner.len();
@@ -324,10 +324,10 @@ fn fn_bounds(sig: &str) -> Vec<(u8, String, String, String)> {
         } else if let Some((_, r, a)) = bounds.iter().find(|(n, _, _)| n == ty.trim_start_matches("&mut ").trim_start_matches('&')) {
             out.push((idx, ty.to_string(), r.clone(), a.clone()));
         } else if gnames.iter().any(|g| g == ty) || (ty.len() == 1 && ty.starts_with(|c: char| c.is_ascii_uppercase())) {
-            // (`other: U` のような型引数そのものの引数: 呼び出しの引数の式の型で決まる。印は "=")
+            // (a parameter whose type is a type parameter itself, like `other: U`: decided by the type of the call's argument expression. The mark is "=")
             out.push((idx, ty.to_string(), "=".to_string(), String::new()));
         } else if let Some(t) = ty.strip_prefix("&mut ").or_else(|| ty.strip_prefix('&')).map(|t| t.trim()).filter(|t| gnames.iter().any(|g| g == t)) {
-            // (`dest: &mut T` (`mem::take`): 引数の参照の先の型。4 つめに参照の印)
+            // (`dest: &mut T` (`mem::take`): the type behind the argument's reference. A reference mark in the 4th)
             out.push((idx, t.to_string(), "=".to_string(), "&".to_string()));
         }
         idx += 1;
@@ -335,7 +335,7 @@ fn fn_bounds(sig: &str) -> Vec<(u8, String, String, String)> {
     out
 }
 
-/// `impl Tr for S<T>` / `impl S` の self 型の名前 (`S`)
+/// The name of the self type (`S`) of `impl Tr for S<T>` / `impl S`
 fn impl_self(name: &str) -> String {
     let n = name.strip_prefix("impl ").unwrap_or(name);
     let n = match n.rfind(" for ") {
@@ -352,15 +352,15 @@ impl FileIndex {
         let toks: Vec<(u8, u32, u32)> = tokenize(text.as_bytes()).into_iter().map(|(a, b, c)| (a, b as u32, c as u32)).collect();
         let syms = document_symbols(&text);
         let mut defs = vec![];
-        // (囲むもの・モジュールのパスは同じものを共有する: ライブラリや大きいワークスペースの定義の数だけ持つので)
+        // (the containers and module paths are shared: since one is held for each definition of libraries and large workspaces)
         fn walk(text: &str, v: &[Symbol], owner: &str, container: &Arc<str>, module: &Arc<[String]>, outer: &[String], out: &mut Vec<Def>) {
             for s in v {
-                // (`extern "C" { .. }` のブロック: 中の宣言はそのままこの階層のアイテム)
+                // (an `extern "C" { .. }` block: the declarations inside are items of this level as they are)
                 if s.kind == SymKind::Extern {
                     walk(text, &s.children, owner, container, module, outer, out);
                     continue;
                 }
-                // (型引数の名前: 型の別名はその型引数、struct / enum / union はその型引数、フィールド・バリアントは持ち主の型の)
+                // (type parameter names: a type alias's own, a struct / enum / union's own, and for a field / variant those of the owner type)
                 let params = match s.kind {
                     SymKind::TypeAlias => alias_parts(&s.detail).0,
                     SymKind::Struct | SymKind::Enum | SymKind::Union => generic_names(text, s.name_end),
@@ -383,7 +383,7 @@ impl FileIndex {
                             SymKind::TypeAlias => alias_parts(&s.detail).1,
                             SymKind::Function | SymKind::Method => {
                                 let t = ret_type(&s.detail);
-                                // (impl の中の Self は impl の self 型)
+                                // (Self inside an impl is the impl's self type)
                                 if container.starts_with("impl") { subst(&t, &["Self".to_string()], &[impl_self_full(&container[..]).to_string()]) } else { t }
                             }
                             SymKind::Variant => owner.to_string(),
@@ -393,7 +393,7 @@ impl FileIndex {
                         fnret: if matches!(s.kind, SymKind::Function | SymKind::Method) {
                             fn_bounds(&s.detail)
                         } else if s.kind == SymKind::Struct {
-                            // (タプル構造体 `struct P<'a>(A, B);`: フィールドの書き方を (255, "", "A, B", ""))
+                            // (a tuple struct `struct P<'a>(A, B);`: the way its fields are written as (255, "", "A, B", ""))
                             let after = text.get(s.name_end..s.end).unwrap_or("");
                             let a = after.trim_start();
                             let a = if a.starts_with('<') { close_angle(a).map(|c| &a[c + 1..]).unwrap_or("") } else { a };
@@ -402,15 +402,15 @@ impl FileIndex {
                                 None => vec![],
                             }
                         } else if s.kind == SymKind::Macro {
-                            // (macro_rules! の結果の型の手がかり (本文を捨てたライブラリでも使えるように): 本体の多くが
-                            // `$crate::T::..` (`json_internal!` → Value) なら T、本体が別のマクロ `$crate::m!(..)` だけなら "!m")
+                            // (a hint at the result type of a macro_rules! (so that it can be used even in libraries whose text was dropped): if most of the body is
+                            // `$crate::T::..` (`json_internal!` → Value), T; if the body is only another macro `$crate::m!(..)`, "!m")
                             match macro_hint(text.get(s.start..s.end).unwrap_or("")) {
                                 Some(h) => vec![(255, String::new(), h, String::new())],
                                 None => vec![],
                             }
                         } else if s.kind == SymKind::Variant {
-                            // (タプルのバリアント `V(A, B)`: フィールドの書き方を (255, "", "A, B", "") に。本文を捨てたライブラリでも
-                            // パターンのフィールドの型が分かるように)
+                            // (a tuple variant `V(A, B)`: the way its fields are written goes into (255, "", "A, B", ""), so that even in libraries whose text was dropped
+                            // the types of a pattern's fields are known)
                             match text.get(s.start..s.end).filter(|_| text.get(s.name_end..).is_some_and(|r| r.trim_start().starts_with('('))).and_then(|v| Some((v.find('(')?, v.rfind(')')?))).filter(|(a, b)| a < b) {
                                 Some((a, b)) => vec![(255, String::new(), text[s.start + a + 1..s.start + b].to_string(), String::new())],
                                 None => vec![],
@@ -433,7 +433,7 @@ impl FileIndex {
                         m.push(s.name.clone());
                         walk(text, &s.children, "", &c, &Arc::from(m), &[], out);
                     }
-                    // (関数の本体の中のアイテム: 持ち主のないアイテム)
+                    // (items in a fn body: items without an owner)
                     SymKind::Function | SymKind::Method => walk(text, &s.children, "", &c, module, &[], out),
                     _ => walk(text, &s.children, &s.name, &c, module, &params, out),
                 }
@@ -456,7 +456,7 @@ impl FileIndex {
         f
     }
 
-    /// name_ix を作り直す (defs が変わったとき)
+    /// Rebuilds name_ix (when defs changed)
     fn index_names(&mut self) {
         let mut v: Vec<(u64, u32)> = self.defs.iter().enumerate().map(|(i, d)| (name_hash(&d.name), i as u32)).collect();
         v.sort_unstable();
@@ -468,21 +468,21 @@ impl FileIndex {
         self.owner_ix = o;
     }
 
-    /// 持ち主が owner の定義の defs の番号
+    /// The defs indices of the definitions whose owner is owner
     fn defs_owned<'a>(&'a self, owner: &'a str) -> impl Iterator<Item = usize> + 'a {
         let h = name_hash(owner);
         let a = self.owner_ix.partition_point(|x| x.0 < h);
         self.owner_ix[a..].iter().take_while(move |x| x.0 == h).map(|x| x.1 as usize).filter(move |&i| self.defs[i].owner == owner)
     }
 
-    /// 名前 name の定義の defs の番号
+    /// The defs indices of the definitions named name
     fn defs_named<'a>(&'a self, name: &'a str) -> impl Iterator<Item = usize> + 'a {
         let h = name_hash(name);
         let a = self.name_ix.partition_point(|x| x.0 < h);
         self.name_ix[a..].iter().take_while(move |x| x.0 == h).map(|x| x.1 as usize).filter(move |&i| self.defs[i].name == name)
     }
 
-    /// トークン k を囲む構造体の式 `T { .. }` の T
+    /// The T of the struct expression `T { .. }` enclosing token k
     fn struct_lit_at(&self, k: usize) -> Option<String> {
         let mut d = 0;
         let mut j = k;
@@ -497,7 +497,7 @@ impl FileIndex {
                 d -= 1;
             } else if self.sym(j, b'{') {
                 if d == 0 {
-                    // (宣言の本体 `enum E {` / `struct S {` / `impl T {` / `trait T {` / `impl X for T {` は構造体の式ではない)
+                    // (the bodies of declarations `enum E {` / `struct S {` / `impl T {` / `trait T {` / `impl X for T {` are not struct expressions)
                     let decl = j >= 2 && self.ident(j - 2) && matches!(self.tok(j - 2), "enum" | "struct" | "union" | "trait" | "impl" | "for" | "mod" | "dyn");
                     return (j >= 1 && !decl && self.ident(j - 1) && self.tok(j - 1).starts_with(|c: char| c.is_ascii_uppercase())).then(|| self.tok(j - 1).to_string());
                 }
@@ -515,7 +515,7 @@ impl FileIndex {
                 if let Some(i) = n.rfind(" for ") {
                     let s = type_head(&n[i + 5..]);
                     let t = type_head(n[..i].trim_start_matches('!'));
-                    // (`impl<T: X> Tr for T` のような全部への impl (ブランケット) は "*" に: どの型のメンバにも Tr のメソッドが入る)
+                    // (an impl for everything (blanket) like `impl<T: X> Tr for T` goes to "*": Tr's methods go into the members of every type)
                     if !s.is_empty() && !t.is_empty() {
                         let blanket = s.len() == 1 && s.starts_with(|c: char| c.is_ascii_uppercase());
                         out.push((if blanket { "*".to_string() } else { s }, t));
@@ -529,7 +529,7 @@ impl FileIndex {
         out
     }
 
-    /// `#[derive(A, B)]` の後の struct / enum / union と、derive の名前の位置
+    /// The struct / enum / union after `#[derive(A, B)]`, and the positions of the derive names
     fn collect_derives(&self) -> Vec<(String, String, u32)> {
         let mut out = vec![];
         let n = self.toks.len();
@@ -544,7 +544,7 @@ impl FileIndex {
                     }
                     j += 1;
                 }
-                // (次のアイテムの名前: 属性・pub を飛ばす)
+                // (the name of the next item: skipping attributes and pub)
                 let mut q = j + 1;
                 while q < n && !(self.ident(q) && matches!(self.tok(q), "struct" | "enum" | "union")) && q < j + 64 {
                     q += 1;
@@ -562,11 +562,11 @@ impl FileIndex {
         out
     }
 
-    /// ライブラリのファイル: 定義と use だけ (本文・字句の列・名前の表は捨てる。位置は先に行と桁にしておく)
+    /// A library file: only definitions and uses (the text, token list and name table are dropped; positions are turned into lines and columns first)
     pub fn library(text: String, module: Vec<String>) -> FileIndex {
         let mut f = FileIndex::new(text, module);
         f.lib = true;
-        // (ほかのファイルから見えるのは `pub use` (再エクスポート) だけ。字句の列を捨てる前に集める)
+        // (only `pub use` (re-exports) is visible from other files. Collected before the token list is dropped)
         f.uses = f.collect_uses(true).into_iter().map(|(a, b, _)| (a, b)).collect();
         f.toks = vec![];
         f.idents = FxMap::default();
@@ -575,7 +575,7 @@ impl FileIndex {
         f
     }
 
-    /// 本文・字句の列・名前の表を捨てる (定義の位置は行と桁にしておく。名前はハッシュの集合だけ残す)
+    /// Drops the text, token list and name table (definition positions are turned into lines and columns; of the names only a set of hashes is kept)
     pub fn make_slim(&mut self) {
         if self.slim {
             return;
@@ -599,13 +599,13 @@ impl FileIndex {
         self.slim = true;
     }
 
-    /// ライブラリのファイルの本文だけを持つもの (hover / signatureHelp がシグネチャと doc コメントを読むのに使う。定義は
-    /// もとの索引のものを使うので、字句の列も定義も作らない)
+    /// One holding only the text of a library file (used by hover / signatureHelp to read signatures and doc comments; the definitions
+    /// of the original index are used, so neither a token list nor definitions are made)
     pub fn text_only(&self, text: String) -> FileIndex {
         FileIndex { text, lib: self.lib, in_src: self.in_src, krate: self.krate, module: self.module.clone(), defs: vec![], toks: vec![], idents: FxMap::default(), uses: vec![], use_at: vec![], macros: vec![], use_syms: vec![], name_ix: vec![], owner_ix: vec![], slim: false, names: vec![], impls: vec![], derives: vec![], inactive: vec![], features: None }
     }
 
-    /// slim なファイルを本文から作り直したもの (モジュール・クレートは同じ)
+    /// A slim file rebuilt from its text (same module and crate)
     pub fn reload(&self, text: String) -> FileIndex {
         let mut f = FileIndex::new(text, self.module.clone());
         f.lib = self.lib;
@@ -617,9 +617,9 @@ impl FileIndex {
         f
     }
 
-    /// `#[cfg(..)]` で外れるアイテムを除く (features: そのクレートで有効な feature)。slim にする前に呼ぶ。
-    /// 分かるのは feature = ".." / test / debug_assertions / unix / windows / target_os / target_arch などと all / any / not。
-    /// ほかの cfg は (rustc と同じく) 成り立たないとする
+    /// Removes the items excluded by `#[cfg(..)]` (features: the features enabled in that crate). Called before making it slim.
+    /// Understood are feature = ".." / test / debug_assertions / unix / windows / target_os / target_arch etc. and all / any / not.
+    /// Other cfgs are taken as false (as in rustc)
     pub fn apply_cfg(&mut self, features: Vec<String>) {
         if self.toks.is_empty() && !self.text.is_empty() {
             return;
@@ -629,7 +629,7 @@ impl FileIndex {
             if inactive.iter().any(|&(a, b)| a <= d.item_start && d.item_end <= b) {
                 continue;
             }
-            // (アイテムの始まりから名前までの属性)
+            // (the attributes from the start of the item to the name)
             let a = self.toks.partition_point(|t| (t.1 as usize) < d.item_start);
             let e = self.toks.partition_point(|t| (t.1 as usize) < d.start);
             let mut k = a;
@@ -656,7 +656,7 @@ impl FileIndex {
         self.features = Some(features);
     }
 
-    /// cfg の述語 (トークン *j から。読んだ後へ進める)
+    /// A cfg predicate (from token *j; advances *j past what was read)
     fn cfg_pred(&self, j: &mut usize, fs: &[String]) -> bool {
         if !self.ident(*j) {
             return true;
@@ -694,17 +694,17 @@ impl FileIndex {
                 "target_vendor" => v == if cfg!(target_vendor = "apple") { "apple" } else if cfg!(target_vendor = "pc") { "pc" } else { "unknown" },
                 "target_has_atomic" => matches!(v.as_str(), "8" | "16" | "32" | "64" | "ptr"),
                 "panic" => v == "unwind",
-                // (rustc と同じく、設定されていない cfg は成り立たない)
+                // (as in rustc, a cfg that is not set is false)
                 _ => false,
             };
         }
         match w.as_str() {
             "unix" => cfg!(unix),
             "windows" => cfg!(windows),
-            // (rust-analyzer はワークスペースのクレートを test と debug_assertions ありで見る。`miri` も
-            // (rust-analyzer の設定 `cargo.cfgs` の既定が `["debug_assertions", "miri"]`))
+            // (rust-analyzer sees the workspace crates with test and debug_assertions on. `miri` too
+            // (the default of rust-analyzer's setting `cargo.cfgs` is `["debug_assertions", "miri"]`))
             "test" | "debug_assertions" | "miri" => true,
-            // (設定されていない cfg: `no_global_oom_handling` / `doc` / `bootstrap` など)
+            // (cfgs that are not set: `no_global_oom_handling` / `doc` / `bootstrap` etc.)
             _ => false,
         }
     }
@@ -713,7 +713,7 @@ impl FileIndex {
         self.inactive.iter().any(|&(a, b)| a <= at && at < b)
     }
 
-    /// トークン k が束縛のパターンの中の名前か (`let (a, b) =` / `for (i, x) in` / `if let Some(x) =` / `|a, b|`)
+    /// Whether token k is a name in a binding pattern (`let (a, b) =` / `for (i, x) in` / `if let Some(x) =` / `|a, b|`)
     fn pat_binding(&self, k: usize) -> bool {
         let w = self.tok(k);
         if !w.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') || PRIMS.contains(&w) || matches!(w, "self" | "mut" | "ref") {
@@ -741,7 +741,7 @@ impl FileIndex {
             if self.toks[j].0 == 1 && matches!(self.text.as_bytes()[self.toks[j].1 as usize], b',' | b'(' | b')' | b'[' | b']' | b'&' | b'{' | b'}' | b'@') {
                 continue;
             }
-            // (`Foo::Bar(x)` の `::` と、クロージャの引数の型 `|a: T, b|` の `:`)
+            // (the `::` of `Foo::Bar(x)`, and the `:` of a closure parameter's type `|a: T, b|`)
             if self.sym(j, b':') {
                 continue;
             }
@@ -750,13 +750,13 @@ impl FileIndex {
         false
     }
 
-    /// トークン k が関数の引数の名前か (`fn f(a: T, mut b: U)`)
+    /// Whether token k is the name of a fn parameter (`fn f(a: T, mut b: U)`)
     fn fn_param(&self, k: usize) -> bool {
         if !(self.sym(k + 1, b':') && !self.sym(k + 2, b':')) || k == 0 || !(self.sym(k - 1, b'(') || self.sym(k - 1, b',') || self.tok(k - 1) == "mut") {
             return false;
         }
         let Some(f) = self.enclosing_fn(self.toks[k].1 as usize) else { return false };
-        // (本体の `{` より前)
+        // (before the body's `{`)
         let mut j = self.toks.partition_point(|t| (t.1 as usize) < f.start);
         let mut d = 0;
         while j < self.toks.len() && j < k {
@@ -772,7 +772,7 @@ impl FileIndex {
         true
     }
 
-    /// byte 位置 at が `format!("{name}")` の中の名前の上なら (リテラルのトークン, その名前のローカルの束縛のトークン, 名前の始め)
+    /// If byte position at is on a name inside `format!("{name}")`: (the literal's token, the token of the local binding of that name, the start of the name)
     fn capture_at(&self, at: usize) -> Option<(usize, usize, usize)> {
         let i = self.toks.partition_point(|t| (t.2 as usize) <= at);
         let t = *self.toks.get(i)?;
@@ -785,7 +785,7 @@ impl FileIndex {
         Some((i, b, a))
     }
 
-    /// 閉じ括弧 p に対応する開き括弧
+    /// The opening bracket matching closing bracket p
     fn open_of(&self, p: usize) -> Option<usize> {
         let mut d = 0i32;
         let mut j = p;
@@ -809,7 +809,7 @@ impl FileIndex {
         }
     }
 
-    /// match の腕の `=>` (トークン arrow は `=`) のパターンのトークンの範囲 (ガード `if ..` は除く)
+    /// The token range of the pattern of a match arm's `=>` (token arrow is the `=`) (excluding a guard `if ..`)
     fn arm_pat(&self, arrow: usize) -> (usize, usize) {
         let mut j = arrow;
         let mut start = 0;
@@ -827,7 +827,7 @@ impl FileIndex {
                     }
                     b')' | b']' | b'}' => {
                         let Some(o) = self.open_of(p) else { break };
-                        // (`}` は構造体のパターン `Path { .. }` か、前の腕の本体のブロック)
+                        // (a `}` is either a struct pattern `Path { .. }` or the block body of the previous arm)
                         if self.sym(p, b'}') && !(o >= 1 && self.ident(o - 1) && self.tok(o - 1).starts_with(|c: char| c.is_ascii_uppercase())) {
                             start = j;
                             break;
@@ -855,7 +855,7 @@ impl FileIndex {
         (start, end)
     }
 
-    /// トークン k が match の腕のパターンの中の束縛か (`Some(x) =>` / `T { a, b: c } =>`)
+    /// Whether token k is a binding in a match arm's pattern (`Some(x) =>` / `T { a, b: c } =>`)
     fn arm_binding(&self, k: usize) -> bool {
         let w = self.tok(k);
         if !w.starts_with(|c: char| c.is_ascii_lowercase() || c == '_') || PRIMS.contains(&w) || matches!(w, "self" | "mut" | "ref" | "_") {
@@ -895,7 +895,7 @@ impl FileIndex {
         false
     }
 
-    /// at を囲むアイテム (関数・型・trait・impl) の型引数の宣言の中の name のトークン (内側から)
+    /// The token of name in the generics declarations of the items (fn / type / trait / impl) enclosing at (from the innermost)
     fn generic_param(&self, at: usize, name: &str) -> Option<usize> {
         let mut ds: Vec<&Def> = self
             .defs
@@ -905,7 +905,7 @@ impl FileIndex {
         ds.sort_by_key(|d| d.item_end - d.item_start);
         let n = self.toks.len();
         for d in ds {
-            // (`<` は名前の直後か、impl なら `impl` の直後)
+            // (the `<` is right after the name, or right after `impl` for an impl)
             let mut j = self.toks.partition_point(|t| (t.1 as usize) < d.start);
             if d.kind == SymKind::Impl {
                 let mut q = self.toks.partition_point(|t| (t.1 as usize) < d.item_start);
@@ -944,12 +944,12 @@ impl FileIndex {
         None
     }
 
-    /// at を囲むアイテムの型引数 name の束縛の trait の名前 (`<T: Clone + Debug>` と `where T: Hash`)
+    /// The trait names of the bounds of type parameter name of the items enclosing at (`<T: Clone + Debug>` and `where T: Hash`)
     fn param_bounds(&self, at: usize, name: &str) -> Vec<String> {
         let Some(j) = self.generic_param(at, name) else { return vec![] };
         let mut out = vec![];
         let n = self.toks.len();
-        // (`T:` の後: 深さ 0 の `,` / `>` まで。`+` で区切った各 trait の頭の名前)
+        // (after `T:`: up to the `,` / `>` at depth 0. The head name of each trait separated by `+`)
         let take = |mut q: usize, out: &mut Vec<String>| {
             let mut d = 0;
             let mut first = true;
@@ -975,7 +975,7 @@ impl FileIndex {
         if self.sym(j + 1, b':') && !self.sym(j + 2, b':') {
             take(j + 2, &mut out);
         }
-        // (囲むアイテムの where: 本体の `{` の前)
+        // (the where of the enclosing item: before the body's `{`)
         for d in self.defs.iter().filter(|d| matches!(d.kind, SymKind::Function | SymKind::Method | SymKind::Impl | SymKind::Struct | SymKind::Enum | SymKind::Trait) && d.item_start <= at && at < d.item_end) {
             let mut q = self.toks.partition_point(|t| (t.1 as usize) < d.item_start);
             while q < n && (self.toks[q].1 as usize) < d.item_end && !self.sym(q, b'{') {
@@ -995,17 +995,17 @@ impl FileIndex {
         out
     }
 
-    /// `use a::B as C` で取り込んだ別名 C の、もとの名前 B
+    /// The original name B of an alias C brought in by `use a::B as C`
     fn use_alias(&self, name: &str) -> Option<&str> {
         self.uses.iter().find(|u| u.0 == name && u.1.len() >= 2 && u.1.last().is_some_and(|l| l != name)).map(|u| u.1[u.1.len() - 1].as_str())
     }
 
-    /// name の識別子が出てくるかもしれないか (slim でなければ名前の表で、slim ならハッシュで)
+    /// Whether an identifier name may occur (by the name table if not slim, by the hashes if slim)
     fn may_have(&self, name: &str) -> bool {
         if self.slim { self.names.binary_search(&name_hash(name)).is_ok() } else { self.idents.contains_key(name) }
     }
 
-    /// ヒープの大きさの見積もり (byte): (定義, 本文と字句の列と名前の表, use とその他)
+    /// An estimate of the heap size (bytes): (definitions, the text + token list + name table, uses and the rest)
     pub fn heap_bytes(&self) -> (usize, usize, usize) {
         let vs = |v: &Vec<String>| v.capacity() * 24 + v.iter().map(|x| x.capacity()).sum::<usize>();
         let defs = self.defs.capacity() * std::mem::size_of::<Def>()
@@ -1019,12 +1019,12 @@ impl FileIndex {
         (defs, body, other)
     }
 
-    /// 本文の大きさ (メモリの見積もり)
+    /// The size of the text (for the memory estimate)
     pub fn text_len(&self) -> usize {
         self.text.len()
     }
 
-    /// ライブラリのファイルの定義の名前の端の (行, UTF-16 の桁)
+    /// (line, UTF-16 column) of an end of a definition name in a library file
     pub fn lib_pos(&self, at: usize) -> Option<(u32, u32)> {
         self.defs.iter().find_map(|d| {
             if d.start == at {
@@ -1047,15 +1047,15 @@ impl FileIndex {
     fn ident(&self, k: usize) -> bool {
         k < self.toks.len() && self.toks[k].0 == 0
     }
-    /// k の前が `::` か
+    /// Whether k is preceded by `::`
     fn after_path(&self, k: usize) -> bool {
         k >= 2 && self.sym(k - 1, b':') && self.sym(k - 2, b':')
     }
-    /// k の後ろが `::` か
+    /// Whether k is followed by `::`
     fn before_path(&self, k: usize) -> bool {
         self.sym(k + 1, b':') && self.sym(k + 2, b':')
     }
-    /// byte 位置にある識別子のトークン
+    /// The identifier token at a byte position
     fn tok_at(&self, off: usize) -> Option<usize> {
         let i = self.toks.partition_point(|t| (t.2 as usize) < off);
         for k in [i, i + 1, i.wrapping_sub(1)] {
@@ -1066,7 +1066,7 @@ impl FileIndex {
         None
     }
 
-    /// `use a::b::{C, D as E, f::*};` を (名前, パス) の列に
+    /// `use a::b::{C, D as E, f::*};` into a list of (name, path)
     fn macro_bodies(&self) -> Vec<(usize, usize)> {
         let mut out = vec![];
         let n = self.toks.len();
@@ -1096,7 +1096,7 @@ impl FileIndex {
         out
     }
 
-    /// use_syms を作る (別名の付いた use と pub use。glob と `self` は除く)
+    /// Makes use_syms (uses with an alias, and pub uses; globs and `self` excluded)
     fn collect_use_syms(&self) -> Vec<(String, u32, u32, u32)> {
         let pubs: Vec<usize> = self.collect_uses(true).into_iter().map(|x| x.2).collect();
         let mut out = vec![];
@@ -1108,7 +1108,7 @@ impl FileIndex {
             if !(alias || pubs.contains(&at)) {
                 continue;
             }
-            // (別名なら `as` の後の名前の位置)
+            // (for an alias, the position of the name after `as`)
             let a = if alias { self.text[at..].find(&format!(" {local}")).map(|i| at + i + 1).unwrap_or(at) } else { at };
             let ls = self.text[..a].rfind('\n').map(|i| i + 1).unwrap_or(0);
             let line = self.text[..ls].matches('\n').count() as u32;
@@ -1153,7 +1153,7 @@ impl FileIndex {
                     path = prefix.clone();
                 }
             } else if self.sym(k, b'{') {
-                // (対応する `}`)
+                // (the matching `}`)
                 let mut d = 0;
                 let mut c = k;
                 while c < e {
@@ -1168,7 +1168,7 @@ impl FileIndex {
                     c += 1;
                 }
                 let mut p = path.clone();
-                // (中はカンマで区切った木)
+                // (the inside is a comma-separated tree)
                 let mut s = k + 1;
                 let mut j = k + 1;
                 let mut dd = 0;
@@ -1196,18 +1196,18 @@ impl FileIndex {
         }
     }
 
-    /// off を含むいちばん内側の関数の定義
+    /// The innermost fn definition containing off
     fn enclosing_fn(&self, off: usize) -> Option<&Def> {
         self.defs
             .iter()
             .filter(|d| matches!(d.kind, SymKind::Function | SymKind::Method) && d.item_start <= off && off < d.item_end)
             .min_by_key(|d| d.item_end - d.item_start)
     }
-    /// off を囲む impl の self 型 (メソッドの持ち主)
+    /// The self type of the impl enclosing off (the owner of methods)
     fn enclosing_owner(&self, off: usize) -> Option<String> {
         self.enclosing_fn(off).filter(|d| !d.owner.is_empty()).map(|d| d.owner.clone())
     }
-    /// off を囲むモジュール (ファイルの中の `mod x { .. }` も)
+    /// The module enclosing off (including `mod x { .. }` in the file)
     fn module_at(&self, off: usize) -> Vec<String> {
         let mut m = self.module.clone();
         let mut best: Option<&Def> = None;
@@ -1223,15 +1223,15 @@ impl FileIndex {
         m
     }
 
-    /// トークン k (名前 name) のローカルの束縛 (トークンの番号)。関数の中で、カーソルより前でいちばん近いもの
+    /// The local binding (token index) of token k (named name). The nearest one in the fn before the cursor
     fn local(&self, k: usize, name: &str) -> Option<usize> {
         self.live(k).into_iter().rev().find(|&j| self.tok(j) == name && j != k)
     }
 
-    /// トークン k の位置で見えるローカルの束縛 (トークンの番号、外側から順に)
+    /// The local bindings visible at the position of token k (token indices, from the outermost)
     fn live(&self, k: usize) -> Vec<usize> {
         let Some(f) = self.enclosing_fn(self.toks[k].1 as usize) else { return vec![] };
-        // (関数の名前のトークンから)
+        // (from the token of the fn name)
         let mut i = self.toks.partition_point(|t| (t.1 as usize) < f.start);
         let is_bind = |j: usize| -> bool {
             let w = self.tok(j);
@@ -1244,14 +1244,14 @@ impl FileIndex {
                 && !self.sym(j + 1, b'!')
                 && !(j > 0 && self.sym(j - 1, b'.'))
         };
-        // 有効な束縛: (名前, トークン, 消える深さ, カンマで消えるか, ; で消えるか)
+        // Live bindings: (name, token, the depth at which it goes away, whether it goes away at a comma, whether it goes away at ;)
         let mut live: Vec<(usize, i32, u8)> = vec![];
-        // (次のブロックで有効になるもの: for / if let / while let)
+        // (the ones that become live in the next block: for / if let / while let)
         let mut pend_block: Vec<usize> = vec![];
-        // (文の終わり `;` で有効になるもの: let)
+        // (the ones that become live at the end of the statement `;`: let)
         let mut pend_let: Vec<(usize, i32)> = vec![];
         let mut depth = 0i32;
-        // (関数の引数: 名前の後の `(` .. `)` の `x:`)
+        // (fn parameters: the `x:` in the `(` .. `)` after the name)
         i += 1;
         if self.sym(i, b'<') {
             let mut d = 0;
@@ -1293,8 +1293,8 @@ impl FileIndex {
                 i += 1;
             }
         }
-        // (本体)
-        let mut stmt_kind: u8 = 0; // 1: let のパターン, 2: for / if let / while let のパターン, 3: クロージャの引数
+        // (the body)
+        let mut stmt_kind: u8 = 0; // 1: a let pattern, 2: a for / if let / while let pattern, 3: closure parameters
         let mut body_seen = false;
         let mut pat_start = 0usize;
         let mut arm_start = i;
@@ -1323,7 +1323,7 @@ impl FileIndex {
                     }
                     b';' => {
                         live.retain(|l| !(l.2 == 2 && l.1 == depth));
-                        // (初期化のない `let x;`)
+                        // (a `let x;` without an initializer)
                         if stmt_kind == 1 {
                             for j in pat_start..i {
                                 if is_bind(j) {
@@ -1342,10 +1342,10 @@ impl FileIndex {
                         arm_start = i + 1;
                     }
                     b'=' if self.sym(i + 1, b'>') => {
-                        // match の腕のパターン (`T { x: a, .. }` の x はフィールドの名前)
+                        // A match arm pattern (the x of `T { x: a, .. }` is a field name)
                         let (pa, pe) = self.arm_pat(i);
                         for j in pa.max(arm_start.min(pa))..pe {
-                            // (`(m, 0) | (0, m)` の 2 つめの m は 1 つめと同じ束縛: rust-analyzer と同じく 1 つめに)
+                            // (the 2nd m of `(m, 0) | (0, m)` is the same binding as the 1st: to the 1st, as in rust-analyzer)
                             if is_bind(j) && !self.sym(j + 1, b'{') && !(self.sym(j + 1, b':') && !self.sym(j + 2, b':')) && !(pa..j).any(|q| self.ident(q) && self.tok(q) == self.tok(j)) {
                                 live.push((j, depth, 1));
                             }
@@ -1364,14 +1364,14 @@ impl FileIndex {
                                 }
                             }
                             if stmt_kind == 1 {
-                                stmt_kind = 4; // (型注釈の後の初期化式)
+                                stmt_kind = 4; // (the initializer expression after the type annotation)
                             } else {
                                 stmt_kind = 0;
                             }
                         }
                     }
                     b':' if stmt_kind == 1 && !self.sym(i + 1, b':') && !(i > 0 && self.sym(i - 1, b':')) => {
-                        // `let x: T = ..` の型注釈の前までがパターン
+                        // The pattern is everything before the type annotation of `let x: T = ..`
                         for j in pat_start..i {
                             if is_bind(j) {
                                 pend_let.push((j, depth));
@@ -1395,7 +1395,7 @@ impl FileIndex {
                 }
             } else if t.0 == 0 {
                 match self.tok(i) {
-                    // match の腕のガード `P(x) if x > 0 =>`: パターンの束縛はガードから見える
+                    // A match arm guard `P(x) if x > 0 =>`: the pattern's bindings are visible from the guard
                     "if" => {
                         if let Some(arrow) = self.guard_arrow(i) {
                             let (pa, pe) = self.arm_pat(arrow);
@@ -1408,7 +1408,7 @@ impl FileIndex {
                             }
                         }
                     }
-                    // (`matches!(EXPR, PAT if GUARD)`: パターンの束縛はガードから見える (`)` で消える))
+                    // (`matches!(EXPR, PAT if GUARD)`: the pattern's bindings are visible from the guard (they go away at `)`))
                     "matches" if self.sym(i + 1, b'!') && self.sym(i + 2, b'(') => {
                         let mut d = 0i32;
                         let mut comma = None;
@@ -1437,7 +1437,7 @@ impl FileIndex {
                         }
                     }
                     "let" => {
-                        // (`if let` / `while let` は次のブロックで有効)
+                        // (`if let` / `while let` become live in the next block)
                         let cond = i > 0 && matches!(self.tok(i - 1), "if" | "while");
                         stmt_kind = if cond { 2 } else { 1 };
                         pat_start = i + 1;
@@ -1458,15 +1458,15 @@ impl FileIndex {
             }
             i += 1;
         }
-        // (まだ本体の `{` の前 (関数の引数の中) なら、引数は見える。本体の中で残っているのは、次のブロックから見える
-        // `if let` / `while let` / `for` のパターンの束縛なので、まだ見えない (`if let Some(x) = (x, ..)` の右の x は外の x))
+        // (if still before the body's `{` (in the fn parameters), the parameters are visible. What is left inside the body is the bindings
+        // of `if let` / `while let` / `for` patterns visible from the next block, so they are not visible yet (the x on the right of `if let Some(x) = (x, ..)` is the outer x))
         if !body_seen {
             live.extend(pend_block.iter().map(|&j| (j, depth, 0)));
         }
         live.into_iter().map(|l| l.0).collect()
     }
 
-    /// `if` (トークン i) が match の腕のガードなら、その後の `=>` の `=` (ブロック `{` や `;` の前にあるもの)
+    /// If `if` (token i) is a match arm guard, the `=` of the `=>` after it (the one before a block `{` or a `;`)
     fn guard_arrow(&self, i: usize) -> Option<usize> {
         let mut d = 0i32;
         for j in i + 1..(i + 128).min(self.toks.len()) {
@@ -1490,7 +1490,7 @@ impl FileIndex {
         None
     }
 
-    /// k が `#[derive(..)]` の中の名前か
+    /// Whether k is a name inside `#[derive(..)]`
     fn in_derive(&self, k: usize) -> bool {
         let mut j = k;
         while j > 0 && (self.ident(j - 1) || self.sym(j - 1, b',') || self.sym(j - 1, b':')) {
@@ -1499,12 +1499,12 @@ impl FileIndex {
         j >= 4 && self.sym(j - 1, b'(') && self.ident(j - 2) && self.tok(j - 2) == "derive" && self.sym(j - 3, b'[') && self.sym(j - 4, b'#')
     }
 
-    /// byte 位置 at が macro_rules! の本体の中か (名前を除く)
+    /// Whether byte position at is inside a macro_rules! body (excluding the name)
     fn in_macro_body(&self, at: usize) -> bool {
         self.macros.iter().any(|&(a, b)| a <= at && at < b) || self.defs.iter().any(|d| d.kind == SymKind::Macro && d.item_start <= at && at < d.item_end && at != d.start)
     }
 
-    /// `|` がクロージャの引数の始まりか (前が式の始まりになれる記号か `move`)
+    /// Whether `|` starts closure parameters (preceded by a symbol that can start an expression, or by `move`)
     fn closure_start(&self, i: usize) -> bool {
         if i == 0 {
             return true;
@@ -1513,24 +1513,24 @@ impl FileIndex {
         if self.ident(p) {
             return self.tok(p) == "move" || self.tok(p) == "return";
         }
-        // (参照を取ったクロージャ `f(&|t: &str| ..)`)
+        // (a closure taken by reference `f(&|t: &str| ..)`)
         if self.sym(p, b'&') && p >= 1 && !self.sym(p - 1, b'&') {
             return self.closure_start(p);
         }
         self.toks[p].0 == 1 && matches!(self.text.as_bytes()[self.toks[p].1 as usize], b'(' | b',' | b'=' | b'{' | b';' | b'[' | b':')
     }
 
-    /// ローカルの束縛 b の型の名前 (型注釈・`T::..` / `T { .. }` / `T(..)` の初期化・引数の型)
+    /// The type name of local binding b (type annotation, a `T::..` / `T { .. }` / `T(..)` initializer, the parameter's type)
     fn local_type(&self, b: usize) -> Option<String> {
         let n = self.toks.len();
         let mut j = b + 1;
         if self.sym(j, b':') && !self.sym(j + 1, b':') {
             j += 1;
-            // (`&` / `mut` / 寿命 `'a` (字句では `'` の後の識別子) を飛ばす)
+            // (skips `&` / `mut` / a lifetime `'a` (an identifier after `'` in the tokens))
             while j < n && (self.sym(j, b'&') || self.tok(j) == "mut" || self.toks[j].0 == 2 || (self.ident(j) && self.toks[j].1 >= 1 && self.text.as_bytes()[self.toks[j].1 as usize - 1] == b'\'')) {
                 j += 1;
             }
-            // (`a::b::T<..>` の最後)
+            // (the last of `a::b::T<..>`)
             while self.ident(j) && self.before_path(j) {
                 j += 3;
             }
@@ -1545,11 +1545,11 @@ impl FileIndex {
                 j += 1;
             }
             let up = |j: usize| self.tok(j).starts_with(|c: char| c.is_ascii_uppercase());
-            // (`a::b::T` のモジュールの部分を飛ばす。`T::new` の T で止まる)
+            // (skips the module part of `a::b::T`; stops at the T of `T::new`)
             while self.ident(j) && self.before_path(j) && self.ident(j + 3) && !(up(j) && !up(j + 3)) {
                 j += 3;
             }
-            // (`T::..` / `T { .. }` / `T(..)`、単位構造体 `a::T;` (全部大文字の定数は除く))
+            // (`T::..` / `T { .. }` / `T(..)`, a unit struct `a::T;` (except all-uppercase constants))
             if self.ident(j) && up(j) && (self.before_path(j) || self.sym(j + 1, b'{') || self.sym(j + 1, b'(') || (self.sym(j + 1, b';') && (self.tok(j).len() == 1 || self.tok(j).contains(|c: char| c.is_ascii_lowercase())))) {
                 return Some(self.tok(j).to_string());
             }
@@ -1575,7 +1575,7 @@ const ITEM_KINDS: [SymKind; 10] = [
     SymKind::Module,
 ];
 
-/// derive で作られるメソッド (`default` / `clone` / `eq` / `fmt` / ..) の、持ち主の型 (owners のどれか) の derive の名前の位置
+/// For a method made by derive (`default` / `clone` / `eq` / `fmt` / ..), the position of the derive name of the owner type (one of owners)
 fn derive_method(ws: &[&FileIndex], file: usize, owners: &[String], name: &str) -> Option<Loc> {
     let tr = match name {
         "default" => "Default",
@@ -1593,7 +1593,7 @@ fn derive_method(ws: &[&FileIndex], file: usize, owners: &[String], name: &str) 
     })
 }
 
-/// 候補が一つなら答える。いくつもあれば同じファイルのものが一つならそれ
+/// Answers if there is one candidate. If there are several, the one in the same file if there is exactly one such
 fn pick(c: Vec<(usize, &Def)>, file: usize) -> Vec<Loc> {
     if c.len() == 1 {
         return vec![loc(c[0].0, c[0].1)];
@@ -1605,8 +1605,8 @@ fn pick(c: Vec<(usize, &Def)>, file: usize) -> Vec<Loc> {
     vec![]
 }
 
-/// ワークスペースの候補があればそれ、なければライブラリの候補 (モジュールのパスが短いものを先に: `sys` の下などの
-/// 中のものより、公開されているもの)
+/// The workspace candidates if there are any, else the library candidates (those with a short module path first: rather than the ones inside, e.g. under `sys`,
+/// the public ones)
 fn prefer_ws(ws: &[&FileIndex], c: Vec<(usize, &Def)>, file: usize) -> Vec<Loc> {
     let (w, l): (Vec<(usize, &Def)>, Vec<(usize, &Def)>) = c.into_iter().partition(|x| !ws[x.0].lib);
     if !w.is_empty() {
@@ -1618,13 +1618,13 @@ fn prefer_ws(ws: &[&FileIndex], c: Vec<(usize, &Def)>, file: usize) -> Vec<Loc> 
     let score = lib_rank;
     let best = l.iter().map(|x| score(x.1)).min().unwrap();
     let l: Vec<(usize, &Def)> = l.into_iter().filter(|x| score(x.1) == best).collect();
-    // (同じファイルの同じ名前のメソッドがいくつも: 型引数の違う trait の impl (`Extend<T>` / `Extend<&T>` for Vec)。
-    // 先のもの (ふつうは総称的なもの) にする)
-    // (別のファイルにあってもよい: `impl From<String> for Arc<str>` (string.rs) / `impl<T> From<T> for Arc<T>` (sync.rs))
+    // (several methods of the same name in the same file: impls of a trait with different type arguments (`Extend<T>` / `Extend<&T>` for Vec).
+    // Take the first one (usually the generic one))
+    // (they may be in different files too: `impl From<String> for Arc<str>` (string.rs) / `impl<T> From<T> for Arc<T>` (sync.rs))
     if l.len() > 1 && l.iter().all(|x| x.1.kind == SymKind::Method && x.1.name == l[0].1.name && x.1.owner == l[0].1.owner) {
         return vec![loc(l[0].0, l[0].1)];
     }
-    // (trait のメソッドの宣言と、その trait の impl (`impl<T: Display> ToString for T`) のメソッド: 宣言 (rust-analyzer と同じ))
+    // (a trait method's declaration and the methods of impls of that trait (`impl<T: Display> ToString for T`): the declaration (as in rust-analyzer))
     if l.len() > 1 {
         if let Some(decl) = l.iter().find(|x| x.1.kind == SymKind::Method && !x.1.container.starts_with("impl") && *x.1.container == *x.1.owner) {
             if l.iter().all(|x| std::ptr::eq(x.1, decl.1) || impl_trait(&x.1.container) == Some(decl.1.owner.as_str())) {
@@ -1635,13 +1635,13 @@ fn prefer_ws(ws: &[&FileIndex], c: Vec<(usize, &Def)>, file: usize) -> Vec<Loc> 
     pick(l, file)
 }
 
-/// ライブラリの定義の順位 (小さいほど先): モジュールのパスが短いもの。`sys` / `os` の下や、既定でない `nonpoison` などは後
+/// The rank of a library definition (smaller first): the ones with a short module path. Those under `sys` / `os`, non-default ones like `nonpoison` etc. go later
 fn lib_rank(d: &Def) -> usize {
     let bad = d.module.first().is_some_and(|m| m == "sys" || m == "os" || m.starts_with("sys_")) || d.module.iter().any(|m| m == "nonpoison" || m == "unix" || m == "windows" || m == "wasi");
     d.module.len() + if bad { 100 } else { 0 }
 }
 
-/// `use` のパス (最後の名前を除いたモジュールの部分) → (モジュールのパス, クレートの中のパスか)
+/// The path of a `use` (the module part without the last name) → (module path, whether it is a path inside the crate)
 fn use_module(here: &[String], path: &[String]) -> (Vec<String>, bool) {
     match path.first().map(|s| s.as_str()) {
         Some("crate") => (path[1..].to_vec(), true),
@@ -1660,13 +1660,13 @@ fn use_module(here: &[String], path: &[String]) -> (Vec<String>, bool) {
             m.extend(path[i..].iter().cloned());
             (m, true)
         }
-        // (ほかのクレート `std::sync` / `zust_core::session`: クレートの名前を外す)
+        // (another crate `std::sync` / `zust_core::session`: strips the crate name)
         Some(_) => (path[1..].to_vec(), false),
         None => (vec![], true),
     }
 }
 
-/// d のモジュールが target に合うか (小さいほど良い)。exact なら同じパスだけ。そうでなければ後ろが同じか、順に含む
+/// Whether d's module matches target (smaller is better). If exact, only the same path. Otherwise the tail is the same, or it contains it in order
 fn mod_score(d: &[String], target: &[String], exact: bool) -> Option<usize> {
     if d == target {
         return Some(0);
@@ -1684,15 +1684,15 @@ fn mod_score(d: &[String], target: &[String], exact: bool) -> Option<usize> {
     None
 }
 
-/// 候補を `use` のモジュールで絞る (いちばん合うもの)
+/// Narrows the candidates by the module of a `use` (the best matching ones)
 fn by_use<'a>(cands: &[(usize, &'a Def)], target: &[String], exact: bool) -> Vec<(usize, &'a Def)> {
     let scored: Vec<(usize, (usize, &'a Def))> = cands.iter().filter_map(|c| mod_score(&c.1.module[..], target, exact).map(|s| (s, *c))).collect();
     let Some(best) = scored.iter().map(|x| x.0).min() else { return vec![] };
     scored.into_iter().filter(|x| x.0 == best).map(|x| x.1).collect()
 }
 
-/// off (byte) にある識別子の定義
-/// off の `Self` を囲む impl / trait の (見出しの型・trait の名前のトークン, アイテムの範囲) (rust-analyzer の `Self` の行き先)
+/// The definition of the identifier at off (byte)
+/// (the token of the header's type / trait name, the range of the item) of the impl / trait enclosing the `Self` at off (where rust-analyzer's `Self` goes)
 fn self_owner(f: &FileIndex, off: usize) -> Option<(usize, usize, usize)> {
     let k = f.tok_at(off)?;
     if f.tok(k) != "Self" {
@@ -1702,7 +1702,7 @@ fn self_owner(f: &FileIndex, off: usize) -> Option<(usize, usize, usize)> {
     if d.kind == SymKind::Trait {
         return Some((f.toks.partition_point(|t| (t.1 as usize) < d.start), d.item_start, d.item_end));
     }
-    // (impl の見出し `impl<T> Tr for a::S<T> where .. {` の、`{` / where の前で深さ 0 の最後の識別子)
+    // (the last identifier at depth 0 before the `{` / where of an impl header `impl<T> Tr for a::S<T> where .. {`)
     let mut j = f.toks.partition_point(|t| (t.1 as usize) < d.item_start);
     while j < f.toks.len() && f.tok(j) != "impl" {
         j += 1;
@@ -1725,7 +1725,7 @@ fn self_owner(f: &FileIndex, off: usize) -> Option<(usize, usize, usize)> {
     Some((last?, d.item_start, d.item_end))
 }
 
-/// impl / trait の中の `Self` の参照: 見出しの名前と、その中の `Self` (rust-analyzer と同じ)
+/// The references of `Self` inside an impl / trait: the header's name and the `Self`s inside it (as in rust-analyzer)
 fn self_refs(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool) -> Option<Vec<Loc>> {
     let f = ws[file];
     let (h, a, e) = self_owner(f, off)?;
@@ -1742,8 +1742,8 @@ fn self_refs(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool) -> 
     Some(out)
 }
 
-/// アイテムのキーワード (`fn` / `struct` / `enum` / `trait` ..) の上なら、その後の名前の位置 (rust-analyzer はキーワードの上でも
-/// そのアイテムに答える)
+/// If on the keyword of an item (`fn` / `struct` / `enum` / `trait` ..), the position of the name after it (rust-analyzer answers with that item even on
+/// the keyword)
 fn kw_to_name(f: &FileIndex, off: usize) -> usize {
     if let Some(k) = f.tok_at(off) {
         if matches!(f.tok(k), "fn" | "struct" | "enum" | "union" | "trait" | "type" | "const" | "static" | "mod") && f.ident(k + 1) {
@@ -1764,7 +1764,7 @@ pub fn definition(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
     }
     clear_memo();
     let d: Vec<Loc> = def_at(ws, file, off).into_iter().map(|l| mod_file(ws, l).unwrap_or(l)).collect();
-    // (構造体の省略形 `T { x }` の x: ローカルとフィールドの両方 (rust-analyzer と同じくローカルが先))
+    // (the x of the struct shorthand `T { x }`: both the local and the field (the local first, as in rust-analyzer))
     if let (Some(k), [local]) = (ws[file].tok_at(off), d.as_slice()) {
         if !ws[local.file].defs.iter().any(|x| x.start == local.start) {
             if let Some(&fl) = shorthand_field(ws, file, k).first() {
@@ -1775,11 +1775,11 @@ pub fn definition(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
     d
 }
 
-/// `recv.into()` (into のトークン k、受け手の型 recv) の行き先: 期待する型 T (`let x: T = ..` の注釈) の `impl From<R> for T` の
-/// from (R が受け手の型に合うものを先に)
+/// Where `recv.into()` goes (token k of into, the receiver type recv): the from of the `impl From<R> for T` of the expected type T (the annotation of `let x: T = ..`)
+/// (the ones whose R matches the receiver type first)
 fn into_from(ws: &[&FileIndex], file: usize, k: usize, recv: Option<&str>) -> Option<Loc> {
     let f = ws[file];
-    // (文の始めまで戻って `let NAME: TYPE =`)
+    // (goes back to the start of the statement for `let NAME: TYPE =`)
     let mut j = k;
     let mut d = 0;
     let mut eq = None;
@@ -1821,7 +1821,7 @@ fn into_from(ws: &[&FileIndex], file: usize, k: usize, recv: Option<&str>) -> Op
     best.map(|b| b.1)
 }
 
-/// トークン k が構造体の省略形 `T { x }` の x で、ローカルの x を指すなら、そのフィールドの定義
+/// If token k is the x of a struct shorthand `T { x }` and refers to the local x, the definition of that field
 fn shorthand_pair(ws: &[&FileIndex], file: usize, k: usize) -> Option<Loc> {
     let f = ws[file];
     let l = *def_at(ws, file, f.toks[k].1 as usize).first()?;
@@ -1831,7 +1831,7 @@ fn shorthand_pair(ws: &[&FileIndex], file: usize, k: usize) -> Option<Loc> {
     shorthand_field(ws, file, k).first().copied()
 }
 
-/// `mod x;` (ファイルのモジュール) の定義の行き先はそのファイルの始め (rust-analyzer と同じ)
+/// The definition of `mod x;` (a file module) goes to the start of that file (as in rust-analyzer)
 fn mod_file(ws: &[&FileIndex], l: Loc) -> Option<Loc> {
     let d = ws[l.file].defs.iter().find(|d| d.start == l.start && d.kind == SymKind::Module)?;
     let kr = ws[l.file].krate;
@@ -1853,16 +1853,16 @@ fn def_at(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
     def_at1(ws, file, off)
 }
 
-/// cfg で外れたコードの中のトークン k: rust-analyzer と同じく、外側のスコープから見えるアイテムへのパス
-/// (`used()` / `P` / `sub::deep` / `crate::P`) だけを解決する。ローカル・フィールド・メソッド・関連アイテム (`P::new`)・
-/// 外れたアイテムの名前には答えない
+/// Token k in code excluded by cfg: as in rust-analyzer, resolves only paths to items visible from the outer scope
+/// (`used()` / `P` / `sub::deep` / `crate::P`). No answer for locals, fields, methods, associated items (`P::new`) or
+/// the names of excluded items
 fn inactive_def_at(ws: &[&FileIndex], file: usize, k: usize) -> Vec<Loc> {
     let f = ws[file];
     let decl = k > 0 && f.ident(k - 1) && matches!(f.tok(k - 1), "fn" | "struct" | "enum" | "union" | "trait" | "type" | "const" | "static" | "mod" | "let" | "mut");
     if decl || (k > 0 && f.sym(k - 1, b'.')) || (f.sym(k + 1, b':') && !f.sym(k + 2, b':') && f.struct_lit_at(k).is_some()) {
         return vec![];
     }
-    // (`T::name` の T が型 (大文字で始まる・Self) なら関連アイテム)
+    // (if the T of `T::name` is a type (starts with an uppercase letter, or Self), an associated item)
     if f.after_path(k) && k >= 3 && (f.tok(k - 3) == "Self" || f.tok(k - 3).starts_with(|c: char| c.is_ascii_uppercase())) {
         return vec![];
     }
@@ -1872,7 +1872,7 @@ fn inactive_def_at(ws: &[&FileIndex], file: usize, k: usize) -> Vec<Loc> {
         .collect()
 }
 
-/// トークン k が cfg の述語の中 (`#[cfg(..)]` / `#[cfg_attr(pred, ..)]` の pred / `cfg!(..)`) か。`any` / `all` / `not` の入れ子も
+/// Whether token k is in a cfg predicate (`#[cfg(..)]` / the pred of `#[cfg_attr(pred, ..)]` / `cfg!(..)`). Also nested `any` / `all` / `not`
 fn in_cfg_pred(f: &FileIndex, k: usize) -> bool {
     let mut j = k;
     let mut d = 0i32;
@@ -1897,7 +1897,7 @@ fn in_cfg_pred(f: &FileIndex, k: usize) -> bool {
                 "any" | "all" | "not" => continue,
                 "cfg" => return j >= 2 && f.sym(j - 2, b'['),
                 "cfg_attr" => {
-                    // (最初の引数 (述語) の中だけ: `#[cfg_attr(test, derive(Debug))]` の Debug は述語ではない)
+                    // (only within the first argument (the predicate): the Debug of `#[cfg_attr(test, derive(Debug))]` is not a predicate)
                     let mut dd = 0;
                     for q in j + 1..k {
                         if f.sym(q, b'(') {
@@ -1924,20 +1924,20 @@ fn def_at1(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
     let Some(k) = f.tok_at(off) else { return f.capture_at(off).map(|(_, b, _)| vec![Loc { file, start: f.toks[b].1 as usize, end: f.toks[b].2 as usize }]).unwrap_or_default() };
     let name = f.tok(k).to_string();
     let start = f.toks[k].1 as usize;
-    // (組み込みの型には定義がない)
+    // (built-in types have no definition)
     if PRIMS.contains(&name.as_str()) {
         return vec![];
     }
-    // (cfg の述語の中の名前 (`#[cfg(test)]` の test、`cfg!(unix)`) はどれも指さない (rust-analyzer と同じ))
+    // (names in a cfg predicate (the test of `#[cfg(test)]`, `cfg!(unix)`) refer to nothing (as in rust-analyzer))
     if in_cfg_pred(f, k) {
         return vec![];
     }
-    // 定義の名前の上
-    // (impl の名前の範囲は self 型の名前なので、impl は飛ばす: `impl P` の P は struct P)
+    // On the name of a definition
+    // (the name range of an impl is the self type's name, so impls are skipped: the P of `impl P` is struct P)
     if let Some(d) = f.defs.iter().find(|d| d.start == start && d.kind != SymKind::Impl) {
         return vec![loc(file, d)];
     }
-    // (クレートの名前 `std::..` / `extern crate x;`: そのクレートの根のファイルの始め (rust-analyzer と同じ))
+    // (a crate name `std::..` / `extern crate x;`: the start of that crate's root file (as in rust-analyzer))
     if (f.before_path(k) && !f.after_path(k)) || (k >= 2 && f.tok(k - 1) == "crate" && f.tok(k - 2) == "extern") {
         if !f.defs.iter().any(|d| d.name == name && d.kind == SymKind::Module) {
             if let Some(r) = crate_root(ws, &name) {
@@ -1945,80 +1945,80 @@ fn def_at1(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
             }
         }
     }
-    // (見える定義: ライブラリと src の下のファイルと、このファイル)
-    // マクロの呼び出し `name!(..)` / `a::name!(..)`: マクロだけ (`vec!` は `mod vec` ではない、`format!` は `fn format` ではない)
+    // (visible definitions: libraries, the files under src, and this file)
+    // A macro call `name!(..)` / `a::name!(..)`: macros only (`vec!` is not `mod vec`, `format!` is not `fn format`)
     if f.sym(k + 1, b'!') && !f.sym(k + 2, b'=') && !(k >= 1 && f.sym(k - 1, b'.')) {
         let c: Vec<(usize, &Def)> = named(ws, file, &*name).into_iter().filter(|(_, d)| d.kind == SymKind::Macro && d.owner.is_empty()).collect();
         if !c.is_empty() {
-            // (このファイルの macro_rules! を先に)
+            // (this file's macro_rules! first)
             let here: Vec<(usize, &Def)> = c.iter().copied().filter(|x| x.0 == file).collect();
             return prefer_ws(ws, if here.is_empty() { c } else { here }, file);
         }
     }
-    // メソッド・フィールド `x.name`
+    // A method / field `x.name`
     if k >= 1 && f.sym(k - 1, b'.') && !(k >= 2 && f.sym(k - 2, b'.')) {
         let call = f.sym(k + 1, b'(') || (f.before_path(k) && f.sym(k + 3, b'<'));
         let kinds: &[SymKind] = if call { &[SymKind::Method] } else { &[SymKind::Field] };
         let owner = k.checked_sub(2).and_then(|r| expr_type(ws, file, r, 0)).filter(|t| !type_head(t).is_empty() && type_head(t) != "_");
         let (mut owners, concrete) = owner.as_ref().map(|o| owners_of2(ws, file, o)).unwrap_or_default();
-        // (受け手の型が型引数 `T` なら、その束縛の trait (`impl<T: Clone>` / `where T: Clone`) のメソッド)
+        // (if the receiver type is a type parameter `T`, the methods of the traits of its bounds (`impl<T: Clone>` / `where T: Clone`))
         if let Some(o) = owner.as_deref() {
             owners.extend(f.param_bounds(start, strip_ref(o)));
         }
         let c: Vec<(usize, &Def)> = named(ws, file, &*name).into_iter().filter(|(_, d)| kinds.contains(&d.kind) && (owner.is_none() || owners.contains(&d.owner))).collect();
         let mut c = prefer_concrete(c, &concrete);
-        // (同じ名前の別の型の impl (str の `Split<'a, P>` に slice の `Split<'a, T, P>` の impl): 型引数の数が合うものがあれば、
-        // 合わない impl は外す)
+        // (impls of another type with the same name (an impl of slice's `Split<'a, T, P>` for str's `Split<'a, P>`): if some have a matching number of type parameters,
+        // the impls that do not match are dropped)
         if let Some(o) = owner.as_deref() {
             let n = targs(strip_ref(o)).len();
             let fits = |d: &Def| !d.container.starts_with("impl") || d.owner != type_head(o) || targs(impl_self_full(&d.container)).len() == n;
             if n > 0 && c.iter().any(|x| x.1.owner == type_head(o) && fits(x.1)) || c.iter().any(|x| x.1.owner == "__str_pat_iter") {
                 c.retain(|x| fits(x.1));
             }
-            // (str の `Split<'a, P>` (型引数 1 つ) のメソッドは core のマクロの中のもの (`io::Split<B>` ではない))
+            // (the methods of str's `Split<'a, P>` (1 type parameter) are the ones inside a core macro (not `io::Split<B>`))
             if n == 1 && c.iter().any(|x| x.1.owner == "__str_pat_iter") {
                 c.retain(|x| x.1.owner == "__str_pat_iter" || x.1.owner != type_head(o));
             }
         }
-        // (受け手の型と Deref の先の両方にあるもの (`String::len` と `str::len`): 受け手に近い方)
+        // (the ones on both the receiver type and its Deref target (`String::len` and `str::len`): the one closer to the receiver)
         if let Some(first) = concrete.iter().find(|o| c.iter().any(|x| &x.1.owner == *o)) {
             let first = first.clone();
             c.retain(|x| x.1.owner == first || !concrete.contains(&x.1.owner));
         }
-        // (`let h: Hidden = n.into();`: 期待する型 Hidden の `impl From<..> for Hidden` の from (rust-analyzer と同じ))
+        // (`let h: Hidden = n.into();`: the from of `impl From<..> for Hidden` of the expected type Hidden (as in rust-analyzer))
         if call && name == "into" {
             if let Some(l) = into_from(ws, file, k, owner.as_deref()) {
                 return vec![l];
             }
         }
-        // (derive で作られるメソッド: 具体的な型の持ち主の候補がなければ、ライブラリの trait の宣言より derive の名前)
+        // (methods made by derive: if there is no candidate whose owner is a concrete type, the derive name rather than the library trait's declaration)
         if owner.is_some() && !c.iter().any(|x| concrete.contains(&x.1.owner)) {
             if let Some(l) = derive_method(ws, file, &concrete, &name) {
                 return vec![l];
             }
         }
         if c.is_empty() && owner.is_some() {
-            // (ブランケットの impl の trait のメソッド: `"x".to_string()`)
+            // (methods of the traits of blanket impls: `"x".to_string()`)
             let bl = blanket_traits(ws, file, false);
             c = named(ws, file, &*name).into_iter().filter(|(_, d)| kinds.contains(&d.kind) && bl.contains(&d.owner)).collect();
         }
         if owner.is_none() {
-            // (受け手の型が分からないときは、ライブラリも含めて一つだけのときだけ)
+            // (when the receiver type is unknown, only when it is the only one, libraries included)
             return pick(c, file);
         }
         return prefer_ws(ws, c, file);
     }
-    // パス `Q::name`
+    // A path `Q::name`
     if f.after_path(k) && k >= 3 && f.ident(k - 3) {
         let q = f.tok(k - 3).to_string();
         let mut q = if q == "Self" { f.enclosing_owner(off).unwrap_or(q) } else { q };
-        // (`T { .., ..Default::default() }` の default は T の)
+        // (the default of `T { .., ..Default::default() }` is T's)
         if (q == "Default" && name == "default") && k >= 5 && f.sym(k - 4, b'.') && f.sym(k - 5, b'.') {
             if let Some(t) = f.struct_lit_at(k - 5) {
                 q = if t == "Self" { f.enclosing_owner(off).unwrap_or(t) } else { t };
             }
         }
-        // (`T { field: Default::default() }` の default はフィールドの型の)
+        // (the default of `T { field: Default::default() }` is the field type's)
         if (q == "Default" && name == "default") && k >= 5 && f.sym(k - 4, b':') && !f.sym(k - 5, b':') && f.ident(k - 5) {
             if let Some(t) = f.struct_lit_at(k - 5) {
                 let field = f.tok(k - 5);
@@ -2028,31 +2028,31 @@ fn def_at1(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
             }
         }
         if !matches!(q.as_str(), "crate" | "super" | "self") {
-            // (型のメンバか、モジュールの中のアイテム)
+            // (a member of the type, or an item in the module)
             let (qs, nc) = owner_split(ws, file, &q);
-            // (`std::collections` / `fixture::Counter`: Q がクレートの名前なら、その根のファイルのアイテム)
+            // (`std::collections` / `fixture::Counter`: if Q is a crate name, the items of its root file)
             let root = crate_root(ws, &q);
             let c: Vec<(usize, &Def)> = named(ws, file, &*name)
                 .into_iter()
                 .filter(|(i, d)| qs.contains(&d.owner) || (d.owner.is_empty() && d.module.last() == Some(&q)) || root.is_some_and(|r| *i == r && d.owner.is_empty() && d.module[..] == ws[r].module[..]))
                 .collect();
             let mut c = prefer_concrete(c, &qs[..nc]);
-            // (型と Deref の先の両方にあるもの (`String::as_str` と `str::as_str`): 型そのもの)
+            // (the ones on both the type and its Deref target (`String::as_str` and `str::as_str`): the type itself)
             if let Some(first) = qs[..nc].iter().find(|o| c.iter().any(|x| &x.1.owner == *o)).cloned() {
                 c.retain(|x| x.1.owner == first || !qs[..nc].contains(&x.1.owner));
             }
-            // (derive で作られるメソッド `Point::default()`: 具体的な型の持ち主の候補がなければ derive の名前)
+            // (a method made by derive `Point::default()`: if there is no candidate whose owner is a concrete type, the derive name)
             if !c.iter().any(|x| qs[..nc].contains(&x.1.owner)) {
                 if let Some(l) = derive_method(ws, file, &qs[..nc], &name) {
                     return vec![l];
                 }
             }
-            // (見つからない: `use std::sync::Mutex` のように再エクスポートされた名前なら、下の use でたどる。
-            // Q が知らない名前 (`syn::Pat` / `Delimiter::None` の外部クレートのもの) なら答えない)
+            // (not found: if it is a re-exported name like `use std::sync::Mutex`, followed through the uses below.
+            // If Q is an unknown name (one of an external crate, `syn::Pat` / `Delimiter::None`), no answer)
             if !c.is_empty() {
                 return prefer_ws(ws, c, file);
             }
-            // (derive で作られるメソッド `T::default()` は derive の名前へ: rust-analyzer と同じ)
+            // (a method made by derive `T::default()` goes to the derive name: as in rust-analyzer)
             if let Some(l) = derive_method(ws, file, &qs[..nc], &name) {
                 return vec![l];
             }
@@ -2063,7 +2063,7 @@ fn def_at1(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
             }
         }
     }
-    // `self::` / `super::` (パスの始め): そのモジュール
+    // `self::` / `super::` (at the start of a path): that module
     if (name == "self" || name == "super") && f.before_path(k) {
         let mut segs = vec![name.as_str()];
         let mut j = k;
@@ -2091,12 +2091,12 @@ fn def_at1(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
         }
         return vec![];
     }
-    // `#[derive(Name)]` の Name は derive のマクロ
+    // The Name of `#[derive(Name)]` is the derive macro
     if f.in_derive(k) {
         let c: Vec<(usize, &Def)> = named(ws, file, &*name).into_iter().filter(|(_, d)| d.kind == SymKind::Macro).collect();
         return prefer_ws(ws, c, file);
     }
-    // (`let x` / `let mut x` の x はそれ自身)
+    // (the x of `let x` / `let mut x` is itself)
     if k >= 1
         && (f.tok(k - 1) == "let" || (f.tok(k - 1) == "mut" && k >= 2 && f.tok(k - 2) == "let"))
         && !name.starts_with(|c: char| c.is_ascii_uppercase())
@@ -2106,7 +2106,7 @@ fn def_at1(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
     {
         return vec![Loc { file, start, end: (f.toks[k].2 as usize) }];
     }
-    // 構造体の式・パターンのフィールドの名前 `T { x: .. }` (省略形 `T { x }` は束縛・ローカルの方: rust-analyzer と同じ)
+    // The name of a field in a struct expression / pattern `T { x: .. }` (the shorthand `T { x }` goes to the binding / local side: as in rust-analyzer)
     if k >= 1 && (f.sym(k - 1, b'{') || f.sym(k - 1, b',')) && f.sym(k + 1, b':') && !f.sym(k + 2, b':') {
         if let Some(t) = f.struct_lit_at(k) {
             let t = if t == "Self" { f.enclosing_owner(off).unwrap_or(t) } else { t };
@@ -2115,39 +2115,39 @@ fn def_at1(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
             return prefer_ws(ws, c, file);
         }
     }
-    // (パターン・引数の中の束縛の名前はそれ自身: `let (a, b)` / `fn f(x: T)` / `Some(x) =>`)
+    // (the name of a binding in a pattern / parameters is itself: `let (a, b)` / `fn f(x: T)` / `Some(x) =>`)
     if f.pat_binding(k) || f.fn_param(k) || f.arm_binding(k) {
         return vec![Loc { file, start, end: (f.toks[k].2 as usize) }];
     }
-    // ローカル
+    // A local
     if !f.after_path(k) {
         if let Some(b) = f.local(k, &name) {
             return vec![Loc { file, start: (f.toks[b].1 as usize), end: (f.toks[b].2 as usize) }];
         }
     }
-    // 型引数 (`fn f<T>(x: T)` / `impl<T> S<T>` の T)
+    // A type parameter (the T of `fn f<T>(x: T)` / `impl<T> S<T>`)
     if name.starts_with(|c: char| c.is_ascii_uppercase()) && !f.after_path(k) {
         if let Some(g) = f.generic_param(start, &name) {
             return vec![Loc { file, start: f.toks[g].1 as usize, end: f.toks[g].2 as usize }];
         }
     }
-    // アイテム: 同じモジュール → use → ワークスペースで一つ → ライブラリ (prelude の Option / Some など)
+    // Items: the same module → use → the only one in the workspace → libraries (Option / Some etc. of the prelude)
     let mut cands: Vec<(usize, &Def)> = named(ws, file, &*name).into_iter().filter(|(_, d)| d.owner.is_empty() && ITEM_KINDS.contains(&d.kind)).collect();
     if cands.is_empty() {
-        // (`use a::Point as Pt` の Pt: もとの名前の定義を、その use で引く)
+        // (the Pt of `use a::Point as Pt`: the definition of the original name, looked up through that use)
         if let Some(real) = f.use_alias(&name) {
             cands = named(ws, file, &*real).into_iter().filter(|(_, d)| d.owner.is_empty() && ITEM_KINDS.contains(&d.kind)).collect();
         }
     }
     if cands.is_empty() {
-        // (`Some` / `None` / `Ok` / `Err`: prelude のバリアント)
+        // (`Some` / `None` / `Ok` / `Err`: variants of the prelude)
         cands = named(ws, file, &name).into_iter().filter(|(i, d)| ws[*i].lib && d.kind == SymKind::Variant && (d.owner == "Option" || d.owner == "Result")).collect();
     }
     if cands.is_empty() {
         return vec![];
     }
     let here = f.module_at(off);
-    // (`use` の中の名前 (`use a::Ty as PTy` の Ty): その use のパスで引く)
+    // (a name inside a `use` (the Ty of `use a::Ty as PTy`): looked up by the path of that use)
     if let Some(j) = f.use_at.iter().position(|&a| a == start) {
         let one = [(name.clone(), f.uses[j].1.clone())];
         return resolve_use(ws, file, &one, &here, &name, &cands, 0).unwrap_or_else(|| prefer_ws(ws, cands, file));
@@ -2156,20 +2156,20 @@ fn def_at1(ws: &[&FileIndex], file: usize, off: usize) -> Vec<Loc> {
     if !same.is_empty() {
         return pick(same, file);
     }
-    // (use: 名前を取り込んだもの、glob で取り込んだモジュールのもの、そのモジュールが use で取り込んだもの)
+    // (use: what brought in the name, what is in the modules brought in by glob, what those modules brought in by use)
     if let Some(r) = resolve_use(ws, file, &f.uses, &here, &name, &cands, 0) {
         return r;
     }
     prefer_ws(ws, cands, file)
 }
 
-/// uses (here のモジュールの use) で name を引く。depth: glob で取り込んだモジュールの use をたどった段数
+/// Looks up name with uses (the uses of module here). depth: the number of levels of uses of glob-imported modules followed
 fn resolve_use(ws: &[&FileIndex], file: usize, uses: &[(String, Vec<String>)], here: &[String], name: &str, cands: &[(usize, &Def)], depth: u32) -> Option<Vec<Loc>> {
     for (local, path) in uses {
         if local == name && path.len() >= 2 {
             let (m, exact) = use_module(here, &path[..path.len() - 1]);
             let c = by_use(cands, &m, exact);
-            // (候補がモジュールの下に二つ以上: そのモジュールの `pub use` をたどる。std::sync::Mutex → sync::poison::mutex)
+            // (two or more candidates under the module: follows that module's `pub use`. std::sync::Mutex → sync::poison::mutex)
             if c.len() > 1 && !exact {
                 if let Some(r) = reexport(ws, file, &m, &path[path.len() - 1], cands, 0) {
                     return Some(r);
@@ -2187,7 +2187,7 @@ fn resolve_use(ws: &[&FileIndex], file: usize, uses: &[(String, Vec<String>)], h
             if !c.is_empty() {
                 return Some(prefer_ws(ws, c, file));
             }
-            // (そのモジュールのファイルが use で取り込んだもの: `use super::*` で親の use も見える)
+            // (what the module's file brought in by use: with `use super::*` the parent's uses are visible too)
             if depth < 2 && exact {
                 for w in ws.iter().filter(|w| !w.lib && w.module == m) {
                     if let Some(r) = resolve_use(ws, file, &w.uses, &m, name, cands, depth + 1) {
@@ -2200,7 +2200,7 @@ fn resolve_use(ws: &[&FileIndex], file: usize, uses: &[(String, Vec<String>)], h
     None
 }
 
-/// モジュール m (のファイル) が `use` で取り込んだ name をたどる
+/// Follows the name that module m (its file) brought in by `use`
 fn reexport(ws: &[&FileIndex], file: usize, m: &[String], name: &str, cands: &[(usize, &Def)], depth: u32) -> Option<Vec<Loc>> {
     if depth > 4 {
         return None;
@@ -2230,15 +2230,15 @@ fn reexport(ws: &[&FileIndex], file: usize, m: &[String], name: &str, cands: &[(
     None
 }
 
-/// off にある識別子の参照 (同じ定義に解決される同じ名前の識別子)。include_decl なら定義の名前も入れる
+/// The references of the identifier at off (the identifiers of the same name that resolve to the same definition). If include_decl, the definition's name is included too
 pub fn references(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool, load: Load) -> Vec<Loc> {
     references_in(ws, file, off, include_decl, load, None)
 }
 
-/// textDocument/documentHighlight: ファイル file の中の参照だけ (ほかのファイルは探さない)
+/// textDocument/documentHighlight: only the references in file file (other files are not searched)
 pub fn highlights(ws: &[&FileIndex], file: usize, off: usize, load: Load) -> Vec<Loc> {
     let mut v = references_in(ws, file, off, true, load, Some(file));
-    // (省略形 `T { x }` の x の上: ローカルの参照とフィールドの参照の両方 (rust-analyzer と同じ))
+    // (on the x of a shorthand `T { x }`: both the local's references and the field's references (as in rust-analyzer))
     if let Some(k) = ws[file].tok_at(off) {
         if let Some(fl) = shorthand_pair(ws, file, k) {
             if !ws[fl.file].slim {
@@ -2254,9 +2254,9 @@ pub fn highlights(ws: &[&FileIndex], file: usize, off: usize, load: Load) -> Vec
     v
 }
 
-/// references の本体。only があればそのファイルの中だけを探す
-/// `fn` のキーワードの上: 関数の出口 (`fn` 自身・`return ..`・`?`・本体の最後の式)。rust-analyzer の references /
-/// documentHighlight と同じ
+/// The body of references. If only is given, searches only inside that file
+/// On the `fn` keyword: the fn's exit points (`fn` itself, `return ..`, `?`, the last expression of the body). Same as rust-analyzer's references /
+/// documentHighlight
 fn exit_points(f: &FileIndex, file: usize, off: usize) -> Option<Vec<Loc>> {
     let k = f.tok_at(off)?;
     if f.tok(k) != "fn" || !f.ident(k + 1) {
@@ -2265,7 +2265,7 @@ fn exit_points(f: &FileIndex, file: usize, off: usize) -> Option<Vec<Loc>> {
     let a = f.toks[k + 1].1 as usize;
     let d = f.defs.iter().find(|d| d.start == a && matches!(d.kind, SymKind::Function | SymKind::Method))?;
     let n = f.toks.len();
-    // (本体の `{`: シグネチャの括弧の外の最初の `{`)
+    // (the body's `{`: the first `{` outside the signature's brackets)
     let mut j = k + 2;
     let mut dd = 0;
     while j < n && (f.toks[j].1 as usize) < d.item_end {
@@ -2308,14 +2308,14 @@ fn exit_points(f: &FileIndex, file: usize, off: usize) -> Option<Vec<Loc>> {
             out.push(Loc { file, start: at, end: f.toks[q].2 as usize });
         }
     }
-    // (最後の式: match / if / ブロックなら中の腕・ブロックの最後の式をたどる)
+    // (the last expression: for match / if / a block, follows the arms inside / the last expression of the block)
     block_tails(f, file, open, close, &mut out);
     Some(out)
 }
 
-/// このファイルの `macro_rules! name { (..) => {{ ..; tail }} }` (腕が一つ) の、本体の最後の式の型
-/// マクロの定義の本文から、結果の型の手がかり (FileIndex::new で Def に残す): 腕の本体の始めが `$crate::T::` / `$crate::T(`
-/// (T は大文字で始まる) のものが半分以上なら T。腕が一つで本体が `$crate::m!(..)` なら "!m"
+/// The type of the last expression of the body of this file's `macro_rules! name { (..) => {{ ..; tail }} }` (with one arm)
+/// A hint at the result type from the text of a macro definition (kept in the Def by FileIndex::new): if half or more of the arm bodies start with `$crate::T::` / `$crate::T(`
+/// (T starts with an uppercase letter), T. If there is one arm and the body is `$crate::m!(..)`, "!m"
 fn macro_hint(text: &str) -> Option<String> {
     let bodies: Vec<&str> = text.match_indices("=>").map(|(i, _)| text[i + 2..].trim_start().trim_start_matches(['{', '(']).trim_start()).collect();
     if bodies.is_empty() {
@@ -2341,7 +2341,7 @@ fn macro_hint(text: &str) -> Option<String> {
         }
     }
     let (t, c) = counts.into_iter().max_by_key(|x| x.1)?;
-    // (マクロを呼ぶだけの本体 (TT muncher の途中の腕 `json_internal!(@object ..)` / `vec![..]`) を除いた腕の半分以上)
+    // (half or more of the arms, excluding bodies that only call a macro (the intermediate arms of a TT muncher `json_internal!(@object ..)` / `vec![..]`))
     let finals = bodies
         .iter()
         .filter(|b| {
@@ -2357,7 +2357,7 @@ fn macro_hint(text: &str) -> Option<String> {
 fn macro_result_type(ws: &[&FileIndex], file: usize, name: &str, depth: u32) -> Option<String> {
     let f = ws[file];
     let Some(d) = f.defs.iter().find(|d| d.kind == SymKind::Macro && d.name == name) else {
-        // (ほかのファイル・ライブラリの macro_rules!: 定義に残した手がかり)
+        // (a macro_rules! of another file / a library: the hint kept in the definition)
         if depth > 8 {
             return None;
         }
@@ -2370,7 +2370,7 @@ fn macro_result_type(ws: &[&FileIndex], file: usize, name: &str, depth: u32) -> 
     };
     let a = f.toks.partition_point(|t| (t.1 as usize) < d.start);
     let e = f.toks.partition_point(|t| (t.1 as usize) < d.item_end);
-    // (腕の `=>` が一つだけ)
+    // (only one `=>` of an arm)
     let arrows: Vec<usize> = (a..e).filter(|&q| f.sym(q, b'=') && f.sym(q + 1, b'>')).collect();
     let mut q = *arrows.first()?;
     if arrows.len() != 1 {
@@ -2380,25 +2380,25 @@ fn macro_result_type(ws: &[&FileIndex], file: usize, name: &str, depth: u32) -> 
     if !(f.sym(q, b'{') || f.sym(q, b'(')) {
         return None;
     }
-    // (`{{ .. }}` は内側のブロック)
+    // (`{{ .. }}` is the inner block)
     let (o, c) = if f.sym(q + 1, b'{') && close_of(f, q + 1) + 1 == close_of(f, q) { (q + 1, close_of(f, q + 1)) } else { (q, close_of(f, q)) };
     let mut tails = vec![];
     block_tails(f, file, o, c, &mut tails);
     let l = tails.first()?;
     let k = f.toks.partition_point(|t| (t.2 as usize) < l.end);
-    // (本体の中の `$x` はわからない)
+    // (a `$x` inside the body is unknown)
     if (f.toks.partition_point(|t| (t.1 as usize) < l.start)..=k).any(|q| f.sym(q, b'$')) {
         return None;
     }
     expr_type(ws, file, k, depth + 1)
 }
 
-/// ブロック (開き括弧 p) で終わる式の始め: `match x {` の match、`if c { } else {` の if、`loop {` / `unsafe {`、ただのブロック
-/// なら p。`fn` の本体・`impl` などのアイテムの `{` なら None
+/// The start of an expression ending in a block (opening bracket p): the match of `match x {`, the if of `if c { } else {`, `loop {` / `unsafe {`; for a plain block
+/// p. None for the `{` of a `fn` body or of an item such as `impl`
 fn block_expr_start(f: &FileIndex, p: usize) -> Option<usize> {
     let mut q = p;
     loop {
-        // (`} else {` / `} else if c {`: 前のブロックへ)
+        // (`} else {` / `} else if c {`: to the previous block)
         if q >= 2 && f.ident(q - 1) && f.tok(q - 1) == "else" && f.sym(q - 2, b'}') {
             q = f.open_of(q - 2)?;
             continue;
@@ -2420,7 +2420,7 @@ fn block_expr_start(f: &FileIndex, p: usize) -> Option<usize> {
                 match f.tok(r) {
                     "match" | "loop" | "unsafe" | "async" => return Some(r),
                     "if" => {
-                        // (`else if`: さらに前の if へ)
+                        // (`else if`: further back to the previous if)
                         if r >= 2 && f.ident(r - 1) && f.tok(r - 1) == "else" && f.sym(r - 2, b'}') {
                             q = f.open_of(r - 2)?;
                             break;
@@ -2438,7 +2438,7 @@ fn block_expr_start(f: &FileIndex, p: usize) -> Option<usize> {
     }
 }
 
-/// トークン j の開き括弧に対応する閉じ括弧
+/// The closing bracket matching the opening bracket of token j
 fn close_of(f: &FileIndex, j: usize) -> usize {
     let mut d = 0;
     let mut q = j;
@@ -2456,12 +2456,12 @@ fn close_of(f: &FileIndex, j: usize) -> usize {
     f.toks.len().saturating_sub(1)
 }
 
-/// ブロック `{ .. }` (open..close) の最後の式 (の出口) を out に足す
+/// Adds the last expression (its exit points) of a block `{ .. }` (open..close) to out
 fn block_tails(f: &FileIndex, file: usize, open: usize, close: usize, out: &mut Vec<Loc>) {
     if close >= f.toks.len() || close <= open + 1 || f.sym(close - 1, b';') {
         return;
     }
-    // (最後の文の始め: 深さ 0 で前が `;` か、ブロックの式 `}` の後 (`.` / `else` が続かない))
+    // (the start of the last statement: at depth 0, preceded by `;` or following a block expression `}` (not followed by `.` / `else`))
     let mut s = close - 1;
     let mut dd = 0;
     while s > open + 1 {
@@ -2478,8 +2478,8 @@ fn block_tails(f: &FileIndex, file: usize, open: usize, close: usize, out: &mut 
     expr_tails(f, file, s, close - 1, out);
 }
 
-/// 範囲の式 (トークン s..=e、深さ 0 に `..` / `..=`) の型: `Range<T>` / `RangeInclusive<T>`。T は分かる方の端の型、
-/// どちらも接尾辞のない数なら i32 (rust-analyzer と同じ既定)。終わりのない `a..` は `RangeFrom<T>`
+/// The type of a range expression (tokens s..=e, with `..` / `..=` at depth 0): `Range<T>` / `RangeInclusive<T>`. T is the type of whichever end is known;
+/// if both are numbers without a suffix, i32 (the same default as rust-analyzer). An open-ended `a..` is `RangeFrom<T>`
 fn range_type(ws: &[&FileIndex], file: usize, s: usize, e: usize, depth: u32) -> Option<String> {
     let f = ws[file];
     let mut dd = 0;
@@ -2502,8 +2502,8 @@ fn range_type(ws: &[&FileIndex], file: usize, s: usize, e: usize, depth: u32) ->
     None
 }
 
-/// 前置の演算子 (`&` / `&mut` / `*`) で始まる式 (トークン s..=e) の型: 演算子のかかる式の型 t (式の終わりのトークンの型) に、
-/// 内側から当てはめる (`&*p` の p: `*const T` → `&T`)。間に二項演算子があれば (`*a + b`) そのまま
+/// The type of an expression (tokens s..=e) starting with prefix operators (`&` / `&mut` / `*`): applied from the inside to the type t of the expression the operators apply to (the type of the expression's last token)
+/// (the p of `&*p`: `*const T` → `&T`). If there is a binary operator in between (`*a + b`), unchanged
 fn with_prefix(f: &FileIndex, s: usize, e: usize, t: String) -> String {
     let mut ops = vec![];
     let mut q = s;
@@ -2546,7 +2546,7 @@ fn with_prefix(f: &FileIndex, s: usize, e: usize, t: String) -> String {
     t
 }
 
-/// 式 (トークン s..=e) の出口: match の腕・if / else のブロック・ブロックならその中の最後の式、ほかは式そのもの
+/// The exit points of an expression (tokens s..=e): for match arms, if / else blocks and blocks, the last expression inside; otherwise the expression itself
 fn expr_tails(f: &FileIndex, file: usize, s: usize, e: usize, out: &mut Vec<Loc>) {
     let whole = |out: &mut Vec<Loc>| {
         let a = f.toks[s].1 as usize;
@@ -2559,9 +2559,9 @@ fn expr_tails(f: &FileIndex, file: usize, s: usize, e: usize, out: &mut Vec<Loc>
     } else if f.ident(s) && f.tok(s) == "unsafe" && f.sym(s + 1, b'{') && close_of(f, s + 1) == e {
         block_tails(f, file, s + 1, e, out);
     } else if f.ident(s) && matches!(f.tok(s), "while" | "for") {
-        // (値のないループ: 出口ではない (rust-analyzer と同じ))
+        // (a loop without a value: not an exit point (as in rust-analyzer))
     } else if f.ident(s) && f.tok(s) == "match" {
-        // (腕: `pat => 式,` / `pat => { .. }`)
+        // (arms: `pat => expr,` / `pat => { .. }`)
         let mut b = s + 1;
         while b < e && !(f.sym(b, b'{') && !(b >= 1 && f.ident(b - 1) && f.tok(b - 1).starts_with(|c: char| c.is_ascii_uppercase()))) {
             b += 1;
@@ -2571,7 +2571,7 @@ fn expr_tails(f: &FileIndex, file: usize, s: usize, e: usize, out: &mut Vec<Loc>
         }
         let mut q = b + 1;
         while q < e {
-            // (`=>` を探して、その後の腕の式の終わり (深さ 0 の `,` か、閉じ括弧の前))
+            // (finds `=>`, then the end of the arm's expression after it (a `,` at depth 0, or before a closing bracket))
             if f.sym(q, b'=') && f.sym(q + 1, b'>') {
                 let a = q + 2;
                 let mut z = a;
@@ -2596,7 +2596,7 @@ fn expr_tails(f: &FileIndex, file: usize, s: usize, e: usize, out: &mut Vec<Loc>
             }
         }
     } else if f.ident(s) && f.tok(s) == "if" {
-        // (`if c { A } else if d { B } else { C }`: 各ブロック)
+        // (`if c { A } else if d { B } else { C }`: each block)
         let mut q = s + 1;
         let mut any = false;
         while q <= e {
@@ -2636,30 +2636,30 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
         return prim_refs(ws, file, off, load, only);
     };
     let tf = ws[target.file];
-    // (行き先が `#[derive(Default)]` の名前 (derive が作るメソッド): 問い合わせた名前 (`default`) で探す)
+    // (if the target is the name in `#[derive(Default)]` (a method made by derive): searched by the queried name (`default`))
     let via_derive = !tf.slim && tf.tok_at(target.start).is_some_and(|j| tf.in_derive(j));
     let qname = ws[file].tok_at(off).map(|k| ws[file].tok(k).to_string()).unwrap_or_default();
-    // (クレートの根 (`std` / `fixture`): 位置 0..0。名前は問い合わせた名前)
+    // (a crate root (`std` / `fixture`): position 0..0. The name is the queried name)
     let crate_ref = target.start == 0 && target.end == 0;
     let name = match tf.defs.iter().find(|x| x.start == target.start) {
         _ if via_derive || crate_ref => qname.as_str(),
         Some(d) if tf.slim => d.name.as_str(),
         _ => &tf.text[target.start..target.end],
     };
-    // (ローカルなら定義のある関数の中だけ)
+    // (for a local, only inside the fn that has the definition)
     let is_local = !via_derive && !crate_ref && !tf.defs.iter().any(|x| x.start == target.start && x.kind != SymKind::Impl);
     let mut out = vec![];
-    // (ライブラリの索引はトークンを持たないので、宣言はここで足す。derive の名前も (名前が違うので下では見つからない))
+    // (library indexes have no tokens, so the declaration is added here. The derive name too (it has a different name, so it is not found below))
     if include_decl && ((tf.lib && only.is_none()) || ((via_derive || crate_ref) && only.is_none_or(|o| o == target.file))) {
         out.push(target);
     }
-    // (型なら、その impl の中の `Self` も参照: rust-analyzer と同じ)
+    // (for a type, the `Self`s inside its impls are references too: as in rust-analyzer)
     let tdef = tf.defs.iter().find(|x| x.start == target.start && x.kind != SymKind::Impl);
     let is_type = tdef.is_some_and(|x| matches!(x.kind, SymKind::Struct | SymKind::Enum | SymKind::Union | SymKind::TypeAlias));
-    // (モジュールなら `self::` / `super::` も)
+    // (for a module, `self::` / `super::` too)
     let is_mod = tdef.is_some_and(|x| x.kind == SymKind::Module);
     let is_field = tdef.is_some_and(|x| x.kind == SymKind::Field);
-    // (trait のメソッドなら、impl のメソッドとその呼び出しも: rust-analyzer と同じ)
+    // (for a trait method, the impls' methods and their calls too: as in rust-analyzer)
     let mut targets = vec![target];
     if let Some(td) = tdef.filter(|x| x.kind == SymKind::Method && !x.container.starts_with("impl")) {
         for (i, w) in ws.iter().enumerate() {
@@ -2670,7 +2670,7 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
             }
         }
     }
-    // (メンバなら持ち主の型の名前と、ワークスペースの具体的な型 (struct / enum / union) の名前 (型の別名・trait は除く))
+    // (for a member, the name of the owner type and the names of the concrete types (struct / enum / union) of the workspace (type aliases and traits excluded))
     let owner: Option<String> = tdef.filter(|x| !x.owner.is_empty() && matches!(x.kind, SymKind::Method | SymKind::Function | SymKind::Const)).map(|x| x.owner.clone());
     let mut concrete: FxSet<&str> = if owner.is_some() {
         let aliases: FxSet<&str> = ws.iter().filter(|w| !w.lib).flat_map(|w| w.defs.iter()).filter(|d| matches!(d.kind, SymKind::TypeAlias | SymKind::Trait)).map(|d| d.name.as_str()).collect();
@@ -2678,12 +2678,12 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
     } else {
         FxSet::default()
     };
-    // (持ち主が trait なら `P::default()` も trait のメソッドになりうる: 絞らない)
+    // (if the owner is a trait, `P::default()` can also be the trait's method: not narrowed)
     let owner = owner.filter(|o| concrete.contains(o.as_str()));
     if owner.is_none() {
         concrete.clear();
     }
-    // (探すファイル。メモリから外したファイル (slim) は先に読み直し、識別子の解決にはそれを使う)
+    // (the files to search. Files taken out of memory (slim) are reloaded first, and those are used to resolve identifiers)
     let files: Vec<usize> = ws
         .iter()
         .enumerate()
@@ -2708,10 +2708,10 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
         let ks = w.idents.get(name).unwrap_or(&none);
         let selfs = if is_type { w.idents.get("Self").unwrap_or(&none) } else { &none };
         let mods = if is_mod { w.idents.get("self").into_iter().chain(w.idents.get("super")).flatten().collect() } else { vec![] };
-        // (`use a::Point as Pt` の Pt は数えない: rust-analyzer と同じ。Pt の参照は Pt で引く)
+        // (the Pt of `use a::Point as Pt` is not counted: as in rust-analyzer. The references of Pt are looked up with Pt)
         for &k in ks.iter().chain(selfs.iter()).chain(mods) {
             let at = w.toks[k as usize].1 as usize;
-            // (macro_rules! の本体は名前を解決しない: rust-analyzer と同じ。cfg で外れたアイテムの中は def_at がパスだけ解決する)
+            // (names in macro_rules! bodies are not resolved: as in rust-analyzer. Inside items excluded by cfg, def_at resolves only paths)
             if w.in_macro_body(at) {
                 continue;
             }
@@ -2723,7 +2723,7 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
                 continue;
             }
             let here = Loc { file: i, start: at, end: (w.toks[k as usize].2 as usize) };
-            // (速さのため: メンバの参照で `Q::name` の Q が持ち主でない具体的な型 (struct / enum) なら解決するまでもない)
+            // (for speed: for references of a member, if the Q of `Q::name` is a concrete type (struct / enum) that is not the owner, there is no need to resolve it)
             if let Some(o) = owner.as_deref() {
                 let k = k as usize;
                 if w.after_path(k) && k >= 3 && w.ident(k - 3) {
@@ -2736,11 +2736,11 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
             if def_at(wsx, i, at).first().is_some_and(|l| targets.contains(l)) {
                 out.push(here);
             } else if is_field && shorthand_field(wsx, i, k as usize).first() == Some(&target) {
-                // (省略形 `T { x }` の x はフィールドの参照でもある)
+                // (the x of a shorthand `T { x }` is also a reference of the field)
                 out.push(here);
             }
         }
-        // (ワークスペースのクレートの根: そのクレートの中の `crate::` / `pub(crate)` と、根を指す `super` も (rust-analyzer と同じ))
+        // (a workspace crate root: the `crate::` / `pub(crate)` inside that crate, and also `super` pointing at the root (as in rust-analyzer))
         if crate_ref && !tf.lib && w.krate == tf.krate && !w.lib {
             for (k, _) in w.toks.iter().enumerate() {
                 if !w.ident(k) {
@@ -2757,7 +2757,7 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
                 }
             }
         }
-        // (ローカルなら `format!("{x}")` の中の x も)
+        // (for a local, the x inside `format!("{x}")` too)
         if is_local {
             for (t, tk) in w.toks.iter().enumerate() {
                 if tk.0 != 2 || !w.text[tk.1 as usize..].starts_with('"') {
@@ -2773,7 +2773,7 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
         }
         out
     };
-    // (ファイルごとに独立なので、多ければスレッドに分ける。名前の表の記憶 (thread_local) はスレッドごと、クレートの根は写す)
+    // (each file is independent, so if there are many they are split across threads. The memo of the name table (thread_local) is per thread; the crate roots are copied)
     let par = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(8);
     if files.len() >= 8 && par > 1 {
         let roots = CRATE_ROOTS.with(|c| c.borrow().clone());
@@ -2807,7 +2807,7 @@ fn references_in(ws: &[&FileIndex], file: usize, off: usize, include_decl: bool,
     out
 }
 
-/// `impl Tr for S` / `impl<T> Tr<T> for S<T>` の Tr
+/// The Tr of `impl Tr for S` / `impl<T> Tr<T> for S<T>`
 fn impl_trait(container: &str) -> Option<&str> {
     let n = container.strip_prefix("impl ")?;
     let i = n.rfind(" for ")?;
@@ -2815,7 +2815,7 @@ fn impl_trait(container: &str) -> Option<&str> {
     Some(t.split('<').next().unwrap_or(t).rsplit("::").next().unwrap_or(t).trim())
 }
 
-/// 構造体の式・パターンの省略形 `T { x }` の x (トークン k) のフィールドの定義
+/// The definition of the field of the x (token k) of a struct expression / pattern shorthand `T { x }`
 fn shorthand_field(ws: &[&FileIndex], file: usize, k: usize) -> Vec<Loc> {
     let f = ws[file];
     if !(k >= 1 && (f.sym(k - 1, b'{') || f.sym(k - 1, b',')) && (f.sym(k + 1, b',') || f.sym(k + 1, b'}'))) {
@@ -2836,7 +2836,7 @@ fn shorthand_field(ws: &[&FileIndex], file: usize, k: usize) -> Vec<Loc> {
     prefer_ws(ws, c, file)
 }
 
-/// 組み込みの型 (`u8` など) の参照: ワークスペースの同じ名前の識別子のうち、ほかの定義に解決されないもの
+/// References of a built-in type (`u8` etc.): the identifiers of the same name in the workspace that do not resolve to another definition
 fn prim_refs(ws: &[&FileIndex], file: usize, off: usize, load: Load, only: Option<usize>) -> Vec<Loc> {
     let f = ws[file];
     let Some(k) = f.tok_at(off) else { return vec![] };
@@ -2861,12 +2861,12 @@ fn prim_refs(ws: &[&FileIndex], file: usize, off: usize, load: Load, only: Optio
         for &k in ks {
             let k = k as usize;
             let at = w.toks[k].1 as usize;
-            // (メソッド・フィールドの名前 `x.u8` やマクロの本体の中は除く)
-            // (`0u8` の接尾辞も除く: 数のすぐ後ろ。`std::str::from_utf8` の str はモジュール)
+            // (excluding method / field names `x.u8` and macro bodies)
+            // (also excluding the suffix of `0u8`: right after a number. The str of `std::str::from_utf8` is a module)
             if w.in_macro_body(at) || w.after_path(k) || (k > 0 && (w.sym(k - 1, b'.') || (w.toks[k - 1].2 as usize == at && w.text.as_bytes()[w.toks[k - 1].1 as usize].is_ascii_digit()))) {
                 continue;
             }
-            // (同じ名前の定義 `fn u8(..)` の名前)
+            // (the name of a definition with the same name `fn u8(..)`)
             if w.defs.iter().any(|d| d.start == at) {
                 continue;
             }
@@ -2876,7 +2876,7 @@ fn prim_refs(ws: &[&FileIndex], file: usize, off: usize, load: Load, only: Optio
     out
 }
 
-/// slim なファイル (ws の番号) を読み直す
+/// Reloads a slim file (ws index)
 pub type Load<'a> = &'a dyn Fn(usize) -> Option<Rc<FileIndex>>;
 
 fn name_hash(s: &str) -> u64 {
@@ -2888,7 +2888,7 @@ fn name_hash(s: &str) -> u64 {
     h
 }
 
-/// 型の書き方から参照・`dyn`・`impl`・寿命を外したもの
+/// A type as written with references, `dyn`, `impl` and lifetimes removed
 fn strip_ref(t: &str) -> &str {
     let mut t = t.trim();
     loop {
@@ -2909,7 +2909,7 @@ fn strip_ref(t: &str) -> &str {
     t
 }
 
-/// 型の書き方の頭の名前 (`&'a mut a::Vec<T>` → Vec、`impl Iterator<..>` → Iterator、`[T]` / `[T; N]` → `[T]`、タプル → 空)
+/// The head name of a type as written (`&'a mut a::Vec<T>` → Vec, `impl Iterator<..>` → Iterator, `[T]` / `[T; N]` → `[T]`, a tuple → empty)
 pub fn type_head(t: &str) -> String {
     let t = strip_ref(t);
     if t.starts_with('[') {
@@ -2920,7 +2920,7 @@ pub fn type_head(t: &str) -> String {
     p.rsplit("::").next().unwrap_or("").to_string()
 }
 
-/// 型の引数 (`HashMap<K, V>` → [K, V]、`[T]` / `[T; N]` → [T]、寿命は外す)
+/// The type arguments (`HashMap<K, V>` → [K, V], `[T]` / `[T; N]` → [T], lifetimes removed)
 fn targs(t: &str) -> Vec<String> {
     let t = strip_ref(t);
     let (inner, sep_semi) = if let Some(r) = t.strip_prefix('[') {
@@ -2929,7 +2929,7 @@ fn targs(t: &str) -> Vec<String> {
         match t.find('<') {
             Some(i) if !t[..i].contains('(') => {
                 let r = &t[i + 1..];
-                // (対応する `>` まで)
+                // (up to the matching `>`)
                 let mut d = 0;
                 let mut e = r.len();
                 for (j, c) in r.char_indices() {
@@ -2978,7 +2978,7 @@ fn targs(t: &str) -> Vec<String> {
     out
 }
 
-/// t の中の識別子 params[i] を args[i] に置き換える
+/// Replaces the identifiers params[i] in t with args[i]
 fn subst(t: &str, params: &[String], args: &[String]) -> String {
     if params.is_empty() {
         return t.to_string();
@@ -3007,7 +3007,7 @@ fn subst(t: &str, params: &[String], args: &[String]) -> String {
     out
 }
 
-/// 型の別名の detail (`<K, V> = HashMap<K, V>` / `HashMap<..>`) → (型引数の名前, 右の型)
+/// A type alias's detail (`<K, V> = HashMap<K, V>` / `HashMap<..>`) → (type parameter names, the right-hand type)
 fn alias_parts(detail: &str) -> (Vec<String>, String) {
     let d = detail.trim();
     if !d.starts_with('<') {
@@ -3035,8 +3035,8 @@ fn alias_parts(detail: &str) -> (Vec<String>, String) {
     (params, rhs)
 }
 
-/// 型の別名なら右の型にする (型引数も置き換える: `LockResult<G>` → `Result<G, PoisonError<G>>`)。Deref する包み
-/// (`MutexGuard<T>` / `Box<T>` / `Rc<T>` / `Ref<T>` ..) は中身
+/// For a type alias, turns it into the right-hand type (type arguments replaced too: `LockResult<G>` → `Result<G, PoisonError<G>>`). For a wrapper that Derefs
+/// (`MutexGuard<T>` / `Box<T>` / `Rc<T>` / `Ref<T>` ..), its contents
 fn expand(ws: &[&FileIndex], file: usize, t: &str) -> Vec<String> {
     let mut out = vec![t.to_string()];
     let mut cur = t.to_string();
@@ -3045,13 +3045,13 @@ fn expand(ws: &[&FileIndex], file: usize, t: &str) -> Vec<String> {
         if h.is_empty() {
             break;
         }
-        // (同じ名前の別名がいくつもあれば (`io::Result<T>` と `fmt::Result`): 修飾のモジュールが合うもの、型引数の数が合うもの)
+        // (if there are several aliases with the same name (`io::Result<T>` and `fmt::Result`): the one whose qualifying module matches, the one whose number of type parameters matches)
         let qual = strip_ref(&cur).split('<').next().unwrap_or("").rsplit("::").nth(1).map(|s| s.to_string());
         let nargs = targs(&cur).len();
-        // (右辺が同じ名前の型でも、型引数の数が違う別名 (`io::Result<T>` = `Result<T, Error>`) は開く)
+        // (even if the right-hand side is a type of the same name, an alias with a different number of type parameters (`io::Result<T>` = `Result<T, Error>`) is expanded)
         let aliases: Vec<(usize, &Def)> = named(ws, file, &h).into_iter().filter(|(_, d)| d.kind == SymKind::TypeAlias && d.owner.is_empty() && !d.ty.is_empty() && (type_head(&d.ty) != h || targs(&d.ty).len() != d.params.len())).collect();
-        // (修飾がなければ型引数の数が合うものだけ: `Result<X, Y>` は enum の Result で、別名 `io::Result<T>` ではない)
-        // (修飾がなければ、使う所から見えるもの: 同じファイル、同じクレート、ワークスペースの順)
+        // (without a qualifier, only the ones whose number of type parameters matches: `Result<X, Y>` is the enum Result, not the alias `io::Result<T>`)
+        // (without a qualifier, the ones visible from the use site: in the order same file, same crate, workspace)
         let kr = ws[file].krate;
         let best = aliases.iter().copied().filter(|(_, d)| qual.is_some() || d.params.len() == nargs || nargs == 0).min_by_key(|(i, d)| (qual.as_ref().is_some_and(|q| d.module.last() != Some(q)), d.params.len() != nargs, *i != file, ws[*i].krate != kr, ws[*i].lib)).map(|x| x.1);
         let next = if let Some(d) = best {
@@ -3062,7 +3062,7 @@ fn expand(ws: &[&FileIndex], file: usize, t: &str) -> Vec<String> {
                 None => break,
             }
         } else if let Some(tg) = assoc_type(ws, file, strip_ref(&cur), "Deref", "Target").filter(|tg| type_head(tg) != h && !tg.is_empty()) {
-            // (`impl Deref for PathBuf { type Target = Path; }` などの Deref の先)
+            // (the Deref target, e.g. of `impl Deref for PathBuf { type Target = Path; }`)
             tg
         } else {
             break;
@@ -3076,7 +3076,7 @@ fn expand(ws: &[&FileIndex], file: usize, t: &str) -> Vec<String> {
     out
 }
 
-/// impl の名前 (`impl Tr for S<T>` / `impl S<T>`) の self 型 (`S<T>`)
+/// The self type (`S<T>`) of an impl name (`impl Tr for S<T>` / `impl S<T>`)
 fn impl_self_full(container: &str) -> &str {
     let n = container.strip_prefix("impl ").unwrap_or(container);
     match n.rfind(" for ") {
@@ -3085,7 +3085,7 @@ fn impl_self_full(container: &str) -> &str {
     }
 }
 
-/// 関数のシグネチャ (`fn f(..) -> T where ..`) の戻り値の型
+/// The return type of a fn signature (`fn f(..) -> T where ..`)
 fn ret_type(sig: &str) -> String {
     let b = sig.as_bytes();
     let mut d = 0i32;
@@ -3111,7 +3111,7 @@ fn ret_type(sig: &str) -> String {
     String::new()
 }
 
-/// 繰り返しの要素の型 (`for x in v` の x)
+/// The element type of an iteration (the x of `for x in v`)
 fn elem_type(t: &str) -> Option<String> {
     let h = type_head(t);
     let a = targs(t);
@@ -3129,7 +3129,7 @@ fn elem_type(t: &str) -> Option<String> {
     }
 }
 
-/// `t[..]` の型 (range なら同じ並び)
+/// The type of `t[..]` (the same sequence for a range)
 fn index_type(t: &str, range: bool) -> Option<String> {
     let h = type_head(t);
     let a = targs(t);
@@ -3147,17 +3147,17 @@ fn index_type(t: &str, range: bool) -> Option<String> {
 }
 
 thread_local! {
-    /// 名前 → その名前の定義 (ファイルの番号, defs の番号)。問い合わせ 1 回の間だけ (references は同じ名前を何百回も引く)。
-    /// キーはワークスペースのファイルの数と名前
+    /// Name → the definitions with that name (file index, defs index). Only for the duration of one query (references looks up the same name hundreds of times).
+    /// The key is the number of workspace files and the name
     static NAMED: RefCell<FxMap<(usize, String), Vec<(u32, u32)>>> = RefCell::new(FxMap::default());
 }
 
-/// ファイル file から見える (同じクレート・src・ライブラリ) 名前 name の定義
+/// The definitions of name name visible from file file (same crate, src, libraries)
 fn named<'a>(ws: &[&'a FileIndex], file: usize, name: &str) -> Vec<(usize, &'a Def)> {
     let kr = ws[file].krate;
     let key = (ws.len(), name.to_string());
     let ids = NAMED.with(|m| m.borrow().get(&key).cloned());
-    // (覚えた番号が今のワークスペースと合わなければ (読み直したファイルの差し替えなど) 引き直す)
+    // (if the remembered indices do not match the current workspace (a reloaded file replaced, etc.), looked up again)
     let ok = |ids: &[(u32, u32)]| ids.iter().all(|&(i, j)| ws.get(i as usize).and_then(|w| w.defs.get(j as usize)).is_some_and(|d| d.name == name));
     let ids = match ids {
         Some(v) if ok(&v) => v,
@@ -3174,19 +3174,19 @@ fn named<'a>(ws: &[&'a FileIndex], file: usize, name: &str) -> Vec<(usize, &'a D
 }
 
 thread_local! {
-    /// owner_names の結果 (問い合わせ 1 回の間だけ: definition / references / hover / complete の入口で消す)
+    /// The results of owner_names (only for the duration of one query: cleared at the entry of definition / references / hover / complete)
     static OWNERS: RefCell<FxMap<(String, u32), (Vec<String>, usize)>> = RefCell::new(FxMap::default());
 }
 
-/// ライブラリのクレートの `krate` の番号の始め (ワークスペースのクレートの番号と重ならないように)
+/// The start of the `krate` numbers of library crates (so that they do not overlap the numbers of the workspace crates)
 pub const LIB_KRATE_BASE: u32 = 1_000_000;
 
 thread_local! {
-    /// クレートの名前 → 根のファイル (ws の番号)。LSP がワークスペースの並びを作るたびに設定する
+    /// Crate name → root file (ws index). Set each time the LSP builds the list of the workspace
     static CRATE_ROOTS: RefCell<Vec<(String, usize)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// クレートの名前と根のファイル (ws の番号) を設定する (`std` / 依存クレート / ワークスペースのクレート)
+/// Sets the crate names and root files (ws indices) (`std` / dependency crates / workspace crates)
 pub fn set_crate_roots(v: Vec<(String, usize)>) {
     CRATE_ROOTS.with(|c| *c.borrow_mut() = v);
 }
@@ -3200,15 +3200,15 @@ fn clear_memo() {
     NAMED.with(|m| m.borrow_mut().clear());
 }
 
-/// 型 o (頭の名前) のメンバを探すときの持ち主の名前: o 自身、型の別名の右、Vec → スライス・String → str (Deref の先)、
-/// その型に impl・derive された trait
+/// The owner names used when looking up members of type o (head name): o itself, the right side of a type alias, Vec → slice, String → str (Deref targets),
+/// the traits impl'd / derived for that type
 fn owner_names(ws: &[&FileIndex], file: usize, o: &str) -> Vec<String> {
     owner_split(ws, file, o).0
 }
 
-/// owner_names と、そのうち trait でないもの (型自身・別名・Deref の先) の数
+/// owner_names, and how many of them are not traits (the type itself, aliases, Deref targets)
 fn owner_split(ws: &[&FileIndex], file: usize, o: &str) -> (Vec<String>, usize) {
-    // (`use a::Point as Pt` の別名はもとの名前で)
+    // (an alias from `use a::Point as Pt` by its original name)
     let o = ws[file].use_alias(o).unwrap_or(o);
     let kr = ws[file].krate;
     let key = (o.to_string(), kr);
@@ -3237,15 +3237,15 @@ fn owner_split(ws: &[&FileIndex], file: usize, o: &str) -> (Vec<String>, usize) 
         match x.as_str() {
             "Vec" => extra.push("[T]".to_string()),
             "String" => extra.push("str".to_string()),
-            // (数の型のメソッドは core のマクロ `uint_impl!` / `int_impl!` の中: symbols がそれを `impl __uint` / `impl __int` にする)
+            // (the methods of the number types are inside the core macros `uint_impl!` / `int_impl!`: symbols turns them into `impl __uint` / `impl __int`)
             "u8" | "u16" | "u32" | "u64" | "u128" | "usize" => extra.extend(["__uint".to_string(), "__num".to_string()]),
             "i8" | "i16" | "i32" | "i64" | "i128" | "isize" => extra.extend(["__int".to_string(), "__num".to_string()]),
-            // (str のパターンの繰り返し: core のマクロ `generate_pattern_iterators!` の中の impl (symbols が `impl __str_pat_iter` にする))
+            // (the pattern iterators of str: the impls inside the core macro `generate_pattern_iterators!` (symbols turns them into `impl __str_pat_iter`))
             "Split" | "RSplit" | "SplitN" | "RSplitN" | "SplitTerminator" | "RSplitTerminator" | "Matches" | "RMatches" | "MatchIndices" | "RMatchIndices" => extra.push("__str_pat_iter".to_string()),
             _ => {}
         }
     }
-    // (組み込みの型の trait (`impl Ord for usize` などは core のマクロの中で見えない): よく使う trait のメソッドを持たせる)
+    // (the traits of built-in types (`impl Ord for usize` etc. are inside core macros and not visible): give them the methods of commonly used traits)
     let prim_traits: &[&str] = if v.iter().any(|x| matches!(x.as_str(), "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "char" | "bool")) {
         &["Ord", "PartialOrd", "PartialEq", "Eq", "Clone", "Copy", "Hash", "Default", "Debug", "Display", "ToString"]
     } else if v.iter().any(|x| matches!(x.as_str(), "f32" | "f64")) {
@@ -3268,7 +3268,7 @@ fn owner_split(ws: &[&FileIndex], file: usize, o: &str) -> (Vec<String>, usize) 
             traits.push(tr.to_string());
         }
     }
-    // (繰り返しの型: slice の Iter などの `impl Iterator` は core のマクロの中にあって見えないので、Iterator のメソッドを持たせる)
+    // (iterator types: the `impl Iterator` of slice's Iter etc. are inside core macros and not visible, so give them Iterator's methods)
     if v.iter().any(|x| is_iter_head(x)) {
         for tr in ["Iterator", "DoubleEndedIterator", "ExactSizeIterator"] {
             if !traits.iter().any(|t| t == tr) {
@@ -3281,7 +3281,7 @@ fn owner_split(ws: &[&FileIndex], file: usize, o: &str) -> (Vec<String>, usize) 
     (v, nc)
 }
 
-/// ブランケットの impl (`impl<T: Display> ToString for T`) の trait の名前。only_common なら補完に出すよく使うものだけ
+/// The trait names of blanket impls (`impl<T: Display> ToString for T`). If only_common, only the commonly used ones offered in completion
 fn blanket_traits(ws: &[&FileIndex], file: usize, only_common: bool) -> Vec<String> {
     let kr = ws[file].krate;
     let mut out: Vec<String> = vec![];
@@ -3298,7 +3298,7 @@ fn blanket_traits(ws: &[&FileIndex], file: usize, only_common: bool) -> Vec<Stri
     out
 }
 
-/// 候補のうち、持ち主が型そのもの (concrete) のものがあればそれだけ (`FxMap::default` は trait の宣言より HashMap の impl)
+/// Of the candidates, if there are any whose owner is the type itself (concrete), only those (for `FxMap::default`, HashMap's impl rather than the trait's declaration)
 fn prefer_concrete<'a>(c: Vec<(usize, &'a Def)>, concrete: &[String]) -> Vec<(usize, &'a Def)> {
     if c.iter().any(|x| concrete.contains(&x.1.owner)) {
         c.into_iter().filter(|x| concrete.contains(&x.1.owner) || x.1.owner.is_empty()).collect()
@@ -3307,12 +3307,12 @@ fn prefer_concrete<'a>(c: Vec<(usize, &'a Def)>, concrete: &[String]) -> Vec<(us
     }
 }
 
-/// 型 t のメンバの持ち主の名前 (別名・Deref の先も)
+/// The owner names of the members of type t (aliases and Deref targets too)
 fn owners_of(ws: &[&FileIndex], file: usize, t: &str) -> Vec<String> {
     owners_of2(ws, file, t).0
 }
 
-/// owners_of と、そのうち trait でないもの
+/// owners_of, and those of them that are not traits
 fn owners_of2(ws: &[&FileIndex], file: usize, t: &str) -> (Vec<String>, Vec<String>) {
     let mut v: Vec<String> = vec![];
     let mut c: Vec<String> = vec![];
@@ -3330,7 +3330,7 @@ fn owners_of2(ws: &[&FileIndex], file: usize, t: &str) -> (Vec<String>, Vec<Stri
     (v, c)
 }
 
-/// 型 o の (頭の名前で探した) メンバ name の型。impl の型引数を o の引数で置き換える (`Option<Sig>` の unwrap → Sig)
+/// The type of member name of type o (looked up by its head name). The impl's type parameters are replaced by o's arguments (unwrap of `Option<Sig>` → Sig)
 fn member_type(ws: &[&FileIndex], file: usize, o: &str, name: &str, kinds: &[SymKind]) -> Option<String> {
     expand(ws, file, o).iter().find_map(|t| member_type1(ws, file, t, name, kinds))
 }
@@ -3339,19 +3339,19 @@ fn member_type1(ws: &[&FileIndex], file: usize, o: &str, name: &str, kinds: &[Sy
     member_def(ws, file, o, name, kinds).map(|x| x.0)
 }
 
-/// 受け手の型 o のメンバ name の (型, 定義)
+/// (type, definition) of member name of receiver type o
 fn member_def<'a>(ws: &[&'a FileIndex], file: usize, o: &str, name: &str, kinds: &[SymKind]) -> Option<(String, &'a Def)> {
     let (t, d) = member_def0(ws, file, o, name, kinds)?;
     Some((qualify_local_type(ws, file, d, t), d))
 }
 
-/// 定義 d の型 t の頭の名前が、d と同じファイルの型で、同じ名前の型がほかにもあるとき (serde_json の `map::Iter` と
-/// slice / path の `Iter`): モジュールで修飾する (`map::Iter`)。後の関連型・メソッドの引き当てで取り違えないように
+/// When the head name of type t of definition d is a type in the same file as d and there are other types with the same name (serde_json's `map::Iter` and
+/// slice / path's `Iter`): qualifies it with the module (`map::Iter`). So that later lookups of associated types / methods do not mix them up
 fn qualify_local_type(ws: &[&FileIndex], file: usize, d: &Def, t: String) -> String {
     let body = t.trim_start_matches('&').trim_start_matches("mut ").trim_start();
     let pre = &t[..t.len() - body.len()];
     let h = type_head(body);
-    // (型引数のある型は型引数の数で見分けられる (`Iter<'a, T>` / `Iter<'a, K, V>`) ので、型引数のないものだけ)
+    // (types with type parameters can be told apart by the number of type parameters (`Iter<'a, T>` / `Iter<'a, K, V>`), so only those without type parameters)
     if h.is_empty() || body.starts_with(|c: char| !c.is_ascii_uppercase()) || body[..body.find('<').unwrap_or(body.len())].contains("::") || !targs(body).is_empty() {
         return t;
     }
@@ -3369,7 +3369,7 @@ fn qualify_local_type(ws: &[&FileIndex], file: usize, d: &Def, t: String) -> Str
 fn member_def0<'a>(ws: &[&'a FileIndex], file: usize, o: &str, name: &str, kinds: &[SymKind]) -> Option<(String, &'a Def)> {
     let os = owner_names(ws, file, &type_head(o));
     let kr = ws[file].krate;
-    // (ワークスペースのものを先に。ライブラリは lib_rank の順)
+    // (workspace ones first. Libraries in lib_rank order)
     let _ = kr;
     let cands = named(ws, file, name);
     let find = |os: &[String]| {
@@ -3377,17 +3377,17 @@ fn member_def0<'a>(ws: &[&'a FileIndex], file: usize, o: &str, name: &str, kinds
             .iter()
             .map(|(i, d)| (ws[*i].lib, *d))
             .filter(|(_, d)| kinds.contains(&d.kind) && os.contains(&d.owner) && !d.ty.is_empty())
-            // (持ち主が型そのもののもの (`Option::as_ref`) を trait のもの (`AsRef::as_ref`) より先に)
-            // (同じ名前の別の型 (str の `Split<'a, P>` と slice の `Split<'a, T, P>`) は、型引数の数が合う impl を先に)
+            // (the ones whose owner is the type itself (`Option::as_ref`) before the trait ones (`AsRef::as_ref`))
+            // (for other types with the same name (str's `Split<'a, P>` and slice's `Split<'a, T, P>`), the impls whose number of type parameters matches first)
             .min_by_key(|(lib, d)| {
                 let mismatch = d.container.starts_with("impl") && targs(impl_self_full(&d.container)).len() != targs(o).len();
-                // (型引数のない受け手 (serde_json の `map::Iter`) に、型引数の要る同じ名前の型 (slice の `Iter<'a, T>`) の impl は
-                // 使わない: trait のメソッド (`Iterator::find`) を先に)
+                // (for a receiver without type parameters (serde_json's `map::Iter`), impls of a type with the same name that needs type parameters (slice's `Iter<'a, T>`) are
+                // not used: trait methods (`Iterator::find`) first)
                 (*lib, targs(o).is_empty() && mismatch, d.owner != type_head(o), mismatch, if *lib { lib_rank(d) } else { 0 })
             })
             .map(|x| x.1)
     };
-    // (なければ Deref の先 (`RefMut<Option<T>>` の `as_ref` は Option のもの)、それもなければブランケットの impl の trait のメソッド)
+    // (if none, the Deref target (the `as_ref` of `RefMut<Option<T>>` is Option's); if none either, the methods of the traits of blanket impls)
     let d = match find(&os) {
         Some(d) => d,
         None if kinds.contains(&SymKind::Method) => {
@@ -3400,8 +3400,8 @@ fn member_def0<'a>(ws: &[&'a FileIndex], file: usize, o: &str, name: &str, kinds
         }
         None => return None,
     };
-    // (別名 `type Cur = Option<..>` の受け手は、持ち主の型まで開いてから置き換える。持ち主と同じ名前の別名
-    // `io::Result<T>` (= `Result<T, Error>`) も、impl の型引数の数に合うまで開く)
+    // (a receiver of an alias `type Cur = Option<..>` is expanded up to the owner type before replacing. An alias with the same name as the owner
+    // `io::Result<T>` (= `Result<T, Error>`) is also expanded until it matches the number of the impl's type parameters)
     let arity_differs = || d.container.starts_with("impl") && targs(impl_self_full(&d.container)).len() != targs(o).len();
     if d.owner == type_head(o) && arity_differs() {
         let n = targs(impl_self_full(&d.container)).len();
@@ -3419,11 +3419,11 @@ fn member_def0<'a>(ws: &[&'a FileIndex], file: usize, o: &str, name: &str, kinds
     Some((def_subst(d, o, &d.ty), d))
 }
 
-/// 定義 d (受け手の型 o のメンバ) の型の書き方 s の中の型引数を、受け手の型から置き換える (impl の self 型の型引数・Self・
-/// 数の型のマクロの持ち主・Iterator の impl の決まらない型引数)
+/// Replaces the type parameters in s, the written type of definition d (a member of receiver type o), from the receiver type (the type parameters of the impl's self type, Self,
+/// the owners of the number types' macros, the undetermined type parameters of Iterator impls)
 fn def_subst(d: &Def, o: &str, s: &str) -> String {
     let (params, args) = if d.container.starts_with("impl") {
-        // (impl の self 型 `Option<&T>` を受け手の型 `Option<&Ty>` に当てはめる (位置で並べると `&T` が名前にならない))
+        // (fits the impl's self type `Option<&T>` to the receiver type `Option<&Ty>` (aligned by position, `&T` would not be a name))
         let selfty = impl_self_full(&d.container);
         let vars: Vec<String> = selfty.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty() && w.len() <= 2 && w.starts_with(|c: char| c.is_ascii_uppercase())).map(|w| w.to_string()).collect();
         let mut b = vec![];
@@ -3439,11 +3439,11 @@ fn def_subst(d: &Def, o: &str, s: &str) -> String {
         (vec![], targs(o))
     };
     let mut t = subst(s, &params, &args);
-    // (impl の型引数のうち self 型から決まらないもの (`impl<B, I, F> Iterator for Map<I, F>` の B): 受け手が繰り返しなら
-    // その要素の型 (Iterator の impl ではふつう Item))
-    // (impl の名前は `impl<..>` の型引数を持たないので、大文字 1 文字の名前で見分ける)
+    // (the impl's type parameters not determined by the self type (the B of `impl<B, I, F> Iterator for Map<I, F>`): if the receiver is an iterator,
+    // its element type (usually Item in an Iterator impl))
+    // (an impl's name does not have the type parameters of `impl<..>`, so they are recognized as names of 1 uppercase letter)
     if d.container.starts_with("impl") && d.container.contains("Iterator for ") && is_iter_head(&type_head(o)) {
-        // (代入の前の宣言の型から: 利用者の型 `D` などと取り違えない)
+        // (from the declared type before substitution: so as not to mix them up with the user's types like `D`)
         let mut unbound: Vec<String> = d.ty.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| w.len() == 1 && w.starts_with(|c: char| c.is_ascii_uppercase()) && !params.iter().any(|p| p == w)).map(|w| w.to_string()).collect();
         unbound.dedup();
         if unbound.len() == 1 {
@@ -3452,11 +3452,11 @@ fn def_subst(d: &Def, o: &str, s: &str) -> String {
             }
         }
     }
-    // (trait に書かれたメソッドの Self は受け手の型。数の型のマクロ (`uint_impl!`) の中のメソッドの持ち主も)
+    // (the Self of methods written in a trait is the receiver type. Also the owners of methods inside the number types' macros (`uint_impl!`))
     subst(&t, &["Self".to_string(), "__uint".to_string(), "__int".to_string(), "__num".to_string()], &[o.to_string(), o.to_string(), o.to_string(), o.to_string()]).replace("$SelfT", o).replace("$ActualT", o).replace("$int_ty", o)
 }
 
-/// トークン k で終わる式の型 (分かる範囲で: ローカル・self・フィールド・メソッドや関数の戻り値・構造体の式・添字・`?`)
+/// The type of the expression ending at token k (as far as known: locals, self, fields, return values of methods and fns, struct expressions, indexing, `?`)
 fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<String> {
     let f = ws[file];
     if depth > 32 || k >= f.toks.len() {
@@ -3464,14 +3464,14 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
     }
     let self_ty = |at: usize| -> Option<String> { f.enclosing_fn(at).filter(|d| !d.owner.is_empty()).map(|d| impl_self_full(&d.container).to_string()) };
     let at = f.toks[k].1 as usize;
-    // (タプルの添字 `x.0`: 数のトークンの前が `.`)
+    // (a tuple index `x.0`: a number token preceded by `.`)
     if f.toks[k].0 == 1 && f.text.as_bytes()[f.toks[k].1 as usize].is_ascii_digit() && k >= 2 && f.sym(k - 1, b'.') && !(k >= 3 && f.sym(k - 2, b'.')) {
         let i: usize = f.tok(k).parse().ok()?;
         let base = expr_type(ws, file, k - 2, depth + 1)?;
         let base = expand(ws, file, strip_ref(&base)).into_iter().last()?;
         return match tuple_items(strip_ref(&base)) {
             Some(v) => v.get(i).cloned(),
-            // (タプル構造体 `struct P(A, B)` のフィールド: 定義に残したフィールドの書き方から)
+            // (a field of a tuple struct `struct P(A, B)`: from the way the fields are written, kept in the definition)
             None => {
                 let h = type_head(&base);
                 let d = named(ws, file, &h).into_iter().map(|x| x.1).find(|d| d.kind == SymKind::Struct && d.owner.is_empty() && d.fnret.iter().any(|x| x.0 == 255))?;
@@ -3492,7 +3492,7 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
         if k >= 1 && f.ident(k - 1) && f.tok(k - 1) == "as" {
             return Some(r.to_string());
         }
-        // `a.b`: フィールド
+        // `a.b`: a field
         if k >= 1 && f.sym(k - 1, b'.') && !(k >= 2 && f.sym(k - 2, b'.')) {
             let o = expr_type(ws, file, k - 2, depth + 1)?;
             return member_type(ws, file, &o, r, &[SymKind::Field]);
@@ -3504,7 +3504,7 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
             // `Q::CONST` / `Enum::Variant`
             let q = f.tok(k.checked_sub(3)?).to_string();
             let q = if q == "Self" { self_ty(at)? } else { q };
-            // (`a::b::P` / `m::CONST`: モジュールの下の単位構造体・const。`u32::MAX` の u32 は型 (モジュールの `core::char::MAX` ではない))
+            // (`a::b::P` / `m::CONST`: a unit struct / const under a module. The u32 of `u32::MAX` is a type (not the module's `core::char::MAX`))
             if q.starts_with(|c: char| c.is_ascii_lowercase()) && !PRIMS.contains(&q.as_str()) {
                 let kr = f.krate;
                 return named(ws, file, r)
@@ -3522,12 +3522,12 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
         if r == "None" && !f.after_path(k) {
             return Some("Option<_>".to_string());
         }
-        // (単位構造体の値 `K`)
+        // (the value of a unit struct `K`)
         if r.starts_with(|c: char| c.is_ascii_uppercase()) && named(ws, file, r).iter().any(|(_, d)| d.kind == SymKind::Struct && d.owner.is_empty()) {
             return Some(r.to_string());
         }
         // (const / static)
-        // (同じ名前のものが別のファイルにもあれば (`const PRELUDE`)、同じファイル・同じクレートのもの)
+        // (if things with the same name are in other files too (`const PRELUDE`), the one in the same file / same crate)
         let kr = f.krate;
         return named(ws, file, r)
             .into_iter()
@@ -3569,10 +3569,10 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
             p -= 1;
         }
         let m = p.checked_sub(1)?;
-        // マクロ `vec![..]` / `format!(..)`
+        // Macros `vec![..]` / `format!(..)`
         if f.sym(m, b'!') && m >= 1 && f.ident(m - 1) {
             return match f.tok(m - 1) {
-                // (`vec![a, b]` / `vec![x; n]`: 最初の要素の型)
+                // (`vec![a, b]` / `vec![x; n]`: the type of the first element)
                 "vec" => {
                     let mut dd = 0;
                     let mut e0 = None;
@@ -3591,11 +3591,11 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
                     Some(format!("Vec<{}>", et.unwrap_or_else(|| "_".to_string())))
                 }
                 "format" => Some("String".to_string()),
-                // (このファイルの `macro_rules!` で腕が一つのもの: 本体のブロックの最後の式の型)
+                // (a `macro_rules!` of this file with one arm: the type of the last expression of the body block)
                 mname => macro_result_type(ws, file, mname, depth),
             };
         }
-        // ターボフィッシュ `x.collect::<Vec<_>>()` / `x.parse::<u8>()`
+        // Turbofish `x.collect::<Vec<_>>()` / `x.parse::<u8>()`
         if open == b'(' && f.sym(m, b'>') && !(m >= 1 && (f.sym(m - 1, b'=') || f.sym(m - 1, b'-'))) {
             let mut q = m;
             let mut dd = 0;
@@ -3615,7 +3615,7 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
                 let o = expr_type(ws, file, q - 5, depth + 1)?;
                 return method_call_type_at(ws, file, &o, f.tok(q - 3), m + 1, Some(&tb), depth);
             }
-            // (関数のターボフィッシュ `serde_json::from_str::<Value>(s)` / `f::<T>(x)`: 戻り値の最初の型引数に)
+            // (the turbofish of a fn `serde_json::from_str::<Value>(s)` / `f::<T>(x)`: into the first type parameter of the return type)
             if q >= 3 && f.sym(q - 1, b':') && f.sym(q - 2, b':') && f.ident(q - 3) {
                 let tb = f.text[f.toks[q + 1].1 as usize..f.toks[m - 1].2 as usize].to_string();
                 let name = f.tok(q - 3);
@@ -3631,7 +3631,7 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
             }
             return None;
         }
-        // 括弧の式 `(e)` とタプルの式 `(a, b)` (前が呼ぶもの (名前・`)`・`]`) でないとき)
+        // A parenthesized expression `(e)` and a tuple expression `(a, b)` (when not preceded by something being called (a name, `)`, `]`))
         if open == b'(' && !(f.ident(m) && !KEYWORDS.contains(&f.tok(m))) && !f.sym(m, b')') && !f.sym(m, b']') && !f.sym(m, b'!') {
             let mut ends = vec![];
             let mut dd = 0;
@@ -3652,13 +3652,13 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
                 return Some("()".to_string());
             }
             if ends.len() == 1 && !trailing {
-                // (範囲の式 `(a..b)` / `(a..=b)`: Range<T> (T は分かる方の端の型))
+                // (a range expression `(a..b)` / `(a..=b)`: Range<T> (T is the type of whichever end is known))
                 if let Some(t) = range_type(ws, file, p + 1, k - 1, depth) {
                     return Some(t);
                 }
                 return expr_type(ws, file, ends[0], depth + 1);
             }
-            // (要素の型が一つも分からなければ答えない。分からない要素は `_`)
+            // (no answer if not a single element type is known. Unknown elements are `_`)
             let ts: Vec<Option<String>> = ends.iter().map(|&e| expr_type(ws, file, e, depth + 1)).collect();
             if ts.iter().all(|x| x.is_none()) {
                 return None;
@@ -3666,14 +3666,14 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
             return Some(format!("({})", ts.into_iter().map(|x| x.unwrap_or_else(|| "_".to_string())).collect::<Vec<_>>().join(", ")));
         }
         if open == b'[' {
-            // 添字 `a[i]` (前が式の終わりのとき。`t.1[0]` のタプルの添字も)
+            // Indexing `a[i]` (when preceded by the end of an expression; also the tuple index in `t.1[0]`)
             let tuple_idx = f.toks[m].0 == 1 && f.text.as_bytes()[f.toks[m].1 as usize].is_ascii_digit() && m >= 1 && f.sym(m - 1, b'.');
             if f.ident(m) && (!KEYWORDS.contains(&f.tok(m)) || matches!(f.tok(m), "self" | "Self")) || f.sym(m, b')') || f.sym(m, b']') || tuple_idx {
                 let t = expr_type(ws, file, m, depth + 1)?;
-                // (利用者の型の `impl Index<..> for T { type Output = .. }` も)
+                // (also the user's types' `impl Index<..> for T { type Output = .. }`)
                 return expand(ws, file, &t).iter().find_map(|t| index_type(t, range).or_else(|| assoc_type(ws, file, strip_ref(t), "Index", "Output")));
             }
-            // 配列の式 `[a, b]` / `[x; n]`: `[T; N]` (要素の型は最初の要素の)
+            // An array expression `[a, b]` / `[x; n]`: `[T; N]` (the element type is the first element's)
             let mut first_end = None;
             let mut n = 0;
             let mut rep: Option<usize> = None;
@@ -3705,12 +3705,12 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
             };
             return Some(format!("[{et}; {len}]"));
         }
-        // match / if / ブロックの式 (構造体の式 `T { .. }` でないもの): 腕・ブロックの最後の式のうち型の分かる最初のもの
+        // A match / if / block expression (one that is not a struct expression `T { .. }`): the first of the last expressions of the arms / blocks whose type is known
         if open == b'{' && !(f.ident(m) && (f.tok(m).starts_with(|c: char| c.is_ascii_uppercase()) || f.tok(m) == "Self")) {
             let s = block_expr_start(f, p)?;
             let mut tails = vec![];
             expr_tails(f, file, s, k, &mut tails);
-            // (`_` を含まない型 (`None` の `Option<_>` より `clif_ty(..)` の `Option<Type>`) を先に)
+            // (types without `_` first (the `Option<Type>` of `clif_ty(..)` rather than the `Option<_>` of `None`))
             let mut rough = None;
             for l in tails {
                 let e = f.toks.partition_point(|t| (t.2 as usize) < l.end);
@@ -3732,14 +3732,14 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
         }
         let name = f.tok(m);
         if open == b'{' {
-            // 構造体の式 `T { .. }` (大文字で始まる名前だけ: ブロックと分ける)
+            // A struct expression `T { .. }` (only names starting with an uppercase letter: to tell it from blocks)
             if name == "Self" {
                 return self_ty(at);
             }
             if !name.starts_with(|c: char| c.is_ascii_uppercase()) {
                 return None;
             }
-            // (型引数のある struct: フィールドの初期化の式から型引数を決める `Wrapper { inner: Point::new() }` → Wrapper<Point>)
+            // (a struct with type parameters: the type parameters are decided from the field initializer expressions, `Wrapper { inner: Point::new() }` → Wrapper<Point>)
             let params = named(ws, file, name).into_iter().map(|x| x.1).find(|d| d.owner.is_empty() && d.kind == SymKind::Struct).map(|d| d.params.clone()).unwrap_or_default();
             if params.is_empty() {
                 return Some(name.to_string());
@@ -3748,7 +3748,7 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
             let mut j = p + 1;
             while j < k {
                 if f.ident(j) && (f.sym(j - 1, b'{') || f.sym(j - 1, b',')) && (f.sym(j + 1, b':') && !f.sym(j + 2, b':')) {
-                    // (`field: EXPR` の EXPR の終わり)
+                    // (the end of the EXPR of `field: EXPR`)
                     let mut e = j + 2;
                     let mut d = 0;
                     while e < k {
@@ -3782,16 +3782,16 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
         if f.after_path(m) && m >= 3 && f.ident(m - 3) {
             let q = f.tok(m - 3).to_string();
             let q = if q == "Self" { self_ty(at)? } else { q };
-            // (`a::b::T(..)` / `m::f(..)`: モジュールの下のタプル構造体・関数)
+            // (`a::b::T(..)` / `m::f(..)`: a tuple struct / fn under a module)
             if q.starts_with(|c: char| c.is_ascii_lowercase()) && q != "self" && q != "super" && q != "crate" {
-                // (同じ名前の関数がいくつもあれば、モジュールの名前が修飾 q のもの: `zustc::macros::expand` は macros の expand)
+                // (if there are several fns with the same name, the one whose module name is the qualifier q: `zustc::macros::expand` is the expand of macros)
                 let cands: Vec<&Def> = named(ws, file, name).into_iter().map(|x| x.1).filter(|d| d.owner.is_empty() && matches!(d.kind, SymKind::Struct | SymKind::Function)).collect();
                 let pick = cands.iter().find(|d| d.module.last() == Some(&q)).or(cands.first());
                 if let Some(t) = pick.map(|d| if d.kind == SymKind::Struct { name.to_string() } else { apply_call_args(ws, file, d.ty.clone(), &d.fnret, m + 1, depth) }).filter(|t| !t.is_empty()) {
                     return Some(strip_lifetimes(&norm_proj_ws(ws, file, &t)));
                 }
             }
-            // (関連関数 `Q::f(args)`: 型引数を引数から決める (`Mutex::new(x)` → Mutex<x の型>))
+            // (an associated fn `Q::f(args)`: the type parameters are decided from the arguments (`Mutex::new(x)` → Mutex<type of x>))
             if let Some((r, d)) = expand(ws, file, &q).iter().find_map(|t| member_def(ws, file, t, name, &[SymKind::Method, SymKind::Function, SymKind::Variant])) {
                 let r = apply_call_args(ws, file, r, &d.fnret, m + 1, depth);
                 return Some(strip_lifetimes(&norm_proj_ws(ws, file, &r)));
@@ -3799,7 +3799,7 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
             return name.starts_with(|c: char| c.is_ascii_uppercase()).then(|| q.clone());
         }
         if name == "Some" {
-            // (`Some(e)`: e の型が分かれば Option<e の型>)
+            // (`Some(e)`: if the type of e is known, Option<type of e>)
             let close = close_of(f, m + 1);
             let inner = expr_end(f, m + 2, false).filter(|&e| e + 1 == close).and_then(|e| expr_type(ws, file, e, depth + 1));
             return Some(format!("Option<{}>", inner.unwrap_or_else(|| "_".to_string())));
@@ -3810,7 +3810,7 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
         if name.starts_with(|c: char| c.is_ascii_uppercase()) {
             return Some(name.to_string());
         }
-        // (ローカルのクロージャの呼び出し `all()`: そのクロージャの戻り値の型)
+        // (a call of a local closure `all()`: that closure's return type)
         if let Some(b) = f.local(m, name) {
             if let Some(ty) = binding_type(ws, file, b, depth + 1) {
                 if ty.starts_with("impl Fn") {
@@ -3819,7 +3819,7 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
             }
             return None;
         }
-        // (呼ぶ関数: 名前の解決 (use・同じモジュール) で決まるもの。同じ名前の関数がほかのクレートにもある (`run`))
+        // (the fn called: the one decided by name resolution (use, same module). There are fns with the same name in other crates too (`run`))
         if let Some(t) = def_at(ws, file, f.toks[m].1 as usize).first().and_then(|l| ws[l.file].defs.iter().find(|d| d.start == l.start && d.kind == SymKind::Function)).map(|d| d.ty.clone()) {
             return Some(t).filter(|t| !t.is_empty());
         }
@@ -3836,7 +3836,7 @@ fn expr_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<Str
     None
 }
 
-/// 文の終わり (`;` / `{` / `else`、括弧の外) の前のトークン。a から
+/// The token before the end of the statement (`;` / `{` / `else`, outside brackets). From a
 fn expr_end(f: &FileIndex, a: usize, stop_brace: bool) -> Option<usize> {
     let n = f.toks.len();
     let mut j = a;
@@ -3860,13 +3860,13 @@ fn expr_end(f: &FileIndex, a: usize, stop_brace: bool) -> Option<usize> {
     (j > a).then(|| j - 1)
 }
 
-/// ローカルの束縛 b の型 (型注釈・初期化の式・引数の型・`for x in ..` の要素・`if let Some(x) = ..` の中身)
+/// The type of local binding b (type annotation, initializer expression, parameter type, the element of `for x in ..`, the contents of `if let Some(x) = ..`)
 fn binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<String> {
     let f = ws[file];
     let n = f.toks.len();
     if f.sym(b + 1, b':') && !f.sym(b + 2, b':') {
         let a = f.toks.get(b + 2)?.1 as usize;
-        // (型注釈: `=` / `,` / `)` / `;` まで)
+        // (type annotation: up to `=` / `,` / `)` / `;`)
         let mut j = b + 2;
         let mut d = 0;
         while j < n {
@@ -3889,11 +3889,11 @@ fn binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
         }
         return (!type_head(&t).is_empty() || strip_ref(&t).starts_with('(') || t.starts_with("*const ") || t.starts_with("*mut ")).then_some(t);
     }
-    // パターンの中の束縛 (タプル・バリアント・構造体・スライスの入れ子): パターンの置かれた所の型に、外から道筋を当てはめる
+    // A binding in a pattern (nested tuple / variant / struct / slice): the path from the outside is applied to the type at the place of the pattern
     if let Some(t) = pattern_type(ws, file, b, depth) {
         return Some(t);
     }
-    // `let (a, b) = EXPR;` / `let (a, b): (T, U) = ..;` (タプルのパターン)
+    // `let (a, b) = EXPR;` / `let (a, b): (T, U) = ..;` (a tuple pattern)
     if let Some((after, path)) = let_tuple_pattern(f, b) {
         let ty = if f.sym(after, b':') && !f.sym(after + 1, b':') {
             let mut e = after + 1;
@@ -3914,14 +3914,14 @@ fn binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
         }
         return Some(ty);
     }
-    // `for x in EXPR {` / `for (i, x) in EXPR {` (タプルのパターンなら要素の中の番号)
+    // `for x in EXPR {` / `for (i, x) in EXPR {` (for a tuple pattern, the index within the element)
     if let Some((in_tok, path)) = for_pattern(f, b) {
         let e = expr_end(f, in_tok + 1, true)?;
         let t = match range_type(ws, file, in_tok + 1, e, depth) {
             Some(t) => t,
             None => expr_type(ws, file, e, depth + 1)?,
         };
-        // (`for x in &v` / `&mut v`: 参照の繰り返し)
+        // (`for x in &v` / `&mut v`: iterating references)
         let t = if f.sym(in_tok + 1, b'&') && !t.starts_with('&') { if f.tok(in_tok + 2) == "mut" { format!("&mut {t}") } else { format!("&{t}") } } else { t };
         let mut ty = if is_iter_head(&type_head(&t)) { iter_item_ws(ws, file, &t) } else { iter_item(&t).or_else(|| elem_type(&t)).or_else(|| iter_item_ws(ws, file, &t)) }?;
         for &i in &path {
@@ -3930,7 +3930,7 @@ fn binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
         }
         return Some(ty);
     }
-    // `if let Some(x) = EXPR` / `while let Some((a, b)) = EXPR` / `let Ok(x) = EXPR else` (中のタプルのパターンも)
+    // `if let Some(x) = EXPR` / `while let Some((a, b)) = EXPR` / `let Ok(x) = EXPR else` (tuple patterns inside too)
     if let Some((wrap, eq, path)) = wrap_pattern(f, b) {
         let e = expr_end(f, eq + 1, true)?;
         let t = expr_type(ws, file, e, depth + 1)?;
@@ -3946,23 +3946,23 @@ fn binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
         }
         return Some(ty);
     }
-    // `V(a, b)` / `E::V(a, b)` のパターンの中の束縛: バリアントの宣言の型
+    // A binding in a `V(a, b)` / `E::V(a, b)` pattern: the type in the variant's declaration
     if let Some(t) = variant_binding_type(ws, file, b, depth) {
         return Some(t);
     }
-    // クロージャの引数 `x.iter().map(|d| ..)` / `opt.map(|v| ..)`: 受け手の要素の型
+    // Closure parameters `x.iter().map(|d| ..)` / `opt.map(|v| ..)`: the receiver's element type
     if let Some(t) = closure_param_type(ws, file, b, depth) {
         return Some(t);
     }
-    // (`let x;`: 後の代入 `x = EXPR;` の型)
+    // (`let x;`: the type of the later assignment `x = EXPR;`)
     if f.sym(b + 1, b';') && b >= 1 && (f.tok(b - 1) == "let" || f.tok(b - 1) == "mut") {
         return refine_by_use(ws, file, b, "_", depth);
     }
     // `let x = EXPR;`
     if f.sym(b + 1, b'=') && !f.sym(b + 2, b'=') && b >= 1 && (f.tok(b - 1) == "let" || f.tok(b - 1) == "mut") {
-        // (クロージャ `|a: T, b: U| body` → `impl Fn(T, U) -> R`)
+        // (a closure `|a: T, b: U| body` → `impl Fn(T, U) -> R`)
         let c = if f.tok(b + 2) == "move" { b + 3 } else { b + 2 };
-        // (引数のない `|| ..` も)
+        // (also `|| ..` without parameters)
         if f.sym(c, b'|') {
             let mut j = c + 1;
             let mut tys = vec![];
@@ -3978,7 +3978,7 @@ fn binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
                 }
                 j += 1;
             }
-            // (戻り値の型: 書いてあれば `-> T`、なければ本体の式の型)
+            // (the return type: `-> T` if written, otherwise the type of the body expression)
             let ret = if f.sym(j + 1, b'-') && f.sym(j + 2, b'>') {
                 let mut e = j + 3;
                 while e < n && !f.sym(e, b'{') {
@@ -3992,15 +3992,15 @@ fn binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
         }
         if let Some(e) = expr_end(f, b + 2, false) {
             if let Some(t) = expr_type(ws, file, e, depth + 1) {
-                // (`let mut v = vec![];` / `Vec::new()` のように要素が分からないもの: 後の `v.push(x)` / `v = EXPR` から)
+                // (ones whose element is unknown like `let mut v = vec![];` / `Vec::new()`: from a later `v.push(x)` / `v = EXPR`)
                 let bare = targs(&t).is_empty() && matches!(type_head(&t).as_str(), "Vec" | "VecDeque" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet" | "Option");
-                // (寿命の `'_` は穴ではない)
+                // (the lifetime `'_` is not a hole)
                 if t.replace("'_", "").contains('_') || bare {
                     if let Some(r) = refine_by_use(ws, file, b, &t, depth) {
                         return Some(r);
                     }
                 }
-                // (`let p = &v["x"];` / `&mut x`: 前の参照。式の終わりの型がそのまま全体の型のとき (`&a.b` / `&v[i]`))
+                // (`let p = &v["x"];` / `&mut x`: a leading reference. When the type of the end of the expression is the type of the whole as it is (`&a.b` / `&v[i]`))
                 if (f.sym(b + 2, b'&') || f.sym(b + 2, b'*')) && !t.starts_with('&') {
                     return Some(with_prefix(f, b + 2, e, t));
                 }
@@ -4009,7 +4009,7 @@ fn binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
         }
     }
     let t = f.local_type(b)?;
-    // (`let mut v = Vec::new();`: 型引数のない集まりは後の使い方から)
+    // (`let mut v = Vec::new();`: a collection without type arguments, from its later uses)
     if targs(&t).is_empty() && matches!(t.as_str(), "Vec" | "VecDeque" | "HashMap" | "HashSet" | "BTreeMap" | "BTreeSet") {
         if let Some(r) = refine_by_use(ws, file, b, &t, depth) {
             return Some(r);
@@ -4018,13 +4018,13 @@ fn binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
     Some(t)
 }
 
-/// パターンの中の束縛 b の型: `E::V(.., b, ..)` の V の宣言の、その位置の型。照合する式の型が分かれば型引数を当てる
+/// The type of binding b in a pattern: the type at that position in the declaration of the V of `E::V(.., b, ..)`. If the type of the matched expression is known, type arguments are applied
 fn variant_binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<String> {
     let f = ws[file];
     if !(b >= 1 && (f.sym(b - 1, b'(') || f.sym(b - 1, b',') || matches!(f.tok(b - 1), "ref" | "mut")) && (f.sym(b + 1, b',') || f.sym(b + 1, b')'))) {
         return None;
     }
-    // (囲む `(` と、b がその中の何番目か)
+    // (the enclosing `(`, and which position b is in it)
     let mut j = b;
     let mut d = 0;
     let mut idx = 0;
@@ -4065,7 +4065,7 @@ fn variant_binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) ->
     }
     let q = if f.after_path(j - 1) && j >= 4 { Some(f.tok(j - 4)) } else { None };
     let kr = f.krate;
-    // (同じ名前の enum が別のクレートにもあれば (`Ty::Array`): 修飾 `Ty` を use からたどった enum のもの、このファイル・同じクレートのもの)
+    // (if an enum with the same name is in another crate too (`Ty::Array`): the one of the enum reached by following the qualifier `Ty` through use, or the one in this file / the same crate)
     let qdef = if q.is_some() { def_at(ws, file, f.toks[j - 4].1 as usize).first().copied() } else { None };
     let qmod: Option<Vec<String>> = qdef.and_then(|l| ws[l.file].defs.iter().find(|d| d.start == l.start && d.kind == SymKind::Enum).map(|d| d.module.to_vec()));
     let (vi, vd) = named(ws, file, v)
@@ -4077,7 +4077,7 @@ fn variant_binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) ->
     let inner = &vt[vt.find('(')? + 1..vt.rfind(')')?];
     let tys = targs(&format!("X<{inner}>"));
     let ty = tys.get(idx)?.clone();
-    // (照合する式の型の型引数を、enum の型引数に当てる)
+    // (applies the type arguments of the matched expression's type to the enum's type parameters)
     if !vd.params.is_empty() {
         if let Some(st) = scrut() {
             if let Some(st) = expand(ws, file, &st).into_iter().find(|t| type_head(t) == vd.owner) {
@@ -4088,7 +4088,7 @@ fn variant_binding_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) ->
     Some(ty)
 }
 
-/// パターンの中のトークン k に照合する式の型 (`match EXPR { P => }` / `let P = EXPR` / `if let P = EXPR`)
+/// The type of the expression matched against token k in a pattern (`match EXPR { P => }` / `let P = EXPR` / `if let P = EXPR`)
 fn scrutinee_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Option<String> {
     let f = ws[file];
     let n = f.toks.len();
@@ -4102,7 +4102,7 @@ fn scrutinee_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Optio
         } else if f.sym(j, b';') {
             return None;
         } else if d <= 0 && f.sym(j, b'=') && f.sym(j + 1, b'>') {
-            // (match: 腕の始まりの前の、囲む `{` の前が照合する式)
+            // (match: the matched expression is before the enclosing `{` that precedes the start of the arm)
             let (a, _) = f.arm_pat(j);
             let mut q = a;
             let mut dd = 0;
@@ -4119,7 +4119,7 @@ fn scrutinee_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Optio
             }
             return if f.sym(q, b'{') && q >= 1 { expr_type(ws, file, q - 1, depth + 1) } else { None };
         } else if d <= 0 && f.sym(j, b'=') && !f.sym(j + 1, b'=') && !(f.sym(j - 1, b'=') || f.sym(j - 1, b'!') || f.sym(j - 1, b'<') || f.sym(j - 1, b'>')) {
-            // (`==` / `!=` / `<=` / `>=` (ガードの中) は代入ではない)
+            // (`==` / `!=` / `<=` / `>=` (in a guard) are not assignments)
             let e = expr_end(f, j + 1, true)?;
             return expr_type(ws, file, e, depth + 1);
         }
@@ -4130,11 +4130,11 @@ fn scrutinee_type(ws: &[&FileIndex], file: usize, k: usize, depth: u32) -> Optio
 
 const PRIMS: [&str; 17] = ["u8", "u16", "u32", "u64", "u128", "usize", "i8", "i16", "i32", "i64", "i128", "isize", "f32", "f64", "bool", "char", "str"];
 
-/// 補完の候補
+/// A completion candidate
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
     pub label: String,
-    /// 定義の種類 (ローカルと予約語は None)
+    /// The kind of the definition (None for locals and keywords)
     pub kind: Option<SymKind>,
     pub local: bool,
     pub detail: String,
@@ -4145,7 +4145,7 @@ const KEYWORDS: [&str; 38] = [
     "move", "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "true", "type", "unsafe", "use", "where", "while",
 ];
 
-/// prelude の名前 (`use` しなくても見える std のもの) と、よく使うマクロ
+/// The names of the prelude (std things visible without `use`) and commonly used macros
 const PRELUDE: [&str; 31] = [
     "Option", "Some", "None", "Result", "Ok", "Err", "Vec", "String", "Box", "ToString", "ToOwned", "Clone", "Copy", "Default", "Iterator", "IntoIterator", "Extend",
     "Drop", "Fn", "FnMut", "FnOnce", "PartialEq", "Eq", "PartialOrd", "Ord", "Send", "Sync", "Sized", "From", "Into", "AsRef",
@@ -4155,8 +4155,8 @@ const MACROS: [&str; 22] = [
     "matches", "debug_assert", "debug_assert_eq", "include_str", "concat", "stringify", "dbg",
 ];
 
-/// off (byte) での補完: `x.|` (受け手の型のメンバ)、`Q::|` (型のメンバ・モジュールのアイテム)、それ以外 (ローカル・アイテム・
-/// prelude・予約語)。カーソルの前の識別子の途中までで絞る。返り値は (候補, 打ち切ったか)
+/// Completion at off (byte): `x.|` (members of the receiver type), `Q::|` (members of a type / items of a module), anything else (locals, items,
+/// prelude, keywords). Narrowed by the part of the identifier before the cursor. Returns (candidates, whether it was cut off)
 pub fn complete(ws: &[&FileIndex], file: usize, off: usize) -> (Vec<Item>, bool) {
     clear_memo();
     let f = ws[file];
@@ -4186,7 +4186,7 @@ pub fn complete(ws: &[&FileIndex], file: usize, off: usize) -> (Vec<Item>, bool)
         }
         out.push((sc, prio, Item { label: name.to_string(), kind, local, detail }));
     };
-    // (直前のトークン: `.` / `::`)
+    // (the token just before: `.` / `::`)
     let tk = f.toks.partition_point(|t| (t.2 as usize) <= q);
     let before = tk.checked_sub(1);
     let dot = before.filter(|&k| f.sym(k, b'.') && !(k >= 1 && f.sym(k - 1, b'.')) && f.toks[k].2 as usize == q);
@@ -4198,7 +4198,7 @@ pub fn complete(ws: &[&FileIndex], file: usize, off: usize) -> (Vec<Item>, bool)
                 dot_known = true;
                 let mut os = owners_of(ws, file, &o);
                 os.extend(blanket_traits(ws, file, true));
-                // (持ち主ごとに索引で引く。順は前と同じく ファイル → 定義 の順)
+                // (looked up per owner with the index. The order is the same as before: file → definition)
                 let mut hits: Vec<(usize, usize)> = vec![];
                 for (i, w) in ws.iter().enumerate().filter(|(i, w)| *i == file || w.in_src || w.lib || w.krate == kr) {
                     for o in &os {
@@ -4208,14 +4208,14 @@ pub fn complete(ws: &[&FileIndex], file: usize, off: usize) -> (Vec<Item>, bool)
                 hits.sort_unstable();
                 for (i, j) in hits {
                     let d = &ws[i].defs[j];
-                    // (`self` を取らない関連関数 (`default()`) は `.` の後に出さない: rust-analyzer と同じ)
+                    // (associated fns that do not take `self` (`default()`) are not offered after `.`: as in rust-analyzer)
                     if kinds.contains(&d.kind) && (d.kind != SymKind::Method || d.has_self) {
                         add(&mut out, if ws[i].lib { 1 } else { 0 }, &d.name, Some(d.kind), false, d.container.to_string(), true);
                     }
                 }
             }
             None => {
-                // (型が分からない: ワークスペースのメソッドとフィールドの名前)
+                // (type unknown: the names of the methods and fields of the workspace)
                 for (i, d) in all() {
                     if !ws[i].lib && kinds.contains(&d.kind) {
                         add(&mut out, 0, &d.name, Some(d.kind), false, d.container.to_string(), false);
@@ -4234,7 +4234,7 @@ pub fn complete(ws: &[&FileIndex], file: usize, off: usize) -> (Vec<Item>, bool)
                 add(&mut out, if ws[i].lib { 1 } else { 0 }, &d.name, Some(d.kind), false, d.container.to_string(), true);
             }
         }
-        // (モジュール q が use で取り込んだ (再エクスポートした) 名前: `std::sync::Mutex`)
+        // (names that module q brought in (re-exported) by use: `std::sync::Mutex`)
         for w in ws.iter().filter(|w| w.module.last() == Some(&q)) {
             for (local, _) in &w.uses {
                 if local != "*" && local != "self" {
@@ -4243,7 +4243,7 @@ pub fn complete(ws: &[&FileIndex], file: usize, off: usize) -> (Vec<Item>, bool)
             }
         }
     } else {
-        // ローカル
+        // Locals
         let ck = f.toks.partition_point(|t| (t.1 as usize) < ps).min(f.toks.len().saturating_sub(1));
         if !f.toks.is_empty() {
             for j in f.live(ck).into_iter().rev() {
@@ -4252,7 +4252,7 @@ pub fn complete(ws: &[&FileIndex], file: usize, off: usize) -> (Vec<Item>, bool)
                 }
             }
         }
-        // アイテム (ワークスペース、use したもの、prelude)
+        // Items (workspace, what was brought in by use, prelude)
         let used: Vec<&str> = f.uses.iter().map(|u| u.0.as_str()).collect();
         for (i, d) in all() {
             if d.owner.is_empty() && ITEM_KINDS.contains(&d.kind) && (!ws[i].lib || used.contains(&d.name.as_str())) {
@@ -4275,23 +4275,23 @@ pub fn complete(ws: &[&FileIndex], file: usize, off: usize) -> (Vec<Item>, bool)
         }
     }
     out.sort_by(|a, b| (a.0, a.1, a.2.label.len(), &a.2.label).cmp(&(b.0, b.1, b.2.label.len(), &b.2.label)));
-    // (受け手の型が分かったメンバは全部、ほかは 200 個まで)
+    // (all members when the receiver type is known, otherwise up to 200)
     let cap = if dot_known { 2000 } else { 200 };
     let cut = out.len() > cap;
     out.truncate(cap);
     (out.into_iter().map(|x| x.2).collect(), cut)
 }
 
-/// off の識別子の hover: 定義のシグネチャ (と囲むもの・doc コメント)、ローカルなら束縛と型
+/// Hover on the identifier at off: the definition's signature (and its container, doc comment); for a local, the binding and its type
 pub fn hover(ws: &[&FileIndex], file: usize, off: usize, load: Load) -> Option<String> {
     clear_memo();
-    // (文字列・文字のリテラル: 型と値。rust-analyzer と同じ形)
+    // (string / char literals: the type and the value. The same shape as rust-analyzer)
     if ws[file].tok_at(off).is_none() && ws[file].capture_at(off).is_none() {
         if let Some(h) = literal_hover(ws[file], off) {
             return Some(h);
         }
     }
-    // (組み込みの型)
+    // (built-in types)
     if let Some(k) = ws[file].tok_at(off) {
         let w = ws[file].tok(k);
         if PRIMS.contains(&w) {
@@ -4300,7 +4300,7 @@ pub fn hover(ws: &[&FileIndex], file: usize, off: usize, load: Load) -> Option<S
     }
     let d = def_at(ws, file, off);
     let mut t = *d.first()?;
-    // (derive が作るメソッド (行き先は `#[derive(Default)]` の名前): その trait のメソッドの宣言を見せる)
+    // (a method made by derive (it goes to the name in `#[derive(Default)]`): shows the declaration of that trait's method)
     if !ws[t.file].slim && ws[t.file].tok_at(t.start).is_some_and(|j| ws[t.file].in_derive(j)) {
         let tr = ws[t.file].text[t.start..t.end].to_string();
         if let Some(name) = ws[file].tok_at(off).map(|k| ws[file].tok(k).to_string()) {
@@ -4338,7 +4338,7 @@ pub fn hover(ws: &[&FileIndex], file: usize, off: usize, load: Load) -> Option<S
         }
         return Some(s);
     }
-    // ローカル
+    // A local
     let name = text.get(t.start..t.end)?;
     let b = tf.toks.partition_point(|x| (x.1 as usize) < t.start);
     let ty = if b < tf.toks.len() { binding_type(ws, t.file, b, 0) } else { None };
@@ -4348,7 +4348,7 @@ pub fn hover(ws: &[&FileIndex], file: usize, off: usize, load: Load) -> Option<S
     })
 }
 
-/// アイテムの本文からシグネチャ (属性を外し、本体の `{` の前まで。空白はまとめる)
+/// The signature from an item's text (attributes removed, up to before the body's `{`; whitespace collapsed)
 fn signature(item: &str, kind: SymKind) -> String {
     let mut s = item.trim_start();
     while s.starts_with("#[") || s.starts_with("#![") {
@@ -4407,7 +4407,7 @@ fn signature(item: &str, kind: SymKind) -> String {
     out
 }
 
-/// at (アイテムの始まり) の前の `///` の行
+/// The `///` lines before at (the start of the item)
 fn doc_comment(text: &str, at: usize) -> String {
     let mut lines: Vec<&str> = vec![];
     let head = &text[..text[..at.min(text.len())].rfind('\n').map(|i| i + 1).unwrap_or(0)];
@@ -4425,7 +4425,7 @@ fn doc_comment(text: &str, at: usize) -> String {
     lines.join("\n")
 }
 
-/// ワークスペースの根からの相対パス → モジュールのパス (`crates/x/src/a/b.rs` → [a, b]、`src/a/mod.rs` → [a])
+/// A path relative to the workspace root → the module path (`crates/x/src/a/b.rs` → [a, b], `src/a/mod.rs` → [a])
 pub fn module_of(rel: &str) -> Vec<String> {
     let parts: Vec<&str> = rel.split('/').collect();
     let from = parts.iter().rposition(|p| *p == "src").map(|i| i + 1).unwrap_or(0);
@@ -4458,19 +4458,19 @@ mod tests {
                    fn f(a: i64) -> i64 {\n    let p = P::new(a);\n    let a = a + 1;\n    for i in 0..3 { let _ = i; }\n    match Some(a) { Some(v) => v, None => p.get() }\n}\n";
         let f = FileIndex::new(src.to_string(), vec![]);
         let ws = [&f];
-        // P::new → impl P の new
+        // P::new → the new of impl P
         assert_eq!(def_text(&ws, 0, at(src, "new(a)", 0)).unwrap().2, at(src, "new(x", 0));
-        // self.get() → impl P の get、self.x → フィールド x
+        // self.get() → the get of impl P, self.x → field x
         assert_eq!(def_text(&ws, 0, at(src, "get() * 2", 0)).unwrap().2, at(src, "get(&self)", 0));
         assert_eq!(def_text(&ws, 0, at(src, "x }\n    fn twice", 0) + 0).unwrap().2, at(src, "x: i64 }", 0));
-        // `let a = a + 1` の右の a は引数の a、`Some(a)` の a は let の a
+        // The a on the right of `let a = a + 1` is the parameter a, the a of `Some(a)` is the let's a
         assert_eq!(def_text(&ws, 0, at(src, "a + 1", 0)).unwrap().2, at(src, "a: i64) -> i64 {\n    let p", 0));
         assert_eq!(def_text(&ws, 0, at(src, "a) { Some", 0)).unwrap().2, at(src, "a = a + 1", 0));
-        // for の i、match の腕の v、p.get() (p の型は P::new から)
+        // The i of for, the v of the match arm, p.get() (the type of p from P::new)
         assert_eq!(def_text(&ws, 0, at(src, "i; }", 0)).unwrap().2, at(src, "i in", 0));
         assert_eq!(def_text(&ws, 0, at(src, "v,", 0)).unwrap().2, at(src, "v) =>", 0));
         assert_eq!(def_text(&ws, 0, at(src, "get() }\n}", 0)).unwrap().2, at(src, "get(&self)", 0));
-        // 参照: get は定義と 2 か所
+        // References: get is the definition and 2 places
         assert_eq!(references(&ws, 0, at(src, "get(&self)", 0), true, &|_| None).len(), 3);
         assert_eq!(references(&ws, 0, at(src, "get(&self)", 0), false, &|_| None).len(), 2);
     }
@@ -4484,13 +4484,13 @@ mod tests {
         let ws = [&fa, &fb];
         assert_eq!(def_text(&ws, 1, at(&b, "helper();", 0)).map(|x| (x.0, x.1)), Some((0, "helper".to_string())));
         assert_eq!(def_text(&ws, 1, at(&b, "Thing;", 0)).map(|x| x.0), Some(0));
-        // (定義・use・呼び出し: rust-analyzer と同じく use も参照)
+        // (definition, use, call: the use is a reference too, as in rust-analyzer)
         assert_eq!(references(&ws, 0, 7, true, &|_| None).len(), 3);
         assert_eq!(module_of("crates/x/src/a/mod.rs"), vec!["a".to_string()]);
     }
 
-    /// 参照の数え方を rust-analyzer に合わせたところ: impl の中の `Self`、パターン・引数の束縛、知らない外部のパス、
-    /// cfg で外れたアイテム、組み込みの型
+    /// Where the counting of references was matched to rust-analyzer: `Self` inside impls, bindings of patterns / parameters, unknown external paths,
+    /// items excluded by cfg, built-in types
     #[test]
     fn references_like_rust_analyzer() {
         let src = "fn concrete() {}
@@ -4513,18 +4513,18 @@ fn g() -> u8 { 1 }
         fi.apply_cfg(vec![]);
         let ws = [&fi];
         let no = &|_: usize| None;
-        // P: 定義・impl の名前・`Self` 2 つと、cfg で外れた g の中の 2 つ (`-> P` と `P::new`。rust-analyzer は外れた
-        // アイテムの中もパスは解決する)。`syn::P` は外部のもの
+        // P: the definition, the impl's name, 2 `Self`s and 2 in g excluded by cfg (`-> P` and `P::new`; rust-analyzer resolves paths even inside excluded
+        // items). `syn::P` is an external one
         assert_eq!(references(&ws, 0, at(src, "P {", 0), true, no).len(), 6);
-        // `fn f(concrete: ..)` と `let (a, concrete)` は束縛そのもの: 関数 concrete の参照ではない
+        // `fn f(concrete: ..)` and `let (a, concrete)` are the bindings themselves: not references of the fn concrete
         assert_eq!(references(&ws, 0, 3, true, no).len(), 1);
         assert_eq!(def_text(&ws, 0, at(src, "concrete) =", 0)).map(|x| x.2), Some(at(src, "concrete) =", 0)));
-        // `Delimiter::None` は Option の None ではない (Delimiter を知らない)
+        // `Delimiter::None` is not Option's None (Delimiter is unknown)
         assert!(definition(&ws, 0, at(src, "None", 0)).is_empty());
-        // cfg で外れた g の中の関連アイテム `P::new` には答えない (パスの P には答える)
+        // No answer for the associated item `P::new` in g excluded by cfg (the P of the path is answered)
         assert!(definition(&ws, 0, at(src, "new()", 1)).is_empty());
         assert_eq!(definition(&ws, 0, at(src, "P::new", 0)).first().map(|l| l.start), Some(at(src, "P {", 0)));
-        // u8: 型の位置だけ (`0u8` の接尾辞と `fn u8` の名前は除く)
+        // u8: only type positions (the suffix of `0u8` and the name of `fn u8` are excluded)
         assert_eq!(references(&ws, 0, at(src, "u8 }", 0), true, no).len(), 2);
     }
 }
@@ -4533,7 +4533,7 @@ fn g() -> u8 { 1 }
 #[path = "navigate_tests.rs"]
 mod unit_tests;
 
-/// textDocument/prepareRename: off の名前が名前を変えられるものなら、その名前の範囲
+/// textDocument/prepareRename: if the name at off is one that can be renamed, the range of that name
 pub fn prepare_rename(ws: &[&FileIndex], file: usize, off: usize) -> Result<Loc, String> {
     clear_memo();
     let f = ws[file];
@@ -4544,15 +4544,15 @@ pub fn prepare_rename(ws: &[&FileIndex], file: usize, off: usize) -> Result<Loc,
     }
     let t = *def_at(ws, file, off).first().ok_or("定義が分からない")?;
     let tf = ws[t.file];
-    // (ライブラリのもの: `use a::B;` の B の上でだけ、別名を付ける形で変えられる (rust-analyzer と同じ))
+    // (a library one: can be renamed only on the B of `use a::B;`, in the form of giving it an alias (as in rust-analyzer))
     if tf.lib && lib_use(f, w) != Some(f.toks[k].1 as usize) {
         return Err("ライブラリの定義は名前を変えられない (use の名前の上なら別名を付けられる)".into());
     }
     if mod_file(ws, t).is_some() {
         return Err("ファイルのモジュールの名前は変えられない (ファイルの名前も変わるので)".into());
     }
-    // (trait の impl のメソッド: trait がワークスペースのものなら trait の宣言と全部の impl を変える。ライブラリ・外部の
-    // クレートの trait (`impl Default for S` の default) なら断る: 宣言の方を変えられないので)
+    // (a method of a trait impl: if the trait is a workspace one, the trait's declaration and all impls are renamed. For a trait of a library / external
+    // crate (the default of `impl Default for S`), refused: the declaration cannot be renamed)
     if let Some(d) = tf.defs.iter().find(|d| d.start == t.start && d.kind == SymKind::Method) {
         if let Some(tr) = impl_trait(&d.container) {
             if trait_method(ws, tr, &d.name).is_none() {
@@ -4560,7 +4560,7 @@ pub fn prepare_rename(ws: &[&FileIndex], file: usize, off: usize) -> Result<Loc,
             }
         }
     }
-    // (derive の名前 `#[derive(Clone)]` に解決されたもの: derive が作るメソッド)
+    // (resolved to the derive name `#[derive(Clone)]`: a method made by derive)
     let is_def = tf.defs.iter().any(|d| d.start == t.start);
     if !is_def && !tf.slim && tf.tok_at(t.start).is_some_and(|j| tf.in_derive(j)) {
         return Err("derive が作るメソッドは名前を変えられない".into());
@@ -4569,19 +4569,19 @@ pub fn prepare_rename(ws: &[&FileIndex], file: usize, off: usize) -> Result<Loc,
     Ok(Loc { file, start: a, end: b })
 }
 
-/// ワークスペースの trait tr の宣言の中のメソッド name
+/// The method name in the declaration of the workspace trait tr
 fn trait_method(ws: &[&FileIndex], tr: &str, name: &str) -> Option<Loc> {
     ws.iter().enumerate().filter(|(_, w)| !w.lib).find_map(|(i, w)| {
         w.defs.iter().find(|d| d.kind == SymKind::Method && d.name == name && !d.container.starts_with("impl") && &d.container[..] == tr && w.defs.iter().any(|x| x.kind == SymKind::Trait && x.name == tr)).map(|d| loc(i, d))
     })
 }
 
-/// ファイル f の `use a::name;` (別名なし) の、パスの最後の名前の byte 位置
+/// The byte position of the last name of the path of `use a::name;` (without an alias) in file f
 fn lib_use(f: &FileIndex, name: &str) -> Option<usize> {
     f.uses.iter().zip(&f.use_at).find(|(u, a)| u.0 == name && u.1.last().is_some_and(|l| l == name) && **a != usize::MAX).map(|(_, &a)| a)
 }
 
-/// 識別子として使える名前か (キーワードは除く。`r#` の付いたものは良い)
+/// Whether the name can be used as an identifier (keywords excluded; ones with `r#` are fine)
 fn valid_ident(s: &str) -> bool {
     let n = s.strip_prefix("r#").unwrap_or(s);
     let mut c = n.chars();
@@ -4589,8 +4589,8 @@ fn valid_ident(s: &str) -> bool {
     (h == '_' || h.is_alphabetic()) && c.all(|x| x == '_' || x.is_alphanumeric()) && n != "_" && (s.starts_with("r#") || !KEYWORDS.contains(&n))
 }
 
-/// textDocument/rename: 書き換え (位置, 新しい文字列) の列。構造体の省略形 `S { x }` は `S { new: x }` /
-/// `S { x: new }` に書き換える
+/// textDocument/rename: a list of edits (position, new string). A struct shorthand `S { x }` is rewritten to `S { new: x }` /
+/// `S { x: new }`
 pub fn rename(ws: &[&FileIndex], file: usize, off: usize, new: &str, load: Load) -> Result<Vec<(Loc, String)>, String> {
     let at = prepare_rename(ws, file, off)?;
     if !valid_ident(new) {
@@ -4598,7 +4598,7 @@ pub fn rename(ws: &[&FileIndex], file: usize, off: usize, new: &str, load: Load)
     }
     let old = ws[file].text[at.start..at.end].to_string();
     let t = *def_at(ws, file, off).first().ok_or("定義が分からない")?;
-    // `use` の名前の上: `use std::sync::Mutex;` → `use std::sync::Mutex as New;` と、このファイルの中の Mutex
+    // On a name in a `use`: `use std::sync::Mutex;` → `use std::sync::Mutex as New;`, and the Mutex inside this file
     if lib_use(ws[file], &old) == Some(at.start) {
         let f = ws[file];
         let u = at.start;
@@ -4612,7 +4612,7 @@ pub fn rename(ws: &[&FileIndex], file: usize, off: usize, new: &str, load: Load)
         return Ok(out);
     }
     let is_field = ws[t.file].defs.iter().any(|d| d.start == t.start && d.kind == SymKind::Field);
-    // (trait の impl のメソッド: trait の宣言から引く (宣言・全部の impl・呼び出し))
+    // (a method of a trait impl: looked up from the trait's declaration (the declaration, all impls, calls))
     let root = ws[t.file].defs.iter().find(|d| d.start == t.start && d.kind == SymKind::Method).and_then(|d| impl_trait(&d.container).and_then(|tr| trait_method(ws, tr, &d.name)));
     let refs = match root {
         Some(r) if (r.file, r.start) != (t.file, t.start) => {
@@ -4641,7 +4641,7 @@ pub fn rename(ws: &[&FileIndex], file: usize, off: usize, new: &str, load: Load)
         if fi.text.get(l.start..l.end) != Some(old.as_str()) {
             continue;
         }
-        // (省略形 `T { x }`: rust-analyzer と同じく書き足す形に。フィールドなら前に `new: `、ローカルなら後ろに `: new`)
+        // (a shorthand `T { x }`: in the form of adding text, as in rust-analyzer. For a field `new: ` before it, for a local `: new` after it)
         match fi.tok_at(l.start) {
             Some(k) if fi.toks[k].0 == 0 && (fi.sym(k.wrapping_sub(1), b'{') || fi.sym(k.wrapping_sub(1), b',')) && (fi.sym(k + 1, b',') || fi.sym(k + 1, b'}')) && fi.struct_lit_at(k).is_some() => {
                 if is_field {
@@ -4661,11 +4661,11 @@ pub fn rename(ws: &[&FileIndex], file: usize, off: usize, new: &str, load: Load)
     Ok(out)
 }
 
-/// textDocument/signatureHelp: off を囲む呼び出し `f(..|..)` の (シグネチャ, 引数の byte 範囲 (シグネチャの中), 今の引数)
+/// textDocument/signatureHelp: (signature, byte ranges of the parameters (in the signature), the current parameter) of the call `f(..|..)` enclosing off
 pub fn signature_help(ws: &[&FileIndex], file: usize, off: usize, load: Load) -> Option<(String, Vec<(usize, usize)>, usize, String)> {
     clear_memo();
     let f = ws[file];
-    // (off より前のトークンから戻って、閉じていない `(` を探す。数えるのは深さ 0 のカンマ)
+    // (goes back from the token before off to find an unclosed `(`. Counted are the commas at depth 0)
     let mut j = f.toks.partition_point(|t| (t.1 as usize) < off);
     let mut d = 0i32;
     let mut commas = 0;
@@ -4680,7 +4680,7 @@ pub fn signature_help(ws: &[&FileIndex], file: usize, off: usize, load: Load) ->
         match f.text.as_bytes()[f.toks[j].1 as usize] {
             b')' | b']' | b'}' => d += 1,
             b'[' => {
-                // (引数の中の配列・`vec![..]`: そこまでのカンマは配列の中のもの)
+                // (an array / `vec![..]` in the arguments: the commas so far are the ones inside the array)
                 if d == 0 {
                     commas = 0;
                 } else {
@@ -4704,7 +4704,7 @@ pub fn signature_help(ws: &[&FileIndex], file: usize, off: usize, load: Load) ->
             _ => {}
         }
     };
-    // (呼ぶもの: `f(` / `x.m(` / `T::f(` / `f::<T>(`)
+    // (what is called: `f(` / `x.m(` / `T::f(` / `f::<T>(`)
     let mut c = open.checked_sub(1)?;
     if f.sym(c, b'>') {
         let mut dd = 0;
@@ -4721,13 +4721,13 @@ pub fn signature_help(ws: &[&FileIndex], file: usize, off: usize, load: Load) ->
         }
         c = c.checked_sub(3)?;
     }
-    // (宣言 `fn f(..)` / `struct T(..)` の中は呼び出しではない)
+    // (inside a declaration `fn f(..)` / `struct T(..)` is not a call)
     if !f.ident(c) || KEYWORDS.contains(&f.tok(c)) || (c >= 1 && f.ident(c - 1) && matches!(f.tok(c - 1), "fn" | "struct")) {
         return None;
     }
     let method_call = c >= 1 && f.sym(c - 1, b'.');
     let mut t = *def_at(ws, file, f.toks[c].1 as usize).first()?;
-    // (関数を入れたローカル `let score = lib_rank;`: その関数)
+    // (a local holding a fn `let score = lib_rank;`: that fn)
     if !ws[t.file].defs.iter().any(|x| x.start == t.start) && !ws[t.file].slim {
         let tf = ws[t.file];
         let b = tf.toks.partition_point(|x| (x.1 as usize) < t.start);
@@ -4756,10 +4756,10 @@ pub fn signature_help(ws: &[&FileIndex], file: usize, off: usize, load: Load) ->
             let at = sig.find(def.name.as_str()).unwrap_or(0) + def.name.len();
             (sig, at, doc_comment(text, def.item_start))
         }
-        // (ローカルの束縛: クロージャ `let f = |a: T| ..` なら `impl Fn(a: T) -> R`)
+        // (a local binding: for a closure `let f = |a: T| ..`, `impl Fn(a: T) -> R`)
         None => (closure_sig(ws, t)?, 0, String::new()),
     };
-    // (引数の並び: 名前の後の最初の `(` .. `)`。型引数 `<..>` の中は飛ばす)
+    // (the parameter list: the first `(` .. `)` after the name. Skips the inside of type parameters `<..>`)
     let b = sig.as_bytes();
     let mut i = name_at;
     let mut dg = 0;
@@ -4807,17 +4807,17 @@ pub fn signature_help(ws: &[&FileIndex], file: usize, off: usize, load: Load) ->
         let p = &sig[a..e];
         p == "self" || p.ends_with("self") || p.starts_with("self:") || p.starts_with("mut self")
     });
-    // (メソッドの呼び出し `x.m(..)` では self は引数に数えない: rust-analyzer と同じ)
+    // (in a method call `x.m(..)` self is not counted as a parameter: as in rust-analyzer)
     let params = if method_call && has_self { params[1..].to_vec() } else { params };
     Some((sig, params, commas, doc))
 }
 
-/// closure_param_type の、メソッドのシグネチャから決める方: 受け手 recv のメソッド m の、`(` (open) の後の引数のうち
-/// クロージャ (`|` は j) のものの束縛の引数の形の idx 番目 (path はタプルのパターンの中の番号)
+/// The part of closure_param_type that decides from the method signature: among the parameters after the `(` (open) of method m of receiver recv,
+/// the idx-th of the parameter shape of the bound of the one that is the closure (its `|` is j) (path is the indices within a tuple pattern)
 #[allow(clippy::too_many_arguments)]
 fn closure_param_from_sig(ws: &[&FileIndex], file: usize, recv: &str, m: &str, open: usize, j: usize, idx: usize, path: &[usize], depth: u32) -> Option<String> {
     let f = ws[file];
-    // (クロージャが何番目の引数か、と引数の始め)
+    // (which parameter the closure is, and the starts of the arguments)
     let mut starts = vec![open + 1];
     let mut dd = 0;
     for q in open + 1..j {
@@ -4835,7 +4835,7 @@ fn closure_param_from_sig(ws: &[&FileIndex], file: usize, recv: &str, m: &str, o
     let ps = tuple_items(&format!("({args})"))?;
     let pat = ps.get(idx)?.clone();
     let mut ty = def_subst(d, &o, &pat);
-    // (メソッドの型引数そのものの引数 `fold(init: B, ..)`: その引数の式の型)
+    // (a parameter whose type is a type parameter of the method itself `fold(init: B, ..)`: the type of that argument's expression)
     for (i, g, pat, _) in &d.fnret {
         if pat == "=" {
             if let Some(&s) = starts.get(*i as usize) {
@@ -4846,7 +4846,7 @@ fn closure_param_from_sig(ws: &[&FileIndex], file: usize, recv: &str, m: &str, o
         }
     }
     let mut ty = strip_lifetimes(&norm_proj_ws(ws, file, &ty));
-    // (形の中の型引数 (大文字 1 文字) が置き換わらずに残っていれば分からない)
+    // (unknown if a type parameter (1 uppercase letter) in the shape is left unreplaced)
     let words = |s: &str| s.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| w.len() == 1 && w.starts_with(|c: char| c.is_ascii_uppercase())).map(|w| w.to_string()).collect::<Vec<_>>();
     let before = words(&pat);
     if words(&ty).iter().any(|w| before.contains(w) && !targs(&o).contains(w)) || has_proj(&ty) {
@@ -4859,8 +4859,8 @@ fn closure_param_from_sig(ws: &[&FileIndex], file: usize, recv: &str, m: &str, o
     Some(ty)
 }
 
-/// 型の書き方に置き換わらずに残った関連型の射影 (`I::Item` / `Self::Output` / `<A as Tr>::B` / `Vec<T>::Item`) があるか。
-/// パスの修飾 (`std::cell::RefCell<..>`) は射影ではない
+/// Whether there is a projection of an associated type left unreplaced in a written type (`I::Item` / `Self::Output` / `<A as Tr>::B` / `Vec<T>::Item`).
+/// A path qualifier (`std::cell::RefCell<..>`) is not a projection
 fn has_proj(t: &str) -> bool {
     let b = t.as_bytes();
     t.match_indices("::").any(|(i, _)| {
@@ -4873,7 +4873,7 @@ fn has_proj(t: &str) -> bool {
     })
 }
 
-/// タプルの型 `(A, B<C, D>)` の要素
+/// The elements of a tuple type `(A, B<C, D>)`
 fn tuple_items(t: &str) -> Option<Vec<String>> {
     let t = t.trim();
     let inner = t.strip_prefix('(')?.strip_suffix(')')?;
@@ -4900,7 +4900,7 @@ fn tuple_items(t: &str) -> Option<Vec<String>> {
     Some(out)
 }
 
-/// 繰り返し (イテレータ) の型か (要素の型が iter_item で分かるもの)
+/// Whether it is an iteration (iterator) type (one whose element type iter_item knows)
 fn is_iter_head(h: &str) -> bool {
     matches!(
         h,
@@ -4910,23 +4910,23 @@ fn is_iter_head(h: &str) -> bool {
     )
 }
 
-/// 繰り返しの型 t の要素の型 (`Iter<'_, T>` → &T、`Map<I, impl FnMut() -> R>` → R、`Enumerate<I>` → (usize, 要素) ..)。
-/// 繰り返しでない集まり (Vec / Option / HashMap ..) は IntoIterator の要素 (値のとき) / 参照 (`&Vec<T>` → &T)
+/// The element type of iteration type t (`Iter<'_, T>` → &T, `Map<I, impl FnMut() -> R>` → R, `Enumerate<I>` → (usize, element) ..).
+/// For collections that are not iterators (Vec / Option / HashMap ..), the IntoIterator element (for a value) / a reference (`&Vec<T>` → &T)
 fn iter_item(t: &str) -> Option<String> {
     let t = t.trim();
     let by_ref = t.starts_with('&');
     let h = type_head(t);
-    // (末尾の決まらないアロケータ・ハッシャの型引数 `IntoIter<K, V, A>` / `HashMap<K, V, S>` の A / S は数えない)
+    // (the undetermined trailing allocator / hasher type arguments, the A / S of `IntoIter<K, V, A>` / `HashMap<K, V, S>`, are not counted)
     let mut a = targs(t);
     while a.len() > 1 && a.last().is_some_and(|x| x == "A" || x == "S") {
         a.pop();
     }
     let first = || a.first().cloned();
-    // (型引数のない同じ名前の型 (serde_json の `map::Iter`): std の繰り返しではない。その型の impl から (iter_item_ws))
+    // (a type of the same name without type arguments (serde_json's `map::Iter`): not a std iterator. From that type's impl (iter_item_ws))
     if a.is_empty() && !matches!(h.as_str(), "Chars" | "CharIndices" | "Bytes" | "Lines" | "SplitWhitespace") {
         return None;
     }
-    // (クロージャの型 `impl FnMut(..) -> R` の R)
+    // (the R of a closure type `impl FnMut(..) -> R`)
     let ret_of = |f: &str| -> Option<String> {
         let i = f.find(") -> ")?;
         Some(f[i + 5..].trim().to_string())
@@ -4968,19 +4968,19 @@ fn iter_item(t: &str) -> Option<String> {
     })
 }
 
-/// 型 ty の trait tr の impl の関連型 name (`impl Index<usize> for AdtTable { type Output = StructDef; }` の Output、
-/// `impl Iterator for ReadDir { type Item = io::Result<DirEntry>; }` の Item、`impl Deref for W { type Target = T; }`)
+/// The associated type name of the impl of trait tr for type ty (the Output of `impl Index<usize> for AdtTable { type Output = StructDef; }`,
+/// the Item of `impl Iterator for ReadDir { type Item = io::Result<DirEntry>; }`, `impl Deref for W { type Target = T; }`)
 fn assoc_type(ws: &[&FileIndex], file: usize, ty: &str, tr: &str, name: &str) -> Option<String> {
     let h = type_head(ty);
     if h.is_empty() {
         return None;
     }
-    // (同じ名前の型がいくつもあれば (slice / option / serde_json の `Iter`): impl の self 型の型引数の数が合うもの、
-    // 同じファイル・同じクレートのもの)
+    // (if there are several types with the same name (the `Iter` of slice / option / serde_json): the ones whose impl self type has a matching number of type arguments,
+    // the ones in the same file / same crate)
     let n = targs(ty).len();
     let kr = ws[file].krate;
-    // (修飾 `map::Iter` (qualify_local_type): その名前の型がちょうどそのモジュールにあれば、そのモジュールの impl だけ
-    // (ほかの `Iter` の関連型を答えない。serde_json の `map::Iter` の impl はマクロの中で見えない))
+    // (a qualified `map::Iter` (qualify_local_type): if a type of that name is in exactly that module, only that module's impls
+    // (the associated types of other `Iter`s are not answered. The impls of serde_json's `map::Iter` are inside a macro and not visible))
     let path = strip_ref(ty).split('<').next().unwrap_or("");
     let qual = path.rsplit_once("::").map(|(q, _)| q.to_string());
     let exact = qual.as_ref().is_some_and(|q| named(ws, file, &h).iter().any(|(_, x)| x.owner.is_empty() && matches!(x.kind, SymKind::Struct | SymKind::Enum) && x.module.join("::") == *q));
@@ -4992,13 +4992,13 @@ fn assoc_type(ws: &[&FileIndex], file: usize, ty: &str, tr: &str, name: &str) ->
         .filter(|(_, d)| !exact || qual.as_ref().is_some_and(|q| d.module.join("::") == *q))
         .min_by_key(|(i, d)| (targs(impl_self_full(&d.container)).len() != n, *i != file, ws[*i].krate != kr))?;
     let t = def_subst(d, ty, &d.ty);
-    // (impl の self 型の型引数の名前が残ったものは分からない)
+    // (unknown if names of the type parameters of the impl's self type are left)
     Some(t)
 }
 
-/// iter_item に、impl の関連型 `type Item = ..` を足したもの (利用者の型・std の ReadDir など)
+/// iter_item plus the impls' associated types `type Item = ..` (the user's types, std's ReadDir etc.)
 fn iter_item_ws(ws: &[&FileIndex], file: usize, t: &str) -> Option<String> {
-    // (std のアダプタの中身が利用者や std の型 (`Skip<Args>`) のとき: 中身の要素を impl から)
+    // (when the contents of a std adapter are a user's or std type (`Skip<Args>`): the element of the contents from the impl)
     let adapt = || -> Option<String> {
         let a = targs(strip_ref(t));
         let inner = || iter_item_ws(ws, file, a.first()?);
@@ -5012,13 +5012,13 @@ fn iter_item_ws(ws: &[&FileIndex], file: usize, t: &str) -> Option<String> {
         }
     };
     iter_item(t).or_else(adapt).or_else(|| assoc_type(ws, file, strip_ref(t), "Iterator", "Item")).or_else(|| {
-        // (IntoIterator: `for x in &coll` の coll)
+        // (IntoIterator: the coll of `for x in &coll`)
         let it = assoc_type(ws, file, strip_ref(t), "IntoIterator", "Item")?;
         Some(it)
     })
 }
 
-/// `<` で始まる s の対応する `>` の位置 (`->` の `>` は数えない)
+/// The position of the `>` matching s, which starts with `<` (the `>` of `->` is not counted)
 fn close_angle(s: &str) -> Option<usize> {
     let b = s.as_bytes();
     let mut d = 0;
@@ -5038,9 +5038,9 @@ fn close_angle(s: &str) -> Option<usize> {
     None
 }
 
-/// norm_proj に、impl の関連型を足したもの
+/// norm_proj plus the impls' associated types
 fn norm_proj_ws(ws: &[&FileIndex], file: usize, t: &str) -> String {
-    // (`<A as Tr>::N` (Item / IntoIter 以外): impl の関連型。ToOwned は `str` → String、`[T]` → Vec<T>、ほかは Clone で A)
+    // (`<A as Tr>::N` (other than Item / IntoIter): the impl's associated type. For ToOwned, `str` → String, `[T]` → Vec<T>, otherwise A by Clone)
     let mut t = t.to_string();
     for _ in 0..4 {
         let Some(st) = t.find("<").filter(|_| t.contains(" as ")) else { break };
@@ -5076,7 +5076,7 @@ fn norm_proj_ws(ws: &[&FileIndex], file: usize, t: &str) -> String {
     })
 }
 
-/// 型の書き方の中の関連型の射影 `<A as Iterator>::Item` / `A::Item` / `Self::Item` を、分かれば要素の型に置き換える
+/// Replaces the associated type projections `<A as Iterator>::Item` / `A::Item` / `Self::Item` in a written type with the element type when known
 #[cfg(test)]
 fn norm_proj(t: &str) -> String {
     norm_proj_with(t, &|_, _| None)
@@ -5085,8 +5085,8 @@ fn norm_proj(t: &str) -> String {
 fn norm_proj_with(t: &str, more: &dyn Fn(&str, bool) -> Option<String>) -> String {
     let mut s = t.to_string();
     for _ in 0..6 {
-        // (`::Item` (要素) と `::IntoIter` (IntoIterator: 繰り返しならそれ自身、集まりなら IntoIter<要素>))
-        // (`T::Target` (Deref の先) は別に置き換える)
+        // (`::Item` (the element) and `::IntoIter` (IntoIterator: itself for an iterator, IntoIter<element> for a collection))
+        // (`T::Target` (the Deref target) is replaced separately)
         if let Some(ti) = s.find("::Target") {
             let b = s.as_bytes();
             let mut j = ti;
@@ -5129,7 +5129,7 @@ fn norm_proj_with(t: &str, more: &dyn Fn(&str, bool) -> Option<String>) -> Strin
             (None, None) => break,
         };
         let b = s.as_bytes();
-        // (`::Item` の前の型: `<A as Tr>` か、深さ 0 で区切り (`<` / `,` / `(` / 空白) まで)
+        // (the type before `::Item`: `<A as Tr>`, or up to a separator at depth 0 (`<` / `,` / `(` / whitespace))
         let (a, inner) = if i >= 1 && b[i - 1] == b'>' && s[..i].contains(" as ") {
             let mut d = 0;
             let mut j = i;
@@ -5155,9 +5155,9 @@ fn norm_proj_with(t: &str, more: &dyn Fn(&str, bool) -> Option<String>) -> Strin
             while j > 0 {
                 let c = b[j - 1];
                 if c == b'>' && j >= 2 && b[j - 2] == b'-' {
-                    // (`->` の `>` は括弧ではない)
+                    // (the `>` of `->` is not a bracket)
                 } else if c == b'>' || c == b']' {
-                    // (配列 `[T; N]` の中の空白で切らない)
+                    // (does not cut at the whitespace inside an array `[T; N]`)
                     d += 1;
                 } else if c == b'<' || c == b'[' {
                     if d == 0 {
@@ -5171,7 +5171,7 @@ fn norm_proj_with(t: &str, more: &dyn Fn(&str, bool) -> Option<String>) -> Strin
             }
             (j, s[j..i].to_string())
         };
-        // (配列の値 `[T; N]` (IntoIterator の impl は `[T; N]` の持ち主で引けない): 要素は T、繰り返しは `IntoIter<T>`)
+        // (an array value `[T; N]` (its IntoIterator impl cannot be looked up with `[T; N]` as the owner): the element is T, the iterator is `IntoIter<T>`)
         let arr = |x: &str| x.trim().starts_with('[').then(|| elem_type(x.trim())).flatten();
         let rep = if into {
             if is_iter_head(&type_head(&inner)) { Some(inner.clone()) } else { iter_item(&inner).or_else(|| arr(&inner)).map(|e| format!("IntoIter<{e}>")).or_else(|| more(&inner, true)) }
@@ -5186,7 +5186,7 @@ fn norm_proj_with(t: &str, more: &dyn Fn(&str, bool) -> Option<String>) -> Strin
     s
 }
 
-/// 型の形 pat (型引数の名前 vars を含む) を実際の型 act に当てはめて、vars の値を out に (`Option<U>` と `Option<char>` → U = char)
+/// Fits the type shape pat (containing the type parameter names vars) to the actual type act, putting the values of vars into out (`Option<U>` and `Option<char>` → U = char)
 fn unify(pat: &str, act: &str, vars: &[String], out: &mut Vec<(String, String)>) {
     let p = pat.trim();
     let a = act.trim();
@@ -5206,7 +5206,7 @@ fn unify(pat: &str, act: &str, vars: &[String], out: &mut Vec<(String, String)>)
     }
 }
 
-/// クロージャ (トークン s は `|` か `move`) の引数の型の並び (`|x, (a, b)|` → `&D, (u8, char)`)
+/// The list of the parameter types of a closure (token s is `|` or `move`) (`|x, (a, b)|` → `&D, (u8, char)`)
 fn closure_args(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<String> {
     let f = ws[file];
     let s = if f.tok(s) == "move" { s + 1 } else { s };
@@ -5214,7 +5214,7 @@ fn closure_args(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<
     while e < f.toks.len() && !f.sym(e, b'|') {
         e += 1;
     }
-    // (引数ごとに: 名前ならその型、タプルのパターンなら要素の型を並べたもの)
+    // (for each parameter: for a name its type, for a tuple pattern the element types listed)
     fn pat_ty(ws: &[&FileIndex], file: usize, a: usize, b: usize, depth: u32) -> Option<String> {
         let f = ws[file];
         let mut a = a;
@@ -5268,7 +5268,7 @@ fn closure_args(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<
     Some(out.join(", "))
 }
 
-/// クロージャ (トークン s は `|` か `move`) の戻り値の型 (`-> T` か、本体の式の型)
+/// The return type of a closure (token s is `|` or `move`) (`-> T`, or the type of the body expression)
 fn closure_ret(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<String> {
     let f = ws[file];
     let mut j = if f.tok(s) == "move" { s + 1 } else { s };
@@ -5294,11 +5294,11 @@ fn closure_ret(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<S
         }
         return expr_type(ws, file, c - 1, depth + 1);
     }
-    // (本体が `if .. { } else { }` / `match x { }` / `unsafe { }`: 式全体の終わりの `}` の型)
+    // (the body is `if .. { } else { }` / `match x { }` / `unsafe { }`: the type of the `}` at the end of the whole expression)
     if f.ident(b) && matches!(f.tok(b), "if" | "match" | "unsafe" | "loop") {
         let mut j = b;
         let end = loop {
-            // (条件の中の構造体の式は括弧の中にしか書けないので、深さ 0 の最初の `{` が本体)
+            // (a struct expression in the condition can only be written inside brackets, so the first `{` at depth 0 is the body)
             let mut q = j + 1;
             let mut d = 0;
             while q < f.toks.len() && !(d == 0 && f.sym(q, b'{')) {
@@ -5325,7 +5325,7 @@ fn closure_ret(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<S
     }
     let e = expr_end(f, b, false)?;
     let t = expr_type(ws, file, e, depth + 1)?;
-    // (`&x.name` / `&mut v`: 前の参照)
+    // (`&x.name` / `&mut v`: a leading reference)
     Some(if f.sym(b, b'&') && !f.sym(b + 1, b'&') {
         if f.tok(b + 1) == "mut" { format!("&mut {t}") } else { format!("&{t}") }
     } else {
@@ -5333,16 +5333,16 @@ fn closure_ret(ws: &[&FileIndex], file: usize, s: usize, depth: u32) -> Option<S
     })
 }
 
-/// `recv.name(args)` (m は name のトークン、受け手の型 o) の型: メソッドの戻り値の型の型引数を、引数のクロージャの戻り値
-/// から決める (`map(|x| x.n)` → Map<Iter<..>, impl FnMut() -> u8>、`opt.map(|x| ..)` → Option<R>)。関連型の射影も置き換える
+/// The type of `recv.name(args)` (m is the token of name, receiver type o): the type parameters of the method's return type are decided from the return values of the closures in the arguments
+/// (`map(|x| x.n)` → Map<Iter<..>, impl FnMut() -> u8>, `opt.map(|x| ..)` → Option<R>). Associated type projections are replaced too
 fn method_call_type(ws: &[&FileIndex], file: usize, o: &str, name: &str, m: usize, depth: u32) -> Option<String> {
     method_call_type_at(ws, file, o, name, m + 1, None, depth)
 }
 
-/// method_call_type の本体: op は引数の `(` のトークン、turbo はターボフィッシュ `::<T>` の型
+/// The body of method_call_type: op is the token of the arguments' `(`, turbo is the type of a turbofish `::<T>`
 fn method_call_type_at(ws: &[&FileIndex], file: usize, o: &str, name: &str, op: usize, turbo: Option<&str>, depth: u32) -> Option<String> {
-    // (要素の型が分かる繰り返し (`Split` / `RSplit` / slice の `Iter` ..): Iterator の trait の宣言 (`Option<Self::Item>`) を先に。
-    // その impl は core のマクロの中にあって見えないか、同じ名前の別の型 (slice の `RSplit`) の impl を拾ってしまうので)
+    // (iterators whose element type is known (`Split` / `RSplit` / slice's `Iter` ..): the Iterator trait's declaration (`Option<Self::Item>`) first.
+    // Their impls are inside core macros and not visible, or an impl of another type with the same name (slice's `RSplit`) would be picked up)
     let from_trait = || -> Option<(String, Vec<(u8, String, String, String)>)> {
         if !is_iter_head(&type_head(o)) || iter_item(o).is_none() {
             return None;
@@ -5352,14 +5352,14 @@ fn method_call_type_at(ws: &[&FileIndex], file: usize, o: &str, name: &str, op: 
     };
     let (ret, d) = from_trait().or_else(|| expand(ws, file, o).iter().find_map(|t| member_def(ws, file, t, name, &[SymKind::Method]).map(|(r, d)| (r, d.fnret.clone()))))?;
     let mut ret = ret;
-    // (ターボフィッシュのない `sum()` / `product()`: ふつうは要素の型 (の参照を外したもの))
+    // (`sum()` / `product()` without a turbofish: usually the element type (with the reference removed))
     if turbo.is_none() && matches!(name, "sum" | "product") && ret.len() == 1 {
         if let Some(item) = iter_item_ws(ws, file, o) {
             ret = strip_ref(&item).to_string();
         }
     }
-    // (ターボフィッシュ `collect::<Vec<_>>()` / `sum::<u32>()` / `parse::<u8>()`: 戻り値の中の最初の型引数 (大文字 1 文字) に。
-    // `_` は受け手の要素の型)
+    // (a turbofish `collect::<Vec<_>>()` / `sum::<u32>()` / `parse::<u8>()`: into the first type parameter (1 uppercase letter) in the return type.
+    // `_` is the receiver's element type)
     if let Some(tb) = turbo {
         let tb = match iter_item(o) {
             Some(item) if tb.contains('_') => tb.replace('_', &item),
@@ -5370,7 +5370,7 @@ fn method_call_type_at(ws: &[&FileIndex], file: usize, o: &str, name: &str, op: 
             ret = subst(&ret, &[g], &[tb]);
         }
     }
-    // (`get` / `get_mut` の `I::Output`: 並びの要素 (引数が範囲なら並び)。引数の型を当てはめる前に)
+    // (the `I::Output` of `get` / `get_mut`: the element of the sequence (the sequence if the argument is a range). Before the argument types are applied)
     if ret.contains("I::Output") {
         let f = ws[file];
         let range = f.sym(op, b'(') && (op + 1..close_of(f, op)).any(|q| f.sym(q, b'.') && f.sym(q + 1, b'.'));
@@ -5382,12 +5382,12 @@ fn method_call_type_at(ws: &[&FileIndex], file: usize, o: &str, name: &str, op: 
     Some(strip_lifetimes(&norm_proj_ws(ws, file, &ret)))
 }
 
-/// 呼び出し (引数の `(` は op) の戻り値の型 ret の型引数を、引数から決める: クロージャの戻り値 (`map(|x| ..)`) と、型引数そのものの
-/// 引数の式の型 (`Mutex::new(x)` / `zip(other)`)
+/// Decides the type parameters of the return type ret of a call (the arguments' `(` is op) from the arguments: the return values of closures (`map(|x| ..)`), and the types of
+/// the argument expressions for parameters whose type is a type parameter itself (`Mutex::new(x)` / `zip(other)`)
 fn apply_call_args(ws: &[&FileIndex], file: usize, mut ret: String, d: &[(u8, String, String, String)], op: usize, depth: u32) -> String {
     let f = ws[file];
     if !d.is_empty() && f.sym(op, b'(') {
-        // (引数の始めのトークン: 深さ 0 のカンマで区切る)
+        // (the first token of each argument: split at commas at depth 0)
         let close = close_of(f, op);
         let mut starts = vec![op + 1];
         let mut dd = 0;
@@ -5402,7 +5402,7 @@ fn apply_call_args(ws: &[&FileIndex], file: usize, mut ret: String, d: &[(u8, St
         }
         for (idx, fty, pat, refm) in d {
             let Some(&s) = starts.get(*idx as usize) else { continue };
-            // (型引数そのものの引数 `zip(other)`: 引数の式の型。`&mut T` の引数 `&mut x` なら x の型)
+            // (a parameter whose type is a type parameter itself `zip(other)`: the type of the argument expression. For an argument `&mut x` to a `&mut T` parameter, the type of x)
             if pat == "=" {
                 let by_ref = refm == "&";
                 let (s2, strip) = if by_ref && f.sym(s, b'&') { (if f.tok(s + 1) == "mut" { s + 2 } else { s + 1 }, false) } else { (s, by_ref) };
@@ -5413,7 +5413,7 @@ fn apply_call_args(ws: &[&FileIndex], file: usize, mut ret: String, d: &[(u8, St
                 continue;
             }
             let closure = f.sym(s, b'|') || f.tok(s) == "move";
-            // (関数の名前を渡したもの `and_then(str_lit)` / `map(Path::new)`: その関数の戻り値の型)
+            // (a fn name passed `and_then(str_lit)` / `map(Path::new)`: the return type of that fn)
             let mut e = s;
             while f.ident(e) && f.before_path(e) {
                 e += 3;
@@ -5427,12 +5427,12 @@ fn apply_call_args(ws: &[&FileIndex], file: usize, mut ret: String, d: &[(u8, St
                 None
             };
             let Some(r) = r else { continue };
-            // (pat の中の型引数: 1 文字か大文字で始まる短い名前)
+            // (type parameters in pat: 1 letter, or a short name starting with an uppercase letter)
             let vars: Vec<String> = pat.split(|c: char| !(c.is_alphanumeric() || c == '_')).filter(|w| !w.is_empty() && w.starts_with(|c: char| c.is_ascii_uppercase()) && w.len() <= 2).map(|w| w.to_string()).collect();
             let mut b = vec![];
             unify(pat, &r, &vars, &mut b);
             let (ps, vs): (Vec<String>, Vec<String>) = b.into_iter().unzip();
-            // (クロージャの型引数 F を先に: 戻り値の型の中の別の F (`parse` の型引数) を置き換えないように、一度に置き換える)
+            // (the closure's type parameter F first: replaced all at once so as not to replace another F in the return type (`parse`'s type parameter))
             let (mut ps, mut vs) = (ps, vs);
             if !fty.is_empty() {
                 let args = closure_args(ws, file, s, depth + 1).unwrap_or_default();
@@ -5445,14 +5445,14 @@ fn apply_call_args(ws: &[&FileIndex], file: usize, mut ret: String, d: &[(u8, St
     ret
 }
 
-/// 参照の寿命の名前を外す (`&'a str` → `&str`。`'static` は残す: rust-analyzer の表示と同じ)
+/// Removes lifetime names from references (`&'a str` → `&str`. `'static` is kept: same as rust-analyzer's display)
 fn strip_lifetimes(t: &str) -> String {
     let mut out = String::with_capacity(t.len());
     let mut it = t.char_indices().peekable();
     while let Some((i, c)) = it.next() {
         if c == '&' && t[i + 1..].starts_with('\'') && !t[i + 1..].starts_with("'static") {
             out.push('&');
-            // (`'a ` を飛ばす)
+            // (skips `'a `)
             while let Some(&(_, d)) = it.peek() {
                 it.next();
                 if d == ' ' {
@@ -5466,8 +5466,8 @@ fn strip_lifetimes(t: &str) -> String {
     out
 }
 
-/// 束縛 b の型 t (`Vec<_>` など、分からない所のあるもの) を、同じ関数の中の後の使い方から決める: `v.push(x)` /
-/// `v.insert(k, x)` (Vec の要素) と、`v = EXPR;` (代入した式の型)
+/// Decides the type t of binding b (one with unknown parts, like `Vec<_>`) from later uses in the same fn: `v.push(x)` /
+/// `v.insert(k, x)` (the Vec's element), and `v = EXPR;` (the type of the assigned expression)
 fn refine_by_use(ws: &[&FileIndex], file: usize, b: usize, t: &str, depth: u32) -> Option<String> {
     let f = ws[file];
     if depth > 16 {
@@ -5489,7 +5489,7 @@ fn refine_by_use(ws: &[&FileIndex], file: usize, b: usize, t: &str, depth: u32) 
                 }
             }
         }
-        // (分かった型か: `_` も、型の定義のない 1 文字の名前 (残った型引数 `B`) も含まない)
+        // (whether the type is known: contains neither `_` nor a 1-letter name with no type definition (a leftover type parameter `B`))
         let known = |x: &String| {
             !x.contains('_')
                 && !x.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|w| w.len() == 1 && w.starts_with(|c: char| c.is_ascii_uppercase()) && !named(ws, file, w).iter().any(|(_, d)| matches!(d.kind, SymKind::Struct | SymKind::Enum | SymKind::TypeAlias | SymKind::Union)))
@@ -5502,7 +5502,7 @@ fn refine_by_use(ws: &[&FileIndex], file: usize, b: usize, t: &str, depth: u32) 
                 }
             }
         }
-        // (`f(.., &mut v, ..)` / `x.m(.., &mut v)`: 呼んだ関数の引数の型 (ワークスペースの関数))
+        // (`f(.., &mut v, ..)` / `x.m(.., &mut v)`: the parameter type of the called fn (a workspace fn))
         if q >= 2 && f.sym(q - 2, b'&') && f.tok(q - 1) == "mut" && (f.sym(q + 1, b',') || f.sym(q + 1, b')')) {
             if let Some(pt) = arg_param_type(ws, file, q - 2) {
                 let pt = pt.trim_start_matches("&mut ").trim().to_string();
@@ -5515,10 +5515,10 @@ fn refine_by_use(ws: &[&FileIndex], file: usize, b: usize, t: &str, depth: u32) 
     None
 }
 
-/// 呼び出しの引数 (始めのトークン a) を受け取る、呼んだ関数の引数の型 (ワークスペースの関数のシグネチャから。self は数えない)
+/// The parameter type of the called fn that receives a call argument (first token a) (from the signature of a workspace fn; self is not counted)
 fn arg_param_type(ws: &[&FileIndex], file: usize, a: usize) -> Option<String> {
     let f = ws[file];
-    // (囲む `(` と、何番目の引数か)
+    // (the enclosing `(`, and which argument it is)
     let mut j = a;
     let mut d = 0;
     let mut idx = 0;
@@ -5554,33 +5554,33 @@ fn arg_param_type(ws: &[&FileIndex], file: usize, a: usize) -> Option<String> {
     Some(p.split_once(':')?.1.trim().to_string())
 }
 
-/// パターンの中の道筋の 1 段 (外から内へ当てはめる)
+/// One step of the path within a pattern (applied from the outside in)
 #[derive(Debug, Clone)]
 enum PatStep {
-    /// タプル `(.., x, ..)` の i 番目
+    /// The i-th of a tuple `(.., x, ..)`
     Tuple(usize),
-    /// バリアント・タプル構造体 `Q::V(.., x, ..)` の i 番目 (V のトークン)
+    /// The i-th of a variant / tuple struct `Q::V(.., x, ..)` (the token of V)
     Variant(usize, usize),
-    /// 構造体のパターン `S { f: x }` のフィールド f (S のトークン)
+    /// Field f of a struct pattern `S { f: x }` (the token of S)
     Field(String, usize),
-    /// スライスのパターン `[a, b, ..]` の要素
+    /// An element of a slice pattern `[a, b, ..]`
     Slice,
 }
 
-/// 束縛 b を含むパターンの、置かれた所の型と、外から b までの道筋を当てはめた型。パターンの置かれた所:
-/// `let PAT (: T)? = EXPR` / `if let` / `while let` / `for PAT in EXPR` / match の腕 `PAT (if ..)? =>`。
-/// 道筋のない (パターンの頭の) 束縛と、クロージャ・関数の引数は扱わない (ほかで扱う)
+/// The type at the place of the pattern containing binding b, with the path from the outside to b applied. The places of patterns:
+/// `let PAT (: T)? = EXPR` / `if let` / `while let` / `for PAT in EXPR` / a match arm `PAT (if ..)? =>`.
+/// Bindings without a path (at the head of the pattern) and closure / fn parameters are not handled (handled elsewhere)
 fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<String> {
     let f = ws[file];
     if depth > 24 {
         return None;
     }
-    // (後ろへ戻って、b を囲むパターンの段を集める (内から外へ))
+    // (goes backwards and collects the pattern steps enclosing b (from the inside out))
     let mut steps: Vec<PatStep> = vec![];
     let mut j = b;
     let mut idx = 0usize;
     let mut d = 0i32;
-    // (構造体のパターンの中の `f: x` の f)
+    // (the f of `f: x` in a struct pattern)
     let mut field: Option<String> = if b >= 2 && f.sym(b - 1, b':') && !f.sym(b - 2, b':') && f.ident(b - 2) {
         Some(f.tok(b - 2).to_string())
     } else if f.sym(b + 1, b',') || f.sym(b + 1, b'}') {
@@ -5590,7 +5590,7 @@ fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
     };
     let root;
     let mut mroot = 0;
-    // (match の腕のパターンの中なら、その始め: 前の腕の本体 (`x == y,`) まで戻らない)
+    // (if inside a match arm pattern, its start: does not go back into the previous arm's body (`x == y,`))
     let arm_start = {
         let mut q = b + 1;
         let mut d = 0i32;
@@ -5630,7 +5630,7 @@ fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
         }
         if f.sym(j, b')') || f.sym(j, b']') || f.sym(j, b'}') {
             if d == 0 && f.sym(j, b'}') {
-                // (構造体のパターン `S { .. }` の閉じ括弧でなければ、前の腕の本体の終わり: 腕の始め)
+                // (if not the closing bracket of a struct pattern `S { .. }`, the end of the previous arm's body: the start of the arm)
                 let o = f.open_of(j);
                 let pat = o.is_some_and(|o| o >= 1 && f.ident(o - 1) && f.tok(o - 1).starts_with(|c: char| c.is_ascii_uppercase()));
                 if !pat {
@@ -5652,18 +5652,18 @@ fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
                 } else if j >= 1 && f.ident(j - 1) && matches!(f.tok(j - 1), "let" | "for" | "mut" | "ref") || j >= 1 && (f.sym(j - 1, b'&') || f.sym(j - 1, b',') || f.sym(j - 1, b'(') || f.sym(j - 1, b'|') || f.sym(j - 1, b'[') || f.sym(j - 1, b'{') || f.sym(j - 1, b'>')) {
                     steps.push(PatStep::Tuple(idx));
                 } else if j >= 2 && f.sym(j - 1, b'!') && f.tok(j - 2) == "matches" && idx >= 1 {
-                    // (`matches!(EXPR, PAT)` のパターン: 照合する式は最初の引数)
+                    // (the pattern of `matches!(EXPR, PAT)`: the matched expression is the first argument)
                     mroot = j;
                     root = 'm';
                     break;
                 } else {
-                    // (呼び出しの括弧: パターンではない)
+                    // (the brackets of a call: not a pattern)
                     return None;
                 }
             } else if f.sym(j, b'[') {
                 steps.push(PatStep::Slice);
             } else {
-                // (`S { .. }` の構造体のパターンか、腕の始めのブロック)
+                // (a struct pattern `S { .. }`, or the block at the start of the arm)
                 if j >= 1 && f.ident(j - 1) && f.tok(j - 1).starts_with(|c: char| c.is_ascii_uppercase()) && f.tok(j - 1) != "Self" {
                     steps.push(PatStep::Field(field.take()?, j - 1));
                 } else {
@@ -5672,7 +5672,7 @@ fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
                 }
             }
             idx = 0;
-            // (外の段のフィールドの名前: この段の頭 (名前・パス) の前の `f:`)
+            // (the field name of the outer step: the `f:` before the head (name / path) of this step)
             let mut h = if f.sym(j, b'[') || (j >= 1 && !f.ident(j - 1)) { j } else { j - 1 };
             while h >= 3 && f.after_path(h) {
                 h -= 3;
@@ -5684,7 +5684,7 @@ fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
             continue;
         }
         if f.sym(j, b',') {
-            // (腕のパターンが束縛だけ `.., s if .. =>`: 前の腕の本体が括弧なしで `,` で終わる)
+            // (the arm's pattern is just a binding `.., s if .. =>`: the previous arm's body ends with `,` without brackets)
             if steps.is_empty() && (f.sym(b + 1, b'=') && f.sym(b + 2, b'>') || f.ident(b + 1) && f.tok(b + 1) == "if") {
                 root = 'a';
                 break;
@@ -5697,7 +5697,7 @@ fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
             break;
         }
         if f.sym(j, b'|') {
-            // (クロージャの引数ならほかで扱う。or パターン `A(x) | B(x)` は続ける)
+            // (closure parameters are handled elsewhere. An or-pattern `A(x) | B(x)` continues)
             if f.closure_start(j) {
                 return None;
             }
@@ -5722,14 +5722,14 @@ fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
         }
     }
     if steps.is_empty() {
-        // (match の腕のパターンが束縛だけ `s if .. =>` / `n =>`: 照合する式の型)
+        // (the match arm's pattern is just a binding `s if .. =>` / `n =>`: the type of the matched expression)
         if root == 'a' && f.sym(b + 1, b'=') && f.sym(b + 2, b'>') || root == 'a' && f.ident(b + 1) && f.tok(b + 1) == "if" {
             return scrutinee_type(ws, file, b, depth + 1);
         }
         return None;
     }
     steps.reverse();
-    // (根の型)
+    // (the type of the root)
     let rt = match root {
         'f' => {
             let (in_tok, _) = for_pattern_in(f, b)?;
@@ -5742,7 +5742,7 @@ fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
             if is_iter_head(&type_head(&t)) { iter_item_ws(ws, file, &t) } else { iter_item(&t).or_else(|| elem_type(&t)).or_else(|| iter_item_ws(ws, file, &t)) }?
         }
         'l' => {
-            // (パターンの後: 型注釈 `: T` か `= EXPR`)
+            // (after the pattern: a type annotation `: T` or `= EXPR`)
             let mut q = b + 1;
             let mut dd = steps.len() as i32;
             while q < f.toks.len() && dd > 0 {
@@ -5780,7 +5780,7 @@ fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
         ty = match st {
             PatStep::Tuple(i) => tuple_items(strip_ref(&cur))?.get(*i)?.clone(),
             PatStep::Slice => elem_type(&cur).or_else(|| strip_ref(&cur).strip_prefix('[').and_then(|r| r.split([';', ']']).next()).map(|x| x.trim().to_string()))?,
-            // (構造体の形のバリアント `E::W { x }` のフィールドの持ち主はバリアント W)
+            // (the owner of the fields of a struct-like variant `E::W { x }` is the variant W)
             PatStep::Field(n, st) => member_type(ws, file, &cur, n, &[SymKind::Field]).or_else(|| {
                 let w = f.tok(*st);
                 named(ws, file, n).into_iter().find(|(_, d)| d.kind == SymKind::Field && d.owner == w).map(|(_, d)| d.ty.clone())
@@ -5801,8 +5801,8 @@ fn pattern_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<
     Some(ty)
 }
 
-/// バリアント・タプル構造体のパターン `Q::V(..)` (V のトークン vt) の i 番目のフィールドの型。照合する型 cur の型引数を
-/// enum の型引数に当てる
+/// The type of the i-th field of a variant / tuple struct pattern `Q::V(..)` (the token of V is vt). The type arguments of the matched type cur are applied to
+/// the enum's type parameters
 fn variant_field(ws: &[&FileIndex], file: usize, cur: &str, vt: usize, i: usize) -> Option<String> {
     let f = ws[file];
     let v = f.tok(vt);
@@ -5813,15 +5813,15 @@ fn variant_field(ws: &[&FileIndex], file: usize, cur: &str, vt: usize, i: usize)
         _ => q,
     };
     let kr = f.krate;
-    // (修飾 `Ty::` を use からたどった enum のモジュール: 同じ名前の enum が別のクレートにあるとき)
+    // (the module of the enum reached by following the qualifier `Ty::` through use: when an enum with the same name is in another crate)
     let qmod: Option<Vec<String>> = if f.after_path(vt) && vt >= 3 && f.tok(vt - 3) != "Self" {
         def_at(ws, file, f.toks[vt - 3].1 as usize).first().and_then(|l| ws[l.file].defs.iter().find(|d| d.start == l.start && d.kind == SymKind::Enum).map(|d| d.module.to_vec()))
     } else {
         None
     };
-    // (修飾の別名 `use parse::Ty as PTy` の PTy はもとの名前で)
+    // (the PTy of a qualifier alias `use parse::Ty as PTy` by its original name)
     let q = q.map(|q| f.use_alias(&q).map(|s| s.to_string()).unwrap_or(q));
-    // (バリアント (持ち主が照合する型か修飾) か、タプル構造体 `P(a, b)`)
+    // (a variant (whose owner is the matched type or the qualifier), or a tuple struct `P(a, b)`)
     let (di, d) = named(ws, file, v)
         .into_iter()
         .filter(|(_, d)| (d.kind == SymKind::Variant && (d.owner == head || q.as_deref() == Some(d.owner.as_str()))) || (d.kind == SymKind::Struct && d.owner.is_empty()))
@@ -5844,7 +5844,7 @@ fn variant_field(ws: &[&FileIndex], file: usize, cur: &str, vt: usize, i: usize)
     Some(ty)
 }
 
-/// for_pattern の `in` のトークンだけ (パターンの深さはどこでもよい)
+/// Only the `in` token of for_pattern (the pattern depth may be anything)
 fn for_pattern_in(f: &FileIndex, b: usize) -> Option<(usize, ())> {
     let mut q = b + 1;
     let mut d = 0i32;
@@ -5866,8 +5866,8 @@ fn for_pattern_in(f: &FileIndex, b: usize) -> Option<(usize, ())> {
     None
 }
 
-/// 束縛 b が `Some(..)` / `Ok(..)` / `Err(..)` のパターン (の中のタプル) で、その後が `= EXPR` なら
-/// (Some / Ok / Err, `=` のトークン, タプルの中の番号の並び)
+/// If binding b is in a `Some(..)` / `Ok(..)` / `Err(..)` pattern (in a tuple inside it) followed by `= EXPR`:
+/// (Some / Ok / Err, the token of `=`, the list of indices within the tuple)
 fn wrap_pattern(f: &FileIndex, b: usize) -> Option<(&'static str, usize, Vec<usize>)> {
     let mut j = b;
     let mut idx = 0;
@@ -5902,7 +5902,7 @@ fn wrap_pattern(f: &FileIndex, b: usize) -> Option<(&'static str, usize, Vec<usi
         return None;
     }
     path.reverse();
-    // (後ろへ: ラッパの `)` の後の `=`)
+    // (forwards: the `=` after the wrapper's `)`)
     let mut q = b + 1;
     let mut d = path.len() as i32 + 1;
     while q < f.toks.len() {
@@ -5921,7 +5921,7 @@ fn wrap_pattern(f: &FileIndex, b: usize) -> Option<(&'static str, usize, Vec<usi
     None
 }
 
-/// 束縛 b が `let (..) =` のタプルのパターンの中なら (パターンの後のトークン (`=` か `:`), タプルの中の番号の並び)
+/// If binding b is in a tuple pattern of `let (..) =`: (the token after the pattern (`=` or `:`), the list of indices within the tuple)
 fn let_tuple_pattern(f: &FileIndex, b: usize) -> Option<(usize, Vec<usize>)> {
     let mut j = b;
     let mut idx = 0;
@@ -5936,7 +5936,7 @@ fn let_tuple_pattern(f: &FileIndex, b: usize) -> Option<(usize, Vec<usize>)> {
             d += 1;
         } else if f.sym(j, b'(') {
             if d == 0 {
-                // (`Err(e)` / `T(a, b)` のパターンはタプルではない)
+                // (`Err(e)` / `T(a, b)` patterns are not tuples)
                 if j >= 1 && f.ident(j - 1) && f.tok(j - 1) != "let" && f.tok(j - 1) != "mut" {
                     return None;
                 }
@@ -5951,7 +5951,7 @@ fn let_tuple_pattern(f: &FileIndex, b: usize) -> Option<(usize, Vec<usize>)> {
             return None;
         }
     }
-    // (`let mut (..)` ではなく `let (..)`: パターンの最初は `(`)
+    // (`let (..)`, not `let mut (..)`: the pattern starts with `(`)
     if idx != 0 || path.is_empty() || (j >= 1 && f.ident(j - 1) && matches!(f.tok(j - 1), "if" | "while")) {
         return None;
     }
@@ -5974,9 +5974,9 @@ fn let_tuple_pattern(f: &FileIndex, b: usize) -> Option<(usize, Vec<usize>)> {
     None
 }
 
-/// 束縛 b が `for PAT in` の PAT の中なら (`in` のトークン, タプルの中の番号の並び)
+/// If binding b is in the PAT of `for PAT in`: (the token of `in`, the list of indices within the tuple)
 fn for_pattern(f: &FileIndex, b: usize) -> Option<(usize, Vec<usize>)> {
-    // (前へ: `for` まで。カンマとタプルの括弧を数える)
+    // (backwards: up to `for`. Counts commas and tuple brackets)
     let mut j = b;
     let mut idx = 0;
     let mut path = vec![];
@@ -6005,7 +6005,7 @@ fn for_pattern(f: &FileIndex, b: usize) -> Option<(usize, Vec<usize>)> {
         return None;
     }
     path.reverse();
-    // (後ろへ: `in`。b はタプルの括弧の中 (path の深さ) にいる)
+    // (forwards: `in`. b is inside tuple brackets (at the depth of path))
     let mut q = b + 1;
     let mut d = path.len() as i32;
     while q < f.toks.len() {
@@ -6023,15 +6023,15 @@ fn for_pattern(f: &FileIndex, b: usize) -> Option<(usize, Vec<usize>)> {
     None
 }
 
-/// クロージャの引数 b (`recv.m(|a, b| ..)` の a / b) の型: 繰り返し (`Iter<T>` / `Vec<T>` / `[T]` / `Option<T>` ..) の要素の型。
-/// `filter` / `find` / `position` ... の引数は要素への参照、`fold` は 2 つめが要素、`map_err` / `unwrap_or_else` は Result の E
+/// The type of closure parameter b (the a / b of `recv.m(|a, b| ..)`): the element type of an iteration (`Iter<T>` / `Vec<T>` / `[T]` / `Option<T>` ..).
+/// The parameter of `filter` / `find` / `position` ... is a reference to the element, for `fold` the 2nd is the element, for `map_err` / `unwrap_or_else` the E of the Result
 fn closure_param_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> Option<String> {
     let f = ws[file];
     if depth > 24 {
         return None;
     }
-    // (b の前の `|`: 引数の並びの始め。その間のカンマの数が引数の番号)
-    // (タプルのパターン `|(i, x)|` の中なら、そのタプルの中の番号も: path = [引数の番号, タプルの中の番号..])
+    // (the `|` before b: the start of the parameter list. The number of commas in between is the parameter index)
+    // (if inside a tuple pattern `|(i, x)|`, also the index within that tuple: path = [parameter index, index within the tuple..])
     let mut j = b;
     let mut idx = 0;
     let mut path: Vec<usize> = vec![];
@@ -6062,7 +6062,7 @@ fn closure_param_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> O
     if !f.closure_start(j) || (j >= 1 && f.sym(j - 1, b'|')) {
         return None;
     }
-    // (`recv.m(` の m と、受け手の式の終わり。クロージャは後ろの引数でもよい: `fold(0, |acc, x| ..)`)
+    // (the m of `recv.m(`, and the end of the receiver expression. The closure may be a later argument: `fold(0, |acc, x| ..)`)
     let mut open = if j >= 1 && f.ident(j - 1) && f.tok(j - 1) == "move" { j.checked_sub(2)? } else { j.checked_sub(1)? };
     let mut d = 0;
     while !(d == 0 && f.sym(open, b'(')) {
@@ -6083,7 +6083,7 @@ fn closure_param_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> O
     }
     let m = f.tok(open - 1);
     let recv = expr_type(ws, file, open - 3, depth + 1)?;
-    // (メソッドのシグネチャの束縛 `F: FnOnce(&T) -> R` の引数の形から: `cell.with(|m| ..)` / `opt.map(|x| ..)` / `iter.fold(0, |a, x| ..)`)
+    // (from the parameter shape of the bound `F: FnOnce(&T) -> R` in the method signature: `cell.with(|m| ..)` / `opt.map(|x| ..)` / `iter.fold(0, |a, x| ..)`)
     if let Some(t) = closure_param_from_sig(ws, file, &recv, m, open, j, idx, &path, depth) {
         return Some(t);
     }
@@ -6108,7 +6108,7 @@ fn closure_param_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> O
         (_, 0) => if by_ref { format!("&{elem}") } else { elem },
         _ => return None,
     };
-    // (タプルのパターンの中: その番号の要素。`&(a, b)` の参照は外す)
+    // (inside a tuple pattern: the element at that index. The reference of `&(a, b)` is removed)
     let mut ty = ty;
     for &i in &path[1..] {
         let inner = strip_ref(&ty).to_string();
@@ -6117,15 +6117,15 @@ fn closure_param_type(ws: &[&FileIndex], file: usize, b: usize, depth: u32) -> O
     Some(ty)
 }
 
-/// トークン k で終わるリテラルの型 (`"a"` → &str、`'c'` → char、`b"x"` → &[u8]、`b'x'` → u8、`1u8` → u8、`true` → bool)。
-/// 式全体がリテラルのときだけ (`x + 1` の 1 は式の型ではない)。接尾辞のない数 (`0` / `1.5`) は使い方で型が決まる
-/// (rust-analyzer は `let mut acc = 0; acc += x_i64` を i64 にする) ので答えない。
-/// (字句では数は 1 文字ずつの記号、接尾辞は続く識別子)
+/// The type of the literal ending at token k (`"a"` → &str, `'c'` → char, `b"x"` → &[u8], `b'x'` → u8, `1u8` → u8, `true` → bool).
+/// Only when the whole expression is the literal (the 1 of `x + 1` is not the type of the expression). The type of a number without a suffix (`0` / `1.5`) is decided by its use
+/// (rust-analyzer makes `let mut acc = 0; acc += x_i64` i64), so no answer.
+/// (in the tokens a number is symbols of 1 char each, and the suffix is the identifier that follows)
 fn literal_type(f: &FileIndex, k: usize) -> Option<String> {
     let b = f.text.as_bytes();
     let digit = |j: usize| f.toks[j].0 == 1 && b[f.toks[j].1 as usize].is_ascii_digit();
     let adj = |j: usize| j >= 1 && f.toks[j - 1].2 == f.toks[j].1;
-    // (s から始まる式の前が、式の始まりになれる所か)
+    // (whether what precedes the expression starting at s is a place where an expression can start)
     let whole = |s: usize| -> bool {
         if s == 0 {
             return true;
@@ -6167,8 +6167,8 @@ fn literal_type(f: &FileIndex, k: usize) -> Option<String> {
     if w == "true" || w == "false" {
         return whole(k).then(|| "bool".to_string());
     }
-    // (接尾辞 `1u8` / `2.0f32` / `1_000usize`: 前へ続く数字・`.`・`_` の始めが式の始め)
-    // (`1_000usize` は `1` と `_000usize`)
+    // (a suffix `1u8` / `2.0f32` / `1_000usize`: the start of the digits / `.` / `_` continuing backwards is the start of the expression)
+    // (`1_000usize` is `1` and `_000usize`)
     let suf = w.trim_start_matches(|c: char| c == '_' || c.is_ascii_digit());
     if PRIMS.contains(&suf) && adj(k) && digit(k - 1) {
         let mut j = k - 1;
@@ -6180,7 +6180,7 @@ fn literal_type(f: &FileIndex, k: usize) -> Option<String> {
     None
 }
 
-/// off を含む文字列・文字のリテラルの hover (`&'static str` と値)
+/// Hover of the string / char literal containing off (`&'static str` and the value)
 fn literal_hover(f: &FileIndex, off: usize) -> Option<String> {
     let i = f.toks.partition_point(|t| (t.2 as usize) <= off);
     let t = *f.toks.get(i)?;
@@ -6193,7 +6193,7 @@ fn literal_hover(f: &FileIndex, off: usize) -> Option<String> {
         None => (false, s),
     };
     let (ty, body) = if let Some(r) = s.strip_prefix('r') {
-        // (生の文字列 `r#"..."#`: 中はそのまま)
+        // (a raw string `r#"..."#`: the inside as it is)
         let h = r.len() - r.trim_start_matches('#').len();
         let inner = r.get(h + 1..r.len().checked_sub(h + 1)?)?;
         (if byte { format!("&'static [u8; {}]", inner.len()) } else { "&'static str".to_string() }, inner.to_string())
@@ -6208,7 +6208,7 @@ fn literal_hover(f: &FileIndex, off: usize) -> Option<String> {
     Some(format!("```rust\n{ty}\n```\n---\n\nvalue of literal: ` {body} `"))
 }
 
-/// リテラルの中のエスケープ (`\n` / `\t` / `\\` / `\"` / `\'` / `\0` / `\u{..}` / `\x..` / 行の継続) を戻す
+/// Undoes the escapes in a literal (`\n` / `\t` / `\\` / `\"` / `\'` / `\0` / `\u{..}` / `\x..` / line continuation)
 fn unescape(s: &str) -> String {
     let mut out = String::new();
     let mut it = s.chars().peekable();
@@ -6234,7 +6234,7 @@ fn unescape(s: &str) -> String {
                     out.push(ch);
                 }
             }
-            // (行の継続 `\` + 改行: 次の行の頭の空白も飛ばす)
+            // (a line continuation `\` + newline: also skips the whitespace at the start of the next line)
             Some('\n') => {
                 while it.peek().is_some_and(|c| c.is_whitespace()) {
                     it.next();
@@ -6247,8 +6247,8 @@ fn unescape(s: &str) -> String {
     out
 }
 
-/// ローカルの束縛 t がクロージャ (`let f = |a: T, b| -> R { .. }` / `move |..|`) なら、そのシグネチャ `impl Fn(a: T, b) -> R`
-/// (戻り値の型を書いていなければ、本体の式の型)
+/// If local binding t is a closure (`let f = |a: T, b| -> R { .. }` / `move |..|`), its signature `impl Fn(a: T, b) -> R`
+/// (if the return type is not written, the type of the body expression)
 fn closure_sig(ws: &[&FileIndex], t: Loc) -> Option<String> {
     let f = ws[t.file];
     if f.slim {
@@ -6286,13 +6286,13 @@ fn closure_sig(ws: &[&FileIndex], t: Loc) -> Option<String> {
     Some(format!("impl Fn({params}){ret}"))
 }
 
-/// (調べるための) off のトークンで終わる式の型 (LSP の `zustc/typeAt`)
+/// (for inspection) The type of the expression ending at the token at off (the LSP's `zustc/typeAt`)
 pub fn type_at(ws: &[&FileIndex], file: usize, off: usize) -> Option<String> {
     clear_memo();
     let f = ws[file];
     let k = f.toks.partition_point(|t| (t.2 as usize) <= off).min(f.toks.len().checked_sub(1)?);
     let k = if (f.toks[k].1 as usize) > off { k.checked_sub(1)? } else { k };
-    // (束縛そのもの (パターン・引数・`let x`) の位置: その束縛の型。ほかは式の型)
+    // (at the position of a binding itself (pattern, parameter, `let x`): the type of that binding. Otherwise the type of the expression)
     if f.ident(k) && f.local(k, f.tok(k)).is_none() {
         let at = f.toks[k].1 as usize;
         if def_at(ws, file, at).first().is_some_and(|l| l.file == file && l.start == at && !f.defs.iter().any(|d| d.start == at)) {

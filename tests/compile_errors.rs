@@ -1,5 +1,5 @@
-//! コンパイルエラーの場所とメッセージ (`行:桁: メッセージ`) が tests/compile_errors/<名前>.err と同じか。
-//! tests/compile_errors/*.rs はどれも 1 つ型のエラーがある (期待値は最初の syn 版のドライバで作ったもの)
+//! Whether the location and message of compile errors (`line:col: message`) are the same as tests/compile_errors/<name>.err.
+//! Each of tests/compile_errors/*.rs has one type error (the expected values were made with the first, syn-based driver)
 #[test]
 fn compile_errors_match_expected() {
     let dir = std::env::temp_dir().join(format!("cerr_{}", std::process::id()));

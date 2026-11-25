@@ -1,4 +1,4 @@
-// no_std / no_main のプログラム (rustc では libcore だけでビルドする)
+// A no_std / no_main program (built with libcore only under rustc)
 #![no_std]
 #![no_main]
 
@@ -117,7 +117,7 @@ pub extern "C" fn main() -> i32 {
     println_i64(match parse_u32(b"99999999999") {
         Some(v) => v as i64,
         None => -2,
-    }); // -2 (オーバーフロー)
+    }); // -2 (overflow)
     println_i64(checksum(b"hello") as i64);
     println_i64(u8::MAX as i64 + i16::MIN as i64); // 255 - 32768
     println_i64((37u32.pow(3) % 1000) as i64); // 653

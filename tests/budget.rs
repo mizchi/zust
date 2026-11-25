@@ -1,6 +1,6 @@
-//! サイズ予算テスト: バイナリ・オブジェクト・キャッシュ (session + Cranelift) が予算 (bench/budget.txt) を超えたら失敗する。
-//! 意図して増やしたときは `UPDATE_BUDGET=1 cargo test --release --test budget` で予算を書き直す
-//! (現在値 + 5% の余裕で書かれる)。新しい例を足しただけなら `UPDATE_BUDGET=new` で、既存の上限を変えずに追加する。
+//! Size budget test: fails if the binaries, objects or cache (session + Cranelift) exceed the budget (bench/budget.txt).
+//! When they were increased on purpose, rewrite the budget with `UPDATE_BUDGET=1 cargo test --release --test budget`
+//! (it is written as the current values + a 5% margin). If you only added new examples, `UPDATE_BUDGET=new` adds them without changing the existing limits.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -24,7 +24,7 @@ fn measure() -> BTreeMap<String, u64> {
     }
     for (name, src) in &cases {
         let out = dir.join(name);
-        // リンカで大きさが変わるので bfd ではなく既定 (自動選択) を使う。CI では ZUSTC_BENCH_LINKER で固定
+        // The size changes with the linker, so use the default (automatic choice), not bfd. In CI it is fixed with ZUSTC_BENCH_LINKER
         let o = Options {
             linker: std::env::var("ZUSTC_BENCH_LINKER").ok(),
             backend: Some(zustc::clif_backend::compile),
@@ -44,7 +44,7 @@ fn measure() -> BTreeMap<String, u64> {
 fn sizes_within_budget() {
     let now = measure();
     if let Some(mode) = std::env::var_os("UPDATE_BUDGET") {
-        // UPDATE_BUDGET=new なら既存の上限はそのまま、新しい項目だけ足す
+        // With UPDATE_BUDGET=new, the existing limits stay as they are and only the new entries are added
         let old: BTreeMap<String, u64> = std::fs::read_to_string(BUDGET)
             .unwrap_or_default()
             .lines()

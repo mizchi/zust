@@ -1,6 +1,6 @@
-//! session の Cranelift バックエンド (minclif が記録した命令の列を Cranelift でコンパイルする) で tests/probe・examples・
-//! tests/acg をビルドし、minclif でビルドしたものと出力 (stdout・stderr・終了コード) が同じか (-O なしと -O)。
-//! (-O はオーバーフローの検査をしないので、名前に overflow を含むものは -O では比べない)
+//! Builds tests/probe, examples and tests/acg with session's Cranelift backend (compiles the instruction sequence recorded by minclif with Cranelift)
+//! and checks whether the output (stdout, stderr, exit code) is the same as the one built with minclif (without -O and with -O).
+//! (-O does no overflow checks, so the ones with overflow in their names are not compared with -O)
 #![cfg(feature = "acg")]
 use std::path::PathBuf;
 

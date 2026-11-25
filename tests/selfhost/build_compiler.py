@@ -1,11 +1,11 @@
-"""syn・Cranelift を使わないコンパイラ全体 (session + acg + minclif と、それが使うモジュール) を 1 ファイルのプログラムにまとめる。
+"""Bundles the whole compiler that uses neither syn nor Cranelift (session + acg + minclif and the modules they use) into a single-file program.
 usage: python3 tests/selfhost/build_compiler.py > out/selfhost/compiler_main.rs
-main は `compiler <in.rs> -o <out> [-O]` で session::build を呼ぶ (zustc の --backend=minclif と同じ)。
-これを zustc でコンパイルしたものが、zustc 自身でコンパイルした zustc (の syn を使わない経路) になる。
-proc_macro2 は tests/selfhost/mini_pm2.rs で代える (macros.rs が使う)。"""
+main calls session::build with `compiler <in.rs> -o <out> [-O]` (same as zustc --backend=minclif).
+Compiling this with zustc gives zustc compiled by zustc itself (its path that does not use syn).
+proc_macro2 is replaced with tests/selfhost/mini_pm2.rs (macros.rs uses it)."""
 import re, glob, os, re
 
-# zustc はアイテム位置の macro_rules! を展開しないので enc_struct! をここで展開する
+# zustc does not expand macro_rules! in item position, so enc_struct! is expanded here
 def expand_enc_struct(src):
     def ex(m):
         t, fs = m.group(1), [f.strip() for f in m.group(2).split(",") if f.strip()]
@@ -25,17 +25,17 @@ prelude = (body("crates/syntax/src/prelude.rs")
     .replace('include_str!("prelude_lib.rs.in")', 'include_str!("../../crates/syntax/src/prelude_lib.rs.in")')
     .replace('include!(concat!(env!("OUT_DIR"), "/prelude_items.rs"));', open(items).read()))
 
-# acg/mod.rs の `pub mod clif;` / `mod p1_expr;` を中身で置き換える
+# Replace `pub mod clif;` / `mod p1_expr;` in acg/mod.rs with their contents
 acg = body("crates/typeck/src/acg/mod.rs")
 def inline(m):
     vis, name = m.group(1) or "", m.group(2)
     return f"{vis}mod {name} {{\n" + body(f"crates/typeck/src/acg/{name}.rs") + "\n}\n"
 acg = re.sub(r"^(pub )?mod (\w+);\n", inline, acg, flags=re.M)
-# (`#![allow(..)]` はモジュールの先頭にしか書けない: 中に入れると内側の属性になるので外す)
+# (`#![allow(..)]` can only be written at the start of a module: put inside, it would become an inner attribute, so remove it)
 acg = re.sub(r"^#!\[allow\([^)]*\)\]\n", "", acg, flags=re.M)
 
 ir = body("crates/ir/src/lib.rs")
-# session: ビルドの部分 (session/build.rs) を中に入れ、feature `build` の条件を外す (セルフホストはビルドもする)
+# session: put the build part (session/build.rs) inside and remove the feature `build` conditions (the self-host builds too)
 session = body("crates/core/src/session.rs").replace("mod build;\n", "mod build {\n" + body("crates/core/src/session/build.rs") + "\n}\n")
 session = re.sub(r'^[ \t]*#\[cfg\(not\(feature = "build"\)\)\]\n.*\n', "", session, flags=re.M)
 session = re.sub(r'^[ \t]*#\[cfg\(feature = "build"\)\]\n', "", session, flags=re.M)

@@ -1,12 +1,12 @@
-//! panic のメッセージの場所 (`panicked at <file>:<行>:<桁>:`) が rustc と同じか。
-//! tests/panic_loc/cases.rs を rustc と zustc (session、minclif) でビルドし、引数 0〜6 の場合を比べる
-//! (添字の範囲外 (Vec / 配列)・オーバーフロー・unwrap・assert!・0 除算・書式マクロの引数の中の expect)。
+//! Whether the locations in panic messages (`panicked at <file>:<line>:<col>:`) are the same as rustc's.
+//! Builds tests/panic_loc/cases.rs with rustc and with zustc (the session, minclif) and compares the cases for arguments 0 to 6
+//! (out-of-range indexing (Vec / array), overflow, unwrap, assert!, division by 0, expect inside a format macro's arguments).
 #![cfg(feature = "acg")]
 
 fn location(stderr: &[u8]) -> Option<String> {
     let s = String::from_utf8_lossy(stderr);
     let line = s.lines().find(|l| l.contains("panicked at "))?;
-    // `<file>:<行>:<桁>:` の行と桁だけ
+    // Only the line and column of `<file>:<line>:<col>:`
     let rest = line.split("panicked at ").nth(1)?.trim_end_matches(':');
     let mut parts = rest.rsplitn(3, ':');
     let col = parts.next()?;

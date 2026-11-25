@@ -1,4 +1,4 @@
-// Box からのムーブ・Vec<enum> のハッシュ・u128 の掛け算の検査・MutexGuard の添字・zip / chain の配列・Range::contains など
+// Moves out of a Box, hashing Vec<enum>, checked u128 multiplication, indexing a MutexGuard, arrays in zip / chain, Range::contains, etc.
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Mutex;
@@ -31,7 +31,7 @@ fn first(v: &mut Vec<Box<String>>) -> &mut String {
 }
 
 fn main() {
-    // Box の中身のムーブ
+    // Moving out of a Box's contents
     let mut todo = vec![T::A(Box::new(T::A(Box::new(T::N("x".into())), 2)), 1), T::N("y".into())];
     let mut out = vec![];
     while let Some(t) = todo.pop() {
@@ -41,21 +41,21 @@ fn main() {
         }
     }
     println!("{out:?}");
-    // Vec<enum> / タプルのキー
+    // Vec<enum> / tuple keys
     let mut m: HashMap<(u32, Vec<K>), u32> = HashMap::new();
     for i in 0..20u32 {
         m.insert((i % 5, vec![K::P(i as u8), K::S(i), K::A]), i);
     }
     println!("{} {:?} {:?}", m.len(), m.get(&(3, vec![K::P(13), K::S(13), K::A])), m.get(&(0, vec![])));
-    // std と同じハッシュ値
+    // The same hash values as std
     let o: Option<String> = Some("x".into());
     let none: Option<u8> = None;
     println!("{:x} {:x} {:x}", h(&("tuple", 3usize)), h(&(100u8, true, &o)), h(&none));
-    // 128 bit の掛け算の検査
+    // Checked 128-bit multiplication
     let big = u64::MAX as u128;
     println!("{:?} {:?} {:?}", big.checked_mul(big), (big + 1).checked_mul(big << 64), i128::MIN.checked_mul(-1));
     println!("{:?}", (-(1i128 << 63)).overflowing_mul(1i128 << 64));
-    // MutexGuard の deref・添字
+    // deref / indexing of a MutexGuard
     let mx = Mutex::new(vec![Box::new(1u32), Box::new(2)]);
     {
         let mut g = mx.lock().unwrap();
@@ -64,17 +64,17 @@ fn main() {
     }
     let g = mx.lock().unwrap();
     println!("{} {} {}", *g[0], *g[1], g.len());
-    // &mut v[i] (Box) を &mut T に
+    // &mut v[i] (Box) to &mut T
     let mut bs = vec![Box::new("a".to_string())];
     first(&mut bs).push('b');
     println!("{}", bs[0]);
-    // zip / chain に配列・スライス
+    // Arrays / slices in zip / chain
     let a = vec![1u32, 2, 3];
     let r = 9u32;
     let n = a.iter().zip(&a).chain([(&r, &r)]).filter(|(x, y)| x == y).count();
     let w: Vec<u32> = a.iter().copied().chain([7u32, 8]).collect();
     println!("{n} {w:?}");
-    // Range::contains・next_multiple_of・モジュールの static・&T → *const T
+    // Range::contains, next_multiple_of, module statics, &T → *const T
     let ok: Vec<bool> = [0i64, 255, 256, -1].iter().map(|&d| (0..=255).contains(&d)).collect();
     println!("{ok:?} {} {} {}", (0..5).contains(&3), 13u32.next_multiple_of(8), 16u64.next_multiple_of(8));
     let p: *const u32 = &inner::LIMIT;

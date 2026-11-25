@@ -1,6 +1,6 @@
-// イテレータと Vec のメソッドの追加分: rev (Vec / 範囲 / chars / map の後) / step_by / peekable / skip_while /
-// scan / inspect / flat_map / flatten、windows / chunks、retain / dedup / drain / split_off / resize / fill /
-// to_vec / join / concat / first_mut、Option / Result の expect / zip / map_or_else / get_or_insert_with など
+// Additional iterator and Vec methods: rev (Vec / range / chars / after map) / step_by / peekable / skip_while /
+// scan / inspect / flat_map / flatten, windows / chunks, retain / dedup / drain / split_off / resize / fill /
+// to_vec / join / concat / first_mut, expect / zip / map_or_else / get_or_insert_with etc. of Option / Result
 fn main() {
     let v = vec![1, 2, 3, 4, 5, 6];
     let r: Vec<i32> = v.iter().rev().map(|x| x * 10).collect();
@@ -50,7 +50,7 @@ fn main() {
     println!();
     let arr = [5, 6, 7];
     println!("{} {:?}", arr.windows(2).count(), arr.chunks(2).map(|c| c.len()).collect::<Vec<_>>());
-    // Vec の編集
+    // Editing a Vec
     let mut w = vec![3, 1, 1, 2, 2, 2, 5, 3, 3];
     w.dedup();
     println!("{:?}", w);

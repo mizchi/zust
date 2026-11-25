@@ -1,4 +1,4 @@
-// rustc-hash: FxHasher (整数・バイト列) と FxHashMap / FxHashSet / FxBuildHasher
+// rustc-hash: FxHasher (integers, byte strings) and FxHashMap / FxHashSet / FxBuildHasher
 use std::hash::{BuildHasher, Hash, Hasher};
 
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet, FxHasher};

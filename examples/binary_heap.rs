@@ -1,6 +1,6 @@
-// BinaryHeap と sort_by_cached_key のサンプル: push / pop / peek、Reverse で最小ヒープ、from / collect、
-// iter / into_vec / into_sorted_vec (並びも std と同じ)、{:?}、String とタプルの要素、ダイクストラ法、
-// sort_by_cached_key (キーの計算は 1 要素 1 回)
+// A sample of BinaryHeap and sort_by_cached_key: push / pop / peek, a min-heap with Reverse, from / collect,
+// iter / into_vec / into_sorted_vec (the order is the same as std too), {:?}, String and tuple elements, Dijkstra's algorithm,
+// sort_by_cached_key (the key is computed once per element)
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -37,7 +37,7 @@ fn main() {
         out.push(x);
     }
     println!("{:?} {} {:?}", out, h.is_empty(), h.pop());
-    // 最小ヒープ
+    // A min-heap
     let mut mh = BinaryHeap::new();
     for x in [5u32, 1, 8, 3] {
         mh.push(Reverse(x));
@@ -49,7 +49,7 @@ fn main() {
     println!("{:?}", fh.into_vec());
     let ch: BinaryHeap<i64> = (1..=10).map(|x| (x * 37) % 11).collect();
     println!("{:?}", ch.into_sorted_vec());
-    // String / タプル
+    // String / tuples
     let mut sh: BinaryHeap<String> = BinaryHeap::new();
     for w in ["pear", "apple", "zoo", "fig"] {
         sh.push(w.to_string());
@@ -65,7 +65,7 @@ fn main() {
         total += x.0;
     }
     println!("{}", total);
-    // ダイクストラ法
+    // Dijkstra's algorithm
     let adj: Vec<Vec<(usize, u64)>> = vec![
         vec![(1, 4), (2, 1)],
         vec![(3, 1)],

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# examples/*.rs を zustc と rustc の両方でビルドし、実行結果が一致するか確かめる。
-# usage: tests/compare.sh   (このディレクトリで、cargo build --release の後に実行)
-# (例ごとに別のプロセスで、コアの数だけ並べて動かす。出力は例の順にまとめて出す)
+# Builds examples/*.rs with both zustc and rustc and checks that the run results match.
+# usage: tests/compare.sh   (run in this directory, after cargo build --release)
+# (each example in a separate process, as many in parallel as there are cores; the output is printed together in the order of the examples)
 set -u
 self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
@@ -10,7 +10,7 @@ mkdir -p "$out"
 check() {
   local src=$1 name rflags c0 c1 c2
   name=$(basename "$src" .rs)
-  # キャッシュなし (cold) とキャッシュからの再ビルド (warm) の両方を確かめる
+  # Check both without a cache (cold) and a rebuild from the cache (warm)
   rm -f "$out/$name.cache" "$out/$name.cold.cache"
   if ! ./target/release/zustc "$src" -o "$out/$name.cold" >"$out/$name.log" 2>&1; then
     echo "FAIL $name (zustc)"; cat "$out/$name.log"; return 1
@@ -19,15 +19,15 @@ check() {
   if ! ./target/release/zustc "$src" -o "$out/$name" >"$out/$name.log" 2>&1; then
     echo "FAIL $name (zustc, warm)"; cat "$out/$name.log"; return 1
   fi
-  # no_std (#![no_std] + #![no_main]) は libcore だけで、panic=abort・libc をリンクしてビルドする
-  # (rust_eh_personality は panic=abort では呼ばれないので 0 に定義しておく)
+  # no_std (#![no_std] + #![no_main]) is built with libcore only, panic=abort, linking libc
+  # (rust_eh_personality is not called with panic=abort, so define it as 0)
   if grep -q '^#!\[no_std\]' "$src"; then
     rflags=(--edition 2024 -C panic=abort -C link-arg=-lc -C link-arg=-Wl,--defsym=rust_eh_personality=0)
   else
     rflags=()
   fi
   rustc -Awarnings "${rflags[@]}" "$src" -o "$out/$name.rustc" || { echo "FAIL $name (rustc)"; return 1; }
-  # 終了コードも比べる (no_std の main は戻り値が終了コード)
+  # Compare the exit codes too (for no_std, main's return value is the exit code)
   "$out/$name.cold" >"$out/$name.out0"; c0=$?
   "$out/$name" >"$out/$name.out1"; c1=$?
   echo "exit=$c0" >>"$out/$name.out0"
@@ -36,9 +36,9 @@ check() {
   fi
   "$out/$name.rustc" >"$out/$name.out2"; c2=$?
   echo "exit=$c1" >>"$out/$name.out1"; echo "exit=$c2" >>"$out/$name.out2"
-  # valgrind があれば、メモリエラー (二重解放・解放後の使用・未初期化の読み出し) とリークも見る
+  # If valgrind is available, also check for memory errors (double free, use after free, uninitialized reads) and leaks
   if command -v valgrind >/dev/null 2>&1; then
-    # (終了コードはプログラムのもの。-q なので何か出力されたら問題あり)
+    # (the exit code is the program's; with -q, any output means a problem)
     valgrind -q --leak-check=full --errors-for-leak-kinds=definite --log-file="$out/$name.vg" \
         "$out/$name" >/dev/null 2>/dev/null
     if [ -s "$out/$name.vg" ]; then

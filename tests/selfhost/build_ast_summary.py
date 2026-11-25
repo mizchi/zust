@@ -1,7 +1,7 @@
-"""zustc 自身の crates/syntax/src/ast_summary.rs (アイテムの要約。front.rs の summarize の移植) を、lexer / types / parse /
-ast_types / ast_closure と一緒に 1 ファイルのプログラムにまとめる。
+"""Combines zustc's own crates/syntax/src/ast_summary.rs (item summaries; a port of front.rs's summarize) together with lexer / types / parse /
+ast_types / ast_closure into a one-file program.
 usage: python3 tests/selfhost/build_ast_summary.py > out/selfhost/ast_summary_main.rs
-main は引数のファイルごとに、モジュールを平らにし入れ子のアイテムを外に出してから字句解析し、全アイテムの要約を出す。"""
+For each argument file, main flattens the modules, moves nested items out, then lexes it and prints the summaries of all items."""
 
 def body(p):
     return open(p).read()
@@ -59,5 +59,5 @@ fn main() {
 }
 """)
 print("\n".join(out))
-# (lexer は crate::key を使う: cache と同じもの)
+# (lexer uses crate::key: the same as cache)
 print("mod key {\n    pub use crate::cache::*;\n}")

@@ -1,4 +1,4 @@
-//! session (acg + minclif) で tests/acg/*.rs をビルドし、rustc でビルドしたものと出力を比べる。
+//! Builds tests/acg/*.rs with the session (acg + minclif) and compares the output with the rustc build.
 #![cfg(feature = "acg")]
 
 /// A new directory only this user can enter, made where nothing was: a directory that is there already (another
@@ -48,7 +48,7 @@ fn acg_like_rustc() {
     let dir = private_dir("acg");
     let mut files: Vec<std::path::PathBuf> = std::fs::read_dir("tests/acg").unwrap().map(|e| e.unwrap().path()).collect();
     files.sort();
-    // (ACG_FILE=path で 1 ファイルだけ試す)
+    // (ACG_FILE=path tries just one file)
     if let Ok(f) = std::env::var("ACG_FILE") {
         files = vec![std::path::PathBuf::from(f)];
     }

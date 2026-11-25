@@ -1,6 +1,6 @@
-"""N 個の関数を持つ (rustc でもコンパイルできる) ベンチ用ソースを生成する。
+"""Generates a bench source with N fns (it also compiles with rustc).
 usage: python3 bench/gen.py N [variant] > out.rs
-variant を変えると f{N//2} の本体だけが変わる (1 関数編集のシミュレーション)。"""
+Changing variant changes only the body of f{N//2} (simulating a one-fn edit)."""
 import sys
 
 n = int(sys.argv[1])
@@ -12,7 +12,7 @@ for i in range(n):
     k = (i * 7 + 3) % 13 + 1
     extra = variant if i == n // 2 else 0
     callee = f"f{i - 1}(x / 2 + {k})" if i > 0 else "x"
-    # 実行時間が指数的に増えないよう、2 本目の呼び出しは浅いところだけ
+    # So that run time does not grow exponentially, the second call is only at shallow places
     other = f" + f{i // 2}(x % {k + 1})" if 1 < i < 300 and i % 3 == 0 else ""
     print(f"""fn f{i}(x: u64) -> u64 {{
     let mut acc: u64 = {k + extra};

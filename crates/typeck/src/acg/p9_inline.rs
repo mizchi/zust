@@ -1,40 +1,40 @@
-//! 小さい関数のインライン展開 (`-O` のとき)。
+//! Inline expansion of small fns (with `-O`).
 //!
-//! minclif は IR を持たず、命令をすぐ機械語にする。だから構文木の段階で展開する: 呼び出しの引数を ABI の形
-//! (値渡しの集成体はコピーしたアドレス、sret の戻り値は書き込む先) まで作ったところで、呼ぶ代わりに呼び先の本体を
-//! 同じ FunctionBuilder にコード生成する。本体の引数は func_params の代わりにその値に束縛し、`return` / 末尾の値は
-//! 続きのブロックへの jump にする (emit_return が見る)。呼び先の型推論・変数・drop の状態は入れ替えてから戻す。
+//! minclif has no IR and turns instructions straight into machine code. So expansion is done at the syntax tree stage: once the call's arguments have been built up to their ABI form
+//! (the copied address for an aggregate passed by value, the destination to write for an sret return value), instead of calling, the callee's body is
+//! code-generated into the same FunctionBuilder. The body's parameters are bound to those values instead of func_params, and `return` / the trailing value
+//! become a jump to the continuation block (emit_return looks at this). The callee's type inference, variables and drop state are swapped in and then restored.
 //!
-//! 展開するのは小さい関数: クロージャ・マクロを含まず、本体の構文木が小さく、特別な本体 (drop glue など) や
-//! 呼んだ場所を出す panic (unwrap など) でないもの。ユーザの関数を展開した呼ぶ側は、キャッシュのキーに呼び先のアイテムの
-//! ハッシュと行を入れる (session::fn_key)。依存するクレートの関数は展開しない (本体はインターフェースのハッシュに入らない)。
-//! 展開した中でもう 1 段まで展開する
+//! What is expanded is small fns: those that contain no closures or macros, whose body syntax tree is small, and that are not special bodies (drop glue etc.) or
+//! panics that report the caller's location (unwrap etc.). A caller that expanded a user fn puts the hash and line of the callee's item into its cache key
+//! (session::fn_key). Fns of dependency crates are not expanded (their bodies are not in the interface hash).
+//! Inside an expansion, expansion goes one more level deep
 
 use super::*;
 
-/// 展開してよい関数の本体 (関数 ID → 構文木)
+/// The bodies of the fns that may be expanded (fn ID → syntax tree)
 #[derive(Default)]
 pub struct Inline {
     pub bodies: crate::fxhash::FxMap<u32, ItemFn>,
-    /// ユーザの関数の、アイテムの開始行 - 1 (panic の場所の基準)。prelude の関数はない
+    /// For user fns, the item's start line - 1 (the base for panic locations). Prelude fns have none
     pub user_lines: crate::fxhash::FxMap<u32, u32>,
-    /// 呼び先 (インスタンス) ごとの型推論の結果 (呼ぶ側に依らないので 1 回だけ)
+    /// The type inference result per callee (instance) (independent of the caller, so done only once)
     pub inferred: Mutex<crate::fxhash::FxMap<u32, Inferred>>,
-    /// 検査だけ (check / LSP): 命令の列は作るが機械語にしない (空の Blob を返す)
+    /// Check only (check / LSP): the instruction sequence is built but not turned into machine code (an empty Blob is returned)
     pub check_only: bool,
 }
 
 
 type Inferred = (crate::ast_infer::LetTypes, crate::ast_infer::MacroArgs, crate::ast_infer::TextTypes);
 
-/// 本体の構文木の大きさの上限 (Debug の文字列の長さ。大きさはふつう session がソースのトークンの数で見る)
+/// The upper limit on the size of the body syntax tree (the length of its Debug string; the size is usually checked by session as the number of source tokens)
 const MAX_BODY: usize = 6000;
-/// アイテムのソースのトークンの数の上限
+/// The upper limit on the number of tokens in an item's source
 pub const MAX_TOKENS: usize = 110;
-/// 1 関数の中で展開する回数の上限
+/// The upper limit on the number of expansions in one fn
 const MAX_PER_FN: u32 = 400;
 
-/// 展開してよい形か (本体の構文木だけで決める)
+/// Whether it has a form that may be expanded (decided from the body syntax tree alone)
 pub fn inline_candidate(f: &ItemFn) -> bool {
     if f.attrs.iter().any(|a| a.contains("inline(never)") || a.contains("track_caller") || a.contains("rustc_inherit_overflow_checks")) {
         return false;
@@ -44,8 +44,8 @@ pub fn inline_candidate(f: &ItemFn) -> bool {
 }
 
 impl<'p> Cx<'p> {
-    /// target を args (ABI の形の引数) で呼ぶ代わりに展開する。展開しなければ None。
-    /// 展開したら Some(戻り値) (sret なら None の戻り値: 呼ぶ側が書き込む先を持っている)
+    /// Expands target instead of calling it with args (the arguments in ABI form). None if not expanded.
+    /// If expanded, Some(return value) (for sret, a None return value: the caller holds the destination to write)
     pub(crate) fn try_inline(&mut self, target: u32, sig: &FnSig, args: &[Value]) -> R<Option<Option<Value>>> {
         if !self.prog.opt || self.inline_depth >= 2 || self.inlined >= MAX_PER_FN || sig.ret == Ty::Never {
             return Ok(None);
@@ -55,11 +55,11 @@ impl<'p> Cx<'p> {
             (g.body_of(target), g.env(self.prog, target))
         };
         let Some(f) = self.inl.bodies.get(&body_id) else { return Ok(None) };
-        // (自分自身は展開しない)
+        // (a fn does not expand itself)
         if body_id == self.root {
             return Ok(None);
         }
-        // クロージャの本体: キャプチャ (名前, 変数の型, by-ref か, オフセット) は `__env` のフィールド (compile と同じ)
+        // A closure body: the captures (name, variable type, by-ref?, offset) are fields of `__env` (same as compile)
         let mut caps: Vec<(String, Ty, bool, u32)> = vec![];
         let (root, base_k) = match self.prog.closures.get(&body_id) {
             Some(cd) => {
@@ -91,7 +91,7 @@ impl<'p> Cx<'p> {
             }
         };
         self.inlined += 1;
-        // 続き (戻り値はブロックの引数)
+        // The continuation (the return value is the block's parameter)
         let cont = self.b.create_block();
         let sret = is_sret(sig);
         let ret_ty = if sret { None } else { clif_ty(sig.ret) };
@@ -99,7 +99,7 @@ impl<'p> Cx<'p> {
         let entry = self.b.create_block();
         self.b.ins().jump(entry, &[]);
         self.b.switch_to_block(entry);
-        // 呼び先の状態にする
+        // Switch to the callee's state
         let s_scopes = std::mem::replace(&mut self.scopes, vec![vec![]]);
         let s_loops = std::mem::take(&mut self.loops);
         let s_label = self.pending_label.take();
@@ -140,7 +140,7 @@ impl<'p> Cx<'p> {
         self.inline_depth += 1;
         let r = self.inline_body(f, sig, if sret { &args[1..] } else { args });
         self.inline_depth -= 1;
-        // 戻す
+        // Restore
         self.scopes = s_scopes;
         self.loops = s_loops;
         self.pending_label = s_label;
@@ -180,7 +180,7 @@ impl<'p> Cx<'p> {
         Ok(Some(rv))
     }
 
-    /// 呼び先の本体 (body と同じだが、引数は与えた値)
+    /// The callee's body (the same as body, but the parameters are the given values)
     fn inline_body(&mut self, f: &ItemFn, sig: &FnSig, args: &[Value]) -> R<()> {
         let mut params = args.iter().copied();
         let mut names: Vec<String> = vec![];
@@ -199,14 +199,14 @@ impl<'p> Cx<'p> {
                 return Err("internal: parameter count mismatch (inline)".into());
             };
             if ty.is_agg() {
-                // (呼ぶ側がコピー済み: そのメモリを使い、本体の終わりで drop する)
+                // (already copied by the caller: use that memory and drop it at the end of the body)
                 self.scopes.last_mut().unwrap().push((name, Loc::Ptr(v), ty));
                 self.own_local(Loc::Ptr(v), ty);
             } else {
                 self.bind(name, ty, Some(v));
             }
         }
-        // (クロージャ: キャプチャを `__env` のフィールドとして見せる)
+        // (a closure: expose the captures as fields of `__env`)
         if !self.caps.is_empty() {
             let env = match self.lookup("__env") {
                 Some((l, _)) => self.loc_value(l),

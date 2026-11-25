@@ -1,4 +1,4 @@
-// 乱数列の sort / sort_by_key / binary_search (ジェネリックなマージソート)
+// sort / sort_by_key / binary_search on a random sequence (a generic merge sort)
 fn main() {
     let mut x: u64 = 88172645463325252;
     let mut v: Vec<u64> = Vec::with_capacity(2_000_000);

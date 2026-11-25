@@ -1,4 +1,4 @@
-// no_std: panic すると #[panic_handler] が呼ばれる (assert)
+// no_std: a panic calls the #[panic_handler] (assert)
 #![no_std]
 #![no_main]
 

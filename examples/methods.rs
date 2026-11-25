@@ -1,4 +1,4 @@
-// impl とメソッドのサンプル (rustc でもそのままコンパイルできる)
+// Sample of impls and methods (also compiles as is with rustc)
 unsafe extern "C" {
     fn putchar(c: i32) -> i32;
 }
@@ -58,7 +58,7 @@ impl Vec2 {
         self.y *= k;
     }
 
-    // self を書き換えても呼び出し元には影響しない (値渡し)
+    // Modifying self does not affect the caller (passed by value)
     fn doubled(mut self) -> Self {
         self.scale(2);
         self
@@ -88,7 +88,7 @@ struct Body {
     vel: Vec2,
 }
 
-// impl ブロックは複数に分けてもよい
+// An impl can be split into several blocks
 impl Body {
     fn step(&mut self) {
         self.pos = self.pos.add(self.vel);

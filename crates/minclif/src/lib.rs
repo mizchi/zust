@@ -1,12 +1,12 @@
-//! Cranelift の代わりの最小のバックエンド (x86-64 / System V / ELF)。セルフホストのために Cranelift を置き換える土台。
+//! A minimal backend in place of Cranelift (x86-64 / System V / ELF). The groundwork for replacing Cranelift for self-hosting.
 //!
-//! API は Cranelift の FunctionBuilder に寄せてある (ブロック・ブロック引数・変数・スタックスロット・命令)。
-//! 生成は単純: 値はすべてフレームの 8 byte のスロットに置き、命令ごとに rax / rcx に読んで計算して書き戻す。
-//! 整数の値は型の幅で 0 拡張した形でスロットに持つ (符号つきの比較・拡張のときだけ符号拡張する)。
-//! 外部クレートに依存しないので zustc 自身でもコンパイルできる。tests/minclif.rs が cc でリンクして動かす。
+//! The API follows Cranelift's FunctionBuilder (blocks, block params, variables, stack slots, instructions).
+//! Generation is simple: every value lives in an 8-byte slot of the frame, and each instruction loads into rax / rcx, computes and writes back.
+//! Integer values are kept in their slots zero-extended to the type's width (sign-extended only for signed comparisons / extensions).
+//! It depends on no external crates, so zustc itself can compile it too. tests/minclif.rs links it with cc and runs it.
 
 
-/// 速いハッシュ (FxHash: 番号を引く表に。std の SipHash はコンパイルの数 % を占めていた)
+/// Fast hash (FxHash: for the tables looked up by number; std's SipHash took several % of compilation)
 #[derive(Default, Clone, Copy)]
 pub struct FxHasher {
     h: u64,
@@ -38,14 +38,14 @@ impl std::hash::Hasher for FxHasher {
 pub type FMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefault<FxHasher>>;
 pub type FSet<K> = std::collections::HashSet<K, std::hash::BuildHasherDefault<FxHasher>>;
 
-/// 値の型
+/// Value types
 pub use zust_ir::{Block, FloatCC, FuncRef, IntCC, Lane, Op, Reloc, Shape, StackSlot, Type, VBits, VOp, Value, Variable};
 
-/// 1 関数分の機械語の組み立て (FunctionBuilder が 2 回使う: 解析 (track) と、割り当てを使った本番)
+/// Assembling one fn's machine code (FunctionBuilder uses it twice: analysis (track), and the real run using the allocation)
 pub struct Emitter {
     params: Vec<Type>,
     rets: Vec<Type>,
-    /// 値のスロット (rbp からの負のオフセット) と型
+    /// Value slots (negative offsets from rbp) and types
     values: Vec<(i32, Type)>,
     vars: Vec<(i32, Type)>,
     slots: Vec<i32>,
@@ -55,66 +55,66 @@ pub struct Emitter {
     funcs: Vec<String>,
     code: Vec<u8>,
     relocs: Vec<Reloc>,
-    /// 前方参照のジャンプ: (rel32 を書く位置, 飛び先)
+    /// Forward-reference jumps: (where to write the rel32, target)
     fixups: Vec<(usize, Block)>,
     entry_params: Vec<Value>,
-    /// trap の場所 (ud2 のオフセット) とコード (Cranelift の TrapCode::user に当たる)
+    /// Trap locations (ud2 offsets) and codes (corresponding to Cranelift's TrapCode::user)
     traps: Vec<(u32, u8)>,
     entry_jump: usize,
-    /// 今のブロックが終端命令 (jump / brif / return / trap) で終わったか
+    /// Whether the current block ended with a terminator (jump / brif / return / trap)
     terminated: bool,
-    /// 直前の命令が「rax を値 v のスロットに書く」なら (v, その後のコードの位置)。
-    /// すぐ後で v を rax に読むなら読まなくてよい (ブロックの始まりでは消す: ほかの所から飛んでくる)
+    /// If the previous instruction is "write rax to value v's slot", (v, the code position after it).
+    /// A load of v into rax right after that can be skipped (cleared at the start of a block: other places jump there)
     rax_holds: Option<(u32, usize)>,
-    /// 今の命令の番号 (FunctionBuilder が記録した順)
+    /// The number of the current instruction (in the order FunctionBuilder recorded)
     pub op: u32,
-    /// 解析のときの記録
+    /// The record during analysis
     track: Option<Box<Track>>,
-    /// 割り当て (本番のとき)
+    /// The allocation (in the real run)
     plan: Plan,
-    /// 割り当てたレジスタの保存先
+    /// Where the allocated registers are saved
     save_slots: [i32; 5],
-    /// 値ごとの、スロットのアドレス (スロット, オフセット) か
+    /// Per value, whether it is a slot address (slot, offset)
     paddr: Vec<Option<(u32, i32)>>,
-    /// 変数ごとの、これまでの定義がすべて同じスロットのアドレスか (None: まだ定義なし、Some(None): 違う)。
-    /// use_var の値もそのアドレスとして扱う (インライン展開した `&mut self` など)。違う定義が後で来たら sroa が外す
+    /// Per variable, whether its definitions so far are all the same slot address (None: no definition yet, Some(None): different).
+    /// The value of use_var is also treated as that address (an inlined `&mut self`, etc.). If a different definition comes later, sroa drops it
     var_paddr: Vec<Option<Option<(u32, i32)>>>,
-    /// 値ごとの、iconst の定数か
+    /// Per value, whether it is an iconst constant
     kval: Vec<Option<i64>>,
 }
 
-/// 値・変数を置くレジスタ: rbx, r12, r13, r14, r15 (呼ばれた側が保存するので、呼び出しをまたいでも残る。
-/// 命令の組み立てで使う rax / rcx / rdx / 引数のレジスタ / r11 とぶつからない)
-/// 後ろの 5 つ (rsi, rdi, r8, r9, r10) は呼ばれた側が保存しないので、呼び出しを含まない生存区間にだけ使う
-/// (引数のレジスタは call の中で順に書くが、引数に渡す値の区間はその call を含む)
+/// Registers to hold values / variables: rbx, r12, r13, r14, r15 (callee-saved, so they survive across calls.
+/// They do not clash with rax / rcx / rdx / the argument registers / r11 used in assembling instructions)
+/// The last 5 (rsi, rdi, r8, r9, r10) are not callee-saved, so they are used only for live ranges that contain no call
+/// (the argument registers are written in order within a call, but the range of a value passed as an argument contains that call)
 pub const ALLOC_REGS: [u8; 10] = [3, 12, 13, 14, 15, 6, 7, 8, 9, 10];
-/// レジスタに置かない (スロット)
+/// Not kept in a register (slot)
 pub const MEM: u8 = 255;
-/// 変数の番号を値の番号と分ける
+/// Keeps variable numbers apart from value numbers
 const VAR_BASE: u32 = 1 << 28;
-/// レジスタに置くスタックのスロットのフィールドの番号
+/// The numbers of the fields of stack slots kept in registers
 const FIELD_BASE: u32 = 1 << 29;
 
-/// 解析の記録: 値・変数 (vreg) の読み書きと、区間 (ブロックを続けて書いた範囲) とその行き先
+/// Analysis record: reads / writes of values / variables (vregs), and segments (ranges where a block was written contiguously) and their successors
 #[derive(Default)]
 #[doc(hidden)]
 pub struct Track {
-    /// (vreg, 命令の番号, 書き込みか)
+    /// (vreg, instruction number, is a write)
     pub ev: Vec<(u32, u32, bool)>,
-    /// スロットとして直接使う (アドレス・幅の違う読み書き) か、整数でない: レジスタに置けない
+    /// Whether it is used directly as a slot (address / reads and writes of a different width) or is not an integer: cannot be kept in a register
     mem_only: Vec<bool>,
     var_mem_only: Vec<bool>,
-    /// 浮動小数点か (xmm に置く)
+    /// Whether it is floating point (kept in xmm)
     vfloat: Vec<bool>,
     varfloat: Vec<bool>,
     pub segs: Vec<Seg>,
-    /// 関数を呼ぶ命令の番号
+    /// The numbers of the instructions that call a fn
     calls: Vec<u32>,
-    /// 値ごとの、スロットのアドレスとして load / store / iadd_imm に使った回数
+    /// Per value, how many times it was used as a slot address for load / store / iadd_imm
     addr_uses: Vec<u32>,
-    /// スロットのアドレスからの load / store: (命令, スロット, オフセット, 型, store か)
+    /// Loads / stores from slot addresses: (instruction, slot, offset, type, is a store)
     pub acc: Vec<(u32, u32, i32, Type, bool)>,
-    /// 変数の定義: (変数, 値がスロットのアドレスならそれ)
+    /// Variable definitions: (variable, the slot address if the value is one)
     var_defs: Vec<(u32, Option<(u32, i32)>)>,
 }
 
@@ -123,27 +123,27 @@ pub struct Seg {
     pub block: u32,
     pub start: u32,
     end: u32,
-    /// jump / brif の飛び先のブロック
+    /// The target blocks of jump / brif
     succ: Vec<u32>,
-    /// 終端命令なしで別のブロックへ切り替えた (同じブロックの次の区間へ続く)
+    /// Switched to another block without a terminator (continues to the next segment of the same block)
     falls: bool,
 }
 
-/// 割り当ての結果: 値・変数ごとのレジスタ (MEM ならスロット)、使ったレジスタ (ALLOC_REGS のビット)
+/// The result of allocation: the register per value / variable (a slot if MEM), the registers used (bits of ALLOC_REGS)
 #[derive(Clone, Default)]
 pub struct Plan {
     pub vloc: Vec<u8>,
     pub varloc: Vec<u8>,
-    /// 使った ALLOC_REGS[..5] (呼ばれた側が保存するもの) のビット
+    /// Bits of the ALLOC_REGS[..5] used (the callee-saved ones)
     pub used: u8,
-    /// スロットごとの、フィールドを変数にしたか (アドレスが load / store にしか使われない)
+    /// Per slot, whether its fields were made variables (the address is used only by load / store)
     pub prom: Vec<bool>,
-    /// (スロット, オフセット) → フィールドの番号、フィールドのレジスタ (MEM ならスロットのその場所)
+    /// (slot, offset) → field number, the field's register (that place in the slot if MEM)
     pub fields: FMap<(u32, i32), u32>,
     pub floc: Vec<u8>,
 }
 
-/// mov dst, src (64 bit。レジスタの番号は 0〜15)
+/// mov dst, src (64 bit; register numbers are 0 to 15)
 fn mov_rr(dst: u8, src: u8) -> [u8; 3] {
     [0x48 | ((src >> 3) << 2) | (dst >> 3), 0x89, 0xC0 | ((src & 7) << 3) | (dst & 7)]
 }
@@ -166,16 +166,16 @@ fn mov_mr(r: u8, d: i32, load: bool) -> [u8; 7] {
 
 struct BlockData {
     params: Vec<Value>,
-    /// コードの位置 (切り替えたとき)
+    /// The code position (when switched to)
     offset: Option<usize>,
-    /// 終端命令の前に別のブロックへ切り替えたとき、続きへ飛ぶ jmp の rel32 の位置 (戻ってきたら今の位置へ向ける)
+    /// When switched to another block before the terminator, the position of the rel32 of the jmp to the continuation (pointed at the current position on coming back)
     cont: Option<usize>,
 }
 
 impl Emitter {
     pub fn new(params: Vec<Type>, rets: Vec<Type>, plan: Option<Plan>) -> Emitter {
         let track = if plan.is_none() {
-            // (入口の前の区間: 最初のブロックへ続く)
+            // (The segment before the entry: continues to the first block)
             let mut t = Track::default();
             t.segs.push(Seg { block: u32::MAX, start: 0, end: 0, succ: vec![], falls: true });
             Some(Box::new(t))
@@ -209,9 +209,9 @@ impl Emitter {
             var_paddr: vec![],
             kval: vec![],
         };
-        // プロローグ: push rbp; mov rbp, rsp; sub rsp, <frame> (frame は最後に書き込む)
+        // Prologue: push rbp; mov rbp, rsp; sub rsp, <frame> (frame is written at the end)
         b.code.extend_from_slice(&[0x55, 0x48, 0x89, 0xE5, 0x48, 0x81, 0xEC, 0, 0, 0, 0]);
-        // (割り当てたレジスタの保存)
+        // (Saving the allocated registers)
         for i in 0..5 {
             b.save_slots[i] = b.alloc(8, 8);
             if b.plan.used & (1 << i) != 0 {
@@ -219,14 +219,14 @@ impl Emitter {
                 b.code.extend_from_slice(&mov_mr(ALLOC_REGS[i], d, false));
             }
         }
-        // 引数をスロットへ
+        // Arguments into slots
         const ARG_STORE: [[u8; 3]; 6] = [[0x48, 0x89, 0xBD], [0x48, 0x89, 0xB5], [0x48, 0x89, 0x95], [0x48, 0x89, 0x8D], [0x4C, 0x89, 0x85], [0x4C, 0x89, 0x8D]];
         let (mut ni, mut nf) = (0usize, 0u8);
         let mut ns = 0i32;
         for (_, &t) in params.iter().enumerate() {
             let v = b.new_value(t);
             let off = b.values[v.0 as usize].0;
-            // (浮動小数点の引数は xmm0〜7)
+            // (Floating-point arguments are in xmm0 to 7)
             if t.is_float() && nf < 8 {
                 let p = if t == Type::F32 { 0xF3 } else { 0xF2 };
                 b.code.extend_from_slice(&[p, 0x0F, 0x11, 0x85 | (nf << 3)]);
@@ -236,7 +236,7 @@ impl Emitter {
                 b.force_mem(v);
                 continue;
             }
-            // (i128 はレジスタ 2 つ (下位, 上位)。2 つ残っていなければ全体をスタックで)
+            // (An i128 takes 2 registers (low, high). If 2 are not left, the whole goes on the stack)
             let parts = if t.bytes() == 16 { 2 } else { 1 };
             if ni + parts <= 6 {
                 for k in 0..parts {
@@ -247,7 +247,7 @@ impl Emitter {
             } else {
                 ni = 6;
                 for k in 0..parts {
-                    // スタック渡し: [rbp + 16 + 8*n]
+                    // Passed on the stack: [rbp + 16 + 8*n]
                     let src = 16 + 8 * ns;
                     ns += 1;
                     b.code.extend_from_slice(&[0x48, 0x8B, 0x85]);
@@ -256,14 +256,14 @@ impl Emitter {
                 }
             }
             b.entry_params.push(v);
-            // (整数の引数はレジスタに置ける: 入口 (命令 0) で書いたことにし、本番では下でレジスタへ読む)
+            // (Integer arguments can be kept in registers: treated as written at the entry (instruction 0), and in the real run loaded into the register below)
             if t.bytes() == 16 {
                 b.force_mem(v);
             } else {
                 b.ev_def(v.0);
             }
         }
-        // (入口で 0 にしたいスロットがあれば finish_zeroing がここから飛ぶ: 普段は次の命令へ飛ぶだけ)
+        // (If there are slots to zero at the entry, finish_zeroing jumps from here: normally this just jumps to the next instruction)
         for k in 0..b.entry_params.len() {
             let v = b.entry_params[k];
             let r = b.loc(v);
@@ -277,7 +277,7 @@ impl Emitter {
         b
     }
 
-    /// 関数の引数の値
+    /// The values of the fn's arguments
     pub fn func_params(&self) -> Vec<Value> {
         self.entry_params.clone()
     }
@@ -320,8 +320,8 @@ impl Emitter {
         self.blocks[b.0 as usize].params.clone()
     }
 
-    /// ブロックに切り替える。途中のブロック (終端命令がまだない) から離れるときは続きへの jmp を置き、
-    /// 後でそのブロックに戻ったら (Cranelift と同じく続きを書ける) その jmp を今の位置へ向ける
+    /// Switches to a block. When leaving a block midway (no terminator yet), puts a jmp to the continuation, and
+    /// when coming back to that block later (the continuation can be written, as in Cranelift), points that jmp at the current position
     pub fn switch_to_block(&mut self, b: Block) {
         let falls = self.cur.is_some_and(|c| c != b) && !self.terminated;
         if self.cur != Some(b) {
@@ -382,7 +382,7 @@ impl Emitter {
 
     fn def_var_inner(&mut self, var: Variable, v: Value) {
         let (off, t) = self.vars[var.0 as usize];
-        // (両方レジスタなら直接写す)
+        // (If both are registers, copy directly)
         let (lv, lr) = (self.loc(v), self.var_loc(var));
         if lv != MEM && lr != MEM && (lv >= 16) == (lr >= 16) {
             self.ev_use(v.0);
@@ -464,7 +464,7 @@ impl Emitter {
         StackSlot(self.slots.len() as u32 - 1)
     }
 
-    /// 呼ぶ関数の名前を登録する
+    /// Registers the name of a fn to call
     pub fn import_function(&mut self, name: &str) -> FuncRef {
         if let Some(i) = self.funcs.iter().position(|f| f == name) {
             return FuncRef(i as u32);
@@ -473,7 +473,7 @@ impl Emitter {
         FuncRef(self.funcs.len() as u32 - 1)
     }
 
-    // --- 命令の部品 ---------------------------------------------------
+    // --- Instruction parts ---------------------------------------------------
 
     fn emit(&mut self, b: &[u8]) {
         self.code.extend_from_slice(b);
@@ -492,17 +492,17 @@ impl Emitter {
         self.emit_disp(&[0x48, 0x89, 0x85], off);
     }
 
-    /// rax が今 v を持っているか (直前に書いたばかり)
+    /// Whether rax holds v now (just written)
     fn rax_is(&self, v: Value) -> bool {
         self.rax_holds == Some((v.0, self.code.len()))
     }
 
-    /// 値 v を整数のレジスタ r に読む
+    /// Loads value v into integer register r
     fn load_reg(&mut self, r: u8, v: Value) {
         self.ev_use(v.0);
         let l = self.loc(v);
         if l != MEM && l >= 16 {
-            // movq r64, xmm (f32 は movd r32, xmm: 上位は 0)
+            // movq r64, xmm (for f32, movd r32, xmm: the upper half is 0)
             let k = l - 16;
             let w = if self.values[v.0 as usize].1 == Type::F64 { 0x48 } else { 0x40 };
             self.emit(&[0x66, w | ((k >> 3) << 2) | (r >> 3), 0x0F, 0x7E, 0xC0 | ((k & 7) << 3) | (r & 7)]);
@@ -539,7 +539,7 @@ impl Emitter {
         self.ev_def(v.0);
         let l = self.loc(v);
         if l != MEM && l >= 16 {
-            // movq xmm, rax (f32 は movd xmm, eax)
+            // movq xmm, rax (for f32, movd xmm, eax)
             let k = l - 16;
             let w = if self.values[v.0 as usize].1 == Type::F64 { 0x48 } else { 0x40 };
             self.emit(&[0x66, w | ((k >> 3) << 2), 0x0F, 0x6E, 0xC0 | ((k & 7) << 3)]);
@@ -557,7 +557,7 @@ impl Emitter {
         }
     }
 
-    /// rax を型の幅で 0 拡張する (I64 は何もしない)
+    /// Zero-extends rax from the type's width (nothing for I64)
     fn zext_rax(&mut self, t: Type) {
         match t {
             Type::I8 => self.emit(&[0x48, 0x0F, 0xB6, 0xC0]),
@@ -567,7 +567,7 @@ impl Emitter {
         }
     }
 
-    /// rax を型の幅から符号拡張する
+    /// Sign-extends rax from the type's width
     fn sext_rax(&mut self, t: Type) {
         match t {
             Type::I8 => self.emit(&[0x48, 0x0F, 0xBE, 0xC0]),
@@ -593,7 +593,7 @@ impl Emitter {
         v
     }
 
-    // --- 命令 ----------------------------------------------------------
+    // --- Instructions ----------------------------------------------------------
 
     pub fn iconst(&mut self, t: Type, x: i64) -> Value {
         let v = self.iconst_inner(t, x);
@@ -602,7 +602,7 @@ impl Emitter {
     }
 
     fn iconst_inner(&mut self, t: Type, x: i64) -> Value {
-        // (結果をレジスタに置くなら直接書く: 型の幅で 0 拡張した値)
+        // (If the result is kept in a register, write it directly: the value zero-extended to the type's width)
         let d = self.next_loc();
         if d != MEM && t.bytes() != 16 && !t.is_float() {
             let xv: u64 = match t {
@@ -613,14 +613,14 @@ impl Emitter {
             };
             let b = if d >= 8 { 1u8 } else { 0 };
             if xv <= 0xFFFF_FFFF {
-                // mov r32, imm32 (上位は 0 になる)
+                // mov r32, imm32 (the upper half becomes 0)
                 if b != 0 {
                     self.emit(&[0x41]);
                 }
                 self.emit(&[0xB8 + (d & 7)]);
                 self.emit(&(xv as u32).to_le_bytes());
             } else if (xv as i64) >= i32::MIN as i64 && (xv as i64) < 0 {
-                // mov r64, imm32 (符号拡張)
+                // mov r64, imm32 (sign-extended)
                 self.emit(&[0x48 | b, 0xC7, 0xC0 | (d & 7)]);
                 self.emit(&(xv as i64 as i32).to_le_bytes());
             } else {
@@ -634,7 +634,7 @@ impl Emitter {
         self.result(t)
     }
 
-    /// 64 / 32 bit の a と b がレジスタなら cmp a, b を書いて true (32 bit の比較は符号つきも正しい)
+    /// If 64 / 32 bit a and b are in registers, writes cmp a, b and returns true (a 32-bit comparison is correct for signed ones too)
     fn cmp_regs(&mut self, t: Type, a: Value, b: Value) -> bool {
         if t != Type::I64 && t != Type::I32 {
             return false;
@@ -646,7 +646,7 @@ impl Emitter {
         true
     }
 
-    /// modrm (+ SIB) + disp32: [base + off]、reg フィールドは r
+    /// modrm (+ SIB) + disp32: [base + off], with r in the reg field
     fn mem_operand(&mut self, r: u8, base: u8, off: i32) {
         self.emit(&[0x80 | ((r & 7) << 3) | (base & 7)]);
         if base & 7 == 4 {
@@ -655,12 +655,12 @@ impl Emitter {
         self.emit(&off.to_le_bytes());
     }
 
-    /// 次に作る値のレジスタ (MEM ならスロット)
+    /// The register of the next value to create (a slot if MEM)
     fn next_loc(&self) -> u8 {
         self.plan.vloc.get(self.values.len()).copied().unwrap_or(MEM)
     }
 
-    /// 次の値をレジスタに直接書いた後: 値を作る (rax は持っていない)
+    /// After writing the next value directly into a register: creates the value (rax does not hold it)
     fn result_in_reg(&mut self, t: Type) -> Value {
         let v = self.new_value(t);
         self.ev_def(v.0);
@@ -668,7 +668,7 @@ impl Emitter {
         v
     }
 
-    /// 値のレジスタ (スロットなら None)
+    /// The value's register (None if a slot)
     fn rloc(&self, v: Value) -> Option<u8> {
         let l = self.loc(v);
         if l == MEM { None } else { Some(l) }
@@ -676,12 +676,12 @@ impl Emitter {
 
     fn binop(&mut self, a: Value, b: Value, op: &[u8]) -> Value {
         let t = self.value_type(a);
-        // (64 / 32 bit で、両方と結果がレジスタなら 2 オペランドの形: mov d, a; op d, b。
-        //  生存区間は閉じているので d は a / b のレジスタと違う。32 bit の命令は上位を 0 にする)
+        // (For 64 / 32 bit, if both operands and the result are registers, the 2-operand form: mov d, a; op d, b.
+        //  Live ranges are closed, so d differs from the registers of a / b. 32-bit instructions zero the upper half)
         if t == Type::I64 || t == Type::I32 {
             let d = self.next_loc();
             if let (Some(ra), Some(rb), true) = (self.rloc(a), self.rloc(b), d != MEM) {
-                // (add / sub / and / or / xor rax, rcx と imul rax, rcx)
+                // (add / sub / and / or / xor rax, rcx and imul rax, rcx)
                 let code: Option<u8> = if op.len() == 3 && op[2] == 0xC8 && matches!(op[1], 0x01 | 0x29 | 0x21 | 0x09 | 0x31) {
                     Some(op[1])
                 } else if op.len() == 4 && op[1] == 0x0F && op[2] == 0xAF {
@@ -703,7 +703,7 @@ impl Emitter {
                 }
             }
         }
-        // (rax が b を持っていれば先に rcx へ移す)
+        // (If rax holds b, move it to rcx first)
         if self.rax_is(b) && a != b {
             self.load_rcx(b);
             self.load_rax(a);
@@ -716,7 +716,7 @@ impl Emitter {
     }
 
     pub fn iadd(&mut self, a: Value, b: Value) -> Value {
-        // (スロットのアドレス + 定数: そのスロットのアドレスのまま。変数にしたスロットなら値の番号だけ作る)
+        // (Slot address + constant: stays an address of that slot. For a slot whose fields were made variables, only create the value's number)
         let (pa, pb) = (self.paddr[a.0 as usize], self.paddr[b.0 as usize]);
         let derived = match (pa, self.kval[b.0 as usize], pb, self.kval[a.0 as usize]) {
             (Some((sl, o)), Some(x), _, _) if (x as i32) as i64 == x => Some((a, sl, o.wrapping_add(x as i32))),
@@ -758,7 +758,7 @@ impl Emitter {
         self.iadd(a, k)
     }
 
-    /// 符号なし / 符号つきの割り算・余り (0 除算の検査は呼び出し側)
+    /// Unsigned / signed division and remainder (the check for division by 0 is up to the caller)
     fn divop(&mut self, a: Value, b: Value, signed: bool, rem: bool) -> Value {
         let t = self.value_type(a);
         self.load_rax(a);
@@ -791,7 +791,7 @@ impl Emitter {
         self.divop(a, b, true, true)
     }
 
-    /// シフト (量は rcx の下位 8 bit)
+    /// Shift (the amount is the low 8 bits of rcx)
     fn shift(&mut self, a: Value, b: Value, op: u8, arith: bool) -> Value {
         let t = self.value_type(a);
         self.load_rax(a);
@@ -827,7 +827,7 @@ impl Emitter {
         self.result(t)
     }
 
-    /// 比較 (結果は I8 の 0 / 1)
+    /// Comparison (the result is an I8 0 / 1)
     pub fn icmp(&mut self, cc: IntCC, a: Value, b: Value) -> Value {
         let t = self.value_type(a);
         if self.cmp_regs(t, a, b) {
@@ -842,12 +842,12 @@ impl Emitter {
         }
         self.emit(&[0x48, 0x39, 0xC8]); // cmp rax, rcx
         self.emit(&[0x0F, cc.setcc(), 0xC0]); // setcc al
-        // (movzx rax, al は result がする)
+        // (movzx rax, al is done by result)
         self.result(Type::I8)
     }
 
-    /// `brif(icmp(cc, a, b), ..)` で icmp の値をほかで使わないとき: 値を作らずに cmp と jcc で分ける。
-    /// (icmp の値の番号は同じにする: 作るだけで書かない)
+    /// For `brif(icmp(cc, a, b), ..)` when the icmp's value is used nowhere else: branches with cmp and jcc without creating the value.
+    /// (The icmp value's number is kept the same: it is only created, not written)
     pub fn cmp_only(&mut self, cc: IntCC, a: Value, b: Value) {
         let t = self.value_type(a);
         if self.cmp_regs(t, a, b) {
@@ -866,7 +866,7 @@ impl Emitter {
         self.rax_holds = None;
     }
 
-    /// cmp_only の後: 成り立たなければ else へ (setcc の逆の条件の jcc)
+    /// After cmp_only: to else if it does not hold (jcc on the opposite condition of setcc)
     pub fn brif_cc(&mut self, cc: IntCC, then_b: Block, then_args: &[Value], else_b: Block, else_args: &[Value]) {
         self.branch_on((cc.setcc() ^ 1) - 0x10, then_b, then_args, else_b, else_args);
     }
@@ -907,7 +907,7 @@ impl Emitter {
         self.result(t)
     }
 
-    /// [addr + off] を読む
+    /// Loads [addr + off]
     pub fn load(&mut self, t: Type, addr: Value, off: i32) -> Value {
         if let Some((s, o)) = self.paddr[addr.0 as usize] {
             if self.promoted(s) {
@@ -916,7 +916,7 @@ impl Emitter {
             self.addr_use(addr);
             self.acc(s, o + off, t, false);
         }
-        // (アドレスと結果がレジスタなら mov d, [base + off] / movzx)
+        // (If the address and the result are registers, mov d, [base + off] / movzx)
         let d = self.next_loc();
         if let (Some(base), true) = (self.rloc(addr), d != MEM && matches!(t, Type::I64 | Type::I32 | Type::I16 | Type::I8)) {
             let rx = ((d >> 3) << 2) | (base >> 3);
@@ -936,7 +936,7 @@ impl Emitter {
             Type::I16 => self.emit_disp(&[0x48, 0x0F, 0xB7, 0x80], off),
             Type::I8 => self.emit_disp(&[0x48, 0x0F, 0xB6, 0x80], off),
             Type::I128 | Type::Vec(_) => {
-                // 下位を rcx、上位を rax に読んで書く
+                // Load the low half into rcx and the high half into rax, and write
                 self.emit_disp(&[0x48, 0x8B, 0x88], off);
                 self.emit_disp(&[0x48, 0x8B, 0x80], off + 8);
                 let v = self.new_value(t);
@@ -949,7 +949,7 @@ impl Emitter {
         self.result(t)
     }
 
-    /// [addr + off] に v を書く
+    /// Writes v to [addr + off]
     pub fn store(&mut self, v: Value, addr: Value, off: i32) {
         let t = self.value_type(v);
         if let Some((s, o)) = self.paddr[addr.0 as usize] {
@@ -960,7 +960,7 @@ impl Emitter {
             self.addr_use(addr);
             self.acc(s, o + off, t, true);
         }
-        // (値とアドレスがレジスタなら mov [base + off], r)
+        // (If the value and the address are registers, mov [base + off], r)
         if let (Some(r), Some(base)) = (self.rloc(v), self.rloc(addr)) {
             if matches!(t, Type::I64 | Type::I32 | Type::I16 | Type::I8) {
                 let rx = ((r >> 3) << 2) | (base >> 3);
@@ -968,7 +968,7 @@ impl Emitter {
                     Type::I64 => self.emit(&[0x48 | rx, 0x89]),
                     Type::I32 => self.emit(&[0x40 | rx, 0x89]),
                     Type::I16 => self.emit(&[0x66, 0x40 | rx, 0x89]),
-                    // (REX を付けると sil / dil などの下位 8 bit になる)
+                    // (With a REX prefix this is the low 8 bits like sil / dil)
                     _ => self.emit(&[0x40 | rx, 0x88]),
                 }
                 self.mem_operand(r, base, off);
@@ -996,9 +996,9 @@ impl Emitter {
         }
     }
 
-    /// スタックスロットのアドレス
+    /// The address of a stack slot
     pub fn stack_addr(&mut self, s: StackSlot, off: i32) -> Value {
-        // (フィールドを変数にしたスロット: アドレスは作らない)
+        // (A slot whose fields were made variables: no address is created)
         if self.promoted(s.0) {
             let v = self.new_value(Type::I64);
             self.paddr[v.0 as usize] = Some((s.0, off));
@@ -1015,7 +1015,7 @@ impl Emitter {
         self.plan.prom.get(s as usize).copied().unwrap_or(false)
     }
 
-    /// スロットのアドレスの値を load / store / iadd_imm に使った (解析のとき)
+    /// A slot address value was used for load / store / iadd_imm (during analysis)
     fn addr_use(&mut self, a: Value) {
         if let Some(tr) = &mut self.track {
             tr.addr_uses[a.0 as usize] += 1;
@@ -1029,7 +1029,7 @@ impl Emitter {
         }
     }
 
-    /// 変数にしたフィールドを読む (結果の値を作る)
+    /// Reads a field made into a variable (creates the result value)
     fn field_load(&mut self, t: Type, s: u32, off: i32) -> Value {
         let f = self.plan.fields[&(s, off)] as usize;
         let l = self.plan.floc[f];
@@ -1066,7 +1066,7 @@ impl Emitter {
         self.result(t)
     }
 
-    /// 変数にしたフィールドに v を書く
+    /// Writes v to a field made into a variable
     fn field_store(&mut self, v: Value, s: u32, off: i32) {
         let t = self.value_type(v);
         let f = self.plan.fields[&(s, off)] as usize;
@@ -1100,16 +1100,16 @@ impl Emitter {
         self.fixups.push((at, b));
     }
 
-    /// ブロック引数を渡す (飛び先の引数のスロットへ書く)
+    /// Passes block arguments (writes to the target's param slots)
     fn pass_args(&mut self, b: Block, args: &[Value]) {
         let ps = self.blocks[b.0 as usize].params.clone();
-        // (1 つだけなら入れ替わりは起きない: そのまま書く)
+        // (With only one, no swapping happens: write it directly)
         if args.len() == 1 && ps.len() >= 1 && self.value_type(args[0]).bytes() != 16 {
             self.load_rax(args[0]);
             self.store_rax(ps[0]);
             return;
         }
-        // (引数どうしが入れ替わる場合に備え、全部読んでから書く: スタックに積む)
+        // (In case the arguments swap with one another, read them all before writing: push them on the stack)
         for &a in args {
             self.load_rax(a);
             self.emit(&[0x50]); // push rax
@@ -1138,17 +1138,17 @@ impl Emitter {
         self.terminated = true;
     }
 
-    /// c が 0 でなければ then_b へ、0 なら else_b へ
+    /// To then_b if c is not 0, to else_b if it is 0
     pub fn brif(&mut self, c: Value, then_b: Block, then_args: &[Value], else_b: Block, else_args: &[Value]) {
         self.load_rax(c);
         self.emit(&[0x48, 0x85, 0xC0]); // test rax, rax
         self.branch_on(0x84, then_b, then_args, else_b, else_args);
     }
 
-    /// 直前の比べた結果で、条件 jcc (0x0F の次の byte) が成り立てば else へ、成り立たなければ then へ
+    /// On the result of the previous comparison, to else if condition jcc (the byte after 0x0F) holds, to then if it does not
     fn branch_on(&mut self, jcc: u8, then_b: Block, then_args: &[Value], else_b: Block, else_args: &[Value]) {
         if else_args.is_empty() {
-            // (else に渡すものがなければ直接飛ぶ)
+            // (If nothing is passed to else, jump directly)
             self.seg_succ(else_b);
             self.emit(&[0x0F, jcc]);
             self.rel32_to(else_b);
@@ -1174,17 +1174,17 @@ impl Emitter {
                 self.load_rax(v);
             }
             if self.value_type(v).bytes() == 16 {
-                // (上位は rdx)
+                // (The high half is rdx)
                 let off = self.off(v);
                 self.emit_disp(&[0x48, 0x8B, 0x95], off + 8);
             }
         }
         if let Some(&v) = vals.get(1) {
-            // 2 つ目は rdx
+            // The second is rdx
             let off = self.off(v);
             self.emit_disp(&[0x48, 0x8B, 0x95], off);
         }
-        // (割り当てたレジスタを戻す)
+        // (Restore the allocated registers)
         for i in 0..5 {
             if self.plan.used & (1 << i) != 0 {
                 let d = self.save_slots[i];
@@ -1201,7 +1201,7 @@ impl Emitter {
         self.terminated = true;
     }
 
-    /// 関数を呼ぶ (引数は 6 個まではレジスタ、それ以降はスタック)。戻り値は 0〜2 個 (rax, rdx)
+    /// Calls a fn (up to 6 arguments in registers, the rest on the stack). 0 to 2 return values (rax, rdx)
     pub fn call(&mut self, f: FuncRef, args: &[Value], rets: &[Type]) -> Vec<Value> {
         let op = self.op;
         if let Some(tr) = &mut self.track {
@@ -1210,8 +1210,8 @@ impl Emitter {
         const ARG_LOAD: [[u8; 3]; 6] = [[0x48, 0x8B, 0xBD], [0x48, 0x8B, 0xB5], [0x48, 0x8B, 0x95], [0x48, 0x8B, 0x8D], [0x4C, 0x8B, 0x85], [0x4C, 0x8B, 0x8D]];
         let fargs: Vec<Value> = args.iter().copied().filter(|&a| self.value_type(a).is_float()).collect();
         let args: Vec<Value> = args.iter().copied().filter(|&a| !self.value_type(a).is_float()).collect();
-        // 8 byte ずつの部分 (スロットのオフセット) をレジスタとスタックに分ける (i128 は 2 つ。2 つ残っていなければ全体をスタック)
-        // (レジスタで渡す部分は (値, 上位か)。写しがあればそこから読む)
+        // Split the 8-byte parts (slot offsets) between registers and the stack (an i128 is 2; if 2 are not left, the whole goes on the stack)
+        // (The parts passed in registers are (value, is the high half). If there is a copy, read from it)
         let mut regs: Vec<(Value, bool)> = vec![];
         let mut stack_parts: Vec<i32> = vec![];
         for &a in &args {
@@ -1230,7 +1230,7 @@ impl Emitter {
                 }
             }
         }
-        // (スタック渡しの引数: rsp を 16 byte に揃えてから逆順に push)
+        // (Arguments passed on the stack: align rsp to 16 bytes, then push in reverse order)
         let pad = stack_parts.len() % 2 == 1;
         if pad {
             self.emit(&[0x48, 0x83, 0xEC, 0x08]); // sub rsp, 8
@@ -1240,7 +1240,7 @@ impl Emitter {
             self.emit(&[0x50]);
         }
         const ARG_REG: [u8; 6] = [7, 6, 2, 1, 8, 9];
-        // (引数の値が引数のレジスタにあると、順に書くと先に書いたもので壊れる: そのときはスタックを経由する)
+        // (If an argument's value is in an argument register, writing them in order breaks it with an earlier write: then go through the stack)
         let clash = regs.iter().any(|&(v, hi)| !hi && self.value_type(v).bytes() != 16 && ARG_REG.contains(&self.loc(v)));
         if clash {
             for &(v, hi) in regs.iter() {
@@ -1275,7 +1275,7 @@ impl Emitter {
         for (k, &a) in fargs.iter().enumerate().take(8) {
             self.xmm_load(k as u8, a);
         }
-        // (可変長引数の関数のための al = xmm で渡した数。自分の関数 (`_x..`) は可変長引数でないので要らない)
+        // (al = the number passed in xmm, for variadic fns. Our own fns (`_x..`) are not variadic, so it is not needed)
         if !self.funcs[f.0 as usize].starts_with("_x") {
             self.emit(&[0xB8]);
             self.emit(&(fargs.len().min(8) as u32).to_le_bytes());
@@ -1308,7 +1308,7 @@ impl Emitter {
                 continue;
             }
             if t.bytes() == 16 {
-                // rax (下位) と rdx (上位)
+                // rax (low) and rdx (high)
                 let v = self.new_value(t);
                 let o = self.off(v);
                 self.store_rax_at(o);
@@ -1324,7 +1324,7 @@ impl Emitter {
         out
     }
 
-    /// 組み立てを終えて (機械語, 再配置)。zero のスロットの先頭 1 byte を入口で 0 にする
+    /// Finishes assembling: (machine code, relocations). Zeroes the first byte of the zero slots at the entry
     pub fn finish_zeroing(mut self, zero: &[StackSlot]) -> (Vec<u8>, Vec<Reloc>) {
         if !zero.is_empty() {
             let stub = self.code.len();
@@ -1345,16 +1345,16 @@ impl Emitter {
         self.finish()
     }
 
-    /// 組み立てを終えて (機械語, 再配置)
+    /// Finishes assembling: (machine code, relocations)
     pub fn finish(mut self) -> (Vec<u8>, Vec<Reloc>) {
-        // フレームの大きさ (16 byte 境界)
+        // Frame size (16-byte boundary)
         let frame = (self.frame + 15) / 16 * 16;
         self.code[7..11].copy_from_slice(&frame.to_le_bytes());
         for &(at, b) in &self.fixups {
             let target = self.blocks[b.0 as usize].offset.expect("jump to a block that was never switched to") as i32;
             let rel = target - (at as i32 + 4);
             self.code[at..at + 4].copy_from_slice(&rel.to_le_bytes());
-            // (すぐ次への jmp は 5 byte の nop に)
+            // (A jmp to the very next instruction becomes a 5-byte nop)
             if rel == 0 && at >= 1 && self.code[at - 1] == 0xE9 {
                 self.code[at - 1..at + 4].copy_from_slice(&[0x0F, 0x1F, 0x44, 0x00, 0x00]);
             }
@@ -1365,13 +1365,13 @@ impl Emitter {
 }
 
 
-// --- 浮動小数点・i128・オーバーフロー・ビット演算・間接呼び出し・アドレス ---------------
+// --- Floating point / i128 / overflow / bit operations / indirect calls / addresses ---------------
 impl Emitter {
-    /// 値のスロットのオフセット (メモリから読む・アドレスとして使う: そのスロットへの書き込みは消せない)
+    /// The offset of the value's slot (read from memory / used as an address: writes to that slot cannot be elided)
     fn off(&mut self, v: Value) -> i32 {
         self.ev_use(v.0);
         self.force_mem(v);
-        // (レジスタに置いた値はスロットにない: 念のため書いてから。解析で mem_only にしたので普通は起きない)
+        // (A value kept in a register is not in the slot: write it first just in case. Analysis made it mem_only, so this does not normally happen)
         let r = self.loc(v);
         let o = self.values[v.0 as usize].0;
         if r != MEM && r >= 16 {
@@ -1385,7 +1385,7 @@ impl Emitter {
         o
     }
 
-    /// 値のレジスタ (MEM ならスロット)
+    /// The value's register (a slot if MEM)
     fn loc(&self, v: Value) -> u8 {
         self.plan.vloc.get(v.0 as usize).copied().unwrap_or(MEM)
     }
@@ -1409,7 +1409,7 @@ impl Emitter {
             tr.ev.push((id, op, true));
         }
     }
-    /// 区間を閉じて次を始める (解析のとき)
+    /// Closes the segment and starts the next (during analysis)
     fn seg_switch(&mut self, b: Block, falls: bool) {
         let op = self.op;
         if let Some(tr) = &mut self.track {
@@ -1438,10 +1438,10 @@ impl Emitter {
     }
 
 
-    /// xmm0 (reg 0) / xmm1 (reg 1) に読む
+    /// Loads into xmm0 (reg 0) / xmm1 (reg 1)
     fn xmm_load(&mut self, reg: u8, v: Value) {
         let p = if self.value_type(v) == Type::F32 { 0xF3 } else { 0xF2 };
-        // (xmm に置いた値: movaps xmm_reg, xmm_k)
+        // (A value kept in xmm: movaps xmm_reg, xmm_k)
         let l = self.loc(v);
         if l != MEM && l >= 16 {
             self.ev_use(v.0);
@@ -1449,7 +1449,7 @@ impl Emitter {
             self.emit(&movaps(reg, k));
             return;
         }
-        // (スロットから: レジスタに置けなくする off ではなく、読んだことだけ記録する)
+        // (From the slot: rather than off, which keeps it out of registers, only record that it was read)
         self.ev_use(v.0);
         let o = self.values[v.0 as usize].0;
         self.emit_disp(&[p, 0x0F, 0x10, 0x85 | (reg << 3)], o);
@@ -1465,7 +1465,7 @@ impl Emitter {
         self.ev_def(v.0);
         let p = if t == Type::F32 { 0xF3 } else { 0xF2 };
         let o = self.values[v.0 as usize].0;
-        // (スロットの上位を 0 にしてから書く: f32 も 8 byte のスロットで比べられるように)
+        // (Zero the upper half of the slot before writing: so that an f32 can also be compared in an 8-byte slot)
         self.emit(&[0x31, 0xC0]);
         self.store_rax_at(o);
         self.emit_disp(&[p, 0x0F, 0x11, 0x85], o);
@@ -1532,7 +1532,7 @@ impl Emitter {
         self.xmm0_result(t)
     }
 
-    /// 切り捨て・切り上げ・0 方向への丸め (roundsd の即値 9 / 10 / 11)
+    /// Floor / ceil / round toward 0 (roundsd immediates 9 / 10 / 11)
     fn round(&mut self, a: Value, mode: u8) -> Value {
         let t = self.value_type(a);
         self.xmm_load(0, a);
@@ -1554,7 +1554,7 @@ impl Emitter {
         if t == Type::F32 { 1 << 31 } else { i64::MIN }
     }
 
-    /// 浮動小数点のビット列をそのまま整数として扱う (I32 / I64)
+    /// Treats the bits of a floating-point value as an integer as they are (I32 / I64)
     fn bits_of(&mut self, a: Value) -> Value {
         let t = if self.value_type(a) == Type::F32 { Type::I32 } else { Type::I64 };
         self.bitcast(t, a)
@@ -1588,17 +1588,17 @@ impl Emitter {
         self.bitcast(t, r)
     }
 
-    /// a * b + c (丸めは 2 回: 融合はしない)
+    /// a * b + c (rounded twice: not fused)
     pub fn fma(&mut self, a: Value, b: Value, c: Value) -> Value {
         let m = self.fmul(a, b);
         self.fadd(m, c)
     }
 
-    /// 型だけを変える (ビット列はそのまま)
+    /// Changes only the type (the bits stay as they are)
     pub fn bitcast(&mut self, t: Type, a: Value) -> Value {
         self.load_rax(a);
         if !t.is_float() {
-            // (整数にするときは幅で 0 拡張する: f32 のスロットの上位 4 byte は決まっていない)
+            // (When making it an integer, zero-extend by the width: the upper 4 bytes of an f32's slot are undefined)
             return self.result(t);
         }
         let v = self.new_value(t);
@@ -1606,7 +1606,7 @@ impl Emitter {
         v
     }
 
-    /// 比較 (NaN を含むと Equal 以外の順序の比較は偽、NotEqual は真)
+    /// Comparison (with a NaN, ordering comparisons other than Equal are false, NotEqual is true)
     pub fn fcmp(&mut self, cc: FloatCC, a: Value, b: Value) -> Value {
         let t = self.value_type(a);
         let (x, y) = match cc {
@@ -1646,7 +1646,7 @@ impl Emitter {
         self.xmm0_result(Type::F32)
     }
 
-    /// 符号つき整数 → 浮動小数点
+    /// Signed integer → floating point
     pub fn fcvt_from_sint(&mut self, t: Type, a: Value) -> Value {
         let st = self.value_type(a);
         self.load_rax(a);
@@ -1656,7 +1656,7 @@ impl Emitter {
         self.xmm0_result(t)
     }
 
-    /// 符号なし整数 → 浮動小数点 (64 bit で最上位が立っていれば半分にして 2 倍する)
+    /// Unsigned integer → floating point (for 64 bit with the top bit set, halve and then double)
     pub fn fcvt_from_uint(&mut self, t: Type, a: Value) -> Value {
         let p = if t == Type::F32 { 0xF3 } else { 0xF2 };
         let add = if t == Type::F32 { 0x58 } else { 0x58 };
@@ -1672,7 +1672,7 @@ impl Emitter {
         self.xmm0_result(t)
     }
 
-    /// 浮動小数点 → I64 (cvttsd2si: 範囲外と NaN は i64::MIN)
+    /// Floating point → I64 (cvttsd2si: out of range and NaN give i64::MIN)
     fn cvt_raw(&mut self, a: Value) -> Value {
         let p = if self.value_type(a) == Type::F32 { 0xF3 } else { 0xF2 };
         self.xmm_load(0, a);
@@ -1686,7 +1686,7 @@ impl Emitter {
         if self.value_type(a) == Type::F32 { self.f32const(x as f32) } else { self.f64const(x) }
     }
 
-    /// 浮動小数点 → 符号つき整数 (Rust の `as`: 飽和し、NaN は 0)
+    /// Floating point → signed integer (Rust's `as`: saturates, NaN is 0)
     pub fn fcvt_to_sint_sat(&mut self, t: Type, a: Value) -> Value {
         let n = t.bits() as i32;
         let lo = -(2f64.powi(n - 1));
@@ -1706,14 +1706,14 @@ impl Emitter {
         self.ireduce(t, r3)
     }
 
-    /// 浮動小数点 → 符号なし整数 (飽和し、NaN と負は 0)
+    /// Floating point → unsigned integer (saturates, NaN and negatives are 0)
     pub fn fcvt_to_uint_sat(&mut self, t: Type, a: Value) -> Value {
         let n = t.bits() as i32;
         let hi = 2f64.powi(n);
         let fz = self.fconst_like(a, 0.0);
         let fhi = self.fconst_like(a, hi);
         let f63 = self.fconst_like(a, 2f64.powi(63));
-        // (2^63 以上は 2^63 を引いて変換し、最上位を立てる)
+        // (For 2^63 and above, subtract 2^63, convert, and set the top bit)
         let raw_small = self.cvt_raw(a);
         let a2 = self.fsub(a, f63);
         let raw_big0 = self.cvt_raw(a2);
@@ -1734,7 +1734,7 @@ impl Emitter {
 
     // --- i128 ---------------------------------------------------------
 
-    /// (下位, 上位) から i128
+    /// i128 from (low, high)
     pub fn iconcat(&mut self, lo: Value, hi: Value) -> Value {
         let v = self.new_value(Type::I128);
         let o = self.off(v);
@@ -1745,7 +1745,7 @@ impl Emitter {
         v
     }
 
-    /// i128 の (下位, 上位)
+    /// (low, high) of an i128
     pub fn isplit(&mut self, v: Value) -> (Value, Value) {
         let o = self.off(v);
         self.load_rax_at(o);
@@ -1757,12 +1757,12 @@ impl Emitter {
         (lo, hi)
     }
 
-    /// 2 語の演算: rax = a.lo OP1 b.lo、rcx = a.hi OP2 b.hi (OP は [rbp + d] を取る形の 2 byte のオペコード)
+    /// Two-word operation: rax = a.lo OP1 b.lo, rcx = a.hi OP2 b.hi (OP is a 2-byte opcode of the form that takes [rbp + d])
     fn wide2(&mut self, a: Value, b: Value, op_lo: [u8; 2], op_hi: [u8; 2]) -> Value {
         let (oa, ob) = (self.off(a), self.off(b));
         self.load_rax_at(oa);
         self.emit_disp(&[op_lo[0], op_lo[1], 0x85], ob);
-        // (adc / sbb は上の演算のキャリーを使うので、mov は flags を変えない)
+        // (adc / sbb use the carry of the operation above, and mov does not change the flags)
         self.emit_disp(&[0x48, 0x8B, 0x8D], oa + 8);
         self.emit_disp(&[op_hi[0], op_hi[1], 0x8D], ob + 8);
         let v = self.new_value(Type::I128);
@@ -1788,7 +1788,7 @@ impl Emitter {
         self.wide2(a, b, [0x48, 0x33], [0x48, 0x33])
     }
 
-    /// libgcc の関数 (`__multi3` など) で i128 の 2 項演算
+    /// Binary i128 operations with libgcc fns (`__multi3`, etc.)
     fn wide_libcall(&mut self, name: &str, a: Value, b: Value) -> Value {
         let (al, ah) = self.isplit(a);
         let (bl, bh) = self.isplit(b);
@@ -1812,7 +1812,7 @@ impl Emitter {
         self.wide_libcall("__modti3", a, b)
     }
 
-    /// i128 の比較
+    /// i128 comparison
     pub fn icmp128(&mut self, cc: IntCC, a: Value, b: Value) -> Value {
         let (oa, ob) = (self.off(a), self.off(b));
         match cc {
@@ -1827,7 +1827,7 @@ impl Emitter {
                 self.result(Type::I8)
             }
             _ => {
-                // x < y を sub / sbb の flags で: (a < b)、b < a、!(a < b)、!(b < a)
+                // x < y with the flags of sub / sbb: (a < b), b < a, !(a < b), !(b < a)
                 let (x, y, neg) = match cc {
                     IntCC::SignedLessThan | IntCC::UnsignedLessThan => (oa, ob, false),
                     IntCC::SignedGreaterThan | IntCC::UnsignedGreaterThan => (ob, oa, false),
@@ -1845,7 +1845,7 @@ impl Emitter {
         }
     }
 
-    /// i128 のシフト (量は下位 7 bit)
+    /// i128 shift (the amount is the low 7 bits)
     fn shift128(&mut self, a: Value, b: Value, kind: u8) -> Value {
         let oa = self.off(a);
         self.load_rax_at(oa);
@@ -1875,7 +1875,7 @@ impl Emitter {
         self.shift128(a, b, 2)
     }
 
-    /// 整数 → i128 (0 拡張 / 符号拡張)
+    /// Integer → i128 (zero-extended / sign-extended)
     pub fn extend128(&mut self, a: Value, signed: bool) -> Value {
         let st = self.value_type(a);
         self.load_rax(a);
@@ -1894,14 +1894,14 @@ impl Emitter {
         v
     }
 
-    /// i128 の下位を型の幅に切る
+    /// Truncates the low half of an i128 to the type's width
     pub fn reduce128(&mut self, t: Type, a: Value) -> Value {
         let o = self.off(a);
         self.load_rax_at(o);
         self.result(t)
     }
 
-    // --- オーバーフローつきの演算: (結果, あふれたか (I8)) -------------------------
+    // --- Operations with overflow: (result, whether it overflowed (I8)) -------------------------
 
     pub fn uadd_overflow(&mut self, a: Value, b: Value) -> (Value, Value) {
         let v = self.iadd(a, b);
@@ -1938,7 +1938,7 @@ impl Emitter {
         if t == Type::I64 {
             self.load_rax(a);
             self.load_rcx(b);
-            self.emit(&[0x48, 0xF7, 0xE1]); // mul rcx (CF / OF = 上位が 0 でない)
+            self.emit(&[0x48, 0xF7, 0xE1]); // mul rcx (CF / OF = the upper half is not 0)
             self.emit(&[0x0F, 0x92, 0xC1]); // setc cl
             let v = self.new_value(Type::I64);
             self.store_rax(v);
@@ -1946,7 +1946,7 @@ impl Emitter {
             let of = self.result(Type::I8);
             return (v, of);
         }
-        // 狭い型: 64 bit で掛けて、上の桁が残るか
+        // Narrow types: multiply in 64 bit and see whether higher digits remain
         let (xa, xb) = (self.uextend(Type::I64, a), self.uextend(Type::I64, b));
         let p = self.imul(xa, xb);
         let sh = self.iconst(Type::I64, t.bits() as i64);
@@ -1977,7 +1977,7 @@ impl Emitter {
         (v, of)
     }
 
-    /// 符号なしの 64 bit 掛け算の上位
+    /// The upper half of an unsigned 64-bit multiplication
     pub fn umulhi(&mut self, a: Value, b: Value) -> Value {
         self.load_rax(a);
         self.load_rcx(b);
@@ -1985,13 +1985,13 @@ impl Emitter {
         self.result(Type::I64)
     }
 
-    // --- ビット演算・最小最大 -----------------------------------------------
+    // --- Bit operations / min and max -----------------------------------------------
 
-    /// 上位の 0 の数 (0 なら幅)
+    /// Number of leading zeros (the width if 0)
     pub fn clz(&mut self, a: Value) -> Value {
         let t = self.value_type(a);
         self.load_rax(a);
-        self.emit(&[0x48, 0x0F, 0xBD, 0xC0]); // bsr rax, rax (0 なら ZF)
+        self.emit(&[0x48, 0x0F, 0xBD, 0xC0]); // bsr rax, rax (ZF if 0)
         // jnz +7; mov rax, -1 (7 byte)
         self.emit(&[0x75, 0x07, 0x48, 0xC7, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF]);
         // rax = (bits - 1) - rax
@@ -2000,7 +2000,7 @@ impl Emitter {
         self.result(t)
     }
 
-    /// 下位の 0 の数 (0 なら幅)
+    /// Number of trailing zeros (the width if 0)
     pub fn ctz(&mut self, a: Value) -> Value {
         let t = self.value_type(a);
         self.load_rax(a);
@@ -2077,13 +2077,13 @@ impl Emitter {
         self.select(c, n, a)
     }
 
-    /// c が 0 なら (trapz) / 0 でなければ (trapnz) 止める
+    /// Stops if c is 0 (trapz) / not 0 (trapnz)
     fn trap_if(&mut self, c: Value, on_zero: bool) {
         self.load_rax(c);
         self.emit(&[0x48, 0x85, 0xC0]);
         self.emit(&[if on_zero { 0x75 } else { 0x74 }, 0x02, 0x0F, 0x0B]); // jnz/jz +2; ud2
     }
-    /// コードつきの trap (場所を traps() に残す)
+    /// A trap with a code (records the location in traps())
     pub fn trap_code(&mut self, code: u8) {
         self.traps.push((self.code.len() as u32, code));
         self.trap();
@@ -2101,7 +2101,7 @@ impl Emitter {
     pub fn trapnz_code(&mut self, c: Value, code: u8) {
         self.trap_if_code(c, false, code)
     }
-    /// これまでの trap の (オフセット, コード)
+    /// (offset, code) of the traps so far
     pub fn traps(&self) -> Vec<(u32, u8)> {
         self.traps.clone()
     }
@@ -2112,24 +2112,24 @@ impl Emitter {
         self.trap_if(c, false)
     }
 
-    // --- 間接呼び出し・アドレス --------------------------------------------------
+    // --- Indirect calls / addresses --------------------------------------------------
 
-    /// 関数ポインタ p を呼ぶ
+    /// Calls fn pointer p
     pub fn call_indirect(&mut self, p: Value, args: &[Value], rets: &[Type]) -> Vec<Value> {
-        // (r11 に読んでおき、call の直前に呼ぶ: 引数のレジスタは call() の処理で埋まる)
+        // (Load it into r11 beforehand and call it at the point of the call: the argument registers get filled by the work in call())
         let f = self.import_function("\0indirect");
         let n = self.relocs.len();
         let o = self.off(p);
         self.emit_disp(&[0x4C, 0x8B, 0x9D], o); // mov r11, [p]
         let out = self.call(f, args, rets);
-        // call() が書いた `call rel32` (E8 + 4) を `call r11` + nop に書き換える
+        // Rewrite the `call rel32` (E8 + 4) that call() wrote into `call r11` + nop
         let r = self.relocs.remove(n);
         let at = r.offset as usize;
         self.code[at - 1..at + 4].copy_from_slice(&[0x41, 0xFF, 0xD3, 0x90, 0x90]);
         out
     }
 
-    /// 名前 (関数かデータ) のアドレス (GOT 経由: 外部の名前でも PIE でも使える)
+    /// The address of a name (fn or data) (via the GOT: works for external names and in PIE too)
     pub fn symbol_addr(&mut self, name: &str) -> Value {
         self.emit(&[0x48, 0x8B, 0x05]); // mov rax, [rip + rel32]
         let at = self.code.len() as u32;
@@ -2173,17 +2173,17 @@ impl Emitter {
     }
 }
 
-// --- ELF64 の再配置可能オブジェクト ------------------------------------------
+// --- ELF64 relocatable objects ------------------------------------------
 
-/// データ (名前, 中身, 再配置 (オフセット, 指す名前, 加数), 外から見えるか)。中のポインタは R_X86_64_64
+/// Data (name, contents, relocations (offset, name pointed to, addend), visible from outside). Pointers in it are R_X86_64_64
 pub type DataDef = (String, Vec<u8>, Vec<(u32, String, i64)>, bool);
 
-/// 関数 (名前, 機械語, 再配置, 外から見えるか) を .text に並べた ELF の .o
+/// An ELF .o with fns (name, machine code, relocations, visible from outside) laid out in .text
 pub fn write_object(funcs: &[(String, Vec<u8>, Vec<Reloc>, bool)]) -> Vec<u8> {
     write_object_full(funcs, &[])
 }
 
-/// 関数を .text、データを .data に置いた ELF の .o
+/// An ELF .o with fns in .text and data in .data
 pub fn write_object_full(funcs: &[(String, Vec<u8>, Vec<Reloc>, bool)], datas: &[DataDef]) -> Vec<u8> {
     let pad = |v: &mut Vec<u8>, a: usize, fill: u8| {
         while v.len() % a != 0 {
@@ -2204,7 +2204,7 @@ pub fn write_object_full(funcs: &[(String, Vec<u8>, Vec<Reloc>, bool)], datas: &
         doffs.push(data.len());
         data.extend_from_slice(bytes);
     }
-    // 記号: 0 = null、1 = .text、2 = .data のセクション記号、ローカル、グローバル、未定義
+    // Symbols: 0 = null, 1 = .text, 2 = .data section symbols, locals, globals, undefined
     let mut strtab: Vec<u8> = vec![0];
     let add_str = |s: &str, t: &mut Vec<u8>| -> u32 {
         let o = t.len() as u32;
@@ -2212,7 +2212,7 @@ pub fn write_object_full(funcs: &[(String, Vec<u8>, Vec<Reloc>, bool)], datas: &
         t.push(0);
         o
     };
-    // (名前, info, shndx, value, size)
+    // (name, info, shndx, value, size)
     let mut syms: Vec<(u32, u8, u16, u64, u64)> = vec![(0, 0, 0, 0, 0), (0, 3, 1, 0, 0), (0, 3, 2, 0, 0)];
     let mut index: FMap<String, u32> = FMap::default();
     for pass in 0..2 {
@@ -2278,7 +2278,7 @@ pub fn write_object_full(funcs: &[(String, Vec<u8>, Vec<Reloc>, bool)], datas: &
             rela_entry(&mut rela_data, doffs[i] as u64 + *o as u64, sym_of(name), 1, *addend);
         }
     }
-    // (名前の位置: .text 1, .data 7, .symtab 13, .strtab 21, .rela.text 29, .rela.data 40, .shstrtab 51, .note.GNU-stack 61)
+    // (Name positions: .text 1, .data 7, .symtab 13, .strtab 21, .rela.text 29, .rela.data 40, .shstrtab 51, .note.GNU-stack 61)
     let shstr = b"\0.text\0.data\0.symtab\0.strtab\0.rela.text\0.rela.data\0.shstrtab\0.note.GNU-stack\0".to_vec();
     let mut out = vec![0u8; 64];
     pad(&mut out, 16, 0);
@@ -2340,17 +2340,17 @@ pub fn write_object_full(funcs: &[(String, Vec<u8>, Vec<Reloc>, bool)], datas: &
     out
 }
 
-// --- レジスタ割り当て -------------------------------------------------------------
+// --- Register allocation -------------------------------------------------------------
 
-/// 解析の記録から、値・変数をレジスタに割り当てる (線形走査)。
-/// 生存区間は命令の番号の範囲 [最初, 最後]: 1 つの区間 (ブロックを続けて書いた範囲) の中だけで書いて読む値はそのまま、
-/// 区間をまたぐものは区間の入口・出口で生きているか (後ろ向きのデータフロー) を見て、生きている区間の端まで延ばす
-/// paddr: 値ごとのスロットのアドレス、nslots: スロットの数、zero: 入口で 0 にするスロット (変数にしない)
-/// スロットのフィールドを変数にする判定 (SROA): (スロットごとに変数にするか, (スロット, オフセット) → フィールドの番号, フィールドの型)。
-/// アドレスを load / store / iadd_imm にしか使わず、読み書きが重ならず型が同じスロット。clif_backend も使う
+/// Allocates values / variables to registers from the analysis record (linear scan).
+/// A live range is a range of instruction numbers [first, last]: a value written and read only within one segment (a range where a block was written contiguously) stays as is,
+/// and one that crosses segments is checked for being live at segment entries / exits (backward dataflow) and extended to the ends of the segments where it is live
+/// paddr: the slot address per value, nslots: the number of slots, zero: slots zeroed at the entry (not made variables)
+/// Deciding which slot fields to make variables (SROA): (per slot, whether to make it variables, (slot, offset) → field number, field types).
+/// Slots whose address is used only by load / store / iadd_imm, whose reads and writes do not overlap, and whose types match. clif_backend uses it too
 pub fn sroa(tr: &Track, nvals: usize, paddr: &[Option<(u32, i32)>], nslots: usize, zero: &[u32]) -> (Vec<bool>, FMap<(u32, i32), u32>, Vec<Type>) {
     let mut prom = vec![std::env::var_os("MINCLIF_NO_SROA").is_none(); nslots];
-    // (スロットのアドレスを入れた変数: 定義がすべて同じアドレスでなければ、そのスロットは変数にしない)
+    // (Variables holding a slot address: unless all their definitions are the same address, that slot is not made variables)
     {
         let mut st: FMap<u32, Option<(u32, i32)>> = FMap::default();
         let mut bad: FSet<u32> = FSet::default();
@@ -2413,7 +2413,7 @@ pub fn sroa(tr: &Track, nvals: usize, paddr: &[Option<(u32, i32)>], nslots: usiz
             }
         }
     }
-    // (重なり: スロットごとにオフセットの順に並べて見る)
+    // (Overlaps: per slot, look at them sorted by offset)
     let mut keys: Vec<(u32, i32)> = ftype.keys().copied().filter(|k| prom[k.0 as usize]).collect();
     keys.sort();
     for w in 1..keys.len() {
@@ -2436,7 +2436,7 @@ pub fn sroa(tr: &Track, nvals: usize, paddr: &[Option<(u32, i32)>], nslots: usiz
 pub fn plan(tr: &Track, nvals: usize, nvars: usize, paddr: &[Option<(u32, i32)>], nslots: usize, zero: &[u32]) -> Plan {
     let (prom, fields, ftys) = sroa(tr, nvals, paddr, nslots, zero);
     let nf = ftys.len();
-    // (読み書きの記録にフィールドの読み書きを足す: 命令の順のまま)
+    // (Add the field reads / writes to the read / write record: keeping instruction order)
     let mut ev: Vec<(u32, u32, bool)> = Vec::with_capacity(tr.ev.len() + tr.acc.len());
     {
         let mut k = 0;
@@ -2465,7 +2465,7 @@ pub fn plan(tr: &Track, nvals: usize, nvars: usize, paddr: &[Option<(u32, i32)>]
     };
     let cand = |i: usize| -> bool {
         if i < nvals {
-            // (変数にしたスロットのアドレスは作らないので要らない)
+            // (Not needed, since the addresses of slots made into variables are not created)
             !tr.mem_only.get(i).copied().unwrap_or(true) && !paddr.get(i).copied().flatten().is_some_and(|(sl, _)| prom[sl as usize])
         } else if i < nvals + nvars {
             !tr.var_mem_only.get(i - nvals).copied().unwrap_or(true)
@@ -2474,7 +2474,7 @@ pub fn plan(tr: &Track, nvals: usize, nvars: usize, paddr: &[Option<(u32, i32)>]
         }
     };
     let segs = &tr.segs;
-    // 命令の番号 → 区間 (区間は始まりの順)
+    // Instruction number → segment (segments are in order of start)
     let seg_of = |op: u32| -> usize {
         let mut lo = 0usize;
         let mut hi = segs.len();
@@ -2511,7 +2511,7 @@ pub fn plan(tr: &Track, nvals: usize, nvars: usize, paddr: &[Option<(u32, i32)>]
             last[i] = op;
         }
     }
-    // 区間をまたぐもの (と、区間の中で書く前に読むもの): データフローで見る
+    // Things that cross segments (and things read before being written within a segment): look at them with dataflow
     let mut gid = vec![usize::MAX; n];
     let mut globals: Vec<usize> = vec![];
     for i in 0..n {
@@ -2541,7 +2541,7 @@ pub fn plan(tr: &Track, nvals: usize, nvars: usize, paddr: &[Option<(u32, i32)>]
                 gens[s * words + w] |= bit;
             }
         }
-        // 区間の行き先: 飛び先のブロックの最初の区間、続き (同じブロックの次の区間 / 入口の前の区間は次)
+        // Successors of a segment: the first segment of the target block, the continuation (the next segment of the same block / for the segment before the entry, the next one)
         let mut first_seg: FMap<u32, usize> = FMap::default();
         for (k, sg) in segs.iter().enumerate() {
             first_seg.entry(sg.block).or_insert(k);
@@ -2595,8 +2595,8 @@ pub fn plan(tr: &Track, nvals: usize, nvars: usize, paddr: &[Option<(u32, i32)>]
             }
         }
     }
-    // 線形走査: 始まりの順に、空いているレジスタへ。呼び出しを含む区間は呼ばれた側が保存するレジスタだけ。
-    // なければ「使う回数 / 長さ」がいちばん小さいもの (今のものか、同じ種類のレジスタを持っているもの) をスロットへ
+    // Linear scan: in order of start, into a free register. A range containing a call gets only callee-saved registers.
+    // If there is none, the one with the smallest "uses / length" (the current one, or one holding a register of the same kind) goes to a slot
     let mut uses = vec![0u32; n];
     for &(id, _, _) in &ev {
         let i = idx(id);
@@ -2607,7 +2607,7 @@ pub fn plan(tr: &Track, nvals: usize, nvars: usize, paddr: &[Option<(u32, i32)>]
     let mut calls = tr.calls.clone();
     calls.sort_unstable();
     let has_call = |a: u32, b: u32| -> bool {
-        // (a 以上の最初の呼び出し: 二分探索)
+        // (The first call at or after a: binary search)
         let (mut l, mut h) = (0usize, calls.len());
         while l < h {
             let m = (l + h) / 2;
@@ -2626,7 +2626,7 @@ pub fn plan(tr: &Track, nvals: usize, nvars: usize, paddr: &[Option<(u32, i32)>]
     let mut active: Vec<usize> = vec![];
     let mut free_saved: Vec<u8> = vec![4, 3, 2, 1, 0];
     let mut free_temp: Vec<u8> = vec![9, 8, 7, 6, 5];
-    // (浮動小数点: xmm8〜15。どれも呼び出しで壊れるので、呼び出しを含まない区間だけ。番号は 16 + xmm の番号)
+    // (Floating point: xmm8 to 15. All are clobbered by calls, so only for ranges with no call. The number is 16 + the xmm number)
     let mut free_xmm: Vec<u8> = vec![31, 30, 29, 28, 27, 26, 25, 24];
     let is_float = |i: usize| -> bool {
         if i < nvals {
@@ -2639,7 +2639,7 @@ pub fn plan(tr: &Track, nvals: usize, nvars: usize, paddr: &[Option<(u32, i32)>]
     };
     let mut used = 0u8;
     for &i in &order {
-        // (終わったものを外す)
+        // (Drop the ones that ended)
         let mut k = 0;
         while k < active.len() {
             let a = active[k];
@@ -2675,7 +2675,7 @@ pub fn plan(tr: &Track, nvals: usize, nvars: usize, paddr: &[Option<(u32, i32)>]
             active.push(i);
             continue;
         }
-        // (追い出す: 呼び出しをまたぐなら、呼ばれた側が保存するレジスタを持つものから)
+        // (Evict: if it crosses a call, from the ones holding callee-saved registers)
         let mut worst: Option<usize> = None;
         for k in 0..active.len() {
             let a = active[k];
@@ -2699,7 +2699,7 @@ pub fn plan(tr: &Track, nvals: usize, nvars: usize, paddr: &[Option<(u32, i32)>]
             }
         }
     }
-    // (番号 → レジスタの番号)
+    // (Number → register number)
     let reg = |l: u8| -> u8 {
         if l == MEM {
             MEM
@@ -2719,20 +2719,20 @@ pub fn plan(tr: &Track, nvals: usize, nvars: usize, paddr: &[Option<(u32, i32)>]
     }
 }
 
-// --- 記録して 2 回組み立てる FunctionBuilder ---------------------------------------------
+// --- FunctionBuilder that records and assembles twice ---------------------------------------------
 
 
-/// 1 関数分の組み立て。命令は記録しながら解析用の Emitter で組み立て (値の番号と型を決める)、
-/// finish で値・変数をレジスタに割り当ててから、本番の Emitter で記録した命令を同じ順にもう一度組み立てる
+/// Assembling one fn. Instructions are assembled with an Emitter for analysis while being recorded (fixing value numbers and types),
+/// and finish allocates values / variables to registers, then assembles the recorded instructions once more in the same order with the real Emitter
 pub struct FunctionBuilder {
     pub params: Vec<Type>,
     pub rets: Vec<Type>,
     dry: Emitter,
     pub ops: Vec<Op>,
     real: Option<Emitter>,
-    /// 入口で 0 にするスロット (finish_zeroing に渡すもの。変数にしない)
+    /// Slots zeroed at the entry (what is passed to finish_zeroing; not made variables)
     pub zero: Vec<u32>,
-    /// 命令ごとの戻り値 (値・ブロック・変数・スロット・関数の番号。clif_backend が使う)
+    /// Return values per instruction (numbers of values / blocks / variables / slots / fns; used by clif_backend)
     pub res: Vec<Vec<u32>>,
 }
 
@@ -2753,8 +2753,8 @@ impl FunctionBuilder {
     pub fn current_block(&self) -> Option<Block> {
         self.dry.current_block()
     }
-    /// 解析の記録 (clif_backend が使う)
-    /// 値ごとのスロットのアドレス (sroa に渡すもの) と、値・スロットの数
+    /// The analysis record (used by clif_backend)
+    /// The slot address per value (passed to sroa), and the numbers of values / slots
     pub fn paddr(&self) -> &[Option<(u32, i32)>] {
         &self.dry.paddr
     }
@@ -2772,23 +2772,23 @@ impl FunctionBuilder {
         }
     }
 
-    /// finish_zeroing で 0 にするスロットを先に教える (traps / finish の前)
+    /// Tells beforehand the slots finish_zeroing zeroes (before traps / finish)
     pub fn set_zero(&mut self, z: &[StackSlot]) {
         self.zero = z.iter().map(|s| s.0).collect();
     }
 
-    /// 割り当てを決めて本番を組み立てる (1 回だけ)
+    /// Decides the allocation and assembles the real run (only once)
     fn realize(&mut self) {
         if self.real.is_some() {
             return;
         }
         let mut tr = self.dry.take_track().unwrap_or_default();
-        // (すぐ後が trap の呼び出し (panic) は戻ってこない: 呼び出しをまたぐとしない)
+        // (A call followed right away by a trap (panic) does not return: it is not counted as crossing a call)
         let ops = &self.ops;
         tr.calls.retain(|&c| !matches!(ops.get(c as usize + 1), Some(Op::Trap | Op::TrapCode(_))));
         let pl = if std::env::var_os("MINCLIF_NO_REGALLOC").is_some() { Plan::default() } else { plan(&tr, self.dry.values.len(), self.dry.vars.len(), &self.dry.paddr, self.dry.slots.len(), &self.zero) };
         let mut e = Emitter::new(self.params.clone(), self.rets.clone(), Some(pl));
-        // (値ごとの読む回数: icmp の値を brif だけが読むなら、まとめて cmp + jcc にする)
+        // (Read count per value: if only a brif reads an icmp's value, combine them into cmp + jcc)
         let mut reads = vec![0u32; self.dry.values.len()];
         for &(id, _, def) in &tr.ev {
             if !def && (id as usize) < reads.len() {
@@ -2800,7 +2800,7 @@ impl FunctionBuilder {
         while i < ops.len() {
             e.op = i as u32;
             if let Op::Icmp(cc, a, b) = &ops[i] {
-                // (間に値もコードも作らない命令 (ブロック・変数・スロットを作る) があってもよい)
+                // (There may be instructions in between that create neither values nor code (ones creating blocks / variables / slots))
                 let mut j = i + 1;
                 while j < ops.len() && matches!(ops[j], Op::CreateBlock | Op::DeclareVar(_) | Op::CreateStackSlot(..) | Op::ImportFunction(_)) {
                     j += 1;
@@ -3579,10 +3579,10 @@ impl FunctionBuilder {
     }
 }
 
-/// 記録した命令を本番の Emitter で組み立てる (戻り値は解析のときと同じ番号になる)
-/// 記録 (zust_ir::Recorder) を同じ順に組み立て直す。記録の番号 (値・ブロック・変数・スロット・関数) はここで振り直す
-/// (minclif は命令の中で値やスロットを作ることがあるので番号が違う)。2 つ目は記録のスロットの番号 → minclif のスロットの番号。
-/// ZUSTC_IR_VERIFY=1 で、値の型が記録と同じかを確かめる
+/// Assembles the recorded instructions with the real Emitter (return values get the same numbers as during analysis)
+/// Reassembles a recording (zust_ir::Recorder) in the same order. The recording's numbers (values / blocks / variables / slots / fns) are renumbered here
+/// (minclif sometimes creates values and slots inside instructions, so the numbers differ). The second is recording slot number → minclif slot number.
+/// With ZUSTC_IR_VERIFY=1, checks that the values' types match the recording
 pub fn from_recording(rec: &zust_ir::Recorder) -> (FunctionBuilder, Vec<u32>) {
     fn put(m: &mut Vec<u32>, i: u32, x: u32) {
         let i = i as usize;

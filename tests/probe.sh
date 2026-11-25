@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# よく使う Rust の機能の小さなプログラム (tests/probe/*.rs) を rustc と zustc でビルドして出力を比べ、
-# 通った数を出す。機能を足すたびに数が増えるのを見る (落ちたものは理由の 1 行目も出す)。
-#   tests/probe.sh          全部
-#   tests/probe.sh NAME..   指定したものだけ
+# Builds small programs using commonly used Rust features (tests/probe/*.rs) with rustc and zustc, compares the outputs,
+# and prints how many passed. Watch the number grow as features are added (for the failures, the first line of the reason is printed too).
+#   tests/probe.sh          all
+#   tests/probe.sh NAME..   only the named ones
 set -uo pipefail
 cd "$(dirname "$0")/.."
 cargo build --release -q || exit 1
@@ -20,7 +20,7 @@ for n in "${names[@]}"; do
     echo "SKIP $n (rustc がビルドできない)"
     continue
   fi
-  # (tests/probe/NAME.in があれば標準入力に渡す)
+  # (if tests/probe/NAME.in exists, pass it as stdin)
   input=/dev/null
   [ -f "tests/probe/$n.in" ] && input="tests/probe/$n.in"
   "$out/$n.r" < "$input" > "$out/$n.r.out" 2>/dev/null

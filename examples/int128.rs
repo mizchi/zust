@@ -1,4 +1,4 @@
-// 128 bit 整数: 算術・除算・書式化・キャスト・メソッド・コレクション
+// 128-bit integers: arithmetic, division, formatting, casts, methods, collections
 use std::collections::HashMap;
 
 fn rng(s: &mut u64) -> u64 {
@@ -62,7 +62,7 @@ fn main() {
     let total: i128 = v.iter().map(|b| b.v / 1000).sum();
     println!("{}", total);
 
-    // 乱数で四則演算・シフト・比較を照合する
+    // Cross-check arithmetic, shifts and comparisons with random numbers
     let mut h: u64 = 0;
     for _ in 0..3000 {
         let a = (rng(&mut s) as u128) << (rng(&mut s) % 64) | rng(&mut s) as u128;

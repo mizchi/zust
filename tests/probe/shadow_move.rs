@@ -1,5 +1,5 @@
-// match 対象と同じ名前の束縛 (`let nn = ..; if let Some(nn) = nn { v.push(nn) }`) で値をムーブする:
-// 外側の変数をムーブ済みにする (二重に drop しない)。while let / match も
+// Moving a value with a binding of the same name as the match scrutinee (`let nn = ..; if let Some(nn) = nn { v.push(nn) }`):
+// marks the outer variable as moved (no double drop). while let / match too
 fn find(names: &[(u32, Vec<u8>)], k: u32) -> Option<Vec<u8>> {
     names.iter().find(|n| n.0 == k).map(|n| n.1.clone())
 }

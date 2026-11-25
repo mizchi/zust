@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 description = "zustc のドライバ (session: 解析・check・キャッシュ。feature build でビルド・並列化・ワークスペース)。下の層を公開し直す。syn と Cranelift に依存しない"
 
 [features]
-# ビルド (機械語・オブジェクト・リンク)。LSP・解析は default-features = false で使い、バックエンドに依存しない
+# Building (machine code, objects, linking). LSP / analysis use default-features = false and do not depend on the backend
 default = ["build"]
 build = ["dep:zust-codegen"]
 

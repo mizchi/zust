@@ -1,4 +1,4 @@
-// 再帰呼び出し (関数呼び出しのオーバーヘッド)
+// Recursive calls (fn call overhead)
 fn fib(n: u32) -> u64 {
     if n < 2 { n as u64 } else { fib(n - 1) + fib(n - 2) }
 }

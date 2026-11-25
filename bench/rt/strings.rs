@@ -1,4 +1,4 @@
-// 文字列の組み立て・format!・split・parse
+// Building strings, format!, split, parse
 fn main() {
     let mut total = 0u64;
     let mut longest = String::new();

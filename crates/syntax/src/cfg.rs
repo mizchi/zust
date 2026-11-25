@@ -1,12 +1,12 @@
-//! 条件付きコンパイル: `#[cfg(..)]` の付いたもの (アイテム・フィールド・バリアント・match の腕・文・式) を
-//! 述語が偽なら空白にする。`#[cfg_attr(p, a)]` は p が真なら `#[a]`、偽なら消す。`cfg!(p)` は `true` / `false` にする。
-//! ついでに `extern crate x;` (std / core / alloc と、ワークスペースの依存) も消す。
-//! バイト位置と行は変えない (空白で塗る) ので、エラーと panic の場所はそのまま。
+//! Conditional compilation: blanks out things with `#[cfg(..)]` (items, fields, variants, match arms, statements, expressions)
+//! when the predicate is false. `#[cfg_attr(p, a)]` becomes `#[a]` if p is true and is removed if false. `cfg!(p)` becomes `true` / `false`.
+//! It also removes `extern crate x;` (std / core / alloc, and workspace dependencies).
+//! Byte positions and lines are not changed (painted over with whitespace), so error and panic locations stay as they are.
 //!
-//! 述語: `feature = ".."` (クレートごとの集合)・`debug_assertions` (-O でなければ真)・`unix` / `target_os = "linux"` など
-//! x86-64 Linux の値・`test` / `doc` / `miri` は偽・`not` / `all` / `any`。知らない名前は偽
+//! Predicates: `feature = ".."` (a set per crate), `debug_assertions` (true unless -O), `unix` / `target_os = "linux"` and other
+//! x86-64 Linux values, `test` / `doc` / `miri` are false, `not` / `all` / `any`. Unknown names are false
 
-/// cfg の述語を評価するための設定
+/// Settings for evaluating cfg predicates
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CfgSet {
     pub features: Vec<String>,
@@ -72,10 +72,10 @@ impl CfgSet {
     }
 }
 
-/// 字句: (種類, 開始, 終了)。種類 0 = 識別子, 1 = 記号 1 文字, 2 = リテラル
+/// Token: (kind, start, end). Kind 0 = identifier, 1 = one-character symbol, 2 = literal
 type Tok = (u8, usize, usize);
 
-/// 述語 toks[i..] を評価し、(値, 次の位置)
+/// Evaluates the predicate toks[i..]: (value, next position)
 fn eval(s: &[u8], toks: &[Tok], mut i: usize, c: &CfgSet) -> (bool, usize) {
     let t = |k: usize| -> &[u8] {
         match toks.get(k) {
@@ -130,7 +130,7 @@ fn is_close(b: &[u8]) -> bool {
     b == b")" || b == b"]" || b == b"}"
 }
 
-/// 対応する閉じ括弧の位置
+/// The position of the matching closing bracket
 fn matching(s: &[u8], toks: &[Tok], i: usize) -> usize {
     let mut d = 0i32;
     let mut k = i;
@@ -157,7 +157,7 @@ fn blank(out: &mut [u8], a: usize, b: usize) {
     }
 }
 
-/// 属性の後ろの「もの」の終わり (その最後の字句の位置)。i は対象の最初の字句
+/// The end of the "thing" after an attribute (the position of its last token). i is the first token of the target
 fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
     let t = |k: usize| -> &[u8] {
         match toks.get(k) {
@@ -165,11 +165,11 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
             None => b"",
         }
     };
-    // (ほかの属性を飛ばす)
+    // (Skip other attributes)
     while t(i) == b"#" && t(i + 1) == b"[" {
         i = matching(s, toks, i + 1) + 1;
     }
-    // (`;` まで続くもの: `const X: T = S { .. };`・`use a::{b, c};`・`let`・`type`・`static`)
+    // (Things that run up to `;`: `const X: T = S { .. };`, `use a::{b, c};`, `let`, `type`, `static`)
     let mut j = i;
     while matches!(t(j), b"pub" | b"unsafe" | b"async" | b"extern") || t(j).first() == Some(&b'"') {
         if t(j) == b"pub" && t(j + 1) == b"(" {
@@ -184,7 +184,7 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
     while k < toks.len() {
         let b = t(k);
         if toks[k].0 == 1 && is_close(b) {
-            // (包んでいるものの終わり: その手前まで)
+            // (The end of what encloses it: up to just before that)
             return k - 1;
         }
         if toks[k].0 == 1 && (b == b";" || (b == b"," && !keyword_item)) {
@@ -198,7 +198,7 @@ fn thing_end(s: &[u8], toks: &[Tok], mut i: usize) -> usize {
                 continue;
             }
             if b == b"{" && !semi_item {
-                // (ブロックで終わるもの。後ろの `,` も消す: バリアント・match の腕)
+                // (Things that end with a block. A following `,` is removed too: variants, match arms)
                 return if t(m + 1) == b"," { m + 1 } else { m };
             }
             k = m + 1;
@@ -310,7 +310,7 @@ pub(crate) fn cfg_if_not_taken(src: &str, c: &CfgSet) -> Vec<(usize, usize)> {
     out
 }
 
-/// src の cfg を評価する。変わらなければ None
+/// Evaluates the cfgs in src. None if nothing changes
 /// `cfg_select! { pred => { .. } _ => { .. } }`: the tokens of the first arm whose predicate holds, in place of the
 /// whole call (the rest blanked, newlines kept, so lines and columns stay). Nested calls in the chosen arm are
 /// expanded too; not inside `macro_rules!` (a predicate there may be a metavariable, expanded first)
@@ -555,8 +555,8 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs:
             i = close + 1;
             continue;
         }
-        // マクロの呼び出しと macro_rules! の中は見ない (展開してから評価する: cfg_if! の `if #[cfg(..)] { .. }`)。
-        // std の書式のマクロ (`println!("{}", cfg!(unix))`) は後で展開されないので、中も評価する
+        // The insides of macro calls and macro_rules! are not looked at (evaluated after expansion: cfg_if!'s `if #[cfg(..)] { .. }`).
+        // std's formatting macros (`println!("{}", cfg!(unix))`) are not expanded later, so their insides are evaluated too
         if toks[i].0 == 0 && t(i) != b"cfg" && t(i + 1) == b"!" && !format_like(t(i)) {
             *env |= matches!(t(i), b"env" | b"option_env");
             let g = if t(i + 2) == b"(" || t(i + 2) == b"[" || t(i + 2) == b"{" {
@@ -648,7 +648,7 @@ fn strip_toks(src: &str, c: &CfgSet, select: &mut bool, env: &mut bool, externs:
                 continue;
             }
             if inner {
-                // (`#![cfg(..)]` が偽ならファイル全体。今は属性だけ消す)
+                // (If `#![cfg(..)]` is false, the whole file. For now only the attribute is removed)
                 blank(&mut out, toks[i].1, toks[rb].2);
                 if !v {
                     blank(&mut out, 0, s.len());

@@ -1,5 +1,5 @@
-// trait の静的呼び出し (`Tr::f(..)` / `T::f(..)` / ジェネリックな impl)、スライス → 配列の try_into、
-// スライスの get(範囲)、ハッシャ付きの HashMap 型
+// Static trait calls (`Tr::f(..)` / `T::f(..)` / generic impls), slice → array try_into,
+// slice get(range), HashMap types with a hasher
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::collections::hash_map::DefaultHasher;

@@ -1,4 +1,4 @@
-// n 体問題 (f64 の struct の配列、sqrt)
+// The n-body problem (an array of f64 structs, sqrt)
 #[derive(Clone, Copy)]
 struct Body {
     p: [f64; 3],

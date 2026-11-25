@@ -1,9 +1,9 @@
-//! ide のゴールデンテスト: tests/fixture の小さいワークスペース (と小さい std) のすべての識別子の位置で、定義・参照・
-//! hover・補完を出して、tests/golden/*.txt と比べる。シンボルの一覧と定義の表 (Def) も比べる。
-//! 期待値は zustc の出力そのもの (変わったら差分を見て直すか、`UPDATE_GOLDEN=1 cargo test -p zust-ide --test golden`
-//! で書き直す)。ワークスペースの中の定義の行き先は bench/ide_golden_ra.py で rust-analyzer と比べてある。
+//! Golden tests of ide: at the positions of all identifiers in the small workspace of tests/fixture (and a small std), produces definition / references /
+//! hover / completion and compares them with tests/golden/*.txt. Also compares the symbol lists and the definition tables (Def).
+//! The expected values are zustc's output itself (when it changes, look at the diff and fix it, or run `UPDATE_GOLDEN=1 cargo test -p zust-ide --test golden`
+//! to rewrite them). The destinations of definitions within the workspace have been compared with rust-analyzer by bench/ide_golden_ra.py.
 //!
-//! ほかに、ほかのファイルを slim にしても (本文を捨てて読み直しても) 答えが同じかを見る。
+//! Also checks that the answers are the same when the other files are made slim (when their text is dropped and re-read).
 
 use zust_ide::navigate::{self, FileIndex, Item, Loc};
 use zust_ide::symbols::{self, Symbol};
@@ -32,8 +32,8 @@ fn rs_files(dir: &Path, base: &Path, out: &mut Vec<String>) {
     }
 }
 
-/// fixture のワークスペース: lib/ (std の代わり)、ws/ (src は本体のクレート、tests は別のクレート)、sym/ (クレートの外の
-/// ファイル: シンボルの読み方の確かめ)
+/// The fixture workspace: lib/ (in place of std), ws/ (src is the main crate, tests is another crate), sym/ (files outside
+/// the crates: checks how symbols are read)
 struct Fx {
     names: Vec<String>,
     texts: Vec<String>,
@@ -44,7 +44,7 @@ fn index(name: &str, text: &str, features: &[&str]) -> FileIndex {
     let fs: Vec<String> = features.iter().map(|s| s.to_string()).collect();
     if let Some(rel) = name.strip_prefix("lib/") {
         let mut f = FileIndex::library(text.to_string(), navigate::module_of(rel));
-        // (ライブラリのクレートごとの番号: LSP と同じ)
+        // (a number per library crate: same as the LSP)
         let k = ["core", "alloc", "std"].iter().position(|c| rel.starts_with(&format!("{c}/"))).unwrap_or(9);
         f.krate = navigate::LIB_KRATE_BASE + k as u32;
         return f;
@@ -61,7 +61,7 @@ fn index(name: &str, text: &str, features: &[&str]) -> FileIndex {
     f
 }
 
-/// part: "ws" (lib と ws) / "sym" (lib と sym) / "all"
+/// part: "ws" (lib and ws) / "sym" (lib and sym) / "all"
 fn fixture_of(features: &[&str], part: &str) -> Fx {
     let base = root().join("fixture");
     let mut names = vec![];
@@ -69,7 +69,7 @@ fn fixture_of(features: &[&str], part: &str) -> Fx {
     names.retain(|n| part == "all" || n.starts_with("lib/") || n.starts_with(&format!("{part}/")));
     let texts: Vec<String> = names.iter().map(|n| std::fs::read_to_string(base.join(n)).unwrap()).collect();
     let ws = names.iter().zip(&texts).map(|(n, t)| index(n, t, features)).collect();
-    // (クレートの根: LSP が設定するのと同じ)
+    // (crate roots: the same as the LSP sets)
     let mut roots = vec![];
     for (c, f) in [("core", "lib/core/src/lib.rs"), ("alloc", "lib/alloc/src/lib.rs"), ("std", "lib/std/src/lib.rs"), ("fixture", "ws/src/lib.rs")] {
         if let Some(i) = names.iter().position(|n| n == f) {
@@ -93,7 +93,7 @@ impl Fx {
     }
     fn lc(&self, file: usize, at: usize) -> String {
         if self.ws[file].lib {
-            // (ライブラリは本文を持たない: 名前の端の行と桁)
+            // (libraries keep no text: the line and column of an end of the name)
             let (l, c) = self.ws[file].lib_pos(at).unwrap_or((u32::MAX, 0));
             return format!("{}:{}:{}", self.names[file], l + 1, c + 1);
         }
@@ -149,7 +149,7 @@ fn check(name: &str, got: &str) {
     }
 }
 
-/// 識別子のトークン (種類 0) の (始め, 終わり)
+/// The (start, end) of identifier tokens (kind 0)
 fn idents(text: &str) -> Vec<(usize, usize)> {
     tokenize(text.as_bytes()).into_iter().filter(|t| t.0 == 0).map(|t| (t.1, t.2)).collect()
 }
@@ -158,13 +158,13 @@ fn nav_files(fx: &Fx) -> Vec<usize> {
     (0..fx.names.len()).filter(|&i| !fx.ws[i].lib).collect()
 }
 
-/// すべての識別子で: 定義 / 参照 (定義を含む・含まない) / hover
+/// At every identifier: definition / references (with and without the definition) / hover
 #[test]
 fn navigation() {
     check("navigation.txt", &nav_dump(&fixture(&["std"])));
 }
 
-/// sym/ (変わった書き方・壊れたコード) でも同じものを出す (落ちないこと・読める所まで読むこと)
+/// Produces the same for sym/ (unusual styles / broken code) too (must not crash, and must read as far as it can)
 #[test]
 fn navigation_odd() {
     check("navigation_odd.txt", &nav_dump(&fixture_of(&["std"], "sym")));
@@ -184,7 +184,7 @@ fn nav_dump(fx: &Fx) -> String {
             let r = navigate::references(&ws, i, a, true, &load);
             let r2 = navigate::references(&ws, i, b, false, &load);
             let h = navigate::hover(&ws, i, a, &load).map(|h| esc(&h)).unwrap_or_else(|| "-".into());
-            // (参照の一覧は行き先ごとに一度だけ。行き先のない組み込みの型は名前ごとに)
+            // (the reference list only once per destination; for built-in types with no destination, once per name)
             let key = d.first().map(|l| fx.loc(l)).unwrap_or_else(|| name.to_string());
             let _ = write!(out, "{} {name} -> {} | refs {}/{}", fx.lc(i, a), fx.locs(&d), r.len(), r2.len());
             if listed.insert(key) && !r.is_empty() {
@@ -196,7 +196,7 @@ fn nav_dump(fx: &Fx) -> String {
     out
 }
 
-/// `x.|` / `x.na|me` / `Q::|` / `na|me` の補完
+/// Completion at `x.|` / `x.na|me` / `Q::|` / `na|me`
 #[test]
 fn completion() {
     let fx = fixture(&["std"]);
@@ -228,7 +228,7 @@ fn completion() {
             }
         }
     }
-    // (ファイルの終わり・空のファイル・識別子の前の空白)
+    // (the end of the file, an empty file, whitespace before an identifier)
     let f = FileIndex::new(String::new(), vec![]);
     let (v, _) = navigate::complete(&[&f], 0, 0);
     let _ = writeln!(out, "== empty n={}", v.len());
@@ -249,7 +249,7 @@ fn sym_line(out: &mut String, s: &Symbol, depth: usize) {
     }
 }
 
-/// documentSymbol の木と、平らにしたもの (容れ物の名前つき)、LSP の種類の番号
+/// The documentSymbol tree, its flattened form (with the container names), and the LSP kind numbers
 #[test]
 fn symbol_tree() {
     let fx = fixture_of(&[], "all");
@@ -267,7 +267,7 @@ fn symbol_tree() {
     check("symbols.txt", &out);
 }
 
-/// 索引の定義の表 (Def) と impl の組。feature を変えたとき (cfg で外れるもの)
+/// The index's definition table (Def) and the impl pairs. With different features (what cfg excludes)
 #[test]
 fn def_tables() {
     let mut out = String::new();
@@ -301,7 +301,7 @@ fn def_tables() {
     check("defs.txt", &out);
 }
 
-/// ほかのファイルを slim にしても (LSP がメモリから外したとき) 定義・参照・hover の答えが同じ
+/// The answers of definition / references / hover are the same when the other files are made slim (when the LSP drops them from memory)
 #[test]
 fn slim_is_transparent() {
     let fx = fixture(&["std"]);
@@ -333,7 +333,7 @@ fn slim_is_transparent() {
     }
 }
 
-/// slim にしたものは本文を持たず、reload で元に戻る。heap_bytes は小さくなる
+/// A slimmed one keeps no text and is restored by reload. heap_bytes gets smaller
 #[test]
 fn slim_and_reload() {
     let fx = fixture(&["std"]);

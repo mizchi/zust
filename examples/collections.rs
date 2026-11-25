@@ -1,6 +1,6 @@
-// コレクションのサンプル: HashSet (insert / contains / remove / 和・積・差 / collect)、BTreeMap (キーの順に回る・
-// entry / or_insert / or_default / first_key_value / pop_first / m[&k] / rev)、BTreeSet、VecDeque (両端の push / pop・
-// d[i] / iter)、手書きの impl Index / IndexMut
+// Collections sample: HashSet (insert / contains / remove / union, intersection, difference / collect), BTreeMap (iterates in key order,
+// entry / or_insert / or_default / first_key_value / pop_first / m[&k] / rev), BTreeSet, VecDeque (push / pop at both ends,
+// d[i] / iter), hand-written impl Index / IndexMut
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::ops::{Index, IndexMut};
 
