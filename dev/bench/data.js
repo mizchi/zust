@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795632591843,
+  "lastUpdate": 1795632594395,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -131836,6 +131836,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/5beecd0ee9037951f5d73c419be222380ed60f44"
         },
         "date": 1795631210108,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.61,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1913,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.77,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1555,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.85,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5381,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "18b4beb05c908165c9064ebdb8626f25728bb23c",
+          "message": "Merge pull request #206 from mizchi/claude/rename-driver2-session\n\nRename driver2 → session (Session / Options / BuildReport), cache2 → build_cache, <output>.cache",
+          "timestamp": "2026-11-26T03:42:29+09:00",
+          "tree_id": "b130d1d519e018b0234ff0b77f76845eadd5fe90",
+          "url": "https://github.com/mizchi/zust/commit/18b4beb05c908165c9064ebdb8626f25728bb23c"
+        },
+        "date": 1795632594000,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
