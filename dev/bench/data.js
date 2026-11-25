@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795637014416,
+  "lastUpdate": 1795637016884,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -110696,6 +110696,85 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/d838a6e02be4382e23935c48a394996145cd781f"
         },
         "date": 1795636283919,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "parity documentSymbol (名前の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity workspace/symbol (上位 20 の一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity definition (行き先の一致)",
+            "value": 96.552,
+            "unit": "%"
+          },
+          {
+            "name": "parity hover (名前を含む)",
+            "value": 77.5,
+            "unit": "%"
+          },
+          {
+            "name": "parity references (数の一致)",
+            "value": 81.818,
+            "unit": "%"
+          },
+          {
+            "name": "parity documentHighlight (数の一致)",
+            "value": 93.333,
+            "unit": "%"
+          },
+          {
+            "name": "parity rename (書き換えの一致)",
+            "value": 100,
+            "unit": "%"
+          },
+          {
+            "name": "parity signatureHelp (名前・引数の数・今の引数の一致)",
+            "value": 94.737,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `x.\\|` (書いてある名前を含む)",
+            "value": 90,
+            "unit": "%"
+          },
+          {
+            "name": "parity completion `na\\|me` (同)",
+            "value": 71.429,
+            "unit": "%"
+          },
+          {
+            "name": "parity 一致の平均",
+            "value": 90.537,
+            "unit": "%"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "72e35d186ad1822627ce9919619eca2c071d31ff",
+          "message": "Merge pull request #215 from mizchi/claude/fix-187-int128-methods\n\ntypeck: i128 / u128 wrapping_div, wrapping_rem, overflowing_div, overflowing_rem, isqrt and reverse_bits (#187)",
+          "timestamp": "2026-11-26T04:57:30+09:00",
+          "tree_id": "7ec5c70b5ae455137423e93d0dc34aa99485e27e",
+          "url": "https://github.com/mizchi/zust/commit/72e35d186ad1822627ce9919619eca2c071d31ff"
+        },
+        "date": 1795637016500,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
