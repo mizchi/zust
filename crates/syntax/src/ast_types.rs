@@ -441,6 +441,9 @@ fn path_ty(p: &Path, self_ty: Option<&TySyn>) -> R<TySyn> {
     if last.fn_args.is_some() {
         return Err("unsupported type path".to_string());
     }
+    if !last.args.is_empty() && (n == 1 || p.segs[n - 2].name == "primitive") && (Ty::prim(&last.name).is_some() || last.name == "str") {
+        return Err(builtin_args_err(last));
+    }
     let s = last.name.clone();
     let mut generic_args = Vec::new();
     for a in &last.args {
@@ -488,4 +491,11 @@ fn self_name(a: &str, self_ty: Option<&TySyn>) -> String {
         }
         _ => a.to_string(),
     }
+}
+
+/// E0109: `u32<i32>` / `str<'static>`, generic arguments on a builtin type
+#[cold]
+fn builtin_args_err(last: &crate::parse::Seg) -> String {
+    let kind = if last.args.iter().any(|a| matches!(a, GArg::Ty(_) | GArg::Const(_))) { "type" } else { "lifetime" };
+    format!("{kind} arguments are not allowed on builtin type `{}` (E0109)", last.name)
 }

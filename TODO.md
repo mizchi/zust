@@ -49,7 +49,7 @@ obligations, dyn coercions and auto traits (reports: [part 1](docs/reports/2026-
   (`-> Option<impl Tr>`) is not checked against its bounds; projections by a name std also defines (`T::Item`) and
   generic associated types are not normalized by the solver; type inference still uses `Program::assoc_of`.
 - E0119 against std's impls (`impl<S> Into<S> for GenX<S>`): std's impls are not clauses.
-- `Sized` ([report](docs/reports/2026-11-25-07-sized.md)): the prelude declares no `?Sized`, so only `Vec`, `Option`,
+- `Sized` ([report](docs/reports/2026-11-25-08-sized.md)): the prelude declares no `?Sized`, so only `Vec`, `Option`,
   `Result` and the collections are checked of std's types (`ManuallyDrop<T>` of a `T: ?Sized` is not unsized); an
   impl's own `?Sized` parameters are taken as sized at its methods' calls; an associated type's value is not checked
   against the trait's implicit `Sized`.

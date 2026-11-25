@@ -72,7 +72,7 @@ pub(crate) fn vec_of(es: &[Expr]) -> Expr {
         return m;
     }
     lets.push(Stmt::Expr(m, false));
-    Expr::Block(None, false, PBlock { stmts: lets })
+    Expr::Block(None, false, PBlock { stmts: lets, spos: Default::default() })
 }
 
 impl Cx<'_> {
@@ -89,7 +89,33 @@ impl Cx<'_> {
             || self.prog.structs[sid as usize].args.iter().any(|&a| matches!(a, Ty::Struct(x) if self.copies_items(x, depth + 1)))
     }
 
+    /// Whether the type of `r` (past its references) is one with a Drop impl
+    #[cold]
+    fn has_drop_impl(&mut self, r: &Expr) -> bool {
+        matches!(self.peek(r).map(|t| self.strip_refs(t)), Some(Ty::Struct(sid)) if self.prog.drop_impls.contains(&self.prog.base_of(sid)))
+    }
+
     pub(crate) fn method_call(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
+        // (invalid_atomic_ordering, deny by default: an atomic's load / store / failure ordering it cannot have)
+        if let Expr::MethodCall(r, m, _, args, sp) = e {
+            if self.user_code
+                && matches!(m.as_bytes().first(), Some(b'l' | b's' | b'c' | b'f'))
+                && matches!(m.as_str(), "load" | "store" | "compare_exchange" | "compare_exchange_weak" | "fetch_update")
+            {
+                if let Some(er) = self.atomic_ordering(r, m, args) {
+                    return Err(er);
+                }
+            }
+            // (E0658: a closure's, a fn pointer's or an `F: Fn..` parameter's `call` / `call_mut` / `call_once`, which
+            // need `fn_traits`)
+            if self.user_code && !self.prog.fn_traits && m.starts_with("call") && matches!(m.as_str(), "call" | "call_mut" | "call_once") && self.fn_like(r) {
+                return Err(self.at(sp.at, "use of unstable library feature `fn_traits` (E0658)".to_string()));
+            }
+            // (E0040: `x.drop()` of a value whose type has a Drop impl)
+            if self.user_code && args.is_empty() && m == "drop" && self.has_drop_impl(r) {
+                return Err(self.at(sp.at, "explicit use of destructor method (E0040)".to_string()));
+            }
+        }
         // (a call that named its trait: set while this call is resolved, and the outer call's back after)
         let forced = match e {
             Expr::MethodCall(_, m, ..) => self.explicit_traits.get(&(e as *const Expr as usize)).map(|t| (m.clone(), t.clone())),
@@ -168,6 +194,49 @@ impl Cx<'_> {
         self.caller_locs.truncate(n);
         self.explicit_trait = prev;
         r
+    }
+
+    /// The receiver of a `call` is a closure, a fn pointer or a fn item, or a type parameter one of whose bounds is an
+    /// `Fn` trait (behind references)
+    #[cold]
+    #[inline(never)]
+    fn fn_like(&self, r: &Expr) -> bool {
+        match self.peek(r).map(|t| self.strip_refs(t)) {
+            Some(Ty::Struct(sid)) => {
+                let sd = &self.prog.structs[sid as usize];
+                // (std's `Fn` traits by name, not one of the program's that starts so (`FnLike`))
+                let fn_trait = |b: &String| matches!(b.split(['<', '(']).next().map(str::trim), Some("Fn" | "FnMut" | "FnOnce"));
+                sd.name.contains("{closure") || sd.placeholder.as_ref().is_some_and(|bs| bs.iter().any(fn_trait))
+            }
+            Some(Ty::Fn(..)) => true,
+            _ => false,
+        }
+    }
+
+    /// invalid_atomic_ordering (rustc 1.100's messages, at the ordering): a std atomic's `load` with `Release` /
+    /// `AcqRel`, `store` with `Acquire` / `AcqRel`, `compare_exchange(_weak)` / `fetch_update` with a failure ordering
+    /// of `Release` / `AcqRel`, written as `Ordering::X` or `X`
+    #[cold]
+    #[inline(never)]
+    fn atomic_ordering(&self, r: &Expr, m: &str, args: &[Expr]) -> Option<String> {
+        let Ty::Struct(sid) = self.strip_refs(self.peek(r)?) else { return None };
+        if !self.prog.structs[self.prog.base_of(sid) as usize].name.starts_with("Atomic") {
+            return None;
+        }
+        let (k, bad, msg) = match m {
+            "load" => (0, ["Release", "AcqRel"], "atomic loads cannot have `Release` or `AcqRel` ordering".to_string()),
+            "store" => (1, ["Acquire", "AcqRel"], "atomic stores cannot have `Acquire` or `AcqRel` ordering".to_string()),
+            _ => (
+                if m == "fetch_update" { 1 } else { 3 },
+                ["Release", "AcqRel"],
+                format!("`{m}`'s failure ordering may not be `Release` or `AcqRel`, since a failed `{m}` does not result in a write"),
+            ),
+        };
+        let Expr::Path(None, p) = strip_paren(args.get(k)?) else { return None };
+        let n = p.segs.last()?.name.as_str();
+        // (std's `atomic::Ordering` is the prelude's `__AtOrd_`)
+        let ordering = p.segs.len() == 1 || matches!(p.segs[p.segs.len() - 2].name.as_str(), "Ordering" | "__AtOrd_");
+        (ordering && bad.contains(&n)).then(|| self.at(p.pos, msg))
     }
 
     /// An impl's method i is for t: its impl's self type (its parameters solved) is t (`impl A for W<u8>`'s is not
@@ -280,6 +349,12 @@ impl Cx<'_> {
     fn method_call_inner(&mut self, e: &Expr, expected: Option<Ty>) -> R<V> {
         let Expr::MethodCall(recv, method, gargs, margs, msp) = e else { unreachable!() };
         let msp = *msp;
+        // (E0624: a private fn of the receiver's inherent impl, where the program has such)
+        if self.prog.field_priv.as_deref().is_some_and(|fp| !fp.methods.is_empty()) {
+            if let Some(Ty::Struct(sid)) = self.peek(recv).map(|t| self.strip_refs(t)) {
+                self.method_privacy(sid, method, msp.at)?;
+            }
+        }
         // (`0.0.cmp()` with `impl MyCmp for f32` only: an unsuffixed literal takes the one numeric type whose impl has
         // the method, when its default type (f64 / i32) has none)
         if let Expr::Lit(t, sp) = strip_paren(recv) {
@@ -620,7 +695,7 @@ impl Cx<'_> {
                             let hs = Expr::Ref(true, Box::new(Expr::Unary("*".into(), Box::new(path_expr("__hs")), crate::parse::Span::default())));
                             stmts.push(Stmt::Expr(mcall(f, "hash", vec![hs]), true));
                         }
-                        let e = Expr::Block(None, false, PBlock { stmts });
+                        let e = Expr::Block(None, false, PBlock { stmts, spos: Default::default() });
                         return self.expr(&e, expected);
                     }
                     if self.prog.structs[self.prog.base_of(sid) as usize].name == "Option" {
@@ -3353,7 +3428,8 @@ impl Cx<'_> {
                 Some(v) => v,
                 None => self.b.ins().iconst(types::I8, 0),
             };
-            vals.push((v, t, expr_start(a)));
+            // (a block argument's type is its tail's: rustc points there, `f({ String::new() })`)
+            vals.push((v, t, value_pos(a)));
         }
         let arg_tys: Vec<Ty> = vals.iter().map(|v| v.1).collect();
         // 引数の型から改めて解く。引数に現れない型パラメータ (クロージャの戻り値など) は sol から
@@ -3731,6 +3807,13 @@ impl Cx<'_> {
                     || matches!(&l, Lit::Int(i) if matches!(i.suffix(), "f32" | "f64"))
                     || (matches!(&l, Lit::Int(i) if i.suffix().is_empty()) && expected.is_some_and(|t| t.is_float())) =>
             {
+                // (an integer literal is never a float: `let y: f64 = 2;` is rustc's E0308, in the program's own code)
+                if let (Lit::Int(i), Some(t), true) = (&l, expected, self.user_code) {
+                    if i.suffix().is_empty() {
+                        self.int_as_float = text.as_ptr() as usize;
+                        return err(SP, format!("mismatched types: expected `{}`, found integer", self.prog.tn(t)));
+                    }
+                }
                 let (digits, suffix) = match &l {
                     Lit::Float(f) => (f.base10_digits().to_string(), f.suffix().to_string()),
                     Lit::Int(i) => (i.base10_digits().to_string(), i.suffix().to_string()),

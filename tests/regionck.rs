@@ -5163,3 +5163,64 @@ fn b(rr: &mut &mut i32) {
 fn main() { a(); let mut v = 0; let mut r = &mut v; b(&mut r); }
 "#, &[(7, "`x` does not live long enough"), (13, "cannot assign to `**rr` because it is borrowed")], "rv2");
 }
+
+#[test]
+fn part35_elided_lifetimes_in_impl_headers_and_async_fns() {
+    // (an impl header writes a path's lifetimes: `impl MyTrait for Foo` with `struct Foo<'a>` is E0726 at Foo (4), as
+    // `impl Lt for u32` with `trait Lt<'a>` is at Lt; `Foo<'_>` and the impl's own are accepted (5-7). Each checked
+    // with rustc 1.97)
+    errors_at(r#"trait MyTrait {}
+trait Lt<'a> {}
+struct Foo<'a>(&'a u8);
+impl MyTrait for Foo {}
+impl MyTrait for &Foo<'_> {}
+impl<'a> Lt<'a> for Foo<'a> {}
+impl Lt<'_> for u32 {}
+fn main() {}
+"#, &[(4, "implicit elided lifetime not allowed here (E0726)")], "el1");
+    errors_at(r#"trait Lt<'a> {}
+impl Lt for u32 {}
+fn main() {}
+"#, &[(2, "implicit elided lifetime not allowed here (E0726)")], "el2");
+    // (an `async fn`'s parameter too: its future captures the lifetime; a fn that is not async elides it (6))
+    errors_at(r#"struct HasLifetime<'a>(&'a bool);
+async fn error(lt: HasLifetime) {
+    if *lt.0 {}
+}
+async fn ok(lt: HasLifetime<'_>) { if *lt.0 {} }
+fn no_error(lt: HasLifetime) { if *lt.0 {} }
+fn main() {}
+"#, &[(2, "implicit elided lifetime not allowed here (E0726)")], "el3");
+}
+
+#[test]
+fn part35_drop_of_a_type_that_holds_no_reference() {
+    // (#161's last finding, checked with rustc 1.97: the `Drop` of a type that holds no reference (`Token`) sees no
+    // loan, so a tuple with it that holds a borrow of its own field (5), or of a local gone before it (11), is accepted;
+    // a `Drop` type that holds the borrow still sees it (E0597 at 21))
+    errors_at(r#"use std::cell::Cell;
+struct Token;
+impl Drop for Token { fn drop(&mut self) {} }
+fn a() {
+    let d = (Cell::new(None), 1, Token);
+    d.0.set(Some(&d.1));
+}
+fn b() {
+    let mut d = (None, Token);
+    {
+        let x = 1;
+        d.0 = Some(&x);
+    }
+}
+struct D<'a>(Option<&'a i32>);
+impl Drop for D<'_> { fn drop(&mut self) {} }
+fn c() {
+    let mut d = D(None);
+    {
+        let x = 1;
+        d.0 = Some(&x);
+    }
+}
+fn main() { a(); b(); c(); }
+"#, &[(21, "`x` does not live long enough")], "dk1");
+}
