@@ -1290,6 +1290,10 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
     // 入れ子のアイテムの名前と、それを含む関数の本体 (開き括弧のトークン位置)。閉じた本体の (開き, 閉じ)
     let mut nested_names: Vec<(Vec<u8>, usize)> = vec![];
     let mut bodies: Vec<(usize, usize)> = vec![];
+    // (the open braces, innermost last, and each closed block's (open, close): a nested item's scope is the block it
+    // is written in, which may be a block inside its fn's body (`{ fn f() {} }` twice in one fn: two `f`s apart))
+    let mut open_braces: Vec<usize> = vec![];
+    let mut blocks: Vec<(usize, usize)> = vec![];
     // トップレベルのアイテムの名前 (入れ子のアイテムを外に出すとぶつかるもの)
     let mut top_names: Vec<Vec<u8>> = vec![];
     let mut k = 0;
@@ -1418,15 +1422,16 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 }
                 moves.push((toks[st].1, toks[e].2));
                 let nk = if matches!(t, b"static") && tok(ik + 1) == b"mut" { ik + 2 } else { ik + 1 };
+                let scope = open_braces.last().copied().unwrap_or(fn_bodies.last().unwrap().1);
                 if nk < toks.len() && toks[nk].0 == 0 && t != b"use" && t != b"impl" && !extern_block {
-                    nested_names.push((tok(nk).to_vec(), fn_bodies.last().unwrap().1));
+                    nested_names.push((tok(nk).to_vec(), scope));
                 }
                 // (an extern block's functions: names of the block's function, renamed like its other items when
                 // another function's block declares the name too; the declaration then keeps its symbol, link_name)
                 if extern_block {
                     for q in ik + 1..e {
                         if toks[q].0 == 0 && tok(q) == b"fn" && q + 1 < e && toks[q + 1].0 == 0 {
-                            nested_names.push((tok(q + 1).to_vec(), fn_bodies.last().unwrap().1));
+                            nested_names.push((tok(q + 1).to_vec(), scope));
                         }
                     }
                 }
@@ -1445,9 +1450,13 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                         fn_bodies.push((depth, k));
                         pending_fn = false;
                     }
+                    open_braces.push(k);
                     depth += 1;
                 }
                 b"}" => {
+                    if let Some(o) = open_braces.pop() {
+                        blocks.push((o, k));
+                    }
                     depth -= 1;
                     if fn_bodies.last().is_some_and(|&(d, _)| d == depth) {
                         let (_, open) = fn_bodies.pop().unwrap();
@@ -1472,7 +1481,7 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
         if !dup {
             continue;
         }
-        if let Some(&(open, close)) = bodies.iter().find(|x| x.0 == *b) {
+        if let Some(&(open, close)) = blocks.iter().find(|x| x.0 == *b).or_else(|| bodies.iter().find(|x| x.0 == *b)) {
             let mut nn = n.clone();
             nn.extend_from_slice(format!("__h{i}").as_bytes());
             renames.push((open, close, n.clone(), nn));
@@ -1490,8 +1499,8 @@ fn hoist_parts_at(src: &str, redo: u32) -> Option<(String, Vec<(usize, String)>)
                 k += 1;
             }
         }
-        // (同じトークンに複数あれば、元の順で最初のもの (renames.iter().find と同じ))
-        at.sort();
+        // (同じトークンに複数あれば、その位置を囲むいちばん内側の block のもの: Rust の名前の見え方と同じ)
+        at.sort_by(|x, y| x.0.cmp(&y.0).then(renames[y.1].0.cmp(&renames[x.1].0)));
         at.dedup_by_key(|x| x.0);
         // (a foreign function's declaration, `fn abs(x: i32) -> i32;` with no body, renamed: it keeps its symbol, a
         // `#[link_name = "abs"]` before it unless it has one)

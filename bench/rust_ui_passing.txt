@@ -830,6 +830,7 @@ compile-fail	borrowck/borrowck-closures-use-after-free.rs
 compile-fail	borrowck/borrowck-consume-unsize-vec.rs
 compile-fail	borrowck/borrowck-consume-upcast-box.rs
 compile-fail	borrowck/borrowck-deref-pattern-assignment.rs
+compile-fail	borrowck/borrowck-describe-lvalue.rs
 compile-fail	borrowck/borrowck-drop-from-guard.rs
 compile-fail	borrowck/borrowck-escaping-closure-error-1.rs
 compile-fail	borrowck/borrowck-escaping-closure-error-2.rs
@@ -1439,6 +1440,7 @@ compile-fail	closures/issue-87461.rs
 check-pass	closures/issue-97607.rs
 compile-fail	closures/issue-99565.rs
 compile-fail	closures/labeled-break-inside-closure-62480.rs
+run-pass	closures/local-enums-in-closure-2074.rs
 compile-fail	closures/local-type-mismatch-attribution-issue-127048.rs
 compile-fail	closures/local-type-mix.rs
 compile-fail	closures/missing-body.rs
@@ -3690,6 +3692,7 @@ compile-fail	keyword/keyword-true-as-identifier.rs
 compile-fail	keyword/meta-is-not-reserved.rs
 run-pass	keyword/raw-identifier-for-function-57198.rs
 compile-fail	keyword/reserved-become.rs
+check-pass	keyword/soup.rs
 compile-fail	label/continue-pointing-to-block-ice-121623.rs
 check-pass	label/label-beginning-with-underscore.rs
 run-pass	label/label-in-closure-no-self-shadow.rs
@@ -7903,6 +7906,7 @@ compile-fail	type/type-params-in-different-spaces-3.rs
 compile-fail	type/type-path-err-node-types.rs
 compile-fail	type/type-recursive-box-shadowed.rs
 compile-fail	type/type-recursive.rs
+compile-fail	type/type-shadow.rs
 run-pass	type/unit-type-basic-usages.rs
 compile-fail	type/usize-no-generic-arguments.rs
 compile-fail	type/verbose-suggestion-for-missing-fn-args.rs
