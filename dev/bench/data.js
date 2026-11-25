@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795628269465,
+  "lastUpdate": 1795628272167,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -129981,6 +129981,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/1c6f335f3cd11a34b3f3deaa38c78136c1306dba"
         },
         "date": 1795617648768,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.48,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1910,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.77,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1555,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.57,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5360,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4c2b4a2b3c3ba58e4ec04544e5f0184466568b51",
+          "message": "Merge pull request #196 from mizchi/claude/fix-192-parallel-fnptr\n\nParallel build: don't send a Blob naming a closure's fn-pointer instance (#192)",
+          "timestamp": "2026-11-26T02:32:17+09:00",
+          "tree_id": "2f25bda8de18271a0858b9219af03e337dffc68b",
+          "url": "https://github.com/mizchi/zust/commit/4c2b4a2b3c3ba58e4ec04544e5f0184466568b51"
+        },
+        "date": 1795628271647,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
