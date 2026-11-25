@@ -52,7 +52,7 @@
 zsc に小さなコードを通して確かめた(機能ごとに 1 つの `.zsc` を `--all-js` でコンパイル)。
 
 **結論: 1 ファイルで完結する小さな React の画面や数値カーネルは書けるが、実アプリにはまだ足りない。**
-足りないのは主に、非同期、`Option` / `Result`、JS の値の型、標準ライブラリの量。
+足りないのは主に、`Option` / `Result`、JS の値の型、標準ライブラリの量。
 
 今あるもの:
 
@@ -73,9 +73,11 @@ zsc に小さなコードを通して確かめた(機能ごとに 1 つの `.zsc
      - `--emit-rust` でのモジュール(Rust の `mod` / `use` にする)
      - パッケージからの取り込み、プレイグラウンドでの複数ファイル
      - 名前を変えて取り込む(`import { area as shapeArea }`)、`export` の付かない型を取り込めないようにするか
-2. **非同期**
-   - `async fn` / `await` と `Promise<T>` の型がない。`fetch` も、イベントの後の処理も書けない
-   - 段階 3 の「async の effect」を待たず、まず `extern` で受けた `Promise<T>` を `await` できる最小の形を入れる(JS ではそのまま `async` / `await`。`@wasm` では使えない、とする)
+2. **済: 非同期**(README の「非同期」)。`async fn`、`await`、`async (..) =>`、`Promise<T>`(JS の async / await のまま。`.d.ts` は `Promise<T>`)
+   - 残り
+     - effect を perform する async fn(段階 3 の「async の effect」: Promise で継続を再開する)
+     - `Promise.all` などの組み合わせ、async の中の `try` / `catch`(7 と一緒に)
+     - async の React コンポーネント(Server Components)は対象外
 3. **`Option` / `Result` と `?`**(提案 003)
    - 自前の enum なら書けるが、標準の型(prelude)、`?`、`if let`、任意のフィールド `x?: T` がない
    - `import type` で TS の任意のフィールドを読むのも、これが前提
@@ -103,6 +105,8 @@ zsc に小さなコードを通して確かめた(機能ごとに 1 つの `.zsc
 - プレイグラウンド: 複数ファイルと、`import type` で読む TS ファイルのタブ
 
 ### P2: 残りの細部
+
+- テストの出力ディレクトリ: `tests/examples.rs` の `out_dir(name)` は `target/test-out/<name>` を使うので、同じチェックアウトで `cargo test` を 2 つ同時に走らせるとぶつかる。失敗を調べられるように出力は残したまま、プロセスごとの接尾辞などでヘルパーの側で分ける(mizchi/zust#146 のレビューで合意)
 
 - `@wasm` の中の浮動小数点数の `to_string` と補間の穴: JS の `Number#toString`(往復できる最短の桁)を、`core::fmt` を使わずに書く必要がある(`format!` は wasm を大きくする。README の「文字列と `==`」の表)。最短の桁を求める Ryu などの表も、サイズを測って決める
 - typed array をバイト列の形式に載せる

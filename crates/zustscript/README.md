@@ -237,6 +237,34 @@ export fn primes_below(n: i32) -> i32 {
 - 左辺を第1引数に入れる: `x |> f(a)` は `f(x, a)`、`x |> f` は `f(x)`
 - メソッドにも使える: `xs |> .map(g)` は `xs.map(g)`
 
+### 非同期: `async fn` / `await` / `Promise<T>`
+
+JS の async / await をそのまま使います。
+
+```zsc
+extern fn fetchText(url: String) -> Promise<String> = "fetchText";
+extern fn log(s: String) = "console.log";
+
+export async fn title(id: i32) -> String {
+  let body = await fetchText(`/items/${id}`);
+  body.trim()
+}
+
+export fn App() -> Jsx {
+  <button onClick={async () => { let t = await title(1); log(t); }}>load</button>
+}
+```
+
+- `async fn f() -> T` を呼ぶと `Promise<T>` が返る。本体は `T` を返す。`.d.ts` は `Promise<T>`
+- `await e` は `Promise<T>` の `e` から `T` を取る。書けるのは `async fn` と `async (..) =>` の中だけ(ふつうのクロージャの中は不可。JS と同じ)
+  - `await f() + 1` は `(await f()) + 1`(前置の演算子と同じ結合)
+  - JS で関数になる式(被演算子の位置の `match` など)の中の `await` は、その関数を async にして `await` する
+- `Promise<T>` は JS の値の型。作るのは `extern` の関数(`fetch` などを包んだもの)と `async fn`
+- まだできないこと
+  - `@wasm` / `@simd` / `--emit-rust`(Promise は JS のもの)
+  - effect を perform する async fn(effect は generator で動く)。effect は async でない関数の中で handle する
+  - `Promise.all` などの組み合わせ(`extern` で受ける)、`try` / `catch`(TODO の P0 の 7)
+
 ### 代数的エフェクト(enum で宣言する)
 
 ```rust

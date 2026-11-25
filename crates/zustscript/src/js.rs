@@ -372,7 +372,8 @@ impl<'a> Js<'a> {
         let params: Vec<String> = args.iter().map(|a| a.0.clone()).collect();
         self.inplace = crate::own::inplace_pushes(&params, body, self.info);
         let saved = std::mem::take(&mut self.out);
-        self.line(&format!("{}function{} {js_name}({}) {{", if public { "export " } else { "" }, if gen_ { "*" } else { "" }, ps.join(", ")));
+        let is_async = matches!(it, Item::Fn { is_async: true, .. });
+        self.line(&format!("{}{}function{} {js_name}({}) {{", if public { "export " } else { "" }, if is_async { "async " } else { "" }, if gen_ { "*" } else { "" }, ps.join(", ")));
         self.ind += 1;
         self.gen_ = gen_;
         self.tmp = 0;
@@ -845,7 +846,16 @@ impl<'a> Js<'a> {
         }
         let save = (std::mem::take(&mut self.out), self.ind, std::mem::replace(&mut self.arm_tail, false));
         self.ind = 1;
-        self.stmt_expr(e, &Dest::Return);
+        let boxed = !self.gen_ && awaits(e);
+        if boxed {
+            // (assigned, then returned in a box: see below)
+            let v = self.fresh();
+            self.line(&format!("let {v};"));
+            self.stmt_expr(e, &Dest::Assign(v.clone()));
+            self.line(&format!("return [{v}];"));
+        } else {
+            self.stmt_expr(e, &Dest::Return);
+        }
         let body = std::mem::replace(&mut self.out, save.0);
         self.ind = save.1;
         self.arm_tail = save.2;
@@ -853,6 +863,10 @@ impl<'a> Js<'a> {
         let body: String = body.lines().map(|l| format!("{pad}{l}\n")).collect();
         if self.gen_ {
             format!("(yield* (function* () {{\n{body}{pad}}})())")
+        } else if boxed {
+            // (an `await` inside: the function is async, and its Promise is awaited where it stands. The value is
+            // boxed: a Promise the expression gives would be adopted by the async function and come out awaited)
+            format!("(await (async () => {{\n{body}{pad}}})())[0]")
         } else {
             format!("(() => {{\n{body}{pad}}})()")
         }
@@ -1107,6 +1121,8 @@ impl<'a> Js<'a> {
                 format!("new {ctor}([{}])", xs.iter().map(|x| self.expr(x)).collect::<Vec<_>>().join(", "))
             }
             EK::Array(xs) | EK::Tuple(xs) => format!("[{}]", xs.iter().map(|x| self.expr(x)).collect::<Vec<_>>().join(", ")),
+            EK::Await(x) => format!("(await {})", self.bin_operand(x, 14, true)),
+            EK::Async(c) => format!("async {}", self.expr(c)),
             // (a template literal: a hole writes its value as `String(..)` does, which is `to_string`'s JS)
             EK::Interp(parts, holes) => {
                 let mut o = String::from("`");
@@ -1421,6 +1437,15 @@ fn single_call(s: &str) -> bool {
         }
     }
     false
+}
+
+/// An `await` in `e` that is not inside a closure of its own (it belongs to the function `e` is in)
+fn awaits(e: &Expr) -> bool {
+    match &e.kind {
+        EK::Await(_) => true,
+        EK::Closure(..) | EK::Async(_) => false,
+        _ => crate::check::subexprs(e).into_iter().any(awaits),
+    }
 }
 
 /// A `break` / `continue` in `e` that leaves a loop outside `e` (not one of its own loops, not in a closure)
