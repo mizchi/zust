@@ -19,7 +19,6 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use zust_fuzz::targets::{self, Target};
@@ -153,12 +152,19 @@ fn report(what: &str, saved: std::io::Result<PathBuf>) {
     }
 }
 
-/// The input that runs, as the watchdog and the supervisor see it: its text and edition (also in `current.rs` and
-/// `current.edition`, for the supervisor after a crash) and when it started (0: none runs)
+/// The input that runs, as the watchdog sees it: its text, its edition and when its run started (0: none runs), in one
+/// record under one lock, so the watchdog never pairs one input's start with another's text or edition
+#[derive(Default)]
+struct Running {
+    src: String,
+    edition: u16,
+    started: u64,
+}
+
+/// The running input, shared with the watchdog; also in `current.rs` and `current.edition`, for the supervisor after
+/// a crash
 struct Active {
-    started: Arc<AtomicU64>,
-    input: Arc<Mutex<String>>,
-    edition: Arc<AtomicU16>,
+    running: Arc<Mutex<Running>>,
     current: PathBuf,
 }
 
@@ -166,27 +172,36 @@ impl Active {
     fn set(&self, src: &str, edition: u16) {
         let _ = std::fs::write(&self.current, src);
         let _ = std::fs::write(self.current.with_extension("edition"), edition.to_string());
-        if let Ok(mut s) = self.input.lock() {
-            s.clear();
-            s.push_str(src);
+        if let Ok(mut r) = self.running.lock() {
+            r.src.clear();
+            r.src.push_str(src);
+            r.edition = edition;
+            r.started = 0;
         }
-        self.edition.store(edition, Ordering::Relaxed);
     }
 
     /// Runs one target on the input set last, under the watchdog
     fn run(&self, t: Target, src: &str, edition: u16) -> Result<String, Failure> {
-        self.started.store(now_ms(), Ordering::Relaxed);
-        let r = run_one(t, src, edition);
-        self.started.store(0, Ordering::Relaxed);
-        r
+        if let Ok(mut r) = self.running.lock() {
+            r.started = now_ms();
+        }
+        let res = run_one(t, src, edition);
+        if let Ok(mut r) = self.running.lock() {
+            r.started = 0;
+        }
+        res
     }
 }
 
 /// In a worker each candidate runs as an input does, under the watchdog: one that hangs or crashes ends the worker as
-/// an input would, after the finding was saved. `minimize` on the command line runs them directly
-fn minimize_failure(active: Option<&Active>, t: Target, src: &str, f: &Failure, edition: u16) -> String {
+/// an input would, after the finding was saved; and none runs past the worker's deadline (the input as it is then is
+/// the minimized one). `minimize` on the command line runs them directly
+fn minimize_failure(active: Option<(&Active, u64)>, t: Target, src: &str, f: &Failure, edition: u16) -> String {
     mutate::minimize(src, 3000, &mut |cand| {
-        let r = match active {
+        if active.is_some_and(|(_, deadline)| now_secs() >= deadline) {
+            return false;
+        }
+        let r = match active.map(|a| a.0) {
             Some(a) => {
                 a.set(cand, edition);
                 a.run(t, cand, edition)
@@ -208,24 +223,18 @@ fn worker(a: &Args, deadline: u64) -> ! {
     let mut corpus = load_corpus(&a.corpus);
     let n0 = corpus.len();
     let mut rng = rng::Rng::new(a.seed);
-    let active = Active {
-        started: Arc::new(AtomicU64::new(0)),
-        input: Arc::new(Mutex::new(String::new())),
-        edition: Arc::new(AtomicU16::new(2021)),
-        current: a.out.join("current.rs"),
-    };
+    let active = Active { running: Arc::new(Mutex::new(Running { edition: 2021, ..Running::default() })), current: a.out.join("current.rs") };
     {
         // (the watchdog: an input running past the timeout is saved as a hang, and the worker ends; the supervisor
-        // starts another)
-        let (started, input, edition, out, timeout) = (active.started.clone(), active.input.clone(), active.edition.clone(), a.out.clone(), a.timeout_ms);
+        // starts another. The lock is held from the check to the exit, so the run cannot end or change meanwhile)
+        let (running, out, timeout) = (active.running.clone(), a.out.clone(), a.timeout_ms);
         std::thread::spawn(move || {
             loop {
                 std::thread::sleep(Duration::from_millis(100));
-                let s = started.load(Ordering::Relaxed);
-                if s != 0 && now_ms().saturating_sub(s) > timeout {
-                    let src = input.lock().map(|s| s.clone()).unwrap_or_default();
-                    let f = Failure { kind: "hang", place: format!("{:016x}", hash(&src)), detail: format!("over {timeout} ms") };
-                    report("hang", save_finding(&out, &f, &src, None, edition.load(Ordering::Relaxed)));
+                let Ok(r) = running.lock() else { continue };
+                if r.started != 0 && now_ms().saturating_sub(r.started) > timeout {
+                    let f = Failure { kind: "hang", place: format!("{:016x}", hash(&r.src)), detail: format!("over {timeout} ms") };
+                    report("hang", save_finding(&out, &f, &r.src, None, r.edition));
                     std::process::exit(3);
                 }
             }
@@ -255,7 +264,7 @@ fn worker(a: &Args, deadline: u64) -> ! {
                     let what = format!("{} at {} ({})", f.kind, f.place, f.detail.lines().next().unwrap_or(""));
                     // (saved before it is minimized, which a candidate that hangs or crashes ends)
                     report(&what, save_finding(&a.out, &f, &src, None, edition));
-                    let min = minimize_failure(Some(&active), t, &src, &f, edition);
+                    let min = minimize_failure(Some((&active, deadline)), t, &src, &f, edition);
                     if let Err(e) = save_finding(&a.out, &f, &src, Some(&min), edition) {
                         eprintln!("zust-fuzz: {what}: the minimized input could not be saved: {e}");
                     }
