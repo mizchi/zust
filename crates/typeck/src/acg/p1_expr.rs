@@ -1142,8 +1142,9 @@ impl Cx<'_> {
                 // reborrowed)
                 let mut_moved = self.bk.plain_init == e as *const Expr as usize && self.bk.level >= 2 && matches!(p.ty(), Ty::Ref(true, _));
                 if self.bk_on() && (!self.bk_ty(p.ty()).0 || mut_moved) {
-                    // (`*x` with x a raw pointer: what it points to is not owned, E0507)
-                    if matches!(self.peek(x), Some(Ty::Ptr(..))) && self.bk.level >= 1 {
+                    // (`*x` with x a raw pointer: what it points to is not owned, E0507; also with x a reference that
+                    // is no place (`*&x`, `*v.first().unwrap()`))
+                    if self.bk.level >= 1 && (matches!(self.peek(x), Some(Ty::Ptr(..))) || !is_place_expr(x)) {
                         self.drop_move_check(e)?;
                     }
                     // (`*rc` with rc an Rc / a Deref type of the program's: its deref gives a reference, which cannot
@@ -2588,7 +2589,10 @@ impl Cx<'_> {
             let ct = if by_move { t } else { Ty::Ptr(true, intern(t)) };
             sol[cd.n_parent + i] = Some(ct);
             caps.push((loc, t));
+            // (a guard's checks of the arm's bindings (bk_ev) of a closure's captures: only a mutable borrow)
+            let gc = std::mem::replace(&mut self.bk.guard_cap, true);
             copy_caps.push(self.bk_capture(c, n, loc, t, by_move));
+            self.bk.guard_cap = gc;
         }
         // (a capture held by value (a `move` closure's) of a local not declared `mut`, which the body assigns or borrows
         // mutably: E0594 / E0596 at the mutation; one held by reference is a `&mut` loan the borrow check reports)
@@ -3912,6 +3916,23 @@ impl Cx<'_> {
             if let Some(&(_, target)) = ident_of(p).and_then(|n| self.fn_aliases.iter().rev().find(|a| a.0 == n)) {
                 let ne: &Expr = self.keep_expr(Expr::Call(Box::new(target.clone()), cargs.clone()));
                 return self.expr(ne, expected);
+            }
+        }
+        // (`core::mem::MaybeUninit::<S>::uninit()` / `std::vec::Vec::<u8>::new()`: std's modules before a type of the
+        //  prelude with type arguments are left out, as without them (libc 0.2's offset_of!))
+        if let Expr::Path(None, p) = strip_paren(func) {
+            let n = p.segs.len();
+            if n >= 4 && matches!(p.segs[0].name.as_str(), "std" | "core" | "alloc") {
+                let k = (1..n - 1).find(|&k| !p.segs[k].args.is_empty());
+                if let Some(k) = k.filter(|&k| {
+                    k >= 2
+                        && p.segs[1..k].iter().all(|s| s.args.is_empty() && s.name.starts_with(|c: char| c.is_ascii_lowercase()))
+                        && self.prog.struct_index.contains_key(p.segs[k].name.as_str())
+                }) {
+                    let np = crate::parse::Path { global: false, segs: p.segs[k..].to_vec(), pos: p.pos };
+                    let ne: &Expr = self.keep_expr(Expr::Call(Box::new(Expr::Path(None, np)), cargs.clone()));
+                    return self.expr(ne, expected);
+                }
             }
         }
         // `(*f)(x)` with f: `Box<dyn Fn ..>` / `&dyn Fn ..` / a closure behind a reference: `f(x)`

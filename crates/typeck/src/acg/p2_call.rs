@@ -1318,7 +1318,11 @@ impl Cx<'_> {
                 if let Some(bv) = bv {
                     match recv_temp {
                         Some(f) => self.clear_flag(f),
-                        None => self.mark_moved(recv),
+                        None => {
+                            self.mark_moved(recv);
+                            // (the Box moves into the call: a use of it after is E0382)
+                            self.bk_acc(recv, borrowck::Acc::Move);
+                        }
                     }
                     // (the receiver is the Box: of its type also where p0 is what a temporary Box points to,
                     // `Box::new(S).f()`; an `unsafe fn` is so here too, E0133 outside `unsafe`)
@@ -1349,6 +1353,11 @@ impl Cx<'_> {
             if self.prog.structs[self.prog.base_of(ps) as usize].name == "Pin" && p0t == Ty::Struct(ps) {
                 if let Place::Mem(a0, o0, _) = p0 {
                     let v0 = self.addr_plus(a0, o0);
+                    // (a `Pin<&mut Self>` moves into the call, as it is no `&mut` a call reborrows: a use of it after is
+                    // E0382 (moves/pin-mut-reborrow.rs))
+                    if recv_temp.is_none() && (!self.bk_ty(p0t).0 || super::p6_match_drop::holds_mut_ref(self.prog, p0t, 0)) {
+                        self.bk_acc(recv, borrowck::Acc::Move);
+                    }
                     return self.call_fn(id, Some((v0, p0t)), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
                 }
             }
@@ -3586,6 +3595,17 @@ impl Cx<'_> {
                 let n = bytes.len() as u32;
                 let a = self.data_addr(bytes);
                 Ok((Some(a), Ty::Ref(false, intern(Ty::Array(intern(Ty::U8), n)))))
+            }
+            // (`c"hello"`: the prelude's `&'static CStr` of its bytes and their 0)
+            Lit::CStr(bs) => {
+                let mut text = String::from("b\"");
+                for &c in bs.iter().chain(std::iter::once(&0u8)) {
+                    text.push_str(&format!("\\x{c:02x}"));
+                }
+                text.push('"');
+                let call = Expr::Call(Box::new(path_expr("__exr_cstr_lit")), vec![Expr::Lit(text, crate::parse::Pos::default())]);
+                let e: &Expr = self.keep_expr(call);
+                self.expr(e, expected)
             }
             _ => err(SP, "unsupported literal"),
         }
