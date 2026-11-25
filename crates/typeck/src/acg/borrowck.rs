@@ -274,6 +274,11 @@ pub struct Bk {
     /// The `mut` locals declared without a value and assigned whole (`let mut x; x = 1;`), whose second assignment the
     /// dataflow looks for; and those it found (check)
     pub mut_flow: std::cell::RefCell<(Vec<u32>, Vec<u32>)>,
+    /// In the report: the E0716 of each temporary's loan still in use when the temporary goes away (the loan, the
+    /// error's index, the live locals that hold it then), the loans a returned value holds and the locals it is read
+    /// from, with where it is returned. Such an E0716 is E0515 at the return, as rustc reports it (`for ref x in xs {
+    /// v.push(x) } v`), also where a loop's next item drops the loan from what the returned local holds
+    pub ret_temps: std::cell::RefCell<(Vec<(u32, usize, Vec<u32>)>, Vec<(u32, Sp)>, Vec<(u32, Sp)>)>,
     /// Locals that own a value whose type implements `Drop` (a user's), and the place of that value in the local,
     /// through boxes and fields (`Box<Scribble>`: `*`; `Wrapper(Scribble)`: `.0`): its `drop` may use what a `&mut`
     /// field points to, so a borrow through it must not outlive the local (E0713)
@@ -1443,6 +1448,7 @@ impl Bk {
         }
         // ---- report (on the fixpoint)
         let mut live_at = vec![];
+        *self.ret_temps.borrow_mut() = (vec![], vec![], vec![]);
         for b in 0..n {
             let Some(mut st) = st_in[b].take() else { continue };
             self.run_block(&evs[b], &mut st, Some(&mut errs), &live_out[row(b)], loans_on, &mut live_at);
@@ -1459,6 +1465,16 @@ impl Bk {
                     if self.params.contains(&lo.place.local) && self.drop_field_borrow(lo, &st) {
                         errs.push(BkError { sp: lo.sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
                     }
+                }
+            }
+        }
+        // (a temporary's loan that a returned value holds: E0515 where it is returned, not E0716 where it goes away)
+        {
+            let rt = self.ret_temps.borrow();
+            for (ln, ei, hs) in &rt.0 {
+                let ret = rt.1.iter().find(|r| r.0 == *ln).or_else(|| rt.2.iter().find(|r| hs.contains(&r.0)));
+                if let (Some(&(_, sp)), Some(e)) = (ret, errs.get_mut(*ei)) {
+                    *e = BkError { sp, msg: "cannot return value referencing temporary value (E0515)".to_string() };
                 }
             }
         }
@@ -1583,6 +1599,9 @@ impl Bk {
                                 if lo.place.local == *l && lo.place.owned_len() == lo.place.proj.len() {
                                     let name = path_str(&self.locals, &BPlace { local: *l, proj: vec![] });
                                     if name == TEMP {
+                                        let live = &live_at[i * w..(i + 1) * w];
+                                        let hs = st.holds.iter().filter(|h| h.0 != *l && is_live(live, h.0) && h.1.binary_search(&ln).is_ok()).map(|h| h.0).collect();
+                                        self.ret_temps.borrow_mut().0.push((ln, errs.len(), hs));
                                         errs.push(BkError { sp: lo.sp, msg: "temporary value dropped while borrowed: it is freed while still in use (E0716)".to_string() });
                                         continue;
                                     }
@@ -1679,6 +1698,7 @@ impl Bk {
                                 if lo.place.owned_len() < lo.place.proj.len() {
                                     errs.push(BkError { sp: lo.sp, msg: "borrow may still be in use when destructor runs (E0713)".to_string() });
                                 } else if name == TEMP {
+                                    self.ret_temps.borrow_mut().0.push((ln, errs.len(), vec![*l]));
                                     errs.push(BkError { sp: lo.sp, msg: "temporary value dropped while borrowed: it is freed while still in use (E0716)".to_string() });
                                 } else {
                                     errs.push(BkError { sp: lo.sp, msg: format!("`{name}` does not live long enough (dropped while still borrowed)") });
@@ -1836,6 +1856,10 @@ impl Bk {
                     if loans_on {
                         if let Some(errs) = errs.as_deref_mut() {
                             let ls = self.resolve(srcs, st);
+                            let mut rt = self.ret_temps.borrow_mut();
+                            rt.1.extend(ls.iter().map(|&ln| (ln, *sp)));
+                            rt.2.extend(srcs.iter().filter_map(|s| if let Src::Local(x) = s { Some((*x, *sp)) } else { None }));
+                            drop(rt);
                             // (a borrow through a `&mut` field of a local whose type implements `Drop`: the local's
                             // drop, when the function returns, may use the field, so the borrow is still in use then
                             // (`&mut *s.0` with s: Scribble). Not through a `&` field: a shared one is copied out)
@@ -3193,6 +3217,19 @@ impl Cx<'_> {
         self.bk_ev(Ev::Def(id, d));
         self.bk.block_val.insert(blk as *const crate::parse::Block as usize, id);
         self.bk.scope_temps.push((self.scopes.len().saturating_sub(2), id));
+    }
+
+    /// A temporary of type t that holds what srcs borrow and whose drop may use it: a hidden local of the statement,
+    /// dropped at its end (bk_temps_end), so the loans live until then. Returns the local (a call that takes the
+    /// temporary by value ends what it holds there)
+    pub(crate) fn bk_drop_temp(&mut self, t: Ty, srcs: Vec<Src>) -> u32 {
+        let id = self.bk.locals.len() as u32;
+        self.bk.locals.push(Local { name: TEMP.to_string(), ty: t, copy: false, refs: true, mutable: Some(true), decl: super::SP, via_ref: false });
+        self.bk_ev(Ev::Bind(id, true));
+        self.bk_ev(Ev::Def(id, srcs));
+        self.bk.stmt_temps.push(id);
+        self.bk.drop_temps.push(id);
+        id
     }
 
     pub(crate) fn bk_drop_held(&mut self, ts: &[u32], sp: Sp) {

@@ -113,3 +113,4 @@ Japanese versions are in [../ja/reports/](../ja/reports/README.md).
 | 2026-11-24 | [Region (lifetime) checking, part 27: two-phase argument reborrows, `ptr::swap` of raw pointers, a placeholder's associated type through its bound's method](2026-11-24-13-region-check-27.md) |
 | 2026-11-24 | [Region (lifetime) checking, part 28: the type arguments of generic trait objects, bare trait objects before 2021, E0223](2026-11-24-14-region-check-28.md) |
 | 2026-11-24 | [Trait solving, step 3: projections as normalizes-to goals (#2)](2026-11-24-15-projection-goals.md) |
+| 2026-11-25 | [Region (lifetime) checking, part 29: temporaries whose drop uses what they borrow, the scopes that end them, a returned temporary's E0515](2026-11-25-01-region-check-29.md) |
