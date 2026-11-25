@@ -1302,12 +1302,31 @@ fn item_scope(b: &[u8], toks: &[(u8, usize, usize)], close: &[usize], depth: &[u
         k -= 1;
         n += 1;
         let t = tk(k);
+        // (a braced const argument inside the head's `<..>`, `impl C<{ m!() * 3 }> {`: stepped over, back to its `{`)
+        if toks[k].0 == 1 && t == b"}" && angle > 0 {
+            let mut d = 0i32;
+            while k > 0 {
+                if toks[k].0 == 1 && tk(k) == b"}" {
+                    d += 1;
+                } else if toks[k].0 == 1 && tk(k) == b"{" {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                k -= 1;
+            }
+            continue;
+        }
         if toks[k].0 == 1 && (t == b";" || t == b"{" || t == b"}") {
             return false;
         }
         // (`extern "C" { .. }`: foreign items. `extern "C" fn f() {` meets `fn` first, going back)
-        if toks[k].0 == 0 && (t == b"mod" || t == b"impl" || t == b"trait" || t == b"extern") {
-            return true;
+        // (an `impl` that starts an item: not `impl Trait` in a type, `fn f() -> impl Display { m!() * 3 }`)
+        let impl_head = || k == 0 || (toks[k - 1].0 == 1 && matches!(tk(k - 1), b";" | b"{" | b"}" | b"]")) || (toks[k - 1].0 == 0 && matches!(tk(k - 1), b"unsafe" | b"default"));
+        // (a brace inside the head's `<..>` is a const argument, an expression: `impl S<{ m!() * 3 }> {}`)
+        if toks[k].0 == 0 && (t == b"mod" || (t == b"impl" && impl_head()) || t == b"trait" || t == b"extern") {
+            return angle >= 0;
         }
         if toks[k].0 == 0 && (t == b"fn" || t == b"struct" || t == b"enum" || t == b"union" || t == b"let") {
             return false;
@@ -2372,7 +2391,37 @@ fn find_calls(
             let inner = if r.start <= r.end && r.end <= text.len() { &text[r.start..r.end] } else { "" };
             if inner.is_empty() || macros.keys().any(|m| inner.contains(m.as_str())) {
                 let brace = g.delimiter() == proc_macro2::Delimiter::Brace;
-                let module = brace && i >= 2 && matches!(&toks[i - 2], TokenTree::Ident(m) if m == "mod");
+                // (a place of items, as expand_cfg's item_scope reads it: the body of a `mod`, `impl`, `trait` or
+                // `extern` block, going back over its head to the item before it; not a fn's or a struct's body)
+                let module = brace && {
+                    let mut k = i;
+                    let mut found = false;
+                    // (a brace inside the head's `<..>` is a const argument, an expression: `impl S<{ m!() * 3 }> {}`)
+                    let mut angle = 0i32;
+                    while k > 0 {
+                        k -= 1;
+                        match &toks[k] {
+                            TokenTree::Punct(q) if q.as_char() == '>' && !(k > 0 && matches!(&toks[k - 1], TokenTree::Punct(a) if matches!(a.as_char(), '-' | '=') && a.spacing() == proc_macro2::Spacing::Joint)) => angle += 1,
+                            TokenTree::Punct(q) if q.as_char() == '<' => angle -= 1,
+                            TokenTree::Punct(q) if q.as_char() == ';' => break,
+                            // (a braced const argument inside the head's `<..>`: stepped over)
+                            TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace && angle > 0 => {}
+                            TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace => break,
+                            TokenTree::Ident(w) if matches!(w.to_string().as_str(), "fn" | "struct" | "enum" | "union" | "let") => break,
+                            // (an `impl` that starts an item, as item_scope: not `-> impl Display`)
+                            TokenTree::Ident(w) if w == "impl" && !(k == 0
+                                || matches!(&toks[k - 1], TokenTree::Punct(q) if q.as_char() == ';')
+                                || matches!(&toks[k - 1], TokenTree::Group(pg) if matches!(pg.delimiter(), proc_macro2::Delimiter::Brace | proc_macro2::Delimiter::Bracket))
+                                || matches!(&toks[k - 1], TokenTree::Ident(u) if u == "unsafe" || u == "default")) => {}
+                            TokenTree::Ident(w) if matches!(w.to_string().as_str(), "mod" | "impl" | "trait" | "extern") => {
+                                found = angle >= 0;
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                    found
+                };
                 find_calls(g.stream(), macros, text, depth + 1, brace, module, out)?;
             }
         }
