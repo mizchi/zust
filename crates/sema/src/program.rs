@@ -780,7 +780,7 @@ pub struct Insts {
     /// zustc check's last round: the instances with placeholders for type parameters (Program::placeholder), and
     /// what they request. A typeck error of one is not reported (acg::compile)
     pub lenient: bool,
-    /// Of those, the instances of fns that instances were made of with `Copy` types only (driver2's
+    /// Of those, the instances of fns that instances were made of with `Copy` types only (session's
     /// placeholder_wave): checked for what moving a T does, nothing else
     pub recheck: FxSet<u32>,
     /// Of those, the instances of fns that a where clause bounds (the fn's, its impl's): a parameter's bounds there

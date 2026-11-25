@@ -1,5 +1,5 @@
-//! driver2 のビルドの部分 (feature `build`): 関数を機械語にする (lower)・fork の並列化・オブジェクト・リンク・ワークスペース。
-//! 解析と check (LSP) は親の driver2 にあり、バックエンドに依存しない
+//! session のビルドの部分 (feature `build`): 関数を機械語にする (lower)・fork の並列化・オブジェクト・リンク・ワークスペース。
+//! 解析と check (LSP) は親の session にあり、バックエンドに依存しない
 
 use super::*;
 use crate::acg::Target;
@@ -22,19 +22,19 @@ pub(super) fn lower_blob(a: &Analysis, c: acg::Compiled, req: Vec<u32>) -> R<(Bl
 
 /// ソースから ELF の .o を作る (キャッシュも並列化もしない)
 pub fn build_object(src0: &str, opt: bool) -> R<Vec<u8>> {
-    let mut s = Session2::new(Options2 { opt, no_cache: true, jobs: 1, ..Default::default() });
+    let mut s = Session::new(Options { opt, no_cache: true, jobs: 1, ..Default::default() });
     let a = s.analyze(src0)?;
-    s.compile_object(&a, &mut Report2::default(), None)
+    s.compile_object(&a, &mut BuildReport::default(), None)
 }
 
 /// ソースから実行ファイルを作る (キャッシュも並列化もしない)
 pub fn build(src: &str, output: &std::path::Path, opt: bool, linker: Option<&str>) -> R<()> {
-    let mut s = Session2::new(Options2 { opt, no_cache: true, jobs: 1, linker: linker.map(|l| l.to_string()), ..Default::default() });
+    let mut s = Session::new(Options { opt, no_cache: true, jobs: 1, linker: linker.map(|l| l.to_string()), ..Default::default() });
     s.build(src, output).map(|_| ())
 }
 
 
-impl Session2 {
+impl Session {
     /// ids をコンパイルする (jobs > 1 で数が多ければ fork した子プロセスで分けて)。結果は ids と同じ順
     fn compile_many(&self, a: &Analysis, insts: &Mutex<Insts>, ids: &[u32]) -> R<Vec<Blob>> {
         // (at least 16 per child; ZUSTC_BUILD_PAR_MIN for tests: 1 splits nearly every wave)
@@ -66,7 +66,7 @@ impl Session2 {
                 let mut i = k;
                 while i < ids.len() {
                     let at = buf.len();
-                    crate::cache2::put_uv(&mut buf, i as u64);
+                    crate::build_cache::put_uv(&mut buf, i as u64);
                     match compile_id(a, insts, ids[i]) {
                         Ok(b) => {
                             let mut e = vec![];
@@ -81,15 +81,15 @@ impl Session2 {
                                     i += jobs;
                                     continue;
                                 }
-                                crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+                                crate::build_cache::encode_blob(&b, &a.prog, &*g, &mut e);
                             }
                             buf.push(0);
-                            crate::cache2::put_uv(&mut buf, e.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, e.len() as u64);
                             buf.extend_from_slice(&e);
                         }
                         Err(m) => {
                             buf.push(1);
-                            crate::cache2::put_uv(&mut buf, m.len() as u64);
+                            crate::build_cache::put_uv(&mut buf, m.len() as u64);
                             buf.extend_from_slice(m.as_bytes());
                         }
                     }
@@ -108,7 +108,7 @@ impl Session2 {
             unsafe { c_close(fd) };
             let mut st = 0i32;
             unsafe { c_waitpid(pid, &mut st, 0) };
-            let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+            let mut r = crate::build_cache::Rd { d: &d, pos: 0 };
             while r.pos < d.len() {
                 let (Some(i), Some(fail), Some(n)) = (r.uv(), r.u8(), r.uv()) else { break };
                 let Some(body) = r.take(n as usize) else { break };
@@ -122,7 +122,7 @@ impl Session2 {
         let mut out = vec![];
         for (i, r) in res.into_iter().enumerate() {
             match r {
-                Some(Ok(d)) => out.push(crate::cache2::decode_blob(&d, &a.prog, insts).ok_or("internal: cannot decode a compiled function")?),
+                Some(Ok(d)) => out.push(crate::build_cache::decode_blob(&d, &a.prog, insts).ok_or("internal: cannot decode a compiled function")?),
                 Some(Err(m)) => return Err(m),
                 None => {
                     // (子が落ちた: その関数はここでコンパイルする (エラーが出るならそれが出る))
@@ -134,7 +134,7 @@ impl Session2 {
     }
 
     /// 解析済みのプログラムの .o を作る (キャッシュを引き、なければコンパイルしてキャッシュに入れる)
-    fn compile_object(&mut self, a: &Analysis, rep: &mut Report2, tm: Option<&mut Timer>) -> R<Vec<u8>> {
+    fn compile_object(&mut self, a: &Analysis, rep: &mut BuildReport, tm: Option<&mut Timer>) -> R<Vec<u8>> {
         let mut live = a.prog.reachable(&a.refs);
         // (a function only a static points to (`static F: fn() = f;`) is compiled too)
         for c in &a.prog.consts {
@@ -172,14 +172,14 @@ impl Session2 {
                 };
                 let raw = self.get(k);
                 if log_compiled && raw.is_some() {
-                    let d = crate::cache2::decode_blob(raw.as_ref().unwrap(), &a.prog, &insts);
+                    let d = crate::build_cache::decode_blob(raw.as_ref().unwrap(), &a.prog, &insts);
                     match &d {
                         None => eprintln!("decode-fail {}", a.prog.names[insts.lock().unwrap().body_of(id) as usize]),
                         Some(b) if !(b.line_base.is_none() || b.line_base == lb) => eprintln!("line-mismatch {}", a.prog.names[insts.lock().unwrap().body_of(id) as usize]),
                         _ => {}
                     }
                 }
-                let hit = raw.and_then(|d| crate::cache2::decode_blob(&d, &a.prog, &insts)).filter(|b| b.line_base.is_none() || b.line_base == lb);
+                let hit = raw.and_then(|d| crate::build_cache::decode_blob(&d, &a.prog, &insts)).filter(|b| b.line_base.is_none() || b.line_base == lb);
                 match hit {
                     Some(b) => {
                         rep.fns_hit += 1;
@@ -203,7 +203,7 @@ impl Session2 {
                     let mut e = vec![];
                     {
                                 let g = insts.lock().unwrap();
-                                crate::cache2::encode_blob(&b, &a.prog, &*g, &mut e);
+                                crate::build_cache::encode_blob(&b, &a.prog, &*g, &mut e);
                             }
                     self.put(keys[&id], e);
                 }
@@ -257,10 +257,10 @@ impl Session2 {
     }
 
     /// ソースから実行ファイルを作る。前回と同じ .o ならリンクしない
-    pub fn build(&mut self, src: &str, output: &std::path::Path) -> R<Report2> {
+    pub fn build(&mut self, src: &str, output: &std::path::Path) -> R<BuildReport> {
         let t0 = now_ns();
         let mut tm = Timer { on: self.opts.time, last: t0, start: t0 };
-        let mut rep = Report2::default();
+        let mut rep = BuildReport::default();
         let a = self.analyze(src).map_err(|e| self.unhoist_analysis_err(src, e))?;
         rep.items_parsed = a.n_parsed;
         tm.lap("front", format!("{} items, {} parsed", a.items.len(), a.n_parsed));
@@ -782,9 +782,9 @@ type Parts = (Vec<(String, Vec<u8>, Vec<Reloc>, bool)>, Vec<DataDef>);
 
 fn read_parts(d: &[u8]) -> Option<Parts> {
     let d = d.strip_prefix(PARTS_MAGIC)?;
-    let mut r = crate::cache2::Rd { d, pos: 0 };
+    let mut r = crate::build_cache::Rd { d, pos: 0 };
     let unzz = |v: u64| ((v >> 1) as i64) ^ -((v & 1) as i64);
-    let s = |r: &mut crate::cache2::Rd| -> Option<String> {
+    let s = |r: &mut crate::build_cache::Rd| -> Option<String> {
         let n = r.uv()? as usize;
         Some(String::from_utf8_lossy(r.take(n)?).into_owned())
     };
@@ -974,7 +974,7 @@ pub fn read_workspace(path: &std::path::Path) -> R<Vec<CrateSpec>> {
 /// ワークスペースのビルドの結果 (クレートごと)
 #[derive(Clone, Debug, Default)]
 pub struct WsReport {
-    pub crates: Vec<(String, Report2)>,
+    pub crates: Vec<(String, BuildReport)>,
     /// 書き直した .o の数
     pub objects_written: usize,
     pub linked: usize,
@@ -1125,9 +1125,9 @@ fn n_lines(s: &str) -> u32 {
     s.as_bytes().iter().filter(|&&c| c == b'\n').count() as u32
 }
 
-impl Session2 {
+impl Session {
     /// 1 つのクレート (複数のファイル) をビルドする: 根のファイルから `mod x;` を辿る
-    pub fn build_path(&mut self, root: &std::path::Path, display: &str, output: &std::path::Path) -> R<Report2> {
+    pub fn build_path(&mut self, root: &std::path::Path, display: &str, output: &std::path::Path) -> R<BuildReport> {
         let (src, map) = crate::srcmap::load_crate(root, display, &self.opts.cfg_with(&self.opts.features))?;
         let src = if self.opts.test { with_harness(&src, display, &self.opts.cfg_with(&self.opts.features)) } else { src };
         self.ctx = CrateCtx { map: map.clone(), ..Default::default() };
@@ -1149,14 +1149,14 @@ impl Session2 {
         deps: &[usize],
         fp: &str,
         out_dir: &std::path::Path,
-    ) -> R<(Report2, bool, u64)> {
+    ) -> R<(BuildReport, bool, u64)> {
         let c = &crates[i];
         let t1 = now_ns();
         let fp_path = out_dir.join(format!("{}.fp", c.name).as_str());
         let op = out_dir.join(format!("{}.o", c.name).as_str());
-        let cp = out_dir.join(format!("{}.crcache2", c.name).as_str());
+        let cp = out_dir.join(format!("{}.cache", c.name).as_str());
         if !self.opts.no_cache {
-            self.disk = crate::cache2::Cache2::open(cp.as_path());
+            self.disk = crate::build_cache::BuildCache::open(cp.as_path());
         }
         // ソース: 自分 + 依存するクレート (後ろに付ける)
         let (own, own_map) = loaded[i].clone().unwrap();
@@ -1225,7 +1225,7 @@ impl Session2 {
             env: c.env.clone(),
             dep_ranges: ranges,
         };
-        let mut r = Report2::default();
+        let mut r = BuildReport::default();
         let a = self.analyze(&src).map_err(|e| format!("crate `{}`: {}", c.name, self.ctx.map.relocate_err(&e)))?;
         r.items_parsed = a.n_parsed;
         let obj = self.compile_object(&a, &mut r, None).map_err(|e| format!("crate `{}`: {}", c.name, self.ctx.map.relocate_err(&e)))?;
@@ -1333,7 +1333,7 @@ impl Session2 {
     }
 
     /// ワークスペースをビルドする: クレートごとに .o を out_dir に作り (変わらなければ書かない)、
-    /// bin ごとに自分と依存するクレートの .o をリンクする。キャッシュはこの Session2 のものを共有する
+    /// bin ごとに自分と依存するクレートの .o をリンクする。キャッシュはこの Session のものを共有する
     pub fn build_workspace(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path) -> R<WsReport> {
         // (wasm32: a crate's object is the parts of the module (write_parts); a bin's "link" writes the module from its
         // parts and its dependencies' with the module writer itself)
@@ -1467,7 +1467,7 @@ impl Session2 {
                 if self.opts.time {
                     eprintln!("  {:<12} fresh", c.name);
                 }
-                rep.crates.push((c.name.clone(), Report2::default()));
+                rep.crates.push((c.name.clone(), BuildReport::default()));
                 continue;
             }
             stale.push((i, fp));
@@ -1613,7 +1613,7 @@ impl Session2 {
                     if self.opts.time {
                         eprintln!("  {:<12} fresh (used interface unchanged)", crates[i].name);
                     }
-                    rep.crates.push((crates[i].name.clone(), Report2::default()));
+                    rep.crates.push((crates[i].name.clone(), BuildReport::default()));
                     continue;
                 }
                 fp2s.push((i, fp2));
@@ -1628,7 +1628,7 @@ impl Session2 {
         }
         // (クレートは互いのソースしか使わない (.o は使わない) ので、古いものを fork して同時にコンパイルする)
         let par = self.opts.jobs.min(stale.len()).max(1);
-        let mut results: Vec<Option<R<(Report2, bool, u64)>>> = vec![None; stale.len()];
+        let mut results: Vec<Option<R<(BuildReport, bool, u64)>>> = vec![None; stale.len()];
         if par > 1 {
             let inner = (self.opts.jobs / par).max(1);
             let mut k0 = 0;
@@ -1654,7 +1654,7 @@ impl Session2 {
                                 buf.push(0);
                                 buf.push(ch as u8);
                                 for v in [rp.fns_compiled as u64, rp.fns_hit as u64, rp.items_parsed as u64, rp.object_bytes as u64, ns] {
-                                    crate::cache2::put_uv(&mut buf, v);
+                                    crate::build_cache::put_uv(&mut buf, v);
                                 }
                                 // (作ったキャッシュのエントリ (要約・関数の機械語) も返す: 後の組のクレートが fork で引き継いで使う。
                                 //  prelude の単相化や依存するクレートのアイテムの要約は、多くのクレートで同じ)
@@ -1662,7 +1662,7 @@ impl Session2 {
                                     if let Some(v) = self.mem.get(&k) {
                                         buf.extend_from_slice(&(k as u64).to_le_bytes());
                                         buf.extend_from_slice(&((k >> 64) as u64).to_le_bytes());
-                                        crate::cache2::put_uv(&mut buf, v.len() as u64);
+                                        crate::build_cache::put_uv(&mut buf, v.len() as u64);
                                         buf.extend_from_slice(v);
                                     }
                                 }
@@ -1688,7 +1688,7 @@ impl Session2 {
                     unsafe { c_close(fd) };
                     let mut st = 0i32;
                     unsafe { c_waitpid(pid, &mut st, 0) };
-                    let mut r = crate::cache2::Rd { d: &d, pos: 0 };
+                    let mut r = crate::build_cache::Rd { d: &d, pos: 0 };
                     results[k] = match r.u8() {
                         Some(0) => {
                             let ch = r.u8().unwrap_or(1) != 0;
@@ -1696,7 +1696,7 @@ impl Session2 {
                             for x in v.iter_mut() {
                                 *x = r.uv().unwrap_or(0);
                             }
-                            let rp = Report2 { fns_compiled: v[0] as usize, fns_hit: v[1] as usize, items_parsed: v[2] as usize, object_bytes: v[3] as usize, linked: false };
+                            let rp = BuildReport { fns_compiled: v[0] as usize, fns_hit: v[1] as usize, items_parsed: v[2] as usize, object_bytes: v[3] as usize, linked: false };
                             while r.pos < d.len() {
                                 let (Some(lo), Some(hi), Some(n)) = (r.u64(), r.u64(), r.uv()) else { break };
                                 let Some(body) = r.take(n as usize) else { break };

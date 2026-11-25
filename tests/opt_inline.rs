@@ -1,4 +1,4 @@
-//! driver2 の `-O` (小さい関数のインライン展開 + minclif の読み直しの省略) で tests/probe・examples・tests/acg を
+//! session の `-O` (小さい関数のインライン展開 + minclif の読み直しの省略) で tests/probe・examples・tests/acg を
 //! ビルドし、`-O` なしと出力 (stdout・stderr・終了コード) が同じか。
 //! (`-O` はオーバーフローの検査をしないので、オーバーフローで panic するもの (名前に overflow を含む) は除く)
 #![cfg(feature = "acg")]
@@ -28,10 +28,10 @@ fn inline_keeps_behavior() {
         let sub = dir.join(p.parent().unwrap().file_name().unwrap());
         std::fs::create_dir_all(&sub).unwrap();
         let (a, b) = (sub.join(format!("{name}.0")), sub.join(format!("{name}.1")));
-        if zustc::driver2::build(&src, &a, false, None).is_err() {
+        if zustc::session::build(&src, &a, false, None).is_err() {
             return None;
         }
-        if let Err(e) = zustc::driver2::build(&src, &b, true, None) {
+        if let Err(e) = zustc::session::build(&src, &b, true, None) {
             return Some(Err(format!("{name}: -O build failed: {}", e.lines().next().unwrap_or(""))));
         }
         let run = |e: &PathBuf| std::process::Command::new(e).stdin(std::process::Stdio::null()).output().unwrap();

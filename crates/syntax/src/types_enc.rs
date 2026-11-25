@@ -1,5 +1,5 @@
 //! 型の構文 (TySyn) と要約 (Summary) の直列化 (キャッシュ用)。front.rs から分けたもの: syn に依存しないので
-//! driver2 (syn・Cranelift を使わないドライバ) も使え、zustc 自身でもコンパイルできる。
+//! session も使え、zustc 自身でもコンパイルできる。
 
 use crate::enc::{Enc, Rd};
 use crate::types::TYS;

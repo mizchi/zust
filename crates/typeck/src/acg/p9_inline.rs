@@ -7,7 +7,7 @@
 //!
 //! 展開するのは小さい関数: クロージャ・マクロを含まず、本体の構文木が小さく、特別な本体 (drop glue など) や
 //! 呼んだ場所を出す panic (unwrap など) でないもの。ユーザの関数を展開した呼ぶ側は、キャッシュのキーに呼び先のアイテムの
-//! ハッシュと行を入れる (driver2::fn_key)。依存するクレートの関数は展開しない (本体はインターフェースのハッシュに入らない)。
+//! ハッシュと行を入れる (session::fn_key)。依存するクレートの関数は展開しない (本体はインターフェースのハッシュに入らない)。
 //! 展開した中でもう 1 段まで展開する
 
 use super::*;
@@ -27,7 +27,7 @@ pub struct Inline {
 
 type Inferred = (crate::ast_infer::LetTypes, crate::ast_infer::MacroArgs, crate::ast_infer::TextTypes);
 
-/// 本体の構文木の大きさの上限 (Debug の文字列の長さ。大きさはふつう driver2 がソースのトークンの数で見る)
+/// 本体の構文木の大きさの上限 (Debug の文字列の長さ。大きさはふつう session がソースのトークンの数で見る)
 const MAX_BODY: usize = 6000;
 /// アイテムのソースのトークンの数の上限
 pub const MAX_TOKENS: usize = 110;

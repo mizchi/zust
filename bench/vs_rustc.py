@@ -85,9 +85,9 @@ def bench(name):
         rows.append((label, c, noop, e, du(*store), os.path.getsize(exe + ".strip"), r, out))
 
     exe = os.path.join(d, "c")
-    scenario("zustc", [ZUSTC, src, "-o", exe], exe, [exe + ".crcache2", exe + ".o"])
+    scenario("zustc", [ZUSTC, src, "-o", exe], exe, [exe + ".cache", exe + ".o"])
     exe = os.path.join(d, "cO")
-    scenario("zustc -O", [ZUSTC, src, "-o", exe, "-O"], exe, [exe + ".crcache2", exe + ".o"])
+    scenario("zustc -O", [ZUSTC, src, "-o", exe, "-O"], exe, [exe + ".cache", exe + ".o"])
     exe, inc = os.path.join(d, "r"), os.path.join(d, "r-incr")
     scenario("rustc -Cincremental", ["rustc", "--edition", "2021", "-Awarnings", "-Cincremental=" + inc, src, "-o", exe],
              exe, [inc])

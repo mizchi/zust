@@ -1660,7 +1660,7 @@ fn use_module(here: &[String], path: &[String]) -> (Vec<String>, bool) {
             m.extend(path[i..].iter().cloned());
             (m, true)
         }
-        // (ほかのクレート `std::sync` / `zust_core::driver2`: クレートの名前を外す)
+        // (ほかのクレート `std::sync` / `zust_core::session`: クレートの名前を外す)
         Some(_) => (path[1..].to_vec(), false),
         None => (vec![], true),
     }

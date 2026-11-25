@@ -71,12 +71,12 @@ fn forked_check_gives_the_same_diagnostics() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// A host with threads of its own (a test harness is one) that asks Session2 for 4 jobs: neither the item summaries
+/// A host with threads of its own (a test harness is one) that asks Session for 4 jobs: neither the item summaries
 /// nor the check fork there (a lock another thread holds would stay held in a child), and the answer is the same
 #[test]
 fn threaded_host_checks_in_process() {
     let src = program();
-    let one = zustc::Session2::new(zustc::Options2 { jobs: 1, no_cache: true, ..zustc::Options2::default() }).check(&src);
+    let one = zustc::Session::new(zustc::Options { jobs: 1, no_cache: true, ..zustc::Options::default() }).check(&src);
     // (a thread that lives through the check: it waits until the check is done)
     let (done, wait) = std::sync::mpsc::channel::<()>();
     let (up, started) = std::sync::mpsc::channel::<()>();
@@ -85,9 +85,9 @@ fn threaded_host_checks_in_process() {
         let _ = wait.recv();
     });
     started.recv().unwrap();
-    let f0 = zustc::driver2::forks();
-    let many = zustc::Session2::new(zustc::Options2 { jobs: 4, no_cache: true, ..zustc::Options2::default() }).check(&src);
-    let f1 = zustc::driver2::forks();
+    let f0 = zustc::session::forks();
+    let many = zustc::Session::new(zustc::Options { jobs: 4, no_cache: true, ..zustc::Options::default() }).check(&src);
+    let f1 = zustc::session::forks();
     done.send(()).unwrap();
     other.join().unwrap();
     assert_eq!(f1, f0, "a threaded host forked");

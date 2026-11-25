@@ -1,9 +1,9 @@
-//! driver2 (syn・Cranelift を使わないドライバ) のキャッシュ。cache.rs と同じ考え方で、外部クレート (zstd) を使わない:
+//! session のキャッシュ (ディスクでは `<出力>.cache`)。外部クレート (zstd) を使わない:
 //! - キー: 128 bit のハッシュ (下位 64 bit をファイルに書く)
 //! - 値: アイテムの要約、または関数の機械語 + シンボリックな再配置 (acg::Blob。呼び先のインスタンスは (元の関数名, 型引数) で書く)
 //! - 保存するときは今回のビルドで使ったエントリだけを書く (古いものは自然に消える)
 //!
-//! Blob の直列化は fork した子プロセスからコンパイル結果を受け取るのにも使う (driver2 の並列化)。
+//! Blob の直列化は fork した子プロセスからコンパイル結果を受け取るのにも使う (session の並列化)。
 
 use std::sync::Mutex;
 
@@ -23,7 +23,7 @@ unsafe extern "C" {
 }
 
 /// キャッシュファイル: MAGIC, エントリの数 (可変長), (キーの下位 64 bit, 長さ (可変長), 中身) *
-pub struct Cache2 {
+pub struct BuildCache {
     data: Vec<u8>,
     index: FxMap<u64, (usize, usize)>,
 }
@@ -94,15 +94,15 @@ fn put_bytes(out: &mut Vec<u8>, b: &[u8]) {
     out.extend_from_slice(b);
 }
 
-impl Cache2 {
-    pub fn empty() -> Cache2 {
-        Cache2 { data: vec![], index: FxMap::default() }
+impl BuildCache {
+    pub fn empty() -> BuildCache {
+        BuildCache { data: vec![], index: FxMap::default() }
     }
 
     /// ファイルを読む (読めない・形式が違うなら空)
-    pub fn open(path: &std::path::Path) -> Cache2 {
+    pub fn open(path: &std::path::Path) -> BuildCache {
         let data = std::fs::read(path).unwrap_or_default();
-        let mut c = Cache2::empty();
+        let mut c = BuildCache::empty();
         if data.len() < 8 || &data[..8] != MAGIC {
             return c;
         }
@@ -422,25 +422,25 @@ pub fn decode_blob(d: &[u8], prog: &Program, insts: &Mutex<Insts>) -> Option<Blo
 
 #[cfg(test)]
 mod save_tests {
-    use super::Cache2;
+    use super::BuildCache;
 
     /// save writes through a tmp file of this process's own and leaves none behind; open reads back what was saved.
     /// (Two processes saving at once each rename their own complete file: formal/tla/CacheSave.tla)
     #[test]
     fn save_then_open() {
-        let dir = std::env::temp_dir().join(format!("cache2_save_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("build_cache_save_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("p.crcache2");
+        let path = dir.join("p.cache");
         // (a tmp file of the name every process used before: it is not ours, and is left alone)
-        std::fs::write(dir.join("p.crcache2.tmp"), b"partial").unwrap();
-        Cache2::save(&path, &[(1, b"one".as_slice()), (2, b"two".as_slice())]).unwrap();
-        let c = Cache2::open(&path);
+        std::fs::write(dir.join("p.cache.tmp"), b"partial").unwrap();
+        BuildCache::save(&path, &[(1, b"one".as_slice()), (2, b"two".as_slice())]).unwrap();
+        let c = BuildCache::open(&path);
         assert_eq!(c.get(1), Some(b"one".as_slice()));
         assert_eq!(c.get(2), Some(b"two".as_slice()));
         let mut names: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         names.sort();
-        assert_eq!(names, ["p.crcache2", "p.crcache2.tmp"]);
+        assert_eq!(names, ["p.cache", "p.cache.tmp"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use zustc::driver2::{Options2, Session2};
+use zustc::session::{Options, Session};
 
 mod stamp;
 
@@ -44,7 +44,7 @@ fn die(msg: String) -> ! {
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut args = argv.iter().cloned().peekable();
-    let mut o = Options2::default();
+    let mut o = Options::default();
     let mut input = PathBuf::new();
     let mut output = PathBuf::new();
     let mut mode = "build";
@@ -120,10 +120,10 @@ fn main() {
         }
     }
     if mode == "workspace" {
-        let crates = zustc::driver2::read_workspace(&input).unwrap_or_else(|e| die(e));
+        let crates = zustc::session::read_workspace(&input).unwrap_or_else(|e| die(e));
         let out_dir = if output.as_os_str().is_empty() { input.parent().map(|d| d.join("target")).unwrap_or("target".into()) } else { output };
-        // (キャッシュはクレートごとに out_dir/<名前>.crcache2)
-        match Session2::new(o).build_workspace(&crates, &out_dir) {
+        // (キャッシュはクレートごとに out_dir/<名前>.cache)
+        match Session::new(o).build_workspace(&crates, &out_dir) {
             Ok(_) => std::process::exit(0),
             Err(e) => die(e),
         }
@@ -139,7 +139,7 @@ fn main() {
         } else {
             src
         };
-        let mut s = Session2::new(Options2 { no_cache: true, ..o });
+        let mut s = Session::new(Options { no_cache: true, ..o });
         // (a crate of one file: the `extern crate` items the configuring blanked, in their places in it (the loader
         // drops them when an expansion moved them))
         // (the root file's first malformed `cfg`, at its line in the combined source: other files' lines come before
@@ -179,9 +179,9 @@ fn main() {
         let _ = std::fs::remove_file(&sp);
     }
     let no_cache = o.no_cache;
-    let mut s = Session2::new(o);
+    let mut s = Session::new(o);
     let mut cp = output.as_os_str().to_owned();
-    cp.push(".crcache2");
+    cp.push(".cache");
     let cp = PathBuf::from(cp);
     s.load_cache(&cp);
     match s.build_path(&input, "src/main.rs", &output) {

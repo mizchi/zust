@@ -1,4 +1,4 @@
-//! driver2 の Cranelift バックエンド: minclif の FunctionBuilder が記録した命令の列 (acg が呼んだ順) を、
+//! session の Cranelift バックエンド: minclif の FunctionBuilder が記録した命令の列 (acg が呼んだ順) を、
 //! Cranelift の IR に組み立て直してコンパイルする。acg・キャッシュ・.o の書き出しは minclif と同じものを使うので、
 //! 「同じフロントエンド・同じ命令の列」でバックエンドだけを比べられる (minclif と Cranelift)。
 //!

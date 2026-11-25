@@ -3,7 +3,7 @@
 //! - [`compile`] has the same shape as the Cranelift backend (zust-clif): it reads the instructions minclif's
 //!   FunctionBuilder recorded (in the order acg made them) and returns one function's "code" with relocations. Here
 //!   the code is a wasm function body, so caching, the fork-parallel compile, ICF and the object layout of
-//!   driver2/build.rs work unchanged.
+//!   session/build.rs work unchanged.
 //! - [`write_module`] takes the functions and data that build.rs would have written into an ELF object and writes
 //!   one wasm module instead (zustc compiles whole programs, so no wasm linker is needed).
 //!

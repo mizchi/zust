@@ -5,7 +5,7 @@ import os, shutil, statistics, subprocess, sys, time
 
 ZUSTC = os.path.abspath("target/release/zustc")
 W = os.path.abspath("out/runtime")
-# (既定は driver2 (自前のフロントエンド) + Cranelift。--backend=minclif で minclif。
+# (既定は session (自前のフロントエンド) + Cranelift。--backend=minclif で minclif。
 #  MINCLIF_NO_REGALLOC は minclif のレジスタ割り当てなし)
 CONFIGS = [
     ("minclif -O (割り当てなし)", lambda s, o: ["env", "MINCLIF_NO_REGALLOC=1", ZUSTC, s, "-o", o, "--backend=minclif", "-O", "--no-cache"]),

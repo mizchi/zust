@@ -22,7 +22,7 @@ use crate::toml;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use zustc::driver2::{CrateSpec, Options2, Session2};
+use zustc::session::{CrateSpec, Options, Session};
 
 type R<T> = Result<T, String>;
 
@@ -331,11 +331,11 @@ impl<'a> Runner<'a> {
             test: false,
         });
         let zd = dir.join("zust");
-        let mut opts = Options2 { backend: Some(zustc::clif_backend::compile), ..Options2::default() };
+        let mut opts = Options { backend: Some(zustc::clif_backend::compile), ..Options::default() };
         if let Some(j) = self.jobs {
             opts.jobs = j;
         }
-        Session2::new(opts).build_workspace(&crates, &zd)?;
+        Session::new(opts).build_workspace(&crates, &zd)?;
         Ok(zd.join("build-script-build"))
     }
 

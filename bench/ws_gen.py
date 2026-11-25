@@ -1,4 +1,4 @@
-"""複数クレート・複数ファイルのワークスペースを作る (driver2 の `zustc build` と rustc の比較用)。
+"""複数クレート・複数ファイルのワークスペースを作る (session の `zustc build` と rustc の比較用)。
 
 usage: python3 bench/ws_gen.py <dir> [--crates K] [--files F] [--fns N]
 

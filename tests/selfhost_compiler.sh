@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # セルフホストの仕上げ: syn・Cranelift を使わないコンパイラ全体 (tests/selfhost/build_compiler.py が 1 ファイルにまとめたもの) を
-# rustc と zustc (driver2) の両方でコンパイルし、できた 2 つのコンパイラで tests/probe / examples / tests/acg をコンパイルして
+# rustc と zustc (session) の両方でコンパイルし、できた 2 つのコンパイラで tests/probe / examples / tests/acg をコンパイルして
 #   - 2 つのコンパイラが出す .o が同じバイト列か
 #   - それを実行した出力が同じか
 # を確かめる。さらに zustc 版のコンパイラで自分自身 (compiler_main.rs) をもう一度コンパイルし (2 段目)、

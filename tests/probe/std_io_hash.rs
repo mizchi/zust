@@ -8,7 +8,7 @@ fn parse(s: &str) -> Res<i32> {
 }
 fn main() {
     // (a file of this build's own, beside the executable: the tests that build and run the probes at the same time
-    // (driver2, driver2_inline, driver2_cranelift) each have their own, where a fixed /tmp path was shared)
+    // (run_examples, opt_inline, cranelift_backend) each have their own, where a fixed /tmp path was shared)
     let path = &format!("{}.txt", std::env::args().next().unwrap());
     fs::write(path, "alpha\nbeta\n").unwrap();
     let s = fs::read_to_string(path).unwrap();

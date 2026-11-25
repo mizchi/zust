@@ -1,9 +1,9 @@
 //! 最小の LSP サーバ (stdio)。対応: initialize / didOpen / didChange (全文同期) / didClose /
 //! shutdown / exit / textDocument/documentSymbol / workspace/symbol / textDocument/definition / textDocument/references /
 //! textDocument/hover / textDocument/completion。
-//! 開く・変更するたびに [`Session2::check`] を走らせて publishDiagnostics を返す。
+//! 開く・変更するたびに [`Session::check`] を走らせて publishDiagnostics を返す。
 //!
-//! ドキュメントごとに Session2 を 1 つ持ち、キャッシュはメモリ上だけに置く。
+//! ドキュメントごとに Session を 1 つ持ち、キャッシュはメモリ上だけに置く。
 //! 変わっていない関数は「検査済み」の印で飛ばすので、応答時間は変更量に比例する。
 //! シンボルは zust_ide::symbols で字句の列から読む (構文が壊れていても読める所まで)。workspace/symbol・定義・参照は
 //! 開いているドキュメントと、ワークスペースの根の下の .rs ファイル (更新時刻と大きさで覚える) の索引
@@ -19,13 +19,13 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use zust_core::driver2::{Options2, Session2};
+use zust_core::session::{Options, Session};
 use zust_ide::navigate::{self, FileIndex, Loc};
 use zust_ide::symbols::{self, LineIndex, Symbol};
 
 /// 開いているドキュメント
 struct Doc {
-    s: Session2,
+    s: Session,
     /// 本文と、それに対する診断・シンボル (シンボルは求められたときに作る)
     text: String,
     diags: Vec<Value>,
@@ -217,7 +217,7 @@ impl Server {
         let doc = self
             .docs
             .entry(uri.clone())
-            .or_insert_with(|| Doc { s: Session2::new(Options2 { jobs: 1, ..Default::default() }), text: String::new(), diags: vec![], syms: None, idx: None });
+            .or_insert_with(|| Doc { s: Session::new(Options { jobs: 1, ..Default::default() }), text: String::new(), diags: vec![], syms: None, idx: None });
         // 本文が同じ (保存しただけ等) なら前回の診断をそのまま返す。比較は memcmp なのでハッシュより安い
         if !doc.text.is_empty() && doc.text == text {
             return publish(&uri, version, doc.diags.clone());

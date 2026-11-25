@@ -73,7 +73,7 @@ fn bench_patterns_like_rustc() {
         assert!(r.status.success(), "rustc's build of {name} exited with {:?}: {}", r.status.code(), String::from_utf8_lossy(&r.stderr));
         let want = r.stdout;
         let exe = dir.join(name);
-        if let Err(e) = zustc::driver2::build(&src, &exe, false, None) {
+        if let Err(e) = zustc::session::build(&src, &exe, false, None) {
             bad.push(format!("{name}: build: {e}"));
             continue;
         }

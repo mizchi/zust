@@ -425,7 +425,7 @@ def main():
 
 def target(tn, tmp):
     """対象: synth (生成した 40 モジュール)・fixture (ide のテストの fixture のワークスペース)・zustc (このリポジトリの
-    driver2.rs を開く)・ide (このリポジトリの navigate.rs を開く: 字句の部品が多い別の書き方のファイル)"""
+    session.rs を開く)・ide (このリポジトリの navigate.rs を開く: 字句の部品が多い別の書き方のファイル)"""
     if tn == "synth":
         return make_synth(os.path.join(tmp, "synth"))
     if tn == "fixture":

@@ -74,7 +74,7 @@ zustc hello.rs -o hello
 
 - **Output path:** without `-o`, the output goes next to the input with the extension removed (`hello`).
 - **Files next to the output:**
-  - `hello.crcache2`: the cache
+  - `hello.cache`: the cache
   - `hello.o`: the object file
   - `hello.link`: the saved link line
 - **Rebuilds:** only the functions that changed are recompiled. If nothing changed, zustc does not even link.
