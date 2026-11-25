@@ -3613,11 +3613,14 @@ compile-fail	implied-bounds/references-err.rs
 check-pass	implied-bounds/trait-where-clause-implied.rs
 compile-fail	imports/ambiguous-1.rs
 compile-fail	imports/ambiguous-10.rs
+compile-fail	imports/ambiguous-12.rs
 compile-fail	imports/ambiguous-13.rs
 compile-fail	imports/ambiguous-14.rs
 compile-fail	imports/ambiguous-15.rs
 compile-fail	imports/ambiguous-16.rs
+compile-fail	imports/ambiguous-17.rs
 compile-fail	imports/ambiguous-3.rs
+compile-fail	imports/ambiguous-4-extern.rs
 compile-fail	imports/ambiguous-5.rs
 compile-fail	imports/ambiguous-6.rs
 compile-fail	imports/ambiguous-7.rs
@@ -3714,6 +3717,8 @@ compile-fail	imports/issue-32354-suggest-import-rename.rs
 compile-fail	imports/issue-33464.rs
 compile-fail	imports/issue-37887.rs
 compile-fail	imports/issue-38293.rs
+compile-fail	imports/issue-4366-2.rs
+compile-fail	imports/issue-4366.rs
 compile-fail	imports/issue-45799-bad-extern-crate-rename-suggestion-formatting.rs
 compile-fail	imports/issue-45829/import-self.rs
 compile-fail	imports/issue-45829/import-twice.rs
@@ -3781,6 +3786,7 @@ compile-fail	indexing/index-with-wrong-type.rs
 compile-fail	indexing/index_message.rs
 compile-fail	indexing/indexing-integral-types.rs
 compile-fail	indexing/indexing-requires-a-uint.rs
+compile-fail	indexing/point-at-index-for-obligation-failure.rs
 run-pass	indexing/ref-array-indexing.rs
 compile-fail	inference/ambiguity-errors-single-diagnostic.rs
 compile-fail	inference/ambiguous_type_parameter.rs
@@ -8008,6 +8014,7 @@ compile-fail	traits/error-reporting/conditionally-implemented-trait-158423.rs
 compile-fail	traits/error-reporting/incomplete-partial-ord-impl.rs
 compile-fail	traits/eval-caching-error-region.rs
 compile-fail	traits/explicit-reference-cast-unrelated-leaf.rs
+compile-fail	traits/explicit-reference-cast.rs
 run-pass	traits/false-ambiguity-where-clause-builtin-bound.rs
 check-pass	traits/fn-pointer/hrtb-assoc-fn-traits-28994.rs
 compile-fail	traits/fn-pointer/suggest-wrap-parens-method.rs
