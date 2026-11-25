@@ -2445,7 +2445,12 @@ impl Cx<'_> {
         if segs.len() == 2 {
             // (through an alias of a primitive too: `type Mask = u16;` and `Mask::BITS`)
             // (a type alias is not hidden by a value binding of the name: another namespace)
-            let alias = || Ty::from_suffix(&self.prog.prim_of_name(&segs[0]));
+            // (an alias of a primitive, or one of core::ffi's C types: `c_int::MAX` in libc 0.2's types.rs)
+            let alias = || {
+                let prim = self.prog.prim_of_name(&segs[0]);
+                // (the integer ones: `c_float::MAX` / `c_double::MAX` are not integer bounds)
+                Ty::from_suffix(&prim).or_else(|| crate::ast_types::ffi_alias(&prim).filter(|t| t.is_int() && !self.prog.struct_index.contains_key(prim.as_str())))
+            };
             if let Some(t) = Ty::from_suffix(&segs[0]).or(if segs[0] == "char" { Some(Ty::Char) } else { None }).or_else(alias) {
                 if let Some(v) = crate::program::prim_assoc_const(t, &segs[1]) {
                     let t = if segs[1] == "BITS" { Ty::U32 } else { t };

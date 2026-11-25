@@ -1306,7 +1306,9 @@ impl Cx<'_> {
             return self.prog.consts[ci as usize].stat.is_none();
         }
         let Expr::Path(None, path) = path_expr(n) else { return false };
-        self.prog.variant_by_p(&PPath::of(&path), self.self_sid).is_some()
+        let pp = PPath::of(&path);
+        // (or a unit struct: `let Unit = u;` binds nothing, nor moves u)
+        self.prog.variant_by_p(&pp, self.self_sid).is_some() || self.prog.struct_by_p(&pp, self.self_sid).is_some_and(|s| self.unit_struct_pat(n, Ty::Struct(s)))
     }
 }
 
@@ -1744,6 +1746,7 @@ impl Cx<'_> {
         // captures none, so its hidden type's regions are 'static too (E0700 in rustc). Not with type parameters,
         // which it captures)
         self.bk.lint_mut = self.prog.deny_unused_mut && self.user_code && self.bk_on() && self.bk.level >= 2;
+        self.bk.ret_impl = matches!(&f.sig.ret, Some(crate::parse::Ty::Impl(_)));
         self.bk.ret_no_capture = self.bk_on()
             && self.user_code
             && self.prog.opaque.contains(&self.rg.base)
@@ -2208,6 +2211,11 @@ impl Cx<'_> {
                 Stmt::Let(pat, ann_ty, init, els, ..) if !is_simple_let(pat) || els.is_some() || self.names_variant_or_const(pat) => {
                     // 分解する let (`let S { x, y } = s;`): 反駁不能パターンとして束縛だけ行う
                     let Some(init) = init else {
+                        // (a pattern that binds no name declares nothing: `let S { field: _, .. };`, libc 0.2's
+                        //  `offset_of!`, whose check that the field exists rustc makes and zustc does not yet)
+                        if matches!(pat, Pat::Struct(..)) && !pat_binds_any(pat) {
+                            continue;
+                        }
                         return err(SP, "`let` without initializer is not supported");
                     };
                     let ann = ann_ty.as_ref().and_then(|t| self.parse_ty(t).ok());
@@ -2297,13 +2305,16 @@ impl Cx<'_> {
                     self.bk.scrut_place = scrut_saved.1;
                     self.rg.scrut = scrut_saved.2;
                     let ob = self.owned_binds;
+                    let pm = self.bk.pat_moves;
                     let pre = if is_place_expr(init) { self.moved_flag(init) } else { None };
                     self.bk_bind_begin();
                     let r = self.pat_bind(pat, place, BindMode::Move);
                     self.bk_bind_end();
                     r?;
-                    if self.owned_binds > ob {
+                    if self.owned_binds > ob || self.bk.pat_moves > pm {
                         self.deref_move_check(init)?;
+                    }
+                    if self.owned_binds > ob {
                         match pre {
                             Some(f) => self.clear_flag(f),
                             None => {
@@ -3393,6 +3404,17 @@ pub(crate) fn plainly_irrefutable(p: &Pat) -> bool {
 }
 
 /// p binds a name by `ref mut` somewhere
+/// Whether a pattern binds a name (an identifier pattern anywhere in it)
+pub(crate) fn pat_binds_any(p: &Pat) -> bool {
+    match p {
+        Pat::Ident(..) => true,
+        Pat::Tuple(ps) | Pat::TupleStruct(_, ps) | Pat::Slice(ps) | Pat::Or(ps) => ps.iter().any(pat_binds_any),
+        Pat::Struct(_, fs, _) => fs.iter().any(|(_, q)| pat_binds_any(q)),
+        Pat::Ref(_, q) => pat_binds_any(q),
+        _ => false,
+    }
+}
+
 pub(crate) fn pat_binds_ref_mut(p: &Pat) -> bool {
     match p {
         Pat::Ident(r, m, _, sub) => (*r && *m) || sub.as_deref().is_some_and(pat_binds_ref_mut),
