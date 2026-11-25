@@ -253,7 +253,7 @@ impl Cx<'_> {
                 match (t0, text) {
                     (Ty::Bool, "false") => N::Ctor(0, vec![]),
                     (Ty::Bool, "true") => N::Ctor(1, vec![]),
-                    (t, s) if self.ctors(t).is_none() => N::Lit(Some(lit_value(s))),
+                    (t, s) if self.ctors(t).is_none() => N::Lit(Some(wrap_unsigned(lit_value(s), t))),
                     _ => return Err(Unknown),
                 }
             }
@@ -435,6 +435,19 @@ fn show(name: &str, args: &[String], tuple: bool) -> String {
         return if tuple { "()".into() } else { name.to_string() };
     }
     format!("{name}({})", args.join(", "))
+}
+
+/// an unsigned integer literal's value as the type holds it: `256` of a `u8` is `0`, as rustc compares patterns (a
+/// literal out of the type's range is the overflowing_literals lint, which a crate may allow)
+fn wrap_unsigned(v: String, t: Ty) -> String {
+    let w = t.bits();
+    if !matches!(t, Ty::U8 | Ty::U16 | Ty::U32 | Ty::U64 | Ty::Usize) || w >= 128 {
+        return v;
+    }
+    match v.parse::<u128>() {
+        Ok(n) => (n & ((1u128 << w) - 1)).to_string(),
+        Err(_) => v,
+    }
 }
 
 /// a literal pattern's value for telling literals apart: an integer's in decimal (`0x2a` is `42`), else its text

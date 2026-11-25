@@ -6357,6 +6357,7 @@ run-pass	pattern/usefulness/integer-ranges/regression-switchint-sorting-with-ran
 run-pass	pattern/usefulness/irrefutable-let-patterns.rs
 run-pass	pattern/usefulness/irrefutable-unit.rs
 compile-fail	pattern/usefulness/issue-105479-str-non-exhaustiveness.rs
+compile-fail	pattern/usefulness/issue-13727.rs
 compile-fail	pattern/usefulness/issue-15129.rs
 compile-fail	pattern/usefulness/issue-2111.rs
 compile-fail	pattern/usefulness/issue-30240-b.rs

@@ -3183,3 +3183,12 @@ fn a_name_a_macro_argument_writes_is_reported_at_the_argument() {
     let d = s.check("macro_rules! foo {\n    ($id: ident) => {\n        $id\n    }\n}\nfn main() {\n    foo!(\n        x\n    );\n}\n");
     assert_eq!(d.first().map(|d| (d.line, d.col)), Some((8, 9)), "{d:?}");
 }
+
+#[test]
+fn literal_patterns_wrap_to_the_scrutinee_type() {
+    // (rustc 1.100: with overflowing_literals allowed, `256` and `512` of a `u8` are both 0, so the second arm is
+    // unreachable under deny(unreachable_patterns))
+    let mut s = Session2::new(Options2 { jobs: 1, ..Options2::default() });
+    let d = s.check("#![allow(overflowing_literals)]\n#![deny(unreachable_patterns)]\nfn t(v: u8) {\n    match v {\n        256 => {}\n        512 => {}\n        _ => {}\n    }\n}\nfn main() { t(1); }\n");
+    assert_eq!(d.first().map(|d| (d.line, d.msg.as_str())), Some((6, "unreachable pattern")), "{d:?}");
+}
