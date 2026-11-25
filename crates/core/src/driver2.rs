@@ -9994,50 +9994,81 @@ fn x_kind<'a>(mut w: impl Iterator<Item = &'a str>) -> &'a str {
 /// E0437 / E0438: member `name` (a type when `ty`) of the trait impl whose header is item `h`, when the impl is of a
 /// trait of the program's (one of that name) that declares no type or const of that name
 #[cold]
-fn not_a_member<'a>(src: &'a str, items: &[SrcItem], it: &SrcItem, h: u32, ty: bool, name: &str, traits: &mut Option<FxMap<&'a str, Option<u32>>>) -> Option<String> {
-    use crate::lexer::ItemKind as K;
-    let hi = items.get(h as usize)?;
-    let head = src.get(hi.start..hi.end)?;
-    let head = item_text(head).strip_prefix("unsafe ").map_or(item_text(head), |r| r.trim_start());
-    let rest = head.strip_prefix("impl")?;
-    if !hi.idents.iter().any(|&(a, b)| src.get(a as usize..b as usize) == Some("for")) {
+fn not_a_member<'a>(src: &'a str, items: &[SrcItem], it: &SrcItem, h: u32, ty: bool, name: &str, traits: &mut Option<TraitMembers<'a>>) -> Option<String> {
+    let TraitMembers { traits: tmap, decl, by_header } = traits.get_or_insert_with(|| TraitMembers::new(src, items));
+    let th = (*by_header.entry(h).or_insert_with(|| {
+        let tr = impl_trait_name(src, items.get(h as usize)?)?;
+        (*tmap.get(tr)?)
+    }))?;
+    if decl.contains(&(th, ty, name)) {
         return None;
     }
-    let tr = impl_self_name(rest);
-    let map = traits.get_or_insert_with(|| {
-        let mut m: FxMap<&str, Option<u32>> = FxMap::default();
-        for (i, t) in items.iter().enumerate() {
-            if t.kind != K::TraitHeader {
-                continue;
-            }
-            let mut w = t.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or(""));
-            if w.find(|&x| x == "trait").is_some() {
-                if let Some(n) = w.next() {
-                    m.entry(n).and_modify(|e| *e = None).or_insert(Some(i as u32));
-                }
-            }
-        }
-        m
-    });
-    let th = (*map.get(tr)?)?;
-    // (a trait's member by its text, past its attributes and visibility: `#[doc(hidden)] type Buffer: 'static;`)
-    let kw = if ty { "type" } else { "const" };
-    let declared = items.iter().any(|m| {
-        m.kind == K::TraitMember(th)
-            && src.get(m.start..m.end).and_then(|t| item_text(t).strip_prefix(kw)).is_some_and(|r| {
-                let r = r.trim_start();
-                r.strip_prefix(name).is_some_and(|after| !after.starts_with(|c: char| c.is_alphanumeric() || c == '_'))
-            })
-    });
-    if declared {
-        return None;
-    }
+    let tr = impl_trait_name(src, items.get(h as usize)?)?;
     let col = it.start - src[..it.start].rfind('\n').map_or(0, |k| k + 1) + 1;
     Some(if ty {
         format!("{}:{col}: type `{name}` is not a member of trait `{tr}` (E0437)", it.line)
     } else {
         format!("{}:{col}: const `{name}` is not a member of trait `{tr}` (E0438)", it.line)
     })
+}
+
+/// The trait's name of a trait impl's header (`impl<T> Tr<T> for X {` -> `Tr`); None for an inherent impl
+fn impl_trait_name<'a>(src: &'a str, hi: &SrcItem) -> Option<&'a str> {
+    let head = src.get(hi.start..hi.end)?;
+    let head = item_text(head).strip_prefix("unsafe ").map_or(item_text(head), |r| r.trim_start());
+    let rest = head.strip_prefix("impl")?;
+    if !hi.idents.iter().any(|&(a, b)| src.get(a as usize..b as usize) == Some("for")) {
+        return None;
+    }
+    Some(impl_self_name(rest))
+}
+
+/// The program's traits, read once for E0437 / E0438: each name's header (None for a name two traits have), the
+/// (trait, a type?, name) of their associated types and consts, and each impl header's trait
+struct TraitMembers<'a> {
+    traits: FxMap<&'a str, Option<u32>>,
+    decl: FxSet<(u32, bool, &'a str)>,
+    by_header: FxMap<u32, Option<u32>>,
+}
+
+impl<'a> TraitMembers<'a> {
+    #[cold]
+    fn new(src: &'a str, items: &[SrcItem]) -> Self {
+        use crate::lexer::ItemKind as K;
+        let mut traits: FxMap<&str, Option<u32>> = FxMap::default();
+        let mut decl = FxSet::default();
+        for (i, t) in items.iter().enumerate() {
+            match t.kind {
+                K::TraitHeader => {
+                    let mut w = t.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or(""));
+                    if w.find(|&x| x == "trait").is_some() {
+                        if let Some(n) = w.next() {
+                            traits.entry(n).and_modify(|e| *e = None).or_insert(Some(i as u32));
+                        }
+                    }
+                }
+                // (a member by its text, past its attributes and visibility: `#[doc(hidden)] type Buffer: 'static;`)
+                K::TraitMember(th) => {
+                    let text = item_text(src.get(t.start..t.end).unwrap_or(""));
+                    let (is_ty, r) = match (text.strip_prefix("type"), text.strip_prefix("const")) {
+                        (Some(r), _) => (true, r),
+                        (_, Some(r)) => (false, r),
+                        _ => continue,
+                    };
+                    if !r.starts_with(char::is_whitespace) {
+                        continue;
+                    }
+                    let r = r.trim_start();
+                    let n = &r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len())];
+                    if !n.is_empty() && n != "fn" {
+                        decl.insert((th, is_ty, n));
+                    }
+                }
+                _ => {}
+            }
+        }
+        TraitMembers { traits, decl, by_header: FxMap::default() }
+    }
 }
 
 /// Errors of an item's declaration, read from its text: an inherent impl of a type of std (E0116: `impl Vec<u8> {}`,
@@ -10422,8 +10453,8 @@ fn unused_alias_param_in(src: &str, items: &[SrcItem], it: &SrcItem, lt: usize) 
 fn duplicate_impl_item(src: &str, items: &[SrcItem]) -> Option<String> {
     use crate::lexer::ItemKind as K;
     let mut seen: crate::fxhash::FxSet<(u32, bool, &str)> = Default::default();
-    // (the program's traits by name, read once: their header's index, or None for a name two traits have)
-    let mut traits: Option<FxMap<&str, Option<u32>>> = None;
+    // (the program's traits and their members, read once)
+    let mut traits: Option<TraitMembers> = None;
     for it in items {
         let K::ImplMember(h) = it.kind else { continue };
         let ids = || it.idents.iter().map(|&(a, b)| src.get(a as usize..b as usize).unwrap_or(""));
