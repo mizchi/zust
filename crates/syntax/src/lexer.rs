@@ -2031,21 +2031,17 @@ pub fn rename_module_collisions_fix(src: &str, crates: &[String], fix: &mut Vec<
         }
     }
     let in_crate = |m: usize| -> bool { m != usize::MAX && mods[m].0.first().is_some_and(|r| crates.iter().any(|c| c.as_bytes() == r.as_slice())) };
+    // (each name's scopes, read once (a scan of all the definitions per name is quadratic in a crate of many items):
+    // the first scope defining it, whether another scope does too, whether one that is not the root does)
+    let mut scopes_of: LMap<&[u8], (usize, bool, bool)> = LMap::default();
+    for d in &defs {
+        let e = scopes_of.entry(d.0.as_slice()).or_insert((d.1, false, false));
+        e.1 |= e.0 != d.1;
+        e.2 |= d.1 != usize::MAX;
+    }
+    // (a name two scopes define, or one a module defines that a `use` brings in from std too)
     let colliding = |n: &[u8]| -> bool {
-        if std_names.iter().any(|x| x.as_slice() == n) && defs.iter().any(|d| d.0.as_slice() == n && d.1 != usize::MAX) {
-            return true;
-        }
-        let mut first: Option<usize> = None;
-        for d in &defs {
-            if d.0.as_slice() == n {
-                match first {
-                    None => first = Some(d.1),
-                    Some(f) if f != d.1 => return true,
-                    _ => {}
-                }
-            }
-        }
-        false
+        scopes_of.get(n).is_some_and(|&(_, multi, inner)| multi || inner && std_names.iter().any(|x| x.as_slice() == n))
     };
     let new_name = |m: usize, n: &[u8]| -> Vec<u8> {
         let mut v = Vec::new();
