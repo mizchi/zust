@@ -411,6 +411,15 @@ impl<T: Clone> Option<&T> {
     }
 }
 
+impl<T> Option<Option<T>> {
+    pub fn flatten(self) -> Option<T> {
+        match self {
+            Some(inner) => inner,
+            None => None,
+        }
+    }
+}
+
 // `x.clone()` (derive(Clone) / タプル / 配列 / 整数など): 本体は型ごとに codegen が作る (フィールドごとに clone)
 fn __exr_clone<T>(x: &T) -> T {
     unsafe { (x as *const T).read() }
