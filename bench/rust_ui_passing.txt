@@ -2134,6 +2134,7 @@ run-pass	derives/derive-hygiene-struct-builder.rs
 check-pass	derives/derive-macro-const-default.rs
 check-pass	derives/derive-multiple-with-packed.rs
 check-pass	derives/derive-on-drop-type.rs
+compile-fail	derives/derive-on-trait-item-or-impl-item.rs
 check-pass	derives/derive-static-str-field.rs
 run-pass	derives/derive-type-with-reference.rs
 check-pass	derives/derive-with-where-bounds.rs
@@ -2144,6 +2145,7 @@ run-pass	derives/deriving-in-fn.rs
 check-pass	derives/deriving-meta-empty-trait-list.rs
 compile-fail	derives/deriving-meta-unknown-trait.rs
 compile-fail	derives/deriving-no-inner-impl-error-message.rs
+compile-fail	derives/deriving-non-type.rs
 compile-fail	derives/deriving-with-repr-packed-2.rs
 run-pass	derives/deriving-with-repr-packed-3.rs
 compile-fail	derives/eq-ord/derive-eq-check-all-variants.rs
@@ -2168,6 +2170,7 @@ compile-fail	derives/imperfect-derive-advanced.rs
 compile-fail	derives/imperfect-derive-copy.rs
 compile-fail	derives/imperfect-derive-phantom.rs
 compile-fail	derives/issue-36617.rs
+compile-fail	derives/issue-43023.rs
 compile-fail	derives/issue-91492.rs
 compile-fail	derives/issue-91550.rs
 check-pass	derives/no-ice-on-derived-copy-with-associated-type-field.rs
@@ -2835,6 +2838,7 @@ compile-fail	feature-gates/feature-gate-xop_target_feature.rs
 compile-fail	feature-gates/feature-gate-yeet_expr.rs
 check-pass	feature-gates/issue-43106-gating-of-deprecated.rs
 compile-fail	feature-gates/issue-43106-gating-of-derive-2.rs
+compile-fail	feature-gates/issue-43106-gating-of-derive.rs
 check-pass	feature-gates/issue-43106-gating-of-macro_escape.rs
 compile-fail	feature-gates/issue-43106-gating-of-macro_use.rs
 compile-fail	feature-gates/issue-43106-gating-of-proc_macro_derive.rs
@@ -6195,6 +6199,7 @@ check-pass	proc-macro/extern-prelude-extern-crate-proc-macro.rs
 compile-fail	proc-macro/illegal-proc-macro-derive-use.rs
 compile-fail	proc-macro/issue-89566-suggest-fix-invalid-top-level-macro-attr.rs
 compile-fail	proc-macro/macro-namespace-reserved-2.rs
+compile-fail	proc-macro/macros-in-extern-derive.rs
 compile-fail	proc-macro/proc-macro-abi.rs
 compile-fail	proc-macro/pub-at-crate-root.rs
 compile-fail	proc-macro/reserved-macro-names.rs

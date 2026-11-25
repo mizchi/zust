@@ -4020,6 +4020,9 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
                         if let Some(&(at, name, _)) = leading(&text[k..]).iter().find(|&&(_, n, inp)| matches!(n, "link_name" | "link_ordinal") && !check(n, inp)) {
                             return Some((k + at, format!("malformed `{name}` attribute input")));
                         }
+                        if let Some(&(at, _, _)) = leading(&text[k..]).iter().find(|&&(_, n, _)| n == "derive") {
+                            return Some((k + at, "`derive` may only be applied to `struct`s, `enum`s and `union`s (E0774)".to_string()));
+                        }
                         match text[k..].find(';') {
                             Some(e) => k += e + 1,
                             None => break,
@@ -4138,6 +4141,11 @@ fn malformed_attr(src0: &str, split: &str, items: &[SrcItem], standalone: bool, 
             }
         };
         for &(at, name, input) in &attrs {
+            // (E0774: a derive is a struct's, an enum's or a union's)
+            if name == "derive" && !matches!(kw, "struct" | "enum" | "union") {
+                let line = it.line + text[..at].matches('\n').count();
+                return Some(format!("{line}:1: `derive` may only be applied to `struct`s, `enum`s and `union`s (E0774)"));
+            }
             // (a proc macro: a fn of a `proc-macro` crate)
             if matches!(name, "proc_macro" | "proc_macro_derive" | "proc_macro_attribute") && !proc_macro_crate {
                 let line = it.line + text[..at].matches('\n').count();

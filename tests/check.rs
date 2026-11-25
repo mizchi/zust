@@ -2315,3 +2315,17 @@ fn malformed_link_attributes() {
     assert_eq!(first("extern \"C\" {\n    #[link_ordinal(\"x\")]\n    fn foo();\n}\nfn main() {}\n"), Some((2, "malformed `link_ordinal` attribute input".to_string())), "link_ordinal");
     assert_eq!(first("extern \"C\" {\n    #[link_name = \"foo\"]\n    fn bar();\n}\n#[export_name = \"x\"]\npub fn f() {}\nfn main() {}\n"), None, "well formed");
 }
+
+#[test]
+fn derive_on_an_item_of_another_kind() {
+    // (E0774: a derive is a struct's, an enum's or a union's; at the attribute's line as rustc 1.100)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize| Some((l, "`derive` may only be applied to `struct`s, `enum`s and `union`s (E0774)".to_string()));
+    assert_eq!(first("trait Foo {\n    #[derive(Clone)]\n    type Bar;\n}\nfn main() {}\n"), e(2), "a trait's item");
+    assert_eq!(first("#[derive(Debug)]\nfn f() {}\nfn main() {}\n"), e(1), "a fn");
+    assert_eq!(first("extern \"C\" {\n    #[derive(Copy)]\n    fn f();\n}\nfn main() {}\n"), e(2), "an extern block's item");
+    assert_eq!(first("#[derive(Clone, Copy)]\nunion U { f: i32 }\n#[derive(Debug)]\nenum E {}\nfn main() {}\n"), None, "a union and an enum");
+}
