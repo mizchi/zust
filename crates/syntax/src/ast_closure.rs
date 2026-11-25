@@ -495,6 +495,8 @@ impl Free {
                     self.scopes.pop();
                 }
             }
+            // (`stringify!(self)`: its tokens are text, no use of a variable)
+            Expr::Macro(mp, ..) if mp.segs.last().is_some_and(|s| s.name == "stringify") => {}
             Expr::Macro(_, g, sp) => {
                 if let Some(es) = macro_args_at(g, sp.at) {
                     for x in &es {

@@ -1933,7 +1933,26 @@ fn find_calls(
             let inner = if r.start <= r.end && r.end <= text.len() { &text[r.start..r.end] } else { "" };
             if inner.is_empty() || macros.keys().any(|m| inner.contains(m.as_str())) {
                 let brace = g.delimiter() == proc_macro2::Delimiter::Brace;
-                let module = brace && i >= 2 && matches!(&toks[i - 2], TokenTree::Ident(m) if m == "mod");
+                // (a place of items, as expand_cfg's item_scope reads it: the body of a `mod`, `impl`, `trait` or
+                // `extern` block, going back over its head to the item before it; not a fn's or a struct's body)
+                let module = brace && {
+                    let mut k = i;
+                    let mut found = false;
+                    while k > 0 {
+                        k -= 1;
+                        match &toks[k] {
+                            TokenTree::Punct(q) if q.as_char() == ';' => break,
+                            TokenTree::Group(pg) if pg.delimiter() == proc_macro2::Delimiter::Brace => break,
+                            TokenTree::Ident(w) if matches!(w.to_string().as_str(), "fn" | "struct" | "enum" | "union" | "let") => break,
+                            TokenTree::Ident(w) if matches!(w.to_string().as_str(), "mod" | "impl" | "trait" | "extern") => {
+                                found = true;
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                    found
+                };
                 find_calls(g.stream(), macros, text, depth + 1, brace, module, out)?;
             }
         }
