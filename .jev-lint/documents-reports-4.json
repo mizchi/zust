@@ -16,6 +16,14 @@
     "docs_reports_2026-11-25-05-region-check-33.ja": {
       "path": "docs/ja/reports/2026-11-25-05-region-check-33.md",
       "role": "historical"
+    },
+    "docs_reports_2026-11-25-06-parallel-frontend.en": {
+      "path": "docs/reports/2026-11-25-06-parallel-frontend.md",
+      "role": "historical"
+    },
+    "docs_reports_2026-11-25-06-parallel-frontend.ja": {
+      "path": "docs/ja/reports/2026-11-25-06-parallel-frontend.md",
+      "role": "historical"
     }
   },
   "comparisons": [
@@ -39,6 +47,17 @@
       },
       "target": {
         "source": "docs_reports_2026-11-25-05-region-check-33.ja"
+      }
+    },
+    {
+      "id": "docs_reports_2026-11-25-06-parallel-frontend",
+      "topic": "The Japanese file docs/ja/reports/2026-11-25-06-parallel-frontend.md is a faithful translation of docs/reports/2026-11-25-06-parallel-frontend.md",
+      "mode": "translation",
+      "reference": {
+        "source": "docs_reports_2026-11-25-06-parallel-frontend.en"
+      },
+      "target": {
+        "source": "docs_reports_2026-11-25-06-parallel-frontend.ja"
       }
     }
   ]
