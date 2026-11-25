@@ -1,0 +1,2 @@
+import { token, Token } from "./deep/leaf.zsc";
+export fn from_a(s: String) -> Token { token(`a:${s}`) }

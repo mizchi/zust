@@ -766,6 +766,10 @@ impl<'a> Lower<'a> {
                 self.vars.insert(a.clone(), k);
             }
         }
+        // (a `?` returns its `Err` / `None`, which is owned: so is every result then)
+        if !self.copy(&ret) && crate::js::has_try(body) {
+            self.modes.owned_result.insert(rs.clone());
+        }
         let ret_ref = !self.copy(&ret) && !self.modes.owned_result.contains(&rs);
         let b = if self.copy(&ret) {
             self.expr(body)?
@@ -1480,6 +1484,18 @@ impl<'a> Lower<'a> {
             }
             EK::Tuple(_) => not_in_subset(pos, "a tuple"),
             EK::Await(_) | EK::Async(_) => not_in_subset(pos, "`await` / an async closure (a Promise is JS's)"),
+            // (Rust's own `?` would need the std types: a match that returns the `Err` / `None`, rebuilt)
+            EK::Try(x) => {
+                let en = self.info.tries[&e.id].clone();
+                self.used.insert(en.clone());
+                let v = self.expr(x)?;
+                let t = rs_type(&en);
+                val(if en == "Result" {
+                    format!("match {v} {{ {t}::Ok(zs_v) => zs_v, {t}::Err(zs_e) => return {t}::Err(zs_e) }}")
+                } else {
+                    format!("match {v} {{ {t}::Some(zs_v) => zs_v, {t}::None => return {t}::None }}")
+                })
+            }
             // (appended piece by piece: `format!` would pull `core::fmt` into the wasm (about 10 KB). The holes are
             // borrowed through the arguments' path; an integer is written by `zs_push_int`, as JS writes it. A float
             // is written differently by JS and Rust)

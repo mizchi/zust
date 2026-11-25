@@ -1,0 +1,3 @@
+// expect: the prelude's `Option` is left out of this file, because another enum has a variant named like one of its own (None, Some)
+enum Hit { None, Hit(i32) }
+fn b() -> Option<i32> { Some(1) }
