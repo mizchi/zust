@@ -220,7 +220,7 @@ Known differences from rust-analyzer are listed in [CONTRIBUTING.md](CONTRIBUTIN
 
 ## Status
 
-Numbers measured <!-- measured -->2026-11-25, 85eadb7<!-- /measured --> by CI on each push to main. Details:
+Numbers measured <!-- measured -->2026-11-25, 3736248<!-- /measured --> by CI on each push to main. Details:
 [SUPPORT.md](SUPPORT.md) (what is supported) and [PERFORMANCE.md](PERFORMANCE.md) (speed, size, memory, and
 comparisons with rustc and others).
 
@@ -235,7 +235,7 @@ only the tests it can be asked to handle (no nightly features, auxiliary crates 
 | run-pass (builds, runs, same output) | 2403 | 1866 (77.7%) |
 | check-pass (accepted by `zustc check`) | 1813 | 1527 (84.2%) |
 | build-pass | 135 | 102 (75.6%) |
-| compile-fail (rejected at an annotated line) | 7386 | 4735 (64.1%) |
+| compile-fail (rejected at an annotated line) | 7386 | 4743 (64.2%) |
 <!-- /auto:ui -->
 
 [SUPPORT.md](SUPPORT.md) breaks this down by area: the language, the checks, the runtime and std, and what is left.
@@ -248,10 +248,10 @@ table, with instruction counts, cache and binary sizes and memory, is in [PERFOR
 <!-- auto:kpi-summary -->
 | | gen1000 | gen5000 |
 |---|---:|---:|
-| cold build | 129 ms | 580 ms |
-| no-op build | 0.8 ms | 0.8 ms |
-| build after editing one function | 19.6 ms | 73.2 ms |
-| `check` | 41 ms | 188 ms |
+| cold build | 163 ms | 721 ms |
+| no-op build | 1.1 ms | 1.1 ms |
+| build after editing one function | 25.9 ms | 91.2 ms |
+| `check` | 67 ms | 309 ms |
 <!-- /auto:kpi-summary -->
 
 Against `rustc -C incremental` on gen1000 (a snapshot measured by hand): about 6x faster cold, 15x faster after an
