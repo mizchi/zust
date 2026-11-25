@@ -862,7 +862,8 @@ fn js_values_and_exceptions() {
          [{\"TAG\":\"Ok\",\"_0\":\"body of ok\"},{\"TAG\":\"Err\",\"_0\":\"status 404\"},{\"TAG\":\"Err\",\"_0\":\"fetch failed\"},{\"TAG\":\"Ok\",\"_0\":\"{\\\"url\\\":\\\"j\\\"}\"},{\"TAG\":\"Err\",\"_0\":\"Unexpected token\"}]\n\
          10 | RangeError: negative -1 | one,? | hello hi ann\n\
          c.txt .txt y.md\n\
-         [{\"TAG\":\"Ok\",\"_0\":\"[1]\"},\"Err\"] h.example | (a thrown value that has no string form) | 16\n"
+         [{\"TAG\":\"Ok\",\"_0\":\"[1]\"},\"Err\"] h.example | (a thrown value that has no string form) | 16\n\
+         [{\"TAG\":\"Ok\",\"_0\":\"v\"},{\"TAG\":\"Err\",\"_0\":\"no value\"}]\n"
     );
     let js = std::fs::read_to_string(d.join("js_values.js")).unwrap();
     assert!(js.contains("import { parse } from \"node:path\";"), "{js}");

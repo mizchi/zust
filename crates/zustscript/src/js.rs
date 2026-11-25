@@ -1217,7 +1217,8 @@ impl<'a> Js<'a> {
                 let (tn, pn) = self.info.member[&e.id].clone();
                 let (_, t, js) = self.info.ext_types[&tn].props.iter().find(|p| p.0 == pn).cloned().unwrap();
                 let s = self.operand(x);
-                self.js_result(format!("{s}{}", member(&js)), &t)
+                // (a getter that throws: the receiver is evaluated outside the catch, as a call's are)
+                self.extern_call(vec![s], &t, |v| format!("{}{}", v[0], member(&js)))
             }
             EK::Field(x, f) => {
                 let s = self.operand(x);

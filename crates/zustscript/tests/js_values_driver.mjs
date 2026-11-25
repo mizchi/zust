@@ -19,3 +19,4 @@ console.log(JSON.stringify([await m.load("ok"), await m.load("missing"), await m
 console.log(m.thrown());
 console.log(m.base_of("/a/b/c.txt"), m.path_base("/x/y.md").base);
 console.log(JSON.stringify([await m.parse_later(Promise.resolve("[1]")), (await m.parse_later(Promise.resolve("{"))).TAG]), m.reviewed());
+console.log(JSON.stringify([await m.held(Promise.resolve({ value: "v" })), await m.held(Promise.resolve({ get value() { throw new Error("no value"); } }))]));

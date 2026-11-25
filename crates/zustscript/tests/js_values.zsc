@@ -119,3 +119,9 @@ export fn reviewed() -> String {
   let o = match odd(3) { Ok(n) => n.to_string(), Err(m) => m };
   `${h} | ${o} | ${squares().square(4)}`
 }
+
+// a property whose getter may throw, read on an awaited value
+extern type Holder { value: Result<String, String> }
+export async fn held(p: Promise<Holder>) -> Result<String, String> {
+  (await p).value
+}
