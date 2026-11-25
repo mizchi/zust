@@ -1320,10 +1320,14 @@ impl Cx<'_> {
                         Some(f) => self.clear_flag(f),
                         None => self.mark_moved(recv),
                     }
+                    let r = self.call_fn(id, Some((bv, p0t)), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
+                    // (the call takes the receiver after its arguments: what the holder holds ends there, not
+                    // before them (`D(&x).consume({ x = 2; })` is E0506))
                     if let Some(h) = recv_holder {
+                        self.bk_drop_held(&[h], SP);
                         self.bk_ev(borrowck::Ev::Def(h, vec![]));
                     }
-                    return self.call_fn(id, Some((bv, p0t)), &margs.iter().collect::<Vec<_>>(), tf, expected, SP);
+                    return r;
                 }
             }
         }
@@ -1497,14 +1501,14 @@ impl Cx<'_> {
             }
         }
         // `self` を値で受ける: 受け手からムーブ
+        // (a temporary receiver's holder ends after the call, which takes it after the arguments)
+        let mut consumed_holder = None;
         if !matches!(recv_ty, Ty::Ref(..)) && self.needs_drop(st) {
             match recv_temp {
                 Some(f) => self.clear_flag(f),
                 None => self.mark_moved(recv),
             }
-            if let Some(h) = recv_holder.filter(|_| !through_ref) {
-                self.bk_ev(borrowck::Ev::Def(h, vec![]));
-            }
+            consumed_holder = recv_holder.filter(|_| !through_ref);
         }
         let args: Vec<&Expr> = margs.iter().collect();
         // (a `&mut self` method of a value that holds references stores what its arguments borrow:
@@ -1546,6 +1550,11 @@ impl Cx<'_> {
             self.bk.activate = bk_act;
         }
         let r = self.call_fn(id, Some((recv_v, recv_ty)), &args, tf, expected, SP);
+        // (used there, by the callee's drop of it, so its loans are live while the arguments are made)
+        if let Some(h) = consumed_holder {
+            self.bk_drop_held(&[h], SP);
+            self.bk_ev(borrowck::Ev::Def(h, vec![]));
+        }
         self.bk.store_args = stores0;
         self.rg_took_call(e);
         if into_recv {

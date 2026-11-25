@@ -4339,6 +4339,9 @@ fn part29_review() {
     // statement, E0506 as in rustc 1.97)
     errors_at("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) {} }\nimpl D<'_> { fn consume(self) -> i32 { *self.0 } }\nfn main() {\n    let mut x = 1;\n    let t = (D(&x).consume(), { x = 2; });\n    let _ = t;\n    println!(\"{}\", x);\n}\n", &[], "r3");
     errors_at("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) {} }\nimpl D<'_> { fn peek(&self) -> i32 { *self.0 } }\nfn main() {\n    let mut x = 1;\n    let t = (D(&x).peek(), { x = 2; });\n    let _ = t;\n}\n", &[(6, "cannot assign to `x` because it is borrowed")], "r4");
+    // (the call takes such a receiver after its arguments: an argument that writes what it borrows is E0506, as in
+    // rustc 1.97; a write after the call is not)
+    errors_at("struct D<'a>(&'a i32);\nimpl Drop for D<'_> { fn drop(&mut self) {} }\nimpl D<'_> {\n    fn consume(self, _: ()) -> i32 { *self.0 }\n}\nfn a() { let mut x = 1; let _ = D(&x).consume({ x = 2; }); }\nfn c() { let mut x = 1; let r = D(&x).consume(()); x = 2; println!(\"{} {}\", r, x); }\nfn main() { a(); c(); }\n", &[(6, "cannot assign to `x` because it is borrowed")], "r6");
     // (a returned local assigned after the use of a temporary it borrowed: rustc 1.97 reports E0515 at the return,
     // as zustc does)
     errors_at("fn f() -> &'static str {\n    let mut r = String::new().as_str();\n    println!(\"{}\", r);\n    r = \"ok\";\n    r\n}\nfn main() { println!(\"{}\", f()); }\n", &[(5, "cannot return value referencing temporary value (E0515)")], "r2");
