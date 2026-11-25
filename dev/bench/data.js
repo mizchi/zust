@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795609442262,
+  "lastUpdate": 1795609444509,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -128497,6 +128497,70 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/mizchi/zust/commit/3caafc07fc696cda1eb263f70d87f14f53429679"
         },
         "date": 1795603615870,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "tests/ui run-pass pass rate",
+            "value": 79.36,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui run-pass passing",
+            "value": 1907,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui check-pass pass rate",
+            "value": 85.71,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui check-pass passing",
+            "value": 1554,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui build-pass pass rate",
+            "value": 77.04,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui build-pass passing",
+            "value": 104,
+            "unit": "tests"
+          },
+          {
+            "name": "tests/ui compile-fail pass rate",
+            "value": 72.31,
+            "unit": "%"
+          },
+          {
+            "name": "tests/ui compile-fail passing",
+            "value": 5341,
+            "unit": "tests"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "7c57bb917f00219e563b5c794d0d054792f11038",
+          "message": "Region check part 35: the drop of a type that holds no reference (#172)\n\nRegion check part 35: the drop of a type that holds no reference",
+          "timestamp": "2026-11-25T21:18:29+09:00",
+          "tree_id": "578144197fc1623eeae935a19d317f9ca952d1f6",
+          "url": "https://github.com/mizchi/zust/commit/7c57bb917f00219e563b5c794d0d054792f11038"
+        },
+        "date": 1795609444216,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
