@@ -2424,3 +2424,23 @@ fn link_names_and_members_rustc_rejects() {
     assert_eq!(first("#[derive(\"Clone\")]\nstruct Foo;\nfn main() {}\n"), e(1, "expected path to a trait, found literal (E0777)"), "a literal in a derive");
     assert_eq!(first("#[derive(Copy, Clone)]\nstruct Foo;\nimpl Drop for Foo {\n    fn drop(&mut self) {}\n}\nfn main() {}\n"), e(2, "the trait `Copy` cannot be implemented for this type; the type has a destructor (E0184)"), "Copy and Drop");
 }
+
+#[test]
+fn elided_lifetimes_and_foreign_bodies() {
+    // (E0726, and a fn with a body in an extern block, at the lines rustc 1.100 reports them)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.msg.clone()))
+    };
+    let e = |l: usize, m: &str| Some((l, m.to_string()));
+    let lt = "implicit elided lifetime not allowed here (E0726)";
+    assert_eq!(first("trait MyTrait {}\nstruct Foo<'a> {\n    x: &'a u32,\n}\nimpl MyTrait for Foo {}\nfn main() {}\n"), e(5, lt), "the self type's lifetime");
+    assert_eq!(first("trait MyTrait<'a> {}\nimpl MyTrait for u32 {}\nfn main() {}\n"), e(2, lt), "the trait's lifetime");
+    assert_eq!(first("struct HasLifetime<'a>(&'a bool);\nasync fn error(lt: HasLifetime) {\n    if *lt.0 {}\n}\nfn main() {}\n"), e(2, lt), "an async fn's parameter");
+    assert_eq!(
+        first("trait MyTrait<'a> {}\nstruct Foo<'a>(&'a u8);\nimpl<'a> MyTrait<'a> for Foo<'a> {}\nimpl MyTrait<'_> for &Foo<'_> {}\nfn no_error(x: Foo) -> u8 { *x.0 }\nfn main() {}\n"),
+        None,
+        "lifetimes written, and a plain fn's elided one"
+    );
+    assert_eq!(first("extern \"C\" {\n    fn foo() -> i32 {\n        0\n    }\n}\nfn main() {}\n"), e(2, "incorrect function inside `extern` block"), "a foreign fn with a body");
+}

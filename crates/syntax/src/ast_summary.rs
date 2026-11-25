@@ -2804,6 +2804,10 @@ pub fn summarize(item: &Item, owner: Option<&Owner>) -> R<Summary> {
                     continue;
                 }
                 let ItemKind::Fn(fs, None) = &fi.kind else {
+                    // (a fn with a body: what a foreign fn may not have)
+                    if matches!(fi.kind, ItemKind::Fn(_, Some(_))) {
+                        return Err(format!("{}:1: incorrect function inside `extern` block", fi.line));
+                    }
                     return err("only fns and statics are supported in extern blocks");
                 };
                 if link_name(&fi.attrs).unwrap_or_else(|| fs.name.clone()).starts_with("__enzyme_") {

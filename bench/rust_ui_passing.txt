@@ -385,6 +385,7 @@ compile-fail	async-await/async-closures/without-precise-captures-we-are-powerles
 compile-fail	async-await/async-closures/wrong-fn-kind.rs
 compile-fail	async-await/async-error-span.rs
 check-pass	async-await/async-fn-elided-impl-lifetime-parameter.rs
+compile-fail	async-await/async-fn-path-elision.rs
 compile-fail	async-await/async-fn/closure-arg-type-mismatch.rs
 compile-fail	async-await/async-fn/dyn-in-return-type.rs
 check-pass	async-await/async-fn/edition-2015-not-async-bound.rs
@@ -1596,6 +1597,7 @@ compile-fail	coherence/impl-coherence-error-for-undefined-type-18058.rs
 check-pass	coherence/inherent-impls-with-same-fn-ptr-return.rs
 compile-fail	coherence/normalize-for-errors.rs
 compile-fail	coherence/orphan-check-error-reporting-ty-var.rs
+compile-fail	coherence/skip-reporting-if-references-err.rs
 check-pass	coherence/super-traits/super-trait-knowable-1.rs
 check-pass	coherence/super-traits/super-trait-knowable-2.rs
 check-pass	coherence/super-traits/super-trait-knowable-3.rs
@@ -2710,6 +2712,7 @@ check-pass	extern/extern-C-non-FFI-safe-arg-ice-52334.rs
 check-pass	extern/extern-C-str-arg-ice-80125.rs
 build-pass	extern/extern-c-method-with-str-param.rs
 run-pass	extern/extern-compare-with-return-type.rs
+compile-fail	extern/extern-ffi-fn-with-body.rs
 check-pass	extern/extern-fn-pointer-clone-copy.rs
 run-pass	extern/extern-foreign-crate.rs
 compile-fail	extern/extern-macro.rs
@@ -2721,6 +2724,7 @@ run-pass	extern/extern-pub.rs
 check-pass	extern/extern-rust-trait-method.rs
 run-pass	extern/extern-rust.rs
 compile-fail	extern/foreign-fn-pattern-error-10877.rs
+compile-fail	extern/function-definition-in-extern-block-75283.rs
 run-pass	extern/issue-10025.rs
 build-pass	extern/issue-10763.rs
 run-pass	extern/issue-10764-rpass.rs
@@ -2728,6 +2732,7 @@ build-pass	extern/issue-1251.rs
 compile-fail	extern/issue-18819.rs
 compile-fail	extern/issue-36122-accessing-externed-dst.rs
 compile-fail	extern/issue-47725.rs
+compile-fail	extern/issue-95829.rs
 run-pass	extern/lgamma-linkage.rs
 compile-fail	extern/not-in-block.rs
 run-pass	extern/windows-tcb-trash-13259.rs
@@ -3030,6 +3035,7 @@ run-pass	foreign/foreign-int-types.rs
 run-pass	foreign/foreign-mod-unused-const.rs
 check-pass	foreign/foreign-pub-super.rs
 compile-fail	foreign/foreign-safe-fn-arg-mismatch.rs
+compile-fail	foreign/issue-91370-foreign-fn-block-impl.rs
 check-pass	foreign/issue-99276-same-type-lifetimes.rs
 run-pass	foreign/nil-decl-in-foreign.rs
 compile-fail	foreign/stashed-issue-121451.rs
@@ -3315,8 +3321,10 @@ run-pass	impl-header-lifetime-elision/bare_type.rs
 check-pass	impl-header-lifetime-elision/constant-used-as-arraylen.rs
 compile-fail	impl-header-lifetime-elision/dyn-trait.rs
 run-pass	impl-header-lifetime-elision/explicit-and-elided-same-header.rs
+compile-fail	impl-header-lifetime-elision/path-elided.rs
 run-pass	impl-header-lifetime-elision/path-underscore.rs
 run-pass	impl-header-lifetime-elision/ref-underscore.rs
+compile-fail	impl-header-lifetime-elision/trait-elided.rs
 run-pass	impl-header-lifetime-elision/trait-underscore.rs
 run-pass	impl-trait/basic-trait-impl.rs
 check-pass	impl-trait/bivariant-lifetime-liveness.rs
@@ -3907,6 +3915,7 @@ build-pass	lifetimes/issue-36744-without-calls.rs
 check-pass	lifetimes/issue-54378.rs
 compile-fail	lifetimes/issue-64173-unused-lifetimes.rs
 check-pass	lifetimes/issue-67498.rs
+compile-fail	lifetimes/issue-69314.rs
 check-pass	lifetimes/issue-76168-hr-outlives-2.rs
 check-pass	lifetimes/issue-77175.rs
 compile-fail	lifetimes/issue-79187-2.rs
@@ -3915,6 +3924,8 @@ check-pass	lifetimes/issue-84398.rs
 compile-fail	lifetimes/issue-90170-elision-mismatch.rs
 check-pass	lifetimes/issue-93911.rs
 compile-fail	lifetimes/issue-95023.rs
+compile-fail	lifetimes/issue-97193.rs
+compile-fail	lifetimes/issue-97194.rs
 compile-fail	lifetimes/keyword-self-lifetime-error-10412.rs
 run-pass	lifetimes/late-bound-lifetime-arguments-warning-72278.rs
 check-pass	lifetimes/lifetime-bound-whitespace-13703.rs
@@ -8545,6 +8556,7 @@ compile-fail	wf/wf-impl-self-type.rs
 compile-fail	wf/wf-in-fn-type-arg.rs
 compile-fail	wf/wf-in-fn-type-ret.rs
 compile-fail	wf/wf-in-fn-type-static.rs
+compile-fail	wf/wf-in-foreign-fn-decls-issue-80468.rs
 compile-fail	wf/wf-in-obj-type-static.rs
 compile-fail	wf/wf-static-method.rs
 compile-fail	wf/wf-where-clauses-pre-normalization.rs

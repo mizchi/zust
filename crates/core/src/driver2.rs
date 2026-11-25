@@ -9864,19 +9864,46 @@ fn not_a_member<'a>(src: &'a str, items: &[SrcItem], it: &SrcItem, h: u32, ty: b
 fn item_decl_err(src: &str, items: &[SrcItem], foreign: bool) -> Option<String> {
     use crate::lexer::ItemKind as K;
     let mut aliases = None;
+    // (the program's types and traits with lifetime parameters, read once when an impl is met)
+    let mut lts: Option<crate::fxhash::FxSet<&str>> = None;
     let sb = src.as_bytes();
     for it in items {
-        if !matches!(it.kind, K::ImplHeader | K::Normal) {
+        if !matches!(it.kind, K::ImplHeader | K::Normal | K::ImplMember(_)) {
             continue;
         }
-        // (by the first byte: an attribute, a visibility, `impl` or `type`; `pub fn` and the like by the fifth)
+        // (by the first byte: an attribute, a visibility, `impl`, `type`, `async` or `unsafe`; `pub fn` and the like by
+        // the fifth; an impl's member only for `async`)
         let b = &sb[it.start.min(sb.len())..it.end.min(sb.len())];
-        if !matches!(b.first(), Some(b'i' | b't' | b'p' | b'#' | b'u')) || b.get(3) == Some(&b' ') && b.get(4) != Some(&b't') && b[0] == b'p' {
+        if !matches!(b.first(), Some(b'i' | b't' | b'p' | b'#' | b'u' | b'a'))
+            || b.get(3) == Some(&b' ') && !matches!(b.get(4), Some(b't' | b'a')) && b[0] == b'p'
+            || matches!(it.kind, K::ImplMember(_)) && !matches!(b.first(), Some(b'a' | b'p' | b'#'))
+        {
             continue;
         }
         let text = src.get(it.start..it.end).unwrap_or("");
         let t = item_text(text);
+        if t.starts_with("async") {
+            // (E0726: an `async fn`'s parameter of a type with lifetime parameters written without them)
+            let l = lts.get_or_insert_with(|| lt_names(src, items));
+            if !l.is_empty() {
+                if let Some(e) = elided_async_lt(it, text, t, l) {
+                    return Some(e);
+                }
+            }
+            continue;
+        }
+        if matches!(it.kind, K::ImplMember(_)) {
+            continue;
+        }
         if let Some(rest) = t.strip_prefix("impl") {
+            // (E0726: `impl MyTrait for Foo` of a `Foo<'a>` / a `MyTrait<'a>`)
+            let l = lts.get_or_insert_with(|| lt_names(src, items));
+            // (only an impl whose header names one of them: by its identifiers)
+            if !l.is_empty() && it.idents.iter().any(|&(a, e)| src.get(a as usize..e as usize).is_some_and(|w| l.contains(w))) {
+                if let Some(e) = elided_impl_lt(text, it, rest, l) {
+                    return Some(e);
+                }
+            }
             if let Some(e) = inherent_impl_err(src, items, it, rest, foreign, &mut aliases) {
                 return Some(e);
             }
@@ -9897,6 +9924,102 @@ fn item_decl_err(src: &str, items: &[SrcItem], foreign: bool) -> Option<String> 
             if let Some(e) = unused_alias_param_in(src, items, it, at + lt) {
                 return Some(e);
             }
+        }
+    }
+    None
+}
+
+/// The names of the program's structs, enums, unions and traits declared with lifetime parameters (`struct Foo<'a>`)
+fn lt_names<'a>(src: &'a str, items: &[SrcItem]) -> crate::fxhash::FxSet<&'a str> {
+    use crate::lexer::ItemKind as K;
+    let mut out = crate::fxhash::FxSet::default();
+    for it in items {
+        if !matches!(it.kind, K::Normal | K::TraitHeader) {
+            continue;
+        }
+        let t = item_text(src.get(it.start..it.end).unwrap_or(""));
+        let t = t.strip_prefix("unsafe ").unwrap_or(t);
+        if !matches!(t.as_bytes().first(), Some(b's' | b'e' | b'u' | b't')) {
+            continue;
+        }
+        let Some(r) = ["struct ", "enum ", "union ", "trait "].iter().find_map(|k| t.strip_prefix(k)) else { continue };
+        let r = r.trim_start();
+        let n = &r[..r.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(r.len())];
+        if !n.is_empty() && r[n.len()..].trim_start().starts_with("<'") {
+            out.insert(n);
+        }
+    }
+    out
+}
+
+/// E0726 of an impl header (the text past `impl`): its trait's or self type's path names one of `lts` with no
+/// arguments
+#[cold]
+fn elided_impl_lt(text: &str, it: &SrcItem, rest: &str, lts: &crate::fxhash::FxSet<&str>) -> Option<String> {
+    let r = rest.trim_start();
+    let b = r.as_bytes();
+    let mut i = 0;
+    if b.first() == Some(&b'<') {
+        let mut d = 0;
+        while i < b.len() {
+            match b[i] {
+                b'<' => d += 1,
+                b'>' if i > 0 && b[i - 1] != b'-' => d -= 1,
+                _ => {}
+            }
+            i += 1;
+            if d == 0 {
+                break;
+            }
+        }
+    }
+    let head = &r[i.min(r.len())..];
+    let head = &head[..head.find('{').unwrap_or(head.len())];
+    let head = &head[..head.find(" where ").unwrap_or(head.len())];
+    for part in head.split(" for ") {
+        let p = part.trim_start().trim_start_matches(['&', ' ']);
+        let p = p.strip_prefix("dyn ").unwrap_or(p).trim_start();
+        let end = p.find(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':')).unwrap_or(p.len());
+        let name = p[..end].rsplit("::").next().unwrap_or("");
+        if lts.contains(name) && !p[end..].trim_start().starts_with('<') {
+            let line = it.line + text[..text.len() - rest.len()].matches('\n').count();
+            return Some(format!("{line}:1: implicit elided lifetime not allowed here (E0726)"));
+        }
+    }
+    None
+}
+
+/// E0726 of an `async fn` (the item's text, and t past its attributes and visibility): a parameter's type naming one
+/// of `lts` with no arguments
+#[cold]
+fn elided_async_lt(it: &SrcItem, text: &str, t: &str, lts: &crate::fxhash::FxSet<&str>) -> Option<String> {
+    {
+        let Some(r) = t.strip_prefix("async").filter(|r| r.trim_start().starts_with("fn ")) else { return None };
+        let Some(open) = r.find('(') else { return None };
+        let mut d = 0i32;
+        let close = r[open..].char_indices().find(|&(_, c)| {
+            match c {
+                '(' => d += 1,
+                ')' => d -= 1,
+                _ => {}
+            }
+            d == 0
+        });
+        let Some((cl, _)) = close else { return None };
+        let params = &r[open + 1..open + cl];
+        let mut k = 0;
+        while k < params.len() {
+            let w = &params[k..];
+            let n = w.find(|c: char| !(c.is_alphanumeric() || c == '_')).unwrap_or(w.len());
+            if n == 0 {
+                k += w.chars().next().map_or(1, |c| c.len_utf8());
+                continue;
+            }
+            if lts.contains(&w[..n]) && !w[n..].trim_start().starts_with('<') {
+                let line = it.line + text[..text.len() - t.len()].matches('\n').count();
+                return Some(format!("{line}:1: implicit elided lifetime not allowed here (E0726)"));
+            }
+            k += n;
         }
     }
     None
