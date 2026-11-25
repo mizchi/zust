@@ -4942,3 +4942,37 @@ fn d(x: &i32) -> (&i32, u8) { (x, 1) }
 fn main() {}
 "#, &[(1, "cannot return"), (2, "cannot return"), (4, "cannot return")], "ag");
 }
+
+#[test]
+fn part33_review_of_159() {
+    // (the minor findings of #159's third review, each checked with rustc 1.97: a variant written through a type alias
+    // of the enum (`A::V`) captures nothing (5: no error); a guard's write to another field of a union the pattern
+    // tests is E0510 (13), as one to the field itself (21))
+    errors_at(r#"enum E { V }
+type A = E;
+fn f() {
+    let mut e = E::V;
+    let c = || match e { A::V => 1 };
+    e = E::V;
+    c();
+}
+union U { a: u32, b: u32 }
+fn g(mut u: U) {
+    unsafe {
+        match u {
+            U { a: 0 } if { u.b = 1; true } => (),
+            _ => (),
+        }
+    }
+}
+fn h(mut u: U) {
+    unsafe {
+        match u {
+            U { a: 0 } if { u.a = 1; true } => (),
+            _ => (),
+        }
+    }
+}
+fn main() {}
+"#, &[(13, "cannot assign `u.b` in match guard"), (21, "cannot assign `u.a` in match guard")], "r3");
+}

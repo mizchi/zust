@@ -2243,7 +2243,9 @@ impl Bk {
             return None;
         }
         guards.iter().flat_map(|gs| gs.iter()).find(|(g, deep)| {
-            g.local == p.local && (prefix(&p.proj, &g.proj) || *deep && prefix(&g.proj, &p.proj) && p.proj[g.proj.len()..].iter().all(|x| matches!(x, Proj::Deref(_))))
+            // (a write to another field of a union the pattern tests is to the tested memory, union_overlap)
+            g.local == p.local
+                && (prefix(&p.proj, &g.proj) || union_overlap(&p.proj, &g.proj) || *deep && prefix(&g.proj, &p.proj) && p.proj[g.proj.len()..].iter().all(|x| matches!(x, Proj::Deref(_))))
         }).map(|g| &g.0)
     }
 
@@ -4139,7 +4141,15 @@ impl Cx<'_> {
                     let qual = match n {
                         0 => false,
                         1 => self.prog.const_index.get(p.segs[0].name.as_str()).is_none(),
-                        _ => p.segs[n - 2].name == ename || p.segs[n - 2].name == "Self",
+                        // (the enum, `Self`, or a type alias of the enum (`type A = E;`, `A::V`))
+                        _ => {
+                            let q = p.segs[n - 2].name.as_str();
+                            q == ename
+                                || q == "Self"
+                                || self.prog.aliases.get(q).is_some_and(|(_, ty)| {
+                                    matches!(ty, crate::types::TySyn::Named(a) | crate::types::TySyn::App(a, _) if a.rsplit("::").next() == Some(ename))
+                                })
+                        }
                     };
                     sd.is_enum && sd.variants.len() == 1 && sd.variants[0].fields.is_empty() && qual && p.segs.last().is_some_and(|s| s.name == sd.variants[0].name)
                 }) => {}

@@ -747,9 +747,13 @@ impl Cx<'_> {
                         Err(_) => push(out, place),
                     },
                     Pat::Struct(_, named, _) => {
+                        // (a union's field is marked, as an expression's is: a guard's write to another field of the
+                        // union is to the tested memory (E0510))
+                        let union = self.prog.unions.contains(&self.prog.structs[self.prog.base_of(sid) as usize].name);
                         for (n, q) in named {
+                            let fname = if union { format!("{}{n}", borrowck::UNION_FIELD) } else { n.clone() };
                             match fs.iter().find(|f| f.0 == *n) {
-                                Some(f) => self.tested_places(q, &field(place, n.clone()), f.1, out, depth + 1),
+                                Some(f) => self.tested_places(q, &field(place, fname), f.1, out, depth + 1),
                                 None => push(out, place),
                             }
                         }
