@@ -320,6 +320,66 @@ fn metadata_matches_cargo() {
     assert!(bad.is_empty(), "\n{}", bad.join("\n"));
 }
 
+/// The files under d whose names end with ext
+fn files_with(d: &Path, ext: &str) -> Vec<PathBuf> {
+    let mut out = vec![];
+    for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(files_with(&p, ext));
+        } else if p.to_string_lossy().ends_with(ext) {
+            out.push(p);
+        }
+    }
+    out
+}
+
+#[test]
+fn check_reports_every_error() {
+    let sc = Scratch::new("check");
+    let d = sc.0.clone();
+    sc.write(&[
+        ("app/Cargo.toml", "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[workspace]\n[dependencies]\nutil = { path = \"../util\" }\n"),
+        ("app/src/main.rs", "fn main() {\n    println!(\"{}\", util::one() + util::two());\n    let s: String = 5;\n}\n"),
+        ("util/Cargo.toml", "[package]\nname = \"util\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"),
+        ("util/src/lib.rs", "pub fn one() -> u32 {\n    1\n}\npub fn bad_a() -> u32 {\n    \"a\"\n}\npub fn two() -> u32 {\n    2\n}\npub fn bad_b(x: u8) -> bool {\n    x + 1\n}\n"),
+    ]);
+    let m = d.join("app/Cargo.toml");
+    let t = d.join("t");
+    let (ok, _, err) = cargo(&["generate-lockfile", "--offline"], &m, &t);
+    assert!(ok, "{err}");
+    // (every fn's errors, of every crate: an error of the lib does not stop the bin's check, which uses its source)
+    let (ok, _, err) = zurgo(&["check"], &m, &t);
+    assert!(!ok, "{err}");
+    let lib = d.join("util/src/lib.rs").display().to_string();
+    for want in [
+        format!("error: crate `util`: {lib}:5:5: mismatched types: expected `u32`, found `&str`"),
+        format!("error: crate `util`: {lib}:11:5: mismatched types: expected `bool`, found `u8`"),
+        "error: crate `app`: src/main.rs:3:21: mismatched types: expected `String`, found `i32`".to_string(),
+        "error: 3 errors in 2 crates".to_string(),
+    ] {
+        assert!(err.contains(&want), "missing `{want}`:\n{err}");
+    }
+    // (a build stops at the first)
+    let (ok, _, err) = zurgo(&["build"], &m, &t);
+    assert!(!ok && err.matches("mismatched types").count() == 1, "{err}");
+    // (fixed: the check passes, and writes no object; the build after it builds and runs)
+    sc.write(&[
+        ("util/src/lib.rs", "pub fn one() -> u32 {\n    1\n}\npub fn two() -> u32 {\n    2\n}\n"),
+        ("app/src/main.rs", "fn main() {\n    println!(\"{}\", util::one() + util::two());\n}\n"),
+    ]);
+    let _ = std::fs::remove_dir_all(&t);
+    let (ok, _, err) = zurgo(&["check"], &m, &t);
+    assert!(ok && err.contains("Finished checking 2 crates"), "{err}");
+    assert!(files_with(&t, ".o").is_empty(), "a check wrote objects: {:?}", files_with(&t, ".o"));
+    let (ok, out, err) = zurgo(&["run"], &m, &t);
+    assert!(ok && out == "3\n", "{out}{err}");
+    // (a check after a build: the crates are checked again, not taken as fresh from their objects)
+    sc.write(&[("util/src/lib.rs", "pub fn one() -> u32 {\n    1\n}\npub fn two() -> u32 {\n    2\n}\nfn unused() -> u8 {\n    'c'\n}\n")]);
+    let (ok, _, err) = zurgo(&["check"], &m, &t);
+    assert!(!ok && err.contains(&format!("{lib}:8:5: mismatched types")) && err.contains("1 error in 1 crate"), "{err}");
+}
+
 #[test]
 fn errors() {
     let sc = Scratch::new("errors");

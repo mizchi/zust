@@ -17,6 +17,7 @@ zurgo run
 | command | what it does |
 |---|---|
 | `zurgo build` | builds the package of the manifest (every member, for a virtual workspace) and its dependencies |
+| `zurgo check` | checks every crate a build compiles and lists each one's errors (below); writes no objects |
 | `zurgo run [-- args]` | builds, then runs the binary (`--bin` chooses one when there are several) |
 | `zurgo test [filter] [-- args]` | builds the tests, then runs each one in a process of its own, all at once (below) |
 | `zurgo metadata` | the package graph as `cargo metadata --format-version 1` writes it |
@@ -180,6 +181,28 @@ anything is built:
   - The proc-macro crate's root is read with its features, so `#[cfg_attr(feature = "x", proc_macro_attribute)]`
     counts when the feature is on;
 - a function-like macro (`html!(..)`) expands to a `compile_error!` naming #29.
+
+## Checking
+
+`zurgo check` prepares the crates as `zurgo build` does (build scripts and proc macros run), then type checks each
+one in dependency order and prints its errors, one line each, instead of compiling it:
+
+```text
+error: crate `util`: /path/to/util/src/lib.rs:5:5: mismatched types: expected `u32`, found `&str`
+error: crate `util`: /path/to/util/src/lib.rs:11:5: mismatched types: expected `bool`, found `u8`
+error: crate `app`: src/main.rs:3:21: mismatched types: expected `String`, found `i32`
+error: 3 errors in 2 crates
+```
+
+- A build stops at a crate's first error. A check goes on: every fn's body is checked and each one's errors are
+  listed, and a crate's errors do not stop the crates that depend on it (a crate uses its dependencies' sources, not
+  their objects).
+- An error in a dependency's lines (an instance of its generic fn with this crate's types) is shown at the
+  dependency's file, once, under the first crate that found it.
+- An error of the analysis before the bodies (a name that does not resolve in an item's signature, a malformed
+  item) is still the crate's only one, as with `zustc check`.
+- It writes no objects and no fingerprints, and every crate is checked, even one a build would take as fresh. The
+  crates are checked one after another (a build compiles stale crates at once).
 
 ## Tests
 

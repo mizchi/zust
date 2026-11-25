@@ -1138,8 +1138,9 @@ impl Session {
         r
     }
 
-    /// Compiles the single workspace crate i and writes the .o, the cache and the fingerprint. (result, whether the .o changed, time (ns))
-    fn build_one(
+    /// A crate's source as build_one compiles it: its own (expanded) text, then the dependency crates' interfaces
+    /// (pruned to what it reaches), with self.ctx set for it
+    fn ws_source(
         &mut self,
         crates: &[CrateSpec],
         loaded: &[Option<(String, crate::srcmap::SrcMap)>],
@@ -1147,17 +1148,8 @@ impl Session {
         prune: (&[Option<Vec<crate::stub::StubItem>>], Option<&[(usize, usize)]>),
         i: usize,
         deps: &[usize],
-        fp: &str,
-        out_dir: &std::path::Path,
-    ) -> R<(BuildReport, bool, u64)> {
+    ) -> String {
         let c = &crates[i];
-        let t1 = now_ns();
-        let fp_path = out_dir.join(format!("{}.fp", c.name).as_str());
-        let op = out_dir.join(format!("{}.o", c.name).as_str());
-        let cp = out_dir.join(format!("{}.cache", c.name).as_str());
-        if !self.opts.no_cache {
-            self.disk = crate::build_cache::BuildCache::open(cp.as_path());
-        }
         // The source: own + the dependency crates (appended after it)
         let (own, own_map) = loaded[i].clone().unwrap();
         let mut src = own.clone();
@@ -1225,6 +1217,55 @@ impl Session {
             env: c.env.clone(),
             dep_ranges: ranges,
         };
+        src
+    }
+
+    /// check_workspace's crate: its errors, as `file:line:col: message` (relocated as build_one's error is: one in a
+    /// dependency's lines (an instance of its generic fn, an item of its interface) at the dependency's file). An
+    /// error of the analysis is the only one, as with `zustc check`; the fns' bodies are all checked, each one's
+    /// errors reported
+    #[cold]
+    fn check_one(
+        &mut self,
+        crates: &[CrateSpec],
+        loaded: &[Option<(String, crate::srcmap::SrcMap)>],
+        dep_loaded: &[Option<(String, crate::srcmap::SrcMap)>],
+        prune: (&[Option<Vec<crate::stub::StubItem>>], Option<&[(usize, usize)]>),
+        i: usize,
+        deps: &[usize],
+        out_dir: &std::path::Path,
+    ) -> Vec<String> {
+        if !self.opts.no_cache {
+            self.disk = crate::build_cache::BuildCache::open(out_dir.join(format!("{}.cache", crates[i].name).as_str()).as_path());
+        }
+        let src = self.ws_source(crates, loaded, dep_loaded, prune, i, deps);
+        let diags = self.check(&src);
+        let out = diags.iter().map(|d| self.ctx.map.relocate_err(&format!("{}:{}: {}", d.line, d.col, d.msg))).collect();
+        self.ctx = CrateCtx::default();
+        out
+    }
+
+    /// Compiles the single workspace crate i and writes the .o, the cache and the fingerprint. (result, whether the .o changed, time (ns))
+    fn build_one(
+        &mut self,
+        crates: &[CrateSpec],
+        loaded: &[Option<(String, crate::srcmap::SrcMap)>],
+        dep_loaded: &[Option<(String, crate::srcmap::SrcMap)>],
+        prune: (&[Option<Vec<crate::stub::StubItem>>], Option<&[(usize, usize)]>),
+        i: usize,
+        deps: &[usize],
+        fp: &str,
+        out_dir: &std::path::Path,
+    ) -> R<(BuildReport, bool, u64)> {
+        let c = &crates[i];
+        let t1 = now_ns();
+        let fp_path = out_dir.join(format!("{}.fp", c.name).as_str());
+        let op = out_dir.join(format!("{}.o", c.name).as_str());
+        let cp = out_dir.join(format!("{}.cache", c.name).as_str());
+        if !self.opts.no_cache {
+            self.disk = crate::build_cache::BuildCache::open(cp.as_path());
+        }
+        let src = self.ws_source(crates, loaded, dep_loaded, prune, i, deps);
         let mut r = BuildReport::default();
         let a = self.analyze(&src).map_err(|e| format!("crate `{}`: {}", c.name, self.ctx.map.relocate_err(&e)))?;
         r.items_parsed = a.n_parsed;
@@ -1346,6 +1387,16 @@ impl Session {
         r
     }
 
+    /// Checks a workspace (`zurgo check`): every crate, in dependency order, as build_workspace prepares it, and
+    /// each one's errors instead of its object (Session::check). A crate's errors do not stop the others: a crate
+    /// uses its dependencies' sources, not their objects. Writes no objects nor fingerprints
+    pub fn check_workspace(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path) -> R<Vec<(String, Vec<String>)>> {
+        self.ws_diags = Some(vec![]);
+        let r = self.build_workspace(crates, out_dir);
+        let d = self.ws_diags.take().unwrap_or_default();
+        r.map(|_| d)
+    }
+
     fn build_workspace_in(&mut self, crates: &[CrateSpec], out_dir: &std::path::Path, module_writer: Option<ModuleWriter>) -> R<WsReport> {
         let t0 = now_ns();
         // (a test crate is configured with `test`: in its fingerprint too)
@@ -1463,7 +1514,7 @@ impl Session {
             let fp = key_hex(h.finish());
             let fp_path = out_dir.join(format!("{}.fp", c.name).as_str());
             let op = out_dir.join(format!("{}.o", c.name).as_str());
-            if !self.opts.no_cache && op.exists() && std::fs::read_to_string(fp_path.as_path()).is_ok_and(|old| old == fp) {
+            if !self.opts.no_cache && self.ws_diags.is_none() && op.exists() && std::fs::read_to_string(fp_path.as_path()).is_ok_and(|old| old == fp) {
                 if self.opts.time {
                     eprintln!("  {:<12} fresh", c.name);
                 }
@@ -1608,7 +1659,7 @@ impl Session {
                 let (fp2, reached) = self.precise_fp(&crates[i], own, &loaded[i].as_ref().unwrap().1, &deps, crates, &loaded, &dep_items);
                 let p2 = out_dir.join(format!("{}.fp2", crates[i].name).as_str());
                 let op = out_dir.join(format!("{}.o", crates[i].name).as_str());
-                if !self.opts.no_cache && op.exists() && std::fs::read_to_string(p2.as_path()).is_ok_and(|old| old == fp2) {
+                if !self.opts.no_cache && self.ws_diags.is_none() && op.exists() && std::fs::read_to_string(p2.as_path()).is_ok_and(|old| old == fp2) {
                     let _ = std::fs::write(out_dir.join(format!("{}.fp", crates[i].name).as_str()), &fp);
                     if self.opts.time {
                         eprintln!("  {:<12} fresh (used interface unchanged)", crates[i].name);
@@ -1627,6 +1678,19 @@ impl Session {
             }
         }
         // (crates use only each other's sources (not the .o), so the stale ones are forked and compiled concurrently)
+        // (a check (check_workspace): here, one after another, each crate's errors kept)
+        // (an error in a dependency's lines that an earlier crate reported, as it is: once)
+        if self.ws_diags.is_some() {
+            let mut seen: FxSet<String> = FxSet::default();
+            for (i, _) in std::mem::take(&mut stale) {
+                let mut d = self.check_one(crates, &own_v, &dep_v, (&dep_items_all, match &reach_of[i] { Some(v) => Some(v.as_slice()), None => None }), i, &all_deps(i), out_dir);
+                d.retain(|e| seen.insert(e.clone()));
+                if let Some(w) = self.ws_diags.as_mut() {
+                    w.push((crates[i].name.clone(), d));
+                }
+            }
+            return Ok(rep);
+        }
         let par = self.opts.jobs.min(stale.len()).max(1);
         let mut results: Vec<Option<R<(BuildReport, bool, u64)>>> = vec![None; stale.len()];
         if par > 1 {

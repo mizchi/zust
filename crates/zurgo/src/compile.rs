@@ -566,6 +566,34 @@ fn ws_text_in(crates: &[CrateSpec], redact: bool) -> String {
     s
 }
 
+/// zustc's options for a build (or a check) with `o`: the target's backend and module writer
+fn session_opts(o: &BuildOpts) -> R<Options> {
+    let mut opts = Options { opt: o.release, time: o.time, no_cache: o.no_cache, ..Options::default() };
+    if let Some(j) = o.jobs {
+        opts.jobs = j;
+    }
+    match o.target.as_deref() {
+        None | Some("x86_64-unknown-linux-gnu") => opts.backend = Some(zustc::clif_backend::compile),
+        Some("wasm32-unknown-unknown") => {
+            opts.backend = Some(zustc::wasm_backend::compile);
+            opts.module_writer = Some(zustc::wasm_backend::write_module);
+        }
+        Some(t) => return Err(format!("unknown target `{t}`")),
+    }
+    Ok(opts)
+}
+
+/// `zurgo check`: the crates a build would compile (build scripts and proc macros run as for a build), each one
+/// checked (Session::check_workspace) and none compiled to an object. Each crate's errors, in dependency order:
+/// (crate, `file:line:col: message`). A crate's errors do not stop the check of the crates after it
+pub fn check(g: &Graph, o: &BuildOpts) -> R<Vec<(String, Vec<String>)>> {
+    let out = out_dir(g, o);
+    std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let _lock = build_script::lock_file(&out.join(".zurgo-lock"))?;
+    let (crates, _) = plan_labeled(g, o)?;
+    Session::new(session_opts(o)?).check_workspace(&crates, &out)
+}
+
 pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
     let out = out_dir(g, o);
     std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
@@ -580,18 +608,7 @@ pub fn build(g: &Graph, o: &BuildOpts) -> R<Built> {
         eprint!("{}", ws_text_in(&crates, true));
         eprintln!("(written to {}, with the environment's values)", p.display());
     }
-    let mut opts = Options { opt: o.release, time: o.time, no_cache: o.no_cache, ..Options::default() };
-    if let Some(j) = o.jobs {
-        opts.jobs = j;
-    }
-    match o.target.as_deref() {
-        None | Some("x86_64-unknown-linux-gnu") => opts.backend = Some(zustc::clif_backend::compile),
-        Some("wasm32-unknown-unknown") => {
-            opts.backend = Some(zustc::wasm_backend::compile);
-            opts.module_writer = Some(zustc::wasm_backend::write_module);
-        }
-        Some(t) => return Err(format!("unknown target `{t}`")),
-    }
+    let opts = session_opts(o)?;
     let wasm = opts.module_writer.is_some();
     Session::new(opts).build_workspace(&crates, &out)?;
     // (wasm32: a bin is the module `<name>.wasm`)

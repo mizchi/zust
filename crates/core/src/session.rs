@@ -778,11 +778,13 @@ pub struct Session {
     const_lines: Vec<usize>,
     /// their fns' names' prefix (CONST_CHECK_FN, or another when the program writes that)
     const_fn: String,
+    /// In a check_workspace: each crate's errors, as `file:line:col: message` (and no objects are written)
+    ws_diags: Option<Vec<(String, Vec<String>)>>,
 }
 
 impl Session {
     pub fn new(opts: Options) -> Session {
-        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new() }
+        Session { opts, cid: compiler_id(), disk: crate::build_cache::BuildCache::empty(), mem: FxMap::default(), used: FxSet::default(), fresh: vec![], ctx: CrateCtx::default(), last_map: None, sel: Default::default(), sum_fp: FxMap::default(), chk: None, externs: vec![], cfg_err: None, checking: false, const_lines: vec![], const_fn: String::new(), ws_diags: None }
     }
 
     pub fn load_cache(&mut self, path: &std::path::Path) {
