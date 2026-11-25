@@ -12,7 +12,7 @@
 //! error already). The specifier is the file's with `.zsc` replaced by `.js`: the modules are compiled into one
 //! directory tree that mirrors the sources.
 
-use crate::ast::{Item, Pos, TsFrom, TyS};
+use crate::ast::{Item, Member, Pos, TsFrom, TyS};
 use crate::tsimport::TsError;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
@@ -78,7 +78,7 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
         let mut types: Vec<String> = vec![];
         for (n, npos) in names {
             match m.find(n) {
-                Some(Item::Record { .. }) | Some(Item::Enum { .. }) => types.push(n.clone()),
+                Some(Item::Record { .. }) | Some(Item::Enum { .. }) | Some(Item::ExternType { .. }) => types.push(n.clone()),
                 Some(Item::Fn { public: false, .. }) | Some(Item::WasmFn { public: false, .. }) => {
                     errs.push(TsError { file: None, pos: *npos, msg: format!("`{from}` does not export `{n}` (write `export fn {n}` there)") });
                 }
@@ -97,7 +97,7 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
                     for t in args.iter().chain([&ret]) {
                         uses(t, generics, &mut types);
                     }
-                    out.push(Item::Extern { name: name.clone(), module: Some(spec.clone()), generics: generics.clone(), args, ret, js: crate::js::ident(name), pos: *npos });
+                    out.push(Item::Extern { name: name.clone(), module: Some(spec.clone()), generics: generics.clone(), args, ret, js: crate::js::ident(name), pos: *npos, zsc: true });
                 }
                 Some(Item::WasmFn { .. }) => {
                     errs.push(TsError { file: None, pos: *npos, msg: format!("`{n}` is a Rust `wasm fn`: it cannot be imported yet (an `@wasm fn` can)") });
@@ -109,6 +109,38 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
         // like: the module's declarations say which names are types
         while let Some(n) = types.pop() {
             let Some(it) = m.find(&n) else { continue };
+            // (the prelude's `Option` / `Result`: the importing module has its own, the same type)
+            if let Item::Enum { pos, .. } = it
+                && crate::ast::is_prelude(*pos)
+            {
+                continue;
+            }
+            // (an extern type is JS's: the same declaration here, and the types its members use)
+            if let Item::ExternType { params, members, origin, .. } = it {
+                let defined = origin.clone().unwrap_or(key.clone());
+                if done.insert((defined.clone(), n.clone())) {
+                    for m in members {
+                        match m {
+                            Member::Prop { ty, .. } => uses(ty, params, &mut types),
+                            Member::Method { args, ret, .. } => args.iter().chain([ret]).for_each(|t| uses(t, params, &mut types)),
+                        }
+                    }
+                    let mut it = it.clone();
+                    if let Item::ExternType { module: Some(spec), .. } = &mut it
+                        && (spec.starts_with("./") || spec.starts_with("../"))
+                    {
+                        // (a relative module is the declaring file's: from here, another path)
+                        // (its specifier is the module's that holds it: the declaring one, or one that imported it)
+                        let dir = key.parent().unwrap_or(Path::new("/"));
+                        *spec = relative(&here, &normalize(&dir.join(&*spec)));
+                    }
+                    if let Item::ExternType { origin, .. } = &mut it {
+                        *origin = Some(defined);
+                    }
+                    out.push(it);
+                }
+                continue;
+            }
             let mut it = it.clone();
             let (Item::Record { from: f, .. } | Item::Enum { from: f, .. }) = &mut it else { continue };
             // where the type is defined: this module, or the module or TS file it came from
@@ -151,15 +183,35 @@ fn expand_in(items: Vec<Item>, base: &Path, stack: &mut Vec<PathBuf>, modules: &
 /// The mark of a type of the zustscript module `file`, used from the directory `here`: exported there (every type
 /// is, in its `.d.ts`), in that module's JS shape (`repr: None`), and imported from its JS by a relative specifier
 fn from_module(here: &Path, file: &Path) -> TsFrom {
+    let rel = relative(here, file);
+    let spec = format!("{}.js", rel.strip_suffix(".zsc").unwrap_or(&rel));
+    TsFrom { path: PathBuf::from(spec), exported: true, members: vec![], text: String::new(), repr: None, zsc: Some(file.to_path_buf()) }
+}
+
+/// The specifier of `file` from the directory `here` (`./lib/x.zsc`, `../y.js`)
+fn relative(here: &Path, file: &Path) -> String {
     let a: Vec<_> = here.components().collect();
     let b: Vec<_> = file.components().collect();
     let common = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
     let mut parts: Vec<String> = vec!["..".into(); a.len() - common];
     parts.extend(b[common..].iter().map(|c| c.as_os_str().to_string_lossy().to_string()));
     let rel = parts.join("/");
-    let rel = if rel.starts_with("../") { rel } else { format!("./{rel}") };
-    let spec = format!("{}.js", rel.strip_suffix(".zsc").unwrap_or(&rel));
-    TsFrom { path: PathBuf::from(spec), exported: true, members: vec![], text: String::new(), repr: None, zsc: Some(file.to_path_buf()) }
+    if rel.starts_with("../") { rel } else { format!("./{rel}") }
+}
+
+/// `a/./b/../c` → `a/c` (a path that need not exist)
+fn normalize(p: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// The named types `t` uses (not its generic parameters, not the built-in ones)
@@ -200,6 +252,7 @@ impl Module {
         stack.pop();
         let items = items.map_err(|es| es.into_iter().map(|e| if e.file.is_some() { e } else { at(e.pos, e.msg) }).collect::<Vec<_>>())?;
         let items = crate::tsimport::expand(items, &dir).map_err(|es| es.into_iter().map(|e| if e.file.is_some() { e } else { at(e.pos, e.msg) }).collect::<Vec<_>>())?;
+        let items = crate::ast::with_prelude(items);
         let mut ck = crate::check::Checker::new();
         ck.check_file(&items, false);
         if !ck.errors.is_empty() {
@@ -213,7 +266,7 @@ impl Module {
 
     fn find(&self, n: &str) -> Option<&Item> {
         self.items.iter().find(|it| match it {
-            Item::Record { name, .. } | Item::Enum { name, .. } | Item::Fn { name, .. } | Item::WasmFn { name, .. } => name == n,
+            Item::Record { name, .. } | Item::Enum { name, .. } | Item::Fn { name, .. } | Item::WasmFn { name, .. } | Item::ExternType { name, .. } => name == n,
             _ => false,
         })
     }

@@ -1,0 +1,3 @@
+// tests/examples.rs options_and_try: a module's Option / Result functions, imported (their values are not converted as JS's)
+export fn half(n: i32) -> Option<i32> { if n % 2 == 0 { Some(n / 2) } else { None } }
+export fn check(n: i32) -> Result<i32, String> { if n > 0 { Ok(n) } else { Err("neg") } }

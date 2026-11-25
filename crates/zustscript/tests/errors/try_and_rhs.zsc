@@ -1,0 +1,3 @@
+// expect: `?` cannot be used on the right of `&&` / `||`
+fn a() -> Option<bool> { None }
+fn b(c: bool) -> Option<bool> { Some(c && a()?) }

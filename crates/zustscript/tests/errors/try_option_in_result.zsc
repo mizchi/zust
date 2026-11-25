@@ -1,0 +1,3 @@
+// expect: `?` on an `Option` in this function, which returns `Result`: turn it into a `Result` with `.ok_or(e)?`
+fn a() -> Option<i32> { None }
+fn b() -> Result<i32, String> { let v = a()?; Ok(v) }

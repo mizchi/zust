@@ -1,0 +1,31 @@
+// The prelude's Option / Result in `@wasm`: `?` and `if let` lower to Rust matches
+enum DivError { ByZero, Overflow }
+
+fn safe_div(a: i32, b: i32) -> Result<i32, DivError> {
+  if b == 0 { Err(ByZero) } else { Ok(a / b) }
+}
+
+fn half(a: i32) -> Option<i32> {
+  if a % 2 == 0 { Some(a / 2) } else { None }
+}
+
+@wasm export fn ratio(a: i32, b: i32, c: i32) -> Result<i32, DivError> {
+  let x = safe_div(a, b)?;
+  safe_div(x, c)
+}
+
+@wasm export fn quarter(a: i32) -> Option<i32> {
+  let h = half(a)?;
+  if let Some(q) = half(h) { Some(q) } else { None }
+}
+
+@wasm export fn code(a: i32, b: i32) -> i32 {
+  match ratio(a, b, 1) { Ok(v) => v, Err(e) => match e { ByZero => -1, Overflow => -2 } }
+}
+
+// (review of mizchi/zust#164) a `?` makes the Rust result owned: its `None` is a value of its own, not a borrow
+fn choose(x: Option<i32>, fallback: Option<String>) -> Option<String> { let _ = x?; fallback }
+
+@wasm export fn chosen(a: i32) -> i32 {
+  match choose(if a > 0 { Some(a) } else { None }, Some("hi")) { Some(s) => s.len(), None => -1 }
+}
