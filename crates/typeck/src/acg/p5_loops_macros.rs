@@ -630,6 +630,15 @@ impl Cx<'_> {
                 }
                 _ => None,
             };
+            // (a struct of the program's with a `next` of its own, but no Iterator impl nor `into_iter`: `for x in bogus`
+            // is rustc's E0277 at the expression)
+            if let Some(Ty::Struct(s)) = bt {
+                let user = self.prog.struct_item.get(s as usize).is_some_and(|&i| i < self.prog.prelude_from);
+                if user && has_next && user_into.is_none() && !matches!(strip_paren(fexpr), Expr::MethodCall(..)) && !self.prog.implements(Ty::Struct(s), "Iterator") {
+                    let n = self.prog.tn(Ty::Struct(s)).replace('#', "");
+                    return Err(self.at(expr_start(fexpr), format!("`{n}` is not an iterator (E0277)")));
+                }
+            }
             let paren = |x: &Expr| Expr::Paren(Box::new(x.clone()));
             let via: Option<Expr> = if has_next {
                 None

@@ -3015,6 +3015,7 @@ compile-fail	for-loop-while/dont-suggest-break-from-unbreakable-loops.rs
 compile-fail	for-loop-while/for-c-in-str.rs
 run-pass	for-loop-while/for-destruct.rs
 compile-fail	for-loop-while/for-else-err.rs
+compile-fail	for-loop-while/for-loop-bogosity.rs
 compile-fail	for-loop-while/for-loop-diagnostic-span.rs
 run-pass	for-loop-while/for-loop-goofiness.rs
 run-pass	for-loop-while/for-loop-has-unit-body.rs

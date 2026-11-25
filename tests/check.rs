@@ -2807,3 +2807,16 @@ fn macro_parameters_no_matcher_binds() {
     assert_eq!(first("macro_rules! m {\n    (begin $($ard:ident),* end) => {\n        [$($arg),*]\n    };\n}\nfn main() {\n    let x = 1;\n    let _ = m![begin x end];\n}\n"), Some((3, "attempted to repeat an expression containing no syntax variables matched as repeating at this depth".to_string())), "a repetition");
     assert_eq!(first("macro_rules! outer {\n    ($n:ident) => {\n        macro_rules! $n {\n            ($x:expr) => { $x + 1 };\n        }\n    };\n}\nouter!(inner);\nfn main() {\n    let _ = inner!(2);\n}\n"), None, "an inner macro's own parameter");
 }
+
+#[test]
+fn a_for_loop_over_a_struct_with_its_own_next() {
+    // (rustc 1.100: E0277 at the expression; an Iterator impl's `next` is fine)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let s = "struct M { x: isize }\nimpl M {\n    fn next(&mut self) -> Option<isize> { Some(self.x) }\n}\nfn main() {\n    let bogus = M { x: 1 };\n    for x in bogus {\n        let _ = x;\n    }\n}\n";
+    assert_eq!(first(s), Some((7, 14, "`M` is not an iterator (E0277)".to_string())));
+    let ok = "struct C(u8);\nimpl Iterator for C {\n    type Item = u8;\n    fn next(&mut self) -> Option<u8> { None }\n}\nfn main() {\n    for x in C(3) { let _ = x; }\n}\n";
+    assert_eq!(first(ok), None);
+}
