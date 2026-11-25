@@ -1228,8 +1228,9 @@ impl Cx<'_> {
                 // reborrowed)
                 let mut_moved = self.bk.plain_init == e as *const Expr as usize && self.bk.level >= 2 && matches!(p.ty(), Ty::Ref(true, _));
                 if self.bk_on() && (!self.bk_ty(p.ty()).0 || mut_moved) {
-                    // (`*x` with x a raw pointer: what it points to is not owned, E0507)
-                    if matches!(self.peek(x), Some(Ty::Ptr(..))) && self.bk.level >= 1 {
+                    // (`*x` with x a raw pointer: what it points to is not owned, E0507; also with x a reference that
+                    // is no place (`*&x`, `*v.first().unwrap()`))
+                    if self.bk.level >= 1 && (matches!(self.peek(x), Some(Ty::Ptr(..))) || !is_place_expr(x)) {
                         self.drop_move_check(e)?;
                     }
                     // (`*rc` with rc an Rc / a Deref type of the program's: its deref gives a reference, which cannot
@@ -2681,7 +2682,10 @@ impl Cx<'_> {
             let ct = if by_move { t } else { Ty::Ptr(true, intern(t)) };
             sol[cd.n_parent + i] = Some(ct);
             caps.push((loc, t));
+            // (a guard's checks of the arm's bindings (bk_ev) of a closure's captures: only a mutable borrow)
+            let gc = std::mem::replace(&mut self.bk.guard_cap, true);
             copy_caps.push(self.bk_capture(c, n, loc, t, by_move));
+            self.bk.guard_cap = gc;
         }
         // (a capture held by value (a `move` closure's) of a local not declared `mut`, which the body assigns or borrows
         // mutably: E0594 / E0596 at the mutation; one held by reference is a `&mut` loan the borrow check reports)

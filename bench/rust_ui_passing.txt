@@ -983,6 +983,7 @@ compile-fail	borrowck/const-fn-ptr-borrow-annotation.rs
 compile-fail	borrowck/copy-suggestion-region-vid.rs
 compile-fail	borrowck/dbg-issue-120327.rs
 compile-fail	borrowck/deref-and-mut-borrow-conflict.rs
+compile-fail	borrowck/deref-field-pattern-ref-suggestion-issue-146995.rs
 compile-fail	borrowck/deref-index-pattern-ref-suggestion.rs
 compile-fail	borrowck/disallow-possibly-uninitialized.rs
 compile-fail	borrowck/do-not-suggest-adding-move-when-closure-is-already-marked-as-move.rs
@@ -1289,6 +1290,7 @@ compile-fail	closures/2229_closure_analysis/diagnostics/arrays.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-1.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-2.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-3.rs
+compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-4.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/borrowck/borrowck-closures-mut-and-imm.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/box.rs
 compile-fail	closures/2229_closure_analysis/diagnostics/cant-mutate-imm-borrow.rs
@@ -4737,6 +4739,7 @@ compile-fail	moves/nested-loop-moved-value-wrong-continue.rs
 compile-fail	moves/no-capture-arc.rs
 compile-fail	moves/no-reuse-move-arc.rs
 compile-fail	moves/pin-mut-reborrow-infer-var-issue-107419.rs
+compile-fail	moves/pin-mut-reborrow.rs
 compile-fail	moves/recreating-value-in-loop-condition.rs
 compile-fail	moves/suggest-clone.rs
 compile-fail	moves/unconstrained-impl-param-clone-suggestion.rs
@@ -5875,6 +5878,7 @@ run-pass	pattern/issue-15080.rs
 compile-fail	pattern/issue-17718-patterns.rs
 run-pass	pattern/issue-27320.rs
 compile-fail	pattern/issue-28992-empty.rs
+compile-fail	pattern/issue-52240.rs
 run-pass	pattern/issue-6449.rs
 compile-fail	pattern/issue-66270-pat-struct-parser-recovery.rs
 compile-fail	pattern/issue-67037-pat-tup-scrut-ty-diff-less-fields.rs
@@ -6518,6 +6522,7 @@ compile-fail	rfcs/rfc-0000-never_patterns/ICE-119271-never-arm-attr-in-guard.rs
 run-pass	rfcs/rfc-0107-bind-by-move-pattern-guards/bind-by-move-no-guards.rs
 check-pass	rfcs/rfc-0107-bind-by-move-pattern-guards/former-E0008-now-pass.rs
 run-pass	rfcs/rfc-0107-bind-by-move-pattern-guards/rfc-basic-examples.rs
+compile-fail	rfcs/rfc-0107-bind-by-move-pattern-guards/rfc-reject-double-move-across-arms.rs
 compile-fail	rfcs/rfc-0107-bind-by-move-pattern-guards/rfc-reject-double-move-in-first-arm.rs
 run-pass	rfcs/rfc-1238-nonparametric-dropck/must-work-ex1.rs
 run-pass	rfcs/rfc-1238-nonparametric-dropck/must-work-ex2.rs
@@ -6593,6 +6598,8 @@ run-pass	rfcs/rfc-2175-or-if-while-let/basic.rs
 check-pass	rfcs/rfc-2294-if-let-guard/drop-scope-let-chains.rs
 compile-fail	rfcs/rfc-2294-if-let-guard/exhaustive.rs
 check-pass	rfcs/rfc-2294-if-let-guard/guard-lifetime-2.rs
+compile-fail	rfcs/rfc-2294-if-let-guard/guard-mutability-1.rs
+compile-fail	rfcs/rfc-2294-if-let-guard/guard-mutability-2.rs
 compile-fail	rfcs/rfc-2294-if-let-guard/let-chains-gated-correctly-in-guard.rs
 check-pass	rfcs/rfc-2294-if-let-guard/loop-mutability.rs
 check-pass	rfcs/rfc-2294-if-let-guard/move-guard-if-let.rs
@@ -7066,6 +7073,7 @@ compile-fail	suggestions/bad-infer-in-trait-impl.rs
 compile-fail	suggestions/bool_typo_err_suggest.rs
 compile-fail	suggestions/borrow-cast-or-binexpr-with-parens.rs
 compile-fail	suggestions/borrow-for-loop-head.rs
+compile-fail	suggestions/borrow-from-overloaded-deref-assign-issue-154826.rs
 compile-fail	suggestions/box-future-wrong-output.rs
 compile-fail	suggestions/boxed-variant-field.rs
 compile-fail	suggestions/call-boxed.rs
@@ -7220,6 +7228,7 @@ compile-fail	suggestions/non_ascii_ident.rs
 compile-fail	suggestions/non_copy_move_out_of_tuple.rs
 compile-fail	suggestions/only-replace-intended-coma-not-all-in-pattern.rs
 compile-fail	suggestions/only-suggest-removal-of-conversion-method-calls.rs
+compile-fail	suggestions/option-content-move-from-tuple-match.rs
 compile-fail	suggestions/option-content-move.rs
 compile-fail	suggestions/option-content-move2.rs
 compile-fail	suggestions/option-content-move3.rs
@@ -7343,6 +7352,7 @@ compile-fail	suggestions/while-let-typo.rs
 compile-fail	suggestions/wrap-function-local-constructors.rs
 run-pass	supertrait-shadowing/trivially-false-subtrait.rs
 build-pass	symbol-names/issue-53912.rs
+compile-fail	sync/atomic-types-not-copyable.rs
 compile-fail	sync/mutexguard-sync.rs
 compile-fail	sync/suggest-cell.rs
 compile-fail	sync/suggest-once-cell.rs
@@ -7682,6 +7692,7 @@ compile-fail	traits/safety-fn-body.rs
 run-pass	traits/safety-ok.rs
 compile-fail	traits/safety-trait-impl.rs
 check-pass	traits/self-not-send-in-default-method-8171.rs
+compile-fail	traits/self-without-lifetime-constraint.rs
 compile-fail	traits/send-trait-objects-basic.rs
 compile-fail	traits/similarly_named_trait.rs
 check-pass	traits/solver-cycles/100347-recursive-enum-cow-slice.rs

@@ -4,7 +4,7 @@ The percentages are rustc's own UI tests that pass in that area: run-pass + chec
 directories named in the comment next to the number (`ui:`), or compile-fail (`cf:`). They count only the tests
 `bench/rust_ui.py` can ask zustc to handle (no nightly features, auxiliary crates, special flags or targets other than
 Linux x86-64), so 100% does not mean every test of a directory passes. They were measured
-<!-- measured -->2026-11-25, 4139c8b<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
+<!-- measured -->2026-11-25, e7a483c<!-- /measured --> by CI on each push to main (bench.yml runs `bench/rust_ui.py`, then
 `scripts/update_readme.py` writes them here). The totals for each kind of test are in the
 [README](README.md#coverage-of-rustcs-test-suite), the subset of the language in prose is in
 [docs/language.md](docs/language.md), and the [reports](docs/reports/) explain each step.
@@ -47,7 +47,7 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 - [ ] drop: <!-- ui:drop -->68.1% (the drop order of some temporaries differs)
 - [ ] traits: <!-- ui:traits -->72.6% (generic traits, blanket impls, `dyn` (also `dyn Tr<A>`), `impl .. for dyn Tr` work; `impl<T> Tr for &T` only without functions; no coherence)
 - [ ] `macro_rules!`: <!-- ui:macros -->77.9% (hygiene for `let`, labels, arm bindings; not every fragment kind)
-- [ ] unions: <!-- ui:union -->76.9% (no `repr(packed)`)
+- [ ] unions: <!-- ui:union -->84.6% (no `repr(packed)`)
 - [ ] const generics: <!-- ui:const-generics -->66.3% (no `generic_const_exprs`)
 - [ ] generic associated types: <!-- ui:generic-associated-types -->82.2%
 - [ ] casts (`as _` / `as *const _` take the source or expected type; a pointer of unknown kind is E0641): <!-- ui:cast -->72.4%
@@ -56,7 +56,7 @@ Linux x86-64), so 100% does not mean every test of a directory passes. They were
 
 ## Checks (compile-fail)
 
-- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->89.9%
+- [x] borrow checking: moves, conflicting loans, escapes, mutability: borrowck <!-- cf:borrowck -->90.4%
   ([report 08](docs/reports/2026-11-18-08-borrow-checking.md))
 - [x] type errors, missing items, generics declarations (E0403, E0207, E0392, E0072 ..): typeck <!-- cf:typeck -->73.5%, structs <!-- cf:structs -->81.2%
 - [x] unsafe operations outside `unsafe` (E0133): calls to `unsafe fn` and extern fns, raw pointer derefs, `static mut`,
