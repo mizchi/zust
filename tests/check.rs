@@ -2756,3 +2756,14 @@ fn const_and_static_items_without_a_type() {
     assert_eq!(first("fn main() {\n    const FOO = \"hello\";\n    let _ = FOO;\n}\n").map(|d| (d.0, d.2)), e(2, 0, "const").map(|d| (d.0, d.2)), "in a fn body, at its line");
     assert_eq!(first("const A: u8 = 1;\nstatic B: u8 = 2;\nfn main() {}\n"), None, "with types");
 }
+
+#[test]
+fn attributes_with_no_item_after_them_in_an_impl() {
+    // (rustc 1.100: "expected item after attributes", at the first)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    assert_eq!(first("struct Foo;\nimpl Foo {\n    fn foo() {}\n    #[inline]\n    #[allow(dead_code)]\n}\nfn main() {}\n"), Some((4, 5, "expected item after attributes".to_string())));
+    assert_eq!(first("struct Foo;\nimpl Foo {\n    #[inline]\n    fn foo() {}\n}\nfn main() { Foo::foo(); }\n"), None);
+}

@@ -378,7 +378,13 @@ fn split_items(src: &str) -> Result<Vec<SrcItem>, String> {
         i += 1;
         // impl ブロックの閉じ括弧はどのアイテムにも属さない
         if c == b'}' && impl_header.is_some() && depth == 1 {
-            if st.cur.is_some() {
+            if let Some((sp, ..)) = st.cur {
+                // (attributes with no item after them, `impl Foo { #[stable(..)] }`: rustc's error at the first)
+                let sp = sp as usize;
+                if attrs_only(std::str::from_utf8(&s[sp..start]).unwrap_or("")) {
+                    let col = std::str::from_utf8(&s[s[..sp].iter().rposition(|&c| c == b'\n').map_or(0, |p| p + 1)..sp]).map_or(1, |l| l.chars().count() + 1);
+                    return Err(format!("{}:{col}: expected item after attributes", st.line_at(sp)));
+                }
                 return Err(format!(
                     "{}:1: unterminated item in impl block",
                     st.line_at(start)
@@ -593,6 +599,33 @@ fn utf8_len(b: u8) -> usize {
         0xc0.. => 2,
         _ => 1,
     }
+}
+
+/// Whether a text is outer attributes alone (`#[..]` groups, whitespace and comments between), at least one
+#[cold]
+fn attrs_only(text: &str) -> bool {
+    let mut rest = text.trim_start();
+    if !rest.starts_with("#[") {
+        return false;
+    }
+    while let Some(r) = rest.strip_prefix("#[") {
+        let mut d = 1;
+        let Some(e) = r.char_indices().find_map(|(i, c)| {
+            match c {
+                '[' => d += 1,
+                ']' => d -= 1,
+                _ => {}
+            }
+            (d == 0).then_some(i)
+        }) else {
+            return false;
+        };
+        rest = r[e + 1..].trim_start();
+        while rest.starts_with("//") {
+            rest = rest[rest.find('\n').unwrap_or(rest.len())..].trim_start();
+        }
+    }
+    rest.is_empty()
 }
 
 /// rustc's lexer error for a string, a raw string or a block comment that the file ends in, at its start: E0765

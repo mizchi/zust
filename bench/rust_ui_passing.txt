@@ -5579,6 +5579,8 @@ compile-fail	parser/issues/issue-20616-6.rs
 compile-fail	parser/issues/issue-20616-7.rs
 compile-fail	parser/issues/issue-20616-8.rs
 compile-fail	parser/issues/issue-20616-9.rs
+compile-fail	parser/issues/issue-20711-2.rs
+compile-fail	parser/issues/issue-20711.rs
 compile-fail	parser/issues/issue-21153.rs
 run-pass	parser/issues/issue-21475.rs
 compile-fail	parser/issues/issue-22647.rs
