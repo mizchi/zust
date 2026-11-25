@@ -50,12 +50,16 @@ fn mix(h: u64, x: u64) -> u64 {
 
 /// 全体を前処理する (with_prelude_in のもともとの順)
 pub fn prep_full(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, cfg: Option<&crate::cfg::CfgSet>) -> R<Prep> {
+    // (ZUSTC_PROF: the time of each of its stages, under `prep`)
+    let mut tm = crate::prof::Timer { on: std::env::var_os("ZUSTC_PROF").is_some(), last: crate::prof::now_ns(), start: 0 };
     let tl = lexer::expand_thread_local(src);
+    tm.lap(" prep/tls", String::new());
     let s1: &str = match &tl {
         Some(t) => t.as_str(),
         None => src,
     };
     let expanded = crate::macros::expand_cfg(s1, cfg)?;
+    tm.lap(" prep/macro", String::new());
     let s2: &str = match &expanded {
         Some(t) => t.as_str(),
         None => s1,
@@ -64,6 +68,7 @@ pub fn prep_full(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, c
         let _ = std::fs::write(p, s2);
     }
     let flat = lexer::flatten_modules_fix(s2, crates, fix);
+    tm.lap(" prep/flat", String::new());
     let s3: &str = match &flat {
         Some(t) => t.as_str(),
         None => s2,
@@ -99,11 +104,13 @@ pub fn prep_full(src: &str, crates: &[String], fix: &mut Vec<(u32, u32, i32)>, c
         _ => None,
     };
     let hoisted = reflat.or(hoisted);
+    tm.lap(" prep/hoist", String::new());
     let s4: &str = match &hoisted {
         Some(t) => t.as_str(),
         None => s3,
     };
     let cv = crate::ctors::rewrite_ctor_values(s4);
+    tm.lap(" prep/ctors", String::new());
     let text = match cv {
         Some(t) => t,
         None => s4.to_string(),
