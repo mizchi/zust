@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795637954561,
+  "lastUpdate": 1795637957677,
   "repoUrl": "https://github.com/mizchi/zust",
   "entries": {
     "zustc": [
@@ -82696,6 +82696,75 @@ window.BENCHMARK_DATA = {
           {
             "name": "lsp peak RSS",
             "value": 100.141,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "miz404@gmail.com",
+            "name": "Kotaro Chikuba",
+            "username": "mizchi"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ce9b7b6a5f09bb904309b619c83536fd19886ac3",
+          "message": "CI: kache keeps what rustc makes in the test and rust-ui jobs; rust-cache keeps the registry and the tools (#220)\n\nkache (kunobi-ninja/kache-action, kache 2.3.1) wraps rustc and keeps each compiler run's output in the GitHub\nActions cache, by its inputs with the checkout's paths left out, so a crate compiled as in an earlier run is copied,\nthe test binaries too (cache-executables). rust-cache no longer keeps target/ (cache-targets: false), so the two do\nnot store the same outputs twice in the repository's 10 GB.\n\nLocally, kache's warm rebuild of zust-syntax and zust-base took 0.1 s where the cold one took 19.9 s.\n\n\nClaude-Session: https://claude.ai/code/session_01JroQ9gGLQPao3UW4tGGgZE\n\nCo-authored-by: Claude <noreply@anthropic.com>",
+          "timestamp": "2026-11-26T05:13:19+09:00",
+          "tree_id": "3d8fd9b2f3159d960e33f0581dc9e79ed7b9d131",
+          "url": "https://github.com/mizchi/zust/commit/ce9b7b6a5f09bb904309b619c83536fd19886ac3"
+        },
+        "date": 1795637956974,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "lsp definition p50",
+            "value": 1.221,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp hover p50",
+            "value": 0.958,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp completion p50",
+            "value": 1.93,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp references p50",
+            "value": 12.54,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp rename p50",
+            "value": 1.418,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp signatureHelp p50",
+            "value": 1.191,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp documentHighlight p50",
+            "value": 2.69,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp ready (startup to indexed)",
+            "value": 318.827,
+            "unit": "ms"
+          },
+          {
+            "name": "lsp peak RSS",
+            "value": 99.852,
             "unit": "MiB"
           }
         ]
