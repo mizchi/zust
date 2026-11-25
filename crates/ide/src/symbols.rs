@@ -201,7 +201,6 @@ impl Scan<'_> {
         out
     }
 
-    /// Reads the items in a..end. in_impl: inside impl / trait (fns are methods)
     /// Items inside a fn body (tokens a..end): the ones with a keyword at the start of a statement (after `{` / `}` / `;` / an attribute's `]`)
     fn nested_items(&self, a: usize, end: usize) -> Vec<Symbol> {
         let mut out = vec![];
@@ -233,37 +232,12 @@ impl Scan<'_> {
         out
     }
 
+    /// Reads the items in a..end. in_impl: inside impl / trait (fns are methods)
     fn items(&self, a: usize, end: usize, in_impl: bool, out: &mut Vec<Symbol>) {
         let mut k = a;
         while k < end {
             let start = k;
-            // Attributes `#[..]` / `#![..]`
-            let mut j = k;
-            while self.sym(j, b'#') {
-                let mut o = j + 1;
-                if self.sym(o, b'!') {
-                    o += 1;
-                }
-                if !self.sym(o, b'[') {
-                    break;
-                }
-                j = self.close(o, end) + 1;
-            }
-            // Modifiers (pub / pub(crate) / unsafe / async / default / extern "C" (before fn) / const (before fn))
-            loop {
-                if self.is(j, b"pub") {
-                    j += 1;
-                    if self.sym(j, b'(') {
-                        j = self.close(j, end) + 1;
-                    }
-                } else if self.is(j, b"unsafe") || self.is(j, b"async") || self.is(j, b"default") || (self.is(j, b"const") && (self.is(j + 1, b"fn") || self.is(j + 1, b"unsafe") || self.is(j + 1, b"extern") || self.is(j + 1, b"async") || self.is(j + 1, b"impl") || self.is(j + 1, b"trait"))) {
-                    j += 1;
-                } else if self.is(j, b"extern") && j + 1 < end && self.t[j + 1].0 == 2 && self.is(j + 2, b"fn") {
-                    j += 2;
-                } else {
-                    break;
-                }
-            }
+            let j = self.item_keyword(k, end);
             if j >= end {
                 break;
             }
@@ -339,58 +313,7 @@ impl Scan<'_> {
                     out.push(named(SymKind::Trait, j + 1, e, String::new(), ch));
                     e + 1
                 }
-                b"impl" => {
-                    let e = self.item_end(j, end, true);
-                    let mut b = j + 1;
-                    while b < e && !self.sym(b, b'{') {
-                        b += 1;
-                    }
-                    let mut ch = vec![];
-                    if self.sym(b, b'{') {
-                        self.items(b + 1, self.close(b, end), true, &mut ch);
-                    }
-                    // (Name: `Tr for S<T>` / `S`, without the type params of `impl<T> Tr for S<T>`)
-                    let mut h = j + 1;
-                    if self.sym(h, b'<') {
-                        let mut d = 0i32;
-                        while h < b {
-                            if self.sym(h, b'<') {
-                                d += 1;
-                            } else if self.sym(h, b'>') {
-                                d -= 1;
-                                if d == 0 {
-                                    h += 1;
-                                    break;
-                                }
-                            }
-                            h += 1;
-                        }
-                    }
-                    let mut he = b.saturating_sub(1);
-                    // (Nothing from `where` on goes into the name)
-                    let mut w = h;
-                    while w < b {
-                        if self.is(w, b"where") {
-                            he = w.saturating_sub(1);
-                            break;
-                        }
-                        w += 1;
-                    }
-                    let name = if h <= he { self.join(h, he) } else { String::from("impl") };
-                    let (na, nb) = if h <= he && he < self.t.len() { (self.t[h].1, self.t[he].2) } else { (self.t[j].1, self.t[j].2) };
-                    out.push(Symbol {
-                        name: format!("impl {name}"),
-                        kind: SymKind::Impl,
-                        detail: String::new(),
-                        start: self.t[start].1,
-                        end: self.t[e.min(self.t.len() - 1)].2,
-                        name_start: na,
-                        name_end: nb,
-                        children: ch,
-                        in_macro: false,
-                    });
-                    e + 1
-                }
+                b"impl" => self.impl_item(start, j, end, out),
                 b"mod" if self.ident(j + 1) => {
                     let e = self.item_end(j, end, true);
                     let mut ch = vec![];
@@ -416,48 +339,14 @@ impl Scan<'_> {
                     if self.is(nk, b"_") {
                         e + 1
                     } else {
-                        // (Type: from `:` up to before `=` / `;`)
-                        let mut ta = nk + 1;
-                        let detail = if self.sym(ta, b':') {
-                            ta += 1;
-                            let mut tb = ta;
-                            while tb < e && !self.sym(tb, b'=') {
-                                tb += 1;
-                            }
-                            if tb > ta { self.join(ta, tb - 1) } else { String::new() }
-                        } else {
-                            String::new()
-                        };
+                        let detail = self.const_type(nk, e);
                         out.push(named(if kw == b"const" { SymKind::Const } else { SymKind::Static }, nk, e, detail, vec![]));
                         e + 1
                     }
                 }
                 b"type" if self.ident(j + 1) => {
                     let e = self.item_end(j, end, false);
-                    // (detail: the type to the right of `=`. With type params, `<K, V> = right`)
-                    let mut q = j + 2;
-                    let mut generics = String::new();
-                    if self.sym(q, b'<') {
-                        let g0 = q;
-                        let mut d = 0;
-                        while q < e {
-                            if self.sym(q, b'<') {
-                                d += 1;
-                            } else if self.sym(q, b'>') && !self.sym(q - 1, b'-') {
-                                d -= 1;
-                                if d == 0 {
-                                    break;
-                                }
-                            }
-                            q += 1;
-                        }
-                        generics = self.join(g0, q);
-                    }
-                    while q < e && !self.sym(q, b'=') {
-                        q += 1;
-                    }
-                    let rhs = if q + 1 < e { self.join(q + 1, e - 1) } else { String::new() };
-                    let detail = if generics.is_empty() || rhs.is_empty() { rhs } else { format!("{generics} = {rhs}") };
+                    let detail = self.alias_detail(j, e);
                     out.push(named(SymKind::TypeAlias, j + 1, e, detail, vec![]));
                     e + 1
                 }
@@ -469,52 +358,8 @@ impl Scan<'_> {
                     out.push(named(SymKind::Macro, j + 2, e, String::from("macro_rules!"), vec![]));
                     // (The methods of core's number types are in the bodies of the macros `uint_impl!` / `int_impl!`: the items in their arms are made
                     // members of `impl __uint` / `impl __int` (navigate adds them to the owners u8 .. / i8 ..))
-                    let mname = self.text(j + 2).to_vec();
-                    if matches!(mname.as_slice(), b"uint_impl" | b"int_impl" | b"from_str_int_impl" | b"generate_pattern_iterators") && self.sym(j + 3, b'{') {
-                        let mut ch = vec![];
-                        let mut q = j + 4;
-                        while q < e {
-                            if self.sym(q, b'=') && self.sym(q + 1, b'>') && self.sym(q + 2, b'{') {
-                                let c = self.close(q + 2, e);
-                                let mut part = vec![];
-                                self.items(q + 3, c, true, &mut part);
-                                // (The members of the impl inside `$( impl $int_ty { fn .. } )+` too)
-                                part = self.nested_items(q + 3, c).into_iter().chain(part).collect();
-                                for s in part {
-                                    if s.kind == SymKind::Impl {
-                                        ch.extend(s.children.into_iter().map(|mut x| {
-                                            if x.kind == SymKind::Function {
-                                                x.kind = SymKind::Method;
-                                            }
-                                            x
-                                        }));
-                                    } else if !ch.iter().any(|x: &Symbol| x.name_start == s.name_start) {
-                                        ch.push(s);
-                                    }
-                                }
-                                q = c + 1;
-                            } else {
-                                q += 1;
-                            }
-                        }
-                        ch.sort_by_key(|s| s.name_start);
-                        ch.dedup_by_key(|s| s.name_start);
-                        for s in &mut ch {
-                            s.in_macro = true;
-                            // (Members of the number types' impls)
-                            if s.kind == SymKind::Function {
-                                s.kind = SymKind::Method;
-                            }
-                        }
-                        let owner = match mname.as_slice() {
-                            b"uint_impl" => "__uint",
-                            b"int_impl" => "__int",
-                            // (Iterator impls such as str's `Split<'a, P>`: navigate adds them to the owners of those types)
-                            b"generate_pattern_iterators" => "__str_pat_iter",
-                            _ => "__num",
-                        };
-                        let (na, nb) = (self.t[j + 2].1, self.t[j + 2].2);
-                        out.push(Symbol { name: format!("impl {owner}"), kind: SymKind::Impl, detail: String::new(), start: self.t[start].1, end: self.t[e.min(self.t.len() - 1)].2, name_start: na, name_end: nb, children: ch, in_macro: true });
+                    if matches!(self.text(j + 2), b"uint_impl" | b"int_impl" | b"from_str_int_impl" | b"generate_pattern_iterators") && self.sym(j + 3, b'{') {
+                        out.push(self.number_impl(start, j, e));
                     }
                     e + 1
                 }
@@ -529,31 +374,213 @@ impl Scan<'_> {
                     e + 1
                 }
                 b"use" | b"extern" => self.item_end(j, end, false) + 1,
-                _ => {
-                    // (Macro calls like `m! { .. }` / `m!(..);` are skipped. An unknown token advances by one)
-                    if self.ident(j) && self.sym(j + 1, b'!') && j + 2 < end && self.t[j + 2].0 == 1 {
-                        let c = self.close(j + 2, end);
-                        // (The static in `thread_local! { static X: T = ..; }` is an item: rust-analyzer expands the macro to see it)
-                        if self.is(j, b"thread_local") && self.sym(j + 2, b'{') {
-                            let n = out.len();
-                            self.items(j + 3, c, false, out);
-                            for s in &mut out[n..] {
-                                s.in_macro = true;
-                                // (The type of a thread_local static is `LocalKey<T>`)
-                                if s.kind == SymKind::Static {
-                                    s.detail = format!("LocalKey<{}>", s.detail);
-                                }
-                            }
-                        }
-                        if self.sym(c + 1, b';') { c + 2 } else { c + 1 }
-                    } else if self.sym(j, b'{') {
-                        self.close(j, end) + 1
-                    } else {
-                        j + 1
-                    }
-                }
+                _ => self.past_non_item(j, end, out),
             };
             k = next.max(k + 1);
+        }
+    }
+
+    /// The keyword of the item at k: past its attributes and modifiers
+    fn item_keyword(&self, k: usize, end: usize) -> usize {
+        // Attributes `#[..]` / `#![..]`
+        let mut j = k;
+        while self.sym(j, b'#') {
+            let mut o = j + 1;
+            if self.sym(o, b'!') {
+                o += 1;
+            }
+            if !self.sym(o, b'[') {
+                break;
+            }
+            j = self.close(o, end) + 1;
+        }
+        // Modifiers (pub / pub(crate) / unsafe / async / default / extern "C" (before fn) / const (before fn))
+        loop {
+            if self.is(j, b"pub") {
+                j += 1;
+                if self.sym(j, b'(') {
+                    j = self.close(j, end) + 1;
+                }
+            } else if self.is(j, b"unsafe") || self.is(j, b"async") || self.is(j, b"default") || (self.is(j, b"const") && (self.is(j + 1, b"fn") || self.is(j + 1, b"unsafe") || self.is(j + 1, b"extern") || self.is(j + 1, b"async") || self.is(j + 1, b"impl") || self.is(j + 1, b"trait"))) {
+                j += 1;
+            } else if self.is(j, b"extern") && j + 1 < end && self.t[j + 1].0 == 2 && self.is(j + 2, b"fn") {
+                j += 2;
+            } else {
+                break;
+            }
+        }
+        j
+    }
+
+    /// Reads the impl block whose `impl` is token j (start: its first token, attributes included) into out, with its items as children; the
+    /// token after it
+    fn impl_item(&self, start: usize, j: usize, end: usize, out: &mut Vec<Symbol>) -> usize {
+        let e = self.item_end(j, end, true);
+        let mut b = j + 1;
+        while b < e && !self.sym(b, b'{') {
+            b += 1;
+        }
+        let mut ch = vec![];
+        if self.sym(b, b'{') {
+            self.items(b + 1, self.close(b, end), true, &mut ch);
+        }
+        // (Name: `Tr for S<T>` / `S`, without the type params of `impl<T> Tr for S<T>`)
+        let mut h = j + 1;
+        if self.sym(h, b'<') {
+            let mut d = 0i32;
+            while h < b {
+                if self.sym(h, b'<') {
+                    d += 1;
+                } else if self.sym(h, b'>') {
+                    d -= 1;
+                    if d == 0 {
+                        h += 1;
+                        break;
+                    }
+                }
+                h += 1;
+            }
+        }
+        let mut he = b.saturating_sub(1);
+        // (Nothing from `where` on goes into the name)
+        let mut w = h;
+        while w < b {
+            if self.is(w, b"where") {
+                he = w.saturating_sub(1);
+                break;
+            }
+            w += 1;
+        }
+        let name = if h <= he { self.join(h, he) } else { String::from("impl") };
+        let (na, nb) = if h <= he && he < self.t.len() { (self.t[h].1, self.t[he].2) } else { (self.t[j].1, self.t[j].2) };
+        out.push(Symbol {
+            name: format!("impl {name}"),
+            kind: SymKind::Impl,
+            detail: String::new(),
+            start: self.t[start].1,
+            end: self.t[e.min(self.t.len() - 1)].2,
+            name_start: na,
+            name_end: nb,
+            children: ch,
+            in_macro: false,
+        });
+        e + 1
+    }
+
+    /// The type of a const / static whose name is token nk and which ends at e: from `:` up to before `=` / `;` (empty if not written)
+    fn const_type(&self, nk: usize, e: usize) -> String {
+        let mut ta = nk + 1;
+        if self.sym(ta, b':') {
+            ta += 1;
+            let mut tb = ta;
+            while tb < e && !self.sym(tb, b'=') {
+                tb += 1;
+            }
+            if tb > ta { self.join(ta, tb - 1) } else { String::new() }
+        } else {
+            String::new()
+        }
+    }
+
+    /// The detail of `type` alias j..=e: the type to the right of `=`. With type params, `<K, V> = right`
+    fn alias_detail(&self, j: usize, e: usize) -> String {
+        let mut q = j + 2;
+        let mut generics = String::new();
+        if self.sym(q, b'<') {
+            let g0 = q;
+            let mut d = 0;
+            while q < e {
+                if self.sym(q, b'<') {
+                    d += 1;
+                } else if self.sym(q, b'>') && !self.sym(q - 1, b'-') {
+                    d -= 1;
+                    if d == 0 {
+                        break;
+                    }
+                }
+                q += 1;
+            }
+            generics = self.join(g0, q);
+        }
+        while q < e && !self.sym(q, b'=') {
+            q += 1;
+        }
+        let rhs = if q + 1 < e { self.join(q + 1, e - 1) } else { String::new() };
+        if generics.is_empty() || rhs.is_empty() { rhs } else { format!("{generics} = {rhs}") }
+    }
+
+    /// The `impl __uint` / `impl __int` / .. of a number-type macro of core (`macro_rules! uint_impl { .. }`, token j, start its first token,
+    /// e its end): the items in its arms, made methods
+    fn number_impl(&self, start: usize, j: usize, e: usize) -> Symbol {
+        let mut ch = vec![];
+        let mut q = j + 4;
+        while q < e {
+            if self.sym(q, b'=') && self.sym(q + 1, b'>') && self.sym(q + 2, b'{') {
+                let c = self.close(q + 2, e);
+                let mut part = vec![];
+                self.items(q + 3, c, true, &mut part);
+                // (The members of the impl inside `$( impl $int_ty { fn .. } )+` too)
+                part = self.nested_items(q + 3, c).into_iter().chain(part).collect();
+                for s in part {
+                    if s.kind == SymKind::Impl {
+                        ch.extend(s.children.into_iter().map(|mut x| {
+                            if x.kind == SymKind::Function {
+                                x.kind = SymKind::Method;
+                            }
+                            x
+                        }));
+                    } else if !ch.iter().any(|x: &Symbol| x.name_start == s.name_start) {
+                        ch.push(s);
+                    }
+                }
+                q = c + 1;
+            } else {
+                q += 1;
+            }
+        }
+        ch.sort_by_key(|s| s.name_start);
+        ch.dedup_by_key(|s| s.name_start);
+        for s in &mut ch {
+            s.in_macro = true;
+            // (Members of the number types' impls)
+            if s.kind == SymKind::Function {
+                s.kind = SymKind::Method;
+            }
+        }
+        let owner = match self.text(j + 2) {
+            b"uint_impl" => "__uint",
+            b"int_impl" => "__int",
+            // (Iterator impls such as str's `Split<'a, P>`: navigate adds them to the owners of those types)
+            b"generate_pattern_iterators" => "__str_pat_iter",
+            _ => "__num",
+        };
+        let (na, nb) = (self.t[j + 2].1, self.t[j + 2].2);
+        Symbol { name: format!("impl {owner}"), kind: SymKind::Impl, detail: String::new(), start: self.t[start].1, end: self.t[e.min(self.t.len() - 1)].2, name_start: na, name_end: nb, children: ch, in_macro: true }
+    }
+
+    /// Past token j, which starts no item: a macro call `m! { .. }` / `m!(..);` (the statics of `thread_local! { .. }` are read into out), a
+    /// block `{ .. }`, or (anything else) the one token
+    fn past_non_item(&self, j: usize, end: usize, out: &mut Vec<Symbol>) -> usize {
+        // (Macro calls like `m! { .. }` / `m!(..);` are skipped. An unknown token advances by one)
+        if self.ident(j) && self.sym(j + 1, b'!') && j + 2 < end && self.t[j + 2].0 == 1 {
+            let c = self.close(j + 2, end);
+            // (The static in `thread_local! { static X: T = ..; }` is an item: rust-analyzer expands the macro to see it)
+            if self.is(j, b"thread_local") && self.sym(j + 2, b'{') {
+                let n = out.len();
+                self.items(j + 3, c, false, out);
+                for s in &mut out[n..] {
+                    s.in_macro = true;
+                    // (The type of a thread_local static is `LocalKey<T>`)
+                    if s.kind == SymKind::Static {
+                        s.detail = format!("LocalKey<{}>", s.detail);
+                    }
+                }
+            }
+            if self.sym(c + 1, b';') { c + 2 } else { c + 1 }
+        } else if self.sym(j, b'{') {
+            self.close(j, end) + 1
+        } else {
+            j + 1
         }
     }
 
