@@ -1626,6 +1626,7 @@ compile-fail	confuse-field-and-method/issue-2392.rs
 compile-fail	confuse-field-and-method/issue-32128.rs
 compile-fail	confuse-field-and-method/issue-33784.rs
 compile-fail	confuse-field-and-method/private-field.rs
+compile-fail	const-generics/adt_const_params/const_param_ty_trait_no_gate.rs
 check-pass	const-generics/apit-with-const-param.rs
 check-pass	const-generics/arg-in-pat-2.rs
 compile-fail	const-generics/argument_order.rs
@@ -2606,6 +2607,7 @@ compile-fail	error-codes/E0620.rs
 compile-fail	error-codes/E0621-does-not-trigger-for-closures.rs
 compile-fail	error-codes/E0624.rs
 compile-fail	error-codes/E0637.rs
+compile-fail	error-codes/E0658.rs
 compile-fail	error-codes/E0659.rs
 compile-fail	error-codes/E0746.rs
 compile-fail	error-codes/E0767.rs
@@ -2727,6 +2729,7 @@ compile-fail	feature-gates/feature-gate-custom_attribute.rs
 compile-fail	feature-gates/feature-gate-custom_attribute2.rs
 compile-fail	feature-gates/feature-gate-decl_macro.rs
 compile-fail	feature-gates/feature-gate-deref_patterns.rs
+compile-fail	feature-gates/feature-gate-derive-coerce-pointee.rs
 compile-fail	feature-gates/feature-gate-derive-from.rs
 compile-fail	feature-gates/feature-gate-diagnostic-on-move.rs
 check-pass	feature-gates/feature-gate-diagnostic-on-type-error-malformed-args.rs
@@ -2742,11 +2745,13 @@ compile-fail	feature-gates/feature-gate-f16b.rs
 compile-fail	feature-gates/feature-gate-ffi_const.rs
 compile-fail	feature-gates/feature-gate-ffi_pure.rs
 compile-fail	feature-gates/feature-gate-field-projections.rs
+compile-fail	feature-gates/feature-gate-field-representing-type-raw.rs
 compile-fail	feature-gates/feature-gate-final-associated-functions.rs
 compile-fail	feature-gates/feature-gate-fma4_target_feature.rs
 compile-fail	feature-gates/feature-gate-fmt-debug.rs
 compile-fail	feature-gates/feature-gate-fn_align.rs
 compile-fail	feature-gates/feature-gate-fn_delegation.rs
+compile-fail	feature-gates/feature-gate-fn_static.rs
 compile-fail	feature-gates/feature-gate-format_args_nl.rs
 compile-fail	feature-gates/feature-gate-frontmatter.rs
 compile-fail	feature-gates/feature-gate-fundamental.rs
@@ -2759,6 +2764,7 @@ compile-fail	feature-gates/feature-gate-impl_trait_in_assoc_type.rs
 compile-fail	feature-gates/feature-gate-impl_trait_in_fn_trait_return.rs
 check-pass	feature-gates/feature-gate-ineffective_unstable_reexports.rs
 compile-fail	feature-gates/feature-gate-intrinsics.rs
+compile-fail	feature-gates/feature-gate-io_error_kind_in_core.rs
 compile-fail	feature-gates/feature-gate-lang-items.rs
 compile-fail	feature-gates/feature-gate-large-assignments.rs
 compile-fail	feature-gates/feature-gate-lifetime-capture-rules-2024.rs
@@ -2789,6 +2795,8 @@ compile-fail	feature-gates/feature-gate-pin_ergonomics.rs
 compile-fail	feature-gates/feature-gate-postfix_match.rs
 compile-fail	feature-gates/feature-gate-prelude_import.rs
 compile-fail	feature-gates/feature-gate-profiler-runtime.rs
+compile-fail	feature-gates/feature-gate-reborrow-coerce-shared.rs
+compile-fail	feature-gates/feature-gate-reborrow.rs
 compile-fail	feature-gates/feature-gate-register_tool.rs
 compile-fail	feature-gates/feature-gate-repr-simd.rs
 compile-fail	feature-gates/feature-gate-rust-preserve-none-cc.rs
@@ -2830,6 +2838,7 @@ compile-fail	feature-gates/issue-43106-gating-of-proc_macro_derive.rs
 compile-fail	feature-gates/issue-43106-gating-of-stable.rs
 compile-fail	feature-gates/issue-43106-gating-of-test.rs
 compile-fail	feature-gates/issue-43106-gating-of-unstable.rs
+compile-fail	feature-gates/issue-49983-see-issue-0.rs
 check-pass	feature-gates/soft-feature-gate-auto_traits.rs
 check-pass	feature-gates/soft-feature-gate-decl_macro.rs
 check-pass	feature-gates/soft-feature-gate-negative_impls.rs
@@ -7002,6 +7011,7 @@ compile-fail	span/wf-method-late-bound-regions.rs
 compile-fail	specialization/feature-gate-specialization.rs
 run-pass	specialization/soundness/partial_ord_slice.rs
 compile-fail	specialization/specialization-feature-gate-overlap.rs
+compile-fail	stability-attribute/accidental-stable-in-unstable.rs
 compile-fail	stability-attribute/accidentally-stable-intrinsics.rs
 check-pass	stability-attribute/check-stability-issue-138319.rs
 check-pass	stability-attribute/issue-99286-stable-intrinsics.rs
@@ -7912,6 +7922,7 @@ compile-fail	traits/wf-object/no-duplicates.rs
 check-pass	traits/where-clause-on-self-assoc-type.rs
 run-pass	traits/where-clause-vs-impl.rs
 run-pass	traits/with-bounds-default.rs
+compile-fail	transmutability/malformed-program-gracefulness/feature-missing.rs
 check-pass	transmutability/transmute-copy-associated-type.rs
 check-pass	transmute/lifetimes.rs
 compile-fail	transmute/main.rs

@@ -2262,3 +2262,25 @@ fn trait_bounds_that_name_no_trait_in_scope() {
     assert_eq!(first("use std::fmt::Debug;\nfn f<T: Debug>(_x: T) {}\nfn main() {}\n"), None, "imported");
     assert_eq!(first("use std::fmt;\nfn f<T: fmt::Debug + Clone>(_x: T) {}\n#[derive(Debug)]\nstruct S;\nfn main() {}\n"), None, "a path and a derive");
 }
+
+#[test]
+fn unstable_items_of_std() {
+    // (E0658 of a `use` of an unstable item of std's; each expected line and column is rustc 1.100's on the same source)
+    let first = |src: &str| {
+        let mut s = Session2::new(Options2 { jobs: 1, edition: 2021, ..Options2::default() });
+        s.check(src).first().map(|d| (d.line, d.col, d.msg.clone()))
+    };
+    let e = |l: usize, c: usize, f: &str| Some((l, c, format!("use of unstable library feature `{f}` (E0658)")));
+    assert_eq!(first("use std::ops::FnPtr;\nfn main() {}\n"), e(1, 5, "fn_static"), "a path");
+    assert_eq!(first("use std::marker::{Copy, Reborrow};\nfn main() {}\n"), e(1, 25, "reborrow"), "a braced list");
+    assert_eq!(first("use core::io::ErrorKind;\nfn main() {}\n"), e(1, 11, "core_io"), "core::io");
+    assert_eq!(first("#[allow(unused_imports)] use core::unicode::UNICODE_VERSION;\nfn main() {}\n"), e(1, 30, "unicode_internals"), "after attributes");
+    assert_eq!(
+        first("use std::intrinsics;\nfn main() {}\n").map(|d| (d.0, d.1)),
+        Some((1, 5)),
+        "intrinsics"
+    );
+    // (a stable item of the module, the feature enabled)
+    assert_eq!(first("use std::intrinsics::transmute;\nfn main() {}\n"), None, "a stable item");
+    assert_eq!(first("#![feature(reborrow)]\nuse std::marker::Reborrow;\nfn main() {}\n"), None, "enabled");
+}

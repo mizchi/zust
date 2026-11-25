@@ -7554,6 +7554,17 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
             continue;
         }
         let text = &split[it.start..it.end];
+        // (E0658: an unstable item of std's, `use std::intrinsics;`, after the item's attributes too)
+        {
+            let t = text.trim_start();
+            let t = if t.starts_with("#[") { t[leading_attrs(t).len()..].trim_start() } else { t };
+            let t = t.strip_prefix("pub ").unwrap_or(t);
+            if let Some(rest) = t.strip_prefix("use ").filter(|r| r.starts_with("std::") || r.starts_with("core::")) {
+                if let Some(e) = unstable_std_use(split, text, rest, it.line) {
+                    return Some(e);
+                }
+            }
+        }
         let t = text.trim_start();
         let t = t.strip_prefix("pub ").unwrap_or(t);
         let Some(rest) = t.strip_prefix("use ") else { continue };
@@ -7672,6 +7683,70 @@ fn unresolved_import(src: &str, split: &str, items: &[SrcItem], deps: &[String])
         }
     }
     None
+}
+
+/// std's items behind a library feature (rustc 1.100): the path as `std::..` (`core::..` reads the same), the feature, and
+/// the reason rustc gives
+const UNSTABLE_STD: &[(&str, &str, &str)] = &[
+    ("std::intrinsics", "core_intrinsics", ": intrinsics are unlikely to ever be stabilized, instead they should be used through stabilized interfaces in the rest of the standard library"),
+    ("std::ops::FnPtr", "fn_static", ""),
+    ("std::field::FieldRepresentingType", "field_representing_type_raw", ""),
+    ("std::marker::ConstParamTy_", "const_param_ty_trait", ""),
+    ("std::marker::CoercePointee", "derive_coerce_pointee", ""),
+    ("std::marker::CoerceShared", "reborrow", ""),
+    ("std::marker::Reborrow", "reborrow", ""),
+    ("std::ptr::Unique", "ptr_internals", ": use `NonNull` instead and consider `PhantomData<T>` (if you also use `#[may_dangle]`), `Send`, and/or `Sync`"),
+    ("std::unicode::UNICODE_VERSION", "unicode_internals", ""),
+    ("std::mem::TransmuteFrom", "transmutability", ""),
+    ("std::mem::Assume", "transmutability", ""),
+];
+
+/// E0658 "use of unstable library feature `x`" of a `use` of one of UNSTABLE_STD (or of `core::io`'s items, at `io`),
+/// the crate not enabling the feature: at the path, or at the name in a braced list (`use std::marker::{Copy, Reborrow};`)
+#[cold]
+#[inline(never)]
+fn unstable_std_use(src: &str, text: &str, rest: &str, line: usize) -> Option<String> {
+    let rest = &rest[..rest.find(';').unwrap_or(rest.len())];
+    // (the column of rest's byte k on the item's line)
+    let col = |k: usize| {
+        let off = rest.as_ptr() as usize - text.as_ptr() as usize + k;
+        let before = &text[..off];
+        (line + before.matches('\n').count(), before.len() - before.rfind('\n').map_or(0, |i| i + 1) + 1)
+    };
+    let mut found: Option<((usize, usize), &str, &str)> = None;
+    let mut look = |path: &str, at: usize| {
+        let p = path.split(" as ").next().unwrap_or("").trim();
+        let std = p.strip_prefix("core::").map(|r| format!("std::{r}")).unwrap_or_else(|| p.to_string());
+        if found.is_some() {
+            return;
+        }
+        if let Some(&(_, feat, why)) = UNSTABLE_STD.iter().find(|u| u.0 == std) {
+            found = Some((col(at), feat, why));
+        } else if p.starts_with("core::io::") || p == "core::io" {
+            found = Some((col(at + 6), "core_io", ""));
+        }
+    };
+    match rest.find('{') {
+        Some(b) => {
+            let prefix = &rest[..b];
+            let inner = &rest[b + 1..rest.rfind('}').unwrap_or(rest.len())];
+            if inner.contains('{') {
+                return None;
+            }
+            let mut k = b + 1;
+            for part in inner.split(',') {
+                let lead = part.len() - part.trim_start().len();
+                look(&format!("{prefix}{}", part.trim()), k + lead);
+                k += part.len() + 1;
+            }
+        }
+        None => look(rest, 0),
+    }
+    let ((l, c), feat, why) = found?;
+    if enabled_features(src).iter().any(|f| f == feat) {
+        return None;
+    }
+    Some(format!("{l}:{c}: use of unstable library feature `{feat}`{why} (E0658)"))
 }
 
 /// The naming lints (`deny` = [non_snake_case, non_camel_case_types, non_upper_case_globals]): the first fn / method,
