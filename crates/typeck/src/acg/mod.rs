@@ -2837,6 +2837,24 @@ impl Cx<'_> {
                         Ty::Array(e, _) => return Some(*e),
                         Ty::Ref(_, Ty::Slice(e)) => return Some(**e),
                         Ty::Ref(_, i) => t = *i,
+                        // (a type's own `Index`: what its `index` returns a reference to, so a field read through its
+                        // `Deref` is found (`v[0].f` with `Output = MyPtr<Foo>`))
+                        Ty::Struct(sid) => {
+                            let id = self.prog.method(sid, "index")?;
+                            let sig = &self.prog.sigs[id as usize];
+                            let mut sol = vec![None; sig.generics.len()];
+                            if sig.trait_of.is_some() {
+                                if let Some(s0) = sol.first_mut() {
+                                    *s0 = Some(Ty::Struct(sid));
+                                }
+                            } else if let Some(st) = sig.self_ty {
+                                self.prog.match_ty(st, Ty::Struct(sid), &mut sol);
+                            }
+                            return match self.prog.partial_subst(sig.ret, &sol) {
+                                Ty::Ref(_, i) if !self.prog.has_param(*i) => Some(*i),
+                                _ => None,
+                            };
+                        }
                         _ => return None,
                     }
                 }
