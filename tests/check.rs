@@ -3142,3 +3142,21 @@ fn macro_matchers_rustc_rejects_what_follows_a_fragment_in_and_names_bound_twice
     assert_eq!(first("macro_rules! m {\n    ($a:ident, $($a:ident),*) => {};\n}\nfn main() {}\n", 2021), e(2, "duplicate matcher binding"));
     assert_eq!(first("macro_rules! m {\n    ($a:ident) => {};\n    ($a:path) => {};\n}\nfn main() {}\n", 2021), None);
 }
+
+/// Review of #180, each checked against rustc: a struct whose tail is a `?Sized` parameter is unsized by value in a
+/// signature (E0277); a program trait whose supertrait is Clone makes a `?Sized` parameter sized; a closure does not
+/// make its parent's `?Sized` parameter sized
+#[test]
+fn sized_review_cases() {
+    let check = |src: &str| Session2::new(Options2 { jobs: 1, no_cache: true, ..Options2::default() }).check(src);
+    let d = check("struct W<T: ?Sized>(T);\nfn bad<T: ?Sized>(_: W<T>) {}\nfn main() {}\n");
+    assert!(d.len() == 1 && d[0].msg.contains("`T` cannot be known"), "{d:?}");
+    for src in [
+        "struct W<T: ?Sized>(T);\nfn good<T: ?Sized>(_: &W<T>) {}\nfn main() {}\n",
+        "trait Dup: Clone {}\nfn f<T: Dup + ?Sized>(_: &T) { let _v: Vec<T> = Vec::new(); }\nfn main() {}\n",
+        "use std::fmt::Display;\nfn f<T: ?Sized + Display>(x: &T) -> String { let c = |y: &T| format!(\"{y}\"); c(x) }\nfn main() { println!(\"{}\", f(\"abc\")); }\n",
+    ] {
+        let d = check(src);
+        assert!(d.is_empty(), "{src}\n{d:?}");
+    }
+}

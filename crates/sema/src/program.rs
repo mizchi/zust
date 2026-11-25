@@ -1937,6 +1937,8 @@ impl Program {
                 }
             }
         }
+        // (the program's fns' parameters that must be sized, classified once the traits' supertraits are known)
+        let mut pending_sized: Vec<(u32, usize, Vec<(String, Vec<String>)>, Vec<String>)> = vec![];
         for (ii, (it, sm)) in items.iter().zip(sums).enumerate() {
             let first = p.names.len() as u32;
             let cnames: Vec<String> = sm.closures.iter().map(|c| format!("{}::call", c.name)).collect();
@@ -2106,24 +2108,9 @@ impl Program {
                 if !ss.preds.is_empty() {
                     p.fn_preds.insert(p.sigs.len() as u32, ss.preds.clone());
                 }
-                if ii < user && !ss.generics.is_empty() {
-                    // (its own parameters follow its impl's (impl_generics) or its trait's (`Self` and the trait's))
-                    let owner = match items[ii].kind {
-                        crate::lexer::ItemKind::ImplMember(h) => sums.get(h as usize).map_or(0, |h| h.impl_generics.len()),
-                        crate::lexer::ItemKind::TraitMember(h) => sums.get(h as usize).map_or(0, |h| 1 + h.trait_generics.iter().filter(|g| !g.0.starts_with('#')).count()),
-                        _ => 0,
-                    };
-                    // (`T: Clone + ?Sized` is sized: Clone's supertrait)
-                    let sized_by = |bs: &[String]| bs.iter().any(|b| matches!(b.split('<').next().unwrap_or(b).trim().rsplit("::").next().unwrap_or(""), "Sized" | "Clone" | "Copy" | "Default" | "From" | "Into" | "TryFrom" | "TryInto" | "FromStr" | "FromIterator"));
-                    let un: Vec<usize> = ss.own_unsized.iter().filter_map(|n| ss.generics.iter().rposition(|g| &g.0 == n)).filter(|&k| !sized_by(&ss.generics[k].1)).collect();
-                    // (a const parameter is no type: `__const` among its bounds)
-                    let sz: Vec<usize> = (owner.min(ss.generics.len())..ss.generics.len()).filter(|k| !un.contains(k) && !ss.generics[*k].1.iter().any(|b| b.starts_with(crate::types::CONST_GENERIC))).collect();
-                    if !sz.is_empty() {
-                        p.fn_sized_gens.insert(p.sigs.len() as u32, sz);
-                    }
-                    if !un.is_empty() {
-                        p.fn_unsized_gens.insert(p.sigs.len() as u32, un);
-                    }
+                // (closure `call`s take their parent's parameters: not their own)
+                if ii < user && !ss.generics.is_empty() && !cnames.contains(name) {
+                    pending_sized.push((p.sigs.len() as u32, ii, ss.generics.clone(), ss.own_unsized.clone()));
                 }
                 p.sigs.push(FnSig {
                     params,
@@ -2218,6 +2205,30 @@ impl Program {
                     p.trait_self_outlives.insert(tr.clone(), so.clone());
                 }
                 p.trait_ngen.insert(tr.clone(), 1 + sm.trait_generics.iter().filter(|g| !g.0.starts_with('#')).count());
+            }
+        }
+        // (own parameters follow the impl's (impl_generics) or the trait's (`Self` and the trait's); one declared
+        // `?Sized` whose other bounds imply Sized is sized: `T: Clone + ?Sized`, `T: Dup + ?Sized` with `trait Dup: Clone`)
+        for (fid, ii, generics, own_unsized) in std::mem::take(&mut pending_sized) {
+            let owner = match items[ii].kind {
+                crate::lexer::ItemKind::ImplMember(h) => sums.get(h as usize).map_or(0, |h| h.impl_generics.len()),
+                crate::lexer::ItemKind::TraitMember(h) => sums.get(h as usize).map_or(0, |h| 1 + h.trait_generics.iter().filter(|g| !g.0.starts_with('#')).count()),
+                _ => 0,
+            };
+            let sized_by = |bs: &[String]| {
+                bs.iter().any(|b| {
+                    matches!(b.split('<').next().unwrap_or(b).trim().rsplit("::").next().unwrap_or(""), "Sized" | "Clone" | "Copy" | "Default" | "From" | "Into" | "TryFrom" | "TryInto" | "FromStr" | "FromIterator")
+                        || p.bound_implies(b, &["Sized", "Clone", "Copy", "Default"], false, 0)
+                })
+            };
+            let un: Vec<usize> = own_unsized.iter().filter_map(|n| generics.iter().rposition(|g| &g.0 == n)).filter(|&k| !sized_by(&generics[k].1)).collect();
+            // (a const parameter is no type: `__const` among its bounds)
+            let sz: Vec<usize> = (owner.min(generics.len())..generics.len()).filter(|k| !un.contains(k) && !generics[*k].1.iter().any(|b| b.starts_with(crate::types::CONST_GENERIC))).collect();
+            if !sz.is_empty() {
+                p.fn_sized_gens.insert(fid, sz);
+            }
+            if !un.is_empty() {
+                p.fn_unsized_gens.insert(fid, un);
             }
         }
         p.peq = (0..p.names.len() as u32)
@@ -4708,6 +4719,21 @@ impl Program {
         t.is_unsized() || matches!(t, Ty::Struct(s) if self.structs[s as usize].maybe_unsized)
     }
 
+    /// Whether t may be unsized when may says so of some types (a definition's `?Sized` parameters): those, or a
+    /// struct whose unsized tail is one (`W<T>` with `struct W<T: ?Sized>(T)` of a `T: ?Sized`)
+    pub fn maybe_unsized_with(&self, t: Ty, may: &dyn Fn(Ty) -> bool) -> bool {
+        if may(t) || self.maybe_unsized(t) {
+            return true;
+        }
+        match t {
+            Ty::Struct(s) => {
+                let sd = &self.structs[s as usize];
+                sd.base.is_some_and(|b| !self.is_tuple(b) && self.instance_unsized_with(b, &sd.args, &|a| self.maybe_unsized_with(a, may)))
+            }
+            _ => false,
+        }
+    }
+
     /// The first type in t that may be unsized (maybe_unsized) where only a sized one may be: an argument of the
     /// program's struct or enum for a parameter not declared `?Sized`, of std's `Vec` / `Option` / `Result` and the
     /// collections, a tuple's element other than the last, a slice's or array's element (E0277)
@@ -5216,12 +5242,17 @@ impl Program {
 
     /// Whether the instance of base with args has an unsized tail (its id carries DST_TAG)
     fn instance_unsized(&self, base: u32, args: &[Ty]) -> bool {
+        self.instance_unsized_with(base, args, &|a| self.maybe_unsized(a))
+    }
+
+    /// instance_unsized with may saying which arguments may be unsized (a definition's `?Sized` parameters too)
+    fn instance_unsized_with(&self, base: u32, args: &[Ty], may: &dyn Fn(Ty) -> bool) -> bool {
         let b = &self.structs[base as usize];
         if b.is_enum {
             return false;
         }
         // (a placeholder of a `?Sized` parameter counts: `Bar<T>` with `struct Bar<T: ?Sized>` may be unsized)
-        let oracle = |i: u8| args.get(i as usize).is_some_and(|&a| self.maybe_unsized(a));
+        let oracle = |i: u8| args.get(i as usize).is_some_and(|&a| may(a));
         match b.fields.last() {
             Some(f) => self.tail_unsized(base, f.1, &oracle, 0),
             // (the definition's fields are not resolved yet: from its last field as written)
@@ -6710,6 +6741,13 @@ impl Program {
         // 大半の関数では空のフィールドは、空でないときだけ入れる (no-op ビルドで全関数分ハッシュするため)
         if !s.generics.is_empty() || s.trait_of.is_some() || !s.has_body || s.impl_trait.is_some() {
             h.add(&(&s.generics, &s.trait_of, s.has_body, &s.impl_trait));
+        }
+        // (which parameters must be sized, which may not: a call's E0277 depends on them)
+        if let Some(v) = self.fn_sized_gens.get(&id) {
+            h.add(&("sized", v));
+        }
+        if let Some(v) = self.fn_unsized_gens.get(&id) {
+            h.add(&("unsized", v));
         }
         if let Some(t) = s.self_ty {
             self.hash_ty(t, h);

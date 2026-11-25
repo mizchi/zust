@@ -12050,6 +12050,11 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
     // field other than the last, an enum's or a union's field, an argument for a parameter not declared `?Sized`, a
     // tuple's element other than the last, a slice's or array's element, a free fn's argument or result)
     let size_msg = |t: Ty, gens: &[String]| {
+        // (a struct unsized by a parameter in its tail is named by that parameter, as rustc does)
+        let t = match t {
+            Ty::Struct(s) => prog.structs[s as usize].args.iter().rev().copied().find(|a| matches!(a, Ty::Param(_))).unwrap_or(t),
+            t => t,
+        };
         let n = match t {
             Ty::Param(i) => gens.get(i as usize).cloned().unwrap_or_default(),
             t => crate::traits::display_ty(prog, t),
@@ -12067,7 +12072,8 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
         let (Some(it), Some(sm)) = (items.get(ii), sums.get(ii)) else { continue };
         let union = sm.unions.iter().any(|u| *u == sd.name || sd.name.ends_with(&format!("::{u}")));
         let adt_b = |g: &str| sm.adt_bounds.iter().find(|(p, _)| p == g).map(|(_, b)| b.clone()).unwrap_or_default();
-        let may = |t: Ty| prog.maybe_unsized(t) || matches!(t, Ty::Param(i) if sm.adt_generics.get(i as usize).is_some_and(|g| sm.adt_unsized.contains(g) && !implies_sized(&adt_b(g))));
+        let param_may = |t: Ty| matches!(t, Ty::Param(i) if sm.adt_generics.get(i as usize).is_some_and(|g| sm.adt_unsized.contains(g) && !implies_sized(&adt_b(g))));
+        let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
         let fields: Vec<&[(String, Ty, u32)]> = if sd.is_enum { sd.variants.iter().map(|v| v.fields.as_slice()).collect() } else { vec![sd.fields.as_slice()] };
         let text = blank_comments(src.get(it.start..it.end).unwrap_or(""));
         for (vi, fs) in fields.iter().enumerate() {
@@ -12088,7 +12094,8 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
             if matches!(items[ii].kind, ItemKind::Normal | ItemKind::ImplHeader) {
                 let gn: Vec<&str> = sm.impl_generics.iter().map(|g| g.0.as_str()).collect();
                 let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
-                let may = |t: Ty| prog.maybe_unsized(t) || matches!(t, Ty::Param(i) if gens.get(i as usize).is_some_and(|n| maybe_unsized(&head, n)) && !implies_sized(&sm.impl_generics[i as usize].1));
+                let param_may = |t: Ty| matches!(t, Ty::Param(i) if gens.get(i as usize).is_some_and(|n| maybe_unsized(&head, n)) && !implies_sized(&sm.impl_generics[i as usize].1));
+                let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
                 for t in std::iter::once(st).chain(sm.impl_trait_args.iter()) {
                     let Ok(t) = prog.resolve_g(t, &gn) else { continue };
                     if let Some(b) = prog.sized_wf_with(t, &may, 0) {
@@ -12109,7 +12116,8 @@ fn sized_wf_error(prog: &Program, sums: &[Summary], src: &str, items: &[SrcItem]
             }
             let gn: Vec<&str> = sig.generics.iter().map(|g| g.0.as_str()).collect();
             let gens: Vec<String> = gn.iter().map(|s| s.to_string()).collect();
-            let may = |t: Ty| prog.maybe_unsized(t) || matches!(t, Ty::Param(i) if gens.get(i as usize).is_some_and(|n| sig.own_unsized.contains(n)) && !implies_sized(&sig.generics[i as usize].1));
+            let param_may = |t: Ty| matches!(t, Ty::Param(i) if gens.get(i as usize).is_some_and(|n| sig.own_unsized.contains(n)) && !implies_sized(&sig.generics[i as usize].1));
+            let may = |t: Ty| prog.maybe_unsized_with(t, &param_may);
             for (k, t) in sig.params.iter().chain([&sig.ret]).enumerate() {
                 let Ok(t) = prog.resolve_g(t, &gn) else { continue };
                 // (a value of the type itself: an argument, or the result)
